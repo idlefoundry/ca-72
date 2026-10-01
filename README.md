@@ -50,8 +50,9 @@ The editor works like the panel:
   position to go straight to it.
 - **Switches:** click.
 - **Wheels:** drag. The PITCH wheel settles into its centre detent when let go near it.
-- **Size:** drag the grip at the bottom right corner. The panel keeps its proportions,
-  and the size is saved with the session.
+- **Size:** the editor opens at 80 % of the screen's usable width. Drag the grip at the
+  bottom right corner to change it. The panel keeps its proportions, and a size you set
+  is saved with the session.
 
 Hovering over a control shows its name and value. The name plate does something when
 clicked.
@@ -132,6 +133,9 @@ The service documents and datasheets the model was derived from are not included
   0.1 to 0.4 s; the same rate again is immediate.
 - Below 8 kHz the voice runs at 2, 4 or 8 times the host's rate.
 - The editor has no keyboard control, and a host cannot resize it; use the grip.
+- The first size comes from the main screen on macOS and the primary monitor on Windows.
+  On Linux it comes from the whole X11 screen, which spans every monitor, so it can open
+  wider than the monitor it is on.
 - The macOS builds are unsigned.
 
 ## Credits

@@ -73,3 +73,15 @@ the next block's parameter changes instead. Hosts send both, so it is left as it
   support that).
 - `crates/ca72-panel/tests/approved.png` is the approved mock-up, every control at half
   its travel. The panel as drawn must match it, the plate left out.
+
+## R6. The editor opens at 80 % of the screen
+**Owner decision, 2026-10-01.** The editor opened at 1720 logical pixels, the whole width
+of a 16-inch MacBook Pro's screen; the owner asked for about 80 %.
+
+**Agent decisions, 2026-10-01.**
+- Until the grip resizes it, the editor opens at 80 % of the screen's usable width (less
+  the menu bar, dock or taskbar), its height also kept within 80 % of the usable height.
+  The screen is macOS's main screen, Windows' primary monitor, or the X11 screen. Where
+  the size is unknown, it opens at 1380 pixels.
+- The saved width is 0 until the grip sets one, so a session opens to fit whichever
+  screen it is on. A session saved before this change keeps the 1720 it stored.

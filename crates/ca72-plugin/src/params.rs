@@ -130,7 +130,8 @@ pub struct Ca72Params {
     /// again.
     #[persist = "noise_seed"]
     pub noise_seed: Arc<AtomicU64>,
-    /// The editor's width in logical pixels (its height follows the panel's proportions).
+    /// The editor's width in logical pixels (its height follows the panel's proportions); 0
+    /// until it is resized, when it opens at a share of the screen.
     #[persist = "editor_width"]
     pub editor_width: Arc<AtomicU32>,
 
@@ -275,7 +276,7 @@ impl Default for Ca72Params {
     fn default() -> Self {
         Ca72Params {
             noise_seed: Arc::new(AtomicU64::new(fresh_seed())),
-            editor_width: Arc::new(AtomicU32::new(crate::editor::DEFAULT_WIDTH)),
+            editor_width: Arc::new(AtomicU32::new(0)),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
             glide: ten("Glide", 0.0),

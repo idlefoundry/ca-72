@@ -346,11 +346,14 @@ dependencies = [
  "ca72",
  "ca72-analysis",
  "ca72-panel",
+ "cocoa",
  "keyboard-types",
  "nih_plug",
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",
  "softbuffer",
+ "winapi",
+ "x11",
 ]
 
 [[package]]

@@ -20,8 +20,10 @@ use nih_plug::prelude::*;
 
 use crate::params::Ca72Params;
 
-/// The editor's width at first, in logical pixels: half a panel unit a pixel.
-pub const DEFAULT_WIDTH: u32 = 1720;
+/// The share of the usable screen the editor opens at until it is resized.
+const SCREEN_SHARE: f64 = 0.8;
+/// The editor's width at first where the screen's size is unknown, in logical pixels.
+pub const DEFAULT_WIDTH: u32 = 1380;
 /// How small and large the grip makes it.
 const MIN_WIDTH: u32 = 860;
 const MAX_WIDTH: u32 = 3438;
@@ -40,6 +42,15 @@ pub fn height_for(width: u32) -> u32 {
 
 fn clamp_width(width: u32) -> u32 {
     width.clamp(MIN_WIDTH, MAX_WIDTH)
+}
+
+/// The width the editor opens at before it is resized: its share of the usable screen
+/// (logical pixels), its height kept within the same share.
+fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
+    screen.map_or(DEFAULT_WIDTH, |(w, h)| {
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / art::H);
+        clamp_width(w.round() as u32)
+    })
 }
 
 /// What the audio thread reports to the editor after each block.
@@ -214,6 +225,7 @@ impl Editor for Ca72Editor {
                     context,
                     params,
                     meters,
+                    width,
                     f64::from(scale.unwrap_or(1.0)),
                 )
             },
@@ -223,7 +235,10 @@ impl Editor for Ca72Editor {
     }
 
     fn size(&self) -> (u32, u32) {
-        let width = clamp_width(self.params.editor_width.load(Ordering::Relaxed));
+        let width = match self.params.editor_width.load(Ordering::Relaxed) {
+            0 => fitted_width(screen::usable(self.host_scale().map(f64::from))),
+            w => clamp_width(w),
+        };
         (width, height_for(width))
     }
 
@@ -280,8 +295,9 @@ struct Editing {
     context: Arc<dyn GuiContext>,
     params: Arc<Ca72Params>,
     meters: Arc<Meters>,
-    /// Physical pixels a logical pixel.
+    /// Physical pixels a logical pixel, and the window's width in logical pixels.
     dpr: f64,
+    width: u32,
     renderer: Renderer,
     scene: Scene,
     /// The pointer, in logical pixels.
@@ -303,9 +319,9 @@ impl PanelWindow {
         context: Arc<dyn GuiContext>,
         params: Arc<Ca72Params>,
         meters: Arc<Meters>,
+        width: u32,
         dpr: f64,
     ) -> Self {
-        let width = clamp_width(params.editor_width.load(Ordering::Relaxed));
         let physical = (
             (f64::from(width) * dpr).round() as u32,
             (f64::from(height_for(width)) * dpr).round() as u32,
@@ -315,7 +331,7 @@ impl PanelWindow {
             surface,
             physical,
             shown: false,
-            editing: Editing::new(context, params, meters, physical.0, dpr),
+            editing: Editing::new(context, params, meters, width, physical.0, dpr),
         }
     }
 
@@ -331,6 +347,7 @@ impl Editing {
         context: Arc<dyn GuiContext>,
         params: Arc<Ca72Params>,
         meters: Arc<Meters>,
+        width: u32,
         physical_width: u32,
         dpr: f64,
     ) -> Self {
@@ -339,6 +356,7 @@ impl Editing {
             params,
             meters,
             dpr,
+            width,
             renderer: Renderer::new(f64::from(physical_width) / art::W, dpr),
             scene: Scene::default(),
             pointer: (0.0, 0.0),
@@ -431,10 +449,7 @@ impl Editing {
                 }
             }
             Target::Grip => {
-                self.resizing = Some((
-                    self.pointer.0,
-                    clamp_width(self.params.editor_width.load(Ordering::Relaxed)),
-                ));
+                self.resizing = Some((self.pointer.0, self.width));
             }
         }
     }
@@ -607,12 +622,14 @@ impl Editing {
 
     /// Asks the host for a window `width` wide: whether it agreed.
     fn resize(&mut self, width: u32) -> bool {
-        let old = self.params.editor_width.swap(width, Ordering::Relaxed);
-        if old == width {
+        if width == self.width {
             return false;
         }
+        let old = self.params.editor_width.swap(width, Ordering::Relaxed);
         let agreed = self.context.request_resize();
-        if !agreed {
+        if agreed {
+            self.width = width;
+        } else {
             self.params.editor_width.store(old, Ordering::Relaxed);
         }
         agreed
@@ -748,6 +765,7 @@ impl WindowHandler for PanelWindow {
                 self.physical = (size.width.max(1), size.height.max(1));
                 let e = &mut self.editing;
                 e.dpr = info.scale();
+                e.width = info.logical_size().width.round() as u32;
                 e.renderer
                     .rescale(f64::from(self.physical.0) / art::W, e.dpr);
                 self.surface.resize(self.physical);
@@ -765,6 +783,72 @@ impl WindowHandler for PanelWindow {
             },
             _ => EventStatus::Ignored,
         }
+    }
+}
+
+/// The usable part of the screen (less the menu bar, dock or taskbar), in logical pixels
+/// (`scale` the host's, where the platform counts physical ones): macOS's main screen,
+/// Windows' primary monitor, X11's screen (all its monitors together).
+#[allow(unsafe_code)]
+mod screen {
+    #[cfg(target_os = "macos")]
+    pub fn usable(_scale: Option<f64>) -> Option<(f64, f64)> {
+        use cocoa::appkit::NSScreen;
+        use cocoa::base::nil;
+        // SAFETY: a class method of AppKit's, nil where there is no screen.
+        let screen = unsafe { NSScreen::mainScreen(nil) };
+        if screen == nil {
+            return None;
+        }
+        // SAFETY: `screen` is an NSScreen.
+        let frame = unsafe { NSScreen::visibleFrame(screen) };
+        Some((frame.size.width, frame.size.height))
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn usable(scale: Option<f64>) -> Option<(f64, f64)> {
+        use winapi::shared::windef::RECT;
+        use winapi::um::winuser::{GetDpiForSystem, SPI_GETWORKAREA, SystemParametersInfoW};
+        let mut r = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        // SAFETY: SPI_GETWORKAREA writes one RECT through the pointer.
+        let ok =
+            unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut r as *mut RECT).cast(), 0) };
+        if ok == 0 {
+            return None;
+        }
+        // SAFETY: no arguments.
+        let k = scale.unwrap_or_else(|| f64::from(unsafe { GetDpiForSystem() }) / 96.0);
+        Some((
+            f64::from(r.right - r.left) / k,
+            f64::from(r.bottom - r.top) / k,
+        ))
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn usable(scale: Option<f64>) -> Option<(f64, f64)> {
+        use x11::xlib;
+        // SAFETY: a connection of our own, closed before it is left.
+        unsafe {
+            let d = xlib::XOpenDisplay(std::ptr::null());
+            if d.is_null() {
+                return None;
+            }
+            let s = xlib::XDefaultScreen(d);
+            let (w, h) = (xlib::XDisplayWidth(d, s), xlib::XDisplayHeight(d, s));
+            xlib::XCloseDisplay(d);
+            let k = scale.unwrap_or(1.0);
+            Some((f64::from(w) / k, f64::from(h) / k))
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    pub fn usable(_scale: Option<f64>) -> Option<(f64, f64)> {
+        None
     }
 }
 
@@ -1013,7 +1097,8 @@ mod tests {
             context,
             Arc::clone(&params),
             Arc::new(Meters::default()),
-            DEFAULT_WIDTH,
+            1720,
+            1720,
             1.0,
         );
         (e, host, params)
@@ -1250,8 +1335,34 @@ mod tests {
 
     #[test]
     fn the_editor_keeps_the_panels_proportions() {
-        assert_eq!(height_for(DEFAULT_WIDTH), 529);
+        assert_eq!(height_for(1720), 529);
         assert_eq!(clamp_width(10), MIN_WIDTH);
         assert_eq!(clamp_width(99_999), MAX_WIDTH);
+    }
+
+    #[test]
+    fn it_opens_at_four_fifths_of_the_screen_until_resized() {
+        // A 14-inch MacBook Pro's screen less the menu bar; a 34-inch ultrawide's.
+        assert_eq!(fitted_width(Some((1512.0, 949.0))), 1210);
+        assert_eq!(fitted_width(Some((3440.0, 1400.0))), 2752);
+        // Short and wide: the height's share sets it.
+        assert_eq!(fitted_width(Some((3840.0, 800.0))), 2082);
+        assert_eq!(height_for(2082), 640);
+        assert_eq!(fitted_width(None), DEFAULT_WIDTH);
+        assert_eq!(
+            Ca72Params::default().editor_width.load(Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[test]
+    fn the_grip_saves_the_width_it_was_given() {
+        let (mut e, _host, params) = editing();
+        assert!(e.resize(1500));
+        assert_eq!(
+            (e.width, params.editor_width.load(Ordering::Relaxed)),
+            (1500, 1500)
+        );
+        assert!(!e.resize(1500));
     }
 }
