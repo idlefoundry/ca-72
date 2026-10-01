@@ -14,10 +14,25 @@ crate-type = ["cdylib", "lib"]
 # A debug build that aborts when the audio thread allocates, for trying the plug-in in a
 # host (nih-plug's own global allocator: the tests count with theirs instead).
 assert_process_allocs = ["nih_plug/assert_process_allocs"]
+# The plug-in as an application of its own (nih-plug's standalone host), for trying the
+# editor without a host: `cargo run -p ca72-plugin --example standalone --features standalone`.
+standalone = ["nih_plug/standalone"]
+
+[[example]]
+name = "standalone"
+required-features = ["standalone"]
 
 [dependencies]
 ca72.workspace = true
+ca72-panel = { path = "../ca72-panel" }
 nih_plug.workspace = true
+# The editor's window and its pixels: the revision nih-plug's own examples use. baseview
+# takes `raw-window-handle` 0.5, softbuffer 0.6.
+baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "9a0b42c09d712777b2edb4c5e0cb6baf21e988f0" }
+softbuffer = { version = "0.4.6", default-features = false, features = ["kms", "x11"] }
+raw-window-handle = "0.5"
+raw-window-handle-06 = { package = "raw-window-handle", version = "0.6" }
+keyboard-types = { version = "0.6.1", default-features = false }
 
 [dev-dependencies]
 ca72-analysis.workspace = true

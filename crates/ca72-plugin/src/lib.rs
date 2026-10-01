@@ -1,6 +1,7 @@
 //! The CA-72 as a VST3 and CLAP plug-in: the circuit model's voice in its real-time quality,
 //! played by MIDI, its EXTERNAL INPUT the side chain, mono on every output channel.
 
+pub mod editor;
 pub mod engine;
 pub mod params;
 
@@ -8,6 +9,7 @@ use std::sync::Arc;
 
 use nih_plug::prelude::*;
 
+use crate::editor::{Ca72Editor, Meters};
 use crate::engine::{
     ALL_NOTES_OFF, ALL_SOUND_OFF, Engine, Event, MODULATION_WHEEL, RESET_CONTROLLERS,
 };
@@ -16,11 +18,14 @@ use crate::params::Ca72Params;
 pub struct Ca72 {
     params: Arc<Ca72Params>,
     engine: Engine,
+    meters: Arc<Meters>,
 }
 
 impl std::fmt::Debug for Ca72 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Ca72").field("engine", &self.engine).finish()
+        f.debug_struct("Ca72")
+            .field("engine", &self.engine)
+            .finish()
     }
 }
 
@@ -29,6 +34,7 @@ impl Default for Ca72 {
         Ca72 {
             params: Arc::new(Ca72Params::default()),
             engine: Engine::new(),
+            meters: Arc::new(Meters::default()),
         }
     }
 }
@@ -44,10 +50,14 @@ fn mono(channels: &[&mut [f32]], i: usize) -> f32 {
 impl Ca72 {
     fn midi(&mut self, e: NoteEvent<()>) {
         let event = match e {
-            NoteEvent::NoteOn { note, .. } => Event::Note { key: note, on: true },
-            NoteEvent::NoteOff { note, .. } | NoteEvent::Choke { note, .. } => {
-                Event::Note { key: note, on: false }
-            }
+            NoteEvent::NoteOn { note, .. } => Event::Note {
+                key: note,
+                on: true,
+            },
+            NoteEvent::NoteOff { note, .. } | NoteEvent::Choke { note, .. } => Event::Note {
+                key: note,
+                on: false,
+            },
             NoteEvent::MidiPitchBend { value, .. } => Event::PitchBend(value * 2.0 - 1.0),
             NoteEvent::MidiCC { cc, value, .. } => match cc {
                 MODULATION_WHEEL => Event::Modulation(value),
@@ -86,8 +96,7 @@ impl Plugin for Ca72 {
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] =
-        &[layout(2, "Stereo"), layout(1, "Mono")];
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[layout(2, "Stereo"), layout(1, "Mono")];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
@@ -97,6 +106,13 @@ impl Plugin for Ca72 {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    fn editor(&mut self, _executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        Some(Box::new(Ca72Editor::new(
+            self.params.clone(),
+            self.meters.clone(),
+        )))
     }
 
     fn initialize(
@@ -144,7 +160,8 @@ impl Plugin for Ca72 {
             self.midi(e);
             next = context.next_event();
         }
-        self.engine.end_block(len);
+        let lamp = self.engine.end_block(len);
+        self.meters.publish(lamp, self.engine.midi_wheels());
         ProcessStatus::KeepAlive
     }
 }

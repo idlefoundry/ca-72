@@ -51,5 +51,18 @@ opt-level = 3
 [profile.dev.package.ca72-analysis]
 opt-level = 3
 
+# The editor draws its panel in software: unoptimised, a frame takes seconds.
+[profile.dev.package.resvg]
+opt-level = 3
+
+[profile.dev.package.usvg]
+opt-level = 3
+
+[profile.dev.package.tiny-skia]
+opt-level = 3
+
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+
 [profile.release]
 debug = 1

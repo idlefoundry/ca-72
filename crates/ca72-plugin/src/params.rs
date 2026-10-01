@@ -4,7 +4,7 @@
 
 use std::hash::{BuildHasher, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::tuning::Range;
@@ -130,6 +130,13 @@ pub struct Ca72Params {
     /// again.
     #[persist = "noise_seed"]
     pub noise_seed: Arc<AtomicU64>,
+    /// The editor's width in logical pixels (its height follows the panel's proportions).
+    #[persist = "editor_width"]
+    pub editor_width: Arc<AtomicU32>,
+
+    /// POWER off: the host's bypass, the output faded out.
+    #[id = "bypass"]
+    pub bypass: BoolParam,
 
     // CONTROLLERS
     /// TUNE in its dial's units (printed -2..+2, -2.5..+2.5 at its ends).
@@ -268,6 +275,8 @@ impl Default for Ca72Params {
     fn default() -> Self {
         Ca72Params {
             noise_seed: Arc::new(AtomicU64::new(fresh_seed())),
+            editor_width: Arc::new(AtomicU32::new(crate::editor::DEFAULT_WIDTH)),
+            bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
             glide: ten("Glide", 0.0),
             mod_mix: ten("Modulation Mix", 0.0),
@@ -398,6 +407,7 @@ impl Ca72Params {
             volume: ten(&self.volume),
             main_output: self.main_output.value(),
             bend_range: f64::from(self.midi_bend_range.value()),
+            power: !self.bypass.value(),
         }
     }
 }

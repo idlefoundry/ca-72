@@ -1,13 +1,15 @@
 //! The engine neither allocates nor frees on the audio thread once its voice is built: notes,
 //! pitch bend, the modulation wheel, the MIDI resets, every kind of control moving and the
 //! side chain driven hard, a block at a time, counted by a global allocator on this thread.
-//! A failure names where the first came from.
+//! A failure names where the first came from. (Built with `assert_process_allocs`, nih-plug's
+//! own global allocator watches instead.)
 
+#![cfg(not(feature = "assert_process_allocs"))]
 #![allow(unsafe_code, clippy::unwrap_used)]
 
-use ca72_plugin::engine::{Controls, Engine, Event};
 use ca72::tuning::Range;
 use ca72::voice::Waveform;
+use ca72_plugin::engine::{Controls, Engine, Event};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -71,10 +73,16 @@ fn the_engine_neither_allocates_nor_frees_while_it_plays() {
         let b = at / BLOCK;
         // Notes over the 44 keys and beyond them, the wheels from MIDI, the resets.
         if b.is_multiple_of(20) {
-            e.event(Event::Note { key: (30 + b % 70) as u8, on: true });
+            e.event(Event::Note {
+                key: (30 + b % 70) as u8,
+                on: true,
+            });
         }
         if b % 20 == 15 {
-            e.event(Event::Note { key: (30 + b % 70) as u8, on: false });
+            e.event(Event::Note {
+                key: (30 + b % 70) as u8,
+                on: false,
+            });
         }
         e.event(Event::PitchBend((at as f32 * 1e-4).sin()));
         e.event(Event::Modulation(0.5 + 0.5 * (at as f32 * 3e-4).sin()));

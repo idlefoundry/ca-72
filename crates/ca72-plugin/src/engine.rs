@@ -8,14 +8,15 @@ use ca72::resample::{Decimator, Interpolator};
 use ca72::voice::{Jacks, Panel, Quality, Voice, audio_taper};
 
 /// What the parameters set: the panel (its wheels where the parameters leave them), MAIN
-/// OUTPUT's VOLUME (0..1 of its travel) and switch, and how far a MIDI keyboard's full pitch
-/// bend moves the PITCH wheel, in semitones.
+/// OUTPUT's VOLUME (0..1 of its travel) and switch, how far a MIDI keyboard's full pitch
+/// bend moves the PITCH wheel, in semitones, and POWER (off: bypassed, silent).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Controls {
     pub panel: Panel,
     pub volume: f64,
     pub main_output: bool,
     pub bend_range: f64,
+    pub power: bool,
 }
 
 impl Default for Controls {
@@ -25,6 +26,7 @@ impl Default for Controls {
             volume: 1.0,
             main_output: true,
             bend_range: 2.0,
+            power: true,
         }
     }
 }
@@ -32,7 +34,10 @@ impl Default for Controls {
 /// MIDI input, as the engine takes it (any channel).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event {
-    Note { key: u8, on: bool },
+    Note {
+        key: u8,
+        on: bool,
+    },
     /// The pitch bend, -1..1, 0 at rest.
     PitchBend(f32),
     /// The modulation wheel (control change 1), 0..1.
@@ -58,6 +63,9 @@ const LAMP_FALL: f32 = 0.05;
 /// factory calibration fails at much lower rates (it gives NaN at 1.2 kHz).
 pub const MIN_VOICE_RATE: f64 = 8_000.0;
 
+/// How long POWER takes to fade the output out or in, s (switched at once, it clicks).
+const POWER_FADE: f64 = 0.01;
+
 /// The voice at a multiple of the host's rate: the side chain interpolated up, the output
 /// decimated down.
 #[derive(Debug)]
@@ -81,6 +89,9 @@ pub struct Engine {
     bend: f32,
     modulation: f32,
     lamp: f32,
+    /// The output's gain under POWER (0 off, 1 on), and its step a sample while it fades.
+    fade: f64,
+    fade_step: f64,
 }
 
 impl Default for Engine {
@@ -104,6 +115,8 @@ impl Engine {
             bend: 0.0,
             modulation: 0.0,
             lamp: 0.0,
+            fade: 1.0,
+            fade_step: 1.0,
         }
     }
 
@@ -119,6 +132,7 @@ impl Engine {
             return;
         }
         self.rate = rate;
+        self.fade_step = (1.0 / (POWER_FADE * rate)).min(1.0);
         let factor = [1, 2, 4, 8]
             .into_iter()
             .find(|f| rate * *f as f64 >= MIN_VOICE_RATE)
@@ -185,8 +199,13 @@ impl Engine {
     }
 
     /// One output sample with `ext` at EXTERNAL INPUT (1.0 the same volts as the output's
-    /// 1.0); silence before [`Engine::prepare`].
+    /// 1.0); silence before [`Engine::prepare`]. With POWER off, once faded out, the voice
+    /// rests (the MIDI input still reaches it).
     pub fn tick(&mut self, ext: f32) -> f32 {
+        let on = self.controls.power;
+        if !on && self.fade == 0.0 {
+            return 0.0;
+        }
         let Some(v) = &mut self.voice else {
             return 0.0;
         };
@@ -208,7 +227,12 @@ impl Engine {
                 y
             }
         };
-        (y * self.gain) as f32
+        self.fade = if on {
+            (self.fade + self.fade_step).min(1.0)
+        } else {
+            (self.fade - self.fade_step).max(0.0)
+        };
+        (y * self.gain * self.fade) as f32
     }
 
     /// After a block of `len` samples: the OVERLOAD lamp (0 off, 1 fully lit), its peak held
@@ -230,6 +254,15 @@ impl Engine {
     pub fn wheels(&self) -> (f64, f64) {
         let p = self.panel();
         (p.pitch_wheel, p.mod_wheel)
+    }
+
+    /// Where a MIDI keyboard's wheels move the panel's, as the panel draws them: its pitch
+    /// bend's share of the PITCH wheel's travel (0..1, 0.5 at rest) and its modulation wheel
+    /// (0..1).
+    pub fn midi_wheels(&self) -> (f32, f32) {
+        let share = (self.controls.bend_range / PITCH_WHEEL_SEMITONES).clamp(0.0, 1.0);
+        let share = if share.is_finite() { share as f32 } else { 0.0 };
+        (0.5 + self.bend * share / 2.0, self.modulation)
     }
 
     /// The panel the voice plays: the controls', in Potato, the MIDI input's bend moving
@@ -265,5 +298,9 @@ pub fn output_gain(volume: f64, on: bool) -> f64 {
     let t = audio_taper(volume);
     let (top, bottom) = (5e3 * (1.0 - t), 5e3 * t);
     let load = bottom * 10e3 / (bottom + 10e3);
-    if load <= 0.0 { 0.0 } else { load / (top + load) }
+    if load <= 0.0 {
+        0.0
+    } else {
+        load / (top + load)
+    }
 }

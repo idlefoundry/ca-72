@@ -1,7 +1,7 @@
 //! The engine plays as the instrument does: the default parameters are the default panel, a
 //! key sounds at its pitch, MIDI's full bend moves it by MIDI BEND RANGE, the side chain
-//! reaches the output through EXTERNAL INPUT, and a key held through a change of sample rate
-//! plays on.
+//! reaches the output through EXTERNAL INPUT, POWER fades the output out and in, and a key
+//! held through a change of sample rate plays on.
 
 #![allow(clippy::unwrap_used)]
 
@@ -48,6 +48,34 @@ fn the_default_parameters_are_the_default_panel() {
     let c = Ca72Params::default().controls();
     assert_eq!(c.panel, Panel::default());
     assert_eq!((c.volume, c.main_output, c.bend_range), (1.0, true, 2.0));
+    assert!(c.power, "POWER on: not bypassed");
+}
+
+#[test]
+fn power_off_fades_to_silence_and_on_plays_again() {
+    let mut c = Controls::default();
+    let mut e = ready(&c);
+    e.event(Event::Note { key: 57, on: true });
+    let playing = run(&mut e, 0.5, |_| 0.0);
+    assert!(rms(&playing[(0.2 * RATE) as usize..]) > 0.01);
+
+    c.power = false;
+    e.set(&c);
+    let fading = run(&mut e, 0.05, |_| 0.0);
+    let gone = (0.011 * RATE) as usize;
+    assert!(
+        fading[..gone].iter().any(|y| *y != 0.0),
+        "a fade, not a click"
+    );
+    assert!(fading[gone..].iter().all(|y| *y == 0.0));
+
+    c.power = true;
+    e.set(&c);
+    let again = run(&mut e, 0.2, |_| 0.0);
+    assert!(
+        rms(&again[(0.05 * RATE) as usize..]) > 0.01,
+        "the held key plays on"
+    );
 }
 
 #[test]
