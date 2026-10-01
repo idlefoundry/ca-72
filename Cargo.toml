@@ -1,0 +1,48 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "GPL-3.0-or-later"
+publish = false
+repository = "https://github.com/Idlewile/ca-72"
+
+[workspace.dependencies]
+ca72 = { path = "crates/ca72" }
+ca72-analysis = { path = "crates/ca72-analysis" }
+ca72-rt = { path = "crates/ca72-rt" }
+ca72-spice = { path = "crates/ca72-spice" }
+
+libc = "0.2"
+libm = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+tempfile = "3.27"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "warn"
+
+# The real-time models run seconds of audio in their tests (their calibrations among
+# them): unoptimised, the debug suite takes hours.
+[profile.dev.package.ca72]
+opt-level = 3
+
+[profile.dev.package.libm]
+opt-level = 3
+
+[profile.dev.package.ca72-analysis]
+opt-level = 3
+
+[profile.release]
+debug = 1

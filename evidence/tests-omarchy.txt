@@ -1,0 +1,681 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (target/debug/deps/ca72-65eca8f614605c15)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/a440.rs (target/debug/deps/a440-ec1d114f0e455c52)
+
+running 1 test
+steady state: mean 7.4533 V (table 7.4533), harmonics within 6.04e-7 V; fundamental at 20 ms 0.218 (table 0.223), at 100 ms 0.807 (table 0.806)
+test the_a440_plays_its_circuits_waveform_at_440_hz ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/expo_table.rs (target/debug/deps/expo_table-7c6d164ddfaf1970)
+
+running 1 test
+table built in 413 ms; worst -0.0003 cents at +0.084 V, saturated -0.2342 cents at +0.684 V; 59 ns per lookup (1.497e2)
+test table_matches_the_circuit_solution ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+     Running tests/filter_cal.rs (target/debug/deps/filter_cal-a9b349e2f0894c59)
+
+running 1 test
+Folkman's procedure: R39 at 0.632274, R49 327.0304 ohm, R73 at 0.782635
+calibrated: CUTOFF -1 430.77 Hz (440 before the scale was set); fully clockwise 24000 Hz (5.13: at least 16 kHz); lowest before regeneration dies Some(59.92131403372259) Hz (5.13: under 300); KEYBOARD CONTROL 1 from low A at 440 Hz: high A 884.3 Hz (5.15: 880 +- 50); two divisions from 440 Hz: 1759 Hz, 1760 Hz 2.00 divisions up (5.18: about 2); with 1 and 2 and the third A at 1760: low A 440.00 Hz, high A 3524.7 Hz (3520); regenerates at EMPHASIS 7.4: false, 7.6: true
+test filter_calibration ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 33.49s
+
+     Running tests/mna.rs (target/debug/deps/mna-14d3c29c4d8ebc7a)
+
+running 3 tests
+12 iterations: junction 0.324898911 V against 0.324898911 V; 4.583432441e-3 A against 4test an_rc_step_is_backward_euler ... .ok583432441
+e-3 A
+test a_diode_and_resistor_match_their_closed_form ... ok
+worst relative difference 2.63e-7 (case 0 h Some(1e-5) d f5 / d v3: -4.713227e-5 against -4.713226e-5)
+test jacobian_matches_finite_differences ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/noise.rs (target/debug/deps/noise-14db29ebb4a4be64)
+
+running 1 test
+loads changed in place against the circuit solved with them: within 8.5e-15 (relative); pink before -1.491e-2, after -1.468e-2
+test changed_loads_match_the_circuit_solved_with_them ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resample_factors.rs (target/debug/deps/resample_factors-fa895091f830b08f)
+
+running 3 tests
+
+thread 'decimator_refuses_sixteen' (204446) panicked at crates/ca72/src/resample.rs:258:14:
+oversampling factor 16: 1, 2, 4 or 8
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'interpolator_refuses_three' (204447) panicked at crates/ca72/src/resample.rs:258:14:
+oversampling factor 3: 1, 2, 4 or 8
+test decimator_refuses_sixteen - should panic ... ok
+test interpolator_refuses_three - should panic ... ok
+test supported_factors_build ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/rt_alloc.rs (target/debug/deps/rt_alloc-7c6a07e676841cfa)
+
+running 1 test
+test the_voice_does_not_allocate_while_it_plays ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.92s
+
+     Running tests/threaded.rs (target/debug/deps/threaded-10aeb603c4a42c4e)
+
+running 1 test
+77097 samples in 825 blocks, the same to the bit (the filter's last output 1.277 V)
+test threads_give_the_same_samples_as_one ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.80s
+
+     Running tests/vcf_jacobian.rs (target/debug/deps/vcf_jacobian-33a318eda454bdf9)
+
+running 2 tests
+test filter_jacobian_matches_finite_differences ... ok
+test series_junction_balances_its_resistor ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/voice.rs (target/debug/deps/voice-3fd57302d5c281b0)
+
+running 8 tests
+oscillator 3: FREQUENCY spans 16.8 semitones at middle C (5.35: 14 to 17); with CONTROL off on LO it clicks every 4.95 s at its minimum (5.36: 2 to 5), 10.99 Hz at its maximum against 32''s minimum 6.48 Hz (5.36: overlapping)
+test oscillator_3s_frequency_and_wide_range_meet_the_service_manual ... ok
+A3 220.00 Hz, then A2 110.07, with E3 held too 110.07, A2 released 164.92; loudness contour 4.480 V before the second key, at most 4.480 V after
+test the_lowest_key_sounds_and_contours_are_not_retriggered ... ok
+rms: before 1.58e-9, held 0.109, 0.6 s after the release 5.28e-4; onset 8.10 ms after the press; pitch 110.008 Hz (+0.13 cents)
+release tail 110.012 Hz (+0.05 cents from the held note)
+test a_key_sounds_at_its_pitch_and_releases ... ok
+keyboard: A2 0.3340 V, A3 1.3472 V; GLIDE off 1 ms after the contact: 1.3472 V; GLIDE on at 10, 30, 60, 100 ms: 0.484 0.845 1.341 1.347 V
+test glide_moves_the_keyboard_voltage_between_keys ... ok
+at the output, both channels at VOLUME 10: the triangle +0.8 dB (5.8: 1 +- 3), white noise -5.8 dB (Folkman: -5), pink -10.4 dB (Norlin's 5.27: -5 +- 3, not met: A23); against the triangle white -6.64 dB, pink -11.20 dB; tilt from 125-250 Hz to 4-8 kHz: white -2.0 dB, pink +15.1 dB
+test the_noise_sits_under_the_triangle_as_the_factory_set_it ... ok
+oscillator 2: 109.993 Hz (-0.10 cents), at FREQUENCY 10 176.93 Hz (+8.23 semitones); oscillator 3 with CONTROL off: A2 232.662 Hz, A3 232.672 Hz; reverse against sawtooth: correlation -1.000
+test oscillators_2_and_3_play_through_their_controls ... ok
+oscillator 1 under oscillator 3's square, the wheel fully forward: 447.6 to 1265.5 Hz, 18.0 semitones (5.37: 13 to 23); the filter's corner 40.15 times (5.19: at least 2400 / 440 = 5.45); the pitch wheel 69.03 to 175.30 Hz, 16.1 semitones (13 to 17)
+test modulation_and_the_wheels_meet_the_service_manual ... ok
+A-440: 440.00 Hz at -5.3 dB (5.7: -8 +- 2); the triangle at +0.8 dB (5.8: 1 +- 3), -6.1 dB apart (the manual's -9); external input -30 dB at 1 kHz: the lamp lights at VOLUME Some(9.5) with the output's THD Some(4.423560500471211) % at Some(1.8696581140996016) dB
+test the_a440_and_the_external_input_meet_the_service_manual ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 28.85s
+
+     Running unittests src/lib.rs (target/debug/deps/ca72_lab-d2bd40b19453eb23)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/ca72-lab.rs (target/debug/deps/mm_lab-8ea2c45578fb3954)
+
+running 1 test
+test tests::patch_keys ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/board4ext_realtime.rs (target/debug/deps/board4ext_realtime-bd6195a0c9a7e7dc)
+
+running 1 test
+100 Hz: gain 37.70 dB (ngspice 37.70 dB, +0.003 dB); the bus current +0.003 dB
+1000 Hz: gain 37.73 dB (ngspice 37.73 dB, +0.002 dB); the bus current +0.002 dB
+10000 Hz: gain 37.48 dB (ngspice 37.46 dB, +0.024 dB); the bus current +0.024 dB
+20000 Hz: gain 36.75 dB (ngspice 36.72 dB, +0.027 dB); the bus current +0.027 dB
+overdriven: output -7.34..+9.90 V in ngspice, the model's clip levels within 0.010 V; the lamp over half its current from Some(0.0005) to Some(0.2630625) s (ngspice Some(4.1666666666666665e-5) to Some(0.262625)), peak 60.2 mA (ngspice 60.2)
+
+test the_preamplifier_matches_the_circuit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.13s
+
+     Running tests/contour_realtime.rs (target/debug/deps/contour_realtime-932b7445a8834b96)
+
+running 1 test
+held, DECAY on at 48 kHz: trigger edges within -0.036 ms; filter: worst +27.5 mV at 0.0728 s, peak 4.485 V (+5.9 mV); loudness: worst +29.4 mV at 0.0814 s, peak 5.278 V (+4.7 mV);
+held, DECAY on at 24 kHz: trigger edges within -0.066 ms; filter: worst +31.7 mV at 0.0728 s, peak 4.485 V (+5.9 mV); loudness: worst +32.2 mV at 0.0814 s, peak 5.278 V (+4.7 mV);
+held, DECAY off at 48 kHz: trigger edges within -0.036 ms; filter: worst +30.7 mV at 0.0733 s, peak 4.485 V (+7.2 mV); loudness: worst +44.6 mV at 0.6153 s, peak 5.278 V (+5.9 mV);
+held, DECAY off at 24 kHz: trigger edges within -0.067 ms; filter: worst +39.7 mV at 0.6215 s, peak 4.485 V (+11.4 mV); loudness: worst +81.8 mV at 0.6157 s, peak 5.278 V (+8.7 mV);
+released during the attack at 48 kHz: trigger edges within -0.144 ms; filter: worst -19.9 mV at 0.0000 s, peak 3.009 V (-6.7 mV); loudness: worst -11.1 mV at 0.0000 s, peak 4.977 V (+7.4 mV);
+released during the attack at 24 kHz: trigger edges within -0.174 ms; filter: worst -19.9 mV at 0.0000 s, peak 3.009 V (-6.7 mV); loudness: worst -11.1 mV at 0.0000 s, peak 4.977 V (+7.4 mV);
+sustain at 0 and 10 at 48 kHz: trigger edges within +0.130 ms; filter: worst +71.8 mV at 0.0623 s, peak 4.487 V (+10.4 mV); loudness: worst +71.4 mV at 0.0624 s, peak 5.280 V (+11.4 mV);
+sustain at 0 and 10 at 24 kHz: trigger edges within +0.192 ms; filter: worst +86.5 mV at 0.0622 s, peak 4.487 V (+10.4 mV); loudness: worst +85.7 mV at 0.0622 s, peak 5.280 V (+21.1 mV);
+retriggered 30 ms after a release at 48 kHz: trigger edges within -0.036 ms; filter: worst +27.5 mV at 0.0728 s, peak 4.485 V (+6.8 mV); loudness: worst +29.4 mV at 0.0814 s, peak 5.278 V (+4.7 mV);
+retriggered 30 ms after a release at 24 kHz: trigger edges within -0.067 ms; filter: worst +31.7 mV at 0.0728 s, peak 4.485 V (+5.9 mV); loudness: worst +32.2 mV at 0.0814 s, peak 5.278 V (+6.0 mV);
+S-TRIG alone at 48 kHz: trigger edges within -0.029 ms; filter: worst +25.8 mV at 0.0649 s, peak 4.485 V (+5.7 mV); loudness: worst +28.3 mV at 0.0734 s, peak 5.278 V (+4.9 mV);
+S-TRIG alone at 24 kHz: trigger edges within -0.039 ms; filter: worst +30.0 mV at 0.0648 s, peak 4.485 V (+5.7 mV); loudness: worst +31.1 mV at 0.0734 s, peak 5.278 V (+4.9 mV);
+S-TRIG pulsed during a held key at 48 kHz: trigger edges within -0.036 ms; filter: worst +27.5 mV at 0.0728 s, peak 4.485 V (+5.9 mV); loudness: worst +29.4 mV at 0.0814 s, peak 5.278 V (+4.7 mV);
+S-TRIG pulsed during a held key at 24 kHz: trigger edges within -0.066 ms; filter: worst +31.7 mV at 0.0728 s, peak 4.485 V (+5.9 mV); loudness: worst +32.2 mV at 0.0814 s, peak 5.278 V (+4.7 mV);
+
+test contours_match_the_circuit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.14s
+
+     Running tests/derived_data.rs (target/debug/deps/derived_data-a064d12baba21876)
+
+running 3 tests
+test device_constants_match_the_model_library ... ok
+test tables_match_the_circuit ... ok
+test the_a440_table_matches_the_circuit ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.44s
+
+     Running tests/expo_realtime.rs (target/debug/deps/expo_realtime-27019ebfda6ed334)
+
+running 2 tests
+ramp -0.2 V, jack -4 V: 0.498 uA, -0.045 cents
+ramp -0.2 V, jack -2 V: 1.943 uA, +0.011 cents
+ramp -0.2 V, jack -1 V: 3.840 uA, +0.027 cents
+ramp -0.2 V, jack +0 V: 7.588 uA, +0.041 cents
+ramp -0.2 V, jack +1 V: 14.999 uA, +0.055 cents
+ramp -0.2 V, jack +2 V: 29.660 uA, +0.073 cents
+ramp -0.2 V, jack +4 V: 116.434 uA, +0.137 cents
+ramp -3.8 V, jack -4 V: 0.472 uA, -0.112 cents
+ramp -3.8 V, jack -2 V: 1.841 uA, -0.073 cents
+ramp -3.8 V, jack -1 V: 3.639 uA, -0.060 cents
+ramp -3.8 V, jack +0 V: 7.191 uA, -0.048 cents
+ramp -3.8 V, jack +1 V: 14.213 uA, -0.034 cents
+ramp -3.8 V, jack +2 V: 28.103 uA, -0.017 cents
+ramp -3.8 V, jack +4 V: 110.252 uA, +0.046 cents
+constant -0.161 cents; worst 0.137 cents; the jack's scale 0.9838 octaves a volt
+test the_oscillator_control_jack_matches_the_circuit ... ok
+15 C Lo key 0 ramp -0.2: -1.035 cents
+15 C Lo key 0 ramp -3.8: -0.714 cents
+15 C Lo key 13 ramp -0.2: -0.559 cents
+15 C Lo key 13 ramp -3.8: -0.457 cents
+15 C Lo key 26 ramp -0.2: -0.329 cents
+15 C Lo key 26 ramp -3.8: -0.331 cents
+15 C Lo key 43 ramp -0.2: -0.193 cents
+15 C Lo key 43 ramp -3.8: -0.253 cents
+15 C R32 key 0 ramp -0.2: -0.134 cents
+15 C R32 key 0 ramp -3.8: -0.216 cents
+15 C R32 key 13 ramp -0.2: -0.109 cents
+15 C R32 key 13 ramp -3.8: -0.198 cents
+15 C R32 key 26 ramp -0.2: -0.092 cents
+15 C R32 key 26 ramp -3.8: -0.184 cents
+15 C R32 key 43 ramp -0.2: -0.072 cents
+15 C R32 key 43 ramp -3.8: -0.166 cents
+15 C R8 key 0 ramp -0.2: -0.094 cents
+15 C R8 key 0 ramp -3.8: -0.186 cents
+15 C R8 key 13 ramp -0.2: -0.079 cents
+15 C R8 key 13 ramp -3.8: -0.172 cents
+15 C R8 key 26 ramp -0.2: -0.063 cents
+15 C R8 key 26 ramp -3.8: -0.157 cents
+15 C R8 key 43 ramp -0.2: -0.036 cents
+15 C R8 key 43 ramp -3.8: -0.131 cents
+15 C R2 key 0 ramp -0.2: -0.066 cents
+15 C R2 key 0 ramp -3.8: -0.160 cents
+15 C R2 key 13 ramp -0.2: -0.047 cents
+15 C R2 key 13 ramp -3.8: -0.142 cents
+15 C R2 key 26 ramp -0.2: -0.020 cents
+15 C R2 key 26 ramp -3.8: -0.114 cents
+15 C R2 key 43 ramp -0.2: +0.049 cents
+15 C R2 key 43 ramp -3.8: -0.046 cents
+25 C Lo key 0 ramp -0.2: -0.942 cents
+25 C Lo key 0 ramp -3.8: -0.611 cents
+25 C Lo key 13 ramp -0.2: -0.458 cents
+25 C Lo key 13 ramp -3.8: -0.350 cents
+25 C Lo key 26 ramp -0.2: -0.225 cents
+25 C Lo key 26 ramp -3.8: -0.222 cents
+25 C Lo key 43 ramp -0.2: -0.087 cents
+25 C Lo key 43 ramp -3.8: -0.143 cents
+25 C R32 key 0 ramp -0.2: -0.028 cents
+25 C R32 key 0 ramp -3.8: -0.105 cents
+25 C R32 key 13 ramp -0.2: -0.003 cents
+25 C R32 key 13 ramp -3.8: -0.087 cents
+25 C R32 key 26 ramp -0.2: +0.015 cents
+25 C R32 key 26 ramp -3.8: -0.072 cents
+25 C R32 key 43 ramp -0.2: +0.035 cents
+25 C R32 key 43 ramp -3.8: -0.054 cents
+25 C R8 key 0 ramp -0.2: +0.013 cents
+25 C R8 key 0 ramp -3.8: -0.074 cents
+25 C R8 key 13 ramp -0.2: +0.028 cents
+25 C R8 key 13 ramp -3.8: -0.061 cents
+25 C R8 key 26 ramp -0.2: +0.044 cents
+25 C R8 key 26 ramp -3.8: -0.046 cents
+25 C R8 key 43 ramp -0.2: +0.072 cents
+25 C R8 key 43 ramp -3.8: -0.018 cents
+25 C R2 key 0 ramp -0.2: +0.042 cents
+25 C R2 key 0 ramp -3.8: -0.048 cents
+25 C R2 key 13 ramp -0.2: +0.061 cents
+25 C R2 key 13 ramp -3.8: -0.030 cents
+25 C R2 key 26 ramp -0.2: +0.089 cents
+25 C R2 key 26 ramp -3.8: -0.002 cents
+25 C R2 key 43 ramp -0.2: +0.159 cents
+25 C R2 key 43 ramp -3.8: +0.068 cents
+40 C Lo key 0 ramp -0.2: -0.824 cents
+40 C Lo key 0 ramp -3.8: -0.479 cents
+40 C Lo key 13 ramp -0.2: -0.330 cents
+40 C Lo key 13 ramp -3.8: -0.212 cents
+40 C Lo key 26 ramp -0.2: -0.092 cents
+40 C Lo key 26 ramp -3.8: -0.081 cents
+40 C Lo key 43 ramp -0.2: +0.048 cents
+40 C Lo key 43 ramp -3.8: -0.000 cents
+40 C R32 key 0 ramp -0.2: +0.109 cents
+40 C R32 key 0 ramp -3.8: +0.038 cents
+40 C R32 key 13 ramp -0.2: +0.135 cents
+40 C R32 key 13 ramp -3.8: +0.057 cents
+40 C R32 key 26 ramp -0.2: +0.153 cents
+40 C R32 key 26 ramp -3.8: +0.072 cents
+40 C R32 key 43 ramp -0.2: +0.175 cents
+40 C R32 key 43 ramp -3.8: +0.091 cents
+40 C R8 key 0 ramp -0.2: +0.151 cents
+40 C R8 key 0 ramp -3.8: +0.070 cents
+40 C R8 key 13 ramp -0.2: +0.167 cents
+40 C R8 key 13 ramp -3.8: +0.084 cents
+40 C R8 key 26 ramp -0.2: +0.183 cents
+40 C R8 key 26 ramp -3.8: +0.099 cents
+40 C R8 key 43 ramp -0.2: +0.212 cents
+40 C R8 key 43 ramp -3.8: +0.127 cents
+40 C R2 key 0 ramp -0.2: +0.180 cents
+40 C R2 key 0 ramp -3.8: +0.097 cents
+40 C R2 key 13 ramp -0.2: +0.200 cents
+40 C R2 key 13 ramp -3.8: +0.116 cents
+40 C R2 key 26 ramp -0.2: +0.229 cents
+40 C R2 key 26 ramp -3.8: +0.145 cents
+40 C R2 key 43 ramp -0.2: +0.302 cents
+40 C R2 key 43 ramp -3.8: +0.216 cents
+constant -0.149 cents; worst 32'..2' 0.302, LO 1.035
+test realtime_converter_follows_ngspice_over_the_range_and_temperature ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+
+     Running tests/keyboard_realtime.rs (target/debug/deps/keyboard_realtime-de74e316e363d008)
+
+running 2 tests
+string current: ngspice 8.41265 mA, RT 8.41263 mA (-2.3e-6); keys 0..43 (-0.0039..3.6252 V): worst +0.0001 mV at key 43
+test the_string_and_every_key_match_the_circuit ... ok
+GLIDE off: detached notes, legato down and back: worst +9.985 mV at 0.14004 s; quasi-static -0.0223 mV at 0.1712 s; RT 0.077 s for 0.25 s (0 subdivided, 0 failed)
+GLIDE 100K: legato up and down: worst +0.165 mV at 0.30002 s; quasi-static +0.0624 mV at 0.5677 s; RT 0.196 s for 1 s (0 subdivided, 0 failed)
+GLIDE 1M: released half way, held, played again: worst -0.028 mV at 0.43985 s; quasi-static -0.0269 mV at 0.4408 s; RT 0.118 s for 0.8 s (0 subdivided, 0 failed)
+the trigger contact 2 ms ahead of the pitch contact: worst +7.121 mV at 0.20227 s; quasi-static -0.0024 mV at 0.0819 s; RT 0.092 s for 0.35 s (0 subdivided, 0 failed)
+
+test playing_matches_the_circuit ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.40s
+
+     Running tests/modmix_realtime.rs (target/debug/deps/modmix_realtime-e7ef238782575d52)
+
+running 1 test
+MODULATION MIX 0: ngspice offset +39.07 mV, gains -0.0000 (noise) -0.8379 (oscillator 3); the model +39.07 mV, -0.0000, -0.8379 (at a solved point: -0.0000, -0.8379)
+MODULATION MIX 0.25: ngspice offset +39.37 mV, gains -0.3909 (noise) -0.7435 (oscillator 3); the model +39.37 mV, -0.3909, -0.7435 (at a solved point: -0.3909, -0.7435)
+MODULATION MIX 0.5: ngspice offset +39.45 mV, gains -0.6067 (noise) -0.6067 (oscillator 3); the model +39.45 mV, -0.6067, -0.6067 (at a solved point: -0.6067, -0.6067)
+MODULATION MIX 0.8: ngspice offset +39.33 mV, gains -0.7650 (noise) -0.3319 (oscillator 3); the model +39.33 mV, -0.7650, -0.3318 (at a solved point: -0.7650, -0.3319)
+MODULATION MIX 1: ngspice offset +39.07 mV, gains -0.8379 (noise) -0.0000 (oscillator 3); the model +39.07 mV, -0.8379, -0.0000 (at a solved point: -0.8379, -0.0000)
+the line, the wheel fully forward and the MOD bus, oscillator 3 at -4.3 V: ngspice +1.8825 V, the model +1.8813 V
+the line, the wheel fully forward and the MOD bus, oscillator 3 at -2.0 V: ngspice +0.8884 V, the model +0.8885 V
+the line, the wheel fully forward and the MOD bus, oscillator 3 at +0.0 V: ngspice +0.0251 V, the model +0.0251 V
+the line, the wheel fully forward and the MOD bus, oscillator 3 at +1.0 V: ngspice -0.4049 V, the model -0.4066 V
+the line, the wheel fully forward and the MOD bus, oscillator 3 at +1.8 V: ngspice -0.7444 V, the model -0.7519 V
+the line, the wheel fully forward and the MOD bus, oscillator 3 at +2.5 V: ngspice -0.8706 V, the model -0.8878 V
+the amplifier's output resistance: 20.2 ohm
+
+test the_modulation_mix_matches_the_circuit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/noise_realtime.rs (target/debug/deps/noise_realtime-4b26b73669f95204)
+
+running 1 test
+operating point: within 0.065 mV of ngspice at the transistors
+white: +34.3 dB at 100 Hz, +34.8 at 1 kHz, +33.7 at 10 kHz; against ngspice within +0.001 dB (20000 Hz), 0.00 degrees; discretised (4x) within -0.086 dB of continuous as weighted (20000 Hz; 0.3 dB to 16 kHz, 0.6 to 20 kHz; within 40 dB of its peak)
+pink: +55.6 dB at 100 Hz, +45.4 at 1 kHz, +31.9 at 10 kHz; against ngspice within +0.001 dB (20000 Hz), 0.00 degrees; discretised (4x) within -0.210 dB of continuous as weighted (15886 Hz; 0.3 dB to 16 kHz, 0.6 to 20 kHz; within 40 dB of its peak)
+red: +57.6 dB at 100 Hz, +14.3 at 1 kHz, -39.0 at 10 kHz; against ngspice within +0.001 dB (20000 Hz), 0.00 degrees; discretised (4x) within -0.000 dB of continuous as weighted (502 Hz; 0.3 dB to 16 kHz, 0.6 to 20 kHz; within 40 dB of its peak)
+generated noise against the response (octave bands, 20 Hz to 16 kHz): within -0.42 dB (red at 16000 Hz)
+
+test the_noise_generator_matches_the_circuit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.83s
+
+     Running tests/regulator.rs (target/debug/deps/regulator-0eace803c2dc8d75)
+
+running 1 test
+trimmed: +10 V 10.0000 V (R21 wiper 0.295), -10 V -10.0000 V (R58 wiper 0.779); CR3 7.30 mA (1N821: 7.5), the pairs' tails 9.96 and 10.19 mA
+load regulation, 50 to 300 mA on both: +10 V moves -10.633 mV (42.53 mohm), -10 V 22.601 mV (90.41 mohm)
++10 V: 41.60 mohm at 100 Hz, 41.59 at 1 kHz, 40.8 at 10 kHz; peak 41.6 mohm at 10 Hz
+-10 V: 47.37 mohm at 100 Hz, 42.32 at 1 kHz, 23.0 at 10 kHz; peak 47.4 mohm at 10 Hz
+-10 V from +10 V's load: 41.65 mohm at 100 Hz, 35.96 at 1 kHz, 6.9 at 10 kHz; peak 41.7 mohm at 10 Hz
++10 V from -10 V's load: 0.35 mohm at 100 Hz, 0.34 at 1 kHz, 0.3 at 10 kHz; peak 0.4 mohm at 63096 Hz
+ripple rejection at 120 Hz: +UNREG to +10 V -78.1 dB, to -10 V -78.1 dB; -UNREG to -10 V -79.1 dB, to +10 V -125.4 dB; with 1.25 V p-p on each unregulated rail: 157 uV p-p on +10 V, 295 uV on -10 V
+
+test the_regulator_holds_its_rails ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+     Running tests/revsaw_realtime.rs (target/debug/deps/revsaw_realtime-97e6be34fdc82516)
+
+running 1 test
+110 Hz (155.952 Hz): reverse sawtooth -2.132..+2.550 V unloaded; the loaded sawtooth within 0.00 mV, the reverse within 0.11 mV
+LO, CONTROL off (4.840 Hz): reverse sawtooth -2.174..+2.572 V unloaded; the loaded sawtooth within 0.00 mV, the reverse within 0.73 mV
+output resistance: 5459.4 ohm, ngspice 5458.2 ohm
+
+test the_reverse_sawtooth_matches_the_circuit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.23s
+
+     Running tests/vca_realtime.rs (target/debug/deps/vca_realtime-46ee74c5526caa8b)
+
+running 9 tests
+test tremolo_step_budget ... ignored
+contour 1: worst -14.5 mV at +0.0300 V on the first pair
+contour 5: worst -27.9 mV at +0.0125 V on the first pair
+
+test static_transfer_matches_the_circuit ... ok
+as drawn contour +0: Q18 0.0 uA, Q21 1382.1 uA, Q1 8.937 mA (worst 0.003 %); output at rest 3.0232 V, RT -0.1 mV
+as drawn contour +0.5: Q18 25.1 uA, Q21 1382.1 uA, Q1 8.965 mA (worst 0.003 %); output at rest 3.0320 V, RT -0.1 mV
+as drawn contour +1: Q18 93.1 uA, Q21 1382.0 uA, Q1 9.040 mA (worst 0.003 %); output at rest 3.0517 V, RT -0.2 mV
+as drawn contour +2: Q18 235.7 uA, Q21 1382.0 uA, Q1 9.197 mA (worst 0.003 %); output at rest 3.0742 V, RT -0.6 mV
+as drawn contour +3: Q18 380.1 uA, Q21 1382.0 uA, Q1 9.357 mA (worst 0.003 %); output at rest 3.0720 V, RT -1.4 mV
+as drawn contour +4: Q18 525.0 uA, Q21 1381.8 uA, Q1 9.516 mA (worst 0.003 %); output at rest 3.0449 V, RT -2.5 mV
+as drawn contour +5: Q18 546.7 uA, Q21 1381.7 uA, Q1 9.540 mA (worst 0.007 %); output at rest 3.0388 V, RT -2.7 mV
+as drawn contour +6: Q18 537.1 uA, Q21 1381.7 uA, Q1 9.530 mA (worst 0.007 %); output at rest 3.0416 V, RT -2.7 mV
+as drawn contour +8: Q18 514.8 uA, Q21 1381.8 uA, Q1 9.505 mA (worst 0.007 %); output at rest 3.0476 V, RT -2.4 mV
+calibrated contour +0: Q18 0.0 uA, Q21 1382.1 uA, Q1 8.937 mA (worst 0.001 %); output at rest 2.4671 V, RT -5.2 mV
+calibrated contour +0.5: Q18 25.1 uA, Q21 1382.1 uA, Q1 8.965 mA (worst 0.001 %); output at rest 2.4841 V, RT -5.1 mV
+calibrated contour +1: Q18 93.1 uA, Q21 1382.0 uA, Q1 9.040 mA (worst 0.001 %); output at rest 2.5262 V, RT -5.0 mV
+calibrated contour +2: Q18 235.7 uA, Q21 1382.0 uA, Q1 9.197 mA (worst 0.002 %); output at rest 2.5965 V, RT -5.1 mV
+calibrated contour +3: Q18 380.1 uA, Q21 1382.0 uA, Q1 9.356 mA (worst 0.002 %); output at rest 2.6437 V, RT -5.4 mV
+calibrated contour +4: Q18 525.0 uA, Q21 1381.8 uA, Q1 9.516 mA (worst 0.001 %); output at rest 2.6673 V, RT -6.1 mV
+calibrated contour +5: Q18 546.7 uA, Q21 1381.7 uA, Q1 9.540 mA (worst 0.006 %); output at rest 2.6688 V, RT -6.2 mV
+calibrated contour +6: Q18 537.1 uA, Q21 1381.7 uA, Q1 9.530 mA (worst 0.006 %); output at rest 2.6682 V, RT -6.2 mV
+calibrated contour +8: Q18 514.8 uA, Q21 1381.8 uA, Q1 9.505 mA (worst 0.006 %); output at rest 2.6664 V, RT -6.1 mV
+
+test bias_matches_the_circuit ... ok
+2nd VCA BAL R12: ngspice 0.6722, RT 0.6700; 1st VCA BAL R14: ngspice 0.5581, RT 0.5584
+test calibration_matches_the_circuit ... ok
+J3 at +1 V: ngspice -15.64 dB at 1 kHz, RT +0.059 dB
+J3 at +2 V: ngspice -7.16 dB at 1 kHz, RT +0.067 dB
+J3 at +3 V: ngspice -2.93 dB at 1 kHz, RT +0.074 dB
+J3 at +4 V: ngspice -0.11 dB at 1 kHz, RT +0.081 dB
+J3 at +4.5 V: ngspice +1.01 dB at 1 kHz, RT +0.084 dB
+J3 at +5 V: ngspice +1.98 dB at 1 kHz, RT +0.087 dB
+J3 at +5.5 V: ngspice -1.48 dB at 1 kHz, RT +0.076 dB
+J3 at +6 V: ngspice -11.74 dB at 1 kHz, RT +0.059 dB
+J3 at +8 V: ngspice -98.72 dB at 1 kHz, RT -110.101 dB (both off)
+J3 at +10 V: ngspice -98.72 dB at 1 kHz, RT -110.101 dB (both off)
+
+test the_loudness_jack_matches_the_circuit ... ok
+thump, rise 5.0 ms: ngspice peak 117.1 mV; RT worst difference 1.32 mV at 0.0554 s
+thump, rise 1.0 ms: ngspice peak 117.6 mV; RT worst difference 1.33 mV at 0.0525 s
+thump, rise 0.3 ms: ngspice peak 117.6 mV; RT worst difference 1.33 mV at 0.0522 s
+
+test thump_matches_the_circuit ... ok
+contour +0.5: ngspice -24.95 dB at 1 kHz, RT +0.076 dB
+contour +1: ngspice -13.54 dB at 1 kHz, RT +0.078 dB
+contour +2: ngspice -5.45 dB at 1 kHz, RT +0.081 dB
+contour +3: ngspice -1.29 dB at 1 kHz, RT +0.084 dB
+contour +4: ngspice +1.52 dB at 1 kHz, RT +0.085 dB
+contour +5: ngspice +1.87 dB at 1 kHz, RT +0.087 dB
+contour +6: ngspice +1.71 dB at 1 kHz, RT +0.087 dB
+contour +8: ngspice +1.35 dB at 1 kHz, RT +0.086 dB
+contour 5:      10 Hz ngspice +1.55 dB, RT +0.091 dB
+contour 5:      23 Hz ngspice +1.92 dB, RT +0.091 dB
+contour 5:      54 Hz ngspice +1.98 dB, RT +0.090 dB
+contour 5:     126 Hz ngspice +1.95 dB, RT +0.090 dB
+contour 5:     293 Hz ngspice +1.89 dB, RT +0.088 dB
+contour 5:     682 Hz ngspice +1.87 dB, RT +0.087 dB
+contour 5:    1587 Hz ngspice +1.87 dB, RT +0.087 dB
+contour 5:    3694 Hz ngspice +1.86 dB, RT +0.087 dB
+contour 5:    8595 Hz ngspice +1.86 dB, RT +0.087 dB
+contour 5:   20000 Hz ngspice +1.86 dB, RT +0.087 dB
+
+test gain_matches_the_circuit ... ok
+contour 5, 0.5 V: H1 0.0/+0.08 H2 -41.0/+0.44
+contour 5, 1 V: H1 0.0/+0.07 H2 -34.5/+0.43 H3 -40.3/+0.51
+contour 5, 2 V: H1 0.0/+0.04 H2 -27.3/+0.33 H3 -27.5/+0.39
+contour 5, 3 V: H1 0.0/+0.01 H2 -23.6/+0.14 H3 -20.3/+0.21 H4 -46.0/+1.25 H5 -45.5/+1.29
+contour 5, 5 V: H1 0.0/+0.00 H2 -23.5/+0.06 H3 -13.7/+0.04 H4 -30.7/+0.13 H5 -26.4/+0.23 H6 -44.5/+0.73 H7 -43.6/+1.13
+contour 2, 3 V: H1 0.0/+0.06 H2 -32.3/+0.50 H3 -32.9/+0.35
+
+test drive_distortion_matches_the_circuit ... ok
+tremolo at 0 Hz: ngspice 25.24 mV rms, RT difference 0.220 mV rms (41.2 dB below), worst 0.311 mV
+tremolo at 5 Hz: ngspice 99.71 mV rms, RT difference 1.465 mV rms (36.7 dB below), worst 2.692 mV
+tremolo at 100 Hz: ngspice 127.97 mV rms, RT difference 1.466 mV rms (38.8 dB below), worst 2.549 mV
+tremolo at 1000 Hz: ngspice 33.07 mV rms, RT difference 1.334 mV rms (27.9 dB below), worst 1.986 mV
+
+test the_loudness_jack_follows_audio_rate_cv ... ok
+
+test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 33.21s
+
+     Running tests/vcf_control.rs (target/debug/deps/vcf_control-210da0f2e24f3536)
+
+running 2 tests
+FILTER control jack (CUTOFF at 0 V): -8V 0.18uA -0.01c -0.01c; -4V 3.18uA +0.00c +0.00c; -1V 27.78uA +0.00c +0.00c; +0V 57.09uA +0.00c +0.00c; +1V 116.91uA +0.00c +0.00c; +4V 930.38uA +0.00c +0.00c; +8V 1802.14uA +0.49c +0.49c;
+test the_filter_control_jack_matches_the_circuit ... ok
+15 C, keyboard 0 V: -10V 1.26uA +0.00c -0.00c; -9V 1.85uA -0.03c -0.03c; -8V 2.71uA +0.00c +0.00c; -7V 3.96uA +0.00c +0.00c; -6V 5.80uA +0.00c +0.00c; -5V 8.49uA +0.00c +0.00c; -4V 12.44uA +0.00c +0.00c; -3V 18.20uA +0.00c +0.00c; -2V 26.63uA +0.00c +0.00c; -1V 38.95uA +0.00c +0.00c; +0V 56.91uA +0.00c +0.00c; +1V 83.09uA +0.00c +0.00c; +2V 121.13uA +0.00c +0.00c; +3V 176.22uA -0.00c -0.00c; +4V 255.59uA -0.00c -0.00c; +5V 369.13uA -0.01c -0.01c; +6V 529.93uA -0.02c -0.02c; +7V 754.46uA -0.03c -0.03c; +8V 1061.98uA -0.07c -0.07c; +9V 1472.19uA +0.01c +0.03c; +10V 1721.00uA +0.47c +0.46c;
+25 C, keyboard 0 V: -10V 1.44uA -0.00c -0.00c; -9V 2.08uA -0.03c -0.03c; -8V 3.01uA +0.00c +0.00c; -7V 4.35uA +0.00c +0.00c; -6V 6.29uA +0.00c +0.00c; -5V 9.09uA +0.00c +0.00c; -4V 13.14uA +0.00c +0.00c; -3V 18.98uA +0.00c +0.00c; -2V 27.42uA +0.00c +0.00c; -1V 39.59uA +0.00c +0.00c; +0V 57.12uA +0.00c +0.00c; +1V 82.35uA +0.00c +0.00c; +2V 118.56uA +0.00c +0.00c; +3V 170.40uA -0.00c -0.00c; +4V 244.27uA -0.00c -0.00c; +5V 348.89uA -0.00c -0.00c; +6V 495.79uA -0.01c -0.01c; +7V 699.63uA -0.02c -0.02c; +8V 977.94uA -0.04c -0.04c; +9V 1349.77uA -0.09c -0.09c; +10V 1714.48uA +0.38c +0.36c;
+40 C, keyboard 0 V: -10V 1.73uA -0.00c -0.00c; -9V 2.45uA -0.03c -0.03c; -8V 3.49uA +0.00c +0.00c; -7V 4.95uA +0.00c +0.00c; -6V 7.03uA +0.00c +0.00c; -5V 9.98uA +0.00c +0.00c; -4V 14.18uA +0.00c +0.00c; -3V 20.13uA +0.00c +0.00c; -2V 28.56uA +0.00c +0.00c; -1V 40.52uA +0.00c +0.00c; +0V 57.45uA +0.00c +0.00c; +1V 81.39uA +0.00c +0.00c; +2V 115.19uA +0.00c +0.00c; +3V 162.78uA -0.00c -0.00c; +4V 229.55uA -0.00c -0.00c; +5V 322.77uA -0.00c -0.00c; +6V 452.05uA -0.01c -0.01c; +7V 629.66uA -0.01c -0.01c; +8V 870.61uA -0.03c -0.03c; +9V 1192.03uA -0.05c -0.05c; +10V 1608.65uA +0.03c +0.08c;
+25 C, keyboard 2 V: -10V 6.29uA +0.00c +0.00c; -9V 9.09uA +0.00c +0.00c; -8V 13.14uA +0.00c +0.00c; -7V 18.98uA +0.00c +0.00c; -6V 27.42uA +0.00c +0.00c; -5V 39.59uA +0.00c +0.00c; -4V 57.12uA +0.00c +0.00c; -3V 82.35uA +0.00c +0.00c; -2V 118.56uA +0.00c +0.00c; -1V 170.40uA -0.00c -0.00c; +0V 244.27uA -0.00c -0.00c; +1V 348.89uA -0.00c -0.00c; +2V 495.79uA -0.01c -0.01c; +3V 699.63uA -0.02c -0.02c; +4V 977.94uA -0.04c -0.04c; +5V 1349.77uA -0.09c -0.09c; +6V 1714.48uA +0.38c +0.36c; +7V 1767.16uA +0.47c +0.47c; +8V 1783.98uA +0.48c +0.48c; +9V 1792.51uA +0.49c +0.49c; +10V 1797.51uA +0.49c +0.49c;
+
+test ladder_current_matches_the_circuit ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.94s
+
+     Running tests/vcf_realtime.rs (target/debug/deps/vcf_realtime-721faf2b80525213)
+
+running 6 tests
+test capacitance_budget ... ignored
+cutoff -3 V, R14  1500: ngspice    395.0 Hz  +0.10 dB; RT +0.62 cents -0.03 dB
+cutoff -3 V, R14   700: ngspice    430.2 Hz +10.19 dB; RT +0.62 cents -0.13 dB
+cutoff +0 V, R14  1500: ngspice   1184.9 Hz  +1.60 dB; RT +0.91 cents -0.03 dB
+cutoff +0 V, R14   700: ngspice   1287.9 Hz +18.31 dB; RT +0.91 cents -0.30 dB
+cutoff +3 V, R14  1500: ngspice   3522.1 Hz  +2.10 dB; RT +1.79 cents -0.05 dB
+cutoff +3 V, R14   700: ngspice   3826.2 Hz +23.86 dB; RT +1.62 cents -0.94 dB
+cutoff +6 V, R14  1500: ngspice  10158.4 Hz  +2.13 dB; RT +6.31 cents -0.14 dB
+cutoff +6 V, R14   700: ngspice  11035.0 Hz +25.10 dB; RT +4.06 cents -2.54 dB
+
+test resonance_matches_the_circuit ... ok
+cutoff -6 V, R14  50000, 4x: I0    6.29 uA, peak  -4.1 dB; worst +0.01 dB at 283 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff -6 V, R14  10000, 4x: I0    6.29 uA, peak  -6.0 dB; worst -0.01 dB at 80 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff -6 V, R14   3000, 4x: I0    6.29 uA, peak  -5.5 dB; worst -0.02 dB at 112 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff -6 V, R14   1500, 4x: I0    6.29 uA, peak  -3.7 dB; worst -0.03 dB at 126 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff -3 V, R14  50000, 4x: I0   18.98 uA, peak  -2.5 dB; worst +0.01 dB at 796 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff -3 V, R14  10000, 4x: I0   18.98 uA, peak  -4.6 dB; worst +0.01 dB at 710 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff -3 V, R14   3000, 4x: I0   18.98 uA, peak  -3.5 dB; worst -0.01 dB at 317 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff -3 V, R14   1500, 4x: I0   18.98 uA, peak  +0.1 dB; worst -0.03 dB at 356 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff +0 V, R14  50000, 4x: I0   57.12 uA, peak  -1.9 dB; worst -0.02 dB at 3991 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff +0 V, R14  10000, 4x: I0   57.12 uA, peak  -4.2 dB; worst -0.02 dB at 3991 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff +0 V, R14   3000, 4x: I0   57.12 uA, peak  -2.8 dB; worst -0.02 dB at 3991 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff +0 V, R14   1500, 4x: I0   57.12 uA, peak  +0.5 dB; worst -0.04 dB at 1125 Hz (<= 10 kHz), +0.00 dB at 0 Hz (above)
+cutoff +3 V, R14  50000, 4x: I0  170.40 uA, peak  -1.8 dB; worst -0.15 dB at 8934 Hz (<= 10 kHz), -0.29 dB at 11247 Hz (above)
+cutoff +3 V, R14  10000, 4x: I0  170.40 uA, peak  -4.1 dB; worst -0.15 dB at 8934 Hz (<= 10 kHz), -0.39 dB at 12619 Hz (above)
+cutoff +3 V, R14   3000, 4x: I0  170.40 uA, peak  -2.5 dB; worst -0.15 dB at 8934 Hz (<= 10 kHz), -0.29 dB at 11247 Hz (above)
+cutoff +3 V, R14   1500, 4x: I0  170.40 uA, peak  +2.0 dB; worst -0.15 dB at 8934 Hz (<= 10 kHz), -0.21 dB at 10024 Hz (above)
+cutoff +6 V, R14  50000, 4x: I0  495.79 uA, peak  -1.8 dB; worst +0.09 dB at 7962 Hz (<= 10 kHz), -0.64 dB at 20000 Hz (above)
+cutoff +6 V, R14  50000, 8x: I0  495.79 uA, peak  -1.8 dB; worst +0.04 dB at 8934 Hz (<= 10 kHz), -0.12 dB at 20000 Hz (above)
+cutoff +6 V, R14  10000, 4x: I0  495.79 uA, peak  -4.1 dB; worst +0.07 dB at 8934 Hz (<= 10 kHz), -0.65 dB at 20000 Hz (above)
+cutoff +6 V, R14  10000, 8x: I0  495.79 uA, peak  -4.1 dB; worst +0.03 dB at 8934 Hz (<= 10 kHz), -0.12 dB at 20000 Hz (above)
+cutoff +6 V, R14   3000, 4x: I0  495.79 uA, peak  -2.4 dB; worst -0.12 dB at 7962 Hz (<= 10 kHz), -0.68 dB at 20000 Hz (above)
+cutoff +6 V, R14   3000, 8x: I0  495.79 uA, peak  -2.4 dB; worst -0.07 dB at 7962 Hz (<= 10 kHz), -0.13 dB at 20000 Hz (above)
+cutoff +6 V, R14   1500, 4x: I0  495.79 uA, peak  +2.0 dB; worst -0.25 dB at 8934 Hz (<= 10 kHz), -0.70 dB at 20000 Hz (above)
+cutoff +6 V, R14   1500, 8x: I0  495.79 uA, peak  +2.0 dB; worst -0.14 dB at 8934 Hz (<= 10 kHz), -0.17 dB at 10024 Hz (above)
+cutoff +8 V, R14  50000, 4x: I0  977.91 uA, peak  -1.9 dB; worst +0.07 dB at 8934 Hz (<= 10 kHz), -0.18 dB at 20000 Hz (above)
+cutoff +8 V, R14  50000, 8x: I0  977.91 uA, peak  -1.9 dB; worst +0.03 dB at 8934 Hz (<= 10 kHz), +0.04 dB at 12619 Hz (above)
+cutoff +8 V, R14  10000, 4x: I0  977.91 uA, peak  -4.2 dB; worst -0.02 dB at 8934 Hz (<= 10 kHz), -0.22 dB at 20000 Hz (above)
+cutoff +8 V, R14  10000, 8x: I0  977.91 uA, peak  -4.2 dB; worst +0.01 dB at 20 Hz (<= 10 kHz), -0.02 dB at 20000 Hz (above)
+cutoff +8 V, R14   3000, 4x: I0  977.91 uA, peak  -2.6 dB; worst -0.07 dB at 8934 Hz (<= 10 kHz), -0.36 dB at 20000 Hz (above)
+cutoff +8 V, R14   3000, 8x: I0  977.91 uA, peak  -2.6 dB; worst -0.03 dB at 8934 Hz (<= 10 kHz), -0.10 dB at 15887 Hz (above)
+cutoff +8 V, R14   1500, 4x: I0  977.91 uA, peak  +1.9 dB; worst -0.07 dB at 8934 Hz (<= 10 kHz), -0.45 dB at 20000 Hz (above)
+cutoff +8 V, R14   1500, 8x: I0  977.91 uA, peak  +1.9 dB; worst -0.02 dB at 8934 Hz (<= 10 kHz), -0.28 dB at 20000 Hz (above)
+
+test small_signal_response_matches_the_circuit ... ok
+500 points: -0.08 cents, 2000 points: reference, 4000 points: +0.004 cents
+test oscillation_reference_converges ... ok
+cutoff +6 V, R14  50000,  0.5 V: H1 0.0/+0.00 H2 -42.6/+0.15 H3 -66.9/-0.03
+cutoff +6 V, R14  50000,    2 V: H1 0.0/+0.00 H2 -30.6/+0.15 H3 -42.7/-0.00 H4 -73.7/-0.13 H5 -89.3/-0.45
+cutoff +6 V, R14  50000,    5 V: H1 0.0/+0.00 H2 -23.0/+0.17 H3 -25.9/-0.03 H4 -45.9/-0.05 H5 -52.4/-0.31 H6 -64.2/+0.07 H7 -64.2/-0.28
+cutoff +6 V, R14  50000,   10 V: H1 0.0/+0.01 H2 -21.7/+0.33 H3 -13.9/-0.00 H4 -28.2/+0.29 H5 -23.2/-0.05 H6 -34.5/+0.29 H7 -29.0/-0.09
+cutoff +6 V, R14  50000,   20 V: H1 0.0/+0.01 H2 -27.4/+0.20 H3 -10.8/+0.03 H4 -30.3/+0.15 H5 -16.4/+0.03 H6 -32.9/+0.17 H7 -20.4/+0.03
+cutoff +0 V, R14   1500,  0.5 V: H1 0.0/-0.00 H2 -60.8/+0.10 H3 -80.6/-0.30
+cutoff +0 V, R14   1500,    2 V: H1 0.0/-0.00 H2 -48.6/+0.10 H3 -56.3/-0.00 H4 -81.1/+0.09 H5 -86.7/-0.21 H6 -99.0/-0.01
+cutoff +0 V, R14   1500,    5 V: H1 0.0/-0.00 H2 -39.9/+0.10 H3 -39.3/-0.00 H4 -55.0/+0.11 H5 -51.6/-0.03 H6 -59.2/+0.14 H7 -68.1/-0.01
+cutoff +0 V, R14   1500,   10 V: H1 0.0/+0.00 H2 -29.9/+0.14 H3 -25.4/-0.01 H4 -30.4/+0.13 H5 -26.4/-0.00 H6 -33.3/+0.16 H7 -34.2/+0.04
+cutoff +0 V, R14   1500,   20 V: H1 0.0/-0.00 H2 -20.8/+0.19 H3 -12.5/+0.01 H4 -24.8/+0.26 H5 -19.8/+0.06 H6 -29.6/+0.27 H7 -26.2/+0.08
+
+test drive_distortion_matches_the_circuit ... ok
+cutoff -3 V: ngspice  425.43 Hz, 0.694 V, H2 -36.1 dB, H3 -47.6 dB; RT +1.14 cents, H1..H3 -0.03 -0.06 -0.04 dB
+cutoff +0 V: ngspice 1238.80 Hz, 0.805 V, H2 -34.9 dB, H3 -45.1 dB; RT +1.40 cents, H1..H3 -0.03 -0.03 -0.11 dB
+cutoff +3 V: ngspice 3647.36 Hz, 0.845 V, H2 -34.4 dB, H3 -44.3 dB; RT +2.95 cents, H1..H3 -0.04 -0.07 -0.25 dB
+
+test self_oscillation_matches_the_circuit ... ok
+
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 51.45s
+
+     Running tests/vco_electrical.rs (target/debug/deps/vco_electrical-caa0644468e3506b)
+
+running 4 tests
+test operating_point_matches_the_drawing ... ok
+test keyboard_gain_at_ic1_is_19_6_mv_per_volt ... ok
+test waveforms_have_the_drawing_levels ... ok
+test folkman_1973_calibration_converges ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.82s
+
+     Running tests/vco_numerics.rs (target/debug/deps/vco_numerics-c293333e7f6d97a7)
+
+running 1 test
+R32 key 0: 21.83207 Hz; reltol 1e-5: 21.83222 Hz (+0.0116 cents)
+R32 key 0: 21.83207 Hz; 4x finer steps: 21.83207 Hz (-0.0000 cents)
+R32 key 0: 21.83207 Hz; trapezoidal: 21.83216 Hz (+0.0070 cents)
+R8 key 21: 293.62287 Hz; reltol 1e-5: 293.62431 Hz (+0.0085 cents)
+R8 key 21: 293.62287 Hz; 4x finer steps: 293.62285 Hz (-0.0001 cents)
+R8 key 21: 293.62287 Hz; trapezoidal: 293.62284 Hz (-0.0001 cents)
+R2 key 42: 3953.77290 Hz; reltol 1e-5: 3953.76952 Hz (-0.0015 cents)
+R2 key 42: 3953.77290 Hz; 4x finer steps: 3953.77294 Hz (+0.0000 cents)
+R2 key 42: 3953.77290 Hz; trapezoidal: 3953.77787 Hz (+0.0022 cents)
+test frequency_is_converged_in_the_solver_settings ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.94s
+
+     Running tests/vco_osc23.rs (target/debug/deps/vco_osc23-0c4aaa229b28773f)
+
+running 1 test
+IC8: offset 0.1879 mV (the model's 0.1880); output -4.926751 V (the model's -4.926767); the -5 V line -4.99998103 V, the -4V line -3.867060 V, IC6's offset +18.54 uV
+test oscillators_2_and_3_match_the_manual_and_the_circuit has been running for over 60 seconds
+oscillator 2: ngspice R11' 235.5 ohm, R8' 0.1352; real time 235.6 ohm, 0.1351
+  Two { freq: 0.0 }: R8 4: 67.276 Hz (-0.031 c); R8 40: 537.564 Hz (-0.029 c); R32 4: 16.813 Hz (-0.015 c); R2 40: 2151.222 Hz (-0.008 c);
+  Two { freq: 0.5 }: R8 4: 109.997 Hz (-0.003 c); R8 40: 878.885 Hz (+0.012 c); R32 4: 27.492 Hz (+0.001 c); R2 40: 3520.000 Hz (+0.000 c);
+  Two { freq: 1.0 }: R8 4: 176.509 Hz (+0.020 c); R8 40: 1410.443 Hz (+0.015 c); R32 4: 44.119 Hz (+0.033 c); R2 40: 5657.877 Hz (-1.220 c);
+  FREQUENCY's travel: 16.70 semitones (5.35: 14-17)
+oscillator 3: ngspice R11' 142.2 ohm, R8' 0.1352; real time 142.3 ohm, 0.1351
+  Three { freq: 0.0, control: true }: R8 4: 66.999 Hz (-0.033 c); R8 40: 535.355 Hz (-0.029 c); R32 4: 16.744 Hz (-0.014 c); R2 40: 2142.373 Hz (-0.008 c);
+  Three { freq: 0.5, control: true }: R8 4: 109.997 Hz (-0.002 c); R8 40: 878.883 Hz (+0.015 c); R32 4: 27.492 Hz (+0.002 c); R2 40: 3520.001 Hz (-0.000 c);
+  Three { freq: 1.0, control: true }: R8 4: 176.395 Hz (+0.023 c); R8 40: 1409.533 Hz (+0.018 c); R32 4: 44.091 Hz (+0.033 c); R2 40: 5654.224 Hz (-1.218 c);
+  Three { freq: 0.0, control: false }: R8 4: 26.351 Hz (-0.283 c); R8 40: 26.351 Hz (-0.283 c); R32 4: 6.585 Hz (-0.281 c); R2 40: 105.434 Hz (-0.289 c);
+  Three { freq: 0.5, control: false }: R8 4: 233.842 Hz (-0.139 c); R8 40: 233.842 Hz (-0.140 c); R32 4: 58.453 Hz (-0.130 c); R2 40: 935.374 Hz (-0.127 c);
+  Three { freq: 1.0, control: false }: R8 4: 1402.361 Hz (-0.043 c); R8 40: 1402.359 Hz (-0.041 c); R32 4: 350.545 Hz (-0.024 c); R2 40: 5625.310 Hz (-1.247 c);
+  FREQUENCY's travel: 16.76 semitones with CONTROL on (5.35: 14-17), 68.8 off (2.3, later board: +-3 octaves); keys with CONTROL off: +0.000 semitones; LO at minimum 0.205 Hz (4.9 s a click; 5.36: 2-5 s), LO at maximum 10.95 Hz against 32' at minimum 6.58 Hz (5.36: they overlap)
+worst real time against ngspice: -0.289 cents below 4.5 kHz (oscillator 3 Three { freq: 0.0, control: false } R2 key 40), -1.247 above (oscillator 3 Three { freq: 1.0, control: false } R2 key 40)
+test oscillators_2_and_3_match_the_manual_and_the_circuit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 74.73s
+
+     Running tests/vco_realtime.rs (target/debug/deps/vco_realtime-a28adbd4c9029b30)
+
+running 2 tests
+tuned in 26 notes, 0.01 s: Tuning { r11: 183.68800112167517, a8: 0.1350765377422724, octave_step: 0.29889118551891747, tune: 7.531404188437971 }
+Lo key 0: ngspice 0.6812 Hz, real-time 0.6810 Hz, -0.692 cents
+Lo key 7: ngspice 1.0207 Hz, real-time 1.0204 Hz, -0.488 cents
+Lo key 14: ngspice 1.5292 Hz, real-time 1.5289 Hz, -0.350 cents
+Lo key 21: ngspice 2.2911 Hz, real-time 2.2908 Hz, -0.255 cents
+Lo key 28: ngspice 3.4326 Hz, real-time 3.4322 Hz, -0.190 cents
+Lo key 35: ngspice 5.1427 Hz, real-time 5.1423 Hz, -0.145 cents
+Lo key 42: ngspice 7.7047 Hz, real-time 7.7042 Hz, -0.110 cents
+Lo key 43: ngspice 8.1627 Hz, real-time 8.1622 Hz, -0.108 cents
+R32 key 0: ngspice 21.8321 Hz, real-time 21.8310 Hz, -0.088 cents
+R32 key 7: ngspice 32.7068 Hz, real-time 32.7052 Hz, -0.085 cents
+R32 key 14: ngspice 48.9973 Hz, real-time 48.9950 Hz, -0.081 cents
+R32 key 21: ngspice 73.4002 Hz, real-time 73.3968 Hz, -0.082 cents
+R32 key 28: ngspice 109.9545 Hz, real-time 109.9495 Hz, -0.080 cents
+R32 key 35: ngspice 164.7095 Hz, real-time 164.7016 Hz, -0.083 cents
+R32 key 42: ngspice 246.7258 Hz, real-time 246.7142 Hz, -0.082 cents
+R32 key 43: ngspice 261.3874 Hz, real-time 261.3749 Hz, -0.083 cents
+R16 key 0: ngspice 43.6720 Hz, real-time 43.6701 Hz, -0.076 cents
+R16 key 7: ngspice 65.4231 Hz, real-time 65.4202 Hz, -0.077 cents
+R16 key 14: ngspice 98.0053 Hz, real-time 98.0013 Hz, -0.072 cents
+R16 key 21: ngspice 146.8108 Hz, real-time 146.8041 Hz, -0.079 cents
+R16 key 28: ngspice 219.9158 Hz, real-time 219.9068 Hz, -0.071 cents
+R16 key 35: ngspice 329.4177 Hz, real-time 329.4026 Hz, -0.080 cents
+R16 key 42: ngspice 493.4406 Hz, real-time 493.4205 Hz, -0.071 cents
+R16 key 43: ngspice 522.7629 Hz, real-time 522.7403 Hz, -0.075 cents
+R8 key 0: ngspice 87.3545 Hz, real-time 87.3510 Hz, -0.070 cents
+R8 key 7: ngspice 130.8569 Hz, real-time 130.8514 Hz, -0.073 cents
+R8 key 14: ngspice 196.0189 Hz, real-time 196.0112 Hz, -0.068 cents
+R8 key 21: ngspice 293.6229 Hz, real-time 293.6104 Hz, -0.073 cents
+R8 key 28: ngspice 439.8230 Hz, real-time 439.8088 Hz, -0.056 cents
+R8 key 35: ngspice 658.8221 Hz, real-time 658.7935 Hz, -0.075 cents
+R8 key 42: ngspice 986.9055 Hz, real-time 986.8781 Hz, -0.048 cents
+R8 key 43: ngspice 1045.5656 Hz, real-time 1045.5304 Hz, -0.058 cents
+R4 key 0: ngspice 174.7183 Hz, real-time 174.7116 Hz, -0.067 cents
+R4 key 7: ngspice 261.7181 Hz, real-time 261.7075 Hz, -0.070 cents
+R4 key 14: ngspice 392.0321 Hz, real-time 392.0179 Hz, -0.062 cents
+R4 key 21: ngspice 587.2329 Hz, real-time 587.2091 Hz, -0.070 cents
+R4 key 28: ngspice 879.6515 Hz, real-time 879.6270 Hz, -0.048 cents
+R4 key 35: ngspice 1317.7861 Hz, real-time 1317.7302 Hz, -0.073 cents
+R4 key 42: ngspice 1974.4546 Hz, real-time 1974.4345 Hz, -0.018 cents
+R4 key 43: ngspice 2091.9066 Hz, real-time 2091.8693 Hz, -0.031 cents
+R2 key 0: ngspice 349.4343 Hz, real-time 349.4212 Hz, -0.065 cents
+R2 key 7: ngspice 523.4233 Hz, real-time 523.4054 Hz, -0.059 cents
+R2 key 14: ngspice 784.0587 Hz, real-time 784.0317 Hz, -0.060 cents
+R2 key 21: ngspice 1174.5445 Hz, real-time 1174.5049 Hz, -0.058 cents
+R2 key 28: ngspice 1759.7369 Hz, real-time 1759.6918 Hz, -0.044 cents
+R2 key 35: ngspice 2637.1494 Hz, real-time 2637.0464 Hz, -0.068 cents
+R2 key 42: ngspice 3953.7733 Hz, real-time 3953.7604 Hz, -0.006 cents
+R2 key 43: ngspice 4189.4735 Hz, real-time 4189.5386 Hz, +0.027 cents
+worst 32'..2' 0.088 cents, LO 0.692 cents
+test tuned_realtime_oscillator_tracks_the_tuned_circuit ... ok
+R8 key 4 (110.0 Hz) saw: 181 harmonics, worst error -74.2 dB of the peak at #181, largest alias -121.0 dB
+R8 key 4 (110.0 Hz) tri: 181 harmonics, worst error -73.0 dB of the peak at #2, largest alias -122.7 dB
+R8 key 4 (110.0 Hz) rect: 181 harmonics, worst error -62.1 dB of the peak at #153, largest alias -121.6 dB
+R4 key 24 (698.3 Hz) saw: 28 harmonics, worst error -58.5 dB of the peak at #28, largest alias -121.8 dB
+R4 key 24 (698.3 Hz) tri: 28 harmonics, worst error -70.6 dB of the peak at #2, largest alias -120.4 dB
+R4 key 24 (698.3 Hz) rect: 28 harmonics, worst error -48.0 dB of the peak at #27, largest alias -122.3 dB
+R2 key 42 (3953.8 Hz) saw: 5 harmonics, worst error -43.4 dB of the peak at #5, largest alias -70.0 dB
+R2 key 42 (3953.8 Hz) tri: 5 harmonics, worst error -67.2 dB of the peak at #2, largest alias -71.7 dB
+R2 key 42 (3953.8 Hz) rect: 5 harmonics, worst error -44.8 dB of the peak at #5, largest alias -73.1 dB
+
+test realtime_waveforms_match_the_circuit_below_20_khz ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.91s
+
+     Running unittests src/lib.rs (target/debug/deps/ca72_spice-b25dd7ccc28197f0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/runner.rs (target/debug/deps/runner-3fdec3445c03037b)
+
+running 3 tests
+test work_directories_with_spaces_work ... ok
+test simulator_errors_are_errors ... ok
+test rc_step_matches_its_exponential ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests ca72
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ca72_lab
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ca72_spice
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

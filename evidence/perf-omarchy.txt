@@ -1,0 +1,32 @@
+# The Minimoog's performance against its first recording (DMM, stage 7)
+
+Machine: omarchy (Ryzen 7 7800X3D), release build, 2026-09-29.
+Reference: `ca72-lab perf record <dir>`, run at 22:55 on the models of 942873b3 (before any
+optimization; the harness itself was committed with the first pass, 5b9e6ada): the seven
+scenarios rendered at 48 kHz, every sample kept (15 MB, not in the repository: to make it
+again, build ca72-lab from 5b9e6ada with crates/ca72 from 942873b3).
+Check: `cargo run --release -p ca72-lab --bin ca72-lab -- perf check <dir>` on the
+tree of the second pass (the minimoog branch after f982de3f and cf9264b9): each scenario
+rendered again, compared sample by sample, timed. "of real time" is rendering time over
+audio time; "was" the reference's. The criterion for "no loss": every scenario within
+1e-7 of full scale of the reference.
+
+perf-idle: 0.399 of real time (was 2.235: 5.6x); built in 0.58 s; largest difference 3.793e-13 (-248.4 dBFS) at 0.5676 s; 0.0674 % of samples bit-identical
+v0-bass: 0.499 of real time (was 2.311: 4.6x); built in 0.59 s; largest difference 1.304e-9 (-177.7 dBFS) at 0.2083 s; 0.0224 % of samples bit-identical
+v0-three: 0.569 of real time (was 2.309: 4.1x); built in 0.57 s; largest difference 1.025e-9 (-179.8 dBFS) at 0.2086 s; 0.0198 % of samples bit-identical
+v0-board3: 0.506 of real time (was 1.988: 3.9x); built in 0.57 s; largest difference 1.302e-11 (-217.7 dBFS) at 12.1342 s; 0.0057 % of samples bit-identical
+perf-ext: 1.528 of real time (was 3.780: 2.5x); built in 0.57 s; largest difference 1.685e-9 (-175.5 dBFS) at 0.1089 s; 0.0083 % of samples bit-identical
+perf-a440: 0.454 of real time (was 2.317: 5.1x); built in 0.57 s; largest difference 1.784e-9 (-175.0 dBFS) at 0.5083 s; 0.0021 % of samples bit-identical
+perf-screech: 0.740 of real time (was 2.610: 3.5x); built in 0.57 s; largest difference 2.591e-8 (-151.7 dBFS) at 2.1354 s; 0.0042 % of samples bit-identical
+all: 24.70 s against 92.82 s (3.8x); largest difference 2.591e-8
+
+Where the time goes, us a sample (built with `--features profile`, whose laps add their own
+cost; the contour's, solver's and filter's parts are within their stage's):
+
+  perf-idle, us a sample: keyboard 0.08, contours 1.24, noise 1.20, modulation 0.10, preamp 0.03, oscillators 0.39, control node 0.12, filter 4.86, vca 1.09, contour trigger 0.04, contour v-trig 0.36, contour decay 0.59, contour follower 0.16, solver load 0.02, solver solve 0.01, filter resampling 0.44, filter bias 1.02, filter evaluation 2.18, filter solve 1.17
+  v0-bass, us a sample: keyboard 1.18, contours 2.06, noise 1.22, modulation 0.10, preamp 0.03, oscillators 0.51, control node 0.12, filter 4.87, vca 1.36, contour trigger 0.79, contour v-trig 0.29, contour decay 0.69, contour follower 0.20, solver load 0.67, solver solve 0.33, filter resampling 0.45, filter bias 1.03, filter evaluation 2.13, filter solve 1.17
+  v0-three, us a sample: keyboard 1.71, contours 2.04, noise 1.22, modulation 0.10, preamp 0.03, oscillators 1.57, control node 0.12, filter 4.90, vca 1.37, contour trigger 0.79, contour v-trig 0.29, contour decay 0.68, contour follower 0.20, solver load 0.93, solver solve 0.49, filter resampling 0.44, filter bias 1.02, filter evaluation 2.16, filter solve 1.17
+  v0-board3, us a sample: keyboard 0.25, contours 1.30, noise 1.21, modulation 0.11, preamp 0.03, oscillators 2.09, control node 0.12, filter 5.13, vca 1.37, contour trigger 0.19, contour v-trig 0.19, contour decay 0.64, contour follower 0.17, solver load 0.12, solver solve 0.06, filter resampling 0.44, filter bias 1.02, filter evaluation 2.36, filter solve 1.21
+  perf-ext, us a sample: keyboard 0.44, contours 1.51, noise 1.22, modulation 0.10, preamp 24.19, oscillators 0.03, control node 0.12, filter 5.20, vca 1.41, contour trigger 0.36, contour v-trig 0.23, contour decay 0.66, contour follower 0.18, solver load 14.66, solver solve 6.59, filter resampling 0.45, filter bias 1.02, filter evaluation 2.43, filter solve 1.20
+  perf-a440, us a sample: keyboard 0.46, contours 1.72, noise 1.22, modulation 0.10, preamp 0.03, oscillators 0.47, control node 0.13, filter 5.27, vca 1.40, contour trigger 0.48, contour v-trig 0.28, contour decay 0.66, contour follower 0.20, solver load 0.25, solver solve 0.12, filter resampling 0.46, filter bias 1.05, filter evaluation 2.49, filter solve 1.22
+  perf-screech, us a sample: keyboard 1.13, contours 1.43, noise 1.22, modulation 0.10, preamp 0.03, oscillators 2.50, control node 0.12, filter 9.04, vca 1.47, contour trigger 0.33, contour v-trig 0.21, contour decay 0.62, contour follower 0.18, solver load 1.73, solver solve 0.91, filter resampling 0.45, filter bias 1.02, filter evaluation 5.45, filter solve 2.02
