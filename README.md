@@ -74,8 +74,8 @@ To try the plug-in without a host, run it as an application of its own:
 cargo run --release -p ca72-plugin --example standalone --features standalone
 ```
 
-On Linux this also needs the ALSA and JACK development libraries (`libasound2-dev
-libjack-jackd2-dev`).
+On Linux this also needs the ALSA, JACK and OpenGL development libraries
+(`libasound2-dev libjack-jackd2-dev libgl-dev`).
 
 ## Testing
 
@@ -87,6 +87,10 @@ The tests check the real-time models against the circuit lab's reference measure
 They also check that the plug-in neither allocates nor frees memory on the audio thread,
 and that the editor's gestures reach the host as single gestures. One test compares the
 panel as drawn with the approved design.
+
+`scripts/validate.sh` runs clap-validator, pluginval (at strictness 10) and Steinberg's
+VST3 validator on the bundles, downloading or building each the first time. CI does all of
+this on macOS, Windows and Linux.
 
 The tests that run the circuit simulations need ngspice 47. Without it they say so and
 pass; set `CA72_REQUIRE_NGSPICE=1` to make a missing ngspice a failure.

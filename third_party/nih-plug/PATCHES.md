@@ -21,6 +21,16 @@ do its own example plug-ins (`sine`, `gain`). These two changes, both in
    that, a host may keep showing the values from before the load
    (`state-reproducibility-basic`, `-binary` and `-buffered`).
 
+A third change, in `src/wrapper/vst3/wrapper.rs`, comes from Steinberg's VST3 validator
+(SDK 3.8.1):
+
+3. **A bus arrangement is matched against the right buses.** `set_bus_arrangements`
+   took a layout's first auxiliary bus to be the host's bus 1 when the layout has no main
+   bus, and bus 0 when it has one: the wrong way round (the rest of the file has it
+   right). For an instrument with a side chain it read past the end of the host's
+   one-element array, and so refused every arrangement the host asked for (the
+   validator's mono test: "Mono Input-SpeakerArrangement is not supported").
+
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
-and `nih_plug_derive` here and apply both changes again, unless upstream has fixed them.
+and `nih_plug_derive` here and apply the three changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.

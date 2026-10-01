@@ -46,7 +46,17 @@ has a Developer ID, and the builds are unsigned until it is set up.
 **Agent decisions, 2026-10-01.** The plug-in is built with nih-plug, vendored with two
 fixes that clap-validator needs (`third_party/nih-plug/PATCHES.md`). The output is mono,
 the same on every output channel, in a stereo or a mono layout. POWER is the host's
-bypass: the output fades over 10 ms, and the voice rests once silent.
+bypass: the output fades over 10 ms, and the voice rests once silent. A third fix to
+nih-plug came from Steinberg's validator: its VST3 wrapper matched the host's bus
+arrangements against the wrong buses, reading past the end of the host's array, and so
+refused even the mono layout it offers.
+
+**Evidence (the Mac, 2026-10-01):** `scripts/validate.sh` on the release bundles:
+clap-validator 0.4.1, 37 tests passed, 0 failed, 7 skipped; pluginval 1.0.4 at strictness
+10, SUCCESS, its editor tests among them; Steinberg's validator (SDK 3.8.1), 47 passed, 0
+failed. That validator's bypass test prints two errors and still passes: nih-plug ignores
+a value the host sets on the controller while the plug-in is processing, and takes it from
+the next block's parameter changes instead. Hosts send both, so it is left as it is.
 
 ## R5. The editor, drawn natively
 **Owner decision, 2026-10-01.** The editor is drawn in Rust, not in a web view.

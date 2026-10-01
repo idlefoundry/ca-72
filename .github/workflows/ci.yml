@@ -1,0 +1,113 @@
+# On macOS, Windows and Linux: the bundles (built first, with only the libraries the README
+# lists), clippy, every test (on Linux with ngspice 47, required), and the three validators
+# on the bundles (scripts/validate.sh). The bundles are kept as the run's artifacts; the
+# macOS ones are universal (Apple silicon and Intel) and not yet signed.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS, os: macos-15 }
+          - { name: Windows, os: windows-2025 }
+          - { name: Linux, os: ubuntu-24.04 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Rust for Intel Macs as well
+        if: runner.os == 'macOS'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: The editor's libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libx11-xcb-dev libxcb1-dev
+
+      - name: Bundles
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            cargo xtask bundle-universal ca72-plugin --release
+          else
+            cargo xtask bundle ca72-plugin --release
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CA-72-${{ matrix.name }}
+          path: |
+            target/bundled/CA-72.vst3
+            target/bundled/CA-72.clap
+          if-no-files-found: error
+
+      - name: The standalone's, ngspice's and the validators' libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libasound2-dev libjack-jackd2-dev libgl-dev libreadline-dev bison flex xvfb
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: ngspice 47, cached
+        if: runner.os == 'Linux'
+        id: ngspice
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/ngspice-47
+          key: ngspice-47-${{ matrix.os }}
+
+      - name: ngspice 47, built
+        if: runner.os == 'Linux' && steps.ngspice.outputs.cache-hit != 'true'
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o ngspice-47.tar.gz https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/47/ngspice-47.tar.gz
+          echo "894e649651f1838a14095e5a5439e7d3aa63e87ede14d283173fda4fcdef675f  ngspice-47.tar.gz" | sha256sum -c -
+          tar xzf ngspice-47.tar.gz
+          cd ngspice-47 && mkdir release && cd release
+          ../configure --prefix="$HOME/.local/opt/ngspice-47" --with-readline=yes --enable-openmp --without-x --disable-debug
+          make -j"$(nproc)"
+          make install
+
+      - name: Tests
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then export CA72_REQUIRE_NGSPICE=1; fi
+          cargo test --workspace
+
+      - name: Validators, cached
+        uses: actions/cache@v4
+        with:
+          path: ~/validators
+          key: validators-${{ matrix.os }}-${{ hashFiles('scripts/validate.sh') }}
+
+      - name: Validators
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: CA72_VALIDATORS="$HOME/validators" scripts/validate.sh

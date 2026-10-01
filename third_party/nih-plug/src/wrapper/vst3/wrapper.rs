@@ -741,7 +741,7 @@ impl<P: Vst3Plugin> IAudioProcessor for Wrapper<P> {
                 // NOTE: We completely ignore the speaker arrangements and only look at the channel
                 //       counts here. This may cause issues at some point, but it works for now.
                 let has_main_input = layout.main_input_channels.is_some();
-                let aux_input_start_idx = if has_main_input { 0 } else { 1 };
+                let aux_input_start_idx = if has_main_input { 1 } else { 0 };
                 if has_main_input
                     && (*inputs).count_ones() != layout.main_input_channels.unwrap().get()
                 {
@@ -756,7 +756,7 @@ impl<P: Vst3Plugin> IAudioProcessor for Wrapper<P> {
                 }
 
                 let has_main_output = layout.main_output_channels.is_some();
-                let aux_output_start_idx = if has_main_output { 0 } else { 1 };
+                let aux_output_start_idx = if has_main_output { 1 } else { 0 };
                 if (*outputs).count_ones()
                     != layout
                         .main_output_channels

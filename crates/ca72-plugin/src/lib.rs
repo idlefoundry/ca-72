@@ -71,14 +71,19 @@ impl Ca72 {
     }
 }
 
-/// EXTERNAL INPUT: a stereo side chain (mixed to mono at the jack).
-const SIDE_CHAIN: &[std::num::NonZeroU32] = &[new_nonzero_u32(2)];
+/// EXTERNAL INPUT: a side chain of as many channels as the output (mixed to mono at the jack).
+const SIDE_CHAIN_STEREO: &[std::num::NonZeroU32] = &[new_nonzero_u32(2)];
+const SIDE_CHAIN_MONO: &[std::num::NonZeroU32] = &[new_nonzero_u32(1)];
 
 const fn layout(channels: u32, name: &'static str) -> AudioIOLayout {
     AudioIOLayout {
         main_input_channels: None,
         main_output_channels: Some(new_nonzero_u32(channels)),
-        aux_input_ports: SIDE_CHAIN,
+        aux_input_ports: if channels == 1 {
+            SIDE_CHAIN_MONO
+        } else {
+            SIDE_CHAIN_STEREO
+        },
         names: PortNames {
             layout: Some(name),
             main_output: Some("Output"),
