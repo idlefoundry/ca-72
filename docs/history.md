@@ -4,7 +4,7 @@ The circuit model in this repository was developed from 2026-09-27 to 2026-10-01
 DAW-v3, a digital audio workstation, as one of its instruments, and then moved here to be
 released on its own. This file is that project's record of the decisions about it: the
 section it calls **DMM** (the model itself, its circuit lab, its quality modes and its
-performance work), and four later entries that concern it (D142, D144, D145 and D148).
+performance work), and four later entries that concern it (D142, D144, D145 and D151).
 They are reproduced as they were written, so that the references to "DMM" in the code and
 the derivation documents (`docs/circuit/`) can be followed.
 
@@ -877,13 +877,19 @@ yet (its results predate the device).
 - **On the Mac (2026-09-30):** `device/circuit/minimoog` 1.31 ms, `device/instrument/minimoog-potato`
   0.16 ms. The failed run's own records (under the old name) were not kept.
 
-## D148. The Minimoog's panel as the plug-in's: its printed ticks corrected, softer knobs, no cheeks, the left hand controller beside the panel (DMM, D138, D144)
+## D151. The Minimoog's panel as the plug-in's: its printed ticks corrected, softer knobs, no cheeks, the left hand controller beside the panel (DMM, D138, D144)
 **Owner decision, 2026-10-01.** The owner asked for the circuit-derived Minimoog to be
 released as an open-source plug-in, in a repository of its own (not this one), and for
 its panel to be fixed there: the ticks were "in the wrong spots", the knobs' reflections
 "distracting", the wood ended short. From the agent's mock-ups the owner chose the layout
 with the left hand controller in a column beside the panel, and then: "fix the DAWs panel
-as well, it should look the same". `minimoog.ts` now draws that panel.
+as well, it should look the same". `minimoog.ts` now draws that panel. (Written as D148,
+a number another entry took the same day.)
+
+The model, its circuit lab, the netlists and the derivation documents were copied into
+that repository (the plug-in CA-72, by Idle Foundry, GPL-3.0-or-later). The DAW keeps its
+own copy: nothing here depends on that repository, and changes do not pass between them
+unless copied.
 
 - **The ticks, measured again** against the face-on photograph (Commons, "Minimoog
   panel.jpg") and a second one, each tick found as a blob about the drawn centre:
@@ -929,4 +935,3 @@ them: every legend clears its tick by 6.7 units or more; no two of the 227 texts
 (the nearest 2.2); the rear drawing is under the panel, above the lists, with either
 view. In the sessions' 1600 by 1000 page the panel is fitted at 863 by 265 px (598 by
 265 before). Only that session draws the panel.
-

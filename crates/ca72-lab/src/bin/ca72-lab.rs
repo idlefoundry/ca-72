@@ -1,4 +1,4 @@
-//! `ca72-lab`: the Minimoog circuit lab's command line (docs/circuit/README.md).
+//! `ca72-lab`: the circuit lab's command line (docs/circuit/README.md).
 //!
 //! ```text
 //! ca72-lab calibrate [folkman|norlin]      factory tuning of oscillator 1 in ngspice

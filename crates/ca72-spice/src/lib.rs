@@ -1,9 +1,9 @@
 //! ngspice as the offline circuit reference (DMM, `docs/circuit/`).
 //!
-//! The Minimoog emulation is derived from transcribed netlists of the instrument's boards
+//! The model is derived from transcribed netlists of the instrument's boards
 //! (`circuits/boards/`). ngspice solves those netlists at the circuit level; the
 //! real-time models are checked against its answers. ngspice is a tool here, never a
-//! dependency of the DAW: nothing in the engine links or starts it.
+//! dependency of the plug-in: nothing in it links or starts ngspice.
 //!
 //! - [`Ngspice::find`] looks for the binary: `CA72_NGSPICE`, then the newest
 //!   `~/.local/opt/ngspice-*/bin/ngspice`, then Homebrew's, then `PATH`.

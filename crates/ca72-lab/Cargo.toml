@@ -1,6 +1,6 @@
 [package]
 name = "ca72-lab"
-description = "The Minimoog circuit lab: ngspice benches of the transcribed boards, the factory calibration, and reference measurements for the real-time models"
+description = "The CA-72's circuit lab: ngspice benches of the boards transcribed from the Minimoog Model D's service documents, the factory calibration, and reference measurements for the real-time models"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
