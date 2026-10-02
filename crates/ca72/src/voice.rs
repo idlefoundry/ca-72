@@ -356,9 +356,20 @@ pub fn glide_r(p: f64, on: bool) -> f64 {
 /// is not documented: assumptions A18).
 pub const RELEASE_LEAD: f64 = 2e-3;
 
+/// How long a voice's trigger contact must be open before a key pressed again retriggers
+/// its contours, s: Q20 holds the reset line about 12 ms after a release, until C7 has
+/// drained (docs/circuit/board2.md, "Trigger section"; `tests/retrigger.rs` finds 11.5 to
+/// 12 ms in every mode), and a millisecond more. POLY waits this long before a note that
+/// takes a voice whose key is down (decisions.md, "POLY").
+pub const RETRIGGER_GAP: f64 = 0.013;
+
 /// The lowest key (F) as a MIDI note on 8' (A, the fifth key, is 110 Hz there).
 pub const LOWEST_KEY_MIDI: i32 = 41;
 pub const KEYS: i32 = 44;
+
+/// The MIDI notes the voice plays: all 128. Those beyond the instrument's 44 keys continue
+/// its key string (the plug-in's extension, not the circuit's: [`Keys::step`]).
+pub const MIDI_NOTES: std::ops::RangeInclusive<i32> = 0..=127;
 
 /// The keyboard circuit's load: the three oscillators' keyboard inputs and the filter's
 /// KEYBOARD CONTROL 1 and 2 ([`Load::of`]).
@@ -395,15 +406,20 @@ pub struct Keys {
     /// Released keys whose pitch contacts are still closed, and the sample they open at.
     releasing: Vec<(i32, u64)>,
     samples: u64,
+    /// The string's foot as last set (it stays while no key's contact is closed).
+    foot: i32,
 }
 
 /// A sample's contacts: the lowest and highest keys whose pitch contacts are closed, the
-/// trigger contact, and EXT. S-TRIG (the rear jack shorted to ground).
+/// trigger contact, and EXT. S-TRIG (the rear jack shorted to ground). With a key beyond
+/// the string's ends sounding, `keys` is that end's key alone and `foot` how many keys
+/// beyond it the key is ([`Keys::step`]); 0 otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Contacts {
     pub keys: Option<(usize, usize)>,
     pub gate: bool,
     pub s_trig: bool,
+    pub foot: i32,
 }
 
 /// A sample at the instrument's jacks: the EXTERNAL INPUT (as a fraction of
@@ -411,6 +427,10 @@ pub struct Contacts {
 /// normal contact in place: the oscillators' external bus held by R156 33K, the filter's
 /// R51 grounded, the loudness input tied to +10 V through 33K); EXT. S-TRIG closed or open.
 /// A plugged source is ideal (A5).
+///
+/// With them, the plug-in's ANALOG (decisions.md; not the instrument's): each oscillator off its
+/// calibration by `detune` cents and the filter's cutoff off its by `cutoff` octaves, both
+/// 0 for the circuit as drawn (the samples then the same to the bit).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Jacks {
     pub ext: f64,
@@ -418,7 +438,15 @@ pub struct Jacks {
     pub filter: Option<f64>,
     pub loudness: Option<f64>,
     pub s_trig: bool,
+    pub detune: [f64; 3],
+    pub cutoff: f64,
 }
+
+/// The volts an octave at a 100K input to the filter's control node, as R51 (the FILTER
+/// CONTROL jack's) is, measured on the model with CUTOFF at its centre: 0.97 V at -3 and
+/// 1.03 V at +3, the converter's own curve (`tests/analog.rs`). KEYBOARD CONTROL 1 and 2
+/// together (100K) make the filter follow the keyboard's 1.013 V an octave about as closely.
+pub const FILTER_VOLTS_PER_OCTAVE: f64 = 0.98;
 
 /// The keyboard circuit (board 1), driven by the contacts: the pitch voltage.
 #[derive(Debug, Clone)]
@@ -431,6 +459,12 @@ pub struct KeyboardPart {
     count: usize,
     from: f64,
     to: f64,
+    /// The keyboard's output's volts a key over the instrument's keys (the string's scale as
+    /// its current, the amplifier and the load give it), and the keys beyond the string's
+    /// ends in volts as they stand, gliding as the hold capacitor does (decisions.md, "The
+    /// full MIDI range": the plug-in's extension).
+    step: f64,
+    beyond: f64,
 }
 
 /// The contour generators at their sub-rate, interpolated, and the noise source: what
@@ -662,9 +696,10 @@ impl Voice {
             keys: Keys {
                 rate,
                 // Room for every key: a key press must not allocate on the audio thread.
-                held: Vec::with_capacity(64),
-                releasing: Vec::with_capacity(64),
+                held: Vec::with_capacity(128),
+                releasing: Vec::with_capacity(128),
                 samples: 0,
+                foot: 0,
             },
             kbd: KeyboardPart {
                 to: keyboard.out(),
@@ -673,6 +708,8 @@ impl Voice {
                 rate,
                 every: 1,
                 count: 0,
+                step: (volts(HIGH_A) - volts(LOW_A)) / f64::from(HIGH_A - LOW_A),
+                beyond: 0.0,
             },
             ctl,
             bias,
@@ -782,6 +819,12 @@ impl Voice {
         (self.audio.last.0, self.audio.front.last_i)
     }
 
+    /// Oscillator `n`'s (0, 1, 2) latest reset: its time in samples and how many it has
+    /// made (a probe of its frequency at any pitch: the resets' spacing).
+    pub fn probe_resets(&self, n: usize) -> (f64, u64) {
+        self.audio.front.vcos[n].last_reset()
+    }
+
     /// The last sample's contours (filter, loudness), V.
     pub fn probe_contours(&self) -> (f64, f64) {
         self.last_ctl
@@ -824,7 +867,8 @@ impl Voice {
         &self.kbd.keyboard
     }
 
-    /// A MIDI note pressed or released (notes outside the 44 keys are ignored).
+    /// A MIDI note (0 to 127) pressed or released: beyond the 44 keys the string continues
+    /// ([`Keys::step`]).
     pub fn note(&mut self, midi: i32, on: bool) {
         self.keys.note(midi, on);
     }
@@ -913,12 +957,13 @@ fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourP
 }
 
 impl Keys {
-    /// A MIDI note pressed or released (notes outside the 44 keys are ignored).
+    /// A MIDI note (0 to 127) pressed or released: the 44 keys F to C (41 to 84) are the
+    /// instrument's, the rest continue its key string ([`Keys::step`]).
     pub fn note(&mut self, midi: i32, on: bool) {
-        let k = midi - LOWEST_KEY_MIDI;
-        if !(0..KEYS).contains(&k) {
+        if !MIDI_NOTES.contains(&midi) {
             return;
         }
+        let k = midi - LOWEST_KEY_MIDI;
         if on {
             if !self.held.contains(&k) {
                 self.held.push(k);
@@ -934,6 +979,14 @@ impl Keys {
     /// The contacts for the next sample (the lowest and highest keys whose pitch contacts
     /// are closed: held, or released within the lead; and the trigger contact), and a
     /// sample on.
+    ///
+    /// Keys beyond the string's ends (the plug-in's extension: decisions.md, "The full MIDI range"): the
+    /// trigger contact closes for them as for the rest. While the lowest key whose contact
+    /// is closed is below F, it sounds alone: the circuit plays F, and the keys between F
+    /// and it are added to the keyboard's output ([`KeyboardPart::tick`]); while every such
+    /// key is above C, the lowest of them likewise, from C. Otherwise the keys above C are
+    /// left out, as the instrument's lowest-note priority leaves them silent, and the
+    /// contacts are the instrument's own.
     pub fn step(&mut self) -> Contacts {
         let now = self.samples;
         self.releasing.retain(|&(_, until)| until > now);
@@ -943,14 +996,22 @@ impl Keys {
                 .copied()
                 .chain(self.releasing.iter().map(|&(k, _)| k))
         };
-        let range = keys()
-            .min()
-            .zip(keys().max())
-            .map(|(a, b)| (a as usize, b as usize));
+        let on = || keys().filter(|k| (0..KEYS).contains(k));
+        let (keys, foot) = match (keys().min(), on().min().zip(on().max())) {
+            (Some(lowest), _) if lowest < 0 => (Some((0, 0)), lowest),
+            (_, Some((lo, hi))) => (Some((lo as usize, hi as usize)), 0),
+            (Some(lowest), None) => {
+                let top = (KEYS - 1) as usize;
+                (Some((top, top)), lowest - (KEYS - 1))
+            }
+            (None, _) => (None, self.foot),
+        };
+        self.foot = foot;
         let c = Contacts {
-            keys: range,
+            keys,
             gate: !self.held.is_empty(),
             s_trig: false,
+            foot,
         };
         self.samples += 1;
         c
@@ -959,8 +1020,8 @@ impl Keys {
     /// Room for every key, so a key press does not allocate (a clone keeps the lists'
     /// contents, not their room).
     pub fn reserve(&mut self) {
-        self.held.reserve(64);
-        self.releasing.reserve(64);
+        self.held.reserve(128);
+        self.releasing.reserve(128);
     }
 
     /// Whether a key is held.
@@ -989,6 +1050,9 @@ impl KeyboardPart {
             self.keyboard.set_load(keyboard_load(p));
             self.from = self.to;
             self.to = self.keyboard.tick(c.keys, c.gate);
+            if c.foot != 0 || self.beyond != 0.0 {
+                self.to += self.beyond(p, c);
+            }
         }
         self.count += 1;
         let v_kbd = if self.every == 1 {
@@ -999,6 +1063,27 @@ impl KeyboardPart {
         };
         laps.lap(crate::prof::Part::Keyboard);
         v_kbd
+    }
+
+    /// The keys beyond the string's ends, in volts at the keyboard's output, a tick on
+    /// (decisions.md, "The full MIDI range": the plug-in's extension, not the circuit's). The circuit plays the
+    /// end key, and this adds the keys between it and the key sounding at the output's own
+    /// volts a key, so the scale continues. While the trigger contact is closed it moves as
+    /// the circuit's output does, through R61 and GLIDE onto the hold capacitor C6; while it
+    /// is open, it holds, as C6 does.
+    fn beyond(&mut self, p: &Panel, c: Contacts) -> f64 {
+        let target = self.step * f64::from(c.foot);
+        if c.gate {
+            let k = &self.keyboard.circuit;
+            let tau = (k.r61 + glide_r(p.glide, p.glide_on)) * k.c6;
+            let h = self.every as f64 / self.rate;
+            let a = crate::ulp::exp(-h / tau);
+            self.beyond = target + (self.beyond - target) * a;
+            if (self.beyond - target).abs() < 1e-12 {
+                self.beyond = target;
+            }
+        }
+        self.beyond
     }
 }
 
@@ -1231,7 +1316,12 @@ impl FrontPart {
             };
             let mut tuning = self.tunings[n];
             tuning.tune += p.tune.clamp(-1.0, 1.0) * TUNE_HALF_SPAN;
-            let d = osc_drive_with(osc, &tuning, v_kbd, &buses, op.range);
+            let mut d = osc_drive_with(osc, &tuning, v_kbd, &buses, op.range);
+            if j.detune[n] != 0.0 {
+                // ANALOG (the plug-in's): the oscillator off its calibration, as an offset at
+                // its range tap (R43), which the octave trimmer set to an octave a step.
+                d.inputs[5].v += j.detune[n] / 1200.0 * tuning.octave_step;
+            }
             let i_in = d.apply(&mut self.vcos[n].expo);
             self.vcos[n].set_oversample(oversampling(p.quality).0);
             self.vcos[n].table_on = p.quality == Quality::Potato;
@@ -1309,7 +1399,12 @@ impl FrontPart {
             },
             Input {
                 r: 100e3,
-                v: j.filter.unwrap_or(0.0),
+                v: if j.cutoff == 0.0 {
+                    j.filter.unwrap_or(0.0)
+                } else {
+                    // ANALOG (the plug-in's): the cutoff off its calibration, as volts at R51.
+                    j.filter.unwrap_or(0.0) + j.cutoff * FILTER_VOLTS_PER_OCTAVE
+                },
             },
         ];
         let (i_node, g_node) = self.expo.node(&ins);

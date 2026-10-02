@@ -24,6 +24,7 @@ required-features = ["standalone"]
 
 [dependencies]
 ca72.workspace = true
+libm.workspace = true
 ca72-panel = { path = "../ca72-panel" }
 nih_plug.workspace = true
 # The editor's window and its pixels: the revision nih-plug's own examples use. baseview

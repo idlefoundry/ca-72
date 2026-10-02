@@ -29,6 +29,21 @@ fn threads_give_the_same_samples_as_one() {
             filter: plugged.then(|| 2.0 * libm::sin(tau * 3.0 * t)),
             loudness: plugged.then(|| 5.0 + 4.0 * libm::sin(tau * 7.0 * t)),
             s_trig: plugged && t.rem_euclid(0.2) < 0.01,
+            // The plug-in's ANALOG from 0.9 s: each oscillator and the cutoff moving.
+            detune: if t > 0.9 {
+                [
+                    4.0 * libm::sin(tau * 0.5 * t),
+                    -3.0,
+                    2.0 * libm::cos(tau * 0.7 * t),
+                ]
+            } else {
+                [0.0; 3]
+            },
+            cutoff: if t > 0.9 {
+                0.04 * libm::sin(tau * 0.3 * t)
+            } else {
+                0.0
+            },
         }
     };
     let (mut at, mut block, mut compared) = (0usize, 0usize, 0usize);
@@ -58,7 +73,8 @@ fn threads_give_the_same_samples_as_one() {
             17 => both(&|p| p.quality = Quality::NoCompromises),
             _ => {}
         }
-        let key = |b: usize| [45, 57, 52, 45, 64, 50][b % 6];
+        // (Keys beyond the 44 too: the plug-in's extension of the string.)
+        let key = |b: usize| [45, 57, 52, 45, 64, 50, 30, 100, 57][b % 9];
         if block.is_multiple_of(4) {
             serial.note(key(block / 4), true);
             threaded.note(key(block / 4), true);

@@ -21,15 +21,10 @@ fn tables_match_the_circuit() {
             "TRI[{i}]: ngspice {a}, committed {b}: run `ca72-lab tables`"
         );
     }
-    let out = ca72_lab::vcf::output_stage_table(
-        &spice,
-        &work_dir("tables-check-out"),
-        Solver::default(),
-    )
-    .expect("sweep");
-    use ca72::tables::{
-        OUT_DI, OUT_DI_MIN, OUT_DI_STEP, OUT_DIB, OUT_DIB_MIN, OUT_DIB_STEP,
-    };
+    let out =
+        ca72_lab::vcf::output_stage_table(&spice, &work_dir("tables-check-out"), Solver::default())
+            .expect("sweep");
+    use ca72::tables::{OUT_DI, OUT_DI_MIN, OUT_DI_STEP, OUT_DIB, OUT_DIB_MIN, OUT_DIB_STEP};
     use ca72_lab::vcf::{OUT_W_MIN, OUT_W_STEP};
     assert_eq!((OUT_W_MIN, OUT_W_STEP), (OUT_DI_MIN, OUT_DI_STEP));
     assert_eq!((OUT_W_MIN, OUT_W_STEP), (OUT_DIB_MIN, OUT_DIB_STEP));

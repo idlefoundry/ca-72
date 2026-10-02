@@ -1,6 +1,8 @@
 //! The CA-72 as a VST3 and CLAP plug-in: the circuit model's voice in its real-time quality,
-//! played by MIDI, its EXTERNAL INPUT the side chain, mono on every output channel.
+//! played by MIDI, its EXTERNAL INPUT the side chain; one voice, or with POLY one per note
+//! (up to ten), placed across the stereo output by SPREAD.
 
+pub mod character;
 pub mod editor;
 pub mod engine;
 pub mod params;
@@ -129,6 +131,11 @@ impl Plugin for Ca72 {
         self.engine.set(&self.params.controls());
         self.engine
             .prepare(f64::from(config.sample_rate), self.params.seed());
+        // What this machine plays in real time with POLY at the host's largest block
+        // (decisions.md, "POLY in real time"): shown beside VOICES.
+        let block = config.max_buffer_size.max(1) as usize;
+        let fits = crate::engine::realtime_voices(f64::from(config.sample_rate), block);
+        self.meters.measured(fits, block as u32);
         true
     }
 
@@ -156,9 +163,15 @@ impl Plugin for Ca72 {
                 self.midi(e);
                 next = context.next_event();
             }
-            let y = self.engine.tick(side.map_or(0.0, |s| mono(s, i)));
-            for channel in out.iter_mut() {
-                channel[i] = y;
+            // Left and right (SPREAD's voices placed); on a mono output, the two together.
+            let (l, r) = self.engine.tick_stereo(side.map_or(0.0, |s| mono(s, i)));
+            match &mut out[..] {
+                [left, right, ..] => {
+                    left[i] = l;
+                    right[i] = r;
+                }
+                [only] => only[i] = 0.5 * (l + r),
+                [] => {}
             }
         }
         while let Some(e) = next {
@@ -174,7 +187,7 @@ impl Plugin for Ca72 {
 impl ClapPlugin for Ca72 {
     const CLAP_ID: &'static str = "com.idlefoundry.ca-72";
     const CLAP_DESCRIPTION: Option<&'static str> =
-        Some("A monophonic synthesizer modelled from its circuit");
+        Some("A synthesizer modelled from its circuit, one voice or up to ten");
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_SUPPORT_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_FEATURES: &'static [ClapFeature] = &[

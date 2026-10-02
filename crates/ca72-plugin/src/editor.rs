@@ -1,8 +1,10 @@
 //! The editor: the front panel (`ca72-panel`) in a window of its own (baseview), its frames
-//! shown with softbuffer. Every control operates its parameter through the host, a drag
-//! one gesture (one undo step in hosts that keep them); the POWER switch is the bypass; the
-//! OVERLOAD lamp and the wheels show what the audio thread reports. A click on the name
-//! plate turns it over; the grip at the bottom right corner resizes the window.
+//! shown with softbuffer, and under it the plug-in's own controls (`ca72_panel::strip`: POLY,
+//! VOICES with what plays in real time here, ANALOG and SPREAD). Every control operates its
+//! parameter through the host, a drag one gesture (one undo step in hosts that keep them);
+//! the POWER switch is the bypass; the OVERLOAD lamp and the wheels show what the audio
+//! thread reports. A click on the name plate turns it over; the grip at the panel's bottom
+//! right corner resizes the window.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -14,6 +16,7 @@ use baseview::{
     WindowHandler, WindowOpenOptions, WindowScalePolicy,
 };
 use ca72_panel::art::{self, PLATE_TURN, POWER};
+use ca72_panel::strip::{self, Amount, STRIP_H, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Target, interact};
 use keyboard_types::Modifiers;
 use nih_plug::prelude::*;
@@ -35,9 +38,9 @@ const SCROLL_REST: Duration = Duration::from_millis(400);
 /// A trackpad's travel that makes a notch, in pixels.
 const NOTCH: f64 = 40.0;
 
-/// The editor's height at `width`, in the panel's proportions.
+/// The editor's height at `width`: the panel in its proportions, and the strip under it.
 pub fn height_for(width: u32) -> u32 {
-    (f64::from(width) * art::H / art::W).round() as u32
+    (f64::from(width) * (art::H + STRIP_H) / art::W).round() as u32
 }
 
 fn clamp_width(width: u32) -> u32 {
@@ -48,17 +51,22 @@ fn clamp_width(width: u32) -> u32 {
 /// (logical pixels), its height kept within the same share.
 fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
     screen.map_or(DEFAULT_WIDTH, |(w, h)| {
-        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / art::H);
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / (art::H + STRIP_H));
         clamp_width(w.round() as u32)
     })
 }
 
-/// What the audio thread reports to the editor after each block.
+/// What the audio thread reports to the editor after each block, and what the plug-in
+/// measured of this machine when it was activated.
 #[derive(Debug)]
 pub struct Meters {
     overload: AtomicU32,
     bend: AtomicU32,
     modulation: AtomicU32,
+    /// How many POLY voices play in real time here (u32::MAX: not measured), at the host's
+    /// largest block, frames.
+    fits: AtomicU32,
+    block: AtomicU32,
 }
 
 impl Default for Meters {
@@ -67,11 +75,26 @@ impl Default for Meters {
             overload: AtomicU32::new(0.0f32.to_bits()),
             bend: AtomicU32::new(0.5f32.to_bits()),
             modulation: AtomicU32::new(0.0f32.to_bits()),
+            fits: AtomicU32::new(u32::MAX),
+            block: AtomicU32::new(0),
         }
     }
 }
 
 impl Meters {
+    /// How many POLY voices this machine plays in real time in blocks of `block` frames
+    /// (`crate::engine::realtime_voices`).
+    pub fn measured(&self, fits: u32, block: u32) {
+        self.block.store(block, Ordering::Relaxed);
+        self.fits.store(fits, Ordering::Relaxed);
+    }
+
+    /// What [`Meters::measured`] last gave: the voices and the block.
+    pub fn fits(&self) -> Option<(u32, u32)> {
+        let n = self.fits.load(Ordering::Relaxed);
+        (n != u32::MAX).then(|| (n, self.block.load(Ordering::Relaxed)))
+    }
+
     /// The OVERLOAD lamp (0..1) and a MIDI keyboard's wheels as the panel draws them.
     pub fn publish(&self, overload: f32, (bend, modulation): (f32, f32)) {
         self.overload.store(overload.to_bits(), Ordering::Relaxed);
@@ -300,6 +323,12 @@ struct Editing {
     width: u32,
     renderer: Renderer,
     scene: Scene,
+    /// The strip under the panel: its renderer and scene, an amount's slider being dragged,
+    /// and each amount's last value but 0 (its switch turns it back on there).
+    strip: StripRenderer,
+    strip_scene: StripScene,
+    sliding: Option<Amount>,
+    last: [f32; 2],
     /// The pointer, in logical pixels.
     pointer: (f64, f64),
     hover: Option<Target>,
@@ -336,9 +365,8 @@ impl PanelWindow {
     }
 
     fn present(&mut self) {
-        let frame = self.editing.renderer.frame();
-        self.surface
-            .present(self.physical, frame.width(), frame.height(), frame.data());
+        let (panel, strip) = (self.editing.renderer.frame(), self.editing.strip.frame());
+        self.surface.present(self.physical, &[panel, strip]);
     }
 }
 
@@ -359,6 +387,10 @@ impl Editing {
             width,
             renderer: Renderer::new(f64::from(physical_width) / art::W, dpr),
             scene: Scene::default(),
+            strip: StripRenderer::new(f64::from(physical_width) / art::W),
+            strip_scene: StripScene::default(),
+            sliding: None,
+            last: [0.5; 2],
             pointer: (0.0, 0.0),
             hover: None,
             drag: None,
@@ -405,8 +437,69 @@ impl Editing {
         s.end_set_parameter(&self.params.bypass);
     }
 
+    /// An amount's parameter (ANALOG, SPREAD).
+    fn amount(&self, a: Amount) -> &FloatParam {
+        match a {
+            Amount::Analog => &self.params.analog,
+            Amount::Spread => &self.params.spread,
+        }
+    }
+
+    /// VOICES stepped by `by`, a gesture of its own.
+    fn step_voices(&self, by: i32) {
+        let s = self.setter();
+        let p = &self.params.voices;
+        s.begin_set_parameter(p);
+        s.set_parameter(p, p.value() + by);
+        s.end_set_parameter(p);
+    }
+
+    /// A press on the strip under the panel, at (`x`, `y`) in its units.
+    fn strip_press(&mut self, x: f64, y: f64) {
+        let Some(target) = strip::hit(x, y) else {
+            return;
+        };
+        if let StripTarget::Switch(a) = target {
+            // Off: 0, the amount kept; on: back to it (half way if it never was).
+            let now = self.amount(a).unmodulated_normalized_value();
+            let to = if now > 0.0 {
+                self.last[a as usize] = now;
+                0.0
+            } else {
+                self.last[a as usize]
+            };
+            let (s, p) = (self.setter(), self.amount(a));
+            s.begin_set_parameter(p);
+            s.set_parameter_normalized(p, to);
+            s.end_set_parameter(p);
+            return;
+        }
+        let s = self.setter();
+        match target {
+            StripTarget::Poly => {
+                let p = &self.params.poly;
+                s.begin_set_parameter(p);
+                s.set_parameter(p, !p.value());
+                s.end_set_parameter(p);
+            }
+            StripTarget::Fewer => self.step_voices(-1),
+            StripTarget::More => self.step_voices(1),
+            StripTarget::Slider(a) => {
+                let p = self.amount(a);
+                s.begin_set_parameter(p);
+                s.set_parameter_normalized(p, strip::slider_value(a, x) as f32);
+                self.sliding = Some(a);
+            }
+            StripTarget::Switch(_) => {}
+        }
+    }
+
     fn press(&mut self, modifiers: Modifiers) {
         let (x, y) = self.in_drawing(self.pointer);
+        if y >= art::H {
+            self.strip_press(x, y - art::H);
+            return;
+        }
         let Some(target) = interact::hit(self.renderer.layout(), x, y) else {
             return;
         };
@@ -463,9 +556,20 @@ impl Editing {
         }
         let fine = modifiers.contains(Modifiers::SHIFT);
         let pointer = self.pointer;
+        if let Some(a) = self.sliding {
+            let (x, _) = self.in_drawing(pointer);
+            let p = self.amount(a);
+            self.setter()
+                .set_parameter_normalized(p, strip::slider_value(a, x) as f32);
+            return None;
+        }
         let Some(d) = &mut self.drag else {
             let (x, y) = self.in_drawing(pointer);
-            self.hover = interact::hit(self.renderer.layout(), x, y);
+            (self.hover, self.strip_scene.hover) = if y >= art::H {
+                (None, strip::hit(x, y - art::H))
+            } else {
+                (interact::hit(self.renderer.layout(), x, y), None)
+            };
             return None;
         };
         if (pointer.0 - d.from.0).abs() + (pointer.1 - d.from.1).abs() > 3.0 {
@@ -499,6 +603,10 @@ impl Editing {
 
     fn released(&mut self) {
         if self.resizing.take().is_some() {
+            return;
+        }
+        if let Some(a) = self.sliding.take() {
+            self.setter().end_set_parameter(self.amount(a));
             return;
         }
         let Some(d) = self.drag.take() else {
@@ -538,10 +646,20 @@ impl Editing {
     }
 
     fn scrolled(&mut self, delta: ScrollDelta, modifiers: Modifiers) {
-        if self.drag.is_some() {
+        if self.drag.is_some() || self.sliding.is_some() {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
+        if y >= art::H {
+            // VOICES steps with the wheel, a notch a voice.
+            if let (Some(StripTarget::Fewer | StripTarget::More), ScrollDelta::Lines { y: dy, .. }) =
+                (strip::hit(x, y - art::H), delta)
+                && dy != 0.0
+            {
+                self.step_voices(if dy > 0.0 { 1 } else { -1 });
+            }
+            return;
+        }
         let Some(Target::Control(i) | Target::Legend(i, _)) =
             interact::hit(self.renderer.layout(), x, y)
         else {
@@ -665,6 +783,12 @@ impl Editing {
             }
         };
         self.scene.tip = self.tip();
+        let p = &self.params;
+        self.strip_scene.poly = p.poly.value();
+        self.strip_scene.voices = u32::try_from(p.voices.value()).unwrap_or(4);
+        self.strip_scene.fits = self.meters.fits();
+        self.strip_scene.analog = f64::from(p.analog.unmodulated_normalized_value());
+        self.strip_scene.spread = f64::from(p.spread.unmodulated_normalized_value());
     }
 
     /// The tip: over the control operated, else over the one under the pointer.
@@ -716,7 +840,9 @@ impl Editing {
             self.end_scroll();
         }
         self.update_scene();
-        self.renderer.render(&self.scene)
+        let panel = self.renderer.render(&self.scene);
+        let strip = self.strip.render(&self.strip_scene);
+        panel || strip
     }
 
     /// The pointer's events: a width the window is to be resized to, if the grip took it
@@ -768,6 +894,7 @@ impl WindowHandler for PanelWindow {
                 e.width = info.logical_size().width.round() as u32;
                 e.renderer
                     .rescale(f64::from(self.physical.0) / art::W, e.dpr);
+                e.strip.rescale(f64::from(self.physical.0) / art::W);
                 self.surface.resize(self.physical);
                 self.shown = false;
                 EventStatus::Captured
@@ -1004,27 +1131,38 @@ mod window {
             }
         }
 
-        /// Shows a frame (premultiplied RGBA, opaque, `fw` by `fh`) in a window of `size`
-        /// pixels, from its top left corner.
-        pub fn present(&mut self, (w, h): (u32, u32), fw: u32, fh: u32, rgba: &[u8]) {
+        /// Shows frames (premultiplied RGBA, opaque), one under the other from the top left
+        /// corner, in a window of `size` pixels.
+        pub fn present(&mut self, (w, h): (u32, u32), frames: &[&ca72_panel::Pixmap]) {
             let Some((_, surface)) = &mut self.inner else {
                 return;
             };
             let Ok(mut buffer) = surface.buffer_mut() else {
                 return;
             };
-            let (w, h, fw) = (w as usize, h as usize, fw as usize);
+            let (w, h) = (w as usize, h as usize);
             if buffer.len() < w * h {
                 return;
             }
+            let mut frames = frames.iter();
+            let mut frame = frames.next();
+            let mut top = 0usize;
             for y in 0..h {
+                while let Some(f) = frame
+                    && y >= top + f.height() as usize
+                {
+                    top += f.height() as usize;
+                    frame = frames.next();
+                }
                 let row = &mut buffer[y * w..(y + 1) * w];
                 for (x, out) in row.iter_mut().enumerate() {
-                    *out = if x < fw && y < fh as usize {
-                        let p = &rgba[(y * fw + x) * 4..(y * fw + x) * 4 + 4];
-                        (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2])
-                    } else {
-                        0x003b_2213
+                    *out = match frame {
+                        Some(f) if x < f.width() as usize => {
+                            let (fw, fy) = (f.width() as usize, y - top);
+                            let p = &f.data()[(fy * fw + x) * 4..(fy * fw + x) * 4 + 4];
+                            (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2])
+                        }
+                        _ => 0x003b_2213,
                     };
                 }
             }
@@ -1335,7 +1473,8 @@ mod tests {
 
     #[test]
     fn the_editor_keeps_the_panels_proportions() {
-        assert_eq!(height_for(1720), 529);
+        // The panel's 529 and the strip's 48 under it.
+        assert_eq!(height_for(1720), 577);
         assert_eq!(clamp_width(10), MIN_WIDTH);
         assert_eq!(clamp_width(99_999), MAX_WIDTH);
     }
@@ -1345,14 +1484,117 @@ mod tests {
         // A 14-inch MacBook Pro's screen less the menu bar; a 34-inch ultrawide's.
         assert_eq!(fitted_width(Some((1512.0, 949.0))), 1210);
         assert_eq!(fitted_width(Some((3440.0, 1400.0))), 2752);
-        // Short and wide: the height's share sets it.
-        assert_eq!(fitted_width(Some((3840.0, 800.0))), 2082);
-        assert_eq!(height_for(2082), 640);
+        // Short and wide: the height's share sets it (the panel and the strip under it).
+        assert_eq!(fitted_width(Some((3840.0, 800.0))), 1908);
+        assert_eq!(height_for(1908), 640);
         assert_eq!(fitted_width(None), DEFAULT_WIDTH);
         assert_eq!(
             Ca72Params::default().editor_width.load(Ordering::Relaxed),
             0
         );
+    }
+
+    /// A point of the strip under the panel (its units) in the window.
+    fn on_strip(e: &Editing, (x, y): (f64, f64)) -> Point {
+        at(e, (x, art::H + y))
+    }
+
+    /// Where a strip target is, found by scanning its middle row.
+    fn strip_at(target: StripTarget) -> (f64, f64) {
+        let y = STRIP_H / 2.0;
+        let xs: Vec<f64> = (0..3438)
+            .map(f64::from)
+            .filter(|&x| strip::hit(x, y) == Some(target))
+            .collect();
+        assert!(!xs.is_empty(), "{target:?} not found");
+        (xs[xs.len() / 2], y)
+    }
+
+    /// POLY, VOICES, ANALOG and SPREAD from the strip under the panel: each its own
+    /// parameter, a click one gesture, a slider's drag one gesture; an amount's switch turns
+    /// it off and back on at its amount.
+    #[test]
+    fn the_strip_operates_poly_voices_analog_and_spread() {
+        let (mut e, host, params) = editing();
+        let p = on_strip(&e, strip_at(StripTarget::Poly));
+        click(&mut e, p);
+        let poly = params.poly.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(poly), Call::Set(poly, 1.0), Call::End(poly)]
+        );
+        let voices = params.voices.as_ptr();
+        let p = on_strip(&e, strip_at(StripTarget::More));
+        click(&mut e, p);
+        // (4 to 5 of 2..10.)
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(voices),
+                Call::Set(voices, 0.375),
+                Call::End(voices)
+            ]
+        );
+        let p = on_strip(&e, strip_at(StripTarget::Fewer));
+        e.mouse(MouseEvent::CursorMoved {
+            position: p,
+            modifiers: Modifiers::empty(),
+        });
+        e.mouse(MouseEvent::WheelScrolled {
+            delta: ScrollDelta::Lines { x: 0.0, y: -1.0 },
+            modifiers: Modifiers::empty(),
+        });
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(voices),
+                Call::Set(voices, 0.125),
+                Call::End(voices)
+            ]
+        );
+        // ANALOG's slider: pressed at its middle, dragged to its end, one gesture.
+        let analog = params.analog.as_ptr();
+        let (x, y) = strip_at(StripTarget::Slider(Amount::Analog));
+        let (from, to) = (on_strip(&e, (x, y)), on_strip(&e, (x + 2000.0, y)));
+        go(&mut e, from);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        go(&mut e, to);
+        e.mouse(MouseEvent::ButtonReleased {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let calls = host.take();
+        assert_eq!(calls.first(), Some(&Call::Begin(analog)));
+        assert_eq!(
+            &calls[calls.len() - 2..],
+            &[Call::Set(analog, 1.0), Call::End(analog)]
+        );
+        assert!(
+            calls.iter().all(|c| match c {
+                Call::Begin(p) | Call::Set(p, _) | Call::End(p) => *p == analog,
+            }),
+            "{calls:?}"
+        );
+        // SPREAD's switch: on from 0 at half way (it never was), off again keeping it.
+        let spread = params.spread.as_ptr();
+        let p = on_strip(&e, strip_at(StripTarget::Switch(Amount::Spread)));
+        click(&mut e, p);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(spread),
+                Call::Set(spread, 0.5),
+                Call::End(spread)
+            ]
+        );
+        // The strip draws what the parameters hold and what plays in real time here.
+        e.meters.measured(6, 512);
+        e.update_scene();
+        assert_eq!(e.strip_scene.fits, Some((6, 512)));
+        assert!(e.draw());
     }
 
     #[test]

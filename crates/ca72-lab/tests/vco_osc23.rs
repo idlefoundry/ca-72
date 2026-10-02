@@ -93,10 +93,7 @@ fn oscillators_2_and_3_match_the_manual_and_the_circuit() {
             (m5 - ca72::expo::M5_LINE).abs() < 5e-9,
             "the -5 V line {m5}"
         );
-        assert!(
-            (m4 - ca72::expo::M4_LINE).abs() < 5e-6,
-            "the -4V line {m4}"
-        );
+        assert!((m4 - ca72::expo::M4_LINE).abs() < 5e-6, "the -4V line {m4}");
         assert!(
             (summer - ca72::expo::SUMMER_OFFSET).abs() < 0.5e-6,
             "IC6's offset {summer}"

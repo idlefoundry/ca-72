@@ -348,6 +348,7 @@ dependencies = [
  "ca72-panel",
  "cocoa",
  "keyboard-types",
+ "libm",
  "nih_plug",
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",

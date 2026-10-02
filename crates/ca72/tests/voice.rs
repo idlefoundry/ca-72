@@ -117,8 +117,7 @@ fn the_lowest_key_sounds_and_contours_are_not_retriggered() {
             _ if i == (0.7 * SR) as usize => v.note(52, true),
             // The lowest released: the next lowest, E, sounds.
             _ if i == (0.9 * SR) as usize => v.note(45, false),
-            // A note outside the 44 keys is ignored.
-            _ if i == (1.0 * SR) as usize => v.note(20, true),
+            // (Notes beyond the 44 keys: tests/midi_range.rs.)
             _ => {}
         }
         out.push(v.tick());

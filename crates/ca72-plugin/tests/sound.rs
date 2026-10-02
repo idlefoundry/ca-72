@@ -170,3 +170,111 @@ fn reset_controllers_returns_the_wheels() {
     e.event(Event::ResetControllers);
     assert_eq!(e.wheels(), (0.0, 0.0));
 }
+
+/// POLY off with ANALOG and SPREAD at 0 is the one voice as the plug-in played it before
+/// POLY existed: the engine's output, sample for sample, a voice's own (its noise seeded
+/// with the instance's seed, in Potato) times MAIN OUTPUT's gain.
+#[test]
+fn poly_off_is_the_one_voice_as_before() {
+    use ca72::voice::{Quality, Voice};
+    let c = Controls::default();
+    let mut e = ready(&c);
+    let mut v = Voice::prototype(RATE);
+    v.set_seed(1);
+    v.panel = Panel {
+        quality: Quality::Potato,
+        ..Panel::default()
+    };
+    let gain = output_gain(c.volume, c.main_output);
+    let keys = [
+        (0, 45, true),
+        (9_000, 57, true),
+        (20_000, 45, false),
+        (30_000, 57, false),
+    ];
+    let mut k = 0;
+    for i in 0..40_000 {
+        while k < keys.len() && keys[k].0 == i {
+            let (_, key, on) = keys[k];
+            e.event(Event::Note { key, on });
+            v.note(i32::from(key), on);
+            k += 1;
+        }
+        let got = e.tick(0.0);
+        let want = (v.tick_in(0.0) * gain * 1.0) as f32;
+        assert_eq!(
+            got.to_bits(),
+            want.to_bits(),
+            "sample {i}: {got} against {want}"
+        );
+    }
+}
+
+/// POLY: a chord plays on its own voices (louder than one; the one voice plays its lowest
+/// key), and with SPREAD at 100 % they part left and right; one voice stays in the centre.
+#[test]
+fn poly_plays_a_chord_and_spread_parts_it() {
+    let chord = |c: &Controls| {
+        let mut e = ready(c);
+        for key in [45, 52, 57] {
+            e.event(Event::Note { key, on: true });
+        }
+        let (mut l, mut r) = (Vec::new(), Vec::new());
+        for _ in 0..(0.6 * RATE) as usize {
+            let (a, b) = e.tick_stereo(0.0);
+            l.push(f64::from(a));
+            r.push(f64::from(b));
+        }
+        (l, r)
+    };
+    let (ml, mr) = chord(&Controls::default());
+    let poly = Controls {
+        poly: true,
+        voices: 3,
+        ..Controls::default()
+    };
+    let (pl, pr) = chord(&poly);
+    let tail = |x: &[f64]| rms(&x[(0.3 * RATE) as usize..]);
+    assert_eq!(ml, mr, "one voice is in the centre");
+    assert_eq!(pl, pr, "POLY without SPREAD is in the centre");
+    assert!(
+        tail(&pl) > 1.4 * tail(&ml),
+        "{} against {}",
+        tail(&pl),
+        tail(&ml)
+    );
+    let (sl, sr) = chord(&Controls {
+        spread: 1.0,
+        ..poly
+    });
+    let apart: f64 = sl.iter().zip(&sr).map(|(a, b)| (a - b).abs()).sum();
+    assert!(apart > 1.0, "SPREAD left them together");
+    let (one_l, one_r) = chord(&Controls {
+        spread: 1.0,
+        ..Controls::default()
+    });
+    assert_eq!(one_l, one_r, "SPREAD moved the one voice");
+    assert_eq!(one_l, ml, "SPREAD changed the one voice");
+}
+
+/// Every MIDI note plays, in both modes, where the keyboard's scale continues.
+#[test]
+fn every_midi_note_plays_in_both_modes() {
+    for poly in [false, true] {
+        let mut c = Controls {
+            poly,
+            ..Controls::default()
+        };
+        // (The filter open; MIDI 95, 1976 Hz, the highest this pitch detector reads.)
+        c.panel.cutoff = 1.0;
+        for key in [20u8, 95] {
+            let mut e = ready(&c);
+            let f = pitch_of(&mut e, key);
+            let want = 440.0 * 2f64.powf((f64::from(key) - 69.0) / 12.0);
+            assert!(
+                cents(f, want).abs() < 6.0,
+                "POLY {poly}: MIDI {key} at {f} Hz"
+            );
+        }
+    }
+}

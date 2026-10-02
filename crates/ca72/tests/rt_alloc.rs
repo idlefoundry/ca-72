@@ -95,6 +95,9 @@ fn the_voice_does_not_allocate_while_it_plays() {
             filter: Some(3.0 * (tau * 0.7 * t).sin()),
             loudness: Some(4.0 + 4.0 * (tau * 5.0 * t).sin()),
             s_trig: t.rem_euclid(0.35) < 0.005,
+            // The plug-in's ANALOG moving too.
+            detune: [3.0 * (tau * 0.3 * t).sin(), -2.0, 1.5],
+            cutoff: 0.03 * (tau * 0.2 * t).sin(),
         });
     }
     ARMED.store(false, Ordering::SeqCst);
@@ -150,6 +153,8 @@ fn the_voice_on_threads_does_not_allocate_while_it_plays() {
                     filter: Some(3.0 * (tau * 0.7 * t).sin()),
                     loudness: Some(4.0 + 4.0 * (tau * 5.0 * t).sin()),
                     s_trig: t.rem_euclid(0.35) < 0.005,
+                    detune: [3.0 * (tau * 0.3 * t).sin(), -2.0, 1.5],
+                    cutoff: 0.03 * (tau * 0.2 * t).sin(),
                 }
             },
             |_, y| sink += y,

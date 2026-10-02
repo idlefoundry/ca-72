@@ -392,6 +392,7 @@ fn jacks_at(t: f64) -> Jacks {
         filter: Some(3.0 * (tau * 0.7 * t).sin()),
         loudness: Some(4.0 + 4.0 * (tau * 5.0 * t).sin()),
         s_trig: t.rem_euclid(0.35) < 0.005,
+        ..Jacks::default()
     }
 }
 

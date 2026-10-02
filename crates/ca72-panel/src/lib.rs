@@ -8,9 +8,12 @@ pub mod controls;
 pub mod fonts;
 pub mod interact;
 pub mod render;
+pub mod strip;
 mod svg;
 
 pub use art::{H, Layout, PLATE_NAMES, W};
 pub use controls::{CONTROLS, Control, Kind};
 pub use interact::Target;
 pub use render::{Renderer, Scene};
+/// The frames' type.
+pub use resvg::tiny_skia::Pixmap;

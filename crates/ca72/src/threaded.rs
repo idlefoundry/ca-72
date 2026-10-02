@@ -558,7 +558,7 @@ impl Threaded {
         })
     }
 
-    /// A MIDI note pressed or released (notes outside the 44 keys are ignored).
+    /// A MIDI note (0 to 127) pressed or released ([`Voice::note`]).
     pub fn note(&mut self, midi: i32, on: bool) {
         self.keys.note(midi, on);
     }

@@ -513,10 +513,7 @@ fn the_loudness_jack_overdrive_matches_the_circuit() {
             for _ in 0..200 {
                 rt.tick(0.0, cont);
             }
-            let unsettled: u64 = ca72::unconverged::take()
-                .iter()
-                .map(|(_, n)| n)
-                .sum();
+            let unsettled: u64 = ca72::unconverged::take().iter().map(|(_, n)| n).sum();
             // As the voice runs it with the jack plugged: the bias solved every sample.
             let gain = rt_gain_every(&b, 1000.0, Some(1));
             let rel = |a: f64, b: f64| (a - b).abs() / b.abs().max(1e-6);

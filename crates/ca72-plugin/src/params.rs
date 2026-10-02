@@ -1,5 +1,5 @@
 //! The plug-in's parameters: the front panel's and left hand controller's controls in their
-//! dials' units, and MIDI BEND RANGE. Their ids are stable (a saved session's settings are
+//! dials' units, MIDI BEND RANGE, and the plug-in's own POLY, VOICES, ANALOG and SPREAD. Their ids are stable (a saved session's settings are
 //! found by them): never rename one.
 
 use std::hash::{BuildHasher, Hasher};
@@ -11,7 +11,7 @@ use ca72::tuning::Range;
 use ca72::voice::{ContourKnobs, OscPanel, Panel, Quality, Waveform};
 use nih_plug::prelude::*;
 
-use crate::engine::Controls;
+use crate::engine::{Controls, POLY_VOICES};
 
 /// RANGE's positions.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +250,35 @@ pub struct Ca72Params {
     /// semitones: up to the wheel's whole travel.
     #[id = "midi_bend_range"]
     pub midi_bend_range: FloatParam,
+
+    // The plug-in's own, not the instrument's (decisions.md, "POLY", "ANALOG and SPREAD").
+    /// POLY: one instrument per voice (VOICES of them); off, the one with its keyboard
+    /// circuit's lowest-note priority.
+    #[id = "poly"]
+    pub poly: BoolParam,
+    /// VOICES: how many POLY plays, 2 to 10 (kept while POLY is off).
+    #[id = "voices"]
+    pub voices: IntParam,
+    /// ANALOG: each voice its own parts and its oscillators drifting, 0 to 100 %.
+    #[id = "analog"]
+    pub analog: FloatParam,
+    /// SPREAD: POLY's voices across the stereo field, 0 to 100 %.
+    #[id = "spread"]
+    pub spread: FloatParam,
+}
+
+/// An amount, 0 to 100 %.
+fn percent(name: &str) -> FloatParam {
+    FloatParam::new(
+        name,
+        0.0,
+        FloatRange::Linear {
+            min: 0.0,
+            max: 100.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_rounded(0))
 }
 
 /// A knob over `lo..hi` in its dial's units.
@@ -323,6 +352,17 @@ impl Default for Ca72Params {
             mod_wheel: dial("Modulation Wheel", 0.0, 1.0, 0.0),
             midi_bend_range: dial("MIDI Bend Range", 0.0, PITCH_WHEEL_SEMITONES as f32, 2.0)
                 .with_unit(" semitones"),
+            poly: BoolParam::new("Poly", false),
+            voices: IntParam::new(
+                "Voices",
+                POLY_VOICES.1 as i32,
+                IntRange::Linear {
+                    min: POLY_VOICES.0 as i32,
+                    max: POLY_VOICES.2 as i32,
+                },
+            ),
+            analog: percent("Analog"),
+            spread: percent("Spread"),
         }
     }
 }
@@ -409,6 +449,10 @@ impl Ca72Params {
             main_output: self.main_output.value(),
             bend_range: f64::from(self.midi_bend_range.value()),
             power: !self.bypass.value(),
+            poly: self.poly.value(),
+            voices: usize::try_from(self.voices.value()).unwrap_or(POLY_VOICES.1),
+            analog: f64::from(self.analog.value()) / 100.0,
+            spread: f64::from(self.spread.value()) / 100.0,
         }
     }
 }

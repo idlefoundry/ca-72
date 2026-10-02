@@ -218,12 +218,8 @@ fn shapers(spice: &Ngspice, rest: &[String]) -> Res {
 fn tables(spice: &Ngspice) -> Res {
     let tri = vco::triangle_table(spice, &work_dir("tables"), Solver::default())
         .map_err(|e| e.to_string())?;
-    let out = ca72_lab::vcf::output_stage_table(
-        spice,
-        &work_dir("tables-out"),
-        Solver::default(),
-    )
-    .map_err(|e| e.to_string())?;
+    let out = ca72_lab::vcf::output_stage_table(spice, &work_dir("tables-out"), Solver::default())
+        .map_err(|e| e.to_string())?;
     let path = circuits_dir().join("../crates/ca72/src/tables.rs");
     std::fs::write(&path, vco::tables_source(&tri, &out, &spice.version))
         .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -564,8 +560,7 @@ fn hifi(rest: &[String]) -> Res {
                 failed.push(format!("{name}: solves stopped short"));
             }
         }
-        let m =
-            ca72_lab::quality::measure(&nc.probes, &hq.probes, &nc.samples, &held.samples);
+        let m = ca72_lab::quality::measure(&nc.probes, &hq.probes, &nc.samples, &held.samples);
         let at = |i: usize| i as f64 / 48_000.0;
         let secs = nc.samples.len() as f64 / 48_000.0;
         println!(
@@ -587,8 +582,7 @@ fn hifi(rest: &[String]) -> Res {
         );
         // (The audio allowing for a delay, and by its spectra: for modes whose resamplers
         // differ, where a plain subtraction measures the shift.)
-        let (lag, dd) =
-            ca72_lab::quality::delayed_difference(&held.samples, &nc.samples, 32);
+        let (lag, dd) = ca72_lab::quality::delayed_difference(&held.samples, &nc.samples, 32);
         let spectra = ca72_lab::quality::spectral_difference(&held.samples, &nc.samples);
         println!(
             "  {name}: the audio {lag:+} samples late, then within {dd:.2e} ({:.1} dBFS); spectra {}",

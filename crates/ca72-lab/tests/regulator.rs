@@ -110,8 +110,9 @@ fn the_regulator_holds_its_rails() {
         lab::regulator_ac(&spice, &work, &b, RegulatorAc::LineP, (120.0, 120.0, 1), s).expect("ac");
     let ln =
         lab::regulator_ac(&spice, &work, &b, RegulatorAc::LineN, (120.0, 120.0, 1), s).expect("ac");
-    let first =
-        |p: &ca72_spice::Plot, node: &str| mag(p.complex_vec(&format!("v({node})")).expect("ac")[0]);
+    let first = |p: &ca72_spice::Plot, node: &str| {
+        mag(p.complex_vec(&format!("v({node})")).expect("ac")[0])
+    };
     let db = |x: f64| 20.0 * x.log10();
     let (pp, pn, np, nn) = (
         first(&lp, "outp"),
