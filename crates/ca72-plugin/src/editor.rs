@@ -51,6 +51,12 @@ pub fn height_for(width: u32) -> u32 {
     (f64::from(width) * (art::H + STRIP_H + BAR_H) / art::W).round() as u32
 }
 
+/// What the presets' drawer adds to the window's height at `width` while it is open below
+/// the bar.
+pub fn drawer_height(width: u32) -> u32 {
+    (f64::from(width) * DRAWER_H / art::W).round() as u32
+}
+
 fn clamp_width(width: u32) -> u32 {
     width.clamp(MIN_WIDTH, MAX_WIDTH)
 }
@@ -215,6 +221,8 @@ pub struct Ca72Editor {
     /// The host's scale (f32 bits; 0 none given: the system's, as on macOS).
     scale: AtomicU32,
     open: Arc<AtomicBool>,
+    /// The window grown for the presets' drawer below the bar.
+    grown: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for Ca72Editor {
@@ -232,6 +240,7 @@ impl Ca72Editor {
             meters,
             scale: AtomicU32::new(0),
             open: Arc::new(AtomicBool::new(false)),
+            grown: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -251,6 +260,9 @@ impl Editor for Ca72Editor {
         let scale = self.host_scale();
         let params = Arc::clone(&self.params);
         let meters = Arc::clone(&self.meters);
+        // The drawer is shut when the editor opens.
+        self.grown.store(false, Ordering::Relaxed);
+        let grown = Arc::clone(&self.grown);
         let window = Window::open_parented(
             &window::Parent(parent),
             WindowOpenOptions {
@@ -266,6 +278,7 @@ impl Editor for Ca72Editor {
                     context,
                     params,
                     meters,
+                    grown,
                     width,
                     f64::from(scale.unwrap_or(1.0)),
                 )
@@ -280,7 +293,12 @@ impl Editor for Ca72Editor {
             0 => fitted_width(screen::usable(self.host_scale().map(f64::from))),
             w => clamp_width(w),
         };
-        (width, height_for(width))
+        let drawer = if self.grown.load(Ordering::Relaxed) {
+            drawer_height(width)
+        } else {
+            0
+        };
+        (width, height_for(width) + drawer)
     }
 
     fn set_scale_factor(&self, factor: f32) -> bool {
@@ -327,6 +345,8 @@ struct Scroll {
 struct PanelWindow {
     surface: window::Surface,
     physical: (u32, u32),
+    /// Its size in logical pixels, as last set or reported.
+    logical: (u32, u32),
     shown: bool,
     editing: Editing,
 }
@@ -353,6 +373,11 @@ struct Editing {
     drawer: DrawerRenderer,
     pub(crate) browser: Browser,
     composed: Option<ca72_panel::Pixmap>,
+    /// The window grown for the drawer below the bar (the editor's `size` reads it), the
+    /// drawer's frame while it slides down there, and a size asked of the window.
+    grown: Arc<AtomicBool>,
+    slid: Option<ca72_panel::Pixmap>,
+    resizing_window: bool,
     /// The pointer, in logical pixels.
     pointer: (f64, f64),
     hover: Option<Target>,
@@ -372,6 +397,7 @@ impl PanelWindow {
         context: Arc<dyn GuiContext>,
         params: Arc<Ca72Params>,
         meters: Arc<Meters>,
+        grown: Arc<AtomicBool>,
         width: u32,
         dpr: f64,
     ) -> Self {
@@ -383,15 +409,15 @@ impl PanelWindow {
         PanelWindow {
             surface,
             physical,
+            logical: (width, height_for(width)),
             shown: false,
             editing: Editing::new(
                 context,
                 params,
                 meters,
-                width,
-                physical.0,
-                dpr,
+                (width, physical.0, dpr),
                 Library::shared(),
+                grown,
             ),
         }
     }
@@ -400,6 +426,8 @@ impl PanelWindow {
     fn resized(&mut self, info: &WindowInfo) {
         let size = info.physical_size();
         let physical = (size.width.max(1), size.height.max(1));
+        let logical = info.logical_size();
+        self.logical = (logical.width.round() as u32, logical.height.round() as u32);
         if physical == self.physical && info.scale() == self.editing.dpr && self.shown {
             return;
         }
@@ -413,23 +441,42 @@ impl PanelWindow {
         self.shown = false;
     }
 
+    /// The window resized to what the editor asks (the grip, the drawer below the bar),
+    /// when it asked: on macOS baseview reports no resize of its own making, so the frames
+    /// follow here; elsewhere the report that follows finds the size already taken.
+    fn follow(&mut self, window: &mut Window<'_>) {
+        if !std::mem::take(&mut self.editing.resizing_window) {
+            return;
+        }
+        let want = (self.editing.width, self.editing.window_height());
+        if want != self.logical {
+            let size = Size::new(f64::from(want.0), f64::from(want.1));
+            window.resize(size);
+            self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
+        }
+    }
+
     fn present(&mut self) {
         let e = &self.editing;
         let panel = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
-        self.surface
-            .present(self.physical, &[panel, e.strip.frame(), e.bar.frame()]);
+        let mut frames = vec![panel, e.strip.frame(), e.bar.frame()];
+        if e.grown.load(Ordering::Relaxed) && e.browser.open {
+            frames.push(e.slid.as_ref().unwrap_or_else(|| e.drawer.frame()));
+        }
+        self.surface.present(self.physical, &frames);
     }
 }
 
 impl Editing {
+    /// An editor `width` logical pixels wide, `physical_width` physical ones, `dpr`
+    /// physical pixels a logical one.
     fn new(
         context: Arc<dyn GuiContext>,
         params: Arc<Ca72Params>,
         meters: Arc<Meters>,
-        width: u32,
-        physical_width: u32,
-        dpr: f64,
+        (width, physical_width, dpr): (u32, u32, f64),
         library: Library,
+        grown: Arc<AtomicBool>,
     ) -> Self {
         Editing {
             context,
@@ -447,6 +494,9 @@ impl Editing {
             drawer: DrawerRenderer::new(f64::from(physical_width) / art::W),
             browser: Browser::new(library),
             composed: None,
+            grown,
+            slid: None,
+            resizing_window: false,
             pointer: (0.0, 0.0),
             hover: None,
             drag: None,
@@ -481,21 +531,73 @@ impl Editing {
         (x * k, y * k)
     }
 
-    /// The drawer's top now (drawing units), while it shows.
-    fn drawer_top(&self) -> Option<f64> {
+    /// Whether the drawer is below the bar (the window grown), else over the panel.
+    fn below(&self) -> bool {
+        self.grown.load(Ordering::Relaxed)
+    }
+
+    /// The drawer's top now (drawing units) and where it is cut off, while it shows: below
+    /// the bar sliding down from under it, else over the panel sliding up from its foot.
+    fn drawer_span(&self) -> Option<(f64, f64, f64)> {
         let k = self.browser.reveal();
-        (k > 0.0).then_some(DRAWER_TOP + (1.0 - k) * DRAWER_H)
+        if k <= 0.0 {
+            return None;
+        }
+        let foot = art::H + STRIP_H + BAR_H;
+        Some(if self.below() {
+            (foot - (1.0 - k) * DRAWER_H, foot, foot + DRAWER_H)
+        } else {
+            let top = DRAWER_TOP + (1.0 - k) * DRAWER_H;
+            (top, top, art::H)
+        })
     }
 
     /// The pointer's place in the drawer (drawer units), if it is over it.
     fn in_drawer(&self, (x, y): (f64, f64)) -> Option<(f64, f64)> {
-        let top = self.drawer_top()?;
-        (y >= top && y < art::H).then_some((x, y - top))
+        let (top, from, to) = self.drawer_span()?;
+        (y >= from && y < to).then_some((x, y - top))
+    }
+
+    /// The window's height (logical pixels): the panel, the strip and the bar, and the
+    /// drawer below them while it is open there.
+    fn window_height(&self) -> u32 {
+        height_for(self.width)
+            + if self.below() {
+                drawer_height(self.width)
+            } else {
+                0
+            }
+    }
+
+    /// The window grown for the drawer as it opens, and back as it shuts (if the host will
+    /// not, it opens over the panel).
+    fn follow_drawer(&mut self) {
+        let open = self.browser.open;
+        if open == self.below() {
+            return;
+        }
+        if open {
+            self.grown.store(true, Ordering::Relaxed);
+            if self.context.request_resize() {
+                self.browser.below = true;
+            } else {
+                self.grown.store(false, Ordering::Relaxed);
+                self.browser.below = false;
+            }
+        } else {
+            self.grown.store(false, Ordering::Relaxed);
+            self.context.request_resize();
+        }
+        self.composed = None;
+        self.slid = None;
+        self.resizing_window = true;
     }
 
     /// The pointer's place on the presets' bar (bar units), if it is over it.
     fn on_bar(&self, (x, y): (f64, f64)) -> Option<(f64, f64)> {
-        (y >= art::H + STRIP_H).then_some((x, y - art::H - STRIP_H))
+        (art::H + STRIP_H..art::H + STRIP_H + BAR_H)
+            .contains(&y)
+            .then_some((x, y - art::H - STRIP_H))
     }
 
     fn operated(&self, control: usize) -> Option<&dyn Operated> {
@@ -588,6 +690,7 @@ impl Editing {
                 self.browser
                     .drawer_press(t, dx, &self.drawer, &self.params, &setter);
             }
+            self.follow_drawer();
             return;
         }
         if let Some((bx, by)) = self.on_bar((x, y)) {
@@ -595,6 +698,7 @@ impl Editing {
                 let setter = ParamSetter::new(self.context.as_ref());
                 self.browser.bar_press(t, &self.params, &setter);
             }
+            self.follow_drawer();
             return;
         }
         if y >= art::H {
@@ -870,6 +974,7 @@ impl Editing {
         let agreed = self.context.request_resize();
         if agreed {
             self.width = width;
+            self.resizing_window = true;
         } else {
             self.params.editor_width.store(old, Ordering::Relaxed);
         }
@@ -975,7 +1080,23 @@ impl Editing {
         // The drawer over the panel, while it shows (and moves).
         let k = self.browser.reveal();
         let mut drawer = false;
-        if k > 0.0 {
+        if k > 0.0 && self.below() {
+            // Below the bar: sliding down from under it.
+            drawer = self.drawer.render(&self.browser.drawer);
+            if self.browser.sliding() {
+                let frame = self.drawer.frame();
+                let s = self.slid.get_or_insert_with(|| frame.clone());
+                if (s.width(), s.height()) != (frame.width(), frame.height()) {
+                    *s = frame.clone();
+                }
+                s.fill(ca72_panel::presets::background());
+                let top = (-(1.0 - k) * DRAWER_H * self.renderer.scale()).round();
+                overlay(s, frame, top as i32);
+                drawer = true;
+            } else if self.slid.take().is_some() {
+                drawer = true;
+            }
+        } else if k > 0.0 {
             drawer = self.drawer.render(&self.browser.drawer);
             let sliding = self.browser.sliding();
             if panel || drawer || sliding || self.composed.is_none() {
@@ -1044,20 +1165,13 @@ impl WindowHandler for PanelWindow {
             Event::Mouse(e) => {
                 let status = match self.editing.mouse(e) {
                     None => EventStatus::Ignored,
-                    Some(resize) => {
-                        if let Some(width) = resize {
-                            let size = Size::new(f64::from(width), f64::from(height_for(width)));
-                            window.resize(size);
-                            // On macOS baseview reports no resize of its own making (only a
-                            // change of scale): the frames follow the new size here, else the
-                            // host's window shrinks around a picture drawn at the old one (the
-                            // owner, 2026-10-02). Elsewhere the report that follows finds the
-                            // size already taken.
-                            self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
-                        }
-                        EventStatus::Captured
-                    }
+                    // (A width the grip took is the editor's now: `follow` sizes the window.)
+                    Some(_) => EventStatus::Captured,
                 };
+                // The grip, or the drawer opening or shutting below the bar: the window
+                // follows (the owner, 2026-10-02: on macOS it had stayed drawn at the old
+                // size until reopened).
+                self.follow(window);
                 // A field of the drawer took the caret: the keyboard comes here.
                 if std::mem::take(&mut self.editing.browser.wants_keys) {
                     window.focus();
@@ -1068,7 +1182,10 @@ impl WindowHandler for PanelWindow {
             Event::Keyboard(k) => {
                 let e = &mut self.editing;
                 let setter = ParamSetter::new(e.context.as_ref());
-                if e.browser.key(&k, &e.params, &setter) {
+                let taken = e.browser.key(&k, &e.params, &setter);
+                e.follow_drawer();
+                self.follow(window);
+                if taken {
                     EventStatus::Captured
                 } else {
                     EventStatus::Ignored
@@ -1361,6 +1478,8 @@ mod tests {
     #[derive(Default)]
     struct Host {
         calls: Mutex<Vec<Call>>,
+        /// It will not resize the window.
+        fixed: AtomicBool,
     }
 
     impl Host {
@@ -1378,7 +1497,7 @@ mod tests {
             PluginApi::Clap
         }
         fn request_resize(&self) -> bool {
-            true
+            !self.fixed.load(Ordering::Relaxed)
         }
         unsafe fn raw_begin_set_parameter(&self, param: ParamPtr) {
             self.push(Call::Begin(param));
@@ -1410,10 +1529,9 @@ mod tests {
             context,
             Arc::clone(&params),
             Arc::new(Meters::default()),
-            1720,
-            1720,
-            1.0,
+            (1720, 1720, 1.0),
             library,
+            Arc::new(AtomicBool::new(false)),
         );
         (e, host, params)
     }
@@ -1812,7 +1930,8 @@ mod tests {
 
     /// A point of the drawer (its units) in the window, the drawer open.
     fn in_drawer(e: &Editing, (x, y): (f64, f64)) -> Point {
-        at(e, (x, DRAWER_TOP + y))
+        let (top, _, _) = e.drawer_span().expect("the drawer open");
+        at(e, (x, top + y))
     }
 
     fn key(e: &mut Editing, k: Key) -> bool {
@@ -1857,23 +1976,20 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_opens_the_drawer_over_the_panel_and_a_row_sets_the_plugin() {
+    fn the_bar_opens_the_drawer_below_it_and_a_row_sets_the_plugin() {
         let dir = tempfile::tempdir().unwrap();
         let (mut e, host, params) = editing_with(Library::at(dir.path()));
         e.draw();
-        assert!(e.composed.is_none());
+        let shut = e.window_height();
+        assert_eq!(shut, height_for(1720));
         open(&mut e);
-        // Drawn over the panel's lower part: the frame shown differs from the panel's there.
-        let c = e.composed.as_ref().expect("the drawer over the panel");
-        let frame = e.renderer.frame();
-        let row = |p: &ca72_panel::Pixmap, y: u32| {
-            let w = p.width() as usize;
-            p.data()[(y as usize * w) * 4..((y as usize + 1) * w) * 4].to_vec()
-        };
-        let low = (frame.height() as f64 * 0.9) as u32;
-        let high = (frame.height() as f64 * 0.1) as u32;
-        assert_ne!(row(c, low), row(frame, low));
-        assert_eq!(row(c, high), row(frame, high));
+        // Below the bar, the window grown for it (the host asked), the panel untouched.
+        assert!(e.below() && e.resizing_window);
+        assert_eq!(e.window_height(), shut + drawer_height(1720));
+        assert!(e.composed.is_none());
+        let (top, _, _) = e.drawer_span().unwrap();
+        assert_eq!(top, art::H + STRIP_H + BAR_H);
+        assert!(e.browser.bar.below && e.browser.bar.open);
         assert_eq!(e.browser.drawer.rows.len(), crate::library::factory().len());
         // A row sets every parameter it names (or its default), the preset remembered.
         host.take();
@@ -1920,13 +2036,59 @@ mod tests {
         e.draw();
         assert_eq!(e.browser.bar.name, "Undertow Growl");
         assert!(e.browser.drawer.rows[i].current);
-        // Escape closes it.
+        // A double click on a row chooses it and closes the drawer, the window shrinking.
+        e.browser.scroll(-100);
+        let j = row_of(&e, "Brass Tutti");
+        let pt = in_drawer(
+            &e,
+            presets_ui::row_centre(&e.browser.drawer, j).expect("shown"),
+        );
+        click(&mut e, pt);
+        click(&mut e, pt);
+        assert_eq!(preset(&params), "Brass Tutti");
+        assert!(!e.browser.open && !e.below());
+        assert_eq!(e.window_height(), shut);
+        // Escape closes it too.
+        open(&mut e);
         assert!(key(&mut e, Key::Escape));
-        assert!(!e.browser.open);
+        e.follow_drawer();
+        assert!(!e.browser.open && !e.below());
         assert!(
             !key(&mut e, Key::Character("a".into())),
             "closed: the host's keys"
         );
+    }
+
+    /// A host that will not resize the window: the drawer opens over the panel instead.
+    #[test]
+    fn where_the_window_cannot_grow_the_drawer_opens_over_the_panel() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, host, _params) = editing_with(Library::at(dir.path()));
+        host.fixed.store(true, Ordering::Relaxed);
+        e.draw();
+        open(&mut e);
+        assert!(!e.below());
+        assert_eq!(e.window_height(), height_for(1720));
+        assert!(!e.browser.bar.below);
+        let c = e.composed.as_ref().expect("the drawer over the panel");
+        let frame = e.renderer.frame();
+        let row = |p: &ca72_panel::Pixmap, y: u32| {
+            let w = p.width() as usize;
+            p.data()[(y as usize * w) * 4..((y as usize + 1) * w) * 4].to_vec()
+        };
+        let low = (frame.height() as f64 * 0.9) as u32;
+        let high = (frame.height() as f64 * 0.1) as u32;
+        assert_ne!(row(c, low), row(frame, low));
+        assert_eq!(row(c, high), row(frame, high));
+        // A row there sets the plug-in too.
+        let i = row_of(&e, "Lead");
+        let pt = in_drawer(
+            &e,
+            presets_ui::row_centre(&e.browser.drawer, i).expect("shown"),
+        );
+        click(&mut e, pt);
+        e.draw();
+        assert_eq!(e.browser.bar.name, "Lead");
     }
 
     #[test]
@@ -2113,7 +2275,12 @@ mod tests {
         );
         go(&mut e, pt);
         e.draw();
-        let frames = [e.composed.as_ref().unwrap(), e.strip.frame(), e.bar.frame()];
+        let frames = [
+            e.renderer.frame(),
+            e.strip.frame(),
+            e.bar.frame(),
+            e.drawer.frame(),
+        ];
         let w = frames[0].width();
         let h: u32 = frames.iter().map(|f| f.height()).sum();
         let mut all = ca72_panel::Pixmap::new(w, h).unwrap();

@@ -7,7 +7,8 @@
 //! plug-in remembers it (`preset`, saved with the session); the bar marks it • once a value
 //! leaves it. The drawer: typing goes to the field with the caret (the search when none);
 //! the arrow keys step through the list, setting each preset; Enter commits a field (the
-//! search: closes); Escape takes back an edit, else closes. The library is read again when
+//! search: closes); Escape takes back an edit, else closes; a double click on a row chooses
+//! it and closes the drawer. The library is read again when
 //! the drawer opens, after each change and every two seconds while it is open, so DAW-v3's
 //! changes show too.
 
@@ -28,6 +29,8 @@ use crate::params::Ca72Params;
 pub const SLIDE: Duration = Duration::from_millis(140);
 /// How often the library is read again while the drawer is open.
 const REREAD: Duration = Duration::from_secs(2);
+/// Two clicks on a row within this long: chosen, and the drawer closed.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// The parameters POLY and VOICES: set only by a preset that names them.
 const FIELDS: &[&str] = &["poly", "voices"];
@@ -221,6 +224,11 @@ pub struct Browser {
     read: Option<Instant>,
     /// The window should take the keyboard (a field took the caret).
     pub wants_keys: bool,
+    /// The drawer opens below the bar, the window growing for it; false where the host
+    /// would not resize the window (it then opens over the panel).
+    pub below: bool,
+    /// The last row clicked, and when: a second click soon after closes the drawer.
+    last_row: Option<(Instant, usize)>,
 }
 
 impl std::fmt::Debug for Browser {
@@ -245,6 +253,8 @@ impl Browser {
             wanted: None,
             read: None,
             wants_keys: false,
+            below: true,
+            last_row: None,
         }
     }
 
@@ -365,6 +375,7 @@ impl Browser {
             changed: entry.is_some() && changed,
             favorite: entry.is_some_and(|e| e.favorite),
             open: self.open,
+            below: self.below,
             hover: self.bar.hover,
         };
     }
@@ -585,6 +596,16 @@ impl Browser {
                 if let Some(e) = self.list.get(i).cloned() {
                     self.drawer.editing = None;
                     self.choose(&e, p, s);
+                }
+                // A double click chooses it and closes the drawer.
+                let now = Instant::now();
+                let double = self
+                    .last_row
+                    .is_some_and(|(t, r)| r == i && now - t < DOUBLE_CLICK);
+                self.last_row = Some((now, i));
+                if double {
+                    self.last_row = None;
+                    self.show(false, p);
                 }
             }
             DrawerTarget::Star(i) => {

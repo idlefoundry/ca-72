@@ -1,9 +1,10 @@
 //! The plug-in's own controls, drawn under the panel and always with it (decisions.md, "POLY"
-//! and "ANALOG and SPREAD"): not the instrument's, so not on its face. POLY (a switch), VOICES
-//! (2 to 10, stepped) with how many this machine plays in real time at the host's block
-//! size, VOICES marked when it asks more; ANALOG and SPREAD, each a slider (0 to 100 %) and
-//! a switch that turns it off and back on at its amount. Drawn in the panel's colours and
-//! lettering, at the panel's scale, `STRIP_H` panel units tall across its whole width.
+//! and "ANALOG and SPREAD"), labelled CA-72: not the instrument's, so not on its face. POLY
+//! (a switch), VOICES (2 to 10, stepped) with how many this machine plays in real time at
+//! the host's block size, VOICES marked when it asks more; ANALOG and SPREAD, each a slider
+//! (0 to 100 %) and a switch that turns it off and back on at its amount. Drawn in the
+//! panel's colours and lettering, at the panel's scale, `STRIP_H` panel units tall across
+//! its whole width.
 
 use std::fmt;
 
@@ -205,7 +206,9 @@ fn body(fonts: &Fonts, s: &StripScene) -> String {
             if on { "ON" } else { "OFF" }
         );
     };
-    text(&mut out, NAME_X, "NOT THE INSTRUMENT'S:", DIM, "start");
+    // The plug-in's own controls, not the instrument's: named for the plug-in (the owner,
+    // 2026-10-02: "not the instrument's" read oddly).
+    text(&mut out, NAME_X, "CA-72", DIM, "start");
     // POLY.
     text(&mut out, POLY_X - 20.0, "POLY", colour::LEGEND, "end");
     switch(&mut out, POLY_X, s.poly, s.hover == Some(StripTarget::Poly));

@@ -5,7 +5,9 @@
 //! panel's lower four fifths: a search field, FAVOURITES and MINE, the tags in use as chips,
 //! the list (each row's star, its name, EDITED or YOURS, its tags, and RENAME, TAGS, REVERT,
 //! DELETE), and under it the current sound saved as a preset, named and tagged, and RESTORE
-//! FACTORY. Drawn in the strip's colours and lettering, at the panel's scale: the bar
+//! FACTORY. The drawer opens below the bar, the window growing for it (the owner,
+//! 2026-10-02: "opening downwards ... it's going to extend the plugin's window"); where the
+//! host will not resize the window it slides up over the panel's lower part instead. Drawn in the strip's colours and lettering, at the panel's scale: the bar
 //! [`BAR_H`] panel units tall, the drawer [`DRAWER_H`]. What a pointer finds is
 //! [`bar_hit`] and [`drawer_hit`]; the drawing and the finding share one layout.
 
@@ -31,6 +33,10 @@ const BORDER: &str = "#4a4640";
 const ACCENT: &str = "#f0a030";
 const WARN: &str = "#e5b94d";
 const BACK: &str = "#1f2228";
+/// The drawer's background, for what its frame does not cover while it slides.
+pub fn background() -> Color {
+    Color::from_rgba8(0x1f, 0x22, 0x28, 0xff)
+}
 const ROW_ON: &str = "#3a3022";
 const ROW_HOVER: &str = "#262a31";
 
@@ -211,6 +217,8 @@ pub struct BarScene {
     pub changed: bool,
     pub favorite: bool,
     pub open: bool,
+    /// The drawer opens below the bar (else over the panel): which way the arrow points.
+    pub below: bool,
     pub hover: Option<BarTarget>,
 }
 
@@ -435,7 +443,15 @@ fn bar_body(fonts: &Fonts, s: &BarScene) -> String {
         fill,
         "start",
     );
-    triangle(&mut out, NAME_END - 34.0, BAR_MID, 26.0, !s.open, DIM);
+    // Pointing where the drawer goes: down to open below, up to close it again.
+    triangle(
+        &mut out,
+        NAME_END - 34.0,
+        BAR_MID,
+        26.0,
+        s.open == s.below,
+        DIM,
+    );
     button(
         &mut out,
         (SAVE_X, y, SAVE_W, BTN_H),
@@ -1055,7 +1071,7 @@ impl Layer {
             f64::from(h) / self.scale,
         ];
         let doc = art::document(view, w, h, body);
-        self.frame.fill(Color::from_rgba8(0x1f, 0x22, 0x28, 0xff));
+        self.frame.fill(background());
         if let Ok(tree) = usvg::Tree::from_str(&doc, &self.options) {
             resvg::render(&tree, Transform::identity(), &mut self.frame.as_mut());
         }
@@ -1339,6 +1355,7 @@ mod png {
             changed: true,
             favorite: true,
             open: true,
+            below: true,
             hover: None,
         });
         bar.frame().save_png(dir.join("bar.png")).unwrap();

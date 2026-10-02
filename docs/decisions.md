@@ -314,6 +314,21 @@ window, which hosts may refuse).
   remembered, typing searches, the arrows and the bar's step, a chip filters, the wheel
   scrolls the list, SAVE… saves with tags, RENAME and TAGS in place, DELETE after asking,
   RESTORE, the host's shortcuts left to it).
-- Not checked yet: the validators on the Mac (no parameter changed; the new persisted
-  field and the editor's size) and a host's keyboard focus in practice (Live on the Mac).
+- Checked on the Mac, 2026-10-02: clap-validator, pluginval at strictness 10 (its GUI tests
+  skipped while Live was open) and Steinberg's validator pass; in Live the drawer takes the
+  keyboard and the search works (the owner).
+
+**Owner decisions, 2026-10-02, later** (trying it in Live): the drawer opens downward,
+"so it's going to extend the plugin's window"; the strip's "NOT THE INSTRUMENT'S" read
+oddly: it says CA-72; a double click on a preset chooses it and closes the drawer.
+
+**Agent decisions:**
+- The drawer opens below the bar: the editor asks the host to resize (as the grip does),
+  its size counting the drawer while it is open (`drawer_height`: 845 panel units, 423
+  pixels at 1720 wide), and the window follows at once (baseview on macOS reports no
+  resize of its own making: R5). It slides down from under the bar; it shuts at once, the
+  window shrinking back. A host that will not resize keeps the window and the drawer
+  slides up over the panel's lower part as before; the bar's arrow points where the
+  drawer goes. Tests: the window's height with the drawer and without, a double click, a
+  host refusing to resize.
 

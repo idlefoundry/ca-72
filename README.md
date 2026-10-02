@@ -85,7 +85,8 @@ The editor works like the panel:
 Hovering over a control shows its name and value. The name plate does something when
 clicked.
 
-Under the panel, a strip holds the plug-in's own controls: POLY (click), VOICES (click
+Under the panel, a strip labelled CA-72 holds the plug-in's own controls (not the
+instrument's): POLY (click), VOICES (click
 either side to step), and ANALOG and SPREAD (drag the slider; the switch beside each turns
 it off and back on at its amount). Beside VOICES it shows how many voices this machine
 plays in real time at the host's block size, and marks VOICES when it asks for more.
@@ -93,10 +94,12 @@ SPREAD is dimmed while POLY is off, and FEEDBACK while EXTERNAL INPUT is closed.
 
 **Presets.** Under the strip, the presets' bar: the preset last chosen (marked • once you
 change it), a star to make it a favourite, the previous and next preset, and SAVE…. Click
-the name and a drawer slides up over the panel:
+the name and a drawer opens below it, the window growing to hold it (in a host that will
+not resize the window, it slides up over the panel instead):
 
 - Type to search names, descriptions and tags; FAVOURITES and MINE filter, and so does
-  each tag's chip. Click a preset, or use the arrow keys, to choose it.
+  each tag's chip. Click a preset, or use the arrow keys, to choose it; double-click it to
+  choose it and close the drawer.
 - Each row has a star, RENAME, TAGS, DELETE (asked first) and, for a factory preset you
   edited, REVERT. SAVE AS saves the current sound, named and tagged; naming it as a
   factory preset saves yours in its place.
