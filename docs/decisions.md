@@ -71,6 +71,12 @@ the next block's parameter changes instead. Hosts send both, so it is left as it
 - The window resizes from a grip at its bottom right corner, in the panel's proportions,
   and the width is saved with the session. A host cannot resize it (nih-plug does not
   support that).
+- **Fixed 2026-10-02** (the owner: on the Mac a resize "stays the same size, but the window
+  shrinks", until the editor is opened again). baseview on macOS resizes its view when
+  asked but reports no resize of its own making (only a change of scale), so the frames
+  stayed at the old size. The editor now applies the new size itself when the grip
+  resizes it; on Linux and Windows the report that follows finds it already taken. Test:
+  the grip's, every frame at the new size.
 - `crates/ca72-panel/tests/approved.png` is the approved mock-up, every control at half
   its travel. The panel as drawn must match it, the plate left out.
 

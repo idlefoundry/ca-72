@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use baseview::{
     Event, EventStatus, MouseButton, MouseEvent, ScrollDelta, Size, Window, WindowEvent,
-    WindowHandler, WindowOpenOptions, WindowScalePolicy,
+    WindowHandler, WindowInfo, WindowOpenOptions, WindowScalePolicy,
 };
 use ca72_panel::art::{self, PLATE_TURN, POWER};
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
@@ -396,6 +396,23 @@ impl PanelWindow {
         }
     }
 
+    /// The window now `info`'s size: the surface and every frame drawn to it.
+    fn resized(&mut self, info: &WindowInfo) {
+        let size = info.physical_size();
+        let physical = (size.width.max(1), size.height.max(1));
+        if physical == self.physical && info.scale() == self.editing.dpr && self.shown {
+            return;
+        }
+        self.physical = physical;
+        self.editing.fit(
+            info.scale(),
+            info.logical_size().width.round() as u32,
+            physical.0,
+        );
+        self.surface.resize(self.physical);
+        self.shown = false;
+    }
+
     fn present(&mut self) {
         let e = &self.editing;
         let panel = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
@@ -439,6 +456,19 @@ impl Editing {
             turning: None,
             resizing: None,
         }
+    }
+
+    /// The renderers at the window's scale: `dpr` physical pixels a logical one, `width`
+    /// logical pixels wide, `physical_width` physical ones.
+    fn fit(&mut self, dpr: f64, width: u32, physical_width: u32) {
+        self.dpr = dpr;
+        self.width = width;
+        let scale = f64::from(physical_width) / art::W;
+        self.renderer.rescale(scale, dpr);
+        self.strip.rescale(scale);
+        self.bar.rescale(scale);
+        self.drawer.rescale(scale);
+        self.composed = None;
     }
 
     fn setter(&self) -> ParamSetter<'_> {
@@ -1008,19 +1038,7 @@ impl WindowHandler for PanelWindow {
     fn on_event(&mut self, window: &mut Window<'_>, event: Event) -> EventStatus {
         match event {
             Event::Window(WindowEvent::Resized(info)) => {
-                let size = info.physical_size();
-                self.physical = (size.width.max(1), size.height.max(1));
-                let e = &mut self.editing;
-                e.dpr = info.scale();
-                e.width = info.logical_size().width.round() as u32;
-                e.renderer
-                    .rescale(f64::from(self.physical.0) / art::W, e.dpr);
-                e.strip.rescale(f64::from(self.physical.0) / art::W);
-                e.bar.rescale(f64::from(self.physical.0) / art::W);
-                e.drawer.rescale(f64::from(self.physical.0) / art::W);
-                e.composed = None;
-                self.surface.resize(self.physical);
-                self.shown = false;
+                self.resized(&info);
                 EventStatus::Captured
             }
             Event::Mouse(e) => {
@@ -1028,8 +1046,14 @@ impl WindowHandler for PanelWindow {
                     None => EventStatus::Ignored,
                     Some(resize) => {
                         if let Some(width) = resize {
-                            window
-                                .resize(Size::new(f64::from(width), f64::from(height_for(width))));
+                            let size = Size::new(f64::from(width), f64::from(height_for(width)));
+                            window.resize(size);
+                            // On macOS baseview reports no resize of its own making (only a
+                            // change of scale): the frames follow the new size here, else the
+                            // host's window shrinks around a picture drawn at the old one (the
+                            // owner, 2026-10-02). Elsewhere the report that follows finds the
+                            // size already taken.
+                            self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
                         }
                         EventStatus::Captured
                     }
@@ -1758,6 +1782,25 @@ mod tests {
             (1500, 1500)
         );
         assert!(!e.resize(1500));
+        // Every frame then drawn at that size (on macOS the window applies it itself: its
+        // baseview reports no resize of its own making).
+        e.fit(1.0, 1500, 1500);
+        e.draw();
+        let widths = [
+            e.renderer.frame().width(),
+            e.strip.frame().width(),
+            e.bar.frame().width(),
+        ];
+        assert_eq!(widths, [1500; 3]);
+        let tall: u32 = [e.renderer.frame(), e.strip.frame(), e.bar.frame()]
+            .iter()
+            .map(|f| f.height())
+            .sum();
+        assert!(
+            tall.abs_diff(height_for(1500)) <= 2,
+            "{tall} for {}",
+            height_for(1500)
+        );
     }
 
     // ---- The presets (decisions.md R10).
