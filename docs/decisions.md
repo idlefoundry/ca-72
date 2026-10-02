@@ -204,8 +204,12 @@ now FEEDBACK, its legend reading FEEDBACK. The same was done in DAW-v3 (DMM).
 
 **Agent decisions, 2026-10-02** (not separately approved):
 - FEEDBACK (`feedback`, 0 to 10 on the knob's dial, 0 by default: no cable) sends each
-  voice's output, before MAIN OUTPUT's VOLUME, times the knob's share, into its EXTERNAL
-  INPUT one sample later (a loop cannot be instantaneous), added to the side chain there.
+  voice's output, before MAIN OUTPUT's VOLUME, into its EXTERNAL INPUT one sample later (a
+  loop cannot be instantaneous), added to the side chain there. The level sent follows the
+  knob's taper (the owner, 2026-10-02: 3 on the dial was "already super intense"; that
+  should come at about 6): `feedback_law` = travel^2.357, so 6 sends 30 % of the output, 3
+  about 6 %, 5 20 %, 10 all of it. The parameter (what automation sees) is the knob's
+  position.
   As with the cable it is heard through the MIXER's EXTERNAL INPUT switch and VOLUME, and
   OVERLOAD lights.
 - While FEEDBACK is on the preamplifier is solved as High Fidelity solves it: Potato's

@@ -377,6 +377,22 @@ fn keyboard_load(p: &Panel) -> Load {
     Load::of(3, p.keyboard_control_1, p.keyboard_control_2)
 }
 
+/// How far up FEEDBACK's knob (0..1 of its travel) sends how much of the output back
+/// (0..1, [`Voice::feedback`]): a taper, as a volume pot's, so the knob's lower half is a
+/// gentle onset and the loop's self-oscillation is near its top. 60 % of the travel sends
+/// 30 % (the owner, 2026-10-02: 30 % sent was "already super intense" at 30 % of the
+/// knob); a third sends 6 %, three quarters 51 %.
+pub fn feedback_law(knob: f64) -> f64 {
+    if knob > 0.0 {
+        crate::ulp::pow(knob.min(1.0), FEEDBACK_TAPER)
+    } else {
+        0.0
+    }
+}
+
+/// [`feedback_law`]'s exponent: ln 0.3 / ln 0.6, so that 60 % of the knob sends 30 %.
+pub const FEEDBACK_TAPER: f64 = 2.356_915_448_856_724;
+
 /// The instrument's voice: its panel and four parts. The keys' contacts, the keyboard
 /// circuit and the contours (with the noise source) depend only on the keys and the panel,
 /// not on the audio path, so a caller may run them on threads of their own ahead of it

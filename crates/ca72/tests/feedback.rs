@@ -150,3 +150,24 @@ fn feedback_at_its_ends_stays_within_the_rails() {
         eprintln!("{q:?}: at the ends, at most {most:.2}; then A3 at {peak:.2}");
     }
 }
+
+/// FEEDBACK's knob through its taper: nothing at 0, 30 % of the output at 60 % of the travel,
+/// all of it at the top, rising all the way (a gentle onset in the lower half).
+#[test]
+fn the_knob_is_tapered() {
+    use ca72::voice::feedback_law;
+    assert_eq!(feedback_law(0.0), 0.0);
+    assert!(
+        (feedback_law(0.6) - 0.3).abs() < 1e-9,
+        "{}",
+        feedback_law(0.6)
+    );
+    assert!((feedback_law(1.0) - 1.0).abs() < 1e-12);
+    assert!(feedback_law(1.0 / 3.0) < 0.08 && feedback_law(0.5) < 0.2);
+    let mut last = 0.0;
+    for k in 1..=100 {
+        let a = feedback_law(f64::from(k) / 100.0);
+        assert!(a > last, "{k}: {a}");
+        last = a;
+    }
+}

@@ -265,7 +265,8 @@ pub struct Ca72Params {
     /// SPREAD: POLY's voices across the stereo field, 0 to 100 %.
     #[id = "spread"]
     pub spread: FloatParam,
-    /// FEEDBACK, the phones' VOLUME knob (0 to 10): the output cabled into EXTERNAL INPUT.
+    /// FEEDBACK, the phones' VOLUME knob (0 to 10): the output cabled into EXTERNAL INPUT,
+    /// the level sent following the knob's taper (`ca72::voice::feedback_law`).
     #[id = "feedback"]
     pub feedback: FloatParam,
 }
@@ -457,7 +458,8 @@ impl Ca72Params {
             voices: usize::try_from(self.voices.value()).unwrap_or(POLY_VOICES.1),
             analog: f64::from(self.analog.value()) / 100.0,
             spread: f64::from(self.spread.value()) / 100.0,
-            feedback: f64::from(self.feedback.value()) / 10.0,
+            // The knob's travel through its taper (decisions.md R8).
+            feedback: ca72::voice::feedback_law(f64::from(self.feedback.value()) / 10.0),
         }
     }
 }
