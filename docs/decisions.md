@@ -262,3 +262,52 @@ down to match so it cannot win by loudness, and a tooltip.
   host shows it in its list of parameters ("Lock (oscillators identical)").
 - A session saved before this version, with ANALOG at 0, now has the floor (the plug-in is
   not yet released; DAW-v3 keeps its older devices exact).
+
+## R10. Presets: a library shared with DAW-v3, a bar and a drawer
+**Owner decisions, 2026-10-02** (with DAW-v3's Minimoog: its DMM-P). "We should have a few
+presets loaded for the user", from well-regarded published patches under new names; "a CRUD
+system ... create, edit, and delete every one of these presets"; "a way to favorite a
+preset and search and tag". The plug-in gets the same full browser as DAW-v3 (built there
+first); the two share one library; the presets "drop down from the bottom ... some sort of
+drawer" (agreed: a bar under the strip, a drawer sliding up over the panel, not growing the
+window, which hosts may refuse).
+
+**Agent decisions, 2026-10-02** (not separately approved):
+- **A preset is named panel settings**: the dials' plain values by parameter ID (a choice
+  by its index, a switch 0 or 1), POLY and VOICES too, never the PITCH wheel or the bypass;
+  the MOD wheel is part of one. The plug-in's IDs and ranges are DAW-v3's Minimoog's, so
+  one file serves both. Choosing one sets every other parameter to its default, POLY and
+  VOICES only when it names them; each parameter changed is a gesture of its own.
+- **The factory's 17** are `crates/ca72-plugin/sounds/minimoog.toml`, DAW-v3's file byte
+  for byte (its DMM-P gives each one's source, their levelling and the adjustments made on
+  the model). Built in, never changed.
+- **The user's are files** in `<data>/Idle Foundry/CA-72/Presets` (`$IDLE_FOUNDRY_SHARED`
+  overrides the `Idle Foundry` folder), `<name>.toml`: `format`, `name`, `description`,
+  `tags`, `favorite`, `replaces`, `values`; written whole and moved into place. The factory
+  presets' tags, favourites and deletions are the folder's `factory.toml`; saving over or
+  renaming a factory preset writes the user's version standing in for it (REVERT takes it
+  back); deleting one hides it (RESTORE FACTORY). Names: 1 to 64 characters, none of
+  `/ \ : * ? " < > |`, unique ignoring case. DAW-v3 reads and writes the same files the
+  same way (checked both ways with each program's own writer: each lists the other's
+  presets, tags and favourites, and sets the same normalized values).
+- **The plug-in remembers its preset** (`preset`, a persisted field saved with the
+  session); the bar marks it • once a parameter leaves the preset's value.
+- **The window grows by the bar** (80 panel units): 617 pixels tall at 1720 wide, was 577.
+- **The drawer takes the keyboard** while open (baseview's focus on opening and on a
+  field): typing goes to the field with the caret (the search when none), the arrows step
+  through the list setting each preset, Enter commits, Escape takes back an edit or
+  closes, Tab moves between the search and the save fields. Keys with Command or Control
+  stay the host's, and with the drawer shut every key is.
+- **Drawn** with the strip's colours and the panel's typeface; the star and the arrows are
+  shapes (the typeface has no such glyphs).
+- **Tests:** `library::tests` (saved, found, tagged, made favourite, renamed, removed; a
+  factory preset edited, renamed, reverted, deleted, restored; a DAW-v3 file read, an
+  unreadable one reported), `ca72-panel` `presets::tests` (fields edit at the caret, every
+  control found where drawn, the caret placed by a click, the frames drawn), and the
+  editor's (the bar opens the drawer over the panel, a row sets the parameters and is
+  remembered, typing searches, the arrows and the bar's step, a chip filters, the wheel
+  scrolls the list, SAVE… saves with tags, RENAME and TAGS in place, DELETE after asking,
+  RESTORE, the host's shortcuts left to it).
+- Not checked yet: the validators on the Mac (no parameter changed; the new persisted
+  field and the editor's size) and a host's keyboard focus in practice (Live on the Mac).
+

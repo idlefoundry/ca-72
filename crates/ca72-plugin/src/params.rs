@@ -3,8 +3,8 @@
 //! found by them): never rename one.
 
 use std::hash::{BuildHasher, Hasher};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::tuning::Range;
@@ -134,6 +134,10 @@ pub struct Ca72Params {
     /// until it is resized, when it opens at a share of the screen.
     #[persist = "editor_width"]
     pub editor_width: Arc<AtomicU32>,
+    /// The preset the plug-in was last set to (decisions.md R10), empty when none: saved
+    /// with the session, so the bar names it again.
+    #[persist = "preset"]
+    pub preset: Arc<RwLock<String>>,
 
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
@@ -314,6 +318,7 @@ impl Default for Ca72Params {
         Ca72Params {
             noise_seed: Arc::new(AtomicU64::new(fresh_seed())),
             editor_width: Arc::new(AtomicU32::new(0)),
+            preset: Arc::new(RwLock::new(String::new())),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
             glide: ten("Glide", 0.0),

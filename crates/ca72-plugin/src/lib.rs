@@ -5,7 +5,9 @@
 pub mod character;
 pub mod editor;
 pub mod engine;
+pub mod library;
 pub mod params;
+pub mod presets;
 
 use std::sync::Arc;
 

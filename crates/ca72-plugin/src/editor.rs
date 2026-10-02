@@ -4,7 +4,8 @@
 //! parameter through the host, a drag one gesture (one undo step in hosts that keep them);
 //! the POWER switch is the bypass; the OVERLOAD lamp and the wheels show what the audio
 //! thread reports. A click on the name plate turns it over; the grip at the panel's bottom
-//! right corner resizes the window.
+//! right corner resizes the window. Under the strip the presets' bar, and their drawer over
+//! the panel (`crate::presets`, decisions.md R10), which takes the keyboard while open.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -17,12 +18,17 @@ use baseview::{
 };
 use ca72_panel::art::{self, PLATE_TURN, POWER};
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
+use ca72_panel::presets::{
+    BAR_H, BarRenderer, DRAWER_H, DRAWER_TOP, DrawerRenderer, bar_hit, drawer_hit, overlay,
+};
 use ca72_panel::strip::{self, Amount, STRIP_H, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Target, interact};
 use keyboard_types::Modifiers;
 use nih_plug::prelude::*;
 
+use crate::library::Library;
 use crate::params::Ca72Params;
+use crate::presets::Browser;
 
 /// The share of the usable screen the editor opens at until it is resized.
 const SCREEN_SHARE: f64 = 0.8;
@@ -39,9 +45,10 @@ const SCROLL_REST: Duration = Duration::from_millis(400);
 /// A trackpad's travel that makes a notch, in pixels.
 const NOTCH: f64 = 40.0;
 
-/// The editor's height at `width`: the panel in its proportions, and the strip under it.
+/// The editor's height at `width`: the panel in its proportions, and the strip and the
+/// presets' bar under it.
 pub fn height_for(width: u32) -> u32 {
-    (f64::from(width) * (art::H + STRIP_H) / art::W).round() as u32
+    (f64::from(width) * (art::H + STRIP_H + BAR_H) / art::W).round() as u32
 }
 
 fn clamp_width(width: u32) -> u32 {
@@ -52,7 +59,7 @@ fn clamp_width(width: u32) -> u32 {
 /// (logical pixels), its height kept within the same share.
 fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
     screen.map_or(DEFAULT_WIDTH, |(w, h)| {
-        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / (art::H + STRIP_H));
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / (art::H + STRIP_H + BAR_H));
         clamp_width(w.round() as u32)
     })
 }
@@ -340,6 +347,12 @@ struct Editing {
     strip_scene: StripScene,
     sliding: Option<Amount>,
     last: [f32; 2],
+    /// The presets: the bar's and the drawer's renderers, what they show and do, and the
+    /// panel's frame with the drawer over it (while it shows).
+    bar: BarRenderer,
+    drawer: DrawerRenderer,
+    pub(crate) browser: Browser,
+    composed: Option<ca72_panel::Pixmap>,
     /// The pointer, in logical pixels.
     pointer: (f64, f64),
     hover: Option<Target>,
@@ -371,13 +384,23 @@ impl PanelWindow {
             surface,
             physical,
             shown: false,
-            editing: Editing::new(context, params, meters, width, physical.0, dpr),
+            editing: Editing::new(
+                context,
+                params,
+                meters,
+                width,
+                physical.0,
+                dpr,
+                Library::shared(),
+            ),
         }
     }
 
     fn present(&mut self) {
-        let (panel, strip) = (self.editing.renderer.frame(), self.editing.strip.frame());
-        self.surface.present(self.physical, &[panel, strip]);
+        let e = &self.editing;
+        let panel = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
+        self.surface
+            .present(self.physical, &[panel, e.strip.frame(), e.bar.frame()]);
     }
 }
 
@@ -389,6 +412,7 @@ impl Editing {
         width: u32,
         physical_width: u32,
         dpr: f64,
+        library: Library,
     ) -> Self {
         Editing {
             context,
@@ -402,6 +426,10 @@ impl Editing {
             strip_scene: StripScene::default(),
             sliding: None,
             last: [0.5; 2],
+            bar: BarRenderer::new(f64::from(physical_width) / art::W),
+            drawer: DrawerRenderer::new(f64::from(physical_width) / art::W),
+            browser: Browser::new(library),
+            composed: None,
             pointer: (0.0, 0.0),
             hover: None,
             drag: None,
@@ -421,6 +449,23 @@ impl Editing {
     fn in_drawing(&self, (x, y): (f64, f64)) -> (f64, f64) {
         let k = self.dpr / self.renderer.scale();
         (x * k, y * k)
+    }
+
+    /// The drawer's top now (drawing units), while it shows.
+    fn drawer_top(&self) -> Option<f64> {
+        let k = self.browser.reveal();
+        (k > 0.0).then_some(DRAWER_TOP + (1.0 - k) * DRAWER_H)
+    }
+
+    /// The pointer's place in the drawer (drawer units), if it is over it.
+    fn in_drawer(&self, (x, y): (f64, f64)) -> Option<(f64, f64)> {
+        let top = self.drawer_top()?;
+        (y >= top && y < art::H).then_some((x, y - top))
+    }
+
+    /// The pointer's place on the presets' bar (bar units), if it is over it.
+    fn on_bar(&self, (x, y): (f64, f64)) -> Option<(f64, f64)> {
+        (y >= art::H + STRIP_H).then_some((x, y - art::H - STRIP_H))
     }
 
     fn operated(&self, control: usize) -> Option<&dyn Operated> {
@@ -507,6 +552,21 @@ impl Editing {
 
     fn press(&mut self, modifiers: Modifiers) {
         let (x, y) = self.in_drawing(self.pointer);
+        if let Some((dx, dy)) = self.in_drawer((x, y)) {
+            if let Some(t) = drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy) {
+                let setter = ParamSetter::new(self.context.as_ref());
+                self.browser
+                    .drawer_press(t, dx, &self.drawer, &self.params, &setter);
+            }
+            return;
+        }
+        if let Some((bx, by)) = self.on_bar((x, y)) {
+            if let Some(t) = bar_hit(bx, by) {
+                let setter = ParamSetter::new(self.context.as_ref());
+                self.browser.bar_press(t, &self.params, &setter);
+            }
+            return;
+        }
         if y >= art::H {
             self.strip_press(x, y - art::H);
             return;
@@ -575,12 +635,20 @@ impl Editing {
             return None;
         }
         let Some(d) = &mut self.drag else {
-            let (x, y) = self.in_drawing(pointer);
-            (self.hover, self.strip_scene.hover) = if y >= art::H {
-                (None, strip::hit(x, y - art::H))
-            } else {
-                (interact::hit(self.renderer.layout(), x, y), None)
-            };
+            let at = self.in_drawing(pointer);
+            let (x, y) = at;
+            let over_drawer = self.in_drawer(at);
+            self.browser.drawer.hover = over_drawer
+                .and_then(|(dx, dy)| drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy));
+            self.browser.bar.hover = self.on_bar(at).and_then(|(bx, by)| bar_hit(bx, by));
+            (self.hover, self.strip_scene.hover) =
+                if over_drawer.is_some() || self.on_bar(at).is_some() {
+                    (None, None)
+                } else if y >= art::H {
+                    (None, strip::hit(x, y - art::H))
+                } else {
+                    (interact::hit(self.renderer.layout(), x, y), None)
+                };
             return None;
         };
         if (pointer.0 - d.from.0).abs() + (pointer.1 - d.from.1).abs() > 3.0 {
@@ -661,6 +729,20 @@ impl Editing {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
+        if self.in_drawer((x, y)).is_some() {
+            // The list scrolls, a row a notch.
+            let dy = match delta {
+                ScrollDelta::Lines { y, .. } => f64::from(y),
+                ScrollDelta::Pixels { y, .. } => f64::from(y) / NOTCH,
+            };
+            if dy.abs() >= 0.5 {
+                self.browser.scroll(if dy > 0.0 { -1 } else { 1 });
+            }
+            return;
+        }
+        if self.on_bar((x, y)).is_some() {
+            return;
+        }
         if y >= art::H {
             // VOICES steps with the wheel, a notch a voice.
             if let (Some(StripTarget::Fewer | StripTarget::More), ScrollDelta::Lines { y: dy, .. }) =
@@ -856,9 +938,32 @@ impl Editing {
             self.end_scroll();
         }
         self.update_scene();
+        self.browser.tick(&self.params);
         let panel = self.renderer.render(&self.scene);
         let strip = self.strip.render(&self.strip_scene);
-        panel || strip
+        let bar = self.bar.render(&self.browser.bar);
+        // The drawer over the panel, while it shows (and moves).
+        let k = self.browser.reveal();
+        let mut drawer = false;
+        if k > 0.0 {
+            drawer = self.drawer.render(&self.browser.drawer);
+            let sliding = self.browser.sliding();
+            if panel || drawer || sliding || self.composed.is_none() {
+                let frame = self.renderer.frame();
+                let c = self.composed.get_or_insert_with(|| frame.clone());
+                if (c.width(), c.height()) == (frame.width(), frame.height()) {
+                    c.data_mut().copy_from_slice(frame.data());
+                } else {
+                    *c = frame.clone();
+                }
+                let top = ((DRAWER_TOP + (1.0 - k) * DRAWER_H) * self.renderer.scale()).round();
+                overlay(c, self.drawer.frame(), top as i32);
+                drawer = true;
+            }
+        } else if self.composed.take().is_some() {
+            drawer = true;
+        }
+        panel || strip || bar || drawer
     }
 
     /// The pointer's events: a width the window is to be resized to, if the grip took it
@@ -911,19 +1016,40 @@ impl WindowHandler for PanelWindow {
                 e.renderer
                     .rescale(f64::from(self.physical.0) / art::W, e.dpr);
                 e.strip.rescale(f64::from(self.physical.0) / art::W);
+                e.bar.rescale(f64::from(self.physical.0) / art::W);
+                e.drawer.rescale(f64::from(self.physical.0) / art::W);
+                e.composed = None;
                 self.surface.resize(self.physical);
                 self.shown = false;
                 EventStatus::Captured
             }
-            Event::Mouse(e) => match self.editing.mouse(e) {
-                None => EventStatus::Ignored,
-                Some(resize) => {
-                    if let Some(width) = resize {
-                        window.resize(Size::new(f64::from(width), f64::from(height_for(width))));
+            Event::Mouse(e) => {
+                let status = match self.editing.mouse(e) {
+                    None => EventStatus::Ignored,
+                    Some(resize) => {
+                        if let Some(width) = resize {
+                            window
+                                .resize(Size::new(f64::from(width), f64::from(height_for(width))));
+                        }
+                        EventStatus::Captured
                     }
-                    EventStatus::Captured
+                };
+                // A field of the drawer took the caret: the keyboard comes here.
+                if std::mem::take(&mut self.editing.browser.wants_keys) {
+                    window.focus();
                 }
-            },
+                status
+            }
+            // The drawer, while open, takes the keys (the host keeps its shortcuts).
+            Event::Keyboard(k) => {
+                let e = &mut self.editing;
+                let setter = ParamSetter::new(e.context.as_ref());
+                if e.browser.key(&k, &e.params, &setter) {
+                    EventStatus::Captured
+                } else {
+                    EventStatus::Ignored
+                }
+            }
             _ => EventStatus::Ignored,
         }
     }
@@ -1196,6 +1322,8 @@ mod tests {
     use nih_plug::wrapper::state::PluginState;
 
     use super::*;
+    use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, RowAction};
+    use keyboard_types::{Key, KeyState, KeyboardEvent};
 
     /// What the editor asked of the host.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1244,6 +1372,13 @@ mod tests {
     }
 
     fn editing() -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        // A library that is not there (nothing of the user's read; these tests write none).
+        editing_with(Library::at(
+            std::env::temp_dir().join("ca72-editor-tests-no-library"),
+        ))
+    }
+
+    fn editing_with(library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
         let host = Arc::new(Host::default());
         let params = Arc::new(Ca72Params::default());
         let context: Arc<dyn GuiContext> = host.clone();
@@ -1254,6 +1389,7 @@ mod tests {
             1720,
             1720,
             1.0,
+            library,
         );
         (e, host, params)
     }
@@ -1489,8 +1625,8 @@ mod tests {
 
     #[test]
     fn the_editor_keeps_the_panels_proportions() {
-        // The panel's 529 and the strip's 48 under it.
-        assert_eq!(height_for(1720), 577);
+        // The panel's 529, the strip's 48 and the presets' bar's 40 under it.
+        assert_eq!(height_for(1720), 617);
         assert_eq!(clamp_width(10), MIN_WIDTH);
         assert_eq!(clamp_width(99_999), MAX_WIDTH);
     }
@@ -1500,9 +1636,9 @@ mod tests {
         // A 14-inch MacBook Pro's screen less the menu bar; a 34-inch ultrawide's.
         assert_eq!(fitted_width(Some((1512.0, 949.0))), 1210);
         assert_eq!(fitted_width(Some((3440.0, 1400.0))), 2752);
-        // Short and wide: the height's share sets it (the panel and the strip under it).
-        assert_eq!(fitted_width(Some((3840.0, 800.0))), 1908);
-        assert_eq!(height_for(1908), 640);
+        // Short and wide: the height's share sets it (the panel, the strip and the bar).
+        assert_eq!(fitted_width(Some((3840.0, 800.0))), 1785);
+        assert_eq!(height_for(1785), 640);
         assert_eq!(fitted_width(None), DEFAULT_WIDTH);
         assert_eq!(
             Ca72Params::default().editor_width.load(Ordering::Relaxed),
@@ -1622,5 +1758,329 @@ mod tests {
             (1500, 1500)
         );
         assert!(!e.resize(1500));
+    }
+
+    // ---- The presets (decisions.md R10).
+
+    /// A point of the presets' bar (its units) in the window.
+    fn on_bar(e: &Editing, (x, y): (f64, f64)) -> Point {
+        at(e, (x, art::H + STRIP_H + y))
+    }
+
+    /// A point of the drawer (its units) in the window, the drawer open.
+    fn in_drawer(e: &Editing, (x, y): (f64, f64)) -> Point {
+        at(e, (x, DRAWER_TOP + y))
+    }
+
+    fn key(e: &mut Editing, k: Key) -> bool {
+        let setter = ParamSetter::new(e.context.as_ref());
+        e.browser.key(
+            &KeyboardEvent {
+                state: KeyState::Down,
+                key: k,
+                ..KeyboardEvent::default()
+            },
+            &e.params,
+            &setter,
+        )
+    }
+
+    fn typed(e: &mut Editing, s: &str) {
+        for c in s.chars() {
+            key(e, Key::Character(c.to_string()));
+        }
+    }
+
+    /// The drawer, opened from the bar's name and slid open.
+    fn open(e: &mut Editing) {
+        click(e, on_bar(e, presets_ui::bar_centre(BarTarget::Name)));
+        assert!(e.browser.open);
+        std::thread::sleep(crate::presets::SLIDE + Duration::from_millis(20));
+        e.draw();
+        assert_eq!(e.browser.reveal(), 1.0);
+    }
+
+    fn row_of(e: &Editing, name: &str) -> usize {
+        e.browser
+            .drawer
+            .rows
+            .iter()
+            .position(|r| r.name == name)
+            .unwrap_or_else(|| panic!("{name} not listed"))
+    }
+
+    fn preset(p: &Ca72Params) -> String {
+        p.preset.read().unwrap().clone()
+    }
+
+    #[test]
+    fn the_bar_opens_the_drawer_over_the_panel_and_a_row_sets_the_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, host, params) = editing_with(Library::at(dir.path()));
+        e.draw();
+        assert!(e.composed.is_none());
+        open(&mut e);
+        // Drawn over the panel's lower part: the frame shown differs from the panel's there.
+        let c = e.composed.as_ref().expect("the drawer over the panel");
+        let frame = e.renderer.frame();
+        let row = |p: &ca72_panel::Pixmap, y: u32| {
+            let w = p.width() as usize;
+            p.data()[(y as usize * w) * 4..((y as usize + 1) * w) * 4].to_vec()
+        };
+        let low = (frame.height() as f64 * 0.9) as u32;
+        let high = (frame.height() as f64 * 0.1) as u32;
+        assert_ne!(row(c, low), row(frame, low));
+        assert_eq!(row(c, high), row(frame, high));
+        assert_eq!(e.browser.drawer.rows.len(), crate::library::factory().len());
+        // A row sets every parameter it names (or its default), the preset remembered.
+        host.take();
+        let i = row_of(&e, "Undertow Growl");
+        // Below the rows shown: the wheel scrolls the list to it.
+        let mid = in_drawer(&e, presets_ui::field_centre(FieldId::SaveName, None));
+        let list = Point {
+            x: mid.x,
+            y: mid.y - 120.0,
+        };
+        go(&mut e, list);
+        while presets_ui::row_centre(&e.browser.drawer, i).is_none() {
+            let first = e.browser.drawer.first;
+            e.mouse(MouseEvent::WheelScrolled {
+                delta: ScrollDelta::Lines { x: 0.0, y: -1.0 },
+                modifiers: Modifiers::empty(),
+            });
+            assert_eq!(
+                e.browser.drawer.first,
+                first + 1,
+                "the wheel scrolls the list"
+            );
+        }
+        let (x, y) = presets_ui::row_centre(&e.browser.drawer, i).expect("shown");
+        let pt = in_drawer(&e, (x, y));
+        click(&mut e, pt);
+        assert_eq!(preset(&params), "Undertow Growl");
+        let calls = host.take();
+        let set = |p: ParamPtr| {
+            calls
+                .iter()
+                .any(|c| matches!(c, Call::Set(q, _) if *q == p))
+        };
+        assert!(
+            set(params.osc2_on.as_ptr())
+                && set(params.cutoff.as_ptr())
+                && set(params.mod_wheel.as_ptr())
+        );
+        assert!(!set(params.pitch_wheel.as_ptr()) && !set(params.bypass.as_ptr()));
+        // Each a gesture of its own.
+        let begins = calls.iter().filter(|c| matches!(c, Call::Begin(_))).count();
+        let ends = calls.iter().filter(|c| matches!(c, Call::End(_))).count();
+        assert_eq!(begins, ends);
+        e.draw();
+        assert_eq!(e.browser.bar.name, "Undertow Growl");
+        assert!(e.browser.drawer.rows[i].current);
+        // Escape closes it.
+        assert!(key(&mut e, Key::Escape));
+        assert!(!e.browser.open);
+        assert!(
+            !key(&mut e, Key::Character("a".into())),
+            "closed: the host's keys"
+        );
+    }
+
+    #[test]
+    fn typing_searches_and_the_arrows_step_through_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _host, params) = editing_with(Library::at(dir.path()));
+        open(&mut e);
+        typed(&mut e, "GLIDE");
+        let names: Vec<&str> = e
+            .browser
+            .drawer
+            .rows
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        assert!(names.contains(&"Lead") && names.contains(&"Hollow Glider"));
+        assert!(!names.contains(&"Bass"), "{names:?}");
+        key(&mut e, Key::Backspace);
+        assert_eq!(e.browser.drawer.search.text, "GLID");
+        key(&mut e, Key::ArrowDown);
+        let first = e.browser.drawer.rows[0].name.clone();
+        assert_eq!(preset(&params), first);
+        key(&mut e, Key::ArrowDown);
+        assert_eq!(preset(&params), e.browser.drawer.rows[1].name);
+        key(&mut e, Key::ArrowUp);
+        assert_eq!(preset(&params), first);
+        // The host's shortcuts stay the host's.
+        let setter = ParamSetter::new(e.context.as_ref());
+        assert!(!e.browser.key(
+            &KeyboardEvent {
+                state: KeyState::Down,
+                key: Key::Character("s".into()),
+                modifiers: Modifiers::CONTROL,
+                ..KeyboardEvent::default()
+            },
+            &e.params,
+            &setter,
+        ));
+        // A tag chip filters; the bar's arrows step too.
+        key(&mut e, Key::Escape);
+        open(&mut e);
+        let bass = e
+            .browser
+            .drawer
+            .chips
+            .iter()
+            .position(|(t, _)| t == "whistle")
+            .expect("a chip");
+        let setter = ParamSetter::new(e.context.as_ref());
+        e.browser
+            .drawer_press(DrawerTarget::Chip(bass), 0.0, &e.drawer, &e.params, &setter);
+        let names: Vec<&str> = e
+            .browser
+            .drawer
+            .rows
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        assert_eq!(names, ["Cruising Whistle"]);
+        let pt = on_bar(&e, presets_ui::bar_centre(BarTarget::Next));
+        click(&mut e, pt);
+        assert_eq!(preset(&params), "Cruising Whistle");
+    }
+
+    #[test]
+    fn saved_renamed_tagged_deleted_and_restored_from_the_drawer() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _host, params) = editing_with(Library::at(dir.path()));
+        // SAVE… opens the drawer at the name; Tab to the tags; Enter saves.
+        e.draw();
+        let pt = on_bar(&e, presets_ui::bar_centre(BarTarget::Save));
+        click(&mut e, pt);
+        assert_eq!(e.browser.drawer.focus, Some(FieldId::SaveName));
+        std::thread::sleep(crate::presets::SLIDE + Duration::from_millis(20));
+        e.draw();
+        typed(&mut e, "My Bass");
+        key(&mut e, Key::Tab);
+        typed(&mut e, "bass, test");
+        key(&mut e, Key::Enter);
+        assert!(dir.path().join("My Bass.toml").exists());
+        assert_eq!(preset(&params), "My Bass");
+        let lib = Library::at(dir.path());
+        let mine = lib.find("My Bass").unwrap();
+        assert_eq!(mine.sound.tags, ["bass", "test"]);
+        // Its values: every parameter but the PITCH wheel and the bypass, plain.
+        let ids: Vec<&str> = mine.sound.values.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(ids.contains(&"cutoff") && ids.contains(&"osc1_range") && ids.contains(&"voices"));
+        assert!(!ids.contains(&"pitch_wheel") && !ids.contains(&"bypass"));
+        assert!(mine.sound.values.contains(&("osc1_range".to_owned(), 3.0)));
+        // Saving as a factory preset's name says it replaces it.
+        let setter = ParamSetter::new(e.context.as_ref());
+        e.browser.drawer_press(
+            DrawerTarget::Field(FieldId::SaveName),
+            0.0,
+            &e.drawer,
+            &e.params,
+            &setter,
+        );
+        typed(&mut e, "Bass");
+        assert!(e.browser.drawer.replace);
+        assert!(e.browser.drawer.hint.contains("factory"));
+        // Renamed in place (the plug-in keeps it), its tags edited.
+        let i = row_of(&e, "My Bass");
+        let (x, y) =
+            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Rename).expect("shown");
+        let pt = in_drawer(&e, (x, y));
+        click(&mut e, pt);
+        assert_eq!(e.browser.drawer.focus, Some(FieldId::Edit));
+        for _ in 0.."My Bass".len() {
+            key(&mut e, Key::Backspace);
+        }
+        typed(&mut e, "Your Bass");
+        key(&mut e, Key::Enter);
+        assert!(lib.find("Your Bass").is_some() && lib.find("My Bass").is_none());
+        assert_eq!(preset(&params), "Your Bass");
+        let i = row_of(&e, "Your Bass");
+        let (x, y) =
+            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Tags).expect("shown");
+        let pt = in_drawer(&e, (x, y));
+        click(&mut e, pt);
+        key(&mut e, Key::End);
+        typed(&mut e, ", deep");
+        key(&mut e, Key::Enter);
+        assert_eq!(
+            lib.find("Your Bass").unwrap().sound.tags,
+            ["bass", "test", "deep"]
+        );
+        // Deleted after asking.
+        let i = row_of(&e, "Your Bass");
+        let (x, y) =
+            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Delete).expect("shown");
+        let pt = in_drawer(&e, (x, y));
+        click(&mut e, pt);
+        assert!(lib.find("Your Bass").is_some(), "deleted before asked");
+        let (x, y) =
+            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Confirm).expect("asked");
+        let pt = in_drawer(&e, (x, y));
+        click(&mut e, pt);
+        assert!(lib.find("Your Bass").is_none());
+        e.draw();
+        assert!(!e.browser.bar.found, "the bar says the preset is gone");
+        // A factory preset deleted, then restored; the star makes a favourite.
+        let i = row_of(&e, "Lead");
+        let setter = ParamSetter::new(e.context.as_ref());
+        for a in [RowAction::Delete, RowAction::Confirm] {
+            e.browser.drawer_press(
+                DrawerTarget::Action(i, a),
+                0.0,
+                &e.drawer,
+                &e.params,
+                &setter,
+            );
+        }
+        assert!(e.browser.drawer.rows.iter().all(|r| r.name != "Lead"));
+        e.browser
+            .drawer_press(DrawerTarget::Restore, 0.0, &e.drawer, &e.params, &setter);
+        let i = row_of(&e, "Lead");
+        e.browser
+            .drawer_press(DrawerTarget::Star(i), 0.0, &e.drawer, &e.params, &setter);
+        assert!(lib.find("Lead").unwrap().favorite);
+    }
+
+    /// The window's frames stacked (the panel with the drawer over it, the strip, the bar),
+    /// written to `$CA72_EDITOR_PNG` for a look.
+    #[test]
+    #[ignore = "writes an image for a look"]
+    fn the_window_with_the_drawer_open_png() {
+        let Some(out) = std::env::var_os("CA72_EDITOR_PNG") else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
+        e.draw();
+        open(&mut e);
+        let i = row_of(&e, "Brass Tutti");
+        let pt = in_drawer(
+            &e,
+            presets_ui::row_centre(&e.browser.drawer, i).expect("shown"),
+        );
+        click(&mut e, pt);
+        let pt = in_drawer(
+            &e,
+            presets_ui::row_centre(&e.browser.drawer, i + 1).expect("shown"),
+        );
+        go(&mut e, pt);
+        e.draw();
+        let frames = [e.composed.as_ref().unwrap(), e.strip.frame(), e.bar.frame()];
+        let w = frames[0].width();
+        let h: u32 = frames.iter().map(|f| f.height()).sum();
+        let mut all = ca72_panel::Pixmap::new(w, h).unwrap();
+        let mut y = 0usize;
+        for f in frames {
+            let n = (f.width() * f.height() * 4) as usize;
+            let start = y * w as usize * 4;
+            all.data_mut()[start..start + n].copy_from_slice(f.data());
+            y += f.height() as usize;
+        }
+        all.save_png(out).unwrap();
     }
 }

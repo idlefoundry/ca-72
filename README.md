@@ -89,6 +89,27 @@ Under the panel, a strip holds the plug-in's own controls: POLY (click), VOICES 
 either side to step), and ANALOG and SPREAD (drag the slider; the switch beside each turns
 it off and back on at its amount). Beside VOICES it shows how many voices this machine
 plays in real time at the host's block size, and marks VOICES when it asks for more.
+SPREAD is dimmed while POLY is off, and FEEDBACK while EXTERNAL INPUT is closed.
+
+**Presets.** Under the strip, the presets' bar: the preset last chosen (marked • once you
+change it), a star to make it a favourite, the previous and next preset, and SAVE…. Click
+the name and a drawer slides up over the panel:
+
+- Type to search names, descriptions and tags; FAVOURITES and MINE filter, and so does
+  each tag's chip. Click a preset, or use the arrow keys, to choose it.
+- Each row has a star, RENAME, TAGS, DELETE (asked first) and, for a factory preset you
+  edited, REVERT. SAVE AS saves the current sound, named and tagged; naming it as a
+  factory preset saves yours in its place.
+- Factory presets are never lost: deleting one hides it, and RESTORE FACTORY brings it
+  back.
+- Enter commits a field (in the search, closes the drawer); Escape takes back an edit or
+  closes it. While the drawer is open it takes the keyboard; the host keeps its Command
+  and Control shortcuts.
+
+The library is a folder of files, `Idle Foundry/CA-72/Presets` in your user data folder
+(`~/Library/Application Support` on macOS, `%APPDATA%` on Windows, `~/.local/share` on
+Linux), shared with DAW-v3's Minimoog: a preset saved in either shows in both. The
+seventeen factory presets are built in.
 
 ## Building
 
@@ -169,7 +190,12 @@ The service documents and datasheets the model was derived from are not included
   process, since it includes the factory calibration. A new sample rate after that takes
   0.1 to 0.4 s; the same rate again is immediate.
 - Below 8 kHz the voice runs at 2, 4 or 8 times the host's rate.
-- The editor has no keyboard control, and a host cannot resize it; use the grip.
+- The panel has no keyboard control (the presets' drawer does), and a host cannot resize
+  the editor; use the grip.
+- Choosing a preset sets each parameter as a gesture of its own; a host that keeps undo
+  steps may keep one per parameter changed.
+- The presets' library is read when the drawer opens and every two seconds while it is
+  open, so a change DAW-v3 makes shows within two seconds.
 - The first size comes from the main screen on macOS and the primary monitor on Windows.
   On Linux it comes from the whole X11 screen, which spans every monitor, so it can open
   wider than the monitor it is on.

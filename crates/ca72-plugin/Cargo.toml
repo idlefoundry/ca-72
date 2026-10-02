@@ -34,6 +34,8 @@ softbuffer = { version = "0.4.6", default-features = false, features = ["kms", "
 raw-window-handle = "0.5"
 raw-window-handle-06 = { package = "raw-window-handle", version = "0.6" }
 keyboard-types = { version = "0.6.1", default-features = false }
+# The presets' files (decisions.md R10: the format DAW-v3's Minimoog shares).
+toml = "0.7"
 
 # The screen's size, for the editor's first size: the versions baseview takes.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -48,6 +50,7 @@ x11 = { version = "2.21", features = ["xlib"] }
 [dev-dependencies]
 ca72-analysis.workspace = true
 ca72-rt.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
