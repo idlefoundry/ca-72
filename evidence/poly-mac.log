@@ -1,0 +1,24 @@
+# CA-72 POLY on the Mac (Apple M4 Pro, 10 performance + 4 efficiency cores), crates/ca72-plugin/tests/poly_bench.rs as on omarchy, 2026-10-02.
+# NOT a clean measurement: Ableton Live 12 was running and playing on the Mac (seen at 00:48, just after these runs: Live 65 % CPU,
+# coreaudiod 31 %; the load was about 3 before and through them),
+# and the block's time hardly changes from 3 to 6 voices (mean 4.2 to 4.4 ms): the bench thread was held back, not paying the voices'
+# cost (by Live's audio threads, or by the time-constraint policy's computation share of half the period once a block exceeds it:
+# not determined).
+# Not used as the Mac's count; the strip's own estimate there (first line) is 7 at 256 frames.
+POLY voices in real time here at 48 kHz: 7 at 256 frames, 7 at 1024
+# 2026-10-02T00:36:56  0:36  up 6 days,  6:56, 1 user, load averages: 3.78 2.98 3.04
+CA-72: 6 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 4.438 ms, p50 4.338, p99 7.029, p99.9 8.141, worst 10.014; 1434 of 11250 late; 83.2 % of the thread; peak 0.975; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-02T00:38:07  0:38  up 6 days,  6:57, 1 user, load averages: 4.14 3.22 3.12
+# 2026-10-02T00:38:07  0:38  up 6 days,  6:57, 1 user, load averages: 4.14 3.22 3.12
+CA-72: 5 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 4.359 ms, p50 4.309, p99 7.078, p99.9 8.333, worst 9.287; 1296 of 11250 late; 81.7 % of the thread; peak 0.902; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-02T00:39:17  0:39  up 6 days,  6:58, 1 user, load averages: 3.30 3.16 3.10
+# 2026-10-02T00:39:17  0:39  up 6 days,  6:58, 1 user, load averages: 3.30 3.16 3.10
+CA-72: 4 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 4.384 ms, p50 4.312, p99 6.984, p99.9 7.842, worst 10.723; 970 of 11250 late; 82.2 % of the thread; peak 0.871; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-02T00:40:26  0:40  up 6 days, 7 hrs, 1 user, load averages: 3.53 3.18 3.11
+# 2026-10-02T00:40:26  0:40  up 6 days, 7 hrs, 1 user, load averages: 3.53 3.18 3.11
+CA-72: 3 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 4.175 ms, p50 4.077, p99 6.915, p99.9 8.498, worst 10.462; 1092 of 11250 late; 78.3 % of the thread; peak 0.662; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-02T00:41:35  0:41  up 6 days,  7:01, 1 user, load averages: 3.47 3.24 3.13
+# 2026-10-02T00:41:35  0:41  up 6 days,  7:01, 1 user, load averages: 3.47 3.24 3.13
+CA-72: 2 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 2.819 ms, p50 2.657, p99 5.130, p99.9 6.445, worst 7.742; 80 of 11250 late; 52.9 % of the thread; peak 0.670; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-02T00:42:38  0:42  up 6 days,  7:02, 1 user, load averages: 4.29 3.49 3.23
+== idlewile-macbook-3 CA-72 at 256 frames: 0 voices with no late block (two runs)

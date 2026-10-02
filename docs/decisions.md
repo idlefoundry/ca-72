@@ -85,3 +85,104 @@ of a 16-inch MacBook Pro's screen; the owner asked for about 80 %.
   the size is unknown, it opens at 1380 pixels.
 - The saved width is 0 until the grip sets one, so a session opens to fit whichever
   screen it is on. A session saved before this change keeps the 1720 it stored.
+
+## R7. POLY, the full MIDI range, ANALOG and SPREAD
+**Owner decisions, 2026-10-01** (the request made for DAW-v3's Minimoog and for this
+plug-in alike): POLY switches between the one instrument and one per note, 1 to 10 voices,
+easily; every MIDI note plays, 41 to 84 exactly as before; ANALOG and SPREAD, each 0 to
+100 % and 0 by default, ANALOG giving each voice its own tolerances on the oscillators'
+tuning, the cutoff and EMPHASIS, the contours' times and GLIDE, with the oscillators' and
+cutoff's drift; SPREAD placing POLY's voices by their number, the first in the centre; the
+voice count never asking more of the machine without saying so. With them all off a
+session sounds as before. Ported from DAW-v3 (DMM, branch `minimoog-poly`), where each
+part was measured first.
+
+**Agent decisions, 2026-10-01** (not separately approved):
+
+### POLY
+- POLY is a parameter (a switch), VOICES another (2 to 10, 4 by default), both under the
+  panel on the plug-in's own strip, not on the instrument's face. Ten voices are built when
+  the plug-in is activated (off the audio thread: the first at a new rate takes up to a
+  second, the rest are copies), so switching POLY or VOICES while playing allocates
+  nothing; switching POLY lifts every key, and the notes sounding stop.
+- Each voice is the whole instrument with its own keyboard circuit, which its note reaches
+  as one key held while the note is. GLIDE slides from the last key that voice played.
+- A new note takes a free voice (one let go whose output has stayed under 1e-6 for a whole
+  block) by its number, else the one let go longest ago, else the one held longest.
+- A note that takes a voice whose key was still down lifts the key and presses the new one
+  once the voice's trigger contact has been open 13 ms: the modelled circuit re-arms its
+  trigger only after about 12 ms (Q20 holds the reset line until C7 has drained), so its
+  contours start again, as the instrument's S-trigger does. The note's pitch and attack
+  come 13 ms after it. `crates/ca72/tests/retrigger.rs` finds the threshold between 11.5
+  and 12 ms at 44.1, 48 and 96 kHz.
+- The MIDI wheels and the panel reach every voice.
+- POLY off is the plug-in as it was, to the sample (`tests/sound.rs`).
+- A voice that has fallen silent is not run until its next note: it stops in time, and its
+  contours resume from where they were (below the VCA's cutoff), not from rest. The same
+  fuzz found that such a voice resumed with DECAY moved to its end could send the decay's
+  Newton steps below the -10 V rail, and the follower's bracket check then panicked on the
+  audio thread. Now a step that runs off below the rail is taken again from where the
+  capacitor was, both nodes' steps held to 0.2 V, else the capacitor holds for that
+  sample; every other step is as before. Test: `crates/ca72-plugin/tests/fuzz_bounds.rs`
+  (every control at its ends, notes over all 128: a panic and NaN before, six seeds of 200
+  rounds clean after).
+
+### The full MIDI range
+- Beyond the instrument's 44 keys, the circuit plays its end key (F or C) and the keys
+  beyond are added at the keyboard's output, at the output's own volts a key, gliding with
+  GLIDE while the trigger is closed: the plug-in's extension, not the circuit's. Moving the
+  key string's foot in the circuit instead saturates the keyboard's amplifier (-2.86 and
+  +6.92 V), so MIDI 0 to 7 and 122 to 127 each played one pitch.
+- Every note's keyboard voltage is within 0.12 mV of the scale, and on 8' every note is
+  within 5 cents (`crates/ca72/tests/midi_range.rs`). The oscillators' own limits, at the
+  ends: on 2' the top notes run sharp (2.6 cents at MIDI 96, 8.4 kHz, to 53 at MIDI 127,
+  50 kHz), on LO the lowest flat (3.7 to 10.5 cents at MIDI 0 to 36), as the circuit does
+  there. Lowest-note priority covers all 128.
+- A session made before this version may hold notes outside 41 to 84 that were silent;
+  they now sound.
+- **The converter's ceiling.** clap-validator's `param-fuzz-bounds` found that a key far
+  beyond the 44 with an oscillator's RANGE at 2', FREQUENCY and the PITCH wheel at their
+  tops (about 100 kHz) drove the exponential converter past where its model holds: above
+  about 1e-2 A R42's feedback takes the tail node past any rail, the solve went to NaN and
+  the voice stayed silent for good. The timing current is held at 5 mA
+  (`vco::TIMING_MAX`, twice MIDI 127's at the panel's centre; up to it the solve converges),
+  its Early slope as the converter gives it there. Below it nothing changes. Test:
+  `crates/ca72/tests/midi_range.rs`, the case in every mode (NaN before, held after).
+
+### ANALOG and SPREAD
+- DAW-v3's character, the same draws and arithmetic (`crates/ca72-plugin/src/character.rs`):
+  each voice's parts drawn once from its seed (the first voice's is the session's seed, as
+  with one voice). At 100 %: each oscillator's tuning within 4 cents (an offset at its
+  range tap), the cutoff within 0.04 octave (at R51, 0.98 V an octave), EMPHASIS, the
+  contours' ATTACK and DECAY and GLIDE within 0.012 of their rotation; each oscillator
+  drifts (a mean-reverting walk, 3 cents, 4 s) and wavers (0.4 cent under 30 Hz), the
+  cutoff drifts (0.015 octave). Sustains, levels and waveshapes are left alone.
+- SPREAD places voice n at 0, -1, +1, -0.5, +0.5, -0.75, +0.75, -0.25, +0.25, -0.125 times
+  the amount, a voice in the centre whole on both sides. The output became stereo for it;
+  on a mono output it is the two channels together, so a session with SPREAD at 0 sounds
+  as before on either.
+
+### POLY in real time
+- POLY's voices run in turn on the host's audio thread. The plug-in starts no threads of
+  its own: the host sizes its own threads to the machine, and a plug-in's busy threads
+  beside them would be more than the machine has.
+- When it is activated, the plug-in measures a voice's cost in a block where its key
+  changes, at the host's rate and largest block, and counts how many such fit in 60 % of
+  the block's period (DAW-v3's figure). The strip shows that number beside VOICES and marks
+  VOICES when it asks for more ("expect dropouts").
+- Measured (`tests/poly_bench.rs`: the engine as a host calls it, on one promoted thread,
+  48 kHz, changing chords every half second with the modulation moving, ANALOG 50 %,
+  SPREAD 70 %, 60 s, a block a period and never back to back; two clean runs a count;
+  `evidence/poly-<machine>.log`):
+  - **omarchy** (Ryzen 7 7800X3D), 256 frames: **4 voices** with no late block in two runs
+    (mean 2.5 ms of 5.33, worst 4.7); 5 voices 1 late block in a minute, 6 voices 87, 8
+    voices 1,821, 10 every block. At 512 frames 8 voices were still late 842 times. The
+    strip's own count there: 4 at 256 frames.
+  - **The Mac** (M4 Pro): not measured cleanly. Ableton Live was running and playing there,
+    and the block's time hardly changed from 3 to 6 voices, so the bench thread was held
+    back rather than paying for the voices (`evidence/poly-mac.log`). The strip's own count
+    there: 7 at 256 frames. To be measured again on a quiet Mac.
+  - No run was demoted by the watchdog.
+- So VOICES defaults to 4, what omarchy plays at 256 frames; the strip shows each
+  machine's own count (a voice costs about the same share of any block, so a larger block
+  barely changes it: 4 at 1024 frames on omarchy too).

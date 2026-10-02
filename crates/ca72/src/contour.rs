@@ -1070,6 +1070,32 @@ impl Contours {
                 if !converged {
                     crate::unconverged::note(crate::unconverged::Solver::ContourDecay);
                 }
+                // Off where the circuit goes (a POLY voice resumed after resting, its
+                // capacitor where it stopped, the knobs moved meanwhile to DECAY's end) the
+                // steps can run off below the -10 V rail. Then the step again from where the
+                // capacitor was, both nodes' steps held to 0.2 V, and failing that the
+                // capacitor held where it was for this sample.
+                if !(v.is_finite() && e7.is_finite()) || v < c.vn {
+                    let (mut v2, mut e72) = (v_old, st.e7);
+                    let mut settled = false;
+                    for _ in 0..400 {
+                        let (r0, j) = res(v2, e72);
+                        let det = j[0][0] * j[1][1] - j[0][1] * j[1][0];
+                        let sv = ((r0[0] * j[1][1] - r0[1] * j[0][1]) / det).clamp(-0.2, 0.2);
+                        let se = ((j[0][0] * r0[1] - j[1][0] * r0[0]) / det).clamp(-0.2, 0.2);
+                        v2 -= sv;
+                        e72 -= se;
+                        if sv.abs() < tol_decay && se.abs() < tol_decay {
+                            settled = true;
+                            break;
+                        }
+                    }
+                    (v, e7) = if settled && v2.is_finite() && e72.is_finite() && v2 >= c.vn {
+                        (v2, e72)
+                    } else {
+                        (v_old, st.e7)
+                    };
+                }
                 st.v = v;
                 st.e7 = e7;
                 st.j7 = series_junction_from(su.v_e6 - e7, s.r9 + c.npn.rb, &base, j7).0;

@@ -79,7 +79,10 @@ fn poly_chords_in_real_time() {
                 let b = n / beat;
                 let r = roots[b % roots.len()] + (b / roots.len() % 3) as u8;
                 for s in shape.iter().take(voices) {
-                    e.event(Event::Note { key: r + s, on: true });
+                    e.event(Event::Note {
+                        key: r + s,
+                        on: true,
+                    });
                     held.push(r + s);
                 }
             }

@@ -35,7 +35,9 @@ for the CLAP bundle.
 - **Keys:** every MIDI note plays. Notes 41 to 84 are the instrument's 44 keys, F to C
   (with RANGE at 8'); beyond them the plug-in continues the key string's scale, a key a
   semitone, which the instrument cannot do. Like the instrument, the keyboard gives the
-  lowest note held priority and triggers once while keys are held.
+  lowest note held priority and triggers once while keys are held. Far above the keys
+  (with RANGE, FREQUENCY and the PITCH wheel high as well) an oscillator stops rising, far
+  past the audio band.
 - **POLY** (under the panel, not the instrument's): off, the one instrument as above. On,
   each note plays a whole instrument of its own, with its own keyboard circuit, contours
   and glide, up to VOICES of them (2 to 10). A new note takes a free voice, else the one

@@ -1,0 +1,33 @@
+# CA-72 POLY in real time on omarchy (Ryzen 7 7800X3D, 16 threads), crates/ca72-plugin/tests/poly_bench.rs:
+# one promoted thread, 48 kHz, 60 s paced, changing chords, ANALOG 50 %, SPREAD 70 %; each run under
+# ~/.cache/daw-timing.lock (exclusive), uptime before and after; a count passes on two clean runs.
+# 2026-10-01T23:44:28-04:00  23:44:28 up 1 day, 10:27,  5 users,  load average: 2.37, 2.32, 3.93
+CA-72: 10 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 6.230 ms, p50 5.964, p99 9.137, p99.9 9.699, worst 10.095; 11250 of 11250 late; 116.8 % of the thread; peak 1.349; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-01T23:46:33-04:00  23:46:33 up 1 day, 10:29,  5 users,  load average: 1.17, 1.89, 3.57
+# 2026-10-01T23:46:37-04:00  23:46:37 up 1 day, 10:29,  5 users,  load average: 1.15, 1.87, 3.55
+CA-72: 8 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 4.782 ms, p50 4.511, p99 7.267, p99.9 7.777, worst 7.981; 1821 of 11250 late; 89.7 % of the thread; peak 1.254; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-01T23:47:50-04:00  23:47:50 up 1 day, 10:30,  5 users,  load average: 1.43, 1.81, 3.40
+# 2026-10-01T23:54:03-04:00  23:54:03 up 1 day, 10:37,  5 users,  load average: 3.40, 4.97, 4.74
+CA-72: 7 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 4.217 ms, p50 4.061, p99 6.379, p99.9 6.800, worst 7.023; 655 of 11250 late; 79.1 % of the thread; peak 1.037; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-01T23:55:10-04:00  23:55:10 up 1 day, 10:38,  5 users,  load average: 1.88, 4.22, 4.50
+# 2026-10-01T23:55:35-04:00  23:55:35 up 1 day, 10:38,  5 users,  load average: 3.17, 4.35, 4.53
+CA-72: 6 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 3.632 ms, p50 3.494, p99 5.254, p99.9 5.563, worst 5.767; 87 of 11250 late; 68.1 % of the thread; peak 0.975; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-01T23:56:39-04:00  23:56:39 up 1 day, 10:39,  5 users,  load average: 1.81, 3.74, 4.31
+# 2026-10-01T23:56:43-04:00  23:56:43 up 1 day, 10:39,  5 users,  load average: 1.74, 3.69, 4.29
+CA-72: 5 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 3.038 ms, p50 2.856, p99 4.509, p99.9 4.831, worst 5.344; 1 of 11250 late; 57.0 % of the thread; peak 0.902; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-01T23:57:46-04:00  23:57:46 up 1 day, 10:40,  5 users,  load average: 0.98, 3.09, 4.04
+# 2026-10-01T23:58:36-04:00  23:58:36 up 1 day, 10:41,  5 users,  load average: 1.76, 2.95, 3.94
+CA-72: 4 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 2.452 ms, p50 2.359, p99 3.649, p99.9 3.942, worst 4.379; 0 of 11250 late; 46.0 % of the thread; peak 0.871; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-01T23:59:39-04:00  23:59:39 up 1 day, 10:42,  5 users,  load average: 1.19, 2.58, 3.75
+# 2026-10-02T00:00:31-04:00  00:00:31 up 1 day, 10:43,  5 users,  load average: 2.58, 2.75, 3.74
+CA-72: 4 POLY voices at 256-frame blocks (5.333 ms), 60 s paced on one thread: mean 2.484 ms, p50 2.395, p99 3.672, p99.9 3.944, worst 4.738; 0 of 11250 late; 46.6 % of the thread; peak 0.871; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-02T00:01:34-04:00  00:01:34 up 1 day, 10:44,  5 users,  load average: 1.52, 2.42, 3.56
+== omarchy CA-72 at 256 frames: 4 voices with no late block (two runs)
+# 2026-10-02T00:02:25-04:00  00:02:25 up 1 day, 10:45,  5 users,  load average: 2.69, 2.63, 3.58
+CA-72: 10 POLY voices at 512-frame blocks (10.667 ms), 60 s paced on one thread: mean 12.185 ms, p50 11.611, p99 17.509, p99.9 18.217, worst 18.939; 5625 of 5625 late; 114.2 % of the thread; peak 1.349; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-02T00:04:30-04:00  00:04:30 up 1 day, 10:47,  5 users,  load average: 1.71, 2.23, 3.31
+# 2026-10-02T00:25:16-04:00  00:25:16 up 1 day, 11:08,  5 users,  load average: 3.32, 3.68, 3.98
+CA-72: 8 POLY voices at 512-frame blocks (10.667 ms), 60 s paced on one thread: mean 9.584 ms, p50 9.129, p99 13.898, p99.9 14.367, worst 14.730; 842 of 5625 late; 89.8 % of the thread; peak 1.254; real-time: Ok(()), demoted by the watchdog 0 times
+# 2026-10-02T00:26:29-04:00  00:26:29 up 1 day, 11:09,  5 users,  load average: 2.02, 3.21, 3.79
+== omarchy CA-72 at 512 frames: 0 voices with no late block (two runs)
+# The strip's own count here (what_this_machine_plays_in_real_time, 2026-10-02): POLY voices in real time here at 48 kHz: 4 at 256 frames, 4 at 1024

@@ -162,6 +162,15 @@ pub fn triangle(buf: f64) -> f64 {
         * (p2 - p0 + f * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + f * (3.0 * (p1 - p2) + p3 - p0)))
 }
 
+/// The most timing current the converter's model gives, A: twice MIDI 127's at the panel's
+/// centre (2.47 mA), an octave above the top key the plug-in plays, far past the audio band
+/// on any range. Up to it the solve converges; above about 1e-2 A it runs away.
+pub const TIMING_MAX: f64 = 5e-3;
+
+/// The timing current at -4 V on the ramp over that at 0 V (the Early effect) at
+/// [`TIMING_MAX`], as the converter's solve gives it there.
+const EARLY_AT_MAX: f64 = 0.881;
+
 /// One output sample of the oscillator.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct VcoOut {
@@ -391,6 +400,16 @@ impl Vco {
                 ];
                 (top.ic_exp, bottom.ic_exp)
             }
+        };
+        // Far above the instrument's range (keys beyond its 44, the plug-in's extension, with
+        // RANGE, FREQUENCY and the PITCH wheel high) the converter's model leaves its ground:
+        // above about 1e-2 A its tail node runs past any rail and the solve diverges. The
+        // timing current is held at [`TIMING_MAX`] there, the ramp's slope as the converter
+        // gives it at that current; below it, as solved.
+        let (top, bottom) = if top.is_finite() && bottom.is_finite() && top <= TIMING_MAX {
+            (top, bottom)
+        } else {
+            (TIMING_MAX, TIMING_MAX * EARLY_AT_MAX)
         };
         self.guess = Some(top);
         let b = (top - bottom) / 4.0;

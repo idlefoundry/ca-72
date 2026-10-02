@@ -251,3 +251,90 @@ fn the_oscillators_limits_at_the_ranges_ends() {
         eprintln!("{quality:?}:\n{lines}");
     }
 }
+
+/// Far above the instrument's range the converter's model runs away (above about 1e-2 A);
+/// the timing current is held at `TIMING_MAX` there. The case a fuzz of the plug-in found:
+/// MIDI 126 held and let go on oscillator 1 at 2', oscillators modulated (OSC. MOD. on, MOD.
+/// MIX and the MODULATION wheel up), the PITCH wheel up, then oscillator 2 switched from LO
+/// to 2' with FREQUENCY at its top: its solve went to NaN within 0.1 s and the voice stayed
+/// silent for good. Every mode plays on, finite, no oscillator past the ceiling, and a key
+/// in the instrument's range afterwards sounds again.
+#[test]
+fn the_converter_is_held_at_its_ceiling_far_above_the_keys() {
+    use ca72::tuning::Range;
+    use ca72::vco::TIMING_MAX;
+    use ca72::voice::Waveform;
+    let rate = 44_100.0;
+    for quality in [
+        Quality::NoCompromises,
+        Quality::HighFidelity,
+        Quality::Potato,
+    ] {
+        let mut p = Panel {
+            quality,
+            osc3_control: true,
+            cutoff: 1.0,
+            emphasis: 0.0,
+            contour_amount: 1.0,
+            keyboard_control_1: true,
+            keyboard_control_2: true,
+            glide: 0.0,
+            glide_on: true,
+            noise_on: true,
+            noise_volume: 0.0,
+            mod_mix: 1.0,
+            osc_mod: true,
+            pitch_wheel: 1.0,
+            mod_wheel: 1.0,
+            tune: -1.0,
+            ..Panel::default()
+        };
+        p.osc[0].range = Range::R2;
+        p.osc[0].waveform = Waveform::Triangle;
+        p.osc[0].volume = 0.0;
+        p.osc[0].freq = 1.0;
+        p.osc[1].range = Range::Lo;
+        p.osc[1].waveform = Waveform::Triangle;
+        p.osc[1].volume = 1.0;
+        p.osc[1].freq = 0.0;
+        p.osc[2].range = Range::Lo;
+        p.osc[2].on = false;
+        p.filter_contour.attack = 0.0;
+        p.filter_contour.decay = 0.0;
+        p.filter_contour.sustain = 1.0;
+        p.loudness_contour.attack = 0.0;
+        p.loudness_contour.decay = 1.0;
+        p.loudness_contour.sustain = 0.0;
+        let mut v = Voice::new(rate, p);
+        v.note(126, true);
+        for _ in 0..2048 {
+            v.tick();
+        }
+        v.note(126, false);
+        for _ in 0..2048 {
+            v.tick();
+        }
+        v.panel.osc[1].range = Range::R2;
+        v.panel.osc[1].freq = 1.0;
+        v.panel.osc[1].volume = 0.0;
+        let mut most = 0.0f64;
+        for i in 0..(0.5 * rate) as usize {
+            let y = v.tick();
+            assert!(y.is_finite(), "{quality:?}: sample {i} is {y}");
+            most = most.max(v.probe_pitch().1.into_iter().fold(0.0, f64::max));
+        }
+        assert!(most <= TIMING_MAX, "{quality:?}: {most} A");
+        // Back in the instrument's range, it sounds.
+        v.panel = Panel {
+            quality,
+            ..Panel::default()
+        };
+        v.note(57, true);
+        let mut peak = 0.0f64;
+        for _ in 0..(0.3 * rate) as usize {
+            peak = peak.max(v.tick().abs());
+        }
+        assert!(peak > 0.05, "{quality:?}: {peak}");
+        eprintln!("{quality:?}: the timing current at most {most:.3e} A, then A3 at {peak:.3}");
+    }
+}
