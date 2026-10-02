@@ -72,7 +72,8 @@ const SWITCH_W: f64 = 92.0;
 const SWITCH_H: f64 = 44.0;
 const VOICES_X: f64 = 720.0;
 const STEP_W: f64 = 46.0;
-const HINT_X: f64 = 1030.0;
+/// Where the real-time hint starts: clear of VOICES' "+" (which ends at 1032).
+const HINT_X: f64 = 1062.0;
 /// Each amount: its label's x, its slider's track from and to, its value's x, its switch's x.
 const AMOUNTS: [(Amount, &str, f64, f64, f64, f64, f64); 2] = [
     (
@@ -111,6 +112,17 @@ fn track(a: Amount) -> (f64, f64) {
         .iter()
         .find(|t| t.0 == a)
         .map_or((0.0, 1.0), |t| (t.3, t.4))
+}
+
+/// What the strip says beside VOICES: how many voices play in real time here at the host's
+/// block size, and, when VOICES asks more, that it will drop out (kept short enough to end
+/// before ANALOG).
+fn hint(n: u32, block: u32, over: bool) -> String {
+    if over {
+        format!("{n} in real time here: expect dropouts")
+    } else {
+        format!("{n} in real time here ({block}-sample blocks)")
+    }
 }
 
 /// What is at (`x`, `y`) on the strip (panel units across, strip units down).
@@ -237,15 +249,10 @@ fn body(fonts: &Fonts, s: &StripScene) -> String {
         "middle",
     );
     if let Some((n, block)) = s.fits {
-        let hint = if over {
-            format!("{n} in real time here ({block}-sample blocks): expect dropouts")
-        } else {
-            format!("{n} in real time here ({block}-sample blocks)")
-        };
         text(
             &mut out,
             HINT_X,
-            &hint,
+            &hint(n, block, over),
             if over { WARN } else { DIM },
             "start",
         );
@@ -409,6 +416,40 @@ mod tests {
         }
         assert_eq!(hit(NAME_X, MID), None);
         assert_eq!(hit(POLY_X + 10.0, STRIP_H + 1.0), None);
+    }
+
+    /// The real-time hint, at its longest, starts clear of VOICES' "+" and ends clear of
+    /// ANALOG, measured in the strip's own face (it once ran into ANALOG).
+    #[test]
+    fn the_hint_clears_its_neighbours() {
+        let r = StripRenderer::new(1.0);
+        let plus_end = VOICES_X + 150.0 + STEP_W + 70.0 + STEP_W;
+        let analog = AMOUNTS[0].2;
+        for t in [hint(10, 4096, false), hint(10, 4096, true)] {
+            let doc = art::document(
+                [0.0, 0.0, W, STRIP_H],
+                W as u32,
+                STRIP_H as u32,
+                &format!(
+                    "<text x='{}' y='{}' font-size='{}' letter-spacing='1'>{}</text>",
+                    N(HINT_X),
+                    N(MID + TEXT * 0.36),
+                    N(TEXT),
+                    escape(&t)
+                ),
+            );
+            let tree = usvg::Tree::from_str(&doc, &r.options).expect("the hint's document");
+            let b = tree.root().abs_bounding_box();
+            let (left, right) = (f64::from(b.left()), f64::from(b.right()));
+            assert!(right - left > 100.0, "{t}: not measured ({b:?})");
+            assert!(
+                left >= plus_end + 20.0 && right <= analog - 40.0,
+                "{t}: {left} to {right}, between {plus_end} and {analog}"
+            );
+            eprintln!(
+                "{t}: {left:.0} to {right:.0} (\"+\" ends at {plus_end}, ANALOG at {analog})"
+            );
+        }
     }
 
     /// The strip draws, and draws again only when its scene changes.
