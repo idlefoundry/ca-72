@@ -152,11 +152,12 @@ part was measured first.
 ### ANALOG and SPREAD
 - DAW-v3's character, the same draws and arithmetic (`crates/ca72-plugin/src/character.rs`):
   each voice's parts drawn once from its seed (the first voice's is the session's seed, as
-  with one voice). At 100 %: each oscillator's tuning within 4 cents (an offset at its
-  range tap), the cutoff within 0.04 octave (at R51, 0.98 V an octave), EMPHASIS, the
-  contours' ATTACK and DECAY and GLIDE within 0.012 of their rotation; each oscillator
-  drifts (a mean-reverting walk, 3 cents, 4 s) and wavers (0.4 cent under 30 Hz), the
-  cutoff drifts (0.015 octave). Sustains, levels and waveshapes are left alone.
+  with one voice). At 100 % (twice the character's figures, `ANALOG_DEPTH`: the owner
+  found them "extremely subtle", 2026-10-02; 50 % is what 100 % was): each oscillator's
+  tuning spread 8 cents (an offset at its range tap), the cutoff 0.08 octave (at R51, 0.98 V
+  an octave), EMPHASIS, the contours' ATTACK and DECAY and GLIDE 0.024 of their rotation;
+  each oscillator drifts (a mean-reverting walk, 6 cents, 4 s) and wavers (0.8 cent under
+  30 Hz), the cutoff drifts (0.03 octave). Sustains, levels and waveshapes are left alone.
 - SPREAD places voice n at 0, -1, +1, -0.5, +0.5, -0.75, +0.75, -0.25, +0.25, -0.125 times
   the amount, a voice in the centre whole on both sides. The output became stereo for it;
   on a mono output it is the two channels together, so a session with SPREAD at 0 sounds

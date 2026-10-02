@@ -16,6 +16,10 @@ use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
 use crate::character::Character;
 
+/// How far ANALOG goes at 100 %, in the character's figures (`character.rs`, DAW-v3's): twice
+/// them, as DAW-v3's Minimoog (the owner, 2026-10-02: at once they were "extremely subtle").
+pub const ANALOG_DEPTH: f64 = 2.0;
+
 /// The voices POLY may play: the fewest, by default, the most (all of them built).
 pub const POLY_VOICES: (usize, usize, usize) = (2, 4, 10);
 
@@ -446,7 +450,7 @@ impl Engine {
 
     /// One sample of the voices at their rate (`rate` Hz): left and right.
     fn sample(&mut self, ext: f64, rate: f64) -> (f64, f64) {
-        let (analog, spread) = (self.controls.analog, self.controls.spread);
+        let (analog, spread) = (self.controls.analog * ANALOG_DEPTH, self.controls.spread);
         let jacks = |s: &mut Slot| {
             let mut j = Jacks {
                 ext,
@@ -552,7 +556,7 @@ impl Engine {
     /// The panel to every voice (each with its tolerances under ANALOG).
     fn apply(&mut self) {
         let p = self.panel();
-        let analog = self.controls.analog;
+        let analog = self.controls.analog * ANALOG_DEPTH;
         for s in &mut self.slots {
             let pv = if analog > 0.0 {
                 analog_panel(&s.character, p, analog)
