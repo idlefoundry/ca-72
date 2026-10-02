@@ -346,6 +346,7 @@ dependencies = [
  "ca72",
  "ca72-analysis",
  "ca72-panel",
+ "ca72-rt",
  "cocoa",
  "keyboard-types",
  "libm",

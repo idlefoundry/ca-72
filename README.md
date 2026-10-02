@@ -1,7 +1,8 @@
 # CA-72
 
-A monophonic synthesizer plug-in, VST3 and CLAP, for macOS, Windows and Linux, by Idle
-Foundry. Its voice is modelled from the circuit of a 1970s analogue synthesizer, the
+A synthesizer plug-in, VST3 and CLAP, for macOS, Windows and Linux, by Idle Foundry:
+monophonic like the instrument it models, or one whole instrument per note with POLY. Its
+voice is modelled from the circuit of a 1970s analogue synthesizer, the
 Minimoog Model D of about 1972-73 with the CA3046 ("old") oscillator board. Every board
 was transcribed from the instrument's service documents into SPICE netlists and simulated
 in ngspice. The real-time models were then derived from those simulations and tested
@@ -31,15 +32,32 @@ for the CLAP bundle.
 
 ## Playing it
 
-- **Keys:** MIDI notes play the instrument's 44 keys, F to C (MIDI notes 41 to 84, with
-  RANGE at 8'). Notes outside them are ignored. Like the instrument, the keyboard gives
-  the lowest note held priority and triggers once while keys are held.
+- **Keys:** every MIDI note plays. Notes 41 to 84 are the instrument's 44 keys, F to C
+  (with RANGE at 8'); beyond them the plug-in continues the key string's scale, a key a
+  semitone, which the instrument cannot do. Like the instrument, the keyboard gives the
+  lowest note held priority and triggers once while keys are held.
+- **POLY** (under the panel, not the instrument's): off, the one instrument as above. On,
+  each note plays a whole instrument of its own, with its own keyboard circuit, contours
+  and glide, up to VOICES of them (2 to 10). A new note takes a free voice, else the one
+  let go longest ago, else the one held longest; a voice that was still held lifts its key
+  and presses the new one 13 ms later, so its contours start again (the circuit re-arms
+  its trigger only after about 12 ms, and so the note's pitch and attack come 13 ms
+  late). The wheels reach every voice. Switching POLY stops the notes sounding.
+- **ANALOG** (0 to 100 %, off by default): each voice its own parts, as if built from a
+  different batch: the three oscillators' tuning, the filter's cutoff and EMPHASIS, the
+  contours' times and GLIDE, each off by a little; the oscillators and the cutoff drift
+  slowly and waver. It applies to the one voice with POLY off too. At 0 the voice is the
+  circuit as drawn, to the sample.
+- **SPREAD** (0 to 100 %, off by default): POLY's voices across the stereo field, the
+  first in the centre and the next alternately left and right. With POLY off the voice
+  stays in the centre.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
   default), and the modulation wheel (CC 1) moves the MODULATION wheel. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
-- **Output:** mono, the same on every output channel, in a stereo or a mono layout.
+- **Output:** stereo, the same on both channels unless SPREAD places POLY's voices; on a
+  mono output, the two channels together.
 - **POWER** is the host's bypass: the output fades out over 10 ms and back in.
 
 The editor works like the panel:
@@ -56,6 +74,11 @@ The editor works like the panel:
 
 Hovering over a control shows its name and value. The name plate does something when
 clicked.
+
+Under the panel, a strip holds the plug-in's own controls: POLY (click), VOICES (click
+either side to step), and ANALOG and SPREAD (drag the slider; the switch beside each turns
+it off and back on at its amount). Beside VOICES it shows how many voices this machine
+plays in real time at the host's block size, and marks VOICES when it asks for more.
 
 ## Building
 
@@ -125,7 +148,10 @@ The service documents and datasheets the model was derived from are not included
 
 - Only the real-time quality, Potato, is in the plug-in. The model's two more exact
   qualities do not run in real time; they remain in `crates/ca72` and the lab.
-- It is monophonic, with the instrument's 44 keys.
+- POLY's voices all run on the host's audio thread, so how many play in real time depends
+  on the machine and the host's block size (see [docs/decisions.md](docs/decisions.md),
+  "POLY in real time"); the strip shows the number. With more, expect dropouts.
+- Ten voices at full level with SPREAD can peak above 0 dBFS; lower MAIN OUTPUT's VOLUME.
 - The rear panel's control voltage and trigger inputs are left out.
 - PHONES and the jacks in the controller's column are drawn but do nothing.
 - Building the voice when the plug-in is activated takes about 0.8 s the first time in a

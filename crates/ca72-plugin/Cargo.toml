@@ -47,6 +47,7 @@ x11 = { version = "2.21", features = ["xlib"] }
 
 [dev-dependencies]
 ca72-analysis.workspace = true
+ca72-rt.workspace = true
 
 [lints]
 workspace = true
