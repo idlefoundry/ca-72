@@ -278,3 +278,41 @@ fn every_midi_note_plays_in_both_modes() {
         }
     }
 }
+
+/// LOCK (decisions.md R9): with it off each oscillator keeps a floor of mismatch, so three in
+/// unison drift apart and LOCK sounds different; its trim holds the level to the drifting one
+/// (within 0.7 dB, untrimmed 3.3 dB louder), and with one oscillator there is nothing to lock
+/// (within 0.3 dB). POLY, a chord with no octave, 7.5 s (drifting oscillators beat slowly).
+#[test]
+fn lock_is_the_circuit_at_the_drifting_level() {
+    for (oscillators, most) in [(3usize, 0.7f64), (1, 0.3)] {
+        let level = |lock: bool| {
+            let mut c = Controls {
+                poly: true,
+                voices: 4,
+                lock,
+                ..Controls::default()
+            };
+            c.panel.osc[1].on = oscillators == 3;
+            c.panel.osc[2].on = oscillators == 3;
+            let mut e = ready(&c);
+            for k in [45u8, 52, 56, 61] {
+                e.event(Event::Note { key: k, on: true });
+            }
+            let y = run(&mut e, 8.0, |_| 0.0);
+            let from = y.len() / 16;
+            (y[from..].to_vec(), 20.0 * rms(&y[from..]).log10())
+        };
+        let ((drift, a), (locked, b)) = (level(false), level(true));
+        eprintln!(
+            "{oscillators} oscillators: LOCK {:+.2} dB against drifting",
+            b - a
+        );
+        assert!(drift != locked, "LOCK changed nothing");
+        assert!(
+            (b - a).abs() < most,
+            "{oscillators} oscillators: LOCK {:+.2} dB",
+            b - a
+        );
+    }
+}

@@ -83,6 +83,7 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         analog: r.either(0.0, 1.0),
         spread: r.either(0.0, 1.0),
         feedback: r.either(0.0, 1.0),
+        lock: r.end(),
     }
 }
 

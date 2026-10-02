@@ -226,3 +226,24 @@ now FEEDBACK, its legend reading FEEDBACK. The same was done in DAW-v3 (DMM).
   the sound brighter in every mode; Potato as High Fidelity; finite and within the rails
   with every control feeding the loop at its end), the threaded test (the same samples to
   the bit), the engine's bounds fuzz (`tests/fuzz_bounds.rs`, FEEDBACK at its ends too).
+
+## R9. A floor of mismatch, and LOCK
+**Owner decisions, 2026-10-02** (with DAW-v3's Minimoog, DMM). With ANALOG at 0 the three
+oscillators were identical: at one pitch they locked in phase and sounded up to 3.5 dB
+louder than with ANALOG on, which invites judging by loudness. The owner chose a small
+built-in mismatch, with a switch that makes the oscillators perfectly identical, turned
+down to match so it cannot win by loudness, and a tooltip.
+
+**Agent decisions, 2026-10-02** (not separately approved):
+- With LOCK off each oscillator keeps a floor of its own (`ANALOG_FLOOR`, 0.75 of the
+  character's figures: a tuning spread of 3 cents, 2.25 cents of drift, 0.3 cent of waver);
+  ANALOG adds to it. In DAW-v3 the level then moves 0.4 dB across ANALOG's range.
+- LOCK (`lock`, off by default) makes the oscillators the circuit as drawn and turns the
+  output down by `lock_trim`: the switched-on oscillators that share a pitch and their
+  volumes give the ideal gain of locking, of which 0.68 shows at the output (`LOCK_SHARE`,
+  fitted in DAW-v3). Measured: three in unison +0.4 dB with LOCK, one oscillator 0.0
+  (`tests/sound.rs`); octaves lock only in part and are left, about 0.7 dB.
+- The plug-in has no rear panel, so LOCK is a parameter without a control on the panel: a
+  host shows it in its list of parameters ("Lock (oscillators identical)").
+- A session saved before this version, with ANALOG at 0, now has the floor (the plug-in is
+  not yet released; DAW-v3 keeps its older devices exact).

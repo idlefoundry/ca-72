@@ -20,6 +20,44 @@ use crate::character::Character;
 /// them, as DAW-v3's Minimoog (the owner, 2026-10-02: at once they were "extremely subtle").
 pub const ANALOG_DEPTH: f64 = 2.0;
 
+/// The oscillators' own mismatch and drift with LOCK off, in the character's figures
+/// (decisions.md R9; DAW-v3's): a tuning spread of 3 cents and 2.25 of drift, so oscillators
+/// at one pitch never lock in phase (locked, three in unison sounded 3.3 dB louder, not
+/// better). ANALOG adds to it.
+pub const ANALOG_FLOOR: f64 = 0.75;
+
+/// How much of the ideal gain of locking (`10 log10(coherent / incoherent)`) shows at the
+/// output, the mixer's overdrive and the filter taking the rest (fitted in DAW-v3, DMM).
+pub const LOCK_SHARE: f64 = 0.68;
+
+/// The output's gain with LOCK on: down by the panel's switched-on oscillators that share a
+/// pitch (RANGE, FREQUENCY and, for oscillator 3, OSC. 3 CONTROL alike) and their volumes, so
+/// locked oscillators sound as loud as drifting ones. With no two at one pitch, 1.
+pub fn lock_trim(p: &Panel) -> f64 {
+    let keys = |n: usize| (p.osc[n].range, p.osc[n].freq, n < 2 || p.osc3_control);
+    let on = |n: usize| p.osc[n].on && p.osc[n].volume > 0.0;
+    let incoherent: f64 = (0..3)
+        .filter(|&n| on(n))
+        .map(|n| p.osc[n].volume.powi(2))
+        .sum();
+    let mut coherent = 0.0;
+    for n in (0..3).filter(|&n| on(n)) {
+        if (0..n).any(|m| on(m) && keys(m) == keys(n)) {
+            continue;
+        }
+        let a: f64 = (0..3)
+            .filter(|&m| on(m) && keys(m) == keys(n))
+            .map(|m| p.osc[m].volume)
+            .sum();
+        coherent += a * a;
+    }
+    if incoherent > 0.0 && coherent > incoherent {
+        ca72::ulp::pow(coherent / incoherent, -0.5 * LOCK_SHARE)
+    } else {
+        1.0
+    }
+}
+
 /// The voices POLY may play: the fewest, by default, the most (all of them built).
 pub const POLY_VOICES: (usize, usize, usize) = (2, 4, 10);
 
@@ -45,6 +83,10 @@ pub struct Controls {
     /// FEEDBACK (0..1): the voices' output patched back into their EXTERNAL INPUT, a sample
     /// late, by this much of its level (the phones' VOLUME knob; decisions.md R8).
     pub feedback: f64,
+    /// LOCK: the oscillators identical, the circuit as drawn, its level matched
+    /// ([`lock_trim`]); off, each oscillator keeps its own floor of mismatch
+    /// ([`ANALOG_FLOOR`]; decisions.md R9).
+    pub lock: bool,
 }
 
 impl Default for Controls {
@@ -60,6 +102,7 @@ impl Default for Controls {
             analog: 0.0,
             spread: 0.0,
             feedback: 0.0,
+            lock: false,
         }
     }
 }
@@ -302,7 +345,8 @@ impl Engine {
                 }
             }
             self.controls = *c;
-            self.gain = output_gain(c.volume, c.main_output);
+            self.gain = output_gain(c.volume, c.main_output)
+                * if c.lock { lock_trim(&c.panel) } else { 1.0 };
             self.apply();
         }
     }
@@ -455,13 +499,22 @@ impl Engine {
     /// One sample of the voices at their rate (`rate` Hz): left and right.
     fn sample(&mut self, ext: f64, rate: f64) -> (f64, f64) {
         let (analog, spread) = (self.controls.analog * ANALOG_DEPTH, self.controls.spread);
+        // The oscillators': their own floor and ANALOG's, unless LOCK; the cutoff's, ANALOG's.
+        let oscillators = if self.controls.lock {
+            0.0
+        } else {
+            ANALOG_FLOOR + analog
+        };
+        let at = oscillators.max(analog);
         let jacks = |s: &mut Slot| {
             let mut j = Jacks {
                 ext,
                 ..Jacks::default()
             };
-            if analog > 0.0 {
-                (j.detune, j.cutoff) = s.character.offsets(analog, rate);
+            if at > 0.0 {
+                let (cents, cutoff) = s.character.offsets(at, rate);
+                j.detune = cents.map(|c| c * oscillators / at);
+                j.cutoff = cutoff * analog / at;
             }
             j
         };

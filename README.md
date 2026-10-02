@@ -48,8 +48,10 @@ for the CLAP bundle.
 - **ANALOG** (0 to 100 %, off by default): each voice its own parts, as if built from a
   different batch: the three oscillators' tuning, the filter's cutoff and EMPHASIS, the
   contours' times and GLIDE, each off by a little; the oscillators and the cutoff drift
-  slowly and waver. It applies to the one voice with POLY off too. At 0 the voice is the
-  circuit as drawn, to the sample.
+  slowly and waver. It applies to the one voice with POLY off too. At 0 each oscillator
+  still keeps a tiny mismatch and drift of its own, as no two real ones are the same:
+  perfectly identical oscillators lock in phase and sound louder, not better. The host
+  parameter **Lock** makes them identical (the circuit as drawn), its level matched.
 - **SPREAD** (0 to 100 %, off by default): POLY's voices across the stereo field, the
   first in the centre and the next alternately left and right. With POLY off the voice
   stays in the centre.

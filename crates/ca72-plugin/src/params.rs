@@ -269,6 +269,10 @@ pub struct Ca72Params {
     /// the level sent following the knob's taper (`ca72::voice::feedback_law`).
     #[id = "feedback"]
     pub feedback: FloatParam,
+    /// LOCK: the oscillators identical, the circuit as drawn, its level matched (off: each
+    /// keeps a small mismatch of its own; decisions.md R9).
+    #[id = "lock"]
+    pub lock: BoolParam,
 }
 
 /// An amount, 0 to 100 %.
@@ -368,6 +372,7 @@ impl Default for Ca72Params {
             analog: percent("Analog"),
             spread: percent("Spread"),
             feedback: ten("Feedback", 0.0),
+            lock: BoolParam::new("Lock (oscillators identical)", false),
         }
     }
 }
@@ -460,6 +465,7 @@ impl Ca72Params {
             spread: f64::from(self.spread.value()) / 100.0,
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(f64::from(self.feedback.value()) / 10.0),
+            lock: self.lock.value(),
         }
     }
 }
