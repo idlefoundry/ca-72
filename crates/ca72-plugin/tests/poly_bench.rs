@@ -115,3 +115,17 @@ fn poly_chords_in_real_time() {
     );
     assert!(peak > 0.01, "the chords were not heard");
 }
+
+/// What the strip shows (`realtime_voices`): a count within 0 to 10, more at a larger block,
+/// and the same answer again (measured once a process for a rate and block). Printed for
+/// decisions.md, beside the paced runs above.
+#[test]
+fn what_this_machine_plays_in_real_time() {
+    use ca72_plugin::engine::realtime_voices;
+    let small = realtime_voices(48_000.0, 256);
+    let large = realtime_voices(48_000.0, 1024);
+    eprintln!("POLY voices in real time here at 48 kHz: {small} at 256 frames, {large} at 1024");
+    assert!(small <= 10 && large <= 10);
+    assert!(large >= small);
+    assert_eq!(realtime_voices(48_000.0, 256), small);
+}
