@@ -7,7 +7,7 @@ use resvg::tiny_skia::{Color, Pixmap, PixmapPaint, Transform};
 use resvg::usvg;
 
 use crate::art::{self, H, Layer, Layout, W};
-use crate::controls::{CONTROLS, Kind};
+use crate::controls::{CONTROLS, Kind, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 
 /// What the panel shows.
@@ -165,6 +165,7 @@ impl Renderer {
 
     /// The layers showing `scene`, in the order they are drawn.
     fn layers(&self, scene: &Scene) -> Vec<Layer> {
+        let silent = feedback_silent(&scene.values);
         let mut out: Vec<Layer> = CONTROLS
             .iter()
             .zip(scene.values)
@@ -174,7 +175,13 @@ impl Renderer {
                     Kind::Wheel { .. } => scene.midi.1,
                     _ => 0.0,
                 };
-                art::control(c, v, midi)
+                let mut layer = art::control(c, v, midi);
+                // FEEDBACK while EXTERNAL INPUT is closed: dimmed as the parts with no
+                // parameter are, still operable.
+                if silent && c.param == "feedback" {
+                    layer.body = format!("<g opacity='0.5'>{}</g>", layer.body);
+                }
+                layer
             })
             .collect();
         out.push(art::power(scene.power));
@@ -251,5 +258,59 @@ impl Renderer {
             }
         }
         changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::controls::index;
+
+    /// FEEDBACK's knob is drawn dimmed while EXTERNAL INPUT is switched off, and nothing
+    /// else on the panel changes.
+    #[test]
+    fn feedback_dims_while_external_input_is_closed() {
+        let open = Scene {
+            values: [0.5; CONTROLS.len()],
+            ..Scene::default()
+        };
+        let mut closed = open.clone();
+        let feedback = index("feedback").expect("a control");
+        let ext = index("ext_on").expect("a control");
+        closed.values[ext] = 0.0;
+        let frame = |scene: &Scene| {
+            let mut r = Renderer::new(0.5, 1.0);
+            r.render(scene);
+            (r.frame().clone(), r.scale())
+        };
+        let ((a, s), (b, _)) = (frame(&open), frame(&closed));
+        let c = &CONTROLS[feedback];
+        let (cx, cy) = c.centre();
+        let k = art::bounds(&c.kind);
+        let knob = |x: u32, y: u32| {
+            let (x, y) = (f64::from(x) / s, f64::from(y) / s);
+            (cx + k[0]..cx + k[2]).contains(&x) && (cy + k[1]..cy + k[3]).contains(&y)
+        };
+        // EXTERNAL INPUT's own switch moves too.
+        let switch = &CONTROLS[ext];
+        let (sx, sy) = switch.centre();
+        let sk = art::bounds(&switch.kind);
+        let rocker = |x: u32, y: u32| {
+            let (x, y) = (f64::from(x) / s, f64::from(y) / s);
+            (sx + sk[0]..sx + sk[2]).contains(&x) && (sy + sk[1]..sy + sk[3]).contains(&y)
+        };
+        let (mut inside, mut outside) = (0, 0);
+        for (i, (p, q)) in a.pixels().iter().zip(b.pixels()).enumerate() {
+            let (x, y) = (i as u32 % a.width(), i as u32 / a.width());
+            if p != q {
+                if knob(x, y) {
+                    inside += 1;
+                } else if !rocker(x, y) {
+                    outside += 1;
+                }
+            }
+        }
+        assert!(inside > 500, "{inside} of the knob's pixels dimmed");
+        assert_eq!(outside, 0, "{outside} pixels elsewhere changed");
     }
 }

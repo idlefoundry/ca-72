@@ -484,3 +484,38 @@ pub const CONTROLS: [Control; 44] = [
 pub fn index(param: &str) -> Option<usize> {
     CONTROLS.iter().position(|c| c.param == param)
 }
+
+/// FEEDBACK's tip while it is silent ([`feedback_silent`]).
+pub const FEEDBACK_SILENT: &str =
+    "FEEDBACK (silent: switch EXTERNAL INPUT on in the MIXER and turn its VOLUME up)";
+
+/// Whether FEEDBACK is silent at these values (normalized, by index in [`CONTROLS`]): it is
+/// heard through the MIXER's EXTERNAL INPUT, so nothing goes back while that is switched off
+/// or its VOLUME is at 0. Its knob is then dimmed, still turnable, and its tip says why (the
+/// owner, 2026-10-02).
+pub fn feedback_silent(values: &[f64; CONTROLS.len()]) -> bool {
+    let at = |param| index(param).map_or(0.0, |i| values[i]);
+    !(at("ext_on") >= 0.5 && at("ext_volume") > 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn feedback_is_silent_while_external_input_is_closed() {
+        let mut v = [0.5; CONTROLS.len()];
+        let (on, volume) = (
+            index("ext_on").expect("a control"),
+            index("ext_volume").expect("a control"),
+        );
+        assert!(!feedback_silent(&v));
+        v[on] = 0.0;
+        assert!(feedback_silent(&v));
+        v[on] = 1.0;
+        v[volume] = 0.0;
+        assert!(feedback_silent(&v));
+        v[volume] = 0.01;
+        assert!(!feedback_silent(&v));
+    }
+}

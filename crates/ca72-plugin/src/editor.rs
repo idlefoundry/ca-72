@@ -16,6 +16,7 @@ use baseview::{
     WindowHandler, WindowOpenOptions, WindowScalePolicy,
 };
 use ca72_panel::art::{self, PLATE_TURN, POWER};
+use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
 use ca72_panel::strip::{self, Amount, STRIP_H, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Target, interact};
 use keyboard_types::Modifiers;
@@ -818,8 +819,13 @@ impl Editing {
                 let p = self.operated(i)?;
                 let (x, y) = c.centre();
                 let top = art::bounds(&c.kind)[1];
+                let label = if c.param == "feedback" && feedback_silent(&self.scene.values) {
+                    FEEDBACK_SILENT
+                } else {
+                    c.label
+                };
                 Some((
-                    format!("{}: {}", c.label, p.text(self.scene.values[i] as f32)),
+                    format!("{label}: {}", p.text(self.scene.values[i] as f32)),
                     x,
                     y + top,
                 ))

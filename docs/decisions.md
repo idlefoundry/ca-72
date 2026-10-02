@@ -222,6 +222,14 @@ now FEEDBACK, its legend reading FEEDBACK. The same was done in DAW-v3 (DMM).
   none with it. One voice (POLY off) with FEEDBACK costs about half the period.
 - The approved panel (R2, `crates/ca72-panel/tests/approved.png`) differs only at that knob
   and its legend; the comparison still passes within its limits.
+- The knob is dimmed while EXTERNAL INPUT is closed (the owner, 2026-10-02, approved: in a
+  test the knob seemed to do nothing, as EXTERNAL INPUT was off; "grayed out ... unless the
+  external volume input has been turned on and is above zero"). While the mixer's EXTERNAL
+  INPUT switch is off or its VOLUME is at 0 the knob is drawn at half opacity, as the parts
+  with no parameter are, and its tip reads "FEEDBACK (silent: switch EXTERNAL INPUT on in
+  the MIXER and turn its VOLUME up)". It stays operable (agent's decision), so the amount
+  can be set first. The sound is unchanged. Tests: `controls::feedback_silent`'s cases and
+  `render::tests` (the knob's pixels dimmed, nothing else on the panel changed).
 - Tests: `crates/ca72/tests/feedback.rs` (not heard with EXTERNAL INPUT off; OVERLOAD lit and
   the sound brighter in every mode; Potato as High Fidelity; finite and within the rails
   with every control feeding the loop at its end), the threaded test (the same samples to
