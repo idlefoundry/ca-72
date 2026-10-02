@@ -82,6 +82,7 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         voices: if r.end() { 10 } else { 2 },
         analog: r.either(0.0, 1.0),
         spread: r.either(0.0, 1.0),
+        feedback: r.either(0.0, 1.0),
     }
 }
 

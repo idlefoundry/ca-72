@@ -42,6 +42,9 @@ pub struct Controls {
     pub voices: usize,
     pub analog: f64,
     pub spread: f64,
+    /// FEEDBACK (0..1): the voices' output patched back into their EXTERNAL INPUT, a sample
+    /// late, by this much of its level (the phones' VOLUME knob; decisions.md R8).
+    pub feedback: f64,
 }
 
 impl Default for Controls {
@@ -56,6 +59,7 @@ impl Default for Controls {
             voices: POLY_VOICES.1,
             analog: 0.0,
             spread: 0.0,
+            feedback: 0.0,
         }
     }
 }
@@ -557,7 +561,9 @@ impl Engine {
     fn apply(&mut self) {
         let p = self.panel();
         let analog = self.controls.analog * ANALOG_DEPTH;
+        let feedback = self.controls.feedback.clamp(0.0, 1.0);
         for s in &mut self.slots {
+            s.voice.feedback = feedback;
             let pv = if analog > 0.0 {
                 analog_panel(&s.character, p, analog)
             } else {
@@ -580,26 +586,30 @@ pub const HEADROOM: f64 = 0.6;
 /// oscillator 3 on the filter through the MODULATION wheel, ANALOG's offsets on), and how
 /// many such fit in [`HEADROOM`] of the block's period. Measured on the calling thread (not
 /// the audio thread's): a quarter of a second or so, once a process for each rate and block.
-pub fn realtime_voices(rate: f64, block: usize) -> u32 {
+/// With `feedback`, FEEDBACK on (at half, into the external input at half VOLUME: its
+/// preamplifier running, solved as High Fidelity's).
+pub fn realtime_voices(rate: f64, block: usize, feedback: bool) -> u32 {
     use std::sync::{Mutex, OnceLock};
-    static MEASURED: OnceLock<Mutex<Vec<(u64, usize, u32)>>> = OnceLock::new();
+    /// A measurement: the rate's bits, the block, FEEDBACK, the voices.
+    type Measured = (u64, usize, bool, u32);
+    static MEASURED: OnceLock<Mutex<Vec<Measured>>> = OnceLock::new();
     let cache = MEASURED.get_or_init(|| Mutex::new(Vec::new()));
-    let key = (rate.to_bits(), block);
+    let key = (rate.to_bits(), block, feedback);
     if let Some(n) = cache
         .lock()
         .ok()
-        .and_then(|c| c.iter().find(|e| (e.0, e.1) == key).map(|e| e.2))
+        .and_then(|c| c.iter().find(|e| (e.0, e.1, e.2) == key).map(|e| e.3))
     {
         return n;
     }
-    let n = measure_voices(rate, block);
+    let n = measure_voices(rate, block, feedback);
     if let Ok(mut c) = cache.lock() {
-        c.push((key.0, key.1, n));
+        c.push((key.0, key.1, key.2, n));
     }
     n
 }
 
-fn measure_voices(rate: f64, block: usize) -> u32 {
+fn measure_voices(rate: f64, block: usize, feedback: bool) -> u32 {
     let factor = [1, 2, 4, 8]
         .into_iter()
         .find(|f| rate * *f as f64 >= MIN_VOICE_RATE)
@@ -616,6 +626,11 @@ fn measure_voices(rate: f64, block: usize) -> u32 {
     p.glide_on = true;
     p.emphasis = 0.5;
     p.quality = Quality::Potato;
+    if feedback {
+        p.ext_on = true;
+        p.ext_volume = 0.5;
+        v.feedback = 0.5;
+    }
     v.panel = p;
     let mut character = Character::new(1, 1, 3, ANALOG_KNOBS);
     let keys = [45, 57, 52, 64, 40, 69, 48, 60];

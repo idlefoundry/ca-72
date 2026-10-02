@@ -494,6 +494,11 @@ pub struct Threaded {
     pub failed: u64,
     /// How the workers follow the audio thread's scheduling, if they do.
     follow: Option<Follow>,
+    /// FEEDBACK, as [`Voice::feedback`]: on, the parts run in turn on the caller's thread
+    /// (a one-sample loop from the output to the preamplifier leaves nothing to pipeline).
+    pub feedback: f64,
+    /// The last output sample, for FEEDBACK.
+    fed_back: f64,
 }
 
 impl Threaded {
@@ -555,6 +560,8 @@ impl Threaded {
             overload_peak: 0.0,
             failed: 0,
             follow,
+            feedback: 0.0,
+            fed_back: 0.0,
         })
     }
 
@@ -587,7 +594,7 @@ impl Threaded {
         jacks: impl Fn(usize) -> Jacks,
         mut out: impl FnMut(usize, f64),
     ) {
-        if self.panel.quality == Quality::Potato {
+        if self.panel.quality == Quality::Potato || self.feedback > 0.0 {
             self.process_in_turn(len, jacks, out);
             return;
         }
@@ -670,7 +677,10 @@ impl Threaded {
             }
             for (i, &given) in given.iter().enumerate().take(n) {
                 match (given, ok[3].then(|| self.back.take(i)).flatten()) {
-                    (true, Some(o)) => out(at + i, o[1]),
+                    (true, Some(o)) => {
+                        self.fed_back = o[1];
+                        out(at + i, o[1]);
+                    }
                     _ => {
                         // A worker has stopped: the sample is silent.
                         self.failed += 1;
@@ -729,8 +739,12 @@ impl Threaded {
             }
             return;
         };
+        pre.part.accurate = self.feedback > 0.0;
         for i in 0..len {
-            let j = jacks(i);
+            let mut j = jacks(i);
+            if self.feedback > 0.0 {
+                j.ext += self.feedback * self.fed_back;
+            }
             let mut c = self.keys.step();
             c.s_trig = j.s_trig;
             let v_kbd = kbd.part.tick(&p, c);
@@ -743,6 +757,7 @@ impl Threaded {
             let f = self.front.tick(&p, &j, v_kbd, &control, i_pre);
             let (_, y) = back.part.tick(&p, &f, &d);
             self.last_drive = d.to_array();
+            self.fed_back = y;
             out(i, y);
         }
     }

@@ -134,8 +134,10 @@ impl Plugin for Ca72 {
         // What this machine plays in real time with POLY at the host's largest block
         // (decisions.md, "POLY in real time"): shown beside VOICES.
         let block = config.max_buffer_size.max(1) as usize;
-        let fits = crate::engine::realtime_voices(f64::from(config.sample_rate), block);
-        self.meters.measured(fits, block as u32);
+        let rate = f64::from(config.sample_rate);
+        let fits = crate::engine::realtime_voices(rate, block, false);
+        let fits_feedback = crate::engine::realtime_voices(rate, block, true);
+        self.meters.measured(fits, fits_feedback, block as u32);
         true
     }
 

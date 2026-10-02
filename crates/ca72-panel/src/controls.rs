@@ -202,7 +202,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 43] = [
+pub const CONTROLS: [Control; 44] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -421,6 +421,15 @@ pub const CONTROLS: [Control; 43] = [
         50.0,
         Colour::Blue,
         Orient::Right,
+    ),
+    // The phones' VOLUME is the plug-in's FEEDBACK (decisions.md R8): the PHONES output
+    // cabled into EXTERNAL INPUT, as players overdrive the instrument.
+    knob(
+        "feedback",
+        "FEEDBACK (the phones' VOLUME: the output into EXTERNAL INPUT)",
+        2680.0,
+        580.0,
+        Dial::Ten,
     ),
     // The left hand controller.
     rocker(

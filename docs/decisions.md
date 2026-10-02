@@ -194,3 +194,31 @@ part was measured first.
 - So VOICES defaults to 4, what omarchy plays at 256 frames; the strip shows each
   machine's own count (a voice costs about the same share of any block, so a larger block
   barely changes it: 4 at 1024 frames on omarchy too).
+
+## R8. FEEDBACK: the phones' VOLUME knob
+**Owner decisions, 2026-10-02.** The instrument has no overdrive control; players cable its
+PHONES output into EXTERNAL INPUT and turn the phones' VOLUME up, overdriving the external
+input's preamplifier and the mixer. The owner asked for a feedback control, and then for it
+to take the place of the unused volume knob: the phones' VOLUME, which did nothing (R3), is
+now FEEDBACK, its legend reading FEEDBACK. The same was done in DAW-v3 (DMM).
+
+**Agent decisions, 2026-10-02** (not separately approved):
+- FEEDBACK (`feedback`, 0 to 10 on the knob's dial, 0 by default: no cable) sends each
+  voice's output, before MAIN OUTPUT's VOLUME, times the knob's share, into its EXTERNAL
+  INPUT one sample later (a loop cannot be instantaneous), added to the side chain there.
+  As with the cable it is heard through the MIXER's EXTERNAL INPUT switch and VOLUME, and
+  OVERLOAD lights.
+- While FEEDBACK is on the preamplifier is solved as High Fidelity solves it: Potato's
+  (its paths fitted to the circuit's gain) sent the loop into a low, dark oscillation the
+  circuit does not make. With it Potato sounds as High Fidelity does at 30 % (level within
+  1 %, brightness 30.5 % against 28.7 % above 1 kHz; `crates/ca72/tests/feedback.rs`).
+- Cost: a voice about 9.6 us a sample with FEEDBACK on, against 1.8 without (omarchy): about
+  half a core at 48 kHz. The strip's real-time count is measured both ways at activation
+  and shows the one in force: on omarchy at 256 frames, 4 POLY voices without FEEDBACK,
+  none with it. One voice (POLY off) with FEEDBACK costs about half the period.
+- The approved panel (R2, `crates/ca72-panel/tests/approved.png`) differs only at that knob
+  and its legend; the comparison still passes within its limits.
+- Tests: `crates/ca72/tests/feedback.rs` (not heard with EXTERNAL INPUT off; OVERLOAD lit and
+  the sound brighter in every mode; Potato as High Fidelity; finite and within the rails
+  with every control feeding the loop at its end), the threaded test (the same samples to
+  the bit), the engine's bounds fuzz (`tests/fuzz_bounds.rs`, FEEDBACK at its ends too).

@@ -125,10 +125,13 @@ fn poly_chords_in_real_time() {
 #[test]
 fn what_this_machine_plays_in_real_time() {
     use ca72_plugin::engine::realtime_voices;
-    let small = realtime_voices(48_000.0, 256);
-    let large = realtime_voices(48_000.0, 1024);
+    let small = realtime_voices(48_000.0, 256, false);
+    let large = realtime_voices(48_000.0, 1024, false);
+    let fed = realtime_voices(48_000.0, 256, true);
+    eprintln!("POLY voices in real time here at 48 kHz with FEEDBACK on: {fed} at 256 frames");
+    assert!(fed <= small);
     eprintln!("POLY voices in real time here at 48 kHz: {small} at 256 frames, {large} at 1024");
     assert!(small <= 10 && large <= 10);
     assert!(large >= small);
-    assert_eq!(realtime_voices(48_000.0, 256), small);
+    assert_eq!(realtime_voices(48_000.0, 256, false), small);
 }

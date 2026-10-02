@@ -63,9 +63,10 @@ pub struct Meters {
     overload: AtomicU32,
     bend: AtomicU32,
     modulation: AtomicU32,
-    /// How many POLY voices play in real time here (u32::MAX: not measured), at the host's
-    /// largest block, frames.
+    /// How many POLY voices play in real time here (u32::MAX: not measured), without and
+    /// with FEEDBACK, at the host's largest block, frames.
     fits: AtomicU32,
+    fits_feedback: AtomicU32,
     block: AtomicU32,
 }
 
@@ -76,6 +77,7 @@ impl Default for Meters {
             bend: AtomicU32::new(0.5f32.to_bits()),
             modulation: AtomicU32::new(0.0f32.to_bits()),
             fits: AtomicU32::new(u32::MAX),
+            fits_feedback: AtomicU32::new(u32::MAX),
             block: AtomicU32::new(0),
         }
     }
@@ -84,14 +86,21 @@ impl Default for Meters {
 impl Meters {
     /// How many POLY voices this machine plays in real time in blocks of `block` frames
     /// (`crate::engine::realtime_voices`).
-    pub fn measured(&self, fits: u32, block: u32) {
+    pub fn measured(&self, fits: u32, fits_feedback: u32, block: u32) {
         self.block.store(block, Ordering::Relaxed);
         self.fits.store(fits, Ordering::Relaxed);
+        self.fits_feedback.store(fits_feedback, Ordering::Relaxed);
     }
 
-    /// What [`Meters::measured`] last gave: the voices and the block.
-    pub fn fits(&self) -> Option<(u32, u32)> {
-        let n = self.fits.load(Ordering::Relaxed);
+    /// What [`Meters::measured`] last gave, without or with FEEDBACK: the voices and the
+    /// block.
+    pub fn fits(&self, feedback: bool) -> Option<(u32, u32)> {
+        let n = if feedback {
+            &self.fits_feedback
+        } else {
+            &self.fits
+        }
+        .load(Ordering::Relaxed);
         (n != u32::MAX).then(|| (n, self.block.load(Ordering::Relaxed)))
     }
 
@@ -180,6 +189,7 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "loudness_decay" => &p.loudness_decay,
         "loudness_sustain" => &p.loudness_sustain,
         "volume" => &p.volume,
+        "feedback" => &p.feedback,
         "main_output" => &p.main_output,
         "a440" => &p.a440,
         "glide_on" => &p.glide_on,
@@ -786,7 +796,7 @@ impl Editing {
         let p = &self.params;
         self.strip_scene.poly = p.poly.value();
         self.strip_scene.voices = u32::try_from(p.voices.value()).unwrap_or(4);
-        self.strip_scene.fits = self.meters.fits();
+        self.strip_scene.fits = self.meters.fits(self.params.feedback.value() > 0.0);
         self.strip_scene.analog = f64::from(p.analog.unmodulated_normalized_value());
         self.strip_scene.spread = f64::from(p.spread.unmodulated_normalized_value());
     }
@@ -1591,7 +1601,7 @@ mod tests {
             ]
         );
         // The strip draws what the parameters hold and what plays in real time here.
-        e.meters.measured(6, 512);
+        e.meters.measured(6, 2, 512);
         e.update_scene();
         assert_eq!(e.strip_scene.fits, Some((6, 512)));
         assert!(e.draw());

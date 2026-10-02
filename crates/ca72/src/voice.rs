@@ -395,6 +395,14 @@ pub struct Voice {
     control_quality: Option<Quality>,
     /// The last sample's contours (filter, loudness), V.
     last_ctl: (f64, f64),
+    /// FEEDBACK (the plug-in's, not the instrument's): how much of the voice's own output is
+    /// patched back into its EXTERNAL INPUT jack, 0 to 1 (1: the output at its full level,
+    /// before MAIN OUTPUT's VOLUME), one sample late, as players cable the output into the
+    /// external input to overdrive the preamplifier and the mixer. Heard through the
+    /// MIXER's EXTERNAL INPUT switch and VOLUME, as the cable is. 0, nothing is added.
+    pub feedback: f64,
+    /// The last output sample, for FEEDBACK.
+    fed_back: f64,
 }
 
 /// The keys: which are held, and which released keys' pitch contacts are still closed.
@@ -551,6 +559,10 @@ pub struct PreampPart {
     ext_amp: f64,
     /// EXT. INPUT VOLUME's law.
     volume: Memo<(f64, f64)>,
+    /// With FEEDBACK on: the preamplifier solved as High Fidelity solves it even in Potato,
+    /// whose preamplifier (its paths fitted to the circuit's gain) oscillates low and dark
+    /// inside the loop where the circuit does not.
+    pub accurate: bool,
 }
 
 /// The modulation line, the oscillators, the mixer and the filter's control node.
@@ -725,6 +737,7 @@ impl Voice {
                     overload_peak: 0.0,
                     ext_amp: 0.0,
                     volume: Memo::NEW,
+                    accurate: false,
                 },
                 front: FrontPart {
                     rate,
@@ -758,6 +771,8 @@ impl Voice {
             },
             control_quality: None,
             last_ctl: (0.0, 0.0),
+            feedback: 0.0,
+            fed_back: 0.0,
         }
     }
 
@@ -922,8 +937,23 @@ impl Voice {
         })
     }
 
-    /// One output sample with these signals at the jacks.
+    /// One output sample with these signals at the jacks (and, with [`Voice::feedback`],
+    /// the last output sample added at EXTERNAL INPUT).
     pub fn tick_jacks(&mut self, j: &Jacks) -> f64 {
+        self.audio.pre.accurate = self.feedback > 0.0;
+        let y = if self.feedback > 0.0 {
+            self.tick_at(&Jacks {
+                ext: j.ext + self.feedback * self.fed_back,
+                ..*j
+            })
+        } else {
+            self.tick_at(j)
+        };
+        self.fed_back = y;
+        y
+    }
+
+    fn tick_at(&mut self, j: &Jacks) -> f64 {
         let p = self.panel;
         let mut c = self.keys.step();
         c.s_trig = j.s_trig;
@@ -1219,7 +1249,12 @@ impl PreampPart {
     pub fn tick(&mut self, p: &Panel, ext: f64) -> f64 {
         let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
         let mut laps = crate::prof::Laps::start();
-        self.preamp.set_quality(p.quality);
+        self.preamp
+            .set_quality(if self.accurate && p.quality == Quality::Potato {
+                Quality::HighFidelity
+            } else {
+                p.quality
+            });
         // The external input: R9's divider into the preamplifier, which runs while SW10 is
         // on; R46 loads the bus either way (the front counts its conductance).
         let i = if p.ext_on {

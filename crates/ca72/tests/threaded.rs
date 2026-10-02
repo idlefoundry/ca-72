@@ -84,6 +84,11 @@ fn threads_give_the_same_samples_as_one() {
             serial.note(key(block / 4), false);
             threaded.note(key(block / 4), false);
         }
+        // FEEDBACK (decisions.md R8) from 1.0 s to 1.4 s, the external input on: the output
+        // into it, a sample late.
+        let fb = if (1.0..1.4).contains(&t) { 0.6 } else { 0.0 };
+        serial.feedback = fb;
+        threaded.feedback = fb;
         let n = lengths[block % lengths.len()];
         let want: Vec<f64> = (0..n).map(|i| serial.tick_jacks(&jacks(at + i))).collect();
         let mut got = vec![f64::NAN; n];
@@ -92,7 +97,7 @@ fn threads_give_the_same_samples_as_one() {
         // In Potato the parts run in turn on this thread: no pass goes to the workers.
         assert_eq!(
             threaded.passes() == passes,
-            threaded.panel.quality == Quality::Potato,
+            threaded.panel.quality == Quality::Potato || fb > 0.0,
             "block {block}"
         );
         for (i, (w, g)) in want.iter().zip(&got).enumerate() {

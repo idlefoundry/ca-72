@@ -60,6 +60,12 @@ for the CLAP bundle.
   MIXER switch and VOLUME.
 - **Output:** stereo, the same on both channels unless SPREAD places POLY's voices; on a
   mono output, the two channels together.
+- **FEEDBACK** (the phones' VOLUME knob, 0 by default): the instrument has no overdrive
+  control; players cable its PHONES output into EXTERNAL INPUT. This knob is that cable:
+  turn it up, switch the MIXER's EXTERNAL INPUT on and raise its VOLUME, and the output
+  overdrives the external input's preamplifier and the mixer (OVERLOAD lights). With it on
+  a voice costs about five times as much, so fewer POLY voices play in real time (the
+  strip shows how many).
 - **POWER** is the host's bypass: the output fades out over 10 ms and back in.
 
 The editor works like the panel:
@@ -155,7 +161,8 @@ The service documents and datasheets the model was derived from are not included
   "POLY in real time"); the strip shows the number. With more, expect dropouts.
 - Ten voices at full level with SPREAD can peak above 0 dBFS; lower MAIN OUTPUT's VOLUME.
 - The rear panel's control voltage and trigger inputs are left out.
-- PHONES and the jacks in the controller's column are drawn but do nothing.
+- The PHONES jack and the jacks in the controller's column are drawn but do nothing (the
+  phones' VOLUME knob is FEEDBACK).
 - Building the voice when the plug-in is activated takes about 0.8 s the first time in a
   process, since it includes the factory calibration. A new sample rate after that takes
   0.1 to 0.4 s; the same rate again is immediate.

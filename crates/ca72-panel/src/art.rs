@@ -700,13 +700,10 @@ fn panel(s: &mut Svg, layout: &Layout) {
     legend(s, 2902.0, 200.0, "ON");
     legend(s, 2682.0, 336.0, "A–440");
     legend(s, 2728.0, 410.0, "ON");
-    legend(s, 2682.0, 485.0, "VOLUME");
+    // The phones' VOLUME knob is FEEDBACK (a control: decisions.md R8).
+    legend(s, 2682.0, 485.0, "FEEDBACK");
     legend(s, 2856.0, 485.0, "PHONES");
-    // PHONES has no parameter: drawn for the panel's sake, dimmed.
-    draw_dial(s, 2680.0, 580.0, Dial::Ten);
-    put!(s, "<g transform='translate(2680 580)' opacity='0.5'>");
-    knob_body(s, STD, -150.0);
-    s.0.push_str("</g>");
+    // The PHONES jack has no parameter: drawn for the panel's sake, dimmed.
     put!(s, "<g transform='translate(2855 581)' opacity='0.5'>");
     jack(s, 34.0, false);
     s.0.push_str("</g>");
