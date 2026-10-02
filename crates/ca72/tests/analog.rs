@@ -67,9 +67,11 @@ fn the_cutoffs_offset_is_its_octaves() {
     // offset's octaves within 6 % (at the centre within 1 %).
     let mut out = String::new();
     for cutoff in [0.2, 0.5, 0.8] {
-        let mut panel = Panel::default();
-        panel.cutoff = cutoff;
-        panel.contour_amount = 0.0;
+        let panel = Panel {
+            cutoff,
+            contour_amount: 0.0,
+            ..Panel::default()
+        };
         let v = Voice::new(SR, panel);
         let i0 = |octaves: f64| {
             let mut w = v.clone();

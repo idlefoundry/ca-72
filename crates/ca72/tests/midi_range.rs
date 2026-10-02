@@ -157,9 +157,11 @@ fn the_lowest_key_held_sounds_over_all_128() {
 fn glide_crosses_the_strings_ends() {
     // GLIDE at 5, legato from MIDI 29 (below the keyboard) to 60, and on to 100 (above it):
     // the keyboard's voltage slides the whole way, with no step where the string ends.
-    let mut panel = Panel::default();
-    panel.glide = 0.5;
-    panel.glide_on = true;
+    let panel = Panel {
+        glide: 0.5,
+        glide_on: true,
+        ..Panel::default()
+    };
     let mut v = Voice::new(SR, panel);
     v.note(29, true);
     for _ in 0..(0.5 * SR) as usize {

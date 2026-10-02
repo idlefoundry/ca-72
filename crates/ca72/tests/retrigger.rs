@@ -10,8 +10,10 @@ use ca72::voice::{Panel, Quality, RETRIGGER_GAP, Voice};
 /// The loudness contour's highest over the 80 ms after a second key, against its sustain
 /// before, V: with `gap` s between the first key's release and the second's press.
 fn rise(rate: f64, quality: Quality, gap: f64) -> f64 {
-    let mut p = Panel::default();
-    p.quality = quality;
+    let p = Panel {
+        quality,
+        ..Panel::default()
+    };
     let mut v = Voice::new(rate, p);
     v.note(45, true);
     let mut sustain = 0.0;
