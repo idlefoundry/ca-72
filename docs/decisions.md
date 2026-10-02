@@ -183,6 +183,13 @@ part was measured first.
     back rather than paying for the voices (`evidence/poly-mac.log`). The strip's own count
     there: 7 at 256 frames. To be measured again on a quiet Mac.
   - No run was demoted by the watchdog.
+- **Evidence (the Mac, 2026-10-02, the release bundles of this version):** clap-validator
+  0.4.1, 37 passed, 0 failed, 7 skipped (before the two fixes `param-fuzz-bounds` failed
+  every time); pluginval 1.0.4 at strictness 10, SUCCESS, its editor tests skipped this
+  time (`--skip-gui-tests`: the Mac was in use, and they open windows on its screen);
+  Steinberg's validator (SDK 3.8.1), 47 passed, 0 failed. The workspace's tests and clippy
+  pass on the Mac and on Linux. Linux's validators were not run locally (omarchy has no
+  cmake or xvfb-run); CI runs them.
 - So VOICES defaults to 4, what omarchy plays at 256 frames; the strip shows each
   machine's own count (a voice costs about the same share of any block, so a larger block
   barely changes it: 4 at 1024 frames on omarchy too).
