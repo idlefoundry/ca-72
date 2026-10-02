@@ -171,13 +171,17 @@ fn reset_controllers_returns_the_wheels() {
     assert_eq!(e.wheels(), (0.0, 0.0));
 }
 
-/// POLY off with ANALOG and SPREAD at 0 is the one voice as the plug-in played it before
-/// POLY existed: the engine's output, sample for sample, a voice's own (its noise seeded
-/// with the instance's seed, in Potato) times MAIN OUTPUT's gain.
+/// POLY off with ANALOG and SPREAD at 0 and LOCK on (the oscillators without their floor,
+/// R9; one oscillator, so no trim) is the one voice as the plug-in played it before POLY
+/// existed: the engine's output, sample for sample, a voice's own (its noise seeded with the
+/// instance's seed, in Potato) times MAIN OUTPUT's gain.
 #[test]
 fn poly_off_is_the_one_voice_as_before() {
     use ca72::voice::{Quality, Voice};
-    let c = Controls::default();
+    let c = Controls {
+        lock: true,
+        ..Controls::default()
+    };
     let mut e = ready(&c);
     let mut v = Voice::prototype(RATE);
     v.set_seed(1);
