@@ -257,12 +257,17 @@ fn body(fonts: &Fonts, s: &StripScene) -> String {
             "start",
         );
     }
-    // ANALOG and SPREAD.
+    // ANALOG and SPREAD. SPREAD places POLY's voices: with POLY off the one voice is in the
+    // centre, so it is dimmed (still operable, to set before POLY goes on).
     for (a, label, lx, t0, t1, vx, sw) in AMOUNTS {
         let v = match a {
             Amount::Analog => s.analog,
             Amount::Spread => s.spread,
         };
+        let muted = a == Amount::Spread && !s.poly;
+        if muted {
+            put!(out, "<g opacity='0.5'>");
+        }
         text(&mut out, lx, label, colour::LEGEND, "start");
         put!(
             out,
@@ -310,6 +315,9 @@ fn body(fonts: &Fonts, s: &StripScene) -> String {
             v > 0.0,
             s.hover == Some(StripTarget::Switch(a)),
         );
+        if muted {
+            put!(out, "</g>");
+        }
     }
     let _ = fonts.advance("", TEXT, Weight::Regular, 0.0);
     out.0
@@ -464,5 +472,38 @@ mod tests {
         s.voices = 6;
         assert!(r.render(&s));
         assert_eq!(r.frame().width(), strip_size(0.4).0);
+    }
+
+    /// SPREAD is drawn dimmed while POLY is off, ANALOG as it is.
+    #[test]
+    fn spread_dims_while_poly_is_off() {
+        let scale = 0.5;
+        let frame = |poly: bool| {
+            let mut r = StripRenderer::new(scale);
+            r.render(&StripScene {
+                poly,
+                analog: 0.5,
+                spread: 0.5,
+                ..StripScene::default()
+            });
+            r.frame().clone()
+        };
+        let (off, on) = (frame(false), frame(true));
+        // The pixels that differ in each amount's span (its label to its switch).
+        let differ = |a: Amount| {
+            let &(_, _, lx, _, _, _, sw) = AMOUNTS.iter().find(|x| x.0 == a).expect("an amount");
+            let (x0, x1) = ((lx * scale) as u32, ((sw + SWITCH_W) * scale) as u32);
+            off.pixels()
+                .iter()
+                .zip(on.pixels())
+                .enumerate()
+                .filter(|&(i, (p, q))| {
+                    let x = i as u32 % off.width();
+                    (x0..x1).contains(&x) && p != q
+                })
+                .count()
+        };
+        assert!(differ(Amount::Spread) > 200, "SPREAD not dimmed");
+        assert_eq!(differ(Amount::Analog), 0, "ANALOG changed with POLY");
     }
 }

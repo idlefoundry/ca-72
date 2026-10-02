@@ -162,6 +162,13 @@ part was measured first.
   the amount, a voice in the centre whole on both sides. The output became stereo for it;
   on a mono output it is the two channels together, so a session with SPREAD at 0 sounds
   as before on either.
+- SPREAD is drawn at half opacity while POLY is off (the owner, 2026-10-02, approved: "in
+  the case of a single voice only patch, then the spread should be grayed out"): the one
+  voice is in the centre, so it does nothing. It stays operable (agent's decision), to be
+  set before POLY goes on. The strip has no tips, so it is dimmed only. Test:
+  `strip::tests::spread_dims_while_poly_is_off`. (A stereo spread of the three oscillators
+  in one voice was weighed and dropped: they are summed before the one filter, so it would
+  need a second mixer, filter and VCA.)
 
 ### POLY in real time
 - POLY's voices run in turn on the host's audio thread. The plug-in starts no threads of
