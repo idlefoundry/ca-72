@@ -1542,3 +1542,47 @@ RDW_ALLCHILDREN)`:
 
 Not tried: another host, a remote-desktop session, CI's Windows runner (the new test needs
 the editor drawn on a desktop), macOS and Linux (whose code is unchanged).
+
+## R29. 0.1.1
+**Owner decision, 2026-10-06.** A 0.1.1 release once R28 is merged ("once #4 merges,
+prepare a 0.1.1 release").
+
+**What it brings since 0.1.0** (the tag `v0.1.0`):
+- **Windows: the host no longer aborts** as the presets' drawer opens, nor as the grip
+  resizes in a host that resizes the editor's window from within the editor's request (R26;
+  Sonar, and a developer's own DAW).
+- **Windows: the editor is shown again when Windows repaints its window** (R28; it stayed
+  the host's grey after a capture or a host's repaint, in REAPER among others).
+- **CHECK FOR UPDATES** in the presets' drawer (R27). 0.1.0 has none, so its users learn of
+  0.1.1 from the releases page.
+- The README's video (documents only).
+
+**Agent decisions, 2026-10-06** (not separately approved):
+- **A patch release, 0.1.1.** Nothing a project or a preset holds has changed since 0.1.0:
+  the parameters, the plug-in's IDs, the voice (`crates/ca72`, the plug-in's engine) and the
+  presets' format are 0.1.0's, so what was saved with 0.1.0 opens unchanged. Its installers
+  install over 0.1.0's, as they are made to (the Windows installer's AppId is 0.1.0's, the
+  macOS packages are not version-checked, `install.sh` replaces the bundles).
+- **The version** is the workspace's (`Cargo.toml`): every crate's, so the installers'
+  names, the macOS packages' versions, the Windows installer's Apps entry and the update
+  check's own version (`CARGO_PKG_VERSION`) follow; `Cargo.lock` changed only in the
+  workspace's eight crates. The README's status names 0.1.1.
+- **The update check's test of versions** (`a_version_is_three_numbers`, R27) took 0.1.1 to
+  be newer than this build, true only of 0.1.0, and failed with the bump: it now takes the
+  next patch, minor and major of this build's version to be newer, and neither this one nor
+  0.1.0, so that a release's version leaves it passing.
+- **Released the way R17 and R20 set out** (R24 was 0.1.0's exception): once this is
+  merged, the tag `v0.1.1` on main's commit; CI's release job drafts the release with the
+  Windows and Linux installers, the notices, the git sources and `SHA256SUMS.txt`; the macOS
+  installer is built, signed and notarised on the Mac (`docs/macos-release.md`) and put into
+  the draft; the owner publishes it, with notes in 0.1.0's form (drafted in this change's
+  pull request).
+
+**Evidence (2026-10-06, the Windows reference machine, the GNU toolchain as R24),** on this
+change's tree (R28's, main merged into it, and the bump): `cargo test --workspace` 229
+passed, 0 failed (25 ignored, run by hand); clippy with `-D warnings` on the workspace, all
+targets, with `--features ca72-plugin/standalone`; `cargo fmt --all -- --check`;
+`scripts/notices.py --check`. `cargo xtask bundle ca72-plugin --profile bundle` and
+`scripts/package.sh` made `CA-72-0.1.1-Windows-setup.exe`, its version information 0.1.1, the
+plug-in in it built from this tree (not installed: the machine's 0.1.0 is left as it is). The
+macOS and Linux installers are CI's, on the pull request.

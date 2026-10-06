@@ -15,8 +15,8 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.1.0, the first release. The macOS installer is signed and notarised; the Windows one is
-not yet signed.
+**Status:** 0.1.1: Windows fixes and a check for updates since 0.1.0, the first release. The macOS
+installer is signed and notarised; the Windows one is not yet signed.
 
 ## Installing
 
