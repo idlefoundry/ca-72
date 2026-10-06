@@ -110,6 +110,16 @@ impl<'a> Window<'a> {
         self.window.focus()
     }
 
+    /// Whether the window takes every key while it has the keyboard, those a host's dialog would
+    /// otherwise keep for itself too (Escape, Enter, Tab and the arrows): Windows only, where a
+    /// dialog's message loop asks (`WM_GETDLGCODE`). Elsewhere nothing (CA-72 patch).
+    pub fn set_wants_keys(&mut self, wanted: bool) {
+        #[cfg(target_os = "windows")]
+        self.window.set_wants_keys(wanted);
+        #[cfg(not(target_os = "windows"))]
+        let _ = wanted;
+    }
+
     /// If provided, then an OpenGL context will be created for this window. You'll be able to
     /// access this context through [crate::Window::gl_context].
     #[cfg(feature = "opengl")]

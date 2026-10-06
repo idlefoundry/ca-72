@@ -419,6 +419,22 @@ impl<P: Plugin, B: Backend<P>> Wrapper<P, B> {
         push_successful
     }
 
+    /// The plugin's own change of a parameter during `process()` (PATCHES.md, change 10): set at
+    /// once, its smoother and the editor following, as the editor's changes are applied after the
+    /// call. Nothing is set for a parameter that is not the plugin's.
+    pub fn set_own_parameter(&self, param: ParamPtr, normalized: f32) {
+        if !self.param_ptr_to_id.contains_key(&param) {
+            nih_debug_assert_failure!("Unknown parameter: {:?}", param);
+            return;
+        }
+        // SAFETY: one of the plugin's own parameters, which live as long as the wrapper.
+        if unsafe { param.set_normalized_value(normalized) } {
+            unsafe { param.update_smoother(self.buffer_config.sample_rate, false) };
+            let task_posted = self.schedule_gui(Task::ParameterValueChanged(param, normalized));
+            nih_debug_assert!(task_posted, "The task queue is full, dropping task...");
+        }
+    }
+
     /// Get the plugin's state object, may be called by the plugin's GUI as part of its own preset
     /// management. The wrapper doesn't use these functions and serializes and deserializes directly
     /// the JSON in the relevant plugin API methods instead.

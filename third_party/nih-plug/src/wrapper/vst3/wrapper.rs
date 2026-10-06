@@ -1164,10 +1164,15 @@ impl<P: Vst3Plugin> IAudioProcessor for Wrapper<P> {
             //       on the exclusive end index) of the block.
             // FIXME: Apparently stable sort allcoates if the slice is large enough. This should be
             //        fixed at some point.
+            // At the same time, every parameter change before every event, whatever the host's
+            // order: the MIDI CCs come from parameter queues too, in the host's queue order, so a
+            // CC could otherwise land before or after an automation point at its sample, and a
+            // plugin setting that parameter from the CC (PATCHES.md, change 10) win or lose by
+            // chance. Now the automation is set first, and the event follows it.
             permit_alloc(|| {
                 process_events.sort_by_key(|event| match event {
-                    ProcessEvent::ParameterChange { timing, .. } => *timing,
-                    ProcessEvent::NoteEvent(event) => event.timing(),
+                    ProcessEvent::ParameterChange { timing, .. } => (*timing, 0),
+                    ProcessEvent::NoteEvent(event) => (event.timing(), 1),
                 })
             });
 
@@ -1400,13 +1405,42 @@ impl<P: Vst3Plugin> IAudioProcessor for Wrapper<P> {
                             inputs: buffers.aux_inputs,
                             outputs: buffers.aux_outputs,
                         };
-                        let mut context = self.inner.make_process_context(transport);
+                        let mut context = self
+                            .inner
+                            .make_process_context(transport, !data.output_param_changes.is_null());
                         let result = plugin.process(buffers.main_buffer, &mut aux, &mut context);
                         self.inner.last_process_status.store(result);
                         result
                     } else {
                         ProcessStatus::Normal
                     };
+
+                    // The parameters the plugin set itself in this run, told to the host at their
+                    // sample offsets (PATCHES.md, change 10). A queue's points are added in time
+                    // order: the runs follow one another and the plugin sets them in order.
+                    let mut own = self.inner.own_param_changes.borrow_mut();
+                    if let Some(out) = data.output_param_changes.upgrade() {
+                        for change in own.iter() {
+                            let mut queue_index = 0;
+                            if let Some(queue) = out
+                                .add_parameter_data(&change.hash, &mut queue_index)
+                                .upgrade()
+                            {
+                                let offset = clamp_output_event_timing(
+                                    change.timing + block_start as u32,
+                                    total_buffer_len as u32,
+                                );
+                                let mut point_index = 0;
+                                queue.add_point(
+                                    offset as i32,
+                                    change.normalized as f64,
+                                    &mut point_index,
+                                );
+                            }
+                        }
+                    }
+                    own.clear();
+                    drop(own);
 
                     match result {
                         ProcessStatus::Error(err) => {

@@ -1829,3 +1829,364 @@ as I think people might be running into issues."
 (R31 and R32, and the bump): `cargo test --workspace` 230 passed, 0 failed (25 ignored, run
 by hand); `Cargo.lock` changed only in the workspace's eight crates. The installers are
 CI's, on the pull request.
+
+## R34. MIDI Learn
+**The owner's request, 2026-10-06:** a focused first MIDI Learn. Each sound control (knobs,
+selectors, switches) learns a hardware controller's absolute 7-bit control change on its exact
+channel from its context menu, which shows the assignment and a clear waiting state, with a
+keyboard-accessible list besides; Escape, Cancel and closing the editor cancel; one controller
+a parameter and one parameter a controller, a controller reused moving and saying from where;
+the capture message changes nothing. The wheels keep pitch bend and CC 1; the wheels, POWER,
+MIDI BEND RANGE and the editor's own actions are not learned. Bank select, the modulation
+wheel, data entry and RPN/NRPN, and the channel mode messages are reserved, and explained while
+learning. Each parameter's own normalization; switches off at 0–63, on at 64–127; selectors
+deterministic; "jump" takeover; only the dezippering learned knobs need. Saved per instance in
+the host's project, versioned, by stable id, apart from the CA-72's presets (which leave it
+alone); an older project opens with none, even into an instance with some; malformed,
+duplicate and unknown entries handled safely; no learning saved; no global defaults. Through
+nih-plug's existing MIDI path (VST3's MIDI CCs arrive as hidden parameters), the parameter set
+from the audio thread so that its value, the voices, the editor and the host agree with the
+editor open or closed; event timing honoured and automation's order with a controller defined;
+no duplicate recording (CLAP's `DONT_RECORD`); nothing allocated, locked or waited for on the
+audio thread. Deferred: relative encoders, 14-bit pairs, NRPN/RPN, MIDI 2.0, profiles, feedback
+to controllers, Omni.
+
+**Agent decisions, 2026-10-06** (not separately approved):
+
+### What is learned, and what is not
+- **The list is explicit** (`crates/ca72-plugin/src/learn.rs`, `LEARNABLE`, 47): every panel
+  knob (19), RANGE and WAVEFORM (6), every panel and left hand controller switch (15, NOISE's
+  WHITE/PINK among them), the strip's POLY, VOICES, ENTROPY and SPREAD, and LOCK, which has no
+  control and is learned from the list. That is every parameter a preset sets but the
+  MODULATION wheel and MIDI BEND RANGE (a test holds the two lists together). Not learned: the
+  PITCH and MODULATION wheels (pitch bend and CC 1 move them already), POWER (the host's
+  bypass), MIDI BEND RANGE (the player's, R18), anything else of the editor's.
+- **Reserved** (`learn::reserved`): CC 0 and 32, 1, 6 and 38, 96–101, 120–127. They go where
+  they went: CC 1 the MODULATION wheel, 120, 121 and 123 as R18 has them, the others nowhere. A
+  reserved controller moved while a control waits is named in the note ("CC 1 IS THE
+  MODULATION WHEEL: NOT LEARNED") and the control waits on.
+
+### Values
+- A 7-bit value `v` (nih-plug gives `v / 127`; `round(x × 127)` takes it back) sets a knob to
+  `v / 127` of its travel through the parameter's own normalization; a selector or VOICES to the
+  position `⌊v × n / 128⌋` of its `n` (each an equal share of 0–127: RANGE's six change at 22, 43,
+  64, 86 and 107), snapped by the parameter's own steps; a switch (two positions) off at 0–63, on
+  at 64–127. 64 is not a knob's exact centre (64/127): TUNE sits 0.02 semitone above it, an
+  oscillator's FREQUENCY 0.06 (said in the README's limitations).
+- **"Jump" takeover**: the first message sets the control there. A value the parameter already
+  has (a selector's other values within one position, a controller sending the same value)
+  changes nothing and tells the host nothing.
+
+### Learning
+- **The audio thread only reads the assignments** (`learn::MidiMap`): a table of 16 × 128
+  atomics, each the learnable parameter's index plus one. Every change is made off it under a
+  mutex it never takes, which keeps at most one controller a parameter: learning a parameter
+  lets its old controller go; a controller another had moves, and `Assigned` says which
+  (`displaced`) and what it replaced. Removing one leaves the sound as it is.
+- **The capture**: the editor arms a parameter (an atomic word, its index and the arming's
+  number). The audio thread takes the next learnable control change as the one, with a
+  compare-and-swap that disarms it, and posts the parameter, channel and controller in another
+  atomic word; that message sets nothing. The editor assigns it at its next frame
+  (`MidiMap::poll`), only if the arming is still the one caught for: armed again elsewhere or
+  cancelled meanwhile, it is dropped. Until then that controller's further moves do nothing (a
+  frame at most). Arming another parameter moves the learning; cancelling keeps every
+  assignment. Closing the editor assigns a controller already caught (its message came) and then
+  disarms, so nothing is left armed with no editor to show it; nothing of learning is saved.
+
+### In the editor (`crates/ca72-plugin/src/learning.rs`; `ca72-panel`'s `learn.rs`)
+- **A right click** on a control opens its menu, drawn over the panel in the tips' colours: its
+  name and controller (`CUTOFF FREQUENCY · CH 1 · CC 74`, or `NO MIDI CONTROLLER`), **MIDI
+  LEARN** (**CANCEL MIDI LEARN** while it waits), **REMOVE MIDI ASSIGNMENT** (dim with none),
+  **MIDI ASSIGNMENTS…**. A strip control's opens over the panel's foot. The wheels and POWER
+  open one that says why they are not learned. A press outside it only closes it; a right click
+  first ends any gesture (R18); losing the window's focus closes it.
+- **Waiting**: the control is ringed in the drawer's accent (dashed), on the panel or the strip,
+  and a note over it says what it waits for, how to stop, and which controllers are not learned
+  (or the reserved one just moved). The hover tip gives way to it. When it is learned the note
+  names the controller, and the control it was taken from, for four seconds.
+- **The list**: the drawer's tools gain a **MIDI** button (the search field 220 units shorter
+  for it) that shows, in the presets' place, every learnable control with its controller (or
+  WAITING), LEARN, REMOVE and CANCEL, the keys and the reserved controllers in the chips' row,
+  and what was last done in the save row. The keyboard works it while the drawer has the keys:
+  Up, Down, Page Up and Down, Home, End choose; a letter finds the next control beginning with
+  it; Enter learns or cancels; Delete or Backspace removes; Escape cancels, then closes. The
+  drawer opens on the presets again the next time.
+- **The keyboard**: a menu opened or learning begun takes the keyboard as the drawer does (R10,
+  R18, R26: baseview's focus on macOS and Windows; X11 gives the editor the keys under the
+  pointer), so that Escape reaches it, and gives it back when neither is left, checked each
+  frame (a controller ends learning without an event in the window).
+- **Every key while it holds them** (Windows; baseview's third change,
+  `third_party/baseview/PATCHES.md`): while the drawer is open or MIDI Learn holds the keyboard,
+  the editor's window answers a dialog's `WM_GETDLGCODE` with `DLGC_WANTALLKEYS`; otherwise
+  as before. REAPER's FX window is a dialog: there an arrow moved REAPER's focus to one of its
+  own buttons, so the list never had it (found on Windows, below). The drawer's own keys
+  (R10's arrows, Enter, Escape and Tab) had the same fate there, untried until now.
+- `ca72-panel`'s approved image is unchanged: nothing of this is drawn at rest.
+
+### On the audio thread
+- `Ca72::process` sends a learnable control change to the table and, for an assigned one, sets
+  the parameter through the host at its event's sample (`ProcessContext::set_parameter_normalized`,
+  below): the parameter is at the new value at once, for the host, the editor (which reads the
+  parameters each frame, R5) and the state; with the editor closed the same.
+- **Dezippering, learned knobs only** (`learn::Dezip`). A 7-bit step is coarse: CUTOFF's wiper
+  spans 20 V through 200 kΩ into the control node, where R51's 100 kΩ takes 0.98 V an octave,
+  so the knob spans about ten octaves and a step about 0.08 (a semitone); a step of MAIN OUTPUT
+  VOLUME is 0.8 % of its travel; of TUNE, 3.9 cents. **Measured** (`a_controllers_steps`, by
+  hand: a held A2 sawtooth, each knob turned in a quarter of a second by the host's automation
+  every 32 samples, by the controller's steps taken at once, and as built; the energy above
+  8 kHz, where the note has little, against the automation's): MAIN OUTPUT VOLUME 10 to 3,
+  steps **+6.64 dB** (clicks: the output's gain steps after the circuit), gliding +0.88;
+  EMPHASIS 2 to 9, steps **+1.68 dB**, gliding −0.07; CUTOFF −1 to 2 at EMPHASIS 7 and 9.5,
+  steps +0.02 and +0.13, gliding −0.06 and −0.16; OSCILLATOR-1 VOLUME 8 to 2 −0.01 and +0.15;
+  TUNE −1 to 1 +0.03 and −0.03 (the filter and the pitch take a step without a click). The
+  whole's level within 0.1 dB stepped; gliding, MAIN OUTPUT VOLUME's 1.0 dB above (its glide
+  lags the turn by half of 10 ms), the others within 0.3 dB. So a glide is needed for some
+  knobs and costs the others nothing measurable: every knob a learned controller moves glides
+  alike, simpler to know than a list. The voices take it from where they had it to the new
+  value over 10 ms (`DEZIP`), linearly, their controls set every 32 samples (`DEZIP_STEP`),
+  runs no longer than that while one moves; a second message mid-glide glides on from where it
+  is. Only the voices glide: the parameter jumped. Switches, selectors and VOICES do not. The
+  host's automation, the editor and presets reach the voices as they always have: anything
+  setting a gliding knob's parameter ends its glide there. nih-plug's smoothers are not used:
+  none of the parameters has one, and giving them one would change automation's sound too.
+- Nothing allocated or freed (`tests/realtime.rs`, the plug-in's own `process` with every kind
+  of learned control, a capture, reserved controllers and automation ending a glide).
+
+### Through the host (`third_party/nih-plug/PATCHES.md`, changes 10 and 11)
+- **The MIDI path is nih-plug's as it was**: CLAP's MIDI events and VST3's hidden MIDI CC
+  parameters (`IMidiMapping` maps every controller on every channel to one, which the wrapper
+  turns into `NoteEvent::MidiCC`) reach `process` as before. Nothing is asked of a host's own
+  MIDI mapping.
+- **`ProcessContext::set_parameter_normalized`** (change 10) sets the parameter as each wrapper
+  already sets the host's automation during a process call, and tells the host: CLAP an output
+  `CLAP_EVENT_PARAM_VALUE` at the change's time flagged `CLAP_EVENT_DONT_RECORD` and no gesture
+  (`clap/ext/params.h`: "Turning a knob via plugin's internal MIDI mapping"), so the host shows
+  the value without recording automation over the MIDI it records (nothing more: no rescan of
+  the parameters, below); VST3 a point in the call's
+  `outputParameterChanges` at its sample offset, VST3's way for a processor to tell its host
+  and controller (Steinberg's Communication FAQ). Room for 1024 changes a call is reserved when
+  the wrapper is made. No feedback loop: the plug-in tells the host only of its own changes, never
+  of the host's automation, and nih-plug ignores a controller value the host sets while
+  processing (R4).
+- **The order at one sample** (change 10): a host's parameter change is set before the events
+  the plug-in reads at its sample, in both formats, whatever the host's order (VST3 sorts by
+  time, parameter changes first; CLAP splits a run before an event a parameter change follows at
+  its sample). So the host's automation and a learned controller of one parameter take turns in
+  time: the later holds, and at one sample the controller (set after the automation). A host
+  playing automation moves the parameter back at its next point. Without the CLAP change the
+  test's "listed first" case gave the automation (checked).
+- **`TestProcessContext`** (change 11): a context with no host, for the plug-in's tests of
+  `process`, since nih-plug keeps its parameter setters to itself.
+
+### Saved with the project
+- **`midi_map`, a persisted field** (with `preset` and the editor's width): JSON
+  `{"version":1,"assignments":[{"param":"cutoff","channel":1,"cc":74}, …]}`, by the
+  parameters' stable ids, the channel 1 to 16 as shown, in the list's order. A host's project
+  and its presets of the plug-in hold it; the CA-72's own presets never do (R10: they hold
+  parameters' values), and choosing, saving, replacing or reverting one leaves it alone.
+- **Read leniently** (`learn::Saved`): anything but an object of version 1 is an empty table;
+  an entry of an unknown or unlearnable parameter, a channel outside 1–16, a controller outside
+  0–127 or reserved, or a parameter or controller already assigned above it in the file, is left
+  out (the first kept). `Plugin::filter_state` writes a state's table back checked before it
+  loads, and gives a state without one (saved before this) an empty one: nih-plug sets only the
+  fields a state names, so an older project loaded into an instance with assignments would
+  otherwise have kept them.
+- The parameters, their ids, ranges and defaults, the voice and the presets' format are 0.1.1's:
+  a project saved before opens with the same sound and no assignments.
+
+### Tests
+`learn::tests` (13: the list against the presets' parameters, every kind's conversion, the
+reserved controllers, catching and assigning, cancelling, arming another, relearning and
+moving, channels, the JSON both ways, malformed, duplicate and unknown entries, a state made
+good, the glide); the plug-in's (`lib.rs`: a controller set at its sample through the host and
+told once, the capture changing nothing, reserved controllers keeping their paths and channels
+told apart, switches, selectors and VOICES, the glide and automation ending it, automation and
+a controller taking turns, instances apart, a session's table and an old one's, the editor
+never open in any); `tests/clap_host.rs` (a CLAP host in the test process, through the
+plug-in's own entry point: the change told at its time flagged `DONT_RECORD` and no rescan
+asked, the order at one sample both ways, the table out and back with the state and gone with
+an older one or a broken one, instances apart); `tests/realtime.rs` (nothing allocated); the
+editor's (the menu learns, cancels with Escape, removes; arming another and a controller moved;
+closing cancels and keeps what was caught; the strip's controls and the wheels' and POWER's
+menus; the MIDI list from the keyboard and the pointer; a right click ending a drag; on
+Windows, in a real window, the window asking a dialog for every key only while the drawer or a
+control's menu holds the keyboard); `presets::tests` (presets leave the assignments alone);
+`ca72-panel` (a menu's items found where drawn, a menu and a note kept on the panel).
+
+### In hosts
+On the Mac each host loaded one build of the CA-72 only, named "CA-72 MIDI TEST" so as not to replace the
+installed CA-72, and a virtual MIDI port sent the controllers. Kept apart:
+- **Automated, no host:** everything under Tests; `tests/clap_host.rs` is the plug-in's CLAP
+  entry point driven by a host in the test process (the event, its flag and time, no rescan
+  asked, the order at one sample, the state).
+- **By hand, Ableton Live 12.2.7 Beta, VST3 (macOS):** a control's menu, MIDI LEARN's ring and
+  waiting note, CC 1 while waiting explained and the control still waiting, CC 74 learned with
+  the capture changing nothing and the next value setting CUTOFF FREQUENCY, and the controller
+  working with the editor closed. Recorded with Automation Arm on: the clip got the controller
+  (Live's "MIDI Ctrl 74" envelope) and the track got Cutoff Frequency automation from the
+  plug-in's reported values: the VST3 limit above. Played back, the clip moved CUTOFF along its
+  sweep (and moving to its start sent the controller's value there), and Live marked the track's
+  automation overridden. A controller on channel 2 arrived as channel 1. Saved into a set and the
+  set reopened: the set's plug-in state held `"midi_map": {"version":1,"assignments":
+  [{"param":"cutoff","channel":1,"cc":74}]}` beside the parameters, the reopened menu named
+  `CH 1 · CC 74`, and CC 74 at 64 set CUTOFF to its centre. The drawer's MIDI list took the
+  arrow keys.
+- **By hand, Bitwig Studio 5.2.7, CLAP (macOS):** the controller reached the plug-in and set
+  the parameter (a diagnostic build's counters: two controllers, one learned, one told), but
+  Bitwig's display kept the old value. A diagnostic build sending the same event with other
+  flags: with `DONT_RECORD` (flags 2 or 3) the display stayed; with none (0) it followed, and
+  each value was an undo step. A values rescan after each block with a change was added for
+  it (and passed the CLAP test host), never tried in Bitwig, and taken out again when the
+  Audio Unit (R30) came in from main: clap-wrapper's AUv2 takes any rescan, values only too,
+  for a new parameter list (`setupParameters()`, then `ParameterList`, `ParameterInfo` and
+  `ClassInfo` changed), which a turning knob would have asked for many times a second. The
+  Audio Unit is told each value by the event itself (`onPerformEdit`, then a
+  `kAudioUnitEvent_ParameterValueChange`). So Bitwig's display does not follow a learned
+  controller, a limit of Bitwig's, said in the README.
+- **By hand, REAPER 7.82 on Windows 11 (the reference machine, a screen at 200 %), VST3 and
+  CLAP,** the build named `CA-72 R34` (IDs of its own), bundled with MSVC as the release is, in
+  a REAPER with a settings folder of its own (`-cfgfile`: the owner's audio settings, the
+  plug-in folders pointed at the build). REAPER's scripts sent the MIDI
+  (`StuffMIDIMessage`), the pointer's messages were posted to the editor's window, and keys
+  were real (`SendInput`), sent only while REAPER's window was in front:
+  - The menu (`CUTOFF FREQUENCY · NO MIDI CONTROLLER`), MIDI LEARN's ring and note, CC 1
+    explained, the capture changing nothing (0.5), `CH 2 · CC 74` learned and its 127 setting
+    1.0, and CC 74 on channel 1 then changing nothing: REAPER keeps the channels apart.
+  - The keyboard: learning took REAPER's focus from its FX window's preset box to the editor's
+    window. Before baseview's third change a real Up arrow moved the focus to a button of
+    REAPER's and the list stayed; after it, Up moved the list's choice, and Down, Enter (EMPHASIS
+    waiting, then `CH 1 · CC 71` learned) and Delete (removed) worked. Escape closed the FX
+    window, before the change and after it, in VST3 and in CLAP (which stops learning: closing
+    the editor does); with the plug-in's "Send all keyboard input to plug-in" on (`WAK 1`), it
+    cancelled learning, the window stayed, and the focus went back to the preset box.
+  - Recording a sweep (50 CCs of 74, 0 to 127) with the track's automation in Trim/Read: the
+    item got the CCs, no envelope, and the undo history "Recorded media". In Write mode REAPER
+    wrote a Cutoff Frequency envelope besides, from the VST3's reported values (46 points) and
+    from the CLAP's (48), though the CLAP's are flagged `DONT_RECORD`: REAPER does not honour
+    the flag. A learned move left "Edit FX parameter" as the last undo step (the capture did
+    not).
+  - Playback: the item's CCs moved CUTOFF (1.0 by 1.2 s); as playback stopped REAPER sent CC 74
+    with 0 (a MIDI logger before the plug-in saw it), and CUTOFF followed.
+  - The CLAP's project saved and REAPER started again: the menu named `CH 1 · CC 74`, and CC 74
+    set CUTOFF (live MIDI reached the reopened track only once its effects changed, a MIDI logger
+    added before the plug-in: REAPER's, seen once).
+- **By hand, Sandyne 2.5.0.0 on Windows 11 (the reference machine), VST3 and CLAP,** the same
+  `CA-72 R34` build in the user's plug-in folders (`%LOCALAPPDATA%\Programs\Common`, R31's
+  `CA-72 R30` builds to the Recycle Bin), the clicks real (`SendInput`, Sandyne in front;
+  Sandyne, built with JUCE, ignores posted ones). The owner's Moog Sub 37 sent nothing over USB
+  (a MIDI monitor on its port heard no note or controller, twice), so, with the owner's
+  approval, loopMIDI 1.0.16.27 (Tobias Erichsen's, its installer's signature checked) was
+  installed and a port of its, `CA72 Test`, enabled as Sandyne's MIDI input; a script sent the
+  controllers into it, on channel 4 as the Sub 37 is set to send:
+  - Sandyne found both builds when asked to scan, put the VST3 on a track of its own (armed)
+    and opened its editor in a window of its own, drawn a pixel a point (no display scale
+    given: MIDI Learn's menu and note are small, as the hover tips are).
+  - MIDI LEARN on CUTOFF FREQUENCY: CC 1 explained, then Sandyne's own CC 123 explained (it
+    sends one at times), CC 74 on channel 4 learned (`CH 4 · CC 74`), the capture changing
+    nothing; a sweep to 127 turned CUTOFF fully up and 0 fully down.
+  - A real Escape cancelled learning on EMPHASIS and the window stayed: Sandyne gives the
+    plug-in its keys.
+  - The project saved (`.sand`, the plug-in's state in JUCE's VST3 form: its component state
+    held `{"param":"cutoff","channel":4,"cc":74}`), Sandyne started again and the project
+    opened: CC 74 at 127, sent with the plug-in's window shut, turned CUTOFF fully up, and the
+    menu named `CH 4 · CC 74`.
+  - The CLAP on a track of its own: `CH 4 · CC 75` learned and its sweep moved CUTOFF.
+  - Not tried in Sandyne: recording controllers or automation, playback.
+- **Not checked in a host:** a CLAP host's recording, playback and reopening on macOS; the
+  Audio Unit (R30, merged while this was made) in Logic or GarageBand: its MIDI, the editor's
+  learning, and what those hosts record (an AU has no "don't record" either); Escape in a host
+  on macOS (the tool driving the Mac's hosts sent Escape to no application, not even to close
+  Live's own menu; the editor's tests cover it); REAPER on macOS, Cubase and other hosts;
+  REAPER's Touch and Latch modes; Linux. The owner stopped the checks in Bitwig after the clash
+  below, kept them to Live on the Mac, and then asked for Windows.
+- **Seen besides, not MIDI Learn's:** in Bitwig, which loads every plug-in into one process,
+  a second, differently built CA-72 opened a blank editor. softbuffer 0.4.8's macOS backend
+  defines an Objective-C class under a fixed name, `SoftbufferObserver` (objc2's
+  `define_class!`), and a second copy of the library in the process cannot define it again,
+  so any two plug-ins carrying their own softbuffer 0.4 in one process would meet it. Left
+  for its own change.
+
+### Not done, and why
+- **VST3 has no "don't record"**: a VST3 host that writes automation for a plug-in's own
+  changes may record a learned move as automation as well as the MIDI it records (Steinberg:
+  "some hosts support writing of automation for parameters sent back (outputParameterChanges)").
+  The alternative, `restartComponent(kParamValuesChanged)` from the GUI thread, would keep such
+  hosts from recording but re-read every parameter (and nih-plug's 2,080 hidden MIDI ones) for
+  each move, and the host's view would no longer follow at the move's sample; the other,
+  `IMidiMapping` mapping a learned controller to its parameter in the host, would take the
+  controller from nih-plug's MIDI path into each host's own, which hosts implement unevenly (and
+  the request kept nih-plug's path). Left as the format's documented way, and said in the README.
+  Live 12.2.7 is such a host (below).
+- **Bitwig shows nothing of a value flagged not to be recorded** (above): its display of a
+  learned control stays as it was until something else sets it; the sound, the plug-in's editor
+  and the saved state have the value. Without the flag each move would be an undo step, and a
+  rescan costs the Audio Unit its parameter list; left to Bitwig.
+- **Live gave the VST3 a channel-2 controller as channel 1** (below): there a controller is
+  learned as `CH 1` whatever its channel, and one CC number on two channels is one controller.
+  The channel is lost before the plug-in (nih-plug's hidden parameters keep all 16 apart, and the
+  plug-in's tests tell channels apart); nothing the plug-in can change.
+- **CLAP, upstream and unchanged:** `handle_in_events_until` never splits a run at the first event
+  of a call's queue, so a parameter change first in a block at a later sample is set from the
+  block's start (seen reading it; not this change's to alter: it moves automation in every CLAP
+  host).
+- Deferred, as asked: relative encoders, 14-bit pairs, NRPN/RPN, MIDI 2.0, profiles, feedback to
+  controllers, Omni, soft takeover, global defaults.
+
+**Evidence (2026-10-06, the Mac: Apple M4 Pro, macOS 27.0, Rust 1.97.1; a host open, so
+pluginval's editor tests skipped), on main with R30–R33 merged and the rescan taken out:**
+`cargo test --workspace` 265 passed, 0 failed (26 ignored, run by hand); clippy with
+`-D warnings` on the workspace, all targets, all features; `cargo fmt --all -- --check`;
+`scripts/notices.py --check` (the notices unchanged: serde was linked already, `clap-sys` is for
+the tests). Before the merge, `preset_render` against main's code: all 24 factory presets the
+same to the bit; with nothing learned, `process` the same to the bit as the code before
+(`with_nothing_learned_the_sound_is_as_before`, run again after it). `cargo xtask bundle
+ca72-plugin --profile bundle` and `scripts/auv2.sh`, then `scripts/validate.sh`: clap-validator
+0.4.1, 37 passed, 0 failed, 7 skipped; pluginval 1.0.4 at strictness 10, SUCCESS; Steinberg's
+validator (SDK 3.8.1), 47 passed, 0 failed (its bypass test prints two messages it does not
+count as failures: nih-plug's controller ignores `setParamNormalized` while processing,
+upstream's and untouched); auval `-strict`, AU VALIDATION SUCCEEDED; pluginval on the Audio
+Unit, SUCCESS. (The Audio Unit validate.sh leaves in `~/Library/Audio/Plug-Ins/Components` was
+put back to the one there before.)
+
+**Evidence on Windows (2026-10-06, the reference machine: i5-13600K, Windows 11, a screen at
+200 %; Rust 1.97.1, GNU and MSVC),** this branch with baseview's third change: `cargo test
+--workspace` in the desktop session 269 passed, 0 failed (26 ignored) with each toolchain,
+`the_editor_asks_a_dialog_for_every_key_only_while_it_holds_them` and R28's real-window tests
+among them (over SSH, with no desktop, R28's
+`the_panel_is_shown_again_as_windows_repaints_its_window` sees one colour and fails: it needs
+a desktop, R28); clippy with `-D warnings` on the workspace and all targets (MSVC with
+`--all-features`, as CI; GNU with `--features ca72-plugin/standalone`); `cargo fmt --all --
+--check`. CI's Windows job (MSVC) on the pull request, before the third change: 268 passed, 0
+failed; clap-validator 36 passed, 0 failed, 8 skipped; pluginval at strictness 10, its editor
+tests included, SUCCESS; Steinberg's validator 47 passed, 0 failed.
+
+## R35. 0.1.3
+**Owner decision, 2026-10-06.** "merge it and release 0.1.3 if you think it's ready to go":
+MIDI Learn (R34) as 0.1.3.
+
+**What it brings since 0.1.2** (the tag `v0.1.2`):
+- **MIDI Learn** (R34): a hardware controller's control change for each sound control, from
+  the control's menu or the MIDI list in the presets' drawer, kept with the project.
+- **Windows: the presets' drawer and the MIDI list take the arrow keys, Enter and Tab** in a
+  host whose plug-in window is a dialog, REAPER's (baseview's third change, R34).
+
+**Agent decisions, 2026-10-06** (not separately approved):
+- **Ready, the agent judged:** the workspace's tests, clippy, the validators and CI pass on
+  every system; MIDI Learn was tried by hand in Live 12 (VST3, macOS), REAPER 7.82 (VST3 and
+  CLAP, Windows) and Sandyne 2.5 (VST3 and CLAP, Windows), and partly in Bitwig 5.2 (CLAP,
+  macOS). Not tried: the Audio Unit in a host. It tells the host of a learned value as it does
+  of an edit in the editor (both reach clap-wrapper as the CLAP's output values), which
+  GarageBand took (R30).
+- **0.1.3, as asked,** though MIDI Learn is a feature: the parameters, the plug-in's IDs, the
+  voice and the presets' format are 0.1.2's, so what was saved with 0.1.0 to 0.1.2 opens
+  unchanged, and the installers install over theirs. A project saved with 0.1.3 opens in an
+  earlier version without its assignments (nih-plug reads only the fields it knows).
+- **The version** as R29: the workspace's (`Cargo.lock` changed only in its eight crates);
+  the README's status names 0.1.3, its MIDI Learn section says it is there from 0.1.3, and its
+  line on the Audio Unit no longer waits for 0.1.2.
+- **Released the way R29 and R33 were:** a commit of its own in R34's pull request, so that CI
+  runs once before the tag; once merged, the tag `v0.1.3` on main's commit; CI's release job
+  drafts the release with the Windows and Linux installers, the notices, the git sources and
+  `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
+  (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.2's
+  form.

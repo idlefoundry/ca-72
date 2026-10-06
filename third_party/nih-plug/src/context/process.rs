@@ -1,7 +1,9 @@
 //! A context passed during the process function.
 
+use std::collections::VecDeque;
+
 use super::PluginApi;
-use crate::prelude::{Plugin, PluginNoteEvent, ProcessMode};
+use crate::prelude::{ParamPtr, Plugin, PluginNoteEvent, ProcessMode};
 
 /// Contains both context data and callbacks the plugin can use during processing. Most notably this
 /// is how a plugin sends and receives note events, gets transport information, and accesses
@@ -99,10 +101,26 @@ pub trait ProcessContext<P: Plugin> {
     /// monophonic modulation when dropping the capacity down to 1.
     fn set_current_voice_capacity(&self, capacity: u32);
 
-    // TODO: Add this, this works similar to [GuiContext::set_parameter] but it adds the parameter
-    //       change to a queue (or directly to the VST3 plugin's parameter output queues) instead of
-    //       using main thread host automation (and all the locks involved there).
-    // fn set_parameter<P: Param>(&self, param: &P, value: P::Plain);
+    /// Set a parameter from the audio thread as a change of the plugin's own (a MIDI controller
+    /// it has learned, say), `timing` samples into the block given to this `process()` call. The
+    /// value is set at once, as the host's automation sets it during processing, so the plugin
+    /// reads it from here on and the editor is told; and the host is told as its format has it:
+    ///
+    /// - CLAP: a `CLAP_EVENT_PARAM_VALUE` output event at that time, flagged
+    ///   `CLAP_EVENT_DONT_RECORD` (what changed it, a MIDI message say, is what the host records:
+    ///   recording the parameter as well would conflict with it, as `clap/ext/params.h` says).
+    /// - VST3: a point in the process call's output parameter changes, at that sample offset.
+    ///   VST3 has no flag against recording: a host that writes automation for these may record
+    ///   it.
+    /// - The standalone: no host to tell.
+    ///
+    /// No gesture is begun or ended. Realtime-safe: nothing is allocated, locked or waited for.
+    /// Returns whether the host will be told: false when the parameter is not the plugin's (then
+    /// nothing is set), the host gave no queue for such changes, or this block already holds as
+    /// many as it can tell (the value is set either way).
+    ///
+    /// Not upstream's: the CA-72's `third_party/nih-plug/PATCHES.md`, change 10.
+    fn set_parameter_normalized(&mut self, param: ParamPtr, normalized: f32, timing: u32) -> bool;
 }
 
 /// Information about the plugin's transport. Depending on the plugin API and the host not all
@@ -342,5 +360,112 @@ impl Transport {
             )),
             (_, _, _, _) => None,
         }
+    }
+}
+
+/// A [`ProcessContext`] with no host, for a plugin's own tests: the events are the ones pushed,
+/// in order; the transport is stopped and the processing mode fixed; a change the plugin makes
+/// itself ([`ProcessContext::set_parameter_normalized`]) is set as a wrapper sets it (the value
+/// and its smoother) and kept in [`reported`][Self::reported], as a host would be told it; and
+/// [`automate()`][Self::automate()] sets a parameter as a host's automation is set between the
+/// runs a wrapper splits a block into. Only the parameters of the [`Params`] it is made with are
+/// touched.
+///
+/// Not upstream's: the CA-72's `third_party/nih-plug/PATCHES.md`, change 11.
+pub struct TestProcessContext<P: Plugin> {
+    /// Keeps the parameters `known` points into alive.
+    _params: std::sync::Arc<dyn crate::params::Params>,
+    known: Vec<ParamPtr>,
+    events: VecDeque<PluginNoteEvent<P>>,
+    transport: Transport,
+    process_mode: ProcessMode,
+    /// The changes the plugin made itself, as the host would be told them: the parameter, its
+    /// normalized value as set, and when in the block.
+    pub reported: Vec<(ParamPtr, f32, u32)>,
+}
+
+impl<P: Plugin> std::fmt::Debug for TestProcessContext<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestProcessContext")
+            .field("events", &self.events.len())
+            .field("reported", &self.reported)
+            .finish()
+    }
+}
+
+impl<P: Plugin> TestProcessContext<P> {
+    /// A context for a plugin whose parameters are `params`, at `sample_rate`.
+    pub fn new(
+        params: std::sync::Arc<dyn crate::params::Params>,
+        sample_rate: f32,
+        process_mode: ProcessMode,
+    ) -> Self {
+        let known = params.param_map().into_iter().map(|(_, p, _)| p).collect();
+        Self {
+            _params: params,
+            known,
+            events: VecDeque::new(),
+            transport: Transport::new(sample_rate),
+            process_mode,
+            reported: Vec::new(),
+        }
+    }
+
+    /// An event for the next `process()` call (or the rest of this one), after those pushed.
+    pub fn push_event(&mut self, event: PluginNoteEvent<P>) {
+        self.events.push_back(event);
+    }
+
+    /// Sets `param` to `normalized` as a host's automation is set: between `process()` calls, as
+    /// a wrapper does at an automation point it has split the block at. Returns whether `param`
+    /// is one of the plugin's.
+    pub fn automate(&self, param: ParamPtr, normalized: f32) -> bool {
+        if !self.known.contains(&param) {
+            return false;
+        }
+        // SAFETY: `param` is one of `_params`' own, which this context keeps alive.
+        unsafe {
+            param.set_normalized_value(normalized);
+            param.update_smoother(self.transport.sample_rate, false);
+        }
+        true
+    }
+}
+
+impl<P: Plugin> ProcessContext<P> for TestProcessContext<P> {
+    fn plugin_api(&self) -> PluginApi {
+        PluginApi::Standalone
+    }
+
+    fn execute_background(&self, _task: P::BackgroundTask) {}
+
+    fn execute_gui(&self, _task: P::BackgroundTask) {}
+
+    fn transport(&self) -> &Transport {
+        &self.transport
+    }
+
+    fn process_mode(&self) -> ProcessMode {
+        self.process_mode
+    }
+
+    fn next_event(&mut self) -> Option<PluginNoteEvent<P>> {
+        self.events.pop_front()
+    }
+
+    fn send_event(&mut self, _event: PluginNoteEvent<P>) {}
+
+    fn set_latency_samples(&self, _samples: u32) {}
+
+    fn set_current_voice_capacity(&self, _capacity: u32) {}
+
+    fn set_parameter_normalized(&mut self, param: ParamPtr, normalized: f32, timing: u32) -> bool {
+        if !self.automate(param, normalized) {
+            return false;
+        }
+        // SAFETY: as in `automate()`.
+        let value = unsafe { param.unmodulated_normalized_value() };
+        self.reported.push((param, value, timing));
+        true
     }
 }

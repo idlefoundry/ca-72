@@ -9,14 +9,15 @@ use winapi::um::winuser::{
     GetDpiForWindow, GetFocus, GetMessageW, GetWindowLongPtrW, LoadCursorW, PostMessageW,
     RegisterClassW, ReleaseCapture, SetCapture, SetCursor, SetFocus, SetProcessDpiAwarenessContext,
     SetTimer, SetWindowLongPtrW, SetWindowPos, TrackMouseEvent, TranslateMessage, UnregisterClassW,
-    CS_OWNDC, GET_XBUTTON_WPARAM, GWLP_USERDATA, HTCLIENT, IDC_ARROW, MSG, SWP_NOMOVE,
-    SWP_NOZORDER, TRACKMOUSEEVENT, WHEEL_DELTA, WM_CHAR, WM_CLOSE, WM_CREATE, WM_DPICHANGED,
-    WM_INPUTLANGCHANGE, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-    WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSELEAVE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
-    WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SHOWWINDOW, WM_SIZE, WM_SYSCHAR,
-    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_USER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
-    WS_CAPTION, WS_CHILD, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUPWINDOW,
-    WS_SIZEBOX, WS_VISIBLE, XBUTTON1, XBUTTON2,
+    CS_OWNDC, DLGC_WANTALLKEYS, DLGC_WANTARROWS, DLGC_WANTCHARS, DLGC_WANTTAB, GET_XBUTTON_WPARAM,
+    GWLP_USERDATA, HTCLIENT, IDC_ARROW, MSG, SWP_NOMOVE, SWP_NOZORDER, TRACKMOUSEEVENT,
+    WHEEL_DELTA, WM_CHAR, WM_CLOSE, WM_CREATE, WM_DPICHANGED, WM_GETDLGCODE, WM_INPUTLANGCHANGE,
+    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+    WM_MOUSEHWHEEL, WM_MOUSELEAVE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
+    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SHOWWINDOW, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WM_TIMER, WM_USER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION, WS_CHILD,
+    WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUPWINDOW, WS_SIZEBOX, WS_VISIBLE,
+    XBUTTON1, XBUTTON2,
 };
 
 use std::cell::{Cell, Ref, RefCell};
@@ -427,6 +428,20 @@ unsafe fn wnd_proc_inner(
 
             None
         }
+        // A dialog's message loop (`IsDialogMessage`, as a host's window may be: REAPER's FX
+        // window) asks the window with the keyboard which keys it takes, and keeps the rest for
+        // itself: Escape and Enter close the dialog, Tab and the arrows move between its
+        // controls. While the handler wants the keys (`Window::set_wants_keys`), all of them
+        // are its (CA-72 patch).
+        WM_GETDLGCODE => {
+            if window_state.wants_keys.get() {
+                Some(
+                    (DLGC_WANTALLKEYS | DLGC_WANTARROWS | DLGC_WANTTAB | DLGC_WANTCHARS) as LRESULT,
+                )
+            } else {
+                None
+            }
+        }
         // If WM_SETCURSOR returns `None`, WM_SETCURSOR continues to get handled by the outer window(s),
         // If it returns `Some(1)`, the current window decides what the cursor is
         WM_SETCURSOR => {
@@ -518,6 +533,10 @@ pub(super) struct WindowState {
     /// messages. Borrowing `handler` again there panicked inside `wnd_proc`, which cannot unwind,
     /// and so aborted the host's process.
     pending_events: RefCell<VecDeque<Event>>,
+
+    /// Whether the handler wants every key, those a dialog keeps for itself too
+    /// (`WM_GETDLGCODE`; CA-72 patch).
+    wants_keys: Cell<bool>,
 
     #[cfg(feature = "opengl")]
     pub gl_context: Option<GlContext>,
@@ -772,6 +791,7 @@ impl Window<'_> {
 
                 deferred_tasks: RefCell::new(VecDeque::with_capacity(4)),
                 pending_events: RefCell::new(VecDeque::new()),
+                wants_keys: Cell::new(false),
 
                 #[cfg(feature = "opengl")]
                 gl_context,
@@ -860,6 +880,12 @@ impl Window<'_> {
         // To avoid reentrant event handler calls we'll defer the actual focus request until after
         // the event has been handled (upstream's #252, backported: CA-72 patch)
         self.state.deferred_tasks.borrow_mut().push_back(WindowTask::Focus);
+    }
+
+    /// Whether the window asks for every key while it has the keyboard, those a host's dialog
+    /// would otherwise keep (Escape, Enter, Tab, the arrows) too (CA-72 patch).
+    pub fn set_wants_keys(&mut self, wanted: bool) {
+        self.state.wants_keys.set(wanted);
     }
 
     pub fn resize(&mut self, size: Size) {

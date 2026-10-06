@@ -378,3 +378,120 @@ fn asking_the_helper_neither_allocates_nor_frees() {
         "asking the helper allocated {allocs} and freed {frees} times; the first:\n{first}"
     );
 }
+
+/// MIDI Learn on the audio thread (decisions.md R34), through the plug-in's own `process`: learned
+/// controllers setting knobs (gliding in the voices), switches, a selector and VOICES through the
+/// host, a controller caught while learning, the reserved ones refused, the host's automation
+/// ending a glide: no allocation, no free. (The stand-in host's record of the changes is reserved
+/// first, as the wrappers reserve theirs; its events are pushed off the count.)
+#[test]
+fn midi_learn_neither_allocates_nor_frees() {
+    use ca72_plugin::Ca72;
+    use ca72_plugin::learn::{Cc, index};
+    use nih_plug::context::process::TestProcessContext;
+    use nih_plug::prelude::*;
+    use std::sync::Arc;
+
+    struct Init;
+    impl InitContext<Ca72> for Init {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Clap
+        }
+        fn execute(&self, _: ()) {}
+        fn set_latency_samples(&self, _: u32) {}
+        fn set_current_voice_capacity(&self, _: u32) {}
+    }
+
+    let _serial = start();
+    let mut p = Ca72::default();
+    let config = BufferConfig {
+        sample_rate: RATE as f32,
+        min_buffer_size: None,
+        max_buffer_size: BLOCK as u32,
+        process_mode: ProcessMode::Realtime,
+    };
+    assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
+    let params = p.params();
+    let map = Arc::clone(&p.parameters().midi_map);
+    let learned = |id: &str, cc: u8| {
+        map.assign(index(id).unwrap(), Cc { channel: 0, cc })
+            .unwrap();
+    };
+    learned("cutoff", 74);
+    learned("emphasis", 71);
+    learned("osc2_on", 20);
+    learned("osc1_range", 21);
+    learned("voices", 22);
+    let mut c = TestProcessContext::<Ca72>::new(params, RATE as f32, ProcessMode::Realtime);
+    c.reported.reserve(1 << 16);
+    let cutoff = p.parameters().cutoff.as_ptr();
+    let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
+    let mut buffer = Buffer::default();
+    // SAFETY: both slices are `BLOCK` long and live as long as the buffer.
+    unsafe {
+        buffer.set_slices(BLOCK, |s| {
+            s.clear();
+            s.push(&mut l);
+            s.push(&mut r);
+        });
+    }
+    let mut aux = AuxiliaryBuffers {
+        inputs: &mut [],
+        outputs: &mut [],
+    };
+    let cc = |timing: u32, cc: u8, value: f32| NoteEvent::MidiCC {
+        timing,
+        channel: 0,
+        cc,
+        value,
+    };
+    HERE.with(|h| h.set(true));
+    for b in 0..400usize {
+        // (The host's queue filled off the count.)
+        ARMED.store(false, Ordering::SeqCst);
+        if b.is_multiple_of(50) {
+            c.push_event(NoteEvent::NoteOn {
+                timing: 0,
+                voice_id: None,
+                channel: 0,
+                note: 45 + (b / 50 % 12) as u8,
+                velocity: 1.0,
+            });
+        }
+        for k in 0..4u32 {
+            let v = ((b as f32 * 4.0 + k as f32) * 0.07).sin() * 0.5 + 0.5;
+            c.push_event(cc(k * 30, 74, v));
+            c.push_event(cc(k * 30 + 3, 71, 1.0 - v));
+        }
+        c.push_event(cc(5, 20, if b % 6 < 3 { 0.0 } else { 1.0 }));
+        c.push_event(cc(6, 21, (b % 7) as f32 / 6.0));
+        c.push_event(cc(7, 22, (b % 9) as f32 / 8.0));
+        c.push_event(cc(9, 1, 0.5));
+        c.push_event(cc(9, 100, 0.5));
+        if b % 40 == 10 {
+            map.arm(index("glide").unwrap());
+            c.push_event(cc(11, 30 + (b / 40) as u8, 0.5));
+        }
+        if b % 40 == 11 {
+            map.poll();
+        }
+        if b % 30 == 29 {
+            c.automate(cutoff, 0.25);
+        }
+        ARMED.store(true, Ordering::SeqCst);
+        p.process(&mut buffer, &mut aux, &mut c);
+    }
+    ARMED.store(false, Ordering::SeqCst);
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "MIDI Learn allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+    );
+    assert!(c.reported.len() > 1000, "{} changes told", c.reported.len());
+}

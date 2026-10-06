@@ -12,6 +12,10 @@
 //! panel's scale: the selector [`BAR_END`] panel units across the strip's row (the strip
 //! draws it: [`bar_svg`]), the drawer [`DRAWER_H`] tall. What a pointer finds is [`bar_hit`]
 //! and [`drawer_hit`]; the drawing and the finding share one layout.
+//!
+//! Its MIDI button shows MIDI Learn's list in its place (the CA-72's `docs/decisions.md` R34):
+//! every control that can be learned, its controller, LEARN, REMOVE and CANCEL, operated from the
+//! keyboard as well ([`MidiList`]).
 
 use std::fmt;
 
@@ -175,8 +179,47 @@ pub enum DrawerTarget {
     Restore,
     /// The update check's button.
     Update,
+    /// MIDI: the MIDI Learn list in the presets' place, or back.
+    Midi,
+    /// A row of the MIDI list (by its index), one of its buttons.
+    MidiRow(usize),
+    MidiAction(usize, MidiAction),
     /// The drawer, where nothing else is.
     Back,
+}
+
+/// What a button of a row of the MIDI list does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MidiAction {
+    /// Wait for the next controller moved, and assign it.
+    Learn,
+    /// Stop waiting.
+    Cancel,
+    /// Its controller removed.
+    Remove,
+}
+
+/// A row of the MIDI list: a control's name, its controller as shown (empty: none), and whether
+/// it is waiting for one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MidiRow {
+    pub name: String,
+    pub assignment: String,
+    pub waiting: bool,
+}
+
+/// The drawer's MIDI Learn list (decisions.md R34): its rows, the first shown, the one chosen
+/// (the arrow keys move it; Enter learns it, Delete removes its controller), the hints at its
+/// top, and what was last done, in its colour.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct MidiList {
+    pub rows: Vec<MidiRow>,
+    pub first: usize,
+    pub chosen: usize,
+    pub keys: String,
+    pub reserved: String,
+    pub status: String,
+    pub tone: Tone,
 }
 
 /// The colour of the update check's text.
@@ -232,6 +275,8 @@ pub struct DrawerScene {
     pub focus: Option<FieldId>,
     pub hover: Option<DrawerTarget>,
     pub update: UpdateScene,
+    /// The MIDI Learn list, shown in the presets' place (none: the presets).
+    pub midi: Option<MidiList>,
 }
 
 /// What the bar shows.
@@ -492,7 +537,10 @@ fn fit(fonts: &Fonts, s: &str, size: f64, room: f64) -> String {
 const PAD: f64 = 30.0;
 const TOOLS_Y: f64 = PAD;
 const TOOLS_H: f64 = 60.0;
-const SEARCH_END: f64 = 1900.0;
+const SEARCH_END: f64 = 1680.0;
+/// The MIDI button, between the search and FAVOURITES.
+const MIDI_X: f64 = 1710.0;
+const MIDI_W: f64 = 190.0;
 const FAVS_X: f64 = 1930.0;
 const FAVS_W: f64 = 320.0;
 const MINE_X: f64 = 2280.0;
@@ -623,6 +671,12 @@ pub fn drawer_hit(fonts: &Fonts, s: &DrawerScene, x: f64, y: f64) -> Option<Draw
     }
     let inside =
         |x0: f64, x1: f64, y0: f64, h: f64| (x0..x1).contains(&x) && (y0..y0 + h).contains(&y);
+    if inside(MIDI_X, MIDI_X + MIDI_W, TOOLS_Y, TOOLS_H) {
+        return Some(DrawerTarget::Midi);
+    }
+    if let Some(m) = &s.midi {
+        return Some(midi_hit(s, m, x, y));
+    }
     if inside(PAD, SEARCH_END, TOOLS_Y, TOOLS_H) {
         return Some(DrawerTarget::Field(FieldId::Search));
     }
@@ -762,6 +816,19 @@ fn drawer_body(fonts: &Fonts, s: &DrawerScene) -> String {
         "<line x1='0' y1='2' x2='{}' y2='2' stroke='{ACCENT}' stroke-width='4'/>",
         N(W)
     );
+    button(
+        &mut out,
+        (MIDI_X, TOOLS_Y, MIDI_W, TOOLS_H),
+        "MIDI",
+        TEXT,
+        s.midi.is_some(),
+        hover(DrawerTarget::Midi),
+        colour::LEGEND,
+    );
+    if let Some(m) = &s.midi {
+        midi_body(&mut out, fonts, s, m);
+        return out.0;
+    }
     // The tools.
     field(
         &mut out,
@@ -799,43 +866,7 @@ fn drawer_body(fonts: &Fonts, s: &DrawerScene) -> String {
         hover(DrawerTarget::Mine),
         colour::LEGEND,
     );
-    button(
-        &mut out,
-        (W - PAD - CLOSE_W, TOOLS_Y, CLOSE_W, TOOLS_H),
-        "×",
-        40.0,
-        false,
-        hover(DrawerTarget::Close),
-        colour::LEGEND,
-    );
-    // The update check.
-    let u = &s.update;
-    let tone = match u.tone {
-        Tone::Dim => DIM,
-        Tone::News => ACCENT,
-        Tone::Trouble => WARN,
-    };
-    let room = UPDATE_TEXT_END - (MINE_X + MINE_W + 30.0);
-    text(
-        &mut out,
-        UPDATE_TEXT_END,
-        TOOLS_Y + TOOLS_H / 2.0,
-        &fit(fonts, &u.text, SMALL, room),
-        SMALL,
-        tone,
-        "end",
-    );
-    if !u.button.is_empty() {
-        button(
-            &mut out,
-            (UPDATE_X, TOOLS_Y, UPDATE_W, TOOLS_H),
-            &u.button,
-            UPDATE_LABEL,
-            u.tone == Tone::News,
-            hover(DrawerTarget::Update),
-            colour::LEGEND,
-        );
-    }
+    close_and_update(&mut out, fonts, s);
     // The chips.
     for (i, (x, w)) in chip_boxes(fonts, &s.chips).into_iter().enumerate() {
         let (t, on) = &s.chips[i];
@@ -1059,6 +1090,212 @@ fn drawer_body(fonts: &Fonts, s: &DrawerScene) -> String {
         colour::LEGEND,
     );
     out.0
+}
+
+/// A tone's colour.
+fn tone_fill(t: Tone) -> &'static str {
+    match t {
+        Tone::Dim => DIM,
+        Tone::News => ACCENT,
+        Tone::Trouble => WARN,
+    }
+}
+
+/// The tools' right end: the update check and ×, in either list.
+fn close_and_update(out: &mut Svg, fonts: &Fonts, s: &DrawerScene) {
+    let hover = |t: DrawerTarget| s.hover == Some(t);
+    button(
+        out,
+        (W - PAD - CLOSE_W, TOOLS_Y, CLOSE_W, TOOLS_H),
+        "×",
+        40.0,
+        false,
+        hover(DrawerTarget::Close),
+        colour::LEGEND,
+    );
+    // The update check.
+    let u = &s.update;
+    let room = UPDATE_TEXT_END - (MINE_X + MINE_W + 30.0);
+    text(
+        out,
+        UPDATE_TEXT_END,
+        TOOLS_Y + TOOLS_H / 2.0,
+        &fit(fonts, &u.text, SMALL, room),
+        SMALL,
+        tone_fill(u.tone),
+        "end",
+    );
+    if !u.button.is_empty() {
+        button(
+            out,
+            (UPDATE_X, TOOLS_Y, UPDATE_W, TOOLS_H),
+            &u.button,
+            UPDATE_LABEL,
+            u.tone == Tone::News,
+            hover(DrawerTarget::Update),
+            colour::LEGEND,
+        );
+    }
+}
+
+/// A MIDI row's buttons, right to left from the row's end: what each does and says.
+fn midi_actions(r: &MidiRow) -> Vec<(MidiAction, &'static str)> {
+    if r.waiting {
+        vec![(MidiAction::Cancel, "CANCEL")]
+    } else if r.assignment.is_empty() {
+        vec![(MidiAction::Learn, "LEARN")]
+    } else {
+        vec![(MidiAction::Remove, "REMOVE"), (MidiAction::Learn, "LEARN")]
+    }
+}
+
+/// The y of the MIDI list's row `i`, if it is shown.
+fn midi_row_y(m: &MidiList, i: usize) -> Option<f64> {
+    (i >= m.first && i < m.first + ROWS_SHOWN).then(|| LIST_Y + (i - m.first) as f64 * ROW_H)
+}
+
+/// What is at (`x`, `y`) in the drawer while it shows the MIDI list (its tools' right end
+/// aside, which [`drawer_hit`] finds first).
+fn midi_hit(s: &DrawerScene, m: &MidiList, x: f64, y: f64) -> DrawerTarget {
+    let inside =
+        |x0: f64, x1: f64, y0: f64, h: f64| (x0..x1).contains(&x) && (y0..y0 + h).contains(&y);
+    if inside(W - PAD - CLOSE_W, W - PAD, TOOLS_Y, TOOLS_H) {
+        return DrawerTarget::Close;
+    }
+    if !s.update.button.is_empty() && inside(UPDATE_X, UPDATE_X + UPDATE_W, TOOLS_Y, TOOLS_H) {
+        return DrawerTarget::Update;
+    }
+    if (LIST_Y..list_bottom()).contains(&y) {
+        let i = m.first + ((y - LIST_Y) / ROW_H) as usize;
+        let Some(r) = m.rows.get(i) else {
+            return DrawerTarget::Back;
+        };
+        let ry = LIST_Y + (i - m.first) as f64 * ROW_H;
+        for (k, (a, _)) in midi_actions(r).into_iter().enumerate() {
+            let ax = action_x(k);
+            if inside(ax, ax + ACTION_W, ry + 8.0, ROW_H - 16.0) {
+                return DrawerTarget::MidiAction(i, a);
+            }
+        }
+        return DrawerTarget::MidiRow(i);
+    }
+    DrawerTarget::Back
+}
+
+/// The drawer's MIDI list (decisions.md R34): its title where the search is, the keys and the
+/// controllers not learned where the chips are, each control's row (its name, its controller or
+/// that it waits for one, LEARN, REMOVE or CANCEL), and what was done where SAVE AS is.
+fn midi_body(out: &mut Svg, fonts: &Fonts, s: &DrawerScene, m: &MidiList) {
+    let hover = |t: DrawerTarget| s.hover == Some(t);
+    text(
+        out,
+        PAD,
+        TOOLS_Y + TOOLS_H / 2.0,
+        "MIDI LEARN: A CONTROLLER FOR EACH CONTROL",
+        TEXT,
+        colour::LEGEND,
+        "start",
+    );
+    close_and_update(out, fonts, s);
+    let mid = CHIPS_Y + CHIP_H / 2.0;
+    let reserved_w = fonts.advance(&m.reserved, SMALL, Weight::Regular, 1.0);
+    let keys = fit(
+        fonts,
+        &m.keys,
+        SMALL,
+        (W - 2.0 * PAD - reserved_w - 40.0).max(0.0),
+    );
+    text(out, PAD, mid, &keys, SMALL, DIM, "start");
+    let reserved = fit(fonts, &m.reserved, SMALL, W - 2.0 * PAD);
+    text(out, W - PAD, mid, &reserved, SMALL, DIM, "end");
+    put!(
+        out,
+        "<rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='{}' stroke='{BORDER}' stroke-width='2'/>",
+        N(PAD),
+        N(LIST_Y),
+        N(W - 2.0 * PAD),
+        N(list_bottom() - LIST_Y),
+        colour::PANEL
+    );
+    for (i, r) in m.rows.iter().enumerate() {
+        let Some(y) = midi_row_y(m, i) else { continue };
+        let hovered = matches!(s.hover, Some(DrawerTarget::MidiRow(h) | DrawerTarget::MidiAction(h, _)) if h == i);
+        let chosen = m.chosen == i;
+        if chosen || hovered {
+            put!(
+                out,
+                "<rect x='{}' y='{}' width='{}' height='{}' fill='{}'/>",
+                N(PAD + 2.0),
+                N(y),
+                N(W - 2.0 * PAD - 4.0),
+                N(ROW_H),
+                if chosen { ROW_ON } else { ROW_HOVER }
+            );
+        }
+        let mid = y + ROW_H / 2.0;
+        text(
+            out,
+            PAD + 30.0,
+            mid,
+            &fit(fonts, &r.name, TEXT, ROW_TAGS_X - PAD - 80.0),
+            TEXT,
+            colour::LEGEND,
+            "start",
+        );
+        let (said, fill) = if r.waiting {
+            (
+                "WAITING: MOVE A CONTROLLER ON YOUR MIDI DEVICE".to_owned(),
+                ACCENT,
+            )
+        } else if r.assignment.is_empty() {
+            ("—".to_owned(), DIM)
+        } else {
+            (r.assignment.clone(), colour::LEGEND)
+        };
+        let shows_actions = chosen || hovered || r.waiting;
+        let end = if shows_actions {
+            action_x(midi_actions(r).len().saturating_sub(1)) - 30.0
+        } else {
+            W - PAD - 30.0
+        };
+        text(
+            out,
+            ROW_TAGS_X,
+            mid,
+            &fit(fonts, &said, TEXT, (end - ROW_TAGS_X).max(0.0)),
+            TEXT,
+            fill,
+            "start",
+        );
+        if shows_actions {
+            for (k, (a, label)) in midi_actions(r).into_iter().enumerate() {
+                button(
+                    out,
+                    (action_x(k), y + 8.0, ACTION_W, ROW_H - 16.0),
+                    label,
+                    SMALL,
+                    a == MidiAction::Cancel,
+                    hover(DrawerTarget::MidiAction(i, a)),
+                    colour::LEGEND,
+                );
+            }
+        }
+    }
+    if m.first > 0 {
+        triangle(out, W - PAD - 26.0, LIST_Y + 16.0, 22.0, true, DIM);
+    }
+    if m.first + ROWS_SHOWN < m.rows.len() {
+        triangle(out, W - PAD - 26.0, list_bottom() - 16.0, 22.0, false, DIM);
+    }
+    text(
+        out,
+        PAD,
+        SAVE_Y + SAVE_H / 2.0,
+        &fit(fonts, &m.status, TEXT, W - 2.0 * PAD),
+        TEXT,
+        tone_fill(m.tone),
+        "start",
+    );
 }
 
 /// A renderer of an SVG body `w` by `h` panel units at a scale.
@@ -1393,6 +1630,7 @@ mod png {
                 hover: None,
             },
             hover: None,
+            learning: None,
         });
         strip.frame().save_png(dir.join("strip.png")).unwrap();
         let mut d = DrawerRenderer::new(0.4);
@@ -1448,8 +1686,47 @@ mod png {
                 tone: Tone::News,
                 button: "DOWNLOAD".into(),
             },
+            midi: None,
         });
         d.frame().save_png(dir.join("drawer.png")).unwrap();
+        // The MIDI Learn list (decisions.md R34).
+        d.render(&DrawerScene {
+            midi: Some(MidiList {
+                rows: [
+                    ("TUNE", ""),
+                    ("OSCILLATOR MODULATION", ""),
+                    ("GLIDE", "CH 1 · CC 5"),
+                    ("MODULATION MIX", ""),
+                    ("OSCILLATOR-1 RANGE", "CH 2 · CC 20"),
+                    ("OSCILLATOR-2 RANGE", ""),
+                    ("OSCILLATOR-3 RANGE", ""),
+                    ("OSCILLATOR-2 FREQUENCY", "CH 1 · CC 74"),
+                    ("OSCILLATOR-3 FREQUENCY", ""),
+                ]
+                .iter()
+                .enumerate()
+                .map(|(i, (n, a))| MidiRow {
+                    name: (*n).into(),
+                    assignment: (*a).into(),
+                    waiting: i == 3,
+                })
+                .collect(),
+                first: 0,
+                chosen: 2,
+                keys: "UP, DOWN: CHOOSE · ENTER: LEARN · DELETE: REMOVE · ESC: CANCEL".into(),
+                reserved: "NOT LEARNED: CC 0 AND 32 (BANK), 1 (MODULATION WHEEL), 6, 38 AND 96-101 (DATA ENTRY, RPN, NRPN), 120-127 (CHANNEL MODE)".into(),
+                status: "OSCILLATOR-2 FREQUENCY: CH 1 · CC 74, TAKEN FROM CUTOFF FREQUENCY.".into(),
+                tone: Tone::News,
+            }),
+            hover: Some(DrawerTarget::MidiRow(4)),
+            update: UpdateScene {
+                text: "CA-72 0.1.1".into(),
+                tone: Tone::Dim,
+                button: "CHECK FOR UPDATES".into(),
+            },
+            ..DrawerScene::default()
+        });
+        d.frame().save_png(dir.join("drawer-midi.png")).unwrap();
     }
 }
 
@@ -1495,6 +1772,25 @@ pub fn update_fits(fonts: &Fonts, scene: &UpdateScene) -> bool {
 /// Where the update check's button's middle is (drawer units).
 pub fn update_centre() -> (f64, f64) {
     (UPDATE_X + UPDATE_W / 2.0, TOOLS_Y + TOOLS_H / 2.0)
+}
+
+/// Where the MIDI button's middle is (drawer units).
+pub fn midi_centre() -> (f64, f64) {
+    (MIDI_X + MIDI_W / 2.0, TOOLS_Y + TOOLS_H / 2.0)
+}
+
+/// Where the MIDI list's row `i`'s middle is, if it is shown (drawer units).
+pub fn midi_row_centre(m: &MidiList, i: usize) -> Option<(f64, f64)> {
+    midi_row_y(m, i).map(|y| (ROW_TAGS_X - 100.0, y + ROW_H / 2.0))
+}
+
+/// Where the MIDI list's row `i`'s button doing `a` is, if the row shows it (drawer units).
+pub fn midi_action_centre(m: &MidiList, i: usize, a: MidiAction) -> Option<(f64, f64)> {
+    let y = midi_row_y(m, i)?;
+    let k = midi_actions(m.rows.get(i)?)
+        .iter()
+        .position(|(b, _)| *b == a)?;
+    Some((action_x(k) + ACTION_W / 2.0, y + ROW_H / 2.0))
 }
 
 /// Where row `i`'s middle is, if it is shown (drawer units).

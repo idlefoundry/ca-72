@@ -9,8 +9,8 @@ compiler warnings (`non_snake_case` in `src/win/drop_target.rs`, and
 `mismatched_lifetime_syntaxes`). `src/macos/window.rs` has one `use` list in the order
 today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
-Two changes, both for Windows only, in `src/win/window.rs`, `src/win/drop_target.rs` and
-`src/event.rs` (the CA-72's `docs/decisions.md` R26 and R28):
+Three changes, all for Windows only, in `src/win/window.rs`, `src/win/drop_target.rs`,
+`src/event.rs` and `src/window.rs` (the CA-72's `docs/decisions.md` R26, R28 and R34):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -61,6 +61,21 @@ Two changes, both for Windows only, in `src/win/window.rs`, `src/win/drop_target
 
    The CA-72's test `the_panel_is_shown_again_as_windows_repaints_its_window` fails without
    this change (the host's background left on the editor's window).
+
+3. **The window takes every key while its handler holds the keyboard.** A host's window may be
+   a dialog (REAPER's FX window is), whose message loop asks the window with the keyboard
+   which keys it takes (`WM_GETDLGCODE`) and keeps the others for itself; baseview left that
+   to `DefWindowProcW`, which takes none of them. So with the CA-72's presets' drawer or MIDI
+   Learn holding the keyboard, REAPER 7.82 on Windows moved its focus to one of its own buttons
+   at an arrow key, and the drawer's list never had it. Now `Window::set_wants_keys(true)`
+   has the window answer `DLGC_WANTALLKEYS` (and the arrows, Tab and characters), and `false`,
+   the default, leaves the question to `DefWindowProcW` as before, so that the dialog keeps its
+   keys while the handler does not want them. On macOS and X11 the call does nothing. (REAPER
+   keeps Escape whatever the window answers, and closes its FX window, unless the plug-in's
+   "Send all keyboard input to plug-in" is on.)
+
+   The CA-72's test `the_editor_asks_a_dialog_for_every_key_only_while_it_holds_them` checks
+   the answer with the drawer and a control's menu open and shut.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.

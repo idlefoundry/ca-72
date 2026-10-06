@@ -22,7 +22,7 @@ use crate::prelude::{
 use crate::util::permit_alloc;
 use crate::wrapper::state::{self, PluginState};
 use crate::wrapper::util::buffer_management::BufferManager;
-use crate::wrapper::util::{hash_param_id, process_wrapper};
+use crate::wrapper::util::{hash_param_id, process_wrapper, OwnParamChange, OWN_PARAM_CHANGES};
 
 /// The actual wrapper bits. We need this as an `Arc<T>` so we can safely use our event loop API.
 /// Since we can't combine that with VST3's interior reference counting this just has to be moved to
@@ -92,6 +92,10 @@ pub(crate) struct WrapperInner<P: Vst3Plugin> {
     /// Stores any events the plugin has output during the current processing cycle, analogous to
     /// `input_events`.
     pub output_events: AtomicRefCell<VecDeque<PluginNoteEvent<P>>>,
+    /// The parameters the plugin set itself during the current `process()` call, to be added to
+    /// the host's output parameter changes once it returns (PATCHES.md, change 10). Its room is
+    /// reserved here: it never grows.
+    pub own_param_changes: AtomicRefCell<Vec<OwnParamChange>>,
     /// VST3 has several useful predefined note expressions, but for some reason they are the only
     /// note event type that don't have MIDI note ID and channel fields. So we need to keep track of
     /// the most recent VST3 note IDs we've seen, and then map those back to MIDI note IDs and
@@ -307,6 +311,7 @@ impl<P: Vst3Plugin> WrapperInner<P> {
             )),
             input_events: AtomicRefCell::new(VecDeque::with_capacity(1024)),
             output_events: AtomicRefCell::new(VecDeque::with_capacity(1024)),
+            own_param_changes: AtomicRefCell::new(Vec::with_capacity(OWN_PARAM_CHANGES)),
             note_expression_controller: AtomicRefCell::new(NoteExpressionController::default()),
             process_events: AtomicRefCell::new(Vec::with_capacity(4096)),
             updated_state_sender,
@@ -372,11 +377,19 @@ impl<P: Vst3Plugin> WrapperInner<P> {
         }
     }
 
-    pub fn make_process_context(&self, transport: Transport) -> WrapperProcessContext<'_, P> {
+    /// `host_listens`: the host gave an output parameter changes queue to this process call, so
+    /// the plugin's own parameter changes can be told to it (PATCHES.md, change 10).
+    pub fn make_process_context(
+        &self,
+        transport: Transport,
+        host_listens: bool,
+    ) -> WrapperProcessContext<'_, P> {
         WrapperProcessContext {
             inner: self,
             input_events_guard: self.input_events.borrow_mut(),
             output_events_guard: self.output_events.borrow_mut(),
+            own_param_changes_guard: self.own_param_changes.borrow_mut(),
+            host_listens,
             transport,
         }
     }
