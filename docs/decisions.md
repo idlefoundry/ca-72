@@ -1681,9 +1681,9 @@ Rust 1.97.1),** on this change's tree. `scripts/auv2.sh` on the universal bundle
 - **pluginval 1.0.4 at strictness 10** (editor tests skipped, the screen in use). With
   clap-wrapper as released it aborted the host in 2 runs of 10 ("BUG IN CLIENT OF
   LIBMALLOC: memory corruption of free block": the message thread in `SetParameter()` while
-  another thread initialized the unit), where the VST3 passed 5 of 5; with changes 1 and 2,
-  no abort in 32 runs but the state restoration test failing in 4; with all four, 24 of 24
-  passed, and the seeds that had failed pass.
+  another thread initialized the unit), where the VST3 passed 5 of 5. With change 1, no abort
+  in 12 runs, and with changes 1 and 2 none in 20, but the state restoration test failed in
+  1 and 3 of them; with all four, 24 of 24 passed, and the seeds that had failed pass.
 - **A host of AVAudioEngine's,** the way GarageBand and Logic load units: five notes sound
   (RMS 0.13), the output bounded; the full state, saved after a block, restored into a
   second instance; parameters set and saved with no block between are kept (clap-wrapper as
