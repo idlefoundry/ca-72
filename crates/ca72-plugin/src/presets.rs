@@ -735,8 +735,13 @@ impl Browser {
                 }
                 self.reread(p);
             }
-            // The update check is the editor's (`crate::update`).
-            DrawerTarget::Update | DrawerTarget::Back => {}
+            // The update check is the editor's (`crate::update`), and so is the MIDI list
+            // (`crate::learning`).
+            DrawerTarget::Update
+            | DrawerTarget::Midi
+            | DrawerTarget::MidiRow(_)
+            | DrawerTarget::MidiAction(..)
+            | DrawerTarget::Back => {}
         }
     }
 
@@ -887,6 +892,54 @@ mod tests {
             bend(&named),
             Some(p.midi_bend_range.preview_normalized(12.0))
         );
+    }
+
+    /// The MIDI assignments (decisions.md R30) are the instance's, not a sound's: choosing,
+    /// saving, replacing and reverting a preset leave them as they are, and no preset file holds
+    /// them.
+    #[test]
+    fn presets_leave_the_midi_assignments_alone() {
+        use crate::learn::{Cc, index};
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let p = Ca72Params::default();
+        let map = &p.midi_map;
+        map.assign(index("cutoff").unwrap(), Cc { channel: 0, cc: 74 });
+        map.assign(index("voices").unwrap(), Cc { channel: 9, cc: 20 });
+        let before = map.saved();
+        let fonts = DrawerRenderer::new(0.25);
+        let s = ParamSetter::new(&Host);
+        let mut b = Browser::new(Library::at(dir.path()));
+        b.show(true, &p);
+        let bass = lib.find("Bass").unwrap();
+        b.choose(&bass, &p, &s);
+        b.step(1, &p, &s);
+        assert_eq!(map.saved(), before, "chosen");
+        b.drawer.save_name = Field::new("Mine");
+        b.drawer_press(DrawerTarget::SaveGo, 0.0, &fonts, &p, &s);
+        b.drawer.save_name = Field::new("Lead");
+        b.drawer_press(DrawerTarget::SaveGo, 0.0, &fonts, &p, &s);
+        assert_eq!(lib.find("Lead").unwrap().origin, Origin::Edited);
+        assert_eq!(map.saved(), before, "saved");
+        for f in std::fs::read_dir(dir.path()).unwrap() {
+            let text = std::fs::read_to_string(f.unwrap().path()).unwrap();
+            assert!(
+                !text.contains("midi_map") && !text.contains("assignments"),
+                "{text}"
+            );
+        }
+        b.reread(&p);
+        let lead = b.drawer.rows.iter().position(|r| r.name == "Lead").unwrap();
+        b.drawer_press(
+            DrawerTarget::Action(lead, RowAction::Revert),
+            0.0,
+            &fonts,
+            &p,
+            &s,
+        );
+        assert_eq!(lib.find("Lead").unwrap().origin, Origin::Factory);
+        assert_eq!(map.saved(), before, "reverted");
+        assert!(values_now(&p).iter().all(|(k, _)| !k.contains("midi_map")));
     }
 
     /// RENAME, TAGS and DELETE's question stay with their preset as the list changes (a

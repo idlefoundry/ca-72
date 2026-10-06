@@ -9,6 +9,7 @@ use resvg::usvg;
 use crate::art::{self, H, Layer, Layout, W};
 use crate::controls::{CONTROLS, Kind, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
+use crate::learn::{self, Menu, Note};
 
 /// What the panel shows.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,6 +25,11 @@ pub struct Scene {
     pub overload: f64,
     /// A tip: its text, centred above (x, y) in the drawing.
     pub tip: Option<(String, f64, f64)>,
+    /// MIDI Learn (decisions.md R30): the control being learned, by its index in [`CONTROLS`]
+    /// (ringed), a note over the panel saying what it does, and a control's menu.
+    pub learning: Option<usize>,
+    pub note: Option<Note>,
+    pub menu: Option<Menu>,
 }
 
 impl Default for Scene {
@@ -34,6 +40,9 @@ impl Default for Scene {
             power: true,
             overload: 0.0,
             tip: None,
+            learning: None,
+            note: None,
+            menu: None,
         }
     }
 }
@@ -185,6 +194,9 @@ impl Renderer {
         out.push(art::lamp(scene.power));
         out.push(art::overload(scene.overload));
         out.push(art::plate());
+        if let Some(c) = scene.learning.and_then(|i| CONTROLS.get(i)) {
+            out.push(learn::ring(c));
+        }
         if let Some((t, x, y)) = &scene.tip {
             out.push(art::tip(
                 &self.fonts,
@@ -194,7 +206,19 @@ impl Renderer {
                 TIP_TEXT * self.ui / self.scale,
             ));
         }
+        if let Some(n) = &scene.note {
+            out.push(learn::note(&self.fonts, n));
+        }
+        if let Some(m) = &scene.menu {
+            out.push(learn::menu(&self.fonts, m));
+        }
         out
+    }
+
+    /// The lettering's size of the tip, a note and a menu, in drawing units (its logical pixels at
+    /// this scale).
+    pub fn text_size(&self) -> f64 {
+        TIP_TEXT * self.ui / self.scale
     }
 
     /// A layer's pixels, aligned to the frame's: their place and their image.

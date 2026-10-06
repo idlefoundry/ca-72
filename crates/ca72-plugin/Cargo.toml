@@ -40,8 +40,10 @@ keyboard-types = { version = "0.6.1", default-features = false }
 # The presets' files (decisions.md R10: the format the DAW's instrument shares).
 toml = "0.7"
 # GitHub's answer to the update check (decisions.md R27): nih-plug's own, without the
-# workspace's features.
+# workspace's features. The MIDI assignments in the plug-in's state (R30) as well, with serde
+# (nih-plug's too).
 serde_json = "1"
+serde.workspace = true
 
 # The screen's size, for the editor's first size (and on Windows the keyboard's focus and
 # the pointer's capture, and the shell that opens a release in the browser): the versions
@@ -61,6 +63,9 @@ x11rb = { version = "0.13.0", features = ["randr"] }
 ca72-analysis.workspace = true
 ca72-rt.workspace = true
 tempfile.workspace = true
+# A CLAP host in the tests (`tests/clap_host.rs`, decisions.md R30): the bindings nih-plug's CLAP
+# wrapper takes, at its revision.
+clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6363ad63fbd80049cb7a42a97ac156" }
 
 # The editor's pixels read and its window captured, in the tests in a real window.
 [target.'cfg(target_os = "windows")'.dev-dependencies]

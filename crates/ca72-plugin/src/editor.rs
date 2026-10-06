@@ -5,7 +5,8 @@
 //! the POWER switch is the bypass; the OVERLOAD lamp and the wheels show what the audio
 //! thread reports. The grip at the panel's bottom right corner resizes the window. Under the strip the presets' bar, and their drawer over
 //! the panel (`crate::presets`, decisions.md R10), which takes the keyboard while open; in the
-//! drawer the update check (`crate::update`, R27).
+//! drawer the update check (`crate::update`, R27). A right click opens a control's menu, for
+//! MIDI Learn; the drawer's MIDI button shows its list of assignments (`crate::learning`, R30).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -27,6 +28,7 @@ use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
 
+use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
 use crate::params::Ca72Params;
 use crate::presets::Browser;
@@ -46,6 +48,8 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const SCROLL_REST: Duration = Duration::from_millis(400);
 /// A trackpad's travel that makes a notch, in pixels.
 const NOTCH: f64 = 40.0;
+/// A control's menu's lettering, against the tip's.
+const MENU_TEXT: f64 = 1.15;
 
 /// The editor's height at `width`: the panel in its proportions, and the strip (with the
 /// presets' selector) under it.
@@ -424,6 +428,9 @@ struct Editing {
     placed: bool,
     /// The update check in the drawer; dropped with the editor, it ends a check under way.
     update: Update,
+    /// MIDI Learn: a control's menu, the note over the control being learned, the drawer's
+    /// list (decisions.md R30).
+    pub(crate) learning: Learning,
     /// The pointer, in logical pixels.
     pointer: (f64, f64),
     hover: Option<Target>,
@@ -519,13 +526,22 @@ impl PanelWindow {
     /// (baseview there keeps every key its window is given, the host's shortcuts too:
     /// decisions.md R18).
     fn keyboard(&mut self, window: &mut Window<'_>) {
-        if std::mem::take(&mut self.editing.browser.wants_keys) {
+        // (MIDI Learn too, while a control's menu is open or a controller is awaited: Escape
+        // closes or cancels it; decisions.md R30.)
+        let asked = std::mem::take(&mut self.editing.browser.wants_keys)
+            | std::mem::take(&mut self.editing.learning.take_keys);
+        if asked {
             let had = window::take_keys(window);
             if self.keys.is_none() {
                 self.keys = had;
             }
         }
+        let learning = self
+            .editing
+            .learning
+            .holds_keys(&self.editing.params.midi_map);
         if !self.editing.browser.open
+            && !learning
             && let Some(keys) = self.keys.take()
         {
             window::give_keys_back(window, keys);
@@ -575,6 +591,7 @@ impl Editing {
             resizing_window: false,
             placed: false,
             update: Update::default(),
+            learning: Learning::default(),
             pointer: (0.0, 0.0),
             hover: None,
             drag: None,
@@ -785,9 +802,28 @@ impl Editing {
         // (its window lost the pointer): ended before anything else begins.
         self.end_gestures();
         let (x, y) = self.in_drawing(self.pointer);
+        // A control's menu open: the press is its own (an item, or closing it).
+        match self
+            .learning
+            .press(self.renderer.fonts(), &self.params.midi_map, (x, y))
+        {
+            Pressed::Nothing => {}
+            Pressed::Done => return,
+            Pressed::List(chosen) => {
+                self.show_midi_list(chosen);
+                return;
+            }
+        }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
             match drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy) {
                 Some(DrawerTarget::Update) => self.update.press(),
+                Some(DrawerTarget::Midi) => self.learning.list = !self.learning.list,
+                Some(DrawerTarget::MidiRow(i)) => {
+                    self.learning.list_press(&self.params.midi_map, i, None);
+                }
+                Some(DrawerTarget::MidiAction(i, a)) => {
+                    self.learning.list_press(&self.params.midi_map, i, Some(a));
+                }
                 Some(t) => {
                     let setter = ParamSetter::new(self.context.as_ref());
                     self.browser
@@ -852,6 +888,50 @@ impl Editing {
         }
     }
 
+    /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R30),
+    /// on the panel or the strip; elsewhere none.
+    fn context_menu(&mut self) {
+        self.end_gestures();
+        let (x, y) = self.in_drawing(self.pointer);
+        let size = self.renderer.text_size() * MENU_TEXT;
+        let map = &self.params.midi_map;
+        if self.in_drawer((x, y)).is_some() || self.on_bar((x, y)).is_some() {
+            self.learning.close_menu();
+            return;
+        }
+        if y >= art::H {
+            // A strip control's menu: over the panel's foot, above it.
+            match strip::hit(x, y - art::H) {
+                Some(t) => self.learning.open_menu(
+                    self.renderer.fonts(),
+                    map,
+                    Some(Place::Strip(t.control())),
+                    None,
+                    (x, art::H),
+                    size,
+                ),
+                None => self.learning.close_menu(),
+            }
+            return;
+        }
+        let target = interact::hit(self.renderer.layout(), x, y);
+        let place = match target {
+            Some(Target::Control(i) | Target::Legend(i, _)) => Some(Place::Panel(i)),
+            _ => None,
+        };
+        self.learning
+            .open_menu(self.renderer.fonts(), map, place, target, (x, y), size);
+    }
+
+    /// The drawer opened on its MIDI list, `chosen` in view.
+    fn show_midi_list(&mut self, chosen: Option<usize>) {
+        self.learning.show_list(chosen);
+        if !self.browser.open {
+            self.browser.show(true, &self.params);
+        }
+        self.follow_drawer();
+    }
+
     /// The pointer moved.
     fn moved(&mut self, modifiers: Modifiers) {
         if let Some((x0, w0)) = self.resizing {
@@ -872,6 +952,9 @@ impl Editing {
         let Some(d) = &mut self.drag else {
             let at = self.in_drawing(pointer);
             let (x, y) = at;
+            if self.learning.menu_open() {
+                self.learning.hover(self.renderer.fonts(), at);
+            }
             let over_drawer = self.in_drawer(at);
             self.browser.drawer.hover = over_drawer
                 .and_then(|(dx, dy)| drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy));
@@ -1004,7 +1087,11 @@ impl Editing {
             self.list_travel += rows;
             let whole = self.list_travel.trunc();
             if whole != 0.0 {
-                self.browser.scroll(-(whole as i32));
+                if self.learning.list {
+                    self.learning.scroll(-(whole as i32));
+                } else {
+                    self.browser.scroll(-(whole as i32));
+                }
                 self.list_travel -= whole;
             }
             return;
@@ -1204,6 +1291,24 @@ impl Editing {
         self.browser.tick(&self.params);
         self.update.tick();
         self.browser.drawer.update = self.update.scene();
+        // MIDI Learn: what the audio thread caught assigned; the ring, the note and the menu;
+        // the drawer's list (the presets again once the drawer has shut). A tip gives way to a
+        // note or a menu.
+        let map = &self.params.midi_map;
+        self.learning.poll(map);
+        let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
+        (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
+        self.strip_scene.learning = strip_ring;
+        if self.scene.note.is_some() || self.scene.menu.is_some() {
+            self.scene.tip = None;
+        }
+        if !self.browser.open && !self.browser.sliding() {
+            self.learning.list = false;
+        }
+        self.browser.drawer.midi = self
+            .learning
+            .list
+            .then(|| self.learning.list_scene(&self.params.midi_map));
         self.shrink_shut_drawer();
         let panel = self.renderer.render(&self.scene);
         self.strip_scene.bar.clone_from(&self.browser.bar);
@@ -1262,6 +1367,10 @@ impl Editing {
                 button: MouseButton::Left,
                 modifiers,
             } => self.press(modifiers),
+            MouseEvent::ButtonPressed {
+                button: MouseButton::Right,
+                ..
+            } => self.context_menu(),
             MouseEvent::ButtonReleased {
                 button: MouseButton::Left,
                 ..
@@ -1281,9 +1390,30 @@ impl Editing {
 impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
+        // MIDI Learn first (decisions.md R30): Escape closes a control's menu, the drawer's MIDI
+        // list takes the keys it shows, and Escape cancels learning.
+        let map = std::sync::Arc::clone(&self.params.midi_map);
+        let down = k.state == KeyState::Down && !modifier(&k.key);
+        if down && k.key == Key::Escape && self.learning.menu_open() {
+            self.learning.close_menu();
+            return true;
+        }
+        if self.browser.open && self.learning.list {
+            let mut close = false;
+            let taken = self.learning.list_key(k, &map, &mut close);
+            if close {
+                self.browser.show(false, &self.params);
+                self.follow_drawer();
+            }
+            return taken;
+        }
+        if down && k.key == Key::Escape && map.armed().is_some() {
+            self.learning.cancel(&map);
+            return true;
+        }
         // A key the drawer acts on may set the parameters (the arrows choose presets): no
         // gesture is left open under it. Shift and the other modifiers alone leave a drag.
-        if self.browser.open && k.state == KeyState::Down && !modifier(&k.key) {
+        if self.browser.open && down {
             self.end_gestures();
         }
         let setter = ParamSetter::new(self.context.as_ref());
@@ -1294,8 +1424,11 @@ impl Editing {
 }
 
 impl Drop for Editing {
-    // The editor closed mid-drag, or within a wheel's rest: no parameter is left touched.
+    // The editor closed mid-drag, or within a wheel's rest: no parameter is left touched. And
+    // MIDI Learn ends: a controller the audio thread has already caught for it is assigned,
+    // else nothing is (decisions.md R30).
     fn drop(&mut self) {
+        self.learning.close(&self.params.midi_map);
         self.end_gestures();
     }
 }
@@ -1339,6 +1472,9 @@ impl WindowHandler for PanelWindow {
         // them showed, on macOS, the tall view in the short window, its top cut off (the
         // owner, 2026-10-03: a flicker as the drawer finished shutting; decisions.md R19).
         self.follow(window);
+        // (MIDI Learn done meanwhile, by a controller rather than here: the keyboard back to the
+        // host now, not at the editor's next event; decisions.md R30.)
+        self.keyboard(window);
         if changed || repaint_due(self.shown, now) {
             self.present();
             self.shown = Some(now);
@@ -1360,9 +1496,11 @@ impl WindowHandler for PanelWindow {
                 }
                 EventStatus::Captured
             }
-            // No gesture is left open (decisions.md R18).
+            // No gesture is left open (decisions.md R18), nor a control's menu (R30; learning
+            // goes on: the controller to be learned is elsewhere).
             Event::Window(WindowEvent::Unfocused | WindowEvent::WillClose) => {
                 self.editing.end_gestures();
+                self.editing.learning.close_menu();
                 EventStatus::Ignored
             }
             Event::Mouse(e) => {
@@ -2116,6 +2254,322 @@ mod tests {
             button: MouseButton::Left,
             modifiers: Modifiers::empty(),
         });
+    }
+
+    fn right_click(e: &mut Editing, p: Point) {
+        go(e, p);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Right,
+            modifiers: Modifiers::empty(),
+        });
+        e.mouse(MouseEvent::ButtonReleased {
+            button: MouseButton::Right,
+            modifiers: Modifiers::empty(),
+        });
+    }
+
+    /// The open menu's items, each its label and whether it can be chosen.
+    fn menu_items(e: &Editing) -> Vec<(String, bool)> {
+        e.learning.menu().expect("a menu").items.clone()
+    }
+
+    /// The open menu's item of this label clicked.
+    fn menu_item(e: &mut Editing, label: &str) {
+        let m = e.learning.menu().expect("a menu").clone();
+        let k = m
+            .items
+            .iter()
+            .position(|(t, _)| t == label)
+            .unwrap_or_else(|| panic!("no {label} in {:?}", m.items));
+        let p = at(e, m.item_at(k));
+        click(e, p);
+    }
+
+    /// A key as the window gives it to the editor.
+    fn keyed(e: &mut Editing, k: Key) -> bool {
+        e.keyed(&KeyboardEvent {
+            state: KeyState::Down,
+            key: k,
+            ..KeyboardEvent::default()
+        })
+    }
+
+    fn learnable(id: &str) -> usize {
+        crate::learn::index(id).expect("learnable")
+    }
+
+    fn note_lines(e: &Editing) -> Vec<String> {
+        e.scene
+            .note
+            .as_ref()
+            .map(|n| n.lines.iter().map(|(t, _)| t.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// A control's menu (a right click): MIDI LEARN rings it and says it waits, Escape cancels it,
+    /// a controller caught is assigned and said; REMOVE MIDI ASSIGNMENT removes it. None of it
+    /// is a gesture of a parameter's (the sound is left as it is), and a press outside the menu
+    /// only closes it.
+    #[test]
+    fn a_controls_menu_learns_cancels_and_removes_its_controller() {
+        let (mut e, host, params) = editing();
+        let map = Arc::clone(&params.midi_map);
+        let cutoff = learnable("cutoff");
+        let knob = ca72_panel::controls::index("cutoff").expect("a control");
+        let p = at(&e, centre("cutoff"));
+        right_click(&mut e, p);
+        e.draw();
+        let m = e.scene.menu.clone().expect("a menu drawn");
+        assert_eq!(m.title, "CUTOFF FREQUENCY · NO MIDI CONTROLLER");
+        assert_eq!(
+            m.items,
+            [
+                ("MIDI LEARN".to_owned(), true),
+                ("REMOVE MIDI ASSIGNMENT".to_owned(), false),
+                ("MIDI ASSIGNMENTS…".to_owned(), true),
+            ]
+        );
+        menu_item(&mut e, "MIDI LEARN");
+        assert_eq!(map.armed(), Some(cutoff));
+        e.draw();
+        assert_eq!((e.scene.menu.clone(), e.scene.learning), (None, Some(knob)));
+        assert_eq!(note_lines(&e)[0], "MIDI LEARN: CUTOFF FREQUENCY");
+        assert_eq!(e.scene.tip, None);
+        assert!(e.learning.holds_keys(&map));
+        // Escape: cancelled.
+        assert!(keyed(&mut e, Key::Escape));
+        assert_eq!(map.armed(), None);
+        e.draw();
+        assert_eq!(e.scene.learning, None);
+        // Learned again, and a controller caught by the audio thread: assigned and said.
+        let p = at(&e, centre("cutoff"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        assert_eq!(map.incoming(0, 74), crate::learn::Incoming::Caught);
+        e.draw();
+        assert_eq!(
+            map.assignment(cutoff)
+                .map(crate::learn::Cc::text)
+                .as_deref(),
+            Some("CH 1 · CC 74")
+        );
+        assert_eq!(note_lines(&e), ["CUTOFF FREQUENCY: CH 1 · CC 74"]);
+        assert_eq!(e.scene.learning, None);
+        // Its menu now names it, and removes it.
+        let p = at(&e, centre("cutoff"));
+        right_click(&mut e, p);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some("CUTOFF FREQUENCY · CH 1 · CC 74")
+        );
+        assert!(menu_items(&e)[1].1, "REMOVE can be chosen");
+        menu_item(&mut e, "REMOVE MIDI ASSIGNMENT");
+        assert_eq!(map.assignment(cutoff), None);
+        // A press elsewhere with a menu open only closes it.
+        let p = at(&e, centre("cutoff"));
+        right_click(&mut e, p);
+        let p = at(&e, centre("emphasis"));
+        click(&mut e, p);
+        assert!(!e.learning.menu_open());
+        assert_eq!(params.cutoff.value(), 0.0);
+        assert!(host.take().is_empty(), "no gesture");
+    }
+
+    /// Arming another control moves the learning there; a controller another control had moves
+    /// to the one learned, and the note says from which.
+    #[test]
+    fn learning_another_control_moves_it_and_a_controller_reused_moves() {
+        let (mut e, _host, params) = editing();
+        let map = Arc::clone(&params.midi_map);
+        map.assign(
+            learnable("emphasis"),
+            crate::learn::Cc { channel: 0, cc: 74 },
+        );
+        let p = at(&e, centre("cutoff"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        let p = at(&e, centre("glide"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        assert_eq!(map.armed(), Some(learnable("glide")));
+        map.incoming(0, 74);
+        e.draw();
+        assert_eq!(
+            note_lines(&e),
+            [
+                "GLIDE: CH 1 · CC 74",
+                "TAKEN FROM EMPHASIS, WHICH HAS NONE NOW"
+            ]
+        );
+        assert_eq!(map.assignment(learnable("emphasis")), None);
+        assert_eq!(map.assignment(learnable("cutoff")), None);
+    }
+
+    /// Closing the editor ends learning: nothing assigned, unless the audio thread had already
+    /// caught a controller for it (that message came, so it is the assignment).
+    #[test]
+    fn closing_the_editor_cancels_learning() {
+        let (mut e, _host, params) = editing();
+        let map = Arc::clone(&params.midi_map);
+        let p = at(&e, centre("cutoff"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        drop(e);
+        assert_eq!(map.armed(), None);
+        assert!(map.assignments().iter().all(Option::is_none));
+        let (mut e, _host, _) = editing();
+        e.params = Arc::clone(&params);
+        let p = at(&e, centre("cutoff"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        map.incoming(2, 20);
+        drop(e);
+        assert_eq!(map.armed(), None);
+        assert_eq!(
+            map.assignment(learnable("cutoff")),
+            Some(crate::learn::Cc { channel: 2, cc: 20 })
+        );
+    }
+
+    /// The strip's controls have the menu too (it opens over the panel's foot, the control
+    /// ringed on the strip); a wheel and POWER say why they are not learned, MIDI LEARN not
+    /// offered.
+    #[test]
+    fn the_strips_controls_learn_and_the_wheels_and_power_say_why_not() {
+        let (mut e, host, params) = editing();
+        let map = Arc::clone(&params.midi_map);
+        let p = on_strip(&e, strip_at(StripTarget::Poly));
+        right_click(&mut e, p);
+        let m = e.learning.menu().expect("a menu").clone();
+        assert_eq!(m.title, "POLY · NO MIDI CONTROLLER");
+        let (_, h) = m.extent(e.renderer.fonts());
+        assert!(m.y + h <= art::H + 1e-6, "over the panel");
+        menu_item(&mut e, "MIDI LEARN");
+        e.draw();
+        assert_eq!(e.strip_scene.learning, Some(strip::StripControl::Poly));
+        assert_eq!(e.scene.learning, None);
+        let p = on_strip(&e, strip_at(StripTarget::Slider(Amount::Spread)));
+        right_click(&mut e, p);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some("SPREAD · NO MIDI CONTROLLER")
+        );
+        let p = on_strip(&e, strip_at(StripTarget::Poly));
+        right_click(&mut e, p);
+        menu_item(&mut e, "CANCEL MIDI LEARN");
+        assert_eq!(map.armed(), None);
+        for (param, title) in [
+            ("pitch_wheel", "PITCH: MIDI PITCH BEND MOVES IT"),
+            (
+                "mod_wheel",
+                "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT",
+            ),
+        ] {
+            let p = at(&e, centre(param));
+            right_click(&mut e, p);
+            assert_eq!(e.learning.menu().map(|m| m.title.as_str()), Some(title));
+            assert_eq!(
+                menu_items(&e),
+                [
+                    ("NOT LEARNED BY MIDI LEARN".to_owned(), false),
+                    ("MIDI ASSIGNMENTS…".to_owned(), true),
+                ]
+            );
+            // (What cannot be chosen leaves the menu open.)
+            menu_item(&mut e, "NOT LEARNED BY MIDI LEARN");
+            assert!(e.learning.menu_open());
+        }
+        let p = at(&e, (art::COL + POWER.0, art::TOP + POWER.1));
+        right_click(&mut e, p);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some("POWER: THE HOST'S BYPASS")
+        );
+        assert!(keyed(&mut e, Key::Escape));
+        assert!(!e.learning.menu_open());
+        assert!(host.take().is_empty(), "no gesture");
+    }
+
+    /// The drawer's MIDI list, from its MIDI button or a control's MIDI ASSIGNMENTS…: every
+    /// learnable control and its controller, operated from the keyboard (the arrows choose,
+    /// Enter learns or cancels, Delete removes, a letter finds a control, Escape cancels then
+    /// closes) and by the pointer (a row's LEARN).
+    #[test]
+    fn the_drawers_midi_list_is_operated_from_the_keyboard() {
+        let (mut e, host, params) = editing();
+        let map = Arc::clone(&params.midi_map);
+        open(&mut e);
+        let p = in_drawer(&e, presets_ui::midi_centre());
+        click(&mut e, p);
+        assert!(e.learning.list);
+        e.draw();
+        let list = e.browser.drawer.midi.clone().expect("the list shown");
+        assert_eq!(list.rows.len(), crate::learn::LEARNABLE.len());
+        assert_eq!(list.rows[0].name, "TUNE");
+        assert!(keyed(&mut e, Key::ArrowDown));
+        assert!(keyed(&mut e, Key::ArrowDown));
+        assert_eq!(e.learning.chosen(), learnable("glide"));
+        assert!(keyed(&mut e, Key::Enter));
+        assert_eq!(map.armed(), Some(learnable("glide")));
+        e.draw();
+        assert!(
+            e.browser
+                .drawer
+                .midi
+                .as_ref()
+                .is_some_and(|l| l.rows[2].waiting)
+        );
+        assert!(keyed(&mut e, Key::Escape), "Escape cancels first");
+        assert_eq!(map.armed(), None);
+        assert!(e.browser.open);
+        map.assign(learnable("glide"), crate::learn::Cc { channel: 0, cc: 5 });
+        e.draw();
+        assert_eq!(
+            e.browser
+                .drawer
+                .midi
+                .as_ref()
+                .map(|l| l.rows[2].assignment.as_str()),
+            Some("CH 1 · CC 5")
+        );
+        assert!(keyed(&mut e, Key::Delete));
+        assert_eq!(map.assignment(learnable("glide")), None);
+        assert!(keyed(&mut e, Key::Character("c".into())));
+        assert_eq!(e.learning.chosen(), learnable("cutoff"));
+        e.draw();
+        let list = e.browser.drawer.midi.clone().expect("the list");
+        assert!(list.first <= list.chosen && list.chosen < list.first + presets_ui::ROWS_SHOWN);
+        // LEARN on a row, by the pointer.
+        let p = presets_ui::midi_action_centre(&list, list.chosen, presets_ui::MidiAction::Learn)
+            .expect("the chosen row's LEARN");
+        let p = in_drawer(&e, p);
+        click(&mut e, p);
+        assert_eq!(map.armed(), Some(learnable("cutoff")));
+        assert!(keyed(&mut e, Key::Escape));
+        assert!(keyed(&mut e, Key::Escape), "then Escape closes");
+        assert!(!e.browser.open);
+        slid(&mut e);
+        assert_eq!(e.browser.drawer.midi, None, "the presets next time");
+        // From a control's menu: the list, that control chosen.
+        let p = at(&e, centre("emphasis"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI ASSIGNMENTS…");
+        assert!(e.browser.open && e.learning.list);
+        assert_eq!(e.learning.chosen(), learnable("emphasis"));
+        assert!(host.take().is_empty(), "no gesture");
+    }
+
+    /// A right click mid-drag ends the drag's gesture before the menu opens.
+    #[test]
+    fn a_right_click_ends_a_drag_first() {
+        let (mut e, host, _params) = editing();
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -40.0));
+        right_click(&mut e, p);
+        assert!(e.learning.menu_open());
+        well_formed(&host.take());
     }
 
     #[test]
@@ -3188,6 +3642,45 @@ mod tests {
             y += f.height() as usize;
         }
         all.save_png(out).unwrap();
+    }
+
+    /// MIDI Learn drawn (decisions.md R30), for looking at: CUTOFF being learned (ringed, its
+    /// note) with MAIN OUTPUT VOLUME's menu open, then POLY being learned after a reserved
+    /// controller was moved, each as `learn-<n>.png` in `$CA72_LEARN_PNG`, the folder.
+    #[test]
+    fn the_window_learning_png() {
+        let Some(out) = std::env::var_os("CA72_LEARN_PNG") else {
+            return;
+        };
+        let out = std::path::PathBuf::from(out);
+        let dir = tempfile::tempdir().unwrap();
+        let shot = |e: &mut Editing, name: &str| {
+            e.draw();
+            let frames = [e.renderer.frame(), e.strip.frame()];
+            let w = frames[0].width();
+            let h: u32 = frames.iter().map(|f| f.height()).sum();
+            let mut all = ca72_panel::Pixmap::new(w, h).unwrap();
+            let mut y = 0usize;
+            for f in frames {
+                let n = (f.width() * f.height() * 4) as usize;
+                let start = y * w as usize * 4;
+                all.data_mut()[start..start + n].copy_from_slice(f.data());
+                y += f.height() as usize;
+            }
+            all.save_png(out.join(name)).unwrap();
+        };
+        let (mut e, _host, params) = editing_with(Library::at(dir.path()));
+        params
+            .midi_map
+            .assign(learnable("volume"), crate::learn::Cc { channel: 0, cc: 7 });
+        params.midi_map.arm(learnable("cutoff"));
+        let p = at(&e, centre("volume"));
+        right_click(&mut e, p);
+        shot(&mut e, "learn-1.png");
+        e.learning.close_menu();
+        params.midi_map.arm(learnable("poly"));
+        params.midi_map.refuse(1);
+        shot(&mut e, "learn-2.png");
     }
 
     /// The drawer's update check (decisions.md R27): its button the editor's, not the

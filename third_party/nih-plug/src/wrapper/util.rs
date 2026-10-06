@@ -50,6 +50,21 @@ pub fn hash_param_id(id: &str) -> u32 {
     hash
 }
 
+/// A parameter the plugin set itself during a `process()` call
+/// ([`ProcessContext::set_parameter_normalized()`][crate::prelude::ProcessContext::set_parameter_normalized()]),
+/// for the wrapper to tell the host once the call returns: the parameter's hash, the time within
+/// the call's block, and the normalized value as set (PATCHES.md, change 9).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct OwnParamChange {
+    pub hash: u32,
+    pub timing: u32,
+    pub normalized: f32,
+}
+
+/// How many such changes one `process()` call can tell the host (room reserved when the wrapper
+/// is made, so none is allocated on the audio thread); past it they are set but not told.
+pub(crate) const OWN_PARAM_CHANGES: usize = 1024;
+
 /// The equivalent of the `strlcpy()` C function. Copy `src` to `dest` as a null-terminated
 /// C-string. If `dest` does not have enough capacity, add a null terminator at the end to prevent
 /// buffer overflows.

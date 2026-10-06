@@ -4,13 +4,13 @@ use clap_sys::events::{
     clap_event_header, clap_event_midi, clap_event_midi_sysex, clap_event_note,
     clap_event_note_expression, clap_event_param_gesture, clap_event_param_mod,
     clap_event_param_value, clap_event_transport, clap_input_events, clap_output_events,
-    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI, CLAP_EVENT_MIDI_SYSEX,
-    CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_END, CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF,
-    CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_GESTURE_BEGIN, CLAP_EVENT_PARAM_GESTURE_END,
-    CLAP_EVENT_PARAM_MOD, CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT,
-    CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_EXPRESSION, CLAP_NOTE_EXPRESSION_PAN,
-    CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING, CLAP_NOTE_EXPRESSION_VIBRATO,
-    CLAP_NOTE_EXPRESSION_VOLUME, CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
+    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_DONT_RECORD, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI,
+    CLAP_EVENT_MIDI_SYSEX, CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_END, CLAP_EVENT_NOTE_EXPRESSION,
+    CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_GESTURE_BEGIN,
+    CLAP_EVENT_PARAM_GESTURE_END, CLAP_EVENT_PARAM_MOD, CLAP_EVENT_PARAM_VALUE,
+    CLAP_EVENT_TRANSPORT, CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_EXPRESSION,
+    CLAP_NOTE_EXPRESSION_PAN, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,
+    CLAP_NOTE_EXPRESSION_VIBRATO, CLAP_NOTE_EXPRESSION_VOLUME, CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
     CLAP_TRANSPORT_HAS_SECONDS_TIMELINE, CLAP_TRANSPORT_HAS_TEMPO,
     CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_LOOP_ACTIVE, CLAP_TRANSPORT_IS_PLAYING,
     CLAP_TRANSPORT_IS_RECORDING, CLAP_TRANSPORT_IS_WITHIN_PRE_ROLL,
@@ -94,6 +94,7 @@ use crate::wrapper::state::{self, PluginState};
 use crate::wrapper::util::buffer_management::{BufferManager, ChannelPointers};
 use crate::wrapper::util::{
     clamp_input_event_timing, clamp_output_event_timing, hash_param_id, process_wrapper, strlcpy,
+    OwnParamChange, OWN_PARAM_CHANGES,
 };
 
 /// How many output parameter changes we can store in our output parameter change queue. Storing
@@ -143,6 +144,13 @@ pub struct Wrapper<P: ClapPlugin> {
     /// Stores any events the plugin has output during the current processing cycle, analogous to
     /// `input_events`.
     output_events: AtomicRefCell<VecDeque<PluginNoteEvent<P>>>,
+    /// The parameters the plugin set itself during the current `process()` call, for
+    /// [`handle_out_events()`][Self::handle_out_events()] to tell the host (PATCHES.md, change 9).
+    /// Its room is reserved here: it never grows.
+    own_param_changes: AtomicRefCell<Vec<OwnParamChange>>,
+    /// A rescan of the parameters' values asked of the host for the plugin's own changes and not
+    /// yet made: at most one waits (PATCHES.md, change 9).
+    own_rescan_pending: AtomicBool,
     /// The last process status returned by the plugin. This is used for tail handling.
     last_process_status: AtomicCell<ProcessStatus>,
     /// The current latency in samples, as set by the plugin through the [`ProcessContext`]. Uses
@@ -414,6 +422,7 @@ impl<P: ClapPlugin> MainThreadExecutor<Task<P>> for Wrapper<P> {
             },
             Task::RescanParamValues => match &*self.host_params.borrow() {
                 Some(host_params) => {
+                    self.own_rescan_pending.store(false, Ordering::Release);
                     nih_debug_assert!(is_gui_thread);
                     unsafe_clap_call! { host_params=>rescan(&*self.host_callback, CLAP_PARAM_RESCAN_VALUES) };
                 }
@@ -551,6 +560,8 @@ impl<P: ClapPlugin> Wrapper<P> {
             current_process_mode: AtomicCell::new(ProcessMode::Realtime),
             input_events: AtomicRefCell::new(VecDeque::with_capacity(512)),
             output_events: AtomicRefCell::new(VecDeque::with_capacity(512)),
+            own_param_changes: AtomicRefCell::new(Vec::with_capacity(OWN_PARAM_CHANGES)),
+            own_rescan_pending: AtomicBool::new(false),
             last_process_status: AtomicCell::new(ProcessStatus::Normal),
             current_latency: AtomicU32::new(0),
             // This is initialized just before calling `Plugin::initialize()` so that during the
@@ -746,13 +757,57 @@ impl<P: ClapPlugin> Wrapper<P> {
         }
     }
 
-    fn make_process_context(&self, transport: Transport) -> WrapperProcessContext<'_, P> {
+    /// `host_listens`: the host gave an output events queue to this process call, so the
+    /// plugin's own parameter changes can be told to it (PATCHES.md, change 9).
+    fn make_process_context(
+        &self,
+        transport: Transport,
+        host_listens: bool,
+    ) -> WrapperProcessContext<'_, P> {
         WrapperProcessContext {
             wrapper: self,
             input_events_guard: self.input_events.borrow_mut(),
             output_events_guard: self.output_events.borrow_mut(),
+            own_param_changes_guard: self.own_param_changes.borrow_mut(),
+            host_listens,
             transport,
         }
+    }
+
+    /// The plugin's own change of a parameter during `process()`, `timing` samples into the run
+    /// (PATCHES.md, change 9): set as the host's automation is set (the value, its smoother, the
+    /// editor told), and kept in `own` for [`handle_out_events()`][Self::handle_out_events()] to
+    /// tell the host. Returns whether the host will be told.
+    pub(crate) fn set_own_parameter(
+        &self,
+        own: &mut Vec<OwnParamChange>,
+        host_listens: bool,
+        param: ParamPtr,
+        normalized: f32,
+        timing: u32,
+    ) -> bool {
+        let Some(&hash) = self.param_ptr_to_hash.get(&param) else {
+            nih_debug_assert_failure!("Unknown parameter: {:?}", param);
+            return false;
+        };
+        // SAFETY: the pointer is one of the plugin's own parameters (`param_ptr_to_hash`), which
+        // live as long as the wrapper.
+        let steps = unsafe { param.step_count() }.unwrap_or(1) as f64;
+        self.update_plain_value_by_hash(
+            hash,
+            ClapParamUpdate::PlainValueSet(f64::from(normalized) * steps),
+            self.current_buffer_config.load().map(|c| c.sample_rate),
+        );
+        if !host_listens || own.len() >= own.capacity() {
+            return false;
+        }
+        own.push(OwnParamChange {
+            hash,
+            timing,
+            // SAFETY: as above.
+            normalized: unsafe { param.unmodulated_normalized_value() },
+        });
+        true
     }
 
     /// Get a parameter's ID based on a `ParamPtr`. Used in the `GuiContext` implementation for the
@@ -939,9 +994,38 @@ impl<P: ClapPlugin> Wrapper<P> {
             return None;
         }
 
+        // An event at a later sample than the run's start, followed at that same sample by one
+        // the run would be split at (a parameter change, say): the run is split before this one
+        // instead, so that at any sample the host's parameter changes are set before the events
+        // the plugin reads, whatever the host's order among them. A MIDI CC the plugin sets a
+        // parameter from (PATCHES.md, change 9) then follows automation of that parameter at its
+        // sample rather than coming before or after it by chance.
+        let split_before = |idx: u32, event: *const clap_event_header| -> bool {
+            // SAFETY: the host's events, valid for this call (as everywhere here).
+            unsafe {
+                let time = (*event).time;
+                if time <= current_sample_idx as u32 || stop_predicate(event) {
+                    return false;
+                }
+                for later_idx in (idx + 1)..num_events {
+                    let later: *const clap_event_header = clap_call! { in_=>get(in_, later_idx) };
+                    if (*later).time != time {
+                        break;
+                    }
+                    if stop_predicate(later) {
+                        return true;
+                    }
+                }
+                false
+            }
+        };
+
         let start_idx = resume_from_event_idx as u32;
         let mut event: *const clap_event_header = clap_call! { in_=>get(in_, start_idx) };
         for next_event_idx in (start_idx + 1)..num_events {
+            if split_before(next_event_idx - 1, event) {
+                return Some(((*event).time as usize, (next_event_idx - 1) as usize));
+            }
             self.handle_in_event(
                 event,
                 &mut input_events,
@@ -960,7 +1044,7 @@ impl<P: ClapPlugin> Wrapper<P> {
             event = next_event;
         }
 
-        // Don't forget about the last event
+        // Don't forget about the last event (none follows it at its sample)
         self.handle_in_event(
             event,
             &mut input_events,
@@ -1054,6 +1138,55 @@ impl<P: ClapPlugin> Wrapper<P> {
 
             nih_debug_assert!(push_successful);
         }
+
+        // The parameters the plugin set itself in this run, at their times, flagged not to be
+        // recorded: what set them (a MIDI CC, say) is what the host records, and recording both
+        // would conflict (`clap/ext/params.h`: "Turning a knob via plugin's internal MIDI
+        // mapping"). No gesture: the plugin's own change is not the user's edit of the parameter.
+        // In time order after the editor's above, which are at the run's start (PATCHES.md,
+        // change 9).
+        let mut own = self.own_param_changes.borrow_mut();
+        for change in own.iter() {
+            let steps = self
+                .param_by_hash
+                .get(&change.hash)
+                .and_then(|p| unsafe { p.step_count() })
+                .unwrap_or(1) as f64;
+            let event = clap_event_param_value {
+                header: clap_event_header {
+                    size: mem::size_of::<clap_event_param_value>() as u32,
+                    time: clamp_output_event_timing(
+                        change.timing + current_sample_idx as u32,
+                        total_buffer_len as u32,
+                    ),
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_PARAM_VALUE,
+                    flags: CLAP_EVENT_DONT_RECORD,
+                },
+                param_id: change.hash,
+                cookie: std::ptr::null_mut(),
+                port_index: -1,
+                note_id: -1,
+                channel: -1,
+                key: -1,
+                value: f64::from(change.normalized) * steps,
+            };
+            let push_successful = clap_call! { out=>try_push(out, &event.header) };
+            nih_debug_assert!(push_successful);
+        }
+        // And the host asked, on its main thread, to read the parameters' values again: a host
+        // may take a value flagged not to be recorded as one not to be applied either (Bitwig
+        // Studio 5.2 leaves its own view of the parameter as it was), and a values rescan is
+        // CLAP's way to have it take new values without recording them ("The host will not
+        // record those changes as automation points"). One waits at most.
+        if !own.is_empty() && !self.own_rescan_pending.swap(true, Ordering::AcqRel) {
+            let task_posted = self.schedule_gui(Task::RescanParamValues);
+            if !task_posted {
+                self.own_rescan_pending.store(false, Ordering::Release);
+            }
+        }
+        own.clear();
+        drop(own);
 
         // Also send all note events generated by the plugin
         let mut output_events = self.output_events.borrow_mut();
@@ -2248,7 +2381,8 @@ impl<P: ClapPlugin> Wrapper<P> {
                         inputs: buffers.aux_inputs,
                         outputs: buffers.aux_outputs,
                     };
-                    let mut context = wrapper.make_process_context(transport);
+                    let mut context =
+                        wrapper.make_process_context(transport, !process.out_events.is_null());
                     let result = plugin.process(buffers.main_buffer, &mut aux, &mut context);
                     wrapper.last_process_status.store(result);
                     result
@@ -2271,6 +2405,9 @@ impl<P: ClapPlugin> Wrapper<P> {
                 // events.
                 if !process.out_events.is_null() {
                     wrapper.handle_out_events(&*process.out_events, block_start, total_buffer_len);
+                } else {
+                    // (No queue: the plugin's own changes were set, and are not told.)
+                    wrapper.own_param_changes.borrow_mut().clear();
                 }
 
                 // If our block ends at the end of the buffer then that means there are no more

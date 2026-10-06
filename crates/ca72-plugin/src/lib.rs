@@ -6,6 +6,8 @@ pub mod character;
 pub mod editor;
 pub mod engine;
 pub mod helper;
+pub mod learn;
+pub mod learning;
 pub mod library;
 pub mod params;
 pub mod pool;
@@ -22,6 +24,7 @@ use crate::engine::{
     ALL_NOTES_OFF, ALL_SOUND_OFF, Engine, Event, MODULATION_WHEEL, RESET_CONTROLLERS,
 };
 use crate::helper::{Helper, MEND, SERVE};
+use crate::learn::{Dezip, Incoming};
 use crate::params::Ca72Params;
 
 pub struct Ca72 {
@@ -33,6 +36,9 @@ pub struct Ca72 {
     /// The plug-in's own thread for what the audio thread asks of it (decisions.md R23),
     /// started when the plug-in is first initialised (none if the system would not start it).
     helper: Option<Helper>,
+    /// The knobs learned MIDI controllers have just moved, gliding in the voices (decisions.md
+    /// R30).
+    dezip: Dezip,
 }
 
 impl std::fmt::Debug for Ca72 {
@@ -50,6 +56,11 @@ impl Default for Ca72 {
 }
 
 impl Ca72 {
+    /// Its parameters, typed (the host's view is [`Plugin::params`]).
+    pub fn parameters(&self) -> &Arc<Ca72Params> {
+        &self.params
+    }
+
     fn with_params(params: Ca72Params) -> Ca72 {
         Ca72 {
             params: Arc::new(params),
@@ -57,6 +68,7 @@ impl Ca72 {
             meters: Arc::new(Meters::default()),
             rate: 48_000.0,
             helper: None,
+            dezip: Dezip::default(),
         }
     }
 }
@@ -108,10 +120,65 @@ fn event_of(e: NoteEvent<()>) -> Option<Event> {
 }
 
 impl Ca72 {
-    fn midi(&mut self, e: NoteEvent<()>) {
+    /// A MIDI event: a learnable control change to MIDI Learn (decisions.md R30), anything else
+    /// as before (the reserved control changes the engine follows, CC 1, 120, 121 and 123, among
+    /// them). Whether it set a parameter.
+    fn midi(&mut self, e: NoteEvent<()>, context: &mut impl ProcessContext<Self>) -> bool {
+        if let NoteEvent::MidiCC {
+            timing,
+            channel,
+            cc,
+            value,
+        } = e
+        {
+            if learn::reserved(cc).is_none() {
+                return match self.params.midi_map.incoming(channel, cc) {
+                    Incoming::Assigned(i) => self.learned(i, value, timing, context),
+                    // Caught for the parameter being learned: the sound is not changed by it.
+                    Incoming::Caught | Incoming::Unassigned => false,
+                };
+            }
+            // (Said in the editor while it learns: this one is not learned.)
+            self.params.midi_map.refuse(cc);
+        }
         if let Some(event) = event_of(e) {
             self.engine.event(event);
         }
+        false
+    }
+
+    /// Learnable parameter `i`'s controller at `value` (0..1, as the host gives a control change;
+    /// 7 bits), `timing` samples into the block: the parameter set through the host, as the
+    /// host's automation sets it (the editor and the host following, the state holding it), and
+    /// a knob gliding there in the voices ([`Dezip`]). Whether it changed.
+    fn learned(
+        &mut self,
+        i: usize,
+        value: f32,
+        timing: u32,
+        context: &mut impl ProcessContext<Self>,
+    ) -> bool {
+        let seven = (value.clamp(0.0, 1.0) * 127.0).round() as u8;
+        let Some(target) = learn::target(&self.params, i) else {
+            return false;
+        };
+        let normalized = target.normalized_for(seven);
+        if target.at(normalized) {
+            return false;
+        }
+        let knob = learn::knob_param(&self.params, i);
+        let from = knob.map(|k| self.dezip.value(k));
+        context.set_parameter_normalized(target.ptr(), normalized, timing);
+        if let (Some(k), Some(from)) = (knob, from) {
+            self.dezip.start(i, k, from, k.value());
+        }
+        true
+    }
+
+    /// The engine's controls: the parameters, a knob a learned controller has just moved where
+    /// its glide has it.
+    fn controls(&self) -> crate::engine::Controls {
+        self.params.controls_with(&|k| self.dezip.value(k))
     }
 
     /// What the engine asks done off the audio thread since the last block, asked of the
@@ -173,7 +240,11 @@ impl Plugin for Ca72 {
     /// A session saved before ENTROPY (decisions.md R14) holds ANALOG's `analog`, which no
     /// parameter takes: it opens with ENTROPY at its default, not at what the instance had
     /// (R18).
+    ///
+    /// A state without MIDI assignments (saved before MIDI Learn) opens with none, whatever the
+    /// instance had; a table that is not understood is none either (decisions.md R30).
     fn filter_state(state: &mut PluginState) {
+        learn::filter_state(&mut state.fields);
         state.params.remove("analog");
         if !state.params.contains_key("entropy") {
             let entropy = Ca72Params::default().entropy.default_plain_value();
@@ -202,6 +273,7 @@ impl Plugin for Ca72 {
         let block = config.max_buffer_size.max(1) as usize;
         let rate = f64::from(config.sample_rate);
         self.rate = rate;
+        self.dezip.prepare(rate);
         if self.helper.is_none() {
             self.helper = Helper::start(self.engine.spares(), self.engine.crew()).ok();
         }
@@ -222,6 +294,8 @@ impl Plugin for Ca72 {
     }
 
     fn reset(&mut self) {
+        self.dezip.clear();
+        self.engine.set(&self.params.controls());
         self.engine.release_all();
         self.engine.event(Event::ResetControllers);
     }
@@ -232,7 +306,10 @@ impl Plugin for Ca72 {
         aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        self.engine.set(&self.params.controls());
+        // (A knob whose parameter something else has set since a learned controller moved it
+        // stops gliding: the host's automation, the editor and presets set the voices as ever.)
+        self.dezip.follow(&self.params);
+        self.engine.set(&self.controls());
         let len = buffer.samples();
         // The voices' deadline: a share of the block's period from now (decisions.md R11);
         // none rendering offline, where every voice is waited for (R18).
@@ -247,22 +324,33 @@ impl Plugin for Ca72 {
         let mut next = context.next_event();
         // The samples between one event and the next, a run at a time (the engine plays
         // POLY's voices one after another over a run: decisions.md R11), the side chain mixed
-        // to mono.
+        // to mono. A learned MIDI controller sets its parameter at its event, and the voices take
+        // it from there; while a knob it moved glides, a run is at most `DEZIP_STEP` samples
+        // (decisions.md R30).
         const RUN: usize = 128;
         let (mut ext, mut l, mut r) = ([0.0f32; RUN], [0.0f32; RUN], [0.0f32; RUN]);
         let mut i = 0;
+        let mut glided = false;
         while i < len {
+            let mut learned = false;
             while let Some(e) = next {
                 if e.timing() as usize > i {
                     break;
                 }
-                self.midi(e);
+                learned |= self.midi(e, context);
                 next = context.next_event();
             }
-            let end = next
+            if learned || glided || self.dezip.moving() {
+                self.dezip.follow(&self.params);
+                self.engine.set(&self.controls());
+            }
+            let mut end = next
                 .map_or(len, |e| e.timing() as usize)
                 .min(len)
                 .min(i + RUN);
+            if self.dezip.moving() {
+                end = end.min(i + learn::DEZIP_STEP);
+            }
             let n = end - i;
             let ext = match side {
                 Some(s) if !s.is_empty() => {
@@ -286,10 +374,14 @@ impl Plugin for Ca72 {
                 }
                 [] => self.engine.render(ext, &mut l[..n], &mut r[..n]),
             }
+            glided = self.dezip.moving();
+            self.dezip.advance(n, &self.params);
             i = end;
         }
+        // (Past the block's end: a parameter set here reaches the voices at the next block's
+        // start.)
         while let Some(e) = next {
-            self.midi(e);
+            self.midi(e, context);
             next = context.next_event();
         }
         let lamp = self.engine.end_block(len);
@@ -323,31 +415,50 @@ impl Vst3Plugin for Ca72 {
 mod tests {
     use super::*;
     use ca72::modulation::PITCH_WHEEL_SEMITONES;
+    use nih_plug::context::process::TestProcessContext;
+    use std::collections::BTreeMap;
+
+    /// A context with no host, for the plug-in's parameters (nih-plug's `TestProcessContext`).
+    fn hostless(p: &Ca72) -> TestProcessContext<Ca72> {
+        let params: Arc<dyn Params> = p.params.clone();
+        TestProcessContext::new(params, 48_000.0, ProcessMode::Realtime)
+    }
 
     #[test]
     fn the_hosts_midi_reaches_the_wheels_on_any_channel() {
         let mut p = Ca72::default();
-        p.midi(NoteEvent::MidiPitchBend {
-            timing: 0,
-            channel: 3,
-            value: 0.0,
-        });
-        p.midi(NoteEvent::MidiCC {
-            timing: 0,
-            channel: 9,
-            cc: MODULATION_WHEEL,
-            value: 1.0,
-        });
+        let mut c = hostless(&p);
+        p.midi(
+            NoteEvent::MidiPitchBend {
+                timing: 0,
+                channel: 3,
+                value: 0.0,
+            },
+            &mut c,
+        );
+        p.midi(
+            NoteEvent::MidiCC {
+                timing: 0,
+                channel: 9,
+                cc: MODULATION_WHEEL,
+                value: 1.0,
+            },
+            &mut c,
+        );
         let (bend, modulation) = p.engine.wheels();
         assert!((bend + 2.0 / PITCH_WHEEL_SEMITONES).abs() < 1e-9, "{bend}");
         assert_eq!(modulation, 1.0);
-        p.midi(NoteEvent::MidiCC {
-            timing: 0,
-            channel: 0,
-            cc: RESET_CONTROLLERS,
-            value: 0.0,
-        });
+        p.midi(
+            NoteEvent::MidiCC {
+                timing: 0,
+                channel: 0,
+                cc: RESET_CONTROLLERS,
+                value: 0.0,
+            },
+            &mut c,
+        );
         assert_eq!(p.engine.wheels(), (0.0, 0.0));
+        assert!(c.reported.is_empty());
     }
 
     /// All Sound Off silences, All Notes Off releases (decisions.md R18).
@@ -399,6 +510,505 @@ mod tests {
         let mut new = state(&[("entropy", 40.0)]);
         Ca72::filter_state(&mut new);
         assert_eq!(entropy(&new), Some(40.0));
+    }
+
+    /// One block of `len` samples processed as a host calls `process`, with the events pushed to
+    /// `c` (stereo, no side chain): its left channel.
+    #[allow(unsafe_code)]
+    fn block(p: &mut Ca72, c: &mut TestProcessContext<Ca72>, len: usize) -> Vec<f32> {
+        let (mut l, mut r) = (vec![0.0f32; len], vec![0.0f32; len]);
+        let mut buffer = Buffer::default();
+        // SAFETY: both slices are `len` long and live until `process` has returned.
+        unsafe {
+            buffer.set_slices(len, |s| {
+                s.clear();
+                s.push(&mut l);
+                s.push(&mut r);
+            });
+        }
+        let mut aux = AuxiliaryBuffers {
+            inputs: &mut [],
+            outputs: &mut [],
+        };
+        p.process(&mut buffer, &mut aux, c);
+        drop(buffer);
+        l
+    }
+
+    /// A control change as a host gives it (channel 0 to 15, the 7-bit value as 0..1).
+    fn cc(timing: u32, channel: u8, cc: u8, value: u8) -> NoteEvent<()> {
+        NoteEvent::MidiCC {
+            timing,
+            channel,
+            cc,
+            value: f32::from(value) / 127.0,
+        }
+    }
+
+    fn learnable(id: &str) -> usize {
+        learn::index(id).expect("learnable")
+    }
+
+    fn on(channel: u8, cc: u8) -> learn::Cc {
+        learn::Cc { channel, cc }
+    }
+
+    /// A learned controller sets its parameter at its event's sample, through the host (the
+    /// host told once, at that time; a value the parameter already has, not again), with no
+    /// editor open; the parameter is at the new value at once.
+    #[test]
+    fn a_learned_controller_sets_its_parameter_at_its_sample_through_the_host() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        p.params.midi_map.assign(learnable("cutoff"), on(0, 74));
+        c.push_event(cc(100, 0, 74, 127));
+        c.push_event(cc(200, 0, 74, 127));
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.params.cutoff.value(), 5.0);
+        assert_eq!(c.reported, [(p.params.cutoff.as_ptr(), 1.0, 100)]);
+        c.push_event(cc(10, 0, 74, 0));
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.params.cutoff.value(), -5.0);
+        assert_eq!(
+            c.reported.last(),
+            Some(&(p.params.cutoff.as_ptr(), 0.0, 10))
+        );
+    }
+
+    /// While learning, the next learnable controller is caught and changes nothing; once the
+    /// editor has assigned it, it sets the parameter.
+    #[test]
+    fn the_controller_caught_while_learning_changes_nothing() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        let map = Arc::clone(&p.params.midi_map);
+        map.arm(learnable("emphasis"));
+        c.push_event(cc(0, 3, 20, 127));
+        c.push_event(cc(64, 3, 20, 100));
+        block(&mut p, &mut c, 128);
+        assert_eq!(p.params.emphasis.value(), 0.0, "the sound unchanged");
+        assert!(c.reported.is_empty());
+        assert_eq!(
+            map.poll().map(|a| (a.param, a.cc)),
+            Some((learnable("emphasis"), on(3, 20)))
+        );
+        c.push_event(cc(5, 3, 20, 127));
+        block(&mut p, &mut c, 128);
+        assert_eq!(p.params.emphasis.value(), 10.0);
+    }
+
+    /// The reserved controllers keep what they did (the modulation wheel moves the wheel, reset
+    /// all controllers resets it) and are not learned; a controller on another channel than the
+    /// one learned does nothing.
+    #[test]
+    fn the_reserved_controllers_keep_their_paths_and_channels_are_told_apart() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        let map = Arc::clone(&p.params.midi_map);
+        map.assign(learnable("cutoff"), on(0, 74));
+        map.arm(learnable("glide"));
+        for reserved in [
+            0, 1, 6, 32, 38, 96, 97, 98, 99, 100, 101, 122, 124, 125, 126, 127,
+        ] {
+            c.push_event(cc(0, 0, reserved, 127));
+        }
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.engine.wheels().1, 1.0, "CC 1 is the modulation wheel");
+        assert_eq!(
+            map.armed(),
+            Some(learnable("glide")),
+            "nothing reserved was learned"
+        );
+        assert_eq!(map.refused(), Some(127));
+        c.push_event(cc(0, 0, 121, 0));
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.engine.wheels(), (0.0, 0.0), "CC 121 reset the wheels");
+        map.cancel();
+        c.push_event(cc(0, 1, 74, 127));
+        block(&mut p, &mut c, 64);
+        assert_eq!(
+            p.params.cutoff.value(),
+            0.0,
+            "CC 74 on channel 2 is not channel 1's"
+        );
+        assert!(c.reported.is_empty());
+    }
+
+    /// A switch, a selector and VOICES from their controllers' values.
+    #[test]
+    fn switches_selectors_and_voices_take_their_controllers_values() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        let map = Arc::clone(&p.params.midi_map);
+        map.assign(learnable("osc2_on"), on(0, 20));
+        map.assign(learnable("osc1_range"), on(0, 21));
+        map.assign(learnable("voices"), on(0, 22));
+        c.push_event(cc(0, 0, 20, 64));
+        c.push_event(cc(0, 0, 21, 0));
+        c.push_event(cc(0, 0, 22, 127));
+        block(&mut p, &mut c, 64);
+        assert!(p.params.osc2_on.value());
+        assert_eq!(p.params.osc1_range.value(), params::Footage::Lo);
+        assert_eq!(p.params.voices.value(), 10);
+        c.push_event(cc(0, 0, 20, 63));
+        c.push_event(cc(0, 0, 21, 127));
+        c.push_event(cc(0, 0, 22, 0));
+        block(&mut p, &mut c, 64);
+        assert!(!p.params.osc2_on.value());
+        assert_eq!(p.params.osc1_range.value(), params::Footage::R2);
+        assert_eq!(p.params.voices.value(), 2);
+    }
+
+    /// A knob a learned controller moves is at its new value at once (the host's, the editor's,
+    /// the state's), and the voices glide there over `DEZIP` (10 ms), set every `DEZIP_STEP`
+    /// samples; anything else setting it meanwhile (the host's automation) ends the glide there.
+    #[test]
+    fn a_knob_a_controller_moves_glides_in_the_voices_alone() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        p.params.midi_map.assign(learnable("cutoff"), on(0, 74));
+        let at_rest = p.controls().panel.cutoff;
+        assert_eq!(at_rest, p.params.controls().panel.cutoff);
+        c.push_event(cc(0, 0, 74, 127));
+        block(&mut p, &mut c, 128);
+        let voices = p.controls().panel.cutoff;
+        let target = p.params.controls().panel.cutoff;
+        assert_eq!(target, 1.0, "the parameter at once");
+        assert!(
+            voices > at_rest && voices < target,
+            "{at_rest} {voices} {target}"
+        );
+        // 480 samples at 48 kHz: there, exactly.
+        block(&mut p, &mut c, 352);
+        assert_eq!(p.controls(), p.params.controls());
+        assert!(!p.dezip.moving());
+        // Automation meanwhile: no more glide.
+        c.push_event(cc(0, 0, 74, 0));
+        block(&mut p, &mut c, 64);
+        assert!(p.dezip.moving());
+        assert!(c.automate(p.params.cutoff.as_ptr(), 0.75));
+        block(&mut p, &mut c, 64);
+        assert!(!p.dezip.moving());
+        assert_eq!(p.controls(), p.params.controls());
+        assert_eq!(p.params.cutoff.value(), 2.5);
+        // Switches and selectors do not glide.
+        p.params.midi_map.assign(learnable("osc1_range"), on(0, 21));
+        c.push_event(cc(0, 0, 21, 127));
+        block(&mut p, &mut c, 64);
+        assert!(!p.dezip.moving());
+        assert_eq!(p.controls(), p.params.controls());
+    }
+
+    /// Why a knob a learned controller moves glides (decisions.md R30), measured, by hand
+    /// (`cargo test --release -p ca72-plugin --lib a_controllers_steps -- --ignored
+    /// --nocapture`): a held A2 on a sawtooth, a knob turned in a quarter of a second three ways:
+    /// by the host's automation every 32 samples (the reference), by a 7-bit controller with the
+    /// voices following each step at once, and by the same controller as the plug-in plays it
+    /// (gliding). The energy above 8 kHz, where the note has little, and the whole, against the
+    /// reference's; each knob from and to on its dial, with EMPHASIS where given.
+    #[test]
+    #[ignore]
+    fn a_controllers_steps() {
+        use ca72_analysis::fft::{hann, power};
+        const RATE: usize = 48_000;
+        const STEP: usize = 32;
+        let render = |id: &str, from: f64, to: f64, emphasis: f32, how: usize| -> Vec<f32> {
+            let mut p = initialised(false);
+            let mut c = hostless(&p);
+            if how == 1 {
+                // (The voices following each step at once: glides one sample long.)
+                p.dezip.prepare(1.0 / learn::DEZIP);
+            }
+            let i = learnable(id);
+            p.params.midi_map.assign(i, on(0, 74));
+            let params = Arc::clone(&p.params);
+            let knob = learn::knob_param(&params, i).expect("a knob");
+            let ptr = knob.as_ptr();
+            let travel = |v: f64| knob.preview_normalized(v as f32);
+            c.automate(params.emphasis.as_ptr(), emphasis / 10.0);
+            c.automate(params.contour_amount.as_ptr(), 0.0);
+            c.automate(ptr, travel(from));
+            c.push_event(NoteEvent::NoteOn {
+                timing: 0,
+                voice_id: None,
+                channel: 0,
+                note: 45,
+                velocity: 1.0,
+            });
+            for _ in 0..(RATE / 4 / STEP) {
+                block(&mut p, &mut c, STEP);
+            }
+            let mut out = Vec::new();
+            let mut sent = None;
+            for k in 0..(RATE / 2 / STEP) {
+                let t = ((k * STEP) as f64 / RATE as f64 / 0.25).min(1.0);
+                let n = travel(from + (to - from) * t);
+                if how == 0 {
+                    c.automate(ptr, n);
+                } else {
+                    let v = (f64::from(n) * 127.0).round() as u8;
+                    if sent != Some(v) {
+                        c.push_event(cc(0, 0, 74, v));
+                        sent = Some(v);
+                    }
+                }
+                out.extend(block(&mut p, &mut c, STEP));
+            }
+            out
+        };
+        let band = |x: &[f32]| -> (f64, f64) {
+            let n = 2048;
+            let w = hann(n);
+            let (mut high, mut all) = (0.0, 0.0);
+            for frame in x.windows(n).step_by(n / 2) {
+                let f: Vec<f64> = frame.iter().map(|&s| f64::from(s)).collect();
+                for (k, e) in power(&f, &w).iter().enumerate() {
+                    all += e;
+                    if k as f64 * RATE as f64 / n as f64 >= 8_000.0 {
+                        high += e;
+                    }
+                }
+            }
+            (high, all)
+        };
+        let db = |a: f64, b: f64| 10.0 * (a / b).log10();
+        for (id, from, to, emphasis) in [
+            ("cutoff", -1.0, 2.0, 7.0),
+            ("cutoff", -1.0, 2.0, 9.5),
+            ("volume", 10.0, 3.0, 0.0),
+            ("osc1_volume", 8.0, 2.0, 0.0),
+            ("emphasis", 2.0, 9.0, 0.0),
+            ("tune", -1.0, 1.0, 0.0),
+        ] {
+            let emphasis = if id == "emphasis" {
+                from as f32
+            } else {
+                emphasis
+            };
+            let smooth = render(id, from, to, emphasis, 0);
+            let (hs, a0) = band(&smooth);
+            let mut line = format!(
+                "{id} {from} to {to} (EMPHASIS {emphasis}): reference above 8 kHz {:.1} dB of its whole",
+                db(hs, a0)
+            );
+            for (name, how) in [("stepped", 1), ("glided", 2)] {
+                let (h, a) = band(&render(id, from, to, emphasis, how));
+                line += &format!(
+                    "; {name} {:+.2} dB above 8 kHz, {:+.2} dB all",
+                    db(h, hs),
+                    db(a, a0)
+                );
+            }
+            println!("{line}");
+        }
+    }
+
+    /// With no controller learned, `process` plays as it did before MIDI Learn (decisions.md
+    /// R30), to the bit: the code before replayed here on the engine itself (its controls set at
+    /// the block's start, runs of at most 128 samples between events, each event at its
+    /// sample), with notes, the wheels, controllers not learned and reserved ones, POLY off and
+    /// on (rendered offline: every voice waited for).
+    #[test]
+    fn with_nothing_learned_the_sound_is_as_before() {
+        use crate::engine::Engine;
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        const LEN: usize = 256;
+        let before =
+            |e: &mut Engine, controls: &crate::engine::Controls, events: &[NoteEvent<()>]| {
+                e.set(controls);
+                e.set_deadline(None);
+                let (mut l, mut r) = (vec![0.0f32; LEN], vec![0.0f32; LEN]);
+                let mut it = events.iter().peekable();
+                let mut i = 0;
+                while i < LEN {
+                    while let Some(ev) = it.peek() {
+                        if ev.timing() as usize > i {
+                            break;
+                        }
+                        if let Some(x) = event_of(**ev) {
+                            e.event(x);
+                        }
+                        it.next();
+                    }
+                    let end = it
+                        .peek()
+                        .map_or(LEN, |ev| ev.timing() as usize)
+                        .min(LEN)
+                        .min(i + 128);
+                    e.render(&[], &mut l[i..end], &mut r[i..end]);
+                    i = end;
+                }
+                for ev in it {
+                    if let Some(x) = event_of(*ev) {
+                        e.event(x);
+                    }
+                }
+                e.end_block(LEN);
+                l
+            };
+        for poly in [false, true] {
+            let mut p = initialised(poly);
+            let params: Arc<dyn Params> = p.params.clone();
+            let mut c = TestProcessContext::new(params, 48_000.0, ProcessMode::Offline);
+            let controls = p.params.controls();
+            let mut e = Engine::new();
+            e.set(&controls);
+            e.prepare(48_000.0, p.params.seed());
+            let mut heard = 0.0;
+            for b in 0..120u32 {
+                let note = |timing, note: u8, on: bool| {
+                    if on {
+                        NoteEvent::NoteOn {
+                            timing,
+                            voice_id: None,
+                            channel: 0,
+                            note,
+                            velocity: 1.0,
+                        }
+                    } else {
+                        NoteEvent::NoteOff {
+                            timing,
+                            voice_id: None,
+                            channel: 0,
+                            note,
+                            velocity: 0.0,
+                        }
+                    }
+                };
+                let mut events = vec![];
+                if b % 12 == 0 {
+                    events.push(note(3, 45 + (b / 12 % 7) as u8, true));
+                    events.push(note(3, 52 + (b / 12 % 5) as u8, true));
+                }
+                if b % 12 == 9 {
+                    events.push(note(17, 45 + (b / 12 % 7) as u8, false));
+                }
+                events.push(cc(40, (b % 16) as u8, 74, (b * 7 % 128) as u8));
+                events.push(cc(41, 0, 1, (b * 5 % 128) as u8));
+                events.push(NoteEvent::MidiPitchBend {
+                    timing: 90,
+                    channel: 0,
+                    value: 0.5 + 0.4 * ((b as f32) * 0.3).sin(),
+                });
+                events.push(cc(200, 0, 7, 100));
+                if b % 50 == 49 {
+                    events.push(cc(250, 0, 121, 0));
+                    events.push(cc(255, 0, 123, 0));
+                }
+                for ev in &events {
+                    c.push_event(*ev);
+                }
+                let now = block(&mut p, &mut c, LEN);
+                let was = before(&mut e, &controls, &events);
+                heard += was.iter().map(|x| f64::from(x.abs())).sum::<f64>();
+                assert!(
+                    now.iter()
+                        .zip(&was)
+                        .all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "POLY {poly}, block {b}: not the same samples"
+                );
+            }
+            assert!(c.reported.is_empty());
+            assert!(heard > 1.0, "POLY {poly}: silence compared");
+        }
+    }
+
+    /// The host's automation and a learned controller on one parameter: whichever sets it last,
+    /// in time, holds it. At one sample the automation is set first (the wrappers split a block
+    /// at an automation point and set it before the run's events: PATCHES.md, change 9), so the
+    /// controller's value holds from there until the next automation point.
+    #[test]
+    fn automation_and_a_controller_on_one_parameter_take_turns_in_time() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        p.params.midi_map.assign(learnable("emphasis"), on(0, 71));
+        // A run from an automation point (set first), with the controller at its first sample.
+        c.automate(p.params.emphasis.as_ptr(), 0.2);
+        c.push_event(cc(0, 0, 71, 127));
+        block(&mut p, &mut c, 32);
+        assert_eq!(p.params.emphasis.value(), 10.0);
+        // The next automation point, later: it holds.
+        c.automate(p.params.emphasis.as_ptr(), 0.3);
+        block(&mut p, &mut c, 32);
+        assert_eq!(p.params.emphasis.value(), 3.0);
+        assert_eq!(p.controls(), p.params.controls());
+        // The controller again, later in a run: from its sample.
+        c.push_event(cc(16, 0, 71, 0));
+        block(&mut p, &mut c, 32);
+        assert_eq!(p.params.emphasis.value(), 0.0);
+        assert_eq!(c.reported.last().map(|r| r.2), Some(16));
+    }
+
+    /// Two instances, each its own assignments: one's controller does nothing to the other.
+    #[test]
+    fn each_instance_has_its_own_assignments() {
+        let (mut a, mut b) = (initialised(false), initialised(false));
+        let (mut ca, mut cb) = (hostless(&a), hostless(&b));
+        a.params.midi_map.assign(learnable("cutoff"), on(0, 74));
+        b.params.midi_map.assign(learnable("emphasis"), on(0, 74));
+        for (p, c) in [(&mut a, &mut ca), (&mut b, &mut cb)] {
+            c.push_event(cc(0, 0, 74, 127));
+            block(p, c, 64);
+        }
+        assert_eq!(
+            (a.params.cutoff.value(), a.params.emphasis.value()),
+            (5.0, 0.0)
+        );
+        assert_eq!(
+            (b.params.cutoff.value(), b.params.emphasis.value()),
+            (0.0, 10.0)
+        );
+        b.params.midi_map.arm(learnable("glide"));
+        assert_eq!(a.params.midi_map.armed(), None);
+    }
+
+    /// The assignments are saved with the session and come back with it; a session saved before
+    /// MIDI Learn, loaded into an instance with assignments, leaves it none; one whose table is
+    /// not understood, none either. An armed learning is not saved.
+    #[test]
+    fn a_session_holds_its_assignments_and_an_old_one_none() {
+        let state = |fields: BTreeMap<String, String>| PluginState {
+            version: String::new(),
+            params: Default::default(),
+            fields,
+        };
+        let a = Ca72::default();
+        a.params.midi_map.assign(learnable("cutoff"), on(0, 74));
+        a.params.midi_map.arm(learnable("glide"));
+        let saved = a.params.serialize_fields();
+        assert!(
+            saved
+                .get(learn::STATE_KEY)
+                .is_some_and(|t| !t.contains("glide"))
+        );
+        let b = Ca72::default();
+        let mut s = state(saved);
+        Ca72::filter_state(&mut s);
+        b.params.deserialize_fields(&s.fields);
+        assert_eq!(
+            b.params.midi_map.assignment(learnable("cutoff")),
+            Some(on(0, 74))
+        );
+        assert_eq!(b.params.midi_map.armed(), None);
+        // Older, without one: none.
+        let mut old = state(BTreeMap::from([(
+            "preset".to_owned(),
+            "\"Bass\"".to_owned(),
+        )]));
+        Ca72::filter_state(&mut old);
+        b.params.deserialize_fields(&old.fields);
+        assert!(b.params.midi_map.assignments().iter().all(Option::is_none));
+        // Not understood: none.
+        b.params.midi_map.assign(learnable("cutoff"), on(0, 74));
+        let mut bad = state(BTreeMap::from([(
+            learn::STATE_KEY.to_owned(),
+            "[1, 2".to_owned(),
+        )]));
+        Ca72::filter_state(&mut bad);
+        b.params.deserialize_fields(&bad.fields);
+        assert!(b.params.midi_map.assignments().iter().all(Option::is_none));
     }
 
     /// The plug-in tests that use the process's budget of workers, one at a time.

@@ -151,6 +151,72 @@ presets are built in, among them a drum kit and a riser made on the panel alone 
 Kick, Noise Snare, Closed Hat, Open Hat, Noise Crash, Pink Riser: one instance a drum) and
 Warped Pad, eight POLY voices drifting with ENTROPY.
 
+## MIDI Learn
+
+A knob, fader or button of a MIDI controller can move a control of the CA-72:
+
+1. Right-click the control and choose **MIDI LEARN**. It is ringed, and a note over it says
+   it is waiting.
+2. Move the knob, fader or button. That controller, on its MIDI channel, is now the
+   control's; the note names it (`CH 1 · CC 74`). The message that taught it changes nothing;
+   the next ones move the control.
+
+The control's menu names its controller; **REMOVE MIDI ASSIGNMENT** takes it away (the sound
+stays as it is). Escape, **CANCEL MIDI LEARN** in the menu, or closing the editor stops
+waiting, and the controllers learned before are kept. Choosing **MIDI LEARN** on another
+control while one waits moves the waiting there.
+
+**The list.** The **MIDI** button in the presets' drawer (or **MIDI ASSIGNMENTS…** in a
+control's menu) shows every control that can be learned and its controller, with LEARN,
+REMOVE and CANCEL. It works from the keyboard: Up and Down choose a control (a letter jumps
+to the next one beginning with it), Enter learns it or stops waiting, Delete or Backspace
+removes its controller, Escape stops waiting and then closes the drawer. It is the only way to
+learn **LOCK**, which has no control on the panel.
+
+**What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches, the left
+hand controller's GLIDE and DECAY switches, and POLY, VOICES, ENTROPY, SPREAD and LOCK. Not
+the PITCH and MODULATION wheels (MIDI pitch bend and the modulation wheel, CC 1, move them
+already), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
+
+**Controllers that are not learned:** CC 0 and 32 (bank select), CC 1 (the modulation
+wheel), CC 6, 38 and 96–101 (data entry, RPN and NRPN), and CC 120–127 (the channel mode
+messages). Moving one while a control waits says so, and it waits on. CC 1, 120 (all sound
+off), 121 (reset all controllers) and 123 (all notes off) do what they always did.
+
+**How a controller moves a control:** its value, 0 to 127, sets a knob to that share of its
+travel (127 is the top); RANGE and WAVEFORM to one of their six positions, each an equal
+share of 0–127 (VOICES, its nine); a switch off at 0–63 and on at 64–127. The control goes
+straight to the controller's value at its first message ("jump" takeover: it does not wait
+for the controller to pass the control's position). What you hear of a knob follows it over
+10 ms, so that its steps of 1/127 do not zip; the control itself, your host and a saved
+project have the new value at once.
+
+**One controller a control, one control a controller.** A controller is its number and its
+MIDI channel, shown 1 to 16: CC 74 on channel 1 and CC 74 on channel 2 are two controllers.
+Learning a control again replaces its controller. Learning a controller another control has
+moves it, and the note says which control lost it.
+
+**Where they are kept:** with the CA-72 in your host's project, each instance its own, and
+in your host's own presets of the plug-in. Not in the CA-72's presets: choosing, saving or
+reverting one leaves the controllers as they are. A project saved before MIDI Learn opens
+with none.
+
+**Recording and automation.** What your host records is the controller's MIDI, on the track;
+the CA-72 tells the host each new value so that its display follows. In CLAP it asks the host
+not to record that as automation as well (and, for a host that then ignores the value, as
+Bitwig Studio 5.2 does, asks it to read the values again). VST3 has no such request: a host
+that writes automation for a plug-in's own changes may record the move as automation too.
+Ableton Live 12 does, while its Automation Arm is on: the clip gets the controller and the
+track gets the control's automation, and playing the clip back moves the control, which Live
+takes as overriding that automation (its Re-Enable Automation button lights). Record
+controller moves with Automation Arm off, or use the CLAP. A learned controller and your
+host's automation of the same control take turns: the later one holds, and at the same moment
+the controller's.
+
+**Channels in Live.** Live 12 passed the CA-72's VST3 a controller sent on channel 2 as
+channel 1, so there a controller is learned as `CH 1` whatever channel it sends on, and the
+same CC number on two channels is one controller.
+
 ## Building
 
 You need [rustup](https://rustup.rs), which installs the Rust that `rust-toolchain.toml`
@@ -206,8 +272,10 @@ cargo test --workspace
 
 The tests take three to eight minutes, building included. They check the real-time models
 against the circuit lab's reference measurements. They also check that the plug-in neither
-allocates nor frees memory on the audio thread, and that the editor's gestures reach the
-host as single gestures. One test compares the panel as drawn with the approved design. On
+allocates nor frees memory on the audio thread, that the editor's gestures reach the
+host as single gestures, and, with a CLAP host of their own in the test process, that a
+learned MIDI controller sets its parameter as CLAP asks and that projects keep the
+assignments. One test compares the panel as drawn with the approved design. On
 Windows three open the editor in a window of their own, off the screen, and resize it as hosts
 do.
 
@@ -274,8 +342,15 @@ The service documents and datasheets the model was derived from are not included
   process, since it includes the factory calibration. A new sample rate after that takes
   0.1 to 0.4 s; the same rate again is immediate.
 - Below 8 kHz the voice runs at 2, 4 or 8 times the host's rate.
-- The panel has no keyboard control (the presets' drawer does), and a host cannot resize
-  the editor; use the grip.
+- The panel has no keyboard control (the presets' drawer and its MIDI list do), and a host
+  cannot resize the editor; use the grip.
+- MIDI Learn takes absolute 7-bit control changes only: not relative encoders, 14-bit
+  controller pairs, NRPN or RPN, or MIDI 2.0. A controller is learned on one channel (no
+  "any channel"); there is no pick-up takeover, no profile of assignments to reuse across
+  projects, and nothing is sent back to a controller's lights or motors. A knob centred by
+  its controller's 64 sits a hair above its centre (TUNE +0.02 semitone, an oscillator's
+  FREQUENCY +0.06): 64 is 64/127 of the travel. Your host must pass control changes to the
+  plug-in.
 - Choosing a preset sets each parameter as a gesture of its own; a host that keeps undo
   steps may keep one per parameter changed.
 - The presets' library is read when the drawer opens and every two seconds while it is

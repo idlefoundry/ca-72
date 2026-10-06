@@ -12,6 +12,7 @@ use ca72::voice::{ContourKnobs, OscPanel, Panel, Quality, Waveform};
 use nih_plug::prelude::*;
 
 use crate::engine::{Controls, POLY_VOICES};
+use crate::learn::MidiMap;
 
 /// RANGE's positions.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +139,10 @@ pub struct Ca72Params {
     /// with the session, so the bar names it again.
     #[persist = "preset"]
     pub preset: Arc<RwLock<String>>,
+    /// The MIDI controllers assigned to parameters by MIDI Learn, and the learning (decisions.md
+    /// R30): saved with the session (`crate::learn::Saved`), not with a sound preset.
+    #[persist = "midi_map"]
+    pub midi_map: Arc<MidiMap>,
 
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
@@ -319,6 +324,7 @@ impl Default for Ca72Params {
             noise_seed: Arc::new(AtomicU64::new(fresh_seed())),
             editor_width: Arc::new(AtomicU32::new(0)),
             preset: Arc::new(RwLock::new(String::new())),
+            midi_map: Arc::new(MidiMap::default()),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
             glide: ten("Glide", 0.0),
@@ -398,8 +404,17 @@ impl Ca72Params {
 
     /// The engine's controls from the parameters (dial units in, the voice's 0..1 out).
     pub fn controls(&self) -> Controls {
-        let ten = |p: &FloatParam| f64::from(p.value()) / 10.0;
-        let freq = |p: &FloatParam| (f64::from(p.value()) + 7.5) / 15.0;
+        self.controls_with(&|p: &FloatParam| p.value())
+    }
+
+    /// The engine's controls with each knob where `knob` has it (its dial's units): the
+    /// parameter's value, or for one a learned MIDI controller has just moved, where its glide
+    /// has it (`crate::learn::Dezip`; decisions.md R30). Every other conversion is
+    /// [`Ca72Params::controls`]'.
+    pub fn controls_with(&self, knob: &dyn Fn(&FloatParam) -> f32) -> Controls {
+        let value = |p: &FloatParam| f64::from(knob(p));
+        let ten = |p: &FloatParam| value(p) / 10.0;
+        let freq = |p: &FloatParam| (value(p) + 7.5) / 15.0;
         let osc = [
             OscPanel {
                 range: self.osc1_range.value().into(),
@@ -426,7 +441,7 @@ impl Ca72Params {
         let panel = Panel {
             osc,
             osc3_control: self.osc3_control.value(),
-            cutoff: (f64::from(self.cutoff.value()) + 5.0) / 10.0,
+            cutoff: (value(&self.cutoff) + 5.0) / 10.0,
             emphasis: ten(&self.emphasis),
             contour_amount: ten(&self.contour_amount),
             keyboard_control_1: self.keyboard_control_1.value(),
@@ -450,26 +465,26 @@ impl Ca72Params {
             mod_mix: ten(&self.mod_mix),
             osc_mod: self.osc_mod.value(),
             filter_mod: self.filter_mod.value(),
-            pitch_wheel: f64::from(self.pitch_wheel.value()),
-            mod_wheel: f64::from(self.mod_wheel.value()),
+            pitch_wheel: value(&self.pitch_wheel),
+            mod_wheel: value(&self.mod_wheel),
             ext_volume: ten(&self.ext_volume),
             ext_on: self.ext_on.value(),
             a440: self.a440.value(),
-            tune: f64::from(self.tune.value()) / 2.5,
+            tune: value(&self.tune) / 2.5,
             quality: Quality::default(),
         };
         Controls {
             panel,
             volume: ten(&self.volume),
             main_output: self.main_output.value(),
-            bend_range: f64::from(self.midi_bend_range.value()),
+            bend_range: value(&self.midi_bend_range),
             power: !self.bypass.value(),
             poly: self.poly.value(),
             voices: usize::try_from(self.voices.value()).unwrap_or(POLY_VOICES.1),
-            entropy: f64::from(self.entropy.value()) / 100.0,
-            spread: f64::from(self.spread.value()) / 100.0,
+            entropy: value(&self.entropy) / 100.0,
+            spread: value(&self.spread) / 100.0,
             // The knob's travel through its taper (decisions.md R8).
-            feedback: ca72::voice::feedback_law(f64::from(self.feedback.value()) / 10.0),
+            feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),
         }
     }

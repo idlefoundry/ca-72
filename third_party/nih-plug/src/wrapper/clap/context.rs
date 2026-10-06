@@ -12,7 +12,7 @@ use crate::prelude::{
     ClapPlugin, GuiContext, InitContext, ParamPtr, PluginApi, PluginNoteEvent, ProcessContext,
     ProcessMode, RemoteControlsContext, RemoteControlsPage, RemoteControlsSection, Transport,
 };
-use crate::wrapper::util::strlcpy;
+use crate::wrapper::util::{strlcpy, OwnParamChange};
 
 /// An [`InitContext`] implementation for the wrapper.
 ///
@@ -40,6 +40,10 @@ pub(crate) struct WrapperProcessContext<'a, P: ClapPlugin> {
     pub(super) wrapper: &'a Wrapper<P>,
     pub(super) input_events_guard: AtomicRefMut<'a, VecDeque<PluginNoteEvent<P>>>,
     pub(super) output_events_guard: AtomicRefMut<'a, VecDeque<PluginNoteEvent<P>>>,
+    /// The parameters the plugin sets itself, for the host's output events, and whether the host
+    /// gave a queue for them (PATCHES.md, change 9).
+    pub(super) own_param_changes_guard: AtomicRefMut<'a, Vec<OwnParamChange>>,
+    pub(super) host_listens: bool,
     pub(super) transport: Transport,
 }
 
@@ -128,6 +132,16 @@ impl<P: ClapPlugin> ProcessContext<P> for WrapperProcessContext<'_, P> {
 
     fn set_current_voice_capacity(&self, capacity: u32) {
         self.wrapper.set_current_voice_capacity(capacity)
+    }
+
+    fn set_parameter_normalized(&mut self, param: ParamPtr, normalized: f32, timing: u32) -> bool {
+        self.wrapper.set_own_parameter(
+            &mut self.own_param_changes_guard,
+            self.host_listens,
+            param,
+            normalized,
+            timing,
+        )
     }
 }
 

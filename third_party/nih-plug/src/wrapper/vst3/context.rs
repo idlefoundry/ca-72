@@ -12,6 +12,7 @@ use crate::prelude::{
 
 use super::inner::{Task, WrapperInner};
 use crate::event_loop::EventLoop;
+use crate::wrapper::util::OwnParamChange;
 
 /// An [`InitContext`] implementation for the wrapper.
 ///
@@ -42,6 +43,10 @@ pub(crate) struct WrapperProcessContext<'a, P: Vst3Plugin> {
     pub(super) inner: &'a WrapperInner<P>,
     pub(super) input_events_guard: AtomicRefMut<'a, VecDeque<PluginNoteEvent<P>>>,
     pub(super) output_events_guard: AtomicRefMut<'a, VecDeque<PluginNoteEvent<P>>>,
+    /// The parameters the plugin sets itself, for the host's output parameter changes, and
+    /// whether the host gave a queue for them (PATCHES.md, change 9).
+    pub(super) own_param_changes_guard: AtomicRefMut<'a, Vec<OwnParamChange>>,
+    pub(super) host_listens: bool,
     pub(super) transport: Transport,
 }
 
@@ -120,6 +125,34 @@ impl<P: Vst3Plugin> ProcessContext<P> for WrapperProcessContext<'_, P> {
 
     fn set_current_voice_capacity(&self, _capacity: u32) {
         // This is only supported by CLAP
+    }
+
+    fn set_parameter_normalized(&mut self, param: ParamPtr, normalized: f32, timing: u32) -> bool {
+        let Some(&hash) = self.inner.param_ptr_to_hash.get(&param) else {
+            nih_debug_assert_failure!("Unknown parameter: {:?}", param);
+            return false;
+        };
+        // As the host's automation is set during a process call: the value, its smoother, and
+        // the editor told.
+        let sample_rate = self
+            .inner
+            .current_buffer_config
+            .load()
+            .map(|c| c.sample_rate);
+        self.inner
+            .set_normalized_value_by_hash(hash, normalized, sample_rate);
+        let changes = &mut self.own_param_changes_guard;
+        if !self.host_listens || changes.len() >= changes.capacity() {
+            return false;
+        }
+        changes.push(OwnParamChange {
+            hash,
+            timing,
+            // SAFETY: the pointer is one of the plugin's own parameters (`param_ptr_to_hash`),
+            // which live as long as the wrapper.
+            normalized: unsafe { param.unmodulated_normalized_value() },
+        });
+        true
     }
 }
 

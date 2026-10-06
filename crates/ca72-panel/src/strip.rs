@@ -37,6 +37,31 @@ pub enum StripTarget {
     Switch(Amount),
 }
 
+/// The strip's controls, a parameter each (MIDI Learn names them: decisions.md R30).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StripControl {
+    Poly,
+    Voices,
+    Entropy,
+    Spread,
+}
+
+impl StripTarget {
+    /// The control this part of the strip operates.
+    pub fn control(self) -> StripControl {
+        match self {
+            StripTarget::Poly => StripControl::Poly,
+            StripTarget::Fewer | StripTarget::More => StripControl::Voices,
+            StripTarget::Slider(Amount::Entropy) | StripTarget::Switch(Amount::Entropy) => {
+                StripControl::Entropy
+            }
+            StripTarget::Slider(Amount::Spread) | StripTarget::Switch(Amount::Spread) => {
+                StripControl::Spread
+            }
+        }
+    }
+}
+
 /// What the strip shows: its controls and the presets' selector.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StripScene {
@@ -47,6 +72,8 @@ pub struct StripScene {
     pub spread: f64,
     pub bar: BarScene,
     pub hover: Option<StripTarget>,
+    /// The control MIDI Learn is learning (ringed in the accent: decisions.md R30).
+    pub learning: Option<StripControl>,
 }
 
 impl Default for StripScene {
@@ -58,6 +85,7 @@ impl Default for StripScene {
             spread: 0.0,
             bar: BarScene::default(),
             hover: None,
+            learning: None,
         }
     }
 }
@@ -136,6 +164,23 @@ pub fn hit(x: f64, y: f64) -> Option<StripTarget> {
         }
     }
     None
+}
+
+/// Where a control is across the strip, its label included (from, to; panel units): its
+/// ring, and the notes and menus over it, go there.
+pub fn span(c: StripControl) -> (f64, f64) {
+    let amount = |a: Amount| {
+        AMOUNTS
+            .iter()
+            .find(|t| t.0 == a)
+            .map_or((0.0, 0.0), |t| (t.2 - 12.0, t.6 + SWITCH_W + 12.0))
+    };
+    match c {
+        StripControl::Poly => (POLY_X - 110.0, POLY_X + SWITCH_W + 12.0),
+        StripControl::Voices => (VOICES_X + 10.0, VOICES_X + 162.0 + 2.0 * STEP_W + 70.0),
+        StripControl::Entropy => amount(Amount::Entropy),
+        StripControl::Spread => amount(Amount::Spread),
+    }
 }
 
 /// An amount's value (0..1) for a pointer at `x` along its slider.
@@ -289,6 +334,17 @@ fn body(fonts: &Fonts, s: &StripScene) -> String {
         if muted {
             put!(out, "</g>");
         }
+    }
+    // The control MIDI Learn is learning, ringed as the panel's are.
+    if let Some(c) = s.learning {
+        let (x0, x1) = span(c);
+        put!(
+            out,
+            "<rect x='{}' y='8' width='{}' height='{}' rx='14' fill='none' stroke='{ACCENT}' stroke-width='5' stroke-dasharray='18 10'/>",
+            N(x0),
+            N(x1 - x0),
+            N(STRIP_H - 16.0)
+        );
     }
     out.0
 }
