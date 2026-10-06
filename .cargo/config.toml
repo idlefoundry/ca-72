@@ -5,3 +5,10 @@ xtask = "run --package xtask --release --"
 # not claim the toolchain's older default, 10.12 (R17).
 [env]
 MACOSX_DEPLOYMENT_TARGET = "11.0"
+
+# On Windows with MSVC, as CI builds the release, the C runtime linked into the plug-in
+# rather than taken from Visual C++'s VCRUNTIME140.dll, which the installer does not bring
+# and a computer without that redistributable lacks (decisions.md R32). A RUSTFLAGS in the
+# environment would replace this.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
