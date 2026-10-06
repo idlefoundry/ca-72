@@ -2159,3 +2159,34 @@ a desktop, R28); clippy with `-D warnings` on the workspace and all targets (MSV
 --check`. CI's Windows job (MSVC) on the pull request, before the third change: 268 passed, 0
 failed; clap-validator 36 passed, 0 failed, 8 skipped; pluginval at strictness 10, its editor
 tests included, SUCCESS; Steinberg's validator 47 passed, 0 failed.
+
+## R35. 0.1.3
+**Owner decision, 2026-10-06.** "merge it and release 0.1.3 if you think it's ready to go":
+MIDI Learn (R34) as 0.1.3.
+
+**What it brings since 0.1.2** (the tag `v0.1.2`):
+- **MIDI Learn** (R34): a hardware controller's control change for each sound control, from
+  the control's menu or the MIDI list in the presets' drawer, kept with the project.
+- **Windows: the presets' drawer and the MIDI list take the arrow keys, Enter and Tab** in a
+  host whose plug-in window is a dialog, REAPER's (baseview's third change, R34).
+
+**Agent decisions, 2026-10-06** (not separately approved):
+- **Ready, the agent judged:** the workspace's tests, clippy, the validators and CI pass on
+  every system; MIDI Learn was tried by hand in Live 12 (VST3, macOS), REAPER 7.82 (VST3 and
+  CLAP, Windows) and Sandyne 2.5 (VST3 and CLAP, Windows), and partly in Bitwig 5.2 (CLAP,
+  macOS). Not tried: the Audio Unit in a host. It tells the host of a learned value as it does
+  of an edit in the editor (both reach clap-wrapper as the CLAP's output values), which
+  GarageBand took (R30).
+- **0.1.3, as asked,** though MIDI Learn is a feature: the parameters, the plug-in's IDs, the
+  voice and the presets' format are 0.1.2's, so what was saved with 0.1.0 to 0.1.2 opens
+  unchanged, and the installers install over theirs. A project saved with 0.1.3 opens in an
+  earlier version without its assignments (nih-plug reads only the fields it knows).
+- **The version** as R29: the workspace's (`Cargo.lock` changed only in its eight crates);
+  the README's status names 0.1.3, its MIDI Learn section says it is there from 0.1.3, and its
+  line on the Audio Unit no longer waits for 0.1.2.
+- **Released the way R29 and R33 were:** a commit of its own in R34's pull request, so that CI
+  runs once before the tag; once merged, the tag `v0.1.3` on main's commit; CI's release job
+  drafts the release with the Windows and Linux installers, the notices, the git sources and
+  `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
+  (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.2's
+  form.
