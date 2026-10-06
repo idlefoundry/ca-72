@@ -1612,3 +1612,90 @@ bundle-universal ca72-plugin --profile bundle` (Rust 1.97.1) made the bundles, t
   from the public release matches its checksum and Gatekeeper accepts it.
 
 `notarization.json` is kept with the release's evidence outside the repository.
+
+## R30. An Audio Unit for macOS
+**Owner decision, 2026-10-06.** An Audio Unit, as asked for in issue #6 ("an AU-Plugin
+version"): "start the AU work on a branch, you can use GarageBand for testing on this
+computer. When we've determined that everything works, please merge into main and clean up
+the branch." Made alongside another machine's work on Potato's speed: the Audio Unit wraps
+the CLAP plug-in as it is, so the two meet only in the plug-in's parameters, its state and
+its latency, which the wrapper passes on unchanged, and in this file.
+
+**Agent decisions, 2026-10-06** (not separately approved):
+- **Version 2, made from the CLAP plug-in by clap-wrapper.** nih-plug makes no Audio Units.
+  [clap-wrapper](https://github.com/free-audio/clap-wrapper)'s AUv2 wrapper (MIT; v0.16.0,
+  its latest) presents the CLAP plug-in to the host as an Audio Unit: the plug-in's own code
+  is unchanged, and the Audio Unit plays what the CLAP plays. Version 2 rather than 3: Logic
+  Pro and GarageBand, and every macOS host that takes Audio Units, load version 2 in their
+  own process; version 3 is an app extension inside an app of its own, and what iPad hosts
+  need, which the CA-72 is not built for.
+- **The CLAP inside the component** (`Contents/PlugIns/CA-72.clap`). The wrapper looks
+  there before the CLAP folders, so the component plays the CLAP it was built with, whether
+  or not a CLAP is installed, and never another version that happens to be. The installer's
+  component carries the same signed CLAP as its CLAP choice (`scripts/package.sh` signs the
+  CLAP, then copies it in, then signs the component). It costs the component the CLAP's
+  10 MB.
+- **Its identity, which a host keeps in its songs and so must never change:** type `aumu`
+  (an instrument), subtype `CA72`, manufacturer `IdlF` (Idle Foundry; Apple keeps the
+  all-lowercase codes for itself); the name "Idle Foundry: CA-72" (Logic and GarageBand list
+  it as CA-72 under Idle Foundry); the bundle identifier `com.idlefoundry.ca-72.component`.
+- **Vendored:** clap-wrapper, the CLAP headers (1.2.6) and Apple's AudioUnitSDK (1.1.0, the
+  Apache License 2.0), at the versions clap-wrapper fetches for itself, in `third_party/`
+  with their sources' commits and hashes (`PATCHES.md`, `VENDORED.md`). The build needs no
+  network, and the source of everything built into the component is in the repository, as
+  the GPL asks of the whole. `THIRD-PARTY-NOTICES.txt` carries their licences, and {fmt}'s,
+  which clap-wrapper compiles in (`scripts/notices.py`).
+- **clap-wrapper patched** (`third_party/clap-wrapper/PATCHES.md`): pluginval aborted the
+  host in about one run in four with the heap corrupted, because the host's parameter
+  changes went straight into the audio thread's event list from whatever thread the host
+  called on; and a state saved before the host rendered a block lost the changes since the
+  last one, and the host read the values from before a state it had just restored. Four
+  changes: the host's changes wait under a lock for the audio thread; a save hands any
+  still waiting to the plug-in first (`clap_plugin_params.flush()`, with no block
+  processed meanwhile); a restore refreshes the values the host reads at once; and the
+  host lists the parameters in the plug-in's order, the panel's, rather than by id.
+  Nothing upstream had reported or fixed them; offering the fixes upstream is the owner's
+  call.
+- **Built by `scripts/auv2.sh`** (CMake 3.21 or later; `scripts/auv2/CMakeLists.txt`), from
+  `target/bundled/CA-72.clap`, after the bundles, for the CLAP's architectures (universal
+  for a release) and for macOS 11 as they are. Afresh each time, a few seconds: the wrapper
+  reads the CLAP while it builds, which CMake does not track.
+- **In the macOS installer** as a third choice, Audio Unit, into
+  `/Library/Audio/Plug-Ins/Components`, like the others not relocatable and not version
+  checked.
+- **Validated** by `scripts/validate.sh` on macOS: Apple's `auval -strict` (and the Intel
+  slice under Rosetta, where it is installed) and pluginval at strictness 10. Hosts and these
+  validators find an Audio Unit only where it is installed, so the script first copies it
+  into `~/Library/Audio/Plug-Ins/Components`, over any copy there. CI builds it on macOS,
+  validates it and keeps it with the bundles.
+- **Not released here.** The README says that the Audio Unit comes with the macOS installer
+  from the release after 0.1.1; until then it is built from source.
+
+**Evidence (2026-10-06, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, CMake 4.4.4,
+Rust 1.97.1),** on this change's tree. `scripts/auv2.sh` on the universal bundles made
+`CA-72.component`, `x86_64 arm64`.
+- **`auval -strict`:** AU VALIDATION SUCCEEDED: 51 parameters (in the panel's order with
+  change 4), the Cocoa view, renders from 11.025 to 192 kHz and 64 to 4096 frames, MIDI.
+  One warning: the preset's name is not kept in the class data. The Intel slice was not
+  run: this Mac has no Rosetta.
+- **pluginval 1.0.4 at strictness 10** (editor tests skipped, the screen in use). With
+  clap-wrapper as released it aborted the host in 2 runs of 10 ("BUG IN CLIENT OF
+  LIBMALLOC: memory corruption of free block": the message thread in `SetParameter()` while
+  another thread initialized the unit), where the VST3 passed 5 of 5. With change 1, no abort
+  in 12 runs, and with changes 1 and 2 none in 20, but the state restoration test failed in
+  1 and 3 of them; with all four, 24 of 24 passed, and the seeds that had failed pass.
+- **A host of AVAudioEngine's,** the way GarageBand and Logic load units: five notes sound
+  (RMS 0.13), the output bounded; the full state, saved after a block, restored into a
+  second instance; parameters set and saved with no block between are kept (clap-wrapper as
+  released loses them). The editor through `kAudioUnitProperty_CocoaUI`, opened and closed
+  four times and the unit disposed of with it open; and through Apple's out-of-process
+  hosting (`AUHostingService`), drawn whole at 1382 by 463.
+- **GarageBand 10.4.14,** which on this macOS loads the component in Apple's hosting
+  service: listed under AU Instruments › Idle Foundry › CA-72 (Stereo); its Smart Controls
+  took the first parameters in the panel's order; the editor shown whole in its plug-in
+  window. Four notes recorded with Musical Typing and exported as WAVE: 0.15 RMS, the C at
+  260 Hz (C4, 261.6 Hz), released to silence. POLY on and VOICES 5, set on the panel; the
+  project saved, closed and reopened with both as set; played back with POLY on, no crash.
+- **`scripts/package.sh`** (signed ad hoc here) made a three-choice installer, every package
+  not relocatable, the component's CLAP identical to the CLAP choice's;
+  `scripts/notices.py --check` passes. CI's runs are on the pull request.

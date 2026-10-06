@@ -6,8 +6,9 @@ The crates are those `ca72-plugin` links (normal dependencies, not build scripts
 procedural macros) on any platform it is released for, read from `cargo metadata` and
 Cargo.lock, with the licence files each crate ships; a crate that ships none gets its
 licence's standard text with its authors. The Rust standard library, built into every Rust
-binary, and the panel's font follow. Run it after any change to the dependencies or to
-rust-toolchain.toml:
+binary, the panel's font and the macOS Audio Unit's wrapper (third_party, decisions.md R30)
+follow. Run it after any change to the dependencies, to rust-toolchain.toml or to the
+vendored wrapper:
 
     python3 scripts/notices.py           # writes THIRD-PARTY-NOTICES.txt
     python3 scripts/notices.py --check   # fails if the file is out of date (CI)
@@ -31,6 +32,17 @@ PLATFORMS = [
 ]
 FONT = "third_party/urw-gothic"
 FONT_COPYRIGHT = "Copyright 2014 by (URW)++ Design & Development"
+# The Audio Unit's wrapper and what it is built with, vendored (VENDORED.md, PATCHES.md): the
+# name, where it is from, its licence, and the files whose text is its notice.
+AUV2 = [
+    ("clap-wrapper 0.16.0", "https://github.com/free-audio/clap-wrapper", "MIT",
+     ["third_party/clap-wrapper/LICENSE"]),
+    ("CLAP 1.2.6", "https://github.com/free-audio/clap", "MIT", ["third_party/clap/LICENSE"]),
+    ("{fmt}, as clap-wrapper 0.16.0 vendors it", "https://github.com/fmtlib/fmt", "MIT",
+     ["third_party/clap-wrapper/libs/fmt/fmt/format.h"]),
+    ("AudioUnitSDK 1.1.0, by Apple", "https://github.com/apple/AudioUnitSDK", "Apache-2.0",
+     ["third_party/AudioUnitSDK/LICENSE.txt"]),
+]
 LICENCE_FILE = re.compile(r"^(licen[cs]e|copying|notice|unlicense|copyright)", re.I)
 
 MIT = """Copyright (c) {authors}
@@ -121,6 +133,13 @@ def where(p):
     return p.get("repository") or ""
 
 
+def header(path):
+    """The licence a source file carries in its first comment (`/* ... */`)."""
+    with open(path, encoding="utf-8") as f:
+        body = f.read().split("/*", 1)[1].split("*/", 1)[0]
+    return "\n".join(l.strip() for l in body.strip("\n").split("\n")).strip("\n") + "\n"
+
+
 def text(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         lines = f.read().replace("\r\n", "\n").split("\n")
@@ -176,7 +195,9 @@ def render():
         "https://github.com/idlefoundry/ca-72. Its plug-ins are built with the works below, each\n"
         "under its own licence, whose notices follow. The crates are those Cargo.lock names, from\n"
         "crates.io; the sources of the ones it takes from git repositories are in each release as\n"
-        "well, CA-72-<version>-git-sources.tar.gz.\n"
+        "well, CA-72-<version>-git-sources.tar.gz. The macOS Audio Unit wraps the CLAP plug-in\n"
+        "in clap-wrapper, built with the CLAP headers and Apple's AudioUnitSDK, whose sources are\n"
+        "in the CA-72's repository (third_party).\n"
         "Written by scripts/notices.py from Cargo.lock: do not edit by hand.\n"
     )
     out.append("CRATES\n")
@@ -186,7 +207,10 @@ def render():
         out.append(f"  {p['name']} {p['version']}  ({expr}" + (", used under MIT)" if mit_elected(expr) and expr != "MIT" else ")"))
     out.append("")
     out.append(f"  The Rust standard library, Rust {toolchain()}  (MIT OR Apache-2.0, used under MIT)")
-    out.append(f"  URW Gothic  (AGPL-3.0 with a font exception)\n")
+    out.append(f"  URW Gothic  (AGPL-3.0 with a font exception)")
+    for name, _, expr, _ in AUV2:
+        out.append(f"  {name}  ({expr}; the Audio Unit)")
+    out.append("")
     for body, members in sorted(groups.values(), key=lambda g: (g[1][0]["name"], g[1][0]["version"])):
         out.append("=" * 78)
         for p in members:
@@ -211,6 +235,13 @@ def render():
     font = os.path.join(ROOT, FONT)
     out.append(text(os.path.join(font, "LICENSE")))
     out.append(text(os.path.join(font, "COPYING")))
+    for name, url, _, files in AUV2:
+        out.append("=" * 78)
+        out.append(f"{name}  {url}")
+        out.append("-" * 78)
+        for f in files:
+            path = os.path.join(ROOT, f)
+            out.append(header(path) if f.endswith(".h") else text(path))
     return "\n".join(out)
 
 

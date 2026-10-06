@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Validates the bundles in target/bundled (`cargo xtask bundle ca72-plugin --profile bundle`) with
-# clap-validator, pluginval at strictness 10 and Steinberg's VST3 validator. Each is fetched
+# clap-validator, pluginval at strictness 10 and Steinberg's VST3 validator; on macOS the Audio
+# Unit as well (scripts/auv2.sh), with Apple's auval and pluginval. An Audio Unit is validated
+# where hosts find it, so it is first copied into ~/Library/Audio/Plug-Ins/Components, over any
+# CA-72.component there, and left there. Each is fetched
 # from its GitHub release (checked against its SHA-256), or for Steinberg's built from the
 # VST3 SDK, into $CA72_VALIDATORS (default target/validators). Needs curl, unzip, git, cmake
 # and a C++ compiler (on Windows, Visual Studio's); on Linux without a display, xvfb-run for
@@ -123,3 +126,26 @@ ${display[@]+"${display[@]}"} "$pluginval" --strictness-level 10 --validate-in-p
     ${gui[@]+"${gui[@]}"} --validate "$bundles/CA-72.vst3"
 echo "== Steinberg's VST3 validator, SDK $VST3_SDK"
 "$vst3" "$bundles/CA-72.vst3"
+
+if [ "$os" = macos ]; then
+    if [ ! -e "$bundles/CA-72.component" ]; then
+        echo "validate.sh: $bundles/CA-72.component is missing: build it with scripts/auv2.sh" >&2
+        exit 1
+    fi
+    components="$HOME/Library/Audio/Plug-Ins/Components"
+    mkdir -p "$components"
+    rm -rf "$components/CA-72.component"
+    ditto "$bundles/CA-72.component" "$components/CA-72.component"
+    # The system's registry of Audio Units, restarted so that it reads the new copy now.
+    killall -9 AudioComponentRegistrar 2> /dev/null || true
+    echo "== auval, strict"
+    auval -strict -v aumu CA72 IdlF
+    if [ "$(uname -m)" = arm64 ] && [[ "$(lipo -archs "$components/CA-72.component/Contents/MacOS/CA-72")" == *x86_64* ]] &&
+        arch -x86_64 /usr/bin/true 2> /dev/null; then
+        echo "== auval, strict, the Intel slice (Rosetta)"
+        arch -x86_64 auval -strict -v aumu CA72 IdlF
+    fi
+    echo "== pluginval $PLUGINVAL, strictness 10, the Audio Unit${gui[*]:+ (editor tests skipped)}"
+    "$pluginval" --strictness-level 10 --validate-in-process ${gui[@]+"${gui[@]}"} \
+        --validate "$components/CA-72.component"
+fi
