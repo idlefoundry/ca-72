@@ -1670,3 +1670,32 @@ its latency, which the wrapper passes on unchanged, and in this file.
   validates it and keeps it with the bundles.
 - **Not released here.** The README says that the Audio Unit comes with the macOS installer
   from the release after 0.1.1; until then it is built from source.
+
+**Evidence (2026-10-06, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, CMake 4.4.4,
+Rust 1.97.1),** on this change's tree. `scripts/auv2.sh` on the universal bundles made
+`CA-72.component`, `x86_64 arm64`.
+- **`auval -strict`:** AU VALIDATION SUCCEEDED: 51 parameters (in the panel's order with
+  change 4), the Cocoa view, renders from 11.025 to 192 kHz and 64 to 4096 frames, MIDI.
+  One warning: the preset's name is not kept in the class data. The Intel slice was not
+  run: this Mac has no Rosetta.
+- **pluginval 1.0.4 at strictness 10** (editor tests skipped, the screen in use). With
+  clap-wrapper as released it aborted the host in 2 runs of 10 ("BUG IN CLIENT OF
+  LIBMALLOC: memory corruption of free block": the message thread in `SetParameter()` while
+  another thread initialized the unit), where the VST3 passed 5 of 5; with changes 1 and 2,
+  no abort in 32 runs but the state restoration test failing in 4; with all four, 24 of 24
+  passed, and the seeds that had failed pass.
+- **A host of AVAudioEngine's,** the way GarageBand and Logic load units: five notes sound
+  (RMS 0.13), the output bounded; the full state, saved after a block, restored into a
+  second instance; parameters set and saved with no block between are kept (clap-wrapper as
+  released loses them). The editor through `kAudioUnitProperty_CocoaUI`, opened and closed
+  four times and the unit disposed of with it open; and through Apple's out-of-process
+  hosting (`AUHostingService`), drawn whole at 1382 by 463.
+- **GarageBand 10.4.14,** which on this macOS loads the component in Apple's hosting
+  service: listed under AU Instruments › Idle Foundry › CA-72 (Stereo); its Smart Controls
+  took the first parameters in the panel's order; the editor shown whole in its plug-in
+  window. Four notes recorded with Musical Typing and exported as WAVE: 0.15 RMS, the C at
+  260 Hz (C4, 261.6 Hz), released to silence. POLY on and VOICES 5, set on the panel; the
+  project saved, closed and reopened with both as set; played back with POLY on, no crash.
+- **`scripts/package.sh`** (signed ad hoc here) made a three-choice installer, every package
+  not relocatable, the component's CLAP identical to the CLAP choice's;
+  `scripts/notices.py --check` passes. CI's runs are on the pull request.
