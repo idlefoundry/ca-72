@@ -1,7 +1,8 @@
 # On macOS, Windows and Linux: the bundles (built first, with only the libraries the README
-# lists) and their installers (scripts/package.sh), clippy, the standalone, every test (on
-# Linux with ngspice 47, required), and the three validators on the bundles
-# (scripts/validate.sh). The bundles and installers are kept as the run's artifacts; the
+# lists; on macOS the Audio Unit as well, scripts/auv2.sh) and their installers
+# (scripts/package.sh), clippy, the standalone, every test (on Linux with ngspice 47,
+# required), and the three validators on the bundles, with auval and pluginval on the Audio
+# Unit (scripts/validate.sh). The bundles and installers are kept as the run's artifacts; the
 # macOS ones are universal (Apple silicon and Intel) and not yet signed. Linux builds on
 # Ubuntu 22.04 so that its bundles load on distributions as old as its C library. A tag
 # v<version> also puts the Windows and Linux installers, the notices and the checksums into
@@ -67,6 +68,10 @@ jobs:
             cargo xtask bundle ca72-plugin --profile bundle
           fi
 
+      - name: Audio Unit
+        if: runner.os == 'macOS'
+        run: scripts/auv2.sh
+
       - name: The third-party notices up to date
         if: runner.os == 'Linux'
         run: python3 scripts/notices.py --check
@@ -84,6 +89,7 @@ jobs:
           path: |
             target/bundled/CA-72.vst3
             target/bundled/CA-72.clap
+            target/bundled/CA-72.component
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v7

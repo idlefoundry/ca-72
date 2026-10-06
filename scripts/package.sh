@@ -4,7 +4,8 @@
 #
 #   macOS    CA-72-<version>-macOS.pkg            (pkgbuild, productbuild; build the bundles
 #                                                 with `cargo xtask bundle-universal` for
-#                                                 Apple silicon and Intel)
+#                                                 Apple silicon and Intel, then the Audio
+#                                                 Unit with scripts/auv2.sh)
 #   Windows  CA-72-<version>-Windows-setup.exe    (Inno Setup 6's ISCC, from Git Bash)
 #   Linux    CA-72-<version>-Linux-x86_64.tar.gz  (with install.sh)
 #
@@ -32,6 +33,10 @@ for b in CA-72.vst3 CA-72.clap; do
         exit 1
     fi
 done
+if [ "$(uname -s)" = Darwin ] && [ ! -e "$bundles/CA-72.component" ]; then
+    echo "package.sh: $bundles/CA-72.component is missing: build it with scripts/auv2.sh" >&2
+    exit 1
+fi
 for f in LICENSE THIRD-PARTY-NOTICES.txt; do
     [ -f "$root/$f" ] || { echo "package.sh: $root/$f is missing" >&2; exit 1; }
 done
@@ -53,14 +58,23 @@ macos() {
         : "${CA72_NOTARY_PROFILE:?Set the notarytool keychain profile for a public Mac release}"
     fi
     local stage="$work/stage" pkgs="$work/pkgs"
-    mkdir -p "$stage/VST3" "$stage/CLAP" "$pkgs"
+    mkdir -p "$stage/VST3" "$stage/CLAP" "$stage/Components" "$pkgs"
     cp -R "$bundles/CA-72.vst3" "$stage/VST3/"
     cp -R "$bundles/CA-72.clap" "$stage/CLAP/"
+    cp -R "$bundles/CA-72.component" "$stage/Components/"
     local kind dir b plist
-    for kind in vst3 clap; do
-        dir="$(echo "$kind" | tr '[:lower:]' '[:upper:]')"
+    # The CLAP before the component, which then carries that same CLAP, signed (R30).
+    for kind in vst3 clap component; do
+        case "$kind" in
+        component) dir=Components ;;
+        *) dir="$(echo "$kind" | tr '[:lower:]' '[:upper:]')" ;;
+        esac
         b="$stage/$dir/CA-72.$kind"
         plist="$b/Contents/Info.plist"
+        if [ "$kind" = component ]; then
+            rm -rf "$b/Contents/PlugIns/CA-72.clap"
+            cp -R "$stage/CLAP/CA-72.clap" "$b/Contents/PlugIns/"
+        fi
         # nih-plug's bundler writes its own identifier and version 1.0.0.
         plutil -replace CFBundleIdentifier -string "com.idlefoundry.ca-72.$kind" "$plist"
         plutil -replace CFBundleShortVersionString -string "$version" "$plist"
@@ -101,6 +115,7 @@ macos() {
     <choices-outline>
         <line choice="vst3"/>
         <line choice="clap"/>
+        <line choice="au"/>
     </choices-outline>
     <choice id="vst3" title="VST3" description="CA-72.vst3, in /Library/Audio/Plug-Ins/VST3">
         <pkg-ref id="com.idlefoundry.ca-72.vst3.pkg"/>
@@ -108,8 +123,12 @@ macos() {
     <choice id="clap" title="CLAP" description="CA-72.clap, in /Library/Audio/Plug-Ins/CLAP">
         <pkg-ref id="com.idlefoundry.ca-72.clap.pkg"/>
     </choice>
+    <choice id="au" title="Audio Unit" description="CA-72.component, in /Library/Audio/Plug-Ins/Components (Logic Pro, GarageBand)">
+        <pkg-ref id="com.idlefoundry.ca-72.component.pkg"/>
+    </choice>
     <pkg-ref id="com.idlefoundry.ca-72.vst3.pkg" version="$version" onConclusion="none">vst3.pkg</pkg-ref>
     <pkg-ref id="com.idlefoundry.ca-72.clap.pkg" version="$version" onConclusion="none">clap.pkg</pkg-ref>
+    <pkg-ref id="com.idlefoundry.ca-72.component.pkg" version="$version" onConclusion="none">component.pkg</pkg-ref>
 </installer-gui-script>
 EOF
     local pkg="$work/CA-72-$version-macOS.pkg" final="$out/CA-72-$version-macOS.pkg" sign=()
