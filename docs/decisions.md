@@ -1586,3 +1586,29 @@ targets, with `--features ca72-plugin/standalone`; `cargo fmt --all -- --check`;
 `scripts/package.sh` made `CA-72-0.1.1-Windows-setup.exe`, its version information 0.1.1, the
 plug-in in it built from this tree (not installed: the machine's 0.1.0 is left as it is). The
 macOS and Linux installers are CI's, on the pull request.
+
+**The release (2026-10-06, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3),** from a fresh clone of the tag `v0.1.1` (`425af615`, main's commit; clean, version
+0.1.1). The tag's CI passed and drafted the release with its five assets. `cargo xtask
+bundle-universal ca72-plugin --profile bundle` (Rust 1.97.1) made the bundles, then
+`scripts/package.sh` with the two Developer ID identities, the notary profile and
+`CA72_REQUIRE_NOTARIZATION=1` made `CA-72-0.1.1-macOS.pkg`:
+- **Apple's notary service** accepted it: submission `d2746af0-c27b-4fee-9a99-5705a755bd6a`,
+  status `Accepted`. The ticket is stapled (`stapler validate` passes); the installer is
+  signed `Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)`, trusted timestamp
+  2026-10-06 16:18:47 UTC; Gatekeeper (`spctl --assess --type install`): `accepted`,
+  `source=Notarized Developer ID`.
+- **The VST3 and the CLAP in its payload** (expanded with `pkgutil --expand-full`): each
+  signed `Developer ID Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the hardened
+  runtime and a secure timestamp, `codesign --verify --strict` passing; version 0.1.1
+  (nih-plug's bundler writes 1.0.0, `package.sh` the workspace's); `x86_64 arm64`; LICENSE
+  and the notices inside; installed to `/Library/Audio/Plug-Ins/VST3` and `…/CLAP`.
+- **Its SHA-256** is `f0077b6b74ab10d0c66271b921de7390f5b6f282c963c3a388ada181b38a5624`
+  (9,189,503 bytes). It went into the draft with its line added to CI's `SHA256SUMS.txt`;
+  the four files it lists, downloaded again from the draft, passed `shasum -a 256 -c`.
+- **Published** on the owner's word at 2026-10-06 16:22:13 UTC as the latest release
+  (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.1, six assets). The API's
+  `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.1`; the `.pkg` downloaded
+  from the public release matches its checksum and Gatekeeper accepts it.
+
+`notarization.json` is kept with the release's evidence outside the repository.
