@@ -1915,6 +1915,12 @@ to controllers, Omni.
   R18, R26: baseview's focus on macOS and Windows; X11 gives the editor the keys under the
   pointer), so that Escape reaches it, and gives it back when neither is left, checked each
   frame (a controller ends learning without an event in the window).
+- **Every key while it holds them** (Windows; baseview's third change,
+  `third_party/baseview/PATCHES.md`): while the drawer is open or MIDI Learn holds the keyboard,
+  the editor's window answers a dialog's `WM_GETDLGCODE` with `DLGC_WANTALLKEYS`; otherwise
+  as before. REAPER's FX window is a dialog: there an arrow moved REAPER's focus to one of its
+  own buttons, so the list never had it (found on Windows, below). The drawer's own keys
+  (R10's arrows, Enter, Escape and Tab) had the same fate there, untried until now.
 - `ca72-panel`'s approved image is unchanged: nothing of this is drawn at rest.
 
 ### On the audio thread
@@ -1998,16 +2004,17 @@ told apart, switches, selectors and VOICES, the glide and automation ending it, 
 a controller taking turns, instances apart, a session's table and an old one's, the editor
 never open in any); `tests/clap_host.rs` (a CLAP host in the test process, through the
 plug-in's own entry point: the change told at its time flagged `DONT_RECORD` and no rescan
-asked, the order at one sample both ways, the table out and back with the state and gone with an older one or a broken
-one, instances apart); `tests/realtime.rs` (nothing allocated); the editor's (the menu learns,
-cancels with Escape, removes; arming another and a controller moved; closing cancels and keeps
-what was caught; the strip's controls and the wheels' and POWER's menus; the MIDI list from the
-keyboard and the pointer; a right click ending a drag); `presets::tests` (presets leave the
-assignments alone); `ca72-panel` (a menu's items found where drawn, a menu and a note kept on
-the panel).
+asked, the order at one sample both ways, the table out and back with the state and gone with
+an older one or a broken one, instances apart); `tests/realtime.rs` (nothing allocated); the
+editor's (the menu learns, cancels with Escape, removes; arming another and a controller moved;
+closing cancels and keeps what was caught; the strip's controls and the wheels' and POWER's
+menus; the MIDI list from the keyboard and the pointer; a right click ending a drag; on
+Windows, in a real window, the window asking a dialog for every key only while the drawer or a
+control's menu holds the keyboard); `presets::tests` (presets leave the assignments alone);
+`ca72-panel` (a menu's items found where drawn, a menu and a note kept on the panel).
 
 ### In hosts
-Each host loaded one build of the CA-72 only, named "CA-72 MIDI TEST" so as not to replace the
+On the Mac each host loaded one build of the CA-72 only, named "CA-72 MIDI TEST" so as not to replace the
 installed CA-72, and a virtual MIDI port sent the controllers. Kept apart:
 - **Automated, no host:** everything under Tests; `tests/clap_host.rs` is the plug-in's CLAP
   entry point driven by a host in the test process (the event, its flag and time, no rescan
@@ -2036,12 +2043,40 @@ installed CA-72, and a virtual MIDI port sent the controllers. Kept apart:
   Audio Unit is told each value by the event itself (`onPerformEdit`, then a
   `kAudioUnitEvent_ParameterValueChange`). So Bitwig's display does not follow a learned
   controller, a limit of Bitwig's, said in the README.
-- **Not checked in a host:** recording, playback and reopening in a CLAP host; the Audio Unit
-  (R30, merged while this was made) in Logic or GarageBand: its MIDI, the editor's learning,
-  and what those hosts record (an AU has no "don't record" either); Escape in a host (the tool
-  driving the hosts sent Escape to no application, not even to close Live's own menu; the
-  editor's tests cover it); REAPER, Cubase and other hosts; Windows and Linux. The owner
-  stopped the checks in Bitwig after the clash below, and kept them to Live.
+- **By hand, REAPER 7.82 on Windows 11 (the reference machine, a screen at 200 %), VST3 and
+  CLAP,** the build named `CA-72 R34` (IDs of its own), bundled with MSVC as the release is, in
+  a REAPER with a settings folder of its own (`-cfgfile`: the owner's audio settings, the
+  plug-in folders pointed at the build). REAPER's scripts sent the MIDI
+  (`StuffMIDIMessage`), the pointer's messages were posted to the editor's window, and keys
+  were real (`SendInput`), sent only while REAPER's window was in front:
+  - The menu (`CUTOFF FREQUENCY · NO MIDI CONTROLLER`), MIDI LEARN's ring and note, CC 1
+    explained, the capture changing nothing (0.5), `CH 2 · CC 74` learned and its 127 setting
+    1.0, and CC 74 on channel 1 then changing nothing: REAPER keeps the channels apart.
+  - The keyboard: learning took REAPER's focus from its FX window's preset box to the editor's
+    window. Before baseview's third change a real Up arrow moved the focus to a button of
+    REAPER's and the list stayed; after it, Up moved the list's choice, and Down, Enter (EMPHASIS
+    waiting, then `CH 1 · CC 71` learned) and Delete (removed) worked. Escape closed the FX
+    window, before the change and after it, in VST3 and in CLAP (which stops learning: closing
+    the editor does); with the plug-in's "Send all keyboard input to plug-in" on (`WAK 1`), it
+    cancelled learning, the window stayed, and the focus went back to the preset box.
+  - Recording a sweep (50 CCs of 74, 0 to 127) with the track's automation in Trim/Read: the
+    item got the CCs, no envelope, and the undo history "Recorded media". In Write mode REAPER
+    wrote a Cutoff Frequency envelope besides, from the VST3's reported values (46 points) and
+    from the CLAP's (48), though the CLAP's are flagged `DONT_RECORD`: REAPER does not honour
+    the flag. A learned move left "Edit FX parameter" as the last undo step (the capture did
+    not).
+  - Playback: the item's CCs moved CUTOFF (1.0 by 1.2 s); as playback stopped REAPER sent CC 74
+    with 0 (a MIDI logger before the plug-in saw it), and CUTOFF followed.
+  - The CLAP's project saved and REAPER started again: the menu named `CH 1 · CC 74`, and CC 74
+    set CUTOFF (live MIDI reached the reopened track only once its effects changed, a MIDI logger
+    added before the plug-in: REAPER's, seen once).
+- **Not checked in a host:** a CLAP host's recording, playback and reopening on macOS; the
+  Audio Unit (R30, merged while this was made) in Logic or GarageBand: its MIDI, the editor's
+  learning, and what those hosts record (an AU has no "don't record" either); Escape in a host
+  on macOS (the tool driving the Mac's hosts sent Escape to no application, not even to close
+  Live's own menu; the editor's tests cover it); REAPER on macOS, Cubase and other hosts;
+  REAPER's Touch and Latch modes; Linux. The owner stopped the checks in Bitwig after the clash
+  below, kept them to Live on the Mac, and then asked for Windows.
 - **Seen besides, not MIDI Learn's:** in Bitwig, which loads every plug-in into one process,
   a second, differently built CA-72 opened a blank editor. softbuffer 0.4.8's macOS backend
   defines an Objective-C class under a fixed name, `SoftbufferObserver` (objc2's
@@ -2090,3 +2125,15 @@ count as failures: nih-plug's controller ignores `setParamNormalized` while proc
 upstream's and untouched); auval `-strict`, AU VALIDATION SUCCEEDED; pluginval on the Audio
 Unit, SUCCESS. (The Audio Unit validate.sh leaves in `~/Library/Audio/Plug-Ins/Components` was
 put back to the one there before.)
+
+**Evidence on Windows (2026-10-06, the reference machine: i5-13600K, Windows 11, a screen at
+200 %; Rust 1.97.1, GNU and MSVC),** this branch with baseview's third change: `cargo test
+--workspace` in the desktop session 269 passed, 0 failed (26 ignored) with each toolchain,
+`the_editor_asks_a_dialog_for_every_key_only_while_it_holds_them` and R28's real-window tests
+among them (over SSH, with no desktop, R28's
+`the_panel_is_shown_again_as_windows_repaints_its_window` sees one colour and fails: it needs
+a desktop, R28); clippy with `-D warnings` on the workspace and all targets (MSVC with
+`--all-features`, as CI; GNU with `--features ca72-plugin/standalone`); `cargo fmt --all --
+--check`. CI's Windows job (MSVC) on the pull request, before the third change: 268 passed, 0
+failed; clap-validator 36 passed, 0 failed, 8 skipped; pluginval at strictness 10, its editor
+tests included, SUCCESS; Steinberg's validator 47 passed, 0 failed.

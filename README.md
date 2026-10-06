@@ -211,18 +211,27 @@ with none.
 
 **Recording and automation.** What your host records is the controller's MIDI, on the track;
 the CA-72 tells the host each new value so that its display follows. In CLAP it asks the host
-not to record that as automation as well (Bitwig Studio 5.2 then leaves its own display of the
-control as it was, though the control has moved). VST3 and Audio Units have no such request: a
-host that writes automation for a plug-in's own changes may record the move as automation too.
-Ableton Live 12 does, while its Automation Arm is on: the clip gets the controller and the
-track gets the control's automation, and playing the clip back moves the control, which Live
-takes as overriding that automation (its Re-Enable Automation button lights). Record controller
-moves there with Automation Arm off. A learned controller and your host's automation of the
-same control take turns: the later one holds, and at the same moment the controller's.
+not to record that as automation as well, though not every host honours it (Bitwig Studio 5.2
+then leaves its own display of the control as it was, though the control has moved). VST3 and
+Audio Units have no such request: a host that writes automation for a plug-in's own changes may
+record the move as automation too. Ableton Live 12 does, while its Automation Arm is on: the
+clip gets the controller and the track gets the control's automation, and playing the clip back
+moves the control, which Live takes as overriding that automation (its Re-Enable Automation
+button lights). REAPER 7 does while a track's automation is in Write mode, in CLAP as in VST3,
+and its undo history takes a learned move as an edit of the parameter. Record controller moves
+with the track's automation only read (Live's Automation Arm off, REAPER's Trim/Read). A
+learned controller and your host's automation of the same control take turns: the later one
+holds, and at the same moment the controller's.
 
-**Channels in Live.** Live 12 passed the CA-72's VST3 a controller sent on channel 2 as
-channel 1, so there a controller is learned as `CH 1` whatever channel it sends on, and the
-same CC number on two channels is one controller.
+**Hosts' MIDI.** Live 12 passed the CA-72's VST3 a controller sent on channel 2 as channel 1,
+so there a controller is learned as `CH 1` whatever channel it sends on, and the same CC number
+on two channels is one controller; REAPER keeps the channels apart. REAPER may set a controller
+a track's MIDI used back to 0 when playback stops (it did when tried), and a learned control
+follows it there.
+
+**Escape in REAPER on Windows.** REAPER closes its plug-in window at Escape, which stops MIDI
+Learn waiting too, unless that window's **Send all keyboard input to plug-in** is on; the
+arrows, Enter and Delete reach the MIDI list either way.
 
 ## Building
 

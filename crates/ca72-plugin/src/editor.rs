@@ -540,10 +540,12 @@ impl PanelWindow {
             .editing
             .learning
             .holds_keys(&self.editing.params.midi_map);
-        if !self.editing.browser.open
-            && !learning
-            && let Some(keys) = self.keys.take()
-        {
+        let holding = self.editing.browser.open || learning;
+        // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
+        // in REAPER's FX window an arrow moved REAPER's focus to one of its own buttons); the
+        // host's again once it lets them go (decisions.md R34).
+        window.set_wants_keys(holding);
+        if !holding && let Some(keys) = self.keys.take() {
             window::give_keys_back(window, keys);
         }
     }
@@ -3786,6 +3788,9 @@ mod windows_window_tests {
         WM_MOUSEMOVE, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_NOACTIVATE,
         WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP, WS_VISIBLE,
     };
+    use winapi::um::winuser::{
+        DLGC_WANTALLKEYS, MK_RBUTTON, SendMessageW, WM_GETDLGCODE, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    };
 
     use super::*;
 
@@ -4218,6 +4223,45 @@ mod windows_window_tests {
             "the panel and the drawer again ({} colours)",
             colours(&shown)
         );
+        o.close();
+    }
+
+    /// While the editor holds the keyboard (the presets' drawer open, a control's menu), its
+    /// window asks a host's dialog for every key: in REAPER's FX window, a dialog, an arrow moved
+    /// REAPER's focus to one of its own buttons rather than reaching the drawer's list
+    /// (decisions.md R34). And only then: otherwise the dialog keeps its keys.
+    #[test]
+    fn the_editor_asks_a_dialog_for_every_key_only_while_it_holds_them() {
+        let o = Opened::new(false, HostWindow::OffScreen);
+        let asks = || {
+            // SAFETY: a message sent to the test's own window.
+            let code = unsafe { SendMessageW(o.window(), WM_GETDLGCODE, 0, 0) };
+            code & DLGC_WANTALLKEYS != 0
+        };
+        assert!(!asks(), "nothing held");
+        o.click_name();
+        assert!(asks(), "the presets' drawer open");
+        o.click_name();
+        pump(Duration::from_millis(400));
+        assert!(!asks(), "the drawer shut");
+        // A right click on CUTOFF FREQUENCY: its menu.
+        let cutoff = &CONTROLS[ca72_panel::controls::index("cutoff").expect("a control")];
+        let (x, y) = o.at(cutoff.centre());
+        let at = (((y.round() as u32) << 16) | (x.round() as u32 & 0xFFFF)) as LPARAM;
+        let w = o.window();
+        // SAFETY: messages posted to the test's own window.
+        unsafe {
+            PostMessageW(w, WM_MOUSEMOVE, 0, at);
+            PostMessageW(w, WM_RBUTTONDOWN, MK_RBUTTON as WPARAM, at);
+        }
+        pump(Duration::from_millis(50));
+        // SAFETY: as above.
+        unsafe { PostMessageW(w, WM_RBUTTONUP, 0, at) };
+        pump(Duration::from_millis(300));
+        assert!(asks(), "a control's menu open");
+        // A click on the wood above the panel: the menu shut.
+        o.drag(o.at((art::W / 2.0, 20.0)), 0.0);
+        assert!(!asks(), "the menu shut");
         o.close();
     }
 }
