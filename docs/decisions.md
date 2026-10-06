@@ -2070,6 +2070,28 @@ installed CA-72, and a virtual MIDI port sent the controllers. Kept apart:
   - The CLAP's project saved and REAPER started again: the menu named `CH 1 · CC 74`, and CC 74
     set CUTOFF (live MIDI reached the reopened track only once its effects changed, a MIDI logger
     added before the plug-in: REAPER's, seen once).
+- **By hand, Sandyne 2.5.0.0 on Windows 11 (the reference machine), VST3 and CLAP,** the same
+  `CA-72 R34` build in the user's plug-in folders (`%LOCALAPPDATA%\Programs\Common`, R31's
+  `CA-72 R30` builds to the Recycle Bin), the clicks real (`SendInput`, Sandyne in front;
+  Sandyne, built with JUCE, ignores posted ones). The owner's Moog Sub 37 sent nothing over USB
+  (a MIDI monitor on its port heard no note or controller, twice), so, with the owner's
+  approval, loopMIDI 1.0.16.27 (Tobias Erichsen's, its installer's signature checked) was
+  installed and a port of its, `CA72 Test`, enabled as Sandyne's MIDI input; a script sent the
+  controllers into it, on channel 4 as the Sub 37 is set to send:
+  - Sandyne found both builds when asked to scan, put the VST3 on a track of its own (armed)
+    and opened its editor in a window of its own, drawn a pixel a point (no display scale
+    given: MIDI Learn's menu and note are small, as the hover tips are).
+  - MIDI LEARN on CUTOFF FREQUENCY: CC 1 explained, then Sandyne's own CC 123 explained (it
+    sends one at times), CC 74 on channel 4 learned (`CH 4 · CC 74`), the capture changing
+    nothing; a sweep to 127 turned CUTOFF fully up and 0 fully down.
+  - A real Escape cancelled learning on EMPHASIS and the window stayed: Sandyne gives the
+    plug-in its keys.
+  - The project saved (`.sand`, the plug-in's state in JUCE's VST3 form: its component state
+    held `{"param":"cutoff","channel":4,"cc":74}`), Sandyne started again and the project
+    opened: CC 74 at 127, sent with the plug-in's window shut, turned CUTOFF fully up, and the
+    menu named `CH 4 · CC 74`.
+  - The CLAP on a track of its own: `CH 4 · CC 75` learned and its sweep moved CUTOFF.
+  - Not tried in Sandyne: recording controllers or automation, playback.
 - **Not checked in a host:** a CLAP host's recording, playback and reopening on macOS; the
   Audio Unit (R30, merged while this was made) in Logic or GarageBand: its MIDI, the editor's
   learning, and what those hosts record (an AU has no "don't record" either); Escape in a host

@@ -380,9 +380,9 @@ The service documents and datasheets the model was derived from are not included
   on Linux the monitor the pointer is on (else the primary). If the window with the
   presets' drawer below the panel would not fit on the screen, or the host will not
   resize it, the drawer opens over the panel instead.
-- On Windows and Linux, in a host that gives the editor no display scale (Live, for one),
-  the editor draws a pixel a point: the panel fills the window at any size, but the hover
-  tips are small on a high-density screen.
+- On Windows and Linux, in a host that gives the editor no display scale (Live and Sandyne, for
+  two), the editor draws a pixel a point: the panel fills the window at any size, but the hover
+  tips, and MIDI Learn's menu and note, are small on a high-density screen.
 - The Windows installer is unsigned (see [Installing](#installing)).
 - The update check needs `curl` (Windows 10 1803 or later and macOS have it, as do most
   Linux distributions) and a direct connection to GitHub; it does not use Windows' proxy
