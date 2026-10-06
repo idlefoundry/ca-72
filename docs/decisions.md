@@ -1829,3 +1829,43 @@ as I think people might be running into issues."
 (R31 and R32, and the bump): `cargo test --workspace` 230 passed, 0 failed (25 ignored, run
 by hand); `Cargo.lock` changed only in the workspace's eight crates. The installers are
 CI's, on the pull request.
+
+**The release (2026-10-06, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3),** from a fresh clone of the tag `v0.1.2` (`b1e6d67`, main's commit, whose tree is the
+pull request's head's, `75b1f2f`; clean, version 0.1.2), in a folder of its own beside
+another agent's checkout, which was left untouched. The tag's CI passed and drafted the
+release with its five assets. Over SSH from the Windows reference machine, at low priority
+(`nice -n 19`, 8 jobs), `cargo xtask bundle-universal ca72-plugin --profile bundle` (Rust
+1.97.1, through rustup's proxy: the login shell's `cargo` is stable's) and `scripts/auv2.sh`
+made the bundles and the Audio Unit. Signing could not be done over SSH, where the keychain
+is locked (`codesign`: `errSecInternalComponent`; `notarytool`: `keychainLocked`), so the
+owner ran `scripts/package.sh` with the two Developer ID identities, the notary profile and
+`CA72_REQUIRE_NOTARIZATION=1` in a terminal on the Mac:
+- **Apple's notary service** accepted it: submission `1c5d7685-2a84-4260-8058-e104c4fa5e6c`,
+  status `Accepted`. The ticket is stapled (`stapler validate` passes); the installer is
+  signed `Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)`, trusted timestamp
+  2026-10-06 19:26:06 UTC; Gatekeeper (`spctl --assess --type install`): `accepted`,
+  `source=Notarized Developer ID`. `pkgbuild` printed "write: Permission denied" four times
+  for each bundle, as `package.sh` notes it does on macOS 15 and later; the payload is whole.
+- **The VST3, the CLAP and the Audio Unit in its payload** (expanded with `pkgutil
+  --expand-full`; the first release with the Audio Unit): each signed `Developer ID
+  Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the hardened runtime and a secure
+  timestamp, `codesign --verify --strict` passing; version 0.1.2; `x86_64 arm64`; LICENSE
+  and the notices inside; installed to `/Library/Audio/Plug-Ins/VST3`, `…/CLAP` and
+  `…/Components`. The component's CLAP is the CLAP choice's, byte for byte, its signature
+  valid.
+- **Its SHA-256** is `8c9ed3bba0ba17bc415136cde0cc98a94441fe7a0bf1bcaf044fb3fba9f57a7d`
+  (14,059,118 bytes). It went into the draft with its line added to CI's `SHA256SUMS.txt`;
+  the four files it lists, downloaded again from the draft, passed `sha256sum -c`. CI's
+  Windows plug-in, from the pull request's run, imports Windows' own libraries only (R32).
+- **Published** on the owner's word at 2026-10-06 19:28:40 UTC as the latest release
+  (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.2, six assets), with the notes
+  drafted in #9. The API's `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.2`;
+  the public downloads have the draft's sizes, and the public `SHA256SUMS.txt` is the one
+  uploaded.
+
+`notarization.json`, the build's and the packaging's logs, the commands (`build.sh`) and
+`SHA256SUMS.txt` are kept with the release's evidence outside the repository, as 0.1.1's are.
+The release's clone then went to the Mac's Trash, and R31's test CLAP to the reference
+machine's Recycle Bin; its VST3, which Sandyne had loaded, was gone from the folder once
+Sandyne closed, another change's test build (`CA-72 R34`) in its place.
