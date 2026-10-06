@@ -1,4 +1,4 @@
-//! MIDI Learn (decisions.md R30): a hardware controller's absolute 7-bit control change, on its
+//! MIDI Learn (decisions.md R34): a hardware controller's absolute 7-bit control change, on its
 //! own MIDI channel, assigned to one of the plug-in's sound parameters; each instance its own
 //! table, saved with the host's project, not with the sound presets.
 //!
@@ -19,7 +19,7 @@
 //!   Escape, CANCEL and the editor closing disarm it ([`MidiMap::cancel`]); arming another
 //!   parameter moves the learning there. Nothing of learning is saved.
 //! - **Playing**: a learned control change sets its parameter at its sample, through the host
-//!   (`ProcessContext::set_parameter_normalized`, `third_party/nih-plug/PATCHES.md` change 9):
+//!   (`ProcessContext::set_parameter_normalized`, `third_party/nih-plug/PATCHES.md` change 10):
 //!   a knob to value / 127 of its travel, a selector (or VOICES) to the position its share of
 //!   0–127 falls in, a switch off at 0–63 and on at 64–127. The value jumps there ("jump"
 //!   takeover); a knob's voices follow it over [`DEZIP`] ([`Dezip`]).
@@ -229,7 +229,7 @@ const TARGET_BITS: u32 = 8;
 /// channel and the control change.
 const CAUGHT: u64 = 1 << 63;
 
-/// One instance's MIDI assignments and its learning (decisions.md R30). Saved with the plug-in's
+/// One instance's MIDI assignments and its learning (decisions.md R34). Saved with the plug-in's
 /// state under `midi_map` ([`Saved`]).
 pub struct MidiMap {
     /// By channel and controller (channel × 128 + CC): the learnable parameter it sets, its
@@ -727,7 +727,7 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
 
 /// How long the voices take to follow a knob a learned controller moves, s: a 7-bit controller
 /// moves a knob in steps of 1/127 of its travel, which the voices would otherwise take as steps
-/// (MAIN OUTPUT VOLUME's click: decisions.md R30 measures them). The parameter itself (the
+/// (MAIN OUTPUT VOLUME's click: decisions.md R34 measures them). The parameter itself (the
 /// host's, the editor's, the state's) is at the new value at once.
 pub const DEZIP: f64 = 0.010;
 

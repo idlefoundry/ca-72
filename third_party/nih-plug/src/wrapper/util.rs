@@ -53,7 +53,7 @@ pub fn hash_param_id(id: &str) -> u32 {
 /// A parameter the plugin set itself during a `process()` call
 /// ([`ProcessContext::set_parameter_normalized()`][crate::prelude::ProcessContext::set_parameter_normalized()]),
 /// for the wrapper to tell the host once the call returns: the parameter's hash, the time within
-/// the call's block, and the normalized value as set (PATCHES.md, change 9).
+/// the call's block, and the normalized value as set (PATCHES.md, change 10).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct OwnParamChange {
     pub hash: u32,

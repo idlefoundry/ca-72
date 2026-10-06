@@ -1613,7 +1613,224 @@ bundle-universal ca72-plugin --profile bundle` (Rust 1.97.1) made the bundles, t
 
 `notarization.json` is kept with the release's evidence outside the repository.
 
-## R30. MIDI Learn
+## R30. An Audio Unit for macOS
+**Owner decision, 2026-10-06.** An Audio Unit, as asked for in issue #6 ("an AU-Plugin
+version"): "start the AU work on a branch, you can use GarageBand for testing on this
+computer. When we've determined that everything works, please merge into main and clean up
+the branch." Made alongside another machine's work on Potato's speed: the Audio Unit wraps
+the CLAP plug-in as it is, so the two meet only in the plug-in's parameters, its state and
+its latency, which the wrapper passes on unchanged, and in this file.
+
+**Agent decisions, 2026-10-06** (not separately approved):
+- **Version 2, made from the CLAP plug-in by clap-wrapper.** nih-plug makes no Audio Units.
+  [clap-wrapper](https://github.com/free-audio/clap-wrapper)'s AUv2 wrapper (MIT; v0.16.0,
+  its latest) presents the CLAP plug-in to the host as an Audio Unit: the plug-in's own code
+  is unchanged, and the Audio Unit plays what the CLAP plays. Version 2 rather than 3: Logic
+  Pro and GarageBand, and every macOS host that takes Audio Units, load version 2 in their
+  own process; version 3 is an app extension inside an app of its own, and what iPad hosts
+  need, which the CA-72 is not built for.
+- **The CLAP inside the component** (`Contents/PlugIns/CA-72.clap`). The wrapper looks
+  there before the CLAP folders, so the component plays the CLAP it was built with, whether
+  or not a CLAP is installed, and never another version that happens to be. The installer's
+  component carries the same signed CLAP as its CLAP choice (`scripts/package.sh` signs the
+  CLAP, then copies it in, then signs the component). It costs the component the CLAP's
+  10 MB.
+- **Its identity, which a host keeps in its songs and so must never change:** type `aumu`
+  (an instrument), subtype `CA72`, manufacturer `IdlF` (Idle Foundry; Apple keeps the
+  all-lowercase codes for itself); the name "Idle Foundry: CA-72" (Logic and GarageBand list
+  it as CA-72 under Idle Foundry); the bundle identifier `com.idlefoundry.ca-72.component`.
+- **Vendored:** clap-wrapper, the CLAP headers (1.2.6) and Apple's AudioUnitSDK (1.1.0, the
+  Apache License 2.0), at the versions clap-wrapper fetches for itself, in `third_party/`
+  with their sources' commits and hashes (`PATCHES.md`, `VENDORED.md`). The build needs no
+  network, and the source of everything built into the component is in the repository, as
+  the GPL asks of the whole. `THIRD-PARTY-NOTICES.txt` carries their licences, and {fmt}'s,
+  which clap-wrapper compiles in (`scripts/notices.py`).
+- **clap-wrapper patched** (`third_party/clap-wrapper/PATCHES.md`): pluginval aborted the
+  host in about one run in four with the heap corrupted, because the host's parameter
+  changes went straight into the audio thread's event list from whatever thread the host
+  called on; and a state saved before the host rendered a block lost the changes since the
+  last one, and the host read the values from before a state it had just restored. Four
+  changes: the host's changes wait under a lock for the audio thread; a save hands any
+  still waiting to the plug-in first (`clap_plugin_params.flush()`, with no block
+  processed meanwhile); a restore refreshes the values the host reads at once; and the
+  host lists the parameters in the plug-in's order, the panel's, rather than by id.
+  Nothing upstream had reported or fixed them; offering the fixes upstream is the owner's
+  call.
+- **Built by `scripts/auv2.sh`** (CMake 3.21 or later; `scripts/auv2/CMakeLists.txt`), from
+  `target/bundled/CA-72.clap`, after the bundles, for the CLAP's architectures (universal
+  for a release) and for macOS 11 as they are. Afresh each time, a few seconds: the wrapper
+  reads the CLAP while it builds, which CMake does not track.
+- **In the macOS installer** as a third choice, Audio Unit, into
+  `/Library/Audio/Plug-Ins/Components`, like the others not relocatable and not version
+  checked.
+- **Validated** by `scripts/validate.sh` on macOS: Apple's `auval -strict` (and the Intel
+  slice under Rosetta, where it is installed) and pluginval at strictness 10. Hosts and these
+  validators find an Audio Unit only where it is installed, so the script first copies it
+  into `~/Library/Audio/Plug-Ins/Components`, over any copy there. CI builds it on macOS,
+  validates it and keeps it with the bundles.
+- **Not released here.** The README says that the Audio Unit comes with the macOS installer
+  from the release after 0.1.1; until then it is built from source.
+
+**Evidence (2026-10-06, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, CMake 4.4.4,
+Rust 1.97.1),** on this change's tree. `scripts/auv2.sh` on the universal bundles made
+`CA-72.component`, `x86_64 arm64`.
+- **`auval -strict`:** AU VALIDATION SUCCEEDED: 51 parameters (in the panel's order with
+  change 4), the Cocoa view, renders from 11.025 to 192 kHz and 64 to 4096 frames, MIDI.
+  One warning: the preset's name is not kept in the class data. The Intel slice was not
+  run: this Mac has no Rosetta.
+- **pluginval 1.0.4 at strictness 10** (editor tests skipped, the screen in use). With
+  clap-wrapper as released it aborted the host in 2 runs of 10 ("BUG IN CLIENT OF
+  LIBMALLOC: memory corruption of free block": the message thread in `SetParameter()` while
+  another thread initialized the unit), where the VST3 passed 5 of 5. With change 1, no abort
+  in 12 runs, and with changes 1 and 2 none in 20, but the state restoration test failed in
+  1 and 3 of them; with all four, 24 of 24 passed, and the seeds that had failed pass.
+- **A host of AVAudioEngine's,** the way GarageBand and Logic load units: five notes sound
+  (RMS 0.13), the output bounded; the full state, saved after a block, restored into a
+  second instance; parameters set and saved with no block between are kept (clap-wrapper as
+  released loses them). The editor through `kAudioUnitProperty_CocoaUI`, opened and closed
+  four times and the unit disposed of with it open; and through Apple's out-of-process
+  hosting (`AUHostingService`), drawn whole at 1382 by 463.
+- **GarageBand 10.4.14,** which on this macOS loads the component in Apple's hosting
+  service: listed under AU Instruments › Idle Foundry › CA-72 (Stereo); its Smart Controls
+  took the first parameters in the panel's order; the editor shown whole in its plug-in
+  window. Four notes recorded with Musical Typing and exported as WAVE: 0.15 RMS, the C at
+  260 Hz (C4, 261.6 Hz), released to silence. POLY on and VOICES 5, set on the panel; the
+  project saved, closed and reopened with both as set; played back with POLY on, no crash.
+- **`scripts/package.sh`** (signed ad hoc here) made a three-choice installer, every package
+  not relocatable, the component's CLAP identical to the CLAP choice's;
+  `scripts/notices.py --check` passes. CI's runs are on the pull request.
+
+## R31. Hosts that switch the side chain off: the plug-in no longer reads address 0
+**The report, 2026-10-06.** Users told the owner that the CA-72 did not work in Sandyne, a
+free DAW, as a VST on Windows. The owner asked for it to be tried there.
+
+**The cause,** found on the Windows reference machine with Sandyne 2.5.0.0 (its installer,
+`Sandyne_v2.5.0.0_win64.exe`, 538,577,168 bytes, from the link on sandyne.com, installed by
+the owner; it takes VST3 and CLAP) and 0.1.1's released VST3 (its installer checked against
+`SHA256SUMS.txt`; the module Sandyne loaded was that file, 4,636,160 bytes, version 0.1.1).
+Sandyne scanned the plug-in without trouble. Put on a track, it was set up for blocks of up
+to 1920 samples at 48 kHz, its editor opened, and in its first block, of 480 samples, Sandyne
+caught an access violation inside the plug-in's processing and disabled it for the session
+("Plugin Crashed: CA-72"): no sound. Sandyne is built with JUCE, and sets an instrument up
+with outputs only (`setPlayConfigDetails (maxBs=1920 outCh=2)` in its log), which switches
+off the CA-72's one input bus, its side chain (EXTERNAL INPUT). For a bus switched off on its
+side, JUCE's VST3 hosting gives the bus's full channel count, two, with every channel's
+pointer null (`HostBufferMapper::associateBufferTo`, `juce_VST3Common.h`). nih-plug checked
+only that the array of pointers was not null, then copied each channel through its pointer:
+a read from address 0. 0.1.0 does the same; the code is unchanged since. REAPER, where the
+plug-in has been tried most, gives the bus its buffers. Hosts built with JUCE that set an
+instrument up without inputs likely all meet it. That Sandyne switches the bus off is
+inferred from its log and JUCE's source (Sandyne's is not public); the fix below, which
+handles nothing else, ended the crash.
+
+**Agent decisions, 2026-10-06** (the owner asked for the fix and for it to be tried in
+Sandyne again; not separately approved otherwise):
+- **nih-plug's ninth change** (`third_party/nih-plug/PATCHES.md`): a channel the host gives as
+  a null pointer is read as silence if it is an input, and backed by scratch storage,
+  discarded, if it is an output, so that every channel the plug-in sees is as long as the
+  block. In the buffers both of nih-plug's wrappers share, so the CLAP takes it too, and with
+  it the Audio Unit, which wraps the CLAP (R30). Not by the bus's activation
+  (`IComponent::activateBus`), which nih-plug accepts and ignores: the pointers are what is
+  read, and a host may give a null one for a bus it left active.
+- **Tests.** `a_vst3_host_that_deactivates_the_side_chain_has_its_blocks_played`
+  (`crates/ca72-plugin/src/lib.rs`) drives the plug-in's VST3 wrapper as Sandyne did: set up
+  for 1920 samples, the side chain switched off, three blocks of 480 with its two channels
+  null; every output sample written and finite. nih-plug's own `null_channel_pointers`
+  covers each kind of channel, main and auxiliary, input and output; nih-plug's tests are
+  not the workspace's, so it is run by hand, from a copy of `third_party/nih-plug` outside
+  the repository (which keeps a `Cargo.lock` of its own out of it).
+- **Tried in Sandyne under a name and IDs of its own,** as R28 was: `CA-72 R30` (so named
+  before the Audio Unit took R30), built as the bundle is (`--profile bundle`, with MSVC as CI
+  builds it: R32), in the user's VST3 and CLAP folders (`%LOCALAPPDATA%\Programs\Common`).
+  R27's `CA-72 TEST` builds, still there, went to the Recycle Bin, so that Sandyne listed no
+  stale build.
+
+**Evidence (2026-10-06, the Windows reference machine: i5-13600K, Windows 11, a screen at
+200 %; Rust 1.97.1, GNU as R24 and MSVC as R32):**
+- **Sandyne 2.5.0.0** (the owner's clicks, its log and the modules it loaded read here):
+  0.1.1's VST3 crashed in its first block as above. This change's: scanned and put on a
+  track, set up and set up again after its editor opened, as before; the editor at 3072 by
+  1030, then 1536 by 515; the owner played notes on its track (four in Sandyne's log) and
+  heard it play; no crash, no error in the log. Not tried: the CLAP in Sandyne, the drawer
+  and the grip there, a project saved and opened again, other hosts built with JUCE.
+- **The new test** aborted before the change, at the side chain's copy (a debug build checks
+  the null pointer: `slice::from_raw_parts_mut requires the pointer to be aligned and
+  non-null`; a release build reads address 0), and passes after it. nih-plug's buffer tests,
+  `buffer_io` and `null_channel_pointers`, pass.
+- **On this change's tree** (main with the Audio Unit, R30): `cargo test --workspace` 230
+  passed, 0 failed (25 ignored, run by hand) with GNU, and the same with MSVC; clippy with
+  `-D warnings` on the workspace and all targets, with `--features ca72-plugin/standalone`
+  (GNU) and with `--all-features` (MSVC, as CI); `cargo fmt --all -- --check`;
+  `scripts/notices.py --check`. macOS and Linux run the same code (CI's tests on the pull
+  request); the Audio Unit was not tried.
+
+## R32. Windows: the C runtime linked into the plug-in
+**Seen, 2026-10-06,** while R31 was looked into: 0.1.1's Windows plug-in, built by CI with
+MSVC, imports Visual C++'s runtime, `VCRUNTIME140.dll`, and four of the Universal C
+Runtime's `api-ms-win-crt-*` libraries. The installer does not bring Visual C++'s runtime,
+so where no other program has installed it and the host has no copy of its own, Windows
+cannot load the plug-in, and the host shows it failing or not at all. Not seen on a
+computer: read from the imports. Not R31's cause: Sandyne has its own copy, beside its
+executable. The reference machine's builds, with GNU, never needed it.
+
+**Agent decisions, 2026-10-06** (the owner asked for what was found on the way to be fixed,
+and approved Visual Studio's Build Tools on the reference machine; not separately approved
+otherwise):
+- **The C runtime linked statically with MSVC** (`.cargo/config.toml`: `+crt-static` for
+  `cfg(all(windows, target_env = "msvc"))`, which CI's Windows build is): the plug-in
+  imports Windows' own libraries only. Not Visual C++'s redistributable in the installer
+  (some 25 MB beside its 3.6, and a second program installed), nor the runtime's DLL beside
+  the plug-in, where Windows does not look (it looks beside the host's executable). A
+  `RUSTFLAGS` in the environment would replace the configuration's; CI sets none.
+- **MSVC on the reference machine,** beside the GNU toolchain, which stays its default:
+  Visual Studio Build Tools 2022 (17.14, the C++ workload) and Rust 1.97.1 for
+  `x86_64-pc-windows-msvc` (`cargo +1.97.1-x86_64-pc-windows-msvc`). The bundles as CI
+  builds them, and its clippy with `--all-features` (R26 could not run it), run here now.
+
+**Evidence (2026-10-06, the Windows reference machine):** `cargo +1.97.1-x86_64-pc-windows-msvc
+xtask bundle ca72-plugin --profile bundle`: the VST3 and the CLAP import
+`api-ms-win-core-synch-l1-2-0`, `avrt`, `bcryptprimitives`, `gdi32`, `kernel32`, `ntdll`,
+`ole32`, `oleaut32`, `shell32` and `user32`, all Windows'; 0.1.1's VST3 imports these and
+`VCRUNTIME140` and `api-ms-win-crt-heap`, `-math`, `-runtime` and `-string`. The exports are
+0.1.1's (`GetPluginFactory`, `InitDll`, `ExitDll`, `clap_entry`); the VST3 is 4,802,048
+bytes, 0.1.1's 4,636,160. R31's test build, linked the same way, played in Sandyne; the
+workspace's tests pass with MSVC (R31). Not tried: a computer without Visual C++'s
+redistributable (this one has had it since 2026-09-18), so the failure itself was not seen.
+
+## R33. 0.1.2
+**Owner decision, 2026-10-06.** A release as soon as may be, with R31 and the Audio Unit
+(R30): "I would like to get this out as a release as soon as possible along with the AU pr,
+as I think people might be running into issues."
+
+**What it brings since 0.1.1** (the tag `v0.1.1`):
+- **The plug-in plays in hosts that switch its side chain off** (R31): in Sandyne, and
+  likely in other hosts built with JUCE, 0.1.0 and 0.1.1 crashed in their first block and
+  the host disabled them. On every system, the VST3 and the CLAP.
+- **An Audio Unit for macOS** (R30), a third choice in the macOS installer.
+- **Windows: no Visual C++ runtime needed** (R32).
+
+**Agent decisions, 2026-10-06** (not separately approved):
+- **A patch release, 0.1.2,** as R29: nothing a project or a preset holds has changed since
+  0.1.1 (the parameters, the plug-in's IDs, the voice and the presets' format are its), so
+  what was saved with 0.1.0 or 0.1.1 opens unchanged, and the installers install over
+  theirs. The Audio Unit is new; its identity is R30's.
+- **In R31's pull request,** a commit of its own, so that CI runs once before the tag (R29
+  was a pull request of its own).
+- **The version** as R29: the workspace's (`Cargo.lock` changed only in its eight crates);
+  the README's status names 0.1.2, and its line on the Audio Unit names 0.1.2 rather than
+  "the release after 0.1.1".
+- **Released the way R29 was:** once merged, the tag `v0.1.2` on main's commit; CI's release
+  job drafts the release with the Windows and Linux installers, the notices, the git sources
+  and `SHA256SUMS.txt`; the macOS installer, now with the Audio Unit, is built, signed and
+  notarised on the release Mac (`docs/macos-release.md`) and put into the draft; the owner
+  publishes it, with notes in 0.1.1's form (drafted in the pull request).
+
+**Evidence (2026-10-06, the Windows reference machine, GNU as R24),** on this change's tree
+(R31 and R32, and the bump): `cargo test --workspace` 230 passed, 0 failed (25 ignored, run
+by hand); `Cargo.lock` changed only in the workspace's eight crates. The installers are
+CI's, on the pull request.
+
+## R34. MIDI Learn
 **The owner's request, 2026-10-06:** a focused first MIDI Learn. Each sound control (knobs,
 selectors, switches) learns a hardware controller's absolute 7-bit control change on its exact
 channel from its context menu, which shows the assignment and a clear waiting state, with a
@@ -1729,31 +1946,30 @@ to controllers, Omni.
 - Nothing allocated or freed (`tests/realtime.rs`, the plug-in's own `process` with every kind
   of learned control, a capture, reserved controllers and automation ending a glide).
 
-### Through the host (`third_party/nih-plug/PATCHES.md`, changes 9 and 10)
+### Through the host (`third_party/nih-plug/PATCHES.md`, changes 10 and 11)
 - **The MIDI path is nih-plug's as it was**: CLAP's MIDI events and VST3's hidden MIDI CC
   parameters (`IMidiMapping` maps every controller on every channel to one, which the wrapper
   turns into `NoteEvent::MidiCC`) reach `process` as before. Nothing is asked of a host's own
   MIDI mapping.
-- **`ProcessContext::set_parameter_normalized`** (change 9) sets the parameter as each wrapper
+- **`ProcessContext::set_parameter_normalized`** (change 10) sets the parameter as each wrapper
   already sets the host's automation during a process call, and tells the host: CLAP an output
   `CLAP_EVENT_PARAM_VALUE` at the change's time flagged `CLAP_EVENT_DONT_RECORD` and no gesture
   (`clap/ext/params.h`: "Turning a knob via plugin's internal MIDI mapping"), so the host shows
-  the value without recording automation over the MIDI it records, and then, once a process call
-  that had any and one at a time, `host_params->rescan(CLAP_PARAM_RESCAN_VALUES)` from the main
-  thread, since Bitwig Studio 5.2.7 shows nothing of such an event (below); VST3 a point in the call's
+  the value without recording automation over the MIDI it records (nothing more: no rescan of
+  the parameters, below); VST3 a point in the call's
   `outputParameterChanges` at its sample offset, VST3's way for a processor to tell its host
   and controller (Steinberg's Communication FAQ). Room for 1024 changes a call is reserved when
   the wrapper is made. No feedback loop: the plug-in tells the host only of its own changes, never
   of the host's automation, and nih-plug ignores a controller value the host sets while
   processing (R4).
-- **The order at one sample** (change 9): a host's parameter change is set before the events
+- **The order at one sample** (change 10): a host's parameter change is set before the events
   the plug-in reads at its sample, in both formats, whatever the host's order (VST3 sorts by
   time, parameter changes first; CLAP splits a run before an event a parameter change follows at
   its sample). So the host's automation and a learned controller of one parameter take turns in
   time: the later holds, and at one sample the controller (set after the automation). A host
   playing automation moves the parameter back at its next point. Without the CLAP change the
   test's "listed first" case gave the automation (checked).
-- **`TestProcessContext`** (change 10): a context with no host, for the plug-in's tests of
+- **`TestProcessContext`** (change 11): a context with no host, for the plug-in's tests of
   `process`, since nih-plug keeps its parameter setters to itself.
 
 ### Saved with the project
@@ -1781,8 +1997,8 @@ told once, the capture changing nothing, reserved controllers keeping their path
 told apart, switches, selectors and VOICES, the glide and automation ending it, automation and
 a controller taking turns, instances apart, a session's table and an old one's, the editor
 never open in any); `tests/clap_host.rs` (a CLAP host in the test process, through the
-plug-in's own entry point: the change told at its time flagged `DONT_RECORD`, the order at one
-sample both ways, the table out and back with the state and gone with an older one or a broken
+plug-in's own entry point: the change told at its time flagged `DONT_RECORD` and no rescan
+asked, the order at one sample both ways, the table out and back with the state and gone with an older one or a broken
 one, instances apart); `tests/realtime.rs` (nothing allocated); the editor's (the menu learns,
 cancels with Escape, removes; arming another and a controller moved; closing cancels and keeps
 what was caught; the strip's controls and the wheels' and POWER's menus; the MIDI list from the
@@ -1792,10 +2008,10 @@ the panel).
 
 ### In hosts
 Each host loaded one build of the CA-72 only, named "CA-72 MIDI TEST" so as not to replace the
-installed 0.1.1, and a virtual MIDI port sent the controllers. Kept apart:
+installed CA-72, and a virtual MIDI port sent the controllers. Kept apart:
 - **Automated, no host:** everything under Tests; `tests/clap_host.rs` is the plug-in's CLAP
-  entry point driven by a host in the test process (the event, its flag and time, one values
-  rescan asked for however many changes, the order at one sample, the state).
+  entry point driven by a host in the test process (the event, its flag and time, no rescan
+  asked, the order at one sample, the state).
 - **By hand, Ableton Live 12.2.7 Beta, VST3 (macOS):** a control's menu, MIDI LEARN's ring and
   waiting note, CC 1 while waiting explained and the control still waiting, CC 74 learned with
   the capture changing nothing and the next value setting CUTOFF FREQUENCY, and the controller
@@ -1808,15 +2024,24 @@ installed 0.1.1, and a virtual MIDI port sent the controllers. Kept apart:
   [{"param":"cutoff","channel":1,"cc":74}]}` beside the parameters, the reopened menu named
   `CH 1 · CC 74`, and CC 74 at 64 set CUTOFF to its centre. The drawer's MIDI list took the
   arrow keys.
-- **By hand, Bitwig Studio 5.2.7, CLAP (macOS), the build before the values rescan:** the
-  controller reached the plug-in and set the parameter (a diagnostic build's counters: two
-  controllers, one learned, one told), but Bitwig's display kept the old value. A diagnostic
-  build sending the same event with other flags: with `DONT_RECORD` (flags 2 or 3) the display
-  stayed; with none (0) it followed, and each value was an undo step. Hence the rescan.
-- **Not checked in a host:** the values rescan in Bitwig (the owner stopped the Bitwig checks
-  after the clash below); recording, playback and reopening in a CLAP host; Escape in a host
-  (the tool driving the hosts sent Escape to no application, not even to close Live's own
-  menu; the editor's tests cover it); REAPER, Cubase and other hosts; Windows and Linux.
+- **By hand, Bitwig Studio 5.2.7, CLAP (macOS):** the controller reached the plug-in and set
+  the parameter (a diagnostic build's counters: two controllers, one learned, one told), but
+  Bitwig's display kept the old value. A diagnostic build sending the same event with other
+  flags: with `DONT_RECORD` (flags 2 or 3) the display stayed; with none (0) it followed, and
+  each value was an undo step. A values rescan after each block with a change was added for
+  it (and passed the CLAP test host), never tried in Bitwig, and taken out again when the
+  Audio Unit (R30) came in from main: clap-wrapper's AUv2 takes any rescan, values only too,
+  for a new parameter list (`setupParameters()`, then `ParameterList`, `ParameterInfo` and
+  `ClassInfo` changed), which a turning knob would have asked for many times a second. The
+  Audio Unit is told each value by the event itself (`onPerformEdit`, then a
+  `kAudioUnitEvent_ParameterValueChange`). So Bitwig's display does not follow a learned
+  controller, a limit of Bitwig's, said in the README.
+- **Not checked in a host:** recording, playback and reopening in a CLAP host; the Audio Unit
+  (R30, merged while this was made) in Logic or GarageBand: its MIDI, the editor's learning,
+  and what those hosts record (an AU has no "don't record" either); Escape in a host (the tool
+  driving the hosts sent Escape to no application, not even to close Live's own menu; the
+  editor's tests cover it); REAPER, Cubase and other hosts; Windows and Linux. The owner
+  stopped the checks in Bitwig after the clash below, and kept them to Live.
 - **Seen besides, not MIDI Learn's:** in Bitwig, which loads every plug-in into one process,
   a second, differently built CA-72 opened a blank editor. softbuffer 0.4.8's macOS backend
   defines an Objective-C class under a fixed name, `SoftbufferObserver` (objc2's
@@ -1835,6 +2060,10 @@ installed 0.1.1, and a virtual MIDI port sent the controllers. Kept apart:
   controller from nih-plug's MIDI path into each host's own, which hosts implement unevenly (and
   the request kept nih-plug's path). Left as the format's documented way, and said in the README.
   Live 12.2.7 is such a host (below).
+- **Bitwig shows nothing of a value flagged not to be recorded** (above): its display of a
+  learned control stays as it was until something else sets it; the sound, the plug-in's editor
+  and the saved state have the value. Without the flag each move would be an undo step, and a
+  rescan costs the Audio Unit its parameter list; left to Bitwig.
 - **Live gave the VST3 a channel-2 controller as channel 1** (below): there a controller is
   learned as `CH 1` whatever its channel, and one CC number on two channels is one controller.
   The channel is lost before the plug-in (nih-plug's hidden parameters keep all 16 apart, and the
@@ -1847,14 +2076,17 @@ installed 0.1.1, and a virtual MIDI port sent the controllers. Kept apart:
   controllers, Omni, soft takeover, global defaults.
 
 **Evidence (2026-10-06, the Mac: Apple M4 Pro, macOS 27.0, Rust 1.97.1; a host open, so
-pluginval's editor tests skipped):** `cargo test --workspace` 264 passed, 0 failed (26 ignored,
-run by hand); clippy with `-D warnings` on the workspace, all targets, all
-features; `cargo fmt --all -- --check`; `scripts/notices.py --check` (the notices unchanged: serde
-was linked already, `clap-sys` is for the tests). `preset_render` against main's code: all 24
-factory presets the same to the bit; with nothing learned, `process` the same to the bit as the
-code before (`with_nothing_learned_the_sound_is_as_before`). `cargo xtask bundle ca72-plugin
---profile bundle`, then `scripts/validate.sh` on its bundles: clap-validator 0.4.1, 37 passed, 0
-failed, 7 skipped; pluginval 1.0.4 at strictness 10, SUCCESS; Steinberg's validator (SDK 3.8.1),
-47 passed, 0 failed (its bypass test prints two messages it does not count as failures:
-nih-plug's controller ignores `setParamNormalized` while processing, upstream's and untouched).
-Run again after the values rescan and the hosts, with the same results.
+pluginval's editor tests skipped), on main with R30–R33 merged and the rescan taken out:**
+`cargo test --workspace` 265 passed, 0 failed (26 ignored, run by hand); clippy with
+`-D warnings` on the workspace, all targets, all features; `cargo fmt --all -- --check`;
+`scripts/notices.py --check` (the notices unchanged: serde was linked already, `clap-sys` is for
+the tests). Before the merge, `preset_render` against main's code: all 24 factory presets the
+same to the bit; with nothing learned, `process` the same to the bit as the code before
+(`with_nothing_learned_the_sound_is_as_before`, run again after it). `cargo xtask bundle
+ca72-plugin --profile bundle` and `scripts/auv2.sh`, then `scripts/validate.sh`: clap-validator
+0.4.1, 37 passed, 0 failed, 7 skipped; pluginval 1.0.4 at strictness 10, SUCCESS; Steinberg's
+validator (SDK 3.8.1), 47 passed, 0 failed (its bypass test prints two messages it does not
+count as failures: nih-plug's controller ignores `setParamNormalized` while processing,
+upstream's and untouched); auval `-strict`, AU VALIDATION SUCCEEDED; pluginval on the Audio
+Unit, SUCCESS. (The Audio Unit validate.sh leaves in `~/Library/Audio/Plug-Ins/Components` was
+put back to the one there before.)

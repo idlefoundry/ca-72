@@ -37,7 +37,7 @@ pub enum StripTarget {
     Switch(Amount),
 }
 
-/// The strip's controls, a parameter each (MIDI Learn names them: decisions.md R30).
+/// The strip's controls, a parameter each (MIDI Learn names them: decisions.md R34).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StripControl {
     Poly,
@@ -72,7 +72,7 @@ pub struct StripScene {
     pub spread: f64,
     pub bar: BarScene,
     pub hover: Option<StripTarget>,
-    /// The control MIDI Learn is learning (ringed in the accent: decisions.md R30).
+    /// The control MIDI Learn is learning (ringed in the accent: decisions.md R34).
     pub learning: Option<StripControl>,
 }
 

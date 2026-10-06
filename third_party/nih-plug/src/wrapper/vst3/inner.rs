@@ -93,7 +93,7 @@ pub(crate) struct WrapperInner<P: Vst3Plugin> {
     /// `input_events`.
     pub output_events: AtomicRefCell<VecDeque<PluginNoteEvent<P>>>,
     /// The parameters the plugin set itself during the current `process()` call, to be added to
-    /// the host's output parameter changes once it returns (PATCHES.md, change 9). Its room is
+    /// the host's output parameter changes once it returns (PATCHES.md, change 10). Its room is
     /// reserved here: it never grows.
     pub own_param_changes: AtomicRefCell<Vec<OwnParamChange>>,
     /// VST3 has several useful predefined note expressions, but for some reason they are the only
@@ -378,7 +378,7 @@ impl<P: Vst3Plugin> WrapperInner<P> {
     }
 
     /// `host_listens`: the host gave an output parameter changes queue to this process call, so
-    /// the plugin's own parameter changes can be told to it (PATCHES.md, change 9).
+    /// the plugin's own parameter changes can be told to it (PATCHES.md, change 10).
     pub fn make_process_context(
         &self,
         transport: Transport,

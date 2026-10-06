@@ -42,6 +42,12 @@ pub struct BufferManager {
     aux_input_storage: Vec<Vec<Vec<f32>>>,
 
     aux_output_buffers: Vec<Buffer<'static>>,
+
+    /// Where the plugin writes an output channel the host gave a null pointer for (VST3 hosts do
+    /// for a bus they deactivated): one per main output channel and per auxiliary output channel,
+    /// discarded after each block.
+    main_output_scratch: Vec<Vec<f32>>,
+    aux_output_scratch: Vec<Vec<Vec<f32>>>,
 }
 
 // SAFETY: The raw pointers in the `ChannelPointers` fields/vectors are only used as scratch storage
@@ -64,7 +70,8 @@ pub struct BufferSource<'a> {
 pub struct ChannelPointers {
     /// A raw pointer to an array of f32 arrays, containing one array for each channel. `ptrs` must
     /// contain (at least) `num_channel` `*const f32`s, and each of those inner arrays must contain
-    /// (at least) `num_samples` `f32` values.
+    /// (at least) `num_samples` `f32` values, or be a null pointer: an input channel the plugin
+    /// then reads as silence, an output channel whose samples are discarded.
     pub ptrs: NonNull<*mut f32>,
     /// The number of audio channels used for this port.
     pub num_channels: usize,
@@ -131,6 +138,19 @@ impl BufferManager {
             aux_output_buffers.push(buffer);
         }
 
+        let main_output_scratch = vec![
+            vec![0.0; max_buffer_size];
+            audio_io_layout
+                .main_output_channels
+                .map(NonZeroU32::get)
+                .unwrap_or(0) as usize
+        ];
+        let aux_output_scratch = audio_io_layout
+            .aux_output_ports
+            .iter()
+            .map(|num_channels| vec![vec![0.0; max_buffer_size]; num_channels.get() as usize])
+            .collect();
+
         Self {
             main_input_channel_pointers: None,
             main_output_channel_pointers: None,
@@ -143,6 +163,9 @@ impl BufferManager {
             aux_input_storage,
 
             aux_output_buffers,
+
+            main_output_scratch,
+            aux_output_scratch,
         }
     }
 
@@ -156,14 +179,15 @@ impl BufferManager {
     /// sample accurate automation. If any of the outputs are missing because the host hasn't
     /// provided enough channels or outputs, then they will be replaced by empty slices.
     ///
-    /// # Panics
-    ///
-    /// May panic if one of the inner channel pointers is a null pointer.
+    /// An inner channel pointer may be a null pointer, as VST3 hosts give for every channel of a
+    /// bus they deactivated (JUCE's hosts among them). Such an input channel is read as silence,
+    /// and such an output channel is backed by scratch storage whose samples are discarded, so
+    /// that every channel the plugin sees is as long as the block.
     ///
     /// # Safety
     ///
     /// Any provided `ChannelPointers` must point to memory regions that remain valid to read from
-    /// or write to for the lifetime of the returned [`Buffers`].
+    /// or write to for the lifetime of the returned [`Buffers`], apart from null inner pointers.
     pub unsafe fn create_buffers<'a, 'buffer: 'a>(
         &'a mut self,
         sample_offset: usize,
@@ -187,18 +211,20 @@ impl BufferManager {
             match self.main_output_channel_pointers {
                 Some(output_channel_pointers) => {
                     nih_debug_assert_eq!(output_slices.len(), output_channel_pointers.num_channels);
-                    for (channel_idx, output_slice) in output_slices
+                    for (channel_idx, (output_slice, scratch)) in output_slices
                         .iter_mut()
+                        .zip(self.main_output_scratch.iter_mut())
                         .enumerate()
                         .take(output_channel_pointers.num_channels)
                     {
-                        let output_channel_pointer =
-                            output_channel_pointers.ptrs.as_ptr().add(channel_idx);
-
-                        *output_slice = std::slice::from_raw_parts_mut(
-                            (*output_channel_pointer).add(sample_offset),
-                            num_samples,
-                        );
+                        *output_slice = match channel_pointer(&output_channel_pointers, channel_idx)
+                        {
+                            Some(output_channel_pointer) => std::slice::from_raw_parts_mut(
+                                output_channel_pointer.as_ptr().add(sample_offset),
+                                num_samples,
+                            ),
+                            None => scratch_slice(scratch, num_samples),
+                        };
                     }
 
                     // If the caller/host should have provided buffer pointers but didn't then we
@@ -226,19 +252,20 @@ impl BufferManager {
                     .enumerate()
                     .take(input_channel_pointers.num_channels)
                 {
-                    let input_channel_pointer =
-                        *input_channel_pointers.ptrs.as_ptr().add(channel_idx);
                     debug_assert!(channel_idx < output_channel_pointers.num_channels);
-                    let output_channel_pointer =
-                        *output_channel_pointers.ptrs.as_ptr().add(channel_idx);
-
-                    // If the host processes the main IO out of place then the inputs need to be
-                    // copied to the output buffers. Otherwise the input should already be there.
-                    if input_channel_pointer != output_channel_pointer {
-                        output_slice.copy_from_slice(std::slice::from_raw_parts_mut(
-                            input_channel_pointer.add(sample_offset),
-                            num_samples,
-                        ))
+                    match channel_pointer(&input_channel_pointers, channel_idx) {
+                        // If the host processes the main IO out of place then the inputs need to
+                        // be copied to the output buffers. Otherwise the input should already be
+                        // there.
+                        Some(input_channel_pointer) => {
+                            let input = input_channel_pointer.as_ptr().add(sample_offset);
+                            if input != output_slice.as_mut_ptr() {
+                                output_slice
+                                    .copy_from_slice(std::slice::from_raw_parts(input, num_samples))
+                            }
+                        }
+                        // An input channel the host gave no memory for is silent
+                        None => output_slice.fill(0.0),
                     }
                 }
             });
@@ -275,15 +302,19 @@ impl BufferManager {
                         .enumerate()
                         .take(input_channel_pointers.num_channels)
                     {
-                        let input_channel_pointer =
-                            input_channel_pointers.ptrs.as_ptr().add(channel_idx);
-
                         nih_debug_assert!(num_samples <= channel.capacity());
                         channel.resize(num_samples, 0.0);
-                        channel.copy_from_slice(std::slice::from_raw_parts_mut(
-                            (*input_channel_pointer).add(sample_offset),
-                            num_samples,
-                        ))
+                        match channel_pointer(input_channel_pointers, channel_idx) {
+                            Some(input_channel_pointer) => {
+                                channel.copy_from_slice(std::slice::from_raw_parts(
+                                    input_channel_pointer.as_ptr().add(sample_offset),
+                                    num_samples,
+                                ))
+                            }
+                            // A channel the host gave no memory for (a bus it deactivated) is
+                            // silent
+                            None => channel.fill(0.0),
+                        }
                     }
 
                     // In case we were provided too few channels we'll fill the rest with zeroes to
@@ -321,10 +352,11 @@ impl BufferManager {
 
         // The auxiliary output buffers can point directly to the host's buffers. This logic is the
         // same as the main outputs, minus the copying of input cdata
-        for (output_channel_pointers, output_buffer) in self
+        for ((output_channel_pointers, output_buffer), output_scratch) in self
             .aux_output_channel_pointers
             .iter()
             .zip(self.aux_output_buffers.iter_mut())
+            .zip(self.aux_output_scratch.iter_mut())
         {
             output_buffer.set_slices(num_samples, |output_slices| {
                 match output_channel_pointers {
@@ -333,18 +365,20 @@ impl BufferManager {
                             output_slices.len(),
                             output_channel_pointers.num_channels
                         );
-                        for (channel_idx, output_slice) in output_slices
+                        for (channel_idx, (output_slice, scratch)) in output_slices
                             .iter_mut()
+                            .zip(output_scratch.iter_mut())
                             .enumerate()
                             .take(output_channel_pointers.num_channels)
                         {
-                            let output_channel_pointer =
-                                output_channel_pointers.ptrs.as_ptr().add(channel_idx);
-
-                            *output_slice = std::slice::from_raw_parts_mut(
-                                (*output_channel_pointer).add(sample_offset),
-                                num_samples,
-                            );
+                            *output_slice =
+                                match channel_pointer(output_channel_pointers, channel_idx) {
+                                    Some(output_channel_pointer) => std::slice::from_raw_parts_mut(
+                                        output_channel_pointer.as_ptr().add(sample_offset),
+                                        num_samples,
+                                    ),
+                                    None => scratch_slice(scratch, num_samples),
+                                };
 
                             // The host may not zero out the buffers, and assume the plugin always
                             // write something there
@@ -374,6 +408,31 @@ impl BufferManager {
             aux_outputs: &mut self.aux_output_buffers,
         })
     }
+}
+
+/// The host's pointer to one of a port's channels, or `None` where it gave a null pointer.
+///
+/// # Safety
+///
+/// `pointers.ptrs` must hold at least `channel_idx + 1` pointers.
+unsafe fn channel_pointer(pointers: &ChannelPointers, channel_idx: usize) -> Option<NonNull<f32>> {
+    NonNull::new(*pointers.ptrs.as_ptr().add(channel_idx))
+}
+
+/// A channel of zeroes as long as the block, backed by `scratch`, for an output channel the host
+/// gave a null pointer for. The `'static` lifetime is shortened as the buffers' are.
+///
+/// # Safety
+///
+/// `scratch` must not be used otherwise while the returned slice is.
+unsafe fn scratch_slice(scratch: &mut Vec<f32>, num_samples: usize) -> &'static mut [f32] {
+    // It only allocates if the host's block is longer than the maximum it set up
+    if scratch.len() < num_samples {
+        scratch.resize(num_samples, 0.0);
+    }
+    let slice = &mut scratch[..num_samples];
+    slice.fill(0.0);
+    &mut *(slice as *mut [f32])
 }
 
 #[cfg(any(miri, test))]
@@ -502,6 +561,103 @@ mod miri {
             for sample in channel {
                 assert!(*sample == 0.0);
             }
+        }
+    }
+
+    /// A VST3 host gives a null pointer for every channel of a bus it deactivated (JUCE's hosts
+    /// do), and may for single channels: inputs read as silence, outputs go to scratch storage,
+    /// and every channel is as long as the block.
+    #[test]
+    fn null_channel_pointers() {
+        const OFFSET: usize = 64;
+        const LEN: usize = 128;
+
+        // The host's own memory, where it gives any: the main output's first channel, and the
+        // first auxiliary input and output ports
+        let mut main_output = vec![7.0f32; BUFFER_SIZE];
+        let mut aux_input = vec![vec![0.5f32; BUFFER_SIZE]; NUM_AUX_CHANNELS];
+        let mut aux_output = vec![vec![7.0f32; BUFFER_SIZE]; NUM_AUX_CHANNELS];
+
+        let mut main_output_pointers = [main_output.as_mut_ptr(), std::ptr::null_mut()];
+        let mut main_input_pointers = [std::ptr::null_mut::<f32>(); NUM_MAIN_INPUT_CHANNELS];
+        let mut aux_input_pointers = [
+            aux_input
+                .iter_mut()
+                .map(|c| c.as_mut_ptr())
+                .collect::<Vec<_>>(),
+            vec![std::ptr::null_mut(); NUM_AUX_CHANNELS],
+        ];
+        let mut aux_output_pointers = [
+            aux_output
+                .iter_mut()
+                .map(|c| c.as_mut_ptr())
+                .collect::<Vec<_>>(),
+            vec![std::ptr::null_mut(); NUM_AUX_CHANNELS],
+        ];
+
+        let mut buffer_manager = BufferManager::for_audio_io_layout(BUFFER_SIZE, AUDIO_IO_LAYOUT);
+        let buffers = unsafe {
+            buffer_manager.create_buffers(OFFSET, LEN, |buffer_sources| {
+                *buffer_sources.main_output_channel_pointers = Some(ChannelPointers {
+                    ptrs: NonNull::new(main_output_pointers.as_mut_ptr()).unwrap(),
+                    num_channels: main_output_pointers.len(),
+                });
+                *buffer_sources.main_input_channel_pointers = Some(ChannelPointers {
+                    ptrs: NonNull::new(main_input_pointers.as_mut_ptr()).unwrap(),
+                    num_channels: main_input_pointers.len(),
+                });
+                for (source, pointers) in buffer_sources
+                    .aux_input_channel_pointers
+                    .iter_mut()
+                    .zip(aux_input_pointers.iter_mut())
+                {
+                    *source = Some(ChannelPointers {
+                        ptrs: NonNull::new(pointers.as_mut_ptr()).unwrap(),
+                        num_channels: pointers.len(),
+                    });
+                }
+                for (source, pointers) in buffer_sources
+                    .aux_output_channel_pointers
+                    .iter_mut()
+                    .zip(aux_output_pointers.iter_mut())
+                {
+                    *source = Some(ChannelPointers {
+                        ptrs: NonNull::new(pointers.as_mut_ptr()).unwrap(),
+                        num_channels: pointers.len(),
+                    });
+                }
+            })
+        };
+
+        // The main input the host gave no memory for is silence on every main output channel,
+        // the one in the host's memory and the one in scratch storage
+        assert_eq!(buffers.main_buffer.samples(), LEN);
+        for channel in buffers.main_buffer.as_slice() {
+            assert_eq!(&channel[..], &[0.0; LEN][..]);
+        }
+        assert_eq!(&buffers.aux_inputs[0].as_slice()[0][..], &[0.5; LEN][..]);
+        for channel in buffers.aux_inputs[1].as_slice() {
+            assert_eq!(&channel[..], &[0.0; LEN][..]);
+        }
+        for buffer in buffers.aux_outputs.iter_mut() {
+            for channel in buffer.as_slice() {
+                assert_eq!(&channel[..], &[0.0; LEN][..]);
+            }
+        }
+
+        // The plugin writes every channel it has; the host sees its own, within the block
+        for channel in buffers.main_buffer.as_slice() {
+            channel.fill(1.0);
+        }
+        for buffer in buffers.aux_outputs.iter_mut() {
+            for channel in buffer.as_slice() {
+                channel.fill(1.0);
+            }
+        }
+        for channel in std::iter::once(&main_output).chain(aux_output.iter()) {
+            assert!(channel[..OFFSET].iter().all(|&x| x == 7.0));
+            assert!(channel[OFFSET..OFFSET + LEN].iter().all(|&x| x == 1.0));
+            assert!(channel[OFFSET + LEN..].iter().all(|&x| x == 7.0));
         }
     }
 }

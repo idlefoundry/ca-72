@@ -140,7 +140,7 @@ pub struct Ca72Params {
     #[persist = "preset"]
     pub preset: Arc<RwLock<String>>,
     /// The MIDI controllers assigned to parameters by MIDI Learn, and the learning (decisions.md
-    /// R30): saved with the session (`crate::learn::Saved`), not with a sound preset.
+    /// R34): saved with the session (`crate::learn::Saved`), not with a sound preset.
     #[persist = "midi_map"]
     pub midi_map: Arc<MidiMap>,
 
@@ -409,7 +409,7 @@ impl Ca72Params {
 
     /// The engine's controls with each knob where `knob` has it (its dial's units): the
     /// parameter's value, or for one a learned MIDI controller has just moved, where its glide
-    /// has it (`crate::learn::Dezip`; decisions.md R30). Every other conversion is
+    /// has it (`crate::learn::Dezip`; decisions.md R34). Every other conversion is
     /// [`Ca72Params::controls`]'.
     pub fn controls_with(&self, knob: &dyn Fn(&FloatParam) -> f32) -> Controls {
         let value = |p: &FloatParam| f64::from(knob(p));

@@ -419,7 +419,7 @@ impl<P: Plugin, B: Backend<P>> Wrapper<P, B> {
         push_successful
     }
 
-    /// The plugin's own change of a parameter during `process()` (PATCHES.md, change 9): set at
+    /// The plugin's own change of a parameter during `process()` (PATCHES.md, change 10): set at
     /// once, its smoother and the editor following, as the editor's changes are applied after the
     /// call. Nothing is set for a parameter that is not the plugin's.
     pub fn set_own_parameter(&self, param: ParamPtr, normalized: f32) {

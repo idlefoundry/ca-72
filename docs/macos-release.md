@@ -1,8 +1,8 @@
 # A trusted macOS release
 
-The public macOS installer must contain Developer ID Application-signed VST3 and CLAP
-bundles, be signed with Developer ID Installer, and be accepted by Apple's notary
-service. The notarization ticket is stapled to the installer so it can be verified
+The public macOS installer must contain Developer ID Application-signed VST3, CLAP and
+Audio Unit bundles (the Audio Unit carries the same signed CLAP inside it), be signed with
+Developer ID Installer, and be accepted by Apple's notary service. The notarization ticket is stapled to the installer so it can be verified
 without first contacting Apple.
 
 The release identities are:
@@ -29,10 +29,11 @@ shell configuration file.
 ## Build and verify
 
 From a clean checkout of the version to release (once:
-`rustup target add x86_64-apple-darwin aarch64-apple-darwin`):
+`rustup target add x86_64-apple-darwin aarch64-apple-darwin` and `brew install cmake`):
 
 ```sh
 cargo xtask bundle-universal ca72-plugin --profile bundle
+scripts/auv2.sh
 export CA72_MACOS_SIGN_APP='Developer ID Application: Idle Foundry Ltd. (3JA8JUZ36W)'
 export CA72_MACOS_SIGN_INSTALLER='Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)'
 export CA72_NOTARY_PROFILE=CA72_NOTARY

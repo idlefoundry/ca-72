@@ -37,7 +37,7 @@ pub struct Ca72 {
     /// started when the plug-in is first initialised (none if the system would not start it).
     helper: Option<Helper>,
     /// The knobs learned MIDI controllers have just moved, gliding in the voices (decisions.md
-    /// R30).
+    /// R34).
     dezip: Dezip,
 }
 
@@ -120,7 +120,7 @@ fn event_of(e: NoteEvent<()>) -> Option<Event> {
 }
 
 impl Ca72 {
-    /// A MIDI event: a learnable control change to MIDI Learn (decisions.md R30), anything else
+    /// A MIDI event: a learnable control change to MIDI Learn (decisions.md R34), anything else
     /// as before (the reserved control changes the engine follows, CC 1, 120, 121 and 123, among
     /// them). Whether it set a parameter.
     fn midi(&mut self, e: NoteEvent<()>, context: &mut impl ProcessContext<Self>) -> bool {
@@ -242,7 +242,7 @@ impl Plugin for Ca72 {
     /// (R18).
     ///
     /// A state without MIDI assignments (saved before MIDI Learn) opens with none, whatever the
-    /// instance had; a table that is not understood is none either (decisions.md R30).
+    /// instance had; a table that is not understood is none either (decisions.md R34).
     fn filter_state(state: &mut PluginState) {
         learn::filter_state(&mut state.fields);
         state.params.remove("analog");
@@ -326,7 +326,7 @@ impl Plugin for Ca72 {
         // POLY's voices one after another over a run: decisions.md R11), the side chain mixed
         // to mono. A learned MIDI controller sets its parameter at its event, and the voices take
         // it from there; while a knob it moved glides, a run is at most `DEZIP_STEP` samples
-        // (decisions.md R30).
+        // (decisions.md R34).
         const RUN: usize = 128;
         let (mut ext, mut l, mut r) = ([0.0f32; RUN], [0.0f32; RUN], [0.0f32; RUN]);
         let mut i = 0;
@@ -699,7 +699,7 @@ mod tests {
         assert_eq!(p.controls(), p.params.controls());
     }
 
-    /// Why a knob a learned controller moves glides (decisions.md R30), measured, by hand
+    /// Why a knob a learned controller moves glides (decisions.md R34), measured, by hand
     /// (`cargo test --release -p ca72-plugin --lib a_controllers_steps -- --ignored
     /// --nocapture`): a held A2 on a sawtooth, a knob turned in a quarter of a second three ways:
     /// by the host's automation every 32 samples (the reference), by a 7-bit controller with the
@@ -804,7 +804,7 @@ mod tests {
     }
 
     /// With no controller learned, `process` plays as it did before MIDI Learn (decisions.md
-    /// R30), to the bit: the code before replayed here on the engine itself (its controls set at
+    /// R34), to the bit: the code before replayed here on the engine itself (its controls set at
     /// the block's start, runs of at most 128 samples between events, each event at its
     /// sample), with notes, the wheels, controllers not learned and reserved ones, POLY off and
     /// on (rendered offline: every voice waited for).
@@ -917,7 +917,7 @@ mod tests {
 
     /// The host's automation and a learned controller on one parameter: whichever sets it last,
     /// in time, holds it. At one sample the automation is set first (the wrappers split a block
-    /// at an automation point and set it before the run's events: PATCHES.md, change 9), so the
+    /// at an automation point and set it before the run's events: PATCHES.md, change 10), so the
     /// controller's value holds from there until the next automation point.
     #[test]
     fn automation_and_a_controller_on_one_parameter_take_turns_in_time() {
@@ -1121,6 +1121,79 @@ mod tests {
         assert!(ended, "the drop returned before the helper ended");
         assert_eq!(workers, 0, "the drop returned before the workers stopped");
         dropper.join().unwrap();
+    }
+
+    /// The VST3 as a JUCE host plays it (Sandyne, decisions.md R31): set up for blocks of up
+    /// to 1920 samples, the side chain deactivated (the host's instrument has no inputs), then
+    /// blocks of 480 with that bus's two channels given as null pointers. The blocks play,
+    /// every output sample written and finite; 0.1.0 and 0.1.1 read the side chain from
+    /// address 0, an access violation.
+    #[test]
+    #[allow(unsafe_code)]
+    fn a_vst3_host_that_deactivates_the_side_chain_has_its_blocks_played() {
+        use nih_plug::wrapper::vst3::{Wrapper, vst3_sys};
+        use vst3_sys::base::{IPluginBase, IUnknown, kResultOk};
+        use vst3_sys::vst::{
+            AudioBusBuffers, BusDirections, IAudioProcessor, IComponent, MediaTypes, ProcessData,
+            ProcessModes, ProcessSetup, SymbolicSampleSizes,
+        };
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        const LEN: usize = 480;
+        let realtime = ProcessModes::kRealtime as i32;
+        let float32 = SymbolicSampleSizes::kSample32 as i32;
+
+        let w = Box::leak(Wrapper::<Ca72>::new());
+        let mut side = [std::ptr::null_mut::<f32>(); 2];
+        let (mut left, mut right) = (vec![f32::NAN; LEN], vec![f32::NAN; LEN]);
+        let mut out = [left.as_mut_ptr(), right.as_mut_ptr()];
+        let mut inputs = AudioBusBuffers {
+            num_channels: 2,
+            silence_flags: u64::MAX,
+            buffers: side.as_mut_ptr().cast(),
+        };
+        let mut outputs = AudioBusBuffers {
+            num_channels: 2,
+            silence_flags: 0,
+            buffers: out.as_mut_ptr().cast(),
+        };
+        // SAFETY: the calls a host makes, in its order, on an instance it then releases; the
+        // buffers outlive them, and the rest of the block's data is null (no events, no
+        // parameter changes, no transport), which the wrapper takes as absent.
+        unsafe {
+            assert_eq!(w.initialize(std::ptr::null_mut()), kResultOk);
+            let setup = ProcessSetup {
+                process_mode: realtime,
+                symbolic_sample_size: float32,
+                max_samples_per_block: 1920,
+                sample_rate: 48_000.0,
+            };
+            assert_eq!(w.setup_processing(&setup), kResultOk);
+            // Input bus 0 is the side chain: the plug-in has no main input.
+            let (audio, input) = (MediaTypes::kAudio as i32, BusDirections::kInput as i32);
+            assert_eq!(w.activate_bus(audio, input, 0, 0), kResultOk);
+            assert_eq!(w.set_active(1), kResultOk);
+            assert_eq!(w.set_processing(1), kResultOk);
+
+            let mut data: ProcessData = std::mem::zeroed();
+            data.process_mode = realtime;
+            data.symbolic_sample_size = float32;
+            data.num_samples = LEN as i32;
+            data.num_inputs = 1;
+            data.inputs = &mut inputs;
+            data.num_outputs = 1;
+            data.outputs = &mut outputs;
+            for _ in 0..3 {
+                assert_eq!(w.process(&mut data), kResultOk);
+            }
+
+            assert_eq!(w.set_processing(0), kResultOk);
+            assert_eq!(w.set_active(0), kResultOk);
+            assert_eq!(w.terminate(), kResultOk);
+            w.release();
+        }
+        assert!(left.iter().chain(&right).all(|x| x.is_finite()));
     }
 }
 

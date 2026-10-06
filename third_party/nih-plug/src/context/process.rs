@@ -119,7 +119,7 @@ pub trait ProcessContext<P: Plugin> {
     /// nothing is set), the host gave no queue for such changes, or this block already holds as
     /// many as it can tell (the value is set either way).
     ///
-    /// Not upstream's: the CA-72's `third_party/nih-plug/PATCHES.md`, change 9.
+    /// Not upstream's: the CA-72's `third_party/nih-plug/PATCHES.md`, change 10.
     fn set_parameter_normalized(&mut self, param: ParamPtr, normalized: f32, timing: u32) -> bool;
 }
 
@@ -371,7 +371,7 @@ impl Transport {
 /// runs a wrapper splits a block into. Only the parameters of the [`Params`] it is made with are
 /// touched.
 ///
-/// Not upstream's: the CA-72's `third_party/nih-plug/PATCHES.md`, change 10.
+/// Not upstream's: the CA-72's `third_party/nih-plug/PATCHES.md`, change 11.
 pub struct TestProcessContext<P: Plugin> {
     /// Keeps the parameters `known` points into alive.
     _params: std::sync::Arc<dyn crate::params::Params>,

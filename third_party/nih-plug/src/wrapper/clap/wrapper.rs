@@ -145,12 +145,9 @@ pub struct Wrapper<P: ClapPlugin> {
     /// `input_events`.
     output_events: AtomicRefCell<VecDeque<PluginNoteEvent<P>>>,
     /// The parameters the plugin set itself during the current `process()` call, for
-    /// [`handle_out_events()`][Self::handle_out_events()] to tell the host (PATCHES.md, change 9).
+    /// [`handle_out_events()`][Self::handle_out_events()] to tell the host (PATCHES.md, change 10).
     /// Its room is reserved here: it never grows.
     own_param_changes: AtomicRefCell<Vec<OwnParamChange>>,
-    /// A rescan of the parameters' values asked of the host for the plugin's own changes and not
-    /// yet made: at most one waits (PATCHES.md, change 9).
-    own_rescan_pending: AtomicBool,
     /// The last process status returned by the plugin. This is used for tail handling.
     last_process_status: AtomicCell<ProcessStatus>,
     /// The current latency in samples, as set by the plugin through the [`ProcessContext`]. Uses
@@ -422,7 +419,6 @@ impl<P: ClapPlugin> MainThreadExecutor<Task<P>> for Wrapper<P> {
             },
             Task::RescanParamValues => match &*self.host_params.borrow() {
                 Some(host_params) => {
-                    self.own_rescan_pending.store(false, Ordering::Release);
                     nih_debug_assert!(is_gui_thread);
                     unsafe_clap_call! { host_params=>rescan(&*self.host_callback, CLAP_PARAM_RESCAN_VALUES) };
                 }
@@ -561,7 +557,6 @@ impl<P: ClapPlugin> Wrapper<P> {
             input_events: AtomicRefCell::new(VecDeque::with_capacity(512)),
             output_events: AtomicRefCell::new(VecDeque::with_capacity(512)),
             own_param_changes: AtomicRefCell::new(Vec::with_capacity(OWN_PARAM_CHANGES)),
-            own_rescan_pending: AtomicBool::new(false),
             last_process_status: AtomicCell::new(ProcessStatus::Normal),
             current_latency: AtomicU32::new(0),
             // This is initialized just before calling `Plugin::initialize()` so that during the
@@ -758,7 +753,7 @@ impl<P: ClapPlugin> Wrapper<P> {
     }
 
     /// `host_listens`: the host gave an output events queue to this process call, so the
-    /// plugin's own parameter changes can be told to it (PATCHES.md, change 9).
+    /// plugin's own parameter changes can be told to it (PATCHES.md, change 10).
     fn make_process_context(
         &self,
         transport: Transport,
@@ -775,7 +770,7 @@ impl<P: ClapPlugin> Wrapper<P> {
     }
 
     /// The plugin's own change of a parameter during `process()`, `timing` samples into the run
-    /// (PATCHES.md, change 9): set as the host's automation is set (the value, its smoother, the
+    /// (PATCHES.md, change 10): set as the host's automation is set (the value, its smoother, the
     /// editor told), and kept in `own` for [`handle_out_events()`][Self::handle_out_events()] to
     /// tell the host. Returns whether the host will be told.
     pub(crate) fn set_own_parameter(
@@ -998,7 +993,7 @@ impl<P: ClapPlugin> Wrapper<P> {
         // the run would be split at (a parameter change, say): the run is split before this one
         // instead, so that at any sample the host's parameter changes are set before the events
         // the plugin reads, whatever the host's order among them. A MIDI CC the plugin sets a
-        // parameter from (PATCHES.md, change 9) then follows automation of that parameter at its
+        // parameter from (PATCHES.md, change 10) then follows automation of that parameter at its
         // sample rather than coming before or after it by chance.
         let split_before = |idx: u32, event: *const clap_event_header| -> bool {
             // SAFETY: the host's events, valid for this call (as everywhere here).
@@ -1144,7 +1139,7 @@ impl<P: ClapPlugin> Wrapper<P> {
         // would conflict (`clap/ext/params.h`: "Turning a knob via plugin's internal MIDI
         // mapping"). No gesture: the plugin's own change is not the user's edit of the parameter.
         // In time order after the editor's above, which are at the run's start (PATCHES.md,
-        // change 9).
+        // change 10).
         let mut own = self.own_param_changes.borrow_mut();
         for change in own.iter() {
             let steps = self
@@ -1173,17 +1168,6 @@ impl<P: ClapPlugin> Wrapper<P> {
             };
             let push_successful = clap_call! { out=>try_push(out, &event.header) };
             nih_debug_assert!(push_successful);
-        }
-        // And the host asked, on its main thread, to read the parameters' values again: a host
-        // may take a value flagged not to be recorded as one not to be applied either (Bitwig
-        // Studio 5.2 leaves its own view of the parameter as it was), and a values rescan is
-        // CLAP's way to have it take new values without recording them ("The host will not
-        // record those changes as automation points"). One waits at most.
-        if !own.is_empty() && !self.own_rescan_pending.swap(true, Ordering::AcqRel) {
-            let task_posted = self.schedule_gui(Task::RescanParamValues);
-            if !task_posted {
-                self.own_rescan_pending.store(false, Ordering::Release);
-            }
         }
         own.clear();
         drop(own);

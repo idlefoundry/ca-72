@@ -1,4 +1,4 @@
-//! MIDI Learn's parts of the panel (the CA-72's `docs/decisions.md` R30): a control's menu (a
+//! MIDI Learn's parts of the panel (the CA-72's `docs/decisions.md` R34): a control's menu (a
 //! right click), the note over the control being learned, and the ring that marks it. Each is a
 //! layer the renderer draws over the controls; a menu's items are found where they are drawn
 //! ([`Menu::hit`]), both from one layout.

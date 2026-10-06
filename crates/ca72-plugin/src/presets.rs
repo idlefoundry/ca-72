@@ -894,7 +894,7 @@ mod tests {
         );
     }
 
-    /// The MIDI assignments (decisions.md R30) are the instance's, not a sound's: choosing,
+    /// The MIDI assignments (decisions.md R34) are the instance's, not a sound's: choosing,
     /// saving, replacing and reverting a preset leave them as they are, and no preset file holds
     /// them.
     #[test]

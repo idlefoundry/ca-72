@@ -1,6 +1,7 @@
 # CA-72
 
-A synthesizer plug-in, VST3 and CLAP, for macOS, Windows and Linux, by Idle Foundry:
+A synthesizer plug-in, VST3 and CLAP for macOS, Windows and Linux and an Audio Unit for macOS,
+by Idle Foundry:
 monophonic like the instrument it models, or one whole instrument per note with POLY. Its
 voice is modelled from the circuit of a 1970s analogue synthesizer, the
 Minimoog Model D of about 1972-73 with the CA3046 ("old") oscillator board. Every board
@@ -15,8 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.1.1: Windows fixes and a check for updates since 0.1.0, the first release. The macOS
-installer is signed and notarised; the Windows one is not yet signed.
+**Status:** 0.1.2: an Audio Unit for macOS, and a fix for hosts that switch the side chain off
+(Sandyne, among others built with JUCE), since 0.1.1. The macOS installer is signed and
+notarised; the Windows one is not yet signed.
 
 ## Installing
 
@@ -38,20 +40,23 @@ installer is signed and notarised; the Windows one is not yet signed.
    ```
 
 3. In your host, rescan the plug-ins or restart it. The CA-72 appears as an instrument by
-   Idle Foundry, in VST3 and CLAP.
+   Idle Foundry, in VST3 and CLAP, and on macOS as an Audio Unit too (in Logic Pro and
+   GarageBand, under **AU Instruments › Idle Foundry**). The macOS installer has the Audio
+   Unit from 0.1.2 on; before 0.1.2 is out, build it ([Building](#building)).
 
 The Windows installer is not yet signed, so the first time you run it Windows says "Windows
 protected your PC": click **More info**, then **Run anyway**.
 
 The plug-ins go into the usual folders:
 
-| | VST3 | CLAP |
-|---|---|---|
-| macOS | `/Library/Audio/Plug-Ins/VST3` | `/Library/Audio/Plug-Ins/CLAP` |
-| Windows | `C:\Program Files\Common Files\VST3` | `C:\Program Files\Common Files\CLAP` |
-| Linux | `~/.vst3` (`/usr/lib/vst3` with `./install.sh --system`) | `~/.clap` (`/usr/lib/clap`) |
+| | VST3 | CLAP | Audio Unit |
+|---|---|---|---|
+| macOS | `/Library/Audio/Plug-Ins/VST3` | `/Library/Audio/Plug-Ins/CLAP` | `/Library/Audio/Plug-Ins/Components` |
+| Windows | `C:\Program Files\Common Files\VST3` | `C:\Program Files\Common Files\CLAP` | |
+| Linux | `~/.vst3` (`/usr/lib/vst3` with `./install.sh --system`) | `~/.clap` (`/usr/lib/clap`) | |
 
-To uninstall: on macOS, delete `CA-72.vst3` and `CA-72.clap` from those folders; on Windows,
+To uninstall: on macOS, delete `CA-72.vst3`, `CA-72.clap` and `CA-72.component` from those
+folders; on Windows,
 find **CA-72** in **Settings › Apps** and choose **Uninstall**; on Linux, run
 `./install.sh --uninstall` (`./install.sh --uninstall --system` for a system-wide copy). Your
 presets are kept.
@@ -153,6 +158,9 @@ Warped Pad, eight POLY voices drifting with ENTROPY.
 
 ## MIDI Learn
 
+Not in 0.1.2: it comes with the next release; until then, build the CA-72
+([Building](#building)).
+
 A knob, fader or button of a MIDI controller can move a control of the CA-72:
 
 1. Right-click the control and choose **MIDI LEARN**. It is ringed, and a note over it says
@@ -203,15 +211,14 @@ with none.
 
 **Recording and automation.** What your host records is the controller's MIDI, on the track;
 the CA-72 tells the host each new value so that its display follows. In CLAP it asks the host
-not to record that as automation as well (and, for a host that then ignores the value, as
-Bitwig Studio 5.2 does, asks it to read the values again). VST3 has no such request: a host
-that writes automation for a plug-in's own changes may record the move as automation too.
+not to record that as automation as well (Bitwig Studio 5.2 then leaves its own display of the
+control as it was, though the control has moved). VST3 and Audio Units have no such request: a
+host that writes automation for a plug-in's own changes may record the move as automation too.
 Ableton Live 12 does, while its Automation Arm is on: the clip gets the controller and the
 track gets the control's automation, and playing the clip back moves the control, which Live
-takes as overriding that automation (its Re-Enable Automation button lights). Record
-controller moves with Automation Arm off, or use the CLAP. A learned controller and your
-host's automation of the same control take turns: the later one holds, and at the same moment
-the controller's.
+takes as overriding that automation (its Re-Enable Automation button lights). Record controller
+moves there with Automation Arm off. A learned controller and your host's automation of the
+same control take turns: the later one holds, and at the same moment the controller's.
 
 **Channels in Live.** Live 12 passed the CA-72's VST3 a controller sent on channel 2 as
 channel 1, so there a controller is learned as `CH 1` whatever channel it sends on, and the
@@ -251,9 +258,13 @@ rustup target add x86_64-apple-darwin aarch64-apple-darwin
 cargo xtask bundle-universal ca72-plugin --profile bundle
 ```
 
+On macOS, `scripts/auv2.sh` then builds the Audio Unit, `target/bundled/CA-72.component`,
+around the CLAP bundle (and for the same processors). It needs
+[CMake](https://cmake.org) 3.21 or later (`brew install cmake`) and takes a few seconds.
+
 `scripts/package.sh` then makes the installer for the system it runs on, in
-`target/packages` (on macOS from the universal bundles; on Windows from Git Bash, with
-[Inno Setup 6](https://jrsoftware.org/isinfo.php)).
+`target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
+Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
 
 To try the plug-in without a host, run it as an application of its own:
 
@@ -281,10 +292,11 @@ do.
 
 `scripts/validate.sh` runs clap-validator, pluginval (at strictness 10) and Steinberg's
 VST3 validator on the bundles, downloading (checked against their SHA-256) or building each
-the first time. It needs curl, unzip, git, cmake and a C++ compiler (on Windows, Visual
-Studio's), and on Linux without a display `xvfb-run`; `CA72_SKIP_GUI_TESTS=1` leaves out
-pluginval's editor tests, which open windows. CI does all of this on macOS, Windows and
-Linux.
+the first time; on macOS also Apple's auval and pluginval on the Audio Unit, which it first
+copies into `~/Library/Audio/Plug-Ins/Components`, where hosts look for it. It needs curl,
+unzip, git, cmake and a C++ compiler (on Windows, Visual Studio's), and on Linux without a
+display `xvfb-run`; `CA72_SKIP_GUI_TESTS=1` leaves out pluginval's editor tests, which open
+windows. CI does all of this on macOS, Windows and Linux.
 
 The tests that run the circuit simulations need ngspice 47. Without it they say so and
 pass; set `CA72_REQUIRE_NGSPICE=1` to make a missing ngspice a failure.
@@ -306,8 +318,8 @@ the circuit lab.
 | `docs/circuit/` | How the model was derived, board by board, with its sources and assumptions |
 | `docs/decisions.md` | The release's decisions |
 | `docs/history.md` | The model's decisions, from its development as an instrument of a DAW |
-| `third_party/` | nih-plug and baseview (both patched) and the URW Gothic font |
-| `scripts/` | Validating the bundles, making the installers (`package.sh`, `installer/`), the third-party notices, fetching the sources |
+| `third_party/` | nih-plug and baseview (both patched), the URW Gothic font, and for the Audio Unit clap-wrapper (patched), the CLAP headers and Apple's AudioUnitSDK |
+| `scripts/` | Building the Audio Unit (`auv2.sh`, `auv2/`), validating the bundles, making the installers (`package.sh`, `installer/`), the third-party notices, fetching the sources |
 | `xtask/` | Builds the bundles |
 
 The service documents and datasheets the model was derived from are not included.
@@ -383,7 +395,11 @@ The service documents and datasheets the model was derived from are not included
   [baseview](https://github.com/RustAudio/baseview) (patched as
   `third_party/baseview/PATCHES.md` describes),
   [softbuffer](https://github.com/rust-windowing/softbuffer) and
-  [resvg](https://github.com/linebender/resvg).
+  [resvg](https://github.com/linebender/resvg). The Audio Unit is
+  [clap-wrapper](https://github.com/free-audio/clap-wrapper), by Timo Kaluza, Paul Walker
+  and others (MIT; patched as `third_party/clap-wrapper/PATCHES.md` describes), around the
+  CLAP plug-in, built with the [CLAP](https://github.com/free-audio/clap) headers (MIT) and
+  Apple's [AudioUnitSDK](https://github.com/apple/AudioUnitSDK) (Apache 2.0).
 - The licences of everything built into the plug-ins are in
   [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt), which every installer carries. The
   crates come from crates.io, at the versions `Cargo.lock` names; each release also carries

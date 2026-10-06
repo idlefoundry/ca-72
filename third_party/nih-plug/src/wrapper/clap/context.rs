@@ -41,7 +41,7 @@ pub(crate) struct WrapperProcessContext<'a, P: ClapPlugin> {
     pub(super) input_events_guard: AtomicRefMut<'a, VecDeque<PluginNoteEvent<P>>>,
     pub(super) output_events_guard: AtomicRefMut<'a, VecDeque<PluginNoteEvent<P>>>,
     /// The parameters the plugin sets itself, for the host's output events, and whether the host
-    /// gave a queue for them (PATCHES.md, change 9).
+    /// gave a queue for them (PATCHES.md, change 10).
     pub(super) own_param_changes_guard: AtomicRefMut<'a, Vec<OwnParamChange>>,
     pub(super) host_listens: bool,
     pub(super) transport: Transport,

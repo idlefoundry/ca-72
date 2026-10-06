@@ -13,7 +13,7 @@
 //! draws it: [`bar_svg`]), the drawer [`DRAWER_H`] tall. What a pointer finds is [`bar_hit`]
 //! and [`drawer_hit`]; the drawing and the finding share one layout.
 //!
-//! Its MIDI button shows MIDI Learn's list in its place (the CA-72's `docs/decisions.md` R30):
+//! Its MIDI button shows MIDI Learn's list in its place (the CA-72's `docs/decisions.md` R34):
 //! every control that can be learned, its controller, LEARN, REMOVE and CANCEL, operated from the
 //! keyboard as well ([`MidiList`]).
 
@@ -208,7 +208,7 @@ pub struct MidiRow {
     pub waiting: bool,
 }
 
-/// The drawer's MIDI Learn list (decisions.md R30): its rows, the first shown, the one chosen
+/// The drawer's MIDI Learn list (decisions.md R34): its rows, the first shown, the one chosen
 /// (the arrow keys move it; Enter learns it, Delete removes its controller), the hints at its
 /// top, and what was last done, in its colour.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -1182,7 +1182,7 @@ fn midi_hit(s: &DrawerScene, m: &MidiList, x: f64, y: f64) -> DrawerTarget {
     DrawerTarget::Back
 }
 
-/// The drawer's MIDI list (decisions.md R30): its title where the search is, the keys and the
+/// The drawer's MIDI list (decisions.md R34): its title where the search is, the keys and the
 /// controllers not learned where the chips are, each control's row (its name, its controller or
 /// that it waits for one, LEARN, REMOVE or CANCEL), and what was done where SAVE AS is.
 fn midi_body(out: &mut Svg, fonts: &Fonts, s: &DrawerScene, m: &MidiList) {
@@ -1689,7 +1689,7 @@ mod png {
             midi: None,
         });
         d.frame().save_png(dir.join("drawer.png")).unwrap();
-        // The MIDI Learn list (decisions.md R30).
+        // The MIDI Learn list (decisions.md R34).
         d.render(&DrawerScene {
             midi: Some(MidiList {
                 rows: [

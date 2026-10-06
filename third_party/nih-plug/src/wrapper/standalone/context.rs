@@ -104,7 +104,7 @@ impl<P: Plugin, B: Backend<P>> ProcessContext<P> for WrapperProcessContext<'_, P
 
     fn set_parameter_normalized(&mut self, param: ParamPtr, normalized: f32, _timing: u32) -> bool {
         // Set at once, as the editor's changes are set after the call: no host to tell
-        // (PATCHES.md, change 9).
+        // (PATCHES.md, change 10).
         self.wrapper.set_own_parameter(param, normalized);
         false
     }

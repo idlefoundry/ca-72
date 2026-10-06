@@ -25,7 +25,7 @@ pub struct Scene {
     pub overload: f64,
     /// A tip: its text, centred above (x, y) in the drawing.
     pub tip: Option<(String, f64, f64)>,
-    /// MIDI Learn (decisions.md R30): the control being learned, by its index in [`CONTROLS`]
+    /// MIDI Learn (decisions.md R34): the control being learned, by its index in [`CONTROLS`]
     /// (ringed), a note over the panel saying what it does, and a control's menu.
     pub learning: Option<usize>,
     pub note: Option<Note>,

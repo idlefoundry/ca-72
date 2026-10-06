@@ -61,49 +61,61 @@ Five more came from a review of the plug-in before its release (2026-10-03; the 
    extension may change the mode while the plug-in is active, and the plug-in is not
    initialized again for it, so `BufferConfig::process_mode` alone may be out of date.
 
-Two more came with the CA-72's MIDI Learn (2026-10-06; `docs/decisions.md` R30), which sets a
+One more came from a report: the CA-72 crashed in Sandyne, a DAW built with JUCE (2026-10-06;
+the CA-72's `docs/decisions.md` R31):
+
+9. **A channel the host gives as a null pointer is not read.** A VST3 host may give a null
+   pointer for a channel, and JUCE's hosts do for every channel of a bus they deactivated,
+   with the bus's full channel count (`HostBufferMapper::associateBufferTo`); setting up an
+   instrument with no inputs deactivates its side chain. `create_buffers` read every input
+   channel through its pointer, so an instrument with a side chain read from address 0 in
+   its first block, an access violation. A null input channel is now read as silence, and a
+   null output channel is backed by scratch storage, allocated with the rest and discarded,
+   so that every channel the plug-in sees is as long as the block
+   (`src/wrapper/util/buffer_management.rs`, with a test of each kind of channel).
+
+Two more came with the CA-72's MIDI Learn (2026-10-06; `docs/decisions.md` R34), which sets a
 parameter from the audio thread when a learned MIDI controller moves. Upstream left that as a
 `TODO` in `ProcessContext` (`set_parameter`), and the plugin must not use the editor's
 `ParamSetter` there (its host calls belong on the GUI thread) nor keep a value of its own that the
 host, the editor and the saved state would not see:
 
-9. **`ProcessContext::set_parameter_normalized(param, normalized, timing)`**
-   (`src/context/process.rs`). The value is set at once, as each wrapper already sets the
-   host's automation during a process call (its smoother updated, the editor told), so the
-   plugin reads it from there on; and the host is told as its format has it:
-   - **CLAP:** a `CLAP_EVENT_PARAM_VALUE` output event at the change's time, flagged
-     `CLAP_EVENT_DONT_RECORD`, no gesture: `clap/ext/params.h`'s "Turning a knob via plugin's
-     internal MIDI mapping", where recording both the MIDI and the parameter would conflict
-     (`src/wrapper/clap/context.rs`; `Wrapper::set_own_parameter` and `handle_out_events` in
-     `src/wrapper/clap/wrapper.rs`, after the editor's changes, in time order). Then, for a
-     process call that had any, `clap_host_params::rescan(CLAP_PARAM_RESCAN_VALUES)` on the main
-     thread (`Task::RescanParamValues`; one pending at a time, `own_rescan_pending`), because
-     Bitwig Studio 5.2.7 does not apply an output value event flagged `DONT_RECORD`: its display
-     kept the old value, while without the flag it followed and made an undo step of each.
-   - **VST3:** a point at the change's sample offset in the process call's
-     `outputParameterChanges`, the processor's way to tell the host and its controller of a
-     change (`src/wrapper/vst3/context.rs`, `inner.rs`; drained after each run in
-     `src/wrapper/vst3/wrapper.rs`). VST3 has no flag against recording: Steinberg notes that
-     some hosts write automation for these, and Ableton Live 12.2.7 does while its automation
-     is armed.
-   - **The standalone:** set at once; no host to tell (`src/wrapper/standalone/`).
+10. **`ProcessContext::set_parameter_normalized(param, normalized, timing)`**
+    (`src/context/process.rs`). The value is set at once, as each wrapper already sets the
+    host's automation during a process call (its smoother updated, the editor told), so the
+    plugin reads it from there on; and the host is told as its format has it:
+    - **CLAP:** a `CLAP_EVENT_PARAM_VALUE` output event at the change's time, flagged
+      `CLAP_EVENT_DONT_RECORD`, no gesture: `clap/ext/params.h`'s "Turning a knob via plugin's
+      internal MIDI mapping", where recording both the MIDI and the parameter would conflict
+      (`src/wrapper/clap/context.rs`; `Wrapper::set_own_parameter` and `handle_out_events` in
+      `src/wrapper/clap/wrapper.rs`, after the editor's changes, in time order). Nothing more:
+      Bitwig Studio 5.2.7 does not apply such an event to its own display (without the flag it
+      did, and made an undo step of each), but a values rescan after each block was not the
+      cure, since clap-wrapper's Audio Unit takes any rescan for a new parameter list.
+    - **VST3:** a point at the change's sample offset in the process call's
+      `outputParameterChanges`, the processor's way to tell the host and its controller of a
+      change (`src/wrapper/vst3/context.rs`, `inner.rs`; drained after each run in
+      `src/wrapper/vst3/wrapper.rs`). VST3 has no flag against recording: Steinberg notes that
+      some hosts write automation for these, and Ableton Live 12.2.7 does while its automation
+      is armed.
+    - **The standalone:** set at once; no host to tell (`src/wrapper/standalone/`).
 
-   Each wrapper reserves room for 1024 such changes a process call when it is made
-   (`OWN_PARAM_CHANGES`, `src/wrapper/util.rs`), so nothing is allocated, locked or waited for
-   on the audio thread; past it a change is set but not told, and the call returns `false`.
-   And **at one sample, the host's parameter changes come before the events the plugin reads**,
-   whatever the host's order, so that a controller setting a parameter follows the automation of
-   it at that sample rather than winning or losing by chance: in VST3 the process call's events
-   are sorted by (time, parameter change first) (MIDI CCs arrive as parameter changes there too,
-   in the host's queue order); in CLAP, `handle_in_events_until` splits the run before an event
-   that a parameter change follows at its sample (`split_before`).
-10. **`TestProcessContext`** (`src/context/process.rs`): a `ProcessContext` with no host, for a
-   plugin's own tests: the events pushed, a change made through change 9 set as a wrapper sets
-   it and kept as a host would be told it, and `automate()` setting a parameter as a host's
-   automation is set between runs. It touches only the parameters of the `Params` it is made
-   with. (A plugin cannot set a parameter outside nih-plug otherwise: its setters are
-   crate-private.)
+    Each wrapper reserves room for 1024 such changes a process call when it is made
+    (`OWN_PARAM_CHANGES`, `src/wrapper/util.rs`), so nothing is allocated, locked or waited for
+    on the audio thread; past it a change is set but not told, and the call returns `false`.
+    And **at one sample, the host's parameter changes come before the events the plugin reads**,
+    whatever the host's order, so that a controller setting a parameter follows the automation of
+    it at that sample rather than winning or losing by chance: in VST3 the process call's events
+    are sorted by (time, parameter change first) (MIDI CCs arrive as parameter changes there too,
+    in the host's queue order); in CLAP, `handle_in_events_until` splits the run before an event
+    that a parameter change follows at its sample (`split_before`).
+11. **`TestProcessContext`** (`src/context/process.rs`): a `ProcessContext` with no host, for a
+    plugin's own tests: the events pushed, a change made through change 10 set as a wrapper sets
+    it and kept as a host would be told it, and `automate()` setting a parameter as a host's
+    automation is set between runs. It touches only the parameters of the `Params` it is made
+    with. (A plugin cannot set a parameter outside nih-plug otherwise: its setters are
+    crate-private.)
 
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
-and `nih_plug_derive` here and apply the ten changes again, unless upstream has fixed them.
+and `nih_plug_derive` here and apply the eleven changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.

@@ -1167,7 +1167,7 @@ impl<P: Vst3Plugin> IAudioProcessor for Wrapper<P> {
             // At the same time, every parameter change before every event, whatever the host's
             // order: the MIDI CCs come from parameter queues too, in the host's queue order, so a
             // CC could otherwise land before or after an automation point at its sample, and a
-            // plugin setting that parameter from the CC (PATCHES.md, change 9) win or lose by
+            // plugin setting that parameter from the CC (PATCHES.md, change 10) win or lose by
             // chance. Now the automation is set first, and the event follows it.
             permit_alloc(|| {
                 process_events.sort_by_key(|event| match event {
@@ -1416,7 +1416,7 @@ impl<P: Vst3Plugin> IAudioProcessor for Wrapper<P> {
                     };
 
                     // The parameters the plugin set itself in this run, told to the host at their
-                    // sample offsets (PATCHES.md, change 9). A queue's points are added in time
+                    // sample offsets (PATCHES.md, change 10). A queue's points are added in time
                     // order: the runs follow one another and the plugin sets them in order.
                     let mut own = self.inner.own_param_changes.borrow_mut();
                     if let Some(out) = data.output_param_changes.upgrade() {

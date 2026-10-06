@@ -1,4 +1,4 @@
-//! MIDI Learn in the editor (decisions.md R30): a control's menu (a right click: MIDI LEARN,
+//! MIDI Learn in the editor (decisions.md R34): a control's menu (a right click: MIDI LEARN,
 //! REMOVE MIDI ASSIGNMENT, MIDI ASSIGNMENTS…), the ring and the note over the control being
 //! learned, what was done said over it for a while, and the drawer's MIDI list, which the keyboard
 //! operates. The assignments themselves are [`crate::learn::MidiMap`]'s; this is what the editor

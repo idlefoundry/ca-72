@@ -6,7 +6,7 @@
 //! thread reports. The grip at the panel's bottom right corner resizes the window. Under the strip the presets' bar, and their drawer over
 //! the panel (`crate::presets`, decisions.md R10), which takes the keyboard while open; in the
 //! drawer the update check (`crate::update`, R27). A right click opens a control's menu, for
-//! MIDI Learn; the drawer's MIDI button shows its list of assignments (`crate::learning`, R30).
+//! MIDI Learn; the drawer's MIDI button shows its list of assignments (`crate::learning`, R34).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -429,7 +429,7 @@ struct Editing {
     /// The update check in the drawer; dropped with the editor, it ends a check under way.
     update: Update,
     /// MIDI Learn: a control's menu, the note over the control being learned, the drawer's
-    /// list (decisions.md R30).
+    /// list (decisions.md R34).
     pub(crate) learning: Learning,
     /// The pointer, in logical pixels.
     pointer: (f64, f64),
@@ -527,7 +527,7 @@ impl PanelWindow {
     /// decisions.md R18).
     fn keyboard(&mut self, window: &mut Window<'_>) {
         // (MIDI Learn too, while a control's menu is open or a controller is awaited: Escape
-        // closes or cancels it; decisions.md R30.)
+        // closes or cancels it; decisions.md R34.)
         let asked = std::mem::take(&mut self.editing.browser.wants_keys)
             | std::mem::take(&mut self.editing.learning.take_keys);
         if asked {
@@ -888,7 +888,7 @@ impl Editing {
         }
     }
 
-    /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R30),
+    /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R34),
     /// on the panel or the strip; elsewhere none.
     fn context_menu(&mut self) {
         self.end_gestures();
@@ -1390,7 +1390,7 @@ impl Editing {
 impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
-        // MIDI Learn first (decisions.md R30): Escape closes a control's menu, the drawer's MIDI
+        // MIDI Learn first (decisions.md R34): Escape closes a control's menu, the drawer's MIDI
         // list takes the keys it shows, and Escape cancels learning.
         let map = std::sync::Arc::clone(&self.params.midi_map);
         let down = k.state == KeyState::Down && !modifier(&k.key);
@@ -1426,7 +1426,7 @@ impl Editing {
 impl Drop for Editing {
     // The editor closed mid-drag, or within a wheel's rest: no parameter is left touched. And
     // MIDI Learn ends: a controller the audio thread has already caught for it is assigned,
-    // else nothing is (decisions.md R30).
+    // else nothing is (decisions.md R34).
     fn drop(&mut self) {
         self.learning.close(&self.params.midi_map);
         self.end_gestures();
@@ -1473,7 +1473,7 @@ impl WindowHandler for PanelWindow {
         // owner, 2026-10-03: a flicker as the drawer finished shutting; decisions.md R19).
         self.follow(window);
         // (MIDI Learn done meanwhile, by a controller rather than here: the keyboard back to the
-        // host now, not at the editor's next event; decisions.md R30.)
+        // host now, not at the editor's next event; decisions.md R34.)
         self.keyboard(window);
         if changed || repaint_due(self.shown, now) {
             self.present();
@@ -1496,7 +1496,7 @@ impl WindowHandler for PanelWindow {
                 }
                 EventStatus::Captured
             }
-            // No gesture is left open (decisions.md R18), nor a control's menu (R30; learning
+            // No gesture is left open (decisions.md R18), nor a control's menu (R34; learning
             // goes on: the controller to be learned is elsewhere).
             Event::Window(WindowEvent::Unfocused | WindowEvent::WillClose) => {
                 self.editing.end_gestures();
@@ -3644,7 +3644,7 @@ mod tests {
         all.save_png(out).unwrap();
     }
 
-    /// MIDI Learn drawn (decisions.md R30), for looking at: CUTOFF being learned (ringed, its
+    /// MIDI Learn drawn (decisions.md R34), for looking at: CUTOFF being learned (ringed, its
     /// note) with MAIN OUTPUT VOLUME's menu open, then POLY being learned after a reserved
     /// controller was moved, each as `learn-<n>.png` in `$CA72_LEARN_PNG`, the folder.
     #[test]

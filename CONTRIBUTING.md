@@ -2,8 +2,9 @@
 
 Bug reports, measurements and fixes are welcome.
 
-- **Bugs:** open an issue with your system, host and its version, the format (VST3 or
-  CLAP), the CA-72's version, and what you did. A crash report or the host's log helps.
+- **Bugs:** open an issue with your system, host and its version, the format (VST3, CLAP
+  or Audio Unit), the CA-72's version, and what you did. A crash report or the host's log
+  helps.
 - **Changes:** open a pull request. Before you do, build and test as the README describes
   (`cargo xtask bundle ca72-plugin --profile bundle`, `cargo test --workspace`), and run
   `cargo fmt --all` and `cargo clippy --workspace --all-targets --all-features -- -D warnings`

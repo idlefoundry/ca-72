@@ -1,9 +1,8 @@
 //! MIDI Learn as a CLAP host meets it, through the plug-in's own CLAP entry point in this
-//! process (decisions.md R30; `third_party/nih-plug/PATCHES.md`, change 9): a learned
+//! process (decisions.md R34; `third_party/nih-plug/PATCHES.md`, change 10): a learned
 //! controller's MIDI message sets its parameter at its time, and the plug-in tells the host as a
-//! parameter value flagged not to be recorded (the MIDI is what a host records), and asks the
-//! host to read the parameters' values again (some hosts, Bitwig Studio 5.2 among them, do not
-//! apply a value flagged not to be recorded); at one sample
+//! parameter value flagged not to be recorded (the MIDI is what a host records), asking for no
+//! rescan of the parameters; at one sample
 //! the host's automation is set before the controller, whatever the host's order; the
 //! assignments go out with the plug-in's state and come back with it, and a state from before
 //! them leaves an instance none. No editor is ever opened: all of it plays with the editor
@@ -25,8 +24,8 @@ use clap_sys::events::{
     clap_input_events, clap_output_events,
 };
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, CLAP_PARAM_RESCAN_VALUES, clap_host_params, clap_param_clear_flags,
-    clap_param_rescan_flags, clap_plugin_params,
+    CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
+    clap_plugin_params,
 };
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
@@ -55,12 +54,10 @@ fn id(param: &str) -> clap_id {
     h & !(1 << 31)
 }
 
-/// The host's count of values rescans asked of it (`host_data`).
-unsafe extern "C" fn rescan(host: *const clap_host, flags: clap_param_rescan_flags) {
-    if flags & CLAP_PARAM_RESCAN_VALUES != 0 {
-        // SAFETY: `host_data` is the instance's counter, alive as long as its host.
-        unsafe { (*(*host).host_data.cast::<AtomicUsize>()).fetch_add(1, Ordering::SeqCst) };
-    }
+/// The host's count of rescans asked of it, of any kind (`host_data`).
+unsafe extern "C" fn rescan(host: *const clap_host, _: clap_param_rescan_flags) {
+    // SAFETY: `host_data` is the instance's counter, alive as long as its host.
+    unsafe { (*(*host).host_data.cast::<AtomicUsize>()).fetch_add(1, Ordering::SeqCst) };
 }
 unsafe extern "C" fn clear(_: *const clap_host, _: clap_id, _: clap_param_clear_flags) {}
 unsafe extern "C" fn request(_: *const clap_host) {}
@@ -171,7 +168,7 @@ unsafe extern "C" fn read(stream: *const clap_istream, buffer: *mut c_void, size
 struct Instance {
     plugin: *const clap_plugin,
     _host: Box<clap_host>,
-    /// How often the plug-in asked its host to rescan the parameters' values.
+    /// How often the plug-in asked its host to rescan its parameters.
     rescans: Box<AtomicUsize>,
 }
 
@@ -433,13 +430,12 @@ fn a_learned_controller_is_set_at_its_time_and_told_not_to_be_recorded() {
     );
     assert_eq!(p.value("cutoff"), 1.0);
     assert_eq!(p.value("osc1_range"), 5.0);
-    // And the host asked to read the values again (this host's process thread is its main
-    // thread, so at once): once for the block.
-    let rescans = p.rescans.load(Ordering::SeqCst);
-    assert_eq!(rescans, before + 1);
-    // The same value again: nothing changes, nothing is told or asked.
+    // And no rescan of the parameters is asked for (this host's process thread is its main
+    // thread, so one would have come at once): the Audio Unit's wrapper rebuilds its whole
+    // parameter list for one.
+    assert_eq!(p.rescans.load(Ordering::SeqCst), before);
+    // The same value again: nothing changes, nothing is told.
     assert!(p.process(&[In::Cc(5, 0, 74, 127)]).is_empty());
-    assert_eq!(p.rescans.load(Ordering::SeqCst), rescans);
     // The host's own automation is not echoed back.
     assert!(p.process(&[In::Param(5, "cutoff", 0.25)]).is_empty());
     assert_eq!(p.value("cutoff"), 0.25);
