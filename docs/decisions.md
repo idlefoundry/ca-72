@@ -1763,3 +1763,36 @@ Sandyne again; not separately approved otherwise):
   (GNU) and with `--all-features` (MSVC, as CI); `cargo fmt --all -- --check`;
   `scripts/notices.py --check`. macOS and Linux run the same code (CI's tests on the pull
   request); the Audio Unit was not tried.
+
+## R32. Windows: the C runtime linked into the plug-in
+**Seen, 2026-10-06,** while R31 was looked into: 0.1.1's Windows plug-in, built by CI with
+MSVC, imports Visual C++'s runtime, `VCRUNTIME140.dll`, and four of the Universal C
+Runtime's `api-ms-win-crt-*` libraries. The installer does not bring Visual C++'s runtime,
+so where no other program has installed it and the host has no copy of its own, Windows
+cannot load the plug-in, and the host shows it failing or not at all. Not seen on a
+computer: read from the imports. Not R31's cause: Sandyne has its own copy, beside its
+executable. The reference machine's builds, with GNU, never needed it.
+
+**Agent decisions, 2026-10-06** (the owner asked for what was found on the way to be fixed,
+and approved Visual Studio's Build Tools on the reference machine; not separately approved
+otherwise):
+- **The C runtime linked statically with MSVC** (`.cargo/config.toml`: `+crt-static` for
+  `cfg(all(windows, target_env = "msvc"))`, which CI's Windows build is): the plug-in
+  imports Windows' own libraries only. Not Visual C++'s redistributable in the installer
+  (some 25 MB beside its 3.6, and a second program installed), nor the runtime's DLL beside
+  the plug-in, where Windows does not look (it looks beside the host's executable). A
+  `RUSTFLAGS` in the environment would replace the configuration's; CI sets none.
+- **MSVC on the reference machine,** beside the GNU toolchain, which stays its default:
+  Visual Studio Build Tools 2022 (17.14, the C++ workload) and Rust 1.97.1 for
+  `x86_64-pc-windows-msvc` (`cargo +1.97.1-x86_64-pc-windows-msvc`). The bundles as CI
+  builds them, and its clippy with `--all-features` (R26 could not run it), run here now.
+
+**Evidence (2026-10-06, the Windows reference machine):** `cargo +1.97.1-x86_64-pc-windows-msvc
+xtask bundle ca72-plugin --profile bundle`: the VST3 and the CLAP import
+`api-ms-win-core-synch-l1-2-0`, `avrt`, `bcryptprimitives`, `gdi32`, `kernel32`, `ntdll`,
+`ole32`, `oleaut32`, `shell32` and `user32`, all Windows'; 0.1.1's VST3 imports these and
+`VCRUNTIME140` and `api-ms-win-crt-heap`, `-math`, `-runtime` and `-string`. The exports are
+0.1.1's (`GetPluginFactory`, `InitDll`, `ExitDll`, `clap_entry`); the VST3 is 4,802,048
+bytes, 0.1.1's 4,636,160. R31's test build, linked the same way, played in Sandyne; the
+workspace's tests pass with MSVC (R31). Not tried: a computer without Visual C++'s
+redistributable (this one has had it since 2026-09-18), so the failure itself was not seen.
