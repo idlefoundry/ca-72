@@ -125,6 +125,9 @@ WrapAsAUV2::WrapAsAUV2(AUV2_Type type, const std::string &clapname, const std::s
 {
   (void)_autype;  // TODO: will be used for dynamic property adaption
   _uiIsOpened = false;
+  // As the process adapter's own event list, so that neither grows while the host plays.
+  _pendingParameters.reserve(8192);
+  _takenParameters.reserve(8192);
   if (!_desc)
   {
     if (initializeClapDesc())
@@ -461,11 +464,14 @@ void WrapAsAUV2::setupParameters(const clap_plugin_t *plugin, const clap_plugin_
 OSStatus WrapAsAUV2::GetParameterList(AudioUnitScope inScope, AudioUnitParameterID *outParameterList,
                                       UInt32 &outNumParameters)
 {
-  if (inScope != kAudioUnitScope_Global || !_paramOrderingProvided)
+  // The plugin's own order, as setupParameters() lists them, whether or not it gives an
+  // AUv2 order of its own: the SDK's would sort them by id.
+  if (inScope != kAudioUnitScope_Global)
   {
     return AUBase::GetParameterList(inScope, outParameterList, outNumParameters);
   }
 
+  std::lock_guard<std::mutex> guard(_paramTreeMutex);
   outNumParameters = static_cast<UInt32>(_orderedParameterList.size());
   if (outParameterList)
   {
@@ -574,19 +580,86 @@ OSStatus WrapAsAUV2::SetParameter(AudioUnitParameterID inID, AudioUnitScope inSc
 {
   if (inScope == kAudioUnitScope_Global)
   {
-    if (_processAdapter)
-    {
-      // a parameter has been set.
-      // _processAdapter->addParameterEvent(inID,inValue,inBufferOffsetInFrames);
-      auto p = _parametertree.find(inID);
-      if (p != _parametertree.end())
-      {
-        auto &param = p->second.get()->info();
-        _processAdapter->addParameterEvent(param, inValue, inBufferOffsetInFrames);
-      }
-    }
+    // Queued for the next Render(), whichever thread this is (see _pendingParameters).
+    std::lock_guard<std::mutex> guard(_pendingParametersMutex);
+    _pendingParameters.push_back({inID, inValue, inBufferOffsetInFrames});
   }
   return AUBase::SetParameter(inID, inScope, inElement, inValue, inBufferOffsetInFrames);
+}
+
+void WrapAsAUV2::takePendingParameters()
+{
+  // On the audio thread, before the block is processed. If another thread holds the lock
+  // for the moment, its changes go with the next block instead.
+  {
+    std::unique_lock<std::mutex> lock(_pendingParametersMutex, std::try_to_lock);
+    if (!lock.owns_lock() || _pendingParameters.empty()) return;
+    _takenParameters.swap(_pendingParameters);
+  }
+  for (const auto &c : _takenParameters)
+  {
+    auto p = _parametertree.find(c.id);
+    if (p != _parametertree.end())
+    {
+      _processAdapter->addParameterEvent(p->second.get()->info(), c.value, c.offset);
+    }
+  }
+  _takenParameters.clear();
+}
+
+void WrapAsAUV2::flushPendingParameters()
+{
+  auto *params = _plugin->_ext._params;
+  if (!params) return;
+  {
+    std::lock_guard<std::mutex> guard(_pendingParametersMutex);
+    if (_pendingParameters.empty()) return;
+  }
+  // The host is most likely not rendering, or the audio thread would have taken the
+  // changes already; if a block is being rendered, this waits for its end.
+  std::lock_guard<std::mutex> render(_renderMutex);
+  std::vector<PendingParameter> changes;
+  {
+    std::lock_guard<std::mutex> guard(_pendingParametersMutex);
+    changes.swap(_pendingParameters);
+    _pendingParameters.reserve(changes.capacity());
+  }
+  std::vector<clap_event_param_value_t> events;
+  {
+    std::lock_guard<std::mutex> guard(_paramTreeMutex);
+    for (const auto &c : changes)
+    {
+      auto p = _parametertree.find(c.id);
+      if (p == _parametertree.end()) continue;
+      const auto &info = p->second->info();
+      clap_event_param_value_t e{};
+      e.header.size = sizeof(e);
+      e.header.time = 0;
+      e.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+      e.header.type = CLAP_EVENT_PARAM_VALUE;
+      e.header.flags = 0;
+      e.param_id = info.id;
+      e.cookie = info.cookie;
+      e.note_id = -1;
+      e.port_index = -1;
+      e.channel = -1;
+      e.key = -1;
+      e.value = c.value;
+      events.push_back(e);
+    }
+  }
+  if (events.empty()) return;
+  clap_input_events_t in{&events,
+                         [](const clap_input_events_t *list) -> uint32_t
+                         { return (uint32_t)static_cast<std::vector<clap_event_param_value_t> *>(list->ctx)->size(); },
+                         [](const clap_input_events_t *list, uint32_t index) -> const clap_event_header_t *
+                         {
+                           auto *v = static_cast<std::vector<clap_event_param_value_t> *>(list->ctx);
+                           return index < v->size() ? &(*v)[index].header : nullptr;
+                         }};
+  // No output list: nih-plug then leaves the editor's own changes queued for the next
+  // block, where they reach the host as before.
+  params->flush(_plugin->_plugin, &in, nullptr);
 }
 
 void WrapAsAUV2::SetBypassEffect(bool bypass)
@@ -1191,6 +1264,8 @@ OSStatus WrapAsAUV2::Render(AudioUnitRenderActionFlags &inFlags, const AudioTime
 
     auto it_is = _plugin->AlwaysAudioThread();
 
+    std::lock_guard<std::mutex> render(_renderMutex);
+    takePendingParameters();
     _processAdapter->process(data);
 
     {
@@ -1380,6 +1455,7 @@ OSStatus WrapAsAUV2::SaveState(CFPropertyListRef *ptPList)
   }
   else
   {
+    flushPendingParameters();
     Clap::StateMemento chunk;
     _plugin->_ext._state->save(_plugin->_plugin, chunk);
 
@@ -1448,6 +1524,12 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
   {
     return -1;
   }
+
+  // The state supersedes the parameter changes still waiting for a block.
+  {
+    std::lock_guard<std::mutex> guard(_pendingParametersMutex);
+    _pendingParameters.clear();
+  }
   /*
    * In the read side I fall through to default, whereas in the write
    * side I use an 'else' on the set of stream formats. This means
@@ -1498,6 +1580,9 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
       Clap::StateMemento chunk;
       chunk.setData(pData, lLen);
       _plugin->_ext._state->load(_plugin->_plugin, chunk);
+      // The parameters' values as the state left them, for the host to read at once: the
+      // plugin's own request for this (CLAP_PARAM_RESCAN_VALUES) comes on a later idle.
+      param_rescan(CLAP_PARAM_RESCAN_VALUES);
     }
   }
   return noErr;

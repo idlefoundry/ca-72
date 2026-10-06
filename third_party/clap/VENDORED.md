@@ -13,4 +13,4 @@ SHA-256 of the tree (every file but this one, sorted by path, as
 `find . -type f ! -name VENDORED.md -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256`
 from this directory): `67259d07eca07bb095486e09c7d177a3d4f6217ffc48c95bcb409b1bfadbbb57`.
 
-To update: with clap-wrapper (`../clap-wrapper/VENDORED.md`).
+To update: with clap-wrapper (`../clap-wrapper/PATCHES.md`).

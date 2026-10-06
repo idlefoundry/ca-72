@@ -760,6 +760,27 @@ class WrapAsAUV2 : public ausdk::AUBase,
   std::unique_ptr<Clap::AUv2::ProcessAdapter> _processAdapter;
   std::atomic<bool> _initialized = false;
 
+  // The parameter changes SetParameter() receives. A host calls it from any thread: its
+  // main thread while the audio thread renders, the audio thread itself, or while another
+  // thread initializes the unit. Only the audio thread may touch the process adapter's
+  // event list, so the changes wait here, under a lock, until the next Render() takes them
+  // (trying the lock, never waiting on it). RestoreState() drops the ones it supersedes.
+  struct PendingParameter
+  {
+    AudioUnitParameterID id;
+    double value;
+    uint32_t offset;
+  };
+  std::mutex _pendingParametersMutex;
+  std::vector<PendingParameter> _pendingParameters;
+  std::vector<PendingParameter> _takenParameters;  // the audio thread's own
+  void takePendingParameters();
+  // Held through Render(). SaveState() takes it to hand the changes still waiting to the
+  // plugin itself (clap_plugin_params.flush()) when the host has not rendered since they
+  // came: the saved state then has them, and no block is processed meanwhile.
+  std::mutex _renderMutex;
+  void flushPendingParameters();
+
   // some info about the wrapped clap
   // audio-port layout captured at PostConstructor. Scanning the CLAP
   // audio-ports extension (count/get) is only legal while the plugin is
