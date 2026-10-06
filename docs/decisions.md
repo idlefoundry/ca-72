@@ -1867,4 +1867,5 @@ owner ran `scripts/package.sh` with the two Developer ID identities, the notary 
 `notarization.json`, the build's and the packaging's logs, the commands (`build.sh`) and
 `SHA256SUMS.txt` are kept with the release's evidence outside the repository, as 0.1.1's are.
 The release's clone then went to the Mac's Trash, and R31's test CLAP to the reference
-machine's Recycle Bin (its VST3 to follow once Sandyne, which had it loaded, is closed).
+machine's Recycle Bin; its VST3, which Sandyne had loaded, was gone from the folder once
+Sandyne closed, another change's test build (`CA-72 R34`) in its place.
