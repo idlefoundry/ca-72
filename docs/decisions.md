@@ -1699,3 +1699,67 @@ Rust 1.97.1),** on this change's tree. `scripts/auv2.sh` on the universal bundle
 - **`scripts/package.sh`** (signed ad hoc here) made a three-choice installer, every package
   not relocatable, the component's CLAP identical to the CLAP choice's;
   `scripts/notices.py --check` passes. CI's runs are on the pull request.
+
+## R31. Hosts that switch the side chain off: the plug-in no longer reads address 0
+**The report, 2026-10-06.** Users told the owner that the CA-72 did not work in Sandyne, a
+free DAW, as a VST on Windows. The owner asked for it to be tried there.
+
+**The cause,** found on the Windows reference machine with Sandyne 2.5.0.0 (its installer,
+`Sandyne_v2.5.0.0_win64.exe`, 538,577,168 bytes, from the link on sandyne.com, installed by
+the owner; it takes VST3 and CLAP) and 0.1.1's released VST3 (its installer checked against
+`SHA256SUMS.txt`; the module Sandyne loaded was that file, 4,636,160 bytes, version 0.1.1).
+Sandyne scanned the plug-in without trouble. Put on a track, it was set up for blocks of up
+to 1920 samples at 48 kHz, its editor opened, and in its first block, of 480 samples, Sandyne
+caught an access violation inside the plug-in's processing and disabled it for the session
+("Plugin Crashed: CA-72"): no sound. Sandyne is built with JUCE, and sets an instrument up
+with outputs only (`setPlayConfigDetails (maxBs=1920 outCh=2)` in its log), which switches
+off the CA-72's one input bus, its side chain (EXTERNAL INPUT). For a bus switched off on its
+side, JUCE's VST3 hosting gives the bus's full channel count, two, with every channel's
+pointer null (`HostBufferMapper::associateBufferTo`, `juce_VST3Common.h`). nih-plug checked
+only that the array of pointers was not null, then copied each channel through its pointer:
+a read from address 0. 0.1.0 does the same; the code is unchanged since. REAPER, where the
+plug-in has been tried most, gives the bus its buffers. Hosts built with JUCE that set an
+instrument up without inputs likely all meet it. That Sandyne switches the bus off is
+inferred from its log and JUCE's source (Sandyne's is not public); the fix below, which
+handles nothing else, ended the crash.
+
+**Agent decisions, 2026-10-06** (the owner asked for the fix and for it to be tried in
+Sandyne again; not separately approved otherwise):
+- **nih-plug's ninth change** (`third_party/nih-plug/PATCHES.md`): a channel the host gives as
+  a null pointer is read as silence if it is an input, and backed by scratch storage,
+  discarded, if it is an output, so that every channel the plug-in sees is as long as the
+  block. In the buffers both of nih-plug's wrappers share, so the CLAP takes it too, and with
+  it the Audio Unit, which wraps the CLAP (R30). Not by the bus's activation
+  (`IComponent::activateBus`), which nih-plug accepts and ignores: the pointers are what is
+  read, and a host may give a null one for a bus it left active.
+- **Tests.** `a_vst3_host_that_deactivates_the_side_chain_has_its_blocks_played`
+  (`crates/ca72-plugin/src/lib.rs`) drives the plug-in's VST3 wrapper as Sandyne did: set up
+  for 1920 samples, the side chain switched off, three blocks of 480 with its two channels
+  null; every output sample written and finite. nih-plug's own `null_channel_pointers`
+  covers each kind of channel, main and auxiliary, input and output; nih-plug's tests are
+  not the workspace's, so it is run by hand, from a copy of `third_party/nih-plug` outside
+  the repository (which keeps a `Cargo.lock` of its own out of it).
+- **Tried in Sandyne under a name and IDs of its own,** as R28 was: `CA-72 R30` (so named
+  before the Audio Unit took R30), built as the bundle is (`--profile bundle`, with MSVC as CI
+  builds it: R32), in the user's VST3 and CLAP folders (`%LOCALAPPDATA%\Programs\Common`).
+  R27's `CA-72 TEST` builds, still there, went to the Recycle Bin, so that Sandyne listed no
+  stale build.
+
+**Evidence (2026-10-06, the Windows reference machine: i5-13600K, Windows 11, a screen at
+200 %; Rust 1.97.1, GNU as R24 and MSVC as R32):**
+- **Sandyne 2.5.0.0** (the owner's clicks, its log and the modules it loaded read here):
+  0.1.1's VST3 crashed in its first block as above. This change's: scanned and put on a
+  track, set up and set up again after its editor opened, as before; the editor at 3072 by
+  1030, then 1536 by 515; the owner played notes on its track (four in Sandyne's log) and
+  heard it play; no crash, no error in the log. Not tried: the CLAP in Sandyne, the drawer
+  and the grip there, a project saved and opened again, other hosts built with JUCE.
+- **The new test** aborted before the change, at the side chain's copy (a debug build checks
+  the null pointer: `slice::from_raw_parts_mut requires the pointer to be aligned and
+  non-null`; a release build reads address 0), and passes after it. nih-plug's buffer tests,
+  `buffer_io` and `null_channel_pointers`, pass.
+- **On this change's tree** (main with the Audio Unit, R30): `cargo test --workspace` 230
+  passed, 0 failed (25 ignored, run by hand) with GNU, and the same with MSVC; clippy with
+  `-D warnings` on the workspace and all targets, with `--features ca72-plugin/standalone`
+  (GNU) and with `--all-features` (MSVC, as CI); `cargo fmt --all -- --check`;
+  `scripts/notices.py --check`. macOS and Linux run the same code (CI's tests on the pull
+  request); the Audio Unit was not tried.

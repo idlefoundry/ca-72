@@ -61,6 +61,19 @@ Five more came from a review of the plug-in before its release (2026-10-03; the 
    extension may change the mode while the plug-in is active, and the plug-in is not
    initialized again for it, so `BufferConfig::process_mode` alone may be out of date.
 
+One more came from a report: the CA-72 crashed in Sandyne, a DAW built with JUCE (2026-10-06;
+the CA-72's `docs/decisions.md` R31):
+
+9. **A channel the host gives as a null pointer is not read.** A VST3 host may give a null
+   pointer for a channel, and JUCE's hosts do for every channel of a bus they deactivated,
+   with the bus's full channel count (`HostBufferMapper::associateBufferTo`); setting up an
+   instrument with no inputs deactivates its side chain. `create_buffers` read every input
+   channel through its pointer, so an instrument with a side chain read from address 0 in
+   its first block, an access violation. A null input channel is now read as silence, and a
+   null output channel is backed by scratch storage, allocated with the rest and discarded,
+   so that every channel the plug-in sees is as long as the block
+   (`src/wrapper/util/buffer_management.rs`, with a test of each kind of channel).
+
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
-and `nih_plug_derive` here and apply the eight changes again, unless upstream has fixed them.
+and `nih_plug_derive` here and apply the nine changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.

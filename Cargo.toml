@@ -18,8 +18,8 @@ ca72-analysis = { path = "crates/ca72-analysis" }
 ca72-rt = { path = "crates/ca72-rt" }
 ca72-spice = { path = "crates/ca72-spice" }
 
-# The plug-in framework (ISC; its VST3 bindings are GPL-3.0): its commit below with eight
-# fixes, to state loading, buses, resizing and the processing mode
+# The plug-in framework (ISC; its VST3 bindings are GPL-3.0): its commit below with nine
+# fixes, to state loading, buses, resizing, the processing mode and the host's null channels
 # (third_party/nih-plug/PATCHES.md).
 nih_plug = { path = "third_party/nih-plug" }
 nih_plug_xtask = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683" }
