@@ -2190,3 +2190,35 @@ MIDI Learn (R34) as 0.1.3.
   `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
   (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.2's
   form.
+
+**The release (2026-10-06, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3).** The pull request's CI passed on the bump (`cb21704`) on every system; it was merged
+(`07a7dfb`, main's commit, its tree `cb21704`'s) and tagged `v0.1.3`, whose CI passed and
+drafted the release with its five assets. The macOS installer was built from a fresh clone at
+`cb21704` (nothing in the build records the commit), made while the tag's CI ran: `cargo xtask
+bundle-universal ca72-plugin --profile bundle` (Rust 1.97.1) and `scripts/auv2.sh`, the bundles
+then passing `scripts/validate.sh` (clap-validator 37 passed, 0 failed, 7 skipped; pluginval at
+strictness 10, SUCCESS; Steinberg's validator 47 passed; auval `-strict`, AU VALIDATION
+SUCCEEDED; pluginval on the Audio Unit, SUCCESS; editor tests skipped), and `scripts/package.sh`
+with the two Developer ID identities, the notary profile and `CA72_REQUIRE_NOTARIZATION=1`
+making `CA-72-0.1.3-macOS.pkg`:
+- **Apple's notary service** accepted it: submission `9892bffb-b042-4427-8e06-2a3155bba08f`,
+  status `Accepted` (some 50 minutes in Apple's queue). The ticket is stapled (`stapler
+  validate` passes); the installer is signed `Developer ID Installer: Idle Foundry Ltd.
+  (3JA8JUZ36W)`, trusted timestamp 2026-10-06 21:14:48 UTC; Gatekeeper: `accepted`,
+  `source=Notarized Developer ID`.
+- **The VST3, the CLAP and the Audio Unit in its payload**: each signed `Developer ID
+  Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the hardened runtime, `codesign --verify
+  --strict --deep` passing; version 0.1.3; `x86_64 arm64`.
+- **Its SHA-256** is `19911160f8398cab3a3f9b103ac4dd5d90970dc2720c3bf3bf3a44c339d3f421`
+  (14,293,865 bytes). It went into the draft with its line added to CI's `SHA256SUMS.txt`; the
+  four files it lists, downloaded again from the draft, passed `shasum -a 256 -c`.
+- **Published** on the owner's word ("are we able to make this the latest release?") at
+  2026-10-06 22:15:21 UTC as the latest release
+  (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.3, six assets), with notes in
+  0.1.2's form. The API's `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.3`;
+  the `.pkg` downloaded from the public release matches its checksum and Gatekeeper accepts it.
+
+`notarization.json`, the build's, the validators' and the packaging's logs, the commands
+(`build.sh`) and `SHA256SUMS.txt` are kept with the release's evidence outside the repository,
+as 0.1.1's and 0.1.2's are. The release's clone then went to the Mac's Trash.
