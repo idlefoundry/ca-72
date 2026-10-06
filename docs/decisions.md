@@ -1796,3 +1796,36 @@ xtask bundle ca72-plugin --profile bundle`: the VST3 and the CLAP import
 bytes, 0.1.1's 4,636,160. R31's test build, linked the same way, played in Sandyne; the
 workspace's tests pass with MSVC (R31). Not tried: a computer without Visual C++'s
 redistributable (this one has had it since 2026-09-18), so the failure itself was not seen.
+
+## R33. 0.1.2
+**Owner decision, 2026-10-06.** A release as soon as may be, with R31 and the Audio Unit
+(R30): "I would like to get this out as a release as soon as possible along with the AU pr,
+as I think people might be running into issues."
+
+**What it brings since 0.1.1** (the tag `v0.1.1`):
+- **The plug-in plays in hosts that switch its side chain off** (R31): in Sandyne, and
+  likely in other hosts built with JUCE, 0.1.0 and 0.1.1 crashed in their first block and
+  the host disabled them. On every system, the VST3 and the CLAP.
+- **An Audio Unit for macOS** (R30), a third choice in the macOS installer.
+- **Windows: no Visual C++ runtime needed** (R32).
+
+**Agent decisions, 2026-10-06** (not separately approved):
+- **A patch release, 0.1.2,** as R29: nothing a project or a preset holds has changed since
+  0.1.1 (the parameters, the plug-in's IDs, the voice and the presets' format are its), so
+  what was saved with 0.1.0 or 0.1.1 opens unchanged, and the installers install over
+  theirs. The Audio Unit is new; its identity is R30's.
+- **In R31's pull request,** a commit of its own, so that CI runs once before the tag (R29
+  was a pull request of its own).
+- **The version** as R29: the workspace's (`Cargo.lock` changed only in its eight crates);
+  the README's status names 0.1.2, and its line on the Audio Unit names 0.1.2 rather than
+  "the release after 0.1.1".
+- **Released the way R29 was:** once merged, the tag `v0.1.2` on main's commit; CI's release
+  job drafts the release with the Windows and Linux installers, the notices, the git sources
+  and `SHA256SUMS.txt`; the macOS installer, now with the Audio Unit, is built, signed and
+  notarised on the release Mac (`docs/macos-release.md`) and put into the draft; the owner
+  publishes it, with notes in 0.1.1's form (drafted in the pull request).
+
+**Evidence (2026-10-06, the Windows reference machine, GNU as R24),** on this change's tree
+(R31 and R32, and the bump): `cargo test --workspace` 230 passed, 0 failed (25 ignored, run
+by hand); `Cargo.lock` changed only in the workspace's eight crates. The installers are
+CI's, on the pull request.

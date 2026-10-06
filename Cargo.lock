@@ -302,7 +302,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "ca72"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ca72-rt",
  "libm",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-analysis"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libm",
  "serde",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-lab"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ca72",
  "ca72-analysis",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-panel"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "resvg",
  "rustybuzz",
@@ -339,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-plugin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "baseview 0.1.0",
  "ca72",
@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-rt"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-spice"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "tempfile",
 ]
@@ -2886,7 +2886,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "nih_plug_xtask",
 ]

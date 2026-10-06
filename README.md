@@ -16,8 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.1.1: Windows fixes and a check for updates since 0.1.0, the first release. The macOS
-installer is signed and notarised; the Windows one is not yet signed.
+**Status:** 0.1.2: an Audio Unit for macOS, and a fix for hosts that switch the side chain off
+(Sandyne, among others built with JUCE), since 0.1.1. The macOS installer is signed and
+notarised; the Windows one is not yet signed.
 
 ## Installing
 
@@ -41,7 +42,7 @@ installer is signed and notarised; the Windows one is not yet signed.
 3. In your host, rescan the plug-ins or restart it. The CA-72 appears as an instrument by
    Idle Foundry, in VST3 and CLAP, and on macOS as an Audio Unit too (in Logic Pro and
    GarageBand, under **AU Instruments › Idle Foundry**). The macOS installer has the Audio
-   Unit from the release after 0.1.1 on; until then, build it ([Building](#building)).
+   Unit from 0.1.2 on; before 0.1.2 is out, build it ([Building](#building)).
 
 The Windows installer is not yet signed, so the first time you run it Windows says "Windows
 protected your PC": click **More info**, then **Run anyway**.
