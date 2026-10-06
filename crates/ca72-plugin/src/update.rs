@@ -553,8 +553,18 @@ mod tests {
             repository.replace("https://github.com/", "https://api.github.com/repos/")
                 + "/releases/latest"
         );
-        assert!(newer("99.0.0") && newer("0.1.1") && newer("0.2.0") && newer("1.0.0"));
-        assert!(!newer(VERSION) && !newer("0.0.9") && !newer("nightly"));
+        // Later than this build's version, whichever release it is: the next patch, minor
+        // and major; not this one, nor 0.1.0, the first release.
+        let (major, minor, patch) = numbers(VERSION).expect("this build's version");
+        for later in [
+            format!("{major}.{minor}.{}", patch + 1),
+            format!("{major}.{}.0", minor + 1),
+            format!("{}.0.0", major + 1),
+        ] {
+            assert!(newer(&later), "{later}");
+        }
+        assert!(newer("99.0.0"));
+        assert!(!newer(VERSION) && !newer("0.1.0") && !newer("0.0.9") && !newer("nightly"));
     }
 
     #[test]
