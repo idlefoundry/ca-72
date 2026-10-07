@@ -2256,6 +2256,19 @@ built-in ASIO Driver at 48 kHz and 480 samples, ASIO-Guard on, Windows 11 at 200
 Not tried: Cubase on macOS (the same wrapper; the test runs on every system in CI), Cubase
 before version 15, and the Elements and Artist editions.
 
+**Since R37 (the Windows machine, 2026-10-07):** the owner tried `CA-72 R36` in Cubase 15
+themselves: "that one works!". (`CA-72 R34`, an older test build left in the user VST3 folder,
+showed them the fault: knobs moving, switches not.) The 0.1.4 that CI built on the pull request
+(run 37642706976, the tree of the tag), installed over 0.1.1 with its installer
+(`CA-72.vst3` 4,900,352 bytes, SHA-256 `82dff939…`), then did the same in two hosts while they
+processed audio: in Cubase 15.0.30, OSCILLATOR-1's switch, OSCILLATOR MODULATION and A-440
+moved, POLY went from OFF to ON, VOICES from 4 to 5, and a quick drag of CUTOFF FREQUENCY
+stayed; in REAPER 7.82 (a copy run with its own `-cfgfile`, the Dummy Audio driver, playing),
+the three switches, POLY and VOICES the same. The installer kept this machine's earlier choice
+of the VST3 alone (a custom install), so the CLAP was not installed. Not tried: the release's
+own Windows installer in a host (a second CI build of the same tree), the CLAP in a host, and
+Linux and macOS hosts.
+
 ## R37. 0.1.4
 **Owner decision, 2026-10-07.** R36 released at once as 0.1.4, from the plug-in's own
 nih-plug; the move to `plugin-kit`, planned as 0.1.4, becomes 0.1.5 (R36).
@@ -2277,3 +2290,37 @@ nih-plug; the move to `plugin-kit`, planned as 0.1.4, becomes 0.1.5 (R36).
   release with the Windows and Linux installers, the notices, the git sources and
   `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
   (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.3's form.
+
+**The release (2026-10-07, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3).** The pull request's CI passed on the bump (`c81b661`) on every system; it was merged
+(`2ee178d`, main's commit, its tree `c81b661`'s) and tagged `v0.1.4`, whose CI passed and
+drafted the release with its five assets. The macOS installer was built over SSH from a fresh
+clone of the tag (`2ee178d`) while the tag's CI ran: `cargo xtask bundle-universal ca72-plugin
+--profile bundle` (Rust 1.97.1) and `scripts/auv2.sh`, the bundles then passing
+`scripts/validate.sh` as far as auval (clap-validator 37 passed, 0 failed, 7 skipped; pluginval
+at strictness 10, SUCCESS; Steinberg's validator 47 passed; editor tests skipped). Over SSH
+auval finds no Audio Unit at all, not even the MC-79's installed one, so the owner ran it in
+their desktop session, before `scripts/package.sh` there: `auval -strict`, CA-72 0.1.4 (0x104),
+AU VALIDATION SUCCEEDED. pluginval on the Audio Unit was not run on the Mac; CI's macOS job ran
+it on the same tree. The owner's `~/Library` Audio Unit (0.1.1) was set aside for each run and
+put back. Packaging, with the two Developer ID identities, the notary profile and
+`CA72_REQUIRE_NOTARIZATION=1`, made `CA-72-0.1.4-macOS.pkg`:
+- **Apple's notary service** accepted it: submission `c5074124-c2b5-4af0-9894-1054764ed4c5`,
+  status `Accepted` (about a minute). The ticket is stapled (`stapler validate` passes); the
+  installer is signed `Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)`, trusted
+  timestamp 2026-10-07 16:20:01 UTC; Gatekeeper: `accepted`, `source=Notarized Developer ID`.
+- **The VST3, the CLAP and the Audio Unit in its payload** (with the CLAP inside the Audio
+  Unit): each signed `Developer ID Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the
+  hardened runtime, `codesign --verify --strict --deep` passing; version 0.1.4; `x86_64 arm64`.
+- **Its SHA-256** is `29cfa22841009ad5db843ea742f47822dfb7c50c819aab6e81fef4005291b692`
+  (14,300,983 bytes). It went into the draft with its line added to CI's `SHA256SUMS.txt`; the
+  four files it lists, downloaded again from the draft, passed `sha256sum -c`.
+- **Published** on the owner's go for 0.1.4 (R36) at 2026-10-07 16:33:11 UTC as the latest
+  release (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.4, six assets), with notes
+  in 0.1.3's form. The API's `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.4`;
+  the `.pkg` downloaded from the public release, marked as downloaded, matches its checksum and
+  Gatekeeper accepts it.
+
+`notarization.json`, the build's, the validators', auval's and the packaging's logs, the
+commands (`build.sh`, `auval.sh`, `package.sh`) and `SHA256SUMS.txt` are kept with the
+release's evidence outside the repository, as 0.1.3's are.
