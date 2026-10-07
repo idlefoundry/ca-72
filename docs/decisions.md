@@ -2256,3 +2256,24 @@ built-in ASIO Driver at 48 kHz and 480 samples, ASIO-Guard on, Windows 11 at 200
 Not tried: Cubase on macOS (the same wrapper; the test runs on every system in CI), Cubase
 before version 15, and the Elements and Artist editions.
 
+## R37. 0.1.4
+**Owner decision, 2026-10-07.** R36 released at once as 0.1.4, from the plug-in's own
+nih-plug; the move to `plugin-kit`, planned as 0.1.4, becomes 0.1.5 (R36).
+
+**What it brings since 0.1.3** (the tag `v0.1.3`):
+- **Cubase: the editor's switches and buttons work** (R36). In Cubase 15, and in any VST3 host
+  that reads a value back as an edit ends, a click on a switch, a button or a selector's legend
+  did nothing, and a quick drag could end one move short. The VST3 on every system; the CLAP
+  and the Audio Unit were not affected.
+
+**Agent decisions, 2026-10-07** (not separately approved):
+- **A patch release, 0.1.4,** as R29, R33 and R35: nothing a project or a preset holds has
+  changed since 0.1.3, so what was saved with 0.1.0 to 0.1.3 opens unchanged, and the
+  installers install over theirs.
+- **The version** as R29: the workspace's (`Cargo.lock` changed only in its eight crates); the
+  README's status names 0.1.4.
+- **Released the way R35 was:** a commit of its own in R36's pull request, so that CI runs once
+  before the tag; once merged, the tag `v0.1.4` on main's commit; CI's release job drafts the
+  release with the Windows and Linux installers, the notices, the git sources and
+  `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
+  (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.3's form.
