@@ -2190,3 +2190,69 @@ MIDI Learn (R34) as 0.1.3.
   `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
   (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.2's
   form.
+
+## R36. The editor's switches and buttons in Cubase
+**Owner decision, 2026-10-07.** Users reported that the plug-in's buttons did nothing in
+Cubase 15 on Windows 11. The owner had a Cubase trial installed on the Windows machine for the
+agent to test with and, on its report, said to "move forward with your recommendations": fix
+it in the vendored nih-plug, release the fix as 0.1.4 from the plug-in's own nih-plug rather
+than wait for the move to `plugin-kit` (which becomes 0.1.5), and make the same change in
+`plugin-kit` for the CA-74 and the MC-79.
+
+**What was wrong.** While the host processes audio, nih-plug's VST3 wrapper did not set a value
+the editor changed: it told the host (`performEdit()`) and left the value for the host to send
+back to the processor at the next process call, so that a value never changes in the middle of
+one; until then the controller reported the value from before the edit. Within `endEdit()`,
+Cubase 15 reads the controller's value (`getParamNormalized()`) and sends that to the
+processor, after the edit. A click is a whole gesture between two process calls, so Cubase sent
+back the old value and the control did not move. Every control set by a click was affected:
+the rockers and switches, POWER, POLY, the − and + beside VOICES, the buttons beside ENTROPY and
+SPREAD, a selector stepped by a click on its legend, and a double click setting a knob to its
+default. A knob being dragged moved, since each move came back before the next, but a quick
+drag let go between two process calls could end one move short. Presets were not affected: a
+preset's state is set at the end of a process call by another route.
+
+**Agent decisions, 2026-10-07** (not separately approved):
+- **Held, not set at once** (nih-plug's `PATCHES.md`, change 12). Setting the value at once
+  from the editor's thread would have been simpler, but a value could then change in the middle
+  of a process call, which the plug-in's code does not expect (VOICES and POLY are read more
+  than once in a call). The edit is held instead, the latest for each parameter: the controller
+  reports it, the next process call sets it at its start, before the host's own changes at its
+  first sample, and stopping processing sets it if no call will. A host that never sends an
+  edit back now has it set as well.
+- **A test of the wrapper, with a probe rather than the CA-72.**
+  `crates/ca72-plugin/tests/vst3_host.rs` drives the wrapper through its own VST3 factory, with
+  a probe plug-in whose editor opens no window but keeps the wrapper's context, and a host that
+  does what Cubase 15 does. Its six tests run on every system. Four fail without change 12: the
+  click read back as 1.0, a quick drag ending at 0.25 rather than 0.75, an edit lost by a host
+  that sends nothing back, and an edit lost as processing stops; the other two guard what did
+  not change. With nih-plug's allocation check on (`assert_process_allocs`, built with MSVC),
+  all six pass: the change allocates nothing in a process call.
+- **The CLAP is untouched:** its wrapper sets an edit itself as it sends it to the host. The
+  Audio Unit wraps the CLAP.
+- **R36 and R37 numbered at once:** no branch on GitHub had a record after R35 (2026-10-07).
+  The unmerged lines elsewhere (the softbuffer fix on the Mac, `perf` on the Linux reference
+  machine) take later numbers when they merge.
+
+**Evidence (the Windows machine, 2026-10-07):** Cubase Pro 15.0.30, a trial, with the Steinberg
+built-in ASIO Driver at 48 kHz and 480 samples, ASIO-Guard on, Windows 11 at 200 % scaling, and
+"Suspend VST 3 plug-in processing when no audio signals are received" off.
+- **Before:** the installed 0.1.1 (4,636,160 bytes). A click on OSCILLATOR-1's switch in the
+  mixer changed neither the panel nor Cubase's generic editor; the same switch set from the
+  generic editor moved on the panel; with the instrument deactivated in Cubase, the click
+  worked. The editor's window held the pointer's capture from press to release. A renamed build
+  of 0.1.3 that logged the wrapper's calls showed, for one click on that switch, `performEdit`
+  with 0.0, then within `endEdit` `getParamNormalized` returning 1.0, then 1.0 at the next
+  process call; for a knob's drag, each move came back unchanged.
+- **After:** a renamed build of this change, `CA-72 R36`. Clicks on OSCILLATOR-1's switch,
+  OSCILLATOR MODULATION and A-440 moved them (about 1,000 of 1,500 sampled pixels around each
+  changed; none around two switches not clicked); POLY went from OFF to ON and VOICES from 4 to
+  5; a quick drag of CUTOFF FREQUENCY stayed where it was let go, and a double click set it back
+  to 0. Cubase's generic editor then showed OSCILLATOR MODULATION on, OSCILLATOR-1 off and
+  CUTOFF 0.00.
+- `cargo test -p ca72-plugin --test vst3_host`: 6 passed; with the wrapper restored, 2 passed
+  and 4 failed.
+
+Not tried: Cubase on macOS (the same wrapper; the test runs on every system in CI), Cubase
+before version 15, and the Elements and Artist editions.
+
