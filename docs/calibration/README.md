@@ -163,8 +163,10 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    by up to 2 dB (Three Saw Slab -1.96, Lead and Upright Pluck -1.02; not re-levelled); at 0
    or 10 they render the same to the bit.
 7. **ATTACK's and DECAY's laws** (the four 1M rheostats, `voice::time_pot`, 2026-10-08).
-   Session F set each contour's ATTACK and DECAY to its dial's marks (the reference's manual
-   draws the CA-72's dial: 10, 200 and 600 ms, 1, 5 and 10 s at the same angles), its output
+   Session F set each contour's ATTACK and DECAY to its dial's marks (10 and 200 ms, 1 and 10
+   s at -120, -90, 30 and 105 degrees on the reference's dial, its manual's drawing and the
+   owner's photographs agreeing; the CA-72's panel, after the original's, prints 10 s at
+   108 and 5 s at 67 where the reference has 60), its output
    on a DC-coupled input; the CA-72 renders the takes at the same marks. Measures: the
    attack's rise from 10 to 90 %; the final decay's fall (DECAY on, SUSTAIN 10) from 90 to 50
    % (the takes end before the slowest falls further). At 1 ms (fully anticlockwise) both
@@ -177,7 +179,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    reference's time through the CA-72's contour (the attack exactly linear in it, the decay
    found between renders at bracketing resistances):
 
-   | | 1 s mark (0.6) | 10 s mark (0.86) | fully clockwise |
+   | | 1 s mark (0.6) | 10 s mark (0.85) | fully clockwise |
    |---|---|---|---|
    | Generic audio taper | 162K | 535K | 1M |
    | Filter ATTACK | 52.5K | 749K | 1.06M |

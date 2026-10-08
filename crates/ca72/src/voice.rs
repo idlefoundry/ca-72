@@ -356,14 +356,15 @@ pub fn time_pot_drawn(p: f64) -> f64 {
     1e6 * audio_taper(p)
 }
 
-/// The hardware reference's ATTACK and DECAY at its dial's 1 s and 10 s marks (0.6 and 0.86
-/// of the travel) and fully clockwise, as the pot's resistance through which the CA-72's
+/// The hardware reference's ATTACK and DECAY at its dial's 1 s and 10 s marks (0.6 and 0.85
+/// of the travel: 30 and 105 degrees on its dial, photographed; the CA-72's panel prints the 10
+/// s mark at 108) and fully clockwise, as the pot's resistance through which the CA-72's
 /// contour takes the reference's time: 10 to 90 % of the attack, 90 to 50 % of the final
 /// decay (docs/calibration, session F). The generic taper's are 162K, 535K and 1M.
-pub const FILTER_ATTACK: [(f64, f64); 3] = [(0.6, 52.5e3), (0.86, 749e3), (1.0, 1.06e6)];
-pub const FILTER_DECAY: [(f64, f64); 3] = [(0.6, 58.5e3), (0.86, 660e3), (1.0, 873e3)];
-pub const LOUDNESS_ATTACK: [(f64, f64); 3] = [(0.6, 53.0e3), (0.86, 788e3), (1.0, 1.10e6)];
-pub const LOUDNESS_DECAY: [(f64, f64); 3] = [(0.6, 49.9e3), (0.86, 630e3), (1.0, 853e3)];
+pub const FILTER_ATTACK: [(f64, f64); 3] = [(0.6, 52.5e3), (0.85, 749e3), (1.0, 1.06e6)];
+pub const FILTER_DECAY: [(f64, f64); 3] = [(0.6, 58.5e3), (0.85, 660e3), (1.0, 873e3)];
+pub const LOUDNESS_ATTACK: [(f64, f64); 3] = [(0.6, 53.0e3), (0.85, 788e3), (1.0, 1.10e6)];
+pub const LOUDNESS_DECAY: [(f64, f64); 3] = [(0.6, 49.9e3), (0.85, 630e3), (1.0, 853e3)];
 
 /// Where the time pots leave the generic taper: the dial's tick past its 10 ms mark, up to
 /// which the reference's times agree with it within where its knob was set.
