@@ -2325,10 +2325,12 @@ put back. Packaging, with the two Developer ID identities, the notary profile an
 commands (`build.sh`, `auval.sh`, `package.sh`) and `SHA256SUMS.txt` are kept with the
 release's evidence outside the repository, as 0.1.3's are.
 
-## R-OPAQUE. The editor's window opaque on Linux desktops that composite
+## R38. The editor's window opaque on Linux desktops that composite
 **Owner decision, 2026-10-08.** The CA-74 found that on a Linux desktop that composites, its
 standalone's panel looked washed out, far too bright, and fixed it in its editor. The owner
-asked for the same fix in the CA-72 and the MC-79, merged only on their go.
+asked for the same fix in the CA-72 and the MC-79, merged only on their go. Shown it tried
+(below), asked whether to merge it once CI passed and release it with the next version rather
+than on its own: "yes".
 
 **What was wrong.** baseview makes its X11 window with a 32-bit visual, an alpha channel,
 wherever the screen has one (`third_party/baseview`, `find_best_visual_config`), and the editor

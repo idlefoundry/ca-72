@@ -2009,7 +2009,7 @@ mod window {
     /// here ignores (Core Graphics skips it, GDI's copy and KMS's XRGB too) except X11 on a
     /// window with an alpha channel, which baseview makes wherever the screen has a 32-bit
     /// visual: there 0 is transparent, and on a compositing desktop the desktop shows through
-    /// the panel, added to its colours (decisions.md R-OPAQUE).
+    /// the panel, added to its colours (decisions.md R38).
     pub fn shown(p: &[u8]) -> u32 {
         0xff00_0000 | (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2])
     }
