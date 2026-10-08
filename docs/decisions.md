@@ -2428,3 +2428,29 @@ cores given to the host with `taskset`, so that the plug-in counts 4 processors)
 
 Not tried: a machine as slow as the users' (none here), Waveform 13, Windows, Maniac Audio's
 Dark Studio, REAPER on this machine, the editor closed against open, and the CLAP in Waveform.
+
+## R40. 0.1.5
+**Owner decision, 2026-10-08.** R39 released at once: "let's just push the performance fix into
+production immediately", with R38 (its owner's go: with the next version). The softbuffer fix
+(R34, "Seen besides"), made on the Mac and not yet merged, comes with the next patch release.
+
+**What it brings since 0.1.4** (the tag `v0.1.4`):
+- **Machines of 3 and 4 processors play POLY's voices with a worker** (R39). With the POLY
+  presets (Slow Horn Swell, Brass Tutti, Warped Pad) such a machine played every voice on the
+  host's audio thread: in Tracktion Waveform the CPU reached 100 % and the audio engine had to
+  be reset. The samples are the same to the bit.
+- **The editor's window opaque on Linux desktops that composite** (R38): the desktop, or the
+  host's own window, no longer shows through the panel.
+
+**Agent decisions, 2026-10-08** (not separately approved):
+- **A patch release, 0.1.5,** as R29, R33, R35 and R37: nothing a project or a preset holds has
+  changed since 0.1.4, so what was saved with 0.1.0 to 0.1.4 opens unchanged, and the
+  installers install over theirs.
+- **The version** as R37: the workspace's (`Cargo.lock` changed only in its eight crates); the
+  README's status names 0.1.5.
+- **The move to `plugin-kit`,** planned as 0.1.5 (R37), takes a later version.
+- **Released the way R37 was:** a commit of its own in R39's pull request, so that CI runs once
+  before the tag; once merged, the tag `v0.1.5` on main's commit; CI's release job drafts the
+  release with the Windows and Linux installers, the notices, the git sources and
+  `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
+  (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.4's form.

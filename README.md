@@ -16,8 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.1.4: the editor's switches and buttons work in Cubase, since 0.1.3. The macOS
-installer is signed and notarised; the Windows one is not yet signed.
+**Status:** 0.1.5: on machines of 3 and 4 processors the POLY presets no longer overload the
+CPU, and on Linux the editor's window is opaque, since 0.1.4. The macOS installer is signed and
+notarised; the Windows one is not yet signed.
 
 ## Installing
 
