@@ -211,17 +211,44 @@ const VOLUME_TRACK: [(f64, f64); 6] = [
     (1.0, 1.0),
 ];
 
-/// A mixer VOLUME knob's wiper as a fraction of its track: straight between
-/// [`VOLUME_TRACK`]'s points.
-pub fn volume_track(volume: f64) -> f64 {
-    let p = volume.clamp(0.0, 1.0);
-    for w in VOLUME_TRACK.windows(2) {
+/// A knob's wiper as a fraction of its track, straight between a law's points (knob, track;
+/// from (0, 0) to (1, 1)).
+fn track(points: &[(f64, f64)], knob: f64) -> f64 {
+    let p = knob.clamp(0.0, 1.0);
+    for w in points.windows(2) {
         let ((pa, ta), (pb, tb)) = (w[0], w[1]);
         if p <= pb {
             return ta + (tb - ta) * (p - pa) / (pb - pa);
         }
     }
     1.0
+}
+
+/// A mixer VOLUME knob's wiper as a fraction of its track: straight between
+/// [`VOLUME_TRACK`]'s points.
+pub fn volume_track(volume: f64) -> f64 {
+    track(&VOLUME_TRACK, volume)
+}
+
+/// CUTOFF FREQUENCY (R11, 5K linear across +-10 V) as the hardware reference's knob sets its
+/// wiper: the fraction of the track at the dial's -4, -2, 2 and 4 at which the voice's filter
+/// sits where the reference's does, each at its CUT CV 0 (docs/calibration, session E). The
+/// dial runs -5 to 5 between the knob's stops (photographed), where the two agree, as at 0. A
+/// straight track's are 0.1, 0.3, 0.7 and 0.9.
+const CUTOFF_TRACK: [(f64, f64); 7] = [
+    (0.0, 0.0),
+    (0.1, 0.0582),
+    (0.3, 0.2669),
+    (0.5, 0.5),
+    (0.7, 0.7304),
+    (0.9, 0.9346),
+    (1.0, 1.0),
+];
+
+/// The CUTOFF knob's wiper as a fraction of its track: straight between [`CUTOFF_TRACK`]'s
+/// points.
+pub fn cutoff_track(cutoff: f64) -> f64 {
+    track(&CUTOFF_TRACK, cutoff)
 }
 
 /// The input a mixer channel's VOLUME pot (25K linear, its wiper through `r_series` to the
@@ -1570,7 +1597,7 @@ impl FrontPart {
         // The filter's control node: CUTOFF, AMOUNT OF CONTOUR, KEYBOARD CONTROL 1 and 2,
         // R52 (the modulation line with FILTER MODULATION on, else grounded) and R51 (the
         // external control's jack, empty: grounded).
-        let pos = p.cutoff.clamp(0.0, 1.0);
+        let pos = cutoff_track(p.cutoff);
         let r_cut = 200e3 + 5e3 * pos * (1.0 - pos);
         let amt = p.contour_amount.clamp(0.0, 1.0);
         let open = Input {

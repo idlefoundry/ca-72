@@ -224,6 +224,27 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    now finds the OVERLOAD lamp at VOLUME 9.2, searched in steps of 0.1 (4.4 % at the output,
    as before at 9.5). Only Pulse Strut (+0.4 dB) and Undertow Growl (+1.8 dB), whose
    FEEDBACK runs through the input, change.
+10. **CUTOFF's law** (R11, `voice::cutoff_track`, 2026-10-08). The owner photographed the
+    reference's dials at their stops (`rig/dial-photos-2026-10-08` on the lab's share): each
+    knob turns 300 degrees and stops on its dial's end ticks; CUTOFF's eleven ticks are 30
+    degrees apart, -5 and 5 at the stops, as on the CA-72's panel. (The first comparison of
+    the marks took the stops for -4.5 and 4.5.) Through session E's sweeps, the same measure
+    of both, the CA-72's corner was 0.36 to 0.43 octave under the reference's at +4, 0.28 to
+    0.35 under at +2, 0.33 to 0.42 over at -2 and 0.45 to 0.53 over at -4, and within 0.08
+    at 0 and at the anticlockwise stop. At CUT CV 0, the reference runs 10.0 octaves from
+    stop to stop, as the CA-72 does (10.1), but steeper in the middle (1.17 octaves a mark)
+    and flatter near the stops (0.5 to 0.6 in the last mark): the S of the mixer's VOLUME
+    pots (change 8), a linear track whose ends turn slowly. The fraction of the track that
+    puts the CA-72's filter where the reference's is at -4, -2, 2 and 4 is 0.0582, 0.2669,
+    0.7304 and 0.9346 (a straight track's 0.1, 0.3, 0.7, 0.9); the law runs straight between
+    those and the stops and centre, where R39 was fitted, so R39 stands. Now every mark is
+    within -0.08 to +0.10 octave of the reference. What is left leans with CUT CV the same
+    way at every mark: the CA-72's filter moves 2.3 to 3.1 % more per volt than the
+    reference's (Still differs). Folkman's calibration and the service manual's checks keep
+    the drawing's straight track (`filter_cal::inputs`). ENTROPY's cutoff offset test now
+    allows 8 %: at +3 the knob is 0.83 of the track, where the converter's curve leaves the
+    offset 6.6 to 7.5 % short. Presets with CUTOFF off its marks change in brightness; the
+    retuned two move again (redone with the levels, below).
 
 ## Not changed, and why
 
@@ -238,11 +259,10 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 
 ## Still differs (2026-10-08, after the knob session's fits)
 
-- **The CUTOFF dial's span.** R39 put the corner on the reference's at the dial's centre and
-  top, but the reference's CUTOFF spans 8.85 octaves from -4 to +4 and the CA-72's 8.46: at
-  -2 and -4 the CA-72's corner is now about 0.18 and 0.36 octave high (session E's corners).
-  Whether the reference's marks sit at other angles or its pot's ends differ needs the
-  dial's end stops (photographs asked for).
+- **The filter's scale:** at every CUTOFF mark the CA-72's corner moves 2.3 to 3.1 % more
+  per volt of CUT CV than the reference's (session E), and the reference's KEYBOARD CONTROL
+  both on tracks 0.970 octave an octave: both point at the control node's scale (the SCALE
+  trim R49), to be measured against the CA-72's own keyboard tracking.
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
   needs 0.2 to 0.7 dB more drive than the reference for the same compression, from EXT and
   about as much from the oscillators: the filter's input side (R54 470 and the input pair),

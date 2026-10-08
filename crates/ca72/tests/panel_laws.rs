@@ -3,8 +3,8 @@
 //! rises over the knob's travel.
 
 use ca72::voice::{
-    FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, time_pot, time_pot_drawn,
-    volume_track,
+    FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, cutoff_track, time_pot,
+    time_pot_drawn, volume_track,
 };
 
 #[test]
@@ -54,6 +54,27 @@ fn the_mixers_volume_follows_the_reference_at_its_marks() {
     for k in 0..=1000 {
         let t = volume_track(k as f64 / 1000.0);
         assert!(t > last || k == 0, "VOLUME {k}/1000: {t}");
+        last = t;
+    }
+}
+
+#[test]
+fn cutoff_follows_the_reference_at_its_marks() {
+    for (p, t) in [(0.1, 0.0582), (0.3, 0.2669), (0.7, 0.7304), (0.9, 0.9346)] {
+        assert!(
+            (cutoff_track(p) - t).abs() < 1e-12,
+            "CUTOFF {p}: {}",
+            cutoff_track(p)
+        );
+    }
+    // The stops and the centre as drawn: where the filter's trims were fitted.
+    assert_eq!(cutoff_track(0.0), 0.0);
+    assert_eq!(cutoff_track(0.5), 0.5);
+    assert_eq!(cutoff_track(1.0), 1.0);
+    let mut last = -1.0;
+    for k in 0..=1000 {
+        let t = cutoff_track(k as f64 / 1000.0);
+        assert!(t > last || k == 0, "CUTOFF {k}/1000: {t}");
         last = t;
     }
 }
