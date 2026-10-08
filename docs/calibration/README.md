@@ -205,6 +205,25 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    oscillator 1's was measured. At 0 and 10 nothing changes. Presets with a VOLUME between
    rise by up to 0.6 dB (Bass, Lead and Slow Horn Swell, at about 8; not re-levelled); the
    others stay within -136 dB.
+9. **The external input's preamplifier: R61 200K to 232K** (`preamp::R61`, 2026-10-08).
+   At the MIX, oscillator 1's sawtooth at VOLUME 10 against EXT's tone per volt at the jack
+   (VOLUME 2 and 5, clean) was 0.92 dB weaker on the reference than on the CA-72, the same
+   from 84 Hz to 1.5 kHz: a comparison of the two paths with the filter left out. Through
+   the filter, the CA-72 needed 1.0 to 2.0 dB more input than the reference for the same
+   compression of the main output (0.5, 1 and 2 dB, at EXT VOLUME 2 to 8; session H), while
+   the oscillators drive it more nearly as the reference's do (session D: 0.5 dB short at
+   170 Hz, about 2 at 84 Hz, where the takes beat slowly and the measure is coarse). So the
+   external path was short, and of its parts the preamplifier's gain is the one
+   that fits: in oscillator units the reference's path is 0.9 dB more sensitive but clips
+   0.7 dB lower, where a smaller R46 would have raised both. R61 at 232K (1 %, E96) gives
+   the circuit 0.97 dB more gain in ngspice (229K would give 0.89); the netlist and the
+   three real-time preamplifiers change together. Now the paths at the MIX agree within
+   0.04 dB, and the CA-72 needs 0.2 to 0.7 dB more input than the reference for the same
+   compression: the rest is on the filter's side, shared with the oscillators. The 2.2 dB
+   first estimated (change 4) came from session A's fit under the old taper. 5.26's test
+   now finds the OVERLOAD lamp at VOLUME 9.2, searched in steps of 0.1 (4.4 % at the output,
+   as before at 9.5). Only Pulse Strut (+0.4 dB) and Undertow Growl (+1.8 dB), whose
+   FEEDBACK runs through the input, change.
 
 ## Not changed, and why
 
@@ -224,9 +243,10 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   -2 and -4 the CA-72's corner is now about 0.18 and 0.36 octave high (session E's corners).
   Whether the reference's marks sit at other angles or its pot's ends differ needs the
   dial's end stops (photographs asked for).
-- **EXTERNAL INPUT's drive:** about 2.2 dB under the reference's at every mark (change 4).
-  Session D (the mixer's overdrive) is the comparison that tells whether the bus or the
-  external path accounts for it.
+- **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
+  needs 0.2 to 0.7 dB more drive than the reference for the same compression, from EXT and
+  about as much from the oscillators: the filter's input side (R54 470 and the input pair),
+  for the mixer's overdrive (session D) to settle.
 - **The contours' peak:** the attack ends at 1.17 [1.18] of the held level on the CA-72 and
   1.22 to 1.23 [1.26 to 1.27] on the reference: the peak divider (R33/R29 [R24/R27]) or CR3's
   [CR6's] threshold. And with DECAY at 0 the release's first half takes 1.9 to 2.2 ms against
@@ -238,7 +258,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   10.39 V), against 80 cents before.
 - **Not in this round:** KEYBOARD CONTROL's tracking (the reference's: 0.328 octave an
   octave with 1, 0.970 with both; not yet set beside the CA-72's), oscillators 2 and 3's
-  FREQUENCY spans, the mixer's overdrive (session D),
+  FREQUENCY spans,
   SUSTAIN's law, and VOLUME on oscillators 2 and 3 and the noise (taken as oscillator 1's).
 - **The presets** were not re-levelled: against 0.1.3 their levels now run -3.5 dB (Three
   Saw Slab) to +6.1 dB (Pink Riser) from the library's -18 LUFS, and Cruising Whistle's and

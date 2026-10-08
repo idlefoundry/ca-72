@@ -76,8 +76,8 @@ higher and fire sooner. This is a candidate for the owner's comparison.
 
 - `the_a440_and_the_external_input_meet_the_service_manual`: the A-440 at 440.00 Hz and
   -5.3 dB (5.7: -8 +- 2, B4-7); with -30 dB at 1 kHz into the external input the OVERLOAD
-  lamp lights at VOLUME 9.5 while the output's distortion is the filter's soft overdrive
-  (4.4 %), before the preamplifier clips (5.26).
+  lamp lights at VOLUME 9.2 (searched in steps of 0.1) while the output's distortion is the
+  filter's soft overdrive (4.4 %), before the preamplifier clips (5.26).
 - `filter_cal.rs`: Folkman's filter procedure run again against the committed trims, and
   the service manual's 5.13, 5.15 and 5.18 on the calibrated filter.
 

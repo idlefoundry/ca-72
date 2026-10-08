@@ -2223,6 +2223,7 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   octave); RANGE (R39) to the reference's 0.559; oscillator 3's R162 to 2.96K (its pitch with
   OSC. 3 CONTROL off); and, measured on the reference in place of the generic tapers (A9),
   the laws of EXTERNAL INPUT VOLUME (R9), EMPHASIS (R14), the four ATTACK and DECAY pots and
-  the mixer's VOLUME. The 8 and 12 ms keyboard delays stay; the presets are not re-levelled.
+  the mixer's VOLUME; and, at the owner's go, the external preamplifier's R61 to 232K (its
+  gain 0.97 dB up). The 8 and 12 ms keyboard delays stay.
   What still differs is listed in the calibration README.
 - **The number** of this record is a placeholder until the merge.

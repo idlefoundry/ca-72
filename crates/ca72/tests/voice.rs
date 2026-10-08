@@ -636,15 +636,14 @@ fn the_a440_and_the_external_input_meet_the_service_manual() {
         let thd = ((2..=10).map(|k| h(k).powi(2)).sum::<f64>()).sqrt() / h(1);
         (lamp, thd, dbu(dev(tail)))
     };
-    let mut lit_at = None;
-    for step in 0..=20 {
-        let vol = step as f64 / 20.0;
-        let (lamp, thd, level) = run(vol);
-        if lamp >= 0.5 {
-            lit_at = Some((vol, thd, level));
-            break;
-        }
-    }
+    // VOLUME in steps of 0.5 on the dial, then of 0.1 below the first that lights it.
+    let lit = |vols: &mut dyn Iterator<Item = f64>| {
+        vols.map(|vol| (vol, run(vol)))
+            .find(|(_, (lamp, _, _))| *lamp >= 0.5)
+            .map(|(vol, (_, thd, level))| (vol, thd, level))
+    };
+    let lit_at = lit(&mut (0..=20).map(|step| step as f64 / 20.0))
+        .and_then(|(coarse, ..)| lit(&mut (0..=5).map(|k| coarse - 0.05 + k as f64 / 100.0)));
     eprintln!(
         "A-440: {f:.2} Hz at {a_db:+.1} dB (5.7: -8 +- 2); the triangle at {t_db:+.1} dB (5.8: 1 +- 3), {:+.1} dB apart (the manual's -9); \
          external input -30 dB at 1 kHz: the lamp lights at VOLUME {:?} with the output's THD {:?} % at {:?} dB",

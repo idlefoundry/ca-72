@@ -2,15 +2,15 @@
 *
 * Source drawing: service manual Figure 9-11 (S-F911); reference designators are Figure
 * 9-11's. The EXTERNAL INPUT's volume (R9, 1M audio, on the front panel) feeds pin 11.
-* Preamplifier (2.12, "a 200 gain amplifier"): R78 1K and C23 into Q27 (R66 100K to
-* ground), paired with Q32 (TIS97; tail R58 150K to -10 V); Q27's collector (R65 27K; R64
-* 100 with C22 100 pF to +10 V) drives Q33 (2N4058), whose collector is the output with R57
-* 10K to -10 V; R61 200K against R62 1K (C26 220 uF to ground) and R63 1K close the loop
-* on Q32's base (C21 10 pF). C20 1.0 uF takes the output to pin 17 (SW10 and R46 33K to
-* the mixer's bus). Overload lamp driver (from +15 V): Q25 (2N3392) through R53 10K charges
-* C14 .47 uF from the output's peaks; R56 100K and R48 680K divide it toward -10 V onto Q31
-* (TIS93), which follows into Q34 (TIS92): Q34 sinks the lamp (pin 19, B1 from +15 V)
-* through R72 47 to the switched ground (pin 20).
+* Preamplifier (2.12, "a 200 gain amplifier"): R78 1K and C23 into Q27 (R66 100K to ground),
+* paired with Q32 (TIS97; tail R58 150K to -10 V); Q27's collector (R65 27K; R64 100 with C22
+* 100 pF to +10 V) drives Q33 (2N4058), whose collector is the output with R57 10K to -10 V;
+* R61 (200K; 232K here: B4-8) against R62 1K (C26 220 uF to ground) and R63 1K close the loop
+* on Q32's base (C21 10 pF). C20 1.0 uF takes the output to pin 17 (SW10 and R46 33K to the
+* mixer's bus). Overload lamp driver (from +15 V): Q25 (2N3392) through R53 10K charges C14
+* .47 uF from the output's peaks; R56 100K and R48 680K divide it toward -10 V onto Q31
+* (TIS93), which follows into Q34 (TIS92): Q34 sinks the lamp (pin 19, B1 from +15 V) through
+* R72 47 to the switched ground (pin 20).
 *
 * Ports: in (pin 11), out (pin 17), amp (the output before C20), lamp (pin 19), swgnd
 * (pin 20), p10, n10, p15.
@@ -27,7 +27,7 @@ r58   tail n10 150k                 ; R58 150K
 q33   amp c27 p10 Q2N4058           ; Q33 2N4058
 r57   amp n10 10k                   ; R57 10K
 r63   b32 n61 1k                    ; R63 1K
-r61   n61 amp 200k                  ; R61 200K
+r61   n61 amp 232k                  ; R61: 200K on the drawing; 232K where the hardware reference's gain sits (board4.md B4-8)
 r62   n61 n62 1k                    ; R62 1K
 c26   n62 0 220u                    ; C26 220 uF
 c21   b32 amp 10p                   ; C21 10 pF

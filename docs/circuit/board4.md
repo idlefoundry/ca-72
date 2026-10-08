@@ -140,9 +140,9 @@ the first pair's emitters), so the gain peaks at 5 V (+1.9 dB) and falls slightl
 2. **The preamplifier** ("a 200 gain amplifier", 2.12): R78 1K and C23 .1 uF into Q27 (R66
    100K to ground), paired with Q32 (TIS97; tail R58 150K to -10 V); Q27's collector (R65
    27K, with R64 100 and C22 100 pF to +10 V) drives Q33 (2N4058), whose collector is the
-   output with R57 10K to -10 V. R61 200K against R62 1K, AC-grounded by C26 220 uF, and
-   R63 1K close the loop on Q32's base (C21 10 pF): a gain of 201 in the audio band, 1 at
-   DC. In ngspice from a 100K source: 37.7 dB, within 1 dB of flat from 100 Hz to 20 kHz
+   output with R57 10K to -10 V. R61 200K (232K in the model: B4-8) against R62 1K,
+   AC-grounded by C26 220 uF, and R63 1K close the loop on Q32's base (C21 10 pF): a gain of
+   201 (233) in the audio band, 1 at DC. In ngspice from a 100K source: 37.7 dB (38.7), within 1 dB of flat from 100 Hz to 20 kHz
    (-0.9 dB at 20 kHz, -4 dB at 50 kHz). It clips at about -7.3 and +9.9 V.
 3. **The lamp driver**: Q25 (2N3392, R53 10K from the output) charges C14 .47 uF with the
    output's positive peaks; R56 100K and R48 680K divide it toward -10 V onto Q31 (TIS93),
@@ -221,7 +221,7 @@ hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
 | `board4ext_realtime.rs`: the preamplifier against ngspice from a 100K source | Gain within 0.003 dB at 100 Hz, 0.002 at 1 kHz, 0.024 at 10 kHz, 0.027 at 20 kHz; driven 20 V into clipping, its levels within 0.010 V; the lamp over half its current from 0.5 ms to 263.1 ms (ngspice 0.04 to 262.6 ms), 60.2 mA |
 | `derived_data.rs`: `the_a440_table_matches_the_circuit` | The committed table equals a fresh ngspice run |
 | `ca72/tests/a440.rs` | The played steady state's harmonics within 0.6 uV of the table, its mean exact; the start within 0.02 of the table at 20 and 100 ms |
-| `voice.rs`: `the_a440_and_the_external_input_meet_the_service_manual` | The A-440 at 440.00 Hz and -5.3 dB at the output (5.7: -8 +- 2: 0.7 dB above, B4-7); -30 dB at 1 kHz into the external input: the lamp lights at VOLUME 9.5 while the output's distortion is the filter's soft overdrive (4.4 %), before the preamplifier clips (20 % at 10) (5.26) |
+| `voice.rs`: `the_a440_and_the_external_input_meet_the_service_manual` | The A-440 at 440.00 Hz and -5.3 dB at the output (5.7: -8 +- 2: 0.7 dB above, B4-7); -30 dB at 1 kHz into the external input: the lamp lights at VOLUME 9.2 (searched in steps of 0.1) while the output's distortion is the filter's soft overdrive (4.4 %), before the preamplifier clips (5.26) |
 | `filter_cal.rs` | As above |
 
 ## Discrepancies and open items
@@ -248,3 +248,9 @@ hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
   The model therefore plays the unloaded waveform, as through an ideal buffer, at 440 Hz
   (assumptions A26). At the output it reads -5.3 dB, 0.7 dB above 5.7's window. For the
   owner's comparison.
+- **B4-8** (2026-10-08) R61 is 232K in the model, not the drawing's 200K: the hardware
+  reference's external input is 0.92 dB more sensitive, against its oscillators at the mixer,
+  than the CA-72's was, and its filter overdrives at as much less input. With R61 at 232K
+  (1 %, E96) the preamplifier gains 0.97 dB more (ngspice: 38.69 against 37.72 dB from a
+  100K source at 1 kHz); its clipping, set by its output's swing, is unchanged
+  (docs/calibration, change 9).
