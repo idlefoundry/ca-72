@@ -253,3 +253,104 @@ def session_b():
                   "five 2 s gates, no input: the thump's whole recovery"))
     t.extend(reference())
     return t
+
+
+# The CA-72's panel for the knob sessions (ca72-lab's keys). Session A's home with both
+# SUSTAINs at 10, as the owner set them on 2026-10-08 (loudness from about 6) and
+# EXTERNAL INPUT VOLUME 5 as fitted (0.375).
+HOME = {
+    "osc1_on": False, "osc2_on": False, "osc3_on": False, "noise_on": False,
+    "ext_on": True, "ext_volume": 0.375,
+    "cutoff": 1.0, "emphasis": 0.0, "contour_amount": 0.0,
+    "keyboard_control_1": False, "keyboard_control_2": False,
+    "filter_mod": False, "osc_mod": False, "mod_wheel": 0.0, "glide": 0.0, "glide_on": False,
+    "filter_attack": 0.0, "filter_sustain": 1.0,
+    "loudness_attack": 0.0, "loudness_sustain": 1.0,
+    "decay": False, "a440": False, "osc3_control": True,
+}
+
+
+def held_vpo(levels, step=1.2, settle=0.25):
+    """LC GATE held while OSC 1V/OCT steps through levels (fractions of full scale), each
+    for step s. A segment is [t0, t1, level], settle s after its step."""
+    seconds = LEAD + len(levels) * step + 0.4
+    lc, vpo = zeros(seconds), zeros(seconds)
+    lc[span(LEAD, seconds - 0.1)] = GATE
+    segs = []
+    for i, v in enumerate(levels):
+        t0 = LEAD + i * step
+        vpo[span(t0, t0 + step)] = v
+        segs.append([round(t0 + settle, 4), round(t0 + step - 0.05, 4), v])
+    return seconds, {"lc_gate": lc, "vpo": vpo}, {"segments": segs}
+
+
+def panel_take(name, panel, set_line, levels=(0.0, 0.1, 0.2), step=1.2, notes=""):
+    s, sig, ev = held_vpo(levels, step)
+    t = take(name, s, sig, ev, notes)
+    t["panel"] = dict(panel)
+    t["set"] = set_line
+    return t
+
+
+def session_c():
+    """The oscillators, one at a time into the mixer at 8' unless a take says otherwise, the
+    filter open, LC GATE held, OSC 1V/OCT stepped 0, +1 and +2 V: each waveform's shape and
+    level (MIX beside MAIN), the ranges, the mixer's VOLUME, FREQUENCY's ends and OSC. 3
+    CONTROL. The panel moves one knob or switch a take, in this order."""
+    t = []
+    ref = reference()[0]
+    ref["panel"] = dict(HOME)
+    ref["set"] = "nothing: the home panel with both SUSTAINs at 10"
+    t.append(ref)
+
+    p = dict(HOME, ext_on=False)
+    for n in (1, 2, 3):
+        p.update({f"osc{n}_range": "8", f"osc{n}_waveform": "triangle", f"osc{n}_volume": 1.0})
+        if n > 1:
+            p[f"osc{n}_freq"] = 0.5
+    p["osc1_on"] = True
+    t.append(panel_take(
+        "osc1_triangle", p,
+        "EXT IN switch OFF; OSC 1 ON, VOLUME 10, RANGE 8', WAVEFORM triangle; OSC 2 and 3 OFF, "
+        "each RANGE 8', FREQUENCY 0, WAVEFORM triangle, VOLUME 10; NOISE OFF; OSC 3 CONTROL ON; "
+        "OSC MODULATION OFF; FILTER MODULATION OFF; GLIDE OFF; TUNE 0"))
+
+    def step(name, set_line, levels=(0.0, 0.1, 0.2), stp=1.2, **change):
+        p.update(change)
+        t.append(panel_take(name, p, set_line, levels, stp))
+
+    step("osc1_sharktooth", "OSC 1 WAVEFORM one click clockwise (shark tooth)",
+         osc1_waveform="sharktooth")
+    step("osc1_sawtooth", "OSC 1 WAVEFORM one more click (sawtooth)",
+         levels=(0.0, 0.1, 0.2, 0.3, 0.4), osc1_waveform="sawtooth")
+    for r in ("4", "2", "16", "32"):
+        step(f"osc1_range{r}", f"OSC 1 RANGE {r}'", osc1_range=r)
+    step("osc1_rangelo", "OSC 1 RANGE LO", levels=(0.0, 0.1, 0.2, 0.3), stp=3.0,
+         osc1_range="lo")
+    step("osc1_vol8", "OSC 1 RANGE back to 8'; OSC 1 VOLUME 8", osc1_range="8",
+         osc1_volume=0.8)
+    for v in (6, 4, 2, 0):
+        step(f"osc1_vol{v}", f"OSC 1 VOLUME {v}", osc1_volume=v / 10)
+    step("osc1_square", "OSC 1 VOLUME back to 10; OSC 1 WAVEFORM one click clockwise (square)",
+         osc1_volume=1.0, osc1_waveform="square")
+    step("osc1_wide", "OSC 1 WAVEFORM one more click (wide rectangle)", osc1_waveform="wide")
+    step("osc1_narrow", "OSC 1 WAVEFORM one more click (narrow rectangle)",
+         osc1_waveform="narrow")
+
+    step("osc2_triangle", "OSC 1 switch OFF; OSC 2 switch ON", osc1_on=False, osc2_on=True)
+    for w, k in (("sharktooth", "shark tooth"), ("sawtooth", "sawtooth"), ("square", "square"),
+                 ("wide", "wide rectangle"), ("narrow", "narrow rectangle")):
+        step(f"osc2_{w}", f"OSC 2 WAVEFORM one click clockwise ({k})", osc2_waveform=w)
+    step("osc2_freq_cw", "OSC 2 FREQUENCY fully clockwise", osc2_freq=1.0)
+    step("osc2_freq_ccw", "OSC 2 FREQUENCY fully counterclockwise", osc2_freq=0.0)
+
+    step("osc3_triangle", "OSC 2 FREQUENCY back to 0 and OSC 2 switch OFF; OSC 3 switch ON",
+         osc2_freq=0.5, osc2_on=False, osc3_on=True)
+    for w, k in (("reverse", "reverse sawtooth"), ("sawtooth", "sawtooth"), ("square", "square"),
+                 ("wide", "wide rectangle"), ("narrow", "narrow rectangle")):
+        step(f"osc3_{w}", f"OSC 3 WAVEFORM one click clockwise ({k})", osc3_waveform=w)
+    step("osc3_freq_cw", "OSC 3 FREQUENCY fully clockwise", osc3_freq=1.0)
+    step("osc3_freq_ccw", "OSC 3 FREQUENCY fully counterclockwise", osc3_freq=0.0)
+    step("osc3_control_off", "OSC 3 FREQUENCY back to 0; OSC 3 CONTROL OFF", osc3_freq=0.5,
+         osc3_control=False)
+    return t

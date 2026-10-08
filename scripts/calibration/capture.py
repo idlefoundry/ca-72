@@ -143,6 +143,7 @@ def run_take(take, outdir, index, session, sd):
         "notes": take.get("notes", ""),
         "events": take.get("events", {}),
         "panel": take.get("panel", "home"),
+        "set": take.get("set", ""),
         "wav": os.path.basename(wav),
         "wav_sha256": sha256(wav),
     }

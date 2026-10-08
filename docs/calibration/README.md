@@ -21,7 +21,7 @@ features (its LFO, patch points, high-pass mode, a second DECAY switch) are not 
 |---|---|
 | Interface | MOTU 828ES on the Mac, its own driver, 48 kHz. On Linux over class-compliant USB, playback started alongside a capture shifted the captured channels by 16 or scrambled them; capture alone was sound |
 | Control | Two Expert Sleepers ES-3 on the interface's optical outputs: DC-coupled, sample-locked with the inputs. ES-3 #1 outputs 1 to 5 (computer channels 9 to 13) drive LC GATE, FC GATE, OSC 1 V/OCT, CUT CV and EXT; output 6 (14) is looped back into analog input 5 (computer input 7) |
-| Recorded | The reference's rear MAIN OUTPUT (analog input 1, computer input 3) and its MIX jack (analog input 3, computer input 5) |
+| Recorded | The reference's main output (analog input 1, computer input 3; the rear HIGH or the front 3.5 mm MAIN, to be confirmed) and its MIX jack (analog input 3, computer input 5) |
 | Stream | `sounddevice.playrec`: stimuli out and responses in on one clock. The driver's latency (12,387 samples) is measured on every take from a timing mark on the loopback and removed |
 | Interface's input | A first-order high-pass of 0.94 Hz (169.5 ms, from a DC step on the loopback): renders are passed through it before a comparison of slow events (the VCA's thump) |
 | Scale | The ES-3's full scale is about 10 V (an octave per 0.1 of full scale measured 1.042 octaves on the reference's V/OCT input, so 10.42 V if that input is exact). Comparisons that need volts carry this ±4 % |
