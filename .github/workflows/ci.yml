@@ -5,9 +5,10 @@
 # Unit (scripts/validate.sh). The bundles and installers are kept as the run's artifacts; the
 # macOS ones are universal (Apple silicon and Intel) and not yet signed. Linux builds on
 # Ubuntu 22.04 so that its bundles load on distributions as old as its C library. A tag
-# v<version> also puts the Windows and Linux installers, the notices and the checksums into
-# that version's draft release (made here if the macOS release has not made it), for a maintainer to
-# publish (decisions.md R17, R20).
+# v<version> also puts the Windows and Linux installers, the Windows ZIP for installing by hand
+# (scripts/windows-zip.sh), the notices and the checksums into that version's draft release
+# (made here if the macOS release has not made it), for a maintainer to publish (decisions.md
+# R17, R20).
 name: CI
 
 on:
@@ -149,6 +150,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v5
 
@@ -157,6 +159,20 @@ jobs:
           pattern: CA-72-*-installer
           path: installers
           merge-multiple: true
+
+      - name: The Windows ZIP, CI's Windows bundles unchanged, for installing by hand
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.name == "CA-72-Windows") | .id')
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > windows-artifact.zip
+          mkdir windows-bundles
+          (cd windows-bundles && unzip -q ../windows-artifact.zip)
+          CA72_WINDOWS_ARTIFACT_ID="$id" \
+            CA72_WINDOWS_ARTIFACT_SHA256="$(sha256sum windows-artifact.zip | cut -d' ' -f1)" \
+            bash scripts/windows-zip.sh windows-bundles
+          cp target/packages/CA-72-*-Windows-x86_64.zip* installers/
 
       - name: The installers, their checksums and the notices, into the release's draft
         env:
@@ -176,7 +192,8 @@ jobs:
               --title "CA-72 $version" \
               --notes "Installers for Windows (10 or 11, 64-bit) and Linux (x86-64); the signed macOS installer is added from a Mac. How to install: see the README."
           fi
-          (cd installers && sha256sum CA-72-* > ../ci-sums.txt)
+          # The ZIP's own .sha256 beside it (as 0.1.4's) is not listed.
+          (cd installers && sha256sum $(ls CA-72-* | grep -v '\.sha256$') > ../ci-sums.txt)
           # CI's line for a file before the draft's earlier one: sort -u keeps the first (R24).
           cat ci-sums.txt earlier/SHA256SUMS.txt 2>/dev/null | sort -s -u -k2 > installers/SHA256SUMS.txt
           gh release upload "$GITHUB_REF_NAME" installers/* --clobber
