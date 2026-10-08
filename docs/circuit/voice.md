@@ -157,7 +157,7 @@ allocations.
 **The rear jacks** (2026-09-29; A5). `Voice::tick_jacks` takes, each sample, the EXTERNAL
 INPUT and the four rear jacks (`Jacks`: `None` an empty jack, its normal contact in
 place): the oscillators' control input holds their external bus (8A; the circuit's scale
-0.984 octaves a volt, within 0.14 cent of ngspice from -4 to +4 V, `expo_realtime.rs`), the
+0.998 octaves a volt with R38 50.5K, 0.987 with the drawing's 51.1K (docs/calibration), within 0.14 cent of ngspice from -4 to +4 V, `expo_realtime.rs`), the
 filter's feeds the control node through R51 100K (within 0.01 cent of ngspice from -8 to +4
 V, 0.49 cent at +8 V where Q28 saturates, `vcf_control.rs`), EXT. LOUDNESS drives Q21's
 tail through J3 (the gain within 0.09 dB of ngspice from 1 to 6 V; its useful range is

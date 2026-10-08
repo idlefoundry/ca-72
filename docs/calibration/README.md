@@ -24,7 +24,7 @@ features (its LFO, patch points, high-pass mode, a second DECAY switch) are not 
 | Recorded | The reference's main output (analog input 1, computer input 3; the rear HIGH or the front 3.5 mm MAIN, to be confirmed) and its MIX jack (analog input 3, computer input 5) |
 | Stream | `sounddevice.playrec`: stimuli out and responses in on one clock. The driver's latency (12,387 samples) is measured on every take from a timing mark on the loopback and removed |
 | Interface's input | A first-order high-pass of 0.94 Hz (169.5 ms, from a DC step on the loopback): renders are passed through it before a comparison of slow events (the VCA's thump) |
-| Scale | The ES-3's full scale is about 10 V (an octave per 0.1 of full scale measured 1.042 octaves on the reference's V/OCT input, so 10.42 V if that input is exact). Comparisons that need volts carry this ±4 % |
+| Scale | The ES-3's full scale is 10.39 V. The reference's manual gives its oscillators' control input 1 V an octave; they moved 1.0407, 1.0386 to 1.0393 and 1.0381 octaves per 0.1 of full scale (session C), and its filter's self-oscillation 1.035 under CUT CV (session E): the ES-3 runs 3.9 % over 10 V. `ca72-lab stim --volts-fs 10.39` |
 
 The listening page of 2026-10-08 is `listen/2026-10-08/index.html` there. Captures and
 renders are kept outside the repository (they are large; a capture's JSON has
@@ -88,6 +88,18 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    reference (0.1.3: 9.7 to 16.9 ms later). One DECAY switch still serves both. The drawing's arrangement is kept (`dump_each: false`) and tested
    against ngspice beside the new one. It changes only presets with DECAY off (Pulse Strut,
    Cruising Whistle, Slow Bow, Pink Riser); the others render the same to the bit.
+2. **The oscillators' external control input, R38, R63 and R144: 51.1K to 50.5K**
+   (`expo::R_EXT`, 2026-10-09). The keyboard reaches each oscillator through R27 51.1K and
+   the factory's scale trim makes its keys exact; the rear jack's resistor, the same 51.1K,
+   then gives 0.987 octaves a volt (measured on the model, session C's take
+   `03_osc1_sawtooth`). The reference's control input is 1 V an octave (its manual; its three
+   oscillators 1.0016, 0.9996 to 1.0003 and 0.9991 with the ES-3 at 10.39 V). 50.5K (1 %,
+   E192) gives 0.998: 1.0374 octaves per 0.1 of full scale against 1.0407 (oscillator 1)
+   and 1.038 to 1.039 (2 and 3), where 51.1K gave 0.987. The keys stay exact: the factory
+   tuning runs on the model as before. An empty jack's bus now rests at +0.067 V (R156 33K
+   against the three 50.5K), not +0.107 V; the tuning absorbs it. The plug-in has no jack
+   (R3), so this changes what a plugged jack does (the DAW's device, `ca72-lab stim`), and
+   the presets only by the tuning's re-solve.
 
 ## Not changed, and why
 

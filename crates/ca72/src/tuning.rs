@@ -199,10 +199,11 @@ impl Buses {
     };
 }
 
-/// An undriven bus's voltage (the external input with its jack empty): R163 or R156 33K
-/// from +10 V against the three oscillators' 51.1K inputs to their summing junctions at
-/// -5 V (board1.md, "Oscillators 2 and 3", 4).
-pub const OPEN_BUS: f64 = (10.0 / 33e3 - 3.0 * 5.0 / 51.1e3) / (1.0 / 33e3 + 3.0 / 51.1e3);
+/// An undriven bus's voltage (the external input with its jack empty): R156 33K from +10 V
+/// against the three oscillators' external inputs ([`crate::expo::R_EXT`]) to their summing
+/// junctions at -5 V (board1.md, "Oscillators 2 and 3", 4).
+pub const OPEN_BUS: f64 =
+    (10.0 / 33e3 - 3.0 * 5.0 / crate::expo::R_EXT) / (1.0 / 33e3 + 3.0 / crate::expo::R_EXT);
 
 /// [`osc_drive`] with the buses given.
 pub fn osc_drive_with(osc: Osc, t: &Tuning, v_kbd: f64, buses: &Buses, range: Range) -> Drive {

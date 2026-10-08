@@ -179,18 +179,20 @@ pub fn netlist(trims: &Trims, ctl: &Controls, supplies: Supplies, solver: Solver
     match ctl.osc {
         Osc::One => {
             // R12 bend, R21 tune, R27 keyboard, R32 modulation, R38 external, R43 range.
-            s.push_str(
+            s.push_str(&format!(
                 "r12 bend sum 150k\nr21 tune sum 560k\nr27 kbd sum 51.1k\nr32 mod sum 51.1k\n\
-                 r38 ext sum 51.1k\nr43 rng sum 15k\n",
-            );
+                 r38 ext sum {rext}\nr43 rng sum 15k\n",
+                rext = ca72::expo::R_EXT,
+            ));
             s.push_str(&vco("sum"));
         }
         Osc::Two { freq } => {
             // R96, R88, R80, R72, R63, R52; the FREQUENCY network on IC4's + input.
-            s.push_str(
+            s.push_str(&format!(
                 "r96 bend sum 150k\nr88 tune sum 560k\nr80 kbd sum 51.1k\nr72 mod sum 51.1k\n\
-                 r63 ext sum 51.1k\nr52 rng sum 15k\nx2f freq pos vn mm_osc2freq\n",
-            );
+                 r63 ext sum {rext}\nr52 rng sum 15k\nx2f freq pos vn mm_osc2freq\n",
+                rext = ca72::expo::R_EXT,
+            ));
             s.push_str(&freq_pot("4", "freq", freq));
             s.push_str(&vco("sum"));
         }
@@ -199,10 +201,11 @@ pub fn netlist(trims: &Trims, ctl: &Controls, supplies: Supplies, solver: Solver
             // SW2 joins 16A to the summing junction (15A) or, off, to the -5 V line. R179
             // (range) and R143 (IC8) go to the summing junction directly. R171 (the reverse
             // sawtooth's input) loads the sawtooth.
-            s.push_str(
+            s.push_str(&format!(
                 "r110 bend in3 150k\nr120 tune in3 560k\nr129 kbd in3 51.1k\nr136 mod in3 51.1k\n\
-                 r144 ext in3 51.1k\nr179 rng sum 15k\n",
-            );
+                 r144 ext in3 {rext}\nr179 rng sum 15k\n",
+                rext = ca72::expo::R_EXT,
+            ));
             s.push_str(&format!(
                 "rsw2 in3 {} 1m\nrsw10 fw ctl {}\nx8 fw ctl sum vp vn mm_osc3ctl\n\
                  x37 saw rev vp vn mm_revsaw\n",

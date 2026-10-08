@@ -109,9 +109,15 @@ pub struct Input {
     pub v: f64,
 }
 
+/// The external control input's resistor (oscillator 1's R38; R63 and R144 on oscillators 2
+/// and 3). Figure 9-3's 51.1K, against the keyboard's R27 51.1K with the scale trimmed to the
+/// keys, puts the rear jack at 0.987 octaves a volt; 50.5K (1 %, E192) puts it at 0.998, as
+/// the hardware reference's oscillators take a volt an octave (docs/calibration).
+pub const R_EXT: f64 = 50.5e3;
+
 /// Oscillator 1's summing resistors (Figure 9-3): bend R12, tune R21, keyboard R27,
-/// modulation R32, external R38, range R43.
-pub const OSC1_INPUT_R: [f64; 6] = [150e3, 560e3, 51.1e3, 51.1e3, 51.1e3, 15e3];
+/// modulation R32, external R38 ([`R_EXT`]), range R43.
+pub const OSC1_INPUT_R: [f64; 6] = [150e3, 560e3, 51.1e3, 51.1e3, R_EXT, 15e3];
 
 /// The converter's solved state: the collector current and the node voltages the lab
 /// compares with ngspice.
