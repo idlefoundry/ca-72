@@ -114,11 +114,14 @@ def run_take(take, outdir, index, session, sd):
     if loud:
         problems.append(f"idle inputs not quiet: {loud}")
     base = f"{index:02d}_{take['name']}"
-    cols = ["main", "mix", "loop"] + [s for s in ("ext", "cut", "lc_gate", "fc_gate", "vpo")]
+    extra = [f"in{c}" for c in range(11, 27)] if take.get("record_optical") else []
+    cols = ["main", "mix", "loop"] + [s for s in ("ext", "cut", "lc_gate", "fc_gate", "vpo")] + extra
     data = np.zeros((n, len(cols)), np.float32)
     for i, c in enumerate(cols):
         if c in IN:
             data[:, i] = rec[:, IN[c] - 1]
+        elif c.startswith("in") and c[2:].isdigit():
+            data[:, i] = rec[:, int(c[2:]) - 1]
         else:
             data[:, i] = out[:, OUT[c] - 1]
     wav = os.path.join(outdir, base + ".wav")
@@ -144,6 +147,7 @@ def run_take(take, outdir, index, session, sd):
         "events": take.get("events", {}),
         "panel": take.get("panel", "home"),
         "set": take.get("set", ""),
+        "midi_note": take.get("midi_note"),
         "wav": os.path.basename(wav),
         "wav_sha256": sha256(wav),
     }

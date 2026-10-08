@@ -207,6 +207,73 @@ def noise(meta, c):
     return out
 
 
+def f0_of(x, lo=0.5, hi=8000.0):
+    """The fundamental of a periodic x, Hz: the lowest strong peak of its spectrum, then the
+    frequency whose first 12 harmonics carry the most energy (a fine search about it)."""
+    w = np.hanning(len(x))
+    n = 1 << int(np.ceil(np.log2(len(x) * 16)))
+    X = np.abs(np.fft.rfft(x * w, n))
+    f = np.fft.rfftfreq(n, 1 / FS)
+    m = (f >= lo) & (f <= hi)
+    peak = X[m].max()
+    strong = np.nonzero(m & (X > 0.05 * peak))[0]
+    i = strong[0]
+    while i + 1 < len(X) and X[i + 1] > X[i]:
+        i += 1
+    t = np.arange(len(x)) / FS
+
+    def energy(g):
+        return sum(abs(np.sum(x * w * np.exp(-2j * np.pi * h * g * t))) ** 2
+                   for h in range(1, 13) if h * g < FS / 2)
+
+    a, b = f[i] * 0.995, f[i] * 1.005
+    for _ in range(40):
+        c1, c2 = a + (b - a) * 0.382, a + (b - a) * 0.618
+        if energy(c1) > energy(c2):
+            b = c2
+        else:
+            a = c1
+    return 0.5 * (a + b)
+
+
+def spectrum_of(x, f, n=24):
+    """Harmonics 1..n of f: levels in dB re the first, and phases re the first's (each
+    harmonic's phase less h times the first's, degrees)."""
+    w = np.hanning(len(x))
+    t = np.arange(len(x)) / FS
+    z = np.array([np.sum(x * w * np.exp(-2j * np.pi * h * f * t)) if h * f < FS / 2 else 0
+                  for h in range(1, n + 1)])
+    lev = db(np.abs(z) / np.abs(z[0]))
+    ph = np.degrees(np.angle(z * np.exp(-1j * np.arange(1, n + 1) * np.angle(z[0]))))
+    return lev, ph, 2 * np.abs(z[0]) / np.sum(w)
+
+
+def osc(meta, c):
+    """An oscillator take (plans.session_c): each V/OCT step's pitch, the MIX's level and
+    harmonics, and the main output against the MIX."""
+    rows = []
+    for t0, t1, v in meta["events"]["segments"]:
+        mx, mn = seg(c["mix"], t0, t1), seg(c["main"], t0, t1)
+        mx, mn = mx - mx.mean(), mn - mn.mean()
+        f = f0_of(mx)
+        lev, ph, h1 = spectrum_of(mx, f)
+        lev_m, _, h1_m = spectrum_of(mn, f)
+        rows.append({
+            "vpo": v, "hz": round(f, 4),
+            "mix_rms_db": round(float(db(np.sqrt(np.mean(mx * mx)))), 2),
+            "mix_peak": round(float(np.max(np.abs(mx))), 4),
+            "mix_h1_db": round(float(db(h1)), 2),
+            "main_rms_db": round(float(db(np.sqrt(np.mean(mn * mn)))), 2),
+            "main_over_mix_h1_db": round(float(db(h1_m / h1)), 3),
+            "mix_h_db": [round(float(x), 2) for x in lev],
+            "mix_h_deg": [round(float(x), 1) for x in ph],
+            "main_h_db": [round(float(x), 2) for x in lev_m],
+        })
+    for a, b in zip(rows, rows[1:]):
+        b["octaves_from_prev"] = round(float(np.log2(b["hz"] / a["hz"])), 5)
+    return rows
+
+
 ANALYSES = {
     "noise": noise, "gate_noise": noise,
     "ext_1k_levels": levels, "ext_200_levels": levels, "ext_200_levels_cut-0.3": levels,
@@ -218,7 +285,9 @@ ANALYSES = {
 
 def analyze(take_json, render=None):
     meta, c = load(take_json, render)
-    fn = ANALYSES.get(meta["take"])
+    name = meta["take"]
+    fn = ANALYSES.get(name) or (osc if name.startswith("osc") else
+                                levels if name.endswith("_levels") else None)
     return meta, (fn(meta, c) if fn else None)
 
 

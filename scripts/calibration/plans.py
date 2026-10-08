@@ -354,3 +354,256 @@ def session_c():
     step("osc3_control_off", "OSC 3 FREQUENCY back to 0; OSC 3 CONTROL OFF", osc3_freq=0.5,
          osc3_control=False)
     return t
+
+
+def session_d():
+    """The mixer's overdrive: sawtooths at 8', FREQUENCY 0, the filter open. Oscillator 1 at
+    VOLUME 10 (session C has it alone at 2 to 10), oscillator 2 added at VOLUME 2 to 10,
+    then oscillator 3 at 2 to 10. LC GATE held, OSC 1V/OCT at 0 and +1 V for 2 s each."""
+    t = []
+    p = dict(HOME, ext_on=False)
+    for n in (1, 2, 3):
+        p.update({f"osc{n}_range": "8", f"osc{n}_waveform": "sawtooth", f"osc{n}_volume": 1.0,
+                  f"osc{n}_on": n < 3})
+        if n > 1:
+            p[f"osc{n}_freq"] = 0.5
+    lv = (0.0, 0.1)
+
+    def step(name, set_line, **change):
+        p.update(change)
+        t.append(panel_take(name, p, set_line, lv, 2.0))
+
+    step("osc12_vol2",
+         "OSC 3 FREQUENCY back to 0 and OSC 3 switch OFF; OSC 1 and OSC 2 WAVEFORM to sawtooth; "
+         "OSC 1 switch ON (VOLUME 10); OSC 2 switch ON at VOLUME 2", osc2_volume=0.2)
+    for v in (4, 6, 8, 10):
+        step(f"osc12_vol{v}", f"OSC 2 VOLUME {v}", osc2_volume=v / 10)
+    step("osc123_vol2", "OSC 3 WAVEFORM to sawtooth; OSC 3 switch ON at VOLUME 2",
+         osc3_on=True, osc3_volume=0.2)
+    for v in (4, 6, 8, 10):
+        step(f"osc123_vol{v}", f"OSC 3 VOLUME {v}", osc3_volume=v / 10)
+    return t
+
+
+def sweep_take(name, panel, set_line, cuts, vpos=None, amp=0.005, midi=None, notes=""):
+    """Session A's sweeps into EXT at each CUT CV (and OSC 1V/OCT, if given, held through
+    each sweep), with the panel and the MIDI note last sent to the reference (its keyboard's
+    pitch; ca72-lab stim --key)."""
+    s, sig, ev = sweeps(amp, cuts)
+    if vpos is not None:
+        vpo = zeros(s)
+        for (t0, t1, _), v in zip(ev["segments"], vpos):
+            vpo[span(t0 - 0.4, t1 + 0.2)] = v
+        sig["vpo"] = vpo
+        ev["vpo"] = list(vpos)
+    t = take(name, s, sig, ev, notes)
+    t["panel"], t["set"] = dict(panel), set_line
+    if midi is not None:
+        t["midi_note"] = midi
+    return t
+
+
+def cutoff_knob(mark):
+    """CUTOFF's printed mark (-5..+5) as the CA-72's knob (0..1)."""
+    return (mark + 5) / 10
+
+
+def session_e():
+    """The filter: EMPHASIS 2.5, 5 and 7.5 (sweeps at a clean level, CUT CV -1 to -5 V),
+    EMPHASIS 10 self-oscillating against CUT CV, CUTOFF at its printed marks (CUT CV chosen
+    to keep the corner between about 300 Hz and 5 kHz), and KEYBOARD CONTROL 1, 2 and both
+    at MIDI notes 41 and 65 (two octaves) with CUTOFF at 0."""
+    t = []
+    ref = reference()[0]
+    ref["panel"] = dict(HOME)
+    ref["set"] = "OSC 1, 2 and 3 switches OFF; EXT IN switch ON (EXT VOLUME stays at 5)"
+    t.append(ref)
+    p = dict(HOME)
+    cuts = [-0.1, -0.2, -0.3, -0.4, -0.5]
+    for e, line in ((2.5, "FILTER EMPHASIS 2.5 (halfway between 2 and 3)"),
+                    (5.0, "FILTER EMPHASIS 5"), (7.5, "FILTER EMPHASIS 7.5")):
+        p["emphasis"] = e / 10
+        t.append(sweep_take(f"emph{e:g}", p, line, cuts))
+
+    p["emphasis"] = 1.0
+    steps = [round(-0.05 * i, 2) for i in range(11)]
+    s = LEAD + len(steps) * 0.8 + 0.4
+    lc, cv = zeros(s), zeros(s)
+    lc[span(LEAD, s - 0.1)] = GATE
+    segs = []
+    for i, c in enumerate(steps):
+        t0 = LEAD + i * 0.8
+        cv[span(t0, t0 + 0.8)] = c
+        segs.append([round(t0 + 0.25, 4), round(t0 + 0.75, 4), c])
+    x = take("emph10_selfosc", s, {"lc_gate": lc, "cut": cv}, {"segments": segs},
+             "no input, CUT CV stepped 0 to -5 V: the self-oscillation's pitch and level")
+    x["panel"], x["set"] = dict(p), "FILTER EMPHASIS 10"
+    t.append(x)
+
+    p["emphasis"] = 0.0
+    first = True
+    for mark, line in ((4, "CUTOFF FREQUENCY +4"), (2, "CUTOFF FREQUENCY +2"),
+                       (0, "CUTOFF FREQUENCY 0"), (-2, "CUTOFF FREQUENCY -2"),
+                       (-4, "CUTOFF FREQUENCY -4"), (-5, "CUTOFF FREQUENCY fully counterclockwise")):
+        p["cutoff"] = cutoff_knob(mark)
+        cs = sorted({round(min(0.5, max(-0.5, (d - mark) / 10)), 2) for d in (2, 0, -1)},
+                    reverse=True)
+        if first:
+            line = "FILTER EMPHASIS back to 0; " + line
+            first = False
+        t.append(sweep_take(f"cutoff{mark:+d}", p, line, cs))
+
+    p["cutoff"] = cutoff_knob(0)
+    for name, line, k1, k2, note, vpos in (
+            ("kbd1_n41", "CUTOFF FREQUENCY back to 0; KEYBOARD CONTROL 1 ON", True, False, 41,
+             None),
+            ("kbd1_n65", "nothing (I send MIDI note 65)", True, False, 65, None),
+            ("kbd12_n65", "KEYBOARD CONTROL 2 ON as well", True, True, 65, None),
+            ("kbd12_n41", "nothing (I send MIDI note 41)", True, True, 41, [0.0, 0.2]),
+            ("kbd2_n41", "KEYBOARD CONTROL 1 OFF (2 stays ON)", False, True, 41, None),
+            ("kbd2_n65", "nothing (I send MIDI note 65)", False, True, 65, None)):
+        p["keyboard_control_1"], p["keyboard_control_2"] = k1, k2
+        t.append(sweep_take(name, p, line, [0.0] * (len(vpos) if vpos else 1), vpos,
+                            midi=note))
+    return t
+
+
+def session_h():
+    """EXTERNAL INPUT VOLUME at 2, 4, 6, 8 and 10, then back at 5: session A's 1 kHz steps
+    (LEVELS) at each, the filter open, LC GATE held. MIX gives the pot's taper with nothing
+    after it; the top steps the mixer's and the filter's overdrive."""
+    t = []
+    p = dict(HOME)
+    first = "KEYBOARD CONTROL 2 OFF; CUTOFF FREQUENCY fully clockwise; "
+    for v in (2, 4, 6, 8, 10, 5):
+        p["ext_volume"] = 0.375 if v == 5 else v / 10
+        s, sig, ev = level_steps(1000.0, LEVELS, 0.0)
+        x = take(f"extvol{v}_levels", s, sig, ev, "1 kHz steps into EXT, LC GATE held")
+        x["panel"] = dict(p)
+        x["set"] = first + f"EXT VOLUME {v}" if first else (
+            "EXT VOLUME back to 5" if v == 5 else f"EXT VOLUME {v}")
+        first = ""
+        t.append(x)
+    return t
+
+
+# Printed ATTACK/DECAY marks on the reference (1 ms fully counterclockwise to 10 s fully
+# clockwise). Knob values are the CA-72's audio-taper guess so a render starts near the
+# mark; the capture is what fits them.
+ATTACK_MARKS = (
+    ("1ms", 0.00, 0.8, 0.5, 2),
+    ("10ms", 0.18, 0.8, 0.5, 2),
+    ("100ms", 0.38, 1.2, 0.5, 2),
+    ("1s", 0.62, 3.5, 0.8, 1),
+    ("10s", 1.00, 14.0, 1.0, 1),
+)
+DECAY_MARKS = (
+    ("1ms", 0.00, 0.6, 0.8, 2),
+    ("10ms", 0.18, 0.6, 1.0, 2),
+    ("100ms", 0.38, 0.6, 1.5, 2),
+    ("1s", 0.62, 0.6, 5.0, 1),
+    ("10s", 1.00, 0.6, 16.0, 1),
+)
+
+
+def contour_take(name, panel, set_line, pulses, with_tone=True, notes=""):
+    """Gate pulses for the contour session. Each pulse is (gate, on, off) with gate one of
+    lc, fc or both. A 1 kHz tone rides EXT so the loudness contour is also in the main
+    output. Optical returns (FILT CONT, LOUD CONT) are recorded with the take."""
+    t = LEAD + 0.2
+    for _, on, off in pulses:
+        t += on + off
+    seconds = t + 0.3
+    ext, lc, fc = zeros(seconds), zeros(seconds), zeros(seconds)
+    if with_tone:
+        put(ext, max(LEAD - 0.05, 0.0), tone(1000.0, 0.005, seconds - LEAD + 0.05))
+    ev = []
+    t = LEAD + 0.2
+    for gate, on, off in pulses:
+        if gate in ("lc", "both"):
+            lc[span(t, t + on)] = GATE
+        if gate in ("fc", "both"):
+            fc[span(t, t + on)] = GATE
+        ev.append([round(t, 4), round(on, 4), gate])
+        t += on + off
+    x = take(name, seconds, {"ext": ext, "lc_gate": lc, "fc_gate": fc} if with_tone else
+             {"lc_gate": lc, "fc_gate": fc},
+             {"pulses": ev, "tone_hz": 1000.0 if with_tone else None}, notes)
+    x["panel"], x["set"], x["record_optical"] = dict(panel), set_line, True
+    return x
+
+
+def session_f():
+    """The contours at their printed ATTACK and DECAY marks and SUSTAIN 0, 5 and 10.
+    Loudness first, then the filter, each contour's output patched to a DC-coupled modular
+    return (computer inputs 11 to 26). LC GATE and FC GATE pulsed separately so each
+    contour is seen on its jack and, for loudness, on the main output."""
+    t = []
+    p = dict(HOME)
+    pulses_id = (("lc", 0.4, 0.6), ("fc", 0.4, 0.6))
+    t.append(contour_take(
+        "identify", p,
+        "Patch FILT CONT and LOUD CONT into two DC-coupled modular inputs that return "
+        "through the MOTU's optical ins; leave EXT VOLUME at 5, CUTOFF fully clockwise, "
+        "KEYBOARD CONTROL off, both ATTACK at 1 ms, both SUSTAIN at 10, both DECAY switches off",
+        pulses_id, notes="which optical inputs the two contour jacks land on"))
+
+    def add(name, line, pulses, **change):
+        p.update(change)
+        t.append(contour_take(name, p, line, pulses))
+
+    for mark, knob, on, off, n in ATTACK_MARKS:
+        line = (f"LOUDNESS ATTACK to the {mark} mark" if mark != "1ms" else
+                "nothing: both ATTACK already at 1 ms")
+        add(f"loud_att_{mark}", line, (("lc", on, off),) * n, loudness_attack=knob)
+    add("loud_att_cw", "LOUDNESS ATTACK fully clockwise (past the 10 s mark)",
+        (("lc", 14.0, 1.0),), loudness_attack=1.0)
+    add("loud_att_1ms_again", "LOUDNESS ATTACK back to 1 ms",
+        (("lc", 0.8, 0.5),) * 2, loudness_attack=0.0)
+
+    add("loud_dec_on_1ms", "LOUDNESS DECAY switch ON (FILTER DECAY stays off); LOUDNESS DECAY at 1 ms",
+        (("lc", 0.6, 0.8),) * 2, decay=True, loudness_decay=0.0)
+    for mark, knob, on, off, n in DECAY_MARKS[1:]:
+        add(f"loud_dec_{mark}", f"LOUDNESS DECAY to the {mark} mark",
+            (("lc", on, off),) * n, loudness_decay=knob)
+    add("loud_dec_cw", "LOUDNESS DECAY fully clockwise (past the 10 s mark)",
+        (("lc", 0.6, 16.0),), loudness_decay=1.0)
+
+    add("loud_sus_0", "LOUDNESS DECAY back to the 100 ms mark; LOUDNESS SUSTAIN 0",
+        (("lc", 2.0, 1.5),) * 2, loudness_decay=0.38, loudness_sustain=0.0)
+    add("loud_sus_5", "LOUDNESS SUSTAIN 5",
+        (("lc", 2.0, 1.5),) * 2, loudness_sustain=0.5)
+    add("loud_sus_10", "LOUDNESS SUSTAIN back to 10",
+        (("lc", 2.0, 1.5),) * 2, loudness_sustain=1.0)
+
+    add("loud_dec_off", "LOUDNESS DECAY switch OFF; LOUDNESS DECAY back to 1 ms",
+        (("lc", 0.6, 0.8),) * 2, decay=False, loudness_decay=0.0)
+
+    add("filt_att_1ms", "FILTER ATTACK at 1 ms (already); I pulse FC GATE",
+        (("fc", 0.8, 0.5),) * 2, filter_attack=0.0)
+    for mark, knob, on, off, n in ATTACK_MARKS[1:]:
+        add(f"filt_att_{mark}", f"FILTER ATTACK to the {mark} mark",
+            (("fc", on, off),) * n, filter_attack=knob)
+    add("filt_att_cw", "FILTER ATTACK fully clockwise (past the 10 s mark)",
+        (("fc", 14.0, 1.0),), filter_attack=1.0)
+    add("filt_att_1ms_again", "FILTER ATTACK back to 1 ms",
+        (("fc", 0.8, 0.5),) * 2, filter_attack=0.0)
+
+    add("filt_dec_on_1ms", "FILTER DECAY switch ON (LOUDNESS DECAY stays off); FILTER DECAY at 1 ms",
+        (("fc", 0.6, 0.8),) * 2, decay=True, filter_decay=0.0)
+    for mark, knob, on, off, n in DECAY_MARKS[1:]:
+        add(f"filt_dec_{mark}", f"FILTER DECAY to the {mark} mark",
+            (("fc", on, off),) * n, filter_decay=knob)
+    add("filt_dec_cw", "FILTER DECAY fully clockwise (past the 10 s mark)",
+        (("fc", 0.6, 16.0),), filter_decay=1.0)
+
+    add("filt_sus_0", "FILTER DECAY back to the 100 ms mark; FILTER SUSTAIN 0",
+        (("fc", 2.0, 1.5),) * 2, filter_decay=0.38, filter_sustain=0.0)
+    add("filt_sus_5", "FILTER SUSTAIN 5",
+        (("fc", 2.0, 1.5),) * 2, filter_sustain=0.5)
+    add("filt_sus_10", "FILTER SUSTAIN back to 10",
+        (("fc", 2.0, 1.5),) * 2, filter_sustain=1.0)
+
+    add("filt_dec_off", "FILTER DECAY switch OFF; FILTER DECAY back to 1 ms",
+        (("fc", 0.6, 0.8),) * 2, decay=False, filter_decay=0.0)
+    return t
