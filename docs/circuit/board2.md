@@ -32,7 +32,9 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
    -10 V and R1 3K to ground [R57 4.7K and 4.7K to ground]).
 4. **Release.** V-trig at rest pulls the sustain node down through CR2 [CR9] and the DECAY
    jack's normal contacts: DECAY on, the capacitor decays to about 0.66 V at the DECAY
-   time; DECAY off, it is also dumped through CR7 [CR4] and R1401 1.5K to V-trig.
+   time; DECAY off, it is also dumped through CR7 [CR4] and R1401 1.5K to V-trig. On the
+   drawing both capacitors share R1401; the model gives each its own by default, as the
+   hardware reference has (B2-6).
 5. **Outputs.** The filter contour's follower is Q22 (NPN) with Q21 (PNP): one base-emitter
    drop (rest +0.15 V, peak 4.49 V); the loudness contour's is a Darlington, Q3 and Q2: two
    drops (rest -0.48 V, peak 5.28 V). The filter contour drives AMOUNT OF CONTOUR (5K) and
@@ -133,3 +135,14 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
 - **B2-5** The key contacts' resistance and their timing are not documented (A18): with two
   keys held the string's current flows through their contacts, and the lower key sounds
   I x R sharp (1.1 cents at 0.1 ohm).
+- **B2-6** (2026-10-08) The hardware reference releases one contour as fast whatever the
+  other holds, with DECAY off; through the drawing's one R1401 a contour held higher slows
+  the other's (the loudness release 32.3 against 14.3 ms to -40 dB, the filter contour held
+  or empty). The model gives each capacitor an R1401 1.5K of its own
+  (`ContourCircuit::dump_each`; docs/calibration); `false` is the drawing's. Both are
+  tested against ngspice (`contour_realtime.rs`).
+- **B2-7** (2026-10-08) With R1401 carrying about 2 mA (a contour held near 3.6 V, DECAY
+  off), V-trig falls below 3 V about 0.5 ms later in the model than in ngspice (they cross
+  half the rail together), so that release runs about 0.3 ms behind: 87 to 92 mV at 48 kHz,
+  161 to 166 mV at 24 kHz, in both arrangements. The test's budget for that case is 100 and
+  180 mV.

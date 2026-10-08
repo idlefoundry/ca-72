@@ -2190,3 +2190,31 @@ MIDI Learn (R34) as 0.1.3.
   `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
   (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.2's
   form.
+
+## R-CAL. A hardware reference, and the first change it settled
+**Owner decision, 2026-10-07.** The CA-72 is matched to the owner's Behringer Model D, a
+modern recreation of the instrument which the owner could not tell from a Model D in
+level- and pitch-matched recordings: "if we match this, that this will be the right thing to
+do." The comparisons with hardware become measurements ([calibration](calibration/README.md)).
+
+**Agent decisions, 2026-10-07 and 08** (not separately approved):
+- **Change the circuit, never the output:** a difference is traced to a component, trim or
+  device model, the netlist and the real-time model change together within their budgets
+  against ngspice, and the change is recorded as a deviation from the drawing. Calibration
+  is copied; the reference's own features are not targets.
+- **The rig:** the MOTU 828ES on the Mac (on Linux its class-compliant USB shifted the
+  captured channels once playback started beside a capture), two ES-3 for gates and
+  control voltages on the inputs' clock, one stream for stimuli and responses; captures and
+  renders on the lab's share, measured by the same code (`scripts/calibration/`,
+  `ca72-lab stim`).
+- **What the panel at its home settings showed** (oscillators off, EMPHASIS 0): the filter's
+  response against its corner matches within 0.7 dB from 600 Hz to 3.6 kHz; the loudness
+  contour's attack, held level and decay match with its knobs fitted; with DECAY off one
+  contour's release has the reference's shape. Differences that need the knobs moved (the
+  corner's mapping, the thump's size, EXTERNAL INPUT VOLUME's taper, the trigger delay from
+  MIDI) wait for a session at the instrument.
+- **One change: an R1401 for each contour** (`ContourCircuit::dump_each`, board2.md B2-6).
+  Through the drawing's one R1401 a contour held higher halved the other's release with
+  DECAY off; the reference's is the same whatever the other contour holds. It changes the
+  four presets with DECAY off; every other preset renders the same to the bit.
+- **The number** of this record is a placeholder until the merge.

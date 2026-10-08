@@ -20,6 +20,7 @@ still mention that DAW here and there.
 | [no-compromises-attempts.md](no-compromises-attempts.md) | What was tried to make No Compromises real time, what worked and what did not, ideas left |
 | [components.md](components.md) | Device models, their provenance and confidence |
 | [assumptions.md](assumptions.md) | Simplifications, what they leave out, when they are revisited |
+| [../calibration/README.md](../calibration/README.md) | The comparison with a hardware reference: the rig, the measurements, the changes it settled |
 
 ## Running the circuit lab
 

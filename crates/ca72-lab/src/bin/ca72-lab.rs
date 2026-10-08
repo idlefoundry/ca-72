@@ -361,18 +361,22 @@ fn play(rest: &[String]) -> Res {
 /// `scripts/calibration/capture.py` (columns main, mix, loop, then the stimuli ext, cut,
 /// lc_gate, fc_gate, vpo as fractions of the ES-3's full scale). EXT reaches the EXTERNAL
 /// INPUT jack, CUT the FILTER CONTROL jack (R51), VPO the oscillators' control jack, LC
-/// GATE closes EXT. S-TRIG while above half of its high level. The output WAV's channels:
+/// GATE closes EXT. S-TRIG while above half of its high level (`--gate-delay ON,OFF` ms later at
+/// its rise and its fall: the hardware reference's gate input's own delays, for a comparison
+/// by ear). The output WAV's channels:
 /// the main output (the voice's scale, 5 V as 1.0), the mixer bus's Norton current (mA),
 /// the filter's output (V), the loudness contour (V) and the preamplifier's output (V).
 fn stim(rest: &[String]) -> Res {
     use ca72::voice::{INPUT_VOLTS, Jacks, Panel, Voice};
     let usage = "ca72-lab stim <take.wav> <patch.json> <out.wav> [--volts-fs V] \
-                 [--cut-scale S] [--preroll SECONDS] [--quality MODE] [--no-vpo]";
+                 [--cut-scale S] [--preroll SECONDS] [--quality MODE] [--no-vpo] \
+                 [--gate-delay ON_MS,OFF_MS]";
     let mut volts_fs = 10.0;
     let mut cut_scale = 1.0;
     let mut preroll = 2.0;
     let mut q = Quality::NoCompromises;
     let mut vpo = true;
+    let mut gate_delay = (0.0, 0.0);
     let mut positional = Vec::new();
     let mut args = rest.iter();
     let num = |s: Option<&String>| -> Result<f64, String> {
@@ -385,6 +389,14 @@ fn stim(rest: &[String]) -> Res {
             "--preroll" => preroll = num(args.next())?,
             "--quality" => q = quality(args.next().ok_or(usage)?)?,
             "--no-vpo" => vpo = false,
+            "--gate-delay" => {
+                let v = args.next().ok_or(usage)?;
+                let (a, b) = v.split_once(',').ok_or(usage)?;
+                gate_delay = (
+                    a.parse::<f64>().map_err(|e| format!("{e}"))?,
+                    b.parse::<f64>().map_err(|e| format!("{e}"))?,
+                );
+            }
             other if other.starts_with("--") => {
                 return Err(format!("ca72-lab stim: unknown option {other}"));
             }
@@ -416,13 +428,35 @@ fn stim(rest: &[String]) -> Res {
     let built = t0.elapsed().as_secs_f64();
     let (ext, cut, lc, vp) = (&ch[3], &ch[4], &ch[5], &ch[7]);
     let high = lc.iter().fold(0.0f32, |a, &x| a.max(x));
+    // The gate as S-TRIG sees it: each rise and fall delayed as asked.
+    let (d_on, d_off) = (
+        (gate_delay.0 * 1e-3 * f64::from(rate)).round() as usize,
+        (gate_delay.1 * 1e-3 * f64::from(rate)).round() as usize,
+    );
+    let raw: Vec<bool> = lc.iter().map(|&x| high > 0.0 && x > 0.5 * high).collect();
+    let mut gate = vec![false; raw.len()];
+    let mut k = 0;
+    while k < raw.len() {
+        if !raw[k] {
+            k += 1;
+            continue;
+        }
+        let rise = k;
+        while k < raw.len() && raw[k] {
+            k += 1;
+        }
+        let (a, b) = (rise + d_on, (k + d_off).min(raw.len()));
+        for g in gate.iter_mut().take(b).skip(a) {
+            *g = true;
+        }
+    }
     let jacks = |i: Option<usize>| -> Jacks {
         let at = |c: &Vec<f32>| i.map_or(0.0, |i| f64::from(c[i]));
         Jacks {
             ext: at(ext) * volts_fs / INPUT_VOLTS,
             filter: Some(at(cut) * volts_fs * cut_scale),
             osc: vpo.then(|| at(vp) * volts_fs),
-            s_trig: i.is_some_and(|i| high > 0.0 && lc[i] > 0.5 * high),
+            s_trig: i.is_some_and(|i| gate[i]),
             ..Jacks::default()
         }
     };

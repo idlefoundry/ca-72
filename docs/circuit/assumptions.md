@@ -45,5 +45,8 @@ questions about the drawings themselves are in the board documents (B1-..., and 
 
 - Agreement with ngspice shows the real-time models agree with the transcribed circuit and
   these device models. It does not show agreement with a physical instrument.
-- The owner's hardware reference is existing recordings of unknown revision and condition
-  (decision 2026-09-28). Comparisons with them are qualitative.
+- The owner's hardware reference was existing recordings of unknown revision and condition
+  (decision 2026-09-28), compared qualitatively. Since 2026-10-07 it is a hardware
+  recreation of the instrument, measured with the same code as the model
+  ([calibration](../calibration/README.md)); a change it settles is recorded there as a
+  deviation from the drawing.

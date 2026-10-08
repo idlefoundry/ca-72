@@ -17,7 +17,8 @@
 //!   pot into the sustain node, held by the PNP follower Q8 [Q19] at the SUSTAIN divider's
 //!   voltage; on release V-trig pulls the node down through CR2 [CR9] (DECAY on: the final
 //!   decay at the DECAY time) and, with DECAY off, dumps the capacitor through CR7 [CR4]
-//!   and R1401 1.5K.
+//!   and R1401 1.5K: each capacitor through one of its own, as the hardware reference
+//!   does (`ContourCircuit::dump_each`), or both through the drawing's one.
 //! - **Output**: Q22 and Q21, a complementary follower [Q3 and Q2, a Darlington], whose
 //!   drop follows from its transistors at the load's current.
 //!
@@ -176,6 +177,12 @@ pub struct ContourCircuit {
     pub c13: f64,
     /// The left hand controller's R1401 (DECAY off).
     pub r1401: f64,
+    /// With DECAY off, each capacitor dumped through an R1401 of its own (the hardware
+    /// reference's, whose two DECAY switches release one contour as fast whatever the
+    /// other holds: docs/calibration), rather than both through the left hand
+    /// controller's one (Figure 9-12, `false`), where a contour held higher slows the
+    /// other's release.
+    pub dump_each: bool,
     pub filter: Section,
     pub loudness: Section,
     pub npn: Bjt,
@@ -202,6 +209,7 @@ impl Default for ContourCircuit {
             r34: 100e3,
             c13: 0.01e-6,
             r1401: 1.5e3,
+            dump_each: true,
             filter: FILTER_SECTION,
             loudness: LOUDNESS_SECTION,
             npn: Q2N3392,
@@ -323,8 +331,9 @@ pub struct Contours {
     /// node from its last solution with its slope analytic.
     lean: bool,
     trig_inputs: Option<(bool, bool, u64)>,
-    /// The lean modes' warm start for the dump node (NaN: none).
-    dump: f64,
+    /// The lean modes' warm starts for the dump nodes, filter and loudness (the same node
+    /// when they share R1401; NaN: none).
+    dump: [f64; 2],
     /// The transistors' parameters at the temperature, and what they were worked out for
     /// ([`Contours::devices`]).
     devices: std::cell::Cell<Option<DevicesAt>>,
@@ -581,7 +590,7 @@ impl Contours {
             sec_settled: [false; 2],
             lean: false,
             trig_inputs: None,
-            dump: f64::NAN,
+            dump: [f64::NAN; 2],
             devices: std::cell::Cell::new(None),
         }
     }
@@ -880,15 +889,16 @@ impl Contours {
             }
         };
         let (s0, s1) = (self.sections[0], self.sections[1]);
-        // The dump node (R1401's far end) for V-trig at `vt`: both diodes into R1401. (In
-        // High Fidelity and Potato from its last solution with its slope analytic, not from
-        // V-trig's voltage by differences: its bisections from there made the contours'
-        // slowest ticks.)
+        // The dump node (R1401's far end) for V-trig at `vt`, the diodes of the capacitors
+        // `caps` into one R1401: both into the left hand controller's one, or each into its
+        // own ([`ContourCircuit::dump_each`]). (In High Fidelity and Potato from its last
+        // solution with its slope analytic, not from V-trig's voltage by differences: its
+        // bisections from there made the contours' slowest ticks.)
         let (lean, dump_warm) = (self.lean, self.dump);
-        let dump_node = |vt: f64| {
-            let fd = |d: f64| si(s0.v - d).0 + si(s1.v - d).0 - (d - vt) / c.r1401;
-            let lo = vt.min(s0.v).min(s1.v) - 1.0;
-            let hi = vt.max(s0.v).max(s1.v) + 1.0;
+        let dump_node = |vt: f64, caps: &[f64], warm: f64| {
+            let fd = |d: f64| caps.iter().map(|&v| si(v - d).0).sum::<f64>() - (d - vt) / c.r1401;
+            let lo = caps.iter().fold(vt, |a, &v| a.min(v)) - 1.0;
+            let hi = caps.iter().fold(vt, |a, &v| a.max(v)) + 1.0;
             // Falling: the diodes' currents fall and R1401's grows as the node rises.
             debug_assert!(fd(lo) >= 0.0);
             if lean {
@@ -896,19 +906,34 @@ impl Contours {
                 // there is not its current's: no slope, and the root finder bisects. Nothing
                 // here carries an ampere.)
                 let fd_slope = |d: f64| {
-                    let ((i0, g0), (i1, g1)) = (si(s0.v - d), si(s1.v - d));
-                    let f = i0 + i1 - (d - vt) / c.r1401;
+                    let (i, g) = caps.iter().fold((0.0, 0.0), |(i, g), &v| {
+                        let (iv, gv) = si(v - d);
+                        (i + iv, g + gv)
+                    });
+                    let f = i - (d - vt) / c.r1401;
                     let slope = if f.abs() < 1.0 {
-                        -g0 - g1 - 1.0 / c.r1401
+                        -g - 1.0 / c.r1401
                     } else {
                         0.0
                     };
                     (f, slope)
                 };
-                let guess = if dump_warm.is_finite() { dump_warm } else { vt };
+                let guess = if warm.is_finite() { warm } else { vt };
                 root_slope(fd_slope, lo, hi, guess, false, tol)
             } else {
                 root_dir(fd, lo, hi, vt, false, tol)
+            }
+        };
+        // Each section's dump node for V-trig at `vt`.
+        let dump_nodes = |vt: f64| {
+            if c.dump_each {
+                [
+                    dump_node(vt, &[s0.v], dump_warm[0]),
+                    dump_node(vt, &[s1.v], dump_warm[1]),
+                ]
+            } else {
+                let d = dump_node(vt, &[s0.v, s1.v], dump_warm[0]);
+                [d, d]
             }
         };
         let f_vt_by = |vt: f64, (x, ic12, _): ([f64; 2], f64, f64)| {
@@ -916,11 +941,19 @@ impl Contours {
             let (dump, d_dump) = if panel.decay_on {
                 (0.0, 0.0)
             } else {
-                // The node moves with V-trig by R1401's share against the diodes'.
-                let d = dump_node(vt);
-                let g = si(s0.v - d).1 + si(s1.v - d).1 + 1.0 / c.r1401;
-                let dd = 1.0 / (c.r1401 * g);
-                ((d - vt) / c.r1401, (dd - 1.0) / c.r1401)
+                // A node moves with V-trig by R1401's share against its diodes'.
+                let d = dump_nodes(vt);
+                let at = |d: f64, g_diodes: f64| {
+                    let dd = 1.0 / (c.r1401 * (g_diodes + 1.0 / c.r1401));
+                    ((d - vt) / c.r1401, (dd - 1.0) / c.r1401)
+                };
+                if c.dump_each {
+                    let (i0, g0) = at(d[0], si(s0.v - d[0]).1);
+                    let (i1, g1) = at(d[1], si(s1.v - d[1]).1);
+                    (i0 + i1, g0 + g1)
+                } else {
+                    at(d[0], si(s0.v - d[0]).1 + si(s1.v - d[0]).1)
+                }
             };
             let (i0, g0) = si(s0.e7 - vt);
             let (i1, g1) = si(s1.e7 - vt);
@@ -936,15 +969,15 @@ impl Contours {
         let vtrig = root_slope(f_vt, 0.0, c.p93, vtrig_old, false, tol);
         self.vtrig = vtrig;
         self.x12 = q12(vtrig).0;
-        let d_node = if panel.decay_on {
-            vtrig
+        let d_nodes = if panel.decay_on {
+            [vtrig; 2]
         } else {
-            dump_node(vtrig)
+            dump_nodes(vtrig)
         };
         self.dump = if lean && !panel.decay_on {
-            d_node
+            d_nodes
         } else {
-            f64::NAN
+            [f64::NAN; 2]
         };
         laps.lap(Part::VTrig);
         // The flip-flops: held reset while the reset line drives CR1 [CR8] (the current a
@@ -954,7 +987,7 @@ impl Contours {
             vtrig,
             ..ContourOut::default()
         };
-        for k in 0..2 {
+        for (k, &d_node) in d_nodes.iter().enumerate() {
             let (s, ctl, g, su) = if k == 0 {
                 (c.filter, panel.filter, self.loads.filter, setup[0])
             } else {

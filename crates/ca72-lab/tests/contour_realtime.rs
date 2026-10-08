@@ -1,7 +1,8 @@
 //! The real-time contour generators against ngspice (docs/circuit/board2.md): whole
 //! contours for a held key, a key released during the attack, the sustain's extremes and a
-//! retrigger soon after a release, with the DECAY switch on and off; EXT. S-TRIG shorted
-//! alone and pulsed during a held key. ngspice's waveforms
+//! retrigger soon after a release, with the DECAY switch on and off (and off with the filter
+//! contour held above the loudness contour, through an R1401 for each and through the
+//! drawing's one); EXT. S-TRIG shorted alone and pulsed during a held key. ngspice's waveforms
 //! are compared at the model's rate: the flip-flops' resets put 30 ns spikes on the +9.3 V
 //! rail and so on the outputs, which are not part of a contour.
 
@@ -33,6 +34,9 @@ struct Case {
     presses: &'static [(f64, f64)],
     s_trig: &'static [(f64, f64)],
     tstop: f64,
+    /// A wider budget for the contours, V at 48 and at 24 kHz, where a known limit of the
+    /// model's applies (`None`: the test's own).
+    budget: Option<(f64, f64)>,
 }
 
 #[test]
@@ -57,6 +61,7 @@ fn contours_match_the_circuit() {
             presses: &[(0.05, 0.6)],
             s_trig: &[],
             tstop: 1.4,
+            budget: None,
         },
         Case {
             name: "held, DECAY off",
@@ -69,6 +74,49 @@ fn contours_match_the_circuit() {
             presses: &[(0.05, 0.6)],
             s_trig: &[],
             tstop: 1.0,
+            budget: None,
+        },
+        Case {
+            name: "filter held higher, DECAY off",
+            bench: ContourBench {
+                filter: ContourControls {
+                    sustain: 0.95,
+                    ..quick
+                },
+                loudness: ContourControls {
+                    sustain: 0.3,
+                    ..quick
+                },
+                decay_on: false,
+                ..ContourBench::default()
+            },
+            presses: &[(0.05, 0.6)],
+            s_trig: &[],
+            tstop: 1.0,
+            // R1401 carries 2 mA: V-trig falls below 3 V about 0.5 ms later in the model
+            // than in ngspice (its edge at half the rail agrees), so the release runs about
+            // 0.3 ms behind (board2.md, B2-7); in both arrangements.
+            budget: Some((0.10, 0.18)),
+        },
+        Case {
+            name: "filter held higher, DECAY off, one R1401",
+            bench: ContourBench {
+                filter: ContourControls {
+                    sustain: 0.95,
+                    ..quick
+                },
+                loudness: ContourControls {
+                    sustain: 0.3,
+                    ..quick
+                },
+                decay_on: false,
+                dump_each: false,
+                ..ContourBench::default()
+            },
+            presses: &[(0.05, 0.6)],
+            s_trig: &[],
+            tstop: 1.0,
+            budget: Some((0.10, 0.18)),
         },
         Case {
             name: "released during the attack",
@@ -89,6 +137,7 @@ fn contours_match_the_circuit() {
             presses: &[(0.05, 0.25)],
             s_trig: &[],
             tstop: 1.5,
+            budget: None,
         },
         Case {
             name: "sustain at 0 and 10",
@@ -109,6 +158,7 @@ fn contours_match_the_circuit() {
             presses: &[(0.05, 0.5)],
             s_trig: &[],
             tstop: 1.0,
+            budget: None,
         },
         Case {
             name: "retriggered 30 ms after a release",
@@ -121,6 +171,7 @@ fn contours_match_the_circuit() {
             presses: &[(0.05, 0.3), (0.33, 0.6)],
             s_trig: &[],
             tstop: 1.0,
+            budget: None,
         },
         Case {
             name: "S-TRIG alone",
@@ -133,6 +184,7 @@ fn contours_match_the_circuit() {
             presses: &[],
             s_trig: &[(0.05, 0.6)],
             tstop: 1.0,
+            budget: None,
         },
         Case {
             name: "S-TRIG pulsed during a held key",
@@ -145,6 +197,7 @@ fn contours_match_the_circuit() {
             presses: &[(0.05, 0.8)],
             s_trig: &[(0.3, 0.305)],
             tstop: 1.2,
+            budget: None,
         },
     ];
     let sr = 48_000.0;
@@ -189,7 +242,11 @@ fn contours_match_the_circuit() {
         // interpolated onto the 48 kHz grid).
         for rate in [48_000.0, 24_000.0] {
             let pn = panel(&b);
-            let mut rt = Contours::new(ContourCircuit::default(), rate);
+            let circuit = ContourCircuit {
+                dump_each: b.dump_each,
+                ..ContourCircuit::default()
+            };
+            let mut rt = Contours::new(circuit, rate);
             rt.settle(&pn);
             let held = |t: f64| case.presses.iter().any(|&(d, u)| t >= d && t < u);
             let m = (case.tstop * rate) as usize + 2;
@@ -241,9 +298,9 @@ fn contours_match_the_circuit() {
             // At 24 kHz a sample is 42 us: the edges and the fastest attack's slope get a
             // sample's worth more.
             let (edge_budget, budget) = if rate > 30e3 {
-                (0.3e-3, 0.08)
+                (0.3e-3, case.budget.map_or(0.08, |b| b.0))
             } else {
-                (0.35e-3, 0.12)
+                (0.35e-3, case.budget.map_or(0.12, |b| b.1))
             };
             fail |= edge_err.abs() > edge_budget;
             let mut line = format!(
@@ -281,6 +338,7 @@ fn contours_match_the_circuit() {
     // +9.3 V rail sags 75 mV under the charging current and the model's is ideal (A16).
     assert!(
         !fail,
-        "budget: 80 mV (120 mV at 24 kHz) anywhere, peaks 30 mV, trigger edges 0.3 ms (0.35 ms)\n{report}"
+        "budget: 80 mV (120 mV at 24 kHz) anywhere (100 and 180 mV with a filter contour held \
+         high, DECAY off), peaks 30 mV, trigger edges 0.3 ms (0.35 ms)\n{report}"
     );
 }
