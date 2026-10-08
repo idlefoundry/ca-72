@@ -1061,7 +1061,7 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let held = || crate::pool::BUDGET.held();
-        // (A machine of 1 or 2 processors has none to give, one of 3 to 7 one: R11, R-QUAD.
+        // (A machine of 1 or 2 processors has none to give, one of 3 to 7 one: R11, R39.
         // CI's have 3 or 4.)
         let most = crate::engine::default_workers();
         let mut p = initialised(false);

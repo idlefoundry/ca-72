@@ -1266,13 +1266,13 @@ impl Engine {
     }
 }
 
-/// How many workers share POLY's voices on this machine (decisions.md R11, R-QUAD):
+/// How many workers share POLY's voices on this machine (decisions.md R11, R39):
 /// [`workers_for`] its processors.
 pub fn default_workers() -> usize {
     workers_for(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get))
 }
 
-/// The workers for a machine of `n` processors (decisions.md R11, R-QUAD): a third of them less
+/// The workers for a machine of `n` processors (decisions.md R11, R39): a third of them less
 /// two, at most four (four on the Mac's 14, two on 8), and at least one from 3 up, so that on a
 /// machine of 3 or 4 (an older quad-core) POLY's voices are not all on the host's thread while
 /// its other processors idle; none on 1 or 2, where the host's thread and a worker would be all
@@ -1534,8 +1534,8 @@ mod tests {
         e
     }
 
-    /// The workers by the machine's processors (decisions.md R11, R-QUAD): none on 1 or 2, one
-    /// from 3 (a quad-core's 4 among them: before R-QUAD, none below 5), then a third of them
+    /// The workers by the machine's processors (decisions.md R11, R39): none on 1 or 2, one
+    /// from 3 (a quad-core's 4 among them: before R39, none below 5), then a third of them
     /// less two, at most four.
     #[test]
     fn a_machine_of_three_processors_or_more_has_a_worker() {

@@ -482,7 +482,7 @@ is in the first columns of the table under "After".
   thread.
 - **Threads:** started when the plug-in is activated (not on the audio thread), a third of
   the processors less two, at most four (four on the Mac's 14 and on the i5-13600K's 20,
-  two on 8, none below 5; **since R-QUAD** one on 3 and 4), made audio threads for the host's
+  two on 8, none below 5; **since R39** one on 3 and 4), made audio threads for the host's
   largest block
   (`ca72_rt::promote`: on macOS the time-constraint policy, on Linux `SCHED_FIFO` with the
   watchdog, on Windows time-critical priority). They spin 200 us after a run (the block's
@@ -735,7 +735,7 @@ circuit's, and a second quality in the plug-in against R1's one; the owner's to 
 - On the M4 Pro a voice takes 5 to 10 % of a core (Wooden Mallet the least, Undertow
   Growl the most): ten voices about half a core's work to a core's, shared by the host's
   thread and the workers (R11: a third of the processors less two, at most four: none
-  below 5 processors, one at 5 to 7, two at 8 to 10, three at 11 to 13; **since R-QUAD** one
+  below 5 processors, one at 5 to 7, two at 8 to 10, three at 11 to 13; **since R39** one
   at 3 and 4 too). Live's meter shows
   the host's thread's block against its period, waiting for the workers' voices included:
   about a fifth of the work at ten voices with four workers, and its worst blocks.
@@ -2366,7 +2366,7 @@ standalone (`--example standalone`, nih-plug's dummy audio backend), debug, befo
 Not tried: the panel on screen (the CA-74 saw it there), a Linux host, macOS and Windows (the
 byte ignored there, by softbuffer's code; CI runs the tests on all three).
 
-## R-QUAD. A worker on machines of 3 and 4 processors: the POLY presets in Waveform
+## R39. A worker on machines of 3 and 4 processors: the POLY presets in Waveform
 **Owner decision, 2026-10-07.** Two users reported the CPU overloaded in Tracktion Waveform: on
 KVR, Waveform 14 on Linux Mint 22.3 with "4 cores at 3.6 GHz", where choosing Slow Horn Swell,
 Brass Tutti or Warped Pad took the CPU to 100 % "after a moment" and the audio engine had to be
@@ -2374,6 +2374,8 @@ reset, while REAPER showed 8 to 30 %; on Bedroom Producers Blog, Waveform 13 on 
 an AMD A8 notebook, 70 to 80 % "on every preset". Shown the cause below, the owner asked whether
 it was the host's fault or the plug-in's, and on the answer (mostly the plug-in's) said to give
 machines of fewer than 5 processors a worker, the change that keeps the sound and the voices.
+On 2026-10-08 the owner said to release it at once: "let's just push the performance fix into
+production immediately" (R40).
 
 **What was wrong.** The three presets are the only factory presets with POLY on, and they ask
 for 10, 8 and 8 voices. A machine of fewer than 5 processors started no worker (R11), so every

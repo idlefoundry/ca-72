@@ -339,7 +339,7 @@ The service documents and datasheets the model was derived from are not included
   qualities do not run in real time; they remain in `crates/ca72` and the lab.
 - POLY's voices are shared between the host's audio thread and up to four threads of the
   plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
-  [docs/decisions.md](docs/decisions.md) R11, R-QUAD), shared by every instance in the
+  [docs/decisions.md](docs/decisions.md) R11, R39), shared by every instance in the
   host. An instance holds them only while its POLY
   is on, taking them a moment after POLY is switched on and giving them back when it is
   switched off; one that finds them all taken plays its voices on the host's thread, and
