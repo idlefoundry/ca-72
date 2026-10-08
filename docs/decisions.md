@@ -2241,4 +2241,12 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   -1.9, Ladder Kick -1.6, Open Hat -1.6, Ringing Saw Line -1.4, Noise Snare -1.0, Shoreline
   Wash -0.5, Wooden Mallet -0.4), and Pink Riser, quiet by nature, 1.3 dB louder and still
   under -18 LUFS. Hollow Glider and Closed Hat moved under 0.1 dB and were left.
+- **Again after CUTOFF's law** (change 10) and the contours' 10 s mark: Cruising Whistle
+  -1.635 to -1.403 and Ladder Kick -3.9 to -3.504, the same places on CUTOFF's track (the
+  law's inverse; the whistle within 4 cents of 0.1.3's, the ring's first 5 ms within 4);
+  Pulse Strut 9.05 to 9.36, Undertow Growl 8.77 to 8.73, Hollow Glider 6.2 to 6.28, Brass
+  Tutti 4.08 to 4.18, Warped Pad 7.56 to 7.61: every preset VOLUME can reach within 0.1 dB
+  of 0.1.3. At 10 and quieter: Upright Pluck -3.65 dB, Breath Flute -1.91, Stacked Fifths
+  -1.83, Ladder Kick -1.64, Open Hat -1.60, Ringing Saw Line -1.19, Shoreline Wash -1.06,
+  Wooden Mallet -1.04, Noise Snare -0.89; Pink Riser +1.44, still under -18 LUFS.
 - **The number** of this record is a placeholder until the merge.

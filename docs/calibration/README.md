@@ -286,19 +286,8 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   FREQUENCY spans,
   SUSTAIN's law, and VOLUME on oscillators 2 and 3 and the noise (taken as oscillator 1's).
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R-CAL),
-  but nine already at MAIN OUTPUT VOLUME 10 are quieter than in 0.1.3 and VOLUME cannot
-  raise them: Upright Pluck -3.6 dB, Breath Flute -2.2, Stacked Fifths -1.9, Ladder Kick
-  -1.6, Open Hat -1.6, Ringing Saw Line -1.4, Noise Snare -1.0, Shoreline Wash -0.5, Wooden
-  Mallet -0.4 (mostly EMPHASIS's and the contours' laws).
-
-## Reproducing
-
-```
-# On the Mac, in a terminal with the microphone permission:
-cd scripts/calibration && python capture.py session_a ~/lab/artifacts/ca-72/calibration/captures/<date>-A
-# Anywhere:
-cargo run -p ca72-lab --release -- stim <take.wav> scripts/calibration/patches/home_ext5.json <render.wav>
-# The contour takes (session F): --fc-gate lets FC GATE trigger the CA-72's contours too;
-# the render's fourth and sixth channels are the loudness and filter contours.
-python scripts/calibration/analyze.py <take.json> [--render <render.wav>]
-```
+  after CUTOFF's law and the contours' 10 s mark too. Nine already at MAIN OUTPUT VOLUME 10
+  are quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -3.65 dB, Breath
+  Flute -1.91, Stacked Fifths -1.83, Ladder Kick -1.64, Open Hat -1.60, Ringing Saw Line
+  -1.19, Shoreline Wash -1.06, Wooden Mallet -1.04, Noise Snare -0.89 (mostly EMPHASIS's and
+  the contours' laws).
