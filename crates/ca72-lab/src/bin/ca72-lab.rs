@@ -32,6 +32,7 @@ fn main() -> ExitCode {
         Some("waves") => spice().and_then(|s| waves(&s, rest)),
         Some("render") => render(rest),
         Some("play") => play(rest),
+        Some("stim") => stim(rest),
         Some("perf") => perf(rest),
         Some("hifi") => hifi(rest),
         Some("worst") => worst(rest),
@@ -351,6 +352,108 @@ fn play(rest: &[String]) -> Res {
         r.samples.len() as f64 / 48_000.0,
         r.ran,
         r.built,
+        peak * 5.0
+    );
+    Ok(())
+}
+
+/// Plays a hardware capture's stimuli into the voice (docs/calibration): a take written by
+/// `scripts/calibration/capture.py` (columns main, mix, loop, then the stimuli ext, cut,
+/// lc_gate, fc_gate, vpo as fractions of the ES-3's full scale). EXT reaches the EXTERNAL
+/// INPUT jack, CUT the FILTER CONTROL jack (R51), VPO the oscillators' control jack, LC
+/// GATE closes EXT. S-TRIG while above half of its high level. The output WAV's channels:
+/// the main output (the voice's scale, 5 V as 1.0), the mixer bus's Norton current (mA),
+/// the filter's output (V), the loudness contour (V) and the preamplifier's output (V).
+fn stim(rest: &[String]) -> Res {
+    use ca72::voice::{INPUT_VOLTS, Jacks, Panel, Voice};
+    let usage = "ca72-lab stim <take.wav> <patch.json> <out.wav> [--volts-fs V] \
+                 [--cut-scale S] [--preroll SECONDS] [--quality MODE] [--no-vpo]";
+    let mut volts_fs = 10.0;
+    let mut cut_scale = 1.0;
+    let mut preroll = 2.0;
+    let mut q = Quality::NoCompromises;
+    let mut vpo = true;
+    let mut positional = Vec::new();
+    let mut args = rest.iter();
+    let num = |s: Option<&String>| -> Result<f64, String> {
+        s.ok_or(usage)?.parse::<f64>().map_err(|e| format!("{e}"))
+    };
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--volts-fs" => volts_fs = num(args.next())?,
+            "--cut-scale" => cut_scale = num(args.next())?,
+            "--preroll" => preroll = num(args.next())?,
+            "--quality" => q = quality(args.next().ok_or(usage)?)?,
+            "--no-vpo" => vpo = false,
+            other if other.starts_with("--") => {
+                return Err(format!("ca72-lab stim: unknown option {other}"));
+            }
+            _ => positional.push(a.clone()),
+        }
+    }
+    let [take, patch, out] = positional.as_slice() else {
+        return Err(usage.into());
+    };
+    let bytes = std::fs::read(take).map_err(|e| format!("{take}: {e}"))?;
+    let (rate, ch) = ca72_analysis::wav::read(&bytes).map_err(|e| format!("{take}: {e}"))?;
+    if rate != 48_000 || ch.len() < 8 {
+        return Err(format!(
+            "{take}: expected 8 channels at 48 kHz, got {} at {rate}",
+            ch.len()
+        ));
+    }
+    let text = std::fs::read_to_string(patch).map_err(|e| format!("{patch}: {e}"))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("{patch}: {e}"))?;
+    let mut panel = Panel::default();
+    for (k, v) in json["panel"].as_object().into_iter().flatten() {
+        set_control(&mut panel, k, v)?;
+    }
+    panel.quality = q;
+    let t0 = std::time::Instant::now();
+    let mut voice = Voice::new(f64::from(rate), panel);
+    voice.set_seed(72);
+    let built = t0.elapsed().as_secs_f64();
+    let (ext, cut, lc, vp) = (&ch[3], &ch[4], &ch[5], &ch[7]);
+    let high = lc.iter().fold(0.0f32, |a, &x| a.max(x));
+    let jacks = |i: Option<usize>| -> Jacks {
+        let at = |c: &Vec<f32>| i.map_or(0.0, |i| f64::from(c[i]));
+        Jacks {
+            ext: at(ext) * volts_fs / INPUT_VOLTS,
+            filter: Some(at(cut) * volts_fs * cut_scale),
+            osc: vpo.then(|| at(vp) * volts_fs),
+            s_trig: i.is_some_and(|i| high > 0.0 && lc[i] > 0.5 * high),
+            ..Jacks::default()
+        }
+    };
+    let rest_jacks = jacks(None);
+    for _ in 0..(preroll * f64::from(rate)) as usize {
+        voice.tick_jacks(&rest_jacks);
+    }
+    let n = ext.len();
+    let mut data = Vec::with_capacity(n * 5 * 4);
+    let mut peak = 0.0f64;
+    for i in 0..n {
+        let y = voice.tick_jacks(&jacks(Some(i)));
+        let (_, i_bus, v_filter) = voice.probe();
+        let (_, env_l) = voice.probe_contours();
+        let pre = voice.ext_probe();
+        peak = peak.max(y.abs());
+        for v in [y, i_bus * 1e3, v_filter, env_l, pre] {
+            data.extend_from_slice(&(v as f32).to_le_bytes());
+        }
+    }
+    if voice.preamp_failed() > 0 {
+        return Err(format!(
+            "{take}: the preamplifier failed {} solves",
+            voice.preamp_failed()
+        ));
+    }
+    std::fs::write(out, wav_f32(5, rate, &data)).map_err(|e| format!("{out}: {e}"))?;
+    eprintln!(
+        "{out}: {:.1} s in {:.1} s (built in {built:.1} s), peak {peak:.3} ({:.2} V)",
+        n as f64 / f64::from(rate),
+        t0.elapsed().as_secs_f64() - built,
         peak * 5.0
     );
     Ok(())
