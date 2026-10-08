@@ -26,6 +26,13 @@ pub const FACTORY: FilterTrims = FilterTrims {
     r73_pos: 0.782635,
 };
 
+/// The trims the voice uses: Folkman's, with RANGE (R39) where the hardware reference's filter
+/// sits, 0.31 octave above Folkman's at a given control voltage (docs/calibration).
+pub const CALIBRATED: FilterTrims = FilterTrims {
+    r39: 0.559,
+    ..FACTORY
+};
+
 impl FilterTrims {
     /// The converter with these trims.
     pub fn expo(&self) -> FilterExpo {

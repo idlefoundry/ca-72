@@ -100,6 +100,20 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    against the three 50.5K), not +0.107 V; the tuning absorbs it. The plug-in has no jack
    (R3), so this changes what a plugged jack does (the DAW's device, `ca72-lab stim`), and
    the presets only by the tuning's re-solve.
+3. **The filter's RANGE trim, R39: 0.632 to 0.559** (`filter_cal::CALIBRATED`, 2026-10-09).
+   With the trims of Folkman's procedure the CA-72's filter sat 0.32 to 0.34 octave below
+   the reference's at the same control voltage, self-oscillating at EMPHASIS 10 from 22.9 kHz
+   down to 950 Hz (session E, CUTOFF fully clockwise, CUT CV 0 to -5.2 V), and 0.28 octave
+   below it at CUTOFF's centre mark (session E's corners, through the reference's own ratio of
+   oscillation to corner, 1.578). The slopes agree: 10.35 and 10.41 octaves per full scale of
+   CUT CV. RANGE is a trim, so the reference's setting is copied. With R39 at 0.559 the
+   whole voice's corner is within -0.05 to +0.03 octave of the reference's along session A's
+   CUT CV sweep (before: -0.26 to -0.35) and within 0 to +0.08 at the centre mark (before:
+   -0.23 to -0.29). Folkman's trims stay the procedure's result (`FACTORY`) and its test.
+   Every patch's filter opens about 0.31 octave higher than in 0.1.3: the presets' top
+   bands rise 3 to 10 dB, their levels within 0.3 dB (Ladder Kick +1.0 dB). Two presets
+   sound the filter's own pitch, which rises by the same 3.7 semitones: Cruising Whistle
+   and Ladder Kick (not retuned: the owner's call).
 
 ## Not changed, and why
 

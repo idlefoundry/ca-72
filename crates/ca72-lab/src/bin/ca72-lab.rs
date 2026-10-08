@@ -33,6 +33,7 @@ fn main() -> ExitCode {
         Some("render") => render(rest),
         Some("play") => play(rest),
         Some("stim") => stim(rest),
+        Some("filterlaw") => filterlaw(rest),
         Some("perf") => perf(rest),
         Some("hifi") => hifi(rest),
         Some("worst") => worst(rest),
@@ -490,6 +491,50 @@ fn stim(rest: &[String]) -> Res {
         t0.elapsed().as_secs_f64() - built,
         peak * 5.0
     );
+    Ok(())
+}
+
+/// The filter's control law (docs/calibration): for each `cutoff,jack_volts` pair on standard
+/// input, the ladder current (A) and the self-oscillation's frequency at EMPHASIS 10 (Hz),
+/// with the voice's trims (`filter_cal::CALIBRATED`) or `--r39 POS --r49 OHMS`.
+fn filterlaw(rest: &[String]) -> Res {
+    use ca72::filter_cal::{self, CALIBRATED};
+    use std::io::BufRead;
+    let mut trims = CALIBRATED;
+    let mut args = rest.iter();
+    while let Some(a) = args.next() {
+        let v = || -> Result<f64, String> {
+            Err("ca72-lab filterlaw [--r39 POS] [--r49 OHMS] < pairs".into())
+        };
+        match a.as_str() {
+            "--r39" => {
+                trims.r39 = args
+                    .next()
+                    .map_or_else(v, |x| x.parse().map_err(|e| format!("{e}")))?
+            }
+            "--r49" => {
+                trims.r49 = args
+                    .next()
+                    .map_or_else(v, |x| x.parse().map_err(|e| format!("{e}")))?
+            }
+            other => return Err(format!("ca72-lab filterlaw: unknown argument {other}")),
+        }
+    }
+    for line in std::io::stdin().lock().lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        let Some((c, j)) = line.trim().split_once(',') else {
+            continue;
+        };
+        let (cutoff, jack): (f64, f64) = (
+            c.parse().map_err(|e| format!("{e}"))?,
+            j.parse().map_err(|e| format!("{e}"))?,
+        );
+        let mut ins = filter_cal::inputs(cutoff, false, false, 0.0);
+        ins[5].v = jack;
+        let i0 = trims.expo().current(&ins, 25.0);
+        let hz = filter_cal::oscillation(48_000.0, &trims, &ins);
+        println!("{cutoff},{jack},{i0:.6e},{hz:.3}");
+    }
     Ok(())
 }
 

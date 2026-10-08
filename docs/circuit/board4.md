@@ -194,6 +194,11 @@ CUTOFF above 440 Hz (5.18: about 2); three octaves track within 2.3 cents; regen
 starts between EMPHASIS 7.4 and 7.6. CUTOFF -1 ends at 430.8 Hz (Range is set before
 Scale, which moves it; the procedure does not return to it).
 
+**The voice's trims** (`CALIBRATED`, 2026-10-09): Folkman's, with R39 at 0.559, where the
+hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
+([calibration](../calibration/README.md), change 3). The procedure's own result stays
+`FACTORY`, and the test above checks it.
+
 ## The real-time preamplifier, lamp and A-440
 
 - **Preamplifier and lamp** (`preamp.rs`): solved as their circuit by the nodal solver.

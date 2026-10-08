@@ -775,8 +775,8 @@ impl Voice {
                     tunings,
                     vcos,
                     revsaw,
-                    expo: crate::filter_cal::FACTORY.expo(),
-                    table: ExpoTable::shared(crate::filter_cal::FACTORY.expo(), 25.0),
+                    expo: crate::filter_cal::CALIBRATED.expo(),
+                    table: ExpoTable::shared(crate::filter_cal::CALIBRATED.expo(), 25.0),
                     modulation,
                     filter_node: 0.0,
                     i0: 0.0,
@@ -787,10 +787,10 @@ impl Voice {
                 },
                 back: BackPart {
                     vcf: {
-                        // The filter as the factory calibrated it (Folkman's procedure:
-                        // filter_cal).
+                        // The filter as calibrated (Folkman's procedure, RANGE where the
+                        // hardware reference's sits: filter_cal::CALIBRATED).
                         let mut f = Vcf::new(rate, oversampling(Quality::NoCompromises).1);
-                        f.circuit = crate::filter_cal::FACTORY.circuit();
+                        f.circuit = crate::filter_cal::CALIBRATED.circuit();
                         f.prepare(oversampling(Quality::Potato).1);
                         f
                     },
