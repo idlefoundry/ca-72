@@ -326,7 +326,7 @@ the circuit lab.
 | `docs/circuit/` | How the model was derived, board by board, with its sources and assumptions |
 | `docs/decisions.md` | The release's decisions |
 | `docs/history.md` | The model's decisions, from its development as an instrument of a DAW |
-| `third_party/` | nih-plug and baseview (both patched), the URW Gothic font, and for the Audio Unit clap-wrapper (patched), the CLAP headers and Apple's AudioUnitSDK |
+| `third_party/` | nih-plug, baseview and softbuffer (all patched), the URW Gothic font, and for the Audio Unit clap-wrapper (patched), the CLAP headers and Apple's AudioUnitSDK |
 | `scripts/` | Building the Audio Unit (`auv2.sh`, `auv2/`), validating the bundles, making the installers (`package.sh`, `installer/`), the third-party notices, fetching the sources |
 | `xtask/` | Builds the bundles |
 
@@ -403,7 +403,8 @@ The service documents and datasheets the model was derived from are not included
   `third_party/nih-plug/PATCHES.md` describes. The editor uses
   [baseview](https://github.com/RustAudio/baseview) (patched as
   `third_party/baseview/PATCHES.md` describes),
-  [softbuffer](https://github.com/rust-windowing/softbuffer) and
+  [softbuffer](https://github.com/rust-windowing/softbuffer) (patched as
+  `third_party/softbuffer/PATCHES.md` describes) and
   [resvg](https://github.com/linebender/resvg). The Audio Unit is
   [clap-wrapper](https://github.com/free-audio/clap-wrapper), by Timo Kaluza, Paul Walker
   and others (MIT; patched as `third_party/clap-wrapper/PATCHES.md` describes), around the

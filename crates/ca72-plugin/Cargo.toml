@@ -22,6 +22,11 @@ standalone = ["nih_plug/standalone"]
 name = "standalone"
 required-features = ["standalone"]
 
+# On the main thread, which softbuffer's macOS backend requires: the harness runs none there.
+[[test]]
+name = "softbuffer_copies"
+harness = false
+
 [dependencies]
 ca72.workspace = true
 # The workers' real-time scheduling (decisions.md R11).
@@ -30,10 +35,10 @@ libm.workspace = true
 ca72-panel = { path = "../ca72-panel" }
 nih_plug.workspace = true
 # The editor's window and its pixels: baseview at the revision nih-plug's own examples use,
-# patched (third_party/baseview/PATCHES.md). baseview takes `raw-window-handle` 0.5,
-# softbuffer 0.6.
+# and softbuffer 0.4.8, both patched (third_party/baseview/PATCHES.md,
+# third_party/softbuffer/PATCHES.md). baseview takes `raw-window-handle` 0.5, softbuffer 0.6.
 baseview = { path = "../../third_party/baseview" }
-softbuffer = { version = "0.4.6", default-features = false, features = ["kms", "x11"] }
+softbuffer = { path = "../../third_party/softbuffer", default-features = false, features = ["kms", "x11"] }
 raw-window-handle = "0.5"
 raw-window-handle-06 = { package = "raw-window-handle", version = "0.6" }
 keyboard-types = { version = "0.6.1", default-features = false }
@@ -66,6 +71,12 @@ tempfile.workspace = true
 # A CLAP host in the tests (`tests/clap_host.rs`, decisions.md R34): the bindings nih-plug's CLAP
 # wrapper takes, at its revision.
 clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6363ad63fbd80049cb7a42a97ac156" }
+
+# The Objective-C classes of other copies of softbuffer, and the test's own view
+# (tests/softbuffer_copies.rs): the versions softbuffer takes.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"] }
 
 # The editor's pixels read and its window captured, in the tests in a real window.
 [target.'cfg(target_os = "windows")'.dev-dependencies]
