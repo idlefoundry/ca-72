@@ -8,7 +8,9 @@
 //! By hand: `cargo test --release -p ca72-plugin --test preset_levels -- --ignored --nocapture`.
 //! `CA72_ONLY` (a part of a preset's name), `CA72_SET` (`key=value,...`: a preset's plain
 //! values changed, to try one), `CA72_LEVELS_OUT` (a directory: each render as
-//! `<preset>.f32`, stereo, interleaved, little-endian).
+//! `<preset>.f32`, stereo, interleaved, little-endian), `CA72_PHRASE` (a phrase file of
+//! `scripts/calibration/midi_capture.py`, played instead: the notes sent to the hardware
+//! reference, at their times, and 3 s after the last).
 
 #![allow(clippy::unwrap_used)]
 
@@ -56,6 +58,28 @@ fn phrase(s: &Sound) -> Vec<(f64, f64, Vec<u8>)> {
         .collect()
 }
 
+/// `CA72_PHRASE`'s notes: `[{"t": seconds, "kind": "on" | "off", "note": n}, ...]`.
+fn phrase_file() -> Option<Vec<(f64, f64, Vec<u8>)>> {
+    let path = std::env::var_os("CA72_PHRASE")?;
+    let ev: Vec<serde_json::Value> =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut held: Vec<(u8, f64)> = Vec::new();
+    let mut notes = Vec::new();
+    for e in &ev {
+        let (t, note) = (e["t"].as_f64().unwrap(), e["note"].as_u64().unwrap() as u8);
+        match e["kind"].as_str().unwrap() {
+            "on" => held.push((note, t)),
+            "off" => {
+                let i = held.iter().position(|h| h.0 == note).unwrap();
+                let (_, t0) = held.remove(i);
+                notes.push((t0, t - t0, vec![note]));
+            }
+            _ => {}
+        }
+    }
+    Some(notes)
+}
+
 /// The preset with `CA72_SET`'s values in place of its own.
 fn with_overrides(s: &Sound) -> Sound {
     let mut s = s.clone();
@@ -84,8 +108,11 @@ fn render(s: &Sound) -> (Vec<f32>, Vec<f32>) {
     e.set(&c);
     e.prepare(RATE, 1);
     common::workers(&mut e);
-    let notes = phrase(s);
-    let end = notes.iter().map(|n| n.0 + n.1).fold(0.0, f64::max) + 1.5;
+    let (notes, tail) = match phrase_file() {
+        Some(n) => (n, 3.0),
+        None => (phrase(s), 1.5),
+    };
+    let end = notes.iter().map(|n| n.0 + n.1).fold(0.0, f64::max) + tail;
     // Note events at their samples.
     let mut events: Vec<(usize, Event)> = Vec::new();
     for (t0, len, keys) in &notes {

@@ -6,6 +6,11 @@ the loopback, as capture.py does) shows the reference's own delay from a MIDI no
 its contour. Run from the terminal that has the microphone permission.
 
     midi_capture.py OUTDIR
+    midi_capture.py OUTDIR --phrase PHRASE.json --take NAME [--index N]
+
+A phrase file (a preset played on the reference, its panel set by hand) is a list of events
+{"t": seconds, "kind": "on" | "off", "note": n} or {"t", "kind": "cc", "cc": n, "value": v};
+a phrase's take has no tone on EXT.
 """
 
 import ctypes
@@ -106,20 +111,32 @@ def sha256(path):
 
 
 def events():
-    """Note on/off pairs, in seconds on the output timeline."""
+    """Note on/off pairs, in seconds on the output timeline: (t, kind, note or cc, value)."""
     ev = []
     t = 1.0
     for _ in range(5):
-        ev.append((t, "on"))
-        ev.append((t + 0.7, "off"))
+        ev.append((t, "on", NOTE, 100))
+        ev.append((t + 0.7, "off", NOTE, 0))
         t += 1.3
     return ev
 
 
-def run(outdir):
+def phrase_events(path):
+    with open(path) as f:
+        ph = json.load(f)
+    ev = []
+    for e in ph:
+        if e["kind"] == "cc":
+            ev.append((float(e["t"]), "cc", int(e["cc"]), int(e["value"])))
+        else:
+            ev.append((float(e["t"]), e["kind"], int(e["note"]), 100 if e["kind"] == "on" else 0))
+    return sorted(ev)
+
+
+def run(outdir, phrase=None, take="midi_notes", index=0):
     os.makedirs(outdir, exist_ok=True)
-    ev = events()
-    seconds = ev[-1][0] + 1.2
+    ev = phrase_events(phrase) if phrase else events()
+    seconds = ev[-1][0] + (3.0 if phrase else 1.2)
     n_take = int(round(seconds * FS))
     n = n_take + int(TAIL * FS)
     out = np.zeros((n, N_OUT), np.float32)
@@ -130,11 +147,12 @@ def run(outdir):
     tone = np.zeros(n, np.float32)
     tt = np.arange(n) / FS
     tone[int(QUIET_LEAD * FS):n_take] = (0.005 * np.sin(2 * np.pi * 1000 * tt[int(QUIET_LEAD * FS):n_take])).astype(np.float32)
-    out[:n_take, 12] = tone[:n_take]   # computer out 13, EXT
-    out[:n_take, OUT_LOOP] += tone[:n_take]
+    if not phrase:
+        out[:n_take, 12] = tone[:n_take]   # computer out 13, EXT
+        out[:n_take, OUT_LOOP] += tone[:n_take]
 
     port, dest = open_midi()
-    pending = [(int(round(t * FS)), kind) for t, kind in ev]
+    pending = [(int(round(t * FS)), kind, a, b) for t, kind, a, b in ev]
     sent = []
     rec = np.zeros((n, N_IN), np.float32)
     cursor = 0
@@ -148,16 +166,18 @@ def run(outdir):
         outdata[:got] = out[cursor:end]
         rec[cursor:end] = indata[:got]
         now = libc.mach_absolute_time()
-        for sample, kind in list(pending):
+        for item in list(pending):
+            sample, kind, a, b = item
             if cursor <= sample < cursor + frames:
                 dac = time_info.outputBufferDacTime + (sample - cursor) / FS
                 ahead = dac - time_info.currentTime
                 host = now + int(ahead * TICKS_PER_SEC)
-                status_b = 0x90 | CHANNEL if kind == "on" else 0x80 | CHANNEL
-                vel = 100 if kind == "on" else 0
-                send(port, dest, status_b, NOTE, vel, host)
-                sent.append({"t": round(sample / FS, 6), "kind": kind, "ahead_s": round(ahead, 6)})
-                pending.remove((sample, kind))
+                status_b = {"on": 0x90, "off": 0x80, "cc": 0xB0}[kind] | CHANNEL
+                send(port, dest, status_b, a, b, host)
+                sent.append({"t": round(sample / FS, 6), "kind": kind,
+                             ("cc" if kind == "cc" else "note"): a, "value": b,
+                             "ahead_s": round(ahead, 6)})
+                pending.remove(item)
                 slack.append(ahead)
         cursor = end
 
@@ -193,12 +213,13 @@ def run(outdir):
         else:
             data[:, i] = stimuli[c][:n]
 
-    base = os.path.join(outdir, "00_midi_notes")
+    peak = float(np.max(np.abs(data[:, cols.index("main")])))
+    base = os.path.join(outdir, f"{index:02d}_{take}")
     sf.write(base + ".wav", data, FS, subtype="FLOAT")
     record = {
         "session": os.path.basename(os.path.normpath(outdir)),
-        "take": "midi_notes",
-        "index": 0,
+        "take": take,
+        "index": index,
         "started": started,
         "seconds": seconds,
         "rate": FS,
@@ -207,21 +228,32 @@ def run(outdir):
         "aligned": bool(aligned),
         "timing_mark_db": round(mark_db, 2),
         "tail_seconds": TAIL,
-        "midi_note": NOTE,
+        "midi_note": None if phrase else NOTE,
+        "phrase": os.path.abspath(phrase) if phrase else None,
         "midi_channel": CHANNEL + 1,
         "midi_ahead_s": [round(float(s), 6) for s in slack],
         "events": {"notes": sent},
-        "notes": "MIDI notes from the MOTU MIDI OUT, stamped to the audio DAC time",
+        "notes": "MIDI from the MOTU MIDI OUT, stamped to the audio DAC time"
+                 + ("; a phrase, no tone on EXT" if phrase else ""),
         "wav": os.path.basename(base + ".wav"),
         "wav_sha256": sha256(base + ".wav"),
-        "problems": [] if aligned else [f"timing mark not found (lag {lag}, {mark_db:.1f} dB)"],
+        "main_peak": round(peak, 4),
+        "problems": ([] if aligned else [f"timing mark not found (lag {lag}, {mark_db:.1f} dB)"])
+                    + ([f"main output at {peak:.3f} of full scale"] if peak > 0.98 else []),
     }
     with open(base + ".json", "w") as f:
         json.dump(record, f, indent=1)
-    print(f"00_midi_notes: {seconds:.1f} s, latency {lag} samples, "
-          f"{'OK' if aligned else 'PROBLEM'}, ahead {min(slack):.4f}..{max(slack):.4f} s",
+    print(f"{index:02d}_{take}: {seconds:.1f} s, latency {lag} samples, "
+          f"{'OK' if aligned else 'PROBLEM'}, main peak {peak:.3f}, ahead {min(slack):.4f}..{max(slack):.4f} s",
           flush=True)
 
 
 if __name__ == "__main__":
-    run(sys.argv[1])
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("outdir")
+    ap.add_argument("--phrase")
+    ap.add_argument("--take", default="midi_notes")
+    ap.add_argument("--index", type=int, default=0)
+    a = ap.parse_args()
+    run(a.outdir, a.phrase, a.take, a.index)
