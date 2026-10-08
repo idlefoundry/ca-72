@@ -355,15 +355,49 @@ pub fn time_pot_drawn(p: f64) -> f64 {
     1e6 * audio_taper(p)
 }
 
-/// The hardware reference's ATTACK and DECAY at its dial's 1 s and 10 s marks (0.6 and 0.85
-/// of the travel: 30 and 105 degrees on its dial, photographed; the CA-72's panel prints the 10
-/// s mark at 108) and fully clockwise, as the pot's resistance through which the CA-72's
-/// contour takes the reference's time: 10 to 90 % of the attack, 90 to 50 % of the final
-/// decay (docs/calibration, session F). The generic taper's are 162K, 535K and 1M.
-pub const FILTER_ATTACK: [(f64, f64); 3] = [(0.6, 52.5e3), (0.85, 749e3), (1.0, 1.06e6)];
-pub const FILTER_DECAY: [(f64, f64); 3] = [(0.6, 58.5e3), (0.85, 660e3), (1.0, 873e3)];
-pub const LOUDNESS_ATTACK: [(f64, f64); 3] = [(0.6, 53.0e3), (0.85, 788e3), (1.0, 1.10e6)];
-pub const LOUDNESS_DECAY: [(f64, f64); 3] = [(0.6, 49.9e3), (0.85, 630e3), (1.0, 853e3)];
+/// The hardware reference's ATTACK and DECAY at its dial's printed marks, as the pot's
+/// resistance through which the CA-72's contour takes the reference's time: 10 to 90 % of the
+/// attack, 90 to 50 % of the final decay (docs/calibration, sessions F and J). The marks, on
+/// the reference's dial (its manual's drawing and the owner's photographs): 200 ms at -90
+/// degrees (0.2 of the travel), 600 ms at -30 (0.4), the top tick (0.5), 1 s at 30 (0.6), 5 s
+/// at 60 (0.7), 10 s at 105 (0.85; the CA-72's panel prints 5 s at 67 and 10 s at 108), and
+/// fully clockwise. The generic taper's are 17.6K, 53.9K, 100K, 162K, 268K, 535K and 1M.
+pub const FILTER_ATTACK: [(f64, f64); 7] = [
+    (0.2, 15.1e3),
+    (0.4, 30.9e3),
+    (0.5, 40.3e3),
+    (0.6, 52.5e3),
+    (0.7, 253e3),
+    (0.85, 749e3),
+    (1.0, 1.06e6),
+];
+pub const FILTER_DECAY: [(f64, f64); 7] = [
+    (0.2, 17.8e3),
+    (0.4, 37.1e3),
+    (0.5, 48.7e3),
+    (0.6, 58.5e3),
+    (0.7, 267e3),
+    (0.85, 660e3),
+    (1.0, 873e3),
+];
+pub const LOUDNESS_ATTACK: [(f64, f64); 7] = [
+    (0.2, 15.8e3),
+    (0.4, 34.7e3),
+    (0.5, 46.9e3),
+    (0.6, 53.0e3),
+    (0.7, 299e3),
+    (0.85, 788e3),
+    (1.0, 1.10e6),
+];
+pub const LOUDNESS_DECAY: [(f64, f64); 7] = [
+    (0.2, 14.5e3),
+    (0.4, 30.7e3),
+    (0.5, 41.5e3),
+    (0.6, 49.9e3),
+    (0.7, 232e3),
+    (0.85, 630e3),
+    (1.0, 853e3),
+];
 
 /// Where the time pots leave the generic taper: the dial's tick past its 10 ms mark, up to
 /// which the reference's times agree with it within where its knob was set.
@@ -371,7 +405,7 @@ const TIME_POT_GENERIC_TO: f64 = 0.15;
 
 /// An ATTACK or DECAY pot as the voice has it, ohm: the generic taper to
 /// [`TIME_POT_GENERIC_TO`], then straight in its logarithm through `law`'s points.
-pub fn time_pot(p: f64, law: &[(f64, f64); 3]) -> f64 {
+pub fn time_pot(p: f64, law: &[(f64, f64)]) -> f64 {
     let p = p.clamp(0.0, 1.0);
     if p <= TIME_POT_GENERIC_TO {
         return time_pot_drawn(p);
@@ -1144,7 +1178,7 @@ impl Voice {
 /// The contour generators' settings from the panel, EXT. S-TRIG open or closed.
 fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourPanel {
     let [a0, d0, a1, d1] = pots;
-    type Law = [(f64, f64); 3];
+    type Law = [(f64, f64)];
     let k = |c: ContourKnobs, a: &mut Memo<f64>, d: &mut Memo<f64>, la: &Law, ld: &Law| Controls {
         attack: a.get(c.attack, |x| time_pot(x, la)),
         decay: d.get(c.decay, |x| time_pot(x, ld)),

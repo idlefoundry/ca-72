@@ -286,6 +286,17 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     across the four octaves. The voice, the keyboard's load and the filter's ngspice bench
     change together; Folkman's procedure keeps the drawn values.
 
+13. **ATTACK's and DECAY's laws at every printed mark** (`voice::FILTER_ATTACK` and the
+    others, session J, 2026-10-08). Session J set both contours' ATTACK and DECAY at the
+    marks session F had not taken: 200 ms (-90 degrees), 600 ms (-30), the top tick and 5 s
+    (60), the angles of the reference's dial (its manual's drawing, measured at 1200 dpi, and
+    the owner's photographs agree within a degree). The laws now run through 0.2, 0.4, 0.5,
+    0.6, 0.7, 0.85 and 1.0 of the travel; their shape is the reference's own: gentle to the
+    1 s mark (15 to 53K), then steep (230 to 300K at 5 s). Between the 1 s and 10 s marks the
+    old laws, straight from 1 s to 10 s, were up to 2.5 times out. Every mark of sessions F
+    and J now within 0.2 % (attack 10 to 90 %, final decay 90 to 50 %). Below the tick past
+    10 ms the generic taper stays.
+
 ## Still differs (2026-10-08, after the knob session's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -296,8 +307,6 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   1.22 to 1.23 [1.26 to 1.27] on the reference: the peak divider (R33/R29 [R24/R27]) or CR3's
   [CR6's] threshold. And with DECAY at 0 the release's first half takes 1.9 to 2.2 ms against
   the reference's 1.1 to 1.3.
-- **The contours between marks:** the 200 and 600 ms and 5 s marks were not taken; the laws
-  interpolate there.
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
   CA-72 ends 22 cents under the reference (0.9986 against 1.0030 octave a volt at the ES-3's
   10.39 V), against 80 cents before.

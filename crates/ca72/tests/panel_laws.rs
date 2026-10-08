@@ -33,7 +33,11 @@ fn attack_and_decay_follow_the_reference_at_its_marks() {
             last = r;
         }
         assert_eq!(time_pot(-1.0, law), 0.0, "{name} below its travel");
-        assert_eq!(time_pot(2.0, law), law[2].1, "{name} past its travel");
+        assert_eq!(
+            time_pot(2.0, law),
+            law[law.len() - 1].1,
+            "{name} past its travel"
+        );
     }
 }
 
