@@ -351,6 +351,8 @@ dependencies = [
  "keyboard-types",
  "libm",
  "nih_plug",
+ "objc2",
+ "objc2-foundation",
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",
  "serde",
@@ -2064,8 +2066,6 @@ checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 [[package]]
 name = "softbuffer"
 version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aac18da81ebbf05109ab275b157c22a653bb3c12cf884450179942f81bcbf6c3"
 dependencies = [
  "as-raw-xcb-connection",
  "bytemuck",

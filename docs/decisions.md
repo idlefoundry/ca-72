@@ -2507,3 +2507,74 @@ Packaging, with the two Developer ID identities, the notary profile and
 `notarization.json`, the build's, the validators', auval's and the packaging's logs, the
 commands (`build.sh`, `auval.sh`, `package.sh`) and `SHA256SUMS.txt` are kept with the
 release's evidence outside the repository, as 0.1.4's are.
+
+## R41. macOS: the editor drawn beside other copies of softbuffer in one process
+**Seen, 2026-10-06,** in Bitwig Studio 5.2.7 on macOS (CLAP), while MIDI Learn was tried there
+(R34, "Seen besides"): Bitwig loads every plug-in into one
+process, and there a second, differently built CA-72 opened a blank editor.
+
+**The cause,** confirmed on the Mac. softbuffer 0.4.8, which shows the editor's frames, keeps its
+layer in step with the editor's view on macOS through an Objective-C class of its own, defined
+with objc2's `define_class!` under a fixed name, `SoftbufferObserver`, and registered as the
+first surface is made. A process holds one class of a name, and `define_class!` panics when its
+name is taken: a second copy of softbuffer, in a second plug-in's library, panicked as its
+editor opened ("could not create new class "SoftbufferObserver", perhaps a class with that name
+already exists?"), and the editor, which catches softbuffer's panics (R18), drew nothing. Any
+two copies meet it: two builds of the CA-72; its CLAP and its VST3, one binary at two paths;
+another plug-in carrying softbuffer 0.4 (0.4.6 and 0.4.7 used the same name). Every release so
+far, 0.1.0 to 0.1.5, carries 0.4.8. No release fixes it: 0.4.8 is the latest, and upstream's
+master defines the class the same way. Two reproductions, kept out of the repository, each a
+host that loads the libraries it is given into its one process and works on its main thread:
+- a library that makes a softbuffer surface on an NSView of its own, presents a frame and
+  resizes the view, as the editor does: with softbuffer 0.4.8, a second library (another build
+  of it, or the same one copied to another path) panicked as above;
+- a CLAP host that opens each library's editor in a view of its own, then lets the main run
+  loop run for 1.5 s: with 0.1.2's plug-in (built from `v0.1.2`) at two paths, the second
+  editor's layers held no frame, and nih-plug logged the panic, from the editor's `Surface::new`
+  in `PanelWindow::new`, from `clap_plugin_gui.set_parent`.
+
+**Agent decisions, 2026-10-06** (the owner asked for the fix; not separately approved
+otherwise):
+- **softbuffer vendored and patched,** as baseview and nih-plug are
+  (`third_party/softbuffer/PATCHES.md`): the 0.4.8 release, its macOS backend changed so that
+  each copy registers a class of its own at run time, under the first of `SoftbufferObserver1`,
+  `SoftbufferObserver2`, ... that is free, never upstream's name (which an unpatched copy loaded
+  later still needs). Each copy runs only its own code. The class has no state: the layer an
+  observer updates comes as the observation's context. `ca72-plugin` takes softbuffer by path,
+  with the same features; in `Cargo.lock` the crate loses its registry source and checksum, and
+  the plug-in gains the test's two dependencies; no crate is added or changes version.
+- **Not objc2's own way out,** leaving the name to `define_class!` (a patch of one line): a copy
+  that finds that name taken uses the class it names, and so runs the code of whichever copy came
+  first, which objc2 itself calls unsound across libraries. The name,
+  `softbuffer::backends::cg::Observer0.4.8`, does not tell code apart: upstream's master, changed
+  since the release, still calls itself 0.4.8.
+- **The test,** `crates/ca72-plugin/tests/softbuffer_copies.rs`: in a process that already holds
+  the classes an unpatched copy and a patched one register, a surface on a view of the test's
+  own is made and its frame reaches the view's layer; the layer follows the view as it is
+  resized (the observer); a second surface, after the first is gone, registers no second class.
+  softbuffer's macOS backend works on the main thread only, where the test harness runs no test,
+  so this test runs without it (`harness = false`); on other systems it does nothing. Its view
+  and classes take two dependencies on macOS, objc2 and objc2-foundation, at softbuffer's
+  versions.
+
+**Evidence (2026-10-06, the Mac: Apple silicon, macOS 27.0; Rust 1.97.1):**
+- **The reproductions,** with this copy of softbuffer. The surfaces' library: two builds, and
+  one build at two paths, each drew and resized with a class of its own (`SoftbufferObserver1`,
+  `SoftbufferObserver2`), each class's method in its own library (`dladdr`); an unpatched build
+  loaded before it and after it, both drew; four libraries in one process (patched, unpatched,
+  the patched one's copy, a second patched build) took `SoftbufferObserver`, then
+  `SoftbufferObserver1` to `3`. The CLAP host, with this tree's plug-in: one build at two paths,
+  a debug and a release build, and 0.1.2 loaded before it and after it: every editor's
+  softbuffer layer held a frame of the editor's size, 1382 by 463. The plug-in's library no
+  longer exports upstream's `__CLASS_SoftbufferObserver` symbols.
+- **The new test** panicked as above with upstream's `cg.rs` put back, and passes with the
+  change.
+- `cargo test --workspace`: 227 passed, 0 failed (25 ignored, run by hand), and the new test;
+  clippy with `-D warnings` on the workspace, all targets and features; `cargo check` of the
+  plug-in for Windows (MSVC); `scripts/notices.py --check` (the notices are unchanged: the copy
+  carries the release's licences and repository); `cargo fmt --all -- --check`, on a copy of the
+  tree outside the main checkout (in a worktree inside it, cargo takes the vendored crates for
+  the main checkout's workspace and stops, baseview's as well).
+- Not tried: Bitwig itself, with two builds of the CA-72 in one project; other hosts on macOS;
+  the installer's bundles; the Audio Unit, built around the CLAP (R30), so with the change.
+  Linux and Windows compile softbuffer's macOS backend out (CI builds and tests them).
