@@ -20,11 +20,11 @@ pub const CONTACT_R: f64 = 0.1;
 
 /// The output's load at the instrument's usual settings, as a resistance to a voltage: the
 /// three oscillators' keyboard inputs (51.1K each, to summing junctions at -5 V) and the
-/// filter's KEYBOARD CONTROL 1 (R53 300K, to its control node near 0 V): the real-time
-/// model's `keyboard::LOAD_DEFAULT`.
+/// filter's KEYBOARD CONTROL 1 (R53, `ca72::vcf::R53`, to its control node near 0 V): the
+/// real-time model's `keyboard::LOAD_DEFAULT`.
 pub const LOAD_DEFAULT: (f64, f64) = (
-    1.0 / (3.0 / 51.1e3 + 1.0 / 300e3),
-    -5.0 * (3.0 / 51.1e3) / (3.0 / 51.1e3 + 1.0 / 300e3),
+    1.0 / (3.0 / 51.1e3 + 1.0 / ca72::vcf::R53),
+    -5.0 * (3.0 / 51.1e3) / (3.0 / 51.1e3 + 1.0 / ca72::vcf::R53),
 );
 /// The bench.
 #[derive(Debug, Clone, PartialEq)]

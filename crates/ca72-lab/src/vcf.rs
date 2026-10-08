@@ -11,7 +11,8 @@ use std::path::Path;
 pub struct VcfBench {
     /// The CUTOFF FREQUENCY control's wiper voltage (its 5K pot spans -10..+10 V), into R55.
     pub cutoff: f64,
-    /// The keyboard voltage into R53 300K and R54 150K (both keyboard control switches on).
+    /// The keyboard voltage into R53 and R54 (`ca72::vcf::R53`, `R54`; both keyboard control
+    /// switches on).
     pub kbd: f64,
     /// EMPHASIS: R14's resistance in circuit (0 ohm at 10, 50K at 0).
     pub r14: f64,
@@ -49,7 +50,7 @@ pub fn netlist(b: &VcfBench, src: &str, solver: Solver) -> String {
          .include {m}\n.include {v}\n\
          .options temp={t} tnom=25 reltol={rt} abstol=1e-12 vntol=1e-7 method={me} maxord=2\n\
          vp vp 0 10\nvn vn 0 -10\n\
-         vcut vcut 0 {c}\nr55 vcut ctl 200k\nvkbd kbd 0 {k}\nr53 kbd ctl 300k\nr54 kbd ctl 150k\n\
+         vcut vcut 0 {c}\nr55 vcut ctl 200k\nvkbd kbd 0 {k}\nr53 kbd ctl {r53}\nr54 kbd ctl {r54}\n\
          vamt amt 0 0\n{src}\nrmix src ain {mr}\n\
          r14 emo emi {r14}\n{ext}\
          x1 ain ctl amt emo emi out vp vn mm_vcf r39={r39} r49={r49} r73={r73}\n",
@@ -60,6 +61,8 @@ pub fn netlist(b: &VcfBench, src: &str, solver: Solver) -> String {
         me = solver.method,
         c = b.cutoff,
         k = b.kbd,
+        r53 = ca72::vcf::R53,
+        r54 = ca72::vcf::R54,
         mr = b.mix_r,
         r14 = b.r14.max(1e-3),
         r39 = b.r39,

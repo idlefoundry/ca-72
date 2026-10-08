@@ -1614,12 +1614,18 @@ impl FrontPart {
                 v: env_f * amt,
             },
             if p.keyboard_control_1 {
-                Input { r: 300e3, v: v_kbd }
+                Input {
+                    r: crate::vcf::R53,
+                    v: v_kbd,
+                }
             } else {
                 open
             },
             if p.keyboard_control_2 {
-                Input { r: 150e3, v: v_kbd }
+                Input {
+                    r: crate::vcf::R54,
+                    v: v_kbd,
+                }
             } else {
                 open
             },

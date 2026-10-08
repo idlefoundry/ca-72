@@ -29,6 +29,14 @@
 //! corner prewarped ([`Vcf::prewarp_hz`]). Left out: the output stage's transistor
 //! capacitances (docs/circuit/assumptions.md A11).
 
+/// KEYBOARD CONTROL 1 and 2's resistors from the keyboard into the control node (front panel,
+/// Figure 9-17): R53 300K and R54 150K as drawn; 312K and 156K, 4 % more, where the hardware
+/// reference's filter follows the keys (0.970 octave an octave with both, against the drawn
+/// values' 1.004 through the CA-72's keyboard: docs/calibration, change 12). Folkman's
+/// procedure keeps the drawn values (`filter_cal::inputs`).
+pub const R53: f64 = 312e3;
+pub const R54: f64 = 156e3;
+
 use crate::devices::{Bjt, JunctionCapacitance, PairWarm, degenerated_warm, junction_capacitance};
 use crate::expo::Input;
 use crate::prof::Part;

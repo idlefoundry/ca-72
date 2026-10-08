@@ -130,8 +130,8 @@ impl Load {
     /// control node near 0 V; assumptions.md A19).
     pub fn of(oscillators: usize, kbd_1: bool, kbd_2: bool) -> Load {
         let g_osc = oscillators as f64 / 51.1e3;
-        let g_filter =
-            if kbd_1 { 1.0 / 300e3 } else { 0.0 } + if kbd_2 { 1.0 / 150e3 } else { 0.0 };
+        let g_filter = if kbd_1 { 1.0 / crate::vcf::R53 } else { 0.0 }
+            + if kbd_2 { 1.0 / crate::vcf::R54 } else { 0.0 };
         let g = g_osc + g_filter;
         Load {
             r: 1.0 / g,
@@ -142,8 +142,8 @@ impl Load {
 
 /// The instrument's usual load: three oscillators and KEYBOARD CONTROL 1.
 pub const LOAD_DEFAULT: Load = Load {
-    r: 1.0 / (3.0 / 51.1e3 + 1.0 / 300e3),
-    v: -5.0 * (3.0 / 51.1e3) / (3.0 / 51.1e3 + 1.0 / 300e3),
+    r: 1.0 / (3.0 / 51.1e3 + 1.0 / crate::vcf::R53),
+    v: -5.0 * (3.0 / 51.1e3) / (3.0 / 51.1e3 + 1.0 / crate::vcf::R53),
 };
 
 // The nodes: held, then solved.
