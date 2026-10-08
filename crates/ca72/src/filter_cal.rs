@@ -218,7 +218,15 @@ pub fn folkman(rate: f64) -> FilterTrims {
     // track". Alternating the two as written diverges on the model (R49 swings wider each
     // round); the state it aims at is solved directly: R49 such that, with CUTOFF tuning the
     // low A to 440 Hz, the third A sounds 1760 Hz (the two octaves depend on R49 alone).
-    let kb = Keyboard::new(KeyboardCircuit::default(), rate);
+    // The original instrument's keyboard, as drawn: the string's bottom grounded (the
+    // voice's floor is the hardware reference's MIDI, board2.md B2-8).
+    let kb = Keyboard::new(
+        KeyboardCircuit {
+            r_floor: 0.0,
+            ..KeyboardCircuit::default()
+        },
+        rate,
+    );
     let (low, third) = (key_volts(&kb, 4), key_volts(&kb, 28));
     // (CUTOFF's search stays below its top, where the oscillation can pass Nyquist.)
     let tuned = |t: &FilterTrims| {

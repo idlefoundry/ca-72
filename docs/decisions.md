@@ -2249,4 +2249,6 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   of 0.1.3. At 10 and quieter: Upright Pluck -3.65 dB, Breath Flute -1.91, Stacked Fifths
   -1.83, Ladder Kick -1.64, Open Hat -1.60, Ringing Saw Line -1.19, Shoreline Wash -1.06,
   Wooden Mallet -1.04, Noise Snare -0.89; Pink Riser +1.44, still under -18 LUFS.
+- **Owner decision, 2026-10-08:** the keyboard follows the reference's MIDI: 0 V on C2, not
+  the original's lowest F (board2.md B2-8; calibration change 11).
 - **The number** of this record is a placeholder until the merge.

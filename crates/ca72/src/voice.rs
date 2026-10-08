@@ -297,11 +297,10 @@ pub const NOISE_CALIBRATION_BAND: (f64, f64) = (20.0, 20e3);
 /// Calibrates the noise source's density (R26's job): the white noise's current into the bus
 /// through its channel against oscillator 1's triangle's through its channel, both at
 /// [`NOISE_CALIBRATION_VOLUME`], the noise over [`NOISE_CALIBRATION_BAND`] (the continuous
-/// model's response).
-fn calibrate_noise(vco: &mut Vco, rate: f64, tuning: &Tuning) -> f64 {
+/// model's response). `key`: the keyboard's voltage with low A held.
+fn calibrate_noise(vco: &mut Vco, rate: f64, tuning: &Tuning, key: f64) -> f64 {
     let vol = NOISE_CALIBRATION_VOLUME;
     // The triangle's current through its channel, low A on 2' (440 Hz), 200 periods.
-    let key = f64::from(LOW_A) * crate::tuning::KEY_STEP;
     let d = osc_drive_with(Osc::One, tuning, key, &Buses::RESTING, Range::R2);
     let i_in = d.apply(&mut vco.expo);
     vco.reset();
@@ -833,7 +832,7 @@ impl Voice {
         }
         let revsaw = RevSaw::new(RevSawCircuit::default(), rate)
             .expect("the reverse sawtooth's operating point");
-        let density = calibrate_noise(&mut vcos[0].clone(), rate, &t1);
+        let density = calibrate_noise(&mut vcos[0].clone(), rate, &t1, volts(LOW_A));
         for v in &mut vcos {
             v.prepare(oversampling(Quality::Potato).0);
         }

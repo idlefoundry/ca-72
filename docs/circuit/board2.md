@@ -147,3 +147,11 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
   half the rail together), so that release runs about 0.3 ms behind: 87 to 92 mV at 48 kHz,
   161 to 166 mV at 24 kHz, in both arrangements. The test's budget for that case is 100 and
   180 mV.
+- **B2-8** (2026-10-08) The key string's bottom reaches GND through a floor of 50 ohm, five
+  of its own resistors (`keyboard::R_FLOOR`; the drawing grounds it): every key 0.42 V
+  higher, the pitch bus's 0 V on C2, five keys below the lowest F, where the hardware
+  reference's MIDI puts its keyboard's 0 V (its MIDI NOTE ZERO VOLTS, 36 by default; the
+  owner's decision to follow it, docs/calibration change 11). The factory tuning plays its
+  keys through the keyboard and absorbs it (A3 at 220.000 Hz, the keys within 2.43 cents);
+  the filter's KEYBOARD CONTROL hears it. Folkman's filter procedure keeps the drawn
+  keyboard. The bench (`ca72-lab` keyboard) has the same floor; every key within 0.0001 mV.

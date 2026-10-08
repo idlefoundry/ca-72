@@ -259,6 +259,19 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 - **The thump** (B4-6): its size against a note's level, which the oscillators will give.
 - **The corner's mapping:** see the table.
 
+11. **The keyboard's 0 V on C2** (`keyboard::R_FLOOR`, board2.md B2-8, 2026-10-08). The
+    reference's MIDI puts its keyboard's 0 V on C2 (MIDI NOTE ZERO VOLTS, 36 by default in its
+    manual); the original keyboard, and the CA-72, on its lowest key, F, five keys higher.
+    The oscillators are tuned to either, but the filter's KEYBOARD CONTROL hears the voltage
+    itself: at the same CUTOFF the reference's filter sat 0.35 octave higher with both
+    switches on (session E: 856 against 672 Hz at note 41), and in session I's Ringing Saw
+    Line its ring 0.15 to 0.24 octave above the CA-72's once the contour had died away. The
+    owner chose to follow the reference: the key string's bottom reaches GND through 50 ohm,
+    five of its resistors, every key 0.42 V higher; the factory tuning absorbs it (A3 at
+    220.000 Hz, the keys within 2.43 cents) and the bench's string matches it within 0.0001
+    mV a key. Presets with KEYBOARD CONTROL on are brighter, as on the reference (by 0.14,
+    0.28 and 0.42 octave with 1, 2 and both).
+
 ## Still differs (2026-10-08, after the knob session's fits)
 
 - **The filter's scale:** at every CUTOFF mark the CA-72's corner moves 2.3 to 3.1 % more
