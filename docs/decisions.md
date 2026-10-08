@@ -2251,4 +2251,11 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   Wooden Mallet -1.04, Noise Snare -0.89; Pink Riser +1.44, still under -18 LUFS.
 - **Owner decision, 2026-10-08:** the keyboard follows the reference's MIDI: 0 V on C2, not
   the original's lowest F (board2.md B2-8; calibration change 11).
+- **Again after the keyboard's 0 V on C2:** Cruising Whistle -1.403 to -1.765 (its whistle
+  within 4 cents of 0.1.3's), Ladder Kick -3.504 to -3.637 (its ring as 0.1.3's); Bass 9.71,
+  Elastic Octaves 5.48, Pulse Strut 9.16, Undertow Growl 8.71, Hollow Glider 6.16, Slow Horn
+  Swell 8.13, Brass Tutti 4.14, Warped Pad 7.58: every preset VOLUME can reach within 0.05
+  dB of 0.1.3. At 10 and quieter: Upright Pluck -3.64 dB, Breath Flute -2.31, Stacked Fifths
+  -2.01, Ladder Kick -1.63, Open Hat -1.59, Ringing Saw Line -1.52, Wooden Mallet -0.82,
+  Noise Snare -0.81, Shoreline Wash -0.44; Pink Riser +1.44, still under -18 LUFS.
 - **The number** of this record is a placeholder until the merge.
