@@ -1266,11 +1266,23 @@ impl Engine {
     }
 }
 
-/// How many workers share POLY's voices on this machine (decisions.md R11): a third of its
-/// processors less two, at most four (four on the Mac's 14, two on 8), none below 5.
+/// How many workers share POLY's voices on this machine (decisions.md R11, R39):
+/// [`workers_for`] its processors.
 pub fn default_workers() -> usize {
-    let n = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    (n.saturating_sub(2) / 3).min(4)
+    workers_for(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get))
+}
+
+/// The workers for a machine of `n` processors (decisions.md R11, R39): a third of them less
+/// two, at most four (four on the Mac's 14, two on 8), and at least one from 3 up, so that on a
+/// machine of 3 or 4 (an older quad-core) POLY's voices are not all on the host's thread while
+/// its other processors idle; none on 1 or 2, where the host's thread and a worker would be all
+/// the machine has.
+pub fn workers_for(n: usize) -> usize {
+    if n < 3 {
+        0
+    } else {
+        (n.saturating_sub(2) / 3).clamp(1, 4)
+    }
 }
 
 /// When a block's voices must be done by, as a share of its period from its start: a voice a
@@ -1520,6 +1532,20 @@ mod tests {
         e.render(&[], &mut l, &mut r);
         e.end_block(256);
         e
+    }
+
+    /// The workers by the machine's processors (decisions.md R11, R39): none on 1 or 2, one
+    /// from 3 (a quad-core's 4 among them: before R39, none below 5), then a third of them
+    /// less two, at most four.
+    #[test]
+    fn a_machine_of_three_processors_or_more_has_a_worker() {
+        let by: Vec<usize> = (1..=20).map(workers_for).collect();
+        assert_eq!(
+            by,
+            [0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4]
+        );
+        assert_eq!(workers_for(0), 0);
+        assert_eq!(workers_for(256), 4);
     }
 
     /// A voice that a worker late from an earlier run still holds sits the next runs out:

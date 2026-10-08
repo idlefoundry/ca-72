@@ -482,7 +482,8 @@ is in the first columns of the table under "After".
   thread.
 - **Threads:** started when the plug-in is activated (not on the audio thread), a third of
   the processors less two, at most four (four on the Mac's 14 and on the i5-13600K's 20,
-  two on 8, none below 5), made audio threads for the host's largest block
+  two on 8, none below 5; **since R39** one on 3 and 4), made audio threads for the host's
+  largest block
   (`ca72_rt::promote`: on macOS the time-constraint policy, on Linux `SCHED_FIFO` with the
   watchdog, on Windows time-critical priority). They spin 200 us after a run (the block's
   next run follows at once), then park; the audio thread wakes them for each run.
@@ -734,7 +735,8 @@ circuit's, and a second quality in the plug-in against R1's one; the owner's to 
 - On the M4 Pro a voice takes 5 to 10 % of a core (Wooden Mallet the least, Undertow
   Growl the most): ten voices about half a core's work to a core's, shared by the host's
   thread and the workers (R11: a third of the processors less two, at most four: none
-  below 5 processors, one at 5 to 7, two at 8 to 10, three at 11 to 13). Live's meter shows
+  below 5 processors, one at 5 to 7, two at 8 to 10, three at 11 to 13; **since R39** one
+  at 3 and 4 too). Live's meter shows
   the host's thread's block against its period, waiting for the workers' voices included:
   about a fifth of the work at ten voices with four workers, and its worst blocks.
 - A machine of 8 processors (two workers) shares the voices three ways; one of 4 (none)
@@ -2363,3 +2365,92 @@ standalone (`--example standalone`, nih-plug's dummy audio backend), debug, befo
 
 Not tried: the panel on screen (the CA-74 saw it there), a Linux host, macOS and Windows (the
 byte ignored there, by softbuffer's code; CI runs the tests on all three).
+
+## R39. A worker on machines of 3 and 4 processors: the POLY presets in Waveform
+**Owner decision, 2026-10-07.** Two users reported the CPU overloaded in Tracktion Waveform: on
+KVR, Waveform 14 on Linux Mint 22.3 with "4 cores at 3.6 GHz", where choosing Slow Horn Swell,
+Brass Tutti or Warped Pad took the CPU to 100 % "after a moment" and the audio engine had to be
+reset, while REAPER showed 8 to 30 %; on Bedroom Producers Blog, Waveform 13 on Windows 10 on
+an AMD A8 notebook, 70 to 80 % "on every preset". Shown the cause below, the owner asked whether
+it was the host's fault or the plug-in's, and on the answer (mostly the plug-in's) said to give
+machines of fewer than 5 processors a worker, the change that keeps the sound and the voices.
+On 2026-10-08 the owner said to release it at once: "let's just push the performance fix into
+production immediately" (R40).
+
+**What was wrong.** The three presets are the only factory presets with POLY on, and they ask
+for 10, 8 and 8 voices. A machine of fewer than 5 processors started no worker (R11), so every
+voice played on the host's audio thread, and one thread holds about four or five of these
+voices even on the Linux reference machine (R7). Waveform's engine (Tracktion Engine, whose
+source is public) mutes its output and renders nothing once its measure of the audio callback's
+load, smoothed, passes 0.98 (`cpuLimitBeforeMuting`, `tracktion_DeviceManager`): a plug-in that
+keeps the callback near its period makes it fall silent by turns, and its CPU meter sits near
+100 %. REAPER renders a track's plug-ins up to 200 ms ahead and shows the whole machine's use, so
+the same work there read as one core of four. Waveform adds next to nothing to the plug-in's
+cost: the bench without a host and Waveform agree (below). The voice, the engine and the
+presets are unchanged from 0.1.0 to 0.1.4, so the version the users had makes no difference.
+
+**Agent decisions, 2026-10-07** (not separately approved):
+- **One worker from 3 processors up** (`engine::workers_for`): none on 1 or 2, where the host's
+  thread and a worker would be all the machine has; one on 3 and 4, as on 5 to 7; from 5 up as
+  before. One, not two, at 4: two would give a machine of 4 more workers than one of 5 to 7,
+  and leave the host one processor for everything else. How many play in real time still
+  depends on the processor: by the figures below, with one worker a core about 1.5 times
+  slower than the Linux reference machine's still plays Brass Tutti under Tracktion Engine's
+  limit (before, about 1.15 times), an estimate, not a measurement on such a machine.
+- **The samples do not change**: a voice plays the same samples on any thread (R11,
+  `tests/workers.rs`), and every factory preset rendered with one worker on 4 processors is the
+  same to the bit as 0.1.4's render. Under overload the worker's late voices fall silent for a
+  run (R11) rather than the host muting its whole output.
+- **CI now exercises the workers**: its runners have 3 or 4 processors, so for the first time
+  the pool runs in CI on all three systems.
+- **Not done here:** the presets' VOICES (the owner's), the idle sleep and POTATO on the
+  unreleased `perf` branch, a published minimum specification.
+
+**Evidence (the Linux reference machine, 2026-10-07 and 2026-10-08; Ryzen 7 7800X3D, 4 of its 8
+cores given to the host with `taskset`, so that the plug-in counts 4 processors):**
+- **Waveform 14.0.50** (Tracktion's Ubuntu package, unpacked into a folder of its own, a profile
+  of its own whose only VST3 was the build under test, its output on a silent PipeWire sink, 44.1
+  kHz, quantum 512), the owner playing a clip of one note every 0.25 s. Released 0.1.4 (SHA-256
+  a8b1ed8b…): Brass Tutti took Waveform's audio thread to 79 to 86 % of a core, the CPU meter to 80
+  to 90 %. This change (211e0124…): Brass Tutti, the audio thread 51 % at its median (57 % at the
+  90th percentile) and the worker 52 %, the meter at most about 60 %; Slow Horn Swell 48 % (55 %)
+  and 49 %, the meter 55 to 60 %. The threads' times from `/proc` while the owner played.
+- **The released 0.1.4 in a host bench** (the MC-79's `hostbench`, paced on a real-time thread,
+  CLAP, 48 kHz, 256 frames, 30 s, two runs each), mean of the period, late blocks of 5,625: Bass
+  10 to 11 %, 0; Slow Horn Swell 79 to 80 %, 54 to 89; Brass Tutti 71 to 72 %, 3; Warped Pad 65
+  to 67 %, 0 to 1 (one note every 0.25 s). With 4-key chords every second, 70 to 83 % and up to
+  467 late. 128 and 512 frames and 44.1 kHz much the same. Replayed through Tracktion Engine's
+  limit with each block 1.5 times as long (a slower processor), 7 to 23 % of the callbacks muted
+  with these presets; none with Bass even at three times.
+- `preset_render` against 0.1.4's renders: all 24 presets the same to the bit, with no worker
+  and with one on 4 processors. `cargo test -p ca72-plugin` (debug): 152 passed on 16, on 4 and
+  on 3 processors; clippy with and without `--all-features`; rustfmt.
+
+Not tried: a machine as slow as the users' (none here), Waveform 13, Windows, Maniac Audio's
+Dark Studio, REAPER on this machine, the editor closed against open, and the CLAP in Waveform.
+
+## R40. 0.1.5
+**Owner decision, 2026-10-08.** R39 released at once: "let's just push the performance fix into
+production immediately", with R38 (its owner's go: with the next version). The softbuffer fix
+(R34, "Seen besides"), made on the Mac and not yet merged, comes with the next patch release.
+
+**What it brings since 0.1.4** (the tag `v0.1.4`):
+- **Machines of 3 and 4 processors play POLY's voices with a worker** (R39). With the POLY
+  presets (Slow Horn Swell, Brass Tutti, Warped Pad) such a machine played every voice on the
+  host's audio thread: in Tracktion Waveform the CPU reached 100 % and the audio engine had to
+  be reset. The samples are the same to the bit.
+- **The editor's window opaque on Linux desktops that composite** (R38): the desktop, or the
+  host's own window, no longer shows through the panel.
+
+**Agent decisions, 2026-10-08** (not separately approved):
+- **A patch release, 0.1.5,** as R29, R33, R35 and R37: nothing a project or a preset holds has
+  changed since 0.1.4, so what was saved with 0.1.0 to 0.1.4 opens unchanged, and the
+  installers install over theirs.
+- **The version** as R37: the workspace's (`Cargo.lock` changed only in its eight crates); the
+  README's status names 0.1.5.
+- **The move to `plugin-kit`,** planned as 0.1.5 (R37), takes a later version.
+- **Released the way R37 was:** a commit of its own in R39's pull request, so that CI runs once
+  before the tag; once merged, the tag `v0.1.5` on main's commit; CI's release job drafts the
+  release with the Windows and Linux installers, the notices, the git sources and
+  `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
+  (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.4's form.
