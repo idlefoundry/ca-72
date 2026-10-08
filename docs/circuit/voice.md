@@ -21,7 +21,7 @@ model was developed in comes later (plan stage 6).
 | TUNE | From its centre (where the factory's tuning leaves it), R1's wiper into each oscillator | |
 | Filter | board4.md, calibrated by Folkman's procedure (`filter_cal.rs`: R39, R49, R73). The control node: CUTOFF (5K linear across ±10 V) through R55 200K, KEYBOARD CONTROL 1 and 2 through R53 300K and R54 150K, AMOUNT OF CONTOUR (5K linear from the filter contour) through R74 47K, the modulation line through R52 33K, and the external control's R51 100K (its jack empty: grounded). EMPHASIS is R14, a 50K reverse-audio rheostat (its law measured on the hardware reference: docs/calibration) | 4x oversampled |
 | VCA | board4.md, balanced by the factory procedure, on the loudness contour | output rate (bias per sample and at 3 kHz) |
-| Contours | board2.md, on the front panel's ATTACK and DECAY (1M audio rheostats) and SUSTAIN (5K linear), with the DECAY switch | half the output rate, interpolated (A17) |
+| Contours | board2.md, on the front panel's ATTACK and DECAY (1M audio rheostats, their laws measured on the hardware reference: docs/calibration) and SUSTAIN (5K linear), with the DECAY switch | half the output rate, interpolated (A17) |
 
 The pots' tapers are generic audio and reverse-audio laws (A9; GLIDE is "R2 5M AUDIO" on
 Figure 9-17). The panel's knobs run 0..1 for its 0..10 (CUTOFF's -5..+5 as 0..1); GLIDE's switch

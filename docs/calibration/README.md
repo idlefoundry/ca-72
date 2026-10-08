@@ -162,6 +162,37 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    `FACTORY` are unchanged. Presets with EMPHASIS between its ends change, their levels down
    by up to 2 dB (Three Saw Slab -1.96, Lead and Upright Pluck -1.02; not re-levelled); at 0
    or 10 they render the same to the bit.
+7. **ATTACK's and DECAY's laws** (the four 1M rheostats, `voice::time_pot`, 2026-10-09).
+   Session F set each contour's ATTACK and DECAY to its dial's marks (the reference's manual
+   draws the CA-72's dial: 10, 200 and 600 ms, 1, 5 and 10 s at the same angles), its output
+   on a DC-coupled input; the CA-72 renders the takes at the same marks. Measures: the
+   attack's rise from 10 to 90 %; the final decay's fall (DECAY on, SUSTAIN 10) from 90 to 50
+   % (the takes end before the slowest falls further). At 1 ms (fully anticlockwise) both
+   attacks match (0.6 and 0.9 ms). At the 10 ms mark and the tick past it the times scatter
+   about the drawing's taper by where the knob was set (attack 0.65 to 1.08 of the
+   reference's, decay 0.84 to 1.08), so the generic taper stays to there (0.15 of the travel).
+   Above it the CA-72's contours were too slow at the 1 s mark (2.8 to 3.3 times the
+   reference's time), too fast at the 10 s mark (0.68 to 0.84) and, fully clockwise, the
+   attacks 0.91 to 0.94 and the decays 1.16 to 1.18. The pot's resistance that gives the
+   reference's time through the CA-72's contour (the attack exactly linear in it, the decay
+   found between renders at bracketing resistances):
+
+   | | 1 s mark (0.6) | 10 s mark (0.86) | fully clockwise |
+   |---|---|---|---|
+   | Generic audio taper | 162K | 535K | 1M |
+   | Filter ATTACK | 52.5K | 749K | 1.06M |
+   | Filter DECAY | 58.5K | 660K | 873K |
+   | Loudness ATTACK | 53.0K | 788K | 1.10M |
+   | Loudness DECAY | 49.9K | 630K | 853K |
+
+   Each law runs straight in the resistance's logarithm from the generic taper's 11.7K at
+   0.15 through its three points. Every mark now matches within 0.2 % (loudness attack at 1
+   s 457 ms, 10 s 6.78 s, fully clockwise 9.47 s; its decay 293 ms, 4.02 s, 5.53 s; filter
+   attack 294 ms, 4.18 s, 5.92 s; decay 343 ms, 4.33 s, 5.82 s). The reference's laws are
+   steeper than an audio taper between the 1 s and 10 s marks (13 to 15 times the
+   resistance), and its pots' ends are within a 1M part's 20 %, the ATTACK pots above 1M and
+   the DECAY pots below. The contour circuits and their ngspice benches are unchanged (the
+   benches take resistances); `tests/panel_laws.rs` holds the laws to their points.
 
 ## Not changed, and why
 

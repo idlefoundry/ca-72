@@ -298,9 +298,39 @@ pub fn audio_taper(p: f64) -> f64 {
     (crate::ulp::pow(81.0, p.clamp(0.0, 1.0)) - 1.0) / 80.0
 }
 
-/// The ATTACK and DECAY pots: 1M audio rheostats, ohm.
-fn time_pot(p: f64) -> f64 {
+/// The ATTACK and DECAY pots on Figure 9-17: 1M audio rheostats (the generic taper), ohm.
+pub fn time_pot_drawn(p: f64) -> f64 {
     1e6 * audio_taper(p)
+}
+
+/// The hardware reference's ATTACK and DECAY at its dial's 1 s and 10 s marks (0.6 and 0.86
+/// of the travel) and fully clockwise, as the pot's resistance through which the CA-72's
+/// contour takes the reference's time: 10 to 90 % of the attack, 90 to 50 % of the final
+/// decay (docs/calibration, session F). The generic taper's are 162K, 535K and 1M.
+pub const FILTER_ATTACK: [(f64, f64); 3] = [(0.6, 52.5e3), (0.86, 749e3), (1.0, 1.06e6)];
+pub const FILTER_DECAY: [(f64, f64); 3] = [(0.6, 58.5e3), (0.86, 660e3), (1.0, 873e3)];
+pub const LOUDNESS_ATTACK: [(f64, f64); 3] = [(0.6, 53.0e3), (0.86, 788e3), (1.0, 1.10e6)];
+pub const LOUDNESS_DECAY: [(f64, f64); 3] = [(0.6, 49.9e3), (0.86, 630e3), (1.0, 853e3)];
+
+/// Where the time pots leave the generic taper: the dial's tick past its 10 ms mark, up to
+/// which the reference's times agree with it within where its knob was set.
+const TIME_POT_GENERIC_TO: f64 = 0.15;
+
+/// An ATTACK or DECAY pot as the voice has it, ohm: the generic taper to
+/// [`TIME_POT_GENERIC_TO`], then straight in its logarithm through `law`'s points.
+pub fn time_pot(p: f64, law: &[(f64, f64); 3]) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    if p <= TIME_POT_GENERIC_TO {
+        return time_pot_drawn(p);
+    }
+    let mut a = (TIME_POT_GENERIC_TO, time_pot_drawn(TIME_POT_GENERIC_TO));
+    for &b in law {
+        if p <= b.0 {
+            return a.1 * crate::ulp::pow(b.1 / a.1, (p - a.0) / (b.0 - a.0));
+        }
+        a = b;
+    }
+    a.1
 }
 
 /// EMPHASIS on Figure 9-17: R14, 50K reverse audio used as a rheostat, 50K at 0 and 0 at 10
@@ -1061,14 +1091,21 @@ impl Voice {
 /// The contour generators' settings from the panel, EXT. S-TRIG open or closed.
 fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourPanel {
     let [a0, d0, a1, d1] = pots;
-    let k = |c: ContourKnobs, a: &mut Memo<f64>, d: &mut Memo<f64>| Controls {
-        attack: a.get(c.attack, time_pot),
-        decay: d.get(c.decay, time_pot),
+    type Law = [(f64, f64); 3];
+    let k = |c: ContourKnobs, a: &mut Memo<f64>, d: &mut Memo<f64>, la: &Law, ld: &Law| Controls {
+        attack: a.get(c.attack, |x| time_pot(x, la)),
+        decay: d.get(c.decay, |x| time_pot(x, ld)),
         sustain: c.sustain,
     };
     ContourPanel {
-        filter: k(p.filter_contour, a0, d0),
-        loudness: k(p.loudness_contour, a1, d1),
+        filter: k(p.filter_contour, a0, d0, &FILTER_ATTACK, &FILTER_DECAY),
+        loudness: k(
+            p.loudness_contour,
+            a1,
+            d1,
+            &LOUDNESS_ATTACK,
+            &LOUDNESS_DECAY,
+        ),
         decay_on: p.decay,
         s_trig,
     }

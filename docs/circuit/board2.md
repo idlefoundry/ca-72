@@ -20,7 +20,8 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
    line down through R49 220 like Q20. Legato playing does not retrigger: the bus stays at
    +10 V while any key is held.
 2. **Flip-flops** Q1/Q4 [Q25/Q15]. Set, Q5 [Q16] (saturated) charges the timing capacitor C5
-   [C2] (10 uF) through R7 [R42] 100 and the ATTACK pot (1M audio, a rheostat) toward the
+   [C2] (10 uF) through R7 [R42] 100 and the ATTACK pot (1M audio, a rheostat; its law in the voice measured on
+   the hardware reference: docs/calibration) toward the
    +9.3 V rail. The flip-flop resets when the output, divided by R33/R29 [R24/R27] toward
    -10 V, drives enough current through CR3 [CR6] into Q4's [Q15's] base to take Q1 [Q25]
    out of saturation: at 4.49 V [5.28 V] out. It is also held reset while the reset line
