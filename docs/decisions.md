@@ -2232,4 +2232,13 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   3.7 semitones up in both; CUTOFF lowered by 0.305 (Cruising Whistle -1.33 to -1.635, its
   whistle within 5 cents of 0.1.3's at C4, G4 and E4; Ladder Kick -3.6 to -3.9, its ring's
   sweep over the first 11 ms within the measure's resolution of 0.1.3's).
+- **The presets re-levelled** to where R15 and R16 put them: each one's momentary maximum
+  on a phrase in its register (`tests/preset_levels.rs`), on 0.1.3 and now, and MAIN OUTPUT
+  VOLUME moved by the difference through its own law. Twelve within 0.03 dB of 0.1.3 (Three
+  Saw Slab 7.5 to 8.29, Undertow Growl 9.17 to 8.77, Warped Pad 7.8 to 7.56, the rest by
+  0.03 to 0.22). As R15 has it, a preset at VOLUME 10 under its level stays at 10: nine
+  are now quieter than they were (Upright Pluck -3.6 dB, Breath Flute -2.2, Stacked Fifths
+  -1.9, Ladder Kick -1.6, Open Hat -1.6, Ringing Saw Line -1.4, Noise Snare -1.0, Shoreline
+  Wash -0.5, Wooden Mallet -0.4), and Pink Riser, quiet by nature, 1.3 dB louder and still
+  under -18 LUFS. Hollow Glider and Closed Hat moved under 0.1 dB and were left.
 - **The number** of this record is a placeholder until the merge.

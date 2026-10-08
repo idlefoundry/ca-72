@@ -260,9 +260,11 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   octave with 1, 0.970 with both; not yet set beside the CA-72's), oscillators 2 and 3's
   FREQUENCY spans,
   SUSTAIN's law, and VOLUME on oscillators 2 and 3 and the noise (taken as oscillator 1's).
-- **The presets** were not re-levelled: against 0.1.3 their levels now run -3.5 dB (Three
-  Saw Slab) to +6.1 dB (Pink Riser) from the library's -18 LUFS, and Cruising Whistle's and
-  Ladder Kick's filter pitch is 3.7 semitones up.
+- **The presets** are re-levelled and the two that sound the filter's pitch retuned (R-CAL),
+  but nine already at MAIN OUTPUT VOLUME 10 are quieter than in 0.1.3 and VOLUME cannot
+  raise them: Upright Pluck -3.6 dB, Breath Flute -2.2, Stacked Fifths -1.9, Ladder Kick
+  -1.6, Open Hat -1.6, Ringing Saw Line -1.4, Noise Snare -1.0, Shoreline Wash -0.5, Wooden
+  Mallet -0.4 (mostly EMPHASIS's and the contours' laws).
 
 ## Reproducing
 
