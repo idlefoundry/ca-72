@@ -148,6 +148,20 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    control off, FREQUENCY at its minimum now clicks every 5.7 s: past the service manual's 2
    to 5 s (5.36), within the reference's manual (oscillators from 0.1 Hz); the voice test
    takes 10 s as its bound.
+6. **EMPHASIS's law** (R14, `voice::emphasis_r14`, 2026-10-09). The reference's passband
+   falls -2.25, -9.53 and -12.50 dB at EMPHASIS 2.5, 5 and 7.5 and its peak rises +0.4, +11.6
+   and +21 to +33 dB across the cutoffs (session E). With Figure 9-17's 50K reverse audio on
+   the generic taper the CA-72's fell -2.63, -7.19 and -12.85 dB, peaking +0.8, +6.4 and +39
+   dB: too little resonance in the middle, a little too much near the top. Mapping the CA-72's
+   response over EMPHASIS in steps of 0.05, R14 that gives the reference's loss (its peak as a
+   check) is 18.82K, 2.91K and 1.35K (the generic taper's 16.25K, 5.0K and 1.25K); the
+   voice's law runs straight in R14's logarithm from 0 (50K) through those, and from 7.5 to 10
+   follows the generic taper's shape scaled to meet them (0 at 10). Now -2.18, -9.50 and
+   -12.45 dB, peaking +0.5, +11.9 and +23 to +38 dB. Folkman's regeneration calibration and
+   the service manual's checks keep the drawing's law (`emphasis_r14_drawn`), so R73 and
+   `FACTORY` are unchanged. Presets with EMPHASIS between its ends change, their levels down
+   by up to 2 dB (Three Saw Slab -1.96, Lead and Upright Pluck -1.02; not re-levelled); at 0
+   or 10 they render the same to the bit.
 
 ## Not changed, and why
 
