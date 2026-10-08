@@ -530,7 +530,35 @@ fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f6
 /// GLIDE's resistance in circuit: the 5M pot (a rheostat), shorted by the GLIDE switch
 /// off, ohm.
 pub fn glide_r(p: f64, on: bool) -> f64 {
-    if on { 5e6 * audio_taper(p) } else { 0.0 }
+    if on { glide_pot(p) } else { 0.0 }
+}
+
+/// GLIDE as Figure 9-17 draws it: 5M on the generic audio taper, ohm.
+pub fn glide_pot_drawn(p: f64) -> f64 {
+    5e6 * audio_taper(p)
+}
+
+/// GLIDE's resistance at 2.5, 5, 7.5 and 10 such that the keyboard's voltage slides an
+/// octave, up and down, at the hardware reference's rates (20 to 80 % of C3 to C4 and back:
+/// 61 and 22, 29 and 18, 3.8 and 2.1, 1.6 and 0.9 octaves a second; docs/calibration,
+/// session J). The generic taper's are 125K, 500K, 1.63M and 5M.
+const GLIDE_LAW: [(f64, f64); 4] = [(0.25, 162e3), (0.5, 257e3), (0.75, 2.1e6), (1.0, 5e6)];
+
+/// GLIDE as the voice has it: the generic taper's shape to 2.5, scaled to meet
+/// [`GLIDE_LAW`], then straight in its logarithm through it, ohm.
+pub fn glide_pot(p: f64) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    let (p0, r0) = GLIDE_LAW[0];
+    if p <= p0 {
+        return r0 * audio_taper(p) / audio_taper(p0);
+    }
+    for w in GLIDE_LAW.windows(2) {
+        let ((pa, ra), (pb, rb)) = (w[0], w[1]);
+        if p <= pb {
+            return ra * crate::ulp::pow(rb / ra, (p - pa) / (pb - pa));
+        }
+    }
+    GLIDE_LAW[GLIDE_LAW.len() - 1].1
 }
 
 /// How long a released key's pitch contact stays closed after its trigger contact opens,

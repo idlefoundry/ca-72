@@ -4,7 +4,7 @@
 
 use ca72::voice::{
     FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, contour_amount_track,
-    cutoff_track, time_pot, time_pot_drawn, volume_track,
+    cutoff_track, glide_pot, glide_pot_drawn, time_pot, time_pot_drawn, volume_track,
 };
 
 #[test]
@@ -99,5 +99,26 @@ fn contour_amount_follows_the_reference_at_its_marks() {
         let t = contour_amount_track(k as f64 / 1000.0);
         assert!(t > last || k == 0, "AMOUNT {k}/1000: {t}");
         last = t;
+    }
+}
+
+#[test]
+fn glide_follows_the_reference_at_its_marks() {
+    for (p, r) in [(0.25, 162e3), (0.5, 257e3), (0.75, 2.1e6), (1.0, 5e6)] {
+        assert!(
+            (glide_pot(p) / r - 1.0).abs() < 1e-12,
+            "GLIDE {p}: {}",
+            glide_pot(p)
+        );
+    }
+    // Below 2.5, the drawing's taper scaled to meet it.
+    let scale = 162e3 / glide_pot_drawn(0.25);
+    assert!((glide_pot(0.1) / (scale * glide_pot_drawn(0.1)) - 1.0).abs() < 1e-12);
+    assert_eq!(glide_pot(0.0), 0.0);
+    let mut last = -1.0;
+    for k in 0..=1000 {
+        let r = glide_pot(k as f64 / 1000.0);
+        assert!(r > last || k == 0, "GLIDE {k}/1000: {r}");
+        last = r;
     }
 }

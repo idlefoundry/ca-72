@@ -332,6 +332,19 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     -34 dB, and the two in FEEDBACK's loop (Pulse Strut, Undertow Growl), which any change
     sets on another course, with their levels within 0.17 dB.
 
+17. **GLIDE's law** (`voice::glide_pot`, 2026-10-08). Session J played C3, C4, C3 over MIDI
+    at GLIDE 2.5, 5, 7.5 and 10. From each note's start, the keyboard's voltage slid from 20
+    to 80 % of the octave at 61 and 22 (up and down), 29 and 18, 3.8 and 2.1, and 1.6 and 0.9
+    octaves a second: a straight slide, as the CA-72's circuit makes it (the hold amplifier
+    saturates toward its rails, faster up than down). The CA-72 on the generic taper (125K,
+    500K, 1.63M, 5M): 63 and 29, 16 and 8.3, 5.1 and 2.6, 1.65 and 0.86. The netlist takes
+    GLIDE's resistance; rendering the phrase at chosen resistances, the reference's rates
+    (both directions together) are 162K at 2.5, 257K at 5 (216K to 280K by the measure: the
+    CA-72's downward slide starts fast and then slows where the reference's runs straight),
+    2.1M at 7.5, and 5M at 10 as drawn: its pot has the two slopes of its contour pots. The
+    voice's law runs through them (below 2.5 the generic taper's shape scaled to 162K). Now
+    58 and 23, 29 and 13, 3.9 and 2.05, 1.65 and 0.86.
+
 ## Still differs (2026-10-08, after the knob session's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -342,6 +355,10 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   stands 1 to 1.5 dB higher than the reference's (+14.7 to +15.3 dB at 6 against +13.9 to
   +14.3; +21.1 to +22.3 at 7 against +19.4 to +21.3), and at 7.5, near regeneration, up to 5
   dB higher at some cutoffs: the ladder's Q at a given loop gain.
+- **GLIDE's two directions:** at GLIDE 7.5 and 10 the CA-72 slides down 1.9 times slower
+  than up, the reference 1.76 and 1.81 times (the hold amplifier's downward drive, toward
+  -4.4 V through R59/R54); at GLIDE 5 the CA-72's downward slide starts fast and then slows
+  where the reference's runs straight.
 - **The contours' peak:** the attack ends at 1.17 [1.18] of the held level on the CA-72 and
   1.22 to 1.23 [1.26 to 1.27] on the reference: the peak divider (R33/R29 [R24/R27]) or CR3's
   [CR6's] threshold. And with DECAY at 0 the release's first half takes 1.9 to 2.2 ms against

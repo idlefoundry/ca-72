@@ -47,7 +47,8 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
    (Figure 9-17: 8.48 mA) into the 43 resistor string (10 ohm 1% each; 83 mV per key); the
    pitch bus (the string's voltage where the pitch bar touches it, lowest key first) is
    held on C9 0.33 uF. An amplifier (Q23/Q14 matched, Q24) drives C6 1 uF through R61 330
-   and the GLIDE pot (5M, a rheostat; shorted by the GLIDE switch); Q13 (JFET) connects C6
+   and the GLIDE pot (5M, a rheostat; shorted by the GLIDE switch; its law in the voice
+   measured on the hardware reference: docs/calibration); Q13 (JFET) connects C6
    only while a key is held (CR5 pinches it off from the trigger bus); Q10 (JFET) follows
    C6 to the output (R18 3.9K to -10 V), and R30 10K closes the amplifier's loop from the
    output. With glide the loop saturates: C6 charges toward the amplifier's rails (+10 V up,

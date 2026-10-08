@@ -24,7 +24,7 @@ model was developed in comes later (plan stage 6).
 | Contours | board2.md, on the front panel's ATTACK and DECAY (1M audio rheostats, their laws measured on the hardware reference: docs/calibration) and SUSTAIN (5K linear), with the DECAY switch | half the output rate, interpolated (A17) |
 
 The pots' tapers are generic audio and reverse-audio laws (A9; GLIDE is "R2 5M AUDIO" on
-Figure 9-17). The panel's knobs run 0..1 for its 0..10 (CUTOFF's -5..+5 as 0..1); GLIDE's switch
+Figure 9-17) where the hardware reference's were not measured (docs/calibration). The panel's knobs run 0..1 for its 0..10 (CUTOFF's -5..+5 as 0..1); GLIDE's switch
 on the left hand controller is `glide_on`.
 
 **Output scale.** `Voice::tick` returns the main output's voltage across a 10K load, with
@@ -54,8 +54,9 @@ higher and fire sooner. This is a candidate for the owner's comparison.
   string's current through the two contacts (A18). The loudness contour stays at its
   sustain (4.480 V) throughout. A note outside the keyboard is ignored.
 - `glide_moves_the_keyboard_voltage_between_keys`: legato from A2 to A3. With GLIDE off
-  the keyboard voltage arrives within 1 ms of A2's pitch contact opening. At GLIDE 5 (500K)
-  it rises 0.49, 0.85, 1.34 V at 10, 30 and 60 ms, and arrives.
+  the keyboard voltage arrives within 1 ms of A2's pitch contact opening. At GLIDE 5 (257K)
+  it rises to 0.86, 1.20 and 1.53 V at 5, 15 and 25 ms from A2's 0.76 V, and arrives by 35
+  ms.
 
 - `oscillators_2_and_3_play_through_their_controls`: oscillator 2 alone plays the low A at
   109.999 Hz (-0.02 cent), +8.23 semitones with FREQUENCY at 10; oscillator 3 with OSC. 3

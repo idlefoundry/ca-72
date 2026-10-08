@@ -154,7 +154,7 @@ fn the_lowest_key_sounds_and_contours_are_not_retriggered() {
 
 #[test]
 fn glide_moves_the_keyboard_voltage_between_keys() {
-    // GLIDE at 5 (500K on the 1 uF hold capacitor) and off, legato from A2 up to A3.
+    // GLIDE at 5 (257K on the 1 uF hold capacitor) and off, legato from A2 up to A3.
     let mut kbd = Vec::new();
     for on in [true, false] {
         let panel = Panel {
@@ -182,9 +182,9 @@ fn glide_moves_the_keyboard_voltage_between_keys() {
     let (a2, a3) = (at(&kbd[1], 0.39), at(&kbd[1], 0.89));
     // A2's pitch contact opens RELEASE_LEAD (2 ms) after the release: then the pitch moves.
     let off_1ms = at(&kbd[1], 0.403);
-    let on = [0.41, 0.43, 0.46, 0.5].map(|t| at(&kbd[0], t));
+    let on = [0.405, 0.415, 0.425, 0.435].map(|t| at(&kbd[0], t));
     eprintln!(
-        "keyboard: A2 {a2:.4} V, A3 {a3:.4} V; GLIDE off 1 ms after the contact: {off_1ms:.4} V; GLIDE on at 10, 30, 60, 100 ms: {:.3} {:.3} {:.3} {:.3} V",
+        "keyboard: A2 {a2:.4} V, A3 {a3:.4} V; GLIDE off 1 ms after the contact: {off_1ms:.4} V; GLIDE on at 5, 15, 25, 35 ms: {:.3} {:.3} {:.3} {:.3} V",
         on[0], on[1], on[2], on[3]
     );
     assert!(
