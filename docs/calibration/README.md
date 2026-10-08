@@ -212,28 +212,36 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   shape; the factor of two was the shared resistor.
 - **The trigger delay** (board2.md, B2-3: 8 ms from a key, 12 ms after its release). The
   reference's gate input adds 2.3 ms at a gate's rise and about 6 ms at its fall, and needs 3
-  ms of gate: its own processing, not its contour's. What a MIDI note takes on the reference
-  is measured in the knob session, with MIDI sent through the interface.
+  ms of gate: its own processing, not its contour's. The 8 and 12 ms stay (the owner,
+  2026-10-08; session G holds a MIDI note's timing on the reference).
 - **The thump** (B4-6): its size against a note's level, which the oscillators will give.
 - **The corner's mapping:** see the table.
 
-## Next: the knob session
+## Still differs (2026-10-08, after the knob session's fits)
 
-Each needs the panel moved, so the owner at the instrument; the plans run each take, and the
-analysis and the fits are ready for them:
-
-1. The oscillators: each waveform's shape and level at 8', the ranges' octaves, OSC 3's
-   reverse sawtooth, FREQUENCY's span, the mixer's VOLUME taper; MIX recorded beside MAIN.
-2. The mixer's overdrive: one, two and three oscillators at VOLUME 2 to 10 into the filter.
-3. EMPHASIS at 0, 2.5, 5, 7.5 and 10, and self-oscillation, against CUT CV (the regeneration
-   and range trims); CUTOFF at its printed marks; KEYBOARD CONTROL 1, 2 and both.
-4. The contours' ATTACK and DECAY at their printed marks; SUSTAIN at 0, 5 and 10; the
-   contour outputs into the modular's DC-coupled inputs, which return on computer inputs 11
-   to 26.
-5. MIDI from the interface's MIDI output (a cable to the reference's MIDI IN): a note's delay
-   to the attack and to the release, against the CA-72's 8 and 12 ms.
-6. EXTERNAL INPUT VOLUME at 2, 4, 6, 8 and 10 (two points so far: 10 to 5 is -30.7 dB on the
-   reference, -20 dB on the CA-72's assumed taper).
+- **The CUTOFF dial's span.** R39 put the corner on the reference's at the dial's centre and
+  top, but the reference's CUTOFF spans 8.85 octaves from -4 to +4 and the CA-72's 8.46: at
+  -2 and -4 the CA-72's corner is now about 0.18 and 0.36 octave high (session E's corners).
+  Whether the reference's marks sit at other angles or its pot's ends differ needs the
+  dial's end stops (photographs asked for).
+- **EXTERNAL INPUT's drive:** about 2.2 dB under the reference's at every mark (change 4).
+  Session D (the mixer's overdrive) is the comparison that tells whether the bus or the
+  external path accounts for it.
+- **The contours' peak:** the attack ends at 1.17 [1.18] of the held level on the CA-72 and
+  1.22 to 1.23 [1.26 to 1.27] on the reference: the peak divider (R33/R29 [R24/R27]) or CR3's
+  [CR6's] threshold. And with DECAY at 0 the release's first half takes 1.9 to 2.2 ms against
+  the reference's 1.1 to 1.3.
+- **The contours between marks:** the 200 and 600 ms and 5 s marks were not taken; the laws
+  interpolate there.
+- **Oscillator tracking:** with the external control input at 50.5K, over four volts the
+  CA-72 ends 22 cents under the reference (0.9986 against 1.0030 octave a volt at the ES-3's
+  10.39 V), against 80 cents before.
+- **Not in this round:** KEYBOARD CONTROL's tracking (the CA-72's both-on 0.970 of the
+  reference's), oscillators 2 and 3's FREQUENCY spans, the mixer's overdrive (session D),
+  SUSTAIN's law, and VOLUME on oscillators 2 and 3 and the noise (taken as oscillator 1's).
+- **The presets** were not re-levelled: against 0.1.3 their levels now run -3.5 dB (Three
+  Saw Slab) to +6.1 dB (Pink Riser) from the library's -18 LUFS, and Cruising Whistle's and
+  Ladder Kick's filter pitch is 3.7 semitones up.
 
 ## Reproducing
 

@@ -2217,4 +2217,12 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   Through the drawing's one R1401 a contour held higher halved the other's release with
   DECAY off; the reference's is the same whatever the other contour holds. It changes the
   four presets with DECAY off; every other preset renders the same to the bit.
+- **The knob session, 2026-10-08** (sessions C to H; the owner's instructions: trace each
+  difference to a component, a trim or a device model, netlist and model together, one
+  commit each). Changed: the oscillators' external control input to 50.5K (a volt an
+  octave); RANGE (R39) to the reference's 0.559; oscillator 3's R162 to 2.96K (its pitch with
+  OSC. 3 CONTROL off); and, measured on the reference in place of the generic tapers (A9),
+  the laws of EXTERNAL INPUT VOLUME (R9), EMPHASIS (R14), the four ATTACK and DECAY pots and
+  the mixer's VOLUME. The 8 and 12 ms keyboard delays stay; the presets are not re-levelled.
+  What still differs is listed in the calibration README.
 - **The number** of this record is a placeholder until the merge.
