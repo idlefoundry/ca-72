@@ -2192,7 +2192,7 @@ MIDI Learn (R34) as 0.1.3.
   form.
 
 ## R-CAL. A hardware reference, and the first change it settled
-**Owner decision, 2026-10-07.** The CA-72 is matched to the owner's Behringer Model D, a
+**Owner decision, 2026-10-07.** The CA-72 is matched to the owner's hardware reference, a
 modern recreation of the instrument which the owner could not tell from a Model D in
 level- and pitch-matched recordings: "if we match this, that this will be the right thing to
 do." The comparisons with hardware become measurements ([calibration](calibration/README.md)).

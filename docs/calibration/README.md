@@ -1,6 +1,6 @@
 # Calibration against a hardware reference
 
-**Owner decision, 2026-10-07.** The CA-72 is matched to the owner's Behringer Model D, a
+**Owner decision, 2026-10-07.** The CA-72 is matched to the owner's hardware reference, a
 modern recreation of the instrument: "as long as we have the right sound to calibrate to, we
 can assume that this matches the Model D almost exactly in terms of the sound
 characteristics ... if we match this, that this will be the right thing to do." In
