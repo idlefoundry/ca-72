@@ -365,7 +365,9 @@ fn play(rest: &[String]) -> Res {
 /// GATE closes EXT. S-TRIG while above half of its high level (`--gate-delay ON,OFF` ms later at
 /// its rise and its fall: the hardware reference's gate input's own delays, for a comparison
 /// by ear); with `--fc-gate` FC GATE closes it too (the reference's filter contour has a gate
-/// of its own, the CA-72's contours one trigger). The output WAV's channels:
+/// of its own, the CA-72's contours one trigger); with `--key N` MIDI note N is held on the
+/// keyboard throughout (the note sent to the reference, for its keyboard's pitch). The output
+/// WAV's channels:
 /// the main output (the voice's scale, 5 V as 1.0), the mixer bus's Norton current (mA),
 /// the filter's output (V), the loudness contour (V), the preamplifier's output (V) and the
 /// filter contour (V).
@@ -373,7 +375,7 @@ fn stim(rest: &[String]) -> Res {
     use ca72::voice::{INPUT_VOLTS, Jacks, Panel, Voice};
     let usage = "ca72-lab stim <take.wav> <patch.json> <out.wav> [--volts-fs V] \
                  [--cut-scale S] [--preroll SECONDS] [--quality MODE] [--no-vpo] \
-                 [--gate-delay ON_MS,OFF_MS] [--fc-gate]";
+                 [--gate-delay ON_MS,OFF_MS] [--fc-gate] [--key MIDI]";
     let mut volts_fs = 10.0;
     let mut cut_scale = 1.0;
     let mut preroll = 2.0;
@@ -381,6 +383,7 @@ fn stim(rest: &[String]) -> Res {
     let mut vpo = true;
     let mut gate_delay = (0.0, 0.0);
     let mut fc_gate = false;
+    let mut key: Option<i32> = None;
     let mut positional = Vec::new();
     let mut args = rest.iter();
     let num = |s: Option<&String>| -> Result<f64, String> {
@@ -394,6 +397,7 @@ fn stim(rest: &[String]) -> Res {
             "--quality" => q = quality(args.next().ok_or(usage)?)?,
             "--no-vpo" => vpo = false,
             "--fc-gate" => fc_gate = true,
+            "--key" => key = Some(num(args.next())? as i32),
             "--gate-delay" => {
                 let v = args.next().ok_or(usage)?;
                 let (a, b) = v.split_once(',').ok_or(usage)?;
@@ -430,6 +434,9 @@ fn stim(rest: &[String]) -> Res {
     let t0 = std::time::Instant::now();
     let mut voice = Voice::new(f64::from(rate), panel);
     voice.set_seed(72);
+    if let Some(k) = key {
+        voice.note(k, true);
+    }
     let built = t0.elapsed().as_secs_f64();
     let (ext, cut, vp) = (&ch[3], &ch[4], &ch[7]);
     let lc: Vec<f32> = if fc_gate {

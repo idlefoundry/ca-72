@@ -262,9 +262,12 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 ## Still differs (2026-10-08, after the knob session's fits)
 
 - **The filter's scale:** at every CUTOFF mark the CA-72's corner moves 2.3 to 3.1 % more
-  per volt of CUT CV than the reference's (session E), and the reference's KEYBOARD CONTROL
-  both on tracks 0.970 octave an octave: both point at the control node's scale (the SCALE
-  trim R49), to be measured against the CA-72's own keyboard tracking.
+  per volt of CUT CV than the reference's, and with KEYBOARD CONTROL 1, 2 or both it tracks
+  4.2 to 4.5 % more than the reference's (0.343, 0.681, 1.013 octaves an octave against
+  0.328, 0.654, 0.971; session E, MIDI notes 41 and 65, `stim --key`). One scale (the SCALE
+  trim R49) would move both alike; the 1.6 % between them is the keyboard's path into the
+  filter or the reference's keyboard voltage. AMOUNT OF CONTOUR against the FILT CONT
+  jack's measured voltage would give the node's scale apart from both: the next session.
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
   needs 0.2 to 0.7 dB more drive than the reference for the same compression, from EXT and
   about as much from the oscillators: the filter's input side (R54 470 and the input pair),
