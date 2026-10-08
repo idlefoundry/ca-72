@@ -183,11 +183,11 @@ off by more than this, untuned.
 - **B1-10** Figure 9-17 (the interconnecting wiring) is the later board's (octave buffer,
   1K string). The oscillators' FREQUENCY pots and SW2 are taken from it; which end of each
   pot is clockwise is not drawn and follows from the pitch rising clockwise.
-- **B1-12** (2026-10-09) R162 is 3.01K in Modification 8.2 (B1-9); the model's is 2.96K, which
+- **B1-12** (2026-10-08) R162 is 3.01K in Modification 8.2 (B1-9); the model's is 2.96K, which
   puts oscillator 3 with OSC. 3 CONTROL off and FREQUENCY at its tuned centre where the hardware
   reference's sits (201 Hz at 8' against its 198.8; 3.01K gave 232.7). With the control on the
   factory tuning absorbs R162 (`tuning::R162`, `board1-osc23.lib`; docs/calibration).
-- **B1-11** (2026-10-09) The external control input's resistors (R38, R63, R144) are 51.1K on
+- **B1-11** (2026-10-08) The external control input's resistors (R38, R63, R144) are 51.1K on
   Figure 9-3, which leaves the rear jack at 0.987 octaves a volt once the keys are trimmed;
   the model's are 50.5K, as the hardware reference's control input takes a volt an octave
   (`expo::R_EXT`; docs/calibration).

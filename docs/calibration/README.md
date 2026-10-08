@@ -89,7 +89,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    against ngspice beside the new one. It changes only presets with DECAY off (Pulse Strut,
    Cruising Whistle, Slow Bow, Pink Riser); the others render the same to the bit.
 2. **The oscillators' external control input, R38, R63 and R144: 51.1K to 50.5K**
-   (`expo::R_EXT`, 2026-10-09). The keyboard reaches each oscillator through R27 51.1K and
+   (`expo::R_EXT`, 2026-10-08). The keyboard reaches each oscillator through R27 51.1K and
    the factory's scale trim makes its keys exact; the rear jack's resistor, the same 51.1K,
    then gives 0.987 octaves a volt (measured on the model, session C's take
    `03_osc1_sawtooth`). The reference's control input is 1 V an octave (its manual; its three
@@ -100,7 +100,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    against the three 50.5K), not +0.107 V; the tuning absorbs it. The plug-in has no jack
    (R3), so this changes what a plugged jack does (the DAW's device, `ca72-lab stim`), and
    the presets only by the tuning's re-solve.
-3. **The filter's RANGE trim, R39: 0.632 to 0.559** (`filter_cal::CALIBRATED`, 2026-10-09).
+3. **The filter's RANGE trim, R39: 0.632 to 0.559** (`filter_cal::CALIBRATED`, 2026-10-08).
    With the trims of Folkman's procedure the CA-72's filter sat 0.32 to 0.34 octave below
    the reference's at the same control voltage, self-oscillating at EMPHASIS 10 from 22.9 kHz
    down to 950 Hz (session E, CUTOFF fully clockwise, CUT CV 0 to -5.2 V), and 0.28 octave
@@ -114,7 +114,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    bands rise 3 to 10 dB, their levels within 0.3 dB (Ladder Kick +1.0 dB). Two presets
    sound the filter's own pitch, which rises by the same 3.7 semitones: Cruising Whistle
    and Ladder Kick (not retuned: the owner's call).
-4. **EXTERNAL INPUT VOLUME's law** (R9, `voice::ext_taper`, 2026-10-09). The voice's
+4. **EXTERNAL INPUT VOLUME's law** (R9, `voice::ext_taper`, 2026-10-08). The voice's
    gain from the jack to the mixer, against VOLUME 10, fell -36.5, -28.4, -25.7, -23.4 and
    -18.6 dB at 2, 4, 5, 6 and 8 with the generic audio taper and the preamplifier's input
    (97K) loading the wiper; the reference's falls -39.5, -33.1, -31.3, -29.9 and -16.9 dB
@@ -132,7 +132,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    (not re-levelled); the others render the same to the bit. `feedback.rs` plays its loop at
    VOLUME 0.7, where R9 now sits as 0.6 did.
 5. **Oscillator 3 with OSC. 3 CONTROL off: R162 3.01K to 2.96K** (`tuning::R162`,
-   2026-10-09). With the control off oscillator 3 loses its keyboard, tune, bend, modulation
+   2026-10-08). With the control off oscillator 3 loses its keyboard, tune, bend, modulation
    and external inputs and its frequency trimmer, so at FREQUENCY's tuned centre its pitch
    comes from its range resistor and IC8's output, which R150, R155, R162 and R170 set. The
    reference sat at 198.82 Hz at 8' (session C, take 25; V/OCT moved it not at all), the
@@ -148,7 +148,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    control off, FREQUENCY at its minimum now clicks every 5.7 s: past the service manual's 2
    to 5 s (5.36), within the reference's manual (oscillators from 0.1 Hz); the voice test
    takes 10 s as its bound.
-6. **EMPHASIS's law** (R14, `voice::emphasis_r14`, 2026-10-09). The reference's passband
+6. **EMPHASIS's law** (R14, `voice::emphasis_r14`, 2026-10-08). The reference's passband
    falls -2.25, -9.53 and -12.50 dB at EMPHASIS 2.5, 5 and 7.5 and its peak rises +0.4, +11.6
    and +21 to +33 dB across the cutoffs (session E). With Figure 9-17's 50K reverse audio on
    the generic taper the CA-72's fell -2.63, -7.19 and -12.85 dB, peaking +0.8, +6.4 and +39
@@ -162,7 +162,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    `FACTORY` are unchanged. Presets with EMPHASIS between its ends change, their levels down
    by up to 2 dB (Three Saw Slab -1.96, Lead and Upright Pluck -1.02; not re-levelled); at 0
    or 10 they render the same to the bit.
-7. **ATTACK's and DECAY's laws** (the four 1M rheostats, `voice::time_pot`, 2026-10-09).
+7. **ATTACK's and DECAY's laws** (the four 1M rheostats, `voice::time_pot`, 2026-10-08).
    Session F set each contour's ATTACK and DECAY to its dial's marks (the reference's manual
    draws the CA-72's dial: 10, 200 and 600 ms, 1, 5 and 10 s at the same angles), its output
    on a DC-coupled input; the CA-72 renders the takes at the same marks. Measures: the
@@ -193,7 +193,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    resistance), and its pots' ends are within a 1M part's 20 %, the ATTACK pots above 1M and
    the DECAY pots below. The contour circuits and their ngspice benches are unchanged (the
    benches take resistances); `tests/panel_laws.rs` holds the laws to their points.
-8. **The mixer's VOLUME law** (`voice::volume_track`, 2026-10-09). Oscillator 1's sawtooth
+8. **The mixer's VOLUME law** (`voice::volume_track`, 2026-10-08). Oscillator 1's sawtooth
    alone at 8', the reference's MIX against VOLUME 10 fell -2.10, -5.19, -9.42 and -16.51 dB
    at 8, 6, 4 and 2 (session C, takes 9 to 12); the CA-72's 25K linear pot, its wiper
    loaded by the 33K into the bus, fell -2.71, -5.53, -8.96 and -14.47 dB. The fraction of
