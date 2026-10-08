@@ -130,10 +130,16 @@ pub fn oscillation(rate: f64, trims: &FilterTrims, ins: &[Input]) -> f64 {
 }
 
 /// Whether the filter regenerates (its oscillation grows) with EMPHASIS at `emphasis`
-/// (0..1) for the control node's inputs.
+/// (0..1, on Figure 9-17's law: `voice::emphasis_r14_drawn`) for the control node's inputs.
 pub fn regenerates(rate: f64, trims: &FilterTrims, ins: &[Input], emphasis: f64) -> bool {
     let i0 = trims.expo().current(ins, 25.0);
-    let x = run(rate, trims, crate::voice::emphasis_r14(emphasis), i0, 0.4);
+    let x = run(
+        rate,
+        trims,
+        crate::voice::emphasis_r14_drawn(emphasis),
+        i0,
+        0.4,
+    );
     let peak = |a: f64, b: f64| {
         x[(a * rate) as usize..(b * rate) as usize]
             .iter()

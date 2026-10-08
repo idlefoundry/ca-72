@@ -303,9 +303,33 @@ fn time_pot(p: f64) -> f64 {
     1e6 * audio_taper(p)
 }
 
-/// EMPHASIS: R14, 50K reverse audio used as a rheostat, 50K at 0 and 0 at 10.
-pub fn emphasis_r14(p: f64) -> f64 {
+/// EMPHASIS on Figure 9-17: R14, 50K reverse audio used as a rheostat, 50K at 0 and 0 at 10
+/// (the generic taper). Folkman's regeneration calibration and the service manual's checks run
+/// on it (`filter_cal`).
+pub fn emphasis_r14_drawn(p: f64) -> f64 {
     50e3 * audio_taper(1.0 - p)
+}
+
+/// R14's resistance at EMPHASIS 2.5, 5 and 7.5 such that the filter's passband falls and its
+/// peak rises as the hardware reference's do (-2.25, -9.53, -12.50 dB; +0.4, +11.6, +26 dB:
+/// docs/calibration, session E). The generic taper's are 16.25K, 5.0K and 1.25K.
+const EMPHASIS_R14: [(f64, f64); 4] = [(0.0, 50e3), (0.25, 18.82e3), (0.5, 2.91e3), (0.75, 1.35e3)];
+
+/// EMPHASIS as the voice has it: R14 through [`EMPHASIS_R14`], straight in its logarithm
+/// between them, and from 7.5 to 10 the generic taper's shape scaled to meet it.
+pub fn emphasis_r14(p: f64) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    let (p3, r3) = EMPHASIS_R14[3];
+    if p >= p3 {
+        return r3 * audio_taper(1.0 - p) / audio_taper(1.0 - p3);
+    }
+    for w in EMPHASIS_R14.windows(2) {
+        let ((pa, ra), (pb, rb)) = (w[0], w[1]);
+        if p <= pb {
+            return ra * crate::ulp::pow(rb / ra, (p - pa) / (pb - pa));
+        }
+    }
+    r3
 }
 
 /// The mixer's bus as a Norton source: current and conductance.
