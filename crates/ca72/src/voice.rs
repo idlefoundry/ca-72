@@ -641,10 +641,41 @@ pub struct BackPart {
 /// output's (so a render fed back to the input behaves as the instrument does; A25).
 pub const INPUT_VOLTS: f64 = 5.0;
 
-/// R9 (EXTERNAL INPUT VOLUME, 1M audio) at `volume`: its divider's ratio and source
-/// resistance, ohm.
+/// R9's law: the fraction of its track below the wiper at EXTERNAL INPUT VOLUME's marks 2, 4,
+/// 5, 6, 8 and 10, solved so that the voice's gain from the jack to the mixer (the wiper loaded
+/// by the preamplifier, about 97K) falls from 10 as the hardware reference's does: -39.5,
+/// -33.1, -31.3, -29.9 and -16.9 dB (docs/calibration, session H). Figure 9-17's "1M audio"
+/// with the generic taper gave -36.5, -28.4, -25.7, -23.4 and -18.6.
+const EXT_TAPER: [(f64, f64); 6] = [
+    (0.2, 0.011_81),
+    (0.4, 0.028_45),
+    (0.5, 0.037_10),
+    (0.6, 0.046_45),
+    (0.8, 0.509_38),
+    (1.0, 1.0),
+];
+
+/// R9 at `p` (0..1), as a fraction of its track: between the measured marks, straight in the
+/// fraction's logarithm; below 2, the generic audio taper's shape scaled to meet it.
+pub fn ext_taper(p: f64) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    let (p0, t0) = EXT_TAPER[0];
+    if p <= p0 {
+        return t0 * audio_taper(p) / audio_taper(p0);
+    }
+    for w in EXT_TAPER.windows(2) {
+        let ((pa, ta), (pb, tb)) = (w[0], w[1]);
+        if p <= pb {
+            let u = (p - pa) / (pb - pa);
+            return ta * crate::ulp::pow(tb / ta, u);
+        }
+    }
+    1.0
+}
+
+/// R9 (EXTERNAL INPUT VOLUME, 1M) at `volume`: its divider's ratio and source resistance, ohm.
 fn ext_volume(volume: f64) -> (f64, f64) {
-    let t = audio_taper(volume.clamp(0.0, 1.0));
+    let t = ext_taper(volume);
     (t, 1e6 * t * (1.0 - t))
 }
 

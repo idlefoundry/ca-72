@@ -55,9 +55,11 @@ fn feedback_is_not_heard_with_the_external_input_off() {
 /// self-oscillation, where the modes' small differences grow.
 #[test]
 fn feedback_overdrives_the_preamplifier_and_the_mixer() {
+    // EXTERNAL INPUT's VOLUME at 0.7: R9 at about 16 % of its track (its law: voice.rs,
+    // `ext_taper`).
     let ext = |p: &mut Panel| {
         p.ext_on = true;
-        p.ext_volume = 0.6;
+        p.ext_volume = 0.7;
         p.cutoff = 0.8;
     };
     let rms = |y: &[f64]| {

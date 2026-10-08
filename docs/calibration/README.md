@@ -114,6 +114,23 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    bands rise 3 to 10 dB, their levels within 0.3 dB (Ladder Kick +1.0 dB). Two presets
    sound the filter's own pitch, which rises by the same 3.7 semitones: Cruising Whistle
    and Ladder Kick (not retuned: the owner's call).
+4. **EXTERNAL INPUT VOLUME's law** (R9, `voice::ext_taper`, 2026-10-09). The voice's
+   gain from the jack to the mixer, against VOLUME 10, fell -36.5, -28.4, -25.7, -23.4 and
+   -18.6 dB at 2, 4, 5, 6 and 8 with the generic audio taper and the preamplifier's input
+   (97K) loading the wiper; the reference's falls -39.5, -33.1, -31.3, -29.9 and -16.9 dB
+   (session H, the mixer's MIX against the loopback, 1 kHz in the clean region). R9's track
+   fraction at each mark is solved for the reference's gain through the same loading (0.0118,
+   0.0285, 0.0371, 0.0465, 0.509; the generic taper's 0.0176, 0.0600, 0.100, 0.162, 0.408),
+   and the law runs straight in the fraction's logarithm between them. The voice now matches
+   at every mark within 0.01 dB. The marks are taken as the knob's tenths of travel. The
+   reference's law is nearly flat to 6 and steep above it, as a gain control behaves rather
+   than an attenuator; through the CA-72's circuit it is R9's law. At a given mark the
+   CA-72's drive into the filter is about 2.2 dB under the reference's (session A's match: its
+   5 drove as the CA-72's old 0.375): left to the mixer's comparison (session D), which
+   tells whether the bus or the external path accounts for it. Only the two presets whose
+   FEEDBACK runs through EXT change: Pulse Strut -1.1 dB, Undertow Growl +3.0 dB and brighter
+   (not re-levelled); the others render the same to the bit. `feedback.rs` plays its loop at
+   VOLUME 0.7, where R9 now sits as 0.6 did.
 
 ## Not changed, and why
 
