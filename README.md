@@ -338,14 +338,15 @@ The service documents and datasheets the model was derived from are not included
 - Only the real-time quality, Potato, is in the plug-in. The model's two more exact
   qualities do not run in real time; they remain in `crates/ca72` and the lab.
 - POLY's voices are shared between the host's audio thread and up to four threads of the
-  plug-in's own (a third of the processors less two; [docs/decisions.md](docs/decisions.md)
-  R11), shared by every instance in the host. An instance holds them only while its POLY
+  plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
+  [docs/decisions.md](docs/decisions.md) R11, R-QUAD), shared by every instance in the
+  host. An instance holds them only while its POLY
   is on, taking them a moment after POLY is switched on and giving them back when it is
   switched off; one that finds them all taken plays its voices on the host's thread, and
   asks again when its POLY is next switched on (R18, R21). A voice takes 5 to 10 % of a
   core of an Apple M4 Pro (FEEDBACK's presets the
   most; R13), so ten voices are half a core's work to a core's. How many play in real time
-  depends on the machine, the host's block size and the host: on a machine of fewer than 5
+  depends on the machine, the host's block size and the host: on a machine of 1 or 2
   processors every voice plays on the host's thread, and on macOS a host whose audio
   threads are not in an audio workgroup runs its share of the voices more slowly. With more
   than the machine plays, expect dropouts; VOICES (4 by default) sets the most.
