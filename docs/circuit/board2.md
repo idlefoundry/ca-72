@@ -67,7 +67,7 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
 |---|---|
 | Trigger | C7 a state (trapezoidal), charged through CR10's junction law and R60, drained by Q20's base current; Q20 and Q12 as full Gummel-Poon transistors (saturation included), the reset line and V-trig solved from their KCL; C13's node on the trigger bus a state |
 | Flip-flops | Latches (their transitions take microseconds): set as V-trig rises, reset while the reset line drives CR1 [CR8] or when the output reaches the threshold derived from the latch's devices (Q1 [Q25] leaving saturation) |
-| Timing capacitors | Set: the RC charge through R7 and ATTACK from the rail (exact trapezoidal). Reset: the capacitor and the sustain node together (Newton on both), with Q7's base current, Q8 as a PNP follower on its divider, CR2 to V-trig, and with DECAY off CR7 into R1401's node |
+| Timing capacitors | Set: the RC charge through R7 and ATTACK from the rail (exact trapezoidal). Reset: the capacitor and the sustain node together (Newton on both; trapezoidal, the first sample after the attack backward Euler: B2-9), with Q7's base current, Q8 as a PNP follower on its divider, CR2 to V-trig, and with DECAY off CR7 into R1401's node |
 | Outputs | The followers' drops from their transistors at the load's current (the AMOUNT OF CONTOUR pot and the peak divider on the filter contour) |
 
 Agreement with ngspice (2026-09-28; ngspice's waveforms taken at the model's 48 kHz: the
@@ -78,6 +78,7 @@ flip-flops' resets put 30 ns spikes on the rail and outputs):
 | Held key, DECAY on and off; retriggered 30 ms after a release | Within 27..44 mV; peaks within 7 mV; trigger edges within 0.04 ms |
 | Released during a slow attack | Within 20 mV; peaks within 7 mV; edges within 0.15 ms |
 | Fastest attack (500 ohm), SUSTAIN at 0 and 10 | Within 72 mV (mid-attack, the rail's sag: A16); peaks within 11 mV; edges within 0.13 ms |
+| ATTACK and DECAY at 0 ohm, SUSTAIN 10, held (2026-10-08) | Within 65 mV half a millisecond past the attack (also at 24 kHz and at Potato's 6 kHz: 69 and 89 mV); the peaks a sample's rise over (30, 43 mV) |
 
 The same scenarios at the voice's 24 kHz (interpolated onto ngspice's 48 kHz grid): within
 86 mV (the fastest attack), trigger edges within 0.19 ms (assumptions.md A17). At 12 kHz
@@ -155,3 +156,17 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
   keys through the keyboard and absorbs it (A3 at 220.000 Hz, the keys within 2.43 cents);
   the filter's KEYBOARD CONTROL hears it. Folkman's filter procedure keeps the drawn
   keyboard. The bench (`ca72-lab` keyboard) has the same floor; every key within 0.0001 mV.
+- **B2-9** (2026-10-08) A model fault, found against the hardware reference: with DECAY at
+  its end (the pot at 0 ohm, Q7's 5 ohm left) a key's sound fell silent after the attack and
+  returned over 30 to 50 ms in the plug-in (its voices in Potato), where the reference sounds
+  at once. The decay's first sample after the attack was trapezoidal: half its step from a
+  current through DECAY at the last sample, when Q7 was off and the path open, from the
+  sustain node's voltage before the attack. Through 5 ohm that was about an ampere for a
+  sample: the capacitor stepped 0.5 V below the sustain at 48 kHz, 1.6 V at the voice's 24
+  kHz and 8.8 V (below the VCA's threshold) at Potato's 6 kHz, and the node, which sources
+  little, took tens of milliseconds to lift it back. ngspice's circuit has no such dip. That
+  sample is now backward Euler, as ngspice steps after a switch; `contour_realtime.rs` has
+  the case at all three rates. Still: at 0 ohm the drop from the peak to a low SUSTAIN runs
+  faster than ngspice's (0.4 against about 1.5 ms from 5.26 to 2 V at SUSTAIN 5, likely Q8's
+  gain at tens of milliamperes, which the model's follower holds at BF), and a release with
+  DECAY off lags B2-7's 0.3 ms, at that slope up to 0.7 V.

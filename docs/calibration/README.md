@@ -322,6 +322,16 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     against the reference's -2.25, -9.55, -10.43, -11.92, -12.48 and -14.67. Folkman's
     procedure keeps the drawing's law.
 
+16. **A model fault: DECAY at its end** (`contour.rs`, board2.md B2-9, 2026-10-08). Played
+    over MIDI with LOUDNESS DECAY fully anticlockwise (session J's GLIDE and mod-wheel
+    panels), the reference sounds at once; the plug-in went silent 2 ms into the attack and
+    came back over 30 to 50 ms. The drawn circuit in ngspice does not: the real-time
+    contour's first decay sample took half a step from a current through a path that had
+    been open, through DECAY's 0 ohm about an ampere. That sample is now backward Euler. No
+    factory preset has a DECAY at 0: they render within -58 dB of before, Ladder Kick within
+    -34 dB, and the two in FEEDBACK's loop (Pulse Strut, Undertow Growl), which any change
+    sets on another course, with their levels within 0.17 dB.
+
 ## Still differs (2026-10-08, after the knob session's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still

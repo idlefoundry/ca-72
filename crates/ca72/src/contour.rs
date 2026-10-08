@@ -272,6 +272,8 @@ struct SectionState {
     /// Warm starts: Q7's and Q8's junctions (through R9, and the follower Q8).
     j7: f64,
     j8: f64,
+    /// The last sample charged the capacitor (Q7 off): the decay's path was open.
+    attacked: bool,
 }
 
 /// What a section's behaviour needs from the settings, computed when they change.
@@ -1029,6 +1031,7 @@ impl Contours {
                 let v5 = c.p93 - 0.025;
                 let a = 1.0 / ((s.r7 + ctl.attack.max(0.0)) * s.c);
                 st.v = (v_old * (1.0 - 0.5 * h * a) + h * a * v5) / (1.0 + 0.5 * h * a);
+                st.attacked = true;
             } else {
                 // Decay: the capacitor and the sustain node together (Newton on both): the
                 // capacitor discharges through DECAY and saturated Q7 into the node, which
@@ -1041,6 +1044,13 @@ impl Contours {
                 };
                 let (j7, j8) = (st.j7, st.j8);
                 let r7 = s.r9 + c.npn.rb;
+                // Trapezoidal, but the first sample after the attack backward Euler (as
+                // ngspice steps after a switch): the path through DECAY was open and the
+                // sustain node's last voltage is from before the attack, and through DECAY's
+                // end (5 ohm) their difference made an ampere of current that never flowed,
+                // the capacitor stepped volts below the node.
+                let (w_old, w_new) = if st.attacked { (0.0, 1.0) } else { (0.5, 0.5) };
+                st.attacked = false;
                 let i_old = -(v_old - st.e7) / r_dec - i_dump(v_old);
                 // The residuals and their Jacobian, analytic: each junction in series with
                 // its resistance changes its current by g / (1 + R g) a volt, g its slope at
@@ -1064,19 +1074,19 @@ impl Contours {
                     };
                     let i = -(v - e7) / r_dec - i_d;
                     let r = [
-                        v - v_old - 0.5 * h * (i_old + i) / s.c,
+                        v - v_old - h * (w_old * i_old + w_new * i) / s.c,
                         (c.p93 - e7) / s.r10 + (v - e7) / r_dec + i_b7 - i8 - i_si,
                     ];
                     let j = [
                         [
-                            1.0 + 0.5 * h * (1.0 / r_dec + g_d) / s.c,
-                            -0.5 * h / (r_dec * s.c),
+                            1.0 + w_new * h * (1.0 / r_dec + g_d) / s.c,
+                            -w_new * h / (r_dec * s.c),
                         ],
                         [1.0 / r_dec, -1.0 / s.r10 - 1.0 / r_dec + d_b7 - d8 - g_si],
                     ];
                     (r, j)
                 };
-                let (mut v, mut e7) = (v_old + h * i_old / s.c, st.e7);
+                let (mut v, mut e7) = (v_old + 2.0 * w_old * h * i_old / s.c, st.e7);
                 let mut converged = false;
                 // (Up to 100 iterations: its node's steps held to 0.2 V, a jump of volts takes
                 // tens; 30 stopped short twice in perf-ext, which `unconverged` counts.)
