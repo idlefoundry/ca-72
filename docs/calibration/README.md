@@ -310,12 +310,28 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     filter moved 0.89 to 0.95 octave a volt of contour against the reference's 0.81; with the
     law, 0.83 at 4. The contours' own voltages match (session I: their peaks within 3 %).
 
+15. **EMPHASIS at 6, 7 and 8.5** (`voice::emphasis_r14`, 2026-10-08). Session J measured the
+    passband as session E did at three more marks: -10.43, -11.92 and -14.67 dB. At 8.5 the
+    reference self-oscillates (its peak +47 to +54 dB over the passband), as the CA-72 does
+    once R14 is below about 1.3K. Between 5 and 7.5 the law had run straight in R14's
+    logarithm (2.14K and 1.57K at 6 and 7: -10.71 and -11.85 dB on session E's map of the
+    CA-72) and past 7.5 on the generic taper's shape (0.63K at 8.5). On the same map the
+    reference's losses are R14 2.30K, 1.548K and 834 ohm; the law now runs through them, and
+    past 8.5 on the generic taper's shape scaled to meet 834 ohm (0 at 10). Rendering
+    sessions E's and J's six takes: -2.16, -9.47, -10.43, -11.92, -12.41 and -14.63 dB
+    against the reference's -2.25, -9.55, -10.43, -11.92, -12.48 and -14.67. Folkman's
+    procedure keeps the drawing's law.
+
 ## Still differs (2026-10-08, after the knob session's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
   needs 0.2 to 0.7 dB more drive than the reference for the same compression, from EXT and
   about as much from the oscillators: the filter's input side (R54 470 and the input pair),
   for the mixer's overdrive (session D) to settle.
+- **EMPHASIS's peak against its passband:** at the same passband loss the CA-72's peak
+  stands 1 to 1.5 dB higher than the reference's (+14.7 to +15.3 dB at 6 against +13.9 to
+  +14.3; +21.1 to +22.3 at 7 against +19.4 to +21.3), and at 7.5, near regeneration, up to 5
+  dB higher at some cutoffs: the ladder's Q at a given loop gain.
 - **The contours' peak:** the attack ends at 1.17 [1.18] of the held level on the CA-72 and
   1.22 to 1.23 [1.26 to 1.27] on the reference: the peak divider (R33/R29 [R24/R27]) or CR3's
   [CR6's] threshold. And with DECAY at 0 the release's first half takes 1.9 to 2.2 ms against

@@ -456,18 +456,27 @@ pub fn emphasis_r14_drawn(p: f64) -> f64 {
     50e3 * audio_taper(1.0 - p)
 }
 
-/// R14's resistance at EMPHASIS 2.5, 5 and 7.5 such that the filter's passband falls and its
-/// peak rises as the hardware reference's do (-2.25, -9.53, -12.50 dB; +0.4, +11.6, +26 dB:
-/// docs/calibration, session E). The generic taper's are 16.25K, 5.0K and 1.25K.
-const EMPHASIS_R14: [(f64, f64); 4] = [(0.0, 50e3), (0.25, 18.82e3), (0.5, 2.91e3), (0.75, 1.35e3)];
+/// R14's resistance at EMPHASIS 2.5, 5, 6, 7, 7.5 and 8.5 such that the filter's passband
+/// falls as the hardware reference's does (-2.25, -9.53, -10.43, -11.92, -12.50 and -14.67
+/// dB: docs/calibration, sessions E and J). The generic taper's are 16.25K, 5.0K, 3.0K,
+/// 1.71K, 1.25K and 0.58K.
+const EMPHASIS_R14: [(f64, f64); 7] = [
+    (0.0, 50e3),
+    (0.25, 18.82e3),
+    (0.5, 2.91e3),
+    (0.6, 2.30e3),
+    (0.7, 1.548e3),
+    (0.75, 1.35e3),
+    (0.85, 834.0),
+];
 
 /// EMPHASIS as the voice has it: R14 through [`EMPHASIS_R14`], straight in its logarithm
-/// between them, and from 7.5 to 10 the generic taper's shape scaled to meet it.
+/// between them, and from 8.5 to 10 the generic taper's shape scaled to meet it.
 pub fn emphasis_r14(p: f64) -> f64 {
     let p = p.clamp(0.0, 1.0);
-    let (p3, r3) = EMPHASIS_R14[3];
-    if p >= p3 {
-        return r3 * audio_taper(1.0 - p) / audio_taper(1.0 - p3);
+    let (pn, rn) = EMPHASIS_R14[EMPHASIS_R14.len() - 1];
+    if p >= pn {
+        return rn * audio_taper(1.0 - p) / audio_taper(1.0 - pn);
     }
     for w in EMPHASIS_R14.windows(2) {
         let ((pa, ra), (pb, rb)) = (w[0], w[1]);
@@ -475,7 +484,7 @@ pub fn emphasis_r14(p: f64) -> f64 {
             return ra * crate::ulp::pow(rb / ra, (p - pa) / (pb - pa));
         }
     }
-    r3
+    rn
 }
 
 /// The mixer's bus as a Norton source: current and conductance.
