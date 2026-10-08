@@ -131,6 +131,23 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    FEEDBACK runs through EXT change: Pulse Strut -1.1 dB, Undertow Growl +3.0 dB and brighter
    (not re-levelled); the others render the same to the bit. `feedback.rs` plays its loop at
    VOLUME 0.7, where R9 now sits as 0.6 did.
+5. **Oscillator 3 with OSC. 3 CONTROL off: R162 3.01K to 2.96K** (`tuning::R162`,
+   2026-10-09). With the control off oscillator 3 loses its keyboard, tune, bend, modulation
+   and external inputs and its frequency trimmer, so at FREQUENCY's tuned centre its pitch
+   comes from its range resistor and IC8's output, which R150, R155, R162 and R170 set. The
+   reference sat at 198.82 Hz at 8' (session C, take 25; V/OCT moved it not at all), the
+   CA-72 at 232.67 Hz, 0.27 octave higher. With the control on the same knob put the
+   reference's oscillator 3 within 9 cents of oscillator 1, so the knob was at its tuned
+   centre. R162 sets IC8's output at the centre; the factory tuning absorbs it with the
+   control on (the control-on pitch unchanged to 0.001 Hz), so it moves only the control-off
+   pitch: 2.95K gave 195.73 Hz, 2.955K fits, 2.96K (1 %, E192) gives 201.5 Hz in the voice
+   (+23 cents; 202.7 Hz in ngspice's bench). The netlist (`board1-osc23.lib`) and the model
+   change together, and IC8's input offset at its new operating point (0.1868 mV, measured in
+   ngspice by `vco_osc23.rs`) with them. Preset levels move within 0.04 dB; the presets that
+   use oscillator 3 with the control off change only in its pitch (vibrato rates). On LO with the
+   control off, FREQUENCY at its minimum now clicks every 5.7 s: past the service manual's 2
+   to 5 s (5.36), within the reference's manual (oscillators from 0.1 Hz); the voice test
+   takes 10 s as its bound.
 
 ## Not changed, and why
 

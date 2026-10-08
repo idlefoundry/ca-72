@@ -130,12 +130,17 @@ const BIAS: f64 = 15.16e-6 / 2.0 / 93.75;
 /// (`ua741.lib`) at IC8's operating point, its +7.5 V common mode on +-10 V supplies through
 /// its 90 dB CMRR less its output over its gain. The tuning absorbs it with OSC. 3 CONTROL
 /// on; with it off, nothing does (2.7 cents without it). A test measures it in ngspice.
-pub const IC8_OFFSET: f64 = 0.188e-3;
+pub const IC8_OFFSET: f64 = 0.1868e-3;
+
+/// R162 (IC8's feed from +10 V): 3.01K in Modification 8.2 (board1.md, B1-9); 2.96K (1 %, E192)
+/// puts oscillator 3 with OSC. 3 CONTROL off and FREQUENCY at its tuned centre where the hardware
+/// reference's sits (B1-12, docs/calibration). With the control on the factory tuning absorbs it.
+pub const R162: f64 = 2.96e3;
 
 /// Oscillator 3's control stage IC8 (`board1-osc23.lib`): its output for the FREQUENCY
 /// knob, with OSC. 3 CONTROL off feeding it through R180 as well as R181.
 pub fn osc3_control(knob: f64, control: bool) -> f64 {
-    let (r181, r180, r162, r170, r150, r155) = (51e3, 15e3, 3.01e3, 15e3, 1e3, 3.01e3);
+    let (r181, r180, r162, r170, r150, r155) = (51e3, 15e3, R162, 15e3, 1e3, 3.01e3);
     // The + input: R150 from +10 V over R155, less its bias current; the - input below it
     // by the offset.
     let vp = (10.0 / r150 - BIAS) / (1.0 / r150 + 1.0 / r155);
