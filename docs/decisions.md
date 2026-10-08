@@ -2454,6 +2454,59 @@ production immediately", with R38 (its owner's go: with the next version). The s
   release with the Windows and Linux installers, the notices, the git sources and
   `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
   (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.4's form.
+- **The Windows ZIP, for installing by hand, made for each release** (the owner, 2026-10-08:
+  "don't forget the windows zip file... it should be" part of the procedure). 0.1.4's,
+  `CA-72-0.1.4-Windows-x86_64.zip` with its `.zip.sha256`, was made by hand from that tag's CI
+  artifact and added after the release was published, outside `SHA256SUMS.txt`.
+  `scripts/windows-zip.sh` now makes it the same way: CI's Windows VST3 and CLAP unchanged,
+  `README.txt` (installing, updating and uninstalling by hand, the presets' folder, the build's
+  provenance), `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` beside them and in the VST3's
+  Resources, and `FILE-SHA256SUMS.txt`. Run on 0.1.4's artifact, every file but the README's
+  wording is the same as in 0.1.4's ZIP. CI's release job runs it on the tag's `CA-72-Windows`
+  artifact (the job may now read the run's artifacts), and `SHA256SUMS.txt` lists the ZIP;
+  its own `.zip.sha256` stays beside it, as 0.1.4's. 0.1.5's was made by the script by hand
+  (the release job's step first runs at the next tag), and the release notes give it a row.
+
+**The release (2026-10-08, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3).** The pull request's CI passed on the bump (`0eda08f`) on every system; it was merged
+(`38ed3cf`, main's commit, its tree `0eda08f`'s) and tagged `v0.1.5`, whose CI passed and
+drafted the release with its five assets. The macOS installer was built over SSH from a fresh
+clone of the pull request's head (`0eda08f`), started while its CI ran, and signed only after
+the tag's tree was checked to be the tree built (`c70b81e`): `cargo xtask bundle-universal
+ca72-plugin --profile bundle` (Rust 1.97.1) and `scripts/auv2.sh`, the bundles then passing
+`scripts/validate.sh` as far as auval (clap-validator 37 passed, 0 failed, 7 skipped; pluginval
+at strictness 10, SUCCESS; Steinberg's validator 47 passed; editor tests skipped). auval and the
+packaging ran in the Mac's desktop session without the owner, in a shell opened by LaunchServices
+in the background (`open -g -j -na Ghostty.app --args -e ...`): over SSH, and in a tmux session
+of the desktop's tmux server, auval sees only Apple's Audio Units, while codesign and notarytool
+reach the login Keychain from either. `auval -strict`: CA-72 0.1.5 (0x105), AU VALIDATION
+SUCCEEDED. The owner's `~/Library` Audio Unit (0.1.1) was set aside for each run and put back.
+Packaging, with the two Developer ID identities, the notary profile and
+`CA72_REQUIRE_NOTARIZATION=1`, made `CA-72-0.1.5-macOS.pkg`:
+- **Apple's notary service** accepted it: submission `9f468420-e0f4-47ce-8f51-ee7c21677413`,
+  status `Accepted` (about a minute). The ticket is stapled (`stapler validate` passes); the
+  installer is signed `Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)`, trusted
+  timestamp 2026-10-08 20:13:34 UTC; Gatekeeper: `accepted`, `source=Notarized Developer ID`.
+- **The VST3, the CLAP and the Audio Unit in its payload** (with the CLAP inside the Audio
+  Unit): each signed `Developer ID Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the
+  hardened runtime, `codesign --verify --strict --deep` passing; version 0.1.5; `x86_64 arm64`.
+- **Its SHA-256** is `df16b9f6e995d563d2adfbcddd2ef7da42853ec1682e3745e4deb7ca9f13aa13`
+  (14,300,825 bytes).
+- **The Windows ZIP** from the tag's run (37837077300, artifact 11576455731), its SHA-256
+  `064fc66dc456073314496eebef0ece263d1002f08c804edf6be5d2bba9fe8ab7` (4,494,839 bytes), the
+  plug-in's binary `f92720c7…` in both formats.
+- Both went into the draft with their lines added to CI's `SHA256SUMS.txt`, the ZIP with its
+  `.zip.sha256`; the five files it lists, downloaded again from the draft, passed
+  `sha256sum -c`, and the notices are the tag's.
+- **Published** on the owner's go ("release 0.1.5") at 2026-10-08 20:20:30 UTC as the latest
+  release (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.5, eight assets), with notes
+  in 0.1.4's form. The API's `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.5`;
+  the `.pkg` downloaded from the public release, marked as downloaded, matches its checksum and
+  Gatekeeper accepts it.
+
+`notarization.json`, the build's, the validators', auval's and the packaging's logs, the
+commands (`build.sh`, `auval.sh`, `package.sh`) and `SHA256SUMS.txt` are kept with the
+release's evidence outside the repository, as 0.1.4's are.
 
 ## R41. macOS: the editor drawn beside other copies of softbuffer in one process
 **Seen, 2026-10-06,** in Bitwig Studio 5.2.7 on macOS (CLAP), while MIDI Learn was tried there

@@ -45,7 +45,9 @@ notarised; the Windows one is not yet signed.
    Unit from 0.1.2 on.
 
 The Windows installer is not yet signed, so the first time you run it Windows says "Windows
-protected your PC": click **More info**, then **Run anyway**.
+protected your PC": click **More info**, then **Run anyway**. To install by hand instead,
+each release from 0.1.5 has `CA-72-<version>-Windows-x86_64.zip`: the same VST3 and CLAP, with
+a `README.txt` that says where to copy them.
 
 The plug-ins go into the usual folders:
 
