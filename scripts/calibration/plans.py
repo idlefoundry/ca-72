@@ -632,7 +632,7 @@ def amount_take(name, panel, set_line):
     scale (the filter's own octaves a volt, against which the contour's are counted)."""
     s = LEAD + 2 * 2.4 + 0.4
     fc, cv, lc = zeros(s), zeros(s), zeros(s)
-    lc[span(LEAD - 0.3, s - 0.1)] = GATE     # the VCA open throughout
+    lc[span(LEAD, s - 0.1)] = GATE           # the VCA open throughout
     segs = []
     for i, c in enumerate((0.0, 0.1)):
         t0 = LEAD + i * 2.4
