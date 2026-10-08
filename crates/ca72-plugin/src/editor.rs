@@ -2004,6 +2004,19 @@ mod window {
         catch_unwind(AssertUnwindSafe(f)).ok()
     }
 
+    /// A pixel of a frame (premultiplied RGBA, opaque) as the window shows it, opaque: its
+    /// highest byte 0xff. softbuffer asks for 0 there, which every backend it is built with
+    /// here ignores (Core Graphics skips it, GDI's copy and KMS's XRGB too) except X11 on a
+    /// window with an alpha channel, which baseview makes wherever the screen has a 32-bit
+    /// visual: there 0 is transparent, and on a compositing desktop the desktop shows through
+    /// the panel, added to its colours (decisions.md R-OPAQUE).
+    pub fn shown(p: &[u8]) -> u32 {
+        0xff00_0000 | (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2])
+    }
+
+    /// The window beyond the frames, opaque as they are.
+    pub const EMPTY: u32 = 0xff3b_2213;
+
     /// Where the frames are shown; nothing if the platform's window could not be drawn in.
     pub struct Surface {
         inner: Option<(
@@ -2074,10 +2087,9 @@ mod window {
                     *out = match frame {
                         Some(f) if x < f.width() as usize => {
                             let (fw, fy) = (f.width() as usize, y - top);
-                            let p = &f.data()[(fy * fw + x) * 4..(fy * fw + x) * 4 + 4];
-                            (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2])
+                            shown(&f.data()[(fy * fw + x) * 4..(fy * fw + x) * 4 + 4])
                         }
-                        _ => 0x003b_2213,
+                        _ => EMPTY,
                     };
                 }
             }
@@ -2306,6 +2318,16 @@ mod tests {
             .as_ref()
             .map(|n| n.lines.iter().map(|(t, _)| t.clone()).collect())
             .unwrap_or_default()
+    }
+
+    /// Every pixel the window is given is opaque, the frames' and the window's beyond them, so
+    /// that a window with an alpha channel (baseview's on X11) shows the panel and nothing
+    /// through it; the colour is the frame's.
+    #[test]
+    fn the_window_is_given_opaque_pixels() {
+        assert_eq!(window::shown(&[0x12, 0x34, 0x56, 0xff]), 0xff12_3456);
+        assert_eq!(window::shown(&[0, 0, 0, 0xff]) >> 24, 0xff);
+        assert_eq!(window::EMPTY >> 24, 0xff);
     }
 
     /// A control's menu (a right click): MIDI LEARN rings it and says it waits, Escape cancels it,
