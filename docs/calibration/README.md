@@ -193,6 +193,18 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
    resistance), and its pots' ends are within a 1M part's 20 %, the ATTACK pots above 1M and
    the DECAY pots below. The contour circuits and their ngspice benches are unchanged (the
    benches take resistances); `tests/panel_laws.rs` holds the laws to their points.
+8. **The mixer's VOLUME law** (`voice::volume_track`, 2026-10-09). Oscillator 1's sawtooth
+   alone at 8', the reference's MIX against VOLUME 10 fell -2.10, -5.19, -9.42 and -16.51 dB
+   at 8, 6, 4 and 2 (session C, takes 9 to 12); the CA-72's 25K linear pot, its wiper
+   loaded by the 33K into the bus, fell -2.71, -5.53, -8.96 and -14.47 dB. The fraction of
+   the track at which the CA-72's channel gives the reference's level is 0.155, 0.378, 0.623
+   and 0.845, and the law runs straight between those, 0 and 1. The MIX now matches at every
+   mark within 0.01 dB, the main output within 0.11 dB. The S is what a linear track gives
+   when the knob's first and last few degrees turn on its dead ends. One part serves the
+   four channels (oscillators 1 to 3 and the noise), so all four take the law; only
+   oscillator 1's was measured. At 0 and 10 nothing changes. Presets with a VOLUME between
+   rise by up to 0.6 dB (Bass, Lead and Slow Horn Swell, at about 8; not re-levelled); the
+   others stay within -136 dB.
 
 ## Not changed, and why
 

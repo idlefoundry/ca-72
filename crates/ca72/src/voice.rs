@@ -198,10 +198,36 @@ impl Default for Panel {
     }
 }
 
+/// The mixer's VOLUME pots (25K linear) as the hardware reference's oscillator 1 VOLUME
+/// sets its wiper: the fraction of the track at the dial's 2, 4, 6 and 8 through which the
+/// channel gives the reference's MIX level against 10 (-16.51, -9.42, -5.19 and -2.10 dB;
+/// docs/calibration, session C). A linear track's are 0.2, 0.4, 0.6 and 0.8.
+const VOLUME_TRACK: [(f64, f64); 6] = [
+    (0.0, 0.0),
+    (0.2, 0.1548),
+    (0.4, 0.3777),
+    (0.6, 0.6226),
+    (0.8, 0.8453),
+    (1.0, 1.0),
+];
+
+/// A mixer VOLUME knob's wiper as a fraction of its track: straight between
+/// [`VOLUME_TRACK`]'s points.
+pub fn volume_track(volume: f64) -> f64 {
+    let p = volume.clamp(0.0, 1.0);
+    for w in VOLUME_TRACK.windows(2) {
+        let ((pa, ta), (pb, tb)) = (w[0], w[1]);
+        if p <= pb {
+            return ta + (tb - ta) * (p - pa) / (pb - pa);
+        }
+    }
+    1.0
+}
+
 /// The input a mixer channel's VOLUME pot (25K linear, its wiper through `r_series` to the
 /// bus, near GND) puts on its source, ohm.
 fn channel_load(volume: f64, r_series: f64) -> f64 {
-    let p = volume.clamp(0.0, 1.0);
+    let p = volume_track(volume);
     let bottom = 25e3 * p;
     25e3 * (1.0 - p) + bottom * r_series / (bottom + r_series)
 }
@@ -368,7 +394,7 @@ fn channel(v: f64, r_src: f64, volume: f64, on: bool, r_series: f64) -> (f64, f6
         // Off, the switch grounds the series resistor's far end: it loads the bus only.
         return (0.0, 1.0 / r_series);
     }
-    let p = volume.clamp(0.0, 1.0);
+    let p = volume_track(volume);
     let (up, down) = (r_src + 25e3 * (1.0 - p), (25e3 * p).max(1e-3));
     let v_w = v * down / (up + down);
     let r_w = up * down / (up + down);

@@ -4,6 +4,7 @@
 
 use ca72::voice::{
     FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, time_pot, time_pot_drawn,
+    volume_track,
 };
 
 #[test]
@@ -33,5 +34,26 @@ fn attack_and_decay_follow_the_reference_at_its_marks() {
         }
         assert_eq!(time_pot(-1.0, law), 0.0, "{name} below its travel");
         assert_eq!(time_pot(2.0, law), law[2].1, "{name} past its travel");
+    }
+}
+
+#[test]
+fn the_mixers_volume_follows_the_reference_at_its_marks() {
+    for (p, t) in [(0.2, 0.1548), (0.4, 0.3777), (0.6, 0.6226), (0.8, 0.8453)] {
+        assert!(
+            (volume_track(p) - t).abs() < 1e-12,
+            "VOLUME {p}: {}",
+            volume_track(p)
+        );
+    }
+    assert_eq!(volume_track(0.0), 0.0);
+    assert_eq!(volume_track(1.0), 1.0);
+    assert_eq!(volume_track(-1.0), 0.0);
+    assert_eq!(volume_track(2.0), 1.0);
+    let mut last = -1.0;
+    for k in 0..=1000 {
+        let t = volume_track(k as f64 / 1000.0);
+        assert!(t > last || k == 0, "VOLUME {k}/1000: {t}");
+        last = t;
     }
 }
