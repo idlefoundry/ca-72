@@ -236,8 +236,9 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
   CA-72 ends 22 cents under the reference (0.9986 against 1.0030 octave a volt at the ES-3's
   10.39 V), against 80 cents before.
-- **Not in this round:** KEYBOARD CONTROL's tracking (the CA-72's both-on 0.970 of the
-  reference's), oscillators 2 and 3's FREQUENCY spans, the mixer's overdrive (session D),
+- **Not in this round:** KEYBOARD CONTROL's tracking (the reference's: 0.328 octave an
+  octave with 1, 0.970 with both; not yet set beside the CA-72's), oscillators 2 and 3's
+  FREQUENCY spans, the mixer's overdrive (session D),
   SUSTAIN's law, and VOLUME on oscillators 2 and 3 and the noise (taken as oscillator 1's).
 - **The presets** were not re-levelled: against 0.1.3 their levels now run -3.5 dB (Three
   Saw Slab) to +6.1 dB (Pink Riser) from the library's -18 LUFS, and Cruising Whistle's and
