@@ -2226,4 +2226,10 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   the mixer's VOLUME; and, at the owner's go, the external preamplifier's R61 to 232K (its
   gain 0.97 dB up). The 8 and 12 ms keyboard delays stay.
   What still differs is listed in the calibration README.
+- **Owner decisions, 2026-10-08, after the knob session's listening page:** level the
+  presets, retune the two that sound the filter's own pitch, and settle the external input's
+  drive (R61 above). **Cruising Whistle and Ladder Kick retuned:** R39 put the filter's pitch
+  3.7 semitones up in both; CUTOFF lowered by 0.305 (Cruising Whistle -1.33 to -1.635, its
+  whistle within 5 cents of 0.1.3's at C4, G4 and E4; Ladder Kick -3.6 to -3.9, its ring's
+  sweep over the first 11 ms within the measure's resolution of 0.1.3's).
 - **The number** of this record is a placeholder until the merge.
