@@ -199,5 +199,7 @@ analysis and the fits are ready for them:
 cd scripts/calibration && python capture.py session_a ~/lab/artifacts/ca-72/calibration/captures/<date>-A
 # Anywhere:
 cargo run -p ca72-lab --release -- stim <take.wav> scripts/calibration/patches/home_ext5.json <render.wav>
+# The contour takes (session F): --fc-gate lets FC GATE trigger the CA-72's contours too;
+# the render's fourth and sixth channels are the loudness and filter contours.
 python scripts/calibration/analyze.py <take.json> [--render <render.wav>]
 ```

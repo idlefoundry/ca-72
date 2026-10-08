@@ -364,20 +364,23 @@ fn play(rest: &[String]) -> Res {
 /// INPUT jack, CUT the FILTER CONTROL jack (R51), VPO the oscillators' control jack, LC
 /// GATE closes EXT. S-TRIG while above half of its high level (`--gate-delay ON,OFF` ms later at
 /// its rise and its fall: the hardware reference's gate input's own delays, for a comparison
-/// by ear). The output WAV's channels:
+/// by ear); with `--fc-gate` FC GATE closes it too (the reference's filter contour has a gate
+/// of its own, the CA-72's contours one trigger). The output WAV's channels:
 /// the main output (the voice's scale, 5 V as 1.0), the mixer bus's Norton current (mA),
-/// the filter's output (V), the loudness contour (V) and the preamplifier's output (V).
+/// the filter's output (V), the loudness contour (V), the preamplifier's output (V) and the
+/// filter contour (V).
 fn stim(rest: &[String]) -> Res {
     use ca72::voice::{INPUT_VOLTS, Jacks, Panel, Voice};
     let usage = "ca72-lab stim <take.wav> <patch.json> <out.wav> [--volts-fs V] \
                  [--cut-scale S] [--preroll SECONDS] [--quality MODE] [--no-vpo] \
-                 [--gate-delay ON_MS,OFF_MS]";
+                 [--gate-delay ON_MS,OFF_MS] [--fc-gate]";
     let mut volts_fs = 10.0;
     let mut cut_scale = 1.0;
     let mut preroll = 2.0;
     let mut q = Quality::NoCompromises;
     let mut vpo = true;
     let mut gate_delay = (0.0, 0.0);
+    let mut fc_gate = false;
     let mut positional = Vec::new();
     let mut args = rest.iter();
     let num = |s: Option<&String>| -> Result<f64, String> {
@@ -390,6 +393,7 @@ fn stim(rest: &[String]) -> Res {
             "--preroll" => preroll = num(args.next())?,
             "--quality" => q = quality(args.next().ok_or(usage)?)?,
             "--no-vpo" => vpo = false,
+            "--fc-gate" => fc_gate = true,
             "--gate-delay" => {
                 let v = args.next().ok_or(usage)?;
                 let (a, b) = v.split_once(',').ok_or(usage)?;
@@ -427,7 +431,12 @@ fn stim(rest: &[String]) -> Res {
     let mut voice = Voice::new(f64::from(rate), panel);
     voice.set_seed(72);
     let built = t0.elapsed().as_secs_f64();
-    let (ext, cut, lc, vp) = (&ch[3], &ch[4], &ch[5], &ch[7]);
+    let (ext, cut, vp) = (&ch[3], &ch[4], &ch[7]);
+    let lc: Vec<f32> = if fc_gate {
+        ch[5].iter().zip(&ch[6]).map(|(&a, &b)| a.max(b)).collect()
+    } else {
+        ch[5].clone()
+    };
     let high = lc.iter().fold(0.0f32, |a, &x| a.max(x));
     // The gate as S-TRIG sees it: each rise and fall delayed as asked.
     let (d_on, d_off) = (
@@ -466,15 +475,15 @@ fn stim(rest: &[String]) -> Res {
         voice.tick_jacks(&rest_jacks);
     }
     let n = ext.len();
-    let mut data = Vec::with_capacity(n * 5 * 4);
+    let mut data = Vec::with_capacity(n * 6 * 4);
     let mut peak = 0.0f64;
     for i in 0..n {
         let y = voice.tick_jacks(&jacks(Some(i)));
         let (_, i_bus, v_filter) = voice.probe();
-        let (_, env_l) = voice.probe_contours();
+        let (env_f, env_l) = voice.probe_contours();
         let pre = voice.ext_probe();
         peak = peak.max(y.abs());
-        for v in [y, i_bus * 1e3, v_filter, env_l, pre] {
+        for v in [y, i_bus * 1e3, v_filter, env_l, pre, env_f] {
             data.extend_from_slice(&(v as f32).to_le_bytes());
         }
     }
@@ -484,7 +493,7 @@ fn stim(rest: &[String]) -> Res {
             voice.preamp_failed()
         ));
     }
-    std::fs::write(out, wav_f32(5, rate, &data)).map_err(|e| format!("{out}: {e}"))?;
+    std::fs::write(out, wav_f32(6, rate, &data)).map_err(|e| format!("{out}: {e}"))?;
     eprintln!(
         "{out}: {:.1} s in {:.1} s (built in {built:.1} s), peak {peak:.3} ({:.2} V)",
         n as f64 / f64::from(rate),
