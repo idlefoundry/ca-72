@@ -26,7 +26,10 @@ fn inputs(b: &VcfBench, cutoff: f64) -> Vec<Input> {
             r: ca72::vcf::R54,
             v: b.kbd,
         },
-        Input { r: 47e3, v: 0.0 },
+        Input {
+            r: ca72::vcf::R74,
+            v: 0.0,
+        },
     ]
 }
 

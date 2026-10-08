@@ -230,6 +230,35 @@ pub fn volume_track(volume: f64) -> f64 {
     track(&VOLUME_TRACK, volume)
 }
 
+/// AMOUNT OF CONTOUR's pot (R12, 5K linear) as the hardware reference's knob sets its wiper:
+/// the fraction of the track at 2.5, 5 and 7.5 at which the voice's filter moves as the
+/// reference's does for the same contour (0.606, 1.506 and 2.389 octaves for 1.38 V, the
+/// filter self-oscillating at CUTOFF -2; docs/calibration, session J). A linear track's are
+/// 0.25, 0.5 and 0.75.
+const CONTOUR_AMOUNT_TRACK: [(f64, f64); 5] = [
+    (0.0, 0.0),
+    (0.25, 0.2088),
+    (0.5, 0.5131),
+    (0.75, 0.7976),
+    (1.0, 1.0),
+];
+
+/// The AMOUNT OF CONTOUR knob's wiper as a fraction of its track.
+pub fn contour_amount_track(amount: f64) -> f64 {
+    track(&CONTOUR_AMOUNT_TRACK, amount)
+}
+
+/// AMOUNT OF CONTOUR (R12, 5K linear from the filter contour's output to GND, through
+/// [`contour_amount_track`]) and R74 ([`crate::vcf::R74`]) into the control node: the input it
+/// makes with the contour at `env_f` volts.
+pub fn contour_input(amount: f64, env_f: f64) -> Input {
+    let t = contour_amount_track(amount);
+    Input {
+        r: crate::vcf::R74 + 5e3 * t * (1.0 - t),
+        v: env_f * t,
+    }
+}
+
 /// CUTOFF FREQUENCY (R11, 5K linear across +-10 V) as the hardware reference's knob sets its
 /// wiper: the fraction of the track at the dial's -4, -2, 2 and 4 at which the voice's filter
 /// sits where the reference's does, each at its CUT CV 0 (docs/calibration, session E). The
@@ -1643,10 +1672,7 @@ impl FrontPart {
                 r: r_cut,
                 v: -10.0 + 20.0 * pos,
             },
-            Input {
-                r: 47e3 + 5e3 * amt * (1.0 - amt),
-                v: env_f * amt,
-            },
+            contour_input(amt, env_f),
             if p.keyboard_control_1 {
                 Input {
                     r: crate::vcf::R53,

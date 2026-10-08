@@ -3,8 +3,8 @@
 //! rises over the knob's travel.
 
 use ca72::voice::{
-    FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, cutoff_track, time_pot,
-    time_pot_drawn, volume_track,
+    FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, contour_amount_track,
+    cutoff_track, time_pot, time_pot_drawn, volume_track,
 };
 
 #[test]
@@ -79,6 +79,25 @@ fn cutoff_follows_the_reference_at_its_marks() {
     for k in 0..=1000 {
         let t = cutoff_track(k as f64 / 1000.0);
         assert!(t > last || k == 0, "CUTOFF {k}/1000: {t}");
+        last = t;
+    }
+}
+
+#[test]
+fn contour_amount_follows_the_reference_at_its_marks() {
+    for (p, t) in [(0.25, 0.2088), (0.5, 0.5131), (0.75, 0.7976)] {
+        assert!(
+            (contour_amount_track(p) - t).abs() < 1e-12,
+            "AMOUNT {p}: {}",
+            contour_amount_track(p)
+        );
+    }
+    assert_eq!(contour_amount_track(0.0), 0.0);
+    assert_eq!(contour_amount_track(1.0), 1.0);
+    let mut last = -1.0;
+    for k in 0..=1000 {
+        let t = contour_amount_track(k as f64 / 1000.0);
+        assert!(t > last || k == 0, "AMOUNT {k}/1000: {t}");
         last = t;
     }
 }

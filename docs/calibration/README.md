@@ -297,6 +297,19 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     and J now within 0.2 % (attack 10 to 90 %, final decay 90 to 50 %). Below the tick past
     10 ms the generic taper stays.
 
+14. **AMOUNT OF CONTOUR: its knob's law, and R74 47K to 45.3K** (`voice::contour_input`,
+    `vcf::R74`, board4.md B4-9, 2026-10-08). Session J held the filter contour at a SUSTAIN of
+    5 (1.67 V at the FILT CONT jack against 0.29 V at rest) with the filter self-oscillating
+    at CUTOFF -2, AMOUNT OF CONTOUR at 0, 2.5, 5, 7.5 and 10: the step moved the reference's
+    filter 0, 0.606, 1.506, 2.389 and 3.081 octaves. `ca72-lab filterlaw` (now taking AMOUNT
+    and the contour's volts through the voice's `contour_input`) gave the CA-72 0.701, 1.415,
+    2.159 and 2.952: nearly straight where the reference's is an S, and 4 % short at full.
+    R74 at 45.3K gives 3.06 at full; the knob's track at 0.2088, 0.5131 and 0.7976 for 2.5, 5
+    and 7.5 (a linear track's 0.25, 0.5, 0.75: the S of the VOLUME and CUTOFF pots) gives the
+    reference's octaves there exactly. In session I's Ringing Saw Line (AMOUNT 4) the CA-72's
+    filter moved 0.89 to 0.95 octave a volt of contour against the reference's 0.81; with the
+    law, 0.83 at 4. The contours' own voltages match (session I: their peaks within 3 %).
+
 ## Still differs (2026-10-08, after the knob session's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still

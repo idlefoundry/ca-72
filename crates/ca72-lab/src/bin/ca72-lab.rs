@@ -511,8 +511,10 @@ fn stim(rest: &[String]) -> Res {
 }
 
 /// The filter's control law (docs/calibration): for each `cutoff,jack_volts` pair on standard
-/// input, the ladder current (A) and the self-oscillation's frequency at EMPHASIS 10 (Hz),
-/// with the voice's trims (`filter_cal::CALIBRATED`) or `--r39 POS --r49 OHMS`.
+/// input (CUTOFF as its track's fraction), the ladder current (A) and the self-oscillation's
+/// frequency at EMPHASIS 10 (Hz), with the voice's trims (`filter_cal::CALIBRATED`) or `--r39
+/// POS --r49 OHMS`; `cutoff,jack,amount,contour_volts` adds AMOUNT OF CONTOUR (its knob,
+/// through the voice's `contour_input`).
 fn filterlaw(rest: &[String]) -> Res {
     use ca72::filter_cal::{self, CALIBRATED};
     use std::io::BufRead;
@@ -538,15 +540,22 @@ fn filterlaw(rest: &[String]) -> Res {
     }
     for line in std::io::stdin().lock().lines() {
         let line = line.map_err(|e| e.to_string())?;
-        let Some((c, j)) = line.trim().split_once(',') else {
+        // cutoff (CUTOFF's track, 0..1), jack (V at R51)[, AMOUNT OF CONTOUR (its knob, the
+        // voice's law), the filter contour (V)]
+        let f: Vec<f64> = line
+            .trim()
+            .split(',')
+            .map(|x| x.parse::<f64>().map_err(|e| format!("{e}")))
+            .collect::<Result<_, _>>()?;
+        if f.len() < 2 {
             continue;
-        };
-        let (cutoff, jack): (f64, f64) = (
-            c.parse().map_err(|e| format!("{e}"))?,
-            j.parse().map_err(|e| format!("{e}"))?,
-        );
+        }
+        let (cutoff, jack) = (f[0], f[1]);
         let mut ins = filter_cal::inputs(cutoff, false, false, 0.0);
         ins[5].v = jack;
+        if f.len() >= 4 {
+            ins[1] = ca72::voice::contour_input(f[2], f[3]);
+        }
         let i0 = trims.expo().current(&ins, 25.0);
         let hz = filter_cal::oscillation(48_000.0, &trims, &ins);
         println!("{cutoff},{jack},{i0:.6e},{hz:.3}");

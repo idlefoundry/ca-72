@@ -53,7 +53,7 @@ pub fn netlist(b: &VcfBench, src: &str, solver: Solver) -> String {
          vcut vcut 0 {c}\nr55 vcut ctl 200k\nvkbd kbd 0 {k}\nr53 kbd ctl {r53}\nr54 kbd ctl {r54}\n\
          vamt amt 0 0\n{src}\nrmix src ain {mr}\n\
          r14 emo emi {r14}\n{ext}\
-         x1 ain ctl amt emo emi out vp vn mm_vcf r39={r39} r49={r49} r73={r73}\n",
+         x1 ain ctl amt emo emi out vp vn mm_vcf r39={r39} r49={r49} r73={r73} r74={r74}\n",
         m = dir.join("models/mm-devices.lib").display(),
         v = dir.join("boards/board4-vcf.lib").display(),
         t = solver.temp,
@@ -66,6 +66,7 @@ pub fn netlist(b: &VcfBench, src: &str, solver: Solver) -> String {
         mr = b.mix_r,
         r14 = b.r14.max(1e-3),
         r39 = b.r39,
+        r74 = ca72::vcf::R74,
         r49 = b.r49,
         r73 = b.r73,
         ext = b.ext_ctl.map_or(String::new(), |v| format!(

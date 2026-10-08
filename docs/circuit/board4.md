@@ -254,3 +254,9 @@ hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
   (1 %, E96) the preamplifier gains 0.97 dB more (ngspice: 38.69 against 37.72 dB from a
   100K source at 1 kHz); its clipping, set by its output's swing, is unchanged
   (docs/calibration, change 9).
+- **B4-9** (2026-10-08) R74 is 45.3K in the model, not the drawing's 47K: at AMOUNT OF
+  CONTOUR 10 the hardware reference's filter moves 3.08 octaves for 1.38 V of contour (its
+  FILT CONT jack, the filter self-oscillating at CUTOFF -2), the drawing's value 2.95 through
+  the CA-72's control node. 45.3K (1 %, E96) gives 3.06. The voice, the bench's netlist (a
+  parameter of `mm_vcf`, 47K by default) and the converter's test take `vcf::R74`; Folkman's
+  procedure keeps 47K (docs/calibration, change 14).
