@@ -2327,6 +2327,45 @@ put back. Packaging, with the two Developer ID identities, the notary profile an
 commands (`build.sh`, `auval.sh`, `package.sh`) and `SHA256SUMS.txt` are kept with the
 release's evidence outside the repository, as 0.1.3's are.
 
+## R38. The editor's window opaque on Linux desktops that composite
+**Owner decision, 2026-10-08.** The CA-74 found that on a Linux desktop that composites, its
+standalone's panel looked washed out, far too bright, and fixed it in its editor. The owner
+asked for the same fix in the CA-72 and the MC-79, merged only on their go. Shown it tried
+(below), asked whether to merge it once CI passed and release it with the next version rather
+than on its own: "yes".
+
+**What was wrong.** baseview makes its X11 window with a 32-bit visual, an alpha channel,
+wherever the screen has one (`third_party/baseview`, `find_best_visual_config`), and the editor
+gave softbuffer each pixel with its highest byte 0, as softbuffer's documentation asks. On that
+window 0 is transparent: the compositor adds whatever is behind the window to the panel's
+colours. The CA-74's standalone on Hyprland, through XWayland, showed the wallpaper through its
+panel, its cream face near white. Inside a Linux host the host's own window under the editor's
+would show through the same way.
+
+**Agent decisions, 2026-10-08** (not separately approved):
+- **Every pixel the window is given is opaque:** its highest byte 0xff (`window::shown`, and
+  `window::EMPTY` for the window beyond the frames, 0xff3b2213). softbuffer 0.4.8's other
+  backends ignore that byte: Core Graphics draws with `NoneSkipFirst`, GDI copies a 32-bit
+  bitmap with `BitBlt`, KMS's buffers are XRGB8888, and an X11 window of 24 bits has no alpha.
+- **Tried off the owner's screen:** the standalone's window was sent to a workspace not shown
+  and captured from the compositor by itself (`grim -T`), so the capture shows the alpha the
+  compositor was given rather than the colours it would have made of it on screen.
+
+**Evidence (the Linux reference machine, 2026-10-08):** Hyprland 0.56.2 with XWayland; the
+standalone (`--example standalone`, nih-plug's dummy audio backend), debug, before the change
+(main, `7cdf904`) and after, each captured 8 s after its window appeared.
+- **Before:** every pixel of the panel and the strip (2045 by 685) had alpha 0, transparent.
+- **After:** every pixel opaque. Against the panel's drawing (`cargo run -p ca72-panel
+  --example png` at the editor's scale, 2045 / 3438 pixels a panel unit), the face is 29, 27,
+  26 and a legend's cream 235, 230, 216 in both; 72.5 % of the panel's pixels are identical,
+  the rest where the knobs and switches stood at other values than the example draws them.
+- `the_window_is_given_opaque_pixels` fails without the change (0x123456 given where 0xff123456
+  is wanted) and passes with it; the editor's tests (39 passed, 2 that write pictures for a look
+  ignored); rustfmt; clippy with and without `--all-features` (rustc 1.97.1).
+
+Not tried: the panel on screen (the CA-74 saw it there), a Linux host, macOS and Windows (the
+byte ignored there, by softbuffer's code; CI runs the tests on all three).
+
 ## R-QUAD. A worker on machines of 3 and 4 processors: the POLY presets in Waveform
 **Owner decision, 2026-10-07.** Two users reported the CPU overloaded in Tracktion Waveform: on
 KVR, Waveform 14 on Linux Mint 22.3 with "4 cores at 3.6 GHz", where choosing Slow Horn Swell,
