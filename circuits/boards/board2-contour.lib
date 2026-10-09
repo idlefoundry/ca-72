@@ -36,7 +36,7 @@ r55   n7 b20 47k                    ; R55 47K
 q20   rst b20 0 Q2N3392             ; Q20 2N3392
 r49   strig rst 220                 ; R49 220: EXT. S-TRIG pulls the reset line down
 r19   rst b12 10k                   ; R19 10K
-q12   vtrig b12 0 Q2N3392           ; Q12 2N3392: V-trig
+q12   vtrig b12 0 Q12HG             ; Q12 2N3392: V-trig (the hardware reference's gain, B2-14)
 r32   p93 set 10k                   ; R32 10K: the set line
 r23   set vtrig 3.3k                ; R23 3.3K: Q12 holds the set line low at rest
 

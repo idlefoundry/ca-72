@@ -506,6 +506,23 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     releases with DECAY that near its end: their renders are unchanged to the bit. The
     circuit's own fall stays 1.6 to 2.1 times the reference's (change 28 follows).
 
+28. **Q12, V-trig's transistor, at the reference's gain** (`contour::Q12HG`,
+    `mm-devices.lib`, board2.md B2-14, 2026-10-09). Released with DECAY at its end, both
+    contours fall as fast as Q12 takes their current, which grows with its base drive as Q20
+    turns off and the reset line rises: so the fall's speed is Q12's gain over R19, and the
+    delay before it is C7 and R55's (it agrees). In ngspice the gain moved the fall and
+    hardly the delay: at 212 (the 2N3392 bin's middle) 1.75 and 1.47 ms (filter, 90 to 50
+    and 50 to 10 %) and 2.36 and 2.03 (loudness); at 650, 0.97 and 0.79, 1.33 and 1.09,
+    against the reference's 1.06 and 0.79, 1.35 and 0.98: no gain fits all four better (the
+    loudness's last half wants more, the filter's first half less), and 650 holds them all
+    within 0.11 ms. A BC547C-class part's gain (its bin 420 to 800), where the 2N3392's is
+    150 to 300: the likelier difference in a recreation (R19 halved moved the fall about
+    half as far as the gain did).
+    The netlist and the model take it together (`ContourCircuit::q12`). V-trig's edges in
+    ngspice: 7.97 ms after a key's press as before, 12.14 ms after its release (12.48). The
+    plug-in's voice now falls in 0.98 and 0.81 ms (filter), 1.33 and 1.13 (loudness). The
+    factory presets move little (levels within 0.01 dB but Undertow Growl's loop, -0.12).
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -523,11 +540,9 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 - **Ringing Saw Line's ring** (session I) stands +0.06 to +0.16 octave over the reference's
   mid-note on G2 and 0 to +0.22 on C4 (0.3 before change 25): within where the patch's
   DECAY was set on the reference by eye, just right of the top tick.
-- **The contours' release with DECAY at 0:** as the circuit's since change 27, from 90 to 50
-  % in 1.75 ms (filter) and 2.36 ms (loudness) against the reference's 1.06 and 1.35, and
-  from 50 to 10 % in 1.47 and 2.03 against 0.79 and 0.98; the delay from the key's release
-  agrees (12.8 to 14.1 ms). The trigger's falling edge: Q20 turning off as C7 drains, Q12
-  taking the capacitors' current.
+- **The contours' release with DECAY at 0** (changes 27 and 28): from 90 to 50 % in 0.98 ms
+  (filter) and 1.34 ms (loudness) against the reference's 1.06 and 1.35, from 50 to 10 % in
+  0.80 and 1.10 against 0.79 and 0.98: the loudness contour's last half 0.1 ms long.
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
   CA-72 ends 22 cents under the reference (0.9986 against 1.0030 octave a volt at the ES-3's
   10.39 V), against 80 cents before.

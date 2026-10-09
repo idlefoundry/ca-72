@@ -80,7 +80,7 @@ flip-flops' resets put 30 ns spikes on the rail and outputs):
 | Released during a slow attack | Within 20 mV; peaks within 7 mV; edges within 0.15 ms |
 | Fastest attack (500 ohm), SUSTAIN at 0 and 10 | Within 72 mV (mid-attack, the rail's sag: A16); peaks within 11 mV; edges within 0.13 ms |
 | ATTACK and DECAY at 0 ohm, SUSTAIN 10, held (2026-10-08) | Within 66 mV half a millisecond past the attack (also at 24 kHz and at Potato's 6 kHz: 70 and 92 mV); peaks within 23 mV at all three |
-| Released with ATTACK and DECAY at 0 ohm, DECAY on and off (2026-10-09) | The falls from 90 to 50 and 50 to 10 % within 0.04 ms of ngspice's (1.75 and 1.47 ms filter, 2.36 and 2.03 loudness) at 48, 24 and 6 kHz; within 39 mV (48 kHz), 19 mV (24 kHz) and 33 mV (6 kHz, its trigger's edge lined up: B2-13) |
+| Released with ATTACK and DECAY at 0 ohm, DECAY on and off (2026-10-09) | The falls from 90 to 50 and 50 to 10 % within 0.04 ms of ngspice's (0.97 and 0.79 ms filter, 1.33 and 1.09 loudness, with Q12 as the hardware reference's: B2-14) at 48, 24 and 6 kHz; within 39 mV (48 kHz), 19 mV (24 kHz) and 33 mV (6 kHz, its trigger's edge lined up: B2-13) |
 
 The same scenarios at the voice's 24 kHz (interpolated onto ngspice's 48 kHz grid): within
 86 mV (the fastest attack), trigger edges within 0.19 ms (assumptions.md A17). At 12 kHz
@@ -231,3 +231,13 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
   edges at 6 kHz still come about 0.23 ms early (a step and a half: C7 and the reset line's
   stepping), so `contour_realtime.rs` compares the contours there with the last edge lined
   up and holds the edges to their own budget.
+- **B2-14** (2026-10-09) Q12, V-trig's transistor, is modelled at the hardware reference's
+  gain (`Q12HG`: the 2N3392's model with BF 650; the drawing's 2N3392 bin is 150 to 300).
+  Released with DECAY at its end, both contours fall as fast as Q12 takes their current
+  through CR2 [CR9], which grows with its base drive (through R19) as the reset line rises
+  behind Q20's turn-off: the reference's falls (session N) came 1.6 to 2.1 times faster
+  than the circuit's with the 2N3392. Fitted in ngspice to the four falls (each contour
+  from 90 to 50 and 50 to 10 %), all within 0.11 ms (docs/calibration, change 28). V-trig's
+  edge after a key's release comes 0.35 ms sooner (12.14 ms), after a press as before
+  (7.97 ms). The netlist (`board2-contour.lib`, `mm-devices.lib`) and the model
+  (`ContourCircuit::q12`) change together; `contour_realtime.rs` holds them.

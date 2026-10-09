@@ -55,6 +55,15 @@ pub const Q2N3392: Bjt = Bjt {
     tnom: 25.0,
 };
 
+/// Q12, V-trig's transistor, as the hardware reference has it: the 2N3392's model with the
+/// current gain at which both contours, released with DECAY at its end, fall as the
+/// reference's (`Q12HG` in `mm-devices.lib`; docs/calibration, session N; board2.md B2-14):
+/// a modern high-gain part's, where the drawing's 2N3392 bin is 150 to 300.
+pub const Q12HG: Bjt = Bjt {
+    bf: 650.0,
+    ..Q2N3392
+};
+
 /// 1N34A (`D1N34A`) and 1N4004 (`D1N4004`) as in `mm-devices.lib`.
 pub const D1N34A: Diode = Diode {
     is: 1e-6,
@@ -226,6 +235,9 @@ pub struct ContourCircuit {
     pub loudness: Section,
     pub npn: Bjt,
     pub pnp: Bjt,
+    /// Q12, V-trig's transistor: [`Q12HG`] as the hardware reference has it, or
+    /// [`Q2N3392`] as drawn.
+    pub q12: Bjt,
     pub ge: Diode,
     pub si: Diode,
     /// CR3 and CR6, the peak detectors' diodes: [`DCR36`] as the hardware reference has
@@ -256,6 +268,7 @@ impl Default for ContourCircuit {
             loudness: LOUDNESS_SECTION,
             npn: Q2N3392,
             pnp: TIS93,
+            q12: Q12HG,
             ge: D1N34A,
             si: D1N4004,
             peak_diode: DCR36,
@@ -427,7 +440,7 @@ pub struct Contours {
 
 /// [`Contours::devices`]' cache: the temperature's bits, the models (NPN, PNP, germanium
 /// and silicon diodes), and their parameters at it.
-type DevicesAt = (u64, [Bjt; 2], [Diode; 2], [BjtAt; 2], [DiodeAt; 2]);
+type DevicesAt = (u64, [Bjt; 3], [Diode; 2], [BjtAt; 3], [DiodeAt; 2]);
 
 /// A part moving less than this a tick (V) is settled: what it still would move is at most
 /// this times its time constant in ticks (under 25 nV for a 10 s decay at 24 kHz).
@@ -699,9 +712,9 @@ impl Contours {
     /// diodes' laws, worked out again only when it or the models change (performance:
     /// the followers took them at each of their root finder's evaluations). The same values
     /// either way.
-    fn devices_and_diodes(&self) -> ([BjtAt; 2], [DiodeAt; 2]) {
+    fn devices_and_diodes(&self) -> ([BjtAt; 3], [DiodeAt; 2]) {
         let c = &self.circuit;
-        let (q, d) = ([c.npn, c.pnp], [c.ge, c.si]);
+        let (q, d) = ([c.npn, c.pnp, c.q12], [c.ge, c.si]);
         let key = self.celsius.to_bits();
         if let Some((k, q0, d0, qa, da)) = self.devices.get()
             && k == key
@@ -849,7 +862,7 @@ impl Contours {
         let c = self.circuit;
         let h = self.h;
         let (tol, tol_decay) = (self.tol, self.tol_decay);
-        let ([npn, pnp], [ge_at, si_at]) = self.devices_and_diodes();
+        let ([npn, pnp, q12d], [ge_at, si_at]) = self.devices_and_diodes();
         let ge = move |v: f64| ge_at.current(v);
         let si = move |v: f64| si_at.current(v);
         let base = npn.base_law();
@@ -889,7 +902,8 @@ impl Contours {
         let feed_at =
             |rst: f64, r: f64, j: f64| series_junction_from(rst - vb4, r + c.ge.rs, ge, j);
         let j12b = self.j12b;
-        let q12_base = |r: f64| series_junction_from(r, c.r19 + c.npn.rb, &base, j12b);
+        let base12 = q12d.base_law();
+        let q12_base = |r: f64| series_junction_from(r, c.r19 + c.q12.rb, &base12, j12b);
         let j10 = self.j10;
         // (In High Fidelity and Potato each solve of Q20 and Q12 starts from the last
         // one's, not the last tick's, and limits its steps as the nodal solver does.)
@@ -940,7 +954,7 @@ impl Contours {
             let f_rst_by = |r: f64, (x, ic20, _): ([f64; 2], f64, f64)| {
                 let (dic20, _) = grounded_npn_slopes(&npn, &c.npn, x, c.r55);
                 let (j12, ib12) = q12_base(r);
-                let d12 = through(base(j12).1, c.r19 + c.npn.rb);
+                let d12 = through(base12(j12).1, c.r19 + c.q12.rb);
                 let (s_trig, d_trig) = if panel.s_trig {
                     (r / c.r49, 1.0 / c.r49)
                 } else {
@@ -981,11 +995,11 @@ impl Contours {
         let x12 = std::cell::Cell::new(self.x12);
         let q12 = |vt: f64| {
             if lean {
-                let s = grounded_npn_with(&npn, &c.npn, x12.get(), (rst, c.r19, vt), tol, true);
+                let s = grounded_npn_with(&q12d, &c.q12, x12.get(), (rst, c.r19, vt), tol, true);
                 x12.set(s.0);
                 s
             } else {
-                grounded_npn(&npn, &c.npn, x12.get(), rst, c.r19, vt, tol)
+                grounded_npn(&q12d, &c.q12, x12.get(), rst, c.r19, vt, tol)
             }
         };
         // The dump node (R1401's far end) for V-trig at `vt`, the diodes of the capacitors
@@ -1038,7 +1052,7 @@ impl Contours {
         // The sections as the tick found them.
         let first = self.sections;
         let f_vt_by = |vt: f64, (x, ic12, _): ([f64; 2], f64, f64), ss: &[SectionState; 2]| {
-            let (dic12, _) = grounded_npn_slopes(&npn, &c.npn, x, c.r19);
+            let (dic12, _) = grounded_npn_slopes(&q12d, &c.q12, x, c.r19);
             let (dump, d_dump) = if panel.decay_on {
                 (0.0, 0.0)
             } else {
@@ -1072,7 +1086,14 @@ impl Contours {
         };
         let vtrig_old = self.vtrig;
         // Falling: every current into V-trig falls as it rises.
-        debug_assert!(f_vt_by(0.0, solved(rst, c.r19, 0.0), &self.sections).0 >= 0.0);
+        debug_assert!(
+            f_vt_by(
+                0.0,
+                grounded_npn_with(&q12d, &c.q12, [0.7, 0.6], (rst, c.r19, 0.0), 1e-12, true),
+                &self.sections
+            )
+            .0 >= 0.0
+        );
         // V-trig and the sections are one system: through CR2 [CR9] (and with DECAY off CR7
         // [CR4]) a falling V-trig draws the capacitors' currents, which hold it up. Solved
         // from the sections' last states and they then stepped from it, a release through
