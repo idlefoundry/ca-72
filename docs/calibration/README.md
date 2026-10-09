@@ -523,6 +523,26 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     plug-in's voice now falls in 0.98 and 0.81 ms (filter), 1.33 and 1.13 (loudness). The
     factory presets move little (levels within 0.01 dB but Undertow Growl's loop, -0.12).
 
+29. **Oscillators 2 and 3's FREQUENCY laws** (`voice::osc2_freq_track`, `osc3_freq_track`,
+    2026-10-09). Session N held an A3 with each oscillator alone, FREQUENCY at both stops,
+    -5, 0 and +5, between takes of oscillator 1 alone (its tuning drifted 0.15 cent). From
+    oscillator 1 the reference's oscillator 2 stood at -8.05, -6.55, -0.07, +6.54 and +8.23
+    semitones, its oscillator 3 (OSC. 3 CONTROL on) at -8.87, -6.99, -0.26, +6.66 and +8.29;
+    the CA-72's at -8.57, -5.67, 0.00, +5.52 and +8.24, and -8.63, -5.67, 0.00, +5.48 and
+    +8.22. Their stops nearly agree where their -5 and +5 marks are a semitone apart: the
+    reference's knobs set their tracks with the S of its other linear knobs, much stronger
+    (no change of span gives it). Its 0 marks sat 7 and 26 cents flat, but oscillator 3's sat
+    8 cents off in the same session's Hollow Glider (from its 16' pair's beat): where a knob
+    lands by eye (a tenth of a mark is 13 cents there), not a trim. So the 0 mark stays the
+    centre, where the factory tuning puts it in unison, and the laws take the reference's
+    marks from its 0: oscillator 2's track at 0.0334, 0.1195, 0.9000 and 1 for the stops and
+    the -5 and +5 marks, oscillator 3's at 0.0008, 0.1060, 0.9209 and 1 (a linear track's 0,
+    1/6, 5/6, 1). Every mark now within 0.2 cent of the reference's but the clockwise stops,
+    0.06 and 0.33 semitone short (the CA-72's pots end there). The ngspice benches take the
+    pot's position: the netlist is unchanged. The presets' FREQUENCY values (all but 0) are
+    rewritten so that each keeps its pot's position (R-CAL): their intervals and oscillator
+    3's rates as they were.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -550,7 +570,9 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   CA-72's mixer bus; no change): at 8 and 4, oscillator 2 -2.10 and -9.42 dB against the
   reference's -2.29 and -9.55 (oscillator 3's as the reference's oscillator 2's within 0.2
   dB), and the noise, through its 11K, -3.60 and -11.93 against -3.94 and -11.98.
-- **Not in this round:** oscillators 2 and 3's FREQUENCY spans (measured in session N).
+- **Oscillators 2 and 3's FREQUENCY at their clockwise stops** (change 29): 0.06 and 0.33
+  semitone short of the reference's; the 0 mark at the factory tuning's unison, where the
+  reference's sits wherever its knob is set by eye (7 to 26 cents flat in session N).
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R-CAL),
   after sessions J's, L's, M's and N's fits too. Nine already at MAIN OUTPUT VOLUME 10 are
   quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -3.50 dB, Ladder Kick

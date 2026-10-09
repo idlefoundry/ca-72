@@ -212,11 +212,14 @@ const VOLUME_TRACK: [(f64, f64); 6] = [
 ];
 
 /// A knob's wiper as a fraction of its track, straight between a law's points (knob, track;
-/// from (0, 0) to (1, 1)).
+/// the knob from 0 to 1), each point's own value exactly.
 fn track(points: &[(f64, f64)], knob: f64) -> f64 {
     let p = knob.clamp(0.0, 1.0);
     for w in points.windows(2) {
         let ((pa, ta), (pb, tb)) = (w[0], w[1]);
+        if p == pb {
+            return tb;
+        }
         if p <= pb {
             return ta + (tb - ta) * (p - pa) / (pb - pa);
         }
@@ -268,6 +271,40 @@ const SUSTAIN_TRACK: [(f64, f64); 7] = [
 /// A SUSTAIN knob's wiper as a fraction of its track.
 pub fn sustain_track(sustain: f64) -> f64 {
     track(&SUSTAIN_TRACK, sustain)
+}
+
+/// Oscillator 2's FREQUENCY pot (R4, 5K linear) as the hardware reference's knob sets its
+/// wiper: the fraction of the track at the dial's stops and its -5 and +5 marks (the knob
+/// 0..1 for -7.5..+7.5) at which the oscillator stands where the reference's does from its
+/// 0 mark (session N, docs/calibration). The 0 mark stays the centre, where the factory
+/// tuning puts it in unison with oscillator 1. A linear track's are 0, 1/6, 5/6 and 1; the
+/// clockwise stop reaches 0.06 semitone short of the reference's.
+const OSC2_FREQ_TRACK: [(f64, f64); 5] = [
+    (0.0, 0.0334),
+    (1.0 / 6.0, 0.1195),
+    (0.5, 0.5),
+    (5.0 / 6.0, 0.9000),
+    (1.0, 1.0),
+];
+
+/// Oscillator 3's FREQUENCY pot (R5) likewise (OSC. 3 CONTROL on when measured); its
+/// clockwise stop reaches 0.33 semitone short of the reference's.
+const OSC3_FREQ_TRACK: [(f64, f64); 5] = [
+    (0.0, 0.0008),
+    (1.0 / 6.0, 0.1060),
+    (0.5, 0.5),
+    (5.0 / 6.0, 0.9209),
+    (1.0, 1.0),
+];
+
+/// Oscillator 2's FREQUENCY knob's wiper as a fraction of its track.
+pub fn osc2_freq_track(freq: f64) -> f64 {
+    track(&OSC2_FREQ_TRACK, freq)
+}
+
+/// Oscillator 3's FREQUENCY knob's wiper as a fraction of its track.
+pub fn osc3_freq_track(freq: f64) -> f64 {
+    track(&OSC3_FREQ_TRACK, freq)
 }
 
 /// AMOUNT OF CONTOUR (R12, 5K linear from the filter contour's output to GND, through
@@ -1690,9 +1727,11 @@ impl FrontPart {
             }
             let osc = match n {
                 0 => Osc::One,
-                1 => Osc::Two { freq: op.freq },
+                1 => Osc::Two {
+                    freq: osc2_freq_track(op.freq),
+                },
                 _ => Osc::Three {
-                    freq: op.freq,
+                    freq: osc3_freq_track(op.freq),
                     control: p.osc3_control,
                 },
             };

@@ -5,8 +5,8 @@
 use ca72::modulation::{midi_wheel, mod_wheel_r, mod_wheel_r_drawn};
 use ca72::voice::{
     FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, contour_amount_track,
-    cutoff_track, glide_pot, glide_pot_drawn, sustain_track, time_pot, time_pot_drawn,
-    volume_track,
+    cutoff_track, glide_pot, glide_pot_drawn, osc2_freq_track, osc3_freq_track, sustain_track,
+    time_pot, time_pot_drawn, volume_track,
 };
 
 #[test]
@@ -132,6 +132,48 @@ fn sustain_follows_the_reference_at_its_marks() {
         let t = sustain_track(k as f64 / 1000.0);
         assert!(t > last || k == 0, "SUSTAIN {k}/1000: {t}");
         last = t;
+    }
+}
+
+#[test]
+fn frequency_follows_the_reference_at_its_marks() {
+    for (name, law, points) in [
+        (
+            "oscillator 2",
+            osc2_freq_track as fn(f64) -> f64,
+            [
+                (0.0, 0.0334),
+                (1.0 / 6.0, 0.1195),
+                (5.0 / 6.0, 0.9000),
+                (1.0, 1.0),
+            ],
+        ),
+        (
+            "oscillator 3",
+            osc3_freq_track,
+            [
+                (0.0, 0.0008),
+                (1.0 / 6.0, 0.1060),
+                (5.0 / 6.0, 0.9209),
+                (1.0, 1.0),
+            ],
+        ),
+    ] {
+        for (p, t) in points {
+            assert!(
+                (law(p) - t).abs() < 1e-12,
+                "{name} FREQUENCY {p}: {}",
+                law(p)
+            );
+        }
+        // The 0 mark: the factory tuning's centre, exactly.
+        assert_eq!(law(0.5), 0.5, "{name}");
+        let mut last = -1.0;
+        for k in 0..=1000 {
+            let t = law(k as f64 / 1000.0);
+            assert!(t > last, "{name} FREQUENCY {k}/1000: {t}");
+            last = t;
+        }
     }
 }
 
