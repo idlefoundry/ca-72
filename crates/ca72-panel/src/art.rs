@@ -1130,6 +1130,10 @@ pub struct Layer {
     /// R-LOOK), and SVG over them (the lamp's light on them, which does not turn).
     pub sprites: Vec<Sprite>,
     pub over: String,
+    /// A wheel the worn skin's renderer draws, and a rocker's paddle it lights by its shape
+    /// (none in the drawn skin).
+    pub wheel: Option<WheelArt>,
+    pub paddle: Option<PaddleArt>,
 }
 
 /// A picture of a part drawn in a layer: `size` (drawing units) about `at` (from the layer's
@@ -1335,14 +1339,41 @@ pub fn plate() -> Layer {
 /// reach (the picture's wedge reaches its edge, 64 units out, as the drawn fin about does).
 const SELECTOR_R: f64 = 50.0;
 
-/// The panel's lamp over a round part `r` across: lighter up and to the left (`up`, white's
-/// share), darker down and to the right (`down`, black's). It does not turn with the part.
-fn lamp_over(r: f64, up: f64, down: f64) -> String {
+/// How the panel's lamp lights a round part's near side, up and to the left (a colour dodge to
+/// 1 / (1 - `LAMP_NEAR`) of its light at the edge), and darkens its far side (multiplied by
+/// `LAMP_FAR` at the edge), each back to nothing by the middle: the CA-74's.
+const LAMP_NEAR: f64 = 0.45;
+const LAMP_FAR: f64 = 0.35;
+
+/// How far a cap's picture is turned, clockwise, so that its spun sheen (generated lying across
+/// it, along three and nine o'clock) lies along the line to the lamp, up and to the left, as a
+/// spun disc's does.
+const CAP_TURN: f64 = 45.0;
+
+/// The lamp's light on a spun cap `r` across, over its sheen: its near side a touch lighter.
+fn cap_light(r: f64) -> String {
     format!(
-        "<defs><linearGradient id='lamp' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#fff' stop-opacity='{}'/><stop offset='0.42' stop-color='#fff' stop-opacity='0'/><stop offset='0.6' stop-color='#000' stop-opacity='0'/><stop offset='1' stop-color='#000' stop-opacity='{}'/></linearGradient></defs><circle r='{}' fill='url(#lamp)'/>",
-        N(up),
-        N(down),
+        "<defs><linearGradient id='cap' x1='0' y1='0' x2='1' y2='1'><stop offset='0.15' stop-color='#fff' stop-opacity='0.12'/><stop offset='0.5' stop-color='#fff' stop-opacity='0'/><stop offset='0.55' stop-color='#000' stop-opacity='0'/><stop offset='0.85' stop-color='#000' stop-opacity='0.1'/></linearGradient></defs><circle r='{}' fill='url(#cap)'/>",
         N(r)
+    )
+}
+
+/// The panel's lamp over a round part's black plastic, from `inner` (its spun cap's rim, whose
+/// sheen is its own) out to `r`. It does not turn with the part.
+fn lamp_over(r: f64, inner: f64) -> String {
+    let grey = |v: f64| {
+        let g = (v * 255.0).round() as u8;
+        format!("#{g:02x}{g:02x}{g:02x}")
+    };
+    format!(
+        "<defs><linearGradient id='near' x1='0' y1='0' x2='1' y2='1'><stop offset='0.15' stop-color='{n}'/><stop offset='0.5' stop-color='{n}' stop-opacity='0'/></linearGradient><linearGradient id='far' x1='0' y1='0' x2='1' y2='1'><stop offset='0.5' stop-color='{f}' stop-opacity='0'/><stop offset='0.85' stop-color='{f}'/></linearGradient></defs><path d='{ring}' fill-rule='evenodd' fill='url(#near)' style='mix-blend-mode:color-dodge'/><path d='{ring}' fill-rule='evenodd' fill='url(#far)' style='mix-blend-mode:multiply'/>",
+        n = grey(LAMP_NEAR),
+        f = grey(LAMP_FAR),
+        ring = format!(
+            "M {o} 0 A {o} {o} 0 1 0 -{o} 0 A {o} {o} 0 1 0 {o} 0 Z M {i} 0 A {i} {i} 0 1 0 -{i} 0 A {i} {i} 0 1 0 {i} 0 Z",
+            o = N(r - 1.0),
+            i = N(inner)
+        )
     )
 }
 
@@ -1361,15 +1392,15 @@ fn sprite(part: Part, size: (f64, f64), deg: f64, flip: (bool, bool)) -> Sprite 
 /// as the drawn one is (the light on its spun cap and the lamp's over it not turned), a
 /// rocker's picture pressed at its end; the wheels as drawn.
 pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
-    use crate::skin::{BIG_SKIRT, KNOB_SKIRT, POINTER_BODY};
+    use crate::skin::{BIG_CAP, BIG_SKIRT, KNOB_CAP, KNOB_SKIRT, POINTER_BODY, POINTER_CAP};
     let v = v.clamp(0.0, 1.0);
     let (origin, bounds) = (c.centre(), bounds(&c.kind));
     match c.kind {
         Kind::Knob { big, .. } => {
-            let (size, skirt, part, cap) = if big {
-                (BIG, BIG_SKIRT, Part::KnobBig, Part::KnobBigCap)
+            let (size, skirt, part, cap, cap_share) = if big {
+                (BIG, BIG_SKIRT, Part::KnobBig, Part::KnobBigCap, BIG_CAP)
             } else {
-                (STD, KNOB_SKIRT, Part::Knob, Part::KnobCap)
+                (STD, KNOB_SKIRT, Part::Knob, Part::KnobCap, KNOB_CAP)
             };
             let d = 2.0 * size.skirt / skirt;
             Layer {
@@ -1377,9 +1408,9 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                 bounds,
                 sprites: vec![
                     sprite(part, (d, d), -150.0 + 300.0 * v, (false, false)),
-                    sprite(cap, (d, d), 0.0, (false, false)),
+                    sprite(cap, (d, d), CAP_TURN, (false, false)),
                 ],
-                over: lamp_over(size.skirt, 0.17, 0.3),
+                over: lamp_over(size.skirt, d / 2.0 * cap_share) + &cap_light(d / 2.0 * cap_share),
                 ..Layer::default()
             }
         }
@@ -1390,9 +1421,10 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                 bounds,
                 sprites: vec![
                     sprite(Part::Pointer, (d, d), SIX[position(v)], (false, false)),
-                    sprite(Part::PointerCap, (d, d), 0.0, (false, false)),
+                    sprite(Part::PointerCap, (d, d), CAP_TURN, (false, false)),
                 ],
-                over: lamp_over(SELECTOR_R, 0.17, 0.3),
+                over: lamp_over(SELECTOR_R, d / 2.0 * POINTER_CAP)
+                    + &cap_light(d / 2.0 * POINTER_CAP),
                 ..Layer::default()
             }
         }
@@ -1415,33 +1447,88 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
             // The picture's right half is raised; on, its left (the drawing's "on" end at its
             // right pressed).
             let on = v >= 0.5;
+            let m = 16.0;
             Layer {
                 origin,
-                bounds,
+                bounds: [bounds[0] - m, bounds[1] - m, bounds[2] + m, bounds[3] + m],
+                body: paddle_shadow(pw, ph, deg, on),
                 sprites: vec![sprite(part, (pw + 4.0, ph + 4.0), deg, (on, false))],
-                over: paddle_light(pw, ph, deg, on),
+                paddle: Some(PaddleArt { pw, ph, deg, on }),
                 ..Layer::default()
             }
         }
-        Kind::Wheel { .. } => control(c, v, midi),
+        Kind::Wheel { mark, detent, span } => {
+            let turn = (wheel_shown(detent, v, midi) - 0.5) * span;
+            Layer {
+                origin,
+                bounds,
+                body: wheel_slot(),
+                wheel: Some(WheelArt { mark, turn }),
+                ..Layer::default()
+            }
+        }
     }
 }
 
-/// The lamp on a rocker's paddle, `pw` by `ph` along its own length, turned `deg` and
-/// mirrored when `on`: its raised half catching the light and rounding over at its end, its
-/// pressed half lying low, a shadow at the step between them.
-fn paddle_light(pw: f64, ph: f64, deg: f64, on: bool) -> String {
+/// A wheel's slot in the worn skin: its opening, black, under the wheel the renderer draws.
+fn wheel_slot() -> String {
     format!(
-        "<g transform='rotate({}){}'><defs><linearGradient id='raised' x1='0' y1='0' x2='1' y2='0'><stop offset='0' stop-color='#000' stop-opacity='0.3'/><stop offset='0.1' stop-color='#fff' stop-opacity='0'/><stop offset='0.55' stop-color='#fff' stop-opacity='0.15'/><stop offset='0.85' stop-color='#fff' stop-opacity='0.05'/><stop offset='1' stop-color='#000' stop-opacity='0.3'/></linearGradient></defs><rect x='0' y='{}' width='{}' height='{}' fill='url(#raised)'/><rect x='{}' y='{}' width='{}' height='{}' fill='#000' fill-opacity='0.2'/></g>",
+        "<g transform='scale({WHEEL_SCALE})'><rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='{HOLE}'/></g>",
+        N(-SLOT_W / 2.0),
+        N(-SLOT_H / 2.0),
+        N(SLOT_W),
+        N(SLOT_H)
+    )
+}
+
+/// A wheel in the worn skin, drawn by the renderer: its mark, and how far it is turned
+/// (degrees, 0 in its middle).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WheelArt {
+    pub mark: Mark,
+    pub turn: f64,
+}
+
+/// Which way a rocker's raised half lies on the panel (a unit vector, the drawing's x and y),
+/// turned `deg` and mirrored when `on`; and how squarely the lamp, up and to the left, falls on
+/// a face of the paddle tilted towards `towards` (-1 to 1).
+fn raised_towards(deg: f64, on: bool) -> (f64, f64) {
+    let k = if on { -1.0 } else { 1.0 };
+    (k * deg.to_radians().cos(), k * deg.to_radians().sin())
+}
+
+fn lamp_on(towards: (f64, f64)) -> f64 {
+    -(towards.0 + towards.1) / std::f64::consts::SQRT_2
+}
+
+/// A rocker's paddle the worn skin's renderer lights by its shape: `pw` by `ph` along its own
+/// length, turned `deg`, its raised half to its right, or (when `on`) its left, before turning.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaddleArt {
+    pub pw: f64,
+    pub ph: f64,
+    pub deg: f64,
+    pub on: bool,
+}
+
+/// The shadow a rocker's paddle casts on the panel, down and to the right of it, the raised end's
+/// the longer.
+fn paddle_shadow(pw: f64, ph: f64, deg: f64, on: bool) -> String {
+    let r = raised_towards(deg, on);
+    // How far the raised end's shadow falls beyond the paddle: most when it lies away from the
+    // lamp.
+    let reach = 4.0 + 6.0 * (-lamp_on(r)).max(0.0);
+    let (ex, ey) = (r.0 * pw / 2.0, r.1 * pw / 2.0);
+    format!(
+        "<defs><filter id='cast' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='3'/></filter></defs><g filter='url(#cast)' fill='#000'><rect x='{}' y='{}' width='{}' height='{}' rx='4' transform='translate(4 6) rotate({})' fill-opacity='0.45'/><circle cx='{}' cy='{}' r='{}' fill-opacity='0.35'/></g>",
+        N(-pw / 2.0),
+        N(-ph / 2.0),
+        N(pw),
+        N(ph),
         N(deg),
-        if on { " scale(-1 1)" } else { "" },
-        N(-ph / 2.0 + 2.0),
-        N(pw / 2.0 - 1.0),
-        N(ph - 4.0),
-        N(-pw / 2.0 + 1.0),
-        N(-ph / 2.0 + 2.0),
-        N(pw / 2.0),
-        N(ph - 4.0)
+        N(ex + 3.0 + r.0.abs() * reach * 0.6),
+        N(ey + 5.0 + r.1.abs() * reach * 0.6),
+        N(ph * 0.42)
     )
 }
 
@@ -1507,7 +1594,7 @@ pub fn worn_overlay() -> String {
     let mut s = Svg::default();
     put!(
         s,
-        "<defs><linearGradient id='edge-lit' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#ffe6c8' stop-opacity='0.16'/><stop offset='1' stop-color='#ffe6c8' stop-opacity='0'/></linearGradient><linearGradient id='edge-dark' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0'/><stop offset='1' stop-color='#000' stop-opacity='0.45'/></linearGradient><linearGradient id='under-wood' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0.6'/><stop offset='1' stop-color='#000' stop-opacity='0'/></linearGradient><filter id='soft' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='3.5'/></filter><filter id='softer' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='2'/></filter></defs>"
+        "<defs><linearGradient id='edge-lit' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#ffe6c8' stop-opacity='0.16'/><stop offset='1' stop-color='#ffe6c8' stop-opacity='0'/></linearGradient><linearGradient id='edge-dark' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0'/><stop offset='1' stop-color='#000' stop-opacity='0.45'/></linearGradient><linearGradient id='under-wood' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0.6'/><stop offset='1' stop-color='#000' stop-opacity='0'/></linearGradient><filter id='long' x='-0.6' y='-0.6' width='2.2' height='2.2'><feGaussianBlur stdDeviation='7'/></filter><filter id='soft' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='3.5'/></filter><filter id='softer' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='2'/></filter></defs>"
     );
     for (y, h, fill) in [
         (0.0, 10.0, "edge-lit"),
@@ -1539,30 +1626,33 @@ pub fn worn_overlay() -> String {
     for c in CONTROLS.iter() {
         let (x, y) = c.centre();
         match c.kind {
-            Kind::Knob { big, .. } => {
-                let r = if big { BIG.skirt } else { STD.skirt };
+            // A tall knob casts a long soft shadow away from the lamp, and a dark one where it
+            // stands.
+            Kind::Knob { .. } | Kind::Selector(_) => {
+                let r = match c.kind {
+                    Kind::Knob { big: true, .. } => BIG.skirt,
+                    Kind::Knob { .. } => STD.skirt,
+                    _ => SELECTOR_R + 2.0,
+                };
                 put!(
                     s,
-                    "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.6' filter='url(#soft)'/>",
-                    N(x + 4.0),
-                    N(y + 6.0),
+                    "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.55' filter='url(#long)'/><circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.7' filter='url(#softer)'/>",
+                    N(x + 10.0),
+                    N(y + 14.0),
+                    N(r),
+                    N(x + 2.0),
+                    N(y + 3.0),
                     N(r)
                 );
             }
-            Kind::Selector(_) => put!(
-                s,
-                "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.6' filter='url(#soft)'/>",
-                N(x + 4.0),
-                N(y + 6.0),
-                N(SELECTOR_R + 2.0)
-            ),
+            // A rocker's own shadow goes with its layer; its opening's is the panel's.
             Kind::Rocker { w, h, .. } => put!(
                 s,
-                "<rect x='{}' y='{}' width='{}' height='{}' rx='3' fill='#000' fill-opacity='0.55' filter='url(#softer)'/>",
-                N(x - w / 2.0 + 2.0),
-                N(y - h / 2.0 + 3.0),
-                N(w + 4.0),
-                N(h + 4.0)
+                "<rect x='{}' y='{}' width='{}' height='{}' rx='3' fill='#000' fill-opacity='0.4' filter='url(#softer)'/>",
+                N(x - w / 2.0 + 1.0),
+                N(y - h / 2.0 + 2.0),
+                N(w + 3.0),
+                N(h + 3.0)
             ),
             Kind::Wheel { .. } => {}
         }
@@ -1592,19 +1682,6 @@ pub fn worn_overlay() -> String {
         );
     }
     s.0
-}
-
-/// The panel's lamp's falloff over the whole drawing, to be multiplied in: whole up and to the
-/// left, a little darker towards the far corner.
-pub fn falloff() -> String {
-    format!(
-        "<defs><radialGradient id='falloff' gradientUnits='userSpaceOnUse' cx='{}' cy='{}' r='{}'><stop offset='0' stop-color='#fff'/><stop offset='0.2' stop-color='#fff'/><stop offset='0.6' stop-color='#ecebe7'/><stop offset='1' stop-color='#c8c4bd'/></radialGradient></defs><rect x='0' y='0' width='{}' height='{}' fill='url(#falloff)'/>",
-        N(W * 0.2),
-        N(H * 0.1),
-        N(W * 1.05),
-        N(W),
-        N(H)
-    )
 }
 
 /// A hover tip: `text` in a box of the tip's colours (`TIP`, `TIP_BORDER`), `size` its

@@ -2795,6 +2795,18 @@ list that drops down over the strip inside the window."
   the background's, soft, down and to the right; FEEDBACK, dimmed in the drawing while EXTERNAL
   INPUT is off, is shaded instead (a picture is not dimmed). The pictures, about 3.8 MB in the
   plug-in, and how they were made: `crates/ca72-panel/assets/worn/README.md`.
+- **"You can do better. The 74 did better."** (the owner, 2026-10-09, of the first pictures).
+  Side by side at one size the CA-74's parts stood off its face and ours lay flat on it. Now: a
+  tall knob casts a long soft shadow down and to the right and a dark one where it stands; the
+  lamp lights its black skirt's near side and darkens its far side (a colour dodge to 1 / (1 -
+  0.45) and a multiply to 0.35 at its edges, the CA-74's), not its cap, whose spun sheen is
+  turned to lie along the line to the lamp; the face takes the lamp's light, up to 1.26 of
+  itself up and to the left and 0.84 at the far corner, so its texture catches a sheen; the print
+  is worn into the face, its texture showing through it; each rocker's paddle is lit by its
+  shape (the pressed half low, the raised half rising in a hump that rounds over at its end, its
+  sides rounded) and casts its own shadow, longer from the raised end; and, asked "do you think
+  we should make the pitch and mod wheel more realistic too?", the wheels are white ridged
+  cylinders lit by the lamp, their ridges and PITCH's line or MOD.'s dot rolling as they turn.
 - **Cost (release build, the Linux reference machine, another agent's benchmark on four of its
-  cores):** the background once a scale, 156 ms at 0.4 of the drawing (the pictures decoded the
-  first time) and 385 ms at 1; a knob turned, 0.7 ms at 0.4 and 3.6 ms at 1.
+  cores):** the background once a scale, 182 ms at 0.4 of the drawing (the pictures decoded the
+  first time) and 508 ms at 1; a knob turned, 1.5 ms at 0.4 and 4.8 ms at 1.

@@ -5,13 +5,13 @@
 use std::fmt;
 
 use resvg::tiny_skia::{
-    BlendMode, Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint,
-    Rect, SpreadMode, Transform,
+    Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint, Rect,
+    SpreadMode, Transform,
 };
 use resvg::usvg;
 
 use crate::art::{self, H, Layer, Layout, W};
-use crate::controls::{CONTROLS, Kind, feedback_silent};
+use crate::controls::{CONTROLS, Kind, Mark, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
 use crate::skin::{Part, Pictures, Skin};
@@ -267,9 +267,10 @@ impl Renderer {
             }
         };
         svg_over(bg, &art::worn_overlay());
-        // The print, a shade worn.
+        // The print, worn into the face: its texture showing through it a little.
         if let Some(mut print) = Pixmap::new(w, h) {
             svg_over(&mut print, &art::printed(&self.layout));
+            worn_into(&mut print, bg);
             bg.draw_pixmap(
                 0,
                 0,
@@ -306,21 +307,8 @@ impl Renderer {
                 (false, false),
             );
         }
-        // The lamp's falloff, multiplied in.
-        if let Some(mut light) = Pixmap::new(w, h) {
-            svg_over(&mut light, &art::falloff());
-            bg.draw_pixmap(
-                0,
-                0,
-                light.as_ref(),
-                &PixmapPaint {
-                    blend_mode: BlendMode::Multiply,
-                    ..PixmapPaint::default()
-                },
-                Transform::identity(),
-                None,
-            );
-        }
+        // The lamp's light over all of it.
+        lamp(bg, s);
         self.frame = self.background.clone();
     }
 
@@ -435,6 +423,12 @@ impl Renderer {
                 );
             }
         }
+        if let Some(wheel) = layer.wheel {
+            draw_wheel(&mut pixmap, (ox * s - x0, oy * s - y0), s, wheel);
+        }
+        if let Some(paddle) = layer.paddle {
+            light_paddle(&mut pixmap, (ox * s - x0, oy * s - y0), s, paddle);
+        }
         if !layer.over.is_empty() {
             let over = format!(
                 "<g transform='translate({} {})'>{}</g>",
@@ -485,6 +479,228 @@ impl Renderer {
             }
         }
         changed
+    }
+}
+
+/// The panel's lamp, up and to the left, over the whole drawing at `s` pixels a unit: brighter
+/// near it (the face's sheen, catching the specks of its texture), falling off towards the far
+/// corner. Each pixel's light multiplied (`LAMP`: at the lamp, far from it, and how far its
+/// light reaches across and down, as shares of the drawing).
+fn lamp(frame: &mut Pixmap, s: f64) {
+    const LAMP: (f64, f64, f64, f64) = (1.26, 0.84, 0.55, 0.9);
+    let (w, h) = (frame.width() as usize, frame.height() as usize);
+    let across: Vec<f64> = (0..w)
+        .map(|x| {
+            let u = (x as f64 + 0.5) / s / art::W;
+            (-((u - 0.2) / LAMP.2).powi(2)).exp()
+        })
+        .collect();
+    let down: Vec<f64> = (0..h)
+        .map(|y| {
+            let v = (y as f64 + 0.5) / s / art::H;
+            (-(v / LAMP.3).powi(2)).exp()
+        })
+        .collect();
+    let data = frame.data_mut();
+    for (y, d) in down.iter().enumerate() {
+        for (x, a) in across.iter().enumerate() {
+            let k = LAMP.1 + (LAMP.0 - LAMP.1) * a * d;
+            let i = 4 * (y * w + x);
+            for c in &mut data[i..i + 3] {
+                *c = (f64::from(*c) * k).round().min(255.0) as u8;
+            }
+        }
+    }
+}
+
+/// The print as worn into the face under it: each pixel of ink a little darker where the face's
+/// texture is darker than its mean, so the texture shows through it, and faded a shade.
+fn worn_into(ink: &mut Pixmap, face: &Pixmap) {
+    let level =
+        |r: u8, g: u8, b: u8| 0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b);
+    let (sum, n) = face
+        .pixels()
+        .iter()
+        .step_by(97)
+        .fold((0.0, 0.0), |(s, n), p| {
+            (s + level(p.red(), p.green(), p.blue()), n + 1.0)
+        });
+    let mean = (sum / n).max(1.0);
+    for (p, f) in ink.pixels_mut().iter_mut().zip(face.pixels()) {
+        if p.alpha() == 0 {
+            continue;
+        }
+        let ratio = level(f.red(), f.green(), f.blue()) / mean;
+        let k = (0.9 + 0.22 * (ratio - 1.0)).clamp(0.74, 1.0);
+        let at = |v: u8| (f64::from(v) * k).round() as u8;
+        if let Some(c) = resvg::tiny_skia::PremultipliedColorU8::from_rgba(
+            at(p.red()),
+            at(p.green()),
+            at(p.blue()),
+            p.alpha(),
+        ) {
+            *p = c;
+        }
+    }
+}
+
+/// The panel's lamp (above, and up and to the left of, the panel) as a unit vector, x right, y
+/// down the panel, z out of it; and the half way between it and the eye.
+fn lamp_vectors() -> ((f64, f64, f64), (f64, f64, f64)) {
+    let unit = |(x, y, z): (f64, f64, f64)| {
+        let n = (x * x + y * y + z * z).sqrt();
+        (x / n, y / n, z / n)
+    };
+    let light = unit((-0.45, -0.55, 0.7));
+    (light, unit((light.0, light.1, light.2 + 1.0)))
+}
+
+/// A rocker's paddle lit by its shape, `at` its middle (pixels) at `s` pixels a unit: the
+/// pressed half low and flat; the raised half rising from the pivot in a smooth hump that rounds
+/// over at its end; its long sides rounded. Each pixel of its picture (lit evenly) is made as
+/// much lighter or darker as its surface faces the lamp more or less than a flat one does, with
+/// a little of the lamp's gloss on it.
+fn light_paddle(frame: &mut Pixmap, at: (f64, f64), s: f64, p: art::PaddleArt) {
+    let (light, half) = lamp_vectors();
+    let flat = 0.3 + 0.7 * light.2;
+    let (hl, hw) = (p.pw / 2.0, p.ph / 2.0);
+    // The hump's height, and where it crests along the raised half (a share of it).
+    let (rise, crest) = (0.32 * p.ph, 0.78);
+    let (sin, cos) = p.deg.to_radians().sin_cos();
+    let flip = if p.on { -1.0 } else { 1.0 };
+    let reach = ((hl + 2.0).hypot(hw + 2.0) * s).ceil();
+    let (fw, fh) = (frame.width() as i32, frame.height() as i32);
+    let x0 = ((at.0 - reach) as i32).max(0);
+    let x1 = ((at.0 + reach) as i32 + 1).min(fw);
+    let y0 = ((at.1 - reach) as i32).max(0);
+    let y1 = ((at.1 + reach) as i32 + 1).min(fh);
+    let data = frame.data_mut();
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let (dx, dy) = (
+                (f64::from(px) + 0.5 - at.0) / s,
+                (f64::from(py) + 0.5 - at.1) / s,
+            );
+            // Into the paddle's own frame: along it (raised half positive) and across.
+            let u = flip * (dx * cos + dy * sin);
+            let v = -dx * sin + dy * cos;
+            if u.abs() > hl - 1.0 || v.abs() > hw - 1.0 {
+                continue;
+            }
+            // The slope along it: up the hump to its crest, then rounding over at the end.
+            let t = u / hl;
+            let du = if t <= 0.0 {
+                0.04
+            } else if t < crest {
+                let x = t / crest;
+                rise * 6.0 * x * (1.0 - x) / (crest * hl)
+            } else {
+                let x = (t - crest) / (1.0 - crest);
+                -rise * 0.8 * x * x * 3.0 / ((1.0 - crest) * hl)
+            };
+            // The long sides rounded over their last few units.
+            let e = ((v.abs() - (hw - 5.0)) / 5.0).clamp(0.0, 1.0);
+            let dv = v.signum() * e * e * 1.4;
+            // The surface's normal in the paddle's frame, then on the panel.
+            let (nu, nv) = (-du, -dv);
+            let m = (nu * nu + nv * nv + 1.0).sqrt();
+            let (nu, nv, nz) = (nu / m, nv / m, 1.0 / m);
+            let nu = nu * flip;
+            let (nx, ny) = (nu * cos - nv * sin, nu * sin + nv * cos);
+            let diffuse = (nx * light.0 + ny * light.1 + nz * light.2).max(0.0);
+            let k = (0.3 + 0.7 * diffuse) / flat;
+            let gloss = (nx * half.0 + ny * half.1 + nz * half.2).max(0.0).powi(28) * 60.0;
+            let i = 4 * (py * fw + px) as usize;
+            let a = f64::from(data[i + 3]);
+            if a == 0.0 {
+                continue;
+            }
+            for c in 0..3 {
+                let v = f64::from(data[i + c]) * k + gloss * a / 255.0;
+                data[i + c] = v.round().clamp(0.0, a) as u8;
+            }
+        }
+    }
+}
+
+/// A wheel seen from above in its slot, `at` its middle (pixels) at `s` pixels a unit: white
+/// ridged thermoset, a cylinder turning about its axis across the slot, lit by the panel's lamp
+/// (above, and up and to the left of, the panel): its ridges every 8 degrees rolling with it,
+/// each lit on its flank towards the lamp; its rim rounded over at its sides; its ends going
+/// down into the slot's shade; PITCH's line or MOD.'s dot rolling with it.
+fn draw_wheel(frame: &mut Pixmap, at: (f64, f64), s: f64, wheel: art::WheelArt) {
+    let k = art::WHEEL_SCALE;
+    let (hw, hh, r, corner) = (24.0 * k, 67.0 * k, 84.0 * k, 10.0 * k);
+    let unit = |(x, y, z): (f64, f64, f64)| {
+        let n = (x * x + y * y + z * z).sqrt();
+        (x / n, y / n, z / n)
+    };
+    let (light, half) = lamp_vectors();
+    let albedo = [0.80, 0.765, 0.67];
+    let (fw, fh) = (frame.width() as i32, frame.height() as i32);
+    let x0 = ((at.0 - hw * s).floor() as i32).max(0);
+    let x1 = ((at.0 + hw * s).ceil() as i32).min(fw);
+    let y0 = ((at.1 - hh * s).floor() as i32).max(0);
+    let y1 = ((at.1 + hh * s).ceil() as i32).min(fh);
+    let data = frame.data_mut();
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let (dx, dy) = (
+                (f64::from(px) + 0.5 - at.0) / s,
+                (f64::from(py) + 0.5 - at.1) / s,
+            );
+            // Inside the wheel's rounded window, smoothed over a pixel.
+            let (qx, qy) = (
+                (dx.abs() - (hw - corner)).max(0.0),
+                (dy.abs() - (hh - corner)).max(0.0),
+            );
+            let cover = ((corner - qx.hypot(qy)) * s + 0.5).clamp(0.0, 1.0);
+            if cover <= 0.0 {
+                continue;
+            }
+            // Where on the cylinder: the angle from its top, towards the panel's foot.
+            let th = (dy / r).clamp(-0.999, 0.999).asin();
+            let deg = th.to_degrees();
+            // A ridge's flanks tilt the surface along the wheel.
+            let mut ph = ((deg + wheel.turn) / 8.0).rem_euclid(1.0);
+            if ph > 0.5 {
+                ph -= 1.0;
+            }
+            let tilt = if ph.abs() < 0.18 {
+                -0.55 * (std::f64::consts::PI * ph / 0.18).sin()
+            } else {
+                0.0
+            };
+            let a = th + tilt;
+            let side = (dx / hw).signum() * (dx.abs() / hw).powi(4) * 0.75;
+            let n = unit((side, a.sin(), a.cos() * (1.0 - side * side).max(0.0).sqrt()));
+            let diffuse = (n.0 * light.0 + n.1 * light.1 + n.2 * light.2).max(0.0);
+            let spec = (n.0 * half.0 + n.1 * half.1 + n.2 * half.2)
+                .max(0.0)
+                .powi(36)
+                * 0.3;
+            // Its ends go down into the slot's shade.
+            let t = ((dy.abs() / hh - 0.55) / 0.45).clamp(0.0, 1.0);
+            let shade = 1.0 - 0.6 * t * t * (3.0 - 2.0 * t);
+            let marked = match wheel.mark {
+                Mark::Line => (deg + wheel.turn).abs() < 1.3,
+                Mark::Dot => {
+                    let at = (7.0 - wheel.turn).to_radians();
+                    at.cos() > 0.0 && dx.hypot(dy - r * at.sin()) < 5.0 * k
+                }
+            };
+            let i = 4 * (py * fw + px) as usize;
+            for (c, alb) in albedo.iter().enumerate() {
+                let lit = if marked {
+                    0.012
+                } else {
+                    alb * (0.2 + 0.85 * diffuse) * shade + spec * shade
+                };
+                let v = 255.0 * lit.clamp(0.0, 1.0).powf(1.0 / 2.2);
+                data[i + c] = (v * cover + f64::from(data[i + c]) * (1.0 - cover)).round() as u8;
+            }
+            data[i + 3] = (255.0 * cover + f64::from(data[i + 3]) * (1.0 - cover)).round() as u8;
+        }
     }
 }
 
@@ -623,7 +839,8 @@ mod tests {
             assert!(worn.render(&turned), "{param} not drawn again");
             let c = &CONTROLS[i];
             let (cx, cy) = c.centre();
-            let k = art::bounds(&c.kind);
+            // (The worn layer's extent: a rocker's reaches its own shadow.)
+            let k = art::control_worn(c, v, 0.0).bounds;
             // (Its layer is whole pixels: two past its extent.)
             let m = 2.0 / scale;
             let (inside, outside) = differ(
