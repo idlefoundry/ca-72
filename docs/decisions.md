@@ -2259,10 +2259,13 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   AMOUNT OF CONTOUR's law, and its ring decays faster, from EMPHASIS's: positions kept, as
   for every other preset); Bass 9.68, Lead 8.23, Three Saw Slab 8.23, Pulse Strut 8.88,
   Undertow Growl 8.44, Slow Horn Swell 8.1, Wooden Mallet 9.91, Noise Crash 9.87, Warped
-  Pad 7.62: every preset VOLUME can reach within 0.05 dB of 0.1.3. At 10 and quieter:
-  Upright Pluck -3.12 dB, Breath Flute -2.15, Stacked Fifths -1.91, Ladder Kick -1.79,
-  Ringing Saw Line -1.71, Open Hat -1.28, Shoreline Wash -0.90, Noise Snare -0.54; Pink
-  Riser +1.84, still under -18 LUFS.
+  Pad 7.62. And after the contours' peak (calibration change 19; the two pitched presets
+  unmoved: Ladder Kick's boom -0.7 cents from 0.1.3's): Bass 9.7, Three Saw Slab 8.29,
+  Pulse Strut 8.99, Undertow Growl 8.48, Noise Crash 9.89: every preset VOLUME can reach
+  within 0.09 dB of 0.1.3. At 10 and quieter: Upright Pluck -3.31 dB, Breath Flute -2.15,
+  Stacked Fifths -2.09, Ladder Kick -2.06, Ringing Saw Line -1.55, Open Hat -1.50,
+  Shoreline Wash -0.90, Noise Snare -0.87, Closed Hat -0.11; Pink Riser +1.84, still under
+  -18 LUFS.
 - **MIDI's modulation wheel follows the reference's curve** (agent decision, 2026-10-08,
   under the owner's decision to match the reference): control change 1 puts the
   MODULATION wheel where the reference's resistance is for it (`modulation::midi_wheel`);
