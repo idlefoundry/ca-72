@@ -365,7 +365,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     service manual's checks still pass (5.37: 13.5 semitones under oscillator 3's square,
     13 to 23; 5.19: the corner 16.5 times, at least 5.45).
 
-## Still differs (2026-10-08, after the knob session's fits)
+## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
   needs 0.2 to 0.7 dB more drive than the reference for the same compression, from EXT and
@@ -388,10 +388,12 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
   CA-72 ends 22 cents under the reference (0.9986 against 1.0030 octave a volt at the ES-3's
   10.39 V), against 80 cents before.
-- **Not in this round:** KEYBOARD CONTROL's tracking (the reference's: 0.328 octave an
-  octave with 1, 0.970 with both; not yet set beside the CA-72's), oscillators 2 and 3's
-  FREQUENCY spans,
-  SUSTAIN's law, and VOLUME on oscillators 2 and 3 and the noise (taken as oscillator 1's).
+- **VOLUME on oscillator 2 and the noise** (session J, measured at the MIX jack and on the
+  CA-72's mixer bus; no change): at 8 and 4, oscillator 2 -2.10 and -9.42 dB against the
+  reference's -2.29 and -9.55 (oscillator 3's as the reference's oscillator 2's within 0.2
+  dB), and the noise, through its 11K, -3.60 and -11.93 against -3.94 and -11.98.
+- **Not in this round:** oscillators 2 and 3's FREQUENCY spans, SUSTAIN's law, and the
+  reference's MOD DEPTH knob on its own (change 18).
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R-CAL),
   after CUTOFF's law, the contours' 10 s mark and the keyboard's 0 V on C2 too. Nine already
   at MAIN OUTPUT VOLUME 10 are quieter than in 0.1.3 and VOLUME cannot raise them: Upright
