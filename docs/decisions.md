@@ -2340,8 +2340,11 @@ FILTER MODE at the column's foot).
   CA-72's Norton current; at 6.8 Hz HI's lows came back 3 dB short at 30 Hz.)
 - **In real time** HI is taken inside the filter's oversampled step (`Vcf::high_pass`), so
   that the two branches line up through the resamplers; the coupling's state runs in LO
-  too, as its capacitor would. A few operations a step. LO is the output as before: every
-  factory preset renders the same to the bit (`preset_render`, against d07d1d0).
+  too, as its capacitor would. A few operations a step: `preset_cost` (ten voices, one
+  thread, d07d1d0 and this branch alternated three times under the timing lock, the least
+  of each) moved by -1.9 to +1.7 %, median +0.3 %, inside its run-to-run spread (the
+  machine's load 4 to 7). LO is the output as before: every factory preset renders the
+  same to the bit (`preset_render`, against d07d1d0).
 - **Against ngspice** (`vcf_realtime::filter_mode_matches_the_circuit`, the bench with the
   voice's trims and the rest of the mixer on its bus, `MIXER_REST`): HI's error measured
   against the larger branch (HI's error is LO's, the direct branch is exact), budget -26 dB
