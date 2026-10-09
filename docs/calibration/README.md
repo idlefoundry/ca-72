@@ -673,11 +673,11 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   semitone short of the reference's; the 0 mark at the factory tuning's unison, where the
   reference's sits wherever its knob is set by eye (7 to 26 cents flat in session N).
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R42),
-  after sessions J's, L's, M's, N's and O's fits too. Eight at MAIN OUTPUT VOLUME 10 are
-  quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -5.16 dB, Breath Flute
-  -3.41, Ladder Kick -1.95, Stacked Fifths -1.88, Open Hat -1.16, Ringing Saw Line -1.12,
-  Shoreline Wash -0.23, Noise Snare -0.16 (mostly EMPHASIS's and the contours' laws, and the
-  contours' fall after a fast attack). Presets keep their
+  after sessions J's, L's, M's, N's and O's fits too. Seven at MAIN OUTPUT VOLUME 10 are
+  quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -5.05 dB, Breath Flute
+  -3.30, Ladder Kick -1.84, Stacked Fifths -1.81, Ringing Saw Line -1.08, Open Hat -1.05,
+  Shoreline Wash -0.11 (mostly EMPHASIS's and the contours' laws, and the contours' fall
+  after a fast attack). Presets keep their
   knobs' positions where a law changed: those between a law's ends sound as the reference
   would at those marks (Ladder Kick's sweep, for one, starts about 2 semitones lower).
 
