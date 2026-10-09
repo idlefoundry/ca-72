@@ -166,7 +166,9 @@ fn reset_controllers_returns_the_wheels() {
     e.event(Event::Modulation(0.5));
     let (bend, modulation) = e.wheels();
     assert!((bend - 2.0 / ca72::modulation::PITCH_WHEEL_SEMITONES).abs() < 1e-9);
-    assert_eq!(modulation, 0.5);
+    // The modulation wheel where the hardware reference's MIDI curve puts it.
+    assert_eq!(modulation, ca72::modulation::midi_wheel(0.5));
+    assert!(modulation > 0.0 && modulation < 0.5);
     e.event(Event::ResetControllers);
     assert_eq!(e.wheels(), (0.0, 0.0));
 }

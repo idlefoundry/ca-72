@@ -28,12 +28,70 @@ pub fn pitch_wheel_volts(wheel: f64) -> f64 {
 /// semitones end to end). `tests/voice.rs` measures it and requires this figure.
 pub const PITCH_WHEEL_SEMITONES: f64 = 8.07;
 
-/// The MODULATION wheel: R1402, 50K audio used as a rheostat from the line to GND, 90
-/// degrees of rotation from its counterclockwise stop, "1.2K WHEN FULLY FORWARD" (Figure
+/// The MODULATION wheel as drawn: R1402, 50K audio used as a rheostat from the line to GND,
+/// 90 degrees of rotation from its counterclockwise stop, "1.2K WHEN FULLY FORWARD" (Figure
 /// 9-12): the audio law's first third scaled to 1.2K (assumptions A22), ohm.
-pub fn mod_wheel_r(wheel: f64) -> f64 {
+pub fn mod_wheel_r_drawn(wheel: f64) -> f64 {
+    MOD_WHEEL_FULL_DRAWN * wheel_shape(wheel)
+}
+
+/// The drawing's wheel fully forward, and the hardware reference's: the resistance at which
+/// oscillator 1 swings 11.9 semitones peak to peak under oscillator 3's triangle (on LO,
+/// MODULATION MIX at oscillator 3), as the reference's does with its MOD DEPTH at 10 and
+/// MIDI's modulation wheel at 127 (docs/calibration, session J), ohm.
+pub const MOD_WHEEL_FULL_DRAWN: f64 = 1.2e3;
+pub const MOD_WHEEL_FULL: f64 = 685.0;
+
+/// The wheel's law as a share of its resistance fully forward: the generic audio taper's
+/// first third (A22).
+fn wheel_shape(wheel: f64) -> f64 {
     let taper = |p: f64| (crate::ulp::pow(81.0, p) - 1.0) / 80.0;
-    1.2e3 * taper(wheel.clamp(0.0, 1.0) / 3.0) / taper(1.0 / 3.0)
+    taper(wheel.clamp(0.0, 1.0) / 3.0) / taper(1.0 / 3.0)
+}
+
+/// The MODULATION wheel as the voice has it: the drawing's law to the hardware reference's
+/// depth fully forward ([`MOD_WHEEL_FULL`]), ohm.
+pub fn mod_wheel_r(wheel: f64) -> f64 {
+    MOD_WHEEL_FULL * wheel_shape(wheel)
+}
+
+/// The resistance MIDI's modulation wheel puts on the line at 32, 64, 96 and 127 on the
+/// hardware reference (its MOD DEPTH at 10: oscillator 1 swinging 1.29, 2.62, 6.05 and 11.9
+/// semitones; docs/calibration, session J): its MIDI implementation's curve ("soft" by
+/// default, its manual), not the wheel's law, ohm.
+const MIDI_WHEEL_R: [(f64, f64); 4] = [
+    (32.0 / 127.0, 46.3),
+    (64.0 / 127.0, 97.8),
+    (96.0 / 127.0, 261.0),
+    (1.0, MOD_WHEEL_FULL),
+];
+
+/// Where MIDI's modulation wheel (0..1, control change 1's value over 127) puts the
+/// MODULATION wheel: the position whose resistance is the reference's for it, straight in
+/// the resistance's logarithm between [`MIDI_WHEEL_R`] (below 32 the wheel's own law, scaled
+/// to meet it).
+pub fn midi_wheel(cc: f64) -> f64 {
+    let cc = cc.clamp(0.0, 1.0);
+    if cc == 1.0 {
+        return 1.0;
+    }
+    let (c0, r0) = MIDI_WHEEL_R[0];
+    let r = if cc <= c0 {
+        r0 * wheel_shape(cc) / wheel_shape(c0)
+    } else {
+        let mut r = MOD_WHEEL_FULL;
+        for k in MIDI_WHEEL_R.windows(2) {
+            let ((ca, ra), (cb, rb)) = (k[0], k[1]);
+            if cc <= cb {
+                r = ra * crate::ulp::pow(rb / ra, (cc - ca) / (cb - ca));
+                break;
+            }
+        }
+        r
+    };
+    // The wheel's law inverted: its first third of the audio taper.
+    let share = (r / MOD_WHEEL_FULL).clamp(0.0, 1.0) * (crate::ulp::pow(81.0, 1.0 / 3.0) - 1.0);
+    (3.0 * crate::ulp::log(1.0 + share) / crate::ulp::log(81.0)).clamp(0.0, 1.0)
 }
 
 /// The amplifier's DC transfer at one MODULATION MIX position: its output (before R57) is

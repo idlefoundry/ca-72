@@ -345,6 +345,26 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     voice's law runs through them (below 2.5 the generic taper's shape scaled to 162K). Now
     58 and 23, 29 and 13, 3.9 and 2.05, 1.65 and 0.86.
 
+18. **The MODULATION wheel: 685 ohm fully forward, and MIDI's curve** (`modulation::
+    mod_wheel_r`, `modulation::midi_wheel`, 2026-10-08). Session J held A3 on oscillator 1
+    under oscillator 3's triangle (LO, MODULATION MIX at oscillator 3, OSCILLATOR MODULATION
+    on, MOD DEPTH 10) and sent the modulation wheel at 0, 32, 64, 96 and 127: the
+    reference's vibrato swung 0, 1.29, 2.62, 6.05 and 11.9 semitones peak to peak (98th less
+    2nd percentile over each 1.65 s). The CA-72, its MIDI wheel moving its MODULATION wheel
+    on the drawing's law (A22, 1.2K fully forward): 4.1, 8.5, 12.9 and 15.8. Rendering at
+    chosen resistances, the reference's swings are 46.3, 97.8, 261 and 685 ohm (the
+    drawing's at those positions 161, 394, 731 and 1.2K). Two things: fully forward the
+    reference's wheel is 685 ohm, a component (`MOD_WHEEL_FULL`; the wheel keeps the
+    drawing's law, A22, to it, as MOD DEPTH's own law was not measured); and its MIDI
+    wheel's curve, which its manual makes a MIDI setting ("soft" by default), goes where it
+    has it: in the plug-in's handling of control change 1, which puts the wheel where the
+    reference's resistance is (straight in its logarithm between the four). Over MIDI now
+    1.28, 2.59, 6.01 and 12.3 (the last within the measure's spread between 1.65 s windows,
+    1.16 to 1.23 held). Presets keep their wheel positions, at 0.57 of the drawing's
+    resistance (Breath Flute 0.4: 287 to 164 ohm; Undertow Growl, fully forward, 685). The
+    service manual's checks still pass (5.37: 13.5 semitones under oscillator 3's square,
+    13 to 23; 5.19: the corner 16.5 times, at least 5.45).
+
 ## Still differs (2026-10-08, after the knob session's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -359,6 +379,8 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   than up, the reference 1.76 and 1.81 times (the hold amplifier's downward drive, toward
   -4.4 V through R59/R54); at GLIDE 5 the CA-72's downward slide starts fast and then slows
   where the reference's runs straight.
+- **Oscillator 3 on LO at FREQUENCY 0** (OSC. 3 CONTROL on, A3 held): the reference's
+  vibrato ran at 2.05 Hz, the CA-72's at 1.78.
 - **The contours' peak:** the attack ends at 1.17 [1.18] of the held level on the CA-72 and
   1.22 to 1.23 [1.26 to 1.27] on the reference: the peak divider (R33/R29 [R24/R27]) or CR3's
   [CR6's] threshold. And with DECAY at 0 the release's first half takes 1.9 to 2.2 ms against

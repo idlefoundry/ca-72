@@ -2,6 +2,7 @@
 //! through its measured points, keeps the drawing's law where it was not measured, and
 //! rises over the knob's travel.
 
+use ca72::modulation::{midi_wheel, mod_wheel_r, mod_wheel_r_drawn};
 use ca72::voice::{
     FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, contour_amount_track,
     cutoff_track, glide_pot, glide_pot_drawn, time_pot, time_pot_drawn, volume_track,
@@ -120,5 +121,30 @@ fn glide_follows_the_reference_at_its_marks() {
         let r = glide_pot(k as f64 / 1000.0);
         assert!(r > last || k == 0, "GLIDE {k}/1000: {r}");
         last = r;
+    }
+}
+
+#[test]
+fn the_modulation_wheel_follows_the_reference_over_midi() {
+    // MIDI's wheel puts the panel's where the reference's resistance is.
+    for (cc, r) in [(32.0, 46.3), (64.0, 97.8), (96.0, 261.0), (127.0, 685.0)] {
+        let got = mod_wheel_r(midi_wheel(cc / 127.0));
+        assert!(
+            (got / r - 1.0).abs() < 1e-9,
+            "MIDI's wheel at {cc}: {got} ohm"
+        );
+    }
+    assert_eq!(midi_wheel(0.0), 0.0);
+    assert_eq!(midi_wheel(1.0), 1.0);
+    // The panel's wheel: the drawing's law to the reference's depth fully forward.
+    for k in 0..=100 {
+        let w = k as f64 / 100.0;
+        assert!((mod_wheel_r(w) - mod_wheel_r_drawn(w) * 685.0 / 1.2e3).abs() < 1e-9);
+    }
+    let mut last = -1.0;
+    for k in 0..=1000 {
+        let w = midi_wheel(k as f64 / 1000.0);
+        assert!(w > last || k == 0, "MIDI's wheel at {k}/1000: {w}");
+        last = w;
     }
 }

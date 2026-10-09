@@ -64,8 +64,9 @@ higher and fire sooner. This is a candidate for the owner's comparison.
   sawtooth reaches the mixer inverted against its sawtooth (correlation -1.000).
 
 - `modulation_and_the_wheels_meet_the_service_manual`: with oscillator 3's low square
-  on the MOD bus and the wheel fully forward, oscillator 1 swings 18.0 semitones (5.37: 13
-  to 23); on the filter the corner rises 33.8 times (5.19: at least 5.45); the pitch
+  on the MOD bus and the wheel fully forward (the reference's 685 ohm), oscillator 1 swings
+  13.5 semitones (5.37: 13 to 23); on the filter the corner rises 16.5 times (5.19: at least
+  5.45); the pitch
   wheel's travel is 16.1 semitones (5.35: 13 to 17).
 - `the_noise_sits_under_the_triangle_as_the_factory_set_it`: at the output, both channels
   at VOLUME 4, white noise -6.39 dB and pink -6.02 dB against oscillator 1's triangle

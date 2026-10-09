@@ -2251,6 +2251,13 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   Wooden Mallet -1.04, Noise Snare -0.89; Pink Riser +1.44, still under -18 LUFS.
 - **Owner decision, 2026-10-08:** the keyboard follows the reference's MIDI: 0 V on C2, not
   the original's lowest F (board2.md B2-8; calibration change 11).
+- **MIDI's modulation wheel follows the reference's curve** (agent decision, 2026-10-08,
+  under the owner's decision to match the reference): control change 1 puts the
+  MODULATION wheel where the reference's resistance is for it (`modulation::midi_wheel`);
+  the wheel's own law stays the drawing's, to the reference's 685 ohm fully forward
+  (calibration change 18). The reference's manual makes the curve a MIDI setting, so the
+  measured curve is its MIDI handling's, not its MOD DEPTH pot's; presets keep their wheel
+  positions.
 - **Again after the keyboard's 0 V on C2:** Cruising Whistle -1.403 to -1.765 (its whistle
   within 4 cents of 0.1.3's), Ladder Kick -3.504 to -3.637 (its ring as 0.1.3's); Bass 9.71,
   Elastic Octaves 5.48, Pulse Strut 9.16, Undertow Growl 8.71, Hollow Glider 6.16, Slow Horn
