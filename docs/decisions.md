@@ -2251,6 +2251,18 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   Wooden Mallet -1.04, Noise Snare -0.89; Pink Riser +1.44, still under -18 LUFS.
 - **Owner decision, 2026-10-08:** the keyboard follows the reference's MIDI: 0 V on C2, not
   the original's lowest F (board2.md B2-8; calibration change 11).
+- **Again after session J's fits** (KEYBOARD CONTROL's R53 and R54, the contours' laws,
+  AMOUNT OF CONTOUR, EMPHASIS, GLIDE, the MODULATION wheel and the contours' first decay
+  sample): Cruising Whistle -1.765 to -1.693 (its whistle at C4, G4 and E4 +18, -23 and +5
+  cents from 0.1.3's, their mean 0), Ladder Kick -3.637 to -3.615 (its boom, 50 to 120 ms,
+  within 0.2 cents of 0.1.3's on average; its sweep starts about 2 semitones lower, from
+  AMOUNT OF CONTOUR's law, and its ring decays faster, from EMPHASIS's: positions kept, as
+  for every other preset); Bass 9.68, Lead 8.23, Three Saw Slab 8.23, Pulse Strut 8.88,
+  Undertow Growl 8.44, Slow Horn Swell 8.1, Wooden Mallet 9.91, Noise Crash 9.87, Warped
+  Pad 7.62: every preset VOLUME can reach within 0.05 dB of 0.1.3. At 10 and quieter:
+  Upright Pluck -3.12 dB, Breath Flute -2.15, Stacked Fifths -1.91, Ladder Kick -1.79,
+  Ringing Saw Line -1.71, Open Hat -1.28, Shoreline Wash -0.90, Noise Snare -0.54; Pink
+  Riser +1.84, still under -18 LUFS.
 - **MIDI's modulation wheel follows the reference's curve** (agent decision, 2026-10-08,
   under the owner's decision to match the reference): control change 1 puts the
   MODULATION wheel where the reference's resistance is for it (`modulation::midi_wheel`);
