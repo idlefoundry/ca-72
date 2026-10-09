@@ -5,7 +5,8 @@
 use ca72::modulation::{midi_wheel, mod_wheel_r, mod_wheel_r_drawn};
 use ca72::voice::{
     FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, contour_amount_track,
-    cutoff_track, glide_pot, glide_pot_drawn, time_pot, time_pot_drawn, volume_track,
+    cutoff_track, glide_pot, glide_pot_drawn, sustain_track, time_pot, time_pot_drawn,
+    volume_track,
 };
 
 #[test]
@@ -105,6 +106,31 @@ fn contour_amount_follows_the_reference_at_its_marks() {
     for k in 0..=1000 {
         let t = contour_amount_track(k as f64 / 1000.0);
         assert!(t > last || k == 0, "AMOUNT {k}/1000: {t}");
+        last = t;
+    }
+}
+
+#[test]
+fn sustain_follows_the_reference_at_its_marks() {
+    for (p, t) in [
+        (0.2, 0.1611),
+        (0.4, 0.3735),
+        (0.5, 0.4924),
+        (0.6, 0.6185),
+        (0.8, 0.8375),
+    ] {
+        assert!(
+            (sustain_track(p) - t).abs() < 1e-12,
+            "SUSTAIN {p}: {}",
+            sustain_track(p)
+        );
+    }
+    assert_eq!(sustain_track(0.0), 0.0);
+    assert_eq!(sustain_track(1.0), 1.0);
+    let mut last = -1.0;
+    for k in 0..=1000 {
+        let t = sustain_track(k as f64 / 1000.0);
+        assert!(t > last || k == 0, "SUSTAIN {k}/1000: {t}");
         last = t;
     }
 }

@@ -250,6 +250,26 @@ pub fn contour_amount_track(amount: f64) -> f64 {
     track(&CONTOUR_AMOUNT_TRACK, amount)
 }
 
+/// The contours' SUSTAIN pots (R18 and R19, 5K linear across +10 V) as the hardware
+/// reference's knobs set their wipers: the fraction of the track at 2, 4, 5, 6 and 8 at which
+/// each contour holds the reference's level (sessions N and F; docs/calibration), the two
+/// contours' fractions averaged (they part by 0.015 at most). A linear track's are 0.2, 0.4,
+/// 0.5, 0.6 and 0.8; the ends hold where the reference's do.
+const SUSTAIN_TRACK: [(f64, f64); 7] = [
+    (0.0, 0.0),
+    (0.2, 0.1611),
+    (0.4, 0.3735),
+    (0.5, 0.4924),
+    (0.6, 0.6185),
+    (0.8, 0.8375),
+    (1.0, 1.0),
+];
+
+/// A SUSTAIN knob's wiper as a fraction of its track.
+pub fn sustain_track(sustain: f64) -> f64 {
+    track(&SUSTAIN_TRACK, sustain)
+}
+
 /// AMOUNT OF CONTOUR (R12, 5K linear from the filter contour's output to GND, through
 /// [`contour_amount_track`]) and R74 ([`crate::vcf::R74`]) into the control node: the input it
 /// makes with the contour at `env_f` volts.
@@ -1279,7 +1299,7 @@ fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourP
     let k = |c: ContourKnobs, a: &mut Memo<f64>, d: &mut Memo<f64>, la: &Law, ld: &Law| Controls {
         attack: a.get(c.attack, |x| time_pot(x, la)),
         decay: d.get(c.decay, |x| time_pot(x, ld)),
-        sustain: c.sustain,
+        sustain: sustain_track(c.sustain),
     };
     ContourPanel {
         filter: k(p.filter_contour, a0, d0, &FILTER_ATTACK, &FILTER_DECAY),

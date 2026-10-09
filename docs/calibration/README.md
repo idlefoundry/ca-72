@@ -473,6 +473,25 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     Potato, FEEDBACK's loop now runs away (a dark self-oscillation near 58 Hz) from 0.3 of its
     coefficient, High Fidelity's from 0.35; `tests/feedback.rs` compares the modes at 0.25.
 
+26. **SUSTAIN's law** (`voice::sustain_track`, 2026-10-09). Session N held a C3 with both
+    contours' SUSTAIN at 2, 4, 6 and 8 (ATTACK fully anticlockwise, DECAY at the 200 ms mark,
+    the DECAY switches off); session F had taken 0, 5 and 10 with them on. The DECAY switch
+    moves where a contour rests between notes (0.22 V on the reference, 0.24 V on the
+    CA-72), not where it holds, so the held levels compare as they stand at the jacks, less
+    the reference's jack offset (0.15 V on FILT CONT, 0.18 V on LOUD CONT: its contours at
+    rest against the CA-72's). At 0, 5 and 10 the CA-72 held within 0.01, 0.07 and 0.04 V of
+    the reference; at 2 and 4 it held 0.12 to 0.18 V higher, at 8 0.11 V (filter) and 0.22 V
+    (loudness) lower: the reference's knob sets less of its track below the middle and more
+    above, the S of its VOLUME, CUTOFF and AMOUNT OF CONTOUR knobs. The track at 0.1611,
+    0.3735, 0.4924, 0.6185 and 0.8375 for 2, 4, 5, 6 and 8 (the two contours' fractions,
+    within 0.015 of each other, averaged; a linear track's 0.2 to 0.8) gives the loudness
+    contour every mark's held level within 0.03 V and the filter contour 0.04 to 0.06 V over
+    it throughout (the jack offset's own uncertainty: with DECAY off the contours rest 0.17
+    V apart, with it on 0.15). The ngspice bench takes the pot's position, as for the other
+    knobs' laws: the netlist is unchanged. Breath Flute's filter SUSTAIN at 2 ended each note at
+    0.63 V against the reference's 0.43 in its take, now 0.51; its loudness SUSTAIN between 6 and 7
+    held 0.11 V under the reference's, now on it.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -499,7 +518,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   CA-72's mixer bus; no change): at 8 and 4, oscillator 2 -2.10 and -9.42 dB against the
   reference's -2.29 and -9.55 (oscillator 3's as the reference's oscillator 2's within 0.2
   dB), and the noise, through its 11K, -3.60 and -11.93 against -3.94 and -11.98.
-- **Not in this round:** oscillators 2 and 3's FREQUENCY spans and SUSTAIN's law.
+- **Not in this round:** oscillators 2 and 3's FREQUENCY spans (measured in session N).
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R-CAL),
   after sessions J's, L's and M's fits too. Nine already at MAIN OUTPUT VOLUME 10 are
   quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -3.49 dB, Ladder Kick
