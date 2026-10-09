@@ -261,3 +261,9 @@ hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
   from the contour as read before its input was calibrated: 5.9 % low.) The voice, the
   bench's netlist (a parameter of `mm_vcf`, 47K by default) and the converter's test take
   `vcf::R74`; Folkman's procedure keeps 47K (docs/calibration, changes 14 and 20).
+- **B4-HP** (2026-10-09) FILTER MODE, which the original does not have: the hardware
+  reference's switch (decisions.md R-HP). At HI the VCA takes the mixer's output less the
+  filter's in place of the filter's: the bus's Norton current through 23.6K (the filter's
+  own passband at EMPHASIS 0, the voice's trims and the whole mixer on the bus) and a 3 Hz
+  coupling, less the output (`filter-mode.lib`, behavioural; `vcf::MODE_RT`, `MODE_HZ`).
+  At LO the circuit is the drawing's.
