@@ -2811,7 +2811,8 @@ list that drops down over the strip inside the window."
   (the owner, 2026-10-09). Tried and dropped: a rocker's pressed half a shade darker (0.86 of
   its light), a shadowed crease where its raised half begins (0.7 at the pivot, gone 3 units
   up), the raised half's hump higher (0.38 of the paddle's width, was 0.32). The owner: "No, the
-  new thing you just did is worse. Go back." The rockers are as they were before it.
+  new thing you just did is worse. Go back.", and of the pictures compared: "Top left was still
+  the best" (the rockers before it, close up). The rockers are as they were before it.
 - **Cost (release build, the Linux reference machine, another agent's benchmark on four of its
   cores):** the background once a scale, 182 ms at 0.4 of the drawing (the pictures decoded the
   first time) and 508 ms at 1; a knob turned, 1.5 ms at 0.4 and 4.8 ms at 1.
