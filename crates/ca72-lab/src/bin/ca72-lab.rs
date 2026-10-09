@@ -32,6 +32,8 @@ fn main() -> ExitCode {
         Some("waves") => spice().and_then(|s| waves(&s, rest)),
         Some("render") => render(rest),
         Some("play") => play(rest),
+        Some("stim") => stim(rest),
+        Some("filterlaw") => filterlaw(rest),
         Some("perf") => perf(rest),
         Some("hifi") => hifi(rest),
         Some("worst") => worst(rest),
@@ -57,12 +59,13 @@ fn spice() -> Result<Ngspice, String> {
     Ngspice::find().map_err(|e| e.to_string())
 }
 
-/// The trims Folkman's procedure gives in ngspice (`ca72-lab calibrate`, 2026-09-28).
+/// The trims Folkman's procedure gives in ngspice (`ca72-lab calibrate`; 2026-10-08, after
+/// the external control input's 50.5K and the keyboard's 0 V on C2: R11 183.65 before).
 fn calibrated() -> (vco::Trims, f64) {
     (
         vco::Trims {
-            r11: 183.65,
-            a8: 0.13518,
+            r11: 150.33,
+            a8: 0.13516,
             octave_step: 0.29889,
             ..vco::Trims::default()
         },
@@ -353,6 +356,211 @@ fn play(rest: &[String]) -> Res {
         r.built,
         peak * 5.0
     );
+    Ok(())
+}
+
+/// Plays a hardware capture's stimuli into the voice (docs/calibration): a take written by
+/// `scripts/calibration/capture.py` (columns main, mix, loop, then the stimuli ext, cut,
+/// lc_gate, fc_gate, vpo as fractions of the ES-3's full scale). EXT reaches the EXTERNAL
+/// INPUT jack, CUT the FILTER CONTROL jack (R51), VPO the oscillators' control jack, LC
+/// GATE closes EXT. S-TRIG while above half of its high level (`--gate-delay ON,OFF` ms later at
+/// its rise and its fall: the hardware reference's gate input's own delays, for a comparison
+/// by ear); with `--fc-gate` FC GATE closes it too (the reference's filter contour has a gate
+/// of its own, the CA-72's contours one trigger); with `--key N` MIDI note N is held on the
+/// keyboard throughout (the note sent to the reference, for its keyboard's pitch). The output
+/// WAV's channels:
+/// the main output (the voice's scale, 5 V as 1.0), the mixer bus's Norton current (mA),
+/// the filter's output (V), the loudness contour (V), the preamplifier's output (V) and the
+/// filter contour (V).
+fn stim(rest: &[String]) -> Res {
+    use ca72::voice::{INPUT_VOLTS, Jacks, Panel, Voice};
+    let usage = "ca72-lab stim <take.wav> <patch.json> <out.wav> [--volts-fs V] \
+                 [--cut-scale S] [--preroll SECONDS] [--quality MODE] [--no-vpo] \
+                 [--gate-delay ON_MS,OFF_MS] [--fc-gate] [--key MIDI]";
+    let mut volts_fs = 10.0;
+    let mut cut_scale = 1.0;
+    let mut preroll = 2.0;
+    let mut q = Quality::NoCompromises;
+    let mut vpo = true;
+    let mut gate_delay = (0.0, 0.0);
+    let mut fc_gate = false;
+    let mut key: Option<i32> = None;
+    let mut positional = Vec::new();
+    let mut args = rest.iter();
+    let num = |s: Option<&String>| -> Result<f64, String> {
+        s.ok_or(usage)?.parse::<f64>().map_err(|e| format!("{e}"))
+    };
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--volts-fs" => volts_fs = num(args.next())?,
+            "--cut-scale" => cut_scale = num(args.next())?,
+            "--preroll" => preroll = num(args.next())?,
+            "--quality" => q = quality(args.next().ok_or(usage)?)?,
+            "--no-vpo" => vpo = false,
+            "--fc-gate" => fc_gate = true,
+            "--key" => key = Some(num(args.next())? as i32),
+            "--gate-delay" => {
+                let v = args.next().ok_or(usage)?;
+                let (a, b) = v.split_once(',').ok_or(usage)?;
+                gate_delay = (
+                    a.parse::<f64>().map_err(|e| format!("{e}"))?,
+                    b.parse::<f64>().map_err(|e| format!("{e}"))?,
+                );
+            }
+            other if other.starts_with("--") => {
+                return Err(format!("ca72-lab stim: unknown option {other}"));
+            }
+            _ => positional.push(a.clone()),
+        }
+    }
+    let [take, patch, out] = positional.as_slice() else {
+        return Err(usage.into());
+    };
+    let bytes = std::fs::read(take).map_err(|e| format!("{take}: {e}"))?;
+    let (rate, ch) = ca72_analysis::wav::read(&bytes).map_err(|e| format!("{take}: {e}"))?;
+    if rate != 48_000 || ch.len() < 8 {
+        return Err(format!(
+            "{take}: expected 8 channels at 48 kHz, got {} at {rate}",
+            ch.len()
+        ));
+    }
+    let text = std::fs::read_to_string(patch).map_err(|e| format!("{patch}: {e}"))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("{patch}: {e}"))?;
+    let mut panel = Panel::default();
+    for (k, v) in json["panel"].as_object().into_iter().flatten() {
+        set_control(&mut panel, k, v)?;
+    }
+    panel.quality = q;
+    let t0 = std::time::Instant::now();
+    let mut voice = Voice::new(f64::from(rate), panel);
+    voice.set_seed(72);
+    if let Some(k) = key {
+        voice.note(k, true);
+    }
+    let built = t0.elapsed().as_secs_f64();
+    let (ext, cut, vp) = (&ch[3], &ch[4], &ch[7]);
+    let lc: Vec<f32> = if fc_gate {
+        ch[5].iter().zip(&ch[6]).map(|(&a, &b)| a.max(b)).collect()
+    } else {
+        ch[5].clone()
+    };
+    let high = lc.iter().fold(0.0f32, |a, &x| a.max(x));
+    // The gate as S-TRIG sees it: each rise and fall delayed as asked.
+    let (d_on, d_off) = (
+        (gate_delay.0 * 1e-3 * f64::from(rate)).round() as usize,
+        (gate_delay.1 * 1e-3 * f64::from(rate)).round() as usize,
+    );
+    let raw: Vec<bool> = lc.iter().map(|&x| high > 0.0 && x > 0.5 * high).collect();
+    let mut gate = vec![false; raw.len()];
+    let mut k = 0;
+    while k < raw.len() {
+        if !raw[k] {
+            k += 1;
+            continue;
+        }
+        let rise = k;
+        while k < raw.len() && raw[k] {
+            k += 1;
+        }
+        let (a, b) = (rise + d_on, (k + d_off).min(raw.len()));
+        for g in gate.iter_mut().take(b).skip(a) {
+            *g = true;
+        }
+    }
+    let jacks = |i: Option<usize>| -> Jacks {
+        let at = |c: &Vec<f32>| i.map_or(0.0, |i| f64::from(c[i]));
+        Jacks {
+            ext: at(ext) * volts_fs / INPUT_VOLTS,
+            filter: Some(at(cut) * volts_fs * cut_scale),
+            osc: vpo.then(|| at(vp) * volts_fs),
+            s_trig: i.is_some_and(|i| gate[i]),
+            ..Jacks::default()
+        }
+    };
+    let rest_jacks = jacks(None);
+    for _ in 0..(preroll * f64::from(rate)) as usize {
+        voice.tick_jacks(&rest_jacks);
+    }
+    let n = ext.len();
+    let mut data = Vec::with_capacity(n * 6 * 4);
+    let mut peak = 0.0f64;
+    for i in 0..n {
+        let y = voice.tick_jacks(&jacks(Some(i)));
+        let (_, i_bus, v_filter) = voice.probe();
+        let (env_f, env_l) = voice.probe_contours();
+        let pre = voice.ext_probe();
+        peak = peak.max(y.abs());
+        for v in [y, i_bus * 1e3, v_filter, env_l, pre, env_f] {
+            data.extend_from_slice(&(v as f32).to_le_bytes());
+        }
+    }
+    if voice.preamp_failed() > 0 {
+        return Err(format!(
+            "{take}: the preamplifier failed {} solves",
+            voice.preamp_failed()
+        ));
+    }
+    std::fs::write(out, wav_f32(6, rate, &data)).map_err(|e| format!("{out}: {e}"))?;
+    eprintln!(
+        "{out}: {:.1} s in {:.1} s (built in {built:.1} s), peak {peak:.3} ({:.2} V)",
+        n as f64 / f64::from(rate),
+        t0.elapsed().as_secs_f64() - built,
+        peak * 5.0
+    );
+    Ok(())
+}
+
+/// The filter's control law (docs/calibration): for each `cutoff,jack_volts` pair on standard
+/// input (CUTOFF as its track's fraction), the ladder current (A) and the self-oscillation's
+/// frequency at EMPHASIS 10 (Hz), with the voice's trims (`filter_cal::CALIBRATED`) or `--r39
+/// POS --r49 OHMS`; `cutoff,jack,amount,contour_volts` adds AMOUNT OF CONTOUR (its knob,
+/// through the voice's `contour_input`).
+fn filterlaw(rest: &[String]) -> Res {
+    use ca72::filter_cal::{self, CALIBRATED};
+    use std::io::BufRead;
+    let mut trims = CALIBRATED;
+    let mut args = rest.iter();
+    while let Some(a) = args.next() {
+        let v = || -> Result<f64, String> {
+            Err("ca72-lab filterlaw [--r39 POS] [--r49 OHMS] < pairs".into())
+        };
+        match a.as_str() {
+            "--r39" => {
+                trims.r39 = args
+                    .next()
+                    .map_or_else(v, |x| x.parse().map_err(|e| format!("{e}")))?
+            }
+            "--r49" => {
+                trims.r49 = args
+                    .next()
+                    .map_or_else(v, |x| x.parse().map_err(|e| format!("{e}")))?
+            }
+            other => return Err(format!("ca72-lab filterlaw: unknown argument {other}")),
+        }
+    }
+    for line in std::io::stdin().lock().lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        // cutoff (CUTOFF's track, 0..1), jack (V at R51)[, AMOUNT OF CONTOUR (its knob, the
+        // voice's law), the filter contour (V)]
+        let f: Vec<f64> = line
+            .trim()
+            .split(',')
+            .map(|x| x.parse::<f64>().map_err(|e| format!("{e}")))
+            .collect::<Result<_, _>>()?;
+        if f.len() < 2 {
+            continue;
+        }
+        let (cutoff, jack) = (f[0], f[1]);
+        let mut ins = filter_cal::inputs(cutoff, false, false, 0.0);
+        ins[5].v = jack;
+        if f.len() >= 4 {
+            ins[1] = ca72::voice::contour_input(f[2], f[3]);
+        }
+        let i0 = trims.expo().current(&ins, 25.0);
+        let hz = filter_cal::oscillation(48_000.0, &trims, &ins);
+        println!("{cutoff},{jack},{i0:.6e},{hz:.3}");
+    }
     Ok(())
 }
 

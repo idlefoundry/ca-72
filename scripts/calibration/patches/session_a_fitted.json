@@ -1,0 +1,29 @@
+{
+ "about": "Session A's panel as measured on the hardware reference: EXTERNAL INPUT VOLUME at 0.375 (the CA-72's that drives the filter as the reference's 5 does), loudness SUSTAIN 0.60 and DECAY 0.07 (its held level and decay fitted); otherwise home_ext5.json",
+ "panel": {
+  "osc1_on": false,
+  "osc2_on": false,
+  "osc3_on": false,
+  "noise_on": false,
+  "ext_on": true,
+  "ext_volume": 0.375,
+  "cutoff": 1.0,
+  "emphasis": 0.0,
+  "contour_amount": 0.0,
+  "keyboard_control_1": false,
+  "keyboard_control_2": false,
+  "filter_mod": false,
+  "osc_mod": false,
+  "mod_wheel": 0.0,
+  "glide": 0.0,
+  "glide_on": false,
+  "filter_attack": 0.0,
+  "filter_sustain": 1.0,
+  "loudness_attack": 0.0,
+  "loudness_sustain": 0.6,
+  "decay": false,
+  "a440": false,
+  "osc3_control": true,
+  "loudness_decay": 0.07
+ }
+}

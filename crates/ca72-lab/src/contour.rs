@@ -37,6 +37,9 @@ pub struct ContourBench {
     /// The left hand controller's DECAY switch: on, the release decays at the DECAY
     /// time; off, R1401 1.5K dumps the capacitors.
     pub decay_on: bool,
+    /// Each capacitor through an R1401 of its own (`ca72::contour::ContourCircuit::dump_each`),
+    /// or both through the one.
+    pub dump_each: bool,
     /// The key goes down at `key_down` and up at `key_up`, s.
     pub key_down: f64,
     pub key_up: f64,
@@ -50,6 +53,7 @@ impl Default for ContourBench {
             filter: ContourControls::default(),
             loudness: ContourControls::default(),
             decay_on: true,
+            dump_each: ca72::contour::ContourCircuit::default().dump_each,
             key_down: 0.01,
             key_up: 0.4,
             amount: 5e3,
@@ -71,6 +75,9 @@ pub fn netlist(b: &ContourBench, solver: Solver) -> String {
     let dump = if b.decay_on {
         // DECAY on: the dump line open.
         "rdumpf fdump 0 1e12\nrdumpl ldump 0 1e12\n".to_string()
+    } else if b.dump_each {
+        // DECAY off: each dump line through a 1.5K of its own to V-trig.
+        "r1401f fdump vtrig 1.5k\nr1401l ldump vtrig 1.5k\n".to_string()
     } else {
         // DECAY off: both dump lines through R1401 1.5K to V-trig.
         "r1401 dump vtrig 1.5k\nrdf fdump dump 1m\nrdl ldump dump 1m\n".to_string()

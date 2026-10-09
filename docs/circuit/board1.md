@@ -113,7 +113,7 @@ Figure 9-3 and the front panel's wiring (Figure 9-17), transcribed in
    51.1K carries its change into IC6's summing junction.
 4. **The modulation and external buses' pull-ups.** R163 and R156 33K run from +10 V to the
    MOD and EXT buses: against the three oscillators' 51.1K inputs to -5 V they hold an
-   undriven bus at +0.1 V.
+   undriven bus at +0.1 V (the external bus +0.067 V with the model's 50.5K, B1-11).
 5. **Oscillator 3's reverse sawtooth, Q37.** A shunt-feedback inverter on oscillator 3's
    sawtooth output (13B) through R171 33K: R175 68K from collector to base, R182 390K to
    -10 V, emitter at GND; the collector (R165 2.2K from +10 V through R164 330, decoupled
@@ -133,7 +133,7 @@ Checked against the service manual in ngspice (`vco_osc23.rs`):
 | Oscillator 2's FREQUENCY, its travel | 14-17 semitones (5.35) | 16.70 semitones |
 | Oscillator 3's, OSC. 3 CONTROL on | 14-17 semitones | 16.76 semitones |
 | OSC. 3 CONTROL off | the keyboard has no effect; a wider range (2.18; the later board's 2.3: +-3 octaves) | 0.000 semitones from A2 to A3; 68.8 semitones of travel |
-| CONTROL off, LO, FREQUENCY at minimum | a click every 2 to 5 s (5.36) | 0.205 Hz, 4.9 s: with LO five octaves below 32' (A3; four would give 2.4 s, six 9.7 s) |
+| CONTROL off, LO, FREQUENCY at minimum | a click every 2 to 5 s (5.36) | 0.205 Hz, 4.9 s: with LO five octaves below 32' (A3 as it was; four would give 2.4 s, six 9.7 s). The voice, LO 4.74 octaves below 32' as the hardware reference has it (docs/calibration) and R162 2.96K: 4.78 s |
 | LO's top against 32''s bottom (CONTROL off) | they overlap (5.36) | 10.95 Hz against 6.58 Hz |
 
 The real-time models (`tuning.rs`: `osc_drive`, `osc3_control`; `revsaw.rs`), each
@@ -183,6 +183,14 @@ off by more than this, untuned.
 - **B1-10** Figure 9-17 (the interconnecting wiring) is the later board's (octave buffer,
   1K string). The oscillators' FREQUENCY pots and SW2 are taken from it; which end of each
   pot is clockwise is not drawn and follows from the pitch rising clockwise.
+- **B1-12** (2026-10-08) R162 is 3.01K in Modification 8.2 (B1-9); the model's is 2.96K, which
+  puts oscillator 3 with OSC. 3 CONTROL off and FREQUENCY at its tuned centre where the hardware
+  reference's sits (201 Hz at 8' against its 198.8; 3.01K gave 232.7). With the control on the
+  factory tuning absorbs R162 (`tuning::R162`, `board1-osc23.lib`; docs/calibration).
+- **B1-11** (2026-10-08) The external control input's resistors (R38, R63, R144) are 51.1K on
+  Figure 9-3, which leaves the rear jack at 0.987 octaves a volt once the keys are trimmed;
+  the model's are 50.5K, as the hardware reference's control input takes a volt an octave
+  (`expo::R_EXT`; docs/calibration).
 - **B1-8** Oscillator 2's exponential converter is labelled IC2 pins 6/7/8 and 9/10/11 twice
   on both drawings, which is more transistors than a 3046 has; it is probably IC7's spare
   transistor. It changes only which transistors share a chip (thermal and matching), which

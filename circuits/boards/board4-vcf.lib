@@ -16,11 +16,12 @@
 *   vp vn   +10 V and -10 V
 * Parameters: r39 (RANGE trimpot, wiper position from +10, 0..1), r49 (SCALE trimpot,
 * ohms in circuit), r73 (REGEN CAL trimpot, wiper position from R76, 0..1), r76 (330 on
-* Figure 9-11, 150 on drawing 1446).
-.subckt mm_vcf ain ctl amt emo emi out vp vn params: r39=0.5 r49=250 r73=0.5 r76=330
+* Figure 9-11, 150 on drawing 1446), r74 (47K on the drawing; the model's where the
+* hardware reference's contour moves its filter: board4.md B4-9).
+.subckt mm_vcf ain ctl amt emo emi out vp vn params: r39=0.5 r49=250 r73=0.5 r76=330 r74=47k
 
 * --- control node and exponential converter (Q26 TIS93, Q28 TIS92, matched) -----------
-r74   amt ctl 47k                   ; R74 47K: amount of contour into the control node
+r74   amt ctl {r74}                 ; R74 47K: amount of contour into the control node
 r49   ctl n49 {max(r49,1e-3)}       ; R49 500 ohm SCALE trimpot (rheostat)
 r70   n49 0 1.8k                    ; R70 1.8K
 c18   ctl 0 100p                    ; C18 100pF

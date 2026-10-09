@@ -218,7 +218,11 @@ fn the_oscillators_limits_at_the_ranges_ends() {
         let mut lines = String::new();
         for (range, notes, octaves) in [
             (Range::R2, [96, 108, 115, 120, 124, 127], 2.0),
-            (Range::Lo, [0, 12, 24, 36, 0, 0], -7.0),
+            (
+                Range::Lo,
+                [0, 12, 24, 36, 0, 0],
+                2.0 - ca72::tuning::LO_BELOW_2,
+            ),
         ] {
             let mut panel = Panel::default();
             panel.osc[0].range = range;

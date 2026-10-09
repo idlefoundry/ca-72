@@ -2578,3 +2578,130 @@ otherwise):
 - Not tried: Bitwig itself, with two builds of the CA-72 in one project; other hosts on macOS;
   the installer's bundles; the Audio Unit, built around the CLAP (R30), so with the change.
   Linux and Windows compile softbuffer's macOS backend out (CI builds and tests them).
+
+## R42. A hardware reference, and the first change it settled
+**Owner decision, 2026-10-07.** The CA-72 is matched to the owner's hardware reference, a
+modern recreation of the instrument which the owner could not tell from a Model D in
+level- and pitch-matched recordings: "if we match this, that this will be the right thing to
+do." The comparisons with hardware become measurements ([calibration](calibration/README.md)).
+
+**Agent decisions, 2026-10-07 and 08** (not separately approved):
+- **Change the circuit, never the output:** a difference is traced to a component, trim or
+  device model, the netlist and the real-time model change together within their budgets
+  against ngspice, and the change is recorded as a deviation from the drawing. Calibration
+  is copied; the reference's own features are not targets.
+- **The rig:** the MOTU 828ES on the Mac (on Linux its class-compliant USB shifted the
+  captured channels once playback started beside a capture), two ES-3 for gates and
+  control voltages on the inputs' clock, one stream for stimuli and responses; captures and
+  renders on the lab's share, measured by the same code (`scripts/calibration/`,
+  `ca72-lab stim`).
+- **What the panel at its home settings showed** (oscillators off, EMPHASIS 0): the filter's
+  response against its corner matches within 0.7 dB from 600 Hz to 3.6 kHz; the loudness
+  contour's attack, held level and decay match with its knobs fitted; with DECAY off one
+  contour's release has the reference's shape. Differences that need the knobs moved (the
+  corner's mapping, the thump's size, EXTERNAL INPUT VOLUME's taper, the trigger delay from
+  MIDI) wait for a session at the instrument.
+- **One change: an R1401 for each contour** (`ContourCircuit::dump_each`, board2.md B2-6).
+  Through the drawing's one R1401 a contour held higher halved the other's release with
+  DECAY off; the reference's is the same whatever the other contour holds. It changes the
+  four presets with DECAY off; every other preset renders the same to the bit.
+- **The knob session, 2026-10-08** (sessions C to H; the owner's instructions: trace each
+  difference to a component, a trim or a device model, netlist and model together, one
+  commit each). Changed: the oscillators' external control input to 50.5K (a volt an
+  octave); RANGE (R39) to the reference's 0.559; oscillator 3's R162 to 2.96K (its pitch with
+  OSC. 3 CONTROL off); and, measured on the reference in place of the generic tapers (A9),
+  the laws of EXTERNAL INPUT VOLUME (R9), EMPHASIS (R14), the four ATTACK and DECAY pots and
+  the mixer's VOLUME; and, at the owner's go, the external preamplifier's R61 to 232K (its
+  gain 0.97 dB up). The 8 and 12 ms keyboard delays stay.
+  What still differs is listed in the calibration README.
+- **Owner decisions, 2026-10-08, after the knob session's listening page:** level the
+  presets, retune the two that sound the filter's own pitch, and settle the external input's
+  drive (R61 above). **Cruising Whistle and Ladder Kick retuned:** R39 put the filter's pitch
+  3.7 semitones up in both; CUTOFF lowered by 0.305 (Cruising Whistle -1.33 to -1.635, its
+  whistle within 5 cents of 0.1.3's at C4, G4 and E4; Ladder Kick -3.6 to -3.9, its ring's
+  sweep over the first 11 ms within the measure's resolution of 0.1.3's).
+- **The presets re-levelled** to where R15 and R16 put them: each one's momentary maximum
+  on a phrase in its register (`tests/preset_levels.rs`), on 0.1.3 and now, and MAIN OUTPUT
+  VOLUME moved by the difference through its own law. Twelve within 0.03 dB of 0.1.3 (Three
+  Saw Slab 7.5 to 8.29, Undertow Growl 9.17 to 8.77, Warped Pad 7.8 to 7.56, the rest by
+  0.03 to 0.22). As R15 has it, a preset at VOLUME 10 under its level stays at 10: nine
+  are now quieter than they were (Upright Pluck -3.6 dB, Breath Flute -2.2, Stacked Fifths
+  -1.9, Ladder Kick -1.6, Open Hat -1.6, Ringing Saw Line -1.4, Noise Snare -1.0, Shoreline
+  Wash -0.5, Wooden Mallet -0.4), and Pink Riser, quiet by nature, 1.3 dB louder and still
+  under -18 LUFS. Hollow Glider and Closed Hat moved under 0.1 dB and were left.
+- **Again after CUTOFF's law** (change 10) and the contours' 10 s mark: Cruising Whistle
+  -1.635 to -1.403 and Ladder Kick -3.9 to -3.504, the same places on CUTOFF's track (the
+  law's inverse; the whistle within 4 cents of 0.1.3's, the ring's first 5 ms within 4);
+  Pulse Strut 9.05 to 9.36, Undertow Growl 8.77 to 8.73, Hollow Glider 6.2 to 6.28, Brass
+  Tutti 4.08 to 4.18, Warped Pad 7.56 to 7.61: every preset VOLUME can reach within 0.1 dB
+  of 0.1.3. At 10 and quieter: Upright Pluck -3.65 dB, Breath Flute -1.91, Stacked Fifths
+  -1.83, Ladder Kick -1.64, Open Hat -1.60, Ringing Saw Line -1.19, Shoreline Wash -1.06,
+  Wooden Mallet -1.04, Noise Snare -0.89; Pink Riser +1.44, still under -18 LUFS.
+- **Owner decision, 2026-10-08:** the keyboard follows the reference's MIDI: 0 V on C2, not
+  the original's lowest F (board2.md B2-8; calibration change 11).
+- **Again after session J's fits** (KEYBOARD CONTROL's R53 and R54, the contours' laws,
+  AMOUNT OF CONTOUR, EMPHASIS, GLIDE, the MODULATION wheel and the contours' first decay
+  sample): Cruising Whistle -1.765 to -1.693 (its whistle at C4, G4 and E4 +18, -23 and +5
+  cents from 0.1.3's, their mean 0), Ladder Kick -3.637 to -3.615 (its boom, 50 to 120 ms,
+  within 0.2 cents of 0.1.3's on average; its sweep starts about 2 semitones lower, from
+  AMOUNT OF CONTOUR's law, and its ring decays faster, from EMPHASIS's: positions kept, as
+  for every other preset); Bass 9.68, Lead 8.23, Three Saw Slab 8.23, Pulse Strut 8.88,
+  Undertow Growl 8.44, Slow Horn Swell 8.1, Wooden Mallet 9.91, Noise Crash 9.87, Warped
+  Pad 7.62. And after the contours' peak (calibration change 19; the two pitched presets
+  unmoved: Ladder Kick's boom -0.7 cents from 0.1.3's): Bass 9.7, Three Saw Slab 8.29,
+  Pulse Strut 8.99, Undertow Growl 8.48, Noise Crash 9.89: every preset VOLUME can reach
+  within 0.09 dB of 0.1.3. At 10 and quieter: Upright Pluck -3.31 dB, Breath Flute -2.15,
+  Stacked Fifths -2.09, Ladder Kick -2.06, Ringing Saw Line -1.55, Open Hat -1.50,
+  Shoreline Wash -0.90, Noise Snare -0.87, Closed Hat -0.11; Pink Riser +1.84, still under
+  -18 LUFS.
+- **Again after session L's fits** (AMOUNT OF CONTOUR in true volts, the contours' peak
+  diodes, LO, MOD DEPTH's law, the mixer's noise): Ladder Kick -3.615 to -3.604 (its boom
+  +0.3 cents from 0.1.3's), Cruising Whistle unmoved (its three notes +1.8 cents on
+  average); Three Saw Slab 8.24, Pulse Strut 9.04, Cruising Whistle 7.12, Brass Tutti 4.2,
+  Wooden Mallet 9.88, Noise Crash 9.84: every preset VOLUME can reach within 0.07 dB of
+  0.1.3. At 10 and quieter: Upright Pluck -3.00 dB, Breath Flute -1.85, Ladder Kick -1.82,
+  Stacked Fifths -1.76, Ringing Saw Line -1.24, Open Hat -1.12, Shoreline Wash -0.58, Noise
+  Snare -0.52; quiet by nature and left at 10, Closed Hat +0.30 and Pink Riser +1.76.
+- **Again after the contours' capacitors as electrolytics** (the owner's choice of the full
+  model, 2026-10-09; calibration change 25): Cruising Whistle and Ladder Kick unmoved (+1.8
+  and -0.9 cents); Three Saw Slab 8.32, Pulse Strut 9.07, Undertow Growl 8.55, Cruising
+  Whistle 7.16, Wooden Mallet 9.91, Noise Crash 9.89: every preset VOLUME can reach within
+  0.09 dB of 0.1.3. At 10 and quieter: Upright Pluck -3.49 dB, Ladder Kick -2.37, Stacked
+  Fifths -2.15, Breath Flute -1.85, Open Hat -1.63, Ringing Saw Line -1.54, Noise Snare
+  -1.08, Shoreline Wash -0.60, Closed Hat -0.23; Pink Riser +1.83.
+- **Again after SUSTAIN's law** (2026-10-09; calibration change 26): twelve presets moved
+  0.01 to 0.23 dB; Lead 8.2, Pulse Strut 9.1, Cruising Whistle 7.11 (its whistle unmoved:
+  AMOUNT OF CONTOUR 0): every preset VOLUME can reach within 0.02 dB of 0.1.3. At 10 and
+  quieter: Upright Pluck -3.50 dB, Ladder Kick -2.37, Stacked Fifths -2.33, Breath Flute
+  -1.75, Open Hat -1.63, Ringing Saw Line -1.54, Noise Snare -1.08, Shoreline Wash -0.60,
+  Closed Hat -0.23; Pink Riser +1.83.
+- **Again after the contours' release at DECAY 0 and Q12's gain** (2026-10-09; calibration
+  changes 27 and 28): the first changes no preset; after the second every level within 0.01
+  dB but Undertow Growl's chaotic loop (-0.12): Undertow Growl 8.58. Every preset VOLUME can
+  reach within 0.02 dB of 0.1.3; at 10 as above.
+- **Again after EMPHASIS at 2, 3 and 4** (2026-10-09; calibration change 30): the presets
+  with EMPHASIS from 2 to 4 more resonant, their passbands lower: Bass 9.94, Lead 8.66,
+  Warped Pad 7.52, Wooden Mallet 10 (0.09 dB short). At 10 and quieter than 0.1.3: Upright
+  Pluck -5.59 dB, Breath Flute -3.77, Ladder Kick -2.37, Stacked Fifths -2.34, Open Hat
+  -1.63, Ringing Saw Line -1.54, Shoreline Wash -0.60, Noise Snare -0.60, Closed Hat -0.23;
+  Pink Riser +1.81.
+- **The presets' oscillators 2 and 3 FREQUENCY values rewritten after their laws**
+  (2026-10-09; calibration change 29): every value but 0 moved to where the new law puts
+  the pot where the old value did (Stacked Fifths 5 and 7 to 4.1667 and 6.4465, Breath
+  Flute's oscillator 3 4 to 3.1678, the detunes 0.1 to 0.0833, and so on): their intervals
+  and oscillator 3's rates as they were, within 0.005 cent; FREQUENCY 0, the unison, is
+  unmoved. A pitch is a preset's design, as the two retuned filter pitches were.
+- **MIDI's modulation wheel follows the reference's curve** (agent decision, 2026-10-08,
+  under the owner's decision to match the reference): control change 1 puts the
+  MODULATION wheel where the reference's resistance is for it (`modulation::midi_wheel`);
+  the wheel's own law stays the drawing's, to the reference's 685 ohm fully forward
+  (calibration change 18). The reference's manual makes the curve a MIDI setting, so the
+  measured curve is its MIDI handling's, not its MOD DEPTH pot's; presets keep their wheel
+  positions.
+- **Again after the keyboard's 0 V on C2:** Cruising Whistle -1.403 to -1.765 (its whistle
+  within 4 cents of 0.1.3's), Ladder Kick -3.504 to -3.637 (its ring as 0.1.3's); Bass 9.71,
+  Elastic Octaves 5.48, Pulse Strut 9.16, Undertow Growl 8.71, Hollow Glider 6.16, Slow Horn
+  Swell 8.13, Brass Tutti 4.14, Warped Pad 7.58: every preset VOLUME can reach within 0.05
+  dB of 0.1.3. At 10 and quieter: Upright Pluck -3.64 dB, Breath Flute -2.31, Stacked Fifths
+  -2.01, Ladder Kick -1.63, Open Hat -1.59, Ringing Saw Line -1.52, Wooden Mallet -0.82,
+  Noise Snare -0.81, Shoreline Wash -0.44; Pink Riser +1.44, still under -18 LUFS.

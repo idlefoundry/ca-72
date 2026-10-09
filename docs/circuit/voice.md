@@ -10,21 +10,21 @@ model was developed in comes later (plan stage 6).
 | Part | Model | Rate |
 |---|---|---|
 | Keyboard | Board 2's keyboard circuit (board2.md), solved as its netlist: 44 keys, F to C (MIDI 41 to 84). The lowest and highest keys held join the pitch bus to the string, so the lowest sounds (lowest-note priority). The trigger contact stays closed while any key is held, so a legato key does not retrigger (single triggering). Then the hold, GLIDE and the output's load (the three oscillators' keyboard inputs to -5 V and the filter's to its control node, A19). A released key's pitch contact opens 2 ms after its trigger contact (A18) | per sample while it moves, else in blocks |
-| Oscillators 1, 2, 3 | board1.md, each tuned by Folkman's 1973 procedure on the model when the voice is built (oscillators 2 and 3 with FREQUENCY centred and OSC. 3 CONTROL on), their keys played through the keyboard circuit. Oscillator 2's FREQUENCY on IC4's + input; oscillator 3's FREQUENCY through its control stage IC8, OSC. 3 CONTROL switching its inputs, and its reverse sawtooth (Q37) solved as its circuit | 4x oversampled; Q37 at the output rate while heard |
+| Oscillators 1, 2, 3 | board1.md, each tuned by Folkman's 1973 procedure on the model when the voice is built (oscillators 2 and 3 with FREQUENCY centred and OSC. 3 CONTROL on), their keys played through the keyboard circuit. Oscillator 2's FREQUENCY on IC4's + input; oscillator 3's FREQUENCY through its control stage IC8 (both knobs' laws measured on the hardware reference: docs/calibration), OSC. 3 CONTROL switching its inputs, and its reverse sawtooth (Q37) solved as its circuit | 4x oversampled; Q37 at the output rate while heard |
 | WAVEFORM switches | dwg 1448: the sawtooth, triangle and rectangle outputs as Thevenin sources (board 1's output dividers). The second position is the shark tooth on oscillators 1 and 2 (sawtooth and triangle through R030 47K and R031 10K) and the reverse sawtooth on oscillator 3, whose sawtooth R171 loads; the rectangle's width comes from the switch's second pole (0, -1.5 and -2.5 V) | |
-| Mixer | Each oscillator's VOLUME (25K linear) and 33K into the filter's input bus, as a Norton source, and the noise's (25K linear and R48 11K); switched off, a channel's series resistor only loads the bus, as does the external input's (33K) | |
+| Mixer | Each oscillator's VOLUME (25K linear; the knob's law measured on the hardware reference: docs/calibration) and 33K into the filter's input bus, as a Norton source, and the noise's (25K linear and R48 11K); switched off, a channel's series resistor only loads the bus, as does the external input's (33K). The mixer's own noise on the bus (`MIXER_HISS`: the hardware reference's floor at its MIX jack, white, seeded with the voice), from which the filter's self-oscillation starts | |
 | Noise | board3.md: the noise generator's small-signal model, its outputs loaded as the NOISE switch (and R50 at PINK), the mixer's VOLUME and MODULATION MIX load them; its level the factory's calibration, done when the voice is built (A23) | 4x oversampled |
 | Modulation | board3.md: MODULATION MIX (oscillator 3's switch output and the pink or red noise), the modulation mix amplifier's transfer, R57 and the MODULATION wheel; OSCILLATOR MODULATION puts the line on the oscillators' MOD bus, FILTER MODULATION on the filter's control node through R52 33K (off, each is grounded, A21). Oscillator 3's switch output is loaded by its mixer channel and R23 | output rate; oscillator 3 a sample behind |
 | Wheels | The pitch wheel on the oscillators' pitch bus (+6.12 V +-2 V, A22); the MODULATION wheel's resistance on the line (A22) | |
-| External input | board4.md: EXTERNAL INPUT VOLUME (R9, 1M audio) ahead of the preamplifier (circuit No. 12, solved as its circuit), SW10 and R46 33K onto the bus; the OVERLOAD lamp's driver (`Voice::overload`). The jack's voltage is the input sample times 5 V (A25) | the preamplifier at 4x (trapezoidal), while SW10 is on |
+| External input | board4.md: EXTERNAL INPUT VOLUME (R9, 1M; its law measured on the hardware reference, docs/calibration) ahead of the preamplifier (circuit No. 12, solved as its circuit), SW10 and R46 33K onto the bus; the OVERLOAD lamp's driver (`Voice::overload`). The jack's voltage is the input sample times 5 V (A25) | the preamplifier at 4x (trapezoidal), while SW10 is on |
 | A-440 | board4.md: its circuit's waveform (ngspice) at 440 Hz into the VCA's R40 and C8 (A26, B4-7) | output rate |
 | TUNE | From its centre (where the factory's tuning leaves it), R1's wiper into each oscillator | |
-| Filter | board4.md, calibrated by Folkman's procedure (`filter_cal.rs`: R39, R49, R73). The control node: CUTOFF (5K linear across ±10 V) through R55 200K, KEYBOARD CONTROL 1 and 2 through R53 300K and R54 150K, AMOUNT OF CONTOUR (5K linear from the filter contour) through R74 47K, the modulation line through R52 33K, and the external control's R51 100K (its jack empty: grounded). EMPHASIS is R14, a 50K reverse-audio rheostat | 4x oversampled |
+| Filter | board4.md, calibrated by Folkman's procedure (`filter_cal.rs`: R39, R49, R73). The control node: CUTOFF (5K linear across ±10 V; the knob's law measured on the hardware reference: docs/calibration) through R55 200K, KEYBOARD CONTROL 1 and 2 through R53 300K and R54 150K (312K and 156K in the model, as the hardware reference tracks: docs/calibration), AMOUNT OF CONTOUR (5K linear from the filter contour; its knob's law and R74 measured on the hardware reference: docs/calibration) through R74 47K (48.1K in the model), the modulation line through R52 33K, and the external control's R51 100K (its jack empty: grounded). EMPHASIS is R14, a 50K reverse-audio rheostat (its law measured on the hardware reference: docs/calibration) | 4x oversampled |
 | VCA | board4.md, balanced by the factory procedure, on the loudness contour | output rate (bias per sample and at 3 kHz) |
-| Contours | board2.md, on the front panel's ATTACK and DECAY (1M audio rheostats) and SUSTAIN (5K linear), with the DECAY switch | half the output rate, interpolated (A17) |
+| Contours | board2.md, on the front panel's ATTACK and DECAY (1M audio rheostats, their laws measured on the hardware reference: docs/calibration) and SUSTAIN (5K linear; the knob's law measured on the hardware reference: docs/calibration), with the DECAY switch | half the output rate, interpolated (A17) |
 
 The pots' tapers are generic audio and reverse-audio laws (A9; GLIDE is "R2 5M AUDIO" on
-Figure 9-17). The panel's knobs run 0..1 for its 0..10 (CUTOFF's -5..+5 as 0..1); GLIDE's switch
+Figure 9-17) where the hardware reference's were not measured (docs/calibration). The panel's knobs run 0..1 for its 0..10 (CUTOFF's -5..+5 as 0..1); GLIDE's switch
 on the left hand controller is `glide_on`.
 
 **Output scale.** `Voice::tick` returns the main output's voltage across a 10K load, with
@@ -54,8 +54,9 @@ higher and fire sooner. This is a candidate for the owner's comparison.
   string's current through the two contacts (A18). The loudness contour stays at its
   sustain (4.480 V) throughout. A note outside the keyboard is ignored.
 - `glide_moves_the_keyboard_voltage_between_keys`: legato from A2 to A3. With GLIDE off
-  the keyboard voltage arrives within 1 ms of A2's pitch contact opening. At GLIDE 5 (500K)
-  it rises 0.49, 0.85, 1.34 V at 10, 30 and 60 ms, and arrives.
+  the keyboard voltage arrives within 1 ms of A2's pitch contact opening. At GLIDE 5 (257K)
+  it rises to 0.86, 1.20 and 1.53 V at 5, 15 and 25 ms from A2's 0.76 V, and arrives by 35
+  ms.
 
 - `oscillators_2_and_3_play_through_their_controls`: oscillator 2 alone plays the low A at
   109.999 Hz (-0.02 cent), +8.23 semitones with FREQUENCY at 10; oscillator 3 with OSC. 3
@@ -63,8 +64,9 @@ higher and fire sooner. This is a candidate for the owner's comparison.
   sawtooth reaches the mixer inverted against its sawtooth (correlation -1.000).
 
 - `modulation_and_the_wheels_meet_the_service_manual`: with oscillator 3's low square
-  on the MOD bus and the wheel fully forward, oscillator 1 swings 18.0 semitones (5.37: 13
-  to 23); on the filter the corner rises 33.8 times (5.19: at least 5.45); the pitch
+  on the MOD bus and the wheel fully forward (the reference's 685 ohm), oscillator 1 swings
+  13.5 semitones (5.37: 13 to 23); on the filter the corner rises 16.5 times (5.19: at least
+  5.45); the pitch
   wheel's travel is 16.1 semitones (5.35: 13 to 17).
 - `the_noise_sits_under_the_triangle_as_the_factory_set_it`: at the output, both channels
   at VOLUME 4, white noise -6.39 dB and pink -6.02 dB against oscillator 1's triangle
@@ -76,8 +78,8 @@ higher and fire sooner. This is a candidate for the owner's comparison.
 
 - `the_a440_and_the_external_input_meet_the_service_manual`: the A-440 at 440.00 Hz and
   -5.3 dB (5.7: -8 +- 2, B4-7); with -30 dB at 1 kHz into the external input the OVERLOAD
-  lamp lights at VOLUME 9.5 while the output's distortion is the filter's soft overdrive
-  (4.4 %), before the preamplifier clips (5.26).
+  lamp lights at VOLUME 9.2 (searched in steps of 0.1) while the output's distortion is the
+  filter's soft overdrive (4.4 %), before the preamplifier clips (5.26).
 - `filter_cal.rs`: Folkman's filter procedure run again against the committed trims, and
   the service manual's 5.13, 5.15 and 5.18 on the calibrated filter.
 
@@ -157,7 +159,7 @@ allocations.
 **The rear jacks** (2026-09-29; A5). `Voice::tick_jacks` takes, each sample, the EXTERNAL
 INPUT and the four rear jacks (`Jacks`: `None` an empty jack, its normal contact in
 place): the oscillators' control input holds their external bus (8A; the circuit's scale
-0.984 octaves a volt, within 0.14 cent of ngspice from -4 to +4 V, `expo_realtime.rs`), the
+0.998 octaves a volt with R38 50.5K, 0.987 with the drawing's 51.1K (docs/calibration), within 0.14 cent of ngspice from -4 to +4 V, `expo_realtime.rs`), the
 filter's feeds the control node through R51 100K (within 0.01 cent of ngspice from -8 to +4
 V, 0.49 cent at +8 V where Q28 saturates, `vcf_control.rs`), EXT. LOUDNESS drives Q21's
 tail through J3 (the gain within 0.09 dB of ngspice from 1 to 6 V; its useful range is

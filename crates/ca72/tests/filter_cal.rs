@@ -16,7 +16,15 @@ fn filter_calibration() {
     );
     let f = t;
     // Checks on the calibrated filter.
-    let kb = Keyboard::new(KeyboardCircuit::default(), SR);
+    // Folkman's procedure is the original instrument's: its keyboard as drawn, the string's
+    // bottom grounded (the voice's floor is the hardware reference's MIDI, B2-8).
+    let kb = Keyboard::new(
+        KeyboardCircuit {
+            r_floor: 0.0,
+            ..KeyboardCircuit::default()
+        },
+        SR,
+    );
     let key = |k: usize| kb.static_out(k).expect("key");
     // Range: 440 Hz at CUTOFF -1 with the keyboard off; Scale: low A 440, third A 1760.
     let range = oscillation(SR, &f, &inputs(0.4, false, false, 0.0));

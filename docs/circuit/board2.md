@@ -20,7 +20,8 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
    line down through R49 220 like Q20. Legato playing does not retrigger: the bus stays at
    +10 V while any key is held.
 2. **Flip-flops** Q1/Q4 [Q25/Q15]. Set, Q5 [Q16] (saturated) charges the timing capacitor C5
-   [C2] (10 uF) through R7 [R42] 100 and the ATTACK pot (1M audio, a rheostat) toward the
+   [C2] (10 uF) through R7 [R42] 100 and the ATTACK pot (1M audio, a rheostat; its law in the voice measured on
+   the hardware reference: docs/calibration) toward the
    +9.3 V rail. The flip-flop resets when the output, divided by R33/R29 [R24/R27] toward
    -10 V, drives enough current through CR3 [CR6] into Q4's [Q15's] base to take Q1 [Q25]
    out of saturation: at 4.49 V [5.28 V] out. It is also held reset while the reset line
@@ -32,7 +33,9 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
    -10 V and R1 3K to ground [R57 4.7K and 4.7K to ground]).
 4. **Release.** V-trig at rest pulls the sustain node down through CR2 [CR9] and the DECAY
    jack's normal contacts: DECAY on, the capacitor decays to about 0.66 V at the DECAY
-   time; DECAY off, it is also dumped through CR7 [CR4] and R1401 1.5K to V-trig.
+   time; DECAY off, it is also dumped through CR7 [CR4] and R1401 1.5K to V-trig. On the
+   drawing both capacitors share R1401; the model gives each its own by default, as the
+   hardware reference has (B2-6).
 5. **Outputs.** The filter contour's follower is Q22 (NPN) with Q21 (PNP): one base-emitter
    drop (rest +0.15 V, peak 4.49 V); the loudness contour's is a Darlington, Q3 and Q2: two
    drops (rest -0.48 V, peak 5.28 V). The filter contour drives AMOUNT OF CONTOUR (5K) and
@@ -44,7 +47,8 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
    (Figure 9-17: 8.48 mA) into the 43 resistor string (10 ohm 1% each; 83 mV per key); the
    pitch bus (the string's voltage where the pitch bar touches it, lowest key first) is
    held on C9 0.33 uF. An amplifier (Q23/Q14 matched, Q24) drives C6 1 uF through R61 330
-   and the GLIDE pot (5M, a rheostat; shorted by the GLIDE switch); Q13 (JFET) connects C6
+   and the GLIDE pot (5M, a rheostat; shorted by the GLIDE switch; its law in the voice
+   measured on the hardware reference: docs/calibration); Q13 (JFET) connects C6
    only while a key is held (CR5 pinches it off from the trigger bus); Q10 (JFET) follows
    C6 to the output (R18 3.9K to -10 V), and R30 10K closes the amplifier's loop from the
    output. With glide the loop saturates: C6 charges toward the amplifier's rails (+10 V up,
@@ -62,9 +66,9 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
 
 | Part | Real-time model |
 |---|---|
-| Trigger | C7 a state (trapezoidal), charged through CR10's junction law and R60, drained by Q20's base current; Q20 and Q12 as full Gummel-Poon transistors (saturation included), the reset line and V-trig solved from their KCL; C13's node on the trigger bus a state |
-| Flip-flops | Latches (their transitions take microseconds): set as V-trig rises, reset while the reset line drives CR1 [CR8] or when the output reaches the threshold derived from the latch's devices (Q1 [Q25] leaving saturation) |
-| Timing capacitors | Set: the RC charge through R7 and ATTACK from the rail (exact trapezoidal). Reset: the capacitor and the sustain node together (Newton on both), with Q7's base current, Q8 as a PNP follower on its divider, CR2 to V-trig, and with DECAY off CR7 into R1401's node |
+| Trigger | C7 a state (trapezoidal), charged through CR10's junction law and R60, drained by Q20's base current; Q20 and Q12 as full Gummel-Poon transistors (saturation included), the reset line and V-trig solved from their KCL; while V-trig falls with DECAY near its end, V-trig and the sections solved together (B2-13); C13's node on the trigger bus a state |
+| Flip-flops | Latches (their transitions take microseconds): set as V-trig rises, reset while the reset line drives CR1 [CR8] or when the output reaches the threshold derived from the latch's devices (Q1 [Q25] leaving saturation), the capacitor stopped where the output meets it within the sample (B2-10) |
+| Timing capacitors | The capacitor with its series resistance and absorption branches (B2-12; the follower and the peak detector read its terminal). Set: the RC charge through R7 and ATTACK from the rail (trapezoidal). Reset: the capacitor and the sustain node together (Newton on both; trapezoidal, the first sample after the attack backward Euler: B2-9), with Q7's base current, Q8 as a PNP follower on its divider, CR2 to V-trig, and with DECAY off CR7 into R1401's node |
 | Outputs | The followers' drops from their transistors at the load's current (the AMOUNT OF CONTOUR pot and the peak divider on the filter contour) |
 
 Agreement with ngspice (2026-09-28; ngspice's waveforms taken at the model's 48 kHz: the
@@ -75,6 +79,8 @@ flip-flops' resets put 30 ns spikes on the rail and outputs):
 | Held key, DECAY on and off; retriggered 30 ms after a release | Within 27..44 mV; peaks within 7 mV; trigger edges within 0.04 ms |
 | Released during a slow attack | Within 20 mV; peaks within 7 mV; edges within 0.15 ms |
 | Fastest attack (500 ohm), SUSTAIN at 0 and 10 | Within 72 mV (mid-attack, the rail's sag: A16); peaks within 11 mV; edges within 0.13 ms |
+| ATTACK and DECAY at 0 ohm, SUSTAIN 10, held (2026-10-08) | Within 66 mV half a millisecond past the attack (also at 24 kHz and at Potato's 6 kHz: 70 and 92 mV); peaks within 23 mV at all three |
+| Released with ATTACK and DECAY at 0 ohm, DECAY on and off (2026-10-09) | The falls from 90 to 50 and 50 to 10 % within 0.04 ms of ngspice's (0.97 and 0.79 ms filter, 1.33 and 1.09 loudness, with Q12 as the hardware reference's: B2-14) at 48, 24 and 6 kHz; within 39 mV (48 kHz), 19 mV (24 kHz) and 33 mV (6 kHz, its trigger's edge lined up: B2-13) |
 
 The same scenarios at the voice's 24 kHz (interpolated onto ngspice's 48 kHz grid): within
 86 mV (the fastest attack), trigger edges within 0.19 ms (assumptions.md A17). At 12 kHz
@@ -133,3 +139,105 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
 - **B2-5** The key contacts' resistance and their timing are not documented (A18): with two
   keys held the string's current flows through their contacts, and the lower key sounds
   I x R sharp (1.1 cents at 0.1 ohm).
+- **B2-6** (2026-10-08) The hardware reference releases one contour as fast whatever the
+  other holds, with DECAY off; through the drawing's one R1401 a contour held higher slows
+  the other's (the loudness release 32.3 against 14.3 ms to -40 dB, the filter contour held
+  or empty). The model gives each capacitor an R1401 1.5K of its own
+  (`ContourCircuit::dump_each`; docs/calibration); `false` is the drawing's. Both are
+  tested against ngspice (`contour_realtime.rs`).
+- **B2-7** (2026-10-08) With R1401 carrying about 2 mA (a contour held near 3.6 V, DECAY
+  off), V-trig falls below 3 V about 0.5 ms later in the model than in ngspice (they cross
+  half the rail together), so that release runs about 0.3 ms behind: 87 to 92 mV at 48 kHz,
+  161 to 166 mV at 24 kHz, in both arrangements. The test's budget for that case is 100 and
+  180 mV.
+- **B2-8** (2026-10-08) The key string's bottom reaches GND through a floor of 50 ohm, five
+  of its own resistors (`keyboard::R_FLOOR`; the drawing grounds it): every key 0.42 V
+  higher, the pitch bus's 0 V on C2, five keys below the lowest F, where the hardware
+  reference's MIDI puts its keyboard's 0 V (its MIDI NOTE ZERO VOLTS, 36 by default; the
+  owner's decision to follow it, docs/calibration change 11). The factory tuning plays its
+  keys through the keyboard and absorbs it (A3 at 220.000 Hz, the keys within 2.43 cents);
+  the filter's KEYBOARD CONTROL hears it. Folkman's filter procedure keeps the drawn
+  keyboard. The bench (`ca72-lab` keyboard) has the same floor; every key within 0.0001 mV.
+- **B2-9** (2026-10-08) A model fault, found against the hardware reference: with DECAY at
+  its end (the pot at 0 ohm, Q7's 5 ohm left) a key's sound fell silent after the attack and
+  returned over 30 to 50 ms in the plug-in (its voices in Potato), where the reference sounds
+  at once. The decay's first sample after the attack was trapezoidal: half its step from a
+  current through DECAY at the last sample, when Q7 was off and the path open, from the
+  sustain node's voltage before the attack. Through 5 ohm that was about an ampere for a
+  sample: the capacitor stepped 0.5 V below the sustain at 48 kHz, 1.6 V at the voice's 24
+  kHz and 8.8 V (below the VCA's threshold) at Potato's 6 kHz, and the node, which sources
+  little, took tens of milliseconds to lift it back. ngspice's circuit has no such dip. That
+  sample is now backward Euler, as ngspice steps after a switch; `contour_realtime.rs` has
+  the case at all three rates. Still: at 0 ohm the drop from the peak to a low SUSTAIN runs
+  faster than ngspice's (0.4 against about 1.5 ms from 5.26 to 2 V at SUSTAIN 5, likely Q8's
+  gain at tens of milliamperes, which the model's follower holds at BF), and a release with
+  DECAY off lags B2-7's 0.3 ms, at that slope up to 0.7 V.
+- **B2-10** (2026-10-08) A model fault, found against the hardware reference: the attack
+  ended on the sample at or past the peak, so the output overshot the flip-flop's threshold
+  by up to a sample's rise. At 48 and 24 kHz a few millivolts; at Potato's contour rate (6
+  kHz at 48 kHz, the plug-in's) with a fast attack about half a volt: Ringing Saw Line's
+  filter contour peaked at 4.95 to 5.06 V against the circuit's 4.49 (the reference's FILT
+  CONT 4.63, its interface's input scale within 3 %), and its whole decay ran 15 to 20 %
+  high, its filter's ring up to 0.4 octave. The capacitor now stops where the output meets
+  the threshold within the sample (the secant through the sample's ends, refined once); the
+  decay begins on the next. `contour_realtime.rs`: peaks within 7.4 mV of ngspice in every
+  case at 48 and 24 kHz, and within 23 mV with ATTACK at 0, at 6 kHz too.
+- **B2-11** (2026-10-08) The peak detectors CR3 and CR6 are silicon small-signal diodes in
+  the model (`DCR36`), not the drawing's 1N34A germanium. The hardware reference's contours
+  peak 0.306 V (filter) and 0.315 V (loudness) further above their held level at SUSTAIN 10
+  than the circuit's (its contour jacks calibrated; the difference cancels their offsets):
+  through the peak dividers R33/R29 and R24/R27 (gains 1.331 and 1.402) the same 0.23 V more
+  at the flip-flops' thresholds, Q4's [Q15's] base plus the diode's drop at about 23 uA. A
+  germanium point contact drops 0.12 V there, a silicon junction 0.35 to 0.41: a modern
+  recreation's part. `DSG3246`'s values with IS fitted (9.45 nA): the peaks 4.788 and 5.597
+  V in ngspice (4.489 and 5.282 as drawn), the model's within 5 mV, the reference's (its
+  held level plus the difference) 4.795 and 5.597. The reset feeds CR1, CR8 and the trigger
+  input CR10 stay germanium (CR10's leakage sets the trigger delay, B2-3).
+- **B2-12** (2026-10-09) The timing capacitors C5 and C2 are modelled as the electrolytics
+  they are: 1.53 ohm in series, and across the 10 uF three absorption branches (0.769 uF
+  through 779 ohm, 0.202 uF through 28.3K, 0.223 uF through 238K: 11.19 uF over a long
+  time), with R7 and R42 86.6 ohm (100 drawn). After a fast attack the hardware reference's
+  contours drop 0.21 V within a millisecond of their peak and 0.33 V within 10 ms, and
+  hardly at all after a 40 ms attack (session M): the series resistance's step as the
+  attack's current stops and the absorbed charge catching up. Fitted with the real-time
+  model to both contours after the fastest and a slower attack, the drops within 0.8 to 4.1
+  mV from 0.1 to 400 ms and the fastest rises 0.60 and 0.91 ms against 0.62 and 0.96. The
+  netlist (`board2-contour.lib`) and the model (`Section::absorption`, `esr`, the branches
+  trapezoidal; in the sample where the attack meets its peak the capacitor shares its
+  charge with them for the rest of it) change together; `contour_realtime.rs` holds them
+  within its budgets. The ATTACK and DECAY laws are refitted with them (0.88 to 0.90 of
+  their resistances: every measured time kept).
+- **B2-13** (2026-10-09) A model fault, found against the hardware reference: released with
+  DECAY at its end, the contours fell slower than the circuit's, the more the longer the
+  model's step (from 90 to 50 % of the filter contour ngspice 1.75 ms, the model 2.19 at 48
+  kHz, 2.56 at 24 kHz and 4.44 at Potato's 6 kHz, the plug-in's: the error halving as the
+  rate doubled). Through CR2 [CR9] a falling V-trig takes the capacitors' currents, and they
+  hold it up; V-trig was solved from the sections' states at the start of the sample, and
+  the sections then stepped from it. Now, in a sample where V-trig falls and a capacitor's
+  current through DECAY is half a milliampere or more (DECAY near its end; CR2 itself
+  carries Q7's base current and R10's, 1.6 mA, in every release), V-trig is solved again
+  from the sections as stepped and they again from it, by Newton's method on V-trig through
+  the sections' own response to it (each section's 2x2 Jacobian at its solution), within a
+  bracket, each pass starting the sections where the last one's response puts them: two or
+  three passes in such samples, at most nine, to 1 uV in High Fidelity and Potato (140 dB
+  under a contour's swing) and the solvers' tolerance in No Compromises; stopping short at
+  40 is counted (`unconverged::Solver::ContourCoupling`). Otherwise one pass, as before: no
+  factory preset releases with DECAY that near its end, and their renders are unchanged to
+  the bit, their cost at ten voices within the measurement's spread (-0.2 to +1.3 % in
+  five; coupling every release, with CR2's current the test, cost up to 29 % more in the
+  worst block). With DECAY off the dump node stays held for the sample (solved with the
+  passes through CR7 and R1401, it cost every DECAY-off preset a tenth more; B2-7 stays).
+  The falls now within 0.04 ms of ngspice's at every rate, DECAY on or off. The trigger's own
+  edges at 6 kHz still come about 0.23 ms early (a step and a half: C7 and the reset line's
+  stepping), so `contour_realtime.rs` compares the contours there with the last edge lined
+  up and holds the edges to their own budget.
+- **B2-14** (2026-10-09) Q12, V-trig's transistor, is modelled at the hardware reference's
+  gain (`Q12HG`: the 2N3392's model with BF 650; the drawing's 2N3392 bin is 150 to 300).
+  Released with DECAY at its end, both contours fall as fast as Q12 takes their current
+  through CR2 [CR9], which grows with its base drive (through R19) as the reset line rises
+  behind Q20's turn-off: the reference's falls (session N) came 1.6 to 2.1 times faster
+  than the circuit's with the 2N3392. Fitted in ngspice to the four falls (each contour
+  from 90 to 50 and 50 to 10 %), all within 0.11 ms (docs/calibration, change 28). V-trig's
+  edge after a key's release comes 0.35 ms sooner (12.14 ms), after a press as before
+  (7.97 ms). The netlist (`board2-contour.lib`, `mm-devices.lib`) and the model
+  (`ContourCircuit::q12`) change together; `contour_realtime.rs` holds them.

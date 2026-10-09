@@ -16,6 +16,12 @@ use crate::voice::Quality;
 /// The keys (F to C) and the string's resistors between them (43 of 10 ohm, 1 %).
 pub const KEYS: usize = 44;
 
+/// The string's floor, ohm: between its bottom (the lowest key, F) and GND. The drawing
+/// grounds the bottom, so the lowest key is at 0 V; the hardware reference's MIDI puts its
+/// keyboard's 0 V on C2, five keys below F (its MIDI NOTE ZERO VOLTS, 36 by default), which
+/// the filter's KEYBOARD CONTROL hears: five of the string's resistors here (board2.md B2-8).
+pub const R_FLOOR: f64 = 5.0 * 10.0;
+
 /// The circuit's values (Figure 9-7) and devices (`mm-devices.lib`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KeyboardCircuit {
@@ -31,6 +37,8 @@ pub struct KeyboardCircuit {
     /// spring on a gold bar; assumptions.md A18).
     pub r_string: f64,
     pub contact: f64,
+    /// The string's floor ([`R_FLOOR`]; 0 on the drawing).
+    pub r_floor: f64,
     /// The pitch bus: C9 .33 uF, R53 4.7M to +10 V.
     pub c9: f64,
     pub r53: f64,
@@ -72,6 +80,7 @@ impl Default for KeyboardCircuit {
             q11: TIS92,
             r_string: 10.0,
             contact: 0.1,
+            r_floor: R_FLOOR,
             c9: 0.33e-6,
             r53: 4.7e6,
             r52: 43e3,
@@ -121,8 +130,8 @@ impl Load {
     /// control node near 0 V; assumptions.md A19).
     pub fn of(oscillators: usize, kbd_1: bool, kbd_2: bool) -> Load {
         let g_osc = oscillators as f64 / 51.1e3;
-        let g_filter =
-            if kbd_1 { 1.0 / 300e3 } else { 0.0 } + if kbd_2 { 1.0 / 150e3 } else { 0.0 };
+        let g_filter = if kbd_1 { 1.0 / crate::vcf::R53 } else { 0.0 }
+            + if kbd_2 { 1.0 / crate::vcf::R54 } else { 0.0 };
         let g = g_osc + g_filter;
         Load {
             r: 1.0 / g,
@@ -133,8 +142,8 @@ impl Load {
 
 /// The instrument's usual load: three oscillators and KEYBOARD CONTROL 1.
 pub const LOAD_DEFAULT: Load = Load {
-    r: 1.0 / (3.0 / 51.1e3 + 1.0 / 300e3),
-    v: -5.0 * (3.0 / 51.1e3) / (3.0 / 51.1e3 + 1.0 / 300e3),
+    r: 1.0 / (3.0 / 51.1e3 + 1.0 / crate::vcf::R53),
+    v: -5.0 * (3.0 / 51.1e3) / (3.0 / 51.1e3 + 1.0 / crate::vcf::R53),
 };
 
 // The nodes: held, then solved.
@@ -292,16 +301,20 @@ impl KeyboardCircuit {
         Ok(c.v(kcur) / r_load)
     }
 
-    /// The string's current with no key held (the whole string as the source's load), A.
+    /// The string's current with no key held (the whole string and its floor as the
+    /// source's load), A.
     pub fn string_current(&self) -> Result<f64, NoConvergence> {
-        self.source_current(self.r_string * (KEYS - 1) as f64)
+        self.source_current(self.r_string * (KEYS - 1) as f64 + self.r_floor)
     }
 
     /// The current source as a Thevenin source (V, ohm) fitted between the whole string and
     /// one resistor as its load: its output resistance (Q9's Early effect, raised by R1)
     /// shows when keys held together short part of the string.
     fn source_thevenin(&self) -> Result<(f64, f64), NoConvergence> {
-        let (ra, rb) = (self.r_string * (KEYS - 1) as f64, self.r_string);
+        let (ra, rb) = (
+            self.r_string * (KEYS - 1) as f64 + self.r_floor,
+            self.r_string + self.r_floor,
+        );
         let (ia, ib) = (self.source_current(ra)?, self.source_current(rb)?);
         let (va, vb) = (ia * ra, ib * rb);
         let r_out = (va - vb) / (ib - ia);
@@ -364,7 +377,7 @@ impl Keyboard {
         let r_bot = c.add(Part::Resistor {
             a: S_LO,
             b: GND,
-            r: SHORT,
+            r: k.r_floor.max(SHORT),
         });
         let r_lo = c.add(Part::Resistor {
             a: S_LO,
@@ -535,7 +548,7 @@ impl Keyboard {
 
     /// The pitch bus's voltage with key `k` held alone and nothing drawn from it.
     pub fn key_voltage(&self, k: usize) -> f64 {
-        self.string_current * self.circuit.r_string * k as f64
+        self.string_current * (self.circuit.r_string * k as f64 + self.circuit.r_floor)
     }
 
     /// The output, V.
@@ -627,7 +640,9 @@ impl Keyboard {
                 Some((lo, hi)) => {
                     self.net.set_resistance(self.r_top, seg(KEYS - 1 - hi));
                     self.net.set_resistance(self.r_mid, seg(hi - lo));
-                    self.net.set_resistance(self.r_bot, seg(lo));
+                    let floor = self.circuit.r_floor;
+                    self.net
+                        .set_resistance(self.r_bot, (rs * lo as f64 + floor).max(SHORT));
                     self.net.set_resistance(self.r_lo, self.circuit.contact);
                     let r = if hi > lo { self.circuit.contact } else { OPEN };
                     self.net.set_resistance(self.r_hi, r);

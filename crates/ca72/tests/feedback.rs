@@ -49,15 +49,19 @@ fn feedback_is_not_heard_with_the_external_input_off() {
     }
 }
 
-/// At 30 % (the loop driven hard, not yet running away) every mode grows harmonics and lights
+/// At 25 % (the loop driven hard, not yet running away) every mode grows harmonics and lights
 /// OVERLOAD, and Potato (its preamplifier then solved as High Fidelity's) sounds as High
 /// Fidelity does: level within 10 %, brightness within 20 %. Further up the loop runs into
-/// self-oscillation, where the modes' small differences grow.
+/// self-oscillation (near 58 Hz, dark), where the modes' small differences grow: Potato from
+/// 30 %, High Fidelity from 35 % (2026-10-09, the contours' capacitors as electrolytics; both
+/// above 30 % before).
 #[test]
 fn feedback_overdrives_the_preamplifier_and_the_mixer() {
+    // EXTERNAL INPUT's VOLUME at 0.7: R9 at about 16 % of its track (its law: voice.rs,
+    // `ext_taper`).
     let ext = |p: &mut Panel| {
         p.ext_on = true;
-        p.ext_volume = 0.6;
+        p.ext_volume = 0.7;
         p.cutoff = 0.8;
     };
     let rms = |y: &[f64]| {
@@ -71,7 +75,7 @@ fn feedback_overdrives_the_preamplifier_and_the_mixer() {
         Quality::Potato,
     ] {
         let (dry, dry_lamp) = play(q, 0.0, ext);
-        let (wet, wet_lamp) = play(q, 0.3, ext);
+        let (wet, wet_lamp) = play(q, 0.25, ext);
         let (b0, b1) = (above_1k(&dry), above_1k(&wet));
         eprintln!(
             "{q:?}: OVERLOAD {dry_lamp:.2} -> {wet_lamp:.2}, power above 1 kHz {:.1} % -> {:.1} %, level {:.3} -> {:.3}",

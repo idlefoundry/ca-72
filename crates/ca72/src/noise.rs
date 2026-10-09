@@ -433,6 +433,12 @@ impl Gauss {
         (f64::from(self.next_u32()) + 1.0) / 4294967296.0
     }
 
+    /// A uniform number of variance 1 (between -sqrt(3) and sqrt(3)): white noise with
+    /// no transcendental functions a sample.
+    pub fn next_uniform(&mut self) -> f64 {
+        (2.0 * self.uniform() - 1.0) * 1.732_050_807_568_877_2
+    }
+
     /// A standard normal number.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> f64 {

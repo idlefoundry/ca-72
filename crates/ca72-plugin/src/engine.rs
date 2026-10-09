@@ -1212,12 +1212,16 @@ impl Engine {
     pub fn midi_wheels(&self) -> (f32, f32) {
         let share = (self.controls.bend_range / PITCH_WHEEL_SEMITONES).clamp(0.0, 1.0);
         let share = if share.is_finite() { share as f32 } else { 0.0 };
-        (0.5 + self.bend * share / 2.0, self.modulation)
+        (
+            0.5 + self.bend * share / 2.0,
+            ca72::modulation::midi_wheel(f64::from(self.modulation)) as f32,
+        )
     }
 
     /// The panel the voices play: the controls', in Potato, the MIDI input's bend moving
     /// the PITCH wheel by its share of the wheel's travel and its modulation wheel holding
-    /// MODULATION up to its own position.
+    /// MODULATION up to where the hardware reference's MIDI puts it
+    /// (`ca72::modulation::midi_wheel`).
     fn panel(&self) -> Panel {
         let c = &self.controls;
         let share = (c.bend_range / PITCH_WHEEL_SEMITONES).clamp(0.0, 1.0);
@@ -1225,7 +1229,9 @@ impl Engine {
         let mut p = c.panel;
         p.quality = Quality::Potato;
         p.pitch_wheel = (p.pitch_wheel + f64::from(self.bend) * share).clamp(-1.0, 1.0);
-        p.mod_wheel = p.mod_wheel.max(f64::from(self.modulation));
+        p.mod_wheel = p
+            .mod_wheel
+            .max(ca72::modulation::midi_wheel(f64::from(self.modulation)));
         p
     }
 

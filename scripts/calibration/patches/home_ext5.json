@@ -1,0 +1,13 @@
+{
+ "about": "The reference's home panel for session A (docs/calibration): oscillators and noise off, EXTERNAL INPUT on at VOLUME 5, CUTOFF fully clockwise, EMPHASIS and AMOUNT OF CONTOUR 0, KEYBOARD CONTROL off, both contours ATTACK 0 and SUSTAIN 10, DECAY off.",
+ "panel": {
+  "osc1_on": false, "osc2_on": false, "osc3_on": false, "noise_on": false,
+  "ext_on": true, "ext_volume": 0.5,
+  "cutoff": 1.0, "emphasis": 0.0, "contour_amount": 0.0,
+  "keyboard_control_1": false, "keyboard_control_2": false,
+  "filter_mod": false, "osc_mod": false, "mod_wheel": 0.0, "glide": 0.0, "glide_on": false,
+  "filter_attack": 0.0, "filter_sustain": 1.0,
+  "loudness_attack": 0.0, "loudness_sustain": 1.0,
+  "decay": false, "a440": false, "osc3_control": true
+ }
+}

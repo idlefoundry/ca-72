@@ -18,9 +18,18 @@ fn inputs(b: &VcfBench, cutoff: f64) -> Vec<Input> {
             r: 200e3,
             v: cutoff,
         },
-        Input { r: 300e3, v: b.kbd },
-        Input { r: 150e3, v: b.kbd },
-        Input { r: 47e3, v: 0.0 },
+        Input {
+            r: ca72::vcf::R53,
+            v: b.kbd,
+        },
+        Input {
+            r: ca72::vcf::R54,
+            v: b.kbd,
+        },
+        Input {
+            r: ca72::vcf::R74,
+            v: 0.0,
+        },
     ]
 }
 

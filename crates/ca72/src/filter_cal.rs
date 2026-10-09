@@ -26,6 +26,13 @@ pub const FACTORY: FilterTrims = FilterTrims {
     r73_pos: 0.782635,
 };
 
+/// The trims the voice uses: Folkman's, with RANGE (R39) where the hardware reference's filter
+/// sits, 0.31 octave above Folkman's at a given control voltage (docs/calibration).
+pub const CALIBRATED: FilterTrims = FilterTrims {
+    r39: 0.559,
+    ..FACTORY
+};
+
 impl FilterTrims {
     /// The converter with these trims.
     pub fn expo(&self) -> FilterExpo {
@@ -123,10 +130,16 @@ pub fn oscillation(rate: f64, trims: &FilterTrims, ins: &[Input]) -> f64 {
 }
 
 /// Whether the filter regenerates (its oscillation grows) with EMPHASIS at `emphasis`
-/// (0..1) for the control node's inputs.
+/// (0..1, on Figure 9-17's law: `voice::emphasis_r14_drawn`) for the control node's inputs.
 pub fn regenerates(rate: f64, trims: &FilterTrims, ins: &[Input], emphasis: f64) -> bool {
     let i0 = trims.expo().current(ins, 25.0);
-    let x = run(rate, trims, crate::voice::emphasis_r14(emphasis), i0, 0.4);
+    let x = run(
+        rate,
+        trims,
+        crate::voice::emphasis_r14_drawn(emphasis),
+        i0,
+        0.4,
+    );
     let peak = |a: f64, b: f64| {
         x[(a * rate) as usize..(b * rate) as usize]
             .iter()
@@ -205,7 +218,15 @@ pub fn folkman(rate: f64) -> FilterTrims {
     // track". Alternating the two as written diverges on the model (R49 swings wider each
     // round); the state it aims at is solved directly: R49 such that, with CUTOFF tuning the
     // low A to 440 Hz, the third A sounds 1760 Hz (the two octaves depend on R49 alone).
-    let kb = Keyboard::new(KeyboardCircuit::default(), rate);
+    // The original instrument's keyboard, as drawn: the string's bottom grounded (the
+    // voice's floor is the hardware reference's MIDI, board2.md B2-8).
+    let kb = Keyboard::new(
+        KeyboardCircuit {
+            r_floor: 0.0,
+            ..KeyboardCircuit::default()
+        },
+        rate,
+    );
     let (low, third) = (key_volts(&kb, 4), key_volts(&kb, 28));
     // (CUTOFF's search stays below its top, where the oscillation can pass Nyquist.)
     let tuned = |t: &FilterTrims| {

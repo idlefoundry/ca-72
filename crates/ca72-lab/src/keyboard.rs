@@ -20,11 +20,11 @@ pub const CONTACT_R: f64 = 0.1;
 
 /// The output's load at the instrument's usual settings, as a resistance to a voltage: the
 /// three oscillators' keyboard inputs (51.1K each, to summing junctions at -5 V) and the
-/// filter's KEYBOARD CONTROL 1 (R53 300K, to its control node near 0 V): the real-time
-/// model's `keyboard::LOAD_DEFAULT`.
+/// filter's KEYBOARD CONTROL 1 (R53, `ca72::vcf::R53`, to its control node near 0 V): the
+/// real-time model's `keyboard::LOAD_DEFAULT`.
 pub const LOAD_DEFAULT: (f64, f64) = (
-    1.0 / (3.0 / 51.1e3 + 1.0 / 300e3),
-    -5.0 * (3.0 / 51.1e3) / (3.0 / 51.1e3 + 1.0 / 300e3),
+    1.0 / (3.0 / 51.1e3 + 1.0 / ca72::vcf::R53),
+    -5.0 * (3.0 / 51.1e3) / (3.0 / 51.1e3 + 1.0 / ca72::vcf::R53),
 );
 /// The bench.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,14 +60,16 @@ fn common(title: &str, glide: Option<f64>, load: (f64, f64), solver: Solver) -> 
         "{title}\n.include {m}\n.include {k}\n\
          .options temp={t} tnom=25 reltol={rt} abstol=1e-12 vntol=1e-7 method={me} maxord=2\n\
          vp10 p10 0 10\nvn10 n10 0 -10\n\
-         * the key string: its low end grounded, fed at the top by the current source\n\
-         rtop kcur s{top} 1m\nvs0 s0 0 0\n",
+         * the key string: its low end over its floor to GND, fed at the top by the current\n\
+         * source\n\
+         rtop kcur s{top} 1m\nrfloor s0 0 {floor}\n",
         m = dir.join("models/mm-devices.lib").display(),
         k = dir.join("boards/board2-keyboard.lib").display(),
         t = solver.temp,
         rt = solver.reltol,
         me = solver.method,
         top = KEYS - 1,
+        floor = ca72::keyboard::R_FLOOR.max(1e-6),
     );
     for k in 0..KEYS - 1 {
         let _ = writeln!(s, "rs{k} s{} s{k} {STRING_R}", k + 1);
@@ -115,9 +117,10 @@ pub fn static_keys(
         .iter()
         .map(|p| (p.scalar("v(bus)"), p.scalar("v(out)")))
         .collect();
-    // The string's current from its top with key 0 held (the bus's current then goes to
-    // ground at the bottom, not through the string).
-    let current = plots[0].scalar("v(kcur)") / (STRING_R * (KEYS - 1) as f64);
+    // The string's current with key 0 held: across the string itself (the bus's current
+    // then joins at its bottom, not through the string).
+    let current =
+        (plots[0].scalar("v(kcur)") - plots[0].scalar("v(s0)")) / (STRING_R * (KEYS - 1) as f64);
     Ok((keys, current))
 }
 

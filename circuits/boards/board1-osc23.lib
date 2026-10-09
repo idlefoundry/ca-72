@@ -34,7 +34,7 @@ r87   pos vn 91k                    ; R87 91K
 .subckt mm_osc3ctl tune ctl sum vp vn
 r181  tune inv 51k                  ; R181 51K (56K before modification 8.2)
 r180  ctl inv 15k                   ; R180 15K
-r162  vp inv 3.01k                  ; R162 3.01K 1% (modification 8.2, kit 94-001; the drawing: 3K)
+r162  vp inv 2.96k                  ; R162: 3.01K 1% in modification 8.2 (kit 94-001; the drawing: 3K); 2.96K where the hardware reference sits (board1.md B1-12)
 r170  out inv 15k                   ; R170 15K 1%
 r150  vp pos8 1k                    ; R150 1K
 r155  pos8 0 3.01k                  ; R155 3.01K 1%

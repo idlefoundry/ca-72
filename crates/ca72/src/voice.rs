@@ -30,7 +30,7 @@ use crate::contour::{ContourCircuit, Contours, Controls, Panel as ContourPanel};
 use crate::expo::Input;
 use crate::keyboard::{Keyboard, KeyboardCircuit, Load};
 use crate::modulation::{LineLoads, Modulation, mod_wheel_r, pitch_wheel_volts};
-use crate::noise::{Noise, NoiseCircuit, NoiseLoads, NoiseOut};
+use crate::noise::{Gauss, Noise, NoiseCircuit, NoiseLoads, NoiseOut};
 use crate::preamp::{InLoop, Preamp, PreampCircuit};
 use crate::revsaw::{RevSaw, RevSawCircuit, RevSawOut};
 use crate::tuning::{
@@ -198,10 +198,151 @@ impl Default for Panel {
     }
 }
 
+/// The mixer's VOLUME pots (25K linear) as the hardware reference's oscillator 1 VOLUME
+/// sets its wiper: the fraction of the track at the dial's 2, 4, 6 and 8 through which the
+/// channel gives the reference's MIX level against 10 (-16.51, -9.42, -5.19 and -2.10 dB;
+/// docs/calibration, session C). A linear track's are 0.2, 0.4, 0.6 and 0.8.
+const VOLUME_TRACK: [(f64, f64); 6] = [
+    (0.0, 0.0),
+    (0.2, 0.1548),
+    (0.4, 0.3777),
+    (0.6, 0.6226),
+    (0.8, 0.8453),
+    (1.0, 1.0),
+];
+
+/// A knob's wiper as a fraction of its track, straight between a law's points (knob, track;
+/// the knob from 0 to 1), each point's own value exactly.
+fn track(points: &[(f64, f64)], knob: f64) -> f64 {
+    let p = knob.clamp(0.0, 1.0);
+    for w in points.windows(2) {
+        let ((pa, ta), (pb, tb)) = (w[0], w[1]);
+        if p == pb {
+            return tb;
+        }
+        if p <= pb {
+            return ta + (tb - ta) * (p - pa) / (pb - pa);
+        }
+    }
+    1.0
+}
+
+/// A mixer VOLUME knob's wiper as a fraction of its track: straight between
+/// [`VOLUME_TRACK`]'s points.
+pub fn volume_track(volume: f64) -> f64 {
+    track(&VOLUME_TRACK, volume)
+}
+
+/// AMOUNT OF CONTOUR's pot (R12, 5K linear) as the hardware reference's knob sets its wiper:
+/// the fraction of the track at 2.5, 4, 5 and 7.5 at which the voice's filter moves as the
+/// reference's does for the same contour (the filter self-oscillating; docs/calibration):
+/// 0.606, 1.506 and 2.389 octaves for 1.465 V at 2.5, 5 and 7.5 (session J, CUTOFF -2), 2.88
+/// octaves for 3.755 V at 4 (session L, CUTOFF -1). A linear track's are 0.25, 0.4, 0.5 and
+/// 0.75.
+const CONTOUR_AMOUNT_TRACK: [(f64, f64); 6] = [
+    (0.0, 0.0),
+    (0.25, 0.2080),
+    (0.4, 0.3796),
+    (0.5, 0.5111),
+    (0.75, 0.7950),
+    (1.0, 1.0),
+];
+
+/// The AMOUNT OF CONTOUR knob's wiper as a fraction of its track.
+pub fn contour_amount_track(amount: f64) -> f64 {
+    track(&CONTOUR_AMOUNT_TRACK, amount)
+}
+
+/// The contours' SUSTAIN pots (R18 and R19, 5K linear across +10 V) as the hardware
+/// reference's knobs set their wipers: the fraction of the track at 2, 4, 5, 6 and 8 at which
+/// each contour holds the reference's level (sessions N and F; docs/calibration), the two
+/// contours' fractions averaged (they part by 0.015 at most). A linear track's are 0.2, 0.4,
+/// 0.5, 0.6 and 0.8; the ends hold where the reference's do.
+const SUSTAIN_TRACK: [(f64, f64); 7] = [
+    (0.0, 0.0),
+    (0.2, 0.1611),
+    (0.4, 0.3735),
+    (0.5, 0.4924),
+    (0.6, 0.6185),
+    (0.8, 0.8375),
+    (1.0, 1.0),
+];
+
+/// A SUSTAIN knob's wiper as a fraction of its track.
+pub fn sustain_track(sustain: f64) -> f64 {
+    track(&SUSTAIN_TRACK, sustain)
+}
+
+/// Oscillator 2's FREQUENCY pot (R4, 5K linear) as the hardware reference's knob sets its
+/// wiper: the fraction of the track at the dial's stops and its -5 and +5 marks (the knob
+/// 0..1 for -7.5..+7.5) at which the oscillator stands where the reference's does from its
+/// 0 mark (session N, docs/calibration). The 0 mark stays the centre, where the factory
+/// tuning puts it in unison with oscillator 1. A linear track's are 0, 1/6, 5/6 and 1; the
+/// clockwise stop reaches 0.06 semitone short of the reference's.
+const OSC2_FREQ_TRACK: [(f64, f64); 5] = [
+    (0.0, 0.0334),
+    (1.0 / 6.0, 0.1195),
+    (0.5, 0.5),
+    (5.0 / 6.0, 0.9000),
+    (1.0, 1.0),
+];
+
+/// Oscillator 3's FREQUENCY pot (R5) likewise (OSC. 3 CONTROL on when measured); its
+/// clockwise stop reaches 0.33 semitone short of the reference's.
+const OSC3_FREQ_TRACK: [(f64, f64); 5] = [
+    (0.0, 0.0008),
+    (1.0 / 6.0, 0.1060),
+    (0.5, 0.5),
+    (5.0 / 6.0, 0.9209),
+    (1.0, 1.0),
+];
+
+/// Oscillator 2's FREQUENCY knob's wiper as a fraction of its track.
+pub fn osc2_freq_track(freq: f64) -> f64 {
+    track(&OSC2_FREQ_TRACK, freq)
+}
+
+/// Oscillator 3's FREQUENCY knob's wiper as a fraction of its track.
+pub fn osc3_freq_track(freq: f64) -> f64 {
+    track(&OSC3_FREQ_TRACK, freq)
+}
+
+/// AMOUNT OF CONTOUR (R12, 5K linear from the filter contour's output to GND, through
+/// [`contour_amount_track`]) and R74 ([`crate::vcf::R74`]) into the control node: the input it
+/// makes with the contour at `env_f` volts.
+pub fn contour_input(amount: f64, env_f: f64) -> Input {
+    let t = contour_amount_track(amount);
+    Input {
+        r: crate::vcf::R74 + 5e3 * t * (1.0 - t),
+        v: env_f * t,
+    }
+}
+
+/// CUTOFF FREQUENCY (R11, 5K linear across +-10 V) as the hardware reference's knob sets its
+/// wiper: the fraction of the track at the dial's -4, -2, 2 and 4 at which the voice's filter
+/// sits where the reference's does, each at its CUT CV 0 (docs/calibration, session E). The
+/// dial runs -5 to 5 between the knob's stops (photographed), where the two agree, as at 0. A
+/// straight track's are 0.1, 0.3, 0.7 and 0.9.
+const CUTOFF_TRACK: [(f64, f64); 7] = [
+    (0.0, 0.0),
+    (0.1, 0.0582),
+    (0.3, 0.2669),
+    (0.5, 0.5),
+    (0.7, 0.7304),
+    (0.9, 0.9346),
+    (1.0, 1.0),
+];
+
+/// The CUTOFF knob's wiper as a fraction of its track: straight between [`CUTOFF_TRACK`]'s
+/// points.
+pub fn cutoff_track(cutoff: f64) -> f64 {
+    track(&CUTOFF_TRACK, cutoff)
+}
+
 /// The input a mixer channel's VOLUME pot (25K linear, its wiper through `r_series` to the
 /// bus, near GND) puts on its source, ohm.
 fn channel_load(volume: f64, r_series: f64) -> f64 {
-    let p = volume.clamp(0.0, 1.0);
+    let p = volume_track(volume);
     let bottom = 25e3 * p;
     25e3 * (1.0 - p) + bottom * r_series / (bottom + r_series)
 }
@@ -244,11 +385,10 @@ pub const NOISE_CALIBRATION_BAND: (f64, f64) = (20.0, 20e3);
 /// Calibrates the noise source's density (R26's job): the white noise's current into the bus
 /// through its channel against oscillator 1's triangle's through its channel, both at
 /// [`NOISE_CALIBRATION_VOLUME`], the noise over [`NOISE_CALIBRATION_BAND`] (the continuous
-/// model's response).
-fn calibrate_noise(vco: &mut Vco, rate: f64, tuning: &Tuning) -> f64 {
+/// model's response). `key`: the keyboard's voltage with low A held.
+fn calibrate_noise(vco: &mut Vco, rate: f64, tuning: &Tuning, key: f64) -> f64 {
     let vol = NOISE_CALIBRATION_VOLUME;
     // The triangle's current through its channel, low A on 2' (440 Hz), 200 periods.
-    let key = f64::from(LOW_A) * crate::tuning::KEY_STEP;
     let d = osc_drive_with(Osc::One, tuning, key, &Buses::RESTING, Range::R2);
     let i_in = d.apply(&mut vco.expo);
     vco.reset();
@@ -298,14 +438,127 @@ pub fn audio_taper(p: f64) -> f64 {
     (crate::ulp::pow(81.0, p.clamp(0.0, 1.0)) - 1.0) / 80.0
 }
 
-/// The ATTACK and DECAY pots: 1M audio rheostats, ohm.
-fn time_pot(p: f64) -> f64 {
+/// The ATTACK and DECAY pots on Figure 9-17: 1M audio rheostats (the generic taper), ohm.
+pub fn time_pot_drawn(p: f64) -> f64 {
     1e6 * audio_taper(p)
 }
 
-/// EMPHASIS: R14, 50K reverse audio used as a rheostat, 50K at 0 and 0 at 10.
-pub fn emphasis_r14(p: f64) -> f64 {
+/// The hardware reference's ATTACK and DECAY at its dial's printed marks, as the pot's
+/// resistance through which the CA-72's contour takes the reference's time: 10 to 90 % of the
+/// attack, 90 to 50 % of the final decay (docs/calibration, sessions F and J). The marks, on
+/// the reference's dial (its manual's drawing and the owner's photographs): 200 ms at -90
+/// degrees (0.2 of the travel), 600 ms at -30 (0.4), the top tick (0.5), 1 s at 30 (0.6), 5 s
+/// at 60 (0.7), 10 s at 105 (0.85; the CA-72's panel prints 5 s at 67 and 10 s at 108), and
+/// fully clockwise. The generic taper's are 17.6K, 53.9K, 100K, 162K, 268K, 535K and 1M.
+///
+/// With the timing capacitors as the reference's are (their series resistance and absorption,
+/// `contour::C_ABSORPTION`), each resistance is the one at which the contour keeps the time
+/// the ideal capacitor gave at the first fit, 0.88 to 0.90 of it; at 0.15, the generic taper's
+/// 11.7K so scaled, and below it the generic taper's shape (docs/calibration, change 25).
+pub const FILTER_ATTACK: [(f64, f64); 8] = [
+    (0.15, 10.49e3),
+    (0.2, 13.56e3),
+    (0.4, 27.64e3),
+    (0.5, 36.02e3),
+    (0.6, 46.90e3),
+    (0.7, 225.9e3),
+    (0.85, 669.0e3),
+    (1.0, 946.8e3),
+];
+pub const FILTER_DECAY: [(f64, f64); 8] = [
+    (0.15, 10.47e3),
+    (0.2, 15.94e3),
+    (0.4, 33.12e3),
+    (0.5, 43.46e3),
+    (0.6, 52.19e3),
+    (0.7, 236.8e3),
+    (0.85, 581.7e3),
+    (1.0, 768.2e3),
+];
+pub const LOUDNESS_ATTACK: [(f64, f64); 8] = [
+    (0.15, 10.45e3),
+    (0.2, 14.13e3),
+    (0.4, 30.97e3),
+    (0.5, 41.85e3),
+    (0.6, 47.29e3),
+    (0.7, 267.0e3),
+    (0.85, 703.8e3),
+    (1.0, 982.6e3),
+];
+pub const LOUDNESS_DECAY: [(f64, f64); 8] = [
+    (0.15, 10.47e3),
+    (0.2, 13.00e3),
+    (0.4, 27.42e3),
+    (0.5, 37.04e3),
+    (0.6, 44.53e3),
+    (0.7, 206.4e3),
+    (0.85, 558.5e3),
+    (1.0, 755.4e3),
+];
+
+/// An ATTACK or DECAY pot as the voice has it, ohm: to `law`'s first point (the dial's tick
+/// past its 10 ms mark, up to which the reference's times agree with the generic taper within
+/// where its knob was set) the generic taper's shape scaled to meet it, then straight in its
+/// logarithm through `law`'s points.
+pub fn time_pot(p: f64, law: &[(f64, f64)]) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    let (p0, r0) = law[0];
+    if p <= p0 {
+        return r0 * time_pot_drawn(p) / time_pot_drawn(p0);
+    }
+    let mut a = law[0];
+    for &b in &law[1..] {
+        if p == b.0 {
+            return b.1;
+        }
+        if p < b.0 {
+            return a.1 * crate::ulp::pow(b.1 / a.1, (p - a.0) / (b.0 - a.0));
+        }
+        a = b;
+    }
+    a.1
+}
+
+/// EMPHASIS on Figure 9-17: R14, 50K reverse audio used as a rheostat, 50K at 0 and 0 at 10
+/// (the generic taper). Folkman's regeneration calibration and the service manual's checks run
+/// on it (`filter_cal`).
+pub fn emphasis_r14_drawn(p: f64) -> f64 {
     50e3 * audio_taper(1.0 - p)
+}
+
+/// R14's resistance at EMPHASIS 2.5, 5, 6, 7, 7.5 and 8.5 such that the filter's passband
+/// falls as the hardware reference's does (-2.25, -9.53, -10.43, -11.92, -12.50 and -14.67
+/// dB: docs/calibration, sessions E and J), and at 2, 3 and 4 such that its passband and peak
+/// stand as the reference's do with its corner near 800 Hz (session N). The generic taper's
+/// are 20.4K, 16.25K, 12.9K, 8.1K, 5.0K, 3.0K, 1.71K, 1.25K and 0.58K.
+const EMPHASIS_R14: [(f64, f64); 10] = [
+    (0.0, 50e3),
+    (0.2, 30.68e3),
+    (0.25, 18.82e3),
+    (0.3, 9.47e3),
+    (0.4, 3.64e3),
+    (0.5, 2.91e3),
+    (0.6, 2.30e3),
+    (0.7, 1.548e3),
+    (0.75, 1.35e3),
+    (0.85, 834.0),
+];
+
+/// EMPHASIS as the voice has it: R14 through [`EMPHASIS_R14`], straight in its logarithm
+/// between them, and from 8.5 to 10 the generic taper's shape scaled to meet it.
+pub fn emphasis_r14(p: f64) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    let (pn, rn) = EMPHASIS_R14[EMPHASIS_R14.len() - 1];
+    if p >= pn {
+        return rn * audio_taper(1.0 - p) / audio_taper(1.0 - pn);
+    }
+    for w in EMPHASIS_R14.windows(2) {
+        let ((pa, ra), (pb, rb)) = (w[0], w[1]);
+        if p <= pb {
+            return ra * crate::ulp::pow(rb / ra, (p - pa) / (pb - pa));
+        }
+    }
+    rn
 }
 
 /// The mixer's bus as a Norton source: current and conductance.
@@ -314,7 +567,7 @@ fn channel(v: f64, r_src: f64, volume: f64, on: bool, r_series: f64) -> (f64, f6
         // Off, the switch grounds the series resistor's far end: it loads the bus only.
         return (0.0, 1.0 / r_series);
     }
-    let p = volume.clamp(0.0, 1.0);
+    let p = volume_track(volume);
     let (up, down) = (r_src + 25e3 * (1.0 - p), (25e3 * p).max(1e-3));
     let v_w = v * down / (up + down);
     let r_w = up * down / (up + down);
@@ -351,7 +604,35 @@ fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f6
 /// GLIDE's resistance in circuit: the 5M pot (a rheostat), shorted by the GLIDE switch
 /// off, ohm.
 pub fn glide_r(p: f64, on: bool) -> f64 {
-    if on { 5e6 * audio_taper(p) } else { 0.0 }
+    if on { glide_pot(p) } else { 0.0 }
+}
+
+/// GLIDE as Figure 9-17 draws it: 5M on the generic audio taper, ohm.
+pub fn glide_pot_drawn(p: f64) -> f64 {
+    5e6 * audio_taper(p)
+}
+
+/// GLIDE's resistance at 2.5, 5, 7.5 and 10 such that the keyboard's voltage slides an
+/// octave, up and down, at the hardware reference's rates (20 to 80 % of C3 to C4 and back:
+/// 61 and 22, 29 and 18, 3.8 and 2.1, 1.6 and 0.9 octaves a second; docs/calibration,
+/// session J). The generic taper's are 125K, 500K, 1.63M and 5M.
+const GLIDE_LAW: [(f64, f64); 4] = [(0.25, 162e3), (0.5, 257e3), (0.75, 2.1e6), (1.0, 5e6)];
+
+/// GLIDE as the voice has it: the generic taper's shape to 2.5, scaled to meet
+/// [`GLIDE_LAW`], then straight in its logarithm through it, ohm.
+pub fn glide_pot(p: f64) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    let (p0, r0) = GLIDE_LAW[0];
+    if p <= p0 {
+        return r0 * audio_taper(p) / audio_taper(p0);
+    }
+    for w in GLIDE_LAW.windows(2) {
+        let ((pa, ra), (pb, rb)) = (w[0], w[1]);
+        if p <= pb {
+            return ra * crate::ulp::pow(rb / ra, (p - pa) / (pb - pa));
+        }
+    }
+    GLIDE_LAW[GLIDE_LAW.len() - 1].1
 }
 
 /// How long a released key's pitch contact stays closed after its trigger contact opens,
@@ -592,10 +873,25 @@ pub struct PreampPart {
     pub in_loop: InLoop,
 }
 
+/// The mixer's own noise as a Norton current on its bus, A RMS from 0 to 24 kHz (white):
+/// the hardware reference's MIX jack carries 82.2 dB under a sawtooth at VOLUME 10 with
+/// every source off (-103.5 against -21.3 dBFS, the interface's own floor 12 to 15 dB
+/// lower; docs/calibration, sessions J and L), and the CA-72's bus 0.0319 mA RMS for that
+/// sawtooth. The filter's self-oscillation starts from it, as the reference's does from its
+/// circuit's noise; without it, nothing on the bus, the model's filter never starts.
+pub const MIXER_HISS: f64 = 2.48e-9;
+
+/// A seed for the mixer's noise, apart from the noise source's.
+const HISS_SEED: u64 = 0x6869_7373;
+
 /// The modulation line, the oscillators, the mixer and the filter's control node.
 #[derive(Debug, Clone)]
 pub struct FrontPart {
     rate: f64,
+    /// The mixer's noise ([`MIXER_HISS`]): its generator, and its RMS a sample at the
+    /// front's rate.
+    hiss: Gauss,
+    hiss_rms: f64,
     /// Each oscillator's tuning (TUNE and the octave step shared) and its oscillator.
     tunings: [Tuning; 3],
     vcos: [Vco; 3],
@@ -641,10 +937,41 @@ pub struct BackPart {
 /// output's (so a render fed back to the input behaves as the instrument does; A25).
 pub const INPUT_VOLTS: f64 = 5.0;
 
-/// R9 (EXTERNAL INPUT VOLUME, 1M audio) at `volume`: its divider's ratio and source
-/// resistance, ohm.
+/// R9's law: the fraction of its track below the wiper at EXTERNAL INPUT VOLUME's marks 2, 4,
+/// 5, 6, 8 and 10, solved so that the voice's gain from the jack to the mixer (the wiper loaded
+/// by the preamplifier, about 97K) falls from 10 as the hardware reference's does: -39.5,
+/// -33.1, -31.3, -29.9 and -16.9 dB (docs/calibration, session H). Figure 9-17's "1M audio"
+/// with the generic taper gave -36.5, -28.4, -25.7, -23.4 and -18.6.
+const EXT_TAPER: [(f64, f64); 6] = [
+    (0.2, 0.011_81),
+    (0.4, 0.028_45),
+    (0.5, 0.037_10),
+    (0.6, 0.046_45),
+    (0.8, 0.509_38),
+    (1.0, 1.0),
+];
+
+/// R9 at `p` (0..1), as a fraction of its track: between the measured marks, straight in the
+/// fraction's logarithm; below 2, the generic audio taper's shape scaled to meet it.
+pub fn ext_taper(p: f64) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    let (p0, t0) = EXT_TAPER[0];
+    if p <= p0 {
+        return t0 * audio_taper(p) / audio_taper(p0);
+    }
+    for w in EXT_TAPER.windows(2) {
+        let ((pa, ta), (pb, tb)) = (w[0], w[1]);
+        if p <= pb {
+            let u = (p - pa) / (pb - pa);
+            return ta * crate::ulp::pow(tb / ta, u);
+        }
+    }
+    1.0
+}
+
+/// R9 (EXTERNAL INPUT VOLUME, 1M) at `volume`: its divider's ratio and source resistance, ohm.
 fn ext_volume(volume: f64) -> (f64, f64) {
-    let t = audio_taper(volume.clamp(0.0, 1.0));
+    let t = ext_taper(volume);
     (t, 1e6 * t * (1.0 - t))
 }
 
@@ -694,7 +1021,7 @@ impl Voice {
         }
         let revsaw = RevSaw::new(RevSawCircuit::default(), rate)
             .expect("the reverse sawtooth's operating point");
-        let density = calibrate_noise(&mut vcos[0].clone(), rate, &t1);
+        let density = calibrate_noise(&mut vcos[0].clone(), rate, &t1, volts(LOW_A));
         for v in &mut vcos {
             v.prepare(oversampling(Quality::Potato).0);
         }
@@ -772,11 +1099,13 @@ impl Voice {
                 },
                 front: FrontPart {
                     rate,
+                    hiss: Gauss::new(HISS_SEED),
+                    hiss_rms: MIXER_HISS * libm::sqrt(rate / 48e3),
                     tunings,
                     vcos,
                     revsaw,
-                    expo: crate::filter_cal::FACTORY.expo(),
-                    table: ExpoTable::shared(crate::filter_cal::FACTORY.expo(), 25.0),
+                    expo: crate::filter_cal::CALIBRATED.expo(),
+                    table: ExpoTable::shared(crate::filter_cal::CALIBRATED.expo(), 25.0),
                     modulation,
                     filter_node: 0.0,
                     i0: 0.0,
@@ -787,10 +1116,10 @@ impl Voice {
                 },
                 back: BackPart {
                     vcf: {
-                        // The filter as the factory calibrated it (Folkman's procedure:
-                        // filter_cal).
+                        // The filter as calibrated (Folkman's procedure, RANGE where the
+                        // hardware reference's sits: filter_cal::CALIBRATED).
                         let mut f = Vcf::new(rate, oversampling(Quality::NoCompromises).1);
-                        f.circuit = crate::filter_cal::FACTORY.circuit();
+                        f.circuit = crate::filter_cal::CALIBRATED.circuit();
                         f.prepare(oversampling(Quality::Potato).1);
                         f
                     },
@@ -839,6 +1168,7 @@ impl Voice {
     /// Seeds the noise generator (each device its own stream; a render repeats).
     pub fn set_seed(&mut self, seed: u64) {
         self.ctl.noise.reseed(seed);
+        self.audio.front.hiss = Gauss::new(seed ^ HISS_SEED);
     }
 
     pub fn rate(&self) -> f64 {
@@ -1006,14 +1336,21 @@ impl Voice {
 /// The contour generators' settings from the panel, EXT. S-TRIG open or closed.
 fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourPanel {
     let [a0, d0, a1, d1] = pots;
-    let k = |c: ContourKnobs, a: &mut Memo<f64>, d: &mut Memo<f64>| Controls {
-        attack: a.get(c.attack, time_pot),
-        decay: d.get(c.decay, time_pot),
-        sustain: c.sustain,
+    type Law = [(f64, f64)];
+    let k = |c: ContourKnobs, a: &mut Memo<f64>, d: &mut Memo<f64>, la: &Law, ld: &Law| Controls {
+        attack: a.get(c.attack, |x| time_pot(x, la)),
+        decay: d.get(c.decay, |x| time_pot(x, ld)),
+        sustain: sustain_track(c.sustain),
     };
     ContourPanel {
-        filter: k(p.filter_contour, a0, d0),
-        loudness: k(p.loudness_contour, a1, d1),
+        filter: k(p.filter_contour, a0, d0, &FILTER_ATTACK, &FILTER_DECAY),
+        loudness: k(
+            p.loudness_contour,
+            a1,
+            d1,
+            &LOUDNESS_ATTACK,
+            &LOUDNESS_DECAY,
+        ),
         decay_on: p.decay,
         s_trig,
     }
@@ -1374,7 +1711,8 @@ impl FrontPart {
         // external input switched off loads it. Oscillator 3's switch output also feeds the
         // modulation mix through R23: its node is loaded by both.
         laps.lap(crate::prof::Part::Modulation);
-        let mut i_bus = 0.0;
+        // The mixer's own noise, then the channels.
+        let mut i_bus = self.hiss_rms * self.hiss.next_uniform();
         if p.ext_on {
             i_bus += i_pre;
         }
@@ -1393,9 +1731,11 @@ impl FrontPart {
             }
             let osc = match n {
                 0 => Osc::One,
-                1 => Osc::Two { freq: op.freq },
+                1 => Osc::Two {
+                    freq: osc2_freq_track(op.freq),
+                },
                 _ => Osc::Three {
-                    freq: op.freq,
+                    freq: osc3_freq_track(op.freq),
                     control: p.osc3_control,
                 },
             };
@@ -1452,7 +1792,7 @@ impl FrontPart {
         // The filter's control node: CUTOFF, AMOUNT OF CONTOUR, KEYBOARD CONTROL 1 and 2,
         // R52 (the modulation line with FILTER MODULATION on, else grounded) and R51 (the
         // external control's jack, empty: grounded).
-        let pos = p.cutoff.clamp(0.0, 1.0);
+        let pos = cutoff_track(p.cutoff);
         let r_cut = 200e3 + 5e3 * pos * (1.0 - pos);
         let amt = p.contour_amount.clamp(0.0, 1.0);
         let open = Input {
@@ -1464,17 +1804,20 @@ impl FrontPart {
                 r: r_cut,
                 v: -10.0 + 20.0 * pos,
             },
-            Input {
-                r: 47e3 + 5e3 * amt * (1.0 - amt),
-                v: env_f * amt,
-            },
+            contour_input(amt, env_f),
             if p.keyboard_control_1 {
-                Input { r: 300e3, v: v_kbd }
+                Input {
+                    r: crate::vcf::R53,
+                    v: v_kbd,
+                }
             } else {
                 open
             },
             if p.keyboard_control_2 {
-                Input { r: 150e3, v: v_kbd }
+                Input {
+                    r: crate::vcf::R54,
+                    v: v_kbd,
+                }
             } else {
                 open
             },
