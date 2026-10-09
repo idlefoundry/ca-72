@@ -130,6 +130,9 @@ pub struct Panel {
     /// OSCILLATOR MODULATION and FILTER MODULATION.
     pub osc_mod: bool,
     pub filter_mod: bool,
+    /// FILTER MODE, which the original does not have (decisions.md R-HP): HI, the hardware
+    /// reference's high-pass (the mixer's output less the filter's); LO, the filter as drawn.
+    pub filter_hi: bool,
     /// The wheels: pitch -1..1 (0 in its detent), MODULATION 0..1 (fully forward).
     pub pitch_wheel: f64,
     pub mod_wheel: f64,
@@ -187,6 +190,7 @@ impl Default for Panel {
             mod_mix: 0.0,
             osc_mod: false,
             filter_mod: false,
+            filter_hi: false,
             pitch_wheel: 0.0,
             mod_wheel: 0.0,
             ext_volume: 0.5,
@@ -1810,6 +1814,7 @@ impl BackPart {
         self.vcf.circuit.r14 = self.emphasis.get(p.emphasis, emphasis_r14);
         self.vcf.set_oversample(oversampling(p.quality).1);
         self.vcf.set_quality(p.quality);
+        self.vcf.high_pass = p.filter_hi;
         let y = self.vcf.tick(f.i_bus, f.g_bus, f.i0);
         laps.lap(crate::prof::Part::Filter);
         self.vca.a440 = self.a440.tick(p.a440);
