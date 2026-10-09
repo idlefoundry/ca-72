@@ -739,3 +739,33 @@ def session_j():
             t.append(panel_take(f"{src}_vol{v * 10:g}", p, line))
         p[f"{src}_on"] = False
     return t
+
+
+ES6_LEVELS = (0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.45, -0.05, 0.0)
+
+
+def es6_take(name, set_line):
+    """The modular's DC input calibrated: the ES-3 output that drives CUT CV patched into it
+    instead, held at known fractions of full scale (0.6 s each; 0 V to about 4.7 V and back,
+    and one step below zero)."""
+    s = LEAD + 0.6 * len(ES6_LEVELS) + 0.2
+    cv = zeros(s)
+    segs = []
+    for i, c in enumerate(ES6_LEVELS):
+        t0 = LEAD + 0.6 * i
+        cv[span(t0, t0 + 0.6)] = c
+        segs.append([round(t0 + 0.2, 4), round(t0 + 0.55, 4), c])
+    x = take(name, s, {"cut": cv}, {"segments": segs},
+             "the ES-3's CUT CV output looped into the modular's DC input at known levels")
+    x["set"], x["record_optical"] = set_line, True
+    return x
+
+
+def session_l():
+    """Ringing Saw Line's filter, piece by piece (MIDI phrases, `phrases/three_keys.json`,
+    with `midi_capture.py`), and the DC inputs that record FILT CONT and LOUD CONT
+    calibrated against the ES-3."""
+    return [es6_take("es6_cal_fc", "the ES-3 output that feeds CUT CV patched into the DC "
+                     "input that records FILT CONT"),
+            es6_take("es6_cal_lc", "the same output patched into the DC input that records "
+                     "LOUD CONT")]
