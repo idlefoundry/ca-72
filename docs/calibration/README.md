@@ -598,6 +598,38 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     Every preset comes out 0.2 to 0.6 dB louder (the tail at full SUSTAIN), its spectrum
     within 1.6 dB, and is re-levelled (R42).
 
+32. **The VCA balance trims as the reference's: R14 at 0.564, R12 at 0.496**
+    (`vca::R14_REFERENCE`, `R12_REFERENCE`, `board4-vca.lib`, 2026-10-09). At SUSTAIN 2 the
+    VCA adds almost nothing, so in session O each harmonic less its value at 2, taken with
+    its phase against the fundamental's, is the VCA's own. At the resonance the reference's
+    VCA added a 2nd harmonic of -69.7 to -56.2 dBc (0.003 to 0.1 of full scale) at SUSTAIN
+    10, -59.7 at 7 and -67.0 at 5 (at 0.1), at 160 to 180 degrees: against the filter's own.
+    The CA-72's added -47.6 to -36.3 dBc at 0 degrees, in the filter's phase: 20 dB stronger
+    and the other way round (the two outputs' polarity is the same: session A's sawtooth riff
+    correlates at +0.99). With the filter open the CA-72 made 11 to 15 dB more 2nd harmonic
+    at SUSTAIN 10 (-38.2 against -49.4 dBc at 0.01, -19.0 against -34.4 at 0.1). The
+    balance trims set it: the factory procedure (`VcaCircuit::calibrated`) nulls what EXT.
+    LOUDNESS leaks to the output, not the 2nd harmonic. Fitted to it alone, R14 0.580 and
+    R12 0.508 give the VCA the reference's 2nd harmonic at the three SUSTAINs within 2 dB,
+    but its thump (session O's takes hold the gate half a second before their tone) grows by
+    0.08 of the tone from its first millisecond, 2.6 dB in all, where the factory trims had
+    the reference's (0.223 of the tone for 0.01 of full scale at 47 ms, against 0.218 at
+    40). Fitted to both on a grid, R14 0.564 and R12 0.496 put the VCA's 2nd harmonic in the
+    reference's phase at every SUSTAIN, on it at 7, 2.5 dB over at 5 and 7 to 8 dB under at
+    10, and the thump within 0.035 of the tone of the reference's from 8 to 100 ms
+    (`tests/vca_balance.rs`). In the voice at SUSTAIN 10 the 2nd harmonic is now -40.6 to
+    -35.5 dBc at the resonance against the reference's -42.3 to -38.5 (-35.0 to -29.6
+    before), and with the filter open -44.8 to -27.8 against -49.4 to -34.4 (-38.2 to
+    -19.0): the rest is the filter's own (below) and, at the top, the reference's VCA's,
+    which grows faster with drive than any balance gives it. The thump: 0.246 of the tone
+    at 45 ms, 1 dB over the reference's. The netlist's defaults take the same positions, and
+    against ngspice the VCA keeps its budgets with either set (`vca_realtime`; where the 2nd
+    harmonic is now small, its error under -58 dBc; the 5th at 3 V reads 1.58 dB over
+    ngspice's, -59.8 dBc). A departure from the service manual's procedure, not from Moog's
+    schematic. The presets move 0.1 to 0.5 dB in level (Pink Riser 1.0) and are re-levelled
+    (R42); their spectra within 2.4 dB, but Cruising Whistle's, whose self-oscillating
+    filter's 2nd harmonic (the 6.35 kHz band) the VCA no longer adds to: 5.9 dB down.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -608,6 +640,14 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   full scale.
 - **The VCA's law at its top** (change 31): from 1 to 4 V of contour the CA-72's gain stands
   0.4 to 0.6 dB further under SUSTAIN 10's than the reference's.
+- **The VCA's 2nd harmonic at full SUSTAIN** (change 32): 7 to 8 dB under the reference's
+  at the resonance, 8 to 11 dB under with the filter open, where the reference's grows
+  faster than as the square of the drive; and the thump at SUSTAIN 5, 0.37 of the tone
+  against the reference's 0.22, which with ATTACK and DECAY at 0 peaks within 4 ms.
+- **The 3rd harmonic at the resonance at full SUSTAIN:** -60.0 to -51.0 dBc against the
+  reference's -53.6 to -45.3 (at 0.01 to 0.1 of full scale), where with the filter open it
+  is within 0.9 dB: the VCA's 3rd harmonic and the filter's meet at another phase, and the
+  CA-72's peak stands 16 Hz under the reference's sine.
 - **EMPHASIS's peak against its passband:** at the same passband loss the CA-72's peak
   stands 1 to 1.5 dB higher than the reference's (+14.7 to +15.3 dB at 6 against +13.9 to
   +14.3; +21.1 to +22.3 at 7 against +19.4 to +21.3), and at 7.5, near regeneration, up to 5
