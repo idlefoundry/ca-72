@@ -679,7 +679,9 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   Shoreline Wash -0.11 (mostly EMPHASIS's and the contours' laws, and the contours' fall
   after a fast attack). Ringing Saw Line's oscillator 2 stands 3.4 cents sharp, as the
   reference's did on session I's take (R42): at FREQUENCY 0 an exact octave holds its phase
-  where the octave adds up, 3.6 dB over the fundamental, where the reference's pair rolls. Presets keep their
+  where the octave adds up, 3.6 dB over the fundamental, where the reference's pair rolls.
+  The six other presets whose oscillators stood at unison or an octave are detuned as a
+  panel set by ear (+3.4 and -7 cents; Hollow Glider's oscillator 3 -16, as on its take). Presets keep their
   knobs' positions where a law changed: those between a law's ends sound as the reference
   would at those marks (Ladder Kick's sweep, for one, starts about 2 semitones lower).
 
