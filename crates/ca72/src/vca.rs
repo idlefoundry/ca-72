@@ -70,7 +70,10 @@ pub struct VcaCircuit {
     pub r18: f64,
     pub r12: f64,
     pub r12_pos: f64,
-    /// Q18: R35 (collector), R59 (base, from the contour), R37 and R43 (emitter).
+    /// Q18: R35 (collector), R59 (base, from the contour), R37 and R43 (emitter). R43 is
+    /// the hardware reference's 180K, where Figure 9-11 draws 270K (docs/calibration, change
+    /// 31): Q18 conducts from a lower contour, so the VCA closes later in a release and holds
+    /// a low SUSTAIN louder, and its tail at full SUSTAIN is a little larger.
     pub r35: f64,
     pub r59: f64,
     pub r37: f64,
@@ -125,7 +128,8 @@ impl Default for VcaCircuit {
             r35: 1e3,
             r59: 68e3,
             r37: 6.8e3,
-            r43: 270e3,
+            // 270K drawn; the reference's 180K (change 31): a departure from Moog's schematic.
+            r43: 180e3,
             r33: 470.0,
             r51: 33e3,
             r42: 3.3e3,

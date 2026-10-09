@@ -570,12 +570,44 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     reference's. Folkman's procedure keeps the drawing's law. Upright Pluck now 1.4 and
     2.9 dB under the reference at 400 and 800 Hz (5.6 and 5.7 before).
 
+31. **The VCA's R43: 270K to 180K** (`VcaCircuit::r43`, `board4-vca.lib`, board4.md B4-10,
+    2026-10-09). Session O played sines from the ES-3 into EXT, stepped from 0.0003 to 0.1
+    of full scale (oscillator 1's sawtooth at VOLUME 10 reaches the mixer as about 0.03
+    does): C3 with the filter open, and 995 Hz at the resonance of EMPHASIS 7 with CUT CV at
+    -0.5 (the reference's peak at 998 Hz, the CA-72's at 982), the VCA at LOUDNESS SUSTAIN
+    10, 7, 5 and 2. Against SUSTAIN 10 the reference's VCA passed -3.25, -8.12 and -32.6 dB
+    at 7, 5 and 2, the CA-72's -3.96, -9.27 and -49.9. Session F's slow releases (a 1 kHz
+    tone held through LOUDNESS DECAY at 10 s and fully clockwise, LOUD CONT recorded) give
+    the whole law: at 4.0, 2.0, 1.0, 0.6, 0.45 and 0.35 V at the jack the reference's output
+    stood -0.4, -7.3, -15.9, -25.2, -34.0 and -48.3 dB under SUSTAIN 10's, the CA-72's (its
+    contour the jack's less 0.18 V, change 26) -0.8, -8.3, -17.9, -30.3, -47.5 and -75. The
+    contour itself 0.18 V higher at the VCA would have fitted 7 and 5 but not the bottom
+    (-44 dB at 0.3 V against the reference's -61). Q18's emitter returns to -10 V through
+    R43, so a smaller one lets it conduct from a lower contour; R43 and the jack's offset
+    trade against each other (220K at 0.12 V fits as well), and at the offset change 26
+    measured, 180K (E24) puts the law within 0.6 dB from SUSTAIN 10 to 48 dB under it
+    (`tests/vca_gain_law.rs`: 0.8 dB to -20, 1.5 to -35, 3 below). Q18's tail at full
+    SUSTAIN is 2 % higher, and the driven VCA's 3rd harmonic with it: with the filter open at
+    0.1 of full scale -17.7 dBc against the reference's -16.2 (-18.2 before), at the
+    resonance -51.8 against -45.3 (-53.3). The netlist and the model change together, and
+    against ngspice the VCA keeps its budgets (`vca_realtime`; not modelled: Q21 run
+    backwards by 1.8 uA with EXT. LOUDNESS overdriven to 9 V, the VCA off in both). The
+    factory balance on the new circuit: R14 at 0.5602 (ngspice 0.5599), R12 at 0.6700
+    (0.6722). The thump at SUSTAIN 10 stays as it was, 0.225 of the tone for 0.01 of full
+    scale against the reference's 0.218. A departure from Moog's schematic, which draws 270K.
+    Every preset comes out 0.2 to 0.6 dB louder (the tail at full SUSTAIN), its spectrum
+    within 1.6 dB, and is re-levelled (R42).
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
   needs 0.2 to 0.7 dB more drive than the reference for the same compression, from EXT and
   about as much from the oscillators: the filter's input side (R54 470 and the input pair),
-  for the mixer's overdrive (session D) to settle.
+  for the mixer's overdrive (session D) to settle. With the VCA nearly closed (session O,
+  SUSTAIN 2) its 2nd harmonic stands 1.5 to 4.7 dB over the reference's at 0.03 to 0.1 of
+  full scale.
+- **The VCA's law at its top** (change 31): from 1 to 4 V of contour the CA-72's gain stands
+  0.4 to 0.6 dB further under SUSTAIN 10's than the reference's.
 - **EMPHASIS's peak against its passband:** at the same passband loss the CA-72's peak
   stands 1 to 1.5 dB higher than the reference's (+14.7 to +15.3 dB at 6 against +13.9 to
   +14.3; +21.1 to +22.3 at 7 against +19.4 to +21.3), and at 7.5, near regeneration, up to 5

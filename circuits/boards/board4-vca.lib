@@ -45,7 +45,8 @@ r35   e1 c18 1k                     ; R35 1K
 q18   c18 b18 e18 QTIS97            ; Q18: the contour's current source
 r59   cont b18 68k                  ; R59 68K
 r37   e18 0 6.8k                    ; R37 6.8K
-r43   e18 vn 270k                   ; R43 270K
+r43   e18 vn 180k                   ; R43 (270K drawn; the hardware reference's 180K:
+*                                     docs/calibration change 31, a departure from the drawing)
 
 * --- second VCA: Q14/Q13 (TIS97) on the first's collectors, tail from Q21 -------------
 q14   c14 c16 e2 QTIS97             ; Q14: base on Q16's collector

@@ -54,7 +54,8 @@ Reference designators are Figure 9-11's (S-F911); the parts list is Table 7-8.
    pins 7 and 6 (Figure 9-17), then the REGEN CAL trimpot R73 1K and R76 330 into Q30's base.
 7. **VCAs**: the filter's output reaches the first pair Q16/Q15 (TIS97) through R2 and C6
    0.33 uF, attenuated by R34 820 against the bias node (R22 120, R36 510, C15 220 uF): R2
-   sets how hard the first VCA is driven. Q18's current (R37 6.8K, R43 270K to -10 V),
+   sets how hard the first VCA is driven. Q18's current (R37 6.8K, R43 270K to -10 V; the
+   model's 180K, B4-10),
    driven by the loudness contour through R59 68K, is its tail. Its collectors drive the
    second pair Q14/Q13 (tail Q21 from the EXT. LOUDNESS input, R51 33K, R42 3.3K; the rear
    jack J3 normally ties that input to +10 V through 33K: about 1.4 mA, fully on). The
@@ -261,3 +262,12 @@ hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
   from the contour as read before its input was calibrated: 5.9 % low.) The voice, the
   bench's netlist (a parameter of `mm_vcf`, 47K by default) and the converter's test take
   `vcf::R74`; Folkman's procedure keeps 47K (docs/calibration, changes 14 and 20).
+- **B4-10** (2026-10-09) R43 is 180K in the model, not the drawing's 270K: the hardware
+  reference's VCA opens from a lower loudness contour. Over a slow release its output fell
+  -15.9 dB at 1.0 V of contour (its LOUD CONT jack, less the jack's 0.18 V), -25.2 at 0.6,
+  -34.0 at 0.45 and -48.3 at 0.35 against SUSTAIN 10's level, the drawing's values -17.9,
+  -30.3, -47.5 and -75. Q18's emitter returns to -10 V through R43, so a smaller one lets
+  it conduct sooner; 180K (E24) puts the law within 0.6 dB from SUSTAIN 10 to 48 dB under it,
+  and Q18's tail at full SUSTAIN 2 % higher, the 3rd harmonic of a driven VCA with it
+  (docs/calibration, change 31). With EXT. LOUDNESS overdriven to 9 V and the contour at 2 V,
+  ngspice now runs Q21 backwards by 1.8 uA while the VCA is off; the real-time tail stays 0.
