@@ -463,15 +463,19 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   than up, the reference 1.76 and 1.81 times (the hold amplifier's downward drive, toward
   -4.4 V through R59/R54); at GLIDE 5 the CA-72's downward slide starts fast and then slows
   where the reference's runs straight.
-- **Ringing Saw Line's filter, 0.3 octave high mid-note:** session L took it apart and each
-  piece matches (the filter at CUTOFF -1 with both KEYBOARD CONTROLs within 0.05 octave, its
-  resonance at EMPHASIS 6.8 within 0.01, AMOUNT 4 per volt within 0.5 %, the contour's held
-  level within 1 % and its peak, changes 20 and 21). What differs is the filter contour's
-  decay toward SUSTAIN 0 at this patch's DECAY (5.1, set on the reference by eye just right
-  of the top tick): 495 ms on the CA-72 against 465 (from 100 to 600 ms, over each one's
-  floor), the CA-72's contour about 10 % high mid-note. The DECAY laws were fitted on the
-  release at printed marks; a take of the decay toward SUSTAIN 0 at a printed mark would
-  tell the knob's setting from the decay's path.
+- **The contours after a fast attack (session M, 2026-10-09):** toward SUSTAIN 0 at the top
+  tick, the 1 s and the 600 ms marks the decays run as the laws fitted on the release have
+  them (time constants 485, 594 and 369 ms on the filter contour against the CA-72's 485,
+  580 and 370; 421, 522 and 311 ms on the loudness contour against 415, 498 and 307). With a
+  slow attack the reference peaks at the threshold (4.94 and 5.75 V at its jacks) and decays
+  smoothly, as the CA-72 does. After a fast attack its contours drop 0.21 V within a
+  millisecond, 0.33 V within 10 ms and about 0.40 V by 100 ms more than the decay, and the
+  drop all but vanishes after a 40 ms attack: the timing capacitors' (C5, C2, 10 uF
+  electrolytics) absorption and series resistance, which the drawing's ideal parts leave
+  out. It keeps Ringing Saw Line's ring 0.3 octave high mid-note on the CA-72 (its pieces,
+  session L, match: changes 20 and 21). A capacitor model with absorption alone fits the
+  drop within 3 to 9 mV but makes the fastest attack 30 % slow (0.81 against 0.62 ms); with
+  ESR (about 2.3 ohm) and R7/R42 nearer 82 ohm both fit, in a simplified simulation.
 - **The contours' release with DECAY at 0:** its first half takes 1.9 to 2.2 ms against the
   reference's 1.1 to 1.3.
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
