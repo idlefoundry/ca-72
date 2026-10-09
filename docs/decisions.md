@@ -2807,6 +2807,10 @@ list that drops down over the strip inside the window."
   sides rounded) and casts its own shadow, longer from the raised end; and, asked "do you think
   we should make the pitch and mod wheel more realistic too?", the wheels are white ridged
   cylinders lit by the lamp, their ridges and PITCH's line or MOD.'s dot rolling as they turn.
+- **"The switches need to be a touch more obvious as to which side is up and which is down."**
+  (the owner, 2026-10-09): a rocker's pressed half a shade darker (0.86 of its light), down in
+  its opening; a shadowed crease where its raised half begins (0.7 at the pivot, gone 3 units
+  up); the raised half's hump higher (0.38 of the paddle's width, was 0.32).
 - **Cost (release build, the Linux reference machine, another agent's benchmark on four of its
   cores):** the background once a scale, 182 ms at 0.4 of the drawing (the pictures decoded the
   first time) and 508 ms at 1; a knob turned, 1.5 ms at 0.4 and 4.8 ms at 1.

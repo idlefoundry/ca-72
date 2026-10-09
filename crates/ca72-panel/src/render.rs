@@ -559,13 +559,19 @@ fn lamp_vectors() -> ((f64, f64, f64), (f64, f64, f64)) {
 /// pressed half low and flat; the raised half rising from the pivot in a smooth hump that rounds
 /// over at its end; its long sides rounded. Each pixel of its picture (lit evenly) is made as
 /// much lighter or darker as its surface faces the lamp more or less than a flat one does, with
-/// a little of the lamp's gloss on it.
+/// a little of the lamp's gloss on it; the pressed half a shade darker, down in the opening, and
+/// a shadowed crease at the pivot where the raised half begins (the owner, 2026-10-09: "a touch
+/// more obvious as to which side is up and which is down").
 fn light_paddle(frame: &mut Pixmap, at: (f64, f64), s: f64, p: art::PaddleArt) {
     let (light, half) = lamp_vectors();
     let flat = 0.3 + 0.7 * light.2;
     let (hl, hw) = (p.pw / 2.0, p.ph / 2.0);
     // The hump's height, and where it crests along the raised half (a share of it).
-    let (rise, crest) = (0.32 * p.ph, 0.78);
+    let (rise, crest) = (0.38 * p.ph, 0.78);
+    // The pressed half's shade, and the crease's: its darkest, and how far it reaches up the
+    // raised half (units).
+    const LOW: f64 = 0.86;
+    const CREASE: (f64, f64) = (0.7, 3.0);
     let (sin, cos) = p.deg.to_radians().sin_cos();
     let flip = if p.on { -1.0 } else { 1.0 };
     let reach = ((hl + 2.0).hypot(hw + 2.0) * s).ceil();
@@ -608,7 +614,13 @@ fn light_paddle(frame: &mut Pixmap, at: (f64, f64), s: f64, p: art::PaddleArt) {
             let nu = nu * flip;
             let (nx, ny) = (nu * cos - nv * sin, nu * sin + nv * cos);
             let diffuse = (nx * light.0 + ny * light.1 + nz * light.2).max(0.0);
-            let k = (0.3 + 0.7 * diffuse) / flat;
+            let low = LOW + (1.0 - LOW) * ((u + 1.5) / 3.0).clamp(0.0, 1.0);
+            let crease = if (0.0..CREASE.1).contains(&u) {
+                CREASE.0 + (1.0 - CREASE.0) * u / CREASE.1
+            } else {
+                1.0
+            };
+            let k = (0.3 + 0.7 * diffuse) / flat * low * crease;
             let gloss = (nx * half.0 + ny * half.1 + nz * half.2).max(0.0).powi(28) * 60.0;
             let i = 4 * (py * fw + px) as usize;
             let a = f64::from(data[i + 3]);
