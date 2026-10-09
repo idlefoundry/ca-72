@@ -2287,6 +2287,10 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   quieter: Upright Pluck -3.50 dB, Ladder Kick -2.37, Stacked Fifths -2.33, Breath Flute
   -1.75, Open Hat -1.63, Ringing Saw Line -1.54, Noise Snare -1.08, Shoreline Wash -0.60,
   Closed Hat -0.23; Pink Riser +1.83.
+- **Again after the contours' release at DECAY 0 and Q12's gain** (2026-10-09; calibration
+  changes 27 and 28): the first changes no preset; after the second every level within 0.01
+  dB but Undertow Growl's chaotic loop (-0.12): Undertow Growl 8.58. Every preset VOLUME can
+  reach within 0.02 dB of 0.1.3; at 10 as above.
 - **MIDI's modulation wheel follows the reference's curve** (agent decision, 2026-10-08,
   under the owner's decision to match the reference): control change 1 puts the
   MODULATION wheel where the reference's resistance is for it (`modulation::midi_wheel`);
