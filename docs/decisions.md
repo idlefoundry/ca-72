@@ -2579,7 +2579,7 @@ otherwise):
   the installer's bundles; the Audio Unit, built around the CLAP (R30), so with the change.
   Linux and Windows compile softbuffer's macOS backend out (CI builds and tests them).
 
-## R-CAL. A hardware reference, and the first change it settled
+## R42. A hardware reference, and the first change it settled
 **Owner decision, 2026-10-07.** The CA-72 is matched to the owner's hardware reference, a
 modern recreation of the instrument which the owner could not tell from a Model D in
 level- and pitch-matched recordings: "if we match this, that this will be the right thing to
@@ -2705,4 +2705,3 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   dB of 0.1.3. At 10 and quieter: Upright Pluck -3.64 dB, Breath Flute -2.31, Stacked Fifths
   -2.01, Ladder Kick -1.63, Open Hat -1.59, Ringing Saw Line -1.52, Wooden Mallet -0.82,
   Noise Snare -0.81, Shoreline Wash -0.44; Pink Riser +1.44, still under -18 LUFS.
-- **The number** of this record is a placeholder until the merge.

@@ -550,7 +550,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     1/6, 5/6, 1). Every mark now within 0.2 cent of the reference's but the clockwise stops,
     0.06 and 0.33 semitone short (the CA-72's pots end there). The ngspice benches take the
     pot's position: the netlist is unchanged. The presets' FREQUENCY values (all but 0) are
-    rewritten so that each keeps its pot's position (R-CAL): their intervals and oscillator
+    rewritten so that each keeps its pot's position (R42): their intervals and oscillator
     3's rates as they were.
 
 30. **EMPHASIS at 2, 3 and 4** (`voice::emphasis_r14`, 2026-10-09). Upright Pluck played
@@ -600,7 +600,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 - **Oscillators 2 and 3's FREQUENCY at their clockwise stops** (change 29): 0.06 and 0.33
   semitone short of the reference's; the 0 mark at the factory tuning's unison, where the
   reference's sits wherever its knob is set by eye (7 to 26 cents flat in session N).
-- **The presets** are re-levelled and the two that sound the filter's pitch retuned (R-CAL),
+- **The presets** are re-levelled and the two that sound the filter's pitch retuned (R42),
   after sessions J's, L's, M's and N's fits too. Nine at MAIN OUTPUT VOLUME 10 (Wooden
   Mallet's 0.09 dB short besides) are
   quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -5.59 dB, Breath Flute
