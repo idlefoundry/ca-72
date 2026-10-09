@@ -487,6 +487,9 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   than up, the reference 1.76 and 1.81 times (the hold amplifier's downward drive, toward
   -4.4 V through R59/R54); at GLIDE 5 the CA-72's downward slide starts fast and then slows
   where the reference's runs straight.
+- **Ringing Saw Line's ring** (session I) stands +0.06 to +0.16 octave over the reference's
+  mid-note on G2 and 0 to +0.22 on C4 (0.3 before change 25): within where the patch's
+  DECAY was set on the reference by eye, just right of the top tick.
 - **The contours' release with DECAY at 0:** its first half takes 1.9 to 2.2 ms against the
   reference's 1.1 to 1.3.
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
