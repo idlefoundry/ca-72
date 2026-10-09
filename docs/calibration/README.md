@@ -251,6 +251,16 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 
 ## Not changed, and why
 
+- **CUTOFF's law at its odd marks** (session N, takes 23 to 30, 2026-10-09). The law was
+  measured at -4, -2, 0, +2 and +4 (change 10) and interpolated between. With the filter
+  singing alone (EMPHASIS 10, every source off, KEYBOARD CONTROL off), the reference's pitch
+  at -3, -2, -1, 0, +1 and +2 was 110.8, 206.6, 472.2, 1073.8, 2344 and 5188 Hz, the
+  CA-72's -0.05, +0.65, -0.06, -0.29, +0.15 and +0.30 semitone from it; at -1 with both
+  KEYBOARD CONTROLs on and E3 held, 1118 Hz and +0.64 semitone (at -4 the reference hardly
+  sang). The law stays. (Hollow Glider's first take had seemed to show the filter half an
+  octave high: its oscillator 2 sat about 16 dB under the sheet's VOLUME 8, take 31 played
+  from the sheet matches the CA-72 within 2 to 3 dB, and with the filter open, take 22, the
+  mixer's balance within 0.5 dB.)
 - **R1401's value.** With one contour charged the release already has the reference's
   shape; the factor of two was the shared resistor.
 - **The trigger delay** (board2.md, B2-3: 8 ms from a key, 12 ms after its release). The
