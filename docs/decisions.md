@@ -2291,6 +2291,12 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   changes 27 and 28): the first changes no preset; after the second every level within 0.01
   dB but Undertow Growl's chaotic loop (-0.12): Undertow Growl 8.58. Every preset VOLUME can
   reach within 0.02 dB of 0.1.3; at 10 as above.
+- **Again after EMPHASIS at 2, 3 and 4** (2026-10-09; calibration change 30): the presets
+  with EMPHASIS from 2 to 4 more resonant, their passbands lower: Bass 9.94, Lead 8.66,
+  Warped Pad 7.52, Wooden Mallet 10 (0.09 dB short). At 10 and quieter than 0.1.3: Upright
+  Pluck -5.59 dB, Breath Flute -3.77, Ladder Kick -2.37, Stacked Fifths -2.34, Open Hat
+  -1.63, Ringing Saw Line -1.54, Shoreline Wash -0.60, Noise Snare -0.60, Closed Hat -0.23;
+  Pink Riser +1.81.
 - **The presets' oscillators 2 and 3 FREQUENCY values rewritten after their laws**
   (2026-10-09; calibration change 29): every value but 0 moved to where the new law puts
   the pot where the old value did (Stacked Fifths 5 and 7 to 4.1667 and 6.4465, Breath
