@@ -482,7 +482,8 @@ is in the first columns of the table under "After".
   thread.
 - **Threads:** started when the plug-in is activated (not on the audio thread), a third of
   the processors less two, at most four (four on the Mac's 14 and on the i5-13600K's 20,
-  two on 8, none below 5), made audio threads for the host's largest block
+  two on 8, none below 5; **since R39** one on 3 and 4), made audio threads for the host's
+  largest block
   (`ca72_rt::promote`: on macOS the time-constraint policy, on Linux `SCHED_FIFO` with the
   watchdog, on Windows time-critical priority). They spin 200 us after a run (the block's
   next run follows at once), then park; the audio thread wakes them for each run.
@@ -734,7 +735,8 @@ circuit's, and a second quality in the plug-in against R1's one; the owner's to 
 - On the M4 Pro a voice takes 5 to 10 % of a core (Wooden Mallet the least, Undertow
   Growl the most): ten voices about half a core's work to a core's, shared by the host's
   thread and the workers (R11: a third of the processors less two, at most four: none
-  below 5 processors, one at 5 to 7, two at 8 to 10, three at 11 to 13). Live's meter shows
+  below 5 processors, one at 5 to 7, two at 8 to 10, three at 11 to 13; **since R39** one
+  at 3 and 4 too). Live's meter shows
   the host's thread's block against its period, waiting for the workers' voices included:
   about a fifth of the work at ten voices with four workers, and its worst blocks.
 - A machine of 8 processors (two workers) shares the voices three ways; one of 4 (none)
@@ -2190,6 +2192,392 @@ MIDI Learn (R34) as 0.1.3.
   `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
   (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.2's
   form.
+
+## R36. The editor's switches and buttons in Cubase
+**Owner decision, 2026-10-07.** Users reported that the plug-in's buttons did nothing in
+Cubase 15 on Windows 11. The owner had a Cubase trial installed on the Windows machine for the
+agent to test with and, on its report, said to "move forward with your recommendations": fix
+it in the vendored nih-plug, release the fix as 0.1.4 from the plug-in's own nih-plug rather
+than wait for the move to `plugin-kit` (which becomes 0.1.5), and make the same change in
+`plugin-kit` for the CA-74 and the MC-79.
+
+**What was wrong.** While the host processes audio, nih-plug's VST3 wrapper did not set a value
+the editor changed: it told the host (`performEdit()`) and left the value for the host to send
+back to the processor at the next process call, so that a value never changes in the middle of
+one; until then the controller reported the value from before the edit. Within `endEdit()`,
+Cubase 15 reads the controller's value (`getParamNormalized()`) and sends that to the
+processor, after the edit. A click is a whole gesture between two process calls, so Cubase sent
+back the old value and the control did not move. Every control set by a click was affected:
+the rockers and switches, POWER, POLY, the − and + beside VOICES, the buttons beside ENTROPY and
+SPREAD, a selector stepped by a click on its legend, and a double click setting a knob to its
+default. A knob being dragged moved, since each move came back before the next, but a quick
+drag let go between two process calls could end one move short. Presets were not affected: a
+preset's state is set at the end of a process call by another route.
+
+**Agent decisions, 2026-10-07** (not separately approved):
+- **Held, not set at once** (nih-plug's `PATCHES.md`, change 12). Setting the value at once
+  from the editor's thread would have been simpler, but a value could then change in the middle
+  of a process call, which the plug-in's code does not expect (VOICES and POLY are read more
+  than once in a call). The edit is held instead, the latest for each parameter: the controller
+  reports it, the next process call sets it at its start, before the host's own changes at its
+  first sample, and stopping processing sets it if no call will. A host that never sends an
+  edit back now has it set as well.
+- **A test of the wrapper, with a probe rather than the CA-72.**
+  `crates/ca72-plugin/tests/vst3_host.rs` drives the wrapper through its own VST3 factory, with
+  a probe plug-in whose editor opens no window but keeps the wrapper's context, and a host that
+  does what Cubase 15 does. Its six tests run on every system. Four fail without change 12: the
+  click read back as 1.0, a quick drag ending at 0.25 rather than 0.75, an edit lost by a host
+  that sends nothing back, and an edit lost as processing stops; the other two guard what did
+  not change. With nih-plug's allocation check on (`assert_process_allocs`, built with MSVC),
+  all six pass: the change allocates nothing in a process call.
+- **The CLAP is untouched:** its wrapper sets an edit itself as it sends it to the host. The
+  Audio Unit wraps the CLAP.
+- **R36 and R37 numbered at once:** no branch on GitHub had a record after R35 (2026-10-07).
+  The unmerged lines elsewhere (the softbuffer fix on the Mac, `perf` on the Linux reference
+  machine) take later numbers when they merge.
+
+**Evidence (the Windows machine, 2026-10-07):** Cubase Pro 15.0.30, a trial, with the Steinberg
+built-in ASIO Driver at 48 kHz and 480 samples, ASIO-Guard on, Windows 11 at 200 % scaling, and
+"Suspend VST 3 plug-in processing when no audio signals are received" off.
+- **Before:** the installed 0.1.1 (4,636,160 bytes). A click on OSCILLATOR-1's switch in the
+  mixer changed neither the panel nor Cubase's generic editor; the same switch set from the
+  generic editor moved on the panel; with the instrument deactivated in Cubase, the click
+  worked. The editor's window held the pointer's capture from press to release. A renamed build
+  of 0.1.3 that logged the wrapper's calls showed, for one click on that switch, `performEdit`
+  with 0.0, then within `endEdit` `getParamNormalized` returning 1.0, then 1.0 at the next
+  process call; for a knob's drag, each move came back unchanged.
+- **After:** a renamed build of this change, `CA-72 R36`. Clicks on OSCILLATOR-1's switch,
+  OSCILLATOR MODULATION and A-440 moved them (about 1,000 of 1,500 sampled pixels around each
+  changed; none around two switches not clicked); POLY went from OFF to ON and VOICES from 4 to
+  5; a quick drag of CUTOFF FREQUENCY stayed where it was let go, and a double click set it back
+  to 0. Cubase's generic editor then showed OSCILLATOR MODULATION on, OSCILLATOR-1 off and
+  CUTOFF 0.00.
+- `cargo test -p ca72-plugin --test vst3_host`: 6 passed; with the wrapper restored, 2 passed
+  and 4 failed.
+
+Not tried: Cubase on macOS (the same wrapper; the test runs on every system in CI), Cubase
+before version 15, and the Elements and Artist editions.
+
+**Since R37 (the Windows machine, 2026-10-07):** the owner tried `CA-72 R36` in Cubase 15
+themselves: "that one works!". (`CA-72 R34`, an older test build left in the user VST3 folder,
+showed them the fault: knobs moving, switches not.) The 0.1.4 that CI built on the pull request
+(run 37642706976, the tree of the tag), installed over 0.1.1 with its installer
+(`CA-72.vst3` 4,900,352 bytes, SHA-256 `82dff939…`), then did the same in two hosts while they
+processed audio: in Cubase 15.0.30, OSCILLATOR-1's switch, OSCILLATOR MODULATION and A-440
+moved, POLY went from OFF to ON, VOICES from 4 to 5, and a quick drag of CUTOFF FREQUENCY
+stayed; in REAPER 7.82 (a copy run with its own `-cfgfile`, the Dummy Audio driver, playing),
+the three switches, POLY and VOICES the same. The installer kept this machine's earlier choice
+of the VST3 alone (a custom install), so the CLAP was not installed. Not tried: the release's
+own Windows installer in a host (a second CI build of the same tree), the CLAP in a host, and
+Linux and macOS hosts.
+
+## R37. 0.1.4
+**Owner decision, 2026-10-07.** R36 released at once as 0.1.4, from the plug-in's own
+nih-plug; the move to `plugin-kit`, planned as 0.1.4, becomes 0.1.5 (R36).
+
+**What it brings since 0.1.3** (the tag `v0.1.3`):
+- **Cubase: the editor's switches and buttons work** (R36). In Cubase 15, and in any VST3 host
+  that reads a value back as an edit ends, a click on a switch, a button or a selector's legend
+  did nothing, and a quick drag could end one move short. The VST3 on every system; the CLAP
+  and the Audio Unit were not affected.
+
+**Agent decisions, 2026-10-07** (not separately approved):
+- **A patch release, 0.1.4,** as R29, R33 and R35: nothing a project or a preset holds has
+  changed since 0.1.3, so what was saved with 0.1.0 to 0.1.3 opens unchanged, and the
+  installers install over theirs.
+- **The version** as R29: the workspace's (`Cargo.lock` changed only in its eight crates); the
+  README's status names 0.1.4.
+- **Released the way R35 was:** a commit of its own in R36's pull request, so that CI runs once
+  before the tag; once merged, the tag `v0.1.4` on main's commit; CI's release job drafts the
+  release with the Windows and Linux installers, the notices, the git sources and
+  `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
+  (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.3's form.
+
+**The release (2026-10-07, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3).** The pull request's CI passed on the bump (`c81b661`) on every system; it was merged
+(`2ee178d`, main's commit, its tree `c81b661`'s) and tagged `v0.1.4`, whose CI passed and
+drafted the release with its five assets. The macOS installer was built over SSH from a fresh
+clone of the tag (`2ee178d`) while the tag's CI ran: `cargo xtask bundle-universal ca72-plugin
+--profile bundle` (Rust 1.97.1) and `scripts/auv2.sh`, the bundles then passing
+`scripts/validate.sh` as far as auval (clap-validator 37 passed, 0 failed, 7 skipped; pluginval
+at strictness 10, SUCCESS; Steinberg's validator 47 passed; editor tests skipped). Over SSH
+auval finds no Audio Unit at all, not even the MC-79's installed one, so the owner ran it in
+their desktop session, before `scripts/package.sh` there: `auval -strict`, CA-72 0.1.4 (0x104),
+AU VALIDATION SUCCEEDED. pluginval on the Audio Unit was not run on the Mac; CI's macOS job ran
+it on the same tree. The owner's `~/Library` Audio Unit (0.1.1) was set aside for each run and
+put back. Packaging, with the two Developer ID identities, the notary profile and
+`CA72_REQUIRE_NOTARIZATION=1`, made `CA-72-0.1.4-macOS.pkg`:
+- **Apple's notary service** accepted it: submission `c5074124-c2b5-4af0-9894-1054764ed4c5`,
+  status `Accepted` (about a minute). The ticket is stapled (`stapler validate` passes); the
+  installer is signed `Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)`, trusted
+  timestamp 2026-10-07 16:20:01 UTC; Gatekeeper: `accepted`, `source=Notarized Developer ID`.
+- **The VST3, the CLAP and the Audio Unit in its payload** (with the CLAP inside the Audio
+  Unit): each signed `Developer ID Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the
+  hardened runtime, `codesign --verify --strict --deep` passing; version 0.1.4; `x86_64 arm64`.
+- **Its SHA-256** is `29cfa22841009ad5db843ea742f47822dfb7c50c819aab6e81fef4005291b692`
+  (14,300,983 bytes). It went into the draft with its line added to CI's `SHA256SUMS.txt`; the
+  four files it lists, downloaded again from the draft, passed `sha256sum -c`.
+- **Published** on the owner's go for 0.1.4 (R36) at 2026-10-07 16:33:11 UTC as the latest
+  release (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.4, six assets), with notes
+  in 0.1.3's form. The API's `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.4`;
+  the `.pkg` downloaded from the public release, marked as downloaded, matches its checksum and
+  Gatekeeper accepts it.
+
+`notarization.json`, the build's, the validators', auval's and the packaging's logs, the
+commands (`build.sh`, `auval.sh`, `package.sh`) and `SHA256SUMS.txt` are kept with the
+release's evidence outside the repository, as 0.1.3's are.
+
+## R38. The editor's window opaque on Linux desktops that composite
+**Owner decision, 2026-10-08.** The CA-74 found that on a Linux desktop that composites, its
+standalone's panel looked washed out, far too bright, and fixed it in its editor. The owner
+asked for the same fix in the CA-72 and the MC-79, merged only on their go. Shown it tried
+(below), asked whether to merge it once CI passed and release it with the next version rather
+than on its own: "yes".
+
+**What was wrong.** baseview makes its X11 window with a 32-bit visual, an alpha channel,
+wherever the screen has one (`third_party/baseview`, `find_best_visual_config`), and the editor
+gave softbuffer each pixel with its highest byte 0, as softbuffer's documentation asks. On that
+window 0 is transparent: the compositor adds whatever is behind the window to the panel's
+colours. The CA-74's standalone on Hyprland, through XWayland, showed the wallpaper through its
+panel, its cream face near white. Inside a Linux host the host's own window under the editor's
+would show through the same way.
+
+**Agent decisions, 2026-10-08** (not separately approved):
+- **Every pixel the window is given is opaque:** its highest byte 0xff (`window::shown`, and
+  `window::EMPTY` for the window beyond the frames, 0xff3b2213). softbuffer 0.4.8's other
+  backends ignore that byte: Core Graphics draws with `NoneSkipFirst`, GDI copies a 32-bit
+  bitmap with `BitBlt`, KMS's buffers are XRGB8888, and an X11 window of 24 bits has no alpha.
+- **Tried off the owner's screen:** the standalone's window was sent to a workspace not shown
+  and captured from the compositor by itself (`grim -T`), so the capture shows the alpha the
+  compositor was given rather than the colours it would have made of it on screen.
+
+**Evidence (the Linux reference machine, 2026-10-08):** Hyprland 0.56.2 with XWayland; the
+standalone (`--example standalone`, nih-plug's dummy audio backend), debug, before the change
+(main, `7cdf904`) and after, each captured 8 s after its window appeared.
+- **Before:** every pixel of the panel and the strip (2045 by 685) had alpha 0, transparent.
+- **After:** every pixel opaque. Against the panel's drawing (`cargo run -p ca72-panel
+  --example png` at the editor's scale, 2045 / 3438 pixels a panel unit), the face is 29, 27,
+  26 and a legend's cream 235, 230, 216 in both; 72.5 % of the panel's pixels are identical,
+  the rest where the knobs and switches stood at other values than the example draws them.
+- `the_window_is_given_opaque_pixels` fails without the change (0x123456 given where 0xff123456
+  is wanted) and passes with it; the editor's tests (39 passed, 2 that write pictures for a look
+  ignored); rustfmt; clippy with and without `--all-features` (rustc 1.97.1).
+
+Not tried: the panel on screen (the CA-74 saw it there), a Linux host, macOS and Windows (the
+byte ignored there, by softbuffer's code; CI runs the tests on all three).
+
+## R39. A worker on machines of 3 and 4 processors: the POLY presets in Waveform
+**Owner decision, 2026-10-07.** Two users reported the CPU overloaded in Tracktion Waveform: on
+KVR, Waveform 14 on Linux Mint 22.3 with "4 cores at 3.6 GHz", where choosing Slow Horn Swell,
+Brass Tutti or Warped Pad took the CPU to 100 % "after a moment" and the audio engine had to be
+reset, while REAPER showed 8 to 30 %; on Bedroom Producers Blog, Waveform 13 on Windows 10 on
+an AMD A8 notebook, 70 to 80 % "on every preset". Shown the cause below, the owner asked whether
+it was the host's fault or the plug-in's, and on the answer (mostly the plug-in's) said to give
+machines of fewer than 5 processors a worker, the change that keeps the sound and the voices.
+On 2026-10-08 the owner said to release it at once: "let's just push the performance fix into
+production immediately" (R40).
+
+**What was wrong.** The three presets are the only factory presets with POLY on, and they ask
+for 10, 8 and 8 voices. A machine of fewer than 5 processors started no worker (R11), so every
+voice played on the host's audio thread, and one thread holds about four or five of these
+voices even on the Linux reference machine (R7). Waveform's engine (Tracktion Engine, whose
+source is public) mutes its output and renders nothing once its measure of the audio callback's
+load, smoothed, passes 0.98 (`cpuLimitBeforeMuting`, `tracktion_DeviceManager`): a plug-in that
+keeps the callback near its period makes it fall silent by turns, and its CPU meter sits near
+100 %. REAPER renders a track's plug-ins up to 200 ms ahead and shows the whole machine's use, so
+the same work there read as one core of four. Waveform adds next to nothing to the plug-in's
+cost: the bench without a host and Waveform agree (below). The voice, the engine and the
+presets are unchanged from 0.1.0 to 0.1.4, so the version the users had makes no difference.
+
+**Agent decisions, 2026-10-07** (not separately approved):
+- **One worker from 3 processors up** (`engine::workers_for`): none on 1 or 2, where the host's
+  thread and a worker would be all the machine has; one on 3 and 4, as on 5 to 7; from 5 up as
+  before. One, not two, at 4: two would give a machine of 4 more workers than one of 5 to 7,
+  and leave the host one processor for everything else. How many play in real time still
+  depends on the processor: by the figures below, with one worker a core about 1.5 times
+  slower than the Linux reference machine's still plays Brass Tutti under Tracktion Engine's
+  limit (before, about 1.15 times), an estimate, not a measurement on such a machine.
+- **The samples do not change**: a voice plays the same samples on any thread (R11,
+  `tests/workers.rs`), and every factory preset rendered with one worker on 4 processors is the
+  same to the bit as 0.1.4's render. Under overload the worker's late voices fall silent for a
+  run (R11) rather than the host muting its whole output.
+- **CI now exercises the workers**: its runners have 3 or 4 processors, so for the first time
+  the pool runs in CI on all three systems.
+- **Not done here:** the presets' VOICES (the owner's), the idle sleep and POTATO on the
+  unreleased `perf` branch, a published minimum specification.
+
+**Evidence (the Linux reference machine, 2026-10-07 and 2026-10-08; Ryzen 7 7800X3D, 4 of its 8
+cores given to the host with `taskset`, so that the plug-in counts 4 processors):**
+- **Waveform 14.0.50** (Tracktion's Ubuntu package, unpacked into a folder of its own, a profile
+  of its own whose only VST3 was the build under test, its output on a silent PipeWire sink, 44.1
+  kHz, quantum 512), the owner playing a clip of one note every 0.25 s. Released 0.1.4 (SHA-256
+  a8b1ed8b…): Brass Tutti took Waveform's audio thread to 79 to 86 % of a core, the CPU meter to 80
+  to 90 %. This change (211e0124…): Brass Tutti, the audio thread 51 % at its median (57 % at the
+  90th percentile) and the worker 52 %, the meter at most about 60 %; Slow Horn Swell 48 % (55 %)
+  and 49 %, the meter 55 to 60 %. The threads' times from `/proc` while the owner played.
+- **The released 0.1.4 in a host bench** (the MC-79's `hostbench`, paced on a real-time thread,
+  CLAP, 48 kHz, 256 frames, 30 s, two runs each), mean of the period, late blocks of 5,625: Bass
+  10 to 11 %, 0; Slow Horn Swell 79 to 80 %, 54 to 89; Brass Tutti 71 to 72 %, 3; Warped Pad 65
+  to 67 %, 0 to 1 (one note every 0.25 s). With 4-key chords every second, 70 to 83 % and up to
+  467 late. 128 and 512 frames and 44.1 kHz much the same. Replayed through Tracktion Engine's
+  limit with each block 1.5 times as long (a slower processor), 7 to 23 % of the callbacks muted
+  with these presets; none with Bass even at three times.
+- `preset_render` against 0.1.4's renders: all 24 presets the same to the bit, with no worker
+  and with one on 4 processors. `cargo test -p ca72-plugin` (debug): 152 passed on 16, on 4 and
+  on 3 processors; clippy with and without `--all-features`; rustfmt.
+
+Not tried: a machine as slow as the users' (none here), Waveform 13, Windows, Maniac Audio's
+Dark Studio, REAPER on this machine, the editor closed against open, and the CLAP in Waveform.
+
+## R40. 0.1.5
+**Owner decision, 2026-10-08.** R39 released at once: "let's just push the performance fix into
+production immediately", with R38 (its owner's go: with the next version). The softbuffer fix
+(R34, "Seen besides"), made on the Mac and not yet merged, comes with the next patch release.
+
+**What it brings since 0.1.4** (the tag `v0.1.4`):
+- **Machines of 3 and 4 processors play POLY's voices with a worker** (R39). With the POLY
+  presets (Slow Horn Swell, Brass Tutti, Warped Pad) such a machine played every voice on the
+  host's audio thread: in Tracktion Waveform the CPU reached 100 % and the audio engine had to
+  be reset. The samples are the same to the bit.
+- **The editor's window opaque on Linux desktops that composite** (R38): the desktop, or the
+  host's own window, no longer shows through the panel.
+
+**Agent decisions, 2026-10-08** (not separately approved):
+- **A patch release, 0.1.5,** as R29, R33, R35 and R37: nothing a project or a preset holds has
+  changed since 0.1.4, so what was saved with 0.1.0 to 0.1.4 opens unchanged, and the
+  installers install over theirs.
+- **The version** as R37: the workspace's (`Cargo.lock` changed only in its eight crates); the
+  README's status names 0.1.5.
+- **The move to `plugin-kit`,** planned as 0.1.5 (R37), takes a later version.
+- **Released the way R37 was:** a commit of its own in R39's pull request, so that CI runs once
+  before the tag; once merged, the tag `v0.1.5` on main's commit; CI's release job drafts the
+  release with the Windows and Linux installers, the notices, the git sources and
+  `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
+  (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.4's form.
+- **The Windows ZIP, for installing by hand, made for each release** (the owner, 2026-10-08:
+  "don't forget the windows zip file... it should be" part of the procedure). 0.1.4's,
+  `CA-72-0.1.4-Windows-x86_64.zip` with its `.zip.sha256`, was made by hand from that tag's CI
+  artifact and added after the release was published, outside `SHA256SUMS.txt`.
+  `scripts/windows-zip.sh` now makes it the same way: CI's Windows VST3 and CLAP unchanged,
+  `README.txt` (installing, updating and uninstalling by hand, the presets' folder, the build's
+  provenance), `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` beside them and in the VST3's
+  Resources, and `FILE-SHA256SUMS.txt`. Run on 0.1.4's artifact, every file but the README's
+  wording is the same as in 0.1.4's ZIP. CI's release job runs it on the tag's `CA-72-Windows`
+  artifact (the job may now read the run's artifacts), and `SHA256SUMS.txt` lists the ZIP;
+  its own `.zip.sha256` stays beside it, as 0.1.4's. 0.1.5's was made by the script by hand
+  (the release job's step first runs at the next tag), and the release notes give it a row.
+
+**The release (2026-10-08, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3).** The pull request's CI passed on the bump (`0eda08f`) on every system; it was merged
+(`38ed3cf`, main's commit, its tree `0eda08f`'s) and tagged `v0.1.5`, whose CI passed and
+drafted the release with its five assets. The macOS installer was built over SSH from a fresh
+clone of the pull request's head (`0eda08f`), started while its CI ran, and signed only after
+the tag's tree was checked to be the tree built (`c70b81e`): `cargo xtask bundle-universal
+ca72-plugin --profile bundle` (Rust 1.97.1) and `scripts/auv2.sh`, the bundles then passing
+`scripts/validate.sh` as far as auval (clap-validator 37 passed, 0 failed, 7 skipped; pluginval
+at strictness 10, SUCCESS; Steinberg's validator 47 passed; editor tests skipped). auval and the
+packaging ran in the Mac's desktop session without the owner, in a shell opened by LaunchServices
+in the background (`open -g -j -na Ghostty.app --args -e ...`): over SSH, and in a tmux session
+of the desktop's tmux server, auval sees only Apple's Audio Units, while codesign and notarytool
+reach the login Keychain from either. `auval -strict`: CA-72 0.1.5 (0x105), AU VALIDATION
+SUCCEEDED. The owner's `~/Library` Audio Unit (0.1.1) was set aside for each run and put back.
+Packaging, with the two Developer ID identities, the notary profile and
+`CA72_REQUIRE_NOTARIZATION=1`, made `CA-72-0.1.5-macOS.pkg`:
+- **Apple's notary service** accepted it: submission `9f468420-e0f4-47ce-8f51-ee7c21677413`,
+  status `Accepted` (about a minute). The ticket is stapled (`stapler validate` passes); the
+  installer is signed `Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)`, trusted
+  timestamp 2026-10-08 20:13:34 UTC; Gatekeeper: `accepted`, `source=Notarized Developer ID`.
+- **The VST3, the CLAP and the Audio Unit in its payload** (with the CLAP inside the Audio
+  Unit): each signed `Developer ID Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the
+  hardened runtime, `codesign --verify --strict --deep` passing; version 0.1.5; `x86_64 arm64`.
+- **Its SHA-256** is `df16b9f6e995d563d2adfbcddd2ef7da42853ec1682e3745e4deb7ca9f13aa13`
+  (14,300,825 bytes).
+- **The Windows ZIP** from the tag's run (37837077300, artifact 11576455731), its SHA-256
+  `064fc66dc456073314496eebef0ece263d1002f08c804edf6be5d2bba9fe8ab7` (4,494,839 bytes), the
+  plug-in's binary `f92720c7…` in both formats.
+- Both went into the draft with their lines added to CI's `SHA256SUMS.txt`, the ZIP with its
+  `.zip.sha256`; the five files it lists, downloaded again from the draft, passed
+  `sha256sum -c`, and the notices are the tag's.
+- **Published** on the owner's go ("release 0.1.5") at 2026-10-08 20:20:30 UTC as the latest
+  release (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.5, eight assets), with notes
+  in 0.1.4's form. The API's `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.5`;
+  the `.pkg` downloaded from the public release, marked as downloaded, matches its checksum and
+  Gatekeeper accepts it.
+
+`notarization.json`, the build's, the validators', auval's and the packaging's logs, the
+commands (`build.sh`, `auval.sh`, `package.sh`) and `SHA256SUMS.txt` are kept with the
+release's evidence outside the repository, as 0.1.4's are.
+
+## R41. macOS: the editor drawn beside other copies of softbuffer in one process
+**Seen, 2026-10-06,** in Bitwig Studio 5.2.7 on macOS (CLAP), while MIDI Learn was tried there
+(R34, "Seen besides"): Bitwig loads every plug-in into one
+process, and there a second, differently built CA-72 opened a blank editor.
+
+**The cause,** confirmed on the Mac. softbuffer 0.4.8, which shows the editor's frames, keeps its
+layer in step with the editor's view on macOS through an Objective-C class of its own, defined
+with objc2's `define_class!` under a fixed name, `SoftbufferObserver`, and registered as the
+first surface is made. A process holds one class of a name, and `define_class!` panics when its
+name is taken: a second copy of softbuffer, in a second plug-in's library, panicked as its
+editor opened ("could not create new class "SoftbufferObserver", perhaps a class with that name
+already exists?"), and the editor, which catches softbuffer's panics (R18), drew nothing. Any
+two copies meet it: two builds of the CA-72; its CLAP and its VST3, one binary at two paths;
+another plug-in carrying softbuffer 0.4 (0.4.6 and 0.4.7 used the same name). Every release so
+far, 0.1.0 to 0.1.5, carries 0.4.8. No release fixes it: 0.4.8 is the latest, and upstream's
+master defines the class the same way. Two reproductions, kept out of the repository, each a
+host that loads the libraries it is given into its one process and works on its main thread:
+- a library that makes a softbuffer surface on an NSView of its own, presents a frame and
+  resizes the view, as the editor does: with softbuffer 0.4.8, a second library (another build
+  of it, or the same one copied to another path) panicked as above;
+- a CLAP host that opens each library's editor in a view of its own, then lets the main run
+  loop run for 1.5 s: with 0.1.2's plug-in (built from `v0.1.2`) at two paths, the second
+  editor's layers held no frame, and nih-plug logged the panic, from the editor's `Surface::new`
+  in `PanelWindow::new`, from `clap_plugin_gui.set_parent`.
+
+**Agent decisions, 2026-10-06** (the owner asked for the fix; not separately approved
+otherwise):
+- **softbuffer vendored and patched,** as baseview and nih-plug are
+  (`third_party/softbuffer/PATCHES.md`): the 0.4.8 release, its macOS backend changed so that
+  each copy registers a class of its own at run time, under the first of `SoftbufferObserver1`,
+  `SoftbufferObserver2`, ... that is free, never upstream's name (which an unpatched copy loaded
+  later still needs). Each copy runs only its own code. The class has no state: the layer an
+  observer updates comes as the observation's context. `ca72-plugin` takes softbuffer by path,
+  with the same features; in `Cargo.lock` the crate loses its registry source and checksum, and
+  the plug-in gains the test's two dependencies; no crate is added or changes version.
+- **Not objc2's own way out,** leaving the name to `define_class!` (a patch of one line): a copy
+  that finds that name taken uses the class it names, and so runs the code of whichever copy came
+  first, which objc2 itself calls unsound across libraries. The name,
+  `softbuffer::backends::cg::Observer0.4.8`, does not tell code apart: upstream's master, changed
+  since the release, still calls itself 0.4.8.
+- **The test,** `crates/ca72-plugin/tests/softbuffer_copies.rs`: in a process that already holds
+  the classes an unpatched copy and a patched one register, a surface on a view of the test's
+  own is made and its frame reaches the view's layer; the layer follows the view as it is
+  resized (the observer); a second surface, after the first is gone, registers no second class.
+  softbuffer's macOS backend works on the main thread only, where the test harness runs no test,
+  so this test runs without it (`harness = false`); on other systems it does nothing. Its view
+  and classes take two dependencies on macOS, objc2 and objc2-foundation, at softbuffer's
+  versions.
+
+**Evidence (2026-10-06, the Mac: Apple silicon, macOS 27.0; Rust 1.97.1):**
+- **The reproductions,** with this copy of softbuffer. The surfaces' library: two builds, and
+  one build at two paths, each drew and resized with a class of its own (`SoftbufferObserver1`,
+  `SoftbufferObserver2`), each class's method in its own library (`dladdr`); an unpatched build
+  loaded before it and after it, both drew; four libraries in one process (patched, unpatched,
+  the patched one's copy, a second patched build) took `SoftbufferObserver`, then
+  `SoftbufferObserver1` to `3`. The CLAP host, with this tree's plug-in: one build at two paths,
+  a debug and a release build, and 0.1.2 loaded before it and after it: every editor's
+  softbuffer layer held a frame of the editor's size, 1382 by 463. The plug-in's library no
+  longer exports upstream's `__CLASS_SoftbufferObserver` symbols.
+- **The new test** panicked as above with upstream's `cg.rs` put back, and passes with the
+  change.
+- `cargo test --workspace`: 227 passed, 0 failed (25 ignored, run by hand), and the new test;
+  clippy with `-D warnings` on the workspace, all targets and features; `cargo check` of the
+  plug-in for Windows (MSVC); `scripts/notices.py --check` (the notices are unchanged: the copy
+  carries the release's licences and repository); `cargo fmt --all -- --check`, on a copy of the
+  tree outside the main checkout (in a worktree inside it, cargo takes the vendored crates for
+  the main checkout's workspace and stops, baseview's as well).
+- Not tried: Bitwig itself, with two builds of the CA-72 in one project; other hosts on macOS;
+  the installer's bundles; the Audio Unit, built around the CLAP (R30), so with the change.
+  Linux and Windows compile softbuffer's macOS backend out (CI builds and tests them).
 
 ## R-CAL. A hardware reference, and the first change it settled
 **Owner decision, 2026-10-07.** The CA-72 is matched to the owner's hardware reference, a

@@ -116,6 +116,26 @@ host, the editor and the saved state would not see:
     with. (A plugin cannot set a parameter outside nih-plug otherwise: its setters are
     crate-private.)
 
+One more came from a report: the CA-72's switches and buttons did nothing in Cubase 15 on
+Windows 11 (2026-10-07; the CA-72's `docs/decisions.md` R36):
+
+12. **An edit made in the editor while the host processes audio is held, not left to the
+    host.** While the host was processing, `raw_set_parameter_normalized` left the value
+    alone, for the host to send the edit back to the processor, so that a value never changes
+    in the middle of a process call; until then `IEditController::getParamNormalized()`
+    reported the value from before the edit. Cubase 15 reads that value within `endEdit()` and
+    sends it to the processor at the next process call, after the edit. So a click, a whole
+    gesture between two process calls, set nothing, and a drag let go between two calls ended
+    one move short. A host that does not send the edit back at all (upstream's `FIXME` names
+    REAPER, which stops calling a plugin it bypasses) left it unset. The edit is now held, the
+    latest for each parameter (`held_edits`, `src/wrapper/vst3/inner.rs`): the controller
+    reports it, the next process call sets it at its start, before the host's own changes at
+    its first sample, and `setProcessing(false)` sets it if no call will
+    (`src/wrapper/vst3/context.rs`, `wrapper.rs`). Values still change only between process
+    calls, and nothing is allocated, locked or waited for on the audio thread: a flag, and an
+    atomic for each parameter. The CA-72's `crates/ca72-plugin/tests/vst3_host.rs` drives the
+    wrapper through its factory as Cubase 15 does; four of its six tests fail without this.
+
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
-and `nih_plug_derive` here and apply the eleven changes again, unless upstream has fixed them.
+and `nih_plug_derive` here and apply the twelve changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.

@@ -16,9 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.1.3: MIDI Learn, and on Windows the presets' drawer's arrow keys, Enter and Tab
-in REAPER, since 0.1.2. The macOS installer is signed and notarised; the Windows one is not
-yet signed.
+**Status:** 0.1.5: on machines of 3 and 4 processors the POLY presets no longer overload the
+CPU, and on Linux the editor's window is opaque, since 0.1.4. The macOS installer is signed and
+notarised; the Windows one is not yet signed.
 
 ## Installing
 
@@ -45,7 +45,9 @@ yet signed.
    Unit from 0.1.2 on.
 
 The Windows installer is not yet signed, so the first time you run it Windows says "Windows
-protected your PC": click **More info**, then **Run anyway**.
+protected your PC": click **More info**, then **Run anyway**. To install by hand instead,
+each release from 0.1.5 has `CA-72-<version>-Windows-x86_64.zip`: the same VST3 and CLAP, with
+a `README.txt` that says where to copy them.
 
 The plug-ins go into the usual folders:
 
@@ -326,7 +328,7 @@ the circuit lab.
 | `docs/circuit/` | How the model was derived, board by board, with its sources and assumptions |
 | `docs/decisions.md` | The release's decisions |
 | `docs/history.md` | The model's decisions, from its development as an instrument of a DAW |
-| `third_party/` | nih-plug and baseview (both patched), the URW Gothic font, and for the Audio Unit clap-wrapper (patched), the CLAP headers and Apple's AudioUnitSDK |
+| `third_party/` | nih-plug, baseview and softbuffer (all patched), the URW Gothic font, and for the Audio Unit clap-wrapper (patched), the CLAP headers and Apple's AudioUnitSDK |
 | `scripts/` | Building the Audio Unit (`auv2.sh`, `auv2/`), validating the bundles, making the installers (`package.sh`, `installer/`), the third-party notices, fetching the sources |
 | `xtask/` | Builds the bundles |
 
@@ -339,14 +341,15 @@ The service documents and datasheets the model was derived from are not included
 - Only the real-time quality, Potato, is in the plug-in. The model's two more exact
   qualities do not run in real time; they remain in `crates/ca72` and the lab.
 - POLY's voices are shared between the host's audio thread and up to four threads of the
-  plug-in's own (a third of the processors less two; [docs/decisions.md](docs/decisions.md)
-  R11), shared by every instance in the host. An instance holds them only while its POLY
+  plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
+  [docs/decisions.md](docs/decisions.md) R11, R39), shared by every instance in the
+  host. An instance holds them only while its POLY
   is on, taking them a moment after POLY is switched on and giving them back when it is
   switched off; one that finds them all taken plays its voices on the host's thread, and
   asks again when its POLY is next switched on (R18, R21). A voice takes 5 to 10 % of a
   core of an Apple M4 Pro (FEEDBACK's presets the
   most; R13), so ten voices are half a core's work to a core's. How many play in real time
-  depends on the machine, the host's block size and the host: on a machine of fewer than 5
+  depends on the machine, the host's block size and the host: on a machine of 1 or 2
   processors every voice plays on the host's thread, and on macOS a host whose audio
   threads are not in an audio workgroup runs its share of the voices more slowly. With more
   than the machine plays, expect dropouts; VOICES (4 by default) sets the most.
@@ -402,7 +405,8 @@ The service documents and datasheets the model was derived from are not included
   `third_party/nih-plug/PATCHES.md` describes. The editor uses
   [baseview](https://github.com/RustAudio/baseview) (patched as
   `third_party/baseview/PATCHES.md` describes),
-  [softbuffer](https://github.com/rust-windowing/softbuffer) and
+  [softbuffer](https://github.com/rust-windowing/softbuffer) (patched as
+  `third_party/softbuffer/PATCHES.md` describes) and
   [resvg](https://github.com/linebender/resvg). The Audio Unit is
   [clap-wrapper](https://github.com/free-audio/clap-wrapper), by Timo Kaluza, Paul Walker
   and others (MIT; patched as `third_party/clap-wrapper/PATCHES.md` describes), around the
