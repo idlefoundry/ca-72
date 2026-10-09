@@ -2291,6 +2291,12 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   changes 27 and 28): the first changes no preset; after the second every level within 0.01
   dB but Undertow Growl's chaotic loop (-0.12): Undertow Growl 8.58. Every preset VOLUME can
   reach within 0.02 dB of 0.1.3; at 10 as above.
+- **The presets' oscillators 2 and 3 FREQUENCY values rewritten after their laws**
+  (2026-10-09; calibration change 29): every value but 0 moved to where the new law puts
+  the pot where the old value did (Stacked Fifths 5 and 7 to 4.1667 and 6.4465, Breath
+  Flute's oscillator 3 4 to 3.1678, the detunes 0.1 to 0.0833, and so on): their intervals
+  and oscillator 3's rates as they were, within 0.005 cent; FREQUENCY 0, the unison, is
+  unmoved. A pitch is a preset's design, as the two retuned filter pitches were.
 - **MIDI's modulation wheel follows the reference's curve** (agent decision, 2026-10-08,
   under the owner's decision to match the reference): control change 1 puts the
   MODULATION wheel where the reference's resistance is for it (`modulation::midi_wheel`);
