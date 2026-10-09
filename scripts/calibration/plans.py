@@ -831,7 +831,7 @@ def session_o():
     (take 04); with CA72_FR set to it (Hz), the sine at the resonance, half and twice it at
     SUSTAIN 10, and at the resonance at SUSTAIN 7, 5 and 2. The reference take again at the
     end. LC GATE held; FILT CONT and LOUD CONT recorded."""
-    base = dict(HOME, ext_volume=0.5)
+    base = dict(HOME, ext_volume=0.5, filter_decay=0.0, loudness_decay=0.0)
     t = []
 
     def add(x, panel, set_line):
