@@ -30,7 +30,7 @@ use crate::contour::{ContourCircuit, Contours, Controls, Panel as ContourPanel};
 use crate::expo::Input;
 use crate::keyboard::{Keyboard, KeyboardCircuit, Load};
 use crate::modulation::{LineLoads, Modulation, mod_wheel_r, pitch_wheel_volts};
-use crate::noise::{Noise, NoiseCircuit, NoiseLoads, NoiseOut};
+use crate::noise::{Gauss, Noise, NoiseCircuit, NoiseLoads, NoiseOut};
 use crate::preamp::{InLoop, Preamp, PreampCircuit};
 use crate::revsaw::{RevSaw, RevSawCircuit, RevSawOut};
 use crate::tuning::{
@@ -801,10 +801,25 @@ pub struct PreampPart {
     pub in_loop: InLoop,
 }
 
+/// The mixer's own noise as a Norton current on its bus, A RMS from 0 to 24 kHz (white):
+/// the hardware reference's MIX jack carries 82.2 dB under a sawtooth at VOLUME 10 with
+/// every source off (-103.5 against -21.3 dBFS, the interface's own floor 12 to 15 dB
+/// lower; docs/calibration, sessions J and L), and the CA-72's bus 0.0319 mA RMS for that
+/// sawtooth. The filter's self-oscillation starts from it, as the reference's does from its
+/// circuit's noise; without it, nothing on the bus, the model's filter never starts.
+pub const MIXER_HISS: f64 = 2.48e-9;
+
+/// A seed for the mixer's noise, apart from the noise source's.
+const HISS_SEED: u64 = 0x6869_7373;
+
 /// The modulation line, the oscillators, the mixer and the filter's control node.
 #[derive(Debug, Clone)]
 pub struct FrontPart {
     rate: f64,
+    /// The mixer's noise ([`MIXER_HISS`]): its generator, and its RMS a sample at the
+    /// front's rate.
+    hiss: Gauss,
+    hiss_rms: f64,
     /// Each oscillator's tuning (TUNE and the octave step shared) and its oscillator.
     tunings: [Tuning; 3],
     vcos: [Vco; 3],
@@ -1012,6 +1027,8 @@ impl Voice {
                 },
                 front: FrontPart {
                     rate,
+                    hiss: Gauss::new(HISS_SEED),
+                    hiss_rms: MIXER_HISS * libm::sqrt(rate / 48e3),
                     tunings,
                     vcos,
                     revsaw,
@@ -1079,6 +1096,7 @@ impl Voice {
     /// Seeds the noise generator (each device its own stream; a render repeats).
     pub fn set_seed(&mut self, seed: u64) {
         self.ctl.noise.reseed(seed);
+        self.audio.front.hiss = Gauss::new(seed ^ HISS_SEED);
     }
 
     pub fn rate(&self) -> f64 {
@@ -1621,7 +1639,8 @@ impl FrontPart {
         // external input switched off loads it. Oscillator 3's switch output also feeds the
         // modulation mix through R23: its node is loaded by both.
         laps.lap(crate::prof::Part::Modulation);
-        let mut i_bus = 0.0;
+        // The mixer's own noise, then the channels.
+        let mut i_bus = self.hiss_rms * self.hiss.next_uniform();
         if p.ext_on {
             i_bus += i_pre;
         }

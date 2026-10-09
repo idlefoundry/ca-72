@@ -436,6 +436,19 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     those between the ends modulate less (Breath Flute's 0.4 from 164 to 60 ohm, about 40 %
     of its vibrato).
 
+24. **The mixer's noise floor** (`voice::MIXER_HISS`, 2026-10-08). With every source off,
+    EMPHASIS at 10 and a key held, the reference sang at once (session L, take 00); the
+    CA-72 stayed silent (-85 dB): its filter sat at an equilibrium nothing disturbs, where
+    the reference's starts from its circuit's noise. The reference's MIX jack carries
+    -103.5 dBFS with every source off, 12 to 15 dB over the interface's idle inputs and 82.2
+    dB under a sawtooth at VOLUME 10 (-21.3 dBFS, session J). The CA-72's bus now carries the
+    same: white noise as a Norton current, 2.48 nA RMS from 0 to 24 kHz against the
+    sawtooth's 0.0319 mA, seeded with the voice (renders stay reproducible). The filter now
+    sings from silence at the pitches it had when seeded (-0.03 to -0.05 octave from the
+    reference's, at CUTOFF -1 with both KEYBOARD CONTROLs). The floor is the MIX jack's,
+    which may include its own buffer: an upper bound for what reaches the filter, whose
+    start needs only some.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
