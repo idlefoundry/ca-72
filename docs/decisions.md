@@ -2266,6 +2266,14 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   Stacked Fifths -2.09, Ladder Kick -2.06, Ringing Saw Line -1.55, Open Hat -1.50,
   Shoreline Wash -0.90, Noise Snare -0.87, Closed Hat -0.11; Pink Riser +1.84, still under
   -18 LUFS.
+- **Again after session L's fits** (AMOUNT OF CONTOUR in true volts, the contours' peak
+  diodes, LO, MOD DEPTH's law, the mixer's noise): Ladder Kick -3.615 to -3.604 (its boom
+  +0.3 cents from 0.1.3's), Cruising Whistle unmoved (its three notes +1.8 cents on
+  average); Three Saw Slab 8.24, Pulse Strut 9.04, Cruising Whistle 7.12, Brass Tutti 4.2,
+  Wooden Mallet 9.88, Noise Crash 9.84: every preset VOLUME can reach within 0.07 dB of
+  0.1.3. At 10 and quieter: Upright Pluck -3.00 dB, Breath Flute -1.85, Ladder Kick -1.82,
+  Stacked Fifths -1.76, Ringing Saw Line -1.24, Open Hat -1.12, Shoreline Wash -0.58, Noise
+  Snare -0.52; quiet by nature and left at 10, Closed Hat +0.30 and Pink Riser +1.76.
 - **MIDI's modulation wheel follows the reference's curve** (agent decision, 2026-10-08,
   under the owner's decision to match the reference): control change 1 puts the
   MODULATION wheel where the reference's resistance is for it (`modulation::midi_wheel`);

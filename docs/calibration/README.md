@@ -480,11 +480,10 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   dB), and the noise, through its 11K, -3.60 and -11.93 against -3.94 and -11.98.
 - **Not in this round:** oscillators 2 and 3's FREQUENCY spans and SUSTAIN's law.
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R-CAL),
-  after session J's fits and the contours' peak too. Nine already at MAIN OUTPUT VOLUME 10
-  are quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -3.31 dB, Breath
-  Flute -2.15, Stacked Fifths -2.09, Ladder Kick -2.06, Ringing Saw Line -1.55, Open Hat
-  -1.50, Shoreline Wash -0.90, Noise Snare -0.87, Closed Hat -0.11 (mostly EMPHASIS's and
-  the contours' laws, and their peak). Presets keep their
+  after sessions J's and L's fits too. Eight already at MAIN OUTPUT VOLUME 10 are quieter
+  than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -3.00 dB, Breath Flute -1.85,
+  Ladder Kick -1.82, Stacked Fifths -1.76, Ringing Saw Line -1.24, Open Hat -1.12,
+  Shoreline Wash -0.58, Noise Snare -0.52 (mostly EMPHASIS's and the contours' laws). Presets keep their
   knobs' positions where a law changed: those between a law's ends sound as the reference
   would at those marks (Ladder Kick's sweep, for one, starts about 2 semitones lower).
 
