@@ -11,6 +11,8 @@ EMPHASIS and AMOUNT OF CONTOUR at 0, KEYBOARD CONTROL off, both contours with AT
 SUSTAIN 10, the DECAY switches off, main VOLUME 10).
 """
 
+import os
+
 import numpy as np
 
 FS = 48000
@@ -769,3 +771,95 @@ def session_l():
                      "input that records FILT CONT"),
             es6_take("es6_cal_lc", "the same output patched into the DC input that records "
                      "LOUD CONT")]
+
+
+# Session O, the drive study: a sine from the ES-3 into EXT, stepped in level, so that every
+# harmonic at MIX and at MAIN is distortion, and where it grows tells the stage. Levels are
+# fractions of the ES-3's full scale; at EXT VOLUME 5 a sine of about 0.03 reaches MIX as
+# oscillator 1's sawtooth at VOLUME 10 does (session N, take 41: 0.087 RMS at MIX).
+DRIVE = [0.0003, 0.0006, 0.001, 0.002, 0.003, 0.005, 0.007, 0.01, 0.015, 0.02, 0.03, 0.05,
+         0.07, 0.1]
+OPEN_HZ = 130.81    # C3: its harmonics to the 10th well inside the open filter
+# CUT CV for the resonant takes, CUTOFF fully clockwise: the corner at EMPHASIS 0 about 610 Hz
+# (session A), the peak at 7 near 1.4 kHz.
+RES_CUT = -0.5
+# FILT CONT and LOUD CONT in the ES-6 (the computer's inputs 11 and 12).
+CONTOURS = (11, 12)
+
+
+def drive_steps(f, levels, cut, sweep_amp=0.0, step=0.8, gap=0.3):
+    """LC GATE held and CUT CV at cut throughout; if sweep_amp, a 2 s sweep from 50 Hz to
+    8 kHz at that level first (where this take's resonance stands); then the sine at f, each
+    level for step s."""
+    pre = 2.6 if sweep_amp else 0.0
+    seconds = LEAD + 0.5 + pre + len(levels) * (step + gap) + 0.5
+    ext, lc, cv = zeros(seconds), zeros(seconds), zeros(seconds)
+    lc[span(LEAD, seconds - 0.2)] = GATE
+    cv[span(LEAD, seconds - 0.2)] = cut
+    ev = {"tone_hz": f, "cut": cut}
+    if sweep_amp:
+        put(ext, LEAD + 0.5, sweep(50.0, 8000.0, sweep_amp, 2.0))
+        ev["sweep"] = [LEAD + 0.5, 50.0, 8000.0, 2.0, sweep_amp]
+    segs = []
+    for i, a in enumerate(levels):
+        t0 = LEAD + 0.5 + pre + i * (step + gap)
+        put(ext, t0, tone(f, a, step))
+        segs.append([round(t0, 4), round(t0 + step, 4), a])
+    ev["segments"] = segs
+    return seconds, {"ext": ext, "lc_gate": lc, "cut": cv}, ev
+
+
+def locate_steps(cut, amps=(0.0005, 0.003), dur=3.0):
+    """LC GATE held and CUT CV at cut; a sweep from 50 Hz to 8 kHz at each level."""
+    seconds = LEAD + 0.5 + len(amps) * (dur + 0.4) + 0.3
+    ext, lc, cv = zeros(seconds), zeros(seconds), zeros(seconds)
+    lc[span(LEAD, seconds - 0.2)] = GATE
+    cv[span(LEAD, seconds - 0.2)] = cut
+    segs = []
+    for i, a in enumerate(amps):
+        t0 = LEAD + 0.5 + i * (dur + 0.4)
+        put(ext, t0, sweep(50.0, 8000.0, a, dur))
+        segs.append([round(t0, 4), round(t0 + dur, 4), a])
+    return seconds, {"ext": ext, "lc_gate": lc, "cut": cv}, {
+        "sweep": [50.0, 8000.0, dur], "cut": cut, "segments": segs}
+
+
+def session_o():
+    """The drive study (sessions/session-O-sheet.md). The filter open (CUTOFF fully
+    clockwise, EMPHASIS 0, CUT CV 0): C3 in DRIVE's steps with the VCA at LOUDNESS SUSTAIN
+    10, 5 and 2. Then resonant (EMPHASIS 7, CUT CV RES_CUT): sweeps to find the resonance
+    (take 04); with CA72_FR set to it (Hz), the sine at the resonance, half and twice it at
+    SUSTAIN 10, and at the resonance at SUSTAIN 7, 5 and 2. The reference take again at the
+    end. LC GATE held; FILT CONT and LOUD CONT recorded."""
+    base = dict(HOME, ext_volume=0.5)
+    t = []
+
+    def add(x, panel, set_line):
+        x["panel"], x["set"], x["record_inputs"] = dict(panel), set_line, list(CONTOURS)
+        t.append(x)
+
+    for x in reference():
+        add(x, base, "the base panel (the sheet)")
+    for sus, line in ((10, "nothing"), (5, "LOUDNESS SUSTAIN 5"), (2, "LOUDNESS SUSTAIN 2")):
+        s, sig, ev = drive_steps(OPEN_HZ, DRIVE, 0.0)
+        add(take(f"open_c3_lsus{sus}", s, sig, ev, "C3 into EXT in steps, the filter open"),
+            dict(base, loudness_sustain=sus / 10), line)
+    res = dict(base, emphasis=0.7)
+    s, sig, ev = locate_steps(RES_CUT)
+    add(take("res_locate", s, sig, ev, "sweeps at two levels, EMPHASIS 7"), res,
+        "LOUDNESS SUSTAIN 10; EMPHASIS 7")
+    fr = float(os.environ.get("CA72_FR") or 0)
+    if fr <= 0:
+        return t
+    for name, f in (("res_fr", fr), ("res_half", fr / 2), ("res_double", fr * 2)):
+        s, sig, ev = drive_steps(f, DRIVE, RES_CUT, sweep_amp=0.0005)
+        add(take(f"{name}_lsus10", s, sig, ev, f"{f:.1f} Hz into EXT in steps, EMPHASIS 7"),
+            res, "nothing")
+    for sus in (7, 5, 2):
+        s, sig, ev = drive_steps(fr, DRIVE, RES_CUT, sweep_amp=0.0005)
+        add(take(f"res_fr_lsus{sus}", s, sig, ev, f"{fr:.1f} Hz into EXT in steps, EMPHASIS 7"),
+            dict(res, loudness_sustain=sus / 10), f"LOUDNESS SUSTAIN {sus}")
+    for x in reference():
+        x["name"] = "ref_end"
+        add(x, base, "EMPHASIS 0; LOUDNESS SUSTAIN 10")
+    return t

@@ -115,6 +115,7 @@ def run_take(take, outdir, index, session, sd):
         problems.append(f"idle inputs not quiet: {loud}")
     base = f"{index:02d}_{take['name']}"
     extra = [f"in{c}" for c in range(11, 27)] if take.get("record_optical") else []
+    extra = [f"in{c}" for c in take.get("record_inputs", [])] or extra
     cols = ["main", "mix", "loop"] + [s for s in ("ext", "cut", "lc_gate", "fc_gate", "vpo")] + extra
     data = np.zeros((n, len(cols)), np.float32)
     for i, c in enumerate(cols):
