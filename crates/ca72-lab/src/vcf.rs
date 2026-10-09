@@ -165,6 +165,9 @@ pub fn ac_response(
         .collect())
 }
 
+/// A complex response: (frequency, (real, imaginary)) at each point.
+pub type Complex = Vec<(f64, (f64, f64))>;
+
 /// The complex response of a node to the source (1 V AC), over `points` a decade.
 #[allow(clippy::too_many_arguments)]
 pub fn ac_complex(
@@ -176,7 +179,7 @@ pub fn ac_complex(
     f1: f64,
     points: usize,
     solver: Solver,
-) -> Result<Vec<(f64, (f64, f64))>, Error> {
+) -> Result<Complex, Error> {
     let net = netlist(b, "vsrc src 0 dc 0 ac 1", solver);
     let plots = spice.run(&net, &[&format!("ac dec {points} {f0} {f1}")], work)?;
     let p = &plots[0];
