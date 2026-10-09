@@ -463,12 +463,15 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   than up, the reference 1.76 and 1.81 times (the hold amplifier's downward drive, toward
   -4.4 V through R59/R54); at GLIDE 5 the CA-72's downward slide starts fast and then slows
   where the reference's runs straight.
-- **Ringing Saw Line's filter, 0.2 octave high:** at the same contour voltage the CA-72's
-  ring stands 0.19 and 0.21 octave above the reference's on G2 and C4, at CUTOFF -1 with
-  both KEYBOARD CONTROLs on and EMPHASIS 6.8, where at CUTOFF 0 (EMPHASIS 0) the two track
-  within +0.01 to +0.03 octave over four octaves (session J): CUTOFF's law at -1 (within
-  -0.08 to +0.10 octave of the reference's marks), where the knob was set by eye, or
-  EMPHASIS's peak against its corner. A take at that panel would tell.
+- **Ringing Saw Line's filter, 0.3 octave high mid-note:** session L took it apart and each
+  piece matches (the filter at CUTOFF -1 with both KEYBOARD CONTROLs within 0.05 octave, its
+  resonance at EMPHASIS 6.8 within 0.01, AMOUNT 4 per volt within 0.5 %, the contour's held
+  level within 1 % and its peak, changes 20 and 21). What differs is the filter contour's
+  decay toward SUSTAIN 0 at this patch's DECAY (5.1, set on the reference by eye just right
+  of the top tick): 495 ms on the CA-72 against 465 (from 100 to 600 ms, over each one's
+  floor), the CA-72's contour about 10 % high mid-note. The DECAY laws were fitted on the
+  release at printed marks; a take of the decay toward SUSTAIN 0 at a printed mark would
+  tell the knob's setting from the decay's path.
 - **The contours' release with DECAY at 0:** its first half takes 1.9 to 2.2 ms against the
   reference's 1.1 to 1.3.
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
