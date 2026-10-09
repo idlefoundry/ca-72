@@ -63,6 +63,18 @@ pub const D1N34A: Diode = Diode {
     eg: 0.67,
     xti: 3.0,
 };
+/// The peak detectors' CR3 and CR6 as the hardware reference has them: silicon small-signal
+/// diodes (`DCR36` in `mm-devices.lib`), not the drawing's 1N34A germanium. Their saturation
+/// current is the one at which both flip-flops reset where the reference's contours peak
+/// (docs/calibration, session L; board2.md B2-11); the rest is the library's generic
+/// small-signal silicon diode's (`DSG3246`).
+pub const DCR36: Diode = Diode {
+    is: 9.45e-9,
+    n: 1.75,
+    rs: 0.6,
+    eg: 1.11,
+    xti: 3.0,
+};
 pub const D1N4004: Diode = Diode {
     is: 7e-9,
     n: 1.9,
@@ -189,6 +201,9 @@ pub struct ContourCircuit {
     pub pnp: Bjt,
     pub ge: Diode,
     pub si: Diode,
+    /// CR3 and CR6, the peak detectors' diodes: [`DCR36`] as the hardware reference has
+    /// them, or [`D1N34A`] as drawn.
+    pub peak_diode: Diode,
 }
 
 impl Default for ContourCircuit {
@@ -216,6 +231,7 @@ impl Default for ContourCircuit {
             pnp: TIS93,
             ge: D1N34A,
             si: D1N4004,
+            peak_diode: DCR36,
         }
     }
 }
@@ -683,8 +699,8 @@ impl Contours {
         let i_c4 = (c.p93 - v_c4) / s.r4 - (v_c4 - vbe1) / s.r3;
         let vbe4 = n.vt * crate::ulp::log(i_c4 / n.is);
         let i_cr3 = n.base_current(i_c4, -1.0, c.npn.vaf) + (vbe4 - v_sat) / s.r14;
-        let law = c.ge.law(self.celsius);
-        let v_cr3 = root(|v| law(v).0 - i_cr3, -0.5, 2.0, 0.2, self.tol) + c.ge.rs * i_cr3;
+        let law = c.peak_diode.law(self.celsius);
+        let v_cr3 = root(|v| law(v).0 - i_cr3, -0.5, 2.0, 0.2, self.tol) + c.peak_diode.rs * i_cr3;
         let v_pk = vbe4 + v_cr3;
         v_pk + s.r_top * ((v_pk - c.vn) / s.r_bot + i_cr3)
     }

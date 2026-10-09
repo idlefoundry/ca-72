@@ -394,6 +394,21 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     the two filters sit within -0.03 to -0.05 octave there, and with EMPHASIS 6.8 their
     resonances within 0.01 (session L).
 
+21. **The contours' peak: CR3 and CR6 silicon** (`contour::DCR36`, `mm-devices.lib`,
+    board2.md B2-11, 2026-10-08). With the contour jacks' inputs calibrated, the reference's
+    contours peak at 4.90 to 4.94 V (filter) and 5.73 to 5.75 V (loudness; session J's
+    takes, the slower attacks a little higher), rest at 0.29 and -0.31 V and hold at 3.94 and
+    4.61 V at SUSTAIN 10 (session L); the circuit's peak at 4.49 and 5.28 V, rest at 0.15 and
+    -0.48 and hold at 3.83 and 4.48. The jacks sit 0.14 and 0.17 V above the circuit at rest
+    (a buffer's offset: with it, the held levels agree within 1 %, and at FILTER SUSTAIN 0
+    the reference's filter at AMOUNT 4 rose only as far as 0.09 V of contour would take it);
+    the difference between peak and held level, which no offset touches, is 0.306 and 0.315
+    V larger on the reference. Through the two peak dividers that is the same 0.23 V at both
+    flip-flops' thresholds: a silicon diode where the drawing has germanium. One saturation
+    current puts both peaks there (4.788 and 5.597 V in ngspice, against 4.795 and 5.597).
+    Every preset's contours peak 7 % higher: a filter sweep's first moments up to a third of
+    an octave higher, a loudness attack's overshoot 0.5 dB louder.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -416,10 +431,8 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   EMPHASIS's peak against its corner. A take at that panel would tell.
 - **Oscillator 3 on LO at FREQUENCY 0** (OSC. 3 CONTROL on, A3 held): the reference's
   vibrato ran at 2.05 Hz, the CA-72's at 1.78.
-- **The contours' peak:** the attack ends at 1.17 [1.18] of the held level on the CA-72 and
-  1.22 to 1.23 [1.26 to 1.27] on the reference: the peak divider (R33/R29 [R24/R27]) or CR3's
-  [CR6's] threshold. And with DECAY at 0 the release's first half takes 1.9 to 2.2 ms against
-  the reference's 1.1 to 1.3.
+- **The contours' release with DECAY at 0:** its first half takes 1.9 to 2.2 ms against the
+  reference's 1.1 to 1.3.
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
   CA-72 ends 22 cents under the reference (0.9986 against 1.0030 octave a volt at the ES-3's
   10.39 V), against 80 cents before.

@@ -50,7 +50,7 @@ r14   f_c1 f_b4 33k                 ; R14 33K
 r4    p93 f_c4 10k                  ; R4 10K
 r6    p93 f_b5 560                  ; R6 560
 r5    f_b5 f_c1 3.3k                ; R5 3.3K
-dcr3   f_pk f_b4 D1N34A              ; CR3 1N34A: resets at the attack's peak
+dcr3   f_pk f_b4 DCR36               ; CR3 (1N34A drawn; the reference's silicon: B2-11): resets at the attack's peak
 r29   n10 f_pk 16.9k                ; R29 16.9K 1%
 r33   f_pk f_out 5.6k               ; R33 5.6K
 r35   rst f_r35 10k                 ; R35 10K
@@ -87,7 +87,7 @@ r56   l_c25 l_b15 33k               ; R56 33K
 r39   p93 l_c15 10k                 ; R39 10K
 r41   p93 l_b16 560                 ; R41 560
 r40   l_b16 l_c25 3.3k              ; R40 3.3K
-dcr6   l_pk l_b15 D1N34A             ; CR6 1N34A
+dcr6   l_pk l_b15 DCR36              ; CR6 (1N34A drawn; the reference's silicon: B2-11)
 r27   n10 l_pk 16.9k                ; R27 16.9K 1%
 r24   l_pk l_out 6.8k               ; R24 6.8K
 r36   rst l_r36 10k                 ; R36 10K

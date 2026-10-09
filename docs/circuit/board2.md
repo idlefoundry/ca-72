@@ -181,3 +181,14 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
   the threshold within the sample (the secant through the sample's ends, refined once); the
   decay begins on the next. `contour_realtime.rs`: peaks within 7.4 mV of ngspice in every
   case at 48 and 24 kHz, and within 23 mV with ATTACK at 0, at 6 kHz too.
+- **B2-11** (2026-10-08) The peak detectors CR3 and CR6 are silicon small-signal diodes in
+  the model (`DCR36`), not the drawing's 1N34A germanium. The hardware reference's contours
+  peak 0.306 V (filter) and 0.315 V (loudness) further above their held level at SUSTAIN 10
+  than the circuit's (its contour jacks calibrated; the difference cancels their offsets):
+  through the peak dividers R33/R29 and R24/R27 (gains 1.331 and 1.402) the same 0.23 V more
+  at the flip-flops' thresholds, Q4's [Q15's] base plus the diode's drop at about 23 uA. A
+  germanium point contact drops 0.12 V there, a silicon junction 0.35 to 0.41: a modern
+  recreation's part. `DSG3246`'s values with IS fitted (9.45 nA): the peaks 4.788 and 5.597
+  V in ngspice (4.489 and 5.282 as drawn), the model's within 5 mV, the reference's (its
+  held level plus the difference) 4.795 and 5.597. The reset feeds CR1, CR8 and the trigger
+  input CR10 stay germanium (CR10's leakage sets the trigger delay, B2-3).

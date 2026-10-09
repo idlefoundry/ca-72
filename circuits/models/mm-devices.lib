@@ -7,7 +7,7 @@
 *   DS   datasheet-derived: parameters computed from a datasheet's specified points
 *   GS   generic substitute: typical small-signal silicon values, with the datasheet's
 *        specified points (gain bin, capacitances) where the part has them
-*   FIT  fitted to measurements (none yet)
+*   FIT  fitted to measurements (DCR36: the hardware reference's contour peaks)
 * All models are referenced to 25 C (TNOM=25), the datasheets' temperature.
 *
 * Revision 1, 2026-09-28: first pass, spec points only; no curve fits yet.
@@ -160,6 +160,12 @@
 * gives 13.4 ohm. Its temperature compensation (a forward junction in series) is not
 * modelled: the circuit runs at one temperature.
 .model D1N821 D (TNOM=25 IS=1e-14 N=1 RS=10 BV=6.2 IBV=7.5m NBV=1 CJO=100p M=0.33)
+
+* The contour generators' peak detectors CR3, CR6 as the hardware reference has them:    FIT
+* silicon small-signal diodes in place of the drawing's 1N34A (board2.md B2-11). DSG3246's
+* values below, its saturation current fitted to where the reference's two contours peak
+* (docs/calibration, session L): both within 5 mV with the one value.
+.model DCR36 D (TNOM=25 IS=9.45e-9 N=1.75 RS=0.6 BV=75 IBV=5u CJO=4p M=0.33 TT=20n)
 
 * SG3246 silicon small-signal diode (Silicon General; the A-440's limiter CR3, CR4)     GS
 * No data sheet in hand: generic small-signal silicon switching diode values.
