@@ -167,6 +167,7 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "noise_type" => &p.noise_type,
         "osc3_on" => &p.osc3_on,
         "osc3_volume" => &p.osc3_volume,
+        "filter_mode" => &p.filter_mode,
         "filter_mod" => &p.filter_mod,
         "keyboard_control_1" => &p.keyboard_control_1,
         "keyboard_control_2" => &p.keyboard_control_2,

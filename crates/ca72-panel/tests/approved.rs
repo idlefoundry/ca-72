@@ -1,5 +1,7 @@
 //! The panel as drawn matches the design the owner approved (`approved.png`: the mock-up at one
-//! panel unit a pixel, every control at half its travel).
+//! panel unit a pixel, every control at half its travel). The switch column between MIXER and
+//! MODIFIERS (drawing x 2100 to 2330, y 225 to 690) is the renderer's own, as the owner chose
+//! it on 2026-10-09 with FILTER MODE at its head (decisions.md R-HP).
 
 use ca72_panel::art::{PLATE_H, PLATE_X, PLATE_Y};
 use ca72_panel::{CONTROLS, Renderer, Scene};
