@@ -423,6 +423,19 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     LO 312 cents up); the real-time oscillator tracks it within 0.08 cent (LO 0.57). Every
     vibrato and slow sweep from oscillator 3 on LO runs 20 % faster; 5.36's slowest click
     with the control off is 4.78 s.
+23. **MOD DEPTH's own law on the MODULATION wheel** (`modulation::mod_wheel_r`, 2026-10-08).
+    Session L turned the reference's MOD DEPTH knob with no MIDI wheel (a MIDI wheel's message
+    takes the depth from the knob until the knob moves: at MOD DEPTH 2.5 a wheel at 127 still
+    gave the full 12.2 semitones): 0.84, 2.62, 7.80 and 12.26 semitones at 2.5, 5, 7.5 and
+    10, 0.069, 0.214 and 0.636 of the full swing, where the MIDI wheel at 32, 64 and 96 gave
+    0.108, 0.220 and 0.509 (change 18). The CA-72's wheel had the drawing's law to the full
+    685 ohm; now the knob's: 29.5, 95.1 and 349 ohm at a quarter, half and three quarters
+    (the drawing's 91, 222 and 412), rendering 0.069, 0.211 and 0.643 of its full swing.
+    MIDI's curve is unchanged: control change 1 puts the wheel where the reference's
+    resistance for it is, through the knob's law now. Presets keep their wheel positions:
+    those between the ends modulate less (Breath Flute's 0.4 from 164 to 60 ohm, about 40 %
+    of its vibrato).
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -452,8 +465,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   CA-72's mixer bus; no change): at 8 and 4, oscillator 2 -2.10 and -9.42 dB against the
   reference's -2.29 and -9.55 (oscillator 3's as the reference's oscillator 2's within 0.2
   dB), and the noise, through its 11K, -3.60 and -11.93 against -3.94 and -11.98.
-- **Not in this round:** oscillators 2 and 3's FREQUENCY spans, SUSTAIN's law, and the
-  reference's MOD DEPTH knob on its own (change 18).
+- **Not in this round:** oscillators 2 and 3's FREQUENCY spans and SUSTAIN's law.
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R-CAL),
   after session J's fits and the contours' peak too. Nine already at MAIN OUTPUT VOLUME 10
   are quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -3.31 dB, Breath

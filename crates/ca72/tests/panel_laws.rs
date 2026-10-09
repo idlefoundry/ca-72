@@ -136,11 +136,18 @@ fn the_modulation_wheel_follows_the_reference_over_midi() {
     }
     assert_eq!(midi_wheel(0.0), 0.0);
     assert_eq!(midi_wheel(1.0), 1.0);
-    // The panel's wheel: the drawing's law to the reference's depth fully forward.
-    for k in 0..=100 {
-        let w = k as f64 / 100.0;
-        assert!((mod_wheel_r(w) - mod_wheel_r_drawn(w) * 685.0 / 1.2e3).abs() < 1e-9);
+    // The panel's wheel: the reference's MOD DEPTH knob, below a quarter the drawing's
+    // shape scaled to meet it.
+    for (w, r) in [(0.25, 29.5), (0.5, 95.1), (0.75, 349.0), (1.0, 685.0)] {
+        assert!(
+            (mod_wheel_r(w) / r - 1.0).abs() < 1e-12,
+            "the wheel at {w}: {}",
+            mod_wheel_r(w)
+        );
     }
+    let scaled = 29.5 * mod_wheel_r_drawn(0.1) / mod_wheel_r_drawn(0.25);
+    assert!((mod_wheel_r(0.1) / scaled - 1.0).abs() < 1e-12);
+    assert_eq!(mod_wheel_r(0.0), 0.0);
     let mut last = -1.0;
     for k in 0..=1000 {
         let w = midi_wheel(k as f64 / 1000.0);
