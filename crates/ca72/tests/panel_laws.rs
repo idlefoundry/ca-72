@@ -86,7 +86,7 @@ fn cutoff_follows_the_reference_at_its_marks() {
 
 #[test]
 fn contour_amount_follows_the_reference_at_its_marks() {
-    for (p, t) in [(0.25, 0.2088), (0.5, 0.5131), (0.75, 0.7976)] {
+    for (p, t) in [(0.25, 0.2080), (0.4, 0.3796), (0.5, 0.5111), (0.75, 0.7950)] {
         assert!(
             (contour_amount_track(p) - t).abs() < 1e-12,
             "AMOUNT {p}: {}",

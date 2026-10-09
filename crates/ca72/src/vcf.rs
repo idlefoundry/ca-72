@@ -37,11 +37,11 @@
 pub const R53: f64 = 312e3;
 pub const R54: f64 = 156e3;
 
-/// R74, AMOUNT OF CONTOUR's resistor into the control node: 47K on Figure 9-11; 45.3K (1 %)
+/// R74, AMOUNT OF CONTOUR's resistor into the control node: 47K on Figure 9-11; 48.1K (0.5 %)
 /// where the hardware reference's contour moves its filter at AMOUNT OF CONTOUR 10 (3.08
-/// octaves for 1.38 V of contour; board4.md B4-9, docs/calibration change 14). Folkman's
-/// procedure keeps the drawn value.
-pub const R74: f64 = 45.3e3;
+/// octaves for 1.465 V of contour; board4.md B4-9, docs/calibration changes 14 and 20).
+/// Folkman's procedure keeps the drawn value.
+pub const R74: f64 = 48.1e3;
 
 use crate::devices::{Bjt, JunctionCapacitance, PairWarm, degenerated_warm, junction_capacitance};
 use crate::expo::Input;

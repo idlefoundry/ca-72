@@ -310,6 +310,7 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     reference's octaves there exactly. In session I's Ringing Saw Line (AMOUNT 4) the CA-72's
     filter moved 0.89 to 0.95 octave a volt of contour against the reference's 0.81; with the
     law, 0.83 at 4. The contours' own voltages match (session I: their peaks within 3 %).
+    (Change 20 corrects this: the contour was read 5.9 % low.)
 
 15. **EMPHASIS at 6, 7 and 8.5** (`voice::emphasis_r14`, 2026-10-08). Session J measured the
     passband as session E did at three more marks: -10.43, -11.92 and -14.67 dB. At 8.5 the
@@ -377,6 +378,21 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     0.75 and 0.76), and the ring's excess over the reference's fell from 0.85 to 0.44 octave
     50 ms into the long G2 and from 0.29 to 0.12 at 850 ms. Every preset with a fast attack
     changes (levels below).
+
+20. **AMOUNT OF CONTOUR again, in true volts: R74 48.1K, and a point at 4** (`vcf::R74`,
+    `voice::contour_input`, board4.md B4-9, 2026-10-08). Session L calibrated the inputs
+    that record FILT CONT (the rig, above): session J's contour step was 1.465 V, not 1.379,
+    and through R74 45.3K the CA-72's filter moved 3.25 octaves at AMOUNT 10 for it against
+    the reference's 3.08. 48.1K (E192) gives 3.07; the knob's track at 2.5, 5 and 7.5 is then
+    0.2080, 0.5111 and 0.7950 (from 0.2088, 0.5131, 0.7976). Session L held the contour at
+    0.187 and 3.942 V (FILTER SUSTAIN 0 and 10) at AMOUNT 4, the filter self-oscillating at
+    CUTOFF -1 with both KEYBOARD CONTROLs on: the reference moved 2.879, 2.876 and 2.848
+    octaves on G2, C3 and C4, 0.767, 0.766 and 0.758 octave a volt; the straight law
+    between 2.5 and 5 gave the CA-72 0.390 of the track, and rendering the takes (the voice,
+    both KEYBOARD CONTROLs loading the node) puts the reference's at 0.3796, a point of the
+    law now: 0.767, 0.765 and 0.755 octave a volt of the CA-72's own contour. At AMOUNT 0
+    the two filters sit within -0.03 to -0.05 octave there, and with EMPHASIS 6.8 their
+    resonances within 0.01 (session L).
 
 ## Still differs (2026-10-08, after session J's fits)
 

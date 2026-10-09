@@ -231,15 +231,17 @@ pub fn volume_track(volume: f64) -> f64 {
 }
 
 /// AMOUNT OF CONTOUR's pot (R12, 5K linear) as the hardware reference's knob sets its wiper:
-/// the fraction of the track at 2.5, 5 and 7.5 at which the voice's filter moves as the
-/// reference's does for the same contour (0.606, 1.506 and 2.389 octaves for 1.38 V, the
-/// filter self-oscillating at CUTOFF -2; docs/calibration, session J). A linear track's are
-/// 0.25, 0.5 and 0.75.
-const CONTOUR_AMOUNT_TRACK: [(f64, f64); 5] = [
+/// the fraction of the track at 2.5, 4, 5 and 7.5 at which the voice's filter moves as the
+/// reference's does for the same contour (the filter self-oscillating; docs/calibration):
+/// 0.606, 1.506 and 2.389 octaves for 1.465 V at 2.5, 5 and 7.5 (session J, CUTOFF -2), 2.88
+/// octaves for 3.755 V at 4 (session L, CUTOFF -1). A linear track's are 0.25, 0.4, 0.5 and
+/// 0.75.
+const CONTOUR_AMOUNT_TRACK: [(f64, f64); 6] = [
     (0.0, 0.0),
-    (0.25, 0.2088),
-    (0.5, 0.5131),
-    (0.75, 0.7976),
+    (0.25, 0.2080),
+    (0.4, 0.3796),
+    (0.5, 0.5111),
+    (0.75, 0.7950),
     (1.0, 1.0),
 ];
 
