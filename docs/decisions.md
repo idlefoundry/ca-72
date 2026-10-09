@@ -2816,3 +2816,14 @@ list that drops down over the strip inside the window."
 - **Cost (release build, the Linux reference machine, another agent's benchmark on four of its
   cores):** the background once a scale, 182 ms at 0.4 of the drawing (the pictures decoded the
   first time) and 508 ms at 1; a knob turned, 1.5 ms at 0.4 and 4.8 ms at 1.
+
+## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, DOUBLE
+
+**The owner, 2026-10-09:** "we need to add all the same stereo controls that we added to the
+CA74", then "in fact, i think all controls on that panel should probably be added here", and,
+asked whether SPREAD should change to the CA-74's (a constant-power law and the places from the
+edges, wider and up to about 1.5 dB louder, changing projects saved with SPREAD) or keep the
+CA-72's for projects saved before: "I want you to copy the same stereo algorithms we in ca-74".
+So the CA-74's R27 (SPREAD's law and places, POLY going round its voices, a key played again
+keeping its voice), R30 (the placement: EVEN, EDGES or CENTER), R28 and R41 (DOUBLE, its pairs
+mirrored as far out as the placement puts each voice), as they are there.
