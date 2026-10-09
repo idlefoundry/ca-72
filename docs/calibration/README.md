@@ -675,9 +675,11 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R42),
   after sessions J's, L's, M's, N's and O's fits too. Seven at MAIN OUTPUT VOLUME 10 are
   quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -5.05 dB, Breath Flute
-  -3.30, Ladder Kick -1.84, Stacked Fifths -1.81, Ringing Saw Line -1.08, Open Hat -1.05,
+  -3.30, Ladder Kick -1.84, Stacked Fifths -1.81, Ringing Saw Line -1.53, Open Hat -1.05,
   Shoreline Wash -0.11 (mostly EMPHASIS's and the contours' laws, and the contours' fall
-  after a fast attack). Presets keep their
+  after a fast attack). Ringing Saw Line's oscillator 2 stands 3.4 cents sharp, as the
+  reference's did on session I's take (R42): at FREQUENCY 0 an exact octave holds its phase
+  where the octave adds up, 3.6 dB over the fundamental, where the reference's pair rolls. Presets keep their
   knobs' positions where a law changed: those between a law's ends sound as the reference
   would at those marks (Ladder Kick's sweep, for one, starts about 2 semitones lower).
 

@@ -2698,6 +2698,18 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   Closed Hat 9.94, Noise Crash 9.8; the rest moved under 0.1 dB. At 10 and quieter than
   0.1.3: Upright Pluck -5.05 dB, Breath Flute -3.30, Ladder Kick -1.84, Stacked Fifths
   -1.81, Ringing Saw Line -1.08, Open Hat -1.05, Shoreline Wash -0.11; Pink Riser +2.26.
+- **Owner decision, 2026-10-09: Ringing Saw Line's oscillator 2 at +3.4 cents** (FREQUENCY
+  0.026). At FREQUENCY 0 the CA-72's two oscillators sit exactly an octave apart and their
+  phase stays where the octave adds up: 3.6 dB over the 32' fundamental on every note, the
+  line heard an octave up ("it sounds like we're missing an entire bottom octave"). On
+  session I's take the reference's oscillator 2 sat 3.4 cents sharp (from the pair's phase
+  rolling within each note), its octave swinging from 4 dB over the fundamental to 6 dB
+  under; with the same detune the CA-72's swings over the same range. The owner: "Much
+  better!", "save that as the new ringing saw preset". It plays 0.45 dB quieter (at 10:
+  -1.53 dB against 0.1.3). The other presets whose oscillators stand at unison or an octave
+  with FREQUENCY at 0 lock the same way (Three Saw Slab, Pulse Strut, Undertow Growl, Hollow
+  Glider, Brass Tutti, Slow Bow): detuned as a panel set by ear, each on the owner's
+  hearing.
 - **The presets' oscillators 2 and 3 FREQUENCY values rewritten after their laws**
   (2026-10-09; calibration change 29): every value but 0 moved to where the new law puts
   the pot where the old value did (Stacked Fifths 5 and 7 to 4.1667 and 6.4465, Breath
