@@ -1,14 +1,18 @@
 //! Renders the panel to a PNG: `cargo run -p ca72-panel --example png -- out.png [scale]`
-//! (pixels a panel unit, 0.5 by default).
+//! (pixels a panel unit, 0.5 by default); `CA72_SKIN=worn` in the worn skin.
 
-use ca72_panel::{CONTROLS, Renderer, Scene};
+use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let out = args.next().unwrap_or_else(|| "panel.png".into());
     let scale: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0.5);
     let t0 = std::time::Instant::now();
-    let mut r = Renderer::new(scale, 1.0);
+    let skin = match std::env::var("CA72_SKIN").as_deref() {
+        Ok("worn") => Skin::Worn,
+        _ => Skin::Drawn,
+    };
+    let mut r = Renderer::with_skin(skin, scale, 1.0);
     let built = t0.elapsed();
     let mut scene = Scene::default();
     // The plugin's defaults: as the mock-up was drawn.

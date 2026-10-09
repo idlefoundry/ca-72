@@ -2761,7 +2761,8 @@ list that drops down over the strip inside the window."
   `cal/hp-mode`) is on the panel in the new look as in the drawn one.
 - Of three directions (A, the panel carried down; B, a programmer after Moog's of 1982; C,
   aluminium modules), with A's buttons orange or blue where they switch something on: "blue and
-  orange. Let's go option a."
+  orange. Let's go option a.", then "sorry i meant only orange buttons. not blue/oprange": A,
+  its buttons orange.
 - "we need to add all the same stereo controls that we added to the CA74", then "in fact, i
   think all controls on that panel should probably be added here": the strip carries the
   CA-74's (its R25 and R27 to R31, R34, R36, R41): VOICES (MONO | POLY | UNISON, VOICES,
@@ -2776,7 +2777,7 @@ list that drops down over the strip inside the window."
   behind jewels (POWER red in a chrome bezel, OVERLOAD dark); chrome jacks; white ridged
   wheels. The strip is the panel's face carried down under the name board, with its white
   rules between sections and its titles along the foot; the push buttons are translucent
-  caps, orange for a choice and blue for ON, lit from inside; the displays orange
+  caps of the orange rockers' plastic, lit from inside; the displays orange
   gas-discharge digits and dots, the instrument having no LEDs.
 - **The pictures** were made by an image generator (Codex CLI 0.160.1) from words alone and
   cut out of a grey ground as the CA-74's were; their prompts and account go with the assets.
@@ -2785,3 +2786,15 @@ list that drops down over the strip inside the window."
 - **Where:** a branch of its own from `main` (8ff1455). FILTER MODE comes from the drawing
   (the controls and the print are the drawing's), so the look carries it once `cal/hp-mode`
   is merged; each step is tried against a local merge of the two.
+- **The panel, built (`skin.rs`, `art::control_worn`, `Renderer::with_skin`):** the editor
+  draws it worn; the drawn panel stays as the drawing the worn one is printed and placed from,
+  and its approval test (`approved.png`) still guards every place, size and legend. The print is
+  the drawing's own (`art::printed`), laid over the face's picture; each knob's picture turns
+  about its cap's axis and its cap is drawn over it unturned, so its sheen stays where the lamp
+  is; a rocker's picture is mirrored to the end pressed; the knobs' and switches' shadows are
+  the background's, soft, down and to the right; FEEDBACK, dimmed in the drawing while EXTERNAL
+  INPUT is off, is shaded instead (a picture is not dimmed). The pictures, about 3.8 MB in the
+  plug-in, and how they were made: `crates/ca72-panel/assets/worn/README.md`.
+- **Cost (release build, the Linux reference machine, another agent's benchmark on four of its
+  cores):** the background once a scale, 156 ms at 0.4 of the drawing (the pictures decoded the
+  first time) and 385 ms at 1; a knob turned, 0.7 ms at 0.4 and 3.6 ms at 1.

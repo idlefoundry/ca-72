@@ -1,0 +1,10 @@
+Use your image generation tool to make one image, then save it in the current directory as knob-big.png (copy the generated file there). Do nothing else.
+
+The image: a single large tuning knob from the front panel of a 1970s analogue synthesizer, seen from directly above. Square image, as large as you can make it.
+- The knob, as on 1970s American synthesizers and their modular systems: moulded glossy black plastic, in three parts seen from above. Outermost, a wide smooth round skirt, a shallow flared cone at the base, its outline a perfect smooth circle (not scalloped). Inside it, the grip: a short round body with broad, shallow, smooth vertical flutes round it, so that its outline, seen from above, is a gently scalloped circle a little inside the skirt's edge. On top, set flush into the grip, a flat round insert of spun aluminium, polished almost to a mirror, with very fine concentric machining rings.
+- A small round white dot printed on the skirt's upper surface at twelve o'clock, just outside the grip; no other marks.
+- Gently used: the black's gloss a touch softened, the aluminium bright with a faint patina; no scratches, no chips.
+- Proportions: the aluminium insert large, about 72 percent of the skirt's width, the grip about 85 percent.
+- Straight top-down orthographic product photograph, the camera exactly above the centre, no perspective or tilt; the part exactly centred and filling about 75 percent of the frame; on a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
+- Lighting: a ring light all around the camera, perfectly symmetric about the centre: no light from any one side, no directional highlight, no shadow.
+- No text, symbols, logos or numbers anywhere.

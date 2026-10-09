@@ -150,6 +150,7 @@ pub fn menu(fonts: &Fonts, m: &Menu) -> Layer {
         origin: (m.x, m.y),
         bounds: [-e, -e, w + e, h + e],
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -211,6 +212,7 @@ pub fn note(fonts: &Fonts, n: &Note) -> Layer {
         origin: (ox, oy),
         bounds: [-w / 2.0 - e, -e, w / 2.0 + e, h + e],
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -241,6 +243,7 @@ pub fn ring_around(origin: (f64, f64), b: [f64; 4]) -> Layer {
         origin,
         bounds: [b[0] - 5.0, b[1] - 5.0, b[2] + 5.0, b[3] + 5.0],
         body: s.0,
+        ..Layer::default()
     }
 }
 

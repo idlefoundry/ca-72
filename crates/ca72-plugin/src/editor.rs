@@ -24,7 +24,7 @@ use ca72_panel::presets::{
     overlay,
 };
 use ca72_panel::strip::{self, Amount, STRIP_H, StripRenderer, StripScene, StripTarget};
-use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Target, interact};
+use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
 
@@ -579,7 +579,7 @@ impl Editing {
             meters,
             dpr,
             width,
-            renderer: Renderer::new(f64::from(physical_width) / art::W, dpr),
+            renderer: Renderer::with_skin(Skin::Worn, f64::from(physical_width) / art::W, dpr),
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
             strip_scene: StripScene::default(),

@@ -1,15 +1,20 @@
 //! Rendering the panel: the background once for a scale, each moving part's layer again only
-//! when its art changes, and the frame composed of them.
+//! when its art changes, and the frame composed of them; in either skin (`crate::skin`), the
+//! worn one's pictures turned and moved in the drawn parts' places.
 
 use std::fmt;
 
-use resvg::tiny_skia::{Color, Pixmap, PixmapPaint, Transform};
+use resvg::tiny_skia::{
+    BlendMode, Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint,
+    Rect, SpreadMode, Transform,
+};
 use resvg::usvg;
 
 use crate::art::{self, H, Layer, Layout, W};
 use crate::controls::{CONTROLS, Kind, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
+use crate::skin::{Part, Pictures, Skin};
 
 /// What the panel shows.
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +72,9 @@ pub struct Renderer {
     slots: Vec<Slot>,
     /// The scene the frame shows.
     shown: Option<Scene>,
+    skin: Skin,
+    /// The worn skin's pictures, once it has been shown.
+    pictures: Option<Pictures>,
 }
 
 impl fmt::Debug for Renderer {
@@ -90,8 +98,14 @@ pub fn size_at(scale: f64) -> (u32, u32) {
 const TIP_TEXT: f64 = 12.0;
 
 impl Renderer {
-    /// A renderer drawing `scale` pixels a panel unit, `ui` pixels a logical pixel.
+    /// A renderer drawing `scale` pixels a panel unit, `ui` pixels a logical pixel, in the
+    /// drawn skin.
     pub fn new(scale: f64, ui: f64) -> Self {
+        Self::with_skin(Skin::Drawn, scale, ui)
+    }
+
+    /// A renderer drawing the panel in `skin`.
+    pub fn with_skin(skin: Skin, scale: f64, ui: f64) -> Self {
         let fonts = Fonts::new();
         let layout = Layout::measure(&fonts);
         let options = usvg::Options {
@@ -111,9 +125,16 @@ impl Renderer {
             frame: empty(),
             slots: Vec::new(),
             shown: None,
+            skin,
+            pictures: None,
         };
         r.draw_background();
         r
+    }
+
+    /// The skin the panel is drawn in.
+    pub fn skin(&self) -> Skin {
+        self.skin
     }
 
     /// Redraws everything at a new scale.
@@ -128,6 +149,9 @@ impl Renderer {
         self.frame = self.background.clone();
         self.slots.clear();
         self.shown = None;
+        if let Some(p) = &mut self.pictures {
+            p.forget_scale();
+        }
         self.draw_background();
     }
 
@@ -153,6 +177,10 @@ impl Renderer {
     }
 
     fn draw_background(&mut self) {
+        if self.skin == Skin::Worn {
+            self.draw_worn_background();
+            return;
+        }
         let (w, h) = (self.background.width(), self.background.height());
         let view = [
             0.0,
@@ -169,9 +197,142 @@ impl Renderer {
         self.frame = self.background.clone();
     }
 
+    /// The worn skin's background: walnut, the faces' textured black, the shadows and the
+    /// trim, the print over them, the screws and jacks, and the lamp's falloff over all.
+    fn draw_worn_background(&mut self) {
+        let s = self.scale;
+        let (w, h) = (self.background.width(), self.background.height());
+        let view = [0.0, 0.0, f64::from(w) / s, f64::from(h) / s];
+        self.background
+            .fill(Color::from_rgba8(0x1d, 0x1b, 0x1a, 0xff));
+        let pictures = self.pictures.get_or_insert_with(Pictures::load);
+        let bg = &mut self.background;
+        // The wood: its grain along the top strip and the name board, down the column; each
+        // board its own band of the picture, drawn out along the grain.
+        let wood = &pictures.walnut;
+        let along = (art::W * s) as f32 / wood.width() as f32;
+        let across = along / 2.2;
+        for (y, hh, band) in [
+            (0.0, art::TOP, 40.0),
+            (art::TOP + art::PH, art::BOARD, 470.0),
+        ] {
+            fill(
+                bg,
+                wood,
+                (0.0, y * s, art::W * s, hh * s),
+                None,
+                Transform::from_row(along, 0.0, 0.0, across, 0.0, (y * s) as f32 - band * across),
+            );
+        }
+        let down = ((art::PH + 4.0) * s) as f32 / wood.width() as f32;
+        fill(
+            bg,
+            wood,
+            (0.0, (art::TOP - 2.0) * s, art::COL * s, (art::PH + 4.0) * s),
+            None,
+            Transform::from_row(
+                0.0,
+                down,
+                -down / 2.2,
+                0.0,
+                (art::COL * s) as f32 + 120.0 * down / 2.2,
+                ((art::TOP - 2.0) * s) as f32,
+            ),
+        );
+        // The faces: the picture 640 units across, mirrored tile to tile.
+        let face = &pictures.face;
+        let k = (640.0 * s) as f32 / face.width() as f32;
+        let at = |x: f64, y: f64| {
+            Transform::from_scale(k, k).post_translate((x * s) as f32, (y * s) as f32)
+        };
+        fill(
+            bg,
+            face,
+            (art::COL * s, art::TOP * s, art::PW * s, art::PH * s),
+            None,
+            at(art::COL, art::TOP),
+        );
+        fill(
+            bg,
+            face,
+            (art::LH_X * s, art::TOP * s, art::LPW * s, art::PH * s),
+            Some(6.0 * s),
+            at(art::LH_X + 200.0, art::TOP),
+        );
+        let options = &self.options;
+        let svg_over = |frame: &mut Pixmap, body: &str| {
+            let doc = art::document(view, w, h, body);
+            if let Ok(tree) = usvg::Tree::from_str(&doc, options) {
+                resvg::render(&tree, Transform::identity(), &mut frame.as_mut());
+            }
+        };
+        svg_over(bg, &art::worn_overlay());
+        // The print, a shade worn.
+        if let Some(mut print) = Pixmap::new(w, h) {
+            svg_over(&mut print, &art::printed(&self.layout));
+            bg.draw_pixmap(
+                0,
+                0,
+                print.as_ref(),
+                &PixmapPaint {
+                    opacity: 0.94,
+                    ..PixmapPaint::default()
+                },
+                Transform::identity(),
+                None,
+            );
+        }
+        // The screws, each turned as it was last tightened, and the jacks.
+        for (i, (x, y, r)) in art::screws().into_iter().enumerate() {
+            let d = (2.0 * r * s).round().max(1.0) as u32;
+            let deg = (i as f32 * 47.0) % 180.0;
+            put_picture(
+                bg,
+                pictures.part(Part::Screw, d, d),
+                (x * s, y * s),
+                deg,
+                (false, false),
+            );
+        }
+        for (x, y, r, nut) in art::jacks() {
+            let d = (2.0 * if nut { r + 6.0 } else { r * 1.12 } * s)
+                .round()
+                .max(1.0) as u32;
+            put_picture(
+                bg,
+                pictures.part(Part::Jack, d, d),
+                (x * s, y * s),
+                20.0,
+                (false, false),
+            );
+        }
+        // The lamp's falloff, multiplied in.
+        if let Some(mut light) = Pixmap::new(w, h) {
+            svg_over(&mut light, &art::falloff());
+            bg.draw_pixmap(
+                0,
+                0,
+                light.as_ref(),
+                &PixmapPaint {
+                    blend_mode: BlendMode::Multiply,
+                    ..PixmapPaint::default()
+                },
+                Transform::identity(),
+                None,
+            );
+        }
+        self.frame = self.background.clone();
+    }
+
     /// The layers showing `scene`, in the order they are drawn.
     fn layers(&self, scene: &Scene) -> Vec<Layer> {
         let silent = feedback_silent(&scene.values);
+        let worn = self.skin == Skin::Worn;
+        let control = if worn {
+            art::control_worn
+        } else {
+            art::control
+        };
         let mut out: Vec<Layer> = CONTROLS
             .iter()
             .zip(scene.values)
@@ -181,18 +342,32 @@ impl Renderer {
                     Kind::Wheel { .. } => scene.midi.1,
                     _ => 0.0,
                 };
-                let mut layer = art::control(c, v, midi);
+                let mut layer = control(c, v, midi);
                 // FEEDBACK while EXTERNAL INPUT is closed: dimmed as the parts with no
                 // parameter are, still operable.
                 if silent && c.param == "feedback" {
-                    layer.body = format!("<g opacity='0.5'>{}</g>", layer.body);
+                    if worn {
+                        // (A picture is not dimmed: the knob is shaded.)
+                        layer.over.push_str(&format!(
+                            "<circle r='{}' fill='#000' fill-opacity='0.5'/>",
+                            crate::svg::N(art::STD.skirt + 1.0)
+                        ));
+                    } else {
+                        layer.body = format!("<g opacity='0.5'>{}</g>", layer.body);
+                    }
                 }
                 layer
             })
             .collect();
-        out.push(art::power(scene.power));
-        out.push(art::lamp(scene.power));
-        out.push(art::overload(scene.overload));
+        if worn {
+            out.push(art::power_worn(scene.power));
+            out.push(art::lamp_worn(scene.power));
+            out.push(art::overload_worn(scene.overload));
+        } else {
+            out.push(art::power(scene.power));
+            out.push(art::lamp(scene.power));
+            out.push(art::overload(scene.overload));
+        }
         out.push(art::plate());
         if let Some(c) = scene.learning.and_then(|i| CONTROLS.get(i)) {
             out.push(learn::ring(c));
@@ -221,8 +396,9 @@ impl Renderer {
         TIP_TEXT * self.ui / self.scale
     }
 
-    /// A layer's pixels, aligned to the frame's: their place and their image.
-    fn render_layer(&self, layer: &Layer) -> Option<(i32, i32, Pixmap)> {
+    /// A layer's pixels, aligned to the frame's: their place and their image (its body, its
+    /// pictures turned in place, then what goes over them).
+    fn render_layer(&mut self, layer: &Layer) -> Option<(i32, i32, Pixmap)> {
         let (ox, oy) = layer.origin;
         let b = layer.bounds;
         let s = self.scale;
@@ -236,10 +412,40 @@ impl Renderer {
             crate::svg::N(oy),
             layer.body
         );
-        let doc = art::document(view, w, h, &body);
-        let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
         let mut pixmap = Pixmap::new(w, h)?;
-        resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+        if !layer.body.is_empty() {
+            let doc = art::document(view, w, h, &body);
+            let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
+            resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+        }
+        if !layer.sprites.is_empty() {
+            let pictures = self.pictures.get_or_insert_with(Pictures::load);
+            for sp in &layer.sprites {
+                let (pw, ph) = (
+                    (sp.size.0 * s).round().max(1.0) as u32,
+                    (sp.size.1 * s).round().max(1.0) as u32,
+                );
+                let at = ((ox + sp.at.0) * s - x0, (oy + sp.at.1) * s - y0);
+                put_picture(
+                    &mut pixmap,
+                    pictures.part(sp.part, pw, ph),
+                    at,
+                    sp.deg as f32,
+                    sp.flip,
+                );
+            }
+        }
+        if !layer.over.is_empty() {
+            let over = format!(
+                "<g transform='translate({} {})'>{}</g>",
+                crate::svg::N(ox),
+                crate::svg::N(oy),
+                layer.over
+            );
+            let doc = art::document(view, w, h, &over);
+            let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
+            resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+        }
         Some((x0 as i32, y0 as i32, pixmap))
     }
 
@@ -282,10 +488,212 @@ impl Renderer {
     }
 }
 
+/// A picture drawn with its middle at `at` (pixels), mirrored as `flip` (across, down) says,
+/// then turned `deg` clockwise.
+fn put_picture(frame: &mut Pixmap, p: &Pixmap, at: (f64, f64), deg: f32, flip: (bool, bool)) {
+    let (pw, ph) = (p.width() as f32, p.height() as f32);
+    let sign = |f: bool| if f { -1.0 } else { 1.0 };
+    frame.draw_pixmap(
+        0,
+        0,
+        p.as_ref(),
+        &PixmapPaint {
+            quality: FilterQuality::Bicubic,
+            ..PixmapPaint::default()
+        },
+        Transform::from_translate(-pw / 2.0, -ph / 2.0)
+            .post_scale(sign(flip.0), sign(flip.1))
+            .post_rotate(deg)
+            .post_translate(at.0 as f32, at.1 as f32),
+        None,
+    );
+}
+
+/// A rectangle (pixels: left, top, width, height), its corners rounded by `r` if given, filled
+/// with a picture placed by `place`, mirrored tile to tile beyond it.
+fn fill(
+    frame: &mut Pixmap,
+    p: &Pixmap,
+    (x, y, w, h): (f64, f64, f64, f64),
+    r: Option<f64>,
+    place: Transform,
+) {
+    let paint = Paint {
+        shader: Pattern::new(
+            p.as_ref(),
+            SpreadMode::Reflect,
+            FilterQuality::Bicubic,
+            1.0,
+            place,
+        ),
+        anti_alias: true,
+        ..Paint::default()
+    };
+    let path = match r {
+        Some(r) => rounded_rect(x, y, w, h, r),
+        None => Rect::from_xywh(x as f32, y as f32, w as f32, h as f32).map(PathBuilder::from_rect),
+    };
+    if let Some(path) = path {
+        frame.fill_path(
+            &path,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+    }
+}
+
+/// A rounded rectangle's outline (pixels).
+pub(crate) fn rounded_rect(
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    r: f64,
+) -> Option<resvg::tiny_skia::Path> {
+    let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
+    let r = (r as f32).min(w / 2.0).min(h / 2.0);
+    // A quarter circle's control points, as a share of its radius.
+    let k = 0.552_284_8 * r;
+    let mut p = PathBuilder::new();
+    p.move_to(x + r, y);
+    p.line_to(x + w - r, y);
+    p.cubic_to(x + w - r + k, y, x + w, y + r - k, x + w, y + r);
+    p.line_to(x + w, y + h - r);
+    p.cubic_to(x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h);
+    p.line_to(x + r, y + h);
+    p.cubic_to(x + r - k, y + h, x, y + h - r + k, x, y + h - r);
+    p.line_to(x, y + r);
+    p.cubic_to(x, y + r - k, x + r - k, y, x + r, y);
+    p.close();
+    p.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::controls::index;
+
+    /// The pixels two frames differ in, inside and outside `within` (the drawing's units:
+    /// left, top, right, bottom).
+    fn differ(a: &Pixmap, b: &Pixmap, scale: f64, within: [f64; 4]) -> (usize, usize) {
+        let (mut inside, mut outside) = (0, 0);
+        for (i, (p, q)) in a.pixels().iter().zip(b.pixels()).enumerate() {
+            if p == q {
+                continue;
+            }
+            let (x, y) = (
+                f64::from(i as u32 % a.width()) / scale,
+                f64::from(i as u32 / a.width()) / scale,
+            );
+            if (within[0]..within[2]).contains(&x) && (within[1]..within[3]).contains(&y) {
+                inside += 1;
+            } else {
+                outside += 1;
+            }
+        }
+        (inside, outside)
+    }
+
+    /// The worn skin draws the panel in its pictures, not as drawn; a knob turned changes its
+    /// own place and nothing else, and a rocker switched its own.
+    #[test]
+    fn the_worn_skin_turns_its_knobs_in_place() {
+        let scale = 0.4;
+        let scene = Scene {
+            values: [0.5; CONTROLS.len()],
+            ..Scene::default()
+        };
+        let mut worn = Renderer::with_skin(Skin::Worn, scale, 1.0);
+        assert_eq!(worn.skin(), Skin::Worn);
+        assert!(worn.render(&scene));
+        let before = worn.frame().clone();
+        let mut drawn = Renderer::new(scale, 1.0);
+        drawn.render(&scene);
+        let (all, _) = differ(&before, drawn.frame(), scale, [0.0, 0.0, W, H]);
+        assert!(
+            all > before.pixels().len() / 2,
+            "{all} pixels from the drawn panel's"
+        );
+        for (param, v) in [("cutoff", 0.95), ("osc1_range", 0.0), ("filter_mod", 0.0)] {
+            let i = index(param).expect("a control");
+            let mut turned = scene.clone();
+            turned.values[i] = v;
+            assert!(worn.render(&turned), "{param} not drawn again");
+            let c = &CONTROLS[i];
+            let (cx, cy) = c.centre();
+            let k = art::bounds(&c.kind);
+            // (Its layer is whole pixels: two past its extent.)
+            let m = 2.0 / scale;
+            let (inside, outside) = differ(
+                &before,
+                worn.frame(),
+                scale,
+                [cx + k[0] - m, cy + k[1] - m, cx + k[2] + m, cy + k[3] + m],
+            );
+            assert!(inside > 50, "{param}: {inside} pixels of its own changed");
+            assert_eq!(outside, 0, "{param}: {outside} pixels elsewhere changed");
+            worn.render(&scene);
+        }
+    }
+
+    /// A worn knob's light stays where the lamp is, up and to the left: turned to either end,
+    /// its upper left is lighter than its lower right, by about as much (the pictures lit
+    /// evenly all round; the lamp's light laid over them, not turned with them).
+    #[test]
+    fn a_worn_knobs_light_stays_with_the_lamp() {
+        let scale = 0.8;
+        let i = index("emphasis").expect("a control");
+        let (cx, cy) = CONTROLS[i].centre();
+        let light = |v: f64| {
+            let mut scene = Scene {
+                values: [0.5; CONTROLS.len()],
+                ..Scene::default()
+            };
+            scene.values[i] = v;
+            let mut r = Renderer::with_skin(Skin::Worn, scale, 1.0);
+            r.render(&scene);
+            // The mean level of a patch of the skirt, `dx`, `dy` units from the axis.
+            let patch = |dx: f64, dy: f64| {
+                let (x0, y0) = (((cx + dx) * scale) as u32, ((cy + dy) * scale) as u32);
+                let mut sum = 0.0;
+                for y in y0 - 3..y0 + 3 {
+                    for x in x0 - 3..x0 + 3 {
+                        let p = r.frame().pixel(x, y).expect("inside").demultiply();
+                        sum += 0.2126 * f64::from(p.red())
+                            + 0.7152 * f64::from(p.green())
+                            + 0.0722 * f64::from(p.blue());
+                    }
+                }
+                sum / 36.0
+            };
+            // Cap and grip, each at the upper left and the lower right.
+            let (cap, grip) = (
+                20.0 / std::f64::consts::SQRT_2,
+                42.0 / std::f64::consts::SQRT_2,
+            );
+            (
+                patch(-cap, -cap) - patch(cap, cap),
+                patch(-grip, -grip) - patch(grip, grip),
+            )
+        };
+        let (low, high) = (light(0.0), light(1.0));
+        // (The cap is drawn unturned; the grip turns, its picture lit evenly all round.)
+        for ((a, b), part, apart) in [
+            ((low.0, high.0), "cap", 0.5),
+            ((low.1, high.1), "grip", 6.0),
+        ] {
+            assert!(
+                a > 1.0 && b > 1.0,
+                "{part}: upper left {a:.1} and {b:.1} levels lighter"
+            );
+            assert!(
+                (a - b).abs() < apart,
+                "{part}: {a:.1} against {b:.1} levels as it turns"
+            );
+        }
+    }
 
     /// FEEDBACK's knob is drawn dimmed while EXTERNAL INPUT is switched off, and nothing
     /// else on the panel changes.

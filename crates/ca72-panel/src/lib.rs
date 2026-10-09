@@ -10,6 +10,7 @@ pub mod interact;
 pub mod learn;
 pub mod presets;
 pub mod render;
+pub mod skin;
 pub mod strip;
 mod svg;
 
@@ -19,3 +20,4 @@ pub use interact::Target;
 pub use render::{Renderer, Scene};
 /// The frames' type.
 pub use resvg::tiny_skia::Pixmap;
+pub use skin::Skin;
