@@ -2685,6 +2685,14 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   Pluck -5.59 dB, Breath Flute -3.77, Ladder Kick -2.37, Stacked Fifths -2.34, Open Hat
   -1.63, Ringing Saw Line -1.54, Shoreline Wash -0.60, Noise Snare -0.60, Closed Hat -0.23;
   Pink Riser +1.81.
+- **Again after the VCA's R43** (2026-10-09; calibration change 31): every preset 0.2 to
+  0.6 dB louder. Bass 9.88, Lead 8.57, Three Saw Slab 8.23, Elastic Octaves 5.43, Pulse
+  Strut 9.02, Undertow Growl 8.45, Hollow Glider 6.07, Cruising Whistle 7.02, Slow Horn Swell
+  8, Brass Tutti 4.12, Wooden Mallet 9.96, Slow Bow 8.29, Closed Hat 9.96, Noise Crash 9.82,
+  Warped Pad 7.44: each within 0.02 dB of 0.1.3. At 10 and quieter than 0.1.3: Upright
+  Pluck -5.16 dB, Breath Flute -3.41, Ladder Kick -1.95, Stacked Fifths -1.88, Open Hat
+  -1.16, Ringing Saw Line -1.12, Shoreline Wash -0.23, Noise Snare -0.16; Pink Riser +2.13
+  (left at 10, as before).
 - **The presets' oscillators 2 and 3 FREQUENCY values rewritten after their laws**
   (2026-10-09; calibration change 29): every value but 0 moved to where the new law puts
   the pot where the old value did (Stacked Fifths 5 and 7 to 4.1667 and 6.4465, Breath

@@ -633,12 +633,11 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   semitone short of the reference's; the 0 mark at the factory tuning's unison, where the
   reference's sits wherever its knob is set by eye (7 to 26 cents flat in session N).
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R42),
-  after sessions J's, L's, M's and N's fits too. Nine at MAIN OUTPUT VOLUME 10 (Wooden
-  Mallet's 0.09 dB short besides) are
-  quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -5.59 dB, Breath Flute
-  -3.77, Ladder Kick -2.37, Stacked Fifths -2.34, Open Hat -1.63, Ringing Saw Line -1.54,
-  Shoreline Wash -0.60, Noise Snare -0.60, Closed Hat -0.23 (mostly EMPHASIS's and the
-  contours' laws, and the contours' fall after a fast attack). Presets keep their
+  after sessions J's, L's, M's, N's and O's fits too. Eight at MAIN OUTPUT VOLUME 10 are
+  quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -5.16 dB, Breath Flute
+  -3.41, Ladder Kick -1.95, Stacked Fifths -1.88, Open Hat -1.16, Ringing Saw Line -1.12,
+  Shoreline Wash -0.23, Noise Snare -0.16 (mostly EMPHASIS's and the contours' laws, and the
+  contours' fall after a fast attack). Presets keep their
   knobs' positions where a law changed: those between a law's ends sound as the reference
   would at those marks (Ladder Kick's sweep, for one, starts about 2 semitones lower).
 
