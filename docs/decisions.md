@@ -2710,6 +2710,14 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   with FREQUENCY at 0 lock the same way (Three Saw Slab, Pulse Strut, Undertow Growl, Hollow
   Glider, Brass Tutti, Slow Bow): detuned as a panel set by ear, each on the owner's
   hearing.
+- **Owner decision, 2026-10-09: those six detuned** ("slightly detuned makes everything
+  better", after a page of each as it was and detuned). Within the reference's own range
+  (its knobs at 0, set by eye, landed 7 and 26 cents flat in session N, 3.4 sharp on
+  Ringing Saw Line's take): Three Saw Slab, Pulse Strut, Undertow Growl and Brass Tutti with
+  oscillator 2 at +3.4 cents (FREQUENCY 0.026) and oscillator 3 at -7 (-0.053), Slow Bow's
+  oscillator 2 at +3.4, Hollow Glider's oscillator 3 at -16 (-0.1215, as on its take 31).
+  Re-levelled: Three Saw Slab 8.54 (1.2 dB quieter detuned), Brass Tutti 4.22, Pulse Strut
+  8.96, Undertow Growl 8.4, Slow Bow 8.23; Hollow Glider within 0.02 dB.
 - **The presets' oscillators 2 and 3 FREQUENCY values rewritten after their laws**
   (2026-10-09; calibration change 29): every value but 0 moved to where the new law puts
   the pot where the old value did (Stacked Fifths 5 and 7 to 4.1667 and 6.4465, Breath
