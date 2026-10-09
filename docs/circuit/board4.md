@@ -54,7 +54,8 @@ Reference designators are Figure 9-11's (S-F911); the parts list is Table 7-8.
    pins 7 and 6 (Figure 9-17), then the REGEN CAL trimpot R73 1K and R76 330 into Q30's base.
 7. **VCAs**: the filter's output reaches the first pair Q16/Q15 (TIS97) through R2 and C6
    0.33 uF, attenuated by R34 820 against the bias node (R22 120, R36 510, C15 220 uF): R2
-   sets how hard the first VCA is driven. Q18's current (R37 6.8K, R43 270K to -10 V),
+   sets how hard the first VCA is driven. Q18's current (R37 6.8K, R43 270K to -10 V; the
+   model's 180K, B4-10),
    driven by the loudness contour through R59 68K, is its tail. Its collectors drive the
    second pair Q14/Q13 (tail Q21 from the EXT. LOUDNESS input, R51 33K, R42 3.3K; the rear
    jack J3 normally ties that input to +10 V through 33K: about 1.4 mA, fully on). The
@@ -111,7 +112,7 @@ Derived from circuit No. 7 and checked against it (`crates/ca72-lab/tests/vca_re
 | Signal path | Three pairs (Q16/Q15, Q14/Q13, the PNP Q12/Q17), each a tanh behind its series drop (RB, RE, and R8 for the output pair) and its per-side source resistances against its base currents (so the balance trims act as they do in the circuit); the input through R2, C6 and R34 (C6's reference moves with bb); the A-440's R40 and C8 on Q14's collector; the output node Q17's collector across R29 and, through C2, R77 and the load; the output pair's Early effect (its collectors swing volts) | Circuit equations; `QTIS97`, `Q2N4058` |
 | Tails | Q18 from the loudness contour (it saturates near 5 V: the gain peaks there), Q21 from EXT. LOUDNESS (J3's 33K to +10 V), Q1 from the chain's node nl: full Gummel-Poon transistors | Circuit equations |
 | Supply chain | R10 with C4, R11, R13, R22, R36 with C15, loaded by the pairs: the first pair's tail lowers nl and raises Q1's current, so the output's resting voltage rises 0.2 V with the contour (C4, about 23 ms): the circuit's thump, about 117 mV at the output after C2 for a 5 V contour | Circuit equations |
-| Balance trims | The factory procedure (service manual 5.24.1, 5.25; Folkman 1973) run on the model: R12 nulls EXT. LOUDNESS feedthrough with the first VCA off (0.670), R14 at full sustain (0.558) | `VcaCircuit::calibrated` |
+| Balance trims | The factory procedure (service manual 5.24.1, 5.25; Folkman 1973) run on the model: R12 nulls EXT. LOUDNESS feedthrough with the first VCA off (0.670), R14 at full sustain (0.560 with R43 180K). The voice takes the hardware reference's instead, R14 0.564 and R12 0.496, fitted to the 2nd harmonic its VCA adds and to its thump (docs/calibration, change 32; a departure from the procedure, not from the drawing) | `VcaCircuit::calibrated`, `reference_trims` |
 | Numerics | Couplings (C6, C8, C2) by the trapezoidal rule, the chain by backward Euler; each tail solved together with the pair it feeds (their three junctions by Newton's method, Kirchhoff's law at the pair's emitters), passes over the three until they agree to 1e-12; Q18 and Q21 (which follow the contour, directly or through nn) every sample, warm-started Newton steps to convergence; Q1 and the pairs' base-current ratios (which follow the chain) every 1/3000 s, interpolated, and at once whenever the contour has moved 2 mV since (a fast attack or release), or every sample while EXT. LOUDNESS is plugged | numerics.md |
 
 Agreement with ngspice (2026-09-28):
@@ -125,7 +126,7 @@ Agreement with ngspice (2026-09-28):
 | Thump | Contour 0 to 5 V in 5, 1 and 0.3 ms, 350 ms, back as fast; no signal | Peak 117 mV; within 1.3 mV at each (2026-09-29; before, 2.0, 446 and 2125 mV: a click at every fast attack, numerics.md) |
 | EXT. LOUDNESS at audio rate | 1 kHz at 50 mV in, J3 between 1 and 5 V at 0, 5, 100 Hz and 1 kHz, bias every sample | 41.2, 36.7, 38.8 dB below the output; 27.9 dB at 1 kHz, the model's step (35.2 dB at 8 times the rate; numerics.md) |
 | EXT. LOUDNESS overdriven | J3 from 5 to 9 V, the contour at -0.35, 0, 2 and 5 V (each tail solved with its pair, 2026-09-29) | Tails within 0.1 %, output at rest within 0.1 mV, gain within 0.06 dB while the VCA is on and off where the circuit shuts it (above about 6.4 to 6.6 V); every bias solve settles (before: tails up to 1,360 % off, gain up to 140 dB, between 6.2 and 7 V) |
-| Drive distortion | 1 kHz, 0.5..5 V into R2, contour 5 and 2 V | H1 within 0.08 dB, H2 and H3 within 0.51 dB, higher harmonics above -50 dB within 1.3 dB |
+| Drive distortion | 1 kHz, 0.5..5 V into R2, contour 5 and 2 V | H1 within 0.08 dB, H2 and H3 within 0.51 dB, higher harmonics above -50 dB within 1.3 dB. With R43 180K and the reference's trims (2026-10-09): H1 within 0.09 dB, H3 within 0.52, the 2nd harmonic (-50 to -46 dBc) within 0.79 (its error -67 dBc), the 5th at 3 V 1.58 (-59.8 dBc) |
 
 Found on the way: with the trims at mid-travel the circuit leaks EXT. LOUDNESS into the
 output at 0.067 V/V; Q18 saturates above about 4.5 V of contour (its collector sits under
@@ -261,3 +262,12 @@ hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
   from the contour as read before its input was calibrated: 5.9 % low.) The voice, the
   bench's netlist (a parameter of `mm_vcf`, 47K by default) and the converter's test take
   `vcf::R74`; Folkman's procedure keeps 47K (docs/calibration, changes 14 and 20).
+- **B4-10** (2026-10-09) R43 is 180K in the model, not the drawing's 270K: the hardware
+  reference's VCA opens from a lower loudness contour. Over a slow release its output fell
+  -15.9 dB at 1.0 V of contour (its LOUD CONT jack, less the jack's 0.18 V), -25.2 at 0.6,
+  -34.0 at 0.45 and -48.3 at 0.35 against SUSTAIN 10's level, the drawing's values -17.9,
+  -30.3, -47.5 and -75. Q18's emitter returns to -10 V through R43, so a smaller one lets
+  it conduct sooner; 180K (E24) puts the law within 0.6 dB from SUSTAIN 10 to 48 dB under it,
+  and Q18's tail at full SUSTAIN 2 % higher, the 3rd harmonic of a driven VCA with it
+  (docs/calibration, change 31). With EXT. LOUDNESS overdriven to 9 V and the contour at 2 V,
+  ngspice now runs Q21 backwards by 1.8 uA while the VCA is off; the real-time tail stays 0.

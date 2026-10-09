@@ -18,9 +18,12 @@
 *   phones  pin 22, to the headphone amplifier (through R75 1K)
 *   vp vn   +10 V and -10 V
 * Parameters: r2, r8 (R8 = R28), r40, r14 (1st VCA BAL wiper position, 0..1), r12 (2nd VCA
-* BAL wiper position, 0..1).
+* BAL wiper position, 0..1). The trims default to the hardware reference's setting
+* (docs/calibration, change 32: fitted to the 2nd harmonic its VCA adds and to its thump),
+* not to the factory procedure's (R14 0.560, R12 0.670), which the benches pass when they
+* test it.
 .subckt mm_vca vin cont ext a440 main phones vp vn
-+ params: r2=160k r8=4.7 r40=10k r14=0.5 r12=0.5
++ params: r2=160k r8=4.7 r40=10k r14=0.564 r12=0.496
 
 * --- the VCAs' decoupled supply chain -------------------------------------------------
 r10   vp nl 120                     ; R10 120
@@ -45,7 +48,8 @@ r35   e1 c18 1k                     ; R35 1K
 q18   c18 b18 e18 QTIS97            ; Q18: the contour's current source
 r59   cont b18 68k                  ; R59 68K
 r37   e18 0 6.8k                    ; R37 6.8K
-r43   e18 vn 270k                   ; R43 270K
+r43   e18 vn 180k                   ; R43 (270K drawn; the hardware reference's 180K:
+*                                     docs/calibration change 31, a departure from the drawing)
 
 * --- second VCA: Q14/Q13 (TIS97) on the first's collectors, tail from Q21 -------------
 q14   c14 c16 e2 QTIS97             ; Q14: base on Q16's collector

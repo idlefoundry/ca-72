@@ -70,7 +70,10 @@ pub struct VcaCircuit {
     pub r18: f64,
     pub r12: f64,
     pub r12_pos: f64,
-    /// Q18: R35 (collector), R59 (base, from the contour), R37 and R43 (emitter).
+    /// Q18: R35 (collector), R59 (base, from the contour), R37 and R43 (emitter). R43 is
+    /// the hardware reference's 180K, where Figure 9-11 draws 270K (docs/calibration, change
+    /// 31): Q18 conducts from a lower contour, so the VCA closes later in a release and holds
+    /// a low SUSTAIN louder, and its tail at full SUSTAIN is a little larger.
     pub r35: f64,
     pub r59: f64,
     pub r37: f64,
@@ -125,7 +128,8 @@ impl Default for VcaCircuit {
             r35: 1e3,
             r59: 68e3,
             r37: 6.8e3,
-            r43: 270e3,
+            // 270K drawn; the reference's 180K (change 31): a departure from Moog's schematic.
+            r43: 180e3,
             r33: 470.0,
             r51: 33e3,
             r42: 3.3e3,
@@ -178,7 +182,31 @@ const FAST_STEPS: usize = 60;
 /// about 5 V, service manual 2.10); the level the 1st VCA balance is set at.
 pub const CONTOUR_FULL: f64 = 5.0;
 
+/// The 1st VCA BAL trim R14's wiper as the hardware reference's is set (docs/calibration,
+/// change 32). Not the factory procedure's ([`VcaCircuit::calibrated`], 0.560): fitted with
+/// [`R12_REFERENCE`] to the 2nd harmonic the reference's VCA adds at the filter's resonance
+/// at LOUDNESS SUSTAIN 10, 7 and 5 and to its thump at SUSTAIN 10 (session O). A departure
+/// from the service manual's procedure, not from Moog's schematic: the trims are the
+/// drawing's, set elsewhere on their travel.
+pub const R14_REFERENCE: f64 = 0.564;
+
+/// The 2nd VCA BAL trim R12's wiper as the hardware reference's is set (change 32): about
+/// mid-travel, where the factory procedure's null of EXT. LOUDNESS's leak puts it at 0.670.
+/// There the CA-72's VCA added a 2nd harmonic in phase with the filter's, about 20 dB over
+/// the reference's, whose VCA takes a little of the filter's away.
+pub const R12_REFERENCE: f64 = 0.496;
+
 impl VcaCircuit {
+    /// The circuit with the VCA balance trims set as the hardware reference's
+    /// ([`R14_REFERENCE`], [`R12_REFERENCE`]): the voice's.
+    pub fn reference_trims(self) -> VcaCircuit {
+        VcaCircuit {
+            r14_pos: R14_REFERENCE,
+            r12_pos: R12_REFERENCE,
+            ..self
+        }
+    }
+
     /// The circuit after the factory's VCA balance procedure (service manual 5.24.1 and
     /// 5.25; Folkman 1973): with the first VCA off, the 2nd VCA BAL trim R12 nulls what a
     /// signal on EXT. LOUDNESS leaks to the output; then with the contour at

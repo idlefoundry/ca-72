@@ -1035,7 +1035,9 @@ impl Voice {
         noise.set_density(density);
         let modulation = Modulation::new().expect("the modulation mix's operating points");
         let contour_every = contour_every(Quality::NoCompromises);
-        let mut vca = Vca::new(VcaCircuit::default().calibrated(), rate, 0.0);
+        // The balance trims as the hardware reference's, not the factory procedure's
+        // (docs/calibration, change 32).
+        let mut vca = Vca::new(VcaCircuit::default().reference_trims(), rate, 0.0);
         vca.prepare_potato();
         let mut ctl = ControlPart {
             contours: Contours::new(ContourCircuit::default(), rate / contour_every as f64),
