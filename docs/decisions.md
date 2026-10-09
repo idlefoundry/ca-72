@@ -2867,4 +2867,4 @@ preset as set) against the commit before: 21 presets the same to the hundredth o
 three above levelled back within 0.01 dB. `preset_render` (every preset with POLY's ten voices)
 against the commit before: Pink Riser the same to the bit, the rest moved by the new choice of
 voice (levels within 0.4 dB) but those with SPREAD (Warped Pad +1.38 dB, Wooden Mallet +1.18,
-before levelling). The plug-in's unit tests (132); rustfmt; clippy.
+before levelling). The plug-in's unit tests (127 passed, 7 ignored); rustfmt; clippy.
