@@ -553,6 +553,23 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     rewritten so that each keeps its pot's position (R-CAL): their intervals and oscillator
     3's rates as they were.
 
+30. **EMPHASIS at 2, 3 and 4** (`voice::emphasis_r14`, 2026-10-09). Upright Pluck played
+    from its sheet twice (takes 01 and 34, alike) stood 5 to 6 dB under the reference from
+    400 to 800 Hz. With the filter open (take 35) the shark tooth matched to 0.2 dB, and with
+    the contour out of the filter (take 36) the filter at CUTOFF -3 nearly did: the
+    difference came with AMOUNT OF CONTOUR. Held at a full contour (takes 37 to 40: AMOUNT 4,
+    the filter near 800 Hz, the shark tooth at 32' laying its harmonics 16 Hz apart through
+    it, each take against the open one), the reference's passband and peak at EMPHASIS 2, 3,
+    4 and 5 stood at -0.8 and 0.0 dB, -4.0 and +2.6, -8.0 and +9.3, -8.7 and +11.0; the
+    CA-72's where its own knob was at 1.25, 3.4, 4.7 and 5.0: at 5 (a point of change 6's
+    law) the same, between 2.5 and 5 steeper than the law's straight line in R14's
+    logarithm, below 2.5 gentler than the generic taper's shape. R14 at 30.68K, 9.47K and
+    3.64K for 2, 3 and 4 (the generic taper's 20.4K, 12.9K and 8.1K) puts every mark within
+    0.4 dB of the passband and 0.6 dB of the peak; 2.5 and 5 keep their points (2.5 lies
+    where the reference's 2 and 3 put it). The peak stands 0.07 to 0.09 octave below the
+    reference's. Folkman's procedure keeps the drawing's law. Upright Pluck now 1.4 and
+    2.9 dB under the reference at 400 and 800 Hz (5.6 and 5.7 before).
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still

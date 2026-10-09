@@ -5,8 +5,8 @@
 use ca72::modulation::{midi_wheel, mod_wheel_r, mod_wheel_r_drawn};
 use ca72::voice::{
     FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, contour_amount_track,
-    cutoff_track, glide_pot, glide_pot_drawn, osc2_freq_track, osc3_freq_track, sustain_track,
-    time_pot, time_pot_drawn, volume_track,
+    cutoff_track, emphasis_r14, glide_pot, glide_pot_drawn, osc2_freq_track, osc3_freq_track,
+    sustain_track, time_pot, time_pot_drawn, volume_track,
 };
 
 #[test]
@@ -174,6 +174,34 @@ fn frequency_follows_the_reference_at_its_marks() {
             assert!(t > last, "{name} FREQUENCY {k}/1000: {t}");
             last = t;
         }
+    }
+}
+
+#[test]
+fn emphasis_follows_the_reference_at_its_marks() {
+    for (p, r) in [
+        (0.2, 30.68e3),
+        (0.25, 18.82e3),
+        (0.3, 9.47e3),
+        (0.4, 3.64e3),
+        (0.5, 2.91e3),
+        (0.6, 2.30e3),
+        (0.7, 1.548e3),
+        (0.75, 1.35e3),
+        (0.85, 834.0),
+    ] {
+        assert!(
+            (emphasis_r14(p) / r - 1.0).abs() < 1e-12,
+            "EMPHASIS {p}: {}",
+            emphasis_r14(p)
+        );
+    }
+    assert_eq!(emphasis_r14(0.0), 50e3);
+    let mut last = f64::INFINITY;
+    for k in 0..1000 {
+        let r = emphasis_r14(k as f64 / 1000.0);
+        assert!(r < last, "EMPHASIS {k}/1000: {r}");
+        last = r;
     }
 }
 

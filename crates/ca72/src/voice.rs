@@ -528,11 +528,15 @@ pub fn emphasis_r14_drawn(p: f64) -> f64 {
 
 /// R14's resistance at EMPHASIS 2.5, 5, 6, 7, 7.5 and 8.5 such that the filter's passband
 /// falls as the hardware reference's does (-2.25, -9.53, -10.43, -11.92, -12.50 and -14.67
-/// dB: docs/calibration, sessions E and J). The generic taper's are 16.25K, 5.0K, 3.0K,
-/// 1.71K, 1.25K and 0.58K.
-const EMPHASIS_R14: [(f64, f64); 7] = [
+/// dB: docs/calibration, sessions E and J), and at 2, 3 and 4 such that its passband and peak
+/// stand as the reference's do with its corner near 800 Hz (session N). The generic taper's
+/// are 20.4K, 16.25K, 12.9K, 8.1K, 5.0K, 3.0K, 1.71K, 1.25K and 0.58K.
+const EMPHASIS_R14: [(f64, f64); 10] = [
     (0.0, 50e3),
+    (0.2, 30.68e3),
     (0.25, 18.82e3),
+    (0.3, 9.47e3),
+    (0.4, 3.64e3),
     (0.5, 2.91e3),
     (0.6, 2.30e3),
     (0.7, 1.548e3),
