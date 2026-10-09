@@ -2738,3 +2738,50 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   dB of 0.1.3. At 10 and quieter: Upright Pluck -3.64 dB, Breath Flute -2.31, Stacked Fifths
   -2.01, Ladder Kick -1.63, Open Hat -1.59, Ringing Saw Line -1.52, Wooden Mallet -0.82,
   Noise Snare -0.81, Shoreline Wash -0.44; Pink Riser +1.44, still under -18 LUFS.
+
+## R-LOOK. The realistic look: the panel in the Model D's materials, and the CA-74's strip
+
+**The owner's request, 2026-10-09:** "Give the CA-72's editor a realistic look and feel, as
+the CA-74 (Highstead) got on 2026-10-08, but Moog-oriented: think of the Model D family the
+CA-72 is calibrated against, its materials and conventions, not its trade dress (no trademarks
+or logos anywhere)." The panel: "Keep every control's place, size and legend; only the surfaces
+become pictures." The plug-in's own controls: "a strip that is always there below the panel,
+fixed in position (not a drawer that opens and closes) ... push buttons that light for the
+choices, slide or rotary controls with readouts, and the presets in a rail with a display and a
+list that drops down over the strip inside the window."
+
+**Through the mock-ups, 2026-10-09:**
+- "you need to research a bit more what the classic moog aesthetic/knobs were like. Especially
+  for the Model D". The look follows the original's materials as published descriptions and
+  parts listings give them and as Wikimedia Commons' "Minimoog panel.jpg" (a 1970s Minimoog,
+  CC BY 2.0, the photograph this panel was measured from) shows them, only looked at. "the
+  photographs taken were of my behrigner, not a model d. and as such they shouldn't be used for
+  reference unless i specifically request them to be used": none were.
+- "Also the new panel needs the low/high filter switch we just added": FILTER MODE (R-HP, on
+  `cal/hp-mode`) is on the panel in the new look as in the drawn one.
+- Of three directions (A, the panel carried down; B, a programmer after Moog's of 1982; C,
+  aluminium modules), with A's buttons orange or blue where they switch something on: "blue and
+  orange. Let's go option a."
+- "we need to add all the same stereo controls that we added to the CA74", then "in fact, i
+  think all controls on that panel should probably be added here": the strip carries the
+  CA-74's (its R25 and R27 to R31, R34, R36, R41): VOICES (MONO | POLY | UNISON, VOICES,
+  ENTROPY), STEREO (SCATTER | DOUBLE, EVEN | EDGES | CENTER, WIDTH, DETUNE and the display of
+  the voices), OUTPUT (DRIVE, AUTO GAIN, LEVEL).
+
+**Agent decisions, 2026-10-09** (not separately approved):
+- **The materials** (A): solid walnut, oiled; the face aluminium with a textured black finish,
+  printed in white; Moog's modular knobs (a smooth flared black skirt with a white dot, a grip
+  of broad flutes, a spun aluminium cap), OSC 2 and 3's the same knob larger; wedge pointer
+  knobs with a cream line for RANGE and WAVEFORM; blue and orange rockers; filament lamps
+  behind jewels (POWER red in a chrome bezel, OVERLOAD dark); chrome jacks; white ridged
+  wheels. The strip is the panel's face carried down under the name board, with its white
+  rules between sections and its titles along the foot; the push buttons are translucent
+  caps, orange for a choice and blue for ON, lit from inside; the displays orange
+  gas-discharge digits and dots, the instrument having no LEDs.
+- **The pictures** were made by an image generator (Codex CLI 0.160.1) from words alone and
+  cut out of a grey ground as the CA-74's were; their prompts and account go with the assets.
+  The generated originals, the logs and the mock-up are kept on the lab's share
+  (`ca-72/look`).
+- **Where:** a branch of its own from `main` (8ff1455). FILTER MODE comes from the drawing
+  (the controls and the print are the drawing's), so the look carries it once `cal/hp-mode`
+  is merged; each step is tried against a local merge of the two.
