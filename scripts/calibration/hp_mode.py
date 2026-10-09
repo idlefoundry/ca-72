@@ -13,7 +13,9 @@ where H is the main output against the MIX (the filter's input), V the direct br
 to the main output (the same for every take) and a, b constants. Two fits test it:
 
 - free V: the real b that makes H_hi + b H_lo the same across every pair, its mean a V;
-- fixed V: V taken as LO with the filter open (CUT CV 0, EMPHASIS 0), a and b real.
+- flat V: V = 1 (the direct branch flat against the MIX), a and b real. (LO with the
+  filter open is not flat enough to stand for V: its corner at 0 V is about 19 kHz, and its
+  coupling capacitors cut the deep bass.)
 
 Each pair's error is |H_hi - model| against |H_hi| over 30 Hz to 15 kHz, dB. Also measured:
 HI's slope two to four octaves below LO's corner (the input-less-low-pass trick predicts 6 dB
@@ -127,12 +129,12 @@ def analyse(pairs, grid, v_open=None):
     if v_open is not None:
         a, b = fit_fixed(lo, hi, v_open, m)
         fixed = (a, b)
-        res["fixed_v"] = {"a": round(a, 4), "b": round(b, 4)}
+        res["flat_v"] = {"a": round(a, 4), "b": round(b, 4)}
     for e, cut, h_lo, h_hi in pairs:
         row = {"emphasis": e, "cut": cut,
                "err_free_db": round(err_db(h_hi, s_mean - b_free * h_lo, m), 2)}
         if fixed:
-            row["err_fixed_db"] = round(err_db(h_hi, fixed[0] * v_open - fixed[1] * h_lo, m), 2)
+            row["err_flat_db"] = round(err_db(h_hi, fixed[0] * v_open - fixed[1] * h_lo, m), 2)
         row.update(describe_hi(grid, h_lo, h_hi))
         if cut == 0.0:
             mid = (grid >= 100) & (grid <= 2000)
@@ -199,7 +201,6 @@ def plot(path, grid, pairs, s_mean, b):
 def run(session, outdir):
     grid = analyze.band_grid(20.0, 20000.0, 24)
     pairs = []
-    v_open = None
     for e in EMPHASES:
         ml, cl = analyze.load(take_json(session, f"lo_e{e:g}"))
         mh, ch = analyze.load(take_json(session, f"hi_e{e:g}"))
@@ -208,9 +209,7 @@ def run(session, outdir):
         hh = segments_h(ch, mh["events"]["segments"], grid)
         for cut in hl:
             pairs.append((e, cut, hl[cut], hh[cut]))
-        if e == 0.0:
-            v_open = hl[0.0]
-    res, s_mean = analyse(pairs, grid, v_open)
+    res, s_mean = analyse(pairs, grid, np.ones(len(grid), complex))
     ma, ca = analyze.load(take_json(session, "lo_e0_again"))
     again = segments_h(ca, ma["events"]["segments"], grid)
     m = (grid >= BAND[0]) & (grid <= BAND[1])
@@ -285,7 +284,7 @@ def main():
     if not a.session:
         ap.error("a session directory, or --self-test")
     res = run(a.session, a.out or os.path.join(a.session, "analysis"))
-    print(json.dumps({k: res[k] for k in ("free_v", "fixed_v", "lo_e0_repeat_db")}, indent=1))
+    print(json.dumps({k: res[k] for k in ("free_v", "flat_v", "lo_e0_repeat_db")}, indent=1))
     for p in res["pairs"]:
         print(p)
 
