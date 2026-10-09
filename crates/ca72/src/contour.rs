@@ -95,9 +95,15 @@ pub enum Follower {
 /// One contour section's constants.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Section {
-    /// R7 [R42] in series with the ATTACK pot; the timing capacitor C5 [C2].
+    /// R7 [R42] in series with the ATTACK pot; the timing capacitor C5 [C2], and its
+    /// dielectric absorption as branches (capacitance F, resistance ohm) across it
+    /// ([`C_ABSORPTION`]; a capacitance of 0 leaves a branch out: the drawing's ideal part).
     pub r7: f64,
     pub c: f64,
+    pub absorption: [(f64, f64); 3],
+    /// The timing capacitor's series resistance (ohm): its terminal, which the follower
+    /// and the peak detector read, sits the current through it times this off its charge.
+    pub esr: f64,
     /// R48 [R16] into the follower; the follower.
     pub r_in: f64,
     pub follower: Follower,
@@ -125,9 +131,28 @@ pub struct Section {
     pub r9: f64,
 }
 
+/// The timing capacitors' dielectric absorption (C5 and C2, 10 uF electrolytics): three
+/// branches of a capacitance through a resistance across each, fitted to the hardware
+/// reference's contours after a fast and a slower attack (docs/calibration, session M;
+/// board2.md B2-12): its output falls 0.21 V within a millisecond of a fast attack's peak and
+/// 0.33 V within 10 ms, as the absorbed charge catches up, and hardly at all after a slow one.
+/// Over a long time the capacitor holds 13.26 uF.
+pub const C_ABSORPTION: [(f64, f64); 3] =
+    [(0.769e-6, 779.0), (0.202e-6, 28.26e3), (0.223e-6, 237.6e3)];
+
+/// The timing capacitors' series resistance, ohm (with [`C_ABSORPTION`] and [`R7`]).
+pub const C_ESR: f64 = 1.53;
+
+/// R7 [R42], the attack's resistor: 100 on Figure 9-7, 86.6 (E96) where the hardware
+/// reference's fastest attacks rise with its capacitors as they are (docs/calibration,
+/// session M; board2.md B2-12).
+pub const R7: f64 = 86.6;
+
 pub const FILTER_SECTION: Section = Section {
-    r7: 100.0,
+    r7: R7,
     c: 10e-6,
+    absorption: C_ABSORPTION,
+    esr: C_ESR,
     r_in: 10e3,
     follower: Follower::Complementary,
     r10: 27e3,
@@ -147,8 +172,10 @@ pub const FILTER_SECTION: Section = Section {
 };
 
 pub const LOUDNESS_SECTION: Section = Section {
-    r7: 100.0,
+    r7: R7,
     c: 10e-6,
+    absorption: C_ABSORPTION,
+    esr: C_ESR,
     r_in: 10e3,
     follower: Follower::Darlington,
     r10: 27e3,
@@ -290,6 +317,47 @@ struct SectionState {
     j8: f64,
     /// The last sample charged the capacitor (Q7 off): the decay's path was open.
     attacked: bool,
+    /// The absorption branches' capacitors' voltages.
+    da: [f64; 3],
+}
+
+impl SectionState {
+    /// The absorption branches over a step of `h` (trapezoidal) from the capacitor at `v`:
+    /// their current at `v`, and the companion (conductance, current) by which their current
+    /// at the step's end is `g v' - b`.
+    fn absorption(&self, s: &Section, h: f64) -> (f64, f64, f64) {
+        let (mut i, mut g, mut b) = (0.0, 0.0, 0.0);
+        for (&(ck, rk), &vk) in s.absorption.iter().zip(&self.da) {
+            if ck <= 0.0 {
+                continue;
+            }
+            let a = 0.5 * h / (rk * ck);
+            i += (self.v - vk) / rk;
+            g += 1.0 / ((1.0 + a) * rk);
+            b += (vk * (1.0 - a) + a * self.v) / ((1.0 + a) * rk);
+        }
+        (i, g, b)
+    }
+
+    /// The branches moved on a step from the capacitor at `v_old` to its present voltage.
+    fn absorb(&mut self, s: &Section, h: f64, v_old: f64) {
+        for (&(ck, rk), vk) in s.absorption.iter().zip(self.da.iter_mut()) {
+            if ck <= 0.0 {
+                *vk = self.v;
+                continue;
+            }
+            let a = 0.5 * h / (rk * ck);
+            *vk = (*vk * (1.0 - a) + a * (v_old + self.v)) / (1.0 + a);
+        }
+    }
+
+    /// The branches as charged as the capacitor (within [`SETTLED`]).
+    fn absorbed(&self, s: &Section) -> bool {
+        s.absorption
+            .iter()
+            .zip(&self.da)
+            .all(|(&(ck, _), &vk)| ck <= 0.0 || (self.v - vk).abs() < SETTLED)
+    }
 }
 
 /// What a section's behaviour needs from the settings, computed when they change.
@@ -1041,19 +1109,27 @@ impl Contours {
                 }
             };
             let v_old = st.v;
+            // The capacitor's absorption: its branches' current now and their companion.
+            let (i_da_old, g_da, b_da) = st.absorption(&s, h);
+            // Q5 saturated (driven by about 2.6 mA): 25 mV; the attack's current through R7,
+            // ATTACK and the capacitor's series resistance, and the terminal it lifts.
+            let v5 = c.p93 - 0.025;
+            let ga = 1.0 / (s.r7 + ctl.attack.max(0.0) + s.esr);
+            let terminal_attacking = |v: f64| v + s.esr * ga * (v5 - v);
+            let terminal;
             if st.set {
-                // Q5 saturated (driven by about 2.6 mA): 25 mV; the capacitor charges
-                // through R7 and ATTACK (trapezoidal, exact for this linear path).
-                let v5 = c.p93 - 0.025;
-                let a = 1.0 / ((s.r7 + ctl.attack.max(0.0)) * s.c);
-                st.v = (v_old * (1.0 - 0.5 * h * a) + h * a * v5) / (1.0 + 0.5 * h * a);
+                // The capacitor charges (trapezoidal, exact for this linear path without
+                // the absorption).
+                st.v = (s.c / h * v_old + 0.5 * (ga * (v5 - v_old) - i_da_old + ga * v5 + b_da))
+                    / (s.c / h + 0.5 * (ga + g_da));
                 st.attacked = true;
+                terminal = terminal_attacking(st.v);
             } else {
                 // Decay: the capacitor and the sustain node together (Newton on both): the
                 // capacitor discharges through DECAY and saturated Q7 into the node, which
                 // R10 and Q7's base current (from Q6 through R9) also feed, Q8 holds at its
                 // base divider and CR2 pulls toward V-trig.
-                let r_dec = ctl.decay.max(0.0) + 5.0;
+                let r_dec = ctl.decay.max(0.0) + 5.0 + s.esr;
                 let emitter = |x: f64| {
                     let (i, d) = pnp.base_law()(x);
                     (i * (pnp.bf + 1.0), d * (pnp.bf + 1.0))
@@ -1089,20 +1165,23 @@ impl Contours {
                         si(v - d_node)
                     };
                     let i = -(v - e7) / r_dec - i_d;
+                    // (The absorption's branches were never open: trapezoidal throughout.)
+                    let i_da = g_da * v - b_da;
                     let r = [
-                        v - v_old - h * (w_old * i_old + w_new * i) / s.c,
+                        v - v_old - h * (w_old * i_old + w_new * i) / s.c
+                            + 0.5 * h * (i_da_old + i_da) / s.c,
                         (c.p93 - e7) / s.r10 + (v - e7) / r_dec + i_b7 - i8 - i_si,
                     ];
                     let j = [
                         [
-                            1.0 + w_new * h * (1.0 / r_dec + g_d) / s.c,
+                            1.0 + (w_new * (1.0 / r_dec + g_d) + 0.5 * g_da) * h / s.c,
                             -w_new * h / (r_dec * s.c),
                         ],
                         [1.0 / r_dec, -1.0 / s.r10 - 1.0 / r_dec + d_b7 - d8 - g_si],
                     ];
                     (r, j)
                 };
-                let (mut v, mut e7) = (v_old + 2.0 * w_old * h * i_old / s.c, st.e7);
+                let (mut v, mut e7) = (v_old + (2.0 * w_old * i_old - i_da_old) * h / s.c, st.e7);
                 let mut converged = false;
                 // (Up to 100 iterations: its node's steps held to 0.2 V, a jump of volts takes
                 // tens; 30 stopped short twice in perf-ext, which `unconverged` counts.)
@@ -1153,9 +1232,10 @@ impl Contours {
                 st.e7 = e7;
                 st.j7 = series_junction_from(su.v_e6 - e7, s.r9 + c.npn.rb, &base, j7).0;
                 st.j8 = series_junction_from(e7 - su.v_th8, su.r_e8, emitter, j8).0;
+                terminal = v - s.esr * ((v - e7) / r_dec + i_dump(v));
             }
             laps.lap(Part::Decay);
-            st.out = self.follow(&s, g, st.v, st.out, (npn, pnp));
+            st.out = self.follow(&s, g, terminal, st.out, (npn, pnp));
             laps.lap(Part::Follow);
             if st.set && st.out >= su.peak {
                 // The flip-flop resets as the output reaches the peak, within the sample:
@@ -1163,20 +1243,47 @@ impl Contours {
                 // by the secant through the sample's two ends and once again), not a
                 // sample's rise above it (at Potato's 6 kHz half a volt with ATTACK at 0).
                 let (v0, o0) = (before.0, before.2);
+                let mut absorbed = false;
                 if st.out > o0 && o0 < su.peak {
+                    let v_end = st.v;
                     let mut v = v0 + (su.peak - o0) * (st.v - v0) / (st.out - o0);
-                    let mut out = self.follow(&s, g, v, su.peak, (npn, pnp));
+                    let mut out = self.follow(&s, g, terminal_attacking(v), su.peak, (npn, pnp));
                     if out > o0 && (out - su.peak).abs() > 1e-6 {
                         v = v0 + (su.peak - o0) * (v - v0) / (out - o0);
-                        out = self.follow(&s, g, v, out, (npn, pnp));
+                        out = self.follow(&s, g, terminal_attacking(v), out, (npn, pnp));
                     }
+                    // The absorption's branches charge until then; for the rest of the
+                    // sample the capacitor shares its charge with them alone (the decay's
+                    // path opens on the next), as it starts to in the circuit.
+                    let theta = ((v - v0) / (v_end - v0)).clamp(0.0, 1.0);
                     st.v = v;
+                    st.absorb(&s, theta * h, v0);
+                    let hr = (1.0 - theta) * h;
+                    if hr > 0.0 {
+                        let (i0, g_da, b_da) = st.absorption(&s, hr);
+                        let v_at = st.v;
+                        st.v = (s.c / hr * v_at - 0.5 * i0 + 0.5 * b_da) / (s.c / hr + 0.5 * g_da);
+                        st.absorb(&s, hr, v_at);
+                        out = self.follow(&s, g, st.v, out, (npn, pnp));
+                    }
+                    // The attack's current stops with the reset: the terminal falls to the
+                    // capacitor's charge (its series resistance's step).
+                    if hr <= 0.0 {
+                        out = self.follow(&s, g, st.v, out, (npn, pnp));
+                    }
                     st.out = out;
+                    absorbed = true;
                 }
                 st.set = false;
+                if !absorbed {
+                    st.absorb(&s, h, v_old);
+                }
+            } else {
+                st.absorb(&s, h, v_old);
             }
             self.sec_settled[k] = same
                 && !st.set
+                && st.absorbed(&s)
                 && (st.v - before.0).abs() < SETTLED
                 && (st.e7 - before.1).abs() < SETTLED
                 && (st.out - before.2).abs() < SETTLED;

@@ -56,8 +56,16 @@ r33   f_pk f_out 5.6k               ; R33 5.6K
 r35   rst f_r35 10k                 ; R35 10K
 dcr1   f_r35 f_b4 D1N34A             ; CR1 1N34A: held reset while no key is down
 q5    f_c5 f_b5 p93 QTIS93          ; Q5 TIS93: the attack switch
-r7    f_c5 f_att 100                ; R7 100
-c5    f_cap 0 10u                   ; C5 10 uF: the timing capacitor
+r7    f_c5 f_att 86.6               ; R7 (100 drawn; the reference's: B2-12)
+resr5 f_cap f_cx 1.53                ; C5's series resistance (the reference's: B2-12)
+c5    f_cx 0 10u                    ; C5 10 uF: the timing capacitor
+* C5's dielectric absorption (an electrolytic; the hardware reference's: board2.md B2-12)
+rda51 f_cx f_da1 779
+cda51 f_da1 0 0.769u
+rda52 f_cx f_da2 28.26k
+cda52 f_da2 0 0.202u
+rda53 f_cx f_da3 237.6k
+cda53 f_da3 0 0.223u
 dcr7   f_cap f_dump D1N4004          ; CR7 1N4004: the dump (DECAY off)
 q6    p93 f_c1 f_e6 Q2N3392         ; Q6 2N3392
 r8    f_e6 n10 10k                  ; R8 10K
@@ -93,8 +101,16 @@ r24   l_pk l_out 6.8k               ; R24 6.8K
 r36   rst l_r36 10k                 ; R36 10K
 dcr8   l_r36 l_b15 D1N34A            ; CR8 1N34A
 q16   l_c16 l_b16 p93 QTIS93        ; Q16 TIS93: the attack switch
-r42   l_c16 l_att 100               ; R42 100
-c2    l_cap 0 10u                   ; C2 10 uF: the timing capacitor
+r42   l_c16 l_att 86.6              ; R42 (100 drawn; the reference's: B2-12)
+resr2 l_cap l_cx 1.53                ; C2's series resistance (as C5's)
+c2    l_cx 0 10u                    ; C2 10 uF: the timing capacitor
+* C2's dielectric absorption (as C5's)
+rda21 l_cx l_da1 779
+cda21 l_da1 0 0.769u
+rda22 l_cx l_da2 28.26k
+cda22 l_da2 0 0.202u
+rda23 l_cx l_da3 237.6k
+cda23 l_da3 0 0.223u
 dcr4   l_cap l_dump D1N4004          ; CR4 1N4004
 q17   p93 l_c25 l_e17 Q2N3392       ; Q17 2N3392
 r43   l_e17 n10 10k                 ; R43 10K

@@ -393,57 +393,68 @@ pub fn time_pot_drawn(p: f64) -> f64 {
 /// degrees (0.2 of the travel), 600 ms at -30 (0.4), the top tick (0.5), 1 s at 30 (0.6), 5 s
 /// at 60 (0.7), 10 s at 105 (0.85; the CA-72's panel prints 5 s at 67 and 10 s at 108), and
 /// fully clockwise. The generic taper's are 17.6K, 53.9K, 100K, 162K, 268K, 535K and 1M.
-pub const FILTER_ATTACK: [(f64, f64); 7] = [
-    (0.2, 15.1e3),
-    (0.4, 30.9e3),
-    (0.5, 40.3e3),
-    (0.6, 52.5e3),
-    (0.7, 253e3),
-    (0.85, 749e3),
-    (1.0, 1.06e6),
+///
+/// With the timing capacitors as the reference's are (their series resistance and absorption,
+/// `contour::C_ABSORPTION`), each resistance is the one at which the contour keeps the time
+/// the ideal capacitor gave at the first fit, 0.88 to 0.90 of it; at 0.15, the generic taper's
+/// 11.7K so scaled, and below it the generic taper's shape (docs/calibration, change 25).
+pub const FILTER_ATTACK: [(f64, f64); 8] = [
+    (0.15, 10.49e3),
+    (0.2, 13.56e3),
+    (0.4, 27.64e3),
+    (0.5, 36.02e3),
+    (0.6, 46.90e3),
+    (0.7, 225.9e3),
+    (0.85, 669.0e3),
+    (1.0, 946.8e3),
 ];
-pub const FILTER_DECAY: [(f64, f64); 7] = [
-    (0.2, 17.8e3),
-    (0.4, 37.1e3),
-    (0.5, 48.7e3),
-    (0.6, 58.5e3),
-    (0.7, 267e3),
-    (0.85, 660e3),
-    (1.0, 873e3),
+pub const FILTER_DECAY: [(f64, f64); 8] = [
+    (0.15, 10.47e3),
+    (0.2, 15.94e3),
+    (0.4, 33.12e3),
+    (0.5, 43.46e3),
+    (0.6, 52.19e3),
+    (0.7, 236.8e3),
+    (0.85, 581.7e3),
+    (1.0, 768.2e3),
 ];
-pub const LOUDNESS_ATTACK: [(f64, f64); 7] = [
-    (0.2, 15.8e3),
-    (0.4, 34.7e3),
-    (0.5, 46.9e3),
-    (0.6, 53.0e3),
-    (0.7, 299e3),
-    (0.85, 788e3),
-    (1.0, 1.10e6),
+pub const LOUDNESS_ATTACK: [(f64, f64); 8] = [
+    (0.15, 10.45e3),
+    (0.2, 14.13e3),
+    (0.4, 30.97e3),
+    (0.5, 41.85e3),
+    (0.6, 47.29e3),
+    (0.7, 267.0e3),
+    (0.85, 703.8e3),
+    (1.0, 982.6e3),
 ];
-pub const LOUDNESS_DECAY: [(f64, f64); 7] = [
-    (0.2, 14.5e3),
-    (0.4, 30.7e3),
-    (0.5, 41.5e3),
-    (0.6, 49.9e3),
-    (0.7, 232e3),
-    (0.85, 630e3),
-    (1.0, 853e3),
+pub const LOUDNESS_DECAY: [(f64, f64); 8] = [
+    (0.15, 10.47e3),
+    (0.2, 13.00e3),
+    (0.4, 27.42e3),
+    (0.5, 37.04e3),
+    (0.6, 44.53e3),
+    (0.7, 206.4e3),
+    (0.85, 558.5e3),
+    (1.0, 755.4e3),
 ];
 
-/// Where the time pots leave the generic taper: the dial's tick past its 10 ms mark, up to
-/// which the reference's times agree with it within where its knob was set.
-const TIME_POT_GENERIC_TO: f64 = 0.15;
-
-/// An ATTACK or DECAY pot as the voice has it, ohm: the generic taper to
-/// [`TIME_POT_GENERIC_TO`], then straight in its logarithm through `law`'s points.
+/// An ATTACK or DECAY pot as the voice has it, ohm: to `law`'s first point (the dial's tick
+/// past its 10 ms mark, up to which the reference's times agree with the generic taper within
+/// where its knob was set) the generic taper's shape scaled to meet it, then straight in its
+/// logarithm through `law`'s points.
 pub fn time_pot(p: f64, law: &[(f64, f64)]) -> f64 {
     let p = p.clamp(0.0, 1.0);
-    if p <= TIME_POT_GENERIC_TO {
-        return time_pot_drawn(p);
+    let (p0, r0) = law[0];
+    if p <= p0 {
+        return r0 * time_pot_drawn(p) / time_pot_drawn(p0);
     }
-    let mut a = (TIME_POT_GENERIC_TO, time_pot_drawn(TIME_POT_GENERIC_TO));
-    for &b in law {
-        if p <= b.0 {
+    let mut a = law[0];
+    for &b in &law[1..] {
+        if p == b.0 {
+            return b.1;
+        }
+        if p < b.0 {
             return a.1 * crate::ulp::pow(b.1 / a.1, (p - a.0) / (b.0 - a.0));
         }
         a = b;

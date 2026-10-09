@@ -68,7 +68,7 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
 |---|---|
 | Trigger | C7 a state (trapezoidal), charged through CR10's junction law and R60, drained by Q20's base current; Q20 and Q12 as full Gummel-Poon transistors (saturation included), the reset line and V-trig solved from their KCL; C13's node on the trigger bus a state |
 | Flip-flops | Latches (their transitions take microseconds): set as V-trig rises, reset while the reset line drives CR1 [CR8] or when the output reaches the threshold derived from the latch's devices (Q1 [Q25] leaving saturation), the capacitor stopped where the output meets it within the sample (B2-10) |
-| Timing capacitors | Set: the RC charge through R7 and ATTACK from the rail (exact trapezoidal). Reset: the capacitor and the sustain node together (Newton on both; trapezoidal, the first sample after the attack backward Euler: B2-9), with Q7's base current, Q8 as a PNP follower on its divider, CR2 to V-trig, and with DECAY off CR7 into R1401's node |
+| Timing capacitors | The capacitor with its series resistance and absorption branches (B2-12; the follower and the peak detector read its terminal). Set: the RC charge through R7 and ATTACK from the rail (trapezoidal). Reset: the capacitor and the sustain node together (Newton on both; trapezoidal, the first sample after the attack backward Euler: B2-9), with Q7's base current, Q8 as a PNP follower on its divider, CR2 to V-trig, and with DECAY off CR7 into R1401's node |
 | Outputs | The followers' drops from their transistors at the load's current (the AMOUNT OF CONTOUR pot and the peak divider on the filter contour) |
 
 Agreement with ngspice (2026-09-28; ngspice's waveforms taken at the model's 48 kHz: the
@@ -192,3 +192,17 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
   V in ngspice (4.489 and 5.282 as drawn), the model's within 5 mV, the reference's (its
   held level plus the difference) 4.795 and 5.597. The reset feeds CR1, CR8 and the trigger
   input CR10 stay germanium (CR10's leakage sets the trigger delay, B2-3).
+- **B2-12** (2026-10-09) The timing capacitors C5 and C2 are modelled as the electrolytics
+  they are: 1.53 ohm in series, and across the 10 uF three absorption branches (0.769 uF
+  through 779 ohm, 0.202 uF through 28.3K, 0.223 uF through 238K: 11.19 uF over a long
+  time), with R7 and R42 86.6 ohm (100 drawn). After a fast attack the hardware reference's
+  contours drop 0.21 V within a millisecond of their peak and 0.33 V within 10 ms, and
+  hardly at all after a 40 ms attack (session M): the series resistance's step as the
+  attack's current stops and the absorbed charge catching up. Fitted with the real-time
+  model to both contours after the fastest and a slower attack, the drops within 0.8 to 4.1
+  mV from 0.1 to 400 ms and the fastest rises 0.60 and 0.91 ms against 0.62 and 0.96. The
+  netlist (`board2-contour.lib`) and the model (`Section::absorption`, `esr`, the branches
+  trapezoidal; in the sample where the attack meets its peak the capacitor shares its
+  charge with them for the rest of it) change together; `contour_realtime.rs` holds them
+  within its budgets. The ATTACK and DECAY laws are refitted with them (0.88 to 0.90 of
+  their resistances: every measured time kept).

@@ -449,6 +449,30 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     which may include its own buffer: an upper bound for what reaches the filter, whose
     start needs only some.
 
+25. **The timing capacitors as electrolytics** (`contour::C_ABSORPTION`, `C_ESR`, `R7`, the
+    four time laws; board2.md B2-12; 2026-10-09). Session M (the owner's choice among three:
+    the full model) took the contours' decay toward SUSTAIN 0 at three marks (they run as
+    the laws have them) and the drop after the peak alone (DECAY fully clockwise) after the
+    fastest attack and one of 40 ms. After the fastest the reference's filter contour falls
+    0.08 V within 0.1 ms, 0.21 V within 1 ms, 0.33 V within 10 ms and 0.46 V by 100 ms
+    (about 0.05 V of it the decay); after 40 ms, 0.007 V at 1 ms and 0.03 V at 10 ms. The
+    loudness contour the same at about 85 %. The drawing's capacitors are ideal and the
+    CA-72's contours held their peak. Absorption alone (branches across the 10 uF) fitted
+    the drop but slowed the fastest attack 30 %; with a series resistance and R7/R42 free,
+    fitted with the real-time contour model to both contours and both attacks: R7 86.6 ohm,
+    1.53 ohm in series, 0.769 uF through 779 ohm, 0.202 uF through 28.3K and 0.223 uF
+    through 238K. The drops within 4.1 and 4.0 mV (fastest) and 0.8 and 1.5 mV (40 ms) from
+    0.1 to 400 ms; the fastest rises 0.60 and 0.91 ms against the reference's 0.62 and 0.96.
+    Over a long time the capacitor holds 11.19 uF, so each point of the four ATTACK and DECAY
+    laws (and the generic taper below 0.15, scaled) moved to the resistance at which the
+    contour keeps the time the first fit gave (0.88 to 0.90). Session M's decays toward
+    SUSTAIN 0 now reach half way at 296, 356 and 226 ms (filter; the reference's 285, 349 and
+    217) and 257, 309 and 190 ms (loudness; 258, 319 and 192), where the ideal capacitor
+    took 337, 404 and 257 (288, 346, 213); their time constants stay within 0.5 to 4.6 %.
+    Every preset's contours change after their attacks (levels within 0.5 dB, below). In
+    Potato, FEEDBACK's loop now runs away (a dark self-oscillation near 58 Hz) from 0.3 of its
+    coefficient, High Fidelity's from 0.35; `tests/feedback.rs` compares the modes at 0.25.
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -463,19 +487,6 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   than up, the reference 1.76 and 1.81 times (the hold amplifier's downward drive, toward
   -4.4 V through R59/R54); at GLIDE 5 the CA-72's downward slide starts fast and then slows
   where the reference's runs straight.
-- **The contours after a fast attack (session M, 2026-10-09):** toward SUSTAIN 0 at the top
-  tick, the 1 s and the 600 ms marks the decays run as the laws fitted on the release have
-  them (time constants 485, 594 and 369 ms on the filter contour against the CA-72's 485,
-  580 and 370; 421, 522 and 311 ms on the loudness contour against 415, 498 and 307). With a
-  slow attack the reference peaks at the threshold (4.94 and 5.75 V at its jacks) and decays
-  smoothly, as the CA-72 does. After a fast attack its contours drop 0.21 V within a
-  millisecond, 0.33 V within 10 ms and about 0.40 V by 100 ms more than the decay, and the
-  drop all but vanishes after a 40 ms attack: the timing capacitors' (C5, C2, 10 uF
-  electrolytics) absorption and series resistance, which the drawing's ideal parts leave
-  out. It keeps Ringing Saw Line's ring 0.3 octave high mid-note on the CA-72 (its pieces,
-  session L, match: changes 20 and 21). A capacitor model with absorption alone fits the
-  drop within 3 to 9 mV but makes the fastest attack 30 % slow (0.81 against 0.62 ms); with
-  ESR (about 2.3 ohm) and R7/R42 nearer 82 ohm both fit, in a simplified simulation.
 - **The contours' release with DECAY at 0:** its first half takes 1.9 to 2.2 ms against the
   reference's 1.1 to 1.3.
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the

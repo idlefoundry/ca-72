@@ -23,9 +23,15 @@ fn attack_and_decay_follow_the_reference_at_its_marks() {
                 "{name} at {p}: {got} ohm, the reference's {r}"
             );
         }
-        // The dial's 10 ms mark and the tick past it: the drawing's taper.
+        // The dial's 10 ms mark and the tick past it: the drawing's taper's shape, scaled to
+        // meet the law's first point.
+        let (p0, r0) = law[0];
         for p in [0.0, 0.05, 0.1, 0.15] {
-            assert_eq!(time_pot(p, law), time_pot_drawn(p), "{name} at {p}");
+            let want = r0 * time_pot_drawn(p) / time_pot_drawn(p0);
+            assert!(
+                (time_pot(p, law) - want).abs() <= 1e-9 * want.max(1.0),
+                "{name} at {p}"
+            );
         }
         let mut last = -1.0;
         for k in 0..=1000 {
