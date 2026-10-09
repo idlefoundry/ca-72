@@ -17,6 +17,8 @@ pub enum Solver {
     ContourTransistor,
     /// The contours' decay step (the capacitor and the sustain node).
     ContourDecay,
+    /// V-trig and the contours' sections solved together while V-trig moves.
+    ContourCoupling,
     /// A junction behind a resistance (`devices::series_junction_from`).
     SeriesJunction,
     /// A differential pair behind its drop (`devices::degenerated_from`, `_warm_to`).
@@ -35,13 +37,14 @@ pub enum Solver {
     FilterLoop,
 }
 
-const N: usize = 10;
+const N: usize = 11;
 
 /// The solvers' names, in [`Solver`]'s order.
 pub const NAMES: [&str; N] = [
     "contour root",
     "contour transistor",
     "contour decay",
+    "contour coupling",
     "series junction",
     "degenerated pair",
     "junctions",

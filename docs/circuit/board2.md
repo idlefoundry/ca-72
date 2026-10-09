@@ -66,7 +66,7 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
 
 | Part | Real-time model |
 |---|---|
-| Trigger | C7 a state (trapezoidal), charged through CR10's junction law and R60, drained by Q20's base current; Q20 and Q12 as full Gummel-Poon transistors (saturation included), the reset line and V-trig solved from their KCL; C13's node on the trigger bus a state |
+| Trigger | C7 a state (trapezoidal), charged through CR10's junction law and R60, drained by Q20's base current; Q20 and Q12 as full Gummel-Poon transistors (saturation included), the reset line and V-trig solved from their KCL; while V-trig falls with DECAY near its end, V-trig and the sections solved together (B2-13); C13's node on the trigger bus a state |
 | Flip-flops | Latches (their transitions take microseconds): set as V-trig rises, reset while the reset line drives CR1 [CR8] or when the output reaches the threshold derived from the latch's devices (Q1 [Q25] leaving saturation), the capacitor stopped where the output meets it within the sample (B2-10) |
 | Timing capacitors | The capacitor with its series resistance and absorption branches (B2-12; the follower and the peak detector read its terminal). Set: the RC charge through R7 and ATTACK from the rail (trapezoidal). Reset: the capacitor and the sustain node together (Newton on both; trapezoidal, the first sample after the attack backward Euler: B2-9), with Q7's base current, Q8 as a PNP follower on its divider, CR2 to V-trig, and with DECAY off CR7 into R1401's node |
 | Outputs | The followers' drops from their transistors at the load's current (the AMOUNT OF CONTOUR pot and the peak divider on the filter contour) |
@@ -80,6 +80,7 @@ flip-flops' resets put 30 ns spikes on the rail and outputs):
 | Released during a slow attack | Within 20 mV; peaks within 7 mV; edges within 0.15 ms |
 | Fastest attack (500 ohm), SUSTAIN at 0 and 10 | Within 72 mV (mid-attack, the rail's sag: A16); peaks within 11 mV; edges within 0.13 ms |
 | ATTACK and DECAY at 0 ohm, SUSTAIN 10, held (2026-10-08) | Within 66 mV half a millisecond past the attack (also at 24 kHz and at Potato's 6 kHz: 70 and 92 mV); peaks within 23 mV at all three |
+| Released with ATTACK and DECAY at 0 ohm, DECAY on and off (2026-10-09) | The falls from 90 to 50 and 50 to 10 % within 0.04 ms of ngspice's (1.75 and 1.47 ms filter, 2.36 and 2.03 loudness) at 48, 24 and 6 kHz; within 39 mV (48 kHz), 19 mV (24 kHz) and 33 mV (6 kHz, its trigger's edge lined up: B2-13) |
 
 The same scenarios at the voice's 24 kHz (interpolated onto ngspice's 48 kHz grid): within
 86 mV (the fastest attack), trigger edges within 0.19 ms (assumptions.md A17). At 12 kHz
@@ -206,3 +207,27 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
   charge with them for the rest of it) change together; `contour_realtime.rs` holds them
   within its budgets. The ATTACK and DECAY laws are refitted with them (0.88 to 0.90 of
   their resistances: every measured time kept).
+- **B2-13** (2026-10-09) A model fault, found against the hardware reference: released with
+  DECAY at its end, the contours fell slower than the circuit's, the more the longer the
+  model's step (from 90 to 50 % of the filter contour ngspice 1.75 ms, the model 2.19 at 48
+  kHz, 2.56 at 24 kHz and 4.44 at Potato's 6 kHz, the plug-in's: the error halving as the
+  rate doubled). Through CR2 [CR9] a falling V-trig takes the capacitors' currents, and they
+  hold it up; V-trig was solved from the sections' states at the start of the sample, and
+  the sections then stepped from it. Now, in a sample where V-trig falls and a capacitor's
+  current through DECAY is half a milliampere or more (DECAY near its end; CR2 itself
+  carries Q7's base current and R10's, 1.6 mA, in every release), V-trig is solved again
+  from the sections as stepped and they again from it, by Newton's method on V-trig through
+  the sections' own response to it (each section's 2x2 Jacobian at its solution), within a
+  bracket, each pass starting the sections where the last one's response puts them: two or
+  three passes in such samples, at most nine, to 1 uV in High Fidelity and Potato (140 dB
+  under a contour's swing) and the solvers' tolerance in No Compromises; stopping short at
+  40 is counted (`unconverged::Solver::ContourCoupling`). Otherwise one pass, as before: no
+  factory preset releases with DECAY that near its end, and their renders are unchanged to
+  the bit, their cost at ten voices within the measurement's spread (-0.2 to +1.3 % in
+  five; coupling every release, with CR2's current the test, cost up to 29 % more in the
+  worst block). With DECAY off the dump node stays held for the sample (solved with the
+  passes through CR7 and R1401, it cost every DECAY-off preset a tenth more; B2-7 stays).
+  The falls now within 0.04 ms of ngspice's at every rate, DECAY on or off. The trigger's own
+  edges at 6 kHz still come about 0.23 ms early (a step and a half: C7 and the reset line's
+  stepping), so `contour_realtime.rs` compares the contours there with the last edge lined
+  up and holds the edges to their own budget.

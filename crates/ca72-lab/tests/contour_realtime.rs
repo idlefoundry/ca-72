@@ -199,6 +199,53 @@ fn contours_match_the_circuit() {
             ends: true,
         },
         Case {
+            // Released with DECAY at its end: the capacitors fall as fast as V-trig takes
+            // their current, which holds V-trig up (board2.md B2-13: solved apart, the fall
+            // ran 25 % slow at 48 kHz and 2.5 times at 6 kHz).
+            name: "released at DECAY 0",
+            bench: ContourBench {
+                filter: ContourControls {
+                    attack: 0.0,
+                    decay: 0.0,
+                    sustain: 1.0,
+                },
+                loudness: ContourControls {
+                    attack: 0.0,
+                    decay: 0.0,
+                    sustain: 1.0,
+                },
+                decay_on: true,
+                ..ContourBench::default()
+            },
+            presses: &[(0.05, 0.12)],
+            s_trig: &[],
+            tstop: 0.2,
+            budget: Some((0.10, 0.12)),
+            ends: true,
+        },
+        Case {
+            name: "released at DECAY 0, DECAY off",
+            bench: ContourBench {
+                filter: ContourControls {
+                    attack: 0.0,
+                    decay: 0.0,
+                    sustain: 1.0,
+                },
+                loudness: ContourControls {
+                    attack: 0.0,
+                    decay: 0.0,
+                    sustain: 1.0,
+                },
+                decay_on: false,
+                ..ContourBench::default()
+            },
+            presses: &[(0.05, 0.12)],
+            s_trig: &[],
+            tstop: 0.2,
+            budget: Some((0.10, 0.12)),
+            ends: true,
+        },
+        Case {
             name: "retriggered 30 ms after a release",
             bench: ContourBench {
                 filter: quick,
@@ -331,16 +378,15 @@ fn contours_match_the_circuit() {
                 lr.push(o.loudness);
                 vr.push(o.vtrig);
             }
-            let grid = |y: &[f64]| -> Vec<f64> {
+            let grid = |y: &[f64], shift: f64| -> Vec<f64> {
                 (0..n)
                     .map(|k| {
-                        let x = k as f64 / sr * rate;
+                        let x = ((k as f64 / sr + shift) * rate).max(0.0);
                         let i = (x.floor() as usize).min(y.len() - 2);
                         y[i] + (y[i + 1] - y[i]) * (x - i as f64)
                     })
                     .collect()
             };
-            let (f_rt, l_rt, vt_rt) = (grid(&fr), grid(&lr), grid(&vr));
             // The trigger's edges: V-trig crossing half the rail, each press and release.
             let edges = |y: &[f64]| -> Vec<f64> {
                 (1..y.len())
@@ -348,7 +394,17 @@ fn contours_match_the_circuit() {
                     .map(|k| (k as f64 - 1.0 + (4.65 - y[k - 1]) / (y[k] - y[k - 1])) / sr)
                     .collect()
             };
+            let vt_rt = grid(&vr, 0.0);
             let (e_ng, e_rt) = (edges(&vt_ng), edges(&vt_rt));
+            // At Potato's 6 kHz the trigger's edges come up to a step and a half early (0.23
+            // ms, the trigger section's own stepping), and a contour released at DECAY's end
+            // falls a volt a millisecond: there the contours are compared with the last edge
+            // lined up (its time is held to the edges' budget below).
+            let shift = match (rate < 12e3, e_ng.last(), e_rt.last()) {
+                (true, Some(a), Some(b)) if e_ng.len() == e_rt.len() => b - a,
+                _ => 0.0,
+            };
+            let (f_rt, l_rt) = (grid(&fr, shift), grid(&lr, shift));
             let edge_err = if e_ng.len() == e_rt.len() {
                 e_ng.iter().zip(&e_rt).fold(
                     0.0f64,
