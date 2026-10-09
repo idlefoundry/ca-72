@@ -365,6 +365,18 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     service manual's checks still pass (5.37: 13.5 semitones under oscillator 3's square,
     13 to 23; 5.19: the corner 16.5 times, at least 5.45).
 
+19. **A model fault: the contours' peak at Potato's rate** (`contour.rs`, board2.md B2-10,
+    2026-10-08). Session I recorded Ringing Saw Line's FILT CONT (the interface's input at
+    10 V full scale): its filter contour peaked at 4.63 V and decayed from there. The
+    plug-in's (its voices in Potato, the contours at 6 kHz) peaked at 4.95 to 5.06 V and ran
+    15 to 20 % above the reference's through the decay: its attack ended a sample past the
+    flip-flop's threshold, at ATTACK 0 half a volt over. With the capacitor stopped where
+    the output meets the threshold, the peak is the circuit's 4.49 V and the decay within 3
+    to 7 % of the reference's; per volt the ring moves alike (0.79 and 0.74 octave against
+    0.75 and 0.76), and the ring's excess over the reference's fell from 0.85 to 0.44 octave
+    50 ms into the long G2 and from 0.29 to 0.12 at 850 ms. Every preset with a fast attack
+    changes (levels below).
+
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -379,6 +391,12 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   than up, the reference 1.76 and 1.81 times (the hold amplifier's downward drive, toward
   -4.4 V through R59/R54); at GLIDE 5 the CA-72's downward slide starts fast and then slows
   where the reference's runs straight.
+- **Ringing Saw Line's filter, 0.2 octave high:** at the same contour voltage the CA-72's
+  ring stands 0.19 and 0.21 octave above the reference's on G2 and C4, at CUTOFF -1 with
+  both KEYBOARD CONTROLs on and EMPHASIS 6.8, where at CUTOFF 0 (EMPHASIS 0) the two track
+  within +0.01 to +0.03 octave over four octaves (session J): CUTOFF's law at -1 (within
+  -0.08 to +0.10 octave of the reference's marks), where the knob was set by eye, or
+  EMPHASIS's peak against its corner. A take at that panel would tell.
 - **Oscillator 3 on LO at FREQUENCY 0** (OSC. 3 CONTROL on, A3 held): the reference's
   vibrato ran at 2.05 Hz, the CA-72's at 1.78.
 - **The contours' peak:** the attack ends at 1.17 [1.18] of the held level on the CA-72 and

@@ -1142,6 +1142,21 @@ impl Contours {
             st.out = self.follow(&s, g, st.v, st.out, (npn, pnp));
             laps.lap(Part::Follow);
             if st.set && st.out >= su.peak {
+                // The flip-flop resets as the output reaches the peak, within the sample:
+                // the capacitor stops there (its voltage where the output meets the peak,
+                // by the secant through the sample's two ends and once again), not a
+                // sample's rise above it (at Potato's 6 kHz half a volt with ATTACK at 0).
+                let (v0, o0) = (before.0, before.2);
+                if st.out > o0 && o0 < su.peak {
+                    let mut v = v0 + (su.peak - o0) * (st.v - v0) / (st.out - o0);
+                    let mut out = self.follow(&s, g, v, su.peak, (npn, pnp));
+                    if out > o0 && (out - su.peak).abs() > 1e-6 {
+                        v = v0 + (su.peak - o0) * (v - v0) / (out - o0);
+                        out = self.follow(&s, g, v, out, (npn, pnp));
+                    }
+                    st.v = v;
+                    st.out = out;
+                }
                 st.set = false;
             }
             self.sec_settled[k] = same

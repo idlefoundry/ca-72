@@ -39,8 +39,7 @@ struct Case {
     budget: Option<(f64, f64)>,
     /// Knobs at their ends (0 ohm): the attack takes a millisecond, so compared outside half
     /// a millisecond of where ngspice moves 50 mV a sample (there a sample's timing is
-    /// volts), the peaks within a sample's rise, and at Potato's contour rate (6 kHz at 48
-    /// kHz) too.
+    /// volts), and at Potato's contour rate (6 kHz at 48 kHz) too.
     ends: bool,
 }
 
@@ -365,14 +364,6 @@ fn contours_match_the_circuit() {
                 // Potato's: a sample is 0.17 ms.
                 (0.5e-3, 0.12)
             };
-            // The peaks: 30 mV; with the knobs at their ends the flip-flop resets on the
-            // sample past the peak, after a rise of 9.3 V through R7 100 and 10 uF in a
-            // sample.
-            let peak_budget = if case.ends {
-                9.3 * (1.0 - (-1.0 / (rate * 100.0 * 10e-6)).exp())
-            } else {
-                0.03
-            };
             fail |= edge_err.abs() > edge_budget;
             let mut line = format!(
                 "{} at {} kHz: trigger edges within {:+.3} ms;",
@@ -391,7 +382,7 @@ fn contours_match_the_circuit() {
                 }
                 let peak_ng = ng.iter().fold(f64::MIN, |a, &x| a.max(x));
                 let peak_rt = rtv.iter().fold(f64::MIN, |a, &x| a.max(x));
-                fail |= worst.1.abs() > budget || (peak_rt - peak_ng).abs() > peak_budget;
+                fail |= worst.1.abs() > budget || (peak_rt - peak_ng).abs() > 0.03;
                 line.push_str(&format!(
                     " {name}: worst {:+.1} mV at {:.4} s, peak {:.3} V ({:+.1} mV);",
                     worst.1 * 1e3,

@@ -67,7 +67,7 @@ controller (Figure 9-12, S-F912) and the service manual's text (section 2.10).
 | Part | Real-time model |
 |---|---|
 | Trigger | C7 a state (trapezoidal), charged through CR10's junction law and R60, drained by Q20's base current; Q20 and Q12 as full Gummel-Poon transistors (saturation included), the reset line and V-trig solved from their KCL; C13's node on the trigger bus a state |
-| Flip-flops | Latches (their transitions take microseconds): set as V-trig rises, reset while the reset line drives CR1 [CR8] or when the output reaches the threshold derived from the latch's devices (Q1 [Q25] leaving saturation) |
+| Flip-flops | Latches (their transitions take microseconds): set as V-trig rises, reset while the reset line drives CR1 [CR8] or when the output reaches the threshold derived from the latch's devices (Q1 [Q25] leaving saturation), the capacitor stopped where the output meets it within the sample (B2-10) |
 | Timing capacitors | Set: the RC charge through R7 and ATTACK from the rail (exact trapezoidal). Reset: the capacitor and the sustain node together (Newton on both; trapezoidal, the first sample after the attack backward Euler: B2-9), with Q7's base current, Q8 as a PNP follower on its divider, CR2 to V-trig, and with DECAY off CR7 into R1401's node |
 | Outputs | The followers' drops from their transistors at the load's current (the AMOUNT OF CONTOUR pot and the peak divider on the filter contour) |
 
@@ -79,7 +79,7 @@ flip-flops' resets put 30 ns spikes on the rail and outputs):
 | Held key, DECAY on and off; retriggered 30 ms after a release | Within 27..44 mV; peaks within 7 mV; trigger edges within 0.04 ms |
 | Released during a slow attack | Within 20 mV; peaks within 7 mV; edges within 0.15 ms |
 | Fastest attack (500 ohm), SUSTAIN at 0 and 10 | Within 72 mV (mid-attack, the rail's sag: A16); peaks within 11 mV; edges within 0.13 ms |
-| ATTACK and DECAY at 0 ohm, SUSTAIN 10, held (2026-10-08) | Within 65 mV half a millisecond past the attack (also at 24 kHz and at Potato's 6 kHz: 69 and 89 mV); the peaks a sample's rise over (30, 43 mV) |
+| ATTACK and DECAY at 0 ohm, SUSTAIN 10, held (2026-10-08) | Within 66 mV half a millisecond past the attack (also at 24 kHz and at Potato's 6 kHz: 70 and 92 mV); peaks within 23 mV at all three |
 
 The same scenarios at the voice's 24 kHz (interpolated onto ngspice's 48 kHz grid): within
 86 mV (the fastest attack), trigger edges within 0.19 ms (assumptions.md A17). At 12 kHz
@@ -171,3 +171,13 @@ per second of the busy test scenarios at 48 kHz, 0.2 s per second in `v0-bass.js
   faster than ngspice's (0.4 against about 1.5 ms from 5.26 to 2 V at SUSTAIN 5, likely Q8's
   gain at tens of milliamperes, which the model's follower holds at BF), and a release with
   DECAY off lags B2-7's 0.3 ms, at that slope up to 0.7 V.
+- **B2-10** (2026-10-08) A model fault, found against the hardware reference: the attack
+  ended on the sample at or past the peak, so the output overshot the flip-flop's threshold
+  by up to a sample's rise. At 48 and 24 kHz a few millivolts; at Potato's contour rate (6
+  kHz at 48 kHz, the plug-in's) with a fast attack about half a volt: Ringing Saw Line's
+  filter contour peaked at 4.95 to 5.06 V against the circuit's 4.49 (the reference's FILT
+  CONT 4.63, its interface's input scale within 3 %), and its whole decay ran 15 to 20 %
+  high, its filter's ring up to 0.4 octave. The capacitor now stops where the output meets
+  the threshold within the sample (the secant through the sample's ends, refined once); the
+  decay begins on the next. `contour_realtime.rs`: peaks within 7.4 mV of ngspice in every
+  case at 48 and 24 kHz, and within 23 mV with ATTACK at 0, at 6 kHz too.
