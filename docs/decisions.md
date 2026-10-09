@@ -2281,6 +2281,12 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   0.09 dB of 0.1.3. At 10 and quieter: Upright Pluck -3.49 dB, Ladder Kick -2.37, Stacked
   Fifths -2.15, Breath Flute -1.85, Open Hat -1.63, Ringing Saw Line -1.54, Noise Snare
   -1.08, Shoreline Wash -0.60, Closed Hat -0.23; Pink Riser +1.83.
+- **Again after SUSTAIN's law** (2026-10-09; calibration change 26): twelve presets moved
+  0.01 to 0.23 dB; Lead 8.2, Pulse Strut 9.1, Cruising Whistle 7.11 (its whistle unmoved:
+  AMOUNT OF CONTOUR 0): every preset VOLUME can reach within 0.02 dB of 0.1.3. At 10 and
+  quieter: Upright Pluck -3.50 dB, Ladder Kick -2.37, Stacked Fifths -2.33, Breath Flute
+  -1.75, Open Hat -1.63, Ringing Saw Line -1.54, Noise Snare -1.08, Shoreline Wash -0.60,
+  Closed Hat -0.23; Pink Riser +1.83.
 - **MIDI's modulation wheel follows the reference's curve** (agent decision, 2026-10-08,
   under the owner's decision to match the reference): control change 1 puts the
   MODULATION wheel where the reference's resistance is for it (`modulation::midi_wheel`);
