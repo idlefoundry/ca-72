@@ -133,7 +133,7 @@ Checked against the service manual in ngspice (`vco_osc23.rs`):
 | Oscillator 2's FREQUENCY, its travel | 14-17 semitones (5.35) | 16.70 semitones |
 | Oscillator 3's, OSC. 3 CONTROL on | 14-17 semitones | 16.76 semitones |
 | OSC. 3 CONTROL off | the keyboard has no effect; a wider range (2.18; the later board's 2.3: +-3 octaves) | 0.000 semitones from A2 to A3; 68.8 semitones of travel |
-| CONTROL off, LO, FREQUENCY at minimum | a click every 2 to 5 s (5.36) | 0.205 Hz, 4.9 s: with LO five octaves below 32' (A3; four would give 2.4 s, six 9.7 s) |
+| CONTROL off, LO, FREQUENCY at minimum | a click every 2 to 5 s (5.36) | 0.205 Hz, 4.9 s: with LO five octaves below 32' (A3 as it was; four would give 2.4 s, six 9.7 s). The voice, LO 4.74 octaves below 32' as the hardware reference has it (docs/calibration) and R162 2.96K: 4.78 s |
 | LO's top against 32''s bottom (CONTROL off) | they overlap (5.36) | 10.95 Hz against 6.58 Hz |
 
 The real-time models (`tuning.rs`: `osc_drive`, `osc3_control`; `revsaw.rs`), each

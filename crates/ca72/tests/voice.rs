@@ -542,9 +542,9 @@ fn oscillator_3s_frequency_and_wide_range_meet_the_service_manual() {
     );
     let span = 12.0 * (lo / hi).log2();
     // 5.36: CONTROL off, LO, FREQUENCY at its minimum: "clicks ... between two to five seconds
-    // apart"; LO's top overlaps 32''s bottom. With R162 where the hardware reference's control-off
-    // pitch puts it (docs/calibration) the clicks are slower than 5.36's: the reference's manual
-    // gives its oscillators down to 0.1 Hz, so up to 10 s.
+    // apart"; LO's top overlaps 32''s bottom. (With R162 and LO where the hardware reference
+    // puts them, docs/calibration, about 4.8 s; the reference's manual gives its oscillators
+    // down to 0.1 Hz, so the bound is 10 s.)
     let slowest = osc3_period(&t3, 0.0, false, Range::Lo, 19, 16.0);
     let lo_top = osc3_period(&t3, 1.0, false, Range::Lo, 19, 2.0);
     let r32_bottom = osc3_period(&t3, 0.0, false, Range::R32, 19, 2.0);

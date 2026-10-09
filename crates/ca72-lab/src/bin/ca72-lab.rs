@@ -59,12 +59,13 @@ fn spice() -> Result<Ngspice, String> {
     Ngspice::find().map_err(|e| e.to_string())
 }
 
-/// The trims Folkman's procedure gives in ngspice (`ca72-lab calibrate`, 2026-09-28).
+/// The trims Folkman's procedure gives in ngspice (`ca72-lab calibrate`; 2026-10-08, after
+/// the external control input's 50.5K and the keyboard's 0 V on C2: R11 183.65 before).
 fn calibrated() -> (vco::Trims, f64) {
     (
         vco::Trims {
-            r11: 183.65,
-            a8: 0.13518,
+            r11: 150.33,
+            a8: 0.13516,
             octave_step: 0.29889,
             ..vco::Trims::default()
         },

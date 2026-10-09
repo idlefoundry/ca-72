@@ -17,8 +17,14 @@ pub const LOW_A: u32 = 4;
 pub const SECOND_A: u32 = 16;
 pub const HIGH_A: u32 = 40;
 
-/// The range switch's positions, as octaves below 2'. LO's place is an assumption
-/// (docs/circuit/assumptions.md A3).
+/// LO's place on the range switch, octaves below 2': 6.74 below 8', where the hardware
+/// reference's oscillator 3 has it with OSC. 3 CONTROL off (198.82 Hz at 8', session C;
+/// 1.8699 Hz on LO, session L: 6.732) and on (A3 at 2.0097 Hz on LO, session L, against its
+/// 8' at F5, session J: 6.745). The drawing does not give it (B1-6); five octaves below 32'
+/// was the assumption (docs/circuit/assumptions.md A3, docs/calibration).
+pub const LO_BELOW_2: f64 = 8.74;
+
+/// The range switch's positions, as octaves below 2' (LO at [`LO_BELOW_2`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Range {
     Lo,
@@ -37,7 +43,7 @@ impl Range {
             Range::R8 => 2.0,
             Range::R16 => 3.0,
             Range::R32 => 4.0,
-            Range::Lo => 9.0,
+            Range::Lo => LO_BELOW_2,
         }
     }
 }

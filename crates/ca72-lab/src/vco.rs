@@ -41,8 +41,8 @@ pub enum Range {
 }
 
 impl Range {
-    /// Octaves below 2'. LO's distance below 32' is not established (board1.md B1-6): five
-    /// octaves is an assumption (docs/circuit/assumptions.md A3).
+    /// Octaves below 2'. LO's distance below 32' is not drawn (board1.md B1-6): the voice's,
+    /// measured on the hardware reference (`ca72::tuning::LO_BELOW_2`).
     pub fn octaves_below_2(self) -> f64 {
         match self {
             Range::R2 => 0.0,
@@ -50,7 +50,7 @@ impl Range {
             Range::R8 => 2.0,
             Range::R16 => 3.0,
             Range::R32 => 4.0,
-            Range::Lo => 9.0,
+            Range::Lo => ca72::tuning::LO_BELOW_2,
         }
     }
 }

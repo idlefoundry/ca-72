@@ -409,6 +409,20 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     Every preset's contours peak 7 % higher: a filter sweep's first moments up to a third of
     an octave higher, a loudness attack's overshoot 0.5 dB louder.
 
+22. **Oscillator 3's LO range: 4.74 octaves below 32'** (`tuning::LO_BELOW_2`, 2026-10-08).
+    The drawing does not give LO's place on the range switch (B1-6); the model assumed five
+    octaves below 32' (A3). Session L played oscillator 3 alone on LO at FREQUENCY 0 and
+    recorded the MIX jack: 2.0097 Hz with OSC. 3 CONTROL on (A3 held) and 1.8699 Hz with it
+    off. Off, the reference's oscillator 3 was 198.82 Hz at 8' (session C): LO 6.732 octaves
+    below 8'; on, it sat 35 cents under A-440 at 8' (session J, F5): LO 6.745 below. The
+    CA-72 had LO 7.000 below 8' (1.720 and 1.575 Hz, 270 and 297 cents under the reference);
+    LO is now 6.74 below 8' in the model and the netlist's bench alike (2.06 and 1.89 Hz).
+    The oscillators' circuit reference (`vco1-core.json`) is regenerated from ngspice tuned
+    by Folkman's procedure again (R11 150.3 ohm since the external input's 50.5K and the
+    keyboard's 0 V on C2, 183.65 before; every range but LO within 0.05 cent of 0.1.0's,
+    LO 312 cents up); the real-time oscillator tracks it within 0.08 cent (LO 0.57). Every
+    vibrato and slow sweep from oscillator 3 on LO runs 20 % faster; 5.36's slowest click
+    with the control off is 4.78 s.
 ## Still differs (2026-10-08, after session J's fits)
 
 - **The filter's overdrive:** with the external path matched (change 9), the CA-72 still
@@ -429,8 +443,6 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   within +0.01 to +0.03 octave over four octaves (session J): CUTOFF's law at -1 (within
   -0.08 to +0.10 octave of the reference's marks), where the knob was set by eye, or
   EMPHASIS's peak against its corner. A take at that panel would tell.
-- **Oscillator 3 on LO at FREQUENCY 0** (OSC. 3 CONTROL on, A3 held): the reference's
-  vibrato ran at 2.05 Hz, the CA-72's at 1.78.
 - **The contours' release with DECAY at 0:** its first half takes 1.9 to 2.2 ms against the
   reference's 1.1 to 1.3.
 - **Oscillator tracking:** with the external control input at 50.5K, over four volts the
