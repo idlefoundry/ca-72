@@ -2827,3 +2827,44 @@ CA-72's for projects saved before: "I want you to copy the same stereo algorithm
 So the CA-74's R27 (SPREAD's law and places, POLY going round its voices, a key played again
 keeping its voice), R30 (the placement: EVEN, EDGES or CENTER), R28 and R41 (DOUBLE, its pairs
 mirrored as far out as the placement puts each voice), as they are there.
+
+**Agent decisions, 2026-10-09** (the first step: SPREAD's law and places, the placement, POLY's
+choice of voice; not separately approved):
+- **The pan law** is the CA-74's: constant power, √2 cos and √2 sin of the place's quarter turn,
+  whole on both sides at the centre (`character::pan_gains`). The CA-72's before it, the DAW's
+  instrument's, kept both sides whole until the far one faded, a voice in the centre twice the
+  power of one at an edge.
+- **The places** are SCATTER's placement's (`Placement`, the host's Scatter Placement, the last
+  parameter, `placement`: `even`, `edges` or `centre`, shown EVEN, EDGES and CENTER; a session
+  or preset saved before reads EVEN), among VOICES's voices: EVEN, evenly from edge to edge from
+  the edges in; EDGES, from 100 to 60 % out; CENTER, the first in the centre and the rest by the
+  golden ratio. The CA-72's places before them were the first voice in the centre, then the
+  quarters and an eighth. The voices' mix carries the placement and VOICES to the workers
+  (`Mix`, `MIX_LEN` 6).
+- **One voice alone sits in the centre:** with POLY off the instrument's voice is not placed (it
+  was in the centre before too, by its place).
+- **POLY's choice of voice:** the voice that last played the key if it is free or letting go,
+  else the free voice whose last note began longest ago, else the one let go longest ago, else
+  the one held longest (was: the first free voice by its number, then the oldest let go, then the
+  oldest held).
+- **MIDI Learn:** SCATTER PLACEMENT is learnable as a selector (48 learnable controls: 23 knobs,
+  8 selectors, 17 switches); it has no place on the panel until the strip is built.
+- **The presets** that play POLY moved and are levelled again through MAIN OUTPUT VOLUME's law,
+  as R42 levels them: Slow Horn Swell 8 to 7.94 (+0.22 dB from the choice of voice alone, its
+  SPREAD 0), Brass Tutti 4.22 to 3.92 (+1.34 dB, SPREAD 50), Warped Pad 7.44 to 6.9 (+2.05 dB,
+  SPREAD 80): each one's momentary maximum on its phrase within 0.01 dB of before. The DAW's copy
+  of the factory file now differs in these three volumes, and its instrument keeps its own law
+  and places.
+
+**Evidence (the Linux reference machine, 2026-10-09):** the CA-74's tests ported:
+`every_place_is_as_loud_as_the_centre`, `even_fills_the_field_evenly_from_its_edges`,
+`edges_fills_the_field_from_its_edges`, `centre_starts_in_the_centre_and_spreads_by_the_golden_ratio`,
+`a_placement_goes_by_its_index_and_back`, `a_chord_fills_the_field_and_one_voice_stays_in_the_centre`,
+`poly_notes_go_round_the_voices`, `a_key_played_again_keeps_its_voice`; with the old law and
+choice of voice the first, the chord's and the round's fail, and without the key kept the last
+fails (the chord struck again on voices 3, 4 and 5); the learn list's (48). `preset_levels` (each
+preset as set) against the commit before: 21 presets the same to the hundredth of a dB, the
+three above levelled back within 0.01 dB. `preset_render` (every preset with POLY's ten voices)
+against the commit before: Pink Riser the same to the bit, the rest moved by the new choice of
+voice (levels within 0.4 dB) but those with SPREAD (Warped Pad +1.38 dB, Wooden Mallet +1.18,
+before levelling). The plug-in's unit tests (132); rustfmt; clippy.

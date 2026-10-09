@@ -12,6 +12,7 @@
 
 use ca72::tuning::Range;
 use ca72::voice::{Panel, Waveform};
+use ca72_plugin::character::Placement;
 use ca72_plugin::engine::{Controls, Engine, Event};
 
 /// A small generator, the same sequence on every run.
@@ -82,6 +83,11 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         voices: if r.end() { 10 } else { 2 },
         entropy: r.either(0.0, 1.0),
         spread: r.either(0.0, 1.0),
+        placement: if r.end() {
+            Placement::Edges
+        } else {
+            Placement::Centre
+        },
         feedback: r.either(0.0, 1.0),
         lock: r.end(),
     }

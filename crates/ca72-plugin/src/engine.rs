@@ -6,15 +6,19 @@
 //! POLY off, the one instrument takes every key through its keyboard circuit (lowest-note
 //! priority, single triggering), as before. POLY on, one voice per note, up to VOICES (2 to
 //! 10) of the ten built: each the whole instrument with its own keyboard circuit, which its
-//! note reaches as one key (`PolyKey`; decisions.md, "POLY"). ENTROPY makes each voice its
-//! own parts, SPREAD puts the voices across the stereo field (`character.rs`); both 0 by
-//! default, the circuit as drawn.
+//! note reaches as one key (`PolyKey`; decisions.md, "POLY"). A POLY note takes the voice
+//! that last played its key if that voice is free or letting go, else the free voice whose
+//! last note began longest ago, else the one let go longest ago, else the one held longest
+//! (the CA-74's R27; decisions.md R-STEREO), so a chord struck again stays where it was and a
+//! melody goes round the voices. ENTROPY makes each voice its own parts, SPREAD puts the voices
+//! across the stereo field where the placement has them (`character.rs`), one voice alone in
+//! the centre; both 0 by default, the circuit as drawn.
 
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
 use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
-use crate::character::Character;
+use crate::character::{Character, Placement};
 use crate::pool::{Ask, Crew, MAX, Pool, Shared};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -72,7 +76,7 @@ const ENTROPY_KNOBS: usize = 6;
 /// What the parameters set: the panel (its wheels where the parameters leave them), MAIN
 /// OUTPUT's VOLUME (0..1 of its travel) and switch, how far a MIDI keyboard's full pitch
 /// bend moves the PITCH wheel, in semitones, POWER (off: bypassed, silent), and POLY,
-/// VOICES, ENTROPY and SPREAD (0..1).
+/// VOICES, ENTROPY and SPREAD (0..1), and where SPREAD places the voices.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Controls {
     pub panel: Panel,
@@ -84,6 +88,8 @@ pub struct Controls {
     pub voices: usize,
     pub entropy: f64,
     pub spread: f64,
+    /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R-STEREO).
+    pub placement: Placement,
     /// FEEDBACK (0..1): the voices' output patched back into their EXTERNAL INPUT, a sample
     /// late, by this much of its level (the phones' VOLUME knob; decisions.md R8).
     pub feedback: f64,
@@ -105,6 +111,7 @@ impl Default for Controls {
             voices: POLY_VOICES.1,
             entropy: 0.0,
             spread: 0.0,
+            placement: Placement::Even,
             feedback: 0.0,
             lock: false,
         }
@@ -326,7 +333,7 @@ impl Playing {
                 y = 0.0;
             }
             peak = peak.max(y.abs());
-            let (gl, gr) = self.character.gains(m.spread);
+            let (gl, gr) = self.character.gains(m.spread, m.placement, m.voices);
             self.out[0][k] = y * f64::from(gl);
             self.out[1][k] = y * f64::from(gr);
         }
@@ -840,13 +847,24 @@ impl Engine {
         true
     }
 
-    /// A POLY note: a free voice by its number, else the oldest let go, else the oldest held
-    /// (its key lifted and pressed again: `PolyKey`).
+    /// A POLY note: the voice that last played the key if it is free or letting go (a chord
+    /// struck again stays where it was in the field), else the free voice whose last note began
+    /// longest ago (the notes go round the voices, to either side in turn), else the one let
+    /// go longest ago, else the one held longest (its key lifted and pressed again: `PolyKey`)
+    /// (the CA-74's R27).
     fn poly_on(&mut self, key: u8) {
         let n = self.voices();
-        let pick = self.slots[..n]
-            .iter()
-            .position(|s| !s.active)
+        let pick = (0..n)
+            .filter(|&k| {
+                let s = &self.slots[k];
+                s.note == key && s.age > 0 && !s.gate
+            })
+            .max_by_key(|&k| self.slots[k].age)
+            .or_else(|| {
+                (0..n)
+                    .filter(|&k| !self.slots[k].active)
+                    .min_by_key(|&k| self.slots[k].age)
+            })
             .or_else(|| {
                 (0..n)
                     .filter(|&k| !self.slots[k].gate)
@@ -1131,6 +1149,8 @@ impl Engine {
             oscillators,
             at: oscillators.max(entropy),
             spread: self.controls.spread,
+            placement: self.controls.placement,
+            voices: self.voices(),
         }
     }
 
@@ -1152,8 +1172,8 @@ impl Engine {
                 p.broken = true;
                 return (0.0, 0.0);
             }
-            let (gl, gr) = p.character.gains(mix.spread);
-            return (y * f64::from(gl), y * f64::from(gr));
+            // One voice alone sits in the centre: SPREAD places POLY's voices among themselves.
+            return (y, y);
         }
         let mut ins = [0.0f64; CHUNK];
         ins[0] = ext;
@@ -1304,27 +1324,43 @@ const SHARED_RUN: usize = 8;
 pub const CHUNK: usize = 128;
 
 /// ENTROPY and SPREAD as the voices' samples take them: ENTROPY's depth, the oscillators'
-/// (their floor with it, unless LOCK), the depth the character's offsets are drawn at, and
-/// SPREAD.
+/// (their floor with it, unless LOCK), the depth the character's offsets are drawn at,
+/// SPREAD, and SCATTER's placement and the voices it places among (VOICES).
 #[derive(Debug, Clone, Copy)]
 pub struct Mix {
     entropy: f64,
     oscillators: f64,
     at: f64,
     spread: f64,
+    placement: Placement,
+    voices: usize,
 }
 
+/// [`Mix`]'s values, as the workers are handed them.
+pub const MIX_LEN: usize = 6;
+
 impl Mix {
-    pub fn to_array(self) -> [f64; 4] {
-        [self.entropy, self.oscillators, self.at, self.spread]
+    pub fn to_array(self) -> [f64; MIX_LEN] {
+        [
+            self.entropy,
+            self.oscillators,
+            self.at,
+            self.spread,
+            self.placement.index() as f64,
+            self.voices as f64,
+        ]
     }
 
-    pub fn from_array([entropy, oscillators, at, spread]: [f64; 4]) -> Mix {
+    pub fn from_array(
+        [entropy, oscillators, at, spread, placement, voices]: [f64; MIX_LEN],
+    ) -> Mix {
         Mix {
             entropy,
             oscillators,
             at,
             spread,
+            placement: Placement::from_index(placement as usize),
+            voices: voices as usize,
         }
     }
 }
@@ -1654,7 +1690,7 @@ mod tests {
         assert!(!s.drop && p.drop);
         s.hand(&mut p);
         assert!(p.drop, "the drop lost");
-        p.play(1, &[0.0; CHUNK], 48_000.0, &Mix::from_array([0.0; 4]));
+        p.play(1, &[0.0; CHUNK], 48_000.0, &Mix::from_array([0.0; MIX_LEN]));
         assert!(!p.drop);
         s.gate = false;
         s.ran(false);
@@ -1884,5 +1920,129 @@ mod tests {
                 "voice {k}"
             );
         }
+    }
+
+    /// Left and right power of `keys` held for a second with `c`, and the largest difference
+    /// of a sample's two sides.
+    fn sides(c: &Controls, keys: &[u8]) -> (f64, f64, f64) {
+        let mut e = Engine::new();
+        e.set(c);
+        e.prepare(48_000.0, 9);
+        for &key in keys {
+            e.event(Event::Note { key, on: true });
+        }
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let (mut mid, mut side, mut diff) = (0.0f64, 0.0f64, 0.0f64);
+        for _ in 0..(48_000 / 256) {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(256);
+            for (&a, &b) in l.iter().zip(&r) {
+                let (a, b) = (f64::from(a), f64::from(b));
+                mid += (0.5 * (a + b)).powi(2);
+                side += (0.5 * (a - b)).powi(2);
+                diff = diff.max((a - b).abs());
+            }
+        }
+        (mid, side, diff)
+    }
+
+    /// At full SPREAD a three-note chord fills the field (side within 3 dB of mid; the old
+    /// places and pan law, a voice in the centre weighed double, gave less), and one voice
+    /// alone stays in the centre, left and right the same (decisions.md R-STEREO).
+    #[test]
+    fn a_chord_fills_the_field_and_one_voice_stays_in_the_centre() {
+        let c = Controls {
+            poly: true,
+            voices: 8,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let (mid, side, _) = sides(&c, &[57, 61, 64]);
+        let db = 10.0 * (side / mid).log10();
+        assert!(db > -3.0, "side {db:.1} dB against mid");
+        let mono = Controls { poly: false, ..c };
+        let (_, _, diff) = sides(&mono, &[57]);
+        assert_eq!(diff, 0.0, "one voice off the centre");
+    }
+
+    /// POLY's notes go round the voices: a note after one let go and fallen silent takes the
+    /// next voice, not the first again.
+    #[test]
+    fn poly_notes_go_round_the_voices() {
+        let c = Controls {
+            poly: true,
+            voices: 4,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 9);
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        for (i, key) in [48u8, 50, 52, 53, 55].into_iter().enumerate() {
+            e.event(Event::Note { key, on: true });
+            let k = e
+                .slots
+                .iter()
+                .position(|s| s.gate)
+                .expect("a voice for the note");
+            assert_eq!(k, i % 4, "note {i}");
+            e.event(Event::Note { key, on: false });
+            for _ in 0..(3 * 48_000 / 256) {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+            }
+            assert!(e.slots.iter().all(|s| !s.active), "note {i} not silent");
+        }
+    }
+
+    /// A key played again takes the voice it last had, letting go or fallen silent, so a chord
+    /// struck again stays where it was in the field; a new key still takes the next voice.
+    #[test]
+    fn a_key_played_again_keeps_its_voice() {
+        let c = Controls {
+            poly: true,
+            voices: 8,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 9);
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let chord = [60u8, 64, 67];
+        let voices = |e: &Engine| -> Vec<usize> {
+            chord
+                .iter()
+                .map(|&key| {
+                    e.slots
+                        .iter()
+                        .position(|s| s.gate && s.note == key)
+                        .expect("a voice for the key")
+                })
+                .collect()
+        };
+        let strike = |e: &mut Engine, on: bool| {
+            for key in chord {
+                e.event(Event::Note { key, on });
+            }
+        };
+        strike(&mut e, true);
+        let first = voices(&e);
+        strike(&mut e, false);
+        // Struck again while letting go, then again after falling silent.
+        for wait in [2usize, 3 * 48_000 / 256] {
+            for _ in 0..wait {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+            }
+            strike(&mut e, true);
+            assert_eq!(voices(&e), first, "after {wait} blocks");
+            strike(&mut e, false);
+        }
+        e.event(Event::Note { key: 69, on: true });
+        let new = e.slots.iter().position(|s| s.gate).unwrap();
+        assert!(
+            !first.contains(&new),
+            "a new key on voice {new}, one of the chord's"
+        );
     }
 }

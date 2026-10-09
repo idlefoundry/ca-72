@@ -3,6 +3,7 @@
 
 #![allow(dead_code, clippy::unwrap_used)]
 
+use ca72_plugin::character::Placement;
 use ca72_plugin::engine::{Controls, Engine, Event};
 use ca72_plugin::library::Sound;
 use ca72_plugin::params::{Ca72Params, Footage, Wave, Wave3};
@@ -72,6 +73,9 @@ pub fn controls_of(s: &Sound) -> Controls {
             "midi_bend_range" => c.bend_range = v,
             "entropy" => c.entropy = v / 100.0,
             "spread" => c.spread = v / 100.0,
+            "placement" => {
+                c.placement = Placement::from_index(v.round().clamp(0.0, 2.0) as usize);
+            }
             "feedback" => c.feedback = ca72::voice::feedback_law(v / 10.0),
             "lock" => c.lock = on(v),
             "poly" | "voices" => {}

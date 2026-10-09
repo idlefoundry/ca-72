@@ -11,6 +11,7 @@ use ca72::tuning::Range;
 use ca72::voice::{ContourKnobs, OscPanel, Panel, Quality, Waveform};
 use nih_plug::prelude::*;
 
+use crate::character::Placement;
 use crate::engine::{Controls, POLY_VOICES};
 use crate::learn::MidiMap;
 
@@ -101,6 +102,32 @@ pub enum Wave3 {
     #[id = "narrow_rectangle"]
     #[name = "Narrow Rectangle"]
     NarrowRectangle,
+}
+
+/// Where SCATTER puts the voices (decisions.md R-STEREO, the CA-74's R30): evenly from edge
+/// to edge, out at the edges, or out from the centre. In this order: a preset's value is its
+/// index.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scatter {
+    #[id = "even"]
+    #[name = "EVEN"]
+    Even,
+    #[id = "edges"]
+    #[name = "EDGES"]
+    Edges,
+    #[id = "centre"]
+    #[name = "CENTER"]
+    Centre,
+}
+
+impl From<Scatter> for Placement {
+    fn from(s: Scatter) -> Placement {
+        match s {
+            Scatter::Even => Placement::Even,
+            Scatter::Edges => Placement::Edges,
+            Scatter::Centre => Placement::Centre,
+        }
+    }
 }
 
 impl From<Wave3> for Waveform {
@@ -282,6 +309,10 @@ pub struct Ca72Params {
     /// keeps a small mismatch of its own; decisions.md R9).
     #[id = "lock"]
     pub lock: BoolParam,
+    /// SCATTER's placement (EVEN by default): where SPREAD puts the voices (decisions.md
+    /// R-STEREO). The last parameter: a session saved before it reads EVEN.
+    #[id = "placement"]
+    pub placement: EnumParam<Scatter>,
 }
 
 /// An amount, 0 to 100 %.
@@ -384,6 +415,7 @@ impl Default for Ca72Params {
             spread: percent("Spread"),
             feedback: ten("Feedback", 0.0),
             lock: BoolParam::new("Lock (oscillators identical)", false),
+            placement: EnumParam::new("Scatter Placement", Scatter::Even),
         }
     }
 }
@@ -483,6 +515,7 @@ impl Ca72Params {
             voices: usize::try_from(self.voices.value()).unwrap_or(POLY_VOICES.1),
             entropy: value(&self.entropy) / 100.0,
             spread: value(&self.spread) / 100.0,
+            placement: self.placement.value().into(),
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),
