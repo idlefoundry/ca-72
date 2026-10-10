@@ -12,6 +12,7 @@ pub mod expo;
 pub mod fast;
 pub mod filter_cal;
 pub mod keyboard;
+pub mod light;
 pub mod linear;
 pub mod mna;
 pub mod modulation;
