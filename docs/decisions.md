@@ -2951,6 +2951,16 @@ list that drops down over the strip inside the window."
   closely matching wood had kept under 32, is 36 on the same face (the commit before, measured
   over the same rows: 1.457 and 36). On `potato` the last column's head (QUALITY, approved
   apart, R-POTATO) is left out too: 1.445 and 30745 of 32851.
+- "I feel like the badge isn't quite in the right place though." / "is it on the same grid as
+  everything else?" It was not: its left end 4 units right of the MODIFIERS|OUTPUT line (its
+  place on the old board) and a touch above the strip's middle. Then: "maybe it's also partially
+  cause it's not up to the same realistic quality as everything else. Let's fix that.": the
+  plate a generated picture of a blank plate, brushed black anodised aluminium with a bright
+  chamfer, proud of the wood with its shadow, its lettering paint filled into engraving
+  (`art::plate_worn`, `assets/worn/README.md`); "dial back the lighting effect of the badge a
+  bit": its picture at 80 %. Of three places, each rendered whole on the mock-up's page (as
+  built; centred on OUTPUT, recommended; its left end on the divider line): "I think we can go
+  with option C." Its left end on the line (2578), in the strip's middle.
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
