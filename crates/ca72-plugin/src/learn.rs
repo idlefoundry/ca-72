@@ -3,7 +3,7 @@
 //! table, saved with the host's project, not with the sound presets.
 //!
 //! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches and the
-//!   strip's POLY, VOICES, ENTROPY and SPREAD, and LOCK (a host parameter without a control: the
+//!   strip's POLY, VOICES, ENTROPY, SPREAD and INNER, and LOCK (a host parameter without a control: the
 //!   drawer's list learns it). Not the wheels (MIDI pitch bend and the modulation wheel, CC 1,
 //!   move them already), POWER (the host's bypass), MIDI BEND RANGE (the player's), nor anything
 //!   but a sound parameter.
@@ -83,7 +83,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK. Its order is the drawer's list; the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 53] = [
+pub const LEARNABLE: [Learnable; 54] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -138,6 +138,7 @@ pub const LEARNABLE: [Learnable; 53] = [
     stepped("voices", "VOICES"),
     knob("entropy", "ENTROPY"),
     knob("spread", "WIDTH"),
+    knob("inner", "INNER"),
     stepped("placement", "SCATTER PLACEMENT"),
     knob("double", "DETUNE (DOUBLE)"),
     knob("drive", "DRIVE"),
@@ -696,6 +697,7 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "voices" => &p.voices,
         "entropy" => &p.entropy,
         "spread" => &p.spread,
+        "inner" => &p.inner,
         "lock" => &p.lock,
         "placement" => &p.placement,
         "unison" => &p.unison,
@@ -733,6 +735,7 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "feedback" => &p.feedback,
         "entropy" => &p.entropy,
         "spread" => &p.spread,
+        "inner" => &p.inner,
         "double" => &p.double,
         "drive" => &p.drive,
         "level" => &p.level,
@@ -923,7 +926,7 @@ mod tests {
                 counts(Kind::Stepped),
                 counts(Kind::Switch)
             ),
-            (26, 8, 19)
+            (27, 8, 19)
         );
     }
 

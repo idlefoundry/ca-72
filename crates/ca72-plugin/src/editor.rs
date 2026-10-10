@@ -29,6 +29,7 @@ use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, S
 use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
+use plugin_kit_stereo::place;
 
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
@@ -1462,24 +1463,30 @@ fn strip_scene(p: &Ca72Params, sounding: u32, was: StripScene) -> StripScene {
     let on = |k: usize| sounding & (1 << k) != 0;
     // Where they sound: in MONO the one voice (its pair with DOUBLE, all of WIDTH's way out);
     // else each of VOICES's voices at its place by the placement, its pair as far out with
-    // DOUBLE (decisions.md R-STEREO).
-    let width = c.spread;
+    // DOUBLE (decisions.md R-STEREO), each in its side's band by INNER: where the engine's
+    // gains put it, the kit's (R-INNER).
+    let (width, inner) = (c.spread, c.inner);
     let field = if mono {
         if doubled {
-            Field::Double(vec![(width, on(0))])
+            Field::Double(vec![(place::pair_at(width, inner, 1.0), on(0))])
         } else {
             Field::Scatter(vec![(0.0, on(0))])
         }
     } else if doubled {
         Field::Double(
             (0..voices)
-                .map(|k| (placement.pair(k, voices) * width, on(k)))
+                .map(|k| {
+                    (
+                        place::pair_at(width, inner, placement.pair(k, voices)),
+                        on(k),
+                    )
+                })
                 .collect(),
         )
     } else {
         Field::Scatter(
             (0..voices)
-                .map(|k| (placement.place(k, voices) * width, on(k)))
+                .map(|k| (place::voice_at(width, inner, placement, k, voices), on(k)))
                 .collect(),
         )
     };

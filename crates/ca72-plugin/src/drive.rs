@@ -57,7 +57,7 @@ pub fn unmeasured() -> Saved {
 
 /// The key of a sound as far as DRIVE's loudness goes: the panel, LOCK, ENTROPY (each voice its
 /// own parts) and FEEDBACK (the voice's output into its own external input). Not POLY, UNISON,
-/// VOICES, DOUBLE or SPREAD: a note's voices each have their own filter, so a chord, a unison
+/// VOICES, DOUBLE, SPREAD or INNER: a note's voices each have their own filter, so a chord, a unison
 /// or a pair sum what one voice does (their levels are their own trims'). Never 0.
 pub fn sound(c: &Controls) -> u64 {
     // (FNV-1a over the debug form: every field of the panel, the floats to the bit.)
@@ -155,6 +155,7 @@ mod tests {
         assert!(!c.waiting());
         let mut louder = controls;
         (louder.drive, louder.level, louder.spread, louder.poly) = (12.0, -6.0, 1.0, true);
+        louder.inner = 0.5;
         assert_eq!(sound(&louder), sound(&controls));
         let mut fed = controls;
         fed.feedback = 0.5;

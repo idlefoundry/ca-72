@@ -75,6 +75,7 @@ pub fn controls_of(s: &Sound) -> Controls {
             "midi_bend_range" => c.bend_range = v,
             "entropy" => c.entropy = v / 100.0,
             "spread" => c.spread = v / 100.0,
+            "inner" => c.inner = v / 100.0,
             "unison" => c.unison = on(v),
             "double" => c.double = v / 100.0,
             "drive" => c.drive = v,

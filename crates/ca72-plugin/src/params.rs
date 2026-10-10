@@ -1,5 +1,5 @@
 //! The plug-in's parameters: the front panel's and left hand controller's controls in their
-//! dials' units, MIDI BEND RANGE, and the plug-in's own POLY, VOICES, ENTROPY and SPREAD.
+//! dials' units, MIDI BEND RANGE, and the plug-in's own POLY, VOICES, ENTROPY, SPREAD and INNER.
 //! Their ids are stable (a saved session's settings are found by them): never rename one.
 
 use std::hash::{BuildHasher, Hasher};
@@ -341,6 +341,11 @@ pub struct Ca72Params {
     /// before reads it on.
     #[id = "auto_gain"]
     pub auto_gain: BoolParam,
+    /// INNER (0 to 100 %): the inner edge of each side's band, a share of SPREAD's way out, the
+    /// centre cleared of voices (decisions.md R-INNER). After AUTO GAIN: a session saved before
+    /// reads 0.
+    #[id = "inner"]
+    pub inner: FloatParam,
 }
 
 /// Cents as the strip's DETUNE reads them: a number, whole or to a tenth ("12", "7.2"), as an
@@ -505,6 +510,7 @@ impl Default for Ca72Params {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
             auto_gain: BoolParam::new("Auto Gain", true),
+            inner: percent("Inner"),
         }
     }
 }
@@ -604,6 +610,7 @@ impl Ca72Params {
             voices: usize::try_from(self.voices.value()).unwrap_or(POLY_VOICES.1),
             entropy: value(&self.entropy) / 100.0,
             spread: value(&self.spread) / 100.0,
+            inner: value(&self.inner) / 100.0,
             placement: self.placement.value().into(),
             unison: self.unison.value(),
             double: value(&self.double) / 100.0,
@@ -642,7 +649,9 @@ mod tests {
         assert_eq!(back("off"), Some(0.0));
         assert_eq!(back("40"), Some(100.0), "past 20 cents: the most");
         assert_eq!((d.name(), p.spread.name()), ("Double Detune", "Width"));
+        assert_eq!(p.inner.name(), "Inner");
         let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
         assert!(ids.iter().any(|i| i == "double") && ids.iter().any(|i| i == "spread"));
+        assert!(ids.iter().any(|i| i == "inner"));
     }
 }

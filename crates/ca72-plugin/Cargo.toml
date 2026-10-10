@@ -51,7 +51,7 @@ serde_json = "1"
 serde.workspace = true
 # The stereo and AUTO GAIN's machinery (plugin-kit's K6), from github.com/idlefoundry/plugin-kit
 # at one commit (its `stereo` branch until K5 and K6 are merged there), as the panel takes K5.
-plugin-kit-stereo = { git = "https://github.com/idlefoundry/plugin-kit", rev = "b301c97198e07baf9649087806369c333a14e6a2" }
+plugin-kit-stereo = { git = "https://github.com/idlefoundry/plugin-kit", rev = "ac04479611c3cd7bc910d85c92e36c0098c1cf75" }
 
 # The screen's size, for the editor's first size (and on Windows the keyboard's focus and
 # the pointer's capture, and the shell that opens a release in the browser): the versions

@@ -88,7 +88,7 @@ const ENTROPY_KNOBS: usize = 6;
 /// What the parameters set: the panel (its wheels where the parameters leave them), MAIN
 /// OUTPUT's VOLUME (0..1 of its travel) and switch, how far a MIDI keyboard's full pitch
 /// bend moves the PITCH wheel, in semitones, POWER (off: bypassed, silent), and POLY,
-/// VOICES, ENTROPY and SPREAD (0..1), where SPREAD places the voices, UNISON and DOUBLE.
+/// VOICES, ENTROPY, SPREAD and INNER (0..1), where SPREAD places the voices, UNISON and DOUBLE.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Controls {
     pub panel: Panel,
@@ -100,6 +100,9 @@ pub struct Controls {
     pub voices: usize,
     pub entropy: f64,
     pub spread: f64,
+    /// INNER: the inner edge of each side's band, a share of SPREAD's way out (decisions.md
+    /// R-INNER).
+    pub inner: f64,
     /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R-STEREO).
     pub placement: Placement,
     /// UNISON: VOICES instruments on every key together (decisions.md R-STEREO).
@@ -139,6 +142,7 @@ impl Default for Controls {
             voices: POLY_VOICES.1,
             entropy: 0.0,
             spread: 0.0,
+            inner: 0.0,
             placement: Placement::Even,
             unison: false,
             double: 0.0,
@@ -207,8 +211,8 @@ const SILENT: f64 = 1e-6;
 const QUIET: usize = 256;
 
 /// The detune between DOUBLE's two voices of a note at its full amount, cents, and the time
-/// constant, seconds, with which a voice's place follows SPREAD, the placement, VOICES and
-/// DOUBLE: plugin-kit's (its K6; decisions.md R-STEREO, the CA-74's R27 and R28).
+/// constant, seconds, with which a voice's place follows SPREAD, INNER, the placement, VOICES
+/// and DOUBLE: plugin-kit's (its K6; decisions.md R-STEREO, the CA-74's R27 and R28).
 pub use plugin_kit_stereo::place::{DOUBLE_CENTS, GLIDE};
 
 /// The voices at a multiple of the host's rate: the side chain interpolated up, the left and
@@ -505,12 +509,13 @@ impl Playing {
             0.0
         };
         let wide = |(l, r): (f32, f32)| (f64::from(l), f64::from(r));
-        let [voice, twin] = pair_gains(m.spread, out);
+        let [voice, twin] = pair_gains(m.spread, m.inner, out);
         Places {
             voice: wide(if doubled {
                 voice
             } else {
-                self.character.gains(m.spread, m.placement, m.voices)
+                self.character
+                    .gains(m.spread, m.inner, m.placement, m.voices)
             }),
             twin: if twin_on { wide(twin) } else { (0.0, 0.0) },
             half: 0.5 * m.double,
@@ -1635,7 +1640,7 @@ pub const CHUNK: usize = 128;
 
 /// ENTROPY, SPREAD, DOUBLE and DRIVE as the voices' samples take them: ENTROPY's depth, the
 /// oscillators' (their floor with it, unless LOCK), the depth the character's offsets are
-/// drawn at, SPREAD, SCATTER's placement and the voices it places among (VOICES), DOUBLE's
+/// drawn at, SPREAD and INNER, SCATTER's placement and the voices it places among (VOICES), DOUBLE's
 /// detune between a note's two voices, cents (0: one voice a note), and DRIVE's gain into the
 /// filter (1: the circuit).
 #[derive(Debug, Clone, Copy)]
@@ -1644,6 +1649,7 @@ pub struct Mix {
     oscillators: f64,
     at: f64,
     spread: f64,
+    inner: f64,
     placement: Placement,
     voices: usize,
     double: f64,
@@ -1651,7 +1657,7 @@ pub struct Mix {
 }
 
 /// [`Mix`]'s values, as the workers are handed them.
-pub const MIX_LEN: usize = 8;
+pub const MIX_LEN: usize = 9;
 
 impl Mix {
     pub fn to_array(self) -> [f64; MIX_LEN] {
@@ -1660,6 +1666,7 @@ impl Mix {
             self.oscillators,
             self.at,
             self.spread,
+            self.inner,
             self.placement.index() as f64,
             self.voices as f64,
             self.double,
@@ -1673,6 +1680,7 @@ impl Mix {
             oscillators,
             at,
             spread,
+            inner,
             placement,
             voices,
             double,
@@ -1684,6 +1692,7 @@ impl Mix {
             oscillators,
             at,
             spread,
+            inner,
             placement: Placement::from_index(placement as usize),
             voices: voices as usize,
             double,
@@ -1918,6 +1927,7 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
         } else {
             0.0
         },
+        inner: c.inner.clamp(0.0, 1.0),
         // (One voice alone has no place among others: its DOUBLE pair as far out as
         // SPREAD, which EDGES gives.)
         placement: if many { c.placement } else { Placement::Edges },
@@ -2492,6 +2502,32 @@ mod tests {
         let db = 10.0 * (side / mid).log10();
         assert!(db > -3.0, "side {db:.1} dB against mid");
         let mono = Controls { poly: false, ..c };
+        let (_, _, diff) = sides(&mono, &[57]);
+        assert_eq!(diff, 0.0, "one voice off the centre");
+    }
+
+    /// INNER at 100 % clears the centre: a chord on EVEN's three voices, one of them in the
+    /// centre at INNER 0, is all at the edges, its side nearer its mid; one voice alone stays in
+    /// the centre, whatever INNER (decisions.md R-INNER).
+    #[test]
+    fn inner_clears_the_centre_and_one_voice_stays_there() {
+        let c = Controls {
+            poly: true,
+            voices: 3,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let share = |c: &Controls| {
+            let (mid, side, _) = sides(c, &[57, 61, 64]);
+            side / mid
+        };
+        let (open, cleared) = (share(&c), share(&Controls { inner: 1.0, ..c }));
+        assert!(cleared > 1.3 * open, "side against mid: {open:.3} then {cleared:.3}");
+        let mono = Controls {
+            poly: false,
+            inner: 1.0,
+            ..c
+        };
         let (_, _, diff) = sides(&mono, &[57]);
         assert_eq!(diff, 0.0, "one voice off the centre");
     }
