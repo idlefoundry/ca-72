@@ -741,6 +741,8 @@ pub struct Light {
     /// EXTERNAL INPUT's coupling: its coefficient, last input and output.
     ext_hp: (f64, f64, f64),
     overload_peak: f64,
+    /// The plug-in's DRIVE: the gain on the bus into the ladder's input pair (1 the circuit).
+    drive: f32,
 }
 
 impl Light {
@@ -820,6 +822,7 @@ impl Light {
                 0.0,
             ),
             overload_peak: 0.0,
+            drive: 1.0,
         };
         // (The oscillators start in phase, as the circuit's do when its voice is made; ENTROPY's
         // floor of mismatch then draws them apart: decisions.md R9, R31.)
@@ -833,6 +836,24 @@ impl Light {
 
     pub fn rate(&self) -> f64 {
         self.rate
+    }
+
+    /// The plug-in's DRIVE, as [`crate::voice::Voice::set_drive`]: the mixer's signal into the
+    /// filter's input pair raised by `gain` (the ladder's feedback not), driving the pair
+    /// harder than the panel's mixer can; 1 is the circuit.
+    pub fn set_drive(&mut self, gain: f64) {
+        self.drive = gain.max(0.0) as f32;
+    }
+
+    /// The three oscillators started together `at` one share of the way through their cycles
+    /// (from the sawtooth's top), as [`crate::voice::Voice::start_oscillators_at`]: for a voice
+    /// made or put back to rest that is not the first, so that voices playing one note
+    /// together do not start in step. Never at a note.
+    pub fn start_oscillators_at(&mut self, at: f64) {
+        let at = at.clamp(0.0, 0.98) as f32;
+        for o in &mut self.osc {
+            o.phase = at;
+        }
     }
 
     /// Seeds the noise (each voice its own stream).
@@ -1252,7 +1273,7 @@ impl Light {
         }
         let bus = gain[0] * w0 + gain[1] * w1 + gain[2] * w2 + noise_gain * noise + ext_bus * pre;
         let y = self.ladder.tick(
-            laws::DRIVE * bus,
+            laws::DRIVE * self.drive * bus,
             g.clamp(0.0, 0.999),
             k,
             laws::BIAS,
