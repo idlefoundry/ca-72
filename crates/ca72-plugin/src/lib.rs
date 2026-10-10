@@ -251,6 +251,15 @@ impl Plugin for Ca72 {
     /// instance had; a table that is not understood is none either (decisions.md R34).
     fn filter_state(state: &mut PluginState) {
         learn::filter_state(&mut state.fields);
+        // A state saved before DOUBLE was a switch of its own: DOUBLE where its DETUNE is
+        // above 0 (decisions.md R-STEREO).
+        if !state.params.contains_key("doubled") {
+            let detuned =
+                matches!(state.params.get("double"), Some(ParamValue::F32(d)) if *d > 0.0);
+            state
+                .params
+                .insert("doubled".to_owned(), ParamValue::Bool(detuned));
+        }
         // A state without AUTO GAIN's curve (saved before DRIVE), or with one that is not
         // understood, opens with the average's, whatever the instance had (decisions.md
         // R-STEREO, the CA-74's R29).

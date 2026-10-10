@@ -884,6 +884,14 @@ impl Editing {
         s.end_set_parameter(p);
     }
 
+    /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
+    /// knob unresponsive unless the user is in double mode"), which is drawn dimmed then.
+    fn operable(&self, i: usize) -> bool {
+        CONTROLS
+            .get(i)
+            .is_none_or(|c| c.param != "double" || self.params.doubled.value())
+    }
+
     /// A switch set, a gesture of its own; nothing if it is so already.
     fn set_switch(&self, p: &BoolParam, on: bool) {
         if p.value() != on {
@@ -918,7 +926,7 @@ impl Editing {
                     _ => self.set_switch(&p.unison, true),
                 }
             }
-            StripTarget::Tab(Bank::Stereo, i) => self.switch_amount(Readout::Detune, i == 1),
+            StripTarget::Tab(Bank::Stereo, i) => self.set_switch(&self.params.doubled, i == 1),
             StripTarget::Tab(Bank::Placement, i) => {
                 let p = &self.params.placement;
                 let to = p.preview_normalized(match i {
@@ -1009,6 +1017,9 @@ impl Editing {
         self.last_press = Some((now, target));
         match target {
             Target::Control(i) | Target::Legend(i, _) => {
+                if !self.operable(i) {
+                    return;
+                }
                 let kind = CONTROLS[i].kind;
                 if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
                     if let Some(p) = self.operated(i) {
@@ -1266,6 +1277,9 @@ impl Editing {
         else {
             return;
         };
+        if !self.operable(i) {
+            return;
+        }
         let (notches, travel) = match delta {
             ScrollDelta::Lines { y, .. } => (
                 if y > 0.0 {
@@ -1377,6 +1391,7 @@ impl Editing {
             };
         }
         self.scene.power = !self.params.bypass.value();
+        self.scene.detune_off = !self.params.doubled.value();
         self.scene.overload = Meters::load(&self.meters.overload);
         self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
@@ -1617,7 +1632,7 @@ fn strip_scene(
     let unison = c.unison;
     let poly = c.poly && !unison;
     let mono = !poly && !unison;
-    let doubled = c.double > 0.0;
+    let doubled = p.doubled.value();
     let voices = c.voices.clamp(2, 10);
     let placement = c.placement;
     let mode = Some(if unison { 2 } else { usize::from(poly) });
@@ -3813,21 +3828,21 @@ mod tests {
         // (The test host applies nothing: POLY and UNISON are still off, so MONO is already.)
         tab(&mut e, Bank::Mode, 0);
         assert_eq!(host.take(), vec![], "MONO already");
-        let double = params.double.as_ptr();
+        let doubled = params.doubled.as_ptr();
         tab(&mut e, Bank::Stereo, 1);
         assert_eq!(
             host.take(),
             vec![
-                Call::Begin(double),
-                Call::Set(double, 0.5),
-                Call::End(double)
+                Call::Begin(doubled),
+                Call::Set(doubled, 1.0),
+                Call::End(doubled)
             ]
         );
         tab(&mut e, Bank::Stereo, 0);
         assert_eq!(
             host.take(),
             vec![],
-            "SCATTER already (DETUNE still off here)"
+            "SCATTER already (DOUBLE still off here)"
         );
         let placement = params.placement.as_ptr();
         tab(&mut e, Bank::Placement, 2);

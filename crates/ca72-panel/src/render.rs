@@ -30,6 +30,9 @@ pub struct Scene {
     pub overload: f64,
     /// QUALITY's opening (decisions.md R-ULTRA): what it shows and how far each has come.
     pub opening: crate::ultra::Opening,
+    /// DETUNE unused (SCATTER): its knob drawn dimmed, as FEEDBACK's is with EXTERNAL INPUT
+    /// shut.
+    pub detune_off: bool,
     /// A tip: its text, centred above (x, y) in the drawing.
     pub tip: Option<(String, f64, f64)>,
     /// MIDI Learn (decisions.md R34): the control being learned, by its index in [`CONTROLS`]
@@ -47,6 +50,7 @@ impl Default for Scene {
             power: true,
             overload: 0.0,
             opening: crate::ultra::Opening::default(),
+            detune_off: false,
             tip: None,
             learning: None,
             note: None,
@@ -327,8 +331,9 @@ impl Renderer {
                 };
                 let mut layer = control(c, v, midi);
                 // FEEDBACK while EXTERNAL INPUT is closed: dimmed as the parts with no
-                // parameter are, still operable.
-                if silent && c.param == "feedback" {
+                // parameter are, still operable; DETUNE in SCATTER: dimmed so, and not operable
+                // (the editor's `operable`).
+                if (silent && c.param == "feedback") || (scene.detune_off && c.param == "double") {
                     if worn {
                         // (A picture is not dimmed: the knob is shaded.)
                         layer.over.push_str(&format!(

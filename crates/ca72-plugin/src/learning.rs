@@ -37,6 +37,7 @@ pub fn place(i: usize) -> Option<Place> {
     Some(match id {
         "poly" => Place::Strip(StripControl::Poly),
         "unison" => Place::Strip(StripControl::Unison),
+        "doubled" => Place::Strip(StripControl::Double),
         "placement" => Place::Strip(StripControl::Placement),
         "auto_gain" => Place::Strip(StripControl::AutoGain),
         _ => Place::Panel(control_index(id)?),
@@ -50,6 +51,7 @@ pub fn learnable_at(p: Place) -> Option<usize> {
         Place::Strip(s) => index(match s {
             StripControl::Poly => "poly",
             StripControl::Unison => "unison",
+            StripControl::Double => "doubled",
             StripControl::Placement => "placement",
             StripControl::AutoGain => "auto_gain",
         }),

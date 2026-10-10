@@ -3657,8 +3657,18 @@ being placed on them as well? Show me a before/after video once you are done."
   (0.72 to 1.22 of a drop's size; rising quickly, falling over a fifth of a second); with
   DOUBLE a note's two drops beat against each other as two notes DETUNE apart do at 220 Hz (20
   cents, 2.5 a second), one swelling as the other ebbs and the two swaying in turn (24 % and 4
-  units at 10 cents or more; then "a bit intense. dial it back a little": 13 % and 2), a pair
-  coming out of its voice as DETUNE comes up from OFF.
+  units at 10 cents or more; then "a bit intense. dial it back a little": 13 % and 2; then
+  "dial back the detune wobble a bit more": 7 % and 1), a pair coming out of its voice as
+  DOUBLE comes on.
+- **DOUBLE a switch of its own** (the owner, 2026-10-10: "whenever I put detune to 0 it
+  instantly switches to scatter, and vice versa if I'm in scatter and try and detune it throws
+  me into double ... i think it makes more sense to just make that knob unresponsive unless the
+  user is in double mode"): DOUBLE had been DETUNE above 0. Now the parameter `doubled`
+  (SCATTER | DOUBLE's tabs, a preset's, learnable from the tabs as POLY is); DETUNE only an
+  amount, its knob dimmed and not answering the pointer in SCATTER (MIDI may still move it).
+  DOUBLE at DETUNE's 0 is a pair at one pitch (the engine told a ten-thousandth of a cent:
+  `params::DOUBLED_AT_NONE`). A session or a preset saved before reads DOUBLE on wherever its
+  DETUNE is above 0 (`Ca72::filter_state`, `presets::targets`); no factory preset has DOUBLE.
 - **The levels:** each voice's output's peak over a block was measured already (for knowing when
   a voice falls silent: `Engine::levels` keeps it); the output's peak is measured (two compares
   a sample) only while an editor is open, else a flag read a block. The audio thread keeps the
