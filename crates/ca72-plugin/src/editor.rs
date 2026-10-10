@@ -23,7 +23,8 @@ use baseview::{
 use ca72_panel::art::{self, POWER};
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
 use ca72_panel::presets::{
-    BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, ROW_H, drawer_hit,
+    BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, PresetKey, ROW_H, drawer_hit,
+    in_tags,
 };
 use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact};
@@ -804,21 +805,24 @@ impl Editing {
             }
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
-            match drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy) {
+            match drawer_hit(&self.browser.drawer, dx, dy) {
                 Some(DrawerTarget::Update) => self.update.press(),
-                Some(DrawerTarget::Midi) => self.learning.list = !self.learning.list,
+                Some(DrawerTarget::Key(PresetKey::MidiLearn)) => {
+                    self.learning.list = !self.learning.list;
+                }
                 Some(DrawerTarget::MidiRow(i)) => {
                     self.learning.list_press(&self.params.midi_map, i, None);
                 }
                 Some(DrawerTarget::MidiAction(i, a)) => {
                     self.learning.list_press(&self.params.midi_map, i, Some(a));
                 }
+                Some(DrawerTarget::Back) | None => {}
+                // Anything of the presets' shows them again in the MIDI list's place.
                 Some(t) => {
+                    self.learning.list = false;
                     let setter = ParamSetter::new(self.context.as_ref());
-                    self.browser
-                        .drawer_press(t, dx, &self.drawer, &self.params, &setter);
+                    self.browser.drawer_press(t, dx, &self.params, &setter);
                 }
-                None => {}
             }
             self.follow_drawer();
             return;
@@ -933,8 +937,8 @@ impl Editing {
                 self.learning.hover(self.renderer.fonts(), at);
             }
             let over_drawer = self.in_drawer(at);
-            self.browser.drawer.hover = over_drawer
-                .and_then(|(dx, dy)| drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy));
+            self.browser.drawer.hover =
+                over_drawer.and_then(|(dx, dy)| drawer_hit(&self.browser.drawer, dx, dy));
             let on_strip = if over_drawer.is_some() {
                 None
             } else {
@@ -1047,8 +1051,8 @@ impl Editing {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
-        if self.in_drawer((x, y)).is_some() {
-            // The list scrolls a row for each row's travel, the rest kept for the next: a
+        if let Some((dx, dy)) = self.in_drawer((x, y)) {
+            // The list (or the tags, under the pointer) scrolls a row for each row's travel, the rest kept for the next: a
             // wheel's lines (a slow turn on macOS gives fractions of one), a trackpad's or a
             // Magic Mouse's points as the list's rows at this size (each event a few points,
             // which a whole-notch threshold had dropped). A turn the other way starts again.
@@ -1066,6 +1070,8 @@ impl Editing {
             if whole != 0.0 {
                 if self.learning.list {
                     self.learning.scroll(-(whole as i32));
+                } else if in_tags(dx, dy) {
+                    self.browser.scroll_tags(-(whole as i32));
                 } else {
                     self.browser.scroll(-(whole as i32));
                 }
@@ -2222,7 +2228,7 @@ mod tests {
     use nih_plug::wrapper::state::PluginState;
 
     use super::*;
-    use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, RowAction};
+    use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, PresetKey};
 
     /// What the editor asked of the host.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3372,14 +3378,11 @@ mod tests {
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         e.draw();
         open(&mut e);
-        let mid = in_drawer(&e, presets_ui::field_centre(FieldId::SaveName, None));
-        go(
-            &mut e,
-            Point {
-                x: mid.x,
-                y: mid.y - 120.0,
-            },
+        let list = in_drawer(
+            &e,
+            presets_ui::row_centre(&e.browser.drawer, 0).expect("shown"),
         );
+        go(&mut e, list);
         let wheel = |e: &mut Editing, delta: ScrollDelta| {
             e.mouse(MouseEvent::WheelScrolled {
                 delta,
@@ -3423,11 +3426,10 @@ mod tests {
         host.take();
         let i = row_of(&e, "Undertow Growl");
         // Below the rows shown: the wheel scrolls the list to it.
-        let mid = in_drawer(&e, presets_ui::field_centre(FieldId::SaveName, None));
-        let list = Point {
-            x: mid.x,
-            y: mid.y - 120.0,
-        };
+        let list = in_drawer(
+            &e,
+            presets_ui::row_centre(&e.browser.drawer, 0).expect("shown"),
+        );
         go(&mut e, list);
         while presets_ui::row_centre(&e.browser.drawer, i).is_none() {
             let first = e.browser.drawer.first;
@@ -3602,7 +3604,7 @@ mod tests {
             .expect("a chip");
         let setter = ParamSetter::new(e.context.as_ref());
         e.browser
-            .drawer_press(DrawerTarget::Chip(bass), 0.0, &e.drawer, &e.params, &setter);
+            .drawer_press(DrawerTarget::Chip(bass), 0.0, &e.params, &setter);
         let names: Vec<&str> = e
             .browser
             .drawer
@@ -3661,23 +3663,24 @@ mod tests {
         assert!(ids.contains(&"cutoff") && ids.contains(&"osc1_range") && ids.contains(&"voices"));
         assert!(!ids.contains(&"pitch_wheel") && !ids.contains(&"bypass"));
         assert!(mine.sound.values.contains(&("osc1_range".to_owned(), 3.0)));
-        // Saving as a factory preset's name says it replaces it.
-        let setter = ParamSetter::new(e.context.as_ref());
-        e.browser.drawer_press(
-            DrawerTarget::Field(FieldId::SaveName),
-            0.0,
-            &e.drawer,
-            &e.params,
-            &setter,
-        );
+        // SAVE AS: the preset's name to begin with; a factory preset's name, it says it replaces
+        // it; Escape takes the save back.
+        let key_at = |e: &Editing, k: PresetKey| in_drawer(e, presets_ui::key_centre(k));
+        let pt = key_at(&e, PresetKey::SaveAs);
+        click(&mut e, pt);
+        assert_eq!(e.browser.drawer.save_name.text, "My Bass");
+        assert_eq!(e.browser.drawer.focus, Some(FieldId::SaveName));
+        for _ in 0.."My Bass".len() {
+            key(&mut e, Key::Backspace);
+        }
         typed(&mut e, "Bass");
         assert!(e.browser.drawer.replace);
         assert!(e.browser.drawer.hint.contains("factory"));
-        // Renamed in place (the plug-in keeps it), its tags edited.
-        let i = row_of(&e, "My Bass");
-        let (x, y) =
-            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Rename).expect("shown");
-        let pt = in_drawer(&e, (x, y));
+        key(&mut e, Key::Escape);
+        assert_eq!(e.browser.drawer.editing, None);
+        assert!(e.browser.open);
+        // RENAME, for the preset set: renamed in place (the plug-in keeps it).
+        let pt = key_at(&e, PresetKey::Rename);
         click(&mut e, pt);
         assert_eq!(e.browser.drawer.focus, Some(FieldId::Edit));
         for _ in 0.."My Bass".len() {
@@ -3687,10 +3690,8 @@ mod tests {
         key(&mut e, Key::Enter);
         assert!(lib.find("Your Bass").is_some() && lib.find("My Bass").is_none());
         assert_eq!(preset(&params), "Your Bass");
-        let i = row_of(&e, "Your Bass");
-        let (x, y) =
-            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Tags).expect("shown");
-        let pt = in_drawer(&e, (x, y));
+        // TAGS: its tags edited.
+        let pt = key_at(&e, PresetKey::Tags);
         click(&mut e, pt);
         key(&mut e, Key::End);
         typed(&mut e, ", deep");
@@ -3699,38 +3700,39 @@ mod tests {
             lib.find("Your Bass").unwrap().sound.tags,
             ["bass", "test", "deep"]
         );
-        // Deleted after asking.
-        let i = row_of(&e, "Your Bass");
-        let (x, y) =
-            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Delete).expect("shown");
-        let pt = in_drawer(&e, (x, y));
+        // DELETE: deleted once asked (DELETE again).
+        let pt = key_at(&e, PresetKey::Delete);
         click(&mut e, pt);
         assert!(lib.find("Your Bass").is_some(), "deleted before asked");
-        let (x, y) =
-            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Confirm).expect("asked");
-        let pt = in_drawer(&e, (x, y));
+        e.draw();
         click(&mut e, pt);
         assert!(lib.find("Your Bass").is_none());
         e.draw();
         assert!(!e.browser.bar.found, "the bar says the preset is gone");
-        // A factory preset deleted, then restored; the star makes a favourite.
+        // A factory preset deleted (Enter once asked), then restored; the star makes a
+        // favourite.
         let i = row_of(&e, "Lead");
         let setter = ParamSetter::new(e.context.as_ref());
-        for a in [RowAction::Delete, RowAction::Confirm] {
-            e.browser.drawer_press(
-                DrawerTarget::Action(i, a),
-                0.0,
-                &e.drawer,
-                &e.params,
-                &setter,
-            );
-        }
-        assert!(e.browser.drawer.rows.iter().all(|r| r.name != "Lead"));
         e.browser
-            .drawer_press(DrawerTarget::Restore, 0.0, &e.drawer, &e.params, &setter);
+            .drawer_press(DrawerTarget::Row(i), 0.0, &e.params, &setter);
+        e.browser.drawer_press(
+            DrawerTarget::Key(PresetKey::Delete),
+            0.0,
+            &e.params,
+            &setter,
+        );
+        key(&mut e, Key::Enter);
+        assert!(e.browser.drawer.rows.iter().all(|r| r.name != "Lead"));
+        let setter = ParamSetter::new(e.context.as_ref());
+        e.browser.drawer_press(
+            DrawerTarget::Key(PresetKey::Restore),
+            0.0,
+            &e.params,
+            &setter,
+        );
         let i = row_of(&e, "Lead");
         e.browser
-            .drawer_press(DrawerTarget::Star(i), 0.0, &e.drawer, &e.params, &setter);
+            .drawer_press(DrawerTarget::Star(i), 0.0, &e.params, &setter);
         assert!(lib.find("Lead").unwrap().favorite);
     }
 

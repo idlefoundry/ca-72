@@ -610,7 +610,7 @@ fn lamp(frame: &mut Pixmap, s: f64) {
 
 /// The print as worn into the face under it: each pixel of ink a little darker where the face's
 /// texture is darker than its mean, so the texture shows through it, and faded a shade.
-fn worn_into(ink: &mut Pixmap, face: &Pixmap) {
+pub(crate) fn worn_into(ink: &mut Pixmap, face: &Pixmap) {
     let level =
         |r: u8, g: u8, b: u8| 0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b);
     let (sum, n) = face

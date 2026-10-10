@@ -22,11 +22,9 @@ use super::{
 };
 use crate::art::{self, PANEL_H};
 use crate::fonts::{FAMILY, Fonts};
-use crate::presets::{BarScene, BarTarget};
+use crate::presets::{BarScene, BarTarget, DOWN, STAR, UP};
+use crate::skin::{BUTTON, GLASS};
 use crate::svg::{N, Svg, put};
-
-static BUTTON: &[u8] = include_bytes!("../../assets/worn/button.png");
-static GLASS: &[u8] = include_bytes!("../../assets/worn/display-glass.png");
 
 /// The panel's neon orange (the mock-up's): lit segments, dots and drops; the glow round a
 /// lit dot (the mock-up's); the drops' light (the mock-up's, added in).
@@ -1116,12 +1114,6 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
     fill(frame, arrow_glow, ORANGE_GLOW, 0.16 * level * pointed);
     fill(frame, arrow, dim(ORANGE), (0.55 + 0.45 * level) * pointed);
 }
-
-/// The name display's signs in dots (five across, seven down, as its capitals: the mock-up's
-/// glyphs): the favourite's star, and the list's arrow, down or up.
-const STAR: [u8; 7] = [0x04, 0x04, 0x1f, 0x0e, 0x0e, 0x1b, 0x11];
-const DOWN: [u8; 7] = [0x00, 0x1f, 0x1f, 0x0e, 0x0e, 0x04, 0x00];
-const UP: [u8; 7] = [0x00, 0x04, 0x0e, 0x0e, 0x1f, 0x1f, 0x00];
 
 /// A sign's dots, in pixels at `scale`, about `x` (units) on the name's rows.
 fn sign_dots(scale: f64, sign: &[u8; 7], x: f64, mut each: impl FnMut((f32, f32))) {
