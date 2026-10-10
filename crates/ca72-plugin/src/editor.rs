@@ -4762,7 +4762,7 @@ mod windows_window_tests {
     use std::path::PathBuf;
     use std::ptr::null_mut;
 
-    use ca72_panel::presets::{self as presets_ui, BarTarget};
+    use ca72_panel::presets::BarTarget;
     use nih_plug::context::PluginApi;
     use nih_plug::editor::ParentWindowHandle;
     use nih_plug::wrapper::state::PluginState;
@@ -4873,7 +4873,6 @@ mod windows_window_tests {
                 resizes: AtomicU32::new(0),
             });
             let context: Arc<dyn GuiContext> = host.clone();
-            let grown = Arc::clone(&editor.grown);
             let dir: PathBuf = presets.path().to_path_buf();
             let handle = Window::open_parented(
                 &window::Parent(ParentWindowHandle::Win32Hwnd(parent.cast())),
@@ -4883,16 +4882,7 @@ mod windows_window_tests {
                     scale: WindowScalePolicy::ScaleFactor(1.0),
                 },
                 move |window: &mut Window<'_>| {
-                    PanelWindow::new(
-                        window,
-                        context,
-                        params,
-                        meters,
-                        grown,
-                        w,
-                        1.0,
-                        Library::at(dir),
-                    )
+                    PanelWindow::new(window, context, params, meters, w, 1.0, Library::at(dir))
                 },
             );
             pump(Duration::from_millis(300));
@@ -5100,38 +5090,33 @@ mod windows_window_tests {
         o.size()
     }
 
+    /// The drawer drops down over the strip inside the window (A6: decisions.md R44): as it
+    /// opens and shuts the window stays as it is, and nothing is asked of the host.
     fn the_drawer_opens_and_shuts(resizes_editor: bool) {
         let o = Opened::new(resizes_editor, HostWindow::OffScreen);
-        let short = (MIN_WIDTH, height_for(MIN_WIDTH));
-        assert_eq!(settled(&o, short), short);
-        o.click_name();
-        let tall = (MIN_WIDTH, height_for(MIN_WIDTH) + drawer_height(MIN_WIDTH));
+        let size = (MIN_WIDTH, height_for(MIN_WIDTH));
+        assert_eq!(settled(&o, size), size);
+        let asked = o.host.resizes.load(Ordering::Relaxed);
+        for what in ["opened", "shut"] {
+            o.click_name();
+            pump(Duration::from_millis(300));
+            assert_eq!(o.size(), size, "the window as it was, the drawer {what}");
+        }
         assert_eq!(
-            settled(&o, tall),
-            tall,
-            "the window grown for the drawer below the strip"
-        );
-        assert!(
-            o.host.resizes.load(Ordering::Relaxed) >= 1,
-            "the host asked"
-        );
-        o.click_name();
-        assert_eq!(
-            settled(&o, short),
-            short,
-            "the window back once the drawer has shut"
+            o.host.resizes.load(Ordering::Relaxed),
+            asked,
+            "nothing asked of the host"
         );
         o.close();
     }
 
-    /// The host grows its own window, the editor its own (the drawer took the keyboard as the
-    /// press was handled: its window's messages ran the resize early).
+    /// In a host that would grow its own window and leave the editor's to it.
     #[test]
     fn the_drawer_opens_and_shuts_where_the_host_grows_its_own_window() {
         the_drawer_opens_and_shuts(false);
     }
 
-    /// The host resizes the editor's window as well, from within the editor's request.
+    /// In a host that would resize the editor's window as well, from within the editor's request.
     #[test]
     fn the_drawer_opens_and_shuts_where_the_host_resizes_the_editors_window() {
         the_drawer_opens_and_shuts(true);
@@ -5197,16 +5182,18 @@ mod windows_window_tests {
             "the panel again within 100 ms of the host's window captured ({} colours)",
             colours(&shown)
         );
-        // The drawer opened below the strip: the host repaints the editor's window from within
-        // the editor's request, its handler busy (the editor is told once it returns, R26), and
-        // the window, grown, again later.
+        // The drawer opened over the strip, the window as it was (A6: decisions.md R44): shown,
+        // and shown again as the host's window is repainted.
         o.click_name();
-        let tall = (MIN_WIDTH, height_for(MIN_WIDTH) + drawer_height(MIN_WIDTH));
-        assert_eq!(settled(&o, tall), tall, "the window grown for the drawer");
         pump(Duration::from_millis(300));
+        assert_eq!(
+            o.size(),
+            (MIN_WIDTH, height_for(MIN_WIDTH)),
+            "the window as it was"
+        );
         let drawer = pixels(&o);
         assert!(
-            colours(&drawer) >= 100,
+            colours(&drawer) >= 100 && drawer != panel,
             "the panel and the drawer shown ({} colours)",
             colours(&drawer)
         );
