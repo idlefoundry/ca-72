@@ -105,20 +105,21 @@ pub mod laws {
     pub const PINK_TOP: [f64; 2] = [6_500.0, 9_000.0];
 
     /// The ladder's input pair, a tanh on the input less the loop's feedback: the bus in its
-    /// units (two and three sawtooths at full VOLUME compress 0.5 and 0.8 dB, the circuit's
+    /// units (two and three sawtooths at full VOLUME compress 0.6 and 1.1 dB, the circuit's
     /// 0.7 and 1.2), off its centre by `BIAS` (with the triangle's own, its second harmonic
-    /// from -37 dB at VOLUME 1 to -33 dB at 10, the circuit's -38 to -32).
-    pub const DRIVE: f32 = 0.60;
+    /// from -37 dB at VOLUME 1 to -32 dB at 10, as the circuit's).
+    pub const DRIVE: f32 = 0.69;
     pub const BIAS: f32 = 0.10;
     /// The loop's gain in `LOOP` (fitted with the pair off its centre by 0.28) times this:
     /// the same gain through the pair's slope at `BIAS`.
     pub const LOOP_SCALE: f64 = 0.941_52;
     /// The plug-in's DRIVE at gain G: the pair's limit (its tanh's) lowered to G to this
     /// power, its slope kept: the circuit's ladder, its every stage a pair, holds a driven
-    /// input lower than one pair would (0.82 of it at 24 dB).
-    pub const DRIVE_CEILING: f64 = -0.0716;
+    /// input lower than one pair would (0.88 of it at 24 dB; the level so within 0.75 dB of
+    /// the circuit's from 0 to 24 dB on six patches).
+    pub const DRIVE_CEILING: f64 = -0.045;
     /// The output from the ladder's (at the VCA's gain 1: the loudness contour at 4.455 V).
-    pub const OUT: f32 = 0.705;
+    pub const OUT: f32 = 0.613;
 
     /// CUTOFF: log2 of the self-oscillating ladder's pitch, Hz, at the knob's 0, 0.05, ...,
     /// 1 (measured from 0.15 to 0.9; below, continued at the slope there in the pot's track,
@@ -220,8 +221,8 @@ pub mod laws {
         13.87,
     ];
     pub const RING_LEVEL: [f64; 15] = [
-        1.512, 1.176, 1.078, 1.075, 1.048, 1.054, 1.068, 1.074, 1.066, 1.082, 1.099, 1.13, 1.174,
-        1.196, 1.262,
+        1.738, 1.352, 1.239, 1.236, 1.205, 1.212, 1.228, 1.235, 1.226, 1.244, 1.264, 1.300, 1.350,
+        1.376, 1.451,
     ];
 
     /// The contours: their rest from power-on and the level an attack stops at (its
@@ -1950,9 +1951,9 @@ mod tests {
     }
 
     /// DRIVE as the circuit's: oscillator 1's sawtooth at VOLUME 5, the filter open, 6, 12
-    /// and 24 dB of it raise the level 5.8, 11.0 and 15.5 dB (the circuit's 5.7, 10.5 and
+    /// and 24 dB of it raise the level 5.7, 10.75 and 15.0 dB (the circuit's 5.7, 10.5 and
     /// 15.0: the pair saturates, and its limit falls with DRIVE as the circuit's ladder holds
-    /// a driven input; without that fall, 17 dB).
+    /// a driven input).
     #[test]
     fn drive_raises_the_level_less_and_less() {
         let level = |db: f64| {
@@ -1967,9 +1968,9 @@ mod tests {
             10.0 * (x.iter().map(|y| y * y).sum::<f64>() / x.len() as f64).log10()
         };
         let off = level(0.0);
-        for (db, want) in [(6.0, 5.8), (12.0, 11.0), (24.0, 15.5)] {
+        for (db, want) in [(6.0, 5.75), (12.0, 10.75), (24.0, 15.0)] {
             let up = level(db) - off;
-            assert!((up - want).abs() < 0.5, "DRIVE {db} dB: {up:+.2} dB");
+            assert!((up - want).abs() < 0.3, "DRIVE {db} dB: {up:+.2} dB");
         }
     }
 
