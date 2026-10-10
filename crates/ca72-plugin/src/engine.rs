@@ -4,18 +4,28 @@
 //! (`tests/realtime.rs`).
 //!
 //! POLY off, the one instrument takes every key through its keyboard circuit (lowest-note
-//! priority, single triggering), as before. POLY on, one voice per note, up to VOICES (2 to
+//! priority, single triggering), as before. UNISON (outranking POLY) plays VOICES whole
+//! instruments together, each taking every key through its own keyboard circuit as the one
+//! does, each its own parts under ENTROPY and its own place under SPREAD, turned down by the
+//! square root of VOICES (decisions.md R45, the CA-74's R25). POLY on, one voice per note, up to VOICES (2 to
 //! 10) of the ten built: each the whole instrument with its own keyboard circuit, which its
-//! note reaches as one key (`PolyKey`; decisions.md, "POLY"). ENTROPY makes each voice its
-//! own parts, SPREAD puts the voices across the stereo field (`character.rs`); both 0 by
-//! default, the circuit as drawn.
+//! note reaches as one key (`PolyKey`; decisions.md, "POLY"). A POLY note takes the voice
+//! that last played its key if that voice is free or letting go, else the free voice whose
+//! last note began longest ago, else the one let go longest ago, else the one held longest
+//! (the CA-74's R27; decisions.md R45), so a chord struck again stays where it was and a
+//! melody goes round the voices. ENTROPY makes each voice its own parts, SPREAD puts the voices
+//! across the stereo field where the placement has them (`character.rs`), one voice alone in
+//! the centre; both 0 by default, the circuit as drawn.
 
+use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
 use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
-use crate::character::Character;
+use crate::character::{Character, Placement};
+use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
 use crate::pool::{Ask, Crew, MAX, Pool, Shared};
+use plugin_kit_stereo::place::{ALONE, DOUBLE_TRIM, glide_share, pair_gains, unison_trim};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -65,6 +75,16 @@ pub fn lock_trim(p: &Panel) -> f64 {
 /// The voices POLY may play: the fewest, by default, the most (all of them built).
 pub const POLY_VOICES: (usize, usize, usize) = (2, 4, 10);
 
+/// The voices whose levels the editor is told: as many as POLY can have.
+pub const LEVELS: usize = POLY_VOICES.2;
+
+/// DRIVE's top, dB (decisions.md R45, the CA-74's R29: past it the filter is saturated
+/// and the note stops being one).
+pub const DRIVE_TOP: f64 = 24.0;
+
+/// LEVEL's range, dB (the CA-74's).
+pub const LEVEL_RANGE: (f64, f64) = (-30.0, 12.0);
+
 /// ENTROPY's tolerances on the panel: EMPHASIS, the filter contour's ATTACK and DECAY, the
 /// loudness contour's, GLIDE.
 const ENTROPY_KNOBS: usize = 6;
@@ -72,7 +92,7 @@ const ENTROPY_KNOBS: usize = 6;
 /// What the parameters set: the panel (its wheels where the parameters leave them), MAIN
 /// OUTPUT's VOLUME (0..1 of its travel) and switch, how far a MIDI keyboard's full pitch
 /// bend moves the PITCH wheel, in semitones, POWER (off: bypassed, silent), and POLY,
-/// VOICES, ENTROPY and SPREAD (0..1).
+/// VOICES, ENTROPY, SPREAD and INNER (0..1), where SPREAD places the voices, UNISON and DOUBLE.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Controls {
     pub panel: Panel,
@@ -84,6 +104,28 @@ pub struct Controls {
     pub voices: usize,
     pub entropy: f64,
     pub spread: f64,
+    /// INNER: the inner edge of each side's band, a share of SPREAD's way out (decisions.md
+    /// R49).
+    pub inner: f64,
+    /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R45), EVEN or
+    /// CENTER as the plug-in offers them (`params::Scatter`; R49).
+    pub placement: Placement,
+    /// UNISON: VOICES instruments on every key together (decisions.md R45).
+    pub unison: bool,
+    /// DOUBLE (0..1): each note played by two voices, detuned from each other by up to
+    /// [`DOUBLE_CENTS`], SPREAD putting them to either side of the centre (decisions.md
+    /// R45); 0, one voice a note.
+    pub double: f64,
+    /// DRIVE (0..[`DRIVE_TOP`] dB): the mixer's signal into the filter raised by so much, its
+    /// input pair driven past where the panel's mixer can take it; 0, the circuit
+    /// (decisions.md R45).
+    pub drive: f64,
+    /// LEVEL (dB, [`LEVEL_RANGE`]): the output's gain after MAIN OUTPUT's, the plug-in's own;
+    /// 0, none (decisions.md R45).
+    pub level: f64,
+    /// AUTO GAIN: the output brought back down by as much as DRIVE made the sound louder, as
+    /// measured for it (`drive.rs`; decisions.md R45).
+    pub auto_gain: bool,
     /// FEEDBACK (0..1): the voices' output patched back into their EXTERNAL INPUT, a sample
     /// late, by this much of its level (the phones' VOLUME knob; decisions.md R8).
     pub feedback: f64,
@@ -91,6 +133,12 @@ pub struct Controls {
     /// ([`lock_trim`]); off, each oscillator keeps its own floor of mismatch
     /// ([`ENTROPY_FLOOR`]; decisions.md R9).
     pub lock: bool,
+    /// QUALITY at LO, Potato mode: the voices played by the light model ([`Light`]), not the
+    /// circuit's, for computers the circuit is too heavy for (decisions.md R47).
+    pub potato: bool,
+    /// QUALITY at ULTRA: the circuit's model with no compromises (`Quality::NoCompromises`),
+    /// not at its real-time setting (decisions.md R48). Switched while it plays.
+    pub ultra: bool,
 }
 
 impl Default for Controls {
@@ -105,8 +153,17 @@ impl Default for Controls {
             voices: POLY_VOICES.1,
             entropy: 0.0,
             spread: 0.0,
+            inner: 0.0,
+            placement: Placement::Even,
+            unison: false,
+            double: 0.0,
+            drive: 0.0,
+            level: 0.0,
+            auto_gain: true,
             feedback: 0.0,
             lock: false,
+            potato: false,
+            ultra: false,
         }
     }
 }
@@ -162,6 +219,19 @@ const HUSH_WAIT: f64 = 0.1;
 /// output has stayed under this for a whole block.
 const SILENT: f64 = 1e-6;
 
+/// A twin let go (DOUBLE turned off) falls silent once its output has stayed under [`SILENT`]
+/// for this many samples running, counted across runs (the CA-74's).
+const QUIET: usize = 256;
+
+/// The time constant, seconds, with which a voice's place follows SPREAD, INNER, the
+/// placement, VOICES and DOUBLE: plugin-kit's (its K6; decisions.md R45, the CA-74's R27
+/// and R28).
+pub use plugin_kit_stereo::place::GLIDE;
+
+/// The detune between DOUBLE's two voices of a note at its full amount, cents: the CA-72's own
+/// (the owner, 2026-10-10: "let's make our maximum detune 100"; the kit's, the CA-74's, is 20).
+pub const DOUBLE_CENTS: f64 = 100.0;
+
 /// The voices at a multiple of the host's rate: the side chain interpolated up, the left and
 /// right outputs decimated down.
 #[derive(Debug)]
@@ -194,24 +264,25 @@ impl PolyKey {
         }
     }
 
-    /// The voice's gate and key for the next sample, played on `voice`'s keys.
-    fn step(&mut self, gate: bool, key: i32, voice: &mut Voice) {
+    /// The voice's gate and key for the next sample, played on its keys by `note` (the
+    /// circuit's voice's, or the light one's).
+    fn step(&mut self, gate: bool, key: i32, mut note: impl FnMut(i32, bool)) {
         if gate {
             match self.down {
                 None if self.open >= self.gap => {
-                    voice.note(key, true);
+                    note(key, true);
                     self.down = Some(key);
                 }
                 None => {}
                 Some(old) if old != key => {
-                    voice.note(key, true);
-                    voice.note(old, false);
+                    note(key, true);
+                    note(old, false);
                     self.down = Some(key);
                 }
                 Some(_) => {}
             }
         } else if let Some(old) = self.down.take() {
-            voice.note(old, false);
+            note(old, false);
             self.open = 0;
         }
         if self.down.is_none() {
@@ -219,10 +290,10 @@ impl PolyKey {
         }
     }
 
-    /// Its key lifted at once (POLY switched, the voices rebuilt).
-    fn lift(&mut self, voice: &mut Voice) {
+    /// Its key lifted at once (POLY switched, the voices rebuilt), on the keys `note` plays.
+    fn lift(&mut self, mut note: impl FnMut(i32, bool)) {
         if let Some(old) = self.down.take() {
-            voice.note(old, false);
+            note(old, false);
         }
     }
 
@@ -280,11 +351,63 @@ impl Slot {
     }
 }
 
+/// DOUBLE's second voice of a note (decisions.md R45, the CA-74's R28): a voice with
+/// parts of its own (its character, noise and oscillators' start, a place's past the voices'),
+/// its own key, its gains at the last run's end (None before its first run, or while it does
+/// not play), and whether it still sounds: with DOUBLE turned off it plays its tail out, its
+/// key lifted, until silent for [`QUIET`] samples (how many so far).
+#[derive(Debug, Clone)]
+struct Twin {
+    voice: Voice,
+    light: Light,
+    character: Character,
+    key: PolyKey,
+    pan: Option<(f64, f64)>,
+    live: bool,
+    quiet: usize,
+}
+
+impl Twin {
+    /// After a run of `n` samples whose loudest was `peak`: live while DOUBLE is on; let go,
+    /// until it has been silent long enough; its gains where the run left them.
+    fn ran(&mut self, n: usize, doubled: bool, peak: f64, pan: Option<(f64, f64)>) {
+        if doubled {
+            (self.live, self.quiet) = (true, 0);
+        } else if self.live {
+            self.quiet = if peak < SILENT { self.quiet + n } else { 0 };
+            if self.quiet >= QUIET {
+                (self.live, self.quiet) = (false, 0);
+            }
+        }
+        self.pan = pan;
+    }
+}
+
+/// Voice `k`'s twin for DOUBLE, of an instance seeded `seed`, at `rate` Hz: made as the voice
+/// of place `k` past the voices' is. (Boxed, as a spare twin is: a voice is some 34 KB, and a
+/// debug build copies what is made about the stack; ten spares' twins unboxed overflowed a
+/// test thread's 2 MB. A voice's place stays the size it was.)
+fn made_twin(rate: f64, seed: u64, k: usize) -> Box<Twin> {
+    let j = k + POLY_VOICES.2;
+    Box::new(Twin {
+        voice: made_voice(rate, seed, j),
+        light: made_light(rate, seed, j),
+        character: Character::new(voice_seed(seed, j), j, 3, ENTROPY_KNOBS),
+        key: PolyKey::new(rate),
+        pan: None,
+        live: false,
+        quiet: 0,
+    })
+}
+
 /// A voice as it plays: the voice, its character and its key, and a run's gate, note and
-/// drop in, its samples out.
-#[derive(Debug)]
+/// drop in, its samples out; with DOUBLE, its twin too.
+#[derive(Debug, Clone)]
 pub struct Playing {
     voice: Voice,
+    /// The light model's voice, and whether it is the one played (QUALITY at LO).
+    light: Light,
+    potato: bool,
     character: Character,
     key: PolyKey,
     gate: bool,
@@ -293,44 +416,257 @@ pub struct Playing {
     /// The last run's samples (left, right) and its output's peak.
     out: [[f64; CHUNK]; 2],
     peak: f64,
+    /// Its gains, left and right, at the last run's end, gliding to its place (None before
+    /// its first run: there from the start).
+    pan: Option<(f64, f64)>,
     /// The engine's panel's generation it plays with ([`Engine::apply`]).
     panel_gen: u64,
     /// Its output went non-finite: silent until the engine puts a clean voice in its place
     /// ([`Engine::restore`]; decisions.md R18).
     broken: bool,
+    /// DOUBLE's second voice of the note, and whether DOUBLE is on as the engine's panel
+    /// last had it (the twin takes the keys pressed only then).
+    twin: Box<Twin>,
+    double: bool,
+}
+
+/// Where a run puts a voice and its twin: their gains (left, right), DOUBLE's half detune,
+/// cents, whether DOUBLE is on and whether the twin plays.
+struct Places {
+    voice: (f64, f64),
+    twin: (f64, f64),
+    half: f64,
+    doubled: bool,
+    twin_on: bool,
 }
 
 impl Playing {
     /// A run of `n` samples with `ext` at EXTERNAL INPUT: its key moved on a sample at a time
-    /// (the drop at the first), its character's offsets and SPREAD's place; the samples in
-    /// `out`, the peak in `peak`. A sample that is not finite marks the voice broken, and it
-    /// is silent from there.
+    /// (the drop at the first), its character's offsets and its place; with DOUBLE its twin
+    /// too; the samples in `out`, the peak in `peak`. A sample that is not finite marks the
+    /// voice broken, and it is silent from there.
     pub fn play(&mut self, n: usize, ext: &[f64; CHUNK], rate: f64, m: &Mix) {
-        let mut peak = 0.0f64;
-        for (k, &x) in ext.iter().enumerate().take(n) {
+        self.play_from(&ext[..n], rate, m, glide_share(rate));
+    }
+
+    /// As [`Playing::play`], for as many samples as `ext` has, its place gliding by `share`
+    /// a sample ([`glide_share`] at `rate`).
+    fn play_from(&mut self, ext: &[f64], rate: f64, m: &Mix, share: f64) {
+        if self.potato {
+            self.play_light_from(ext, rate, m, share);
+            return;
+        }
+        let p = self.places(m);
+        self.voice.set_drive(m.drive);
+        self.twin.voice.set_drive(m.drive);
+        let (mut gl, mut gr) = self.pan.unwrap_or(p.voice);
+        let (mut hl, mut hr) = self.twin.pan.unwrap_or(p.twin);
+        let (mut peak, mut twin_peak) = (0.0f64, 0.0f64);
+        let note = i32::from(self.note);
+        for (k, &x) in ext.iter().enumerate() {
             let gate = if self.drop {
                 self.drop = false;
                 false
             } else {
                 self.gate
             };
+            gl += (p.voice.0 - gl) * share;
+            gr += (p.voice.1 - gr) * share;
+            if p.twin_on {
+                hl += (p.twin.0 - hl) * share;
+                hr += (p.twin.1 - hr) * share;
+            }
             if self.broken {
                 (self.out[0][k], self.out[1][k]) = (0.0, 0.0);
                 continue;
             }
-            self.key.step(gate, i32::from(self.note), &mut self.voice);
-            let j = jacks(&mut self.character, x, rate, m);
+            let voice = &mut self.voice;
+            self.key.step(gate, note, |k, on| voice.note(k, on));
+            let mut j = jacks(&mut self.character, x, rate, m);
+            if p.doubled {
+                j.detune = j.detune.map(|d| d - p.half);
+            }
             let mut y = self.voice.tick_jacks(&j);
             if !y.is_finite() {
                 self.broken = true;
                 y = 0.0;
             }
-            peak = peak.max(y.abs());
-            let (gl, gr) = self.character.gains(m.spread);
-            self.out[0][k] = y * f64::from(gl);
-            self.out[1][k] = y * f64::from(gr);
+            let (mut left, mut right, mut most) = (y * gl, y * gr, y.abs());
+            if p.twin_on {
+                let t = &mut self.twin;
+                // (A twin let go plays its tail out, its key lifted.)
+                let voice = &mut t.voice;
+                t.key
+                    .step(gate && p.doubled, note, |k, on| voice.note(k, on));
+                let mut j = jacks(&mut t.character, x, rate, m);
+                if p.doubled {
+                    j.detune = j.detune.map(|d| d + p.half);
+                }
+                let mut z = t.voice.tick_jacks(&j);
+                if !z.is_finite() {
+                    self.broken = true;
+                    z = 0.0;
+                }
+                left += z * hl;
+                right += z * hr;
+                most = most.max(z.abs());
+                twin_peak = twin_peak.max(z.abs());
+            }
+            peak = peak.max(most);
+            self.out[0][k] = left;
+            self.out[1][k] = right;
         }
         self.peak = peak;
+        self.pan = Some((gl, gr));
+        self.twin.ran(
+            ext.len(),
+            p.doubled,
+            twin_peak,
+            p.twin_on.then_some((hl, hr)),
+        );
+    }
+
+    /// [`Playing::play_from`] at QUALITY's LO: the light voices played in the circuit's
+    /// voices' place, with their keys, characters, places and DOUBLE's twin as theirs (the
+    /// character's offsets read each sample, as the circuit's voice reads them, so that a
+    /// voice's character is the same whichever plays it).
+    fn play_light_from(&mut self, ext: &[f64], rate: f64, m: &Mix, share: f64) {
+        let p = self.places(m);
+        self.light.set_drive(m.drive);
+        self.twin.light.set_drive(m.drive);
+        let (mut gl, mut gr) = self.pan.unwrap_or(p.voice);
+        let (mut hl, mut hr) = self.twin.pan.unwrap_or(p.twin);
+        let (mut peak, mut twin_peak) = (0.0f64, 0.0f64);
+        let note = i32::from(self.note);
+        for (k, &x) in ext.iter().enumerate() {
+            let gate = if self.drop {
+                self.drop = false;
+                false
+            } else {
+                self.gate
+            };
+            gl += (p.voice.0 - gl) * share;
+            gr += (p.voice.1 - gr) * share;
+            if p.twin_on {
+                hl += (p.twin.0 - hl) * share;
+                hr += (p.twin.1 - hr) * share;
+            }
+            if self.broken {
+                (self.out[0][k], self.out[1][k]) = (0.0, 0.0);
+                continue;
+            }
+            let light = &mut self.light;
+            self.key.step(gate, note, |k, on| light.note(k, on));
+            let j = jacks(&mut self.character, x, rate, m);
+            let detune = if p.doubled {
+                j.detune.map(|d| d - p.half)
+            } else {
+                j.detune
+            };
+            self.light.set_offsets(detune, j.cutoff);
+            let mut y = self.light.tick(x);
+            if !y.is_finite() {
+                self.broken = true;
+                y = 0.0;
+            }
+            let (mut left, mut right, mut most) = (y * gl, y * gr, y.abs());
+            if p.twin_on {
+                let t = &mut *self.twin;
+                let light = &mut t.light;
+                t.key
+                    .step(gate && p.doubled, note, |k, on| light.note(k, on));
+                let j = jacks(&mut t.character, x, rate, m);
+                let detune = if p.doubled {
+                    j.detune.map(|d| d + p.half)
+                } else {
+                    j.detune
+                };
+                t.light.set_offsets(detune, j.cutoff);
+                let mut z = t.light.tick(x);
+                if !z.is_finite() {
+                    self.broken = true;
+                    z = 0.0;
+                }
+                left += z * hl;
+                right += z * hr;
+                most = most.max(z.abs());
+                twin_peak = twin_peak.max(z.abs());
+            }
+            peak = peak.max(most);
+            self.out[0][k] = left;
+            self.out[1][k] = right;
+        }
+        self.peak = peak;
+        self.pan = Some((gl, gr));
+        self.twin.ran(
+            ext.len(),
+            p.doubled,
+            twin_peak,
+            p.twin_on.then_some((hl, hr)),
+        );
+    }
+
+    /// Where a run with `m` puts the voice and its twin: with DOUBLE the pair about the
+    /// centre, the voice half the detune flat to the right and its twin half sharp as far to
+    /// the left, SPREAD's way out as far as the placement puts the voice (the CA-74's R28 and
+    /// R41); else the voice at its own place (a twin let go plays its tail where it was).
+    fn places(&self, m: &Mix) -> Places {
+        let doubled = m.double > 0.0;
+        let twin_on = doubled || self.twin.live;
+        // (One voice alone, no placement among others: its pair all of SPREAD's way out.)
+        let out = if twin_on {
+            m.placement
+                .map_or(ALONE, |p| self.character.pair(p, m.voices))
+        } else {
+            0.0
+        };
+        let wide = |(l, r): (f32, f32)| (f64::from(l), f64::from(r));
+        let [voice, twin] = pair_gains(m.spread, m.inner, out);
+        Places {
+            // (Alone and not doubled, SPREAD is 0 and the voice whole on both sides.)
+            voice: wide(if doubled {
+                voice
+            } else {
+                let placement = m.placement.unwrap_or_default();
+                self.character.gains(m.spread, m.inner, placement, m.voices)
+            }),
+            twin: if twin_on { wide(twin) } else { (0.0, 0.0) },
+            half: 0.5 * m.double,
+            doubled,
+            twin_on,
+        }
+    }
+
+    /// A key pressed or released on the voice's keyboard (the one instrument's, or UNISON's),
+    /// and on its twin's: pressed there only with DOUBLE on, so that a twin let go plays its
+    /// tail out.
+    fn note(&mut self, key: i32, on: bool) {
+        let twin = self.double || !on;
+        if self.potato {
+            self.light.note(key, on);
+            if twin {
+                self.twin.light.note(key, on);
+            }
+        } else {
+            self.voice.note(key, on);
+            if twin {
+                self.twin.voice.note(key, on);
+            }
+        }
+    }
+
+    /// Its key and its twin's lifted at once, on the voices played.
+    fn lift(&mut self) {
+        let t = &mut *self.twin;
+        if self.potato {
+            let (light, twin) = (&mut self.light, &mut t.light);
+            self.key.lift(|k, on| light.note(k, on));
+            t.key.lift(|k, on| twin.note(k, on));
+        } else {
+            let (voice, twin) = (&mut self.voice, &mut t.voice);
+            self.key.lift(|k, on| voice.note(k, on));
+            t.key.lift(|k, on| twin.note(k, on));
+        }
     }
 }
 
@@ -344,10 +680,12 @@ pub struct Spares {
     places: [Mutex<Spare>; POLY_VOICES.2],
 }
 
-/// A place's spare voice: clean, or the voice it replaced.
+/// A place's spare voice and twin (DOUBLE's): clean, or the ones they replaced. (The twin
+/// boxed, as [`made_twin`]'s: the places are made together.)
 #[derive(Debug, Default)]
 struct Spare {
     voice: Option<Voice>,
+    twin: Option<Box<Voice>>,
     clean: bool,
 }
 
@@ -389,26 +727,33 @@ impl Spares {
     }
 }
 
-/// A clean voice at `rate` Hz put in `place` while it is `wanted` there: made before the lock
-/// is taken, and the voice it replaces dropped after.
+/// A clean voice and twin at `rate` Hz put in `place` while it is `wanted` there: made before
+/// the lock is taken, and the ones they replace dropped after.
 fn fill(place: &Mutex<Spare>, rate: f64, wanted: impl Fn(&Spare) -> bool) {
     if !place.lock().is_ok_and(|s| wanted(&s)) {
         return;
     }
-    let mut voice = Some(Voice::prototype(rate));
+    let (mut voice, mut twin) = (
+        Some(Voice::prototype(rate)),
+        Some(Box::new(Voice::prototype(rate))),
+    );
     if let Ok(mut s) = place.lock()
         && wanted(&s)
     {
         std::mem::swap(&mut s.voice, &mut voice);
+        std::mem::swap(&mut s.twin, &mut twin);
         s.clean = true;
     }
-    drop(voice);
+    drop((voice, twin));
 }
 
 /// The voices, the MIDI input's state and the controls they play with.
 #[derive(Debug)]
 pub struct Engine {
     slots: Vec<Slot>,
+    /// Each voice's output's peak over the last block (the editor's drops and lamps follow
+    /// them; each slot's peak is kept anyway, for knowing when its voice falls silent).
+    levels: [f32; LEVELS],
     over: Option<Oversampled>,
     rate: f64,
     seed: u64,
@@ -421,6 +766,18 @@ pub struct Engine {
     bend: f32,
     modulation: f32,
     lamp: f32,
+    /// A voice's place's glide a sample at the voices' rate ([`glide_share`]).
+    glide: f64,
+    /// AUTO GAIN (decisions.md R45): the sound's curve (`drive.rs`), the correction the
+    /// controls ask for from it (1: none), the correction gliding to it a sample at a time,
+    /// and the glide's share a sample at the host's rate. Only it glides: the output's other
+    /// gains step as they did.
+    curve: Curve<STEPS>,
+    auto: f64,
+    auto_now: f64,
+    auto_share: f64,
+    /// Where AUTO GAIN's measurements are asked for and kept, told the voices' rate.
+    calibration: Option<Calibration>,
     /// The output's gain under POWER (0 off, 1 on), and its step a sample while it fades.
     fade: f64,
     fade_step: f64,
@@ -472,6 +829,7 @@ impl Engine {
         let controls = Controls::default();
         Engine {
             slots: Vec::new(),
+            levels: [0.0; LEVELS],
             over: None,
             rate: 0.0,
             seed: 0,
@@ -482,6 +840,12 @@ impl Engine {
             bend: 0.0,
             modulation: 0.0,
             lamp: 0.0,
+            glide: 1.0,
+            curve: AVERAGE,
+            auto: 1.0,
+            auto_now: 1.0,
+            auto_share: 1.0,
+            calibration: None,
             fade: 1.0,
             fade_step: 1.0,
             hush: false,
@@ -515,18 +879,29 @@ impl Engine {
         let reseeded = seed != self.seed;
         self.seed = seed;
         if rate == self.rate && !self.slots.is_empty() {
+            let voice_rate = self.voice_rate();
             for (k, s) in self.slots.iter_mut().enumerate() {
                 if let Ok(mut p) = s.play.lock() {
-                    p.voice.set_seed(voice_seed(seed, k));
                     if reseeded {
+                        // (Made again, as an instance opened with the seed makes them: its
+                        // voices' oscillators start where it says.)
+                        p.voice = made_voice(voice_rate, seed, k);
+                        p.light = made_light(voice_rate, seed, k);
                         p.character = Character::new(voice_seed(seed, k), k, 3, ENTROPY_KNOBS);
+                        p.twin = made_twin(voice_rate, seed, k);
+                        p.panel_gen = u64::MAX;
+                    } else {
+                        p.voice.set_seed(voice_seed(seed, k));
+                        p.light.set_seed(voice_seed(seed, k));
                     }
                 }
             }
             if reseeded {
                 self.apply();
+                self.press_held();
             }
-            self.spares.make(self.voice_rate());
+            self.auto_now = self.auto;
+            self.spares.make(voice_rate);
             return;
         }
         self.stop_workers();
@@ -544,37 +919,41 @@ impl Engine {
             down: [Decimator::new(factor), Decimator::new(factor)],
         });
         let voice_rate = rate * factor as f64;
+        self.glide = glide_share(voice_rate);
+        (self.auto_now, self.auto_share) = (self.auto, glide_share(rate));
+        if let Some(c) = &self.calibration {
+            c.set_rate(voice_rate);
+        }
         self.slots = (0..POLY_VOICES.2)
-            .map(|k| {
-                // (Each its own copy from the prototype, its key lists' room reserved: a key
-                // press must not allocate on the audio thread.)
-                let mut voice = Voice::prototype(voice_rate);
-                voice.set_seed(voice_seed(seed, k));
-                Slot {
-                    play: Arc::new(Mutex::new(Playing {
-                        voice,
-                        character: Character::new(voice_seed(seed, k), k, 3, ENTROPY_KNOBS),
-                        key: PolyKey::new(voice_rate),
-                        gate: false,
-                        note: 0,
-                        drop: false,
-                        out: [[0.0; CHUNK]; 2],
-                        peak: 0.0,
-                        panel_gen: u64::MAX,
-                        broken: false,
-                    })),
-                    note: 0,
+            .map(|k| Slot {
+                play: Arc::new(Mutex::new(Playing {
+                    voice: made_voice(voice_rate, seed, k),
+                    light: made_light(voice_rate, seed, k),
+                    potato: false,
+                    character: Character::new(voice_seed(seed, k), k, 3, ENTROPY_KNOBS),
+                    key: PolyKey::new(voice_rate),
                     gate: false,
-                    shown: false,
+                    note: 0,
                     drop: false,
-                    age: 0,
-                    active: false,
+                    out: [[0.0; CHUNK]; 2],
                     peak: 0.0,
-                    lift: false,
-                    notes: [(0, false); 32],
-                    pending: 0,
-                    rest: false,
-                }
+                    pan: None,
+                    panel_gen: u64::MAX,
+                    broken: false,
+                    twin: made_twin(voice_rate, seed, k),
+                    double: false,
+                })),
+                note: 0,
+                gate: false,
+                shown: false,
+                drop: false,
+                age: 0,
+                active: false,
+                peak: 0.0,
+                lift: false,
+                notes: [(0, false); 32],
+                pending: 0,
+                rest: false,
             })
             .collect();
         // (Each voice's lock taken once here, off the audio thread: on macOS the standard
@@ -585,11 +964,17 @@ impl Engine {
         }
         self.spares.make(voice_rate);
         self.apply();
-        if !self.controls.poly
-            && let Ok(mut p) = self.slots[0].play.lock()
-        {
-            for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
-                p.voice.note(key as i32, true);
+        self.press_held();
+    }
+
+    /// The keys held pressed again on the instruments' voices just made (POLY's voices take
+    /// the next keys).
+    fn press_held(&self) {
+        for k in 0..self.instruments() {
+            if let Ok(mut p) = self.slots[k].play.lock() {
+                for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
+                    p.note(key as i32, true);
+                }
             }
         }
     }
@@ -604,7 +989,7 @@ impl Engine {
     /// decisions.md R18). Returns how many run (none with POLY off, or if the system would not
     /// start them).
     pub fn start_workers(&mut self, workers: usize, period: Option<Duration>) -> usize {
-        if self.pool.is_some() && self.workers == (workers, period) && self.controls.poly {
+        if self.pool.is_some() && self.workers == (workers, period) && self.many() {
             return self.workers();
         }
         self.stop_workers();
@@ -614,7 +999,7 @@ impl Engine {
         }
         let voices: Vec<Shared> = self.slots.iter().map(|s| s.play.clone()).collect();
         self.plan = self.crew.plan(&voices, workers, period);
-        if self.controls.poly {
+        if self.many() {
             self.pool = self.crew.start(self.plan);
             self.ask = Ask::Answered;
             #[cfg(test)]
@@ -639,7 +1024,7 @@ impl Engine {
     /// ([`Engine::take_serving`]) and taken once it is ready, every voice played here until
     /// then; switched off, the pool let go, to be stopped there.
     fn follow_poly(&mut self) {
-        let on = self.controls.poly;
+        let on = self.many();
         if self
             .crew
             .follow(on, self.plan, &mut self.pool, &mut self.ask)
@@ -686,11 +1071,16 @@ impl Engine {
         }
     }
 
-    /// The controls for the samples that follow. POLY switched lifts every key first (the
-    /// notes then sounding stop; the next notes play in the new way).
+    /// The controls for the samples that follow. POLY, UNISON or DOUBLE switched lifts every
+    /// key first (the notes then sounding stop; the next notes play in the new way).
     pub fn set(&mut self, c: &Controls) {
         if *c != self.controls {
-            if c.poly != self.controls.poly {
+            if c.poly != self.controls.poly
+                || c.potato != self.controls.potato
+                || c.unison != self.controls.unison
+                || (c.unison && c.voices != self.controls.voices)
+                || (c.double > 0.0) != (self.controls.double > 0.0)
+            {
                 self.lift_all();
             }
             if c.voices < self.controls.voices {
@@ -701,18 +1091,45 @@ impl Engine {
             }
             self.controls = *c;
             self.gain = output_gain(c.volume, c.main_output)
-                * if c.lock { lock_trim(&c.panel) } else { 1.0 };
+                * if c.lock { lock_trim(&c.panel) } else { 1.0 }
+                * unison_trim_of(c)
+                * double_trim(c)
+                * level_gain(c.level);
+            self.auto = auto_trim(c, &self.curve);
             self.apply();
         }
     }
 
     /// The one instrument's key pressed or released (POLY off), on the first voice (once it
-    /// is free, if a worker late from an earlier run holds it).
+    /// is free, if a worker late from an earlier run holds it); with UNISON, on each of its
+    /// instruments.
     fn one_note(&mut self, key: i32, on: bool) {
-        let s = &mut self.slots[0];
-        if with_voice(s, |p| p.voice.note(key, on)).is_none() && s.pending < s.notes.len() {
-            s.notes[s.pending] = (key, on);
-            s.pending += 1;
+        for k in 0..self.instruments().max(1) {
+            let s = &mut self.slots[k];
+            if with_voice(s, |p| p.note(key, on)).is_none() && s.pending < s.notes.len() {
+                s.notes[s.pending] = (key, on);
+                s.pending += 1;
+            }
+            if self.controls.unison && on {
+                s.active = true;
+            }
+        }
+    }
+
+    /// Whether more than the one instrument plays: POLY's voices or UNISON's.
+    fn many(&self) -> bool {
+        self.controls.poly || self.controls.unison
+    }
+
+    /// The voices that take every key through their keyboard circuits, as the one instrument
+    /// does: UNISON's VOICES, POLY off's one, POLY's none.
+    fn instruments(&self) -> usize {
+        if self.controls.unison {
+            self.voices()
+        } else if self.controls.poly {
+            0
+        } else {
+            1.min(self.slots.len())
         }
     }
 
@@ -726,7 +1143,7 @@ impl Engine {
                 if self.slots.is_empty() {
                     return;
                 }
-                if !self.controls.poly {
+                if self.controls.unison || !self.controls.poly {
                     self.one_note(i32::from(key), on);
                 } else if on {
                     self.poly_on(key);
@@ -760,9 +1177,13 @@ impl Engine {
     /// output fades back in. A voice taken for a note meanwhile plays on.
     fn all_sound_off(&mut self) {
         self.release_all();
-        let poly = self.controls.poly;
+        let (many, instruments) = (self.many(), self.instruments());
         for (k, s) in self.slots.iter_mut().enumerate() {
-            s.rest = if poly { s.active } else { k == 0 };
+            s.rest = if many {
+                s.active || k < instruments
+            } else {
+                k == 0
+            };
         }
         self.hush = !self.slots.is_empty();
         self.hush_waited = 0;
@@ -776,7 +1197,7 @@ impl Engine {
         if !self.hush || self.fade > 0.0 {
             return;
         }
-        let poly = self.controls.poly;
+        let poly = self.many();
         let mut waiting = false;
         for k in 0..self.slots.len() {
             if !self.slots[k].rest {
@@ -812,6 +1233,34 @@ impl Engine {
     /// the spare has not been made again since it was last used. Either way the spares are
     /// then to be mended ([`Engine::take_mending`]).
     fn restore(&mut self, k: usize, p: &mut Playing) -> bool {
+        if p.potato {
+            // (The light voices are put to rest in place: nothing to make.)
+            p.light.rest();
+            p.twin.light.rest();
+            light_seeded(&mut p.light, self.seed, k);
+            light_seeded(&mut p.twin.light, self.seed, k + POLY_VOICES.2);
+        } else if !self.restore_voices(k, p) {
+            return false;
+        }
+        p.key.rest();
+        p.twin.key.rest();
+        (p.twin.live, p.twin.quiet, p.twin.pan) = (false, 0, None);
+        (p.broken, p.drop) = (false, false);
+        let s = &mut self.slots[k];
+        (s.lift, s.pending, s.shown) = (false, 0, false);
+        // (The panel before the keys: DOUBLE's, which the twin takes keys by.)
+        self.voice_panel(p, &self.panel());
+        if k < self.instruments() {
+            for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
+                p.note(key as i32, true);
+            }
+        }
+        true
+    }
+
+    /// Place `k`'s circuit voice and twin swapped for clean spares, seeded as made: whether
+    /// they were (not if the spares are not clean or not at the voices' rate).
+    fn restore_voices(&mut self, k: usize, p: &mut Playing) -> bool {
         self.mend = true;
         let rate = p.voice.rate();
         let Ok(mut spare) = self.spares.places[k].try_lock() else {
@@ -824,29 +1273,34 @@ impl Engine {
             return false;
         };
         std::mem::swap(&mut p.voice, clean);
+        if let Some(twin) = spare.twin.as_mut().filter(|v| v.rate() == rate) {
+            std::mem::swap(&mut p.twin.voice, &mut **twin);
+        }
         spare.clean = false;
         drop(spare);
-        p.voice.set_seed(voice_seed(self.seed, k));
-        p.key.rest();
-        (p.broken, p.drop) = (false, false);
-        let s = &mut self.slots[k];
-        (s.lift, s.pending, s.shown) = (false, 0, false);
-        if !self.controls.poly && k == 0 {
-            for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
-                p.voice.note(key as i32, true);
-            }
-        }
-        self.voice_panel(p, &self.panel());
+        seeded(&mut p.voice, self.seed, k);
+        seeded(&mut p.twin.voice, self.seed, k + POLY_VOICES.2);
         true
     }
 
-    /// A POLY note: a free voice by its number, else the oldest let go, else the oldest held
-    /// (its key lifted and pressed again: `PolyKey`).
+    /// A POLY note: the voice that last played the key if it is free or letting go (a chord
+    /// struck again stays where it was in the field), else the free voice whose last note began
+    /// longest ago (the notes go round the voices, to either side in turn), else the one let
+    /// go longest ago, else the one held longest (its key lifted and pressed again: `PolyKey`)
+    /// (the CA-74's R27).
     fn poly_on(&mut self, key: u8) {
         let n = self.voices();
-        let pick = self.slots[..n]
-            .iter()
-            .position(|s| !s.active)
+        let pick = (0..n)
+            .filter(|&k| {
+                let s = &self.slots[k];
+                s.note == key && s.age > 0 && !s.gate
+            })
+            .max_by_key(|&k| self.slots[k].age)
+            .or_else(|| {
+                (0..n)
+                    .filter(|&k| !self.slots[k].active)
+                    .min_by_key(|&k| self.slots[k].age)
+            })
             .or_else(|| {
                 (0..n)
                     .filter(|&k| !self.slots[k].gate)
@@ -871,8 +1325,7 @@ impl Engine {
     /// Every held key released (the contours then run out as the DECAY switch has them).
     pub fn release_all(&mut self) {
         for key in 0..self.held.len() {
-            if std::mem::take(&mut self.held[key]) && !self.controls.poly && !self.slots.is_empty()
-            {
+            if std::mem::take(&mut self.held[key]) && self.instruments() > 0 {
                 self.one_note(key as i32, false);
             }
         }
@@ -883,18 +1336,17 @@ impl Engine {
 
     /// Every voice's key lifted at once and the held keys forgotten (POLY switched).
     fn lift_all(&mut self) {
-        let poly = self.controls.poly;
         for k in 0..self.slots.len() {
             let s = &mut self.slots[k];
-            if with_voice(s, |p| p.key.lift(&mut p.voice)).is_none() {
+            if with_voice(s, Playing::lift).is_none() {
                 s.lift = true;
             }
             s.gate = false;
-            if k == 0 && !poly {
-                for key in 0..self.held.len() {
-                    if self.held[key] {
-                        self.one_note(key as i32, false);
-                    }
+        }
+        if self.instruments() > 0 {
+            for key in 0..self.held.len() {
+                if self.held[key] {
+                    self.one_note(key as i32, false);
                 }
             }
         }
@@ -950,7 +1402,10 @@ impl Engine {
     pub fn render(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
         let len = left.len().min(right.len());
         let at = |i: usize| ext.get(i).copied().filter(|x| x.is_finite()).unwrap_or(0.0);
-        if !self.controls.poly || self.over.is_some() || self.slots.is_empty() {
+        // (At QUALITY's LO the one instrument too plays a run at a time: its light voice costs
+        // too little for a lock and a place worked out each sample to be nothing beside it.)
+        let runs = self.many() || self.controls.potato;
+        if !runs || self.over.is_some() || self.slots.is_empty() {
             for i in 0..len {
                 (left[i], right[i]) = self.tick_stereo(at(i));
             }
@@ -983,7 +1438,11 @@ impl Engine {
             }
             let (mut l, mut r) = ([0.0f64; CHUNK], [0.0f64; CHUNK]);
             if run > 0 {
-                self.run(run, &ins, rate, &mix, true, &mut l, &mut r);
+                if self.many() {
+                    self.run(run, &ins, rate, &mix, true, &mut l, &mut r);
+                } else {
+                    self.run_one(run, &ins, rate, &mix, &mut l, &mut r);
+                }
             }
             for k in 0..n {
                 (left[start + k], right[start + k]) = if k < run {
@@ -994,6 +1453,28 @@ impl Engine {
             }
             start += n;
         }
+    }
+
+    /// The one instrument's voice (POLY and UNISON off) over `n` samples, as as many samples
+    /// of [`Engine::tick_stereo`] play it, its lock taken once: silent for the run if a worker
+    /// late from an earlier run still holds it.
+    fn run_one(
+        &mut self,
+        n: usize,
+        ext: &[f64; CHUNK],
+        rate: f64,
+        mix: &Mix,
+        l: &mut [f64; CHUNK],
+        r: &mut [f64; CHUNK],
+    ) {
+        let play = self.slots[0].play.clone();
+        let Ok(mut p) = play.try_lock() else {
+            return;
+        };
+        self.bring_up(0, &mut p);
+        p.play_from(&ext[..n], rate, mix, self.glide);
+        l[..n].copy_from_slice(&p.out[0][..n]);
+        r[..n].copy_from_slice(&p.out[1][..n]);
     }
 
     /// POLY's sounding voices over `n` samples, summed into `l` and `r` in their order: each
@@ -1029,6 +1510,8 @@ impl Engine {
             count += 1;
         }
         let deadline = self.deadline;
+        // (At QUALITY's LO a voice costs less than waking a worker for it: every voice here.)
+        let share = share && !self.controls.potato;
         let played = match &mut self.pool {
             Some(pool) if share && count > 1 && n >= SHARED_RUN => {
                 pool.play(&list[..count], n, ext, rate, mix, deadline)
@@ -1063,23 +1546,24 @@ impl Engine {
     }
 
     /// A voice brought up to what the engine asked of it meanwhile: a clean voice in its place
-    /// if it broke ([`Engine::restore`]), its key lifted, the one instrument's keys, and the
-    /// panel.
+    /// if it broke ([`Engine::restore`]), the panel, its key lifted and the one instrument's
+    /// keys.
     fn bring_up(&mut self, k: usize, p: &mut Playing) {
         if p.broken {
             self.restore(k, p);
         }
-        let s = &mut self.slots[k];
-        if std::mem::take(&mut s.lift) {
-            p.key.lift(&mut p.voice);
-        }
-        for &(key, on) in &s.notes[..s.pending] {
-            p.voice.note(key, on);
-        }
-        s.pending = 0;
+        // (The panel before the keys: DOUBLE's, which the twin takes keys by.)
         if p.panel_gen != self.panel_gen {
             self.voice_panel(p, &self.panel());
         }
+        let s = &mut self.slots[k];
+        if std::mem::take(&mut s.lift) {
+            p.lift();
+        }
+        for &(key, on) in &s.notes[..s.pending] {
+            p.note(key, on);
+        }
+        s.pending = 0;
     }
 
     /// A sample of the voices' sum, left and right, through MAIN OUTPUT's gain and POWER's
@@ -1090,10 +1574,12 @@ impl Engine {
         if self.hush && self.fade == 0.0 {
             self.hush_waited += 1;
         }
-        // (As the one voice was: the gain, then the fade.)
+        // (As the one voice was: the gain, then the fade; AUTO GAIN's correction, gliding,
+        // between them, 1 without DRIVE.)
+        self.auto_now += (self.auto - self.auto_now) * self.auto_share;
         let (l, r) = (
-            (l * self.gain * self.fade) as f32,
-            (r * self.gain * self.fade) as f32,
+            (l * self.gain * self.auto_now * self.fade) as f32,
+            (r * self.gain * self.auto_now * self.fade) as f32,
         );
         if l.is_finite() && r.is_finite() {
             return (l, r);
@@ -1117,43 +1603,44 @@ impl Engine {
         }
     }
 
-    /// How ENTROPY and SPREAD stand for the voices' samples.
+    /// How ENTROPY, SPREAD, DOUBLE and DRIVE stand for the voices' samples.
     fn mix(&self) -> Mix {
-        let entropy = self.controls.entropy * ENTROPY_DEPTH;
-        // The oscillators': their own floor and ENTROPY's, unless LOCK; the cutoff's, ENTROPY's.
-        let oscillators = if self.controls.lock {
-            0.0
-        } else {
-            ENTROPY_FLOOR + entropy
-        };
-        Mix {
-            entropy,
-            oscillators,
-            at: oscillators.max(entropy),
-            spread: self.controls.spread,
+        mix_of(&self.controls, self.voices())
+    }
+
+    /// AUTO GAIN's curve for the sound (`drive.rs`), the correction following it.
+    pub fn set_curve(&mut self, curve: Curve<STEPS>) {
+        self.curve = curve;
+        self.auto = auto_trim(&self.controls, &curve);
+    }
+
+    /// AUTO GAIN's curve the engine plays with.
+    pub fn curve(&self) -> Curve<STEPS> {
+        self.curve
+    }
+
+    /// Where AUTO GAIN's measurements are asked for and kept (`drive.rs`), told the voices'
+    /// rate now and whenever the engine is prepared. Not on the audio thread.
+    pub fn calibrate_with(&mut self, c: Calibration) {
+        if self.rate > 0.0 {
+            c.set_rate(self.voice_rate());
         }
+        self.calibration = Some(c);
     }
 
     /// One sample of the voices at their rate (`rate` Hz): left and right.
     fn sample(&mut self, ext: f64, rate: f64) -> (f64, f64) {
         let mix = self.mix();
-        if !self.controls.poly {
+        if !self.many() {
             let play = self.slots[0].play.clone();
             let Ok(mut p) = play.try_lock() else {
                 return (0.0, 0.0);
             };
             self.bring_up(0, &mut p);
-            if p.broken {
-                return (0.0, 0.0);
-            }
-            let j = jacks(&mut p.character, ext, rate, &mix);
-            let y = p.voice.tick_jacks(&j);
-            if !y.is_finite() {
-                p.broken = true;
-                return (0.0, 0.0);
-            }
-            let (gl, gr) = p.character.gains(mix.spread);
-            return (y * f64::from(gl), y * f64::from(gr));
+            // (One voice alone sits in the centre, both sides whole: SPREAD's places are for
+            // POLY's and UNISON's voices, and DOUBLE's pair. The voice's key is the keyboard's.)
+            p.play_from(&[ext], rate, &mix, self.glide);
+            return (p.out[0][0], p.out[1][0]);
         }
         let mut ins = [0.0f64; CHUNK];
         ins[0] = ext;
@@ -1171,12 +1658,33 @@ impl Engine {
     /// silent over the block freed.
     pub fn end_block(&mut self, len: usize) -> f32 {
         let mut peak = 0.0f64;
-        for s in &mut self.slots {
-            if let Some(p) = with_voice(s, |p| p.voice.take_overload_peak()) {
+        // (UNISON's instruments, which take their keys straight, are held while a key is.)
+        let held = if self.controls.unison && self.held.iter().any(|h| *h) {
+            self.instruments()
+        } else {
+            0
+        };
+        for (k, s) in self.slots.iter_mut().enumerate() {
+            let overload = |p: &mut Playing| {
+                if p.potato {
+                    let twin = p.twin.light.take_overload_peak();
+                    return p.light.take_overload_peak().max(twin);
+                }
+                let twin = p.twin.voice.take_overload_peak();
+                p.voice.take_overload_peak().max(twin)
+            };
+            if let Some(p) = with_voice(s, overload) {
                 peak = peak.max(p);
             }
-            if s.active && !s.gate && s.peak < SILENT {
+            if s.active && !s.gate && s.peak < SILENT && k >= held {
                 s.active = false;
+            }
+            if let Some(l) = self.levels.get_mut(k) {
+                *l = if s.peak.is_finite() {
+                    s.peak as f32
+                } else {
+                    0.0
+                };
             }
             s.peak = 0.0;
         }
@@ -1190,9 +1698,29 @@ impl Engine {
         self.lamp
     }
 
-    /// The voices sounding now (POLY on), or 1 (off).
+    /// Each voice's output's peak over the last block, by its slot (POLY's and UNISON's voices;
+    /// the one instrument's is the first).
+    pub fn levels(&self) -> &[f32; LEVELS] {
+        &self.levels
+    }
+
+    /// Which voices sound now, a bit a voice (the editor's display of where they sound, A6):
+    /// POLY's and UNISON's sounding, the one instrument while a key is held.
+    pub fn sounding_mask(&self) -> u32 {
+        if self.many() {
+            self.slots
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.active)
+                .fold(0, |m, (k, _)| m | 1 << k)
+        } else {
+            u32::from(self.held.iter().any(|h| *h))
+        }
+    }
+
+    /// The voices sounding now (POLY or UNISON on), or 1 (off).
     pub fn sounding(&self) -> usize {
-        if self.controls.poly {
+        if self.many() {
             self.slots.iter().filter(|s| s.active).count()
         } else {
             1
@@ -1218,7 +1746,8 @@ impl Engine {
         )
     }
 
-    /// The panel the voices play: the controls', in Potato, the MIDI input's bend moving
+    /// The panel the voices play: the controls', in Potato (at ULTRA, No Compromises), the
+    /// MIDI input's bend moving
     /// the PITCH wheel by its share of the wheel's travel and its modulation wheel holding
     /// MODULATION up to where the hardware reference's MIDI puts it
     /// (`ca72::modulation::midi_wheel`).
@@ -1227,7 +1756,11 @@ impl Engine {
         let share = (c.bend_range / PITCH_WHEEL_SEMITONES).clamp(0.0, 1.0);
         let share = if share.is_finite() { share } else { 0.0 };
         let mut p = c.panel;
-        p.quality = Quality::Potato;
+        p.quality = if c.ultra {
+            Quality::NoCompromises
+        } else {
+            Quality::Potato
+        };
         p.pitch_wheel = (p.pitch_wheel + f64::from(self.bend) * share).clamp(-1.0, 1.0);
         p.mod_wheel = p
             .mod_wheel
@@ -1255,19 +1788,36 @@ impl Engine {
         }
     }
 
-    /// A voice's panel `p` with its tolerances, FEEDBACK and its loop's preamplifier.
+    /// A voice's panel `p` with its tolerances, FEEDBACK and its loop's preamplifier; its
+    /// twin's with the twin's tolerances; and whether DOUBLE is on.
     fn voice_panel(&self, v: &mut Playing, p: &Panel) {
         let entropy = self.controls.entropy * ENTROPY_DEPTH;
-        v.voice.feedback = self.controls.feedback.clamp(0.0, 1.0);
-        v.voice.in_loop = self.in_loop;
-        let pv = if entropy > 0.0 {
-            entropy_panel(&v.character, *p, entropy)
-        } else {
-            *p
-        };
-        if v.voice.panel != pv {
-            v.voice.panel = pv;
+        let feedback = self.controls.feedback.clamp(0.0, 1.0);
+        for (voice, character) in [
+            (&mut v.voice, &v.character),
+            (&mut v.twin.voice, &v.twin.character),
+        ] {
+            voice.feedback = feedback;
+            voice.in_loop = self.in_loop;
+            let pv = if entropy > 0.0 {
+                entropy_panel(character, *p, entropy)
+            } else {
+                *p
+            };
+            if voice.panel != pv {
+                voice.panel = pv;
+            }
         }
+        // (The light voices only at LO: their laws are worked out again as their panel
+        // changes, which the circuit's voices have no need of.)
+        v.potato = self.controls.potato;
+        if v.potato {
+            for (light, voice) in [(&mut v.light, &v.voice), (&mut v.twin.light, &v.twin.voice)] {
+                light.feedback = feedback;
+                light.set_panel(&voice.panel);
+            }
+        }
+        v.double = self.controls.double > 0.0;
         v.panel_gen = self.panel_gen;
     }
 }
@@ -1303,28 +1853,65 @@ const SHARED_RUN: usize = 8;
 /// Samples [`Engine::render`] plays a voice for at a time.
 pub const CHUNK: usize = 128;
 
-/// ENTROPY and SPREAD as the voices' samples take them: ENTROPY's depth, the oscillators'
-/// (their floor with it, unless LOCK), the depth the character's offsets are drawn at, and
-/// SPREAD.
+/// ENTROPY, SPREAD, DOUBLE and DRIVE as the voices' samples take them: ENTROPY's depth, the
+/// oscillators' (their floor with it, unless LOCK), the depth the character's offsets are
+/// drawn at, SPREAD and INNER, SCATTER's placement (none for one voice alone, its DOUBLE pair at
+/// the edge) and the voices it places among (VOICES), DOUBLE's detune between a note's two voices, cents (0: one voice a note), and DRIVE's gain into the
+/// filter (1: the circuit).
 #[derive(Debug, Clone, Copy)]
 pub struct Mix {
     entropy: f64,
     oscillators: f64,
     at: f64,
     spread: f64,
+    inner: f64,
+    placement: Option<Placement>,
+    voices: usize,
+    double: f64,
+    drive: f64,
 }
 
+/// [`Mix`]'s values, as the workers are handed them.
+pub const MIX_LEN: usize = 9;
+
 impl Mix {
-    pub fn to_array(self) -> [f64; 4] {
-        [self.entropy, self.oscillators, self.at, self.spread]
+    pub fn to_array(self) -> [f64; MIX_LEN] {
+        [
+            self.entropy,
+            self.oscillators,
+            self.at,
+            self.spread,
+            self.inner,
+            self.placement.map_or(-1.0, |p| p.index() as f64),
+            self.voices as f64,
+            self.double,
+            self.drive,
+        ]
     }
 
-    pub fn from_array([entropy, oscillators, at, spread]: [f64; 4]) -> Mix {
+    pub fn from_array(
+        [
+            entropy,
+            oscillators,
+            at,
+            spread,
+            inner,
+            placement,
+            voices,
+            double,
+            drive,
+        ]: [f64; MIX_LEN],
+    ) -> Mix {
         Mix {
             entropy,
             oscillators,
             at,
             spread,
+            inner,
+            placement: (placement >= 0.0).then(|| Placement::from_index(placement as usize)),
+            voices: voices as usize,
+            double,
+            drive,
         }
     }
 }
@@ -1480,6 +2067,236 @@ fn measure_voices(rate: f64, block: usize, feedback: bool, workers: usize) -> u3
     voices as u32
 }
 
+/// UNISON's trim on the output: its VOICES voices, not in phase, add in power, so it is turned
+/// down by the square root of VOICES's setting and sounds about as loud as one voice (the
+/// CA-74's R25).
+fn unison_trim_of(c: &Controls) -> f64 {
+    if c.unison {
+        unison_trim(c.voices.clamp(POLY_VOICES.0, POLY_VOICES.2))
+    } else {
+        1.0
+    }
+}
+
+/// Where voice `k` of seed `s` starts its oscillators on their ramps (decisions.md R45,
+/// the CA-74's R25): the first voice at the circuit's initial condition, as the reference
+/// starts (so one voice, and every preset with POLY and UNISON off, is the model's to the bit);
+/// every other voice where its seed says, as a real instrument's free-running oscillators are
+/// wherever they are when a note comes. A voice's three start together, as the reference's do,
+/// only the voices apart (the CA-74 starts each oscillator apart: here LOCK's trim, R9, is for
+/// three started together, and each voice's would otherwise have its own level at LOCK). Only a
+/// voice made or put back to rest starts so: one that has played stops wherever its oscillators
+/// were, and the next note finds them there.
+fn out_of_step(k: usize, s: u64) -> Option<f64> {
+    if k == 0 {
+        return None;
+    }
+    let x = voice_seed(s, k)
+        .wrapping_add(3)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    Some(((x ^ (x >> 29)) >> 11) as f64 / (1u64 << 53) as f64)
+}
+
+/// Voice `k` of an instance seeded `seed`, at `rate` Hz: its own copy from the prototype (its
+/// key lists' room reserved: a key press must not allocate on the audio thread), [`seeded`].
+fn made_voice(rate: f64, seed: u64, k: usize) -> Voice {
+    let mut voice = Voice::prototype(rate);
+    seeded(&mut voice, seed, k);
+    voice
+}
+
+/// Voice `k`'s light model (QUALITY's LO) of an instance seeded `seed`, at `rate` Hz,
+/// [`light_seeded`]. (Made with the voice, off the audio thread; it allocates nothing after.)
+fn made_light(rate: f64, seed: u64, k: usize) -> Light {
+    let mut light = Light::new(rate);
+    light_seeded(&mut light, seed, k);
+    light
+}
+
+/// A light voice at rest made voice `k` of an instance seeded `seed`, as [`seeded`] makes the
+/// circuit's: its noise seeded, its oscillators started where [`out_of_step`] says.
+fn light_seeded(light: &mut Light, seed: u64, k: usize) {
+    light.set_seed(voice_seed(seed, k));
+    if let Some(at) = out_of_step(k, seed) {
+        light.start_oscillators_at(at);
+    }
+}
+
+/// A clean voice made voice `k` of an instance seeded `seed`: its noise seeded, its
+/// oscillators started where [`out_of_step`] says.
+fn seeded(voice: &mut Voice, seed: u64, k: usize) {
+    voice.set_seed(voice_seed(seed, k));
+    if let Some(at) = out_of_step(k, seed) {
+        voice.start_oscillators_at(at);
+    }
+}
+
+/// LEVEL's gain at `db` (within [`LEVEL_RANGE`]; not finite, 0 dB). At 0 dB, 1 exactly.
+pub fn level_gain(db: f64) -> f64 {
+    let db = if db.is_finite() {
+        db.clamp(LEVEL_RANGE.0, LEVEL_RANGE.1)
+    } else {
+        0.0
+    };
+    10f64.powf(db / 20.0)
+}
+
+/// How ENTROPY, SPREAD, DOUBLE and DRIVE stand for the voices' samples under controls `c`,
+/// `voices` (VOICES) of them placed.
+fn mix_of(c: &Controls, voices: usize) -> Mix {
+    let many = c.poly || c.unison;
+    let entropy = c.entropy * ENTROPY_DEPTH;
+    // The oscillators': their own floor and ENTROPY's, unless LOCK; the cutoff's, ENTROPY's.
+    let oscillators = if c.lock { 0.0 } else { ENTROPY_FLOOR + entropy };
+    Mix {
+        entropy,
+        oscillators,
+        at: oscillators.max(entropy),
+        // (One voice alone sits in the centre: the places are POLY's and UNISON's voices'
+        // among themselves, and DOUBLE's pair's.)
+        spread: if many || c.double > 0.0 {
+            c.spread
+        } else {
+            0.0
+        },
+        inner: c.inner.clamp(0.0, 1.0),
+        // (One voice alone has no place among others: none, and its DOUBLE pair as far out as
+        // SPREAD, the kit's `ALONE`.)
+        placement: many.then_some(c.placement),
+        voices,
+        double: if c.double > 0.0 {
+            c.double.min(1.0) * DOUBLE_CENTS
+        } else {
+            0.0
+        },
+        drive: if c.drive > 0.0 {
+            10f64.powf(c.drive.min(DRIVE_TOP) / 20.0)
+        } else {
+            1.0
+        },
+    }
+}
+
+/// AUTO GAIN's correction under controls `c` from the sound's `curve` (decisions.md
+/// R45): 1 without DRIVE or with AUTO GAIN off.
+fn auto_trim(c: &Controls, curve: &Curve<STEPS>) -> f64 {
+    if c.auto_gain && c.drive > 0.0 {
+        10f64.powf(curve.at(c.drive, DRIVE_TOP) / 20.0)
+    } else {
+        1.0
+    }
+}
+
+/// The seed of AUTO GAIN's measuring voices: their own, not the instance's, so that a sound
+/// measures the same in any instance (the CA-74's R29).
+const PROBE_SEED: u64 = 0x0CA7_2D21_7E00_0001;
+
+/// The voices a sound's panel plays (ENTROPY's tolerances on each, FEEDBACK), one for each of
+/// the notes AUTO GAIN's measurement plays ([`KEYS`]), for measuring DRIVE's loudness off the
+/// audio thread (decisions.md R45; `drive.rs`): made as an engine's first voices are, each
+/// its own (its parts, its oscillators' start, its noise), POLY's, one a note, in the centre,
+/// without the output's gain (MAIN OUTPUT's, LEVEL's, the trims', AUTO GAIN's).
+#[derive(Debug)]
+pub struct Probe {
+    voices: Vec<Playing>,
+    controls: Controls,
+    rate: f64,
+}
+
+impl Probe {
+    /// For the sound of controls `c` with the voices at `rate` Hz.
+    pub fn new(c: &Controls, rate: f64) -> Probe {
+        let mut controls = *c;
+        (
+            controls.poly,
+            controls.unison,
+            controls.double,
+            controls.spread,
+        ) = (true, false, 0.0, 0.0);
+        let entropy = controls.entropy * ENTROPY_DEPTH;
+        let mut panel = c.panel;
+        panel.quality = Quality::Potato;
+        let voices = (0..KEYS.len())
+            .map(|k| {
+                let character = Character::new(voice_seed(PROBE_SEED, k), k, 3, ENTROPY_KNOBS);
+                let mut voice = made_voice(rate, PROBE_SEED, k);
+                voice.feedback = controls.feedback.clamp(0.0, 1.0);
+                voice.panel = if entropy > 0.0 {
+                    entropy_panel(&character, panel, entropy)
+                } else {
+                    panel
+                };
+                // (At QUALITY's LO the light voices measured, as they play.)
+                let mut light = made_light(rate, PROBE_SEED, k);
+                if controls.potato {
+                    light.feedback = voice.feedback;
+                    light.set_panel(&voice.panel);
+                }
+                Playing {
+                    voice,
+                    light,
+                    potato: controls.potato,
+                    character,
+                    key: PolyKey::new(rate),
+                    gate: false,
+                    note: 0,
+                    drop: false,
+                    out: [[0.0; CHUNK]; 2],
+                    peak: 0.0,
+                    pan: None,
+                    panel_gen: 0,
+                    broken: false,
+                    twin: made_twin(rate, PROBE_SEED, k),
+                    double: false,
+                }
+            })
+            .collect();
+        Probe {
+            voices,
+            controls,
+            rate,
+        }
+    }
+
+    /// The K-weighted energy of [`KEYS`] played together, held [`HELD`] s and heard for
+    /// [`HEARD`] s, at DRIVE `db` (dB): each time from the voices as they were made.
+    pub fn energy(&self, db: f64) -> f64 {
+        let mut c = self.controls;
+        c.drive = db;
+        let m = mix_of(&c, KEYS.len());
+        let mut voices = self.voices.clone();
+        for (v, key) in voices.iter_mut().zip(KEYS) {
+            v.note = key;
+        }
+        let mut k = KWeighted::new(self.rate);
+        let held = (HELD * self.rate) as usize;
+        let heard = (HEARD * self.rate) as usize;
+        let ext = [0.0; CHUNK];
+        let share = glide_share(self.rate);
+        let mut at = 0;
+        while at < heard {
+            let until = if at < held { held } else { heard };
+            let n = CHUNK.min(until - at);
+            for v in &mut voices {
+                v.gate = at < held;
+                v.play_from(&ext[..n], self.rate, &m, share);
+            }
+            for i in 0..n {
+                k.push(voices.iter().map(|v| v.out[0][i]).sum());
+            }
+            at += n;
+        }
+        k.energy
+    }
+}
+
+/// DOUBLE's trim on the output: a note's two voices, each its own, add in power, so it is
+/// turned down by two's square root and sounds about as loud as one voice a note (the CA-74's
+/// R28).
+fn double_trim(c: &Controls) -> f64 {
+    if c.double > 0.0 { DOUBLE_TRIM } else { 1.0 }
+}
+
 /// Voice `k`'s noise seed from the instance's: the first voice's the instance's own.
 fn voice_seed(seed: u64, k: usize) -> u64 {
     if k == 0 {
@@ -1521,6 +2338,43 @@ pub fn output_gain(volume: f64, on: bool) -> f64 {
 mod tests {
     use super::*;
     use crate::pool::Budget;
+
+    /// A voice's output's peak as the engine reports it, playing the panel as it opens and
+    /// louder: printed, for the editor's level scale (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "prints levels"]
+    fn voice_levels() {
+        for (name, c) in [
+            ("as it opens", Controls::default()),
+            (
+                "POLY, four voices",
+                Controls {
+                    poly: true,
+                    voices: 4,
+                    ..Controls::default()
+                },
+            ),
+        ] {
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 1);
+            for key in [45, 52, 57, 64] {
+                e.event(Event::Note { key, on: true });
+            }
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut most = [0.0f32; LEVELS];
+            let mut out = 0.0f32;
+            for _ in 0..200 {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                for (m, v) in most.iter_mut().zip(e.levels()) {
+                    *m = m.max(*v);
+                }
+                out = l.iter().chain(r.iter()).fold(out, |m, v| m.max(v.abs()));
+            }
+            println!("{name}: voices' peaks {most:?}, the output's {out}");
+        }
+    }
 
     fn four_voices(workers: usize) -> Engine {
         let mut e = Engine::new();
@@ -1654,7 +2508,7 @@ mod tests {
         assert!(!s.drop && p.drop);
         s.hand(&mut p);
         assert!(p.drop, "the drop lost");
-        p.play(1, &[0.0; CHUNK], 48_000.0, &Mix::from_array([0.0; 4]));
+        p.play(1, &[0.0; CHUNK], 48_000.0, &Mix::from_array([0.0; MIX_LEN]));
         assert!(!p.drop);
         s.gate = false;
         s.ran(false);
@@ -1884,5 +2738,806 @@ mod tests {
                 "voice {k}"
             );
         }
+    }
+
+    /// Left and right power of `keys` held for a second with `c`, and the largest difference
+    /// of a sample's two sides.
+    fn sides(c: &Controls, keys: &[u8]) -> (f64, f64, f64) {
+        let mut e = Engine::new();
+        e.set(c);
+        e.prepare(48_000.0, 9);
+        for &key in keys {
+            e.event(Event::Note { key, on: true });
+        }
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let (mut mid, mut side, mut diff) = (0.0f64, 0.0f64, 0.0f64);
+        for _ in 0..(48_000 / 256) {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(256);
+            for (&a, &b) in l.iter().zip(&r) {
+                let (a, b) = (f64::from(a), f64::from(b));
+                mid += (0.5 * (a + b)).powi(2);
+                side += (0.5 * (a - b)).powi(2);
+                diff = diff.max((a - b).abs());
+            }
+        }
+        (mid, side, diff)
+    }
+
+    /// At full SPREAD a three-note chord fills the field (side within 3 dB of mid; the old
+    /// places and pan law, a voice in the centre weighed double, gave less), and one voice
+    /// alone stays in the centre, left and right the same (decisions.md R45).
+    #[test]
+    fn a_chord_fills_the_field_and_one_voice_stays_in_the_centre() {
+        let c = Controls {
+            poly: true,
+            voices: 8,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let (mid, side, _) = sides(&c, &[57, 61, 64]);
+        let db = 10.0 * (side / mid).log10();
+        assert!(db > -3.0, "side {db:.1} dB against mid");
+        let mono = Controls { poly: false, ..c };
+        let (_, _, diff) = sides(&mono, &[57]);
+        assert_eq!(diff, 0.0, "one voice off the centre");
+    }
+
+    /// INNER at 100 % clears the centre: a chord on EVEN's three voices, one of them in the
+    /// centre at INNER 0, is all at the edges, its side nearer its mid; one voice alone stays in
+    /// the centre, whatever INNER (decisions.md R49).
+    #[test]
+    fn inner_clears_the_centre_and_one_voice_stays_there() {
+        let c = Controls {
+            poly: true,
+            voices: 3,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let share = |c: &Controls| {
+            let (mid, side, _) = sides(c, &[57, 61, 64]);
+            side / mid
+        };
+        let (open, cleared) = (share(&c), share(&Controls { inner: 1.0, ..c }));
+        assert!(
+            cleared > 1.3 * open,
+            "side against mid: {open:.3} then {cleared:.3}"
+        );
+        let mono = Controls {
+            poly: false,
+            inner: 1.0,
+            ..c
+        };
+        let (_, _, diff) = sides(&mono, &[57]);
+        assert_eq!(diff, 0.0, "one voice off the centre");
+    }
+
+    /// POLY's notes go round the voices: a note after one let go and fallen silent takes the
+    /// next voice, not the first again.
+    #[test]
+    fn poly_notes_go_round_the_voices() {
+        let c = Controls {
+            poly: true,
+            voices: 4,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 9);
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        for (i, key) in [48u8, 50, 52, 53, 55].into_iter().enumerate() {
+            e.event(Event::Note { key, on: true });
+            let k = e
+                .slots
+                .iter()
+                .position(|s| s.gate)
+                .expect("a voice for the note");
+            assert_eq!(k, i % 4, "note {i}");
+            e.event(Event::Note { key, on: false });
+            for _ in 0..(3 * 48_000 / 256) {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+            }
+            assert!(e.slots.iter().all(|s| !s.active), "note {i} not silent");
+        }
+    }
+
+    /// A key played again takes the voice it last had, letting go or fallen silent, so a chord
+    /// struck again stays where it was in the field; a new key still takes the next voice.
+    #[test]
+    fn a_key_played_again_keeps_its_voice() {
+        let c = Controls {
+            poly: true,
+            voices: 8,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 9);
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let chord = [60u8, 64, 67];
+        let voices = |e: &Engine| -> Vec<usize> {
+            chord
+                .iter()
+                .map(|&key| {
+                    e.slots
+                        .iter()
+                        .position(|s| s.gate && s.note == key)
+                        .expect("a voice for the key")
+                })
+                .collect()
+        };
+        let strike = |e: &mut Engine, on: bool| {
+            for key in chord {
+                e.event(Event::Note { key, on });
+            }
+        };
+        strike(&mut e, true);
+        let first = voices(&e);
+        strike(&mut e, false);
+        // Struck again while letting go, then again after falling silent.
+        for wait in [2usize, 3 * 48_000 / 256] {
+            for _ in 0..wait {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+            }
+            strike(&mut e, true);
+            assert_eq!(voices(&e), first, "after {wait} blocks");
+            strike(&mut e, false);
+        }
+        e.event(Event::Note { key: 69, on: true });
+        let new = e.slots.iter().position(|s| s.gate).unwrap();
+        assert!(
+            !first.contains(&new),
+            "a new key on voice {new}, one of the chord's"
+        );
+    }
+
+    /// A held note's power over `seconds` (after `skip` of them) with `c`, on key `key`.
+    fn held_power(c: &Controls, key: u8, skip: f64, seconds: f64) -> f64 {
+        let mut e = Engine::new();
+        e.set(c);
+        e.prepare(48_000.0, 9);
+        e.event(Event::Note { key, on: true });
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let mut sum = 0.0f64;
+        for k in 0..((skip + seconds) * 48_000.0 / 256.0) as usize {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(256);
+            if k as f64 >= skip * 48_000.0 / 256.0 {
+                sum += l
+                    .iter()
+                    .chain(&r)
+                    .map(|&x| f64::from(x).powi(2))
+                    .sum::<f64>();
+            }
+        }
+        sum
+    }
+
+    /// UNISON's voices come in anywhere in their cycles, not in step: with LOCK (every voice
+    /// the circuit as drawn, nothing to pull them apart) a held note is still about as loud
+    /// with eight of them as with one (within 2 dB), where eight in step would sum 9 dB louder
+    /// (decisions.md R45, the CA-74's R25).
+    #[test]
+    fn unison_voices_come_in_out_of_step() {
+        let c = Controls {
+            voices: 8,
+            lock: true,
+            ..Controls::default()
+        };
+        let one = held_power(&c, 40, 0.0, 1.0);
+        let all = held_power(&Controls { unison: true, ..c }, 40, 0.0, 1.0);
+        let db = 10.0 * (all / one).log10();
+        assert!(db.abs() < 2.0, "UNISON {db:+.1} dB against one voice");
+    }
+
+    /// UNISON's voices, each its own, are trimmed by their count's square root: a held note
+    /// is about as loud with eight of them as with one (within 2 dB, over its sustain).
+    #[test]
+    fn unison_is_about_as_loud_as_one_voice() {
+        let c = Controls {
+            voices: 8,
+            entropy: 0.3,
+            ..Controls::default()
+        };
+        let one = held_power(&c, 45, 1.0, 2.0);
+        let all = held_power(&Controls { unison: true, ..c }, 45, 1.0, 2.0);
+        let db = 10.0 * (all / one).log10();
+        assert!(db.abs() < 2.0, "UNISON {db:+.1} dB against one voice");
+    }
+
+    /// Every UNISON voice takes the keys as the one instrument's keyboard does (lowest-note
+    /// priority, single triggering): its keyboard voltage the one instrument's after each of a
+    /// run of keys pressed and let go, legato and not; and every voice sounds.
+    #[test]
+    fn unison_voices_take_the_keys_as_the_instrument_does() {
+        let events: [(u8, bool); 8] = [
+            (60, true),
+            (64, true),
+            (55, true),
+            (55, false),
+            (60, false),
+            (64, false),
+            (67, true),
+            (62, true),
+        ];
+        let run = |unison: bool| -> Vec<Vec<f64>> {
+            let c = Controls {
+                unison,
+                voices: 4,
+                ..Controls::default()
+            };
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut out = Vec::new();
+            for (key, on) in events {
+                e.event(Event::Note { key, on });
+                for _ in 0..8 {
+                    e.render(&[], &mut l, &mut r);
+                    e.end_block(256);
+                }
+                let n = if unison { 4 } else { 1 };
+                out.push(
+                    (0..n)
+                        .map(|k| e.slots[k].play.lock().unwrap().voice.probe().0)
+                        .collect(),
+                );
+            }
+            if unison {
+                assert_eq!(e.sounding(), 4, "every UNISON voice sounding");
+            }
+            out
+        };
+        let (one, all) = (run(false), run(true));
+        for (i, (o, a)) in one.iter().zip(&all).enumerate() {
+            for (k, v) in a.iter().enumerate() {
+                assert!(
+                    (v - o[0]).abs() < 1e-9,
+                    "after event {i}, voice {k}'s keyboard at {v} V, the instrument's {}",
+                    o[0]
+                );
+            }
+        }
+    }
+
+    /// Switching UNISON lets every key go: no voice's keyboard holds a key after it.
+    #[test]
+    fn switching_unison_lets_every_key_go() {
+        let c = Controls {
+            unison: true,
+            voices: 4,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 9);
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        e.event(Event::Note { key: 60, on: true });
+        e.render(&[], &mut l, &mut r);
+        e.set(&Controls { unison: false, ..c });
+        e.render(&[], &mut l, &mut r);
+        for k in 0..4 {
+            assert!(
+                !e.slots[k].play.lock().unwrap().voice.envelopes().2,
+                "voice {k} still holds a key"
+            );
+        }
+    }
+
+    /// Left and right of `c` with `keys` held for `seconds`, as `sides` plays them.
+    fn played(c: &Controls, keys: &[u8], seconds: f64) -> (Vec<f64>, Vec<f64>) {
+        let mut e = Engine::new();
+        e.set(c);
+        e.prepare(48_000.0, 9);
+        for &key in keys {
+            e.event(Event::Note { key, on: true });
+        }
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let (mut ls, mut rs) = (Vec::new(), Vec::new());
+        for _ in 0..(seconds * 48_000.0 / 256.0) as usize {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(256);
+            ls.extend(l.iter().map(|&x| f64::from(x)));
+            rs.extend(r.iter().map(|&x| f64::from(x)));
+        }
+        (ls, rs)
+    }
+
+    /// DOUBLE: a note's twin half the detune sharp on the left, its voice half flat on the
+    /// right (at full SPREAD each alone on its side), the two apart by the detune
+    /// (decisions.md R45, the CA-74's R28): 7 % of 100 cents. One oscillator, LOCK.
+    #[test]
+    fn double_puts_the_sharp_twin_left_and_the_flat_voice_right() {
+        let mut c = Controls {
+            double: 0.07,
+            spread: 1.0,
+            lock: true,
+            ..Controls::default()
+        };
+        c.panel.osc[1].on = false;
+        c.panel.osc[2].on = false;
+        let (ls, rs) = played(&c, &[57], 2.0);
+        let hz = |x: &[f64]| {
+            ca72_analysis::pitch::pitch(&x[24_000..], 48_000)
+                .median_hz
+                .expect("a pitch")
+        };
+        let cents = 1200.0 * (hz(&ls) / hz(&rs)).log2();
+        assert!(
+            (cents - 7.0).abs() < 1.5,
+            "left against right {cents:.1} cents"
+        );
+    }
+
+    /// DOUBLE's two voices a note, each its own, are trimmed by two's square root: a chord is
+    /// about as loud with DOUBLE as without (within 2 dB); with SPREAD at 0 the pair stays in
+    /// the centre, left and right the same.
+    #[test]
+    fn double_is_about_as_loud_and_stays_in_the_centre_without_spread() {
+        let loud = |double: f64| {
+            let c = Controls {
+                poly: true,
+                double,
+                entropy: 0.3,
+                spread: 1.0,
+                ..Controls::default()
+            };
+            let (mid, side, _) = sides(&c, &[57, 61, 64]);
+            mid + side
+        };
+        let db = 10.0 * (loud(0.35) / loud(0.0)).log10();
+        assert!(
+            db.abs() < 2.0,
+            "DOUBLE {db:+.1} dB against one voice a note"
+        );
+        let centred = Controls {
+            double: 0.35,
+            ..Controls::default()
+        };
+        let (_, _, diff) = sides(&centred, &[57]);
+        assert_eq!(diff, 0.0, "the pair off the centre with SPREAD at 0");
+    }
+
+    /// DOUBLE takes the placement (the CA-74's R41): with CENTER a note on the first voice
+    /// has its pair in the centre, left and right the same; with EVEN out to the sides (its
+    /// first voice's place is an edge). INNER at 100 % puts every pair at the edges, as EDGES
+    /// did (R49): CENTER's first pair is then where EVEN's is, to the bit. One voice alone
+    /// (POLY off) has its pair as far out as SPREAD whatever the placement (the kit's `ALONE`),
+    /// there too.
+    #[test]
+    fn double_takes_the_placement_its_pairs_mirrored() {
+        let doubled = |poly: bool, placement: Placement, inner: f64| Controls {
+            poly,
+            voices: 4,
+            double: 0.35,
+            spread: 1.0,
+            inner,
+            placement,
+            ..Controls::default()
+        };
+        let (_, _, diff) = sides(&doubled(true, Placement::Centre, 0.0), &[57]);
+        assert_eq!(diff, 0.0, "CENTER's first pair in the centre");
+        let even = sides(&doubled(true, Placement::Even, 0.0), &[57]);
+        assert!(even.1 > 0.1 * even.0, "EVEN: the pair out to the sides");
+        let inner = sides(&doubled(true, Placement::Centre, 1.0), &[57]);
+        assert_eq!(
+            inner, even,
+            "INNER at 100 %: CENTER's first pair at the edges"
+        );
+        let alone = sides(&doubled(false, Placement::Centre, 0.0), &[57]);
+        assert_eq!(alone, even, "POLY off: the pair at the edges");
+    }
+
+    /// DOUBLE's pairs played by the workers are the same to the bit as on the caller's thread
+    /// (a pair is one place's: whoever takes it plays both).
+    #[test]
+    fn doubled_voices_on_the_workers_are_the_same_to_the_bit() {
+        let c = Controls {
+            poly: true,
+            double: 0.35,
+            spread: 1.0,
+            entropy: 0.3,
+            ..Controls::default()
+        };
+        let run = |workers: usize| -> Vec<f32> {
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            if workers > 0 {
+                e.start_workers(workers, None);
+            }
+            for key in [48, 55, 60, 64, 67] {
+                e.event(Event::Note { key, on: true });
+            }
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut out = Vec::new();
+            for _ in 0..100 {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                out.extend_from_slice(&l);
+                out.extend_from_slice(&r);
+            }
+            out
+        };
+        let (alone, shared) = (run(0), run(2));
+        assert!(alone.iter().any(|x| x.abs() > 1e-3), "silence compared");
+        assert!(
+            alone
+                .iter()
+                .zip(&shared)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+        );
+    }
+
+    /// DOUBLE turned off lets the note go, and the twin plays its tail out on its side (INNER at
+    /// 100 %: every pair at the edges, as EDGES had them), then falls silent and stops; a key
+    /// pressed after reaches the voice alone, in the centre. POLY off and on.
+    #[test]
+    fn a_twin_let_go_plays_its_tail_out_and_takes_no_new_key() {
+        for poly in [false, true] {
+            let c = Controls {
+                poly,
+                double: 0.35,
+                spread: 1.0,
+                inner: 1.0,
+                ..Controls::default()
+            };
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            e.event(Event::Note { key: 57, on: true });
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut block = |e: &mut Engine| {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                l.iter()
+                    .zip(&r)
+                    .map(|(&a, &b)| f64::from(a - b).abs())
+                    .fold(0.0, f64::max)
+            };
+            for _ in 0..40 {
+                block(&mut e);
+            }
+            e.set(&Controls { double: 0.0, ..c });
+            assert!(
+                block(&mut e) > 1e-3,
+                "poly {poly}: the tail not to either side"
+            );
+            for _ in 0..(10 * 48_000 / 256) {
+                block(&mut e);
+            }
+            let live = |e: &Engine| e.slots.iter().any(|s| s.play.lock().unwrap().twin.live);
+            assert!(!live(&e), "poly {poly}: a twin still live after its tail");
+            e.event(Event::Note { key: 60, on: true });
+            let mut most = 0.0f64;
+            for _ in 0..40 {
+                let d = block(&mut e);
+                if !poly {
+                    most = most.max(d);
+                }
+            }
+            assert_eq!(most, 0.0, "poly {poly}: a new key off the centre");
+            assert!(!live(&e), "poly {poly}: a twin took the new key");
+            assert!(
+                e.slots
+                    .iter()
+                    .all(|s| !s.play.lock().unwrap().twin.voice.envelopes().2),
+                "poly {poly}: a twin holds a key"
+            );
+        }
+    }
+
+    /// A held note's energy (left and right) below and above `hz`, `skip` to `skip + 1` s in,
+    /// with `c`; and the samples. A sustained sound: oscillator 1's sawtooth alone, the
+    /// filter half open.
+    fn bands(c: &Controls, hz: f64, skip: f64) -> (f64, f64, Vec<f64>) {
+        let (l, r) = played(c, &[45], skip + 1.0);
+        let from = (skip * 48_000.0) as usize;
+        let y: Vec<f64> = l[from..]
+            .iter()
+            .zip(&r[from..])
+            .map(|(a, b)| a + b)
+            .collect();
+        let n = y.len();
+        let (mut low, mut high) = (0.0, 0.0);
+        // (A plain DFT on whole-hertz bins: one second, 1 Hz apart.)
+        for f in (5..4_000).step_by(5) {
+            let w = 2.0 * std::f64::consts::PI * f as f64 / 48_000.0;
+            let (mut re, mut im) = (0.0, 0.0);
+            for (k, &v) in y.iter().enumerate() {
+                re += v * (w * k as f64).cos();
+                im += v * (w * k as f64).sin();
+            }
+            let e = (re * re + im * im) / n as f64;
+            if (f as f64) < hz {
+                low += e;
+            } else {
+                high += e;
+            }
+        }
+        (low, high, y)
+    }
+
+    fn sustained() -> Controls {
+        let mut c = Controls {
+            lock: true,
+            ..Controls::default()
+        };
+        c.panel.osc[1].on = false;
+        c.panel.osc[2].on = false;
+        c.panel.loudness_contour.sustain = 1.0;
+        c
+    }
+
+    /// DRIVE drives the filter's input pair harder: a held note grows louder with it, and by
+    /// less the higher it goes, as the pair saturates (on a sawtooth +2.7, +5.1, +8.5 and +10.7
+    /// dB at 3, 6, 12 and 24 dB; decisions.md R45). (Not brighter: the ladder's stages,
+    /// slew-limited by their currents, take the highs the clipping adds.)
+    #[test]
+    fn drive_drives_the_filter_harder() {
+        let c = sustained();
+        let (lo0, hi0, _) = bands(&c, 1_000.0, 0.5);
+        // (AUTO GAIN off: DRIVE alone.)
+        let louder = |drive: f64| {
+            let c = Controls {
+                drive,
+                auto_gain: false,
+                ..c
+            };
+            let (lo, hi, _) = bands(&c, 1_000.0, 0.5);
+            10.0 * ((lo + hi) / (lo0 + hi0)).log10()
+        };
+        let (a, b, d) = (louder(6.0), louder(12.0), louder(24.0));
+        assert!(a > 3.0, "DRIVE 6 dB: {a:+.1} dB");
+        assert!(
+            a < b && b < d,
+            "DRIVE 6, 12, 24 dB: {a:+.1}, {b:+.1}, {d:+.1} dB"
+        );
+        assert!(d < 18.0, "DRIVE 24 dB: {d:+.1} dB, the pair not saturating");
+    }
+
+    /// LEVEL moves the output by its decibels, and at 0 dB is no gain at all.
+    #[test]
+    fn level_moves_the_output_by_its_decibels() {
+        assert_eq!(level_gain(0.0), 1.0);
+        let c = sustained();
+        let (l0, _) = played(&c, &[45], 0.3);
+        let (l, _) = played(&Controls { level: -6.0, ..c }, &[45], 0.3);
+        let (a, b) = (
+            l0.iter().map(|x| x * x).sum::<f64>(),
+            l.iter().map(|x| x * x).sum::<f64>(),
+        );
+        let db = 10.0 * (b / a).log10();
+        assert!((db + 6.0).abs() < 1e-3, "LEVEL -6 dB: {db:+.4} dB");
+    }
+
+    /// AUTO GAIN's correction glides on the output: switched off at DRIVE 12 dB, it takes the
+    /// output up by the curve's correction there, a sample at a time, without a step (the
+    /// ratio of the outputs every sample from 1 to the correction, by at most a hundredth a
+    /// sample). Without DRIVE it asks for none: AUTO GAIN on or off, the same to the bit
+    /// (decisions.md R45, the CA-74's R29).
+    #[test]
+    fn autos_correction_glides_and_without_drive_there_is_none() {
+        let run = |c: Controls, then: Controls| -> Vec<f32> {
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            e.event(Event::Note { key: 45, on: true });
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut y = Vec::new();
+            for k in 0..60 {
+                if k == 40 {
+                    e.set(&then);
+                }
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                y.extend_from_slice(&l);
+            }
+            y
+        };
+        let c = Controls {
+            drive: 12.0,
+            ..sustained()
+        };
+        let off = Controls {
+            auto_gain: false,
+            ..c
+        };
+        let (on, switched) = (run(c, c), run(c, off));
+        let at = 40 * 256;
+        assert_eq!(on[..at], switched[..at]);
+        let want = 10f64.powf(-AVERAGE.at(12.0, DRIVE_TOP) / 20.0);
+        // (Each sample's ratio where the output is not near nought, and its index.)
+        let ratios: Vec<(usize, f64)> = on[at..]
+            .iter()
+            .zip(&switched[at..])
+            .enumerate()
+            .filter(|(_, (a, _))| a.abs() > 1e-3)
+            .map(|(i, (a, b))| (i, f64::from(*b) / f64::from(*a)))
+            .collect();
+        assert!(ratios[0].1 < 1.01, "a step: {}", ratios[0].1);
+        assert!(
+            ratios
+                .windows(2)
+                .filter(|w| w[1].0 == w[0].0 + 1)
+                .all(|w| (w[1].1 - w[0].1).abs() < 0.01),
+            "a step within the glide"
+        );
+        let last = ratios[ratios.len() - 1].1;
+        assert!((last - want).abs() < 1e-3 * want, "{last} against {want}");
+        let plain = sustained();
+        let (a, b) = (
+            run(plain, plain),
+            run(
+                plain,
+                Controls {
+                    auto_gain: false,
+                    ..plain
+                },
+            ),
+        );
+        assert_eq!(a, b);
+    }
+
+    /// Blocks of `e` for `seconds`, the loudest sample's level.
+    fn loudest(e: &mut Engine, seconds: f64) -> f32 {
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let mut most = 0.0f32;
+        for _ in 0..(seconds * 48_000.0 / 256.0) as usize {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(256);
+            most = l.iter().chain(&r).fold(most, |a, x| a.max(x.abs()));
+        }
+        most
+    }
+
+    /// QUALITY at LO (decisions.md R47): the one instrument and POLY's voices play the
+    /// light model, not the circuit's, and switching QUALITY lets go of the keys held, as
+    /// switching POLY does.
+    #[test]
+    fn quality_lo_plays_the_light_voices_and_switching_it_lets_go_of_the_keys() {
+        let mut c = Controls {
+            potato: true,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 1);
+        e.event(Event::Note { key: 57, on: true });
+        assert!(loudest(&mut e, 0.5) > 0.01, "the light voice silent");
+        {
+            let p = e.slots[0].play.lock().unwrap();
+            assert!(p.light.held(), "the key not on the light voice");
+            assert!(!p.voice.envelopes().2, "the circuit's voice got the key");
+        }
+        c.potato = false;
+        e.set(&c);
+        assert!(
+            !e.slots[0].play.lock().unwrap().light.held(),
+            "the key still held on the light voice"
+        );
+        // POLY at LO: a chord's voices sound, and fall silent and free after (the DECAY
+        // switch off: the contours let go at once).
+        (c.potato, c.poly, c.panel.decay) = (true, true, false);
+        e.set(&c);
+        for key in [48, 55, 64] {
+            e.event(Event::Note { key, on: true });
+        }
+        assert!(loudest(&mut e, 0.5) > 0.01, "POLY's light voices silent");
+        assert_eq!(e.sounding(), 3);
+        e.event(Event::AllNotesOff);
+        // (Two seconds: the VCA's thump dies away over about one, as the circuit's does.)
+        loudest(&mut e, 2.0);
+        assert_eq!(e.sounding(), 0, "POLY's light voices not freed");
+    }
+
+    /// QUALITY at ULTRA (decisions.md R48): the circuit's voices play with no compromises,
+    /// and switching to HI and back changes the model's setting under the key held, without
+    /// letting go of it. (A short while: No Compromises is slow, more so in a debug build.)
+    #[test]
+    fn quality_ultra_plays_the_circuit_with_no_compromises_and_keeps_the_key() {
+        let mut c = Controls {
+            ultra: true,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 1);
+        e.event(Event::Note { key: 57, on: true });
+        assert!(loudest(&mut e, 0.05) > 0.001, "ULTRA's voice silent");
+        {
+            let p = e.slots[0].play.lock().unwrap();
+            assert_eq!(p.voice.panel.quality, Quality::NoCompromises);
+            assert!(p.voice.envelopes().2, "the key not on the circuit's voice");
+        }
+        c.ultra = false;
+        e.set(&c);
+        loudest(&mut e, 0.01);
+        let p = e.slots[0].play.lock().unwrap();
+        assert_eq!(p.voice.panel.quality, Quality::Potato);
+        assert!(p.voice.envelopes().2, "switching to HI let go of the key");
+    }
+
+    /// At LO the one instrument plays a run at a time ([`Engine::run_one`]): the same samples,
+    /// to the bit, as a sample at a time, ENTROPY's movements and the glide of its place
+    /// among them.
+    #[test]
+    fn the_one_voice_at_lo_plays_a_run_as_a_sample_at_a_time() {
+        let c = Controls {
+            potato: true,
+            entropy: 0.5,
+            ..Controls::default()
+        };
+        let make = || {
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 3);
+            e.event(Event::Note { key: 60, on: true });
+            e
+        };
+        let (mut runs, mut samples) = (make(), make());
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let mut heard = 0.0f32;
+        for block in 0..40 {
+            runs.render(&[], &mut l, &mut r);
+            for i in 0..256 {
+                let (a, b) = samples.tick_stereo(0.0);
+                assert!(
+                    a.to_bits() == l[i].to_bits() && b.to_bits() == r[i].to_bits(),
+                    "block {block}, sample {i}"
+                );
+                heard = heard.max(a.abs());
+            }
+            runs.end_block(256);
+            samples.end_block(256);
+        }
+        assert!(heard > 0.01, "silent");
+    }
+
+    /// At LO DOUBLE's pair and UNISON's voices are placed and levelled as at HI: the pair to
+    /// either side at full SPREAD, the unison about as loud as one voice.
+    #[test]
+    fn lo_places_double_and_levels_unison_as_hi() {
+        let doubled = Controls {
+            potato: true,
+            poly: true,
+            double: 1.0,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let (mid, side, _) = sides(&doubled, &[57]);
+        assert!(side > 0.05 * mid && mid > 0.0, "mid {mid}, side {side}");
+        let c = Controls {
+            potato: true,
+            voices: 8,
+            entropy: 0.3,
+            ..Controls::default()
+        };
+        let one = held_power(&c, 45, 1.0, 2.0);
+        let all = held_power(&Controls { unison: true, ..c }, 45, 1.0, 2.0);
+        let db = 10.0 * (all / one).log10();
+        assert!(db.abs() < 2.0, "UNISON {db:+.1} dB against one voice");
+    }
+
+    /// AUTO GAIN measures a sound at LO with the light voices (`drive.rs`), its key the sound's
+    /// at LO; at HI keyed as before.
+    #[test]
+    fn auto_gain_measures_lo_with_the_light_voices() {
+        let hi = Controls::default();
+        let lo = Controls { potato: true, ..hi };
+        assert_ne!(crate::drive::sound(&lo), crate::drive::sound(&hi));
+        let probe = Probe::new(&lo, MIN_VOICE_RATE);
+        assert!(probe.voices.iter().all(|v| v.potato));
+        let e = probe.energy(0.0);
+        assert!(e.is_finite() && e > 0.0, "{e}");
+        assert!(
+            Probe::new(&hi, MIN_VOICE_RATE)
+                .voices
+                .iter()
+                .all(|v| !v.potato)
+        );
     }
 }

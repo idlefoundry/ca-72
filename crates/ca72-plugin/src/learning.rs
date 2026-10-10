@@ -6,12 +6,12 @@
 
 use std::time::{Duration, Instant};
 
+use ca72_panel::Target;
 use ca72_panel::controls::{CONTROLS, index as control_index};
 use ca72_panel::fonts::Fonts;
 use ca72_panel::learn::{Menu, Note, PANEL, Tone, above};
 use ca72_panel::presets::{MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone};
 use ca72_panel::strip::{StripControl, span};
-use ca72_panel::{H, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 
 use crate::learn::{Assigned, Cc, LEARNABLE, MidiMap, RESERVED_TEXT, index, reserved};
@@ -22,8 +22,9 @@ const NOTICE: Duration = Duration::from_secs(4);
 /// The keys the drawer's MIDI list takes, as it says.
 pub const KEYS_TEXT: &str = "UP, DOWN: CHOOSE · ENTER: LEARN · DELETE: REMOVE · ESC: CANCEL";
 
-/// Where a learnable parameter's control is: the panel's (its index in [`CONTROLS`]), the
-/// strip's, or none (LOCK: the drawer's list alone learns it).
+/// Where a learnable parameter's control is: the panel's (its index in [`CONTROLS`]: the
+/// strip's knobs and the left hand's are the panel's controls too), the strip's tabs, or none
+/// (LOCK: the drawer's list alone learns it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
     Panel(usize),
@@ -35,9 +36,10 @@ pub fn place(i: usize) -> Option<Place> {
     let id = LEARNABLE.get(i)?.id;
     Some(match id {
         "poly" => Place::Strip(StripControl::Poly),
-        "voices" => Place::Strip(StripControl::Voices),
-        "entropy" => Place::Strip(StripControl::Entropy),
-        "spread" => Place::Strip(StripControl::Spread),
+        "unison" => Place::Strip(StripControl::Unison),
+        "doubled" => Place::Strip(StripControl::Double),
+        "placement" => Place::Strip(StripControl::Placement),
+        "auto_gain" => Place::Strip(StripControl::AutoGain),
         _ => Place::Panel(control_index(id)?),
     })
 }
@@ -48,21 +50,21 @@ pub fn learnable_at(p: Place) -> Option<usize> {
         Place::Panel(c) => index(CONTROLS.get(c)?.param),
         Place::Strip(s) => index(match s {
             StripControl::Poly => "poly",
-            StripControl::Voices => "voices",
-            StripControl::Entropy => "entropy",
-            StripControl::Spread => "spread",
+            StripControl::Unison => "unison",
+            StripControl::Double => "doubled",
+            StripControl::Placement => "placement",
+            StripControl::AutoGain => "auto_gain",
         }),
     }
 }
 
-/// Where a note about a place's control goes: centred above it (a strip control's, above the
-/// strip, at the panel's foot).
+/// Where a note about a place's control goes: centred above it.
 fn note_point(p: Place) -> (f64, f64) {
     match p {
         Place::Panel(c) => above(&CONTROLS[c]),
         Place::Strip(s) => {
-            let (x0, x1) = span(s);
-            ((x0 + x1) / 2.0, H)
+            let (x0, y0, x1, _) = span(s);
+            ((x0 + x1) / 2.0, y0)
         }
     }
 }
@@ -76,6 +78,10 @@ pub enum Item {
     List,
     /// Says why the control cannot be learned; does nothing.
     Not,
+    /// QUALITY's (decisions.md R48): its indicator above it (the hamster, the lamp, the
+    /// Tesla lamp, through the shutter) shown, or hidden (the panel blank there).
+    Show,
+    Hide,
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -96,6 +102,8 @@ pub enum Pressed {
     Done,
     /// MIDI ASSIGNMENTS…: the drawer's MIDI list wanted, this parameter chosen.
     List(Option<usize>),
+    /// QUALITY's menu: its indicator shown (true), or hidden.
+    Indicator(bool),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -130,6 +138,7 @@ fn not_learnable(t: Target) -> Option<String> {
         Target::Control(i) | Target::Legend(i, _) => match CONTROLS.get(i)?.param {
             "pitch_wheel" => "PITCH: MIDI PITCH BEND MOVES IT".into(),
             "mod_wheel" => "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT".into(),
+            "quality" => "QUALITY: SET PER PLUGIN INSTANCE".into(),
             _ => return None,
         },
         Target::Power => "POWER: THE HOST'S BYPASS".into(),
@@ -226,6 +235,39 @@ impl Learning {
         self.take_keys = true;
     }
 
+    /// QUALITY's menu (decisions.md R48; a right click on its toggle, the owner: "default
+    /// mode is to show the quality indicators (tesla coil, hamster, etc.), but they can be
+    /// hidden as an option. This can be selectable by right clicking the toggle switch."),
+    /// opened at (`x`, `y`): why MIDI Learn does not learn it, as its title, then its indicator
+    /// shown or hidden (`shown`: the one it is, dim), and the MIDI list, as a control's that
+    /// cannot be learned has.
+    pub fn open_quality_menu(&mut self, fonts: &Fonts, (x, y): (f64, f64), size: f64, shown: bool) {
+        let items = [
+            (Item::Show, "SHOW ITS INDICATOR", !shown),
+            (Item::Hide, "HIDE ITS INDICATOR", shown),
+            (Item::Not, "NOT LEARNED BY MIDI LEARN", false),
+            (Item::List, "MIDI ASSIGNMENTS\u{2026}", true),
+        ];
+        let menu = Menu {
+            x,
+            y,
+            size,
+            title: "QUALITY: SET PER PLUGIN INSTANCE".to_owned(),
+            items: items
+                .iter()
+                .map(|(_, t, on)| ((*t).to_owned(), *on))
+                .collect(),
+            hover: None,
+        }
+        .placed(fonts, x, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: items.into_iter().map(|(it, ..)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
     /// The menu closed.
     pub fn close_menu(&mut self) {
         self.open = None;
@@ -257,6 +299,8 @@ impl Learning {
             (Some(Item::Cancel), _) => self.cancel(map),
             (Some(Item::Remove), Some(i)) => self.remove(map, i),
             (Some(Item::List), l) => return Pressed::List(l),
+            (Some(Item::Show), _) => return Pressed::Indicator(true),
+            (Some(Item::Hide), _) => return Pressed::Indicator(false),
             _ => {}
         }
         Pressed::Done

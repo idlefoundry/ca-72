@@ -326,6 +326,17 @@ impl Vco {
         self.dec[0].delay() + 1.0 / self.oversample as f64
     }
 
+    /// Starts again `at` (0 at the ramp's top after a reset, towards 1 at the threshold where
+    /// it resets) down its ramp, as a free-running oscillator is wherever it has got to when a
+    /// note comes, rather than at the reference's initial condition (decisions.md R45, the
+    /// CA-74's R25). Its edges' state starts as a reset leaves it: an edge the place has already
+    /// passed comes right at the next cycle.
+    pub fn start_at(&mut self, at: f64) {
+        self.reset();
+        let f = at.clamp(0.0, 0.98);
+        self.v = self.core.v_top0 + f * (self.core.v_threshold - self.core.v_top0);
+    }
+
     /// Starts again from the top of the ramp.
     pub fn reset(&mut self) {
         self.v = self.core.v_top0;

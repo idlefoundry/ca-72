@@ -1,11 +1,13 @@
-//! What the factory presets' measurements share (`preset_cost.rs`, `preset_render.rs`): a
-//! preset's controls, and POLY's chords played into the engine a block at a time.
+//! What the factory presets' measurements share (`preset_cost.rs`, `preset_render.rs`,
+//! `preset_levels.rs`, `drive_auto.rs`): a preset's controls, its levelling phrase, notes
+//! played through the engine, and POLY's chords played into it a block at a time.
 
 #![allow(dead_code, clippy::unwrap_used)]
 
+use ca72_plugin::drive::{Curve, STEPS};
 use ca72_plugin::engine::{Controls, Engine, Event};
 use ca72_plugin::library::Sound;
-use ca72_plugin::params::{Ca72Params, Footage, Wave, Wave3};
+use ca72_plugin::params::{Ca72Params, Footage, Scatter, Wave, Wave3};
 use nih_plug::prelude::Enum;
 
 pub fn env<T: std::str::FromStr>(name: &str, default: T) -> T {
@@ -20,6 +22,7 @@ pub fn env<T: std::str::FromStr>(name: &str, default: T) -> T {
 pub fn controls_of(s: &Sound) -> Controls {
     let mut c = Ca72Params::default().controls();
     let on = |v: f64| v >= 0.5;
+    let mut doubled = None;
     for (id, v) in &s.values {
         let v = *v;
         let p = &mut c.panel;
@@ -51,6 +54,7 @@ pub fn controls_of(s: &Sound) -> Controls {
             "noise_on" => p.noise_on = on(v),
             "noise_volume" => p.noise_volume = v / 10.0,
             "noise_type" => p.noise_pink = on(v),
+            "filter_mode" => p.filter_hi = on(v),
             "filter_mod" => p.filter_mod = on(v),
             "keyboard_control_1" => p.keyboard_control_1 = on(v),
             "keyboard_control_2" => p.keyboard_control_2 = on(v),
@@ -72,11 +76,30 @@ pub fn controls_of(s: &Sound) -> Controls {
             "midi_bend_range" => c.bend_range = v,
             "entropy" => c.entropy = v / 100.0,
             "spread" => c.spread = v / 100.0,
+            "inner" => c.inner = v / 100.0,
+            "unison" => c.unison = on(v),
+            "double" => c.double = v / 100.0,
+            "drive" => c.drive = v,
+            "level" => c.level = v,
+            "auto_gain" => c.auto_gain = on(v),
+            // By the plug-in's choices (0 EVEN, 1 CENTER), as `presets.rs` takes a preset's.
+            "placement" => {
+                let last = Scatter::variants().len() - 1;
+                c.placement = Scatter::from_index((v.round().max(0.0) as usize).min(last)).into();
+            }
             "feedback" => c.feedback = ca72::voice::feedback_law(v / 10.0),
             "lock" => c.lock = on(v),
+            // (DOUBLE, a switch of its own: its pair played at DETUNE's amount, at none a
+            // ten-thousandth of a cent; a preset without it, DOUBLE where DETUNE is above 0.)
+            "doubled" => doubled = Some(on(v)),
             "poly" | "voices" => {}
             other => panic!("{}: no parameter {other}", s.name),
         }
+    }
+    match doubled {
+        Some(true) => c.double = c.double.max(ca72_plugin::params::DOUBLED_AT_NONE),
+        Some(false) => c.double = 0.0,
+        None => {}
     }
     c
 }
@@ -161,4 +184,96 @@ pub fn play_block(
         k = end;
     }
     e.end_block(len)
+}
+
+/// A phrase: (start, length) in seconds and the keys held.
+pub fn phrase(s: &Sound) -> Vec<(f64, f64, Vec<u8>)> {
+    let tag = |t: &str| s.tags.iter().any(|x| x == t);
+    let poly = s.values.iter().any(|(k, v)| k == "poly" && *v >= 0.5);
+    let held = if tag("slow") { 3.0 } else { 1.5 };
+    if tag("drums") {
+        let key = if tag("snare") { 54 } else { 57 };
+        return (0..4).map(|k| (0.6 * k as f64, 0.25, vec![key])).collect();
+    }
+    if tag("fx") {
+        return vec![(0.0, 6.0, vec![48])];
+    }
+    if poly {
+        return [48u8, 53, 55]
+            .iter()
+            .enumerate()
+            .map(|(k, &r)| {
+                let keys = [0u8, 4, 7, 12, 16, 19].iter().map(|d| r + d).collect();
+                (3.0 * k as f64, 2.5, keys)
+            })
+            .collect();
+    }
+    let roots: [u8; 3] = if tag("bass") {
+        [36, 43, 40]
+    } else {
+        [60, 67, 64]
+    };
+    roots
+        .iter()
+        .enumerate()
+        .map(|(k, &r)| ((held + 0.5) * k as f64, held, vec![r]))
+        .collect()
+}
+
+/// The preset's POLY and VOICES on `c` (the measurements leave them out of [`controls_of`]).
+pub fn played_as(s: &Sound, mut c: Controls) -> Controls {
+    for (k, v) in &s.values {
+        match k.as_str() {
+            "poly" => c.poly = *v >= 0.5,
+            "voices" => c.voices = *v as usize,
+            _ => {}
+        }
+    }
+    c
+}
+
+/// `notes` ((start, length) in seconds and the keys held) played with `c`, AUTO GAIN's `curve`
+/// (None: the engine's own, the average's) for `end` seconds at `rate` Hz, in 256-sample blocks,
+/// each event at its sample: left and right.
+pub fn play(
+    c: &Controls,
+    curve: Option<Curve<STEPS>>,
+    notes: &[(f64, f64, Vec<u8>)],
+    end: f64,
+    rate: f64,
+) -> (Vec<f32>, Vec<f32>) {
+    const BLOCK: usize = 256;
+    let mut e = Engine::new();
+    if let Some(curve) = curve {
+        e.set_curve(curve);
+    }
+    e.set(c);
+    e.prepare(rate, 1);
+    workers(&mut e);
+    let mut events: Vec<(usize, Event)> = Vec::new();
+    for (t0, len, keys) in notes {
+        for &key in keys {
+            events.push(((t0 * rate) as usize, Event::Note { key, on: true }));
+            events.push((((t0 + len) * rate) as usize, Event::Note { key, on: false }));
+        }
+    }
+    events.sort_by_key(|e| e.0);
+    let n = (end * rate / BLOCK as f64) as usize * BLOCK;
+    let (mut l, mut r) = (vec![0.0f32; n], vec![0.0f32; n]);
+    let mut next = events.iter().peekable();
+    for b in (0..n).step_by(BLOCK) {
+        let mut k = b;
+        while k < b + BLOCK {
+            while let Some((_, ev)) = next.next_if(|(at, _)| *at <= k) {
+                e.event(*ev);
+            }
+            let stop = next
+                .peek()
+                .map_or(b + BLOCK, |(at, _)| (*at).clamp(k + 1, b + BLOCK));
+            e.render(&[], &mut l[k..stop], &mut r[k..stop]);
+            k = stop;
+        }
+        e.end_block(BLOCK);
+    }
+    (l, r)
 }

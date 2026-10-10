@@ -3,15 +3,18 @@
 //! (up to ten), placed across the stereo output by SPREAD.
 
 pub mod character;
+pub mod drive;
 pub mod editor;
 pub mod engine;
 pub mod helper;
 pub mod learn;
 pub mod learning;
 pub mod library;
+pub mod opening;
 pub mod params;
 pub mod pool;
 pub mod presets;
+pub mod settings;
 pub mod update;
 
 use std::sync::Arc;
@@ -39,6 +42,8 @@ pub struct Ca72 {
     /// The knobs learned MIDI controllers have just moved, gliding in the voices (decisions.md
     /// R34).
     dezip: Dezip,
+    /// AUTO GAIN's curve's writes as the audio thread last read them (`drive.rs`).
+    curve_seen: u64,
 }
 
 impl std::fmt::Debug for Ca72 {
@@ -69,6 +74,7 @@ impl Ca72 {
             rate: 48_000.0,
             helper: None,
             dezip: Dezip::default(),
+            curve_seen: 0,
         }
     }
 }
@@ -243,14 +249,46 @@ impl Plugin for Ca72 {
     ///
     /// A state without MIDI assignments (saved before MIDI Learn) opens with none, whatever the
     /// instance had; a table that is not understood is none either (decisions.md R34).
+    ///
+    /// A session saved with SCATTER's EDGES, no longer offered (INNER does its work: decisions.md
+    /// R49), or with a placement not understood, opens with EVEN, the default, not at what
+    /// the instance had.
     fn filter_state(state: &mut PluginState) {
         learn::filter_state(&mut state.fields);
+        // A state saved before DOUBLE was a switch of its own: DOUBLE where its DETUNE is
+        // above 0 (decisions.md R45).
+        if !state.params.contains_key("doubled") {
+            let detuned =
+                matches!(state.params.get("double"), Some(ParamValue::F32(d)) if *d > 0.0);
+            state
+                .params
+                .insert("doubled".to_owned(), ParamValue::Bool(detuned));
+        }
+        // A state without AUTO GAIN's curve (saved before DRIVE), or with one that is not
+        // understood, opens with the average's, whatever the instance had (decisions.md
+        // R45, the CA-74's R29).
+        let curve = state
+            .fields
+            .get(drive::STATE_KEY)
+            .and_then(|t| serde_json::from_str::<drive::Saved>(t).ok())
+            .unwrap_or_else(drive::unmeasured);
+        if let Ok(t) = serde_json::to_string(&curve) {
+            state.fields.insert(drive::STATE_KEY.to_owned(), t);
+        }
         state.params.remove("analog");
         if !state.params.contains_key("entropy") {
             let entropy = Ca72Params::default().entropy.default_plain_value();
             state
                 .params
                 .insert("entropy".to_owned(), ParamValue::F32(entropy));
+        }
+        let offered = |id: &str| params::Scatter::ids().is_some_and(|ids| ids.contains(&id));
+        if matches!(state.params.get("placement"), Some(ParamValue::String(id)) if !offered(id)) {
+            let even = Ca72Params::default().placement.default_plain_value();
+            state.params.insert(
+                "placement".to_owned(),
+                ParamValue::I32(even.to_index() as i32),
+            );
         }
     }
 
@@ -274,8 +312,15 @@ impl Plugin for Ca72 {
         let rate = f64::from(config.sample_rate);
         self.rate = rate;
         self.dezip.prepare(rate);
+        // (AUTO GAIN's measurements on the helper thread: decisions.md R45.)
+        self.engine.calibrate_with(self.params.drive_curve.clone());
         if self.helper.is_none() {
-            self.helper = Helper::start(self.engine.spares(), self.engine.crew()).ok();
+            self.helper = Helper::start(
+                self.engine.spares(),
+                self.engine.crew(),
+                self.params.drive_curve.clone(),
+            )
+            .ok();
         }
         // POLY's workers, audio threads for the host's largest block (decisions.md R11), held
         // only while POLY is on: started here if it is, else on the helper thread when it is
@@ -309,6 +354,9 @@ impl Plugin for Ca72 {
         // (A knob whose parameter something else has set since a learned controller moved it
         // stops gliding: the host's automation, the editor and presets set the voices as ever.)
         self.dezip.follow(&self.params);
+        if let Some(c) = self.params.drive_curve.read(&mut self.curve_seen) {
+            self.engine.set_curve(c);
+        }
         self.engine.set(&self.controls());
         let len = buffer.samples();
         // The voices' deadline: a share of the block's period from now (decisions.md R11);
@@ -385,7 +433,16 @@ impl Plugin for Ca72 {
             next = context.next_event();
         }
         let lamp = self.engine.end_block(len);
-        self.meters.publish(lamp, self.engine.midi_wheels());
+        self.meters
+            .publish(lamp, self.engine.midi_wheels(), self.engine.sounding_mask());
+        // The voices' levels and the output's, for the editor's drops and QUALITY's lamps:
+        // only while an editor is open (else a flag read a block, and nothing more).
+        if self.meters.watched() {
+            let peak = out.iter().fold(0.0f32, |m, ch| {
+                ch.iter().take(len).fold(m, |m, v| m.max(v.abs()))
+            });
+            self.meters.publish_levels(self.engine.levels(), peak);
+        }
         self.ask_helper();
         ProcessStatus::KeepAlive
     }
@@ -510,6 +567,39 @@ mod tests {
         let mut new = state(&[("entropy", 40.0)]);
         Ca72::filter_state(&mut new);
         assert_eq!(entropy(&new), Some(40.0));
+    }
+
+    /// A session saved with SCATTER's EDGES (no longer offered: R49), or with a placement
+    /// not understood, opens with EVEN (its index, as nih-plug sets an enum by one), not at what
+    /// the instance had (R18); one saved with EVEN or CENTER keeps its own.
+    #[test]
+    fn a_session_saved_with_edges_opens_with_even() {
+        let filtered = |id: &str| {
+            let mut s = PluginState {
+                version: String::new(),
+                params: [("placement".to_owned(), ParamValue::String(id.to_owned()))].into(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            s.params.remove("placement")
+        };
+        let even = params::Scatter::Even.to_index() as i32;
+        for id in ["edges", "sideways"] {
+            assert!(
+                matches!(filtered(id), Some(ParamValue::I32(i)) if i == even),
+                "{id}"
+            );
+        }
+        for id in ["even", "centre"] {
+            assert!(
+                matches!(filtered(id), Some(ParamValue::String(s)) if s == id),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            params::Scatter::from_index(even as usize),
+            params::Scatter::Even
+        );
     }
 
     /// One block of `len` samples processed as a host calls `process`, with the events pushed to
@@ -1195,6 +1285,56 @@ mod tests {
             w.release();
         }
         assert!(left.iter().chain(&right).all(|x| x.is_finite()));
+    }
+
+    /// AUTO GAIN's curve is the session's (decisions.md R45, the CA-74's R29): saved,
+    /// loaded into another instance, and the engine plays with it from the next block; a
+    /// session saved before DRIVE, loaded into an instance with a measured curve, leaves it the
+    /// average's; one whose curve is not understood, the average's too.
+    #[test]
+    fn a_session_holds_its_curve_and_an_old_one_the_average() {
+        use crate::drive::{AVERAGE, Curve, STATE_KEY, Saved, unmeasured};
+        use nih_plug::params::persist::PersistentField;
+        let state = |fields: BTreeMap<String, String>| PluginState {
+            version: String::new(),
+            params: Default::default(),
+            fields,
+        };
+        let measured = Saved {
+            sound: 5,
+            db: [-1.0, -2.0, -3.0, -4.0],
+        };
+        let a = Ca72::default();
+        a.params.drive_curve.set(measured);
+        let saved = a.params.serialize_fields();
+        assert_eq!(
+            saved.get(STATE_KEY).map(String::as_str),
+            Some(r#"{"sound":5,"db":[-1.0,-2.0,-3.0,-4.0]}"#)
+        );
+        let mut b = Ca72::default();
+        let mut s = state(saved);
+        Ca72::filter_state(&mut s);
+        b.params.deserialize_fields(&s.fields);
+        assert_eq!(b.params.drive_curve.saved(), measured);
+        let mut c = hostless(&b);
+        block(&mut b, &mut c, 64);
+        assert_eq!(b.engine.curve(), Curve(measured.db));
+        // Older, without one: the average's.
+        let mut old = state(BTreeMap::from([(
+            "preset".to_owned(),
+            "\"Bass\"".to_owned(),
+        )]));
+        Ca72::filter_state(&mut old);
+        b.params.deserialize_fields(&old.fields);
+        assert_eq!(b.params.drive_curve.saved(), unmeasured());
+        block(&mut b, &mut c, 64);
+        assert_eq!(b.engine.curve(), AVERAGE);
+        // Not understood: the average's.
+        b.params.drive_curve.set(measured);
+        let mut bad = state(BTreeMap::from([(STATE_KEY.to_owned(), "[1, 2".to_owned())]));
+        Ca72::filter_state(&mut bad);
+        b.params.deserialize_fields(&bad.fields);
+        assert_eq!(b.params.drive_curve.saved(), unmeasured());
     }
 }
 

@@ -64,9 +64,9 @@ find **CA-72** in **Settings › Apps** and choose **Uninstall**; on Linux, run
 presets are kept.
 
 **Updating.** Open the presets' drawer (click the preset's name under the panel) and click
-**CHECK FOR UPDATES** at its top right, beside the version you have. If a newer release is
-out, **DOWNLOAD** opens its installer for your computer in your browser: close your host,
-then run it as above. The CA-72 checks only when you click, through your system's `curl`,
+**[ CHECK FOR UPDATES ]** at the foot of the PRESET display, under the version you have. If a
+newer release is out, **[ DOWNLOAD ]** opens its installer for your computer in your browser:
+close your host, then run it as above. The CA-72 checks only when you click, through your system's `curl`,
 and sends nothing of yours.
 
 ## Playing it
@@ -81,11 +81,19 @@ and sends nothing of yours.
   past the audio band.
 - **POLY** (under the panel, not the instrument's): off, the one instrument as above. On,
   each note plays a whole instrument of its own, with its own keyboard circuit, contours
-  and glide, up to VOICES of them (2 to 10). A new note takes a free voice, else the
-  oldest of those let go, else the oldest held; a voice that was still held lifts its key
-  and presses the new one 13 ms later, so its contours start again (the circuit re-arms
+  and glide, up to VOICES of them (2 to 10). A new note takes the voice that last played
+  its key if that one is free or letting go (a chord struck again stays where it was), else
+  the free voice whose last note began longest ago (the notes go round the voices), else the
+  one let go longest ago, else the one held longest; a voice that was still held lifts its
+  key and presses the new one 13 ms later, so its contours start again (the circuit re-arms
   its trigger only after about 12 ms, and so the note's pitch and attack come 13 ms
   late). The wheels reach every voice. Switching POLY stops the notes sounding.
+- **UNISON** (off by default): every note on VOICES whole instruments at once, each taking
+  the keys as the one instrument does (the lowest note held, triggering once), each with
+  its own parts under ENTROPY and its own place under SPREAD, their oscillators at
+  different points of their cycles; turned down so that it sounds about as loud as one
+  voice. It outranks POLY. Switching it, or VOICES while it is on, stops the notes
+  sounding.
 - **ENTROPY** (0 to 100 %, off by default): each voice its own parts, as if built from a
   different batch: the three oscillators' tuning, the filter's cutoff and EMPHASIS, the
   contours' times and GLIDE, each off by a little; the oscillators and the cutoff drift
@@ -93,22 +101,67 @@ and sends nothing of yours.
   still keeps a tiny mismatch and drift of its own, as no two real ones are the same:
   perfectly identical oscillators lock in phase and sound louder, not better. The host
   parameter **Lock** makes them identical (the circuit as drawn), its level matched.
-- **SPREAD** (0 to 100 %, off by default): POLY's voices across the stereo field, the
-  first in the centre and the next alternately left and right. With POLY off the voice
-  stays in the centre.
+- **SPREAD** (0 to 100 %, off by default): POLY's or UNISON's voices across the stereo
+  field, each as loud wherever it sits, where **SCATTER** puts them: EVEN (the default),
+  evenly from edge to edge, the first two at the edges; or CENTER, the first in the centre and
+  the rest spread about it by the golden ratio. With POLY and UNISON off the voice stays in the centre
+  (unless DOUBLE). A voice moves to a new place over 10 ms.
+- **INNER** (0 to 100 %, off by default): the inner edge of each side, as a share of SPREAD
+  (the strip's WIDTH). SPREAD brings the voices in from the outer edges; INNER moves them out
+  from the centre. Each side's voices sit in a band from INNER's share of SPREAD's way out to
+  SPREAD's edge, as far across it as SCATTER puts them, and none in the centre: a voice SCATTER
+  puts there (CENTER's first, EVEN's last with an odd number of voices) goes to the side its
+  turn falls on. With DOUBLE the pairs keep to the band too. At 100 % every voice sits at
+  SPREAD's edge; at SPREAD 0, or with POLY and UNISON off and no DOUBLE, it does nothing.
+- **DOUBLE** (0 to 100 %, off by default): each note two whole voices, up to 20 cents apart,
+  the sharper on the left. With SPREAD the pair goes out to either side of the centre, as
+  far as SCATTER puts the note's voice (with INNER at 100 %, and with POLY and UNISON off, all
+  of SPREAD's way); at SPREAD 0 both are in the centre. Turned down so that it sounds about as
+  loud as one voice a note; it doubles the voices' work. Switching it on or off stops the
+  notes sounding; a doubled voice let go plays its tail out.
+- **DRIVE** (0 to 24 dB, off by default): the mixer's signal raised into the filter's input,
+  driving it harder than the panel's mixer can. The sound grows louder, by less the higher
+  DRIVE goes as the filter's input saturates, and darker: the filter's stages take the highs
+  the clipping adds. **AUTO GAIN** (on by default) turns the output down by as much as DRIVE
+  made the sound louder. The plug-in measures each sound when you change it in its window
+  (three short notes at each of DRIVE's steps, a few tenths of a second's work on a thread of
+  its own) and keeps the result with your session, so that it plays and renders the same
+  again. A sound set only by the host or a MIDI controller uses the factory presets' average
+  until it is changed in the window.
+- **LEVEL** (-30 to +12 dB, 0 by default): the output's gain, after MAIN OUTPUT's.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
   default), and the modulation wheel (CC 1) moves the MODULATION wheel. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
-- **Output:** stereo, the same on both channels unless SPREAD places POLY's voices; on a
-  mono output, the two channels together.
+- **Output:** stereo, the same on both channels unless SPREAD places the voices or DOUBLE's
+  pairs; on a mono output, the two channels together.
 - **FEEDBACK** (the phones' VOLUME knob, 0 by default): the instrument has no overdrive
   control; players cable its PHONES output into EXTERNAL INPUT. This knob is that cable:
   turn it up, switch the MIXER's EXTERNAL INPUT on and raise its VOLUME, and the output
   overdrives the external input's preamplifier and the mixer (OVERLOAD lights). With it on
   a voice costs about a fifth more.
+- **FILTER MODE** (at the head of the filter's switch column, LO by default): the original
+  has no such switch; a modern recreation of the instrument has, and this is its high-pass,
+  measured on one. At HI the output is the mixer's less the filter's: about 6 dB an octave
+  below the cutoff, the deepest bass coming back, and as EMPHASIS rises, a shelf with the
+  resonance's peak on it rather than a high-pass. At LO the filter is the drawing's.
 - **POWER** is the host's bypass: the output fades out over 10 ms and back in.
+- **QUALITY** (a chrome toggle above POWER: ULTRA, HI by default, or LO; not the
+  instrument's): at ULTRA the circuit's model plays with no compromises, its most exact, at
+  about seven times the work of HI; one voice takes about a whole core of a fast computer, so
+  it is meant for offline renders (export, bounce, freeze) and small projects on powerful
+  computers. Choosing it, a shutter in the panel above opens and a lamp comes up and lights
+  (or, chosen with a right click on the lamp, ALWAYS OPEN: the lamp stays up and only its
+  light comes and goes); the first time, a
+  note says what ULTRA is for. At LO, Potato mode, the
+  voices are played by a light model instead of the circuit's, for computers the circuit is
+  too heavy for. It follows the same panel, the plug-in's own controls with it, its laws
+  fitted to the circuit's (pitch, levels, the filter's cutoff, emphasis and rings, the
+  contours, GLIDE, the VCA, DRIVE and FILTER MODE), and sounds close to it but simpler: ten
+  voices take a thirtieth to a fortieth of what they do at HI. Switching it stops the notes
+  sounding (switching between HI and ULTRA does not). It is saved with the session, not with
+  presets: it suits the computer, not the sound.
 
 The editor works like the panel:
 
@@ -132,21 +185,24 @@ dimmed while POLY is off, and FEEDBACK while EXTERNAL INPUT is closed.
 **Presets.** At the strip's left: the preset last chosen (marked • once you change it), a
 star to make it a favourite, the previous and next preset, and SAVE…. A preset holds every
 control but the PITCH wheel, POWER and MIDI BEND RANGE (your keyboard's, which choosing a
-preset leaves as it is), POLY, VOICES, ENTROPY and SPREAD among them. Click
-the name and a drawer opens below the strip, the window growing to hold it (in a host that
-will not resize the window, it slides up over the panel instead):
+preset leaves as it is), POLY, VOICES, ENTROPY, SPREAD and INNER among them. Click
+the name and a drawer drops down over the strip, in three sections:
 
-- Type to search names, descriptions and tags; FAVOURITES and MINE filter, and so does
-  each tag's chip. Click a preset, or use the arrow keys, to choose it; double-click it to
-  choose it and close the drawer. The mouse wheel or a trackpad scrolls the list.
-- Each row has a star, RENAME, TAGS, DELETE (asked first) and, for a factory preset you
-  edited, REVERT. SAVE AS saves the current sound, named and tagged; naming it as a
-  factory preset saves yours in its place. Names are told apart regardless of case, and a
-  few cannot be used on any system: `factory`, and Windows' device names such as `CON`.
-- Factory presets are never lost: deleting one hides it, and RESTORE FACTORY brings it
-  back.
-- Enter commits a field (in the search, closes the drawer); Escape takes back an edit or
-  closes it. While the drawer is open it takes the keyboard. On macOS the host keeps its
+- **FIND**: type to search names, descriptions and tags; click a tag to filter by it (the
+  wheel scrolls the tags).
+- **PRESETS**: ALL, FAVORITES and MINE over the list. Click a preset, or use the arrow keys,
+  to choose it; double-click it to choose it and close the drawer; click its star to make it a
+  favourite. The mouse wheel or a trackpad scrolls the list.
+- **PRESET**: its keys act on the preset you have chosen: RENAME, TAGS, DELETE (asked first:
+  DELETE again or Enter deletes it) and, for a factory preset you edited, REVERT. SAVE AS
+  saves the current sound, named and tagged (Tab moves from the name to the tags; SAVE AS
+  again or Enter saves); naming it as a factory preset saves yours in its place. Names are
+  told apart regardless of case, and a few cannot be used on any system: `factory`, and
+  Windows' device names such as `CON`. The display under the keys shows the preset, or what
+  you are typing.
+- Factory presets are never lost: deleting one hides it, and RESTORE brings it back.
+- Enter commits a field (in the search, closes the drawer); Escape takes back what a key
+  began, or closes it. While the drawer is open it takes the keyboard. On macOS the host keeps its
   Command and Control shortcuts; on Windows they wait until the drawer shuts, when the
   keyboard goes back to the host; on Linux the editor has the keys while the pointer is
   over it.
@@ -176,15 +232,16 @@ stays as it is). Escape, **CANCEL MIDI LEARN** in the menu, or closing the edito
 waiting, and the controllers learned before are kept. Choosing **MIDI LEARN** on another
 control while one waits moves the waiting there.
 
-**The list.** The **MIDI** button in the presets' drawer (or **MIDI ASSIGNMENTS…** in a
-control's menu) shows every control that can be learned and its controller, with LEARN,
-REMOVE and CANCEL. It works from the keyboard: Up and Down choose a control (a letter jumps
+**The list.** The **MIDI LEARN** key in the presets' drawer (or **MIDI ASSIGNMENTS…** in a
+control's menu) shows every control that can be learned and its controller in the list's
+place, with LEARN, REMOVE and CANCEL. It works from the keyboard: Up and Down choose a control (a letter jumps
 to the next one beginning with it), Enter learns it or stops waiting, Delete or Backspace
 removes its controller, Escape stops waiting and then closes the drawer. It is the only way to
 learn **LOCK**, which has no control on the panel.
 
 **What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches, the left
-hand controller's GLIDE and DECAY switches, and POLY, VOICES, ENTROPY, SPREAD and LOCK. Not
+hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD),
+INNER, SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Not
 the PITCH and MODULATION wheels (MIDI pitch bend and the modulation wheel, CC 1, move them
 already), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
 
@@ -195,7 +252,7 @@ off), 121 (reset all controllers) and 123 (all notes off) do what they always di
 
 **How a controller moves a control:** its value, 0 to 127, sets a knob to that share of its
 travel (127 is the top); RANGE and WAVEFORM to one of their six positions, each an equal
-share of 0–127 (VOICES, its nine); a switch off at 0–63 and on at 64–127. The control goes
+share of 0–127 (VOICES, its nine; SCATTER, its three); a switch off at 0–63 and on at 64–127. The control goes
 straight to the controller's value at its first message ("jump" takeover: it does not wait
 for the controller to pass the control's position). What you hear of a knob follows it over
 10 ms, so that its steps of 1/127 do not zip; the control itself, your host and a saved
@@ -339,8 +396,16 @@ The service documents and datasheets the model was derived from are not included
 
 ## Limitations
 
-- Only the real-time quality, Potato, is in the plug-in. The model's two more exact
-  qualities do not run in real time; they remain in `crates/ca72` and the lab.
+- At HI the circuit's model plays in its real-time quality (the model's own "Potato", not the
+  plug-in's Potato mode); at ULTRA, in its most exact, No Compromises, which does not run in
+  real time on most computers ([docs/decisions.md](docs/decisions.md) R48). The model's
+  High Fidelity quality remains in `crates/ca72` and the lab.
+- **Potato mode (QUALITY at LO) is close to the circuit, not the same**
+  ([docs/decisions.md](docs/decisions.md) R47): a FEEDBACK loop can settle into another
+  oscillation than the circuit's (Undertow Growl is about 3 dB quieter as its notes start,
+  Pulse Strut about 1), the light filter's top octaves fall faster (Ringing Saw Line darker),
+  and driven hard at high EMPHASIS it loses its resonance sooner. Every other factory preset
+  is within a decibel of the circuit's.
 - POLY's voices are shared between the host's audio thread and up to four threads of the
   plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
   [docs/decisions.md](docs/decisions.md) R11, R39), shared by every instance in the
@@ -353,12 +418,18 @@ The service documents and datasheets the model was derived from are not included
   depends on the machine, the host's block size and the host: on a machine of 1 or 2
   processors every voice plays on the host's thread, and on macOS a host whose audio
   threads are not in an audio workgroup runs its share of the voices more slowly. With more
-  than the machine plays, expect dropouts; VOICES (4 by default) sets the most.
+  than the machine plays, expect dropouts; VOICES (4 by default) sets the most. DOUBLE
+  makes each voice two, so ten voices doubled are twenty voices' work.
   A voice that one of the plug-in's threads has not finished by three quarters of the
   block's period is silent for the rest of that run, and the block's later runs play on
   the host's thread, rather than the block being late. An export or a freeze waits for
   every voice.
 - Ten voices at full level with SPREAD can peak above 0 dBFS; lower MAIN OUTPUT's VOLUME.
+- AUTO GAIN brings a measured sound back within about half a decibel up to 12 dB of DRIVE, and
+  within about a decibel above it, though some sounds are left up to 3 or 4 dB off, as the
+  notes played change how hard DRIVE bites; with the presets' average standing in, until the
+  sound is changed in the window, about 2 dB. Moving DRIVE quickly can thump on uneven
+  waveforms (the narrow rectangles), as the filter's input rectifies them.
 - The rear panel's control voltage and trigger inputs are left out.
 - The PHONES jack and the jacks in the controller's column are drawn but do nothing (the
   phones' VOLUME knob is FEEDBACK).

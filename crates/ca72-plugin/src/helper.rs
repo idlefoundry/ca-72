@@ -1,7 +1,9 @@
 //! The plug-in's own helper thread (decisions.md R23): it does for the audio thread what must
 //! not be done there, mending the engine's spare voices ([`Spares::mend`]; R18) and starting
 //! and stopping POLY's workers ([`Crew::serve`]; R21), when the audio thread asks, which
-//! allocates nothing and does not wait (a bit set, an unpark).
+//! allocates nothing and does not wait (a bit set, an unpark). And AUTO GAIN's measurements
+//! ([`Calibration::step`]; R45), when the editor asks, a render at a time with the audio
+//! thread's asks seen to between them.
 //!
 //! nih-plug's background thread did this before. Shared by every instance, it holds the
 //! plug-in alive while it runs a task: a host that destroyed the plug-in then got back at once
@@ -10,6 +12,7 @@
 //! stopping before its next voice) and joins it, then stops and joins its voices' workers, so
 //! no thread of the plug-in's runs once the host's destroy returns.
 
+use crate::drive::Calibration;
 use crate::engine::Spares;
 use crate::pool::Crew;
 use std::sync::Arc;
@@ -41,19 +44,28 @@ struct Shared {
 pub struct Helper {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+    calibration: Calibration,
 }
 
 impl Helper {
-    /// The helper started for these spares and this crew. Not on the audio thread.
-    pub fn start(spares: Arc<Spares>, crew: Arc<Crew>) -> std::io::Result<Helper> {
+    /// The helper started for these spares, this crew and these measurements. Not on the
+    /// audio thread.
+    pub fn start(
+        spares: Arc<Spares>,
+        crew: Arc<Crew>,
+        calibration: Calibration,
+    ) -> std::io::Result<Helper> {
         let shared = Arc::new(Shared::default());
         let s = shared.clone();
+        let c = calibration.clone();
         let thread = std::thread::Builder::new()
             .name("ca72-helper".to_owned())
-            .spawn(move || help(&s, &spares, &crew))?;
+            .spawn(move || help(&s, &spares, &crew, &c))?;
+        calibration.set_helper(Some(thread.thread().clone()));
         Ok(Helper {
             shared,
             thread: Some(thread),
+            calibration,
         })
     }
 
@@ -74,6 +86,7 @@ impl Drop for Helper {
     /// Stopped (a mend in progress before its next voice, a serve once done) and joined. Not
     /// on the audio thread.
     fn drop(&mut self) {
+        self.calibration.set_helper(None);
         self.shared.quit.store(true, Ordering::Release);
         if let Some(t) = self.thread.take() {
             t.thread().unpark();
@@ -82,14 +95,21 @@ impl Drop for Helper {
     }
 }
 
-/// The helper: parked until asked, then the asks done, until told to stop.
-fn help(s: &Shared, spares: &Spares, crew: &Crew) {
+/// The helper: parked until asked, then the asks done, until told to stop. A measurement for
+/// AUTO GAIN goes a render at a time (some tenths of a second's work in all), the asks seen to
+/// between its renders.
+fn help(s: &Shared, spares: &Spares, crew: &Crew, calibration: &Calibration) {
     let quit = || s.quit.load(Ordering::Acquire);
+    let mut job = None;
     while !quit() {
         let asks = s.asks.swap(0, Ordering::AcqRel);
+        let measuring = calibration.step(&mut job);
         if asks == 0 {
-            // (An ask made since the swap leaves the unpark's token: this returns at once.)
-            std::thread::park();
+            if !measuring {
+                // (An ask or a sound asked for since leaves the unpark's token: this returns
+                // at once.)
+                std::thread::park();
+            }
             continue;
         }
         #[cfg(test)]
@@ -165,7 +185,7 @@ mod tests {
     #[test]
     fn a_helper_dropped_mid_round_is_waited_for() {
         let (spares, crew) = (Arc::new(Spares::default()), Arc::new(Crew::new()));
-        let helper = Helper::start(spares.clone(), crew.clone()).unwrap();
+        let helper = Helper::start(spares.clone(), crew.clone(), Default::default()).unwrap();
         let watch = helper.watch();
         watch.hold(true);
         helper.ask(MEND | SERVE);
@@ -192,5 +212,34 @@ mod tests {
             (Arc::strong_count(&spares), Arc::strong_count(&crew)),
             (1, 1)
         );
+    }
+
+    /// The helper measures a sound asked for, on its own (the curve then the sound's), and lets
+    /// the curve go when it is dropped (nothing left to wake). (At the voices' lowest rate: a
+    /// debug build's voice is slow.)
+    #[test]
+    fn the_helper_measures_a_sound_asked_for() {
+        use crate::engine::{Controls, MIN_VOICE_RATE};
+        let cal = Calibration::default();
+        cal.set_rate(MIN_VOICE_RATE);
+        let helper = Helper::start(
+            Arc::new(Spares::default()),
+            Arc::new(Crew::new()),
+            cal.clone(),
+        )
+        .unwrap();
+        let mut c = Controls::default();
+        c.panel.cutoff = 0.4;
+        cal.ask(&c);
+        let start = std::time::Instant::now();
+        while cal.saved().sound != crate::drive::sound(&c) {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(120),
+                "not measured"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        drop(helper);
+        assert_eq!(cal.holders(), 1, "the helper kept the curve");
     }
 }

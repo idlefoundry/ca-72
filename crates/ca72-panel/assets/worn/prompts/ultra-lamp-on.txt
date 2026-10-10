@@ -1,0 +1,9 @@
+Use your image generation tool to edit the attached image (lamp-off-b.png, in the current directory) into one new image, then save it in the current directory as lamp-on.png (copy the generated file there). Do nothing else.
+
+The edit: the same picture, identical in every other way (the same framing, size and position, the same bezel, knurling, glass, bulb and filament, the same plain mid-grey #808080 background), except that the lamp is now lit, warmly, as a valve amplifier's pilot lamp is once it has warmed up:
+- the filament glows bright orange-white;
+- the bulb glows around it;
+- the amber glass glows warm orange from inside, brightest around the bulb, deeper amber towards its rim; the small highlight at the dome's upper left stays;
+- the chrome bezel catches a little warm light on its inner bevel;
+- no glow spills onto the grey background; no cast shadow; no text, letters, numbers, symbols or logos anywhere.
+Keep the image the same size as the attached one.

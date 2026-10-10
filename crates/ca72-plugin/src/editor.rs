@@ -1,12 +1,15 @@
 //! The editor: the front panel (`ca72-panel`) in a window of its own (baseview), its frames
-//! shown with softbuffer, and under it the plug-in's own controls (`ca72_panel::strip`: POLY,
-//! VOICES with what plays in real time here, ENTROPY and SPREAD). Every control operates its
-//! parameter through the host, a drag one gesture (one undo step in hosts that keep them);
-//! the POWER switch is the bypass; the OVERLOAD lamp and the wheels show what the audio
-//! thread reports. The grip at the panel's bottom right corner resizes the window. Under the strip the presets' bar, and their drawer over
-//! the panel (`crate::presets`, decisions.md R10), which takes the keyboard while open; in the
-//! drawer the update check (`crate::update`, R27). A right click opens a control's menu, for
-//! MIDI Learn; the drawer's MIDI button shows its list of assignments (`crate::learning`, R34).
+//! shown with softbuffer, and under it the plug-in's own strip (`ca72_panel::strip`, A6:
+//! decisions.md R44): the presets' rail, the left hand's GLIDE, DECAY and wheels, MODE,
+//! VOICES and ENTROPY, how the voices are played across the field, WIDTH, INNER, DETUNE and
+//! where the voices sound, DRIVE, AUTO GAIN and LEVEL. Every control operates its parameter
+//! through the host, a drag one gesture (one undo step in hosts that keep them); the POWER
+//! switch is the bypass; the OVERLOAD lamp, the wheels and the voices' display show what the
+//! audio thread reports. The grip at the window's bottom right corner resizes it. The presets'
+//! drawer drops down from under the rail over the strip (`crate::presets`, decisions.md R10),
+//! the window keeping its size, and takes the keyboard while open; in it the update check
+//! (`crate::update`, R27). A right click opens a control's menu, for MIDI Learn; the drawer's
+//! MIDI button shows its list of assignments (`crate::learning`, R34).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -19,19 +22,24 @@ use baseview::{
 };
 use ca72_panel::art::{self, POWER};
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
+use ca72_panel::learn::{Note, Tone};
 use ca72_panel::presets::{
-    BAR_END, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, ROW_H, bar_hit, drawer_hit,
-    overlay,
+    BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, PresetKey, ROW_H, drawer_hit,
+    in_tags,
 };
-use ca72_panel::strip::{self, Amount, STRIP_H, StripRenderer, StripScene, StripTarget};
-use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Target, interact};
+use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
+use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
+use plugin_kit_stereo::place;
 
+use crate::engine::LEVELS;
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
-use crate::params::Ca72Params;
+use crate::opening::{ANIMATE_S, Motion, level_of};
+use crate::params::{Ca72Params, QualityMode, Scatter};
 use crate::presets::Browser;
+use crate::settings::Settings;
 use crate::update::Update;
 
 /// The share of the usable screen the editor opens at until it is resized.
@@ -40,7 +48,7 @@ const SCREEN_SHARE: f64 = 0.8;
 pub const DEFAULT_WIDTH: u32 = 1380;
 /// How small and large the grip makes it.
 const MIN_WIDTH: u32 = 860;
-const MAX_WIDTH: u32 = 3438;
+const MAX_WIDTH: u32 = 3108;
 
 /// Two presses within this long are a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -51,16 +59,10 @@ const NOTCH: f64 = 40.0;
 /// A control's menu's lettering, against the tip's.
 const MENU_TEXT: f64 = 1.15;
 
-/// The editor's height at `width`: the panel in its proportions, and the strip (with the
-/// presets' selector) under it.
+/// The editor's height at `width`: the panel and the strip under it, in the drawing's
+/// proportions.
 pub fn height_for(width: u32) -> u32 {
-    (f64::from(width) * (art::H + STRIP_H) / art::W).round() as u32
-}
-
-/// What the presets' drawer adds to the window's height at `width` while it is open below
-/// the bar.
-pub fn drawer_height(width: u32) -> u32 {
-    (f64::from(width) * DRAWER_H / art::W).round() as u32
+    (f64::from(width) * art::H / art::W).round() as u32
 }
 
 fn clamp_width(width: u32) -> u32 {
@@ -71,7 +73,7 @@ fn clamp_width(width: u32) -> u32 {
 /// (logical pixels), its height kept within the same share.
 fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
     screen.map_or(DEFAULT_WIDTH, |(w, h)| {
-        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / (art::H + STRIP_H));
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / art::H);
         clamp_width(w.round() as u32)
     })
 }
@@ -82,6 +84,14 @@ pub struct Meters {
     overload: AtomicU32,
     bend: AtomicU32,
     modulation: AtomicU32,
+    /// The voices sounding, a bit a voice (`Engine::sounding_mask`).
+    voices: AtomicU32,
+    /// Each voice's output's peak since the editor last took them (`Engine::levels`), and the
+    /// plug-in's output's, the highest kept: a peak is never negative, and such a float's bits
+    /// order as its value. Only while an editor watches them (`watchers`, how many).
+    levels: [AtomicU32; LEVELS],
+    output: AtomicU32,
+    watchers: AtomicU32,
 }
 
 impl Default for Meters {
@@ -90,17 +100,53 @@ impl Default for Meters {
             overload: AtomicU32::new(0.0f32.to_bits()),
             bend: AtomicU32::new(0.5f32.to_bits()),
             modulation: AtomicU32::new(0.0f32.to_bits()),
+            voices: AtomicU32::new(0),
+            levels: std::array::from_fn(|_| AtomicU32::new(0)),
+            output: AtomicU32::new(0),
+            watchers: AtomicU32::new(0),
         }
     }
 }
 
 impl Meters {
-    /// The OVERLOAD lamp (0..1) and a MIDI keyboard's wheels as the panel draws them.
-    pub fn publish(&self, overload: f32, (bend, modulation): (f32, f32)) {
+    /// The OVERLOAD lamp (0..1), a MIDI keyboard's wheels as the panel draws them, and the
+    /// voices sounding (a bit a voice).
+    pub fn publish(&self, overload: f32, (bend, modulation): (f32, f32), voices: u32) {
         self.overload.store(overload.to_bits(), Ordering::Relaxed);
         self.bend.store(bend.to_bits(), Ordering::Relaxed);
         self.modulation
             .store(modulation.to_bits(), Ordering::Relaxed);
+        self.voices.store(voices, Ordering::Relaxed);
+    }
+
+    /// Whether an editor watches the levels (the audio thread measures the output's then).
+    pub fn watched(&self) -> bool {
+        self.watchers.load(Ordering::Relaxed) > 0
+    }
+
+    /// Each voice's output's peak over the block, and the output's (the audio thread's: a
+    /// compare each).
+    pub fn publish_levels(&self, levels: &[f32; LEVELS], output: f32) {
+        let held = |a: &AtomicU32, v: f32| {
+            let v = if v.is_finite() && v > 0.0 { v } else { 0.0 };
+            a.fetch_max(v.to_bits(), Ordering::Relaxed);
+        };
+        for (a, &v) in self.levels.iter().zip(levels) {
+            held(a, v);
+        }
+        held(&self.output, output);
+    }
+
+    /// The voices' peaks and the output's since they were last taken, taken.
+    fn take_levels(&self) -> ([f64; LEVELS], f64) {
+        let take = |a: &AtomicU32| {
+            let v = f64::from(f32::from_bits(a.swap(0, Ordering::Relaxed)));
+            if v.is_finite() { v } else { 0.0 }
+        };
+        (
+            std::array::from_fn(|k| take(&self.levels[k])),
+            take(&self.output),
+        )
     }
 
     fn load(a: &AtomicU32) -> f64 {
@@ -167,6 +213,8 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "noise_type" => &p.noise_type,
         "osc3_on" => &p.osc3_on,
         "osc3_volume" => &p.osc3_volume,
+        "filter_mode" => &p.filter_mode,
+        "quality" => &p.quality,
         "filter_mod" => &p.filter_mod,
         "keyboard_control_1" => &p.keyboard_control_1,
         "keyboard_control_2" => &p.keyboard_control_2,
@@ -187,6 +235,14 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "decay_on" => &p.decay_on,
         "pitch_wheel" => &p.pitch_wheel,
         "mod_wheel" => &p.mod_wheel,
+        // The strip's knobs (A6).
+        "voices" => &p.voices,
+        "entropy" => &p.entropy,
+        "spread" => &p.spread,
+        "inner" => &p.inner,
+        "double" => &p.double,
+        "drive" => &p.drive,
+        "level" => &p.level,
         _ => return None,
     })
 }
@@ -198,8 +254,6 @@ pub struct Ca72Editor {
     /// The host's scale (f32 bits; 0 none given: the system's, as on macOS).
     scale: AtomicU32,
     open: Arc<AtomicBool>,
-    /// The window grown for the presets' drawer below the bar.
-    grown: Arc<AtomicBool>,
     /// The width fitted to the screen for this opening (0 not yet measured).
     fitted: Arc<AtomicU32>,
 }
@@ -219,7 +273,6 @@ impl Ca72Editor {
             meters,
             scale: AtomicU32::new(0),
             open: Arc::new(AtomicBool::new(false)),
-            grown: Arc::new(AtomicBool::new(false)),
             fitted: Arc::new(AtomicU32::new(0)),
         }
     }
@@ -232,7 +285,6 @@ impl Ca72Editor {
     /// The editor opening: the drawer shut (the window does not open grown), the screen
     /// measured again, its size.
     fn opening(&self) -> (u32, u32) {
-        self.grown.store(false, Ordering::Relaxed);
         self.fitted.store(0, Ordering::Relaxed);
         self.size()
     }
@@ -257,7 +309,6 @@ impl Ca72Editor {
     fn closing(&self) -> Closing {
         Closing {
             open: Arc::clone(&self.open),
-            grown: Arc::clone(&self.grown),
             fitted: Arc::clone(&self.fitted),
         }
     }
@@ -266,14 +317,12 @@ impl Ca72Editor {
 /// The editor's window closed: not open, the drawer shut, the screen to be measured again.
 struct Closing {
     open: Arc<AtomicBool>,
-    grown: Arc<AtomicBool>,
     fitted: Arc<AtomicU32>,
 }
 
 impl Drop for Closing {
     fn drop(&mut self) {
         self.open.store(false, Ordering::Release);
-        self.grown.store(false, Ordering::Relaxed);
         self.fitted.store(0, Ordering::Relaxed);
     }
 }
@@ -301,7 +350,6 @@ impl Editor for Ca72Editor {
         let scale = self.host_scale();
         let params = Arc::clone(&self.params);
         let meters = Arc::clone(&self.meters);
-        let grown = Arc::clone(&self.grown);
         let parent = window::Parent(parent);
         // No window to open in (no parent, no X11 display): nothing shown, rather than
         // baseview's panic in the host's thread (decisions.md R18).
@@ -321,7 +369,6 @@ impl Editor for Ca72Editor {
                     context,
                     params,
                     meters,
-                    grown,
                     width,
                     f64::from(scale.unwrap_or(1.0)),
                     Library::shared(),
@@ -337,12 +384,7 @@ impl Editor for Ca72Editor {
             0 => self.fitted(),
             w => clamp_width(w),
         };
-        let drawer = if self.grown.load(Ordering::Relaxed) {
-            drawer_height(width)
-        } else {
-            0
-        };
-        (width, height_for(width) + drawer)
+        (width, height_for(width))
     }
 
     fn set_scale_factor(&self, factor: f32) -> bool {
@@ -408,21 +450,18 @@ struct Editing {
     width: u32,
     renderer: Renderer,
     scene: Scene,
-    /// The strip under the panel: its renderer and scene, an amount's slider being dragged,
-    /// and each amount's last value but 0 (its switch turns it back on there).
+    /// The strip's own parts (over the drawing's strip): their renderer and scene, and
+    /// ENTROPY's, WIDTH's, DETUNE's and INNER's last amount but 0 (their switches, and SCATTER |
+    /// DOUBLE, turn them back on there; `amount` gives each its place).
     strip: StripRenderer,
     strip_scene: StripScene,
-    sliding: Option<Amount>,
-    last: [f32; 2],
-    /// The presets: the bar's and the drawer's renderers, what they show and do, and the
-    /// panel's frame with the drawer over it (while it shows).
+    last: [f32; 4],
+    /// The presets: the drawer's renderer, what the rail and the drawer show and do, and the
+    /// window's frame: the panel's, the strip's parts under its foot, the drawer over them.
     drawer: DrawerRenderer,
     pub(crate) browser: Browser,
     composed: Option<ca72_panel::Pixmap>,
-    /// The window grown for the drawer below the bar (the editor's `size` reads it), the
-    /// drawer's frame while it slides down there, and a size asked of the window.
-    grown: Arc<AtomicBool>,
-    slid: Option<ca72_panel::Pixmap>,
+    /// A size asked of the window.
     resizing_window: bool,
     /// The drawer placed for its opening (below the strip or over the panel), asked once.
     placed: bool,
@@ -443,10 +482,27 @@ struct Editing {
     /// the window to, asked of the host at the next frame (once a frame, however often the
     /// pointer moves).
     resizing: Option<(f64, u32)>,
+    /// A press, release, wheel or key here since AUTO GAIN's curve was last asked for (as the
+    /// editor opens too): asked again once nothing is held ([`Editing::measure_when_done`]).
+    touched: bool,
     gripped: Option<u32>,
-    /// The usable screen (logical pixels) at the window's scale: the drawer opens below the
-    /// strip only if the window then fits on it.
+    /// The usable screen (logical pixels) at the window's scale (the editor's opening size).
+    #[allow(dead_code)]
     screen: fn(f64) -> Option<(f64, f64)>,
+    /// How far the drawer was down (`Browser::reveal`) in the last frame composed.
+    reveal_shown: f64,
+    /// QUALITY's opening (decisions.md R48; `opening.rs`), moved on by the time since it
+    /// last was, at most [`ANIMATE_S`] apart (the strip's drops move on with it: the two are
+    /// drawn in one frame); the editor opens with QUALITY's setting up. The voices' levels as last taken (0 to 1), for the strip's drops, and the output's
+    /// (the one instrument's drop's, and the lamps').
+    motion: Motion,
+    motion_at: Option<Instant>,
+    levels: [f64; LEVELS],
+    output: f64,
+    /// What this computer keeps (`settings.rs`): ULTRA's shutter or always open, ULTRA's
+    /// note read. The note shows once ULTRA's lamp is lit, until it is read.
+    settings: Settings,
+    ultra_note: bool,
 }
 
 impl PanelWindow {
@@ -458,7 +514,6 @@ impl PanelWindow {
         context: Arc<dyn GuiContext>,
         params: Arc<Ca72Params>,
         meters: Arc<Meters>,
-        grown: Arc<AtomicBool>,
         width: u32,
         dpr: f64,
         library: Library,
@@ -479,7 +534,6 @@ impl PanelWindow {
                 meters,
                 (width, physical.0, dpr),
                 library,
-                grown,
                 |k| screen::usable(Some(k)),
             ),
             keys: None,
@@ -552,12 +606,8 @@ impl PanelWindow {
 
     fn present(&mut self) {
         let e = &self.editing;
-        let panel = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
-        let mut frames = vec![panel, e.strip.frame()];
-        if e.grown.load(Ordering::Relaxed) && (e.browser.open || e.browser.sliding()) {
-            frames.push(e.slid.as_ref().unwrap_or_else(|| e.drawer.frame()));
-        }
-        self.surface.present(self.physical, &frames);
+        let frame = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
+        self.surface.present(self.physical, &[frame]);
     }
 }
 
@@ -570,7 +620,6 @@ impl Editing {
         meters: Arc<Meters>,
         (width, physical_width, dpr): (u32, u32, f64),
         library: Library,
-        grown: Arc<AtomicBool>,
         screen: fn(f64) -> Option<(f64, f64)>,
     ) -> Self {
         Editing {
@@ -579,17 +628,14 @@ impl Editing {
             meters,
             dpr,
             width,
-            renderer: Renderer::new(f64::from(physical_width) / art::W, dpr),
+            renderer: Renderer::with_skin(Skin::Worn, f64::from(physical_width) / art::W, dpr),
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
             strip_scene: StripScene::default(),
-            sliding: None,
-            last: [0.5; 2],
+            last: [0.5; 4],
             drawer: DrawerRenderer::new(f64::from(physical_width) / art::W),
             browser: Browser::new(library),
             composed: None,
-            grown,
-            slid: None,
             resizing_window: false,
             placed: false,
             update: Update::default(),
@@ -603,6 +649,122 @@ impl Editing {
             resizing: None,
             gripped: None,
             screen,
+            touched: true,
+            reveal_shown: 0.0,
+            motion: Motion::default(),
+            motion_at: None,
+            levels: [0.0; LEVELS],
+            output: 0.0,
+            // (The tests' editors keep nothing on the computer.)
+            settings: if cfg!(test) {
+                Settings::default()
+            } else {
+                Settings::load()
+            },
+            ultra_note: false,
+        }
+        .opened()
+    }
+
+    /// As it opens: what QUALITY's setting shows up in its opening, not moving (the hamster
+    /// asleep); it watches the levels, and the voices' peaks held while it was shut are let go.
+    fn opened(mut self) -> Self {
+        self.meters.watchers.fetch_add(1, Ordering::Relaxed);
+        let _ = self.meters.take_levels();
+        self.motion = Motion::at(self.params.quality.value(), 0.0);
+        self.scene.opening = self.motion.opening(!self.settings.shutter);
+        self
+    }
+
+    /// This computer's settings kept (not by the tests' editors).
+    fn keep_settings(&self) {
+        if !cfg!(test) {
+            let _ = self.settings.save();
+        }
+    }
+
+    /// QUALITY's opening moved on towards what its setting `q` shows, by the time since it
+    /// last was (at most 50 ms of it: a stalled frame does not jump it), and the voices' levels
+    /// taken: at most [`ANIMATE_S`] apart (thirty times a second, whatever the screen's rate).
+    /// ULTRA's note shown once its lamp is up, until it is read.
+    fn move_opening(&mut self, now: Instant, q: QualityMode) {
+        let since = self
+            .motion_at
+            .map(|t| now.saturating_duration_since(t).as_secs_f64());
+        if since.is_some_and(|s| s < ANIMATE_S) {
+            return;
+        }
+        let (peaks, output) = self.meters.take_levels();
+        self.levels = peaks.map(level_of);
+        self.output = level_of(output);
+        if self.settings.shutter {
+            self.motion
+                .step(since.unwrap_or(0.0).min(0.05), q, self.output);
+        } else {
+            // (None of it shown: what the setting shows kept up, so that shown again it is
+            // there, still.)
+            self.motion = Motion::at(q, self.output);
+        }
+        self.motion_at = Some(now);
+        let on = q == QualityMode::Ultra;
+        if on && self.motion.coil == 1.0 && !self.settings.ultra_note_read {
+            self.ultra_note = true;
+        }
+        if !on {
+            self.ultra_note = false;
+        }
+        self.scene.opening = self.motion.opening(!self.settings.shutter);
+    }
+
+    /// ULTRA's note: what it is for (the owner: "only intended for offline renders, or small
+    /// projects on powerful PCs"), left of its lamp; a press anywhere closes it, read.
+    fn ultra_note(&self) -> Note {
+        let size = self.renderer.text_size();
+        let lines = vec![
+            ("ULTRA · NO COMPROMISES".to_owned(), Tone::Accent),
+            (
+                "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SEVEN TIMES THE WORK OF HI:".to_owned(),
+                Tone::Plain,
+            ),
+            (
+                "ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER.".to_owned(),
+                Tone::Plain,
+            ),
+            (
+                "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL".to_owned(),
+                Tone::Plain,
+            ),
+            (
+                "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.".to_owned(),
+                Tone::Plain,
+            ),
+            (
+                "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.".to_owned(),
+                Tone::Dim,
+            ),
+            ("CLICK TO CLOSE".to_owned(), Tone::Dim),
+        ];
+        let mut note = Note {
+            x: 0.0,
+            y: 0.0,
+            size,
+            lines,
+        };
+        let (w, h) = note.extent(self.renderer.fonts());
+        // (Its box's right edge a little left of the lamp's column, its top at the lamp's.)
+        note.x = art::COL + 2940.0 - w / 2.0;
+        note.y = art::TOP + 40.0 + h + size * 0.4;
+        note
+    }
+
+    /// A change made here done (nothing held, no wheel's gesture open): AUTO GAIN's curve asked
+    /// for the sound as it now is, measured unless it is already its (decisions.md R45,
+    /// the CA-74's R29). Only the editor asks: the host's automation and learned controllers
+    /// never do, so that a render does not depend on when a measurement finished.
+    fn measure_when_done(&mut self) {
+        if self.touched && !self.dragging() && self.scroll.is_none() {
+            self.touched = false;
+            self.params.drive_curve.ask(&self.params.controls());
         }
     }
 
@@ -628,25 +790,14 @@ impl Editing {
         (x * k, y * k)
     }
 
-    /// Whether the drawer is below the bar (the window grown), else over the panel.
-    fn below(&self) -> bool {
-        self.grown.load(Ordering::Relaxed)
-    }
-
-    /// The drawer's top now (drawing units) and where it is cut off, while it shows: below
-    /// the strip sliding down from under it, else over the panel sliding up from its foot.
+    /// The drawer's top now (drawing units) and where it is cut off, while it shows: dropping
+    /// down from under the rail over the strip's sections (A6), the window as it is.
     fn drawer_span(&self) -> Option<(f64, f64, f64)> {
         let k = self.browser.reveal();
         if k <= 0.0 {
             return None;
         }
-        let foot = art::H + STRIP_H;
-        Some(if self.below() {
-            (foot - (1.0 - k) * DRAWER_H, foot, foot + DRAWER_H)
-        } else {
-            let top = DRAWER_TOP + (1.0 - k) * DRAWER_H;
-            (top, top, art::H)
-        })
+        Some((DRAWER_TOP - (1.0 - k) * DRAWER_H, DRAWER_TOP, art::H))
     }
 
     /// The pointer's place in the drawer (drawer units), if it is over it.
@@ -655,66 +806,29 @@ impl Editing {
         (y >= from && y < to).then_some((x, y - top))
     }
 
-    /// The window's height (logical pixels): the panel, the strip and the bar, and the
-    /// drawer below them while it is open there.
+    /// The window's height (logical pixels): the panel and the strip.
     fn window_height(&self) -> u32 {
         height_for(self.width)
-            + if self.below() {
-                drawer_height(self.width)
-            } else {
-                0
-            }
     }
 
-    /// Whether the window with the drawer below the strip fits on the usable screen (if the
-    /// screen is known): on a short, wide one it would run off its foot.
-    fn drawer_fits(&self) -> bool {
-        let tall = height_for(self.width) + drawer_height(self.width);
-        (self.screen)(self.dpr).is_none_or(|(_, h)| f64::from(tall) <= h)
-    }
-
-    /// The window grown for the drawer as it opens, and back as it shuts (if the host will
-    /// not, or the window would then not fit on the screen, it opens over the panel:
-    /// decisions.md R18).
+    /// The drawer placed as it opens: always over the strip, the window as it is (A6; it had
+    /// grown the window below the strip: decisions.md R18, R19).
     fn follow_drawer(&mut self) {
         let open = self.browser.open;
         if open == self.placed {
             return;
         }
         self.placed = open;
-        if open {
-            self.grown.store(true, Ordering::Relaxed);
-            if self.drawer_fits() && self.context.request_resize() {
-                self.browser.below = true;
-            } else {
-                self.grown.store(false, Ordering::Relaxed);
-                self.browser.below = false;
-            }
-        } else if self.below() {
-            // Shut below the strip: it slides back up under it as it came out, the window
-            // keeping its height until it has (`shrink_shut_drawer`). It had jumped over the
-            // panel and slid down off it (the owner, 2026-10-03; decisions.md R19).
-            return;
-        }
+        self.browser.below = false;
         self.composed = None;
-        self.slid = None;
-        self.resizing_window = true;
     }
 
-    /// The window shrunk back once a drawer shut below the strip has slid up under it.
-    fn shrink_shut_drawer(&mut self) {
-        if !self.browser.open && self.below() && !self.browser.sliding() {
-            self.grown.store(false, Ordering::Relaxed);
-            self.context.request_resize();
-            self.slid = None;
-            self.resizing_window = true;
+    /// The rail's part under the pointer (the drawing's units), if it is over one.
+    fn on_rail(&self, (x, y): (f64, f64)) -> Option<BarTarget> {
+        match strip::hit(x, y) {
+            Some(StripTarget::Bar(t)) => Some(t),
+            _ => None,
         }
-    }
-
-    /// The pointer's place on the presets' bar (bar units), if it is over it.
-    /// The pointer's place on the presets' selector (the strip's left, its units), if there.
-    fn on_bar(&self, (x, y): (f64, f64)) -> Option<(f64, f64)> {
-        ((art::H..art::H + STRIP_H).contains(&y) && x < BAR_END).then_some((x, y - art::H))
     }
 
     fn operated(&self, control: usize) -> Option<&dyn Operated> {
@@ -742,60 +856,103 @@ impl Editing {
         s.end_set_parameter(&self.params.bypass);
     }
 
-    /// An amount's parameter (ENTROPY, SPREAD).
-    fn amount(&self, a: Amount) -> &FloatParam {
+    /// An amount the strip turns off and back on (ENTROPY's, WIDTH's and INNER's readouts,
+    /// SCATTER | DOUBLE): its parameter and its place in `last`.
+    fn amount(&self, a: Readout) -> (&FloatParam, usize) {
         match a {
-            Amount::Entropy => &self.params.entropy,
-            Amount::Spread => &self.params.spread,
+            Readout::Width => (&self.params.spread, 1),
+            Readout::Detune => (&self.params.double, 2),
+            Readout::Inner => (&self.params.inner, 3),
+            _ => (&self.params.entropy, 0),
         }
     }
 
-    /// VOICES stepped by `by`, a gesture of its own.
-    fn step_voices(&self, by: i32) {
+    /// An amount turned off (0, kept) or back on at it (half way if it never was), a gesture of
+    /// its own; nothing if it is so already.
+    fn switch_amount(&mut self, a: Readout, on: bool) {
+        let (p, k) = self.amount(a);
+        let now = p.unmodulated_normalized_value();
+        if (now > 0.0) == on {
+            return;
+        }
+        let to = if on {
+            self.last[k]
+        } else {
+            self.last[k] = now;
+            0.0
+        };
+        let (p, _) = self.amount(a);
         let s = self.setter();
-        let p = &self.params.voices;
         s.begin_set_parameter(p);
-        s.set_parameter(p, p.value() + by);
+        s.set_parameter_normalized(p, to);
         s.end_set_parameter(p);
     }
 
-    /// A press on the strip under the panel, at (`x`, `y`) in its units.
-    fn strip_press(&mut self, x: f64, y: f64) {
-        let Some(target) = strip::hit(x, y) else {
-            return;
-        };
-        if let StripTarget::Switch(a) = target {
-            // Off: 0, the amount kept; on: back to it (half way if it never was).
-            let now = self.amount(a).unmodulated_normalized_value();
-            let to = if now > 0.0 {
-                self.last[a as usize] = now;
-                0.0
-            } else {
-                self.last[a as usize]
-            };
-            let (s, p) = (self.setter(), self.amount(a));
+    /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
+    /// knob unresponsive unless the user is in double mode"), which is drawn dimmed then.
+    fn operable(&self, i: usize) -> bool {
+        CONTROLS
+            .get(i)
+            .is_none_or(|c| c.param != "double" || self.params.doubled.value())
+    }
+
+    /// A switch set, a gesture of its own; nothing if it is so already.
+    fn set_switch(&self, p: &BoolParam, on: bool) {
+        if p.value() != on {
+            let s = self.setter();
             s.begin_set_parameter(p);
-            s.set_parameter_normalized(p, to);
+            s.set_parameter(p, on);
             s.end_set_parameter(p);
-            return;
         }
-        let s = self.setter();
-        match target {
-            StripTarget::Poly => {
-                let p = &self.params.poly;
-                s.begin_set_parameter(p);
-                s.set_parameter(p, !p.value());
-                s.end_set_parameter(p);
+    }
+
+    /// A press on the strip's own parts (the drawing's units): a tab, a readout that is a
+    /// switch, the rail's keys and the name.
+    fn strip_press(&mut self, t: StripTarget) {
+        match t {
+            StripTarget::Switch(a) => {
+                let on = self.amount(a).0.unmodulated_normalized_value() <= 0.0;
+                self.switch_amount(a, on);
             }
-            StripTarget::Fewer => self.step_voices(-1),
-            StripTarget::More => self.step_voices(1),
-            StripTarget::Slider(a) => {
-                let p = self.amount(a);
-                s.begin_set_parameter(p);
-                s.set_parameter_normalized(p, strip::slider_value(a, x) as f32);
-                self.sliding = Some(a);
+            // MONO: POLY and UNISON off; POLY: POLY on, UNISON off; UNISON: on (POLY as it was,
+            // which UNISON outranks: the CA-74's R31).
+            StripTarget::Tab(Bank::Mode, i) => {
+                let p = &self.params;
+                match i {
+                    0 => {
+                        self.set_switch(&p.unison, false);
+                        self.set_switch(&p.poly, false);
+                    }
+                    1 => {
+                        self.set_switch(&p.unison, false);
+                        self.set_switch(&p.poly, true);
+                    }
+                    _ => self.set_switch(&p.unison, true),
+                }
             }
-            StripTarget::Switch(_) => {}
+            StripTarget::Tab(Bank::Stereo, i) => self.set_switch(&self.params.doubled, i == 1),
+            // The tabs are the placement's choices in their order: EVEN, CENTER.
+            StripTarget::Tab(Bank::Placement, i) => {
+                let p = &self.params.placement;
+                let last = Scatter::variants().len() - 1;
+                let to = p.preview_normalized(Scatter::from_index(i.min(last)));
+                if p.unmodulated_normalized_value() != to {
+                    let s = self.setter();
+                    s.begin_set_parameter(p);
+                    s.set_parameter_normalized(p, to);
+                    s.end_set_parameter(p);
+                }
+            }
+            StripTarget::Tab(Bank::Auto, _) => {
+                let on = !self.params.auto_gain.value();
+                self.set_switch(&self.params.auto_gain, on);
+            }
+            StripTarget::Bar(b) => {
+                let setter = ParamSetter::new(self.context.as_ref());
+                self.browser.bar_press(b, &self.params, &setter);
+                self.follow_drawer();
+            }
+            StripTarget::Display => {}
         }
     }
 
@@ -804,6 +961,13 @@ impl Editing {
         // (its window lost the pointer): ended before anything else begins.
         self.end_gestures();
         let (x, y) = self.in_drawing(self.pointer);
+        // ULTRA's note showing: the press closes it, read.
+        if self.ultra_note {
+            self.ultra_note = false;
+            self.settings.ultra_note_read = true;
+            self.keep_settings();
+            return;
+        }
         // A control's menu open: the press is its own (an item, or closing it).
         match self
             .learning
@@ -811,41 +975,41 @@ impl Editing {
         {
             Pressed::Nothing => {}
             Pressed::Done => return,
+            Pressed::Indicator(shown) => {
+                self.settings.shutter = shown;
+                self.keep_settings();
+                return;
+            }
             Pressed::List(chosen) => {
                 self.show_midi_list(chosen);
                 return;
             }
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
-            match drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy) {
+            match drawer_hit(&self.browser.drawer, dx, dy) {
                 Some(DrawerTarget::Update) => self.update.press(),
-                Some(DrawerTarget::Midi) => self.learning.list = !self.learning.list,
+                Some(DrawerTarget::Key(PresetKey::MidiLearn)) => {
+                    self.learning.list = !self.learning.list;
+                }
                 Some(DrawerTarget::MidiRow(i)) => {
                     self.learning.list_press(&self.params.midi_map, i, None);
                 }
                 Some(DrawerTarget::MidiAction(i, a)) => {
                     self.learning.list_press(&self.params.midi_map, i, Some(a));
                 }
+                Some(DrawerTarget::Back) | None => {}
+                // Anything of the presets' shows them again in the MIDI list's place.
                 Some(t) => {
+                    self.learning.list = false;
                     let setter = ParamSetter::new(self.context.as_ref());
-                    self.browser
-                        .drawer_press(t, dx, &self.drawer, &self.params, &setter);
+                    self.browser.drawer_press(t, dx, &self.params, &setter);
                 }
-                None => {}
             }
             self.follow_drawer();
             return;
         }
-        if let Some((bx, by)) = self.on_bar((x, y)) {
-            if let Some(t) = bar_hit(bx, by) {
-                let setter = ParamSetter::new(self.context.as_ref());
-                self.browser.bar_press(t, &self.params, &setter);
-            }
-            self.follow_drawer();
-            return;
-        }
-        if y >= art::H {
-            self.strip_press(x, y - art::H);
+        if let Some(t) = strip::hit(x, y) {
+            self.strip_press(t);
             return;
         }
         let Some(target) = interact::hit(self.renderer.layout(), x, y) else {
@@ -858,8 +1022,11 @@ impl Editing {
         self.last_press = Some((now, target));
         match target {
             Target::Control(i) | Target::Legend(i, _) => {
+                if !self.operable(i) {
+                    return;
+                }
                 let kind = CONTROLS[i].kind;
-                if double && !matches!(kind, Kind::Rocker { .. }) {
+                if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
                     if let Some(p) = self.operated(i) {
                         self.set_once(i, f64::from(p.default()));
                     }
@@ -867,7 +1034,7 @@ impl Editing {
                     return;
                 }
                 let value = self.value_of(i);
-                if !matches!(kind, Kind::Rocker { .. })
+                if !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. })
                     && let Some(p) = self.operated(i)
                 {
                     p.begin(&self.setter());
@@ -897,26 +1064,41 @@ impl Editing {
         let (x, y) = self.in_drawing(self.pointer);
         let size = self.renderer.text_size() * MENU_TEXT;
         let map = &self.params.midi_map;
-        if self.in_drawer((x, y)).is_some() || self.on_bar((x, y)).is_some() {
+        if self.in_drawer((x, y)).is_some() || self.on_rail((x, y)).is_some() {
             self.learning.close_menu();
             return;
         }
-        if y >= art::H {
-            // A strip control's menu: over the panel's foot, above it.
-            match strip::hit(x, y - art::H) {
-                Some(t) => self.learning.open_menu(
-                    self.renderer.fonts(),
-                    map,
-                    Some(Place::Strip(t.control())),
-                    None,
-                    (x, art::H),
-                    size,
-                ),
+        if let Some(t) = strip::hit(x, y) {
+            // A tab's menu (the strip's knobs' are the panel's), above it.
+            match t.control() {
+                Some(c) => {
+                    let (x0, y0, x1, _) = strip::span(c);
+                    self.learning.open_menu(
+                        self.renderer.fonts(),
+                        map,
+                        Some(Place::Strip(c)),
+                        None,
+                        ((x0 + x1) / 2.0, y0),
+                        size,
+                    );
+                }
                 None => self.learning.close_menu(),
             }
             return;
         }
         let target = interact::hit(self.renderer.layout(), x, y);
+        // QUALITY's toggle: its indicator shown or hidden (decisions.md R48).
+        if let Some(Target::Control(i) | Target::Legend(i, _)) = target
+            && CONTROLS.get(i).is_some_and(|c| c.param == "quality")
+        {
+            self.learning.open_quality_menu(
+                self.renderer.fonts(),
+                (x, y),
+                size,
+                self.settings.shutter,
+            );
+            return;
+        }
         let place = match target {
             Some(Target::Control(i) | Target::Legend(i, _)) => Some(Place::Panel(i)),
             _ => None,
@@ -944,13 +1126,6 @@ impl Editing {
         }
         let fine = modifiers.contains(Modifiers::SHIFT);
         let pointer = self.pointer;
-        if let Some(a) = self.sliding {
-            let (x, _) = self.in_drawing(pointer);
-            let p = self.amount(a);
-            self.setter()
-                .set_parameter_normalized(p, strip::slider_value(a, x) as f32);
-            return;
-        }
         let Some(d) = &mut self.drag else {
             let at = self.in_drawing(pointer);
             let (x, y) = at;
@@ -958,17 +1133,24 @@ impl Editing {
                 self.learning.hover(self.renderer.fonts(), at);
             }
             let over_drawer = self.in_drawer(at);
-            self.browser.drawer.hover = over_drawer
-                .and_then(|(dx, dy)| drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy));
-            self.browser.bar.hover = self.on_bar(at).and_then(|(bx, by)| bar_hit(bx, by));
-            (self.hover, self.strip_scene.hover) =
-                if over_drawer.is_some() || self.on_bar(at).is_some() {
-                    (None, None)
-                } else if y >= art::H {
-                    (None, strip::hit(x, y - art::H))
-                } else {
-                    (interact::hit(self.renderer.layout(), x, y), None)
-                };
+            self.browser.drawer.hover =
+                over_drawer.and_then(|(dx, dy)| drawer_hit(&self.browser.drawer, dx, dy));
+            let on_strip = if over_drawer.is_some() {
+                None
+            } else {
+                strip::hit(x, y)
+            };
+            self.browser.bar.hover = match on_strip {
+                Some(StripTarget::Bar(t)) => Some(t),
+                _ => None,
+            };
+            (self.hover, self.strip_scene.hover) = if over_drawer.is_some() {
+                (None, None)
+            } else if on_strip.is_some() {
+                (None, on_strip)
+            } else {
+                (interact::hit(self.renderer.layout(), x, y), None)
+            };
             return;
         };
         if (pointer.0 - d.from.0).abs() + (pointer.1 - d.from.1).abs() > 3.0 {
@@ -999,17 +1181,13 @@ impl Editing {
         }
     }
 
-    /// Whether a press is being held: a control, a slider or the grip dragged.
+    /// Whether a press is being held: a control or the grip dragged.
     fn dragging(&self) -> bool {
-        self.drag.is_some() || self.sliding.is_some() || self.resizing.is_some()
+        self.drag.is_some() || self.resizing.is_some()
     }
 
     fn released(&mut self) {
         if self.resizing.take().is_some() {
-            return;
-        }
-        if let Some(a) = self.sliding.take() {
-            self.setter().end_set_parameter(self.amount(a));
             return;
         }
         if let Some(d) = self.drag.take() {
@@ -1023,9 +1201,6 @@ impl Editing {
     fn end_gestures(&mut self) {
         self.end_scroll();
         self.resizing = None;
-        if let Some(a) = self.sliding.take() {
-            self.setter().end_set_parameter(self.amount(a));
-        }
         if let Some(d) = self.drag.take() {
             self.let_go(d, false);
         }
@@ -1040,8 +1215,9 @@ impl Editing {
             let picked = match d.pressed {
                 Target::Legend(_, k) => Some(k as f64 / 5.0),
                 _ => {
-                    let (cx, _) = CONTROLS[d.control].centre();
-                    interact::click(&kind, v, self.in_drawing(d.from).0 - cx)
+                    let (cx, cy) = CONTROLS[d.control].centre();
+                    let (x, y) = self.in_drawing(d.from);
+                    interact::click(&kind, v, x - cx, y - cy)
                 }
             };
             if let Some(p) = picked {
@@ -1053,7 +1229,7 @@ impl Editing {
             return;
         };
         let s = self.setter();
-        if matches!(kind, Kind::Rocker { .. }) {
+        if matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
             if v != d.value {
                 p.begin(&s);
                 p.set(&s, v as f32);
@@ -1068,12 +1244,12 @@ impl Editing {
     }
 
     fn scrolled(&mut self, delta: ScrollDelta, modifiers: Modifiers) {
-        if self.drag.is_some() || self.sliding.is_some() {
+        if self.drag.is_some() {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
-        if self.in_drawer((x, y)).is_some() {
-            // The list scrolls a row for each row's travel, the rest kept for the next: a
+        if let Some((dx, dy)) = self.in_drawer((x, y)) {
+            // The list (or the tags, under the pointer) scrolls a row for each row's travel, the rest kept for the next: a
             // wheel's lines (a slow turn on macOS gives fractions of one), a trackpad's or a
             // Magic Mouse's points as the list's rows at this size (each event a few points,
             // which a whole-notch threshold had dropped). A turn the other way starts again.
@@ -1091,6 +1267,8 @@ impl Editing {
             if whole != 0.0 {
                 if self.learning.list {
                     self.learning.scroll(-(whole as i32));
+                } else if in_tags(dx, dy) {
+                    self.browser.scroll_tags(-(whole as i32));
                 } else {
                     self.browser.scroll(-(whole as i32));
                 }
@@ -1098,18 +1276,7 @@ impl Editing {
             }
             return;
         }
-        if self.on_bar((x, y)).is_some() {
-            return;
-        }
-        if y >= art::H {
-            // VOICES steps with the wheel, a notch a voice.
-            if let (Some(StripTarget::Fewer | StripTarget::More), ScrollDelta::Lines { y: dy, .. }) =
-                (strip::hit(x, y - art::H), delta)
-                && dy != 0.0
-            {
-                self.end_scroll();
-                self.step_voices(if dy > 0.0 { 1 } else { -1 });
-            }
+        if strip::hit(x, y).is_some() {
             return;
         }
         let Some(Target::Control(i) | Target::Legend(i, _)) =
@@ -1117,6 +1284,9 @@ impl Editing {
         else {
             return;
         };
+        if !self.operable(i) {
+            return;
+        }
         let (notches, travel) = match delta {
             ScrollDelta::Lines { y, .. } => (
                 if y > 0.0 {
@@ -1217,23 +1387,31 @@ impl Editing {
     fn update_scene(&mut self) {
         for (i, c) in CONTROLS.iter().enumerate() {
             self.scene.values[i] = match (&self.drag, &self.scroll) {
-                (Some(d), _) if d.control == i && !matches!(c.kind, Kind::Rocker { .. }) => d.value,
+                (Some(d), _)
+                    if d.control == i
+                        && !matches!(c.kind, Kind::Rocker { .. } | Kind::Toggle { .. }) =>
+                {
+                    d.value
+                }
                 (_, Some(s)) if s.control == i => s.value,
                 _ => self.value_of(i),
             };
         }
         self.scene.power = !self.params.bypass.value();
+        self.scene.detune_off = !self.params.doubled.value();
         self.scene.overload = Meters::load(&self.meters.overload);
+        self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
             Meters::load(&self.meters.bend),
             Meters::load(&self.meters.modulation),
         );
         self.scene.tip = self.tip();
-        let p = &self.params;
-        self.strip_scene.poly = p.poly.value();
-        self.strip_scene.voices = u32::try_from(p.voices.value()).unwrap_or(4);
-        self.strip_scene.entropy = f64::from(p.entropy.unmodulated_normalized_value());
-        self.strip_scene.spread = f64::from(p.spread.unmodulated_normalized_value());
+        self.strip_scene = strip_scene(
+            &self.params,
+            self.meters.voices.load(Ordering::Relaxed),
+            (&self.levels, self.output),
+            std::mem::take(&mut self.strip_scene),
+        );
     }
 
     /// The tip: over the control operated, else over the one under the pointer.
@@ -1299,6 +1477,7 @@ impl Editing {
         let map = &self.params.midi_map;
         self.learning.poll(map);
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
+        let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
         self.strip_scene.learning = strip_ring;
         if self.scene.note.is_some() || self.scene.menu.is_some() {
@@ -1311,48 +1490,54 @@ impl Editing {
             .learning
             .list
             .then(|| self.learning.list_scene(&self.params.midi_map));
-        self.shrink_shut_drawer();
         let panel = self.renderer.render(&self.scene);
         self.strip_scene.bar.clone_from(&self.browser.bar);
-        let strip = self.strip.render(&self.strip_scene);
-        // The drawer over the panel, while it shows (and moves).
+        // (The strip's parts drawn again over the panel's frame where it changed there.)
+        // (The drops move on with QUALITY's opening, on its clock: the two in one frame.)
+        let strip = self.strip.render_at(
+            &self.strip_scene,
+            self.renderer.frame(),
+            self.renderer.damage(),
+            self.motion_at.unwrap_or_else(Instant::now),
+        );
+        // The drawer over the strip, dropping down from under the rail, while it shows.
         let k = self.browser.reveal();
-        let mut drawer = false;
-        if k > 0.0 && self.below() {
-            // Below the bar: sliding down from under it.
-            drawer = self.drawer.render(&self.browser.drawer);
-            if self.browser.sliding() {
-                let frame = self.drawer.frame();
-                let s = self.slid.get_or_insert_with(|| frame.clone());
-                if (s.width(), s.height()) != (frame.width(), frame.height()) {
-                    *s = frame.clone();
-                }
-                s.fill(ca72_panel::presets::background());
-                let top = (-(1.0 - k) * DRAWER_H * self.renderer.scale()).round();
-                overlay(s, frame, top as i32);
-                drawer = true;
-            } else if self.slid.take().is_some() {
-                drawer = true;
-            }
-        } else if k > 0.0 {
-            drawer = self.drawer.render(&self.browser.drawer);
-            let sliding = self.browser.sliding();
-            if panel || drawer || sliding || self.composed.is_none() {
-                let frame = self.renderer.frame();
-                let c = self.composed.get_or_insert_with(|| frame.clone());
-                if (c.width(), c.height()) == (frame.width(), frame.height()) {
-                    c.data_mut().copy_from_slice(frame.data());
-                } else {
-                    *c = frame.clone();
-                }
-                let top = ((DRAWER_TOP + (1.0 - k) * DRAWER_H) * self.renderer.scale()).round();
-                overlay(c, self.drawer.frame(), top as i32);
-                drawer = true;
-            }
-        } else if self.composed.take().is_some() {
-            drawer = true;
+        // (Its place changed since the frame last shown is a change too: the slide's last frame
+        // stops short of its end, which the frame shown must still reach.)
+        let moved = k != self.reveal_shown;
+        let drawer = k > 0.0
+            && (self.drawer.render(&self.browser.drawer) || self.browser.sliding() || moved);
+        let shut = k <= 0.0 && moved;
+        if !(panel || strip || drawer || shut || self.composed.is_none()) {
+            return false;
         }
-        panel || strip || drawer
+        self.reveal_shown = k;
+        // The rows that changed, the panel's and the strip's, put together again alone; all of
+        // them while the drawer moves or something floats over everything.
+        let top = (art::PANEL_H * self.renderer.scale()).round() as i64;
+        let rows = |d: Option<[i32; 4]>, top: i64| {
+            d.map(|d| (top + i64::from(d[1]), top + i64::from(d[3])))
+        };
+        let changed = match (
+            rows(self.renderer.damage(), 0),
+            rows(self.strip.damage(), top),
+        ) {
+            (Some(a), Some(b)) => Some((a.0.min(b.0), a.1.max(b.1))),
+            (a, b) => a.or(b),
+        };
+        let only = if drawer || shut || self.renderer.floating() {
+            None
+        } else {
+            changed
+        };
+        compose(
+            &mut self.composed,
+            &self.renderer,
+            self.strip.frame(),
+            (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
+            only,
+        );
+        true
     }
 
     /// The pointer's events: whether the event was the panel's.
@@ -1386,6 +1571,176 @@ impl Editing {
             _ => return false,
         }
         true
+    }
+}
+
+/// The window's frame: the panel's renderer's (the whole drawing), the strip's parts over its
+/// strip (`strip`, from the panel's foot down), the drawer over that from `drawer`'s top
+/// (drawing units, cut off at the rail's foot), and over everything what floats (MIDI Learn's
+/// ring, a tip, a note, a menu); in the rows `only` alone (from, past) when given.
+fn compose(
+    composed: &mut Option<ca72_panel::Pixmap>,
+    renderer: &Renderer,
+    strip: &ca72_panel::Pixmap,
+    drawer: Option<(&ca72_panel::Pixmap, f64)>,
+    only: Option<(i64, i64)>,
+) {
+    let frame = renderer.frame();
+    let all = (0, i64::from(frame.height()));
+    let rows = match composed {
+        Some(c) if (c.width(), c.height()) == (frame.width(), frame.height()) => {
+            only.unwrap_or(all)
+        }
+        _ => all,
+    };
+    let c = composed.get_or_insert_with(|| frame.clone());
+    if (c.width(), c.height()) != (frame.width(), frame.height()) {
+        *c = frame.clone();
+    }
+    let s = renderer.scale();
+    let top = (art::PANEL_H * s).round() as i64;
+    paste_rows(c, frame, 0, rows);
+    paste_rows(c, strip, top, rows);
+    if let Some((d, at)) = drawer {
+        let rail = (DRAWER_TOP * s).round() as i64;
+        paste_rows(c, d, (at * s).round() as i64, (rows.0.max(rail), rows.1));
+    }
+    if rows == all && renderer.floating() {
+        renderer.draw_floating(c);
+    }
+}
+
+/// `p` put in the frame `c` with its top at row `top`, in `c`'s rows `rows` (from, past) only.
+fn paste_rows(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i64, rows: (i64, i64)) {
+    let (w, pw, ph) = (
+        c.width() as usize,
+        p.width() as usize,
+        i64::from(p.height()),
+    );
+    let h = i64::from(c.height());
+    let n = w.min(pw) * 4;
+    for to in rows.0.max(top).max(0)..rows.1.min(top + ph).min(h) {
+        let (src, dst) = ((to - top) as usize * pw * 4, to as usize * w * 4);
+        c.data_mut()[dst..dst + n].copy_from_slice(&p.data()[src..src + n]);
+    }
+}
+
+/// What the strip shows, from the parameters, the voices sounding (a bit a voice), their levels
+/// (0 to 1, by voice) and the output's, and the scene before (its rail, hover and MIDI Learn's
+/// ring are set elsewhere).
+fn strip_scene(
+    p: &Ca72Params,
+    sounding: u32,
+    (levels, output): (&[f64], f64),
+    was: StripScene,
+) -> StripScene {
+    let c = p.controls();
+    let unison = c.unison;
+    let poly = c.poly && !unison;
+    let mono = !poly && !unison;
+    let doubled = p.doubled.value();
+    let voices = c.voices.clamp(2, 10);
+    let placement = c.placement;
+    let mode = Some(if unison { 2 } else { usize::from(poly) });
+    // Three places, the readouts' (the mock-up's): a decimal under ten, a sign taking a place.
+    let num3 = |v: f64| {
+        if v.abs() < 0.05 {
+            "0.0".to_owned()
+        } else if v.abs() < 9.95 {
+            format!("{v:.1}")
+        } else {
+            format!("{}", v.round())
+        }
+    };
+    let percent = |v: f64| {
+        if v > 0.0 {
+            format!("{}", (v * 100.0).round())
+        } else {
+            "OFF".to_owned()
+        }
+    };
+    let auto = if c.auto_gain && c.drive > 0.0 {
+        let curve = crate::drive::Curve(p.drive_curve.saved().db);
+        (num3(curve.at(c.drive, crate::engine::DRIVE_TOP)), true)
+    } else {
+        (String::new(), false)
+    };
+    let readouts = [
+        (format!("{voices}"), !mono),
+        (percent(c.entropy), c.entropy > 0.0),
+        (percent(c.spread), c.spread > 0.0 && (!mono || doubled)),
+        (
+            if doubled {
+                crate::params::cents(c.double * crate::engine::DOUBLE_CENTS)
+            } else {
+                "OFF".to_owned()
+            },
+            doubled,
+        ),
+        auto,
+        (num3(c.drive), c.drive > 0.0),
+        (num3(c.level), true),
+        (
+            percent(c.inner),
+            c.inner > 0.0 && c.spread > 0.0 && (!mono || doubled),
+        ),
+    ];
+    let on = |k: usize| sounding & (1 << k) != 0;
+    // Where they sound: in MONO the one voice (its pair with DOUBLE, all of WIDTH's way out);
+    // else each of VOICES's voices at its place by the placement, its pair as far out with
+    // DOUBLE (decisions.md R45), each in its side's band by INNER: where the engine's
+    // gains put it, the kit's (R49).
+    let (width, inner) = (c.spread, c.inner);
+    let field = if mono {
+        if doubled {
+            Field::Double(vec![(place::pair_at(width, inner, place::ALONE), on(0))])
+        } else {
+            Field::Scatter(vec![(0.0, on(0))])
+        }
+    } else if doubled {
+        Field::Double(
+            (0..voices)
+                .map(|k| {
+                    (
+                        place::pair_at(width, inner, placement.pair(k, voices)),
+                        on(k),
+                    )
+                })
+                .collect(),
+        )
+    } else {
+        Field::Scatter(
+            (0..voices)
+                .map(|k| (place::voice_at(width, inner, placement, k, voices), on(k)))
+                .collect(),
+        )
+    };
+    // The placement's tab by the plug-in's choice (its tabs are its choices, EVEN and CENTER:
+    // not the kit's index, which counts its EDGES); none where it moves nothing.
+    let placement_lit = !mono || doubled;
+    StripScene {
+        mode,
+        stereo: Some(usize::from(doubled)),
+        placement: placement_lit.then_some(p.placement.value().to_index()),
+        auto: c.auto_gain,
+        readouts,
+        field,
+        // Each voice's level by its place in the field (the one instrument's, the output's),
+        // in steps of a fortieth (a drop does not move for less).
+        levels: if mono {
+            vec![output]
+        } else {
+            levels.iter().take(voices).copied().collect()
+        }
+        .into_iter()
+        .map(|v| (v * 40.0).round() / 40.0)
+        .collect(),
+        detune: if doubled {
+            c.double * crate::engine::DOUBLE_CENTS
+        } else {
+            0.0
+        },
+        ..was
     }
 }
 
@@ -1428,10 +1783,12 @@ impl Editing {
 impl Drop for Editing {
     // The editor closed mid-drag, or within a wheel's rest: no parameter is left touched. And
     // MIDI Learn ends: a controller the audio thread has already caught for it is assigned,
-    // else nothing is (decisions.md R34).
+    // else nothing is (decisions.md R34). It no longer watches the levels (the audio thread
+    // stops measuring them when no editor does).
     fn drop(&mut self) {
         self.learning.close(&self.params.midi_map);
         self.end_gestures();
+        self.meters.watchers.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -1481,6 +1838,7 @@ impl WindowHandler for PanelWindow {
             self.present();
             self.shown = Some(now);
         }
+        self.editing.measure_when_done();
     }
 
     fn on_event(&mut self, window: &mut Window<'_>, event: Event) -> EventStatus {
@@ -1507,6 +1865,12 @@ impl WindowHandler for PanelWindow {
             }
             Event::Mouse(e) => {
                 let released = matches!(e, MouseEvent::ButtonReleased { .. });
+                self.editing.touched |= matches!(
+                    e,
+                    MouseEvent::ButtonPressed { .. }
+                        | MouseEvent::ButtonReleased { .. }
+                        | MouseEvent::WheelScrolled { .. }
+                );
                 let status = if self.editing.mouse(e) {
                     EventStatus::Captured
                 } else {
@@ -1524,6 +1888,7 @@ impl WindowHandler for PanelWindow {
             }
             // The drawer, while open, takes the keys (the host keeps its shortcuts).
             Event::Keyboard(k) => {
+                self.editing.touched = true;
                 let taken = self.editing.keyed(&k);
                 self.follow(window);
                 self.keyboard(window);
@@ -2017,6 +2382,38 @@ mod window {
     /// The window beyond the frames, opaque as they are.
     pub const EMPTY: u32 = 0xff3b_2213;
 
+    /// The window's pixels (`w` by `h`, a row after another) from frames shown one under the
+    /// other from its top left corner, [`EMPTY`] beyond them: a row at a time, each frame's
+    /// row turned as a run of pixels (the compiler makes a short loop of it; a pixel at a time,
+    /// with a frame found for each, took several times as long).
+    pub fn fill(buffer: &mut [u32], (w, h): (usize, usize), frames: &[&ca72_panel::Pixmap]) {
+        let mut frames = frames.iter();
+        let mut frame = frames.next();
+        let mut top = 0usize;
+        for (y, row) in buffer.chunks_exact_mut(w).take(h).enumerate() {
+            while let Some(f) = frame
+                && y >= top + f.height() as usize
+            {
+                top += f.height() as usize;
+                frame = frames.next();
+            }
+            let n = match frame {
+                Some(f) => {
+                    let fw = f.width() as usize;
+                    let n = fw.min(w);
+                    let from = (y - top) * fw * 4;
+                    let src = &f.data()[from..from + n * 4];
+                    for (out, p) in row[..n].iter_mut().zip(src.chunks_exact(4)) {
+                        *out = shown(p);
+                    }
+                    n
+                }
+                None => 0,
+            };
+            row[n..].fill(EMPTY);
+        }
+    }
+
     /// Where the frames are shown; nothing if the platform's window could not be drawn in.
     pub struct Surface {
         inner: Option<(
@@ -2072,27 +2469,7 @@ mod window {
             if buffer.len() < w * h {
                 return;
             }
-            let mut frames = frames.iter();
-            let mut frame = frames.next();
-            let mut top = 0usize;
-            for y in 0..h {
-                while let Some(f) = frame
-                    && y >= top + f.height() as usize
-                {
-                    top += f.height() as usize;
-                    frame = frames.next();
-                }
-                let row = &mut buffer[y * w..(y + 1) * w];
-                for (x, out) in row.iter_mut().enumerate() {
-                    *out = match frame {
-                        Some(f) if x < f.width() as usize => {
-                            let (fw, fy) = (f.width() as usize, y - top);
-                            shown(&f.data()[(fy * fw + x) * 4..(fy * fw + x) * 4 + 4])
-                        }
-                        _ => EMPTY,
-                    };
-                }
-            }
+            fill(&mut buffer[..], (w, h), frames);
             let _ = buffer.present();
         }
     }
@@ -2107,7 +2484,8 @@ mod tests {
     use nih_plug::wrapper::state::PluginState;
 
     use super::*;
-    use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, RowAction};
+    use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, PresetKey};
+    use ca72_panel::ultra;
 
     /// What the editor asked of the host.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2177,11 +2555,449 @@ mod tests {
             Arc::new(Meters::default()),
             (1720, 1720, 1.0),
             library,
-            Arc::new(AtomicBool::new(false)),
-            // No screen known: the drawer fits below.
             |_| None,
         );
         (e, host, params)
+    }
+
+    /// The window's pixels as the frames were turned a pixel at a time, before (the
+    /// reference for [`window::fill`]).
+    fn filled_a_pixel_at_a_time(
+        buffer: &mut [u32],
+        (w, h): (usize, usize),
+        frames: &[&ca72_panel::Pixmap],
+    ) {
+        let mut frames = frames.iter();
+        let mut frame = frames.next();
+        let mut top = 0usize;
+        for y in 0..h {
+            while let Some(f) = frame
+                && y >= top + f.height() as usize
+            {
+                top += f.height() as usize;
+                frame = frames.next();
+            }
+            let row = &mut buffer[y * w..(y + 1) * w];
+            for (x, out) in row.iter_mut().enumerate() {
+                *out = match frame {
+                    Some(f) if x < f.width() as usize => {
+                        let (fw, fy) = (f.width() as usize, y - top);
+                        window::shown(&f.data()[(fy * fw + x) * 4..(fy * fw + x) * 4 + 4])
+                    }
+                    _ => window::EMPTY,
+                };
+            }
+        }
+    }
+
+    /// The window's pixels, a row at a time, are the pixels turned one at a time, to the bit:
+    /// frames narrower than the window and shorter, one under the other, the window beyond.
+    #[test]
+    fn the_window_s_pixels_a_row_at_a_time_are_its_pixels_one_at_a_time() {
+        let frame = |w: u32, h: u32, k: u8| {
+            let mut p = ca72_panel::Pixmap::new(w, h).unwrap();
+            for (i, px) in p.data_mut().chunks_exact_mut(4).enumerate() {
+                px.copy_from_slice(&[(i as u8).wrapping_mul(k), k, (i / 7) as u8, 255]);
+            }
+            p
+        };
+        let (a, b) = (frame(37, 11, 3), frame(29, 6, 5));
+        let (w, h) = (41, 20);
+        let (mut new, mut old) = (vec![0u32; w * h], vec![0u32; w * h]);
+        window::fill(&mut new, (w, h), &[&a, &b]);
+        filled_a_pixel_at_a_time(&mut old, (w, h), &[&a, &b]);
+        assert_eq!(new, old);
+    }
+
+    /// What turning a Retina window's frame into the screen's pixels costs, a row at a time and
+    /// a pixel at a time: printed (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "prints timings"]
+    fn the_window_s_pixels_timings() {
+        let (w, h) = (3440usize, 1965usize);
+        let f = ca72_panel::Pixmap::new(w as u32, h as u32).unwrap();
+        let mut buffer = vec![0u32; w * h];
+        for (name, way) in [
+            (
+                "a row at a time",
+                window::fill as fn(&mut [u32], (usize, usize), &[&ca72_panel::Pixmap]),
+            ),
+            ("a pixel at a time", filled_a_pixel_at_a_time),
+        ] {
+            let t = Instant::now();
+            for _ in 0..50 {
+                way(&mut buffer, (w, h), &[&f]);
+            }
+            println!(
+                "{name}: {:.2} ms a frame",
+                t.elapsed().as_secs_f64() * 1000.0 / 50.0
+            );
+        }
+    }
+
+    /// The window played for a look and a measure (decisions.md R48): 24 seconds in real
+    /// time at sixty frames a second, a Retina window (3440 pixels across): four POLY voices
+    /// with DOUBLE playing chords at HI, then ULTRA, then LO, falling quiet, then HI again with
+    /// DETUNE swept from none to all of it. Each frame drawn and turned into the screen's
+    /// pixels as `present` does, timed; every other frame's QUALITY column and STEREO display
+    /// kept, written to `$CA72_RUN`, the folder, as `frames.rgba` (`size.txt`: its width and
+    /// height), with the times in `times.txt` (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "plays the window for a while"]
+    fn the_window_played() {
+        let Some(out) = std::env::var_os("CA72_RUN").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let host = Arc::new(Host::default());
+        let params = Arc::new(Ca72Params::default());
+        let context: Arc<dyn GuiContext> = host.clone();
+        let meters = Arc::new(Meters::default());
+        let mut e = Editing::new(
+            context,
+            Arc::clone(&params),
+            Arc::clone(&meters),
+            (1720, 3440, 2.0),
+            Library::at(dir.path()),
+            |_| None,
+        );
+        // (Set as a host's automation sets them: nih-plug's context for tests.)
+        let hostless = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        let set = |p: ParamPtr, v: f32| {
+            hostless.automate(p, v);
+        };
+        set(params.poly.as_ptr(), 1.0);
+        set(params.voices.as_ptr(), 0.25);
+        set(params.spread.as_ptr(), 0.8);
+        set(params.double.as_ptr(), 0.6);
+        set(params.quality.as_ptr(), 0.5);
+        let s = 3440.0 / art::W;
+        // The two parts kept: QUALITY's column, and STEREO's knobs over its display.
+        let column = (
+            (art::COL + 2925.0) * s,
+            (art::TOP - 20.0) * s,
+            183.0 * s,
+            400.0 * s,
+        );
+        let (dx, dy, dw, dh) = strip::DISPLAY;
+        let stereo = (
+            (dx - 10.0) * s,
+            (strip::ROWS[1] - 75.0) * s,
+            (dw + 20.0) * s,
+            (dy + dh + 10.0 - strip::ROWS[1] + 75.0) * s,
+        );
+        let px = |r: (f64, f64, f64, f64)| (r.0 as usize, r.1 as usize, r.2 as usize, r.3 as usize);
+        let (column, stereo) = (px(column), px(stereo));
+        let (fw, fh) = (column.2 + 12 + stereo.2, column.3.max(stereo.3));
+        let mut frames: Vec<u8> = Vec::new();
+        let mut screen: Vec<u32> = Vec::new();
+        // A voice's level, `t` seconds into a chord it plays: a quick attack, a decay to its
+        // sustain, held 1.6 beats, released.
+        let beat = 60.0 / 112.0;
+        let env = |t: f64| {
+            let held = 1.6 * beat;
+            let a = |t: f64| (t / 0.01).min(1.0) * (0.6 + 0.4 * (-t / 0.3).exp());
+            if t < 0.0 {
+                0.0
+            } else if t < held {
+                a(t)
+            } else {
+                a(held) * (-(t - held) / 0.25).exp()
+            }
+        };
+        let t0 = Instant::now();
+        let ticks = 24 * 60;
+        let mut times = Vec::new();
+        let mut presented = 0;
+        for k in 0..ticks {
+            let at = t0 + Duration::from_micros(k * 16_667);
+            if let Some(wait) = at.checked_duration_since(Instant::now()) {
+                std::thread::sleep(wait);
+            }
+            let t = k as f64 / 60.0;
+            let quality = if t < 6.0 {
+                0.5
+            } else if t < 12.0 {
+                1.0
+            } else if t < 18.0 {
+                0.0
+            } else {
+                0.5
+            };
+            set(params.quality.as_ptr(), quality);
+            if t >= 18.0 {
+                set(
+                    params.double.as_ptr(),
+                    ((t - 18.5) / 5.0).clamp(0.0, 1.0) as f32,
+                );
+            }
+            // Chords every two beats (quiet from 15 to 18 seconds), each voice its own
+            // velocity.
+            let playing = !(15.0..18.0).contains(&t);
+            let chord = (t / (2.0 * beat)).floor();
+            let since = t - chord * 2.0 * beat;
+            let mut levels = [0.0f32; LEVELS];
+            let mut mask = 0u32;
+            for (v, level) in levels.iter_mut().enumerate().take(4) {
+                let vel = 0.55 + 0.45 * (((chord as usize + v) * 7) % 5) as f64 / 4.0;
+                let l = if playing {
+                    0.35 * vel * env(since - 0.02 * v as f64)
+                } else {
+                    0.0
+                };
+                *level = l as f32;
+                if l > 1e-3 {
+                    mask |= 1 << v;
+                }
+            }
+            let output = (levels.iter().map(|&l| f64::from(l)).sum::<f64>() * 0.7).min(1.0);
+            meters.publish(0.0, (0.5, 0.0), mask);
+            meters.publish_levels(&levels, output as f32);
+            let started = Instant::now();
+            let changed = e.draw();
+            if changed {
+                let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
+                screen.resize((f.width() * f.height()) as usize, 0);
+                // (As `present` turns it: the window's own code.)
+                window::fill(&mut screen, (f.width() as usize, f.height() as usize), &[f]);
+                presented += 1;
+            }
+            times.push(started.elapsed().as_secs_f64() * 1000.0);
+            if k % 2 == 0 {
+                let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
+                let mut img = vec![0u8; fw * fh * 4];
+                for (r, x0) in [(column, 0usize), (stereo, column.2 + 12)] {
+                    for y in 0..r.3 {
+                        let from = ((r.1 + y) * f.width() as usize + r.0) * 4;
+                        let to = (y * fw + x0) * 4;
+                        img[to..to + r.2 * 4].copy_from_slice(&f.data()[from..from + r.2 * 4]);
+                    }
+                }
+                frames.extend_from_slice(&img);
+            }
+        }
+        std::fs::write(out.join("frames.rgba"), &frames).unwrap();
+        std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
+        let total: f64 = times.iter().sum();
+        let mean = total / times.len() as f64;
+        let mut sorted = times.clone();
+        sorted.sort_by(f64::total_cmp);
+        let p95 = sorted[sorted.len() * 95 / 100];
+        let report = format!(
+            "{ticks} frames in 24 s: {presented} presented; the UI thread's work {total:.0} ms ({:.1} % of one core), {mean:.2} ms a frame on average, {p95:.2} at the 95th percentile\n",
+            total / 24_000.0 * 100.0
+        );
+        print!("{report}");
+        std::fs::write(out.join("times.txt"), report).unwrap();
+    }
+
+    /// QUALITY's toggle (decisions.md R47, R48) goes where it is clicked, a gesture of
+    /// its own as a rocker's: above its nut ULTRA, below it LO, on it (HI already) nothing.
+    #[test]
+    fn quality_goes_where_its_toggle_is_clicked() {
+        let (mut e, host, params) = editing();
+        let q = params.quality.as_ptr();
+        let (x, y) = centre("quality");
+        let up = at(&e, (x, y - 40.0));
+        click(&mut e, up);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(q), Call::Set(q, 1.0), Call::End(q)]
+        );
+        let down = at(&e, (x, y + 45.0));
+        click(&mut e, down);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(q), Call::Set(q, 0.0), Call::End(q)]
+        );
+        let middle = at(&e, (x, y));
+        click(&mut e, middle);
+        assert_eq!(host.take(), vec![]);
+    }
+
+    /// A right click on QUALITY's opening (decisions.md R48) opens its menu: its shutter or
+    /// always open, the one it is in in its title and not to be chosen; choosing the other
+    /// switches it, and the menu says so the next time.
+    #[test]
+    fn quality_s_menu_shows_or_hides_its_indicator() {
+        let (mut e, _, _) = editing();
+        assert!(e.settings.shutter, "shown by default");
+        let toggle = at(&e, centre("quality"));
+        right_click(&mut e, toggle);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some("QUALITY: SET PER PLUGIN INSTANCE")
+        );
+        assert_eq!(
+            menu_items(&e),
+            vec![
+                ("SHOW ITS INDICATOR".to_owned(), false),
+                ("HIDE ITS INDICATOR".to_owned(), true),
+                ("NOT LEARNED BY MIDI LEARN".to_owned(), false),
+                ("MIDI ASSIGNMENTS\u{2026}".to_owned(), true),
+            ]
+        );
+        menu_item(&mut e, "HIDE ITS INDICATOR");
+        assert!(!e.settings.shutter && e.learning.menu().is_none());
+        e.draw();
+        assert!(e.scene.opening.hidden);
+        right_click(&mut e, toggle);
+        assert_eq!(menu_items(&e)[0], ("SHOW ITS INDICATOR".to_owned(), true));
+        menu_item(&mut e, "SHOW ITS INDICATOR");
+        assert!(e.settings.shutter);
+        // (Where the indicator is, a right click is the panel's, as anywhere off a control.)
+        let above = at(&e, (art::COL + 3023.0, art::TOP + 92.0));
+        right_click(&mut e, above);
+        assert!(e.learning.menu().is_none());
+    }
+
+    /// QUALITY's opening (decisions.md R48) follows QUALITY by the time between frames
+    /// (a stalled frame does not jump it): from HI, its lamp goes down over the closing time,
+    /// then ULTRA's Tesla lamp comes up over the opening time; up, ULTRA's note shows until a
+    /// press reads it, and not again; with the shutter off, its own times.
+    #[test]
+    fn quality_s_opening_follows_quality_and_ultra_s_note_is_read_once() {
+        let (mut e, _, _) = editing();
+        assert_eq!(
+            (e.motion.lamp, e.motion.coil),
+            (1.0, 0.0),
+            "it opens at HI, up"
+        );
+        let t0 = Instant::now();
+        let frames = |e: &mut Editing, from: Instant, n: u32, q: QualityMode| {
+            for k in 0..=n {
+                e.move_opening(from + Duration::from_millis(u64::from(k) * 40), q);
+            }
+        };
+        let ultra = QualityMode::Ultra;
+        e.move_opening(t0, ultra);
+        frames(&mut e, t0, 30, ultra);
+        assert!(
+            (e.motion.lamp - (1.0 - 1.2 / ultra::CLOSE_S)).abs() < 1e-9,
+            "{}",
+            e.motion.lamp
+        );
+        assert_eq!(e.motion.coil, 0.0);
+        // (A stall of a second moves it on 50 ms.)
+        e.move_opening(t0 + Duration::from_millis(2200), ultra);
+        assert!(
+            (e.motion.lamp - (1.0 - 1.25 / ultra::CLOSE_S)).abs() < 1e-9,
+            "{}",
+            e.motion.lamp
+        );
+        frames(&mut e, t0 + Duration::from_millis(2200), 100, ultra);
+        assert_eq!((e.motion.lamp, e.motion.coil), (0.0, 1.0));
+        assert_eq!(e.scene.opening.coil, 1.0);
+        assert!(e.ultra_note);
+        assert_eq!(e.ultra_note().lines[0].0, "ULTRA · NO COMPROMISES");
+        press(&mut e);
+        assert!(!e.ultra_note && e.settings.ultra_note_read);
+        e.move_opening(t0 + Duration::from_secs(8), ultra);
+        assert!(!e.ultra_note);
+        // Hidden: none of it drawn, LO's hamster there at once (shown again, nothing comes up).
+        e.settings.shutter = false;
+        let t1 = t0 + Duration::from_secs(10);
+        frames(&mut e, t1, 1, QualityMode::Lo);
+        assert_eq!((e.motion.coil, e.motion.hamster), (0.0, 1.0));
+        assert!(e.scene.opening.hidden);
+        e.settings.shutter = true;
+        frames(&mut e, t1 + Duration::from_secs(1), 1, QualityMode::Lo);
+        assert!(!e.scene.opening.hidden && e.scene.opening.hamster == 1.0);
+    }
+
+    /// What follows the synth is drawn at most thirty times a second: frames a sixtieth of a
+    /// second apart move QUALITY's opening on every other one, the levels taken then.
+    #[test]
+    fn what_follows_the_synth_moves_thirty_times_a_second() {
+        let (mut e, _, _) = editing();
+        let t0 = Instant::now();
+        e.move_opening(t0, QualityMode::Hi);
+        let mut moved = 0;
+        for k in 1..=60u64 {
+            e.meters.publish_levels(&[0.25; LEVELS], 0.25);
+            let was = e.motion_at;
+            e.move_opening(t0 + Duration::from_micros(k * 16_667), QualityMode::Hi);
+            moved += u32::from(e.motion_at != was);
+        }
+        assert!((28..=31).contains(&moved), "{moved}");
+        assert!(e.levels[0] > 0.5 && e.motion.level > 0.0, "{:?}", e.levels);
+    }
+
+    /// An editor watches the levels while it is open: the audio thread measures them only
+    /// then.
+    #[test]
+    fn the_levels_are_watched_only_while_an_editor_is_open() {
+        let meters = Arc::new(Meters::default());
+        assert!(!meters.watched());
+        let host = Arc::new(Host::default());
+        let context: Arc<dyn GuiContext> = host.clone();
+        let dir = tempfile::tempdir().unwrap();
+        let e = Editing::new(
+            context,
+            Arc::new(Ca72Params::default()),
+            Arc::clone(&meters),
+            (1720, 1720, 1.0),
+            Library::at(dir.path()),
+            |_| None,
+        );
+        assert!(meters.watched());
+        drop(e);
+        assert!(!meters.watched());
+    }
+
+    /// The window's frame put together again in the rows that changed is the frame put
+    /// together whole: through the voices sounding (the strip's drops), the wheels taken from a
+    /// keyboard (the strip's left, the panel's layers) and the OVERLOAD lamp (the panel above).
+    #[test]
+    fn the_frame_put_together_in_rows_is_the_frame_put_together_whole() {
+        let (mut e, _, _) = editing();
+        assert!(e.draw());
+        for i in 0..30u8 {
+            let lamp = if i % 8 < 4 { 0.0 } else { 1.0 };
+            let wheels = (0.5 + 0.05 * f32::from(i % 5), 0.1 * f32::from(i % 3));
+            e.meters.publish(lamp, wheels, u32::from(i % 6 < 3));
+            e.draw();
+            let mut whole = None;
+            compose(&mut whole, &e.renderer, e.strip.frame(), None, None);
+            assert!(e.composed == whole, "frame {i}: not as put together whole");
+        }
+    }
+
+    /// The drawer's slide ends where it was going in the frame shown, though its last moving
+    /// frame stops short of there: the strip's rows put together again under it afterwards
+    /// (the voices' drops) leave it whole. (In REAPER on Windows, 2026-10-10, the list's rows
+    /// over the voices' display had come out a few pixels lower than the rest.)
+    #[test]
+    fn the_drawer_ends_its_slide_in_the_frame_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _, _) = editing_with(Library::at(dir.path()));
+        e.draw();
+        let p = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Name)));
+        click(&mut e, p);
+        // A moment of the slide short of its end, then its end.
+        e.browser
+            .slide_began(Instant::now() - crate::presets::SLIDE.mul_f64(0.5));
+        e.draw();
+        assert!(e.reveal_shown > 0.0 && e.reveal_shown < 0.99);
+        e.browser
+            .slide_began(Instant::now() - crate::presets::SLIDE * 2);
+        e.draw();
+        e.meters.publish(0.0, (0.5, 0.0), 1);
+        e.draw();
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            Some((e.drawer.frame(), DRAWER_TOP)),
+            None,
+        );
+        assert!(e.composed == whole, "the drawer where its slide ended");
     }
 
     /// Every gesture well formed: a parameter's begin only while it has none open, its
@@ -2455,30 +3271,52 @@ mod tests {
         );
     }
 
-    /// The strip's controls have the menu too (it opens over the panel's foot, the control
-    /// ringed on the strip); a wheel and POWER say why they are not learned, MIDI LEARN not
-    /// offered.
+    /// The strip's controls have the menu too (a tab's above it, the control ringed on the
+    /// strip; a knob's as the panel's knobs'); a wheel and POWER say why they are not learned,
+    /// MIDI LEARN not offered.
     #[test]
     fn the_strips_controls_learn_and_the_wheels_and_power_say_why_not() {
         let (mut e, host, params) = editing();
         let map = Arc::clone(&params.midi_map);
-        let p = on_strip(&e, strip_at(StripTarget::Poly));
+        let p = on_strip(&e, strip_at(StripTarget::Tab(Bank::Mode, 1)));
         right_click(&mut e, p);
         let m = e.learning.menu().expect("a menu").clone();
         assert_eq!(m.title, "POLY · NO MIDI CONTROLLER");
         let (_, h) = m.extent(e.renderer.fonts());
-        assert!(m.y + h <= art::H + 1e-6, "over the panel");
+        assert!(m.y >= 0.0 && m.y + h <= art::H + 1e-6, "inside the window");
         menu_item(&mut e, "MIDI LEARN");
         e.draw();
         assert_eq!(e.strip_scene.learning, Some(strip::StripControl::Poly));
         assert_eq!(e.scene.learning, None);
-        let p = on_strip(&e, strip_at(StripTarget::Slider(Amount::Spread)));
+        let p = at(&e, centre("spread"));
         right_click(&mut e, p);
         assert_eq!(
             e.learning.menu().map(|m| m.title.as_str()),
-            Some("SPREAD · NO MIDI CONTROLLER")
+            Some("WIDTH · NO MIDI CONTROLLER")
         );
-        let p = on_strip(&e, strip_at(StripTarget::Poly));
+        let p = on_strip(&e, strip_at(StripTarget::Tab(Bank::Mode, 1)));
+        right_click(&mut e, p);
+        menu_item(&mut e, "CANCEL MIDI LEARN");
+        assert_eq!(map.armed(), None);
+        // INNER's knob (the strip's last): its menu where it was pressed, MIDI LEARN rings it as
+        // the panel's knobs are rung, and its note says so over it.
+        let inner = ca72_panel::controls::index("inner").expect("a control");
+        let p = at(&e, centre("inner"));
+        right_click(&mut e, p);
+        let m = e.learning.menu().expect("a menu").clone();
+        assert_eq!(m.title, "INNER · NO MIDI CONTROLLER");
+        let (_, h) = m.extent(e.renderer.fonts());
+        assert!((m.x - centre("inner").0).abs() < 1e-6, "at INNER's knob");
+        assert!(m.y >= 0.0 && m.y + h <= art::H + 1e-6, "inside the window");
+        menu_item(&mut e, "MIDI LEARN");
+        assert_eq!(map.armed(), Some(learnable("inner")));
+        e.draw();
+        assert_eq!(
+            (e.scene.learning, e.strip_scene.learning),
+            (Some(inner), None)
+        );
+        assert_eq!(note_lines(&e)[0], "MIDI LEARN: INNER");
+        let p = at(&e, centre("inner"));
         right_click(&mut e, p);
         menu_item(&mut e, "CANCEL MIDI LEARN");
         assert_eq!(map.armed(), None);
@@ -2488,17 +3326,22 @@ mod tests {
                 "mod_wheel",
                 "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT",
             ),
+            ("quality", "QUALITY: SET PER PLUGIN INSTANCE"),
         ] {
             let p = at(&e, centre(param));
             right_click(&mut e, p);
             assert_eq!(e.learning.menu().map(|m| m.title.as_str()), Some(title));
+            // (QUALITY's has its indicator's two first: `quality_s_menu_shows_or_hides_its_
+            // indicator`.)
+            let items = menu_items(&e);
             assert_eq!(
-                menu_items(&e),
+                items[items.len() - 2..],
                 [
                     ("NOT LEARNED BY MIDI LEARN".to_owned(), false),
                     ("MIDI ASSIGNMENTS…".to_owned(), true),
                 ]
             );
+            assert_eq!(items.len(), if param == "quality" { 4 } else { 2 });
             // (What cannot be chosen leaves the menu open.)
             menu_item(&mut e, "NOT LEARNED BY MIDI LEARN");
             assert!(e.learning.menu_open());
@@ -2638,6 +3481,24 @@ mod tests {
                 Call::Set(cutoff, 0.75),
                 Call::Set(cutoff, 1.0),
                 Call::End(cutoff)
+            ]
+        );
+        // A knob of the strip's, INNER's, the same (from its 0).
+        let p = at(&e, centre("inner"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -2.0));
+        go(&mut e, below(p, -60.0));
+        go(&mut e, below(p, -300.0));
+        release(&mut e);
+        let inner = params.inner.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(inner),
+                Call::Set(inner, 0.25),
+                Call::Set(inner, 1.0),
+                Call::End(inner)
             ]
         );
     }
@@ -2793,9 +3654,10 @@ mod tests {
         let p = at(&e, centre("emphasis"));
         go(&mut e, p);
         wheel(&mut e, 1.0);
-        let p = on_strip(&e, strip_at(StripTarget::More));
+        let p = at(&e, centre("voices"));
         go(&mut e, p);
         wheel(&mut e, 1.0);
+        e.end_gestures();
         let calls = host.take();
         well_formed(&calls);
         assert_eq!(
@@ -2825,10 +3687,10 @@ mod tests {
         well_formed(&host.take());
 
         let (mut e, host, _params) = editing();
-        let p = on_strip(&e, strip_at(StripTarget::Slider(Amount::Spread)));
+        let p = at(&e, centre("spread"));
         go(&mut e, p);
         press(&mut e);
-        go(&mut e, below(p, 0.0));
+        go(&mut e, below(p, -40.0));
         drop(e);
         well_formed(&host.take());
     }
@@ -2891,6 +3753,17 @@ mod tests {
             e.scene.tip.as_ref().map(|t| t.0.as_str()),
             Some("OSCILLATOR-1 VOLUME: 8.00")
         );
+        // A strip knob's, INNER's, in its unit: turned from 0 to 40 %.
+        let p = at(&e, centre("inner"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -96.0));
+        e.update_scene();
+        assert_eq!(
+            e.scene.tip.as_ref().map(|t| t.0.as_str()),
+            Some("INNER: 40 %")
+        );
+        release(&mut e);
     }
 
     #[test]
@@ -2903,8 +3776,9 @@ mod tests {
 
     #[test]
     fn the_editor_keeps_the_panels_proportions() {
-        // The panel's 529 and the strip's 48 under it (the presets' selector in its row).
-        assert_eq!(height_for(1720), 577);
+        // The panel's 512 and the strip's 470 under it (A6, the name board gone: the drawing
+        // 3108 by 1775).
+        assert_eq!(height_for(1720), 982);
         assert_eq!(clamp_width(10), MIN_WIDTH);
         assert_eq!(clamp_width(99_999), MAX_WIDTH);
     }
@@ -2913,10 +3787,10 @@ mod tests {
     fn it_opens_at_four_fifths_of_the_screen_until_resized() {
         // A 14-inch MacBook Pro's screen less the menu bar; a 34-inch ultrawide's.
         assert_eq!(fitted_width(Some((1512.0, 949.0))), 1210);
-        assert_eq!(fitted_width(Some((3440.0, 1400.0))), 2752);
-        // Short and wide: the height's share sets it (the panel and the strip).
-        assert_eq!(fitted_width(Some((3840.0, 800.0))), 1908);
-        assert_eq!(height_for(1908), 640);
+        // The height's share sets it on a wide screen (the panel and the strip under it).
+        assert_eq!(fitted_width(Some((3440.0, 1400.0))), 1961);
+        assert_eq!(fitted_width(Some((3840.0, 800.0))), 1121);
+        assert_eq!(height_for(1121), 640);
         assert_eq!(fitted_width(None), DEFAULT_WIDTH);
         assert_eq!(
             Ca72Params::default().editor_width.load(Ordering::Relaxed),
@@ -2934,12 +3808,12 @@ mod tests {
         let whole = r(0, 0, 5120, 1440);
         let (left, right) = (r(0, 0, 2560, 1440), r(2560, 0, 2560, 1440));
         let monitors = [(left, true), (right, false)];
-        assert_eq!(fitted_width(Some((5120.0, 1440.0))), 3435);
+        assert_eq!(fitted_width(Some((5120.0, 1440.0))), 2017);
         assert_eq!(
             monitor_area(whole, &monitors, Some((3000, 700)), None),
             right
         );
-        assert_eq!(fitted_width(Some((2560.0, 1440.0))), 2048);
+        assert_eq!(fitted_width(Some((2560.0, 1440.0))), 2017);
         // The pointer elsewhere: the primary; no RandR: the whole screen, as before.
         assert_eq!(monitor_area(whole, &monitors, None, None), left);
         assert_eq!(monitor_area(whole, &[], Some((3000, 700)), None), whole);
@@ -2967,121 +3841,197 @@ mod tests {
         }
     }
 
-    /// The size the host asks before it opens the window again: the drawer shut, though the
-    /// window closed with it open below (it reopened a drawer's height too tall, blank).
+    /// The window is the drawing's proportions, its width as saved, the drawer open or shut
+    /// (it drops down over the strip: A6).
     #[test]
-    fn the_editor_reopens_with_the_drawer_shut() {
+    fn the_editor_opens_at_the_drawings_proportions() {
         let params = Arc::new(Ca72Params::default());
         params.editor_width.store(1720, Ordering::Relaxed);
         let editor = Ca72Editor::new(Arc::clone(&params), Arc::new(Meters::default()));
-        let shut = (1720, height_for(1720));
-        editor.grown.store(true, Ordering::Relaxed);
-        assert_eq!(editor.size(), (1720, shut.1 + drawer_height(1720)));
-        drop(editor.closing());
-        assert_eq!(editor.size(), shut);
-        editor.grown.store(true, Ordering::Relaxed);
-        assert_eq!(editor.opening(), shut);
+        let size = (1720, height_for(1720));
+        assert_eq!(editor.size(), size);
+        assert_eq!(editor.opening(), size);
+        assert_eq!(size.1, (1720.0 * art::H / art::W).round() as u32);
     }
 
-    /// A point of the strip under the panel (its units) in the window.
-    fn on_strip(e: &Editing, (x, y): (f64, f64)) -> Point {
-        at(e, (x, art::H + y))
+    /// A point of the strip (the drawing's units) in the window.
+    fn on_strip(e: &Editing, p: (f64, f64)) -> Point {
+        at(e, p)
     }
 
-    /// Where a strip target is, found by scanning its middle row.
+    /// Where a strip target is, found where the strip's hit test finds it.
     fn strip_at(target: StripTarget) -> (f64, f64) {
-        let y = STRIP_H / 2.0;
-        let xs: Vec<f64> = (0..3438)
-            .map(f64::from)
-            .filter(|&x| strip::hit(x, y) == Some(target))
-            .collect();
-        assert!(!xs.is_empty(), "{target:?} not found");
-        (xs[xs.len() / 2], y)
+        let p = strip::centre(target);
+        assert_eq!(strip::hit(p.0, p.1), Some(target), "{target:?} not found");
+        p
     }
 
-    /// POLY, VOICES, ENTROPY and SPREAD from the strip under the panel: each its own
-    /// parameter, a click one gesture, a slider's drag one gesture; an amount's switch turns
-    /// it off and back on at its amount.
+    /// The strip's tabs and switches (A6): MODE's MONO, POLY and UNISON set POLY and UNISON;
+    /// SCATTER | DOUBLE turns DETUNE off and back on at its amount (half way if it never was);
+    /// the placement's EVEN and CENTER are its parameter's two choices; AUTO GAIN's tab toggles
+    /// it; ENTROPY's, WIDTH's and INNER's readouts turn their amounts off and on; VOICES is a
+    /// knob, a drag one gesture. Each click a gesture of its own for each parameter it changes,
+    /// none for one already so.
     #[test]
-    fn the_strip_operates_poly_voices_entropy_and_spread() {
+    fn the_strip_operates_its_parameters() {
         let (mut e, host, params) = editing();
-        let p = on_strip(&e, strip_at(StripTarget::Poly));
-        click(&mut e, p);
-        let poly = params.poly.as_ptr();
+        let tab = |e: &mut Editing, b: Bank, i: usize| {
+            let p = on_strip(e, strip_at(StripTarget::Tab(b, i)));
+            click(e, p);
+        };
+        let (poly, unison) = (params.poly.as_ptr(), params.unison.as_ptr());
+        tab(&mut e, Bank::Mode, 1);
         assert_eq!(
             host.take(),
             vec![Call::Begin(poly), Call::Set(poly, 1.0), Call::End(poly)]
         );
+        tab(&mut e, Bank::Mode, 2);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(unison),
+                Call::Set(unison, 1.0),
+                Call::End(unison)
+            ]
+        );
+        // (The test host applies nothing: POLY and UNISON are still off, so MONO is already.)
+        tab(&mut e, Bank::Mode, 0);
+        assert_eq!(host.take(), vec![], "MONO already");
+        let doubled = params.doubled.as_ptr();
+        tab(&mut e, Bank::Stereo, 1);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(doubled),
+                Call::Set(doubled, 1.0),
+                Call::End(doubled)
+            ]
+        );
+        tab(&mut e, Bank::Stereo, 0);
+        assert_eq!(
+            host.take(),
+            vec![],
+            "SCATTER already (DOUBLE still off here)"
+        );
+        let placement = params.placement.as_ptr();
+        tab(&mut e, Bank::Placement, 0);
+        assert_eq!(host.take(), vec![], "EVEN already");
+        tab(&mut e, Bank::Placement, 1);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(placement),
+                Call::Set(placement, 1.0),
+                Call::End(placement)
+            ]
+        );
+        assert_eq!(
+            params.placement.preview_plain(1.0),
+            Scatter::Centre,
+            "the second tab CENTER"
+        );
+        let auto = params.auto_gain.as_ptr();
+        tab(&mut e, Bank::Auto, 0);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(auto), Call::Set(auto, 0.0), Call::End(auto)]
+        );
+        // ENTROPY's, WIDTH's and INNER's switches: on from 0 at half way (they never were).
+        for (r, p) in [
+            (Readout::Entropy, params.entropy.as_ptr()),
+            (Readout::Width, params.spread.as_ptr()),
+            (Readout::Inner, params.inner.as_ptr()),
+        ] {
+            let at = on_strip(&e, strip_at(StripTarget::Switch(r)));
+            click(&mut e, at);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, 0.5), Call::End(p)]
+            );
+        }
+        // VOICES's knob dragged up: one gesture of VOICES.
         let voices = params.voices.as_ptr();
-        let p = on_strip(&e, strip_at(StripTarget::More));
-        click(&mut e, p);
-        // (4 to 5 of 2..10.)
-        assert_eq!(
-            host.take(),
-            vec![
-                Call::Begin(voices),
-                Call::Set(voices, 0.375),
-                Call::End(voices)
-            ]
-        );
-        let p = on_strip(&e, strip_at(StripTarget::Fewer));
-        e.mouse(MouseEvent::CursorMoved {
-            position: p,
-            modifiers: Modifiers::empty(),
-        });
-        e.mouse(MouseEvent::WheelScrolled {
-            delta: ScrollDelta::Lines { x: 0.0, y: -1.0 },
-            modifiers: Modifiers::empty(),
-        });
-        assert_eq!(
-            host.take(),
-            vec![
-                Call::Begin(voices),
-                Call::Set(voices, 0.125),
-                Call::End(voices)
-            ]
-        );
-        // ENTROPY's slider: pressed at its middle, dragged to its end, one gesture.
-        let entropy = params.entropy.as_ptr();
-        let (x, y) = strip_at(StripTarget::Slider(Amount::Entropy));
-        let (from, to) = (on_strip(&e, (x, y)), on_strip(&e, (x + 2000.0, y)));
-        go(&mut e, from);
-        e.mouse(MouseEvent::ButtonPressed {
-            button: MouseButton::Left,
-            modifiers: Modifiers::empty(),
-        });
-        go(&mut e, to);
-        e.mouse(MouseEvent::ButtonReleased {
-            button: MouseButton::Left,
-            modifiers: Modifiers::empty(),
-        });
+        let p = at(&e, centre("voices"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -120.0));
+        release(&mut e);
         let calls = host.take();
-        assert_eq!(calls.first(), Some(&Call::Begin(entropy)));
-        assert_eq!(
-            &calls[calls.len() - 2..],
-            &[Call::Set(entropy, 1.0), Call::End(entropy)]
-        );
-        assert!(
-            calls.iter().all(|c| match c {
-                Call::Begin(p) | Call::Set(p, _) | Call::End(p) => *p == entropy,
-            }),
-            "{calls:?}"
-        );
-        // SPREAD's switch: on from 0 at half way (it never was), off again keeping it.
-        let spread = params.spread.as_ptr();
-        let p = on_strip(&e, strip_at(StripTarget::Switch(Amount::Spread)));
-        click(&mut e, p);
-        assert_eq!(
-            host.take(),
-            vec![
-                Call::Begin(spread),
-                Call::Set(spread, 0.5),
-                Call::End(spread)
-            ]
-        );
+        well_formed(&calls);
+        assert_eq!(calls.first(), Some(&Call::Begin(voices)));
+        assert_eq!(calls.last(), Some(&Call::End(voices)));
         // The strip draws what the parameters hold.
         e.update_scene();
         assert!(e.draw());
+    }
+
+    /// The strip's readouts that are switches turn their amounts off, keeping each, and back on
+    /// at it: WIDTH's and INNER's each their own (INNER's switch the same as WIDTH's).
+    #[test]
+    fn the_strips_switches_turn_their_amounts_off_and_back_on_at_their_last() {
+        let amount = |name: &str, percent: f32| {
+            FloatParam::new(
+                name,
+                percent,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+        };
+        let (mut e, host, _) = editing();
+        e.params = Arc::new(Ca72Params {
+            spread: amount("Width", 70.0),
+            inner: amount("Inner", 40.0),
+            ..Ca72Params::default()
+        });
+        let switch = |e: &mut Editing, r: Readout| {
+            let p = on_strip(e, strip_at(StripTarget::Switch(r)));
+            click(e, p);
+        };
+        // Off, each kept.
+        for (r, p) in [
+            (Readout::Width, e.params.spread.as_ptr()),
+            (Readout::Inner, e.params.inner.as_ptr()),
+        ] {
+            switch(&mut e, r);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, 0.0), Call::End(p)]
+            );
+        }
+        // (The test host applies nothing: the parameters as the host would hold them now.)
+        e.params = Arc::new(Ca72Params::default());
+        // Back on, each at its own.
+        for (r, p, was) in [
+            (Readout::Inner, e.params.inner.as_ptr(), 0.4),
+            (Readout::Width, e.params.spread.as_ptr(), 0.7),
+        ] {
+            switch(&mut e, r);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, was), Call::End(p)]
+            );
+        }
+    }
+
+    /// The strip lights the placement's tab by the plug-in's choice, EVEN the first and CENTER
+    /// the second (not by the kit's index, which counts its EDGES); none in MONO without DOUBLE,
+    /// whose one voice has no place among others.
+    #[test]
+    fn the_strip_lights_the_placements_tab() {
+        let lit = |poly: bool, placement: Scatter| {
+            let p = Ca72Params {
+                poly: BoolParam::new("Poly", poly),
+                placement: EnumParam::new("Scatter Placement", placement),
+                ..Ca72Params::default()
+            };
+            strip_scene(&p, 0, (&[], 0.0), StripScene::default()).placement
+        };
+        assert_eq!(lit(true, Scatter::Even), Some(0));
+        assert_eq!(lit(true, Scatter::Centre), Some(1));
+        assert_eq!(lit(false, Scatter::Centre), None);
+        assert_eq!(Bank::Placement.words(), ["EVEN", "CENTER"]);
     }
 
     #[test]
@@ -3099,10 +4049,8 @@ mod tests {
         e.draw();
         let widths = [e.renderer.frame().width(), e.strip.frame().width()];
         assert_eq!(widths, [1500; 2]);
-        let tall: u32 = [e.renderer.frame(), e.strip.frame()]
-            .iter()
-            .map(|f| f.height())
-            .sum();
+        // (The panel's renderer draws the whole drawing, the strip's parts over its foot.)
+        let tall = e.renderer.frame().height();
         assert!(
             tall.abs_diff(height_for(1500)) <= 2,
             "{tall} for {}",
@@ -3148,11 +4096,6 @@ mod tests {
 
     // ---- The presets (decisions.md R10).
 
-    /// A point of the presets' bar (its units) in the window.
-    fn on_bar(e: &Editing, (x, y): (f64, f64)) -> Point {
-        at(e, (x, art::H + y))
-    }
-
     /// A point of the drawer (its units) in the window, the drawer open.
     fn in_drawer(e: &Editing, (x, y): (f64, f64)) -> Point {
         let (top, _, _) = e.drawer_span().expect("the drawer open");
@@ -3180,7 +4123,8 @@ mod tests {
 
     /// The drawer, opened from the bar's name and slid open.
     fn open(e: &mut Editing) {
-        click(e, on_bar(e, presets_ui::bar_centre(BarTarget::Name)));
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Name)));
+        click(e, p);
         assert!(e.browser.open);
         std::thread::sleep(crate::presets::SLIDE + Duration::from_millis(20));
         e.draw();
@@ -3215,14 +4159,11 @@ mod tests {
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         e.draw();
         open(&mut e);
-        let mid = in_drawer(&e, presets_ui::field_centre(FieldId::SaveName, None));
-        go(
-            &mut e,
-            Point {
-                x: mid.x,
-                y: mid.y - 120.0,
-            },
+        let list = in_drawer(
+            &e,
+            presets_ui::row_centre(&e.browser.drawer, 0).expect("shown"),
         );
+        go(&mut e, list);
         let wheel = |e: &mut Editing, delta: ScrollDelta| {
             e.mouse(MouseEvent::WheelScrolled {
                 delta,
@@ -3248,30 +4189,28 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_opens_the_drawer_below_it_and_a_row_sets_the_plugin() {
+    fn the_rail_drops_the_drawer_over_the_strip_and_a_row_sets_the_plugin() {
         let dir = tempfile::tempdir().unwrap();
         let (mut e, host, params) = editing_with(Library::at(dir.path()));
         e.draw();
         let shut = e.window_height();
         assert_eq!(shut, height_for(1720));
         open(&mut e);
-        // Below the bar, the window grown for it (the host asked), the panel untouched.
-        assert!(e.below() && e.resizing_window);
-        assert_eq!(e.window_height(), shut + drawer_height(1720));
-        assert!(e.composed.is_none());
-        let (top, _, _) = e.drawer_span().unwrap();
-        assert_eq!(top, art::H + STRIP_H);
-        assert!(e.browser.bar.below && e.browser.bar.open);
+        // Over the strip from under the rail, the window as it was, nothing asked of the host.
+        assert_eq!(e.window_height(), shut);
+        assert!(!e.resizing_window);
+        assert_eq!(host.resizes.load(Ordering::Relaxed), 0);
+        assert_eq!(e.drawer_span().unwrap(), (DRAWER_TOP, DRAWER_TOP, art::H));
+        assert!(!e.browser.bar.below && e.browser.bar.open);
         assert_eq!(e.browser.drawer.rows.len(), crate::library::factory().len());
         // A row sets every parameter it names (or its default), the preset remembered.
         host.take();
         let i = row_of(&e, "Undertow Growl");
         // Below the rows shown: the wheel scrolls the list to it.
-        let mid = in_drawer(&e, presets_ui::field_centre(FieldId::SaveName, None));
-        let list = Point {
-            x: mid.x,
-            y: mid.y - 120.0,
-        };
+        let list = in_drawer(
+            &e,
+            presets_ui::row_centre(&e.browser.drawer, 0).expect("shown"),
+        );
         go(&mut e, list);
         while presets_ui::row_centre(&e.browser.drawer, i).is_none() {
             let first = e.browser.drawer.first;
@@ -3308,7 +4247,7 @@ mod tests {
         e.draw();
         assert_eq!(e.browser.bar.name, "Undertow Growl");
         assert!(e.browser.drawer.rows[i].current);
-        // A double click on a row chooses it and closes the drawer, the window shrinking.
+        // A double click on a row chooses it and closes the drawer.
         e.browser.scroll(-100);
         let j = row_of(&e, "Brass Tutti");
         let pt = in_drawer(
@@ -3320,30 +4259,25 @@ mod tests {
         assert_eq!(preset(&params), "Brass Tutti");
         assert!(!e.browser.open);
         slid(&mut e);
-        assert!(!e.below());
         assert_eq!(e.window_height(), shut);
         // Escape closes it too.
         open(&mut e);
         assert!(key(&mut e, Key::Escape));
         slid(&mut e);
-        assert!(!e.browser.open && !e.below());
+        assert!(!e.browser.open);
         assert!(
             !key(&mut e, Key::Character("a".into())),
             "closed: the host's keys"
         );
     }
 
-    /// The editor's width, fitted to the screen as it opens, stays while the drawer opens
-    /// and shuts (only its height changes), and is measured again when it next opens.
+    /// The editor's width, fitted to the screen as it opens, stays, and is measured again
+    /// when it next opens.
     #[test]
-    fn the_width_stays_while_the_drawer_opens_and_shuts() {
+    fn the_width_stays_until_the_editor_opens_again() {
         let ed = Ca72Editor::new(Arc::new(Ca72Params::default()), Arc::new(Meters::default()));
         let (w, h) = ed.opening();
-        // A screen that would measure otherwise now: the width the editor opened at stays.
         ed.fitted.store(w, Ordering::Relaxed);
-        ed.grown.store(true, Ordering::Relaxed);
-        assert_eq!(ed.size(), (w, h + drawer_height(w)));
-        ed.grown.store(false, Ordering::Relaxed);
         assert_eq!(ed.size(), (w, h));
         drop(ed.closing());
         assert_eq!(
@@ -3353,66 +4287,30 @@ mod tests {
         );
     }
 
-    /// Shut below the strip, the drawer slides back up under it as it came out: the window
-    /// keeps its height, and the drawer is not drawn over the panel, until it has; then the
-    /// window shrinks (decisions.md R19).
+    /// The drawer drops down from under the rail over the strip's sections and slides back up
+    /// under it as it shuts: the panel and the rail stay as they are, the window its size, the
+    /// host never asked to resize it (A6; it had grown the window below the strip). A row there
+    /// sets the plug-in.
     #[test]
-    fn the_drawer_shuts_the_way_it_opened() {
+    fn the_drawer_drops_over_the_strip_and_leaves_the_panel() {
         let dir = tempfile::tempdir().unwrap();
         let (mut e, host, _params) = editing_with(Library::at(dir.path()));
         e.draw();
-        let shut = e.window_height();
         open(&mut e);
-        assert!(e.below());
-        let tall = e.window_height();
-        let asked = host.resizes.load(Ordering::Relaxed);
-        assert!(key(&mut e, Key::Escape));
-        e.follow_drawer();
-        // Held at the slide's start (begun an hour hence: however long a draw takes here).
-        e.browser
-            .slide_began(Instant::now() + Duration::from_secs(3600));
-        e.draw();
-        assert!(!e.browser.open && e.browser.sliding());
-        assert!(
-            e.below(),
-            "the window keeps its height while the drawer slides"
-        );
-        assert_eq!(e.window_height(), tall);
-        assert!(e.slid.is_some(), "the drawer sliding below the strip");
-        assert!(e.composed.is_none(), "not over the panel");
-        assert_eq!(host.resizes.load(Ordering::Relaxed), asked);
-        // Its end past.
-        e.browser
-            .slide_began(Instant::now() - crate::presets::SLIDE * 2);
-        e.draw();
-        assert!(!e.below());
-        assert_eq!(e.window_height(), shut);
-        assert_eq!(host.resizes.load(Ordering::Relaxed), asked + 1);
-    }
-
-    /// A host that will not resize the window: the drawer opens over the panel instead.
-    #[test]
-    fn where_the_window_cannot_grow_the_drawer_opens_over_the_panel() {
-        let dir = tempfile::tempdir().unwrap();
-        let (mut e, host, _params) = editing_with(Library::at(dir.path()));
-        host.fixed.store(true, Ordering::Relaxed);
-        e.draw();
-        open(&mut e);
-        assert!(!e.below());
-        assert_eq!(e.window_height(), height_for(1720));
-        assert!(!e.browser.bar.below);
-        let c = e.composed.as_ref().expect("the drawer over the panel");
+        let c = e.composed.as_ref().expect("the window's frame");
         let frame = e.renderer.frame();
         let row = |p: &ca72_panel::Pixmap, y: u32| {
             let w = p.width() as usize;
             p.data()[(y as usize * w) * 4..((y as usize + 1) * w) * 4].to_vec()
         };
-        let low = (frame.height() as f64 * 0.9) as u32;
-        let high = (frame.height() as f64 * 0.1) as u32;
-        assert_ne!(row(c, low), row(frame, low));
-        assert_eq!(row(c, high), row(frame, high));
-        // A row there sets the plug-in too: one on the list's first page, not the current
-        // preset (which one depends on how many presets sort before it).
+        let s = e.renderer.scale();
+        let panel = ((art::PANEL_H - 40.0) * s) as u32;
+        let low = ((art::H - 100.0) * s) as u32;
+        assert_eq!(row(c, panel), row(frame, panel), "the panel as it is");
+        assert_ne!(row(c, low), row(frame, low), "the drawer over the strip");
+        let open_row = row(c, low);
+        assert_eq!(host.resizes.load(Ordering::Relaxed), 0);
+        // A row there sets the plug-in: one on the list's first page, not the current preset.
         let i = e.browser.drawer.first + 1;
         let name = e.browser.drawer.rows[i].name.clone();
         assert!(!e.browser.drawer.rows[i].current);
@@ -3423,35 +4321,20 @@ mod tests {
         click(&mut e, pt);
         e.draw();
         assert_eq!(e.browser.bar.name, name);
-    }
-
-    /// On a short, wide screen the window with the drawer below would run off its foot (at
-    /// 3440 by 1400 the editor opens 2752 wide: 923 pixels tall, 1600 with the drawer): the
-    /// drawer opens over the panel, the host not asked.
-    #[test]
-    fn where_the_window_would_not_fit_the_drawer_opens_over_the_panel() {
-        let dir = tempfile::tempdir().unwrap();
-        let (mut e, host, _params) = editing_with(Library::at(dir.path()));
-        e.screen = |_| Some((3440.0, 1400.0));
-        let w = fitted_width(Some((3440.0, 1400.0)));
-        assert_eq!(
-            (w, height_for(w), height_for(w) + drawer_height(w)),
-            (2752, 923, 1600)
-        );
-        e.fit(1.0, w, w);
-        e.draw();
-        open(&mut e);
-        assert!(!e.below() && !e.browser.bar.below);
-        assert_eq!(host.resizes.load(Ordering::Relaxed), 0);
-        assert!(e.composed.is_some(), "the drawer over the panel");
-        // Shut and opened again where it fits: below the strip.
+        // Shut: it slides back up (held at the slide's start), the window as it is.
         assert!(key(&mut e, Key::Escape));
         e.follow_drawer();
+        e.browser
+            .slide_began(Instant::now() + Duration::from_secs(3600));
+        e.draw();
+        assert!(!e.browser.open && e.browser.sliding());
+        assert_eq!(e.window_height(), height_for(1720));
+        e.browser
+            .slide_began(Instant::now() - crate::presets::SLIDE * 2);
+        e.draw();
+        let c = e.composed.as_ref().expect("the window's frame");
+        assert_ne!(row(c, low), open_row, "the strip again");
         assert_eq!(host.resizes.load(Ordering::Relaxed), 0);
-        e.screen = |_| Some((3440.0, 1600.0));
-        open(&mut e);
-        assert!(e.below());
-        assert_eq!(e.window_height(), 1600);
     }
 
     #[test]
@@ -3502,7 +4385,7 @@ mod tests {
             .expect("a chip");
         let setter = ParamSetter::new(e.context.as_ref());
         e.browser
-            .drawer_press(DrawerTarget::Chip(bass), 0.0, &e.drawer, &e.params, &setter);
+            .drawer_press(DrawerTarget::Chip(bass), 0.0, &e.params, &setter);
         let names: Vec<&str> = e
             .browser
             .drawer
@@ -3511,7 +4394,7 @@ mod tests {
             .map(|r| r.name.as_str())
             .collect();
         assert_eq!(names, ["Cruising Whistle"]);
-        let pt = on_bar(&e, presets_ui::bar_centre(BarTarget::Next));
+        let pt = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Next)));
         click(&mut e, pt);
         assert_eq!(preset(&params), "Cruising Whistle");
     }
@@ -3542,7 +4425,7 @@ mod tests {
         let (mut e, _host, params) = editing_with(Library::at(dir.path()));
         // SAVE… opens the drawer at the name; Tab to the tags; Enter saves.
         e.draw();
-        let pt = on_bar(&e, presets_ui::bar_centre(BarTarget::Save));
+        let pt = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Save)));
         click(&mut e, pt);
         assert_eq!(e.browser.drawer.focus, Some(FieldId::SaveName));
         std::thread::sleep(crate::presets::SLIDE + Duration::from_millis(20));
@@ -3561,23 +4444,24 @@ mod tests {
         assert!(ids.contains(&"cutoff") && ids.contains(&"osc1_range") && ids.contains(&"voices"));
         assert!(!ids.contains(&"pitch_wheel") && !ids.contains(&"bypass"));
         assert!(mine.sound.values.contains(&("osc1_range".to_owned(), 3.0)));
-        // Saving as a factory preset's name says it replaces it.
-        let setter = ParamSetter::new(e.context.as_ref());
-        e.browser.drawer_press(
-            DrawerTarget::Field(FieldId::SaveName),
-            0.0,
-            &e.drawer,
-            &e.params,
-            &setter,
-        );
+        // SAVE AS: the preset's name to begin with; a factory preset's name, it says it replaces
+        // it; Escape takes the save back.
+        let key_at = |e: &Editing, k: PresetKey| in_drawer(e, presets_ui::key_centre(k));
+        let pt = key_at(&e, PresetKey::SaveAs);
+        click(&mut e, pt);
+        assert_eq!(e.browser.drawer.save_name.text, "My Bass");
+        assert_eq!(e.browser.drawer.focus, Some(FieldId::SaveName));
+        for _ in 0.."My Bass".len() {
+            key(&mut e, Key::Backspace);
+        }
         typed(&mut e, "Bass");
         assert!(e.browser.drawer.replace);
         assert!(e.browser.drawer.hint.contains("factory"));
-        // Renamed in place (the plug-in keeps it), its tags edited.
-        let i = row_of(&e, "My Bass");
-        let (x, y) =
-            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Rename).expect("shown");
-        let pt = in_drawer(&e, (x, y));
+        key(&mut e, Key::Escape);
+        assert_eq!(e.browser.drawer.editing, None);
+        assert!(e.browser.open);
+        // RENAME, for the preset set: renamed in place (the plug-in keeps it).
+        let pt = key_at(&e, PresetKey::Rename);
         click(&mut e, pt);
         assert_eq!(e.browser.drawer.focus, Some(FieldId::Edit));
         for _ in 0.."My Bass".len() {
@@ -3587,10 +4471,8 @@ mod tests {
         key(&mut e, Key::Enter);
         assert!(lib.find("Your Bass").is_some() && lib.find("My Bass").is_none());
         assert_eq!(preset(&params), "Your Bass");
-        let i = row_of(&e, "Your Bass");
-        let (x, y) =
-            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Tags).expect("shown");
-        let pt = in_drawer(&e, (x, y));
+        // TAGS: its tags edited.
+        let pt = key_at(&e, PresetKey::Tags);
         click(&mut e, pt);
         key(&mut e, Key::End);
         typed(&mut e, ", deep");
@@ -3599,38 +4481,39 @@ mod tests {
             lib.find("Your Bass").unwrap().sound.tags,
             ["bass", "test", "deep"]
         );
-        // Deleted after asking.
-        let i = row_of(&e, "Your Bass");
-        let (x, y) =
-            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Delete).expect("shown");
-        let pt = in_drawer(&e, (x, y));
+        // DELETE: deleted once asked (DELETE again).
+        let pt = key_at(&e, PresetKey::Delete);
         click(&mut e, pt);
         assert!(lib.find("Your Bass").is_some(), "deleted before asked");
-        let (x, y) =
-            presets_ui::action_centre(&e.browser.drawer, i, RowAction::Confirm).expect("asked");
-        let pt = in_drawer(&e, (x, y));
+        e.draw();
         click(&mut e, pt);
         assert!(lib.find("Your Bass").is_none());
         e.draw();
         assert!(!e.browser.bar.found, "the bar says the preset is gone");
-        // A factory preset deleted, then restored; the star makes a favourite.
+        // A factory preset deleted (Enter once asked), then restored; the star makes a
+        // favourite.
         let i = row_of(&e, "Lead");
         let setter = ParamSetter::new(e.context.as_ref());
-        for a in [RowAction::Delete, RowAction::Confirm] {
-            e.browser.drawer_press(
-                DrawerTarget::Action(i, a),
-                0.0,
-                &e.drawer,
-                &e.params,
-                &setter,
-            );
-        }
-        assert!(e.browser.drawer.rows.iter().all(|r| r.name != "Lead"));
         e.browser
-            .drawer_press(DrawerTarget::Restore, 0.0, &e.drawer, &e.params, &setter);
+            .drawer_press(DrawerTarget::Row(i), 0.0, &e.params, &setter);
+        e.browser.drawer_press(
+            DrawerTarget::Key(PresetKey::Delete),
+            0.0,
+            &e.params,
+            &setter,
+        );
+        key(&mut e, Key::Enter);
+        assert!(e.browser.drawer.rows.iter().all(|r| r.name != "Lead"));
+        let setter = ParamSetter::new(e.context.as_ref());
+        e.browser.drawer_press(
+            DrawerTarget::Key(PresetKey::Restore),
+            0.0,
+            &e.params,
+            &setter,
+        );
         let i = row_of(&e, "Lead");
         e.browser
-            .drawer_press(DrawerTarget::Star(i), 0.0, &e.drawer, &e.params, &setter);
+            .drawer_press(DrawerTarget::Star(i), 0.0, &e.params, &setter);
         assert!(lib.find("Lead").unwrap().favorite);
     }
 
@@ -3653,24 +4536,132 @@ mod tests {
         };
         let dir = tempfile::tempdir().unwrap();
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
+        window_frame(&mut e).save_png(out).unwrap();
+    }
+
+    /// The window's frame as shown (the panel's renderer's whole drawing, the strip's parts over
+    /// its foot, the drawer and what floats over them: `compose`), for a look.
+    fn window_frame(e: &mut Editing) -> &ca72_panel::Pixmap {
         e.draw();
-        let frames = [e.renderer.frame(), e.strip.frame()];
-        let w = frames[0].width();
-        let h: u32 = frames.iter().map(|f| f.height()).sum();
-        let mut all = ca72_panel::Pixmap::new(w, h).unwrap();
-        let mut y = 0usize;
-        for f in frames {
-            let n = (f.width() * f.height() * 4) as usize;
-            let start = y * w as usize * 4;
-            all.data_mut()[start..start + n].copy_from_slice(f.data());
-            y += f.height() as usize;
+        e.composed.as_ref().expect("the window's frame")
+    }
+
+    /// QUALITY's opening (decisions.md R48) for looking at, written to `$CA72_ULTRA_PNG`,
+    /// the folder: the panel's last column close up (two pixels a unit) at QUALITY's three
+    /// positions, each's thing up at rest and as the synth plays, `quality-<lo|hi|ultra>-<level>
+    /// .png`; each coming up, `shutter-<setting>-<p>.png`; none of it, `hidden.png`; and the
+    /// window at ULTRA with its note, `note.png`, and the opening's menu, `menu.png`.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_ultra_pngs() {
+        let Some(out) = std::env::var_os("CA72_ULTRA_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let k = 2.0;
+        let mut r = Renderer::with_skin(Skin::Worn, k, 1.0);
+        let crop = |r: &Renderer, name: &str| {
+            let f = r.frame();
+            let (x0, y0) = (
+                ((art::COL + 2930.0) * k) as u32,
+                ((art::TOP - 20.0) * k) as u32,
+            );
+            let (w, h) = (((3108.0 - 2930.0) * k) as u32, (640.0 * k) as u32);
+            let mut c = ca72_panel::Pixmap::new(w, h).unwrap();
+            for y in 0..h {
+                let from = ((y0 + y) * f.width() + x0) as usize * 4;
+                let to = (y * w) as usize * 4;
+                c.data_mut()[to..to + w as usize * 4]
+                    .copy_from_slice(&f.data()[from..from + w as usize * 4]);
+            }
+            c.save_png(out.join(name)).unwrap();
+        };
+        let q = ca72_panel::controls::index("quality").unwrap();
+        let mut scene = Scene {
+            values: [0.5; CONTROLS.len()],
+            ..Scene::default()
+        };
+        use ca72_panel::ultra::Opening;
+        // QUALITY's three positions, each's thing up: at rest, and at the synth's levels.
+        for (name, v) in [("lo", 0.0), ("hi", 0.5), ("ultra", 1.0)] {
+            scene.values[q] = v;
+            for level in [0.0, 0.5, 1.0] {
+                let mut o = Opening {
+                    level,
+                    spark: 1.3,
+                    run: if level > 0.0 { 1.0 } else { 0.0 },
+                    asleep: if level > 0.0 { 0.0 } else { 1.0 },
+                    stride: 3,
+                    turn: 20.0,
+                    ..Opening::default()
+                };
+                match name {
+                    "lo" => o.hamster = 1.0,
+                    "hi" => o.lamp = 1.0,
+                    _ => o.coil = 1.0,
+                }
+                scene.opening = o;
+                r.render(&scene);
+                crop(&r, &format!("quality-{name}-{level}.png"));
+            }
         }
-        all.save_png(out).unwrap();
+        // Each coming up through the shutter.
+        for (name, v) in [("lo", 0.0), ("hi", 0.5), ("ultra", 1.0)] {
+            scene.values[q] = v;
+            for p in [0.0, 0.16, 0.32, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] {
+                let mut o = Opening {
+                    level: 0.6,
+                    spark: 2.1,
+                    run: p,
+                    stride: (p * 7.0) as u8,
+                    ..Opening::default()
+                };
+                match name {
+                    "lo" => o.hamster = p,
+                    "hi" => o.lamp = p,
+                    _ => o.coil = p,
+                }
+                scene.opening = o;
+                r.render(&scene);
+                crop(&r, &format!("shutter-{name}-{p}.png"));
+            }
+        }
+        // None of it: the panel blank above QUALITY.
+        scene.opening = Opening {
+            hidden: true,
+            coil: 1.0,
+            ..Opening::default()
+        };
+        r.render(&scene);
+        crop(&r, "hidden.png");
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
+        e.draw();
+        e.scene.values[q] = 1.0;
+        e.scene.opening = Opening {
+            coil: 1.0,
+            ..Opening::default()
+        };
+        e.scene.note = Some(e.ultra_note());
+        e.renderer.render(&e.scene);
+        e.renderer.frame().save_png(out.join("note.png")).unwrap();
+        // QUALITY's menu, its toggle right-clicked.
+        e.ultra_note = false;
+        e.settings.ultra_note_read = true;
+        let size = e.renderer.text_size() * MENU_TEXT;
+        let at = (art::COL + 3023.0, art::TOP + 266.0);
+        e.learning
+            .open_quality_menu(e.renderer.fonts(), at, size, e.settings.shutter);
+        e.scene.note = None;
+        e.scene.menu = e.learning.menu().cloned();
+        e.renderer.render(&e.scene);
+        e.renderer.frame().save_png(out.join("menu.png")).unwrap();
     }
 
     /// MIDI Learn drawn (decisions.md R34), for looking at: CUTOFF being learned (ringed, its
     /// note) with MAIN OUTPUT VOLUME's menu open, then POLY being learned after a reserved
-    /// controller was moved, each as `learn-<n>.png` in `$CA72_LEARN_PNG`, the folder.
+    /// controller was moved, then the strip's INNER being learned with its menu open, each as
+    /// `learn-<n>.png` in `$CA72_LEARN_PNG`, the folder.
     #[test]
     fn the_window_learning_png() {
         let Some(out) = std::env::var_os("CA72_LEARN_PNG") else {
@@ -3679,19 +4670,7 @@ mod tests {
         let out = std::path::PathBuf::from(out);
         let dir = tempfile::tempdir().unwrap();
         let shot = |e: &mut Editing, name: &str| {
-            e.draw();
-            let frames = [e.renderer.frame(), e.strip.frame()];
-            let w = frames[0].width();
-            let h: u32 = frames.iter().map(|f| f.height()).sum();
-            let mut all = ca72_panel::Pixmap::new(w, h).unwrap();
-            let mut y = 0usize;
-            for f in frames {
-                let n = (f.width() * f.height() * 4) as usize;
-                let start = y * w as usize * 4;
-                all.data_mut()[start..start + n].copy_from_slice(f.data());
-                y += f.height() as usize;
-            }
-            all.save_png(out.join(name)).unwrap();
+            window_frame(e).save_png(out.join(name)).unwrap();
         };
         let (mut e, _host, params) = editing_with(Library::at(dir.path()));
         params
@@ -3705,6 +4684,10 @@ mod tests {
         params.midi_map.arm(learnable("poly"));
         params.midi_map.refuse(1);
         shot(&mut e, "learn-2.png");
+        params.midi_map.arm(learnable("inner"));
+        let p = at(&e, centre("inner"));
+        right_click(&mut e, p);
+        shot(&mut e, "learn-3.png");
     }
 
     /// The drawer's update check (decisions.md R27): its button the editor's, not the
@@ -3758,19 +4741,7 @@ mod tests {
             presets_ui::row_centre(&e.browser.drawer, i + 1).expect("shown"),
         );
         go(&mut e, pt);
-        e.draw();
-        let frames = [e.renderer.frame(), e.strip.frame(), e.drawer.frame()];
-        let w = frames[0].width();
-        let h: u32 = frames.iter().map(|f| f.height()).sum();
-        let mut all = ca72_panel::Pixmap::new(w, h).unwrap();
-        let mut y = 0usize;
-        for f in frames {
-            let n = (f.width() * f.height() * 4) as usize;
-            let start = y * w as usize * 4;
-            all.data_mut()[start..start + n].copy_from_slice(f.data());
-            y += f.height() as usize;
-        }
-        all.save_png(out).unwrap();
+        window_frame(&mut e).save_png(out).unwrap();
     }
 }
 
@@ -3791,7 +4762,7 @@ mod windows_window_tests {
     use std::path::PathBuf;
     use std::ptr::null_mut;
 
-    use ca72_panel::presets::{self as presets_ui, BarTarget};
+    use ca72_panel::presets::BarTarget;
     use nih_plug::context::PluginApi;
     use nih_plug::editor::ParentWindowHandle;
     use nih_plug::wrapper::state::PluginState;
@@ -3902,7 +4873,6 @@ mod windows_window_tests {
                 resizes: AtomicU32::new(0),
             });
             let context: Arc<dyn GuiContext> = host.clone();
-            let grown = Arc::clone(&editor.grown);
             let dir: PathBuf = presets.path().to_path_buf();
             let handle = Window::open_parented(
                 &window::Parent(ParentWindowHandle::Win32Hwnd(parent.cast())),
@@ -3912,16 +4882,7 @@ mod windows_window_tests {
                     scale: WindowScalePolicy::ScaleFactor(1.0),
                 },
                 move |window: &mut Window<'_>| {
-                    PanelWindow::new(
-                        window,
-                        context,
-                        params,
-                        meters,
-                        grown,
-                        w,
-                        1.0,
-                        Library::at(dir),
-                    )
+                    PanelWindow::new(window, context, params, meters, w, 1.0, Library::at(dir))
                 },
             );
             pump(Duration::from_millis(300));
@@ -3984,8 +4945,8 @@ mod windows_window_tests {
 
         /// A click on the preset's name, in the strip under the panel.
         fn click_name(&self) {
-            let (x, y) = presets_ui::bar_centre(BarTarget::Name);
-            self.drag(self.at((x, art::H + y)), 0.0);
+            let (x, y) = strip::centre(StripTarget::Bar(BarTarget::Name));
+            self.drag(self.at((x, y)), 0.0);
         }
 
         fn close(mut self) {
@@ -4129,38 +5090,33 @@ mod windows_window_tests {
         o.size()
     }
 
+    /// The drawer drops down over the strip inside the window (A6: decisions.md R44): as it
+    /// opens and shuts the window stays as it is, and nothing is asked of the host.
     fn the_drawer_opens_and_shuts(resizes_editor: bool) {
         let o = Opened::new(resizes_editor, HostWindow::OffScreen);
-        let short = (MIN_WIDTH, height_for(MIN_WIDTH));
-        assert_eq!(settled(&o, short), short);
-        o.click_name();
-        let tall = (MIN_WIDTH, height_for(MIN_WIDTH) + drawer_height(MIN_WIDTH));
+        let size = (MIN_WIDTH, height_for(MIN_WIDTH));
+        assert_eq!(settled(&o, size), size);
+        let asked = o.host.resizes.load(Ordering::Relaxed);
+        for what in ["opened", "shut"] {
+            o.click_name();
+            pump(Duration::from_millis(300));
+            assert_eq!(o.size(), size, "the window as it was, the drawer {what}");
+        }
         assert_eq!(
-            settled(&o, tall),
-            tall,
-            "the window grown for the drawer below the strip"
-        );
-        assert!(
-            o.host.resizes.load(Ordering::Relaxed) >= 1,
-            "the host asked"
-        );
-        o.click_name();
-        assert_eq!(
-            settled(&o, short),
-            short,
-            "the window back once the drawer has shut"
+            o.host.resizes.load(Ordering::Relaxed),
+            asked,
+            "nothing asked of the host"
         );
         o.close();
     }
 
-    /// The host grows its own window, the editor its own (the drawer took the keyboard as the
-    /// press was handled: its window's messages ran the resize early).
+    /// In a host that would grow its own window and leave the editor's to it.
     #[test]
     fn the_drawer_opens_and_shuts_where_the_host_grows_its_own_window() {
         the_drawer_opens_and_shuts(false);
     }
 
-    /// The host resizes the editor's window as well, from within the editor's request.
+    /// In a host that would resize the editor's window as well, from within the editor's request.
     #[test]
     fn the_drawer_opens_and_shuts_where_the_host_resizes_the_editors_window() {
         the_drawer_opens_and_shuts(true);
@@ -4226,16 +5182,18 @@ mod windows_window_tests {
             "the panel again within 100 ms of the host's window captured ({} colours)",
             colours(&shown)
         );
-        // The drawer opened below the strip: the host repaints the editor's window from within
-        // the editor's request, its handler busy (the editor is told once it returns, R26), and
-        // the window, grown, again later.
+        // The drawer opened over the strip, the window as it was (A6: decisions.md R44): shown,
+        // and shown again as the host's window is repainted.
         o.click_name();
-        let tall = (MIN_WIDTH, height_for(MIN_WIDTH) + drawer_height(MIN_WIDTH));
-        assert_eq!(settled(&o, tall), tall, "the window grown for the drawer");
         pump(Duration::from_millis(300));
+        assert_eq!(
+            o.size(),
+            (MIN_WIDTH, height_for(MIN_WIDTH)),
+            "the window as it was"
+        );
         let drawer = pixels(&o);
         assert!(
-            colours(&drawer) >= 100,
+            colours(&drawer) >= 100 && drawer != panel,
             "the panel and the drawer shown ({} colours)",
             colours(&drawer)
         );

@@ -6,21 +6,24 @@
 //! its default (POLY, VOICES, ENTROPY and SPREAD among them: R12), each a gesture of its own;
 //! MIDI BEND RANGE, the player's keyboard's, only when the preset names it (R18). The plug-in
 //! remembers it (`preset`, saved with the session); the bar marks it • once a value leaves
-//! it. The drawer: typing goes to the field with the caret (the search when none); the arrow
-//! keys step through the list, setting each preset; Enter commits a field (the search:
-//! closes); Escape takes back an edit, else closes; a double click on a row chooses it and
-//! closes the drawer. RENAME, TAGS and DELETE's question stay with their preset as the list
-//! changes, and end when it leaves the list (R18). The library is read again when the drawer
-//! opens, after each change and every two seconds while it is open, so that DAW's changes show
-//! too (its files parsed only when the folder changed); typing in the search and the filters
-//! work on the presets as read (R18).
+//! it. The drawer (the mock-up's, A6: decisions.md R44): typing goes to the field with the
+//! caret (the search when none); the arrow keys step through the list, setting each preset;
+//! Enter commits a field (the search: closes) or, once DELETE has asked, deletes; Tab moves to
+//! the next field shown; Escape takes back what a key began, else closes; a double click on a
+//! row chooses it and closes the drawer. The PRESET keys RENAME, TAGS, DELETE and REVERT act
+//! on the preset the plug-in is set to; what they begin stays with that preset as the list
+//! changes (a filter, another program's change) and ends when it is gone or another is set,
+//! so it never acts on another (R18). SAVE AS begins a save (the bar's SAVE as well), and saves
+//! when pressed again. The library is read again when the drawer opens, after each change and
+//! every two seconds while it is open, so that DAW's changes show too (its files parsed only
+//! when the folder changed); typing in the search and the filters work on the presets as read
+//! (R18).
 
 use std::time::{Duration, Instant};
 
-use ca72_panel::presets::DrawerRenderer;
 use ca72_panel::presets::{
-    BarScene, BarTarget, DrawerScene, DrawerTarget, Edit, Field, FieldId, ROWS_SHOWN, Row,
-    RowAction, caret_at,
+    BarScene, BarTarget, Current, DrawerScene, DrawerTarget, Edit, Field, FieldId, PresetKey,
+    ROWS_SHOWN, Row, TAG_LINES, Tab, caret_at,
 };
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
@@ -153,6 +156,7 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("noise_type", &p.noise_type),
         ("osc3_on", &p.osc3_on),
         ("osc3_volume", &p.osc3_volume),
+        ("filter_mode", &p.filter_mode),
         ("filter_mod", &p.filter_mod),
         ("keyboard_control_1", &p.keyboard_control_1),
         ("keyboard_control_2", &p.keyboard_control_2),
@@ -176,6 +180,14 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("voices", &p.voices),
         ("entropy", &p.entropy),
         ("spread", &p.spread),
+        ("inner", &p.inner),
+        ("placement", &p.placement),
+        ("unison", &p.unison),
+        ("double", &p.double),
+        ("drive", &p.drive),
+        ("level", &p.level),
+        ("auto_gain", &p.auto_gain),
+        ("doubled", &p.doubled),
         ("feedback", &p.feedback),
         ("lock", &p.lock),
     ]
@@ -191,15 +203,28 @@ pub const PLAYERS: &[&str] = &["midi_bend_range"];
 /// any other (decisions.md R12; R10 had left POLY and VOICES as they were when a preset did not
 /// name them).
 fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
+    let value = |id: &str| {
+        e.sound
+            .values
+            .iter()
+            .find(|(k, _)| k == id)
+            .map(|(_, v)| *v)
+    };
     sound_params(p)
         .into_iter()
-        .filter_map(
-            |(id, q)| match e.sound.values.iter().find(|(k, _)| k == id) {
-                Some((_, v)) => Some((id, q.normalized_of(*v))),
-                None if PLAYERS.contains(&id) => None,
-                None => Some((id, q.default_normalized())),
-            },
-        )
+        .filter_map(|(id, q)| match value(id) {
+            Some(v) => Some((id, q.normalized_of(v))),
+            None if PLAYERS.contains(&id) => None,
+            // (A preset saved before DOUBLE was a switch of its own: DOUBLE where its DETUNE
+            // is above 0.)
+            None if id == "doubled" => Some((
+                id,
+                q.normalized_of(f64::from(u8::from(
+                    value("double").is_some_and(|d| d > 0.0),
+                ))),
+            )),
+            None => Some((id, q.default_normalized())),
+        })
         .collect()
 }
 
@@ -210,6 +235,16 @@ pub fn values_now(p: &Ca72Params) -> Vec<(String, f64)> {
         .filter(|(id, _)| !PLAYERS.contains(id))
         .map(|(id, q)| (id.to_owned(), (q.plain() * 1e4).round() / 1e4))
         .collect()
+}
+
+/// Where a preset is from, as a row says it: `EDITED` (the user's version of a factory
+/// preset) or `YOURS`; nothing for the factory's.
+fn origin_word(o: Origin) -> Option<&'static str> {
+    match o {
+        Origin::Factory => None,
+        Origin::Edited => Some("EDITED"),
+        Origin::User => Some("YOURS"),
+    }
 }
 
 fn same(a: &str, b: &str) -> bool {
@@ -237,9 +272,9 @@ pub struct Browser {
     pub below: bool,
     /// The last row clicked, and when: a second click soon after closes the drawer.
     last_row: Option<(Instant, usize)>,
-    /// The preset being renamed, tagged or asked about deleting, by its name and origin:
-    /// `drawer.editing`'s row follows it as the list changes, and the edit ends when it is no
-    /// longer listed, so it never acts on another (decisions.md R18).
+    /// The preset being renamed, tagged or asked about deleting, by its name and origin: the
+    /// edit stays with it as the list changes, and ends when it is gone or another preset is
+    /// set, so it never acts on another (decisions.md R18).
     editing: Option<(String, Origin)>,
 }
 
@@ -345,43 +380,54 @@ impl Browser {
             }
         }
         self.drawer.chips = chips;
-        // The edit follows its preset to its row, and ends when the preset is not listed.
-        match (self.drawer.editing, self.edited_row()) {
-            (Some((_, how)), Some(i)) => self.drawer.editing = Some((i, how)),
-            (Some(_), None) => self.end_edit(),
-            (None, _) => {}
+        let most = self
+            .drawer
+            .chips
+            .len()
+            .div_ceil(2)
+            .saturating_sub(TAG_LINES);
+        self.drawer.tags_first = self.drawer.tags_first.min(most);
+        // What a key began on a preset ends when the preset has gone.
+        if self.editing.is_some() && self.edited_entry().is_none() {
+            self.end_edit();
         }
         self.rows(p);
     }
 
-    /// A row's preset edited (`how`): renamed, tagged or asked about deleting.
-    fn begin_edit(&mut self, i: usize, e: &Entry, how: Edit) {
-        self.drawer.editing = Some((i, how));
+    /// The preset the plug-in is set to edited (`how`): renamed, tagged or asked about
+    /// deleting.
+    fn begin_edit(&mut self, e: &Entry, how: Edit) {
+        self.drawer.editing = Some(how);
+        self.drawer.hint.clear();
         self.editing = Some((e.sound.name.clone(), e.origin));
     }
 
-    /// The edit ended (done, taken back, or its preset gone); a field it had, the search's.
+    /// What a key began ended (done, taken back, or its preset gone); a field it had, the
+    /// search's.
     fn end_edit(&mut self) {
-        if self.drawer.focus == Some(FieldId::Edit) {
+        if matches!(
+            self.drawer.focus,
+            Some(FieldId::Edit | FieldId::SaveName | FieldId::SaveTags)
+        ) {
             self.drawer.focus = Some(FieldId::Search);
         }
         self.drawer.editing = None;
         self.editing = None;
     }
 
-    /// The row of the preset being edited, in the list as it is now.
-    fn edited_row(&self) -> Option<usize> {
+    /// The preset being edited, among the presets as read.
+    fn edited_entry(&self) -> Option<&Entry> {
         let (name, origin) = self.editing.as_ref()?;
-        self.list
+        self.all
             .iter()
-            .position(|e| same(&e.sound.name, name) && e.origin == *origin)
+            .find(|e| same(&e.sound.name, name) && e.origin == *origin)
     }
 
     /// The preset being edited, the library read again first: none when it has gone (said).
     fn edited_now(&mut self, p: &Ca72Params) -> Option<Entry> {
         let who = self.editing.clone();
         self.reread(p);
-        let e = self.edited_row().and_then(|i| self.list.get(i)).cloned();
+        let e = self.edited_entry().cloned();
         if e.is_none()
             && let Some((name, _)) = who
         {
@@ -397,16 +443,23 @@ impl Browser {
             .iter()
             .map(|e| Row {
                 name: e.sound.name.clone(),
-                tags: e.sound.tags.join(" · "),
-                origin: match e.origin {
-                    Origin::Factory => None,
-                    Origin::Edited => Some("EDITED"),
-                    Origin::User => Some("YOURS"),
-                },
+                tags: e.sound.tags.join(" "),
+                origin: origin_word(e.origin),
                 favorite: e.favorite,
                 current: same(&e.sound.name, &current),
             })
             .collect();
+        self.drawer.total = self.all.len();
+        self.drawer.current = self
+            .all
+            .iter()
+            .find(|e| same(&e.sound.name, &current))
+            .map(|e| Current {
+                name: e.sound.name.clone(),
+                origin: origin_word(e.origin),
+                tags: e.sound.tags.join(" "),
+                favorite: e.favorite,
+            });
         let most = self.drawer.rows.len().saturating_sub(ROWS_SHOWN);
         self.drawer.first = self.drawer.first.min(most);
     }
@@ -424,6 +477,21 @@ impl Browser {
             self.all = self.library.entries().0;
             self.list = self.all.clone();
             self.read = Some(Instant::now());
+        }
+        // Another preset set (the host, the bar): what a key began on the last one ends, and
+        // the drawer shows the one set.
+        if self
+            .editing
+            .as_ref()
+            .is_some_and(|(name, _)| !same(name, &current))
+        {
+            self.end_edit();
+        }
+        if self.open
+            && self.drawer.current.as_ref().map(|c| c.name.as_str()) != Some(current.as_str())
+            && self.all.iter().any(|e| same(&e.sound.name, &current))
+        {
+            self.rows(p);
         }
         let entry = self.all.iter().find(|e| same(&e.sound.name, &current));
         if self.wanted.as_ref().is_none_or(|(n, _)| !same(n, &current)) {
@@ -468,6 +536,9 @@ impl Browser {
 
     /// The plug-in set to a preset.
     pub fn choose(&mut self, e: &Entry, p: &Ca72Params, s: &ParamSetter<'_>) {
+        // (What a key began on the last preset, or a save of its sound, ends.)
+        self.end_edit();
+        self.drawer.hint.clear();
         let params = sound_params(p);
         for (id, v) in targets(p, e) {
             if let Some((_, q)) = params.iter().find(|(i, _)| *i == id)
@@ -528,15 +599,22 @@ impl Browser {
             }
             BarTarget::Save => {
                 self.show(true, p);
-                let current = Self::current(p);
-                let e = self.all.iter().find(|e| same(&e.sound.name, &current));
-                self.drawer.save_name = Field::new(e.map_or("", |e| e.sound.name.as_str()));
-                self.drawer.save_tags =
-                    Field::new(&e.map_or(String::new(), |e| e.sound.tags.join(", ")));
-                self.drawer.focus = Some(FieldId::SaveName);
-                self.saving_says();
+                self.begin_save(p);
             }
         }
+    }
+
+    /// A save begun: the PRESET display asks for a name and tags, the preset's to begin with.
+    fn begin_save(&mut self, p: &Ca72Params) {
+        self.end_edit();
+        let current = Self::current(p);
+        let e = self.all.iter().find(|e| same(&e.sound.name, &current));
+        self.drawer.save_name = Field::new(e.map_or("", |e| e.sound.name.as_str()));
+        self.drawer.save_tags = Field::new(&e.map_or(String::new(), |e| e.sound.tags.join(", ")));
+        self.drawer.editing = Some(Edit::Save);
+        self.drawer.focus = Some(FieldId::SaveName);
+        self.wants_keys = true;
+        self.saving_says();
     }
 
     fn report(&mut self, r: Result<impl Sized, String>) {
@@ -555,7 +633,7 @@ impl Browser {
         self.drawer.hint = match there {
             None => String::new(),
             Some(e) if e.origin == Origin::Factory => {
-                "Saved as yours in place of the factory's (REVERT brings it back).".into()
+                "Takes the factory's place (REVERT brings it back).".into()
             }
             Some(e) => format!("Replaces your {}.", e.sound.name),
         };
@@ -583,7 +661,7 @@ impl Browser {
                 self.drawer.save_name = Field::default();
                 self.drawer.save_tags = Field::default();
                 self.drawer.replace = false;
-                self.drawer.focus = None;
+                self.end_edit();
                 let _ = s;
                 self.reread(p);
                 self.bring_into_view(&e.sound.name);
@@ -597,7 +675,7 @@ impl Browser {
     /// Commits the preset being renamed or tagged, wherever its row is now; none if it has
     /// gone.
     fn commit_edit(&mut self, p: &Ca72Params) {
-        let Some((_, how)) = self.drawer.editing else {
+        let Some(how @ (Edit::Rename | Edit::Tags)) = self.drawer.editing else {
             return;
         };
         let Some(e) = self.edited_now(p) else {
@@ -612,10 +690,7 @@ impl Browser {
                 }
                 shown = n.sound.name;
             }),
-            Edit::Tags => {
-                library::parse_tags(&text).and_then(|t| self.library.tag(&e.sound.name, t))
-            }
-            Edit::Delete { .. } => Ok(()),
+            _ => library::parse_tags(&text).and_then(|t| self.library.tag(&e.sound.name, t)),
         };
         match r {
             Ok(()) => {
@@ -629,31 +704,23 @@ impl Browser {
     }
 
     /// A press in the drawer, at `x` across it (panel units: a field's caret goes there).
-    pub fn drawer_press(
-        &mut self,
-        t: DrawerTarget,
-        x: f64,
-        fonts: &DrawerRenderer,
-        p: &Ca72Params,
-        s: &ParamSetter<'_>,
-    ) {
+    pub fn drawer_press(&mut self, t: DrawerTarget, x: f64, p: &Ca72Params, s: &ParamSetter<'_>) {
         match t {
             DrawerTarget::Field(id) => {
-                let f = self.field_mut(id);
-                let f2 = f.clone();
-                f.caret = caret_at(fonts.fonts(), &f2, id, x);
+                let caret = caret_at(&self.drawer, id, x);
+                self.field_mut(id).caret = caret;
                 self.drawer.focus = Some(id);
                 self.wants_keys = true;
             }
-            DrawerTarget::Favourites => {
-                self.drawer.favourites = !self.drawer.favourites;
+            DrawerTarget::Tab(t) => {
+                (self.drawer.favourites, self.drawer.mine) = match t {
+                    Tab::All => (false, false),
+                    Tab::Favourites => (true, false),
+                    Tab::Mine => (false, true),
+                };
+                self.drawer.first = 0;
                 self.refilter(p);
             }
-            DrawerTarget::Mine => {
-                self.drawer.mine = !self.drawer.mine;
-                self.refilter(p);
-            }
-            DrawerTarget::Close => self.show(false, p),
             DrawerTarget::Chip(i) => {
                 if let Some(c) = self.drawer.chips.get_mut(i) {
                     c.1 = !c.1;
@@ -683,49 +750,73 @@ impl Browser {
                     self.reread(p);
                 }
             }
-            DrawerTarget::Action(i, a) => {
-                let Some(e) = self.list.get(i).cloned() else {
-                    return;
-                };
-                match a {
-                    RowAction::Rename => {
-                        self.begin_edit(i, &e, Edit::Rename);
-                        self.drawer.edit = Field::new(&e.sound.name);
-                        self.drawer.focus = Some(FieldId::Edit);
-                        self.wants_keys = true;
-                    }
-                    RowAction::Tags => {
-                        self.begin_edit(i, &e, Edit::Tags);
-                        self.drawer.edit = Field::new(&e.sound.tags.join(", "));
-                        self.drawer.focus = Some(FieldId::Edit);
-                        self.wants_keys = true;
-                    }
-                    RowAction::Revert => {
-                        self.report(self.library.revert(&e.sound.name));
-                        self.reread(p);
-                    }
-                    RowAction::Delete => {
-                        let factory = e.origin != Origin::User;
-                        self.begin_edit(i, &e, Edit::Delete { factory });
-                    }
-                    // The preset asked about, wherever its row is now; none if it has gone.
-                    RowAction::Confirm => {
-                        if self
-                            .drawer
-                            .editing
-                            .is_some_and(|(r, how)| r == i && matches!(how, Edit::Delete { .. }))
-                            && let Some(e) = self.edited_now(p)
-                        {
-                            self.report(self.library.remove(&e.sound.name));
-                        }
-                        self.end_edit();
-                        self.reread(p);
-                    }
-                    RowAction::Cancel => self.end_edit(),
+            DrawerTarget::Key(k) => self.key_press(k, p, s),
+            // The update check is the editor's (`crate::update`), and so is the MIDI list
+            // (`crate::learning`).
+            DrawerTarget::Update
+            | DrawerTarget::MidiRow(_)
+            | DrawerTarget::MidiAction(..)
+            | DrawerTarget::Back => {}
+        }
+    }
+
+    /// A PRESET key: RENAME, TAGS, DELETE and REVERT for the preset the plug-in is set to
+    /// (DELETE again, once it has asked, deletes it); SAVE AS (again, once begun, saves);
+    /// RESTORE; CLOSE. (MIDI LEARN is the editor's.)
+    fn key_press(&mut self, k: PresetKey, p: &Ca72Params, s: &ParamSetter<'_>) {
+        let current = Self::current(p);
+        let entry = self
+            .all
+            .iter()
+            .find(|e| same(&e.sound.name, &current))
+            .cloned();
+        match (k, entry) {
+            (PresetKey::Rename | PresetKey::Tags | PresetKey::Delete | PresetKey::Revert, None) => {
+                self.end_edit();
+                self.drawer.hint = "Choose a preset first.".into();
+            }
+            (PresetKey::Rename, Some(e)) => {
+                self.begin_edit(&e, Edit::Rename);
+                self.drawer.edit = Field::new(&e.sound.name);
+                self.drawer.focus = Some(FieldId::Edit);
+                self.wants_keys = true;
+            }
+            (PresetKey::Tags, Some(e)) => {
+                self.begin_edit(&e, Edit::Tags);
+                self.drawer.edit = Field::new(&e.sound.tags.join(", "));
+                self.drawer.focus = Some(FieldId::Edit);
+                self.wants_keys = true;
+            }
+            (PresetKey::Delete, Some(e)) => {
+                if matches!(self.drawer.editing, Some(Edit::Delete { .. })) {
+                    self.confirm_delete(p);
+                } else {
+                    let factory = e.origin != Origin::User;
+                    self.begin_edit(&e, Edit::Delete { factory });
+                    self.drawer.focus = Some(FieldId::Search);
                 }
             }
-            DrawerTarget::SaveGo => self.save(p, s),
-            DrawerTarget::Restore => {
+            (PresetKey::Revert, Some(e)) => {
+                self.end_edit();
+                if e.origin == Origin::Edited {
+                    self.drawer.hint = match self.library.revert(&e.sound.name) {
+                        Ok(_) => format!("{} is the factory's again.", e.sound.name),
+                        Err(err) => err,
+                    };
+                } else {
+                    self.drawer.hint = "Only a factory preset you changed can be reverted.".into();
+                }
+                self.reread(p);
+            }
+            (PresetKey::SaveAs, _) => {
+                if self.drawer.editing == Some(Edit::Save) {
+                    self.save(p, s);
+                } else {
+                    self.begin_save(p);
+                }
+            }
+            (PresetKey::Restore, _) => {
+                self.end_edit();
                 match self.library.restore() {
                     Ok(r) if r.is_empty() => {
                         self.drawer.hint = "No factory preset was deleted.".into()
@@ -735,14 +826,23 @@ impl Browser {
                 }
                 self.reread(p);
             }
-            // The update check is the editor's (`crate::update`), and so is the MIDI list
-            // (`crate::learning`).
-            DrawerTarget::Update
-            | DrawerTarget::Midi
-            | DrawerTarget::MidiRow(_)
-            | DrawerTarget::MidiAction(..)
-            | DrawerTarget::Back => {}
+            (PresetKey::Close, _) => self.show(false, p),
+            (PresetKey::MidiLearn, _) => {}
         }
+    }
+
+    /// The preset DELETE asked about deleted, wherever it is now; none if it has gone.
+    fn confirm_delete(&mut self, p: &Ca72Params) {
+        if matches!(self.drawer.editing, Some(Edit::Delete { .. }))
+            && let Some(e) = self.edited_now(p)
+        {
+            self.drawer.hint = match self.library.remove(&e.sound.name) {
+                Ok(_) => format!("Deleted {}.", e.sound.name),
+                Err(err) => err,
+            };
+        }
+        self.end_edit();
+        self.reread(p);
     }
 
     fn field_mut(&mut self, id: FieldId) -> &mut Field {
@@ -758,6 +858,17 @@ impl Browser {
     pub fn scroll(&mut self, rows: i32) {
         let most = self.drawer.rows.len().saturating_sub(ROWS_SHOWN) as i32;
         self.drawer.first = (self.drawer.first as i32 + rows).clamp(0, most) as usize;
+    }
+
+    /// The tags scrolled by `lines` (two tags a line).
+    pub fn scroll_tags(&mut self, lines: i32) {
+        let most = self
+            .drawer
+            .chips
+            .len()
+            .div_ceil(2)
+            .saturating_sub(TAG_LINES) as i32;
+        self.drawer.tags_first = (self.drawer.tags_first as i32 + lines).clamp(0, most) as usize;
     }
 
     /// A key: whether the drawer took it (else it is the host's).
@@ -782,16 +893,23 @@ impl Browser {
                     self.show(false, p);
                 }
             }
+            (Key::Enter, _) if matches!(self.drawer.editing, Some(Edit::Delete { .. })) => {
+                self.confirm_delete(p);
+            }
             (Key::ArrowDown | Key::ArrowUp, None | Some(FieldId::Search)) => {
                 self.step(if e.key == Key::ArrowDown { 1 } else { -1 }, p, s);
             }
             (Key::Enter, None | Some(FieldId::Search)) => self.show(false, p),
             (Key::Enter, Some(FieldId::Edit)) => self.commit_edit(p),
             (Key::Enter, Some(FieldId::SaveName | FieldId::SaveTags)) => self.save(p, s),
+            // The next field shown: the search, then what a key began's.
             (Key::Tab, _) => {
-                self.drawer.focus = Some(match focus {
-                    Some(FieldId::Search) => FieldId::SaveName,
-                    Some(FieldId::SaveName) => FieldId::SaveTags,
+                self.drawer.focus = Some(match (self.drawer.editing, focus) {
+                    (Some(Edit::Save), None | Some(FieldId::Search)) => FieldId::SaveName,
+                    (Some(Edit::Save), Some(FieldId::SaveName)) => FieldId::SaveTags,
+                    (Some(Edit::Rename | Edit::Tags), None | Some(FieldId::Search)) => {
+                        FieldId::Edit
+                    }
                     _ => FieldId::Search,
                 });
             }
@@ -907,7 +1025,6 @@ mod tests {
         map.assign(index("cutoff").unwrap(), Cc { channel: 0, cc: 74 });
         map.assign(index("voices").unwrap(), Cc { channel: 9, cc: 20 });
         let before = map.saved();
-        let fonts = DrawerRenderer::new(0.25);
         let s = ParamSetter::new(&Host);
         let mut b = Browser::new(Library::at(dir.path()));
         b.show(true, &p);
@@ -915,10 +1032,14 @@ mod tests {
         b.choose(&bass, &p, &s);
         b.step(1, &p, &s);
         assert_eq!(map.saved(), before, "chosen");
-        b.drawer.save_name = Field::new("Mine");
-        b.drawer_press(DrawerTarget::SaveGo, 0.0, &fonts, &p, &s);
-        b.drawer.save_name = Field::new("Lead");
-        b.drawer_press(DrawerTarget::SaveGo, 0.0, &fonts, &p, &s);
+        // SAVE AS begins a save; pressed again, it saves.
+        let save_as = |b: &mut Browser, name: &str| {
+            b.drawer_press(DrawerTarget::Key(PresetKey::SaveAs), 0.0, &p, &s);
+            b.drawer.save_name = Field::new(name);
+            b.drawer_press(DrawerTarget::Key(PresetKey::SaveAs), 0.0, &p, &s);
+        };
+        save_as(&mut b, "Mine");
+        save_as(&mut b, "Lead");
         assert_eq!(lib.find("Lead").unwrap().origin, Origin::Edited);
         assert_eq!(map.saved(), before, "saved");
         for f in std::fs::read_dir(dir.path()).unwrap() {
@@ -928,23 +1049,17 @@ mod tests {
                 "{text}"
             );
         }
-        b.reread(&p);
-        let lead = b.drawer.rows.iter().position(|r| r.name == "Lead").unwrap();
-        b.drawer_press(
-            DrawerTarget::Action(lead, RowAction::Revert),
-            0.0,
-            &fonts,
-            &p,
-            &s,
-        );
+        // REVERT, of the preset set (the one just saved).
+        b.drawer_press(DrawerTarget::Key(PresetKey::Revert), 0.0, &p, &s);
         assert_eq!(lib.find("Lead").unwrap().origin, Origin::Factory);
         assert_eq!(map.saved(), before, "reverted");
         assert!(values_now(&p).iter().all(|(k, _)| !k.contains("midi_map")));
     }
 
-    /// RENAME, TAGS and DELETE's question stay with their preset as the list changes (a
-    /// filter, another program's change) and end when it leaves the list: another preset is
-    /// never renamed, tagged or deleted in its place (decisions.md R18).
+    /// RENAME, TAGS and DELETE act on the preset the plug-in is set to; what they begin stays
+    /// with it as the list changes (a filter, another program's change), and ends when it has
+    /// gone or another preset is set: another preset is never renamed, tagged or deleted in its
+    /// place (decisions.md R18).
     #[test]
     fn an_edit_stays_with_its_preset() {
         let dir = tempfile::tempdir().unwrap();
@@ -955,100 +1070,87 @@ mod tests {
         lib.favorite("Pad A", true).unwrap();
         lib.favorite("Warped Pad", true).unwrap();
         let p = Ca72Params::default();
-        let fonts = DrawerRenderer::new(0.25);
         let s = ParamSetter::new(&Host);
         let mut b = Browser::new(Library::at(dir.path()));
+        let key = |b: &mut Browser, k: PresetKey| {
+            b.drawer_press(DrawerTarget::Key(k), 0.0, &p, &s);
+        };
+        // (A row set, as a single click: not taken with the last for a double click.)
+        let set = |b: &mut Browser, name: &str| {
+            let i = rows(b).iter().position(|r| *r == name).expect("listed");
+            b.last_row = None;
+            b.drawer_press(DrawerTarget::Row(i), 0.0, &p, &s);
+        };
         b.show(true, &p);
+        // With no preset set, the keys that act on one say so.
+        key(&mut b, PresetKey::Rename);
+        assert_eq!(b.drawer.editing, None);
+        assert_eq!(b.drawer.hint, "Choose a preset first.");
         typed(&mut b, "pad", &p);
         assert_eq!(rows(&b), ["Pad A", "Pad B", "Warped Pad"]);
 
-        // Renaming Pad B, FAVOURITES leaves it out: the edit ends; Enter renames nothing.
-        b.drawer_press(
-            DrawerTarget::Action(1, RowAction::Rename),
-            0.0,
-            &fonts,
-            &p,
-            &s,
-        );
-        b.drawer.edit = Field::new("Renamed");
-        b.drawer_press(DrawerTarget::Favourites, 0.0, &fonts, &p, &s);
+        // Renaming Pad B, FAVORITES leaves it out of the list: the rename stays with it.
+        set(&mut b, "Pad B");
+        key(&mut b, PresetKey::Rename);
+        assert_eq!(b.drawer.editing, Some(Edit::Rename));
+        assert_eq!(b.drawer.focus, Some(FieldId::Edit));
+        b.drawer.edit = Field::new("Pad Renamed");
+        b.drawer_press(DrawerTarget::Tab(Tab::Favourites), 0.0, &p, &s);
         assert_eq!(rows(&b), ["Pad A", "Warped Pad"]);
-        assert_eq!(b.drawer.editing, None);
-        assert_eq!(b.drawer.focus, Some(FieldId::Search));
+        assert_eq!(b.drawer.editing, Some(Edit::Rename));
         b.key(&down(Key::Enter), &p, &s);
-        assert!(lib.find("Renamed").is_none() && lib.find("Warped Pad").is_some());
-        b.show(true, &p);
-        b.drawer_press(DrawerTarget::Favourites, 0.0, &fonts, &p, &s);
+        assert!(lib.find("Pad B").is_none() && lib.find("Pad Renamed").is_some());
+        assert_eq!(Browser::current(&p), "Pad Renamed");
+        assert_eq!(b.drawer.editing, None);
+        b.drawer_press(DrawerTarget::Tab(Tab::All), 0.0, &p, &s);
 
-        // Tagging Pad B, a preset sorting before it arrives: the edit follows it.
-        b.drawer_press(
-            DrawerTarget::Action(1, RowAction::Tags),
-            0.0,
-            &fonts,
-            &p,
-            &s,
-        );
+        // Tagging it, a preset arriving from elsewhere: the tags go to it.
+        key(&mut b, PresetKey::Tags);
         b.drawer.edit = Field::new("soft");
         lib.save("Pad 0", vec![], None).unwrap();
         b.reread(&p);
-        assert_eq!(rows(&b), ["Pad 0", "Pad A", "Pad B", "Warped Pad"]);
-        assert_eq!(b.drawer.editing, Some((2, Edit::Tags)));
+        assert_eq!(rows(&b), ["Pad 0", "Pad A", "Pad Renamed", "Warped Pad"]);
         b.key(&down(Key::Enter), &p, &s);
-        assert_eq!(lib.find("Pad B").unwrap().sound.tags, ["soft"]);
+        assert_eq!(lib.find("Pad Renamed").unwrap().sound.tags, ["soft"]);
         assert!(lib.find("Pad A").unwrap().sound.tags.is_empty());
 
-        // DELETE asked of Pad B, Pad 0 then deleted elsewhere: the question follows Pad B, and
-        // a confirmation where its row was deletes nothing.
-        b.drawer_press(
-            DrawerTarget::Action(2, RowAction::Delete),
-            0.0,
-            &fonts,
-            &p,
-            &s,
-        );
-        lib.remove("Pad 0").unwrap();
-        b.reread(&p);
-        assert_eq!(rows(&b), ["Pad A", "Pad B", "Warped Pad"]);
-        assert_eq!(b.drawer.editing, Some((1, Edit::Delete { factory: false })));
-        b.drawer_press(
-            DrawerTarget::Action(2, RowAction::Confirm),
-            0.0,
-            &fonts,
-            &p,
-            &s,
-        );
-        assert_eq!(rows(&b), ["Pad A", "Pad B", "Warped Pad"]);
-        b.drawer_press(
-            DrawerTarget::Action(1, RowAction::Delete),
-            0.0,
-            &fonts,
-            &p,
-            &s,
-        );
-        b.drawer_press(
-            DrawerTarget::Action(1, RowAction::Confirm),
-            0.0,
-            &fonts,
-            &p,
-            &s,
-        );
-        assert_eq!(rows(&b), ["Pad A", "Warped Pad"]);
+        // DELETE asked about it, another preset set: the question ends, and Enter deletes
+        // nothing; asked of Pad A, DELETE again deletes Pad A.
+        key(&mut b, PresetKey::Delete);
+        assert_eq!(b.drawer.editing, Some(Edit::Delete { factory: false }));
+        set(&mut b, "Pad A");
+        assert_eq!(b.drawer.editing, None);
+        b.key(&down(Key::Enter), &p, &s);
+        assert!(lib.find("Pad Renamed").is_some());
+        b.show(true, &p);
+        key(&mut b, PresetKey::Delete);
+        key(&mut b, PresetKey::Delete);
+        assert!(lib.find("Pad A").is_none());
+        assert_eq!(b.drawer.hint, "Deleted Pad A.");
 
         // RENAME of a preset deleted elsewhere since the list was read: said, nothing done.
-        b.drawer_press(
-            DrawerTarget::Action(0, RowAction::Rename),
-            0.0,
-            &fonts,
-            &p,
-            &s,
-        );
+        set(&mut b, "Pad Renamed");
+        key(&mut b, PresetKey::Rename);
         b.drawer.edit = Field::new("Pad Again");
-        lib.remove("Pad A").unwrap();
+        lib.remove("Pad Renamed").unwrap();
         b.key(&down(Key::Enter), &p, &s);
-        assert_eq!(b.drawer.hint, "Pad A is no longer there.");
+        assert_eq!(b.drawer.hint, "Pad Renamed is no longer there.");
         assert_eq!(b.drawer.editing, None);
         assert!(lib.find("Pad Again").is_none() && lib.find("Warped Pad").is_some());
-        assert_eq!(lib.search("", &[], false, true).len(), 0);
+
+        // REVERT of a preset that is not a changed factory one: said, nothing done.
+        set(&mut b, "Warped Pad");
+        key(&mut b, PresetKey::Revert);
+        assert_eq!(
+            b.drawer.hint,
+            "Only a factory preset you changed can be reverted."
+        );
+        // Escape takes back what a key began; again, it closes the drawer.
+        key(&mut b, PresetKey::Tags);
+        b.key(&down(Key::Escape), &p, &s);
+        assert_eq!((b.drawer.editing, b.open), (None, true));
+        b.key(&down(Key::Escape), &p, &s);
+        assert!(!b.open);
     }
 
     /// Typing in the search and the filters work on the presets as read: no file is read for

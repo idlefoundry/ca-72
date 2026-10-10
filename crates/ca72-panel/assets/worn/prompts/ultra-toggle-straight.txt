@@ -1,0 +1,6 @@
+Use your image generation tool to edit the attached image (toggle-bare.png, in the current directory) into one new image, then save it in the current directory as toggle-straight.png (copy the generated file there). Do nothing else.
+
+The attached image is a three-position chrome bat-handle toggle switch, seen from straight in front, its lever in the middle position but tilted a little, so some of its length shows. The edit: the lever pointing EXACTLY straight at the camera, with no angle at all, seen perfectly end-on: only its round domed tip shows, a small polished chrome circle exactly in the centre of the bushing, concentric with the bushing, the washer and the hex nut; none of the lever's length visible on any side.
+- Identical in every other way: the same framing, size and position (the nut, washer and bushing exactly where they are now), the same polished chrome, the same plain flat mid-grey (#808080) background with no shadow on it, the same soft light from up and to the left (the tip's highlight up and to the left).
+- No text, symbols, logos or numbers anywhere.
+Keep the image the same size as the attached one.

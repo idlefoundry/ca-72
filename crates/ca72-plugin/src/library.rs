@@ -33,9 +33,9 @@ use toml::Value;
 /// The format of the files this reads and writes.
 pub const FORMAT: i64 = 1;
 
-/// The parameters a preset never sets: the PITCH wheel (where the player leaves it) and the
-/// bypass (the host's).
-pub const KEPT: &[&str] = &["pitch_wheel", "bypass"];
+/// The parameters a preset never sets: the PITCH wheel (where the player leaves it), the
+/// bypass (the host's) and QUALITY (the computer's: decisions.md R47).
+pub const KEPT: &[&str] = &["pitch_wheel", "bypass", "quality"];
 
 const MOST_TAGS: usize = 16;
 const LONGEST_TAG: usize = 32;
@@ -844,7 +844,7 @@ pub fn tags_of(list: &[Entry]) -> Vec<String> {
 }
 
 /// A table written whole, then moved into place.
-fn write(file: &Path, t: &toml::Table) -> Result<(), String> {
+pub(crate) fn write(file: &Path, t: &toml::Table) -> Result<(), String> {
     let text = toml::to_string(t).map_err(|e| e.to_string())?;
     if let Some(d) = file.parent() {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
@@ -865,7 +865,7 @@ mod tests {
     #[test]
     fn the_factory_file_is_read_whole() {
         let f = factory();
-        assert_eq!(f.len(), 25);
+        assert_eq!(f.len(), 26);
         assert_eq!(f[0].name, "Bass");
         assert!(f.iter().all(|s| !s.values.is_empty()));
         assert!(

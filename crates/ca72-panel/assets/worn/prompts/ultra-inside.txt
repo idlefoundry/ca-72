@@ -1,0 +1,12 @@
+Use your image generation tool to make one image, then save it in the current directory as inside.png (copy the generated file there). Do nothing else.
+
+The image: the inside of a 1970s analogue synthesizer, seen through a small square opening in its front panel, straight on: the camera exactly in front of the opening's centre, looking straight in, one-point perspective, the four inside walls receding evenly towards the floor deep inside. Square image, as large as you can make it.
+- The image shows ONLY the inside: its four edges are exactly the opening's four edges. No front panel, no frame, no bezel, no border, no screws round it.
+- The floor, deep inside: a dark green circuit board with gold traces and pads, small resistors with colour bands, small capacitors, a metal-can transistor, a few brass standoffs.
+- The walls: machined aluminium side plates; on the left and the right wall a vertical steel guide rail with brass pivot brackets and small blued screws, where jointed chrome arms are mounted (the arms themselves are not in the picture); a few fine wires laced along the walls.
+- Exactly across the middle, at half the image's height, from the left wall to the right wall: a polished steel lead screw (a long finely threaded rod) held in a brass bearing block at each wall, a small brass gear on its right end meshing with a smaller pinion.
+- The centre of the picture, in front of the board, is clear: no tall parts there (a lamp will slide in along the lead screw).
+- No lamp, no arms, no hands, no figures.
+- Old-school, precise and beautifully made, like fine 1970s instrument engineering; clean, gently used, not grimy, not rusty, not steampunk.
+- Light: dim; soft light from up and to the left falls into the opening, so the top-left walls are a little lighter; the floor darker; a faint warm glow from below.
+- No text, letters, numbers, symbols or logos anywhere.

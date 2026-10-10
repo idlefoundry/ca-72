@@ -1,24 +1,33 @@
 //! The panel's art, as SVG, in panel units: the panel measured from a photograph of the
 //! instrument's taken face on (Commons, "Minimoog panel.jpg"; the panel is 3108 by 795 of
-//! them), under a wooden top strip, the name board below it, and the left hand controller
-//! in a column of its own at the left.
+//! them), under a wooden top strip with the name plate on it; and under that the plug-in's
+//! strip (`crate::strip`), the left hand controller's GLIDE, DECAY and wheels at its left
+//! (A6, decisions.md R44: they had a column of their own beside the panel).
 //!
 //! What never moves is drawn once ([`background`]); each control, lamp and the name plate
 //! is a layer of its own, drawn over it ([`Layer`]).
 
 use crate::controls::{CONTROLS, Colour, Control, Dial, Kind, Legends, Mark, Orient, Place};
 use crate::fonts::{FAMILY, Fonts, Weight};
+use crate::skin::Part;
 use crate::svg::{N, Svg, colour::*, defs, escape, put};
 
 pub const PW: f64 = 3108.0;
 pub const PH: f64 = 795.0;
 pub const TOP: f64 = 130.0;
-pub const BOARD: f64 = 132.0;
-/// The column the left hand controller stands in, beside the panel.
-pub const COL: f64 = 330.0;
-/// The drawing's size.
+/// The panel's left edge: the drawing's (the left hand controller's column, 330 units wide,
+/// was there until A6: its controls are on the strip, `strip::LEFT_HAND`).
+pub const COL: f64 = 0.0;
+/// The drawing's width.
 pub const W: f64 = COL + PW;
-pub const H: f64 = TOP + PH + BOARD;
+/// The panel's height: the top strip and the face. (The name board under the face, 132 units,
+/// went when the name plate moved up into the top strip: the owner, 2026-10-10, "If we moved
+/// the CA-72 badge to the top, we could save a lot of space in that center wooden area.")
+pub const PANEL_H: f64 = TOP + PH;
+/// The strip's under it (A6): the presets' rail, then three rows.
+pub const STRIP_H: f64 = 850.0;
+/// The drawing's height: the panel and the strip.
+pub const H: f64 = PANEL_H + STRIP_H;
 
 /// Lettering sizes: the legends, the dials' numbers, the section titles.
 const LEG: f64 = 19.0;
@@ -40,17 +49,19 @@ const PLATE_PAD: f64 = 24.0;
 /// The plate's width: as when a click turned it over to a second, wider name, gone since
 /// (the owner, 2026-10-03), so the panel stays as approved.
 pub const PLATE_W: f64 = 261.0;
-/// The plate's top left corner: its left end at the MODIFIERS|OUTPUT line.
-pub const PLATE_X: f64 = COL + 2582.0;
-pub const PLATE_H: f64 = 0.62 * BOARD;
-pub const PLATE_Y: f64 = TOP + PH + (BOARD - PLATE_H) / 2.0;
+/// The plate's top left corner: its left end on the MODIFIERS|OUTPUT line (the divider's,
+/// 2578), in the top strip between its screws, in the strip's middle (the owner, 2026-10-10,
+/// of three places rendered whole: "I think we can go with option C").
+pub const PLATE_X: f64 = COL + 2578.0;
+pub const PLATE_H: f64 = 82.0;
+pub const PLATE_Y: f64 = (TOP - PLATE_H) / 2.0;
 const NAME_Y: f64 = 31.0;
 const MAKER_Y: f64 = 64.0;
 
-/// The left hand controller's face: its left edge in the drawing, its size.
+/// The left hand controller's place as its column had it: its left edge then, its width
+/// (its controls are placed relative to it, now at `strip::LEFT_HAND`).
 pub const LH_X: f64 = 22.0;
-const LPW: f64 = COL - 44.0;
-const LPH: f64 = PH;
+pub const LPW: f64 = 330.0 - 44.0;
 const LH_JACK: f64 = 46.0;
 const LH_LABEL: f64 = 118.0;
 pub(crate) const LH_ROCKER: f64 = 214.0;
@@ -66,12 +77,17 @@ const SLOT_H: f64 = 146.0;
 
 /// The POWER switch (the plugin's bypass) and its lamp, on the panel.
 pub const POWER: (f64, f64) = (3023.0, 580.0);
-const LAMP_AT: (f64, f64) = (3023.0, 426.0);
+pub(crate) const LAMP_AT: (f64, f64) = (3023.0, 426.0);
 /// The OVERLOAD lamp, on the panel.
-const OVERLOAD_AT: (f64, f64) = (1764.0, 274.0);
+pub(crate) const OVERLOAD_AT: (f64, f64) = (1764.0, 274.0);
+/// QUALITY's toggle (decisions.md R48), on the panel, and its size as seen: its pictures'
+/// (180 by 291 pixels, the nut at their middle) 50 units wide.
+pub(crate) const QUALITY_AT: (f64, f64) = (3023.0, 266.0);
+pub(crate) const TOGGLE: (f64, f64) = (50.0, 50.0 * 291.0 / 180.0);
+/// ULTRA's lamp (decisions.md R48), on the panel, over QUALITY.
+pub(crate) const ULTRA_AT: (f64, f64) = (3023.0, 92.0);
 
-/// The editor's resize grip, in the name board's bottom right corner (left, top, right,
-/// bottom).
+/// The editor's resize grip, in the drawing's bottom right corner (left, top, right, bottom).
 pub const GRIP: [f64; 4] = [W - 54.0, H - 54.0, W, H];
 
 /// The waveform pictograms, drawn 24 by 14 and printed about 18 by 10 (`GLYPH`).
@@ -225,6 +241,20 @@ fn eleven(r0: f64, r1: f64) -> Vec<(f64, f64, f64, f64)> {
         .collect()
 }
 
+/// A strip knob's dial: a tick at each of `ticks` (degrees from twelve o'clock), numbered
+/// by `labels[i]` where it says `Some(i)`.
+fn numbered(ticks: &[(f64, Option<i32>)], labels: &[&'static str]) -> DialMarks {
+    DialMarks {
+        ticks: ticks.iter().map(|&(a, _)| (a, 58.0, 71.0, 4.0)).collect(),
+        labels: ticks
+            .iter()
+            .filter_map(|&(a, i)| Some((a, *labels.get(usize::try_from(i?).ok()?)?, None)))
+            .collect(),
+        r: 86.0,
+        captions: vec![],
+    }
+}
+
 fn marks(dial: Dial) -> DialMarks {
     let ten = || DialMarks {
         ticks: eleven(58.0, 71.0),
@@ -295,6 +325,38 @@ fn marks(dial: Dial) -> DialMarks {
             r: 98.0,
             captions: vec![],
         },
+        // The strip's: a tick at every step (VOICES's every voice, numbered; DETUNE's every
+        // 2.5 cents and DRIVE's every 3 dB, every other numbered), LEVEL's every 5 dB from
+        // -30 to +10 and its end, at their places on its travel.
+        Dial::Voices => numbered(
+            &(0..9)
+                .map(|k| (-150.0 + 37.5 * f64::from(k), Some(k)))
+                .collect::<Vec<_>>(),
+            &["2", "3", "4", "5", "6", "7", "8", "9", "10"],
+        ),
+        Dial::Detune => numbered(
+            &(0..9)
+                .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
+                .collect::<Vec<_>>(),
+            &["0", "25", "50", "75", "100"],
+        ),
+        Dial::Drive => numbered(
+            &(0..9)
+                .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
+                .collect::<Vec<_>>(),
+            &["0", "6", "12", "18", "24"],
+        ),
+        Dial::Level => {
+            let at = |db: f64| -150.0 + (db + 30.0) * 300.0 / 42.0;
+            let mut ticks: Vec<(f64, Option<i32>)> = (0..9)
+                .map(|k| {
+                    let db = -30.0 + 5.0 * f64::from(k);
+                    (at(db), (k % 2 == 0).then_some(k / 2))
+                })
+                .collect();
+            ticks.push((150.0, None));
+            numbered(&ticks, &["–30", "–20", "–10", "0", "+10"])
+        }
         // Marked in time, not evenly (as printed); the 200 ms mark is printed long ("200—").
         Dial::Time => DialMarks {
             ticks: [
@@ -488,14 +550,140 @@ pub fn document(view: [f64; 4], px: u32, py: u32, body: &str) -> String {
 pub fn background(layout: &Layout) -> String {
     let mut s = Svg::default();
     wood(&mut s);
-    panel(&mut s, layout);
-    column(&mut s);
+    panel(&mut s, layout, Ink::All);
+    strip_face(&mut s);
+    crate::strip::surfaces(&mut s);
+    column(&mut s, Ink::All);
+    strip_print(&mut s);
     s.0
 }
 
+/// What a part of the drawing draws: all of it, or its print alone (the worn skin lays the
+/// print over pictures of the surfaces: decisions.md R44).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ink {
+    All,
+    Print,
+}
+
+/// The print alone, as the background has it: the face's and the column's lettering, rules,
+/// dials' marks and selectors' legends, and the grip's lines in the corner.
+pub fn printed(layout: &Layout) -> String {
+    let mut s = Svg::default();
+    grip(&mut s);
+    panel(&mut s, layout, Ink::Print);
+    column(&mut s, Ink::Print);
+    strip_print(&mut s);
+    s.0
+}
+
+/// The strip's face, in the drawn skin (the worn skin's is a picture): the panel's black,
+/// under the rail, with the panel's trim at its ends and foot.
+fn strip_face(s: &mut Svg) {
+    let top = PANEL_H + crate::strip::RAIL;
+    put!(
+        s,
+        "<rect x='0' y='{}' width='{}' height='{}' fill='{PANEL}'/>",
+        N(top),
+        N(W),
+        N(H - top)
+    );
+    put!(s, "<g transform='translate(0 {})'>", N(top));
+    strip_trims(s);
+    s.0.push_str("</g>");
+}
+
+/// The aluminium trim at the strip face's ends and along its foot, in its own place (its top
+/// left corner under the rail).
+pub(crate) fn strip_trims(s: &mut Svg) {
+    let h = H - PANEL_H - crate::strip::RAIL;
+    put!(
+        s,
+        "<rect x='0' y='0' width='15' height='{}' fill='url(#trim)'/>",
+        N(h)
+    );
+    put!(
+        s,
+        "<rect x='{}' y='0' width='28' height='{}' fill='url(#trim)'/>",
+        N(W - 28.0),
+        N(h)
+    );
+    put!(
+        s,
+        "<rect x='0' y='{}' width='{}' height='6' fill='url(#trim)'/>",
+        N(h - 6.0),
+        N(W)
+    );
+}
+
+/// The strip's print (`strip::print`) and its knobs' dials.
+fn strip_print(s: &mut Svg) {
+    crate::strip::print(s, FAMILY);
+    for c in CONTROLS.iter().filter(|c| c.place == Place::Strip) {
+        if let Kind::Knob { dial, .. } = c.kind {
+            let (x, y) = c.centre();
+            draw_dial(s, x, y, dial);
+        }
+    }
+}
+
+/// The top strip's screws: centre and radius, in the drawing.
+fn top_screws() -> impl Iterator<Item = (f64, f64, f64)> {
+    [0.05, 0.35, 0.65, 0.95]
+        .into_iter()
+        .map(|x| (COL + x * PW, TOP - 22.0, 7.0))
+}
+
+/// The left hand's screws, in its own place: its switches' and its wheels' mountings (no
+/// plate of its own on the strip's face, nor its corners' screws: the owner, 2026-10-09, "no
+/// need to put a back plate on top of another backplate").
+fn column_screws() -> Vec<(f64, f64, f64)> {
+    let mut mountings = Vec::new();
+    for y in LH_ROWS {
+        for x in [LH_ROCKER - LH_SCREW_DX, LH_ROCKER + LH_SCREW_DX] {
+            mountings.push((x, y, 5.0));
+        }
+    }
+    for x in LH_WHEELS {
+        for dy in [-64.0, 64.0] {
+            mountings.push((
+                x - (30.0 * WHEEL_SCALE + 10.0),
+                WHEEL_Y + dy * WHEEL_SCALE,
+                5.0,
+            ));
+        }
+    }
+    mountings
+}
+
+/// Every screw's centre and radius, in the drawing.
+pub fn screws() -> Vec<(f64, f64, f64)> {
+    let (lx, ly) = crate::strip::LEFT_HAND;
+    top_screws()
+        .chain(
+            column_screws()
+                .into_iter()
+                .map(|(x, y, r)| (lx + x, ly + y, r)),
+        )
+        .collect()
+}
+
+/// The jacks with no parameter (the controller's GLIDE and DECAY, the panel's PHONES): centre,
+/// radius and whether a nut is round it, in the drawing.
+pub fn jacks() -> Vec<(f64, f64, f64, bool)> {
+    let (lx, ly) = crate::strip::LEFT_HAND;
+    LH_ROWS
+        .iter()
+        .map(|y| (lx + LH_JACK, ly + y, 22.0, true))
+        .chain([(COL + PHONES.0, TOP + PHONES.1, 34.0, false)])
+        .collect()
+}
+
+/// The PHONES jack, on the panel.
+const PHONES: (f64, f64) = (2855.0, 581.0);
+
 fn wood(s: &mut Svg) {
-    // The top strip, the name board and the controller's column. No cheeks: the ends are
-    // square.
+    // The top strip and the strip's rail. No cheeks: the ends are square.
     put!(
         s,
         "<rect x='0' y='0' width='{}' height='{}' fill='url(#wood-h)'/>",
@@ -505,16 +693,9 @@ fn wood(s: &mut Svg) {
     put!(
         s,
         "<rect x='0' y='{}' width='{}' height='{}' fill='url(#wood-h)'/>",
-        N(TOP + PH),
+        N(PANEL_H),
         N(W),
-        N(BOARD)
-    );
-    put!(
-        s,
-        "<rect x='0' y='{}' width='{}' height='{}' fill='url(#wood-v)'/>",
-        N(TOP - 2.0),
-        N(COL),
-        N(PH + 4.0)
+        N(crate::strip::RAIL)
     );
     // Grain: long, gently wavering lines (the same every time).
     let mut seed: u64 = 7;
@@ -543,12 +724,18 @@ fn wood(s: &mut Svg) {
             );
         }
     };
-    grain(s, 0.0, 6.0, W, TOP - 12.0, true, 7);
-    grain(s, 0.0, TOP + PH + 8.0, W, BOARD - 16.0, true, 8);
-    grain(s, 4.0, TOP, COL - 8.0, PH, false, 6);
-    for x in [0.05, 0.35, 0.65, 0.95] {
-        screw(s, COL + x * PW, TOP - 22.0, 7.0);
+    // The top strip's grain laid out as when the left hand's column stood left of the panel,
+    // 330 units wide: the panel's wood stays as approved.
+    grain(s, -330.0, 6.0, W + 330.0, TOP - 12.0, true, 7);
+    grain(s, 0.0, PANEL_H + 6.0, W, crate::strip::RAIL - 12.0, true, 6);
+    for (x, y, r) in top_screws() {
+        screw(s, x, y, r);
     }
+    grip(s);
+}
+
+/// The resize grip's three lines in the drawing's corner.
+fn grip(s: &mut Svg) {
     for k in 1..=3 {
         let d = 12.0 * f64::from(k);
         put!(
@@ -562,36 +749,22 @@ fn wood(s: &mut Svg) {
     }
 }
 
-fn panel(s: &mut Svg, layout: &Layout) {
+fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
     put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
-    put!(
-        s,
-        "<rect x='0' y='0' width='{}' height='{}' fill='{PANEL}'/>",
-        N(PW),
-        N(PH)
-    );
-    put!(
-        s,
-        "<rect x='0' y='0' width='{}' height='7' fill='{SHADOW}' fill-opacity='{SHADOW_OPACITY}'/>",
-        N(PW)
-    );
-    put!(
-        s,
-        "<rect x='0' y='0' width='15' height='{}' fill='url(#trim)'/>",
-        N(PH)
-    );
-    put!(
-        s,
-        "<rect x='{}' y='0' width='28' height='{}' fill='url(#trim)'/>",
-        N(PW - 28.0),
-        N(PH)
-    );
-    put!(
-        s,
-        "<rect x='0' y='{}' width='{}' height='6' fill='url(#trim)'/>",
-        N(PH - 6.0),
-        N(PW)
-    );
+    if ink == Ink::All {
+        put!(
+            s,
+            "<rect x='0' y='0' width='{}' height='{}' fill='{PANEL}'/>",
+            N(PW),
+            N(PH)
+        );
+        put!(
+            s,
+            "<rect x='0' y='0' width='{}' height='7' fill='{SHADOW}' fill-opacity='{SHADOW_OPACITY}'/>",
+            N(PW)
+        );
+        trims(s);
+    }
     // Section dividers (broken where a label or a switch sits across one).
     let divider = |s: &mut Svg, x: f64, gaps: &[(f64, f64)]| {
         let mut y = 9.0;
@@ -602,10 +775,11 @@ fn panel(s: &mut Svg, layout: &Layout) {
     };
     divider(s, 445.0, &[(198.0, 297.0)]);
     divider(s, 1122.0, &[]);
-    divider(s, 1908.0, &[(98.0, 197.0), (234.0, 292.0), (298.0, 392.0)]);
+    divider(s, 1908.0, &[(98.0, 319.0), (356.0, 414.0), (420.0, 514.0)]);
     divider(s, 2578.0, &[]);
     divider(s, 2956.0, &[]);
-    line(s, 1908.0, 447.0, 2578.0, 447.0, 4.0);
+    // (From beside the column: KEYBOARD CONTROL 2 sits across the line's old start.)
+    line(s, 1976.0, 447.0, 2578.0, 447.0, 4.0);
     // Section titles along the foot, as wide as printed.
     for (i, (x0, x1, t, y)) in TITLES.iter().enumerate() {
         let spaced = layout.titles[i].map_or(String::new(), |w| {
@@ -663,15 +837,21 @@ fn panel(s: &mut Svg, layout: &Layout) {
     legend(s, 1763.0, 226.0, "OVERLOAD");
     legend(s, 1764.0, 407.0, "WHITE");
     legend(s, 1764.0, 558.0, "PINK");
+    // The column as the hardware reference has it (decisions.md R46): FILTER MODE at its
+    // head, the original's three switches 122 units lower.
     legend(s, 1910.0, 114.0, "FILTER");
-    legend(s, 1910.0, 134.0, "MODULATION");
-    legend(s, 1954.0, 207.0, "ON");
-    legend(s, 1954.0, 228.0, "ON");
-    legend(s, 1837.0, 263.0, "1");
-    legend(s, 1910.0, 309.0, "KEYBOARD");
-    legend(s, 1910.0, 326.0, "CONTROL");
-    legend(s, 1837.0, 363.0, "2");
-    legend(s, 1954.0, 401.0, "ON");
+    legend(s, 1910.0, 134.0, "MODE");
+    legend(s, 1860.0, 207.0, "LO");
+    legend(s, 1954.0, 207.0, "HI");
+    legend(s, 1910.0, 236.0, "FILTER");
+    legend(s, 1910.0, 256.0, "MODULATION");
+    legend(s, 1954.0, 329.0, "ON");
+    legend(s, 1954.0, 350.0, "ON");
+    legend(s, 1837.0, 385.0, "1");
+    legend(s, 1910.0, 431.0, "KEYBOARD");
+    legend(s, 1910.0, 448.0, "CONTROL");
+    legend(s, 1837.0, 485.0, "2");
+    legend(s, 1954.0, 523.0, "ON");
     // MODIFIERS.
     lettered(s, 2282.0, 31.0, "FILTER", 31.0);
     legend(s, 2081.0, 55.0, "CUTOFF FREQUENCY");
@@ -694,13 +874,47 @@ fn panel(s: &mut Svg, layout: &Layout) {
     legend(s, 2682.0, 485.0, "FEEDBACK");
     legend(s, 2856.0, 485.0, "PHONES");
     // The PHONES jack has no parameter: drawn for the panel's sake, dimmed.
-    put!(s, "<g transform='translate(2855 581)' opacity='0.5'>");
-    jack(s, 34.0, false);
-    s.0.push_str("</g>");
+    if ink == Ink::All {
+        put!(
+            s,
+            "<g transform='translate({} {})' opacity='0.5'>",
+            N(PHONES.0),
+            N(PHONES.1)
+        );
+        jack(s, 34.0, false);
+        s.0.push_str("</g>");
+    }
     // POWER: the plugin's bypass. The lamp is lit while it plays.
+    // QUALITY: its toggle's three positions round it (ULTRA's lamp above, drawn as it moves).
+    let (qx, qy) = QUALITY_AT;
+    legend(s, qx, 168.0, "QUALITY");
+    lettered(s, qx, qy - 50.0, "ULTRA", 15.0);
+    lettered(s, qx - 40.0, qy, "HI", 15.0);
+    lettered(s, qx, qy + 52.0, "LO", 15.0);
     legend(s, 3023.0, 465.0, "POWER");
     legend(s, 3023.0, 500.0, "ON");
     s.0.push_str("</g>");
+}
+
+/// The aluminium trim at the face's ends and along its foot, in the face's own place.
+pub(crate) fn trims(s: &mut Svg) {
+    put!(
+        s,
+        "<rect x='0' y='0' width='15' height='{}' fill='url(#trim)'/>",
+        N(PH)
+    );
+    put!(
+        s,
+        "<rect x='{}' y='0' width='28' height='{}' fill='url(#trim)'/>",
+        N(PW - 28.0),
+        N(PH)
+    );
+    put!(
+        s,
+        "<rect x='0' y='{}' width='{}' height='6' fill='url(#trim)'/>",
+        N(PH - 6.0),
+        N(PW)
+    );
 }
 
 fn selector_marks(s: &mut Svg, c: &Control, set: Legends, layout: &Layout) {
@@ -764,54 +978,27 @@ fn jack(s: &mut Svg, r: f64, nut: bool) {
     put!(s, "<circle r='{}' fill='{HOLE}'/>", N(r * 0.36));
 }
 
-/// The left hand controller: GLIDE and DECAY, then the PITCH and MODULATION wheels, upright
-/// in its column, as tall as the panel.
-fn column(s: &mut Svg) {
-    put!(s, "<g transform='translate({} {})'>", N(LH_X), N(TOP));
-    put!(
-        s,
-        "<rect x='0' y='0' width='{}' height='{}' rx='6' fill='{PANEL}'/>",
-        N(LPW),
-        N(LPH)
-    );
-    put!(
-        s,
-        "<rect x='0' y='0' width='{}' height='7' fill='{SHADOW}' fill-opacity='{SHADOW_OPACITY}'/>",
-        N(LPW)
-    );
-    for (x, y) in [
-        (16.0, 16.0),
-        (LPW - 16.0, 16.0),
-        (16.0, LPH - 16.0),
-        (LPW - 16.0, LPH - 16.0),
-    ] {
-        screw(s, x, y, 8.0);
-    }
-    // The GLIDE and DECAY jacks have no parameter: drawn, dimmed.
-    for y in LH_ROWS {
-        put!(
-            s,
-            "<g transform='translate({} {})' opacity='0.5'>",
-            N(LH_JACK),
-            N(y)
-        );
-        jack(s, 22.0, true);
-        s.0.push_str("</g>");
-    }
-    // The switches' and the wheels' mounting screws.
-    for y in LH_ROWS {
-        for x in [LH_ROCKER - LH_SCREW_DX, LH_ROCKER + LH_SCREW_DX] {
-            screw(s, x, y, 5.0);
-        }
-    }
-    for x in LH_WHEELS {
-        for dy in [-64.0, 64.0] {
-            screw(
+/// The left hand controller: GLIDE and DECAY, then the PITCH and MODULATION wheels, at the
+/// strip's left, straight on its face (A6).
+fn column(s: &mut Svg, ink: Ink) {
+    let (lx, ly) = crate::strip::LEFT_HAND;
+    put!(s, "<g transform='translate({} {})'>", N(lx), N(ly));
+    if ink == Ink::All {
+        let mountings = column_screws();
+        // The GLIDE and DECAY jacks have no parameter: drawn, dimmed.
+        for y in LH_ROWS {
+            put!(
                 s,
-                x - (30.0 * WHEEL_SCALE + 10.0),
-                WHEEL_Y + dy * WHEEL_SCALE,
-                5.0,
+                "<g transform='translate({} {})' opacity='0.5'>",
+                N(LH_JACK),
+                N(y)
             );
+            jack(s, 22.0, true);
+            s.0.push_str("</g>");
+        }
+        // The switches' and the wheels' mounting screws.
+        for (x, y, r) in mountings {
+            screw(s, x, y, r);
         }
     }
     legend(s, LH_LABEL, LH_ROWS[0], "GLIDE");
@@ -904,6 +1091,37 @@ fn knob_body(s: &mut Svg, size: Size, deg: f64) {
 
 /// A pointer knob at position `i` of six: the fluted black body, a fin along its pointer
 /// carrying a white line from the cap to its tip, a spun aluminium cap.
+/// QUALITY's toggle as drawn: a chrome nut and its bushing, the lever's ball tip up, out (at
+/// the nut's middle) or down, `i` 2, 1 or 0.
+fn toggle_body(s: &mut Svg, i: usize) {
+    put!(
+        s,
+        "<polygon points='{}' fill='#b8b8b2' stroke='#5e5e5a' stroke-width='1.2'/><circle r='11' fill='#d6d6d0' stroke='#7a7a75'/><circle r='7.5' fill='#8c8c87'/>",
+        (0..6)
+            .map(|k| {
+                let a = (30.0 + 60.0 * f64::from(k)).to_radians();
+                format!("{},{}", N(17.0 * a.cos()), N(17.0 * a.sin()))
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    match i {
+        1 => put!(
+            s,
+            "<circle cy='1.5' r='5.5' fill='#f0f0ea' stroke='#8a8a85'/>"
+        ),
+        _ => {
+            let d = if i == 2 { -1.0 } else { 1.0 };
+            put!(
+                s,
+                "<line x1='0' y1='0' x2='0' y2='{}' stroke='#e2e2dc' stroke-width='6' stroke-linecap='round'/><circle cy='{}' r='5' fill='#f2f2ec' stroke='#8a8a85'/>",
+                N(28.0 * d),
+                N(31.0 * d)
+            );
+        }
+    }
+}
+
 fn selector_body(s: &mut Svg, i: usize) {
     shadow(s, 3.0, 5.0, 57.0);
     put!(s, "<g transform='rotate({})'>", N(SIX[i]));
@@ -1034,11 +1252,34 @@ fn wheel(s: &mut Svg, mark: Mark, span: f64, shown: f64) {
 
 /// A part of the drawing that moves: its art about `origin` (in the drawing), within `bounds`
 /// of it (left, top, right, bottom).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layer {
     pub origin: (f64, f64),
     pub bounds: [f64; 4],
     pub body: String,
+    /// The worn skin's pictures drawn over the body, each about the origin (decisions.md
+    /// R44), and SVG over them (the lamp's light on them, which does not turn).
+    pub sprites: Vec<Sprite>,
+    pub over: String,
+    /// A wheel the worn skin's renderer draws, and a rocker's paddle it lights by its shape
+    /// (none in the drawn skin).
+    pub wheel: Option<WheelArt>,
+    pub paddle: Option<PaddleArt>,
+}
+
+/// A picture of a part drawn in a layer: `size` (drawing units) about `at` (from the layer's
+/// origin), turned `deg` clockwise after it is mirrored as `flip` (across, down) says, drawn
+/// `zoom` times its size (its picture made at `size`, so that a part growing does not make a
+/// picture a frame) and `alpha` opaque.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sprite {
+    pub part: Part,
+    pub size: (f64, f64),
+    pub at: (f64, f64),
+    pub deg: f64,
+    pub flip: (bool, bool),
+    pub zoom: f64,
+    pub alpha: f64,
 }
 
 /// A control's extent about its centre (left, top, right, bottom), its shadow included.
@@ -1049,7 +1290,9 @@ pub fn bounds(kind: &Kind) -> [f64; 4] {
             [-(r + 3.0), -(r + 3.0), r + 6.0, r + 8.0]
         }
         Kind::Selector(_) => [-62.0, -62.0, 63.0, 64.0],
-        Kind::Rocker { w, h, .. } => [-w / 2.0 - 4.0, -h / 2.0 - 4.0, w / 2.0 + 4.0, h / 2.0 + 4.0],
+        Kind::Rocker { w, h, .. } | Kind::Toggle { w, h } => {
+            [-w / 2.0 - 4.0, -h / 2.0 - 4.0, w / 2.0 + 4.0, h / 2.0 + 4.0]
+        }
         Kind::Wheel { .. } => {
             let (hx, hy) = (
                 SLOT_W / 2.0 * WHEEL_SCALE + 2.0,
@@ -1079,6 +1322,7 @@ pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
             knob_body(&mut s, if big { BIG } else { STD }, -150.0 + 300.0 * v)
         }
         Kind::Selector(_) => selector_body(&mut s, position(v)),
+        Kind::Toggle { .. } => toggle_body(&mut s, crate::interact::toggle_position(v)),
         Kind::Rocker {
             w,
             h,
@@ -1102,6 +1346,7 @@ pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
         origin: c.centre(),
         bounds: bounds(&c.kind),
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -1123,6 +1368,7 @@ pub fn power(on: bool) -> Layer {
         origin: (COL + POWER.0, TOP + POWER.1),
         bounds: POWER_BOUNDS,
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -1144,6 +1390,7 @@ pub fn lamp(on: bool) -> Layer {
         origin: (COL + LAMP_AT.0, TOP + LAMP_AT.1),
         bounds: [-20.0, -20.0, 23.0, 24.0],
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -1177,6 +1424,7 @@ pub fn overload(level: f64) -> Layer {
         origin: (COL + OVERLOAD_AT.0, TOP + OVERLOAD_AT.1),
         bounds: [-34.0, -34.0, 34.0, 34.0],
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -1218,7 +1466,467 @@ pub fn plate() -> Layer {
         origin: (PLATE_X, PLATE_Y),
         bounds: [-24.0, -10.0, w + 24.0, h + 10.0],
         body: s.0,
+        ..Layer::default()
     }
+}
+
+// ---- The worn skin (decisions.md R44): the same parts in the same places, their surfaces
+// pictures (`crate::skin`), the lamp's light laid over them where it does not turn.
+
+/// The name plate in the worn skin (the owner, 2026-10-10: "it's not up to the same realistic
+/// quality as everything else"): a picture of a blank plate, standing a little proud of the
+/// wood (its shadow soft, down and to the right), its lettering printed on it as the panel's is:
+/// paint filled into engraving, the cut's upper left wall in shade over it, its lower right
+/// catching the lamp a little.
+pub fn plate_worn() -> Layer {
+    let (w, h) = (PLATE_W, PLATE_H);
+    let mut body = Svg::default();
+    put!(
+        body,
+        "<defs><filter id='plate-shadow' x='-0.2' y='-0.5' width='1.4' height='2'><feGaussianBlur stdDeviation='4'/></filter></defs><rect x='3' y='5' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.6' filter='url(#plate-shadow)'/><rect x='1' y='1.5' width='{}' height='{}' rx='3' fill='#000' fill-opacity='0.5'/>",
+        N(w),
+        N(h),
+        N(w),
+        N(h)
+    );
+    let mut over = Svg::default();
+    let line = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64, extra: &str| {
+        for (dx, dy, fill, opacity) in [
+            (0.6, 0.7, "#ffffff", 0.1),
+            (-0.5, -0.6, "#000000", 0.75),
+            (0.0, 0.0, PLATE_PAINT, 0.95),
+        ] {
+            put!(
+                s,
+                "<text x='{}' y='{}' text-anchor='start' font-size='{}' font-weight='700' fill='{fill}' fill-opacity='{opacity}' {extra}>{}</text>",
+                N(x + dx),
+                N(y + size * 0.36 + dy),
+                N(size),
+                escape(t)
+            );
+        }
+    };
+    line(&mut over, PLATE_PAD, NAME_Y, PLATE_NAME, 38.0, "");
+    line(
+        &mut over,
+        PLATE_PAD + 2.0,
+        MAKER_Y,
+        PLATE_MAKER,
+        12.0,
+        "letter-spacing='4.2'",
+    );
+    Layer {
+        origin: (PLATE_X, PLATE_Y),
+        bounds: [-24.0, -10.0, w + 24.0, h + 14.0],
+        body: body.0,
+        sprites: vec![Sprite {
+            at: (w / 2.0, h / 2.0),
+            ..sprite(Part::Plate, (w, h), 0.0, (false, false))
+        }],
+        over: over.0,
+        ..Layer::default()
+    }
+}
+
+/// The plate's lettering's paint: an off white, as the panel's print.
+const PLATE_PAINT: &str = "#e4ded0";
+
+/// A selector's knob's body: as wide as the drawn one's fluted outline, less the pointer's
+/// reach (the picture's wedge reaches its edge, 64 units out, as the drawn fin about does).
+const SELECTOR_R: f64 = 50.0;
+
+/// How the panel's lamp lights a round part's near side, up and to the left (a colour dodge to
+/// 1 / (1 - `LAMP_NEAR`) of its light at the edge), and darkens its far side (multiplied by
+/// `LAMP_FAR` at the edge), each back to nothing by the middle: the CA-74's.
+const LAMP_NEAR: f64 = 0.45;
+const LAMP_FAR: f64 = 0.35;
+
+/// How far a cap's picture is turned, clockwise, so that its spun sheen (generated lying across
+/// it, along three and nine o'clock) lies along the line to the lamp, up and to the left, as a
+/// spun disc's does.
+const CAP_TURN: f64 = 45.0;
+
+/// The lamp's light on a spun cap `r` across, over its sheen: its near side a touch lighter.
+fn cap_light(r: f64) -> String {
+    format!(
+        "<defs><linearGradient id='cap' x1='0' y1='0' x2='1' y2='1'><stop offset='0.15' stop-color='#fff' stop-opacity='0.12'/><stop offset='0.5' stop-color='#fff' stop-opacity='0'/><stop offset='0.55' stop-color='#000' stop-opacity='0'/><stop offset='0.85' stop-color='#000' stop-opacity='0.1'/></linearGradient></defs><circle r='{}' fill='url(#cap)'/>",
+        N(r)
+    )
+}
+
+/// The panel's lamp over a round part's black plastic, from `inner` (its spun cap's rim, whose
+/// sheen is its own) out to `r`. It does not turn with the part.
+fn lamp_over(r: f64, inner: f64) -> String {
+    let grey = |v: f64| {
+        let g = (v * 255.0).round() as u8;
+        format!("#{g:02x}{g:02x}{g:02x}")
+    };
+    format!(
+        "<defs><linearGradient id='near' x1='0' y1='0' x2='1' y2='1'><stop offset='0.15' stop-color='{n}'/><stop offset='0.5' stop-color='{n}' stop-opacity='0'/></linearGradient><linearGradient id='far' x1='0' y1='0' x2='1' y2='1'><stop offset='0.5' stop-color='{f}' stop-opacity='0'/><stop offset='0.85' stop-color='{f}'/></linearGradient></defs><path d='{ring}' fill-rule='evenodd' fill='url(#near)' style='mix-blend-mode:color-dodge'/><path d='{ring}' fill-rule='evenodd' fill='url(#far)' style='mix-blend-mode:multiply'/>",
+        n = grey(LAMP_NEAR),
+        f = grey(LAMP_FAR),
+        ring = format!(
+            "M {o} 0 A {o} {o} 0 1 0 -{o} 0 A {o} {o} 0 1 0 {o} 0 Z M {i} 0 A {i} {i} 0 1 0 -{i} 0 A {i} {i} 0 1 0 {i} 0 Z",
+            o = N(r - 1.0),
+            i = N(inner)
+        )
+    )
+}
+
+/// A sprite at a layer's origin.
+fn sprite(part: Part, size: (f64, f64), deg: f64, flip: (bool, bool)) -> Sprite {
+    Sprite {
+        part,
+        size,
+        at: (0.0, 0.0),
+        deg,
+        flip,
+        zoom: 1.0,
+        alpha: 1.0,
+    }
+}
+
+/// A control in the worn skin at its normalized value: a knob's or a selector's picture turned
+/// as the drawn one is (the light on its spun cap and the lamp's over it not turned), a
+/// rocker's picture pressed at its end; the wheels as drawn.
+pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
+    use crate::skin::{BIG_CAP, BIG_SKIRT, KNOB_CAP, KNOB_SKIRT, POINTER_BODY, POINTER_CAP};
+    let v = v.clamp(0.0, 1.0);
+    let (origin, bounds) = (c.centre(), bounds(&c.kind));
+    match c.kind {
+        Kind::Knob { big, .. } => {
+            let (size, skirt, part, cap, cap_share) = if big {
+                (BIG, BIG_SKIRT, Part::KnobBig, Part::KnobBigCap, BIG_CAP)
+            } else {
+                (STD, KNOB_SKIRT, Part::Knob, Part::KnobCap, KNOB_CAP)
+            };
+            let d = 2.0 * size.skirt / skirt;
+            Layer {
+                origin,
+                bounds,
+                sprites: vec![
+                    sprite(part, (d, d), -150.0 + 300.0 * v, (false, false)),
+                    sprite(cap, (d, d), CAP_TURN, (false, false)),
+                ],
+                over: lamp_over(size.skirt, d / 2.0 * cap_share) + &cap_light(d / 2.0 * cap_share),
+                ..Layer::default()
+            }
+        }
+        Kind::Selector(_) => {
+            let d = 2.0 * SELECTOR_R / POINTER_BODY;
+            Layer {
+                origin,
+                bounds,
+                sprites: vec![
+                    sprite(Part::Pointer, (d, d), SIX[position(v)], (false, false)),
+                    sprite(Part::PointerCap, (d, d), CAP_TURN, (false, false)),
+                ],
+                over: lamp_over(SELECTOR_R, d / 2.0 * POINTER_CAP)
+                    + &cap_light(d / 2.0 * POINTER_CAP),
+                ..Layer::default()
+            }
+        }
+        // QUALITY's chrome toggle: its picture for the lever's place.
+        Kind::Toggle { w, h } => {
+            let part = match crate::interact::toggle_position(v) {
+                2 => Part::ToggleUp,
+                1 => Part::ToggleMid,
+                _ => Part::ToggleDown,
+            };
+            Layer {
+                origin,
+                bounds,
+                sprites: vec![sprite(part, (w, h), 0.0, (false, false))],
+                ..Layer::default()
+            }
+        }
+        Kind::Rocker {
+            w,
+            h,
+            colour,
+            orient,
+        } => {
+            let (deg, pw, ph) = match orient {
+                Orient::Right => (0.0, w, h),
+                Orient::Top => (-90.0, h, w),
+                Orient::Bottom => (90.0, h, w),
+            };
+            let on = v >= 0.5;
+            if colour == Colour::Black {
+                // POWER's black ribbed rocker (QUALITY), upright as POWER's: its picture's
+                // upper half raised, its lower when its upper end is pressed.
+                let top = match orient {
+                    Orient::Bottom => !on,
+                    _ => on,
+                };
+                return Layer {
+                    origin,
+                    bounds,
+                    // (Its picture as much larger than its paddle as POWER's, 46 by 124 for 43 by 119.)
+                    sprites: vec![sprite(
+                        Part::Power,
+                        (w * 46.0 / 43.0, h * 124.0 / 119.0),
+                        0.0,
+                        (false, top),
+                    )],
+                    ..Layer::default()
+                };
+            }
+            let part = match colour {
+                Colour::Blue => Part::RockerBlue,
+                Colour::Red => Part::RockerOrange,
+                Colour::Ivory | Colour::Black => Part::RockerIvory,
+            };
+            // The picture's right half is raised; on, its left (the drawing's "on" end at its
+            // right pressed).
+            let m = 16.0;
+            Layer {
+                origin,
+                bounds: [bounds[0] - m, bounds[1] - m, bounds[2] + m, bounds[3] + m],
+                body: paddle_shadow(pw, ph, deg, on),
+                sprites: vec![sprite(part, (pw + 4.0, ph + 4.0), deg, (on, false))],
+                paddle: Some(PaddleArt { pw, ph, deg, on }),
+                ..Layer::default()
+            }
+        }
+        Kind::Wheel { mark, detent, span } => {
+            let turn = (wheel_shown(detent, v, midi) - 0.5) * span;
+            Layer {
+                origin,
+                bounds,
+                body: wheel_slot(),
+                wheel: Some(WheelArt { mark, turn }),
+                ..Layer::default()
+            }
+        }
+    }
+}
+
+/// A wheel's slot in the worn skin: its opening, black, under the wheel the renderer draws.
+fn wheel_slot() -> String {
+    format!(
+        "<g transform='scale({WHEEL_SCALE})'><rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='{HOLE}'/></g>",
+        N(-SLOT_W / 2.0),
+        N(-SLOT_H / 2.0),
+        N(SLOT_W),
+        N(SLOT_H)
+    )
+}
+
+/// A wheel in the worn skin, drawn by the renderer: its mark, and how far it is turned
+/// (degrees, 0 in its middle).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WheelArt {
+    pub mark: Mark,
+    pub turn: f64,
+}
+
+/// Which way a rocker's raised half lies on the panel (a unit vector, the drawing's x and y),
+/// turned `deg` and mirrored when `on`; and how squarely the lamp, up and to the left, falls on
+/// a face of the paddle tilted towards `towards` (-1 to 1).
+fn raised_towards(deg: f64, on: bool) -> (f64, f64) {
+    let k = if on { -1.0 } else { 1.0 };
+    (k * deg.to_radians().cos(), k * deg.to_radians().sin())
+}
+
+fn lamp_on(towards: (f64, f64)) -> f64 {
+    -(towards.0 + towards.1) / std::f64::consts::SQRT_2
+}
+
+/// A rocker's paddle the worn skin's renderer lights by its shape: `pw` by `ph` along its own
+/// length, turned `deg`, its raised half to its right, or (when `on`) its left, before turning.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaddleArt {
+    pub pw: f64,
+    pub ph: f64,
+    pub deg: f64,
+    pub on: bool,
+}
+
+/// The shadow a rocker's paddle casts on the panel, down and to the right of it, the raised end's
+/// the longer.
+fn paddle_shadow(pw: f64, ph: f64, deg: f64, on: bool) -> String {
+    let r = raised_towards(deg, on);
+    // How far the raised end's shadow falls beyond the paddle: most when it lies away from the
+    // lamp.
+    let reach = 4.0 + 6.0 * (-lamp_on(r)).max(0.0);
+    let (ex, ey) = (r.0 * pw / 2.0, r.1 * pw / 2.0);
+    format!(
+        "<defs><filter id='cast' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='3'/></filter></defs><g filter='url(#cast)' fill='#000'><rect x='{}' y='{}' width='{}' height='{}' rx='4' transform='translate(4 6) rotate({})' fill-opacity='0.45'/><circle cx='{}' cy='{}' r='{}' fill-opacity='0.35'/></g>",
+        N(-pw / 2.0),
+        N(-ph / 2.0),
+        N(pw),
+        N(ph),
+        N(deg),
+        N(ex + 3.0 + r.0.abs() * reach * 0.6),
+        N(ey + 5.0 + r.1.abs() * reach * 0.6),
+        N(ph * 0.42)
+    )
+}
+
+/// The POWER switch in the worn skin: its picture's upper half raised, its lower when on.
+pub fn power_worn(on: bool) -> Layer {
+    Layer {
+        origin: (COL + POWER.0, TOP + POWER.1),
+        bounds: POWER_BOUNDS,
+        sprites: vec![sprite(Part::Power, (46.0, 124.0), 0.0, (false, on))],
+        ..Layer::default()
+    }
+}
+
+/// A jewel's light from its lamp: hot in the middle, red to its rim, and a little round it.
+fn jewel_light(r: f64, level: f64) -> String {
+    format!(
+        "<defs><radialGradient id='lit' fx='0.4' fy='0.38'><stop offset='0' stop-color='#ffd0a0'/><stop offset='0.45' stop-color='#ff4a28'/><stop offset='1' stop-color='#c81408' stop-opacity='0.3'/></radialGradient><filter id='halo' x='-1' y='-1' width='3' height='3'><feGaussianBlur stdDeviation='{}'/></filter></defs><g opacity='{}'><circle r='{}' fill='#ff3018' fill-opacity='0.55' filter='url(#halo)'/><circle r='{}' fill='url(#lit)'/></g>",
+        N(r * 0.45),
+        N(level),
+        N(r * 1.05),
+        N(r)
+    )
+}
+
+/// The POWER lamp in the worn skin: a red jewel in its chrome bezel, its filament lit while
+/// the plug-in plays.
+pub fn lamp_worn(on: bool) -> Layer {
+    Layer {
+        origin: (COL + LAMP_AT.0, TOP + LAMP_AT.1),
+        bounds: [-30.0, -30.0, 30.0, 30.0],
+        sprites: vec![sprite(Part::Jewel, (40.0, 40.0), 0.0, (false, false))],
+        over: if on {
+            jewel_light(12.5, 1.0)
+        } else {
+            String::new()
+        },
+        ..Layer::default()
+    }
+}
+
+/// The OVERLOAD lamp in the worn skin at `level` (0 dark, 1 fully lit): a dark jewel, its
+/// filament glowing red through it.
+pub fn overload_worn(level: f64) -> Layer {
+    let level = (level.clamp(0.0, 1.0) * 100.0).round() / 100.0;
+    Layer {
+        origin: (COL + OVERLOAD_AT.0, TOP + OVERLOAD_AT.1),
+        bounds: [-34.0, -34.0, 34.0, 34.0],
+        sprites: vec![sprite(Part::JewelDark, (48.0, 48.0), 0.0, (false, false))],
+        over: if level >= 0.05 {
+            jewel_light(15.0, level)
+        } else {
+            String::new()
+        },
+        ..Layer::default()
+    }
+}
+
+/// What the worn skin lays over its pictures of the wood and the face, once a scale: the
+/// wood's edges rounded over where the lamp falls and darker where they turn away, the shadow
+/// the top strip casts on the faces, the face's aluminium trim, and each moving part's shadow,
+/// soft, down and to the right (a part's shadow is the same whichever way it is turned).
+pub fn worn_overlay() -> String {
+    let mut s = Svg::default();
+    put!(
+        s,
+        "<defs><linearGradient id='edge-lit' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#ffe6c8' stop-opacity='0.16'/><stop offset='1' stop-color='#ffe6c8' stop-opacity='0'/></linearGradient><linearGradient id='edge-dark' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0'/><stop offset='1' stop-color='#000' stop-opacity='0.45'/></linearGradient><linearGradient id='under-wood' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0.6'/><stop offset='1' stop-color='#000' stop-opacity='0'/></linearGradient><filter id='long' x='-0.6' y='-0.6' width='2.2' height='2.2'><feGaussianBlur stdDeviation='7'/></filter><filter id='soft' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='3.5'/></filter><filter id='softer' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='2'/></filter></defs>"
+    );
+    let rail = crate::strip::RAIL;
+    for (y, h, fill) in [
+        (0.0, 10.0, "edge-lit"),
+        (TOP - 14.0, 14.0, "edge-dark"),
+        (PANEL_H, 10.0, "edge-lit"),
+        (PANEL_H + rail - 14.0, 14.0, "edge-dark"),
+    ] {
+        put!(
+            s,
+            "<rect x='0' y='{}' width='{}' height='{}' fill='url(#{fill})'/>",
+            N(y),
+            N(W),
+            N(h)
+        );
+    }
+    for y in [TOP, PANEL_H + rail] {
+        put!(
+            s,
+            "<rect x='{}' y='{}' width='{}' height='14' fill='url(#under-wood)'/>",
+            N(COL),
+            N(y),
+            N(PW)
+        );
+    }
+    put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
+    trims(&mut s);
+    s.0.push_str("</g>");
+    put!(s, "<g transform='translate(0 {})'>", N(PANEL_H + rail));
+    strip_trims(&mut s);
+    s.0.push_str("</g>");
+    // The moving parts' shadows.
+    for c in CONTROLS.iter() {
+        let (x, y) = c.centre();
+        match c.kind {
+            // A tall knob casts a long soft shadow away from the lamp, and a dark one where it
+            // stands.
+            Kind::Knob { .. } | Kind::Selector(_) => {
+                let r = match c.kind {
+                    Kind::Knob { big: true, .. } => BIG.skirt,
+                    Kind::Knob { .. } => STD.skirt,
+                    _ => SELECTOR_R + 2.0,
+                };
+                put!(
+                    s,
+                    "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.55' filter='url(#long)'/><circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.7' filter='url(#softer)'/>",
+                    N(x + 10.0),
+                    N(y + 14.0),
+                    N(r),
+                    N(x + 2.0),
+                    N(y + 3.0),
+                    N(r)
+                );
+            }
+            // The toggle's nut's (its lever's is too small to tell).
+            Kind::Toggle { w, .. } => put!(
+                s,
+                "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.5' filter='url(#softer)'/>",
+                N(x + 2.0),
+                N(y + 3.0),
+                N(w * 0.46)
+            ),
+            // A rocker's own shadow goes with its layer; its opening's is the panel's.
+            Kind::Rocker { w, h, .. } => put!(
+                s,
+                "<rect x='{}' y='{}' width='{}' height='{}' rx='3' fill='#000' fill-opacity='0.4' filter='url(#softer)'/>",
+                N(x - w / 2.0 + 1.0),
+                N(y - h / 2.0 + 2.0),
+                N(w + 3.0),
+                N(h + 3.0)
+            ),
+            Kind::Wheel { .. } => {}
+        }
+    }
+    put!(
+        s,
+        "<rect x='{}' y='{}' width='48' height='124' rx='3' fill='#000' fill-opacity='0.55' filter='url(#softer)'/>",
+        N(COL + POWER.0 - 21.0),
+        N(TOP + POWER.1 - 59.0)
+    );
+    // (QUALITY's opening's ring casts its own, with it: it can be hidden, `ultra::ring_shade`.)
+    for ((x, y), r) in [(LAMP_AT, 20.0), (OVERLOAD_AT, 24.0)] {
+        put!(
+            s,
+            "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.55' filter='url(#softer)'/>",
+            N(COL + x + 2.0),
+            N(TOP + y + 3.0),
+            N(r)
+        );
+    }
+    for (x, y, r, nut) in jacks() {
+        put!(
+            s,
+            "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.5' filter='url(#softer)'/>",
+            N(x + 2.0),
+            N(y + 3.0),
+            N(if nut { r + 6.0 } else { r * 1.12 })
+        );
+    }
+    s.0
 }
 
 /// A hover tip: `text` in a box of the tip's colours (`TIP`, `TIP_BORDER`), `size` its
@@ -1252,5 +1960,6 @@ pub fn tip(fonts: &Fonts, x: f64, y: f64, t: &str, size: f64) -> Layer {
         origin: (x, y),
         bounds: [x0 - m, y0 - m, -x0 + m, m],
         body: s.0,
+        ..Layer::default()
     }
 }

@@ -1,0 +1,8 @@
+Use your image generation tool to make one image, then save it in the current directory as face.png (copy the generated file there). Do nothing else.
+
+The image: a straight-on, orthographic, evenly lit close photograph of the bare front panel of a 1970s analogue synthesizer, filling the whole frame edge to edge. Square, as large as you can make it.
+- The material: an aluminium panel with a black textured paint finish, a deep neutral black close to #1b1a1a: a fine, even, slightly pebbled texture (a fine-grained textured enamel) that catches the light in tiny specks, matte to a low satin sheen.
+- Cared for but decades old: the finish intact (no chips, no bare metal, no rust, no peeling), with only faint signs of use: a faint uneven sheen where hands have rested, a little very fine dust caught in the texture.
+- The marks are subtle and spread evenly; the panel reads as an even black from a distance.
+- Completely blank: NO text, letters, numbers, logos, holes, knobs, screws, jacks, lines, borders or printed graphics of any kind.
+- Soft diffuse light from the upper left, no strong reflections, no vignetting, no perspective, sharp focus everywhere.

@@ -2782,3 +2782,1117 @@ chose it without feedback.
 **Evidence (omarchy, 2026-10-09):** the plug-in crate's tests in debug, 153 passed, 0 failed
 (the factory file's count now 25; its text still names no trademark); `preset_levels.rs` by
 hand for White Lotus, -18.03 LUFS momentary maximum at VOLUME 9.78.
+
+
+## R44. The realistic look: the panel in the Model D's materials, and the CA-74's strip
+
+**The owner's request, 2026-10-09:** "Give the CA-72's editor a realistic look and feel, as
+the CA-74 (Highstead) got on 2026-10-08, but Moog-oriented: think of the Model D family the
+CA-72 is calibrated against, its materials and conventions, not its trade dress (no trademarks
+or logos anywhere)." The panel: "Keep every control's place, size and legend; only the surfaces
+become pictures." The plug-in's own controls: "a strip that is always there below the panel,
+fixed in position (not a drawer that opens and closes) ... push buttons that light for the
+choices, slide or rotary controls with readouts, and the presets in a rail with a display and a
+list that drops down over the strip inside the window."
+
+**Through the mock-ups, 2026-10-09:**
+- "you need to research a bit more what the classic moog aesthetic/knobs were like. Especially
+  for the Model D". The look follows the original's materials as published descriptions and
+  parts listings give them and as Wikimedia Commons' "Minimoog panel.jpg" (a 1970s Minimoog,
+  CC BY 2.0, the photograph this panel was measured from) shows them, only looked at. "the
+  photographs taken were of my behrigner, not a model d. and as such they shouldn't be used for
+  reference unless i specifically request them to be used": none were.
+- "Also the new panel needs the low/high filter switch we just added": FILTER MODE (R46, on
+  `cal/hp-mode`) is on the panel in the new look as in the drawn one.
+- Of three directions (A, the panel carried down; B, a programmer after Moog's of 1982; C,
+  aluminium modules), with A's buttons orange or blue where they switch something on: "blue and
+  orange. Let's go option a.", then "sorry i meant only orange buttons. not blue/oprange": A,
+  its buttons orange.
+- "we need to add all the same stereo controls that we added to the CA74", then "in fact, i
+  think all controls on that panel should probably be added here": the strip carries the
+  CA-74's (its R25 and R27 to R31, R34, R36, R41): VOICES (MONO | POLY | UNISON, VOICES,
+  ENTROPY), STEREO (SCATTER | DOUBLE, EVEN | EDGES | CENTER, WIDTH, DETUNE and the display of
+  the voices), OUTPUT (DRIVE, AUTO GAIN, LEVEL).
+
+**Agent decisions, 2026-10-09** (not separately approved):
+- **The materials** (A): solid walnut, oiled; the face aluminium with a textured black finish,
+  printed in white; Moog's modular knobs (a smooth flared black skirt with a white dot, a grip
+  of broad flutes, a spun aluminium cap), OSC 2 and 3's the same knob larger; wedge pointer
+  knobs with a cream line for RANGE and WAVEFORM; blue and orange rockers; filament lamps
+  behind jewels (POWER red in a chrome bezel, OVERLOAD dark); chrome jacks; white ridged
+  wheels. The strip is the panel's face carried down under the name board, with its white
+  rules between sections and its titles along the foot; the push buttons are translucent
+  caps of the orange rockers' plastic, lit from inside; the displays orange
+  gas-discharge digits and dots, the instrument having no LEDs.
+- **The pictures** were made by an image generator (Codex CLI 0.160.1) from words alone and
+  cut out of a grey ground as the CA-74's were; their prompts and account go with the assets.
+  The generated originals, the logs and the mock-up are kept on the lab's share
+  (`ca-72/look`).
+- **Where:** a branch of its own from `main` (8ff1455). FILTER MODE comes from the drawing
+  (the controls and the print are the drawing's), so the look carries it once `cal/hp-mode`
+  is merged; each step is tried against a local merge of the two.
+- **The panel, built (`skin.rs`, `art::control_worn`, `Renderer::with_skin`):** the editor
+  draws it worn; the drawn panel stays as the drawing the worn one is printed and placed from,
+  and its approval test (`approved.png`) still guards every place, size and legend. The print is
+  the drawing's own (`art::printed`), laid over the face's picture; each knob's picture turns
+  about its cap's axis and its cap is drawn over it unturned, so its sheen stays where the lamp
+  is; a rocker's picture is mirrored to the end pressed; the knobs' and switches' shadows are
+  the background's, soft, down and to the right; FEEDBACK, dimmed in the drawing while EXTERNAL
+  INPUT is off, is shaded instead (a picture is not dimmed). The pictures, about 3.8 MB in the
+  plug-in, and how they were made: `crates/ca72-panel/assets/worn/README.md`.
+- **"You can do better. The 74 did better."** (the owner, 2026-10-09, of the first pictures).
+  Side by side at one size the CA-74's parts stood off its face and ours lay flat on it. Now: a
+  tall knob casts a long soft shadow down and to the right and a dark one where it stands; the
+  lamp lights its black skirt's near side and darkens its far side (a colour dodge to 1 / (1 -
+  0.45) and a multiply to 0.35 at its edges, the CA-74's), not its cap, whose spun sheen is
+  turned to lie along the line to the lamp; the face takes the lamp's light, up to 1.26 of
+  itself up and to the left and 0.84 at the far corner, so its texture catches a sheen; the print
+  is worn into the face, its texture showing through it; each rocker's paddle is lit by its
+  shape (the pressed half low, the raised half rising in a hump that rounds over at its end, its
+  sides rounded) and casts its own shadow, longer from the raised end; and, asked "do you think
+  we should make the pitch and mod wheel more realistic too?", the wheels are white ridged
+  cylinders lit by the lamp, their ridges and PITCH's line or MOD.'s dot rolling as they turn.
+- **"The switches need to be a touch more obvious as to which side is up and which is down."**
+  (the owner, 2026-10-09). Tried and dropped: a rocker's pressed half a shade darker (0.86 of
+  its light), a shadowed crease where its raised half begins (0.7 at the pivot, gone 3 units
+  up), the raised half's hump higher (0.38 of the paddle's width, was 0.32). The owner: "No, the
+  new thing you just did is worse. Go back.", and of the pictures compared: "Top left was still
+  the best" (the rockers before it, close up). The rockers are as they were before it.
+- **Cost (release build, the Linux reference machine, another agent's benchmark on four of its
+  cores):** the background once a scale, 182 ms at 0.4 of the drawing (the pictures decoded the
+  first time) and 508 ms at 1; a knob turned, 1.5 ms at 0.4 and 4.8 ms at 1.
+- **The strip chosen: A6** (the browser mock-up, 2026-10-09, its version 14; the sources on the
+  lab's share, `ca-72/look/mock`). Of the strip in three rows (A5): "this screen is much too
+  large. Needs to be the same height as the buttons flanking it"; the presets' screen is now as
+  tall as the keys beside it, its surround included (62 units; its dots 6 apart, were 9). Then:
+  "can you do one more mock up? This one will move the keyboard mod/pitch controls back down to
+  the lower area to take advantage of using more height and less width for the plugin to allow
+  the top panel to be a little larger compared to the bottom", the plug-in's left edge "the red
+  line" at the column's right; and, shown A6: "yup, this is the one. A6 looks good. Also, no need
+  to put a back plate on top of another backplate here" (the left hand's controls now straight
+  on the strip's face). So:
+  - the panel's controller column (GLIDE and DECAY and their jacks, the PITCH and MOD. wheels)
+    leaves the panel for the strip's left, laid out as the column had them; the window starts
+    at the panel's face, 3108 units of the drawing wide instead of 3438, as tall as A5's;
+  - the strip in three rows on A5's grid: banks of lit tabs on the first (MODE: MONO, POLY,
+    UNISON; VOICES PLAYED AS: SCATTER, DOUBLE; PLACEMENT: EVEN, EDGES, CENTER; AUTO GAIN's ON),
+    then knobs with readouts (VOICES and ENTROPY; WIDTH and DETUNE over the voices' display,
+    WHERE THE VOICES SOUND; DRIVE and LEVEL, AUTO GAIN's correction in dB), sections VOICES,
+    STEREO and OUTPUT; the presets' rail in walnut above it (favourite, previous, the screen,
+    next, SAVE), the list dropping down over the strip;
+  - what it gains (told the owner): where the window's width decides, the panel is 11 % larger
+    at the same width; on a 16:9 screen its height decides already, and it opens the same size
+    as before in a window a tenth narrower (on 1920 by 1080, about 1356 pixels wide, was 1500).
+- **A6 built (2026-10-09 and 10).** The drawing is one: the panel, 3108 by 1057 units, and the
+  strip below it, 850 units, 3108 by 1907 in all (`art::PANEL_H`, `art::STRIP_H`). What turns
+  is the drawing's: the left hand's controls and the strip's six knobs (VOICES, ENTROPY, WIDTH,
+  DETUNE, DRIVE, LEVEL) are among its controls (now 50), drawn, turned, learned and found as
+  the panel's are. The strip's own parts (the tabs, the readouts, the voices' display, the
+  rail's keys and the preset's name) are drawn over the drawing's strip by
+  `strip::StripRenderer`, in the CA-74's materials, which moved into the shared kit
+  (`plugin-kit-materials`, its K5; the CA-74 switched to it on its `kit-materials` branch):
+  the tabs translucent amber caps lit from inside, their light on the face round them; the
+  readouts orange seven-segment digits behind smoked glass; the drops of the voices; the name
+  in orange dots. Two pictures came with them from the CA-74, the keys' cap and the displays'
+  glass (`crates/ca72-panel/assets/worn/README.md`).
+  - The window opens at the drawing's proportions and never grows: the presets' list drops
+    down from under the rail over the strip, seven rows tall (was eight; the panel stays in
+    sight).
+  - The approval test (`tests/approved.rs`) compares the panel with the approved mock-up right
+    of the mock-up's column. The wood's grain is laid out as it was with the column there, so
+    the panel's wood is unchanged; the mean difference is 1.38, as before A6 (1.38).
+  - **Cost** (`cargo run --release -p ca72-panel --example frames`: a frame, the panel's
+    renderer, the strip's, the editor's putting them together and the conversion for the
+    window, for each kind of change). As first built, every change anywhere drew the strip's
+    parts again whole, and so did each frame while the voices' drops moved: on the Linux
+    reference machine (another agent's benchmark busy on four of its cores) 5 ms a frame at 0.44
+    of the drawing (the window on a 1920 by 1080 screen) and 19 ms at 0.87 (the same on a Retina
+    screen), all the time notes were played. Most of it was tiny-skia laying two pictures the
+    strip's size, mostly clear, over every pixel of it. Now:
+    - those two are laid only where they have pixels (`Sparse`);
+    - the panel's renderer puts its frame together again only inside the rectangle its layers
+      changed (`Renderer::damage`), each pixel as when it is put together whole;
+    - the strip keeps the drawing's strip with what never changes over it, brings it up to the
+      drawing only where that changed, and draws again only the rectangle that changed (where
+      the drawing changed under it, a tab, a readout, the rail, the pointer, MIDI Learn's ring,
+      the drops' window while they move), grown until every part reaching into it lies inside
+      it, each part being drawn whole;
+    - the editor puts its frame together again only in the rows that changed (all of them
+      while the drawer slides or something floats over everything).
+
+    On the owner's Mac (Apple silicon), the median of 40 frames, ms: with the first of these
+    changes (the commit that built A6: the two pictures laid where they have pixels, the drops'
+    window drawn alone, the strip left alone for a knob above it), then with all of them:
+
+    | Change | first: 0.44 | 0.87 | 1.0 | now: 0.44 | 0.87 | 1.0 |
+    |---|---|---|---|---|---|---|
+    | a panel knob (CUTOFF) | 1.0 | 3.8 | 5.0 | 0.5 | 1.6 | 2.1 |
+    | a strip knob (DRIVE, its readout) | 2.5 | 8.3 | 8.6 | 1.2 | 4.1 | 3.1 |
+    | the PITCH wheel | 1.8 | 6.1 | 8.1 | 0.5 | 1.9 | 2.6 |
+    | a tab | 0.8 | 2.4 | 3.2 | 0.2 | 0.7 | 0.9 |
+    | notes played (the drops moving) | 0.4 | 1.7 | 2.2 | 0.4 | 1.7 | 2.2 |
+    | nothing | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+
+    What is left is mostly a turned knob's own picture, a readout's digits (an SVG with a blur)
+    and the drops. Each frame drawn in part is the frame drawn whole, to the bit: the panel's
+    (`a_frame_put_together_in_part_is_the_frame_put_together_whole`), the strip's, through
+    every kind of change and the drawing changing under its parts
+    (`a_frame_drawn_in_parts_is_the_frame_drawn_whole`), and the editor's
+    (`the_frame_put_together_in_rows_is_the_frame_put_together_whole`).
+  - **In hosts (2026-10-10).** A renamed build, "CA-72 A6" (IDs of its own, so no host takes it
+    for the installed CA-72), of this branch merged locally with `cal/hp-mode` (FILTER MODE,
+    which the owner asked to have on the new panel) and `main`; built as the release is
+    (`--profile bundle`).
+    - **macOS 27.0 (the owner's Mac):** clap-validator (37 passed, 7 skipped), Steinberg's VST3
+      validator (47 passed) and pluginval at strictness 10 with its editor tests (the editor
+      opened, opened while processing, automated) all passed. Installed beside the released
+      CA-72 in `~/Library/Audio/Plug-Ins` (VST3 and CLAP) for the owner to play in Ableton Live
+      12.4 beta; not opened there by the agent (Live was open with the owner's sets).
+    - **Windows 11, REAPER 7.82** (the CA-74's harness, `ca72-it\a6`): the editor opened at
+      the drawing's proportions (2692 by 1652). Clicks on every tab, ENTROPY's readout, GLIDE,
+      and the wheel over DRIVE, LEVEL, VOICES and the PITCH wheel set their parameters, each
+      read back through REAPER's API; the presets' list dropped over the strip; notes lit the
+      drops; and real pointer clicks (the cursor moved and pressed) on POLY, EDGES, AUTO GAIN
+      and WIDTH's readout did the same. Two faults found and fixed: the wheel moved VOICES as a
+      smooth knob, two notches short of the next voice (now a voice a notch); and with the list
+      open while notes played, its rows over the voices' display came out a few pixels lower
+      than the rest (the slide's last frame stops short of its end, and the frames since were
+      put together in rows only; now a drawer whose place changed is put together whole,
+      `the_drawer_ends_its_slide_in_the_frame_shown`).
+    - **Windows 11, Cubase Pro 15.0.30** (the trial R36 used): an instrument track with CA-72
+      A6; real clicks on MONO, POLY, DOUBLE, EDGES, AUTO GAIN, ENTROPY's readout, GLIDE and
+      FILTER MODE, posted ones on POLY and UNISON, and a real double click on DETUNE (back to
+      off, SCATTER lit), each shown by the editor (its tabs, readouts and tips). The first real click after the harness
+      brought the window forward was lost: it does so with an Alt key, which leaves Cubase's
+      window in menu mode; after a first click elsewhere every click took. Cubase closed
+      without saving; the test builds recycled.
+
+**The owner, playing the A6 build, 2026-10-10:**
+- "the preset text needs to be vertically centered. Also, we need some sort of border or edge
+  around that screen to help it feel more natural": the name's dots a sixth smaller (5 units
+  apart), a capital in the window's middle (2 units above it) with the descenders inside it;
+  and a bezel the worn skin never drew (only the drawn one had a flat surround): a dark frame
+  standing proud of the rail's wood, its top edge catching the lamp, its shadow below, a black
+  lip into the glass, as tall as the keys beside it (`strip::name_bezel`, both skins).
+- "these orange buttons get too bright on the edges. looks unnatural": a lit tab's glow
+  pressed down to a quarter over its knee (0.8), its outermost band (from 0.86 of the way out)
+  up to 0.4 darker, and its light on the face round it 0.6 of what it was, one orange (the rim
+  had been a hot yellow-white round the cap, brighter than its face).
+- "all the knobs look like they have white halos. and why do the knobs always have 4 shiny
+  places that have nothing to do with the light?": the knobs' pictures quieted
+  (`assets/worn/quiet.py`, the README): the ring light they were made under had left broad
+  reflections round the skirts and a bright line round each outline. Each skirt's light is
+  the same all round now, each grip's to below its flutes, the outline held dark; the panel's
+  lamp alone lights them. The evenness test (`the_knobs_pictures_are_lit_evenly_all_round`)
+  holds: the edge between grip and skirt, off the cap's axis, is left as it was.
+- "If we moved the CA-72 badge to the top, we could save a lot of space in that center wooden
+  area.": the name plate is in the top strip now, its left end on the MODIFIERS|OUTPUT line as
+  before, between the strip's screws; the name board under the face is gone, the presets'
+  rail right under the face. The drawing is 3108 by 1775 (was 1907): the window 7 % shorter at
+  a width, and on a wide screen it opens wider (a 2560 by 1440 monitor: 2017 wide, was 1878).
+  The approved test compares the top strip and the face (the plate's place left out), and
+  allows as many strongly different pixels (32 levels or more) as a hundredth of the approved
+  panel's area with its board: over the smaller area the 99th percentile, which the board's
+  closely matching wood had kept under 32, is 36 on the same face (the commit before, measured
+  over the same rows: 1.457 and 36). On `potato` the last column's head (QUALITY, approved
+  apart, R47) is left out too: 1.445 and 30745 of 32851.
+- "I feel like the badge isn't quite in the right place though." / "is it on the same grid as
+  everything else?" It was not: its left end 4 units right of the MODIFIERS|OUTPUT line (its
+  place on the old board) and a touch above the strip's middle. Then: "maybe it's also partially
+  cause it's not up to the same realistic quality as everything else. Let's fix that.": the
+  plate a generated picture of a blank plate, brushed black anodised aluminium with a bright
+  chamfer, proud of the wood with its shadow, its lettering paint filled into engraving
+  (`art::plate_worn`, `assets/worn/README.md`); "dial back the lighting effect of the badge a
+  bit": its picture at 80 %. Of three places, each rendered whole on the mock-up's page (as
+  built; centred on OUTPUT, recommended; its left end on the divider line): "I think we can go
+  with option C." Its left end on the line (2578), in the strip's middle.
+- **The strip's knobs' legends and the lit tabs' corners** (the owner, 2026-10-10, from the
+  build in Live: "these labels are too high above their knobs. also, is it just me, or should
+  the corners of these buttons be darker, not lighter", "i'm just thinking that's where the
+  plastic would be densist from the user's perspective"): the legends 109 units above their
+  knobs, not 122, as far over the numeral at twelve o'clock as TUNE's over its own (27 pixels
+  at a pixel a unit; they were 40); a lit tab's corners darker as well as its edge, half its
+  light at the corner itself, the rim line round them too, easing in from 0.35 of the way out
+  both ways (the light round the tab on the face, the kit's, is left as it is: it is not
+  brighter at the corners). The window as it opens, for a look: `presets.rs`'s `window_png`.
+  Then "go even darker in the corners": a quarter of its light at the corner itself, easing in
+  from 0.3 of the way out. And "why does the overdrive light have a circle in the middle of
+  it?": the jewel's picture (POWER's, OVERLOAD's made from it) had a ring light's reflection
+  in its dome, a bright ring halfway out, which on OVERLOAD's dark glass read as a pink circle
+  (as the knobs' ring-light reflections did); painted out of the picture
+  (`assets/worn/README.md`), for both lamps.
+- **The rail's star and the display's reds** (the owner, 2026-10-10, sending the mock-up's dot
+  star and its voices' display: "turn this into a pixel star. like the one you have here. And
+  go back to that red too. Same thing with the stereo bar. I want it to go back to the red
+  pictured here."): the favourite's star before the name drawn in the name's dots (the
+  mock-up's five by seven), as faint as the unlit dots when the preset is not a favourite; the
+  name's dots in the mock-up's neon (255, 112, 40) with its deeper glow (255, 72, 10), not the
+  hotter amber they had been given; and the voices' display the mock-up's drops again: flat
+  discs where their fields sum past one, 25 units across for a sounding voice and 15 for an
+  idle one, no white-hot middle, their light (172, 80, 30) added in so that under this
+  display's glass a sounding drop measures (233, 130, 63) and an idle one (155, 89, 44) where
+  the owner's picture has (225, 134, 63) and (159, 80, 38) (an idle one's light half a
+  sounding one's share, the mock-up's a third, for the same).
+  Then "make sure the arrow on the right side of the preset dropdown is also dots like this":
+  the list's arrow in the name's dots too, the mock-up's glyphs (down while the list is shut,
+  up while it is down), 0.7 of the name's light but under the pointer.
+- **The presets' drawer, the mock-up's** (the owner, 2026-10-10: "i just realized we didn't
+  update the preset search page to the new one that you had sketched out! let's fix that"; the
+  drawn drawer, flat panels and buttons, had been left as it was): A6's dropdown, a tenth smaller
+  as the mock-up drew it, on the strip's face under the rail (its picture placed as the strip's,
+  its trim and the rail's shadow), in three sections in the panel's print, their displays dots
+  behind glass as the rail's name (the mock-up's neon, every dot faintly there, the lit ones
+  with their glow; `ca72-panel/src/presets/drawer.rs`):
+  - FIND: the search on its own line (SEARCH, faintly, while empty), and the tags in use two to
+    a line, each picked as a filter bright (sixteen lines show; the wheel scrolls them).
+  - PRESETS: ALL, FAVORITES and MINE as tabs over the list (one at a time: the drawn drawer's
+    two switches could both be on), then seventeen rows, each the current preset's mark, its
+    star (outlined if not a favourite; a click on it makes it one), its name, EDITED or YOURS,
+    its tags; arrows at the right where there are more above or below.
+  - PRESET: eight keys, the rail's charcoal caps with their legends printed over them (RENAME,
+    TAGS, DELETE, REVERT; SAVE AS, RESTORE, MIDI LEARN, CLOSE), over a display of the preset
+    the plug-in is set to (its name; where it is from, starred if a favourite; its tags; what
+    was last done; how many presets the list shows of how many) and the update check (R27) on
+    its last lines.
+  Agent decisions, not separately approved: the drawn drawer's per-row RENAME, TAGS, REVERT
+  and DELETE became the PRESET keys, acting on the preset the plug-in is set to (the mock-up's
+  keys have no row); what they begin stays with that preset as the list changes and ends when it
+  is gone or another is set (R18's rule, which had followed a row). RENAME, TAGS and SAVE AS
+  are typed into the PRESET display (SAVE AS's name and tags on two lines, NAME and TAGS before
+  them), DELETE asks there (DELETE again, or Enter, deletes; Escape keeps); a key held down while
+  what it began goes on, and the update check not shown meanwhile. The caret is a character
+  display's: a line of dots under the character it is before, steady. MIDI LEARN shows MIDI
+  Learn's list (R34) in the list's place (its keys and the controllers it will not learn where
+  the tags are), LEARN, REMOVE and CANCEL as words at a row's end; anything of the presets'
+  pressed shows them again. The glass is the rail's picture with its rows and columns evened out
+  and its mesh softened: drawn out over displays many times its height, its faint lines had been
+  hard bands across the list (the owner, 2026-10-10: "there's several harsh horizontal lines,
+  please get rid of them").
+  Its cost (measured at a Retina screen's scale, two pixels a unit, a release build, on the
+  Linux machine): the drawn drawer drew whole for every change, 13 ms to open and about 11 ms
+  for each change after (a row under the pointer, a letter typed); this one draws again only the
+  lines of a display that changed, 2 ms for a row under the pointer or a letter typed, 4 ms for a
+  key's prompt, 20 ms for the MIDI list in the list's place. What does not change (the face,
+  print, bezels, glass and every unlit dot) takes about 0.1 s to make, on a thread of its own
+  begun as the editor opens, so the drawer's first opening draws only its lit dots: 28 ms. It is
+  shared by the editors open at the same scale.
+
+## R45. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
+
+**The owner, 2026-10-09:** "we need to add all the same stereo controls that we added to the
+CA74", then "in fact, i think all controls on that panel should probably be added here", and,
+asked whether SPREAD should change to the CA-74's (a constant-power law and the places from the
+edges, wider and up to about 1.5 dB louder, changing projects saved with SPREAD) or keep the
+CA-72's for projects saved before: "I want you to copy the same stereo algorithms we in ca-74".
+So the CA-74's R27 (SPREAD's law and places, POLY going round its voices, a key played again
+keeping its voice), R30 (the placement: EVEN, EDGES or CENTER), R28 and R41 (DOUBLE, its pairs
+mirrored as far out as the placement puts each voice), as they are there.
+
+**Agent decisions, 2026-10-09** (the first step: SPREAD's law and places, the placement, POLY's
+choice of voice; not separately approved):
+- **The pan law** is the CA-74's: constant power, √2 cos and √2 sin of the place's quarter turn,
+  whole on both sides at the centre (`character::pan_gains`). The CA-72's before it, the DAW's
+  instrument's, kept both sides whole until the far one faded, a voice in the centre twice the
+  power of one at an edge.
+- **The places** are SCATTER's placement's (`Placement`, the host's Scatter Placement, the last
+  parameter, `placement`: `even`, `edges` or `centre`, shown EVEN, EDGES and CENTER; a session
+  or preset saved before reads EVEN), among VOICES's voices: EVEN, evenly from edge to edge from
+  the edges in; EDGES, from 100 to 60 % out; CENTER, the first in the centre and the rest by the
+  golden ratio. The CA-72's places before them were the first voice in the centre, then the
+  quarters and an eighth. The voices' mix carries the placement and VOICES to the workers
+  (`Mix`, `MIX_LEN` 6).
+- **One voice alone sits in the centre:** with POLY off the instrument's voice is not placed (it
+  was in the centre before too, by its place).
+- **POLY's choice of voice:** the voice that last played the key if it is free or letting go,
+  else the free voice whose last note began longest ago, else the one let go longest ago, else
+  the one held longest (was: the first free voice by its number, then the oldest let go, then the
+  oldest held).
+- **MIDI Learn:** SCATTER PLACEMENT is learnable as a selector (48 learnable controls: 23 knobs,
+  8 selectors, 17 switches); it has no place on the panel until the strip is built.
+- **The presets** that play POLY moved and are levelled again through MAIN OUTPUT VOLUME's law,
+  as R42 levels them: Slow Horn Swell 8 to 7.94 (+0.22 dB from the choice of voice alone, its
+  SPREAD 0), Brass Tutti 4.22 to 3.92 (+1.34 dB, SPREAD 50), Warped Pad 7.44 to 6.9 (+2.05 dB,
+  SPREAD 80): each one's momentary maximum on its phrase within 0.01 dB of before. The DAW's copy
+  of the factory file now differs in these three volumes, and its instrument keeps its own law
+  and places.
+
+**Evidence (the Linux reference machine, 2026-10-09):** the CA-74's tests ported:
+`every_place_is_as_loud_as_the_centre`, `even_fills_the_field_evenly_from_its_edges`,
+`edges_fills_the_field_from_its_edges`, `centre_starts_in_the_centre_and_spreads_by_the_golden_ratio`,
+`a_placement_goes_by_its_index_and_back`, `a_chord_fills_the_field_and_one_voice_stays_in_the_centre`,
+`poly_notes_go_round_the_voices`, `a_key_played_again_keeps_its_voice`; with the old law and
+choice of voice the first, the chord's and the round's fail, and without the key kept the last
+fails (the chord struck again on voices 3, 4 and 5); the learn list's (48). `preset_levels` (each
+preset as set) against the commit before: 21 presets the same to the hundredth of a dB, the
+three above levelled back within 0.01 dB. `preset_render` (every preset with POLY's ten voices)
+against the commit before: Pink Riser the same to the bit, the rest moved by the new choice of
+voice (levels within 0.4 dB) but those with SPREAD (Warped Pad +1.38 dB, Wooden Mallet +1.18,
+before levelling). The plug-in's unit tests (127 passed, 7 ignored); rustfmt; clippy.
+
+**Agent decisions, 2026-10-09** (the second step: UNISON; not separately approved):
+- **UNISON** (the host's Unison, `unison`, off by default; a session or preset saved before
+  reads off) is the CA-74's R25 on this instrument: VOICES whole instruments, each taking every
+  key through its own keyboard circuit as POLY off's one instrument does (lowest-note priority,
+  single triggering), each with its own parts (ENTROPY's tolerances) and its place in the field
+  by SPREAD and the placement, the output turned down by the square root of VOICES. It
+  outranks POLY. Switching it, or VOICES while it is on, lets every key go.
+- **Out of step:** every voice but the first, when it is made or put back to rest, starts its
+  oscillators where its seed puts them on their ramps (`Vco::start_at`); the first starts at
+  the reference's initial condition, so one voice, and every preset with POLY and UNISON off,
+  renders as before to the bit. Without it UNISON's voices at LOCK would sound as one voice
+  9 dB louder.
+- **A voice's three oscillators start together**, at one point, as the reference starts them
+  together at the top. The CA-74 starts each of its two apart, but here LOCK's trim (R9) is for
+  three started together: started apart, the four-voice chord at LOCK came out 3.4 dB under the
+  drifting one, and each voice would have had its own level at LOCK.
+- **A seed loaded into a running instance makes its voices again**, as an instance opened with
+  it makes them (the CA-74 does the same), so their oscillators start where the new seed says
+  (R18's test caught it).
+- **MIDI Learn:** UNISON is learnable as a switch (49 learnable controls: 23 knobs,
+  8 selectors, 18 switches).
+- **The presets that play POLY:** their voices past the first now start out of step, so a
+  chord's onset no longer adds up in phase. They are levelled back through MAIN OUTPUT VOLUME's
+  law by their momentary maximum, as before: Slow Horn Swell 7.94 to 8.011 (+0.27 dB), Brass
+  Tutti 3.92 to 3.894 (-0.12 dB), Warped Pad 6.9 to 7.141 (+0.91 dB). Their integrated
+  loudness on the phrase moves +0.26, -0.19 and +0.89 dB.
+
+**Evidence (the Linux reference machine, 2026-10-09):** the CA-74's tests ported:
+`unison_voices_come_in_out_of_step` (eight voices at LOCK within 2 dB of one; with every voice
+started in step it fails at +9.0 dB), `unison_is_about_as_loud_as_one_voice`,
+`unison_voices_take_the_keys_as_the_instrument_does` (every voice's keyboard voltage the one
+instrument's after each of eight key events, every voice sounding),
+`switching_unison_lets_every_key_go`. `tests/sound.rs` passes: LOCK +0.19 dB against
+drifting (`lock_is_the_circuit_at_the_drifting_level`), and a reseeded instance plays as one
+opened with the seed. `preset_levels` against the first step: 21 presets the same to the
+hundredth of a dB, the three above levelled back within 0.005 dB. `preset_render` (every
+preset with POLY's ten voices) against the first step: the noise presets the same to the bit
+or within -145 dB, the rest moved by the voices' starts (levels within 0.71 dB; Warped Pad
++0.99 dB after levelling). The plug-in's unit tests (131 passed, 7 ignored); rustfmt; clippy.
+
+**Agent decisions, 2026-10-09** (the third step: DOUBLE; not separately approved):
+- **DOUBLE** (the host's Double, `double`, 0 to 100 %, off at 0, the last parameter; a session
+  or preset saved before reads 0; saved in presets, as SPREAD is) is the CA-74's R28 and R41:
+  each note two voices, the voice half the detune flat and a twin half sharp, up to 20 cents
+  apart at 100 % (`DOUBLE_CENTS`); the pair about the centre, the flat voice to the right and
+  its sharp twin as far to the left, SPREAD's way out as far as the placement puts the voice
+  (EDGES: every pair to the edges); with POLY and UNISON off the one voice's pair as far out
+  as SPREAD whatever the placement; the output turned down by two's square root. Turning
+  DOUBLE on or off lets every note go; turned off, a twin still sounding plays its tail out on
+  its side until silent.
+- **Where the CA-72's differs:** an amount without a switch, as ENTROPY and SPREAD are here
+  (the CA-74's has one). The detune is the oscillators': half of it added to each of the three
+  oscillators' ENTROPY offsets (`Jacks::detune`), the filter's keyboard tracking left as it is,
+  so oscillator 3 as a low-frequency source moves by the same few cents. The twin is a
+  place's past the voices' (its seed, noise, tolerances and oscillators' start) with a
+  keyboard of its own: in POLY its own key; with POLY off and in UNISON taking the keys
+  straight, but those pressed only while DOUBLE is on, so a twin let go takes no new key (the
+  CA-74's, let go, would sound with a new note on its voice's place).
+- **A voice's place glides** (10 ms, the CA-74's `GLIDE`, R27): moved by SPREAD, the
+  placement, VOICES or DOUBLE, it glides instead of stepping (switching DOUBLE off moves each
+  releasing voice from its pair's place to its own). Constant, it is the same to the bit.
+- **MIDI Learn:** DOUBLE is learnable as a knob (50 learnable controls: 24 knobs, 8 selectors,
+  18 switches).
+- **Memory:** each voice's place holds its twin, and each place's spare a clean twin, boxed:
+  a voice is 34 KB, and unboxed the ten spares overflowed a test thread's 2 MB stack in a
+  debug build.
+
+**Cost (`preset_cost`, now with `CA72_DOUBLE`; the Linux reference machine, a Ryzen 7 7800X3D
+shared with other work, load average 5 to 8, so single figures varied by up to three times
+between runs):** about twice the voices' work, as twice the voices. Ten notes of POLY,
+256-frame blocks at 48 kHz, Bass (the steadiest): one thread 80 % of a core off, 160 to 199 %
+with DOUBLE at 35 %; with three workers 24 % off, 49 % on. The README's limitations say so.
+
+**Evidence (the Linux reference machine, 2026-10-09):** the CA-74's tests ported:
+`double_puts_the_sharp_twin_left_and_the_flat_voice_right` (+7.0 cents at 35 %; with the
+voice sharp too, 0.0, and fails), `double_is_about_as_loud_and_stays_in_the_centre_without_spread`
+(without the trim +3.3 dB, and fails), `double_takes_the_placement_its_pairs_mirrored` (with
+every pair at the edges, CENTER's first fails), `doubled_voices_on_the_workers_are_the_same_to_the_bit`;
+the CA-72's own `a_twin_let_go_plays_its_tail_out_and_takes_no_new_key` (with the twin taking
+every key, it fails holding the new key). `preset_render` (every preset with POLY's ten
+voices) against UNISON's commit: every preset the same to the bit; `preset_levels` the same.
+The learn list's (50). The plug-in's unit tests (136 passed, 7 ignored), the plug-in's and the
+model's integration tests; rustfmt; clippy.
+
+**Agent decisions, 2026-10-09** (the fourth step: DRIVE, LEVEL and the host's names; not
+separately approved):
+- **DRIVE** (the host's Drive, `drive`, 0 to 24 dB, off at 0; after DOUBLE, saved in presets,
+  learnable as a knob) is the CA-74's R29 DRIVE on this circuit: the mixer's signal raised into
+  the filter's input pair (Q29 and Q30) after C27. The pair sees DRIVE's gain times the drop
+  the bus's current makes across R54 (its own base currents' drop with it); C27's current, the
+  bus's load and the bias chain (b5) stay the circuit's (`ca72::vcf::Drive::gain`). At 0 it is
+  the circuit to the bit. A voice and its twin take it at each run. The model's threaded voice
+  (the lab's) does not.
+- **What it does here:** a held note grows louder, by less the higher DRIVE goes, as the input
+  pair saturates (oscillator 1's sawtooth alone: +2.7, +5.1, +8.5 and +10.7 dB at 3, 6, 12 and
+  24 dB); and darker, not brighter: the ladder's stages, slew-limited by their currents, take
+  the highs the clipping adds (a triangle's energy over 1 kHz against under it -1.0, -3.3 and
+  -10.2 dB at 3, 6 and 12 dB; +15.5 at 24, where it is nearly a square).
+- **No thump promised:** raising DRIVE quickly on an asymmetric wave (the narrow rectangle)
+  steps the output under 20 Hz to about twelve times its held level there, whether the gain is
+  after C27 or before it (0.41 against 0.44): the saturating pair rectifies, its DC moving with
+  DRIVE, as turning a mixer VOLUME up quickly does. The CA-74's reason for after the capacitors
+  does not carry over; after C27 is kept so that DRIVE leaves C27's charge the circuit's. A test
+  of no thump was written, failed both ways, and was dropped.
+- **LEVEL** (the host's Level, `level`, -30 to +12 dB, 0 by default; after DRIVE, saved in
+  presets, learnable as a knob) is the CA-74's: the output's gain after MAIN OUTPUT's, the
+  plug-in's own; it steps as MAIN OUTPUT VOLUME's gain does (a learned knob glides, R34).
+- **The host's names, the CA-74's (R31):** SPREAD is shown as Width, and DOUBLE as Double
+  Detune, read in cents ("12 cents", Off at 0) and taken back so; their ids are as they were.
+  MIDI Learn's list says WIDTH and DETUNE (DOUBLE) (52 learnable controls: 26 knobs,
+  8 selectors, 18 switches); the strip as drawn says SPREAD until it is drawn again.
+- **AUTO GAIN is the next step:** until then DRIVE makes the sound louder.
+
+**Cost:** DRIVE's settings measured alike within the machine's noise (Bass, ten POLY voices,
+one thread: 85 to 124 % of a core at 0, 12 and 24 dB, three runs each, interleaved, load
+average 10 to 16): Potato's filter takes at most two Newton iterations a step whatever it is
+driven by.
+
+**Evidence (the Linux reference machine, 2026-10-09):** tests: `drive_drives_the_filter_harder`
+(with the gain kept from the pair it reads +0.0 dB and fails), `level_moves_the_output_by_its_decibels`,
+the CA-74's `double_reads_in_cents_and_spread_is_width`, and `filter_jacobian_matches_finite_differences`
+at DRIVE's 24 dB too. `preset_render` against UNISON's commit: every preset the same to the
+bit; `preset_levels` the same. The learn list's (52). The plug-in's unit tests (139 passed,
+7 ignored), the plug-in's and the model's integration tests; rustfmt; clippy.
+
+**Agent decisions, 2026-10-09** (the fifth step: AUTO GAIN; not separately approved):
+- **AUTO GAIN** (the host's Auto Gain, `auto_gain`, on by default, the last parameter: a
+  session saved before reads it on; saved in presets; learnable as a switch, 53 learnable
+  controls, 19 switches) is the CA-74's R29 (`drive.rs`, ported): the output turned down by as
+  much as DRIVE made the sound louder, from a curve measured for the sound. The plug-in plays
+  three notes together (C2, G3 and C5, held 0.3 s, heard for 0.45 s) on three voices made as
+  an engine's first three are (a seed of their own), without DRIVE and at 6, 12, 18 and 24 dB,
+  and compares their K-weighted energy: four corrections, drawn straight between. The curve is
+  saved with the session (`drive_curve`); a session saved before, or one not understood,
+  opens with the factory presets' average (`Curve::AVERAGE`, their mean: -4.74, -8.43, -10.95
+  and -12.42 dB). It is measured only when the sound is changed in the plug-in's own window
+  (after a press, release, wheel or key there, once nothing is held, and as the window opens),
+  never on the host's automation or a learned controller, so that a render never depends on
+  when a measurement finished. The audio thread reads the curve without a lock, once a block.
+- **Where the CA-72's differs:** the sound's key is its panel, LOCK, ENTROPY and FEEDBACK (the
+  voice's output into its own external input changes how DRIVE loads it); not POLY, UNISON,
+  VOICES, DOUBLE or SPREAD, as on the CA-74. The measurement runs on the plug-in's own helper
+  (R23), a render at a time, the audio thread's asks (mending the spares, the workers) seen to
+  between renders, so one of those may wait a render (about a tenth of a second); dropping the
+  plug-in waits out a render under way. Only AUTO GAIN's correction glides (10 ms, at the
+  host's rate): MAIN OUTPUT's and the other gains step as before, so that every preset plays as
+  before to the bit.
+- **The CA-72's DRIVE needs measuring per sound more than the CA-74's did:** the presets'
+  curves at 24 dB run from 0 (Cruising Whistle: its whistle is the filter's own, with no mixer
+  signal for DRIVE to raise) to -21.5 dB (Breath Flute), and Undertow Growl's turns back
+  (-5.2, -5.3, -4.9 and -3.9 dB).
+
+**Accuracy (`tests/drive_auto.rs`, by hand; the 24 presets, DRIVE every 3 dB from 3 to 24,
+AUTO GAIN on, dB left over against DRIVE off):**
+- With each preset's own curve, on its levelling phrase (momentary maximum): 0.50 dB RMS from
+  3 to 12 dB (5 of 96 over 1 dB, the worst 2.7), 1.05 from 15 to 24 (18 of 96; the worst 3.5,
+  Pink Riser, left quieter); on four held chords (integrated): 0.44 and 0.94 dB RMS (the worst
+  4.4, Undertow Growl, quieter). The CA-74's own were 0.17 and 1.34 dB RMS on its phrases.
+- With the average's curve standing in: 2.05 and 2.07 dB RMS from 3 to 12 dB, 3.44 and 3.72 over
+  all of DRIVE (the worst 12.4, Cruising Whistle, taken down for nothing); with the CA-74's
+  average before the CA-72's was measured, 5.3 dB RMS.
+
+**Cost (the Linux reference machine, a Ryzen 7 7800X3D shared with other work):** a
+measurement on one thread, a median 668 to 904 ms over two runs, the longest 1.7 s (Bass), on
+the helper thread, which is not a real-time one (the CA-74's, 355 ms). Beside the voices
+(`a_measurement_beside_the_voices`: Brass Tutti, ten POLY voices at DRIVE 12 dB, three
+workers, 256-frame blocks paced in real time, none of the threads promoted), with the machine's
+load average at 12 to 14: alone a median 50 % of the period and its 99.9th percentile 142 %;
+with measurements made one after another beside them, 43 % and 168 % (twelve measurements);
+the worst 210 % both ways. The machine's noise decides more than the measurements; to be
+measured again on a quiet machine.
+
+**Evidence (the Linux reference machine, 2026-10-09):** the CA-74's tests ported: the curve
+drawn straight between its steps; a reader seeing each write once and never half of one; a
+sound asked for once (and FEEDBACK's in its key); a measurement for a sound no longer wanted
+let go; `autos_correction_glides_and_without_drive_there_is_none` (with the correction stepped,
+2.6 times at once, it fails); `the_helper_measures_a_sound_asked_for` (and lets the curve go
+when dropped); `a_session_holds_its_curve_and_an_old_one_the_average`;
+`auto_brings_a_preset_back_and_off_it_is_louder` (Lead at 16 kHz). `preset_render` against
+UNISON's commit: every preset the same to the bit. The plug-in's unit tests (146 passed,
+7 ignored), the plug-in's and the model's integration tests; rustfmt; clippy.
+
+### Into plugin-kit (2026-10-10)
+
+**The owner, 2026-10-09:** "are we going to move the stereo effects to the plugin kit as well?
+seems like a common thing we would use"; told the general parts would, after the materials,
+and on 2026-10-10: "Do 1 & 2" (the kit's materials published and the plug-ins pinned to them;
+and this).
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- The general parts are plugin-kit's now (`plugin-kit-stereo`, its K6), taken from
+  github.com/idlefoundry/plugin-kit at one commit (b301c97, its `stereo` branch until it is
+  merged there), with the panel's materials (K5) at the same commit: the pan law and the
+  placement (`character.rs` re-exports them), DOUBLE's pair, detune and trim, UNISON's trim,
+  the places' glide (`engine.rs`), and AUTO GAIN's curve, its sharing among the threads and the
+  host, its measurement a render at a time and K-weighting (`drive.rs`).
+- The CA-72's own stays here: `Probe` (its voices, which measure a sound, as the kit's
+  `Measure`), a sound's key (`drive::sound`), the four steps up to DRIVE's 24 dB, the presets'
+  average curve (`drive::AVERAGE`), the notes played, and the session's field (`drive_curve`,
+  on the plug-in's own `drive::Calibration`, since the kit takes no nih-plug).
+
+**Evidence (the Linux reference machine, 2026-10-10):** against the commit before (414b4d9):
+`preset_render`, every preset the same to the bit, from the kit's worktree and again from its
+published commit; every factory preset's AUTO GAIN curve measured at 48 kHz the same to the
+bit; three presets each with DOUBLE, UNISON and each placement forced on (eighteen renders,
+SPREAD 80 %, DRIVE 7 dB) the same to the bit; the session's field the same text
+(`a_session_holds_its_curve_and_an_old_one_the_average`). The plug-in's unit tests (140
+passed, 7 ignored: the placement's and the curve's tests moved to the kit, where they pass),
+its integration tests; rustfmt; clippy. Not yet: the CA-74 on the kit's K6 (and K5 from its
+published commit).
+
+- **The number** of this record is a placeholder until the merge.
+
+## R46. FILTER MODE: the hardware reference's high-pass
+**Owner decisions, 2026-10-09.** The CA-72 gets the hardware reference's FILTER MODE switch
+(LO or HI): "I'm just looking to offer the same functionality." Measured on the reference
+first (session HP), then built. On the panel where the reference has it: at the head of the
+switch column between MIXER and MODIFIERS, the original's three switches below it (the
+second of two mock-ups drawn by the panel's renderer; the first kept them in place and put
+FILTER MODE at the column's foot).
+
+**Agent decisions, 2026-10-09** (not separately approved):
+- **What HI is** (session HP: EMPHASIS 0, 2.5, 5 and 7.5, each in LO and HI back to back at
+  six control voltages; `scripts/calibration/hp_mode.py`). The filter's input less its
+  low-pass output at equal gain, through the same output: HI = V - b LO against the
+  reference's MIX output, b = 1.002, V flat within 0.25 dB, explains all 24 sweeps to -29 to
+  -42 dB, and rejects a high-pass not made from LO (the analysis's self-test). So about 6 dB
+  an octave below the corner, not the 24 its maker gives; a bump of +3 dB above it; the deep
+  bass back to about -8 dB at 30 Hz, where only the low-pass branch has the output's
+  coupling (C5/C1); and as EMPHASIS lowers LO's passband, a shelf (-12, -3 and -2 dB below
+  the corner at 2.5, 5 and 7.5) with the resonance's peak on it. The cancellation holds as
+  the input overdrives (150 Hz at CUT CV -4 V, within 0.85 dB over 34 dB of level), and HI
+  distorts less than LO: part of LO's distortion is after the mixing point. EMPHASIS 10
+  sings at LO's pitch and level in HI.
+- **The circuit** (`circuits/boards/filter-mode.lib`, behavioural: the reference's circuit
+  is not known, only its transfer). HI is the bus's Norton current (the current its
+  channels would push into a virtual ground) through `vcf::MODE_RT`, a coupling of
+  `vcf::MODE_HZ`, less the filter's output. The Norton current, not the bus's voltage:
+  against it, the CA-72's LO falls at low frequencies as the reference's does against MIX
+  (-0.82 and -0.88 dB at 30 Hz), while against the bus's voltage C27 would add its own.
+  MODE_RT, 23.6K, is the filter's passband at EMPHASIS 0 as the voice has it, from ngspice:
+  the voice's trims (REGEN CAL at 0.78, which leaves a little feedback at EMPHASIS 0) and
+  every mixer channel's resistor on the bus (on or off, they share the current: one channel
+  alone gives 26.9K; NOISE on changes it by 0.15 dB). At 26.9K, HI's shelf sat 1.1 dB too
+  high against the reference's. MODE_HZ, 3 Hz, matches the phase between the two branches,
+  which is all HI hears below 100 Hz: within 0.3 degrees and 0.1 dB from 15 to 80 Hz.
+  (The reference's direct branch leads its MIX as 6.8 Hz would, but MIX is not the
+  CA-72's Norton current; at 6.8 Hz HI's lows came back 3 dB short at 30 Hz.)
+- **In real time** HI is taken inside the filter's oversampled step (`Vcf::high_pass`), so
+  that the two branches line up through the resamplers; the coupling's state runs in LO
+  too, as its capacitor would. A few operations a step: `preset_cost` (ten voices, one
+  thread, d07d1d0 and this branch alternated three times under the timing lock, the least
+  of each) moved by -1.9 to +1.7 %, median +0.3 %, inside its run-to-run spread (the
+  machine's load 4 to 7). LO is the output as before: every factory preset renders the
+  same to the bit (`preset_render`, against d07d1d0).
+- **Against ngspice** (`vcf_realtime::filter_mode_matches_the_circuit`, the bench with the
+  voice's trims and the rest of the mixer on its bus, `MIXER_REST`): HI's error measured
+  against the larger branch (HI's error is LO's, the direct branch is exact), budget -26 dB
+  to 10 kHz (LO's own 0.3 dB with a few degrees), -18 dB above; worst -27.2 dB, at 8.9 kHz
+  on a resonant peak.
+- **Against the reference** (`render_hp.sh`, `compare_hp.py`: session HP's takes through
+  `ca72-lab stim`, each normalised to its own LO passband): HI within a median of 0.1 to 1.0
+  dB and a 90th percentile of 1.7 dB in every pair (No Compromises; Potato the same within
+  0.4 dB); the lows at 30 Hz within 0.4 dB; the shelf within 0.8 dB at EMPHASIS 2.5 to 7.5.
+  What remains is LO's own (EMPHASIS's peak, the control voltage's scale: the calibration
+  README's "Still differs"). At EMPHASIS 0 the notch below the corner is deeper in the CA-72
+  (-41 to -60 dB against -29 to -46): its depth rests on a fraction of a degree.
+- **The plug-in:** `filter_mode` (LO by default), in presets (a preset without it is LO),
+  MIDI-learnable as a two-way switch, in `ca72-lab`'s patches as `"filter_mode": "lo"` or
+  `"hi"`. The panel test's approved drawing takes the new column from the renderer (its
+  region named in `tests/approved.rs`); everything else is still compared with the approved
+  mock-up.
+- **Not done:** no factory preset uses HI (the owner's call); the calibration README's list
+  of sessions gains session HP when this branch meets `cal/behringer`'s.
+- **The number** of this record, and board4.md's B4-HP, are placeholders until the merge.
+
+## R47. QUALITY: Potato mode, the light voices, at LO
+
+**The owner, 2026-10-10:** "with this release I think we should officially launch potato mode.
+We'll just have a HI/LOW selector switch on the UI, I think. Perhaps we can put it above the
+power switch?" Told that Potato mode (the development line's R31, on its unreleased `perf`
+branch, 2026-10-06) is fitted to the circuit as it was before the hardware reference
+recalibrated it (R42 on), and knows neither DRIVE nor FILTER MODE: "just do quality HI / LO for
+now." Shown QUALITY above POWER in the mock-up, as POWER's black rocker or as FILTER MODE's
+orange one: "black, for sure". The owner's decisions of 2026-10-05 on the development line
+stand: a lighter model, allowed to sound worse than the circuit's, costing no more than a
+comparable patch of a common free synthesizer ("Surge XT's usage is your ceiling. Make it as
+good as you can under that."); saved with the session, not with presets.
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- **Where:** the branch `potato`, from `realistic-look` with `cal/hp-mode` merged (the release
+  carries both, and the light voices must play FILTER MODE too). The development line is
+  another history (its base, 6126b71, is not this one's): its light model
+  (`crates/ca72/src/light.rs`) is brought over whole, its engine's integration written again
+  for this engine.
+- **The switch:** QUALITY, in the panel's last column above POWER's lamp, where the column was
+  empty: POWER's black ribbed rocker, upright, HI its upper end pressed, LO its lower (the
+  worn skin draws it from POWER's picture). The host's parameter `potato`, named Quality, HI or
+  LO, HI by default; not a preset's (`library::KEPT`); not learned by MIDI Learn (its menu: "set
+  for the computer, not the sound"). (Since R48, a chrome toggle of three positions, and the
+  parameter `quality`.)
+- **The engine at LO:** a light voice beside each circuit voice and beside DOUBLE's twin, made
+  with it, played in its place with the same keys, character (its offsets read each sample, as
+  the circuit's voice reads them, so that a voice's character is the same whichever plays it),
+  places, DRIVE and FEEDBACK; UNISON's voices started out of step as the circuit's are; a
+  broken voice put to rest in place (nothing to make); no worker woken for a light voice (it
+  costs less than the waking); the one instrument played a run of 128 samples at a time, its
+  lock taken once (the same samples, to the bit, as a sample at a time). Switching QUALITY
+  lets go of the keys held, as switching POLY does. AUTO GAIN measures a sound at LO with the
+  light voices, its key LO's own (HI's keys as before, so sessions' curves stand).
+- **What a voice costs** (`CA72_POTATO=1` with `tests/preset_cost.rs`, the Linux reference
+  machine, ten POLY voices, one thread, unpaced): 2.1 to 3.8 % of a core at LO against 78 to
+  107 % at HI for Bass, Cruising Whistle and Brass Tutti (30 to 45 times lighter).
+
+**Evidence so far (the Linux reference machine, 2026-10-10):** HI plays every factory preset
+the same to the bit as before the change (`preset_render` against 1535b5f); the engine's tests
+of LO (the light voices play, switching lets go of the keys, POLY's voices sound and are freed,
+the one instrument's runs the same to the bit as its samples, DOUBLE placed and UNISON
+levelled as at HI, AUTO GAIN measuring with the light voices); `quality_lo_neither_allocates_nor_frees_while_it_plays`;
+`tests/fuzz_bounds.rs` with QUALITY among the controls at their ends; the editor's QUALITY
+clicked as a rocker and its MIDI Learn menu; rustfmt; clippy.
+
+### The light voices fitted again to this circuit (2026-10-10)
+
+**Agent decisions** (not separately approved; a helper agent on the branch `potato-fit`, merged
+here at cf2e1e0):
+- **The harness** from the development line (`tests/measure/mod.rs`, `potato_reference.rs` and
+  `potato_match.rs`: every law from a panel control to pitch, level, cutoff, resonance and
+  time, measured alike on the circuit's voice and the light one), with DRIVE on six patches,
+  FILTER MODE's HI against LO (noise curves, sawtooth levels, the ring), FEEDBACK on four
+  patches at four of its settings, oscillator 3's free FREQUENCY and the release with DECAY
+  off; `potato_cost.rs` a timed loop.
+- **Each knob read through the circuit's own law** where the hardware reference recalibrated
+  it (`volume_track`, the FREQUENCY tracks, `sustain_track`, `time_pot`, `emphasis_r14`,
+  `glide_r`, `ext_taper`, `mod_wheel_r`), the laws behind them fitted again, and DECAY's shape
+  (faster at first, slower at its end), the input pair's compression, the lowest cutoffs, the
+  rings' level, the shark tooth and EXTERNAL INPUT's couplings fitted as the circuit's. Against
+  the circuit as it is now (the light voice before, where it moved):
+
+  | Law | Circuit | Light | Before |
+  |---|---|---|---|
+  | Oscillator 3 free, 8' | 201.49 Hz | 201.50 | 232.68 |
+  | Level against VOLUME 2 / 6 / 10 | .0291 / .1061 / .1863 | .0290 / .1054 / .1854 | .0353 / .0980 / .1811 |
+  | Compression, three oscillators at 10 | -1.19 dB | -1.06 | -0.70 |
+  | Ring at EMPHASIS 10, CUTOFF 0.5 | 1056 Hz, 0.170 | 1056 Hz, 0.169 | 857 Hz, 0.155 |
+  | Threshold at CUTOFF .3 / .5 / .7 | .827 / .725 / .700 | .825 / .729 / .700 | .789 / .742 / .733 |
+  | Passband at EMPHASIS 5 / 7, CUTOFF .5 | -9.35 / -11.80 dB | -9.32 / -11.60 | -6.59 / -11.15 |
+  | KEYBOARD CONTROL 1 / 2 / both | .328 / .649 / .956 | .328 / .646 / .952 | .339 / .673 / .977 |
+  | AMOUNT 2.5 / 5 / 7.5 at 3.83 V | +1.52 / +3.87 / +6.15 oct | +1.51 / +3.84 / +6.18 | +1.88 / +3.83 / +5.88 |
+  | ATTACK 4 to the plateau, filter / loudness | .250 / .438 s | .252 / .440 | .433 / .685 |
+  | DECAY 2 / 6, loudness to half | .091 / .313 s | .091 / .313 | .123 / 1.135 |
+  | SUSTAIN 2.5 / 5 / 7.5, loudness | .500 / 1.675 / 3.070 V | .504 / 1.671 / 3.074 | .655 / 1.704 / 2.897 |
+  | Release, DECAY on at 6, to 90 % | 1.165 s | 1.163 | 3.784 |
+  | VCA at 1.0 / 1.9 / 3.1 / 4.3 V | .193 / .423 / .732 / .999 | .194 / .421 / .732 / .999 | .170 / .404 / .720 / .995 |
+  | GLIDE 6, 12 semitones up / down | 70.5 / 126.4 ms | 69.7 / 125.5 | 65.2 / 141.0 |
+  | Oscillator modulation, wheel 1 | +752 / -592 cents | +745 / -585 | +991 / -779 |
+  | EXTERNAL INPUT's gain, VOLUME 2.5 / 5 / 7.5 / 10 | 2.07 / 4.38 / 14.75 / 159.0 | 2.08 / 4.41 / 14.87 / 158.0 | 2.79 / 7.28 / 14.02 / 137.3 |
+
+  (The rest of the helper's table: the pitch, both FREQUENCY tracks, the triangle's second
+  harmonic, the shark tooth's harmonics, the rings and peaks at low cutoffs, the passband near
+  CUTOFF 0, ATTACK 8, the release with DECAY off, the retrigger, the modulations, the noises,
+  A-440 and the filter contour's rest, each within a percent or two of the circuit's.)
+- **DRIVE** (`Light::set_drive`, the circuit voice's argument): the bus into the input pair
+  raised, the pair's limit falling as the gain to the -0.045 (0.88 at 24 dB). The level's rise
+  at 6, 12, 18 and 24 dB within 0.75 dB of the circuit's on six patches (a sawtooth open, 5.67 /
+  10.54 / 13.60 / 14.95 dB against 5.74 / 10.75 / 13.91 / 15.02); open patches darken as the
+  circuit's do. Driven hard at EMPHASIS 7 the light voice loses its resonance sooner (three
+  sawtooths at 24 dB: highs -14.5 dB against -9.7).
+- **FILTER MODE's HI:** the bus at the open ladder's EMPHASIS-0 passband through a 3 Hz
+  coupling, less the filter's coupled output (13 Hz, apart from the 4.4 Hz one after the VCA).
+  Noise curves at CUTOFF .3, .5 and .7 and EMPHASIS 0 to 5 within 0.2 to 0.45 dB RMS from 40 Hz
+  to 10 kHz (EMPHASIS 0 at .5 and .7, 1.6 to 1.8 dB: the notch deeper; EMPHASIS 7.5, at its
+  threshold, 1.7 to 2.9 dB); the sawtooth's levels within -0.57 to +0.07 dB; at EMPHASIS 10 the
+  same ring as LO's and the circuit's.
+- **What still differs:**
+  - FEEDBACK's loop has the circuit's latency (about 3.5 samples more) and the preamplifier's
+    coupling, and its tones are within 1.5 % of the circuit's; but which oscillation the loop
+    falls into differs (alone at CUTOFF .5 the circuit drops into a 26 to 38 Hz relaxation from
+    3.8 on the knob, the light voice holds 440 Hz; a sawtooth at CUTOFF .6, the knob at 5 to 7,
+    the other way about). Undertow Growl is 2.9 dB quiet at LO and 8 to 16 dB short at 0.5 to
+    2 kHz in its first moments. Stopped after three experiments without a cause, as the stuck
+    rule has it.
+  - Ringing Saw Line darker (0.72; 2 dB down from 4 to 8 kHz: the light ladder's top octaves,
+    R31's); Closed Hat a little brighter (1.16); Ladder Kick 0.8 dB louder.
+  - The DECAY switch off slows the circuit's attack a little (0.537 against 0.570 at 0.2 s into
+    ATTACK 6); not modelled. The release with DECAY off without the circuit's slow creep after
+    90 %.
+
+**Every factory preset at HI and LO** (`tests/potato_ab.rs`; LO's level less HI's, and the
+ratio of their spectral centroids): within 1 dB in 22 of the 24 and 0.87 to 1.13 in brightness in
+22, R31's mark; outside it Pulse Strut -1.2 dB and Undertow Growl -2.9 dB, Ringing Saw Line
+0.72 and Closed Hat 1.16. Their renders, HI then LO, are on the owner's Mac for listening
+(`~/Downloads/ca72-potato`).
+
+**What a light voice costs** (`potato_cost.rs`, ns a sample, the Linux reference machine): 34.3
+with three oscillators into the ladder (about 168 cycles; 30.6 before the fit), 83.0 with
+everything on (79.9). It allocates nothing.
+
+**Evidence (the Linux reference machine, 2026-10-10):** after the merge, HI plays every factory
+preset the same to the bit as before (`preset_render` against 1535b5f); the light voice's
+tests (13, each new law seen failing with its law broken), the model's, the plug-in's and the
+panel's (276 passed); rustfmt; clippy.
+
+**To follow:** the cost on the Windows reference machine against the same free synthesizer's
+patch, as R31 measured it; the owner's listening; the README.
+- **The number** of this record is a placeholder until the merge.
+
+## R48. QUALITY's ULTRA: the circuit's model with no compromises, and its lamp
+
+**The owner, 2026-10-10:** "I think we should also bring back our highest quality mode. Is
+that still in the code? I have a fun UI idea for it." Then: "I think we should have a no
+compromises mode, don't you? Maybe the first time the user launches that mode, we can give
+them a little warning that says that it's only intended for offline renders, or small projects
+on powerful PCs." The idea: "a small panel above the quality selector (make it a slightly
+rounded square) opens up, moves aside, and a big round light appears (the kind you see on old
+tube amps). On the light, the word "ULTRA" is written. This change should ideally feel a bit
+like a transformer taking shape. It should feel old school and mechanical, and make the user
+feel like they can see a little bit inside the machine when the transition happens. Little
+mechanical arms and parts, the green of a PCB dimly appearing in the background, etc. please
+mock this up for me."
+
+Mocked up in the browser (the lab's `ca-72/look/mock`, study "ULTRA"), the owner steered it in
+turn: "Panel drops off to the right. Light slides in from the left and moves up once it's in
+the center position."; of six ideas for the inside generated from words, "That's the right
+direction" (jointed chrome arms, a lead screw, a filament in the lamp); "It needs to be obvious
+how it's sliding in. Something needs to look like it's pushing it or pulling it, or both." (a
+carriage and a chain); "the light looks too small when it's being pulled in. It's not a mile
+away" (an inch down). Then a second way, asked for to compare: "just like a circle with 8
+sliding blades, and those blades just pull apart to reveal the light underneath, and the light
+lifts up ... the light is already underneath. It just needs to move upwards."; "I mean more
+like a camera shutter."; "I like the little twist that the mechanical option does right at the
+end when the light turns on. Can you do the same twist for the camera shutter version?"; the
+blades "fit in just a little more with the surrounding look ... I still want it to be like
+plain sort of gunmetal, like you had before. But I just want the color to match closely.";
+"the move upward that the light takes and the rotation motion that turns on the bulb, all of
+that should happen at the same time." And: "Looks great! I think that's the one we should go
+with. We should also offer a no animation option that leaves the bulb out and turns it on
+instantly." then "Actually, let's still animate the light coming on, but no rotation or
+anything." The switch: "Sure, add a third position, let's see how that looks."; "That's only 2
+positions graphically. The switch has no image for a middle position"; "No. Imagine it being a
+3 positions graphically switch. Not a rocker."; of a rotary selector, a toggle and a slide, the
+toggle's middle "should look like there's no angle to the toggle lever", then "Maybe you were
+right. Give it the slightest bit of angle"; "Cool. Looks good. Let's run with the silver
+toggle."
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- **Where:** the branch `ultra`, from `potato` (QUALITY is R47's switch, given its third
+  position).
+- **The parameter:** QUALITY becomes the host's enum parameter `quality` (LO, HI, ULTRA, in that
+  order; HI by default), in place of R47's boolean `potato`, which was never released. It
+  stays out of presets (`library::KEPT`) and out of MIDI Learn ("set for the computer, not the
+  sound").
+- **The engine at ULTRA:** the circuit's voices with the model's No Compromises setting in place
+  of its real-time one (the engine's HI), switched while a key is held, without letting it go
+  (the model switches between its settings sample by sample). AUTO GAIN keeps HI's curve: the
+  circuit is measured at its real-time setting, which No Compromises differs from far below what
+  the correction can tell, and measuring at No Compromises would take the helper many times as
+  long.
+- **The switch:** the chrome toggle's three pictures (`assets/worn/README.md`), 50 units wide at
+  (3023, 266), its lever up for ULTRA, out for HI, down for LO; "ULTRA" printed above it, "HI" to
+  its left, "LO" below, in 15-unit letters, QUALITY above them at 168. A click above its nut
+  chooses ULTRA, below it LO, on it (or on HI's legend) HI; the mouse wheel steps it; no drag;
+  one gesture, at the release, as a rocker's. In the drawn skin, a drawn nut and lever.
+- **The lamp:** at (3023, 92): the opening 50 units in radius, the ring 3.6 beyond it, the lamp
+  46 (the mock-up's sizes); the lamp waits at 0.9 of its size, its bezel turned back 40 degrees.
+  Opening, 2.5 s: the blades over its first 0.04 to 0.44, then the lamp up, turning and lighting
+  over the rest (the light 0.12 of that behind the turn); closing, 1.8 s; the light only, 1.1 s
+  on and 0.5 s off. The editor moves it on by the time between its frames (at most 50 ms of it,
+  so that a stalled frame does not jump it), and opens with it where QUALITY is, still. The
+  lens does not turn (its highlight stays where the room's light is): the lamp's pictures are
+  split into a lens and a bezel, the bezel turned over it. The lamp's light on the panel round
+  it is a very faint amber ring just past the steel one (0.06 at most, out to 1.3 of the lamp's
+  radius; the owner, after the first build: "No need for that much yellow glow around the lamp.
+  Keep it very subtle"). In the drawn skin: nothing while it is shut (the
+  approved mock-up has no lamp), the shutter and a plain lamp as it opens.
+- **The note:** once ULTRA's lamp is lit, until it is read (a press anywhere closes it), and
+  then never again on that computer: "ULTRA · NO COMPROMISES / THE CIRCUIT'S MODEL EXACTLY, AT
+  ABOUT SEVEN TIMES THE WORK OF HI: / ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER. / IT
+  IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL / PROJECTS ON POWERFUL
+  COMPUTERS. PLAYED LIVE, IT MAY DROP OUT. / RIGHT-CLICK THE LAMP FOR ITS SHUTTER, OR ALWAYS
+  OPEN. / CLICK TO CLOSE", left of the lamp's column.
+- **Shutter or always open** (the light only): first a button in the presets drawer's top row;
+  then, the owner: "Shutter versus always open mode should be selectable via a right click on
+  the ultra lamp". A right click on the lamp (its ring and what is in it) opens its menu, as a
+  control's MIDI Learn menu opens: "ULTRA'S LAMP · SHUTTER" (or "· ALWAYS OPEN"), its items
+  SHUTTER and ALWAYS OPEN, the one it is in dim. The button is gone from the drawer, and the
+  search has its room again. The computer's, not the session's; the note tells of it ("RIGHT-CLICK
+  THE LAMP FOR ITS SHUTTER, OR ALWAYS OPEN.").
+- **The computer's settings:** a file of its own, `CA-72/settings.toml` in the folder the
+  presets' library keeps (`settings.rs`): `ultra_shutter`, `ultra_note_read`; keys it does not
+  know kept, a file it cannot read never written over.
+- **The approved test** (`tests/approved.rs`) leaves out the last column's head, above POWER's
+  lamp: QUALITY, its toggle and ULTRA's lamp came after the approved mock-up and were approved
+  in their own. With it out, the panel against the mock-up: mean 1.359, 99th percentile 30 (on
+  `potato`, with the column in, 1.431 and 31).
+
+**What ULTRA costs** (`tests/preset_cost.rs`, one POLY voice, 256-frame blocks at 48 kHz, one
+thread, unpaced, the Linux reference machine, an AMD Ryzen 7 7800X3D):
+
+| Preset | HI, of a core (worst block) | ULTRA, of a core (worst block) | ULTRA / HI |
+|---|---|---|---|
+| Bass | 12.9 % (22 %) | 98.3 % (187 %) | 7.6 |
+| Cruising Whistle | 14.6 % (27 %) | 104.2 % (216 %) | 7.1 |
+| Brass Tutti | 17.8 % (34 %) | 118.4 % (212 %) | 6.7 |
+
+So one voice at ULTRA takes about a whole core of a fast computer, and its worst blocks twice
+that: played live on this machine, even one voice drops out. A voice cannot be shared between
+threads, so POLY's workers do not help a voice; they help many voices.
+
+**Evidence (the Linux reference machine, 2026-10-10):** the engine's test of ULTRA (the voices
+at No Compromises, the key kept when switched to HI); the real-time test with ULTRA switched on
+and off while it plays (no allocation, no free); AUTO GAIN's key at ULTRA is HI's; the toggle's
+gestures (`interact.rs`, the editor's `quality_goes_where_its_toggle_is_clicked`); ULTRA's lamp
+following QUALITY by the time between frames, its note read once, the light only's times
+(`ultra_s_lamp_follows_quality_and_its_note_is_read_once`); the settings file kept and a bad one
+left alone; the parts' pictures cut out; the lamp's menu choosing its shutter or always open
+(`ultra_s_lamp_s_menu_chooses_its_shutter_or_always_open`). The
+plug-in's own frames at points of the opening (`the_ultra_pngs`) match the mock-up's. A frame
+of the opening costs 1.45 ms to draw on average (3.4 at most) at the window's opening size,
+3.2 ms (6.6) at twice it (`ultra_timings`, release); the editor's frames come every 15 ms. The
+Mac's build ("CA-72 ULTRA", renamed, beside the owner's open Live) passes clap-validator and
+pluginval (strictness 5); it has not yet been opened in a host.
+
+**The owner, told what ULTRA costs and asked whether it should play HI live and the exact model
+only when the host renders offline:** "No, I think Ultra should remain Ultra." ULTRA plays the
+circuit's model with no compromises always, live or rendering; the note says what it costs.
+
+**Open (asked, not answered):** the lamp's colour (amber, as built; green and red were offered);
+whether the note shows once a computer.
+- **The number** of this record is a placeholder until the merge.
+
+### QUALITY's opening: a hamster at LO, the lamp at HI, a Tesla lamp at ULTRA (2026-10-10, later)
+
+**The owner, 2026-10-10**, in the mock-up: "How hard would it be to put an animation of a
+hamster runnign in a wheel for "LO" mode?"; "Let's have the same animation. Shutter opens,
+hamster wheel appears and is brought forward as the hamster starts running."; "i would make him
+more like an animated creature than a real one. And make his wheel fitting the mechanical
+1970's aesthetic"; "don't make the hamster too cute and disney-like. I liked your first hamster,
+he was just too real."; of three, "The "rise" hamster is the best". The wheel: "You gotta make
+that hamster wheel look more like a rickety brass hamster wheel. Old school looking."; "don't
+make the cage warped like that though. Otherwise it's better. Also, these hamster wheels
+normally have a back to them don't they? More brass spokes."; "is there an easy way to make the
+back of the cage feel more inset? Like making it a little darker or something?"; "Show me an
+example with the number of spokes reduced by 15%", then "the hamster wheel has the right amount
+of spokes now". The lamps: "the current ULTRA mode lamp should be what we see in High mode. Make
+another ULTRA mode, which should be a Tesla coil, complete with animated lightning bolts coming
+out of it."; "It should look a lot like the amber lamp, but blue, with lightning, and a tesla
+coil in the center"; "HIGH is now the only mode without any animation. Can you just add a warm
+glow to it? Perhaps something that can match the intensity of the synth itself?"; "make sure the
+Tesla coil has the same glow intensity spread that high has now."; and, after HI, HIGH and
+ULTRA had been printed on the lenses, "Get rid of "ULTRA" and "HI" writing on the glass."
+("HIGH I mean"). Then: "fantastic work. build this out. I want to test it on my Mac.", and
+"make sure nothing that we did with the UI here today decreases performance in any way. And one
+other thing can we make the dots in the stereo spread a little more animated according to the
+volume of their respective sounds in the synth? and perhaps someway to animate the detune effect
+being placed on them as well? Show me a before/after video once you are done."
+
+**As built** (the mock-up's study, `ultra.js`, `hamster.js`, `tesla.js`, is the spec):
+- **The opening** (`ca72_panel::ultra::Opening`) holds one thing at a time: LO's hamster in his
+  wheel, HI's amber lamp, ULTRA's Tesla lamp; changing QUALITY, what is up goes back down (1.8 s)
+  before the next comes up (2.5 s) through the same shutter; then, from the build, "that's too
+  long of an animation time. the transition from one mode to the next should take like 3
+  seconds of animation": 1.25 s down and 1.75 s up, three seconds in all.
+- **None in place of always open** (the owner, 2026-10-10: "i forgot about the "always open"
+  mode. Let's remove that. Now the alternative is no indicator animation area at all. Just the
+  switch and the panel will remain blank above it."): the opening's menu (a right click above
+  QUALITY, where it is or would be) is SHUTTER or NONE; with NONE nothing of it is drawn, its
+  ring's shadow included (it moved from the face's drawing into the opening's own layer), and
+  the editor keeps what the setting shows up, still, so that shown again it is there. The
+  computer's setting is the same (`ultra_shutter`, false now NONE). Then: "default mode is to
+  show the quality indicators (tesla coil, hamster, etc.), but they can be hidden as an option.
+  This can be selectable by right clicking the toggle switch.": shown by default (as it was);
+  the choice in QUALITY's own menu, its toggle (or a legend) right-clicked: its title why MIDI
+  Learn does not learn it, as before, then SHOW ITS INDICATOR and HIDE ITS INDICATOR (the one it
+  is, dim), then MIDI Learn's two; a right click where the indicator is is the panel's, as
+  anywhere off a control. The note: "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW
+  IT." Its title, "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND", read
+  as if QUALITY were the computer's, all its instances' (the owner: "I want quality to be set for
+  independently by each instance. not shared across the computer."): it is each instance's, as
+  it always was, and the title says so, "QUALITY: SET PER PLUGIN INSTANCE". (Whether its
+  indicator is shown is the computer's, for every instance, as a way of showing the panel.) The lenses are plain. Its menu (a
+  right click) is "QUALITY'S OPENING · SHUTTER" or "· ALWAYS OPEN"; always open, each setting's
+  thing stands in the ring and fades in over the first 0.35 of its coming (1.1 s; out in
+  0.5 s), a lamp lighting as before.
+- **The Tesla lamp:** the amber lamp's twin in cobalt glass with a miniature Tesla coil where the
+  bulb was (generated as an edit of the amber lamp's picture, so the two match; its lit picture
+  an edit of that), cut into a lens and a bezel as the amber one. Its lightning is drawn as it
+  plays (the mock-up's, ported): six streaks at most, each living 0.1 to 0.25 s from the
+  toroid's rim to the inside of the glass (0.74 of the radius), its jagged shape struck again
+  every 45 ms, a wide faint blue glow, a paler stroke, a white core, a spot where it meets the
+  glass; seeded, so a frame drawn twice is the same.
+- **The lamps follow the synth:** the plug-in's output's level (its peak over each block, -42 dB
+  dark to 0 dB full) through a filament (0.05 s up, 0.3 s down): at rest 0.28 of their light, at
+  the loudest all of it, the filament flaring (0.65 at most) and a glow on the panel from the
+  ring out (0.16 at most; at first it washed over the bezels, and was kept off them). The Tesla
+  coil's streaks come only as it sounds, more, longer and brighter the louder it is.
+- **The hamster** (the drawn, naturalistic one: an eight-frame run and a sleeping picture,
+  generated) in the old brass wire wheel (generated round and true, its back of 31 spokes made
+  26 by moving its own spokes, with their joints and heads, to even places; its back, inside
+  the inner rim, darkened to 0.55 of its light and 0.38 just inside the rim, set back). The
+  wheel comes forward from 0.72 of its size as he picks up his run; he runs at the wheel's
+  foot, a little up the rising side (12 degrees at a full run), the wheel turning 137.5 degrees
+  a second under him. Then "don't wait for the hamster to come forward for him to start
+  running. He should already be running": running at full pace as the shutter opens on him.
+- **Agent decision, for "nothing ... decreases performance":** at rest nothing moves. The
+  hamster runs while the synth sounds (its output over -40 dB), slows and stands when it falls
+  quiet, and dozes off a second later (0.7 s; the mock-up offered this, its default ran
+  always); the coil sparks only while it sounds (the mock-up let an odd spark fly at rest). A
+  window at rest costs what it did.
+- **The drops** (the strip's voices' display): each swells and brightens with its voice's level
+  (0.72 to 1.22 of a drop's size; rising quickly, falling over a fifth of a second); with
+  DOUBLE a note's two drops beat against each other as two notes DETUNE apart do at 220 Hz (20
+  cents, 2.5 a second), one swelling as the other ebbs and the two swaying in turn (24 % and 4
+  units at 10 cents or more; then "a bit intense. dial it back a little": 13 % and 2; then
+  "dial back the detune wobble a bit more": 7 % and 1), a pair coming out of its voice as
+  DOUBLE comes on.
+- **DOUBLE a switch of its own** (the owner, 2026-10-10: "whenever I put detune to 0 it
+  instantly switches to scatter, and vice versa if I'm in scatter and try and detune it throws
+  me into double ... i think it makes more sense to just make that knob unresponsive unless the
+  user is in double mode"): DOUBLE had been DETUNE above 0. Now the parameter `doubled`
+  (SCATTER | DOUBLE's tabs, a preset's, learnable from the tabs as POLY is); DETUNE only an
+  amount, its knob dimmed and not answering the pointer in SCATTER (MIDI may still move it).
+  DOUBLE at DETUNE's 0 is a pair at one pitch (the engine told a ten-thousandth of a cent:
+  `params::DOUBLED_AT_NONE`). A session or a preset saved before reads DOUBLE on wherever its
+  DETUNE is above 0 (`Ca72::filter_state`, `presets::targets`); no factory preset had DOUBLE.
+- **Cycle of Fifths, a factory preset** (the owner, 2026-10-10: "I added a new preset "cycle of
+  fifths" let's make that a factory default"): the owner's preset as saved (ten UNISON voices,
+  two sawtooths at 8' about six semitones apart, DOUBLE at 100 cents, INNER 21, gliding), last
+  in `sounds/presets.toml`, DOUBLE named on; its MAIN OUTPUT VOLUME 8.6 (it was saved at 10)
+  for a momentary maximum of -17.97 LUFS, where the others are levelled (R15; `tests/
+  preset_levels.rs`: at 10 it was -11.5). Its tags, ours: fat, glide.
+- **The levels:** each voice's output's peak over a block was measured already (for knowing when
+  a voice falls silent: `Engine::levels` keeps it); the output's peak is measured (two compares
+  a sample) only while an editor is open, else a flag read a block. The audio thread keeps the
+  highest of each (an atomic max) until the editor takes them.
+- **Cost:** what follows the synth (the opening, the drops) is drawn at most 30 times a second;
+  something coming up or going down, every frame as before. The opening is two layers, the
+  well, its floor and the ring drawn again only as something comes or goes, and what moves and
+  its light; the lightning is drawn without blend modes or a clip (a fifth cheaper). The drops
+  are drawn only near each (six radii): 2.3 ms a frame for twenty moving at twice the opening
+  size, where they took 5.2 ms (`drops_timings`); with the mock-up's flat drops (R44), 0.77.
+  Then, measured whole (below), the opening and the drops were put on one clock, thirty times
+  a second, something coming up or going down too (two clocks out of step had presented sixty
+  frames a second between them), and the window's frame turned into the screen's pixels a row
+  at a time (`window::fill`): 3.1 ms a frame at twice the opening size, where a pixel at a
+  time, a frame found for each, took 7.3 (`the_window_s_pixels_timings`), on every frame the
+  window presents.
+- **Measured whole** (`the_window_played`: 24 s in real time at sixty frames a second, a Retina
+  window, four POLY voices with DOUBLE playing chords at HI, ULTRA, then LO, falling quiet, then
+  HI with DETUNE swept; each frame drawn and turned into the screen's pixels as each build's
+  `present` does, timed; the build before these changes, `ultra` at c23a0a1, played the same,
+  each run twice, in either order): before, 57.8 % of one core on the editor's thread, 1,061
+  frames presented, 9.6 ms a frame; now, 32.4 %, 745 frames, 5.4 ms. The audio thread does no
+  more per sample in the voices; with an editor open it compares the output's samples for
+  their peak and keeps eleven numbers a block, and with none, reads a flag.
+- **DETUNE to 100 cents** (the owner, 2026-10-10: "let's make our maximum detune 100"): the
+  CA-72's own `engine::DOUBLE_CENTS`, 100 (the kit's, the CA-74's, stays 20), its dial 0, 25, 50,
+  75, 100. A session saved with DETUNE up plays five times as far apart. The drops' beat follows
+  the pair's to 4 a second and stays there (two notes a semitone apart beat 13 times a second at
+  220 Hz, which the drops would only flicker at).
+
+
+## R49. INNER: the inner edge of each side's band, and WIDTH, INNER and DETUNE three across
+
+**The owner, 2026-10-10:** "right now, we have a way to control the outer edges, which is
+width ... Imagine we're just dealing with the left-hand side of the stereo spectrum. You have
+your far left-hand edge ... and then you have your right-hand edge, which is currently our
+center. Width would bring things in from the left-hand edge, but we would have no control to
+bring things in from the right-hand edge, from the center." Told the two choices (a voice
+placed in the centre; INNER a place of its own or a share of WIDTH) with a recommendation for
+each: "Go with 'inner' and yes, this should affect the CA-74 as well". Shown two layouts for
+each plug-in, drawn by their renderers (INNER under WIDTH, the display beside it under DETUNE;
+or WIDTH, INNER and DETUNE three across, the VOICES section narrower), with three across
+recommended here: "3 across wins for both".
+
+**Agent decisions, 2026-10-10**, as recommended to the owner and taken with the name:
+- **INNER is plugin-kit's** (its K7, at ac04479, the kit's branch `stereo-inner` on `stereo`;
+  the panel's materials from the same commit): INNER, 0 to 100 %, is a share of SPREAD's way
+  out, not a place of its own, so the two never cross and SPREAD still scales the whole
+  picture; each side's voices sit in a band from there to SPREAD's edge, each as far across it
+  as SCATTER puts it at full SPREAD. A voice SCATTER puts in the centre (CENTER's first, EVEN's
+  last of an odd number) takes the side its turn falls on, the left first, so INNER clears the
+  centre; DOUBLE's pairs keep to the band, a pair in the centre opening to INNER's share either
+  side. The one voice's DOUBLE pair with POLY and UNISON off, all of SPREAD's way out (R45),
+  stays there.
+- **The parameter:** `inner`, the host's Inner, 0 to 100 %, off by default, after AUTO GAIN, so
+  a session or preset saved before reads it 0; a preset holds it (no factory preset names it);
+  MIDI Learn's INNER (54 learnable controls: 27 knobs, 8 selectors, 19 switches). It glides as
+  SPREAD does (the voices' targets move, 10 ms), it is not part of a sound's key for AUTO GAIN,
+  and it does nothing at SPREAD 0 or with POLY and UNISON off and no DOUBLE.
+- **The display** draws each voice where the engine's gains put it, INNER's band and all, by
+  the kit's `voice_at` and `pair_at`, which the gains use too.
+- **The strip, three across** (R44's A6 redrawn in its STEREO section): VOICES (370, 976) and
+  STEREO (976, 2370), OUTPUT as it was; WIDTH, INNER and DETUNE 430 apart about STEREO's middle
+  (1243, 1673, 2103), each a knob and its readout; the two banks of tabs centred over the
+  section as a pair, 180 apart, in their order; the display from WIDTH's unit to DETUNE's, wider
+  than before. INNER is a strip knob (51 controls), appended after the others so that no
+  control's index moves, with its readout, a switch as WIDTH's (off, and back on at its amount),
+  lit where it does something; its tip reads "INNER: 40 %".
+- `docs/panel.png` is left as it was (the 0.1.0 picture, as R44 leaves it): drawn again, it
+  would be the worn editor's first picture there, for the look's merge to choose.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
+dd215c4: every factory preset (24) the same to the bit; three presets each with POLY, UNISON and
+DOUBLE in each placement, SPREAD 80 % (27 renders), the same to the bit. The kit's tests (19,
+its K7); here `inner_clears_the_centre_and_one_voice_stays_there`,
+`the_strips_switches_turn_their_amounts_off_and_back_on_at_their_last`,
+`the_strips_units_stand_in_their_sections_clear_of_each_other`, and the strip's MIDI Learn,
+gesture, tip and switch tests with INNER. The panel's and plug-in's tests, 202 passed, 16
+ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`. Not yet: the
+installed build in a host.
+
+### EDGES dropped (2026-10-10)
+
+**The owner, 2026-10-10**, once INNER was built: "I don't really see any difference between edge
+and even, because edge is now just even with the inner controls on maximum, is it not?" Told it
+is close but not the same at eight to ten voices: "if there is cases where it yields different
+behavior, then maybe we can just leave it. Just make sure that that's true, that it's not
+exactly replicable from other settings." Told where it differs, then: "Do you think those
+differences will be practically audible? I'm changing my mind again…"; "Drop it."; "Actually
+render first"; and having listened to the renders: "k, I think we should remove edges".
+
+**Agent decisions, 2026-10-10**, as recommended to the owner:
+- **What EDGES had of its own**, measured with the kit's `voice_at`: with VOICES 2 to 7, EVEN
+  with INNER (90 % at three voices down to 70 % at seven) puts every voice where EDGES did;
+  with DOUBLE, every pair at WIDTH's edge is INNER at 100 % in either placement, to the bit;
+  only with eight to ten voices and no DOUBLE does EDGES's strictly outside-in order (100, 100,
+  90, 90, 80, 80 % ...) differ from anything EVEN or CENTER can do, the nearest EVEN at most
+  about 8 % of the way out from it. Renders for the owner (`mac:~/Downloads/ca72-edges-ab`, the
+  CA-72's, ten voices, WIDTH 100 %): POLY chords and UNISON with EDGES and with EVEN at INNER
+  55 % measured the same width (side to mid within 0.05 dB, left-right correlation within
+  0.006); single notes one at a time, the worst case, about 2 dB of balance on notes already 12
+  to 17 dB to one side; plain EVEN, the reference, 6 to 8 dB.
+- **SCATTER's placement is EVEN or CENTER** (`Scatter`, ids `even` and `centre` as they were;
+  the host's Scatter Placement two positions). A preset's `placement` is read by the plug-in's
+  index, 0 EVEN and 1 CENTER, an older 2 (CENTER) as CENTER (no factory preset names one); a
+  session saved with `edges`, or a placement not understood, opens with EVEN (`filter_state`),
+  not at what the instance had, as R18 has it for ENTROPY. MIDI Learn takes the placement as a
+  switch, EVEN below 64 and CENTER from it (54 learnable controls: 27 knobs, 7 selectors, 20
+  switches).
+- **The strip:** PLACEMENT is two lit tabs, EVEN and CENTER, its recess a tab narrower; the two
+  banks stay centred over STEREO as a pair, 180 apart. The lit tab and a click go by the
+  plug-in's choice, not the kit's index.
+- **The kit at eb374f8** (its K7's "EDGES dropped", made by a session the owner opened in the
+  kit, since a change to the shared kit from here was refused): no `Edges`, EVEN and CENTER
+  its placements (indices 0 and 1), and `ALONE` for one voice alone, whose DOUBLE pair goes all
+  of SPREAD's way out (R45). The voices' mix carries no placement for a lone voice
+  (`Option<Placement>`), and its pair takes `ALONE`, as it took EDGES's pair, 1, before; the
+  panel's materials from the same commit.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
+bd63519: every factory preset (24) the same to the bit. Tests: the placement's two choices by
+their ids, the strip's two tabs where they stand and the lit tab, DOUBLE's pairs at INNER 100 %
+the same to the bit in EVEN, CENTER and as the engine's lone pair, a value learned for each kind,
+`a_session_saved_with_edges_opens_with_even`; the panel's and plug-in's tests, 206 passed, 18
+ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`. With the
+kit at eb374f8, against renders of d159f42: three presets each in MONO, POLY and UNISON, with
+and without DOUBLE, EVEN and CENTER, INNER 0 and 60 % (72 renders), and every factory preset
+(24), the same to the bit; tests, 206 passed; rustfmt; clippy with `-D warnings`.
+
+**At the merge to main, 2026-10-10** (R44 to R49 together, as the owner asked: "k, can we merge
+this into main now?", INNER with them: "yes"): the kit at 4c0f0f3, its main, where K5 to K7
+were merged (its pull requests 2 and 3); its tree is eb374f8's, the commit pinned before, so
+nothing built changes. The third-party notices leave the kit's crates out, as the CA-74's do:
+they are Idle Foundry's own code under the CA-72's licence, which the notices now say
+(`scripts/notices.py`). The README's picture of the panel (`docs/panel.png`) is the editor's
+window as it opens in this look.

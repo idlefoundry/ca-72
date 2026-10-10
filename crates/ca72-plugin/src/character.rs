@@ -29,9 +29,9 @@ pub mod entropy {
 const OSCILLATORS: usize = 3;
 const KNOBS: usize = 10;
 
-/// Where voice `k` sits at full SPREAD: the first in the centre, then out to either side in
-/// turn, a chord of any size spread evenly-ish (the quarters, then an eighth).
-const PANS: [f64; 10] = [0.0, -1.0, 1.0, -0.5, 0.5, -0.75, 0.75, -0.25, 0.25, -0.125];
+/// Where SCATTER puts the voices POLY plays at full SPREAD, and the pan law that puts each
+/// there as loud: plugin-kit's (its K6; the CA-74's R27 and R30; here decisions.md R45).
+pub use plugin_kit_stereo::place::{Placement, pan_gains};
 
 /// A voice's character: its own tolerances, drawn once from its seed, its oscillators' and
 /// cutoff's movements, and where it sits in the stereo field.
@@ -52,8 +52,8 @@ pub struct Character {
     waver: [f64; OSCILLATORS],
     rng: u64,
     count: u32,
-    /// Where the voice sits at full SPREAD, -1 (left) to 1 (right).
-    pan: f64,
+    /// Which voice it is, for its place among the voices played (SPREAD's).
+    voice: usize,
     /// The rate the movements' constants below are for, and they: the drift's step and its
     /// noise's share, the waver's pole and its noise's scale (worked out once a rate, not
     /// each sample: the same values).
@@ -81,7 +81,7 @@ impl Character {
             // (Never zero, as xorshift needs.)
             rng: (seed ^ 0x5EED_0FA1_A106_0000) | 1,
             count: 0,
-            pan: PANS[voice % PANS.len()],
+            voice,
             rate: f64::NAN,
             drift_ab: (0.0, 0.0),
             waver_ws: (0.0, 0.0),
@@ -167,20 +167,22 @@ impl Character {
         )
     }
 
-    /// The gains (left, right) that put the voice in its place, by `spread` (0..1) of
-    /// SPREAD, by a pan law that keeps both channels whole at the centre (as at 0).
-    pub fn gains(&self, spread: f64) -> (f32, f32) {
-        if spread > 0.0 {
-            pan_gains(0.5 + 0.5 * spread * self.pan)
-        } else {
-            (1.0, 1.0)
-        }
+    /// How far out DOUBLE's pair of this voice sits, as `placement` has it among `voices`
+    /// ([`Placement::pair`]).
+    pub fn pair(&self, placement: Placement, voices: usize) -> f64 {
+        placement.pair(self.voice, voices)
     }
-}
 
-/// The pan law: at `pan` (0 left, 0.5 centre, 1 right) each side's gain, both whole at the
-/// centre (the DAW's instrument's, so the two sound alike).
-pub fn pan_gains(pan: f64) -> (f32, f32) {
-    let p = pan.clamp(0.0, 1.0);
-    ((2.0 * (1.0 - p)).min(1.0) as f32, (2.0 * p).min(1.0) as f32)
+    /// The gains (left, right) that put the voice in its place, as `placement` has it among
+    /// `voices`, by `spread` (0..1) of SPREAD, in its side's band by `inner` (0..1) of INNER
+    /// ([`pan_gains`]; both whole at SPREAD 0).
+    pub fn gains(
+        &self,
+        spread: f64,
+        inner: f64,
+        placement: Placement,
+        voices: usize,
+    ) -> (f32, f32) {
+        plugin_kit_stereo::place::voice_gains(spread, inner, placement, self.voice, voices)
+    }
 }

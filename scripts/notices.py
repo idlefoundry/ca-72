@@ -74,7 +74,8 @@ def metadata(platform):
 
 
 def linked(meta):
-    """The packages `ca72-plugin` links, its own workspace's left out."""
+    """The packages `ca72-plugin` links, its own workspace's left out, and Idle Foundry's
+    plugin-kit's crates (the code the plug-ins share, under the same licence and copyright)."""
     packages = {p["id"]: p for p in meta["packages"]}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
     workspace = set(meta["workspace_members"])
@@ -92,7 +93,11 @@ def linked(meta):
             if any("proc-macro" in t["kind"] for t in p["targets"]):
                 continue
             stack.append(dep["pkg"])
-    return [packages[i] for i in seen if i not in workspace]
+    return [
+        packages[i]
+        for i in seen
+        if i not in workspace and not packages[i]["name"].startswith("plugin-kit-")
+    ]
 
 
 # The Rust project's LICENSE-MIT (rust-lang/rust): std, core, alloc and the crates the
@@ -192,10 +197,12 @@ def render():
     out.append(
         "The CA-72, copyright © 2026 Idle Foundry Ltd., is free software under the GNU General\n"
         "Public License, version 3 or later (LICENSE); its source is at\n"
-        "https://github.com/idlefoundry/ca-72. Its plug-ins are built with the works below, each\n"
-        "under its own licence, whose notices follow. The crates are those Cargo.lock names, from\n"
-        "crates.io; the sources of the ones it takes from git repositories are in each release as\n"
-        "well, CA-72-<version>-git-sources.tar.gz. The macOS Audio Unit wraps the CLAP plug-in\n"
+        "https://github.com/idlefoundry/ca-72, and the code it shares with Idle Foundry's other\n"
+        "plug-ins, under the same licence, at https://github.com/idlefoundry/plugin-kit. Its\n"
+        "plug-ins are built with the works below, each under its own licence, whose notices\n"
+        "follow. The crates are those Cargo.lock names, from crates.io; the sources of the ones it\n"
+        "takes from git repositories are in each release as well,\n"
+        "CA-72-<version>-git-sources.tar.gz. The macOS Audio Unit wraps the CLAP plug-in\n"
         "in clap-wrapper, built with the CLAP headers and Apple's AudioUnitSDK, whose sources are\n"
         "in the CA-72's repository (third_party).\n"
         "Written by scripts/notices.py from Cargo.lock: do not edit by hand.\n"

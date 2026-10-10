@@ -7,7 +7,9 @@
 //!
 //! By hand: `cargo test --release -p ca72-plugin --test preset_cost -- --ignored
 //! --nocapture` (`CA72_SECONDS`, 4; `CA72_VOICES`, 10; `CA72_ONLY`, a part of a preset's
-//! name; `CA72_NO_FEEDBACK`, set: FEEDBACK at 0).
+//! name; `CA72_NO_FEEDBACK`, set: FEEDBACK at 0; `CA72_DOUBLE`, DOUBLE's amount in %, 0;
+//! `CA72_DRIVE`, DRIVE in dB, 0; `CA72_POTATO`, set: QUALITY at LO, the light voices;
+//! `CA72_ULTRA`, set: QUALITY at ULTRA, the circuit's model with no compromises).
 
 #![allow(clippy::unwrap_used)]
 
@@ -28,16 +30,22 @@ fn each_presets_cost_with_ten_voices() {
     let mut rows = Vec::new();
     let only = std::env::var("CA72_ONLY").ok();
     let no_feedback = std::env::var_os("CA72_NO_FEEDBACK").is_some();
+    let double: f64 = env("CA72_DOUBLE", 0.0);
+    let drive: f64 = env("CA72_DRIVE", 0.0);
     for s in factory() {
         if only.as_ref().is_some_and(|o| !s.name.contains(o.as_str())) {
             continue;
         }
         let mut c = controls_of(s);
         c.poly = true;
+        c.potato = std::env::var_os("CA72_POTATO").is_some();
+        c.ultra = std::env::var_os("CA72_ULTRA").is_some();
         c.voices = voices;
         if no_feedback {
             c.feedback = 0.0;
         }
+        c.double = double / 100.0;
+        c.drive = drive;
         let mut e = Engine::new();
         e.set(&c);
         e.prepare(rate, 1);
@@ -60,7 +68,13 @@ fn each_presets_cost_with_ten_voices() {
         let _ = workers;
     }
     eprintln!(
-        "CA-72, {voices} POLY voices, 256-frame blocks at 48 kHz, {}:",
+        "CA-72, {voices} POLY voices{}, 256-frame blocks at 48 kHz, {}:",
+        match (double > 0.0, drive > 0.0) {
+            (true, true) => format!(" with DOUBLE at {double} % and DRIVE at {drive} dB"),
+            (true, false) => format!(" with DOUBLE at {double} %"),
+            (false, true) => format!(" with DRIVE at {drive} dB"),
+            (false, false) => String::new(),
+        },
         match env("CA72_WORKERS", 0usize) {
             0 => "one thread".to_owned(),
             n => format!("the caller's thread and {n} workers"),

@@ -24,6 +24,11 @@
 //! - **Emphasis**: R7/R3's junction, through C10, the EMPHASIS rheostat R14, R73 and R76,
 //!   drives Q30's base.
 //!
+//! - **FILTER MODE** (not on the original; decisions.md R46, `filter-mode.lib`): the
+//!   hardware reference's high-pass. HI is the mixer's output less the filter's: the bus's
+//!   Norton current through [`MODE_RT`] (the filter's own passband at EMPHASIS 0) and a
+//!   coupling of [`MODE_HZ`], less the output above. LO is the output as drawn.
+//!
 //! The whole loop (nine states: [`STATES`]) is solved without delay: trapezoidal
 //! integration, Newton's method, at `oversample` times the output rate, with the ladder's
 //! corner prewarped ([`Vcf::prewarp_hz`]). Left out: the output stage's transistor
@@ -478,6 +483,10 @@ pub struct Drive {
     pub bias: LadderBias,
     /// The ladder's time scale: 1 as drawn, or the prewarping factor.
     pub p: f64,
+    /// Not the circuit's: the plug-in's DRIVE (its decisions.md R45, the CA-74's R29),
+    /// the input pair's view of the bus's current across R54 times this, after C27 (so C27's
+    /// charge, the bus's load and the bias chain are the circuit's); 1 is the circuit.
+    pub gain: f64,
     /// Potato: each pair's tanh taken at once with its series drop folded into its thermal
     /// voltage, not solved behind it ([`plain_pair`]).
     pub plain: bool,
@@ -633,6 +642,8 @@ impl VcfCircuit {
         let r_tot = self.r7 + self.r14 + r73b + r_g;
         let r_b5 = self.r67 * self.r_chain / (self.r67 + self.r_chain);
         let k_in = 1.0 / (1.0 + d.g_n * self.r54);
+        // (R54 as the input pair sees it: DRIVE's gain on the drop across it.)
+        let r54_seen = self.r54 * d.gain;
         let bias = &d.bias;
         let e = bias.e;
         let (di, ddi) = table_hermite(&OUT_DI, OUT_DI_MIN, OUT_DI_STEP, y[W]);
@@ -642,8 +653,8 @@ impl VcfCircuit {
         let i_f0 = (y[NT] - self.r7 * di - y[Q10] - y[VB]) / r_tot;
         // The pair's base currents (Q29's +b u, Q30's -b u) drop across R54 and R73/R76
         // and, through them, change the bus and emphasis currents: D = A - B u.
-        let a = self.r54 * i_in0 - r_g * i_f0;
-        let b = bias.b_in * (self.r54 * k_in + r_g * (1.0 - r_g / r_tot)) + bias.v_in;
+        let a = r54_seen * i_in0 - r_g * i_f0;
+        let b = bias.b_in * (r54_seen * k_in + r_g * (1.0 - r_g / r_tot)) + bias.v_in;
         let pair = |x: f64, b: f64, two_vt: f64, z: &mut PairWarm| {
             if d.plain {
                 plain_pair(x, b, two_vt)
@@ -701,7 +712,7 @@ impl VcfCircuit {
             di_f[VB] = -1.0 / r_tot;
             let mut d_ud = [0.0; STATES];
             for n in [W, Q10, NT, VB, Q27] {
-                d_ud[n] = dud * (self.r54 * di_in[n] - r_g * di_f[n]);
+                d_ud[n] = dud * (r54_seen * di_in[n] - r_g * di_f[n]);
             }
             for n in [W, Q10, NT, VB, Q27] {
                 di_in[n] += c_i * d_ud[n];
@@ -836,6 +847,25 @@ type JacobianOut<'a> = (
 /// The default prewarping limit, Hz ([`Vcf::prewarp_hz`]).
 pub const PREWARP_HZ: f64 = 16e3;
 
+/// FILTER MODE's direct branch (`filter-mode.lib`): the bus's Norton current through this
+/// transimpedance, ohms, the filter's own passband (its output against that current) at
+/// EMPHASIS 0, so that HI cancels the passband there as the reference's does (session HP:
+/// HI = V - 1.002 LO). From ngspice, the filter as the voice has it (its trims,
+/// `filter_cal::CALIBRATED`, and every mixer channel's resistor on the bus,
+/// `filter_cal::G_BUS_OFF`): the output against a channel's Norton current at the control
+/// node's +6 V, 300 to 500 Hz, between the output's coupling and the corner (23.61K; 23.66K
+/// at +3 V, 200 to 300 Hz). One channel alone on the bus would give 26.9K: the other
+/// channels' resistors share the current, whether on or off (on, a VOLUME pot's few
+/// kilohms in series; with NOISE on, the passband is 0.15 dB higher).
+pub const MODE_RT: f64 = 23.6e3;
+/// Its coupling, Hz, where HI's deep bass comes back as the reference's does (session HP).
+/// What HI hears below 100 Hz is the direct branch against LO, which leads it there (the
+/// output's coupling, C5/C1, is LO's alone). The reference's direct branch leads its MIX
+/// output as a 6.8 Hz coupling would, but MIX is not the bus's Norton current; against the
+/// reference's own LO, this corner matches it within 0.3 degrees and 0.1 dB from 15 to 80
+/// Hz (6.8 Hz: 13 degrees and 0.8 dB short at 15 Hz, HI's lows 3 dB short at 30 Hz).
+pub const MODE_HZ: f64 = 3.0;
+
 /// The filter in real time.
 #[derive(Debug, Clone)]
 pub struct Vcf {
@@ -873,6 +903,8 @@ pub struct Vcf {
     pub last_iterations: usize,
     /// The pairs' last solutions: warm starts for the next evaluation.
     zs: [PairWarm; 5],
+    /// The plug-in's DRIVE ([`Drive::gain`]; 1, the circuit).
+    gain: f64,
     /// The prewarping factor for the present bias, and the limit it was taken at.
     warp: Option<(f64, f64)>,
     /// The loop's Jacobian and the output's gradient, kept from step to step: the entries
@@ -883,6 +915,10 @@ pub struct Vcf {
     /// and its resampler's outputs then: once the resampler's whole line holds it, the same
     /// outputs again (decisions.md R11).
     g_held: (f64, usize, [f64; 8]),
+    /// FILTER MODE at HI (decisions.md R46): the output is the mixer's less the filter's.
+    pub high_pass: bool,
+    /// The direct branch's coupling: its capacitor's voltage and its last input, V.
+    mode: (f64, f64),
 }
 
 /// The loop Jacobian's entries that are not always zero ([`VcfCircuit::eval_full`]), row by
@@ -933,10 +969,13 @@ impl Vcf {
             tol: 1e-10,
             last_iterations: 0,
             zs: [PairWarm::COLD; 5],
+            gain: 1.0,
             warp: None,
             jac: [[0.0; STATES]; STATES],
             gout: [0.0; STATES],
             g_held: (f64::NAN, 0, [0.0; 8]),
+            high_pass: false,
+            mode: (0.0, 0.0),
         }
     }
 
@@ -966,6 +1005,12 @@ impl Vcf {
                 .collect()
         });
         self.bias_key = [self.celsius.to_bits(), self.circuit.c.to_bits()];
+    }
+
+    /// The plug-in's DRIVE (its decisions.md R45): the input pair's view of the bus's
+    /// current across R54 times `gain` ([`Drive::gain`]); 1 is the circuit.
+    pub fn set_drive(&mut self, gain: f64) {
+        self.gain = gain;
     }
 
     /// The quality mode, from the next sample (switchable while it plays): in Potato the
@@ -1030,6 +1075,7 @@ impl Vcf {
         self.up_g.reset();
         self.down.reset();
         self.g_held = (f64::NAN, 0, [0.0; 8]);
+        self.mode = (0.0, 0.0);
     }
 
     /// Delay through the resamplers, in output samples.
@@ -1044,7 +1090,8 @@ impl Vcf {
 
     /// The output's change from its resting voltage (Q7's collector), in volts, for one
     /// output sample of the mixer bus (the Norton current `i_bus` its switched-on channels
-    /// push into it, and their total conductance `g_bus`) and the ladder current `i0`.
+    /// push into it, and their total conductance `g_bus`) and the ladder current `i0`; with
+    /// [`Vcf::high_pass`], FILTER MODE's HI instead.
     pub fn tick(&mut self, i_bus: f64, g_bus: f64, i0: f64) -> f64 {
         let mut laps = crate::prof::Laps::start();
         let mut ns = [0.0f64; 8];
@@ -1067,6 +1114,7 @@ impl Vcf {
         let mut iters = 0;
         for k in 0..self.oversample {
             let v = self.step(ns[k], gs[k].max(0.0), i0, &mut iters, &mut laps);
+            let v = self.filter_mode(ns[k], v);
             if let Some(o) = self.down.push(v) {
                 out = o;
             }
@@ -1074,6 +1122,18 @@ impl Vcf {
         }
         self.last_iterations = iters;
         out
+    }
+
+    /// FILTER MODE over one step, at the loop's rate so that the two branches line up: the
+    /// direct branch's coupling (trapezoidal, as the loop) charged in LO as well, as its
+    /// capacitor would be; LO's output `v` as it is, or HI.
+    fn filter_mode(&mut self, i_n: f64, v: f64) -> f64 {
+        let x = MODE_RT * i_n;
+        let a = core::f64::consts::PI * MODE_HZ * self.h;
+        let (q, x0) = self.mode;
+        let q = (q * (1.0 - a) + a * (x + x0)) / (1.0 + a);
+        self.mode = (q, x);
+        if self.high_pass { x - q - v } else { v }
     }
 
     fn drive(&mut self, i_n: f64, g_n: f64, i0: f64) -> Drive {
@@ -1098,6 +1158,7 @@ impl Vcf {
                 bias,
                 p,
                 plain: self.potato,
+                gain: self.gain,
             };
         }
         let p = if self.prewarp_hz > 0.0 {
@@ -1115,6 +1176,7 @@ impl Vcf {
             bias,
             p,
             plain: self.potato,
+            gain: self.gain,
         }
     }
 

@@ -1,0 +1,8 @@
+Use your image generation tool to make one image, then save it in the current directory as lamp-off-b.png (copy the generated file there). Do nothing else.
+
+The image: one single big panel pilot lamp of the kind old valve amplifiers have, seen from straight in front, its lamp off. Square image, as large as you can make it.
+- The part: a round domed lens of amber glass, about two thirds of the part's width, in a wide knurled bright chrome bezel ring with a polished inner bevel. Through the glass, in the middle, a small clear bulb with a fine coiled tungsten filament standing upright on two thin support wires, unlit. The glass a deep dark amber.
+- Gently used, clean; no scratches.
+- Straight-on orthographic product photograph, the camera exactly in front of the centre, no perspective or tilt; the part exactly centred and filling about 80 percent of the frame; on a perfectly flat, uniform, plain mid-grey (#808080) background, no texture, no gradient, no cast shadow; sharp focus everywhere.
+- Lighting: soft light from up and to the left: a small soft highlight on the dome at its upper left, the bezel's knurling lit evenly; no shadow cast on the background.
+- No text, letters, numbers, symbols or logos anywhere.
