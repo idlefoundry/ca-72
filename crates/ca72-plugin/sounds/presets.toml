@@ -8,9 +8,10 @@
 # The fifteen after Bass and Lead are documented patches for the instrument the CA-72 models,
 # under names of our own: its maker's 1974 sound charts, its 2016 reissue's patch sheets, and
 # two recreations by ear. Ladder Kick to Pink Riser are a drum kit and a riser made from the
-# panel alone, one instance a drum; Warped Pad, last, is eight POLY voices drifting with
-# ENTROPY. MAIN OUTPUT VOLUME levels them against each other (measured on the
-# model: `tests/preset_levels.rs`), not the charts' listening level.
+# panel alone, one instance a drum; Warped Pad is eight POLY voices drifting with ENTROPY.
+# White Lotus, last, is a held bass fitted to a recording by measurement (decisions.md R43).
+# MAIN OUTPUT VOLUME levels them against each other (measured on the model:
+# `tests/preset_levels.rs`), not the charts' listening level.
 format = 1
 
 [[preset]]
@@ -1199,3 +1200,55 @@ poly = 1
 voices = 8
 entropy = 85
 spread = 80
+
+[[preset]]
+name = "White Lotus"
+description = "One narrow rectangle into a filter that rings on its third harmonic and follows the keys; oscillator 3 at LO wobbles the ring at 11 Hz through FILTER MODULATION. A mellow held bass with a ring an octave and a fifth above each note."
+tags = ["bass", "resonant", "held"]
+
+[preset.values]
+tune = 0
+glide = 0
+mod_mix = 0
+osc_mod = 0
+osc3_control = 0
+decay_on = 1
+glide_on = 0
+mod_wheel = 0.17
+osc1_range = 3
+osc1_waveform = 5
+osc2_range = 3
+osc2_waveform = 2
+osc2_frequency = 0
+osc3_range = 0
+osc3_waveform = 0
+osc3_frequency = 7.45
+osc1_on = 1
+osc1_volume = 10
+ext_on = 0
+ext_volume = 8
+osc2_on = 0
+osc2_volume = 8
+noise_on = 0
+noise_volume = 8
+noise_type = 0
+osc3_on = 0
+osc3_volume = 8
+filter_mod = 1
+keyboard_control_1 = 1
+keyboard_control_2 = 1
+cutoff = -2.14
+emphasis = 7
+contour_amount = 0
+filter_attack = 0
+filter_decay = 3
+filter_sustain = 10
+loudness_attack = 0.5
+loudness_decay = 3.5
+loudness_sustain = 8.5
+volume = 9.78
+feedback = 0
+poly = 0
+voices = 4
+entropy = 0
+spread = 0
