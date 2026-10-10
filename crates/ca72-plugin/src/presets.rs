@@ -179,6 +179,8 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("placement", &p.placement),
         ("unison", &p.unison),
         ("double", &p.double),
+        ("drive", &p.drive),
+        ("level", &p.level),
         ("feedback", &p.feedback),
         ("lock", &p.lock),
     ]

@@ -90,6 +90,8 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         },
         unison: r.end(),
         double: r.either(0.0, 1.0),
+        drive: r.either(0.0, 24.0),
+        level: r.either(-30.0, 12.0),
         feedback: r.either(0.0, 1.0),
         lock: r.end(),
     }

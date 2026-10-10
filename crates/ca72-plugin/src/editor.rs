@@ -2476,7 +2476,7 @@ mod tests {
         right_click(&mut e, p);
         assert_eq!(
             e.learning.menu().map(|m| m.title.as_str()),
-            Some("SPREAD · NO MIDI CONTROLLER")
+            Some("WIDTH · NO MIDI CONTROLLER")
         );
         let p = on_strip(&e, strip_at(StripTarget::Poly));
         right_click(&mut e, p);

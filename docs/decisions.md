@@ -2952,3 +2952,44 @@ every key, it fails holding the new key). `preset_render` (every preset with POL
 voices) against UNISON's commit: every preset the same to the bit; `preset_levels` the same.
 The learn list's (50). The plug-in's unit tests (136 passed, 7 ignored), the plug-in's and the
 model's integration tests; rustfmt; clippy.
+
+**Agent decisions, 2026-10-09** (the fourth step: DRIVE, LEVEL and the host's names; not
+separately approved):
+- **DRIVE** (the host's Drive, `drive`, 0 to 24 dB, off at 0; after DOUBLE, saved in presets,
+  learnable as a knob) is the CA-74's R29 DRIVE on this circuit: the mixer's signal raised into
+  the filter's input pair (Q29 and Q30) after C27. The pair sees DRIVE's gain times the drop
+  the bus's current makes across R54 (its own base currents' drop with it); C27's current, the
+  bus's load and the bias chain (b5) stay the circuit's (`ca72::vcf::Drive::gain`). At 0 it is
+  the circuit to the bit. A voice and its twin take it at each run. The model's threaded voice
+  (the lab's) does not.
+- **What it does here:** a held note grows louder, by less the higher DRIVE goes, as the input
+  pair saturates (oscillator 1's sawtooth alone: +2.7, +5.1, +8.5 and +10.7 dB at 3, 6, 12 and
+  24 dB); and darker, not brighter: the ladder's stages, slew-limited by their currents, take
+  the highs the clipping adds (a triangle's energy over 1 kHz against under it -1.0, -3.3 and
+  -10.2 dB at 3, 6 and 12 dB; +15.5 at 24, where it is nearly a square).
+- **No thump promised:** raising DRIVE quickly on an asymmetric wave (the narrow rectangle)
+  steps the output under 20 Hz to about twelve times its held level there, whether the gain is
+  after C27 or before it (0.41 against 0.44): the saturating pair rectifies, its DC moving with
+  DRIVE, as turning a mixer VOLUME up quickly does. The CA-74's reason for after the capacitors
+  does not carry over; after C27 is kept so that DRIVE leaves C27's charge the circuit's. A test
+  of no thump was written, failed both ways, and was dropped.
+- **LEVEL** (the host's Level, `level`, -30 to +12 dB, 0 by default; after DRIVE, saved in
+  presets, learnable as a knob) is the CA-74's: the output's gain after MAIN OUTPUT's, the
+  plug-in's own; it steps as MAIN OUTPUT VOLUME's gain does (a learned knob glides, R34).
+- **The host's names, the CA-74's (R31):** SPREAD is shown as Width, and DOUBLE as Double
+  Detune, read in cents ("12 cents", Off at 0) and taken back so; their ids are as they were.
+  MIDI Learn's list says WIDTH and DETUNE (DOUBLE) (52 learnable controls: 26 knobs,
+  8 selectors, 18 switches); the strip as drawn says SPREAD until it is drawn again.
+- **AUTO GAIN is the next step:** until then DRIVE makes the sound louder.
+
+**Cost:** DRIVE's settings measured alike within the machine's noise (Bass, ten POLY voices,
+one thread: 85 to 124 % of a core at 0, 12 and 24 dB, three runs each, interleaved, load
+average 10 to 16): Potato's filter takes at most two Newton iterations a step whatever it is
+driven by.
+
+**Evidence (the Linux reference machine, 2026-10-09):** tests: `drive_drives_the_filter_harder`
+(with the gain kept from the pair it reads +0.0 dB and fails), `level_moves_the_output_by_its_decibels`,
+the CA-74's `double_reads_in_cents_and_spread_is_width`, and `filter_jacobian_matches_finite_differences`
+at DRIVE's 24 dB too. `preset_render` against UNISON's commit: every preset the same to the
+bit; `preset_levels` the same. The learn list's (52). The plug-in's unit tests (139 passed,
+7 ignored), the plug-in's and the model's integration tests; rustfmt; clippy.

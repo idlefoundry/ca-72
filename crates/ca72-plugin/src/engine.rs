@@ -72,6 +72,13 @@ pub fn lock_trim(p: &Panel) -> f64 {
 /// The voices POLY may play: the fewest, by default, the most (all of them built).
 pub const POLY_VOICES: (usize, usize, usize) = (2, 4, 10);
 
+/// DRIVE's top, dB (decisions.md R-STEREO, the CA-74's R29: past it the filter is saturated
+/// and the note stops being one).
+pub const DRIVE_TOP: f64 = 24.0;
+
+/// LEVEL's range, dB (the CA-74's).
+pub const LEVEL_RANGE: (f64, f64) = (-30.0, 12.0);
+
 /// ENTROPY's tolerances on the panel: EMPHASIS, the filter contour's ATTACK and DECAY, the
 /// loudness contour's, GLIDE.
 const ENTROPY_KNOBS: usize = 6;
@@ -99,6 +106,13 @@ pub struct Controls {
     /// [`DOUBLE_CENTS`], SPREAD putting them to either side of the centre (decisions.md
     /// R-STEREO); 0, one voice a note.
     pub double: f64,
+    /// DRIVE (0..[`DRIVE_TOP`] dB): the mixer's signal into the filter raised by so much, its
+    /// input pair driven past where the panel's mixer can take it; 0, the circuit
+    /// (decisions.md R-STEREO).
+    pub drive: f64,
+    /// LEVEL (dB, [`LEVEL_RANGE`]): the output's gain after MAIN OUTPUT's, the plug-in's own;
+    /// 0, none (decisions.md R-STEREO).
+    pub level: f64,
     /// FEEDBACK (0..1): the voices' output patched back into their EXTERNAL INPUT, a sample
     /// late, by this much of its level (the phones' VOLUME knob; decisions.md R8).
     pub feedback: f64,
@@ -123,6 +137,8 @@ impl Default for Controls {
             placement: Placement::Even,
             unison: false,
             double: 0.0,
+            drive: 0.0,
+            level: 0.0,
             feedback: 0.0,
             lock: false,
         }
@@ -417,6 +433,8 @@ impl Playing {
     /// a sample ([`glide_share`] at `rate`).
     fn play_from(&mut self, ext: &[f64], rate: f64, m: &Mix, share: f64) {
         let p = self.places(m);
+        self.voice.set_drive(m.drive);
+        self.twin.voice.set_drive(m.drive);
         let (mut gl, mut gr) = self.pan.unwrap_or(p.voice);
         let (mut hl, mut hr) = self.twin.pan.unwrap_or(p.twin);
         let (mut peak, mut twin_peak) = (0.0f64, 0.0f64);
@@ -922,7 +940,8 @@ impl Engine {
             self.gain = output_gain(c.volume, c.main_output)
                 * if c.lock { lock_trim(&c.panel) } else { 1.0 }
                 * unison_trim(c)
-                * double_trim(c);
+                * double_trim(c)
+                * level_gain(c.level);
             self.apply();
         }
     }
@@ -1382,7 +1401,7 @@ impl Engine {
         }
     }
 
-    /// How ENTROPY, SPREAD and DOUBLE stand for the voices' samples.
+    /// How ENTROPY, SPREAD, DOUBLE and DRIVE stand for the voices' samples.
     fn mix(&self) -> Mix {
         let entropy = self.controls.entropy * ENTROPY_DEPTH;
         // The oscillators': their own floor and ENTROPY's, unless LOCK; the cutoff's, ENTROPY's.
@@ -1414,6 +1433,11 @@ impl Engine {
                 self.controls.double.min(1.0) * DOUBLE_CENTS
             } else {
                 0.0
+            },
+            drive: if self.controls.drive > 0.0 {
+                10f64.powf(self.controls.drive.min(DRIVE_TOP) / 20.0)
+            } else {
+                1.0
             },
         }
     }
@@ -1598,10 +1622,11 @@ const SHARED_RUN: usize = 8;
 /// Samples [`Engine::render`] plays a voice for at a time.
 pub const CHUNK: usize = 128;
 
-/// ENTROPY, SPREAD and DOUBLE as the voices' samples take them: ENTROPY's depth, the
+/// ENTROPY, SPREAD, DOUBLE and DRIVE as the voices' samples take them: ENTROPY's depth, the
 /// oscillators' (their floor with it, unless LOCK), the depth the character's offsets are
-/// drawn at, SPREAD, SCATTER's placement and the voices it places among (VOICES), and
-/// DOUBLE's detune between a note's two voices, cents (0: one voice a note).
+/// drawn at, SPREAD, SCATTER's placement and the voices it places among (VOICES), DOUBLE's
+/// detune between a note's two voices, cents (0: one voice a note), and DRIVE's gain into the
+/// filter (1: the circuit).
 #[derive(Debug, Clone, Copy)]
 pub struct Mix {
     entropy: f64,
@@ -1611,10 +1636,11 @@ pub struct Mix {
     placement: Placement,
     voices: usize,
     double: f64,
+    drive: f64,
 }
 
 /// [`Mix`]'s values, as the workers are handed them.
-pub const MIX_LEN: usize = 7;
+pub const MIX_LEN: usize = 8;
 
 impl Mix {
     pub fn to_array(self) -> [f64; MIX_LEN] {
@@ -1626,11 +1652,21 @@ impl Mix {
             self.placement.index() as f64,
             self.voices as f64,
             self.double,
+            self.drive,
         ]
     }
 
     pub fn from_array(
-        [entropy, oscillators, at, spread, placement, voices, double]: [f64; MIX_LEN],
+        [
+            entropy,
+            oscillators,
+            at,
+            spread,
+            placement,
+            voices,
+            double,
+            drive,
+        ]: [f64; MIX_LEN],
     ) -> Mix {
         Mix {
             entropy,
@@ -1640,6 +1676,7 @@ impl Mix {
             placement: Placement::from_index(placement as usize),
             voices: voices as usize,
             double,
+            drive,
         }
     }
 }
@@ -1840,6 +1877,16 @@ fn seeded(voice: &mut Voice, seed: u64, k: usize) {
     if let Some(at) = out_of_step(k, seed) {
         voice.start_oscillators_at(at);
     }
+}
+
+/// LEVEL's gain at `db` (within [`LEVEL_RANGE`]; not finite, 0 dB). At 0 dB, 1 exactly.
+pub fn level_gain(db: f64) -> f64 {
+    let db = if db.is_finite() {
+        db.clamp(LEVEL_RANGE.0, LEVEL_RANGE.1)
+    } else {
+        0.0
+    };
+    10f64.powf(db / 20.0)
 }
 
 /// DOUBLE's trim on the output: a note's two voices, each its own, add in power, so it is
@@ -2712,5 +2759,83 @@ mod tests {
                 "poly {poly}: a twin holds a key"
             );
         }
+    }
+
+    /// A held note's energy (left and right) below and above `hz`, `skip` to `skip + 1` s in,
+    /// with `c`; and the samples. A sustained sound: oscillator 1's sawtooth alone, the
+    /// filter half open.
+    fn bands(c: &Controls, hz: f64, skip: f64) -> (f64, f64, Vec<f64>) {
+        let (l, r) = played(c, &[45], skip + 1.0);
+        let from = (skip * 48_000.0) as usize;
+        let y: Vec<f64> = l[from..]
+            .iter()
+            .zip(&r[from..])
+            .map(|(a, b)| a + b)
+            .collect();
+        let n = y.len();
+        let (mut low, mut high) = (0.0, 0.0);
+        // (A plain DFT on whole-hertz bins: one second, 1 Hz apart.)
+        for f in (5..4_000).step_by(5) {
+            let w = 2.0 * std::f64::consts::PI * f as f64 / 48_000.0;
+            let (mut re, mut im) = (0.0, 0.0);
+            for (k, &v) in y.iter().enumerate() {
+                re += v * (w * k as f64).cos();
+                im += v * (w * k as f64).sin();
+            }
+            let e = (re * re + im * im) / n as f64;
+            if (f as f64) < hz {
+                low += e;
+            } else {
+                high += e;
+            }
+        }
+        (low, high, y)
+    }
+
+    fn sustained() -> Controls {
+        let mut c = Controls {
+            lock: true,
+            ..Controls::default()
+        };
+        c.panel.osc[1].on = false;
+        c.panel.osc[2].on = false;
+        c.panel.loudness_contour.sustain = 1.0;
+        c
+    }
+
+    /// DRIVE drives the filter's input pair harder: a held note grows louder with it, and by
+    /// less the higher it goes, as the pair saturates (on a sawtooth +2.7, +5.1, +8.5 and +10.7
+    /// dB at 3, 6, 12 and 24 dB; decisions.md R-STEREO). (Not brighter: the ladder's stages,
+    /// slew-limited by their currents, take the highs the clipping adds.)
+    #[test]
+    fn drive_drives_the_filter_harder() {
+        let c = sustained();
+        let (lo0, hi0, _) = bands(&c, 1_000.0, 0.5);
+        let louder = |drive: f64| {
+            let (lo, hi, _) = bands(&Controls { drive, ..c }, 1_000.0, 0.5);
+            10.0 * ((lo + hi) / (lo0 + hi0)).log10()
+        };
+        let (a, b, d) = (louder(6.0), louder(12.0), louder(24.0));
+        assert!(a > 3.0, "DRIVE 6 dB: {a:+.1} dB");
+        assert!(
+            a < b && b < d,
+            "DRIVE 6, 12, 24 dB: {a:+.1}, {b:+.1}, {d:+.1} dB"
+        );
+        assert!(d < 18.0, "DRIVE 24 dB: {d:+.1} dB, the pair not saturating");
+    }
+
+    /// LEVEL moves the output by its decibels, and at 0 dB is no gain at all.
+    #[test]
+    fn level_moves_the_output_by_its_decibels() {
+        assert_eq!(level_gain(0.0), 1.0);
+        let c = sustained();
+        let (l0, _) = played(&c, &[45], 0.3);
+        let (l, _) = played(&Controls { level: -6.0, ..c }, &[45], 0.3);
+        let (a, b) = (
+            l0.iter().map(|x| x * x).sum::<f64>(),
+            l.iter().map(|x| x * x).sum::<f64>(),
+        );
+        let db = 10.0 * (b / a).log10();
+        assert!((db + 6.0).abs() < 1e-3, "LEVEL -6 dB: {db:+.4} dB");
     }
 }

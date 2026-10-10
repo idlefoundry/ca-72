@@ -1167,6 +1167,13 @@ impl Voice {
         v
     }
 
+    /// The plug-in's DRIVE (its decisions.md R-STEREO, the CA-74's R29): the mixer's signal
+    /// into the filter's input pair raised by `gain`, after C27, driving the pair harder than
+    /// the panel's mixer can ([`crate::vcf::Drive::gain`]); 1 is the circuit.
+    pub fn set_drive(&mut self, gain: f64) {
+        self.audio.back.vcf.set_drive(gain);
+    }
+
     /// The three oscillators started together `at` one share of the way down their ramps
     /// ([`Vco::start_at`]), as the reference starts them together at the top: for a voice made
     /// or put back to rest that is not the first, so that voices playing one note together do

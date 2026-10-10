@@ -12,7 +12,7 @@ use ca72::voice::{ContourKnobs, OscPanel, Panel, Quality, Waveform};
 use nih_plug::prelude::*;
 
 use crate::character::Placement;
-use crate::engine::{Controls, POLY_VOICES};
+use crate::engine::{Controls, DOUBLE_CENTS, DRIVE_TOP, LEVEL_RANGE, POLY_VOICES};
 use crate::learn::MidiMap;
 
 /// RANGE's positions.
@@ -321,6 +321,25 @@ pub struct Ca72Params {
     /// 100 % (decisions.md R-STEREO). The last parameter: a session saved before it reads 0.
     #[id = "double"]
     pub double: FloatParam,
+    /// DRIVE (0 to 24 dB): the mixer's signal into the filter raised, its input pair driven
+    /// harder (decisions.md R-STEREO). After DOUBLE: a session saved before reads it off.
+    #[id = "drive"]
+    pub drive: FloatParam,
+    /// LEVEL (dB): the output's gain, the plug-in's own, after MAIN OUTPUT's (decisions.md
+    /// R-STEREO). After DRIVE: a session saved before reads 0 dB.
+    #[id = "level"]
+    pub level: FloatParam,
+}
+
+/// Cents as the strip's DETUNE reads them: a number, whole or to a tenth ("12", "7.2"), as an
+/// instrument's display shows it, without a sign (the CA-74's R34).
+pub fn cents(c: f64) -> String {
+    let c = (c * 10.0).round() / 10.0;
+    if c.fract() == 0.0 {
+        format!("{c:.0}")
+    } else {
+        format!("{c:.1}")
+    }
 }
 
 /// An amount, 0 to 100 %.
@@ -420,12 +439,58 @@ impl Default for Ca72Params {
                 },
             ),
             entropy: percent("Entropy"),
-            spread: percent("Spread"),
+            // (The strip's WIDTH: the id is SPREAD's, as sessions and presets have it; the
+            // CA-74's R31.)
+            spread: percent("Width"),
             feedback: ten("Feedback", 0.0),
             lock: BoolParam::new("Lock (oscillators identical)", false),
             placement: EnumParam::new("Scatter Placement", Scatter::Even),
             unison: BoolParam::new("Unison", false),
-            double: percent("Double"),
+            // (The strip's DETUNE, DOUBLE's: its amount in cents, none SCATTER; the CA-74's
+            // R31.)
+            double: percent("Double Detune")
+                .with_unit("")
+                .with_value_to_string(Arc::new(|v| {
+                    if v > 0.0 {
+                        format!("{} cents", cents(f64::from(v) / 100.0 * DOUBLE_CENTS))
+                    } else {
+                        String::from("Off")
+                    }
+                }))
+                .with_string_to_value(Arc::new(|s| {
+                    let t = s.trim();
+                    let t = t
+                        .strip_suffix("cents")
+                        .or_else(|| t.strip_suffix("cent"))
+                        .or_else(|| t.strip_suffix('\u{a2}'))
+                        .unwrap_or(t)
+                        .trim();
+                    if t.eq_ignore_ascii_case("off") {
+                        return Some(0.0);
+                    }
+                    let c: f64 = t.parse().ok()?;
+                    Some((c / DOUBLE_CENTS * 100.0).clamp(0.0, 100.0) as f32)
+                })),
+            drive: FloatParam::new(
+                "Drive",
+                0.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: DRIVE_TOP as f32,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            level: FloatParam::new(
+                "Level",
+                0.0,
+                FloatRange::Linear {
+                    min: LEVEL_RANGE.0 as f32,
+                    max: LEVEL_RANGE.1 as f32,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
         }
     }
 }
@@ -528,9 +593,41 @@ impl Ca72Params {
             placement: self.placement.value().into(),
             unison: self.unison.value(),
             double: value(&self.double) / 100.0,
+            drive: value(&self.drive),
+            level: value(&self.level),
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The host reads DOUBLE's amount as the strip does, DETUNE in cents (Off at none), and
+    /// takes it back so; SPREAD's is the strip's WIDTH. Their ids are as they were (the
+    /// CA-74's test).
+    #[test]
+    fn double_reads_in_cents_and_spread_is_width() {
+        let p = Ca72Params::default();
+        let d = &p.double;
+        let at = |percent: f32| d.normalized_value_to_string(d.preview_normalized(percent), true);
+        assert_eq!(at(0.0), "Off");
+        assert_eq!(at(60.0), "12 cents");
+        assert_eq!(at(36.0), "7.2 cents");
+        let back = |s: &str| {
+            d.string_to_normalized_value(s)
+                .map(|n| (d.preview_plain(n) * 1000.0).round() / 1000.0)
+        };
+        assert_eq!(back("12 cents"), Some(60.0));
+        assert_eq!(back("12 \u{a2}"), Some(60.0));
+        assert_eq!(back("7.2"), Some(36.0));
+        assert_eq!(back("off"), Some(0.0));
+        assert_eq!(back("40"), Some(100.0), "past 20 cents: the most");
+        assert_eq!((d.name(), p.spread.name()), ("Double Detune", "Width"));
+        let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
+        assert!(ids.iter().any(|i| i == "double") && ids.iter().any(|i| i == "spread"));
     }
 }

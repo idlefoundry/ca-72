@@ -75,6 +75,8 @@ pub fn controls_of(s: &Sound) -> Controls {
             "spread" => c.spread = v / 100.0,
             "unison" => c.unison = on(v),
             "double" => c.double = v / 100.0,
+            "drive" => c.drive = v,
+            "level" => c.level = v,
             "placement" => {
                 c.placement = Placement::from_index(v.round().clamp(0.0, 2.0) as usize);
             }

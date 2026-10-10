@@ -478,6 +478,10 @@ pub struct Drive {
     pub bias: LadderBias,
     /// The ladder's time scale: 1 as drawn, or the prewarping factor.
     pub p: f64,
+    /// Not the circuit's: the plug-in's DRIVE (its decisions.md R-STEREO, the CA-74's R29),
+    /// the input pair's view of the bus's current across R54 times this, after C27 (so C27's
+    /// charge, the bus's load and the bias chain are the circuit's); 1 is the circuit.
+    pub gain: f64,
     /// Potato: each pair's tanh taken at once with its series drop folded into its thermal
     /// voltage, not solved behind it ([`plain_pair`]).
     pub plain: bool,
@@ -633,6 +637,8 @@ impl VcfCircuit {
         let r_tot = self.r7 + self.r14 + r73b + r_g;
         let r_b5 = self.r67 * self.r_chain / (self.r67 + self.r_chain);
         let k_in = 1.0 / (1.0 + d.g_n * self.r54);
+        // (R54 as the input pair sees it: DRIVE's gain on the drop across it.)
+        let r54_seen = self.r54 * d.gain;
         let bias = &d.bias;
         let e = bias.e;
         let (di, ddi) = table_hermite(&OUT_DI, OUT_DI_MIN, OUT_DI_STEP, y[W]);
@@ -642,8 +648,8 @@ impl VcfCircuit {
         let i_f0 = (y[NT] - self.r7 * di - y[Q10] - y[VB]) / r_tot;
         // The pair's base currents (Q29's +b u, Q30's -b u) drop across R54 and R73/R76
         // and, through them, change the bus and emphasis currents: D = A - B u.
-        let a = self.r54 * i_in0 - r_g * i_f0;
-        let b = bias.b_in * (self.r54 * k_in + r_g * (1.0 - r_g / r_tot)) + bias.v_in;
+        let a = r54_seen * i_in0 - r_g * i_f0;
+        let b = bias.b_in * (r54_seen * k_in + r_g * (1.0 - r_g / r_tot)) + bias.v_in;
         let pair = |x: f64, b: f64, two_vt: f64, z: &mut PairWarm| {
             if d.plain {
                 plain_pair(x, b, two_vt)
@@ -701,7 +707,7 @@ impl VcfCircuit {
             di_f[VB] = -1.0 / r_tot;
             let mut d_ud = [0.0; STATES];
             for n in [W, Q10, NT, VB, Q27] {
-                d_ud[n] = dud * (self.r54 * di_in[n] - r_g * di_f[n]);
+                d_ud[n] = dud * (r54_seen * di_in[n] - r_g * di_f[n]);
             }
             for n in [W, Q10, NT, VB, Q27] {
                 di_in[n] += c_i * d_ud[n];
@@ -873,6 +879,8 @@ pub struct Vcf {
     pub last_iterations: usize,
     /// The pairs' last solutions: warm starts for the next evaluation.
     zs: [PairWarm; 5],
+    /// The plug-in's DRIVE ([`Drive::gain`]; 1, the circuit).
+    gain: f64,
     /// The prewarping factor for the present bias, and the limit it was taken at.
     warp: Option<(f64, f64)>,
     /// The loop's Jacobian and the output's gradient, kept from step to step: the entries
@@ -933,6 +941,7 @@ impl Vcf {
             tol: 1e-10,
             last_iterations: 0,
             zs: [PairWarm::COLD; 5],
+            gain: 1.0,
             warp: None,
             jac: [[0.0; STATES]; STATES],
             gout: [0.0; STATES],
@@ -966,6 +975,12 @@ impl Vcf {
                 .collect()
         });
         self.bias_key = [self.celsius.to_bits(), self.circuit.c.to_bits()];
+    }
+
+    /// The plug-in's DRIVE (its decisions.md R-STEREO): the input pair's view of the bus's
+    /// current across R54 times `gain` ([`Drive::gain`]); 1 is the circuit.
+    pub fn set_drive(&mut self, gain: f64) {
+        self.gain = gain;
     }
 
     /// The quality mode, from the next sample (switchable while it plays): in Potato the
@@ -1098,6 +1113,7 @@ impl Vcf {
                 bias,
                 p,
                 plain: self.potato,
+                gain: self.gain,
             };
         }
         let p = if self.prewarp_hz > 0.0 {
@@ -1115,6 +1131,7 @@ impl Vcf {
             bias,
             p,
             plain: self.potato,
+            gain: self.gain,
         }
     }
 

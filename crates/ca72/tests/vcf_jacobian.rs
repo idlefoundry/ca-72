@@ -10,15 +10,19 @@ fn filter_jacobian_matches_finite_differences() {
         r14: 3e3,
         ..VcfCircuit::default()
     };
+    // (DRIVE's gain too: the input pair's view of R54 raised, the plug-in's 24 dB.)
     for plain in [false, true] {
-        let d = Drive {
-            i_n: 0.3 / 33e3,
-            g_n: 2.0 / 33e3,
-            bias: c.bias(400e-6, 25.0),
-            p: 1.02,
-            plain,
-        };
-        check(&c, &d);
+        for gain in [1.0, 15.85] {
+            let d = Drive {
+                i_n: 0.3 / 33e3,
+                g_n: 2.0 / 33e3,
+                bias: c.bias(400e-6, 25.0),
+                p: 1.02,
+                plain,
+                gain,
+            };
+            check(&c, &d);
+        }
     }
 }
 
