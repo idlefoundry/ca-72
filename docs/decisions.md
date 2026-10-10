@@ -3249,3 +3249,54 @@ FILTER MODE at the column's foot).
 - **Not done:** no factory preset uses HI (the owner's call); the calibration README's list
   of sessions gains session HP when this branch meets `cal/behringer`'s.
 - **The number** of this record, and board4.md's B4-HP, are placeholders until the merge.
+
+## R-POTATO. QUALITY: Potato mode, the light voices, at LO
+
+**The owner, 2026-10-10:** "with this release I think we should officially launch potato mode.
+We'll just have a HI/LOW selector switch on the UI, I think. Perhaps we can put it above the
+power switch?" Told that Potato mode (the development line's R31, on its unreleased `perf`
+branch, 2026-10-06) is fitted to the circuit as it was before the hardware reference
+recalibrated it (R42 on), and knows neither DRIVE nor FILTER MODE: "just do quality HI / LO for
+now." Shown QUALITY above POWER in the mock-up, as POWER's black rocker or as FILTER MODE's
+orange one: "black, for sure". The owner's decisions of 2026-10-05 on the development line
+stand: a lighter model, allowed to sound worse than the circuit's, costing no more than a
+comparable patch of a common free synthesizer ("Surge XT's usage is your ceiling. Make it as
+good as you can under that."); saved with the session, not with presets.
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- **Where:** the branch `potato`, from `realistic-look` with `cal/hp-mode` merged (the release
+  carries both, and the light voices must play FILTER MODE too). The development line is
+  another history (its base, 6126b71, is not this one's): its light model
+  (`crates/ca72/src/light.rs`) is brought over whole, its engine's integration written again
+  for this engine.
+- **The switch:** QUALITY, in the panel's last column above POWER's lamp, where the column was
+  empty: POWER's black ribbed rocker, upright, HI its upper end pressed, LO its lower (the
+  worn skin draws it from POWER's picture). The host's parameter `potato`, named Quality, HI or
+  LO, HI by default; not a preset's (`library::KEPT`); not learned by MIDI Learn (its menu: "set
+  for the computer, not the sound").
+- **The engine at LO:** a light voice beside each circuit voice and beside DOUBLE's twin, made
+  with it, played in its place with the same keys, character (its offsets read each sample, as
+  the circuit's voice reads them, so that a voice's character is the same whichever plays it),
+  places, DRIVE and FEEDBACK; UNISON's voices started out of step as the circuit's are; a
+  broken voice put to rest in place (nothing to make); no worker woken for a light voice (it
+  costs less than the waking); the one instrument played a run of 128 samples at a time, its
+  lock taken once (the same samples, to the bit, as a sample at a time). Switching QUALITY
+  lets go of the keys held, as switching POLY does. AUTO GAIN measures a sound at LO with the
+  light voices, its key LO's own (HI's keys as before, so sessions' curves stand).
+- **What a voice costs** (`CA72_POTATO=1` with `tests/preset_cost.rs`, the Linux reference
+  machine, ten POLY voices, one thread, unpaced): 2.1 to 3.8 % of a core at LO against 78 to
+  107 % at HI for Bass, Cruising Whistle and Brass Tutti (30 to 45 times lighter).
+
+**Evidence so far (the Linux reference machine, 2026-10-10):** HI plays every factory preset
+the same to the bit as before the change (`preset_render` against 1535b5f); the engine's tests
+of LO (the light voices play, switching lets go of the keys, POLY's voices sound and are freed,
+the one instrument's runs the same to the bit as its samples, DOUBLE placed and UNISON
+levelled as at HI, AUTO GAIN measuring with the light voices); `quality_lo_neither_allocates_nor_frees_while_it_plays`;
+`tests/fuzz_bounds.rs` with QUALITY among the controls at their ends; the editor's QUALITY
+clicked as a rocker and its MIDI Learn menu; rustfmt; clippy.
+
+**To follow:** the light voices fitted again to this circuit (the laws, DRIVE, FILTER MODE's HI,
+FEEDBACK), every preset's A/B for the owner's listening, the cost on the Windows reference
+machine against Surge XT as R31 measured it, the README.
+- **The number** of this record is a placeholder until the merge.
+
