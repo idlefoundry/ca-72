@@ -2988,6 +2988,9 @@ list that drops down over the strip inside the window."
   display's glass a sounding drop measures (233, 130, 63) and an idle one (155, 89, 44) where
   the owner's picture has (225, 134, 63) and (159, 80, 38) (an idle one's light half a
   sounding one's share, the mock-up's a third, for the same).
+  Then "make sure the arrow on the right side of the preset dropdown is also dots like this":
+  the list's arrow in the name's dots too, the mock-up's glyphs (down while the list is shut,
+  up while it is down), 0.7 of the name's light but under the pointer.
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
