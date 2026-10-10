@@ -96,14 +96,12 @@ impl Motion {
         if (self.level - level).abs() < 1e-3 {
             self.level = level;
         }
-        // The hamster: picking up his run as his wheel comes forward (dropping it as it goes
-        // down), then running while the synth sounds.
-        let lift = smooth(0.44, 1.0, self.hamster);
+        // The hamster: running already as the shutter opens on him and his wheel comes forward
+        // (the owner: "don't wait for the hamster to come forward for him to start running. He
+        // should already be running"), and as it goes down; up, running while the synth sounds.
         let wanted = if self.hamster <= 0.0 {
             0.0
-        } else if self.hamster < 1.0 {
-            lift
-        } else if level >= RUN_AT {
+        } else if self.hamster < 1.0 || level >= RUN_AT {
             1.0
         } else {
             0.0

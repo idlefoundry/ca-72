@@ -136,7 +136,7 @@ fn not_learnable(t: Target) -> Option<String> {
         Target::Control(i) | Target::Legend(i, _) => match CONTROLS.get(i)?.param {
             "pitch_wheel" => "PITCH: MIDI PITCH BEND MOVES IT".into(),
             "mod_wheel" => "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT".into(),
-            "quality" => "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND".into(),
+            "quality" => "QUALITY: SET PER PLUGIN INSTANCE".into(),
             _ => return None,
         },
         Target::Power => "POWER: THE HOST'S BYPASS".into(),
@@ -250,7 +250,7 @@ impl Learning {
             x,
             y,
             size,
-            title: "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND".to_owned(),
+            title: "QUALITY: SET PER PLUGIN INSTANCE".to_owned(),
             items: items
                 .iter()
                 .map(|(_, t, on)| ((*t).to_owned(), *on))

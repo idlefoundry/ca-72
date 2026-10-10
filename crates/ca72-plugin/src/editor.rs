@@ -2810,7 +2810,7 @@ mod tests {
         right_click(&mut e, toggle);
         assert_eq!(
             e.learning.menu().map(|m| m.title.as_str()),
-            Some("QUALITY: SET FOR THE COMPUTER, NOT THE SOUND")
+            Some("QUALITY: SET PER PLUGIN INSTANCE")
         );
         assert_eq!(
             menu_items(&e),
@@ -3305,7 +3305,7 @@ mod tests {
                 "mod_wheel",
                 "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT",
             ),
-            ("quality", "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND"),
+            ("quality", "QUALITY: SET PER PLUGIN INSTANCE"),
         ] {
             let p = at(&e, centre(param));
             right_click(&mut e, p);
