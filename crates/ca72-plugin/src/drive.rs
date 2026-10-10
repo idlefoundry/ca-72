@@ -56,12 +56,17 @@ pub fn unmeasured() -> Saved {
 }
 
 /// The key of a sound as far as DRIVE's loudness goes: the panel, LOCK, ENTROPY (each voice its
-/// own parts) and FEEDBACK (the voice's output into its own external input). Not POLY, UNISON,
-/// VOICES, DOUBLE or SPREAD: a note's voices each have their own filter, so a chord, a unison
-/// or a pair sum what one voice does (their levels are their own trims'). Never 0.
+/// own parts), FEEDBACK (the voice's output into its own external input) and QUALITY (at LO,
+/// the light voices'; at HI keyed as before it). Not POLY, UNISON, VOICES, DOUBLE or SPREAD: a
+/// note's voices each have their own filter, so a chord, a unison or a pair sum what one voice
+/// does (their levels are their own trims'). Never 0.
 pub fn sound(c: &Controls) -> u64 {
     // (FNV-1a over the debug form: every field of the panel, the floats to the bit.)
-    let text = format!("{:?}", (c.panel, c.lock, c.entropy, c.feedback));
+    let text = if c.potato {
+        format!("{:?}", (c.panel, c.lock, c.entropy, c.feedback, "LO"))
+    } else {
+        format!("{:?}", (c.panel, c.lock, c.entropy, c.feedback))
+    };
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in text.bytes() {
         h ^= u64::from(b);

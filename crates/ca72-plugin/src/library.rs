@@ -33,9 +33,9 @@ use toml::Value;
 /// The format of the files this reads and writes.
 pub const FORMAT: i64 = 1;
 
-/// The parameters a preset never sets: the PITCH wheel (where the player leaves it) and the
-/// bypass (the host's).
-pub const KEPT: &[&str] = &["pitch_wheel", "bypass"];
+/// The parameters a preset never sets: the PITCH wheel (where the player leaves it), the
+/// bypass (the host's) and QUALITY (the computer's: decisions.md R-POTATO).
+pub const KEPT: &[&str] = &["pitch_wheel", "bypass", "potato"];
 
 const MOST_TAGS: usize = 16;
 const LONGEST_TAG: usize = 32;

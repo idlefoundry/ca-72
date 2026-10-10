@@ -96,6 +96,7 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         auto_gain: r.end(),
         feedback: r.either(0.0, 1.0),
         lock: r.end(),
+        potato: r.end(),
     }
 }
 

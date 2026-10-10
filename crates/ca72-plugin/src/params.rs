@@ -355,6 +355,12 @@ pub struct Ca72Params {
     /// before reads it on.
     #[id = "auto_gain"]
     pub auto_gain: BoolParam,
+    /// QUALITY, HI by default: at LO the voices are played by the light model, Potato mode,
+    /// for computers the circuit's is too heavy for (decisions.md R-POTATO). Not a preset's
+    /// (`library::KEPT`): it suits the computer, not the sound; saved with the session. After
+    /// AUTO GAIN: a session saved before reads it HI.
+    #[id = "potato"]
+    pub potato: BoolParam,
 }
 
 /// Cents as the strip's DETUNE reads them: a number, whole or to a tenth ("12", "7.2"), as an
@@ -520,6 +526,13 @@ impl Default for Ca72Params {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
             auto_gain: BoolParam::new("Auto Gain", true),
+            potato: BoolParam::new("Quality", false)
+                .with_value_to_string(Arc::new(|lo| if lo { "LO" } else { "HI" }.to_owned()))
+                .with_string_to_value(Arc::new(|s| match s.trim().to_ascii_uppercase().as_str() {
+                    "LO" => Some(true),
+                    "HI" => Some(false),
+                    _ => None,
+                })),
         }
     }
 }
@@ -629,6 +642,7 @@ impl Ca72Params {
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),
+            potato: self.potato.value(),
         }
     }
 }

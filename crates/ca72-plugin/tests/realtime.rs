@@ -250,6 +250,79 @@ fn poly_neither_allocates_nor_frees_while_it_plays() {
     );
 }
 
+/// QUALITY at LO (decisions.md R-POTATO): the light voices played as the plug-in plays its
+/// host's blocks, the one instrument a run at a time and POLY's chords, with the side chain
+/// and FEEDBACK, ENTROPY and SPREAD, DOUBLE and UNISON switched on and off, the panel moving,
+/// QUALITY and POLY switched while it plays, All Sound Off among it: no allocation, no free on
+/// the audio thread.
+#[test]
+fn quality_lo_neither_allocates_nor_frees_while_it_plays() {
+    let _serial = start();
+    let mut e = Engine::new();
+    let mut c = Controls {
+        potato: true,
+        voices: 8,
+        entropy: 0.7,
+        spread: 0.9,
+        feedback: 0.4,
+        drive: 9.0,
+        ..Controls::default()
+    };
+    e.set(&c);
+    e.prepare(RATE, 7);
+    HERE.with(|h| h.set(true));
+    ARMED.store(true, Ordering::SeqCst);
+    let mut sink = 0.0f32;
+    let (mut l, mut r, mut ext) = ([0.0f32; BLOCK], [0.0f32; BLOCK], [0.0f32; BLOCK]);
+    for b in 0..(2 * RATE as usize / BLOCK) {
+        if b.is_multiple_of(40) {
+            for k in [24u8, 45, 52, 57, 61, 64, 69, 73, 76, 110] {
+                e.event(Event::Note {
+                    key: k + (b / 40 % 3) as u8,
+                    on: true,
+                });
+            }
+        }
+        if b % 40 == 30 {
+            for k in [24u8, 45, 52, 57, 61, 64] {
+                e.event(Event::Note {
+                    key: k + (b / 40 % 3) as u8,
+                    on: false,
+                });
+            }
+        }
+        hush(&mut e, b);
+        c.poly = b / 75 % 2 == 1;
+        c.unison = b / 50 % 3 == 2;
+        c.double = if b / 60 % 2 == 1 { 0.6 } else { 0.0 };
+        if b % 170 == 169 {
+            c.potato = !c.potato;
+        }
+        c.panel.cutoff = 0.5 + 0.3 * (b as f64 * 0.05).sin();
+        e.set(&c);
+        for (i, x) in ext.iter_mut().enumerate() {
+            *x = 0.1 * ((b * BLOCK + i) as f32 * 0.01).sin();
+        }
+        e.render(&ext, &mut l, &mut r);
+        sink += l.iter().chain(&r).sum::<f32>();
+        sink += e.end_block(BLOCK);
+    }
+    e.release_all();
+    ARMED.store(false, Ordering::SeqCst);
+    std::hint::black_box(sink);
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "LO allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+    );
+}
+
 /// POLY's voices shared with workers (decisions.md R11), played between the events as the
 /// plug-in plays its host's blocks, each block given its deadline, the side chain driven,
 /// chords of ten taking held voices, VOICES changed and POLY switched while it plays, its

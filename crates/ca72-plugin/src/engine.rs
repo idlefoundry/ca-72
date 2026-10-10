@@ -17,6 +17,7 @@
 //! across the stereo field where the placement has them (`character.rs`), one voice alone in
 //! the centre; both 0 by default, the circuit as drawn.
 
+use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
 use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
@@ -125,6 +126,9 @@ pub struct Controls {
     /// ([`lock_trim`]); off, each oscillator keeps its own floor of mismatch
     /// ([`ENTROPY_FLOOR`]; decisions.md R9).
     pub lock: bool,
+    /// QUALITY at LO, Potato mode: the voices played by the light model ([`Light`]), not the
+    /// circuit's, for computers the circuit is too heavy for (decisions.md R-POTATO).
+    pub potato: bool,
 }
 
 impl Default for Controls {
@@ -147,6 +151,7 @@ impl Default for Controls {
             auto_gain: true,
             feedback: 0.0,
             lock: false,
+            potato: false,
         }
     }
 }
@@ -243,24 +248,25 @@ impl PolyKey {
         }
     }
 
-    /// The voice's gate and key for the next sample, played on `voice`'s keys.
-    fn step(&mut self, gate: bool, key: i32, voice: &mut Voice) {
+    /// The voice's gate and key for the next sample, played on its keys by `note` (the
+    /// circuit's voice's, or the light one's).
+    fn step(&mut self, gate: bool, key: i32, mut note: impl FnMut(i32, bool)) {
         if gate {
             match self.down {
                 None if self.open >= self.gap => {
-                    voice.note(key, true);
+                    note(key, true);
                     self.down = Some(key);
                 }
                 None => {}
                 Some(old) if old != key => {
-                    voice.note(key, true);
-                    voice.note(old, false);
+                    note(key, true);
+                    note(old, false);
                     self.down = Some(key);
                 }
                 Some(_) => {}
             }
         } else if let Some(old) = self.down.take() {
-            voice.note(old, false);
+            note(old, false);
             self.open = 0;
         }
         if self.down.is_none() {
@@ -268,10 +274,10 @@ impl PolyKey {
         }
     }
 
-    /// Its key lifted at once (POLY switched, the voices rebuilt).
-    fn lift(&mut self, voice: &mut Voice) {
+    /// Its key lifted at once (POLY switched, the voices rebuilt), on the keys `note` plays.
+    fn lift(&mut self, mut note: impl FnMut(i32, bool)) {
         if let Some(old) = self.down.take() {
-            voice.note(old, false);
+            note(old, false);
         }
     }
 
@@ -337,6 +343,7 @@ impl Slot {
 #[derive(Debug, Clone)]
 struct Twin {
     voice: Voice,
+    light: Light,
     character: Character,
     key: PolyKey,
     pan: Option<(f64, f64)>,
@@ -368,6 +375,7 @@ fn made_twin(rate: f64, seed: u64, k: usize) -> Box<Twin> {
     let j = k + POLY_VOICES.2;
     Box::new(Twin {
         voice: made_voice(rate, seed, j),
+        light: made_light(rate, seed, j),
         character: Character::new(voice_seed(seed, j), j, 3, ENTROPY_KNOBS),
         key: PolyKey::new(rate),
         pan: None,
@@ -381,6 +389,9 @@ fn made_twin(rate: f64, seed: u64, k: usize) -> Box<Twin> {
 #[derive(Debug, Clone)]
 pub struct Playing {
     voice: Voice,
+    /// The light model's voice, and whether it is the one played (QUALITY at LO).
+    light: Light,
+    potato: bool,
     character: Character,
     key: PolyKey,
     gate: bool,
@@ -425,6 +436,10 @@ impl Playing {
     /// As [`Playing::play`], for as many samples as `ext` has, its place gliding by `share`
     /// a sample ([`glide_share`] at `rate`).
     fn play_from(&mut self, ext: &[f64], rate: f64, m: &Mix, share: f64) {
+        if self.potato {
+            self.play_light_from(ext, rate, m, share);
+            return;
+        }
         let p = self.places(m);
         self.voice.set_drive(m.drive);
         self.twin.voice.set_drive(m.drive);
@@ -449,7 +464,8 @@ impl Playing {
                 (self.out[0][k], self.out[1][k]) = (0.0, 0.0);
                 continue;
             }
-            self.key.step(gate, note, &mut self.voice);
+            let voice = &mut self.voice;
+            self.key.step(gate, note, |k, on| voice.note(k, on));
             let mut j = jacks(&mut self.character, x, rate, m);
             if p.doubled {
                 j.detune = j.detune.map(|d| d - p.half);
@@ -463,12 +479,94 @@ impl Playing {
             if p.twin_on {
                 let t = &mut self.twin;
                 // (A twin let go plays its tail out, its key lifted.)
-                t.key.step(gate && p.doubled, note, &mut t.voice);
+                let voice = &mut t.voice;
+                t.key
+                    .step(gate && p.doubled, note, |k, on| voice.note(k, on));
                 let mut j = jacks(&mut t.character, x, rate, m);
                 if p.doubled {
                     j.detune = j.detune.map(|d| d + p.half);
                 }
                 let mut z = t.voice.tick_jacks(&j);
+                if !z.is_finite() {
+                    self.broken = true;
+                    z = 0.0;
+                }
+                left += z * hl;
+                right += z * hr;
+                most = most.max(z.abs());
+                twin_peak = twin_peak.max(z.abs());
+            }
+            peak = peak.max(most);
+            self.out[0][k] = left;
+            self.out[1][k] = right;
+        }
+        self.peak = peak;
+        self.pan = Some((gl, gr));
+        self.twin.ran(
+            ext.len(),
+            p.doubled,
+            twin_peak,
+            p.twin_on.then_some((hl, hr)),
+        );
+    }
+
+    /// [`Playing::play_from`] at QUALITY's LO: the light voices played in the circuit's
+    /// voices' place, with their keys, characters, places and DOUBLE's twin as theirs (the
+    /// character's offsets read each sample, as the circuit's voice reads them, so that a
+    /// voice's character is the same whichever plays it).
+    fn play_light_from(&mut self, ext: &[f64], rate: f64, m: &Mix, share: f64) {
+        let p = self.places(m);
+        self.light.set_drive(m.drive);
+        self.twin.light.set_drive(m.drive);
+        let (mut gl, mut gr) = self.pan.unwrap_or(p.voice);
+        let (mut hl, mut hr) = self.twin.pan.unwrap_or(p.twin);
+        let (mut peak, mut twin_peak) = (0.0f64, 0.0f64);
+        let note = i32::from(self.note);
+        for (k, &x) in ext.iter().enumerate() {
+            let gate = if self.drop {
+                self.drop = false;
+                false
+            } else {
+                self.gate
+            };
+            gl += (p.voice.0 - gl) * share;
+            gr += (p.voice.1 - gr) * share;
+            if p.twin_on {
+                hl += (p.twin.0 - hl) * share;
+                hr += (p.twin.1 - hr) * share;
+            }
+            if self.broken {
+                (self.out[0][k], self.out[1][k]) = (0.0, 0.0);
+                continue;
+            }
+            let light = &mut self.light;
+            self.key.step(gate, note, |k, on| light.note(k, on));
+            let j = jacks(&mut self.character, x, rate, m);
+            let detune = if p.doubled {
+                j.detune.map(|d| d - p.half)
+            } else {
+                j.detune
+            };
+            self.light.set_offsets(detune, j.cutoff);
+            let mut y = self.light.tick(x);
+            if !y.is_finite() {
+                self.broken = true;
+                y = 0.0;
+            }
+            let (mut left, mut right, mut most) = (y * gl, y * gr, y.abs());
+            if p.twin_on {
+                let t = &mut *self.twin;
+                let light = &mut t.light;
+                t.key
+                    .step(gate && p.doubled, note, |k, on| light.note(k, on));
+                let j = jacks(&mut t.character, x, rate, m);
+                let detune = if p.doubled {
+                    j.detune.map(|d| d + p.half)
+                } else {
+                    j.detune
+                };
+                t.light.set_offsets(detune, j.cutoff);
+                let mut z = t.light.tick(x);
                 if !z.is_finite() {
                     self.broken = true;
                     z = 0.0;
@@ -523,16 +621,32 @@ impl Playing {
     /// and on its twin's: pressed there only with DOUBLE on, so that a twin let go plays its
     /// tail out.
     fn note(&mut self, key: i32, on: bool) {
-        self.voice.note(key, on);
-        if self.double || !on {
-            self.twin.voice.note(key, on);
+        let twin = self.double || !on;
+        if self.potato {
+            self.light.note(key, on);
+            if twin {
+                self.twin.light.note(key, on);
+            }
+        } else {
+            self.voice.note(key, on);
+            if twin {
+                self.twin.voice.note(key, on);
+            }
         }
     }
 
-    /// Its key and its twin's lifted at once.
+    /// Its key and its twin's lifted at once, on the voices played.
     fn lift(&mut self) {
-        self.key.lift(&mut self.voice);
-        self.twin.key.lift(&mut self.twin.voice);
+        let t = &mut *self.twin;
+        if self.potato {
+            let (light, twin) = (&mut self.light, &mut t.light);
+            self.key.lift(|k, on| light.note(k, on));
+            t.key.lift(|k, on| twin.note(k, on));
+        } else {
+            let (voice, twin) = (&mut self.voice, &mut t.voice);
+            self.key.lift(|k, on| voice.note(k, on));
+            t.key.lift(|k, on| twin.note(k, on));
+        }
     }
 }
 
@@ -748,11 +862,13 @@ impl Engine {
                         // (Made again, as an instance opened with the seed makes them: its
                         // voices' oscillators start where it says.)
                         p.voice = made_voice(voice_rate, seed, k);
+                        p.light = made_light(voice_rate, seed, k);
                         p.character = Character::new(voice_seed(seed, k), k, 3, ENTROPY_KNOBS);
                         p.twin = made_twin(voice_rate, seed, k);
                         p.panel_gen = u64::MAX;
                     } else {
                         p.voice.set_seed(voice_seed(seed, k));
+                        p.light.set_seed(voice_seed(seed, k));
                     }
                 }
             }
@@ -788,6 +904,8 @@ impl Engine {
             .map(|k| Slot {
                 play: Arc::new(Mutex::new(Playing {
                     voice: made_voice(voice_rate, seed, k),
+                    light: made_light(voice_rate, seed, k),
+                    potato: false,
                     character: Character::new(voice_seed(seed, k), k, 3, ENTROPY_KNOBS),
                     key: PolyKey::new(voice_rate),
                     gate: false,
@@ -934,6 +1052,7 @@ impl Engine {
     pub fn set(&mut self, c: &Controls) {
         if *c != self.controls {
             if c.poly != self.controls.poly
+                || c.potato != self.controls.potato
                 || c.unison != self.controls.unison
                 || (c.unison && c.voices != self.controls.voices)
                 || (c.double > 0.0) != (self.controls.double > 0.0)
@@ -1090,6 +1209,34 @@ impl Engine {
     /// the spare has not been made again since it was last used. Either way the spares are
     /// then to be mended ([`Engine::take_mending`]).
     fn restore(&mut self, k: usize, p: &mut Playing) -> bool {
+        if p.potato {
+            // (The light voices are put to rest in place: nothing to make.)
+            p.light.rest();
+            p.twin.light.rest();
+            light_seeded(&mut p.light, self.seed, k);
+            light_seeded(&mut p.twin.light, self.seed, k + POLY_VOICES.2);
+        } else if !self.restore_voices(k, p) {
+            return false;
+        }
+        p.key.rest();
+        p.twin.key.rest();
+        (p.twin.live, p.twin.quiet, p.twin.pan) = (false, 0, None);
+        (p.broken, p.drop) = (false, false);
+        let s = &mut self.slots[k];
+        (s.lift, s.pending, s.shown) = (false, 0, false);
+        // (The panel before the keys: DOUBLE's, which the twin takes keys by.)
+        self.voice_panel(p, &self.panel());
+        if k < self.instruments() {
+            for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
+                p.note(key as i32, true);
+            }
+        }
+        true
+    }
+
+    /// Place `k`'s circuit voice and twin swapped for clean spares, seeded as made: whether
+    /// they were (not if the spares are not clean or not at the voices' rate).
+    fn restore_voices(&mut self, k: usize, p: &mut Playing) -> bool {
         self.mend = true;
         let rate = p.voice.rate();
         let Ok(mut spare) = self.spares.places[k].try_lock() else {
@@ -1109,19 +1256,6 @@ impl Engine {
         drop(spare);
         seeded(&mut p.voice, self.seed, k);
         seeded(&mut p.twin.voice, self.seed, k + POLY_VOICES.2);
-        p.key.rest();
-        p.twin.key.rest();
-        (p.twin.live, p.twin.quiet, p.twin.pan) = (false, 0, None);
-        (p.broken, p.drop) = (false, false);
-        let s = &mut self.slots[k];
-        (s.lift, s.pending, s.shown) = (false, 0, false);
-        // (The panel before the keys: DOUBLE's, which the twin takes keys by.)
-        self.voice_panel(p, &self.panel());
-        if k < self.instruments() {
-            for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
-                p.note(key as i32, true);
-            }
-        }
         true
     }
 
@@ -1244,7 +1378,10 @@ impl Engine {
     pub fn render(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
         let len = left.len().min(right.len());
         let at = |i: usize| ext.get(i).copied().filter(|x| x.is_finite()).unwrap_or(0.0);
-        if !self.many() || self.over.is_some() || self.slots.is_empty() {
+        // (At QUALITY's LO the one instrument too plays a run at a time: its light voice costs
+        // too little for a lock and a place worked out each sample to be nothing beside it.)
+        let runs = self.many() || self.controls.potato;
+        if !runs || self.over.is_some() || self.slots.is_empty() {
             for i in 0..len {
                 (left[i], right[i]) = self.tick_stereo(at(i));
             }
@@ -1277,7 +1414,11 @@ impl Engine {
             }
             let (mut l, mut r) = ([0.0f64; CHUNK], [0.0f64; CHUNK]);
             if run > 0 {
-                self.run(run, &ins, rate, &mix, true, &mut l, &mut r);
+                if self.many() {
+                    self.run(run, &ins, rate, &mix, true, &mut l, &mut r);
+                } else {
+                    self.run_one(run, &ins, rate, &mix, &mut l, &mut r);
+                }
             }
             for k in 0..n {
                 (left[start + k], right[start + k]) = if k < run {
@@ -1288,6 +1429,28 @@ impl Engine {
             }
             start += n;
         }
+    }
+
+    /// The one instrument's voice (POLY and UNISON off) over `n` samples, as as many samples
+    /// of [`Engine::tick_stereo`] play it, its lock taken once: silent for the run if a worker
+    /// late from an earlier run still holds it.
+    fn run_one(
+        &mut self,
+        n: usize,
+        ext: &[f64; CHUNK],
+        rate: f64,
+        mix: &Mix,
+        l: &mut [f64; CHUNK],
+        r: &mut [f64; CHUNK],
+    ) {
+        let play = self.slots[0].play.clone();
+        let Ok(mut p) = play.try_lock() else {
+            return;
+        };
+        self.bring_up(0, &mut p);
+        p.play_from(&ext[..n], rate, mix, self.glide);
+        l[..n].copy_from_slice(&p.out[0][..n]);
+        r[..n].copy_from_slice(&p.out[1][..n]);
     }
 
     /// POLY's sounding voices over `n` samples, summed into `l` and `r` in their order: each
@@ -1323,6 +1486,8 @@ impl Engine {
             count += 1;
         }
         let deadline = self.deadline;
+        // (At QUALITY's LO a voice costs less than waking a worker for it: every voice here.)
+        let share = share && !self.controls.potato;
         let played = match &mut self.pool {
             Some(pool) if share && count > 1 && n >= SHARED_RUN => {
                 pool.play(&list[..count], n, ext, rate, mix, deadline)
@@ -1477,6 +1642,10 @@ impl Engine {
         };
         for (k, s) in self.slots.iter_mut().enumerate() {
             let overload = |p: &mut Playing| {
+                if p.potato {
+                    let twin = p.twin.light.take_overload_peak();
+                    return p.light.take_overload_peak().max(twin);
+                }
                 let twin = p.twin.voice.take_overload_peak();
                 p.voice.take_overload_peak().max(twin)
             };
@@ -1595,6 +1764,15 @@ impl Engine {
             };
             if voice.panel != pv {
                 voice.panel = pv;
+            }
+        }
+        // (The light voices only at LO: their laws are worked out again as their panel
+        // changes, which the circuit's voices have no need of.)
+        v.potato = self.controls.potato;
+        if v.potato {
+            for (light, voice) in [(&mut v.light, &v.voice), (&mut v.twin.light, &v.twin.voice)] {
+                light.feedback = feedback;
+                light.set_panel(&voice.panel);
             }
         }
         v.double = self.controls.double > 0.0;
@@ -1881,6 +2059,23 @@ fn made_voice(rate: f64, seed: u64, k: usize) -> Voice {
     voice
 }
 
+/// Voice `k`'s light model (QUALITY's LO) of an instance seeded `seed`, at `rate` Hz,
+/// [`light_seeded`]. (Made with the voice, off the audio thread; it allocates nothing after.)
+fn made_light(rate: f64, seed: u64, k: usize) -> Light {
+    let mut light = Light::new(rate);
+    light_seeded(&mut light, seed, k);
+    light
+}
+
+/// A light voice at rest made voice `k` of an instance seeded `seed`, as [`seeded`] makes the
+/// circuit's: its noise seeded, its oscillators started where [`out_of_step`] says.
+fn light_seeded(light: &mut Light, seed: u64, k: usize) {
+    light.set_seed(voice_seed(seed, k));
+    if let Some(at) = out_of_step(k, seed) {
+        light.start_oscillators_at(at);
+    }
+}
+
 /// A clean voice made voice `k` of an instance seeded `seed`: its noise seeded, its
 /// oscillators started where [`out_of_step`] says.
 fn seeded(voice: &mut Voice, seed: u64, k: usize) {
@@ -1984,8 +2179,16 @@ impl Probe {
                 } else {
                     panel
                 };
+                // (At QUALITY's LO the light voices measured, as they play.)
+                let mut light = made_light(rate, PROBE_SEED, k);
+                if controls.potato {
+                    light.feedback = voice.feedback;
+                    light.set_panel(&voice.panel);
+                }
                 Playing {
                     voice,
+                    light,
+                    potato: controls.potato,
                     character,
                     key: PolyKey::new(rate),
                     gate: false,
@@ -3058,5 +3261,137 @@ mod tests {
             ),
         );
         assert_eq!(a, b);
+    }
+
+    /// Blocks of `e` for `seconds`, the loudest sample's level.
+    fn loudest(e: &mut Engine, seconds: f64) -> f32 {
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let mut most = 0.0f32;
+        for _ in 0..(seconds * 48_000.0 / 256.0) as usize {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(256);
+            most = l.iter().chain(&r).fold(most, |a, x| a.max(x.abs()));
+        }
+        most
+    }
+
+    /// QUALITY at LO (decisions.md R-POTATO): the one instrument and POLY's voices play the
+    /// light model, not the circuit's, and switching QUALITY lets go of the keys held, as
+    /// switching POLY does.
+    #[test]
+    fn quality_lo_plays_the_light_voices_and_switching_it_lets_go_of_the_keys() {
+        let mut c = Controls {
+            potato: true,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 1);
+        e.event(Event::Note { key: 57, on: true });
+        assert!(loudest(&mut e, 0.5) > 0.01, "the light voice silent");
+        {
+            let p = e.slots[0].play.lock().unwrap();
+            assert!(p.light.held(), "the key not on the light voice");
+            assert!(!p.voice.envelopes().2, "the circuit's voice got the key");
+        }
+        c.potato = false;
+        e.set(&c);
+        assert!(
+            !e.slots[0].play.lock().unwrap().light.held(),
+            "the key still held on the light voice"
+        );
+        // POLY at LO: a chord's voices sound, and fall silent and free after (the DECAY
+        // switch off: the contours let go at once).
+        (c.potato, c.poly, c.panel.decay) = (true, true, false);
+        e.set(&c);
+        for key in [48, 55, 64] {
+            e.event(Event::Note { key, on: true });
+        }
+        assert!(loudest(&mut e, 0.5) > 0.01, "POLY's light voices silent");
+        assert_eq!(e.sounding(), 3);
+        e.event(Event::AllNotesOff);
+        // (Two seconds: the VCA's thump dies away over about one, as the circuit's does.)
+        loudest(&mut e, 2.0);
+        assert_eq!(e.sounding(), 0, "POLY's light voices not freed");
+    }
+
+    /// At LO the one instrument plays a run at a time ([`Engine::run_one`]): the same samples,
+    /// to the bit, as a sample at a time, ENTROPY's movements and the glide of its place
+    /// among them.
+    #[test]
+    fn the_one_voice_at_lo_plays_a_run_as_a_sample_at_a_time() {
+        let c = Controls {
+            potato: true,
+            entropy: 0.5,
+            ..Controls::default()
+        };
+        let make = || {
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 3);
+            e.event(Event::Note { key: 60, on: true });
+            e
+        };
+        let (mut runs, mut samples) = (make(), make());
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let mut heard = 0.0f32;
+        for block in 0..40 {
+            runs.render(&[], &mut l, &mut r);
+            for i in 0..256 {
+                let (a, b) = samples.tick_stereo(0.0);
+                assert!(
+                    a.to_bits() == l[i].to_bits() && b.to_bits() == r[i].to_bits(),
+                    "block {block}, sample {i}"
+                );
+                heard = heard.max(a.abs());
+            }
+            runs.end_block(256);
+            samples.end_block(256);
+        }
+        assert!(heard > 0.01, "silent");
+    }
+
+    /// At LO DOUBLE's pair and UNISON's voices are placed and levelled as at HI: the pair to
+    /// either side at full SPREAD, the unison about as loud as one voice.
+    #[test]
+    fn lo_places_double_and_levels_unison_as_hi() {
+        let doubled = Controls {
+            potato: true,
+            poly: true,
+            double: 1.0,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let (mid, side, _) = sides(&doubled, &[57]);
+        assert!(side > 0.05 * mid && mid > 0.0, "mid {mid}, side {side}");
+        let c = Controls {
+            potato: true,
+            voices: 8,
+            entropy: 0.3,
+            ..Controls::default()
+        };
+        let one = held_power(&c, 45, 1.0, 2.0);
+        let all = held_power(&Controls { unison: true, ..c }, 45, 1.0, 2.0);
+        let db = 10.0 * (all / one).log10();
+        assert!(db.abs() < 2.0, "UNISON {db:+.1} dB against one voice");
+    }
+
+    /// AUTO GAIN measures a sound at LO with the light voices (`drive.rs`), its key the sound's
+    /// at LO; at HI keyed as before.
+    #[test]
+    fn auto_gain_measures_lo_with_the_light_voices() {
+        let hi = Controls::default();
+        let lo = Controls { potato: true, ..hi };
+        assert_ne!(crate::drive::sound(&lo), crate::drive::sound(&hi));
+        let probe = Probe::new(&lo, MIN_VOICE_RATE);
+        assert!(probe.voices.iter().all(|v| v.potato));
+        let e = probe.energy(0.0);
+        assert!(e.is_finite() && e > 0.0, "{e}");
+        assert!(
+            Probe::new(&hi, MIN_VOICE_RATE)
+                .voices
+                .iter()
+                .all(|v| !v.potato)
+        );
     }
 }
