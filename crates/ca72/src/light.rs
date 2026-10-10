@@ -63,10 +63,12 @@ pub mod laws {
     /// reset): a little before half way, as the circuit's, whose even harmonics stand 37 dB
     /// (the second), 43 and 46 dB under its fundamental.
     pub const TRIANGLE_BOTTOM: f32 = 0.4915;
-    /// The shark tooth: the triangle inverted (its peak at the sawtooth's reset) and the
-    /// falling sawtooth, as R030 and R031 mix them.
-    pub const SHARK_TRIANGLE: f32 = 0.686;
-    pub const SHARK_SAWTOOTH: f32 = 0.184;
+    /// The shark tooth: the triangle inverted (its peak at the sawtooth's reset, and this
+    /// share of a period ahead of it) and the falling sawtooth, as R030 and R031 mix them (its
+    /// odd harmonics so within 0.5 dB of the circuit's to the ninth).
+    pub const SHARK_TRIANGLE: f32 = 0.704;
+    pub const SHARK_SAWTOOTH: f32 = 0.189;
+    pub const SHARK_AHEAD: f32 = 0.0175;
     pub const SOURCE_OHMS: [f64; 4] = [687.0, 2246.0, 3500.0, 8790.0];
     /// Oscillator 3's channel against the others' (its sawtooth through the reverse
     /// sawtooth's stage).
@@ -77,8 +79,8 @@ pub mod laws {
     pub const COUPLING_HZ: f64 = 13.0;
     pub const DROOP_HZ: f64 = 4.4;
     /// FILTER MODE HI (decisions.md R-HP): the bus less the filter's output, the bus at the
-    /// filter's own passband at EMPHASIS 0 (here the ladder's at the cutoff, times this) and
-    /// through its own coupling, Hz (vcf.rs's `MODE_HZ`).
+    /// filter's own passband at EMPHASIS 0 (the open ladder's, times this) and through its
+    /// own coupling, Hz (vcf.rs's `MODE_HZ`).
     pub const MODE_GAIN: f32 = 1.0;
     pub const MODE_HZ: f64 = 3.0;
     /// The VCA's control feeding through to the output, its thump as the loudness contour
@@ -91,8 +93,8 @@ pub mod laws {
     /// The noise: white's and pink's level (on their generators' units), their channels'
     /// source resistances (pink's through R50), and each one's band (a high-pass and a
     /// low-pass, Hz).
-    pub const WHITE: f32 = 0.593;
-    pub const PINK: f32 = 0.433;
+    pub const WHITE: f32 = 0.600;
+    pub const PINK: f32 = 0.440;
     pub const NOISE_OHMS: (f64, f64) = (700.0, 26.2e3);
     pub const WHITE_BAND: (f64, f64) = (60.0, 9_500.0);
     pub const PINK_BAND: (f64, f64) = (40.0, 6_500.0);
@@ -116,14 +118,14 @@ pub mod laws {
     /// input lower than one pair would (0.82 of it at 24 dB).
     pub const DRIVE_CEILING: f64 = -0.0716;
     /// The output from the ladder's (at the VCA's gain 1: the loudness contour at 4.455 V).
-    pub const OUT: f32 = 0.709;
+    pub const OUT: f32 = 0.705;
 
     /// CUTOFF: log2 of the self-oscillating ladder's pitch, Hz, at the knob's 0, 0.05, ...,
     /// 1 (measured from 0.15 to 0.9; below, continued at the slope there in the pot's track,
     /// voice.rs's `cutoff_track`; above, past Nyquist, continued).
     pub const CUTOFF_LOG2: [f32; 21] = [
-        5.409, 5.656, 5.903, 6.345, 6.787, 7.257, 7.745, 8.306, 8.878, 9.459, 10.045, 10.626,
-        11.208, 11.789, 12.366, 12.874, 13.375, 13.866, 14.229, 14.42, 14.55,
+        5.2, 5.5, 5.81, 6.345, 6.787, 7.257, 7.745, 8.306, 8.878, 9.459, 10.045, 10.626, 11.208,
+        11.789, 12.366, 12.874, 13.375, 13.866, 14.229, 14.42, 14.55,
     ];
     /// KEYBOARD CONTROL 1, 2 and both: octaves of the cutoff an octave of the keys, from C
     /// (36, where the keyboard's voltage is 0).
@@ -149,10 +151,10 @@ pub mod laws {
     ];
     pub const LOOP: [[f64; 11]; 10] = [
         [
-            0.146, 0.502, 1.395, 2.879, 3.025, 3.134, 3.2, 3.4, 3.5, 3.6, 3.8,
+            0.146, 0.502, 1.08, 1.95, 2.06, 2.14, 2.2, 2.45, 2.8, 3.2, 3.8,
         ],
         [
-            0.154, 0.528, 1.468, 3.031, 3.184, 3.299, 3.368, 3.72, 3.95, 4.05, 4.212,
+            0.154, 0.528, 1.2, 2.3, 2.45, 2.56, 2.65, 3.05, 3.55, 3.9, 4.212,
         ],
         [
             0.158, 0.54, 1.502, 2.79, 2.955, 3.079, 3.445, 3.805, 4.1, 4.229, 4.429,
@@ -188,19 +190,39 @@ pub mod laws {
     /// table's own threshold there.
     pub const THRESHOLD_AT_LOG2: [f64; 3] = [7.74, 10.04, 12.37];
     pub const THRESHOLD: [f64; 3] = [0.7923, 0.7274, 0.7164];
-    pub const SHIFT: [f64; 3] = [-0.0032, 0.0175, 0.0176];
+    pub const SHIFT: [f64; 3] = [-0.0032, 0.0195, 0.0176];
     pub const EMPHASIS_NEAR: f64 = 0.012;
     /// The ladder's corner above the ring's pitch (the table above), octaves, below the ringing
     /// threshold: fitted to the drawn circuit's responses at its CUTOFF 0.3, 0.5 and 0.7 (220,
     /// 858 and 3454 Hz rings); it closes to nothing at the threshold, as the ring's own
     /// saturation pulls the circuit's corner down to its pitch.
-    pub const CORNER: [f64; 3] = [0.048, 0.088, 0.111];
-    pub const CORNER_AT_LOG2: [f64; 3] = [7.78, 9.74, 11.75];
+    pub const CORNER: [f64; 4] = [-0.1, 0.048, 0.088, 0.111];
+    pub const CORNER_AT_LOG2: [f64; 4] = [6.2, 7.78, 9.74, 11.75];
+    /// The filter's passband against the open filter's, as the circuit's (whose passband
+    /// falls as its cutoff goes below 100 Hz, 4.2 dB at CUTOFF 0): the ladder's output times
+    /// this at these cutoffs (log2 Hz), dB.
+    pub const PASS_AT_LOG2: [f64; 13] = [
+        5.2, 5.5, 5.81, 6.345, 6.787, 7.257, 7.745, 8.306, 8.878, 10.045, 10.626, 14.229, 14.55,
+    ];
+    pub const PASS_DB: [f64; 13] = [
+        -4.1, -3.4, -2.8, -2.0, -1.5, -1.1, -0.8, -0.45, -0.2, 0.1, 0.3, 0.1, 0.0,
+    ];
     /// Past the threshold, where `CORNER` has closed, the ring's own pitch raised this much,
     /// octaves (the input pair's knee in the loop pulls the ring flat; the circuit's rings
     /// measured, within 3 cents from 81 Hz to 3.5 kHz).
     pub const RING_RAISE: [f64; 5] = [0.001, -0.0015, 0.0085, 0.0065, -0.0025];
     pub const RING_RAISE_AT_LOG2: [f64; 5] = [6.44, 7.78, 8.75, 11.75, 12.75];
+    /// Past the threshold (as `CORNER` closes), the pair's limit raised to this at these
+    /// cutoffs (log2 Hz): the circuit's rings at EMPHASIS 10 louder against the input's limit
+    /// as they rise (its every stage a pair), within 0.3 dB of them to 15 kHz.
+    pub const RING_LEVEL_AT_LOG2: [f64; 15] = [
+        6.34, 6.79, 7.26, 7.74, 8.31, 8.88, 9.46, 10.04, 10.63, 11.21, 11.79, 12.37, 12.87, 13.38,
+        13.87,
+    ];
+    pub const RING_LEVEL: [f64; 15] = [
+        1.512, 1.176, 1.078, 1.075, 1.048, 1.054, 1.068, 1.074, 1.066, 1.082, 1.099, 1.13, 1.174,
+        1.196, 1.262,
+    ];
 
     /// The contours: their rest from power-on and the level an attack stops at (its
     /// plateau), V (filter, loudness); where its RC curve aims, as a share of the plateau's
@@ -304,22 +326,26 @@ pub mod laws {
     pub const NOISE_SEMITONES_RMS: f64 = 2.80;
     pub const NOISE_OCTAVES_RMS: f64 = 0.679;
     pub const NOISE_OFFSET: (f64, f64) = (0.25, 0.062);
-    /// The swing's share against the wheel's position (a cubic), and the offsets' (the wheel
-    /// to this power; the line's loading by its rheostat).
+    /// The swing's share against the wheel's position as the drawing's wheel would set its
+    /// resistance (a cubic), and the offsets' against the wheel's resistance R (voice.rs's
+    /// `mod_wheel_r`): `OFFSET.0` R / (R + `OFFSET.1`) (the line divided by its rheostat;
+    /// within 12 % of the circuit's from a quarter forward).
     pub const WHEEL: [f64; 3] = [0.828, 0.584, -0.412];
-    pub const OFFSET_POWER: f64 = 0.6;
+    pub const OFFSET: (f64, f64) = (0.9915, 218.3);
 
     /// EXTERNAL INPUT: its gain to the output, `EXT_GAIN t / (1 + EXT_LOAD t (1 - t))` for
     /// VOLUME's law t (voice.rs's `ext_taper`: the 1M pot loaded by the preamplifier; within
     /// 2 %), the level its preamplifier clips at there, and the OVERLOAD lamp's onset and
     /// full brightness there.
-    pub const EXT_GAIN: f64 = 170.6;
+    pub const EXT_GAIN: f64 = 173.5;
     pub const EXT_LOAD: f64 = 10.16;
     pub const EXT_CLIP: f64 = 0.765;
     pub const OVERLOAD: (f64, f64) = (0.24, 0.36);
-    /// EXTERNAL INPUT's coupling at the jack, a high-pass, Hz (the circuit's input falls 9 dB
-    /// more than the output's droop at 5 Hz, 4.5 at 8).
+    /// EXTERNAL INPUT's couplings, high-passes, Hz: at the jack, and after its preamplifier
+    /// (C20) on the way to the mixer (the circuit's input from the jack to the output within
+    /// 0.6 dB of it from 3 to 30 Hz).
     pub const EXT_COUPLING_HZ: f64 = 9.0;
+    pub const PREAMP_COUPLING_HZ: f64 = 8.0;
 
     /// A-440: its level at the output (its table's units).
     pub const A440_LEVEL: f32 = 0.2385;
@@ -504,7 +530,9 @@ impl Osc {
                 laws::TRIANGLE * t
             }
             Waveform::SharkTooth => {
-                laws::SHARK_TRIANGLE * (4.0 * (p - 0.5).abs() - 1.0) + laws::SHARK_SAWTOOTH * fall()
+                let q = p + laws::SHARK_AHEAD;
+                let q = if q >= 1.0 { q - 1.0 } else { q };
+                laws::SHARK_TRIANGLE * (4.0 * (q - 0.5).abs() - 1.0) + laws::SHARK_SAWTOOTH * fall()
             }
             Waveform::Sawtooth => laws::SAWTOOTH * fall(),
             Waveform::ReverseSawtooth => -laws::REVERSE_SAWTOOTH * fall(),
@@ -724,9 +752,6 @@ struct Setting {
     tracking: f64,
     contour: f64,
     emphasis: [f64; 10],
-    /// The loop's gain at EMPHASIS 0 at each of those cutoffs (FILTER MODE HI's direct
-    /// branch).
-    k0: [f64; 10],
     /// How much of the corner's rise above the ring's pitch EMPHASIS leaves (1 below 7, 0 from
     /// the threshold).
     corner: f64,
@@ -797,6 +822,8 @@ pub struct Light {
     droop: (f32, f32, f32),
     mode: (f32, f32, f32),
     direct: f32,
+    /// The filter's passband at its cutoff (control rate).
+    pass: f32,
     /// The thump's band-pass: its coefficients (high-pass, low-pass) and its state (the
     /// VCA's last gain, the high-pass's output, the low-pass's).
     thump_c: (f32, f32),
@@ -822,12 +849,15 @@ pub struct Light {
     fed_back: [f32; 128],
     fed_at: usize,
     lamp: f64,
-    /// EXTERNAL INPUT's coupling: its coefficient, last input and output.
+    /// EXTERNAL INPUT's couplings (the jack's, the preamplifier's): each its coefficient, last
+    /// input and output.
     ext_hp: (f64, f64, f64),
+    pre_hp: (f32, f32, f32),
     overload_peak: f64,
     /// The plug-in's DRIVE: the gain on the bus into the ladder's input pair (1 the circuit),
     /// and the pair's limit with it (as [`Ladder::tick`] takes it).
     drive: f32,
+    drive_top: f32,
     limit: (f32, f32, f32),
 }
 
@@ -890,6 +920,7 @@ impl Light {
                 0.0,
             ),
             direct: 0.0,
+            pass: 1.0,
             thump_c: (
                 (-1.0 / (laws::THUMP_TIMES.0 * rate)).exp() as f32,
                 (1.0 - (-1.0 / (laws::THUMP_TIMES.1 * rate)).exp()) as f32,
@@ -915,8 +946,14 @@ impl Light {
                 0.0,
                 0.0,
             ),
+            pre_hp: (
+                (-std::f64::consts::TAU * laws::PREAMP_COUPLING_HZ / rate).exp() as f32,
+                0.0,
+                0.0,
+            ),
             overload_peak: 0.0,
             drive: 1.0,
+            drive_top: 1.0,
             limit: (1.0, 1.0, 0.0),
         };
         l.set_drive(1.0);
@@ -940,7 +977,8 @@ impl Light {
     pub fn set_drive(&mut self, gain: f64) {
         let gain = gain.max(1e-3);
         self.drive = gain as f32;
-        let top = gain.powf(laws::DRIVE_CEILING).min(1.0) as f32;
+        self.drive_top = gain.powf(laws::DRIVE_CEILING).min(1.0) as f32;
+        let top = self.drive_top;
         self.limit = (top, 1.0 / top, top * tanh(laws::BIAS / top));
     }
 
@@ -1032,6 +1070,10 @@ impl Light {
         let slope = 1.0 - self.bias * self.bias;
         let passband = f64::from(laws::OUT * laws::DRIVE * slope)
             / (1.0 + laws::LOOP[3][0] * laws::LOOP_SCALE);
+        // FILTER MODE HI's direct branch: the open ladder's passband at EMPHASIS 0, as the
+        // circuit's is the same at every cutoff (vcf.rs's `MODE_RT`).
+        self.direct = laws::MODE_GAIN * laws::DRIVE * slope
+            / (1.0 + (laws::LOOP[9][0] * laws::LOOP_SCALE) as f32);
         self.set.ext = if p.ext_on {
             (1.0 / passband) as f32
         } else {
@@ -1059,9 +1101,6 @@ impl Light {
         // (EMPHASIS as the knob drawn with its generic taper would set R14.)
         let emphasis = 1.0 - (1.0 + 80.0 * emphasis_r14(p.emphasis) / 50e3).ln() / 81f64.ln();
         self.set.corner = ((0.744 - emphasis) / 0.044).clamp(0.0, 1.0);
-        for (k0, row) in self.set.k0.iter_mut().zip(&laws::LOOP) {
-            *k0 = row[0] * laws::LOOP_SCALE;
-        }
         for ((k, row), &log2) in self
             .set
             .emphasis
@@ -1087,7 +1126,7 @@ impl Light {
         let w = w.clamp(0.0, 1.0);
         let [a, b, c] = laws::WHEEL;
         self.set.depth = w * (a + w * (b + w * c));
-        self.set.offset_depth = w.powf(laws::OFFSET_POWER);
+        self.set.offset_depth = laws::OFFSET.0 * r / (r + laws::OFFSET.1);
         self.set.mix = p.mod_mix.clamp(0.0, 1.0) as f32;
         self.set.osc_mod = p.osc_mod;
         self.set.filter_mod = p.filter_mod;
@@ -1178,6 +1217,7 @@ impl Light {
         self.mode = (self.mode.0, 0.0, 0.0);
         self.thump = (0.0, 0.0, 0.0);
         self.ext_hp = (self.ext_hp.0, 0.0, 0.0);
+        self.pre_hp = (self.pre_hp.0, 0.0, 0.0);
         self.fed_back = [0.0; 128];
         // (In phase again, as the circuit's clean voice is.)
         for o in &mut self.osc {
@@ -1223,12 +1263,24 @@ impl Light {
         let (g, k) = self.coefficients(0.0);
         self.g_step = (g - self.g) / CONTROL_EVERY as f32;
         self.k = k;
-        // FILTER MODE HI's direct branch: the ladder's passband at EMPHASIS 0 at this cutoff.
         let log2 = self.set.cutoff
-            + self.set.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0;
-        let k0 = interpolate(&laws::LOOP_AT_LOG2, &self.set.k0, log2);
-        let slope = 1.0 - self.bias * self.bias;
-        self.direct = laws::MODE_GAIN * laws::DRIVE * slope / (1.0 + k0 as f32);
+            + self.set.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
+            + self.set.contour * (self.contours[0].volts - self.set.contours[0].rest)
+            + self.cutoff_offset;
+        // The passband at this cutoff.
+        let pass = interpolate(&laws::PASS_AT_LOG2, &laws::PASS_DB, log2);
+        self.pass = f64::from(exp2((pass * (std::f64::consts::LOG2_10 / 20.0)) as f32)) as f32;
+        // Past the threshold, the pair's limit for the ring's level at this cutoff.
+        let ringing = 1.0 - self.set.corner;
+        let top = if ringing > 0.0 {
+            let lift = interpolate(&laws::RING_LEVEL_AT_LOG2, &laws::RING_LEVEL, log2);
+            self.drive_top * (1.0 + ringing * (lift - 1.0)) as f32
+        } else {
+            self.drive_top
+        };
+        if top != self.limit.0 {
+            self.limit = (top, 1.0 / top, top * tanh(laws::BIAS / top));
+        }
     }
 
     /// The ladder's stage gain and loop gain for the cutoff the panel, the keys and the
@@ -1416,6 +1468,18 @@ impl Light {
             self.overload_peak = self.overload_peak.max(lamp);
             pre = tanh((x / laws::EXT_CLIP) as f32) * laws::EXT_CLIP as f32;
         }
+        // (The preamplifier's output coupling, while anything is in it.)
+        if pre != 0.0 || self.pre_hp.2 != 0.0 {
+            let (a, x0, y0) = self.pre_hp;
+            let y = a * (y0 + pre - x0);
+            let y = if y.abs() < 1e-12 && pre == 0.0 {
+                0.0
+            } else {
+                y
+            };
+            self.pre_hp = (a, pre, y);
+            pre = y;
+        }
         let bus = gain[0] * w0 + gain[1] * w1 + gain[2] * w2 + noise_gain * noise + ext_bus * pre;
         let y = self.ladder.tick(
             laws::DRIVE * self.drive * bus,
@@ -1426,6 +1490,7 @@ impl Light {
         );
         // The filter's output coupling; FILTER MODE HI, the bus (through its own coupling)
         // less it.
+        let y = y * self.pass;
         let (a, x0, y0) = self.coupling;
         let lo = a * (y0 + y - x0);
         self.coupling = (a, y, lo);
@@ -1595,8 +1660,9 @@ mod tests {
         assert!((cents + 798.0).abs() < 1.5, "{cents} cents");
     }
 
-    /// The filter at EMPHASIS 10 rings at the circuit's pitch once something reaches it
-    /// (CUTOFF 0.5: 1056 Hz), not at all at CUTOFF 0.1; at CUTOFF 0.5 it rings from EMPHASIS
+    /// The filter at EMPHASIS 10 rings at the circuit's pitch and level once something
+    /// reaches it (CUTOFF 0.5: 1056 Hz, 0.170 RMS), not at all at CUTOFF 0.1; at CUTOFF 0.5
+    /// it rings from EMPHASIS
     /// 7.35, not at 7.15 (the circuit's threshold 7.25); in FILTER MODE HI as in LO.
     #[test]
     fn the_filter_rings_where_the_circuits_does() {
@@ -1617,7 +1683,8 @@ mod tests {
         };
         let x = ring(0.5, 1.0);
         let rms = (x.iter().map(|y| y * y).sum::<f64>() / x.len() as f64).sqrt();
-        assert!(rms > 0.1, "rms {rms}");
+        // (The circuit's 0.170: its ring louder than one pair's limit would have it.)
+        assert!((rms / 0.170 - 1.0).abs() < 0.04, "rms {rms}");
         assert!((hz(&x) / 1056.0 - 1.0).abs() < 0.01, "{} Hz", hz(&x));
         let hi = ring(0.5, 0.99);
         assert!((hz(&hi) / 1056.0 - 1.0).abs() < 0.01, "HI: {} Hz", hz(&hi));
@@ -1627,8 +1694,9 @@ mod tests {
         assert!(quiet(&ring(0.5, 0.715)), "rang at EMPHASIS 7.15");
     }
 
-    /// EXTERNAL INPUT coupled at its jack as the circuit's: 5 Hz through the open filter 12
-    /// to 20 dB under 100 Hz (the circuit's 17.5; the output's droop alone 8).
+    /// EXTERNAL INPUT coupled at its jack and after its preamplifier as the circuit's: 5 Hz
+    /// through the open filter 21 to 24.5 dB under 100 Hz (the circuit's 22.8; the output's
+    /// droop alone 11.4, with the jack's coupling alone 18).
     #[test]
     fn the_external_input_is_coupled() {
         let level = |hz: f64| {
@@ -1651,7 +1719,7 @@ mod tests {
         };
         let d = level(5.0) - level(100.0);
         assert!(
-            (-20.0..-12.0).contains(&d),
+            (-24.5..-21.0).contains(&d),
             "5 Hz {d:+.1} dB against 100 Hz"
         );
     }
@@ -1817,6 +1885,52 @@ mod tests {
         run(&mut l, 240_000);
         let held = l.contours().1;
         assert!((held - 1.675).abs() < 0.01, "SUSTAIN 5 at {held} V");
+    }
+
+    /// The shark tooth's odd harmonics as the circuit's: the fifth 27.6 dB under the
+    /// fundamental (its triangle ahead of the sawtooth's reset; in step, 24.7).
+    #[test]
+    fn the_shark_tooth_as_the_circuits() {
+        let mut l = Light::new(48_000.0);
+        let mut p = measuring();
+        p.osc[0].waveform = Waveform::SharkTooth;
+        p.osc[0].volume = 0.2;
+        l.set_panel(&p);
+        l.note(33, true);
+        run(&mut l, 24_000);
+        let x = run(&mut l, 48_000);
+        let f0 = hz(&x);
+        let amp = |h: f64| {
+            let w = std::f64::consts::TAU * h * f0 / 48_000.0;
+            let (mut re, mut im) = (0.0, 0.0);
+            for (i, y) in x.iter().enumerate() {
+                let window = 0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / x.len() as f64).cos();
+                re += window * y * (w * i as f64).cos();
+                im += window * y * (w * i as f64).sin();
+            }
+            re.hypot(im)
+        };
+        let h5 = 20.0 * (amp(5.0) / amp(1.0)).log10();
+        assert!((h5 + 27.6).abs() < 1.0, "the fifth harmonic at {h5:.1} dB");
+    }
+
+    /// The passband falls as the circuit's at the lowest cutoffs: a sawtooth at 55 Hz
+    /// (VOLUME 3) through CUTOFF 0.1 15.9 dB under CUTOFF 1's (the circuit's 17.3; with the
+    /// ladder's own passband alone, 13).
+    #[test]
+    fn the_passband_falls_at_the_lowest_cutoffs() {
+        let level = |cutoff: f64| {
+            let mut l = Light::new(48_000.0);
+            let mut p = measuring();
+            p.cutoff = cutoff;
+            l.set_panel(&p);
+            l.note(33, true);
+            run(&mut l, 24_000);
+            let x = run(&mut l, 48_000);
+            10.0 * (x.iter().map(|y| y * y).sum::<f64>() / x.len() as f64).log10()
+        };
+        let d = level(0.1) - level(1.0);
+        assert!((d + 15.9).abs() < 1.0, "CUTOFF 0.1 {d:+.1} dB against 1");
     }
 
     /// DRIVE as the circuit's: oscillator 1's sawtooth at VOLUME 5, the filter open, 6, 12
