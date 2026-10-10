@@ -3620,7 +3620,11 @@ being placed on them as well? Show me a before/after video once you are done."
   Learn does not learn it, as before, then SHOW ITS INDICATOR and HIDE ITS INDICATOR (the one it
   is, dim), then MIDI Learn's two; a right click where the indicator is is the panel's, as
   anywhere off a control. The note: "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW
-  IT." The lenses are plain. Its menu (a
+  IT." Its title, "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND", read
+  as if QUALITY were the computer's, all its instances' (the owner: "I want quality to be set for
+  independently by each instance. not shared across the computer."): it is each instance's, as
+  it always was, and the title says so, "QUALITY: SET PER PLUGIN INSTANCE". (Whether its
+  indicator is shown is the computer's, for every instance, as a way of showing the panel.) The lenses are plain. Its menu (a
   right click) is "QUALITY'S OPENING · SHUTTER" or "· ALWAYS OPEN"; always open, each setting's
   thing stands in the ring and fades in over the first 0.35 of its coming (1.1 s; out in
   0.5 s), a lamp lighting as before.
