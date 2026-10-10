@@ -169,6 +169,7 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "osc3_on" => &p.osc3_on,
         "osc3_volume" => &p.osc3_volume,
         "filter_mode" => &p.filter_mode,
+        "potato" => &p.potato,
         "filter_mod" => &p.filter_mod,
         "keyboard_control_1" => &p.keyboard_control_1,
         "keyboard_control_2" => &p.keyboard_control_2,
@@ -2298,6 +2299,20 @@ mod tests {
         (e, host, params)
     }
 
+    /// QUALITY (decisions.md R-POTATO) is clicked as the panel's rockers are, a gesture of its
+    /// own: LO from HI.
+    #[test]
+    fn quality_is_clicked_as_a_rocker() {
+        let (mut e, host, params) = editing();
+        let q = params.potato.as_ptr();
+        let p = at(&e, centre("potato"));
+        click(&mut e, p);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(q), Call::Set(q, 1.0), Call::End(q)]
+        );
+    }
+
     /// The window's frame put together again in the rows that changed is the frame put
     /// together whole: through the voices sounding (the strip's drops), the wheels taken from a
     /// keyboard (the strip's left, the panel's layers) and the OVERLOAD lamp (the panel above).
@@ -2652,6 +2667,7 @@ mod tests {
                 "mod_wheel",
                 "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT",
             ),
+            ("potato", "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND"),
         ] {
             let p = at(&e, centre(param));
             right_click(&mut e, p);

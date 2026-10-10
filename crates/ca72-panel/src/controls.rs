@@ -227,7 +227,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 51] = [
+pub const CONTROLS: [Control; 52] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -468,6 +468,19 @@ pub const CONTROLS: [Control; 51] = [
         2680.0,
         580.0,
         Dial::Ten,
+    ),
+    // QUALITY (decisions.md R-POTATO): POWER's black rocker over POWER's lamp, HI its upper end
+    // pressed, LO its lower (its "on" end: the light voices).
+    rocker(
+        "potato",
+        "QUALITY (HI or LO)",
+        Place::Panel,
+        3023.0,
+        250.0,
+        42.0,
+        108.0,
+        Colour::Black,
+        Orient::Bottom,
     ),
     // The left hand controller.
     rocker(

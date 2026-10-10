@@ -885,6 +885,9 @@ fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
         s.0.push_str("</g>");
     }
     // POWER: the plugin's bypass. The lamp is lit while it plays.
+    legend(s, 3023.0, 132.0, "QUALITY");
+    legend(s, 3023.0, 180.0, "HI");
+    legend(s, 3023.0, 322.0, "LO");
     legend(s, 3023.0, 465.0, "POWER");
     legend(s, 3023.0, 500.0, "ON");
     s.0.push_str("</g>");
@@ -1533,6 +1536,27 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                 Orient::Top => (-90.0, h, w),
                 Orient::Bottom => (90.0, h, w),
             };
+            let on = v >= 0.5;
+            if colour == Colour::Black {
+                // POWER's black ribbed rocker (QUALITY), upright as POWER's: its picture's
+                // upper half raised, its lower when its upper end is pressed.
+                let top = match orient {
+                    Orient::Bottom => !on,
+                    _ => on,
+                };
+                return Layer {
+                    origin,
+                    bounds,
+                    // (Its picture as much larger than its paddle as POWER's, 46 by 124 for 43 by 119.)
+                    sprites: vec![sprite(
+                        Part::Power,
+                        (w * 46.0 / 43.0, h * 124.0 / 119.0),
+                        0.0,
+                        (false, top),
+                    )],
+                    ..Layer::default()
+                };
+            }
             let part = match colour {
                 Colour::Blue => Part::RockerBlue,
                 Colour::Red => Part::RockerOrange,
@@ -1540,7 +1564,6 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
             };
             // The picture's right half is raised; on, its left (the drawing's "on" end at its
             // right pressed).
-            let on = v >= 0.5;
             let m = 16.0;
             Layer {
                 origin,

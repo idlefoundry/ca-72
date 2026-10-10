@@ -130,6 +130,7 @@ fn not_learnable(t: Target) -> Option<String> {
         Target::Control(i) | Target::Legend(i, _) => match CONTROLS.get(i)?.param {
             "pitch_wheel" => "PITCH: MIDI PITCH BEND MOVES IT".into(),
             "mod_wheel" => "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT".into(),
+            "potato" => "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND".into(),
             _ => return None,
         },
         Target::Power => "POWER: THE HOST'S BYPASS".into(),
