@@ -140,7 +140,8 @@ pub const LEARNABLE: [Learnable; 54] = [
     knob("entropy", "ENTROPY"),
     knob("spread", "WIDTH"),
     knob("inner", "INNER"),
-    stepped("placement", "SCATTER PLACEMENT"),
+    // (Two choices, EVEN and CENTER: a switch, as NOISE's WHITE or PINK.)
+    switch("placement", "SCATTER PLACEMENT"),
     knob("double", "DETUNE (DOUBLE)"),
     knob("drive", "DRIVE"),
     knob("level", "LEVEL"),
@@ -927,7 +928,7 @@ mod tests {
                 counts(Kind::Stepped),
                 counts(Kind::Switch)
             ),
-            (27, 8, 19)
+            (27, 7, 20)
         );
     }
 
@@ -955,8 +956,8 @@ mod tests {
         assert_eq!(m.refused(), None, "nothing said while not learning");
     }
 
-    /// A knob: value / 127 of its travel. A switch: off at 0–63, on at 64–127. A selector: its six
-    /// positions each an equal share of 0–127; VOICES its nine.
+    /// A knob: value / 127 of its travel. A switch (SCATTER's placement too): off at 0–63, on at
+    /// 64–127. A selector: its six positions each an equal share of 0–127; VOICES its nine.
     #[test]
     fn a_value_sets_each_kind_through_its_parameters_normalization() {
         let p = Ca72Params::default();
@@ -971,6 +972,18 @@ mod tests {
         assert_eq!(
             (pink.normalized_for(63), pink.normalized_for(64)),
             (0.0, 1.0)
+        );
+        // SCATTER's placement, two choices: EVEN at 0–63, CENTER at 64–127.
+        let placement = target(&p, at("placement")).expect("a two-way switch");
+        let chosen = |v: u8| p.placement.preview_plain(placement.normalized_for(v));
+        assert_eq!(
+            [chosen(0), chosen(63), chosen(64), chosen(127)],
+            [
+                crate::params::Scatter::Even,
+                crate::params::Scatter::Even,
+                crate::params::Scatter::Centre,
+                crate::params::Scatter::Centre
+            ]
         );
         let range = target(&p, at("osc1_range")).expect("a selector");
         let position = |v: u8| (range.normalized_for(v) * 5.0).round() as u8;

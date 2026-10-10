@@ -4,11 +4,10 @@
 
 #![allow(dead_code, clippy::unwrap_used)]
 
-use ca72_plugin::character::Placement;
 use ca72_plugin::drive::{Curve, STEPS};
 use ca72_plugin::engine::{Controls, Engine, Event};
 use ca72_plugin::library::Sound;
-use ca72_plugin::params::{Ca72Params, Footage, Wave, Wave3};
+use ca72_plugin::params::{Ca72Params, Footage, Scatter, Wave, Wave3};
 use nih_plug::prelude::Enum;
 
 pub fn env<T: std::str::FromStr>(name: &str, default: T) -> T {
@@ -81,8 +80,10 @@ pub fn controls_of(s: &Sound) -> Controls {
             "drive" => c.drive = v,
             "level" => c.level = v,
             "auto_gain" => c.auto_gain = on(v),
+            // By the plug-in's choices (0 EVEN, 1 CENTER), as `presets.rs` takes a preset's.
             "placement" => {
-                c.placement = Placement::from_index(v.round().clamp(0.0, 2.0) as usize);
+                let last = Scatter::variants().len() - 1;
+                c.placement = Scatter::from_index((v.round().max(0.0) as usize).min(last)).into();
             }
             "feedback" => c.feedback = ca72::voice::feedback_law(v / 10.0),
             "lock" => c.lock = on(v),

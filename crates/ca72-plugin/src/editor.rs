@@ -33,7 +33,7 @@ use plugin_kit_stereo::place;
 
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
-use crate::params::Ca72Params;
+use crate::params::{Ca72Params, Scatter};
 use crate::presets::Browser;
 use crate::update::Update;
 
@@ -762,13 +762,11 @@ impl Editing {
                 }
             }
             StripTarget::Tab(Bank::Stereo, i) => self.switch_amount(Readout::Detune, i == 1),
+            // The tabs are the placement's choices in their order: EVEN, CENTER.
             StripTarget::Tab(Bank::Placement, i) => {
                 let p = &self.params.placement;
-                let to = p.preview_normalized(match i {
-                    1 => crate::params::Scatter::Edges,
-                    2 => crate::params::Scatter::Centre,
-                    _ => crate::params::Scatter::Even,
-                });
+                let last = Scatter::variants().len() - 1;
+                let to = p.preview_normalized(Scatter::from_index(i.min(last)));
                 if p.unmodulated_normalized_value() != to {
                     let s = self.setter();
                     s.begin_set_parameter(p);
@@ -1414,7 +1412,6 @@ fn paste_rows(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i64, rows
 /// What the strip shows, from the parameters, the voices sounding (a bit a voice) and the
 /// scene before (its rail, hover and MIDI Learn's ring are set elsewhere).
 fn strip_scene(p: &Ca72Params, sounding: u32, was: StripScene) -> StripScene {
-    use crate::character::Placement;
     let c = p.controls();
     let unison = c.unison;
     let poly = c.poly && !unison;
@@ -1496,12 +1493,13 @@ fn strip_scene(p: &Ca72Params, sounding: u32, was: StripScene) -> StripScene {
                 .collect(),
         )
     };
+    // The placement's tab by the plug-in's choice (its tabs are its choices, EVEN and CENTER:
+    // not the kit's index, which counts its EDGES); none where it moves nothing.
     let placement_lit = !mono || doubled;
-    let _ = Placement::Even;
     StripScene {
         mode,
         stereo: Some(usize::from(doubled)),
-        placement: placement_lit.then_some(placement.index()),
+        placement: placement_lit.then_some(p.placement.value().to_index()),
         auto: c.auto_gain,
         readouts,
         field,
@@ -3222,9 +3220,10 @@ mod tests {
 
     /// The strip's tabs and switches (A6): MODE's MONO, POLY and UNISON set POLY and UNISON;
     /// SCATTER | DOUBLE turns DETUNE off and back on at its amount (half way if it never was);
-    /// the placement is its parameter; AUTO GAIN's tab toggles it; ENTROPY's, WIDTH's and INNER's
-    /// readouts turn their amounts off and on; VOICES is a knob, a drag one gesture. Each click
-    /// a gesture of its own for each parameter it changes, none for one already so.
+    /// the placement's EVEN and CENTER are its parameter's two choices; AUTO GAIN's tab toggles
+    /// it; ENTROPY's, WIDTH's and INNER's readouts turn their amounts off and on; VOICES is a
+    /// knob, a drag one gesture. Each click a gesture of its own for each parameter it changes,
+    /// none for one already so.
     #[test]
     fn the_strip_operates_its_parameters() {
         let (mut e, host, params) = editing();
@@ -3267,7 +3266,9 @@ mod tests {
             "SCATTER already (DETUNE still off here)"
         );
         let placement = params.placement.as_ptr();
-        tab(&mut e, Bank::Placement, 2);
+        tab(&mut e, Bank::Placement, 0);
+        assert_eq!(host.take(), vec![], "EVEN already");
+        tab(&mut e, Bank::Placement, 1);
         assert_eq!(
             host.take(),
             vec![
@@ -3275,6 +3276,11 @@ mod tests {
                 Call::Set(placement, 1.0),
                 Call::End(placement)
             ]
+        );
+        assert_eq!(
+            params.placement.preview_plain(1.0),
+            Scatter::Centre,
+            "the second tab CENTER"
         );
         let auto = params.auto_gain.as_ptr();
         tab(&mut e, Bank::Auto, 0);
@@ -3359,6 +3365,25 @@ mod tests {
                 vec![Call::Begin(p), Call::Set(p, was), Call::End(p)]
             );
         }
+    }
+
+    /// The strip lights the placement's tab by the plug-in's choice, EVEN the first and CENTER
+    /// the second (not by the kit's index, which counts its EDGES); none in MONO without DOUBLE,
+    /// whose one voice has no place among others.
+    #[test]
+    fn the_strip_lights_the_placements_tab() {
+        let lit = |poly: bool, placement: Scatter| {
+            let p = Ca72Params {
+                poly: BoolParam::new("Poly", poly),
+                placement: EnumParam::new("Scatter Placement", placement),
+                ..Ca72Params::default()
+            };
+            strip_scene(&p, 0, StripScene::default()).placement
+        };
+        assert_eq!(lit(true, Scatter::Even), Some(0));
+        assert_eq!(lit(true, Scatter::Centre), Some(1));
+        assert_eq!(lit(false, Scatter::Centre), None);
+        assert_eq!(Bank::Placement.words(), ["EVEN", "CENTER"]);
     }
 
     #[test]

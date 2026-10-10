@@ -92,7 +92,8 @@ pub enum Bank {
     Mode,
     /// SCATTER | DOUBLE: how the voices are played across the field.
     Stereo,
-    /// EVEN | EDGES | CENTER: where SCATTER puts them.
+    /// EVEN | CENTER: where SCATTER puts them (no EDGES: INNER moves them out from the centre;
+    /// decisions.md R-INNER).
     Placement,
     /// AUTO GAIN's ON.
     Auto,
@@ -106,7 +107,7 @@ impl Bank {
         match self {
             Bank::Mode => &["MONO", "POLY", "UNISON"],
             Bank::Stereo => &["SCATTER", "DOUBLE"],
-            Bank::Placement => &["EVEN", "EDGES", "CENTER"],
+            Bank::Placement => &["EVEN", "CENTER"],
             Bank::Auto => &["ON"],
         }
     }
@@ -125,12 +126,17 @@ impl Bank {
     pub fn x(self) -> f64 {
         match self {
             Bank::Mode => CV,
-            // Each bank's middle: the pair (2 and 3 tabs, BANKS_GAP between their recesses)
-            // centred on the section's middle.
-            Bank::Stereo => CI - (BANKS_GAP + 3.0 * TAB_PITCH + RECESS_PAD) / 2.0,
-            Bank::Placement => CI + (BANKS_GAP + 2.0 * TAB_PITCH + RECESS_PAD) / 2.0,
+            // Each bank's middle: the pair (BANKS_GAP between their recesses, SCATTER |
+            // DOUBLE's on the left) centred on the section's middle.
+            Bank::Stereo => CI - (BANKS_GAP + Bank::Placement.width()) / 2.0,
+            Bank::Placement => CI + (BANKS_GAP + Bank::Stereo.width()) / 2.0,
             Bank::Auto => CO + UNIT_KNOB,
         }
+    }
+
+    /// Its recess's width: its tabs' pitches and the pad.
+    fn width(self) -> f64 {
+        self.words().len() as f64 * TAB_PITCH + RECESS_PAD
     }
 
     /// Tab `i`'s middle.
@@ -141,7 +147,7 @@ impl Bank {
 
     /// The recess the bank stands in: left, top, width, height.
     pub fn recess(self) -> (f64, f64, f64, f64) {
-        let w = self.words().len() as f64 * TAB_PITCH + RECESS_PAD;
+        let w = self.width();
         let h = TAB.1 + 22.0;
         (self.x() - w / 2.0, ROWS[0] - h / 2.0, w, h)
     }
@@ -565,5 +571,36 @@ mod tests {
         assert!(s.0 > SECTIONS[2].0 && p.0 + p.2 < SECTIONS[2].1);
         let (dx, _, dw, _) = DISPLAY;
         assert_eq!((dx, dx + dw), (CW - UNIT_HALF, CD + UNIT_HALF));
+    }
+
+    /// PLACEMENT's bank is EVEN and CENTER (no EDGES: decisions.md R-INNER), its recess two
+    /// tabs wide: each tab found where it stands, the placement's control (MIDI Learn rings the
+    /// recess), and no tab past CENTER or before EVEN; every bank's tabs found so.
+    #[test]
+    fn placements_two_tabs_are_found_where_they_stand() {
+        let b = Bank::Placement;
+        assert_eq!(b.words(), ["EVEN", "CENTER"]);
+        let (x, y, w, h) = b.recess();
+        assert_eq!(w, 2.0 * TAB_PITCH + RECESS_PAD);
+        for i in 0..2 {
+            let t = StripTarget::Tab(b, i);
+            let (tx, ty) = b.tab(i);
+            assert_eq!(hit(tx, ty), Some(t));
+            assert_eq!(t.control(), Some(StripControl::Placement));
+            assert!(
+                tx - TAB.0 / 2.0 > x && tx + TAB.0 / 2.0 < x + w,
+                "tab {i} in the recess"
+            );
+        }
+        assert_eq!(span(StripControl::Placement), (x, y, x + w, y + h));
+        for beyond in [b.tab(0).0 - TAB_PITCH, b.tab(1).0 + TAB_PITCH] {
+            assert_eq!(hit(beyond, ROWS[0]), None, "a tab at {beyond}");
+        }
+        for b in Bank::ALL {
+            for i in 0..b.words().len() {
+                let (tx, ty) = b.tab(i);
+                assert_eq!(hit(tx, ty), Some(StripTarget::Tab(b, i)), "{b:?} {i}");
+            }
+        }
     }
 }

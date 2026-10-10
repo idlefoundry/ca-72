@@ -103,7 +103,8 @@ pub struct Controls {
     /// INNER: the inner edge of each side's band, a share of SPREAD's way out (decisions.md
     /// R-INNER).
     pub inner: f64,
-    /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R-STEREO).
+    /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R-STEREO), EVEN or
+    /// CENTER as the plug-in offers them (`params::Scatter`; R-INNER).
     pub placement: Placement,
     /// UNISON: VOICES instruments on every key together (decisions.md R-STEREO).
     pub unison: bool,
@@ -1929,7 +1930,8 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
         },
         inner: c.inner.clamp(0.0, 1.0),
         // (One voice alone has no place among others: its DOUBLE pair as far out as
-        // SPREAD, which EDGES gives.)
+        // SPREAD. The kit's `Edges` is its way to put a lone pair at the edge, not a choice
+        // the plug-in offers: R-INNER.)
         placement: if many { c.placement } else { Placement::Edges },
         voices,
         double: if c.double > 0.0 {
@@ -2825,27 +2827,33 @@ mod tests {
     }
 
     /// DOUBLE takes the placement (the CA-74's R41): with CENTER a note on the first voice
-    /// has its pair in the centre, left and right the same; with EVEN and EDGES out to the
-    /// sides; and one voice alone (POLY off) has its pair as far out as SPREAD whatever the
-    /// placement.
+    /// has its pair in the centre, left and right the same; with EVEN out to the sides (its
+    /// first voice's place is an edge). INNER at 100 % puts every pair at the edges, as EDGES
+    /// did (R-INNER): CENTER's first pair is then where EVEN's is, to the bit. One voice alone
+    /// (POLY off) has its pair as far out as SPREAD whatever the placement (the kit's EDGES,
+    /// kept for it), there too.
     #[test]
     fn double_takes_the_placement_its_pairs_mirrored() {
-        let doubled = |poly: bool, placement: Placement| Controls {
+        let doubled = |poly: bool, placement: Placement, inner: f64| Controls {
             poly,
             voices: 4,
             double: 0.35,
             spread: 1.0,
+            inner,
             placement,
             ..Controls::default()
         };
-        let (_, _, diff) = sides(&doubled(true, Placement::Centre), &[57]);
+        let (_, _, diff) = sides(&doubled(true, Placement::Centre, 0.0), &[57]);
         assert_eq!(diff, 0.0, "CENTER's first pair in the centre");
-        for p in [Placement::Even, Placement::Edges] {
-            let (mid, side, _) = sides(&doubled(true, p), &[57]);
-            assert!(side > 0.1 * mid, "{p:?}: the pair out to the sides");
-        }
-        let (mid, side, _) = sides(&doubled(false, Placement::Centre), &[57]);
-        assert!(side > 0.1 * mid, "POLY off: the pair out to the sides");
+        let even = sides(&doubled(true, Placement::Even, 0.0), &[57]);
+        assert!(even.1 > 0.1 * even.0, "EVEN: the pair out to the sides");
+        let inner = sides(&doubled(true, Placement::Centre, 1.0), &[57]);
+        assert_eq!(
+            inner, even,
+            "INNER at 100 %: CENTER's first pair at the edges"
+        );
+        let alone = sides(&doubled(false, Placement::Centre, 0.0), &[57]);
+        assert_eq!(alone, even, "POLY off: the pair at the edges");
     }
 
     /// DOUBLE's pairs played by the workers are the same to the bit as on the caller's thread
@@ -2889,9 +2897,9 @@ mod tests {
         );
     }
 
-    /// DOUBLE turned off lets the note go, and the twin plays its tail out on its side, then
-    /// falls silent and stops; a key pressed after reaches the voice alone, in the centre.
-    /// POLY off and on.
+    /// DOUBLE turned off lets the note go, and the twin plays its tail out on its side (INNER at
+    /// 100 %: every pair at the edges, as EDGES had them), then falls silent and stops; a key
+    /// pressed after reaches the voice alone, in the centre. POLY off and on.
     #[test]
     fn a_twin_let_go_plays_its_tail_out_and_takes_no_new_key() {
         for poly in [false, true] {
@@ -2899,7 +2907,7 @@ mod tests {
                 poly,
                 double: 0.35,
                 spread: 1.0,
-                placement: Placement::Edges,
+                inner: 1.0,
                 ..Controls::default()
             };
             let mut e = Engine::new();
