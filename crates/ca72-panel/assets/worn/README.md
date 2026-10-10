@@ -50,6 +50,15 @@ lamp over them. Then, with ImageMagick 7:
   (`the_knobs_pictures_are_lit_evenly_all_round`). The caps are drawn unturned over the
   turned knob (`skin::Part::KnobCap`): a spun disc's sheen lies where the lamp is however the
   knob is turned;
+- quieted (`quiet.py`, 2026-10-10; the owner: "all the knobs look like they have white halos.
+  and why do the knobs always have 4 shiny places that have nothing to do with the light?"):
+  the ring light had left broad reflections round the skirts (four, five and six times round)
+  and a bright line round each outline. Each smooth skirt's (and the pointer knob's body's)
+  light is made the same all round but for what is finer than a few degrees; each fluted grip's
+  to below its flutes' count (the flutes stay); the edge between grip and skirt, off the axis,
+  is left as it is; the outline's band is held to a dark grey. The big knob's skirt's pattern
+  four times round went from 0.34 of its light to 0.03, the knob's from 0.68 to 0.08; the panel's
+  lamp lights the outline's near side (`art::lamp_over`);
 - resized (Lanczos) to the sizes above; the face made grey (its colour is a black a touch warm,
   `skin::FACE_TINT`).
 

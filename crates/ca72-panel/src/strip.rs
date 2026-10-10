@@ -411,14 +411,55 @@ pub(crate) fn surfaces(s: &mut Svg) {
         bezel(s, r.window(), 5.0);
     }
     bezel(s, DISPLAY, 5.0);
+    name_bezel(s, 0.0);
+}
+
+/// The name's display set into the rail's wood (the owner: "we need some sort of border or edge
+/// around that screen to help it feel more natural"): a dark frame standing a little proud of
+/// the wood, its shadow soft below it and to the right, its top edge catching the light and its
+/// bottom in shade, a black lip down into the glass, its lower inner edge catching the light.
+/// Within the surround: as tall as the keys beside it. `dy` down (the worn strip draws in its
+/// own frame, from the rail's top).
+pub(crate) fn name_bezel(s: &mut Svg, dy: f64) {
     let (x, y, w, h) = NAME;
+    let y = y + dy;
+    let o = NAME_SURROUND;
+    let (fx, fy, fw, fh) = (x - o, y - o, w + 2.0 * o, h + 2.0 * o);
     put!(
         s,
-        "<rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#0d0c0b'/>",
-        N(x - NAME_SURROUND),
-        N(y - NAME_SURROUND),
-        N(w + 2.0 * NAME_SURROUND),
-        N(h + 2.0 * NAME_SURROUND)
+        "<defs><filter id='name-shadow' x='-0.05' y='-0.5' width='1.1' height='2'><feGaussianBlur stdDeviation='2.5'/></filter><linearGradient id='name-frame' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#2c2a27'/><stop offset='0.5' stop-color='#1a1917'/><stop offset='1' stop-color='#0e0d0c'/></linearGradient><linearGradient id='name-edge' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#fff' stop-opacity='0.28'/><stop offset='0.45' stop-color='#fff' stop-opacity='0.04'/><stop offset='1' stop-color='#000' stop-opacity='0.6'/></linearGradient><linearGradient id='name-lip' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0'/><stop offset='0.8' stop-color='#000' stop-opacity='0'/><stop offset='1' stop-color='#fff' stop-opacity='0.16'/></linearGradient></defs>"
+    );
+    put!(
+        s,
+        "<rect x='{}' y='{}' width='{}' height='{}' rx='6' fill='#000' fill-opacity='0.55' filter='url(#name-shadow)'/>",
+        N(fx + 1.5),
+        N(fy + 3.0),
+        N(fw),
+        N(fh)
+    );
+    put!(
+        s,
+        "<rect x='{}' y='{}' width='{}' height='{}' rx='6' fill='url(#name-frame)'/><rect x='{}' y='{}' width='{}' height='{}' rx='5.5' fill='none' stroke='url(#name-edge)' stroke-width='1.2'/>",
+        N(fx),
+        N(fy),
+        N(fw),
+        N(fh),
+        N(fx + 0.6),
+        N(fy + 0.6),
+        N(fw - 1.2),
+        N(fh - 1.2)
+    );
+    put!(
+        s,
+        "<rect x='{}' y='{}' width='{}' height='{}' rx='4.5' fill='#050504'/><rect x='{}' y='{}' width='{}' height='{}' rx='4.5' fill='none' stroke='url(#name-lip)' stroke-width='1'/>",
+        N(x - 2.0),
+        N(y - 2.0),
+        N(w + 4.0),
+        N(h + 4.0),
+        N(x - 1.5),
+        N(y - 1.5),
+        N(w + 3.0),
+        N(h + 3.0)
     );
 }
 

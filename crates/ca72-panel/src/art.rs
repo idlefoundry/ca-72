@@ -1,6 +1,6 @@
 //! The panel's art, as SVG, in panel units: the panel measured from a photograph of the
 //! instrument's taken face on (Commons, "Minimoog panel.jpg"; the panel is 3108 by 795 of
-//! them), under a wooden top strip, the name board below it; and under that the plug-in's
+//! them), under a wooden top strip with the name plate on it; and under that the plug-in's
 //! strip (`crate::strip`), the left hand controller's GLIDE, DECAY and wheels at its left
 //! (A6, decisions.md R-LOOK: they had a column of their own beside the panel).
 //!
@@ -15,14 +15,15 @@ use crate::svg::{N, Svg, colour::*, defs, escape, put};
 pub const PW: f64 = 3108.0;
 pub const PH: f64 = 795.0;
 pub const TOP: f64 = 130.0;
-pub const BOARD: f64 = 132.0;
 /// The panel's left edge: the drawing's (the left hand controller's column, 330 units wide,
 /// was there until A6: its controls are on the strip, `strip::LEFT_HAND`).
 pub const COL: f64 = 0.0;
 /// The drawing's width.
 pub const W: f64 = COL + PW;
-/// The panel's height: the top strip, the face and the name board.
-pub const PANEL_H: f64 = TOP + PH + BOARD;
+/// The panel's height: the top strip and the face. (The name board under the face, 132 units,
+/// went when the name plate moved up into the top strip: the owner, 2026-10-10, "If we moved
+/// the CA-72 badge to the top, we could save a lot of space in that center wooden area.")
+pub const PANEL_H: f64 = TOP + PH;
 /// The strip's under it (A6): the presets' rail, then three rows.
 pub const STRIP_H: f64 = 850.0;
 /// The drawing's height: the panel and the strip.
@@ -48,10 +49,11 @@ const PLATE_PAD: f64 = 24.0;
 /// The plate's width: as when a click turned it over to a second, wider name, gone since
 /// (the owner, 2026-10-03), so the panel stays as approved.
 pub const PLATE_W: f64 = 261.0;
-/// The plate's top left corner: its left end at the MODIFIERS|OUTPUT line.
+/// The plate's top left corner: its left end at the MODIFIERS|OUTPUT line, in the top strip
+/// (between its screws), a touch above its middle (its foot in the strip's shade).
 pub const PLATE_X: f64 = COL + 2582.0;
-pub const PLATE_H: f64 = 0.62 * BOARD;
-pub const PLATE_Y: f64 = TOP + PH + (BOARD - PLATE_H) / 2.0;
+pub const PLATE_H: f64 = 82.0;
+pub const PLATE_Y: f64 = (TOP - PLATE_H) / 2.0 - 4.0;
 const NAME_Y: f64 = 31.0;
 const MAKER_Y: f64 = 64.0;
 
@@ -78,8 +80,7 @@ pub(crate) const LAMP_AT: (f64, f64) = (3023.0, 426.0);
 /// The OVERLOAD lamp, on the panel.
 pub(crate) const OVERLOAD_AT: (f64, f64) = (1764.0, 274.0);
 
-/// The editor's resize grip, in the name board's bottom right corner (left, top, right,
-/// bottom).
+/// The editor's resize grip, in the drawing's bottom right corner (left, top, right, bottom).
 pub const GRIP: [f64; 4] = [W - 54.0, H - 54.0, W, H];
 
 /// The waveform pictograms, drawn 24 by 14 and printed about 18 by 10 (`GLYPH`).
@@ -559,7 +560,7 @@ enum Ink {
 }
 
 /// The print alone, as the background has it: the face's and the column's lettering, rules,
-/// dials' marks and selectors' legends, and the grip's lines on the name board.
+/// dials' marks and selectors' legends, and the grip's lines in the corner.
 pub fn printed(layout: &Layout) -> String {
     let mut s = Svg::default();
     grip(&mut s);
@@ -675,19 +676,12 @@ pub fn jacks() -> Vec<(f64, f64, f64, bool)> {
 const PHONES: (f64, f64) = (2855.0, 581.0);
 
 fn wood(s: &mut Svg) {
-    // The top strip, the name board and the strip's rail. No cheeks: the ends are square.
+    // The top strip and the strip's rail. No cheeks: the ends are square.
     put!(
         s,
         "<rect x='0' y='0' width='{}' height='{}' fill='url(#wood-h)'/>",
         N(W),
         N(TOP)
-    );
-    put!(
-        s,
-        "<rect x='0' y='{}' width='{}' height='{}' fill='url(#wood-h)'/>",
-        N(TOP + PH),
-        N(W),
-        N(BOARD)
     );
     put!(
         s,
@@ -723,10 +717,9 @@ fn wood(s: &mut Svg) {
             );
         }
     };
-    // The top strip's and the name board's grain laid out as when the left hand's column stood
-    // left of the panel, 330 units wide: the panel's wood stays as approved.
+    // The top strip's grain laid out as when the left hand's column stood left of the panel,
+    // 330 units wide: the panel's wood stays as approved.
     grain(s, -330.0, 6.0, W + 330.0, TOP - 12.0, true, 7);
-    grain(s, -330.0, TOP + PH + 8.0, W + 330.0, BOARD - 16.0, true, 8);
     grain(s, 0.0, PANEL_H + 6.0, W, crate::strip::RAIL - 12.0, true, 6);
     for (x, y, r) in top_screws() {
         screw(s, x, y, r);
@@ -734,7 +727,7 @@ fn wood(s: &mut Svg) {
     grip(s);
 }
 
-/// The resize grip's three lines in the name board's corner.
+/// The resize grip's three lines in the drawing's corner.
 fn grip(s: &mut Svg) {
     for k in 1..=3 {
         let d = 12.0 * f64::from(k);
@@ -1717,8 +1710,6 @@ pub fn worn_overlay() -> String {
     for (y, h, fill) in [
         (0.0, 10.0, "edge-lit"),
         (TOP - 14.0, 14.0, "edge-dark"),
-        (TOP + PH, 10.0, "edge-lit"),
-        (PANEL_H - 14.0, 14.0, "edge-dark"),
         (PANEL_H, 10.0, "edge-lit"),
         (PANEL_H + rail - 14.0, 14.0, "edge-dark"),
     ] {

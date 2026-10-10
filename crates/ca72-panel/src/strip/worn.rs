@@ -35,22 +35,90 @@ const SEG_ON: &str = "#ff7028";
 const SEG_OFF_OPACITY: f64 = 0.05;
 /// The tabs: translucent amber plastic lit from inside (the CA-74's amber, tried there: lit
 /// `[1.25, 0.55 g^1.6, 0.08 g^3]` of the glow `g`, unlit `[0.26, 0.062, 0.003]` of the shade),
-/// and their light on the face round them.
+/// and their light on the face round them. The glow over `TAB_KNEE` pressed down to a quarter
+/// of itself, and the light round them a little over half the CA-74's and all one orange (the
+/// owner, 2026-10-10: "these orange buttons get too bright on the edges. looks unnatural": the
+/// cap's walls, which carry the light to its edge, and the bevel's catch light had gone a hot
+/// yellow-white round it, brighter than its face).
 const AMBER: Tint = Tint {
-    lit: |g| [1.25 * g, 0.55 * g.powf(1.6), 0.08 * g * g * g],
+    lit: |g| {
+        let g = if g > TAB_KNEE {
+            TAB_KNEE + (g - TAB_KNEE) * 0.25
+        } else {
+            g
+        };
+        [1.25 * g, 0.55 * g.powf(1.6), 0.08 * g * g * g]
+    },
     unlit: |k| [0.26 * k, 0.062 * k, 0.003 * k],
 };
+const TAB_KNEE: f32 = 0.8;
+/// How much darker a lit tab's outermost band is made (its edge, where the cap's walls carry
+/// the light, a bright line round a darker band inside it; at the edge this share darker,
+/// easing in from `EDGE_FROM` of the way out).
+const EDGE_DARKER: f32 = 0.4;
+const EDGE_FROM: f32 = 0.86;
+
+/// The lit cap with its outermost band darkened ([`EDGE_DARKER`]), in linear light, as far out
+/// as the kit's cap measures it (its rounded square, its middle drawn out across).
+fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Lighting {
+    let lin = |v: u8| {
+        let v = f32::from(v) / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let enc = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        let s = if v <= 0.003_130_8 {
+            v * 12.92
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0).round() as u8
+    };
+    let (w, h) = (l.lit.width(), l.lit.height());
+    let (half, long) = (h as f32 / 2.0, (w as f32 - h as f32).max(0.0) / 2.0);
+    for (i, px) in l.lit.pixels_mut().iter_mut().enumerate() {
+        let c = px.demultiply();
+        if c.alpha() == 0 {
+            continue;
+        }
+        let (x, y) = ((i as u32 % w) as f32 + 0.5, (i as u32 / w) as f32 + 0.5);
+        let u = ((x - w as f32 / 2.0).abs() - long).max(0.0) / half;
+        let v = (y - half).abs() / half;
+        let d = (u * u * u * u + v * v * v * v).sqrt().sqrt().min(1.0);
+        let t = ((d - EDGE_FROM) / (1.0 - EDGE_FROM)).clamp(0.0, 1.0);
+        let k = 1.0 - EDGE_DARKER * t * t * (3.0 - 2.0 * t);
+        if k < 1.0 {
+            let f = |v: u8| enc(lin(v) * k);
+            *px = resvg::tiny_skia::ColorU8::from_rgba(
+                f(c.red()),
+                f(c.green()),
+                f(c.blue()),
+                c.alpha(),
+            )
+            .premultiply();
+        }
+    }
+    l
+}
 const AMBER_LIGHT: Underlight = Underlight {
-    rim: [1.0, 0.42, 0.12],
-    light: [1.0, 0.28, 0.05],
+    rim: [0.6, 0.2, 0.04],
+    light: [0.6, 0.17, 0.03],
 };
 /// The tabs' and the keys' print.
 const TAB_PRINT: &str = "#2a1006";
 const KEY_PRINT: &str = "#d9d2c0";
 /// The name's dots' pitch, and the drops' sizes (a sounding voice's, an idle one's), units.
-const DOT: f64 = 6.0;
+const DOT: f64 = 5.0;
 const DROP: f64 = 10.0;
 const IDLE_DROP: f64 = 6.0;
+/// Where a capital's middle is, above the name's window's middle: a capital stands in the
+/// window's middle, as near as the descenders below it leave room for (the owner: "the preset
+/// text needs to be vertically centered").
+const CAP_LIFT: f64 = 2.0;
 
 /// The strip's parts at a scale: its frame, what never changes, the caps and light resampled,
 /// the readouts as last drawn, the drops.
@@ -113,7 +181,11 @@ impl StripRenderer {
             still: None,
             print: None,
             base: None,
-            lighting: plugin_kit_materials::lighting(&button, TAB.0 / TAB.1, AMBER),
+            lighting: edge_eased(plugin_kit_materials::lighting(
+                &button,
+                TAB.0 / TAB.1,
+                AMBER,
+            )),
             glass: png(GLASS),
             button,
             lit_tab: None,
@@ -536,6 +608,10 @@ impl StripRenderer {
         }
         let (x, y, w, h) = DISPLAY;
         glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
+        // The name's: its bezel on the rail's wood, then its glass.
+        let mut bezel = Svg::default();
+        super::name_bezel(&mut bezel, -PANEL_H);
+        svg_over(&self.options, &mut still, s, &bezel.0);
         let (x, y, w, h) = NAME;
         glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 3.0);
         // The name's dots, every one faintly there.
@@ -964,7 +1040,7 @@ fn name_icons(o: &mut Svg, b: &BarScene) {
     let (_, y, _, h) = NAME;
     let (_, _, star_x, arrow_x) = name_places();
     let level = name_level(b);
-    let mid = y - PANEL_H + h / 2.0 - DOT / 2.0;
+    let mid = y - PANEL_H + h / 2.0 - CAP_LIFT;
     let orange = format!("rgb({},{},{})", ORANGE.0, ORANGE.1, ORANGE.2);
     put!(
         o,
@@ -1034,12 +1110,12 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
 }
 
 /// Each dot of the name's display, in pixels at `scale` (the strip's frame): its character's
-/// place, its row, its column. (Seven rows for a capital about the window's middle; two below
-/// for a descender.)
+/// place, its row, its column. (Seven rows for a capital, its middle [`CAP_LIFT`] above the
+/// window's; two below for a descender, its last dots inside the window.)
 fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) {
     let (_, y, _, h) = NAME;
     let (left, places, ..) = name_places();
-    let top = y - PANEL_H + h / 2.0 - 4.0 * DOT;
+    let top = y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * DOT;
     for i in 0..places {
         for j in 0..9 {
             for col in 0..5 {

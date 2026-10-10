@@ -211,14 +211,13 @@ impl Renderer {
             .fill(Color::from_rgba8(0x1d, 0x1b, 0x1a, 0xff));
         let pictures = self.pictures.get_or_insert_with(Pictures::load);
         let bg = &mut self.background;
-        // The wood: its grain along the top strip, the name board and the strip's rail; each
-        // board its own band of the picture, drawn out along the grain.
+        // The wood: its grain along the top strip and the strip's rail; each board its own band
+        // of the picture, drawn out along the grain.
         let wood = &pictures.walnut;
         let along = (art::W * s) as f32 / wood.width() as f32;
         let across = along / 2.2;
         for (y, hh, band) in [
             (0.0, art::TOP, 40.0),
-            (art::TOP + art::PH, art::BOARD, 470.0),
             (art::PANEL_H, crate::strip::RAIL, 260.0),
         ] {
             fill(
