@@ -218,10 +218,13 @@ const SILENT: f64 = 1e-6;
 /// for this many samples running, counted across runs (the CA-74's).
 const QUIET: usize = 256;
 
-/// The detune between DOUBLE's two voices of a note at its full amount, cents, and the time
-/// constant, seconds, with which a voice's place follows SPREAD, the placement, VOICES and
-/// DOUBLE: plugin-kit's (its K6; decisions.md R-STEREO, the CA-74's R27 and R28).
-pub use plugin_kit_stereo::place::{DOUBLE_CENTS, GLIDE};
+/// The time constant, seconds, with which a voice's place follows SPREAD, the placement,
+/// VOICES and DOUBLE: plugin-kit's (its K6; decisions.md R-STEREO, the CA-74's R27 and R28).
+pub use plugin_kit_stereo::place::GLIDE;
+
+/// The detune between DOUBLE's two voices of a note at its full amount, cents: the CA-72's own
+/// (the owner, 2026-10-10: "let's make our maximum detune 100"; the kit's, the CA-74's, is 20).
+pub const DOUBLE_CENTS: f64 = 100.0;
 
 /// The voices at a multiple of the host's rate: the side chain interpolated up, the left and
 /// right outputs decimated down.
@@ -3001,11 +3004,11 @@ mod tests {
 
     /// DOUBLE: a note's twin half the detune sharp on the left, its voice half flat on the
     /// right (at full SPREAD each alone on its side), the two apart by the detune
-    /// (decisions.md R-STEREO, the CA-74's R28): 35 % of 20 cents. One oscillator, LOCK.
+    /// (decisions.md R-STEREO, the CA-74's R28): 7 % of 100 cents. One oscillator, LOCK.
     #[test]
     fn double_puts_the_sharp_twin_left_and_the_flat_voice_right() {
         let mut c = Controls {
-            double: 0.35,
+            double: 0.07,
             spread: 1.0,
             lock: true,
             ..Controls::default()

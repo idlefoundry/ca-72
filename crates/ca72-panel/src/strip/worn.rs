@@ -1222,9 +1222,11 @@ const BEAT_FULL: f64 = 10.0;
 /// How far a drop's light reaches, in its radii (past it, its halo under a level's step).
 const REACH: f64 = 4.5;
 
-/// The beat of two notes `cents` apart at [`BEAT_AT`], Hz.
+/// The beat of two notes `cents` apart at [`BEAT_AT`], Hz, at most [`BEAT_MOST`] (two notes
+/// a semitone apart beat 13 times a second, which the drops would only flicker at).
+const BEAT_MOST: f64 = 4.0;
 fn beat_hz(cents: f64) -> f64 {
-    BEAT_AT * (2f64.powf(cents.max(0.0) / 1200.0) - 1.0)
+    (BEAT_AT * (2f64.powf(cents.max(0.0) / 1200.0) - 1.0)).min(BEAT_MOST)
 }
 
 /// Where the scene puts each drop: its id, its place, whether it sounds, and the drop it comes

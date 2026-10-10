@@ -338,7 +338,7 @@ fn marks(dial: Dial) -> DialMarks {
             &(0..9)
                 .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
                 .collect::<Vec<_>>(),
-            &["0", "5", "10", "15", "20"],
+            &["0", "25", "50", "75", "100"],
         ),
         Dial::Drive => numbered(
             &(0..9)

@@ -355,7 +355,7 @@ pub struct Ca72Params {
     /// placement: a session saved before it reads it off.
     #[id = "unison"]
     pub unison: BoolParam,
-    /// DOUBLE: each note two voices, detuned up to 20 cents, either side of the centre, 0 to
+    /// DOUBLE: each note two voices, detuned up to 100 cents, either side of the centre, 0 to
     /// 100 % (decisions.md R-STEREO). The last parameter: a session saved before it reads 0.
     #[id = "double"]
     pub double: FloatParam,
@@ -673,17 +673,17 @@ mod tests {
         let d = &p.double;
         let at = |percent: f32| d.normalized_value_to_string(d.preview_normalized(percent), true);
         assert_eq!(at(0.0), "Off");
-        assert_eq!(at(60.0), "12 cents");
-        assert_eq!(at(36.0), "7.2 cents");
+        assert_eq!(at(60.0), "60 cents");
+        assert_eq!(at(7.2), "7.2 cents");
         let back = |s: &str| {
             d.string_to_normalized_value(s)
                 .map(|n| (d.preview_plain(n) * 1000.0).round() / 1000.0)
         };
-        assert_eq!(back("12 cents"), Some(60.0));
-        assert_eq!(back("12 \u{a2}"), Some(60.0));
-        assert_eq!(back("7.2"), Some(36.0));
+        assert_eq!(back("60 cents"), Some(60.0));
+        assert_eq!(back("60 \u{a2}"), Some(60.0));
+        assert_eq!(back("7.2"), Some(7.2));
         assert_eq!(back("off"), Some(0.0));
-        assert_eq!(back("40"), Some(100.0), "past 20 cents: the most");
+        assert_eq!(back("140"), Some(100.0), "past 100 cents: the most");
         assert_eq!((d.name(), p.spread.name()), ("Double Detune", "Width"));
         let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
         assert!(ids.iter().any(|i| i == "double") && ids.iter().any(|i| i == "spread"));

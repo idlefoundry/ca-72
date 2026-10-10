@@ -489,9 +489,8 @@ struct Editing {
     /// How far the drawer was down (`Browser::reveal`) in the last frame composed.
     reveal_shown: f64,
     /// QUALITY's opening (decisions.md R-ULTRA; `opening.rs`), moved on by the time since it
-    /// last was: at each frame while something comes up or goes down, else at most
-    /// [`ANIMATE_S`] apart (what follows the synth); the editor opens with QUALITY's setting
-    /// up. The voices' levels as last taken (0 to 1), for the strip's drops, and the output's
+    /// last was, at most [`ANIMATE_S`] apart (the strip's drops move on with it: the two are
+    /// drawn in one frame); the editor opens with QUALITY's setting up. The voices' levels as last taken (0 to 1), for the strip's drops, and the output's
     /// (the one instrument's drop's, and the lamps').
     motion: Motion,
     motion_at: Option<Instant>,
@@ -683,19 +682,13 @@ impl Editing {
 
     /// QUALITY's opening moved on towards what its setting `q` shows, by the time since it
     /// last was (at most 50 ms of it: a stalled frame does not jump it), and the voices' levels
-    /// taken: at every frame while something comes up or goes down, else at most
-    /// [`ANIMATE_S`] apart. ULTRA's note shown once its lamp is up, until it is read.
+    /// taken: at most [`ANIMATE_S`] apart (thirty times a second, whatever the screen's rate).
+    /// ULTRA's note shown once its lamp is up, until it is read.
     fn move_opening(&mut self, now: Instant, q: QualityMode) {
         let since = self
             .motion_at
             .map(|t| now.saturating_duration_since(t).as_secs_f64());
-        let wanted = match q {
-            QualityMode::Lo => self.motion.hamster,
-            QualityMode::Hi => self.motion.lamp,
-            QualityMode::Ultra => self.motion.coil,
-        };
-        let due = self.motion.moving() || wanted < 1.0 || since.is_none_or(|s| s >= ANIMATE_S);
-        if !due {
+        if since.is_some_and(|s| s < ANIMATE_S) {
             return;
         }
         let (peaks, output) = self.meters.take_levels();
@@ -1474,10 +1467,12 @@ impl Editing {
         let panel = self.renderer.render(&self.scene);
         self.strip_scene.bar.clone_from(&self.browser.bar);
         // (The strip's parts drawn again over the panel's frame where it changed there.)
-        let strip = self.strip.render(
+        // (The drops move on with QUALITY's opening, on its clock: the two in one frame.)
+        let strip = self.strip.render_at(
             &self.strip_scene,
             self.renderer.frame(),
             self.renderer.damage(),
+            self.motion_at.unwrap_or_else(Instant::now),
         );
         // The drawer over the strip, dropping down from under the rail, while it shows.
         let k = self.browser.reveal();
@@ -2351,6 +2346,38 @@ mod window {
     /// The window beyond the frames, opaque as they are.
     pub const EMPTY: u32 = 0xff3b_2213;
 
+    /// The window's pixels (`w` by `h`, a row after another) from frames shown one under the
+    /// other from its top left corner, [`EMPTY`] beyond them: a row at a time, each frame's
+    /// row turned as a run of pixels (the compiler makes a short loop of it; a pixel at a time,
+    /// with a frame found for each, took several times as long).
+    pub fn fill(buffer: &mut [u32], (w, h): (usize, usize), frames: &[&ca72_panel::Pixmap]) {
+        let mut frames = frames.iter();
+        let mut frame = frames.next();
+        let mut top = 0usize;
+        for (y, row) in buffer.chunks_exact_mut(w).take(h).enumerate() {
+            while let Some(f) = frame
+                && y >= top + f.height() as usize
+            {
+                top += f.height() as usize;
+                frame = frames.next();
+            }
+            let n = match frame {
+                Some(f) => {
+                    let fw = f.width() as usize;
+                    let n = fw.min(w);
+                    let from = (y - top) * fw * 4;
+                    let src = &f.data()[from..from + n * 4];
+                    for (out, p) in row[..n].iter_mut().zip(src.chunks_exact(4)) {
+                        *out = shown(p);
+                    }
+                    n
+                }
+                None => 0,
+            };
+            row[n..].fill(EMPTY);
+        }
+    }
+
     /// Where the frames are shown; nothing if the platform's window could not be drawn in.
     pub struct Surface {
         inner: Option<(
@@ -2406,27 +2433,7 @@ mod window {
             if buffer.len() < w * h {
                 return;
             }
-            let mut frames = frames.iter();
-            let mut frame = frames.next();
-            let mut top = 0usize;
-            for y in 0..h {
-                while let Some(f) = frame
-                    && y >= top + f.height() as usize
-                {
-                    top += f.height() as usize;
-                    frame = frames.next();
-                }
-                let row = &mut buffer[y * w..(y + 1) * w];
-                for (x, out) in row.iter_mut().enumerate() {
-                    *out = match frame {
-                        Some(f) if x < f.width() as usize => {
-                            let (fw, fy) = (f.width() as usize, y - top);
-                            shown(&f.data()[(fy * fw + x) * 4..(fy * fw + x) * 4 + 4])
-                        }
-                        _ => EMPTY,
-                    };
-                }
-            }
+            fill(&mut buffer[..], (w, h), frames);
             let _ = buffer.present();
         }
     }
@@ -2514,6 +2521,81 @@ mod tests {
             |_| None,
         );
         (e, host, params)
+    }
+
+    /// The window's pixels as the frames were turned a pixel at a time, before (the
+    /// reference for [`window::fill`]).
+    fn filled_a_pixel_at_a_time(
+        buffer: &mut [u32],
+        (w, h): (usize, usize),
+        frames: &[&ca72_panel::Pixmap],
+    ) {
+        let mut frames = frames.iter();
+        let mut frame = frames.next();
+        let mut top = 0usize;
+        for y in 0..h {
+            while let Some(f) = frame
+                && y >= top + f.height() as usize
+            {
+                top += f.height() as usize;
+                frame = frames.next();
+            }
+            let row = &mut buffer[y * w..(y + 1) * w];
+            for (x, out) in row.iter_mut().enumerate() {
+                *out = match frame {
+                    Some(f) if x < f.width() as usize => {
+                        let (fw, fy) = (f.width() as usize, y - top);
+                        window::shown(&f.data()[(fy * fw + x) * 4..(fy * fw + x) * 4 + 4])
+                    }
+                    _ => window::EMPTY,
+                };
+            }
+        }
+    }
+
+    /// The window's pixels, a row at a time, are the pixels turned one at a time, to the bit:
+    /// frames narrower than the window and shorter, one under the other, the window beyond.
+    #[test]
+    fn the_window_s_pixels_a_row_at_a_time_are_its_pixels_one_at_a_time() {
+        let frame = |w: u32, h: u32, k: u8| {
+            let mut p = ca72_panel::Pixmap::new(w, h).unwrap();
+            for (i, px) in p.data_mut().chunks_exact_mut(4).enumerate() {
+                px.copy_from_slice(&[(i as u8).wrapping_mul(k), k, (i / 7) as u8, 255]);
+            }
+            p
+        };
+        let (a, b) = (frame(37, 11, 3), frame(29, 6, 5));
+        let (w, h) = (41, 20);
+        let (mut new, mut old) = (vec![0u32; w * h], vec![0u32; w * h]);
+        window::fill(&mut new, (w, h), &[&a, &b]);
+        filled_a_pixel_at_a_time(&mut old, (w, h), &[&a, &b]);
+        assert_eq!(new, old);
+    }
+
+    /// What turning a Retina window's frame into the screen's pixels costs, a row at a time and
+    /// a pixel at a time: printed (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "prints timings"]
+    fn the_window_s_pixels_timings() {
+        let (w, h) = (3440usize, 1965usize);
+        let f = ca72_panel::Pixmap::new(w as u32, h as u32).unwrap();
+        let mut buffer = vec![0u32; w * h];
+        for (name, way) in [
+            (
+                "a row at a time",
+                window::fill as fn(&mut [u32], (usize, usize), &[&ca72_panel::Pixmap]),
+            ),
+            ("a pixel at a time", filled_a_pixel_at_a_time),
+        ] {
+            let t = Instant::now();
+            for _ in 0..50 {
+                way(&mut buffer, (w, h), &[&f]);
+            }
+            println!(
+                "{name}: {:.2} ms a frame",
+                t.elapsed().as_secs_f64() * 1000.0 / 50.0
+            );
+        }
     }
 
     /// The window played for a look and a measure (decisions.md R-ULTRA): 24 seconds in real
@@ -2644,9 +2726,8 @@ mod tests {
             if changed {
                 let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
                 screen.resize((f.width() * f.height()) as usize, 0);
-                for (o, p) in screen.iter_mut().zip(f.data().chunks_exact(4)) {
-                    *o = window::shown(p);
-                }
+                // (As `present` turns it: the window's own code.)
+                window::fill(&mut screen, (f.width() as usize, f.height() as usize), &[f]);
                 presented += 1;
             }
             times.push(started.elapsed().as_secs_f64() * 1000.0);

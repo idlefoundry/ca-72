@@ -17,7 +17,7 @@ pub enum Dial {
     ModMix,
     /// The strip's (A6): VOICES, 2 to 10, a step a voice.
     Voices,
-    /// DETUNE, DOUBLE's: 0 to 20 cents.
+    /// DETUNE, DOUBLE's: 0 to 100 cents.
     Detune,
     /// DRIVE: 0 to 24 dB.
     Drive,

@@ -136,8 +136,7 @@ impl Motion {
         }
     }
 
-    /// Whether something is coming up or going down (drawn at every frame then, as before:
-    /// what follows the synth is drawn at most [`ANIMATE_S`] apart).
+    /// Whether something is coming up or going down.
     pub fn moving(&self) -> bool {
         [self.hamster, self.lamp, self.coil]
             .iter()
@@ -167,7 +166,7 @@ impl Motion {
     }
 }
 
-/// What follows the synth (the opening, the drops) is drawn at most this often, seconds.
+/// The opening and the drops move on at most this often, seconds: thirty times a second.
 pub const ANIMATE_S: f64 = 1.0 / 30.0;
 
 #[cfg(test)]

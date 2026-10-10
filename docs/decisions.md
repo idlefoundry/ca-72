@@ -3643,5 +3643,24 @@ being placed on them as well? Show me a before/after video once you are done."
   well, its floor and the ring drawn again only as something comes or goes, and what moves and
   its light; the lightning is drawn without blend modes or a clip (a fifth cheaper). The drops
   are drawn only near each (six radii): 2.3 ms a frame for twenty moving at twice the opening
-  size, where they took 5.2 ms (`drops_timings`).
+  size, where they took 5.2 ms (`drops_timings`); with the mock-up's flat drops (R-LOOK), 0.77.
+  Then, measured whole (below), the opening and the drops were put on one clock, thirty times
+  a second, something coming up or going down too (two clocks out of step had presented sixty
+  frames a second between them), and the window's frame turned into the screen's pixels a row
+  at a time (`window::fill`): 3.1 ms a frame at twice the opening size, where a pixel at a
+  time, a frame found for each, took 7.3 (`the_window_s_pixels_timings`), on every frame the
+  window presents.
+- **Measured whole** (`the_window_played`: 24 s in real time at sixty frames a second, a Retina
+  window, four POLY voices with DOUBLE playing chords at HI, ULTRA, then LO, falling quiet, then
+  HI with DETUNE swept; each frame drawn and turned into the screen's pixels as each build's
+  `present` does, timed; the build before these changes, `ultra` at c23a0a1, played the same,
+  each run twice, in either order): before, 57.8 % of one core on the editor's thread, 1,061
+  frames presented, 9.6 ms a frame; now, 32.4 %, 745 frames, 5.4 ms. The audio thread does no
+  more per sample in the voices; with an editor open it compares the output's samples for
+  their peak and keeps eleven numbers a block, and with none, reads a flag.
+- **DETUNE to 100 cents** (the owner, 2026-10-10: "let's make our maximum detune 100"): the
+  CA-72's own `engine::DOUBLE_CENTS`, 100 (the kit's, the CA-74's, stays 20), its dial 0, 25, 50,
+  75, 100. A session saved with DETUNE up plays five times as far apart. The drops' beat follows
+  the pair's to 4 a second and stays there (two notes a semitone apart beat 13 times a second at
+  220 Hz, which the drops would only flicker at).
 
