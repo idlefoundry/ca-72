@@ -3235,3 +3235,46 @@ its K7); here `inner_clears_the_centre_and_one_voice_stays_there`,
 gesture, tip and switch tests with INNER. The panel's and plug-in's tests, 202 passed, 16
 ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`. Not yet: the
 installed build in a host.
+
+### EDGES dropped (2026-10-10)
+
+**The owner, 2026-10-10**, once INNER was built: "I don't really see any difference between edge
+and even, because edge is now just even with the inner controls on maximum, is it not?" Told it
+is close but not the same at eight to ten voices: "if there is cases where it yields different
+behavior, then maybe we can just leave it. Just make sure that that's true, that it's not
+exactly replicable from other settings." Told where it differs, then: "Do you think those
+differences will be practically audible? I'm changing my mind again…"; "Drop it."; "Actually
+render first"; and having listened to the renders: "k, I think we should remove edges".
+
+**Agent decisions, 2026-10-10**, as recommended to the owner:
+- **What EDGES had of its own**, measured with the kit's `voice_at`: with VOICES 2 to 7, EVEN
+  with INNER (90 % at three voices down to 70 % at seven) puts every voice where EDGES did;
+  with DOUBLE, every pair at WIDTH's edge is INNER at 100 % in either placement, to the bit;
+  only with eight to ten voices and no DOUBLE does EDGES's strictly outside-in order (100, 100,
+  90, 90, 80, 80 % ...) differ from anything EVEN or CENTER can do, the nearest EVEN at most
+  about 8 % of the way out from it. Renders for the owner (`mac:~/Downloads/ca72-edges-ab`, the
+  CA-72's, ten voices, WIDTH 100 %): POLY chords and UNISON with EDGES and with EVEN at INNER
+  55 % measured the same width (side to mid within 0.05 dB, left-right correlation within
+  0.006); single notes one at a time, the worst case, about 2 dB of balance on notes already 12
+  to 17 dB to one side; plain EVEN, the reference, 6 to 8 dB.
+- **SCATTER's placement is EVEN or CENTER** (`Scatter`, ids `even` and `centre` as they were;
+  the host's Scatter Placement two positions). A preset's `placement` is read by the plug-in's
+  index, 0 EVEN and 1 CENTER, an older 2 (CENTER) as CENTER (no factory preset names one); a
+  session saved with `edges`, or a placement not understood, opens with EVEN (`filter_state`),
+  not at what the instance had, as R18 has it for ENTROPY. MIDI Learn takes the placement as a
+  switch, EVEN below 64 and CENTER from it (54 learnable controls: 27 knobs, 7 selectors, 20
+  switches).
+- **The strip:** PLACEMENT is two lit tabs, EVEN and CENTER, its recess a tab narrower; the two
+  banks stay centred over STEREO as a pair, 180 apart. The lit tab and a click go by the
+  plug-in's choice, not the kit's index.
+- **The kit keeps its `Edges` for now**, used only by the engine for one voice alone, whose
+  DOUBLE pair goes all of SPREAD's way out (R-STEREO); the kit's own change (dropping it, a
+  constant for the lone pair) was blocked here as a change to a shared repo and is the owner's
+  to have made from the kit.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
+bd63519: every factory preset (24) the same to the bit. Tests: the placement's two choices by
+their ids, the strip's two tabs where they stand and the lit tab, DOUBLE's pairs at INNER 100 %
+the same to the bit in EVEN, CENTER and as the engine's lone pair, a value learned for each kind,
+`a_session_saved_with_edges_opens_with_even`; the panel's and plug-in's tests, 206 passed, 18
+ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`.

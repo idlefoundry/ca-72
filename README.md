@@ -103,9 +103,8 @@ and sends nothing of yours.
   parameter **Lock** makes them identical (the circuit as drawn), its level matched.
 - **SPREAD** (0 to 100 %, off by default): POLY's or UNISON's voices across the stereo
   field, each as loud wherever it sits, where **SCATTER** puts them: EVEN (the default),
-  evenly from edge to edge, the first two at the edges; EDGES, every voice 60 to 100 % of
-  the way out to one side or the other; CENTER, the first in the centre and the rest spread
-  about it by the golden ratio. With POLY and UNISON off the voice stays in the centre
+  evenly from edge to edge, the first two at the edges; or CENTER, the first in the centre and
+  the rest spread about it by the golden ratio. With POLY and UNISON off the voice stays in the centre
   (unless DOUBLE). A voice moves to a new place over 10 ms.
 - **INNER** (0 to 100 %, off by default): the inner edge of each side, as a share of SPREAD
   (the strip's WIDTH). SPREAD brings the voices in from the outer edges; INNER moves them out
@@ -116,8 +115,8 @@ and sends nothing of yours.
   SPREAD's edge; at SPREAD 0, or with POLY and UNISON off and no DOUBLE, it does nothing.
 - **DOUBLE** (0 to 100 %, off by default): each note two whole voices, up to 20 cents apart,
   the sharper on the left. With SPREAD the pair goes out to either side of the centre, as
-  far as SCATTER puts the note's voice (with EDGES, and with POLY and UNISON off, all of
-  SPREAD's way); at SPREAD 0 both are in the centre. Turned down so that it sounds about as
+  far as SCATTER puts the note's voice (with INNER at 100 %, and with POLY and UNISON off, all
+  of SPREAD's way); at SPREAD 0 both are in the centre. Turned down so that it sounds about as
   loud as one voice a note; it doubles the voices' work. Switching it on or off stops the
   notes sounding; a doubled voice let go plays its tail out.
 - **DRIVE** (0 to 24 dB, off by default): the mixer's signal raised into the filter's input,
