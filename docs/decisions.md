@@ -2991,6 +2991,46 @@ list that drops down over the strip inside the window."
   Then "make sure the arrow on the right side of the preset dropdown is also dots like this":
   the list's arrow in the name's dots too, the mock-up's glyphs (down while the list is shut,
   up while it is down), 0.7 of the name's light but under the pointer.
+- **The presets' drawer, the mock-up's** (the owner, 2026-10-10: "i just realized we didn't
+  update the preset search page to the new one that you had sketched out! let's fix that"; the
+  drawn drawer, flat panels and buttons, had been left as it was): A6's dropdown, a tenth smaller
+  as the mock-up drew it, on the strip's face under the rail (its picture placed as the strip's,
+  its trim and the rail's shadow), in three sections in the panel's print, their displays dots
+  behind glass as the rail's name (the mock-up's neon, every dot faintly there, the lit ones
+  with their glow; `ca72-panel/src/presets/drawer.rs`):
+  - FIND: the search on its own line (SEARCH, faintly, while empty), and the tags in use two to
+    a line, each picked as a filter bright (sixteen lines show; the wheel scrolls them).
+  - PRESETS: ALL, FAVORITES and MINE as tabs over the list (one at a time: the drawn drawer's
+    two switches could both be on), then seventeen rows, each the current preset's mark, its
+    star (outlined if not a favourite; a click on it makes it one), its name, EDITED or YOURS,
+    its tags; arrows at the right where there are more above or below.
+  - PRESET: eight keys, the rail's charcoal caps with their legends printed over them (RENAME,
+    TAGS, DELETE, REVERT; SAVE AS, RESTORE, MIDI LEARN, CLOSE), over a display of the preset
+    the plug-in is set to (its name; where it is from, starred if a favourite; its tags; what
+    was last done; how many presets the list shows of how many) and the update check (R27) on
+    its last lines.
+  Agent decisions, not separately approved: the drawn drawer's per-row RENAME, TAGS, REVERT
+  and DELETE became the PRESET keys, acting on the preset the plug-in is set to (the mock-up's
+  keys have no row); what they begin stays with that preset as the list changes and ends when it
+  is gone or another is set (R18's rule, which had followed a row). RENAME, TAGS and SAVE AS
+  are typed into the PRESET display (SAVE AS's name and tags on two lines, NAME and TAGS before
+  them), DELETE asks there (DELETE again, or Enter, deletes; Escape keeps); a key held down while
+  what it began goes on, and the update check not shown meanwhile. The caret is a character
+  display's: a line of dots under the character it is before, steady. MIDI LEARN shows MIDI
+  Learn's list (R34) in the list's place (its keys and the controllers it will not learn where
+  the tags are), LEARN, REMOVE and CANCEL as words at a row's end; anything of the presets'
+  pressed shows them again. The glass is the rail's picture with its rows and columns evened out
+  and its mesh softened: drawn out over displays many times its height, its faint lines had been
+  hard bands across the list (the owner, 2026-10-10: "there's several harsh horizontal lines,
+  please get rid of them").
+  Its cost (measured at a Retina screen's scale, two pixels a unit, a release build, on the
+  Linux machine): the drawn drawer drew whole for every change, 13 ms to open and about 11 ms
+  for each change after (a row under the pointer, a letter typed); this one draws again only the
+  lines of a display that changed, 2 ms for a row under the pointer or a letter typed, 4 ms for a
+  key's prompt, 20 ms for the MIDI list in the list's place. What does not change (the face,
+  print, bezels, glass and every unlit dot) takes about 0.1 s to make, on a thread of its own
+  begun as the editor opens, so the drawer's first opening draws only its lit dots: 28 ms. It is
+  shared by the editors open at the same scale.
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 

@@ -64,9 +64,9 @@ find **CA-72** in **Settings › Apps** and choose **Uninstall**; on Linux, run
 presets are kept.
 
 **Updating.** Open the presets' drawer (click the preset's name under the panel) and click
-**CHECK FOR UPDATES** at its top right, beside the version you have. If a newer release is
-out, **DOWNLOAD** opens its installer for your computer in your browser: close your host,
-then run it as above. The CA-72 checks only when you click, through your system's `curl`,
+**[ CHECK FOR UPDATES ]** at the foot of the PRESET display, under the version you have. If a
+newer release is out, **[ DOWNLOAD ]** opens its installer for your computer in your browser:
+close your host, then run it as above. The CA-72 checks only when you click, through your system's `curl`,
 and sends nothing of yours.
 
 ## Playing it
@@ -180,20 +180,23 @@ dimmed while POLY is off, and FEEDBACK while EXTERNAL INPUT is closed.
 star to make it a favourite, the previous and next preset, and SAVE…. A preset holds every
 control but the PITCH wheel, POWER and MIDI BEND RANGE (your keyboard's, which choosing a
 preset leaves as it is), POLY, VOICES, ENTROPY and SPREAD among them. Click
-the name and a drawer opens below the strip, the window growing to hold it (in a host that
-will not resize the window, it slides up over the panel instead):
+the name and a drawer drops down over the strip, in three sections:
 
-- Type to search names, descriptions and tags; FAVOURITES and MINE filter, and so does
-  each tag's chip. Click a preset, or use the arrow keys, to choose it; double-click it to
-  choose it and close the drawer. The mouse wheel or a trackpad scrolls the list.
-- Each row has a star, RENAME, TAGS, DELETE (asked first) and, for a factory preset you
-  edited, REVERT. SAVE AS saves the current sound, named and tagged; naming it as a
-  factory preset saves yours in its place. Names are told apart regardless of case, and a
-  few cannot be used on any system: `factory`, and Windows' device names such as `CON`.
-- Factory presets are never lost: deleting one hides it, and RESTORE FACTORY brings it
-  back.
-- Enter commits a field (in the search, closes the drawer); Escape takes back an edit or
-  closes it. While the drawer is open it takes the keyboard. On macOS the host keeps its
+- **FIND**: type to search names, descriptions and tags; click a tag to filter by it (the
+  wheel scrolls the tags).
+- **PRESETS**: ALL, FAVORITES and MINE over the list. Click a preset, or use the arrow keys,
+  to choose it; double-click it to choose it and close the drawer; click its star to make it a
+  favourite. The mouse wheel or a trackpad scrolls the list.
+- **PRESET**: its keys act on the preset you have chosen: RENAME, TAGS, DELETE (asked first:
+  DELETE again or Enter deletes it) and, for a factory preset you edited, REVERT. SAVE AS
+  saves the current sound, named and tagged (Tab moves from the name to the tags; SAVE AS
+  again or Enter saves); naming it as a factory preset saves yours in its place. Names are
+  told apart regardless of case, and a few cannot be used on any system: `factory`, and
+  Windows' device names such as `CON`. The display under the keys shows the preset, or what
+  you are typing.
+- Factory presets are never lost: deleting one hides it, and RESTORE brings it back.
+- Enter commits a field (in the search, closes the drawer); Escape takes back what a key
+  began, or closes it. While the drawer is open it takes the keyboard. On macOS the host keeps its
   Command and Control shortcuts; on Windows they wait until the drawer shuts, when the
   keyboard goes back to the host; on Linux the editor has the keys while the pointer is
   over it.
@@ -222,9 +225,9 @@ stays as it is). Escape, **CANCEL MIDI LEARN** in the menu, or closing the edito
 waiting, and the controllers learned before are kept. Choosing **MIDI LEARN** on another
 control while one waits moves the waiting there.
 
-**The list.** The **MIDI** button in the presets' drawer (or **MIDI ASSIGNMENTS…** in a
-control's menu) shows every control that can be learned and its controller, with LEARN,
-REMOVE and CANCEL. It works from the keyboard: Up and Down choose a control (a letter jumps
+**The list.** The **MIDI LEARN** key in the presets' drawer (or **MIDI ASSIGNMENTS…** in a
+control's menu) shows every control that can be learned and its controller in the list's
+place, with LEARN, REMOVE and CANCEL. It works from the keyboard: Up and Down choose a control (a letter jumps
 to the next one beginning with it), Enter learns it or stops waiting, Delete or Backspace
 removes its controller, Escape stops waiting and then closes the drawer. It is the only way to
 learn **LOCK**, which has no control on the panel.
