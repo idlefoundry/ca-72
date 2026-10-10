@@ -88,6 +88,7 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         } else {
             Placement::Centre
         },
+        unison: r.end(),
         feedback: r.either(0.0, 1.0),
         lock: r.end(),
     }

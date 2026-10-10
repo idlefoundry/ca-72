@@ -2817,7 +2817,7 @@ list that drops down over the strip inside the window."
   cores):** the background once a scale, 182 ms at 0.4 of the drawing (the pictures decoded the
   first time) and 508 ms at 1; a knob turned, 1.5 ms at 0.4 and 4.8 ms at 1.
 
-## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, DOUBLE
+## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
 **The owner, 2026-10-09:** "we need to add all the same stereo controls that we added to the
 CA74", then "in fact, i think all controls on that panel should probably be added here", and,
@@ -2868,3 +2868,43 @@ three above levelled back within 0.01 dB. `preset_render` (every preset with POL
 against the commit before: Pink Riser the same to the bit, the rest moved by the new choice of
 voice (levels within 0.4 dB) but those with SPREAD (Warped Pad +1.38 dB, Wooden Mallet +1.18,
 before levelling). The plug-in's unit tests (127 passed, 7 ignored); rustfmt; clippy.
+
+**Agent decisions, 2026-10-09** (the second step: UNISON; not separately approved):
+- **UNISON** (the host's Unison, `unison`, off by default; a session or preset saved before
+  reads off) is the CA-74's R25 on this instrument: VOICES whole instruments, each taking every
+  key through its own keyboard circuit as POLY off's one instrument does (lowest-note priority,
+  single triggering), each with its own parts (ENTROPY's tolerances) and its place in the field
+  by SPREAD and the placement, the output turned down by the square root of VOICES. It
+  outranks POLY. Switching it, or VOICES while it is on, lets every key go.
+- **Out of step:** every voice but the first, when it is made or put back to rest, starts its
+  oscillators where its seed puts them on their ramps (`Vco::start_at`); the first starts at
+  the reference's initial condition, so one voice, and every preset with POLY and UNISON off,
+  renders as before to the bit. Without it UNISON's voices at LOCK would sound as one voice
+  9 dB louder.
+- **A voice's three oscillators start together**, at one point, as the reference starts them
+  together at the top. The CA-74 starts each of its two apart, but here LOCK's trim (R9) is for
+  three started together: started apart, the four-voice chord at LOCK came out 3.4 dB under the
+  drifting one, and each voice would have had its own level at LOCK.
+- **A seed loaded into a running instance makes its voices again**, as an instance opened with
+  it makes them (the CA-74 does the same), so their oscillators start where the new seed says
+  (R18's test caught it).
+- **MIDI Learn:** UNISON is learnable as a switch (49 learnable controls: 23 knobs,
+  8 selectors, 18 switches).
+- **The presets that play POLY:** their voices past the first now start out of step, so a
+  chord's onset no longer adds up in phase. They are levelled back through MAIN OUTPUT VOLUME's
+  law by their momentary maximum, as before: Slow Horn Swell 7.94 to 8.011 (+0.27 dB), Brass
+  Tutti 3.92 to 3.894 (-0.12 dB), Warped Pad 6.9 to 7.141 (+0.91 dB). Their integrated
+  loudness on the phrase moves +0.26, -0.19 and +0.89 dB.
+
+**Evidence (the Linux reference machine, 2026-10-09):** the CA-74's tests ported:
+`unison_voices_come_in_out_of_step` (eight voices at LOCK within 2 dB of one; with every voice
+started in step it fails at +9.0 dB), `unison_is_about_as_loud_as_one_voice`,
+`unison_voices_take_the_keys_as_the_instrument_does` (every voice's keyboard voltage the one
+instrument's after each of eight key events, every voice sounding),
+`switching_unison_lets_every_key_go`. `tests/sound.rs` passes: LOCK +0.19 dB against
+drifting (`lock_is_the_circuit_at_the_drifting_level`), and a reseeded instance plays as one
+opened with the seed. `preset_levels` against the first step: 21 presets the same to the
+hundredth of a dB, the three above levelled back within 0.005 dB. `preset_render` (every
+preset with POLY's ten voices) against the first step: the noise presets the same to the bit
+or within -145 dB, the rest moved by the voices' starts (levels within 0.71 dB; Warped Pad
++0.99 dB after levelling). The plug-in's unit tests (131 passed, 7 ignored); rustfmt; clippy.

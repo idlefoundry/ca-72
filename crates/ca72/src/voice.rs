@@ -1167,6 +1167,16 @@ impl Voice {
         v
     }
 
+    /// The three oscillators started together `at` one share of the way down their ramps
+    /// ([`Vco::start_at`]), as the reference starts them together at the top: for a voice made
+    /// or put back to rest that is not the first, so that voices playing one note together do
+    /// not start in step with each other (decisions.md R-STEREO). Never at a note.
+    pub fn start_oscillators_at(&mut self, at: f64) {
+        for v in &mut self.audio.front.vcos {
+            v.start_at(at);
+        }
+    }
+
     /// Seeds the noise generator (each device its own stream; a render repeats).
     pub fn set_seed(&mut self, seed: u64) {
         self.ctl.noise.reseed(seed);

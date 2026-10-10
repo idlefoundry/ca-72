@@ -313,6 +313,10 @@ pub struct Ca72Params {
     /// R-STEREO). The last parameter: a session saved before it reads EVEN.
     #[id = "placement"]
     pub placement: EnumParam<Scatter>,
+    /// UNISON: VOICES instruments on every key together (decisions.md R-STEREO). After the
+    /// placement: a session saved before it reads it off.
+    #[id = "unison"]
+    pub unison: BoolParam,
 }
 
 /// An amount, 0 to 100 %.
@@ -416,6 +420,7 @@ impl Default for Ca72Params {
             feedback: ten("Feedback", 0.0),
             lock: BoolParam::new("Lock (oscillators identical)", false),
             placement: EnumParam::new("Scatter Placement", Scatter::Even),
+            unison: BoolParam::new("Unison", false),
         }
     }
 }
@@ -516,6 +521,7 @@ impl Ca72Params {
             entropy: value(&self.entropy) / 100.0,
             spread: value(&self.spread) / 100.0,
             placement: self.placement.value().into(),
+            unison: self.unison.value(),
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),

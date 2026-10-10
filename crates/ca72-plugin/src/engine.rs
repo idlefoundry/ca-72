@@ -4,7 +4,10 @@
 //! (`tests/realtime.rs`).
 //!
 //! POLY off, the one instrument takes every key through its keyboard circuit (lowest-note
-//! priority, single triggering), as before. POLY on, one voice per note, up to VOICES (2 to
+//! priority, single triggering), as before. UNISON (outranking POLY) plays VOICES whole
+//! instruments together, each taking every key through its own keyboard circuit as the one
+//! does, each its own parts under ENTROPY and its own place under SPREAD, turned down by the
+//! square root of VOICES (decisions.md R-STEREO, the CA-74's R25). POLY on, one voice per note, up to VOICES (2 to
 //! 10) of the ten built: each the whole instrument with its own keyboard circuit, which its
 //! note reaches as one key (`PolyKey`; decisions.md, "POLY"). A POLY note takes the voice
 //! that last played its key if that voice is free or letting go, else the free voice whose
@@ -90,6 +93,8 @@ pub struct Controls {
     pub spread: f64,
     /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R-STEREO).
     pub placement: Placement,
+    /// UNISON: VOICES instruments on every key together (decisions.md R-STEREO).
+    pub unison: bool,
     /// FEEDBACK (0..1): the voices' output patched back into their EXTERNAL INPUT, a sample
     /// late, by this much of its level (the phones' VOLUME knob; decisions.md R8).
     pub feedback: f64,
@@ -112,6 +117,7 @@ impl Default for Controls {
             entropy: 0.0,
             spread: 0.0,
             placement: Placement::Even,
+            unison: false,
             feedback: 0.0,
             lock: false,
         }
@@ -522,18 +528,25 @@ impl Engine {
         let reseeded = seed != self.seed;
         self.seed = seed;
         if rate == self.rate && !self.slots.is_empty() {
+            let voice_rate = self.voice_rate();
             for (k, s) in self.slots.iter_mut().enumerate() {
                 if let Ok(mut p) = s.play.lock() {
-                    p.voice.set_seed(voice_seed(seed, k));
                     if reseeded {
+                        // (Made again, as an instance opened with the seed makes them: its
+                        // voices' oscillators start where it says.)
+                        p.voice = made_voice(voice_rate, seed, k);
                         p.character = Character::new(voice_seed(seed, k), k, 3, ENTROPY_KNOBS);
+                        p.panel_gen = u64::MAX;
+                    } else {
+                        p.voice.set_seed(voice_seed(seed, k));
                     }
                 }
             }
             if reseeded {
                 self.apply();
+                self.press_held();
             }
-            self.spares.make(self.voice_rate());
+            self.spares.make(voice_rate);
             return;
         }
         self.stop_workers();
@@ -552,36 +565,30 @@ impl Engine {
         });
         let voice_rate = rate * factor as f64;
         self.slots = (0..POLY_VOICES.2)
-            .map(|k| {
-                // (Each its own copy from the prototype, its key lists' room reserved: a key
-                // press must not allocate on the audio thread.)
-                let mut voice = Voice::prototype(voice_rate);
-                voice.set_seed(voice_seed(seed, k));
-                Slot {
-                    play: Arc::new(Mutex::new(Playing {
-                        voice,
-                        character: Character::new(voice_seed(seed, k), k, 3, ENTROPY_KNOBS),
-                        key: PolyKey::new(voice_rate),
-                        gate: false,
-                        note: 0,
-                        drop: false,
-                        out: [[0.0; CHUNK]; 2],
-                        peak: 0.0,
-                        panel_gen: u64::MAX,
-                        broken: false,
-                    })),
-                    note: 0,
+            .map(|k| Slot {
+                play: Arc::new(Mutex::new(Playing {
+                    voice: made_voice(voice_rate, seed, k),
+                    character: Character::new(voice_seed(seed, k), k, 3, ENTROPY_KNOBS),
+                    key: PolyKey::new(voice_rate),
                     gate: false,
-                    shown: false,
+                    note: 0,
                     drop: false,
-                    age: 0,
-                    active: false,
+                    out: [[0.0; CHUNK]; 2],
                     peak: 0.0,
-                    lift: false,
-                    notes: [(0, false); 32],
-                    pending: 0,
-                    rest: false,
-                }
+                    panel_gen: u64::MAX,
+                    broken: false,
+                })),
+                note: 0,
+                gate: false,
+                shown: false,
+                drop: false,
+                age: 0,
+                active: false,
+                peak: 0.0,
+                lift: false,
+                notes: [(0, false); 32],
+                pending: 0,
+                rest: false,
             })
             .collect();
         // (Each voice's lock taken once here, off the audio thread: on macOS the standard
@@ -592,11 +599,17 @@ impl Engine {
         }
         self.spares.make(voice_rate);
         self.apply();
-        if !self.controls.poly
-            && let Ok(mut p) = self.slots[0].play.lock()
-        {
-            for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
-                p.voice.note(key as i32, true);
+        self.press_held();
+    }
+
+    /// The keys held pressed again on the instruments' voices just made (POLY's voices take
+    /// the next keys).
+    fn press_held(&self) {
+        for k in 0..self.instruments() {
+            if let Ok(mut p) = self.slots[k].play.lock() {
+                for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
+                    p.voice.note(key as i32, true);
+                }
             }
         }
     }
@@ -611,7 +624,7 @@ impl Engine {
     /// decisions.md R18). Returns how many run (none with POLY off, or if the system would not
     /// start them).
     pub fn start_workers(&mut self, workers: usize, period: Option<Duration>) -> usize {
-        if self.pool.is_some() && self.workers == (workers, period) && self.controls.poly {
+        if self.pool.is_some() && self.workers == (workers, period) && self.many() {
             return self.workers();
         }
         self.stop_workers();
@@ -621,7 +634,7 @@ impl Engine {
         }
         let voices: Vec<Shared> = self.slots.iter().map(|s| s.play.clone()).collect();
         self.plan = self.crew.plan(&voices, workers, period);
-        if self.controls.poly {
+        if self.many() {
             self.pool = self.crew.start(self.plan);
             self.ask = Ask::Answered;
             #[cfg(test)]
@@ -646,7 +659,7 @@ impl Engine {
     /// ([`Engine::take_serving`]) and taken once it is ready, every voice played here until
     /// then; switched off, the pool let go, to be stopped there.
     fn follow_poly(&mut self) {
-        let on = self.controls.poly;
+        let on = self.many();
         if self
             .crew
             .follow(on, self.plan, &mut self.pool, &mut self.ask)
@@ -697,7 +710,10 @@ impl Engine {
     /// notes then sounding stop; the next notes play in the new way).
     pub fn set(&mut self, c: &Controls) {
         if *c != self.controls {
-            if c.poly != self.controls.poly {
+            if c.poly != self.controls.poly
+                || c.unison != self.controls.unison
+                || (c.unison && c.voices != self.controls.voices)
+            {
                 self.lift_all();
             }
             if c.voices < self.controls.voices {
@@ -708,18 +724,42 @@ impl Engine {
             }
             self.controls = *c;
             self.gain = output_gain(c.volume, c.main_output)
-                * if c.lock { lock_trim(&c.panel) } else { 1.0 };
+                * if c.lock { lock_trim(&c.panel) } else { 1.0 }
+                * unison_trim(c);
             self.apply();
         }
     }
 
     /// The one instrument's key pressed or released (POLY off), on the first voice (once it
-    /// is free, if a worker late from an earlier run holds it).
+    /// is free, if a worker late from an earlier run holds it); with UNISON, on each of its
+    /// instruments.
     fn one_note(&mut self, key: i32, on: bool) {
-        let s = &mut self.slots[0];
-        if with_voice(s, |p| p.voice.note(key, on)).is_none() && s.pending < s.notes.len() {
-            s.notes[s.pending] = (key, on);
-            s.pending += 1;
+        for k in 0..self.instruments().max(1) {
+            let s = &mut self.slots[k];
+            if with_voice(s, |p| p.voice.note(key, on)).is_none() && s.pending < s.notes.len() {
+                s.notes[s.pending] = (key, on);
+                s.pending += 1;
+            }
+            if self.controls.unison && on {
+                s.active = true;
+            }
+        }
+    }
+
+    /// Whether more than the one instrument plays: POLY's voices or UNISON's.
+    fn many(&self) -> bool {
+        self.controls.poly || self.controls.unison
+    }
+
+    /// The voices that take every key through their keyboard circuits, as the one instrument
+    /// does: UNISON's VOICES, POLY off's one, POLY's none.
+    fn instruments(&self) -> usize {
+        if self.controls.unison {
+            self.voices()
+        } else if self.controls.poly {
+            0
+        } else {
+            1.min(self.slots.len())
         }
     }
 
@@ -733,7 +773,7 @@ impl Engine {
                 if self.slots.is_empty() {
                     return;
                 }
-                if !self.controls.poly {
+                if self.controls.unison || !self.controls.poly {
                     self.one_note(i32::from(key), on);
                 } else if on {
                     self.poly_on(key);
@@ -767,9 +807,13 @@ impl Engine {
     /// output fades back in. A voice taken for a note meanwhile plays on.
     fn all_sound_off(&mut self) {
         self.release_all();
-        let poly = self.controls.poly;
+        let (many, instruments) = (self.many(), self.instruments());
         for (k, s) in self.slots.iter_mut().enumerate() {
-            s.rest = if poly { s.active } else { k == 0 };
+            s.rest = if many {
+                s.active || k < instruments
+            } else {
+                k == 0
+            };
         }
         self.hush = !self.slots.is_empty();
         self.hush_waited = 0;
@@ -783,7 +827,7 @@ impl Engine {
         if !self.hush || self.fade > 0.0 {
             return;
         }
-        let poly = self.controls.poly;
+        let poly = self.many();
         let mut waiting = false;
         for k in 0..self.slots.len() {
             if !self.slots[k].rest {
@@ -834,11 +878,14 @@ impl Engine {
         spare.clean = false;
         drop(spare);
         p.voice.set_seed(voice_seed(self.seed, k));
+        if let Some(at) = out_of_step(k, self.seed) {
+            p.voice.start_oscillators_at(at);
+        }
         p.key.rest();
         (p.broken, p.drop) = (false, false);
         let s = &mut self.slots[k];
         (s.lift, s.pending, s.shown) = (false, 0, false);
-        if !self.controls.poly && k == 0 {
+        if k < self.instruments() {
             for (key, _) in self.held.iter().enumerate().filter(|(_, h)| **h) {
                 p.voice.note(key as i32, true);
             }
@@ -889,8 +936,7 @@ impl Engine {
     /// Every held key released (the contours then run out as the DECAY switch has them).
     pub fn release_all(&mut self) {
         for key in 0..self.held.len() {
-            if std::mem::take(&mut self.held[key]) && !self.controls.poly && !self.slots.is_empty()
-            {
+            if std::mem::take(&mut self.held[key]) && self.instruments() > 0 {
                 self.one_note(key as i32, false);
             }
         }
@@ -901,18 +947,17 @@ impl Engine {
 
     /// Every voice's key lifted at once and the held keys forgotten (POLY switched).
     fn lift_all(&mut self) {
-        let poly = self.controls.poly;
         for k in 0..self.slots.len() {
             let s = &mut self.slots[k];
             if with_voice(s, |p| p.key.lift(&mut p.voice)).is_none() {
                 s.lift = true;
             }
             s.gate = false;
-            if k == 0 && !poly {
-                for key in 0..self.held.len() {
-                    if self.held[key] {
-                        self.one_note(key as i32, false);
-                    }
+        }
+        if self.instruments() > 0 {
+            for key in 0..self.held.len() {
+                if self.held[key] {
+                    self.one_note(key as i32, false);
                 }
             }
         }
@@ -968,7 +1013,7 @@ impl Engine {
     pub fn render(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
         let len = left.len().min(right.len());
         let at = |i: usize| ext.get(i).copied().filter(|x| x.is_finite()).unwrap_or(0.0);
-        if !self.controls.poly || self.over.is_some() || self.slots.is_empty() {
+        if !self.many() || self.over.is_some() || self.slots.is_empty() {
             for i in 0..len {
                 (left[i], right[i]) = self.tick_stereo(at(i));
             }
@@ -1157,7 +1202,7 @@ impl Engine {
     /// One sample of the voices at their rate (`rate` Hz): left and right.
     fn sample(&mut self, ext: f64, rate: f64) -> (f64, f64) {
         let mix = self.mix();
-        if !self.controls.poly {
+        if !self.many() {
             let play = self.slots[0].play.clone();
             let Ok(mut p) = play.try_lock() else {
                 return (0.0, 0.0);
@@ -1191,11 +1236,17 @@ impl Engine {
     /// silent over the block freed.
     pub fn end_block(&mut self, len: usize) -> f32 {
         let mut peak = 0.0f64;
-        for s in &mut self.slots {
+        // (UNISON's instruments, which take their keys straight, are held while a key is.)
+        let held = if self.controls.unison && self.held.iter().any(|h| *h) {
+            self.instruments()
+        } else {
+            0
+        };
+        for (k, s) in self.slots.iter_mut().enumerate() {
             if let Some(p) = with_voice(s, |p| p.voice.take_overload_peak()) {
                 peak = peak.max(p);
             }
-            if s.active && !s.gate && s.peak < SILENT {
+            if s.active && !s.gate && s.peak < SILENT && k >= held {
                 s.active = false;
             }
             s.peak = 0.0;
@@ -1210,9 +1261,9 @@ impl Engine {
         self.lamp
     }
 
-    /// The voices sounding now (POLY on), or 1 (off).
+    /// The voices sounding now (POLY or UNISON on), or 1 (off).
     pub fn sounding(&self) -> usize {
-        if self.controls.poly {
+        if self.many() {
             self.slots.iter().filter(|s| s.active).count()
         } else {
             1
@@ -1514,6 +1565,48 @@ fn measure_voices(rate: f64, block: usize, feedback: bool, workers: usize) -> u3
         voices -= 1;
     }
     voices as u32
+}
+
+/// UNISON's trim on the output: its VOICES voices, not in phase, add in power, so it is turned
+/// down by the square root of VOICES's setting and sounds about as loud as one voice (the
+/// CA-74's R25).
+fn unison_trim(c: &Controls) -> f64 {
+    if c.unison {
+        1.0 / (c.voices.clamp(POLY_VOICES.0, POLY_VOICES.2) as f64).sqrt()
+    } else {
+        1.0
+    }
+}
+
+/// Where voice `k` of seed `s` starts its oscillators on their ramps (decisions.md R-STEREO,
+/// the CA-74's R25): the first voice at the circuit's initial condition, as the reference
+/// starts (so one voice, and every preset with POLY and UNISON off, is the model's to the bit);
+/// every other voice where its seed says, as a real instrument's free-running oscillators are
+/// wherever they are when a note comes. A voice's three start together, as the reference's do,
+/// only the voices apart (the CA-74 starts each oscillator apart: here LOCK's trim, R9, is for
+/// three started together, and each voice's would otherwise have its own level at LOCK). Only a
+/// voice made or put back to rest starts so: one that has played stops wherever its oscillators
+/// were, and the next note finds them there.
+fn out_of_step(k: usize, s: u64) -> Option<f64> {
+    if k == 0 {
+        return None;
+    }
+    let x = voice_seed(s, k)
+        .wrapping_add(3)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    Some(((x ^ (x >> 29)) >> 11) as f64 / (1u64 << 53) as f64)
+}
+
+/// Voice `k` of an instance seeded `seed`, at `rate` Hz: its own copy from the prototype (its
+/// key lists' room reserved: a key press must not allocate on the audio thread), its noise
+/// seeded, its oscillators started where [`out_of_step`] says.
+fn made_voice(rate: f64, seed: u64, k: usize) -> Voice {
+    let mut voice = Voice::prototype(rate);
+    voice.set_seed(voice_seed(seed, k));
+    if let Some(at) = out_of_step(k, seed) {
+        voice.start_oscillators_at(at);
+    }
+    voice
 }
 
 /// Voice `k`'s noise seed from the instance's: the first voice's the instance's own.
@@ -2044,5 +2137,139 @@ mod tests {
             !first.contains(&new),
             "a new key on voice {new}, one of the chord's"
         );
+    }
+
+    /// A held note's power over `seconds` (after `skip` of them) with `c`, on key `key`.
+    fn held_power(c: &Controls, key: u8, skip: f64, seconds: f64) -> f64 {
+        let mut e = Engine::new();
+        e.set(c);
+        e.prepare(48_000.0, 9);
+        e.event(Event::Note { key, on: true });
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let mut sum = 0.0f64;
+        for k in 0..((skip + seconds) * 48_000.0 / 256.0) as usize {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(256);
+            if k as f64 >= skip * 48_000.0 / 256.0 {
+                sum += l
+                    .iter()
+                    .chain(&r)
+                    .map(|&x| f64::from(x).powi(2))
+                    .sum::<f64>();
+            }
+        }
+        sum
+    }
+
+    /// UNISON's voices come in anywhere in their cycles, not in step: with LOCK (every voice
+    /// the circuit as drawn, nothing to pull them apart) a held note is still about as loud
+    /// with eight of them as with one (within 2 dB), where eight in step would sum 9 dB louder
+    /// (decisions.md R-STEREO, the CA-74's R25).
+    #[test]
+    fn unison_voices_come_in_out_of_step() {
+        let c = Controls {
+            voices: 8,
+            lock: true,
+            ..Controls::default()
+        };
+        let one = held_power(&c, 40, 0.0, 1.0);
+        let all = held_power(&Controls { unison: true, ..c }, 40, 0.0, 1.0);
+        let db = 10.0 * (all / one).log10();
+        assert!(db.abs() < 2.0, "UNISON {db:+.1} dB against one voice");
+    }
+
+    /// UNISON's voices, each its own, are trimmed by their count's square root: a held note
+    /// is about as loud with eight of them as with one (within 2 dB, over its sustain).
+    #[test]
+    fn unison_is_about_as_loud_as_one_voice() {
+        let c = Controls {
+            voices: 8,
+            entropy: 0.3,
+            ..Controls::default()
+        };
+        let one = held_power(&c, 45, 1.0, 2.0);
+        let all = held_power(&Controls { unison: true, ..c }, 45, 1.0, 2.0);
+        let db = 10.0 * (all / one).log10();
+        assert!(db.abs() < 2.0, "UNISON {db:+.1} dB against one voice");
+    }
+
+    /// Every UNISON voice takes the keys as the one instrument's keyboard does (lowest-note
+    /// priority, single triggering): its keyboard voltage the one instrument's after each of a
+    /// run of keys pressed and let go, legato and not; and every voice sounds.
+    #[test]
+    fn unison_voices_take_the_keys_as_the_instrument_does() {
+        let events: [(u8, bool); 8] = [
+            (60, true),
+            (64, true),
+            (55, true),
+            (55, false),
+            (60, false),
+            (64, false),
+            (67, true),
+            (62, true),
+        ];
+        let run = |unison: bool| -> Vec<Vec<f64>> {
+            let c = Controls {
+                unison,
+                voices: 4,
+                ..Controls::default()
+            };
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut out = Vec::new();
+            for (key, on) in events {
+                e.event(Event::Note { key, on });
+                for _ in 0..8 {
+                    e.render(&[], &mut l, &mut r);
+                    e.end_block(256);
+                }
+                let n = if unison { 4 } else { 1 };
+                out.push(
+                    (0..n)
+                        .map(|k| e.slots[k].play.lock().unwrap().voice.probe().0)
+                        .collect(),
+                );
+            }
+            if unison {
+                assert_eq!(e.sounding(), 4, "every UNISON voice sounding");
+            }
+            out
+        };
+        let (one, all) = (run(false), run(true));
+        for (i, (o, a)) in one.iter().zip(&all).enumerate() {
+            for (k, v) in a.iter().enumerate() {
+                assert!(
+                    (v - o[0]).abs() < 1e-9,
+                    "after event {i}, voice {k}'s keyboard at {v} V, the instrument's {}",
+                    o[0]
+                );
+            }
+        }
+    }
+
+    /// Switching UNISON lets every key go: no voice's keyboard holds a key after it.
+    #[test]
+    fn switching_unison_lets_every_key_go() {
+        let c = Controls {
+            unison: true,
+            voices: 4,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 9);
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        e.event(Event::Note { key: 60, on: true });
+        e.render(&[], &mut l, &mut r);
+        e.set(&Controls { unison: false, ..c });
+        e.render(&[], &mut l, &mut r);
+        for k in 0..4 {
+            assert!(
+                !e.slots[k].play.lock().unwrap().voice.envelopes().2,
+                "voice {k} still holds a key"
+            );
+        }
     }
 }

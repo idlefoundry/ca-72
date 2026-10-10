@@ -73,6 +73,7 @@ pub fn controls_of(s: &Sound) -> Controls {
             "midi_bend_range" => c.bend_range = v,
             "entropy" => c.entropy = v / 100.0,
             "spread" => c.spread = v / 100.0,
+            "unison" => c.unison = on(v),
             "placement" => {
                 c.placement = Placement::from_index(v.round().clamp(0.0, 2.0) as usize);
             }

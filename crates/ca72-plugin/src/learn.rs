@@ -83,7 +83,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK. Its order is the drawer's list; the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 48] = [
+pub const LEARNABLE: [Learnable; 49] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -134,6 +134,7 @@ pub const LEARNABLE: [Learnable; 48] = [
     switch("decay_on", "DECAY (switch)"),
     // The strip, and LOCK.
     switch("poly", "POLY"),
+    switch("unison", "UNISON"),
     stepped("voices", "VOICES"),
     knob("entropy", "ENTROPY"),
     knob("spread", "SPREAD"),
@@ -693,6 +694,7 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "spread" => &p.spread,
         "lock" => &p.lock,
         "placement" => &p.placement,
+        "unison" => &p.unison,
         _ => return None,
     })
 }
@@ -910,7 +912,7 @@ mod tests {
                 counts(Kind::Stepped),
                 counts(Kind::Switch)
             ),
-            (23, 8, 17)
+            (23, 8, 18)
         );
     }
 
