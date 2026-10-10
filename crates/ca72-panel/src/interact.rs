@@ -8,7 +8,7 @@
 //! settling into its centre detent when let go near it (it has no spring).
 
 use crate::art::{self, BIG, GRIP, Layout, POWER, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
-use crate::controls::{CONTROLS, Kind};
+use crate::controls::{CONTROLS, Dial, Kind};
 
 /// What is under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +86,10 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
 pub fn step(kind: &Kind, v: f64, up: bool, fine: bool) -> f64 {
     let sign = if up { 1.0 } else { -1.0 };
     match kind {
+        // VOICES, 2 to 10: a voice a notch.
+        Kind::Knob {
+            dial: Dial::Voices, ..
+        } => ((v * 8.0).round() + sign).clamp(0.0, 8.0) / 8.0,
         Kind::Knob { .. } => (v + sign * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
         Kind::Selector(_) => (art::position(v) as f64 + sign).clamp(0.0, 5.0) / 5.0,
         Kind::Wheel { .. } => (v + sign * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
@@ -169,6 +173,10 @@ mod tests {
         assert_eq!(drag(sel, 0.4, 30.0, 0.0, false), Some(0.6));
         assert_eq!(click(sel, 0.4, -5.0), Some(0.2));
         assert_eq!(step(sel, 1.0, true, false), 1.0);
+        let voices = &CONTROLS[index("voices").expect("a control")].kind;
+        assert_eq!(step(voices, 0.25, true, false), 0.375);
+        assert_eq!(step(voices, 0.25, false, true), 0.125);
+        assert_eq!(step(voices, 1.0, true, false), 1.0);
         let rocker = &CONTROLS[index("osc1_on").expect("a control")].kind;
         assert_eq!(drag(rocker, 1.0, 0.0, 50.0, false), None);
         assert_eq!(click(rocker, 1.0, 0.0), Some(0.0));

@@ -441,8 +441,8 @@ struct Editing {
     /// The usable screen (logical pixels) at the window's scale (the editor's opening size).
     #[allow(dead_code)]
     screen: fn(f64) -> Option<(f64, f64)>,
-    /// The drawer was in the last frame composed.
-    drawer_shown: bool,
+    /// How far the drawer was down (`Browser::reveal`) in the last frame composed.
+    reveal_shown: f64,
 }
 
 impl PanelWindow {
@@ -590,7 +590,7 @@ impl Editing {
             gripped: None,
             screen,
             touched: true,
-            drawer_shown: false,
+            reveal_shown: 0.0,
         }
     }
 
@@ -1285,13 +1285,16 @@ impl Editing {
         );
         // The drawer over the strip, dropping down from under the rail, while it shows.
         let k = self.browser.reveal();
-        let drawer =
-            k > 0.0 && (self.drawer.render(&self.browser.drawer) || self.browser.sliding());
-        let shut = k <= 0.0 && std::mem::replace(&mut self.drawer_shown, false);
+        // (Its place changed since the frame last shown is a change too: the slide's last frame
+        // stops short of its end, which the frame shown must still reach.)
+        let moved = k != self.reveal_shown;
+        let drawer = k > 0.0
+            && (self.drawer.render(&self.browser.drawer) || self.browser.sliding() || moved);
+        let shut = k <= 0.0 && moved;
         if !(panel || strip || drawer || shut || self.composed.is_none()) {
             return false;
         }
-        self.drawer_shown = k > 0.0;
+        self.reveal_shown = k;
         // The rows that changed, the panel's and the strip's, put together again alone; all of
         // them while the drawer moves or something floats over everything.
         let top = (art::PANEL_H * self.renderer.scale()).round() as i64;
@@ -2310,6 +2313,38 @@ mod tests {
             compose(&mut whole, &e.renderer, e.strip.frame(), None, None);
             assert!(e.composed == whole, "frame {i}: not as put together whole");
         }
+    }
+
+    /// The drawer's slide ends where it was going in the frame shown, though its last moving
+    /// frame stops short of there: the strip's rows put together again under it afterwards
+    /// (the voices' drops) leave it whole. (In REAPER on Windows, 2026-10-10, the list's rows
+    /// over the voices' display had come out a few pixels lower than the rest.)
+    #[test]
+    fn the_drawer_ends_its_slide_in_the_frame_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _, _) = editing_with(Library::at(dir.path()));
+        e.draw();
+        let p = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Name)));
+        click(&mut e, p);
+        // A moment of the slide short of its end, then its end.
+        e.browser
+            .slide_began(Instant::now() - crate::presets::SLIDE.mul_f64(0.5));
+        e.draw();
+        assert!(e.reveal_shown > 0.0 && e.reveal_shown < 0.99);
+        e.browser
+            .slide_began(Instant::now() - crate::presets::SLIDE * 2);
+        e.draw();
+        e.meters.publish(0.0, (0.5, 0.0), 1);
+        e.draw();
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            Some((e.drawer.frame(), DRAWER_TOP)),
+            None,
+        );
+        assert!(e.composed == whole, "the drawer where its slide ended");
     }
 
     /// Every gesture well formed: a parameter's begin only while it has none open, its
