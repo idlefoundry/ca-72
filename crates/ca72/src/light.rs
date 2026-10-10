@@ -236,12 +236,15 @@ pub mod laws {
     /// The time constants, s, against the pots' resistance R (voice.rs's `time_pot` through
     /// the reference's laws, ohm): A (R / 100K)^B + T0 as (A, B, T0) for ATTACK, DECAY from the
     /// peak, and the release with the DECAY switch on (DECAY's pot), each (filter, loudness):
-    /// within 0.6 % of the circuit's at ATTACK and DECAY 2 to 10 (its decay a little faster
-    /// than one exponential at first and slower at last: matched at its 50 and 90 % times).
+    /// within 0.6 % of the circuit's at ATTACK 2 to 10 (DECAY with `DECAY_FALL`).
     pub const ATTACK_TIME: [(f64, f64, f64); 2] =
         [(1.114_91, 1.007_46, 0.0007), (1.115_32, 1.003_32, 0.0008)];
     pub const DECAY_TIME: [(f64, f64, f64); 2] =
-        [(1.042_89, 1.000_67, 0.0003), (1.050_96, 1.000_55, 0.0003)];
+        [(1.168, 1.000_67, 0.0003), (1.167, 1.000_55, 0.0003)];
+    /// DECAY from the peak faster the further it has to fall (the circuit's through its
+    /// diodes): its rate times 1 + this times the volts to go (filter, loudness); its 50, 90
+    /// and 99 % times so within 2 % of the circuit's (one exponential's 4 to 6 % apart).
+    pub const DECAY_FALL: [f64; 2] = [0.05, 0.035];
     pub const RELEASE_TIME: [(f64, f64, f64); 2] =
         [(1.119_76, 1.002_92, 0.0003), (1.123_86, 1.004_29, 0.0003)];
     /// SUSTAIN's level, V: a cubic in the pot's track (voice.rs's `sustain_track`; filter,
@@ -657,6 +660,7 @@ struct ContourLaw {
     sustain: f64,
     released: f64,
     rest: f64,
+    fall: f64,
 }
 
 impl ContourLaw {
@@ -696,6 +700,7 @@ impl ContourLaw {
             sustain: c0 + s * (c1 + s * (c2 + s * c3)),
             released,
             rest,
+            fall: laws::DECAY_FALL[which],
         }
     }
 }
@@ -725,7 +730,8 @@ impl Contour {
                     self.volts = next;
                 }
             } else {
-                self.volts += (law.sustain - self.volts) * law.decay;
+                let to_go = self.volts - law.sustain;
+                self.volts -= to_go * law.decay * (1.0 + law.fall * to_go);
             }
         } else if !self.fresh {
             self.attacking = false;
@@ -1839,7 +1845,8 @@ mod tests {
 
     /// The contours' times through the reference's laws (voice.rs's `time_pot`), as the
     /// circuit's: ATTACK 6 takes the loudness contour to its plateau in 0.665 s (the circuit's
-    /// 0.6645), DECAY 6 the filter contour half way down from it in 0.36 to 0.38 s (0.363),
+    /// 0.6645), DECAY 6 the filter contour half way down from it in 0.36 to 0.38 s (0.363)
+    /// and nine tenths in 1.27 to 1.33 s (1.304; one exponential through both, 1.25),
     /// SUSTAIN 5 holds the loudness contour at 1.675 V; and a fast attack stops short of the
     /// plateau, as the circuit's does (ATTACK 0: 4.685 V, against 4.792).
     #[test]
@@ -1859,6 +1866,7 @@ mod tests {
         l.set_panel(&p);
         l.note(60, true);
         let (mut peak, mut top, mut half, mut at) = (0.0f64, 0.0f64, None, 0.0);
+        let mut ninety = None;
         for i in 0..96_000 {
             l.tick(0.0);
             let (f, v) = l.contours();
@@ -1867,6 +1875,9 @@ mod tests {
             }
             if half.is_none() && peak > 4.0 && f < 0.5 * (peak + 0.0431) {
                 half = Some(i as f64 / 48_000.0);
+            }
+            if ninety.is_none() && peak > 4.0 && f < 0.1 * peak + 0.9 * 0.0431 {
+                ninety = Some(i as f64 / 48_000.0);
             }
             if v > top + 1e-9 {
                 top = v;
@@ -1880,6 +1891,11 @@ mod tests {
         );
         let half = half.expect("no decay") - 0.0086;
         assert!((0.36..0.38).contains(&half), "DECAY 6 half way in {half} s");
+        let ninety = ninety.expect("no decay") - 0.0086;
+        assert!(
+            (1.27..1.33).contains(&ninety),
+            "DECAY 6 nine tenths in {ninety} s"
+        );
         p.loudness_contour.sustain = 0.5;
         l.set_panel(&p);
         run(&mut l, 240_000);
