@@ -2894,6 +2894,33 @@ list that drops down over the strip inside the window."
     every kind of change and the drawing changing under its parts
     (`a_frame_drawn_in_parts_is_the_frame_drawn_whole`), and the editor's
     (`the_frame_put_together_in_rows_is_the_frame_put_together_whole`).
+  - **In hosts (2026-10-10).** A renamed build, "CA-72 A6" (IDs of its own, so no host takes it
+    for the installed CA-72), of this branch merged locally with `cal/hp-mode` (FILTER MODE,
+    which the owner asked to have on the new panel) and `main`; built as the release is
+    (`--profile bundle`).
+    - **macOS 27.0 (the owner's Mac):** clap-validator (37 passed, 7 skipped), Steinberg's VST3
+      validator (47 passed) and pluginval at strictness 10 with its editor tests (the editor
+      opened, opened while processing, automated) all passed. Installed beside the released
+      CA-72 in `~/Library/Audio/Plug-Ins` (VST3 and CLAP) for the owner to play in Ableton Live
+      12.4 beta; not opened there by the agent (Live was open with the owner's sets).
+    - **Windows 11, REAPER 7.82** (the CA-74's harness, `ca72-it\a6`): the editor opened at
+      the drawing's proportions (2692 by 1652). Clicks on every tab, ENTROPY's readout, GLIDE,
+      and the wheel over DRIVE, LEVEL, VOICES and the PITCH wheel set their parameters, each
+      read back through REAPER's API; the presets' list dropped over the strip; notes lit the
+      drops; and real pointer clicks (the cursor moved and pressed) on POLY, EDGES, AUTO GAIN
+      and WIDTH's readout did the same. Two faults found and fixed: the wheel moved VOICES as a
+      smooth knob, two notches short of the next voice (now a voice a notch); and with the list
+      open while notes played, its rows over the voices' display came out a few pixels lower
+      than the rest (the slide's last frame stops short of its end, and the frames since were
+      put together in rows only; now a drawer whose place changed is put together whole,
+      `the_drawer_ends_its_slide_in_the_frame_shown`).
+    - **Windows 11, Cubase Pro 15.0.30** (the trial R36 used): an instrument track with CA-72
+      A6; real clicks on MONO, POLY, DOUBLE, EDGES, AUTO GAIN, ENTROPY's readout, GLIDE and
+      FILTER MODE, posted ones on POLY and UNISON, and a real double click on DETUNE (back to
+      off, SCATTER lit), each shown by the editor (its tabs, readouts and tips). The first real click after the harness
+      brought the window forward was lost: it does so with an Alt key, which leaves Cubase's
+      window in menu mode; after a first click elsewhere every click took. Cubase closed
+      without saving; the test builds recycled.
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
