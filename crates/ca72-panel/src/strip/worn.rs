@@ -584,14 +584,13 @@ impl StripRenderer {
         if meets(window, r) {
             self.drops(window, scene.detune);
         }
-        // The preset's name, its star and arrow; MIDI Learn's ring round the control it waits
-        // for; the favourite's key; the pointer's part.
+        // The preset's name, its star and arrow (dots); MIDI Learn's ring round the control it
+        // waits for; the favourite's key; the pointer's part.
         if meets(self.name_part(), r) {
             name(&mut self.frame, s, &scene.bar);
         }
         if meets(self.signs_part(scene), r) {
             let mut o = Svg::default();
-            name_icons(&mut o, &scene.bar);
             if let Some(c) = scene.learning {
                 ring(&mut o, c);
             }
@@ -1058,38 +1057,6 @@ fn name_level(b: &BarScene) -> f64 {
     }
 }
 
-/// The name display's arrow that drops the list down at its end (up while it is down). (The
-/// favourite's star is dots, as the name is: [`name`].)
-fn name_icons(o: &mut Svg, b: &BarScene) {
-    let (_, y, _, h) = NAME;
-    let (_, _, _, arrow_x) = name_places();
-    let level = name_level(b);
-    let mid = y - PANEL_H + h / 2.0 - CAP_LIFT;
-    let orange = format!("rgb({},{},{})", ORANGE.0, ORANGE.1, ORANGE.2);
-    let (aw, down) = (22.0, !b.open);
-    let (tip, base) = if down {
-        (mid + aw * 0.35, mid - aw * 0.35)
-    } else {
-        (mid - aw * 0.35, mid + aw * 0.35)
-    };
-    let hover = if b.hover == Some(BarTarget::Name) {
-        1.0
-    } else {
-        0.7
-    };
-    put!(
-        o,
-        "<path d='M {} {} L {} {} L {} {} Z' fill='{orange}' fill-opacity='{}'/>",
-        N(arrow_x - aw / 2.0),
-        N(base),
-        N(arrow_x + aw / 2.0),
-        N(base),
-        N(arrow_x),
-        N(tip),
-        N(hover * level)
-    );
-}
-
 /// The preset's name in dots ([`font::glyph`]), lit over the unlit dots (the still's).
 fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
     let (_, places, ..) = name_places();
@@ -1117,14 +1084,30 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
             core.push_circle(px, py, r as f32);
         }
     });
-    // The favourite's star before it, in the same dots (the owner, 2026-10-10: "turn this
-    // into a pixel star"): lit for a favourite, else as faint as the unlit dots.
+    // The favourite's star before it and the arrow that drops the list down after it, in the
+    // same dots (the owner, 2026-10-10: "turn this into a pixel star", "make sure the arrow on
+    // the right side of the preset dropdown is also dots"): the star lit for a favourite, else
+    // as faint as the unlit dots; the arrow up while the list is down, brighter under the
+    // pointer.
+    let (_, _, star_x, arrow_x) = name_places();
     let mut star = PathBuilder::new();
     let mut star_glow = PathBuilder::new();
-    star_dots(scale, |(px, py)| {
+    sign_dots(scale, &STAR, star_x, |(px, py)| {
         star_glow.push_circle(px, py, (r * 2.1) as f32);
         star.push_circle(px, py, r as f32);
     });
+    let mut arrow = PathBuilder::new();
+    let mut arrow_glow = PathBuilder::new();
+    let sign = if b.open { &UP } else { &DOWN };
+    sign_dots(scale, sign, arrow_x, |(px, py)| {
+        arrow_glow.push_circle(px, py, (r * 2.1) as f32);
+        arrow.push_circle(px, py, r as f32);
+    });
+    let pointed = if b.hover == Some(BarTarget::Name) {
+        1.0
+    } else {
+        0.7
+    };
     // (In the mock-up's red: its dots' orange, their glow a deeper red; the owner: "go back to
     // that red".)
     let dim = |c: (u8, u8, u8)| {
@@ -1139,19 +1122,24 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
     } else {
         fill(frame, star, ORANGE, 0.06);
     }
+    fill(frame, arrow_glow, ORANGE_GLOW, 0.16 * level * pointed);
+    fill(frame, arrow, dim(ORANGE), (0.55 + 0.45 * level) * pointed);
 }
 
-/// The star's dots (five across, seven down, as the name's capitals: the mock-up's), in pixels
-/// at `scale`, about the star's place before the name.
+/// The name display's signs in dots (five across, seven down, as its capitals: the mock-up's
+/// glyphs): the favourite's star, and the list's arrow, down or up.
 const STAR: [u8; 7] = [0x04, 0x04, 0x1f, 0x0e, 0x0e, 0x1b, 0x11];
-fn star_dots(scale: f64, mut each: impl FnMut((f32, f32))) {
+const DOWN: [u8; 7] = [0x00, 0x1f, 0x1f, 0x0e, 0x0e, 0x04, 0x00];
+const UP: [u8; 7] = [0x00, 0x04, 0x0e, 0x0e, 0x1f, 0x1f, 0x00];
+
+/// A sign's dots, in pixels at `scale`, about `x` (units) on the name's rows.
+fn sign_dots(scale: f64, sign: &[u8; 7], x: f64, mut each: impl FnMut((f32, f32))) {
     let (_, y, _, h) = NAME;
-    let (_, _, star_x, _) = name_places();
     let top = y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * DOT;
-    for (j, row) in STAR.iter().enumerate() {
+    for (j, row) in sign.iter().enumerate() {
         for col in 0..5 {
             if row >> (4 - col) & 1 == 1 {
-                let px = ((star_x + (col as f64 - 2.0) * DOT) * scale) as f32;
+                let px = ((x + (col as f64 - 2.0) * DOT) * scale) as f32;
                 let py = ((top + j as f64 * DOT) * scale) as f32;
                 each((px, py));
             }
