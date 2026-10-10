@@ -745,6 +745,7 @@ impl Browser {
             // The update check is the editor's (`crate::update`), and so is the MIDI list
             // (`crate::learning`).
             DrawerTarget::Update
+            | DrawerTarget::Shutter
             | DrawerTarget::Midi
             | DrawerTarget::MidiRow(_)
             | DrawerTarget::MidiAction(..)

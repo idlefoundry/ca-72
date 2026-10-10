@@ -75,6 +75,12 @@ pub enum Kind {
         colour: Colour,
         orient: Orient,
     },
+    /// A three-position toggle (QUALITY), `w` by `h` as seen: its lever down (0), out (0.5) or
+    /// up (1).
+    Toggle {
+        w: f64,
+        h: f64,
+    },
     /// `detent`: centred (PITCH); `span`: its turn over its travel, in degrees.
     Wheel {
         mark: Mark,
@@ -469,19 +475,19 @@ pub const CONTROLS: [Control; 52] = [
         580.0,
         Dial::Ten,
     ),
-    // QUALITY (decisions.md R-POTATO): POWER's black rocker over POWER's lamp, HI its upper end
-    // pressed, LO its lower (its "on" end: the light voices).
-    rocker(
-        "potato",
-        "QUALITY (HI or LO)",
-        Place::Panel,
-        3023.0,
-        250.0,
-        42.0,
-        108.0,
-        Colour::Black,
-        Orient::Bottom,
-    ),
+    // QUALITY (decisions.md R-POTATO, R-ULTRA): a chrome toggle over POWER's lamp, under
+    // ULTRA's: its lever up for ULTRA, out for HI, down for LO.
+    Control {
+        param: "quality",
+        label: "QUALITY (ULTRA, HI or LO)",
+        place: Place::Panel,
+        x: crate::art::QUALITY_AT.0,
+        y: crate::art::QUALITY_AT.1,
+        kind: Kind::Toggle {
+            w: crate::art::TOGGLE.0,
+            h: crate::art::TOGGLE.1,
+        },
+    },
     // The left hand controller.
     rocker(
         "glide_on",

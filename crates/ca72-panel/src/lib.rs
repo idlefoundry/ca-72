@@ -13,6 +13,7 @@ pub mod render;
 pub mod skin;
 pub mod strip;
 mod svg;
+pub mod ultra;
 
 pub use art::{H, Layout, PLATE_NAME, W};
 pub use controls::{CONTROLS, Control, Kind};

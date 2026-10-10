@@ -167,7 +167,10 @@ mod tests {
         let mut fed = controls;
         fed.feedback = 0.5;
         assert_ne!(sound(&fed), sound(&controls), "FEEDBACK is the sound's");
-        let ultra = Controls { ultra: true, ..controls };
+        let ultra = Controls {
+            ultra: true,
+            ..controls
+        };
         assert_eq!(sound(&ultra), sound(&controls), "ULTRA keeps HI's curve");
     }
 

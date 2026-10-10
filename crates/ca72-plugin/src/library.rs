@@ -844,7 +844,7 @@ pub fn tags_of(list: &[Entry]) -> Vec<String> {
 }
 
 /// A table written whole, then moved into place.
-fn write(file: &Path, t: &toml::Table) -> Result<(), String> {
+pub(crate) fn write(file: &Path, t: &toml::Table) -> Result<(), String> {
     let text = toml::to_string(t).map_err(|e| e.to_string())?;
     if let Some(d) = file.parent() {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;

@@ -22,18 +22,20 @@ use baseview::{
 };
 use ca72_panel::art::{self, POWER};
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
+use ca72_panel::learn::{Note, Tone};
 use ca72_panel::presets::{
     BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, ROW_H, drawer_hit,
 };
 use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
-use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact};
+use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact, ultra};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
 
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
-use crate::params::Ca72Params;
+use crate::params::{Ca72Params, QualityMode};
 use crate::presets::Browser;
+use crate::settings::Settings;
 use crate::update::Update;
 
 /// The share of the usable screen the editor opens at until it is resized.
@@ -169,7 +171,7 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "osc3_on" => &p.osc3_on,
         "osc3_volume" => &p.osc3_volume,
         "filter_mode" => &p.filter_mode,
-        "potato" => &p.quality,
+        "quality" => &p.quality,
         "filter_mod" => &p.filter_mod,
         "keyboard_control_1" => &p.keyboard_control_1,
         "keyboard_control_2" => &p.keyboard_control_2,
@@ -445,6 +447,15 @@ struct Editing {
     screen: fn(f64) -> Option<(f64, f64)>,
     /// How far the drawer was down (`Browser::reveal`) in the last frame composed.
     reveal_shown: f64,
+    /// ULTRA's lamp (decisions.md R-ULTRA): how far it has gone (0 shut or dark, 1 up and lit),
+    /// moved on each frame by the time since the last while QUALITY's setting is not where it
+    /// is (the editor opens with it there); when it was last moved on.
+    ultra: f64,
+    ultra_at: Option<Instant>,
+    /// What this computer keeps (`settings.rs`): ULTRA's shutter on or the light only, ULTRA's
+    /// note read. The note shows once ULTRA's lamp is lit, until it is read.
+    settings: Settings,
+    ultra_note: bool,
 }
 
 impl PanelWindow {
@@ -593,7 +604,105 @@ impl Editing {
             screen,
             touched: true,
             reveal_shown: 0.0,
+            ultra: 0.0,
+            ultra_at: None,
+            // (The tests' editors keep nothing on the computer.)
+            settings: if cfg!(test) {
+                Settings::default()
+            } else {
+                Settings::load()
+            },
+            ultra_note: false,
         }
+        .opened()
+    }
+
+    /// As it opens: ULTRA's lamp where QUALITY has it, not moving.
+    fn opened(mut self) -> Self {
+        self.ultra = if self.params.quality.value() == QualityMode::Ultra {
+            1.0
+        } else {
+            0.0
+        };
+        self
+    }
+
+    /// This computer's settings kept (not by the tests' editors).
+    fn keep_settings(&self) {
+        if !cfg!(test) {
+            let _ = self.settings.save();
+        }
+    }
+
+    /// ULTRA's lamp moved on towards where QUALITY has it (`on`: at ULTRA), by the time since
+    /// the last frame (at most 50 ms of it: a stalled frame does not jump it); its note shown
+    /// once it is lit, until it is read.
+    fn move_ultra(&mut self, now: Instant, on: bool) {
+        let target = if on { 1.0 } else { 0.0 };
+        if self.ultra == target {
+            self.ultra_at = None;
+        } else {
+            let dt = self.ultra_at.map_or(0.0, |t| {
+                now.saturating_duration_since(t).as_secs_f64().min(0.05)
+            });
+            let span = match (self.settings.shutter, on) {
+                (true, true) => ultra::OPEN_S,
+                (true, false) => ultra::CLOSE_S,
+                (false, true) => ultra::STILL_ON_S,
+                (false, false) => ultra::STILL_OFF_S,
+            };
+            self.ultra = if on {
+                (self.ultra + dt / span).min(1.0)
+            } else {
+                (self.ultra - dt / span).max(0.0)
+            };
+            self.ultra_at = Some(now);
+        }
+        if on && self.ultra == 1.0 && !self.settings.ultra_note_read {
+            self.ultra_note = true;
+        }
+        if !on {
+            self.ultra_note = false;
+        }
+        self.scene.ultra = (self.ultra * 400.0).round() / 400.0;
+        self.scene.ultra_still = !self.settings.shutter;
+    }
+
+    /// ULTRA's note: what it is for (the owner: "only intended for offline renders, or small
+    /// projects on powerful PCs"), left of its lamp; a press anywhere closes it, read.
+    fn ultra_note(&self) -> Note {
+        let size = self.renderer.text_size();
+        let lines = vec![
+            ("ULTRA · NO COMPROMISES".to_owned(), Tone::Accent),
+            (
+                "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SEVEN TIMES THE WORK OF HI:".to_owned(),
+                Tone::Plain,
+            ),
+            (
+                "ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER.".to_owned(),
+                Tone::Plain,
+            ),
+            (
+                "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL".to_owned(),
+                Tone::Plain,
+            ),
+            (
+                "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.".to_owned(),
+                Tone::Plain,
+            ),
+            ("CLICK TO CLOSE".to_owned(), Tone::Dim),
+        ];
+        let mut note = Note {
+            x: 0.0,
+            y: 0.0,
+            size,
+            lines,
+        };
+        let (w, h) = note.extent(self.renderer.fonts());
+        // (Its box's right edge a little left of the lamp's column, its top at the lamp's.)
+        note.x = art::COL + 2940.0 - w / 2.0;
+        note.y = art::TOP + 40.0 + h + size * 0.4;
+        note
     }
 
     /// A change made here done (nothing held, no wheel's gesture open): AUTO GAIN's curve asked
@@ -793,6 +902,13 @@ impl Editing {
         // (its window lost the pointer): ended before anything else begins.
         self.end_gestures();
         let (x, y) = self.in_drawing(self.pointer);
+        // ULTRA's note showing: the press closes it, read.
+        if self.ultra_note {
+            self.ultra_note = false;
+            self.settings.ultra_note_read = true;
+            self.keep_settings();
+            return;
+        }
         // A control's menu open: the press is its own (an item, or closing it).
         match self
             .learning
@@ -809,6 +925,10 @@ impl Editing {
             match drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy) {
                 Some(DrawerTarget::Update) => self.update.press(),
                 Some(DrawerTarget::Midi) => self.learning.list = !self.learning.list,
+                Some(DrawerTarget::Shutter) => {
+                    self.settings.shutter = !self.settings.shutter;
+                    self.keep_settings();
+                }
                 Some(DrawerTarget::MidiRow(i)) => {
                     self.learning.list_press(&self.params.midi_map, i, None);
                 }
@@ -840,7 +960,7 @@ impl Editing {
         match target {
             Target::Control(i) | Target::Legend(i, _) => {
                 let kind = CONTROLS[i].kind;
-                if double && !matches!(kind, Kind::Rocker { .. }) {
+                if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
                     if let Some(p) = self.operated(i) {
                         self.set_once(i, f64::from(p.default()));
                     }
@@ -848,7 +968,7 @@ impl Editing {
                     return;
                 }
                 let value = self.value_of(i);
-                if !matches!(kind, Kind::Rocker { .. })
+                if !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. })
                     && let Some(p) = self.operated(i)
                 {
                     p.begin(&self.setter());
@@ -1017,8 +1137,9 @@ impl Editing {
             let picked = match d.pressed {
                 Target::Legend(_, k) => Some(k as f64 / 5.0),
                 _ => {
-                    let (cx, _) = CONTROLS[d.control].centre();
-                    interact::click(&kind, v, self.in_drawing(d.from).0 - cx)
+                    let (cx, cy) = CONTROLS[d.control].centre();
+                    let (x, y) = self.in_drawing(d.from);
+                    interact::click(&kind, v, x - cx, y - cy)
                 }
             };
             if let Some(p) = picked {
@@ -1030,7 +1151,7 @@ impl Editing {
             return;
         };
         let s = self.setter();
-        if matches!(kind, Kind::Rocker { .. }) {
+        if matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
             if v != d.value {
                 p.begin(&s);
                 p.set(&s, v as f32);
@@ -1183,13 +1304,20 @@ impl Editing {
     fn update_scene(&mut self) {
         for (i, c) in CONTROLS.iter().enumerate() {
             self.scene.values[i] = match (&self.drag, &self.scroll) {
-                (Some(d), _) if d.control == i && !matches!(c.kind, Kind::Rocker { .. }) => d.value,
+                (Some(d), _)
+                    if d.control == i
+                        && !matches!(c.kind, Kind::Rocker { .. } | Kind::Toggle { .. }) =>
+                {
+                    d.value
+                }
                 (_, Some(s)) if s.control == i => s.value,
                 _ => self.value_of(i),
             };
         }
         self.scene.power = !self.params.bypass.value();
         self.scene.overload = Meters::load(&self.meters.overload);
+        let on = self.params.quality.value() == QualityMode::Ultra;
+        self.move_ultra(Instant::now(), on);
         self.scene.midi = (
             Meters::load(&self.meters.bend),
             Meters::load(&self.meters.modulation),
@@ -1259,12 +1387,14 @@ impl Editing {
         self.browser.tick(&self.params);
         self.update.tick();
         self.browser.drawer.update = self.update.scene();
+        self.browser.drawer.shutter = self.settings.shutter;
         // MIDI Learn: what the audio thread caught assigned; the ring, the note and the menu;
         // the drawer's list (the presets again once the drawer has shut). A tip gives way to a
         // note or a menu.
         let map = &self.params.midi_map;
         self.learning.poll(map);
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
+        let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
         self.strip_scene.learning = strip_ring;
         if self.scene.note.is_some() || self.scene.menu.is_some() {
@@ -2299,18 +2429,70 @@ mod tests {
         (e, host, params)
     }
 
-    /// QUALITY (decisions.md R-POTATO) is clicked as the panel's rockers are, a gesture of its
-    /// own: LO from HI.
+    /// QUALITY's toggle (decisions.md R-POTATO, R-ULTRA) goes where it is clicked, a gesture of
+    /// its own as a rocker's: above its nut ULTRA, below it LO, on it (HI already) nothing.
     #[test]
-    fn quality_is_clicked_as_a_rocker() {
+    fn quality_goes_where_its_toggle_is_clicked() {
         let (mut e, host, params) = editing();
         let q = params.quality.as_ptr();
-        let p = at(&e, centre("potato"));
-        click(&mut e, p);
+        let (x, y) = centre("quality");
+        let up = at(&e, (x, y - 40.0));
+        click(&mut e, up);
         assert_eq!(
             host.take(),
             vec![Call::Begin(q), Call::Set(q, 1.0), Call::End(q)]
         );
+        let down = at(&e, (x, y + 45.0));
+        click(&mut e, down);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(q), Call::Set(q, 0.0), Call::End(q)]
+        );
+        let middle = at(&e, (x, y));
+        click(&mut e, middle);
+        assert_eq!(host.take(), vec![]);
+    }
+
+    /// ULTRA's lamp (decisions.md R-ULTRA) follows QUALITY by the time between frames, over
+    /// ULTRA's opening and closing times (a stalled frame does not jump it); lit, its note shows
+    /// until a press reads it, and not again; the light only, its own times.
+    #[test]
+    fn ultra_s_lamp_follows_quality_and_its_note_is_read_once() {
+        let (mut e, _, _) = editing();
+        let t0 = Instant::now();
+        let frames = |e: &mut Editing, from: Instant, n: u32, on: bool| {
+            for k in 0..=n {
+                e.move_ultra(from + Duration::from_millis(u64::from(k) * 40), on);
+            }
+        };
+        e.move_ultra(t0, false);
+        assert_eq!(e.ultra, 0.0);
+        frames(&mut e, t0, 30, true);
+        assert!((e.ultra - 1.2 / ultra::OPEN_S).abs() < 1e-9, "{}", e.ultra);
+        assert!(!e.ultra_note && !e.scene.ultra_still);
+        // (A stall of a second moves it on 50 ms.)
+        e.move_ultra(t0 + Duration::from_millis(2200), true);
+        assert!((e.ultra - 1.25 / ultra::OPEN_S).abs() < 1e-9, "{}", e.ultra);
+        frames(&mut e, t0 + Duration::from_millis(2200), 40, true);
+        assert_eq!(e.ultra, 1.0);
+        assert!(e.ultra_note);
+        assert_eq!(e.ultra_note().lines[0].0, "ULTRA · NO COMPROMISES");
+        press(&mut e);
+        assert!(!e.ultra_note && e.settings.ultra_note_read);
+        e.move_ultra(t0 + Duration::from_secs(5), true);
+        assert!(!e.ultra_note);
+        // Back to HI, closing; the light only, going out faster.
+        let t1 = t0 + Duration::from_secs(10);
+        frames(&mut e, t1, 10, false);
+        assert!(
+            (e.ultra - (1.0 - 0.4 / ultra::CLOSE_S)).abs() < 1e-9,
+            "{}",
+            e.ultra
+        );
+        e.settings.shutter = false;
+        frames(&mut e, t1 + Duration::from_millis(400), 30, false);
+        assert_eq!(e.ultra, 0.0);
+        assert!(e.scene.ultra_still);
     }
 
     /// The window's frame put together again in the rows that changed is the frame put
@@ -2667,7 +2849,7 @@ mod tests {
                 "mod_wheel",
                 "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT",
             ),
-            ("potato", "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND"),
+            ("quality", "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND"),
         ] {
             let p = at(&e, centre(param));
             right_click(&mut e, p);
@@ -3782,6 +3964,72 @@ mod tests {
             y += f.height() as usize;
         }
         all.save_png(out).unwrap();
+    }
+
+    /// ULTRA's lamp (decisions.md R-ULTRA) for looking at, written to `$CA72_ULTRA_PNG`, the
+    /// folder: the panel's last column close up (two pixels a unit) at points of its opening,
+    /// `shutter-<p>.png`, and of the light only, `still-<p>.png`; QUALITY's three positions,
+    /// `quality-<lo|hi|ultra>.png`; and the window as it opens at ULTRA with its note,
+    /// `note.png`.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_ultra_pngs() {
+        let Some(out) = std::env::var_os("CA72_ULTRA_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let k = 2.0;
+        let mut r = Renderer::with_skin(Skin::Worn, k, 1.0);
+        let crop = |r: &Renderer, name: &str| {
+            let f = r.frame();
+            let (x0, y0) = (
+                ((art::COL + 2930.0) * k) as u32,
+                ((art::TOP - 20.0) * k) as u32,
+            );
+            let (w, h) = (((3108.0 - 2930.0) * k) as u32, (640.0 * k) as u32);
+            let mut c = ca72_panel::Pixmap::new(w, h).unwrap();
+            for y in 0..h {
+                let from = ((y0 + y) * f.width() + x0) as usize * 4;
+                let to = (y * w) as usize * 4;
+                c.data_mut()[to..to + w as usize * 4]
+                    .copy_from_slice(&f.data()[from..from + w as usize * 4]);
+            }
+            c.save_png(out.join(name)).unwrap();
+        };
+        let q = ca72_panel::controls::index("quality").unwrap();
+        let mut scene = Scene {
+            values: [0.5; CONTROLS.len()],
+            ..Scene::default()
+        };
+        for (name, v) in [("lo", 0.0), ("hi", 0.5), ("ultra", 1.0)] {
+            scene.values[q] = v;
+            scene.ultra = v.max(0.0) * if v == 1.0 { 1.0 } else { 0.0 };
+            r.render(&scene);
+            crop(&r, &format!("quality-{name}.png"));
+        }
+        scene.values[q] = 1.0;
+        for p in [
+            0.0, 0.08, 0.16, 0.24, 0.32, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+        ] {
+            scene.ultra = p;
+            r.render(&scene);
+            crop(&r, &format!("shutter-{p}.png"));
+        }
+        scene.ultra_still = true;
+        for p in [0.0, 0.4, 0.7, 1.0] {
+            scene.ultra = p;
+            r.render(&scene);
+            crop(&r, &format!("still-{p}.png"));
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
+        e.draw();
+        e.ultra = 1.0;
+        e.scene.values[q] = 1.0;
+        e.scene.ultra = 1.0;
+        e.scene.note = Some(e.ultra_note());
+        e.renderer.render(&e.scene);
+        e.renderer.frame().save_png(out.join("note.png")).unwrap();
     }
 
     /// MIDI Learn drawn (decisions.md R34), for looking at: CUTOFF being learned (ringed, its

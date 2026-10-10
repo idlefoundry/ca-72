@@ -29,6 +29,14 @@ static POWER: &[u8] = include_bytes!("../assets/worn/power.png");
 static JEWEL: &[u8] = include_bytes!("../assets/worn/jewel.png");
 static JACK: &[u8] = include_bytes!("../assets/worn/jack.png");
 static SCREW: &[u8] = include_bytes!("../assets/worn/screw.png");
+static TOGGLE_UP: &[u8] = include_bytes!("../assets/worn/toggle-up.png");
+static TOGGLE_MID: &[u8] = include_bytes!("../assets/worn/toggle-mid.png");
+static TOGGLE_DOWN: &[u8] = include_bytes!("../assets/worn/toggle-down.png");
+static ULTRA_LENS_OFF: &[u8] = include_bytes!("../assets/worn/ultra-lens-off.png");
+static ULTRA_LENS_ON: &[u8] = include_bytes!("../assets/worn/ultra-lens-on.png");
+static ULTRA_BEZEL_OFF: &[u8] = include_bytes!("../assets/worn/ultra-bezel-off.png");
+static ULTRA_BEZEL_ON: &[u8] = include_bytes!("../assets/worn/ultra-bezel-on.png");
+static ULTRA_FLOOR: &[u8] = include_bytes!("../assets/worn/ultra-floor.png");
 
 /// The face's picture is kept grey; its colour, a black a touch warm, is this over it.
 const FACE_TINT: [f32; 3] = [1.03, 1.0, 0.94];
@@ -57,6 +65,19 @@ pub enum Part {
     KnobCap,
     KnobBigCap,
     PointerCap,
+    /// QUALITY's chrome toggle (decisions.md R-ULTRA), its lever up (ULTRA), out (HI, the
+    /// slightest angle down) and down (LO), the three cut on one frame: the nut stays put.
+    ToggleUp,
+    ToggleMid,
+    ToggleDown,
+    /// ULTRA's lamp: its domed amber lens (the bulb behind it), dark and lit, which does not
+    /// turn; its knurled chrome bezel, the lens cut out of it, dark and lit, which turns; and
+    /// the floor of the well it waits in (the machine's inside, dim).
+    UltraLensOff,
+    UltraLensOn,
+    UltraBezelOff,
+    UltraBezelOn,
+    UltraFloor,
 }
 
 /// How much of a knob's picture its skirt fills (the picture squared about the cap's axis;
@@ -88,6 +109,8 @@ pub struct Pictures {
     jack: Pixmap,
     screw: Pixmap,
     caps: [Pixmap; 3],
+    toggle: [Pixmap; 3],
+    ultra: [Pixmap; 5],
     scaled: Vec<((Part, u32, u32), Pixmap)>,
 }
 
@@ -100,8 +123,8 @@ impl std::fmt::Debug for Pictures {
 }
 
 /// The most parts kept at their sizes (a scale's: the knobs, three pointer and jewel sizes,
-/// six rockers', the jacks', the screws').
-const KEPT: usize = 40;
+/// six rockers', the jacks', the screws', QUALITY's toggle and ULTRA's lamp).
+const KEPT: usize = 48;
 
 impl Pictures {
     /// The pictures decoded (once, as the worn skin is first shown); the face's grey coloured,
@@ -154,6 +177,14 @@ impl Pictures {
             jack: png(JACK),
             screw: png(SCREW),
             caps,
+            toggle: [png(TOGGLE_UP), png(TOGGLE_MID), png(TOGGLE_DOWN)],
+            ultra: [
+                png(ULTRA_LENS_OFF),
+                png(ULTRA_LENS_ON),
+                png(ULTRA_BEZEL_OFF),
+                png(ULTRA_BEZEL_ON),
+                png(ULTRA_FLOOR),
+            ],
             scaled: Vec::new(),
         }
     }
@@ -174,6 +205,14 @@ impl Pictures {
             Part::KnobCap => &self.caps[0],
             Part::KnobBigCap => &self.caps[1],
             Part::PointerCap => &self.caps[2],
+            Part::ToggleUp => &self.toggle[0],
+            Part::ToggleMid => &self.toggle[1],
+            Part::ToggleDown => &self.toggle[2],
+            Part::UltraLensOff => &self.ultra[0],
+            Part::UltraLensOn => &self.ultra[1],
+            Part::UltraBezelOff => &self.ultra[2],
+            Part::UltraBezelOn => &self.ultra[3],
+            Part::UltraFloor => &self.ultra[4],
         }
     }
 
@@ -276,7 +315,7 @@ pub fn resample(src: &Pixmap, w: u32, h: u32) -> Pixmap {
 mod tests {
     use super::*;
 
-    const PARTS: [Part; 11] = [
+    const PARTS: [Part; 17] = [
         Part::Knob,
         Part::KnobBig,
         Part::Pointer,
@@ -288,6 +327,12 @@ mod tests {
         Part::JewelDark,
         Part::Jack,
         Part::Screw,
+        Part::ToggleUp,
+        Part::ToggleMid,
+        Part::ToggleDown,
+        Part::UltraLensOff,
+        Part::UltraLensOn,
+        Part::UltraFloor,
     ];
 
     #[test]
@@ -302,6 +347,21 @@ mod tests {
             assert_eq!(at(w / 2, h / 2), 255, "{part:?}'s middle");
             let small = p.part(part, 40, 30);
             assert_eq!((small.width(), small.height()), (40, 30));
+        }
+        // ULTRA's bezel is a ring: its middle, where the lens shows, clear.
+        for part in [Part::UltraBezelOff, Part::UltraBezelOn] {
+            let src = p.source(part);
+            let (w, h) = (src.width(), src.height());
+            assert_eq!(
+                src.pixel(w / 2, h / 2).map(|c| c.alpha()),
+                Some(0),
+                "{part:?}"
+            );
+            assert_eq!(
+                src.pixel(w / 2, h / 20).map(|c| c.alpha()),
+                Some(255),
+                "{part:?}"
+            );
         }
         // The face is a black, a touch warm.
         let face = p.face.pixel(10, 10).expect("inside").demultiply();

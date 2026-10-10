@@ -13,6 +13,7 @@ pub mod library;
 pub mod params;
 pub mod pool;
 pub mod presets;
+pub mod settings;
 pub mod update;
 
 use std::sync::Arc;

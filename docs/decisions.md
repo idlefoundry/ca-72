@@ -3273,7 +3273,8 @@ good as you can under that."); saved with the session, not with presets.
   empty: POWER's black ribbed rocker, upright, HI its upper end pressed, LO its lower (the
   worn skin draws it from POWER's picture). The host's parameter `potato`, named Quality, HI or
   LO, HI by default; not a preset's (`library::KEPT`); not learned by MIDI Learn (its menu: "set
-  for the computer, not the sound").
+  for the computer, not the sound"). (Since R-ULTRA, a chrome toggle of three positions, and the
+  parameter `quality`.)
 - **The engine at LO:** a light voice beside each circuit voice and beside DOUBLE's twin, made
   with it, played in its place with the same keys, character (its offsets read each sample, as
   the circuit's voice reads them, so that a voice's character is the same whichever plays it),
@@ -3380,3 +3381,111 @@ panel's (276 passed); rustfmt; clippy.
 patch, as R31 measured it; the owner's listening; the README.
 - **The number** of this record is a placeholder until the merge.
 
+## R-ULTRA. QUALITY's ULTRA: the circuit's model with no compromises, and its lamp
+
+**The owner, 2026-10-10:** "I think we should also bring back our highest quality mode. Is
+that still in the code? I have a fun UI idea for it." Then: "I think we should have a no
+compromises mode, don't you? Maybe the first time the user launches that mode, we can give
+them a little warning that says that it's only intended for offline renders, or small projects
+on powerful PCs." The idea: "a small panel above the quality selector (make it a slightly
+rounded square) opens up, moves aside, and a big round light appears (the kind you see on old
+tube amps). On the light, the word "ULTRA" is written. This change should ideally feel a bit
+like a transformer taking shape. It should feel old school and mechanical, and make the user
+feel like they can see a little bit inside the machine when the transition happens. Little
+mechanical arms and parts, the green of a PCB dimly appearing in the background, etc. please
+mock this up for me."
+
+Mocked up in the browser (the lab's `ca-72/look/mock`, study "ULTRA"), the owner steered it in
+turn: "Panel drops off to the right. Light slides in from the left and moves up once it's in
+the center position."; of six ideas for the inside generated from words, "That's the right
+direction" (jointed chrome arms, a lead screw, a filament in the lamp); "It needs to be obvious
+how it's sliding in. Something needs to look like it's pushing it or pulling it, or both." (a
+carriage and a chain); "the light looks too small when it's being pulled in. It's not a mile
+away" (an inch down). Then a second way, asked for to compare: "just like a circle with 8
+sliding blades, and those blades just pull apart to reveal the light underneath, and the light
+lifts up ... the light is already underneath. It just needs to move upwards."; "I mean more
+like a camera shutter."; "I like the little twist that the mechanical option does right at the
+end when the light turns on. Can you do the same twist for the camera shutter version?"; the
+blades "fit in just a little more with the surrounding look ... I still want it to be like
+plain sort of gunmetal, like you had before. But I just want the color to match closely.";
+"the move upward that the light takes and the rotation motion that turns on the bulb, all of
+that should happen at the same time." And: "Looks great! I think that's the one we should go
+with. We should also offer a no animation option that leaves the bulb out and turns it on
+instantly." then "Actually, let's still animate the light coming on, but no rotation or
+anything." The switch: "Sure, add a third position, let's see how that looks."; "That's only 2
+positions graphically. The switch has no image for a middle position"; "No. Imagine it being a
+3 positions graphically switch. Not a rocker."; of a rotary selector, a toggle and a slide, the
+toggle's middle "should look like there's no angle to the toggle lever", then "Maybe you were
+right. Give it the slightest bit of angle"; "Cool. Looks good. Let's run with the silver
+toggle."
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- **Where:** the branch `ultra`, from `potato` (QUALITY is R-POTATO's switch, given its third
+  position).
+- **The parameter:** QUALITY becomes the host's enum parameter `quality` (LO, HI, ULTRA, in that
+  order; HI by default), in place of R-POTATO's boolean `potato`, which was never released. It
+  stays out of presets (`library::KEPT`) and out of MIDI Learn ("set for the computer, not the
+  sound").
+- **The engine at ULTRA:** the circuit's voices with the model's No Compromises setting in place
+  of its real-time one (the engine's HI), switched while a key is held, without letting it go
+  (the model switches between its settings sample by sample). AUTO GAIN keeps HI's curve: the
+  circuit is measured at its real-time setting, which No Compromises differs from far below what
+  the correction can tell, and measuring at No Compromises would take the helper many times as
+  long.
+- **The switch:** the chrome toggle's three pictures (`assets/worn/README.md`), 50 units wide at
+  (3023, 266), its lever up for ULTRA, out for HI, down for LO; "ULTRA" printed above it, "HI" to
+  its left, "LO" below, in 15-unit letters, QUALITY above them at 168. A click above its nut
+  chooses ULTRA, below it LO, on it (or on HI's legend) HI; the mouse wheel steps it; no drag;
+  one gesture, at the release, as a rocker's. In the drawn skin, a drawn nut and lever.
+- **The lamp:** at (3023, 92): the opening 50 units in radius, the ring 3.6 beyond it, the lamp
+  46 (the mock-up's sizes); the lamp waits at 0.9 of its size, its bezel turned back 40 degrees.
+  Opening, 2.5 s: the blades over its first 0.04 to 0.44, then the lamp up, turning and lighting
+  over the rest (the light 0.12 of that behind the turn); closing, 1.8 s; the light only, 1.1 s
+  on and 0.5 s off. The editor moves it on by the time between its frames (at most 50 ms of it,
+  so that a stalled frame does not jump it), and opens with it where QUALITY is, still. The
+  lens does not turn (its highlight stays where the room's light is): the lamp's pictures are
+  split into a lens and a bezel, the bezel turned over it. The lamp's light on the panel round
+  it is a faint amber ring (0.16 at most). In the drawn skin: nothing while it is shut (the
+  approved mock-up has no lamp), the shutter and a plain lamp as it opens.
+- **The note:** once ULTRA's lamp is lit, until it is read (a press anywhere closes it), and
+  then never again on that computer: "ULTRA · NO COMPROMISES / THE CIRCUIT'S MODEL EXACTLY, AT
+  ABOUT SEVEN TIMES THE WORK OF HI: / ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER. / IT
+  IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL / PROJECTS ON POWERFUL
+  COMPUTERS. PLAYED LIVE, IT MAY DROP OUT. / CLICK TO CLOSE", left of the lamp's column.
+- **The light only:** a button in the presets drawer's top row, ULTRA SHUTTER (on by default),
+  between the search (350 units shorter) and MIDI; the computer's, not the session's.
+- **The computer's settings:** a file of its own, `CA-72/settings.toml` in the folder the
+  presets' library keeps (`settings.rs`): `ultra_shutter`, `ultra_note_read`; keys it does not
+  know kept, a file it cannot read never written over.
+- **The approved test** (`tests/approved.rs`) leaves out the last column's head, above POWER's
+  lamp: QUALITY, its toggle and ULTRA's lamp came after the approved mock-up and were approved
+  in their own. With it out, the panel against the mock-up: mean 1.359, 99th percentile 30 (on
+  `potato`, with the column in, 1.431 and 31).
+
+**What ULTRA costs** (`tests/preset_cost.rs`, one POLY voice, 256-frame blocks at 48 kHz, one
+thread, unpaced, the Linux reference machine, an AMD Ryzen 7 7800X3D):
+
+| Preset | HI, of a core (worst block) | ULTRA, of a core (worst block) | ULTRA / HI |
+|---|---|---|---|
+| Bass | 12.9 % (22 %) | 98.3 % (187 %) | 7.6 |
+| Cruising Whistle | 14.6 % (27 %) | 104.2 % (216 %) | 7.1 |
+| Brass Tutti | 17.8 % (34 %) | 118.4 % (212 %) | 6.7 |
+
+So one voice at ULTRA takes about a whole core of a fast computer, and its worst blocks twice
+that: played live on this machine, even one voice drops out. A voice cannot be shared between
+threads, so POLY's workers do not help a voice; they help many voices.
+
+**Evidence (the Linux reference machine, 2026-10-10):** the engine's test of ULTRA (the voices
+at No Compromises, the key kept when switched to HI); the real-time test with ULTRA switched on
+and off while it plays (no allocation, no free); AUTO GAIN's key at ULTRA is HI's; the toggle's
+gestures (`interact.rs`, the editor's `quality_goes_where_its_toggle_is_clicked`); ULTRA's lamp
+following QUALITY by the time between frames, its note read once, the light only's times
+(`ultra_s_lamp_follows_quality_and_its_note_is_read_once`); the settings file kept and a bad one
+left alone; the parts' pictures cut out; the drawer's ULTRA SHUTTER found where it is drawn. The
+plug-in's own frames at points of the opening (`the_ultra_pngs`) match the mock-up's.
+
+**Open (asked, not answered):** the lamp's colour (amber, as built; green and red were offered);
+whether the light only is in the right place; whether the note shows once a computer. And,
+given what ULTRA costs, whether ULTRA should play only when the host renders offline (playing HI
+live), which the host tells the plug-in.
+- **The number** of this record is a placeholder until the merge.

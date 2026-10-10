@@ -179,6 +179,8 @@ pub enum DrawerTarget {
     Restore,
     /// The update check's button.
     Update,
+    /// ULTRA's shutter on or off (the light only).
+    Shutter,
     /// MIDI: the MIDI Learn list in the presets' place, or back.
     Midi,
     /// A row of the MIDI list (by its index), one of its buttons.
@@ -275,6 +277,8 @@ pub struct DrawerScene {
     pub focus: Option<FieldId>,
     pub hover: Option<DrawerTarget>,
     pub update: UpdateScene,
+    /// ULTRA's shutter on (else the light only).
+    pub shutter: bool,
     /// The MIDI Learn list, shown in the presets' place (none: the presets).
     pub midi: Option<MidiList>,
 }
@@ -537,9 +541,13 @@ fn fit(fonts: &Fonts, s: &str, size: f64, room: f64) -> String {
 const PAD: f64 = 30.0;
 const TOOLS_Y: f64 = PAD;
 const TOOLS_H: f64 = 60.0;
-const SEARCH_END: f64 = 1350.0;
 /// (The search 330 units shorter since the drawing lost the controller's column, A6: the update
-/// check's text keeps its room.)
+/// check's text keeps its room; and shorter again for ULTRA's shutter, R-ULTRA.)
+const SEARCH_END: f64 = 1000.0;
+/// ULTRA's shutter (decisions.md R-ULTRA): on, its shutter opens and its lamp comes up; off,
+/// the light only. The computer's, not the session's.
+const SHUTTER_X: f64 = 1030.0;
+const SHUTTER_W: f64 = 320.0;
 /// The MIDI button, between the search and FAVOURITES.
 const MIDI_X: f64 = 1380.0;
 const MIDI_W: f64 = 190.0;
@@ -675,6 +683,9 @@ pub fn drawer_hit(fonts: &Fonts, s: &DrawerScene, x: f64, y: f64) -> Option<Draw
         |x0: f64, x1: f64, y0: f64, h: f64| (x0..x1).contains(&x) && (y0..y0 + h).contains(&y);
     if inside(MIDI_X, MIDI_X + MIDI_W, TOOLS_Y, TOOLS_H) {
         return Some(DrawerTarget::Midi);
+    }
+    if inside(SHUTTER_X, SHUTTER_X + SHUTTER_W, TOOLS_Y, TOOLS_H) {
+        return Some(DrawerTarget::Shutter);
     }
     if let Some(m) = &s.midi {
         return Some(midi_hit(s, m, x, y));
@@ -825,6 +836,15 @@ fn drawer_body(fonts: &Fonts, s: &DrawerScene) -> String {
         TEXT,
         s.midi.is_some(),
         hover(DrawerTarget::Midi),
+        colour::LEGEND,
+    );
+    button(
+        &mut out,
+        (SHUTTER_X, TOOLS_Y, SHUTTER_W, TOOLS_H),
+        "ULTRA SHUTTER",
+        SMALL,
+        s.shutter,
+        hover(DrawerTarget::Shutter),
         colour::LEGEND,
     );
     if let Some(m) = &s.midi {
@@ -1474,6 +1494,10 @@ mod tests {
         );
         assert_eq!(at(MINE_X + 20.0, TOOLS_Y + 20.0), Some(DrawerTarget::Mine));
         assert_eq!(
+            at(SHUTTER_X + 20.0, TOOLS_Y + 20.0),
+            Some(DrawerTarget::Shutter)
+        );
+        assert_eq!(
             at(W - PAD - 20.0, TOOLS_Y + 20.0),
             Some(DrawerTarget::Close)
         );
@@ -1690,6 +1714,7 @@ mod png {
             hint: "Replaces your Deep Bass.".into(),
             focus: Some(FieldId::SaveName),
             hover: Some(DrawerTarget::Row(2)),
+            shutter: true,
             update: UpdateScene {
                 text: "0.2.0 IS OUT (THIS IS 0.1.0)".into(),
                 tone: Tone::News,

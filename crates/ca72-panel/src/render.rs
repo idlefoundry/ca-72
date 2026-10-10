@@ -28,6 +28,10 @@ pub struct Scene {
     pub power: bool,
     /// The OVERLOAD lamp's level, 0 dark to 1 fully lit.
     pub overload: f64,
+    /// ULTRA's lamp (decisions.md R-ULTRA): how far it has gone, 0 shut (or dark) to 1 up and
+    /// lit, and whether the shutter is off (the light only).
+    pub ultra: f64,
+    pub ultra_still: bool,
     /// A tip: its text, centred above (x, y) in the drawing.
     pub tip: Option<(String, f64, f64)>,
     /// MIDI Learn (decisions.md R34): the control being learned, by its index in [`CONTROLS`]
@@ -44,6 +48,8 @@ impl Default for Scene {
             midi: (0.5, 0.0),
             power: true,
             overload: 0.0,
+            ultra: 0.0,
+            ultra_still: false,
             tip: None,
             learning: None,
             note: None,
@@ -284,6 +290,7 @@ impl Renderer {
                 (x * s, y * s),
                 deg,
                 (false, false),
+                (1.0, 1.0),
             );
         }
         for (x, y, r, nut) in art::jacks() {
@@ -296,6 +303,7 @@ impl Renderer {
                 (x * s, y * s),
                 20.0,
                 (false, false),
+                (1.0, 1.0),
             );
         }
         // The lamp's light over all of it.
@@ -342,10 +350,12 @@ impl Renderer {
             out.push(art::power_worn(scene.power));
             out.push(art::lamp_worn(scene.power));
             out.push(art::overload_worn(scene.overload));
+            out.push(crate::ultra::ultra_worn(scene.ultra, scene.ultra_still));
         } else {
             out.push(art::power(scene.power));
             out.push(art::lamp(scene.power));
             out.push(art::overload(scene.overload));
+            out.push(crate::ultra::ultra(scene.ultra, scene.ultra_still));
         }
         out.push(art::plate());
         if let Some(c) = scene.learning.and_then(|i| CONTROLS.get(i)) {
@@ -411,6 +421,7 @@ impl Renderer {
                     at,
                     sp.deg as f32,
                     sp.flip,
+                    (sp.zoom as f32, sp.alpha as f32),
                 );
             }
         }
@@ -552,8 +563,9 @@ impl Renderer {
     /// drawn again over `onto`, a frame the drawing's size at this scale: the editor's, over the
     /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
     pub fn draw_floating(&self, onto: &mut Pixmap) {
-        // (The controls', then POWER's, its lamp's, OVERLOAD's and the name plate's: fixed.)
-        let fixed = CONTROLS.len() + 4;
+        // (The controls', then POWER's, its lamp's, OVERLOAD's, ULTRA's and the name plate's:
+        // fixed.)
+        let fixed = CONTROLS.len() + FIXED;
         for slot in self.slots.iter().skip(fixed) {
             if let Some((x, y, p)) = &slot.pixels {
                 onto.draw_pixmap(
@@ -570,9 +582,13 @@ impl Renderer {
 
     /// Whether any layer floats now ([`Renderer::draw_floating`]).
     pub fn floating(&self) -> bool {
-        self.slots.len() > CONTROLS.len() + 4
+        self.slots.len() > CONTROLS.len() + FIXED
     }
 }
+
+/// The layers drawn after the controls whatever the scene: POWER, its lamp, OVERLOAD, ULTRA's
+/// lamp and the name plate.
+const FIXED: usize = 5;
 
 /// The panel's lamp, up and to the left, over the whole drawing at `s` pixels a unit: brighter
 /// near it (the face's sheen, catching the specks of its texture), falling off towards the far
@@ -798,15 +814,23 @@ fn draw_wheel(frame: &mut Pixmap, at: (f64, f64), s: f64, wheel: art::WheelArt) 
 
 /// A picture drawn with its middle at `at` (pixels), mirrored as `flip` (across, down) says,
 /// then turned `deg` clockwise.
-fn put_picture(frame: &mut Pixmap, p: &Pixmap, at: (f64, f64), deg: f32, flip: (bool, bool)) {
+fn put_picture(
+    frame: &mut Pixmap,
+    p: &Pixmap,
+    at: (f64, f64),
+    deg: f32,
+    flip: (bool, bool),
+    (zoom, alpha): (f32, f32),
+) {
     let (pw, ph) = (p.width() as f32, p.height() as f32);
-    let sign = |f: bool| if f { -1.0 } else { 1.0 };
+    let sign = |f: bool| if f { -zoom } else { zoom };
     frame.draw_pixmap(
         0,
         0,
         p.as_ref(),
         &PixmapPaint {
             quality: FilterQuality::Bicubic,
+            opacity: alpha.clamp(0.0, 1.0),
             ..PixmapPaint::default()
         },
         Transform::from_translate(-pw / 2.0, -ph / 2.0)

@@ -77,6 +77,12 @@ pub const POWER: (f64, f64) = (3023.0, 580.0);
 pub(crate) const LAMP_AT: (f64, f64) = (3023.0, 426.0);
 /// The OVERLOAD lamp, on the panel.
 pub(crate) const OVERLOAD_AT: (f64, f64) = (1764.0, 274.0);
+/// QUALITY's toggle (decisions.md R-ULTRA), on the panel, and its size as seen: its pictures'
+/// (180 by 291 pixels, the nut at their middle) 50 units wide.
+pub(crate) const QUALITY_AT: (f64, f64) = (3023.0, 266.0);
+pub(crate) const TOGGLE: (f64, f64) = (50.0, 50.0 * 291.0 / 180.0);
+/// ULTRA's lamp (decisions.md R-ULTRA), on the panel, over QUALITY.
+pub(crate) const ULTRA_AT: (f64, f64) = (3023.0, 92.0);
 
 /// The editor's resize grip, in the name board's bottom right corner (left, top, right,
 /// bottom).
@@ -885,9 +891,12 @@ fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
         s.0.push_str("</g>");
     }
     // POWER: the plugin's bypass. The lamp is lit while it plays.
-    legend(s, 3023.0, 132.0, "QUALITY");
-    legend(s, 3023.0, 180.0, "HI");
-    legend(s, 3023.0, 322.0, "LO");
+    // QUALITY: its toggle's three positions round it (ULTRA's lamp above, drawn as it moves).
+    let (qx, qy) = QUALITY_AT;
+    legend(s, qx, 168.0, "QUALITY");
+    lettered(s, qx, qy - 50.0, "ULTRA", 15.0);
+    lettered(s, qx - 40.0, qy, "HI", 15.0);
+    lettered(s, qx, qy + 52.0, "LO", 15.0);
     legend(s, 3023.0, 465.0, "POWER");
     legend(s, 3023.0, 500.0, "ON");
     s.0.push_str("</g>");
@@ -1088,6 +1097,37 @@ fn knob_body(s: &mut Svg, size: Size, deg: f64) {
 
 /// A pointer knob at position `i` of six: the fluted black body, a fin along its pointer
 /// carrying a white line from the cap to its tip, a spun aluminium cap.
+/// QUALITY's toggle as drawn: a chrome nut and its bushing, the lever's ball tip up, out (at
+/// the nut's middle) or down, `i` 2, 1 or 0.
+fn toggle_body(s: &mut Svg, i: usize) {
+    put!(
+        s,
+        "<polygon points='{}' fill='#b8b8b2' stroke='#5e5e5a' stroke-width='1.2'/><circle r='11' fill='#d6d6d0' stroke='#7a7a75'/><circle r='7.5' fill='#8c8c87'/>",
+        (0..6)
+            .map(|k| {
+                let a = (30.0 + 60.0 * f64::from(k)).to_radians();
+                format!("{},{}", N(17.0 * a.cos()), N(17.0 * a.sin()))
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    match i {
+        1 => put!(
+            s,
+            "<circle cy='1.5' r='5.5' fill='#f0f0ea' stroke='#8a8a85'/>"
+        ),
+        _ => {
+            let d = if i == 2 { -1.0 } else { 1.0 };
+            put!(
+                s,
+                "<line x1='0' y1='0' x2='0' y2='{}' stroke='#e2e2dc' stroke-width='6' stroke-linecap='round'/><circle cy='{}' r='5' fill='#f2f2ec' stroke='#8a8a85'/>",
+                N(28.0 * d),
+                N(31.0 * d)
+            );
+        }
+    }
+}
+
 fn selector_body(s: &mut Svg, i: usize) {
     shadow(s, 3.0, 5.0, 57.0);
     put!(s, "<g transform='rotate({})'>", N(SIX[i]));
@@ -1234,7 +1274,9 @@ pub struct Layer {
 }
 
 /// A picture of a part drawn in a layer: `size` (drawing units) about `at` (from the layer's
-/// origin), turned `deg` clockwise after it is mirrored as `flip` (across, down) says.
+/// origin), turned `deg` clockwise after it is mirrored as `flip` (across, down) says, drawn
+/// `zoom` times its size (its picture made at `size`, so that a part growing does not make a
+/// picture a frame) and `alpha` opaque.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sprite {
     pub part: Part,
@@ -1242,6 +1284,8 @@ pub struct Sprite {
     pub at: (f64, f64),
     pub deg: f64,
     pub flip: (bool, bool),
+    pub zoom: f64,
+    pub alpha: f64,
 }
 
 /// A control's extent about its centre (left, top, right, bottom), its shadow included.
@@ -1252,7 +1296,9 @@ pub fn bounds(kind: &Kind) -> [f64; 4] {
             [-(r + 3.0), -(r + 3.0), r + 6.0, r + 8.0]
         }
         Kind::Selector(_) => [-62.0, -62.0, 63.0, 64.0],
-        Kind::Rocker { w, h, .. } => [-w / 2.0 - 4.0, -h / 2.0 - 4.0, w / 2.0 + 4.0, h / 2.0 + 4.0],
+        Kind::Rocker { w, h, .. } | Kind::Toggle { w, h } => {
+            [-w / 2.0 - 4.0, -h / 2.0 - 4.0, w / 2.0 + 4.0, h / 2.0 + 4.0]
+        }
         Kind::Wheel { .. } => {
             let (hx, hy) = (
                 SLOT_W / 2.0 * WHEEL_SCALE + 2.0,
@@ -1282,6 +1328,7 @@ pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
             knob_body(&mut s, if big { BIG } else { STD }, -150.0 + 300.0 * v)
         }
         Kind::Selector(_) => selector_body(&mut s, position(v)),
+        Kind::Toggle { .. } => toggle_body(&mut s, crate::interact::toggle_position(v)),
         Kind::Rocker {
             w,
             h,
@@ -1482,6 +1529,8 @@ fn sprite(part: Part, size: (f64, f64), deg: f64, flip: (bool, bool)) -> Sprite 
         at: (0.0, 0.0),
         deg,
         flip,
+        zoom: 1.0,
+        alpha: 1.0,
     }
 }
 
@@ -1522,6 +1571,20 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                 ],
                 over: lamp_over(SELECTOR_R, d / 2.0 * POINTER_CAP)
                     + &cap_light(d / 2.0 * POINTER_CAP),
+                ..Layer::default()
+            }
+        }
+        // QUALITY's chrome toggle: its picture for the lever's place.
+        Kind::Toggle { w, h } => {
+            let part = match crate::interact::toggle_position(v) {
+                2 => Part::ToggleUp,
+                1 => Part::ToggleMid,
+                _ => Part::ToggleDown,
+            };
+            Layer {
+                origin,
+                bounds,
+                sprites: vec![sprite(part, (w, h), 0.0, (false, false))],
                 ..Layer::default()
             }
         }
@@ -1768,6 +1831,14 @@ pub fn worn_overlay() -> String {
                     N(r)
                 );
             }
+            // The toggle's nut's (its lever's is too small to tell).
+            Kind::Toggle { w, .. } => put!(
+                s,
+                "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.5' filter='url(#softer)'/>",
+                N(x + 2.0),
+                N(y + 3.0),
+                N(w * 0.46)
+            ),
             // A rocker's own shadow goes with its layer; its opening's is the panel's.
             Kind::Rocker { w, h, .. } => put!(
                 s,
@@ -1785,6 +1856,14 @@ pub fn worn_overlay() -> String {
         "<rect x='{}' y='{}' width='48' height='124' rx='3' fill='#000' fill-opacity='0.55' filter='url(#softer)'/>",
         N(COL + POWER.0 - 21.0),
         N(TOP + POWER.1 - 59.0)
+    );
+    // ULTRA's ring, which is always there (the shutter in it, or the lamp).
+    put!(
+        s,
+        "<circle cx='{}' cy='{}' r='{}' fill='none' stroke='#000' stroke-opacity='0.45' stroke-width='4' filter='url(#softer)'/>",
+        N(COL + ULTRA_AT.0 + 1.5),
+        N(TOP + ULTRA_AT.1 + 2.5),
+        N(crate::ultra::APERTURE + crate::ultra::RING / 2.0)
     );
     for ((x, y), r) in [(LAMP_AT, 20.0), (OVERLOAD_AT, 24.0)] {
         put!(
