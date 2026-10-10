@@ -29,6 +29,7 @@ static POWER: &[u8] = include_bytes!("../assets/worn/power.png");
 static JEWEL: &[u8] = include_bytes!("../assets/worn/jewel.png");
 static JACK: &[u8] = include_bytes!("../assets/worn/jack.png");
 static SCREW: &[u8] = include_bytes!("../assets/worn/screw.png");
+static PLATE: &[u8] = include_bytes!("../assets/worn/plate.png");
 
 /// The face's picture is kept grey; its colour, a black a touch warm, is this over it.
 const FACE_TINT: [f32; 3] = [1.03, 1.0, 0.94];
@@ -57,6 +58,8 @@ pub enum Part {
     KnobCap,
     KnobBigCap,
     PointerCap,
+    /// The name plate, blank (its lettering is printed on it: `art::plate_worn`).
+    Plate,
 }
 
 /// How much of a knob's picture its skirt fills (the picture squared about the cap's axis;
@@ -88,6 +91,7 @@ pub struct Pictures {
     jack: Pixmap,
     screw: Pixmap,
     caps: [Pixmap; 3],
+    plate: Pixmap,
     scaled: Vec<((Part, u32, u32), Pixmap)>,
 }
 
@@ -154,6 +158,7 @@ impl Pictures {
             jack: png(JACK),
             screw: png(SCREW),
             caps,
+            plate: png(PLATE),
             scaled: Vec::new(),
         }
     }
@@ -174,6 +179,7 @@ impl Pictures {
             Part::KnobCap => &self.caps[0],
             Part::KnobBigCap => &self.caps[1],
             Part::PointerCap => &self.caps[2],
+            Part::Plate => &self.plate,
         }
     }
 
@@ -276,7 +282,7 @@ pub fn resample(src: &Pixmap, w: u32, h: u32) -> Pixmap {
 mod tests {
     use super::*;
 
-    const PARTS: [Part; 11] = [
+    const PARTS: [Part; 12] = [
         Part::Knob,
         Part::KnobBig,
         Part::Pointer,
@@ -288,6 +294,7 @@ mod tests {
         Part::JewelDark,
         Part::Jack,
         Part::Screw,
+        Part::Plate,
     ];
 
     #[test]
