@@ -1705,7 +1705,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 [[package]]
 name = "plugin-kit-materials"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=ac04479611c3cd7bc910d85c92e36c0098c1cf75#ac04479611c3cd7bc910d85c92e36c0098c1cf75"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=eb374f84c4a901164d832f023525582dfbcd8ce5#eb374f84c4a901164d832f023525582dfbcd8ce5"
 dependencies = [
  "resvg",
 ]
@@ -1713,7 +1713,7 @@ dependencies = [
 [[package]]
 name = "plugin-kit-stereo"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=ac04479611c3cd7bc910d85c92e36c0098c1cf75#ac04479611c3cd7bc910d85c92e36c0098c1cf75"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=eb374f84c4a901164d832f023525582dfbcd8ce5#eb374f84c4a901164d832f023525582dfbcd8ce5"
 dependencies = [
  "libm",
  "serde",

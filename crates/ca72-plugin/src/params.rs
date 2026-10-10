@@ -120,8 +120,7 @@ pub enum Scatter {
     Centre,
 }
 
-/// The kit's placement of each choice (never its `Edges`, which the plug-in uses only for one
-/// voice alone: `engine.rs`).
+/// The kit's placement of each choice.
 impl From<Scatter> for Placement {
     fn from(s: Scatter) -> Placement {
         match s {

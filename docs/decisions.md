@@ -3267,14 +3267,19 @@ render first"; and having listened to the renders: "k, I think we should remove 
 - **The strip:** PLACEMENT is two lit tabs, EVEN and CENTER, its recess a tab narrower; the two
   banks stay centred over STEREO as a pair, 180 apart. The lit tab and a click go by the
   plug-in's choice, not the kit's index.
-- **The kit keeps its `Edges` for now**, used only by the engine for one voice alone, whose
-  DOUBLE pair goes all of SPREAD's way out (R-STEREO); the kit's own change (dropping it, a
-  constant for the lone pair) was blocked here as a change to a shared repo and is the owner's
-  to have made from the kit.
+- **The kit at eb374f8** (its K7's "EDGES dropped", made by a session the owner opened in the
+  kit, since a change to the shared kit from here was refused): no `Edges`, EVEN and CENTER
+  its placements (indices 0 and 1), and `ALONE` for one voice alone, whose DOUBLE pair goes all
+  of SPREAD's way out (R-STEREO). The voices' mix carries no placement for a lone voice
+  (`Option<Placement>`), and its pair takes `ALONE`, as it took EDGES's pair, 1, before; the
+  panel's materials from the same commit.
 
 **Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
 bd63519: every factory preset (24) the same to the bit. Tests: the placement's two choices by
 their ids, the strip's two tabs where they stand and the lit tab, DOUBLE's pairs at INNER 100 %
 the same to the bit in EVEN, CENTER and as the engine's lone pair, a value learned for each kind,
 `a_session_saved_with_edges_opens_with_even`; the panel's and plug-in's tests, 206 passed, 18
-ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`.
+ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`. With the
+kit at eb374f8, against renders of d159f42: three presets each in MONO, POLY and UNISON, with
+and without DOUBLE, EVEN and CENTER, INNER 0 and 60 % (72 renders), and every factory preset
+(24), the same to the bit; tests, 206 passed; rustfmt; clippy with `-D warnings`.

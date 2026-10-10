@@ -24,7 +24,7 @@ use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
 use crate::pool::{Ask, Crew, MAX, Pool, Shared};
-use plugin_kit_stereo::place::{DOUBLE_TRIM, glide_share, pair_gains, unison_trim};
+use plugin_kit_stereo::place::{ALONE, DOUBLE_TRIM, glide_share, pair_gains, unison_trim};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -504,19 +504,22 @@ impl Playing {
     fn places(&self, m: &Mix) -> Places {
         let doubled = m.double > 0.0;
         let twin_on = doubled || self.twin.live;
+        // (One voice alone, no placement among others: its pair all of SPREAD's way out.)
         let out = if twin_on {
-            self.character.pair(m.placement, m.voices)
+            m.placement
+                .map_or(ALONE, |p| self.character.pair(p, m.voices))
         } else {
             0.0
         };
         let wide = |(l, r): (f32, f32)| (f64::from(l), f64::from(r));
         let [voice, twin] = pair_gains(m.spread, m.inner, out);
         Places {
+            // (Alone and not doubled, SPREAD is 0 and the voice whole on both sides.)
             voice: wide(if doubled {
                 voice
             } else {
-                self.character
-                    .gains(m.spread, m.inner, m.placement, m.voices)
+                let placement = m.placement.unwrap_or_default();
+                self.character.gains(m.spread, m.inner, placement, m.voices)
             }),
             twin: if twin_on { wide(twin) } else { (0.0, 0.0) },
             half: 0.5 * m.double,
@@ -1641,8 +1644,8 @@ pub const CHUNK: usize = 128;
 
 /// ENTROPY, SPREAD, DOUBLE and DRIVE as the voices' samples take them: ENTROPY's depth, the
 /// oscillators' (their floor with it, unless LOCK), the depth the character's offsets are
-/// drawn at, SPREAD and INNER, SCATTER's placement and the voices it places among (VOICES), DOUBLE's
-/// detune between a note's two voices, cents (0: one voice a note), and DRIVE's gain into the
+/// drawn at, SPREAD and INNER, SCATTER's placement (none for one voice alone, its DOUBLE pair at
+/// the edge) and the voices it places among (VOICES), DOUBLE's detune between a note's two voices, cents (0: one voice a note), and DRIVE's gain into the
 /// filter (1: the circuit).
 #[derive(Debug, Clone, Copy)]
 pub struct Mix {
@@ -1651,7 +1654,7 @@ pub struct Mix {
     at: f64,
     spread: f64,
     inner: f64,
-    placement: Placement,
+    placement: Option<Placement>,
     voices: usize,
     double: f64,
     drive: f64,
@@ -1668,7 +1671,7 @@ impl Mix {
             self.at,
             self.spread,
             self.inner,
-            self.placement.index() as f64,
+            self.placement.map_or(-1.0, |p| p.index() as f64),
             self.voices as f64,
             self.double,
             self.drive,
@@ -1694,7 +1697,7 @@ impl Mix {
             at,
             spread,
             inner,
-            placement: Placement::from_index(placement as usize),
+            placement: (placement >= 0.0).then(|| Placement::from_index(placement as usize)),
             voices: voices as usize,
             double,
             drive,
@@ -1929,10 +1932,9 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
             0.0
         },
         inner: c.inner.clamp(0.0, 1.0),
-        // (One voice alone has no place among others: its DOUBLE pair as far out as
-        // SPREAD. The kit's `Edges` is its way to put a lone pair at the edge, not a choice
-        // the plug-in offers: R-INNER.)
-        placement: if many { c.placement } else { Placement::Edges },
+        // (One voice alone has no place among others: none, and its DOUBLE pair as far out as
+        // SPREAD, the kit's `ALONE`.)
+        placement: many.then_some(c.placement),
         voices,
         double: if c.double > 0.0 {
             c.double.min(1.0) * DOUBLE_CENTS
@@ -2830,8 +2832,8 @@ mod tests {
     /// has its pair in the centre, left and right the same; with EVEN out to the sides (its
     /// first voice's place is an edge). INNER at 100 % puts every pair at the edges, as EDGES
     /// did (R-INNER): CENTER's first pair is then where EVEN's is, to the bit. One voice alone
-    /// (POLY off) has its pair as far out as SPREAD whatever the placement (the kit's EDGES,
-    /// kept for it), there too.
+    /// (POLY off) has its pair as far out as SPREAD whatever the placement (the kit's `ALONE`),
+    /// there too.
     #[test]
     fn double_takes_the_placement_its_pairs_mirrored() {
         let doubled = |poly: bool, placement: Placement, inner: f64| Controls {

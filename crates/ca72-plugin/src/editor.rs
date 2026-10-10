@@ -1471,7 +1471,7 @@ fn strip_scene(p: &Ca72Params, sounding: u32, was: StripScene) -> StripScene {
     let (width, inner) = (c.spread, c.inner);
     let field = if mono {
         if doubled {
-            Field::Double(vec![(place::pair_at(width, inner, 1.0), on(0))])
+            Field::Double(vec![(place::pair_at(width, inner, place::ALONE), on(0))])
         } else {
             Field::Scatter(vec![(0.0, on(0))])
         }
