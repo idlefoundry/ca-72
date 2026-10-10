@@ -3295,8 +3295,88 @@ levelled as at HI, AUTO GAIN measuring with the light voices); `quality_lo_neith
 `tests/fuzz_bounds.rs` with QUALITY among the controls at their ends; the editor's QUALITY
 clicked as a rocker and its MIDI Learn menu; rustfmt; clippy.
 
-**To follow:** the light voices fitted again to this circuit (the laws, DRIVE, FILTER MODE's HI,
-FEEDBACK), every preset's A/B for the owner's listening, the cost on the Windows reference
-machine against Surge XT as R31 measured it, the README.
+### The light voices fitted again to this circuit (2026-10-10)
+
+**Agent decisions** (not separately approved; a helper agent on the branch `potato-fit`, merged
+here at cf2e1e0):
+- **The harness** from the development line (`tests/measure/mod.rs`, `potato_reference.rs` and
+  `potato_match.rs`: every law from a panel control to pitch, level, cutoff, resonance and
+  time, measured alike on the circuit's voice and the light one), with DRIVE on six patches,
+  FILTER MODE's HI against LO (noise curves, sawtooth levels, the ring), FEEDBACK on four
+  patches at four of its settings, oscillator 3's free FREQUENCY and the release with DECAY
+  off; `potato_cost.rs` a timed loop.
+- **Each knob read through the circuit's own law** where the hardware reference recalibrated
+  it (`volume_track`, the FREQUENCY tracks, `sustain_track`, `time_pot`, `emphasis_r14`,
+  `glide_r`, `ext_taper`, `mod_wheel_r`), the laws behind them fitted again, and DECAY's shape
+  (faster at first, slower at its end), the input pair's compression, the lowest cutoffs, the
+  rings' level, the shark tooth and EXTERNAL INPUT's couplings fitted as the circuit's. Against
+  the circuit as it is now (the light voice before, where it moved):
+
+  | Law | Circuit | Light | Before |
+  |---|---|---|---|
+  | Oscillator 3 free, 8' | 201.49 Hz | 201.50 | 232.68 |
+  | Level against VOLUME 2 / 6 / 10 | .0291 / .1061 / .1863 | .0290 / .1054 / .1854 | .0353 / .0980 / .1811 |
+  | Compression, three oscillators at 10 | -1.19 dB | -1.06 | -0.70 |
+  | Ring at EMPHASIS 10, CUTOFF 0.5 | 1056 Hz, 0.170 | 1056 Hz, 0.169 | 857 Hz, 0.155 |
+  | Threshold at CUTOFF .3 / .5 / .7 | .827 / .725 / .700 | .825 / .729 / .700 | .789 / .742 / .733 |
+  | Passband at EMPHASIS 5 / 7, CUTOFF .5 | -9.35 / -11.80 dB | -9.32 / -11.60 | -6.59 / -11.15 |
+  | KEYBOARD CONTROL 1 / 2 / both | .328 / .649 / .956 | .328 / .646 / .952 | .339 / .673 / .977 |
+  | AMOUNT 2.5 / 5 / 7.5 at 3.83 V | +1.52 / +3.87 / +6.15 oct | +1.51 / +3.84 / +6.18 | +1.88 / +3.83 / +5.88 |
+  | ATTACK 4 to the plateau, filter / loudness | .250 / .438 s | .252 / .440 | .433 / .685 |
+  | DECAY 2 / 6, loudness to half | .091 / .313 s | .091 / .313 | .123 / 1.135 |
+  | SUSTAIN 2.5 / 5 / 7.5, loudness | .500 / 1.675 / 3.070 V | .504 / 1.671 / 3.074 | .655 / 1.704 / 2.897 |
+  | Release, DECAY on at 6, to 90 % | 1.165 s | 1.163 | 3.784 |
+  | VCA at 1.0 / 1.9 / 3.1 / 4.3 V | .193 / .423 / .732 / .999 | .194 / .421 / .732 / .999 | .170 / .404 / .720 / .995 |
+  | GLIDE 6, 12 semitones up / down | 70.5 / 126.4 ms | 69.7 / 125.5 | 65.2 / 141.0 |
+  | Oscillator modulation, wheel 1 | +752 / -592 cents | +745 / -585 | +991 / -779 |
+  | EXTERNAL INPUT's gain, VOLUME 2.5 / 5 / 7.5 / 10 | 2.07 / 4.38 / 14.75 / 159.0 | 2.08 / 4.41 / 14.87 / 158.0 | 2.79 / 7.28 / 14.02 / 137.3 |
+
+  (The rest of the helper's table: the pitch, both FREQUENCY tracks, the triangle's second
+  harmonic, the shark tooth's harmonics, the rings and peaks at low cutoffs, the passband near
+  CUTOFF 0, ATTACK 8, the release with DECAY off, the retrigger, the modulations, the noises,
+  A-440 and the filter contour's rest, each within a percent or two of the circuit's.)
+- **DRIVE** (`Light::set_drive`, the circuit voice's argument): the bus into the input pair
+  raised, the pair's limit falling as the gain to the -0.045 (0.88 at 24 dB). The level's rise
+  at 6, 12, 18 and 24 dB within 0.75 dB of the circuit's on six patches (a sawtooth open, 5.67 /
+  10.54 / 13.60 / 14.95 dB against 5.74 / 10.75 / 13.91 / 15.02); open patches darken as the
+  circuit's do. Driven hard at EMPHASIS 7 the light voice loses its resonance sooner (three
+  sawtooths at 24 dB: highs -14.5 dB against -9.7).
+- **FILTER MODE's HI:** the bus at the open ladder's EMPHASIS-0 passband through a 3 Hz
+  coupling, less the filter's coupled output (13 Hz, apart from the 4.4 Hz one after the VCA).
+  Noise curves at CUTOFF .3, .5 and .7 and EMPHASIS 0 to 5 within 0.2 to 0.45 dB RMS from 40 Hz
+  to 10 kHz (EMPHASIS 0 at .5 and .7, 1.6 to 1.8 dB: the notch deeper; EMPHASIS 7.5, at its
+  threshold, 1.7 to 2.9 dB); the sawtooth's levels within -0.57 to +0.07 dB; at EMPHASIS 10 the
+  same ring as LO's and the circuit's.
+- **What still differs:**
+  - FEEDBACK's loop has the circuit's latency (about 3.5 samples more) and the preamplifier's
+    coupling, and its tones are within 1.5 % of the circuit's; but which oscillation the loop
+    falls into differs (alone at CUTOFF .5 the circuit drops into a 26 to 38 Hz relaxation from
+    3.8 on the knob, the light voice holds 440 Hz; a sawtooth at CUTOFF .6, the knob at 5 to 7,
+    the other way about). Undertow Growl is 2.9 dB quiet at LO and 8 to 16 dB short at 0.5 to
+    2 kHz in its first moments. Stopped after three experiments without a cause, as the stuck
+    rule has it.
+  - Ringing Saw Line darker (0.72; 2 dB down from 4 to 8 kHz: the light ladder's top octaves,
+    R31's); Closed Hat a little brighter (1.16); Ladder Kick 0.8 dB louder.
+  - The DECAY switch off slows the circuit's attack a little (0.537 against 0.570 at 0.2 s into
+    ATTACK 6); not modelled. The release with DECAY off without the circuit's slow creep after
+    90 %.
+
+**Every factory preset at HI and LO** (`tests/potato_ab.rs`; LO's level less HI's, and the
+ratio of their spectral centroids): within 1 dB in 22 of the 24 and 0.87 to 1.13 in brightness in
+22, R31's mark; outside it Pulse Strut -1.2 dB and Undertow Growl -2.9 dB, Ringing Saw Line
+0.72 and Closed Hat 1.16. Their renders, HI then LO, are on the owner's Mac for listening
+(`~/Downloads/ca72-potato`).
+
+**What a light voice costs** (`potato_cost.rs`, ns a sample, the Linux reference machine): 34.3
+with three oscillators into the ladder (about 168 cycles; 30.6 before the fit), 83.0 with
+everything on (79.9). It allocates nothing.
+
+**Evidence (the Linux reference machine, 2026-10-10):** after the merge, HI plays every factory
+preset the same to the bit as before (`preset_render` against 1535b5f); the light voice's
+tests (13, each new law seen failing with its law broken), the model's, the plug-in's and the
+panel's (276 passed); rustfmt; clippy.
+
+**To follow:** the cost on the Windows reference machine against the same free synthesizer's
+patch, as R31 measured it; the owner's listening; the README.
 - **The number** of this record is a placeholder until the merge.
 
