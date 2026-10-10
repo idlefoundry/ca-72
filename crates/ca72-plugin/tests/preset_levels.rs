@@ -19,44 +19,10 @@ mod common;
 use ca72_analysis::loudness::loudness;
 use ca72_plugin::engine::{Engine, Event};
 use ca72_plugin::library::{Sound, factory};
-use common::{controls_of, env};
+use common::{controls_of, env, phrase};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
-
-/// A phrase: (start, length) in seconds and the keys held.
-fn phrase(s: &Sound) -> Vec<(f64, f64, Vec<u8>)> {
-    let tag = |t: &str| s.tags.iter().any(|x| x == t);
-    let poly = s.values.iter().any(|(k, v)| k == "poly" && *v >= 0.5);
-    let held = if tag("slow") { 3.0 } else { 1.5 };
-    if tag("drums") {
-        let key = if tag("snare") { 54 } else { 57 };
-        return (0..4).map(|k| (0.6 * k as f64, 0.25, vec![key])).collect();
-    }
-    if tag("fx") {
-        return vec![(0.0, 6.0, vec![48])];
-    }
-    if poly {
-        return [48u8, 53, 55]
-            .iter()
-            .enumerate()
-            .map(|(k, &r)| {
-                let keys = [0u8, 4, 7, 12, 16, 19].iter().map(|d| r + d).collect();
-                (3.0 * k as f64, 2.5, keys)
-            })
-            .collect();
-    }
-    let roots: [u8; 3] = if tag("bass") {
-        [36, 43, 40]
-    } else {
-        [60, 67, 64]
-    };
-    roots
-        .iter()
-        .enumerate()
-        .map(|(k, &r)| ((held + 0.5) * k as f64, held, vec![r]))
-        .collect()
-}
 
 /// `CA72_PHRASE`'s notes and modulation wheel: `[{"t": seconds, "kind": "on" | "off",
 /// "note": n}, {"t": seconds, "kind": "cc", "cc": 1, "value": v}, ...]`.

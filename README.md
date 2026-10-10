@@ -113,6 +113,16 @@ and sends nothing of yours.
   SPREAD's way); at SPREAD 0 both are in the centre. Turned down so that it sounds about as
   loud as one voice a note; it doubles the voices' work. Switching it on or off stops the
   notes sounding; a doubled voice let go plays its tail out.
+- **DRIVE** (0 to 24 dB, off by default): the mixer's signal raised into the filter's input,
+  driving it harder than the panel's mixer can. The sound grows louder, by less the higher
+  DRIVE goes as the filter's input saturates, and darker: the filter's stages take the highs
+  the clipping adds. **AUTO GAIN** (on by default) turns the output down by as much as DRIVE
+  made the sound louder. The plug-in measures each sound when you change it in its window
+  (three short notes at each of DRIVE's steps, a few tenths of a second's work on a thread of
+  its own) and keeps the result with your session, so that it plays and renders the same
+  again. A sound set only by the host or a MIDI controller uses the factory presets' average
+  until it is changed in the window.
+- **LEVEL** (-30 to +12 dB, 0 by default): the output's gain, after MAIN OUTPUT's.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
   default), and the modulation wheel (CC 1) moves the MODULATION wheel. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
@@ -200,8 +210,8 @@ removes its controller, Escape stops waiting and then closes the drawer. It is t
 learn **LOCK**, which has no control on the panel.
 
 **What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches, the left
-hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, SPREAD,
-SCATTER, DOUBLE and LOCK. Not
+hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD),
+SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Not
 the PITCH and MODULATION wheels (MIDI pitch bend and the modulation wheel, CC 1, move them
 already), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
 
@@ -377,6 +387,11 @@ The service documents and datasheets the model was derived from are not included
   the host's thread, rather than the block being late. An export or a freeze waits for
   every voice.
 - Ten voices at full level with SPREAD can peak above 0 dBFS; lower MAIN OUTPUT's VOLUME.
+- AUTO GAIN brings a measured sound back within about half a decibel up to 12 dB of DRIVE, and
+  within about a decibel above it, though some sounds are left up to 3 or 4 dB off, as the
+  notes played change how hard DRIVE bites; with the presets' average standing in, until the
+  sound is changed in the window, about 2 dB. Moving DRIVE quickly can thump on uneven
+  waveforms (the narrow rectangles), as the filter's input rectifies them.
 - The rear panel's control voltage and trigger inputs are left out.
 - The PHONES jack and the jacks in the controller's column are drawn but do nothing (the
   phones' VOLUME knob is FEEDBACK).

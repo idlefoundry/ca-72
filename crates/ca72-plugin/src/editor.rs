@@ -443,6 +443,9 @@ struct Editing {
     /// the window to, asked of the host at the next frame (once a frame, however often the
     /// pointer moves).
     resizing: Option<(f64, u32)>,
+    /// A press, release, wheel or key here since AUTO GAIN's curve was last asked for (as the
+    /// editor opens too): asked again once nothing is held ([`Editing::measure_when_done`]).
+    touched: bool,
     gripped: Option<u32>,
     /// The usable screen (logical pixels) at the window's scale: the drawer opens below the
     /// strip only if the window then fits on it.
@@ -603,6 +606,18 @@ impl Editing {
             resizing: None,
             gripped: None,
             screen,
+            touched: true,
+        }
+    }
+
+    /// A change made here done (nothing held, no wheel's gesture open): AUTO GAIN's curve asked
+    /// for the sound as it now is, measured unless it is already its (decisions.md R-STEREO,
+    /// the CA-74's R29). Only the editor asks: the host's automation and learned controllers
+    /// never do, so that a render does not depend on when a measurement finished.
+    fn measure_when_done(&mut self) {
+        if self.touched && !self.dragging() && self.scroll.is_none() {
+            self.touched = false;
+            self.params.drive_curve.ask(&self.params.controls());
         }
     }
 
@@ -1481,6 +1496,7 @@ impl WindowHandler for PanelWindow {
             self.present();
             self.shown = Some(now);
         }
+        self.editing.measure_when_done();
     }
 
     fn on_event(&mut self, window: &mut Window<'_>, event: Event) -> EventStatus {
@@ -1507,6 +1523,12 @@ impl WindowHandler for PanelWindow {
             }
             Event::Mouse(e) => {
                 let released = matches!(e, MouseEvent::ButtonReleased { .. });
+                self.editing.touched |= matches!(
+                    e,
+                    MouseEvent::ButtonPressed { .. }
+                        | MouseEvent::ButtonReleased { .. }
+                        | MouseEvent::WheelScrolled { .. }
+                );
                 let status = if self.editing.mouse(e) {
                     EventStatus::Captured
                 } else {
@@ -1524,6 +1546,7 @@ impl WindowHandler for PanelWindow {
             }
             // The drawer, while open, takes the keys (the host keeps its shortcuts).
             Event::Keyboard(k) => {
+                self.editing.touched = true;
                 let taken = self.editing.keyed(&k);
                 self.follow(window);
                 self.keyboard(window);

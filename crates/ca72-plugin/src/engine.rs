@@ -22,6 +22,7 @@ use ca72::resample::{Decimator, Interpolator};
 use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
 use crate::character::{Character, Placement, pan_gains};
+use crate::drive::{Calibration, Curve, HEARD, HELD, KEYS, KWeighted};
 use crate::pool::{Ask, Crew, MAX, Pool, Shared};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -113,6 +114,9 @@ pub struct Controls {
     /// LEVEL (dB, [`LEVEL_RANGE`]): the output's gain after MAIN OUTPUT's, the plug-in's own;
     /// 0, none (decisions.md R-STEREO).
     pub level: f64,
+    /// AUTO GAIN: the output brought back down by as much as DRIVE made the sound louder, as
+    /// measured for it (`drive.rs`; decisions.md R-STEREO).
+    pub auto_gain: bool,
     /// FEEDBACK (0..1): the voices' output patched back into their EXTERNAL INPUT, a sample
     /// late, by this much of its level (the phones' VOLUME knob; decisions.md R8).
     pub feedback: f64,
@@ -139,6 +143,7 @@ impl Default for Controls {
             double: 0.0,
             drive: 0.0,
             level: 0.0,
+            auto_gain: true,
             feedback: 0.0,
             lock: false,
         }
@@ -341,7 +346,7 @@ impl Slot {
 /// its own key, its gains at the last run's end (None before its first run, or while it does
 /// not play), and whether it still sounds: with DOUBLE turned off it plays its tail out, its
 /// key lifted, until silent for [`QUIET`] samples (how many so far).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Twin {
     voice: Voice,
     character: Character,
@@ -385,7 +390,7 @@ fn made_twin(rate: f64, seed: u64, k: usize) -> Box<Twin> {
 
 /// A voice as it plays: the voice, its character and its key, and a run's gate, note and
 /// drop in, its samples out; with DOUBLE, its twin too.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Playing {
     voice: Voice,
     character: Character,
@@ -641,6 +646,16 @@ pub struct Engine {
     lamp: f32,
     /// A voice's place's glide a sample at the voices' rate ([`glide_share`]).
     glide: f64,
+    /// AUTO GAIN (decisions.md R-STEREO): the sound's curve (`drive.rs`), the correction the
+    /// controls ask for from it (1: none), the correction gliding to it a sample at a time,
+    /// and the glide's share a sample at the host's rate. Only it glides: the output's other
+    /// gains step as they did.
+    curve: Curve,
+    auto: f64,
+    auto_now: f64,
+    auto_share: f64,
+    /// Where AUTO GAIN's measurements are asked for and kept, told the voices' rate.
+    calibration: Option<Arc<Calibration>>,
     /// The output's gain under POWER (0 off, 1 on), and its step a sample while it fades.
     fade: f64,
     fade_step: f64,
@@ -703,6 +718,11 @@ impl Engine {
             modulation: 0.0,
             lamp: 0.0,
             glide: 1.0,
+            curve: Curve::AVERAGE,
+            auto: 1.0,
+            auto_now: 1.0,
+            auto_share: 1.0,
+            calibration: None,
             fade: 1.0,
             fade_step: 1.0,
             hush: false,
@@ -755,6 +775,7 @@ impl Engine {
                 self.apply();
                 self.press_held();
             }
+            self.auto_now = self.auto;
             self.spares.make(voice_rate);
             return;
         }
@@ -774,6 +795,10 @@ impl Engine {
         });
         let voice_rate = rate * factor as f64;
         self.glide = glide_share(voice_rate);
+        (self.auto_now, self.auto_share) = (self.auto, glide_share(rate));
+        if let Some(c) = &self.calibration {
+            c.set_rate(voice_rate);
+        }
         self.slots = (0..POLY_VOICES.2)
             .map(|k| Slot {
                 play: Arc::new(Mutex::new(Playing {
@@ -942,6 +967,7 @@ impl Engine {
                 * unison_trim(c)
                 * double_trim(c)
                 * level_gain(c.level);
+            self.auto = auto_trim(c, &self.curve);
             self.apply();
         }
     }
@@ -1374,10 +1400,12 @@ impl Engine {
         if self.hush && self.fade == 0.0 {
             self.hush_waited += 1;
         }
-        // (As the one voice was: the gain, then the fade.)
+        // (As the one voice was: the gain, then the fade; AUTO GAIN's correction, gliding,
+        // between them, 1 without DRIVE.)
+        self.auto_now += (self.auto - self.auto_now) * self.auto_share;
         let (l, r) = (
-            (l * self.gain * self.fade) as f32,
-            (r * self.gain * self.fade) as f32,
+            (l * self.gain * self.auto_now * self.fade) as f32,
+            (r * self.gain * self.auto_now * self.fade) as f32,
         );
         if l.is_finite() && r.is_finite() {
             return (l, r);
@@ -1403,43 +1431,27 @@ impl Engine {
 
     /// How ENTROPY, SPREAD, DOUBLE and DRIVE stand for the voices' samples.
     fn mix(&self) -> Mix {
-        let entropy = self.controls.entropy * ENTROPY_DEPTH;
-        // The oscillators': their own floor and ENTROPY's, unless LOCK; the cutoff's, ENTROPY's.
-        let oscillators = if self.controls.lock {
-            0.0
-        } else {
-            ENTROPY_FLOOR + entropy
-        };
-        Mix {
-            entropy,
-            oscillators,
-            at: oscillators.max(entropy),
-            // (One voice alone sits in the centre: the places are POLY's and UNISON's voices'
-            // among themselves, and DOUBLE's pair's.)
-            spread: if self.many() || self.controls.double > 0.0 {
-                self.controls.spread
-            } else {
-                0.0
-            },
-            // (One voice alone has no place among others: its DOUBLE pair as far out as
-            // SPREAD, which EDGES gives.)
-            placement: if self.many() {
-                self.controls.placement
-            } else {
-                Placement::Edges
-            },
-            voices: self.voices(),
-            double: if self.controls.double > 0.0 {
-                self.controls.double.min(1.0) * DOUBLE_CENTS
-            } else {
-                0.0
-            },
-            drive: if self.controls.drive > 0.0 {
-                10f64.powf(self.controls.drive.min(DRIVE_TOP) / 20.0)
-            } else {
-                1.0
-            },
+        mix_of(&self.controls, self.voices())
+    }
+
+    /// AUTO GAIN's curve for the sound (`drive.rs`), the correction following it.
+    pub fn set_curve(&mut self, curve: Curve) {
+        self.curve = curve;
+        self.auto = auto_trim(&self.controls, &curve);
+    }
+
+    /// AUTO GAIN's curve the engine plays with.
+    pub fn curve(&self) -> Curve {
+        self.curve
+    }
+
+    /// Where AUTO GAIN's measurements are asked for and kept (`drive.rs`), told the voices'
+    /// rate now and whenever the engine is prepared. Not on the audio thread.
+    pub fn calibrate_with(&mut self, c: Arc<Calibration>) {
+        if self.rate > 0.0 {
+            c.set_rate(self.voice_rate());
         }
+        self.calibration = Some(c);
     }
 
     /// One sample of the voices at their rate (`rate` Hz): left and right.
@@ -1887,6 +1899,146 @@ pub fn level_gain(db: f64) -> f64 {
         0.0
     };
     10f64.powf(db / 20.0)
+}
+
+/// How ENTROPY, SPREAD, DOUBLE and DRIVE stand for the voices' samples under controls `c`,
+/// `voices` (VOICES) of them placed.
+fn mix_of(c: &Controls, voices: usize) -> Mix {
+    let many = c.poly || c.unison;
+    let entropy = c.entropy * ENTROPY_DEPTH;
+    // The oscillators': their own floor and ENTROPY's, unless LOCK; the cutoff's, ENTROPY's.
+    let oscillators = if c.lock { 0.0 } else { ENTROPY_FLOOR + entropy };
+    Mix {
+        entropy,
+        oscillators,
+        at: oscillators.max(entropy),
+        // (One voice alone sits in the centre: the places are POLY's and UNISON's voices'
+        // among themselves, and DOUBLE's pair's.)
+        spread: if many || c.double > 0.0 {
+            c.spread
+        } else {
+            0.0
+        },
+        // (One voice alone has no place among others: its DOUBLE pair as far out as
+        // SPREAD, which EDGES gives.)
+        placement: if many { c.placement } else { Placement::Edges },
+        voices,
+        double: if c.double > 0.0 {
+            c.double.min(1.0) * DOUBLE_CENTS
+        } else {
+            0.0
+        },
+        drive: if c.drive > 0.0 {
+            10f64.powf(c.drive.min(DRIVE_TOP) / 20.0)
+        } else {
+            1.0
+        },
+    }
+}
+
+/// AUTO GAIN's correction under controls `c` from the sound's `curve` (decisions.md
+/// R-STEREO): 1 without DRIVE or with AUTO GAIN off.
+fn auto_trim(c: &Controls, curve: &Curve) -> f64 {
+    if c.auto_gain && c.drive > 0.0 {
+        10f64.powf(curve.at(c.drive) / 20.0)
+    } else {
+        1.0
+    }
+}
+
+/// The seed of AUTO GAIN's measuring voices: their own, not the instance's, so that a sound
+/// measures the same in any instance (the CA-74's R29).
+const PROBE_SEED: u64 = 0x0CA7_2D21_7E00_0001;
+
+/// The voices a sound's panel plays (ENTROPY's tolerances on each, FEEDBACK), one for each of
+/// the notes AUTO GAIN's measurement plays ([`KEYS`]), for measuring DRIVE's loudness off the
+/// audio thread (decisions.md R-STEREO; `drive.rs`): made as an engine's first voices are, each
+/// its own (its parts, its oscillators' start, its noise), POLY's, one a note, in the centre,
+/// without the output's gain (MAIN OUTPUT's, LEVEL's, the trims', AUTO GAIN's).
+#[derive(Debug)]
+pub struct Probe {
+    voices: Vec<Playing>,
+    controls: Controls,
+    rate: f64,
+}
+
+impl Probe {
+    /// For the sound of controls `c` with the voices at `rate` Hz.
+    pub fn new(c: &Controls, rate: f64) -> Probe {
+        let mut controls = *c;
+        (
+            controls.poly,
+            controls.unison,
+            controls.double,
+            controls.spread,
+        ) = (true, false, 0.0, 0.0);
+        let entropy = controls.entropy * ENTROPY_DEPTH;
+        let mut panel = c.panel;
+        panel.quality = Quality::Potato;
+        let voices = (0..KEYS.len())
+            .map(|k| {
+                let character = Character::new(voice_seed(PROBE_SEED, k), k, 3, ENTROPY_KNOBS);
+                let mut voice = made_voice(rate, PROBE_SEED, k);
+                voice.feedback = controls.feedback.clamp(0.0, 1.0);
+                voice.panel = if entropy > 0.0 {
+                    entropy_panel(&character, panel, entropy)
+                } else {
+                    panel
+                };
+                Playing {
+                    voice,
+                    character,
+                    key: PolyKey::new(rate),
+                    gate: false,
+                    note: 0,
+                    drop: false,
+                    out: [[0.0; CHUNK]; 2],
+                    peak: 0.0,
+                    pan: None,
+                    panel_gen: 0,
+                    broken: false,
+                    twin: made_twin(rate, PROBE_SEED, k),
+                    double: false,
+                }
+            })
+            .collect();
+        Probe {
+            voices,
+            controls,
+            rate,
+        }
+    }
+
+    /// The K-weighted energy of [`KEYS`] played together, held [`HELD`] s and heard for
+    /// [`HEARD`] s, at DRIVE `db` (dB): each time from the voices as they were made.
+    pub fn energy(&self, db: f64) -> f64 {
+        let mut c = self.controls;
+        c.drive = db;
+        let m = mix_of(&c, KEYS.len());
+        let mut voices = self.voices.clone();
+        for (v, key) in voices.iter_mut().zip(KEYS) {
+            v.note = key;
+        }
+        let mut k = KWeighted::new(self.rate);
+        let held = (HELD * self.rate) as usize;
+        let heard = (HEARD * self.rate) as usize;
+        let ext = [0.0; CHUNK];
+        let share = glide_share(self.rate);
+        let mut at = 0;
+        while at < heard {
+            let until = if at < held { held } else { heard };
+            let n = CHUNK.min(until - at);
+            for v in &mut voices {
+                v.gate = at < held;
+                v.play_from(&ext[..n], self.rate, &m, share);
+            }
+            for i in 0..n {
+                k.push(voices.iter().map(|v| v.out[0][i]).sum());
+            }
+            at += n;
+        }
+        k.energy
+    }
 }
 
 /// DOUBLE's trim on the output: a note's two voices, each its own, add in power, so it is
@@ -2811,8 +2963,14 @@ mod tests {
     fn drive_drives_the_filter_harder() {
         let c = sustained();
         let (lo0, hi0, _) = bands(&c, 1_000.0, 0.5);
+        // (AUTO GAIN off: DRIVE alone.)
         let louder = |drive: f64| {
-            let (lo, hi, _) = bands(&Controls { drive, ..c }, 1_000.0, 0.5);
+            let c = Controls {
+                drive,
+                auto_gain: false,
+                ..c
+            };
+            let (lo, hi, _) = bands(&c, 1_000.0, 0.5);
             10.0 * ((lo + hi) / (lo0 + hi0)).log10()
         };
         let (a, b, d) = (louder(6.0), louder(12.0), louder(24.0));
@@ -2837,5 +2995,73 @@ mod tests {
         );
         let db = 10.0 * (b / a).log10();
         assert!((db + 6.0).abs() < 1e-3, "LEVEL -6 dB: {db:+.4} dB");
+    }
+
+    /// AUTO GAIN's correction glides on the output: switched off at DRIVE 12 dB, it takes the
+    /// output up by the curve's correction there, a sample at a time, without a step (the
+    /// ratio of the outputs every sample from 1 to the correction, by at most a hundredth a
+    /// sample). Without DRIVE it asks for none: AUTO GAIN on or off, the same to the bit
+    /// (decisions.md R-STEREO, the CA-74's R29).
+    #[test]
+    fn autos_correction_glides_and_without_drive_there_is_none() {
+        let run = |c: Controls, then: Controls| -> Vec<f32> {
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            e.event(Event::Note { key: 45, on: true });
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut y = Vec::new();
+            for k in 0..60 {
+                if k == 40 {
+                    e.set(&then);
+                }
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                y.extend_from_slice(&l);
+            }
+            y
+        };
+        let c = Controls {
+            drive: 12.0,
+            ..sustained()
+        };
+        let off = Controls {
+            auto_gain: false,
+            ..c
+        };
+        let (on, switched) = (run(c, c), run(c, off));
+        let at = 40 * 256;
+        assert_eq!(on[..at], switched[..at]);
+        let want = 10f64.powf(-Curve::AVERAGE.at(12.0) / 20.0);
+        // (Each sample's ratio where the output is not near nought, and its index.)
+        let ratios: Vec<(usize, f64)> = on[at..]
+            .iter()
+            .zip(&switched[at..])
+            .enumerate()
+            .filter(|(_, (a, _))| a.abs() > 1e-3)
+            .map(|(i, (a, b))| (i, f64::from(*b) / f64::from(*a)))
+            .collect();
+        assert!(ratios[0].1 < 1.01, "a step: {}", ratios[0].1);
+        assert!(
+            ratios
+                .windows(2)
+                .filter(|w| w[1].0 == w[0].0 + 1)
+                .all(|w| (w[1].1 - w[0].1).abs() < 0.01),
+            "a step within the glide"
+        );
+        let last = ratios[ratios.len() - 1].1;
+        assert!((last - want).abs() < 1e-3 * want, "{last} against {want}");
+        let plain = sustained();
+        let (a, b) = (
+            run(plain, plain),
+            run(
+                plain,
+                Controls {
+                    auto_gain: false,
+                    ..plain
+                },
+            ),
+        );
+        assert_eq!(a, b);
     }
 }

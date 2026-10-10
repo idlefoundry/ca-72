@@ -2993,3 +2993,60 @@ the CA-74's `double_reads_in_cents_and_spread_is_width`, and `filter_jacobian_ma
 at DRIVE's 24 dB too. `preset_render` against UNISON's commit: every preset the same to the
 bit; `preset_levels` the same. The learn list's (52). The plug-in's unit tests (139 passed,
 7 ignored), the plug-in's and the model's integration tests; rustfmt; clippy.
+
+**Agent decisions, 2026-10-09** (the fifth step: AUTO GAIN; not separately approved):
+- **AUTO GAIN** (the host's Auto Gain, `auto_gain`, on by default, the last parameter: a
+  session saved before reads it on; saved in presets; learnable as a switch, 53 learnable
+  controls, 19 switches) is the CA-74's R29 (`drive.rs`, ported): the output turned down by as
+  much as DRIVE made the sound louder, from a curve measured for the sound. The plug-in plays
+  three notes together (C2, G3 and C5, held 0.3 s, heard for 0.45 s) on three voices made as
+  an engine's first three are (a seed of their own), without DRIVE and at 6, 12, 18 and 24 dB,
+  and compares their K-weighted energy: four corrections, drawn straight between. The curve is
+  saved with the session (`drive_curve`); a session saved before, or one not understood,
+  opens with the factory presets' average (`Curve::AVERAGE`, their mean: -4.74, -8.43, -10.95
+  and -12.42 dB). It is measured only when the sound is changed in the plug-in's own window
+  (after a press, release, wheel or key there, once nothing is held, and as the window opens),
+  never on the host's automation or a learned controller, so that a render never depends on
+  when a measurement finished. The audio thread reads the curve without a lock, once a block.
+- **Where the CA-72's differs:** the sound's key is its panel, LOCK, ENTROPY and FEEDBACK (the
+  voice's output into its own external input changes how DRIVE loads it); not POLY, UNISON,
+  VOICES, DOUBLE or SPREAD, as on the CA-74. The measurement runs on the plug-in's own helper
+  (R23), a render at a time, the audio thread's asks (mending the spares, the workers) seen to
+  between renders, so one of those may wait a render (about a tenth of a second); dropping the
+  plug-in waits out a render under way. Only AUTO GAIN's correction glides (10 ms, at the
+  host's rate): MAIN OUTPUT's and the other gains step as before, so that every preset plays as
+  before to the bit.
+- **The CA-72's DRIVE needs measuring per sound more than the CA-74's did:** the presets'
+  curves at 24 dB run from 0 (Cruising Whistle: its whistle is the filter's own, with no mixer
+  signal for DRIVE to raise) to -21.5 dB (Breath Flute), and Undertow Growl's turns back
+  (-5.2, -5.3, -4.9 and -3.9 dB).
+
+**Accuracy (`tests/drive_auto.rs`, by hand; the 24 presets, DRIVE every 3 dB from 3 to 24,
+AUTO GAIN on, dB left over against DRIVE off):**
+- With each preset's own curve, on its levelling phrase (momentary maximum): 0.50 dB RMS from
+  3 to 12 dB (5 of 96 over 1 dB, the worst 2.7), 1.05 from 15 to 24 (18 of 96; the worst 3.5,
+  Pink Riser, left quieter); on four held chords (integrated): 0.44 and 0.94 dB RMS (the worst
+  4.4, Undertow Growl, quieter). The CA-74's own were 0.17 and 1.34 dB RMS on its phrases.
+- With the average's curve standing in: 2.05 and 2.07 dB RMS from 3 to 12 dB, 3.44 and 3.72 over
+  all of DRIVE (the worst 12.4, Cruising Whistle, taken down for nothing); with the CA-74's
+  average before the CA-72's was measured, 5.3 dB RMS.
+
+**Cost (the Linux reference machine, a Ryzen 7 7800X3D shared with other work):** a
+measurement on one thread, a median 668 to 904 ms over two runs, the longest 1.7 s (Bass), on
+the helper thread, which is not a real-time one (the CA-74's, 355 ms). Beside the voices
+(`a_measurement_beside_the_voices`: Brass Tutti, ten POLY voices at DRIVE 12 dB, three
+workers, 256-frame blocks paced in real time, none of the threads promoted), with the machine's
+load average at 12 to 14: alone a median 50 % of the period and its 99.9th percentile 142 %;
+with measurements made one after another beside them, 43 % and 168 % (twelve measurements);
+the worst 210 % both ways. The machine's noise decides more than the measurements; to be
+measured again on a quiet machine.
+
+**Evidence (the Linux reference machine, 2026-10-09):** the CA-74's tests ported: the curve
+drawn straight between its steps; a reader seeing each write once and never half of one; a
+sound asked for once (and FEEDBACK's in its key); a measurement for a sound no longer wanted
+let go; `autos_correction_glides_and_without_drive_there_is_none` (with the correction stepped,
+2.6 times at once, it fails); `the_helper_measures_a_sound_asked_for` (and lets the curve go
+when dropped); `a_session_holds_its_curve_and_an_old_one_the_average`;
+`auto_brings_a_preset_back_and_off_it_is_louder` (Lead at 16 kHz). `preset_render` against
+UNISON's commit: every preset the same to the bit. The plug-in's unit tests (146 passed,
+7 ignored), the plug-in's and the model's integration tests; rustfmt; clippy.

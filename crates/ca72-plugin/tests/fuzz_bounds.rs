@@ -92,6 +92,7 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         double: r.either(0.0, 1.0),
         drive: r.either(0.0, 24.0),
         level: r.either(-30.0, 12.0),
+        auto_gain: r.end(),
         feedback: r.either(0.0, 1.0),
         lock: r.end(),
     }

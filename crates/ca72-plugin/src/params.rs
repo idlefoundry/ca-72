@@ -12,6 +12,7 @@ use ca72::voice::{ContourKnobs, OscPanel, Panel, Quality, Waveform};
 use nih_plug::prelude::*;
 
 use crate::character::Placement;
+use crate::drive::Calibration;
 use crate::engine::{Controls, DOUBLE_CENTS, DRIVE_TOP, LEVEL_RANGE, POLY_VOICES};
 use crate::learn::MidiMap;
 
@@ -171,6 +172,12 @@ pub struct Ca72Params {
     #[persist = "midi_map"]
     pub midi_map: Arc<MidiMap>,
 
+    /// AUTO GAIN's curve for the sound (decisions.md R-STEREO; `drive.rs`): measured when the
+    /// sound is changed in the editor, kept with the session so that it plays and renders the
+    /// same again.
+    #[persist = "drive_curve"]
+    pub drive_curve: Arc<Calibration>,
+
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
     pub bypass: BoolParam,
@@ -329,6 +336,11 @@ pub struct Ca72Params {
     /// R-STEREO). After DRIVE: a session saved before reads 0 dB.
     #[id = "level"]
     pub level: FloatParam,
+    /// AUTO GAIN (on by default): the output brought back down by as much as DRIVE made the
+    /// sound louder, as measured for it (decisions.md R-STEREO). After LEVEL: a session saved
+    /// before reads it on.
+    #[id = "auto_gain"]
+    pub auto_gain: BoolParam,
 }
 
 /// Cents as the strip's DETUNE reads them: a number, whole or to a tenth ("12", "7.2"), as an
@@ -383,6 +395,7 @@ impl Default for Ca72Params {
             editor_width: Arc::new(AtomicU32::new(0)),
             preset: Arc::new(RwLock::new(String::new())),
             midi_map: Arc::new(MidiMap::default()),
+            drive_curve: Arc::new(Calibration::default()),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
             glide: ten("Glide", 0.0),
@@ -491,6 +504,7 @@ impl Default for Ca72Params {
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            auto_gain: BoolParam::new("Auto Gain", true),
         }
     }
 }
@@ -595,6 +609,7 @@ impl Ca72Params {
             double: value(&self.double) / 100.0,
             drive: value(&self.drive),
             level: value(&self.level),
+            auto_gain: self.auto_gain.value(),
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),
