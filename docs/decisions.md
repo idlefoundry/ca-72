@@ -3445,7 +3445,9 @@ toggle."
   so that a stalled frame does not jump it), and opens with it where QUALITY is, still. The
   lens does not turn (its highlight stays where the room's light is): the lamp's pictures are
   split into a lens and a bezel, the bezel turned over it. The lamp's light on the panel round
-  it is a faint amber ring (0.16 at most). In the drawn skin: nothing while it is shut (the
+  it is a very faint amber ring just past the steel one (0.06 at most, out to 1.3 of the lamp's
+  radius; the owner, after the first build: "No need for that much yellow glow around the lamp.
+  Keep it very subtle"). In the drawn skin: nothing while it is shut (the
   approved mock-up has no lamp), the shutter and a plain lamp as it opens.
 - **The note:** once ULTRA's lamp is lit, until it is read (a press anywhere closes it), and
   then never again on that computer: "ULTRA · NO COMPROMISES / THE CIRCUIT'S MODEL EXACTLY, AT

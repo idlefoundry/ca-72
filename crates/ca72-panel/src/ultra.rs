@@ -242,16 +242,17 @@ fn ring(s: &mut Svg) {
     );
 }
 
-/// The lamp's light on the panel round it.
+/// The lamp's light on the panel round it: very faint, just past the ring (the owner: "No need
+/// for that much yellow glow around the lamp. Keep it very subtle").
 fn halo(s: &mut Svg, glow: f64) {
-    let r = 1.55 * LAMP_R;
+    let r = 1.3 * LAMP_R;
     put!(
         s,
         "<defs><radialGradient id='u-halo' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='{}'><stop offset='{}' stop-color='#ff9628' stop-opacity='0'/><stop offset='{}' stop-color='#ff9628' stop-opacity='{}'/><stop offset='1' stop-color='#ff9628' stop-opacity='0'/></radialGradient></defs><circle r='{}' fill='url(#u-halo)'/>",
         N(r),
         N((APERTURE + RING - 1.0) / r),
         N((APERTURE + RING + 1.0) / r),
-        N(0.16 * glow),
+        N(0.06 * glow),
         N(r)
     );
 }
