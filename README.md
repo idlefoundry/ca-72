@@ -200,10 +200,11 @@ will not resize the window, it slides up over the panel instead):
 
 The library is a folder of files, `Idle Foundry/CA-72/Presets` in your user data folder
 (`~/Library/Application Support` on macOS, `%APPDATA%` on Windows, `~/.local/share` on
-Linux). The twenty-four factory
+Linux). The twenty-five factory
 presets are built in, among them a drum kit and a riser made on the panel alone (Ladder
-Kick, Noise Snare, Closed Hat, Open Hat, Noise Crash, Pink Riser: one instance a drum) and
-Warped Pad, eight POLY voices drifting with ENTROPY.
+Kick, Noise Snare, Closed Hat, Open Hat, Noise Crash, Pink Riser: one instance a drum),
+Warped Pad, eight POLY voices drifting with ENTROPY, and White Lotus, a held bass whose
+filter rings an octave and a fifth above each note.
 
 ## MIDI Learn
 

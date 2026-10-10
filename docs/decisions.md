@@ -3667,3 +3667,47 @@ being placed on them as well? Show me a before/after video once you are done."
   the pair's to 4 a second and stays there (two notes a semitone apart beat 13 times a second at
   220 Hz, which the drops would only flicker at).
 
+
+## R43. White Lotus, a held bass fitted to a recording, as a factory preset
+**Owner decision, 2026-10-09:** after hearing a preset fitted to the synthesizer bass of a
+studio recording, the owner asked for it to join the factory presets as White Lotus, and
+chose it without feedback.
+
+**Agent decisions, 2026-10-09** (not separately approved):
+- **White Lotus, the 25th preset:** one narrow rectangle at 8' (mixer 10, the other
+  oscillators off), CUTOFF -2.14 and EMPHASIS 7 with both KEYBOARD CONTROL switches on, so
+  the filter rings on each note's third harmonic (on D2 the A3 stands 5.9 dB over the
+  fundamental; on the recording's first note, 5.5 dB); oscillator 3 at LO (FREQUENCY 7.45,
+  11.3 Hz; OSC. 3 CONTROL off, out of the mixer) into FILTER MODULATION at MOD wheel 0.17;
+  LOUDNESS ATTACK 0.5, DECAY 3.5 and SUSTAIN 8.5 with DECAY on; no glide.
+- **Fitted by measurement** to the recording's first 52 s, where the part is long held notes
+  (D2, C2, G2 and B2, each after an F2 on the fourth beat) under little else. The bass was
+  separated with a source-separation model, but each note's harmonics were read from the
+  full mix in windows locked to them, since the separation put some of the synthesizer's
+  upper harmonics in the other stem. The fit weighs H1 to H8, each note's relative to its
+  strongest, toward the first five and toward D2 (the first note and the commonest): an
+  average over many harmonics had hidden the ringing third the owner heard missing. The
+  wobble is fitted to its sidebands (+-11.3 Hz: -21 dB around H2 and H3, -15.5 around H4,
+  -29 around H1, none at half that rate), the note shapes to the stem's level around each
+  start and end (a 1 dB lift settling over half a second, no dip between notes), and glide
+  to the pitch track (without glide within half a semitone 99 % of the time; worse with
+  any). One oscillator: the recording's harmonics show no beating, and a pair exactly in
+  tune fitted only at one locked phase (the score went from 1.7 to 3.6 dB with 2 cents of
+  drift).
+- **On this version's engine, after R42's laws:** the panel fitted first on 0.1.3 (CUTOFF
+  -1.6, OSC. 3 FREQUENCY 7.5, MOD wheel 0.025, SUSTAIN 9) rings on the fourth harmonic here.
+  Fitted again: CUTOFF -2.14; OSC. 3 FREQUENCY 7.45 (LO now reaches 11.36 Hz); MOD wheel
+  0.17, the sidebands the owner heard on 0.1.3's render (-15 dB around H3, -14 around H4);
+  SUSTAIN 8.5 (9 now lifts the start 0.4 dB).
+- **What differs from the recording:** H2 4 to 6 dB strong on D2 and G2 (the narrow
+  rectangle's own); with full tracking every note rings on its third harmonic, where the
+  recording's C2 and B2 ring less; the wobble deeper around H3 and H4 and shallower around
+  H1 and H2. FEEDBACK through EXTERNAL INPUT made the fit worse at every amount tried (EXT 3
+  to 5, FEEDBACK 2 to 3).
+- **Levelled as the others:** MAIN OUTPUT VOLUME 9.78, -18.03 LUFS momentary maximum on
+  `preset_levels.rs`'s bass phrase.
+- The README counts twenty-five and names it. The DAW's copy of the file is not changed here.
+
+**Evidence (omarchy, 2026-10-09):** the plug-in crate's tests in debug, 153 passed, 0 failed
+(the factory file's count now 25; its text still names no trademark); `preset_levels.rs` by
+hand for White Lotus, -18.03 LUFS momentary maximum at VOLUME 9.78.
