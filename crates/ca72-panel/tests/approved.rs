@@ -5,9 +5,11 @@
 //! left hand's controls in a column left of the panel, 330 units wide; they are on the strip
 //! below now (A6, R-LOOK), so the panel is compared with the mock-up right of its column. The
 //! name board under the face is gone (the plate moved up into the top strip, R-LOOK): the top
-//! strip and the face are compared, the plate's place there left out.
+//! strip and the face are compared, the plate's place there left out. The last column's head,
+//! above POWER's lamp, is left out: QUALITY came after the mock-up and was approved in its own
+//! (decisions.md R-POTATO).
 
-use ca72_panel::art::{PANEL_H, PH, PLATE_H, PLATE_X, PLATE_Y, TOP, W};
+use ca72_panel::art::{COL, PANEL_H, PH, PLATE_H, PLATE_X, PLATE_Y, TOP, W};
 use ca72_panel::{CONTROLS, Renderer, Scene};
 use resvg::tiny_skia::Pixmap;
 
@@ -20,6 +22,13 @@ fn outside_the_plate(x: u32, y: u32) -> bool {
     let (x, y) = (f64::from(x), f64::from(y));
     !(PLATE_X - 30.0..PLATE_X + 300.0).contains(&x)
         || !(PLATE_Y - 12.0..PLATE_Y + PLATE_H + 16.0).contains(&y)
+}
+
+/// QUALITY's place: the last column (between its divider and the trim), from the panel's top
+/// to above POWER's lamp.
+fn outside_quality(x: u32, y: u32) -> bool {
+    let (x, y) = (f64::from(x), f64::from(y));
+    !(COL + 2956.0..COL + 3080.0).contains(&x) || !(TOP..TOP + 395.0).contains(&y)
 }
 
 #[test]
@@ -41,7 +50,7 @@ fn the_panel_is_drawn_as_approved() {
         for x in 0..drawn.width() {
             let a = drawn.pixel(x, y).expect("in the frame");
             let b = approved.pixel(x + COLUMN, y).expect("in the mock-up");
-            if !outside_the_plate(x, y) {
+            if !outside_the_plate(x, y) || !outside_quality(x, y) {
                 continue;
             }
             let d = [

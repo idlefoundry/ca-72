@@ -2949,7 +2949,8 @@ list that drops down over the strip inside the window."
   allows as many strongly different pixels (32 levels or more) as a hundredth of the approved
   panel's area with its board: over the smaller area the 99th percentile, which the board's
   closely matching wood had kept under 32, is 36 on the same face (the commit before, measured
-  over the same rows: 1.457 and 36).
+  over the same rows: 1.457 and 36). On `potato` the last column's head (QUALITY, approved
+  apart, R-POTATO) is left out too: 1.445 and 30745 of 32851.
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
