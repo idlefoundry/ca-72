@@ -20,6 +20,9 @@ pub enum Skin {
 
 pub(crate) static WALNUT: &[u8] = include_bytes!("../assets/worn/walnut.png");
 pub(crate) static FACE: &[u8] = include_bytes!("../assets/worn/face.png");
+/// The displays' glass and the keys' charcoal cap (the strip's and the drawer's).
+pub(crate) static GLASS: &[u8] = include_bytes!("../assets/worn/display-glass.png");
+pub(crate) static BUTTON: &[u8] = include_bytes!("../assets/worn/button.png");
 static KNOB: &[u8] = include_bytes!("../assets/worn/knob.png");
 static KNOB_BIG: &[u8] = include_bytes!("../assets/worn/knob-big.png");
 static POINTER: &[u8] = include_bytes!("../assets/worn/pointer.png");
@@ -157,18 +160,24 @@ impl std::fmt::Debug for Pictures {
 /// two lamps, the hamster and his wheel).
 const KEPT: usize = 72;
 
+/// The face's picture, its grey coloured: a black a touch warm.
+pub(crate) fn face_picture() -> Pixmap {
+    let face = Pixmap::decode_png(FACE).expect("a built-in picture decodes");
+    recoloured(&face, |c| {
+        [
+            f32::from(c[0]) * FACE_TINT[0],
+            f32::from(c[1]) * FACE_TINT[1],
+            f32::from(c[2]) * FACE_TINT[2],
+        ]
+    })
+}
+
 impl Pictures {
     /// The pictures decoded (once, as the worn skin is first shown); the face's grey coloured,
     /// the ivory rockers made from the blue ones and OVERLOAD's jewel from POWER's.
     pub fn load() -> Pictures {
         let png = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
-        let face = recoloured(&png(FACE), |c| {
-            [
-                f32::from(c[0]) * FACE_TINT[0],
-                f32::from(c[1]) * FACE_TINT[1],
-                f32::from(c[2]) * FACE_TINT[2],
-            ]
-        });
+        let face = face_picture();
         let rocker_blue = png(ROCKER_BLUE);
         // The ivory of the controller's switches: the blue's shading, the drawing's ivory.
         let rocker_ivory = recoloured(&rocker_blue, |c| {
