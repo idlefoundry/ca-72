@@ -130,7 +130,7 @@ pub struct Panel {
     /// OSCILLATOR MODULATION and FILTER MODULATION.
     pub osc_mod: bool,
     pub filter_mod: bool,
-    /// FILTER MODE, which the original does not have (decisions.md R-HP): HI, the hardware
+    /// FILTER MODE, which the original does not have (decisions.md R46): HI, the hardware
     /// reference's high-pass (the mixer's output less the filter's); LO, the filter as drawn.
     pub filter_hi: bool,
     /// The wheels: pitch -1..1 (0 in its detent), MODULATION 0..1 (fully forward).
@@ -1171,7 +1171,7 @@ impl Voice {
         v
     }
 
-    /// The plug-in's DRIVE (its decisions.md R-STEREO, the CA-74's R29): the mixer's signal
+    /// The plug-in's DRIVE (its decisions.md R45, the CA-74's R29): the mixer's signal
     /// into the filter's input pair raised by `gain`, after C27, driving the pair harder than
     /// the panel's mixer can ([`crate::vcf::Drive::gain`]); 1 is the circuit.
     pub fn set_drive(&mut self, gain: f64) {
@@ -1181,7 +1181,7 @@ impl Voice {
     /// The three oscillators started together `at` one share of the way down their ramps
     /// ([`Vco::start_at`]), as the reference starts them together at the top: for a voice made
     /// or put back to rest that is not the first, so that voices playing one note together do
-    /// not start in step with each other (decisions.md R-STEREO). Never at a note.
+    /// not start in step with each other (decisions.md R45). Never at a note.
     pub fn start_oscillators_at(&mut self, at: f64) {
         for v in &mut self.audio.front.vcos {
             v.start_at(at);

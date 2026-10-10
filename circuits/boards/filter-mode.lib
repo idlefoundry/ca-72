@@ -1,5 +1,5 @@
 * FILTER MODE: the hardware reference's switch, which the original does not have
-* (decisions.md R-HP; calibration session HP, 2026-10-09). HI is the mixer's output less
+* (decisions.md R46; calibration session HP, 2026-10-09). HI is the mixer's output less
 * the filter's: the bus's Norton current (what its switched-on channels would push into a
 * virtual ground) through a transimpedance equal to the filter's own passband at EMPHASIS
 * 0, and a coupling of 3 Hz, less the filter's output. Drawn behaviourally: the reference's

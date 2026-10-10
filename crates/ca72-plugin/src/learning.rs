@@ -78,7 +78,7 @@ pub enum Item {
     List,
     /// Says why the control cannot be learned; does nothing.
     Not,
-    /// QUALITY's (decisions.md R-ULTRA): its indicator above it (the hamster, the lamp, the
+    /// QUALITY's (decisions.md R48): its indicator above it (the hamster, the lamp, the
     /// Tesla lamp, through the shutter) shown, or hidden (the panel blank there).
     Show,
     Hide,
@@ -235,7 +235,7 @@ impl Learning {
         self.take_keys = true;
     }
 
-    /// QUALITY's menu (decisions.md R-ULTRA; a right click on its toggle, the owner: "default
+    /// QUALITY's menu (decisions.md R48; a right click on its toggle, the owner: "default
     /// mode is to show the quality indicators (tesla coil, hamster, etc.), but they can be
     /// hidden as an option. This can be selectable by right clicking the toggle switch."),
     /// opened at (`x`, `y`): why MIDI Learn does not learn it, as its title, then its indicator

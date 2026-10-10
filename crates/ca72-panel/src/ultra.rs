@@ -1,4 +1,4 @@
-//! QUALITY's opening (decisions.md R-ULTRA): a round opening in the face over QUALITY, a thin
+//! QUALITY's opening (decisions.md R48): a round opening in the face over QUALITY, a thin
 //! ring of dark steel round it, closed by a camera's iris of eight curved gunmetal blades, the
 //! face's warm black. Under it, an inch down in a shallow well, waits what each setting shows,
 //! one at a time: at LO a hamster in an old brass wheel, at HI a big lamp of the kind old valve

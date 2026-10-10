@@ -328,7 +328,7 @@ impl Vco {
 
     /// Starts again `at` (0 at the ramp's top after a reset, towards 1 at the threshold where
     /// it resets) down its ramp, as a free-running oscillator is wherever it has got to when a
-    /// note comes, rather than at the reference's initial condition (decisions.md R-STEREO, the
+    /// note comes, rather than at the reference's initial condition (decisions.md R45, the
     /// CA-74's R25). Its edges' state starts as a reset leaves it: an edge the place has already
     /// passed comes right at the next cycle.
     pub fn start_at(&mut self, at: f64) {

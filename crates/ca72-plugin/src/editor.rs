@@ -1,6 +1,6 @@
 //! The editor: the front panel (`ca72-panel`) in a window of its own (baseview), its frames
 //! shown with softbuffer, and under it the plug-in's own strip (`ca72_panel::strip`, A6:
-//! decisions.md R-LOOK): the presets' rail, the left hand's GLIDE, DECAY and wheels, MODE,
+//! decisions.md R44): the presets' rail, the left hand's GLIDE, DECAY and wheels, MODE,
 //! VOICES and ENTROPY, how the voices are played across the field, WIDTH, INNER, DETUNE and
 //! where the voices sound, DRIVE, AUTO GAIN and LEVEL. Every control operates its parameter
 //! through the host, a drag one gesture (one undo step in hosts that keep them); the POWER
@@ -491,7 +491,7 @@ struct Editing {
     screen: fn(f64) -> Option<(f64, f64)>,
     /// How far the drawer was down (`Browser::reveal`) in the last frame composed.
     reveal_shown: f64,
-    /// QUALITY's opening (decisions.md R-ULTRA; `opening.rs`), moved on by the time since it
+    /// QUALITY's opening (decisions.md R48; `opening.rs`), moved on by the time since it
     /// last was, at most [`ANIMATE_S`] apart (the strip's drops move on with it: the two are
     /// drawn in one frame); the editor opens with QUALITY's setting up. The voices' levels as last taken (0 to 1), for the strip's drops, and the output's
     /// (the one instrument's drop's, and the lamps').
@@ -758,7 +758,7 @@ impl Editing {
     }
 
     /// A change made here done (nothing held, no wheel's gesture open): AUTO GAIN's curve asked
-    /// for the sound as it now is, measured unless it is already its (decisions.md R-STEREO,
+    /// for the sound as it now is, measured unless it is already its (decisions.md R45,
     /// the CA-74's R29). Only the editor asks: the host's automation and learned controllers
     /// never do, so that a render does not depend on when a measurement finished.
     fn measure_when_done(&mut self) {
@@ -1087,7 +1087,7 @@ impl Editing {
             return;
         }
         let target = interact::hit(self.renderer.layout(), x, y);
-        // QUALITY's toggle: its indicator shown or hidden (decisions.md R-ULTRA).
+        // QUALITY's toggle: its indicator shown or hidden (decisions.md R48).
         if let Some(Target::Control(i) | Target::Legend(i, _)) = target
             && CONTROLS.get(i).is_some_and(|c| c.param == "quality")
         {
@@ -1688,8 +1688,8 @@ fn strip_scene(
     let on = |k: usize| sounding & (1 << k) != 0;
     // Where they sound: in MONO the one voice (its pair with DOUBLE, all of WIDTH's way out);
     // else each of VOICES's voices at its place by the placement, its pair as far out with
-    // DOUBLE (decisions.md R-STEREO), each in its side's band by INNER: where the engine's
-    // gains put it, the kit's (R-INNER).
+    // DOUBLE (decisions.md R45), each in its side's band by INNER: where the engine's
+    // gains put it, the kit's (R49).
     let (width, inner) = (c.spread, c.inner);
     let field = if mono {
         if doubled {
@@ -2635,7 +2635,7 @@ mod tests {
         }
     }
 
-    /// The window played for a look and a measure (decisions.md R-ULTRA): 24 seconds in real
+    /// The window played for a look and a measure (decisions.md R48): 24 seconds in real
     /// time at sixty frames a second, a Retina window (3440 pixels across): four POLY voices
     /// with DOUBLE playing chords at HI, then ULTRA, then LO, falling quiet, then HI again with
     /// DETUNE swept from none to all of it. Each frame drawn and turned into the screen's
@@ -2796,7 +2796,7 @@ mod tests {
         std::fs::write(out.join("times.txt"), report).unwrap();
     }
 
-    /// QUALITY's toggle (decisions.md R-POTATO, R-ULTRA) goes where it is clicked, a gesture of
+    /// QUALITY's toggle (decisions.md R47, R48) goes where it is clicked, a gesture of
     /// its own as a rocker's: above its nut ULTRA, below it LO, on it (HI already) nothing.
     #[test]
     fn quality_goes_where_its_toggle_is_clicked() {
@@ -2820,7 +2820,7 @@ mod tests {
         assert_eq!(host.take(), vec![]);
     }
 
-    /// A right click on QUALITY's opening (decisions.md R-ULTRA) opens its menu: its shutter or
+    /// A right click on QUALITY's opening (decisions.md R48) opens its menu: its shutter or
     /// always open, the one it is in in its title and not to be chosen; choosing the other
     /// switches it, and the menu says so the next time.
     #[test]
@@ -2856,7 +2856,7 @@ mod tests {
         assert!(e.learning.menu().is_none());
     }
 
-    /// QUALITY's opening (decisions.md R-ULTRA) follows QUALITY by the time between frames
+    /// QUALITY's opening (decisions.md R48) follows QUALITY by the time between frames
     /// (a stalled frame does not jump it): from HI, its lamp goes down over the closing time,
     /// then ULTRA's Tesla lamp comes up over the opening time; up, ULTRA's note shows until a
     /// press reads it, and not again; with the shutter off, its own times.
@@ -4546,7 +4546,7 @@ mod tests {
         e.composed.as_ref().expect("the window's frame")
     }
 
-    /// QUALITY's opening (decisions.md R-ULTRA) for looking at, written to `$CA72_ULTRA_PNG`,
+    /// QUALITY's opening (decisions.md R48) for looking at, written to `$CA72_ULTRA_PNG`,
     /// the folder: the panel's last column close up (two pixels a unit) at QUALITY's three
     /// positions, each's thing up at rest and as the synth plays, `quality-<lo|hi|ultra>-<level>
     /// .png`; each coming up, `shutter-<setting>-<p>.png`; none of it, `hidden.png`; and the

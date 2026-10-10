@@ -2739,7 +2739,52 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   -2.01, Ladder Kick -1.63, Open Hat -1.59, Ringing Saw Line -1.52, Wooden Mallet -0.82,
   Noise Snare -0.81, Shoreline Wash -0.44; Pink Riser +1.44, still under -18 LUFS.
 
-## R-LOOK. The realistic look: the panel in the Model D's materials, and the CA-74's strip
+## R43. White Lotus, a held bass fitted to a recording, as a factory preset
+**Owner decision, 2026-10-09:** after hearing a preset fitted to the synthesizer bass of a
+studio recording, the owner asked for it to join the factory presets as White Lotus, and
+chose it without feedback.
+
+**Agent decisions, 2026-10-09** (not separately approved):
+- **White Lotus, the 25th preset:** one narrow rectangle at 8' (mixer 10, the other
+  oscillators off), CUTOFF -2.14 and EMPHASIS 7 with both KEYBOARD CONTROL switches on, so
+  the filter rings on each note's third harmonic (on D2 the A3 stands 5.9 dB over the
+  fundamental; on the recording's first note, 5.5 dB); oscillator 3 at LO (FREQUENCY 7.45,
+  11.3 Hz; OSC. 3 CONTROL off, out of the mixer) into FILTER MODULATION at MOD wheel 0.17;
+  LOUDNESS ATTACK 0.5, DECAY 3.5 and SUSTAIN 8.5 with DECAY on; no glide.
+- **Fitted by measurement** to the recording's first 52 s, where the part is long held notes
+  (D2, C2, G2 and B2, each after an F2 on the fourth beat) under little else. The bass was
+  separated with a source-separation model, but each note's harmonics were read from the
+  full mix in windows locked to them, since the separation put some of the synthesizer's
+  upper harmonics in the other stem. The fit weighs H1 to H8, each note's relative to its
+  strongest, toward the first five and toward D2 (the first note and the commonest): an
+  average over many harmonics had hidden the ringing third the owner heard missing. The
+  wobble is fitted to its sidebands (+-11.3 Hz: -21 dB around H2 and H3, -15.5 around H4,
+  -29 around H1, none at half that rate), the note shapes to the stem's level around each
+  start and end (a 1 dB lift settling over half a second, no dip between notes), and glide
+  to the pitch track (without glide within half a semitone 99 % of the time; worse with
+  any). One oscillator: the recording's harmonics show no beating, and a pair exactly in
+  tune fitted only at one locked phase (the score went from 1.7 to 3.6 dB with 2 cents of
+  drift).
+- **On this version's engine, after R42's laws:** the panel fitted first on 0.1.3 (CUTOFF
+  -1.6, OSC. 3 FREQUENCY 7.5, MOD wheel 0.025, SUSTAIN 9) rings on the fourth harmonic here.
+  Fitted again: CUTOFF -2.14; OSC. 3 FREQUENCY 7.45 (LO now reaches 11.36 Hz); MOD wheel
+  0.17, the sidebands the owner heard on 0.1.3's render (-15 dB around H3, -14 around H4);
+  SUSTAIN 8.5 (9 now lifts the start 0.4 dB).
+- **What differs from the recording:** H2 4 to 6 dB strong on D2 and G2 (the narrow
+  rectangle's own); with full tracking every note rings on its third harmonic, where the
+  recording's C2 and B2 ring less; the wobble deeper around H3 and H4 and shallower around
+  H1 and H2. FEEDBACK through EXTERNAL INPUT made the fit worse at every amount tried (EXT 3
+  to 5, FEEDBACK 2 to 3).
+- **Levelled as the others:** MAIN OUTPUT VOLUME 9.78, -18.03 LUFS momentary maximum on
+  `preset_levels.rs`'s bass phrase.
+- The README counts twenty-five and names it. The DAW's copy of the file is not changed here.
+
+**Evidence (omarchy, 2026-10-09):** the plug-in crate's tests in debug, 153 passed, 0 failed
+(the factory file's count now 25; its text still names no trademark); `preset_levels.rs` by
+hand for White Lotus, -18.03 LUFS momentary maximum at VOLUME 9.78.
+
+
+## R44. The realistic look: the panel in the Model D's materials, and the CA-74's strip
 
 **The owner's request, 2026-10-09:** "Give the CA-72's editor a realistic look and feel, as
 the CA-74 (Highstead) got on 2026-10-08, but Moog-oriented: think of the Model D family the
@@ -2757,7 +2802,7 @@ list that drops down over the strip inside the window."
   CC BY 2.0, the photograph this panel was measured from) shows them, only looked at. "the
   photographs taken were of my behrigner, not a model d. and as such they shouldn't be used for
   reference unless i specifically request them to be used": none were.
-- "Also the new panel needs the low/high filter switch we just added": FILTER MODE (R-HP, on
+- "Also the new panel needs the low/high filter switch we just added": FILTER MODE (R46, on
   `cal/hp-mode`) is on the panel in the new look as in the drawn one.
 - Of three directions (A, the panel carried down; B, a programmer after Moog's of 1982; C,
   aluminium modules), with A's buttons orange or blue where they switch something on: "blue and
@@ -2950,7 +2995,7 @@ list that drops down over the strip inside the window."
   panel's area with its board: over the smaller area the 99th percentile, which the board's
   closely matching wood had kept under 32, is 36 on the same face (the commit before, measured
   over the same rows: 1.457 and 36). On `potato` the last column's head (QUALITY, approved
-  apart, R-POTATO) is left out too: 1.445 and 30745 of 32851.
+  apart, R47) is left out too: 1.445 and 30745 of 32851.
 - "I feel like the badge isn't quite in the right place though." / "is it on the same grid as
   everything else?" It was not: its left end 4 units right of the MODIFIERS|OUTPUT line (its
   place on the old board) and a touch above the strip's middle. Then: "maybe it's also partially
@@ -3032,7 +3077,7 @@ list that drops down over the strip inside the window."
   begun as the editor opens, so the drawer's first opening draws only its lit dots: 28 ms. It is
   shared by the editors open at the same scale.
 
-## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
+## R45. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
 **The owner, 2026-10-09:** "we need to add all the same stereo controls that we added to the
 CA74", then "in fact, i think all controls on that panel should probably be added here", and,
@@ -3297,7 +3342,7 @@ published commit).
 
 - **The number** of this record is a placeholder until the merge.
 
-## R-HP. FILTER MODE: the hardware reference's high-pass
+## R46. FILTER MODE: the hardware reference's high-pass
 **Owner decisions, 2026-10-09.** The CA-72 gets the hardware reference's FILTER MODE switch
 (LO or HI): "I'm just looking to offer the same functionality." Measured on the reference
 first (session HP), then built. On the panel where the reference has it: at the head of the
@@ -3360,7 +3405,7 @@ FILTER MODE at the column's foot).
   of sessions gains session HP when this branch meets `cal/behringer`'s.
 - **The number** of this record, and board4.md's B4-HP, are placeholders until the merge.
 
-## R-POTATO. QUALITY: Potato mode, the light voices, at LO
+## R47. QUALITY: Potato mode, the light voices, at LO
 
 **The owner, 2026-10-10:** "with this release I think we should officially launch potato mode.
 We'll just have a HI/LOW selector switch on the UI, I think. Perhaps we can put it above the
@@ -3383,7 +3428,7 @@ good as you can under that."); saved with the session, not with presets.
   empty: POWER's black ribbed rocker, upright, HI its upper end pressed, LO its lower (the
   worn skin draws it from POWER's picture). The host's parameter `potato`, named Quality, HI or
   LO, HI by default; not a preset's (`library::KEPT`); not learned by MIDI Learn (its menu: "set
-  for the computer, not the sound"). (Since R-ULTRA, a chrome toggle of three positions, and the
+  for the computer, not the sound"). (Since R48, a chrome toggle of three positions, and the
   parameter `quality`.)
 - **The engine at LO:** a light voice beside each circuit voice and beside DOUBLE's twin, made
   with it, played in its place with the same keys, character (its offsets read each sample, as
@@ -3491,7 +3536,7 @@ panel's (276 passed); rustfmt; clippy.
 patch, as R31 measured it; the owner's listening; the README.
 - **The number** of this record is a placeholder until the merge.
 
-## R-ULTRA. QUALITY's ULTRA: the circuit's model with no compromises, and its lamp
+## R48. QUALITY's ULTRA: the circuit's model with no compromises, and its lamp
 
 **The owner, 2026-10-10:** "I think we should also bring back our highest quality mode. Is
 that still in the code? I have a fun UI idea for it." Then: "I think we should have a no
@@ -3530,10 +3575,10 @@ right. Give it the slightest bit of angle"; "Cool. Looks good. Let's run with th
 toggle."
 
 **Agent decisions, 2026-10-10** (not separately approved):
-- **Where:** the branch `ultra`, from `potato` (QUALITY is R-POTATO's switch, given its third
+- **Where:** the branch `ultra`, from `potato` (QUALITY is R47's switch, given its third
   position).
 - **The parameter:** QUALITY becomes the host's enum parameter `quality` (LO, HI, ULTRA, in that
-  order; HI by default), in place of R-POTATO's boolean `potato`, which was never released. It
+  order; HI by default), in place of R47's boolean `potato`, which was never released. It
   stays out of presets (`library::KEPT`) and out of MIDI Learn ("set for the computer, not the
   sound").
 - **The engine at ULTRA:** the circuit's voices with the model's No Compromises setting in place
@@ -3724,7 +3769,7 @@ being placed on them as well? Show me a before/after video once you are done."
   well, its floor and the ring drawn again only as something comes or goes, and what moves and
   its light; the lightning is drawn without blend modes or a clip (a fifth cheaper). The drops
   are drawn only near each (six radii): 2.3 ms a frame for twenty moving at twice the opening
-  size, where they took 5.2 ms (`drops_timings`); with the mock-up's flat drops (R-LOOK), 0.77.
+  size, where they took 5.2 ms (`drops_timings`); with the mock-up's flat drops (R44), 0.77.
   Then, measured whole (below), the opening and the drops were put on one clock, thirty times
   a second, something coming up or going down too (two clocks out of step had presented sixty
   frames a second between them), and the window's frame turned into the screen's pixels a row
@@ -3746,52 +3791,7 @@ being placed on them as well? Show me a before/after video once you are done."
   220 Hz, which the drops would only flicker at).
 
 
-## R43. White Lotus, a held bass fitted to a recording, as a factory preset
-**Owner decision, 2026-10-09:** after hearing a preset fitted to the synthesizer bass of a
-studio recording, the owner asked for it to join the factory presets as White Lotus, and
-chose it without feedback.
-
-**Agent decisions, 2026-10-09** (not separately approved):
-- **White Lotus, the 25th preset:** one narrow rectangle at 8' (mixer 10, the other
-  oscillators off), CUTOFF -2.14 and EMPHASIS 7 with both KEYBOARD CONTROL switches on, so
-  the filter rings on each note's third harmonic (on D2 the A3 stands 5.9 dB over the
-  fundamental; on the recording's first note, 5.5 dB); oscillator 3 at LO (FREQUENCY 7.45,
-  11.3 Hz; OSC. 3 CONTROL off, out of the mixer) into FILTER MODULATION at MOD wheel 0.17;
-  LOUDNESS ATTACK 0.5, DECAY 3.5 and SUSTAIN 8.5 with DECAY on; no glide.
-- **Fitted by measurement** to the recording's first 52 s, where the part is long held notes
-  (D2, C2, G2 and B2, each after an F2 on the fourth beat) under little else. The bass was
-  separated with a source-separation model, but each note's harmonics were read from the
-  full mix in windows locked to them, since the separation put some of the synthesizer's
-  upper harmonics in the other stem. The fit weighs H1 to H8, each note's relative to its
-  strongest, toward the first five and toward D2 (the first note and the commonest): an
-  average over many harmonics had hidden the ringing third the owner heard missing. The
-  wobble is fitted to its sidebands (+-11.3 Hz: -21 dB around H2 and H3, -15.5 around H4,
-  -29 around H1, none at half that rate), the note shapes to the stem's level around each
-  start and end (a 1 dB lift settling over half a second, no dip between notes), and glide
-  to the pitch track (without glide within half a semitone 99 % of the time; worse with
-  any). One oscillator: the recording's harmonics show no beating, and a pair exactly in
-  tune fitted only at one locked phase (the score went from 1.7 to 3.6 dB with 2 cents of
-  drift).
-- **On this version's engine, after R42's laws:** the panel fitted first on 0.1.3 (CUTOFF
-  -1.6, OSC. 3 FREQUENCY 7.5, MOD wheel 0.025, SUSTAIN 9) rings on the fourth harmonic here.
-  Fitted again: CUTOFF -2.14; OSC. 3 FREQUENCY 7.45 (LO now reaches 11.36 Hz); MOD wheel
-  0.17, the sidebands the owner heard on 0.1.3's render (-15 dB around H3, -14 around H4);
-  SUSTAIN 8.5 (9 now lifts the start 0.4 dB).
-- **What differs from the recording:** H2 4 to 6 dB strong on D2 and G2 (the narrow
-  rectangle's own); with full tracking every note rings on its third harmonic, where the
-  recording's C2 and B2 ring less; the wobble deeper around H3 and H4 and shallower around
-  H1 and H2. FEEDBACK through EXTERNAL INPUT made the fit worse at every amount tried (EXT 3
-  to 5, FEEDBACK 2 to 3).
-- **Levelled as the others:** MAIN OUTPUT VOLUME 9.78, -18.03 LUFS momentary maximum on
-  `preset_levels.rs`'s bass phrase.
-- The README counts twenty-five and names it. The DAW's copy of the file is not changed here.
-
-**Evidence (omarchy, 2026-10-09):** the plug-in crate's tests in debug, 153 passed, 0 failed
-(the factory file's count now 25; its text still names no trademark); `preset_levels.rs` by
-hand for White Lotus, -18.03 LUFS momentary maximum at VOLUME 9.78.
-
-
-## R-INNER. INNER: the inner edge of each side's band, and WIDTH, INNER and DETUNE three across
+## R49. INNER: the inner edge of each side's band, and WIDTH, INNER and DETUNE three across
 
 **The owner, 2026-10-10:** "right now, we have a way to control the outer edges, which is
 width ... Imagine we're just dealing with the left-hand side of the stereo spectrum. You have
@@ -3812,7 +3812,7 @@ recommended here: "3 across wins for both".
   as SCATTER puts it at full SPREAD. A voice SCATTER puts in the centre (CENTER's first, EVEN's
   last of an odd number) takes the side its turn falls on, the left first, so INNER clears the
   centre; DOUBLE's pairs keep to the band, a pair in the centre opening to INNER's share either
-  side. The one voice's DOUBLE pair with POLY and UNISON off, all of SPREAD's way out (R-STEREO),
+  side. The one voice's DOUBLE pair with POLY and UNISON off, all of SPREAD's way out (R45),
   stays there.
 - **The parameter:** `inner`, the host's Inner, 0 to 100 %, off by default, after AUTO GAIN, so
   a session or preset saved before reads it 0; a preset holds it (no factory preset names it);
@@ -3821,14 +3821,14 @@ recommended here: "3 across wins for both".
   and it does nothing at SPREAD 0 or with POLY and UNISON off and no DOUBLE.
 - **The display** draws each voice where the engine's gains put it, INNER's band and all, by
   the kit's `voice_at` and `pair_at`, which the gains use too.
-- **The strip, three across** (R-LOOK's A6 redrawn in its STEREO section): VOICES (370, 976) and
+- **The strip, three across** (R44's A6 redrawn in its STEREO section): VOICES (370, 976) and
   STEREO (976, 2370), OUTPUT as it was; WIDTH, INNER and DETUNE 430 apart about STEREO's middle
   (1243, 1673, 2103), each a knob and its readout; the two banks of tabs centred over the
   section as a pair, 180 apart, in their order; the display from WIDTH's unit to DETUNE's, wider
   than before. INNER is a strip knob (51 controls), appended after the others so that no
   control's index moves, with its readout, a switch as WIDTH's (off, and back on at its amount),
   lit where it does something; its tip reads "INNER: 40 %".
-- `docs/panel.png` is left as it was (the 0.1.0 picture, as R-LOOK leaves it): drawn again, it
+- `docs/panel.png` is left as it was (the 0.1.0 picture, as R44 leaves it): drawn again, it
   would be the worn editor's first picture there, for the look's merge to choose.
 
 **Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
@@ -3875,7 +3875,7 @@ render first"; and having listened to the renders: "k, I think we should remove 
 - **The kit at eb374f8** (its K7's "EDGES dropped", made by a session the owner opened in the
   kit, since a change to the shared kit from here was refused): no `Edges`, EVEN and CENTER
   its placements (indices 0 and 1), and `ALONE` for one voice alone, whose DOUBLE pair goes all
-  of SPREAD's way out (R-STEREO). The voices' mix carries no placement for a lone voice
+  of SPREAD's way out (R45). The voices' mix carries no placement for a lone voice
   (`Option<Placement>`), and its pair takes `ALONE`, as it took EDGES's pair, 1, before; the
   panel's materials from the same commit.
 
@@ -3888,3 +3888,11 @@ ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings
 kit at eb374f8, against renders of d159f42: three presets each in MONO, POLY and UNISON, with
 and without DOUBLE, EVEN and CENTER, INNER 0 and 60 % (72 renders), and every factory preset
 (24), the same to the bit; tests, 206 passed; rustfmt; clippy with `-D warnings`.
+
+**At the merge to main, 2026-10-10** (R44 to R49 together, as the owner asked: "k, can we merge
+this into main now?", INNER with them: "yes"): the kit at 4c0f0f3, its main, where K5 to K7
+were merged (its pull requests 2 and 3); its tree is eb374f8's, the commit pinned before, so
+nothing built changes. The third-party notices leave the kit's crates out, as the CA-74's do:
+they are Idle Foundry's own code under the CA-72's licence, which the notices now say
+(`scripts/notices.py`). The README's picture of the panel (`docs/panel.png`) is the editor's
+window as it opens in this look.

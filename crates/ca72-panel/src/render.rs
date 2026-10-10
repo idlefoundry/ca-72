@@ -28,7 +28,7 @@ pub struct Scene {
     pub power: bool,
     /// The OVERLOAD lamp's level, 0 dark to 1 fully lit.
     pub overload: f64,
-    /// QUALITY's opening (decisions.md R-ULTRA): what it shows and how far each has come.
+    /// QUALITY's opening (decisions.md R48): what it shows and how far each has come.
     pub opening: crate::ultra::Opening,
     /// DETUNE unused (SCATTER): its knob drawn dimmed, as FEEDBACK's is with EXTERNAL INPUT
     /// shut.

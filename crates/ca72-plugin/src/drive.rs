@@ -1,4 +1,4 @@
-//! DRIVE's AUTO GAIN (decisions.md R-STEREO, the CA-74's R29): the output brought back down by
+//! DRIVE's AUTO GAIN (decisions.md R45, the CA-74's R29): the output brought back down by
 //! as much as DRIVE made the sound louder, measured for the sound itself. Off the audio thread,
 //! the plug-in's helper plays a few short notes through voices made as the engine's first are,
 //! with the sound's panel, without DRIVE and at each of its steps, and compares their loudness

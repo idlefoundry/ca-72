@@ -30,7 +30,7 @@ const OSCILLATORS: usize = 3;
 const KNOBS: usize = 10;
 
 /// Where SCATTER puts the voices POLY plays at full SPREAD, and the pan law that puts each
-/// there as loud: plugin-kit's (its K6; the CA-74's R27 and R30; here decisions.md R-STEREO).
+/// there as loud: plugin-kit's (its K6; the CA-74's R27 and R30; here decisions.md R45).
 pub use plugin_kit_stereo::place::{Placement, pan_gains};
 
 /// A voice's character: its own tolerances, drawn once from its seed, its oscillators' and

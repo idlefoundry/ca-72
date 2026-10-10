@@ -7,12 +7,12 @@
 //! priority, single triggering), as before. UNISON (outranking POLY) plays VOICES whole
 //! instruments together, each taking every key through its own keyboard circuit as the one
 //! does, each its own parts under ENTROPY and its own place under SPREAD, turned down by the
-//! square root of VOICES (decisions.md R-STEREO, the CA-74's R25). POLY on, one voice per note, up to VOICES (2 to
+//! square root of VOICES (decisions.md R45, the CA-74's R25). POLY on, one voice per note, up to VOICES (2 to
 //! 10) of the ten built: each the whole instrument with its own keyboard circuit, which its
 //! note reaches as one key (`PolyKey`; decisions.md, "POLY"). A POLY note takes the voice
 //! that last played its key if that voice is free or letting go, else the free voice whose
 //! last note began longest ago, else the one let go longest ago, else the one held longest
-//! (the CA-74's R27; decisions.md R-STEREO), so a chord struck again stays where it was and a
+//! (the CA-74's R27; decisions.md R45), so a chord struck again stays where it was and a
 //! melody goes round the voices. ENTROPY makes each voice its own parts, SPREAD puts the voices
 //! across the stereo field where the placement has them (`character.rs`), one voice alone in
 //! the centre; both 0 by default, the circuit as drawn.
@@ -78,7 +78,7 @@ pub const POLY_VOICES: (usize, usize, usize) = (2, 4, 10);
 /// The voices whose levels the editor is told: as many as POLY can have.
 pub const LEVELS: usize = POLY_VOICES.2;
 
-/// DRIVE's top, dB (decisions.md R-STEREO, the CA-74's R29: past it the filter is saturated
+/// DRIVE's top, dB (decisions.md R45, the CA-74's R29: past it the filter is saturated
 /// and the note stops being one).
 pub const DRIVE_TOP: f64 = 24.0;
 
@@ -105,26 +105,26 @@ pub struct Controls {
     pub entropy: f64,
     pub spread: f64,
     /// INNER: the inner edge of each side's band, a share of SPREAD's way out (decisions.md
-    /// R-INNER).
+    /// R49).
     pub inner: f64,
-    /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R-STEREO), EVEN or
-    /// CENTER as the plug-in offers them (`params::Scatter`; R-INNER).
+    /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R45), EVEN or
+    /// CENTER as the plug-in offers them (`params::Scatter`; R49).
     pub placement: Placement,
-    /// UNISON: VOICES instruments on every key together (decisions.md R-STEREO).
+    /// UNISON: VOICES instruments on every key together (decisions.md R45).
     pub unison: bool,
     /// DOUBLE (0..1): each note played by two voices, detuned from each other by up to
     /// [`DOUBLE_CENTS`], SPREAD putting them to either side of the centre (decisions.md
-    /// R-STEREO); 0, one voice a note.
+    /// R45); 0, one voice a note.
     pub double: f64,
     /// DRIVE (0..[`DRIVE_TOP`] dB): the mixer's signal into the filter raised by so much, its
     /// input pair driven past where the panel's mixer can take it; 0, the circuit
-    /// (decisions.md R-STEREO).
+    /// (decisions.md R45).
     pub drive: f64,
     /// LEVEL (dB, [`LEVEL_RANGE`]): the output's gain after MAIN OUTPUT's, the plug-in's own;
-    /// 0, none (decisions.md R-STEREO).
+    /// 0, none (decisions.md R45).
     pub level: f64,
     /// AUTO GAIN: the output brought back down by as much as DRIVE made the sound louder, as
-    /// measured for it (`drive.rs`; decisions.md R-STEREO).
+    /// measured for it (`drive.rs`; decisions.md R45).
     pub auto_gain: bool,
     /// FEEDBACK (0..1): the voices' output patched back into their EXTERNAL INPUT, a sample
     /// late, by this much of its level (the phones' VOLUME knob; decisions.md R8).
@@ -134,10 +134,10 @@ pub struct Controls {
     /// ([`ENTROPY_FLOOR`]; decisions.md R9).
     pub lock: bool,
     /// QUALITY at LO, Potato mode: the voices played by the light model ([`Light`]), not the
-    /// circuit's, for computers the circuit is too heavy for (decisions.md R-POTATO).
+    /// circuit's, for computers the circuit is too heavy for (decisions.md R47).
     pub potato: bool,
     /// QUALITY at ULTRA: the circuit's model with no compromises (`Quality::NoCompromises`),
-    /// not at its real-time setting (decisions.md R-ULTRA). Switched while it plays.
+    /// not at its real-time setting (decisions.md R48). Switched while it plays.
     pub ultra: bool,
 }
 
@@ -224,7 +224,7 @@ const SILENT: f64 = 1e-6;
 const QUIET: usize = 256;
 
 /// The time constant, seconds, with which a voice's place follows SPREAD, INNER, the
-/// placement, VOICES and DOUBLE: plugin-kit's (its K6; decisions.md R-STEREO, the CA-74's R27
+/// placement, VOICES and DOUBLE: plugin-kit's (its K6; decisions.md R45, the CA-74's R27
 /// and R28).
 pub use plugin_kit_stereo::place::GLIDE;
 
@@ -351,7 +351,7 @@ impl Slot {
     }
 }
 
-/// DOUBLE's second voice of a note (decisions.md R-STEREO, the CA-74's R28): a voice with
+/// DOUBLE's second voice of a note (decisions.md R45, the CA-74's R28): a voice with
 /// parts of its own (its character, noise and oscillators' start, a place's past the voices'),
 /// its own key, its gains at the last run's end (None before its first run, or while it does
 /// not play), and whether it still sounds: with DOUBLE turned off it plays its tail out, its
@@ -768,7 +768,7 @@ pub struct Engine {
     lamp: f32,
     /// A voice's place's glide a sample at the voices' rate ([`glide_share`]).
     glide: f64,
-    /// AUTO GAIN (decisions.md R-STEREO): the sound's curve (`drive.rs`), the correction the
+    /// AUTO GAIN (decisions.md R45): the sound's curve (`drive.rs`), the correction the
     /// controls ask for from it (1: none), the correction gliding to it a sample at a time,
     /// and the glide's share a sample at the host's rate. Only it glides: the output's other
     /// gains step as they did.
@@ -2078,7 +2078,7 @@ fn unison_trim_of(c: &Controls) -> f64 {
     }
 }
 
-/// Where voice `k` of seed `s` starts its oscillators on their ramps (decisions.md R-STEREO,
+/// Where voice `k` of seed `s` starts its oscillators on their ramps (decisions.md R45,
 /// the CA-74's R25): the first voice at the circuit's initial condition, as the reference
 /// starts (so one voice, and every preset with POLY and UNISON off, is the model's to the bit);
 /// every other voice where its seed says, as a real instrument's free-running oscillators are
@@ -2178,7 +2178,7 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
 }
 
 /// AUTO GAIN's correction under controls `c` from the sound's `curve` (decisions.md
-/// R-STEREO): 1 without DRIVE or with AUTO GAIN off.
+/// R45): 1 without DRIVE or with AUTO GAIN off.
 fn auto_trim(c: &Controls, curve: &Curve<STEPS>) -> f64 {
     if c.auto_gain && c.drive > 0.0 {
         10f64.powf(curve.at(c.drive, DRIVE_TOP) / 20.0)
@@ -2193,7 +2193,7 @@ const PROBE_SEED: u64 = 0x0CA7_2D21_7E00_0001;
 
 /// The voices a sound's panel plays (ENTROPY's tolerances on each, FEEDBACK), one for each of
 /// the notes AUTO GAIN's measurement plays ([`KEYS`]), for measuring DRIVE's loudness off the
-/// audio thread (decisions.md R-STEREO; `drive.rs`): made as an engine's first voices are, each
+/// audio thread (decisions.md R45; `drive.rs`): made as an engine's first voices are, each
 /// its own (its parts, its oscillators' start, its noise), POLY's, one a note, in the centre,
 /// without the output's gain (MAIN OUTPUT's, LEVEL's, the trims', AUTO GAIN's).
 #[derive(Debug)]
@@ -2766,7 +2766,7 @@ mod tests {
 
     /// At full SPREAD a three-note chord fills the field (side within 3 dB of mid; the old
     /// places and pan law, a voice in the centre weighed double, gave less), and one voice
-    /// alone stays in the centre, left and right the same (decisions.md R-STEREO).
+    /// alone stays in the centre, left and right the same (decisions.md R45).
     #[test]
     fn a_chord_fills_the_field_and_one_voice_stays_in_the_centre() {
         let c = Controls {
@@ -2785,7 +2785,7 @@ mod tests {
 
     /// INNER at 100 % clears the centre: a chord on EVEN's three voices, one of them in the
     /// centre at INNER 0, is all at the edges, its side nearer its mid; one voice alone stays in
-    /// the centre, whatever INNER (decisions.md R-INNER).
+    /// the centre, whatever INNER (decisions.md R49).
     #[test]
     fn inner_clears_the_centre_and_one_voice_stays_there() {
         let c = Controls {
@@ -2918,7 +2918,7 @@ mod tests {
     /// UNISON's voices come in anywhere in their cycles, not in step: with LOCK (every voice
     /// the circuit as drawn, nothing to pull them apart) a held note is still about as loud
     /// with eight of them as with one (within 2 dB), where eight in step would sum 9 dB louder
-    /// (decisions.md R-STEREO, the CA-74's R25).
+    /// (decisions.md R45, the CA-74's R25).
     #[test]
     fn unison_voices_come_in_out_of_step() {
         let c = Controls {
@@ -3048,7 +3048,7 @@ mod tests {
 
     /// DOUBLE: a note's twin half the detune sharp on the left, its voice half flat on the
     /// right (at full SPREAD each alone on its side), the two apart by the detune
-    /// (decisions.md R-STEREO, the CA-74's R28): 7 % of 100 cents. One oscillator, LOCK.
+    /// (decisions.md R45, the CA-74's R28): 7 % of 100 cents. One oscillator, LOCK.
     #[test]
     fn double_puts_the_sharp_twin_left_and_the_flat_voice_right() {
         let mut c = Controls {
@@ -3104,7 +3104,7 @@ mod tests {
     /// DOUBLE takes the placement (the CA-74's R41): with CENTER a note on the first voice
     /// has its pair in the centre, left and right the same; with EVEN out to the sides (its
     /// first voice's place is an edge). INNER at 100 % puts every pair at the edges, as EDGES
-    /// did (R-INNER): CENTER's first pair is then where EVEN's is, to the bit. One voice alone
+    /// did (R49): CENTER's first pair is then where EVEN's is, to the bit. One voice alone
     /// (POLY off) has its pair as far out as SPREAD whatever the placement (the kit's `ALONE`),
     /// there too.
     #[test]
@@ -3274,7 +3274,7 @@ mod tests {
 
     /// DRIVE drives the filter's input pair harder: a held note grows louder with it, and by
     /// less the higher it goes, as the pair saturates (on a sawtooth +2.7, +5.1, +8.5 and +10.7
-    /// dB at 3, 6, 12 and 24 dB; decisions.md R-STEREO). (Not brighter: the ladder's stages,
+    /// dB at 3, 6, 12 and 24 dB; decisions.md R45). (Not brighter: the ladder's stages,
     /// slew-limited by their currents, take the highs the clipping adds.)
     #[test]
     fn drive_drives_the_filter_harder() {
@@ -3318,7 +3318,7 @@ mod tests {
     /// output up by the curve's correction there, a sample at a time, without a step (the
     /// ratio of the outputs every sample from 1 to the correction, by at most a hundredth a
     /// sample). Without DRIVE it asks for none: AUTO GAIN on or off, the same to the bit
-    /// (decisions.md R-STEREO, the CA-74's R29).
+    /// (decisions.md R45, the CA-74's R29).
     #[test]
     fn autos_correction_glides_and_without_drive_there_is_none() {
         let run = |c: Controls, then: Controls| -> Vec<f32> {
@@ -3394,7 +3394,7 @@ mod tests {
         most
     }
 
-    /// QUALITY at LO (decisions.md R-POTATO): the one instrument and POLY's voices play the
+    /// QUALITY at LO (decisions.md R47): the one instrument and POLY's voices play the
     /// light model, not the circuit's, and switching QUALITY lets go of the keys held, as
     /// switching POLY does.
     #[test]
@@ -3434,7 +3434,7 @@ mod tests {
         assert_eq!(e.sounding(), 0, "POLY's light voices not freed");
     }
 
-    /// QUALITY at ULTRA (decisions.md R-ULTRA): the circuit's voices play with no compromises,
+    /// QUALITY at ULTRA (decisions.md R48): the circuit's voices play with no compromises,
     /// and switching to HI and back changes the model's setting under the key held, without
     /// letting go of it. (A short while: No Compromises is slow, more so in a debug build.)
     #[test]

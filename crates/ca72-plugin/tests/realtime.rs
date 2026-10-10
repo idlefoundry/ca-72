@@ -252,7 +252,7 @@ fn poly_neither_allocates_nor_frees_while_it_plays() {
     );
 }
 
-/// QUALITY at LO (decisions.md R-POTATO): the light voices played as the plug-in plays its
+/// QUALITY at LO (decisions.md R47): the light voices played as the plug-in plays its
 /// host's blocks, the one instrument a run at a time and POLY's chords, with the side chain
 /// and FEEDBACK, ENTROPY and SPREAD, DOUBLE and UNISON switched on and off, the panel moving,
 /// QUALITY and POLY switched while it plays, All Sound Off among it: no allocation, no free on

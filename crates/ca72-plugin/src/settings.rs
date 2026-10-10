@@ -1,4 +1,4 @@
-//! What the plug-in keeps for the computer, not for the session (decisions.md R-ULTRA): ULTRA's
+//! What the plug-in keeps for the computer, not for the session (decisions.md R48): ULTRA's
 //! shutter shown or the light only, and whether ULTRA's note has been read. In the shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, written as one changes. Keys it does not know are kept; a file it cannot read

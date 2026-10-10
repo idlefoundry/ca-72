@@ -2,7 +2,7 @@
 //! instrument's taken face on (Commons, "Minimoog panel.jpg"; the panel is 3108 by 795 of
 //! them), under a wooden top strip with the name plate on it; and under that the plug-in's
 //! strip (`crate::strip`), the left hand controller's GLIDE, DECAY and wheels at its left
-//! (A6, decisions.md R-LOOK: they had a column of their own beside the panel).
+//! (A6, decisions.md R44: they had a column of their own beside the panel).
 //!
 //! What never moves is drawn once ([`background`]); each control, lamp and the name plate
 //! is a layer of its own, drawn over it ([`Layer`]).
@@ -80,11 +80,11 @@ pub const POWER: (f64, f64) = (3023.0, 580.0);
 pub(crate) const LAMP_AT: (f64, f64) = (3023.0, 426.0);
 /// The OVERLOAD lamp, on the panel.
 pub(crate) const OVERLOAD_AT: (f64, f64) = (1764.0, 274.0);
-/// QUALITY's toggle (decisions.md R-ULTRA), on the panel, and its size as seen: its pictures'
+/// QUALITY's toggle (decisions.md R48), on the panel, and its size as seen: its pictures'
 /// (180 by 291 pixels, the nut at their middle) 50 units wide.
 pub(crate) const QUALITY_AT: (f64, f64) = (3023.0, 266.0);
 pub(crate) const TOGGLE: (f64, f64) = (50.0, 50.0 * 291.0 / 180.0);
-/// ULTRA's lamp (decisions.md R-ULTRA), on the panel, over QUALITY.
+/// ULTRA's lamp (decisions.md R48), on the panel, over QUALITY.
 pub(crate) const ULTRA_AT: (f64, f64) = (3023.0, 92.0);
 
 /// The editor's resize grip, in the drawing's bottom right corner (left, top, right, bottom).
@@ -559,7 +559,7 @@ pub fn background(layout: &Layout) -> String {
 }
 
 /// What a part of the drawing draws: all of it, or its print alone (the worn skin lays the
-/// print over pictures of the surfaces: decisions.md R-LOOK).
+/// print over pictures of the surfaces: decisions.md R44).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Ink {
     All,
@@ -837,7 +837,7 @@ fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
     legend(s, 1763.0, 226.0, "OVERLOAD");
     legend(s, 1764.0, 407.0, "WHITE");
     legend(s, 1764.0, 558.0, "PINK");
-    // The column as the hardware reference has it (decisions.md R-HP): FILTER MODE at its
+    // The column as the hardware reference has it (decisions.md R46): FILTER MODE at its
     // head, the original's three switches 122 units lower.
     legend(s, 1910.0, 114.0, "FILTER");
     legend(s, 1910.0, 134.0, "MODE");
@@ -1258,7 +1258,7 @@ pub struct Layer {
     pub bounds: [f64; 4],
     pub body: String,
     /// The worn skin's pictures drawn over the body, each about the origin (decisions.md
-    /// R-LOOK), and SVG over them (the lamp's light on them, which does not turn).
+    /// R44), and SVG over them (the lamp's light on them, which does not turn).
     pub sprites: Vec<Sprite>,
     pub over: String,
     /// A wheel the worn skin's renderer draws, and a rocker's paddle it lights by its shape
@@ -1470,7 +1470,7 @@ pub fn plate() -> Layer {
     }
 }
 
-// ---- The worn skin (decisions.md R-LOOK): the same parts in the same places, their surfaces
+// ---- The worn skin (decisions.md R44): the same parts in the same places, their surfaces
 // pictures (`crate::skin`), the lamp's light laid over them where it does not turn.
 
 /// The name plate in the worn skin (the owner, 2026-10-10: "it's not up to the same realistic

@@ -398,10 +398,10 @@ The service documents and datasheets the model was derived from are not included
 
 - At HI the circuit's model plays in its real-time quality (the model's own "Potato", not the
   plug-in's Potato mode); at ULTRA, in its most exact, No Compromises, which does not run in
-  real time on most computers ([docs/decisions.md](docs/decisions.md) R-ULTRA). The model's
+  real time on most computers ([docs/decisions.md](docs/decisions.md) R48). The model's
   High Fidelity quality remains in `crates/ca72` and the lab.
 - **Potato mode (QUALITY at LO) is close to the circuit, not the same**
-  ([docs/decisions.md](docs/decisions.md) R-POTATO): a FEEDBACK loop can settle into another
+  ([docs/decisions.md](docs/decisions.md) R47): a FEEDBACK loop can settle into another
   oscillation than the circuit's (Undertow Growl is about 3 dB quieter as its notes start,
   Pulse Strut about 1), the light filter's top octaves fall faster (Ringing Saw Line darker),
   and driven hard at high EMPHASIS it loses its resonance sooner. Every other factory preset

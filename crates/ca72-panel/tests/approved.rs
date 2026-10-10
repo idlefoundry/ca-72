@@ -1,13 +1,13 @@
 //! The panel as drawn matches the design the owner approved (`approved.png`: the mock-up at one
 //! panel unit a pixel, every control at half its travel). The switch column between MIXER and
 //! MODIFIERS (the mock-up's x 2100 to 2330, y 225 to 690) is the renderer's own, as the owner
-//! chose it on 2026-10-09 with FILTER MODE at its head (decisions.md R-HP). The mock-up had the
+//! chose it on 2026-10-09 with FILTER MODE at its head (decisions.md R46). The mock-up had the
 //! left hand's controls in a column left of the panel, 330 units wide; they are on the strip
-//! below now (A6, R-LOOK), so the panel is compared with the mock-up right of its column. The
-//! name board under the face is gone (the plate moved up into the top strip, R-LOOK): the top
+//! below now (A6, R44), so the panel is compared with the mock-up right of its column. The
+//! name board under the face is gone (the plate moved up into the top strip, R44): the top
 //! strip and the face are compared, the plate's place there left out. The last column's head,
 //! above POWER's lamp, is left out: QUALITY, its toggle and ULTRA's lamp came after the mock-up
-//! and were approved in their own (decisions.md R-POTATO, R-ULTRA).
+//! and were approved in their own (decisions.md R47, R48).
 
 use ca72_panel::art::{COL, PANEL_H, PH, PLATE_H, PLATE_X, PLATE_Y, TOP, W};
 use ca72_panel::{CONTROLS, Renderer, Scene};

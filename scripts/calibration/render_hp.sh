@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # render_hp.sh LAB_BIN OUTDIR [QUALITY]: session HP's takes through the CA-72 (ca72-lab stim),
-# each take's panel with its FILTER MODE (events.filter_mode) added (decisions.md R-HP).
+# each take's panel with its FILTER MODE (events.filter_mode) added (decisions.md R46).
 # CAPTURES overrides the session's directory on the lab's share.
 set -euo pipefail
 bin=$1 out=$2 q=${3:-no-compromises}

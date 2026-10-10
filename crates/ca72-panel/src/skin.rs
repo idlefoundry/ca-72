@@ -1,4 +1,4 @@
-//! The panel's skins (decisions.md R-LOOK): DRAWN, the panel as `art` draws it, and WORN, the
+//! The panel's skins (decisions.md R44): DRAWN, the panel as `art` draws it, and WORN, the
 //! same panel in pictures of the original's materials, gently used: walnut, the face's textured
 //! black over aluminium with the drawing's print laid on it, Moog's modular knobs (a black
 //! skirt with a white dot, broad flutes, a spun aluminium cap), the wedge pointer knobs, the
@@ -79,7 +79,7 @@ pub enum Part {
     KnobCap,
     KnobBigCap,
     PointerCap,
-    /// QUALITY's chrome toggle (decisions.md R-ULTRA), its lever up (ULTRA), out (HI, the
+    /// QUALITY's chrome toggle (decisions.md R48), its lever up (ULTRA), out (HI, the
     /// slightest angle down) and down (LO), the three cut on one frame: the nut stays put.
     ToggleUp,
     ToggleMid,

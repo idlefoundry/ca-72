@@ -35,7 +35,7 @@ pub const BAR_H: f64 = 96.0;
 /// are to the right of it.
 pub const BAR_END: f64 = 1110.0;
 /// The drawer's top, panel units down from the drawing's, and its height: dropping down from
-/// under the strip's rail over its sections, to the window's foot (A6: decisions.md R-LOOK).
+/// under the strip's rail over its sections, to the window's foot (A6: decisions.md R44).
 pub const DRAWER_TOP: f64 = art::PANEL_H + crate::strip::RAIL;
 pub const DRAWER_H: f64 = art::H - DRAWER_TOP;
 

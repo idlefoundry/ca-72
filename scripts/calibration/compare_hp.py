@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Session HP: the CA-72's renders against the reference's captures (LO and HI;
-decisions.md R-HP).
+decisions.md R46).
 
     compare_hp.py CAPTURES RENDERS OUTDIR
 

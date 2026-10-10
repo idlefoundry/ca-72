@@ -135,7 +135,7 @@ fn small_signal_response_matches_the_circuit() {
     );
 }
 
-/// FILTER MODE's HI (decisions.md R-HP) against `filter-mode.lib` on the bench, over cutoff
+/// FILTER MODE's HI (decisions.md R46) against `filter-mode.lib` on the bench, over cutoff
 /// and emphasis, the filter as the voice has it (its trims and the whole mixer on the bus,
 /// for which `MODE_RT` is taken). HI is the direct branch less the filter's output, and the
 /// direct branch is exact, so HI's error is the output's: it is measured against the larger

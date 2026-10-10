@@ -1,4 +1,4 @@
-//! QUALITY's opening as the editor moves it (decisions.md R-ULTRA; the panel draws it,
+//! QUALITY's opening as the editor moves it (decisions.md R48; the panel draws it,
 //! `ca72_panel::ultra`): what each setting shows coming up and going down, one at a time; the
 //! synth's level as the lamps show it; LO's hamster's run.
 

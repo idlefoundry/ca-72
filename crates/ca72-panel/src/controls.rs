@@ -349,7 +349,7 @@ pub const CONTROLS: [Control; 53] = [
     ),
     // Across MIXER and MODIFIERS: the filter's mode, modulation and keyboard control. FILTER
     // MODE, which the original does not have, at the column's head, where the hardware
-    // reference has it (decisions.md R-HP): LO, or HI pressed.
+    // reference has it (decisions.md R46): LO, or HI pressed.
     rocker(
         "filter_mode",
         "FILTER MODE (LO or HI)",
@@ -475,7 +475,7 @@ pub const CONTROLS: [Control; 53] = [
         580.0,
         Dial::Ten,
     ),
-    // QUALITY (decisions.md R-POTATO, R-ULTRA): a chrome toggle over POWER's lamp, under
+    // QUALITY (decisions.md R47, R48): a chrome toggle over POWER's lamp, under
     // ULTRA's: its lever up for ULTRA, out for HI, down for LO.
     Control {
         param: "quality",
@@ -535,7 +535,7 @@ pub const CONTROLS: [Control; 53] = [
             span: 76.0,
         },
     },
-    // The strip's knobs (A6: decisions.md R-LOOK, R-STEREO, R-INNER), the plug-in's own; INNER
+    // The strip's knobs (A6: decisions.md R44, R45, R49), the plug-in's own; INNER
     // last, so that every other control keeps its index.
     strip_knob("voices", "VOICES", 0, Dial::Voices),
     strip_knob("entropy", "ENTROPY", 1, Dial::Ten),

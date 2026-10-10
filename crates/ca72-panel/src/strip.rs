@@ -1,4 +1,4 @@
-//! The strip under the panel, A6 (decisions.md R-LOOK): the presets' rail in walnut across its
+//! The strip under the panel, A6 (decisions.md R44): the presets' rail in walnut across its
 //! top (the favourite's star, the previous preset, the name's display, the next, SAVE), then
 //! the left hand's controls (GLIDE, DECAY and the PITCH and MOD. wheels, drawn with the panel's
 //! controls: `art`), VOICES, STEREO and OUTPUT in three rows: banks of lit tabs, then knobs
@@ -93,7 +93,7 @@ pub enum Bank {
     /// SCATTER | DOUBLE: how the voices are played across the field.
     Stereo,
     /// EVEN | CENTER: where SCATTER puts them (no EDGES: INNER moves them out from the centre;
-    /// decisions.md R-INNER).
+    /// decisions.md R49).
     Placement,
     /// AUTO GAIN's ON.
     Auto,
@@ -623,7 +623,7 @@ mod tests {
         assert_eq!((dx, dx + dw), (CW - UNIT_HALF, CD + UNIT_HALF));
     }
 
-    /// PLACEMENT's bank is EVEN and CENTER (no EDGES: decisions.md R-INNER), its recess two
+    /// PLACEMENT's bank is EVEN and CENTER (no EDGES: decisions.md R49), its recess two
     /// tabs wide: each tab found where it stands, the placement's control (MIDI Learn rings the
     /// recess), and no tab past CENTER or before EVEN; every bank's tabs found so.
     #[test]
