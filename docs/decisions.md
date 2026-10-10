@@ -3888,3 +3888,65 @@ ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings
 kit at eb374f8, against renders of d159f42: three presets each in MONO, POLY and UNISON, with
 and without DOUBLE, EVEN and CENTER, INNER 0 and 60 % (72 renders), and every factory preset
 (24), the same to the bit; tests, 206 passed; rustfmt; clippy with `-D warnings`.
+
+## R-PRIORITY. NOTE PRIORITY: LOW, LAST or HIGH, on QUALITY's toggle turned on its side
+
+**The owner, 2026-10-10:** asked what the usual choices of priority are ("lowest note, last
+note, I would guess. Um, are there others?"), was told of the three (LOW, the Model D's own
+keyboard; HIGH; LAST, most modern instruments' and the hardware reference's three, with LOW for
+its poly chain) and the rarer FIRST and duophonic split, and how much adding them would take:
+"I say we do lowest, highest, and last. I'm thinking for UI, it makes sense to put that control
+in this section [the left hand controller: GLIDE, DECAY and the wheels] (rotated 90 degrees),
+and we can use the same 3 way toggle that we use on the quality selector. This item should be
+saved per patch, I think." Built on `look-quality` (the owner: "i feel like there are better,
+more recent branches" than `potato`).
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- **What each does**, with POLY off and in each of UNISON's voices (POLY's voices each take one
+  key, where it changes nothing): LOW, the default, is the keyboard circuit as drawn, its
+  contacts at the lowest and highest keys held, and every sound stays the same to the bit. HIGH
+  and LAST hand the circuit the key they choose alone, as if it were the only key down: HIGH the
+  highest held, LAST the one pressed last and, once it is let go, the last of those still held.
+  A key let go keeps its pitch contact for the release lead (2 ms, A18) in every mode, so a key
+  LAST or HIGH has chosen sounds that much longer unless a newer (LAST) or higher (HIGH) one
+  takes over. Beyond the 44 keys the chosen key continues the string as a key alone does there
+  ("The full MIDI range"). `ca72::voice::Priority`, the panel's `priority` (not the
+  instrument's, as `quality` is not), chosen in `Keys::step`; the light voice (R-POTATO) the
+  same, its keys' presses counted for LAST.
+- **Single triggering stays**, as the instrument's: a key pressed while another is held moves
+  the pitch without starting the contours again, so LAST and HIGH play legato. A retrigger
+  choice was asked about and not answered; none is added.
+- **LOW keeps the string's own effect:** a higher key held with the lowest shorts the string
+  between them, and the lowest sounds a little sharp of itself alone (key 57 with 64 held:
+  0.98 mV, 1.2 cents). HIGH and LAST play the key chosen exactly as alone (within 0.05 mV), as
+  the hardware reference's, whose keys are read digitally, plays all three.
+- **The parameter:** `note_priority`, the host's Note Priority, LOW, LAST, HIGH in that order
+  (the toggle's positions left to right, its value 0, 0.5, 1), the last parameter. A preset's,
+  as any panel control: saved with the sound, and LOW for a preset that does not name it (every
+  factory preset). A session saved before it opens with LOW, not at what the instance had
+  (`filter_state`, as R18 has it for ENTROPY). MIDI Learn takes it as a selector, a third of
+  0-127 a position (57 learnable controls: 27 knobs, 8 selectors, 22 switches).
+- **The toggle:** QUALITY's chrome toggle (R-ULTRA), its three pictures mirrored about their
+  diagonal (flipped top to bottom, then turned a quarter clockwise), so that the lever moves
+  left and right and the light still comes from the upper left (a plain quarter turn would
+  light it from the upper right): LOW the lever left (the upright picture's up), LAST out, HIGH
+  right; 81 by 50 units as seen. It stands where GLIDE's and DECAY's switches do (x 214 in the
+  column's place), on a third row under them (y 328), the wheels unmoved; its legend PRIORITY
+  to its left (centred at 108, ten units left of GLIDE's and DECAY's, clear of the lever at
+  LOW), LAST above it and LOW and HIGH under its ends, in the dials' lettering, as QUALITY's are
+  round its lever. A click goes to the position clicked (left of the nut LOW, right of it HIGH,
+  on it or LAST's legend LAST), the mouse wheel a position a notch; its tip reads "NOTE
+  PRIORITY (LOW, LAST or HIGH)"; its menu is MIDI Learn's. The control is appended after INNER
+  so that no other control's index moves (54 controls). The drawn skin turns its drawn toggle
+  the same way.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
+80b8e1c, every factory preset (26) the same to the bit with POLY's ten voices, in MONO with its
+chords held (where LOW chooses), and in MONO at LO (the light voice). Tests:
+`tests/priority.rs` (each mode's key after a run of keys pressed and let go, beyond the 44 keys
+too, the keyboard's output against the chosen key's alone), the light voice's
+`the_priority_chooses_the_key_held_that_sounds` (the release lead too),
+`note_priority_reaches_the_one_instrument_and_unisons_voices`,
+`an_old_session_opens_with_note_priority_low`, `note_priority_is_part_of_a_preset`, the toggle's
+clicks on its side; the core's, panel's and plug-in's tests, 313 passed, 42 ignored; rustfmt;
+clippy with `-D warnings`. Not yet: the installed build in a host.

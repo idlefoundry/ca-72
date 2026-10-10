@@ -53,7 +53,8 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
                 let (hx, hy) = (36.0 * WHEEL_SCALE, 79.0 * WHEEL_SCALE);
                 in_rect(dx, dy, [-hx, -hy, hx, hy])
             }
-            Kind::Toggle { .. } => in_rect(dx, dy, TOGGLE_HIT),
+            Kind::Toggle { across: false, .. } => in_rect(dx, dy, TOGGLE_HIT),
+            Kind::Toggle { across: true, .. } => in_rect(dx, dy, TOGGLE_HIT_ACROSS),
         };
         if found {
             return Some(Target::Control(i));
@@ -113,6 +114,10 @@ const TOGGLE_NUT: f64 = 16.0;
 /// travel, ULTRA's legend above, LO's below and HI's to the left.
 pub const TOGGLE_HIT: [f64; 4] = [-58.0, -64.0, 28.0, 64.0];
 
+/// Where NOTE PRIORITY's toggle (on its side) and its legends answer a pointer, about its
+/// centre: the lever's travel, LAST's legend above, LOW's and HIGH's under its ends.
+pub const TOGGLE_HIT_ACROSS: [f64; 4] = [-60.0, -44.0, 64.0, 48.0];
+
 /// A toggle's position, 0 (down), 1 (out) or 2 (up), from its normalized value.
 pub fn toggle_position(v: f64) -> usize {
     (v.clamp(0.0, 1.0) * 2.0).round() as usize
@@ -120,10 +125,18 @@ pub fn toggle_position(v: f64) -> usize {
 
 /// A click that did not drag, (`dx`, `dy`) from the control's centre: a switch flips, a
 /// selector steps toward the side clicked, QUALITY's toggle goes where it is clicked (above its
-/// nut up, below it down, on it or on HI's legend to its left out).
+/// nut up, below it down, on it or on HI's legend to its left out), NOTE PRIORITY's likewise
+/// on its side (left of its nut left, right of it right, on it or on LAST's legend above out).
 pub fn click(kind: &Kind, v: f64, dx: f64, dy: f64) -> Option<f64> {
     match kind {
         Kind::Rocker { .. } => Some(if v >= 0.5 { 0.0 } else { 1.0 }),
+        Kind::Toggle { across: true, .. } => Some(if dx < -TOGGLE_NUT {
+            0.0
+        } else if dx > TOGGLE_NUT {
+            1.0
+        } else {
+            0.5
+        }),
         Kind::Toggle { .. } => Some(if dy < -TOGGLE_NUT {
             1.0
         } else if dy > TOGGLE_NUT {
@@ -212,6 +225,12 @@ mod tests {
         assert_eq!(step(toggle, 0.5, true, false), 1.0);
         assert_eq!(step(toggle, 1.0, true, false), 1.0);
         assert_eq!(step(toggle, 0.5, false, false), 0.0);
+        // NOTE PRIORITY's, on its side: left LOW, out LAST, right HIGH.
+        let across = &CONTROLS[index("note_priority").expect("a control")].kind;
+        assert_eq!(click(across, 0.5, -40.0, 38.0), Some(0.0));
+        assert_eq!(click(across, 0.0, 0.0, -33.0), Some(0.5));
+        assert_eq!(click(across, 0.5, 40.0, 38.0), Some(1.0));
+        assert_eq!(step(across, 0.0, true, false), 0.5);
         let pitch = &CONTROLS[index("pitch_wheel").expect("a control")].kind;
         assert_eq!(release(pitch, 0.53), 0.5);
         assert_eq!(release(pitch, 0.55), 0.55);

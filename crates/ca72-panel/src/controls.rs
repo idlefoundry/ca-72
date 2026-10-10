@@ -75,11 +75,12 @@ pub enum Kind {
         colour: Colour,
         orient: Orient,
     },
-    /// A three-position toggle (QUALITY), `w` by `h` as seen: its lever down (0), out (0.5) or
-    /// up (1).
+    /// A three-position toggle (QUALITY, NOTE PRIORITY), `w` by `h` as seen: its lever down
+    /// (0), out (0.5) or up (1); `across`, on its side, left (0), out or right (1).
     Toggle {
         w: f64,
         h: f64,
+        across: bool,
     },
     /// `detent`: centred (PITCH); `span`: its turn over its travel, in degrees.
     Wheel {
@@ -233,7 +234,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 53] = [
+pub const CONTROLS: [Control; 54] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -486,6 +487,7 @@ pub const CONTROLS: [Control; 53] = [
         kind: Kind::Toggle {
             w: crate::art::TOGGLE.0,
             h: crate::art::TOGGLE.1,
+            across: false,
         },
     },
     // The left hand controller.
@@ -544,6 +546,21 @@ pub const CONTROLS: [Control; 53] = [
     strip_knob("drive", "DRIVE", 4, Dial::Drive),
     strip_knob("level", "LEVEL", 5, Dial::Level),
     strip_knob("inner", "INNER", 6, Dial::Ten),
+    // NOTE PRIORITY (decisions.md R-PRIORITY), the plug-in's own: QUALITY's toggle on its side,
+    // under GLIDE and DECAY where their switches are, its lever left for LOW, out for LAST,
+    // right for HIGH. Last, so that every other control keeps its index.
+    Control {
+        param: "note_priority",
+        label: "NOTE PRIORITY (LOW, LAST or HIGH)",
+        place: Place::Column,
+        x: crate::art::LH_ROCKER,
+        y: crate::art::LH_PRIORITY,
+        kind: Kind::Toggle {
+            w: crate::art::TOGGLE.1,
+            h: crate::art::TOGGLE.0,
+            across: true,
+        },
+    },
 ];
 
 /// The index of the control operating `param`.

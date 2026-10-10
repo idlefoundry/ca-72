@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::tuning::Range;
-use ca72::voice::{ContourKnobs, OscPanel, Panel, Quality, Waveform};
+use ca72::voice::{ContourKnobs, OscPanel, Panel, Priority, Quality, Waveform};
 use nih_plug::prelude::*;
 
 use crate::character::Placement;
@@ -181,6 +181,32 @@ pub enum QualityMode {
     Ultra,
 }
 
+/// NOTE PRIORITY (decisions.md R-PRIORITY): which of the keys held sounds while POLY is off
+/// (and in UNISON, each voice the same). LOW, the keyboard circuit's own; LAST, the key pressed
+/// last; HIGH, the highest. In this order, as the toggle's positions run left to right.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotePriority {
+    #[id = "low"]
+    #[name = "LOW"]
+    Low,
+    #[id = "last"]
+    #[name = "LAST"]
+    Last,
+    #[id = "high"]
+    #[name = "HIGH"]
+    High,
+}
+
+impl From<NotePriority> for Priority {
+    fn from(p: NotePriority) -> Priority {
+        match p {
+            NotePriority::Low => Priority::Low,
+            NotePriority::Last => Priority::Last,
+            NotePriority::High => Priority::High,
+        }
+    }
+}
+
 #[derive(Params)]
 pub struct Ca72Params {
     /// The noise generator's seed, saved with the session so that it renders the same noise
@@ -325,8 +351,8 @@ pub struct Ca72Params {
     pub midi_bend_range: FloatParam,
 
     // The plug-in's own, not the instrument's (decisions.md, "POLY", "ANALOG and SPREAD").
-    /// POLY: one instrument per voice (VOICES of them); off, the one with its keyboard
-    /// circuit's lowest-note priority.
+    /// POLY: one instrument per voice (VOICES of them); off, the one, NOTE PRIORITY choosing
+    /// which of the keys held sounds (LOW, its keyboard circuit's own).
     #[id = "poly"]
     pub poly: BoolParam,
     /// VOICES: how many POLY plays, 2 to 10 (kept while POLY is off).
@@ -392,6 +418,12 @@ pub struct Ca72Params {
     /// `presets::targets`).
     #[id = "doubled"]
     pub doubled: BoolParam,
+    /// NOTE PRIORITY, LOW by default: which key held sounds (the toggle under GLIDE and DECAY).
+    /// A preset's, as any panel control (the owner, 2026-10-10: "This item should be saved per
+    /// patch"). The last parameter: a session or a preset saved before reads it LOW, the
+    /// instrument's own.
+    #[id = "note_priority"]
+    pub note_priority: EnumParam<NotePriority>,
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -565,6 +597,7 @@ impl Default for Ca72Params {
             inner: percent("Inner"),
             doubled: BoolParam::new("Double", false),
             quality: EnumParam::new("Quality", QualityMode::Hi),
+            note_priority: EnumParam::new("Note Priority", NotePriority::Low),
         }
     }
 }
@@ -654,6 +687,7 @@ impl Ca72Params {
             a440: self.a440.value(),
             tune: value(&self.tune) / 2.5,
             quality: Quality::default(),
+            priority: self.note_priority.value().into(),
         };
         Controls {
             panel,

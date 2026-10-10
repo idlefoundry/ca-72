@@ -174,6 +174,7 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("a440", &p.a440),
         ("glide_on", &p.glide_on),
         ("decay_on", &p.decay_on),
+        ("note_priority", &p.note_priority),
         ("mod_wheel", &p.mod_wheel),
         ("midi_bend_range", &p.midi_bend_range),
         ("poly", &p.poly),
@@ -1170,6 +1171,34 @@ mod tests {
         assert!(b.drawer.chips.iter().any(|(t, _)| t == "zed"));
         b.reread(&p);
         assert!(rows(&b).is_empty());
+    }
+
+    /// NOTE PRIORITY is a preset's (the owner, 2026-10-10: "This item should be saved per
+    /// patch"; R-PRIORITY): saved with the sound, set by a preset naming it, and LOW, the
+    /// instrument's own, by one saved before it (every factory preset).
+    #[test]
+    fn note_priority_is_part_of_a_preset() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let p = Ca72Params::default();
+        let target = |e: &Entry| {
+            targets(&p, e)
+                .into_iter()
+                .find(|(k, _)| *k == "note_priority")
+                .map(|(_, v)| v)
+        };
+        assert!(values_now(&p).iter().any(|(k, _)| k == "note_priority"));
+        for e in lib.entries().0 {
+            assert_eq!(target(&e), Some(0.0), "{}", e.sound.name);
+        }
+        let last = lib
+            .save("Lead", vec![("note_priority".to_owned(), 1.0)], None)
+            .unwrap();
+        assert_eq!(target(&last), Some(0.5));
+        let high = lib
+            .save("Lead High", vec![("note_priority".to_owned(), 2.0)], None)
+            .unwrap();
+        assert_eq!(target(&high), Some(1.0));
     }
 
     /// A preset sets POLY, VOICES, ENTROPY and SPREAD like any other parameter (decisions.md

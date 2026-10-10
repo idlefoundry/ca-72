@@ -11,7 +11,8 @@
 //! (the oscillators' increments, the ladder's coefficient) is worked out every
 //! [`CONTROL_EVERY`] samples and followed between.
 //!
-//! The keys are the instrument's: lowest-note priority, single triggering (a key pressed while
+//! The keys are the instrument's: lowest-note priority (or NOTE PRIORITY's HIGH or LAST, as the
+//! circuit's voice has them: [`crate::voice::Priority`]), single triggering (a key pressed while
 //! another is held does not start the contours again), the contours re-armed once the trigger
 //! contact has been open 11.5 ms; GLIDE moves the pitch as the circuit's hold does. Nothing here
 //! allocates once made.
@@ -20,9 +21,9 @@ use crate::tuning::FREQ_CENTRE;
 #[cfg(test)]
 use crate::voice::OscPanel;
 use crate::voice::{
-    ContourKnobs, FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, Panel, Waveform,
-    emphasis_r14, ext_taper, glide_r, osc2_freq_track, osc3_freq_track, sustain_track, time_pot,
-    volume_track,
+    ContourKnobs, FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, Panel, Priority,
+    Waveform, emphasis_r14, ext_taper, glide_r, osc2_freq_track, osc3_freq_track, sustain_track,
+    time_pot, volume_track,
 };
 
 /// Samples between the control laws' updates.
@@ -497,6 +498,24 @@ impl Held {
     fn lowest(self) -> Option<i32> {
         (self.0 != 0).then(|| self.0.trailing_zeros() as i32)
     }
+
+    fn highest(self) -> Option<i32> {
+        (self.0 != 0).then(|| 127 - self.0.leading_zeros() as i32)
+    }
+
+    /// The key held pressed last, by `pressed` (when each was pressed, counted in presses).
+    fn newest(self, pressed: &[u32; 128]) -> Option<i32> {
+        let mut bits = self.0;
+        let mut newest: Option<usize> = None;
+        while bits != 0 {
+            let k = bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            if newest.is_none_or(|n| pressed[k] > pressed[n]) {
+                newest = Some(k);
+            }
+        }
+        newest.map(|k| k as i32)
+    }
 }
 
 /// An oscillator: its phase (0..1) and waveform.
@@ -797,6 +816,9 @@ pub struct Light {
     set_for_panel: bool,
     set: Setting,
     held: Held,
+    /// When each key was last pressed, counted in presses (for LAST), and the count.
+    pressed: [u32; 128],
+    presses: u32,
     /// A released key whose pitch contact is still closed, the samples it stays so, and that
     /// time in samples.
     lead: (i32, u32),
@@ -885,6 +907,8 @@ impl Light {
             set_for_panel: false,
             set: Setting::default(),
             held: Held::default(),
+            pressed: [0; 128],
+            presses: 0,
             lead: (0, 0),
             lead_samples: at(laws::RELEASE_LEAD),
             target: laws::PITCH_AT_REST,
@@ -1176,10 +1200,26 @@ impl Light {
 
     /// A MIDI note pressed or released.
     pub fn note(&mut self, midi: i32, on: bool) {
-        if !on && self.held.lowest() == Some(midi) {
+        if !(0..128).contains(&midi) {
+            return;
+        }
+        if !on && self.sounding() == Some(midi) {
             self.lead = (midi, self.lead_samples);
         }
+        if on && self.held.0 & (1u128 << midi) == 0 {
+            self.presses = self.presses.wrapping_add(1);
+            self.pressed[midi as usize] = self.presses;
+        }
         self.held.set(midi, on);
+    }
+
+    /// The key held that sounds, as the panel's priority chooses it.
+    fn sounding(&self) -> Option<i32> {
+        match self.panel.priority {
+            Priority::Low => self.held.lowest(),
+            Priority::High => self.held.highest(),
+            Priority::Last => self.held.newest(&self.pressed),
+        }
     }
 
     /// Whether a key is held.
@@ -1243,13 +1283,20 @@ impl Light {
     /// The control laws, every [`CONTROL_EVERY`] samples: the pitch (GLIDE), the
     /// oscillators' increments and the ladder's coefficients for the next samples.
     fn control(&mut self) {
-        let lowest = if self.lead.1 > 0 {
+        let sounding = self.sounding();
+        let sounding = if self.lead.1 > 0 {
             self.lead.1 = self.lead.1.saturating_sub(CONTROL_EVERY as u32);
-            self.held.lowest().map(|k| k.min(self.lead.0))
+            let lead = self.lead.0;
+            sounding.map(|k| match self.panel.priority {
+                Priority::Low => k.min(lead),
+                Priority::High => k.max(lead),
+                Priority::Last if self.pressed[lead as usize] > self.pressed[k as usize] => lead,
+                Priority::Last => k,
+            })
         } else {
-            self.held.lowest()
+            sounding
         };
-        if let Some(key) = lowest {
+        if let Some(key) = sounding {
             let (lo, hi) = laws::KEYBOARD_KEYS;
             let key = f64::from(key);
             self.target = key.clamp(lo, hi);
@@ -2009,5 +2056,69 @@ mod tests {
                 "CUTOFF {cutoff}, EMPHASIS {emphasis}: HI {d:+.2} dB against LO"
             );
         }
+    }
+
+    /// NOTE PRIORITY (decisions.md R-PRIORITY) as the circuit's voice has it: LOW the lowest
+    /// key held, HIGH the highest, LAST the key pressed last, then the last still held; a key
+    /// let go keeps sounding for the release lead (2 ms) unless a newer key takes over; beyond
+    /// the keyboard's keys, the chosen key continues the scale.
+    #[test]
+    fn the_priority_chooses_the_key_held_that_sounds() {
+        let plays = |priority: Priority, steps: &[(i32, i32)]| {
+            let mut l = Light::new(48_000.0);
+            let mut p = measuring();
+            p.priority = priority;
+            l.set_panel(&p);
+            for &(key, sounding) in steps {
+                l.note(key.abs(), key > 0);
+                run(&mut l, 480);
+                let at = l.target + l.foot;
+                assert!(
+                    (at - f64::from(sounding)).abs() < 1e-9,
+                    "{priority:?}: after {key:+}, key {at} for {sounding}"
+                );
+            }
+        };
+        plays(
+            Priority::Low,
+            &[(57, 57), (64, 57), (50, 50), (-50, 57), (-57, 64)],
+        );
+        plays(
+            Priority::High,
+            &[
+                (57, 57),
+                (64, 64),
+                (50, 64),
+                (-64, 57),
+                (-57, 50),
+                (100, 100),
+            ],
+        );
+        plays(
+            Priority::Last,
+            &[
+                (57, 57),
+                (64, 64),
+                (50, 50),
+                (-50, 64),
+                (60, 60),
+                (-64, 60),
+                (-60, 57),
+                (30, 30),
+            ],
+        );
+        // The release lead: LAST's key let go sounds 2 ms on, then the last still held.
+        let mut l = Light::new(48_000.0);
+        let mut p = measuring();
+        p.priority = Priority::Last;
+        l.set_panel(&p);
+        l.note(57, true);
+        l.note(64, true);
+        run(&mut l, 480);
+        l.note(64, false);
+        run(&mut l, 48);
+        assert_eq!(l.target, 64.0, "within the lead");
+        run(&mut l, 96);
+        assert_eq!(l.target, 57.0, "after it");
     }
 }

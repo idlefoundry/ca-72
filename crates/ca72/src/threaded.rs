@@ -615,7 +615,7 @@ impl Threaded {
             let n = (len - at).min(CHUNK);
             for i in 0..n {
                 js[i] = jacks(at + i);
-                contacts[i] = self.keys.step();
+                contacts[i] = self.keys.step(self.panel.priority);
                 contacts[i].s_trig = js[i].s_trig;
                 ext[i][0] = js[i].ext;
                 loudness[i][0] = js[i].loudness.unwrap_or(f64::NAN);
@@ -748,7 +748,7 @@ impl Threaded {
             if self.feedback > 0.0 {
                 j.ext += self.feedback * self.fed_back;
             }
-            let mut c = self.keys.step();
+            let mut c = self.keys.step(p.priority);
             c.s_trig = j.s_trig;
             let v_kbd = kbd.part.tick(&p, c);
             let control = ctl.part.tick(&p, c);

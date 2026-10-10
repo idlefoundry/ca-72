@@ -2,7 +2,8 @@
 //! instrument wires them (docs/circuit/voice.md).
 //!
 //! - **Keyboard** (board 2's keyboard circuit, [`crate::keyboard`]): 44 keys; the lowest
-//!   and highest held join the pitch bus to the string (lowest-note priority follows); the
+//!   and highest held join the pitch bus to the string (lowest-note priority follows; the
+//!   plug-in's NOTE PRIORITY HIGH or LAST hands it the key it chooses alone: [`Priority`]); the
 //!   trigger contact is closed while any key is held (single triggering); the hold,
 //!   GLIDE, and the output's load (the oscillators' and the filter's keyboard inputs). A
 //!   key's pitch contact opens [`RELEASE_LEAD`] after its trigger contact (A18).
@@ -100,6 +101,20 @@ pub enum Quality {
     Potato,
 }
 
+/// Which of the keys held sounds (not the instrument's: decisions.md R-PRIORITY). The keyboard
+/// circuit's own is the lowest; HIGH and LAST hand it the key chosen alone, as if it were the
+/// only key down. In this order, as the toggle's positions run from left to right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Priority {
+    /// The lowest key: the circuit's contacts as drawn (the lowest and highest keys held).
+    #[default]
+    Low,
+    /// The key pressed last; once it is let go, the last of those still held.
+    Last,
+    /// The highest key.
+    High,
+}
+
 /// The front panel and left hand controller: knobs 0..1 (the panel's 0..10; CUTOFF's
 /// -5..+5 as 0..1), switches as booleans.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -148,6 +163,8 @@ pub struct Panel {
     pub tune: f64,
     /// The model's quality mode (not a control of the instrument's).
     pub quality: Quality,
+    /// Which key held sounds (not a control of the instrument's either).
+    pub priority: Priority,
 }
 
 /// TUNE's wiper voltage over half its travel: R1 spans 10 V less R22's 5.05 V.
@@ -198,6 +215,7 @@ impl Default for Panel {
             a440: false,
             tune: 0.0,
             quality: Quality::NoCompromises,
+            priority: Priority::Low,
         }
     }
 }
@@ -719,6 +737,9 @@ pub struct Keys {
     held: Vec<i32>,
     /// Released keys whose pitch contacts are still closed, and the sample they open at.
     releasing: Vec<(i32, u64)>,
+    /// When each MIDI note was last pressed, counted in presses (for LAST), and the count.
+    pressed: [u64; 128],
+    presses: u64,
     samples: u64,
     /// The string's foot as last set (it stays while no key's contact is closed).
     foot: i32,
@@ -1073,6 +1094,8 @@ impl Voice {
                 // Room for every key: a key press must not allocate on the audio thread.
                 held: Vec::with_capacity(128),
                 releasing: Vec::with_capacity(128),
+                pressed: [0; 128],
+                presses: 0,
                 samples: 0,
                 foot: 0,
             },
@@ -1341,7 +1364,7 @@ impl Voice {
 
     fn tick_at(&mut self, j: &Jacks) -> f64 {
         let p = self.panel;
-        let mut c = self.keys.step();
+        let mut c = self.keys.step(p.priority);
         c.s_trig = j.s_trig;
         // (The pitch and contour paths at another quality, when it is held.)
         let pc = match self.control_quality {
@@ -1390,6 +1413,8 @@ impl Keys {
         if on {
             if !self.held.contains(&k) {
                 self.held.push(k);
+                self.presses += 1;
+                self.pressed[midi as usize] = self.presses;
             }
             self.releasing.retain(|&(x, _)| x != k);
         } else if self.held.contains(&k) {
@@ -1401,7 +1426,8 @@ impl Keys {
 
     /// The contacts for the next sample (the lowest and highest keys whose pitch contacts
     /// are closed: held, or released within the lead; and the trigger contact), and a
-    /// sample on.
+    /// sample on. With `priority` HIGH or LAST, the key it chooses among them alone, as if
+    /// it were the only key down (the trigger contact as ever: closed while any is held).
     ///
     /// Keys beyond the string's ends (the plug-in's extension: decisions.md, "The full MIDI range"): the
     /// trigger contact closes for them as for the rest. While the lowest key whose contact
@@ -1410,7 +1436,7 @@ impl Keys {
     /// key is above C, the lowest of them likewise, from C. Otherwise the keys above C are
     /// left out, as the instrument's lowest-note priority leaves them silent, and the
     /// contacts are the instrument's own.
-    pub fn step(&mut self) -> Contacts {
+    pub fn step(&mut self, priority: Priority) -> Contacts {
         let now = self.samples;
         self.releasing.retain(|&(_, until)| until > now);
         let keys = || {
@@ -1420,14 +1446,25 @@ impl Keys {
                 .chain(self.releasing.iter().map(|&(k, _)| k))
         };
         let on = || keys().filter(|k| (0..KEYS).contains(k));
-        let (keys, foot) = match (keys().min(), on().min().zip(on().max())) {
-            (Some(lowest), _) if lowest < 0 => (Some((0, 0)), lowest),
-            (_, Some((lo, hi))) => (Some((lo as usize, hi as usize)), 0),
-            (Some(lowest), None) => {
-                let top = (KEYS - 1) as usize;
-                (Some((top, top)), lowest - (KEYS - 1))
+        let top = KEYS - 1;
+        // A key alone: its own contact, or beyond the string's ends, that end's key.
+        let alone = |k: i32| {
+            let end = k.clamp(0, top);
+            (Some((end as usize, end as usize)), k - end)
+        };
+        let chosen = match priority {
+            Priority::Low => None,
+            Priority::High => Some(keys().max()),
+            Priority::Last => {
+                Some(keys().max_by_key(|&k| self.pressed[(k + LOWEST_KEY_MIDI) as usize]))
             }
-            (None, _) => (None, self.foot),
+        };
+        let (keys, foot) = match (chosen, keys().min(), on().min().zip(on().max())) {
+            (Some(Some(k)), _, _) => alone(k),
+            (Some(None), _, _) | (None, None, _) => (None, self.foot),
+            (None, Some(lowest), _) if lowest < 0 => (Some((0, 0)), lowest),
+            (None, _, Some((lo, hi))) => (Some((lo as usize, hi as usize)), 0),
+            (None, Some(lowest), None) => alone(lowest),
         };
         self.foot = foot;
         let c = Contacts {

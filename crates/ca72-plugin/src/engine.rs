@@ -3,8 +3,8 @@
 //! the side chain at EXTERNAL INPUT. Once the voices are built nothing here allocates
 //! (`tests/realtime.rs`).
 //!
-//! POLY off, the one instrument takes every key through its keyboard circuit (lowest-note
-//! priority, single triggering), as before. UNISON (outranking POLY) plays VOICES whole
+//! POLY off, the one instrument takes every key through its keyboard circuit (NOTE PRIORITY's
+//! choice of the keys held, LOW by default, the circuit's own; single triggering), as before. UNISON (outranking POLY) plays VOICES whole
 //! instruments together, each taking every key through its own keyboard circuit as the one
 //! does, each its own parts under ENTROPY and its own place under SPREAD, turned down by the
 //! square root of VOICES (decisions.md R-STEREO, the CA-74's R25). POLY on, one voice per note, up to VOICES (2 to
@@ -2338,6 +2338,7 @@ pub fn output_gain(volume: f64, on: bool) -> f64 {
 mod tests {
     use super::*;
     use crate::pool::Budget;
+    use ca72::voice::Priority;
 
     /// A voice's output's peak as the engine reports it, playing the panel as it opens and
     /// louder: printed, for the editor's level scale (`-- --ignored --nocapture`).
@@ -2947,8 +2948,8 @@ mod tests {
         assert!(db.abs() < 2.0, "UNISON {db:+.1} dB against one voice");
     }
 
-    /// Every UNISON voice takes the keys as the one instrument's keyboard does (lowest-note
-    /// priority, single triggering): its keyboard voltage the one instrument's after each of a
+    /// Every UNISON voice takes the keys as the one instrument's keyboard does (NOTE PRIORITY,
+    /// LOW by default, and single triggering): its keyboard voltage the one instrument's after each of a
     /// run of keys pressed and let go, legato and not; and every voice sounds.
     #[test]
     fn unison_voices_take_the_keys_as_the_instrument_does() {
@@ -2999,6 +3000,56 @@ mod tests {
                     "after event {i}, voice {k}'s keyboard at {v} V, the instrument's {}",
                     o[0]
                 );
+            }
+        }
+    }
+
+    /// NOTE PRIORITY reaches the voices (decisions.md R-PRIORITY): with POLY off, and in each
+    /// of UNISON's voices, the keyboard after 60, 67, 55 and 64 are pressed is where the key the
+    /// priority chooses puts it alone (LOW the circuit's own, its lowest a little sharp with
+    /// higher keys held: within 1.5 mV).
+    #[test]
+    fn note_priority_reaches_the_one_instrument_and_unisons_voices() {
+        let keyboard = |priority: Priority, unison: bool, keys: &[u8]| -> Vec<f64> {
+            let mut c = Controls {
+                unison,
+                voices: 4,
+                ..Controls::default()
+            };
+            c.panel.priority = priority;
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            for &key in keys {
+                e.event(Event::Note { key, on: true });
+                for _ in 0..8 {
+                    e.render(&[], &mut l, &mut r);
+                    e.end_block(256);
+                }
+            }
+            let n = if unison { 4 } else { 1 };
+            (0..n)
+                .map(|k| e.slots[k].play.lock().unwrap().voice.probe().0)
+                .collect()
+        };
+        for (priority, sounding, within) in [
+            (Priority::Low, 55, 1.5e-3),
+            (Priority::Last, 64, 5e-5),
+            (Priority::High, 67, 5e-5),
+        ] {
+            let alone = keyboard(Priority::Low, false, &[sounding])[0];
+            for unison in [false, true] {
+                for (k, v) in keyboard(priority, unison, &[60, 67, 55, 64])
+                    .into_iter()
+                    .enumerate()
+                {
+                    assert!(
+                        (v - alone).abs() < within,
+                        "{priority:?}, UNISON {unison}: voice {k}'s keyboard {:.3} mV from {sounding}'s",
+                        (v - alone) * 1e3
+                    );
+                }
             }
         }
     }

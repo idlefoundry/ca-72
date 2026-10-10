@@ -282,6 +282,15 @@ impl Plugin for Ca72 {
                 .params
                 .insert("entropy".to_owned(), ParamValue::F32(entropy));
         }
+        // A state saved before NOTE PRIORITY: the instrument's own, LOW, whatever the instance
+        // had (decisions.md R-PRIORITY).
+        if !state.params.contains_key("note_priority") {
+            let low = Ca72Params::default().note_priority.default_plain_value();
+            state.params.insert(
+                "note_priority".to_owned(),
+                ParamValue::I32(low.to_index() as i32),
+            );
+        }
         let offered = |id: &str| params::Scatter::ids().is_some_and(|ids| ids.contains(&id));
         if matches!(state.params.get("placement"), Some(ParamValue::String(id)) if !offered(id)) {
             let even = Ca72Params::default().placement.default_plain_value();
@@ -567,6 +576,35 @@ mod tests {
         let mut new = state(&[("entropy", 40.0)]);
         Ca72::filter_state(&mut new);
         assert_eq!(entropy(&new), Some(40.0));
+    }
+
+    /// A session saved before NOTE PRIORITY opens with LOW, the instrument's own (its index, as
+    /// nih-plug sets an enum by one), not at what the instance had (R-PRIORITY); one saved since
+    /// keeps its own.
+    #[test]
+    fn an_old_session_opens_with_note_priority_low() {
+        let filtered = |params: Vec<(String, ParamValue)>| {
+            let mut s = PluginState {
+                version: String::new(),
+                params: params.into_iter().collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            s.params.remove("note_priority")
+        };
+        let low = params::NotePriority::Low.to_index() as i32;
+        assert!(matches!(
+            filtered(vec![("cutoff".to_owned(), ParamValue::F32(3.0))]),
+            Some(ParamValue::I32(i)) if i == low
+        ));
+        let high = (
+            "note_priority".to_owned(),
+            ParamValue::String("high".to_owned()),
+        );
+        assert!(matches!(
+            filtered(vec![high]),
+            Some(ParamValue::String(s)) if s == "high"
+        ));
     }
 
     /// A session saved with SCATTER's EDGES (no longer offered: R-INNER), or with a placement

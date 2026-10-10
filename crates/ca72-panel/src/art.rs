@@ -67,6 +67,10 @@ const LH_LABEL: f64 = 118.0;
 pub(crate) const LH_ROCKER: f64 = 214.0;
 const LH_SCREW_DX: f64 = 50.0;
 pub(crate) const LH_ROWS: [f64; 2] = [150.0, 230.0];
+/// NOTE PRIORITY's toggle (decisions.md R-PRIORITY), on its side under GLIDE and DECAY, and its
+/// legend's centre (left of it, where theirs are, moved in as far as its lever's LOW allows).
+pub(crate) const LH_PRIORITY: f64 = 328.0;
+const LH_PRIORITY_LABEL: f64 = 108.0;
 pub(crate) const LH_WHEELS: [f64; 2] = [82.0, 204.0];
 pub(crate) const WHEEL_Y: f64 = 515.0;
 /// The wheels are drawn larger in the column than the instrument's.
@@ -1005,6 +1009,13 @@ fn column(s: &mut Svg, ink: Ink) {
     legend(s, LH_LABEL, LH_ROWS[1], "DECAY");
     lettered(s, LH_ROCKER + 36.0, LH_ROWS[0] + 34.0, "ON", NUM);
     lettered(s, LH_ROCKER + 36.0, LH_ROWS[1] + 34.0, "ON", NUM);
+    // NOTE PRIORITY: its lever's places round it, as QUALITY's are (LAST, the lever out,
+    // above it; LOW and HIGH under its ends).
+    legend(s, LH_PRIORITY_LABEL, LH_PRIORITY, "PRIORITY");
+    let (px, py) = (LH_ROCKER, LH_PRIORITY);
+    lettered(s, px, py - 33.0, "LAST", NUM);
+    lettered(s, px - 40.0, py + 38.0, "LOW", NUM);
+    lettered(s, px + 40.0, py + 38.0, "HIGH", NUM);
     let label_y = WHEEL_Y + 73.0 * WHEEL_SCALE + 16.0;
     legend(s, LH_WHEELS[0], label_y, "PITCH");
     legend(s, LH_WHEELS[1], label_y, "MOD.");
@@ -1290,7 +1301,7 @@ pub fn bounds(kind: &Kind) -> [f64; 4] {
             [-(r + 3.0), -(r + 3.0), r + 6.0, r + 8.0]
         }
         Kind::Selector(_) => [-62.0, -62.0, 63.0, 64.0],
-        Kind::Rocker { w, h, .. } | Kind::Toggle { w, h } => {
+        Kind::Rocker { w, h, .. } | Kind::Toggle { w, h, .. } => {
             [-w / 2.0 - 4.0, -h / 2.0 - 4.0, w / 2.0 + 4.0, h / 2.0 + 4.0]
         }
         Kind::Wheel { .. } => {
@@ -1322,7 +1333,17 @@ pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
             knob_body(&mut s, if big { BIG } else { STD }, -150.0 + 300.0 * v)
         }
         Kind::Selector(_) => selector_body(&mut s, position(v)),
-        Kind::Toggle { .. } => toggle_body(&mut s, crate::interact::toggle_position(v)),
+        Kind::Toggle { across, .. } => {
+            let at = crate::interact::toggle_position(v);
+            if across {
+                // On its side: the drawing mirrored about its diagonal, up to the left.
+                s.0.push_str("<g transform='matrix(0 1 1 0 0 0)'>");
+                toggle_body(&mut s, 2 - at);
+                s.0.push_str("</g>");
+            } else {
+                toggle_body(&mut s, at);
+            }
+        }
         Kind::Rocker {
             w,
             h,
@@ -1626,17 +1647,25 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                 ..Layer::default()
             }
         }
-        // QUALITY's chrome toggle: its picture for the lever's place.
-        Kind::Toggle { w, h } => {
-            let part = match crate::interact::toggle_position(v) {
+        // QUALITY's chrome toggle: its picture for the lever's place. NOTE PRIORITY's on its
+        // side: the picture mirrored about its diagonal (flipped, then turned a quarter), so
+        // that its light still comes from the upper left; its lever up to the left.
+        Kind::Toggle { w, h, across } => {
+            let at = crate::interact::toggle_position(v);
+            let part = match if across { 2 - at } else { at } {
                 2 => Part::ToggleUp,
                 1 => Part::ToggleMid,
                 _ => Part::ToggleDown,
             };
+            let sprite = if across {
+                sprite(part, (h, w), 90.0, (false, true))
+            } else {
+                sprite(part, (w, h), 0.0, (false, false))
+            };
             Layer {
                 origin,
                 bounds,
-                sprites: vec![sprite(part, (w, h), 0.0, (false, false))],
+                sprites: vec![sprite],
                 ..Layer::default()
             }
         }
@@ -1882,12 +1911,12 @@ pub fn worn_overlay() -> String {
                 );
             }
             // The toggle's nut's (its lever's is too small to tell).
-            Kind::Toggle { w, .. } => put!(
+            Kind::Toggle { w, h, .. } => put!(
                 s,
                 "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.5' filter='url(#softer)'/>",
                 N(x + 2.0),
                 N(y + 3.0),
-                N(w * 0.46)
+                N(w.min(h) * 0.46)
             ),
             // A rocker's own shadow goes with its layer; its opening's is the panel's.
             Kind::Rocker { w, h, .. } => put!(
