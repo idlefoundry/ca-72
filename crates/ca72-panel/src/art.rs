@@ -49,11 +49,12 @@ const PLATE_PAD: f64 = 24.0;
 /// The plate's width: as when a click turned it over to a second, wider name, gone since
 /// (the owner, 2026-10-03), so the panel stays as approved.
 pub const PLATE_W: f64 = 261.0;
-/// The plate's top left corner: its left end at the MODIFIERS|OUTPUT line, in the top strip
-/// (between its screws), a touch above its middle (its foot in the strip's shade).
-pub const PLATE_X: f64 = COL + 2582.0;
+/// The plate's top left corner: its left end on the MODIFIERS|OUTPUT line (the divider's,
+/// 2578), in the top strip between its screws, in the strip's middle (the owner, 2026-10-10,
+/// of three places rendered whole: "I think we can go with option C").
+pub const PLATE_X: f64 = COL + 2578.0;
 pub const PLATE_H: f64 = 82.0;
-pub const PLATE_Y: f64 = (TOP - PLATE_H) / 2.0 - 4.0;
+pub const PLATE_Y: f64 = (TOP - PLATE_H) / 2.0;
 const NAME_Y: f64 = 31.0;
 const MAKER_Y: f64 = 64.0;
 
