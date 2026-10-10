@@ -845,7 +845,7 @@ fn drawer_body(fonts: &Fonts, s: &DrawerScene) -> String {
     button(
         &mut out,
         (FAVS_X, TOOLS_Y, FAVS_W, TOOLS_H),
-        "   FAVOURITES",
+        "   FAVORITES",
         TEXT,
         s.favourites,
         hover(DrawerTarget::Favourites),
