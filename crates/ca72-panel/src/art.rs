@@ -1472,6 +1472,64 @@ pub fn plate() -> Layer {
 // ---- The worn skin (decisions.md R-LOOK): the same parts in the same places, their surfaces
 // pictures (`crate::skin`), the lamp's light laid over them where it does not turn.
 
+/// The name plate in the worn skin (the owner, 2026-10-10: "it's not up to the same realistic
+/// quality as everything else"): a picture of a blank plate, standing a little proud of the
+/// wood (its shadow soft, down and to the right), its lettering printed on it as the panel's is:
+/// paint filled into engraving, the cut's upper left wall in shade over it, its lower right
+/// catching the lamp a little.
+pub fn plate_worn() -> Layer {
+    let (w, h) = (PLATE_W, PLATE_H);
+    let mut body = Svg::default();
+    put!(
+        body,
+        "<defs><filter id='plate-shadow' x='-0.2' y='-0.5' width='1.4' height='2'><feGaussianBlur stdDeviation='4'/></filter></defs><rect x='3' y='5' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.6' filter='url(#plate-shadow)'/><rect x='1' y='1.5' width='{}' height='{}' rx='3' fill='#000' fill-opacity='0.5'/>",
+        N(w),
+        N(h),
+        N(w),
+        N(h)
+    );
+    let mut over = Svg::default();
+    let line = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64, extra: &str| {
+        for (dx, dy, fill, opacity) in [
+            (0.6, 0.7, "#ffffff", 0.16),
+            (-0.5, -0.6, "#000000", 0.75),
+            (0.0, 0.0, PLATE_PAINT, 0.95),
+        ] {
+            put!(
+                s,
+                "<text x='{}' y='{}' text-anchor='start' font-size='{}' font-weight='700' fill='{fill}' fill-opacity='{opacity}' {extra}>{}</text>",
+                N(x + dx),
+                N(y + size * 0.36 + dy),
+                N(size),
+                escape(t)
+            );
+        }
+    };
+    line(&mut over, PLATE_PAD, NAME_Y, PLATE_NAME, 38.0, "");
+    line(
+        &mut over,
+        PLATE_PAD + 2.0,
+        MAKER_Y,
+        PLATE_MAKER,
+        12.0,
+        "letter-spacing='4.2'",
+    );
+    Layer {
+        origin: (PLATE_X, PLATE_Y),
+        bounds: [-24.0, -10.0, w + 24.0, h + 14.0],
+        body: body.0,
+        sprites: vec![Sprite {
+            at: (w / 2.0, h / 2.0),
+            ..sprite(Part::Plate, (w, h), 0.0, (false, false))
+        }],
+        over: over.0,
+        ..Layer::default()
+    }
+}
+
+/// The plate's lettering's paint: an off white, as the panel's print.
+const PLATE_PAINT: &str = "#e4ded0";
+
 /// A selector's knob's body: as wide as the drawn one's fluted outline, less the pointer's
 /// reach (the picture's wedge reaches its edge, 64 units out, as the drawn fin about does).
 const SELECTOR_R: f64 = 50.0;

@@ -37,6 +37,7 @@ static ULTRA_LENS_ON: &[u8] = include_bytes!("../assets/worn/ultra-lens-on.png")
 static ULTRA_BEZEL_OFF: &[u8] = include_bytes!("../assets/worn/ultra-bezel-off.png");
 static ULTRA_BEZEL_ON: &[u8] = include_bytes!("../assets/worn/ultra-bezel-on.png");
 static ULTRA_FLOOR: &[u8] = include_bytes!("../assets/worn/ultra-floor.png");
+static PLATE: &[u8] = include_bytes!("../assets/worn/plate.png");
 
 /// The face's picture is kept grey; its colour, a black a touch warm, is this over it.
 const FACE_TINT: [f32; 3] = [1.03, 1.0, 0.94];
@@ -78,6 +79,8 @@ pub enum Part {
     UltraBezelOff,
     UltraBezelOn,
     UltraFloor,
+    /// The name plate, blank (its lettering is printed on it: `art::plate_worn`).
+    Plate,
 }
 
 /// How much of a knob's picture its skirt fills (the picture squared about the cap's axis;
@@ -111,6 +114,7 @@ pub struct Pictures {
     caps: [Pixmap; 3],
     toggle: [Pixmap; 3],
     ultra: [Pixmap; 5],
+    plate: Pixmap,
     scaled: Vec<((Part, u32, u32), Pixmap)>,
 }
 
@@ -185,6 +189,7 @@ impl Pictures {
                 png(ULTRA_BEZEL_ON),
                 png(ULTRA_FLOOR),
             ],
+            plate: png(PLATE),
             scaled: Vec::new(),
         }
     }
@@ -213,6 +218,7 @@ impl Pictures {
             Part::UltraBezelOff => &self.ultra[2],
             Part::UltraBezelOn => &self.ultra[3],
             Part::UltraFloor => &self.ultra[4],
+            Part::Plate => &self.plate,
         }
     }
 
@@ -315,7 +321,7 @@ pub fn resample(src: &Pixmap, w: u32, h: u32) -> Pixmap {
 mod tests {
     use super::*;
 
-    const PARTS: [Part; 17] = [
+    const PARTS: [Part; 18] = [
         Part::Knob,
         Part::KnobBig,
         Part::Pointer,
@@ -333,6 +339,7 @@ mod tests {
         Part::UltraLensOff,
         Part::UltraLensOn,
         Part::UltraFloor,
+        Part::Plate,
     ];
 
     #[test]
