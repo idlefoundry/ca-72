@@ -1704,6 +1704,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 [[package]]
 name = "plugin-kit-materials"
 version = "0.3.1"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=43a51a7399f31f8ae3bf0994573bb7e9d88bbaab#43a51a7399f31f8ae3bf0994573bb7e9d88bbaab"
 dependencies = [
  "resvg",
 ]

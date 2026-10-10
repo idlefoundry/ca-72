@@ -9,9 +9,9 @@ publish.workspace = true
 
 [dependencies]
 resvg = { version = "0.45", default-features = false, features = ["text"] }
-# The worn skins' materials (plugin-kit's K5): by path from the kit's worktree while K5 is on its
-# branch; then the kit's commit, as the CA-74 takes it.
-plugin-kit-materials = { path = "../../../../../../plugin-kit/.claude/worktrees/materials/crates/plugin-kit-materials" }
+# The worn skins' materials (plugin-kit's K5), from github.com/idlefoundry/plugin-kit at one
+# commit (its `materials` branch until K5 is merged there).
+plugin-kit-materials = { git = "https://github.com/idlefoundry/plugin-kit", rev = "43a51a7399f31f8ae3bf0994573bb7e9d88bbaab" }
 rustybuzz = "0.20"
 
 [lints]
