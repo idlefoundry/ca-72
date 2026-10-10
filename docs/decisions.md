@@ -3490,8 +3490,10 @@ of the opening costs 1.45 ms to draw on average (3.4 at most) at the window's op
 Mac's build ("CA-72 ULTRA", renamed, beside the owner's open Live) passes clap-validator and
 pluginval (strictness 5); it has not yet been opened in a host.
 
+**The owner, told what ULTRA costs and asked whether it should play HI live and the exact model
+only when the host renders offline:** "No, I think Ultra should remain Ultra." ULTRA plays the
+circuit's model with no compromises always, live or rendering; the note says what it costs.
+
 **Open (asked, not answered):** the lamp's colour (amber, as built; green and red were offered);
-whether the light only is in the right place; whether the note shows once a computer. And,
-given what ULTRA costs, whether ULTRA should play only when the host renders offline (playing HI
-live), which the host tells the plug-in.
+whether the light only is in the right place; whether the note shows once a computer.
 - **The number** of this record is a placeholder until the merge.
