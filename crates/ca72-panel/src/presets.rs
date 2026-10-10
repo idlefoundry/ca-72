@@ -1615,6 +1615,59 @@ mod tests {
 mod png {
     use super::*;
 
+    /// Parts close up (two pixels a unit) for looking at: a knob, a big knob, a selector and a
+    /// lit tab of the strip, each `part-<name>.png` in `$CA72_PARTS_PNG`, the folder.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn parts_png() {
+        let Some(dir) = std::env::var_os("CA72_PARTS_PNG") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let k = 2.0;
+        let mut panel = crate::Renderer::with_skin(crate::Skin::Worn, k, 1.0);
+        let mut scene = crate::Scene::default();
+        for v in scene.values.iter_mut() {
+            *v = 0.5;
+        }
+        panel.render(&scene);
+        let crop = |p: &Pixmap, (x, y): (f64, f64), r: f64, name: &str| {
+            let c = p
+                .clone_rect(
+                    resvg::tiny_skia::IntRect::from_xywh(
+                        ((x - r) * k) as i32,
+                        ((y - r) * k) as i32,
+                        (2.0 * r * k) as u32,
+                        (2.0 * r * k) as u32,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            c.save_png(dir.join(format!("part-{name}.png"))).unwrap();
+        };
+        for (param, r) in [
+            ("cutoff", 90.0),
+            ("osc2_frequency", 100.0),
+            ("osc1_range", 90.0),
+        ] {
+            let c = &crate::CONTROLS[crate::controls::index(param).unwrap()];
+            crop(panel.frame(), c.centre(), r, param);
+        }
+        let mut strip = crate::strip::StripRenderer::new(k);
+        strip.render(&crate::strip::StripScene::default(), panel.frame(), None);
+        let mut whole = panel.frame().clone();
+        whole.draw_pixmap(
+            0,
+            (art::PANEL_H * k).round() as i32,
+            strip.frame().as_ref(),
+            &resvg::tiny_skia::PixmapPaint::default(),
+            resvg::tiny_skia::Transform::identity(),
+            None,
+        );
+        whole.save_png(dir.join("part-whole.png")).unwrap();
+    }
+
     /// The rail close up (a pixel a unit) over the worn panel's wood, a few names on its
     /// display (one with a descender, one changed, none), each `rail-<n>.png` in
     /// `$CA72_RAIL_PNG`, the folder: for looking at the name's display.
