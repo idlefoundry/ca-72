@@ -452,7 +452,7 @@ struct Editing {
     /// is (the editor opens with it there); when it was last moved on.
     ultra: f64,
     ultra_at: Option<Instant>,
-    /// What this computer keeps (`settings.rs`): ULTRA's shutter on or the light only, ULTRA's
+    /// What this computer keeps (`settings.rs`): ULTRA's shutter or always open, ULTRA's
     /// note read. The note shows once ULTRA's lamp is lit, until it is read.
     settings: Settings,
     ultra_note: bool,
@@ -690,6 +690,10 @@ impl Editing {
                 "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.".to_owned(),
                 Tone::Plain,
             ),
+            (
+                "RIGHT-CLICK THE LAMP FOR ITS SHUTTER, OR ALWAYS OPEN.".to_owned(),
+                Tone::Dim,
+            ),
             ("CLICK TO CLOSE".to_owned(), Tone::Dim),
         ];
         let mut note = Note {
@@ -916,6 +920,11 @@ impl Editing {
         {
             Pressed::Nothing => {}
             Pressed::Done => return,
+            Pressed::Lamp(shutter) => {
+                self.settings.shutter = shutter;
+                self.keep_settings();
+                return;
+            }
             Pressed::List(chosen) => {
                 self.show_midi_list(chosen);
                 return;
@@ -925,10 +934,6 @@ impl Editing {
             match drawer_hit(self.drawer.fonts(), &self.browser.drawer, dx, dy) {
                 Some(DrawerTarget::Update) => self.update.press(),
                 Some(DrawerTarget::Midi) => self.learning.list = !self.learning.list,
-                Some(DrawerTarget::Shutter) => {
-                    self.settings.shutter = !self.settings.shutter;
-                    self.keep_settings();
-                }
                 Some(DrawerTarget::MidiRow(i)) => {
                     self.learning.list_press(&self.params.midi_map, i, None);
                 }
@@ -1018,6 +1023,16 @@ impl Editing {
                 }
                 None => self.learning.close_menu(),
             }
+            return;
+        }
+        // ULTRA's lamp: its shutter, or always open (decisions.md R-ULTRA).
+        if ultra::on_lamp(x, y) {
+            self.learning.open_lamp_menu(
+                self.renderer.fonts(),
+                (x, y),
+                size,
+                self.settings.shutter,
+            );
             return;
         }
         let target = interact::hit(self.renderer.layout(), x, y);
@@ -1387,7 +1402,6 @@ impl Editing {
         self.browser.tick(&self.params);
         self.update.tick();
         self.browser.drawer.update = self.update.scene();
-        self.browser.drawer.shutter = self.settings.shutter;
         // MIDI Learn: what the audio thread caught assigned; the ring, the note and the menu;
         // the drawer's list (the presets again once the drawer has shut). A tip gives way to a
         // note or a menu.
@@ -2451,6 +2465,43 @@ mod tests {
         let middle = at(&e, (x, y));
         click(&mut e, middle);
         assert_eq!(host.take(), vec![]);
+    }
+
+    /// A right click on ULTRA's lamp (decisions.md R-ULTRA) opens its menu: its shutter or
+    /// always open, the one it is in in its title and not to be chosen; choosing the other
+    /// switches it, and the menu says so the next time.
+    #[test]
+    fn ultra_s_lamp_s_menu_chooses_its_shutter_or_always_open() {
+        let (mut e, _, _) = editing();
+        let lamp = at(&e, (art::COL + 3023.0, art::TOP + 92.0));
+        right_click(&mut e, lamp);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some("ULTRA'S LAMP · SHUTTER")
+        );
+        assert_eq!(
+            menu_items(&e),
+            vec![
+                ("SHUTTER".to_owned(), false),
+                ("ALWAYS OPEN".to_owned(), true)
+            ]
+        );
+        menu_item(&mut e, "ALWAYS OPEN");
+        assert!(!e.settings.shutter && e.learning.menu().is_none());
+        right_click(&mut e, lamp);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some("ULTRA'S LAMP · ALWAYS OPEN")
+        );
+        menu_item(&mut e, "SHUTTER");
+        assert!(e.settings.shutter);
+        // (Beside it, QUALITY's own menu, as before.)
+        let toggle = at(&e, centre("quality"));
+        right_click(&mut e, toggle);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some("QUALITY: SET FOR THE COMPUTER, NOT THE SOUND")
+        );
     }
 
     /// ULTRA's lamp (decisions.md R-ULTRA) follows QUALITY by the time between frames, over
@@ -3970,7 +4021,7 @@ mod tests {
     /// folder: the panel's last column close up (two pixels a unit) at points of its opening,
     /// `shutter-<p>.png`, and of the light only, `still-<p>.png`; QUALITY's three positions,
     /// `quality-<lo|hi|ultra>.png`; and the window as it opens at ULTRA with its note,
-    /// `note.png`.
+    /// `note.png`, and its lamp's menu, `menu.png`.
     #[test]
     #[ignore = "writes images for a look"]
     fn the_ultra_pngs() {
@@ -4030,6 +4081,17 @@ mod tests {
         e.scene.note = Some(e.ultra_note());
         e.renderer.render(&e.scene);
         e.renderer.frame().save_png(out.join("note.png")).unwrap();
+        // ULTRA's lamp's menu, right-clicked.
+        e.ultra_note = false;
+        e.settings.ultra_note_read = true;
+        let size = e.renderer.text_size() * MENU_TEXT;
+        let at = (art::COL + 3023.0, art::TOP + 92.0);
+        e.learning
+            .open_lamp_menu(e.renderer.fonts(), at, size, e.settings.shutter);
+        e.scene.note = None;
+        e.scene.menu = e.learning.menu().cloned();
+        e.renderer.render(&e.scene);
+        e.renderer.frame().save_png(out.join("menu.png")).unwrap();
     }
 
     /// MIDI Learn drawn (decisions.md R34), for looking at: CUTOFF being learned (ringed, its

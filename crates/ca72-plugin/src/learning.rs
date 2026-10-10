@@ -76,6 +76,9 @@ pub enum Item {
     List,
     /// Says why the control cannot be learned; does nothing.
     Not,
+    /// ULTRA's lamp's (decisions.md R-ULTRA): its shutter, or always open.
+    Shutter,
+    AlwaysOpen,
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -96,6 +99,8 @@ pub enum Pressed {
     Done,
     /// MIDI ASSIGNMENTS…: the drawer's MIDI list wanted, this parameter chosen.
     List(Option<usize>),
+    /// ULTRA's lamp's menu: its shutter chosen (true), or always open.
+    Lamp(bool),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -227,6 +232,32 @@ impl Learning {
         self.take_keys = true;
     }
 
+    /// ULTRA's lamp's menu (decisions.md R-ULTRA) opened at (`x`, `y`): its shutter or always
+    /// open, the one it is in named in its title and dim among the items.
+    pub fn open_lamp_menu(&mut self, fonts: &Fonts, (x, y): (f64, f64), size: f64, shutter: bool) {
+        let menu = Menu {
+            x,
+            y,
+            size,
+            title: format!(
+                "ULTRA'S LAMP · {}",
+                if shutter { "SHUTTER" } else { "ALWAYS OPEN" }
+            ),
+            items: vec![
+                ("SHUTTER".to_owned(), !shutter),
+                ("ALWAYS OPEN".to_owned(), shutter),
+            ],
+            hover: None,
+        }
+        .placed(fonts, x, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: vec![Item::Shutter, Item::AlwaysOpen],
+            menu,
+        });
+        self.take_keys = true;
+    }
+
     /// The menu closed.
     pub fn close_menu(&mut self) {
         self.open = None;
@@ -258,6 +289,8 @@ impl Learning {
             (Some(Item::Cancel), _) => self.cancel(map),
             (Some(Item::Remove), Some(i)) => self.remove(map, i),
             (Some(Item::List), l) => return Pressed::List(l),
+            (Some(Item::Shutter), _) => return Pressed::Lamp(true),
+            (Some(Item::AlwaysOpen), _) => return Pressed::Lamp(false),
             _ => {}
         }
         Pressed::Done

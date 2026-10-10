@@ -3453,9 +3453,15 @@ toggle."
   then never again on that computer: "ULTRA · NO COMPROMISES / THE CIRCUIT'S MODEL EXACTLY, AT
   ABOUT SEVEN TIMES THE WORK OF HI: / ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER. / IT
   IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL / PROJECTS ON POWERFUL
-  COMPUTERS. PLAYED LIVE, IT MAY DROP OUT. / CLICK TO CLOSE", left of the lamp's column.
-- **The light only:** a button in the presets drawer's top row, ULTRA SHUTTER (on by default),
-  between the search (350 units shorter) and MIDI; the computer's, not the session's.
+  COMPUTERS. PLAYED LIVE, IT MAY DROP OUT. / RIGHT-CLICK THE LAMP FOR ITS SHUTTER, OR ALWAYS
+  OPEN. / CLICK TO CLOSE", left of the lamp's column.
+- **Shutter or always open** (the light only): first a button in the presets drawer's top row;
+  then, the owner: "Shutter versus always open mode should be selectable via a right click on
+  the ultra lamp". A right click on the lamp (its ring and what is in it) opens its menu, as a
+  control's MIDI Learn menu opens: "ULTRA'S LAMP · SHUTTER" (or "· ALWAYS OPEN"), its items
+  SHUTTER and ALWAYS OPEN, the one it is in dim. The button is gone from the drawer, and the
+  search has its room again. The computer's, not the session's; the note tells of it ("RIGHT-CLICK
+  THE LAMP FOR ITS SHUTTER, OR ALWAYS OPEN.").
 - **The computer's settings:** a file of its own, `CA-72/settings.toml` in the folder the
   presets' library keeps (`settings.rs`): `ultra_shutter`, `ultra_note_read`; keys it does not
   know kept, a file it cannot read never written over.
@@ -3483,7 +3489,8 @@ and off while it plays (no allocation, no free); AUTO GAIN's key at ULTRA is HI'
 gestures (`interact.rs`, the editor's `quality_goes_where_its_toggle_is_clicked`); ULTRA's lamp
 following QUALITY by the time between frames, its note read once, the light only's times
 (`ultra_s_lamp_follows_quality_and_its_note_is_read_once`); the settings file kept and a bad one
-left alone; the parts' pictures cut out; the drawer's ULTRA SHUTTER found where it is drawn. The
+left alone; the parts' pictures cut out; the lamp's menu choosing its shutter or always open
+(`ultra_s_lamp_s_menu_chooses_its_shutter_or_always_open`). The
 plug-in's own frames at points of the opening (`the_ultra_pngs`) match the mock-up's. A frame
 of the opening costs 1.45 ms to draw on average (3.4 at most) at the window's opening size,
 3.2 ms (6.6) at twice it (`ultra_timings`, release); the editor's frames come every 15 ms. The
@@ -3495,5 +3502,5 @@ only when the host renders offline:** "No, I think Ultra should remain Ultra." U
 circuit's model with no compromises always, live or rendering; the note says what it costs.
 
 **Open (asked, not answered):** the lamp's colour (amber, as built; green and red were offered);
-whether the light only is in the right place; whether the note shows once a computer.
+whether the note shows once a computer.
 - **The number** of this record is a placeholder until the merge.

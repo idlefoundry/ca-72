@@ -146,7 +146,8 @@ and sends nothing of yours.
   about seven times the work of HI; one voice takes about a whole core of a fast computer, so
   it is meant for offline renders (export, bounce, freeze) and small projects on powerful
   computers. Choosing it, a shutter in the panel above opens and a lamp comes up and lights
-  (or, with ULTRA SHUTTER off in the presets drawer, the lamp only lights); the first time, a
+  (or, chosen with a right click on the lamp, ALWAYS OPEN: the lamp stays up and only its
+  light comes and goes); the first time, a
   note says what ULTRA is for. At LO, Potato mode, the
   voices are played by a light model instead of the circuit's, for computers the circuit is
   too heavy for. It follows the same panel, the plug-in's own controls with it, its laws
