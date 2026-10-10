@@ -3482,7 +3482,11 @@ gestures (`interact.rs`, the editor's `quality_goes_where_its_toggle_is_clicked`
 following QUALITY by the time between frames, its note read once, the light only's times
 (`ultra_s_lamp_follows_quality_and_its_note_is_read_once`); the settings file kept and a bad one
 left alone; the parts' pictures cut out; the drawer's ULTRA SHUTTER found where it is drawn. The
-plug-in's own frames at points of the opening (`the_ultra_pngs`) match the mock-up's.
+plug-in's own frames at points of the opening (`the_ultra_pngs`) match the mock-up's. A frame
+of the opening costs 1.45 ms to draw on average (3.4 at most) at the window's opening size,
+3.2 ms (6.6) at twice it (`ultra_timings`, release); the editor's frames come every 15 ms. The
+Mac's build ("CA-72 ULTRA", renamed, beside the owner's open Live) passes clap-validator and
+pluginval (strictness 5); it has not yet been opened in a host.
 
 **Open (asked, not answered):** the lamp's colour (amber, as built; green and red were offered);
 whether the light only is in the right place; whether the note shows once a computer. And,

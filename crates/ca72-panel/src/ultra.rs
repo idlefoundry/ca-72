@@ -457,6 +457,32 @@ mod tests {
         assert!(open.sprites.iter().all(|s| (s.zoom - 1.0).abs() < 1e-12));
     }
 
+    /// What a frame of the opening costs to draw at the window's opening size and twice it
+    /// (a Retina screen): printed (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "prints timings"]
+    fn ultra_timings() {
+        use crate::render::{Renderer, Scene};
+        use crate::skin::Skin;
+        for scale in [1720.0 / crate::art::W, 3440.0 / crate::art::W] {
+            let mut r = Renderer::with_skin(Skin::Worn, scale, 1.0);
+            let mut scene = Scene::default();
+            r.render(&scene);
+            let mut times = Vec::new();
+            for k in 0..=160 {
+                scene.ultra = f64::from(k) / 160.0;
+                let t = std::time::Instant::now();
+                r.render(&scene);
+                times.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            let mean = times.iter().sum::<f64>() / times.len() as f64;
+            let max = times.iter().copied().fold(0.0, f64::max);
+            println!(
+                "scale {scale:.3}: a frame of ULTRA's opening {mean:.2} ms on average, {max:.2} at most"
+            );
+        }
+    }
+
     /// An arc's path goes the short way, or round, as asked.
     #[test]
     fn an_arc_goes_the_way_it_is_asked() {
