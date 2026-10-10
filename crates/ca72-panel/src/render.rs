@@ -72,6 +72,9 @@ pub struct Renderer {
     slots: Vec<Slot>,
     /// The scene the frame shows.
     shown: Option<Scene>,
+    /// The pixels the last render changed: left, top, right, bottom (the last two past the
+    /// change).
+    damage: Option<[i32; 4]>,
     skin: Skin,
     /// The worn skin's pictures, once it has been shown.
     pictures: Option<Pictures>,
@@ -125,6 +128,7 @@ impl Renderer {
             frame: empty(),
             slots: Vec::new(),
             shown: None,
+            damage: None,
             skin,
             pictures: None,
         };
@@ -207,7 +211,7 @@ impl Renderer {
             .fill(Color::from_rgba8(0x1d, 0x1b, 0x1a, 0xff));
         let pictures = self.pictures.get_or_insert_with(Pictures::load);
         let bg = &mut self.background;
-        // The wood: its grain along the top strip and the name board, down the column; each
+        // The wood: its grain along the top strip, the name board and the strip's rail; each
         // board its own band of the picture, drawn out along the grain.
         let wood = &pictures.walnut;
         let along = (art::W * s) as f32 / wood.width() as f32;
@@ -215,6 +219,7 @@ impl Renderer {
         for (y, hh, band) in [
             (0.0, art::TOP, 40.0),
             (art::TOP + art::PH, art::BOARD, 470.0),
+            (art::PANEL_H, crate::strip::RAIL, 260.0),
         ] {
             fill(
                 bg,
@@ -224,21 +229,6 @@ impl Renderer {
                 Transform::from_row(along, 0.0, 0.0, across, 0.0, (y * s) as f32 - band * across),
             );
         }
-        let down = ((art::PH + 4.0) * s) as f32 / wood.width() as f32;
-        fill(
-            bg,
-            wood,
-            (0.0, (art::TOP - 2.0) * s, art::COL * s, (art::PH + 4.0) * s),
-            None,
-            Transform::from_row(
-                0.0,
-                down,
-                -down / 2.2,
-                0.0,
-                (art::COL * s) as f32 + 120.0 * down / 2.2,
-                ((art::TOP - 2.0) * s) as f32,
-            ),
-        );
         // The faces: the picture 640 units across, mirrored tile to tile.
         let face = &pictures.face;
         let k = (640.0 * s) as f32 / face.width() as f32;
@@ -252,12 +242,13 @@ impl Renderer {
             None,
             at(art::COL, art::TOP),
         );
+        let strip_top = art::PANEL_H + crate::strip::RAIL;
         fill(
             bg,
             face,
-            (art::LH_X * s, art::TOP * s, art::LPW * s, art::PH * s),
-            Some(6.0 * s),
-            at(art::LH_X + 200.0, art::TOP),
+            (0.0, strip_top * s, art::W * s, (art::H - strip_top) * s),
+            None,
+            at(320.0, strip_top),
         );
         let options = &self.options;
         let svg_over = |frame: &mut Pixmap, body: &str| {
@@ -446,21 +437,48 @@ impl Renderer {
     /// Brings the frame up to `scene`, rendering only the layers whose art changed: whether
     /// the frame changed.
     pub fn render(&mut self, scene: &Scene) -> bool {
+        self.damage = None;
         if self.shown.as_ref() == Some(scene) {
             return false;
         }
+        let first = self.shown.is_none();
         self.shown = Some(scene.clone());
         let layers = self.layers(scene);
         let mut changed = self.slots.len() != layers.len();
+        // Where the layers changed, as they were and as they are.
+        let mut damage: Option<[i32; 4]> = None;
+        let mut add = |pixels: &Option<(i32, i32, Pixmap)>| {
+            if let Some((x, y, p)) = pixels {
+                let r = [*x, *y, x + p.width() as i32, y + p.height() as i32];
+                damage = Some(damage.map_or(r, |d| {
+                    [
+                        d[0].min(r[0]),
+                        d[1].min(r[1]),
+                        d[2].max(r[2]),
+                        d[3].max(r[3]),
+                    ]
+                }));
+            }
+        };
+        for slot in self.slots.iter().skip(layers.len()) {
+            add(&slot.pixels);
+        }
         self.slots.resize_with(layers.len(), Slot::default);
         for (i, layer) in layers.into_iter().enumerate() {
             if self.slots[i].layer.as_ref() == Some(&layer) {
                 continue;
             }
+            add(&self.slots[i].pixels);
             self.slots[i].pixels = self.render_layer(&layer);
+            add(&self.slots[i].pixels);
             self.slots[i].layer = Some(layer);
             changed = true;
         }
+        self.damage = if first {
+            Some([0, 0, self.frame.width() as i32, self.frame.height() as i32])
+        } else {
+            damage
+        };
         if changed {
             self.frame
                 .data_mut()
@@ -479,6 +497,38 @@ impl Renderer {
             }
         }
         changed
+    }
+
+    /// Whether the last render changed a pixel at or below `y` (drawing units: the strip's
+    /// top, for its parts drawn over the frame).
+    pub fn changed_below(&self, y: f64) -> bool {
+        self.damage
+            .is_some_and(|d| d[3] > (y * self.scale).round() as i32)
+    }
+
+    /// The layers that float over everything (MIDI Learn's ring, the tip, the note, a menu)
+    /// drawn again over `onto`, a frame the drawing's size at this scale: the editor's, over the
+    /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
+    pub fn draw_floating(&self, onto: &mut Pixmap) {
+        // (The controls', then POWER's, its lamp's, OVERLOAD's and the name plate's: fixed.)
+        let fixed = CONTROLS.len() + 4;
+        for slot in self.slots.iter().skip(fixed) {
+            if let Some((x, y, p)) = &slot.pixels {
+                onto.draw_pixmap(
+                    *x,
+                    *y,
+                    p.as_ref(),
+                    &PixmapPaint::default(),
+                    Transform::identity(),
+                    None,
+                );
+            }
+        }
+    }
+
+    /// Whether any layer floats now ([`Renderer::draw_floating`]).
+    pub fn floating(&self) -> bool {
+        self.slots.len() > CONTROLS.len() + 4
     }
 }
 
@@ -790,6 +840,25 @@ pub(crate) fn rounded_rect(
 mod tests {
     use super::*;
     use crate::controls::index;
+
+    /// The renderer says where its frame changed: a knob turned on the panel above the strip
+    /// changes nothing on the strip, one of the strip's does (its parts are drawn again over
+    /// it then, `crate::strip`); the first frame changes everything.
+    #[test]
+    fn it_says_whether_the_strip_changed() {
+        let mut r = Renderer::new(0.2, 1.0);
+        let mut scene = Scene::default();
+        assert!(r.render(&scene));
+        assert!(r.changed_below(art::H - 1.0));
+        scene.values[index("cutoff").expect("CUTOFF")] = 0.7;
+        assert!(r.render(&scene));
+        assert!(!r.changed_below(art::PANEL_H));
+        scene.values[index("drive").expect("DRIVE")] = 0.7;
+        assert!(r.render(&scene));
+        assert!(r.changed_below(art::PANEL_H));
+        assert!(!r.render(&scene));
+        assert!(!r.changed_below(0.0));
+    }
 
     /// The pixels two frames differ in, inside and outside `within` (the drawing's units:
     /// left, top, right, bottom).

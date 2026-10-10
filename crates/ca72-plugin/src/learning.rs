@@ -6,12 +6,12 @@
 
 use std::time::{Duration, Instant};
 
+use ca72_panel::Target;
 use ca72_panel::controls::{CONTROLS, index as control_index};
 use ca72_panel::fonts::Fonts;
 use ca72_panel::learn::{Menu, Note, PANEL, Tone, above};
 use ca72_panel::presets::{MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone};
 use ca72_panel::strip::{StripControl, span};
-use ca72_panel::{H, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 
 use crate::learn::{Assigned, Cc, LEARNABLE, MidiMap, RESERVED_TEXT, index, reserved};
@@ -22,8 +22,9 @@ const NOTICE: Duration = Duration::from_secs(4);
 /// The keys the drawer's MIDI list takes, as it says.
 pub const KEYS_TEXT: &str = "UP, DOWN: CHOOSE · ENTER: LEARN · DELETE: REMOVE · ESC: CANCEL";
 
-/// Where a learnable parameter's control is: the panel's (its index in [`CONTROLS`]), the
-/// strip's, or none (LOCK: the drawer's list alone learns it).
+/// Where a learnable parameter's control is: the panel's (its index in [`CONTROLS`]: the
+/// strip's knobs and the left hand's are the panel's controls too), the strip's tabs, or none
+/// (LOCK: the drawer's list alone learns it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
     Panel(usize),
@@ -35,9 +36,9 @@ pub fn place(i: usize) -> Option<Place> {
     let id = LEARNABLE.get(i)?.id;
     Some(match id {
         "poly" => Place::Strip(StripControl::Poly),
-        "voices" => Place::Strip(StripControl::Voices),
-        "entropy" => Place::Strip(StripControl::Entropy),
-        "spread" => Place::Strip(StripControl::Spread),
+        "unison" => Place::Strip(StripControl::Unison),
+        "placement" => Place::Strip(StripControl::Placement),
+        "auto_gain" => Place::Strip(StripControl::AutoGain),
         _ => Place::Panel(control_index(id)?),
     })
 }
@@ -48,21 +49,20 @@ pub fn learnable_at(p: Place) -> Option<usize> {
         Place::Panel(c) => index(CONTROLS.get(c)?.param),
         Place::Strip(s) => index(match s {
             StripControl::Poly => "poly",
-            StripControl::Voices => "voices",
-            StripControl::Entropy => "entropy",
-            StripControl::Spread => "spread",
+            StripControl::Unison => "unison",
+            StripControl::Placement => "placement",
+            StripControl::AutoGain => "auto_gain",
         }),
     }
 }
 
-/// Where a note about a place's control goes: centred above it (a strip control's, above the
-/// strip, at the panel's foot).
+/// Where a note about a place's control goes: centred above it.
 fn note_point(p: Place) -> (f64, f64) {
     match p {
         Place::Panel(c) => above(&CONTROLS[c]),
         Place::Strip(s) => {
-            let (x0, x1) = span(s);
-            ((x0 + x1) / 2.0, H)
+            let (x0, y0, x1, _) = span(s);
+            ((x0 + x1) / 2.0, y0)
         }
     }
 }

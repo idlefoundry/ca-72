@@ -1,0 +1,1094 @@
+//! The strip's own parts, drawn over the drawing (A6): the tabs, lit amber from inside with
+//! their light on the face round them (`plugin_kit_materials`, as the CA-74's buttons that
+//! light), the readouts' seven segments and the voices' display behind their glass, the rail's
+//! keys, and the preset's name in dots. The light is the panel's neon orange. What does not
+//! change is drawn once a scale, and laid over the drawing's strip again only when that
+//! changes; a readout drawn again only when what it reads does; the drops of the voices'
+//! display each frame while they move (as the CA-74's, its R36), and then only their window.
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::time::Instant;
+
+use plugin_kit_materials::{
+    Glow, Lighting, Tint, Underlight, fill, font, glass, place, sprite, widened,
+};
+use resvg::tiny_skia::{PathBuilder, Pixmap, PixmapPaint, Transform};
+use resvg::usvg;
+
+use super::{
+    Bank, DISPLAY, Field, KEY_HEIGHT, NAME, Readout, StripControl, StripScene, StripTarget, TAB,
+    blank, keys, span,
+};
+use crate::art::{self, PANEL_H};
+use crate::fonts::{FAMILY, Fonts};
+use crate::presets::{BarScene, BarTarget};
+use crate::svg::{N, Svg, put};
+
+static BUTTON: &[u8] = include_bytes!("../../assets/worn/button.png");
+static GLASS: &[u8] = include_bytes!("../../assets/worn/display-glass.png");
+
+/// The panel's neon orange (the mock-up's): lit segments, dots and drops.
+const ORANGE: (u8, u8, u8) = (255, 112, 40);
+const ORANGE_HOT: (u8, u8, u8) = (255, 190, 120);
+const SEG_ON: &str = "#ff7028";
+const SEG_OFF_OPACITY: f64 = 0.05;
+/// The tabs: translucent amber plastic lit from inside (the CA-74's amber, tried there: lit
+/// `[1.25, 0.55 g^1.6, 0.08 g^3]` of the glow `g`, unlit `[0.26, 0.062, 0.003]` of the shade),
+/// and their light on the face round them.
+const AMBER: Tint = Tint {
+    lit: |g| [1.25 * g, 0.55 * g.powf(1.6), 0.08 * g * g * g],
+    unlit: |k| [0.26 * k, 0.062 * k, 0.003 * k],
+};
+const AMBER_LIGHT: Underlight = Underlight {
+    rim: [1.0, 0.42, 0.12],
+    light: [1.0, 0.28, 0.05],
+};
+/// The tabs' and the keys' print.
+const TAB_PRINT: &str = "#2a1006";
+const KEY_PRINT: &str = "#d9d2c0";
+/// The name's dots' pitch, and the drops' sizes (a sounding voice's, an idle one's), units.
+const DOT: f64 = 6.0;
+const DROP: f64 = 10.0;
+const IDLE_DROP: f64 = 6.0;
+
+/// The strip's parts at a scale: its frame, what never changes, the caps and light resampled,
+/// the readouts as last drawn, the drops.
+pub struct StripRenderer {
+    scale: f64,
+    options: usvg::Options<'static>,
+    frame: Pixmap,
+    still: Option<Sparse>,
+    print: Option<Sparse>,
+    /// The drawing's strip with the still parts over it; the display's window as drawn before
+    /// the drops.
+    base: Option<Pixmap>,
+    beneath: Option<Pixmap>,
+    lighting: Lighting,
+    glass: Pixmap,
+    button: Pixmap,
+    lit_tab: Option<Pixmap>,
+    glows: Vec<((f64, f64), Glow)>,
+    readouts: Vec<Option<Reading>>,
+    liquid: Liquid,
+    last: Option<Instant>,
+    moved: bool,
+    shown: Option<StripScene>,
+    /// The pixels the last render changed: left, top, right, bottom (the last two past the
+    /// change).
+    damage: Option<[i32; 4]>,
+    /// Every frame drawn whole (the tests' reference for one drawn in parts).
+    whole: bool,
+}
+
+impl fmt::Debug for StripRenderer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StripRenderer")
+            .field("scale", &self.scale)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A readout drawn: what it reads, lit or dark, and the patch of the frame it covers.
+struct Reading {
+    text: String,
+    lit: bool,
+    left: i32,
+    top: i32,
+    patch: Pixmap,
+}
+
+impl StripRenderer {
+    /// At `scale` (pixels a drawing unit), its pictures decoded.
+    pub fn new(scale: f64) -> Self {
+        let png = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
+        let button = png(BUTTON);
+        let fonts = Fonts::new();
+        StripRenderer {
+            scale,
+            options: usvg::Options {
+                fontdb: fonts.database(),
+                font_family: FAMILY.into(),
+                ..usvg::Options::default()
+            },
+            frame: blank(scale).expect("a frame"),
+            still: None,
+            print: None,
+            base: None,
+            beneath: None,
+            lighting: plugin_kit_materials::lighting(&button, TAB.0 / TAB.1, AMBER),
+            glass: png(GLASS),
+            button,
+            lit_tab: None,
+            glows: Vec::new(),
+            readouts: Vec::new(),
+            liquid: Liquid::default(),
+            last: None,
+            moved: false,
+            shown: None,
+            damage: None,
+            whole: false,
+        }
+    }
+
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+
+    /// Drawn again at `scale`.
+    pub fn rescale(&mut self, scale: f64) {
+        if scale != self.scale {
+            self.scale = scale;
+            if let Some(f) = blank(scale) {
+                self.frame = f;
+            }
+            (self.still, self.print, self.lit_tab) = (None, None, None);
+            (self.base, self.beneath) = (None, None);
+            self.glows.clear();
+            self.readouts.clear();
+            self.shown = None;
+        }
+    }
+
+    pub fn frame(&self) -> &Pixmap {
+        &self.frame
+    }
+
+    /// Whether the drops are still moving (draw again next frame).
+    pub fn animating(&self) -> bool {
+        self.moved
+    }
+
+    /// The pixels of the frame the last render changed: left, top, right, bottom (the last two
+    /// past the change).
+    pub fn damage(&self) -> Option<[i32; 4]> {
+        self.damage
+    }
+
+    /// Drawn for `scene` over the drawing's strip (`under`: the panel's renderer's frame, the
+    /// whole drawing at this scale; `under_changed`, whether it has changed since the last
+    /// call): whether the frame changed. (Over the drawing itself, not apart from it: a lit
+    /// tab's light lights the face round it.)
+    pub fn render(&mut self, scene: &StripScene, under: &Pixmap, under_changed: bool) -> bool {
+        self.render_at(scene, under, under_changed, Instant::now())
+    }
+
+    /// As [`StripRenderer::render`], the drops eased to `now`.
+    pub fn render_at(
+        &mut self,
+        scene: &StripScene,
+        under: &Pixmap,
+        under_changed: bool,
+        now: Instant,
+    ) -> bool {
+        let dt = self
+            .last
+            .map_or(0.0, |t| now.saturating_duration_since(t).as_secs_f64());
+        self.last = Some(now);
+        let (moved, _) = self.liquid.step(scene, dt.min(0.1));
+        self.moved = moved;
+        // Anything but the drops changed: all of it drawn again; else the drops' window alone.
+        let whole = self.whole
+            || under_changed
+            || self.base.is_none()
+            || self.beneath.is_none()
+            || self.shown.as_ref().is_none_or(|was| {
+                let mut now = scene.clone();
+                now.field.clone_from(&was.field);
+                now != *was
+            });
+        if whole {
+            self.draw(scene, under, under_changed);
+            self.damage = Some([0, 0, self.frame.width() as i32, self.frame.height() as i32]);
+        } else if moved {
+            let window = self.window();
+            if let Some(b) = &self.beneath {
+                paste(&mut self.frame, b, window);
+            }
+            self.drops(window);
+            self.damage = Some(window);
+        } else {
+            self.damage = None;
+            self.shown = Some(scene.clone());
+            return false;
+        }
+        self.shown = Some(scene.clone());
+        true
+    }
+
+    /// The display's window, inside its glass, in the frame's pixels: left, top, right, bottom.
+    fn window(&self) -> [i32; 4] {
+        let s = self.scale;
+        let (dx, dy, dw, dh) = DISPLAY;
+        [
+            ((dx + 4.0) * s) as i32,
+            ((dy - PANEL_H + 4.0) * s) as i32,
+            ((dx + dw - 4.0) * s).ceil() as i32,
+            ((dy - PANEL_H + dh - 4.0) * s).ceil() as i32,
+        ]
+    }
+
+    /// The voices' drops, behind the display's glass, in its `window`.
+    fn drops(&mut self, window: [i32; 4]) {
+        let s = self.scale;
+        let (dx, dy, dw, dh) = DISPLAY;
+        self.liquid.draw(
+            &mut self.frame,
+            window,
+            ((dx + dw / 2.0) * s, (dy - PANEL_H + dh / 2.0) * s),
+            (dw / 2.0 - 40.0) * s,
+            s,
+        );
+    }
+
+    /// The drawing's strip, its rows from the panel's foot down, with what never changes over
+    /// it.
+    fn make_base(&mut self, under: &Pixmap) {
+        let s = self.scale;
+        let Some(mut base) = blank(s) else {
+            return;
+        };
+        let (fw, fh) = (base.width() as usize, base.height() as usize);
+        let top = (PANEL_H * s).round() as usize;
+        let uw = under.width() as usize;
+        let rows = fh.min((under.height() as usize).saturating_sub(top));
+        let w = fw.min(uw);
+        let (src, dst) = (under.data(), base.data_mut());
+        for y in 0..rows {
+            let from = ((top + y) * uw) * 4;
+            let to = (y * fw) * 4;
+            dst[to..to + w * 4].copy_from_slice(&src[from..from + w * 4]);
+        }
+        if let Some(still) = &self.still {
+            still.over(&mut base);
+        }
+        self.base = Some(base);
+    }
+
+    fn draw(&mut self, scene: &StripScene, under: &Pixmap, under_changed: bool) {
+        let s = self.scale;
+        if self.still.is_none() {
+            self.make_still();
+        }
+        if under_changed || self.base.is_none() {
+            self.make_base(under);
+        }
+        if let Some(b) = &self.base
+            && b.data().len() == self.frame.data().len()
+        {
+            self.frame.data_mut().copy_from_slice(b.data());
+        }
+        // The lit tabs: their light on the face round them, then the lit cap over the unlit.
+        let lit = lit_tabs(scene);
+        if self.lit_tab.is_none() {
+            let px = |v: f64| (v * s).round().max(1.0) as u32;
+            self.lit_tab = Some(plugin_kit_materials::resample(
+                &self.lighting.lit,
+                px(TAB.0),
+                px(TAB.1),
+            ));
+        }
+        for &at in &lit {
+            let glow = match self.glows.iter().position(|(g, _)| *g == at) {
+                Some(i) => Some(&self.glows[i].1),
+                None => {
+                    if let Some(g) = Glow::new(s, (at.0, at.1 - PANEL_H), TAB, AMBER_LIGHT) {
+                        self.glows.push((at, g));
+                        self.glows.last().map(|(_, g)| g)
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(g) = glow {
+                g.light(&mut self.frame);
+            }
+            if let Some(cap) = &self.lit_tab {
+                place(
+                    &mut self.frame,
+                    cap,
+                    s,
+                    (at.0, at.1 - PANEL_H),
+                    &PixmapPaint::default(),
+                );
+            }
+        }
+        // The readouts.
+        if self.readouts.len() != Readout::ALL.len() {
+            self.readouts = (0..Readout::ALL.len()).map(|_| None).collect();
+        }
+        for (i, r) in Readout::ALL.into_iter().enumerate() {
+            let (text, on) = &scene.readouts[i];
+            reading(self, i, r, text, *on);
+        }
+        // The voices' drops, behind the display's glass, the window kept as it was before
+        // them (for the frames in which only they move). Nothing after them is drawn there.
+        let window = self.window();
+        self.beneath = cut(&self.frame, window);
+        self.drops(window);
+        // The preset's name, its star and arrow.
+        name(&mut self.frame, s, &scene.bar);
+        let mut o = Svg::default();
+        name_icons(&mut o, &scene.bar);
+        // MIDI Learn's ring round the control it waits for.
+        if let Some(c) = scene.learning {
+            ring(&mut o, c);
+        }
+        star_key(&mut o, scene.bar.favorite);
+        hovered(&mut o, scene.hover);
+        svg_over(&self.options, &mut self.frame, s, &o.0);
+        // The print over the caps.
+        if let Some(p) = &self.print {
+            p.over(&mut self.frame);
+        }
+    }
+
+    /// What never changes at this scale: the unlit tabs, the keys' caps, the glass of the
+    /// readouts, of the display and of the name, the name's dots unlit; and the print over the
+    /// caps, apart.
+    fn make_still(&mut self) {
+        let s = self.scale;
+        let Some(mut still) = blank(s) else {
+            return;
+        };
+        let at = |(x, y): (f64, f64)| (x, y - PANEL_H);
+        // The tabs, unlit.
+        for b in Bank::ALL {
+            for i in 0..b.words().len() {
+                sprite(&mut still, &self.lighting.unlit, s, at(b.tab(i)), TAB);
+            }
+        }
+        // The keys: the charcoal cap, drawn out wider for SAVE.
+        for (x, w, _) in keys() {
+            let cap = widened(&self.button, w / KEY_HEIGHT);
+            sprite(&mut still, &cap, s, at((x, super::RAIL_Y)), (w, KEY_HEIGHT));
+        }
+        // The glass.
+        for r in Readout::ALL {
+            let (x, y, w, h) = r.window();
+            glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
+        }
+        let (x, y, w, h) = DISPLAY;
+        glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
+        let (x, y, w, h) = NAME;
+        glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 3.0);
+        // The name's dots, every one faintly there.
+        let r = DOT * 0.36 * s;
+        let mut unlit = PathBuilder::new();
+        name_dots(s, |_, _, _, (px, py)| unlit.push_circle(px, py, r as f32));
+        fill(&mut still, unlit, ORANGE, 0.06);
+        self.still = Some(Sparse::new(still));
+        // The print: the tabs' words and the keys' marks.
+        if let Some(mut print) = blank(s) {
+            let mut o = Svg::default();
+            for b in Bank::ALL {
+                for (i, w) in b.words().iter().enumerate() {
+                    let (x, y) = b.tab(i);
+                    put!(
+                        o,
+                        "<text x='{}' y='{}' font-size='17' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{TAB_PRINT}' fill-opacity='0.85'>{w}</text>",
+                        N(x),
+                        N(y - PANEL_H)
+                    );
+                }
+            }
+            key_marks(&mut o);
+            svg_over(&self.options, &mut print, s, &o.0);
+            self.print = Some(Sparse::new(print));
+        }
+    }
+}
+
+/// A layer mostly clear, laid over a frame its size where it has pixels only. (tiny-skia's
+/// `draw_pixmap` blends every pixel: the still parts and the print over the whole strip had
+/// cost 15 ms a frame at 0.87 of the drawing.)
+struct Sparse {
+    pixmap: Pixmap,
+    /// Its runs of pixels not clear: each from, to (bytes).
+    runs: Vec<(usize, usize)>,
+}
+
+impl Sparse {
+    fn new(pixmap: Pixmap) -> Self {
+        let w = pixmap.width() as usize;
+        let mut runs = Vec::new();
+        for (y, row) in pixmap.pixels().chunks(w.max(1)).enumerate() {
+            let mut x = 0;
+            while x < row.len() {
+                if row[x].alpha() == 0 {
+                    x += 1;
+                    continue;
+                }
+                let from = x;
+                while x < row.len() && row[x].alpha() != 0 {
+                    x += 1;
+                }
+                runs.push(((y * w + from) * 4, (y * w + x) * 4));
+            }
+        }
+        Sparse { pixmap, runs }
+    }
+
+    /// Laid over `frame` (its size), source over, as tiny-skia's pipeline does (premultiplied,
+    /// each channel `s + (d (255 - a) + 255) / 256`).
+    fn over(&self, frame: &mut Pixmap) {
+        if frame.data().len() != self.pixmap.data().len() {
+            return;
+        }
+        let (src, dst) = (self.pixmap.data(), frame.data_mut());
+        for &(from, to) in &self.runs {
+            for (s, d) in src[from..to]
+                .chunks_exact(4)
+                .zip(dst[from..to].chunks_exact_mut(4))
+            {
+                let keep = 255 - u16::from(s[3]);
+                for c in 0..4 {
+                    d[c] = (u16::from(s[c]) + ((u16::from(d[c]) * keep + 255) >> 8)) as u8;
+                }
+            }
+        }
+    }
+}
+
+/// The pixels of `frame` in `rect` (left, top, right, bottom), cut out.
+fn cut(frame: &Pixmap, rect: [i32; 4]) -> Option<Pixmap> {
+    let [x0, y0, x1, y1] = clipped(frame, rect)?;
+    let mut p = Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32)?;
+    let (fw, n) = (frame.width() as usize, (x1 - x0) * 4);
+    for y in y0..y1 {
+        let from = (y * fw + x0) * 4;
+        let to = (y - y0) * n;
+        p.data_mut()[to..to + n].copy_from_slice(&frame.data()[from..from + n]);
+    }
+    Some(p)
+}
+
+/// `patch`, cut out of `rect` ([`cut`]), put back.
+fn paste(frame: &mut Pixmap, patch: &Pixmap, rect: [i32; 4]) {
+    let Some([x0, y0, x1, y1]) = clipped(frame, rect) else {
+        return;
+    };
+    let (fw, n) = (frame.width() as usize, (x1 - x0) * 4);
+    if patch.data().len() != n * (y1 - y0) {
+        return;
+    }
+    for y in y0..y1 {
+        let to = (y * fw + x0) * 4;
+        let from = (y - y0) * n;
+        frame.data_mut()[to..to + n].copy_from_slice(&patch.data()[from..from + n]);
+    }
+}
+
+/// `rect` within `frame`, as indices; none if nothing of it is.
+fn clipped(frame: &Pixmap, [x0, y0, x1, y1]: [i32; 4]) -> Option<[usize; 4]> {
+    let (w, h) = (frame.width() as i32, frame.height() as i32);
+    let (x0, y0, x1, y1) = (
+        x0.clamp(0, w),
+        y0.clamp(0, h),
+        x1.clamp(0, w),
+        y1.clamp(0, h),
+    );
+    (x1 > x0 && y1 > y0).then_some([x0 as usize, y0 as usize, x1 as usize, y1 as usize])
+}
+
+/// The tabs lit: each bank's choice, AUTO GAIN's ON while it is on.
+fn lit_tabs(scene: &StripScene) -> Vec<(f64, f64)> {
+    let mut lit = Vec::new();
+    for (b, at) in [
+        (Bank::Mode, scene.mode),
+        (Bank::Stereo, scene.stereo),
+        (Bank::Placement, scene.placement),
+        (Bank::Auto, scene.auto.then_some(0)),
+    ] {
+        if let Some(i) = at {
+            lit.push(b.tab(i));
+        }
+    }
+    lit
+}
+
+/// An SVG body (the strip's units: the drawing's, from the strip's top) drawn over `frame`.
+fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f64, body: &str) {
+    let (w, h) = (frame.width(), frame.height());
+    let view = [0.0, 0.0, f64::from(w) / scale, f64::from(h) / scale];
+    let doc = art::document(view, w, h, body);
+    if let Ok(tree) = usvg::Tree::from_str(&doc, options) {
+        resvg::render(&tree, Transform::identity(), &mut frame.as_mut());
+    }
+}
+
+/// The keys' marks: the previous and next arrows, SAVE (the star is drawn as the preset is).
+fn key_marks(o: &mut Svg) {
+    let y = super::RAIL_Y - PANEL_H;
+    for (x, _, t) in keys() {
+        match t {
+            BarTarget::Prev | BarTarget::Next => {
+                let d = if t == BarTarget::Prev { -1.0 } else { 1.0 };
+                put!(
+                    o,
+                    "<path d='M {} {} L {} {} L {} {}' fill='none' stroke='{KEY_PRINT}' stroke-width='4' stroke-linejoin='round' stroke-linecap='round'/>",
+                    N(x - 6.0 * d),
+                    N(y - 11.0),
+                    N(x + 7.0 * d),
+                    N(y),
+                    N(x - 6.0 * d),
+                    N(y + 11.0)
+                );
+            }
+            BarTarget::Save => put!(
+                o,
+                "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{KEY_PRINT}'>SAVE</text>",
+                N(x),
+                N(y)
+            ),
+            _ => {}
+        }
+    }
+}
+
+/// The favourite's key: its star, filled for a favourite.
+fn star_key(o: &mut Svg, favorite: bool) {
+    let y = super::RAIL_Y - PANEL_H;
+    let Some((x, _, _)) = keys().find(|k| k.2 == BarTarget::Star) else {
+        return;
+    };
+    let d = plugin_kit_materials::star_path(x, y, 14.0);
+    if favorite {
+        put!(o, "<path d='{d}' fill='{KEY_PRINT}'/>");
+    } else {
+        put!(
+            o,
+            "<path d='{d}' fill='none' stroke='{KEY_PRINT}' stroke-width='2.5' stroke-linejoin='round'/>"
+        );
+    }
+}
+
+/// The pointer's part, lightened a little.
+fn hovered(o: &mut Svg, t: Option<StripTarget>) {
+    let rect = match t {
+        Some(StripTarget::Bar(b)) if b != BarTarget::Name => keys()
+            .find(|k| k.2 == b)
+            .map(|(x, w, _)| (x - w / 2.0, super::RAIL_Y - KEY_HEIGHT / 2.0, w, KEY_HEIGHT)),
+        Some(StripTarget::Tab(b, i)) => {
+            let (x, y) = b.tab(i);
+            Some((x - TAB.0 / 2.0, y - TAB.1 / 2.0, TAB.0, TAB.1))
+        }
+        _ => None,
+    };
+    if let Some((x, y, w, h)) = rect {
+        put!(
+            o,
+            "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#fff' fill-opacity='0.07'/>",
+            N(x + 2.0),
+            N(y - PANEL_H + 2.0),
+            N(w - 4.0),
+            N(h - 4.0)
+        );
+    }
+}
+
+/// MIDI Learn's ring round a control it waits for (as the panel's: a dashed outline).
+fn ring(o: &mut Svg, c: StripControl) {
+    let (x0, y0, x1, y1) = span(c);
+    put!(
+        o,
+        "<rect x='{}' y='{}' width='{}' height='{}' rx='10' fill='none' stroke='{}' stroke-width='4' stroke-dasharray='12 8'/>",
+        N(x0 - 4.0),
+        N(y0 - PANEL_H - 4.0),
+        N(x1 - x0 + 8.0),
+        N(y1 - y0 + 8.0),
+        crate::learn::ACCENT
+    );
+}
+
+// ---- The readouts.
+
+/// Readout `i` reading `text`, lit or dark, drawn over the frame: from the patch kept for it,
+/// made again only when what it reads changes.
+fn reading(k: &mut StripRenderer, i: usize, r: Readout, text: &str, lit: bool) {
+    let scale = k.scale;
+    let (x, y, w, h) = r.window();
+    let y = y - PANEL_H;
+    let cells = 3;
+    let Some(slot) = k.readouts.get_mut(i) else {
+        return;
+    };
+    if slot.as_ref().is_none_or(|r| r.text != text || r.lit != lit) {
+        // (The patch is the window and a margin for the glow.)
+        let m = 10.0;
+        let left = ((x - m) * scale).floor();
+        let top = ((y - m) * scale).floor();
+        let right = ((x + w + m) * scale).ceil();
+        let bottom = ((y + h + m) * scale).ceil();
+        *slot = Pixmap::new((right - left) as u32, (bottom - top) as u32).map(|mut patch| {
+            let mut o = Svg::default();
+            put!(
+                o,
+                "<defs><filter id='segglow' x='-0.3' y='-0.6' width='1.6' height='2.2'><feGaussianBlur in='SourceGraphic' stdDeviation='6' result='far'/><feComponentTransfer in='far' result='farhalf'><feFuncA type='linear' slope='0.5'/></feComponentTransfer><feGaussianBlur in='SourceGraphic' stdDeviation='2' result='near'/><feMerge><feMergeNode in='farhalf'/><feMergeNode in='near'/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs><g transform='translate({},{})'>",
+                N(-left / scale),
+                N(-top / scale)
+            );
+            seven(&mut o, (x, y, w, h), cells, text, lit);
+            put!(o, "</g>");
+            svg_over(&k.options, &mut patch, scale, &o.0);
+            Reading {
+                text: text.to_owned(),
+                lit,
+                left: left as i32,
+                top: top as i32,
+                patch,
+            }
+        });
+    }
+    if let Some(r) = slot {
+        k.frame.draw_pixmap(
+            r.left,
+            r.top,
+            r.patch.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    }
+}
+
+/// Seven-segment digits, `cells` of them, in the readout `(x, y, w, h)`, right-aligned, lit
+/// or dark (every segment as an unlit one shows faintly through the glass). The CA-74's.
+fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &str, lit: bool) {
+    const SEGS: [(char, &str); 16] = [
+        ('0', "abcdef"),
+        ('1', "bc"),
+        ('2', "abged"),
+        ('3', "abgcd"),
+        ('4', "fgbc"),
+        ('5', "afgcd"),
+        ('6', "afgedc"),
+        ('7', "abc"),
+        ('8', "abcdefg"),
+        ('9', "abcdfg"),
+        ('-', "g"),
+        ('O', "abcdef"),
+        ('F', "aefg"),
+        ('N', "abcef"),
+        ('E', "adefg"),
+        (' ', ""),
+    ];
+    let mut shown: Vec<(char, bool)> = Vec::new();
+    for c in text.chars() {
+        match (c, shown.last_mut()) {
+            ('.', Some(last)) => last.1 = true,
+            _ => shown.push((c, false)),
+        }
+    }
+    while shown.len() < cells {
+        shown.insert(0, (' ', false));
+    }
+    let shown = &shown[shown.len() - cells..];
+    let pitch = ((w - 22.0) / cells as f64).min(44.0);
+    let (cw, ch, t) = (pitch * 0.68, h * 0.64, pitch * 0.19);
+    let x0 = x + w - 12.0 - pitch * cells as f64 + (pitch - cw) / 2.0;
+    let y0 = y + (h - ch) / 2.0;
+    let hx = t / 2.0 + 1.3;
+    let (y1, y2, y3, y4) = (
+        t / 2.0 + 1.2,
+        ch / 2.0 - 1.2,
+        ch / 2.0 + 1.2,
+        ch - t / 2.0 - 1.2,
+    );
+    let rect = |k: char| -> (f64, f64, f64, f64) {
+        match k {
+            'a' => (hx, 0.0, cw - 2.0 * hx, t),
+            'g' => (hx, ch / 2.0 - t / 2.0, cw - 2.0 * hx, t),
+            'd' => (hx, ch - t, cw - 2.0 * hx, t),
+            'f' => (0.0, y1, t, y2 - y1),
+            'b' => (cw - t, y1, t, y2 - y1),
+            'e' => (0.0, y3, t, y4 - y3),
+            _ => (cw - t, y3, t, y4 - y3),
+        }
+    };
+    let (mut on, mut off) = (String::new(), String::new());
+    for (i, &(c, dp)) in shown.iter().enumerate() {
+        let segs = SEGS.iter().find(|(k, _)| *k == c).map_or("", |(_, v)| v);
+        let cx = x0 + pitch * i as f64;
+        let mut cell = |into_on: bool, body: String| {
+            let to = if into_on && lit { &mut on } else { &mut off };
+            to.push_str(&format!(
+                "<g transform='translate({} {}) skewX(-7)'>{body}</g>",
+                N(cx),
+                N(y0)
+            ));
+        };
+        for k in ['a', 'b', 'c', 'd', 'e', 'f', 'g'] {
+            let (rx, ry, rw, rh) = rect(k);
+            cell(
+                segs.contains(k),
+                format!(
+                    "<rect x='{}' y='{}' width='{}' height='{}' rx='{}'/>",
+                    N(rx),
+                    N(ry),
+                    N(rw),
+                    N(rh),
+                    N(t / 2.0)
+                ),
+            );
+        }
+        cell(
+            dp,
+            format!(
+                "<circle cx='{}' cy='{}' r='{}'/>",
+                N(cw + 4.5),
+                N(ch - 3.0),
+                N(t * 0.55)
+            ),
+        );
+    }
+    put!(
+        s,
+        "<g fill='{SEG_ON}' fill-opacity='{SEG_OFF_OPACITY}'>{off}</g>"
+    );
+    if !on.is_empty() {
+        put!(s, "<g fill='{SEG_ON}' filter='url(#segglow)'>{on}</g>");
+    }
+}
+
+// ---- The preset's name.
+
+/// Where the name's characters go: the first's left, how many fit, the star's and the
+/// arrow's places.
+fn name_places() -> (f64, usize, f64, f64) {
+    let (x, _, w, _) = NAME;
+    let (star_x, arrow_x) = (x + 28.0, x + w - 32.0);
+    let left = star_x + 26.0;
+    let places = ((arrow_x - 30.0 - left) / (6.0 * DOT)).floor().max(1.0) as usize;
+    (left, places, star_x, arrow_x)
+}
+
+/// How bright the name's display is: dimmer where the preset is not in the library.
+fn name_level(b: &BarScene) -> f64 {
+    if b.name.is_empty() || !b.found {
+        0.55
+    } else {
+        1.0
+    }
+}
+
+/// The name display's two signs: a star before the name for a favourite (faintly there
+/// otherwise), the arrow that drops the list down at its end (up while it is down).
+fn name_icons(o: &mut Svg, b: &BarScene) {
+    let (_, y, _, h) = NAME;
+    let (_, _, star_x, arrow_x) = name_places();
+    let level = name_level(b);
+    let mid = y - PANEL_H + h / 2.0 - DOT / 2.0;
+    let orange = format!("rgb({},{},{})", ORANGE.0, ORANGE.1, ORANGE.2);
+    put!(
+        o,
+        "<path d='{}' fill='{orange}' fill-opacity='{}'/>",
+        plugin_kit_materials::star_path(star_x, mid, 12.0),
+        N(if b.favorite { 0.95 * level } else { 0.06 })
+    );
+    let (aw, down) = (22.0, !b.open);
+    let (tip, base) = if down {
+        (mid + aw * 0.35, mid - aw * 0.35)
+    } else {
+        (mid - aw * 0.35, mid + aw * 0.35)
+    };
+    let hover = if b.hover == Some(BarTarget::Name) {
+        1.0
+    } else {
+        0.7
+    };
+    put!(
+        o,
+        "<path d='M {} {} L {} {} L {} {} Z' fill='{orange}' fill-opacity='{}'/>",
+        N(arrow_x - aw / 2.0),
+        N(base),
+        N(arrow_x + aw / 2.0),
+        N(base),
+        N(arrow_x),
+        N(tip),
+        N(hover * level)
+    );
+}
+
+/// The preset's name in dots ([`font::glyph`]), lit over the unlit dots (the still's).
+fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
+    let (_, places, ..) = name_places();
+    let level = name_level(b);
+    let text: String = if b.name.is_empty() {
+        "NO PRESET".to_owned()
+    } else if b.changed {
+        format!("{} \u{2022}", b.name)
+    } else {
+        b.name.clone()
+    };
+    // A control character (a file written elsewhere) is drawn as if it were not there.
+    let mut chars: Vec<char> = text.chars().filter(|c| !c.is_control()).collect();
+    if chars.len() > places {
+        chars.truncate(places - 1);
+        chars.push('\u{2026}');
+    }
+    let glyphs: Vec<[u8; 9]> = chars.iter().map(|&c| font::glyph(c)).collect();
+    let r = DOT * 0.36 * scale;
+    let mut glow = PathBuilder::new();
+    let mut core = PathBuilder::new();
+    name_dots(scale, |i, j, col, (px, py)| {
+        if glyphs.get(i).is_some_and(|g| g[j] >> (4 - col) & 1 == 1) {
+            glow.push_circle(px, py, (r * 2.1) as f32);
+            core.push_circle(px, py, r as f32);
+        }
+    });
+    fill(frame, glow, ORANGE, 0.16 * level);
+    let hot = |v: u8| (f64::from(v) * level + 20.0 * (1.0 - level)) as u8;
+    fill(
+        frame,
+        core,
+        (hot(ORANGE_HOT.0), hot(ORANGE_HOT.1), hot(ORANGE_HOT.2)),
+        0.55 + 0.45 * level,
+    );
+}
+
+/// Each dot of the name's display, in pixels at `scale` (the strip's frame): its character's
+/// place, its row, its column. (Seven rows for a capital about the window's middle; two below
+/// for a descender.)
+fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) {
+    let (_, y, _, h) = NAME;
+    let (left, places, ..) = name_places();
+    let top = y - PANEL_H + h / 2.0 - 4.0 * DOT;
+    for i in 0..places {
+        for j in 0..9 {
+            for col in 0..5 {
+                let px = ((left + (6 * i + col) as f64 * DOT) * scale) as f32;
+                let py = ((top + j as f64 * DOT) * scale) as f32;
+                each(i, j, col, (px, py));
+            }
+        }
+    }
+}
+
+// ---- The voices' display: drops of light (the CA-74's LIQUID, its R36).
+
+/// A drop: where it is (-1..1 of the field), how much of it there is (0..1) and how much of it
+/// sounds (0..1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Drop {
+    x: f64,
+    size: f64,
+    lit: f64,
+}
+
+/// The drops, each easing to where the scene puts it: a drop's id is its voice's (with DOUBLE
+/// its twin's `TWIN +` its voice's).
+#[derive(Debug, Default)]
+struct Liquid {
+    drops: BTreeMap<u32, Drop>,
+}
+
+const TWIN: u32 = 1000;
+
+/// Where the scene puts each drop: its id, its place, whether it sounds, and the drop it comes
+/// out of when it appears (a twin, its voice).
+fn targets(s: &StripScene) -> Vec<(u32, f64, bool, Option<u32>)> {
+    match &s.field {
+        Field::Scatter(places) => places
+            .iter()
+            .enumerate()
+            .map(|(i, &(p, on))| (i as u32, p.clamp(-1.0, 1.0), on, None))
+            .collect(),
+        Field::Double(pairs) => pairs
+            .iter()
+            .enumerate()
+            .flat_map(|(i, &(w, on))| {
+                let (i, w) = (i as u32, w.clamp(0.0, 1.0));
+                [(i, w, on, None), (TWIN + i, -w, on, Some(i))]
+            })
+            .collect(),
+    }
+}
+
+impl Liquid {
+    /// The drops eased `dt` seconds towards the scene's places: whether any moved, and whether
+    /// all are where they are going.
+    fn step(&mut self, s: &StripScene, dt: f64) -> (bool, bool) {
+        let want = targets(s);
+        let mut moved = false;
+        let mut settled = true;
+        for &(id, x, on, from) in &want {
+            if !self.drops.contains_key(&id) {
+                let x0 = from.and_then(|f| self.drops.get(&f)).map_or(x, |d| d.x);
+                let lit = f64::from(u8::from(on));
+                self.drops.insert(
+                    id,
+                    Drop {
+                        x: x0,
+                        size: if dt == 0.0 { 1.0 } else { 0.0 },
+                        lit,
+                    },
+                );
+                moved = true;
+            }
+        }
+        let kx = 1.0 - (-dt * 7.0).exp();
+        let kr = 1.0 - (-dt * 11.0).exp();
+        let homes: BTreeMap<u32, f64> = self.drops.iter().map(|(&k, d)| (k, d.x)).collect();
+        self.drops.retain(|&id, d| {
+            let t = want.iter().find(|w| w.0 == id);
+            let tx = match t {
+                Some(t) => t.1,
+                None if id >= TWIN => homes.get(&(id - TWIN)).copied().unwrap_or(d.x),
+                None => d.x,
+            };
+            let (ts, tl) = t.map_or((0.0, 0.0), |t| (1.0, f64::from(u8::from(t.2))));
+            let was = *d;
+            d.x += (tx - d.x) * kx;
+            d.size += (ts - d.size) * kr;
+            d.lit += (tl - d.lit) * kr;
+            if (tx - d.x).abs() < 1e-3 && (ts - d.size).abs() < 1e-3 && (tl - d.lit).abs() < 1e-3 {
+                (d.x, d.size, d.lit) = (tx, ts, tl);
+            }
+            moved |= *d != was;
+            let stays = t.is_some() || d.size > 0.0;
+            moved |= !stays;
+            settled &= !stays || (d.x, d.size, d.lit) == (tx, ts, tl);
+            stays
+        });
+        (moved, settled)
+    }
+
+    /// The drops' light added into `frame` inside `window` (pixels), the field's middle at
+    /// (`cx`, `cy`) and its half width `half` (pixels): each drop's field its radius squared
+    /// over the distance's (so that drops that meet pool), lit past a level with a halo, an
+    /// idle voice's fainter.
+    fn draw(
+        &self,
+        frame: &mut Pixmap,
+        window: [i32; 4],
+        (cx, cy): (f64, f64),
+        half: f64,
+        scale: f64,
+    ) {
+        let [x0, y0, x1, y1] = window;
+        let (fw, fh) = (frame.width() as i32, frame.height() as i32);
+        let ds: Vec<(f64, f64, f64)> = self
+            .drops
+            .values()
+            .map(|d| {
+                (
+                    cx + d.x * half,
+                    d.size * d.lit * (DROP * scale).powi(2),
+                    d.size * (1.0 - d.lit) * (IDLE_DROP * scale).powi(2),
+                )
+            })
+            .collect();
+        if ds.is_empty() {
+            return;
+        }
+        let data = frame.data_mut();
+        for y in y0.max(0)..y1.min(fh) {
+            let fy = f64::from(y) + 0.5;
+            for x in x0.max(0)..x1.min(fw) {
+                let fx = f64::from(x) + 0.5;
+                let (mut f, mut g) = (0.0, 0.0);
+                for &(dx0, a, b) in &ds {
+                    let (dx, dy) = (fx - dx0, fy - cy);
+                    let q = dx * dx + dy * dy + 1.0;
+                    f += a / q;
+                    g += b / q;
+                }
+                let core = ((f - 0.8) / 0.35).clamp(0.0, 1.0);
+                let core = core * core * (3.0 - 2.0 * core);
+                let hot = ((f - 1.6) / 3.0).clamp(0.0, 1.0) * 0.35;
+                let halo = f.min(1.0).powf(2.2) * 0.42;
+                let idle = ((g - 0.85) / 0.25).clamp(0.0, 1.0) * 0.3 + g.min(1.0).powi(3) * 0.1;
+                let glow = halo + idle;
+                if glow < 0.004 && core == 0.0 {
+                    continue;
+                }
+                let add = [
+                    f64::from(ORANGE.0) * (glow + 0.82 * core) + 255.0 * hot,
+                    f64::from(ORANGE.1) * (glow + 0.9 * core) + 255.0 * hot,
+                    f64::from(ORANGE.2) * (glow + 0.88 * core) + 255.0 * hot,
+                ];
+                let i = ((y * fw + x) * 4) as usize;
+                for (c, a) in add.iter().enumerate() {
+                    data[i + c] = (f64::from(data[i + c]) + a).min(255.0) as u8;
+                }
+                data[i + 3] = data[i + 3].max((255.0 * (glow + core).min(1.0)) as u8);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use resvg::tiny_skia::{Color, Paint, Rect};
+
+    use super::*;
+
+    /// A scene with `sounding` (a bit a voice) of eight voices sounding.
+    fn scene(sounding: u32) -> StripScene {
+        StripScene {
+            mode: Some(1),
+            readouts: std::array::from_fn(|i| (format!("{}", i * 7), i % 3 != 0)),
+            field: Field::Scatter(
+                (0..8)
+                    .map(|i| (f64::from(i) / 4.0 - 0.9, sounding >> i & 1 == 1))
+                    .collect(),
+            ),
+            bar: BarScene {
+                name: "Brass Tutti".into(),
+                found: true,
+                ..BarScene::default()
+            },
+            ..StripScene::default()
+        }
+    }
+
+    /// The frames drawn in parts (the drops' window alone while only they move) are the frames
+    /// drawn whole, through the drops moving, a readout, a tab, the pointer, MIDI Learn's ring
+    /// and the drawing under the strip changing.
+    #[test]
+    fn a_frame_drawn_in_parts_is_the_frame_drawn_whole() {
+        let s = 0.25;
+        let (w, h) = crate::render::size_at(s);
+        let mut under = Pixmap::new(w, h).expect("a frame");
+        under.fill(Color::from_rgba8(40, 36, 30, 255));
+        let mut parts = StripRenderer::new(s);
+        let mut whole = StripRenderer::new(s);
+        whole.whole = true;
+        let mut now = Instant::now();
+        let mut sc = scene(0b1010_0101);
+        let mut changes = 0;
+        for i in 0..160 {
+            let mut under_changed = false;
+            match i {
+                0..=24 => sc.field = scene(if i % 6 < 3 { 0b1111 } else { 0b0011_0000 }).field,
+                25 => sc.readouts[4].0 = "-12".into(),
+                30 => sc.mode = Some(2),
+                33 => sc.hover = Some(StripTarget::Tab(Bank::Placement, 1)),
+                36 => sc.learning = Some(StripControl::AutoGain),
+                40 => {
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(200, 180, 150, 255);
+                    let r = Rect::from_xywh(0.0, (PANEL_H * s) as f32 + 40.0, 300.0, 60.0)
+                        .expect("a rect");
+                    under.fill_rect(r, &paint, Transform::identity(), None);
+                    under_changed = true;
+                }
+                45 => sc.field = scene(0b1100_0011).field,
+                _ => {}
+            }
+            now += Duration::from_millis(16);
+            changes += usize::from(parts.render_at(&sc, &under, under_changed, now));
+            whole.render_at(&sc, &under, under_changed, now);
+            assert!(
+                parts.frame().data() == whole.frame().data(),
+                "frame {i}: drawn in parts, not as whole"
+            );
+        }
+        // (The drops moved in many of them, and settled.)
+        assert!(changes > 30, "{changes} frames drawn");
+        assert!(!parts.animating());
+    }
+}

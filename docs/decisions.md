@@ -2838,6 +2838,47 @@ list that drops down over the strip inside the window."
   - what it gains (told the owner): where the window's width decides, the panel is 11 % larger
     at the same width; on a 16:9 screen its height decides already, and it opens the same size
     as before in a window a tenth narrower (on 1920 by 1080, about 1356 pixels wide, was 1500).
+- **A6 built (2026-10-09 and 10).** The drawing is one: the panel, 3108 by 1057 units, and the
+  strip below it, 850 units, 3108 by 1907 in all (`art::PANEL_H`, `art::STRIP_H`). What turns
+  is the drawing's: the left hand's controls and the strip's six knobs (VOICES, ENTROPY, WIDTH,
+  DETUNE, DRIVE, LEVEL) are among its controls (now 50), drawn, turned, learned and found as
+  the panel's are. The strip's own parts (the tabs, the readouts, the voices' display, the
+  rail's keys and the preset's name) are drawn over the drawing's strip by
+  `strip::StripRenderer`, in the CA-74's materials, which moved into the shared kit
+  (`plugin-kit-materials`, its K5; the CA-74 switched to it on its `kit-materials` branch):
+  the tabs translucent amber caps lit from inside, their light on the face round them; the
+  readouts orange seven-segment digits behind smoked glass; the drops of the voices; the name
+  in orange dots. Two pictures came with them from the CA-74, the keys' cap and the displays'
+  glass (`crates/ca72-panel/assets/worn/README.md`).
+  - The window opens at the drawing's proportions and never grows: the presets' list drops
+    down from under the rail over the strip, seven rows tall (was eight; the panel stays in
+    sight).
+  - The approval test (`tests/approved.rs`) compares the panel with the approved mock-up right
+    of the mock-up's column. The wood's grain is laid out as it was with the column there, so
+    the panel's wood is unchanged; the mean difference is 1.38, as before A6 (1.38).
+  - **Cost** (release build, the Linux reference machine, another agent's benchmark busy on
+    four of its cores; `cargo run --release -p ca72-panel --example frames`). As first built,
+    every change anywhere drew the strip's parts again whole, and so did each frame while the
+    drops moved: 5 ms a frame at 0.44 of the drawing (the window on a 1920 by 1080 screen) and
+    19 ms at 0.87 (the same on a Retina screen), all the time notes were played. Most of it was
+    tiny-skia laying two pictures the strip's size, mostly clear, over every pixel. Now those
+    are laid only where they have pixels, the drawing's strip with what never changes over it
+    is kept until the drawing there changes, a frame in which only the drops move draws their
+    window alone, a knob turned above the strip leaves the strip alone
+    (`Renderer::changed_below`), and the editor puts in the frame shown only the strip's rows
+    that changed. A frame, the window's conversion included (median of 40, ms):
+
+    | Change | at 0.44 | at 0.87 |
+    |---|---|---|
+    | a panel knob (CUTOFF) | 1.8 | 6.5 |
+    | a strip knob (DRIVE, its readout) | 4.1 | 14.7 |
+    | the PITCH wheel | 3.1 | 11.4 |
+    | a tab | 1.4 | 4.8 |
+    | notes played (the drops moving) | 0.9 | 3.7 |
+    | nothing | 0.0 | 0.0 |
+
+    A frame drawn in parts is the frame drawn whole, to the bit
+    (`a_frame_drawn_in_parts_is_the_frame_drawn_whole`).
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 

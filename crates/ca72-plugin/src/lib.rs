@@ -410,7 +410,8 @@ impl Plugin for Ca72 {
             next = context.next_event();
         }
         let lamp = self.engine.end_block(len);
-        self.meters.publish(lamp, self.engine.midi_wheels());
+        self.meters
+            .publish(lamp, self.engine.midi_wheels(), self.engine.sounding_mask());
         self.ask_helper();
         ProcessStatus::KeepAlive
     }

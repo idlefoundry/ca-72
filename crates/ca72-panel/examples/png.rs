@@ -31,7 +31,23 @@ fn main() {
     scene.values[0] = default_of("tune");
     r.render(&scene);
     eprintln!("background {built:?}, every layer {first:?}, one knob {one:?}");
-    if let Err(e) = r.frame().save_png(&out) {
+    // The strip's own parts over the drawing's strip (A6), as the editor shows them.
+    let mut strip = ca72_panel::strip::StripRenderer::new(scale);
+    let t3 = std::time::Instant::now();
+    let scene = example_strip();
+    strip.render(&scene, r.frame(), true);
+    eprintln!("the strip {:?}", t3.elapsed());
+    let mut all = r.frame().clone();
+    let top = (ca72_panel::art::PANEL_H * scale).round() as usize;
+    let w = all.width() as usize;
+    let sf = strip.frame();
+    let rows = (sf.height() as usize).min(all.height() as usize - top);
+    for y in 0..rows {
+        let n = w.min(sf.width() as usize) * 4;
+        let (from, to) = (y * sf.width() as usize * 4, (top + y) * w * 4);
+        all.data_mut()[to..to + n].copy_from_slice(&sf.data()[from..from + n]);
+    }
+    if let Err(e) = all.save_png(&out) {
         eprintln!("{out}: {e}");
         std::process::exit(1);
     }
@@ -51,5 +67,41 @@ fn default_of(param: &str) -> f64 {
         "filter_attack" | "loudness_attack" => 0.1,
         "filter_decay" | "loudness_decay" => 0.4,
         _ => 0.0,
+    }
+}
+
+/// The strip as the mock-up showed it: POLY, SCATTER, EVEN, AUTO GAIN on, eight voices of which
+/// four sound, a preset chosen.
+fn example_strip() -> ca72_panel::strip::StripScene {
+    use ca72_panel::strip::{Field, StripScene};
+    let r = |t: &str, on: bool| (t.to_owned(), on);
+    StripScene {
+        mode: Some(1),
+        stereo: Some(0),
+        placement: Some(0),
+        auto: true,
+        readouts: [
+            r("8", true),
+            r("40", true),
+            r("70", true),
+            r("OFF", false),
+            r("-7.2", true),
+            r("8.4", true),
+            r("0.0", true),
+        ],
+        field: Field::Scatter(
+            [-1.0, 1.0, -0.43, 0.43, -0.71, 0.71, -0.14, 0.14]
+                .iter()
+                .enumerate()
+                .map(|(i, &p)| (p * 0.7, i % 2 == 0))
+                .collect(),
+        ),
+        bar: ca72_panel::presets::BarScene {
+            name: "Brass Tutti".into(),
+            found: true,
+            favorite: true,
+            ..Default::default()
+        },
+        ..StripScene::default()
     }
 }

@@ -1,9 +1,14 @@
 //! The panel as drawn matches the design the owner approved (`approved.png`: the mock-up at one
-//! panel unit a pixel, every control at half its travel).
+//! panel unit a pixel, every control at half its travel). The mock-up had the left hand's
+//! controls in a column left of the panel, 330 units wide; they are on the strip below now (A6,
+//! R-LOOK), so the panel is compared with the mock-up right of its column.
 
-use ca72_panel::art::{PLATE_H, PLATE_X, PLATE_Y};
+use ca72_panel::art::{PANEL_H, PLATE_H, PLATE_X, PLATE_Y, W};
 use ca72_panel::{CONTROLS, Renderer, Scene};
 use resvg::tiny_skia::Pixmap;
+
+/// The width of the mock-up's column, left of the panel.
+const COLUMN: u32 = 330;
 
 /// The mock-up drew its name plate in a fallback face, so the plate is left out.
 fn outside_the_plate(x: u32, y: u32) -> bool {
@@ -23,14 +28,19 @@ fn the_panel_is_drawn_as_approved() {
     });
     let drawn = r.frame();
     assert_eq!(
-        (drawn.width(), drawn.height()),
-        (approved.width(), approved.height())
+        (drawn.width(), PANEL_H as u32),
+        (approved.width() - COLUMN, approved.height())
     );
+    assert_eq!(drawn.width(), W as u32);
 
     let mut differences: Vec<u8> = Vec::new();
-    for (i, (a, b)) in drawn.pixels().iter().zip(approved.pixels()).enumerate() {
-        let (x, y) = (i as u32 % drawn.width(), i as u32 / drawn.width());
-        if outside_the_plate(x, y) {
+    for y in 0..approved.height() {
+        for x in 0..drawn.width() {
+            let a = drawn.pixel(x, y).expect("in the frame");
+            let b = approved.pixel(x + COLUMN, y).expect("in the mock-up");
+            if !outside_the_plate(x, y) {
+                continue;
+            }
             let d = [
                 a.red().abs_diff(b.red()),
                 a.green().abs_diff(b.green()),

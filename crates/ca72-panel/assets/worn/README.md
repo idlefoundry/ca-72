@@ -17,6 +17,8 @@ pictures:
 | `jewel.png` | POWER's lamp: a red domed jewel in a chrome bezel (OVERLOAD's darker one made from it in code) | 256 × 252 |
 | `jack.png` | A jack's knurled chrome ring nut | 256 × 251 |
 | `screw.png` | A black-oxide Phillips pan head | 96 × 96 |
+| `button.png` | The strip's push buttons' cap: square, matte charcoal moulded plastic (made translucent amber in code for the tabs that light) | 256 × 255 |
+| `display-glass.png` | The strip's readouts' and displays' glass: smoked grey-green, a fine mesh and filaments behind it | 900 × 507 |
 
 **What they show.** The original instrument's materials, as published descriptions and parts
 listings give them (decisions.md R-LOOK lists the sources) and as Wikimedia Commons' "Minimoog
@@ -50,6 +52,13 @@ lamp over them. Then, with ImageMagick 7:
   knob is turned;
 - resized (Lanczos) to the sizes above; the face made grey (its colour is a black a touch warm,
   `skin::FACE_TINT`).
+
+**The strip's two (taken 2026-10-09).** `button.png` and `display-glass.png` are the CA-74's, made
+there on 2026-10-08 by the same tool from the prompts of the same names (kept in `prompts/` as
+Codex was given them): the cap cut out of its grey ground as the knobs were and resized from
+1254 pixels square, the glass resized from 1672 by 941. Neither shows anything particular to
+that instrument; the strip's tabs, readouts and print are this panel's own (decisions.md
+R-LOOK).
 
 The generated originals, the masks, the runs' logs and the browser mock-up the owner chose from
 are kept outside the repository, on the lab's share (`ca-72/look`).

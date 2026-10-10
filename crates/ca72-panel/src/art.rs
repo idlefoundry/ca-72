@@ -1,7 +1,8 @@
 //! The panel's art, as SVG, in panel units: the panel measured from a photograph of the
 //! instrument's taken face on (Commons, "Minimoog panel.jpg"; the panel is 3108 by 795 of
-//! them), under a wooden top strip, the name board below it, and the left hand controller
-//! in a column of its own at the left.
+//! them), under a wooden top strip, the name board below it; and under that the plug-in's
+//! strip (`crate::strip`), the left hand controller's GLIDE, DECAY and wheels at its left
+//! (A6, decisions.md R-LOOK: they had a column of their own beside the panel).
 //!
 //! What never moves is drawn once ([`background`]); each control, lamp and the name plate
 //! is a layer of its own, drawn over it ([`Layer`]).
@@ -15,11 +16,17 @@ pub const PW: f64 = 3108.0;
 pub const PH: f64 = 795.0;
 pub const TOP: f64 = 130.0;
 pub const BOARD: f64 = 132.0;
-/// The column the left hand controller stands in, beside the panel.
-pub const COL: f64 = 330.0;
-/// The drawing's size.
+/// The panel's left edge: the drawing's (the left hand controller's column, 330 units wide,
+/// was there until A6: its controls are on the strip, `strip::LEFT_HAND`).
+pub const COL: f64 = 0.0;
+/// The drawing's width.
 pub const W: f64 = COL + PW;
-pub const H: f64 = TOP + PH + BOARD;
+/// The panel's height: the top strip, the face and the name board.
+pub const PANEL_H: f64 = TOP + PH + BOARD;
+/// The strip's under it (A6): the presets' rail, then three rows.
+pub const STRIP_H: f64 = 850.0;
+/// The drawing's height: the panel and the strip.
+pub const H: f64 = PANEL_H + STRIP_H;
 
 /// Lettering sizes: the legends, the dials' numbers, the section titles.
 const LEG: f64 = 19.0;
@@ -48,10 +55,10 @@ pub const PLATE_Y: f64 = TOP + PH + (BOARD - PLATE_H) / 2.0;
 const NAME_Y: f64 = 31.0;
 const MAKER_Y: f64 = 64.0;
 
-/// The left hand controller's face: its left edge in the drawing, its size.
+/// The left hand controller's place as its column had it: its left edge then, its width
+/// (its controls are placed relative to it, now at `strip::LEFT_HAND`).
 pub const LH_X: f64 = 22.0;
-pub const LPW: f64 = COL - 44.0;
-const LPH: f64 = PH;
+pub const LPW: f64 = 330.0 - 44.0;
 const LH_JACK: f64 = 46.0;
 const LH_LABEL: f64 = 118.0;
 pub(crate) const LH_ROCKER: f64 = 214.0;
@@ -226,6 +233,20 @@ fn eleven(r0: f64, r1: f64) -> Vec<(f64, f64, f64, f64)> {
         .collect()
 }
 
+/// A strip knob's dial: a tick at each of `ticks` (degrees from twelve o'clock), numbered
+/// by `labels[i]` where it says `Some(i)`.
+fn numbered(ticks: &[(f64, Option<i32>)], labels: &[&'static str]) -> DialMarks {
+    DialMarks {
+        ticks: ticks.iter().map(|&(a, _)| (a, 58.0, 71.0, 4.0)).collect(),
+        labels: ticks
+            .iter()
+            .filter_map(|&(a, i)| Some((a, *labels.get(usize::try_from(i?).ok()?)?, None)))
+            .collect(),
+        r: 86.0,
+        captions: vec![],
+    }
+}
+
 fn marks(dial: Dial) -> DialMarks {
     let ten = || DialMarks {
         ticks: eleven(58.0, 71.0),
@@ -296,6 +317,38 @@ fn marks(dial: Dial) -> DialMarks {
             r: 98.0,
             captions: vec![],
         },
+        // The strip's: a tick at every step (VOICES's every voice, numbered; DETUNE's every
+        // 2.5 cents and DRIVE's every 3 dB, every other numbered), LEVEL's every 5 dB from
+        // -30 to +10 and its end, at their places on its travel.
+        Dial::Voices => numbered(
+            &(0..9)
+                .map(|k| (-150.0 + 37.5 * f64::from(k), Some(k)))
+                .collect::<Vec<_>>(),
+            &["2", "3", "4", "5", "6", "7", "8", "9", "10"],
+        ),
+        Dial::Detune => numbered(
+            &(0..9)
+                .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
+                .collect::<Vec<_>>(),
+            &["0", "5", "10", "15", "20"],
+        ),
+        Dial::Drive => numbered(
+            &(0..9)
+                .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
+                .collect::<Vec<_>>(),
+            &["0", "6", "12", "18", "24"],
+        ),
+        Dial::Level => {
+            let at = |db: f64| -150.0 + (db + 30.0) * 300.0 / 42.0;
+            let mut ticks: Vec<(f64, Option<i32>)> = (0..9)
+                .map(|k| {
+                    let db = -30.0 + 5.0 * f64::from(k);
+                    (at(db), (k % 2 == 0).then_some(k / 2))
+                })
+                .collect();
+            ticks.push((150.0, None));
+            numbered(&ticks, &["–30", "–20", "–10", "0", "+10"])
+        }
         // Marked in time, not evenly (as printed); the 200 ms mark is printed long ("200—").
         Dial::Time => DialMarks {
             ticks: [
@@ -490,7 +543,10 @@ pub fn background(layout: &Layout) -> String {
     let mut s = Svg::default();
     wood(&mut s);
     panel(&mut s, layout, Ink::All);
+    strip_face(&mut s);
+    crate::strip::surfaces(&mut s);
     column(&mut s, Ink::All);
+    strip_print(&mut s);
     s.0
 }
 
@@ -509,7 +565,58 @@ pub fn printed(layout: &Layout) -> String {
     grip(&mut s);
     panel(&mut s, layout, Ink::Print);
     column(&mut s, Ink::Print);
+    strip_print(&mut s);
     s.0
+}
+
+/// The strip's face, in the drawn skin (the worn skin's is a picture): the panel's black,
+/// under the rail, with the panel's trim at its ends and foot.
+fn strip_face(s: &mut Svg) {
+    let top = PANEL_H + crate::strip::RAIL;
+    put!(
+        s,
+        "<rect x='0' y='{}' width='{}' height='{}' fill='{PANEL}'/>",
+        N(top),
+        N(W),
+        N(H - top)
+    );
+    put!(s, "<g transform='translate(0 {})'>", N(top));
+    strip_trims(s);
+    s.0.push_str("</g>");
+}
+
+/// The aluminium trim at the strip face's ends and along its foot, in its own place (its top
+/// left corner under the rail).
+pub(crate) fn strip_trims(s: &mut Svg) {
+    let h = H - PANEL_H - crate::strip::RAIL;
+    put!(
+        s,
+        "<rect x='0' y='0' width='15' height='{}' fill='url(#trim)'/>",
+        N(h)
+    );
+    put!(
+        s,
+        "<rect x='{}' y='0' width='28' height='{}' fill='url(#trim)'/>",
+        N(W - 28.0),
+        N(h)
+    );
+    put!(
+        s,
+        "<rect x='0' y='{}' width='{}' height='6' fill='url(#trim)'/>",
+        N(h - 6.0),
+        N(W)
+    );
+}
+
+/// The strip's print (`strip::print`) and its knobs' dials.
+fn strip_print(s: &mut Svg) {
+    crate::strip::print(s, FAMILY);
+    for c in CONTROLS.iter().filter(|c| c.place == Place::Strip) {
+        if let Kind::Knob { dial, .. } = c.kind {
+            let (x, y) = c.centre();
+            draw_dial(s, x, y, dial);
+        }
+    }
 }
 
 /// The top strip's screws: centre and radius, in the drawing.
@@ -519,18 +626,10 @@ fn top_screws() -> impl Iterator<Item = (f64, f64, f64)> {
         .map(|x| (COL + x * PW, TOP - 22.0, 7.0))
 }
 
-/// The column's screws, in the column's own place: its corners', then its switches' and its
-/// wheels' mountings.
-fn column_screws() -> [Vec<(f64, f64, f64)>; 2] {
-    let corners = [
-        (16.0, 16.0),
-        (LPW - 16.0, 16.0),
-        (16.0, LPH - 16.0),
-        (LPW - 16.0, LPH - 16.0),
-    ]
-    .into_iter()
-    .map(|(x, y)| (x, y, 8.0))
-    .collect();
+/// The left hand's screws, in its own place: its switches' and its wheels' mountings (no
+/// plate of its own on the strip's face, nor its corners' screws: the owner, 2026-10-09, "no
+/// need to put a back plate on top of another backplate").
+fn column_screws() -> Vec<(f64, f64, f64)> {
     let mut mountings = Vec::new();
     for y in LH_ROWS {
         for x in [LH_ROCKER - LH_SCREW_DX, LH_ROCKER + LH_SCREW_DX] {
@@ -546,18 +645,17 @@ fn column_screws() -> [Vec<(f64, f64, f64)>; 2] {
             ));
         }
     }
-    [corners, mountings]
+    mountings
 }
 
 /// Every screw's centre and radius, in the drawing.
 pub fn screws() -> Vec<(f64, f64, f64)> {
-    let [corners, mountings] = column_screws();
+    let (lx, ly) = crate::strip::LEFT_HAND;
     top_screws()
         .chain(
-            corners
+            column_screws()
                 .into_iter()
-                .chain(mountings)
-                .map(|(x, y, r)| (LH_X + x, TOP + y, r)),
+                .map(|(x, y, r)| (lx + x, ly + y, r)),
         )
         .collect()
 }
@@ -565,9 +663,10 @@ pub fn screws() -> Vec<(f64, f64, f64)> {
 /// The jacks with no parameter (the controller's GLIDE and DECAY, the panel's PHONES): centre,
 /// radius and whether a nut is round it, in the drawing.
 pub fn jacks() -> Vec<(f64, f64, f64, bool)> {
+    let (lx, ly) = crate::strip::LEFT_HAND;
     LH_ROWS
         .iter()
-        .map(|y| (LH_X + LH_JACK, TOP + y, 22.0, true))
+        .map(|y| (lx + LH_JACK, ly + y, 22.0, true))
         .chain([(COL + PHONES.0, TOP + PHONES.1, 34.0, false)])
         .collect()
 }
@@ -576,8 +675,7 @@ pub fn jacks() -> Vec<(f64, f64, f64, bool)> {
 const PHONES: (f64, f64) = (2855.0, 581.0);
 
 fn wood(s: &mut Svg) {
-    // The top strip, the name board and the controller's column. No cheeks: the ends are
-    // square.
+    // The top strip, the name board and the strip's rail. No cheeks: the ends are square.
     put!(
         s,
         "<rect x='0' y='0' width='{}' height='{}' fill='url(#wood-h)'/>",
@@ -593,10 +691,10 @@ fn wood(s: &mut Svg) {
     );
     put!(
         s,
-        "<rect x='0' y='{}' width='{}' height='{}' fill='url(#wood-v)'/>",
-        N(TOP - 2.0),
-        N(COL),
-        N(PH + 4.0)
+        "<rect x='0' y='{}' width='{}' height='{}' fill='url(#wood-h)'/>",
+        N(PANEL_H),
+        N(W),
+        N(crate::strip::RAIL)
     );
     // Grain: long, gently wavering lines (the same every time).
     let mut seed: u64 = 7;
@@ -625,9 +723,11 @@ fn wood(s: &mut Svg) {
             );
         }
     };
-    grain(s, 0.0, 6.0, W, TOP - 12.0, true, 7);
-    grain(s, 0.0, TOP + PH + 8.0, W, BOARD - 16.0, true, 8);
-    grain(s, 4.0, TOP, COL - 8.0, PH, false, 6);
+    // The top strip's and the name board's grain laid out as when the left hand's column stood
+    // left of the panel, 330 units wide: the panel's wood stays as approved.
+    grain(s, -330.0, 6.0, W + 330.0, TOP - 12.0, true, 7);
+    grain(s, -330.0, TOP + PH + 8.0, W + 330.0, BOARD - 16.0, true, 8);
+    grain(s, 0.0, PANEL_H + 6.0, W, crate::strip::RAIL - 12.0, true, 6);
     for (x, y, r) in top_screws() {
         screw(s, x, y, r);
     }
@@ -865,26 +965,13 @@ fn jack(s: &mut Svg, r: f64, nut: bool) {
     put!(s, "<circle r='{}' fill='{HOLE}'/>", N(r * 0.36));
 }
 
-/// The left hand controller: GLIDE and DECAY, then the PITCH and MODULATION wheels, upright
-/// in its column, as tall as the panel.
+/// The left hand controller: GLIDE and DECAY, then the PITCH and MODULATION wheels, at the
+/// strip's left, straight on its face (A6).
 fn column(s: &mut Svg, ink: Ink) {
-    put!(s, "<g transform='translate({} {})'>", N(LH_X), N(TOP));
+    let (lx, ly) = crate::strip::LEFT_HAND;
+    put!(s, "<g transform='translate({} {})'>", N(lx), N(ly));
     if ink == Ink::All {
-        put!(
-            s,
-            "<rect x='0' y='0' width='{}' height='{}' rx='6' fill='{PANEL}'/>",
-            N(LPW),
-            N(LPH)
-        );
-        put!(
-            s,
-            "<rect x='0' y='0' width='{}' height='7' fill='{SHADOW}' fill-opacity='{SHADOW_OPACITY}'/>",
-            N(LPW)
-        );
-        let [corners, mountings] = column_screws();
-        for (x, y, r) in corners {
-            screw(s, x, y, r);
-        }
+        let mountings = column_screws();
         // The GLIDE and DECAY jacks have no parameter: drawn, dimmed.
         for y in LH_ROWS {
             put!(
@@ -1596,11 +1683,14 @@ pub fn worn_overlay() -> String {
         s,
         "<defs><linearGradient id='edge-lit' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#ffe6c8' stop-opacity='0.16'/><stop offset='1' stop-color='#ffe6c8' stop-opacity='0'/></linearGradient><linearGradient id='edge-dark' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0'/><stop offset='1' stop-color='#000' stop-opacity='0.45'/></linearGradient><linearGradient id='under-wood' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0.6'/><stop offset='1' stop-color='#000' stop-opacity='0'/></linearGradient><filter id='long' x='-0.6' y='-0.6' width='2.2' height='2.2'><feGaussianBlur stdDeviation='7'/></filter><filter id='soft' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='3.5'/></filter><filter id='softer' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='2'/></filter></defs>"
     );
+    let rail = crate::strip::RAIL;
     for (y, h, fill) in [
         (0.0, 10.0, "edge-lit"),
         (TOP - 14.0, 14.0, "edge-dark"),
         (TOP + PH, 10.0, "edge-lit"),
-        (H - 14.0, 14.0, "edge-dark"),
+        (PANEL_H - 14.0, 14.0, "edge-dark"),
+        (PANEL_H, 10.0, "edge-lit"),
+        (PANEL_H + rail - 14.0, 14.0, "edge-dark"),
     ] {
         put!(
             s,
@@ -1610,17 +1700,20 @@ pub fn worn_overlay() -> String {
             N(h)
         );
     }
-    for (x, w) in [(COL, PW), (LH_X, LPW)] {
+    for y in [TOP, PANEL_H + rail] {
         put!(
             s,
             "<rect x='{}' y='{}' width='{}' height='14' fill='url(#under-wood)'/>",
-            N(x),
-            N(TOP),
-            N(w)
+            N(COL),
+            N(y),
+            N(PW)
         );
     }
     put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
     trims(&mut s);
+    s.0.push_str("</g>");
+    put!(s, "<g transform='translate(0 {})'>", N(PANEL_H + rail));
+    strip_trims(&mut s);
     s.0.push_str("</g>");
     // The moving parts' shadows.
     for c in CONTROLS.iter() {

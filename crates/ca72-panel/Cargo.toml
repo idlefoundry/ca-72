@@ -9,6 +9,9 @@ publish.workspace = true
 
 [dependencies]
 resvg = { version = "0.45", default-features = false, features = ["text"] }
+# The worn skins' materials (plugin-kit's K5): by path from the kit's worktree while K5 is on its
+# branch; then the kit's commit, as the CA-74 takes it.
+plugin-kit-materials = { path = "../../../../../../plugin-kit/.claude/worktrees/materials/crates/plugin-kit-materials" }
 rustybuzz = "0.20"
 
 [lints]

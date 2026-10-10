@@ -1,0 +1,6 @@
+Use your image generation tool to make one image, then save it in the current directory as vfd-glass.png (copy the generated file there). Do nothing else.
+
+The image: a straight-on, orthographic close photograph of the glass of an unlit vacuum fluorescent display from a late 1970s instrument, filling the whole frame edge to edge. Landscape, as large as you can make it.
+- The material: dark smoked grey-green glass (close to #0f1a18); behind it, just visible, a very fine metal mesh grid and a few thin horizontal filament wires; no characters, segments or dots lit.
+- A faint soft reflection across the glass; NO text, digits, logos, edges or borders.
+- No vignetting, no perspective, sharp focus everywhere.

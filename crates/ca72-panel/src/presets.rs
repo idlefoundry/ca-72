@@ -27,13 +27,13 @@ use crate::fonts::{FAMILY, Fonts, Weight};
 use crate::svg::{N, Svg, colour, escape, put};
 
 /// The selector's height, panel units: the strip's row it shares.
-pub const BAR_H: f64 = crate::strip::STRIP_H;
+pub const BAR_H: f64 = 96.0;
 /// Where the selector ends across the strip's row, panel units: the strip's own controls
 /// are to the right of it.
 pub const BAR_END: f64 = 1110.0;
-/// The drawer's top, panel units down from the drawing's, and its height: the panel's lower
-/// four fifths.
-pub const DRAWER_TOP: f64 = art::H * 0.2;
+/// The drawer's top, panel units down from the drawing's, and its height: dropping down from
+/// under the strip's rail over its sections, to the window's foot (A6: decisions.md R-LOOK).
+pub const DRAWER_TOP: f64 = art::PANEL_H + crate::strip::RAIL;
 pub const DRAWER_H: f64 = art::H - DRAWER_TOP;
 
 const DIM: &str = "#8a909c";
@@ -537,13 +537,15 @@ fn fit(fonts: &Fonts, s: &str, size: f64, room: f64) -> String {
 const PAD: f64 = 30.0;
 const TOOLS_Y: f64 = PAD;
 const TOOLS_H: f64 = 60.0;
-const SEARCH_END: f64 = 1680.0;
+const SEARCH_END: f64 = 1350.0;
+/// (The search 330 units shorter since the drawing lost the controller's column, A6: the update
+/// check's text keeps its room.)
 /// The MIDI button, between the search and FAVOURITES.
-const MIDI_X: f64 = 1710.0;
+const MIDI_X: f64 = 1380.0;
 const MIDI_W: f64 = 190.0;
-const FAVS_X: f64 = 1930.0;
+const FAVS_X: f64 = 1600.0;
 const FAVS_W: f64 = 320.0;
-const MINE_X: f64 = 2280.0;
+const MINE_X: f64 = 1950.0;
 const MINE_W: f64 = 180.0;
 const CLOSE_W: f64 = 64.0;
 /// The update check's button, before ×; its text ends short of the button.
@@ -1536,7 +1538,7 @@ mod tests {
             drawer_hit(&fonts, &s2, 800.0, row(1)),
             Some(DrawerTarget::Field(FieldId::Edit))
         );
-        const { assert!(ROWS_SHOWN >= 8) };
+        const { assert!(ROWS_SHOWN >= 7) };
     }
 
     #[test]
@@ -1584,16 +1586,22 @@ mod tests {
         odd.rows[0].name = "Preset\u{1} 0".into();
         odd.rows[1].tags = "bass\u{7} · dark".into();
         assert_eq!(drawer(&odd).data(), drawer(&scene()).data());
+        let under = Pixmap::new((art::W * 0.4).round() as u32, (art::H * 0.4).round() as u32)
+            .expect("a frame");
         let strip = |name: &str| {
             let mut r = crate::strip::StripRenderer::new(0.4);
-            r.render(&crate::strip::StripScene {
-                bar: BarScene {
-                    name: name.into(),
-                    found: true,
-                    ..BarScene::default()
+            r.render(
+                &crate::strip::StripScene {
+                    bar: BarScene {
+                        name: name.into(),
+                        found: true,
+                        ..BarScene::default()
+                    },
+                    ..crate::strip::StripScene::default()
                 },
-                ..crate::strip::StripScene::default()
-            });
+                &under,
+                true,
+            );
             r.frame().clone()
         };
         assert_eq!(strip("Warped\u{1b} Pad").data(), strip("Warped Pad").data());
@@ -1615,23 +1623,24 @@ mod png {
         };
         let dir = std::path::PathBuf::from(dir);
         let mut strip = crate::strip::StripRenderer::new(0.4);
-        strip.render(&crate::strip::StripScene {
-            poly: true,
-            voices: 8,
-            entropy: 0.3,
-            spread: 0.5,
-            bar: BarScene {
-                name: "Undertow Growl".into(),
-                found: true,
-                changed: true,
-                favorite: true,
-                open: true,
-                below: true,
-                hover: None,
+        let under = Pixmap::new((art::W * 0.4).round() as u32, (art::H * 0.4).round() as u32)
+            .expect("a frame");
+        strip.render(
+            &crate::strip::StripScene {
+                bar: BarScene {
+                    name: "Undertow Growl".into(),
+                    found: true,
+                    changed: true,
+                    favorite: true,
+                    open: true,
+                    below: false,
+                    hover: None,
+                },
+                ..crate::strip::StripScene::default()
             },
-            hover: None,
-            learning: None,
-        });
+            &under,
+            true,
+        );
         strip.frame().save_png(dir.join("strip.png")).unwrap();
         let mut d = DrawerRenderer::new(0.4);
         let names = [

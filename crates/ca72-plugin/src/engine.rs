@@ -1513,6 +1513,20 @@ impl Engine {
         self.lamp
     }
 
+    /// Which voices sound now, a bit a voice (the editor's display of where they sound, A6):
+    /// POLY's and UNISON's sounding, the one instrument while a key is held.
+    pub fn sounding_mask(&self) -> u32 {
+        if self.many() {
+            self.slots
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.active)
+                .fold(0, |m, (k, _)| m | 1 << k)
+        } else {
+            u32::from(self.held.iter().any(|h| *h))
+        }
+    }
+
     /// The voices sounding now (POLY or UNISON on), or 1 (off).
     pub fn sounding(&self) -> usize {
         if self.many() {

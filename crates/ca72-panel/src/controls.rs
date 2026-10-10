@@ -15,6 +15,14 @@ pub enum Dial {
     Time,
     /// MODULATION MIX: 0 to 10 between OSC. 3 and NOISE.
     ModMix,
+    /// The strip's (A6): VOICES, 2 to 10, a step a voice.
+    Voices,
+    /// DETUNE, DOUBLE's: 0 to 20 cents.
+    Detune,
+    /// DRIVE: 0 to 24 dB.
+    Drive,
+    /// LEVEL: -30 to +12 dB.
+    Level,
 }
 
 /// A selector's legends.
@@ -80,8 +88,11 @@ pub enum Kind {
 pub enum Place {
     /// The panel, its origin at its top left corner.
     Panel,
-    /// The left hand controller's face, beside the panel.
+    /// The left hand controller's, its origin where its column's was, now on the strip
+    /// (`strip::LEFT_HAND`).
     Column,
+    /// The strip's, its origin the drawing's.
+    Strip,
 }
 
 /// A control of the panel, operating the parameter of the same function.
@@ -103,7 +114,8 @@ impl Control {
     pub fn centre(&self) -> (f64, f64) {
         let (ox, oy) = match self.place {
             Place::Panel => (crate::art::COL, crate::art::TOP),
-            Place::Column => (crate::art::LH_X, crate::art::TOP),
+            Place::Column => crate::strip::LEFT_HAND,
+            Place::Strip => (0.0, 0.0),
         };
         (ox + self.x, oy + self.y)
     }
@@ -114,6 +126,19 @@ const fn knob(param: &'static str, label: &'static str, x: f64, y: f64, dial: Di
         param,
         label,
         place: Place::Panel,
+        x,
+        y,
+        kind: Kind::Knob { dial, big: false },
+    }
+}
+
+/// A knob on the strip, at its place there (`strip::KNOBS`).
+const fn strip_knob(param: &'static str, label: &'static str, at: usize, dial: Dial) -> Control {
+    let (_, x, y) = crate::strip::KNOBS[at];
+    Control {
+        param,
+        label,
+        place: Place::Strip,
         x,
         y,
         kind: Kind::Knob { dial, big: false },
@@ -202,7 +227,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 44] = [
+pub const CONTROLS: [Control; 50] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -478,6 +503,13 @@ pub const CONTROLS: [Control; 44] = [
             span: 76.0,
         },
     },
+    // The strip's knobs (A6: decisions.md R-LOOK, R-STEREO), the plug-in's own.
+    strip_knob("voices", "VOICES", 0, Dial::Voices),
+    strip_knob("entropy", "ENTROPY", 1, Dial::Ten),
+    strip_knob("spread", "WIDTH", 2, Dial::Ten),
+    strip_knob("double", "DETUNE (DOUBLE)", 3, Dial::Detune),
+    strip_knob("drive", "DRIVE", 4, Dial::Drive),
+    strip_knob("level", "LEVEL", 5, Dial::Level),
 ];
 
 /// The index of the control operating `param`.
