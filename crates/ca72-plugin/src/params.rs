@@ -1,5 +1,5 @@
 //! The plug-in's parameters: the front panel's and left hand controller's controls in their
-//! dials' units, MIDI BEND RANGE, and the plug-in's own POLY, VOICES, ENTROPY and SPREAD.
+//! dials' units, MIDI BEND RANGE, and the plug-in's own POLY, VOICES, ENTROPY, SPREAD and INNER.
 //! Their ids are stable (a saved session's settings are found by them): never rename one.
 
 use std::hash::{BuildHasher, Hasher};
@@ -106,26 +106,25 @@ pub enum Wave3 {
 }
 
 /// Where SCATTER puts the voices (decisions.md R-STEREO, the CA-74's R30): evenly from edge
-/// to edge, out at the edges, or out from the centre. In this order: a preset's value is its
-/// index.
+/// to edge, or out from the centre. The CA-74's third, EDGES, is not offered: INNER moves the
+/// voices out from the centre instead, all of them to the edges at 100 % (the owner,
+/// 2026-10-10; decisions.md R-INNER). In this order (the strip's tabs'): a preset's value is
+/// its index, 0 EVEN and 1 CENTER.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scatter {
     #[id = "even"]
     #[name = "EVEN"]
     Even,
-    #[id = "edges"]
-    #[name = "EDGES"]
-    Edges,
     #[id = "centre"]
     #[name = "CENTER"]
     Centre,
 }
 
+/// The kit's placement of each choice.
 impl From<Scatter> for Placement {
     fn from(s: Scatter) -> Placement {
         match s {
             Scatter::Even => Placement::Even,
-            Scatter::Edges => Placement::Edges,
             Scatter::Centre => Placement::Centre,
         }
     }
@@ -347,8 +346,9 @@ pub struct Ca72Params {
     /// keeps a small mismatch of its own; decisions.md R9).
     #[id = "lock"]
     pub lock: BoolParam,
-    /// SCATTER's placement (EVEN by default): where SPREAD puts the voices (decisions.md
-    /// R-STEREO). The last parameter: a session saved before it reads EVEN.
+    /// SCATTER's placement, EVEN (the default) or CENTER: where SPREAD puts the voices
+    /// (decisions.md R-STEREO, R-INNER). The last parameter: a session saved before it reads
+    /// EVEN, and one saved with EDGES opens with EVEN too (`Ca72::filter_state`).
     #[id = "placement"]
     pub placement: EnumParam<Scatter>,
     /// UNISON: VOICES instruments on every key together (decisions.md R-STEREO). After the
@@ -372,6 +372,11 @@ pub struct Ca72Params {
     /// before reads it on.
     #[id = "auto_gain"]
     pub auto_gain: BoolParam,
+    /// INNER (0 to 100 %): the inner edge of each side's band, a share of SPREAD's way out, the
+    /// centre cleared of voices (decisions.md R-INNER). After AUTO GAIN: a session saved before
+    /// reads 0.
+    #[id = "inner"]
+    pub inner: FloatParam,
     /// QUALITY, HI by default: at LO the voices are played by the light model, Potato mode,
     /// for computers the circuit's is too heavy for (decisions.md R-POTATO); at ULTRA by the
     /// circuit's model with no compromises (R-ULTRA). Not a preset's (`library::KEPT`): it
@@ -544,6 +549,7 @@ impl Default for Ca72Params {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
             auto_gain: BoolParam::new("Auto Gain", true),
+            inner: percent("Inner"),
             quality: EnumParam::new("Quality", QualityMode::Hi),
         }
     }
@@ -645,6 +651,7 @@ impl Ca72Params {
             voices: usize::try_from(self.voices.value()).unwrap_or(POLY_VOICES.1),
             entropy: value(&self.entropy) / 100.0,
             spread: value(&self.spread) / 100.0,
+            inner: value(&self.inner) / 100.0,
             placement: self.placement.value().into(),
             unison: self.unison.value(),
             double: value(&self.double) / 100.0,
@@ -685,7 +692,31 @@ mod tests {
         assert_eq!(back("off"), Some(0.0));
         assert_eq!(back("140"), Some(100.0), "past 100 cents: the most");
         assert_eq!((d.name(), p.spread.name()), ("Double Detune", "Width"));
+        assert_eq!(p.inner.name(), "Inner");
         let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
         assert!(ids.iter().any(|i| i == "double") && ids.iter().any(|i| i == "spread"));
+        assert!(ids.iter().any(|i| i == "inner"));
+    }
+
+    /// SCATTER's placement offers two choices, EVEN (the default) and CENTER, the strip's tabs
+    /// in their order, their ids as they were; each the kit's placement of its name, never its
+    /// EDGES (decisions.md R-INNER). The host steps between the two.
+    #[test]
+    fn the_placement_offers_even_and_center() {
+        let p = Ca72Params::default();
+        assert_eq!(Scatter::variants(), ["EVEN", "CENTER"]);
+        assert_eq!(Scatter::ids(), Some(&["even", "centre"][..]));
+        assert_eq!(
+            ca72_panel::strip::Bank::Placement.words(),
+            Scatter::variants()
+        );
+        assert_eq!(Placement::from(Scatter::Even), Placement::Even);
+        assert_eq!(Placement::from(Scatter::Centre), Placement::Centre);
+        let q = &p.placement;
+        assert_eq!((q.name(), q.value()), ("Scatter Placement", Scatter::Even));
+        assert_eq!(q.step_count(), Some(1));
+        let shown = |n: f32| q.normalized_value_to_string(n, false);
+        assert_eq!((shown(0.0), shown(1.0)), ("EVEN".into(), "CENTER".into()));
+        assert_eq!(p.controls().placement, Placement::Even);
     }
 }

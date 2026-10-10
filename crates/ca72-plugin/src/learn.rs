@@ -2,8 +2,9 @@
 //! own MIDI channel, assigned to one of the plug-in's sound parameters; each instance its own
 //! table, saved with the host's project, not with the sound presets.
 //!
-//! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches and the
-//!   strip's POLY, VOICES, ENTROPY and SPREAD, and LOCK (a host parameter without a control: the
+//! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches, the
+//!   strip's POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD), INNER, SCATTER's placement, DETUNE
+//!   (DOUBLE), DRIVE, LEVEL and AUTO GAIN, and LOCK (a host parameter without a control: the
 //!   drawer's list learns it). Not the wheels (MIDI pitch bend and the modulation wheel, CC 1,
 //!   move them already), POWER (the host's bypass), MIDI BEND RANGE (the player's), nor anything
 //!   but a sound parameter.
@@ -83,7 +84,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK. Its order is the drawer's list; the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 54] = [
+pub const LEARNABLE: [Learnable; 55] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -139,7 +140,9 @@ pub const LEARNABLE: [Learnable; 54] = [
     stepped("voices", "VOICES"),
     knob("entropy", "ENTROPY"),
     knob("spread", "WIDTH"),
-    stepped("placement", "SCATTER PLACEMENT"),
+    knob("inner", "INNER"),
+    // (Two choices, EVEN and CENTER: a switch, as NOISE's WHITE or PINK.)
+    switch("placement", "SCATTER PLACEMENT"),
     knob("double", "DETUNE (DOUBLE)"),
     knob("drive", "DRIVE"),
     knob("level", "LEVEL"),
@@ -698,6 +701,7 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "voices" => &p.voices,
         "entropy" => &p.entropy,
         "spread" => &p.spread,
+        "inner" => &p.inner,
         "lock" => &p.lock,
         "placement" => &p.placement,
         "unison" => &p.unison,
@@ -735,6 +739,7 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "feedback" => &p.feedback,
         "entropy" => &p.entropy,
         "spread" => &p.spread,
+        "inner" => &p.inner,
         "double" => &p.double,
         "drive" => &p.drive,
         "level" => &p.level,
@@ -925,7 +930,7 @@ mod tests {
                 counts(Kind::Stepped),
                 counts(Kind::Switch)
             ),
-            (26, 8, 20)
+            (27, 7, 21)
         );
     }
 
@@ -953,8 +958,8 @@ mod tests {
         assert_eq!(m.refused(), None, "nothing said while not learning");
     }
 
-    /// A knob: value / 127 of its travel. A switch: off at 0–63, on at 64–127. A selector: its six
-    /// positions each an equal share of 0–127; VOICES its nine.
+    /// A knob: value / 127 of its travel. A switch (SCATTER's placement too): off at 0–63, on at
+    /// 64–127. A selector: its six positions each an equal share of 0–127; VOICES its nine.
     #[test]
     fn a_value_sets_each_kind_through_its_parameters_normalization() {
         let p = Ca72Params::default();
@@ -969,6 +974,18 @@ mod tests {
         assert_eq!(
             (pink.normalized_for(63), pink.normalized_for(64)),
             (0.0, 1.0)
+        );
+        // SCATTER's placement, two choices: EVEN at 0–63, CENTER at 64–127.
+        let placement = target(&p, at("placement")).expect("a two-way switch");
+        let chosen = |v: u8| p.placement.preview_plain(placement.normalized_for(v));
+        assert_eq!(
+            [chosen(0), chosen(63), chosen(64), chosen(127)],
+            [
+                crate::params::Scatter::Even,
+                crate::params::Scatter::Even,
+                crate::params::Scatter::Centre,
+                crate::params::Scatter::Centre
+            ]
         );
         let range = target(&p, at("osc1_range")).expect("a selector");
         let position = |v: u8| (range.normalized_for(v) * 5.0).round() as u8;

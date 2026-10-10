@@ -60,7 +60,7 @@ pub fn unmeasured() -> Saved {
 /// the light voices'; at HI keyed as before it, and at ULTRA as at HI: the circuit's model is
 /// measured at its real-time setting, which No Compromises differs from far below what the
 /// correction can tell, and measuring at No Compromises would take the helper many times as
-/// long). Not POLY, UNISON, VOICES, DOUBLE or SPREAD: a
+/// long). Not POLY, UNISON, VOICES, DOUBLE, SPREAD or INNER: a
 /// note's voices each have their own filter, so a chord, a unison or a pair sum what one voice
 /// does (their levels are their own trims'). Never 0.
 pub fn sound(c: &Controls) -> u64 {
@@ -163,6 +163,7 @@ mod tests {
         assert!(!c.waiting());
         let mut louder = controls;
         (louder.drive, louder.level, louder.spread, louder.poly) = (12.0, -6.0, 1.0, true);
+        louder.inner = 0.5;
         assert_eq!(sound(&louder), sound(&controls));
         let mut fed = controls;
         fed.feedback = 0.5;

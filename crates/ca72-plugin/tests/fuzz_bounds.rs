@@ -84,10 +84,12 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         voices: if r.end() { 10 } else { 2 },
         entropy: r.either(0.0, 1.0),
         spread: r.either(0.0, 1.0),
+        inner: r.either(0.0, 1.0),
+        // (The placement's ends: the plug-in's two choices.)
         placement: if r.end() {
-            Placement::Edges
-        } else {
             Placement::Centre
+        } else {
+            Placement::Even
         },
         unison: r.end(),
         double: r.either(0.0, 1.0),

@@ -1,13 +1,13 @@
 //! The editor: the front panel (`ca72-panel`) in a window of its own (baseview), its frames
 //! shown with softbuffer, and under it the plug-in's own strip (`ca72_panel::strip`, A6:
 //! decisions.md R-LOOK): the presets' rail, the left hand's GLIDE, DECAY and wheels, MODE,
-//! VOICES and ENTROPY, how the voices are played across the field, WIDTH, DETUNE and where the
-//! voices sound, DRIVE, AUTO GAIN and LEVEL. Every control operates its parameter through the
-//! host, a drag one gesture (one undo step in hosts that keep them); the POWER switch is the
-//! bypass; the OVERLOAD lamp, the wheels and the voices' display show what the audio thread
-//! reports. The grip at the window's bottom right corner resizes it. The presets' drawer drops
-//! down from under the rail over the strip (`crate::presets`, decisions.md R10), the window
-//! keeping its size, and takes the keyboard while open; in it the update check
+//! VOICES and ENTROPY, how the voices are played across the field, WIDTH, INNER, DETUNE and
+//! where the voices sound, DRIVE, AUTO GAIN and LEVEL. Every control operates its parameter
+//! through the host, a drag one gesture (one undo step in hosts that keep them); the POWER
+//! switch is the bypass; the OVERLOAD lamp, the wheels and the voices' display show what the
+//! audio thread reports. The grip at the window's bottom right corner resizes it. The presets'
+//! drawer drops down from under the rail over the strip (`crate::presets`, decisions.md R10),
+//! the window keeping its size, and takes the keyboard while open; in it the update check
 //! (`crate::update`, R27). A right click opens a control's menu, for MIDI Learn; the drawer's
 //! MIDI button shows its list of assignments (`crate::learning`, R34).
 
@@ -30,12 +30,13 @@ use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, S
 use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact, ultra};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
+use plugin_kit_stereo::place;
 
 use crate::engine::LEVELS;
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
 use crate::opening::{ANIMATE_S, Motion, level_of};
-use crate::params::{Ca72Params, QualityMode};
+use crate::params::{Ca72Params, QualityMode, Scatter};
 use crate::presets::Browser;
 use crate::settings::Settings;
 use crate::update::Update;
@@ -237,6 +238,7 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "voices" => &p.voices,
         "entropy" => &p.entropy,
         "spread" => &p.spread,
+        "inner" => &p.inner,
         "double" => &p.double,
         "drive" => &p.drive,
         "level" => &p.level,
@@ -448,11 +450,11 @@ struct Editing {
     renderer: Renderer,
     scene: Scene,
     /// The strip's own parts (over the drawing's strip): their renderer and scene, and
-    /// ENTROPY's, WIDTH's and DETUNE's last amount but 0 (their switches, and SCATTER | DOUBLE,
-    /// turn them back on there).
+    /// ENTROPY's, WIDTH's, DETUNE's and INNER's last amount but 0 (their switches, and SCATTER |
+    /// DOUBLE, turn them back on there; `amount` gives each its place).
     strip: StripRenderer,
     strip_scene: StripScene,
-    last: [f32; 3],
+    last: [f32; 4],
     /// The presets: the drawer's renderer, what the rail and the drawer show and do, and the
     /// window's frame: the panel's, the strip's parts under its foot, the drawer over them.
     drawer: DrawerRenderer,
@@ -629,7 +631,7 @@ impl Editing {
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
             strip_scene: StripScene::default(),
-            last: [0.5; 3],
+            last: [0.5; 4],
             drawer: DrawerRenderer::new(f64::from(physical_width) / art::W),
             browser: Browser::new(library),
             composed: None,
@@ -851,12 +853,13 @@ impl Editing {
         s.end_set_parameter(&self.params.bypass);
     }
 
-    /// An amount the strip turns off and back on (ENTROPY's and WIDTH's readouts, SCATTER |
-    /// DOUBLE): its parameter and its place in `last`.
+    /// An amount the strip turns off and back on (ENTROPY's, WIDTH's and INNER's readouts,
+    /// SCATTER | DOUBLE): its parameter and its place in `last`.
     fn amount(&self, a: Readout) -> (&FloatParam, usize) {
         match a {
             Readout::Width => (&self.params.spread, 1),
             Readout::Detune => (&self.params.double, 2),
+            Readout::Inner => (&self.params.inner, 3),
             _ => (&self.params.entropy, 0),
         }
     }
@@ -917,13 +920,11 @@ impl Editing {
                 }
             }
             StripTarget::Tab(Bank::Stereo, i) => self.switch_amount(Readout::Detune, i == 1),
+            // The tabs are the placement's choices in their order: EVEN, CENTER.
             StripTarget::Tab(Bank::Placement, i) => {
                 let p = &self.params.placement;
-                let to = p.preview_normalized(match i {
-                    1 => crate::params::Scatter::Edges,
-                    2 => crate::params::Scatter::Centre,
-                    _ => crate::params::Scatter::Even,
-                });
+                let last = Scatter::variants().len() - 1;
+                let to = p.preview_normalized(Scatter::from_index(i.min(last)));
                 if p.unmodulated_normalized_value() != to {
                     let s = self.setter();
                     s.begin_set_parameter(p);
@@ -1608,7 +1609,6 @@ fn strip_scene(
     (levels, output): (&[f64], f64),
     was: StripScene,
 ) -> StripScene {
-    use crate::character::Placement;
     let c = p.controls();
     let unison = c.unison;
     let poly = c.poly && !unison;
@@ -1655,37 +1655,48 @@ fn strip_scene(
         auto,
         (num3(c.drive), c.drive > 0.0),
         (num3(c.level), true),
+        (
+            percent(c.inner),
+            c.inner > 0.0 && c.spread > 0.0 && (!mono || doubled),
+        ),
     ];
     let on = |k: usize| sounding & (1 << k) != 0;
     // Where they sound: in MONO the one voice (its pair with DOUBLE, all of WIDTH's way out);
     // else each of VOICES's voices at its place by the placement, its pair as far out with
-    // DOUBLE (decisions.md R-STEREO).
-    let width = c.spread;
+    // DOUBLE (decisions.md R-STEREO), each in its side's band by INNER: where the engine's
+    // gains put it, the kit's (R-INNER).
+    let (width, inner) = (c.spread, c.inner);
     let field = if mono {
         if doubled {
-            Field::Double(vec![(width, on(0))])
+            Field::Double(vec![(place::pair_at(width, inner, place::ALONE), on(0))])
         } else {
             Field::Scatter(vec![(0.0, on(0))])
         }
     } else if doubled {
         Field::Double(
             (0..voices)
-                .map(|k| (placement.pair(k, voices) * width, on(k)))
+                .map(|k| {
+                    (
+                        place::pair_at(width, inner, placement.pair(k, voices)),
+                        on(k),
+                    )
+                })
                 .collect(),
         )
     } else {
         Field::Scatter(
             (0..voices)
-                .map(|k| (placement.place(k, voices) * width, on(k)))
+                .map(|k| (place::voice_at(width, inner, placement, k, voices), on(k)))
                 .collect(),
         )
     };
+    // The placement's tab by the plug-in's choice (its tabs are its choices, EVEN and CENTER:
+    // not the kit's index, which counts its EDGES); none where it moves nothing.
     let placement_lit = !mono || doubled;
-    let _ = Placement::Even;
     StripScene {
         mode,
         stereo: Some(usize::from(doubled)),
-        placement: placement_lit.then_some(placement.index()),
+        placement: placement_lit.then_some(p.placement.value().to_index()),
         auto: c.auto_gain,
         readouts,
         field,
@@ -3261,6 +3272,28 @@ mod tests {
         right_click(&mut e, p);
         menu_item(&mut e, "CANCEL MIDI LEARN");
         assert_eq!(map.armed(), None);
+        // INNER's knob (the strip's last): its menu where it was pressed, MIDI LEARN rings it as
+        // the panel's knobs are rung, and its note says so over it.
+        let inner = ca72_panel::controls::index("inner").expect("a control");
+        let p = at(&e, centre("inner"));
+        right_click(&mut e, p);
+        let m = e.learning.menu().expect("a menu").clone();
+        assert_eq!(m.title, "INNER · NO MIDI CONTROLLER");
+        let (_, h) = m.extent(e.renderer.fonts());
+        assert!((m.x - centre("inner").0).abs() < 1e-6, "at INNER's knob");
+        assert!(m.y >= 0.0 && m.y + h <= art::H + 1e-6, "inside the window");
+        menu_item(&mut e, "MIDI LEARN");
+        assert_eq!(map.armed(), Some(learnable("inner")));
+        e.draw();
+        assert_eq!(
+            (e.scene.learning, e.strip_scene.learning),
+            (Some(inner), None)
+        );
+        assert_eq!(note_lines(&e)[0], "MIDI LEARN: INNER");
+        let p = at(&e, centre("inner"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "CANCEL MIDI LEARN");
+        assert_eq!(map.armed(), None);
         for (param, title) in [
             ("pitch_wheel", "PITCH: MIDI PITCH BEND MOVES IT"),
             (
@@ -3418,6 +3451,24 @@ mod tests {
                 Call::Set(cutoff, 0.75),
                 Call::Set(cutoff, 1.0),
                 Call::End(cutoff)
+            ]
+        );
+        // A knob of the strip's, INNER's, the same (from its 0).
+        let p = at(&e, centre("inner"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -2.0));
+        go(&mut e, below(p, -60.0));
+        go(&mut e, below(p, -300.0));
+        release(&mut e);
+        let inner = params.inner.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(inner),
+                Call::Set(inner, 0.25),
+                Call::Set(inner, 1.0),
+                Call::End(inner)
             ]
         );
     }
@@ -3672,6 +3723,17 @@ mod tests {
             e.scene.tip.as_ref().map(|t| t.0.as_str()),
             Some("OSCILLATOR-1 VOLUME: 8.00")
         );
+        // A strip knob's, INNER's, in its unit: turned from 0 to 40 %.
+        let p = at(&e, centre("inner"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -96.0));
+        e.update_scene();
+        assert_eq!(
+            e.scene.tip.as_ref().map(|t| t.0.as_str()),
+            Some("INNER: 40 %")
+        );
+        release(&mut e);
     }
 
     #[test]
@@ -3776,9 +3838,10 @@ mod tests {
 
     /// The strip's tabs and switches (A6): MODE's MONO, POLY and UNISON set POLY and UNISON;
     /// SCATTER | DOUBLE turns DETUNE off and back on at its amount (half way if it never was);
-    /// the placement is its parameter; AUTO GAIN's tab toggles it; ENTROPY's and WIDTH's
-    /// readouts turn their amounts off and on; VOICES is a knob, a drag one gesture. Each click
-    /// a gesture of its own for each parameter it changes, none for one already so.
+    /// the placement's EVEN and CENTER are its parameter's two choices; AUTO GAIN's tab toggles
+    /// it; ENTROPY's, WIDTH's and INNER's readouts turn their amounts off and on; VOICES is a
+    /// knob, a drag one gesture. Each click a gesture of its own for each parameter it changes,
+    /// none for one already so.
     #[test]
     fn the_strip_operates_its_parameters() {
         let (mut e, host, params) = editing();
@@ -3821,7 +3884,9 @@ mod tests {
             "SCATTER already (DETUNE still off here)"
         );
         let placement = params.placement.as_ptr();
-        tab(&mut e, Bank::Placement, 2);
+        tab(&mut e, Bank::Placement, 0);
+        assert_eq!(host.take(), vec![], "EVEN already");
+        tab(&mut e, Bank::Placement, 1);
         assert_eq!(
             host.take(),
             vec![
@@ -3830,16 +3895,22 @@ mod tests {
                 Call::End(placement)
             ]
         );
+        assert_eq!(
+            params.placement.preview_plain(1.0),
+            Scatter::Centre,
+            "the second tab CENTER"
+        );
         let auto = params.auto_gain.as_ptr();
         tab(&mut e, Bank::Auto, 0);
         assert_eq!(
             host.take(),
             vec![Call::Begin(auto), Call::Set(auto, 0.0), Call::End(auto)]
         );
-        // ENTROPY's and WIDTH's switches: on from 0 at half way (they never were).
+        // ENTROPY's, WIDTH's and INNER's switches: on from 0 at half way (they never were).
         for (r, p) in [
             (Readout::Entropy, params.entropy.as_ptr()),
             (Readout::Width, params.spread.as_ptr()),
+            (Readout::Inner, params.inner.as_ptr()),
         ] {
             let at = on_strip(&e, strip_at(StripTarget::Switch(r)));
             click(&mut e, at);
@@ -3862,6 +3933,75 @@ mod tests {
         // The strip draws what the parameters hold.
         e.update_scene();
         assert!(e.draw());
+    }
+
+    /// The strip's readouts that are switches turn their amounts off, keeping each, and back on
+    /// at it: WIDTH's and INNER's each their own (INNER's switch the same as WIDTH's).
+    #[test]
+    fn the_strips_switches_turn_their_amounts_off_and_back_on_at_their_last() {
+        let amount = |name: &str, percent: f32| {
+            FloatParam::new(
+                name,
+                percent,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+        };
+        let (mut e, host, _) = editing();
+        e.params = Arc::new(Ca72Params {
+            spread: amount("Width", 70.0),
+            inner: amount("Inner", 40.0),
+            ..Ca72Params::default()
+        });
+        let switch = |e: &mut Editing, r: Readout| {
+            let p = on_strip(e, strip_at(StripTarget::Switch(r)));
+            click(e, p);
+        };
+        // Off, each kept.
+        for (r, p) in [
+            (Readout::Width, e.params.spread.as_ptr()),
+            (Readout::Inner, e.params.inner.as_ptr()),
+        ] {
+            switch(&mut e, r);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, 0.0), Call::End(p)]
+            );
+        }
+        // (The test host applies nothing: the parameters as the host would hold them now.)
+        e.params = Arc::new(Ca72Params::default());
+        // Back on, each at its own.
+        for (r, p, was) in [
+            (Readout::Inner, e.params.inner.as_ptr(), 0.4),
+            (Readout::Width, e.params.spread.as_ptr(), 0.7),
+        ] {
+            switch(&mut e, r);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, was), Call::End(p)]
+            );
+        }
+    }
+
+    /// The strip lights the placement's tab by the plug-in's choice, EVEN the first and CENTER
+    /// the second (not by the kit's index, which counts its EDGES); none in MONO without DOUBLE,
+    /// whose one voice has no place among others.
+    #[test]
+    fn the_strip_lights_the_placements_tab() {
+        let lit = |poly: bool, placement: Scatter| {
+            let p = Ca72Params {
+                poly: BoolParam::new("Poly", poly),
+                placement: EnumParam::new("Scatter Placement", placement),
+                ..Ca72Params::default()
+            };
+            strip_scene(&p, 0, (&[], 0.0), StripScene::default()).placement
+        };
+        assert_eq!(lit(true, Scatter::Even), Some(0));
+        assert_eq!(lit(true, Scatter::Centre), Some(1));
+        assert_eq!(lit(false, Scatter::Centre), None);
+        assert_eq!(Bank::Placement.words(), ["EVEN", "CENTER"]);
     }
 
     #[test]
@@ -4370,19 +4510,14 @@ mod tests {
         };
         let dir = tempfile::tempdir().unwrap();
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
+        window_frame(&mut e).save_png(out).unwrap();
+    }
+
+    /// The window's frame as shown (the panel's renderer's whole drawing, the strip's parts over
+    /// its foot, the drawer and what floats over them: `compose`), for a look.
+    fn window_frame(e: &mut Editing) -> &ca72_panel::Pixmap {
         e.draw();
-        let frames = [e.renderer.frame(), e.strip.frame()];
-        let w = frames[0].width();
-        let h: u32 = frames.iter().map(|f| f.height()).sum();
-        let mut all = ca72_panel::Pixmap::new(w, h).unwrap();
-        let mut y = 0usize;
-        for f in frames {
-            let n = (f.width() * f.height() * 4) as usize;
-            let start = y * w as usize * 4;
-            all.data_mut()[start..start + n].copy_from_slice(f.data());
-            y += f.height() as usize;
-        }
-        all.save_png(out).unwrap();
+        e.composed.as_ref().expect("the window's frame")
     }
 
     /// QUALITY's opening (decisions.md R-ULTRA) for looking at, written to `$CA72_ULTRA_PNG`,
@@ -4501,7 +4636,8 @@ mod tests {
 
     /// MIDI Learn drawn (decisions.md R34), for looking at: CUTOFF being learned (ringed, its
     /// note) with MAIN OUTPUT VOLUME's menu open, then POLY being learned after a reserved
-    /// controller was moved, each as `learn-<n>.png` in `$CA72_LEARN_PNG`, the folder.
+    /// controller was moved, then the strip's INNER being learned with its menu open, each as
+    /// `learn-<n>.png` in `$CA72_LEARN_PNG`, the folder.
     #[test]
     fn the_window_learning_png() {
         let Some(out) = std::env::var_os("CA72_LEARN_PNG") else {
@@ -4510,19 +4646,7 @@ mod tests {
         let out = std::path::PathBuf::from(out);
         let dir = tempfile::tempdir().unwrap();
         let shot = |e: &mut Editing, name: &str| {
-            e.draw();
-            let frames = [e.renderer.frame(), e.strip.frame()];
-            let w = frames[0].width();
-            let h: u32 = frames.iter().map(|f| f.height()).sum();
-            let mut all = ca72_panel::Pixmap::new(w, h).unwrap();
-            let mut y = 0usize;
-            for f in frames {
-                let n = (f.width() * f.height() * 4) as usize;
-                let start = y * w as usize * 4;
-                all.data_mut()[start..start + n].copy_from_slice(f.data());
-                y += f.height() as usize;
-            }
-            all.save_png(out.join(name)).unwrap();
+            window_frame(e).save_png(out.join(name)).unwrap();
         };
         let (mut e, _host, params) = editing_with(Library::at(dir.path()));
         params
@@ -4536,6 +4660,10 @@ mod tests {
         params.midi_map.arm(learnable("poly"));
         params.midi_map.refuse(1);
         shot(&mut e, "learn-2.png");
+        params.midi_map.arm(learnable("inner"));
+        let p = at(&e, centre("inner"));
+        right_click(&mut e, p);
+        shot(&mut e, "learn-3.png");
     }
 
     /// The drawer's update check (decisions.md R27): its button the editor's, not the
@@ -4589,19 +4717,7 @@ mod tests {
             presets_ui::row_centre(&e.browser.drawer, i + 1).expect("shown"),
         );
         go(&mut e, pt);
-        e.draw();
-        let frames = [e.renderer.frame(), e.strip.frame(), e.drawer.frame()];
-        let w = frames[0].width();
-        let h: u32 = frames.iter().map(|f| f.height()).sum();
-        let mut all = ca72_panel::Pixmap::new(w, h).unwrap();
-        let mut y = 0usize;
-        for f in frames {
-            let n = (f.width() * f.height() * 4) as usize;
-            let start = y * w as usize * 4;
-            all.data_mut()[start..start + n].copy_from_slice(f.data());
-            y += f.height() as usize;
-        }
-        all.save_png(out).unwrap();
+        window_frame(&mut e).save_png(out).unwrap();
     }
 }
 

@@ -3711,3 +3711,102 @@ chose it without feedback.
 **Evidence (omarchy, 2026-10-09):** the plug-in crate's tests in debug, 153 passed, 0 failed
 (the factory file's count now 25; its text still names no trademark); `preset_levels.rs` by
 hand for White Lotus, -18.03 LUFS momentary maximum at VOLUME 9.78.
+
+
+## R-INNER. INNER: the inner edge of each side's band, and WIDTH, INNER and DETUNE three across
+
+**The owner, 2026-10-10:** "right now, we have a way to control the outer edges, which is
+width ... Imagine we're just dealing with the left-hand side of the stereo spectrum. You have
+your far left-hand edge ... and then you have your right-hand edge, which is currently our
+center. Width would bring things in from the left-hand edge, but we would have no control to
+bring things in from the right-hand edge, from the center." Told the two choices (a voice
+placed in the centre; INNER a place of its own or a share of WIDTH) with a recommendation for
+each: "Go with 'inner' and yes, this should affect the CA-74 as well". Shown two layouts for
+each plug-in, drawn by their renderers (INNER under WIDTH, the display beside it under DETUNE;
+or WIDTH, INNER and DETUNE three across, the VOICES section narrower), with three across
+recommended here: "3 across wins for both".
+
+**Agent decisions, 2026-10-10**, as recommended to the owner and taken with the name:
+- **INNER is plugin-kit's** (its K7, at ac04479, the kit's branch `stereo-inner` on `stereo`;
+  the panel's materials from the same commit): INNER, 0 to 100 %, is a share of SPREAD's way
+  out, not a place of its own, so the two never cross and SPREAD still scales the whole
+  picture; each side's voices sit in a band from there to SPREAD's edge, each as far across it
+  as SCATTER puts it at full SPREAD. A voice SCATTER puts in the centre (CENTER's first, EVEN's
+  last of an odd number) takes the side its turn falls on, the left first, so INNER clears the
+  centre; DOUBLE's pairs keep to the band, a pair in the centre opening to INNER's share either
+  side. The one voice's DOUBLE pair with POLY and UNISON off, all of SPREAD's way out (R-STEREO),
+  stays there.
+- **The parameter:** `inner`, the host's Inner, 0 to 100 %, off by default, after AUTO GAIN, so
+  a session or preset saved before reads it 0; a preset holds it (no factory preset names it);
+  MIDI Learn's INNER (54 learnable controls: 27 knobs, 8 selectors, 19 switches). It glides as
+  SPREAD does (the voices' targets move, 10 ms), it is not part of a sound's key for AUTO GAIN,
+  and it does nothing at SPREAD 0 or with POLY and UNISON off and no DOUBLE.
+- **The display** draws each voice where the engine's gains put it, INNER's band and all, by
+  the kit's `voice_at` and `pair_at`, which the gains use too.
+- **The strip, three across** (R-LOOK's A6 redrawn in its STEREO section): VOICES (370, 976) and
+  STEREO (976, 2370), OUTPUT as it was; WIDTH, INNER and DETUNE 430 apart about STEREO's middle
+  (1243, 1673, 2103), each a knob and its readout; the two banks of tabs centred over the
+  section as a pair, 180 apart, in their order; the display from WIDTH's unit to DETUNE's, wider
+  than before. INNER is a strip knob (51 controls), appended after the others so that no
+  control's index moves, with its readout, a switch as WIDTH's (off, and back on at its amount),
+  lit where it does something; its tip reads "INNER: 40 %".
+- `docs/panel.png` is left as it was (the 0.1.0 picture, as R-LOOK leaves it): drawn again, it
+  would be the worn editor's first picture there, for the look's merge to choose.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
+dd215c4: every factory preset (24) the same to the bit; three presets each with POLY, UNISON and
+DOUBLE in each placement, SPREAD 80 % (27 renders), the same to the bit. The kit's tests (19,
+its K7); here `inner_clears_the_centre_and_one_voice_stays_there`,
+`the_strips_switches_turn_their_amounts_off_and_back_on_at_their_last`,
+`the_strips_units_stand_in_their_sections_clear_of_each_other`, and the strip's MIDI Learn,
+gesture, tip and switch tests with INNER. The panel's and plug-in's tests, 202 passed, 16
+ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`. Not yet: the
+installed build in a host.
+
+### EDGES dropped (2026-10-10)
+
+**The owner, 2026-10-10**, once INNER was built: "I don't really see any difference between edge
+and even, because edge is now just even with the inner controls on maximum, is it not?" Told it
+is close but not the same at eight to ten voices: "if there is cases where it yields different
+behavior, then maybe we can just leave it. Just make sure that that's true, that it's not
+exactly replicable from other settings." Told where it differs, then: "Do you think those
+differences will be practically audible? I'm changing my mind again…"; "Drop it."; "Actually
+render first"; and having listened to the renders: "k, I think we should remove edges".
+
+**Agent decisions, 2026-10-10**, as recommended to the owner:
+- **What EDGES had of its own**, measured with the kit's `voice_at`: with VOICES 2 to 7, EVEN
+  with INNER (90 % at three voices down to 70 % at seven) puts every voice where EDGES did;
+  with DOUBLE, every pair at WIDTH's edge is INNER at 100 % in either placement, to the bit;
+  only with eight to ten voices and no DOUBLE does EDGES's strictly outside-in order (100, 100,
+  90, 90, 80, 80 % ...) differ from anything EVEN or CENTER can do, the nearest EVEN at most
+  about 8 % of the way out from it. Renders for the owner (`mac:~/Downloads/ca72-edges-ab`, the
+  CA-72's, ten voices, WIDTH 100 %): POLY chords and UNISON with EDGES and with EVEN at INNER
+  55 % measured the same width (side to mid within 0.05 dB, left-right correlation within
+  0.006); single notes one at a time, the worst case, about 2 dB of balance on notes already 12
+  to 17 dB to one side; plain EVEN, the reference, 6 to 8 dB.
+- **SCATTER's placement is EVEN or CENTER** (`Scatter`, ids `even` and `centre` as they were;
+  the host's Scatter Placement two positions). A preset's `placement` is read by the plug-in's
+  index, 0 EVEN and 1 CENTER, an older 2 (CENTER) as CENTER (no factory preset names one); a
+  session saved with `edges`, or a placement not understood, opens with EVEN (`filter_state`),
+  not at what the instance had, as R18 has it for ENTROPY. MIDI Learn takes the placement as a
+  switch, EVEN below 64 and CENTER from it (54 learnable controls: 27 knobs, 7 selectors, 20
+  switches).
+- **The strip:** PLACEMENT is two lit tabs, EVEN and CENTER, its recess a tab narrower; the two
+  banks stay centred over STEREO as a pair, 180 apart. The lit tab and a click go by the
+  plug-in's choice, not the kit's index.
+- **The kit at eb374f8** (its K7's "EDGES dropped", made by a session the owner opened in the
+  kit, since a change to the shared kit from here was refused): no `Edges`, EVEN and CENTER
+  its placements (indices 0 and 1), and `ALONE` for one voice alone, whose DOUBLE pair goes all
+  of SPREAD's way out (R-STEREO). The voices' mix carries no placement for a lone voice
+  (`Option<Placement>`), and its pair takes `ALONE`, as it took EDGES's pair, 1, before; the
+  panel's materials from the same commit.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
+bd63519: every factory preset (24) the same to the bit. Tests: the placement's two choices by
+their ids, the strip's two tabs where they stand and the lit tab, DOUBLE's pairs at INNER 100 %
+the same to the bit in EVEN, CENTER and as the engine's lone pair, a value learned for each kind,
+`a_session_saved_with_edges_opens_with_even`; the panel's and plug-in's tests, 206 passed, 18
+ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`. With the
+kit at eb374f8, against renders of d159f42: three presets each in MONO, POLY and UNISON, with
+and without DOUBLE, EVEN and CENTER, INNER 0 and 60 % (72 renders), and every factory preset
+(24), the same to the bit; tests, 206 passed; rustfmt; clippy with `-D warnings`.

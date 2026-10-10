@@ -174,8 +174,15 @@ impl Character {
     }
 
     /// The gains (left, right) that put the voice in its place, as `placement` has it among
-    /// `voices`, by `spread` (0..1) of SPREAD ([`pan_gains`]; both whole at 0).
-    pub fn gains(&self, spread: f64, placement: Placement, voices: usize) -> (f32, f32) {
-        plugin_kit_stereo::place::voice_gains(spread, placement, self.voice, voices)
+    /// `voices`, by `spread` (0..1) of SPREAD, in its side's band by `inner` (0..1) of INNER
+    /// ([`pan_gains`]; both whole at SPREAD 0).
+    pub fn gains(
+        &self,
+        spread: f64,
+        inner: f64,
+        placement: Placement,
+        voices: usize,
+    ) -> (f32, f32) {
+        plugin_kit_stereo::place::voice_gains(spread, inner, placement, self.voice, voices)
     }
 }

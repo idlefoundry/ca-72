@@ -25,7 +25,7 @@ use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
 use crate::pool::{Ask, Crew, MAX, Pool, Shared};
-use plugin_kit_stereo::place::{DOUBLE_TRIM, glide_share, pair_gains, unison_trim};
+use plugin_kit_stereo::place::{ALONE, DOUBLE_TRIM, glide_share, pair_gains, unison_trim};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -92,7 +92,7 @@ const ENTROPY_KNOBS: usize = 6;
 /// What the parameters set: the panel (its wheels where the parameters leave them), MAIN
 /// OUTPUT's VOLUME (0..1 of its travel) and switch, how far a MIDI keyboard's full pitch
 /// bend moves the PITCH wheel, in semitones, POWER (off: bypassed, silent), and POLY,
-/// VOICES, ENTROPY and SPREAD (0..1), where SPREAD places the voices, UNISON and DOUBLE.
+/// VOICES, ENTROPY, SPREAD and INNER (0..1), where SPREAD places the voices, UNISON and DOUBLE.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Controls {
     pub panel: Panel,
@@ -104,7 +104,11 @@ pub struct Controls {
     pub voices: usize,
     pub entropy: f64,
     pub spread: f64,
-    /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R-STEREO).
+    /// INNER: the inner edge of each side's band, a share of SPREAD's way out (decisions.md
+    /// R-INNER).
+    pub inner: f64,
+    /// SCATTER's placement: where SPREAD puts POLY's voices (decisions.md R-STEREO), EVEN or
+    /// CENTER as the plug-in offers them (`params::Scatter`; R-INNER).
     pub placement: Placement,
     /// UNISON: VOICES instruments on every key together (decisions.md R-STEREO).
     pub unison: bool,
@@ -149,6 +153,7 @@ impl Default for Controls {
             voices: POLY_VOICES.1,
             entropy: 0.0,
             spread: 0.0,
+            inner: 0.0,
             placement: Placement::Even,
             unison: false,
             double: 0.0,
@@ -218,8 +223,9 @@ const SILENT: f64 = 1e-6;
 /// for this many samples running, counted across runs (the CA-74's).
 const QUIET: usize = 256;
 
-/// The time constant, seconds, with which a voice's place follows SPREAD, the placement,
-/// VOICES and DOUBLE: plugin-kit's (its K6; decisions.md R-STEREO, the CA-74's R27 and R28).
+/// The time constant, seconds, with which a voice's place follows SPREAD, INNER, the
+/// placement, VOICES and DOUBLE: plugin-kit's (its K6; decisions.md R-STEREO, the CA-74's R27
+/// and R28).
 pub use plugin_kit_stereo::place::GLIDE;
 
 /// The detune between DOUBLE's two voices of a note at its full amount, cents: the CA-72's own
@@ -607,18 +613,22 @@ impl Playing {
     fn places(&self, m: &Mix) -> Places {
         let doubled = m.double > 0.0;
         let twin_on = doubled || self.twin.live;
+        // (One voice alone, no placement among others: its pair all of SPREAD's way out.)
         let out = if twin_on {
-            self.character.pair(m.placement, m.voices)
+            m.placement
+                .map_or(ALONE, |p| self.character.pair(p, m.voices))
         } else {
             0.0
         };
         let wide = |(l, r): (f32, f32)| (f64::from(l), f64::from(r));
-        let [voice, twin] = pair_gains(m.spread, out);
+        let [voice, twin] = pair_gains(m.spread, m.inner, out);
         Places {
+            // (Alone and not doubled, SPREAD is 0 and the voice whole on both sides.)
             voice: wide(if doubled {
                 voice
             } else {
-                self.character.gains(m.spread, m.placement, m.voices)
+                let placement = m.placement.unwrap_or_default();
+                self.character.gains(m.spread, m.inner, placement, m.voices)
             }),
             twin: if twin_on { wide(twin) } else { (0.0, 0.0) },
             half: 0.5 * m.double,
@@ -1845,8 +1855,8 @@ pub const CHUNK: usize = 128;
 
 /// ENTROPY, SPREAD, DOUBLE and DRIVE as the voices' samples take them: ENTROPY's depth, the
 /// oscillators' (their floor with it, unless LOCK), the depth the character's offsets are
-/// drawn at, SPREAD, SCATTER's placement and the voices it places among (VOICES), DOUBLE's
-/// detune between a note's two voices, cents (0: one voice a note), and DRIVE's gain into the
+/// drawn at, SPREAD and INNER, SCATTER's placement (none for one voice alone, its DOUBLE pair at
+/// the edge) and the voices it places among (VOICES), DOUBLE's detune between a note's two voices, cents (0: one voice a note), and DRIVE's gain into the
 /// filter (1: the circuit).
 #[derive(Debug, Clone, Copy)]
 pub struct Mix {
@@ -1854,14 +1864,15 @@ pub struct Mix {
     oscillators: f64,
     at: f64,
     spread: f64,
-    placement: Placement,
+    inner: f64,
+    placement: Option<Placement>,
     voices: usize,
     double: f64,
     drive: f64,
 }
 
 /// [`Mix`]'s values, as the workers are handed them.
-pub const MIX_LEN: usize = 8;
+pub const MIX_LEN: usize = 9;
 
 impl Mix {
     pub fn to_array(self) -> [f64; MIX_LEN] {
@@ -1870,7 +1881,8 @@ impl Mix {
             self.oscillators,
             self.at,
             self.spread,
-            self.placement.index() as f64,
+            self.inner,
+            self.placement.map_or(-1.0, |p| p.index() as f64),
             self.voices as f64,
             self.double,
             self.drive,
@@ -1883,6 +1895,7 @@ impl Mix {
             oscillators,
             at,
             spread,
+            inner,
             placement,
             voices,
             double,
@@ -1894,7 +1907,8 @@ impl Mix {
             oscillators,
             at,
             spread,
-            placement: Placement::from_index(placement as usize),
+            inner,
+            placement: (placement >= 0.0).then(|| Placement::from_index(placement as usize)),
             voices: voices as usize,
             double,
             drive,
@@ -2145,9 +2159,10 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
         } else {
             0.0
         },
-        // (One voice alone has no place among others: its DOUBLE pair as far out as
-        // SPREAD, which EDGES gives.)
-        placement: if many { c.placement } else { Placement::Edges },
+        inner: c.inner.clamp(0.0, 1.0),
+        // (One voice alone has no place among others: none, and its DOUBLE pair as far out as
+        // SPREAD, the kit's `ALONE`.)
+        placement: many.then_some(c.placement),
         voices,
         double: if c.double > 0.0 {
             c.double.min(1.0) * DOUBLE_CENTS
@@ -2768,6 +2783,35 @@ mod tests {
         assert_eq!(diff, 0.0, "one voice off the centre");
     }
 
+    /// INNER at 100 % clears the centre: a chord on EVEN's three voices, one of them in the
+    /// centre at INNER 0, is all at the edges, its side nearer its mid; one voice alone stays in
+    /// the centre, whatever INNER (decisions.md R-INNER).
+    #[test]
+    fn inner_clears_the_centre_and_one_voice_stays_there() {
+        let c = Controls {
+            poly: true,
+            voices: 3,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let share = |c: &Controls| {
+            let (mid, side, _) = sides(c, &[57, 61, 64]);
+            side / mid
+        };
+        let (open, cleared) = (share(&c), share(&Controls { inner: 1.0, ..c }));
+        assert!(
+            cleared > 1.3 * open,
+            "side against mid: {open:.3} then {cleared:.3}"
+        );
+        let mono = Controls {
+            poly: false,
+            inner: 1.0,
+            ..c
+        };
+        let (_, _, diff) = sides(&mono, &[57]);
+        assert_eq!(diff, 0.0, "one voice off the centre");
+    }
+
     /// POLY's notes go round the voices: a note after one let go and fallen silent takes the
     /// next voice, not the first again.
     #[test]
@@ -3058,27 +3102,33 @@ mod tests {
     }
 
     /// DOUBLE takes the placement (the CA-74's R41): with CENTER a note on the first voice
-    /// has its pair in the centre, left and right the same; with EVEN and EDGES out to the
-    /// sides; and one voice alone (POLY off) has its pair as far out as SPREAD whatever the
-    /// placement.
+    /// has its pair in the centre, left and right the same; with EVEN out to the sides (its
+    /// first voice's place is an edge). INNER at 100 % puts every pair at the edges, as EDGES
+    /// did (R-INNER): CENTER's first pair is then where EVEN's is, to the bit. One voice alone
+    /// (POLY off) has its pair as far out as SPREAD whatever the placement (the kit's `ALONE`),
+    /// there too.
     #[test]
     fn double_takes_the_placement_its_pairs_mirrored() {
-        let doubled = |poly: bool, placement: Placement| Controls {
+        let doubled = |poly: bool, placement: Placement, inner: f64| Controls {
             poly,
             voices: 4,
             double: 0.35,
             spread: 1.0,
+            inner,
             placement,
             ..Controls::default()
         };
-        let (_, _, diff) = sides(&doubled(true, Placement::Centre), &[57]);
+        let (_, _, diff) = sides(&doubled(true, Placement::Centre, 0.0), &[57]);
         assert_eq!(diff, 0.0, "CENTER's first pair in the centre");
-        for p in [Placement::Even, Placement::Edges] {
-            let (mid, side, _) = sides(&doubled(true, p), &[57]);
-            assert!(side > 0.1 * mid, "{p:?}: the pair out to the sides");
-        }
-        let (mid, side, _) = sides(&doubled(false, Placement::Centre), &[57]);
-        assert!(side > 0.1 * mid, "POLY off: the pair out to the sides");
+        let even = sides(&doubled(true, Placement::Even, 0.0), &[57]);
+        assert!(even.1 > 0.1 * even.0, "EVEN: the pair out to the sides");
+        let inner = sides(&doubled(true, Placement::Centre, 1.0), &[57]);
+        assert_eq!(
+            inner, even,
+            "INNER at 100 %: CENTER's first pair at the edges"
+        );
+        let alone = sides(&doubled(false, Placement::Centre, 0.0), &[57]);
+        assert_eq!(alone, even, "POLY off: the pair at the edges");
     }
 
     /// DOUBLE's pairs played by the workers are the same to the bit as on the caller's thread
@@ -3122,9 +3172,9 @@ mod tests {
         );
     }
 
-    /// DOUBLE turned off lets the note go, and the twin plays its tail out on its side, then
-    /// falls silent and stops; a key pressed after reaches the voice alone, in the centre.
-    /// POLY off and on.
+    /// DOUBLE turned off lets the note go, and the twin plays its tail out on its side (INNER at
+    /// 100 %: every pair at the edges, as EDGES had them), then falls silent and stops; a key
+    /// pressed after reaches the voice alone, in the centre. POLY off and on.
     #[test]
     fn a_twin_let_go_plays_its_tail_out_and_takes_no_new_key() {
         for poly in [false, true] {
@@ -3132,7 +3182,7 @@ mod tests {
                 poly,
                 double: 0.35,
                 spread: 1.0,
-                placement: Placement::Edges,
+                inner: 1.0,
                 ..Controls::default()
             };
             let mut e = Engine::new();

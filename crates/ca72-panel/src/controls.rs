@@ -233,7 +233,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 52] = [
+pub const CONTROLS: [Control; 53] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -535,13 +535,15 @@ pub const CONTROLS: [Control; 52] = [
             span: 76.0,
         },
     },
-    // The strip's knobs (A6: decisions.md R-LOOK, R-STEREO), the plug-in's own.
+    // The strip's knobs (A6: decisions.md R-LOOK, R-STEREO, R-INNER), the plug-in's own; INNER
+    // last, so that every other control keeps its index.
     strip_knob("voices", "VOICES", 0, Dial::Voices),
     strip_knob("entropy", "ENTROPY", 1, Dial::Ten),
     strip_knob("spread", "WIDTH", 2, Dial::Ten),
     strip_knob("double", "DETUNE (DOUBLE)", 3, Dial::Detune),
     strip_knob("drive", "DRIVE", 4, Dial::Drive),
     strip_knob("level", "LEVEL", 5, Dial::Level),
+    strip_knob("inner", "INNER", 6, Dial::Ten),
 ];
 
 /// The index of the control operating `param`.

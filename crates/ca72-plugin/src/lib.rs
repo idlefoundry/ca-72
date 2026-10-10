@@ -249,6 +249,10 @@ impl Plugin for Ca72 {
     ///
     /// A state without MIDI assignments (saved before MIDI Learn) opens with none, whatever the
     /// instance had; a table that is not understood is none either (decisions.md R34).
+    ///
+    /// A session saved with SCATTER's EDGES, no longer offered (INNER does its work: decisions.md
+    /// R-INNER), or with a placement not understood, opens with EVEN, the default, not at what
+    /// the instance had.
     fn filter_state(state: &mut PluginState) {
         learn::filter_state(&mut state.fields);
         // A state without AUTO GAIN's curve (saved before DRIVE), or with one that is not
@@ -268,6 +272,14 @@ impl Plugin for Ca72 {
             state
                 .params
                 .insert("entropy".to_owned(), ParamValue::F32(entropy));
+        }
+        let offered = |id: &str| params::Scatter::ids().is_some_and(|ids| ids.contains(&id));
+        if matches!(state.params.get("placement"), Some(ParamValue::String(id)) if !offered(id)) {
+            let even = Ca72Params::default().placement.default_plain_value();
+            state.params.insert(
+                "placement".to_owned(),
+                ParamValue::I32(even.to_index() as i32),
+            );
         }
     }
 
@@ -546,6 +558,39 @@ mod tests {
         let mut new = state(&[("entropy", 40.0)]);
         Ca72::filter_state(&mut new);
         assert_eq!(entropy(&new), Some(40.0));
+    }
+
+    /// A session saved with SCATTER's EDGES (no longer offered: R-INNER), or with a placement
+    /// not understood, opens with EVEN (its index, as nih-plug sets an enum by one), not at what
+    /// the instance had (R18); one saved with EVEN or CENTER keeps its own.
+    #[test]
+    fn a_session_saved_with_edges_opens_with_even() {
+        let filtered = |id: &str| {
+            let mut s = PluginState {
+                version: String::new(),
+                params: [("placement".to_owned(), ParamValue::String(id.to_owned()))].into(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            s.params.remove("placement")
+        };
+        let even = params::Scatter::Even.to_index() as i32;
+        for id in ["edges", "sideways"] {
+            assert!(
+                matches!(filtered(id), Some(ParamValue::I32(i)) if i == even),
+                "{id}"
+            );
+        }
+        for id in ["even", "centre"] {
+            assert!(
+                matches!(filtered(id), Some(ParamValue::String(s)) if s == id),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            params::Scatter::from_index(even as usize),
+            params::Scatter::Even
+        );
     }
 
     /// One block of `len` samples processed as a host calls `process`, with the events pushed to
