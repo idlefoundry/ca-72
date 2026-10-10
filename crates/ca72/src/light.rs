@@ -4,64 +4,83 @@
 //! `tests/potato_reference.rs` measures both): band-limited oscillators (polyBLEP) at the
 //! circuit's levels and shapes, the mixer's channels through their loaded pots, the input
 //! pair's compression, one ladder of four one-pole stages solved without delay around the
-//! loop (its gain the emphasis, its own limiter setting how loud it rings), contours of RC
-//! segments with the circuit's time law and trigger, and the VCA's measured law. The audio
+//! loop (its gain the emphasis, its own limiter setting how loud it rings), FILTER MODE HI
+//! (the bus less the filter), the plug-in's DRIVE, contours of RC segments with the circuit's
+//! time laws and trigger, and the VCA's measured law. The audio
 //! path runs in single precision at the voice's rate; what the panel and the contours set
 //! (the oscillators' increments, the ladder's coefficient) is worked out every
 //! [`CONTROL_EVERY`] samples and followed between.
 //!
 //! The keys are the instrument's: lowest-note priority, single triggering (a key pressed while
 //! another is held does not start the contours again), the contours re-armed once the trigger
-//! contact has been open 12 ms; GLIDE moves the pitch as the circuit's hold does. Nothing here
+//! contact has been open 11.5 ms; GLIDE moves the pitch as the circuit's hold does. Nothing here
 //! allocates once made.
 
 use crate::tuning::FREQ_CENTRE;
 #[cfg(test)]
 use crate::voice::OscPanel;
-use crate::voice::{ContourKnobs, Panel, Waveform, audio_taper, glide_r};
+use crate::voice::{
+    ContourKnobs, FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, Panel, Waveform,
+    emphasis_r14, ext_taper, glide_r, osc2_freq_track, osc3_freq_track, sustain_track, time_pot,
+    volume_track,
+};
 
 /// Samples between the control laws' updates.
 pub const CONTROL_EVERY: usize = 16;
 
 /// The laws, fitted to the circuit model's measurements at 48 kHz (`tests/potato_reference.rs`;
-/// decisions.md R31).
+/// decisions.md R31), as calibrated against the hardware reference (R42 on): where the circuit
+/// reads a knob through the reference's law (voice.rs's `volume_track`, `time_pot` and the
+/// rest), the light voice reads it through the same law.
 pub mod laws {
     /// Key 69 on 8' at TUNE's centre, Hz (the circuit's: 439.78, within 1.4 cents of equal
     /// temperament from key 24 to 108).
     pub const A4: f64 = 440.0;
-    /// FREQUENCY (oscillators 2 and 3) from its centre, cents: a cubic in the knob (0..1),
-    /// within 0.07 cents of the measured.
+    /// FREQUENCY (oscillators 2 and 3) from its centre, cents: a cubic in the pot's track
+    /// (voice.rs's `osc2_freq_track`, `osc3_freq_track`), within 1.2 cents of the measured.
     pub const OSC2_CENTS: [f64; 4] = [-855.506, 1753.088, -94.505, 19.578];
     pub const OSC3_CENTS: [f64; 4] = [-862.370, 1806.991, -206.463, 83.185];
     /// TUNE at either end, cents.
     pub const TUNE_CENTS: f64 = 267.44;
-    /// Oscillator 3 with OSC. 3 CONTROL off: as this key held on 8' (232.7 Hz) at FREQUENCY's
-    /// centre; FREQUENCY then, from its centre, cents, a quintic in the knob (its summing node
-    /// without the keys' input: 69 semitones end to end, within 0.2 cents of the measured);
-    /// TUNE moves it not at all.
-    pub const OSC3_FREE_KEY: f64 = 57.97;
+    /// Oscillator 3 with OSC. 3 CONTROL off: as this key held on 8' (201.5 Hz) at FREQUENCY's
+    /// centre; FREQUENCY then, from its centre, cents, a quintic in the pot's track (its
+    /// summing node without the keys' input: 69 semitones end to end); TUNE moves it not at
+    /// all.
+    pub const OSC3_FREE_KEY: f64 = 55.479;
     pub const OSC3_FREE_CENTS: [f64; 6] = [-3797.431, 9228.8, -4699.331, 3541.6, -1559.71, 402.07];
 
     /// Each waveform's level against the sawtooth's (the bus's unit: a sawtooth at VOLUME 10
     /// is 1 at its peak), its channel's source resistance (ohm, for the pot's loading) and the
     /// rectangles' duty cycles.
-    pub const TRIANGLE: f32 = 0.847;
+    pub const TRIANGLE: f32 = 0.857;
     pub const SAWTOOTH: f32 = 1.0;
     pub const REVERSE_SAWTOOTH: f32 = 1.0;
     pub const SQUARE: f32 = 1.032;
     pub const WIDE: f32 = 1.046;
     pub const NARROW: f32 = 1.059;
     pub const DUTY: [f32; 3] = [0.484, 0.30, 0.179];
+    /// The triangle's lowest point, as a share of its period from its top (the sawtooth's
+    /// reset): a little before half way, as the circuit's, whose even harmonics stand 37 dB
+    /// (the second), 43 and 46 dB under its fundamental.
+    pub const TRIANGLE_BOTTOM: f32 = 0.4915;
     /// The shark tooth: the triangle inverted (its peak at the sawtooth's reset) and the
     /// falling sawtooth, as R030 and R031 mix them.
-    pub const SHARK_TRIANGLE: f32 = 0.677;
-    pub const SHARK_SAWTOOTH: f32 = 0.182;
+    pub const SHARK_TRIANGLE: f32 = 0.686;
+    pub const SHARK_SAWTOOTH: f32 = 0.184;
     pub const SOURCE_OHMS: [f64; 4] = [687.0, 2246.0, 3500.0, 8790.0];
     /// Oscillator 3's channel against the others' (its sawtooth through the reverse
     /// sawtooth's stage).
-    pub const OSC3_LEVEL: f32 = 0.894;
-    /// The high-pass the output shows (the waveforms' droop), Hz.
-    pub const DROOP_HZ: f64 = 12.0;
+    pub const OSC3_LEVEL: f32 = 0.914;
+    /// The high-passes the output shows (the waveforms' droop), Hz: the filter's output
+    /// coupling (C5/C1, which FILTER MODE HI's direct branch does not pass through) and the
+    /// rest after the VCA; together within 0.1 dB of the circuit's at 7 to 28 Hz.
+    pub const COUPLING_HZ: f64 = 13.0;
+    pub const DROOP_HZ: f64 = 4.4;
+    /// FILTER MODE HI (decisions.md R-HP): the bus less the filter's output, the bus at the
+    /// filter's own passband at EMPHASIS 0 (here the ladder's at the cutoff, times this) and
+    /// through its own coupling, Hz (vcf.rs's `MODE_HZ`).
+    pub const MODE_GAIN: f32 = 1.0;
+    pub const MODE_HZ: f64 = 3.0;
     /// The VCA's control feeding through to the output, its thump as the loudness contour
     /// moves: the VCA's gain through a high-pass and a low-pass (time constants, s), times
     /// this (fitted to the circuit's output with nothing sounding, four contours at once,
@@ -72,9 +91,9 @@ pub mod laws {
     /// The noise: white's and pink's level (on their generators' units), their channels'
     /// source resistances (pink's through R50), and each one's band (a high-pass and a
     /// low-pass, Hz).
-    pub const WHITE: f32 = 0.576;
-    pub const PINK: f32 = 0.437;
-    pub const NOISE_OHMS: (f64, f64) = (1e3, 26e3);
+    pub const WHITE: f32 = 0.593;
+    pub const PINK: f32 = 0.433;
+    pub const NOISE_OHMS: (f64, f64) = (700.0, 26.2e3);
     pub const WHITE_BAND: (f64, f64) = (60.0, 9_500.0);
     pub const PINK_BAND: (f64, f64) = (40.0, 6_500.0);
     /// The white's low-pass at each of `NOISE_TOP_AT`'s rates, Hz: the fit at 48 kHz takes in
@@ -84,34 +103,44 @@ pub mod laws {
     pub const PINK_TOP: [f64; 2] = [6_500.0, 9_000.0];
 
     /// The ladder's input pair, a tanh on the input less the loop's feedback: the bus in its
-    /// units (fitted to the compression of one to three sawtooths at full VOLUME, -0.3 to
-    /// -1.1 dB), off its centre by `BIAS` (its second harmonic: a triangle's from -37 dB at
-    /// VOLUME 1 to -26 dB at 10).
+    /// units (two and three sawtooths at full VOLUME compress 0.5 and 0.8 dB, the circuit's
+    /// 0.7 and 1.2), off its centre by `BIAS` (with the triangle's own, its second harmonic
+    /// from -37 dB at VOLUME 1 to -33 dB at 10, the circuit's -38 to -32).
     pub const DRIVE: f32 = 0.60;
-    pub const BIAS: f32 = 0.28;
+    pub const BIAS: f32 = 0.10;
+    /// The loop's gain in `LOOP` (fitted with the pair off its centre by 0.28) times this:
+    /// the same gain through the pair's slope at `BIAS`.
+    pub const LOOP_SCALE: f64 = 0.941_52;
+    /// The plug-in's DRIVE at gain G: the pair's limit (its tanh's) lowered to G to this
+    /// power, its slope kept: the circuit's ladder, its every stage a pair, holds a driven
+    /// input lower than one pair would (0.82 of it at 24 dB).
+    pub const DRIVE_CEILING: f64 = -0.0716;
     /// The output from the ladder's (at the VCA's gain 1: the loudness contour at 4.455 V).
-    pub const OUT: f32 = 0.724;
+    pub const OUT: f32 = 0.709;
 
     /// CUTOFF: log2 of the self-oscillating ladder's pitch, Hz, at the knob's 0, 0.05, ...,
-    /// 1 (measured from 0.15; below, continued at the slope there).
+    /// 1 (measured from 0.15 to 0.9; below, continued at the slope there in the pot's track,
+    /// voice.rs's `cutoff_track`; above, past Nyquist, continued).
     pub const CUTOFF_LOG2: [f32; 21] = [
-        5.155, 5.583, 6.011, 6.436, 6.864, 7.315, 7.783, 8.262, 8.750, 9.247, 9.745, 10.247,
-        10.749, 11.252, 11.752, 12.252, 12.747, 13.234, 13.711, 14.103, 14.271,
+        5.409, 5.656, 5.903, 6.345, 6.787, 7.257, 7.745, 8.306, 8.878, 9.459, 10.045, 10.626,
+        11.208, 11.789, 12.366, 12.874, 13.375, 13.866, 14.229, 14.42, 14.55,
     ];
-    /// KEYBOARD CONTROL 1 and 2: octaves of the cutoff an octave of the keys, from F (41).
-    pub const KEYBOARD_CONTROL: [f64; 2] = [0.339, 0.672];
-    pub const TRACKING_FROM: f64 = 41.0;
+    /// KEYBOARD CONTROL 1, 2 and both: octaves of the cutoff an octave of the keys, from C
+    /// (36, where the keyboard's voltage is 0).
+    pub const KEYBOARD_CONTROL: [f64; 3] = [0.3276, 0.6486, 0.9555];
+    pub const TRACKING_FROM: f64 = 36.0;
     /// AMOUNT OF CONTOUR: octaves a volt of the filter contour above its rest at 10, and the
     /// share at 0, 2.5, 5, 7.5 and 10.
-    pub const CONTOUR_OCTAVES_PER_VOLT: f64 = 2.18;
-    pub const AMOUNT: [f64; 5] = [0.0, 0.23, 0.47, 0.72, 1.0];
-    /// EMPHASIS: the loop's gain (4 rings) at these knob positions, for cutoffs of 60, 87,
-    /// 228, 912 and 3731 Hz (log2 below; between them interpolated, beyond them held): fitted to
-    /// the circuit's responses to noise at EMPHASIS up to 7 (within 0.2 to 0.6 dB) and its
-    /// ringing thresholds (7.9 near 220 Hz, 7.44 near 900, 7.35 near 3.7 kHz; at 10 it rings
-    /// down to about 87 Hz and not below).
-    /// Past the threshold the gain follows R14's law, 11.84 / (R14 + 1.58K) (R14 in K), to
-    /// 7.5 at 10, scaled by `RING_GAIN`.
+    pub const CONTOUR_OCTAVES_PER_VOLT: f64 = 2.10;
+    pub const AMOUNT: [f64; 5] = [0.0, 0.192, 0.487, 0.778, 1.0];
+    /// EMPHASIS: the loop's gain (4 rings; times `LOOP_SCALE`) at these positions of the knob
+    /// drawn with the generic taper (below), for cutoffs of 60, 87, 228, 912 and 3731 Hz (log2
+    /// below; between them interpolated, beyond them held): fitted to the drawn circuit's
+    /// responses to noise at EMPHASIS up to 7 (decisions.md R31), within 0.4 dB of the
+    /// calibrated circuit's passbands at 5 and 7 and 1 dB of its peaks at 5, 6 and 7 below its
+    /// threshold. Past the threshold the gain follows R14's law, 11.84 / (R14 + 1.58K) (R14
+    /// in K), to 7.5 at 10, scaled by `RING_GAIN`; at 10 it rings down to about 81 Hz and not
+    /// below, as the circuit's.
     pub const EMPHASIS_AT: [f64; 11] = [
         0.0, 0.25, 0.5, 0.7, 0.72, 0.735, 0.744, 0.79, 0.85, 0.9, 1.0,
     ];
@@ -151,82 +180,104 @@ pub mod laws {
         ],
     ];
     pub const RING_GAIN: f64 = 2.5;
+    /// EMPHASIS read as the knob drawn with its generic taper would set R14 (voice.rs's
+    /// `emphasis_r14` against `emphasis_r14_drawn`); and over the last `EMPHASIS_NEAR` of
+    /// the drawn knob below the calibrated circuit's ringing threshold (`THRESHOLD`, the drawn
+    /// knob, at these cutoffs, log2 Hz; between them interpolated, beyond them held: it rings
+    /// from 8.3 near 210 Hz, 7.25 near 1 kHz and 7.0 near 5 kHz), moved on by `SHIFT` to the
+    /// table's own threshold there.
+    pub const THRESHOLD_AT_LOG2: [f64; 3] = [7.74, 10.04, 12.37];
+    pub const THRESHOLD: [f64; 3] = [0.7923, 0.7274, 0.7164];
+    pub const SHIFT: [f64; 3] = [-0.0032, 0.0175, 0.0176];
+    pub const EMPHASIS_NEAR: f64 = 0.012;
     /// The ladder's corner above the ring's pitch (the table above), octaves, below the ringing
-    /// threshold: fitted to the circuit's responses at CUTOFF 0.3, 0.5 and 0.7 (220, 858 and
-    /// 3454 Hz rings); it closes to nothing at the threshold, as the ring's own saturation
-    /// pulls the circuit's corner down to its pitch.
+    /// threshold: fitted to the drawn circuit's responses at its CUTOFF 0.3, 0.5 and 0.7 (220,
+    /// 858 and 3454 Hz rings); it closes to nothing at the threshold, as the ring's own
+    /// saturation pulls the circuit's corner down to its pitch.
     pub const CORNER: [f64; 3] = [0.048, 0.088, 0.111];
     pub const CORNER_AT_LOG2: [f64; 3] = [7.78, 9.74, 11.75];
     /// Past the threshold, where `CORNER` has closed, the ring's own pitch raised this much,
-    /// octaves (the input pair's knee in the loop pulls the ring flat by about 1.4 % from 300
-    /// Hz to 4 kHz; the circuit's rings measured).
-    pub const RING_RAISE: [f64; 5] = [0.001, 0.011, 0.021, 0.019, 0.01];
+    /// octaves (the input pair's knee in the loop pulls the ring flat; the circuit's rings
+    /// measured, within 3 cents from 81 Hz to 3.5 kHz).
+    pub const RING_RAISE: [f64; 5] = [0.001, -0.0015, 0.0085, 0.0065, -0.0025];
     pub const RING_RAISE_AT_LOG2: [f64; 5] = [6.44, 7.78, 8.75, 11.75, 12.75];
 
-    /// The contours: their rest and peak, V (filter, loudness), the level an attack stops at
-    /// and where its RC curve aims, as shares of the peak's rise from rest, and the
-    /// comparator's lag past it, s.
-    pub const REST: [f64; 2] = [0.088, -0.520];
-    pub const PEAK: [f64; 2] = [4.970, 5.418];
-    pub const ATTACK_STOP: [f64; 2] = [0.9017, 0.977];
-    pub const ATTACK_AIM: [f64; 2] = [1.779, 1.451];
-    pub const ATTACK_LAG: f64 = 0.000_12;
-    /// ATTACK's and DECAY's time constant: (the 1M audio pot + this, ohm: ATTACK's, DECAY's)
-    /// times C, F.
-    pub const TIME_OHMS: (f64, f64) = (100.0, 5.0);
-    pub const TIME_FARADS: f64 = 10.1e-6;
-    /// SUSTAIN's level, V: a cubic in the knob (filter, loudness).
+    /// The contours: their rest from power-on and the level an attack stops at (its
+    /// plateau), V (filter, loudness); where its RC curve aims, as a share of the plateau's
+    /// rise from rest; and how much earlier a fast attack stops (the timing capacitor's
+    /// series resistance against the charging current): the plateau less the aim's distance
+    /// above it times this over the attack's time constant, s.
+    pub const REST: [f64; 2] = [0.0743, -0.516];
+    pub const PEAK: [f64; 2] = [4.7917, 5.6014];
+    pub const ATTACK_AIM: [f64; 2] = [1.82, 1.40];
+    pub const ATTACK_ESR: [f64; 2] = [1.93e-5, 1.66e-5];
+    /// The time constants, s, against the pots' resistance R (voice.rs's `time_pot` through
+    /// the reference's laws, ohm): A (R / 100K)^B + T0 as (A, B, T0) for ATTACK, DECAY from the
+    /// peak, and the release with the DECAY switch on (DECAY's pot), each (filter, loudness):
+    /// within 0.6 % of the circuit's at ATTACK and DECAY 2 to 10 (its decay a little faster
+    /// than one exponential at first and slower at last: matched at its 50 and 90 % times).
+    pub const ATTACK_TIME: [(f64, f64, f64); 2] =
+        [(1.114_91, 1.007_46, 0.0007), (1.115_32, 1.003_32, 0.0008)];
+    pub const DECAY_TIME: [(f64, f64, f64); 2] =
+        [(1.042_89, 1.000_67, 0.0003), (1.050_96, 1.000_55, 0.0003)];
+    pub const RELEASE_TIME: [(f64, f64, f64); 2] =
+        [(1.119_76, 1.002_92, 0.0003), (1.123_86, 1.004_29, 0.0003)];
+    /// SUSTAIN's level, V: a cubic in the pot's track (voice.rs's `sustain_track`; filter,
+    /// loudness), within 6 mV of the circuit's.
     pub const SUSTAIN: [[f64; 4]; 2] = [
-        [0.0436, 3.7616, -2.1722, 2.1998],
-        [-0.4724, 4.9607, -2.3957, 2.3616],
+        [0.0431, 3.7727, -2.2079, 2.2245],
+        [-0.4729, 4.9704, -2.4266, 2.3829],
     ];
     /// Where a release falls to, V (filter, loudness), with the DECAY switch on (at DECAY's
     /// time).
-    pub const RELEASED: [f64; 2] = [0.144, -0.495];
+    pub const RELEASED: [f64; 2] = [0.1426, -0.4964];
     /// With the switch off, by DECAY at each of `RELEASE_OFF_AT`: where it falls to, V, and
     /// its time constant, s (the capacitor through DECAY's pot and the switch's resistor at
-    /// once: quick and to `RELEASED`'s level at 0, lower and slower as the pot turns up).
+    /// once: at once and to `RELEASED`'s level at 0, lower and slower as the pot turns up;
+    /// the circuit's falls so far and then creeps on, its last tenth over some hundred
+    /// milliseconds).
     pub const RELEASE_OFF_AT: [f64; 11] = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
     pub const RELEASED_OFF: [[f64; 11]; 2] = [
         [
-            0.1423, -0.0016, -0.0591, -0.0964, -0.1254, -0.1503, -0.1728, -0.1936, -0.2122,
-            -0.2279, -0.2401,
+            0.1392, -0.0179, -0.0688, -0.0872, -0.1049, -0.1178, -0.1263, -0.1936, -0.2195,
+            -0.2363, -0.2443,
         ],
         [
-            -0.4966, -0.6418, -0.6997, -0.7373, -0.7667, -0.7918, -0.8145, -0.8355, -0.8543,
-            -0.8701, -0.8825,
+            -0.4998, -0.6582, -0.6988, -0.7182, -0.7368, -0.7513, -0.7601, -0.8294, -0.8585,
+            -0.8773, -0.886,
         ],
     ];
     pub const RELEASE_OFF: [[f64; 11]; 2] = [
         [
-            0.0085, 0.0312, 0.0382, 0.041, 0.0421, 0.0427, 0.0431, 0.0434, 0.0437, 0.044, 0.0441,
+            0.0005, 0.0178, 0.0209, 0.0217, 0.0224, 0.0228, 0.0231, 0.0249, 0.0256, 0.026, 0.0262,
         ],
         [
-            0.0059, 0.0214, 0.0263, 0.0289, 0.0304, 0.0315, 0.0323, 0.0327, 0.0332, 0.0335, 0.0338,
+            0.0005, 0.0174, 0.0200, 0.0208, 0.0215, 0.0220, 0.0222, 0.0238, 0.0243, 0.0246, 0.0247,
         ],
     ];
     /// The trigger: the contours start this long after a key goes down and fall this long
-    /// after the last is let go, s; a key pressed within `REARM` of the last let go does not
-    /// start them again.
+    /// after the last is let go, s; a key pressed `REARM` or more after the last was let go
+    /// starts them again (an attack), even before they have fallen.
     pub const TRIGGER_ON: f64 = 0.0078;
-    pub const TRIGGER_OFF: f64 = 0.015;
-    pub const REARM: f64 = 0.012;
+    pub const TRIGGER_OFF: f64 = 0.0141;
+    pub const REARM: f64 = 0.0115;
 
-    /// The VCA: its gain (1 at the loudness contour's 4.455 V) at these volts; past the last,
-    /// as there.
-    pub const VCA_VOLTS: [f64; 18] = [
-        0.3, 0.4, 0.7, 1.0, 1.3, 1.6, 1.9, 2.2, 2.5, 2.8, 3.1, 3.4, 3.7, 4.0, 4.3, 4.6, 4.9, 5.2,
-    ];
-    pub const VCA_GAIN: [f64; 18] = [
-        0.0, 0.0227, 0.0923, 0.1716, 0.2461, 0.3244, 0.4027, 0.4804, 0.56, 0.6407, 0.7169, 0.7958,
-        0.8764, 0.9554, 0.9984, 0.9993, 0.996, 0.9914,
+    /// The VCA: its gain (1 at the loudness contour's 4.455 V) every 0.1 V from 0 V; past
+    /// the last, as there.
+    pub const VCA_STEP: f64 = 0.1;
+    pub const VCA_GAIN: [f32; 54] = [
+        0.0, 0.001, 0.0096, 0.0281, 0.0503, 0.0737, 0.0976, 0.1215, 0.1454, 0.1691, 0.1927, 0.219,
+        0.245, 0.2706, 0.296, 0.3211, 0.3458, 0.3702, 0.3969, 0.4232, 0.4491, 0.4746, 0.4997,
+        0.5245, 0.5512, 0.5775, 0.601, 0.6264, 0.6536, 0.6803, 0.7065, 0.7321, 0.7573, 0.782,
+        0.8082, 0.8338, 0.8589, 0.8854, 0.9112, 0.9364, 0.961, 0.9839, 0.9959, 0.9992, 1.0001, 1.0,
+        0.9994, 0.9985, 0.9974, 0.9961, 0.9947, 0.9933, 0.9917, 0.99,
     ];
 
-    /// GLIDE: the pitch slides at a constant rate, semitones a second times its pot's ohms,
-    /// rising; falling, this share of it. It holds while no key is down (the keyboard's
-    /// track-and-hold).
-    pub const GLIDE_RATE: f64 = 1.02e8;
-    pub const GLIDE_FALLING: f64 = 0.46;
+    /// GLIDE: the pitch slides at a constant rate, semitones a second times its pot's ohms
+    /// (voice.rs's `glide_r`, the hold's 330 ohm added), rising; falling, this share of it.
+    /// It holds while no key is down (the keyboard's track-and-hold).
+    pub const GLIDE_RATE: f64 = 9.76e7;
+    pub const GLIDE_FALLING: f64 = 0.535;
     /// The keys the keyboard circuit plays (F to C, MIDI); beyond them the plug-in adds the
     /// rest of the scale after it, moving through GLIDE's resistance and the hold's 1 uF alone
     /// (an RC, not the slide), while a key is down (voice.rs's `beyond`).
@@ -234,6 +285,10 @@ pub mod laws {
     pub const GLIDE_FARADS: f64 = 1e-6;
     /// Where a fresh voice's pitch rests, as a key: the keyboard's output before any key.
     pub const PITCH_AT_REST: f64 = 53.75;
+    /// How long a released key's pitch contact stays closed after its trigger contact opens,
+    /// s (voice.rs's `RELEASE_LEAD`): a key let go while a higher one is held moves the pitch
+    /// this much later.
+    pub const RELEASE_LEAD: f64 = 0.002;
 
     /// The modulation at the MODULATION wheel fully forward, from oscillator 3: semitones of
     /// the oscillators at its waveform's swing (each from -1 to 1) and its centre against the
@@ -255,26 +310,26 @@ pub mod laws {
     pub const OFFSET_POWER: f64 = 0.6;
 
     /// EXTERNAL INPUT: its gain to the output, `EXT_GAIN t / (1 + EXT_LOAD t (1 - t))` for
-    /// VOLUME's audio law t (the 1M pot loaded by the preamplifier; within 0.3 %), the level
-    /// its preamplifier clips at there, and the OVERLOAD lamp's onset and full brightness
-    /// there.
-    pub const EXT_GAIN: f64 = 148.1;
+    /// VOLUME's law t (voice.rs's `ext_taper`: the 1M pot loaded by the preamplifier; within
+    /// 2 %), the level its preamplifier clips at there, and the OVERLOAD lamp's onset and
+    /// full brightness there.
+    pub const EXT_GAIN: f64 = 170.6;
     pub const EXT_LOAD: f64 = 10.16;
-    pub const EXT_CLIP: f64 = 0.81;
+    pub const EXT_CLIP: f64 = 0.765;
     pub const OVERLOAD: (f64, f64) = (0.24, 0.36);
     /// EXTERNAL INPUT's coupling at the jack, a high-pass, Hz (the circuit's input falls 9 dB
     /// more than the output's droop at 5 Hz, 4.5 at 8).
-    pub const EXT_COUPLING_HZ: f64 = 10.5;
+    pub const EXT_COUPLING_HZ: f64 = 9.0;
 
     /// A-440: its level at the output (its table's units).
-    pub const A440_LEVEL: f32 = 0.244;
+    pub const A440_LEVEL: f32 = 0.2385;
 
     /// FEEDBACK's cable: how late the output reaches EXTERNAL INPUT, samples, at each of
     /// `FEEDBACK_AT`'s rates (the circuit's loop from EXTERNAL INPUT back is a count of
     /// samples, not a time: 88 at 44.1 and 48 kHz, 95 at 88.2 and 96, less Potato's own path's;
     /// the loop's time sets how it oscillates).
     pub const FEEDBACK_AT: [f64; 4] = [44_100.0, 48_000.0, 88_200.0, 96_000.0];
-    pub const FEEDBACK_DELAY: [f64; 4] = [84.7, 83.5, 87.6, 87.2];
+    pub const FEEDBACK_DELAY: [f64; 4] = [87.9, 87.0, 94.0, 94.2];
 }
 
 /// The noise generators' coefficients at a rate: the white's scale (its density a hertz the
@@ -439,7 +494,15 @@ impl Osc {
         };
         match self.wave {
             // (The triangle at its top as the sawtooth resets, as the circuit's is.)
-            Waveform::Triangle => laws::TRIANGLE * (4.0 * (p - 0.5).abs() - 1.0),
+            Waveform::Triangle => {
+                const B: f32 = laws::TRIANGLE_BOTTOM;
+                let t = if p < B {
+                    1.0 - p * (2.0 / B)
+                } else {
+                    (p - B) * (2.0 / (1.0 - B)) - 1.0
+                };
+                laws::TRIANGLE * t
+            }
             Waveform::SharkTooth => {
                 laws::SHARK_TRIANGLE * (4.0 * (p - 0.5).abs() - 1.0) + laws::SHARK_SAWTOOTH * fall()
             }
@@ -523,17 +586,18 @@ impl Ladder {
     /// One sample of input `x` (the pair's units) at stage gain `g` (G / (1 + G) of the
     /// prewarped coefficient G) and loop gain `k`: the fourth stage's output. The input pair
     /// takes the input less the loop's feedback through its knee ([`pair`], off its centre by
-    /// `bias` whose own output is `rest_bias`), as the circuit's does: driven hard, it squashes
-    /// the resonance and loses less bass.
+    /// `bias`; `limit` its limit, the limit's reciprocal and its output at the bias alone), as
+    /// the circuit's does: driven hard, it squashes the resonance and loses less bass.
     #[inline(always)]
-    fn tick(&mut self, x: f32, g: f32, k: f32, bias: f32, rest_bias: f32) -> f32 {
+    fn tick(&mut self, x: f32, g: f32, k: f32, bias: f32, limit: (f32, f32, f32)) -> f32 {
         let s = &mut self.s;
         let h = 1.0 - g;
         let g2 = g * g;
         let g4 = g2 * g2;
         let rest = h * (g * (g * (g * s[0] + s[1]) + s[2]) + s[3]);
         let y4 = (g4 * x + rest) / (1.0 + k * g4);
-        let mut y = tanh(x - k * y4 + bias) - rest_bias;
+        let (top, inv, rest_bias) = limit;
+        let mut y = top * tanh((x - k * y4 + bias) * inv) - rest_bias;
         for st in s.iter_mut() {
             let v = (y - *st) * g;
             let out = v + *st;
@@ -544,17 +608,17 @@ impl Ladder {
     }
 }
 
-/// A contour generator: its level (V), segment, and the samples it has gone past the
-/// attack's stop (its comparator's lag).
+/// A contour generator: its level (V) and whether it is in its attack.
 #[derive(Debug, Clone, Copy)]
 struct Contour {
     volts: f64,
     attacking: bool,
-    lag: u32,
+    /// Never yet started (it rests where power-on left it).
+    fresh: bool,
 }
 
-/// A contour's coefficients a sample (the attack's, the decay's, the release's), the
-/// levels it aims at, stops at, holds and rests at (V), and its comparator's lag (samples).
+/// A contour's coefficients a sample (the attack's, the decay's, the release's), and the
+/// levels it aims at, stops at, holds and rests at (V).
 #[derive(Debug, Clone, Copy, Default)]
 struct ContourLaw {
     attack: f64,
@@ -565,18 +629,28 @@ struct ContourLaw {
     sustain: f64,
     released: f64,
     rest: f64,
-    lag: u32,
 }
 
 impl ContourLaw {
     fn new(k: ContourKnobs, decay_switch: bool, which: usize, rate: f64) -> ContourLaw {
-        let tau = |p: f64, ohms: f64| (1e6 * audio_taper(p) + ohms) * laws::TIME_FARADS;
+        type Law = [(f64, f64)];
+        let (attack_law, decay_law): (&Law, &Law) = if which == 0 {
+            (&FILTER_ATTACK, &FILTER_DECAY)
+        } else {
+            (&LOUDNESS_ATTACK, &LOUDNESS_DECAY)
+        };
+        let time = |(a, b, t0): (f64, f64, f64), ohms: f64| a * (ohms / 1e5).powf(b) + t0;
+        let r_decay = time_pot(k.decay, decay_law);
+        let tau_a = time(laws::ATTACK_TIME[which], time_pot(k.attack, attack_law));
         let (rest, peak) = (laws::REST[which], laws::PEAK[which]);
-        let rise = peak - rest;
+        let aim = rest + laws::ATTACK_AIM[which] * (peak - rest);
         let [c0, c1, c2, c3] = laws::SUSTAIN[which];
-        let s = k.sustain.clamp(0.0, 1.0);
+        let s = sustain_track(k.sustain);
         let (tau_r, released) = if decay_switch {
-            (tau(k.decay, laws::TIME_OHMS.1), laws::RELEASED[which])
+            (
+                time(laws::RELEASE_TIME[which], r_decay),
+                laws::RELEASED[which],
+            )
         } else {
             let d = k.decay.clamp(0.0, 1.0);
             (
@@ -586,27 +660,25 @@ impl ContourLaw {
         };
         let per = |tau: f64| 1.0 - (-1.0 / (tau * rate)).exp();
         ContourLaw {
-            attack: per(tau(k.attack, laws::TIME_OHMS.0)),
-            decay: per(tau(k.decay, laws::TIME_OHMS.1)),
+            attack: per(tau_a),
+            decay: per(time(laws::DECAY_TIME[which], r_decay)),
             release: per(tau_r),
-            aim: rest + laws::ATTACK_AIM[which] * rise,
-            stop: rest + laws::ATTACK_STOP[which] * rise,
+            aim,
+            stop: peak - (aim - peak) * laws::ATTACK_ESR[which] / tau_a,
             sustain: c0 + s * (c1 + s * (c2 + s * c3)),
             released,
             rest,
-            lag: (laws::ATTACK_LAG * rate).round() as u32,
         }
     }
 }
 
 impl Contour {
-    /// At rest: where a release leaves it (the circuit's rest from power-on differs a little,
-    /// and moves there after its first note: decisions.md R31).
+    /// At rest: as the circuit's from power-on (a release leaves it a little higher).
     fn at_rest(law: &ContourLaw) -> Contour {
         Contour {
-            volts: law.released,
+            volts: law.rest,
             attacking: false,
-            lag: 0,
+            fresh: true,
         }
     }
 
@@ -614,18 +686,20 @@ impl Contour {
     #[inline(always)]
     fn tick(&mut self, gate: bool, law: &ContourLaw) -> f64 {
         if gate {
+            self.fresh = false;
             if self.attacking {
-                self.volts += (law.aim - self.volts) * law.attack;
-                if self.volts >= law.stop {
-                    if self.lag >= law.lag {
-                        self.attacking = false;
-                    }
-                    self.lag += 1;
+                let next = self.volts + (law.aim - self.volts) * law.attack;
+                if next >= law.stop {
+                    // (The comparator flips at its threshold: the attack ends there.)
+                    self.volts = law.stop.max(self.volts);
+                    self.attacking = false;
+                } else {
+                    self.volts = next;
                 }
             } else {
                 self.volts += (law.sustain - self.volts) * law.decay;
             }
-        } else {
+        } else if !self.fresh {
             self.attacking = false;
             self.volts += (law.released - self.volts) * law.release;
         }
@@ -650,6 +724,9 @@ struct Setting {
     tracking: f64,
     contour: f64,
     emphasis: [f64; 10],
+    /// The loop's gain at EMPHASIS 0 at each of those cutoffs (FILTER MODE HI's direct
+    /// branch).
+    k0: [f64; 10],
     /// How much of the corner's rise above the ring's pitch EMPHASIS leaves (1 below 7, 0 from
     /// the threshold).
     corner: f64,
@@ -682,6 +759,10 @@ pub struct Light {
     set_for_panel: bool,
     set: Setting,
     held: Held,
+    /// A released key whose pitch contact is still closed, the samples it stays so, and that
+    /// time in samples.
+    lead: (i32, u32),
+    lead_samples: u32,
     /// The pitch the keys ask for and where GLIDE has it, semitones (MIDI): the keyboard's
     /// own (F to C), and the keys beyond it (asked for, and where they are).
     target: f64,
@@ -708,9 +789,14 @@ pub struct Light {
     noise_c: NoiseLaw,
     /// FEEDBACK's cable at the rate, samples.
     feedback_delay: f32,
-    /// The output's high-pass (its droop): its coefficient, last input and output; the input
+    /// The output's high-passes (its droop): the filter's coupling and the one after the VCA,
+    /// each its coefficient, last input and output; FILTER MODE HI's direct branch's
+    /// coupling likewise, and that branch's gain from the bus (control rate); the input
     /// pair's offset at rest.
+    coupling: (f32, f32, f32),
     droop: (f32, f32, f32),
+    mode: (f32, f32, f32),
+    direct: f32,
     /// The thump's band-pass: its coefficients (high-pass, low-pass) and its state (the
     /// VCA's last gain, the high-pass's output, the low-pass's).
     thump_c: (f32, f32),
@@ -728,8 +814,6 @@ pub struct Light {
     cutoff_offset: f64,
     /// Oscillator 3's last sample (the modulation's source).
     osc3: f32,
-    /// The VCA's law on a grid of 0.25 V from 0 to 6 V.
-    vca: [f32; 25],
     /// A-440's phase and its step a sample.
     a440: (f32, f32),
     /// FEEDBACK's share; the output's last samples (FEEDBACK's delay) and where the next
@@ -741,17 +825,15 @@ pub struct Light {
     /// EXTERNAL INPUT's coupling: its coefficient, last input and output.
     ext_hp: (f64, f64, f64),
     overload_peak: f64,
-    /// The plug-in's DRIVE: the gain on the bus into the ladder's input pair (1 the circuit).
+    /// The plug-in's DRIVE: the gain on the bus into the ladder's input pair (1 the circuit),
+    /// and the pair's limit with it (as [`Ladder::tick`] takes it).
     drive: f32,
+    limit: (f32, f32, f32),
 }
 
 impl Light {
     /// A voice at `rate` Hz, at rest, with the default panel.
     pub fn new(rate: f64) -> Light {
-        let mut vca = [0.0f32; 25];
-        for (i, g) in vca.iter_mut().enumerate() {
-            *g = interpolate(&laws::VCA_VOLTS, &laws::VCA_GAIN, i as f64 * 0.25) as f32;
-        }
         let at = |s: f64| (s * rate).round() as u32;
         let law = ContourLaw::new(Panel::default().filter_contour, true, 0, rate);
         let mut l = Light {
@@ -760,6 +842,8 @@ impl Light {
             set_for_panel: false,
             set: Setting::default(),
             held: Held::default(),
+            lead: (0, 0),
+            lead_samples: at(laws::RELEASE_LEAD),
             target: laws::PITCH_AT_REST,
             pitch: laws::PITCH_AT_REST,
             foot: 0.0,
@@ -790,11 +874,22 @@ impl Light {
             },
             noise_c: NoiseLaw::new(rate),
             feedback_delay: interpolate(&laws::FEEDBACK_AT, &laws::FEEDBACK_DELAY, rate) as f32,
+            coupling: (
+                (-std::f64::consts::TAU * laws::COUPLING_HZ / rate).exp() as f32,
+                0.0,
+                0.0,
+            ),
             droop: (
                 (-std::f64::consts::TAU * laws::DROOP_HZ / rate).exp() as f32,
                 0.0,
                 0.0,
             ),
+            mode: (
+                (-std::f64::consts::TAU * laws::MODE_HZ / rate).exp() as f32,
+                0.0,
+                0.0,
+            ),
+            direct: 0.0,
             thump_c: (
                 (-1.0 / (laws::THUMP_TIMES.0 * rate)).exp() as f32,
                 (1.0 - (-1.0 / (laws::THUMP_TIMES.1 * rate)).exp()) as f32,
@@ -810,7 +905,6 @@ impl Light {
             detune: [0.0; 3],
             cutoff_offset: 0.0,
             osc3: 0.0,
-            vca,
             a440: (0.0, (440.0 / rate) as f32),
             feedback: 0.0,
             fed_back: [0.0; 128],
@@ -823,7 +917,9 @@ impl Light {
             ),
             overload_peak: 0.0,
             drive: 1.0,
+            limit: (1.0, 1.0, 0.0),
         };
+        l.set_drive(1.0);
         // (The oscillators start in phase, as the circuit's do when its voice is made; ENTROPY's
         // floor of mismatch then draws them apart: decisions.md R9, R31.)
         l.set_panel(&Panel::default());
@@ -842,7 +938,10 @@ impl Light {
     /// filter's input pair raised by `gain` (the ladder's feedback not), driving the pair
     /// harder than the panel's mixer can; 1 is the circuit.
     pub fn set_drive(&mut self, gain: f64) {
-        self.drive = gain.max(0.0) as f32;
+        let gain = gain.max(1e-3);
+        self.drive = gain as f32;
+        let top = gain.powf(laws::DRIVE_CEILING).min(1.0) as f32;
+        self.limit = (top, 1.0 / top, top * tanh(laws::BIAS / top));
     }
 
     /// The three oscillators started together `at` one share of the way through their cycles
@@ -877,17 +976,24 @@ impl Light {
             let free = o == 2 && !p.osc3_control;
             let freq = match o {
                 0 => 0.0,
-                1 => (cubic(laws::OSC2_CENTS, x) - cubic(laws::OSC2_CENTS, FREQ_CENTRE)) / 100.0,
+                1 => {
+                    let at = |x: f64| cubic(laws::OSC2_CENTS, osc2_freq_track(x));
+                    (at(x) - at(FREQ_CENTRE)) / 100.0
+                }
                 _ if free => {
                     let quintic = |x: f64| {
+                        let t = osc3_freq_track(x);
                         laws::OSC3_FREE_CENTS
                             .iter()
                             .rev()
-                            .fold(0.0, |a, c| a * x + c)
+                            .fold(0.0, |a, c| a * t + c)
                     };
                     (quintic(x) - quintic(FREQ_CENTRE)) / 100.0
                 }
-                _ => (cubic(laws::OSC3_CENTS, x) - cubic(laws::OSC3_CENTS, FREQ_CENTRE)) / 100.0,
+                _ => {
+                    let at = |x: f64| cubic(laws::OSC3_CENTS, osc3_freq_track(x));
+                    (at(x) - at(FREQ_CENTRE)) / 100.0
+                }
             };
             self.osc[o].wave = p.osc[o].waveform;
             let tune = if free {
@@ -904,7 +1010,7 @@ impl Light {
             };
             let level = if o == 2 { laws::OSC3_LEVEL } else { 1.0 };
             self.set.gain[o] = if p.osc[o].on {
-                channel(p.osc[o].volume, source, 33e3) * level
+                channel(volume_track(p.osc[o].volume), source, 33e3) * level
             } else {
                 0.0
             };
@@ -916,7 +1022,7 @@ impl Light {
             } else {
                 (laws::NOISE_OHMS.0, laws::WHITE)
             };
-            channel(p.noise_volume, ohms, 11e3) / channel(1.0, ohms, 11e3) * level
+            channel(volume_track(p.noise_volume), ohms, 11e3) / channel(1.0, ohms, 11e3) * level
         } else {
             0.0
         };
@@ -924,38 +1030,61 @@ impl Light {
         // DRIVE through the ladder's passband at EMPHASIS 0.)
         // (The pair's slope at its offset.)
         let slope = 1.0 - self.bias * self.bias;
-        let passband = f64::from(laws::OUT * laws::DRIVE * slope) / (1.0 + laws::LOOP[3][0]);
+        let passband = f64::from(laws::OUT * laws::DRIVE * slope)
+            / (1.0 + laws::LOOP[3][0] * laws::LOOP_SCALE);
         self.set.ext = if p.ext_on {
             (1.0 / passband) as f32
         } else {
             0.0
         };
-        let t = audio_taper(p.ext_volume);
+        let t = ext_taper(p.ext_volume);
         self.set.ext_gain = laws::EXT_GAIN * t / (1.0 + laws::EXT_LOAD * t * (1.0 - t));
         let knob = p.cutoff.clamp(0.0, 1.0) * 20.0;
         let i = (knob.floor() as usize).min(19);
         let a = knob - i as f64;
         let c = &laws::CUTOFF_LOG2;
         self.set.cutoff = f64::from(c[i]) + (f64::from(c[i + 1]) - f64::from(c[i])) * a;
-        self.set.tracking = f64::from(u8::from(p.keyboard_control_1)) * laws::KEYBOARD_CONTROL[0]
-            + f64::from(u8::from(p.keyboard_control_2)) * laws::KEYBOARD_CONTROL[1];
+        self.set.tracking = match (p.keyboard_control_1, p.keyboard_control_2) {
+            (false, false) => 0.0,
+            (true, false) => laws::KEYBOARD_CONTROL[0],
+            (false, true) => laws::KEYBOARD_CONTROL[1],
+            (true, true) => laws::KEYBOARD_CONTROL[2],
+        };
         self.set.contour = laws::CONTOUR_OCTAVES_PER_VOLT
             * interpolate(
                 &[0.0, 0.25, 0.5, 0.75, 1.0],
                 &laws::AMOUNT,
                 p.contour_amount,
             );
-        self.set.corner = ((0.744 - p.emphasis) / 0.044).clamp(0.0, 1.0);
-        for (k, row) in self.set.emphasis.iter_mut().zip(&laws::LOOP) {
-            let at = interpolate(&laws::EMPHASIS_AT, row, p.emphasis);
-            // (Past the threshold, `RING_GAIN` of the rise beyond it.)
-            *k = if at > 4.0 {
-                4.0 + (at - 4.0) * laws::RING_GAIN
-            } else {
-                at
-            };
+        // (EMPHASIS as the knob drawn with its generic taper would set R14.)
+        let emphasis = 1.0 - (1.0 + 80.0 * emphasis_r14(p.emphasis) / 50e3).ln() / 81f64.ln();
+        self.set.corner = ((0.744 - emphasis) / 0.044).clamp(0.0, 1.0);
+        for (k0, row) in self.set.k0.iter_mut().zip(&laws::LOOP) {
+            *k0 = row[0] * laws::LOOP_SCALE;
         }
-        let w = p.mod_wheel.clamp(0.0, 1.0);
+        for ((k, row), &log2) in self
+            .set
+            .emphasis
+            .iter_mut()
+            .zip(&laws::LOOP)
+            .zip(&laws::LOOP_AT_LOG2)
+        {
+            let threshold = interpolate(&laws::THRESHOLD_AT_LOG2, &laws::THRESHOLD, log2);
+            let shift = interpolate(&laws::THRESHOLD_AT_LOG2, &laws::SHIFT, log2);
+            let near = 1.0 - ((threshold - emphasis) / laws::EMPHASIS_NEAR).clamp(0.0, 1.0);
+            let at = interpolate(&laws::EMPHASIS_AT, row, emphasis + near * shift);
+            // (Past the threshold, `RING_GAIN` of the rise beyond it.)
+            *k = laws::LOOP_SCALE
+                * if at > 4.0 {
+                    4.0 + (at - 4.0) * laws::RING_GAIN
+                } else {
+                    at
+                };
+        }
+        // (The wheel as the drawing's would set its resistance.)
+        let r = crate::modulation::mod_wheel_r(p.mod_wheel);
+        let w = 3.0 * (1.0 + r / 1.2e3 * (81f64.powf(1.0 / 3.0) - 1.0)).ln() / 81f64.ln();
+        let w = w.clamp(0.0, 1.0);
         let [a, b, c] = laws::WHEEL;
         self.set.depth = w * (a + w * (b + w * c));
         self.set.offset_depth = w.powf(laws::OFFSET_POWER);
@@ -995,6 +1124,9 @@ impl Light {
 
     /// A MIDI note pressed or released.
     pub fn note(&mut self, midi: i32, on: bool) {
+        if !on && self.held.lowest() == Some(midi) {
+            self.lead = (midi, self.lead_samples);
+        }
         self.held.set(midi, on);
     }
 
@@ -1034,13 +1166,16 @@ impl Light {
     /// Back to rest: every key up, the contours and the ladder at rest (All Sound Off).
     pub fn rest(&mut self) {
         self.held = Held::default();
+        self.lead = (0, 0);
         (self.gate, self.trigger, self.pending, self.open) = (false, false, 0, u32::MAX);
         self.contours = [
             Contour::at_rest(&self.set.contours[0]),
             Contour::at_rest(&self.set.contours[1]),
         ];
         self.ladder = Ladder::default();
+        self.coupling = (self.coupling.0, 0.0, 0.0);
         self.droop = (self.droop.0, 0.0, 0.0);
+        self.mode = (self.mode.0, 0.0, 0.0);
         self.thump = (0.0, 0.0, 0.0);
         self.ext_hp = (self.ext_hp.0, 0.0, 0.0);
         self.fed_back = [0.0; 128];
@@ -1055,7 +1190,13 @@ impl Light {
     /// The control laws, every [`CONTROL_EVERY`] samples: the pitch (GLIDE), the
     /// oscillators' increments and the ladder's coefficients for the next samples.
     fn control(&mut self) {
-        if let Some(key) = self.held.lowest() {
+        let lowest = if self.lead.1 > 0 {
+            self.lead.1 = self.lead.1.saturating_sub(CONTROL_EVERY as u32);
+            self.held.lowest().map(|k| k.min(self.lead.0))
+        } else {
+            self.held.lowest()
+        };
+        if let Some(key) = lowest {
             let (lo, hi) = laws::KEYBOARD_KEYS;
             let key = f64::from(key);
             self.target = key.clamp(lo, hi);
@@ -1082,6 +1223,12 @@ impl Light {
         let (g, k) = self.coefficients(0.0);
         self.g_step = (g - self.g) / CONTROL_EVERY as f32;
         self.k = k;
+        // FILTER MODE HI's direct branch: the ladder's passband at EMPHASIS 0 at this cutoff.
+        let log2 = self.set.cutoff
+            + self.set.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0;
+        let k0 = interpolate(&laws::LOOP_AT_LOG2, &self.set.k0, log2);
+        let slope = 1.0 - self.bias * self.bias;
+        self.direct = laws::MODE_GAIN * laws::DRIVE * slope / (1.0 + k0 as f32);
     }
 
     /// The ladder's stage gain and loop gain for the cutoff the panel, the keys and the
@@ -1122,17 +1269,16 @@ impl Light {
         if gate != self.gate {
             self.gate = gate;
             if gate {
-                if self.trigger {
+                self.attack = self.open >= self.rearm;
+                self.pending = if self.attack {
+                    // (Re-armed: an attack, even if the contours have not yet fallen.)
+                    self.trigger_on.max(1)
+                } else if self.trigger {
                     // (Let go and pressed again before the contours fell: they hold.)
-                    self.pending = 0;
+                    0
                 } else {
-                    self.attack = self.open >= self.rearm;
-                    self.pending = if self.attack {
-                        self.trigger_on.max(1)
-                    } else {
-                        1
-                    };
-                }
+                    1
+                };
             } else {
                 self.pending = self.trigger_off.max(1);
             }
@@ -1148,7 +1294,6 @@ impl Light {
                 if gate {
                     for c in &mut self.contours {
                         c.attacking = self.attack;
-                        c.lag = 0;
                     }
                 }
             }
@@ -1277,14 +1422,29 @@ impl Light {
             g.clamp(0.0, 0.999),
             k,
             laws::BIAS,
-            self.bias,
+            self.limit,
         );
+        // The filter's output coupling; FILTER MODE HI, the bus (through its own coupling)
+        // less it.
+        let (a, x0, y0) = self.coupling;
+        let lo = a * (y0 + y - x0);
+        self.coupling = (a, y, lo);
+        let (a, x0, y0) = self.mode;
+        let d = self.direct * bus;
+        let direct = a * (y0 + d - x0);
+        self.mode = (a, d, direct);
+        let y = if self.panel.filter_hi {
+            direct - lo
+        } else {
+            lo
+        };
         // The VCA on the loudness contour.
-        let v = (loud.max(0.0) * 4.0) as f32;
-        let i = (v as usize).min(23);
+        let g = &laws::VCA_GAIN;
+        let v = (loud.max(0.0) / laws::VCA_STEP) as f32;
+        let i = (v as usize).min(g.len() - 2);
         let f = (v - i as f32).min(1.0);
-        let gain = self.vca[i] + (self.vca[i + 1] - self.vca[i]) * f;
-        // The output's coupling (the waveforms' droop, and the input pair's offset kept out).
+        let gain = g[i] + (g[i + 1] - g[i]) * f;
+        // The output's coupling (the rest of the waveforms' droop).
         let y = y * laws::OUT * gain;
         let (a, x0, y0) = self.droop;
         let coupled = a * (y0 + y - x0);
@@ -1406,7 +1566,7 @@ mod tests {
     }
 
     /// Key 69 on 8' is 440 Hz, a RANGE an octave, oscillator 2's FREQUENCY at 0 the circuit's
-    /// -855.5 cents.
+    /// -798.0 cents (through the reference's law, voice.rs's `osc2_freq_track`).
     #[test]
     fn the_pitch_laws() {
         let mut l = Light::new(48_000.0);
@@ -1432,12 +1592,12 @@ mod tests {
         l.set_panel(&p);
         run(&mut l, 4800);
         let cents = 1200.0 * (hz(&run(&mut l, 48_000)) / 440.0).log2();
-        assert!((cents + 855.5).abs() < 1.0, "{cents} cents");
+        assert!((cents + 798.0).abs() < 1.5, "{cents} cents");
     }
 
     /// The filter at EMPHASIS 10 rings at the circuit's pitch once something reaches it
-    /// (CUTOFF 0.5: 858 Hz), not at all at CUTOFF 0.1; at CUTOFF 0.5 it rings from EMPHASIS
-    /// 7.5, not at 7.3 (the circuit's threshold 7.44).
+    /// (CUTOFF 0.5: 1056 Hz), not at all at CUTOFF 0.1; at CUTOFF 0.5 it rings from EMPHASIS
+    /// 7.35, not at 7.15 (the circuit's threshold 7.25); in FILTER MODE HI as in LO.
     #[test]
     fn the_filter_rings_where_the_circuits_does() {
         let ring = |cutoff: f64, emphasis: f64| {
@@ -1445,6 +1605,7 @@ mod tests {
             let mut p = measuring();
             p.cutoff = cutoff;
             p.emphasis = emphasis;
+            p.filter_hi = emphasis == 0.99;
             l.set_panel(&p);
             l.note(60, true);
             run(&mut l, 960);
@@ -1457,11 +1618,13 @@ mod tests {
         let x = ring(0.5, 1.0);
         let rms = (x.iter().map(|y| y * y).sum::<f64>() / x.len() as f64).sqrt();
         assert!(rms > 0.1, "rms {rms}");
-        assert!((hz(&x) / 858.0 - 1.0).abs() < 0.01, "{} Hz", hz(&x));
+        assert!((hz(&x) / 1056.0 - 1.0).abs() < 0.01, "{} Hz", hz(&x));
+        let hi = ring(0.5, 0.99);
+        assert!((hz(&hi) / 1056.0 - 1.0).abs() < 0.01, "HI: {} Hz", hz(&hi));
         let quiet = |x: &[f64]| x.iter().all(|y| y.abs() < 1e-4);
         assert!(quiet(&ring(0.1, 1.0)), "rang at CUTOFF 0.1");
-        assert!(!quiet(&ring(0.5, 0.75)), "silent at EMPHASIS 7.5");
-        assert!(quiet(&ring(0.5, 0.73)), "rang at EMPHASIS 7.3");
+        assert!(!quiet(&ring(0.5, 0.735)), "silent at EMPHASIS 7.35");
+        assert!(quiet(&ring(0.5, 0.715)), "rang at EMPHASIS 7.15");
     }
 
     /// EXTERNAL INPUT coupled at its jack as the circuit's: 5 Hz through the open filter 12
@@ -1493,9 +1656,9 @@ mod tests {
         );
     }
 
-    /// The noise as loud at 44.1 and 96 kHz as at 48 (within 0.5 dB, white and pink at
-    /// VOLUME 5 through the open filter): its density a hertz, not a sample, as the
-    /// circuit's.
+    /// The noise as loud at 44.1 and 96 kHz as at 48 (within 1 dB, white and pink at
+    /// VOLUME 5 through the open filter; the circuit's white 0.7 dB louder at 96 kHz, its
+    /// open filter reaching higher): its density a hertz, not a sample, as the circuit's.
     #[test]
     fn the_noise_is_as_loud_at_every_rate() {
         let rms = |rate: f64, pink: bool| {
@@ -1517,7 +1680,7 @@ mod tests {
             for rate in [44_100.0, 96_000.0] {
                 let d = rms(rate, pink) - at48;
                 assert!(
-                    d.abs() < 0.5,
+                    d.abs() < 1.0,
                     "{} at {rate} Hz: {d:+.2} dB",
                     if pink { "pink" } else { "white" }
                 );
@@ -1556,9 +1719,10 @@ mod tests {
     }
 
     /// The contours start 7.8 ms after the key; SUSTAIN at 10 holds the loudness contour at
-    /// 4.45 V; with the DECAY switch off the release falls with a time constant near 26 ms
-    /// after its 15 ms, towards -0.70 V (DECAY 2); GLIDE at 4 slides 12 semitones in about
-    /// 35 ms (340 a second).
+    /// 4.45 V; with the DECAY switch off the release falls with a time constant near 20 ms
+    /// after its 14 ms, towards -0.70 V (DECAY 2); GLIDE at 4 slides the 11 semitones from
+    /// 48 to 59 in about 27 ms from the lower key's release (the circuit's 27.3 ms: its pitch
+    /// contact 2 ms behind, then 456 semitones a second).
     #[test]
     fn the_contour_and_glide_laws() {
         let mut l = Light::new(48_000.0);
@@ -1580,12 +1744,12 @@ mod tests {
         run(&mut l, 48_000);
         assert!((l.contours().1 - 4.4549).abs() < 0.01, "{}", l.contours().1);
         l.note(60, false);
-        // 15 ms of the trigger, then a time constant (26.3 ms at DECAY 2): from 4.45 V
-        // towards -0.70 V.
-        run(&mut l, 720 + 1440);
-        let fallen = (l.contours().1 + 0.6997) / (4.4549 + 0.6997);
+        // 14 ms of the trigger, then a time constant (20 ms at DECAY 2): from 4.45 V towards
+        // -0.70 V.
+        run(&mut l, 677 + 1440);
+        let fallen = (l.contours().1 + 0.6988) / (4.4549 + 0.6988);
         let tau = 0.030 / -fallen.ln();
-        assert!((tau - 0.0263).abs() < 0.002, "tau {tau}");
+        assert!((tau - 0.0200).abs() < 0.002, "tau {tau}");
         // GLIDE.
         p.glide = 0.4;
         p.glide_on = true;
@@ -1597,11 +1761,113 @@ mod tests {
         let mut at = None;
         for i in 0..9600 {
             l.tick(0.0);
-            if at.is_none() && l.pitch > 59.5 {
+            if at.is_none() && l.pitch > 59.0 {
                 at = Some(i as f64 / 48.0);
             }
         }
         let ms = at.expect("no glide");
-        assert!((ms - 33.8).abs() < 2.0, "11.5 semitones in {ms} ms");
+        assert!((ms - 27.3).abs() < 2.0, "11 semitones in {ms} ms");
+    }
+
+    /// The contours' times through the reference's laws (voice.rs's `time_pot`), as the
+    /// circuit's: ATTACK 6 takes the loudness contour to its plateau in 0.665 s (the circuit's
+    /// 0.6645), DECAY 6 the filter contour half way down from it in 0.36 to 0.38 s (0.363),
+    /// SUSTAIN 5 holds the loudness contour at 1.675 V; and a fast attack stops short of the
+    /// plateau, as the circuit's does (ATTACK 0: 4.685 V, against 4.792).
+    #[test]
+    fn the_contours_follow_the_references_laws() {
+        let mut p = measuring();
+        p.loudness_contour = ContourKnobs {
+            attack: 0.6,
+            decay: 0.5,
+            sustain: 1.0,
+        };
+        p.filter_contour = ContourKnobs {
+            attack: 0.0,
+            decay: 0.6,
+            sustain: 0.0,
+        };
+        let mut l = Light::new(48_000.0);
+        l.set_panel(&p);
+        l.note(60, true);
+        let (mut peak, mut top, mut half, mut at) = (0.0f64, 0.0f64, None, 0.0);
+        for i in 0..96_000 {
+            l.tick(0.0);
+            let (f, v) = l.contours();
+            if f > peak {
+                peak = f;
+            }
+            if half.is_none() && peak > 4.0 && f < 0.5 * (peak + 0.0431) {
+                half = Some(i as f64 / 48_000.0);
+            }
+            if v > top + 1e-9 {
+                top = v;
+                at = i as f64 / 48_000.0;
+            }
+        }
+        assert!((peak - 4.685).abs() < 0.01, "ATTACK 0's peak {peak} V");
+        assert!(
+            (at - 0.6645).abs() < 0.01,
+            "ATTACK 6 to its plateau in {at} s"
+        );
+        let half = half.expect("no decay") - 0.0086;
+        assert!((0.36..0.38).contains(&half), "DECAY 6 half way in {half} s");
+        p.loudness_contour.sustain = 0.5;
+        l.set_panel(&p);
+        run(&mut l, 240_000);
+        let held = l.contours().1;
+        assert!((held - 1.675).abs() < 0.01, "SUSTAIN 5 at {held} V");
+    }
+
+    /// DRIVE as the circuit's: oscillator 1's sawtooth at VOLUME 5, the filter open, 6, 12
+    /// and 24 dB of it raise the level 5.8, 11.0 and 15.5 dB (the circuit's 5.7, 10.5 and
+    /// 15.0: the pair saturates, and its limit falls with DRIVE as the circuit's ladder holds
+    /// a driven input; without that fall, 17 dB).
+    #[test]
+    fn drive_raises_the_level_less_and_less() {
+        let level = |db: f64| {
+            let mut l = Light::new(48_000.0);
+            let mut p = measuring();
+            p.osc[0].volume = 0.5;
+            l.set_panel(&p);
+            l.set_drive(10f64.powf(db / 20.0));
+            l.note(45, true);
+            run(&mut l, 24_000);
+            let x = run(&mut l, 48_000);
+            10.0 * (x.iter().map(|y| y * y).sum::<f64>() / x.len() as f64).log10()
+        };
+        let off = level(0.0);
+        for (db, want) in [(6.0, 5.8), (12.0, 11.0), (24.0, 15.5)] {
+            let up = level(db) - off;
+            assert!((up - want).abs() < 0.5, "DRIVE {db} dB: {up:+.2} dB");
+        }
+    }
+
+    /// FILTER MODE HI as the circuit's: the bus less the filter's output, so that a sawtooth
+    /// at 110 Hz (VOLUME 3) under CUTOFF 0.7 (5.3 kHz) is mostly gone, 10.6 dB under LO's
+    /// (the circuit's 10.8), and over CUTOFF 0.3 (214 Hz) 6.3 dB louder than LO's (6.5); at
+    /// EMPHASIS 5 the bass stands 3 dB under the bus (a shelf: 5.7 dB over LO's, the
+    /// circuit's 5.7).
+    #[test]
+    fn filter_mode_hi_is_the_bus_less_the_filter() {
+        let level = |cutoff: f64, emphasis: f64, hi: bool| {
+            let mut l = Light::new(48_000.0);
+            let mut p = measuring();
+            p.cutoff = cutoff;
+            p.emphasis = emphasis;
+            p.filter_hi = hi;
+            l.set_panel(&p);
+            l.note(45, true);
+            run(&mut l, 24_000);
+            let x = run(&mut l, 48_000);
+            10.0 * (x.iter().map(|y| y * y).sum::<f64>() / x.len() as f64).log10()
+        };
+        for (cutoff, emphasis, want) in [(0.7, 0.0, -10.8), (0.3, 0.0, 6.5), (0.5, 0.5, 5.7)] {
+            let d = level(cutoff, emphasis, true) - level(cutoff, emphasis, false);
+            assert!(
+                (d - want).abs() < 0.8,
+                "CUTOFF {cutoff}, EMPHASIS {emphasis}: HI {d:+.2} dB against LO"
+            );
+        }
     }
 }
