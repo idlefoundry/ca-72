@@ -61,8 +61,8 @@ const EDGE_FROM: f32 = 0.86;
 /// "should the corners of these buttons be darker, not lighter", "that's where the plastic
 /// would be densist from the user's perspective"): this share at the corner itself, easing in
 /// where the cap's sides meet its ends, from `CORNER_FROM` of the way out both ways.
-const CORNER_DARKER: f32 = 0.5;
-const CORNER_FROM: f32 = 0.35;
+const CORNER_DARKER: f32 = 0.75;
+const CORNER_FROM: f32 = 0.3;
 
 /// The lit cap with its outermost band darkened ([`EDGE_DARKER`]) and its corners more
 /// ([`CORNER_DARKER`]), in linear light, as far out as the kit's cap measures it (its rounded

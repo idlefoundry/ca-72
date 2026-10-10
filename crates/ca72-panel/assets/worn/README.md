@@ -14,7 +14,7 @@ pictures:
 | `rocker-blue.png` | A blue rocker in its black opening, its right half raised | 512 × 194 |
 | `rocker-orange.png` | The same in orange (the controller's ivory ones are made from the blue in code) | 512 × 181 |
 | `power.png` | The POWER switch: a black ribbed rocker, its upper half raised | 112 × 320 |
-| `jewel.png` | POWER's lamp: a red domed jewel in a chrome bezel (OVERLOAD's darker one made from it in code) | 256 × 252 |
+| `jewel.png` | POWER's lamp: a red domed jewel in a chrome bezel (OVERLOAD's darker one made from it in code); the ring light's reflection in its dome painted out (2026-10-10: on OVERLOAD's dark glass it showed as a pink ring; each angle's band, radius 48 to 59 about (126.8, 122), the glass just inside it blended into the glass just outside) | 256 × 252 |
 | `jack.png` | A jack's knurled chrome ring nut | 256 × 251 |
 | `screw.png` | A black-oxide Phillips pan head | 96 × 96 |
 | `plate.png` | The name plate, blank: black anodised aluminium, a fine horizontal brushing, a bright chamfer lit from up and to the left (its lettering printed on it in code, `art::plate_worn`) | 1044 × 328 |
