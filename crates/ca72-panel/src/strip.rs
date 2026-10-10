@@ -349,6 +349,10 @@ pub struct StripScene {
     /// Each readout's text and whether it is lit ([`Readout::ALL`]'s order).
     pub readouts: [(String, bool); 7],
     pub field: Field,
+    /// Each voice's level (0 silent to 1 loud, by its index in the field), and DOUBLE's detune
+    /// between a note's two voices, cents: the drops swell with their voices, and a pair beats.
+    pub levels: Vec<f64>,
+    pub detune: f64,
     pub bar: BarScene,
     pub hover: Option<StripTarget>,
     /// The control MIDI Learn waits for, if it is rung here.
@@ -364,6 +368,8 @@ impl Default for StripScene {
             auto: true,
             readouts: std::array::from_fn(|_| (String::new(), false)),
             field: Field::default(),
+            levels: Vec::new(),
+            detune: 0.0,
             bar: BarScene::default(),
             hover: None,
             learning: None,

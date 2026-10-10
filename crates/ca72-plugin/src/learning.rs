@@ -232,15 +232,16 @@ impl Learning {
         self.take_keys = true;
     }
 
-    /// ULTRA's lamp's menu (decisions.md R-ULTRA) opened at (`x`, `y`): its shutter or always
-    /// open, the one it is in named in its title and dim among the items.
+    /// QUALITY's opening's menu (decisions.md R-ULTRA; it was ULTRA's lamp's) opened at (`x`,
+    /// `y`): its shutter or always open, the one it is in named in its title and dim among the
+    /// items.
     pub fn open_lamp_menu(&mut self, fonts: &Fonts, (x, y): (f64, f64), size: f64, shutter: bool) {
         let menu = Menu {
             x,
             y,
             size,
             title: format!(
-                "ULTRA'S LAMP · {}",
+                "QUALITY'S OPENING · {}",
                 if shutter { "SHUTTER" } else { "ALWAYS OPEN" }
             ),
             items: vec![

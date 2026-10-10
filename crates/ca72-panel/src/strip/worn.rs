@@ -111,6 +111,8 @@ const AMBER_LIGHT: Underlight = Underlight {
 /// The tabs' and the keys' print.
 const TAB_PRINT: &str = "#2a1006";
 const KEY_PRINT: &str = "#d9d2c0";
+/// The drops move on at most this far apart, seconds (30 a second).
+const STEP_S: f64 = 1.0 / 30.0;
 /// The name's dots' pitch, and the drops' sizes (a sounding voice's, an idle one's), units.
 const DOT: f64 = 5.0;
 const DROP: f64 = 10.0;
@@ -256,11 +258,17 @@ impl StripRenderer {
         changed: Option<[i32; 4]>,
         now: Instant,
     ) -> bool {
+        // (The drops move on at most [`STEP_S`] apart: they follow the voices, and are drawn
+        // no oftener than the rest that does.)
         let dt = self
             .last
             .map_or(0.0, |t| now.saturating_duration_since(t).as_secs_f64());
-        self.last = Some(now);
-        let (moved, _) = self.liquid.step(scene, dt.min(0.1));
+        let moved = if self.last.is_none() || dt >= STEP_S {
+            self.last = Some(now);
+            self.liquid.step(scene, dt.min(0.1)).0
+        } else {
+            false
+        };
         self.moved = moved;
         if self.still.is_none() {
             self.make_still();
@@ -314,7 +322,7 @@ impl StripRenderer {
     }
 
     /// The voices' drops, behind the display's glass, in its `window`.
-    fn drops(&mut self, window: [i32; 4]) {
+    fn drops(&mut self, window: [i32; 4], detune: f64) {
         let s = self.scale;
         let (dx, dy, dw, dh) = DISPLAY;
         self.liquid.draw(
@@ -323,6 +331,7 @@ impl StripRenderer {
             ((dx + dw / 2.0) * s, (dy - PANEL_H + dh / 2.0) * s),
             (dw / 2.0 - 40.0) * s,
             s,
+            detune,
         );
     }
 
@@ -558,7 +567,7 @@ impl StripRenderer {
         // The voices' drops, behind the display's glass.
         let window = self.window();
         if meets(window, r) {
-            self.drops(window);
+            self.drops(window, scene.detune);
         }
         // The preset's name, its star and arrow; MIDI Learn's ring round the control it waits
         // for; the favourite's key; the pointer's part.
@@ -1129,23 +1138,53 @@ fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) 
 
 // ---- The voices' display: drops of light (the CA-74's LIQUID, its R36).
 
-/// A drop: where it is (-1..1 of the field), how much of it there is (0..1) and how much of it
-/// sounds (0..1).
+/// A drop: where it is (-1..1 of the field), how much of it there is (0..1), how much of it
+/// sounds (0..1) and how loud its voice is (0..1, as a lamp's filament follows a level: quick
+/// to rise, slower to fall).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Drop {
     x: f64,
     size: f64,
     lit: f64,
+    level: f64,
 }
 
 /// The drops, each easing to where the scene puts it: a drop's id is its voice's (with DOUBLE
-/// its twin's `TWIN +` its voice's).
+/// its twin's `TWIN +` its voice's); and DOUBLE's beat, its phase (radians), and the light's
+/// sums, kept from frame to frame.
 #[derive(Debug, Default)]
 struct Liquid {
     drops: BTreeMap<u32, Drop>,
+    beat: f64,
+    sums: Vec<(f32, f32)>,
 }
 
 const TWIN: u32 = 1000;
+
+/// A sounding drop's size at its voice's silence and loudest, shares of [`DROP`] (the owner:
+/// "make the dots in the stereo spread a little more animated according to the volume of their
+/// respective sounds"); how fast its level follows its voice's, rising and falling (per
+/// second).
+const QUIET_SIZE: f64 = 0.72;
+const LOUD_SIZE: f64 = 1.22;
+const LEVEL_UP: f64 = 30.0;
+const LEVEL_DOWN: f64 = 5.0;
+/// DOUBLE's detune shown (the owner: "perhaps someway to animate the detune effect being
+/// placed on them as well?"): a note's two voices beat against each other as two notes so far
+/// apart do, at [`BEAT_AT`] Hz (the A below middle C), one swelling as the other ebbs and the
+/// two swaying in turn, by as much as [`BEAT_SWELL`] of their size and [`BEAT_SWAY`] units at
+/// [`BEAT_FULL`] cents or more apart.
+const BEAT_AT: f64 = 220.0;
+const BEAT_SWELL: f64 = 0.24;
+const BEAT_SWAY: f64 = 4.0;
+const BEAT_FULL: f64 = 10.0;
+/// How far a drop's light reaches, in its radii (past it, under a level's step).
+const REACH: f64 = 6.0;
+
+/// The beat of two notes `cents` apart at [`BEAT_AT`], Hz.
+fn beat_hz(cents: f64) -> f64 {
+    BEAT_AT * (2f64.powf(cents.max(0.0) / 1200.0) - 1.0)
+}
 
 /// Where the scene puts each drop: its id, its place, whether it sounds, and the drop it comes
 /// out of when it appears (a twin, its voice).
@@ -1168,12 +1207,16 @@ fn targets(s: &StripScene) -> Vec<(u32, f64, bool, Option<u32>)> {
 }
 
 impl Liquid {
-    /// The drops eased `dt` seconds towards the scene's places: whether any moved, and whether
-    /// all are where they are going.
+    /// The drops eased `dt` seconds towards the scene's places and their voices' levels, and
+    /// DOUBLE's beat moved on: whether any moved, and whether all are where they are going.
     fn step(&mut self, s: &StripScene, dt: f64) -> (bool, bool) {
         let want = targets(s);
         let mut moved = false;
         let mut settled = true;
+        let level_of = |id: u32| {
+            let voice = if id >= TWIN { id - TWIN } else { id } as usize;
+            s.levels.get(voice).copied().unwrap_or(0.0).clamp(0.0, 1.0)
+        };
         for &(id, x, on, from) in &want {
             if !self.drops.contains_key(&id) {
                 let x0 = from.and_then(|f| self.drops.get(&f)).map_or(x, |d| d.x);
@@ -1184,6 +1227,7 @@ impl Liquid {
                         x: x0,
                         size: if dt == 0.0 { 1.0 } else { 0.0 },
                         lit,
+                        level: if dt == 0.0 { level_of(id) * lit } else { 0.0 },
                     },
                 );
                 moved = true;
@@ -1191,6 +1235,7 @@ impl Liquid {
         }
         let kx = 1.0 - (-dt * 7.0).exp();
         let kr = 1.0 - (-dt * 11.0).exp();
+        let (up, down) = (1.0 - (-dt * LEVEL_UP).exp(), 1.0 - (-dt * LEVEL_DOWN).exp());
         let homes: BTreeMap<u32, f64> = self.drops.iter().map(|(&k, d)| (k, d.x)).collect();
         self.drops.retain(|&id, d| {
             let t = want.iter().find(|w| w.0 == id);
@@ -1200,62 +1245,135 @@ impl Liquid {
                 None => d.x,
             };
             let (ts, tl) = t.map_or((0.0, 0.0), |t| (1.0, f64::from(u8::from(t.2))));
+            let tv = level_of(id) * tl;
             let was = *d;
             d.x += (tx - d.x) * kx;
             d.size += (ts - d.size) * kr;
             d.lit += (tl - d.lit) * kr;
+            d.level += (tv - d.level) * if tv > d.level { up } else { down };
             if (tx - d.x).abs() < 1e-3 && (ts - d.size).abs() < 1e-3 && (tl - d.lit).abs() < 1e-3 {
                 (d.x, d.size, d.lit) = (tx, ts, tl);
+            }
+            if (tv - d.level).abs() < 2e-3 {
+                d.level = tv;
             }
             moved |= *d != was;
             let stays = t.is_some() || d.size > 0.0;
             moved |= !stays;
-            settled &= !stays || (d.x, d.size, d.lit) == (tx, ts, tl);
+            settled &= !stays || (d.x, d.size, d.lit, d.level) == (tx, ts, tl, tv);
             stays
         });
+        // DOUBLE's beat, while a pair sounds.
+        let beating = matches!(s.field, Field::Double(_))
+            && s.detune > 0.0
+            && self
+                .drops
+                .iter()
+                .any(|(&id, d)| id >= TWIN && d.level > 0.0);
+        if beating {
+            self.beat = (self.beat + dt * beat_hz(s.detune) * std::f64::consts::TAU)
+                % std::f64::consts::TAU;
+            moved = true;
+            settled = false;
+        }
         (moved, settled)
+    }
+
+    /// A drop's place (pixels across, the field's middle at `cx`, half `half` wide) and its
+    /// light's strengths, sounding and idle: with DOUBLE, a pair beating as their detune makes
+    /// them (`detune`, cents).
+    fn shape(
+        &self,
+        id: u32,
+        d: &Drop,
+        cx: f64,
+        half: f64,
+        scale: f64,
+        detune: f64,
+    ) -> (f64, f64, f64) {
+        let paired = id >= TWIN || self.drops.contains_key(&(TWIN + id));
+        let (mut x, mut grow) = (cx + d.x * half, 1.0);
+        if paired && detune > 0.0 {
+            let side = if id >= TWIN { -1.0 } else { 1.0 };
+            let k = (detune / BEAT_FULL).min(1.0) * d.level;
+            grow += side * BEAT_SWELL * k * self.beat.sin();
+            x += side * BEAT_SWAY * scale * k * self.beat.cos();
+        }
+        let r = DROP * scale * (QUIET_SIZE + (LOUD_SIZE - QUIET_SIZE) * d.level) * grow;
+        (
+            x,
+            d.size * d.lit * r * r,
+            d.size * (1.0 - d.lit) * (IDLE_DROP * scale).powi(2),
+        )
     }
 
     /// The drops' light added into `frame` inside `window` (pixels), the field's middle at
     /// (`cx`, `cy`) and its half width `half` (pixels): each drop's field its radius squared
-    /// over the distance's (so that drops that meet pool), lit past a level with a halo, an
-    /// idle voice's fainter.
+    /// over the distance's (so that drops that meet pool), out to [`REACH`] radii, lit past a
+    /// level with a halo, an idle voice's fainter. (Each drop adds its field only near it, and
+    /// only where there is any is it lit: a few drops in a wide display cost a few drops'
+    /// worth, not the display's.)
     fn draw(
-        &self,
+        &mut self,
         frame: &mut Pixmap,
         window: [i32; 4],
         (cx, cy): (f64, f64),
         half: f64,
         scale: f64,
+        detune: f64,
     ) {
-        let [x0, y0, x1, y1] = window;
         let (fw, fh) = (frame.width() as i32, frame.height() as i32);
-        let ds: Vec<(f64, f64, f64)> = self
-            .drops
-            .values()
-            .map(|d| {
-                (
-                    cx + d.x * half,
-                    d.size * d.lit * (DROP * scale).powi(2),
-                    d.size * (1.0 - d.lit) * (IDLE_DROP * scale).powi(2),
-                )
-            })
-            .collect();
-        if ds.is_empty() {
+        let [x0, y0, x1, y1] = [
+            window[0].max(0),
+            window[1].max(0),
+            window[2].min(fw),
+            window[3].min(fh),
+        ];
+        if x1 <= x0 || y1 <= y0 {
             return;
         }
-        let data = frame.data_mut();
-        for y in y0.max(0)..y1.min(fh) {
-            let fy = f64::from(y) + 0.5;
-            for x in x0.max(0)..x1.min(fw) {
-                let fx = f64::from(x) + 0.5;
-                let (mut f, mut g) = (0.0, 0.0);
-                for &(dx0, a, b) in &ds {
-                    let (dx, dy) = (fx - dx0, fy - cy);
+        let ds: Vec<(f64, f64, f64)> = self
+            .drops
+            .iter()
+            .map(|(&id, d)| self.shape(id, d, cx, half, scale, detune))
+            .collect();
+        if ds.iter().all(|&(_, a, b)| a <= 0.0 && b <= 0.0) {
+            return;
+        }
+        let w = (x1 - x0) as usize;
+        self.sums.clear();
+        self.sums.resize(w * (y1 - y0) as usize, (0.0, 0.0));
+        for &(dx0, a, b) in &ds {
+            let reach = REACH * a.max(b).sqrt() + 2.0;
+            let (lx, rx) = (
+                ((dx0 - reach).floor() as i32).max(x0),
+                ((dx0 + reach).ceil() as i32).min(x1),
+            );
+            let (ty, by) = (
+                ((cy - reach).floor() as i32).max(y0),
+                ((cy + reach).ceil() as i32).min(y1),
+            );
+            for y in ty..by {
+                let dy = f64::from(y) + 0.5 - cy;
+                let row = (y - y0) as usize * w;
+                for x in lx..rx {
+                    let dx = f64::from(x) + 0.5 - dx0;
                     let q = dx * dx + dy * dy + 1.0;
-                    f += a / q;
-                    g += b / q;
+                    let s = &mut self.sums[row + (x - x0) as usize];
+                    s.0 += (a / q) as f32;
+                    s.1 += (b / q) as f32;
                 }
+            }
+        }
+        let data = frame.data_mut();
+        for y in y0..y1 {
+            let row = (y - y0) as usize * w;
+            for x in x0..x1 {
+                let (f, g) = self.sums[row + (x - x0) as usize];
+                if f == 0.0 && g == 0.0 {
+                    continue;
+                }
+                let (f, g) = (f64::from(f), f64::from(g));
                 let core = ((f - 0.8) / 0.35).clamp(0.0, 1.0);
                 let core = core * core * (3.0 - 2.0 * core);
                 let hot = ((f - 1.6) / 3.0).clamp(0.0, 1.0) * 0.35;
@@ -1287,6 +1405,39 @@ mod tests {
     use resvg::tiny_skia::{Color, Paint, Rect};
 
     use super::*;
+
+    /// What drawing the drops costs at the window's opening size and twice it (a Retina
+    /// screen), ten voices sounding and moving: printed (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "prints timings"]
+    fn drops_timings() {
+        for scale in [1720.0 / crate::art::W, 3440.0 / crate::art::W] {
+            let (w, h) = crate::render::size_at(scale);
+            let under = Pixmap::new(w, h).expect("a frame");
+            let mut r = StripRenderer::new(scale);
+            let mut now = Instant::now();
+            let mut sc = scene(0);
+            r.render_at(&sc, &under, None, now);
+            let mut times = Vec::new();
+            for k in 0..200u32 {
+                sc.field = Field::Double(
+                    (0..10)
+                        .map(|i| (0.1 + 0.08 * f64::from(i) + 0.02 * f64::from(k % 7), true))
+                        .collect(),
+                );
+                sc.levels = (0..10)
+                    .map(|i| 0.5 + 0.4 * (f64::from(k + i) * 0.4).sin())
+                    .collect();
+                sc.detune = 12.0;
+                now += Duration::from_millis(33);
+                let t = Instant::now();
+                r.render_at(&sc, &under, None, now);
+                times.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            let mean = times.iter().sum::<f64>() / times.len() as f64;
+            println!("scale {scale:.3}: the drops moving, {mean:.2} ms a frame on average");
+        }
+    }
 
     /// A scene with `sounding` (a bit a voice) of eight voices sounding.
     fn scene(sounding: u32) -> StripScene {

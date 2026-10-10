@@ -1,0 +1,8 @@
+Use your image generation tool to edit the attached image (tesla-lamp-off.png, in the current directory) into one new image, then save it in the current directory as tesla-lamp-on.png (copy the generated file there). Do nothing else.
+
+The edit: the same picture, identical in every other way (the same framing, size and position, the same chrome bezel and knurling, the same lens, the same miniature Tesla coil inside, the same plain mid-grey #808080 background), except that the coil is now running, lighting the lamp from inside:
+- the blue glass glows bright electric blue from inside, brightest around the coil's toroid, deeper blue towards its rim; the small highlight at the dome's upper left stays;
+- a soft pale blue-white corona glows round the toroid on top of the coil; the coil's copper winding catches blue light;
+- the chrome bezel catches a little cool blue light on its inner bevel;
+- NO lightning, sparks, arcs or streaks (those are drawn separately); no glow spills onto the grey background; no cast shadow; no text, letters, numbers, symbols or logos anywhere.
+Keep the image the same size as the attached one.

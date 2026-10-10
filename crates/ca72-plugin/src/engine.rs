@@ -75,6 +75,9 @@ pub fn lock_trim(p: &Panel) -> f64 {
 /// The voices POLY may play: the fewest, by default, the most (all of them built).
 pub const POLY_VOICES: (usize, usize, usize) = (2, 4, 10);
 
+/// The voices whose levels the editor is told: as many as POLY can have.
+pub const LEVELS: usize = POLY_VOICES.2;
+
 /// DRIVE's top, dB (decisions.md R-STEREO, the CA-74's R29: past it the filter is saturated
 /// and the note stops being one).
 pub const DRIVE_TOP: f64 = 24.0;
@@ -735,6 +738,9 @@ fn fill(place: &Mutex<Spare>, rate: f64, wanted: impl Fn(&Spare) -> bool) {
 #[derive(Debug)]
 pub struct Engine {
     slots: Vec<Slot>,
+    /// Each voice's output's peak over the last block (the editor's drops and lamps follow
+    /// them; each slot's peak is kept anyway, for knowing when its voice falls silent).
+    levels: [f32; LEVELS],
     over: Option<Oversampled>,
     rate: f64,
     seed: u64,
@@ -810,6 +816,7 @@ impl Engine {
         let controls = Controls::default();
         Engine {
             slots: Vec::new(),
+            levels: [0.0; LEVELS],
             over: None,
             rate: 0.0,
             seed: 0,
@@ -1659,6 +1666,13 @@ impl Engine {
             if s.active && !s.gate && s.peak < SILENT && k >= held {
                 s.active = false;
             }
+            if let Some(l) = self.levels.get_mut(k) {
+                *l = if s.peak.is_finite() {
+                    s.peak as f32
+                } else {
+                    0.0
+                };
+            }
             s.peak = 0.0;
         }
         let fall = (-(len as f32) / (self.rate as f32 * LAMP_FALL)).exp();
@@ -1669,6 +1683,12 @@ impl Engine {
 
     pub fn lamp(&self) -> f32 {
         self.lamp
+    }
+
+    /// Each voice's output's peak over the last block, by its slot (POLY's and UNISON's voices;
+    /// the one instrument's is the first).
+    pub fn levels(&self) -> &[f32; LEVELS] {
+        &self.levels
     }
 
     /// Which voices sound now, a bit a voice (the editor's display of where they sound, A6):
@@ -2300,6 +2320,43 @@ pub fn output_gain(volume: f64, on: bool) -> f64 {
 mod tests {
     use super::*;
     use crate::pool::Budget;
+
+    /// A voice's output's peak as the engine reports it, playing the panel as it opens and
+    /// louder: printed, for the editor's level scale (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "prints levels"]
+    fn voice_levels() {
+        for (name, c) in [
+            ("as it opens", Controls::default()),
+            (
+                "POLY, four voices",
+                Controls {
+                    poly: true,
+                    voices: 4,
+                    ..Controls::default()
+                },
+            ),
+        ] {
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 1);
+            for key in [45, 52, 57, 64] {
+                e.event(Event::Note { key, on: true });
+            }
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut most = [0.0f32; LEVELS];
+            let mut out = 0.0f32;
+            for _ in 0..200 {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                for (m, v) in most.iter_mut().zip(e.levels()) {
+                    *m = m.max(*v);
+                }
+                out = l.iter().chain(r.iter()).fold(out, |m, v| m.max(v.abs()));
+            }
+            println!("{name}: voices' peaks {most:?}, the output's {out}");
+        }
+    }
 
     fn four_voices(workers: usize) -> Engine {
         let mut e = Engine::new();

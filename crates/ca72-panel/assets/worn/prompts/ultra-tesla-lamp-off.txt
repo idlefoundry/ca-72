@@ -1,0 +1,8 @@
+Use your image generation tool to edit the attached image (lamp-off-b.png, in the current directory) into one new image, then save it in the current directory as tesla-lamp-off.png (copy the generated file there). Do nothing else.
+
+The edit: the same panel pilot lamp, identical in framing, size and position, with the same knurled bright chrome bezel ring, the same polished inner bevel and the same plain mid-grey #808080 background, except:
+- the domed lens is now deep cool blue glass (a dark cobalt / electric blue) instead of amber, still clear enough to see into, with the same small soft highlight on the dome at its upper left;
+- inside, in place of the small bulb, standing in the middle behind the glass, a miniature Tesla coil seen from the front: a small polished aluminium toroid (a smooth doughnut) on top, under it a short cylinder wound with many turns of fine shiny copper wire, on a tiny black base; about half the lens's height, centred; switched off: no sparks, no glow;
+- the coil seen through the blue glass, so it is tinted blue and a little dim.
+No glow, no cast shadow; no text, letters, numbers, symbols or logos anywhere.
+Keep the image the same size as the attached one.

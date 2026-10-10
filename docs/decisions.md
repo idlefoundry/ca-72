@@ -3544,3 +3544,77 @@ circuit's model with no compromises always, live or rendering; the note says wha
 **Open (asked, not answered):** the lamp's colour (amber, as built; green and red were offered);
 whether the note shows once a computer.
 - **The number** of this record is a placeholder until the merge.
+
+### QUALITY's opening: a hamster at LO, the lamp at HI, a Tesla lamp at ULTRA (2026-10-10, later)
+
+**The owner, 2026-10-10**, in the mock-up: "How hard would it be to put an animation of a
+hamster runnign in a wheel for "LO" mode?"; "Let's have the same animation. Shutter opens,
+hamster wheel appears and is brought forward as the hamster starts running."; "i would make him
+more like an animated creature than a real one. And make his wheel fitting the mechanical
+1970's aesthetic"; "don't make the hamster too cute and disney-like. I liked your first hamster,
+he was just too real."; of three, "The "rise" hamster is the best". The wheel: "You gotta make
+that hamster wheel look more like a rickety brass hamster wheel. Old school looking."; "don't
+make the cage warped like that though. Otherwise it's better. Also, these hamster wheels
+normally have a back to them don't they? More brass spokes."; "is there an easy way to make the
+back of the cage feel more inset? Like making it a little darker or something?"; "Show me an
+example with the number of spokes reduced by 15%", then "the hamster wheel has the right amount
+of spokes now". The lamps: "the current ULTRA mode lamp should be what we see in High mode. Make
+another ULTRA mode, which should be a Tesla coil, complete with animated lightning bolts coming
+out of it."; "It should look a lot like the amber lamp, but blue, with lightning, and a tesla
+coil in the center"; "HIGH is now the only mode without any animation. Can you just add a warm
+glow to it? Perhaps something that can match the intensity of the synth itself?"; "make sure the
+Tesla coil has the same glow intensity spread that high has now."; and, after HI, HIGH and
+ULTRA had been printed on the lenses, "Get rid of "ULTRA" and "HI" writing on the glass."
+("HIGH I mean"). Then: "fantastic work. build this out. I want to test it on my Mac.", and
+"make sure nothing that we did with the UI here today decreases performance in any way. And one
+other thing can we make the dots in the stereo spread a little more animated according to the
+volume of their respective sounds in the synth? and perhaps someway to animate the detune effect
+being placed on them as well? Show me a before/after video once you are done."
+
+**As built** (the mock-up's study, `ultra.js`, `hamster.js`, `tesla.js`, is the spec):
+- **The opening** (`ca72_panel::ultra::Opening`) holds one thing at a time: LO's hamster in his
+  wheel, HI's amber lamp, ULTRA's Tesla lamp; changing QUALITY, what is up goes back down (1.8 s)
+  before the next comes up (2.5 s) through the same shutter. The lenses are plain. Its menu (a
+  right click) is "QUALITY'S OPENING · SHUTTER" or "· ALWAYS OPEN"; always open, each setting's
+  thing stands in the ring and fades in over the first 0.35 of its coming (1.1 s; out in
+  0.5 s), a lamp lighting as before.
+- **The Tesla lamp:** the amber lamp's twin in cobalt glass with a miniature Tesla coil where the
+  bulb was (generated as an edit of the amber lamp's picture, so the two match; its lit picture
+  an edit of that), cut into a lens and a bezel as the amber one. Its lightning is drawn as it
+  plays (the mock-up's, ported): six streaks at most, each living 0.1 to 0.25 s from the
+  toroid's rim to the inside of the glass (0.74 of the radius), its jagged shape struck again
+  every 45 ms, a wide faint blue glow, a paler stroke, a white core, a spot where it meets the
+  glass; seeded, so a frame drawn twice is the same.
+- **The lamps follow the synth:** the plug-in's output's level (its peak over each block, -42 dB
+  dark to 0 dB full) through a filament (0.05 s up, 0.3 s down): at rest 0.28 of their light, at
+  the loudest all of it, the filament flaring (0.65 at most) and a glow on the panel from the
+  ring out (0.16 at most; at first it washed over the bezels, and was kept off them). The Tesla
+  coil's streaks come only as it sounds, more, longer and brighter the louder it is.
+- **The hamster** (the drawn, naturalistic one: an eight-frame run and a sleeping picture,
+  generated) in the old brass wire wheel (generated round and true, its back of 31 spokes made
+  26 by moving its own spokes, with their joints and heads, to even places; its back, inside
+  the inner rim, darkened to 0.55 of its light and 0.38 just inside the rim, set back). The
+  wheel comes forward from 0.72 of its size as he picks up his run; he runs at the wheel's
+  foot, a little up the rising side (12 degrees at a full run), the wheel turning 137.5 degrees
+  a second under him.
+- **Agent decision, for "nothing ... decreases performance":** at rest nothing moves. The
+  hamster runs while the synth sounds (its output over -40 dB), slows and stands when it falls
+  quiet, and dozes off a second later (0.7 s; the mock-up offered this, its default ran
+  always); the coil sparks only while it sounds (the mock-up let an odd spark fly at rest). A
+  window at rest costs what it did.
+- **The drops** (the strip's voices' display): each swells and brightens with its voice's level
+  (0.72 to 1.22 of a drop's size; rising quickly, falling over a fifth of a second); with
+  DOUBLE a note's two drops beat against each other as two notes DETUNE apart do at 220 Hz (20
+  cents, 2.5 a second), one swelling as the other ebbs and the two swaying in turn (24 % and 4
+  units at 10 cents or more), a pair coming out of its voice as DETUNE comes up from OFF.
+- **The levels:** each voice's output's peak over a block was measured already (for knowing when
+  a voice falls silent: `Engine::levels` keeps it); the output's peak is measured (two compares
+  a sample) only while an editor is open, else a flag read a block. The audio thread keeps the
+  highest of each (an atomic max) until the editor takes them.
+- **Cost:** what follows the synth (the opening, the drops) is drawn at most 30 times a second;
+  something coming up or going down, every frame as before. The opening is two layers, the
+  well, its floor and the ring drawn again only as something comes or goes, and what moves and
+  its light; the lightning is drawn without blend modes or a clip (a fifth cheaper). The drops
+  are drawn only near each (six radii): 2.3 ms a frame for twenty moving at twice the opening
+  size, where they took 5.2 ms (`drops_timings`).
+

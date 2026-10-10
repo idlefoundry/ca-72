@@ -37,6 +37,16 @@ static ULTRA_LENS_ON: &[u8] = include_bytes!("../assets/worn/ultra-lens-on.png")
 static ULTRA_BEZEL_OFF: &[u8] = include_bytes!("../assets/worn/ultra-bezel-off.png");
 static ULTRA_BEZEL_ON: &[u8] = include_bytes!("../assets/worn/ultra-bezel-on.png");
 static ULTRA_FLOOR: &[u8] = include_bytes!("../assets/worn/ultra-floor.png");
+static TESLA_LENS_OFF: &[u8] = include_bytes!("../assets/worn/tesla-lens-off.png");
+static TESLA_LENS_ON: &[u8] = include_bytes!("../assets/worn/tesla-lens-on.png");
+static TESLA_BEZEL_OFF: &[u8] = include_bytes!("../assets/worn/tesla-bezel-off.png");
+static TESLA_BEZEL_ON: &[u8] = include_bytes!("../assets/worn/tesla-bezel-on.png");
+static HAMSTER_WHEEL: &[u8] = include_bytes!("../assets/worn/hamster-wheel.png");
+static HAMSTER_RUN: &[u8] = include_bytes!("../assets/worn/hamster-run.png");
+static HAMSTER_ASLEEP: &[u8] = include_bytes!("../assets/worn/hamster-asleep.png");
+
+/// The hamster's run: its frames, side by side in its picture.
+pub const STRIDE: usize = 8;
 static PLATE: &[u8] = include_bytes!("../assets/worn/plate.png");
 
 /// The face's picture is kept grey; its colour, a black a touch warm, is this over it.
@@ -71,14 +81,26 @@ pub enum Part {
     ToggleUp,
     ToggleMid,
     ToggleDown,
-    /// ULTRA's lamp: its domed amber lens (the bulb behind it), dark and lit, which does not
-    /// turn; its knurled chrome bezel, the lens cut out of it, dark and lit, which turns; and
-    /// the floor of the well it waits in (the machine's inside, dim).
+    /// HI's lamp (it was ULTRA's): its domed amber lens (the bulb behind it), dark and lit,
+    /// which does not turn; its knurled chrome bezel, the lens cut out of it, dark and lit,
+    /// which turns; and the floor of the well the opening's things wait in (the machine's
+    /// inside, dim).
     UltraLensOff,
     UltraLensOn,
     UltraBezelOff,
     UltraBezelOn,
     UltraFloor,
+    /// ULTRA's Tesla lamp: the same lamp in cobalt glass, a miniature Tesla coil in it where
+    /// the bulb was, dark and lit, its lens and bezel cut as the amber one's.
+    TeslaLensOff,
+    TeslaLensOn,
+    TeslaBezelOff,
+    TeslaBezelOn,
+    /// LO's hamster: his wheel (old brass wire, its back's spokes darker, set back), a frame of
+    /// his run (0 to [`STRIDE`] less one), and him asleep, curled up.
+    HamsterWheel,
+    Hamster(u8),
+    HamsterAsleep,
     /// The name plate, blank (its lettering is printed on it: `art::plate_worn`).
     Plate,
 }
@@ -114,6 +136,10 @@ pub struct Pictures {
     caps: [Pixmap; 3],
     toggle: [Pixmap; 3],
     ultra: [Pixmap; 5],
+    tesla: [Pixmap; 4],
+    hamster: [Pixmap; STRIDE],
+    wheel: Pixmap,
+    asleep: Pixmap,
     plate: Pixmap,
     scaled: Vec<((Part, u32, u32), Pixmap)>,
 }
@@ -127,8 +153,9 @@ impl std::fmt::Debug for Pictures {
 }
 
 /// The most parts kept at their sizes (a scale's: the knobs, three pointer and jewel sizes,
-/// six rockers', the jacks', the screws', QUALITY's toggle and ULTRA's lamp).
-const KEPT: usize = 48;
+/// six rockers', the jacks', the screws', QUALITY's toggle, and what QUALITY's opening holds:
+/// two lamps, the hamster and his wheel).
+const KEPT: usize = 72;
 
 impl Pictures {
     /// The pictures decoded (once, as the worn skin is first shown); the face's grey coloured,
@@ -189,6 +216,15 @@ impl Pictures {
                 png(ULTRA_BEZEL_ON),
                 png(ULTRA_FLOOR),
             ],
+            tesla: [
+                png(TESLA_LENS_OFF),
+                png(TESLA_LENS_ON),
+                png(TESLA_BEZEL_OFF),
+                png(TESLA_BEZEL_ON),
+            ],
+            hamster: frames(&png(HAMSTER_RUN)),
+            wheel: png(HAMSTER_WHEEL),
+            asleep: png(HAMSTER_ASLEEP),
             plate: png(PLATE),
             scaled: Vec::new(),
         }
@@ -218,6 +254,13 @@ impl Pictures {
             Part::UltraBezelOff => &self.ultra[2],
             Part::UltraBezelOn => &self.ultra[3],
             Part::UltraFloor => &self.ultra[4],
+            Part::TeslaLensOff => &self.tesla[0],
+            Part::TeslaLensOn => &self.tesla[1],
+            Part::TeslaBezelOff => &self.tesla[2],
+            Part::TeslaBezelOn => &self.tesla[3],
+            Part::HamsterWheel => &self.wheel,
+            Part::Hamster(k) => &self.hamster[usize::from(k) % STRIDE],
+            Part::HamsterAsleep => &self.asleep,
             Part::Plate => &self.plate,
         }
     }
@@ -240,6 +283,23 @@ impl Pictures {
     pub fn forget_scale(&mut self) {
         self.scaled.clear();
     }
+}
+
+/// A strip of [`STRIDE`] frames side by side, each as wide as the others, cut apart.
+fn frames(strip: &Pixmap) -> [Pixmap; STRIDE] {
+    let w = strip.width() / STRIDE as u32;
+    std::array::from_fn(|k| {
+        let mut f = Pixmap::new(w, strip.height()).expect("a frame of at least a pixel");
+        f.draw_pixmap(
+            -((k as u32 * w) as i32),
+            0,
+            strip.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+        f
+    })
 }
 
 /// `p` with each pixel's colour as `f` makes it from its own (0 to 255; clamped), its alpha
@@ -321,7 +381,7 @@ pub fn resample(src: &Pixmap, w: u32, h: u32) -> Pixmap {
 mod tests {
     use super::*;
 
-    const PARTS: [Part; 18] = [
+    const PARTS: [Part; 24] = [
         Part::Knob,
         Part::KnobBig,
         Part::Pointer,
@@ -339,6 +399,12 @@ mod tests {
         Part::UltraLensOff,
         Part::UltraLensOn,
         Part::UltraFloor,
+        Part::TeslaLensOff,
+        Part::TeslaLensOn,
+        Part::HamsterWheel,
+        Part::Hamster(0),
+        Part::Hamster(5),
+        Part::HamsterAsleep,
         Part::Plate,
     ];
 
@@ -355,8 +421,13 @@ mod tests {
             let small = p.part(part, 40, 30);
             assert_eq!((small.width(), small.height()), (40, 30));
         }
-        // ULTRA's bezel is a ring: its middle, where the lens shows, clear.
-        for part in [Part::UltraBezelOff, Part::UltraBezelOn] {
+        // The lamps' bezels are rings: their middles, where the lenses show, clear.
+        for part in [
+            Part::UltraBezelOff,
+            Part::UltraBezelOn,
+            Part::TeslaBezelOff,
+            Part::TeslaBezelOn,
+        ] {
             let src = p.source(part);
             let (w, h) = (src.width(), src.height());
             assert_eq!(

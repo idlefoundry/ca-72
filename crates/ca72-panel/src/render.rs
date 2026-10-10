@@ -28,10 +28,8 @@ pub struct Scene {
     pub power: bool,
     /// The OVERLOAD lamp's level, 0 dark to 1 fully lit.
     pub overload: f64,
-    /// ULTRA's lamp (decisions.md R-ULTRA): how far it has gone, 0 shut (or dark) to 1 up and
-    /// lit, and whether the shutter is off (the light only).
-    pub ultra: f64,
-    pub ultra_still: bool,
+    /// QUALITY's opening (decisions.md R-ULTRA): what it shows and how far each has come.
+    pub opening: crate::ultra::Opening,
     /// A tip: its text, centred above (x, y) in the drawing.
     pub tip: Option<(String, f64, f64)>,
     /// MIDI Learn (decisions.md R34): the control being learned, by its index in [`CONTROLS`]
@@ -48,8 +46,7 @@ impl Default for Scene {
             midi: (0.5, 0.0),
             power: true,
             overload: 0.0,
-            ultra: 0.0,
-            ultra_still: false,
+            opening: crate::ultra::Opening::default(),
             tip: None,
             learning: None,
             note: None,
@@ -349,12 +346,14 @@ impl Renderer {
             out.push(art::power_worn(scene.power));
             out.push(art::lamp_worn(scene.power));
             out.push(art::overload_worn(scene.overload));
-            out.push(crate::ultra::ultra_worn(scene.ultra, scene.ultra_still));
+            out.extend(crate::ultra::ultra_worn(&scene.opening));
         } else {
             out.push(art::power(scene.power));
             out.push(art::lamp(scene.power));
             out.push(art::overload(scene.overload));
-            out.push(crate::ultra::ultra(scene.ultra, scene.ultra_still));
+            out.push(crate::ultra::ultra(&scene.opening));
+            // (The drawn skin's opening is one layer: an empty second keeps the count.)
+            out.push(Layer::default());
         }
         out.push(if worn {
             art::plate_worn()
@@ -566,8 +565,8 @@ impl Renderer {
     /// drawn again over `onto`, a frame the drawing's size at this scale: the editor's, over the
     /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
     pub fn draw_floating(&self, onto: &mut Pixmap) {
-        // (The controls', then POWER's, its lamp's, OVERLOAD's, ULTRA's and the name plate's:
-        // fixed.)
+        // (The controls', then POWER's, its lamp's, OVERLOAD's, QUALITY's opening's two and the
+        // name plate's: fixed.)
         let fixed = CONTROLS.len() + FIXED;
         for slot in self.slots.iter().skip(fixed) {
             if let Some((x, y, p)) = &slot.pixels {
@@ -589,9 +588,9 @@ impl Renderer {
     }
 }
 
-/// The layers drawn after the controls whatever the scene: POWER, its lamp, OVERLOAD, ULTRA's
-/// lamp and the name plate.
-const FIXED: usize = 5;
+/// The layers drawn after the controls whatever the scene: POWER, its lamp, OVERLOAD, QUALITY's
+/// opening (its back and its front) and the name plate.
+const FIXED: usize = 6;
 
 /// The panel's lamp, up and to the left, over the whole drawing at `s` pixels a unit: brighter
 /// near it (the face's sheen, catching the specks of its texture), falling off towards the far

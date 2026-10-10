@@ -31,8 +31,10 @@ use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact, ultra}
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
 
+use crate::engine::LEVELS;
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
+use crate::opening::{ANIMATE_S, Motion, level_of};
 use crate::params::{Ca72Params, QualityMode};
 use crate::presets::Browser;
 use crate::settings::Settings;
@@ -82,6 +84,12 @@ pub struct Meters {
     modulation: AtomicU32,
     /// The voices sounding, a bit a voice (`Engine::sounding_mask`).
     voices: AtomicU32,
+    /// Each voice's output's peak since the editor last took them (`Engine::levels`), and the
+    /// plug-in's output's, the highest kept: a peak is never negative, and such a float's bits
+    /// order as its value. Only while an editor watches them (`watchers`, how many).
+    levels: [AtomicU32; LEVELS],
+    output: AtomicU32,
+    watchers: AtomicU32,
 }
 
 impl Default for Meters {
@@ -91,6 +99,9 @@ impl Default for Meters {
             bend: AtomicU32::new(0.5f32.to_bits()),
             modulation: AtomicU32::new(0.0f32.to_bits()),
             voices: AtomicU32::new(0),
+            levels: std::array::from_fn(|_| AtomicU32::new(0)),
+            output: AtomicU32::new(0),
+            watchers: AtomicU32::new(0),
         }
     }
 }
@@ -104,6 +115,36 @@ impl Meters {
         self.modulation
             .store(modulation.to_bits(), Ordering::Relaxed);
         self.voices.store(voices, Ordering::Relaxed);
+    }
+
+    /// Whether an editor watches the levels (the audio thread measures the output's then).
+    pub fn watched(&self) -> bool {
+        self.watchers.load(Ordering::Relaxed) > 0
+    }
+
+    /// Each voice's output's peak over the block, and the output's (the audio thread's: a
+    /// compare each).
+    pub fn publish_levels(&self, levels: &[f32; LEVELS], output: f32) {
+        let held = |a: &AtomicU32, v: f32| {
+            let v = if v.is_finite() && v > 0.0 { v } else { 0.0 };
+            a.fetch_max(v.to_bits(), Ordering::Relaxed);
+        };
+        for (a, &v) in self.levels.iter().zip(levels) {
+            held(a, v);
+        }
+        held(&self.output, output);
+    }
+
+    /// The voices' peaks and the output's since they were last taken, taken.
+    fn take_levels(&self) -> ([f64; LEVELS], f64) {
+        let take = |a: &AtomicU32| {
+            let v = f64::from(f32::from_bits(a.swap(0, Ordering::Relaxed)));
+            if v.is_finite() { v } else { 0.0 }
+        };
+        (
+            std::array::from_fn(|k| take(&self.levels[k])),
+            take(&self.output),
+        )
     }
 
     fn load(a: &AtomicU32) -> f64 {
@@ -447,11 +488,15 @@ struct Editing {
     screen: fn(f64) -> Option<(f64, f64)>,
     /// How far the drawer was down (`Browser::reveal`) in the last frame composed.
     reveal_shown: f64,
-    /// ULTRA's lamp (decisions.md R-ULTRA): how far it has gone (0 shut or dark, 1 up and lit),
-    /// moved on each frame by the time since the last while QUALITY's setting is not where it
-    /// is (the editor opens with it there); when it was last moved on.
-    ultra: f64,
-    ultra_at: Option<Instant>,
+    /// QUALITY's opening (decisions.md R-ULTRA; `opening.rs`), moved on by the time since it
+    /// last was: at each frame while something comes up or goes down, else at most
+    /// [`ANIMATE_S`] apart (what follows the synth); the editor opens with QUALITY's setting
+    /// up. The voices' levels as last taken (0 to 1), for the strip's drops, and the output's
+    /// (the one instrument's drop's, and the lamps').
+    motion: Motion,
+    motion_at: Option<Instant>,
+    levels: [f64; LEVELS],
+    output: f64,
     /// What this computer keeps (`settings.rs`): ULTRA's shutter or always open, ULTRA's
     /// note read. The note shows once ULTRA's lamp is lit, until it is read.
     settings: Settings,
@@ -604,8 +649,10 @@ impl Editing {
             screen,
             touched: true,
             reveal_shown: 0.0,
-            ultra: 0.0,
-            ultra_at: None,
+            motion: Motion::default(),
+            motion_at: None,
+            levels: [0.0; LEVELS],
+            output: 0.0,
             // (The tests' editors keep nothing on the computer.)
             settings: if cfg!(test) {
                 Settings::default()
@@ -617,13 +664,13 @@ impl Editing {
         .opened()
     }
 
-    /// As it opens: ULTRA's lamp where QUALITY has it, not moving.
+    /// As it opens: what QUALITY's setting shows up in its opening, not moving (the hamster
+    /// asleep); it watches the levels, and the voices' peaks held while it was shut are let go.
     fn opened(mut self) -> Self {
-        self.ultra = if self.params.quality.value() == QualityMode::Ultra {
-            1.0
-        } else {
-            0.0
-        };
+        self.meters.watchers.fetch_add(1, Ordering::Relaxed);
+        let _ = self.meters.take_levels();
+        self.motion = Motion::at(self.params.quality.value(), 0.0);
+        self.scene.opening = self.motion.opening(!self.settings.shutter);
         self
     }
 
@@ -634,38 +681,41 @@ impl Editing {
         }
     }
 
-    /// ULTRA's lamp moved on towards where QUALITY has it (`on`: at ULTRA), by the time since
-    /// the last frame (at most 50 ms of it: a stalled frame does not jump it); its note shown
-    /// once it is lit, until it is read.
-    fn move_ultra(&mut self, now: Instant, on: bool) {
-        let target = if on { 1.0 } else { 0.0 };
-        if self.ultra == target {
-            self.ultra_at = None;
-        } else {
-            let dt = self.ultra_at.map_or(0.0, |t| {
-                now.saturating_duration_since(t).as_secs_f64().min(0.05)
-            });
-            let span = match (self.settings.shutter, on) {
-                (true, true) => ultra::OPEN_S,
-                (true, false) => ultra::CLOSE_S,
-                (false, true) => ultra::STILL_ON_S,
-                (false, false) => ultra::STILL_OFF_S,
-            };
-            self.ultra = if on {
-                (self.ultra + dt / span).min(1.0)
-            } else {
-                (self.ultra - dt / span).max(0.0)
-            };
-            self.ultra_at = Some(now);
+    /// QUALITY's opening moved on towards what its setting `q` shows, by the time since it
+    /// last was (at most 50 ms of it: a stalled frame does not jump it), and the voices' levels
+    /// taken: at every frame while something comes up or goes down, else at most
+    /// [`ANIMATE_S`] apart. ULTRA's note shown once its lamp is up, until it is read.
+    fn move_opening(&mut self, now: Instant, q: QualityMode) {
+        let since = self
+            .motion_at
+            .map(|t| now.saturating_duration_since(t).as_secs_f64());
+        let wanted = match q {
+            QualityMode::Lo => self.motion.hamster,
+            QualityMode::Hi => self.motion.lamp,
+            QualityMode::Ultra => self.motion.coil,
+        };
+        let due = self.motion.moving() || wanted < 1.0 || since.is_none_or(|s| s >= ANIMATE_S);
+        if !due {
+            return;
         }
-        if on && self.ultra == 1.0 && !self.settings.ultra_note_read {
+        let (peaks, output) = self.meters.take_levels();
+        self.levels = peaks.map(level_of);
+        self.output = level_of(output);
+        self.motion.step(
+            since.unwrap_or(0.0).min(0.05),
+            q,
+            self.settings.shutter,
+            self.output,
+        );
+        self.motion_at = Some(now);
+        let on = q == QualityMode::Ultra;
+        if on && self.motion.coil == 1.0 && !self.settings.ultra_note_read {
             self.ultra_note = true;
         }
         if !on {
             self.ultra_note = false;
         }
-        self.scene.ultra = (self.ultra * 400.0).round() / 400.0;
-        self.scene.ultra_still = !self.settings.shutter;
+        self.scene.opening = self.motion.opening(!self.settings.shutter);
     }
 
     /// ULTRA's note: what it is for (the owner: "only intended for offline renders, or small
@@ -1331,8 +1381,7 @@ impl Editing {
         }
         self.scene.power = !self.params.bypass.value();
         self.scene.overload = Meters::load(&self.meters.overload);
-        let on = self.params.quality.value() == QualityMode::Ultra;
-        self.move_ultra(Instant::now(), on);
+        self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
             Meters::load(&self.meters.bend),
             Meters::load(&self.meters.modulation),
@@ -1341,6 +1390,7 @@ impl Editing {
         self.strip_scene = strip_scene(
             &self.params,
             self.meters.voices.load(Ordering::Relaxed),
+            (&self.levels, self.output),
             std::mem::take(&mut self.strip_scene),
         );
     }
@@ -1554,9 +1604,15 @@ fn paste_rows(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i64, rows
     }
 }
 
-/// What the strip shows, from the parameters, the voices sounding (a bit a voice) and the
-/// scene before (its rail, hover and MIDI Learn's ring are set elsewhere).
-fn strip_scene(p: &Ca72Params, sounding: u32, was: StripScene) -> StripScene {
+/// What the strip shows, from the parameters, the voices sounding (a bit a voice), their levels
+/// (0 to 1, by voice) and the output's, and the scene before (its rail, hover and MIDI Learn's
+/// ring are set elsewhere).
+fn strip_scene(
+    p: &Ca72Params,
+    sounding: u32,
+    (levels, output): (&[f64], f64),
+    was: StripScene,
+) -> StripScene {
     use crate::character::Placement;
     let c = p.controls();
     let unison = c.unison;
@@ -1638,6 +1694,21 @@ fn strip_scene(p: &Ca72Params, sounding: u32, was: StripScene) -> StripScene {
         auto: c.auto_gain,
         readouts,
         field,
+        // Each voice's level by its place in the field (the one instrument's, the output's),
+        // in steps of a fortieth (a drop does not move for less).
+        levels: if mono {
+            vec![output]
+        } else {
+            levels.iter().take(voices).copied().collect()
+        }
+        .into_iter()
+        .map(|v| (v * 40.0).round() / 40.0)
+        .collect(),
+        detune: if doubled {
+            c.double * crate::engine::DOUBLE_CENTS
+        } else {
+            0.0
+        },
         ..was
     }
 }
@@ -1681,10 +1752,12 @@ impl Editing {
 impl Drop for Editing {
     // The editor closed mid-drag, or within a wheel's rest: no parameter is left touched. And
     // MIDI Learn ends: a controller the audio thread has already caught for it is assigned,
-    // else nothing is (decisions.md R34).
+    // else nothing is (decisions.md R34). It no longer watches the levels (the audio thread
+    // stops measuring them when no editor does).
     fn drop(&mut self) {
         self.learning.close(&self.params.midi_map);
         self.end_gestures();
+        self.meters.watchers.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -2443,6 +2516,168 @@ mod tests {
         (e, host, params)
     }
 
+    /// The window played for a look and a measure (decisions.md R-ULTRA): 24 seconds in real
+    /// time at sixty frames a second, a Retina window (3440 pixels across): four POLY voices
+    /// with DOUBLE playing chords at HI, then ULTRA, then LO, falling quiet, then HI again with
+    /// DETUNE swept from none to all of it. Each frame drawn and turned into the screen's
+    /// pixels as `present` does, timed; every other frame's QUALITY column and STEREO display
+    /// kept, written to `$CA72_RUN`, the folder, as `frames.rgba` (`size.txt`: its width and
+    /// height), with the times in `times.txt` (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "plays the window for a while"]
+    fn the_window_played() {
+        let Some(out) = std::env::var_os("CA72_RUN").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let host = Arc::new(Host::default());
+        let params = Arc::new(Ca72Params::default());
+        let context: Arc<dyn GuiContext> = host.clone();
+        let meters = Arc::new(Meters::default());
+        let mut e = Editing::new(
+            context,
+            Arc::clone(&params),
+            Arc::clone(&meters),
+            (1720, 3440, 2.0),
+            Library::at(dir.path()),
+            |_| None,
+        );
+        // (Set as a host's automation sets them: nih-plug's context for tests.)
+        let hostless = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        let set = |p: ParamPtr, v: f32| {
+            hostless.automate(p, v);
+        };
+        set(params.poly.as_ptr(), 1.0);
+        set(params.voices.as_ptr(), 0.25);
+        set(params.spread.as_ptr(), 0.8);
+        set(params.double.as_ptr(), 0.6);
+        set(params.quality.as_ptr(), 0.5);
+        let s = 3440.0 / art::W;
+        // The two parts kept: QUALITY's column, and STEREO's knobs over its display.
+        let column = (
+            (art::COL + 2925.0) * s,
+            (art::TOP - 20.0) * s,
+            183.0 * s,
+            400.0 * s,
+        );
+        let (dx, dy, dw, dh) = strip::DISPLAY;
+        let stereo = (
+            (dx - 10.0) * s,
+            (strip::ROWS[1] - 75.0) * s,
+            (dw + 20.0) * s,
+            (dy + dh + 10.0 - strip::ROWS[1] + 75.0) * s,
+        );
+        let px = |r: (f64, f64, f64, f64)| (r.0 as usize, r.1 as usize, r.2 as usize, r.3 as usize);
+        let (column, stereo) = (px(column), px(stereo));
+        let (fw, fh) = (column.2 + 12 + stereo.2, column.3.max(stereo.3));
+        let mut frames: Vec<u8> = Vec::new();
+        let mut screen: Vec<u32> = Vec::new();
+        // A voice's level, `t` seconds into a chord it plays: a quick attack, a decay to its
+        // sustain, held 1.6 beats, released.
+        let beat = 60.0 / 112.0;
+        let env = |t: f64| {
+            let held = 1.6 * beat;
+            let a = |t: f64| (t / 0.01).min(1.0) * (0.6 + 0.4 * (-t / 0.3).exp());
+            if t < 0.0 {
+                0.0
+            } else if t < held {
+                a(t)
+            } else {
+                a(held) * (-(t - held) / 0.25).exp()
+            }
+        };
+        let t0 = Instant::now();
+        let ticks = 24 * 60;
+        let mut times = Vec::new();
+        let mut presented = 0;
+        for k in 0..ticks {
+            let at = t0 + Duration::from_micros(k * 16_667);
+            if let Some(wait) = at.checked_duration_since(Instant::now()) {
+                std::thread::sleep(wait);
+            }
+            let t = k as f64 / 60.0;
+            let quality = if t < 6.0 {
+                0.5
+            } else if t < 12.0 {
+                1.0
+            } else if t < 18.0 {
+                0.0
+            } else {
+                0.5
+            };
+            set(params.quality.as_ptr(), quality);
+            if t >= 18.0 {
+                set(
+                    params.double.as_ptr(),
+                    ((t - 18.5) / 5.0).clamp(0.0, 1.0) as f32,
+                );
+            }
+            // Chords every two beats (quiet from 15 to 18 seconds), each voice its own
+            // velocity.
+            let playing = !(15.0..18.0).contains(&t);
+            let chord = (t / (2.0 * beat)).floor();
+            let since = t - chord * 2.0 * beat;
+            let mut levels = [0.0f32; LEVELS];
+            let mut mask = 0u32;
+            for (v, level) in levels.iter_mut().enumerate().take(4) {
+                let vel = 0.55 + 0.45 * (((chord as usize + v) * 7) % 5) as f64 / 4.0;
+                let l = if playing {
+                    0.35 * vel * env(since - 0.02 * v as f64)
+                } else {
+                    0.0
+                };
+                *level = l as f32;
+                if l > 1e-3 {
+                    mask |= 1 << v;
+                }
+            }
+            let output = (levels.iter().map(|&l| f64::from(l)).sum::<f64>() * 0.7).min(1.0);
+            meters.publish(0.0, (0.5, 0.0), mask);
+            meters.publish_levels(&levels, output as f32);
+            let started = Instant::now();
+            let changed = e.draw();
+            if changed {
+                let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
+                screen.resize((f.width() * f.height()) as usize, 0);
+                for (o, p) in screen.iter_mut().zip(f.data().chunks_exact(4)) {
+                    *o = window::shown(p);
+                }
+                presented += 1;
+            }
+            times.push(started.elapsed().as_secs_f64() * 1000.0);
+            if k % 2 == 0 {
+                let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
+                let mut img = vec![0u8; fw * fh * 4];
+                for (r, x0) in [(column, 0usize), (stereo, column.2 + 12)] {
+                    for y in 0..r.3 {
+                        let from = ((r.1 + y) * f.width() as usize + r.0) * 4;
+                        let to = (y * fw + x0) * 4;
+                        img[to..to + r.2 * 4].copy_from_slice(&f.data()[from..from + r.2 * 4]);
+                    }
+                }
+                frames.extend_from_slice(&img);
+            }
+        }
+        std::fs::write(out.join("frames.rgba"), &frames).unwrap();
+        std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
+        let total: f64 = times.iter().sum();
+        let mean = total / times.len() as f64;
+        let mut sorted = times.clone();
+        sorted.sort_by(f64::total_cmp);
+        let p95 = sorted[sorted.len() * 95 / 100];
+        let report = format!(
+            "{ticks} frames in 24 s: {presented} presented; the UI thread's work {total:.0} ms ({:.1} % of one core), {mean:.2} ms a frame on average, {p95:.2} at the 95th percentile\n",
+            total / 24_000.0 * 100.0
+        );
+        print!("{report}");
+        std::fs::write(out.join("times.txt"), report).unwrap();
+    }
+
     /// QUALITY's toggle (decisions.md R-POTATO, R-ULTRA) goes where it is clicked, a gesture of
     /// its own as a rocker's: above its nut ULTRA, below it LO, on it (HI already) nothing.
     #[test]
@@ -2467,7 +2702,7 @@ mod tests {
         assert_eq!(host.take(), vec![]);
     }
 
-    /// A right click on ULTRA's lamp (decisions.md R-ULTRA) opens its menu: its shutter or
+    /// A right click on QUALITY's opening (decisions.md R-ULTRA) opens its menu: its shutter or
     /// always open, the one it is in in its title and not to be chosen; choosing the other
     /// switches it, and the menu says so the next time.
     #[test]
@@ -2477,7 +2712,7 @@ mod tests {
         right_click(&mut e, lamp);
         assert_eq!(
             e.learning.menu().map(|m| m.title.as_str()),
-            Some("ULTRA'S LAMP · SHUTTER")
+            Some("QUALITY'S OPENING · SHUTTER")
         );
         assert_eq!(
             menu_items(&e),
@@ -2491,7 +2726,7 @@ mod tests {
         right_click(&mut e, lamp);
         assert_eq!(
             e.learning.menu().map(|m| m.title.as_str()),
-            Some("ULTRA'S LAMP · ALWAYS OPEN")
+            Some("QUALITY'S OPENING · ALWAYS OPEN")
         );
         menu_item(&mut e, "SHUTTER");
         assert!(e.settings.shutter);
@@ -2504,46 +2739,97 @@ mod tests {
         );
     }
 
-    /// ULTRA's lamp (decisions.md R-ULTRA) follows QUALITY by the time between frames, over
-    /// ULTRA's opening and closing times (a stalled frame does not jump it); lit, its note shows
-    /// until a press reads it, and not again; the light only, its own times.
+    /// QUALITY's opening (decisions.md R-ULTRA) follows QUALITY by the time between frames
+    /// (a stalled frame does not jump it): from HI, its lamp goes down over the closing time,
+    /// then ULTRA's Tesla lamp comes up over the opening time; up, ULTRA's note shows until a
+    /// press reads it, and not again; with the shutter off, its own times.
     #[test]
-    fn ultra_s_lamp_follows_quality_and_its_note_is_read_once() {
+    fn quality_s_opening_follows_quality_and_ultra_s_note_is_read_once() {
         let (mut e, _, _) = editing();
+        assert_eq!(
+            (e.motion.lamp, e.motion.coil),
+            (1.0, 0.0),
+            "it opens at HI, up"
+        );
         let t0 = Instant::now();
-        let frames = |e: &mut Editing, from: Instant, n: u32, on: bool| {
+        let frames = |e: &mut Editing, from: Instant, n: u32, q: QualityMode| {
             for k in 0..=n {
-                e.move_ultra(from + Duration::from_millis(u64::from(k) * 40), on);
+                e.move_opening(from + Duration::from_millis(u64::from(k) * 40), q);
             }
         };
-        e.move_ultra(t0, false);
-        assert_eq!(e.ultra, 0.0);
-        frames(&mut e, t0, 30, true);
-        assert!((e.ultra - 1.2 / ultra::OPEN_S).abs() < 1e-9, "{}", e.ultra);
-        assert!(!e.ultra_note && !e.scene.ultra_still);
+        let ultra = QualityMode::Ultra;
+        e.move_opening(t0, ultra);
+        frames(&mut e, t0, 30, ultra);
+        assert!(
+            (e.motion.lamp - (1.0 - 1.2 / ultra::CLOSE_S)).abs() < 1e-9,
+            "{}",
+            e.motion.lamp
+        );
+        assert_eq!(e.motion.coil, 0.0);
         // (A stall of a second moves it on 50 ms.)
-        e.move_ultra(t0 + Duration::from_millis(2200), true);
-        assert!((e.ultra - 1.25 / ultra::OPEN_S).abs() < 1e-9, "{}", e.ultra);
-        frames(&mut e, t0 + Duration::from_millis(2200), 40, true);
-        assert_eq!(e.ultra, 1.0);
+        e.move_opening(t0 + Duration::from_millis(2200), ultra);
+        assert!(
+            (e.motion.lamp - (1.0 - 1.25 / ultra::CLOSE_S)).abs() < 1e-9,
+            "{}",
+            e.motion.lamp
+        );
+        frames(&mut e, t0 + Duration::from_millis(2200), 100, ultra);
+        assert_eq!((e.motion.lamp, e.motion.coil), (0.0, 1.0));
+        assert_eq!(e.scene.opening.coil, 1.0);
         assert!(e.ultra_note);
         assert_eq!(e.ultra_note().lines[0].0, "ULTRA · NO COMPROMISES");
         press(&mut e);
         assert!(!e.ultra_note && e.settings.ultra_note_read);
-        e.move_ultra(t0 + Duration::from_secs(5), true);
+        e.move_opening(t0 + Duration::from_secs(8), ultra);
         assert!(!e.ultra_note);
-        // Back to HI, closing; the light only, going out faster.
-        let t1 = t0 + Duration::from_secs(10);
-        frames(&mut e, t1, 10, false);
-        assert!(
-            (e.ultra - (1.0 - 0.4 / ultra::CLOSE_S)).abs() < 1e-9,
-            "{}",
-            e.ultra
-        );
+        // To LO with the shutter off: the coil goes out and fades, the hamster fades in.
         e.settings.shutter = false;
-        frames(&mut e, t1 + Duration::from_millis(400), 30, false);
-        assert_eq!(e.ultra, 0.0);
-        assert!(e.scene.ultra_still);
+        let t1 = t0 + Duration::from_secs(10);
+        frames(&mut e, t1, 10, QualityMode::Lo);
+        assert!(e.motion.coil < 0.25, "{}", e.motion.coil);
+        frames(&mut e, t1 + Duration::from_millis(400), 60, QualityMode::Lo);
+        assert_eq!((e.motion.coil, e.motion.hamster), (0.0, 1.0));
+        assert!(e.scene.opening.still);
+    }
+
+    /// What follows the synth is drawn at most thirty times a second: frames a sixtieth of a
+    /// second apart move QUALITY's opening on every other one, the levels taken then.
+    #[test]
+    fn what_follows_the_synth_moves_thirty_times_a_second() {
+        let (mut e, _, _) = editing();
+        let t0 = Instant::now();
+        e.move_opening(t0, QualityMode::Hi);
+        let mut moved = 0;
+        for k in 1..=60u64 {
+            e.meters.publish_levels(&[0.25; LEVELS], 0.25);
+            let was = e.motion_at;
+            e.move_opening(t0 + Duration::from_micros(k * 16_667), QualityMode::Hi);
+            moved += u32::from(e.motion_at != was);
+        }
+        assert!((28..=31).contains(&moved), "{moved}");
+        assert!(e.levels[0] > 0.5 && e.motion.level > 0.0, "{:?}", e.levels);
+    }
+
+    /// An editor watches the levels while it is open: the audio thread measures them only
+    /// then.
+    #[test]
+    fn the_levels_are_watched_only_while_an_editor_is_open() {
+        let meters = Arc::new(Meters::default());
+        assert!(!meters.watched());
+        let host = Arc::new(Host::default());
+        let context: Arc<dyn GuiContext> = host.clone();
+        let dir = tempfile::tempdir().unwrap();
+        let e = Editing::new(
+            context,
+            Arc::new(Ca72Params::default()),
+            Arc::clone(&meters),
+            (1720, 1720, 1.0),
+            Library::at(dir.path()),
+            |_| None,
+        );
+        assert!(meters.watched());
+        drop(e);
+        assert!(!meters.watched());
     }
 
     /// The window's frame put together again in the rows that changed is the frame put
@@ -4018,11 +4304,12 @@ mod tests {
         all.save_png(out).unwrap();
     }
 
-    /// ULTRA's lamp (decisions.md R-ULTRA) for looking at, written to `$CA72_ULTRA_PNG`, the
-    /// folder: the panel's last column close up (two pixels a unit) at points of its opening,
-    /// `shutter-<p>.png`, and of the light only, `still-<p>.png`; QUALITY's three positions,
-    /// `quality-<lo|hi|ultra>.png`; and the window as it opens at ULTRA with its note,
-    /// `note.png`, and its lamp's menu, `menu.png`.
+    /// QUALITY's opening (decisions.md R-ULTRA) for looking at, written to `$CA72_ULTRA_PNG`,
+    /// the folder: the panel's last column close up (two pixels a unit) at QUALITY's three
+    /// positions, each's thing up at rest and as the synth plays, `quality-<lo|hi|ultra>-<level>
+    /// .png`; each coming up, `shutter-<setting>-<p>.png`, and with the shutter off,
+    /// `still-<setting>-<p>.png`; and the window at ULTRA with its note, `note.png`, and the
+    /// opening's menu, `menu.png`.
     #[test]
     #[ignore = "writes images for a look"]
     fn the_ultra_pngs() {
@@ -4053,32 +4340,68 @@ mod tests {
             values: [0.5; CONTROLS.len()],
             ..Scene::default()
         };
+        use ca72_panel::ultra::Opening;
+        // QUALITY's three positions, each's thing up: at rest, and at the synth's levels.
         for (name, v) in [("lo", 0.0), ("hi", 0.5), ("ultra", 1.0)] {
             scene.values[q] = v;
-            scene.ultra = v.max(0.0) * if v == 1.0 { 1.0 } else { 0.0 };
-            r.render(&scene);
-            crop(&r, &format!("quality-{name}.png"));
+            for level in [0.0, 0.5, 1.0] {
+                let mut o = Opening {
+                    level,
+                    spark: 1.3,
+                    run: if level > 0.0 { 1.0 } else { 0.0 },
+                    asleep: if level > 0.0 { 0.0 } else { 1.0 },
+                    stride: 3,
+                    turn: 20.0,
+                    ..Opening::default()
+                };
+                match name {
+                    "lo" => o.hamster = 1.0,
+                    "hi" => o.lamp = 1.0,
+                    _ => o.coil = 1.0,
+                }
+                scene.opening = o;
+                r.render(&scene);
+                crop(&r, &format!("quality-{name}-{level}.png"));
+            }
         }
-        scene.values[q] = 1.0;
-        for p in [
-            0.0, 0.08, 0.16, 0.24, 0.32, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
-        ] {
-            scene.ultra = p;
-            r.render(&scene);
-            crop(&r, &format!("shutter-{p}.png"));
-        }
-        scene.ultra_still = true;
-        for p in [0.0, 0.4, 0.7, 1.0] {
-            scene.ultra = p;
-            r.render(&scene);
-            crop(&r, &format!("still-{p}.png"));
+        // Each coming up through the shutter, and with it off.
+        for (name, v) in [("lo", 0.0), ("hi", 0.5), ("ultra", 1.0)] {
+            scene.values[q] = v;
+            for still in [false, true] {
+                let ps: &[f64] = if still {
+                    &[0.0, 0.2, 0.4, 0.7, 1.0]
+                } else {
+                    &[0.0, 0.16, 0.32, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+                };
+                for &p in ps {
+                    let mut o = Opening {
+                        still,
+                        level: 0.6,
+                        spark: 2.1,
+                        run: p,
+                        stride: (p * 7.0) as u8,
+                        ..Opening::default()
+                    };
+                    match name {
+                        "lo" => o.hamster = p,
+                        "hi" => o.lamp = p,
+                        _ => o.coil = p,
+                    }
+                    scene.opening = o;
+                    r.render(&scene);
+                    let way = if still { "still" } else { "shutter" };
+                    crop(&r, &format!("{way}-{name}-{p}.png"));
+                }
+            }
         }
         let dir = tempfile::tempdir().unwrap();
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         e.draw();
-        e.ultra = 1.0;
         e.scene.values[q] = 1.0;
-        e.scene.ultra = 1.0;
+        e.scene.opening = Opening {
+            coil: 1.0,
+            ..Opening::default()
+        };
         e.scene.note = Some(e.ultra_note());
         e.renderer.render(&e.scene);
         e.renderer.frame().save_png(out.join("note.png")).unwrap();

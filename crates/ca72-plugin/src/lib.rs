@@ -10,6 +10,7 @@ pub mod helper;
 pub mod learn;
 pub mod learning;
 pub mod library;
+pub mod opening;
 pub mod params;
 pub mod pool;
 pub mod presets;
@@ -413,6 +414,14 @@ impl Plugin for Ca72 {
         let lamp = self.engine.end_block(len);
         self.meters
             .publish(lamp, self.engine.midi_wheels(), self.engine.sounding_mask());
+        // The voices' levels and the output's, for the editor's drops and QUALITY's lamps:
+        // only while an editor is open (else a flag read a block, and nothing more).
+        if self.meters.watched() {
+            let peak = out.iter().fold(0.0f32, |m, ch| {
+                ch.iter().take(len).fold(m, |m, v| m.max(v.abs()))
+            });
+            self.meters.publish_levels(self.engine.levels(), peak);
+        }
         self.ask_helper();
         ProcessStatus::KeepAlive
     }
