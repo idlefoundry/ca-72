@@ -191,13 +191,6 @@ fn origin() -> (f64, f64) {
     (COL + ULTRA_AT.0, TOP + ULTRA_AT.1)
 }
 
-/// Whether (`x`, `y`) in the drawing is on the opening (its ring and what is in it): a right
-/// click there opens its menu (its shutter, or always open).
-pub fn on_lamp(x: f64, y: f64) -> bool {
-    let (ox, oy) = origin();
-    (x - ox).hypot(y - oy) <= APERTURE + RING + 2.0
-}
-
 /// The layer's extent: the ring and the lamps' light round it.
 const BOUNDS: [f64; 4] = [-88.0, -88.0, 88.0, 88.0];
 
