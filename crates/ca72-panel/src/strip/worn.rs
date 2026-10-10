@@ -28,9 +28,11 @@ use crate::svg::{N, Svg, put};
 static BUTTON: &[u8] = include_bytes!("../../assets/worn/button.png");
 static GLASS: &[u8] = include_bytes!("../../assets/worn/display-glass.png");
 
-/// The panel's neon orange (the mock-up's): lit segments, dots and drops.
+/// The panel's neon orange (the mock-up's): lit segments, dots and drops; the glow round a
+/// lit dot (the mock-up's); the drops' light (the mock-up's, added in).
 const ORANGE: (u8, u8, u8) = (255, 112, 40);
-const ORANGE_HOT: (u8, u8, u8) = (255, 190, 120);
+const ORANGE_GLOW: (u8, u8, u8) = (255, 72, 10);
+const DROP_LIGHT: (f64, f64, f64) = (172.0, 80.0, 30.0);
 const SEG_ON: &str = "#ff7028";
 const SEG_OFF_OPACITY: f64 = 0.05;
 /// The tabs: translucent amber plastic lit from inside (the CA-74's amber, tried there: lit
@@ -57,9 +59,16 @@ const TAB_KNEE: f32 = 0.8;
 /// easing in from `EDGE_FROM` of the way out).
 const EDGE_DARKER: f32 = 0.4;
 const EDGE_FROM: f32 = 0.86;
+/// And how much darker its corners are, the rim line round them too (the owner, 2026-10-10:
+/// "should the corners of these buttons be darker, not lighter", "that's where the plastic
+/// would be densist from the user's perspective"): this share at the corner itself, easing in
+/// where the cap's sides meet its ends, from `CORNER_FROM` of the way out both ways.
+const CORNER_DARKER: f32 = 0.75;
+const CORNER_FROM: f32 = 0.3;
 
-/// The lit cap with its outermost band darkened ([`EDGE_DARKER`]), in linear light, as far out
-/// as the kit's cap measures it (its rounded square, its middle drawn out across).
+/// The lit cap with its outermost band darkened ([`EDGE_DARKER`]) and its corners more
+/// ([`CORNER_DARKER`]), in linear light, as far out as the kit's cap measures it (its rounded
+/// square, its middle drawn out across).
 fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Lighting {
     let lin = |v: u8| {
         let v = f32::from(v) / 255.0;
@@ -90,7 +99,12 @@ fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Li
         let v = (y - half).abs() / half;
         let d = (u * u * u * u + v * v * v * v).sqrt().sqrt().min(1.0);
         let t = ((d - EDGE_FROM) / (1.0 - EDGE_FROM)).clamp(0.0, 1.0);
-        let k = 1.0 - EDGE_DARKER * t * t * (3.0 - 2.0 * t);
+        let ease = |z: f32| {
+            let z = ((z - CORNER_FROM) / (1.0 - CORNER_FROM)).clamp(0.0, 1.0);
+            z * z * (3.0 - 2.0 * z)
+        };
+        let corner = ease(u.min(1.0)) * ease(v.min(1.0));
+        let k = (1.0 - EDGE_DARKER * t * t * (3.0 - 2.0 * t)) * (1.0 - CORNER_DARKER * corner);
         if k < 1.0 {
             let f = |v: u8| enc(lin(v) * k);
             *px = resvg::tiny_skia::ColorU8::from_rgba(
@@ -113,10 +127,11 @@ const TAB_PRINT: &str = "#2a1006";
 const KEY_PRINT: &str = "#d9d2c0";
 /// The drops move on at most this far apart, seconds (30 a second).
 const STEP_S: f64 = 1.0 / 30.0;
-/// The name's dots' pitch, and the drops' sizes (a sounding voice's, an idle one's), units.
+/// The name's dots' pitch, and the drops' sizes (a sounding voice's, an idle one's: the
+/// mock-up's, the owner, 2026-10-10: "I want it to go back to the red pictured here"), units.
 const DOT: f64 = 5.0;
-const DROP: f64 = 10.0;
-const IDLE_DROP: f64 = 6.0;
+const DROP: f64 = 25.0;
+const IDLE_DROP: f64 = 15.0;
 /// Where a capital's middle is, above the name's window's middle: a capital stands in the
 /// window's middle, as near as the descenders below it leave room for (the owner: "the preset
 /// text needs to be vertically centered").
@@ -1043,20 +1058,14 @@ fn name_level(b: &BarScene) -> f64 {
     }
 }
 
-/// The name display's two signs: a star before the name for a favourite (faintly there
-/// otherwise), the arrow that drops the list down at its end (up while it is down).
+/// The name display's arrow that drops the list down at its end (up while it is down). (The
+/// favourite's star is dots, as the name is: [`name`].)
 fn name_icons(o: &mut Svg, b: &BarScene) {
     let (_, y, _, h) = NAME;
-    let (_, _, star_x, arrow_x) = name_places();
+    let (_, _, _, arrow_x) = name_places();
     let level = name_level(b);
     let mid = y - PANEL_H + h / 2.0 - CAP_LIFT;
     let orange = format!("rgb({},{},{})", ORANGE.0, ORANGE.1, ORANGE.2);
-    put!(
-        o,
-        "<path d='{}' fill='{orange}' fill-opacity='{}'/>",
-        plugin_kit_materials::star_path(star_x, mid, 12.0),
-        N(if b.favorite { 0.95 * level } else { 0.06 })
-    );
     let (aw, down) = (22.0, !b.open);
     let (tip, base) = if down {
         (mid + aw * 0.35, mid - aw * 0.35)
@@ -1108,14 +1117,46 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
             core.push_circle(px, py, r as f32);
         }
     });
-    fill(frame, glow, ORANGE, 0.16 * level);
-    let hot = |v: u8| (f64::from(v) * level + 20.0 * (1.0 - level)) as u8;
-    fill(
-        frame,
-        core,
-        (hot(ORANGE_HOT.0), hot(ORANGE_HOT.1), hot(ORANGE_HOT.2)),
-        0.55 + 0.45 * level,
-    );
+    // The favourite's star before it, in the same dots (the owner, 2026-10-10: "turn this
+    // into a pixel star"): lit for a favourite, else as faint as the unlit dots.
+    let mut star = PathBuilder::new();
+    let mut star_glow = PathBuilder::new();
+    star_dots(scale, |(px, py)| {
+        star_glow.push_circle(px, py, (r * 2.1) as f32);
+        star.push_circle(px, py, r as f32);
+    });
+    // (In the mock-up's red: its dots' orange, their glow a deeper red; the owner: "go back to
+    // that red".)
+    let dim = |c: (u8, u8, u8)| {
+        let d = |v: u8| (f64::from(v) * level + 20.0 * (1.0 - level)) as u8;
+        (d(c.0), d(c.1), d(c.2))
+    };
+    fill(frame, glow, ORANGE_GLOW, 0.16 * level);
+    fill(frame, core, dim(ORANGE), 0.55 + 0.45 * level);
+    if b.favorite {
+        fill(frame, star_glow, ORANGE_GLOW, 0.16 * level);
+        fill(frame, star, dim(ORANGE), 0.55 + 0.45 * level);
+    } else {
+        fill(frame, star, ORANGE, 0.06);
+    }
+}
+
+/// The star's dots (five across, seven down, as the name's capitals: the mock-up's), in pixels
+/// at `scale`, about the star's place before the name.
+const STAR: [u8; 7] = [0x04, 0x04, 0x1f, 0x0e, 0x0e, 0x1b, 0x11];
+fn star_dots(scale: f64, mut each: impl FnMut((f32, f32))) {
+    let (_, y, _, h) = NAME;
+    let (_, _, star_x, _) = name_places();
+    let top = y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * DOT;
+    for (j, row) in STAR.iter().enumerate() {
+        for col in 0..5 {
+            if row >> (4 - col) & 1 == 1 {
+                let px = ((star_x + (col as f64 - 2.0) * DOT) * scale) as f32;
+                let py = ((top + j as f64 * DOT) * scale) as f32;
+                each((px, py));
+            }
+        }
+    }
 }
 
 /// Each dot of the name's display, in pixels at `scale` (the strip's frame): its character's
@@ -1178,8 +1219,8 @@ const BEAT_AT: f64 = 220.0;
 const BEAT_SWELL: f64 = 0.24;
 const BEAT_SWAY: f64 = 4.0;
 const BEAT_FULL: f64 = 10.0;
-/// How far a drop's light reaches, in its radii (past it, under a level's step).
-const REACH: f64 = 6.0;
+/// How far a drop's light reaches, in its radii (past it, its halo under a level's step).
+const REACH: f64 = 4.5;
 
 /// The beat of two notes `cents` apart at [`BEAT_AT`], Hz.
 fn beat_hz(cents: f64) -> f64 {
@@ -1374,25 +1415,22 @@ impl Liquid {
                     continue;
                 }
                 let (f, g) = (f64::from(f), f64::from(g));
-                let core = ((f - 0.8) / 0.35).clamp(0.0, 1.0);
-                let core = core * core * (3.0 - 2.0 * core);
-                let hot = ((f - 1.6) / 3.0).clamp(0.0, 1.0) * 0.35;
-                let halo = f.min(1.0).powf(2.2) * 0.42;
-                let idle = ((g - 0.85) / 0.25).clamp(0.0, 1.0) * 0.3 + g.min(1.0).powi(3) * 0.1;
-                let glow = halo + idle;
-                if glow < 0.004 && core == 0.0 {
+                // (The mock-up's: a flat disc where the fields sum past one, its light the
+                // share of them that sounds, an idle voice's half as bright; a faint halo.)
+                let (all, lit) = (f + g, f + 0.5 * g);
+                let share = lit / all.max(1e-6);
+                let core = ((all - 1.0) * 3.0).clamp(0.0, 1.0);
+                let halo = (all * 0.35).min(1.0);
+                let a = core * (0.4 + 0.6 * share) + halo * 0.22 * share;
+                if a <= 0.002 {
                     continue;
                 }
-                let add = [
-                    f64::from(ORANGE.0) * (glow + 0.82 * core) + 255.0 * hot,
-                    f64::from(ORANGE.1) * (glow + 0.9 * core) + 255.0 * hot,
-                    f64::from(ORANGE.2) * (glow + 0.88 * core) + 255.0 * hot,
-                ];
+                let add = [DROP_LIGHT.0 * a, DROP_LIGHT.1 * a, DROP_LIGHT.2 * a];
                 let i = ((y * fw + x) * 4) as usize;
-                for (c, a) in add.iter().enumerate() {
-                    data[i + c] = (f64::from(data[i + c]) + a).min(255.0) as u8;
+                for (c, v) in add.iter().enumerate() {
+                    data[i + c] = (f64::from(data[i + c]) + v).min(255.0) as u8;
                 }
-                data[i + 3] = data[i + 3].max((255.0 * (glow + core).min(1.0)) as u8);
+                data[i + 3] = data[i + 3].max((255.0 * a.min(1.0)) as u8);
             }
         }
     }

@@ -2961,6 +2961,33 @@ list that drops down over the strip inside the window."
   bit": its picture at 80 %. Of three places, each rendered whole on the mock-up's page (as
   built; centred on OUTPUT, recommended; its left end on the divider line): "I think we can go
   with option C." Its left end on the line (2578), in the strip's middle.
+- **The strip's knobs' legends and the lit tabs' corners** (the owner, 2026-10-10, from the
+  build in Live: "these labels are too high above their knobs. also, is it just me, or should
+  the corners of these buttons be darker, not lighter", "i'm just thinking that's where the
+  plastic would be densist from the user's perspective"): the legends 109 units above their
+  knobs, not 122, as far over the numeral at twelve o'clock as TUNE's over its own (27 pixels
+  at a pixel a unit; they were 40); a lit tab's corners darker as well as its edge, half its
+  light at the corner itself, the rim line round them too, easing in from 0.35 of the way out
+  both ways (the light round the tab on the face, the kit's, is left as it is: it is not
+  brighter at the corners). The window as it opens, for a look: `presets.rs`'s `window_png`.
+  Then "go even darker in the corners": a quarter of its light at the corner itself, easing in
+  from 0.3 of the way out. And "why does the overdrive light have a circle in the middle of
+  it?": the jewel's picture (POWER's, OVERLOAD's made from it) had a ring light's reflection
+  in its dome, a bright ring halfway out, which on OVERLOAD's dark glass read as a pink circle
+  (as the knobs' ring-light reflections did); painted out of the picture
+  (`assets/worn/README.md`), for both lamps.
+- **The rail's star and the display's reds** (the owner, 2026-10-10, sending the mock-up's dot
+  star and its voices' display: "turn this into a pixel star. like the one you have here. And
+  go back to that red too. Same thing with the stereo bar. I want it to go back to the red
+  pictured here."): the favourite's star before the name drawn in the name's dots (the
+  mock-up's five by seven), as faint as the unlit dots when the preset is not a favourite; the
+  name's dots in the mock-up's neon (255, 112, 40) with its deeper glow (255, 72, 10), not the
+  hotter amber they had been given; and the voices' display the mock-up's drops again: flat
+  discs where their fields sum past one, 25 units across for a sounding voice and 15 for an
+  idle one, no white-hot middle, their light (172, 80, 30) added in so that under this
+  display's glass a sounding drop measures (233, 130, 63) and an idle one (155, 89, 44) where
+  the owner's picture has (225, 134, 63) and (159, 80, 38) (an idle one's light half a
+  sounding one's share, the mock-up's a third, for the same).
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
