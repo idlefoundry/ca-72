@@ -2816,6 +2816,28 @@ list that drops down over the strip inside the window."
 - **Cost (release build, the Linux reference machine, another agent's benchmark on four of its
   cores):** the background once a scale, 182 ms at 0.4 of the drawing (the pictures decoded the
   first time) and 508 ms at 1; a knob turned, 1.5 ms at 0.4 and 4.8 ms at 1.
+- **The strip chosen: A6** (the browser mock-up, 2026-10-09, its version 14; the sources on the
+  lab's share, `ca-72/look/mock`). Of the strip in three rows (A5): "this screen is much too
+  large. Needs to be the same height as the buttons flanking it"; the presets' screen is now as
+  tall as the keys beside it, its surround included (62 units; its dots 6 apart, were 9). Then:
+  "can you do one more mock up? This one will move the keyboard mod/pitch controls back down to
+  the lower area to take advantage of using more height and less width for the plugin to allow
+  the top panel to be a little larger compared to the bottom", the plug-in's left edge "the red
+  line" at the column's right; and, shown A6: "yup, this is the one. A6 looks good. Also, no need
+  to put a back plate on top of another backplate here" (the left hand's controls now straight
+  on the strip's face). So:
+  - the panel's controller column (GLIDE and DECAY and their jacks, the PITCH and MOD. wheels)
+    leaves the panel for the strip's left, laid out as the column had them; the window starts
+    at the panel's face, 3108 units of the drawing wide instead of 3438, as tall as A5's;
+  - the strip in three rows on A5's grid: banks of lit tabs on the first (MODE: MONO, POLY,
+    UNISON; VOICES PLAYED AS: SCATTER, DOUBLE; PLACEMENT: EVEN, EDGES, CENTER; AUTO GAIN's ON),
+    then knobs with readouts (VOICES and ENTROPY; WIDTH and DETUNE over the voices' display,
+    WHERE THE VOICES SOUND; DRIVE and LEVEL, AUTO GAIN's correction in dB), sections VOICES,
+    STEREO and OUTPUT; the presets' rail in walnut above it (favourite, previous, the screen,
+    next, SAVE), the list dropping down over the strip;
+  - what it gains (told the owner): where the window's width decides, the panel is 11 % larger
+    at the same width; on a 16:9 screen its height decides already, and it opens the same size
+    as before in a window a tenth narrower (on 1920 by 1080, about 1356 pixels wide, was 1500).
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
