@@ -1728,6 +1728,37 @@ mod png {
         }
     }
 
+    /// The whole window in the worn skin at a pixel a unit, the panel as it opens over the
+    /// strip as it opens (MONO's tab lit), as `window.png` in `$CA72_WINDOW_PNG`, the folder:
+    /// for looking at the strip's legends and lit tabs.
+    #[test]
+    #[ignore = "writes an image for a look"]
+    fn window_png() {
+        let Some(dir) = std::env::var_os("CA72_WINDOW_PNG") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let k = 1.0;
+        let mut panel = crate::Renderer::with_skin(crate::Skin::Worn, k, 1.0);
+        panel.render(&crate::Scene {
+            values: [0.5; crate::CONTROLS.len()],
+            ..crate::Scene::default()
+        });
+        let mut strip = crate::strip::StripRenderer::new(k);
+        strip.render(&crate::strip::StripScene::default(), panel.frame(), None);
+        let mut whole = panel.frame().clone();
+        whole.draw_pixmap(
+            0,
+            (art::PANEL_H * k).round() as i32,
+            strip.frame().as_ref(),
+            &resvg::tiny_skia::PixmapPaint::default(),
+            resvg::tiny_skia::Transform::identity(),
+            None,
+        );
+        whole.save_png(dir.join("window.png")).unwrap();
+    }
+
     #[test]
     #[ignore = "writes images for a look"]
     fn presets_png() {

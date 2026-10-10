@@ -502,7 +502,7 @@ pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
     }
     let knob_legends = ["VOICES", "ENTROPY", "WIDTH", "DETUNE", "DRIVE", "LEVEL"];
     for ((_, x, y), t) in KNOBS.iter().zip(knob_legends) {
-        text(s, *x, y - 122.0, t, LEGEND);
+        text(s, *x, y - 109.0, t, LEGEND);
     }
     for r in Readout::ALL {
         if let Some(u) = r.unit() {

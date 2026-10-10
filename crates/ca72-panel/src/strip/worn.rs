@@ -57,9 +57,16 @@ const TAB_KNEE: f32 = 0.8;
 /// easing in from `EDGE_FROM` of the way out).
 const EDGE_DARKER: f32 = 0.4;
 const EDGE_FROM: f32 = 0.86;
+/// And how much darker its corners are, the rim line round them too (the owner, 2026-10-10:
+/// "should the corners of these buttons be darker, not lighter", "that's where the plastic
+/// would be densist from the user's perspective"): this share at the corner itself, easing in
+/// where the cap's sides meet its ends, from `CORNER_FROM` of the way out both ways.
+const CORNER_DARKER: f32 = 0.5;
+const CORNER_FROM: f32 = 0.35;
 
-/// The lit cap with its outermost band darkened ([`EDGE_DARKER`]), in linear light, as far out
-/// as the kit's cap measures it (its rounded square, its middle drawn out across).
+/// The lit cap with its outermost band darkened ([`EDGE_DARKER`]) and its corners more
+/// ([`CORNER_DARKER`]), in linear light, as far out as the kit's cap measures it (its rounded
+/// square, its middle drawn out across).
 fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Lighting {
     let lin = |v: u8| {
         let v = f32::from(v) / 255.0;
@@ -90,7 +97,12 @@ fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Li
         let v = (y - half).abs() / half;
         let d = (u * u * u * u + v * v * v * v).sqrt().sqrt().min(1.0);
         let t = ((d - EDGE_FROM) / (1.0 - EDGE_FROM)).clamp(0.0, 1.0);
-        let k = 1.0 - EDGE_DARKER * t * t * (3.0 - 2.0 * t);
+        let ease = |z: f32| {
+            let z = ((z - CORNER_FROM) / (1.0 - CORNER_FROM)).clamp(0.0, 1.0);
+            z * z * (3.0 - 2.0 * z)
+        };
+        let corner = ease(u.min(1.0)) * ease(v.min(1.0));
+        let k = (1.0 - EDGE_DARKER * t * t * (3.0 - 2.0 * t)) * (1.0 - CORNER_DARKER * corner);
         if k < 1.0 {
             let f = |v: u8| enc(lin(v) * k);
             *px = resvg::tiny_skia::ColorU8::from_rgba(

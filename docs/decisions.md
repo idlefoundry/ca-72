@@ -2960,6 +2960,15 @@ list that drops down over the strip inside the window."
   bit": its picture at 80 %. Of three places, each rendered whole on the mock-up's page (as
   built; centred on OUTPUT, recommended; its left end on the divider line): "I think we can go
   with option C." Its left end on the line (2578), in the strip's middle.
+- **The strip's knobs' legends and the lit tabs' corners** (the owner, 2026-10-10, from the
+  build in Live: "these labels are too high above their knobs. also, is it just me, or should
+  the corners of these buttons be darker, not lighter", "i'm just thinking that's where the
+  plastic would be densist from the user's perspective"): the legends 109 units above their
+  knobs, not 122, as far over the numeral at twelve o'clock as TUNE's over its own (27 pixels
+  at a pixel a unit; they were 40); a lit tab's corners darker as well as its edge, half its
+  light at the corner itself, the rim line round them too, easing in from 0.35 of the way out
+  both ways (the light round the tab on the face, the kit's, is left as it is: it is not
+  brighter at the corners). The window as it opens, for a look: `presets.rs`'s `window_png`.
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
