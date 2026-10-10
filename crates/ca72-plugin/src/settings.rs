@@ -10,9 +10,10 @@ use crate::library::{shared_dir, write};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
-    /// QUALITY's opening shown (on by default): its shutter opens on what each setting shows;
-    /// off, none of it, the panel blank above QUALITY (the owner, 2026-10-10; it had been
-    /// "always open", the lamp standing in its ring). Kept as `ultra_shutter`.
+    /// QUALITY's indicator shown (on by default): its shutter opens on what each setting shows;
+    /// off, none of it, the panel blank above QUALITY (chosen in QUALITY's menu, its toggle
+    /// right-clicked; it had been "always open", the lamp standing in its ring). Kept as
+    /// `ultra_shutter`.
     pub shutter: bool,
     /// ULTRA's note (what it is for) has been read.
     pub ultra_note_read: bool,

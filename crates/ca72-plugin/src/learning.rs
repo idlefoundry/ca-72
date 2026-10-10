@@ -76,9 +76,10 @@ pub enum Item {
     List,
     /// Says why the control cannot be learned; does nothing.
     Not,
-    /// QUALITY's opening's (decisions.md R-ULTRA): its shutter, or none (the panel blank).
-    Shutter,
-    Hidden,
+    /// QUALITY's (decisions.md R-ULTRA): its indicator above it (the hamster, the lamp, the
+    /// Tesla lamp, through the shutter) shown, or hidden (the panel blank there).
+    Show,
+    Hide,
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -99,8 +100,8 @@ pub enum Pressed {
     Done,
     /// MIDI ASSIGNMENTS…: the drawer's MIDI list wanted, this parameter chosen.
     List(Option<usize>),
-    /// ULTRA's lamp's menu: its shutter chosen (true), or always open.
-    Lamp(bool),
+    /// QUALITY's menu: its indicator shown (true), or hidden.
+    Indicator(bool),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -232,28 +233,34 @@ impl Learning {
         self.take_keys = true;
     }
 
-    /// QUALITY's opening's menu (decisions.md R-ULTRA; it was ULTRA's lamp's) opened at (`x`,
-    /// `y`): its shutter or none (the panel blank above QUALITY; once "always open", the lamp
-    /// standing lit), the one it is in named in its title and dim among the items.
-    pub fn open_lamp_menu(&mut self, fonts: &Fonts, (x, y): (f64, f64), size: f64, shutter: bool) {
+    /// QUALITY's menu (decisions.md R-ULTRA; a right click on its toggle, the owner: "default
+    /// mode is to show the quality indicators (tesla coil, hamster, etc.), but they can be
+    /// hidden as an option. This can be selectable by right clicking the toggle switch."),
+    /// opened at (`x`, `y`): why MIDI Learn does not learn it, as its title, then its indicator
+    /// shown or hidden (`shown`: the one it is, dim), and the MIDI list, as a control's that
+    /// cannot be learned has.
+    pub fn open_quality_menu(&mut self, fonts: &Fonts, (x, y): (f64, f64), size: f64, shown: bool) {
+        let items = [
+            (Item::Show, "SHOW ITS INDICATOR", !shown),
+            (Item::Hide, "HIDE ITS INDICATOR", shown),
+            (Item::Not, "NOT LEARNED BY MIDI LEARN", false),
+            (Item::List, "MIDI ASSIGNMENTS\u{2026}", true),
+        ];
         let menu = Menu {
             x,
             y,
             size,
-            title: format!(
-                "QUALITY'S OPENING · {}",
-                if shutter { "SHUTTER" } else { "NONE" }
-            ),
-            items: vec![
-                ("SHUTTER".to_owned(), !shutter),
-                ("NONE".to_owned(), shutter),
-            ],
+            title: "QUALITY: SET FOR THE COMPUTER, NOT THE SOUND".to_owned(),
+            items: items
+                .iter()
+                .map(|(_, t, on)| ((*t).to_owned(), *on))
+                .collect(),
             hover: None,
         }
         .placed(fonts, x, y, PANEL);
         self.open = Some(Open {
             learnable: None,
-            items: vec![Item::Shutter, Item::Hidden],
+            items: items.into_iter().map(|(it, ..)| it).collect(),
             menu,
         });
         self.take_keys = true;
@@ -290,8 +297,8 @@ impl Learning {
             (Some(Item::Cancel), _) => self.cancel(map),
             (Some(Item::Remove), Some(i)) => self.remove(map, i),
             (Some(Item::List), l) => return Pressed::List(l),
-            (Some(Item::Shutter), _) => return Pressed::Lamp(true),
-            (Some(Item::Hidden), _) => return Pressed::Lamp(false),
+            (Some(Item::Show), _) => return Pressed::Indicator(true),
+            (Some(Item::Hide), _) => return Pressed::Indicator(false),
             _ => {}
         }
         Pressed::Done

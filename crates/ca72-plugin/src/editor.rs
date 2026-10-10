@@ -27,7 +27,7 @@ use ca72_panel::presets::{
     BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, ROW_H, drawer_hit,
 };
 use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
-use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact, ultra};
+use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
 use plugin_kit_stereo::place;
@@ -738,7 +738,7 @@ impl Editing {
                 Tone::Plain,
             ),
             (
-                "RIGHT-CLICK ABOVE QUALITY TO HIDE ITS OPENING, OR SHOW IT.".to_owned(),
+                "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.".to_owned(),
                 Tone::Dim,
             ),
             ("CLICK TO CLOSE".to_owned(), Tone::Dim),
@@ -966,8 +966,8 @@ impl Editing {
         {
             Pressed::Nothing => {}
             Pressed::Done => return,
-            Pressed::Lamp(shutter) => {
-                self.settings.shutter = shutter;
+            Pressed::Indicator(shown) => {
+                self.settings.shutter = shown;
                 self.keep_settings();
                 return;
             }
@@ -1071,9 +1071,12 @@ impl Editing {
             }
             return;
         }
-        // ULTRA's lamp: its shutter, or always open (decisions.md R-ULTRA).
-        if ultra::on_lamp(x, y) {
-            self.learning.open_lamp_menu(
+        let target = interact::hit(self.renderer.layout(), x, y);
+        // QUALITY's toggle: its indicator shown or hidden (decisions.md R-ULTRA).
+        if let Some(Target::Control(i) | Target::Legend(i, _)) = target
+            && CONTROLS.get(i).is_some_and(|c| c.param == "quality")
+        {
+            self.learning.open_quality_menu(
                 self.renderer.fonts(),
                 (x, y),
                 size,
@@ -1081,7 +1084,6 @@ impl Editing {
             );
             return;
         }
-        let target = interact::hit(self.renderer.layout(), x, y);
         let place = match target {
             Some(Target::Control(i) | Target::Legend(i, _)) => Some(Place::Panel(i)),
             _ => None,
@@ -2462,6 +2464,7 @@ mod tests {
 
     use super::*;
     use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, RowAction};
+    use ca72_panel::ultra;
 
     /// What the editor asked of the host.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2800,34 +2803,36 @@ mod tests {
     /// always open, the one it is in in its title and not to be chosen; choosing the other
     /// switches it, and the menu says so the next time.
     #[test]
-    fn quality_s_opening_s_menu_chooses_its_shutter_or_none() {
+    fn quality_s_menu_shows_or_hides_its_indicator() {
         let (mut e, _, _) = editing();
-        let lamp = at(&e, (art::COL + 3023.0, art::TOP + 92.0));
-        right_click(&mut e, lamp);
-        assert_eq!(
-            e.learning.menu().map(|m| m.title.as_str()),
-            Some("QUALITY'S OPENING · SHUTTER")
-        );
-        assert_eq!(
-            menu_items(&e),
-            vec![("SHUTTER".to_owned(), false), ("NONE".to_owned(), true)]
-        );
-        menu_item(&mut e, "NONE");
-        assert!(!e.settings.shutter && e.learning.menu().is_none());
-        right_click(&mut e, lamp);
-        assert_eq!(
-            e.learning.menu().map(|m| m.title.as_str()),
-            Some("QUALITY'S OPENING · NONE")
-        );
-        menu_item(&mut e, "SHUTTER");
-        assert!(e.settings.shutter);
-        // (Beside it, QUALITY's own menu, as before.)
+        assert!(e.settings.shutter, "shown by default");
         let toggle = at(&e, centre("quality"));
         right_click(&mut e, toggle);
         assert_eq!(
             e.learning.menu().map(|m| m.title.as_str()),
             Some("QUALITY: SET FOR THE COMPUTER, NOT THE SOUND")
         );
+        assert_eq!(
+            menu_items(&e),
+            vec![
+                ("SHOW ITS INDICATOR".to_owned(), false),
+                ("HIDE ITS INDICATOR".to_owned(), true),
+                ("NOT LEARNED BY MIDI LEARN".to_owned(), false),
+                ("MIDI ASSIGNMENTS\u{2026}".to_owned(), true),
+            ]
+        );
+        menu_item(&mut e, "HIDE ITS INDICATOR");
+        assert!(!e.settings.shutter && e.learning.menu().is_none());
+        e.draw();
+        assert!(e.scene.opening.hidden);
+        right_click(&mut e, toggle);
+        assert_eq!(menu_items(&e)[0], ("SHOW ITS INDICATOR".to_owned(), true));
+        menu_item(&mut e, "SHOW ITS INDICATOR");
+        assert!(e.settings.shutter);
+        // (Where the indicator is, a right click is the panel's, as anywhere off a control.)
+        let above = at(&e, (art::COL + 3023.0, art::TOP + 92.0));
+        right_click(&mut e, above);
+        assert!(e.learning.menu().is_none());
     }
 
     /// QUALITY's opening (decisions.md R-ULTRA) follows QUALITY by the time between frames
@@ -3305,13 +3310,17 @@ mod tests {
             let p = at(&e, centre(param));
             right_click(&mut e, p);
             assert_eq!(e.learning.menu().map(|m| m.title.as_str()), Some(title));
+            // (QUALITY's has its indicator's two first: `quality_s_menu_shows_or_hides_its_
+            // indicator`.)
+            let items = menu_items(&e);
             assert_eq!(
-                menu_items(&e),
+                items[items.len() - 2..],
                 [
                     ("NOT LEARNED BY MIDI LEARN".to_owned(), false),
                     ("MIDI ASSIGNMENTS…".to_owned(), true),
                 ]
             );
+            assert_eq!(items.len(), if param == "quality" { 4 } else { 2 });
             // (What cannot be chosen leaves the menu open.)
             menu_item(&mut e, "NOT LEARNED BY MIDI LEARN");
             assert!(e.learning.menu_open());
@@ -4619,13 +4628,13 @@ mod tests {
         e.scene.note = Some(e.ultra_note());
         e.renderer.render(&e.scene);
         e.renderer.frame().save_png(out.join("note.png")).unwrap();
-        // ULTRA's lamp's menu, right-clicked.
+        // QUALITY's menu, its toggle right-clicked.
         e.ultra_note = false;
         e.settings.ultra_note_read = true;
         let size = e.renderer.text_size() * MENU_TEXT;
-        let at = (art::COL + 3023.0, art::TOP + 92.0);
+        let at = (art::COL + 3023.0, art::TOP + 266.0);
         e.learning
-            .open_lamp_menu(e.renderer.fonts(), at, size, e.settings.shutter);
+            .open_quality_menu(e.renderer.fonts(), at, size, e.settings.shutter);
         e.scene.note = None;
         e.scene.menu = e.learning.menu().cloned();
         e.renderer.render(&e.scene);

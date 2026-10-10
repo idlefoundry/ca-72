@@ -3613,8 +3613,14 @@ being placed on them as well? Show me a before/after video once you are done."
   QUALITY, where it is or would be) is SHUTTER or NONE; with NONE nothing of it is drawn, its
   ring's shadow included (it moved from the face's drawing into the opening's own layer), and
   the editor keeps what the setting shows up, still, so that shown again it is there. The
-  computer's setting is the same (`ultra_shutter`, false now NONE). The note says so: "RIGHT-
-  CLICK ABOVE QUALITY TO HIDE ITS OPENING, OR SHOW IT." The lenses are plain. Its menu (a
+  computer's setting is the same (`ultra_shutter`, false now NONE). Then: "default mode is to
+  show the quality indicators (tesla coil, hamster, etc.), but they can be hidden as an option.
+  This can be selectable by right clicking the toggle switch.": shown by default (as it was);
+  the choice in QUALITY's own menu, its toggle (or a legend) right-clicked: its title why MIDI
+  Learn does not learn it, as before, then SHOW ITS INDICATOR and HIDE ITS INDICATOR (the one it
+  is, dim), then MIDI Learn's two; a right click where the indicator is is the panel's, as
+  anywhere off a control. The note: "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW
+  IT." The lenses are plain. Its menu (a
   right click) is "QUALITY'S OPENING · SHUTTER" or "· ALWAYS OPEN"; always open, each setting's
   thing stands in the ring and fades in over the first 0.35 of its coming (1.1 s; out in
   0.5 s), a lamp lighting as before.
