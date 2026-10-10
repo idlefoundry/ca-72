@@ -141,6 +141,14 @@ and sends nothing of yours.
   below the cutoff, the deepest bass coming back, and as EMPHASIS rises, a shelf with the
   resonance's peak on it rather than a high-pass. At LO the filter is the drawing's.
 - **POWER** is the host's bypass: the output fades out over 10 ms and back in.
+- **QUALITY** (above POWER, HI by default; not the instrument's): at LO, Potato mode, the
+  voices are played by a light model instead of the circuit's, for computers the circuit is
+  too heavy for. It follows the same panel, the plug-in's own controls with it, its laws
+  fitted to the circuit's (pitch, levels, the filter's cutoff, emphasis and rings, the
+  contours, GLIDE, the VCA, DRIVE and FILTER MODE), and sounds close to it but simpler: ten
+  voices take a thirtieth to a fortieth of what they do at HI. Switching it stops the notes
+  sounding. It is saved with the session, not with presets: it suits the computer, not the
+  sound.
 
 The editor works like the panel:
 
@@ -371,8 +379,15 @@ The service documents and datasheets the model was derived from are not included
 
 ## Limitations
 
-- Only the real-time quality, Potato, is in the plug-in. The model's two more exact
-  qualities do not run in real time; they remain in `crates/ca72` and the lab.
+- The circuit's model plays in its real-time quality (the model's own "Potato", not the
+  plug-in's Potato mode). The model's two more exact qualities do not run in real time; they
+  remain in `crates/ca72` and the lab.
+- **Potato mode (QUALITY at LO) is close to the circuit, not the same**
+  ([docs/decisions.md](docs/decisions.md) R-POTATO): a FEEDBACK loop can settle into another
+  oscillation than the circuit's (Undertow Growl is about 3 dB quieter as its notes start,
+  Pulse Strut about 1), the light filter's top octaves fall faster (Ringing Saw Line darker),
+  and driven hard at high EMPHASIS it loses its resonance sooner. Every other factory preset
+  is within a decibel of the circuit's.
 - POLY's voices are shared between the host's audio thread and up to four threads of the
   plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
   [docs/decisions.md](docs/decisions.md) R11, R39), shared by every instance in the
