@@ -37,10 +37,12 @@ const TURN: f64 = 40.0;
 const BLADES: usize = 8;
 const CURVE: f64 = 1.25;
 const BLADE_TURN: f64 = 72.0;
-/// How long it takes, seconds: opening (the shutter, then what comes up), closing; with the
-/// shutter off, what stands in the ring coming (a lamp lighting), and going.
-pub const OPEN_S: f64 = 2.5;
-pub const CLOSE_S: f64 = 1.8;
+/// How long it takes, seconds: opening (the shutter, then what comes up), closing (a change of
+/// setting, one after the other, three seconds: the owner, 2026-10-10, "the transition from
+/// one mode to the next should take like 3 seconds"; they were 2.5 and 1.8); with the shutter
+/// off, what stands in the ring coming (a lamp lighting), and going.
+pub const OPEN_S: f64 = 1.75;
+pub const CLOSE_S: f64 = 1.25;
 pub const STILL_ON_S: f64 = 1.1;
 pub const STILL_OFF_S: f64 = 0.5;
 /// Where its stages fall in the opening (shares of it): the blades open, then what waits comes
