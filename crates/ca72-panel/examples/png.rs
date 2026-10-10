@@ -35,7 +35,7 @@ fn main() {
     let mut strip = ca72_panel::strip::StripRenderer::new(scale);
     let t3 = std::time::Instant::now();
     let scene = example_strip();
-    strip.render(&scene, r.frame(), true);
+    strip.render(&scene, r.frame(), None);
     eprintln!("the strip {:?}", t3.elapsed());
     let mut all = r.frame().clone();
     let top = (ca72_panel::art::PANEL_H * scale).round() as usize;

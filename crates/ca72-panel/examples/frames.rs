@@ -43,12 +43,7 @@ fn measure(s: f64) {
                      ss: &StripScene,
                      now: Instant| {
         let p = panel.render(scene);
-        let q = strip.render_at(
-            ss,
-            panel.frame(),
-            p && panel.changed_below(art::PANEL_H),
-            now,
-        );
+        let q = strip.render_at(ss, panel.frame(), panel.damage(), now);
         if !(p || q) {
             return;
         }

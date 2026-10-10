@@ -2856,29 +2856,44 @@ list that drops down over the strip inside the window."
   - The approval test (`tests/approved.rs`) compares the panel with the approved mock-up right
     of the mock-up's column. The wood's grain is laid out as it was with the column there, so
     the panel's wood is unchanged; the mean difference is 1.38, as before A6 (1.38).
-  - **Cost** (release build, the Linux reference machine, another agent's benchmark busy on
-    four of its cores; `cargo run --release -p ca72-panel --example frames`). As first built,
-    every change anywhere drew the strip's parts again whole, and so did each frame while the
-    drops moved: 5 ms a frame at 0.44 of the drawing (the window on a 1920 by 1080 screen) and
-    19 ms at 0.87 (the same on a Retina screen), all the time notes were played. Most of it was
-    tiny-skia laying two pictures the strip's size, mostly clear, over every pixel. Now those
-    are laid only where they have pixels, the drawing's strip with what never changes over it
-    is kept until the drawing there changes, a frame in which only the drops move draws their
-    window alone, a knob turned above the strip leaves the strip alone
-    (`Renderer::changed_below`), and the editor puts in the frame shown only the strip's rows
-    that changed. A frame, the window's conversion included (median of 40, ms):
+  - **Cost** (`cargo run --release -p ca72-panel --example frames`: a frame, the panel's
+    renderer, the strip's, the editor's putting them together and the conversion for the
+    window, for each kind of change). As first built, every change anywhere drew the strip's
+    parts again whole, and so did each frame while the voices' drops moved: on the Linux
+    reference machine (another agent's benchmark busy on four of its cores) 5 ms a frame at 0.44
+    of the drawing (the window on a 1920 by 1080 screen) and 19 ms at 0.87 (the same on a Retina
+    screen), all the time notes were played. Most of it was tiny-skia laying two pictures the
+    strip's size, mostly clear, over every pixel of it. Now:
+    - those two are laid only where they have pixels (`Sparse`);
+    - the panel's renderer puts its frame together again only inside the rectangle its layers
+      changed (`Renderer::damage`), each pixel as when it is put together whole;
+    - the strip keeps the drawing's strip with what never changes over it, brings it up to the
+      drawing only where that changed, and draws again only the rectangle that changed (where
+      the drawing changed under it, a tab, a readout, the rail, the pointer, MIDI Learn's ring,
+      the drops' window while they move), grown until every part reaching into it lies inside
+      it, each part being drawn whole;
+    - the editor puts its frame together again only in the rows that changed (all of them
+      while the drawer slides or something floats over everything).
 
-    | Change | at 0.44 | at 0.87 |
-    |---|---|---|
-    | a panel knob (CUTOFF) | 1.8 | 6.5 |
-    | a strip knob (DRIVE, its readout) | 4.1 | 14.7 |
-    | the PITCH wheel | 3.1 | 11.4 |
-    | a tab | 1.4 | 4.8 |
-    | notes played (the drops moving) | 0.9 | 3.7 |
-    | nothing | 0.0 | 0.0 |
+    On the owner's Mac (Apple silicon), the median of 40 frames, ms: with the first of these
+    changes (the commit that built A6: the two pictures laid where they have pixels, the drops'
+    window drawn alone, the strip left alone for a knob above it), then with all of them:
 
-    A frame drawn in parts is the frame drawn whole, to the bit
-    (`a_frame_drawn_in_parts_is_the_frame_drawn_whole`).
+    | Change | first: 0.44 | 0.87 | 1.0 | now: 0.44 | 0.87 | 1.0 |
+    |---|---|---|---|---|---|---|
+    | a panel knob (CUTOFF) | 1.0 | 3.8 | 5.0 | 0.5 | 1.6 | 2.1 |
+    | a strip knob (DRIVE, its readout) | 2.5 | 8.3 | 8.6 | 1.2 | 4.1 | 3.1 |
+    | the PITCH wheel | 1.8 | 6.1 | 8.1 | 0.5 | 1.9 | 2.6 |
+    | a tab | 0.8 | 2.4 | 3.2 | 0.2 | 0.7 | 0.9 |
+    | notes played (the drops moving) | 0.4 | 1.7 | 2.2 | 0.4 | 1.7 | 2.2 |
+    | nothing | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+
+    What is left is mostly a turned knob's own picture, a readout's digits (an SVG with a blur)
+    and the drops. Each frame drawn in part is the frame drawn whole, to the bit: the panel's
+    (`a_frame_put_together_in_part_is_the_frame_put_together_whole`), the strip's, through
+    every kind of change and the drawing changing under its parts
+    (`a_frame_drawn_in_parts_is_the_frame_drawn_whole`), and the editor's
+    (`the_frame_put_together_in_rows_is_the_frame_put_together_whole`).
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 

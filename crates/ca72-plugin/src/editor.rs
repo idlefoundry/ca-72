@@ -1277,11 +1277,11 @@ impl Editing {
             .then(|| self.learning.list_scene(&self.params.midi_map));
         let panel = self.renderer.render(&self.scene);
         self.strip_scene.bar.clone_from(&self.browser.bar);
-        // (The strip's parts drawn again over the panel's frame only where it changed there.)
+        // (The strip's parts drawn again over the panel's frame where it changed there.)
         let strip = self.strip.render(
             &self.strip_scene,
             self.renderer.frame(),
-            panel && self.renderer.changed_below(art::PANEL_H),
+            self.renderer.damage(),
         );
         // The drawer over the strip, dropping down from under the rail, while it shows.
         let k = self.browser.reveal();
@@ -1292,31 +1292,30 @@ impl Editing {
             return false;
         }
         self.drawer_shown = k > 0.0;
-        let drawer_at = DRAWER_TOP - (1.0 - k) * DRAWER_H;
-        // Only the strip changed (the voices' drops, a readout): its rows changed put in the
-        // frame shown, unless something lies over them there.
-        if !(panel || drawer || shut || self.renderer.floating())
-            && let (Some(c), Some([_, y0, _, y1])) = (&mut self.composed, self.strip.damage())
-        {
-            let s = self.renderer.scale();
-            let top = (art::PANEL_H * s).round() as i64;
-            let hidden = if k > 0.0 {
-                (drawer_at * s).round() as i64
-            } else {
-                i64::MAX
-            };
-            let rows = (top + i64::from(y0), (top + i64::from(y1)).min(hidden));
-            if rows.0 >= rows.1 {
-                return false;
-            }
-            paste_rows(c, self.strip.frame(), top, rows);
-            return true;
-        }
+        // The rows that changed, the panel's and the strip's, put together again alone; all of
+        // them while the drawer moves or something floats over everything.
+        let top = (art::PANEL_H * self.renderer.scale()).round() as i64;
+        let rows = |d: Option<[i32; 4]>, top: i64| {
+            d.map(|d| (top + i64::from(d[1]), top + i64::from(d[3])))
+        };
+        let changed = match (
+            rows(self.renderer.damage(), 0),
+            rows(self.strip.damage(), top),
+        ) {
+            (Some(a), Some(b)) => Some((a.0.min(b.0), a.1.max(b.1))),
+            (a, b) => a.or(b),
+        };
+        let only = if drawer || shut || self.renderer.floating() {
+            None
+        } else {
+            changed
+        };
         compose(
             &mut self.composed,
             &self.renderer,
             self.strip.frame(),
-            (k > 0.0).then(|| (self.drawer.frame(), drawer_at)),
+            (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
+            only,
         );
         true
     }
@@ -1358,28 +1357,35 @@ impl Editing {
 /// The window's frame: the panel's renderer's (the whole drawing), the strip's parts over its
 /// strip (`strip`, from the panel's foot down), the drawer over that from `drawer`'s top
 /// (drawing units, cut off at the rail's foot), and over everything what floats (MIDI Learn's
-/// ring, a tip, a note, a menu).
+/// ring, a tip, a note, a menu); in the rows `only` alone (from, past) when given.
 fn compose(
     composed: &mut Option<ca72_panel::Pixmap>,
     renderer: &Renderer,
     strip: &ca72_panel::Pixmap,
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
+    only: Option<(i64, i64)>,
 ) {
     let frame = renderer.frame();
+    let all = (0, i64::from(frame.height()));
+    let rows = match composed {
+        Some(c) if (c.width(), c.height()) == (frame.width(), frame.height()) => {
+            only.unwrap_or(all)
+        }
+        _ => all,
+    };
     let c = composed.get_or_insert_with(|| frame.clone());
-    if (c.width(), c.height()) == (frame.width(), frame.height()) {
-        c.data_mut().copy_from_slice(frame.data());
-    } else {
+    if (c.width(), c.height()) != (frame.width(), frame.height()) {
         *c = frame.clone();
     }
     let s = renderer.scale();
     let top = (art::PANEL_H * s).round() as i64;
-    paste_rows(c, strip, top, (top, i64::MAX));
+    paste_rows(c, frame, 0, rows);
+    paste_rows(c, strip, top, rows);
     if let Some((d, at)) = drawer {
         let rail = (DRAWER_TOP * s).round() as i64;
-        paste_rows(c, d, (at * s).round() as i64, (rail, i64::MAX));
+        paste_rows(c, d, (at * s).round() as i64, (rows.0.max(rail), rows.1));
     }
-    if renderer.floating() {
+    if rows == all && renderer.floating() {
         renderer.draw_floating(c);
     }
 }
@@ -2286,6 +2292,24 @@ mod tests {
             |_| None,
         );
         (e, host, params)
+    }
+
+    /// The window's frame put together again in the rows that changed is the frame put
+    /// together whole: through the voices sounding (the strip's drops), the wheels taken from a
+    /// keyboard (the strip's left, the panel's layers) and the OVERLOAD lamp (the panel above).
+    #[test]
+    fn the_frame_put_together_in_rows_is_the_frame_put_together_whole() {
+        let (mut e, _, _) = editing();
+        assert!(e.draw());
+        for i in 0..30u8 {
+            let lamp = if i % 8 < 4 { 0.0 } else { 1.0 };
+            let wheels = (0.5 + 0.05 * f32::from(i % 5), 0.1 * f32::from(i % 3));
+            e.meters.publish(lamp, wheels, u32::from(i % 6 < 3));
+            e.draw();
+            let mut whole = None;
+            compose(&mut whole, &e.renderer, e.strip.frame(), None, None);
+            assert!(e.composed == whole, "frame {i}: not as put together whole");
+        }
     }
 
     /// Every gesture well formed: a parameter's begin only while it has none open, its

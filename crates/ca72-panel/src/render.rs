@@ -479,15 +479,48 @@ impl Renderer {
         } else {
             damage
         };
-        if changed {
-            self.frame
-                .data_mut()
-                .copy_from_slice(self.background.data());
-            for slot in &self.slots {
-                if let Some((x, y, p)) = &slot.pixels {
-                    self.frame.draw_pixmap(
-                        *x,
-                        *y,
+        if changed && let Some(d) = self.damage {
+            self.recompose(d);
+        }
+        changed
+    }
+
+    /// The frame put together again inside `rect` (pixels: left, top, right, bottom), from the
+    /// background and every layer over it there, in order: each of its pixels as when the whole
+    /// frame is put together.
+    fn recompose(&mut self, rect: [i32; 4]) {
+        let (fw, fh) = (self.frame.width() as i32, self.frame.height() as i32);
+        let [x0, y0, x1, y1] = [
+            rect[0].clamp(0, fw),
+            rect[1].clamp(0, fh),
+            rect[2].clamp(0, fw),
+            rect[3].clamp(0, fh),
+        ];
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let whole = [x0, y0, x1, y1] == [0, 0, fw, fh];
+        let mut patch = if whole {
+            self.background.clone()
+        } else {
+            let Some(mut p) = Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32) else {
+                return;
+            };
+            let n = (x1 - x0) as usize * 4;
+            for y in y0..y1 {
+                let from = (y as usize * fw as usize + x0 as usize) * 4;
+                let to = (y - y0) as usize * n;
+                p.data_mut()[to..to + n].copy_from_slice(&self.background.data()[from..from + n]);
+            }
+            p
+        };
+        for slot in &self.slots {
+            if let Some((x, y, p)) = &slot.pixels {
+                let (r, b) = (x + p.width() as i32, y + p.height() as i32);
+                if *x < x1 && r > x0 && *y < y1 && b > y0 {
+                    patch.draw_pixmap(
+                        x - x0,
+                        y - y0,
                         p.as_ref(),
                         &PixmapPaint::default(),
                         Transform::identity(),
@@ -496,14 +529,23 @@ impl Renderer {
                 }
             }
         }
-        changed
+        if whole {
+            self.frame = patch;
+            return;
+        }
+        let n = (x1 - x0) as usize * 4;
+        for y in y0..y1 {
+            let to = (y as usize * fw as usize + x0 as usize) * 4;
+            let from = (y - y0) as usize * n;
+            self.frame.data_mut()[to..to + n].copy_from_slice(&patch.data()[from..from + n]);
+        }
     }
 
-    /// Whether the last render changed a pixel at or below `y` (drawing units: the strip's
-    /// top, for its parts drawn over the frame).
-    pub fn changed_below(&self, y: f64) -> bool {
+    /// The pixels the last render changed (left, top, right, bottom; the last two past the
+    /// change), if any: where the strip's parts are drawn again over the frame
+    /// (`crate::strip`) and the editor's frame is put together again.
+    pub fn damage(&self) -> Option<[i32; 4]> {
         self.damage
-            .is_some_and(|d| d[3] > (y * self.scale).round() as i32)
     }
 
     /// The layers that float over everything (MIDI Learn's ring, the tip, the note, a menu)
@@ -841,23 +883,60 @@ mod tests {
     use super::*;
     use crate::controls::index;
 
+    /// A frame put together again where it changed is the frame put together whole, to the
+    /// bit: through knobs turned above the strip and on it, a switch, a tip coming and going.
+    #[test]
+    fn a_frame_put_together_in_part_is_the_frame_put_together_whole() {
+        let s = 0.25;
+        let mut r = Renderer::new(s, 1.0);
+        let mut scene = Scene {
+            values: [0.5; CONTROLS.len()],
+            ..Scene::default()
+        };
+        r.render(&scene);
+        let at = |p: &str| index(p).expect(p);
+        for i in 0..12 {
+            match i % 6 {
+                0 => scene.values[at("cutoff")] = 0.1 * f64::from(i),
+                1 => scene.values[at("drive")] = 0.08 * f64::from(i),
+                2 => scene.values[at("pitch_wheel")] = 0.05 * f64::from(i),
+                3 => scene.values[at("osc1_on")] = f64::from(i / 6 % 2),
+                4 => scene.tip = Some(("CUTOFF: 1.2 kHz".into(), 2100.0, 300.0)),
+                _ => scene.tip = None,
+            }
+            assert!(r.render(&scene));
+            let mut whole = Renderer::new(s, 1.0);
+            whole.render(&scene);
+            assert!(
+                r.frame() == whole.frame(),
+                "step {i}: not as put together whole"
+            );
+        }
+    }
+
     /// The renderer says where its frame changed: a knob turned on the panel above the strip
     /// changes nothing on the strip, one of the strip's does (its parts are drawn again over
     /// it then, `crate::strip`); the first frame changes everything.
     #[test]
-    fn it_says_whether_the_strip_changed() {
-        let mut r = Renderer::new(0.2, 1.0);
+    fn it_says_where_its_frame_changed() {
+        let s = 0.2;
+        let mut r = Renderer::new(s, 1.0);
         let mut scene = Scene::default();
         assert!(r.render(&scene));
-        assert!(r.changed_below(art::H - 1.0));
+        let (w, h) = r.size();
+        assert_eq!(r.damage(), Some([0, 0, w as i32, h as i32]));
+        let strip = (art::PANEL_H * s).round() as i32;
         scene.values[index("cutoff").expect("CUTOFF")] = 0.7;
         assert!(r.render(&scene));
-        assert!(!r.changed_below(art::PANEL_H));
+        assert!(
+            r.damage()
+                .is_some_and(|d| d[3] <= strip && d[2] - d[0] < w as i32 / 8)
+        );
         scene.values[index("drive").expect("DRIVE")] = 0.7;
         assert!(r.render(&scene));
-        assert!(r.changed_below(art::PANEL_H));
+        assert!(r.damage().is_some_and(|d| d[1] >= strip));
         assert!(!r.render(&scene));
-        assert!(!r.changed_below(0.0));
+        assert_eq!(r.damage(), None);
     }
 
     /// The pixels two frames differ in, inside and outside `within` (the drawing's units:

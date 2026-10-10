@@ -1600,7 +1600,7 @@ mod tests {
                     ..crate::strip::StripScene::default()
                 },
                 &under,
-                true,
+                None,
             );
             r.frame().clone()
         };
@@ -1639,7 +1639,7 @@ mod png {
                 ..crate::strip::StripScene::default()
             },
             &under,
-            true,
+            None,
         );
         strip.frame().save_png(dir.join("strip.png")).unwrap();
         let mut d = DrawerRenderer::new(0.4);
