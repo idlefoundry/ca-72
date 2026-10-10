@@ -195,8 +195,9 @@ pub mod laws {
     pub const EMPHASIS_NEAR: f64 = 0.012;
     /// The ladder's corner above the ring's pitch (the table above), octaves, below the ringing
     /// threshold: fitted to the drawn circuit's responses at its CUTOFF 0.3, 0.5 and 0.7 (220,
-    /// 858 and 3454 Hz rings); it closes to nothing at the threshold, as the ring's own
-    /// saturation pulls the circuit's corner down to its pitch.
+    /// 858 and 3454 Hz rings), and below them to the calibrated circuit's resonant peaks at
+    /// CUTOFF 0.05 to 0.2 (within 4 Hz); it closes to nothing at the threshold, as the ring's
+    /// own saturation pulls the circuit's corner down to its pitch.
     pub const CORNER: [f64; 4] = [-0.1, 0.048, 0.088, 0.111];
     pub const CORNER_AT_LOG2: [f64; 4] = [6.2, 7.78, 9.74, 11.75];
     /// The filter's passband against the open filter's, as the circuit's (whose passband
@@ -629,7 +630,12 @@ impl Ladder {
         let rest = h * (g * (g * (g * s[0] + s[1]) + s[2]) + s[3]);
         let y4 = (g4 * x + rest) / (1.0 + k * g4);
         let (top, inv, rest_bias) = limit;
-        let mut y = top * tanh((x - k * y4 + bias) * inv) - rest_bias;
+        let u = x - k * y4 + bias;
+        let mut y = if top == 1.0 {
+            tanh(u)
+        } else {
+            top * tanh(u * inv)
+        } - rest_bias;
         for st in s.iter_mut() {
             let v = (y - *st) * g;
             let out = v + *st;
@@ -1501,18 +1507,21 @@ impl Light {
         let (a, x0, y0) = self.coupling;
         let lo = a * (y0 + y - x0);
         self.coupling = (a, y, lo);
-        let (a, x0, y0) = self.mode;
-        let d = self.direct * bus;
-        let direct = a * (y0 + d - x0);
-        self.mode = (a, d, direct);
         let y = if self.panel.filter_hi {
+            let (a, x0, y0) = self.mode;
+            let d = self.direct * bus;
+            let direct = a * (y0 + d - x0);
+            self.mode = (a, d, direct);
             direct - lo
         } else {
+            // (The direct branch's coupling at rest: in HI it starts from the bus's sample.)
+            self.mode.1 = 0.0;
+            self.mode.2 = 0.0;
             lo
         };
         // The VCA on the loudness contour.
         let g = &laws::VCA_GAIN;
-        let v = (loud.max(0.0) / laws::VCA_STEP) as f32;
+        let v = (loud.max(0.0) * (1.0 / laws::VCA_STEP)) as f32;
         let i = (v as usize).min(g.len() - 2);
         let f = (v - i as f32).min(1.0);
         let gain = g[i] + (g[i + 1] - g[i]) * f;
