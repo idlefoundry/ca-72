@@ -1444,7 +1444,7 @@ pub fn plate_worn() -> Layer {
     let mut over = Svg::default();
     let line = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64, extra: &str| {
         for (dx, dy, fill, opacity) in [
-            (0.6, 0.7, "#ffffff", 0.16),
+            (0.6, 0.7, "#ffffff", 0.1),
             (-0.5, -0.6, "#000000", 0.75),
             (0.0, 0.0, PLATE_PAINT, 0.95),
         ] {
