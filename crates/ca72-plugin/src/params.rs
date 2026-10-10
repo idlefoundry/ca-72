@@ -165,6 +165,23 @@ pub enum FilterMode {
     Hi,
 }
 
+/// QUALITY (decisions.md R-POTATO, R-ULTRA): LO, the light model (Potato mode); HI, the
+/// circuit's model at its real-time setting; ULTRA, the circuit's model with no compromises
+/// (the model's own No Compromises), for offline renders and small projects on powerful
+/// computers. In this order, low to high, as a host lists them.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QualityMode {
+    #[id = "lo"]
+    #[name = "LO"]
+    Lo,
+    #[id = "hi"]
+    #[name = "HI"]
+    Hi,
+    #[id = "ultra"]
+    #[name = "ULTRA"]
+    Ultra,
+}
+
 #[derive(Params)]
 pub struct Ca72Params {
     /// The noise generator's seed, saved with the session so that it renders the same noise
@@ -356,11 +373,12 @@ pub struct Ca72Params {
     #[id = "auto_gain"]
     pub auto_gain: BoolParam,
     /// QUALITY, HI by default: at LO the voices are played by the light model, Potato mode,
-    /// for computers the circuit's is too heavy for (decisions.md R-POTATO). Not a preset's
-    /// (`library::KEPT`): it suits the computer, not the sound; saved with the session. After
-    /// AUTO GAIN: a session saved before reads it HI.
-    #[id = "potato"]
-    pub potato: BoolParam,
+    /// for computers the circuit's is too heavy for (decisions.md R-POTATO); at ULTRA by the
+    /// circuit's model with no compromises (R-ULTRA). Not a preset's (`library::KEPT`): it
+    /// suits the computer, not the sound; saved with the session. After AUTO GAIN: a session
+    /// saved before reads it HI.
+    #[id = "quality"]
+    pub quality: EnumParam<QualityMode>,
 }
 
 /// Cents as the strip's DETUNE reads them: a number, whole or to a tenth ("12", "7.2"), as an
@@ -526,13 +544,7 @@ impl Default for Ca72Params {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
             auto_gain: BoolParam::new("Auto Gain", true),
-            potato: BoolParam::new("Quality", false)
-                .with_value_to_string(Arc::new(|lo| if lo { "LO" } else { "HI" }.to_owned()))
-                .with_string_to_value(Arc::new(|s| match s.trim().to_ascii_uppercase().as_str() {
-                    "LO" => Some(true),
-                    "HI" => Some(false),
-                    _ => None,
-                })),
+            quality: EnumParam::new("Quality", QualityMode::Hi),
         }
     }
 }
@@ -642,7 +654,8 @@ impl Ca72Params {
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),
-            potato: self.potato.value(),
+            potato: self.quality.value() == QualityMode::Lo,
+            ultra: self.quality.value() == QualityMode::Ultra,
         }
     }
 }

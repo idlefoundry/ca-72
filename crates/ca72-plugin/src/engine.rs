@@ -129,6 +129,9 @@ pub struct Controls {
     /// QUALITY at LO, Potato mode: the voices played by the light model ([`Light`]), not the
     /// circuit's, for computers the circuit is too heavy for (decisions.md R-POTATO).
     pub potato: bool,
+    /// QUALITY at ULTRA: the circuit's model with no compromises (`Quality::NoCompromises`),
+    /// not at its real-time setting (decisions.md R-ULTRA). Switched while it plays.
+    pub ultra: bool,
 }
 
 impl Default for Controls {
@@ -152,6 +155,7 @@ impl Default for Controls {
             feedback: 0.0,
             lock: false,
             potato: false,
+            ultra: false,
         }
     }
 }
@@ -1709,7 +1713,8 @@ impl Engine {
         )
     }
 
-    /// The panel the voices play: the controls', in Potato, the MIDI input's bend moving
+    /// The panel the voices play: the controls', in Potato (at ULTRA, No Compromises), the
+    /// MIDI input's bend moving
     /// the PITCH wheel by its share of the wheel's travel and its modulation wheel holding
     /// MODULATION up to where the hardware reference's MIDI puts it
     /// (`ca72::modulation::midi_wheel`).
@@ -1718,7 +1723,11 @@ impl Engine {
         let share = (c.bend_range / PITCH_WHEEL_SEMITONES).clamp(0.0, 1.0);
         let share = if share.is_finite() { share } else { 0.0 };
         let mut p = c.panel;
-        p.quality = Quality::Potato;
+        p.quality = if c.ultra {
+            Quality::NoCompromises
+        } else {
+            Quality::Potato
+        };
         p.pitch_wheel = (p.pitch_wheel + f64::from(self.bend) * share).clamp(-1.0, 1.0);
         p.mod_wheel = p
             .mod_wheel
@@ -3313,6 +3322,33 @@ mod tests {
         // (Two seconds: the VCA's thump dies away over about one, as the circuit's does.)
         loudest(&mut e, 2.0);
         assert_eq!(e.sounding(), 0, "POLY's light voices not freed");
+    }
+
+    /// QUALITY at ULTRA (decisions.md R-ULTRA): the circuit's voices play with no compromises,
+    /// and switching to HI and back changes the model's setting under the key held, without
+    /// letting go of it. (A short while: No Compromises is slow, more so in a debug build.)
+    #[test]
+    fn quality_ultra_plays_the_circuit_with_no_compromises_and_keeps_the_key() {
+        let mut c = Controls {
+            ultra: true,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 1);
+        e.event(Event::Note { key: 57, on: true });
+        assert!(loudest(&mut e, 0.05) > 0.001, "ULTRA's voice silent");
+        {
+            let p = e.slots[0].play.lock().unwrap();
+            assert_eq!(p.voice.panel.quality, Quality::NoCompromises);
+            assert!(p.voice.envelopes().2, "the key not on the circuit's voice");
+        }
+        c.ultra = false;
+        e.set(&c);
+        loudest(&mut e, 0.01);
+        let p = e.slots[0].play.lock().unwrap();
+        assert_eq!(p.voice.panel.quality, Quality::Potato);
+        assert!(p.voice.envelopes().2, "switching to HI let go of the key");
     }
 
     /// At LO the one instrument plays a run at a time ([`Engine::run_one`]): the same samples,

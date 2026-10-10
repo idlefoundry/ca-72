@@ -169,7 +169,7 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "osc3_on" => &p.osc3_on,
         "osc3_volume" => &p.osc3_volume,
         "filter_mode" => &p.filter_mode,
-        "potato" => &p.potato,
+        "potato" => &p.quality,
         "filter_mod" => &p.filter_mod,
         "keyboard_control_1" => &p.keyboard_control_1,
         "keyboard_control_2" => &p.keyboard_control_2,
@@ -2304,7 +2304,7 @@ mod tests {
     #[test]
     fn quality_is_clicked_as_a_rocker() {
         let (mut e, host, params) = editing();
-        let q = params.potato.as_ptr();
+        let q = params.quality.as_ptr();
         let p = at(&e, centre("potato"));
         click(&mut e, p);
         assert_eq!(

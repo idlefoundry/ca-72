@@ -57,7 +57,10 @@ pub fn unmeasured() -> Saved {
 
 /// The key of a sound as far as DRIVE's loudness goes: the panel, LOCK, ENTROPY (each voice its
 /// own parts), FEEDBACK (the voice's output into its own external input) and QUALITY (at LO,
-/// the light voices'; at HI keyed as before it). Not POLY, UNISON, VOICES, DOUBLE or SPREAD: a
+/// the light voices'; at HI keyed as before it, and at ULTRA as at HI: the circuit's model is
+/// measured at its real-time setting, which No Compromises differs from far below what the
+/// correction can tell, and measuring at No Compromises would take the helper many times as
+/// long). Not POLY, UNISON, VOICES, DOUBLE or SPREAD: a
 /// note's voices each have their own filter, so a chord, a unison or a pair sum what one voice
 /// does (their levels are their own trims'). Never 0.
 pub fn sound(c: &Controls) -> u64 {
@@ -164,6 +167,8 @@ mod tests {
         let mut fed = controls;
         fed.feedback = 0.5;
         assert_ne!(sound(&fed), sound(&controls), "FEEDBACK is the sound's");
+        let ultra = Controls { ultra: true, ..controls };
+        assert_eq!(sound(&ultra), sound(&controls), "ULTRA keeps HI's curve");
     }
 
     /// A sound measured by its voices: the curve is the sound's, every correction a cut. (At the
