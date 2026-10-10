@@ -1439,7 +1439,7 @@ fn strip_scene(p: &Ca72Params, sounding: u32, was: StripScene) -> StripScene {
     };
     let auto = if c.auto_gain && c.drive > 0.0 {
         let curve = crate::drive::Curve(p.drive_curve.saved().db);
-        (num3(curve.at(c.drive)), true)
+        (num3(curve.at(c.drive, crate::engine::DRIVE_TOP)), true)
     } else {
         (String::new(), false)
     };

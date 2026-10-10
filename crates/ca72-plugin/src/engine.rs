@@ -21,9 +21,10 @@ use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
 use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
-use crate::character::{Character, Placement, pan_gains};
-use crate::drive::{Calibration, Curve, HEARD, HELD, KEYS, KWeighted};
+use crate::character::{Character, Placement};
+use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
 use crate::pool::{Ask, Crew, MAX, Pool, Shared};
+use plugin_kit_stereo::place::{DOUBLE_TRIM, glide_share, pair_gains, unison_trim};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -205,23 +206,10 @@ const SILENT: f64 = 1e-6;
 /// for this many samples running, counted across runs (the CA-74's).
 const QUIET: usize = 256;
 
-/// The detune between DOUBLE's two voices of a note at its full amount, cents (decisions.md
-/// R-STEREO, the CA-74's R28).
-pub const DOUBLE_CENTS: f64 = 20.0;
-
-/// The time constant, seconds, with which a voice's place follows SPREAD, the placement,
-/// VOICES and DOUBLE: a step (a host's automation at a block's start among them) glides
-/// instead of stepping the output, a click (the CA-74's R27).
-pub const GLIDE: f64 = 0.010;
-
-/// A one-pole glide's share of the way a sample at `rate` Hz ([`GLIDE`]).
-fn glide_share(rate: f64) -> f64 {
-    if rate > 0.0 {
-        1.0 - (-1.0 / (GLIDE * rate)).exp()
-    } else {
-        1.0
-    }
-}
+/// The detune between DOUBLE's two voices of a note at its full amount, cents, and the time
+/// constant, seconds, with which a voice's place follows SPREAD, the placement, VOICES and
+/// DOUBLE: plugin-kit's (its K6; decisions.md R-STEREO, the CA-74's R27 and R28).
+pub use plugin_kit_stereo::place::{DOUBLE_CENTS, GLIDE};
 
 /// The voices at a multiple of the host's rate: the side chain interpolated up, the left and
 /// right outputs decimated down.
@@ -517,17 +505,14 @@ impl Playing {
             0.0
         };
         let wide = |(l, r): (f32, f32)| (f64::from(l), f64::from(r));
+        let [voice, twin] = pair_gains(m.spread, out);
         Places {
             voice: wide(if doubled {
-                pan_gains(0.5 + 0.5 * m.spread * out)
+                voice
             } else {
                 self.character.gains(m.spread, m.placement, m.voices)
             }),
-            twin: if twin_on {
-                wide(pan_gains(0.5 - 0.5 * m.spread * out))
-            } else {
-                (0.0, 0.0)
-            },
+            twin: if twin_on { wide(twin) } else { (0.0, 0.0) },
             half: 0.5 * m.double,
             doubled,
             twin_on,
@@ -650,12 +635,12 @@ pub struct Engine {
     /// controls ask for from it (1: none), the correction gliding to it a sample at a time,
     /// and the glide's share a sample at the host's rate. Only it glides: the output's other
     /// gains step as they did.
-    curve: Curve,
+    curve: Curve<STEPS>,
     auto: f64,
     auto_now: f64,
     auto_share: f64,
     /// Where AUTO GAIN's measurements are asked for and kept, told the voices' rate.
-    calibration: Option<Arc<Calibration>>,
+    calibration: Option<Calibration>,
     /// The output's gain under POWER (0 off, 1 on), and its step a sample while it fades.
     fade: f64,
     fade_step: f64,
@@ -718,7 +703,7 @@ impl Engine {
             modulation: 0.0,
             lamp: 0.0,
             glide: 1.0,
-            curve: Curve::AVERAGE,
+            curve: AVERAGE,
             auto: 1.0,
             auto_now: 1.0,
             auto_share: 1.0,
@@ -964,7 +949,7 @@ impl Engine {
             self.controls = *c;
             self.gain = output_gain(c.volume, c.main_output)
                 * if c.lock { lock_trim(&c.panel) } else { 1.0 }
-                * unison_trim(c)
+                * unison_trim_of(c)
                 * double_trim(c)
                 * level_gain(c.level);
             self.auto = auto_trim(c, &self.curve);
@@ -1435,19 +1420,19 @@ impl Engine {
     }
 
     /// AUTO GAIN's curve for the sound (`drive.rs`), the correction following it.
-    pub fn set_curve(&mut self, curve: Curve) {
+    pub fn set_curve(&mut self, curve: Curve<STEPS>) {
         self.curve = curve;
         self.auto = auto_trim(&self.controls, &curve);
     }
 
     /// AUTO GAIN's curve the engine plays with.
-    pub fn curve(&self) -> Curve {
+    pub fn curve(&self) -> Curve<STEPS> {
         self.curve
     }
 
     /// Where AUTO GAIN's measurements are asked for and kept (`drive.rs`), told the voices'
     /// rate now and whenever the engine is prepared. Not on the audio thread.
-    pub fn calibrate_with(&mut self, c: Arc<Calibration>) {
+    pub fn calibrate_with(&mut self, c: Calibration) {
         if self.rate > 0.0 {
             c.set_rate(self.voice_rate());
         }
@@ -1861,9 +1846,9 @@ fn measure_voices(rate: f64, block: usize, feedback: bool, workers: usize) -> u3
 /// UNISON's trim on the output: its VOICES voices, not in phase, add in power, so it is turned
 /// down by the square root of VOICES's setting and sounds about as loud as one voice (the
 /// CA-74's R25).
-fn unison_trim(c: &Controls) -> f64 {
+fn unison_trim_of(c: &Controls) -> f64 {
     if c.unison {
-        1.0 / (c.voices.clamp(POLY_VOICES.0, POLY_VOICES.2) as f64).sqrt()
+        unison_trim(c.voices.clamp(POLY_VOICES.0, POLY_VOICES.2))
     } else {
         1.0
     }
@@ -1952,9 +1937,9 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
 
 /// AUTO GAIN's correction under controls `c` from the sound's `curve` (decisions.md
 /// R-STEREO): 1 without DRIVE or with AUTO GAIN off.
-fn auto_trim(c: &Controls, curve: &Curve) -> f64 {
+fn auto_trim(c: &Controls, curve: &Curve<STEPS>) -> f64 {
     if c.auto_gain && c.drive > 0.0 {
-        10f64.powf(curve.at(c.drive) / 20.0)
+        10f64.powf(curve.at(c.drive, DRIVE_TOP) / 20.0)
     } else {
         1.0
     }
@@ -2059,11 +2044,7 @@ impl Probe {
 /// turned down by two's square root and sounds about as loud as one voice a note (the CA-74's
 /// R28).
 fn double_trim(c: &Controls) -> f64 {
-    if c.double > 0.0 {
-        std::f64::consts::FRAC_1_SQRT_2
-    } else {
-        1.0
-    }
+    if c.double > 0.0 { DOUBLE_TRIM } else { 1.0 }
 }
 
 /// Voice `k`'s noise seed from the instance's: the first voice's the instance's own.
@@ -3046,7 +3027,7 @@ mod tests {
         let (on, switched) = (run(c, c), run(c, off));
         let at = 40 * 256;
         assert_eq!(on[..at], switched[..at]);
-        let want = 10f64.powf(-Curve::AVERAGE.at(12.0) / 20.0);
+        let want = 10f64.powf(-AVERAGE.at(12.0, DRIVE_TOP) / 20.0);
         // (Each sample's ratio where the output is not near nought, and its index.)
         let ratios: Vec<(usize, f64)> = on[at..]
             .iter()

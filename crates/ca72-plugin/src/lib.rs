@@ -256,7 +256,7 @@ impl Plugin for Ca72 {
             .fields
             .get(drive::STATE_KEY)
             .and_then(|t| serde_json::from_str::<drive::Saved>(t).ok())
-            .unwrap_or_default();
+            .unwrap_or_else(drive::unmeasured);
         if let Ok(t) = serde_json::to_string(&curve) {
             state.fields.insert(drive::STATE_KEY.to_owned(), t);
         }
@@ -1229,7 +1229,7 @@ mod tests {
     /// average's; one whose curve is not understood, the average's too.
     #[test]
     fn a_session_holds_its_curve_and_an_old_one_the_average() {
-        use crate::drive::{Curve, STATE_KEY, Saved};
+        use crate::drive::{AVERAGE, Curve, STATE_KEY, Saved, unmeasured};
         use nih_plug::params::persist::PersistentField;
         let state = |fields: BTreeMap<String, String>| PluginState {
             version: String::new(),
@@ -1262,15 +1262,15 @@ mod tests {
         )]));
         Ca72::filter_state(&mut old);
         b.params.deserialize_fields(&old.fields);
-        assert_eq!(b.params.drive_curve.saved(), Saved::default());
+        assert_eq!(b.params.drive_curve.saved(), unmeasured());
         block(&mut b, &mut c, 64);
-        assert_eq!(b.engine.curve(), Curve::AVERAGE);
+        assert_eq!(b.engine.curve(), AVERAGE);
         // Not understood: the average's.
         b.params.drive_curve.set(measured);
         let mut bad = state(BTreeMap::from([(STATE_KEY.to_owned(), "[1, 2".to_owned())]));
         Ca72::filter_state(&mut bad);
         b.params.deserialize_fields(&bad.fields);
-        assert_eq!(b.params.drive_curve.saved(), Saved::default());
+        assert_eq!(b.params.drive_curve.saved(), unmeasured());
     }
 }
 

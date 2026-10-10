@@ -5,7 +5,7 @@
 #![allow(dead_code, clippy::unwrap_used)]
 
 use ca72_plugin::character::Placement;
-use ca72_plugin::drive::Curve;
+use ca72_plugin::drive::{Curve, STEPS};
 use ca72_plugin::engine::{Controls, Engine, Event};
 use ca72_plugin::library::Sound;
 use ca72_plugin::params::{Ca72Params, Footage, Wave, Wave3};
@@ -225,7 +225,7 @@ pub fn played_as(s: &Sound, mut c: Controls) -> Controls {
 /// each event at its sample: left and right.
 pub fn play(
     c: &Controls,
-    curve: Option<Curve>,
+    curve: Option<Curve<STEPS>>,
     notes: &[(f64, f64, Vec<u8>)],
     end: f64,
     rate: f64,

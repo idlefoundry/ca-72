@@ -9,9 +9,9 @@ publish.workspace = true
 
 [dependencies]
 resvg = { version = "0.45", default-features = false, features = ["text"] }
-# The worn skins' materials (plugin-kit's K5), from github.com/idlefoundry/plugin-kit at one
-# commit (its `materials` branch until K5 is merged there).
-plugin-kit-materials = { git = "https://github.com/idlefoundry/plugin-kit", rev = "43a51a7399f31f8ae3bf0994573bb7e9d88bbaab" }
+# The worn skins' materials (plugin-kit's K5), from github.com/idlefoundry/plugin-kit at the
+# commit the plug-in takes its K6 at (the kit's `stereo` branch until both are merged there).
+plugin-kit-materials = { git = "https://github.com/idlefoundry/plugin-kit", rev = "b301c97198e07baf9649087806369c333a14e6a2" }
 rustybuzz = "0.20"
 
 [lints]

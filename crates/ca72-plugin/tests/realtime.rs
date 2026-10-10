@@ -357,7 +357,7 @@ fn asking_the_helper_neither_allocates_nor_frees() {
         ..Controls::default()
     });
     e.prepare(RATE, 7);
-    let helper = Helper::start(e.spares(), e.crew(), std::sync::Arc::default()).unwrap();
+    let helper = Helper::start(e.spares(), e.crew(), Default::default()).unwrap();
     HERE.with(|h| h.set(true));
     ARMED.store(true, Ordering::SeqCst);
     for k in 0..2_000u32 {

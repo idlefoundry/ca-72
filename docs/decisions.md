@@ -3155,3 +3155,33 @@ when dropped); `a_session_holds_its_curve_and_an_old_one_the_average`;
 `auto_brings_a_preset_back_and_off_it_is_louder` (Lead at 16 kHz). `preset_render` against
 UNISON's commit: every preset the same to the bit. The plug-in's unit tests (146 passed,
 7 ignored), the plug-in's and the model's integration tests; rustfmt; clippy.
+
+### Into plugin-kit (2026-10-10)
+
+**The owner, 2026-10-09:** "are we going to move the stereo effects to the plugin kit as well?
+seems like a common thing we would use"; told the general parts would, after the materials,
+and on 2026-10-10: "Do 1 & 2" (the kit's materials published and the plug-ins pinned to them;
+and this).
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- The general parts are plugin-kit's now (`plugin-kit-stereo`, its K6), taken from
+  github.com/idlefoundry/plugin-kit at one commit (b301c97, its `stereo` branch until it is
+  merged there), with the panel's materials (K5) at the same commit: the pan law and the
+  placement (`character.rs` re-exports them), DOUBLE's pair, detune and trim, UNISON's trim,
+  the places' glide (`engine.rs`), and AUTO GAIN's curve, its sharing among the threads and the
+  host, its measurement a render at a time and K-weighting (`drive.rs`).
+- The CA-72's own stays here: `Probe` (its voices, which measure a sound, as the kit's
+  `Measure`), a sound's key (`drive::sound`), the four steps up to DRIVE's 24 dB, the presets'
+  average curve (`drive::AVERAGE`), the notes played, and the session's field (`drive_curve`,
+  on the plug-in's own `drive::Calibration`, since the kit takes no nih-plug).
+
+**Evidence (the Linux reference machine, 2026-10-10):** against the commit before (414b4d9):
+`preset_render`, every preset the same to the bit, from the kit's worktree and again from its
+published commit; every factory preset's AUTO GAIN curve measured at 48 kHz the same to the
+bit; three presets each with DOUBLE, UNISON and each placement forced on (eighteen renders,
+SPREAD 80 %, DRIVE 7 dB) the same to the bit; the session's field the same text
+(`a_session_holds_its_curve_and_an_old_one_the_average`). The plug-in's unit tests (140
+passed, 7 ignored: the placement's and the curve's tests moved to the kit, where they pass),
+its integration tests; rustfmt; clippy. Not yet: the CA-74 on the kit's K6 (and K5 from its
+published commit).
+

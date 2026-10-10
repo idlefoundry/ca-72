@@ -176,7 +176,7 @@ pub struct Ca72Params {
     /// sound is changed in the editor, kept with the session so that it plays and renders the
     /// same again.
     #[persist = "drive_curve"]
-    pub drive_curve: Arc<Calibration>,
+    pub drive_curve: Calibration,
 
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
@@ -395,7 +395,7 @@ impl Default for Ca72Params {
             editor_width: Arc::new(AtomicU32::new(0)),
             preset: Arc::new(RwLock::new(String::new())),
             midi_map: Arc::new(MidiMap::default()),
-            drive_curve: Arc::new(Calibration::default()),
+            drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
             glide: ten("Glide", 0.0),

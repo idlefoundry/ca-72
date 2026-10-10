@@ -44,7 +44,7 @@ struct Shared {
 pub struct Helper {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
-    calibration: Arc<Calibration>,
+    calibration: Calibration,
 }
 
 impl Helper {
@@ -53,7 +53,7 @@ impl Helper {
     pub fn start(
         spares: Arc<Spares>,
         crew: Arc<Crew>,
-        calibration: Arc<Calibration>,
+        calibration: Calibration,
     ) -> std::io::Result<Helper> {
         let shared = Arc::new(Shared::default());
         let s = shared.clone();
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn a_helper_dropped_mid_round_is_waited_for() {
         let (spares, crew) = (Arc::new(Spares::default()), Arc::new(Crew::new()));
-        let helper = Helper::start(spares.clone(), crew.clone(), Arc::default()).unwrap();
+        let helper = Helper::start(spares.clone(), crew.clone(), Default::default()).unwrap();
         let watch = helper.watch();
         watch.hold(true);
         helper.ask(MEND | SERVE);
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn the_helper_measures_a_sound_asked_for() {
         use crate::engine::{Controls, MIN_VOICE_RATE};
-        let cal = Arc::new(Calibration::default());
+        let cal = Calibration::default();
         cal.set_rate(MIN_VOICE_RATE);
         let helper = Helper::start(
             Arc::new(Spares::default()),
@@ -240,6 +240,6 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         drop(helper);
-        assert_eq!(Arc::strong_count(&cal), 1, "the helper kept the curve");
+        assert_eq!(cal.holders(), 1, "the helper kept the curve");
     }
 }

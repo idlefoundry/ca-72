@@ -6,7 +6,7 @@
 //! phrase's momentary maximum, the chords' integrated) set against DRIVE off: what AUTO GAIN
 //! leaves over, with the preset's own curve and with the average's standing in for it. Prints
 //! each preset's, the summary, the measurements' times and the presets' mean curve
-//! ([`Curve::AVERAGE`] is it, rounded).
+//! ([`AVERAGE`] is it, rounded).
 //!
 //! By hand: `cargo test --release -p ca72-plugin --test drive_auto -- --ignored --nocapture`
 //! (`CA72_ONLY`, a part of a preset's name; `CA72_RATE`, 48000). The test that is not ignored
@@ -18,7 +18,7 @@
 mod common;
 
 use ca72_analysis::loudness::loudness as measure;
-use ca72_plugin::drive::{Calibration, Curve, HEARD, STEPS};
+use ca72_plugin::drive::{AVERAGE, Calibration, Curve, HEARD, STEPS};
 use ca72_plugin::engine::Controls;
 use ca72_plugin::library::{Sound, factory};
 use common::{controls_of, env, phrase, play, played_as};
@@ -55,7 +55,7 @@ fn its_phrase(s: &Sound) -> Material {
 
 /// The curve of controls `c` as the plug-in measures it with the voices at `rate` Hz, and how
 /// long that took.
-fn measured(c: &Controls, rate: f64) -> (Curve, Duration) {
+fn measured(c: &Controls, rate: f64) -> (Curve<STEPS>, Duration) {
     let cal = Calibration::default();
     cal.set_rate(rate);
     cal.ask(c);
@@ -66,7 +66,13 @@ fn measured(c: &Controls, rate: f64) -> (Curve, Duration) {
 
 /// The loudness of `c` (with AUTO GAIN's `curve`) playing `material`: momentary maximum, or
 /// integrated.
-fn loudness(c: &Controls, curve: Curve, material: &Material, integrated: bool, rate: f64) -> f64 {
+fn loudness(
+    c: &Controls,
+    curve: Curve<STEPS>,
+    material: &Material,
+    integrated: bool,
+    rate: f64,
+) -> f64 {
     let (l, r) = play(c, Some(curve), &material.0, material.1, rate);
     let m = measure(&[&l, &r], rate as u32);
     if integrated {
@@ -79,7 +85,7 @@ fn loudness(c: &Controls, curve: Curve, material: &Material, integrated: bool, r
 
 /// What AUTO GAIN leaves over at each of [`DRIVES`], dB louder than DRIVE off: on the phrase
 /// and on the chords, with `curve`.
-fn left_over(s: &Sound, curve: Curve, rate: f64) -> [[f64; DRIVES.len()]; 2] {
+fn left_over(s: &Sound, curve: Curve<STEPS>, rate: f64) -> [[f64; DRIVES.len()]; 2] {
     let c = played_as(s, controls_of(s));
     let materials = [(its_phrase(s), false), (held(), true)];
     let mut out = [[0.0; DRIVES.len()]; 2];
@@ -96,7 +102,7 @@ fn left_over(s: &Sound, curve: Curve, rate: f64) -> [[f64; DRIVES.len()]; 2] {
 
 struct Row {
     name: String,
-    curve: Curve,
+    curve: Curve<STEPS>,
     took: Duration,
     own: [[f64; DRIVES.len()]; 2],
     average: [[f64; DRIVES.len()]; 2],
@@ -124,13 +130,13 @@ fn auto_on_the_factory_presets() {
         .cloned()
         .collect();
     // The measurements first, one after another on this thread alone (their times).
-    let curves: Vec<(Curve, Duration)> = presets
+    let curves: Vec<(Curve<STEPS>, Duration)> = presets
         .iter()
         .map(|s| measured(&controls_of(s), rate))
         .collect();
     // Then the presets played, in parallel.
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(8));
-    let jobs: Vec<(Sound, Curve, Duration)> = presets
+    let jobs: Vec<(Sound, Curve<STEPS>, Duration)> = presets
         .iter()
         .cloned()
         .zip(curves)
@@ -148,7 +154,7 @@ fn auto_on_the_factory_presets() {
                             curve: *curve,
                             took: *took,
                             own: left_over(s, *curve, rate),
-                            average: left_over(s, Curve::AVERAGE, rate),
+                            average: left_over(s, AVERAGE, rate),
                         })
                         .collect::<Vec<_>>()
                 })
