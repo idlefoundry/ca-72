@@ -2908,3 +2908,47 @@ hundredth of a dB, the three above levelled back within 0.005 dB. `preset_render
 preset with POLY's ten voices) against the first step: the noise presets the same to the bit
 or within -145 dB, the rest moved by the voices' starts (levels within 0.71 dB; Warped Pad
 +0.99 dB after levelling). The plug-in's unit tests (131 passed, 7 ignored); rustfmt; clippy.
+
+**Agent decisions, 2026-10-09** (the third step: DOUBLE; not separately approved):
+- **DOUBLE** (the host's Double, `double`, 0 to 100 %, off at 0, the last parameter; a session
+  or preset saved before reads 0; saved in presets, as SPREAD is) is the CA-74's R28 and R41:
+  each note two voices, the voice half the detune flat and a twin half sharp, up to 20 cents
+  apart at 100 % (`DOUBLE_CENTS`); the pair about the centre, the flat voice to the right and
+  its sharp twin as far to the left, SPREAD's way out as far as the placement puts the voice
+  (EDGES: every pair to the edges); with POLY and UNISON off the one voice's pair as far out
+  as SPREAD whatever the placement; the output turned down by two's square root. Turning
+  DOUBLE on or off lets every note go; turned off, a twin still sounding plays its tail out on
+  its side until silent.
+- **Where the CA-72's differs:** an amount without a switch, as ENTROPY and SPREAD are here
+  (the CA-74's has one). The detune is the oscillators': half of it added to each of the three
+  oscillators' ENTROPY offsets (`Jacks::detune`), the filter's keyboard tracking left as it is,
+  so oscillator 3 as a low-frequency source moves by the same few cents. The twin is a
+  place's past the voices' (its seed, noise, tolerances and oscillators' start) with a
+  keyboard of its own: in POLY its own key; with POLY off and in UNISON taking the keys
+  straight, but those pressed only while DOUBLE is on, so a twin let go takes no new key (the
+  CA-74's, let go, would sound with a new note on its voice's place).
+- **A voice's place glides** (10 ms, the CA-74's `GLIDE`, R27): moved by SPREAD, the
+  placement, VOICES or DOUBLE, it glides instead of stepping (switching DOUBLE off moves each
+  releasing voice from its pair's place to its own). Constant, it is the same to the bit.
+- **MIDI Learn:** DOUBLE is learnable as a knob (50 learnable controls: 24 knobs, 8 selectors,
+  18 switches).
+- **Memory:** each voice's place holds its twin, and each place's spare a clean twin, boxed:
+  a voice is 34 KB, and unboxed the ten spares overflowed a test thread's 2 MB stack in a
+  debug build.
+
+**Cost (`preset_cost`, now with `CA72_DOUBLE`; the Linux reference machine, a Ryzen 7 7800X3D
+shared with other work, load average 5 to 8, so single figures varied by up to three times
+between runs):** about twice the voices' work, as twice the voices. Ten notes of POLY,
+256-frame blocks at 48 kHz, Bass (the steadiest): one thread 80 % of a core off, 160 to 199 %
+with DOUBLE at 35 %; with three workers 24 % off, 49 % on. The README's limitations say so.
+
+**Evidence (the Linux reference machine, 2026-10-09):** the CA-74's tests ported:
+`double_puts_the_sharp_twin_left_and_the_flat_voice_right` (+7.0 cents at 35 %; with the
+voice sharp too, 0.0, and fails), `double_is_about_as_loud_and_stays_in_the_centre_without_spread`
+(without the trim +3.3 dB, and fails), `double_takes_the_placement_its_pairs_mirrored` (with
+every pair at the edges, CENTER's first fails), `doubled_voices_on_the_workers_are_the_same_to_the_bit`;
+the CA-72's own `a_twin_let_go_plays_its_tail_out_and_takes_no_new_key` (with the twin taking
+every key, it fails holding the new key). `preset_render` (every preset with POLY's ten
+voices) against UNISON's commit: every preset the same to the bit; `preset_levels` the same.
+The learn list's (50). The plug-in's unit tests (136 passed, 7 ignored), the plug-in's and the
+model's integration tests; rustfmt; clippy.

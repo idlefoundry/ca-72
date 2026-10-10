@@ -81,11 +81,19 @@ and sends nothing of yours.
   past the audio band.
 - **POLY** (under the panel, not the instrument's): off, the one instrument as above. On,
   each note plays a whole instrument of its own, with its own keyboard circuit, contours
-  and glide, up to VOICES of them (2 to 10). A new note takes a free voice, else the
-  oldest of those let go, else the oldest held; a voice that was still held lifts its key
-  and presses the new one 13 ms later, so its contours start again (the circuit re-arms
+  and glide, up to VOICES of them (2 to 10). A new note takes the voice that last played
+  its key if that one is free or letting go (a chord struck again stays where it was), else
+  the free voice whose last note began longest ago (the notes go round the voices), else the
+  one let go longest ago, else the one held longest; a voice that was still held lifts its
+  key and presses the new one 13 ms later, so its contours start again (the circuit re-arms
   its trigger only after about 12 ms, and so the note's pitch and attack come 13 ms
   late). The wheels reach every voice. Switching POLY stops the notes sounding.
+- **UNISON** (off by default): every note on VOICES whole instruments at once, each taking
+  the keys as the one instrument does (the lowest note held, triggering once), each with
+  its own parts under ENTROPY and its own place under SPREAD, their oscillators at
+  different points of their cycles; turned down so that it sounds about as loud as one
+  voice. It outranks POLY. Switching it, or VOICES while it is on, stops the notes
+  sounding.
 - **ENTROPY** (0 to 100 %, off by default): each voice its own parts, as if built from a
   different batch: the three oscillators' tuning, the filter's cutoff and EMPHASIS, the
   contours' times and GLIDE, each off by a little; the oscillators and the cutoff drift
@@ -93,16 +101,25 @@ and sends nothing of yours.
   still keeps a tiny mismatch and drift of its own, as no two real ones are the same:
   perfectly identical oscillators lock in phase and sound louder, not better. The host
   parameter **Lock** makes them identical (the circuit as drawn), its level matched.
-- **SPREAD** (0 to 100 %, off by default): POLY's voices across the stereo field, the
-  first in the centre and the next alternately left and right. With POLY off the voice
-  stays in the centre.
+- **SPREAD** (0 to 100 %, off by default): POLY's or UNISON's voices across the stereo
+  field, each as loud wherever it sits, where **SCATTER** puts them: EVEN (the default),
+  evenly from edge to edge, the first two at the edges; EDGES, every voice 60 to 100 % of
+  the way out to one side or the other; CENTER, the first in the centre and the rest spread
+  about it by the golden ratio. With POLY and UNISON off the voice stays in the centre
+  (unless DOUBLE). A voice moves to a new place over 10 ms.
+- **DOUBLE** (0 to 100 %, off by default): each note two whole voices, up to 20 cents apart,
+  the sharper on the left. With SPREAD the pair goes out to either side of the centre, as
+  far as SCATTER puts the note's voice (with EDGES, and with POLY and UNISON off, all of
+  SPREAD's way); at SPREAD 0 both are in the centre. Turned down so that it sounds about as
+  loud as one voice a note; it doubles the voices' work. Switching it on or off stops the
+  notes sounding; a doubled voice let go plays its tail out.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
   default), and the modulation wheel (CC 1) moves the MODULATION wheel. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
-- **Output:** stereo, the same on both channels unless SPREAD places POLY's voices; on a
-  mono output, the two channels together.
+- **Output:** stereo, the same on both channels unless SPREAD places the voices or DOUBLE's
+  pairs; on a mono output, the two channels together.
 - **FEEDBACK** (the phones' VOLUME knob, 0 by default): the instrument has no overdrive
   control; players cable its PHONES output into EXTERNAL INPUT. This knob is that cable:
   turn it up, switch the MIXER's EXTERNAL INPUT on and raise its VOLUME, and the output
@@ -183,7 +200,8 @@ removes its controller, Escape stops waiting and then closes the drawer. It is t
 learn **LOCK**, which has no control on the panel.
 
 **What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches, the left
-hand controller's GLIDE and DECAY switches, and POLY, VOICES, ENTROPY, SPREAD and LOCK. Not
+hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, SPREAD,
+SCATTER, DOUBLE and LOCK. Not
 the PITCH and MODULATION wheels (MIDI pitch bend and the modulation wheel, CC 1, move them
 already), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
 
@@ -194,7 +212,7 @@ off), 121 (reset all controllers) and 123 (all notes off) do what they always di
 
 **How a controller moves a control:** its value, 0 to 127, sets a knob to that share of its
 travel (127 is the top); RANGE and WAVEFORM to one of their six positions, each an equal
-share of 0–127 (VOICES, its nine); a switch off at 0–63 and on at 64–127. The control goes
+share of 0–127 (VOICES, its nine; SCATTER, its three); a switch off at 0–63 and on at 64–127. The control goes
 straight to the controller's value at its first message ("jump" takeover: it does not wait
 for the controller to pass the control's position). What you hear of a knob follows it over
 10 ms, so that its steps of 1/127 do not zip; the control itself, your host and a saved
@@ -352,7 +370,8 @@ The service documents and datasheets the model was derived from are not included
   depends on the machine, the host's block size and the host: on a machine of 1 or 2
   processors every voice plays on the host's thread, and on macOS a host whose audio
   threads are not in an audio workgroup runs its share of the voices more slowly. With more
-  than the machine plays, expect dropouts; VOICES (4 by default) sets the most.
+  than the machine plays, expect dropouts; VOICES (4 by default) sets the most. DOUBLE
+  makes each voice two, so ten voices doubled are twenty voices' work.
   A voice that one of the plug-in's threads has not finished by three quarters of the
   block's period is silent for the rest of that run, and the block's later runs play on
   the host's thread, rather than the block being late. An export or a freeze waits for

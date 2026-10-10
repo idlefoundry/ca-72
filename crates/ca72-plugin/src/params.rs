@@ -317,6 +317,10 @@ pub struct Ca72Params {
     /// placement: a session saved before it reads it off.
     #[id = "unison"]
     pub unison: BoolParam,
+    /// DOUBLE: each note two voices, detuned up to 20 cents, either side of the centre, 0 to
+    /// 100 % (decisions.md R-STEREO). The last parameter: a session saved before it reads 0.
+    #[id = "double"]
+    pub double: FloatParam,
 }
 
 /// An amount, 0 to 100 %.
@@ -421,6 +425,7 @@ impl Default for Ca72Params {
             lock: BoolParam::new("Lock (oscillators identical)", false),
             placement: EnumParam::new("Scatter Placement", Scatter::Even),
             unison: BoolParam::new("Unison", false),
+            double: percent("Double"),
         }
     }
 }
@@ -522,6 +527,7 @@ impl Ca72Params {
             spread: value(&self.spread) / 100.0,
             placement: self.placement.value().into(),
             unison: self.unison.value(),
+            double: value(&self.double) / 100.0,
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),

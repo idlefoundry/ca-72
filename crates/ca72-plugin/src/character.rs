@@ -80,6 +80,18 @@ impl Placement {
         }
     }
 
+    /// How far out to either side DOUBLE's pair of voice `k` of `n` sits at full SPREAD, 0 to 1
+    /// (the CA-74's R41; decisions.md R-STEREO): with EDGES every pair at the edges; with EVEN
+    /// and CENTER as far out as the voice's own place, its flat voice that far to the right and
+    /// its sharp twin as far to the left, so each pair stays about the centre (a voice placed
+    /// in the centre, its pair there too).
+    pub fn pair(self, k: usize, n: usize) -> f64 {
+        match self {
+            Placement::Edges => 1.0,
+            _ => self.place(k, n).abs(),
+        }
+    }
+
     /// Its index (0..3), as the voices' mix carries it and a preset saves it, and back.
     pub fn index(self) -> usize {
         match self {
@@ -230,6 +242,12 @@ impl Character {
             cents,
             amount * (entropy::CUTOFF * self.cutoff + entropy::CUTOFF_DRIFT * d),
         )
+    }
+
+    /// How far out DOUBLE's pair of this voice sits, as `placement` has it among `voices`
+    /// ([`Placement::pair`]).
+    pub fn pair(&self, placement: Placement, voices: usize) -> f64 {
+        placement.pair(self.voice, voices)
     }
 
     /// The gains (left, right) that put the voice in its place, as `placement` has it among
