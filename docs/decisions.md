@@ -3185,3 +3185,53 @@ passed, 7 ignored: the placement's and the curve's tests moved to the kit, where
 its integration tests; rustfmt; clippy. Not yet: the CA-74 on the kit's K6 (and K5 from its
 published commit).
 
+
+## R-INNER. INNER: the inner edge of each side's band, and WIDTH, INNER and DETUNE three across
+
+**The owner, 2026-10-10:** "right now, we have a way to control the outer edges, which is
+width ... Imagine we're just dealing with the left-hand side of the stereo spectrum. You have
+your far left-hand edge ... and then you have your right-hand edge, which is currently our
+center. Width would bring things in from the left-hand edge, but we would have no control to
+bring things in from the right-hand edge, from the center." Told the two choices (a voice
+placed in the centre; INNER a place of its own or a share of WIDTH) with a recommendation for
+each: "Go with 'inner' and yes, this should affect the CA-74 as well". Shown two layouts for
+each plug-in, drawn by their renderers (INNER under WIDTH, the display beside it under DETUNE;
+or WIDTH, INNER and DETUNE three across, the VOICES section narrower), with three across
+recommended here: "3 across wins for both".
+
+**Agent decisions, 2026-10-10**, as recommended to the owner and taken with the name:
+- **INNER is plugin-kit's** (its K7, at ac04479, the kit's branch `stereo-inner` on `stereo`;
+  the panel's materials from the same commit): INNER, 0 to 100 %, is a share of SPREAD's way
+  out, not a place of its own, so the two never cross and SPREAD still scales the whole
+  picture; each side's voices sit in a band from there to SPREAD's edge, each as far across it
+  as SCATTER puts it at full SPREAD. A voice SCATTER puts in the centre (CENTER's first, EVEN's
+  last of an odd number) takes the side its turn falls on, the left first, so INNER clears the
+  centre; DOUBLE's pairs keep to the band, a pair in the centre opening to INNER's share either
+  side. The one voice's DOUBLE pair with POLY and UNISON off, all of SPREAD's way out (R-STEREO),
+  stays there.
+- **The parameter:** `inner`, the host's Inner, 0 to 100 %, off by default, after AUTO GAIN, so
+  a session or preset saved before reads it 0; a preset holds it (no factory preset names it);
+  MIDI Learn's INNER (54 learnable controls: 27 knobs, 8 selectors, 19 switches). It glides as
+  SPREAD does (the voices' targets move, 10 ms), it is not part of a sound's key for AUTO GAIN,
+  and it does nothing at SPREAD 0 or with POLY and UNISON off and no DOUBLE.
+- **The display** draws each voice where the engine's gains put it, INNER's band and all, by
+  the kit's `voice_at` and `pair_at`, which the gains use too.
+- **The strip, three across** (R-LOOK's A6 redrawn in its STEREO section): VOICES (370, 976) and
+  STEREO (976, 2370), OUTPUT as it was; WIDTH, INNER and DETUNE 430 apart about STEREO's middle
+  (1243, 1673, 2103), each a knob and its readout; the two banks of tabs centred over the
+  section as a pair, 180 apart, in their order; the display from WIDTH's unit to DETUNE's, wider
+  than before. INNER is a strip knob (51 controls), appended after the others so that no
+  control's index moves, with its readout, a switch as WIDTH's (off, and back on at its amount),
+  lit where it does something; its tip reads "INNER: 40 %".
+- `docs/panel.png` is left as it was (the 0.1.0 picture, as R-LOOK leaves it): drawn again, it
+  would be the worn editor's first picture there, for the look's merge to choose.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
+dd215c4: every factory preset (24) the same to the bit; three presets each with POLY, UNISON and
+DOUBLE in each placement, SPREAD 80 % (27 renders), the same to the bit. The kit's tests (19,
+its K7); here `inner_clears_the_centre_and_one_voice_stays_there`,
+`the_strips_switches_turn_their_amounts_off_and_back_on_at_their_last`,
+`the_strips_units_stand_in_their_sections_clear_of_each_other`, and the strip's MIDI Learn,
+gesture, tip and switch tests with INNER. The panel's and plug-in's tests, 202 passed, 16
+ignored; `approved.png` (the panel) unchanged; rustfmt; clippy with `-D warnings`. Not yet: the
+installed build in a host.
