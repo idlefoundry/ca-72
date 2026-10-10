@@ -135,6 +135,11 @@ and sends nothing of yours.
   turn it up, switch the MIXER's EXTERNAL INPUT on and raise its VOLUME, and the output
   overdrives the external input's preamplifier and the mixer (OVERLOAD lights). With it on
   a voice costs about a fifth more.
+- **FILTER MODE** (at the head of the filter's switch column, LO by default): the original
+  has no such switch; a modern recreation of the instrument has, and this is its high-pass,
+  measured on one. At HI the output is the mixer's less the filter's: about 6 dB an octave
+  below the cutoff, the deepest bass coming back, and as EMPHASIS rises, a shelf with the
+  resonance's peak on it rather than a high-pass. At LO the filter is the drawing's.
 - **POWER** is the host's bypass: the output fades out over 10 ms and back in.
 
 The editor works like the panel:

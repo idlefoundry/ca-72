@@ -1,7 +1,9 @@
 //! The panel as drawn matches the design the owner approved (`approved.png`: the mock-up at one
-//! panel unit a pixel, every control at half its travel). The mock-up had the left hand's
-//! controls in a column left of the panel, 330 units wide; they are on the strip below now (A6,
-//! R-LOOK), so the panel is compared with the mock-up right of its column.
+//! panel unit a pixel, every control at half its travel). The switch column between MIXER and
+//! MODIFIERS (the mock-up's x 2100 to 2330, y 225 to 690) is the renderer's own, as the owner
+//! chose it on 2026-10-09 with FILTER MODE at its head (decisions.md R-HP). The mock-up had the
+//! left hand's controls in a column left of the panel, 330 units wide; they are on the strip
+//! below now (A6, R-LOOK), so the panel is compared with the mock-up right of its column.
 
 use ca72_panel::art::{PANEL_H, PLATE_H, PLATE_X, PLATE_Y, W};
 use ca72_panel::{CONTROLS, Renderer, Scene};

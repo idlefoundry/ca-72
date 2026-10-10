@@ -775,10 +775,11 @@ fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
     };
     divider(s, 445.0, &[(198.0, 297.0)]);
     divider(s, 1122.0, &[]);
-    divider(s, 1908.0, &[(98.0, 197.0), (234.0, 292.0), (298.0, 392.0)]);
+    divider(s, 1908.0, &[(98.0, 319.0), (356.0, 414.0), (420.0, 514.0)]);
     divider(s, 2578.0, &[]);
     divider(s, 2956.0, &[]);
-    line(s, 1908.0, 447.0, 2578.0, 447.0, 4.0);
+    // (From beside the column: KEYBOARD CONTROL 2 sits across the line's old start.)
+    line(s, 1976.0, 447.0, 2578.0, 447.0, 4.0);
     // Section titles along the foot, as wide as printed.
     for (i, (x0, x1, t, y)) in TITLES.iter().enumerate() {
         let spaced = layout.titles[i].map_or(String::new(), |w| {
@@ -836,15 +837,21 @@ fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
     legend(s, 1763.0, 226.0, "OVERLOAD");
     legend(s, 1764.0, 407.0, "WHITE");
     legend(s, 1764.0, 558.0, "PINK");
+    // The column as the hardware reference has it (decisions.md R-HP): FILTER MODE at its
+    // head, the original's three switches 122 units lower.
     legend(s, 1910.0, 114.0, "FILTER");
-    legend(s, 1910.0, 134.0, "MODULATION");
-    legend(s, 1954.0, 207.0, "ON");
-    legend(s, 1954.0, 228.0, "ON");
-    legend(s, 1837.0, 263.0, "1");
-    legend(s, 1910.0, 309.0, "KEYBOARD");
-    legend(s, 1910.0, 326.0, "CONTROL");
-    legend(s, 1837.0, 363.0, "2");
-    legend(s, 1954.0, 401.0, "ON");
+    legend(s, 1910.0, 134.0, "MODE");
+    legend(s, 1860.0, 207.0, "LO");
+    legend(s, 1954.0, 207.0, "HI");
+    legend(s, 1910.0, 236.0, "FILTER");
+    legend(s, 1910.0, 256.0, "MODULATION");
+    legend(s, 1954.0, 329.0, "ON");
+    legend(s, 1954.0, 350.0, "ON");
+    legend(s, 1837.0, 385.0, "1");
+    legend(s, 1910.0, 431.0, "KEYBOARD");
+    legend(s, 1910.0, 448.0, "CONTROL");
+    legend(s, 1837.0, 485.0, "2");
+    legend(s, 1954.0, 523.0, "ON");
     // MODIFIERS.
     lettered(s, 2282.0, 31.0, "FILTER", 31.0);
     legend(s, 2081.0, 55.0, "CUTOFF FREQUENCY");

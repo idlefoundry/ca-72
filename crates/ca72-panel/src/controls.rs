@@ -227,7 +227,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 50] = [
+pub const CONTROLS: [Control; 51] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -341,12 +341,25 @@ pub const CONTROLS: [Control; 50] = [
         Colour::Blue,
         Orient::Bottom,
     ),
-    // Across MIXER and MODIFIERS: the filter's modulation and keyboard control.
+    // Across MIXER and MODIFIERS: the filter's mode, modulation and keyboard control. FILTER
+    // MODE, which the original does not have, at the column's head, where the hardware
+    // reference has it (decisions.md R-HP): LO, or HI pressed.
+    rocker(
+        "filter_mode",
+        "FILTER MODE (LO or HI)",
+        Place::Panel,
+        1907.0,
+        169.0,
+        108.0,
+        48.0,
+        Colour::Red,
+        Orient::Right,
+    ),
     switch(
         "filter_mod",
         "FILTER MODULATION",
         1907.0,
-        169.0,
+        291.0,
         Colour::Red,
     ),
     rocker(
@@ -354,7 +367,7 @@ pub const CONTROLS: [Control; 50] = [
         "KEYBOARD CONTROL 1",
         Place::Panel,
         1907.0,
-        264.0,
+        386.0,
         108.0,
         48.0,
         Colour::Red,
@@ -365,7 +378,7 @@ pub const CONTROLS: [Control; 50] = [
         "KEYBOARD CONTROL 2",
         Place::Panel,
         1907.0,
-        364.0,
+        486.0,
         108.0,
         48.0,
         Colour::Red,

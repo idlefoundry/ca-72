@@ -153,6 +153,18 @@ pub enum NoiseColor {
     Pink,
 }
 
+/// FILTER MODE, which the original does not have (decisions.md R-HP): LO, the filter as
+/// drawn; HI, the hardware reference's high-pass (the mixer's output less the filter's).
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterMode {
+    #[id = "lo"]
+    #[name = "LO"]
+    Lo,
+    #[id = "hi"]
+    #[name = "HI"]
+    Hi,
+}
+
 #[derive(Params)]
 pub struct Ca72Params {
     /// The noise generator's seed, saved with the session so that it renders the same noise
@@ -242,6 +254,8 @@ pub struct Ca72Params {
     pub osc3_volume: FloatParam,
 
     // MODIFIERS
+    #[id = "filter_mode"]
+    pub filter_mode: EnumParam<FilterMode>,
     #[id = "filter_mod"]
     pub filter_mod: BoolParam,
     #[id = "keyboard_control_1"]
@@ -421,6 +435,7 @@ impl Default for Ca72Params {
             noise_type: EnumParam::new("Noise Color", NoiseColor::White),
             osc3_on: BoolParam::new("Osc 3 On", false),
             osc3_volume: ten("Osc 3 Volume", 8.0),
+            filter_mode: EnumParam::new("Filter Mode", FilterMode::Lo),
             filter_mod: BoolParam::new("Filter Modulation", false),
             keyboard_control_1: BoolParam::new("Keyboard Control 1", true),
             keyboard_control_2: BoolParam::new("Keyboard Control 2", false),
@@ -586,6 +601,7 @@ impl Ca72Params {
             mod_mix: ten(&self.mod_mix),
             osc_mod: self.osc_mod.value(),
             filter_mod: self.filter_mod.value(),
+            filter_hi: self.filter_mode.value() == FilterMode::Hi,
             pitch_wheel: value(&self.pitch_wheel),
             mod_wheel: value(&self.mod_wheel),
             ext_volume: ten(&self.ext_volume),

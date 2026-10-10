@@ -54,6 +54,7 @@ pub fn controls_of(s: &Sound) -> Controls {
             "noise_on" => p.noise_on = on(v),
             "noise_volume" => p.noise_volume = v / 10.0,
             "noise_type" => p.noise_pink = on(v),
+            "filter_mode" => p.filter_hi = on(v),
             "filter_mod" => p.filter_mod = on(v),
             "keyboard_control_1" => p.keyboard_control_1 = on(v),
             "keyboard_control_2" => p.keyboard_control_2 = on(v),

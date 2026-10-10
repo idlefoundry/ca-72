@@ -3185,3 +3185,67 @@ passed, 7 ignored: the placement's and the curve's tests moved to the kit, where
 its integration tests; rustfmt; clippy. Not yet: the CA-74 on the kit's K6 (and K5 from its
 published commit).
 
+- **The number** of this record is a placeholder until the merge.
+
+## R-HP. FILTER MODE: the hardware reference's high-pass
+**Owner decisions, 2026-10-09.** The CA-72 gets the hardware reference's FILTER MODE switch
+(LO or HI): "I'm just looking to offer the same functionality." Measured on the reference
+first (session HP), then built. On the panel where the reference has it: at the head of the
+switch column between MIXER and MODIFIERS, the original's three switches below it (the
+second of two mock-ups drawn by the panel's renderer; the first kept them in place and put
+FILTER MODE at the column's foot).
+
+**Agent decisions, 2026-10-09** (not separately approved):
+- **What HI is** (session HP: EMPHASIS 0, 2.5, 5 and 7.5, each in LO and HI back to back at
+  six control voltages; `scripts/calibration/hp_mode.py`). The filter's input less its
+  low-pass output at equal gain, through the same output: HI = V - b LO against the
+  reference's MIX output, b = 1.002, V flat within 0.25 dB, explains all 24 sweeps to -29 to
+  -42 dB, and rejects a high-pass not made from LO (the analysis's self-test). So about 6 dB
+  an octave below the corner, not the 24 its maker gives; a bump of +3 dB above it; the deep
+  bass back to about -8 dB at 30 Hz, where only the low-pass branch has the output's
+  coupling (C5/C1); and as EMPHASIS lowers LO's passband, a shelf (-12, -3 and -2 dB below
+  the corner at 2.5, 5 and 7.5) with the resonance's peak on it. The cancellation holds as
+  the input overdrives (150 Hz at CUT CV -4 V, within 0.85 dB over 34 dB of level), and HI
+  distorts less than LO: part of LO's distortion is after the mixing point. EMPHASIS 10
+  sings at LO's pitch and level in HI.
+- **The circuit** (`circuits/boards/filter-mode.lib`, behavioural: the reference's circuit
+  is not known, only its transfer). HI is the bus's Norton current (the current its
+  channels would push into a virtual ground) through `vcf::MODE_RT`, a coupling of
+  `vcf::MODE_HZ`, less the filter's output. The Norton current, not the bus's voltage:
+  against it, the CA-72's LO falls at low frequencies as the reference's does against MIX
+  (-0.82 and -0.88 dB at 30 Hz), while against the bus's voltage C27 would add its own.
+  MODE_RT, 23.6K, is the filter's passband at EMPHASIS 0 as the voice has it, from ngspice:
+  the voice's trims (REGEN CAL at 0.78, which leaves a little feedback at EMPHASIS 0) and
+  every mixer channel's resistor on the bus (on or off, they share the current: one channel
+  alone gives 26.9K; NOISE on changes it by 0.15 dB). At 26.9K, HI's shelf sat 1.1 dB too
+  high against the reference's. MODE_HZ, 3 Hz, matches the phase between the two branches,
+  which is all HI hears below 100 Hz: within 0.3 degrees and 0.1 dB from 15 to 80 Hz.
+  (The reference's direct branch leads its MIX as 6.8 Hz would, but MIX is not the
+  CA-72's Norton current; at 6.8 Hz HI's lows came back 3 dB short at 30 Hz.)
+- **In real time** HI is taken inside the filter's oversampled step (`Vcf::high_pass`), so
+  that the two branches line up through the resamplers; the coupling's state runs in LO
+  too, as its capacitor would. A few operations a step: `preset_cost` (ten voices, one
+  thread, d07d1d0 and this branch alternated three times under the timing lock, the least
+  of each) moved by -1.9 to +1.7 %, median +0.3 %, inside its run-to-run spread (the
+  machine's load 4 to 7). LO is the output as before: every factory preset renders the
+  same to the bit (`preset_render`, against d07d1d0).
+- **Against ngspice** (`vcf_realtime::filter_mode_matches_the_circuit`, the bench with the
+  voice's trims and the rest of the mixer on its bus, `MIXER_REST`): HI's error measured
+  against the larger branch (HI's error is LO's, the direct branch is exact), budget -26 dB
+  to 10 kHz (LO's own 0.3 dB with a few degrees), -18 dB above; worst -27.2 dB, at 8.9 kHz
+  on a resonant peak.
+- **Against the reference** (`render_hp.sh`, `compare_hp.py`: session HP's takes through
+  `ca72-lab stim`, each normalised to its own LO passband): HI within a median of 0.1 to 1.0
+  dB and a 90th percentile of 1.7 dB in every pair (No Compromises; Potato the same within
+  0.4 dB); the lows at 30 Hz within 0.4 dB; the shelf within 0.8 dB at EMPHASIS 2.5 to 7.5.
+  What remains is LO's own (EMPHASIS's peak, the control voltage's scale: the calibration
+  README's "Still differs"). At EMPHASIS 0 the notch below the corner is deeper in the CA-72
+  (-41 to -60 dB against -29 to -46): its depth rests on a fraction of a degree.
+- **The plug-in:** `filter_mode` (LO by default), in presets (a preset without it is LO),
+  MIDI-learnable as a two-way switch, in `ca72-lab`'s patches as `"filter_mode": "lo"` or
+  `"hi"`. The panel test's approved drawing takes the new column from the renderer (its
+  region named in `tests/approved.rs`); everything else is still compared with the approved
+  mock-up.
+- **Not done:** no factory preset uses HI (the owner's call); the calibration README's list
+  of sessions gains session HP when this branch meets `cal/behringer`'s.
+- **The number** of this record, and board4.md's B4-HP, are placeholders until the merge.
