@@ -3642,7 +3642,8 @@ being placed on them as well? Show me a before/after video once you are done."
   the inner rim, darkened to 0.55 of its light and 0.38 just inside the rim, set back). The
   wheel comes forward from 0.72 of its size as he picks up his run; he runs at the wheel's
   foot, a little up the rising side (12 degrees at a full run), the wheel turning 137.5 degrees
-  a second under him.
+  a second under him. Then "don't wait for the hamster to come forward for him to start
+  running. He should already be running": running at full pace as the shutter opens on him.
 - **Agent decision, for "nothing ... decreases performance":** at rest nothing moves. The
   hamster runs while the synth sounds (its output over -40 dB), slows and stands when it falls
   quiet, and dozes off a second later (0.7 s; the mock-up offered this, its default ran
@@ -3652,7 +3653,8 @@ being placed on them as well? Show me a before/after video once you are done."
   (0.72 to 1.22 of a drop's size; rising quickly, falling over a fifth of a second); with
   DOUBLE a note's two drops beat against each other as two notes DETUNE apart do at 220 Hz (20
   cents, 2.5 a second), one swelling as the other ebbs and the two swaying in turn (24 % and 4
-  units at 10 cents or more), a pair coming out of its voice as DETUNE comes up from OFF.
+  units at 10 cents or more; then "a bit intense. dial it back a little": 13 % and 2), a pair
+  coming out of its voice as DETUNE comes up from OFF.
 - **The levels:** each voice's output's peak over a block was measured already (for knowing when
   a voice falls silent: `Engine::levels` keeps it); the output's peak is measured (two compares
   a sample) only while an editor is open, else a flag read a block. The audio thread keeps the
