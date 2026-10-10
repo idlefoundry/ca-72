@@ -8,7 +8,7 @@
 //! By hand: `cargo test --release -p ca72-plugin --test preset_cost -- --ignored
 //! --nocapture` (`CA72_SECONDS`, 4; `CA72_VOICES`, 10; `CA72_ONLY`, a part of a preset's
 //! name; `CA72_NO_FEEDBACK`, set: FEEDBACK at 0; `CA72_DOUBLE`, DOUBLE's amount in %, 0;
-//! `CA72_DRIVE`, DRIVE in dB, 0).
+//! `CA72_DRIVE`, DRIVE in dB, 0; `CA72_POTATO`, set: QUALITY at LO, the light voices).
 
 #![allow(clippy::unwrap_used)]
 
@@ -37,6 +37,7 @@ fn each_presets_cost_with_ten_voices() {
         }
         let mut c = controls_of(s);
         c.poly = true;
+        c.potato = std::env::var_os("CA72_POTATO").is_some();
         c.voices = voices;
         if no_feedback {
             c.feedback = 0.0;
