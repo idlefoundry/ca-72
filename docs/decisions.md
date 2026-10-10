@@ -3668,7 +3668,13 @@ being placed on them as well? Show me a before/after video once you are done."
   amount, its knob dimmed and not answering the pointer in SCATTER (MIDI may still move it).
   DOUBLE at DETUNE's 0 is a pair at one pitch (the engine told a ten-thousandth of a cent:
   `params::DOUBLED_AT_NONE`). A session or a preset saved before reads DOUBLE on wherever its
-  DETUNE is above 0 (`Ca72::filter_state`, `presets::targets`); no factory preset has DOUBLE.
+  DETUNE is above 0 (`Ca72::filter_state`, `presets::targets`); no factory preset had DOUBLE.
+- **Cycle of Fifths, a factory preset** (the owner, 2026-10-10: "I added a new preset "cycle of
+  fifths" let's make that a factory default"): the owner's preset as saved (ten UNISON voices,
+  two sawtooths at 8' about six semitones apart, DOUBLE at 100 cents, INNER 21, gliding), last
+  in `sounds/presets.toml`, DOUBLE named on; its MAIN OUTPUT VOLUME 8.6 (it was saved at 10)
+  for a momentary maximum of -17.97 LUFS, where the others are levelled (R15; `tests/
+  preset_levels.rs`: at 10 it was -11.5). Its tags, ours: fat, glide.
 - **The levels:** each voice's output's peak over a block was measured already (for knowing when
   a voice falls silent: `Engine::levels` keeps it); the output's peak is measured (two compares
   a sample) only while an editor is open, else a flag read a block. The audio thread keeps the

@@ -22,6 +22,7 @@ pub fn env<T: std::str::FromStr>(name: &str, default: T) -> T {
 pub fn controls_of(s: &Sound) -> Controls {
     let mut c = Ca72Params::default().controls();
     let on = |v: f64| v >= 0.5;
+    let mut doubled = None;
     for (id, v) in &s.values {
         let v = *v;
         let p = &mut c.panel;
@@ -88,9 +89,17 @@ pub fn controls_of(s: &Sound) -> Controls {
             }
             "feedback" => c.feedback = ca72::voice::feedback_law(v / 10.0),
             "lock" => c.lock = on(v),
+            // (DOUBLE, a switch of its own: its pair played at DETUNE's amount, at none a
+            // ten-thousandth of a cent; a preset without it, DOUBLE where DETUNE is above 0.)
+            "doubled" => doubled = Some(on(v)),
             "poly" | "voices" => {}
             other => panic!("{}: no parameter {other}", s.name),
         }
+    }
+    match doubled {
+        Some(true) => c.double = c.double.max(ca72_plugin::params::DOUBLED_AT_NONE),
+        Some(false) => c.double = 0.0,
+        None => {}
     }
     c
 }
