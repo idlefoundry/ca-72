@@ -3606,8 +3606,15 @@ being placed on them as well? Show me a before/after video once you are done."
   wheel, HI's amber lamp, ULTRA's Tesla lamp; changing QUALITY, what is up goes back down (1.8 s)
   before the next comes up (2.5 s) through the same shutter; then, from the build, "that's too
   long of an animation time. the transition from one mode to the next should take like 3
-  seconds of animation": 1.25 s down and 1.75 s up, three seconds in all (always open's 0.5 s
-  and 1.1 s as they were). The lenses are plain. Its menu (a
+  seconds of animation": 1.25 s down and 1.75 s up, three seconds in all.
+- **None in place of always open** (the owner, 2026-10-10: "i forgot about the "always open"
+  mode. Let's remove that. Now the alternative is no indicator animation area at all. Just the
+  switch and the panel will remain blank above it."): the opening's menu (a right click above
+  QUALITY, where it is or would be) is SHUTTER or NONE; with NONE nothing of it is drawn, its
+  ring's shadow included (it moved from the face's drawing into the opening's own layer), and
+  the editor keeps what the setting shows up, still, so that shown again it is there. The
+  computer's setting is the same (`ultra_shutter`, false now NONE). The note says so: "RIGHT-
+  CLICK ABOVE QUALITY TO HIDE ITS OPENING, OR SHOW IT." The lenses are plain. Its menu (a
   right click) is "QUALITY'S OPENING · SHUTTER" or "· ALWAYS OPEN"; always open, each setting's
   thing stands in the ring and fades in over the first 0.35 of its coming (1.1 s; out in
   0.5 s), a lamp lighting as before.
