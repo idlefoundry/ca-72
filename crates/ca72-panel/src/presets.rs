@@ -1729,8 +1729,8 @@ mod png {
     }
 
     /// The whole window in the worn skin at a pixel a unit, the panel as it opens over the
-    /// strip as it opens (MONO's tab lit), as `window.png` in `$CA72_WINDOW_PNG`, the folder:
-    /// for looking at the strip's legends and lit tabs.
+    /// strip (MONO's tab lit, a favourite's name on the rail, five of eight voices sounding), as
+    /// `window.png` in `$CA72_WINDOW_PNG`, the folder: for looking at the strip.
     #[test]
     #[ignore = "writes an image for a look"]
     fn window_png() {
@@ -1746,7 +1746,25 @@ mod png {
             ..crate::Scene::default()
         });
         let mut strip = crate::strip::StripRenderer::new(k);
-        strip.render(&crate::strip::StripScene::default(), panel.frame(), None);
+        // (A favourite's name on the rail, five of eight voices sounding.)
+        strip.render(
+            &crate::strip::StripScene {
+                field: crate::strip::Field::Scatter(
+                    (0..8)
+                        .map(|i| (f64::from(i) / 3.5 - 1.0, i % 3 != 1))
+                        .collect(),
+                ),
+                bar: BarScene {
+                    name: "Cycling Bass".into(),
+                    found: true,
+                    favorite: true,
+                    ..BarScene::default()
+                },
+                ..crate::strip::StripScene::default()
+            },
+            panel.frame(),
+            None,
+        );
         let mut whole = panel.frame().clone();
         whole.draw_pixmap(
             0,
