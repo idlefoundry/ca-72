@@ -1,0 +1,9 @@
+Use your image generation tool to make one image, then save it in the current directory as plate-a.png (copy the generated file there). Do nothing else.
+
+The image: a single blank name plate from a 1970s analogue synthesizer, the kind screwed to the instrument's wooden case, seen from straight in front. Landscape image, as large as you can make it.
+- The plate: a thin rectangle of black anodised aluminium, exactly 3.2 times as wide as it is tall, its corners only slightly rounded; its face satin with a very fine horizontal brushed grain just visible; a narrow polished chamfer all round its edge, bright aluminium where the anodising was cut through by the bevel.
+- Completely blank: no lettering, no logo, no holes, no screws.
+- Gently used, clean: no scratches, no dents.
+- Straight-on orthographic product photograph, the camera exactly in front of its centre, no perspective or tilt; the plate exactly centred and filling about 85 percent of the frame's width; on a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
+- Lighting: soft, from up and to the left: the chamfer brightest along the top and the left, darker along the bottom and the right; a faint broad sheen across the face, brighter towards the upper left.
+- No text, symbols, logos or numbers anywhere.

@@ -346,7 +346,11 @@ impl Renderer {
             out.push(art::lamp(scene.power));
             out.push(art::overload(scene.overload));
         }
-        out.push(art::plate());
+        out.push(if worn {
+            art::plate_worn()
+        } else {
+            art::plate()
+        });
         if let Some(c) = scene.learning.and_then(|i| CONTROLS.get(i)) {
             out.push(learn::ring(c));
         }
