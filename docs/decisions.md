@@ -2922,6 +2922,36 @@ list that drops down over the strip inside the window."
       window in menu mode; after a first click elsewhere every click took. Cubase closed
       without saving; the test builds recycled.
 
+**The owner, playing the A6 build, 2026-10-10:**
+- "the preset text needs to be vertically centered. Also, we need some sort of border or edge
+  around that screen to help it feel more natural": the name's dots a sixth smaller (5 units
+  apart), a capital in the window's middle (2 units above it) with the descenders inside it;
+  and a bezel the worn skin never drew (only the drawn one had a flat surround): a dark frame
+  standing proud of the rail's wood, its top edge catching the lamp, its shadow below, a black
+  lip into the glass, as tall as the keys beside it (`strip::name_bezel`, both skins).
+- "these orange buttons get too bright on the edges. looks unnatural": a lit tab's glow
+  pressed down to a quarter over its knee (0.8), its outermost band (from 0.86 of the way out)
+  up to 0.4 darker, and its light on the face round it 0.6 of what it was, one orange (the rim
+  had been a hot yellow-white round the cap, brighter than its face).
+- "all the knobs look like they have white halos. and why do the knobs always have 4 shiny
+  places that have nothing to do with the light?": the knobs' pictures quieted
+  (`assets/worn/quiet.py`, the README): the ring light they were made under had left broad
+  reflections round the skirts and a bright line round each outline. Each skirt's light is
+  the same all round now, each grip's to below its flutes, the outline held dark; the panel's
+  lamp alone lights them. The evenness test (`the_knobs_pictures_are_lit_evenly_all_round`)
+  holds: the edge between grip and skirt, off the cap's axis, is left as it was.
+- "If we moved the CA-72 badge to the top, we could save a lot of space in that center wooden
+  area.": the name plate is in the top strip now, its left end on the MODIFIERS|OUTPUT line as
+  before, between the strip's screws; the name board under the face is gone, the presets'
+  rail right under the face. The drawing is 3108 by 1775 (was 1907): the window 7 % shorter at
+  a width, and on a wide screen it opens wider (a 2560 by 1440 monitor: 2017 wide, was 1878).
+  The approved test compares the top strip and the face (the plate's place left out), and
+  allows as many strongly different pixels (32 levels or more) as a hundredth of the approved
+  panel's area with its board: over the smaller area the 99th percentile, which the board's
+  closely matching wood had kept under 32, is 36 on the same face (the commit before, measured
+  over the same rows: 1.457 and 36). On `potato` the last column's head (QUALITY, approved
+  apart, R-POTATO) is left out too: 1.445 and 30745 of 32851.
+
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
 **The owner, 2026-10-09:** "we need to add all the same stereo controls that we added to the

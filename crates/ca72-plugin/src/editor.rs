@@ -3317,8 +3317,9 @@ mod tests {
 
     #[test]
     fn the_editor_keeps_the_panels_proportions() {
-        // The panel's 585 and the strip's 470 under it (A6: the drawing 3108 by 1907).
-        assert_eq!(height_for(1720), 1055);
+        // The panel's 512 and the strip's 470 under it (A6, the name board gone: the drawing
+        // 3108 by 1775).
+        assert_eq!(height_for(1720), 982);
         assert_eq!(clamp_width(10), MIN_WIDTH);
         assert_eq!(clamp_width(99_999), MAX_WIDTH);
     }
@@ -3328,9 +3329,9 @@ mod tests {
         // A 14-inch MacBook Pro's screen less the menu bar; a 34-inch ultrawide's.
         assert_eq!(fitted_width(Some((1512.0, 949.0))), 1210);
         // The height's share sets it on a wide screen (the panel and the strip under it).
-        assert_eq!(fitted_width(Some((3440.0, 1400.0))), 1825);
-        assert_eq!(fitted_width(Some((3840.0, 800.0))), 1043);
-        assert_eq!(height_for(1043), 640);
+        assert_eq!(fitted_width(Some((3440.0, 1400.0))), 1961);
+        assert_eq!(fitted_width(Some((3840.0, 800.0))), 1121);
+        assert_eq!(height_for(1121), 640);
         assert_eq!(fitted_width(None), DEFAULT_WIDTH);
         assert_eq!(
             Ca72Params::default().editor_width.load(Ordering::Relaxed),
@@ -3348,12 +3349,12 @@ mod tests {
         let whole = r(0, 0, 5120, 1440);
         let (left, right) = (r(0, 0, 2560, 1440), r(2560, 0, 2560, 1440));
         let monitors = [(left, true), (right, false)];
-        assert_eq!(fitted_width(Some((5120.0, 1440.0))), 1878);
+        assert_eq!(fitted_width(Some((5120.0, 1440.0))), 2017);
         assert_eq!(
             monitor_area(whole, &monitors, Some((3000, 700)), None),
             right
         );
-        assert_eq!(fitted_width(Some((2560.0, 1440.0))), 1878);
+        assert_eq!(fitted_width(Some((2560.0, 1440.0))), 2017);
         // The pointer elsewhere: the primary; no RandR: the whole screen, as before.
         assert_eq!(monitor_area(whole, &monitors, None, None), left);
         assert_eq!(monitor_area(whole, &[], Some((3000, 700)), None), whole);
