@@ -6,8 +6,8 @@
 //! Tesla coil in it. Choosing one, the blades turn open from the middle and it comes up through
 //! the opening in one motion: a lamp turning its knurled bezel home and lighting as it turns,
 //! the hamster's wheel coming forward as he starts to run. Choosing another, what is up goes
-//! back down and the blades close before they open on the next. With the shutter off (always
-//! open), what each setting shows stands in the ring, fading in and out.
+//! back down and the blades close before they open on the next. Or none of it (the owner's
+//! choice, the opening's menu): the panel blank above QUALITY.
 //!
 //! The lamps follow the synth (the owner: "Perhaps something that can match the intensity of
 //! the synth itself?"): dim at rest, brightening as it plays, the filament flaring, a warm glow
@@ -39,20 +39,15 @@ const CURVE: f64 = 1.25;
 const BLADE_TURN: f64 = 72.0;
 /// How long it takes, seconds: opening (the shutter, then what comes up), closing (a change of
 /// setting, one after the other, three seconds: the owner, 2026-10-10, "the transition from
-/// one mode to the next should take like 3 seconds"; they were 2.5 and 1.8); with the shutter
-/// off, what stands in the ring coming (a lamp lighting), and going.
+/// one mode to the next should take like 3 seconds"; they were 2.5 and 1.8).
 pub const OPEN_S: f64 = 1.75;
 pub const CLOSE_S: f64 = 1.25;
-pub const STILL_ON_S: f64 = 1.1;
-pub const STILL_OFF_S: f64 = 0.5;
 /// Where its stages fall in the opening (shares of it): the blades open, then what waits comes
 /// up, a lamp turning and lighting (the owner: "one motion upwards that turns and the light
 /// bulb turns on"), its light a beat behind the turn, as if the turn made the contact.
 const OPEN: (f64, f64) = (0.04, 0.44);
 const LIFT: (f64, f64) = (0.44, 1.0);
 const LIGHT_LAG: f64 = 0.12;
-/// With the shutter off, how much of its coming it takes to fade in.
-const FADE: f64 = 0.35;
 /// The well's floor, a share of the opening's radius.
 const FLOOR: f64 = 0.86;
 /// The blades' and the ring's metal: the face's warm black (the owner: "plain sort of gunmetal
@@ -89,8 +84,9 @@ pub struct Opening {
     pub hamster: f64,
     pub lamp: f64,
     pub coil: f64,
-    /// The shutter off (always open).
-    pub still: bool,
+    /// None of it shown: the panel blank above QUALITY (the owner, 2026-10-10: "the
+    /// alternative is no indicator animation area at all").
+    pub hidden: bool,
     /// The synth's level (0 silent to 1 loud) as a lamp's filament follows it.
     pub level: f64,
     /// The hamster: how fast he runs (0 standing to 1 a full run), the frame of his run, how
@@ -162,38 +158,27 @@ fn warming(warm: f64) -> f64 {
     warm.powf(1.7) * flick
 }
 
-/// Where everything is, `p` of the way come (`still`: the shutter off).
+/// Where everything is, `p` of the way come.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
-    /// The blades, 0 closed to 1 gone under the ring (1 with the shutter off).
+    /// The blades, 0 closed to 1 gone under the ring.
     pub open: f64,
     /// What comes up: risen (0 waiting in the well, 1 standing in the ring; past 1 a little
     /// as it settles), a lamp's bezel turned home (0 turned back, 1 home), lit (0 dark, 1
-    /// fully), and how much of it shows (with the shutter off, fading in; else 1).
+    /// fully).
     pub rise: f64,
     pub twist: f64,
     pub glow: f64,
-    pub shown: f64,
 }
 
-pub fn look(p: f64, still: bool) -> Look {
+pub fn look(p: f64) -> Look {
     let p = p.clamp(0.0, 1.0);
-    if still {
-        return Look {
-            open: 1.0,
-            rise: 1.0,
-            twist: 1.0,
-            glow: warming(p),
-            shown: smooth(0.0, FADE, p),
-        };
-    }
     let (l0, l1) = LIFT;
     Look {
         open: smooth(OPEN.0, OPEN.1, p),
         rise: if p < l0 { 0.0 } else { settle(l0, l1, p) },
         twist: smooth(l0, l1, p),
         glow: warming(smooth(l0 + LIGHT_LAG * (l1 - l0), l1, p)),
-        shown: 1.0,
     }
 }
 
@@ -237,6 +222,14 @@ fn shown(o: &Opening) -> Shown {
 /// in it and the ring round it), drawn again only as something comes or goes, and the front
 /// (what is in it, the shutter over it, its light), drawn again as it moves.
 pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
+    if o.hidden {
+        let empty = Layer {
+            origin: origin(),
+            bounds: BOUNDS,
+            ..Layer::default()
+        };
+        return [empty.clone(), empty];
+    }
     let mut back = Svg::default();
     let body = Svg::default();
     let mut over = Svg::default();
@@ -244,7 +237,7 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
     let p = match shown(o) {
         Shown::Hamster(p) | Shown::Lamp(_, p) => p,
     };
-    let l = look(p, o.still);
+    let l = look(p);
     let mut floor = Vec::new();
     if l.open > 0.0 {
         well(&mut back);
@@ -260,17 +253,18 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
             Shown::Lamp(lamp, _) => lamp_worn(lamp, o, p, &l, &mut back, &mut over, &mut sprites),
         }
     }
+    ring_shade(&mut back);
     let mut rim = Svg::default();
     ring(&mut rim);
     if l.open < 1.0 {
         shutter(&mut over, l.open);
     }
     if let Shown::Lamp(lamp, _) = shown(o) {
-        let lit = driven(l.glow, o.level) * l.shown;
+        let lit = driven(l.glow, o.level);
         if lit > 0.0 {
             halo(&mut over, lamp.light().0, lit);
         }
-        let k = l.glow * l.shown * o.level;
+        let k = l.glow * o.level;
         if k > 0.0 {
             spill(&mut over, lamp.light().0, k);
         }
@@ -313,7 +307,7 @@ fn lamp_worn(
         put!(
             body,
             "<defs><radialGradient id='u-shade'><stop offset='0.75' stop-color='#000' stop-opacity='{}'/><stop offset='1' stop-color='#000' stop-opacity='0'/></radialGradient></defs><circle cx='{}' cy='{}' r='{}' fill='url(#u-shade)'/>",
-            N(0.55 * l.rise.min(1.0) * l.shown),
+            N(0.55 * l.rise.min(1.0)),
             N(3.0 * l.rise),
             N(5.0 * l.rise),
             N(LAMP_R * sc * 1.12)
@@ -321,26 +315,21 @@ fn lamp_worn(
     }
     let [lens_off, lens_on, bezel_off, bezel_on] = lamp.parts();
     let (d, deg) = (2.0 * LAMP_R, -TURN * (1.0 - l.twist));
-    sprites.push(picture(lens_off, d, sc, 0.0, l.shown));
+    sprites.push(picture(lens_off, d, sc, 0.0, 1.0));
     if glow > 0.0 {
-        sprites.push(picture(lens_on, d, sc, 0.0, glow * l.shown));
+        sprites.push(picture(lens_on, d, sc, 0.0, glow));
     }
-    sprites.push(picture(bezel_off, d, sc, deg, l.shown));
+    sprites.push(picture(bezel_off, d, sc, deg, 1.0));
     if glow > 0.0 {
-        sprites.push(picture(bezel_on, d, sc, deg, glow * l.shown));
+        sprites.push(picture(bezel_on, d, sc, deg, glow));
     }
-    let k = l.glow * l.shown * o.level;
+    let k = l.glow * o.level;
     if k > 0.0 {
         flare(over, lamp, sc, k);
     }
     // The lightning, once the coil stands lit above the ring.
-    if lamp == Lamp::Tesla && (o.still || l.rise > 0.5) {
-        let power = if o.still {
-            smooth(0.3, 1.0, p)
-        } else {
-            smooth(LIFT.0 + 0.3 * (LIFT.1 - LIFT.0), LIFT.1, p)
-        } * l.shown
-            * o.level;
+    if lamp == Lamp::Tesla && l.rise > 0.5 {
+        let power = smooth(LIFT.0 + 0.3 * (LIFT.1 - LIFT.0), LIFT.1, p) * o.level;
         if power > 0.0 {
             streaks(over, sc, o.spark, power);
         }
@@ -392,7 +381,7 @@ fn hamster(o: &Opening, l: &Look, body: &mut Svg, over: &mut Svg, sprites: &mut 
             N(3.0 * rise),
             N(5.0 * rise),
             N(WHEEL_R * sc * 1.08),
-            N(0.5 * rise * l.shown),
+            N(0.5 * rise),
             N(3.0 * rise),
             N(5.0 * rise),
             N(WHEEL_R * sc * 1.08)
@@ -404,7 +393,7 @@ fn hamster(o: &Opening, l: &Look, body: &mut Svg, over: &mut Svg, sprites: &mut 
         2.0 * r / WHEEL_RIM,
         sc,
         o.turn,
-        l.shown,
+        1.0,
     ));
     let foot = FOOT * r;
     let (w, h) = (HAMSTER_LEN * r, HAMSTER_LEN * r * FRAME_PX.1 / FRAME_PX.0);
@@ -414,7 +403,7 @@ fn hamster(o: &Opening, l: &Look, body: &mut Svg, over: &mut Svg, sprites: &mut 
         (cx * climb.cos() - cy * climb.sin()) * sc,
         (cx * climb.sin() + cy * climb.cos()) * sc,
     );
-    let awake = (1.0 - o.asleep) * l.shown;
+    let awake = 1.0 - o.asleep;
     if awake > 0.0 {
         sprites.push(Sprite {
             part: Part::Hamster(o.stride),
@@ -435,7 +424,7 @@ fn hamster(o: &Opening, l: &Look, body: &mut Svg, over: &mut Svg, sprites: &mut 
             deg: 0.0,
             flip: (false, false),
             zoom: sc,
-            alpha: o.asleep * l.shown,
+            alpha: o.asleep,
         });
     }
     // Deep in the well: darker.
@@ -696,6 +685,21 @@ fn well(s: &mut Svg) {
     }
 }
 
+/// The ring's shadow on the face, soft, down and to the right (as the panel's parts' are), under
+/// all of the opening (with it: hidden, there is none).
+fn ring_shade(s: &mut Svg) {
+    let r = APERTURE + RING / 2.0;
+    let out = r + 6.0;
+    put!(
+        s,
+        "<defs><radialGradient id='u-ring-shade' gradientUnits='userSpaceOnUse' cx='1.5' cy='2.5' r='{}'><stop offset='{}' stop-color='#000' stop-opacity='0'/><stop offset='{}' stop-color='#000' stop-opacity='0.4'/><stop offset='1' stop-color='#000' stop-opacity='0'/></radialGradient></defs><circle cx='1.5' cy='2.5' r='{}' fill='url(#u-ring-shade)'/>",
+        N(out),
+        N((r - 6.0) / out),
+        N(r / out),
+        N(out)
+    );
+}
+
 /// The ring round the opening: dark steel, thin, a soft bevel catching the light up and to
 /// the left; its inner edge dark where it drops into the opening.
 fn ring(s: &mut Svg) {
@@ -871,10 +875,17 @@ fn shutter(s: &mut Svg, open: f64) {
 /// mock-up's, which has none); opening, the shutter in its ring; open, a lamp a chrome ring
 /// round an amber or a blue lens, lit as it lights, or the hamster's wheel a brass ring.
 pub fn ultra(o: &Opening) -> Layer {
+    if o.hidden {
+        return Layer {
+            origin: origin(),
+            bounds: BOUNDS,
+            ..Layer::default()
+        };
+    }
     let p = match shown(o) {
         Shown::Hamster(p) | Shown::Lamp(_, p) => p,
     };
-    let l = look(p, o.still);
+    let l = look(p);
     let mut s = Svg::default();
     if l.open == 0.0 {
         return Layer {
@@ -892,8 +903,7 @@ pub fn ultra(o: &Opening) -> Layer {
                 let sc = WHEEL_DEEP + (1.0 - WHEEL_DEEP) * l.rise;
                 put!(
                     s,
-                    "<g opacity='{}'><circle r='{}' fill='none' stroke='#b08a3c' stroke-width='2'/><ellipse cy='{}' rx='{}' ry='{}' fill='#c98a3e'/></g>",
-                    N(l.shown),
+                    "<g><circle r='{}' fill='none' stroke='#b08a3c' stroke-width='2'/><ellipse cy='{}' rx='{}' ry='{}' fill='#c98a3e'/></g>",
                     N(WHEEL_R * sc),
                     N((FOOT * WHEEL_R - 7.0) * sc),
                     N(HAMSTER_LEN * WHEEL_R * 0.4 * sc),
@@ -908,8 +918,7 @@ pub fn ultra(o: &Opening) -> Layer {
                 };
                 put!(
                     s,
-                    "<g opacity='{}'><circle r='{}' fill='#bdbdb8' stroke='#6a6a66'/><circle r='{}' fill='{dark}'/><circle r='{}' fill='{lit}' fill-opacity='{}'/></g>",
-                    N(l.shown),
+                    "<g><circle r='{}' fill='#bdbdb8' stroke='#6a6a66'/><circle r='{}' fill='{dark}'/><circle r='{}' fill='{lit}' fill-opacity='{}'/></g>",
                     N(LAMP_R * sc),
                     N(LAMP_R * LENS * sc),
                     N(LAMP_R * LENS * sc),
@@ -931,24 +940,34 @@ pub fn ultra(o: &Opening) -> Layer {
 mod tests {
     use super::*;
 
-    /// Closed, only the shutter; open and lit, a lamp at its size with its bezel home; with the
-    /// shutter off, it always up, fading in, only its light changing; the light lags the turn.
+    /// Closed, only the shutter; open and lit, a lamp at its size with its bezel home; the light
+    /// lags the turn. Hidden, nothing at all.
     #[test]
     fn a_lamp_comes_up_turning_and_lighting() {
-        let shut = look(0.0, false);
+        let shut = look(0.0);
         assert_eq!((shut.open, shut.rise, shut.glow), (0.0, 0.0, 0.0));
-        let up = look(1.0, false);
-        assert_eq!((up.open, up.twist, up.shown), (1.0, 1.0, 1.0));
+        let up = look(1.0);
+        assert_eq!((up.open, up.twist), (1.0, 1.0));
         assert!((up.rise - 1.0).abs() < 1e-12 && (up.glow - 1.0).abs() < 1e-12);
-        let mid = look(0.6, false);
+        let mid = look(0.6);
         assert!(mid.open == 1.0 && mid.rise > 0.0 && mid.twist > mid.glow);
-        let still = look(0.0, true);
-        assert_eq!(
-            (still.open, still.rise, still.twist, still.glow, still.shown),
-            (1.0, 1.0, 1.0, 0.0, 0.0)
-        );
-        assert_eq!(look(1.0, true).glow, 1.0);
-        assert_eq!(look(FADE, true).shown, 1.0);
+        for o in [
+            Opening {
+                hidden: true,
+                ..Opening::default()
+            },
+            Opening {
+                hidden: true,
+                coil: 1.0,
+                level: 1.0,
+                ..Opening::default()
+            },
+        ] {
+            let [back, front] = ultra_worn(&o);
+            assert!(back.body.is_empty() && back.over.is_empty() && back.sprites.is_empty());
+            assert!(front.body.is_empty() && front.over.is_empty() && front.sprites.is_empty());
+            assert!(ultra(&o).body.is_empty());
+        }
         // Its layer: the shutter alone at first; the lamp's pictures once it opens, the floor
         // under them.
         let [back, front] = ultra_worn(&Opening::default());

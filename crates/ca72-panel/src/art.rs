@@ -1907,14 +1907,7 @@ pub fn worn_overlay() -> String {
         N(COL + POWER.0 - 21.0),
         N(TOP + POWER.1 - 59.0)
     );
-    // ULTRA's ring, which is always there (the shutter in it, or the lamp).
-    put!(
-        s,
-        "<circle cx='{}' cy='{}' r='{}' fill='none' stroke='#000' stroke-opacity='0.45' stroke-width='4' filter='url(#softer)'/>",
-        N(COL + ULTRA_AT.0 + 1.5),
-        N(TOP + ULTRA_AT.1 + 2.5),
-        N(crate::ultra::APERTURE + crate::ultra::RING / 2.0)
-    );
+    // (QUALITY's opening's ring casts its own, with it: it can be hidden, `ultra::ring_shade`.)
     for ((x, y), r) in [(LAMP_AT, 20.0), (OVERLOAD_AT, 24.0)] {
         put!(
             s,

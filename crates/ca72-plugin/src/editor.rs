@@ -696,12 +696,14 @@ impl Editing {
         let (peaks, output) = self.meters.take_levels();
         self.levels = peaks.map(level_of);
         self.output = level_of(output);
-        self.motion.step(
-            since.unwrap_or(0.0).min(0.05),
-            q,
-            self.settings.shutter,
-            self.output,
-        );
+        if self.settings.shutter {
+            self.motion
+                .step(since.unwrap_or(0.0).min(0.05), q, self.output);
+        } else {
+            // (None of it shown: what the setting shows kept up, so that shown again it is
+            // there, still.)
+            self.motion = Motion::at(q, self.output);
+        }
         self.motion_at = Some(now);
         let on = q == QualityMode::Ultra;
         if on && self.motion.coil == 1.0 && !self.settings.ultra_note_read {
@@ -736,7 +738,7 @@ impl Editing {
                 Tone::Plain,
             ),
             (
-                "RIGHT-CLICK THE LAMP FOR ITS SHUTTER, OR ALWAYS OPEN.".to_owned(),
+                "RIGHT-CLICK ABOVE QUALITY TO HIDE ITS OPENING, OR SHOW IT.".to_owned(),
                 Tone::Dim,
             ),
             ("CLICK TO CLOSE".to_owned(), Tone::Dim),
@@ -2798,7 +2800,7 @@ mod tests {
     /// always open, the one it is in in its title and not to be chosen; choosing the other
     /// switches it, and the menu says so the next time.
     #[test]
-    fn ultra_s_lamp_s_menu_chooses_its_shutter_or_always_open() {
+    fn quality_s_opening_s_menu_chooses_its_shutter_or_none() {
         let (mut e, _, _) = editing();
         let lamp = at(&e, (art::COL + 3023.0, art::TOP + 92.0));
         right_click(&mut e, lamp);
@@ -2808,17 +2810,14 @@ mod tests {
         );
         assert_eq!(
             menu_items(&e),
-            vec![
-                ("SHUTTER".to_owned(), false),
-                ("ALWAYS OPEN".to_owned(), true)
-            ]
+            vec![("SHUTTER".to_owned(), false), ("NONE".to_owned(), true)]
         );
-        menu_item(&mut e, "ALWAYS OPEN");
+        menu_item(&mut e, "NONE");
         assert!(!e.settings.shutter && e.learning.menu().is_none());
         right_click(&mut e, lamp);
         assert_eq!(
             e.learning.menu().map(|m| m.title.as_str()),
-            Some("QUALITY'S OPENING · ALWAYS OPEN")
+            Some("QUALITY'S OPENING · NONE")
         );
         menu_item(&mut e, "SHUTTER");
         assert!(e.settings.shutter);
@@ -2874,14 +2873,15 @@ mod tests {
         assert!(!e.ultra_note && e.settings.ultra_note_read);
         e.move_opening(t0 + Duration::from_secs(8), ultra);
         assert!(!e.ultra_note);
-        // To LO with the shutter off: the coil goes out and fades, the hamster fades in.
+        // Hidden: none of it drawn, LO's hamster there at once (shown again, nothing comes up).
         e.settings.shutter = false;
         let t1 = t0 + Duration::from_secs(10);
-        frames(&mut e, t1, 10, QualityMode::Lo);
-        assert!(e.motion.coil < 0.25, "{}", e.motion.coil);
-        frames(&mut e, t1 + Duration::from_millis(400), 60, QualityMode::Lo);
+        frames(&mut e, t1, 1, QualityMode::Lo);
         assert_eq!((e.motion.coil, e.motion.hamster), (0.0, 1.0));
-        assert!(e.scene.opening.still);
+        assert!(e.scene.opening.hidden);
+        e.settings.shutter = true;
+        frames(&mut e, t1 + Duration::from_secs(1), 1, QualityMode::Lo);
+        assert!(!e.scene.opening.hidden && e.scene.opening.hamster == 1.0);
     }
 
     /// What follows the synth is drawn at most thirty times a second: frames a sixtieth of a
@@ -4523,9 +4523,8 @@ mod tests {
     /// QUALITY's opening (decisions.md R-ULTRA) for looking at, written to `$CA72_ULTRA_PNG`,
     /// the folder: the panel's last column close up (two pixels a unit) at QUALITY's three
     /// positions, each's thing up at rest and as the synth plays, `quality-<lo|hi|ultra>-<level>
-    /// .png`; each coming up, `shutter-<setting>-<p>.png`, and with the shutter off,
-    /// `still-<setting>-<p>.png`; and the window at ULTRA with its note, `note.png`, and the
-    /// opening's menu, `menu.png`.
+    /// .png`; each coming up, `shutter-<setting>-<p>.png`; none of it, `hidden.png`; and the
+    /// window at ULTRA with its note, `note.png`, and the opening's menu, `menu.png`.
     #[test]
     #[ignore = "writes images for a look"]
     fn the_ultra_pngs() {
@@ -4580,36 +4579,35 @@ mod tests {
                 crop(&r, &format!("quality-{name}-{level}.png"));
             }
         }
-        // Each coming up through the shutter, and with it off.
+        // Each coming up through the shutter.
         for (name, v) in [("lo", 0.0), ("hi", 0.5), ("ultra", 1.0)] {
             scene.values[q] = v;
-            for still in [false, true] {
-                let ps: &[f64] = if still {
-                    &[0.0, 0.2, 0.4, 0.7, 1.0]
-                } else {
-                    &[0.0, 0.16, 0.32, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            for p in [0.0, 0.16, 0.32, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] {
+                let mut o = Opening {
+                    level: 0.6,
+                    spark: 2.1,
+                    run: p,
+                    stride: (p * 7.0) as u8,
+                    ..Opening::default()
                 };
-                for &p in ps {
-                    let mut o = Opening {
-                        still,
-                        level: 0.6,
-                        spark: 2.1,
-                        run: p,
-                        stride: (p * 7.0) as u8,
-                        ..Opening::default()
-                    };
-                    match name {
-                        "lo" => o.hamster = p,
-                        "hi" => o.lamp = p,
-                        _ => o.coil = p,
-                    }
-                    scene.opening = o;
-                    r.render(&scene);
-                    let way = if still { "still" } else { "shutter" };
-                    crop(&r, &format!("{way}-{name}-{p}.png"));
+                match name {
+                    "lo" => o.hamster = p,
+                    "hi" => o.lamp = p,
+                    _ => o.coil = p,
                 }
+                scene.opening = o;
+                r.render(&scene);
+                crop(&r, &format!("shutter-{name}-{p}.png"));
             }
         }
+        // None of it: the panel blank above QUALITY.
+        scene.opening = Opening {
+            hidden: true,
+            coil: 1.0,
+            ..Opening::default()
+        };
+        r.render(&scene);
+        crop(&r, "hidden.png");
         let dir = tempfile::tempdir().unwrap();
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         e.draw();

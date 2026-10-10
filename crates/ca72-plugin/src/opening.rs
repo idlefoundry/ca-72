@@ -74,20 +74,15 @@ impl Motion {
         m
     }
 
-    /// Moved on `dt` seconds towards what `q` shows (`shutter`: the shutter's times, else
-    /// always open's), the synth's level `level` (0 to 1): what is up and not wanted goes
-    /// down first, then the wanted one comes up.
-    pub fn step(&mut self, dt: f64, q: QualityMode, shutter: bool, level: f64) {
+    /// Moved on `dt` seconds towards what `q` shows, the synth's level `level` (0 to 1): what is
+    /// up and not wanted goes down first, then the wanted one comes up.
+    pub fn step(&mut self, dt: f64, q: QualityMode, level: f64) {
         let want = [
             q == QualityMode::Lo,
             q == QualityMode::Hi,
             q == QualityMode::Ultra,
         ];
-        let (up, down) = if shutter {
-            (ultra::OPEN_S, ultra::CLOSE_S)
-        } else {
-            (ultra::STILL_ON_S, ultra::STILL_OFF_S)
-        };
+        let (up, down) = (ultra::OPEN_S, ultra::CLOSE_S);
         let mut all = [self.hamster, self.lamp, self.coil];
         if let Some(k) = (0..3).find(|&k| all[k] > 0.0 && !want[k]) {
             all[k] = (all[k] - dt / down).max(0.0);
@@ -143,14 +138,14 @@ impl Motion {
             .any(|&v| v > 0.0 && v < 1.0)
     }
 
-    /// The opening drawn (`still`: the shutter off).
-    pub fn opening(&self, still: bool) -> Opening {
+    /// The opening drawn (`hidden`: none of it, the panel blank above QUALITY).
+    pub fn opening(&self, hidden: bool) -> Opening {
         let q = |v: f64, n: f64| (v * n).round() / n;
         Opening {
             hamster: self.hamster,
             lamp: self.lamp,
             coil: self.coil,
-            still,
+            hidden,
             level: q(self.level, 100.0),
             run: q(self.run, 50.0),
             stride: ((self.stride / FRAME_S).floor() as i64)
@@ -186,41 +181,36 @@ mod tests {
     }
 
     /// Moving from HI to LO: the lamp goes down first, then the hamster comes up; to ULTRA
-    /// from LO, the hamster down, then the coil up. With the shutter off, quicker.
+    /// from LO, the hamster down, then the coil up.
     #[test]
     fn one_goes_down_before_the_next_comes_up() {
         let mut m = Motion::at(QualityMode::Hi, 0.0);
         let mut t = 0.0;
         while m.lamp > 0.0 {
-            m.step(0.02, QualityMode::Lo, true, 0.0);
+            m.step(0.02, QualityMode::Lo, 0.0);
             assert_eq!(m.hamster, 0.0);
             t += 0.02;
         }
         assert!((t - ultra::CLOSE_S).abs() < 0.03, "{t}");
         while m.hamster < 1.0 {
-            m.step(0.02, QualityMode::Lo, true, 0.0);
+            m.step(0.02, QualityMode::Lo, 0.0);
             assert!(m.moving() || m.hamster == 1.0);
         }
-        m.step(0.02, QualityMode::Ultra, true, 0.0);
+        m.step(0.02, QualityMode::Ultra, 0.0);
         assert!(m.hamster < 1.0 && m.coil == 0.0);
-        let mut still = Motion::at(QualityMode::Hi, 0.0);
-        for _ in 0..30 {
-            still.step(0.02, QualityMode::Ultra, false, 0.0);
-        }
-        assert!(still.lamp == 0.0 && still.coil > 0.0, "{still:?}");
     }
 
     /// The lamps' light: quick to rise with the synth, slower to fall.
     #[test]
     fn the_lamps_follow_the_synth_as_a_filament() {
         let mut m = Motion::at(QualityMode::Hi, 0.0);
-        m.step(0.05, QualityMode::Hi, true, 1.0);
+        m.step(0.05, QualityMode::Hi, 1.0);
         assert!(m.level > 0.6, "{}", m.level);
         let up = m.level;
-        m.step(0.05, QualityMode::Hi, true, 0.0);
+        m.step(0.05, QualityMode::Hi, 0.0);
         assert!(m.level > 0.5 * up, "{}", m.level);
         for _ in 0..100 {
-            m.step(0.05, QualityMode::Hi, true, 0.0);
+            m.step(0.05, QualityMode::Hi, 0.0);
         }
         assert_eq!(m.level, 0.0);
         assert_eq!(m.opening(false).level, 0.0);
@@ -237,16 +227,16 @@ mod tests {
             "the editor opens on him asleep"
         );
         for _ in 0..60 {
-            m.step(1.0 / 30.0, QualityMode::Lo, true, 0.8);
+            m.step(1.0 / 30.0, QualityMode::Lo, 0.8);
         }
         let o = m.opening(false);
         assert!(o.run > 0.9 && o.asleep == 0.0 && m.turn > 0.0, "{o:?}");
         for _ in 0..150 {
-            m.step(1.0 / 30.0, QualityMode::Lo, true, 0.0);
+            m.step(1.0 / 30.0, QualityMode::Lo, 0.0);
         }
         let a = m.opening(false);
         assert!(a.run == 0.0 && a.asleep == 1.0, "{a:?}");
-        m.step(1.0 / 30.0, QualityMode::Lo, true, 0.0);
+        m.step(1.0 / 30.0, QualityMode::Lo, 0.0);
         assert_eq!(m.opening(false), a, "at rest nothing moves");
     }
 
@@ -254,9 +244,9 @@ mod tests {
     #[test]
     fn the_lightning_moves_only_while_the_coil_sparks() {
         let mut m = Motion::at(QualityMode::Ultra, 0.0);
-        m.step(0.1, QualityMode::Ultra, true, 0.0);
+        m.step(0.1, QualityMode::Ultra, 0.0);
         assert_eq!(m.spark, 0.0);
-        m.step(0.1, QualityMode::Ultra, true, 0.7);
+        m.step(0.1, QualityMode::Ultra, 0.7);
         assert!(m.spark > 0.0);
     }
 }
