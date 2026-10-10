@@ -1615,6 +1615,66 @@ mod tests {
 mod png {
     use super::*;
 
+    /// The rail close up (a pixel a unit) over the worn panel's wood, a few names on its
+    /// display (one with a descender, one changed, none), each `rail-<n>.png` in
+    /// `$CA72_RAIL_PNG`, the folder: for looking at the name's display.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn rail_png() {
+        let Some(dir) = std::env::var_os("CA72_RAIL_PNG") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let k = 1.0;
+        let mut panel = crate::Renderer::with_skin(crate::Skin::Worn, k, 1.0);
+        panel.render(&crate::Scene::default());
+        let mut strip = crate::strip::StripRenderer::new(k);
+        for (i, (name, changed)) in [
+            ("Bass", false),
+            ("Ringing Saw Line", false),
+            ("Undertow Growl", true),
+            ("", false),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            strip.render(
+                &crate::strip::StripScene {
+                    bar: BarScene {
+                        name: name.into(),
+                        found: true,
+                        changed,
+                        favorite: i == 0,
+                        open: false,
+                        below: false,
+                        hover: None,
+                    },
+                    ..crate::strip::StripScene::default()
+                },
+                panel.frame(),
+                None,
+            );
+            let mut whole = panel.frame().clone();
+            whole.draw_pixmap(
+                0,
+                (art::PANEL_H * k).round() as i32,
+                strip.frame().as_ref(),
+                &resvg::tiny_skia::PixmapPaint::default(),
+                resvg::tiny_skia::Transform::identity(),
+                None,
+            );
+            let (y0, h) = (art::PANEL_H * k, crate::strip::RAIL * k);
+            let rail = whole
+                .clone_rect(
+                    resvg::tiny_skia::IntRect::from_xywh(0, y0 as i32, whole.width(), h as u32)
+                        .unwrap(),
+                )
+                .unwrap();
+            rail.save_png(dir.join(format!("rail-{i}.png"))).unwrap();
+        }
+    }
+
     #[test]
     #[ignore = "writes images for a look"]
     fn presets_png() {

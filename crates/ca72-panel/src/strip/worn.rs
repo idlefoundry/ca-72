@@ -48,9 +48,13 @@ const AMBER_LIGHT: Underlight = Underlight {
 const TAB_PRINT: &str = "#2a1006";
 const KEY_PRINT: &str = "#d9d2c0";
 /// The name's dots' pitch, and the drops' sizes (a sounding voice's, an idle one's), units.
-const DOT: f64 = 6.0;
+const DOT: f64 = 5.0;
 const DROP: f64 = 10.0;
 const IDLE_DROP: f64 = 6.0;
+/// Where a capital's middle is, above the name's window's middle: a capital stands in the
+/// window's middle, as near as the descenders below it leave room for (the owner: "the preset
+/// text needs to be vertically centered").
+const CAP_LIFT: f64 = 2.0;
 
 /// The strip's parts at a scale: its frame, what never changes, the caps and light resampled,
 /// the readouts as last drawn, the drops.
@@ -536,6 +540,10 @@ impl StripRenderer {
         }
         let (x, y, w, h) = DISPLAY;
         glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
+        // The name's: its bezel on the rail's wood, then its glass.
+        let mut bezel = Svg::default();
+        super::name_bezel(&mut bezel, -PANEL_H);
+        svg_over(&self.options, &mut still, s, &bezel.0);
         let (x, y, w, h) = NAME;
         glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 3.0);
         // The name's dots, every one faintly there.
@@ -964,7 +972,7 @@ fn name_icons(o: &mut Svg, b: &BarScene) {
     let (_, y, _, h) = NAME;
     let (_, _, star_x, arrow_x) = name_places();
     let level = name_level(b);
-    let mid = y - PANEL_H + h / 2.0 - DOT / 2.0;
+    let mid = y - PANEL_H + h / 2.0 - CAP_LIFT;
     let orange = format!("rgb({},{},{})", ORANGE.0, ORANGE.1, ORANGE.2);
     put!(
         o,
@@ -1034,12 +1042,12 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
 }
 
 /// Each dot of the name's display, in pixels at `scale` (the strip's frame): its character's
-/// place, its row, its column. (Seven rows for a capital about the window's middle; two below
-/// for a descender.)
+/// place, its row, its column. (Seven rows for a capital, its middle [`CAP_LIFT`] above the
+/// window's; two below for a descender, its last dots inside the window.)
 fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) {
     let (_, y, _, h) = NAME;
     let (left, places, ..) = name_places();
-    let top = y - PANEL_H + h / 2.0 - 4.0 * DOT;
+    let top = y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * DOT;
     for i in 0..places {
         for j in 0..9 {
             for col in 0..5 {
