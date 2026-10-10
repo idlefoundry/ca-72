@@ -2,7 +2,8 @@
 //! top (the favourite's star, the previous preset, the name's display, the next, SAVE), then
 //! the left hand's controls (GLIDE, DECAY and the PITCH and MOD. wheels, drawn with the panel's
 //! controls: `art`), VOICES, STEREO and OUTPUT in three rows: banks of lit tabs, then knobs
-//! with their readouts (the knobs are the panel's controls too: `controls::CONTROLS`), and the
+//! with their readouts (VOICES over ENTROPY; STEREO's WIDTH, INNER and DETUNE side by side;
+//! DRIVE over LEVEL; the knobs are the panel's controls too: `controls::CONTROLS`), and the
 //! display of where the voices sound. Every place here is in the drawing's units, the strip
 //! from `art::PANEL_H` down.
 //!
@@ -30,8 +31,8 @@ pub const ROWS: [f64; 3] = [PANEL_H + 228.0, PANEL_H + 452.0, PANEL_H + 676.0];
 /// The sections, across: the left hand's, VOICES, STEREO and OUTPUT (to the trim).
 pub const SECTIONS: [(f64, f64, &str); 4] = [
     (0.0, 370.0, ""),
-    (370.0, 1120.0, "VOICES"),
-    (1120.0, 2370.0, "STEREO"),
+    (370.0, 976.0, "VOICES"),
+    (976.0, 2370.0, "STEREO"),
     (2370.0, W - 28.0, "OUTPUT"),
 ];
 /// Where the left hand's controls are: the old column's origin moved here (its controls in
@@ -40,6 +41,8 @@ pub const LEFT_HAND: (f64, f64) = (art::LH_X + 20.0, PANEL_H + 78.0);
 /// A tab's size, and a bank's pitch between its tabs.
 pub const TAB: (f64, f64) = (150.0, 60.0);
 const TAB_PITCH: f64 = TAB.0 + 6.0;
+/// A bank's recess beyond its tabs' pitches, across.
+const RECESS_PAD: f64 = 18.0;
 /// A readout's size.
 pub const READOUT: (f64, f64) = (156.0, 84.0);
 /// The grid (the mock-up's A5 and A6): every amount a unit of its knob and its readout, the
@@ -47,10 +50,15 @@ pub const READOUT: (f64, f64) = (156.0, 84.0);
 pub const UNIT_KNOB: f64 = -84.0;
 const UNIT_READOUT: f64 = 106.0;
 const UNIT_HALF: f64 = 184.0;
-/// Each section's units' middles: VOICES's, STEREO's two (WIDTH's and DETUNE's), OUTPUT's.
+/// Each section's units' middles: VOICES's, STEREO's three (WIDTH's, INNER's and DETUNE's,
+/// INNER's in the section's middle, the others this far either side of it), OUTPUT's.
 pub const CV: f64 = (SECTIONS[1].0 + SECTIONS[1].1) / 2.0;
-pub const CW: f64 = SECTIONS[2].0 + 330.0;
-pub const CD: f64 = SECTIONS[2].0 + 920.0;
+const STEREO_PITCH: f64 = 430.0;
+pub const CI: f64 = (SECTIONS[2].0 + SECTIONS[2].1) / 2.0;
+pub const CW: f64 = CI - STEREO_PITCH;
+pub const CD: f64 = CI + STEREO_PITCH;
+/// The gap between STEREO's two banks, the pair centred over the section.
+const BANKS_GAP: f64 = 180.0;
 pub const CO: f64 = (SECTIONS[3].0 + SECTIONS[3].1) / 2.0;
 /// The keys on the rail: their middles across and their widths.
 const KEYS: [(f64, f64, BarTarget); 4] = [
@@ -117,8 +125,10 @@ impl Bank {
     pub fn x(self) -> f64 {
         match self {
             Bank::Mode => CV,
-            Bank::Stereo => CW,
-            Bank::Placement => CD,
+            // Each bank's middle: the pair (2 and 3 tabs, BANKS_GAP between their recesses)
+            // centred on the section's middle.
+            Bank::Stereo => CI - (BANKS_GAP + 3.0 * TAB_PITCH + RECESS_PAD) / 2.0,
+            Bank::Placement => CI + (BANKS_GAP + 2.0 * TAB_PITCH + RECESS_PAD) / 2.0,
             Bank::Auto => CO + UNIT_KNOB,
         }
     }
@@ -131,7 +141,7 @@ impl Bank {
 
     /// The recess the bank stands in: left, top, width, height.
     pub fn recess(self) -> (f64, f64, f64, f64) {
-        let w = self.words().len() as f64 * TAB_PITCH + 18.0;
+        let w = self.words().len() as f64 * TAB_PITCH + RECESS_PAD;
         let h = TAB.1 + 22.0;
         (self.x() - w / 2.0, ROWS[0] - h / 2.0, w, h)
     }
@@ -151,10 +161,13 @@ pub enum Readout {
     Auto,
     Drive,
     Level,
+    /// INNER's, its switch (lit where it moves the voices: WIDTH up, and not MONO without
+    /// DOUBLE). Last, so that the others keep their places in [`Readout::ALL`].
+    Inner,
 }
 
 impl Readout {
-    pub const ALL: [Readout; 7] = [
+    pub const ALL: [Readout; 8] = [
         Readout::Voices,
         Readout::Entropy,
         Readout::Width,
@@ -162,6 +175,7 @@ impl Readout {
         Readout::Auto,
         Readout::Drive,
         Readout::Level,
+        Readout::Inner,
     ];
 
     /// Its middle.
@@ -175,6 +189,7 @@ impl Readout {
             Readout::Auto => r(CO, 0),
             Readout::Drive => r(CO, 1),
             Readout::Level => r(CO, 2),
+            Readout::Inner => r(CI, 1),
         }
     }
 
@@ -196,19 +211,21 @@ impl Readout {
 
     /// Whether it is a switch (its amount off and back on at it).
     pub fn switch(self) -> bool {
-        matches!(self, Readout::Entropy | Readout::Width)
+        matches!(self, Readout::Entropy | Readout::Width | Readout::Inner)
     }
 }
 
 /// The knobs' places on the strip (their controls are the panel's: `controls::CONTROLS`):
-/// VOICES over ENTROPY, WIDTH and DETUNE side by side over the display, DRIVE over LEVEL.
-pub const KNOBS: [(&str, f64, f64); 6] = [
+/// VOICES over ENTROPY, WIDTH, INNER and DETUNE side by side over the display, DRIVE over
+/// LEVEL. INNER's last, so that the others keep their indices.
+pub const KNOBS: [(&str, f64, f64); 7] = [
     ("voices", CV + UNIT_KNOB, ROWS[1]),
     ("entropy", CV + UNIT_KNOB, ROWS[2]),
     ("spread", CW + UNIT_KNOB, ROWS[1]),
     ("double", CD + UNIT_KNOB, ROWS[1]),
     ("drive", CO + UNIT_KNOB, ROWS[1]),
     ("level", CO + UNIT_KNOB, ROWS[2]),
+    ("inner", CI + UNIT_KNOB, ROWS[1]),
 ];
 
 /// What a pointer finds on the strip (but its knobs and the left hand's controls, which are
@@ -347,7 +364,7 @@ pub struct StripScene {
     pub placement: Option<usize>,
     pub auto: bool,
     /// Each readout's text and whether it is lit ([`Readout::ALL`]'s order).
-    pub readouts: [(String, bool); 7],
+    pub readouts: [(String, bool); 8],
     pub field: Field,
     pub bar: BarScene,
     pub hover: Option<StripTarget>,
@@ -459,7 +476,9 @@ pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
         let (_, y, _, _) = b.recess();
         text(s, b.x(), y - 26.0, b.title(), LEGEND);
     }
-    let knob_legends = ["VOICES", "ENTROPY", "WIDTH", "DETUNE", "DRIVE", "LEVEL"];
+    let knob_legends = [
+        "VOICES", "ENTROPY", "WIDTH", "DETUNE", "DRIVE", "LEVEL", "INNER",
+    ];
     for ((_, x, y), t) in KNOBS.iter().zip(knob_legends) {
         text(s, *x, y - 122.0, t, LEGEND);
     }
@@ -501,4 +520,50 @@ pub fn strip_size(scale: f64) -> (u32, u32) {
         (W * scale).round().max(1.0) as u32,
         (art::STRIP_H * scale).round().max(1.0) as u32,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each knob's unit (the knob, its readout, `UNIT_HALF` either side of its middle) stands in
+    /// its section, clear of the others on its row; STEREO's three side by side, INNER's in the
+    /// middle; STEREO's banks centred over the section as a pair, `BANKS_GAP` apart; the display
+    /// under WIDTH's unit to DETUNE's.
+    #[test]
+    fn the_strips_units_stand_in_their_sections_clear_of_each_other() {
+        let section = |x: f64| {
+            SECTIONS
+                .iter()
+                .position(|(x0, x1, _)| (*x0..*x1).contains(&x))
+                .expect("in a section")
+        };
+        let units: Vec<(f64, f64)> = KNOBS.iter().map(|(_, x, y)| (x - UNIT_KNOB, *y)).collect();
+        for (i, (c, y)) in units.iter().enumerate() {
+            let s = section(*c);
+            let (x0, x1, _) = SECTIONS[s];
+            assert!(c - UNIT_HALF > x0 && c + UNIT_HALF < x1, "{}", KNOBS[i].0);
+            for (d, _) in units[i + 1..].iter().filter(|(_, z)| z == y) {
+                assert!((c - d).abs() >= 2.0 * UNIT_HALF, "{} overlaps", KNOBS[i].0);
+            }
+        }
+        for r in Readout::ALL {
+            let (x, y) = r.at();
+            let (c, row) = (x - UNIT_READOUT, ROWS.iter().position(|z| *z == y));
+            let knob = units.contains(&(c, y));
+            assert!(knob || r == Readout::Auto, "{r:?} beside its knob");
+            assert!(row.is_some(), "{r:?} on a row");
+        }
+        assert_eq!((CW + CD) / 2.0, CI);
+        assert_eq!(section(CI), 2);
+        let (s, p) = (Bank::Stereo.recess(), Bank::Placement.recess());
+        assert!((p.0 - (s.0 + s.2) - BANKS_GAP).abs() < 1e-9);
+        assert!(
+            (s.0 + p.0 + p.2 - 2.0 * CI).abs() < 1e-9,
+            "centred as a pair"
+        );
+        assert!(s.0 > SECTIONS[2].0 && p.0 + p.2 < SECTIONS[2].1);
+        let (dx, _, dw, _) = DISPLAY;
+        assert_eq!((dx, dx + dw), (CW - UNIT_HALF, CD + UNIT_HALF));
+    }
 }

@@ -2522,7 +2522,10 @@ mod tests {
             side / mid
         };
         let (open, cleared) = (share(&c), share(&Controls { inner: 1.0, ..c }));
-        assert!(cleared > 1.3 * open, "side against mid: {open:.3} then {cleared:.3}");
+        assert!(
+            cleared > 1.3 * open,
+            "side against mid: {open:.3} then {cleared:.3}"
+        );
         let mono = Controls {
             poly: false,
             inner: 1.0,

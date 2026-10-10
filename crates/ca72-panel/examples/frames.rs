@@ -170,12 +170,20 @@ fn strip_scene(sounding: u32) -> StripScene {
             r("-7.2", true),
             r("8.4", true),
             r("0.0", true),
+            r("40", true),
         ],
         field: Field::Scatter(
-            [-1.0, 1.0, -0.43, 0.43, -0.71, 0.71, -0.14, 0.14]
+            // EVEN's places for eight voices, each in its side's band at WIDTH 70 %, INNER 40 %.
+            [-7.0, 7.0, -3.0, 3.0, -5.0, 5.0, -1.0, 1.0]
                 .iter()
+                .map(|p: &f64| p / 7.0)
                 .enumerate()
-                .map(|(i, &p)| (p * 0.7, sounding >> i & 1 == 1))
+                .map(|(i, p)| {
+                    (
+                        0.7 * p.signum() * (0.4 + 0.6 * p.abs()),
+                        sounding >> i & 1 == 1,
+                    )
+                })
                 .collect(),
         ),
         bar: ca72_panel::presets::BarScene {

@@ -2,8 +2,9 @@
 //! own MIDI channel, assigned to one of the plug-in's sound parameters; each instance its own
 //! table, saved with the host's project, not with the sound presets.
 //!
-//! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches and the
-//!   strip's POLY, VOICES, ENTROPY, SPREAD and INNER, and LOCK (a host parameter without a control: the
+//! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches, the
+//!   strip's POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD), INNER, SCATTER's placement, DETUNE
+//!   (DOUBLE), DRIVE, LEVEL and AUTO GAIN, and LOCK (a host parameter without a control: the
 //!   drawer's list learns it). Not the wheels (MIDI pitch bend and the modulation wheel, CC 1,
 //!   move them already), POWER (the host's bypass), MIDI BEND RANGE (the player's), nor anything
 //!   but a sound parameter.
