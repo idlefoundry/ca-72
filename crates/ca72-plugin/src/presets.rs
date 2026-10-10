@@ -184,6 +184,7 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("drive", &p.drive),
         ("level", &p.level),
         ("auto_gain", &p.auto_gain),
+        ("doubled", &p.doubled),
         ("feedback", &p.feedback),
         ("lock", &p.lock),
     ]
@@ -199,15 +200,28 @@ pub const PLAYERS: &[&str] = &["midi_bend_range"];
 /// any other (decisions.md R12; R10 had left POLY and VOICES as they were when a preset did not
 /// name them).
 fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
+    let value = |id: &str| {
+        e.sound
+            .values
+            .iter()
+            .find(|(k, _)| k == id)
+            .map(|(_, v)| *v)
+    };
     sound_params(p)
         .into_iter()
-        .filter_map(
-            |(id, q)| match e.sound.values.iter().find(|(k, _)| k == id) {
-                Some((_, v)) => Some((id, q.normalized_of(*v))),
-                None if PLAYERS.contains(&id) => None,
-                None => Some((id, q.default_normalized())),
-            },
-        )
+        .filter_map(|(id, q)| match value(id) {
+            Some(v) => Some((id, q.normalized_of(v))),
+            None if PLAYERS.contains(&id) => None,
+            // (A preset saved before DOUBLE was a switch of its own: DOUBLE where its DETUNE
+            // is above 0.)
+            None if id == "doubled" => Some((
+                id,
+                q.normalized_of(f64::from(u8::from(
+                    value("double").is_some_and(|d| d > 0.0),
+                ))),
+            )),
+            None => Some((id, q.default_normalized())),
+        })
         .collect()
 }
 

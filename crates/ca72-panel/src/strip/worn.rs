@@ -1202,11 +1202,12 @@ const LEVEL_DOWN: f64 = 5.0;
 /// placed on them as well?"): a note's two voices beat against each other as two notes so far
 /// apart do, at [`BEAT_AT`] Hz (the A below middle C), one swelling as the other ebbs and the
 /// two swaying in turn, by as much as [`BEAT_SWELL`] of their size and [`BEAT_SWAY`] units at
-/// [`BEAT_FULL`] cents or more apart (about half what they were first: "the amount of wobble
-/// you are showing in the stereo bar is a bit intense. dial it back a little").
+/// [`BEAT_FULL`] cents or more apart (a quarter of what they were first: "the amount of wobble
+/// you are showing in the stereo bar is a bit intense. dial it back a little", then "dial back
+/// the detune wobble a bit more").
 const BEAT_AT: f64 = 220.0;
-const BEAT_SWELL: f64 = 0.13;
-const BEAT_SWAY: f64 = 2.0;
+const BEAT_SWELL: f64 = 0.07;
+const BEAT_SWAY: f64 = 1.0;
 const BEAT_FULL: f64 = 10.0;
 /// How far a drop's light reaches, in its radii (past it, its halo under a level's step).
 const REACH: f64 = 4.5;
@@ -1519,6 +1520,7 @@ mod tests {
         let controls = [
             StripControl::Poly,
             StripControl::Unison,
+            StripControl::Double,
             StripControl::Placement,
             StripControl::AutoGain,
         ];

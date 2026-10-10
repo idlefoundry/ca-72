@@ -249,11 +249,12 @@ pub enum StripTarget {
 }
 
 /// The strip's controls that MIDI Learn rings here (its knobs are rung as the panel's are):
-/// POLY (MONO's and POLY's tabs), UNISON, the placement, AUTO GAIN.
+/// POLY (MONO's and POLY's tabs), UNISON, DOUBLE (SCATTER | DOUBLE), the placement, AUTO GAIN.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StripControl {
     Poly,
     Unison,
+    Double,
     Placement,
     AutoGain,
 }
@@ -264,6 +265,7 @@ impl StripTarget {
         match self {
             StripTarget::Tab(Bank::Mode, 2) => Some(StripControl::Unison),
             StripTarget::Tab(Bank::Mode, _) => Some(StripControl::Poly),
+            StripTarget::Tab(Bank::Stereo, _) => Some(StripControl::Double),
             StripTarget::Tab(Bank::Placement, _) => Some(StripControl::Placement),
             StripTarget::Tab(Bank::Auto, _) => Some(StripControl::AutoGain),
             _ => None,
@@ -340,6 +342,7 @@ pub fn span(c: StripControl) -> (f64, f64, f64, f64) {
                 y + TAB.1 / 2.0 + 6.0,
             )
         }
+        StripControl::Double => around(Bank::Stereo.recess()),
         StripControl::Placement => around(Bank::Placement.recess()),
         StripControl::AutoGain => around(Bank::Auto.recess()),
     }

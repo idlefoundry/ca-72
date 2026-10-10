@@ -384,7 +384,20 @@ pub struct Ca72Params {
     /// saved before reads it HI.
     #[id = "quality"]
     pub quality: EnumParam<QualityMode>,
+    /// DOUBLE (the strip's SCATTER | DOUBLE): each note two voices, DETUNE apart, either side
+    /// of the centre; off, SCATTER, DETUNE unused (the owner, 2026-10-10: DOUBLE had been
+    /// DETUNE above 0, so DETUNE at 0 "instantly switches to scatter"; "make that knob
+    /// unresponsive unless the user is in double mode"). After QUALITY: a session or a preset
+    /// saved before reads it on wherever its DETUNE is above 0 (`Ca72::filter_state`,
+    /// `presets::targets`).
+    #[id = "doubled"]
+    pub doubled: BoolParam,
 }
+
+/// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
+/// the pair play as one pitch (a ten-thousandth of a cent: a beat a day), the engine's DOUBLE
+/// being on while its detune is above 0.
+pub const DOUBLED_AT_NONE: f64 = 1e-6;
 
 /// Cents as the strip's DETUNE reads them: a number, whole or to a tenth ("12", "7.2"), as an
 /// instrument's display shows it, without a sign (the CA-74's R34).
@@ -550,6 +563,7 @@ impl Default for Ca72Params {
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
             auto_gain: BoolParam::new("Auto Gain", true),
             inner: percent("Inner"),
+            doubled: BoolParam::new("Double", false),
             quality: EnumParam::new("Quality", QualityMode::Hi),
         }
     }
@@ -654,7 +668,11 @@ impl Ca72Params {
             inner: value(&self.inner) / 100.0,
             placement: self.placement.value().into(),
             unison: self.unison.value(),
-            double: value(&self.double) / 100.0,
+            double: if self.doubled.value() {
+                (value(&self.double) / 100.0).max(DOUBLED_AT_NONE)
+            } else {
+                0.0
+            },
             drive: value(&self.drive),
             level: value(&self.level),
             auto_gain: self.auto_gain.value(),
