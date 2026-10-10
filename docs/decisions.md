@@ -2969,6 +2969,12 @@ list that drops down over the strip inside the window."
   light at the corner itself, the rim line round them too, easing in from 0.35 of the way out
   both ways (the light round the tab on the face, the kit's, is left as it is: it is not
   brighter at the corners). The window as it opens, for a look: `presets.rs`'s `window_png`.
+  Then "go even darker in the corners": a quarter of its light at the corner itself, easing in
+  from 0.3 of the way out. And "why does the overdrive light have a circle in the middle of
+  it?": the jewel's picture (POWER's, OVERLOAD's made from it) had a ring light's reflection
+  in its dome, a bright ring halfway out, which on OVERLOAD's dark glass read as a pink circle
+  (as the knobs' ring-light reflections did); painted out of the picture
+  (`assets/worn/README.md`), for both lamps.
 
 ## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
