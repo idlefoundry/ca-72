@@ -3604,7 +3604,10 @@ being placed on them as well? Show me a before/after video once you are done."
 **As built** (the mock-up's study, `ultra.js`, `hamster.js`, `tesla.js`, is the spec):
 - **The opening** (`ca72_panel::ultra::Opening`) holds one thing at a time: LO's hamster in his
   wheel, HI's amber lamp, ULTRA's Tesla lamp; changing QUALITY, what is up goes back down (1.8 s)
-  before the next comes up (2.5 s) through the same shutter. The lenses are plain. Its menu (a
+  before the next comes up (2.5 s) through the same shutter; then, from the build, "that's too
+  long of an animation time. the transition from one mode to the next should take like 3
+  seconds of animation": 1.25 s down and 1.75 s up, three seconds in all (always open's 0.5 s
+  and 1.1 s as they were). The lenses are plain. Its menu (a
   right click) is "QUALITY'S OPENING · SHUTTER" or "· ALWAYS OPEN"; always open, each setting's
   thing stands in the ring and fades in over the first 0.35 of its coming (1.1 s; out in
   0.5 s), a lamp lighting as before.
