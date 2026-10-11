@@ -4370,3 +4370,37 @@ VST3 (Live takes no CLAP), on a new set's MIDI track, the MOTU at 44.1 kHz as Li
 
 Not tried: Cubase on macOS (not installed), Logic and the Audio Unit (this build has none), an
 Intel Mac.
+
+**Bitwig's lost first click fixed, and the Audio Unit in GarageBand (2026-10-11, morning).** The
+owner: "I don't have logic. What about garage band? And ya, fix bitwig."
+- **The lost first click** (above): a throwaway build that logged every press, release and
+  focus change, in Bitwig 5.2.7, showed both clicks reaching the editor whole; the first was
+  taken where the pointer had last been seen. Bitwig sends its floating plug-in window no
+  `mouseMoved:` as the pointer comes onto it while its own window is in front, and baseview gave
+  the press without its place (an instant move-and-click after a click in Bitwig's window: no
+  control found; the same with a move first: taken; Live's plug-in window gets the movement and
+  never lost one). Fixed in baseview (`third_party/baseview/PATCHES.md`, change 4: each press and
+  release tells the handler where the pointer is first). Tried: three instant move-and-clicks
+  after a click in Bitwig's window, each switched RETRIGGER; a drag of VOICES begun the same way
+  moved it to 5.
+- **A release-style build:** CA-72 TEST (the tree above, renamed), `cargo xtask bundle-universal`
+  and `scripts/auv2.sh` for both Apple silicon and Intel (`x86_64 arm64`), the Audio Unit with codes
+  of its own (`aumu C72T IdlF`, "Idle Foundry: CA-72 TEST") beside the released one;
+  clap-validator (37 passed, 7 skipped), Steinberg's validator (47 passed) and pluginval at
+  strictness 5 passed. Apple's `auval` lists no Audio Unit but Apple's on this Mac, from SSH or a
+  terminal in the desktop session (not even ones installed long before, such as RC-20), so it
+  was not run; GarageBand finds them.
+- **GarageBand 10.4.14:** listed under AU Instruments › Idle Foundry › CA-72 TEST (Stereo); its
+  Smart Controls showed the panel's first parameters; the editor drawn whole (GarageBand opens its
+  window partly off the screen's right and bottom: moved by hand). **Found and fixed:** with the
+  transport stopped, the editor's changes did not take (NOTE PRIORITY, RETRIGGER, POLY, VOICES and
+  DRIVE each shown and then gone) until playback began, when they all arrived: GarageBand was not
+  rendering the instrument, and clap-wrapper ignored nih-plug's request to flush them
+  (`third_party/clap-wrapper/PATCHES.md`, change 5). With the fix, stopped: NOTE PRIORITY to HIGH,
+  RETRIGGER on, POLY lit, VOICES dragged to 5, DRIVE "8.4" and Enter, LEVEL "-6" and Escape back to
+  0.0, FIND "lead" (the six presets tagged so), CLASSIC and REALISTIC (`settings.toml` following),
+  each at once. The same gap affects Logic's tracks that are not selected while stopped (not tried:
+  no Logic here). GarageBand's plug-in window is an ordinary window, behind its own once that is
+  clicked, so the floating-window first click does not arise there.
+- GarageBand's own project left by another session (ca74-au-test, which wants a CA-74 Audio Unit
+  not installed) was opened by GarageBand at launch and closed without saving.
