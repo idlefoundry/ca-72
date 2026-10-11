@@ -5,12 +5,12 @@
 use std::fmt;
 
 use resvg::tiny_skia::{
-    Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint, Rect,
-    SpreadMode, Transform,
+    BlendMode, Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint,
+    Point, Rect, SpreadMode, Transform,
 };
 use resvg::usvg;
 
-use crate::art::{self, H, Layer, Layout, W};
+use crate::art::{self, Blend, H, Layer, Layout, W};
 use crate::controls::{CONTROLS, Kind, Mark, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
@@ -93,6 +93,36 @@ pub struct Renderer {
     /// The lights' pictures made at this scale, each in its layer's place (left, top, width,
     /// height: pixels), drawn as their layers change (decisions.md R-PRESENT).
     lights: Vec<(Glow, [i32; 4], Pixmap)>,
+    /// The overlays drawn at this scale, each in its layer's place (decisions.md R-COSTS).
+    overlays: Vec<(String, [i32; 4], Pixmap)>,
+    /// Pictures placed in layers (turned, mirrored, scaled, moved by fractions of a pixel), kept
+    /// to be put again as they were without being resampled, the least lately used given up
+    /// past [`PLACED_BYTES`] (decisions.md R-COSTS); and the count of the renders, their clock.
+    placed: Vec<Placed>,
+    renders: u64,
+}
+
+/// How much the pictures placed in layers may keep: some dozens of layers' pictures.
+const PLACED_BYTES: usize = 32 << 20;
+
+/// A picture placed in a layer, as [`Placed::key`] says, from its pixel `at` in the layer.
+struct Placed {
+    key: PlacedKey,
+    at: (i32, i32),
+    pixels: Pixmap,
+    used: u64,
+}
+
+/// A picture's part at its size in pixels, where its middle is in its layer's pixels, how far
+/// it is turned (degrees), mirrored and scaled.
+#[derive(Clone, Copy, PartialEq)]
+struct PlacedKey {
+    part: Part,
+    size: (u32, u32),
+    at: (u64, u64),
+    deg: u32,
+    flip: (bool, bool),
+    zoom: u32,
 }
 
 impl fmt::Debug for Renderer {
@@ -148,6 +178,9 @@ impl Renderer {
             skin,
             pictures: None,
             lights: Vec::new(),
+            overlays: Vec::new(),
+            placed: Vec::new(),
+            renders: 0,
         };
         r.draw_background();
         r
@@ -174,6 +207,8 @@ impl Renderer {
             p.forget_scale();
         }
         self.lights.clear();
+        self.overlays.clear();
+        self.placed.clear();
         self.draw_background();
     }
 
@@ -425,23 +460,29 @@ impl Renderer {
             let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
             resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
         }
-        if !layer.sprites.is_empty() {
-            let pictures = self.pictures.get_or_insert_with(Pictures::load);
-            for sp in &layer.sprites {
-                let (pw, ph) = (
+        // Each picture placed (resampled once; kept if it is placed so again), then put with
+        // its opacity: drawn so whether it was kept or not.
+        self.renders += 1;
+        for sp in &layer.sprites {
+            let key = PlacedKey {
+                part: sp.part,
+                size: (
                     (sp.size.0 * s).round().max(1.0) as u32,
                     (sp.size.1 * s).round().max(1.0) as u32,
-                );
-                let at = ((ox + sp.at.0) * s - x0, (oy + sp.at.1) * s - y0);
-                put_picture(
-                    &mut pixmap,
-                    pictures.part(sp.part, pw, ph),
-                    at,
-                    sp.deg as f32,
-                    sp.flip,
-                    (sp.zoom as f32, sp.alpha as f32),
-                );
-            }
+                ),
+                at: (
+                    ((ox + sp.at.0) * s - x0).to_bits(),
+                    ((oy + sp.at.1) * s - y0).to_bits(),
+                ),
+                deg: (sp.deg as f32).to_bits(),
+                flip: sp.flip,
+                zoom: (sp.zoom as f32).to_bits(),
+            };
+            let Some(i) = self.placed_picture(key) else {
+                continue;
+            };
+            let p = &self.placed[i];
+            put(&mut pixmap, &p.pixels, p.at, sp.alpha as f32);
         }
         // Each light from its picture, made once in the layer's place, so drawn without moving
         // a pixel; scaled about the layer's origin while its lamp comes up.
@@ -470,16 +511,16 @@ impl Renderer {
             };
             let (cx, cy) = ((ox * s - x0) as f32, (oy * s - y0) as f32);
             let zoom = light.zoom as f32;
+            if zoom == 1.0 {
+                put(&mut pixmap, &self.lights[i].2, (0, 0), light.alpha as f32);
+                continue;
+            }
             pixmap.draw_pixmap(
                 0,
                 0,
                 self.lights[i].2.as_ref(),
                 &PixmapPaint {
-                    quality: if zoom == 1.0 {
-                        FilterQuality::Nearest
-                    } else {
-                        FilterQuality::Bicubic
-                    },
+                    quality: FilterQuality::Bicubic,
                     opacity: (light.alpha as f32).clamp(0.0, 1.0),
                     ..PixmapPaint::default()
                 },
@@ -488,6 +529,55 @@ impl Renderer {
                     .pre_translate(-cx, -cy),
                 None,
             );
+        }
+        // Each overlay from its picture, drawn once in the layer's place, with its blend.
+        for o in &layer.overlays {
+            let place = [x0 as i32, y0 as i32, w as i32, h as i32];
+            let made = self
+                .overlays
+                .iter()
+                .position(|(svg, at, _)| *at == place && *svg == o.svg);
+            let i = match made {
+                Some(i) => i,
+                None => {
+                    let svg = format!(
+                        "<g transform='translate({} {})'>{}</g>",
+                        crate::svg::N(ox),
+                        crate::svg::N(oy),
+                        o.svg
+                    );
+                    let doc = art::document(view, w, h, &svg);
+                    let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
+                    let mut p = Pixmap::new(w, h)?;
+                    resvg::render(&tree, Transform::identity(), &mut p.as_mut());
+                    self.overlays.push((o.svg.clone(), place, p));
+                    self.overlays.len() - 1
+                }
+            };
+            let blend_mode = match o.blend {
+                Blend::Normal => {
+                    put(&mut pixmap, &self.overlays[i].2, (0, 0), 1.0);
+                    continue;
+                }
+                Blend::ColorDodge => BlendMode::ColorDodge,
+                Blend::Multiply => BlendMode::Multiply,
+            };
+            pixmap.draw_pixmap(
+                0,
+                0,
+                self.overlays[i].2.as_ref(),
+                &PixmapPaint {
+                    blend_mode,
+                    quality: FilterQuality::Nearest,
+                    ..PixmapPaint::default()
+                },
+                Transform::identity(),
+                None,
+            );
+        }
+        let origin = ((ox * s - x0) as f32, (oy * s - y0) as f32);
+        for d in &layer.drawn {
+            d.draw(&mut pixmap, origin, s as f32);
         }
         if let Some(wheel) = layer.wheel {
             draw_wheel(&mut pixmap, (ox * s - x0, oy * s - y0), s, wheel);
@@ -507,6 +597,41 @@ impl Renderer {
             resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
         }
         Some((x0 as i32, y0 as i32, pixmap))
+    }
+
+    /// The picture placed as `key` says, kept or placed now (and kept): its index in
+    /// [`Renderer::placed`].
+    fn placed_picture(&mut self, key: PlacedKey) -> Option<usize> {
+        if let Some(i) = self.placed.iter().position(|p| p.key == key) {
+            self.placed[i].used = self.renders;
+            return Some(i);
+        }
+        let pictures = self.pictures.get_or_insert_with(Pictures::load);
+        let picture = pictures.part(key.part, key.size.0, key.size.1);
+        let at = (f64::from_bits(key.at.0), f64::from_bits(key.at.1));
+        let (x, y, pixels) = place_picture(
+            picture,
+            at,
+            f32::from_bits(key.deg),
+            key.flip,
+            f32::from_bits(key.zoom),
+        )?;
+        let bytes = |p: &Placed| p.pixels.data().len();
+        let mut kept: usize = self.placed.iter().map(bytes).sum();
+        while kept + pixels.data().len() > PLACED_BYTES && !self.placed.is_empty() {
+            let oldest = (0..self.placed.len())
+                .min_by_key(|&i| self.placed[i].used)
+                .expect("one at least");
+            kept -= bytes(&self.placed[oldest]);
+            self.placed.swap_remove(oldest);
+        }
+        self.placed.push(Placed {
+            key,
+            at: (x, y),
+            pixels,
+            used: self.renders,
+        });
+        Some(self.placed.len() - 1)
     }
 
     /// Brings the frame up to `scene`, rendering only the layers whose art changed: whether
@@ -589,14 +714,7 @@ impl Renderer {
             if let Some((x, y, p)) = &slot.pixels {
                 let (r, b) = (x + p.width() as i32, y + p.height() as i32);
                 if *x < x1 && r > x0 && *y < y1 && b > y0 {
-                    patch.draw_pixmap(
-                        x - x0,
-                        y - y0,
-                        p.as_ref(),
-                        &PixmapPaint::default(),
-                        Transform::identity(),
-                        None,
-                    );
+                    put(&mut patch, p, (x - x0, y - y0), 1.0);
                 }
             }
         }
@@ -919,6 +1037,100 @@ fn draw_wheel(frame: &mut Pixmap, at: (f64, f64), s: f64, wheel: art::WheelArt) 
 
 /// A picture drawn with its middle at `at` (pixels), mirrored as `flip` (across, down) says,
 /// then turned `deg` clockwise.
+/// A picture `p` placed as [`put_picture`] puts it, at full opacity, on a pixmap of its own
+/// just round it: that pixmap and where its top left corner is (whole pixels), so that put
+/// there it is the picture put directly, to the bit.
+fn place_picture(
+    p: &Pixmap,
+    at: (f64, f64),
+    deg: f32,
+    flip: (bool, bool),
+    zoom: f32,
+) -> Option<(i32, i32, Pixmap)> {
+    let (pw, ph) = (p.width() as f32, p.height() as f32);
+    let sign = |f: bool| if f { -zoom } else { zoom };
+    let t = Transform::from_translate(-pw / 2.0, -ph / 2.0)
+        .post_scale(sign(flip.0), sign(flip.1))
+        .post_rotate(deg)
+        .post_translate(at.0 as f32, at.1 as f32);
+    let mut corners = [
+        Point::from_xy(0.0, 0.0),
+        Point::from_xy(pw, 0.0),
+        Point::from_xy(0.0, ph),
+        Point::from_xy(pw, ph),
+    ];
+    t.map_points(&mut corners);
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for c in corners {
+        (x0, y0, x1, y1) = (x0.min(c.x), y0.min(c.y), x1.max(c.x), y1.max(c.y));
+    }
+    let (x, y) = (x0.floor() as i32 - 1, y0.floor() as i32 - 1);
+    let (w, h) = (
+        (x1.ceil() as i32 + 1 - x).max(1) as u32,
+        (y1.ceil() as i32 + 1 - y).max(1) as u32,
+    );
+    let mut out = Pixmap::new(w, h)?;
+    out.draw_pixmap(
+        0,
+        0,
+        p.as_ref(),
+        &PixmapPaint {
+            quality: FilterQuality::Bicubic,
+            ..PixmapPaint::default()
+        },
+        t.post_translate(-x as f32, -y as f32),
+        None,
+    );
+    Some((x, y, out))
+}
+
+/// `a` times `b` over 255, rounded (as tiny-skia's 8-bit pipeline multiplies).
+#[inline(always)]
+fn mul255(a: u8, b: u8) -> u8 {
+    let t = u16::from(a) * u16::from(b) + 128;
+    ((t + (t >> 8)) >> 8) as u8
+}
+
+/// `src` (premultiplied) put over `dst` with its top left corner at pixel (`x`, `y`),
+/// `opacity` (0 to 1) opaque: as tiny-skia's `draw_pixmap` puts a pixmap neither scaled nor
+/// turned at whole pixels, but several times as fast (tiny-skia samples it as a pattern, a
+/// pixel at a time, in floats; decisions.md R-COSTS).
+pub(crate) fn put(dst: &mut Pixmap, src: &Pixmap, (x, y): (i32, i32), opacity: f32) {
+    let o = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    if o == 0 {
+        return;
+    }
+    let (dw, dh) = (dst.width() as i32, dst.height() as i32);
+    let (sw, sh) = (src.width() as i32, src.height() as i32);
+    let (x0, y0) = (x.max(0), y.max(0));
+    let (x1, y1) = ((x + sw).min(dw), (y + sh).min(dh));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let n = (x1 - x0) as usize * 4;
+    let (sd, dd) = (src.data(), dst.data_mut());
+    for row in y0..y1 {
+        let from = (((row - y) * sw + (x0 - x)) * 4) as usize;
+        let to = ((row * dw + x0) * 4) as usize;
+        let (s, d) = (&sd[from..from + n], &mut dd[to..to + n]);
+        if o == 255 {
+            for (d, s) in d.chunks_exact_mut(4).zip(s.chunks_exact(4)) {
+                let keep = 255 - s[3];
+                for j in 0..4 {
+                    d[j] = s[j] + mul255(d[j], keep);
+                }
+            }
+        } else {
+            for (d, s) in d.chunks_exact_mut(4).zip(s.chunks_exact(4)) {
+                let keep = 255 - mul255(s[3], o);
+                for j in 0..4 {
+                    d[j] = mul255(s[j], o) + mul255(d[j], keep);
+                }
+            }
+        }
+    }
+}
+
 fn put_picture(
     frame: &mut Pixmap,
     p: &Pixmap,
@@ -1012,6 +1224,7 @@ mod tests {
     use super::*;
     use crate::controls::index;
     use crate::ultra::Opening;
+    use std::time::Instant;
 
     /// A frame put together again where it changed is the frame put together whole, to the
     /// bit: through knobs turned above the strip and on it, a switch, a tip coming and going.
@@ -1038,8 +1251,10 @@ mod tests {
                         spark,
                         ..Opening::default()
                     };
-                    let [_, front] = crate::ultra::ultra_worn(&o);
+                    let [_, mut front] = crate::ultra::ultra_worn(&o);
                     assert!(!front.lights.is_empty());
+                    // (The lightning left out: `the_opening_drawn_by_code_is_the_opening_drawn`.)
+                    front.drawn.clear();
                     // The same layer with its lights drawn as they were, under its SVG.
                     let mut drawn = front.clone();
                     drawn.lights.clear();
@@ -1066,6 +1281,151 @@ mod tests {
                         "scale {scale:.2}, {o:?}: {off} levels off the light drawn"
                     );
                 }
+            }
+        }
+    }
+
+    /// What the layers that cost most cost to draw at a Retina window's scale, as they were
+    /// drawn (SVG, every picture resampled) and as they are (decisions.md R-COSTS): QUALITY's
+    /// shutter half closed, the Tesla lamp sparking, the amber lamp lit and playing, a knob
+    /// turned. Printed, the best of five runs of 100 (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "prints timings"]
+    fn costs_timings() {
+        use crate::art::Blend;
+        let scale = 3440.0 / W;
+        let mut r = Renderer::with_skin(Skin::Worn, scale, 1.0);
+        let scene = Scene::default();
+        r.render(&scene);
+        // A layer as it was drawn: what is drawn by code as SVG, overlays as SVG blended.
+        let as_was = |l: &Layer| {
+            let mut was = l.clone();
+            let mut over: String = l.drawn.iter().map(|d| d.svg()).collect();
+            for o in &l.overlays {
+                over += &match o.blend {
+                    Blend::Normal => o.svg.clone(),
+                    Blend::ColorDodge => {
+                        format!("<g style='mix-blend-mode:color-dodge'>{}</g>", o.svg)
+                    }
+                    Blend::Multiply => format!("<g style='mix-blend-mode:multiply'>{}</g>", o.svg),
+                };
+            }
+            was.over = over + &l.over;
+            was.drawn.clear();
+            was.overlays.clear();
+            was
+        };
+        let time = |r: &mut Renderer, l: &Layer, kept: bool| {
+            let mut best = f64::MAX;
+            for _ in 0..5 {
+                let t = Instant::now();
+                for _ in 0..100 {
+                    if !kept {
+                        r.placed.clear();
+                    }
+                    r.render_layer(l);
+                }
+                best = best.min(t.elapsed().as_secs_f64() * 10.0);
+            }
+            best
+        };
+        let [_, shutter] = crate::ultra::ultra_worn(&Opening {
+            lamp: 0.2,
+            ..Opening::default()
+        });
+        let [_, tesla] = crate::ultra::ultra_worn(&Opening {
+            coil: 1.0,
+            level: 1.0,
+            spark: 1.1,
+            ..Opening::default()
+        });
+        let [_, amber] = crate::ultra::ultra_worn(&Opening {
+            lamp: 1.0,
+            level: 0.6,
+            ..Opening::default()
+        });
+        let knob = r.layers(&scene)[index("emphasis").expect("a control")].clone();
+        for (name, l) in [
+            ("the shutter half closed", shutter),
+            ("the Tesla lamp sparking", tesla),
+            ("the amber lamp lit", amber),
+            ("a knob turned", knob),
+        ] {
+            let was = time(&mut r, &as_was(&l), false);
+            let now = time(&mut r, &l, true);
+            println!("{name}: {was:.3} ms as it was, {now:.3} ms now");
+        }
+    }
+
+    /// QUALITY's opening drawn by code (its shutter, the hamster's shade in the well, the Tesla
+    /// lamp's lightning) is the opening drawn as SVG, as it was: closing, opening, nearly open,
+    /// over the lamp and the hamster, sparking soft and loud, at the window's opening scale and
+    /// a Retina screen's: on the whole within a quarter of a level of 255, under half a percent
+    /// of it more than three levels off, none more than 16 (along the blades' edges, whose
+    /// coverage of a pixel is worked out a pixel at a time, not by the rasterizer; decisions.md
+    /// R-COSTS).
+    #[test]
+    fn the_opening_drawn_by_code_is_the_opening_drawn() {
+        for scale in [1720.0 / W, 3440.0 / W] {
+            let mut r = Renderer::with_skin(Skin::Worn, scale, 1.0);
+            for o in [
+                Opening::default(),
+                Opening {
+                    lamp: 0.1,
+                    ..Opening::default()
+                },
+                Opening {
+                    lamp: 0.25,
+                    ..Opening::default()
+                },
+                Opening {
+                    lamp: 0.43,
+                    ..Opening::default()
+                },
+                Opening {
+                    hamster: 0.3,
+                    run: 1.0,
+                    ..Opening::default()
+                },
+                Opening {
+                    hamster: 0.6,
+                    run: 1.0,
+                    ..Opening::default()
+                },
+                Opening {
+                    coil: 1.0,
+                    level: 0.3,
+                    spark: 0.4,
+                    ..Opening::default()
+                },
+                Opening {
+                    coil: 1.0,
+                    level: 1.0,
+                    spark: 1.1,
+                    ..Opening::default()
+                },
+            ] {
+                let [_, mut front] = crate::ultra::ultra_worn(&o);
+                assert!(!front.drawn.is_empty(), "{o:?}: nothing drawn by code");
+                front.lights.clear();
+                let mut svg = front.clone();
+                svg.drawn.clear();
+                svg.over = front.drawn.iter().map(|d| d.svg()).collect::<String>() + &front.over;
+                let (_, _, a) = r.render_layer(&front).expect("drawn");
+                let (_, _, b) = r.render_layer(&svg).expect("drawn");
+                let off: Vec<u8> = a
+                    .data()
+                    .iter()
+                    .zip(b.data())
+                    .map(|(x, y)| x.abs_diff(*y))
+                    .collect();
+                let most = off.iter().copied().max().unwrap_or(0);
+                let mean = off.iter().map(|&d| f64::from(d)).sum::<f64>() / off.len() as f64;
+                let far = off.iter().filter(|&&d| d > 3).count() as f64 / off.len() as f64;
+                let at = format!("scale {scale:.2}, {o:?}");
+                assert!(mean < 0.25, "{at}: {mean:.3} levels off on average");
+                assert!(far < 0.005, "{at}: {:.2} % past 3 levels off", far * 100.0);
+                assert!(most <= 16, "{at}: {most} levels off");
             }
         }
     }

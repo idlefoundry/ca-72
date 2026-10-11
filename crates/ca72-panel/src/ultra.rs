@@ -18,6 +18,11 @@
 //!
 //! All of it from [`Opening`], which the editor moves on from the time and the synth's level.
 
+use resvg::tiny_skia::{
+    Color, FillRule, GradientStop, LineCap, LineJoin, Mask, Paint, Path, PathBuilder, Pixmap,
+    Point, RadialGradient, SpreadMode, Stroke, Transform,
+};
+
 use crate::art::{COL, Layer, Light, Sprite, TOP, ULTRA_AT};
 use crate::skin::Part;
 use crate::svg::{N, Svg, put};
@@ -270,10 +275,9 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
         return [empty.clone(), empty];
     }
     let mut back = Svg::default();
-    let body = Svg::default();
-    let mut over = Svg::default();
     let mut sprites = Vec::new();
     let mut lights = Vec::new();
+    let mut drawn = Vec::new();
     let p = match shown(o) {
         Shown::Hamster(p) | Shown::Lamp(_, p) => p,
     };
@@ -289,9 +293,9 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
             1.0,
         ));
         match shown(o) {
-            Shown::Hamster(_) => hamster(o, &l, &mut back, &mut over, &mut sprites),
+            Shown::Hamster(_) => hamster(o, &l, &mut back, &mut drawn, &mut sprites),
             Shown::Lamp(lamp, _) => {
-                lights = lamp_worn(lamp, o, p, &l, &mut back, &mut over, &mut sprites);
+                lights = lamp_worn(lamp, o, p, &l, &mut back, &mut drawn, &mut sprites);
             }
         }
     }
@@ -299,7 +303,7 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
     let mut rim = Svg::default();
     ring(&mut rim);
     if l.open < 1.0 {
-        shutter(&mut over, l.open);
+        drawn.push(Drawn::Shutter(l.open));
     }
     if let Shown::Lamp(lamp, _) = shown(o) {
         let lit = driven(l.glow, o.level);
@@ -323,10 +327,9 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
         Layer {
             origin: origin(),
             bounds: BOUNDS,
-            body: body.0,
             sprites,
             lights,
-            over: over.0,
+            drawn,
             ..Layer::default()
         },
     ]
@@ -340,7 +343,7 @@ fn lamp_worn(
     p: f64,
     l: &Look,
     body: &mut Svg,
-    over: &mut Svg,
+    drawn: &mut Vec<Drawn>,
     sprites: &mut Vec<Sprite>,
 ) -> Vec<Light> {
     let mut lights = Vec::new();
@@ -376,9 +379,15 @@ fn lamp_worn(
     if lamp == Lamp::Tesla && l.rise > 0.5 {
         let power = smooth(LIFT.0 + 0.3 * (LIFT.1 - LIFT.0), LIFT.1, p) * o.level;
         if power > 0.0
-            && let Some(flash) = streaks(over, sc, o.spark, power)
+            && let Some(streaks) = struck(sc, o.spark, power)
         {
-            lights.push(light(Lamp::Tesla, GlowKind::Spill, 1.0, 0.5 * flash));
+            lights.push(light(
+                Lamp::Tesla,
+                GlowKind::Spill,
+                1.0,
+                0.5 * streaks.flash(),
+            ));
+            drawn.push(Drawn::Streaks(streaks));
         }
     }
     lights
@@ -418,7 +427,13 @@ fn spill(s: &mut Svg, colour: &str, k: f64) {
 
 /// LO's hamster, his wheel come `l` of the way: the wheel turning, the hamster on its rungs at
 /// its foot, a little up the rising side as he runs, or curled up asleep.
-fn hamster(o: &Opening, l: &Look, body: &mut Svg, over: &mut Svg, sprites: &mut Vec<Sprite>) {
+fn hamster(
+    o: &Opening,
+    l: &Look,
+    body: &mut Svg,
+    drawn: &mut Vec<Drawn>,
+    sprites: &mut Vec<Sprite>,
+) {
     let rise = l.rise.min(1.0);
     let sc = WHEEL_DEEP + (1.0 - WHEEL_DEEP) * l.rise;
     // Its shadow on the well's floor as it comes forward.
@@ -477,12 +492,7 @@ fn hamster(o: &Opening, l: &Look, body: &mut Svg, over: &mut Svg, sprites: &mut 
     }
     // Deep in the well: darker.
     if rise < 1.0 {
-        put!(
-            over,
-            "<circle r='{}' fill='#000' fill-opacity='{}'/>",
-            N(APERTURE),
-            N(0.55 * (1.0 - rise))
-        );
+        drawn.push(Drawn::Shade(0.55 * (1.0 - rise)));
     }
 }
 
@@ -573,6 +583,7 @@ fn ray_to(s: (f64, f64), d: f64, r: f64) -> (f64, f64) {
     (s.0 + dx * k, s.1 + dy * k)
 }
 
+#[cfg(test)]
 fn path(points: &[(f64, f64)]) -> String {
     let mut d = String::with_capacity(points.len() * 14);
     for (i, &(x, y)) in points.iter().enumerate() {
@@ -586,14 +597,14 @@ fn path(points: &[(f64, f64)]) -> String {
 /// as the synth plays softer), the lamp at `sc` of its size. Each of [`SLOTS`] lives its own
 /// life, a tenth to a quarter of a second, leaving the toroid's rim (upwards and to the sides,
 /// not down through the coil) for the glass a little off straight out, drifting as it lives,
-/// its jagged shape struck again every [`JAG_S`]. Drawn as light: a wide faint blue glow, a
+/// its jagged shape struck again every [`JAG_S`]. Drawn (`Streaks::draw`) as light: a wide faint blue glow, a
 /// paler stroke, a white-blue core, a bright spot where it touches the glass; the toroid
 /// brighter and the lamp's light round it flickering with them.
-fn streaks(s: &mut Svg, sc: f64, t: f64, power: f64) -> Option<f64> {
+fn struck(sc: f64, t: f64, power: f64) -> Option<Streaks> {
     let r = LAMP_R * sc;
     let (cx, cy) = (TORUS.0 * r, TORUS.1 * r);
     let jag = (t / JAG_S).floor() as i64;
-    let mut drawn = Vec::new();
+    let mut each = Vec::new();
     for k in 0..SLOTS {
         let life = 0.1 + 0.15 * Seeded(k.wrapping_mul(97).wrapping_add(5)).next();
         let at = t / life + f64::from(k) * 0.37;
@@ -641,68 +652,322 @@ fn streaks(s: &mut Svg, sc: f64, t: f64, power: f64) -> Option<f64> {
         } else {
             1.0 - 0.55 * (into - 0.12) / 0.88
         };
-        drawn.push((
+        each.push(Streak {
             points,
             branches,
             end,
-            env * (0.7 + 0.3 * j.next()) * (0.35 + 0.65 * power),
-        ));
+            v: env * (0.7 + 0.3 * j.next()) * (0.35 + 0.65 * power),
+        });
     }
-    if drawn.is_empty() {
-        return None;
+    (!each.is_empty()).then_some(Streaks { sc, power, each })
+}
+
+/// The Tesla lamp's lightning at a moment ([`struck`]): each streak, the lamp's size and the
+/// coil's power.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Streaks {
+    sc: f64,
+    power: f64,
+    each: Vec<Streak>,
+}
+
+/// A streak: its corners, its branches', where it meets the glass, how bright it is (0 to 1).
+#[derive(Clone, Debug, PartialEq)]
+struct Streak {
+    points: Vec<(f64, f64)>,
+    branches: Vec<Vec<(f64, f64)>>,
+    end: (f64, f64),
+    v: f64,
+}
+
+/// A streak's strokes, wide to narrow: width (units, at a lamp's full size), colour, opacity.
+const STROKES: [(f64, (u8, u8, u8), f64); 4] = [
+    (7.0, (0x28, 0x6e, 0xff), 0.08),
+    (3.8, (0x46, 0x8c, 0xff), 0.2),
+    (1.7, (0x82, 0xb9, 0xff), 0.55),
+    (0.7, (0xeb, 0xf4, 0xff), 0.95),
+];
+
+/// A branch's strokes, likewise.
+const BRANCH_STROKES: [(f64, (u8, u8, u8), f64); 2] = [
+    (3.0, (0x46, 0x8c, 0xff), 0.12),
+    (0.9, (0xaa, 0xd2, 0xff), 0.55),
+];
+
+impl Streaks {
+    /// How strong they are together: the lamp's light round it flickers with them.
+    fn flash(&self) -> f64 {
+        self.each.iter().map(|d| d.v).sum::<f64>() / f64::from(SLOTS)
     }
-    put!(
-        s,
-        "<defs><radialGradient id='t-spot'><stop offset='0' stop-color='#96c8ff'/><stop offset='1' stop-color='#3c78ff' stop-opacity='0'/></radialGradient></defs><g id='t-glass' fill='none' stroke-linecap='round' stroke-linejoin='round'>"
-    );
-    for (points, branches, end, v) in &drawn {
-        let d = path(points);
-        for (w, colour, a) in [
-            (7.0, "#286eff", 0.08),
-            (3.8, "#468cff", 0.2),
-            (1.7, "#82b9ff", 0.55),
-            (0.7, "#ebf4ff", 0.95),
-        ] {
-            put!(
-                s,
-                "<path d='{d}' stroke='{colour}' stroke-opacity='{}' stroke-width='{}'/>",
-                N(a * v),
-                N(w * sc)
-            );
+
+    /// The toroid's brighter glow under them: its middle, radius and opacity.
+    fn glow(&self) -> ((f64, f64), f64, f64) {
+        let r = LAMP_R * self.sc;
+        (
+            (TORUS.0 * r, TORUS.1 * r),
+            TORUS.2 * r * 1.3,
+            0.12 * self.power * (self.each.len() as f64 / 3.0).min(1.0),
+        )
+    }
+
+    /// Drawn on `p` by `t` (the opening's units to its pixels): each streak's strokes and its
+    /// spot on the glass, then the toroid's glow, as [`Streaks::svg`] draws them.
+    fn draw(&self, p: &mut Pixmap, t: Transform) {
+        let sc = self.sc;
+        for st in &self.each {
+            let line = polyline(&st.points);
+            for (w, rgb, a) in STROKES {
+                stroke(p, line.as_ref(), (w * sc, true), rgb, a * st.v, t, None);
+            }
+            for b in &st.branches {
+                let line = polyline(b);
+                for (w, rgb, a) in BRANCH_STROKES {
+                    stroke(p, line.as_ref(), (w * sc, true), rgb, a * st.v, t, None);
+                }
+            }
+            spot(p, st.end, 4.5 * sc, 0.6 * st.v, t);
         }
-        for b in branches {
-            let d = path(b);
-            put!(
-                s,
-                "<path d='{d}' stroke='#468cff' stroke-opacity='{}' stroke-width='{}'/><path d='{d}' stroke='#aad2ff' stroke-opacity='{}' stroke-width='{}'/>",
-                N(0.12 * v),
-                N(3.0 * sc),
-                N(0.55 * v),
-                N(0.9 * sc)
-            );
-        }
+        let (at, r, a) = self.glow();
+        spot(p, at, r, a, t);
+    }
+
+    /// The same as SVG (as they were drawn before they were drawn by code; the tests'
+    /// reference).
+    #[cfg(test)]
+    fn svg(&self, s: &mut Svg) {
+        let sc = self.sc;
         put!(
             s,
-            "<circle cx='{}' cy='{}' r='{}' fill='url(#t-spot)' fill-opacity='{}' stroke='none'/>",
-            N(end.0),
-            N(end.1),
-            N(4.5 * sc),
-            N(0.6 * v)
+            "<defs><radialGradient id='t-spot'><stop offset='0' stop-color='#96c8ff'/><stop offset='1' stop-color='#3c78ff' stop-opacity='0'/></radialGradient></defs><g id='t-glass' fill='none' stroke-linecap='round' stroke-linejoin='round'>"
+        );
+        let hex = |(r, g, b): (u8, u8, u8)| format!("#{r:02x}{g:02x}{b:02x}");
+        for st in &self.each {
+            let d = path(&st.points);
+            for (w, rgb, a) in STROKES {
+                put!(
+                    s,
+                    "<path d='{d}' stroke='{}' stroke-opacity='{}' stroke-width='{}'/>",
+                    hex(rgb),
+                    N(a * st.v),
+                    N(w * sc)
+                );
+            }
+            for b in &st.branches {
+                let d = path(b);
+                for (w, rgb, a) in BRANCH_STROKES {
+                    put!(
+                        s,
+                        "<path d='{d}' stroke='{}' stroke-opacity='{}' stroke-width='{}'/>",
+                        hex(rgb),
+                        N(a * st.v),
+                        N(w * sc)
+                    );
+                }
+            }
+            put!(
+                s,
+                "<circle cx='{}' cy='{}' r='{}' fill='url(#t-spot)' fill-opacity='{}' stroke='none'/>",
+                N(st.end.0),
+                N(st.end.1),
+                N(4.5 * sc),
+                N(0.6 * st.v)
+            );
+        }
+        let ((cx, cy), r, a) = self.glow();
+        put!(
+            s,
+            "<circle cx='{}' cy='{}' r='{}' fill='url(#t-spot)' fill-opacity='{}' stroke='none'/></g>",
+            N(cx),
+            N(cy),
+            N(r),
+            N(a)
         );
     }
-    put!(
-        s,
-        "<circle cx='{}' cy='{}' r='{}' fill='url(#t-spot)' fill-opacity='{}' stroke='none'/></g>",
-        N(cx),
-        N(cy),
-        N(TORUS.2 * r * 1.3),
-        N(0.12 * power * (drawn.len() as f64 / 3.0).min(1.0))
-    );
-    // How strong they are together, for the lamp's light round it flickering with them. (Its
-    // own light over the steady one, a picture, no gradient sharing the steady spill's id: in
-    // one document the panel's glow had been painted twice at its full strength, on and off
-    // with the streaks, rather than the steady glow and half a flash: the CA-74's review.)
-    Some(drawn.iter().map(|d| d.3).sum::<f64>() / f64::from(SLOTS))
+}
+
+/// What of the opening is drawn by code, not SVG, at each tick it changes: the shade over the
+/// hamster deep in the well, the shutter, the Tesla lamp's lightning (decisions.md R-COSTS).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Drawn {
+    /// Black over the opening, this opaque.
+    Shade(f64),
+    /// The shutter, this far open.
+    Shutter(f64),
+    Streaks(Streaks),
+}
+
+impl Drawn {
+    /// Drawn on `p`, the opening's middle at `origin` (pixels), `scale` pixels a unit.
+    pub fn draw(&self, p: &mut Pixmap, origin: (f32, f32), scale: f32) {
+        let t = Transform::from_row(scale, 0.0, 0.0, scale, origin.0, origin.1);
+        match self {
+            Drawn::Shade(a) => {
+                if let Some(c) = circle(0.0, 0.0, APERTURE) {
+                    let mut paint = Paint::default();
+                    paint.set_color(colour((0, 0, 0), *a));
+                    p.fill_path(&c, &paint, FillRule::Winding, t, None);
+                }
+            }
+            Drawn::Shutter(open) => draw_shutter(p, origin, scale, *open),
+            Drawn::Streaks(s) => s.draw(p, t),
+        }
+    }
+
+    /// The same as SVG (the tests' reference).
+    #[cfg(test)]
+    pub(crate) fn svg(&self) -> String {
+        let mut s = Svg::default();
+        match self {
+            Drawn::Shade(a) => put!(
+                s,
+                "<circle r='{}' fill='#000' fill-opacity='{}'/>",
+                N(APERTURE),
+                N(*a)
+            ),
+            Drawn::Shutter(open) => shutter(&mut s, *open),
+            Drawn::Streaks(st) => st.svg(&mut s),
+        }
+        s.0
+    }
+}
+
+/// A colour at an opacity (0 to 1).
+fn colour((r, g, b): (u8, u8, u8), a: f64) -> Color {
+    Color::from_rgba(
+        f32::from(r) / 255.0,
+        f32::from(g) / 255.0,
+        f32::from(b) / 255.0,
+        a.clamp(0.0, 1.0) as f32,
+    )
+    .unwrap_or(Color::TRANSPARENT)
+}
+
+/// A circle as a path: four quarter turns, as SVG's `<circle>` is made one (usvg's), so that
+/// its edge covers its pixels as SVG's does.
+fn circle(cx: f64, cy: f64, r: f64) -> Option<Path> {
+    let q = std::f64::consts::FRAC_PI_2;
+    let k = 4.0 / 3.0 * (q / 4.0).tan();
+    let mut pb = PathBuilder::new();
+    pb.move_to((cx + r) as f32, cy as f32);
+    for i in 0..4 {
+        let (t0, t1) = (f64::from(i) * q, f64::from(i + 1) * q);
+        let (c0, s0, c1, s1) = (t0.cos(), t0.sin(), t1.cos(), t1.sin());
+        pb.cubic_to(
+            (cx + r * (c0 - k * s0)) as f32,
+            (cy + r * (s0 + k * c0)) as f32,
+            (cx + r * (c1 + k * s1)) as f32,
+            (cy + r * (s1 - k * c1)) as f32,
+            (cx + r * c1) as f32,
+            (cy + r * s1) as f32,
+        );
+    }
+    pb.close();
+    pb.finish()
+}
+
+/// The corners joined by straight lines, as a path.
+fn polyline(points: &[(f64, f64)]) -> Option<Path> {
+    let mut pb = PathBuilder::new();
+    for (i, &(x, y)) in points.iter().enumerate() {
+        if i == 0 {
+            pb.move_to(x as f32, y as f32);
+        } else {
+            pb.line_to(x as f32, y as f32);
+        }
+    }
+    pb.finish()
+}
+
+/// [`arc`]'s arc as a path: cubic curves, a quarter turn each at most.
+fn arc_path(cx: f64, cy: f64, r: f64, a: f64, b: f64, cw: bool) -> Option<Path> {
+    let mut d = b - a;
+    if cw {
+        while d < 0.0 {
+            d += std::f64::consts::TAU;
+        }
+    } else {
+        while d > 0.0 {
+            d -= std::f64::consts::TAU;
+        }
+    }
+    let n = (d.abs() / std::f64::consts::FRAC_PI_2).ceil().max(1.0);
+    let step = d / n;
+    let k = 4.0 / 3.0 * (step / 4.0).tan();
+    let at = |t: f64| (cx + r * t.cos(), cy + r * t.sin());
+    let mut pb = PathBuilder::new();
+    let (x, y) = at(a);
+    pb.move_to(x as f32, y as f32);
+    let mut t0 = a;
+    for _ in 0..n as usize {
+        let t1 = t0 + step;
+        let (c0, s0, c1, s1) = (t0.cos(), t0.sin(), t1.cos(), t1.sin());
+        pb.cubic_to(
+            (cx + r * (c0 - k * s0)) as f32,
+            (cy + r * (s0 + k * c0)) as f32,
+            (cx + r * (c1 + k * s1)) as f32,
+            (cy + r * (s1 - k * c1)) as f32,
+            (cx + r * c1) as f32,
+            (cy + r * s1) as f32,
+        );
+        t0 = t1;
+    }
+    pb.finish()
+}
+
+/// `path` stroked (width in units, round ends and joins or SVG's butt and miter) in `rgb` at
+/// opacity `a`, by `t`, inside `mask`.
+fn stroke(
+    p: &mut Pixmap,
+    path: Option<&Path>,
+    (width, round): (f64, bool),
+    rgb: (u8, u8, u8),
+    a: f64,
+    t: Transform,
+    mask: Option<&Mask>,
+) {
+    let Some(path) = path else {
+        return;
+    };
+    let mut paint = Paint::default();
+    paint.set_color(colour(rgb, a));
+    let stroke = Stroke {
+        width: width as f32,
+        line_cap: if round { LineCap::Round } else { LineCap::Butt },
+        line_join: if round {
+            LineJoin::Round
+        } else {
+            LineJoin::Miter
+        },
+        ..Stroke::default()
+    };
+    p.stroke_path(path, &paint, &stroke, t, mask);
+}
+
+/// A spot of the lightning's light: a disc at `at`, radius `r`, pale blue at its middle to
+/// nothing at its edge, `a` opaque.
+fn spot(p: &mut Pixmap, at: (f64, f64), r: f64, a: f64, t: Transform) {
+    let (Some(disc), Some(shader)) = (
+        circle(at.0, at.1, r),
+        RadialGradient::new(
+            Point::from_xy(at.0 as f32, at.1 as f32),
+            Point::from_xy(at.0 as f32, at.1 as f32),
+            r as f32,
+            vec![
+                GradientStop::new(0.0, colour((0x96, 0xc8, 0xff), a)),
+                GradientStop::new(1.0, colour((0x3c, 0x78, 0xff), 0.0)),
+            ],
+            SpreadMode::Pad,
+            Transform::identity(),
+        ),
+    ) else {
+        return;
+    };
+    let paint = Paint {
+        shader,
+        anti_alias: true,
+        ..Paint::default()
+    };
+    p.fill_path(&disc, &paint, FillRule::Winding, t, None);
 }
 
 // ---- The opening.
@@ -811,13 +1076,10 @@ fn arc(cx: f64, cy: f64, r: f64, a: f64, b: f64, cw: bool) -> String {
     )
 }
 
-/// The shutter `open` of the way open. The opening is where all eight blades' edges leave room:
-/// each blade is what lies outside a circle (its curved edge) through two neighbouring corners
-/// of the opening, which grows from the middle and turns as it grows, as a camera's iris does.
-/// All the blades are one metal, so where they overlap only their edges show: each blade's edge
-/// runs on past the opening across the next blade to the rim, a pinwheel when closed, the next
-/// blade in its shade along it.
-fn shutter(s: &mut Svg, open: f64) {
+/// The shutter's blades' curved edges, `open` of the way open: each its circle's middle, the
+/// angles at the two corners of the opening it joins, and whether it runs clockwise from the
+/// first to the second ([`shutter`]).
+fn blade_edges(open: f64) -> Vec<(f64, f64, f64, f64, bool)> {
     let r = APERTURE;
     let rho = r * CURVE;
     let step = std::f64::consts::TAU / BLADES as f64;
@@ -829,8 +1091,7 @@ fn shutter(s: &mut Svg, open: f64) {
             (a * t.cos(), a * t.sin())
         })
         .collect();
-    // Each blade's edge: its circle's middle, and the angles at the two corners it joins.
-    let edges: Vec<(f64, f64, f64, f64, bool)> = (0..BLADES)
+    (0..BLADES)
         .map(|k| {
             let (v, w) = (corners[k], corners[(k + 1) % BLADES]);
             let (mx, my) = ((v.0 + w.0) / 2.0, (v.1 + w.1) / 2.0);
@@ -849,7 +1110,224 @@ fn shutter(s: &mut Svg, open: f64) {
             }
             (cx, cy, t1, t2, dt >= 0.0)
         })
+        .collect()
+}
+
+/// The blades' metal, and their sheen's three stops (offset, colour, opacity), as [`shutter`]
+/// draws them.
+const BLADE_RGB: (u8, u8, u8) = (0x19, 0x16, 0x12);
+const SHEEN: [(f64, (u8, u8, u8), f64); 3] = [
+    (0.0, (0xdc, 0xe2, 0xec), 0.16),
+    (0.5, (0xdc, 0xe2, 0xec), 0.03),
+    (1.0, (0x00, 0x00, 0x00), 0.25),
+];
+
+/// The shutter `open` of the way open drawn on `p` by code, as [`shutter`] draws it as SVG, the
+/// opening's middle at `origin` (pixels), `scale` pixels a unit. The blades, all one metal
+/// each with its own sheen over it, are put together a pixel at a time, the sheen only of the
+/// blade on top there: as SVG eight sheens were filled one over the other, most of each hidden
+/// by the next blade's metal, which with the opening's clip was most of the shutter's cost
+/// (decisions.md R-COSTS). As in SVG, all of it is drawn apart and then cut to the opening, once.
+fn draw_shutter(layer: &mut Pixmap, origin: (f32, f32), scale: f32, open: f64) {
+    let r = APERTURE;
+    let rho = r * CURVE;
+    let edges = blade_edges(open);
+    let t = Transform::from_row(scale, 0.0, 0.0, scale, origin.0, origin.1);
+    let (Some(mut clip), Some(mut p)) = (
+        Mask::new(layer.width(), layer.height()),
+        Pixmap::new(layer.width(), layer.height()),
+    ) else {
+        return;
+    };
+    if let Some(c) = circle(0.0, 0.0, r) {
+        clip.fill_path(&c, FillRule::Winding, true, t);
+    }
+    let p = &mut p;
+    // Their shade on the lamp, just inside the opening's edge.
+    if open > 0.01 {
+        for &(cx, cy, t1, t2, cw) in &edges {
+            let a = arc_path(cx, cy, rho - 1.2, t1, t2, cw);
+            stroke(p, a.as_ref(), (3.0, false), (0, 0, 0), 0.45, t, None);
+        }
+    }
+    blades(p, origin, f64::from(scale), &edges);
+    // Their edges, round the opening and on across the next blade to the rim.
+    for &(cx, cy, t1, t2, cw) in &edges {
+        let on = t2 + if cw { 1.0 } else { -1.0 } * 110f64.to_radians();
+        for (rr, w, rgb, a) in [
+            (rho - 1.4, 3.0, (0, 0, 0), 0.38),
+            (rho, 0.9, (0, 0, 0), 0.85),
+            (rho + 0.55, 0.5, (0xff, 0xff, 0xff), 0.13),
+        ] {
+            let path = arc_path(cx, cy, rr, t2, on, cw);
+            stroke(p, path.as_ref(), (w, false), rgb, a, t, None);
+        }
+        if open > 0.01 {
+            let path = arc_path(cx, cy, rho, t1, t2, cw);
+            stroke(
+                p,
+                path.as_ref(),
+                (0.6, false),
+                (0xff, 0xff, 0xff),
+                0.22,
+                t,
+                None,
+            );
+        }
+    }
+    // The ring's shade on them, under its upper left.
+    let (Some(disc), Some(shader)) = (
+        circle(0.0, 0.0, r + 2.0),
+        RadialGradient::new(
+            Point::from_xy((r * 0.12) as f32, (r * 0.12) as f32),
+            Point::from_xy((r * 0.06) as f32, (r * 0.06) as f32),
+            (r * 1.04) as f32,
+            vec![
+                GradientStop::new((0.82 / 1.04) as f32, colour((0, 0, 0), 0.0)),
+                GradientStop::new(1.0, colour((0, 0, 0), 0.6)),
+            ],
+            SpreadMode::Pad,
+            Transform::identity(),
+        ),
+    ) else {
+        return;
+    };
+    let paint = Paint {
+        shader,
+        anti_alias: true,
+        ..Paint::default()
+    };
+    p.fill_path(&disc, &paint, FillRule::Winding, t, None);
+    p.apply_mask(&clip);
+    crate::render::put(layer, p, (0, 0), 1.0);
+}
+
+/// A blade as [`blades`] draws it: its edge's circle's middle, and where a point is across its
+/// sheen's box, `x * a + y * b + c` as (`a`, `b`, `c`).
+struct Blade {
+    middle: (f64, f64),
+    sheen: (f64, f64, f64),
+}
+
+/// The blades over `p` round the opening, a pixel at a time: each blade is what lies outside
+/// its edge's circle, its metal opaque with its sheen over it, a gradient across its box (the
+/// disc's and its circle's, SVG's object bounding box) from its top left corner to its bottom
+/// right; each over those before it, its edge's coverage of a pixel a ramp a pixel wide. (From
+/// the last blade that covers a pixel wholly: those under it do not show.)
+fn blades(p: &mut Pixmap, origin: (f32, f32), s: f64, edges: &[(f64, f64, f64, f64, bool)]) {
+    let r = APERTURE;
+    let rho = r * CURVE;
+    let (w, h) = (p.width() as usize, p.height() as usize);
+    let (ox, oy) = (f64::from(origin.0), f64::from(origin.1));
+    let reach = r * s + 2.0;
+    let span = |o: f64, most: usize| {
+        (
+            ((o - reach).floor().max(0.0) as usize).min(most),
+            ((o + reach).ceil().max(0.0) as usize).min(most),
+        )
+    };
+    let ((xa, xb), (ya, yb)) = (span(ox, w), span(oy, h));
+    // Each blade's circle's middle, and its sheen's place across its box (left, top, width,
+    // height) as `ux * a + uy * b + c`.
+    let blade: Vec<Blade> = edges
+        .iter()
+        .map(|&(cx, cy, ..)| {
+            let (l, t) = ((-(r + 2.0)).min(cx - rho), (-(r + 2.0)).min(cy - rho));
+            let (w, h) = ((r + 2.0).max(cx + rho) - l, (r + 2.0).max(cy + rho) - t);
+            let (a, b) = (0.5 / w, 0.5 / h);
+            Blade {
+                middle: (cx, cy),
+                sheen: (a, b, -(l * a + t * b)),
+            }
+        })
         .collect();
+    let unit = |(r, g, b): (u8, u8, u8)| {
+        [
+            f64::from(r) / 255.0,
+            f64::from(g) / 255.0,
+            f64::from(b) / 255.0,
+        ]
+    };
+    let metal = unit(BLADE_RGB);
+    let stops = SHEEN.map(|(at, rgb, a)| (at, unit(rgb), a));
+    // The sheen at `t` (0 to 1) across a box, premultiplied: its stops' colours and opacities
+    // between them (as a gradient's, unpremultiplied), then premultiplied.
+    let sheen = |t: f64| {
+        let t = t.clamp(0.0, 1.0);
+        let (a, b) = if t <= stops[1].0 {
+            (stops[0], stops[1])
+        } else {
+            (stops[1], stops[2])
+        };
+        let k = (t - a.0) / (b.0 - a.0);
+        let alpha = a.2 + (b.2 - a.2) * k;
+        let c: [f64; 3] = std::array::from_fn(|i| (a.1[i] + (b.1[i] - a.1[i]) * k) * alpha);
+        (c, alpha)
+    };
+    let data = p.data_mut();
+    let mut cover = [0.0f64; BLADES];
+    for y in ya..yb {
+        let uy = (y as f64 + 0.5 - oy) / s;
+        for x in xa..xb {
+            let ux = (x as f64 + 0.5 - ox) / s;
+            let mut top = None;
+            for (
+                k,
+                &Blade {
+                    middle: (cx, cy), ..
+                },
+            ) in blade.iter().enumerate()
+            {
+                let (dx, dy) = (ux - cx, uy - cy);
+                cover[k] = (((dx * dx + dy * dy).sqrt() - rho) * s + 0.5).clamp(0.0, 1.0);
+                if cover[k] >= 1.0 {
+                    top = Some(k);
+                }
+            }
+            let from = top.unwrap_or(0);
+            if top.is_none() && cover.iter().all(|&k| k <= 0.0) {
+                continue;
+            }
+            let i = (y * w + x) * 4;
+            let mut c: [f64; 4] = if top.is_some() {
+                [0.0; 4]
+            } else {
+                std::array::from_fn(|j| f64::from(data[i + j]) / 255.0)
+            };
+            for (
+                k,
+                &Blade {
+                    sheen: (a, b, d), ..
+                },
+            ) in blade.iter().enumerate().skip(from)
+            {
+                let kc = cover[k];
+                if kc <= 0.0 {
+                    continue;
+                }
+                let (sc, sa) = sheen(ux * a + uy * b + d);
+                for j in 0..3 {
+                    c[j] = (sc[j] + metal[j] * (1.0 - sa)) * kc + c[j] * (1.0 - kc);
+                }
+                c[3] = kc + c[3] * (1.0 - kc);
+            }
+            for j in 0..4 {
+                data[i + j] = (c[j] * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+}
+
+/// The shutter `open` of the way open. The opening is where all eight blades' edges leave room:
+/// each blade is what lies outside a circle (its curved edge) through two neighbouring corners
+/// of the opening, which grows from the middle and turns as it grows, as a camera's iris does.
+/// All the blades are one metal, so where they overlap only their edges show: each blade's edge
+/// runs on past the opening across the next blade to the rim, a pinwheel when closed, the next
+/// blade in its shade along it.
+fn shutter(s: &mut Svg, open: f64) {
+    let r = APERTURE;
+    let rho = r * CURVE;
+    let edges = blade_edges(open);
     let disc = |rr: f64| {
         format!(
             "M {} 0 A {rr} {rr} 0 1 0 {} 0 A {rr} {rr} 0 1 0 {} 0 Z",
@@ -1017,13 +1495,15 @@ mod tests {
             assert!(back.body.is_empty() && back.over.is_empty() && back.sprites.is_empty());
             assert!(front.body.is_empty() && front.over.is_empty() && front.sprites.is_empty());
             assert!(back.lights.is_empty() && front.lights.is_empty());
+            assert!(back.drawn.is_empty() && front.drawn.is_empty());
             assert!(ultra(&o).body.is_empty());
         }
         // Its layer: the shutter alone at first; the lamp's pictures once it opens, the floor
         // under them.
         let [back, front] = ultra_worn(&Opening::default());
         assert!(back.sprites.is_empty() && front.sprites.is_empty());
-        assert!(front.over.contains("u-aperture") && !back.over.is_empty());
+        assert_eq!(front.drawn, [Drawn::Shutter(0.0)]);
+        assert!(!back.over.is_empty());
         let [back, open] = ultra_worn(&Opening {
             lamp: 1.0,
             ..Opening::default()
@@ -1080,7 +1560,7 @@ mod tests {
                             .iter()
                             .filter(|g| g.glow.kind == GlowKind::Spill)
                             .count();
-                        if l.over.contains("t-glass") {
+                        if l.drawn.iter().any(|d| matches!(d, Drawn::Streaks(_))) {
                             assert_eq!(spills, 2, "the steady spill and the flash's");
                             sparking = true;
                         } else {
@@ -1142,22 +1622,24 @@ mod tests {
             });
             front
         };
+        let streaks = |l: &Layer| {
+            l.drawn.iter().find_map(|d| match d {
+                Drawn::Streaks(s) => Some(s.each.len()),
+                _ => None,
+            })
+        };
         let quiet = at(0.0, 1.0);
         assert!(quiet.sprites.iter().any(|s| s.part == Part::TeslaLensOff));
-        assert!(!quiet.over.contains("t-glass"));
+        assert_eq!(streaks(&quiet), None);
         let loud = at(1.0, 1.0);
-        assert!(loud.over.contains("t-glass"), "streaks while it sounds");
+        assert!(streaks(&loud).is_some(), "streaks while it sounds");
         assert_eq!(loud, at(1.0, 1.0));
-        assert_ne!(loud.over, at(1.0, 1.0 + 2.0 * JAG_S).over);
+        assert_ne!(loud.drawn, at(1.0, 1.0 + 2.0 * JAG_S).drawn);
+        // (No drawing to parse: its pictures, lights and lightning alone.)
+        assert!(loud.body.is_empty() && loud.over.is_empty());
         // Over many moments, usually several at once.
         let counts: Vec<usize> = (0..100)
-            .map(|k| {
-                at(1.0, f64::from(k) * 0.037)
-                    .over
-                    .matches("stroke-width")
-                    .count()
-                    / 4
-            })
+            .map(|k| streaks(&at(1.0, f64::from(k) * 0.037)).unwrap_or(0))
             .collect();
         let mean = counts.iter().sum::<usize>() as f64 / counts.len() as f64;
         assert!(mean > 2.0, "{mean}");
@@ -1183,7 +1665,7 @@ mod tests {
             "a run takes him up the rising side"
         );
         // (Up and running, the front has no drawing to parse: only his pictures.)
-        assert!(up.body.is_empty() && up.over.is_empty());
+        assert!(up.body.is_empty() && up.over.is_empty() && up.drawn.is_empty());
         let [_, asleep] = ultra_worn(&Opening {
             run: 0.0,
             asleep: 1.0,
@@ -1191,7 +1673,8 @@ mod tests {
         });
         assert_eq!(asleep.sprites.last().unwrap().part, Part::HamsterAsleep);
         let [_, deep] = ultra_worn(&Opening { hamster: 0.5, ..o });
-        assert!(deep.sprites[0].zoom < 1.0 && deep.over.contains("fill-opacity"));
+        assert!(deep.sprites[0].zoom < 1.0);
+        assert!(matches!(deep.drawn[..], [Drawn::Shade(a)] if a > 0.0));
         // The hamster is shown over a lamp still on its way down.
         assert!(matches!(
             shown(&Opening { lamp: 0.3, ..o }),

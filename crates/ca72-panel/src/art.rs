@@ -1276,10 +1276,13 @@ pub struct Layer {
     pub bounds: [f64; 4],
     pub body: String,
     /// The worn skin's pictures drawn over the body, each about the origin (decisions.md
-    /// R-LOOK), lights over them, and SVG over those (the lamp's light on them, which does not
-    /// turn).
+    /// R-LOOK), lights over them, then what does not change drawn once and kept (the lamp's
+    /// light on a knob, which does not turn with it), what is drawn by code (QUALITY's
+    /// opening's shutter and lightning), and SVG over all of those.
     pub sprites: Vec<Sprite>,
     pub lights: Vec<Light>,
+    pub overlays: Vec<Overlay>,
+    pub drawn: Vec<crate::ultra::Drawn>,
     pub over: String,
     /// A wheel the worn skin's renderer draws, and a rocker's paddle it lights by its shape
     /// (none in the drawn skin).
@@ -1311,6 +1314,23 @@ pub struct Light {
     pub glow: crate::ultra::Glow,
     pub zoom: f64,
     pub alpha: f64,
+}
+
+/// SVG over a layer's pictures that does not change as the layer does: drawn once in the
+/// layer's place and kept, then put over the pictures with `blend` (as SVG's
+/// `mix-blend-mode`), rather than drawn afresh each time the layer is (decisions.md R-COSTS).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Overlay {
+    pub svg: String,
+    pub blend: Blend,
+}
+
+/// How an [`Overlay`] goes over what is under it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Blend {
+    Normal,
+    ColorDodge,
+    Multiply,
 }
 
 /// A control's extent about its centre (left, top, right, bottom), its shadow included.
@@ -1588,30 +1608,52 @@ const LAMP_FAR: f64 = 0.35;
 const CAP_TURN: f64 = 45.0;
 
 /// The lamp's light on a spun cap `r` across, over its sheen: its near side a touch lighter.
-fn cap_light(r: f64) -> String {
-    format!(
-        "<defs><linearGradient id='cap' x1='0' y1='0' x2='1' y2='1'><stop offset='0.15' stop-color='#fff' stop-opacity='0.12'/><stop offset='0.5' stop-color='#fff' stop-opacity='0'/><stop offset='0.55' stop-color='#000' stop-opacity='0'/><stop offset='0.85' stop-color='#000' stop-opacity='0.1'/></linearGradient></defs><circle r='{}' fill='url(#cap)'/>",
-        N(r)
-    )
+fn cap_light(r: f64) -> Overlay {
+    Overlay {
+        svg: format!(
+            "<defs><linearGradient id='cap' x1='0' y1='0' x2='1' y2='1'><stop offset='0.15' stop-color='#fff' stop-opacity='0.12'/><stop offset='0.5' stop-color='#fff' stop-opacity='0'/><stop offset='0.55' stop-color='#000' stop-opacity='0'/><stop offset='0.85' stop-color='#000' stop-opacity='0.1'/></linearGradient></defs><circle r='{}' fill='url(#cap)'/>",
+            N(r)
+        ),
+        blend: Blend::Normal,
+    }
 }
 
 /// The panel's lamp over a round part's black plastic, from `inner` (its spun cap's rim, whose
-/// sheen is its own) out to `r`. It does not turn with the part.
-fn lamp_over(r: f64, inner: f64) -> String {
+/// sheen is its own) out to `r`: its near side dodged lighter, its far side multiplied darker.
+/// It does not turn with the part.
+fn lamp_over(r: f64, inner: f64) -> [Overlay; 2] {
     let grey = |v: f64| {
         let g = (v * 255.0).round() as u8;
         format!("#{g:02x}{g:02x}{g:02x}")
     };
-    format!(
-        "<defs><linearGradient id='near' x1='0' y1='0' x2='1' y2='1'><stop offset='0.15' stop-color='{n}'/><stop offset='0.5' stop-color='{n}' stop-opacity='0'/></linearGradient><linearGradient id='far' x1='0' y1='0' x2='1' y2='1'><stop offset='0.5' stop-color='{f}' stop-opacity='0'/><stop offset='0.85' stop-color='{f}'/></linearGradient></defs><path d='{ring}' fill-rule='evenodd' fill='url(#near)' style='mix-blend-mode:color-dodge'/><path d='{ring}' fill-rule='evenodd' fill='url(#far)' style='mix-blend-mode:multiply'/>",
-        n = grey(LAMP_NEAR),
-        f = grey(LAMP_FAR),
-        ring = format!(
-            "M {o} 0 A {o} {o} 0 1 0 -{o} 0 A {o} {o} 0 1 0 {o} 0 Z M {i} 0 A {i} {i} 0 1 0 -{i} 0 A {i} {i} 0 1 0 {i} 0 Z",
-            o = N(r - 1.0),
-            i = N(inner)
-        )
-    )
+    let ring = format!(
+        "M {o} 0 A {o} {o} 0 1 0 -{o} 0 A {o} {o} 0 1 0 {o} 0 Z M {i} 0 A {i} {i} 0 1 0 -{i} 0 A {i} {i} 0 1 0 {i} 0 Z",
+        o = N(r - 1.0),
+        i = N(inner)
+    );
+    [
+        Overlay {
+            svg: format!(
+                "<defs><linearGradient id='near' x1='0' y1='0' x2='1' y2='1'><stop offset='0.15' stop-color='{n}'/><stop offset='0.5' stop-color='{n}' stop-opacity='0'/></linearGradient></defs><path d='{ring}' fill-rule='evenodd' fill='url(#near)'/>",
+                n = grey(LAMP_NEAR)
+            ),
+            blend: Blend::ColorDodge,
+        },
+        Overlay {
+            svg: format!(
+                "<defs><linearGradient id='far' x1='0' y1='0' x2='1' y2='1'><stop offset='0.5' stop-color='{f}' stop-opacity='0'/><stop offset='0.85' stop-color='{f}'/></linearGradient></defs><path d='{ring}' fill-rule='evenodd' fill='url(#far)'/>",
+                f = grey(LAMP_FAR)
+            ),
+            blend: Blend::Multiply,
+        },
+    ]
+}
+
+/// A round part's lights that do not turn with it: the lamp's on its plastic, then its cap's.
+fn round_lights(r: f64, cap: f64) -> Vec<Overlay> {
+    let mut lights = lamp_over(r, cap).to_vec();
+    lights.push(cap_light(cap));
+    lights
 }
 
 /// A sprite at a layer's origin.
@@ -1649,7 +1691,7 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                     sprite(part, (d, d), -150.0 + 300.0 * v, (false, false)),
                     sprite(cap, (d, d), CAP_TURN, (false, false)),
                 ],
-                over: lamp_over(size.skirt, d / 2.0 * cap_share) + &cap_light(d / 2.0 * cap_share),
+                overlays: round_lights(size.skirt, d / 2.0 * cap_share),
                 ..Layer::default()
             }
         }
@@ -1662,8 +1704,7 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                     sprite(Part::Pointer, (d, d), SIX[position(v)], (false, false)),
                     sprite(Part::PointerCap, (d, d), CAP_TURN, (false, false)),
                 ],
-                over: lamp_over(SELECTOR_R, d / 2.0 * POINTER_CAP)
-                    + &cap_light(d / 2.0 * POINTER_CAP),
+                overlays: round_lights(SELECTOR_R, d / 2.0 * POINTER_CAP),
                 ..Layer::default()
             }
         }

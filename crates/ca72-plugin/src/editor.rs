@@ -3019,9 +3019,10 @@ mod window {
             if buffer.len() < w * h {
                 return false;
             }
-            // Where the buffer still holds the frame shown last (age 1: Windows' and X11's, a
-            // buffer kept), only the places changed are turned and sent; else (macOS's, a new
-            // buffer each frame) the whole frame (decisions.md R-PRESENT).
+            // Where the buffer still holds the frame shown last (age 1: a buffer kept, as
+            // Windows' and X11's are, and macOS's in this copy of softbuffer, shown in tiles),
+            // only the places changed are turned and sent; else the whole frame (decisions.md
+            // R-PRESENT, R-COSTS).
             match damage.filter(|_| buffer.age() == 1) {
                 Some(damage) => {
                     let rects: Vec<softbuffer::Rect> =

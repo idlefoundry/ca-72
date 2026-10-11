@@ -4522,3 +4522,71 @@ again); a patched Core Graphics backend that kept its buffer, or showed the wind
 would be the next step there. The shutter's blades are SVG, about 6 ms a frame while QUALITY
 changes; the Tesla lamp's streaks about 3 ms; a strip knob (DETUNE swept) about 2 ms a render; the
 lamps' lens and bezel pictures are resampled at each tick.
+
+## R-COSTS. The costs R-PRESENT left: macOS shown in tiles, the shutter, the lightning, knobs
+
+**The owner, 2026-10-11,** told what R-PRESENT left ("Still costly, for later": macOS turning and
+showing the whole window each frame, the shutter's blades, the Tesla lamp's lightning, a knob
+redrawn, the lamps' pictures resampled each tick): "okay, let's improve those costly items".
+
+**Agent decisions, 2026-10-11** (each measured first, at a Retina window's scale):
+- **macOS shows the window in tiles, its buffer kept** (softbuffer's second change,
+  `third_party/softbuffer/PATCHES.md`). softbuffer's Core Graphics backend made a new buffer each
+  frame and gave Core Animation one image of all of it, damage or not; so the editor turned every
+  pixel each frame and Core Animation took the whole image again. Now the buffer is kept (`age`
+  1, as on Windows and X11), the layer shows it through tiles of 256 pixels (whole points at a
+  scale factor of 1 or 2: no seam), and a present gives new images (copies of their pixels) to
+  the tiles its damage touches alone. On macOS the editor so takes R-PRESENT's way: the places
+  changed turned and sent.
+- **Pictures placed in layers are kept** (`Renderer::placed`): a picture turned, mirrored,
+  scaled and moved by fractions of a pixel is resampled once onto a pixmap just round it and put
+  from there; placed so again (the lamps' lens and bezel at rest, a knob's cap, the hamster's
+  frames), it is put without being resampled. Always put from its own pixmap, kept or not, so a
+  frame is the same whatever was kept; the least lately used given up past 32 MB.
+- **What does not change over a layer is drawn once** (`art::Overlay`): a knob's and a
+  selector's lights (the lamp's, dodged lighter on the near side and multiplied darker on the
+  far, and the cap's) are drawn once in the layer's place and put over its turning picture
+  with their blend, as SVG's `mix-blend-mode` put them; no SVG is parsed or painted as a knob
+  turns.
+- **QUALITY's opening is drawn by code** (`ultra::Drawn`): the shade over the hamster deep in
+  the well, the shutter and the Tesla lamp's lightning, no SVG. The shutter's eight blades are
+  put together a pixel at a time from the last blade that covers a pixel wholly (as SVG, eight
+  sheens over eight blades were filled one over another, each mostly hidden by the next
+  blade's metal), the whole cut to the opening once as SVG's clip did; its circles are made as
+  usvg makes SVG's, four quarter turns, so that their edges cover pixels alike. The streaks are
+  stroked straight from their corners (`Streaks`). The SVG versions stay as the tests'
+  reference (and the shutter's for the drawn skin).
+- **Pixmaps neither scaled nor turned are put by a loop of our own** (`render::put`), not
+  tiny-skia's `draw_pixmap`, which samples them as a pattern in floats (highp): the kept
+  pictures, the lights at their size, the overlays put normally, the renderer's recompose and
+  the shutter. The same to the bit at full opacity, within a level otherwise.
+- **The drops cost less** (not on the list; the Mac's sampling found them the largest left):
+  their fields summed in single precision, apart for the sounding and the idle (a loop the
+  compiler makes vector code of), and only the part of the display they reach looked at again.
+
+**Evidence (2026-10-11):** `costs_timings` (Linux, best of five runs of 100, as drawn before
+and now): the shutter half closed 3.78 and 1.19 ms; the Tesla lamp sparking 1.56 and 0.97; the
+amber lamp lit 0.45 and 0.25 (1.07 after R-PRESENT); a knob turned 1.52 and 0.30.
+`drops_timings`, twenty drops moving: 1.96 and 1.17 ms a frame (0.46 and 0.29 at the opening
+size). `put` against `draw_pixmap`, a 196-pixel square: on the Mac 11 against 104 µs, on Linux
+91 against 148. On the Mac (`softbuffer_copies`, `CA72_TIMINGS=1`), a present of the whole
+3441 by 1965 window 1.28 ms, of a frame's usual damage (the opening and the display) 0.08 ms.
+`the_window_played`, main at bd4e866 and this, alternately twice: on Linux (its thread's time,
+load 3 to 6) turned in places 13.6 % and 15.2 % of one core before, 11.0 % and 10.9 % after;
+turned whole 22.7 % and 25.3 % before, 19.8 % and 19.6 % after. So on macOS, which turned the
+whole window before and now turns the places, about 23 % becomes about 11 % here, less its
+presents. On the Mac (wall time, at the lowest priority while the owner used it: no more than a
+direction) main turned whole 29.7 % and 30.5 %, this branch in places 22.0 % and 18.8 %
+(measured before the drops' change). Tests: `the_opening_drawn_by_code_is_the_opening_drawn`
+(closing, opening, nearly open, over the lamp and the hamster, sparking soft and loud, both
+scales: within a quarter of a level on the whole, under half a percent past three levels, none
+past 16), `a_light_from_its_picture_is_the_light_drawn` (the lights alone now), the knob's
+light test as before, and on macOS `softbuffer_copies`: a frame shown in tiles drawn by Core
+Animation (offscreen, `renderInContext:`) the same as the frame at every pixel, a change of one
+pixel giving its tile alone a new image and drawn so, the buffer kept and made again on a
+resize (it fails with tiles placed upside down, or their images). The core's, panel's and
+plug-in's tests, 342 passed, 44 ignored; rustfmt; clippy with `-D warnings`; clippy on macOS.
+
+**Not done:** the editor in a host on macOS with the tiles, by eye (the Mac was in use);
+Windows not tried again (nothing of its own changed but the drawing). Left: pictures that turn
+each frame (the hamster's wheel, a knob dragged) are resampled each frame, as they must be.

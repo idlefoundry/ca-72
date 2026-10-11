@@ -1226,7 +1226,7 @@ struct Drop {
 struct Liquid {
     drops: BTreeMap<u32, Drop>,
     beat: f64,
-    sums: Vec<(f32, f32)>,
+    sums: (Vec<f32>, Vec<f32>),
 }
 
 const TWIN: u32 = 1000;
@@ -1386,7 +1386,7 @@ impl Liquid {
     /// over the distance's (so that drops that meet pool), out to [`REACH`] radii, lit past a
     /// level with a halo, an idle voice's fainter. (Each drop adds its field only near it, and
     /// only where there is any is it lit: a few drops in a wide display cost a few drops'
-    /// worth, not the display's.)
+    /// worth, not the display's; only the part of the display they reach is looked at again.)
     fn draw(
         &mut self,
         frame: &mut Pixmap,
@@ -1415,9 +1415,18 @@ impl Liquid {
             return;
         }
         let w = (x1 - x0) as usize;
-        self.sums.clear();
-        self.sums.resize(w * (y1 - y0) as usize, (0.0, 0.0));
+        let n = w * (y1 - y0) as usize;
+        let (sums_a, sums_b) = (&mut self.sums.0, &mut self.sums.1);
+        sums_a.clear();
+        sums_a.resize(n, 0.0);
+        sums_b.clear();
+        sums_b.resize(n, 0.0);
+        // (Where any drop reaches: the part of the window looked at again below.)
+        let mut reached = [x1, y1, x0, y0];
         for &(dx0, a, b) in &ds {
+            if a <= 0.0 && b <= 0.0 {
+                continue;
+            }
             let reach = REACH * a.max(b).sqrt() + 2.0;
             let (lx, rx) = (
                 ((dx0 - reach).floor() as i32).max(x0),
@@ -1427,27 +1436,36 @@ impl Liquid {
                 ((cy - reach).floor() as i32).max(y0),
                 ((cy + reach).ceil() as i32).min(y1),
             );
+            reached = [
+                reached[0].min(lx),
+                reached[1].min(ty),
+                reached[2].max(rx),
+                reached[3].max(by),
+            ];
+            let (a, b, dx0) = (a as f32, b as f32, dx0 as f32);
             for y in ty..by {
-                let dy = f64::from(y) + 0.5 - cy;
+                let dy = y as f32 + 0.5 - cy as f32;
+                let dy2 = dy * dy + 1.0;
                 let row = (y - y0) as usize * w;
-                for x in lx..rx {
-                    let dx = f64::from(x) + 0.5 - dx0;
-                    let q = dx * dx + dy * dy + 1.0;
-                    let s = &mut self.sums[row + (x - x0) as usize];
-                    s.0 += (a / q) as f32;
-                    s.1 += (b / q) as f32;
+                let span = row + (lx - x0) as usize..row + (rx.max(lx) - x0) as usize;
+                let (fa, fb) = (&mut sums_a[span.clone()], &mut sums_b[span]);
+                for (i, (sa, sb)) in fa.iter_mut().zip(fb.iter_mut()).enumerate() {
+                    let dx = (lx + i as i32) as f32 + 0.5 - dx0;
+                    let q = 1.0 / (dx * dx + dy2);
+                    *sa += a * q;
+                    *sb += b * q;
                 }
             }
         }
         let data = frame.data_mut();
-        for y in y0..y1 {
+        for y in reached[1]..reached[3] {
             let row = (y - y0) as usize * w;
-            for x in x0..x1 {
-                let (f, g) = self.sums[row + (x - x0) as usize];
+            for x in reached[0]..reached[2] {
+                let k = row + (x - x0) as usize;
+                let (f, g) = (sums_a[k], sums_b[k]);
                 if f == 0.0 && g == 0.0 {
                     continue;
                 }
-                let (f, g) = (f64::from(f), f64::from(g));
                 // (The mock-up's: a flat disc where the fields sum past one, its light the
                 // share of them that sounds, an idle voice's half as bright; a faint halo.)
                 let (all, lit) = (f + g, f + 0.5 * g);
@@ -1458,10 +1476,14 @@ impl Liquid {
                 if a <= 0.002 {
                     continue;
                 }
-                let add = [DROP_LIGHT.0 * a, DROP_LIGHT.1 * a, DROP_LIGHT.2 * a];
+                let light = [
+                    DROP_LIGHT.0 as f32,
+                    DROP_LIGHT.1 as f32,
+                    DROP_LIGHT.2 as f32,
+                ];
                 let i = ((y * fw + x) * 4) as usize;
-                for (c, v) in add.iter().enumerate() {
-                    data[i + c] = (f64::from(data[i + c]) + v).min(255.0) as u8;
+                for (c, v) in light.iter().enumerate() {
+                    data[i + c] = (f32::from(data[i + c]) + v * a).min(255.0) as u8;
                 }
                 data[i + 3] = data[i + 3].max((255.0 * a.min(1.0)) as u8);
             }
