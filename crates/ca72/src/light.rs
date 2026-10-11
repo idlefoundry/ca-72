@@ -22,8 +22,7 @@ use crate::tuning::FREQ_CENTRE;
 use crate::voice::OscPanel;
 use crate::voice::{
     ContourKnobs, FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, Panel, Priority,
-    Waveform, emphasis_r14, ext_taper, glide_r, osc2_freq_track, osc3_freq_track, sustain_track,
-    time_pot, volume_track,
+    Waveform, emphasis_r14, ext_taper, glide_r, sustain_track, time_pot, volume_track,
 };
 
 /// Samples between the control laws' updates.
@@ -38,7 +37,8 @@ pub mod laws {
     /// temperament from key 24 to 108).
     pub const A4: f64 = 440.0;
     /// FREQUENCY (oscillators 2 and 3) from its centre, cents: a cubic in the pot's track
-    /// (voice.rs's `osc2_freq_track`, `osc3_freq_track`), within 1.2 cents of the measured.
+    /// (the panel's FREQUENCY is the pot's wiper: `freq_dial`), within 1.2 cents of the
+    /// measured.
     pub const OSC2_CENTS: [f64; 4] = [-855.506, 1753.088, -94.505, 19.578];
     pub const OSC3_CENTS: [f64; 4] = [-862.370, 1806.991, -206.463, 83.185];
     /// TUNE at either end, cents.
@@ -1058,21 +1058,20 @@ impl Light {
             let freq = match o {
                 0 => 0.0,
                 1 => {
-                    let at = |x: f64| cubic(laws::OSC2_CENTS, osc2_freq_track(x));
+                    let at = |x: f64| cubic(laws::OSC2_CENTS, x);
                     (at(x) - at(FREQ_CENTRE)) / 100.0
                 }
                 _ if free => {
                     let quintic = |x: f64| {
-                        let t = osc3_freq_track(x);
                         laws::OSC3_FREE_CENTS
                             .iter()
                             .rev()
-                            .fold(0.0, |a, c| a * t + c)
+                            .fold(0.0, |a, c| a * x + c)
                     };
                     (quintic(x) - quintic(FREQ_CENTRE)) / 100.0
                 }
                 _ => {
-                    let at = |x: f64| cubic(laws::OSC3_CENTS, osc3_freq_track(x));
+                    let at = |x: f64| cubic(laws::OSC3_CENTS, x);
                     (at(x) - at(FREQ_CENTRE)) / 100.0
                 }
             };
@@ -1717,8 +1716,8 @@ mod tests {
         (ups.len() - 1) as f64 * 48_000.0 / (ups[ups.len() - 1] - ups[0])
     }
 
-    /// Key 69 on 8' is 440 Hz, a RANGE an octave, oscillator 2's FREQUENCY at 0 the circuit's
-    /// -798.0 cents (through the reference's law, voice.rs's `osc2_freq_track`).
+    /// Key 69 on 8' is 440 Hz, a RANGE an octave, oscillator 2's FREQUENCY pot at its
+    /// counter-clockwise end the circuit's -856.4 cents (`freq_dial`).
     #[test]
     fn the_pitch_laws() {
         let mut l = Light::new(48_000.0);
@@ -1744,7 +1743,7 @@ mod tests {
         l.set_panel(&p);
         run(&mut l, 4800);
         let cents = 1200.0 * (hz(&run(&mut l, 48_000)) / 440.0).log2();
-        assert!((cents + 798.0).abs() < 1.5, "{cents} cents");
+        assert!((cents + 856.4).abs() < 1.5, "{cents} cents");
     }
 
     /// The filter at EMPHASIS 10 rings at the circuit's pitch and level once something

@@ -79,7 +79,8 @@ pub struct ContourKnobs {
 }
 
 /// One oscillator's controls: RANGE, WAVEFORM, its mixer switch and VOLUME, and FREQUENCY
-/// (oscillators 2 and 3; 0..1, centred at 0.5).
+/// (oscillators 2 and 3): its pot's wiper, 0..1 of its track, centred at 0.5. How the knob's
+/// dial sets the pot is the player's choice ([`crate::freq_dial`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OscPanel {
     pub range: Range,
@@ -298,40 +299,6 @@ const SUSTAIN_TRACK: [(f64, f64); 7] = [
 /// A SUSTAIN knob's wiper as a fraction of its track.
 pub fn sustain_track(sustain: f64) -> f64 {
     track(&SUSTAIN_TRACK, sustain)
-}
-
-/// Oscillator 2's FREQUENCY pot (R4, 5K linear) as the hardware reference's knob sets its
-/// wiper: the fraction of the track at the dial's stops and its -5 and +5 marks (the knob
-/// 0..1 for -7.5..+7.5) at which the oscillator stands where the reference's does from its
-/// 0 mark (session N, docs/calibration). The 0 mark stays the centre, where the factory
-/// tuning puts it in unison with oscillator 1. A linear track's are 0, 1/6, 5/6 and 1; the
-/// clockwise stop reaches 0.06 semitone short of the reference's.
-const OSC2_FREQ_TRACK: [(f64, f64); 5] = [
-    (0.0, 0.0334),
-    (1.0 / 6.0, 0.1195),
-    (0.5, 0.5),
-    (5.0 / 6.0, 0.9000),
-    (1.0, 1.0),
-];
-
-/// Oscillator 3's FREQUENCY pot (R5) likewise (OSC. 3 CONTROL on when measured); its
-/// clockwise stop reaches 0.33 semitone short of the reference's.
-const OSC3_FREQ_TRACK: [(f64, f64); 5] = [
-    (0.0, 0.0008),
-    (1.0 / 6.0, 0.1060),
-    (0.5, 0.5),
-    (5.0 / 6.0, 0.9209),
-    (1.0, 1.0),
-];
-
-/// Oscillator 2's FREQUENCY knob's wiper as a fraction of its track.
-pub fn osc2_freq_track(freq: f64) -> f64 {
-    track(&OSC2_FREQ_TRACK, freq)
-}
-
-/// Oscillator 3's FREQUENCY knob's wiper as a fraction of its track.
-pub fn osc3_freq_track(freq: f64) -> f64 {
-    track(&OSC3_FREQ_TRACK, freq)
 }
 
 /// AMOUNT OF CONTOUR (R12, 5K linear from the filter contour's output to GND, through
@@ -1826,11 +1793,9 @@ impl FrontPart {
             }
             let osc = match n {
                 0 => Osc::One,
-                1 => Osc::Two {
-                    freq: osc2_freq_track(op.freq),
-                },
+                1 => Osc::Two { freq: op.freq },
                 _ => Osc::Three {
-                    freq: osc3_freq_track(op.freq),
+                    freq: op.freq,
                     control: p.osc3_control,
                 },
             };

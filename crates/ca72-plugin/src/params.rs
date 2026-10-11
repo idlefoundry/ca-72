@@ -3,9 +3,10 @@
 //! Their ids are stable (a saved session's settings are found by them): never rename one.
 
 use std::hash::{BuildHasher, Hasher};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
+use ca72::freq_dial::{DIAL_END, Law, Pot};
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::tuning::Range;
 use ca72::voice::{ContourKnobs, OscPanel, Panel, Priority, Quality, Waveform};
@@ -231,6 +232,10 @@ pub struct Ca72Params {
     /// same again.
     #[persist = "drive_curve"]
     pub drive_curve: Calibration,
+    /// How the FREQUENCY knobs' dials read on this computer (`settings.rs`; decisions.md
+    /// R-SEMITONES): 0 a semitone a mark, 1 the hardware's. Not the session's: a learned
+    /// controller turns the knob through it ([`Ca72Params::freq_law`]).
+    pub freq_law: Arc<AtomicU8>,
 
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
@@ -257,8 +262,11 @@ pub struct Ca72Params {
     pub osc1_waveform: EnumParam<Wave>,
     #[id = "osc2_range"]
     pub osc2_range: EnumParam<Footage>,
-    /// FREQUENCY in its dial's units: a semitone a mark, 7 printed at 140 degrees, 7.5 at
-    /// the ends of the knob's travel.
+    /// FREQUENCY (decisions.md R-SEMITONES): its pot's position in the dial's units, -7.5 to
+    /// +7.5, the wiper at (value + 7.5) / 15 of its track, as every version has saved it; shown
+    /// and typed in semitones ([`frequency`]). The knob reads it through the computer's law
+    /// (`ca72::freq_dial`): the dial a semitone a mark (7 printed at 140 degrees, 7.5 at the
+    /// ends of the knob's travel), or the hardware's.
     #[id = "osc2_frequency"]
     pub osc2_frequency: FloatParam,
     #[id = "osc2_waveform"]
@@ -461,6 +469,66 @@ fn percent(name: &str) -> FloatParam {
     .with_value_to_string(formatters::v2s_f32_rounded(0))
 }
 
+/// A FREQUENCY pot's offset as the host shows it: cents to a tenth under a semitone ("+3.4
+/// cents"), else semitones to a hundredth ("+7.00 semitones").
+pub fn semitones_text(st: f64) -> String {
+    let c = (st * 1000.0).round() / 10.0;
+    if c == 0.0 {
+        String::from("0 semitones")
+    } else if c.abs() < 100.0 {
+        format!("{c:+.1} cents")
+    } else {
+        format!("{st:+.2} semitones")
+    }
+}
+
+/// Semitones as typed: a number, "semitones" or "st" after it or none; "cents" or "c" after it
+/// for cents.
+pub fn semitones_typed(s: &str) -> Option<f64> {
+    let t = s.trim();
+    let (t, per) = match ["semitones", "semitone", "st"]
+        .iter()
+        .find_map(|u| t.strip_suffix(u))
+    {
+        Some(t) => (t, 1.0),
+        None => match ["cents", "cent", "\u{a2}", "c"]
+            .iter()
+            .find_map(|u| t.strip_suffix(u))
+        {
+            Some(t) => (t, 0.01),
+            None => (t, 1.0),
+        },
+    };
+    let v: f64 = t.trim().trim_start_matches('+').parse().ok()?;
+    v.is_finite().then_some(v * per)
+}
+
+/// The wiper (0..1 of its track) of a FREQUENCY pot at `plain` (the parameter's value).
+pub fn wiper_of(plain: f32) -> f64 {
+    ((f64::from(plain) + DIAL_END) / (2.0 * DIAL_END)).clamp(0.0, 1.0)
+}
+
+/// Oscillator 2's or 3's FREQUENCY ([`Ca72Params::osc2_frequency`]): the pot's position, shown
+/// and typed as its oscillator's offset from the centre (beyond the pot's reach, its end).
+fn frequency(name: &str, pot: Pot) -> FloatParam {
+    let end = DIAL_END as f32;
+    FloatParam::new(
+        name,
+        0.0,
+        FloatRange::Linear {
+            min: -end,
+            max: end,
+        },
+    )
+    .with_value_to_string(Arc::new(move |v| {
+        semitones_text(pot.semitones(wiper_of(v)))
+    }))
+    .with_string_to_value(Arc::new(move |s| {
+        let w = pot.wiper(semitones_typed(s)?);
+        Some(((2.0 * w - 1.0) * DIAL_END) as f32)
+    }))
+}
+
 /// A knob over `lo..hi` in its dial's units.
 fn dial(name: &str, lo: f32, hi: f32, default: f32) -> FloatParam {
     FloatParam::new(name, default, FloatRange::Linear { min: lo, max: hi })
@@ -488,6 +556,7 @@ impl Default for Ca72Params {
             editor_width: Arc::new(AtomicU32::new(0)),
             preset: Arc::new(RwLock::new(String::new())),
             midi_map: Arc::new(MidiMap::default()),
+            freq_law: Arc::new(AtomicU8::new(0)),
             drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
@@ -498,10 +567,10 @@ impl Default for Ca72Params {
             osc1_range: EnumParam::new("Osc 1 Range", Footage::R8),
             osc1_waveform: EnumParam::new("Osc 1 Waveform", Wave::Sawtooth),
             osc2_range: EnumParam::new("Osc 2 Range", Footage::R8),
-            osc2_frequency: dial("Osc 2 Frequency", -7.5, 7.5, 0.0),
+            osc2_frequency: frequency("Osc 2 Frequency", Pot::Two),
             osc2_waveform: EnumParam::new("Osc 2 Waveform", Wave::Sawtooth),
             osc3_range: EnumParam::new("Osc 3 Range", Footage::R8),
-            osc3_frequency: dial("Osc 3 Frequency", -7.5, 7.5, 0.0),
+            osc3_frequency: frequency("Osc 3 Frequency", Pot::Three),
             osc3_waveform: EnumParam::new("Osc 3 Waveform", Wave3::Sawtooth),
             osc1_on: BoolParam::new("Osc 1 On", true),
             osc1_volume: ten("Osc 1 Volume", 8.0),
@@ -618,6 +687,22 @@ impl std::fmt::Debug for Ca72Params {
 }
 
 impl Ca72Params {
+    /// How the FREQUENCY knobs' dials read on this computer.
+    pub fn freq_law(&self) -> Law {
+        match self.freq_law.load(Ordering::Relaxed) {
+            1 => Law::Hardware,
+            _ => Law::Semitones,
+        }
+    }
+
+    pub fn set_freq_law(&self, law: Law) {
+        let v = match law {
+            Law::Semitones => 0,
+            Law::Hardware => 1,
+        };
+        self.freq_law.store(v, Ordering::Relaxed);
+    }
+
     pub fn seed(&self) -> u64 {
         self.noise_seed.load(Ordering::Relaxed)
     }
@@ -755,6 +840,44 @@ mod tests {
         let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
         assert!(ids.iter().any(|i| i == "double") && ids.iter().any(|i| i == "spread"));
         assert!(ids.iter().any(|i| i == "inner"));
+    }
+
+    /// The host reads FREQUENCY in semitones from the centre (cents under one) and takes them
+    /// back so, the value the pot's position as every version saved it (decisions.md
+    /// R-SEMITONES): 0.1.x's +5 is its pot five sixths along, +5.52 semitones on oscillator 2.
+    #[test]
+    fn frequency_reads_in_semitones_and_keeps_the_pot() {
+        let p = Ca72Params::default();
+        let f = &p.osc2_frequency;
+        let shown = |plain: f32| f.normalized_value_to_string(f.preview_normalized(plain), true);
+        assert_eq!(shown(0.0), "0 semitones");
+        assert_eq!(shown(5.0), "+5.52 semitones");
+        assert_eq!(shown(-7.5), "-8.56 semitones");
+        assert_eq!(shown(0.026), "+2.9 cents");
+        let back = |s: &str| {
+            let n = f.string_to_normalized_value(s)?;
+            Some(Pot::Two.semitones(wiper_of(f.preview_plain(n))))
+        };
+        let near = |got: Option<f64>, want: f64| got.is_some_and(|g| (g - want).abs() < 1e-4);
+        assert!(near(back("7"), 7.0));
+        assert!(near(back("+7.00 semitones"), 7.0));
+        assert!(near(back("-5 st"), -5.0));
+        assert!(near(back("+3.4 cents"), 0.034));
+        assert!(near(back("12c"), 0.12));
+        assert!(
+            near(back("20"), Pot::Two.semitones(1.0)),
+            "beyond the pot: its end"
+        );
+        assert_eq!(back("up"), None);
+        // The engine takes the pot's position as the value has it, whatever the law.
+        let c = p.controls();
+        assert_eq!(c.panel.osc[1].freq, 0.5);
+        assert_eq!(
+            (p.freq_law(), Law::default()),
+            (Law::Semitones, Law::Semitones)
+        );
+        p.set_freq_law(Law::Hardware);
+        assert_eq!(p.freq_law(), Law::Hardware);
     }
 
     /// SCATTER's placement offers two choices, EVEN (the default) and CENTER, the strip's tabs
