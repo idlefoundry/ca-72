@@ -155,6 +155,31 @@ pub fn parse_factory(text: &str) -> Result<Vec<Sound>, String> {
     }
 }
 
+/// The tag of every preset in the retired presets' pack, and its files' suffix.
+pub const PACK_TAG: &str = "0.1";
+
+/// The retired presets' pack (decisions.md R-RETIRE): each of `sounds` written into `dir` as
+/// the user's preset, tagged [`PACK_TAG`], in `<name>_0.1.toml`. The user's own preset is
+/// `<name>.toml`, so copying the pack into a library never writes over one; where both name
+/// one preset (their edit of a factory preset since retired), theirs, first by file name, is
+/// the one listed. Saved again, a pack's preset moves to `<name>.toml` when that is free.
+pub fn write_pack(dir: &Path, sounds: &[Sound]) -> Result<Vec<PathBuf>, String> {
+    let lib = Library::at(dir);
+    sounds
+        .iter()
+        .map(|s| {
+            check_name(&s.name)?;
+            let mut s = s.clone();
+            if !s.tags.iter().any(|t| same(t, PACK_TAG)) {
+                s.tags.push(PACK_TAG.to_owned());
+            }
+            let file = dir.join(format!("{}_{PACK_TAG}.toml", s.name));
+            lib.write_user(&file, &s, false, None)?;
+            Ok(file)
+        })
+        .collect()
+}
+
 /// Whether a file named `stem` (before its first dot) is one of Windows's devices.
 fn device(stem: &str) -> bool {
     let stem = stem.trim_end().to_uppercase();
@@ -899,16 +924,93 @@ mod tests {
 
     #[test]
     fn the_factory_file_names_no_trademark() {
-        // Its words: the comments, the names, descriptions and tags (not the values).
-        let text = FACTORY_FILE
-            .lines()
-            .filter(|l| l.starts_with('#') || l.contains('"'))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .to_lowercase();
-        for word in ["moog", "model d", "808", "909", "303", "roland", "minimoog"] {
-            assert!(!text.contains(word), "the factory file says {word:?}");
+        // Its words: the comments, the names, descriptions and tags (not the values); the
+        // retired presets' too, which every release's pack ships.
+        for (file, text) in [("presets", FACTORY_FILE), ("retired", RETIRED_FILE)] {
+            let text = text
+                .lines()
+                .filter(|l| l.starts_with('#') || l.contains('"'))
+                .collect::<Vec<_>>()
+                .join("\n")
+                .to_lowercase();
+            for word in ["moog", "model d", "808", "909", "303", "roland", "minimoog"] {
+                assert!(!text.contains(word), "{file}.toml says {word:?}");
+            }
         }
+    }
+
+    /// The presets retired from the plug-in (decisions.md R-RETIRE), which no build reads but
+    /// the pack's: read whole, each name one a library takes and none twice, none a factory
+    /// preset's (so a session's preset name means one sound), each setting only the sound's
+    /// parameters.
+    const RETIRED_FILE: &str = include_str!("../sounds/retired.toml");
+
+    #[test]
+    fn the_retired_presets_are_well_formed() {
+        let retired = parse_factory(RETIRED_FILE).unwrap();
+        let p = crate::params::Ca72Params::default();
+        let ids: Vec<&str> = crate::presets::sound_params(&p)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        for (i, s) in retired.iter().enumerate() {
+            check_name(&s.name).unwrap();
+            assert!(
+                !retired[..i].iter().any(|r| same(&r.name, &s.name)),
+                "{}",
+                s.name
+            );
+            assert!(
+                !factory().iter().any(|f| same(&f.name, &s.name)),
+                "{}",
+                s.name
+            );
+            assert!(!s.values.is_empty(), "{}", s.name);
+            for (k, _) in &s.values {
+                assert!(ids.contains(&k.as_str()), "{}: {k}", s.name);
+            }
+        }
+    }
+
+    /// The pack (decisions.md R-RETIRE) copied into a library: its presets the user's, tagged
+    /// `0.1`; the player's own file of a name it has too (their edit of a preset since retired)
+    /// neither written over nor hidden, the pack's reported as a second; and a pack's preset
+    /// saved again moves to the file of its name.
+    #[test]
+    fn the_pack_reads_back_as_the_users_presets_and_writes_over_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        lib.save("Old Pluck", vec![("cutoff".into(), 1.5)], None)
+            .unwrap();
+        let own = std::fs::read(dir.path().join("Old Pluck.toml")).unwrap();
+        let sound = |name: &str, cutoff: f64| Sound {
+            name: name.into(),
+            description: "Retired.".into(),
+            tags: vec!["bass".into()],
+            values: vec![("cutoff".into(), cutoff), ("osc1_range".into(), 3.0)],
+        };
+        let pack = [sound("Old Pluck", -3.0), sound("Old Pad", 0.25)];
+        assert_eq!(write_pack(dir.path(), &pack).unwrap().len(), 2);
+        assert_eq!(
+            std::fs::read(dir.path().join("Old Pluck.toml")).unwrap(),
+            own
+        );
+        let (_, bad) = lib.entries();
+        assert_eq!(bad.len(), 1, "{bad:?}");
+        assert!(bad[0].contains("Old Pluck_0.1.toml"), "{bad:?}");
+        assert_eq!(
+            lib.find("Old Pluck").unwrap().sound.values,
+            [("cutoff".to_owned(), 1.5)]
+        );
+        let pad = lib.find("old pad").unwrap();
+        assert_eq!(pad.origin, Origin::User);
+        assert_eq!(pad.sound.description, "Retired.");
+        assert_eq!(pad.sound.tags, ["bass", "0.1"]);
+        assert_eq!(pad.sound.values, sound("Old Pad", 0.25).values);
+        lib.save("Old Pad", pad.sound.values, None).unwrap();
+        assert!(dir.path().join("Old Pad.toml").exists());
+        assert!(!dir.path().join("Old Pad_0.1.toml").exists());
+        assert_eq!(lib.find("Old Pad").unwrap().sound.tags, ["bass", "0.1"]);
     }
 
     #[test]

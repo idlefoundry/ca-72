@@ -10,7 +10,9 @@
 //! values changed, to try one), `CA72_LEVELS_OUT` (a directory: each render as
 //! `<preset>.f32`, stereo, interleaved, little-endian), `CA72_PHRASE` (a phrase file of
 //! `scripts/calibration/midi_capture.py`, played instead: the notes and modulation wheel sent
-//! to the hardware reference, at their times, and 3 s after the last).
+//! to the hardware reference, at their times, and 3 s after the last). `CA72_RETIRED`
+//! (set): the presets retired from the plug-in (`sounds/retired.toml`, decisions.md R-RETIRE)
+//! measured instead, which its pack ships.
 
 #![allow(clippy::unwrap_used)]
 
@@ -18,7 +20,7 @@ mod common;
 
 use ca72_analysis::loudness::loudness;
 use ca72_plugin::engine::{Engine, Event};
-use ca72_plugin::library::{Sound, factory};
+use ca72_plugin::library::{Sound, factory, parse_factory};
 use common::{controls_of, env, phrase};
 
 const RATE: f64 = 48_000.0;
@@ -127,7 +129,12 @@ fn each_preset_in_its_register() {
         std::fs::create_dir_all(d).unwrap();
     }
     println!("preset               momentary max   integrated  (LUFS)");
-    for s in factory().iter().filter(|s| s.name.contains(&only)) {
+    let sounds = if std::env::var_os("CA72_RETIRED").is_some() {
+        parse_factory(include_str!("../sounds/retired.toml")).unwrap()
+    } else {
+        factory().to_vec()
+    };
+    for s in sounds.iter().filter(|s| s.name.contains(&only)) {
         let s = with_overrides(s);
         let (l, r) = render(&s);
         let m = loudness(&[&l, &r], RATE as u32);

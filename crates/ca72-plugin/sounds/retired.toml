@@ -1,0 +1,6 @@
+# The factory presets the plug-in no longer carries (decisions.md R-RETIRE), each moved here
+# whole from `presets.toml`, in its format. Never built into the plug-in: every release with
+# one here carries them beside its installers as the user's presets to add to the library,
+# `CA-72-<version>-0.1-presets.zip` (`scripts/package.sh`), so that a player of an earlier
+# version keeps them. A session never needs them: it holds every value itself.
+format = 1
