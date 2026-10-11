@@ -25,7 +25,18 @@ pub struct VcfBench {
     /// The rear FILTER control jack's source, V, into R51 100K (None: R51 left out, as the
     /// benches before the jacks had it).
     pub ext_ctl: Option<f64>,
+    /// FILTER MODE's network (`filter-mode.lib`) on the output, its HI at node `hi`.
+    pub filter_mode: bool,
+    /// The rest of the mixer on the bus, ohms to ground (None: the one channel alone, as
+    /// the benches before FILTER MODE had it; [`MIXER_REST`]: every other channel's resistor).
+    pub bus_load: Option<f64>,
 }
+
+/// The rest of the mixer as the bus sees it with the bench's channel standing for one
+/// oscillator's: the external input's and two oscillators' 33K and the noise's 11K, which load
+/// it whether their switches are on or off (`ca72::filter_cal::G_BUS_OFF`; on, a VOLUME pot's
+/// few kilohms in series).
+pub const MIXER_REST: f64 = 1.0 / (ca72::filter_cal::G_BUS_OFF - 1.0 / 33e3);
 
 impl Default for VcfBench {
     fn default() -> Self {
@@ -38,6 +49,8 @@ impl Default for VcfBench {
             r49: 250.0,
             mix_r: 33e3,
             ext_ctl: None,
+            filter_mode: false,
+            bus_load: None,
         }
     }
 }
@@ -52,8 +65,8 @@ pub fn netlist(b: &VcfBench, src: &str, solver: Solver) -> String {
          vp vp 0 10\nvn vn 0 -10\n\
          vcut vcut 0 {c}\nr55 vcut ctl 200k\nvkbd kbd 0 {k}\nr53 kbd ctl {r53}\nr54 kbd ctl {r54}\n\
          vamt amt 0 0\n{src}\nrmix src ain {mr}\n\
-         r14 emo emi {r14}\n{ext}\
-         x1 ain ctl amt emo emi out vp vn mm_vcf r39={r39} r49={r49} r73={r73} r74={r74}\n",
+         r14 emo emi {r14}\n{ext}{load}\
+         x1 ain ctl amt emo emi out vp vn mm_vcf r39={r39} r49={r49} r73={r73} r74={r74}\n{fm}",
         m = dir.join("models/mm-devices.lib").display(),
         v = dir.join("boards/board4-vcf.lib").display(),
         t = solver.temp,
@@ -72,6 +85,22 @@ pub fn netlist(b: &VcfBench, src: &str, solver: Solver) -> String {
         ext = b.ext_ctl.map_or(String::new(), |v| format!(
             "vx51 x51 0 {v}\nr51 x51 ctl 100k\n"
         )),
+        load = b
+            .bus_load
+            .map_or(String::new(), |r| format!("rload ain 0 {r}\n")),
+        fm = if b.filter_mode {
+            // The bench's one channel: its Norton current is the source over its resistor.
+            format!(
+                ".include {f}\nbisn isn 0 v = v(src) / {mr}\n\
+                 xm isn out hi mm_fmode rt={rt} fc={fc}\n",
+                f = dir.join("boards/filter-mode.lib").display(),
+                mr = b.mix_r,
+                rt = ca72::vcf::MODE_RT,
+                fc = ca72::vcf::MODE_HZ,
+            )
+        } else {
+            String::new()
+        },
     )
 }
 
@@ -134,6 +163,31 @@ pub fn ac_response(
         .zip(out)
         .map(|(&f, &(re, im))| (f, 10.0 * (re * re + im * im).log10()))
         .collect())
+}
+
+/// A complex response: (frequency, (real, imaginary)) at each point.
+pub type Complex = Vec<(f64, (f64, f64))>;
+
+/// The complex response of a node to the source (1 V AC), over `points` a decade.
+#[allow(clippy::too_many_arguments)]
+pub fn ac_complex(
+    spice: &Ngspice,
+    work: &Path,
+    b: &VcfBench,
+    node: &str,
+    f0: f64,
+    f1: f64,
+    points: usize,
+    solver: Solver,
+) -> Result<Complex, Error> {
+    let net = netlist(b, "vsrc src 0 dc 0 ac 1", solver);
+    let plots = spice.run(&net, &[&format!("ac dec {points} {f0} {f1}")], work)?;
+    let p = &plots[0];
+    let f = p.vec("frequency");
+    let v = p
+        .complex_vec(node)
+        .ok_or_else(|| Error::Raw(format!("no v({node})")))?;
+    Ok(f.iter().copied().zip(v.iter().copied()).collect())
 }
 
 /// A transient run with the source's line given (for example a sine), for `tstop` s with

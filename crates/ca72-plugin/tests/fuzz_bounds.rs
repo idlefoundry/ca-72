@@ -12,6 +12,7 @@
 
 use ca72::tuning::Range;
 use ca72::voice::{Panel, Waveform};
+use ca72_plugin::character::Placement;
 use ca72_plugin::engine::{Controls, Engine, Event};
 
 /// A small generator, the same sequence on every run.
@@ -66,6 +67,7 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
     p.mod_mix = r.either(0.0, 1.0);
     p.osc_mod = r.end();
     p.filter_mod = r.end();
+    p.filter_hi = r.end();
     p.pitch_wheel = r.either(-1.0, 1.0);
     p.mod_wheel = r.either(0.0, 1.0);
     p.ext_volume = r.either(0.0, 1.0);
@@ -82,8 +84,22 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         voices: if r.end() { 10 } else { 2 },
         entropy: r.either(0.0, 1.0),
         spread: r.either(0.0, 1.0),
+        inner: r.either(0.0, 1.0),
+        // (The placement's ends: the plug-in's two choices.)
+        placement: if r.end() {
+            Placement::Centre
+        } else {
+            Placement::Even
+        },
+        unison: r.end(),
+        double: r.either(0.0, 1.0),
+        drive: r.either(0.0, 24.0),
+        level: r.either(-30.0, 12.0),
+        auto_gain: r.end(),
         feedback: r.either(0.0, 1.0),
         lock: r.end(),
+        potato: r.end(),
+        ultra: r.end(),
     }
 }
 

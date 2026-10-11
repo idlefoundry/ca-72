@@ -4,11 +4,12 @@
 //! A knob turns with a vertical drag (fine: a tenth as fast), the mouse wheel nudges it and
 //! a double click restores its default; RANGE and WAVEFORM step between their positions (a
 //! click on a legend picks it, a click on the knob steps toward the side clicked); a switch
-//! flips at a click anywhere on it; the wheels stay where they are left, the PITCH wheel
+//! flips at a click anywhere on it; QUALITY's toggle goes to the position clicked (its lever's
+//! three places, or their legends); the wheels stay where they are left, the PITCH wheel
 //! settling into its centre detent when let go near it (it has no spring).
 
 use crate::art::{self, BIG, GRIP, Layout, POWER, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
-use crate::controls::{CONTROLS, Kind};
+use crate::controls::{CONTROLS, Dial, Kind};
 
 /// What is under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +53,8 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
                 let (hx, hy) = (36.0 * WHEEL_SCALE, 79.0 * WHEEL_SCALE);
                 in_rect(dx, dy, [-hx, -hy, hx, hy])
             }
+            Kind::Toggle { across: false, .. } => in_rect(dx, dy, TOGGLE_HIT),
+            Kind::Toggle { across: true, .. } => in_rect(dx, dy, TOGGLE_HIT_ACROSS),
         };
         if found {
             return Some(Target::Control(i));
@@ -68,17 +71,23 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
 }
 
 /// Where a drag takes a control from `start`, the pointer moved by (dx, dy) logical pixels;
-/// `None` for a switch, which a drag does not move.
+/// `None` for a switch, which a drag does not move. A knob of steps (VOICES) goes from step to
+/// step, never between them (the owner, 2026-10-10: knobs with discrete options "shouldn't move
+/// smoothly between discrete options when the user is clicking and dragging them").
 pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64> {
     let rate = if fine { 0.1 } else { 1.0 };
     Some(match kind {
+        // VOICES, 2 to 10: a voice a step.
+        Kind::Knob {
+            dial: Dial::Voices, ..
+        } => ((start - dy / 240.0 * rate).clamp(0.0, 1.0) * 8.0).round() / 8.0,
         Kind::Knob { .. } => (start - dy / 240.0 * rate).clamp(0.0, 1.0),
         Kind::Selector(_) => {
             let steps = ((dx - dy) / if fine { 60.0 } else { 30.0 }).round();
             (art::position(start) as f64 + steps).clamp(0.0, 5.0) / 5.0
         }
         Kind::Wheel { .. } => (start - dy / 160.0 * rate).clamp(0.0, 1.0),
-        Kind::Rocker { .. } => return None,
+        Kind::Rocker { .. } | Kind::Toggle { .. } => return None,
     })
 }
 
@@ -86,6 +95,10 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
 pub fn step(kind: &Kind, v: f64, up: bool, fine: bool) -> f64 {
     let sign = if up { 1.0 } else { -1.0 };
     match kind {
+        // VOICES, 2 to 10: a voice a notch.
+        Kind::Knob {
+            dial: Dial::Voices, ..
+        } => ((v * 8.0).round() + sign).clamp(0.0, 8.0) / 8.0,
         Kind::Knob { .. } => (v + sign * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
         Kind::Selector(_) => (art::position(v) as f64 + sign).clamp(0.0, 5.0) / 5.0,
         Kind::Wheel { .. } => (v + sign * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
@@ -96,14 +109,47 @@ pub fn step(kind: &Kind, v: f64, up: bool, fine: bool) -> f64 {
                 0.0
             }
         }
+        Kind::Toggle { .. } => (toggle_position(v) as f64 + sign).clamp(0.0, 2.0) / 2.0,
     }
 }
 
-/// A click that did not drag, `dx` right of the control's centre: a switch flips, a
-/// selector steps toward the side clicked.
-pub fn click(kind: &Kind, v: f64, dx: f64) -> Option<f64> {
+/// Half the height of the toggle's nut: a click within it is HI's.
+const TOGGLE_NUT: f64 = 16.0;
+
+/// Where QUALITY's toggle and its legends answer a pointer, about its centre: the lever's
+/// travel, ULTRA's legend above, LO's below and HI's to the left.
+pub const TOGGLE_HIT: [f64; 4] = [-58.0, -64.0, 28.0, 64.0];
+
+/// Where NOTE PRIORITY's toggle (on its side) and its legends answer a pointer, about its
+/// centre: the lever's travel, LAST's legend above, LOW's and HIGH's under its ends.
+pub const TOGGLE_HIT_ACROSS: [f64; 4] = [-60.0, -44.0, 64.0, 48.0];
+
+/// A toggle's position, 0 (down), 1 (out) or 2 (up), from its normalized value.
+pub fn toggle_position(v: f64) -> usize {
+    (v.clamp(0.0, 1.0) * 2.0).round() as usize
+}
+
+/// A click that did not drag, (`dx`, `dy`) from the control's centre: a switch flips, a
+/// selector steps toward the side clicked, QUALITY's toggle goes where it is clicked (above its
+/// nut up, below it down, on it or on HI's legend to its left out), NOTE PRIORITY's likewise
+/// on its side (left of its nut left, right of it right, on it or on LAST's legend above out).
+pub fn click(kind: &Kind, v: f64, dx: f64, dy: f64) -> Option<f64> {
     match kind {
         Kind::Rocker { .. } => Some(if v >= 0.5 { 0.0 } else { 1.0 }),
+        Kind::Toggle { across: true, .. } => Some(if dx < -TOGGLE_NUT {
+            0.0
+        } else if dx > TOGGLE_NUT {
+            1.0
+        } else {
+            0.5
+        }),
+        Kind::Toggle { .. } => Some(if dy < -TOGGLE_NUT {
+            1.0
+        } else if dy > TOGGLE_NUT {
+            0.0
+        } else {
+            0.5
+        }),
         Kind::Selector(_) => Some(
             (art::position(v) as f64 + if dx < 0.0 { -1.0 } else { 1.0 }).clamp(0.0, 5.0) / 5.0,
         ),
@@ -167,11 +213,37 @@ mod tests {
         assert!((drag(knob, 0.5, 0.0, -120.0, true).unwrap_or(0.0) - 0.55).abs() < 1e-12);
         let sel = &CONTROLS[index("osc1_range").expect("a control")].kind;
         assert_eq!(drag(sel, 0.4, 30.0, 0.0, false), Some(0.6));
-        assert_eq!(click(sel, 0.4, -5.0), Some(0.2));
+        assert_eq!(click(sel, 0.4, -5.0, 0.0), Some(0.2));
         assert_eq!(step(sel, 1.0, true, false), 1.0);
+        let voices = &CONTROLS[index("voices").expect("a control")].kind;
+        assert_eq!(step(voices, 0.25, true, false), 0.375);
+        assert_eq!(step(voices, 0.25, false, true), 0.125);
+        assert_eq!(step(voices, 1.0, true, false), 1.0);
+        // A drag goes from voice to voice: a little way, nowhere; further, the next.
+        assert_eq!(drag(voices, 0.25, 0.0, -10.0, false), Some(0.25));
+        assert_eq!(drag(voices, 0.25, 0.0, -20.0, false), Some(0.375));
+        for dy in 0..200 {
+            let v = drag(voices, 0.25, 0.0, -f64::from(dy), false).expect("a knob");
+            assert_eq!(v * 8.0, (v * 8.0).round(), "between voices at {dy}");
+        }
         let rocker = &CONTROLS[index("osc1_on").expect("a control")].kind;
         assert_eq!(drag(rocker, 1.0, 0.0, 50.0, false), None);
-        assert_eq!(click(rocker, 1.0, 0.0), Some(0.0));
+        assert_eq!(click(rocker, 1.0, 0.0, 0.0), Some(0.0));
+        // QUALITY's toggle: where it is clicked, a notch of the wheel a position.
+        let toggle = &CONTROLS[index("quality").expect("a control")].kind;
+        assert_eq!(drag(toggle, 0.5, 0.0, -50.0, false), None);
+        assert_eq!(click(toggle, 0.5, 0.0, -40.0), Some(1.0));
+        assert_eq!(click(toggle, 1.0, -40.0, 0.0), Some(0.5));
+        assert_eq!(click(toggle, 0.5, 0.0, 45.0), Some(0.0));
+        assert_eq!(step(toggle, 0.5, true, false), 1.0);
+        assert_eq!(step(toggle, 1.0, true, false), 1.0);
+        assert_eq!(step(toggle, 0.5, false, false), 0.0);
+        // NOTE PRIORITY's, on its side: left LOW, out LAST, right HIGH.
+        let across = &CONTROLS[index("note_priority").expect("a control")].kind;
+        assert_eq!(click(across, 0.5, -40.0, 38.0), Some(0.0));
+        assert_eq!(click(across, 0.0, 0.0, -33.0), Some(0.5));
+        assert_eq!(click(across, 0.5, 40.0, 38.0), Some(1.0));
+        assert_eq!(step(across, 0.0, true, false), 0.5);
         let pitch = &CONTROLS[index("pitch_wheel").expect("a control")].kind;
         assert_eq!(release(pitch, 0.53), 0.5);
         assert_eq!(release(pitch, 0.55), 0.55);

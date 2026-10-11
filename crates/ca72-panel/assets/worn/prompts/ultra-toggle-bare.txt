@@ -1,0 +1,9 @@
+Use your image generation tool to make one image, then save it in the current directory as toggle-bare.png (copy the generated file there). Do nothing else.
+
+The image: a single three-position bat-handle toggle switch from the front panel of a 1970s analogue synthesizer, seen from straight in front, as the panel is seen, WITHOUT any panel or plate: only the switch's own visible parts. Portrait image, as large as you can make it.
+- The parts: a chrome hex nut over a thin chrome keyed washer, a short chrome threaded bushing through them, and a polished chrome bat-handle lever (a slim tapered lever with a rounded tip) coming out of the bushing.
+- The lever in its MIDDLE position, standing straight out towards the camera, so it is seen almost end-on, tilted just enough that a little of its length shows above its tip.
+- The parts exactly centred, the nut about a third of the image's width; the rest of the image a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no shadow on it; sharp focus everywhere.
+- Straight-on orthographic product photograph, the camera exactly in front of the centre.
+- Lighting: soft light from up and to the left on the chrome.
+- No text, symbols, logos or numbers anywhere.

@@ -15,6 +15,9 @@ const WARN: &str = "#e5b94d";
 const BACK: &str = "#1f2228";
 const BORDER: &str = "#4a4640";
 const HOVER: &str = "#3a3022";
+/// A menu's title's band, darker than its items' (the owner, 2026-10-10: "we need to better
+/// distinguish menu headers from menu options").
+const HEAD: &str = "#14161a";
 
 /// A line's colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,8 +40,9 @@ impl Tone {
 }
 
 /// A control's menu: its top left corner (drawing units), its lettering's size (drawing units),
-/// its title (dim, not an item), its items (each its label and whether it can be chosen) and
-/// the one under the pointer.
+/// its title (not an item), its items (each its label and whether it can be chosen), those of
+/// them that head a group of the items after them (not to be chosen), the one that is the
+/// current choice (marked), and the one under the pointer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu {
     pub x: f64,
@@ -46,6 +50,8 @@ pub struct Menu {
     pub size: f64,
     pub title: String,
     pub items: Vec<(String, bool)>,
+    pub heads: Vec<usize>,
+    pub marked: Option<usize>,
     pub hover: Option<usize>,
 }
 
@@ -58,12 +64,41 @@ impl Menu {
         self.size * 2.0
     }
 
+    /// The title's lettering: smaller than the items', bold, spaced (its size, its spacing).
+    fn title_type(&self) -> (f64, f64) {
+        (self.size * 0.82, self.size * 0.14)
+    }
+
+    /// A group's head's lettering: smaller still, bold, spaced.
+    fn head_type(&self) -> (f64, f64) {
+        (self.size * 0.72, self.size * 0.12)
+    }
+
+    /// Item `i`'s indent: a group's items are set in under their head.
+    fn indent(&self, i: usize) -> f64 {
+        if !self.heads.contains(&i) && self.heads.iter().any(|&h| h < i) {
+            self.size
+        } else {
+            0.0
+        }
+    }
+
     /// Its width and height.
     pub fn extent(&self, fonts: &Fonts) -> (f64, f64) {
-        let widest = std::iter::once(self.title.as_str())
-            .chain(self.items.iter().map(|(t, _)| t.as_str()))
-            .map(|t| fonts.advance(t, self.size, Weight::Regular, 0.0))
-            .fold(0.0, f64::max);
+        let (ts, tsp) = self.title_type();
+        let (hs, hsp) = self.head_type();
+        let widest = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(i, (t, _))| {
+                if self.heads.contains(&i) {
+                    fonts.advance(t, hs, Weight::Bold, hsp)
+                } else {
+                    fonts.advance(t, self.size, Weight::Regular, 0.0) + self.indent(i)
+                }
+            })
+            .fold(fonts.advance(&self.title, ts, Weight::Bold, tsp), f64::max);
         (
             widest + 2.0 * self.pad(),
             self.row() * (self.items.len() + 1) as f64 + self.size * 0.4,
@@ -99,8 +134,10 @@ impl Menu {
     }
 }
 
-/// A menu's layer: a box in the tips' colours, its title dim, then its items, the one under the
-/// pointer lit, one that cannot be chosen dim.
+/// A menu's layer: a box in the tips' colours, its title on a darker band ruled off from the
+/// items, in smaller, bold, spaced amber capitals, then its items, the one under the pointer
+/// lit, one that cannot be chosen dim; a group's head dim, small, bold and spaced, ruled off
+/// from what is above it, its items set in under it; the current choice marked with a dot.
 pub fn menu(fonts: &Fonts, m: &Menu) -> Layer {
     let (w, h) = m.extent(fonts);
     let mut s = Svg::default();
@@ -114,16 +151,73 @@ pub fn menu(fonts: &Fonts, m: &Menu) -> Layer {
     );
     let row = m.row();
     let base = |k: usize| row * k as f64 + row * 0.5 + m.size * 0.36;
+    let r = m.size * 0.3;
     put!(
         s,
-        "<text x='{}' y='{}' font-size='{}' fill='{DIM}'>{}</text>",
+        "<path d='M 0 {r} A {r} {r} 0 0 1 {r} 0 H {} A {r} {r} 0 0 1 {} {r} V {row} H 0 Z' fill='{HEAD}'/><line x1='0' y1='{row}' x2='{}' y2='{row}' stroke='{BORDER}' stroke-width='{}'/>",
+        N(w - r),
+        N(w),
+        N(w),
+        N(m.size / 10.0),
+        r = N(r),
+        row = N(row)
+    );
+    // (The outline again over the band.)
+    put!(
+        s,
+        "<rect x='0' y='0' width='{}' height='{}' rx='{}' fill='none' stroke='{BORDER}' stroke-width='{}'/>",
+        N(w),
+        N(h),
+        N(r),
+        N(m.size / 10.0)
+    );
+    let (ts, tsp) = m.title_type();
+    put!(
+        s,
+        "<text x='{}' y='{}' font-size='{}' font-weight='700' letter-spacing='{}' fill='{ACCENT}'>{}</text>",
         N(m.pad()),
-        N(base(0)),
-        N(m.size),
+        N(row * 0.5 + ts * 0.36),
+        N(ts),
+        N(tsp),
         escape(&m.title)
     );
     for (i, (label, enabled)) in m.items.iter().enumerate() {
         let top = row * (i + 1) as f64;
+        if m.heads.contains(&i) {
+            if i > 0 {
+                put!(
+                    s,
+                    "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{BORDER}' stroke-width='{}'/>",
+                    N(m.size * 0.4),
+                    N(top),
+                    N(w - m.size * 0.4),
+                    N(top),
+                    N(m.size / 12.0)
+                );
+            }
+            let (hs, hsp) = m.head_type();
+            put!(
+                s,
+                "<text x='{}' y='{}' font-size='{}' font-weight='700' letter-spacing='{}' fill='{DIM}'>{}</text>",
+                N(m.pad()),
+                N(top + row * 0.5 + hs * 0.36),
+                N(hs),
+                N(hsp),
+                escape(label)
+            );
+            continue;
+        }
+        let x = m.pad() + m.indent(i);
+        let marked = m.marked == Some(i);
+        if marked {
+            put!(
+                s,
+                "<circle cx='{}' cy='{}' r='{}' fill='{ACCENT}'/>",
+                N(x - m.size * 0.55),
+                N(top + row * 0.5),
+                N(m.size * 0.16)
+            );
+        }
         if m.hover == Some(i) && *enabled {
             put!(
                 s,
@@ -138,10 +232,14 @@ pub fn menu(fonts: &Fonts, m: &Menu) -> Layer {
         put!(
             s,
             "<text x='{}' y='{}' font-size='{}' fill='{}'>{}</text>",
-            N(m.pad()),
+            N(x),
             N(base(i + 1)),
             N(m.size),
-            if *enabled { colour::LEGEND } else { DIM },
+            if *enabled || marked {
+                colour::LEGEND
+            } else {
+                DIM
+            },
             escape(label)
         );
     }
@@ -150,6 +248,7 @@ pub fn menu(fonts: &Fonts, m: &Menu) -> Layer {
         origin: (m.x, m.y),
         bounds: [-e, -e, w + e, h + e],
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -211,6 +310,7 @@ pub fn note(fonts: &Fonts, n: &Note) -> Layer {
         origin: (ox, oy),
         bounds: [-w / 2.0 - e, -e, w / 2.0 + e, h + e],
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -241,6 +341,7 @@ pub fn ring_around(origin: (f64, f64), b: [f64; 4]) -> Layer {
         origin,
         bounds: [b[0] - 5.0, b[1] - 5.0, b[2] + 5.0, b[3] + 5.0],
         body: s.0,
+        ..Layer::default()
     }
 }
 
@@ -263,6 +364,8 @@ mod tests {
                 ("REMOVE MIDI ASSIGNMENT".into(), true),
                 ("MIDI ASSIGNMENTS…".into(), true),
             ],
+            heads: Vec::new(),
+            marked: None,
             hover: None,
         }
     }

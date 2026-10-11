@@ -862,4 +862,79 @@ def session_o():
     for x in reference():
         x["name"] = "ref_end"
         add(x, base, "EMPHASIS 0; LOUDNESS SUSTAIN 10")
+def selfosc_take(name, panel, set_line):
+    """Session E's EMPHASIS 10 take: no input, CUT CV stepped 0 to -5 V in half volts."""
+    steps = [round(-0.05 * i, 2) for i in range(11)]
+    s = LEAD + len(steps) * 0.8 + 0.4
+    lc, cv = zeros(s), zeros(s)
+    lc[span(LEAD, s - 0.1)] = GATE
+    segs = []
+    for i, c in enumerate(steps):
+        t0 = LEAD + i * 0.8
+        cv[span(t0, t0 + 0.8)] = c
+        segs.append([round(t0 + 0.25, 4), round(t0 + 0.75, 4), c])
+    x = take(name, s, {"lc_gate": lc, "cut": cv}, {"segments": segs},
+             "no input, CUT CV stepped 0 to -5 V: the self-oscillation's pitch and level")
+    x["panel"], x["set"] = dict(panel), set_line
+    return x
+
+
+HP_CUTS = [0.0, -0.1, -0.2, -0.3, -0.4, -0.5]
+HP_LEVELS = [0.001, 0.002, 0.004, 0.007, 0.01, 0.015, 0.02, 0.03, 0.05]
+
+
+def session_hp():
+    """The reference's FILTER MODE switch (LO and HI), which the CA-72 lacks. At EMPHASIS 0,
+    2.5, 5 and 7.5, sweeps in LO and in HI back to back, the knob untouched between them, at
+    CUT CV 0 to -5 V with CUTOFF fully clockwise (at 0 V the corner is above the audio band,
+    so HI against LO there is the cancellation itself). Then at EMPHASIS 0 a 150 Hz tone
+    stepped in level at CUT CV -4 V in each mode (whether the cancellation holds as the
+    filter's input overdrives), and EMPHASIS 10 without input in each mode. It tests whether
+    HI is the filter's input less its low-pass output (HI = a MIX - b LO through the same
+    output, a and b constants) and measures a and b (hp_mode.py). The panel is HOME; the
+    switch's position is in each take's events and set line (ca72-lab has no such key). The
+    session ends where it began: LO, EMPHASIS 0."""
+    t = []
+    ref = reference()[0]
+    ref["panel"] = dict(HOME)
+    ref["set"] = "the panel as the sheet's HOME, FILTER MODE LO"
+    ref["events"]["filter_mode"] = "lo"
+    t.append(ref)
+    p = dict(HOME)
+    steps = (
+        (0.0, "lo", "nothing"),
+        (0.0, "hi", "FILTER MODE HI"),
+        (2.5, "hi", "FILTER EMPHASIS 2.5 (halfway between 2 and 3)"),
+        (2.5, "lo", "FILTER MODE LO"),
+        (5.0, "lo", "FILTER EMPHASIS 5"),
+        (5.0, "hi", "FILTER MODE HI"),
+        (7.5, "hi", "FILTER EMPHASIS 7.5"),
+        (7.5, "lo", "FILTER MODE LO"),
+    )
+    for e, mode, line in steps:
+        p["emphasis"] = e / 10
+        x = sweep_take(f"{mode}_e{e:g}", p, line, HP_CUTS)
+        x["events"].update({"filter_mode": mode, "emphasis_mark": e})
+        t.append(x)
+
+    p["emphasis"] = 0.0
+    for mode, line in (("lo", "FILTER EMPHASIS 0"), ("hi", "FILTER MODE HI")):
+        s, sig, ev = level_steps(150.0, HP_LEVELS, -0.4)
+        x = take(f"{mode}_e0_levels", s, sig, ev,
+                 "150 Hz stepped in level, CUT CV -4 V: the cancellation as the input overdrives")
+        x["panel"], x["set"] = dict(p), line
+        x["events"].update({"filter_mode": mode, "emphasis_mark": 0.0})
+        t.append(x)
+
+    p["emphasis"] = 1.0
+    for mode, line in (("hi", "FILTER EMPHASIS 10"), ("lo", "FILTER MODE LO")):
+        x = selfosc_take(f"{mode}_e10_selfosc", p, line)
+        x["events"].update({"filter_mode": mode, "emphasis_mark": 10.0})
+        t.append(x)
+
+    p["emphasis"] = 0.0
+    x = sweep_take("lo_e0_again", p, "FILTER EMPHASIS back to 0", HP_CUTS)
+    x["events"].update({"filter_mode": "lo", "emphasis_mark": 0.0})
+    x["notes"] = "take 01 again: the knob back at 0 and the drift over the session"
+    t.append(x)
     return t

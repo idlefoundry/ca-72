@@ -1,0 +1,9 @@
+Use your image generation tool to make one image, then save it in the current directory as power.png (copy the generated file there). Do nothing else.
+
+The image: a single power rocker switch from the front panel of a 1970s analogue synthesizer, seen from directly above. Portrait image, as large as you can make it.
+- The switch: a tall rectangular paddle of black moulded plastic, satin, about two and a half times as tall as it is wide, with fine raised horizontal ridges across its face for grip; it is a rocker, the pivot across its middle from side to side, the upper half raised and the lower half pressed in.
+- Seated in a thin black rectangular bezel.
+- Gently used: no scratches, no chips.
+- Straight top-down orthographic product photograph, the camera exactly above the centre, no perspective or tilt; the part exactly centred and filling about 75 percent of the frame; on a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
+- Lighting: a ring light all around the camera, perfectly symmetric about the centre: no light from any one side, no directional highlight, no shadow.
+- No text, symbols, logos or numbers anywhere.

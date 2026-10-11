@@ -1,0 +1,8 @@
+Use your image generation tool to make one image, then save it in the current directory as pointer.png (copy the generated file there). Do nothing else.
+
+The image: a single pointer knob (a rotary range selector's knob) from the front panel of a 1970s analogue synthesizer, seen from directly above. Square image, as large as you can make it.
+- The knob, as on 1970s American synthesizers: moulded glossy black plastic. A round body with broad, shallow, smooth vertical flutes round its side (from above, a gently scalloped circle), and a wedge-shaped pointer moulded onto it running straight up the image (towards twelve o'clock): wide where it meets the body, tapering to a narrow rounded tip that reaches a little past the body's edge, its top ridge sloping down to the tip. A cream-white line inlaid along the pointer's ridge from near the middle to the tip. In the middle of the top, a flat round insert of spun aluminium, polished almost to a mirror with very fine concentric rings, about 45 percent of the body's width.
+- Gently used: the black's gloss a touch softened; no scratches, no chips.
+- Straight top-down orthographic product photograph, the camera exactly above the centre, no perspective or tilt; the part exactly centred and filling about 75 percent of the frame; on a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
+- Lighting: a ring light all around the camera, perfectly symmetric about the centre: no light from any one side, no directional highlight, no shadow.
+- No text, symbols, logos or numbers anywhere.

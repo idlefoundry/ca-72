@@ -2,7 +2,8 @@
 //! instrument wires them (docs/circuit/voice.md).
 //!
 //! - **Keyboard** (board 2's keyboard circuit, [`crate::keyboard`]): 44 keys; the lowest
-//!   and highest held join the pitch bus to the string (lowest-note priority follows); the
+//!   and highest held join the pitch bus to the string (lowest-note priority follows; the
+//!   plug-in's NOTE PRIORITY HIGH or LAST hands it the key it chooses alone: [`Priority`]); the
 //!   trigger contact is closed while any key is held (single triggering); the hold,
 //!   GLIDE, and the output's load (the oscillators' and the filter's keyboard inputs). A
 //!   key's pitch contact opens [`RELEASE_LEAD`] after its trigger contact (A18).
@@ -100,6 +101,20 @@ pub enum Quality {
     Potato,
 }
 
+/// Which of the keys held sounds (not the instrument's: decisions.md R-PRIORITY). The keyboard
+/// circuit's own is the lowest; HIGH and LAST hand it the key chosen alone, as if it were the
+/// only key down. In this order, as the toggle's positions run from left to right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Priority {
+    /// The lowest key: the circuit's contacts as drawn (the lowest and highest keys held).
+    #[default]
+    Low,
+    /// The key pressed last; once it is let go, the last of those still held.
+    Last,
+    /// The highest key.
+    High,
+}
+
 /// The front panel and left hand controller: knobs 0..1 (the panel's 0..10; CUTOFF's
 /// -5..+5 as 0..1), switches as booleans.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -130,6 +145,9 @@ pub struct Panel {
     /// OSCILLATOR MODULATION and FILTER MODULATION.
     pub osc_mod: bool,
     pub filter_mod: bool,
+    /// FILTER MODE, which the original does not have (decisions.md R-HP): HI, the hardware
+    /// reference's high-pass (the mixer's output less the filter's); LO, the filter as drawn.
+    pub filter_hi: bool,
     /// The wheels: pitch -1..1 (0 in its detent), MODULATION 0..1 (fully forward).
     pub pitch_wheel: f64,
     pub mod_wheel: f64,
@@ -145,6 +163,12 @@ pub struct Panel {
     pub tune: f64,
     /// The model's quality mode (not a control of the instrument's).
     pub quality: Quality,
+    /// Which key held sounds (not a control of the instrument's either).
+    pub priority: Priority,
+    /// RETRIGGER (not the instrument's: decisions.md R-PRIORITY): each key pressed opens the
+    /// trigger contact for [`RETRIGGER_GAP`] before it comes down, so that the contours start
+    /// again even with other keys held (off: single triggering, the instrument's).
+    pub retrigger: bool,
 }
 
 /// TUNE's wiper voltage over half its travel: R1 spans 10 V less R22's 5.05 V.
@@ -187,6 +211,7 @@ impl Default for Panel {
             mod_mix: 0.0,
             osc_mod: false,
             filter_mod: false,
+            filter_hi: false,
             pitch_wheel: 0.0,
             mod_wheel: 0.0,
             ext_volume: 0.5,
@@ -194,6 +219,8 @@ impl Default for Panel {
             a440: false,
             tune: 0.0,
             quality: Quality::NoCompromises,
+            priority: Priority::Low,
+            retrigger: false,
         }
     }
 }
@@ -715,6 +742,16 @@ pub struct Keys {
     held: Vec<i32>,
     /// Released keys whose pitch contacts are still closed, and the sample they open at.
     releasing: Vec<(i32, u64)>,
+    /// When each MIDI note was last pressed, counted in presses (for LAST), and the count.
+    pressed: [u64; 128],
+    presses: u64,
+    /// RETRIGGER's keys pressed, waiting for the trigger contact to have been open
+    /// [`RETRIGGER_GAP`] (in samples, `gap`); the trigger contact as last set, and the
+    /// sample it last opened at (`None`: never closed).
+    waiting: Vec<i32>,
+    gap: u64,
+    gate: bool,
+    opened: Option<u64>,
     samples: u64,
     /// The string's foot as last set (it stays while no key's contact is closed).
     foot: i32,
@@ -1069,6 +1106,12 @@ impl Voice {
                 // Room for every key: a key press must not allocate on the audio thread.
                 held: Vec::with_capacity(128),
                 releasing: Vec::with_capacity(128),
+                pressed: [0; 128],
+                presses: 0,
+                waiting: Vec::with_capacity(128),
+                gap: (RETRIGGER_GAP * rate).round() as u64,
+                gate: false,
+                opened: None,
                 samples: 0,
                 foot: 0,
             },
@@ -1167,6 +1210,23 @@ impl Voice {
         v
     }
 
+    /// The plug-in's DRIVE (its decisions.md R-STEREO, the CA-74's R29): the mixer's signal
+    /// into the filter's input pair raised by `gain`, after C27, driving the pair harder than
+    /// the panel's mixer can ([`crate::vcf::Drive::gain`]); 1 is the circuit.
+    pub fn set_drive(&mut self, gain: f64) {
+        self.audio.back.vcf.set_drive(gain);
+    }
+
+    /// The three oscillators started together `at` one share of the way down their ramps
+    /// ([`Vco::start_at`]), as the reference starts them together at the top: for a voice made
+    /// or put back to rest that is not the first, so that voices playing one note together do
+    /// not start in step with each other (decisions.md R-STEREO). Never at a note.
+    pub fn start_oscillators_at(&mut self, at: f64) {
+        for v in &mut self.audio.front.vcos {
+            v.start_at(at);
+        }
+    }
+
     /// Seeds the noise generator (each device its own stream; a render repeats).
     pub fn set_seed(&mut self, seed: u64) {
         self.ctl.noise.reseed(seed);
@@ -1179,11 +1239,7 @@ impl Voice {
 
     /// The contours' latest values (filter, loudness), V, and whether a key is held.
     pub fn envelopes(&self) -> (f64, f64, bool) {
-        (
-            self.ctl.env_to.0,
-            self.ctl.env_to.1,
-            !self.keys.held.is_empty(),
-        )
+        (self.ctl.env_to.0, self.ctl.env_to.1, self.keys.held())
     }
 
     /// The last sample's keyboard voltage, V, the mixer bus's Norton current, A, and the
@@ -1249,7 +1305,7 @@ impl Voice {
     /// A MIDI note (0 to 127) pressed or released: beyond the 44 keys the string continues
     /// ([`Keys::step`]).
     pub fn note(&mut self, midi: i32, on: bool) {
-        self.keys.note(midi, on);
+        self.keys.note(midi, on, self.panel.retrigger);
     }
 
     /// One output sample.
@@ -1320,7 +1376,7 @@ impl Voice {
 
     fn tick_at(&mut self, j: &Jacks) -> f64 {
         let p = self.panel;
-        let mut c = self.keys.step();
+        let mut c = self.keys.step(p.priority);
         c.s_trig = j.s_trig;
         // (The pitch and contour paths at another quality, when it is held.)
         let pc = match self.control_quality {
@@ -1360,17 +1416,28 @@ fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourP
 
 impl Keys {
     /// A MIDI note (0 to 127) pressed or released: the 44 keys F to C (41 to 84) are the
-    /// instrument's, the rest continue its key string ([`Keys::step`]).
-    pub fn note(&mut self, midi: i32, on: bool) {
+    /// instrument's, the rest continue its key string ([`Keys::step`]). With `retrigger`, a key
+    /// pressed waits until the trigger contact has been open [`RETRIGGER_GAP`], opening it
+    /// first if keys are held (as if every key were let go and pressed again).
+    pub fn note(&mut self, midi: i32, on: bool, retrigger: bool) {
         if !MIDI_NOTES.contains(&midi) {
             return;
         }
         let k = midi - LOWEST_KEY_MIDI;
         if on {
-            if !self.held.contains(&k) {
-                self.held.push(k);
+            if !self.held.contains(&k) && !self.waiting.contains(&k) {
+                if retrigger {
+                    self.waiting.push(k);
+                } else {
+                    self.held.push(k);
+                }
+                self.presses += 1;
+                self.pressed[midi as usize] = self.presses;
             }
             self.releasing.retain(|&(x, _)| x != k);
+        } else if self.waiting.contains(&k) {
+            // (Let go before it came down: it never sounded.)
+            self.waiting.retain(|&x| x != k);
         } else if self.held.contains(&k) {
             self.held.retain(|&x| x != k);
             let until = self.samples + (RELEASE_LEAD * self.rate).round() as u64;
@@ -1380,7 +1447,8 @@ impl Keys {
 
     /// The contacts for the next sample (the lowest and highest keys whose pitch contacts
     /// are closed: held, or released within the lead; and the trigger contact), and a
-    /// sample on.
+    /// sample on. With `priority` HIGH or LAST, the key it chooses among them alone, as if
+    /// it were the only key down (the trigger contact as ever: closed while any is held).
     ///
     /// Keys beyond the string's ends (the plug-in's extension: decisions.md, "The full MIDI range"): the
     /// trigger contact closes for them as for the rest. While the lowest key whose contact
@@ -1389,9 +1457,22 @@ impl Keys {
     /// key is above C, the lowest of them likewise, from C. Otherwise the keys above C are
     /// left out, as the instrument's lowest-note priority leaves them silent, and the
     /// contacts are the instrument's own.
-    pub fn step(&mut self) -> Contacts {
+    pub fn step(&mut self, priority: Priority) -> Contacts {
         let now = self.samples;
         self.releasing.retain(|&(_, until)| until > now);
+        // RETRIGGER's keys come down once the trigger contact has been open long enough for
+        // the contours to start again; until then it is open, the keys held as they were.
+        if !self.waiting.is_empty()
+            && !self.gate
+            && self.opened.is_none_or(|at| now - at >= self.gap)
+        {
+            self.held.append(&mut self.waiting);
+        }
+        let gate = !self.held.is_empty() && self.waiting.is_empty();
+        if self.gate && !gate {
+            self.opened = Some(now);
+        }
+        self.gate = gate;
         let keys = || {
             self.held
                 .iter()
@@ -1399,19 +1480,30 @@ impl Keys {
                 .chain(self.releasing.iter().map(|&(k, _)| k))
         };
         let on = || keys().filter(|k| (0..KEYS).contains(k));
-        let (keys, foot) = match (keys().min(), on().min().zip(on().max())) {
-            (Some(lowest), _) if lowest < 0 => (Some((0, 0)), lowest),
-            (_, Some((lo, hi))) => (Some((lo as usize, hi as usize)), 0),
-            (Some(lowest), None) => {
-                let top = (KEYS - 1) as usize;
-                (Some((top, top)), lowest - (KEYS - 1))
+        let top = KEYS - 1;
+        // A key alone: its own contact, or beyond the string's ends, that end's key.
+        let alone = |k: i32| {
+            let end = k.clamp(0, top);
+            (Some((end as usize, end as usize)), k - end)
+        };
+        let chosen = match priority {
+            Priority::Low => None,
+            Priority::High => Some(keys().max()),
+            Priority::Last => {
+                Some(keys().max_by_key(|&k| self.pressed[(k + LOWEST_KEY_MIDI) as usize]))
             }
-            (None, _) => (None, self.foot),
+        };
+        let (keys, foot) = match (chosen, keys().min(), on().min().zip(on().max())) {
+            (Some(Some(k)), _, _) => alone(k),
+            (Some(None), _, _) | (None, None, _) => (None, self.foot),
+            (None, Some(lowest), _) if lowest < 0 => (Some((0, 0)), lowest),
+            (None, _, Some((lo, hi))) => (Some((lo as usize, hi as usize)), 0),
+            (None, Some(lowest), None) => alone(lowest),
         };
         self.foot = foot;
         let c = Contacts {
             keys,
-            gate: !self.held.is_empty(),
+            gate,
             s_trig: false,
             foot,
         };
@@ -1424,11 +1516,12 @@ impl Keys {
     pub fn reserve(&mut self) {
         self.held.reserve(128);
         self.releasing.reserve(128);
+        self.waiting.reserve(128);
     }
 
-    /// Whether a key is held.
+    /// Whether a key is held (or pressed and waiting to come down).
     pub fn held(&self) -> bool {
-        !self.held.is_empty()
+        !self.held.is_empty() || !self.waiting.is_empty()
     }
 }
 
@@ -1855,6 +1948,7 @@ impl BackPart {
         self.vcf.circuit.r14 = self.emphasis.get(p.emphasis, emphasis_r14);
         self.vcf.set_oversample(oversampling(p.quality).1);
         self.vcf.set_quality(p.quality);
+        self.vcf.high_pass = p.filter_hi;
         let y = self.vcf.tick(f.i_bus, f.g_bus, f.i0);
         laps.lap(crate::prof::Part::Filter);
         self.vca.a440 = self.a440.tick(p.a440);

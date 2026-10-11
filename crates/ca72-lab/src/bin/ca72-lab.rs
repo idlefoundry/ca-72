@@ -1145,6 +1145,17 @@ fn set_control(p: &mut ca72::voice::Panel, k: &str, v: &serde_json::Value) -> Re
         "tune" => p.tune = knob((-1.0, 1.0))?,
         "osc_mod" => p.osc_mod = switch()?,
         "filter_mod" => p.filter_mod = switch()?,
+        "filter_mode" => {
+            p.filter_hi = match v.as_str() {
+                Some("lo") => false,
+                Some("hi") => true,
+                _ => {
+                    return Err(format!(
+                        "panel key \"filter_mode\" is \"lo\" or \"hi\", not {v}"
+                    ));
+                }
+            }
+        }
         "noise" => {
             p.noise_pink = match v.as_str() {
                 Some("white") => false,

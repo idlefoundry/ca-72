@@ -486,7 +486,6 @@ pub(crate) mod fake {
 
 #[cfg(test)]
 mod tests {
-    use ca72_panel::fonts::Fonts;
     use ca72_panel::presets::update_fits;
 
     use super::fake::*;
@@ -648,7 +647,6 @@ mod tests {
     /// Each scene the check shows fits the drawer whole, a long version's among them.
     #[test]
     fn every_scene_fits_the_drawer() {
-        let fonts = Fonts::new();
         let mut u = Update::with(no_curl, browser);
         let release = Release {
             version: "10.10.10".into(),
@@ -666,13 +664,13 @@ mod tests {
         u.opened = Some(false);
         scenes.push(u.scene());
         for s in &scenes {
-            assert!(update_fits(&fonts, s), "{s:?}");
+            assert!(update_fits(s), "{s:?}");
         }
         let checking = UpdateScene {
             button: "CHECKING…".into(),
             ..scenes[0].clone()
         };
-        assert!(update_fits(&fonts, &checking));
+        assert!(update_fits(&checking));
     }
 
     /// A canned answer, by the release it names, for a stand-in for curl to print.
