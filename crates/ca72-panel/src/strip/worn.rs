@@ -297,14 +297,17 @@ impl StripRenderer {
         let all = [0, 0, self.frame.width() as i32, self.frame.height() as i32];
         // Where the frame is to be drawn again: where the drawing under it changed (the kept
         // drawing with the still parts over it brought up to it there), what the scene shows
-        // differently, the drops' window while they move.
+        // differently, the drops' window while they move. (The drawing's change cut to the
+        // strip first: a change above it, QUALITY's opening's, made the strip from the top of
+        // its window over, almost all of it, at every tick.)
         let top = (PANEL_H * self.scale).round() as i32;
         let mut dirty = None;
         if self.whole || self.base.is_none() {
             self.make_base(under, all);
             dirty = Some(all);
-        } else if let Some([x0, y0, x1, y1]) = changed {
-            let r = [x0, y0 - top, x1, y1 - top];
+        } else if let Some(r) =
+            changed.and_then(|[x0, y0, x1, y1]| within([x0, y0 - top, x1, y1 - top], all))
+        {
             self.make_base(under, r);
             dirty = Some(r);
         }
@@ -1507,6 +1510,43 @@ mod tests {
         sc.levels = vec![0.9; 4];
         q.render(&sc, &small, None);
         assert!(!q.moved, "moved on twice within a thirtieth of a second");
+    }
+
+    /// A change in the drawing above the strip (QUALITY's opening ticking at the panel's top
+    /// right) draws nothing of the strip again: with the drops moving, only their window.
+    #[test]
+    fn a_change_above_the_strip_draws_none_of_it() {
+        let scale = 0.5;
+        let (w, h) = crate::render::size_at(scale);
+        let under = Pixmap::new(w, h).expect("a frame");
+        let mut r = StripRenderer::new(scale);
+        let mut sc = scene(0b1111);
+        let mut now = Instant::now();
+        r.render_at(&sc, &under, None, now);
+        let above = Some([(w - 100) as i32, 30, w as i32, 130]);
+        now += Duration::from_millis(33);
+        sc.levels = vec![0.0; 4];
+        let quiet = r.render_at(&sc, &under, above, now);
+        let window = r.window();
+        for k in 0..10 {
+            now += Duration::from_millis(33);
+            sc.levels = (0..4).map(|i| 0.3 + 0.1 * ((k + i) % 3) as f64).collect();
+            if r.render_at(&sc, &under, above, now) {
+                let d = r.damage().expect("where it changed");
+                assert!(
+                    d[0] >= window[0] - 1
+                        && d[1] >= window[1] - 1
+                        && d[2] <= window[2] + 1
+                        && d[3] <= window[3] + 1,
+                    "tick {k}: drawn {d:?}, the drops' window {window:?}"
+                );
+            }
+        }
+        // (Before the drops moved: nothing at all, but what the levels' first change moved.)
+        if quiet {
+            let d = r.damage().expect("where it changed");
+            assert!(d[1] >= window[1] - 1, "drawn from the strip's top: {d:?}");
+        }
     }
 
     /// What drawing the drops costs at the window's opening size and twice it (a Retina

@@ -15,6 +15,7 @@ use crate::controls::{CONTROLS, Kind, Mark, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
 use crate::skin::{Part, Pictures, Skin};
+use crate::ultra::Glow;
 
 /// What the panel shows.
 #[derive(Clone, Debug, PartialEq)]
@@ -89,6 +90,9 @@ pub struct Renderer {
     skin: Skin,
     /// The worn skin's pictures, once it has been shown.
     pictures: Option<Pictures>,
+    /// The lights' pictures made at this scale, each in its layer's place (left, top, width,
+    /// height: pixels), drawn as their layers change (decisions.md R-PRESENT).
+    lights: Vec<(Glow, [i32; 4], Pixmap)>,
 }
 
 impl fmt::Debug for Renderer {
@@ -143,6 +147,7 @@ impl Renderer {
             damages: Vec::new(),
             skin,
             pictures: None,
+            lights: Vec::new(),
         };
         r.draw_background();
         r
@@ -168,6 +173,7 @@ impl Renderer {
         if let Some(p) = &mut self.pictures {
             p.forget_scale();
         }
+        self.lights.clear();
         self.draw_background();
     }
 
@@ -436,6 +442,52 @@ impl Renderer {
                     (sp.zoom as f32, sp.alpha as f32),
                 );
             }
+        }
+        // Each light from its picture, made once in the layer's place, so drawn without moving
+        // a pixel; scaled about the layer's origin while its lamp comes up.
+        for light in &layer.lights {
+            let place = [x0 as i32, y0 as i32, w as i32, h as i32];
+            let made = self
+                .lights
+                .iter()
+                .position(|(g, at, _)| (*g, *at) == (light.glow, place));
+            let i = match made {
+                Some(i) => i,
+                None => {
+                    let svg = format!(
+                        "<g transform='translate({} {})'>{}</g>",
+                        crate::svg::N(ox),
+                        crate::svg::N(oy),
+                        light.glow.svg()
+                    );
+                    let doc = art::document(view, w, h, &svg);
+                    let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
+                    let mut p = Pixmap::new(w, h)?;
+                    resvg::render(&tree, Transform::identity(), &mut p.as_mut());
+                    self.lights.push((light.glow, place, p));
+                    self.lights.len() - 1
+                }
+            };
+            let (cx, cy) = ((ox * s - x0) as f32, (oy * s - y0) as f32);
+            let zoom = light.zoom as f32;
+            pixmap.draw_pixmap(
+                0,
+                0,
+                self.lights[i].2.as_ref(),
+                &PixmapPaint {
+                    quality: if zoom == 1.0 {
+                        FilterQuality::Nearest
+                    } else {
+                        FilterQuality::Bicubic
+                    },
+                    opacity: (light.alpha as f32).clamp(0.0, 1.0),
+                    ..PixmapPaint::default()
+                },
+                Transform::from_translate(cx, cy)
+                    .pre_scale(zoom, zoom)
+                    .pre_translate(-cx, -cy),
+                None,
+            );
         }
         if let Some(wheel) = layer.wheel {
             draw_wheel(&mut pixmap, (ox * s - x0, oy * s - y0), s, wheel);
@@ -963,6 +1015,61 @@ mod tests {
 
     /// A frame put together again where it changed is the frame put together whole, to the
     /// bit: through knobs turned above the strip and on it, a switch, a tip coming and going.
+    /// A lamp's light drawn from its picture, made once at its strongest, is its light drawn
+    /// afresh at its strength as it was at each tick, within three levels of 255 (each light
+    /// rounded once more; the Tesla lamp's flash over its steady spill, twice): the amber lamp
+    /// and the Tesla lamp, quiet, playing and sparking, at rest and coming up (the flare then
+    /// scaled), at the window's opening scale and a Retina screen's (decisions.md R-PRESENT).
+    #[test]
+    fn a_light_from_its_picture_is_the_light_drawn() {
+        for scale in [1720.0 / W, 3440.0 / W] {
+            let mut r = Renderer::with_skin(Skin::Worn, scale, 1.0);
+            for (lamp, coil) in [(1.0, 0.0), (0.0, 1.0)] {
+                for (p, level, spark) in [
+                    (1.0, 0.0, 0.0),
+                    (1.0, 0.45, 0.3),
+                    (1.0, 1.0, 1.1),
+                    (0.8, 0.7, 0.6),
+                ] {
+                    let o = Opening {
+                        lamp: lamp * p,
+                        coil: coil * p,
+                        level,
+                        spark,
+                        ..Opening::default()
+                    };
+                    let [_, front] = crate::ultra::ultra_worn(&o);
+                    assert!(!front.lights.is_empty());
+                    // The same layer with its lights drawn as they were, under its SVG.
+                    let mut drawn = front.clone();
+                    drawn.lights.clear();
+                    let mut over = String::new();
+                    for (i, l) in front.lights.iter().enumerate() {
+                        over += &l
+                            .glow
+                            .drawn(l.zoom, l.alpha)
+                            .replace("id='", &format!("id='l{i}-"))
+                            .replace("url(#", &format!("url(#l{i}-"));
+                    }
+                    drawn.over = over + &front.over;
+                    let (_, _, a) = r.render_layer(&front).expect("drawn");
+                    let (_, _, b) = r.render_layer(&drawn).expect("drawn");
+                    let off = a
+                        .data()
+                        .iter()
+                        .zip(b.data())
+                        .map(|(x, y)| x.abs_diff(*y))
+                        .max()
+                        .unwrap_or(0);
+                    assert!(
+                        off <= 3,
+                        "scale {scale:.2}, {o:?}: {off} levels off the light drawn"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_frame_put_together_in_part_is_the_frame_put_together_whole() {
         let s = 0.25;

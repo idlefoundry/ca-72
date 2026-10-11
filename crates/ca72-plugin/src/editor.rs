@@ -675,6 +675,9 @@ struct Editing {
     drawer: DrawerRenderer,
     pub(crate) browser: Browser,
     composed: Option<ca72_panel::Pixmap>,
+    /// Where the window's frame changed in the last `draw` that changed it (pixels: left,
+    /// top, right, bottom), or none when it may have changed anywhere (decisions.md R-PRESENT).
+    damage: Option<Vec<[i32; 4]>>,
     /// A size asked of the window.
     resizing_window: bool,
     /// The drawer placed for its opening (below the strip or over the panel), asked once.
@@ -850,10 +853,12 @@ impl PanelWindow {
         }
     }
 
-    fn present(&mut self) {
+    /// The frame shown: where it changed in the last `draw` when `partial`, or all of it.
+    fn present(&mut self, partial: bool) {
         let e = &self.editing;
         let frame = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
-        self.surface.present(self.physical, &[frame]);
+        let damage = e.damage.as_deref().filter(|_| partial);
+        self.surface.present(self.physical, &[frame], damage);
     }
 }
 
@@ -893,6 +898,7 @@ impl Editing {
             drawer: DrawerRenderer::new(f64::from(physical_width) / art::W),
             browser: Browser::new(library),
             composed: None,
+            damage: None,
             resizing_window: false,
             placed: false,
             update: Update::default(),
@@ -1935,12 +1941,28 @@ impl Editing {
             .then(|| self.learning.list_scene(&self.params.midi_map));
         let panel = self.renderer.render(&self.scene);
         self.strip_scene.bar.clone_from(&self.browser.bar);
-        // (The strip's parts drawn again over the panel's frame where it changed there.)
+        // (The strip's parts drawn again over the panel's frame where it changed there: the
+        // panel's places that reach the strip, not QUALITY's opening above it as well.)
         // (The drops move on with QUALITY's opening, on its clock: the two in one frame.)
+        let foot = (art::PANEL_H * self.renderer.scale()).round() as i32;
+        let under = self
+            .renderer
+            .damages()
+            .iter()
+            .copied()
+            .filter(|d| d[3] > foot)
+            .reduce(|a, b| {
+                [
+                    a[0].min(b[0]),
+                    a[1].min(b[1]),
+                    a[2].max(b[2]),
+                    a[3].max(b[3]),
+                ]
+            });
         let strip = self.strip.render_at(
             &self.strip_scene,
             self.renderer.frame(),
-            self.renderer.damage(),
+            under,
             self.motion_at.unwrap_or_else(Instant::now),
         );
         // The drawer over the strip, dropping down from under the rail, while it shows.
@@ -1955,30 +1977,27 @@ impl Editing {
             return false;
         }
         self.reveal_shown = k;
-        // The rows that changed, the panel's and the strip's, put together again alone; all of
-        // them while the drawer moves or something floats over everything.
-        let top = (art::PANEL_H * self.renderer.scale()).round() as i64;
-        let rows = |d: Option<[i32; 4]>, top: i64| {
-            d.map(|d| (top + i64::from(d[1]), top + i64::from(d[3])))
-        };
-        let changed = match (
-            rows(self.renderer.damage(), 0),
-            rows(self.strip.damage(), top),
-        ) {
-            (Some(a), Some(b)) => Some((a.0.min(b.0), a.1.max(b.1))),
-            (a, b) => a.or(b),
-        };
-        let only = if drawer || shut || self.renderer.floating() {
-            None
-        } else {
-            changed
-        };
+        // The places that changed, the panel's and the strip's, put together again alone and
+        // so shown (decisions.md R-PRESENT); all of the frame while the drawer moves, something
+        // floats over everything, or there is no frame of this size to change.
+        let frame = self.renderer.frame();
+        let kept = self
+            .composed
+            .as_ref()
+            .is_some_and(|c| (c.width(), c.height()) == (frame.width(), frame.height()));
+        self.damage = (kept && !(drawer || shut || self.renderer.floating())).then(|| {
+            let mut places = self.renderer.damages().to_vec();
+            if let Some([x0, y0, x1, y1]) = self.strip.damage() {
+                places.push([x0, foot + y0, x1, foot + y1]);
+            }
+            places
+        });
         compose(
             &mut self.composed,
             &self.renderer,
             self.strip.frame(),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
-            only,
+            self.damage.as_deref(),
         );
         true
     }
@@ -2020,50 +2039,58 @@ impl Editing {
 /// The window's frame: the panel's renderer's (the whole drawing), the strip's parts over its
 /// strip (`strip`, from the panel's foot down), the drawer over that from `drawer`'s top
 /// (drawing units, cut off at the rail's foot), and over everything what floats (MIDI Learn's
-/// ring, a tip, a note, a menu); in the rows `only` alone (from, past) when given.
+/// ring, a tip, a note, a menu); in the places `only` alone (pixels: left, top, right,
+/// bottom) when given. (The places, not the rows they span: QUALITY's opening at the panel's
+/// top and the strip's drops at its foot put together the whole frame between them.)
 fn compose(
     composed: &mut Option<ca72_panel::Pixmap>,
     renderer: &Renderer,
     strip: &ca72_panel::Pixmap,
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
-    only: Option<(i64, i64)>,
+    only: Option<&[[i32; 4]]>,
 ) {
     let frame = renderer.frame();
-    let all = (0, i64::from(frame.height()));
-    let rows = match composed {
-        Some(c) if (c.width(), c.height()) == (frame.width(), frame.height()) => {
-            only.unwrap_or(all)
-        }
-        _ => all,
+    let all = [0, 0, frame.width() as i32, frame.height() as i32];
+    let kept = composed
+        .as_ref()
+        .is_some_and(|c| (c.width(), c.height()) == (frame.width(), frame.height()));
+    let places = match only {
+        Some(places) if kept => places,
+        _ => std::slice::from_ref(&all),
     };
-    let c = composed.get_or_insert_with(|| frame.clone());
-    if (c.width(), c.height()) != (frame.width(), frame.height()) {
-        *c = frame.clone();
-    }
+    let c = match composed {
+        Some(c) if kept => c,
+        _ => composed.insert(frame.clone()),
+    };
     let s = renderer.scale();
-    let top = (art::PANEL_H * s).round() as i64;
-    paste_rows(c, frame, 0, rows);
-    paste_rows(c, strip, top, rows);
-    if let Some((d, at)) = drawer {
-        let rail = (DRAWER_TOP * s).round() as i64;
-        paste_rows(c, d, (at * s).round() as i64, (rows.0.max(rail), rows.1));
+    let top = (art::PANEL_H * s).round() as i32;
+    let rail = (DRAWER_TOP * s).round() as i32;
+    for &[x0, y0, x1, y1] in places {
+        paste(c, frame, 0, [x0, y0, x1, y1]);
+        paste(c, strip, top, [x0, y0, x1, y1]);
+        if let Some((d, at)) = drawer {
+            paste(c, d, (at * s).round() as i32, [x0, y0.max(rail), x1, y1]);
+        }
     }
-    if rows == all && renderer.floating() {
+    if places == [all] && renderer.floating() {
         renderer.draw_floating(c);
     }
 }
 
-/// `p` put in the frame `c` with its top at row `top`, in `c`'s rows `rows` (from, past) only.
-fn paste_rows(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i64, rows: (i64, i64)) {
-    let (w, pw, ph) = (
-        c.width() as usize,
-        p.width() as usize,
-        i64::from(p.height()),
-    );
-    let h = i64::from(c.height());
-    let n = w.min(pw) * 4;
-    for to in rows.0.max(top).max(0)..rows.1.min(top + ph).min(h) {
-        let (src, dst) = ((to - top) as usize * pw * 4, to as usize * w * 4);
+/// `p` put in the frame `c` with its top at row `top`, inside `place` (left, top, right,
+/// bottom) only.
+fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i32; 4]) {
+    let (w, h) = (c.width() as i32, c.height() as i32);
+    let (pw, ph) = (p.width() as i32, p.height() as i32);
+    let (x0, x1) = (place[0].max(0), place[2].min(w).min(pw));
+    let (y0, y1) = (place[1].max(top).max(0), place[3].min(top + ph).min(h));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let n = (x1 - x0) as usize * 4;
+    for y in y0..y1 {
+        let src = (((y - top) * pw + x0) * 4) as usize;
+        let dst = ((y * w + x0) * 4) as usize;
         c.data_mut()[dst..dst + n].copy_from_slice(&p.data()[src..src + n]);
     }
 }
@@ -2287,8 +2314,10 @@ impl WindowHandler for PanelWindow {
         // (MIDI Learn done meanwhile, by a controller rather than here: the keyboard back to the
         // host now, not at the editor's next event; decisions.md R34.)
         self.keyboard(window);
-        if changed || repaint_due(self.shown, now) {
-            self.present();
+        // (Shown again whole when due: X11 may have dropped any of it.)
+        let due = repaint_due(self.shown, now);
+        if changed || due {
+            self.present(changed && !due);
             self.shown = Some(now);
         }
         self.editing.measure_when_done();
@@ -2305,7 +2334,7 @@ impl WindowHandler for PanelWindow {
             // resized (the next frame shows one). Not drawn afresh (decisions.md R28).
             Event::Window(WindowEvent::Damaged) => {
                 if self.shown.is_some() {
-                    self.present();
+                    self.present(false);
                 }
                 EventStatus::Captured
             }
@@ -2868,12 +2897,62 @@ mod window {
         }
     }
 
+    /// The window's pixels in the places `damage` (left, top, right, bottom) alone, as
+    /// [`fill`] makes them there, the rest left as it was: the places, cut to the window, that
+    /// were turned.
+    pub fn fill_places(
+        buffer: &mut [u32],
+        (w, h): (usize, usize),
+        frames: &[&ca72_panel::Pixmap],
+        damage: &[[i32; 4]],
+    ) -> Vec<[i32; 4]> {
+        let mut turned = Vec::with_capacity(damage.len());
+        for &[x0, y0, x1, y1] in damage {
+            let cut = |v: i32, most: usize| v.clamp(0, most as i32) as usize;
+            let (x0, y0, x1, y1) = (cut(x0, w), cut(y0, h), cut(x1, w), cut(y1, h));
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            turned.push([x0 as i32, y0 as i32, x1 as i32, y1 as i32]);
+            let mut frames = frames.iter();
+            let mut frame = frames.next();
+            let mut top = 0usize;
+            for y in y0..y1 {
+                while let Some(f) = frame
+                    && y >= top + f.height() as usize
+                {
+                    top += f.height() as usize;
+                    frame = frames.next();
+                }
+                let row = &mut buffer[y * w + x0..y * w + x1];
+                let n = match frame {
+                    Some(f) if (f.width() as usize) > x0 => {
+                        let fw = f.width() as usize;
+                        let n = fw.min(x1) - x0;
+                        let from = ((y - top) * fw + x0) * 4;
+                        let src = &f.data()[from..from + n * 4];
+                        for (out, p) in row[..n].iter_mut().zip(src.chunks_exact(4)) {
+                            *out = shown(p);
+                        }
+                        n
+                    }
+                    _ => 0,
+                };
+                row[n..].fill(EMPTY);
+            }
+        }
+        turned
+    }
+
     /// Where the frames are shown; nothing if the platform's window could not be drawn in.
     pub struct Surface {
         inner: Option<(
             softbuffer::Context<Target>,
             softbuffer::Surface<Target, Target>,
         )>,
+        /// Whether what the window shows is the frame last given, every pixel of it: not
+        /// since the surface was made or resized, nor after a frame that could not be shown.
+        whole: bool,
     }
 
     impl Surface {
@@ -2886,12 +2965,16 @@ mod window {
                 })
                 .flatten()
             });
-            let mut s = Surface { inner };
+            let mut s = Surface {
+                inner,
+                whole: false,
+            };
             s.resize(size);
             s
         }
 
         pub fn resize(&mut self, (w, h): (u32, u32)) {
+            self.whole = false;
             if let (Some((_, surface)), Some(w), Some(h)) =
                 (&mut self.inner, NonZeroU32::new(w), NonZeroU32::new(h))
                 && guarded(|| surface.resize(w, h)).is_none()
@@ -2901,30 +2984,65 @@ mod window {
         }
 
         /// Shows frames (premultiplied RGBA, opaque), one under the other from the top left
-        /// corner, in a window of `size` pixels.
-        pub fn present(&mut self, size: (u32, u32), frames: &[&ca72_panel::Pixmap]) {
+        /// corner, in a window of `size` pixels: where they changed since those last shown, in
+        /// the places `damage` (left, top, right, bottom), when it is given, or anywhere.
+        pub fn present(
+            &mut self,
+            size: (u32, u32),
+            frames: &[&ca72_panel::Pixmap],
+            damage: Option<&[[i32; 4]]>,
+        ) {
             let Some((_, surface)) = &mut self.inner else {
                 return;
             };
-            if guarded(|| Self::show(surface, size, frames)).is_none() {
-                self.inner = None;
+            let damage = damage.filter(|_| self.whole);
+            match guarded(|| Self::show(surface, size, frames, damage)) {
+                Some(shown) => self.whole = shown,
+                None => {
+                    self.whole = false;
+                    self.inner = None;
+                }
             }
         }
 
+        /// Whether the frames were shown, all of them.
         fn show(
             surface: &mut softbuffer::Surface<Target, Target>,
             (w, h): (u32, u32),
             frames: &[&ca72_panel::Pixmap],
-        ) {
+            damage: Option<&[[i32; 4]]>,
+        ) -> bool {
             let Ok(mut buffer) = surface.buffer_mut() else {
-                return;
+                return false;
             };
             let (w, h) = (w as usize, h as usize);
             if buffer.len() < w * h {
-                return;
+                return false;
             }
-            fill(&mut buffer[..], (w, h), frames);
-            let _ = buffer.present();
+            // Where the buffer still holds the frame shown last (age 1: Windows' and X11's, a
+            // buffer kept), only the places changed are turned and sent; else (macOS's, a new
+            // buffer each frame) the whole frame (decisions.md R-PRESENT).
+            match damage.filter(|_| buffer.age() == 1) {
+                Some(damage) => {
+                    let rects: Vec<softbuffer::Rect> =
+                        fill_places(&mut buffer[..], (w, h), frames, damage)
+                            .into_iter()
+                            .filter_map(|[x0, y0, x1, y1]| {
+                                Some(softbuffer::Rect {
+                                    x: x0 as u32,
+                                    y: y0 as u32,
+                                    width: NonZeroU32::new((x1 - x0) as u32)?,
+                                    height: NonZeroU32::new((y1 - y0) as u32)?,
+                                })
+                            })
+                            .collect();
+                    buffer.present_with_damage(&rects).is_ok()
+                }
+                None => {
+                    fill(&mut buffer[..], (w, h), frames);
+                    buffer.present().is_ok()
+                }
+            }
         }
     }
 }
@@ -3093,7 +3211,9 @@ mod tests {
     /// time at sixty frames a second, a Retina window (3440 pixels across): four POLY voices
     /// with DOUBLE playing chords at HI, then ULTRA, then LO, falling quiet, then HI again with
     /// DETUNE swept from none to all of it. Each frame drawn and turned into the screen's
-    /// pixels as `present` does, timed; every other frame's QUALITY column and STEREO display
+    /// pixels as `present` does, timed: the whole frame, as on macOS, and the places changed
+    /// alone, as on Windows and X11 (decisions.md R-PRESENT), the screen so made the same as
+    /// the whole frame's at every frame. Every other frame's QUALITY column and STEREO display
     /// kept, written to `$CA72_RUN`, the folder, as `frames.rgba` (`size.txt`: its width and
     /// height), with the times in `times.txt` (`-- --ignored --nocapture`).
     #[test]
@@ -3149,7 +3269,7 @@ mod tests {
         let (column, stereo) = (px(column), px(stereo));
         let (fw, fh) = (column.2 + 12 + stereo.2, column.3.max(stereo.3));
         let mut frames: Vec<u8> = Vec::new();
-        let mut screen: Vec<u32> = Vec::new();
+        let (mut screen, mut kept): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
         // A voice's level, `t` seconds into a chord it plays: a quick attack, a decay to its
         // sustain, held 1.6 beats, released.
         let beat = 60.0 / 112.0;
@@ -3165,8 +3285,22 @@ mod tests {
             }
         };
         let t0 = Instant::now();
+        // The time this thread has worked, ms: on Linux its own, the computer's other work left
+        // out (with builds running alongside, the wall's clock varied a third from run to run);
+        // elsewhere the wall's.
+        let cpu = || -> f64 {
+            #[cfg(target_os = "linux")]
+            if let Some(ns) = std::fs::read_to_string("/proc/thread-self/schedstat")
+                .ok()
+                .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
+            {
+                return ns / 1e6;
+            }
+            t0.elapsed().as_secs_f64() * 1000.0
+        };
         let ticks = 24 * 60;
-        let mut times = Vec::new();
+        // Each frame's work: drawn and turned whole, drawn and turned in places.
+        let (mut whole, mut places) = (Vec::new(), Vec::new());
         let mut presented = 0;
         for k in 0..ticks {
             let at = t0 + Duration::from_micros(k * 16_667);
@@ -3212,16 +3346,33 @@ mod tests {
             let output = (levels.iter().map(|&l| f64::from(l)).sum::<f64>() * 0.7).min(1.0);
             meters.publish(0.0, (0.5, 0.0), mask);
             meters.publish_levels(&levels, output as f32);
-            let started = Instant::now();
+            let started = cpu();
             let changed = e.draw();
+            let drawn = cpu() - started;
+            let (mut turned, mut in_places) = (0.0, 0.0);
             if changed {
                 let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
-                screen.resize((f.width() * f.height()) as usize, 0);
+                let size = (f.width() as usize, f.height() as usize);
                 // (As `present` turns it: the window's own code.)
-                window::fill(&mut screen, (f.width() as usize, f.height() as usize), &[f]);
+                let fresh = screen.len() != size.0 * size.1;
+                screen.resize(size.0 * size.1, 0);
+                kept.resize(size.0 * size.1, 0);
+                let started = cpu();
+                window::fill(&mut screen, size, &[f]);
+                turned = cpu() - started;
+                let started = cpu();
+                match e.damage.as_deref().filter(|_| !fresh) {
+                    Some(d) => {
+                        window::fill_places(&mut kept, size, &[f], d);
+                    }
+                    None => window::fill(&mut kept, size, &[f]),
+                }
+                in_places = cpu() - started;
+                assert!(kept == screen, "the screen turned in places at frame {k}");
                 presented += 1;
             }
-            times.push(started.elapsed().as_secs_f64() * 1000.0);
+            whole.push(drawn + turned);
+            places.push(drawn + in_places);
             if k % 2 == 0 {
                 let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
                 let mut img = vec![0u8; fw * fh * 4];
@@ -3237,14 +3388,21 @@ mod tests {
         }
         std::fs::write(out.join("frames.rgba"), &frames).unwrap();
         std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
-        let total: f64 = times.iter().sum();
-        let mean = total / times.len() as f64;
-        let mut sorted = times.clone();
-        sorted.sort_by(f64::total_cmp);
-        let p95 = sorted[sorted.len() * 95 / 100];
+        let said = |times: &[f64]| {
+            let total: f64 = times.iter().sum();
+            let mean = total / times.len() as f64;
+            let mut sorted = times.to_vec();
+            sorted.sort_by(f64::total_cmp);
+            let p95 = sorted[sorted.len() * 95 / 100];
+            format!(
+                "{total:.0} ms ({:.1} % of one core), {mean:.2} ms a frame on average, {p95:.2} at the 95th percentile",
+                total / 24_000.0 * 100.0
+            )
+        };
         let report = format!(
-            "{ticks} frames in 24 s: {presented} presented; the UI thread's work {total:.0} ms ({:.1} % of one core), {mean:.2} ms a frame on average, {p95:.2} at the 95th percentile\n",
-            total / 24_000.0 * 100.0
+            "{ticks} frames in 24 s: {presented} presented; the UI thread's work, each frame turned whole (macOS): {}; turned in the places changed (Windows, X11): {}\n",
+            said(&whole),
+            said(&places)
         );
         print!("{report}");
         std::fs::write(out.join("times.txt"), report).unwrap();
@@ -3874,22 +4032,42 @@ mod tests {
         assert!(!meters.watched());
     }
 
-    /// The window's frame put together again in the rows that changed is the frame put
+    /// The window's frame put together again in the places that changed is the frame put
     /// together whole: through the voices sounding (the strip's drops), the wheels taken from a
-    /// keyboard (the strip's left, the panel's layers) and the OVERLOAD lamp (the panel above).
+    /// keyboard (the strip's left, the panel's layers), the OVERLOAD lamp (the panel above) and
+    /// QUALITY's lamp lit by the synth's level at each tick of its clock (the panel's top
+    /// right); and the window's pixels turned in those places alone are its pixels turned whole.
     #[test]
-    fn the_frame_put_together_in_rows_is_the_frame_put_together_whole() {
+    fn the_frame_put_together_in_places_is_the_frame_put_together_whole() {
         let (mut e, _, _) = editing();
         assert!(e.draw());
+        let size = |f: &ca72_panel::Pixmap| (f.width() as usize, f.height() as usize);
+        let f = e.composed.as_ref().expect("a frame");
+        let mut screen = vec![0u32; size(f).0 * size(f).1];
+        window::fill(&mut screen, size(f), &[f]);
+        let mut places = 0;
         for i in 0..30u8 {
             let lamp = if i % 8 < 4 { 0.0 } else { 1.0 };
             let wheels = (0.5 + 0.05 * f32::from(i % 5), 0.1 * f32::from(i % 3));
             e.meters.publish(lamp, wheels, u32::from(i % 6 < 3));
-            e.draw();
+            let level = 0.2 + 0.1 * f32::from(i % 7);
+            e.meters.publish_levels(&[level; LEVELS], level);
+            e.motion_due = None;
+            if !e.draw() {
+                continue;
+            }
             let mut whole = None;
             compose(&mut whole, &e.renderer, e.strip.frame(), None, None);
             assert!(e.composed == whole, "frame {i}: not as put together whole");
+            let f = e.composed.as_ref().expect("a frame");
+            let mut all = vec![0u32; screen.len()];
+            window::fill(&mut all, size(f), &[f]);
+            let d = e.damage.as_deref().expect("where it changed");
+            places += d.len();
+            window::fill_places(&mut screen, size(f), &[f], d);
+            assert!(screen == all, "frame {i}: not as turned whole");
         }
+        assert!(places > 30, "{places} places changed");
     }
 
     /// The drawer's slide ends where it was going in the frame shown, though its last moving

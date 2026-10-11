@@ -18,7 +18,7 @@
 //!
 //! All of it from [`Opening`], which the editor moves on from the time and the synth's level.
 
-use crate::art::{COL, Layer, Sprite, TOP, ULTRA_AT};
+use crate::art::{COL, Layer, Light, Sprite, TOP, ULTRA_AT};
 use crate::skin::Part;
 use crate::svg::{N, Svg, put};
 
@@ -100,7 +100,7 @@ pub struct Opening {
 }
 
 /// Which lamp.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Lamp {
     Amber,
     Tesla,
@@ -132,6 +132,52 @@ impl Lamp {
             Lamp::Amber => ("#ff9628", ["#ffe2a0", "#ffaa3c", "#ff9628"], 0.05),
             Lamp::Tesla => ("#468cff", ["#d7e8ff", "#5a96ff", "#3c78ff"], TORUS.1),
         }
+    }
+}
+
+/// A lamp's light: its filament's flare in the lens, its halo just past the ring, its spill on
+/// the panel round it. Each drawn once a scale at its strongest, a picture the renderer keeps,
+/// and put in the opening with its strength as the picture's opacity, not drawn again at each
+/// tick of the clock as the synth plays (decisions.md R-PRESENT; the CA-74's measure).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Glow {
+    lamp: Lamp,
+    kind: GlowKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum GlowKind {
+    Flare,
+    Halo,
+    Spill,
+}
+
+impl Glow {
+    /// Its drawing at its strongest, about the opening's middle, at a lamp's full size.
+    pub fn svg(self) -> String {
+        self.drawn(1.0, 1.0)
+    }
+
+    /// Its drawing `k` (0 to 1) of its strength, `zoom` times its size (as it was drawn at
+    /// each tick before it was a picture).
+    pub(crate) fn drawn(self, zoom: f64, k: f64) -> String {
+        let mut s = Svg::default();
+        let colour = self.lamp.light().0;
+        match self.kind {
+            GlowKind::Flare => flare(&mut s, self.lamp, zoom, k),
+            GlowKind::Halo => halo(&mut s, colour, k),
+            GlowKind::Spill => spill(&mut s, colour, k),
+        }
+        s.0
+    }
+}
+
+/// A lamp's light of `kind` in a layer, `k` (0 to 1) of its strength, `zoom` times its size.
+fn light(lamp: Lamp, kind: GlowKind, zoom: f64, k: f64) -> Light {
+    Light {
+        glow: Glow { lamp, kind },
+        zoom,
+        alpha: k.clamp(0.0, 1.0),
     }
 }
 
@@ -227,6 +273,7 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
     let body = Svg::default();
     let mut over = Svg::default();
     let mut sprites = Vec::new();
+    let mut lights = Vec::new();
     let p = match shown(o) {
         Shown::Hamster(p) | Shown::Lamp(_, p) => p,
     };
@@ -243,7 +290,9 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
         ));
         match shown(o) {
             Shown::Hamster(_) => hamster(o, &l, &mut back, &mut over, &mut sprites),
-            Shown::Lamp(lamp, _) => lamp_worn(lamp, o, p, &l, &mut back, &mut over, &mut sprites),
+            Shown::Lamp(lamp, _) => {
+                lights = lamp_worn(lamp, o, p, &l, &mut back, &mut over, &mut sprites);
+            }
         }
     }
     ring_shade(&mut back);
@@ -255,11 +304,11 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
     if let Shown::Lamp(lamp, _) = shown(o) {
         let lit = driven(l.glow, o.level);
         if lit > 0.0 {
-            halo(&mut over, lamp.light().0, lit);
+            lights.push(light(lamp, GlowKind::Halo, 1.0, lit));
         }
         let k = l.glow * o.level;
         if k > 0.0 {
-            spill(&mut over, "u-spill", lamp.light().0, k);
+            lights.push(light(lamp, GlowKind::Spill, 1.0, k));
         }
     }
     [
@@ -276,6 +325,7 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
             bounds: BOUNDS,
             body: body.0,
             sprites,
+            lights,
             over: over.0,
             ..Layer::default()
         },
@@ -283,7 +333,7 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
 }
 
 /// A lamp come `p` of the way (as `l`), lit as the synth plays; the Tesla lamp's lightning on
-/// it.
+/// it: its light in the lens and the lightning's on the panel, those drawn after it.
 fn lamp_worn(
     lamp: Lamp,
     o: &Opening,
@@ -292,7 +342,8 @@ fn lamp_worn(
     body: &mut Svg,
     over: &mut Svg,
     sprites: &mut Vec<Sprite>,
-) {
+) -> Vec<Light> {
+    let mut lights = Vec::new();
     let sc = DEEP + (1.0 - DEEP) * l.rise;
     let glow = driven(l.glow, o.level);
     if l.rise > 0.0 {
@@ -318,15 +369,19 @@ fn lamp_worn(
     }
     let k = l.glow * o.level;
     if k > 0.0 {
-        flare(over, lamp, sc, k);
+        lights.push(light(lamp, GlowKind::Flare, sc, k));
     }
-    // The lightning, once the coil stands lit above the ring.
+    // The lightning, once the coil stands lit above the ring; the lamp's light round it
+    // flickering with it, half the streaks' strength at most.
     if lamp == Lamp::Tesla && l.rise > 0.5 {
         let power = smooth(LIFT.0 + 0.3 * (LIFT.1 - LIFT.0), LIFT.1, p) * o.level;
-        if power > 0.0 {
-            streaks(over, sc, o.spark, power);
+        if power > 0.0
+            && let Some(flash) = streaks(over, sc, o.spark, power)
+        {
+            lights.push(light(Lamp::Tesla, GlowKind::Spill, 1.0, 0.5 * flash));
         }
     }
+    lights
 }
 
 /// The filament flaring with `k` (0 to 1) inside the lens: a hot core round it fading out.
@@ -347,12 +402,12 @@ fn flare(s: &mut Svg, lamp: Lamp, sc: f64, k: f64) {
 /// A lamp's light spreading onto the panel round it, `k` (0 to 1) of its most, at the synth's
 /// loudest (the owner: "just add a warm glow to it"): from the ring out, the lamp itself clear
 /// of it (its lens lit by its own light).
-fn spill(s: &mut Svg, id: &str, colour: &str, k: f64) {
+fn spill(s: &mut Svg, colour: &str, k: f64) {
     let r = BOUNDS[2] - 2.0;
     let from = APERTURE + RING;
     put!(
         s,
-        "<defs><radialGradient id='{id}' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='{}'><stop offset='{}' stop-color='{colour}' stop-opacity='0'/><stop offset='{}' stop-color='{colour}' stop-opacity='{}'/><stop offset='1' stop-color='{colour}' stop-opacity='0'/></radialGradient></defs><circle r='{}' fill='url(#{id})'/>",
+        "<defs><radialGradient id='u-spill' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='{}'><stop offset='{}' stop-color='{colour}' stop-opacity='0'/><stop offset='{}' stop-color='{colour}' stop-opacity='{}'/><stop offset='1' stop-color='{colour}' stop-opacity='0'/></radialGradient></defs><circle r='{}' fill='url(#u-spill)'/>",
         N(r),
         N((from - 0.5) / r),
         N(from / r),
@@ -534,7 +589,7 @@ fn path(points: &[(f64, f64)]) -> String {
 /// its jagged shape struck again every [`JAG_S`]. Drawn as light: a wide faint blue glow, a
 /// paler stroke, a white-blue core, a bright spot where it touches the glass; the toroid
 /// brighter and the lamp's light round it flickering with them.
-fn streaks(s: &mut Svg, sc: f64, t: f64, power: f64) {
+fn streaks(s: &mut Svg, sc: f64, t: f64, power: f64) -> Option<f64> {
     let r = LAMP_R * sc;
     let (cx, cy) = (TORUS.0 * r, TORUS.1 * r);
     let jag = (t / JAG_S).floor() as i64;
@@ -594,7 +649,7 @@ fn streaks(s: &mut Svg, sc: f64, t: f64, power: f64) {
         ));
     }
     if drawn.is_empty() {
-        return;
+        return None;
     }
     put!(
         s,
@@ -643,12 +698,11 @@ fn streaks(s: &mut Svg, sc: f64, t: f64, power: f64) {
         N(TORUS.2 * r * 1.3),
         N(0.12 * power * (drawn.len() as f64 / 3.0).min(1.0))
     );
-    // The lamp's light round it flickering with them.
-    let flash = drawn.iter().map(|d| d.3).sum::<f64>() / f64::from(SLOTS);
-    // (A gradient of its own: one element of an id is kept in a document, so with the steady
-    // spill's id the panel's glow was painted twice at its full strength, on and off with the
-    // streaks, rather than the steady glow and half a flash: the CA-74's review.)
-    spill(s, "u-spill-flash", Lamp::Tesla.light().0, 0.5 * flash);
+    // How strong they are together, for the lamp's light round it flickering with them. (Its
+    // own light over the steady one, a picture, no gradient sharing the steady spill's id: in
+    // one document the panel's glow had been painted twice at its full strength, on and off
+    // with the streaks, rather than the steady glow and half a flash: the CA-74's review.)
+    Some(drawn.iter().map(|d| d.3).sum::<f64>() / f64::from(SLOTS))
 }
 
 // ---- The opening.
@@ -962,6 +1016,7 @@ mod tests {
             let [back, front] = ultra_worn(&o);
             assert!(back.body.is_empty() && back.over.is_empty() && back.sprites.is_empty());
             assert!(front.body.is_empty() && front.over.is_empty() && front.sprites.is_empty());
+            assert!(back.lights.is_empty() && front.lights.is_empty());
             assert!(ultra(&o).body.is_empty());
         }
         // Its layer: the shutter alone at first; the lamp's pictures once it opens, the floor
@@ -990,7 +1045,7 @@ mod tests {
     /// No layer of the opening repeats an id (one element of an id is kept in a document: the
     /// Tesla lamp's flash spill had reused the steady spill's, the glow painted twice and
     /// flickering: the CA-74's review), in any setting, lit and sparking or not; and the Tesla
-    /// lamp sparking has its steady spill and its flash's.
+    /// lamp sparking has its steady spill and its flash's, two lights.
     #[test]
     fn no_layer_of_the_opening_repeats_an_id() {
         let ids = |doc: &str| -> Vec<String> {
@@ -1020,9 +1075,16 @@ mod tests {
                             seen.dedup();
                             assert_eq!(seen.len(), n, "a repeated id: {:?}", ids(doc));
                         }
-                        if l.over.contains("u-spill-flash") {
-                            assert!(l.over.contains("id='u-spill'"));
+                        let spills = l
+                            .lights
+                            .iter()
+                            .filter(|g| g.glow.kind == GlowKind::Spill)
+                            .count();
+                        if l.over.contains("t-glass") {
+                            assert_eq!(spills, 2, "the steady spill and the flash's");
                             sparking = true;
+                        } else {
+                            assert!(spills <= 1);
                         }
                     }
                 }
@@ -1047,8 +1109,16 @@ mod tests {
             front
         };
         let (rest, loud) = (at(0.0), at(1.0));
-        assert!(!rest.over.contains("u-flare") && !rest.over.contains("u-spill"));
-        assert!(loud.over.contains("u-flare") && loud.over.contains("u-spill"));
+        let kinds = |l: &Layer| l.lights.iter().map(|g| g.glow.kind).collect::<Vec<_>>();
+        assert_eq!(kinds(&rest), [GlowKind::Halo]);
+        assert_eq!(
+            kinds(&loud),
+            [GlowKind::Flare, GlowKind::Halo, GlowKind::Spill]
+        );
+        // (No drawing to parse in the lamp lit and playing: its pictures and lights alone.)
+        assert!(loud.body.is_empty() && loud.over.is_empty());
+        let halo = |l: &Layer| l.lights[usize::from(l.lights.len() > 1)].alpha;
+        assert!((halo(&rest) - IDLE).abs() < 1e-12 && (halo(&loud) - 1.0).abs() < 1e-12);
         let lit = |l: &Layer| {
             l.sprites
                 .iter()

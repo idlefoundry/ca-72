@@ -1276,8 +1276,10 @@ pub struct Layer {
     pub bounds: [f64; 4],
     pub body: String,
     /// The worn skin's pictures drawn over the body, each about the origin (decisions.md
-    /// R-LOOK), and SVG over them (the lamp's light on them, which does not turn).
+    /// R-LOOK), lights over them, and SVG over those (the lamp's light on them, which does not
+    /// turn).
     pub sprites: Vec<Sprite>,
+    pub lights: Vec<Light>,
     pub over: String,
     /// A wheel the worn skin's renderer draws, and a rocker's paddle it lights by its shape
     /// (none in the drawn skin).
@@ -1296,6 +1298,17 @@ pub struct Sprite {
     pub at: (f64, f64),
     pub deg: f64,
     pub flip: (bool, bool),
+    pub zoom: f64,
+    pub alpha: f64,
+}
+
+/// A light drawn in a layer over its pictures: a picture of it made once a scale and kept
+/// (`crate::ultra::Glow`, a lamp's), drawn `zoom` times its size about the layer's origin and
+/// `alpha` opaque, its strength, rather than drawn afresh as it changes (decisions.md
+/// R-PRESENT).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Light {
+    pub glow: crate::ultra::Glow,
     pub zoom: f64,
     pub alpha: f64,
 }
