@@ -4348,5 +4348,25 @@ open with the owner's sets, was not touched.
   through `onKeyDown()`. Bitwig only finds a plug-in it has not seen at its start (it was relaunched
   once for the throwaway build).
 
+**In Ableton Live 12.4.15 beta (2026-10-11, 08:26), the owner:** "You can close my Mac Ableton
+sets. I don't care", then, offered a test in Live and a tidy of the test builds, "i want both".
+Live was quit (a TERM signal: the screen was locked, no dialog could be answered). Its log's start
+named only its default template, but on relaunch its crash recovery named the set open then,
+"Nige.als" (~/Documents/Ableton/Nige Project/, on disk unchanged since 2026-10-09 20:56): its
+recovery files were copied to ~/Documents/Ableton/"Live recovery backup 2026-10-11 (Nige)" with a
+README on restoring them, and the recovery declined. The build, **CA-72 TEST** (main at f60833a,
+the one test build from now on, replaced in place; A6, ULTRA to ULTRA3, PRIORITY and PRIORITY2
+moved to the Trash; clap-validator, Steinberg's validator and pluginval at strictness 5 passed),
+VST3 (Live takes no CLAP), on a new set's MIDI track, the MOTU at 44.1 kHz as Live had it:
+- **The first click takes in Live:** after a click in Live's own window, one click on NOTE
+  PRIORITY moved it (LOW to HIGH). Bitwig's lost first click is Bitwig's way with its floating
+  plug-in windows, not every host's.
+- NOTE PRIORITY to LAST ("NOTE PRIORITY (LOW, LAST or HIGH): LAST"); RETRIGGER on; POLY lit;
+  VOICES dragged from 4, on 5 with the button down; DRIVE's readout "8.4" and Enter: 8.4; LEVEL
+  "-6_" and Escape: 0.0, the window open; FIND "lead": the six presets tagged so; the settings
+  key's menu (now LOOK and R-SEMITONES's FREQUENCY DIALS, each a group under its head), CLASSIC
+  drawing the panel as drawn and REALISTIC bringing it back, `settings.toml` following.
+- Live quit without saving the test set.
+
 Not tried: Cubase on macOS (not installed), Logic and the Audio Unit (this build has none), an
 Intel Mac.
