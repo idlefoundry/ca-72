@@ -342,6 +342,25 @@ impl<D: HasDisplayHandle, W: HasWindowHandle> SurfaceInterface<D, W> for CGImpl<
 }
 
 impl<D, W> CGImpl<D, W> {
+    /// Our layer's sublayers laid out from its top down, whatever the layers over it: Core
+    /// Animation flips the coordinates of a layer's sublayers once for each flipped layer from
+    /// the window's root (whose coordinates run up) down to that layer. Upstream flipped our
+    /// layer always, right in a view of AppKit's own; but a flipped view's layer is flipped too
+    /// (baseview's is: a plug-in editor's), and there the two flips undid each other, so that
+    /// the tiles came out in rows bottom to top. So our layer is flipped only where the layers
+    /// over it leave the coordinates running up (patched, `PATCHES.md`).
+    fn top_down(&self) {
+        let mut down = false;
+        let mut over = self.layer.superlayer();
+        while let Some(layer) = over {
+            down ^= layer.isGeometryFlipped();
+            over = layer.superlayer();
+        }
+        if self.layer.isGeometryFlipped() == down {
+            self.layer.setGeometryFlipped(!down);
+        }
+    }
+
     /// The tiles made again if the buffer's size or the layer's scale factor changed since they
     /// were made: whether they were (so that every tile needs its image).
     fn tile(&mut self) -> bool {
@@ -484,6 +503,13 @@ impl<D: HasDisplayHandle, W: HasWindowHandle> BufferInterface for BufferImpl<'_,
     /// layer one image of the whole buffer at each present, damage or not).
     fn present_with_damage(self, damage: &[Rect]) -> Result<(), SoftBufferError> {
         let imp = self.imp;
+        // The CALayer has a default action associated with a change in the layer contents, causing
+        // a quarter second fade transition to happen every time a new buffer is applied. This can
+        // be avoided by wrapping the operation in a transaction and disabling all actions (the
+        // tiles made, and our layer flipped, in it as well).
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        imp.top_down();
         let all = imp.tile();
         let meets = |(x, y, w, h): (usize, usize, usize, usize)| {
             all || damage.iter().any(|d| {
@@ -492,11 +518,6 @@ impl<D: HasDisplayHandle, W: HasWindowHandle> BufferInterface for BufferImpl<'_,
                 dx < x + w && x < dx + dw && dy < y + h && y < dy + dh
             })
         };
-        // The CALayer has a default action associated with a change in the layer contents, causing
-        // a quarter second fade transition to happen every time a new buffer is applied. This can
-        // be avoided by wrapping the operation in a transaction and disabling all actions.
-        CATransaction::begin();
-        CATransaction::setDisableActions(true);
         for tile in &imp.tiles {
             if !meets(tile.rect) {
                 continue;

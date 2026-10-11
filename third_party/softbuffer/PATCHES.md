@@ -61,13 +61,22 @@ R-COSTS):
      points at a scale factor of 1 or 2, so tiles meet without a seam), made again when the
      buffer's size or the layer's scale factor changes (`tile`), the layer masking to its
      bounds as an image larger than it was not drawn past them before;
+   - the tiles are laid out from the layer's top down whatever the layers over it
+     (`top_down`): Core Animation flips a layer's sublayers' coordinates once for each flipped
+     layer from the window's root down to it, and upstream flipped its layer always, right in a
+     view of AppKit's own but undone in a flipped view's (baseview's, every plug-in editor's),
+     where the tiles came out in rows bottom to top (found in GarageBand, the CA-72's release
+     checks). So the layer is flipped only where the layers over it leave the coordinates
+     running up, looked at again at each present;
    - `present_with_damage` gives each tile the damage touches a new image, of a copy of its
      pixels (Core Animation may read an image after the buffer has changed again); every tile
      when the tiles have just been made. `present` is `present_with_damage` with all of it.
 
    The CA-72's test `crates/ca72-plugin/tests/softbuffer_copies.rs` also shows a frame in
-   tiles, presents a change of one pixel and finds a new image in that pixel's tile alone, the
-   buffer kept (`age` 1, the frame in it still), and makes the tiles again on a resize.
+   tiles, in a view of AppKit's own and in a flipped one, and finds it drawn by AppKit
+   (`cacheDisplayInRect:`) where it is, every pixel (in the flipped view it fails without
+   `top_down`); presents a change of one pixel and finds a new image in that pixel's tile alone,
+   the buffer kept (`age` 1, the frame in it still); and makes the tiles again on a resize.
 
 To update: if a newer release no longer registers a class under a fixed name, take it from
 crates.io and remove this copy. Otherwise copy the same files from it, remove the same tables,

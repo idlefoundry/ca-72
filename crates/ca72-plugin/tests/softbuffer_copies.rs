@@ -34,7 +34,7 @@ fn main() {
 mod macos {
     use std::ffi::c_void;
     use std::num::NonZeroU32;
-    use std::ptr::{self, NonNull};
+    use std::ptr::NonNull;
 
     use objc2::rc::{Allocated, Retained};
     use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, NSObject};
@@ -45,56 +45,42 @@ mod macos {
     #[link(name = "AppKit", kind = "framework")]
     unsafe extern "C" {}
 
-    #[link(name = "CoreGraphics", kind = "framework")]
-    unsafe extern "C" {
-        fn CGColorSpaceCreateDeviceRGB() -> *mut c_void;
-        fn CGColorSpaceRelease(space: *mut c_void);
-        fn CGBitmapContextCreate(
-            data: *mut c_void,
-            width: usize,
-            height: usize,
-            bits_per_component: usize,
-            bytes_per_row: usize,
-            space: *mut c_void,
-            info: u32,
-        ) -> *mut c_void;
-        fn CGBitmapContextGetData(context: *mut c_void) -> *mut c_void;
-        fn CGContextRelease(context: *mut c_void);
-        fn CGContextTranslateCTM(context: *mut c_void, tx: f64, ty: f64);
-        fn CGContextScaleCTM(context: *mut c_void, sx: f64, sy: f64);
-    }
-
-    /// A Core Graphics context, as `-[CALayer renderInContext:]` takes it.
-    #[repr(transparent)]
-    struct Context(*mut c_void);
-
-    // SAFETY: a pointer to a `CGContext`, as CALayer's methods declare it.
-    unsafe impl objc2::encode::Encode for Context {
-        const ENCODING: objc2::encode::Encoding =
-            objc2::encode::Encoding::Pointer(&objc2::encode::Encoding::Struct("CGContext", &[]));
-    }
-
-    /// `layer` as Core Animation draws it, `w` by `h` pixels from its top left corner at `k`
-    /// pixels a point: each pixel as softbuffer's (0RGB, the highest byte left out).
-    fn drawn(layer: &AnyObject, w: usize, h: usize, k: f64) -> Vec<u32> {
-        // SAFETY: a bitmap context of our own, released here; a CALayer drawn in it.
+    /// `view` as AppKit draws it for a window (`-cacheDisplayInRect:toBitmapImageRep:`, which
+    /// knows its view's flip: softbuffer's layer drawn alone by Core Animation missed a flipped
+    /// view's flip over it, and in baseview's view, the editor's, the tiles came out in rows
+    /// bottom to top), `w` by `h` pixels from its top left corner: each pixel as softbuffer's
+    /// (0RGB).
+    fn drawn(view: &View, w: usize, h: usize) -> Vec<u32> {
+        // SAFETY: NSView's and NSBitmapImageRep's methods, on the main thread; the bitmap's
+        // pixels read inside its size.
         unsafe {
-            let space = CGColorSpaceCreateDeviceRGB();
-            // (0RGB in a 32-bit little-endian word: softbuffer's pixels, its images' format.)
-            let context =
-                CGBitmapContextCreate(ptr::null_mut(), w, h, 8, w * 4, space, 6 | 2 << 12);
-            CGColorSpaceRelease(space);
-            assert!(!context.is_null());
-            CGContextTranslateCTM(context, 0.0, h as f64);
-            CGContextScaleCTM(context, k, -k);
-            let _: () = msg_send![layer, renderInContext: Context(context)];
-            let data = CGBitmapContextGetData(context).cast::<u32>();
-            let pixels = std::slice::from_raw_parts(data, w * h)
-                .iter()
-                .map(|p| p & 0x00ff_ffff)
-                .collect();
-            CGContextRelease(context);
-            pixels
+            let bounds: NSRect = msg_send![&*view.0, bounds];
+            let rep: Retained<AnyObject> =
+                msg_send![&*view.0, bitmapImageRepForCachingDisplayInRect: bounds];
+            let _: () = msg_send![&*view.0, cacheDisplayInRect: bounds, toBitmapImageRep: &*rep];
+            let (pw, ph): (isize, isize) =
+                (msg_send![&*rep, pixelsWide], msg_send![&*rep, pixelsHigh]);
+            let row: isize = msg_send![&*rep, bytesPerRow];
+            let spp: isize = msg_send![&*rep, samplesPerPixel];
+            let format: usize = msg_send![&*rep, bitmapFormat];
+            let data: *const u8 = msg_send![&*rep, bitmapData];
+            assert!(pw as usize >= w && ph as usize >= h, "{pw} by {ph}");
+            // (Its alpha first or last: NSBitmapFormatAlphaFirst is 1.)
+            let first = format & 1 != 0;
+            let mut out = Vec::with_capacity(w * h);
+            for y in 0..h {
+                for x in 0..w {
+                    let p = data.add(y * row as usize + x * spp as usize);
+                    let at = |i: usize| u32::from(*p.add(i));
+                    let (r, g, b) = if first {
+                        (at(1), at(2), at(3))
+                    } else {
+                        (at(0), at(1), at(2))
+                    };
+                    out.push(r << 16 | g << 8 | b);
+                }
+            }
+            out
         }
     }
 
@@ -103,7 +89,32 @@ mod macos {
 
     impl View {
         fn new(w: f64, h: f64) -> Self {
-            let class = AnyClass::get(c"NSView").unwrap();
+            Self::of(AnyClass::get(c"NSView").unwrap(), w, h)
+        }
+
+        /// A view whose coordinates run down from its top, as baseview's (the editor's) do: its
+        /// layer's geometry flipped by AppKit.
+        fn flipped(w: f64, h: f64) -> Self {
+            extern "C-unwind" fn yes(_: &NSObject, _: objc2::runtime::Sel) -> Bool {
+                Bool::YES
+            }
+            let class = AnyClass::get(c"CA72TestFlippedView").unwrap_or_else(|| {
+                let mut b =
+                    ClassBuilder::new(c"CA72TestFlippedView", AnyClass::get(c"NSView").unwrap())
+                        .unwrap();
+                // SAFETY: `-isFlipped`'s signature, which the method overrides.
+                unsafe {
+                    b.add_method(
+                        objc2::sel!(isFlipped),
+                        yes as extern "C-unwind" fn(_, _) -> _,
+                    );
+                }
+                b.register()
+            });
+            Self::of(class, w, h)
+        }
+
+        fn of(class: &AnyClass, w: f64, h: f64) -> Self {
             let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, h));
             // SAFETY: `+alloc` and `-initWithFrame:` make an NSView, on the main thread.
             let view: Retained<AnyObject> = unsafe {
@@ -261,9 +272,20 @@ mod macos {
     }
 
     pub fn a_frame_is_shown_in_tiles_and_damage_changes_only_its_own() {
+        for flipped in [false, true] {
+            shown_in_tiles(flipped);
+        }
+    }
+
+    /// In a view whose coordinates run up (AppKit's own) or down (baseview's, flipped).
+    fn shown_in_tiles(flipped: bool) {
         // (Tiles of 256 pixels, as many points as the screen's scale factor gives: 128 on a
         // Retina screen's.)
-        let view = View::new(600.0, 300.0);
+        let view = if flipped {
+            View::flipped(600.0, 300.0)
+        } else {
+            View::new(600.0, 300.0)
+        };
         let (_context, mut surface) = shown(&view, 600, 300);
         let layer = &view.sublayers()[0];
         // SAFETY: a CALayer's scale factor.
@@ -278,21 +300,43 @@ mod macos {
         let at = |(_, f): &(*const AnyObject, NSRect)| (f.origin.x, f.origin.y, f.size.width);
         assert_eq!(at(&before[0]), (0.0, 0.0, 256.0 / k));
         assert_eq!(at(&before[5]), (512.0 / k, 256.0 / k, 88.0 / k));
+        let at = if flipped {
+            "in a flipped view"
+        } else {
+            "in a view"
+        };
         // The buffer kept: the frame shown, in it still.
         let mut buffer = surface.buffer_mut().unwrap();
         assert_eq!(buffer.age(), 1);
         assert!(buffer.iter().all(|&p| p == 0x003b_2213));
-        // A frame of its own colour at every pixel, shown: as Core Animation draws the tiles,
-        // every pixel where it is (none upside down, none moved, no seam).
-        let pattern = |x: usize, y: usize| ((x as u32) << 12 | y as u32) & 0x00ff_ffff;
+        // A frame shaded across and down, shown: as AppKit draws the view, every pixel where it
+        // is (none upside down, none moved, no seam), within the colours' conversion to the
+        // screen's (a few dozen levels at the most; a pixel misplaced by a row of tiles is off
+        // by a hundred or more).
+        let pattern =
+            |x: usize, y: usize| ((x * 255 / 599) << 16 | (y * 255 / 299) << 8 | 64) as u32;
+        let off = |shown: &[u32], frame: &[u32]| {
+            let apart = |a: u32, b: u32| {
+                (0..3)
+                    .map(|i| ((a >> (8 * i)) & 255).abs_diff((b >> (8 * i)) & 255))
+                    .max()
+                    .unwrap_or(0)
+            };
+            shown
+                .iter()
+                .zip(frame)
+                .filter(|&(&a, &b)| apart(a, b) > 48)
+                .count()
+        };
         for (i, p) in buffer.iter_mut().enumerate() {
             *p = pattern(i % 600, i / 600);
         }
         let frame: Vec<u32> = buffer.to_vec();
         buffer.present().unwrap();
+        let n = off(&drawn(&view, 600, 300), &frame);
         assert!(
-            drawn(layer, 600, 300, k) == frame,
-            "the tiles drawn not as the frame"
+            n == 0,
+            "{at}: the tiles shown not as the frame ({n} pixels)"
         );
         let before = images();
         // A change in the middle tile of the top row alone: its image new, the others kept,
@@ -312,9 +356,10 @@ mod macos {
         for (i, (b, a)) in before.iter().zip(&after).enumerate() {
             assert_eq!(b.0 != a.0, i == 1, "tile {i}: changed {}", b.0 != a.0);
         }
+        let n = off(&drawn(&view, 600, 300), &frame);
         assert!(
-            drawn(layer, 600, 300, k) == frame,
-            "the change drawn not as the frame"
+            n == 0,
+            "{at}: the change shown not as the frame ({n} pixels)"
         );
         // Resized: the buffer not kept; tiles made again for the new size, every one shown.
         surface

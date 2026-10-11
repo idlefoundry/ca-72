@@ -4590,3 +4590,67 @@ plug-in's tests, 342 passed, 44 ignored; rustfmt; clippy with `-D warnings`; cli
 **Not done:** the editor in a host on macOS with the tiles, by eye (the Mac was in use);
 Windows not tried again (nothing of its own changed but the drawing). Left: pictures that turn
 each frame (the hamster's wheel, a knob dragged) are resampled each frame, as they must be.
+
+## R-CHECKS. The checks before a release, on the three computers (2026-10-11)
+
+**The owner, 2026-10-11:** "are there any more tests you need to run before release? If so, run
+them now and fix any issues. You have access to all 3 computers."
+
+**What was run.** CI's job by hand on each computer, from a clean export of main (9c01641) in a
+target folder of its own (main has not been on GitHub since 0.1.0, so CI had not run): the
+bundles (universal on macOS, with the Audio Unit), the installer (`scripts/package.sh`; macOS
+unsigned), the notices' check (Linux), clippy over the workspace with every feature, the
+standalone, every test (Linux with ngspice 47 required), and `scripts/validate.sh` (its editor
+tests included: Linux on XWayland, macOS in the desktop session; Windows' pluginval run there
+separately). Then the editor in hosts, R-PRESENT's and R-COSTS's ways of drawing in each:
+REAPER 7 (VST3 and CLAP) and Cubase 15 (VST3) on Windows; GarageBand 10.4 (Audio Unit) and
+Bitwig 5.2 (CLAP) on macOS; REAPER 7 (VST3) on Linux. Each host with a renamed build (CA-72
+TEST, or CA-72 PRIORITY in the Windows harness), the owner's installed CA-72 not touched; Live,
+open with the owner's set, was left alone.
+
+**Found and fixed:**
+- **macOS: the window drawn in rows bottom to top** (GarageBand: the strip and the rail above
+  the panel). R-COSTS's tiles sit in softbuffer's layer, which upstream always flips; in a
+  flipped view's layer (baseview's, every plug-in editor's) the two flips undid each other.
+  The layer is now flipped only where the layers over it leave the coordinates running up
+  (softbuffer's PATCHES.md, change 2). R-COSTS's test drew softbuffer's layer alone, in a view
+  of AppKit's own, which hid it: it now draws the view as AppKit does, a flipped one too (and
+  fails without the fix). Seen right in GarageBand and Bitwig afterwards.
+- **Windows: a press with no move of the pointer before it was taken where the pointer had
+  last been** (Cubase: the harness's clicks on POLY, QUALITY and CUTOFF did nothing, the next
+  did). Change 4 had told the handler the press's place on macOS alone, taking Windows to send
+  a move first; it does not always. baseview's PATCHES.md change 5 does the same on Windows;
+  a test presses POLY with no move before it (and fails without it). In Cubase afterwards each
+  first click took.
+- **The Windows editor's own window tests had not built since the A6 drawer** (they asked for
+  the drawer's growing the window, gone; clippy and the tests failed on Windows). Brought to
+  the drawer dropping over the strip; and one more: the synth played, a knob turned, the drawer
+  opened and shut, then every pixel of the window as when Windows has it all repainted
+  (it fails when a place is left out of a present).
+- **The notices' check failed** (plugin-kit-materials, GPL, ships no licence file): the look's
+  branch had left the kit's crates out of the notices, Idle Foundry's own code under the same
+  licence, as the CA-74's do (8da3aea), but that commit never reached main. Its change taken
+  over, the notices made again.
+
+**Passed (the final commit's runs are in the commit's message):** the Linux tests (398 then),
+the Windows tests in the desktop session (402, and the window tests at the final commit),
+clippy on all three, the standalone, the installers, the three validators on Linux and the
+Mac's VST3 (pluginval at strictness 10 with its editor tests, clap-validator, Steinberg's
+validator). In each host: the editor drawn whole and right, the synth played (REAPER; the
+drops and the lamp), QUALITY switched (the shutter, the lamps, the hamster), a knob dragged, the
+drawer, tips, ULTRA's note, typing into DRIVE's readout in Cubase; and once still, the window as
+drawn in places the same as the window drawn whole (REAPER both formats and Cubase: moved off
+the screen and back, Windows repainting it; GarageBand: closed and opened again).
+
+**Not done, or not passing, and why:**
+- auval and pluginval on the Audio Unit on this Mac: its registry of Audio Units lists none but
+  Apple's (not the owner's Youlean meter either), so neither finds the CA-72; restarting the
+  registrar did not help. GarageBand finds it and passed. CI runs auval on a clean Mac.
+- Three of the circuit lab's tests (`vco_electrical` twice, `vco_osc23`) fail on this Mac with
+  Homebrew's ngspice 47, built with KLU: "Timestep too small" at the VCO's hold node. They pass
+  with Linux's ngspice 47 (and on Windows); CI's Mac has no ngspice and skips them. The lab is
+  not part of the plug-in; `.options sparse` did not help.
+- The synth played in the Mac's hosts: GarageBand took no MIDI from a script (its virtual input
+  or a new one), so the opening's animation there was QUALITY's, driven by the editor's clock.
+- Live (the owner's set open), Logic (not owned), an Intel Mac, a second screen of another
+  scale (the tiles are made again when the scale changes; not seen).

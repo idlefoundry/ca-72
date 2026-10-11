@@ -5896,14 +5896,15 @@ mod windows_window_tests {
     use std::path::PathBuf;
     use std::ptr::null_mut;
 
-    use ca72_panel::presets::{self as presets_ui, BarTarget};
+    use ca72_panel::presets::BarTarget;
     use nih_plug::context::PluginApi;
     use nih_plug::editor::ParentWindowHandle;
     use nih_plug::wrapper::state::PluginState;
     use winapi::shared::minwindef::{LPARAM, WPARAM};
     use winapi::shared::windef::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, HBRUSH, HWND, RECT};
     use winapi::um::wingdi::{
-        CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetPixel, SelectObject,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
+        DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDIBits, GetPixel, SRCCOPY, SelectObject,
     };
     use winapi::um::winuser::{
         COLOR_BTNFACE, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GW_CHILD,
@@ -5942,6 +5943,8 @@ mod windows_window_tests {
         resizes_editor: bool,
         repaints: bool,
         resizes: AtomicU32,
+        /// The gestures the editor began.
+        gestures: AtomicU32,
     }
 
     impl GuiContext for WindowHost {
@@ -5968,7 +5971,9 @@ mod windows_window_tests {
             }
             true
         }
-        unsafe fn raw_begin_set_parameter(&self, _param: ParamPtr) {}
+        unsafe fn raw_begin_set_parameter(&self, _param: ParamPtr) {
+            self.gestures.fetch_add(1, Ordering::Relaxed);
+        }
         unsafe fn raw_set_parameter_normalized(&self, _param: ParamPtr, _normalized: f32) {}
         unsafe fn raw_end_set_parameter(&self, _param: ParamPtr) {}
         fn get_state(&self) -> PluginState {
@@ -5982,6 +5987,8 @@ mod windows_window_tests {
         parent: HWND,
         editor: Arc<Ca72Editor>,
         host: Arc<WindowHost>,
+        /// What the audio reports, as the plug-in's processing publishes it.
+        meters: Arc<Meters>,
         handle: baseview::WindowHandle,
         _presets: tempfile::TempDir,
     }
@@ -6005,9 +6012,10 @@ mod windows_window_tests {
                 resizes_editor,
                 repaints: host_kind == HostWindow::Dialog,
                 resizes: AtomicU32::new(0),
+                gestures: AtomicU32::new(0),
             });
             let context: Arc<dyn GuiContext> = host.clone();
-            let grown = Arc::clone(&editor.grown);
+            let window_meters = Arc::clone(&meters);
             let dir: PathBuf = presets.path().to_path_buf();
             let handle = Window::open_parented(
                 &window::Parent(ParentWindowHandle::Win32Hwnd(parent.cast())),
@@ -6021,11 +6029,11 @@ mod windows_window_tests {
                         window,
                         context,
                         params,
-                        meters,
-                        grown,
+                        window_meters,
                         w,
                         1.0,
                         Library::at(dir),
+                        Arc::new(HostKeys::default()),
                     )
                 },
             );
@@ -6034,6 +6042,7 @@ mod windows_window_tests {
                 parent,
                 editor,
                 host,
+                meters,
                 handle,
                 _presets: presets,
             }
@@ -6176,6 +6185,43 @@ mod windows_window_tests {
         }
     }
 
+    /// Every pixel of the editor's window, as drawn there (as `pixels`, but all of them).
+    fn every_pixel(o: &Opened) -> Vec<u32> {
+        let (w, h) = o.size();
+        let mut out = vec![0u32; (w * h) as usize];
+        let window = o.window();
+        // SAFETY: the test's own window and its device context, released; a device context
+        // and a bitmap of this function's, deleted; `out` holds the bitmap's pixels.
+        unsafe {
+            let src = GetDC(window);
+            let dc = CreateCompatibleDC(src);
+            let bitmap = CreateCompatibleBitmap(src, w as i32, h as i32);
+            let old = SelectObject(dc, bitmap.cast());
+            BitBlt(dc, 0, 0, w as i32, h as i32, src, 0, 0, SRCCOPY);
+            SelectObject(dc, old);
+            let mut info: BITMAPINFO = std::mem::zeroed();
+            info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+            info.bmiHeader.biWidth = w as i32;
+            info.bmiHeader.biHeight = -(h as i32);
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            info.bmiHeader.biCompression = BI_RGB;
+            GetDIBits(
+                dc,
+                bitmap,
+                0,
+                h,
+                out.as_mut_ptr().cast(),
+                &mut info,
+                DIB_RGB_COLORS,
+            );
+            DeleteObject(bitmap.cast());
+            DeleteDC(dc);
+            ReleaseDC(window, src);
+        }
+        out
+    }
+
     fn colours(pixels: &[u32]) -> usize {
         let mut c = pixels.to_vec();
         c.sort_unstable();
@@ -6234,41 +6280,112 @@ mod windows_window_tests {
         o.size()
     }
 
+    /// The presets' drawer opens and shuts over the strip, the window as it is: the host never
+    /// asked to resize it (A6; the drawer had grown the window below the strip), where the host
+    /// grows its own window and where it resizes the editor's as well.
     fn the_drawer_opens_and_shuts(resizes_editor: bool) {
         let o = Opened::new(resizes_editor, HostWindow::OffScreen);
         let short = (MIN_WIDTH, height_for(MIN_WIDTH));
         assert_eq!(settled(&o, short), short);
         o.click_name();
-        let tall = (MIN_WIDTH, height_for(MIN_WIDTH) + drawer_height(MIN_WIDTH));
-        assert_eq!(
-            settled(&o, tall),
-            tall,
-            "the window grown for the drawer below the strip"
-        );
-        assert!(
-            o.host.resizes.load(Ordering::Relaxed) >= 1,
-            "the host asked"
-        );
+        pump(Duration::from_millis(600));
+        assert_eq!(o.size(), short, "the window as it was, the drawer open");
         o.click_name();
-        assert_eq!(
-            settled(&o, short),
-            short,
-            "the window back once the drawer has shut"
-        );
+        pump(Duration::from_millis(600));
+        assert_eq!(o.size(), short, "the window as it was, the drawer shut");
+        assert_eq!(o.host.resizes.load(Ordering::Relaxed), 0, "the host asked");
         o.close();
     }
 
-    /// The host grows its own window, the editor its own (the drawer took the keyboard as the
-    /// press was handled: its window's messages ran the resize early).
     #[test]
     fn the_drawer_opens_and_shuts_where_the_host_grows_its_own_window() {
         the_drawer_opens_and_shuts(false);
     }
 
-    /// The host resizes the editor's window as well, from within the editor's request.
     #[test]
     fn the_drawer_opens_and_shuts_where_the_host_resizes_the_editors_window() {
         the_drawer_opens_and_shuts(true);
+    }
+
+    /// A press with no move of the pointer before it (the pointer set where it is, or the
+    /// window come under it) lands where it is: POLY's tab, pressed so, is chosen. baseview gave
+    /// the press without its place, and the editor took it where the pointer had last been
+    /// seen (in Cubase, a first click that did nothing; baseview's PATCHES.md, change 5).
+    #[test]
+    fn a_press_with_no_move_before_it_lands_where_it_is() {
+        let o = Opened::new(false, HostWindow::OffScreen);
+        let (x, y) = o.at(strip::centre(StripTarget::Tab(strip::Bank::Mode, 1)));
+        let at = (((y.round() as u32) << 16) | (x.round() as u32 & 0xFFFF)) as LPARAM;
+        let w = o.window();
+        // SAFETY: messages posted to the test's own window.
+        unsafe { PostMessageW(w, WM_LBUTTONDOWN, MK_LBUTTON as WPARAM, at) };
+        pump(Duration::from_millis(60));
+        // SAFETY: as above.
+        unsafe { PostMessageW(w, WM_LBUTTONUP, 0, at) };
+        pump(Duration::from_millis(300));
+        assert!(
+            o.host.gestures.load(Ordering::Relaxed) >= 1,
+            "POLY's tab not chosen"
+        );
+        o.close();
+    }
+
+    /// The window shown where it changed (decisions.md R-PRESENT, R-COSTS: on Windows the
+    /// changed places alone are turned and sent to the window) is the window shown whole: the
+    /// synth playing (QUALITY's lamp following it, the voices' drops), a knob turned, the
+    /// presets' drawer sliding open and shut, then all of it still; every pixel of the window
+    /// then as when Windows has the editor repaint all of it.
+    #[test]
+    fn the_window_shown_in_places_is_the_window_shown_whole() {
+        let o = Opened::new(false, HostWindow::Dialog);
+        let play = |levels: f32, ms: u64| {
+            let until = Instant::now() + Duration::from_millis(ms);
+            let mut k = 0u32;
+            while Instant::now() < until {
+                let mut l = [0.0f32; LEVELS];
+                for (v, l) in l.iter_mut().enumerate().take(4) {
+                    *l = levels * (0.6 + 0.4 * ((k as usize + v) % 3) as f32 / 2.0);
+                }
+                let mask = if levels > 0.0 { 0b1111 } else { 0 };
+                o.meters.publish(0.0, (0.5, 0.0), mask);
+                o.meters.publish_levels(&l, levels);
+                pump(Duration::from_millis(30));
+                k += 1;
+            }
+        };
+        play(0.6, 1500);
+        let cutoff = &CONTROLS[ca72_panel::controls::index("cutoff").expect("a control")];
+        o.drag(o.at(cutoff.centre()), 50.0);
+        play(0.8, 800);
+        o.click_name();
+        play(0.5, 700);
+        o.click_name();
+        play(0.0, 300);
+        // Still: the same frame twice, a while apart.
+        let until = Instant::now() + Duration::from_secs(10);
+        let mut still = every_pixel(&o);
+        loop {
+            pump(Duration::from_millis(400));
+            let now = every_pixel(&o);
+            if now == still {
+                break;
+            }
+            assert!(Instant::now() < until, "the window never still");
+            still = now;
+        }
+        assert!(colours(&still) >= 100, "the panel shown");
+        // Windows asks for all of it again: the editor shows its whole frame.
+        let flags = RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN;
+        // SAFETY: the test's own windows.
+        unsafe { RedrawWindow(o.parent, null_mut(), null_mut(), flags) };
+        pump(Duration::from_millis(200));
+        let whole = every_pixel(&o);
+        let apart = still.iter().zip(&whole).filter(|(a, b)| a != b).count();
+        assert!(
+            apart == 0,
+            "{apart} pixels shown otherwise than in the whole frame"
+        );
+        o.close();
     }
 
     /// The grip asks for its width at the editor's next frame; the host resizes the editor's
@@ -6331,14 +6448,12 @@ mod windows_window_tests {
             "the panel again within 100 ms of the host's window captured ({} colours)",
             colours(&shown)
         );
-        // The drawer opened below the strip: the host repaints the editor's window from within
-        // the editor's request, its handler busy (the editor is told once it returns, R26), and
-        // the window, grown, again later.
+        // The drawer open over the strip, the window as it is: shown again as Windows repaints
+        // it.
         o.click_name();
-        let tall = (MIN_WIDTH, height_for(MIN_WIDTH) + drawer_height(MIN_WIDTH));
-        assert_eq!(settled(&o, tall), tall, "the window grown for the drawer");
-        pump(Duration::from_millis(300));
+        pump(Duration::from_millis(600));
         let drawer = pixels(&o);
+        assert!(drawer != panel, "the drawer shown");
         assert!(
             colours(&drawer) >= 100,
             "the panel and the drawer shown ({} colours)",
