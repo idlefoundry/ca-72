@@ -4097,3 +4097,44 @@ unimplemented (`kNotImplemented`), and keeps them for its own key commands; the 
 (FIND, a preset's name and tags) most likely fare the same there (not tried). Not yet fixed. A
 first try in REAPER found the presets' drawer open before the double click, which three fresh
 tries did not show again.
+
+## R-KEYS. The keys Cubase gives a VST3 plug-in's view reach the editor
+
+**The owner, 2026-10-10**, told that a value typed into a readout (R-TYPED) never reached the
+editor in Cubase, why, and the fix recommended: "absolutely, you should do that."
+
+**What was wrong.** Cubase keeps the keyboard from a VST3 plug-in's own window and gives the
+plug-in its keys through `IPlugView::onKeyDown()` and `onKeyUp()`, using those the plug-in does
+not take as its own key commands (Escape closes the plug-in's window). nih-plug's wrapper
+answered `kNotImplemented`, so no key reached the editor there: not a value typed into a
+readout, and not the drawer's fields (FIND, a preset's name and tags), which had never worked in
+Cubase. REAPER gives the editor's window its keys itself, which is why they worked there.
+
+**Agent decisions, 2026-10-10** (as recommended to the owner):
+- **In the wrapper** (`third_party/nih-plug/PATCHES.md`, change 13): `onKeyDown()` and `onKeyUp()`
+  offer the key to the editor (`Editor::on_host_key()`, `HostKey`: VST3's character, its
+  `VirtualKeyCodes` code and `KeyModifier` flags, down or up), and tell the host `kResultTrue` if
+  the editor took it, else `kResultFalse`, so a key the editor does not take stays the host's.
+- **In the editor:** the host's keys are taken only while the editor holds the keyboard (a value
+  typed, the drawer open, MIDI Learn's menu or learning), and then every one, so that none is
+  Cubase's key command meanwhile; otherwise all stay Cubase's. Those taken are read as the
+  window's own (VST3's codes named: Backspace, Enter, Escape, the arrows, Home, End, Delete, Tab;
+  else the character, the keypad's digits, point and minus sign too when the host gives none;
+  the modifiers) and acted on at the window's next frame, as its own keys are (`HostKeys`,
+  `host_key_event`). A host that gives a key both ways has it taken once: each kept 150 ms for
+  its twin from the other way (`KeyTwins`).
+
+**Evidence (2026-10-10, 46a9ec1):** the wrapper driven as Cubase drives it,
+`a_key_the_host_gives_the_view_reaches_the_editor` (not taken: `kResultFalse`; taken, down and
+up, with character, code and modifiers); `a_hosts_key_is_read_as_the_windows_own`,
+`the_hosts_keys_are_taken_only_while_the_editor_holds_the_keyboard`,
+`a_key_given_both_ways_is_taken_once`, `a_value_typed_with_the_hosts_keys`; the core's, panel's
+and plug-in's tests, 323 passed, 42 ignored; rustfmt; clippy with `-D warnings`. **Windows 11
+(the `prio` harness, real pointer and keys):** Cubase Pro 15.0.30: DRIVE's readout double-clicked
+lit the underscore, "8.4" showed "8.4_", Enter set DRIVE to 8.4 (the readout reading the value
+back through Cubase); LEVEL's "-6_" and Escape: back to 0.0, the plug-in's window still open; the
+drawer's FIND took "lead", the list narrowed to the six presets tagged so. REAPER 7.82: "11" into
+DRIVE's readout set 11 dB exactly (read back through its API), FIND took "lead": nothing doubled.
+Two runs in REAPER began with the drawer open: the harness moved the pointer and pressed at once,
+and the first press was taken where the real cursor had been (on the name, left there by a click
+in Cubase): not the editor's. Not tried: Cubase on macOS, other hosts' keyboards.
