@@ -4138,3 +4138,36 @@ DRIVE's readout set 11 dB exactly (read back through its API), FIND took "lead":
 Two runs in REAPER began with the drawer open: the harness moved the pointer and pressed at once,
 and the first press was taken where the real cursor had been (on the name, left there by a click
 in Cubase): not the editor's. Not tried: Cubase on macOS, other hosts' keyboards.
+
+### On macOS (2026-10-11), R-PRIORITY to R-KEYS
+
+**The owner, 2026-10-10:** "you should test that on a mac this evening", run at midnight by a
+timer. The Mac (macOS 27.0, Apple silicon, Retina) has no Cubase; Bitwig Studio 5.2.7 was the host,
+the build CA-72 PRIORITY2 (main at 5dc7b81, VST3 and CLAP), driven by real pointer and key events
+from a terminal window (screen capture and accessibility are allowed there, not over SSH). Live,
+open with the owner's sets, was not touched.
+
+- **Bitwig, the VST3 and the CLAP:** the editor drawn whole at the drawing's proportions;
+  NOTE PRIORITY to HIGH (its tip "NOTE PRIORITY (LOW, LAST or HIGH): HIGH") and to LAST; RETRIGGER
+  on ("RETRIGGER: On"); POLY lit; VOICES dragged from 4, the picture taken with the button down,
+  on 5 exactly; DRIVE's readout double-clicked, "8.4" typed, Enter: 8.4 (Bitwig's device panel
+  then read "Drive 8.4 dB"); LEVEL "-6_" and Escape: back to 0.0, the window open; FIND took
+  "lead" and the list narrowed to the six presets tagged so; the settings key's menu, CLASSIC drawing
+  the panel as drawn and REALISTIC bringing it back, `settings.toml` following.
+- **pluginval at strictness 10 with its editor tests** (Editor, Open editor whilst processing,
+  Editor Automation): SUCCESS. **R41's test** (`softbuffer_copies`, macOS only): passed.
+- **Found: a first click into the editor's window is lost while Bitwig's own window is in front.**
+  NOTE PRIORITY's and RETRIGGER's first click after a click in Bitwig's arrangement did nothing;
+  the next click on the same control took (pictures before, after the first and after the second).
+  baseview's view answers `acceptsFirstMouse:` with YES, so the plug-in's window takes the click
+  to come forward rather than passing it on; how Bitwig's floating plug-in window asks for that is
+  not yet known. Every click inside the editor's window once it is in front takes. Not yet fixed.
+- **A harness fault, not the editor's:** cliclick's `kp:return` and `kp:esc` were never delivered
+  to the window (a throwaway build that logged every key, its own and the host's, saw the digits
+  and nothing for them); the same keys pressed by their key codes (System Events) arrived as Enter
+  and Escape and did what they should. Bitwig gives a plug-in's window its keys itself: none came
+  through `onKeyDown()`. Bitwig only finds a plug-in it has not seen at its start (it was relaunched
+  once for the throwaway build).
+
+Not tried: Cubase on macOS (not installed), Logic and the Audio Unit (this build has none), an
+Intel Mac.
