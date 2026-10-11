@@ -442,10 +442,10 @@ osc1_range = 3
 osc1_waveform = 2
 osc2_range = 3
 osc2_waveform = 2
-osc2_frequency = 5.00004
+osc2_frequency = 4.525
 osc3_range = 3
 osc3_waveform = 2
-osc3_frequency = 7.000009
+osc3_frequency = 6.3875
 osc1_on = 1
 osc1_volume = 8
 ext_on = 0
@@ -1258,7 +1258,7 @@ spread = 0
 
 [[preset]]
 name = "Cycle of Fifths"
-description = "Ten UNISON voices of two sawtooths at 8', about six semitones apart, each note DOUBLE a semitone wide across the whole field, gliding."
+description = "Ten UNISON voices of two sawtooths at 8', about a fifth apart, each note DOUBLE a semitone wide across the whole field, gliding."
 tags = ["fat", "glide"]
 
 [preset.values]

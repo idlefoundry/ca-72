@@ -876,6 +876,27 @@ mod tests {
 
     /// The factory file ships inside the plug-in whole, its comments too: no trademark, no
     /// other product's or artist's name, no private record (decisions.md R1).
+    /// Stacked Fifths a fourth and a fifth over its root to the cent (the owner, 2026-10-10:
+    /// "Become a true 4th and 5th"), the presets' FREQUENCY values their pots' positions
+    /// (decisions.md R-SEMITONES); Cycle of Fifths' a fifth 16 cents wide, as its owner set it.
+    #[test]
+    fn stacked_fifths_is_a_fourth_and_a_fifth() {
+        use ca72::freq_dial::Pot;
+        let at = |name: &str, id: &str, pot: Pot| {
+            let s = factory().iter().find(|s| s.name == name).expect("a preset");
+            let (_, v) = s.values.iter().find(|(k, _)| k == id).expect("a value");
+            pot.semitones(crate::params::wiper_of(*v as f32))
+        };
+        let fourth = at("Stacked Fifths", "osc2_frequency", Pot::Two);
+        let fifth = at("Stacked Fifths", "osc3_frequency", Pot::Three);
+        assert!(
+            (fourth - 5.0).abs() < 1e-3 && (fifth - 7.0).abs() < 1e-3,
+            "{fourth} {fifth}"
+        );
+        let cycle = at("Cycle of Fifths", "osc2_frequency", Pot::Two);
+        assert!((cycle - 7.16).abs() < 0.01, "{cycle}");
+    }
+
     #[test]
     fn the_factory_file_names_no_trademark() {
         // Its words: the comments, the names, descriptions and tags (not the values).
