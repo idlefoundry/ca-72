@@ -4777,3 +4777,78 @@ typed into FIND (the list narrowed), Escape: the drawer shut, the window open; E
 nothing held: the FX window closed, as REAPER does. The same build of the commit before
 (without change 6): "-6" typed, Escape closed the FX window. Not tried: the VST3 in REAPER, and
 other hosts on Windows (the kit's K10 tried REAPER's VST3 and Cubase 15 with the CA-74).
+
+## R-SCATTER. SCATTER in MONO: the one voice at the next of VOICES's places at each attack
+
+**The owner, 2026-10-11:** "what if me made "scatter" an option in mono? So I would imagine
+something like a plucked voice, which we would want to be monophonic, um, would have scat- when
+scatter gets applied to it, it would jump around uh, seemingly at random um, to the listener,
+but there would actually be it would, it would actually be uh, a pattern according to how it was
+played, I assume. Uh, so the order that the notes were played, perhaps, uh, that they they move
+around um, up to as many voices as, as there are." Told that with POLY and UNISON off, WIDTH,
+INNER, VOICES and the placement moved nothing (the voice in the centre) though the switch reads
+SCATTER, so that no new control was needed; that it costs nothing, the one voice only placed
+anew; that CENTER's places, by the golden ratio, sound random and repeat, and EVEN's go from side
+to side; that the voice should move only at a new attack, a legato phrase staying where it began
+and RETRIGGER moving every key; that one voice moved, not a voice a note, keeps MONO (a new key
+takes the one voice's pitch at once, so nothing of the note before is left behind); that Wooden
+Mallet (MONO, WIDTH 60, which did nothing) and sessions saved with MONO and WIDTH up would start
+to scatter; and that moving over the places' 10 ms at an attack might smear it: "this sounds
+great. make it".
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **When the voice moves:** when its trigger contact closes, the start of an attack, which the
+  contours follow (`Voice::trigger_closed` and `Light::trigger_closed`: the keys' gate each model
+  already kept): a key pressed with none held, or with RETRIGGER a key coming down after the
+  contact's 13 ms open (R50). A key pressed while another is held (single triggering) moves
+  nothing, nor does a key let go. A key pressed again within the re-arming time after the last
+  was let go (about 12 ms) closes the contact and moves the voice, though the circuit may not
+  start its contours again.
+- **Where:** VOICES's places as POLY's voices 0, 1, 2 ... have them by the placement, WIDTH and
+  INNER (the kit's `voice_gains`), the next at each closing, round and round (`Playing::turn`);
+  the first attack at the first place (EVEN's left edge; CENTER's centre or, with INNER, the side
+  its turn falls on). VOICES lowered meanwhile takes the turn round its own count.
+- **Starting again:** All Notes Off and the host's reset (`Engine::release_all`) start the
+  pattern again at the first place, so that a part played from its start after either places its
+  notes alike each time.
+- **How fast:** the one voice's place glides with a time constant of a fifth of `TRIGGER_ON`
+  (`TURN_GLIDE`, 1.56 ms), its knobs' moves too, not the kit's 10 ms (`GLIDE`): its contours
+  start 7.8 ms after the contact closes (the light model's `TRIGGER_ON`, fitted to the
+  circuit's), by when the voice is within 0.7 % of its new place; with 10 ms it would be 46 %
+  short, and the attack heard sliding from the place before. What sounds in those 7.8 ms is the
+  note before's tail, already at the new key's pitch, and it moves with it.
+- **DOUBLE in MONO as before:** the one pair all of WIDTH's way out, whatever VOICES and the
+  placement; a twin let go as DOUBLE is switched off plays its tail out where it was, and the
+  voice glides to its first place.
+- **The strip:** in MONO without DOUBLE, VOICES's readout is lit, WIDTH's and INNER's where they
+  are up, and the placement's tab; WHERE THE VOICES SOUND shows VOICES's places with the one
+  voice lit at its last attack's (the engine's bit for it, `Engine::sounding_mask`). With DOUBLE
+  as before: VOICES and the placement unlit. The picture example's MONO strip likewise.
+- **No new parameter, and nothing kept for what was saved before:** a session or preset with
+  POLY, UNISON and DOUBLE off and WIDTH above 0 now scatters. Of the factory presets only Wooden
+  Mallet (MONO, WIDTH 60, VOICES 8, EVEN) does, and it is kept so, scattering, its loudness the
+  same (below). Whether sessions saved before should open as they sounded is asked of the
+  owner.
+
+**Evidence (the Linux reference machine, 2026-10-11):** tests:
+`the_one_instrument_takes_the_next_place_at_each_attack` (seven detached notes, each one's left
+and right power at the gains of place `i` mod VOICES within 1e-6: EVEN with four voices, CENTER
+with five and INNER, and EVEN at LO; and the editor's bit for each),
+`a_legato_note_stays_and_retrigger_moves_it`, `all_notes_off_starts_the_pattern_again`,
+`the_one_instrument_is_at_its_new_place_before_its_contours_start` (0.7 % short), and the
+strip's `mono_shows_its_places_and_the_one_it_sounds_at` and
+`the_strip_lights_the_placements_tab`; each seen to fail with the code broken (the kit's glide,
+no turn, no restart, every key moving, the light voice not turning, the strip's old lights).
+Tests that held the one voice in the centre with WIDTH up now hold it there at WIDTH 0
+(`a_chord_fills_the_field_and_one_voice_without_spread_stays_in_the_centre`,
+`inner_clears_the_centre_and_one_voice_stays_there`) or at its first place
+(`a_twin_let_go_plays_its_tail_out_and_takes_no_new_key`; `tests/sound.rs`'s
+`poly_plays_a_chord_and_spread_parts_it`: the same sound at EVEN's left edge, its left side √2
+times the centre's within 1e-5 of the peak, its right silent). `preset_levels` (each factory
+preset as it is set, on its phrase, written out) against main (bc5de77): 25 of the 26 the same to
+the bit; Wooden Mallet scattering, its momentary maximum and integrated loudness the same to the
+hundredth of a dB (-22.80 and -24.11 LUFS). `preset_render` (every factory preset on POLY's
+ten voices) against main: all 26 the same to the bit. The plug-in's and the panel's tests, 266
+passed, 32 ignored (the new ones in a debug build too); rustfmt; clippy with `-D warnings`. On
+the Mac, CA-72 TEST built from this branch: clap-validator (37 passed), the VST3 SDK's validator
+(47 passed) and pluginval at strictness 5 pass. Not yet: the installed build in a host.
