@@ -570,7 +570,7 @@ impl Threaded {
 
     /// A MIDI note (0 to 127) pressed or released ([`Voice::note`]).
     pub fn note(&mut self, midi: i32, on: bool) {
-        self.keys.note(midi, on);
+        self.keys.note(midi, on, self.panel.retrigger);
     }
 
     /// The passes handed to the workers so far (none go to them in Potato).

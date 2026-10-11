@@ -175,6 +175,7 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("glide_on", &p.glide_on),
         ("decay_on", &p.decay_on),
         ("note_priority", &p.note_priority),
+        ("retrigger", &p.retrigger),
         ("mod_wheel", &p.mod_wheel),
         ("midi_bend_range", &p.midi_bend_range),
         ("poly", &p.poly),
@@ -1173,11 +1174,11 @@ mod tests {
         assert!(rows(&b).is_empty());
     }
 
-    /// NOTE PRIORITY is a preset's (the owner, 2026-10-10: "This item should be saved per
-    /// patch"; R-PRIORITY): saved with the sound, set by a preset naming it, and LOW, the
-    /// instrument's own, by one saved before it (every factory preset).
+    /// NOTE PRIORITY and RETRIGGER are a preset's (the owner, 2026-10-10: "This item should be
+    /// saved per patch"; R-PRIORITY): saved with the sound, set by a preset naming them, and
+    /// LOW and off, the instrument's own, by one saved before them (every factory preset).
     #[test]
-    fn note_priority_is_part_of_a_preset() {
+    fn note_priority_and_retrigger_are_part_of_a_preset() {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::at(dir.path());
         let p = Ca72Params::default();
@@ -1199,6 +1200,20 @@ mod tests {
             .save("Lead High", vec![("note_priority".to_owned(), 2.0)], None)
             .unwrap();
         assert_eq!(target(&high), Some(1.0));
+        let retrigger = |e: &Entry| {
+            targets(&p, e)
+                .into_iter()
+                .find(|(k, _)| *k == "retrigger")
+                .map(|(_, v)| v)
+        };
+        assert!(values_now(&p).iter().any(|(k, _)| k == "retrigger"));
+        for e in lib.entries().0 {
+            assert_eq!(retrigger(&e), Some(0.0), "{}", e.sound.name);
+        }
+        let on = lib
+            .save("Lead Retrig", vec![("retrigger".to_owned(), 1.0)], None)
+            .unwrap();
+        assert_eq!(retrigger(&on), Some(1.0));
     }
 
     /// A preset sets POLY, VOICES, ENTROPY and SPREAD like any other parameter (decisions.md

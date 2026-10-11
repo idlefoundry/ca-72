@@ -3889,7 +3889,7 @@ kit at eb374f8, against renders of d159f42: three presets each in MONO, POLY and
 and without DOUBLE, EVEN and CENTER, INNER 0 and 60 % (72 renders), and every factory preset
 (24), the same to the bit; tests, 206 passed; rustfmt; clippy with `-D warnings`.
 
-## R-PRIORITY. NOTE PRIORITY: LOW, LAST or HIGH, on QUALITY's toggle turned on its side
+## R-PRIORITY. NOTE PRIORITY (LOW, LAST or HIGH) and RETRIGGER, over GLIDE and DECAY
 
 **The owner, 2026-10-10:** asked what the usual choices of priority are ("lowest note, last
 note, I would guess. Um, are there others?"), was told of the three (LOW, the Model D's own
@@ -3913,40 +3913,64 @@ more recent branches" than `potato`).
   ("The full MIDI range"). `ca72::voice::Priority`, the panel's `priority` (not the
   instrument's, as `quality` is not), chosen in `Keys::step`; the light voice (R-POTATO) the
   same, its keys' presses counted for LAST.
-- **Single triggering stays**, as the instrument's: a key pressed while another is held moves
-  the pitch without starting the contours again, so LAST and HIGH play legato. A retrigger
-  choice was asked about and not answered; none is added.
+- **RETRIGGER** (the owner, told single triggering was kept and a retrigger choice not added:
+  "ah, yes we should add retrigger for sure"): on, each key pressed starts the contours again,
+  other keys held or not. As the circuit has it, the contours start again only once the
+  trigger contact has been open about 12 ms (Q20 holding the reset line until C7 drains:
+  `RETRIGGER_GAP`, 13 ms, `tests/retrigger.rs`), so a key pressed opens the trigger contact
+  for that long first, the keys held staying down, and only then comes down, as if every key
+  were let go and pressed again (POLY waits the same gap for a voice whose key is down). The
+  new note's attack so starts 13 ms late, the pitch held where it was until then; a key pressed
+  within 13 ms of the last let go waits out the rest. A key let go, the pitch falling back to
+  one still held, does not start them again. Off (the default), single triggering, the
+  instrument's: a key pressed while another is held moves the pitch without starting the
+  contours again. `Panel::retrigger`; `Keys::note` and the light voice's `note` hold the key
+  back (`waiting`) until the gap is out.
 - **LOW keeps the string's own effect:** a higher key held with the lowest shorts the string
   between them, and the lowest sounds a little sharp of itself alone (key 57 with 64 held:
   0.98 mV, 1.2 cents). HIGH and LAST play the key chosen exactly as alone (within 0.05 mV), as
   the hardware reference's, whose keys are read digitally, plays all three.
-- **The parameter:** `note_priority`, the host's Note Priority, LOW, LAST, HIGH in that order
-  (the toggle's positions left to right, its value 0, 0.5, 1), the last parameter. A preset's,
-  as any panel control: saved with the sound, and LOW for a preset that does not name it (every
-  factory preset). A session saved before it opens with LOW, not at what the instance had
-  (`filter_state`, as R18 has it for ENTROPY). MIDI Learn takes it as a selector, a third of
-  0-127 a position (57 learnable controls: 27 knobs, 8 selectors, 22 switches).
+- **The parameters:** `note_priority`, the host's Note Priority, LOW, LAST, HIGH in that order
+  (the toggle's positions left to right, its value 0, 0.5, 1), and `retrigger`, the host's
+  Retrigger, off by default, after it, the last parameters. A preset's, as any panel control:
+  saved with the sound, LOW and off for a preset that does not name them (every factory
+  preset). A session saved before them opens with LOW and off, not at what the instance had
+  (`filter_state`, as R18 has it for ENTROPY). MIDI Learn takes NOTE PRIORITY as a selector, a
+  third of 0-127 a position, and RETRIGGER as a switch (58 learnable controls: 27 knobs, 8
+  selectors, 23 switches).
+- **Where they stand** (the owner): first built as a row of NOTE PRIORITY alone between DECAY
+  and the wheels, then: "note priority and retrigger should be added in the top row of the.
+  keyboard controls section. not in the middle where you have it"; shown both on a top row
+  over GLIDE and DECAY, their titles under them: "maybe we should put the names above, since
+  that's what we do everywhere else", and "show me another example that has them all in a
+  single column. Starting with priority, then retrigger, etc."; of the two (A, the top row,
+  titles above; B, one column), "build Option B for sure". So the left hand's column is NOTE
+  PRIORITY (y 95), RETRIGGER (185), GLIDE (265, was 150) and DECAY (345, was 230), each at the
+  switches' place (x 214), the wheels 25 lower than A6 had them (y 540), every row's legend to
+  its left as GLIDE's and DECAY's are (PRIORITY centred at 108, RETRIGGER at 104, moved in from
+  their 118, clear of the lever at LOW and of the switch).
 - **The toggle:** QUALITY's chrome toggle (R-ULTRA), its three pictures mirrored about their
   diagonal (flipped top to bottom, then turned a quarter clockwise), so that the lever moves
   left and right and the light still comes from the upper left (a plain quarter turn would
   light it from the upper right): LOW the lever left (the upright picture's up), LAST out, HIGH
-  right; 81 by 50 units as seen. It stands where GLIDE's and DECAY's switches do (x 214 in the
-  column's place), on a third row under them (y 328), the wheels unmoved; its legend PRIORITY
-  to its left (centred at 108, ten units left of GLIDE's and DECAY's, clear of the lever at
-  LOW), LAST above it and LOW and HIGH under its ends, in the dials' lettering, as QUALITY's are
-  round its lever. A click goes to the position clicked (left of the nut LOW, right of it HIGH,
-  on it or LAST's legend LAST), the mouse wheel a position a notch; its tip reads "NOTE
-  PRIORITY (LOW, LAST or HIGH)"; its menu is MIDI Learn's. The control is appended after INNER
-  so that no other control's index moves (54 controls). The drawn skin turns its drawn toggle
-  the same way.
+  right; 81 by 50 units as seen; LAST lettered above it and LOW and HIGH under its ends, in the
+  dials' lettering, as QUALITY's are round its lever. A click goes to the position clicked
+  (left of the nut LOW, right of it HIGH, on it or LAST's legend LAST), the mouse wheel a
+  position a notch; its tip reads "NOTE PRIORITY (LOW, LAST or HIGH)"; its menu is MIDI
+  Learn's. RETRIGGER is an ivory switch as GLIDE's and DECAY's, its ON under its right end, its
+  mountings' screws as theirs. Both controls are appended after INNER so that no other
+  control's index moves (55 controls). The drawn skin draws them the same way.
 
 **Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
 80b8e1c, every factory preset (26) the same to the bit with POLY's ten voices, in MONO with its
-chords held (where LOW chooses), and in MONO at LO (the light voice). Tests:
+chords held (where LOW chooses), and in MONO at LO (the light voice), RETRIGGER off. Tests:
 `tests/priority.rs` (each mode's key after a run of keys pressed and let go, beyond the 44 keys
-too, the keyboard's output against the chosen key's alone), the light voice's
-`the_priority_chooses_the_key_held_that_sounds` (the release lead too),
+too, the keyboard's output against the chosen key's alone; RETRIGGER's contours started again
+with a key held, the pitch held through the gap, a key pressed soon after a release waiting it
+out), the light voice's `the_priority_chooses_the_key_held_that_sounds` and
+`retrigger_starts_the_contours_again_with_keys_held`,
 `note_priority_reaches_the_one_instrument_and_unisons_voices`,
-`an_old_session_opens_with_note_priority_low`, `note_priority_is_part_of_a_preset`, the toggle's
-clicks on its side; the core's, panel's and plug-in's tests, 313 passed, 42 ignored; rustfmt;
-clippy with `-D warnings`. Not yet: the installed build in a host.
+`an_old_session_opens_with_note_priority_low_and_no_retrigger`,
+`note_priority_and_retrigger_are_part_of_a_preset`, the toggle's clicks on its side; the core's,
+panel's and plug-in's tests, 316 passed, 42 ignored; rustfmt; clippy with `-D warnings`. Not
+yet: the installed build in a host.

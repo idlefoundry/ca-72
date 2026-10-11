@@ -424,6 +424,11 @@ pub struct Ca72Params {
     /// instrument's own.
     #[id = "note_priority"]
     pub note_priority: EnumParam<NotePriority>,
+    /// RETRIGGER, off by default: each key pressed starts the contours again, other keys held
+    /// or not (the switch under GLIDE and DECAY; off, single triggering, the instrument's). A
+    /// preset's, as NOTE PRIORITY. After it: a session or a preset saved before reads it off.
+    #[id = "retrigger"]
+    pub retrigger: BoolParam,
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -598,6 +603,7 @@ impl Default for Ca72Params {
             doubled: BoolParam::new("Double", false),
             quality: EnumParam::new("Quality", QualityMode::Hi),
             note_priority: EnumParam::new("Note Priority", NotePriority::Low),
+            retrigger: BoolParam::new("Retrigger", false),
         }
     }
 }
@@ -688,6 +694,7 @@ impl Ca72Params {
             tune: value(&self.tune) / 2.5,
             quality: Quality::default(),
             priority: self.note_priority.value().into(),
+            retrigger: self.retrigger.value(),
         };
         Controls {
             panel,

@@ -234,7 +234,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 54] = [
+pub const CONTROLS: [Control; 55] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -547,8 +547,9 @@ pub const CONTROLS: [Control; 54] = [
     strip_knob("level", "LEVEL", 5, Dial::Level),
     strip_knob("inner", "INNER", 6, Dial::Ten),
     // NOTE PRIORITY (decisions.md R-PRIORITY), the plug-in's own: QUALITY's toggle on its side,
-    // under GLIDE and DECAY where their switches are, its lever left for LOW, out for LAST,
-    // right for HIGH. Last, so that every other control keeps its index.
+    // the left hand's first row, over RETRIGGER, GLIDE and DECAY where their switches are, its
+    // lever left for LOW, out for LAST, right for HIGH. Last, so that every other control keeps
+    // its index.
     Control {
         param: "note_priority",
         label: "NOTE PRIORITY (LOW, LAST or HIGH)",
@@ -561,6 +562,19 @@ pub const CONTROLS: [Control; 54] = [
             across: true,
         },
     },
+    // RETRIGGER (R-PRIORITY), the plug-in's own: an ivory switch as GLIDE's and DECAY's, the
+    // left hand's second row, over theirs. After NOTE PRIORITY, for the same reason.
+    rocker(
+        "retrigger",
+        "RETRIGGER",
+        Place::Column,
+        crate::art::LH_ROCKER,
+        crate::art::LH_RETRIGGER,
+        82.0,
+        38.0,
+        Colour::Ivory,
+        Orient::Right,
+    ),
 ];
 
 /// The index of the control operating `param`.

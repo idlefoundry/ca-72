@@ -234,6 +234,7 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "glide_on" => &p.glide_on,
         "decay_on" => &p.decay_on,
         "note_priority" => &p.note_priority,
+        "retrigger" => &p.retrigger,
         "pitch_wheel" => &p.pitch_wheel,
         "mod_wheel" => &p.mod_wheel,
         // The strip's knobs (A6).

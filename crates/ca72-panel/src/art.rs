@@ -66,13 +66,18 @@ const LH_JACK: f64 = 46.0;
 const LH_LABEL: f64 = 118.0;
 pub(crate) const LH_ROCKER: f64 = 214.0;
 const LH_SCREW_DX: f64 = 50.0;
-pub(crate) const LH_ROWS: [f64; 2] = [150.0, 230.0];
-/// NOTE PRIORITY's toggle (decisions.md R-PRIORITY), on its side under GLIDE and DECAY, and its
-/// legend's centre (left of it, where theirs are, moved in as far as its lever's LOW allows).
-pub(crate) const LH_PRIORITY: f64 = 328.0;
+pub(crate) const LH_ROWS: [f64; 2] = [265.0, 345.0];
+/// NOTE PRIORITY's toggle on its side and RETRIGGER's switch (decisions.md R-PRIORITY), each a
+/// row over GLIDE and DECAY in one column with theirs, where their switches are; their legends'
+/// centres, left of them as GLIDE's and DECAY's are (moved in, clear of the switch and of the
+/// lever at LOW).
+pub(crate) const LH_PRIORITY: f64 = 95.0;
 const LH_PRIORITY_LABEL: f64 = 108.0;
+pub(crate) const LH_RETRIGGER: f64 = 185.0;
+const LH_RETRIGGER_LABEL: f64 = 104.0;
 pub(crate) const LH_WHEELS: [f64; 2] = [82.0, 204.0];
-pub(crate) const WHEEL_Y: f64 = 515.0;
+/// The wheels' centre (25 lower than A6 had it, for NOTE PRIORITY's and RETRIGGER's rows).
+pub(crate) const WHEEL_Y: f64 = 540.0;
 /// The wheels are drawn larger in the column than the instrument's.
 pub const WHEEL_SCALE: f64 = 1.75;
 /// A wheel's slot.
@@ -643,7 +648,7 @@ fn top_screws() -> impl Iterator<Item = (f64, f64, f64)> {
 /// need to put a back plate on top of another backplate").
 fn column_screws() -> Vec<(f64, f64, f64)> {
     let mut mountings = Vec::new();
-    for y in LH_ROWS {
+    for y in LH_ROWS.into_iter().chain([LH_RETRIGGER]) {
         for x in [LH_ROCKER - LH_SCREW_DX, LH_ROCKER + LH_SCREW_DX] {
             mountings.push((x, y, 5.0));
         }
@@ -1009,9 +1014,11 @@ fn column(s: &mut Svg, ink: Ink) {
     legend(s, LH_LABEL, LH_ROWS[1], "DECAY");
     lettered(s, LH_ROCKER + 36.0, LH_ROWS[0] + 34.0, "ON", NUM);
     lettered(s, LH_ROCKER + 36.0, LH_ROWS[1] + 34.0, "ON", NUM);
-    // NOTE PRIORITY: its lever's places round it, as QUALITY's are (LAST, the lever out,
-    // above it; LOW and HIGH under its ends).
+    // NOTE PRIORITY, its lever's places round it as QUALITY's are (LAST, the lever out, above
+    // it; LOW and HIGH under its ends), and RETRIGGER, its ON as GLIDE's.
     legend(s, LH_PRIORITY_LABEL, LH_PRIORITY, "PRIORITY");
+    legend(s, LH_RETRIGGER_LABEL, LH_RETRIGGER, "RETRIGGER");
+    lettered(s, LH_ROCKER + 36.0, LH_RETRIGGER + 34.0, "ON", NUM);
     let (px, py) = (LH_ROCKER, LH_PRIORITY);
     lettered(s, px, py - 33.0, "LAST", NUM);
     lettered(s, px - 40.0, py + 38.0, "LOW", NUM);

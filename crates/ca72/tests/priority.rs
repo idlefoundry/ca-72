@@ -98,3 +98,79 @@ fn beyond_the_keys_the_chosen_key_plays_as_alone() {
     );
     plays(Priority::Last, &[(100, 100), (30, 30), (60, 60), (-60, 30)]);
 }
+
+/// RETRIGGER (R-PRIORITY): a key pressed while another is held starts the contours again (off,
+/// they go on from where they are, the instrument's single triggering). The trigger contact
+/// opens for `RETRIGGER_GAP` first, the keys held as they were, so the pitch moves to the new
+/// key (LAST) only then. The loudness contour decayed to SUSTAIN 2 with key 57 held a while;
+/// key 64 pressed: its most over the next 80 ms.
+#[test]
+fn retrigger_starts_the_contours_again_with_keys_held() {
+    let run = |retrigger: bool| {
+        let mut v = voice(Priority::Last);
+        v.panel.retrigger = retrigger;
+        v.panel.loudness_contour.decay = 0.3;
+        v.panel.loudness_contour.sustain = 0.2;
+        v.note(57, true);
+        for _ in 0..(0.5 * SR) as usize {
+            v.tick();
+        }
+        let before = v.envelopes().1;
+        v.note(64, true);
+        // Within the gap the pitch is still key 57's.
+        for _ in 0..(0.008 * SR) as usize {
+            v.tick();
+        }
+        let early = v.probe().0;
+        let mut most: f64 = 0.0;
+        for _ in 0..(0.08 * SR) as usize {
+            v.tick();
+            most = most.max(v.envelopes().1);
+        }
+        (before, most, early, v.probe().0)
+    };
+    let (k57, k64) = (alone(57), alone(64));
+    let (before, most, early, late) = run(false);
+    assert!(
+        (most - before).abs() < 0.05,
+        "single triggering: {before:.3} V, then at most {most:.3} V"
+    );
+    assert!(
+        (early - k64).abs() < 5e-5,
+        "single triggering: the pitch at once"
+    );
+    let (before, most, early, late_re) = run(true);
+    assert!(
+        most > before + 2.0,
+        "RETRIGGER: {before:.3} V, then at most {most:.3} V"
+    );
+    assert!(
+        (early - k57).abs() < 5e-5,
+        "RETRIGGER: key 57's within the gap"
+    );
+    assert!((late_re - k64).abs() < 5e-5 && (late - k64).abs() < 5e-5);
+}
+
+/// With RETRIGGER, a key pressed soon after the last was let go waits until the trigger
+/// contact has been open `RETRIGGER_GAP`, so that it starts the contours again too; one pressed
+/// later comes down at once, as without it.
+#[test]
+fn retrigger_waits_out_the_gap_after_a_release() {
+    let mut v = voice(Priority::Low);
+    v.panel.retrigger = true;
+    v.note(57, true);
+    settled(&mut v);
+    v.note(57, false);
+    for _ in 0..(0.004 * SR) as usize {
+        v.tick();
+    }
+    v.note(64, true);
+    for _ in 0..(0.004 * SR) as usize {
+        v.tick();
+    }
+    // 8 ms after the release: still where key 57 left it (the keyboard's hold).
+    let held = v.probe().0;
+    assert!((held - alone(57)).abs() < 1e-3, "{held} V within the gap");
+    let at = settled(&mut v);
+    assert!((at - alone(64)).abs() < 5e-5, "{at} V");
+}

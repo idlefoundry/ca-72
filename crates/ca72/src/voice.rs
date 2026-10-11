@@ -165,6 +165,10 @@ pub struct Panel {
     pub quality: Quality,
     /// Which key held sounds (not a control of the instrument's either).
     pub priority: Priority,
+    /// RETRIGGER (not the instrument's: decisions.md R-PRIORITY): each key pressed opens the
+    /// trigger contact for [`RETRIGGER_GAP`] before it comes down, so that the contours start
+    /// again even with other keys held (off: single triggering, the instrument's).
+    pub retrigger: bool,
 }
 
 /// TUNE's wiper voltage over half its travel: R1 spans 10 V less R22's 5.05 V.
@@ -216,6 +220,7 @@ impl Default for Panel {
             tune: 0.0,
             quality: Quality::NoCompromises,
             priority: Priority::Low,
+            retrigger: false,
         }
     }
 }
@@ -740,6 +745,13 @@ pub struct Keys {
     /// When each MIDI note was last pressed, counted in presses (for LAST), and the count.
     pressed: [u64; 128],
     presses: u64,
+    /// RETRIGGER's keys pressed, waiting for the trigger contact to have been open
+    /// [`RETRIGGER_GAP`] (in samples, `gap`); the trigger contact as last set, and the
+    /// sample it last opened at (`None`: never closed).
+    waiting: Vec<i32>,
+    gap: u64,
+    gate: bool,
+    opened: Option<u64>,
     samples: u64,
     /// The string's foot as last set (it stays while no key's contact is closed).
     foot: i32,
@@ -1096,6 +1108,10 @@ impl Voice {
                 releasing: Vec::with_capacity(128),
                 pressed: [0; 128],
                 presses: 0,
+                waiting: Vec::with_capacity(128),
+                gap: (RETRIGGER_GAP * rate).round() as u64,
+                gate: false,
+                opened: None,
                 samples: 0,
                 foot: 0,
             },
@@ -1223,11 +1239,7 @@ impl Voice {
 
     /// The contours' latest values (filter, loudness), V, and whether a key is held.
     pub fn envelopes(&self) -> (f64, f64, bool) {
-        (
-            self.ctl.env_to.0,
-            self.ctl.env_to.1,
-            !self.keys.held.is_empty(),
-        )
+        (self.ctl.env_to.0, self.ctl.env_to.1, self.keys.held())
     }
 
     /// The last sample's keyboard voltage, V, the mixer bus's Norton current, A, and the
@@ -1293,7 +1305,7 @@ impl Voice {
     /// A MIDI note (0 to 127) pressed or released: beyond the 44 keys the string continues
     /// ([`Keys::step`]).
     pub fn note(&mut self, midi: i32, on: bool) {
-        self.keys.note(midi, on);
+        self.keys.note(midi, on, self.panel.retrigger);
     }
 
     /// One output sample.
@@ -1404,19 +1416,28 @@ fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourP
 
 impl Keys {
     /// A MIDI note (0 to 127) pressed or released: the 44 keys F to C (41 to 84) are the
-    /// instrument's, the rest continue its key string ([`Keys::step`]).
-    pub fn note(&mut self, midi: i32, on: bool) {
+    /// instrument's, the rest continue its key string ([`Keys::step`]). With `retrigger`, a key
+    /// pressed waits until the trigger contact has been open [`RETRIGGER_GAP`], opening it
+    /// first if keys are held (as if every key were let go and pressed again).
+    pub fn note(&mut self, midi: i32, on: bool, retrigger: bool) {
         if !MIDI_NOTES.contains(&midi) {
             return;
         }
         let k = midi - LOWEST_KEY_MIDI;
         if on {
-            if !self.held.contains(&k) {
-                self.held.push(k);
+            if !self.held.contains(&k) && !self.waiting.contains(&k) {
+                if retrigger {
+                    self.waiting.push(k);
+                } else {
+                    self.held.push(k);
+                }
                 self.presses += 1;
                 self.pressed[midi as usize] = self.presses;
             }
             self.releasing.retain(|&(x, _)| x != k);
+        } else if self.waiting.contains(&k) {
+            // (Let go before it came down: it never sounded.)
+            self.waiting.retain(|&x| x != k);
         } else if self.held.contains(&k) {
             self.held.retain(|&x| x != k);
             let until = self.samples + (RELEASE_LEAD * self.rate).round() as u64;
@@ -1439,6 +1460,19 @@ impl Keys {
     pub fn step(&mut self, priority: Priority) -> Contacts {
         let now = self.samples;
         self.releasing.retain(|&(_, until)| until > now);
+        // RETRIGGER's keys come down once the trigger contact has been open long enough for
+        // the contours to start again; until then it is open, the keys held as they were.
+        if !self.waiting.is_empty()
+            && !self.gate
+            && self.opened.is_none_or(|at| now - at >= self.gap)
+        {
+            self.held.append(&mut self.waiting);
+        }
+        let gate = !self.held.is_empty() && self.waiting.is_empty();
+        if self.gate && !gate {
+            self.opened = Some(now);
+        }
+        self.gate = gate;
         let keys = || {
             self.held
                 .iter()
@@ -1469,7 +1503,7 @@ impl Keys {
         self.foot = foot;
         let c = Contacts {
             keys,
-            gate: !self.held.is_empty(),
+            gate,
             s_trig: false,
             foot,
         };
@@ -1482,11 +1516,12 @@ impl Keys {
     pub fn reserve(&mut self) {
         self.held.reserve(128);
         self.releasing.reserve(128);
+        self.waiting.reserve(128);
     }
 
-    /// Whether a key is held.
+    /// Whether a key is held (or pressed and waiting to come down).
     pub fn held(&self) -> bool {
-        !self.held.is_empty()
+        !self.held.is_empty() || !self.waiting.is_empty()
     }
 }
 

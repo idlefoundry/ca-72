@@ -819,6 +819,10 @@ pub struct Light {
     /// When each key was last pressed, counted in presses (for LAST), and the count.
     pressed: [u32; 128],
     presses: u32,
+    /// RETRIGGER's keys pressed, waiting for the keys' gate to have been low `gap` samples
+    /// (voice.rs's `RETRIGGER_GAP`).
+    waiting: Held,
+    gap: u32,
     /// A released key whose pitch contact is still closed, the samples it stays so, and that
     /// time in samples.
     lead: (i32, u32),
@@ -909,6 +913,8 @@ impl Light {
             held: Held::default(),
             pressed: [0; 128],
             presses: 0,
+            waiting: Held::default(),
+            gap: at(crate::voice::RETRIGGER_GAP),
             lead: (0, 0),
             lead_samples: at(laws::RELEASE_LEAD),
             target: laws::PITCH_AT_REST,
@@ -1203,12 +1209,23 @@ impl Light {
         if !(0..128).contains(&midi) {
             return;
         }
-        if !on && self.sounding() == Some(midi) {
-            self.lead = (midi, self.lead_samples);
-        }
-        if on && self.held.0 & (1u128 << midi) == 0 {
+        let bit = 1u128 << midi;
+        if on && (self.held.0 | self.waiting.0) & bit == 0 {
             self.presses = self.presses.wrapping_add(1);
             self.pressed[midi as usize] = self.presses;
+            if self.panel.retrigger {
+                // (Down once the keys' gate has been low long enough: `tick`.)
+                self.waiting.set(midi, true);
+                return;
+            }
+        }
+        if !on && self.waiting.0 & bit != 0 {
+            // (Let go before it came down: it never sounded.)
+            self.waiting.set(midi, false);
+            return;
+        }
+        if !on && self.sounding() == Some(midi) {
+            self.lead = (midi, self.lead_samples);
         }
         self.held.set(midi, on);
     }
@@ -1222,9 +1239,9 @@ impl Light {
         }
     }
 
-    /// Whether a key is held.
+    /// Whether a key is held (or pressed and waiting to come down).
     pub fn held(&self) -> bool {
-        self.held.0 != 0
+        self.held.0 != 0 || self.waiting.0 != 0
     }
 
     /// As [`crate::voice::Voice::slow_state`]: the pitch (as volts, an octave a volt) and
@@ -1258,6 +1275,7 @@ impl Light {
     /// Back to rest: every key up, the contours and the ladder at rest (All Sound Off).
     pub fn rest(&mut self) {
         self.held = Held::default();
+        self.waiting = Held::default();
         self.lead = (0, 0);
         (self.gate, self.trigger, self.pending, self.open) = (false, false, 0, u32::MAX);
         self.contours = [
@@ -1375,9 +1393,15 @@ impl Light {
             self.control();
         }
         self.count -= 1;
+        // RETRIGGER's keys come down once the keys' gate has been low long enough for the
+        // contours to start again; until then it is low, the keys held as they were.
+        if self.waiting.0 != 0 && !self.gate && self.open >= self.gap {
+            self.held.0 |= self.waiting.0;
+            self.waiting = Held::default();
+        }
         // The trigger: the contours follow the keys' gate late, and a key pressed again
         // within the re-arming time does not start them again.
-        let gate = self.held();
+        let gate = self.held.0 != 0 && self.waiting.0 == 0;
         if gate != self.gate {
             self.gate = gate;
             if gate {
@@ -2120,5 +2144,40 @@ mod tests {
         assert_eq!(l.target, 64.0, "within the lead");
         run(&mut l, 96);
         assert_eq!(l.target, 57.0, "after it");
+    }
+
+    /// RETRIGGER as the circuit's voice has it: a key pressed while another is held lowers the
+    /// keys' gate for the gap (13 ms) and then comes down, the contours starting again (an
+    /// attack) and the pitch moving to it only then; off, single triggering.
+    #[test]
+    fn retrigger_starts_the_contours_again_with_keys_held() {
+        let run = |retrigger: bool| {
+            let mut l = Light::new(48_000.0);
+            let mut p = measuring();
+            p.priority = Priority::Last;
+            p.retrigger = retrigger;
+            p.loudness_contour.decay = 0.3;
+            p.loudness_contour.sustain = 0.2;
+            l.set_panel(&p);
+            l.note(57, true);
+            run(&mut l, 24_000);
+            let before = l.contours().1;
+            l.note(64, true);
+            run(&mut l, 384);
+            let early = l.target;
+            let most = (0..3840)
+                .map(|_| {
+                    l.tick(0.0);
+                    l.contours().1
+                })
+                .fold(0.0, f64::max);
+            (before, most, early, l.target)
+        };
+        let (before, most, early, late) = run(false);
+        assert!((most - before).abs() < 0.05, "{before} V, then {most} V");
+        assert_eq!((early, late), (64.0, 64.0));
+        let (before, most, early, late) = run(true);
+        assert!(most > before + 2.0, "{before} V, then {most} V");
+        assert_eq!((early, late), (57.0, 64.0));
     }
 }

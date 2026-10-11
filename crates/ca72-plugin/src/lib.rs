@@ -291,6 +291,12 @@ impl Plugin for Ca72 {
                 ParamValue::I32(low.to_index() as i32),
             );
         }
+        // And before RETRIGGER: off, single triggering, the instrument's own.
+        if !state.params.contains_key("retrigger") {
+            state
+                .params
+                .insert("retrigger".to_owned(), ParamValue::Bool(false));
+        }
         let offered = |id: &str| params::Scatter::ids().is_some_and(|ids| ids.contains(&id));
         if matches!(state.params.get("placement"), Some(ParamValue::String(id)) if !offered(id)) {
             let even = Ca72Params::default().placement.default_plain_value();
@@ -578,20 +584,32 @@ mod tests {
         assert_eq!(entropy(&new), Some(40.0));
     }
 
-    /// A session saved before NOTE PRIORITY opens with LOW, the instrument's own (its index, as
-    /// nih-plug sets an enum by one), not at what the instance had (R-PRIORITY); one saved since
-    /// keeps its own.
+    /// A session saved before NOTE PRIORITY and RETRIGGER opens with LOW (its index, as nih-plug
+    /// sets an enum by one) and RETRIGGER off, the instrument's own, not at what the instance
+    /// had (R-PRIORITY); one saved since keeps its own.
     #[test]
-    fn an_old_session_opens_with_note_priority_low() {
-        let filtered = |params: Vec<(String, ParamValue)>| {
+    fn an_old_session_opens_with_note_priority_low_and_no_retrigger() {
+        let filtered_as = |params: Vec<(String, ParamValue)>, id: &str| {
             let mut s = PluginState {
                 version: String::new(),
                 params: params.into_iter().collect(),
                 fields: Default::default(),
             };
             Ca72::filter_state(&mut s);
-            s.params.remove("note_priority")
+            s.params.remove(id)
         };
+        let filtered = |params| filtered_as(params, "note_priority");
+        assert!(matches!(
+            filtered_as(vec![], "retrigger"),
+            Some(ParamValue::Bool(false))
+        ));
+        assert!(matches!(
+            filtered_as(
+                vec![("retrigger".to_owned(), ParamValue::Bool(true))],
+                "retrigger"
+            ),
+            Some(ParamValue::Bool(true))
+        ));
         let low = params::NotePriority::Low.to_index() as i32;
         assert!(matches!(
             filtered(vec![("cutoff".to_owned(), ParamValue::F32(3.0))]),
