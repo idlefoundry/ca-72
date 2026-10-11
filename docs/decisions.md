@@ -4086,3 +4086,14 @@ value i want the knob to turn to."
 ENTROPY's switch double-clicked, then 25 %; VOICES 12 as 10; DETUNE in SCATTER none); a render of
 DRIVE's and LEVEL's readouts being typed into. The core's, panel's and plug-in's tests, 318
 passed, 42 ignored; rustfmt; clippy with `-D warnings`.
+
+**In hosts (Windows 11, 2026-10-10, the `prio` harness, f6da784):** REAPER 7.82: a real double
+click on DRIVE's readout lit it with the underscore, "8.4" typed with real keys showed "8.4_", and
+Enter set DRIVE to 8.4 dB (read back through REAPER's API: 0.35). Cubase Pro 15.0.30: the double
+click began the typing (the underscore lit), but no key reached the editor: "8.4" and Enter did
+nothing, and Escape went to Cubase, which closed the plug-in's window. Cubase gives a VST3
+plug-in's view its keys through `IPlugView::onKeyDown`, which nih-plug's wrapper leaves
+unimplemented (`kNotImplemented`), and keeps them for its own key commands; the drawer's fields
+(FIND, a preset's name and tags) most likely fare the same there (not tried). Not yet fixed. A
+first try in REAPER found the presets' drawer open before the double click, which three fresh
+tries did not show again.
