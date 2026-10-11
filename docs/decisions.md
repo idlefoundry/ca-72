@@ -4249,4 +4249,4 @@ VST3 validator 47 passed; pluginval at strictness 5 without its editor tests SUC
 beside the other test builds for the owner, nothing replaced, and not opened in Live by the
 agent. The owner's Cycle of Fifths converted (oscillator 2's FREQUENCY 5.8494 to 6.50964, +7.16
 semitones as before), its old file in `CA-72/Presets-before-semitones`: the test builds before
-this one read it 0.45 semitone sharp now. Not tried: any host, Windows, Linux.
+this one read it 0.43 semitone sharp now. Not tried: any host, Windows, Linux.
