@@ -4749,3 +4749,31 @@ handler would be lost. The count is now read after the call (baseview's `PATCHES
 in both copies alike. With it, the seven Windows window tests passed in the desktop session (an
 export of this main with the kit's baseview over its own), the press test failed without change
 5, and clippy over the workspace passed on Windows.
+
+## R61. Escape reaches the editor in REAPER's CLAP on Windows
+
+**The owner, 2026-10-11:** "merge anything into main that should be merged. Just don't push
+anything public", while the CA-74's lead, porting its own fix into plugin-kit (the kit's K10),
+found by reading this repository that the CA-72 has the same fault.
+
+**Agent decisions, 2026-10-11:**
+- **The fault:** in REAPER 7.82 on Windows, the CLAP plug-in's window lost Escape while the
+  editor held the keyboard: typing a value into a readout or into the drawer's FIND, Escape
+  closed REAPER's FX window instead of cancelling. REAPER's CLAP window handles Escape before it
+  asks the window what keys it wants (baseview's change 3, R34) and before dispatching it, so
+  that answer could not help.
+- **Taken from plugin-kit as the kit has it** (baseview's `PATCHES.md`, change 6, the CA-74's):
+  a `WH_GETMESSAGE` hook for each library's GUI thread (`src/win/escape.rs`) hands an Escape
+  just removed from the queue to the focused editor while it holds the keys, after putting a
+  `WM_NULL` in its place. Idle Escape, other keys, peeks and other windows go as before. The
+  CA-72's baseview is the kit's, file for file.
+
+**Evidence (2026-10-11, Windows, MSVC 1.97.1):** baseview's three tests of it pass in the
+desktop session, and two fail with the hook's registration taken out; the CA-72's seven window
+tests pass; clippy over the workspace with every feature passes. In REAPER 7.82, CLAP, a renamed
+build of this tree (CA-72 PRIORITY, its own REAPER settings): LEVEL's readout double-clicked,
+"-6" typed, Escape: back to 0.0, the FX window open and in front; the drawer opened, "lead"
+typed into FIND (the list narrowed), Escape: the drawer shut, the window open; Escape with
+nothing held: the FX window closed, as REAPER does. The same build of the commit before
+(without change 6): "-6" typed, Escape closed the FX window. Not tried: the VST3 in REAPER, and
+other hosts on Windows (the kit's K10 tried REAPER's VST3 and Cubase 15 with the CA-74).
