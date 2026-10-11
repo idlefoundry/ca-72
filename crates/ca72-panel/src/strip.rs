@@ -224,6 +224,12 @@ impl Readout {
     pub fn switch(self) -> bool {
         matches!(self, Readout::Entropy | Readout::Width | Readout::Inner)
     }
+
+    /// Whether a value may be typed into it (all but AUTO GAIN's, which reads what is
+    /// measured; decisions.md R-TYPED).
+    pub fn typed(self) -> bool {
+        self != Readout::Auto
+    }
 }
 
 /// The knobs' places on the strip (their controls are the panel's: `controls::CONTROLS`):
@@ -247,6 +253,9 @@ pub enum StripTarget {
     Tab(Bank, usize),
     /// A readout that is a switch.
     Switch(Readout),
+    /// A readout that is not a switch but takes a value typed into it (VOICES, DETUNE, DRIVE,
+    /// LEVEL: decisions.md R-TYPED; AUTO GAIN's reads what is measured and is none).
+    Readout(Readout),
     /// The voices' display.
     Display,
     /// The rail's keys and the name.
@@ -309,6 +318,15 @@ pub fn hit(x: f64, y: f64) -> Option<StripTarget> {
             return Some(StripTarget::Switch(r));
         }
     }
+    for r in Readout::ALL
+        .into_iter()
+        .filter(|r| !r.switch() && r.typed())
+    {
+        let (rx, ry, rw, rh) = r.window();
+        if (rx..rx + rw).contains(&x) && (ry..ry + rh).contains(&y) {
+            return Some(StripTarget::Readout(r));
+        }
+    }
     let (dx, dy, dw, dh) = DISPLAY;
     ((dx..dx + dw).contains(&x) && (dy..dy + dh).contains(&y)).then_some(StripTarget::Display)
 }
@@ -317,7 +335,7 @@ pub fn hit(x: f64, y: f64) -> Option<StripTarget> {
 pub fn centre(t: StripTarget) -> (f64, f64) {
     match t {
         StripTarget::Tab(b, i) => b.tab(i),
-        StripTarget::Switch(r) => r.at(),
+        StripTarget::Switch(r) | StripTarget::Readout(r) => r.at(),
         StripTarget::Display => (DISPLAY.0 + DISPLAY.2 / 2.0, DISPLAY.1 + DISPLAY.3 / 2.0),
         StripTarget::Bar(BarTarget::Name) => (NAME.0 + NAME.2 / 2.0, RAIL_Y),
         StripTarget::Bar(b) => (KEYS.iter().find(|k| k.2 == b).map_or(0.0, |k| k.0), RAIL_Y),

@@ -4060,3 +4060,29 @@ editor tests SUCCESS. Installed as CA-72 PRIORITY for the owner; not opened in L
 
 Not tried: the Audio Unit and an Intel Mac (a universal build), R41's test (macOS-only, not run on
 this build), Linux hosts, Cubase on macOS.
+
+## R-TYPED. A value typed into a readout
+
+**The owner, 2026-10-10:** "i should be able to type into any of the number displays and enter a
+value i want the knob to turn to."
+
+**Agent decisions, 2026-10-10** (told to the owner as they were begun, not separately approved):
+- **A double click** on a readout begins: VOICES', ENTROPY's, WIDTH's, INNER's, DETUNE's, DRIVE's
+  and LEVEL's. A single click does what it did: ENTROPY's, WIDTH's and INNER's readouts switch
+  their amounts off and on (R-STEREO), so a double click there undoes its first press's switch
+  before the typing begins; the others did nothing and are now the strip's targets
+  (`StripTarget::Readout`). AUTO GAIN's reads what is measured and takes no value; DETUNE's takes
+  none in SCATTER, where its knob does nothing either.
+- **Typing:** the readout lit with what is typed, an underscore (its seven segments' lowest)
+  where the next digit goes while there is room for one: digits, a point, and a minus sign for
+  LEVEL, three cells as the readout has. Backspace takes the last back. Enter sets the knob, as
+  the readout reads it (VOICES a count, ENTROPY, WIDTH and INNER percent, DETUNE cents, DRIVE and
+  LEVEL dB), within its travel (VOICES 2 to 10), a gesture of its own; what is not a number sets
+  nothing. Escape, or a press anywhere but the readout, leaves it as it was; the editor takes
+  every key meanwhile and gives them back after (as the drawer does: R34).
+
+**Evidence (the Linux reference machine, 2026-10-10):** `a_value_typed_into_a_readout_sets_its_knob`
+(DRIVE 8.4 dB; LEVEL beyond its travel either way, Backspace, -9 dB; Escape and a press elsewhere;
+ENTROPY's switch double-clicked, then 25 %; VOICES 12 as 10; DETUNE in SCATTER none); a render of
+DRIVE's and LEVEL's readouts being typed into. The core's, panel's and plug-in's tests, 318
+passed, 42 ignored; rustfmt; clippy with `-D warnings`.
