@@ -4241,3 +4241,12 @@ owner's computers (the one Live set using the CA-72 uses CA-72 CAL), so 0.1.5 ma
   second half of a second), the oscillator within 1.2 cents of 0.1.5's wherever it follows the
   keys, and oscillator 3 with the control off 2.47 to 2.50 semitones lower at every value (change
   5, above: at the centre main and this change both 201.2672 Hz, 0.1.5 232.3974 Hz).
+
+**On the Mac (2026-10-10, main at 230c41e):** built as the bundles are released (`--profile
+bundle`), renamed CA-72 SEMITONES with ids of its own (`com.idlefoundry.ca-72-semitones`,
+`IdleFoundryCA72S`), in a folder of its own; clap-validator 37 passed, 7 skipped; Steinberg's
+VST3 validator 47 passed; pluginval at strictness 5 without its editor tests SUCCESS. Installed
+beside the other test builds for the owner, nothing replaced, and not opened in Live by the
+agent. The owner's Cycle of Fifths converted (oscillator 2's FREQUENCY 5.8494 to 6.50964, +7.16
+semitones as before), its old file in `CA-72/Presets-before-semitones`: the test builds before
+this one read it 0.45 semitone sharp now. Not tried: any host, Windows, Linux.
