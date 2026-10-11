@@ -12,8 +12,9 @@
 //! MIDI button shows its list of assignments (`crate::learning`, R34).
 
 use std::any::Any;
-use std::sync::Arc;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use baseview::{
@@ -30,6 +31,7 @@ use ca72_panel::presets::{
 use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
+use nih_plug::editor::HostKey;
 use nih_plug::prelude::*;
 use plugin_kit_stereo::place;
 
@@ -258,6 +260,148 @@ pub struct Ca72Editor {
     open: Arc<AtomicBool>,
     /// The width fitted to the screen for this opening (0 not yet measured).
     fitted: Arc<AtomicU32>,
+    /// The keys the host gives the editor's view rather than its window (decisions.md R-KEYS).
+    host_keys: Arc<HostKeys>,
+}
+
+/// Keys the host gives the editor's view rather than its window (decisions.md R-KEYS: Cubase
+/// keeps the keyboard from the window and gives a VST3 plug-in its keys through
+/// `IPlugView::onKeyDown()`): whether the editor holds the keyboard now (a value typed, the
+/// drawer, MIDI Learn), and those taken for it, for its window at its next frame.
+#[derive(Debug, Default)]
+pub struct HostKeys {
+    holding: AtomicBool,
+    queue: Mutex<Vec<KeyboardEvent>>,
+}
+
+impl HostKeys {
+    /// A key the host gave: taken while the editor holds the keyboard (every key then, so that
+    /// none is the host's key command meanwhile), else the host's.
+    pub fn offer(&self, k: HostKey) -> bool {
+        if !self.holding.load(Ordering::Acquire) {
+            return false;
+        }
+        if let Some(e) = host_key_event(k)
+            && let Ok(mut q) = self.queue.lock()
+            && q.len() < 64
+        {
+            q.push(e);
+        }
+        true
+    }
+
+    /// The keys taken since the last time.
+    fn take(&self) -> Vec<KeyboardEvent> {
+        self.queue
+            .lock()
+            .map(|mut q| std::mem::take(&mut *q))
+            .unwrap_or_default()
+    }
+}
+
+/// A host's key as the window's own come: a key VST3 names by its code (Backspace, Enter,
+/// Escape, the arrows and so on), else its character (a numeric keypad's digit, point or minus
+/// sign too when the host gives none); its modifiers. None for what the editor has no use for.
+pub fn host_key_event(k: HostKey) -> Option<KeyboardEvent> {
+    // VST3's `VirtualKeyCodes` (pluginterfaces/base/keycodes.h).
+    let named = match k.key_code {
+        1 => Some(Key::Backspace),
+        2 => Some(Key::Tab),
+        4 | 19 => Some(Key::Enter),
+        6 => Some(Key::Escape),
+        9 => Some(Key::End),
+        10 => Some(Key::Home),
+        11 => Some(Key::ArrowLeft),
+        12 => Some(Key::ArrowUp),
+        13 => Some(Key::ArrowRight),
+        14 => Some(Key::ArrowDown),
+        15 => Some(Key::PageUp),
+        16 => Some(Key::PageDown),
+        22 => Some(Key::Delete),
+        54 => Some(Key::Shift),
+        55 => Some(Key::Control),
+        56 => Some(Key::Alt),
+        _ => None,
+    };
+    let key = match (named, k.character) {
+        (Some(n), _) => n,
+        (None, Some(c)) if !c.is_control() => Key::Character(c.to_string()),
+        (None, _) => match k.key_code {
+            7 => Key::Character(" ".into()),
+            24..=33 => Key::Character(char::from(b'0' + (k.key_code - 24) as u8).to_string()),
+            37 => Key::Character("-".into()),
+            38 => Key::Character(".".into()),
+            _ => return None,
+        },
+    };
+    // VST3's `KeyModifier`: shift, alt, command (Ctrl on Windows), control (the Windows key).
+    let mut modifiers = Modifiers::empty();
+    if k.modifiers & 1 != 0 {
+        modifiers |= Modifiers::SHIFT;
+    }
+    if k.modifiers & 2 != 0 {
+        modifiers |= Modifiers::ALT;
+    }
+    let (command, control) = if cfg!(target_os = "macos") {
+        (Modifiers::META, Modifiers::CONTROL)
+    } else {
+        (Modifiers::CONTROL, Modifiers::META)
+    };
+    if k.modifiers & 4 != 0 {
+        modifiers |= command;
+    }
+    if k.modifiers & 8 != 0 {
+        modifiers |= control;
+    }
+    Some(KeyboardEvent {
+        state: if k.down { KeyState::Down } else { KeyState::Up },
+        key,
+        modifiers,
+        ..KeyboardEvent::default()
+    })
+}
+
+/// How long a key coming both ways (the host's and the window's own) waits for its twin.
+const TWIN: Duration = Duration::from_millis(150);
+
+/// Keys taken once though a host gives them both ways: each kept for [`TWIN`] to be matched
+/// with its twin from the other way, which is then not taken again.
+#[derive(Debug, Default)]
+struct KeyTwins {
+    host: VecDeque<(Instant, Key, KeyState)>,
+    own: VecDeque<(Instant, Key, KeyState)>,
+}
+
+impl KeyTwins {
+    /// Whether a key the host gave is new (not one the window had just now).
+    fn host_new(&mut self, k: &KeyboardEvent, now: Instant) -> bool {
+        Self::new_one(&mut self.own, &mut self.host, k, now)
+    }
+
+    /// Whether a key the window had is new (not one the host gave just now).
+    fn own_new(&mut self, k: &KeyboardEvent, now: Instant) -> bool {
+        Self::new_one(&mut self.host, &mut self.own, k, now)
+    }
+
+    fn new_one(
+        other: &mut VecDeque<(Instant, Key, KeyState)>,
+        mine: &mut VecDeque<(Instant, Key, KeyState)>,
+        k: &KeyboardEvent,
+        now: Instant,
+    ) -> bool {
+        let fresh = |t: &Instant| now.saturating_duration_since(*t) < TWIN;
+        other.retain(|(t, ..)| fresh(t));
+        mine.retain(|(t, ..)| fresh(t));
+        if let Some(i) = other
+            .iter()
+            .position(|(_, key, state)| *key == k.key && *state == k.state)
+        {
+            other.remove(i);
+            return false;
+        }
+        mine.push_back((now, k.key.clone(), k.state));
+        true
+    }
 }
 
 impl std::fmt::Debug for Ca72Editor {
@@ -276,6 +420,7 @@ impl Ca72Editor {
             scale: AtomicU32::new(0),
             open: Arc::new(AtomicBool::new(false)),
             fitted: Arc::new(AtomicU32::new(0)),
+            host_keys: Arc::new(HostKeys::default()),
         }
     }
 
@@ -352,6 +497,7 @@ impl Editor for Ca72Editor {
         let scale = self.host_scale();
         let params = Arc::clone(&self.params);
         let meters = Arc::clone(&self.meters);
+        let host_keys = Arc::clone(&self.host_keys);
         let parent = window::Parent(parent);
         // No window to open in (no parent, no X11 display): nothing shown, rather than
         // baseview's panic in the host's thread (decisions.md R18).
@@ -374,6 +520,7 @@ impl Editor for Ca72Editor {
                     width,
                     f64::from(scale.unwrap_or(1.0)),
                     Library::shared(),
+                    host_keys,
                 )
             },
         );
@@ -402,6 +549,11 @@ impl Editor for Ca72Editor {
     fn param_value_changed(&self, _id: &str, _normalized_value: f32) {}
     fn param_modulation_changed(&self, _id: &str, _modulation_offset: f32) {}
     fn param_values_changed(&self) {}
+
+    // Keys the host gives the view (Cubase): the editor's while it holds the keyboard.
+    fn on_host_key(&self, key: HostKey) -> bool {
+        self.host_keys.offer(key)
+    }
 }
 
 /// A control being dragged.
@@ -440,6 +592,17 @@ struct PanelWindow {
     editing: Editing,
     /// The keyboard the drawer took from another window (Windows), given back as it shuts.
     keys: Option<window::Keys>,
+    /// The keys the host gives the editor's view (decisions.md R-KEYS), each taken once if they
+    /// come both ways.
+    host_keys: Arc<HostKeys>,
+    twins: KeyTwins,
+}
+
+impl Drop for PanelWindow {
+    // Closed: the host's keys are the host's again.
+    fn drop(&mut self) {
+        self.host_keys.holding.store(false, Ordering::Release);
+    }
 }
 
 /// The panel being operated: what the pointer does to the parameters, and the scene drawn.
@@ -525,6 +688,7 @@ impl PanelWindow {
         width: u32,
         dpr: f64,
         library: Library,
+        host_keys: Arc<HostKeys>,
     ) -> Self {
         let physical = (
             (f64::from(width) * dpr).round() as u32,
@@ -545,7 +709,19 @@ impl PanelWindow {
                 |k| screen::usable(Some(k)),
             ),
             keys: None,
+            host_keys,
+            twins: KeyTwins::default(),
         }
+    }
+
+    /// A key, the window's own or the host's: the editor's to act on (whether it took it), the
+    /// window's size and keyboard following.
+    fn key(&mut self, window: &mut Window<'_>, k: &KeyboardEvent) -> bool {
+        self.editing.touched = true;
+        let taken = self.editing.keyed(k);
+        self.follow(window);
+        self.keyboard(window);
+        taken
     }
 
     /// The window now `info`'s size: the surface and every frame drawn to it.
@@ -604,6 +780,8 @@ impl PanelWindow {
             .learning
             .holds_keys(&self.editing.params.midi_map);
         let holding = self.editing.browser.open || learning || self.editing.typing.is_some();
+        // (And the keys the host gives the view: the editor's while it holds them.)
+        self.host_keys.holding.store(holding, Ordering::Release);
         // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
         // in REAPER's FX window an arrow moved REAPER's focus to one of its own buttons); the
         // host's again once it lets them go (decisions.md R34).
@@ -1988,6 +2166,13 @@ fn repaint_due(shown: Option<Instant>, now: Instant) -> bool {
 
 impl WindowHandler for PanelWindow {
     fn on_frame(&mut self, window: &mut Window<'_>) {
+        // The keys the host gave the view since the last frame (Cubase), as the window's own,
+        // but those the window had too (decisions.md R-KEYS).
+        for k in self.host_keys.take() {
+            if self.twins.host_new(&k, Instant::now()) {
+                self.key(window, &k);
+            }
+        }
         // A drag whose window lost the pointer's capture (Windows: Alt-Tab mid-drag) never
         // sees its release: it ends here (decisions.md R18).
         if self.editing.dragging() && window::lost_capture(window) {
@@ -2060,10 +2245,11 @@ impl WindowHandler for PanelWindow {
             }
             // The drawer, while open, takes the keys (the host keeps its shortcuts).
             Event::Keyboard(k) => {
-                self.editing.touched = true;
-                let taken = self.editing.keyed(&k);
-                self.follow(window);
-                self.keyboard(window);
+                // (One the host gave the view just now too: taken once.)
+                if !self.twins.own_new(&k, Instant::now()) {
+                    return EventStatus::Captured;
+                }
+                let taken = self.key(window, &k);
                 if taken {
                     EventStatus::Captured
                 } else {
@@ -2990,6 +3176,130 @@ mod tests {
         let middle = at(&e, (x, y));
         click(&mut e, middle);
         assert_eq!(host.take(), vec![]);
+    }
+
+    /// A host's key (Cubase gives a VST3 plug-in its keys through `onKeyDown()`: decisions.md
+    /// R-KEYS) as the window's own: VST3's codes named, else the character, the keypad's digits
+    /// without one too, the modifiers; none for a key the editor has no use for.
+    #[test]
+    fn a_hosts_key_is_read_as_the_windows_own() {
+        let key = |character, key_code, modifiers| HostKey {
+            character,
+            key_code,
+            modifiers,
+            down: true,
+        };
+        let read = |k| host_key_event(k).map(|e| (e.key, e.modifiers));
+        assert_eq!(
+            read(key(Some('8'), 0, 0)),
+            Some((Key::Character("8".into()), Modifiers::empty()))
+        );
+        assert_eq!(
+            read(key(Some('A'), 0, 1)),
+            Some((Key::Character("A".into()), Modifiers::SHIFT))
+        );
+        assert_eq!(read(key(Some('\r'), 4, 0)).map(|r| r.0), Some(Key::Enter));
+        assert_eq!(read(key(None, 19, 0)).map(|r| r.0), Some(Key::Enter));
+        assert_eq!(
+            read(key(Some('\u{1b}'), 6, 0)).map(|r| r.0),
+            Some(Key::Escape)
+        );
+        assert_eq!(
+            read(key(Some('\u{8}'), 1, 0)).map(|r| r.0),
+            Some(Key::Backspace)
+        );
+        assert_eq!(read(key(None, 14, 0)).map(|r| r.0), Some(Key::ArrowDown));
+        assert_eq!(
+            read(key(None, 29, 0)).map(|r| r.0),
+            Some(Key::Character("5".into()))
+        );
+        assert_eq!(
+            read(key(None, 38, 0)).map(|r| r.0),
+            Some(Key::Character(".".into()))
+        );
+        assert_eq!(read(key(None, 44, 0)), None, "F5");
+        let up = host_key_event(HostKey {
+            down: false,
+            ..key(Some('8'), 0, 0)
+        })
+        .expect("a key");
+        assert_eq!(up.state, KeyState::Up);
+    }
+
+    /// The host's keys are the editor's only while it holds the keyboard (a value typed, the
+    /// drawer, MIDI Learn): then every key is taken, so that none is the host's key command
+    /// meanwhile, and those it has a use for are kept for the window; else none is taken.
+    #[test]
+    fn the_hosts_keys_are_taken_only_while_the_editor_holds_the_keyboard() {
+        let keys = HostKeys::default();
+        let k = |character, key_code| HostKey {
+            character,
+            key_code,
+            modifiers: 0,
+            down: true,
+        };
+        assert!(!keys.offer(k(Some('8'), 0)));
+        assert!(keys.take().is_empty());
+        keys.holding.store(true, Ordering::Release);
+        assert!(keys.offer(k(Some('8'), 0)));
+        assert!(keys.offer(k(None, 44)), "F5: taken, kept for nothing");
+        assert!(keys.offer(k(Some('\r'), 4)));
+        let taken: Vec<Key> = keys.take().into_iter().map(|e| e.key).collect();
+        assert_eq!(taken, vec![Key::Character("8".into()), Key::Enter]);
+        assert!(keys.take().is_empty());
+    }
+
+    /// A key a host gives both ways (the view's and the window's own) is taken once, whichever
+    /// comes first; two presses of one key from one way are two; a twin later than [`TWIN`] is a
+    /// key of its own.
+    #[test]
+    fn a_key_given_both_ways_is_taken_once() {
+        let mut twins = KeyTwins::default();
+        let ev = |c: &str| KeyboardEvent {
+            state: KeyState::Down,
+            key: Key::Character(c.into()),
+            ..KeyboardEvent::default()
+        };
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        assert!(twins.own_new(&ev("8"), at(0)));
+        assert!(!twins.host_new(&ev("8"), at(10)));
+        assert!(twins.host_new(&ev("4"), at(20)));
+        assert!(!twins.own_new(&ev("4"), at(25)));
+        assert!(twins.own_new(&ev("1"), at(30)));
+        assert!(twins.own_new(&ev("1"), at(40)));
+        assert!(!twins.host_new(&ev("1"), at(45)));
+        assert!(!twins.host_new(&ev("1"), at(50)));
+        assert!(twins.own_new(&ev("2"), at(60)));
+        assert!(twins.host_new(&ev("2"), at(60 + 200)));
+    }
+
+    /// A value typed with the host's keys (Cubase) as with the window's own.
+    #[test]
+    fn a_value_typed_with_the_hosts_keys() {
+        let (mut e, host, params) = editing();
+        let p = on_strip(&e, strip_at(StripTarget::Readout(Readout::Drive)));
+        click(&mut e, p);
+        click(&mut e, p);
+        for (character, key_code) in [(Some('1'), 0), (None, 26), (Some('\r'), 4)] {
+            let k = host_key_event(HostKey {
+                character,
+                key_code,
+                modifiers: 0,
+                down: true,
+            })
+            .expect("a key");
+            assert!(e.keyed(&k));
+        }
+        let d = params.drive.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(d),
+                Call::Set(d, params.drive.preview_normalized(12.0)),
+                Call::End(d)
+            ]
+        );
     }
 
     /// A value typed into a readout (decisions.md R-TYPED): a double click on it, its digits,
