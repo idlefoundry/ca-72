@@ -14,8 +14,8 @@ one, sorted by path, as
 from this directory) was
 `7dd456dac30f609950356c97f8307ee55052eaf9e1b815c96d09309db603d92b`.
 
-Two changes, for macOS only, in `src/backends/cg.rs` (the CA-72's `docs/decisions.md` R35 and
-R59):
+Two changes, for macOS only, in `src/backends/cg.rs` (the CA-72's `docs/decisions.md` R41,
+R59 and R60):
 
 1. **Each copy of softbuffer registers an observer class of its own.** The CoreGraphics
    backend keeps its layer in step with the view's through an Objective-C object observing the
