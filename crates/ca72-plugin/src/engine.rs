@@ -16,7 +16,7 @@
 //! melody goes round the voices. ENTROPY makes each voice its own parts, SPREAD puts the voices
 //! across the stereo field where the placement has them (`character.rs`); the one instrument
 //! (without DOUBLE) at the next of VOICES's places at each attack, a note played legato staying
-//! where its phrase began (decisions.md R-SCATTER); both 0 by default, the circuit as drawn.
+//! where its phrase began (decisions.md R62); both 0 by default, the circuit as drawn.
 
 use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
@@ -232,7 +232,7 @@ const QUIET: usize = 256;
 pub use plugin_kit_stereo::place::GLIDE;
 
 /// The time constant, seconds, with which the one instrument's place follows when it scatters
-/// (POLY, UNISON and DOUBLE off: decisions.md R-SCATTER): a fifth of the time its contours
+/// (POLY, UNISON and DOUBLE off: decisions.md R62): a fifth of the time its contours
 /// take to start after its trigger contact closes (the light model's `TRIGGER_ON`, fitted to
 /// the circuit's), so that at an attack it is within 1 % of its new place before its contours
 /// start (with [`GLIDE`] it would still be 46 % of the way short).
@@ -438,7 +438,7 @@ pub struct Playing {
     /// last had it (the twin takes the keys pressed only then).
     twin: Box<Twin>,
     double: bool,
-    /// The one instrument's place among VOICES's when it scatters (decisions.md R-SCATTER):
+    /// The one instrument's place among VOICES's when it scatters (decisions.md R62):
     /// the place its last attack took (None before its first, or since the pattern started
     /// again: the first place); and whether its trigger contact was closed at its last sample.
     turn: Option<usize>,
@@ -657,7 +657,7 @@ impl Playing {
     }
 
     /// The one instrument's gains at its turn's place among VOICES's, scattering (decisions.md
-    /// R-SCATTER): before its first attack, the first place.
+    /// R62): before its first attack, the first place.
     fn scattered(&self, m: &Mix) -> (f64, f64) {
         let placement = m.placement.unwrap_or_default();
         let at = self.turn.unwrap_or(0);
@@ -667,7 +667,7 @@ impl Playing {
 
     /// Its trigger contact `closed` at the sample just played: closing (an attack's start) with
     /// the one instrument scattering, its place the next of VOICES's, from the next sample
-    /// (decisions.md R-SCATTER). A note played legato, its contact staying closed, stays.
+    /// (decisions.md R62). A note played legato, its contact staying closed, stays.
     fn turned(&mut self, closed: bool, m: &Mix, p: &mut Places) {
         if m.scatter && closed && !self.closed {
             self.turn = Some(self.turn.map_or(0, |t| (t + 1) % m.voices.max(1)));
@@ -811,7 +811,7 @@ pub struct Engine {
     turn_glide: f64,
     /// The place the one instrument's voice took at its last attack, scattering (the editor
     /// shows it), and whether its pattern starts again from the first place at its next run
-    /// (every key let go by the host: decisions.md R-SCATTER).
+    /// (every key let go by the host: decisions.md R62).
     turn: usize,
     restart: bool,
     /// AUTO GAIN (decisions.md R45): the sound's curve (`drive.rs`), the correction the
@@ -1376,7 +1376,7 @@ impl Engine {
 
     /// Every held key released (the contours then run out as the DECAY switch has them), and
     /// the one instrument's pattern started again from the first place (decisions.md
-    /// R-SCATTER): the host resets the plug-in, and sends All Notes Off as its transport
+    /// R62): the host resets the plug-in, and sends All Notes Off as its transport
     /// stops, so that a part plays and renders its places alike each time.
     pub fn release_all(&mut self) {
         for key in 0..self.held.len() {
@@ -1932,7 +1932,7 @@ pub const CHUNK: usize = 128;
 /// pair at the edge) and the voices it places among (VOICES), DOUBLE's detune between a note's
 /// two voices, cents (0: one voice a note), DRIVE's gain into the filter (1: the circuit), and
 /// whether the one instrument scatters (POLY, UNISON and DOUBLE off: its voice at the next of
-/// VOICES's places at each attack; decisions.md R-SCATTER).
+/// VOICES's places at each attack; decisions.md R62).
 #[derive(Debug, Clone, Copy)]
 pub struct Mix {
     entropy: f64,
@@ -2941,7 +2941,7 @@ mod tests {
     /// The one instrument (POLY, UNISON and DOUBLE off) scatters: each attack at the next of
     /// VOICES's places, round and round, where the placement puts POLY's voices (EVEN; CENTER
     /// with INNER), at QUALITY's LO the same; the editor told the place (decisions.md
-    /// R-SCATTER).
+    /// R62).
     #[test]
     fn the_one_instrument_takes_the_next_place_at_each_attack() {
         let keys = [57, 60, 62, 64, 65, 67, 69];
@@ -2981,7 +2981,7 @@ mod tests {
 
     /// A note played legato (its trigger contact staying closed, single triggering) stays at
     /// the place its phrase began; with RETRIGGER, a key pressed among others held starts the
-    /// contours again, and moves to the next place (decisions.md R-SCATTER).
+    /// contours again, and moves to the next place (decisions.md R62).
     #[test]
     fn a_legato_note_stays_and_retrigger_moves_it() {
         for retrigger in [false, true] {
@@ -3012,7 +3012,7 @@ mod tests {
 
     /// All Notes Off (and the host's reset, which lets every key go so) starts the one
     /// instrument's pattern again from the first place, so that a part plays and renders its
-    /// places alike each time (decisions.md R-SCATTER).
+    /// places alike each time (decisions.md R62).
     #[test]
     fn all_notes_off_starts_the_pattern_again() {
         let c = Controls {
@@ -3043,7 +3043,7 @@ mod tests {
     /// At an attack the one instrument reaches its new place before its contours start
     /// ([`TURN_GLIDE`], `TRIGGER_ON` after its trigger contact closes): within 1 % of the way
     /// there, from the edge to the other (with [`GLIDE`], 46 % short), so that the note is
-    /// heard where it sounds, not sliding there (decisions.md R-SCATTER).
+    /// heard where it sounds, not sliding there (decisions.md R62).
     #[test]
     fn the_one_instrument_is_at_its_new_place_before_its_contours_start() {
         let c = Controls {
@@ -3505,7 +3505,7 @@ mod tests {
             e.event(Event::Note { key: 57, on: true });
             let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
             // (POLY off, the voice alone scatters once DOUBLE is off: its first note at the
-            // first of VOICES's places. R-SCATTER.)
+            // first of VOICES's places. R62.)
             let (gl, gr) = voice_gains(1.0, 1.0, Placement::Even, 0, c.voices);
             let mut block = |e: &mut Engine| {
                 e.render(&[], &mut l, &mut r);

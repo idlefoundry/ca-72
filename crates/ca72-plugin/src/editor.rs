@@ -2110,7 +2110,7 @@ fn strip_scene(
     let mono = !poly && !unison;
     let doubled = p.doubled.value();
     // (MONO with DOUBLE: the one pair, all of WIDTH's way out, whatever VOICES and the
-    // placement; without, it scatters over VOICES's places: decisions.md R-SCATTER.)
+    // placement; without, it scatters over VOICES's places: decisions.md R62.)
     let alone = mono && doubled;
     let voices = c.voices.clamp(2, 10);
     let placement = c.placement;
@@ -2158,7 +2158,7 @@ fn strip_scene(
     let on = |k: usize| sounding & (1 << k) != 0;
     // Where they sound: in MONO with DOUBLE the one pair, all of WIDTH's way out; else each of
     // VOICES's places by the placement (in MONO the one voice at the place of its last attack,
-    // R-SCATTER), its pair as far out with DOUBLE (decisions.md R45), each in its side's band
+    // R62), its pair as far out with DOUBLE (decisions.md R45), each in its side's band
     // by INNER: where the engine's gains put it, the kit's (R49).
     let (width, inner) = (c.spread, c.inner);
     let field = if alone {
@@ -5116,7 +5116,7 @@ mod tests {
 
     /// The strip lights the placement's tab by the plug-in's choice, EVEN the first and CENTER
     /// the second (not by the kit's index, which counts its EDGES), in MONO too, whose one
-    /// voice scatters by it (R-SCATTER); none in MONO with DOUBLE, whose pair has no place
+    /// voice scatters by it (R62); none in MONO with DOUBLE, whose pair has no place
     /// among others.
     #[test]
     fn the_strip_lights_the_placements_tab() {
@@ -5138,7 +5138,7 @@ mod tests {
 
     /// In MONO without DOUBLE the strip shows VOICES's places as the engine's gains have them,
     /// the one voice lit at the place its last attack took (the engine's bit for it), at the
-    /// output's level, with VOICES, WIDTH and INNER lit (R-SCATTER); with DOUBLE, the one pair,
+    /// output's level, with VOICES, WIDTH and INNER lit (R62); with DOUBLE, the one pair,
     /// and VOICES not lit.
     #[test]
     fn mono_shows_its_places_and_the_one_it_sounds_at() {

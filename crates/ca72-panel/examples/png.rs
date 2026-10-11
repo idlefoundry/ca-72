@@ -89,7 +89,7 @@ fn strip_knob(param: &str) -> Option<f64> {
 
 /// The strip as the mock-up showed it: POLY, SCATTER, EVEN, AUTO GAIN on, eight voices of which
 /// four sound, a preset chosen. In MONO (without DOUBLE) the one voice sounds at one of the eight
-/// places, the one its last attack took (decisions.md R-SCATTER), the readouts lit as in POLY.
+/// places, the one its last attack took (decisions.md R62), the readouts lit as in POLY.
 fn example_strip(mono: bool) -> ca72_panel::strip::StripScene {
     use ca72_panel::strip::{Field, StripScene};
     let r = |t: &str, on: bool| (t.to_owned(), on);

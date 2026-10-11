@@ -218,7 +218,7 @@ fn poly_off_is_the_one_voice_as_before() {
 
 /// POLY: a chord plays on its own voices (louder than one; the one voice plays its lowest
 /// key), and with SPREAD at 100 % they part left and right; the one voice, the same sound, goes
-/// to the first of VOICES's places (EVEN's left edge: decisions.md R-SCATTER).
+/// to the first of VOICES's places (EVEN's left edge: decisions.md R62).
 #[test]
 fn poly_plays_a_chord_and_spread_parts_it() {
     let chord = |c: &Controls| {

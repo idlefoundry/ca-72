@@ -4778,7 +4778,7 @@ nothing held: the FX window closed, as REAPER does. The same build of the commit
 (without change 6): "-6" typed, Escape closed the FX window. Not tried: the VST3 in REAPER, and
 other hosts on Windows (the kit's K10 tried REAPER's VST3 and Cubase 15 with the CA-74).
 
-## R-SCATTER. SCATTER in MONO: the one voice at the next of VOICES's places at each attack
+## R62. SCATTER in MONO: the one voice at the next of VOICES's places at each attack
 
 **The owner, 2026-10-11:** "what if me made "scatter" an option in mono? So I would imagine
 something like a plucked voice, which we would want to be monophonic, um, would have scat- when
@@ -4827,8 +4827,14 @@ great. make it".
 - **No new parameter, and nothing kept for what was saved before:** a session or preset with
   POLY, UNISON and DOUBLE off and WIDTH above 0 now scatters. Of the factory presets only Wooden
   Mallet (MONO, WIDTH 60, VOICES 8, EVEN) does, and it is kept so, scattering, its loudness the
-  same (below). Whether sessions saved before should open as they sounded is asked of the
-  owner.
+  same (below).
+
+**The owner, 2026-10-11**, asked whether sessions saved before should open as they sounded
+(recommended: leave them, WIDTH having done nothing there), whether Wooden Mallet should keep
+scattering, and whether the CA-74 should have it too: "okay. what presets would that be?", "ok,
+sounds good" and "yes". Of the presets in the Mac's library only Wooden Mallet (the factory's and
+the owner's copy) scatters; Hollow Glider, Noise Crash, Noise Snare and Slow Bow there are MONO
+with WIDTH up but DOUBLE on, and play as before; the retired presets' pack (R55) holds none yet.
 
 **Evidence (the Linux reference machine, 2026-10-11):** tests:
 `the_one_instrument_takes_the_next_place_at_each_attack` (seven detached notes, each one's left

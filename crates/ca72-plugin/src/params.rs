@@ -364,7 +364,7 @@ pub struct Ca72Params {
     #[id = "poly"]
     pub poly: BoolParam,
     /// VOICES: how many POLY plays, 2 to 10; with POLY and UNISON off, how many places the one
-    /// instrument goes round, a place an attack (decisions.md R-SCATTER).
+    /// instrument goes round, a place an attack (decisions.md R62).
     #[id = "voices"]
     pub voices: IntParam,
     /// ENTROPY: each voice its own parts and its oscillators drifting, 0 to 100 %.
