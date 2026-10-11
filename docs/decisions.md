@@ -4017,3 +4017,83 @@ within the window), `the_settings_are_kept_and_a_bad_file_left_alone` (the look 
 but "classic" read as realistic), the drag test (VOICES on a step at every pixel of a drag);
 renders of the rail and of the menus (the realistic look). The core's, panel's and plug-in's
 tests, 317 passed, 42 ignored; rustfmt; clippy with `-D warnings`.
+
+### In hosts (2026-10-10), R-PRIORITY and R-SKIN
+
+**The owner:** "do the windows testing right now", having asked whether the tests cover "the
+issues we had with Cubase and other DAWs before" (told: R36's Cubase behaviour and R31's side
+chain have tests that act as those hosts did; R26, R28 and R32 are Windows-only and R41 macOS-only,
+none of which had been tried on this build; nothing had been tried in a host).
+
+**Windows 11 at 200 %** (the CA-74's harness again, `ca72-it\prio`: main's tree at 73ba311 built
+as CI builds the release, MSVC with `--profile bundle`, renamed CA-72 PRIORITY with IDs of its
+own; REAPER with a settings folder of its own; a desktop agent in the signed-in session):
+- **Validators:** clap-validator 36 passed, 8 skipped, none failed; pluginval at strictness 10
+  (its editor tests skipped: no desktop over SSH) SUCCESS. Steinberg's validator is not built on
+  this machine (47 passed on the Mac, below).
+- **REAPER 7.82, the VST3 and the CLAP:** the editor opened at the drawing's proportions (2892 by
+  1652). NOTE PRIORITY went where clicked (LOW, HIGH, LAST, LOW) and RETRIGGER on and off, each
+  read back through REAPER's API, by posted clicks and by real ones (the cursor moved and
+  pressed); the settings key's menu (SETTINGS, LOOK, REALISTIC marked), CLASSIC drawing the panel
+  as drawn at once and REALISTIC bringing it back, `settings.toml` following ("classic", then
+  "realistic"); VOICES dragged part way between voices, the picture taken with the button still
+  down, its knob on 5, then on 7, never between; ‹ and › stepping the presets from where the keys
+  are now; the presets' list dropped over the strip and closed (R26); the editor whole after
+  minimising and restoring (R28); a project saved with HIGH and RETRIGGER on, REAPER closed and the
+  project opened again: HIGH and on; notes heard (the track's peak 0.12). The VST3 and the CLAP
+  alike.
+- **A harness fault, not the editor's:** a posted press within about half a second of the last
+  release went where the real cursor was, not where the posted move put it (Windows sends the
+  window the cursor's own place as the pointer's capture ends); with real input, a click and a
+  drag 0.3 s apart both took (NOTE PRIORITY LOW then VOICES 8 to 9, HIGH then 9 to 8).
+- **Cubase Pro 15.0.30** (the trial R36 used; the build in the user's VST3 folder for the test,
+  recycled after): an instrument track with CA-72 PRIORITY, real clicks while it processed audio:
+  NOTE PRIORITY to HIGH, staying there; RETRIGGER on (its tip "RETRIGGER: On"); POLY lit; VOICES
+  dragged from 4 to 5, its readout 5; the settings' menu, CLASSIC and back to REALISTIC; OSCILLATOR-1's
+  switch flipped; CUTOFF FREQUENCY dragged quickly and let go, staying there, and a double click
+  setting it back to 0.00, each shown by the editor as Cubase sent it back (R36's fault showed as
+  controls that did not stay). Cubase closed without saving.
+
+**macOS 27 (the owner's Mac, Apple silicon only; VST3 and CLAP, no Audio Unit):** clap-validator
+37 passed, 7 skipped; Steinberg's VST3 validator 47 passed; pluginval at strictness 5 without its
+editor tests SUCCESS. Installed as CA-72 PRIORITY for the owner; not opened in Live by the agent.
+
+Not tried: the Audio Unit and an Intel Mac (a universal build), R41's test (macOS-only, not run on
+this build), Linux hosts, Cubase on macOS.
+
+## R-TYPED. A value typed into a readout
+
+**The owner, 2026-10-10:** "i should be able to type into any of the number displays and enter a
+value i want the knob to turn to."
+
+**Agent decisions, 2026-10-10** (told to the owner as they were begun, not separately approved):
+- **A double click** on a readout begins: VOICES', ENTROPY's, WIDTH's, INNER's, DETUNE's, DRIVE's
+  and LEVEL's. A single click does what it did: ENTROPY's, WIDTH's and INNER's readouts switch
+  their amounts off and on (R-STEREO), so a double click there undoes its first press's switch
+  before the typing begins; the others did nothing and are now the strip's targets
+  (`StripTarget::Readout`). AUTO GAIN's reads what is measured and takes no value; DETUNE's takes
+  none in SCATTER, where its knob does nothing either.
+- **Typing:** the readout lit with what is typed, an underscore (its seven segments' lowest)
+  where the next digit goes while there is room for one: digits, a point, and a minus sign for
+  LEVEL, three cells as the readout has. Backspace takes the last back. Enter sets the knob, as
+  the readout reads it (VOICES a count, ENTROPY, WIDTH and INNER percent, DETUNE cents, DRIVE and
+  LEVEL dB), within its travel (VOICES 2 to 10), a gesture of its own; what is not a number sets
+  nothing. Escape, or a press anywhere but the readout, leaves it as it was; the editor takes
+  every key meanwhile and gives them back after (as the drawer does: R34).
+
+**Evidence (the Linux reference machine, 2026-10-10):** `a_value_typed_into_a_readout_sets_its_knob`
+(DRIVE 8.4 dB; LEVEL beyond its travel either way, Backspace, -9 dB; Escape and a press elsewhere;
+ENTROPY's switch double-clicked, then 25 %; VOICES 12 as 10; DETUNE in SCATTER none); a render of
+DRIVE's and LEVEL's readouts being typed into. The core's, panel's and plug-in's tests, 318
+passed, 42 ignored; rustfmt; clippy with `-D warnings`.
+
+**In hosts (Windows 11, 2026-10-10, the `prio` harness, f6da784):** REAPER 7.82: a real double
+click on DRIVE's readout lit it with the underscore, "8.4" typed with real keys showed "8.4_", and
+Enter set DRIVE to 8.4 dB (read back through REAPER's API: 0.35). Cubase Pro 15.0.30: the double
+click began the typing (the underscore lit), but no key reached the editor: "8.4" and Enter did
+nothing, and Escape went to Cubase, which closed the plug-in's window. Cubase gives a VST3
+plug-in's view its keys through `IPlugView::onKeyDown`, which nih-plug's wrapper leaves
+unimplemented (`kNotImplemented`), and keeps them for its own key commands; the drawer's fields
+(FIND, a preset's name and tags) most likely fare the same there (not tried). Not yet fixed. A
+first try in REAPER found the presets' drawer open before the double click, which three fresh
+tries did not show again.

@@ -974,7 +974,7 @@ fn reading(k: &mut StripRenderer, i: usize, r: Readout, text: &str, lit: bool) {
 /// Seven-segment digits, `cells` of them, in the readout `(x, y, w, h)`, right-aligned, lit
 /// or dark (every segment as an unlit one shows faintly through the glass). The CA-74's.
 fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &str, lit: bool) {
-    const SEGS: [(char, &str); 16] = [
+    const SEGS: [(char, &str); 17] = [
         ('0', "abcdef"),
         ('1', "bc"),
         ('2', "abged"),
@@ -991,6 +991,8 @@ fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &s
         ('N', "abcef"),
         ('E', "adefg"),
         (' ', ""),
+        // (A value being typed: where the next digit goes.)
+        ('_', "d"),
     ];
     let mut shown: Vec<(char, bool)> = Vec::new();
     for c in text.chars() {

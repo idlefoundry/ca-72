@@ -505,6 +505,12 @@ struct Editing {
     /// note read. The note shows once ULTRA's lamp is lit, until it is read.
     settings: Settings,
     ultra_note: bool,
+    /// A value being typed into a readout (decisions.md R-TYPED): which, and what so far; the
+    /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
+    /// a switch had before it), for a double click.
+    typing: Option<(Readout, String)>,
+    typing_keys: bool,
+    last_strip_press: Option<(Instant, StripTarget, f32)>,
 }
 
 impl PanelWindow {
@@ -585,7 +591,8 @@ impl PanelWindow {
         // (MIDI Learn too, while a control's menu is open or a controller is awaited: Escape
         // closes or cancels it; decisions.md R34.)
         let asked = std::mem::take(&mut self.editing.browser.wants_keys)
-            | std::mem::take(&mut self.editing.learning.take_keys);
+            | std::mem::take(&mut self.editing.learning.take_keys)
+            | std::mem::take(&mut self.editing.typing_keys);
         if asked {
             let had = window::take_keys(window);
             if self.keys.is_none() {
@@ -596,7 +603,7 @@ impl PanelWindow {
             .editing
             .learning
             .holds_keys(&self.editing.params.midi_map);
-        let holding = self.editing.browser.open || learning;
+        let holding = self.editing.browser.open || learning || self.editing.typing.is_some();
         // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
         // in REAPER's FX window an arrow moved REAPER's focus to one of its own buttons); the
         // host's again once it lets them go (decisions.md R34).
@@ -665,6 +672,9 @@ impl Editing {
             output: 0.0,
             settings,
             ultra_note: false,
+            typing: None,
+            typing_keys: false,
+            last_strip_press: None,
         }
         .opened()
     }
@@ -863,6 +873,89 @@ impl Editing {
         }
     }
 
+    /// A value to be typed into readout `r` (decisions.md R-TYPED): not AUTO GAIN's, which reads
+    /// what is measured, nor DETUNE's in SCATTER, where its knob does nothing either.
+    fn start_typing(&mut self, r: Readout) {
+        if !r.typed() || (r == Readout::Detune && !self.params.doubled.value()) {
+            return;
+        }
+        self.typing = Some((r, String::new()));
+        self.typing_keys = true;
+    }
+
+    /// A key while a value is typed: a digit, the point or the sign added where they fit, the
+    /// last taken back, Enter setting the value, Escape leaving it; every key is the editor's
+    /// meanwhile.
+    fn type_key(&mut self, k: &KeyboardEvent) -> bool {
+        if k.state != KeyState::Down {
+            return true;
+        }
+        let Some((r, text)) = &mut self.typing else {
+            return false;
+        };
+        match &k.key {
+            Key::Character(c) => {
+                for ch in c.chars() {
+                    let cells = text.chars().filter(|c| *c != '.').count();
+                    let fits = match ch {
+                        '0'..='9' => cells < 3,
+                        '.' => !text.contains('.') && cells < 3,
+                        '-' => text.is_empty() && matches!(r, Readout::Level),
+                        _ => false,
+                    };
+                    if fits {
+                        text.push(ch);
+                    }
+                }
+            }
+            Key::Backspace => {
+                text.pop();
+            }
+            Key::Enter => {
+                let (r, text) = (*r, text.clone());
+                self.typing = None;
+                self.set_typed(r, &text);
+            }
+            Key::Escape => self.typing = None,
+            _ => {}
+        }
+        true
+    }
+
+    /// The value typed into readout `r` set, as its readout reads it (VOICES a count, ENTROPY,
+    /// WIDTH and INNER percent, DETUNE cents, DRIVE and LEVEL dB), within its knob's travel, a
+    /// gesture of its own; nothing for what is not a number.
+    fn set_typed(&mut self, r: Readout, text: &str) {
+        let Ok(v) = text.parse::<f64>() else {
+            return;
+        };
+        if !v.is_finite() {
+            return;
+        }
+        let p = &self.params;
+        let (id, normalized) = match r {
+            Readout::Voices => (
+                "voices",
+                p.voices
+                    .preview_normalized(v.round().clamp(2.0, 10.0) as i32),
+            ),
+            Readout::Entropy => ("entropy", p.entropy.preview_normalized(v as f32)),
+            Readout::Width => ("spread", p.spread.preview_normalized(v as f32)),
+            Readout::Inner => ("inner", p.inner.preview_normalized(v as f32)),
+            Readout::Detune => (
+                "double",
+                p.double
+                    .preview_normalized((v / crate::engine::DOUBLE_CENTS * 100.0) as f32),
+            ),
+            Readout::Drive => ("drive", p.drive.preview_normalized(v as f32)),
+            Readout::Level => ("level", p.level.preview_normalized(v as f32)),
+            Readout::Auto => return,
+        };
+        if let Some(i) = ca72_panel::controls::index(id) {
+            self.set_once(i, f64::from(normalized.clamp(0.0, 1.0)));
+        }
+    }
+
     fn set_power(&self, on: bool) {
         let s = self.setter();
         s.begin_set_parameter(&self.params.bypass);
@@ -923,7 +1016,33 @@ impl Editing {
     /// A press on the strip's own parts (the drawing's units): a tab, a readout that is a
     /// switch, the rail's keys and the name.
     fn strip_press(&mut self, t: StripTarget) {
+        let now = Instant::now();
+        let double = self
+            .last_strip_press
+            .filter(|(at, last, _)| *last == t && now - *at < DOUBLE_CLICK);
+        // A readout double-clicked: a value typed into it (decisions.md R-TYPED); a switch's
+        // first press, which switched its amount, undone.
+        if let (Some((_, _, was)), StripTarget::Switch(r) | StripTarget::Readout(r)) = (double, t) {
+            self.last_strip_press = None;
+            if let StripTarget::Switch(a) = t {
+                let (p, _) = self.amount(a);
+                if p.unmodulated_normalized_value() != was {
+                    let s = self.setter();
+                    s.begin_set_parameter(p);
+                    s.set_parameter_normalized(p, was);
+                    s.end_set_parameter(p);
+                }
+            }
+            self.start_typing(r);
+            return;
+        }
+        let before = match t {
+            StripTarget::Switch(a) => self.amount(a).0.unmodulated_normalized_value(),
+            _ => 0.0,
+        };
+        self.last_strip_press = Some((now, t, before));
         match t {
+            StripTarget::Readout(_) => {}
             StripTarget::Switch(a) => {
                 let on = self.amount(a).0.unmodulated_normalized_value() <= 0.0;
                 self.switch_amount(a, on);
@@ -982,10 +1101,17 @@ impl Editing {
     }
 
     fn press(&mut self, modifiers: Modifiers) {
+        let (x, y) = self.in_drawing(self.pointer);
+        // A press on the readout a value is being typed into leaves it typed into; anywhere
+        // else ends the typing, nothing set (decisions.md R-TYPED).
+        if let Some((r, _)) = self.typing
+            && matches!(strip::hit(x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
+        {
+            return;
+        }
         // A wheel's gesture still waiting for its rest, or a drag whose release never came
         // (its window lost the pointer): ended before anything else begins.
         self.end_gestures();
-        let (x, y) = self.in_drawing(self.pointer);
         // ULTRA's note showing: the press closes it, read.
         if self.ultra_note {
             self.ultra_note = false;
@@ -1228,6 +1354,7 @@ impl Editing {
     /// before another begins, as the editor closes and as its window loses the focus or the
     /// pointer's capture. A gesture never begins inside another (decisions.md R18).
     fn end_gestures(&mut self) {
+        self.typing = None;
         self.end_scroll();
         self.resizing = None;
         if let Some(d) = self.drag.take() {
@@ -1441,6 +1568,19 @@ impl Editing {
             (&self.levels, self.output),
             std::mem::take(&mut self.strip_scene),
         );
+        // A value being typed: what is typed so far, lit, the next digit's place marked while
+        // there is room for one.
+        if let Some((r, text)) = &self.typing
+            && let Some(i) = Readout::ALL.iter().position(|x| x == r)
+        {
+            let cells = text.chars().filter(|c| *c != '.').count();
+            let shown = if cells < 3 {
+                format!("{text}_")
+            } else {
+                text.clone()
+            };
+            self.strip_scene.readouts[i] = (shown, true);
+        }
     }
 
     /// The tip: over the control operated, else over the one under the pointer.
@@ -1778,6 +1918,9 @@ impl Editing {
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
         // MIDI Learn first (decisions.md R34): Escape closes a control's menu, the drawer's MIDI
         // list takes the keys it shows, and Escape cancels learning.
+        if self.typing.is_some() {
+            return self.type_key(k);
+        }
         let map = std::sync::Arc::clone(&self.params.midi_map);
         let down = k.state == KeyState::Down && !modifier(&k.key);
         if down && k.key == Key::Escape && self.learning.menu_open() {
@@ -2847,6 +2990,115 @@ mod tests {
         let middle = at(&e, (x, y));
         click(&mut e, middle);
         assert_eq!(host.take(), vec![]);
+    }
+
+    /// A value typed into a readout (decisions.md R-TYPED): a double click on it, its digits,
+    /// Enter: its knob set at once, as the readout reads it, within the knob's travel, a gesture
+    /// of its own. Escape, or a press elsewhere, leaves it as it was; a press on the readout
+    /// itself goes on typing. A switch's readout double-clicked keeps its amount (its first
+    /// press undone) and takes a value too. VOICES within 2 to 10; DETUNE in SCATTER takes none;
+    /// AUTO GAIN's reads what is measured and takes none.
+    #[test]
+    fn a_value_typed_into_a_readout_sets_its_knob() {
+        let (mut e, host, params) = editing();
+        let double = |e: &mut Editing, t: StripTarget| {
+            let p = on_strip(e, strip_at(t));
+            click(e, p);
+            click(e, p);
+        };
+        let typed = |e: &mut Editing, text: &str| {
+            for c in text.chars() {
+                keyed(e, Key::Character(c.to_string()));
+            }
+        };
+        let shown = |e: &mut Editing, r: Readout| {
+            e.draw();
+            let i = Readout::ALL
+                .iter()
+                .position(|x| *x == r)
+                .expect("a readout");
+            e.strip_scene.readouts[i].clone()
+        };
+        // DRIVE: 8.4 dB.
+        double(&mut e, StripTarget::Readout(Readout::Drive));
+        assert_eq!(host.take(), vec![]);
+        assert_eq!(shown(&mut e, Readout::Drive), ("_".to_owned(), true));
+        typed(&mut e, "8.4x");
+        assert_eq!(shown(&mut e, Readout::Drive), ("8.4_".to_owned(), true));
+        // (A press on it goes on typing.)
+        let at = on_strip(&e, strip_at(StripTarget::Readout(Readout::Drive)));
+        click(&mut e, at);
+        keyed(&mut e, Key::Enter);
+        let d = params.drive.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(d),
+                Call::Set(d, params.drive.preview_normalized(8.4)),
+                Call::End(d)
+            ]
+        );
+        assert!(e.typing.is_none());
+        // LEVEL: Escape, and a press elsewhere, leave it; beyond its travel, its end.
+        double(&mut e, StripTarget::Readout(Readout::Level));
+        typed(&mut e, "-6");
+        keyed(&mut e, Key::Escape);
+        double(&mut e, StripTarget::Readout(Readout::Level));
+        typed(&mut e, "3");
+        let elsewhere = on_strip(&e, (1500.0, 1700.0));
+        click(&mut e, elsewhere);
+        assert_eq!(host.take(), vec![]);
+        assert!(e.typing.is_none());
+        let l = params.level.as_ptr();
+        for (keys, to) in [
+            ("-99", 0.0),
+            ("159\u{8}", 1.0),
+            ("-9", params.level.preview_normalized(-9.0)),
+        ] {
+            double(&mut e, StripTarget::Readout(Readout::Level));
+            for c in keys.chars() {
+                if c == '\u{8}' {
+                    keyed(&mut e, Key::Backspace);
+                } else {
+                    keyed(&mut e, Key::Character(c.to_string()));
+                }
+            }
+            keyed(&mut e, Key::Enter);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(l), Call::Set(l, to), Call::End(l)],
+                "{keys:?}"
+            );
+        }
+        // ENTROPY's readout, a switch: its first press switched it (the test host applies
+        // nothing, so there is nothing to undo here), then a value.
+        double(&mut e, StripTarget::Switch(Readout::Entropy));
+        let n = params.entropy.as_ptr();
+        let first = host.take();
+        assert_eq!(first.len(), 3, "the first press's switch: {first:?}");
+        typed(&mut e, "25");
+        keyed(&mut e, Key::Enter);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(n),
+                Call::Set(n, params.entropy.preview_normalized(25.0)),
+                Call::End(n)
+            ]
+        );
+        // VOICES: 12 is 10.
+        double(&mut e, StripTarget::Readout(Readout::Voices));
+        typed(&mut e, "12");
+        keyed(&mut e, Key::Enter);
+        let v = params.voices.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(v), Call::Set(v, 1.0), Call::End(v)]
+        );
+        // DETUNE in SCATTER: none; AUTO GAIN's: none.
+        double(&mut e, StripTarget::Readout(Readout::Detune));
+        assert!(e.typing.is_none());
+        assert!(!Readout::Auto.typed());
     }
 
     /// The rail's settings key (decisions.md R-SKIN) opens its menu: under LOOK the editor's
