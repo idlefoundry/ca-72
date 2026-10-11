@@ -41,8 +41,8 @@ impl Tone {
 
 /// A control's menu: its top left corner (drawing units), its lettering's size (drawing units),
 /// its title (not an item), its items (each its label and whether it can be chosen), those of
-/// them that head a group of the items after them (not to be chosen), the one that is the
-/// current choice (marked), and the one under the pointer.
+/// them that head a group of the items after them (not to be chosen), those that are their
+/// group's current choice (marked), and the one under the pointer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu {
     pub x: f64,
@@ -51,7 +51,7 @@ pub struct Menu {
     pub title: String,
     pub items: Vec<(String, bool)>,
     pub heads: Vec<usize>,
-    pub marked: Option<usize>,
+    pub marked: Vec<usize>,
     pub hover: Option<usize>,
 }
 
@@ -208,7 +208,7 @@ pub fn menu(fonts: &Fonts, m: &Menu) -> Layer {
             continue;
         }
         let x = m.pad() + m.indent(i);
-        let marked = m.marked == Some(i);
+        let marked = m.marked.contains(&i);
         if marked {
             put!(
                 s,
@@ -365,7 +365,7 @@ mod tests {
                 ("MIDI ASSIGNMENTS…".into(), true),
             ],
             heads: Vec::new(),
-            marked: None,
+            marked: Vec::new(),
             hover: None,
         }
     }

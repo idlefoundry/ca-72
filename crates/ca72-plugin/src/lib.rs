@@ -168,7 +168,7 @@ impl Ca72 {
         let Some(target) = learn::target(&self.params, i) else {
             return false;
         };
-        let normalized = target.normalized_for(seven);
+        let normalized = learn::normalized_for(&self.params, i, target, seven);
         if target.at(normalized) {
             return false;
         }
@@ -320,6 +320,12 @@ impl Plugin for Ca72 {
         config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
+        // How this computer's FREQUENCY dials read: a learned controller turns the knob through
+        // it, the editor open or not (decisions.md R-SEMITONES).
+        if !cfg!(test) {
+            self.params
+                .set_freq_law(crate::settings::Settings::load().frequency);
+        }
         self.engine.set(&self.params.controls());
         self.engine
             .prepare(f64::from(config.sample_rate), self.params.seed());

@@ -36,6 +36,8 @@ use nih_plug::prelude::*;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
+use ca72::freq_dial::Pot;
+
 use crate::params::Ca72Params;
 
 /// How a learned control change's 7-bit value sets a parameter.
@@ -719,6 +721,19 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
     })
 }
 
+/// Where learnable `i`'s controller at `value` (0–127) sets `target`, its parameter
+/// (normalized): a FREQUENCY knob turned to value / 127 of its travel, its pot where the
+/// computer's law puts it then, as the editor's knob (decisions.md R-SEMITONES); anything else
+/// as [`Target::normalized_for`].
+pub fn normalized_for(p: &Ca72Params, i: usize, target: &dyn Target, value: u8) -> f32 {
+    let knob = f64::from(value.min(127)) / 127.0;
+    match LEARNABLE.get(i).map(|l| l.id) {
+        Some("osc2_frequency") => Pot::Two.wiper_at(p.freq_law(), knob) as f32,
+        Some("osc3_frequency") => Pot::Three.wiper_at(p.freq_law(), knob) as f32,
+        _ => target.normalized_for(value),
+    }
+}
+
 /// The knob of learnable index `i`, if it is one (the ones [`Dezip`] moves).
 pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
     Some(match LEARNABLE.get(i)?.id {
@@ -962,6 +977,29 @@ mod tests {
         m.cancel();
         m.refuse(7);
         assert_eq!(m.refused(), None, "nothing said while not learning");
+    }
+
+    /// A FREQUENCY knob turned to value / 127 of its travel through the computer's law
+    /// (decisions.md R-SEMITONES): its stops -7.5 and +7.5 semitones and the centre between 63
+    /// and 64 in semitones; the pot's ends at the stops in the hardware's.
+    #[test]
+    fn a_controller_turns_a_frequency_knob_through_the_dials_law() {
+        use ca72::freq_dial::Law;
+        let p = Ca72Params::default();
+        let i = at("osc2_frequency");
+        let t = target(&p, i).expect("a knob");
+        let st = |v: u8| Pot::Two.semitones(f64::from(normalized_for(&p, i, t, v)));
+        assert!((st(0) + 7.5).abs() < 1e-4 && (st(127) - 7.5).abs() < 1e-4);
+        assert!(st(63) < 0.0 && st(64) > 0.0);
+        p.set_freq_law(Law::Hardware);
+        assert_eq!(normalized_for(&p, i, t, 127), 1.0);
+        let three = at("osc3_frequency");
+        let t3 = target(&p, three).expect("a knob");
+        assert_eq!(normalized_for(&p, three, t3, 0), 0.0008);
+        // Any other knob as its normalization has it.
+        let cutoff = at("cutoff");
+        let c = target(&p, cutoff).expect("a knob");
+        assert_eq!(normalized_for(&p, cutoff, c, 64), 64.0 / 127.0);
     }
 
     /// A knob: value / 127 of its travel. A switch (SCATTER's placement too): off at 0–63, on at

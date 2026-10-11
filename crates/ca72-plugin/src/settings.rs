@@ -1,12 +1,14 @@
 //! What the plug-in keeps for the computer, not for the session (decisions.md R-ULTRA,
-//! R-SKIN): QUALITY's indicator shown or not, whether ULTRA's note has been read, and the look
-//! (the skin) the editor is drawn in. In the shared
+//! R-SKIN, R-SEMITONES): QUALITY's indicator shown or not, whether ULTRA's note has been read,
+//! the look (the skin) the editor is drawn in and how the FREQUENCY knobs' dials read. In the
+//! shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, written as one changes. Keys it does not know are kept; a file it cannot read
 //! is never written over.
 
 use std::path::{Path, PathBuf};
 
+use ca72::freq_dial::Law;
 use ca72_panel::Skin;
 
 use crate::library::{shared_dir, write};
@@ -24,6 +26,11 @@ pub struct Settings {
     /// one (`Skin::Worn`) unless CLASSIC (`Skin::Drawn`) is chosen (the owner, 2026-10-10: "all
     /// future versions default to the new skin"). Kept as `skin`, "realistic" or "classic".
     pub skin: Skin,
+    /// How oscillators 2 and 3's FREQUENCY knobs' dials read, chosen with the same key: a
+    /// semitone a mark unless HARDWARE is chosen (the owner, 2026-10-10: "use our perfect ones
+    /// by default, but allow the user to use the exact curves"). Kept as `frequency_dials`,
+    /// "semitones" or "hardware".
+    pub frequency: Law,
 }
 
 impl Default for Settings {
@@ -32,6 +39,7 @@ impl Default for Settings {
             shutter: true,
             ultra_note_read: false,
             skin: Skin::Worn,
+            frequency: Law::Semitones,
         }
     }
 }
@@ -61,6 +69,11 @@ impl Settings {
                 Some("classic") => Skin::Drawn,
                 _ => d.skin,
             },
+            // (Anything but HARDWARE, semitones.)
+            frequency: match t.get("frequency_dials").and_then(toml::Value::as_str) {
+                Some("hardware") => Law::Hardware,
+                _ => d.frequency,
+            },
         }
     }
 
@@ -79,6 +92,11 @@ impl Settings {
             Skin::Drawn => "classic",
         };
         t.insert("skin".into(), skin.into());
+        let frequency = match self.frequency {
+            Law::Semitones => "semitones",
+            Law::Hardware => "hardware",
+        };
+        t.insert("frequency_dials".into(), frequency.into());
         write(path, &t)
     }
 }
@@ -110,6 +128,7 @@ mod tests {
             shutter: false,
             ultra_note_read: true,
             skin: Skin::Drawn,
+            frequency: Law::Hardware,
         };
         s.write_to(&path).expect("written");
         assert_eq!(Settings::read(&path), s);
@@ -124,6 +143,12 @@ mod tests {
         assert_eq!(Settings::read(&path).skin, Skin::Worn);
         std::fs::write(&path, "skin = \"classic\"\n").expect("written");
         assert_eq!(Settings::read(&path).skin, Skin::Drawn);
+        // The FREQUENCY dials: semitones unless the file says hardware.
+        assert!(after.contains("frequency_dials = \"semitones\""), "{after}");
+        std::fs::write(&path, "frequency_dials = \"hardware\"\n").expect("written");
+        assert_eq!(Settings::read(&path).frequency, Law::Hardware);
+        std::fs::write(&path, "frequency_dials = \"other\"\n").expect("written");
+        assert_eq!(Settings::read(&path).frequency, Law::Semitones);
         std::fs::write(&path, "not [ toml").expect("written");
         assert!(Settings::default().write_to(&path).is_err());
         assert_eq!(std::fs::read_to_string(&path).expect("read"), "not [ toml");

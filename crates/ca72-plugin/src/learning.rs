@@ -6,6 +6,7 @@
 
 use std::time::{Duration, Instant};
 
+use ca72::freq_dial::Law;
 use ca72_panel::controls::{CONTROLS, index as control_index};
 use ca72_panel::fonts::Fonts;
 use ca72_panel::learn::{Menu, Note, PANEL, Tone, above};
@@ -82,9 +83,11 @@ pub enum Item {
     /// Tesla lamp, through the shutter) shown, or hidden (the panel blank there).
     Show,
     Hide,
-    /// The settings' (decisions.md R-SKIN): the look the editor is drawn in, under its group's
-    /// head (which does nothing).
+    /// The settings' (decisions.md R-SKIN): the look the editor is drawn in, and how the
+    /// FREQUENCY knobs' dials read (R-SEMITONES), each under its group's head (which does
+    /// nothing).
     Look(Skin),
+    Dials(Law),
     Head,
 }
 
@@ -110,6 +113,8 @@ pub enum Pressed {
     Indicator(bool),
     /// The settings' menu: the editor drawn in this look.
     Look(Skin),
+    /// The settings' menu: the FREQUENCY knobs read through this law.
+    Dials(Law),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -231,7 +236,7 @@ impl Learning {
                 })
                 .collect(),
             heads: Vec::new(),
-            marked: None,
+            marked: Vec::new(),
             hover: None,
         }
         .placed(fonts, x, y, PANEL);
@@ -266,7 +271,7 @@ impl Learning {
                 .map(|(_, t, on)| ((*t).to_owned(), *on))
                 .collect(),
             heads: Vec::new(),
-            marked: None,
+            marked: Vec::new(),
             hover: None,
         }
         .placed(fonts, x, y, PANEL);
@@ -281,13 +286,24 @@ impl Learning {
     /// The settings' menu (decisions.md R-SKIN; the rail's settings key, the owner: "We can let
     /// people change their skin there"), opened with its top right corner at (`x`, `y`): under
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
-    /// marked).
-    pub fn open_settings_menu(&mut self, fonts: &Fonts, (x, y): (f64, f64), size: f64, skin: Skin) {
+    /// marked); under FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`,
+    /// marked: decisions.md R-SEMITONES).
+    pub fn open_settings_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        (skin, law): (Skin, Law),
+    ) {
         let items = [
             (Item::Head, "LOOK"),
             (Item::Look(Skin::Worn), "REALISTIC"),
             (Item::Look(Skin::Drawn), "CLASSIC"),
+            (Item::Head, "FREQUENCY DIALS"),
+            (Item::Dials(Law::Semitones), "SEMITONES"),
+            (Item::Dials(Law::Hardware), "HARDWARE"),
         ];
+        let current = |it: &Item| *it == Item::Look(skin) || *it == Item::Dials(law);
         let mut menu = Menu {
             x,
             y,
@@ -296,12 +312,22 @@ impl Learning {
             items: items
                 .iter()
                 .map(|(it, t)| {
-                    let choosable = matches!(it, Item::Look(s) if *s != skin);
+                    let choosable = matches!(it, Item::Look(_) | Item::Dials(_)) && !current(it);
                     ((*t).to_owned(), choosable)
                 })
                 .collect(),
-            heads: vec![0],
-            marked: items.iter().position(|(it, _)| *it == Item::Look(skin)),
+            heads: items
+                .iter()
+                .enumerate()
+                .filter(|(_, (it, _))| *it == Item::Head)
+                .map(|(i, _)| i)
+                .collect(),
+            marked: items
+                .iter()
+                .enumerate()
+                .filter(|(_, (it, _))| current(it))
+                .map(|(i, _)| i)
+                .collect(),
             hover: None,
         };
         let (w, _) = menu.extent(fonts);
@@ -348,6 +374,7 @@ impl Learning {
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
+            (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
             _ => {}
         }
         Pressed::Done

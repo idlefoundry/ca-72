@@ -21,6 +21,7 @@ use baseview::{
     Event, EventStatus, MouseButton, MouseEvent, ScrollDelta, Size, Window, WindowEvent,
     WindowHandler, WindowInfo, WindowOpenOptions, WindowScalePolicy,
 };
+use ca72::freq_dial::{Law, Pot};
 use ca72_panel::art::{self, POWER};
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
 use ca72_panel::learn::{Note, Tone};
@@ -185,6 +186,54 @@ impl<P: Param> Operated for P {
     }
     fn end(&self, s: &ParamSetter<'_>) {
         s.end_set_parameter(self);
+    }
+}
+
+/// An oscillator's FREQUENCY knob (decisions.md R-SEMITONES): where it points, read through
+/// the computer's law (`ca72::freq_dial`), its pot's position the parameter's (normalized,
+/// the wiper). A pot beyond the law's reach shows the knob at its stop.
+struct FreqKnob {
+    params: Arc<Ca72Params>,
+    pot: Pot,
+}
+
+impl FreqKnob {
+    fn param(&self) -> &FloatParam {
+        match self.pot {
+            Pot::Two => &self.params.osc2_frequency,
+            Pot::Three => &self.params.osc3_frequency,
+        }
+    }
+
+    /// The knob at `knob` of its travel: its pot's position.
+    fn wiper(&self, knob: f32) -> f32 {
+        self.pot.wiper_at(self.params.freq_law(), f64::from(knob)) as f32
+    }
+
+    fn knob(&self, wiper: f32) -> f32 {
+        self.pot.knob_at(self.params.freq_law(), f64::from(wiper)) as f32
+    }
+}
+
+impl Operated for FreqKnob {
+    fn value(&self) -> f32 {
+        self.knob(self.param().unmodulated_normalized_value())
+    }
+    fn default(&self) -> f32 {
+        self.knob(self.param().default_normalized_value())
+    }
+    fn text(&self, knob: f32) -> String {
+        self.param()
+            .normalized_value_to_string(self.wiper(knob), true)
+    }
+    fn begin(&self, s: &ParamSetter<'_>) {
+        s.begin_set_parameter(self.param());
+    }
+    fn set(&self, s: &ParamSetter<'_>, knob: f32) {
+        s.set_parameter_normalized(self.param(), self.wiper(knob));
+    }
+    fn end(&self, s: &ParamSetter<'_>) {
+        s.end_set_parameter(self.param());
     }
 }
 
@@ -674,6 +723,8 @@ struct Editing {
     typing: Option<(Readout, String)>,
     typing_keys: bool,
     last_strip_press: Option<(Instant, StripTarget, f32)>,
+    /// Oscillators 2 and 3's FREQUENCY knobs, through the computer's law.
+    freq_knobs: [FreqKnob; 2],
 }
 
 impl PanelWindow {
@@ -815,6 +866,11 @@ impl Editing {
         } else {
             Settings::load()
         };
+        params.set_freq_law(settings.frequency);
+        let freq_knobs = [Pot::Two, Pot::Three].map(|pot| FreqKnob {
+            params: Arc::clone(&params),
+            pot,
+        });
         Editing {
             context,
             params,
@@ -853,6 +909,7 @@ impl Editing {
             typing: None,
             typing_keys: false,
             last_strip_press: None,
+            freq_knobs,
         }
         .opened()
     }
@@ -876,6 +933,14 @@ impl Editing {
             self.renderer = Renderer::with_skin(skin, self.renderer.scale(), self.dpr);
             self.composed = None;
         }
+    }
+
+    /// The FREQUENCY knobs read through `law` from now on, on this computer (decisions.md
+    /// R-SEMITONES): each points where its pot is through it, the sound as it was.
+    fn set_frequency_dials(&mut self, law: Law) {
+        self.settings.frequency = law;
+        self.keep_settings();
+        self.params.set_freq_law(law);
     }
 
     /// This computer's settings kept (not by the tests' editors).
@@ -1034,7 +1099,11 @@ impl Editing {
     }
 
     fn operated(&self, control: usize) -> Option<&dyn Operated> {
-        param(&self.params, CONTROLS.get(control)?.param)
+        match CONTROLS.get(control)?.param {
+            "osc2_frequency" => Some(&self.freq_knobs[0]),
+            "osc3_frequency" => Some(&self.freq_knobs[1]),
+            id => param(&self.params, id),
+        }
     }
 
     fn value_of(&self, control: usize) -> f64 {
@@ -1266,7 +1335,7 @@ impl Editing {
                     self.renderer.fonts(),
                     (x + strip::KEY_W / 2.0, y + strip::KEY_H / 2.0 + 6.0),
                     size,
-                    self.settings.skin,
+                    (self.settings.skin, self.settings.frequency),
                 );
             }
             StripTarget::Bar(b) => {
@@ -1307,6 +1376,10 @@ impl Editing {
             Pressed::Indicator(shown) => {
                 self.settings.shutter = shown;
                 self.keep_settings();
+                return;
+            }
+            Pressed::Dials(law) => {
+                self.set_frequency_dials(law);
                 return;
             }
             Pressed::Look(skin) => {
@@ -3428,14 +3501,14 @@ mod tests {
             Some("SETTINGS")
         );
         assert_eq!(
-            menu_items(&e),
-            vec![
+            menu_items(&e)[..3],
+            [
                 ("LOOK".to_owned(), false),
                 ("REALISTIC".to_owned(), false),
                 ("CLASSIC".to_owned(), true),
             ]
         );
-        assert_eq!(e.learning.menu().map(|m| m.marked), Some(Some(1)));
+        assert_eq!(e.learning.menu().map(|m| m.marked[0]), Some(1));
         // The menu within the window, under the key.
         let m = e.learning.menu().expect("a menu");
         let (w, h) = m.extent(e.renderer.fonts());
@@ -3450,7 +3523,7 @@ mod tests {
         e.draw();
         click(&mut e, key);
         assert_eq!(menu_items(&e)[1], ("REALISTIC".to_owned(), true));
-        assert_eq!(e.learning.menu().map(|m| m.marked), Some(Some(2)));
+        assert_eq!(e.learning.menu().map(|m| m.marked[0]), Some(2));
         // (The head does nothing: the menu stays open.)
         menu_item(&mut e, "LOOK");
         assert!(e.learning.menu().is_some());
@@ -3460,6 +3533,141 @@ mod tests {
             (Skin::Worn, Skin::Worn)
         );
         e.draw();
+    }
+
+    /// The settings key's FREQUENCY DIALS (decisions.md R-SEMITONES): SEMITONES by default, each
+    /// group's choice marked. HARDWARE turns oscillators 2 and 3's knobs to where the hardware's
+    /// dial has their pots, the parameters (the sound) as they were, and the tip still reads
+    /// semitones; a pot past a law's stop shows its knob at the stop, and a press that does not
+    /// move it leaves it there. A drag sets the pot through the law chosen.
+    #[test]
+    fn the_settings_key_chooses_how_the_frequency_dials_read() {
+        use nih_plug::context::process::TestProcessContext;
+        let (mut e, host, params) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert_eq!(
+            menu_items(&e)[3..],
+            [
+                ("FREQUENCY DIALS".to_owned(), false),
+                ("SEMITONES".to_owned(), false),
+                ("HARDWARE".to_owned(), true),
+            ]
+        );
+        assert_eq!(
+            e.learning
+                .menu()
+                .map(|m| (m.heads.clone(), m.marked.clone())),
+            Some((vec![0, 3], vec![1, 4]))
+        );
+        // Oscillator 2 at +5 semitones, oscillator 3's pot at its clockwise end (+8.22).
+        let ps: Arc<dyn Params> = params.clone();
+        let c = TestProcessContext::<crate::Ca72>::new(ps, 48_000.0, ProcessMode::Realtime);
+        let five = Pot::Two.wiper(5.0) as f32;
+        c.automate(params.osc2_frequency.as_ptr(), five);
+        c.automate(params.osc3_frequency.as_ptr(), 1.0);
+        menu_item(&mut e, "SEMITONES");
+        assert!(
+            e.learning.menu().is_some(),
+            "the current choice does nothing"
+        );
+        let away = at(&e, (0.0, 0.0));
+        click(&mut e, away);
+        let (two, three) = (
+            ca72_panel::controls::index("osc2_frequency").expect("a control"),
+            ca72_panel::controls::index("osc3_frequency").expect("a control"),
+        );
+        e.update_scene();
+        assert!((e.scene.values[two] - (5.0 + 7.5) / 15.0).abs() < 1e-6);
+        assert_eq!(e.scene.values[three], 1.0, "past the stop: at it");
+        host.take();
+        click(&mut e, key);
+        menu_item(&mut e, "HARDWARE");
+        assert_eq!(
+            (e.settings.frequency, params.freq_law()),
+            (Law::Hardware, Law::Hardware)
+        );
+        assert!(host.take().is_empty(), "the sound as it was");
+        e.update_scene();
+        let knob = Pot::Two.knob_at(Law::Hardware, f64::from(five));
+        assert!((e.scene.values[two] - knob).abs() < 1e-6);
+        assert!(
+            e.scene.values[two] < (5.0 + 7.5) / 15.0,
+            "the hardware's +5 is wider"
+        );
+        assert_eq!(e.scene.values[three], 1.0);
+        click(&mut e, key);
+        assert_eq!(
+            e.learning.menu().map(|m| m.marked.clone()),
+            Some(vec![1, 5])
+        );
+        let away = at(&e, (0.0, 0.0));
+        click(&mut e, away);
+        // The tip in semitones either way.
+        let p = e.operated(two).expect("a knob");
+        assert_eq!(p.text(p.value()), "+5.00 semitones");
+        // A drag sets the pot through the law chosen: the knob turned as far through either.
+        let drag_up = |e: &mut Editing| {
+            let p2 = at(e, centre("osc2_frequency"));
+            go(e, p2);
+            e.mouse(MouseEvent::ButtonPressed {
+                button: MouseButton::Left,
+                modifiers: Modifiers::empty(),
+            });
+            go(
+                e,
+                Point {
+                    x: p2.x,
+                    y: p2.y - 20.0,
+                },
+            );
+            e.mouse(MouseEvent::ButtonReleased {
+                button: MouseButton::Left,
+                modifiers: Modifiers::empty(),
+            });
+            let f = params.osc2_frequency.as_ptr();
+            host.take()
+                .into_iter()
+                .filter_map(|c| match c {
+                    Call::Set(q, v) if q == f => Some(f64::from(v)),
+                    _ => None,
+                })
+                .last()
+                .expect("set")
+        };
+        let turned = |law: Law, wiper: f64| {
+            Pot::Two.knob_at(law, wiper) - Pot::Two.knob_at(law, f64::from(five))
+        };
+        let hardware = turned(Law::Hardware, drag_up(&mut e));
+        e.set_frequency_dials(Law::Semitones);
+        // (Not a double click, which would restore the default.)
+        e.last_press = None;
+        let semitones = turned(Law::Semitones, drag_up(&mut e));
+        assert!(
+            hardware > 0.01 && (hardware - semitones).abs() < 1e-5,
+            "{hardware} {semitones}"
+        );
+        e.set_frequency_dials(Law::Hardware);
+        e.last_press = None;
+        // Oscillator 3's knob, pinned at its stop, pressed and let go without moving: as it was.
+        let p3 = at(&e, centre("osc3_frequency"));
+        go(&mut e, p3);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        e.mouse(MouseEvent::ButtonReleased {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let g = params.osc3_frequency.as_ptr();
+        assert!(
+            !host
+                .take()
+                .iter()
+                .any(|c| matches!(c, Call::Set(q, _) if *q == g)),
+            "a press that did not move sets nothing"
+        );
     }
 
     /// A right click on QUALITY's opening (decisions.md R-ULTRA) opens its menu: its shutter or
@@ -5330,6 +5538,37 @@ mod tests {
         let p = at(&e, centre("inner"));
         right_click(&mut e, p);
         shot(&mut e, "learn-3.png");
+    }
+
+    /// The settings key's menu with FREQUENCY DIALS (decisions.md R-SEMITONES), and oscillator 2's
+    /// knob at +7 semitones with its tip, through each law: `settings-<n>.png` in
+    /// `$CA72_SETTINGS_PNG`, the folder.
+    #[test]
+    fn the_window_settings_png() {
+        use nih_plug::context::process::TestProcessContext;
+        let Some(out) = std::env::var_os("CA72_SETTINGS_PNG") else {
+            return;
+        };
+        let out = std::path::PathBuf::from(out);
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _host, params) = editing_with(Library::at(dir.path()));
+        let ps: Arc<dyn Params> = params.clone();
+        let c = TestProcessContext::<crate::Ca72>::new(ps, 48_000.0, ProcessMode::Realtime);
+        c.automate(params.osc2_frequency.as_ptr(), Pot::Two.wiper(7.0) as f32);
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        window_frame(&mut e)
+            .save_png(out.join("settings-1.png"))
+            .unwrap();
+        e.learning.close_menu();
+        for (n, law) in [(2, Law::Semitones), (3, Law::Hardware)] {
+            e.set_frequency_dials(law);
+            let p = at(&e, centre("osc2_frequency"));
+            go(&mut e, p);
+            window_frame(&mut e)
+                .save_png(out.join(format!("settings-{n}.png")))
+                .unwrap();
+        }
     }
 
     /// The drawer's update check (decisions.md R27): its button the editor's, not the

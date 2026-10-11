@@ -177,6 +177,14 @@ The editor works like the panel:
 
 Hovering over a control shows its name and value.
 
+**Oscillators 2 and 3's FREQUENCY** read in semitones: each mark of the dial is a semitone
+from the oscillator's centre, -7.5 to +7.5 at the stops, and the knob's tip says where it
+stands (cents under a semitone). The settings key (the gear at the strip's right end) offers
+**FREQUENCY DIALS › HARDWARE** instead: the knob as the hardware reference's turns, its marks
+wider than a semitone near the centre and narrower towards the stops, which reach 8 to 8.6
+semitones. The choice is the computer's, not the sound's: a session or preset keeps its pitch
+whichever is chosen; only where the knob points changes.
+
 Under the panel, a strip holds the presets' selector and the plug-in's own controls (not the
 instrument's): POLY (click), VOICES (click either side to step), and ENTROPY and SPREAD (drag
 the slider; the switch beside each turns it off and back on at its amount). SPREAD is
@@ -444,7 +452,7 @@ The service documents and datasheets the model was derived from are not included
   "any channel"); there is no pick-up takeover, no profile of assignments to reuse across
   projects, and nothing is sent back to a controller's lights or motors. A knob centred by
   its controller's 64 sits a hair above its centre (TUNE +0.02 semitone, an oscillator's
-  FREQUENCY +0.06): 64 is 64/127 of the travel. Your host must pass control changes to the
+  FREQUENCY +0.06 semitone): 64 is 64/127 of the travel. Your host must pass control changes to the
   plug-in.
 - Choosing a preset sets each parameter as a gesture of its own; a host that keeps undo
   steps may keep one per parameter changed.

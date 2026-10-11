@@ -11,6 +11,7 @@ pub mod devices;
 pub mod expo;
 pub mod fast;
 pub mod filter_cal;
+pub mod freq_dial;
 pub mod keyboard;
 pub mod light;
 pub mod linear;

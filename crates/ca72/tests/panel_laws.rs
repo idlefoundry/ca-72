@@ -2,11 +2,12 @@
 //! through its measured points, keeps the drawing's law where it was not measured, and
 //! rises over the knob's travel.
 
+use ca72::freq_dial::{Law, Pot};
 use ca72::modulation::{midi_wheel, mod_wheel_r, mod_wheel_r_drawn};
 use ca72::voice::{
     FILTER_ATTACK, FILTER_DECAY, LOUDNESS_ATTACK, LOUDNESS_DECAY, contour_amount_track,
-    cutoff_track, emphasis_r14, glide_pot, glide_pot_drawn, osc2_freq_track, osc3_freq_track,
-    sustain_track, time_pot, time_pot_drawn, volume_track,
+    cutoff_track, emphasis_r14, glide_pot, glide_pot_drawn, sustain_track, time_pot,
+    time_pot_drawn, volume_track,
 };
 
 #[test]
@@ -135,12 +136,13 @@ fn sustain_follows_the_reference_at_its_marks() {
     }
 }
 
+/// FREQUENCY's hardware law (`freq_dial`, the knob's to choose).
 #[test]
 fn frequency_follows_the_reference_at_its_marks() {
-    for (name, law, points) in [
+    for (name, pot, points) in [
         (
             "oscillator 2",
-            osc2_freq_track as fn(f64) -> f64,
+            Pot::Two,
             [
                 (0.0, 0.0334),
                 (1.0 / 6.0, 0.1195),
@@ -150,7 +152,7 @@ fn frequency_follows_the_reference_at_its_marks() {
         ),
         (
             "oscillator 3",
-            osc3_freq_track,
+            Pot::Three,
             [
                 (0.0, 0.0008),
                 (1.0 / 6.0, 0.1060),
@@ -159,6 +161,7 @@ fn frequency_follows_the_reference_at_its_marks() {
             ],
         ),
     ] {
+        let law = |p: f64| pot.wiper_at(Law::Hardware, p);
         for (p, t) in points {
             assert!(
                 (law(p) - t).abs() < 1e-12,
