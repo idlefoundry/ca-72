@@ -1060,6 +1060,28 @@ mod tests {
         assert!(values_now(&p).iter().all(|(k, _)| !k.contains("midi_map")));
     }
 
+    /// A session whose preset has since left the factory's (decisions.md R-RETIRE) keeps its
+    /// sound: it holds every value itself, and its preset's name is the bar's alone, shown as
+    /// not found and never as changed. Nothing is set from the name (`tick` has no setter).
+    #[test]
+    fn a_session_whose_preset_was_retired_keeps_its_sound() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Ca72Params::default();
+        Browser::set_current(&p, "Retired Pluck");
+        let before = values_now(&p);
+        let mut b = Browser::new(Library::at(dir.path()));
+        b.tick(&p);
+        assert_eq!(
+            (b.bar.name.as_str(), b.bar.found, b.bar.changed),
+            ("Retired Pluck", false, false)
+        );
+        b.show(true, &p);
+        b.tick(&p);
+        assert!(b.drawer.current.is_none());
+        assert_eq!(values_now(&p), before);
+        assert_eq!(Browser::current(&p), "Retired Pluck");
+    }
+
     /// RENAME, TAGS and DELETE act on the preset the plug-in is set to; what they begin stays
     /// with it as the list changes (a filter, another program's change), and ends when it has
     /// gone or another preset is set: another preset is never renamed, tagged or deleted in its

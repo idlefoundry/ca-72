@@ -8,6 +8,9 @@
 #                                                 Unit with scripts/auv2.sh)
 #   Windows  CA-72-<version>-Windows-setup.exe    (Inno Setup 6's ISCC, from Git Bash)
 #   Linux    CA-72-<version>-Linux-x86_64.tar.gz  (with install.sh)
+#            CA-72-<version>-0.1-presets.zip      (the presets retired from the plug-in,
+#                                                 when there are any: decisions.md
+#                                                 R-RETIRE)
 #
 # Each carries LICENSE and THIRD-PARTY-NOTICES.txt, inside the bundles as well. On macOS the
 # bundles are signed with $CA72_MACOS_SIGN_APP (a "Developer ID Application" identity), the
@@ -177,6 +180,45 @@ windows() {
     echo "$out/CA-72-$version-Windows-setup.exe"
 }
 
+# The presets retired from the plug-in (`sounds/retired.toml`, decisions.md R-RETIRE) as the
+# user's presets, for a player of an earlier version to add to the library again; nothing when
+# none is retired. Made with the Linux installer, so that CI's Linux build carries it into each
+# release's draft.
+pack() {
+    local name="CA-72-$version-0.1-presets"
+    local stage="$work/$name"
+    mkdir -p "$stage/Presets"
+    (cd "$root" && cargo run -q -p ca72-plugin --example preset_pack -- "$stage/Presets") > /dev/null
+    [ -n "$(ls -A "$stage/Presets")" ] || return 0
+    cat > "$stage/README.txt" << 'EOF'
+CA-72: the 0.1 presets
+======================
+The factory presets of CA-72 0.1 that later versions no longer carry, as
+presets of your own. A project saved with 0.1 does not need them: it keeps
+every setting itself and sounds as it did. Add them to choose them again in
+the presets drawer.
+
+Add them
+--------
+1. Copy the .toml files in the Presets folder here into the CA-72's presets
+   folder (create it if it is not there):
+   macOS    ~/Library/Application Support/Idle Foundry/CA-72/Presets
+            (in the Finder, Go > Go to Folder, and paste it)
+   Windows  %APPDATA%\Idle Foundry\CA-72\Presets
+            (paste it into File Explorer's address bar)
+   Linux    ~/.local/share/Idle Foundry/CA-72/Presets
+            ($XDG_DATA_HOME/Idle Foundry/CA-72/Presets if XDG_DATA_HOME is set)
+2. Open the presets drawer: they are listed with your own presets, tagged 0.1.
+
+Each file is named "<preset>_0.1.toml", so copying never replaces a preset
+you saved. If you kept your own edit of one of these presets, yours stays the
+one listed. A preset saved again moves to a file of its own name.
+EOF
+    rm -f "$out/$name.zip"
+    (cd "$work" && zip -qrX "$out/$name.zip" "$name")
+    echo "$out/$name.zip"
+}
+
 linux() {
     local name="CA-72-$version-Linux-$(uname -m)"
     local stage="$work/$name"
@@ -189,6 +231,7 @@ linux() {
     chmod +x "$stage/install.sh"
     tar -C "$work" -czf "$out/$name.tar.gz" "$name"
     echo "$out/$name.tar.gz"
+    pack
 }
 
 case "$(uname -s)" in

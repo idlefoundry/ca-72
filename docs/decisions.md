@@ -4252,3 +4252,68 @@ beside the other test builds for the owner, nothing replaced, and not opened in 
 agent. The owner's Cycle of Fifths converted (oscillator 2's FREQUENCY 5.8494 to 6.50964, +7.16
 semitones as before), its old file in `CA-72/Presets-before-semitones`: the test builds before
 this one read it 0.43 semitone sharp now. Not tried: any host, Windows, Linux.
+
+## R-RETIRE. Factory presets retired from the plug-in, and the pack that keeps them
+
+**The owner, 2026-10-10:** "for the 0.2.0 release, I want to have a bunch of new presets, and I
+want to remove a lot of the old ones. Will people who downloaded older versions still have
+access to the original presets (which is what I want)?" Told that the factory presets are built
+into the plug-in, so an upgrade drops those removed from the drawer: "can't we make it part of our
+installer to have it convert someone's presets if they've already got an earlier version of the
+plugin installed?" Told why not (below) and offered the retired presets kept built in, shown to a
+player an earlier version had served (their presets folder or a session of 0.1): "If the person
+never saved any presets or projects, then I don't really worry about saving their presets." Then:
+"what do you think I should do. I'm just loath to think of the bland patches being shipped as
+contributing to people thinking the plugin doesn't sound great." Recommended a clean cut with the
+retired presets as a download beside each release: "Okay, let's just do it that way. As long as no
+one's projects are affected, I'm happy." Which presets go, and the new ones, are the owner's.
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- **A project keeps its sound.** A session holds every parameter's value and its preset's name
+  (`preset`), never a reference to a preset's values, so it plays as saved whether or not its
+  preset is still there. Only the bar reads the name: shown as not found, never marked changed,
+  and nothing is set from it (`Browser::tick` has no setter; `presets::tests::
+  a_session_whose_preset_was_retired_keeps_its_sound`). The plug-in takes no program changes and
+  offers hosts no preset list, so neither can point at a preset that has gone. A player's edit of
+  a retired preset is their file, listed as their own preset (without REVERT, nothing left to go
+  back to). A retired name is never a factory preset's again (`library::tests::
+  the_retired_presets_are_well_formed`), so a session's name cannot come to mean another sound.
+- **Not the installers.** The Windows ZIP, the Linux tarball and a build from source install with
+  no installer; the macOS package and the Windows installer run as an administrator and install
+  for the computer, where the presets are each user's (`<shared>/CA-72/Presets`); and the work
+  would be three programs in three languages, two of them testable only on their own system.
+- **Not built in and shown to some.** It would keep the bland patches in front of the earliest
+  and most vocal players, and every built-in preset is measured and levelled again with each
+  change to the sound.
+- **`sounds/retired.toml`:** a retired preset moves there whole from `presets.toml`, its values
+  as levelled for the model then, in the same format. No build of the plug-in reads it.
+  `tests/preset_levels.rs` measures its presets with `CA72_RETIRED` set, for levelling them again
+  after a change to the sound, as the factory's.
+- **The pack, `CA-72-<version>-0.1-presets.zip`,** in every release with a retired preset:
+  `scripts/package.sh` makes it on Linux with the tarball (`examples/preset_pack.rs`), so CI's
+  Linux build carries it into the release's draft and `SHA256SUMS.txt` with the installers; none
+  while nothing is retired. Inside, `Presets/` and a `README.txt` (where the folder is on each
+  system). Each preset is the user's (`library::write_pack`), tagged `0.1`, in
+  `<name>_0.1.toml`: copying never writes over a player's file (theirs is `<name>.toml`), and
+  where a player kept their own edit of the same preset, theirs, first by file name, is the one
+  listed; a pack's preset saved again moves to `<name>.toml` when that is free (R18).
+  `library::tests::the_pack_reads_back_as_the_users_presets_and_writes_over_none`. The update
+  check finds its installers by their exact names, so it never offers the pack. The names (the
+  asset's, the tag `0.1`) are the agent's, for the owner to change before 0.2.0.
+- **Cycle of Fifths levelled as its record has it** (MAIN OUTPUT VOLUME 8.6, -17.96 LUFS momentary
+  maximum): found at 10 while measuring every preset for the owner's choice, 6.5 dB over the
+  others.
+
+**Left for the cut:** the owner's choice; then the chosen presets move to `retired.toml` in one
+commit, with `library::tests::the_factory_file_is_read_whole`'s count and the tests that name a
+retired preset (`Bass` and `Lead` are named in several), the factory file's opening comment, the
+README's presets section and 0.2.0's notes saying where they went (the pack, with a row in the
+install table). The DAW's copy of the factory file follows when its owner chooses.
+
+**Evidence (omarchy, 2026-10-10):** the library and presets tests pass; each new check failed
+once with the code broken (the pack named `<name>.toml`, the bar's name cleared, a retired preset
+named `bass`). Upright Pluck moved to `retired.toml` for a try: the pack held
+`Presets/Upright Pluck_0.1.toml`, read back as the factory's values tagged `bass, plucked, 0.1`;
+with nothing retired, `package.sh` made no pack. Every preset's level measured on this branch and
+on 0.1.3's build (`~/.cache/ca72-baseline-07a7dfb`): each as R42's re-levelling left it, but Cycle
+of Fifths.
