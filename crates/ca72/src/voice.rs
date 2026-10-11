@@ -1209,6 +1209,13 @@ impl Voice {
         (self.ctl.env_to.0, self.ctl.env_to.1, self.keys.held())
     }
 
+    /// Whether the trigger contact was closed at the last sample: a key down (RETRIGGER's
+    /// once it has come down). It closing is a new attack's start, the contours following
+    /// it.
+    pub fn trigger_closed(&self) -> bool {
+        self.keys.gate
+    }
+
     /// The last sample's keyboard voltage, V, the mixer bus's Norton current, A, and the
     /// filter's output, V.
     pub fn probe(&self) -> (f64, f64, f64) {

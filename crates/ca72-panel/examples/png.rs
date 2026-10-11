@@ -1,6 +1,6 @@
 //! Renders the panel to a PNG: `cargo run -p ca72-panel --example png -- out.png [scale]`
 //! (pixels a panel unit, 0.5 by default); `CA72_SKIN=worn` in the worn skin; `CA72_MONO=1` the
-//! strip in MONO without DOUBLE (VOICES's, WIDTH's and INNER's readouts unlit, PLACEMENT none).
+//! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places).
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -88,37 +88,38 @@ fn strip_knob(param: &str) -> Option<f64> {
 }
 
 /// The strip as the mock-up showed it: POLY, SCATTER, EVEN, AUTO GAIN on, eight voices of which
-/// four sound, a preset chosen. In MONO (without DOUBLE) the one voice sounds in the centre, the
-/// readouts lit as the editor lights them: VOICES's, WIDTH's and INNER's not, PLACEMENT's none.
+/// four sound, a preset chosen. In MONO (without DOUBLE) the one voice sounds at one of the eight
+/// places, the one its last attack took (decisions.md R-SCATTER), the readouts lit as in POLY.
 fn example_strip(mono: bool) -> ca72_panel::strip::StripScene {
     use ca72_panel::strip::{Field, StripScene};
     let r = |t: &str, on: bool| (t.to_owned(), on);
     StripScene {
         mode: Some(if mono { 0 } else { 1 }),
         stereo: Some(0),
-        placement: (!mono).then_some(0),
+        placement: Some(0),
         auto: true,
         readouts: [
-            r("8", !mono),
+            r("8", true),
             r("40", true),
-            r("70", !mono),
+            r("70", true),
             r("OFF", false),
             r("-7.2", true),
             r("8.4", true),
             r("0.0", true),
-            r("40", !mono),
+            r("40", true),
         ],
-        field: Field::Scatter(if mono {
-            vec![(0.0, true)]
-        } else {
-            // EVEN's places for eight voices, each in its side's band at WIDTH 70 %, INNER 40 %.
+        // EVEN's places for eight voices, each in its side's band at WIDTH 70 %, INNER 40 %.
+        field: Field::Scatter(
             [-7.0, 7.0, -3.0, 3.0, -5.0, 5.0, -1.0, 1.0]
                 .iter()
                 .map(|p: &f64| p / 7.0)
                 .enumerate()
-                .map(|(i, p)| (0.7 * p.signum() * (0.4 + 0.6 * p.abs()), i % 2 == 0))
-                .collect()
-        }),
+                .map(|(i, p)| {
+                    let on = if mono { i == 2 } else { i % 2 == 0 };
+                    (0.7 * p.signum() * (0.4 + 0.6 * p.abs()), on)
+                })
+                .collect(),
+        ),
         bar: ca72_panel::presets::BarScene {
             name: "Brass Tutti".into(),
             found: true,

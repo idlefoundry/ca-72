@@ -2109,6 +2109,9 @@ fn strip_scene(
     let poly = c.poly && !unison;
     let mono = !poly && !unison;
     let doubled = p.doubled.value();
+    // (MONO with DOUBLE: the one pair, all of WIDTH's way out, whatever VOICES and the
+    // placement; without, it scatters over VOICES's places: decisions.md R-SCATTER.)
+    let alone = mono && doubled;
     let voices = c.voices.clamp(2, 10);
     let placement = c.placement;
     let mode = Some(if unison { 2 } else { usize::from(poly) });
@@ -2136,9 +2139,9 @@ fn strip_scene(
         (String::new(), false)
     };
     let readouts = [
-        (format!("{voices}"), !mono),
+        (format!("{voices}"), !alone),
         (percent(c.entropy), c.entropy > 0.0),
-        (percent(c.spread), c.spread > 0.0 && (!mono || doubled)),
+        (percent(c.spread), c.spread > 0.0),
         (
             if doubled {
                 crate::params::cents(c.double * crate::engine::DOUBLE_CENTS)
@@ -2150,23 +2153,16 @@ fn strip_scene(
         auto,
         (num3(c.drive), c.drive > 0.0),
         (num3(c.level), true),
-        (
-            percent(c.inner),
-            c.inner > 0.0 && c.spread > 0.0 && (!mono || doubled),
-        ),
+        (percent(c.inner), c.inner > 0.0 && c.spread > 0.0),
     ];
     let on = |k: usize| sounding & (1 << k) != 0;
-    // Where they sound: in MONO the one voice (its pair with DOUBLE, all of WIDTH's way out);
-    // else each of VOICES's voices at its place by the placement, its pair as far out with
-    // DOUBLE (decisions.md R45), each in its side's band by INNER: where the engine's
-    // gains put it, the kit's (R49).
+    // Where they sound: in MONO with DOUBLE the one pair, all of WIDTH's way out; else each of
+    // VOICES's places by the placement (in MONO the one voice at the place of its last attack,
+    // R-SCATTER), its pair as far out with DOUBLE (decisions.md R45), each in its side's band
+    // by INNER: where the engine's gains put it, the kit's (R49).
     let (width, inner) = (c.spread, c.inner);
-    let field = if mono {
-        if doubled {
-            Field::Double(vec![(place::pair_at(width, inner, place::ALONE), on(0))])
-        } else {
-            Field::Scatter(vec![(0.0, on(0))])
-        }
+    let field = if alone {
+        Field::Double(vec![(place::pair_at(width, inner, place::ALONE), on(0))])
     } else if doubled {
         Field::Double(
             (0..voices)
@@ -2187,7 +2183,7 @@ fn strip_scene(
     };
     // The placement's tab by the plug-in's choice (its tabs are its choices, EVEN and CENTER:
     // not the kit's index, which counts its EDGES); none where it moves nothing.
-    let placement_lit = !mono || doubled;
+    let placement_lit = !alone;
     StripScene {
         mode,
         stereo: Some(usize::from(doubled)),
@@ -2195,10 +2191,10 @@ fn strip_scene(
         auto: c.auto_gain,
         readouts,
         field,
-        // Each voice's level by its place in the field (the one instrument's, the output's),
-        // in steps of a fortieth (a drop does not move for less).
+        // Each voice's level by its place in the field (the one instrument's, the output's, at
+        // whichever place it sounds), in steps of a fortieth (a drop does not move for less).
         levels: if mono {
-            vec![output]
+            vec![output; voices]
         } else {
             levels.iter().take(voices).copied().collect()
         }
@@ -5119,22 +5115,73 @@ mod tests {
     }
 
     /// The strip lights the placement's tab by the plug-in's choice, EVEN the first and CENTER
-    /// the second (not by the kit's index, which counts its EDGES); none in MONO without DOUBLE,
-    /// whose one voice has no place among others.
+    /// the second (not by the kit's index, which counts its EDGES), in MONO too, whose one
+    /// voice scatters by it (R-SCATTER); none in MONO with DOUBLE, whose pair has no place
+    /// among others.
     #[test]
     fn the_strip_lights_the_placements_tab() {
-        let lit = |poly: bool, placement: Scatter| {
+        let lit = |poly: bool, doubled: bool, placement: Scatter| {
             let p = Ca72Params {
                 poly: BoolParam::new("Poly", poly),
+                doubled: BoolParam::new("Double", doubled),
                 placement: EnumParam::new("Scatter Placement", placement),
                 ..Ca72Params::default()
             };
             strip_scene(&p, 0, (&[], 0.0), StripScene::default()).placement
         };
-        assert_eq!(lit(true, Scatter::Even), Some(0));
-        assert_eq!(lit(true, Scatter::Centre), Some(1));
-        assert_eq!(lit(false, Scatter::Centre), None);
+        assert_eq!(lit(true, false, Scatter::Even), Some(0));
+        assert_eq!(lit(true, false, Scatter::Centre), Some(1));
+        assert_eq!(lit(false, false, Scatter::Centre), Some(1));
+        assert_eq!(lit(false, true, Scatter::Centre), None);
         assert_eq!(Bank::Placement.words(), ["EVEN", "CENTER"]);
+    }
+
+    /// In MONO without DOUBLE the strip shows VOICES's places as the engine's gains have them,
+    /// the one voice lit at the place its last attack took (the engine's bit for it), at the
+    /// output's level, with VOICES, WIDTH and INNER lit (R-SCATTER); with DOUBLE, the one pair,
+    /// and VOICES not lit.
+    #[test]
+    fn mono_shows_its_places_and_the_one_it_sounds_at() {
+        let amount = |name: &str, percent: f32| {
+            FloatParam::new(
+                name,
+                percent,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+        };
+        let scene = |doubled: bool| {
+            let p = Ca72Params {
+                spread: amount("Width", 100.0),
+                inner: amount("Inner", 40.0),
+                doubled: BoolParam::new("Double", doubled),
+                ..Ca72Params::default()
+            };
+            strip_scene(&p, 1 << 2, (&[], 0.5), StripScene::default())
+        };
+        let s = scene(false);
+        let Field::Scatter(places) = &s.field else {
+            panic!("{:?}", s.field);
+        };
+        let lit: Vec<usize> = (0..places.len()).filter(|&k| places[k].1).collect();
+        assert_eq!((places.len(), lit), (4, vec![2]));
+        for (k, &(x, _)) in places.iter().enumerate() {
+            let want = place::voice_at(1.0, 0.4, place::Placement::Even, k, 4);
+            assert_eq!(x, want, "place {k}");
+        }
+        assert_eq!(s.levels[2], 0.5);
+        let shown = |s: &StripScene, r: Readout| {
+            s.readouts[Readout::ALL.iter().position(|&x| x == r).unwrap()].1
+        };
+        for r in [Readout::Voices, Readout::Width, Readout::Inner] {
+            assert!(shown(&s, r), "{r:?} not lit");
+        }
+        let d = scene(true);
+        assert!(matches!(&d.field, Field::Double(pairs) if pairs.len() == 1));
+        assert!(!shown(&d, Readout::Voices), "VOICES lit with DOUBLE");
+        assert!(shown(&d, Readout::Width));
     }
 
     #[test]

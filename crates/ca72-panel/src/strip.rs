@@ -172,8 +172,8 @@ pub enum Readout {
     Auto,
     Drive,
     Level,
-    /// INNER's, its switch (lit where it moves the voices: WIDTH up, and not MONO without
-    /// DOUBLE). Last, so that the others keep their places in [`Readout::ALL`].
+    /// INNER's, its switch (lit where it moves the voices: WIDTH up). Last, so that the others
+    /// keep their places in [`Readout::ALL`].
     Inner,
 }
 
@@ -390,7 +390,7 @@ impl Default for Field {
 /// What the strip shows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StripScene {
-    /// Each bank's tab lit (none: none, as PLACEMENT's in MONO without DOUBLE).
+    /// Each bank's tab lit (none: none, as PLACEMENT's in MONO with DOUBLE).
     pub mode: Option<usize>,
     pub stereo: Option<usize>,
     pub placement: Option<usize>,

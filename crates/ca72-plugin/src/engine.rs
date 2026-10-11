@@ -14,8 +14,9 @@
 //! last note began longest ago, else the one let go longest ago, else the one held longest
 //! (the CA-74's R27; decisions.md R45), so a chord struck again stays where it was and a
 //! melody goes round the voices. ENTROPY makes each voice its own parts, SPREAD puts the voices
-//! across the stereo field where the placement has them (`character.rs`), one voice alone in
-//! the centre; both 0 by default, the circuit as drawn.
+//! across the stereo field where the placement has them (`character.rs`); the one instrument
+//! (without DOUBLE) at the next of VOICES's places at each attack, a note played legato staying
+//! where its phrase began (decisions.md R-SCATTER); both 0 by default, the circuit as drawn.
 
 use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
@@ -25,7 +26,9 @@ use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
 use crate::pool::{Ask, Crew, MAX, Pool, Shared};
-use plugin_kit_stereo::place::{ALONE, DOUBLE_TRIM, glide_share, pair_gains, unison_trim};
+use plugin_kit_stereo::place::{
+    ALONE, DOUBLE_TRIM, glide_share, pair_gains, unison_trim, voice_gains,
+};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -228,6 +231,13 @@ const QUIET: usize = 256;
 /// and R28).
 pub use plugin_kit_stereo::place::GLIDE;
 
+/// The time constant, seconds, with which the one instrument's place follows when it scatters
+/// (POLY, UNISON and DOUBLE off: decisions.md R-SCATTER): a fifth of the time its contours
+/// take to start after its trigger contact closes (the light model's `TRIGGER_ON`, fitted to
+/// the circuit's), so that at an attack it is within 1 % of its new place before its contours
+/// start (with [`GLIDE`] it would still be 46 % of the way short).
+pub const TURN_GLIDE: f64 = ca72::light::laws::TRIGGER_ON / 5.0;
+
 /// The detune between DOUBLE's two voices of a note at its full amount, cents: the CA-72's own
 /// (the owner, 2026-10-10: "let's make our maximum detune 100"; the kit's, the CA-74's, is 20).
 pub const DOUBLE_CENTS: f64 = 100.0;
@@ -428,6 +438,11 @@ pub struct Playing {
     /// last had it (the twin takes the keys pressed only then).
     twin: Box<Twin>,
     double: bool,
+    /// The one instrument's place among VOICES's when it scatters (decisions.md R-SCATTER):
+    /// the place its last attack took (None before its first, or since the pattern started
+    /// again: the first place); and whether its trigger contact was closed at its last sample.
+    turn: Option<usize>,
+    closed: bool,
 }
 
 /// Where a run puts a voice and its twin: their gains (left, right), DOUBLE's half detune,
@@ -456,7 +471,7 @@ impl Playing {
             self.play_light_from(ext, rate, m, share);
             return;
         }
-        let p = self.places(m);
+        let mut p = self.places(m);
         self.voice.set_drive(m.drive);
         self.twin.voice.set_drive(m.drive);
         let (mut gl, mut gr) = self.pan.unwrap_or(p.voice);
@@ -491,6 +506,7 @@ impl Playing {
                 self.broken = true;
                 y = 0.0;
             }
+            self.turned(self.voice.trigger_closed(), m, &mut p);
             let (mut left, mut right, mut most) = (y * gl, y * gr, y.abs());
             if p.twin_on {
                 let t = &mut self.twin;
@@ -531,7 +547,7 @@ impl Playing {
     /// character's offsets read each sample, as the circuit's voice reads them, so that a
     /// voice's character is the same whichever plays it).
     fn play_light_from(&mut self, ext: &[f64], rate: f64, m: &Mix, share: f64) {
-        let p = self.places(m);
+        let mut p = self.places(m);
         self.light.set_drive(m.drive);
         self.twin.light.set_drive(m.drive);
         let (mut gl, mut gr) = self.pan.unwrap_or(p.voice);
@@ -569,6 +585,7 @@ impl Playing {
                 self.broken = true;
                 y = 0.0;
             }
+            self.turned(self.light.trigger_closed(), m, &mut p);
             let (mut left, mut right, mut most) = (y * gl, y * gr, y.abs());
             if p.twin_on {
                 let t = &mut *self.twin;
@@ -609,32 +626,54 @@ impl Playing {
     /// Where a run with `m` puts the voice and its twin: with DOUBLE the pair about the
     /// centre, the voice half the detune flat to the right and its twin half sharp as far to
     /// the left, SPREAD's way out as far as the placement puts the voice (the CA-74's R28 and
-    /// R41); else the voice at its own place (a twin let go plays its tail where it was).
+    /// R41); else the voice at its own place, or the one instrument scattering at its turn's
+    /// (a twin let go plays its tail where it was).
     fn places(&self, m: &Mix) -> Places {
         let doubled = m.double > 0.0;
         let twin_on = doubled || self.twin.live;
-        // (One voice alone, no placement among others: its pair all of SPREAD's way out.)
-        let out = if twin_on {
-            m.placement
-                .map_or(ALONE, |p| self.character.pair(p, m.voices))
-        } else {
-            0.0
+        // (One voice alone, no placement among others: its pair all of SPREAD's way out; a twin
+        // let go as the one instrument starts to scatter, there still.)
+        let out = match m.placement {
+            _ if !twin_on => 0.0,
+            Some(p) if !m.scatter => self.character.pair(p, m.voices),
+            _ => ALONE,
         };
         let wide = |(l, r): (f32, f32)| (f64::from(l), f64::from(r));
         let [voice, twin] = pair_gains(m.spread, m.inner, out);
         Places {
-            // (Alone and not doubled, SPREAD is 0 and the voice whole on both sides.)
-            voice: wide(if doubled {
-                voice
+            voice: if doubled {
+                wide(voice)
+            } else if m.scatter {
+                self.scattered(m)
             } else {
                 let placement = m.placement.unwrap_or_default();
-                self.character.gains(m.spread, m.inner, placement, m.voices)
-            }),
+                wide(self.character.gains(m.spread, m.inner, placement, m.voices))
+            },
             twin: if twin_on { wide(twin) } else { (0.0, 0.0) },
             half: 0.5 * m.double,
             doubled,
             twin_on,
         }
+    }
+
+    /// The one instrument's gains at its turn's place among VOICES's, scattering (decisions.md
+    /// R-SCATTER): before its first attack, the first place.
+    fn scattered(&self, m: &Mix) -> (f64, f64) {
+        let placement = m.placement.unwrap_or_default();
+        let at = self.turn.unwrap_or(0);
+        let (l, r) = voice_gains(m.spread, m.inner, placement, at, m.voices);
+        (f64::from(l), f64::from(r))
+    }
+
+    /// Its trigger contact `closed` at the sample just played: closing (an attack's start) with
+    /// the one instrument scattering, its place the next of VOICES's, from the next sample
+    /// (decisions.md R-SCATTER). A note played legato, its contact staying closed, stays.
+    fn turned(&mut self, closed: bool, m: &Mix, p: &mut Places) {
+        if m.scatter && closed && !self.closed {
+            self.turn = Some(self.turn.map_or(0, |t| (t + 1) % m.voices.max(1)));
+            p.voice = self.scattered(m);
+        }
+        self.closed = closed;
     }
 
     /// A key pressed or released on the voice's keyboard (the one instrument's, or UNISON's),
@@ -766,8 +805,15 @@ pub struct Engine {
     bend: f32,
     modulation: f32,
     lamp: f32,
-    /// A voice's place's glide a sample at the voices' rate ([`glide_share`]).
+    /// A voice's place's glide a sample at the voices' rate ([`glide_share`]), and the one
+    /// instrument's while it scatters ([`TURN_GLIDE`]).
     glide: f64,
+    turn_glide: f64,
+    /// The place the one instrument's voice took at its last attack, scattering (the editor
+    /// shows it), and whether its pattern starts again from the first place at its next run
+    /// (every key let go by the host: decisions.md R-SCATTER).
+    turn: usize,
+    restart: bool,
     /// AUTO GAIN (decisions.md R45): the sound's curve (`drive.rs`), the correction the
     /// controls ask for from it (1: none), the correction gliding to it a sample at a time,
     /// and the glide's share a sample at the host's rate. Only it glides: the output's other
@@ -841,6 +887,9 @@ impl Engine {
             modulation: 0.0,
             lamp: 0.0,
             glide: 1.0,
+            turn_glide: 1.0,
+            turn: 0,
+            restart: false,
             curve: AVERAGE,
             auto: 1.0,
             auto_now: 1.0,
@@ -920,6 +969,7 @@ impl Engine {
         });
         let voice_rate = rate * factor as f64;
         self.glide = glide_share(voice_rate);
+        self.turn_glide = 1.0 - (-1.0 / (TURN_GLIDE * voice_rate)).exp();
         (self.auto_now, self.auto_share) = (self.auto, glide_share(rate));
         if let Some(c) = &self.calibration {
             c.set_rate(voice_rate);
@@ -942,6 +992,8 @@ impl Engine {
                     broken: false,
                     twin: made_twin(voice_rate, seed, k),
                     double: false,
+                    turn: None,
+                    closed: false,
                 })),
                 note: 0,
                 gate: false,
@@ -1322,7 +1374,10 @@ impl Engine {
             .min(self.slots.len())
     }
 
-    /// Every held key released (the contours then run out as the DECAY switch has them).
+    /// Every held key released (the contours then run out as the DECAY switch has them), and
+    /// the one instrument's pattern started again from the first place (decisions.md
+    /// R-SCATTER): the host resets the plug-in, and sends All Notes Off as its transport
+    /// stops, so that a part plays and renders its places alike each time.
     pub fn release_all(&mut self) {
         for key in 0..self.held.len() {
             if std::mem::take(&mut self.held[key]) && self.instruments() > 0 {
@@ -1332,6 +1387,7 @@ impl Engine {
         for s in &mut self.slots {
             s.gate = false;
         }
+        self.restart = true;
     }
 
     /// Every voice's key lifted at once and the held keys forgotten (POLY switched).
@@ -1472,9 +1528,20 @@ impl Engine {
             return;
         };
         self.bring_up(0, &mut p);
-        p.play_from(&ext[..n], rate, mix, self.glide);
+        p.play_from(&ext[..n], rate, mix, self.one_glide(mix));
+        self.turn = p.turn.unwrap_or(0);
         l[..n].copy_from_slice(&p.out[0][..n]);
         r[..n].copy_from_slice(&p.out[1][..n]);
+    }
+
+    /// The one instrument's place's glide a sample: [`TURN_GLIDE`]'s while it scatters (its
+    /// knobs' moves too), else [`GLIDE`]'s.
+    fn one_glide(&self, mix: &Mix) -> f64 {
+        if mix.scatter {
+            self.turn_glide
+        } else {
+            self.glide
+        }
     }
 
     /// POLY's sounding voices over `n` samples, summed into `l` and `r` in their order: each
@@ -1555,6 +1622,9 @@ impl Engine {
         // (The panel before the keys: DOUBLE's, which the twin takes keys by.)
         if p.panel_gen != self.panel_gen {
             self.voice_panel(p, &self.panel());
+        }
+        if k == 0 && std::mem::take(&mut self.restart) {
+            p.turn = None;
         }
         let s = &mut self.slots[k];
         if std::mem::take(&mut s.lift) {
@@ -1637,9 +1707,10 @@ impl Engine {
                 return (0.0, 0.0);
             };
             self.bring_up(0, &mut p);
-            // (One voice alone sits in the centre, both sides whole: SPREAD's places are for
-            // POLY's and UNISON's voices, and DOUBLE's pair. The voice's key is the keyboard's.)
-            p.play_from(&[ext], rate, &mix, self.glide);
+            // (The one voice at its turn's place, or DOUBLE's pair; at SPREAD 0 in the centre,
+            // both sides whole. The voice's key is the keyboard's.)
+            p.play_from(&[ext], rate, &mix, self.one_glide(&mix));
+            self.turn = p.turn.unwrap_or(0);
             return (p.out[0][0], p.out[1][0]);
         }
         let mut ins = [0.0f64; CHUNK];
@@ -1705,7 +1776,8 @@ impl Engine {
     }
 
     /// Which voices sound now, a bit a voice (the editor's display of where they sound, A6):
-    /// POLY's and UNISON's sounding, the one instrument while a key is held.
+    /// POLY's and UNISON's sounding, the one instrument while a key is held (scattering, the
+    /// bit of the place its last attack took).
     pub fn sounding_mask(&self) -> u32 {
         if self.many() {
             self.slots
@@ -1714,7 +1786,8 @@ impl Engine {
                 .filter(|(_, s)| s.active)
                 .fold(0, |m, (k, _)| m | 1 << k)
         } else {
-            u32::from(self.held.iter().any(|h| *h))
+            let at = if self.mix().scatter { self.turn } else { 0 };
+            u32::from(self.held.iter().any(|h| *h)) << at.min(LEVELS - 1)
         }
     }
 
@@ -1855,9 +1928,11 @@ pub const CHUNK: usize = 128;
 
 /// ENTROPY, SPREAD, DOUBLE and DRIVE as the voices' samples take them: ENTROPY's depth, the
 /// oscillators' (their floor with it, unless LOCK), the depth the character's offsets are
-/// drawn at, SPREAD and INNER, SCATTER's placement (none for one voice alone, its DOUBLE pair at
-/// the edge) and the voices it places among (VOICES), DOUBLE's detune between a note's two voices, cents (0: one voice a note), and DRIVE's gain into the
-/// filter (1: the circuit).
+/// drawn at, SPREAD and INNER, SCATTER's placement (none for one voice alone with DOUBLE, its
+/// pair at the edge) and the voices it places among (VOICES), DOUBLE's detune between a note's
+/// two voices, cents (0: one voice a note), DRIVE's gain into the filter (1: the circuit), and
+/// whether the one instrument scatters (POLY, UNISON and DOUBLE off: its voice at the next of
+/// VOICES's places at each attack; decisions.md R-SCATTER).
 #[derive(Debug, Clone, Copy)]
 pub struct Mix {
     entropy: f64,
@@ -1869,10 +1944,11 @@ pub struct Mix {
     voices: usize,
     double: f64,
     drive: f64,
+    scatter: bool,
 }
 
 /// [`Mix`]'s values, as the workers are handed them.
-pub const MIX_LEN: usize = 9;
+pub const MIX_LEN: usize = 10;
 
 impl Mix {
     pub fn to_array(self) -> [f64; MIX_LEN] {
@@ -1886,6 +1962,7 @@ impl Mix {
             self.voices as f64,
             self.double,
             self.drive,
+            f64::from(u8::from(self.scatter)),
         ]
     }
 
@@ -1900,6 +1977,7 @@ impl Mix {
             voices,
             double,
             drive,
+            scatter,
         ]: [f64; MIX_LEN],
     ) -> Mix {
         Mix {
@@ -1912,6 +1990,7 @@ impl Mix {
             voices: voices as usize,
             double,
             drive,
+            scatter: scatter > 0.0,
         }
     }
 }
@@ -2145,6 +2224,8 @@ pub fn level_gain(db: f64) -> f64 {
 /// `voices` (VOICES) of them placed.
 fn mix_of(c: &Controls, voices: usize) -> Mix {
     let many = c.poly || c.unison;
+    // (The one instrument without DOUBLE scatters: its places are VOICES's, one an attack.)
+    let scatter = !many && c.double <= 0.0;
     let entropy = c.entropy * ENTROPY_DEPTH;
     // The oscillators': their own floor and ENTROPY's, unless LOCK; the cutoff's, ENTROPY's.
     let oscillators = if c.lock { 0.0 } else { ENTROPY_FLOOR + entropy };
@@ -2152,17 +2233,11 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
         entropy,
         oscillators,
         at: oscillators.max(entropy),
-        // (One voice alone sits in the centre: the places are POLY's and UNISON's voices'
-        // among themselves, and DOUBLE's pair's.)
-        spread: if many || c.double > 0.0 {
-            c.spread
-        } else {
-            0.0
-        },
+        spread: c.spread,
         inner: c.inner.clamp(0.0, 1.0),
-        // (One voice alone has no place among others: none, and its DOUBLE pair as far out as
-        // SPREAD, the kit's `ALONE`.)
-        placement: many.then_some(c.placement),
+        // (The one instrument with DOUBLE has no place among others: none, and its pair as far
+        // out as SPREAD, the kit's `ALONE`.)
+        placement: (many || scatter).then_some(c.placement),
         voices,
         double: if c.double > 0.0 {
             c.double.min(1.0) * DOUBLE_CENTS
@@ -2174,6 +2249,7 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
         } else {
             1.0
         },
+        scatter,
     }
 }
 
@@ -2248,6 +2324,8 @@ impl Probe {
                     broken: false,
                     twin: made_twin(rate, PROBE_SEED, k),
                     double: false,
+                    turn: None,
+                    closed: false,
                 }
             })
             .collect();
@@ -2767,9 +2845,9 @@ mod tests {
 
     /// At full SPREAD a three-note chord fills the field (side within 3 dB of mid; the old
     /// places and pan law, a voice in the centre weighed double, gave less), and one voice
-    /// alone stays in the centre, left and right the same (decisions.md R45).
+    /// alone without SPREAD stays in the centre, left and right the same (decisions.md R45).
     #[test]
-    fn a_chord_fills_the_field_and_one_voice_stays_in_the_centre() {
+    fn a_chord_fills_the_field_and_one_voice_without_spread_stays_in_the_centre() {
         let c = Controls {
             poly: true,
             voices: 8,
@@ -2779,14 +2857,18 @@ mod tests {
         let (mid, side, _) = sides(&c, &[57, 61, 64]);
         let db = 10.0 * (side / mid).log10();
         assert!(db > -3.0, "side {db:.1} dB against mid");
-        let mono = Controls { poly: false, ..c };
+        let mono = Controls {
+            poly: false,
+            spread: 0.0,
+            ..c
+        };
         let (_, _, diff) = sides(&mono, &[57]);
         assert_eq!(diff, 0.0, "one voice off the centre");
     }
 
     /// INNER at 100 % clears the centre: a chord on EVEN's three voices, one of them in the
-    /// centre at INNER 0, is all at the edges, its side nearer its mid; one voice alone stays in
-    /// the centre, whatever INNER (decisions.md R49).
+    /// centre at INNER 0, is all at the edges, its side nearer its mid; one voice alone without
+    /// SPREAD stays in the centre, whatever INNER (decisions.md R49).
     #[test]
     fn inner_clears_the_centre_and_one_voice_stays_there() {
         let c = Controls {
@@ -2806,11 +2888,191 @@ mod tests {
         );
         let mono = Controls {
             poly: false,
+            spread: 0.0,
             inner: 1.0,
             ..c
         };
         let (_, _, diff) = sides(&mono, &[57]);
         assert_eq!(diff, 0.0, "one voice off the centre");
+    }
+
+    /// Where the one instrument sounds for each of `keys` played in turn with `c`, each held
+    /// 0.15 s and let go for 0.25 s: the right side's share of its power while held, from 20 ms
+    /// in (its place reached); and the editor's bits for it then.
+    fn scattered(c: &Controls, keys: &[u8]) -> Vec<(f64, u32)> {
+        let mut e = Engine::new();
+        e.set(c);
+        e.prepare(48_000.0, 9);
+        let mut out = Vec::new();
+        for &key in keys {
+            e.event(Event::Note { key, on: true });
+            let (l, r) = run_for(&mut e, 0.15);
+            let from = (0.02 * 48_000.0) as usize;
+            let power = |x: &[f64]| x[from..].iter().map(|v| v * v).sum::<f64>();
+            let (pl, pr) = (power(&l), power(&r));
+            assert!(pl + pr > 1e-3, "key {key} silent");
+            out.push((pr / (pl + pr), e.sounding_mask()));
+            e.event(Event::Note { key, on: false });
+            run_for(&mut e, 0.25);
+        }
+        out
+    }
+
+    /// `e` rendered for `seconds`, left and right.
+    fn run_for(e: &mut Engine, seconds: f64) -> (Vec<f64>, Vec<f64>) {
+        let (mut l, mut r) = ([0.0f32; 240], [0.0f32; 240]);
+        let (mut ls, mut rs) = (Vec::new(), Vec::new());
+        for _ in 0..(seconds * 48_000.0 / 240.0).round() as usize {
+            e.render(&[], &mut l, &mut r);
+            e.end_block(240);
+            ls.extend(l.iter().map(|&x| f64::from(x)));
+            rs.extend(r.iter().map(|&x| f64::from(x)));
+        }
+        (ls, rs)
+    }
+
+    /// The right side's share of a voice's power at place `k` of `n` (the kit's gains).
+    fn share_at(c: &Controls, k: usize, n: usize) -> f64 {
+        let (l, r) = voice_gains(c.spread, c.inner, c.placement, k, n);
+        let (l, r) = (f64::from(l), f64::from(r));
+        r * r / (l * l + r * r)
+    }
+
+    /// The one instrument (POLY, UNISON and DOUBLE off) scatters: each attack at the next of
+    /// VOICES's places, round and round, where the placement puts POLY's voices (EVEN; CENTER
+    /// with INNER), at QUALITY's LO the same; the editor told the place (decisions.md
+    /// R-SCATTER).
+    #[test]
+    fn the_one_instrument_takes_the_next_place_at_each_attack() {
+        let keys = [57, 60, 62, 64, 65, 67, 69];
+        let even = Controls {
+            voices: 4,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let centre = Controls {
+            voices: 5,
+            spread: 0.8,
+            inner: 0.3,
+            placement: Placement::Centre,
+            ..Controls::default()
+        };
+        let light = Controls {
+            potato: true,
+            ..even
+        };
+        for c in [even, centre, light] {
+            let got = scattered(&c, &keys);
+            for (i, &(share, mask)) in got.iter().enumerate() {
+                let k = i % c.voices;
+                let want = share_at(&c, k, c.voices);
+                assert!(
+                    (share - want).abs() < 1e-6,
+                    "{:?} (LO {}) note {i}: {share:.6} against place {k}'s {want:.6}",
+                    c.placement,
+                    c.potato
+                );
+                assert_eq!(mask, 1 << k, "note {i}: the editor's bit");
+            }
+            // (Not all in one place.)
+            assert!(got.iter().any(|g| (g.0 - got[0].0).abs() > 0.1));
+        }
+    }
+
+    /// A note played legato (its trigger contact staying closed, single triggering) stays at
+    /// the place its phrase began; with RETRIGGER, a key pressed among others held starts the
+    /// contours again, and moves to the next place (decisions.md R-SCATTER).
+    #[test]
+    fn a_legato_note_stays_and_retrigger_moves_it() {
+        for retrigger in [false, true] {
+            let mut c = Controls {
+                voices: 4,
+                spread: 1.0,
+                ..Controls::default()
+            };
+            c.panel.retrigger = retrigger;
+            c.panel.priority = Priority::Last;
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            e.event(Event::Note { key: 57, on: true });
+            run_for(&mut e, 0.15);
+            e.event(Event::Note { key: 64, on: true });
+            let (l, r) = run_for(&mut e, 0.15);
+            let from = (0.04 * 48_000.0) as usize;
+            let power = |x: &[f64]| x[from..].iter().map(|v| v * v).sum::<f64>();
+            let share = power(&r) / (power(&l) + power(&r));
+            let k = usize::from(retrigger);
+            assert!(
+                (share - share_at(&c, k, 4)).abs() < 1e-6,
+                "retrigger {retrigger}: {share:.6} against place {k}'s"
+            );
+        }
+    }
+
+    /// All Notes Off (and the host's reset, which lets every key go so) starts the one
+    /// instrument's pattern again from the first place, so that a part plays and renders its
+    /// places alike each time (decisions.md R-SCATTER).
+    #[test]
+    fn all_notes_off_starts_the_pattern_again() {
+        let c = Controls {
+            voices: 4,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 9);
+        for key in [57, 60] {
+            e.event(Event::Note { key, on: true });
+            run_for(&mut e, 0.1);
+            e.event(Event::Note { key, on: false });
+            run_for(&mut e, 0.1);
+        }
+        assert_eq!(e.turn, 1);
+        e.event(Event::AllNotesOff);
+        e.event(Event::Note { key: 62, on: true });
+        let (l, r) = run_for(&mut e, 0.1);
+        let from = (0.02 * 48_000.0) as usize;
+        let power = |x: &[f64]| x[from..].iter().map(|v| v * v).sum::<f64>();
+        let share = power(&r) / (power(&l) + power(&r));
+        assert!((share - share_at(&c, 0, 4)).abs() < 1e-6, "{share:.6}");
+        assert_eq!(e.turn, 0);
+    }
+
+    /// At an attack the one instrument reaches its new place before its contours start
+    /// ([`TURN_GLIDE`], `TRIGGER_ON` after its trigger contact closes): within 1 % of the way
+    /// there, from the edge to the other (with [`GLIDE`], 46 % short), so that the note is
+    /// heard where it sounds, not sliding there (decisions.md R-SCATTER).
+    #[test]
+    fn the_one_instrument_is_at_its_new_place_before_its_contours_start() {
+        let c = Controls {
+            voices: 2,
+            spread: 1.0,
+            ..Controls::default()
+        };
+        let mut e = Engine::new();
+        e.set(&c);
+        e.prepare(48_000.0, 9);
+        e.event(Event::Note { key: 57, on: true });
+        run_for(&mut e, 0.1);
+        e.event(Event::Note { key: 57, on: false });
+        run_for(&mut e, 0.2);
+        e.event(Event::Note { key: 60, on: true });
+        for _ in 0..(ca72::light::laws::TRIGGER_ON * 48_000.0).round() as usize {
+            e.tick_stereo(0.0);
+        }
+        let (gl, _) = e.slots[0].play.lock().unwrap().pan.unwrap();
+        let ((from, _), (to, _)) = (
+            voice_gains(1.0, 0.0, Placement::Even, 0, 2),
+            voice_gains(1.0, 0.0, Placement::Even, 1, 2),
+        );
+        let short = (gl - f64::from(to)) / f64::from(from - to);
+        assert!(
+            short.abs() < 0.01,
+            "{:.1} % of the way short",
+            100.0 * short
+        );
     }
 
     /// POLY's notes go round the voices: a note after one let go and fallen silent takes the
@@ -3225,7 +3487,8 @@ mod tests {
 
     /// DOUBLE turned off lets the note go, and the twin plays its tail out on its side (INNER at
     /// 100 %: every pair at the edges, as EDGES had them), then falls silent and stops; a key
-    /// pressed after reaches the voice alone, in the centre. POLY off and on.
+    /// pressed after reaches the voice alone (POLY off, at its first place: it scatters now).
+    /// POLY off and on.
     #[test]
     fn a_twin_let_go_plays_its_tail_out_and_takes_no_new_key() {
         for poly in [false, true] {
@@ -3241,20 +3504,25 @@ mod tests {
             e.prepare(48_000.0, 9);
             e.event(Event::Note { key: 57, on: true });
             let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            // (POLY off, the voice alone scatters once DOUBLE is off: its first note at the
+            // first of VOICES's places. R-SCATTER.)
+            let (gl, gr) = voice_gains(1.0, 1.0, Placement::Even, 0, c.voices);
             let mut block = |e: &mut Engine| {
                 e.render(&[], &mut l, &mut r);
                 e.end_block(256);
-                l.iter()
-                    .zip(&r)
-                    .map(|(&a, &b)| f64::from(a - b).abs())
-                    .fold(0.0, f64::max)
+                l.iter().zip(&r).fold((0.0, 0.0), |(d, off), (&a, &b)| {
+                    (
+                        f64::max(d, f64::from(a - b).abs()),
+                        f64::max(off, f64::from(a * gr - b * gl).abs()),
+                    )
+                })
             };
             for _ in 0..40 {
                 block(&mut e);
             }
             e.set(&Controls { double: 0.0, ..c });
             assert!(
-                block(&mut e) > 1e-3,
+                block(&mut e).0 > 1e-3,
                 "poly {poly}: the tail not to either side"
             );
             for _ in 0..(10 * 48_000 / 256) {
@@ -3263,14 +3531,18 @@ mod tests {
             let live = |e: &Engine| e.slots.iter().any(|s| s.play.lock().unwrap().twin.live);
             assert!(!live(&e), "poly {poly}: a twin still live after its tail");
             e.event(Event::Note { key: 60, on: true });
-            let mut most = 0.0f64;
+            let (mut most, mut heard) = (0.0f64, 0.0f64);
             for _ in 0..40 {
-                let d = block(&mut e);
+                let (d, off) = block(&mut e);
                 if !poly {
-                    most = most.max(d);
+                    (most, heard) = (most.max(off), heard.max(d));
                 }
             }
-            assert_eq!(most, 0.0, "poly {poly}: a new key off the centre");
+            assert!(
+                most < 1e-6 * heard.max(1.0),
+                "poly {poly}: a new key off its place"
+            );
+            assert!(poly || heard > 1e-3, "the new key silent");
             assert!(!live(&e), "poly {poly}: a twin took the new key");
             assert!(
                 e.slots

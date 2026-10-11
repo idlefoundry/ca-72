@@ -104,15 +104,20 @@ and sends nothing of yours.
 - **SPREAD** (0 to 100 %, off by default): POLY's or UNISON's voices across the stereo
   field, each as loud wherever it sits, where **SCATTER** puts them: EVEN (the default),
   evenly from edge to edge, the first two at the edges; or CENTER, the first in the centre and
-  the rest spread about it by the golden ratio. With POLY and UNISON off the voice stays in the centre
-  (unless DOUBLE). A voice moves to a new place over 10 ms.
+  the rest spread about it by the golden ratio. With POLY, UNISON and DOUBLE off the one voice
+  goes round VOICES's places, the next at each attack: a note played detached moves on, a note
+  played legato stays where its phrase began (with RETRIGGER every key moves on), so a line
+  jumps about the field in a pattern the playing makes. All Notes Off, or the host resetting
+  the plug-in, starts the pattern again from the first place. A voice moves to a new place
+  over 10 ms; the one voice in about 1.6 ms, within the 7.8 ms its contours take to start
+  after a key, so that a note is heard where it sounds.
 - **INNER** (0 to 100 %, off by default): the inner edge of each side, as a share of SPREAD
   (the strip's WIDTH). SPREAD brings the voices in from the outer edges; INNER moves them out
   from the centre. Each side's voices sit in a band from INNER's share of SPREAD's way out to
   SPREAD's edge, as far across it as SCATTER puts them, and none in the centre: a voice SCATTER
   puts there (CENTER's first, EVEN's last with an odd number of voices) goes to the side its
   turn falls on. With DOUBLE the pairs keep to the band too. At 100 % every voice sits at
-  SPREAD's edge; at SPREAD 0, or with POLY and UNISON off and no DOUBLE, it does nothing.
+  SPREAD's edge; at SPREAD 0 it does nothing.
 - **DOUBLE** (0 to 100 %, off by default): each note two whole voices, up to 20 cents apart,
   the sharper on the left. With SPREAD the pair goes out to either side of the centre, as
   far as SCATTER puts the note's voice (with INNER at 100 %, and with POLY and UNISON off, all
@@ -187,8 +192,9 @@ whichever is chosen; only where the knob points changes.
 
 Under the panel, a strip holds the presets' selector and the plug-in's own controls (not the
 instrument's): POLY (click), VOICES (click either side to step), and ENTROPY and SPREAD (drag
-the slider; the switch beside each turns it off and back on at its amount). SPREAD is
-dimmed while POLY is off, and FEEDBACK while EXTERNAL INPUT is closed.
+the slider; the switch beside each turns it off and back on at its amount). VOICES and the
+placement are unlit in MONO with DOUBLE, where they move nothing, and FEEDBACK is dimmed
+while EXTERNAL INPUT is closed.
 
 **Presets.** At the strip's left: the preset last chosen (marked • once you change it), a
 star to make it a favourite, the previous and next preset, and SAVE…. A preset holds every
