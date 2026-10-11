@@ -3714,7 +3714,9 @@ being placed on them as well? Show me a before/after video once you are done."
   two sawtooths at 8' about six semitones apart, DOUBLE at 100 cents, INNER 21, gliding), last
   in `sounds/presets.toml`, DOUBLE named on; its MAIN OUTPUT VOLUME 8.6 (it was saved at 10)
   for a momentary maximum of -17.97 LUFS, where the others are levelled (R15; `tests/
-  preset_levels.rs`: at 10 it was -11.5). Its tags, ours: fat, glide.
+  preset_levels.rs`: at 10 it was -11.5). Its tags, ours: fat, glide. (The file kept VOLUME at
+  10 until 2026-10-10, R-RETIRE's branch: the commit named 8.6 but left the line as the owner's;
+  measured again at 8.6, -17.96 LUFS.)
 - **The levels:** each voice's output's peak over a block was measured already (for knowing when
   a voice falls silent: `Engine::levels` keeps it); the output's peak is measured (two compares
   a sample) only while an editor is open, else a flag read a block. The audio thread keeps the
