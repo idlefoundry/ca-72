@@ -4867,13 +4867,14 @@ current name."
 
 **Agent decisions, 2026-10-11** (not separately approved):
 - **The favourites as the drawer shows them**, read from the owner's library on the Mac at
-  19:43 (EDT; Wooden Mallet starred at 19:42, after a first reading at 19:29): the stars in
+  19:46 (EDT; Wooden Mallet starred at 19:42 and saved again at 19:44, after a first reading
+  at 19:29): the stars in
   `factory.toml` and in their own files, a factory preset with an edit of theirs counted by the
   edit's. Nineteen; not kept: Lead, Elastic Octaves, Undertow Growl, Cruising Whistle, Stacked
   Fifths, Ringing Saw Line, Shoreline Wash.
 - **Each as the owner has it.** Thirteen are their edits, their values whole (every control
   named, but MIDI BEND RANGE, the player's, which Wooden Mallet's file of 2026-10-03 held):
-  Wooden Mallet (VOLUME 10 alone), and, saved that day, Brass Tutti, Breath Flute, Hollow Glider, Ladder Kick, Noise Crash,
+  Wooden Mallet (RETRIGGER on, SPREAD 100, VOLUME 10), and, saved that day, Brass Tutti, Breath Flute, Hollow Glider, Ladder Kick, Noise Crash,
   Noise Snare, Pink Riser, Slow Bow, Slow Horn Swell, Upright Pluck and Warped Pad (DOUBLE on
   most, DRIVE, ENTROPY and SPREAD, UNISON, an octave, NOTE PRIORITY LAST, RETRIGGER), and Cycle
   of Fifths (four voices, DOUBLE 30 cents, oscillator 3 and FILTER MODULATION off). Six are the
