@@ -5287,6 +5287,16 @@ mod tests {
         e.draw();
     }
 
+    /// A library of the factory's presets and twelve of the user's (`Pad 01` to `Pad 12`), so
+    /// that the list runs on below the rows shown whatever the factory's count.
+    fn long_library(dir: &std::path::Path) -> Library {
+        let lib = Library::at(dir);
+        for i in 1..=12 {
+            lib.save(&format!("Pad {i:02}"), vec![], None).unwrap();
+        }
+        lib
+    }
+
     fn row_of(e: &Editing, name: &str) -> usize {
         e.browser
             .drawer
@@ -5306,7 +5316,7 @@ mod tests {
     #[test]
     fn small_scrolls_add_up_to_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
+        let (mut e, _host, _params) = editing_with(long_library(dir.path()));
         e.draw();
         open(&mut e);
         let list = in_drawer(
@@ -5341,7 +5351,7 @@ mod tests {
     #[test]
     fn the_rail_drops_the_drawer_over_the_strip_and_a_row_sets_the_plugin() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut e, host, params) = editing_with(Library::at(dir.path()));
+        let (mut e, host, params) = editing_with(long_library(dir.path()));
         e.draw();
         let shut = e.window_height();
         assert_eq!(shut, height_for(1720));
@@ -5352,10 +5362,13 @@ mod tests {
         assert_eq!(host.resizes.load(Ordering::Relaxed), 0);
         assert_eq!(e.drawer_span().unwrap(), (DRAWER_TOP, DRAWER_TOP, art::H));
         assert!(!e.browser.bar.below && e.browser.bar.open);
-        assert_eq!(e.browser.drawer.rows.len(), crate::library::factory().len());
+        assert_eq!(
+            e.browser.drawer.rows.len(),
+            crate::library::factory().len() + 12
+        );
         // A row sets every parameter it names (or its default), the preset remembered.
         host.take();
-        let i = row_of(&e, "Undertow Growl");
+        let i = row_of(&e, "Warp Field");
         // Below the rows shown: the wheel scrolls the list to it.
         let list = in_drawer(
             &e,
@@ -5377,7 +5390,7 @@ mod tests {
         let (x, y) = presets_ui::row_centre(&e.browser.drawer, i).expect("shown");
         let pt = in_drawer(&e, (x, y));
         click(&mut e, pt);
-        assert_eq!(preset(&params), "Undertow Growl");
+        assert_eq!(preset(&params), "Warp Field");
         let calls = host.take();
         let set = |p: ParamPtr| {
             calls
@@ -5395,18 +5408,18 @@ mod tests {
         let ends = calls.iter().filter(|c| matches!(c, Call::End(_))).count();
         assert_eq!(begins, ends);
         e.draw();
-        assert_eq!(e.browser.bar.name, "Undertow Growl");
+        assert_eq!(e.browser.bar.name, "Warp Field");
         assert!(e.browser.drawer.rows[i].current);
         // A double click on a row chooses it and closes the drawer.
         e.browser.scroll(-100);
-        let j = row_of(&e, "Brass Tutti");
+        let j = row_of(&e, "Brass Choir");
         let pt = in_drawer(
             &e,
             presets_ui::row_centre(&e.browser.drawer, j).expect("shown"),
         );
         click(&mut e, pt);
         click(&mut e, pt);
-        assert_eq!(preset(&params), "Brass Tutti");
+        assert_eq!(preset(&params), "Brass Choir");
         assert!(!e.browser.open);
         slid(&mut e);
         assert_eq!(e.window_height(), shut);
@@ -5500,8 +5513,8 @@ mod tests {
             .iter()
             .map(|r| r.name.as_str())
             .collect();
-        assert!(names.contains(&"Lead") && names.contains(&"Hollow Glider"));
-        assert!(!names.contains(&"Bass"), "{names:?}");
+        assert!(names.contains(&"Singing Drift") && names.contains(&"Horn Bloom"));
+        assert!(!names.contains(&"Felt Bass"), "{names:?}");
         key(&mut e, Key::Backspace);
         assert_eq!(e.browser.drawer.search.text, "GLID");
         key(&mut e, Key::ArrowDown);
@@ -5531,7 +5544,7 @@ mod tests {
             .drawer
             .chips
             .iter()
-            .position(|(t, _)| t == "whistle")
+            .position(|(t, _)| t == "prog")
             .expect("a chip");
         let setter = ParamSetter::new(e.context.as_ref());
         e.browser
@@ -5543,10 +5556,10 @@ mod tests {
             .iter()
             .map(|r| r.name.as_str())
             .collect();
-        assert_eq!(names, ["Cruising Whistle"]);
+        assert_eq!(names, ["Singing Drift"]);
         let pt = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Next)));
         click(&mut e, pt);
-        assert_eq!(preset(&params), "Cruising Whistle");
+        assert_eq!(preset(&params), "Singing Drift");
     }
 
     /// An arrow choosing a preset ends a wheel's gesture still open on a knob it sets.
@@ -5604,7 +5617,7 @@ mod tests {
         for _ in 0.."My Bass".len() {
             key(&mut e, Key::Backspace);
         }
-        typed(&mut e, "Bass");
+        typed(&mut e, "Felt Bass");
         assert!(e.browser.drawer.replace);
         assert!(e.browser.drawer.hint.contains("factory"));
         key(&mut e, Key::Escape);
@@ -5642,7 +5655,7 @@ mod tests {
         assert!(!e.browser.bar.found, "the bar says the preset is gone");
         // A factory preset deleted (Enter once asked), then restored; the star makes a
         // favourite.
-        let i = row_of(&e, "Lead");
+        let i = row_of(&e, "Singing Drift");
         let setter = ParamSetter::new(e.context.as_ref());
         e.browser
             .drawer_press(DrawerTarget::Row(i), 0.0, &e.params, &setter);
@@ -5653,7 +5666,13 @@ mod tests {
             &setter,
         );
         key(&mut e, Key::Enter);
-        assert!(e.browser.drawer.rows.iter().all(|r| r.name != "Lead"));
+        assert!(
+            e.browser
+                .drawer
+                .rows
+                .iter()
+                .all(|r| r.name != "Singing Drift")
+        );
         let setter = ParamSetter::new(e.context.as_ref());
         e.browser.drawer_press(
             DrawerTarget::Key(PresetKey::Restore),
@@ -5661,10 +5680,10 @@ mod tests {
             &e.params,
             &setter,
         );
-        let i = row_of(&e, "Lead");
+        let i = row_of(&e, "Singing Drift");
         e.browser
             .drawer_press(DrawerTarget::Star(i), 0.0, &e.params, &setter);
-        assert!(lib.find("Lead").unwrap().favorite);
+        assert!(lib.find("Singing Drift").unwrap().favorite);
     }
 
     #[test]
@@ -5911,7 +5930,7 @@ mod tests {
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         e.draw();
         open(&mut e);
-        let i = row_of(&e, "Brass Tutti");
+        let i = row_of(&e, "Brass Choir");
         let pt = in_drawer(
             &e,
             presets_ui::row_centre(&e.browser.drawer, i).expect("shown"),

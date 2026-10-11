@@ -6,9 +6,26 @@
 
 use ca72_plugin::drive::{Curve, STEPS};
 use ca72_plugin::engine::{Controls, Engine, Event};
-use ca72_plugin::library::Sound;
-use ca72_plugin::params::{Ca72Params, Footage, Scatter, Wave, Wave3};
+use ca72_plugin::library::{Sound, factory, parse_factory};
+use ca72_plugin::params::{Ca72Params, Footage, NotePriority, Scatter, Wave, Wave3};
 use nih_plug::prelude::Enum;
+
+/// The presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55), which the
+/// measurements made on them keep.
+pub fn retired() -> Vec<Sound> {
+    parse_factory(include_str!("../../sounds/retired.toml")).unwrap()
+}
+
+/// The preset named `name`, the factory's or a retired one; else the first whose name holds
+/// it (the factory's first).
+pub fn preset(name: &str) -> Sound {
+    let all: Vec<Sound> = factory().iter().cloned().chain(retired()).collect();
+    let exact = all.iter().find(|s| s.name == name);
+    exact
+        .or_else(|| all.iter().find(|s| s.name.contains(name)))
+        .cloned()
+        .unwrap_or_else(|| panic!("no preset {name}"))
+}
 
 pub fn env<T: std::str::FromStr>(name: &str, default: T) -> T {
     std::env::var(name)
@@ -70,6 +87,12 @@ pub fn controls_of(s: &Sound) -> Controls {
             "glide_on" => p.glide_on = on(v),
             "decay_on" => p.decay = on(v),
             "a440" => p.a440 = on(v),
+            "note_priority" => {
+                let last = NotePriority::variants().len() - 1;
+                p.priority =
+                    NotePriority::from_index((v.round().max(0.0) as usize).min(last)).into();
+            }
+            "retrigger" => p.retrigger = on(v),
             "mod_wheel" => p.mod_wheel = v,
             "volume" => c.volume = v / 10.0,
             "main_output" => c.main_output = on(v),
