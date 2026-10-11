@@ -4500,20 +4500,25 @@ took the CA-74's played editor from 21 % to 13 % of a core): "Yeah, let's do tha
 `the_window_played`, its thread's own time, main at 66f8ef7 and this, run alternately twice: before
 40.7 % and 51.0 % of one core (6.8 and 8.5 ms a frame on average, 21 ms at the 95th percentile);
 after, turned in places (Windows, X11) 21.7 % and 22.4 % (3.6 and 3.7 ms, 14 ms), turned whole
-(macOS) 37.3 % and 38.3 % (6.2 and 6.4 ms, 16 ms), every frame's places-turned screen the whole
-one. `ultra_timings`, the opening alone lit and playing (wall's time), at the opening size and a
-Retina window's: the amber lamp 0.53 and 1.36 ms a frame before, 0.33 and 1.07 after; the Tesla
-lamp 1.43 and 2.14 before, 0.95 and 1.88 after. Tests: `a_change_above_the_strip_draws_none_of_it`
-(it fails without the cut: the strip drawn from its top), `a_light_from_its_picture_is_the_light_drawn`
-(both lamps, quiet, playing, sparking and coming up, at both scales),
+(macOS) 37.3 % and 38.3 % (6.2 and 6.4 ms, 16 ms), every frame's places-turned screen the whole one.
+The same on the owner's Mac (idle; its wall's time), before and after each in its own target folder
+(in one, Cargo took one tree's build as the other's: path packages are named from the workspace's
+root, and the second tree's files were older than the first's build): before 36.9 % and 36.3 % (6.2
+and 6.0 ms a frame, 16 ms at the 95th percentile), after, turned whole as macOS does 29.4 % and
+30.1 % (4.9 and 5.0 ms, 12 ms); turned in places 21.6 % and 21.9 %, which macOS cannot yet do.
+`ultra_timings`, the opening alone lit and playing (wall's time), at the opening size and a Retina
+window's: the amber lamp 0.53 and 1.36 ms a frame before, 0.33 and 1.07 after; the Tesla lamp 1.43
+and 2.14 before, 0.95 and 1.88 after. Tests: `a_change_above_the_strip_draws_none_of_it` (it fails
+without the cut: the strip drawn from its top), `a_light_from_its_picture_is_the_light_drawn` (both
+lamps, quiet, playing, sparking and coming up, at both scales),
 `the_frame_put_together_in_places_is_the_frame_put_together_whole` (now with the opening ticking,
 the strip and OVERLOAD at once, and the window turned in those places the window turned whole: it
 fails with the strip's place left out). The core's, panel's and plug-in's tests, 341 passed, 43
 ignored; rustfmt; clippy with `-D warnings`.
 
 **Not done, measured, for later:** macOS still turns and shows the whole window at every frame
-that changes (its share of the 38 %: about 2.5 ms a frame here, and Core Animation takes the whole
-image again); a patched Core Graphics backend that kept its buffer, or showed the window in bands,
+that changes (about 2.5 ms a frame here, 1.9 on the Mac, and Core Animation takes the whole image
+again); a patched Core Graphics backend that kept its buffer, or showed the window in bands,
 would be the next step there. The shutter's blades are SVG, about 6 ms a frame while QUALITY
 changes; the Tesla lamp's streaks about 3 ms; a strip knob (DETUNE swept) about 2 ms a render; the
 lamps' lens and bezel pictures are resampled at each tick.
