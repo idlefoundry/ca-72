@@ -3974,3 +3974,46 @@ out), the light voice's `the_priority_chooses_the_key_held_that_sounds` and
 `note_priority_and_retrigger_are_part_of_a_preset`, the toggle's clicks on its side; the core's,
 panel's and plug-in's tests, 316 passed, 42 ignored; rustfmt; clippy with `-D warnings`. Not
 yet: the installed build in a host.
+
+## R-SKIN. The settings key and the editor's look; menus' heads; VOICES dragged by steps
+
+**The owner, 2026-10-10**, shown a picture of the drawn skin: "why are you drawing it in that old
+skin?", then: "i guess we're maintaining it, that's fine. Maybe we should add a settings button
+on the right hand side of the preview preset row. We can let people change their skin there. But
+note, all future versions default to the new skin." Shown the menu: "just say settings: don't say
+'settings for this computer'", "also, we need to better distinguish menu headers from menu
+options", and "do you think we should make look a submenu header and put the two options in the
+submenu? I don't like 'LOOK: ITEM' as a format" (told a group with its head in the one menu was
+recommended over a menu opening from it, two choices not being worth a second step). Then:
+"make sure knobs or sliders with discrete options (like number of voices) shouldn't move smoothly
+between discrete options when the user is clicking and dragging them."
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- **The settings key** at the rail's right end, a key as the star's and the arrows' (86 units),
+  its mark a gear of eight teeth drawn in the keys' print (the typeface has none); the name's
+  display 100 units shorter (2400) and › and SAVE moved left by as much, the gaps between the
+  keys as they were (`strip::KEYS`, `BarTarget::Settings`).
+- **Its menu**, MIDI Learn's kind, dropping down from under the key to its left, within the
+  window: SETTINGS, then LOOK heading REALISTIC and CLASSIC, the look the editor is in marked
+  with a dot and not to be chosen. REALISTIC is the worn skin, CLASSIC the drawn one (the panel
+  as drawn; the strip has one look and keeps it). Choosing one makes the panel's renderer again
+  in it at once (its pictures decoded as it first draws: a moment's pause, once).
+- **For the computer, not the session or the preset:** kept in `settings.toml` as `skin`,
+  "realistic" or "classic", beside QUALITY's indicator choice. Anything but "classic", or no
+  file, is the realistic look, so every version opens in it unless CLASSIC was chosen there.
+- **Menus' heads** (every menu: MIDI Learn's, QUALITY's, SETTINGS): the title on a band darker
+  than the menu, ruled off from the items, in smaller (0.82), bold, spaced capitals in the
+  accent's amber; it had been dim, like an item that cannot be chosen. A group's head (LOOK) is
+  dim, smaller still (0.72), bold and spaced, ruled off from what is above it, its items set in
+  a letter's width under it; the current choice is marked with an amber dot and lettered as an
+  item, not dimmed (`Menu::heads`, `Menu::marked`).
+- **VOICES dragged by steps:** a drag goes from voice to voice (a step every 30 pixels), the knob
+  never between two (`interact::drag`), as the mouse wheel and the arrow keys already did. It is
+  the CA-72's only knob of steps; RANGE and WAVEFORM already stepped.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `the_settings_key_chooses_the_look` (the
+menu, its marked choice, the head that does nothing, the look changed and changed back, the menu
+within the window), `the_settings_are_kept_and_a_bad_file_left_alone` (the look kept; anything
+but "classic" read as realistic), the drag test (VOICES on a step at every pixel of a drag);
+renders of the rail and of the menus (the realistic look). The core's, panel's and plug-in's
+tests, 317 passed, 42 ignored; rustfmt; clippy with `-D warnings`.

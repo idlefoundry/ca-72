@@ -71,10 +71,16 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
 }
 
 /// Where a drag takes a control from `start`, the pointer moved by (dx, dy) logical pixels;
-/// `None` for a switch, which a drag does not move.
+/// `None` for a switch, which a drag does not move. A knob of steps (VOICES) goes from step to
+/// step, never between them (the owner, 2026-10-10: knobs with discrete options "shouldn't move
+/// smoothly between discrete options when the user is clicking and dragging them").
 pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64> {
     let rate = if fine { 0.1 } else { 1.0 };
     Some(match kind {
+        // VOICES, 2 to 10: a voice a step.
+        Kind::Knob {
+            dial: Dial::Voices, ..
+        } => ((start - dy / 240.0 * rate).clamp(0.0, 1.0) * 8.0).round() / 8.0,
         Kind::Knob { .. } => (start - dy / 240.0 * rate).clamp(0.0, 1.0),
         Kind::Selector(_) => {
             let steps = ((dx - dy) / if fine { 60.0 } else { 30.0 }).round();
@@ -213,6 +219,13 @@ mod tests {
         assert_eq!(step(voices, 0.25, true, false), 0.375);
         assert_eq!(step(voices, 0.25, false, true), 0.125);
         assert_eq!(step(voices, 1.0, true, false), 1.0);
+        // A drag goes from voice to voice: a little way, nowhere; further, the next.
+        assert_eq!(drag(voices, 0.25, 0.0, -10.0, false), Some(0.25));
+        assert_eq!(drag(voices, 0.25, 0.0, -20.0, false), Some(0.375));
+        for dy in 0..200 {
+            let v = drag(voices, 0.25, 0.0, -f64::from(dy), false).expect("a knob");
+            assert_eq!(v * 8.0, (v * 8.0).round(), "between voices at {dy}");
+        }
         let rocker = &CONTROLS[index("osc1_on").expect("a control")].kind;
         assert_eq!(drag(rocker, 1.0, 0.0, 50.0, false), None);
         assert_eq!(click(rocker, 1.0, 0.0, 0.0), Some(0.0));

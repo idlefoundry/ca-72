@@ -589,6 +589,8 @@ impl Browser {
         match t {
             BarTarget::Name => self.show(!self.open, p),
             BarTarget::Prev => self.step(-1, p, s),
+            // (The editor's: its menu.)
+            BarTarget::Settings => {}
             BarTarget::Next => self.step(1, p, s),
             BarTarget::Star => {
                 let current = Self::current(p);

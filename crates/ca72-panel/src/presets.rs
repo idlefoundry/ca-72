@@ -147,6 +147,8 @@ pub enum BarTarget {
     Name,
     Next,
     Save,
+    /// The settings' key, at the rail's right end (the strip's rail; the drawn bar has none).
+    Settings,
 }
 
 /// What a pointer finds in the drawer.
@@ -537,7 +539,7 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         BarTarget::Prev => PREV_X + STEP_W / 2.0,
         BarTarget::Name => (NAME_X + NAME_END) / 2.0,
         BarTarget::Next => NEXT_X + STEP_W / 2.0,
-        BarTarget::Save => SAVE_X + SAVE_W / 2.0,
+        BarTarget::Save | BarTarget::Settings => SAVE_X + SAVE_W / 2.0,
     };
     (x, BAR_MID)
 }

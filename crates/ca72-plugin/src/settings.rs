@@ -1,10 +1,13 @@
-//! What the plug-in keeps for the computer, not for the session (decisions.md R-ULTRA): ULTRA's
-//! shutter shown or the light only, and whether ULTRA's note has been read. In the shared
+//! What the plug-in keeps for the computer, not for the session (decisions.md R-ULTRA,
+//! R-SKIN): QUALITY's indicator shown or not, whether ULTRA's note has been read, and the look
+//! (the skin) the editor is drawn in. In the shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, written as one changes. Keys it does not know are kept; a file it cannot read
 //! is never written over.
 
 use std::path::{Path, PathBuf};
+
+use ca72_panel::Skin;
 
 use crate::library::{shared_dir, write};
 
@@ -17,6 +20,10 @@ pub struct Settings {
     pub shutter: bool,
     /// ULTRA's note (what it is for) has been read.
     pub ultra_note_read: bool,
+    /// The look the editor is drawn in, chosen with the rail's settings key: the realistic
+    /// one (`Skin::Worn`) unless CLASSIC (`Skin::Drawn`) is chosen (the owner, 2026-10-10: "all
+    /// future versions default to the new skin"). Kept as `skin`, "realistic" or "classic".
+    pub skin: Skin,
 }
 
 impl Default for Settings {
@@ -24,6 +31,7 @@ impl Default for Settings {
         Settings {
             shutter: true,
             ultra_note_read: false,
+            skin: Skin::Worn,
         }
     }
 }
@@ -48,6 +56,11 @@ impl Settings {
         Settings {
             shutter: flag("ultra_shutter", d.shutter),
             ultra_note_read: flag("ultra_note_read", d.ultra_note_read),
+            // (Anything but CLASSIC, the realistic look.)
+            skin: match t.get("skin").and_then(toml::Value::as_str) {
+                Some("classic") => Skin::Drawn,
+                _ => d.skin,
+            },
         }
     }
 
@@ -61,6 +74,11 @@ impl Settings {
         t.insert("format".into(), 1.into());
         t.insert("ultra_shutter".into(), self.shutter.into());
         t.insert("ultra_note_read".into(), self.ultra_note_read.into());
+        let skin = match self.skin {
+            Skin::Worn => "realistic",
+            Skin::Drawn => "classic",
+        };
+        t.insert("skin".into(), skin.into());
         write(path, &t)
     }
 }
@@ -91,6 +109,7 @@ mod tests {
         let s = Settings {
             shutter: false,
             ultra_note_read: true,
+            skin: Skin::Drawn,
         };
         s.write_to(&path).expect("written");
         assert_eq!(Settings::read(&path), s);
@@ -99,6 +118,12 @@ mod tests {
         Settings::default().write_to(&path).expect("written");
         let after = std::fs::read_to_string(&path).expect("read");
         assert!(after.contains("theirs = 3"), "{after}");
+        // The look: realistic unless the file says classic.
+        assert!(after.contains("skin = \"realistic\""), "{after}");
+        std::fs::write(&path, "skin = \"something new\"\n").expect("written");
+        assert_eq!(Settings::read(&path).skin, Skin::Worn);
+        std::fs::write(&path, "skin = \"classic\"\n").expect("written");
+        assert_eq!(Settings::read(&path).skin, Skin::Drawn);
         std::fs::write(&path, "not [ toml").expect("written");
         assert!(Settings::default().write_to(&path).is_err());
         assert_eq!(std::fs::read_to_string(&path).expect("read"), "not [ toml");

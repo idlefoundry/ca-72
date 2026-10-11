@@ -800,7 +800,8 @@ fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f64, body: &
     }
 }
 
-/// The keys' marks: the previous and next arrows, SAVE (the star is drawn as the preset is).
+/// The keys' marks: the previous and next arrows, SAVE, the settings' gear (the star is drawn
+/// as the preset is).
 fn key_marks(o: &mut Svg) {
     let y = super::RAIL_Y - PANEL_H;
     for (x, _, t) in keys() {
@@ -824,9 +825,44 @@ fn key_marks(o: &mut Svg) {
                 N(x),
                 N(y)
             ),
+            BarTarget::Settings => put!(
+                o,
+                "<path d='{}' fill='{KEY_PRINT}' fill-rule='evenodd'/>",
+                gear_path(x, y, 15.0)
+            ),
             _ => {}
         }
     }
+}
+
+/// A gear of eight teeth about (`cx`, `cy`), `r` to its teeth's tips, its hub open (the
+/// typeface has none).
+fn gear_path(cx: f64, cy: f64, r: f64) -> String {
+    let (inner, hub) = (r * 0.72, r * 0.34);
+    let mut d = String::new();
+    for k in 0..8 {
+        let a = std::f64::consts::TAU * f64::from(k) / 8.0;
+        // Each tooth a little narrower at its tip than at its root.
+        for (da, rr) in [(-0.2, inner), (-0.13, r), (0.13, r), (0.2, inner)] {
+            let (x, y) = (cx + rr * (a + da).cos(), cy + rr * (a + da).sin());
+            d.push_str(&format!(
+                "{}{} {} ",
+                if d.is_empty() { "M" } else { "L" },
+                N(x),
+                N(y)
+            ));
+        }
+    }
+    d.push_str("Z ");
+    d.push_str(&format!(
+        "M {} {} a {h} {h} 0 1 0 {} 0 a {h} {h} 0 1 0 {} 0 Z",
+        N(cx - hub),
+        N(cy),
+        N(2.0 * hub),
+        N(-2.0 * hub),
+        h = N(hub)
+    ));
+    d
 }
 
 /// The favourite's key: its star, filled for a favourite.

@@ -6,12 +6,12 @@
 
 use std::time::{Duration, Instant};
 
-use ca72_panel::Target;
 use ca72_panel::controls::{CONTROLS, index as control_index};
 use ca72_panel::fonts::Fonts;
 use ca72_panel::learn::{Menu, Note, PANEL, Tone, above};
 use ca72_panel::presets::{MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone};
 use ca72_panel::strip::{StripControl, span};
+use ca72_panel::{Skin, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 
 use crate::learn::{Assigned, Cc, LEARNABLE, MidiMap, RESERVED_TEXT, index, reserved};
@@ -82,6 +82,10 @@ pub enum Item {
     /// Tesla lamp, through the shutter) shown, or hidden (the panel blank there).
     Show,
     Hide,
+    /// The settings' (decisions.md R-SKIN): the look the editor is drawn in, under its group's
+    /// head (which does nothing).
+    Look(Skin),
+    Head,
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -104,6 +108,8 @@ pub enum Pressed {
     List(Option<usize>),
     /// QUALITY's menu: its indicator shown (true), or hidden.
     Indicator(bool),
+    /// The settings' menu: the editor drawn in this look.
+    Look(Skin),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -224,6 +230,8 @@ impl Learning {
                     ((*t).to_owned(), enabled)
                 })
                 .collect(),
+            heads: Vec::new(),
+            marked: None,
             hover: None,
         }
         .placed(fonts, x, y, PANEL);
@@ -257,12 +265,50 @@ impl Learning {
                 .iter()
                 .map(|(_, t, on)| ((*t).to_owned(), *on))
                 .collect(),
+            heads: Vec::new(),
+            marked: None,
             hover: None,
         }
         .placed(fonts, x, y, PANEL);
         self.open = Some(Open {
             learnable: None,
             items: items.into_iter().map(|(it, ..)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// The settings' menu (decisions.md R-SKIN; the rail's settings key, the owner: "We can let
+    /// people change their skin there"), opened with its top right corner at (`x`, `y`): under
+    /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
+    /// marked).
+    pub fn open_settings_menu(&mut self, fonts: &Fonts, (x, y): (f64, f64), size: f64, skin: Skin) {
+        let items = [
+            (Item::Head, "LOOK"),
+            (Item::Look(Skin::Worn), "REALISTIC"),
+            (Item::Look(Skin::Drawn), "CLASSIC"),
+        ];
+        let mut menu = Menu {
+            x,
+            y,
+            size,
+            title: "SETTINGS".to_owned(),
+            items: items
+                .iter()
+                .map(|(it, t)| {
+                    let choosable = matches!(it, Item::Look(s) if *s != skin);
+                    ((*t).to_owned(), choosable)
+                })
+                .collect(),
+            heads: vec![0],
+            marked: items.iter().position(|(it, _)| *it == Item::Look(skin)),
+            hover: None,
+        };
+        let (w, _) = menu.extent(fonts);
+        menu = menu.placed(fonts, x - w, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: items.into_iter().map(|(it, _)| it).collect(),
             menu,
         });
         self.take_keys = true;
@@ -301,6 +347,7 @@ impl Learning {
             (Some(Item::List), l) => return Pressed::List(l),
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
+            (Some(Item::Look(s)), _) => return Pressed::Look(*s),
             _ => {}
         }
         Pressed::Done

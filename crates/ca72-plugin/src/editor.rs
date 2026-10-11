@@ -624,13 +624,19 @@ impl Editing {
         library: Library,
         screen: fn(f64) -> Option<(f64, f64)>,
     ) -> Self {
+        // (The tests' editors keep nothing on the computer.)
+        let settings = if cfg!(test) {
+            Settings::default()
+        } else {
+            Settings::load()
+        };
         Editing {
             context,
             params,
             meters,
             dpr,
             width,
-            renderer: Renderer::with_skin(Skin::Worn, f64::from(physical_width) / art::W, dpr),
+            renderer: Renderer::with_skin(settings.skin, f64::from(physical_width) / art::W, dpr),
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
             strip_scene: StripScene::default(),
@@ -657,12 +663,7 @@ impl Editing {
             motion_at: None,
             levels: [0.0; LEVELS],
             output: 0.0,
-            // (The tests' editors keep nothing on the computer.)
-            settings: if cfg!(test) {
-                Settings::default()
-            } else {
-                Settings::load()
-            },
+            settings,
             ultra_note: false,
         }
         .opened()
@@ -676,6 +677,17 @@ impl Editing {
         self.motion = Motion::at(self.params.quality.value(), 0.0);
         self.scene.opening = self.motion.opening(!self.settings.shutter);
         self
+    }
+
+    /// The editor drawn in `skin` from now on, on this computer (decisions.md R-SKIN): its
+    /// panel's renderer made again in it (its pictures decoded as it first draws).
+    fn set_look(&mut self, skin: Skin) {
+        self.settings.skin = skin;
+        self.keep_settings();
+        if self.renderer.skin() != skin {
+            self.renderer = Renderer::with_skin(skin, self.renderer.scale(), self.dpr);
+            self.composed = None;
+        }
     }
 
     /// This computer's settings kept (not by the tests' editors).
@@ -949,6 +961,17 @@ impl Editing {
                 let on = !self.params.auto_gain.value();
                 self.set_switch(&self.params.auto_gain, on);
             }
+            // The settings' key: its menu, dropping down from under it to its left.
+            StripTarget::Bar(BarTarget::Settings) => {
+                let (x, y) = strip::centre(t);
+                let size = self.renderer.text_size() * MENU_TEXT;
+                self.learning.open_settings_menu(
+                    self.renderer.fonts(),
+                    (x + strip::KEY_W / 2.0, y + strip::KEY_H / 2.0 + 6.0),
+                    size,
+                    self.settings.skin,
+                );
+            }
             StripTarget::Bar(b) => {
                 let setter = ParamSetter::new(self.context.as_ref());
                 self.browser.bar_press(b, &self.params, &setter);
@@ -980,6 +1003,10 @@ impl Editing {
             Pressed::Indicator(shown) => {
                 self.settings.shutter = shown;
                 self.keep_settings();
+                return;
+            }
+            Pressed::Look(skin) => {
+                self.set_look(skin);
                 return;
             }
             Pressed::List(chosen) => {
@@ -2820,6 +2847,57 @@ mod tests {
         let middle = at(&e, (x, y));
         click(&mut e, middle);
         assert_eq!(host.take(), vec![]);
+    }
+
+    /// The rail's settings key (decisions.md R-SKIN) opens its menu: under LOOK the editor's
+    /// looks, the realistic by default, marked and not to be chosen; CLASSIC draws the editor in
+    /// the drawn skin and is kept, REALISTIC brings the realistic back.
+    #[test]
+    fn the_settings_key_chooses_the_look() {
+        let (mut e, _, _) = editing();
+        assert_eq!(
+            (e.settings.skin, e.renderer.skin()),
+            (Skin::Worn, Skin::Worn)
+        );
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some("SETTINGS")
+        );
+        assert_eq!(
+            menu_items(&e),
+            vec![
+                ("LOOK".to_owned(), false),
+                ("REALISTIC".to_owned(), false),
+                ("CLASSIC".to_owned(), true),
+            ]
+        );
+        assert_eq!(e.learning.menu().map(|m| m.marked), Some(Some(1)));
+        // The menu within the window, under the key.
+        let m = e.learning.menu().expect("a menu");
+        let (w, h) = m.extent(e.renderer.fonts());
+        assert!(m.x >= 0.0 && m.x + w <= art::W && m.y + h <= art::H);
+        assert!(m.y > strip::centre(StripTarget::Bar(BarTarget::Settings)).1);
+        menu_item(&mut e, "CLASSIC");
+        assert_eq!(
+            (e.settings.skin, e.renderer.skin()),
+            (Skin::Drawn, Skin::Drawn)
+        );
+        assert!(e.learning.menu().is_none());
+        e.draw();
+        click(&mut e, key);
+        assert_eq!(menu_items(&e)[1], ("REALISTIC".to_owned(), true));
+        assert_eq!(e.learning.menu().map(|m| m.marked), Some(Some(2)));
+        // (The head does nothing: the menu stays open.)
+        menu_item(&mut e, "LOOK");
+        assert!(e.learning.menu().is_some());
+        menu_item(&mut e, "REALISTIC");
+        assert_eq!(
+            (e.settings.skin, e.renderer.skin()),
+            (Skin::Worn, Skin::Worn)
+        );
+        e.draw();
     }
 
     /// A right click on QUALITY's opening (decisions.md R-ULTRA) opens its menu: its shutter or
