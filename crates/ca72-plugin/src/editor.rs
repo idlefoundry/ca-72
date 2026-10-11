@@ -1,6 +1,6 @@
 //! The editor: the front panel (`ca72-panel`) in a window of its own (baseview), its frames
 //! shown with softbuffer, and under it the plug-in's own strip (`ca72_panel::strip`, A6:
-//! decisions.md R-LOOK): the presets' rail, the left hand's GLIDE, DECAY and wheels, MODE,
+//! decisions.md R44): the presets' rail, the left hand's GLIDE, DECAY and wheels, MODE,
 //! VOICES and ENTROPY, how the voices are played across the field, WIDTH, INNER, DETUNE and
 //! where the voices sound, DRIVE, AUTO GAIN and LEVEL. Every control operates its parameter
 //! through the host, a drag one gesture (one undo step in hosts that keep them); the POWER
@@ -189,7 +189,7 @@ impl<P: Param> Operated for P {
     }
 }
 
-/// An oscillator's FREQUENCY knob (decisions.md R-SEMITONES): where it points, read through
+/// An oscillator's FREQUENCY knob (decisions.md R54): where it points, read through
 /// the computer's law (`ca72::freq_dial`), its pot's position the parameter's (normalized,
 /// the wiper). A pot beyond the law's reach shows the knob at its stop.
 struct FreqKnob {
@@ -309,11 +309,11 @@ pub struct Ca72Editor {
     open: Arc<AtomicBool>,
     /// The width fitted to the screen for this opening (0 not yet measured).
     fitted: Arc<AtomicU32>,
-    /// The keys the host gives the editor's view rather than its window (decisions.md R-KEYS).
+    /// The keys the host gives the editor's view rather than its window (decisions.md R53).
     host_keys: Arc<HostKeys>,
 }
 
-/// Keys the host gives the editor's view rather than its window (decisions.md R-KEYS: Cubase
+/// Keys the host gives the editor's view rather than its window (decisions.md R53: Cubase
 /// keeps the keyboard from the window and gives a VST3 plug-in its keys through
 /// `IPlugView::onKeyDown()`): whether the editor holds the keyboard now (a value typed, the
 /// drawer, MIDI Learn), and those taken for it, for its window at its next frame.
@@ -641,7 +641,7 @@ struct PanelWindow {
     editing: Editing,
     /// The keyboard the drawer took from another window (Windows), given back as it shuts.
     keys: Option<window::Keys>,
-    /// The keys the host gives the editor's view (decisions.md R-KEYS), each taken once if they
+    /// The keys the host gives the editor's view (decisions.md R53), each taken once if they
     /// come both ways.
     host_keys: Arc<HostKeys>,
     twins: KeyTwins,
@@ -676,7 +676,7 @@ struct Editing {
     pub(crate) browser: Browser,
     composed: Option<ca72_panel::Pixmap>,
     /// Where the window's frame changed in the last `draw` that changed it (pixels: left,
-    /// top, right, bottom), or none when it may have changed anywhere (decisions.md R-PRESENT).
+    /// top, right, bottom), or none when it may have changed anywhere (decisions.md R58).
     damage: Option<Vec<[i32; 4]>>,
     /// A size asked of the window.
     resizing_window: bool,
@@ -708,7 +708,7 @@ struct Editing {
     screen: fn(f64) -> Option<(f64, f64)>,
     /// How far the drawer was down (`Browser::reveal`) in the last frame composed.
     reveal_shown: f64,
-    /// QUALITY's opening (decisions.md R-ULTRA; `opening.rs`), moved on by the time since it
+    /// QUALITY's opening (decisions.md R48; `opening.rs`), moved on by the time since it
     /// last was, at most [`ANIMATE_S`] apart (the strip's drops move on with it: the two are
     /// drawn in one frame); the editor opens with QUALITY's setting up. The voices' levels as last taken (0 to 1), for the strip's drops, and the output's
     /// (the one instrument's drop's, and the lamps').
@@ -728,7 +728,7 @@ struct Editing {
     /// Where they are kept (none in the tests' editors, which keep nothing on the computer).
     settings_file: Option<std::path::PathBuf>,
     ultra_note: bool,
-    /// A value being typed into a readout (decisions.md R-TYPED): which, and what so far; the
+    /// A value being typed into a readout (decisions.md R52): which, and what so far; the
     /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
     /// a switch had before it), for a double click.
     typing: Option<(Readout, String)>,
@@ -940,7 +940,7 @@ impl Editing {
         self
     }
 
-    /// The editor drawn in `skin` from now on, on this computer (decisions.md R-SKIN): its
+    /// The editor drawn in `skin` from now on, on this computer (decisions.md R51): its
     /// panel's renderer made again in it (its pictures decoded as it first draws).
     fn set_look(&mut self, skin: Skin) {
         self.keep_settings(Change::Skin(skin));
@@ -951,7 +951,7 @@ impl Editing {
     }
 
     /// The FREQUENCY knobs read through `law` from now on, on this computer (decisions.md
-    /// R-SEMITONES): each points where its pot is through it, the sound as it was.
+    /// R54): each points where its pot is through it, the sound as it was.
     fn set_frequency_dials(&mut self, law: Law) {
         self.keep_settings(Change::Frequency(law));
         self.params.set_freq_law(law);
@@ -1056,7 +1056,7 @@ impl Editing {
     }
 
     /// A change made here done (nothing held, no wheel's gesture open): AUTO GAIN's curve asked
-    /// for the sound as it now is, measured unless it is already its (decisions.md R-STEREO,
+    /// for the sound as it now is, measured unless it is already its (decisions.md R45,
     /// the CA-74's R29). Only the editor asks: the host's automation and learned controllers
     /// never do, so that a render does not depend on when a measurement finished.
     fn measure_when_done(&mut self) {
@@ -1151,7 +1151,7 @@ impl Editing {
         }
     }
 
-    /// A value to be typed into readout `r` (decisions.md R-TYPED): not AUTO GAIN's, which reads
+    /// A value to be typed into readout `r` (decisions.md R52): not AUTO GAIN's, which reads
     /// what is measured, nor DETUNE's in SCATTER, where its knob does nothing either.
     fn start_typing(&mut self, r: Readout) {
         if !r.typed() || (r == Readout::Detune && !self.params.doubled.value()) {
@@ -1298,7 +1298,7 @@ impl Editing {
         let double = self
             .last_strip_press
             .filter(|(at, last, _)| *last == t && now - *at < DOUBLE_CLICK);
-        // A readout double-clicked: a value typed into it (decisions.md R-TYPED); a switch's
+        // A readout double-clicked: a value typed into it (decisions.md R52); a switch's
         // first press, which switched its amount, undone.
         if let (Some((_, _, was)), StripTarget::Switch(r) | StripTarget::Readout(r)) = (double, t) {
             self.last_strip_press = None;
@@ -1381,7 +1381,7 @@ impl Editing {
     fn press(&mut self, modifiers: Modifiers) {
         let (x, y) = self.in_drawing(self.pointer);
         // A press on the readout a value is being typed into leaves it typed into; anywhere
-        // else ends the typing, nothing set (decisions.md R-TYPED).
+        // else ends the typing, nothing set (decisions.md R52).
         if let Some((r, _)) = self.typing
             && matches!(strip::hit(x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
         {
@@ -1522,7 +1522,7 @@ impl Editing {
             return;
         }
         let target = interact::hit(self.renderer.layout(), x, y);
-        // QUALITY's toggle: its indicator shown or hidden (decisions.md R-ULTRA).
+        // QUALITY's toggle: its indicator shown or hidden (decisions.md R48).
         if let Some(Target::Control(i) | Target::Legend(i, _)) = target
             && CONTROLS.get(i).is_some_and(|c| c.param == "quality")
         {
@@ -1978,7 +1978,7 @@ impl Editing {
         }
         self.reveal_shown = k;
         // The places that changed, the panel's and the strip's, put together again alone and
-        // so shown (decisions.md R-PRESENT); all of the frame while the drawer moves, something
+        // so shown (decisions.md R58); all of the frame while the drawer moves, something
         // floats over everything, or there is no frame of this size to change.
         let frame = self.renderer.frame();
         let kept = self
@@ -2158,8 +2158,8 @@ fn strip_scene(
     let on = |k: usize| sounding & (1 << k) != 0;
     // Where they sound: in MONO the one voice (its pair with DOUBLE, all of WIDTH's way out);
     // else each of VOICES's voices at its place by the placement, its pair as far out with
-    // DOUBLE (decisions.md R-STEREO), each in its side's band by INNER: where the engine's
-    // gains put it, the kit's (R-INNER).
+    // DOUBLE (decisions.md R45), each in its side's band by INNER: where the engine's
+    // gains put it, the kit's (R49).
     let (width, inner) = (c.spread, c.inner);
     let field = if mono {
         if doubled {
@@ -2290,7 +2290,7 @@ fn repaint_due(shown: Option<Instant>, now: Instant) -> bool {
 impl WindowHandler for PanelWindow {
     fn on_frame(&mut self, window: &mut Window<'_>) {
         // The keys the host gave the view since the last frame (Cubase), as the window's own,
-        // but those the window had too (decisions.md R-KEYS).
+        // but those the window had too (decisions.md R53).
         for k in self.host_keys.take() {
             if self.twins.host_new(&k, Instant::now()) {
                 self.key(window, &k);
@@ -3022,7 +3022,7 @@ mod window {
             // Where the buffer still holds the frame shown last (age 1: a buffer kept, as
             // Windows' and X11's are, and macOS's in this copy of softbuffer, shown in tiles),
             // only the places changed are turned and sent; else the whole frame (decisions.md
-            // R-PRESENT, R-COSTS).
+            // R58, R59).
             match damage.filter(|_| buffer.age() == 1) {
                 Some(damage) => {
                     let rects: Vec<softbuffer::Rect> =
@@ -3208,12 +3208,12 @@ mod tests {
         }
     }
 
-    /// The window played for a look and a measure (decisions.md R-ULTRA): 24 seconds in real
+    /// The window played for a look and a measure (decisions.md R48): 24 seconds in real
     /// time at sixty frames a second, a Retina window (3440 pixels across): four POLY voices
     /// with DOUBLE playing chords at HI, then ULTRA, then LO, falling quiet, then HI again with
     /// DETUNE swept from none to all of it. Each frame drawn and turned into the screen's
     /// pixels as `present` does, timed: the whole frame, as on macOS, and the places changed
-    /// alone, as on Windows and X11 (decisions.md R-PRESENT), the screen so made the same as
+    /// alone, as on Windows and X11 (decisions.md R58), the screen so made the same as
     /// the whole frame's at every frame. Every other frame's QUALITY column and STEREO display
     /// kept, written to `$CA72_RUN`, the folder, as `frames.rgba` (`size.txt`: its width and
     /// height), with the times in `times.txt` (`-- --ignored --nocapture`).
@@ -3409,7 +3409,7 @@ mod tests {
         std::fs::write(out.join("times.txt"), report).unwrap();
     }
 
-    /// QUALITY's toggle (decisions.md R-POTATO, R-ULTRA) goes where it is clicked, a gesture of
+    /// QUALITY's toggle (decisions.md R47, R48) goes where it is clicked, a gesture of
     /// its own as a rocker's: above its nut ULTRA, below it LO, on it (HI already) nothing.
     #[test]
     fn quality_goes_where_its_toggle_is_clicked() {
@@ -3434,7 +3434,7 @@ mod tests {
     }
 
     /// A host's key (Cubase gives a VST3 plug-in its keys through `onKeyDown()`: decisions.md
-    /// R-KEYS) as the window's own: VST3's codes named, else the character, the keypad's digits
+    /// R53) as the window's own: VST3's codes named, else the character, the keypad's digits
     /// without one too, the modifiers; none for a key the editor has no use for.
     #[test]
     fn a_hosts_key_is_read_as_the_windows_own() {
@@ -3557,7 +3557,7 @@ mod tests {
         );
     }
 
-    /// A value typed into a readout (decisions.md R-TYPED): a double click on it, its digits,
+    /// A value typed into a readout (decisions.md R52): a double click on it, its digits,
     /// Enter: its knob set at once, as the readout reads it, within the knob's travel, a gesture
     /// of its own. Escape, or a press elsewhere, leaves it as it was; a press on the readout
     /// itself goes on typing. A switch's readout double-clicked keeps its amount (its first
@@ -3666,7 +3666,7 @@ mod tests {
         assert!(!Readout::Auto.typed());
     }
 
-    /// The rail's settings key (decisions.md R-SKIN) opens its menu: under LOOK the editor's
+    /// The rail's settings key (decisions.md R51) opens its menu: under LOOK the editor's
     /// looks, the realistic by default, marked and not to be chosen; CLASSIC draws the editor in
     /// the drawn skin and is kept, REALISTIC brings the realistic back.
     #[test]
@@ -3717,7 +3717,7 @@ mod tests {
         e.draw();
     }
 
-    /// The settings key's FREQUENCY DIALS (decisions.md R-SEMITONES): SEMITONES by default, each
+    /// The settings key's FREQUENCY DIALS (decisions.md R54): SEMITONES by default, each
     /// group's choice marked. HARDWARE turns oscillators 2 and 3's knobs to where the hardware's
     /// dial has their pots, the parameters (the sound) as they were, and the tip still reads
     /// semitones; a pot past a law's stop shows its knob at the stop, and a press that does not
@@ -3852,7 +3852,7 @@ mod tests {
         );
     }
 
-    /// A right click on QUALITY's opening (decisions.md R-ULTRA) opens its menu: its shutter or
+    /// A right click on QUALITY's opening (decisions.md R48) opens its menu: its shutter or
     /// always open, the one it is in in its title and not to be chosen; choosing the other
     /// switches it, and the menu says so the next time.
     #[test]
@@ -3888,7 +3888,7 @@ mod tests {
         assert!(e.learning.menu().is_none());
     }
 
-    /// QUALITY's opening (decisions.md R-ULTRA) follows QUALITY by the time between frames
+    /// QUALITY's opening (decisions.md R48) follows QUALITY by the time between frames
     /// (a stalled frame does not jump it): from HI, its lamp goes down over the closing time,
     /// then ULTRA's Tesla lamp comes up over the opening time; up, ULTRA's note shows until a
     /// press reads it, and not again; with the shutter off, its own times.
@@ -5649,7 +5649,7 @@ mod tests {
         e.composed.as_ref().expect("the window's frame")
     }
 
-    /// QUALITY's opening (decisions.md R-ULTRA) for looking at, written to `$CA72_ULTRA_PNG`,
+    /// QUALITY's opening (decisions.md R48) for looking at, written to `$CA72_ULTRA_PNG`,
     /// the folder: the panel's last column close up (two pixels a unit) at QUALITY's three
     /// positions, each's thing up at rest and as the synth plays, `quality-<lo|hi|ultra>-<level>
     /// .png`; each coming up, `shutter-<setting>-<p>.png`; none of it, `hidden.png`; and the
@@ -5793,7 +5793,7 @@ mod tests {
         shot(&mut e, "learn-3.png");
     }
 
-    /// The settings key's menu with FREQUENCY DIALS (decisions.md R-SEMITONES), and oscillator 2's
+    /// The settings key's menu with FREQUENCY DIALS (decisions.md R54), and oscillator 2's
     /// knob at +7 semitones with its tip, through each law: `settings-<n>.png` in
     /// `$CA72_SETTINGS_PNG`, the folder.
     #[test]
@@ -6330,7 +6330,7 @@ mod windows_window_tests {
         o.close();
     }
 
-    /// The window shown where it changed (decisions.md R-PRESENT, R-COSTS: on Windows the
+    /// The window shown where it changed (decisions.md R58, R59: on Windows the
     /// changed places alone are turned and sent to the window) is the window shown whole: the
     /// synth playing (QUALITY's lamp following it, the voices' drops), a knob turned, the
     /// presets' drawer sliding open and shut, then all of it still; every pixel of the window

@@ -78,7 +78,7 @@ and `src/window.rs` (the CA-72's `docs/decisions.md` R26, R28 and R34), and one 
    The CA-72's test `the_editor_asks_a_dialog_for_every_key_only_while_it_holds_them` checks
    the answer with the drawer and a control's menu open and shut.
 
-And one for macOS, in `src/macos/view.rs` (the CA-72's `docs/decisions.md` R-MAC, 2026-10-11):
+And one for macOS, in `src/macos/view.rs` (the CA-72's `docs/decisions.md` R56, 2026-10-11):
 
 4. **A press or release tells the handler where the pointer is first.** baseview's
    `mouseDown:` and its kind gave the handler the button alone, leaving the pointer where the

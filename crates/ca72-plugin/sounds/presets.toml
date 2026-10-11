@@ -5,7 +5,7 @@
 # `entropy` and `spread` (0 to 100) are POLY, VOICES, ENTROPY and SPREAD: every preset names
 # them. The PITCH wheel is never part of a preset. Oscillators 2 and 3's FREQUENCY name their
 # pots' positions, -7.5 to 7.5 along the track, as every version saves them; the knob reads
-# them in semitones, or as the hardware's dial, the player's choice (decisions.md R-SEMITONES).
+# them in semitones, or as the hardware's dial, the player's choice (decisions.md R54).
 #
 # The fifteen after Bass and Lead are documented patches for the instrument the CA-72 models,
 # under names of our own: its maker's 1974 sound charts, its 2016 reissue's patch sheets, and

@@ -1,4 +1,4 @@
-//! NOTE PRIORITY (decisions.md R-PRIORITY): which of the keys held sounds. LOW is the keyboard
+//! NOTE PRIORITY (decisions.md R50): which of the keys held sounds. LOW is the keyboard
 //! circuit's own (the lowest and highest keys' contacts, as drawn); HIGH and LAST hand the
 //! circuit the key they choose alone, so that the keyboard's output with keys held together is
 //! its output with that key held alone. Beyond the instrument's 44 keys the chosen key continues
@@ -99,7 +99,7 @@ fn beyond_the_keys_the_chosen_key_plays_as_alone() {
     plays(Priority::Last, &[(100, 100), (30, 30), (60, 60), (-60, 30)]);
 }
 
-/// RETRIGGER (R-PRIORITY): a key pressed while another is held starts the contours again (off,
+/// RETRIGGER (R50): a key pressed while another is held starts the contours again (off,
 /// they go on from where they are, the instrument's single triggering). The trigger contact
 /// opens for `RETRIGGER_GAP` first, the keys held as they were, so the pitch moves to the new
 /// key (LAST) only then. The loudness contour decayed to SUSTAIN 2 with key 57 held a while;

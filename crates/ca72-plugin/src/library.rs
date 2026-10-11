@@ -34,7 +34,7 @@ use toml::Value;
 pub const FORMAT: i64 = 1;
 
 /// The parameters a preset never sets: the PITCH wheel (where the player leaves it), the
-/// bypass (the host's) and QUALITY (the computer's: decisions.md R-POTATO).
+/// bypass (the host's) and QUALITY (the computer's: decisions.md R47).
 pub const KEPT: &[&str] = &["pitch_wheel", "bypass", "quality"];
 
 const MOST_TAGS: usize = 16;
@@ -158,7 +158,7 @@ pub fn parse_factory(text: &str) -> Result<Vec<Sound>, String> {
 /// The tag of every preset in the retired presets' pack, and its files' suffix.
 pub const PACK_TAG: &str = "0.1";
 
-/// The retired presets' pack (decisions.md R-RETIRE): each of `sounds` written into `dir` as
+/// The retired presets' pack (decisions.md R55): each of `sounds` written into `dir` as
 /// the user's preset, tagged [`PACK_TAG`], in `<name>_0.1.toml`. The user's own preset is
 /// `<name>.toml`, so copying the pack into a library never writes over one; where both name
 /// one preset (their edit of a factory preset since retired), theirs, first by file name, is
@@ -911,7 +911,7 @@ mod tests {
     /// other product's or artist's name, no private record (decisions.md R1).
     /// Stacked Fifths a fourth and a fifth over its root to the cent (the owner, 2026-10-10:
     /// "Become a true 4th and 5th"), the presets' FREQUENCY values their pots' positions
-    /// (decisions.md R-SEMITONES); Cycle of Fifths' a fifth 16 cents wide, as its owner set it.
+    /// (decisions.md R54); Cycle of Fifths' a fifth 16 cents wide, as its owner set it.
     #[test]
     fn stacked_fifths_is_a_fourth_and_a_fifth() {
         use ca72::freq_dial::Pot;
@@ -947,7 +947,7 @@ mod tests {
         }
     }
 
-    /// The presets retired from the plug-in (decisions.md R-RETIRE), which no build reads but
+    /// The presets retired from the plug-in (decisions.md R55), which no build reads but
     /// the pack's: read whole, each name one a library takes and none twice, none a factory
     /// preset's (so a session's preset name means one sound), each setting only the sound's
     /// parameters.
@@ -980,7 +980,7 @@ mod tests {
         }
     }
 
-    /// The pack (decisions.md R-RETIRE) copied into a library: its presets the user's, tagged
+    /// The pack (decisions.md R55) copied into a library: its presets the user's, tagged
     /// `0.1`; the player's own file of a name it has too (their edit of a preset since retired)
     /// neither written over nor hidden, the pack's reported as a second; and a pack's preset
     /// saved again moves to the file of its name.

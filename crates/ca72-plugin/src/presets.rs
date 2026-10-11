@@ -6,7 +6,7 @@
 //! its default (POLY, VOICES, ENTROPY and SPREAD among them: R12), each a gesture of its own;
 //! MIDI BEND RANGE, the player's keyboard's, only when the preset names it (R18). The plug-in
 //! remembers it (`preset`, saved with the session); the bar marks it • once a value leaves
-//! it. The drawer (the mock-up's, A6: decisions.md R-LOOK): typing goes to the field with the
+//! it. The drawer (the mock-up's, A6: decisions.md R44): typing goes to the field with the
 //! caret (the search when none); the arrow keys step through the list, setting each preset;
 //! Enter commits a field (the search: closes) or, once DELETE has asked, deletes; Tab moves to
 //! the next field shown; Escape takes back what a key began, else closes; a double click on a
@@ -1060,7 +1060,7 @@ mod tests {
         assert!(values_now(&p).iter().all(|(k, _)| !k.contains("midi_map")));
     }
 
-    /// A session whose preset has since left the factory's (decisions.md R-RETIRE) keeps its
+    /// A session whose preset has since left the factory's (decisions.md R55) keeps its
     /// sound: it holds every value itself, and its preset's name is the bar's alone, shown as
     /// not found and never as changed. Nothing is set from the name (`tick` has no setter).
     #[test]
@@ -1199,7 +1199,7 @@ mod tests {
     }
 
     /// NOTE PRIORITY and RETRIGGER are a preset's (the owner, 2026-10-10: "This item should be
-    /// saved per patch"; R-PRIORITY): saved with the sound, set by a preset naming them, and
+    /// saved per patch"; R50): saved with the sound, set by a preset naming them, and
     /// LOW and off, the instrument's own, by one saved before them (every factory preset).
     #[test]
     fn note_priority_and_retrigger_are_part_of_a_preset() {

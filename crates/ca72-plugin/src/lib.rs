@@ -251,12 +251,12 @@ impl Plugin for Ca72 {
     /// instance had; a table that is not understood is none either (decisions.md R34).
     ///
     /// A session saved with SCATTER's EDGES, no longer offered (INNER does its work: decisions.md
-    /// R-INNER), or with a placement not understood, opens with EVEN, the default, not at what
+    /// R49), or with a placement not understood, opens with EVEN, the default, not at what
     /// the instance had.
     fn filter_state(state: &mut PluginState) {
         learn::filter_state(&mut state.fields);
         // A state saved before DOUBLE was a switch of its own: DOUBLE where its DETUNE is
-        // above 0 (decisions.md R-STEREO).
+        // above 0 (decisions.md R45).
         if !state.params.contains_key("doubled") {
             let detuned =
                 matches!(state.params.get("double"), Some(ParamValue::F32(d)) if *d > 0.0);
@@ -266,7 +266,7 @@ impl Plugin for Ca72 {
         }
         // A state without AUTO GAIN's curve (saved before DRIVE), or with one that is not
         // understood, opens with the average's, whatever the instance had (decisions.md
-        // R-STEREO, the CA-74's R29).
+        // R45, the CA-74's R29).
         let curve = state
             .fields
             .get(drive::STATE_KEY)
@@ -283,7 +283,7 @@ impl Plugin for Ca72 {
                 .insert("entropy".to_owned(), ParamValue::F32(entropy));
         }
         // A state saved before NOTE PRIORITY: the instrument's own, LOW, whatever the instance
-        // had (decisions.md R-PRIORITY).
+        // had (decisions.md R50).
         if !state.params.contains_key("note_priority") {
             let low = Ca72Params::default().note_priority.default_plain_value();
             state.params.insert(
@@ -321,7 +321,7 @@ impl Plugin for Ca72 {
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         // How this computer's FREQUENCY dials read: a learned controller turns the knob through
-        // it, the editor open or not (decisions.md R-SEMITONES).
+        // it, the editor open or not (decisions.md R54).
         if !cfg!(test) {
             self.params
                 .set_freq_law(crate::settings::Settings::load().frequency);
@@ -333,7 +333,7 @@ impl Plugin for Ca72 {
         let rate = f64::from(config.sample_rate);
         self.rate = rate;
         self.dezip.prepare(rate);
-        // (AUTO GAIN's measurements on the helper thread: decisions.md R-STEREO.)
+        // (AUTO GAIN's measurements on the helper thread: decisions.md R45.)
         self.engine.calibrate_with(self.params.drive_curve.clone());
         if self.helper.is_none() {
             self.helper = Helper::start(
@@ -592,7 +592,7 @@ mod tests {
 
     /// A session saved before NOTE PRIORITY and RETRIGGER opens with LOW (its index, as nih-plug
     /// sets an enum by one) and RETRIGGER off, the instrument's own, not at what the instance
-    /// had (R-PRIORITY); one saved since keeps its own.
+    /// had (R50); one saved since keeps its own.
     #[test]
     fn an_old_session_opens_with_note_priority_low_and_no_retrigger() {
         let filtered_as = |params: Vec<(String, ParamValue)>, id: &str| {
@@ -631,7 +631,7 @@ mod tests {
         ));
     }
 
-    /// A session saved with SCATTER's EDGES (no longer offered: R-INNER), or with a placement
+    /// A session saved with SCATTER's EDGES (no longer offered: R49), or with a placement
     /// not understood, opens with EVEN (its index, as nih-plug sets an enum by one), not at what
     /// the instance had (R18); one saved with EVEN or CENTER keeps its own.
     #[test]
@@ -1349,7 +1349,7 @@ mod tests {
         assert!(left.iter().chain(&right).all(|x| x.is_finite()));
     }
 
-    /// AUTO GAIN's curve is the session's (decisions.md R-STEREO, the CA-74's R29): saved,
+    /// AUTO GAIN's curve is the session's (decisions.md R45, the CA-74's R29): saved,
     /// loaded into another instance, and the engine plays with it from the next block; a
     /// session saved before DRIVE, loaded into an instance with a measured curve, leaves it the
     /// average's; one whose curve is not understood, the average's too.

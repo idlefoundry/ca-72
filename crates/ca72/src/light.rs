@@ -79,7 +79,7 @@ pub mod laws {
     /// rest after the VCA; together within 0.1 dB of the circuit's at 7 to 28 Hz.
     pub const COUPLING_HZ: f64 = 13.0;
     pub const DROOP_HZ: f64 = 4.4;
-    /// FILTER MODE HI (decisions.md R-HP): the bus less the filter's output, the bus at the
+    /// FILTER MODE HI (decisions.md R46): the bus less the filter's output, the bus at the
     /// filter's own passband at EMPHASIS 0 (the open ladder's, times this) and through its
     /// own coupling, Hz (vcf.rs's `MODE_HZ`).
     pub const MODE_GAIN: f32 = 1.0;
@@ -2081,7 +2081,7 @@ mod tests {
         }
     }
 
-    /// NOTE PRIORITY (decisions.md R-PRIORITY) as the circuit's voice has it: LOW the lowest
+    /// NOTE PRIORITY (decisions.md R50) as the circuit's voice has it: LOW the lowest
     /// key held, HIGH the highest, LAST the key pressed last, then the last still held; a key
     /// let go keeps sounding for the release lead (2 ms) unless a newer key takes over; beyond
     /// the keyboard's keys, the chosen key continues the scale.

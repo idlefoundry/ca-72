@@ -9,7 +9,7 @@
 //!
 //! And a key the host gives the editor's view (`IPlugView::onKeyDown()`, change 13: Cubase keeps
 //! the keyboard from a plug-in's window and gives it its keys this way) reaches the editor, the
-//! host told whether the editor took it (decisions.md R-KEYS).
+//! host told whether the editor took it (decisions.md R53).
 //!
 //! The plug-in here is a probe, not the CA-72: its editor opens no window but keeps the context
 //! the wrapper gives it, the one the CA-72's editor sets its parameters through, and its processor
@@ -568,7 +568,7 @@ fn an_edit_while_not_processing_is_set_at_once() {
     assert_eq!(i.reported("switch"), 0.0);
 }
 
-/// A key the host gives the view (change 13; decisions.md R-KEYS) reaches the editor with its
+/// A key the host gives the view (change 13; decisions.md R53) reaches the editor with its
 /// character, VST3 code, modifiers and state, down or up; the host is told it was taken only if
 /// the editor took it (else the key is the host's: its key command).
 #[test]

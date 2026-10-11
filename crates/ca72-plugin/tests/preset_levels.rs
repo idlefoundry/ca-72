@@ -11,7 +11,7 @@
 //! `<preset>.f32`, stereo, interleaved, little-endian), `CA72_PHRASE` (a phrase file of
 //! `scripts/calibration/midi_capture.py`, played instead: the notes and modulation wheel sent
 //! to the hardware reference, at their times, and 3 s after the last). `CA72_RETIRED`
-//! (set): the presets retired from the plug-in (`sounds/retired.toml`, decisions.md R-RETIRE)
+//! (set): the presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55)
 //! measured instead, which its pack ships.
 
 #![allow(clippy::unwrap_used)]

@@ -1,5 +1,5 @@
 //! Oscillators 2 and 3's FREQUENCY knobs: how a knob's dial sets its pot (decisions.md
-//! R-SEMITONES). The pot (R4 or R5, 5K linear: [`crate::tuning::freq_pot`]) puts its oscillator
+//! R54). The pot (R4 or R5, 5K linear: [`crate::tuning::freq_pot`]) puts its oscillator
 //! so many semitones from the centre where the factory tuning left it; the dial is printed a
 //! semitone a mark, -7 to +7, its travel ending at -7.5 and +7.5 (history.md, "The ticks").
 //! The player chooses the knob's law (the editor's settings key, for the computer):

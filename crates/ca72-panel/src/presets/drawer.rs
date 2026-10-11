@@ -1,4 +1,4 @@
-//! The drawer as the mock-up has it (A6: decisions.md R-LOOK; the owner, 2026-10-10: "we didn't
+//! The drawer as the mock-up has it (A6: decisions.md R44; the owner, 2026-10-10: "we didn't
 //! update the preset search page to the new one that you had sketched out"): on the strip's
 //! face under the rail, three sections in the panel's print, their displays dots behind glass
 //! as the rail's name is: FIND, the search and the tags in use; PRESETS, ALL, FAVORITES and MINE

@@ -79,12 +79,12 @@ pub enum Item {
     List,
     /// Says why the control cannot be learned; does nothing.
     Not,
-    /// QUALITY's (decisions.md R-ULTRA): its indicator above it (the hamster, the lamp, the
+    /// QUALITY's (decisions.md R48): its indicator above it (the hamster, the lamp, the
     /// Tesla lamp, through the shutter) shown, or hidden (the panel blank there).
     Show,
     Hide,
-    /// The settings' (decisions.md R-SKIN): the look the editor is drawn in, and how the
-    /// FREQUENCY knobs' dials read (R-SEMITONES), each under its group's head (which does
+    /// The settings' (decisions.md R51): the look the editor is drawn in, and how the
+    /// FREQUENCY knobs' dials read (R54), each under its group's head (which does
     /// nothing).
     Look(Skin),
     Dials(Law),
@@ -248,7 +248,7 @@ impl Learning {
         self.take_keys = true;
     }
 
-    /// QUALITY's menu (decisions.md R-ULTRA; a right click on its toggle, the owner: "default
+    /// QUALITY's menu (decisions.md R48; a right click on its toggle, the owner: "default
     /// mode is to show the quality indicators (tesla coil, hamster, etc.), but they can be
     /// hidden as an option. This can be selectable by right clicking the toggle switch."),
     /// opened at (`x`, `y`): why MIDI Learn does not learn it, as its title, then its indicator
@@ -283,11 +283,11 @@ impl Learning {
         self.take_keys = true;
     }
 
-    /// The settings' menu (decisions.md R-SKIN; the rail's settings key, the owner: "We can let
+    /// The settings' menu (decisions.md R51; the rail's settings key, the owner: "We can let
     /// people change their skin there"), opened with its top right corner at (`x`, `y`): under
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
     /// marked); under FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`,
-    /// marked: decisions.md R-SEMITONES).
+    /// marked: decisions.md R54).
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,

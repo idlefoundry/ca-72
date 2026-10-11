@@ -5,7 +5,7 @@
 //! patched one (`SoftbufferObserver1`) register; this copy's surface is still made (upstream's
 //! panicked, the editor blank), its frame reaches the view's layer, and the layer follows the
 //! view as the host resizes it. The copy registers one class, its own, for all its surfaces.
-//! And the frame is shown in tiles (decisions.md R-COSTS): its buffer kept from frame to frame,
+//! And the frame is shown in tiles (decisions.md R59): its buffer kept from frame to frame,
 //! a present with damage gives new images to the tiles it touches alone.
 //!
 //! On the main thread, which softbuffer's macOS backend requires and the test harness does not

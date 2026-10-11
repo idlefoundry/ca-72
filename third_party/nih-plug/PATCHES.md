@@ -137,7 +137,7 @@ Windows 11 (2026-10-07; the CA-72's `docs/decisions.md` R36):
     wrapper through its factory as Cubase 15 does; four of its six tests fail without this.
 
 One more from the CA-72's own testing in Cubase 15 on Windows 11 (2026-10-10; its
-`docs/decisions.md` R-KEYS): a value typed into its editor never arrived there.
+`docs/decisions.md` R53): a value typed into its editor never arrived there.
 
 13. **The keys a host gives a VST3 plugin's view reach its editor.** Cubase keeps the keyboard
     from a plugin's own window and gives the plugin its keys through `IPlugView::onKeyDown()`

@@ -723,7 +723,7 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
 
 /// Where learnable `i`'s controller at `value` (0–127) sets `target`, its parameter
 /// (normalized): a FREQUENCY knob turned to value / 127 of its travel, its pot where the
-/// computer's law puts it then, as the editor's knob (decisions.md R-SEMITONES); anything else
+/// computer's law puts it then, as the editor's knob (decisions.md R54); anything else
 /// as [`Target::normalized_for`].
 pub fn normalized_for(p: &Ca72Params, i: usize, target: &dyn Target, value: u8) -> f32 {
     let knob = f64::from(value.min(127)) / 127.0;
@@ -980,7 +980,7 @@ mod tests {
     }
 
     /// A FREQUENCY knob turned to value / 127 of its travel through the computer's law
-    /// (decisions.md R-SEMITONES): its stops -7.5 and +7.5 semitones and the centre between 63
+    /// (decisions.md R54): its stops -7.5 and +7.5 semitones and the centre between 63
     /// and 64 in semitones; the pot's ends at the stops in the hardware's.
     #[test]
     fn a_controller_turns_a_frequency_knob_through_the_dials_law() {

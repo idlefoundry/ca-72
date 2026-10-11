@@ -1,4 +1,4 @@
-//! Oscillators 2 and 3's FREQUENCY pots measured on the voice (decisions.md R-SEMITONES): how
+//! Oscillators 2 and 3's FREQUENCY pots measured on the voice (decisions.md R54): how
 //! many semitones each pot position puts the oscillator from its centre, against
 //! `freq_dial`'s curve, so that every mark of the dial read in semitones is its number.
 

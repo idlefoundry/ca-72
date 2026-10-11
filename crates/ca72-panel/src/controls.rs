@@ -350,7 +350,7 @@ pub const CONTROLS: [Control; 55] = [
     ),
     // Across MIXER and MODIFIERS: the filter's mode, modulation and keyboard control. FILTER
     // MODE, which the original does not have, at the column's head, where the hardware
-    // reference has it (decisions.md R-HP): LO, or HI pressed.
+    // reference has it (decisions.md R46): LO, or HI pressed.
     rocker(
         "filter_mode",
         "FILTER MODE (LO or HI)",
@@ -476,7 +476,7 @@ pub const CONTROLS: [Control; 55] = [
         580.0,
         Dial::Ten,
     ),
-    // QUALITY (decisions.md R-POTATO, R-ULTRA): a chrome toggle over POWER's lamp, under
+    // QUALITY (decisions.md R47, R48): a chrome toggle over POWER's lamp, under
     // ULTRA's: its lever up for ULTRA, out for HI, down for LO.
     Control {
         param: "quality",
@@ -537,7 +537,7 @@ pub const CONTROLS: [Control; 55] = [
             span: 76.0,
         },
     },
-    // The strip's knobs (A6: decisions.md R-LOOK, R-STEREO, R-INNER), the plug-in's own; INNER
+    // The strip's knobs (A6: decisions.md R44, R45, R49), the plug-in's own; INNER
     // last, so that every other control keeps its index.
     strip_knob("voices", "VOICES", 0, Dial::Voices),
     strip_knob("entropy", "ENTROPY", 1, Dial::Ten),
@@ -546,7 +546,7 @@ pub const CONTROLS: [Control; 55] = [
     strip_knob("drive", "DRIVE", 4, Dial::Drive),
     strip_knob("level", "LEVEL", 5, Dial::Level),
     strip_knob("inner", "INNER", 6, Dial::Ten),
-    // NOTE PRIORITY (decisions.md R-PRIORITY), the plug-in's own: QUALITY's toggle on its side,
+    // NOTE PRIORITY (decisions.md R50), the plug-in's own: QUALITY's toggle on its side,
     // the left hand's first row, over RETRIGGER, GLIDE and DECAY where their switches are, its
     // lever left for LOW, out for LAST, right for HIGH. Last, so that every other control keeps
     // its index.
@@ -562,7 +562,7 @@ pub const CONTROLS: [Control; 55] = [
             across: true,
         },
     },
-    // RETRIGGER (R-PRIORITY), the plug-in's own: an ivory switch as GLIDE's and DECAY's, the
+    // RETRIGGER (R50), the plug-in's own: an ivory switch as GLIDE's and DECAY's, the
     // left hand's second row, over theirs. After NOTE PRIORITY, for the same reason.
     rocker(
         "retrigger",

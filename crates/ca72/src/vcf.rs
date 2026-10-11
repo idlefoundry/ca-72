@@ -24,7 +24,7 @@
 //! - **Emphasis**: R7/R3's junction, through C10, the EMPHASIS rheostat R14, R73 and R76,
 //!   drives Q30's base.
 //!
-//! - **FILTER MODE** (not on the original; decisions.md R-HP, `filter-mode.lib`): the
+//! - **FILTER MODE** (not on the original; decisions.md R46, `filter-mode.lib`): the
 //!   hardware reference's high-pass. HI is the mixer's output less the filter's: the bus's
 //!   Norton current through [`MODE_RT`] (the filter's own passband at EMPHASIS 0) and a
 //!   coupling of [`MODE_HZ`], less the output above. LO is the output as drawn.
@@ -483,7 +483,7 @@ pub struct Drive {
     pub bias: LadderBias,
     /// The ladder's time scale: 1 as drawn, or the prewarping factor.
     pub p: f64,
-    /// Not the circuit's: the plug-in's DRIVE (its decisions.md R-STEREO, the CA-74's R29),
+    /// Not the circuit's: the plug-in's DRIVE (its decisions.md R45, the CA-74's R29),
     /// the input pair's view of the bus's current across R54 times this, after C27 (so C27's
     /// charge, the bus's load and the bias chain are the circuit's); 1 is the circuit.
     pub gain: f64,
@@ -915,7 +915,7 @@ pub struct Vcf {
     /// and its resampler's outputs then: once the resampler's whole line holds it, the same
     /// outputs again (decisions.md R11).
     g_held: (f64, usize, [f64; 8]),
-    /// FILTER MODE at HI (decisions.md R-HP): the output is the mixer's less the filter's.
+    /// FILTER MODE at HI (decisions.md R46): the output is the mixer's less the filter's.
     pub high_pass: bool,
     /// The direct branch's coupling: its capacitor's voltage and its last input, V.
     mode: (f64, f64),
@@ -1007,7 +1007,7 @@ impl Vcf {
         self.bias_key = [self.celsius.to_bits(), self.circuit.c.to_bits()];
     }
 
-    /// The plug-in's DRIVE (its decisions.md R-STEREO): the input pair's view of the bus's
+    /// The plug-in's DRIVE (its decisions.md R45): the input pair's view of the bus's
     /// current across R54 times `gain` ([`Drive::gain`]); 1 is the circuit.
     pub fn set_drive(&mut self, gain: f64) {
         self.gain = gain;

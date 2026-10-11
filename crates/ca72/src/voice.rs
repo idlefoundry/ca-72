@@ -102,7 +102,7 @@ pub enum Quality {
     Potato,
 }
 
-/// Which of the keys held sounds (not the instrument's: decisions.md R-PRIORITY). The keyboard
+/// Which of the keys held sounds (not the instrument's: decisions.md R50). The keyboard
 /// circuit's own is the lowest; HIGH and LAST hand it the key chosen alone, as if it were the
 /// only key down. In this order, as the toggle's positions run from left to right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -146,7 +146,7 @@ pub struct Panel {
     /// OSCILLATOR MODULATION and FILTER MODULATION.
     pub osc_mod: bool,
     pub filter_mod: bool,
-    /// FILTER MODE, which the original does not have (decisions.md R-HP): HI, the hardware
+    /// FILTER MODE, which the original does not have (decisions.md R46): HI, the hardware
     /// reference's high-pass (the mixer's output less the filter's); LO, the filter as drawn.
     pub filter_hi: bool,
     /// The wheels: pitch -1..1 (0 in its detent), MODULATION 0..1 (fully forward).
@@ -166,7 +166,7 @@ pub struct Panel {
     pub quality: Quality,
     /// Which key held sounds (not a control of the instrument's either).
     pub priority: Priority,
-    /// RETRIGGER (not the instrument's: decisions.md R-PRIORITY): each key pressed opens the
+    /// RETRIGGER (not the instrument's: decisions.md R50): each key pressed opens the
     /// trigger contact for [`RETRIGGER_GAP`] before it comes down, so that the contours start
     /// again even with other keys held (off: single triggering, the instrument's).
     pub retrigger: bool,
@@ -1177,7 +1177,7 @@ impl Voice {
         v
     }
 
-    /// The plug-in's DRIVE (its decisions.md R-STEREO, the CA-74's R29): the mixer's signal
+    /// The plug-in's DRIVE (its decisions.md R45, the CA-74's R29): the mixer's signal
     /// into the filter's input pair raised by `gain`, after C27, driving the pair harder than
     /// the panel's mixer can ([`crate::vcf::Drive::gain`]); 1 is the circuit.
     pub fn set_drive(&mut self, gain: f64) {
@@ -1187,7 +1187,7 @@ impl Voice {
     /// The three oscillators started together `at` one share of the way down their ramps
     /// ([`Vco::start_at`]), as the reference starts them together at the top: for a voice made
     /// or put back to rest that is not the first, so that voices playing one note together do
-    /// not start in step with each other (decisions.md R-STEREO). Never at a note.
+    /// not start in step with each other (decisions.md R45). Never at a note.
     pub fn start_oscillators_at(&mut self, at: f64) {
         for v in &mut self.audio.front.vcos {
             v.start_at(at);

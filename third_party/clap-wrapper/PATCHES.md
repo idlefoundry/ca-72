@@ -63,7 +63,7 @@ takes the plugin's own changes when the host is not rendering):
    them in, the plugin's (the CA-72's, the panel's), under the lock that guards that list.
 
 One more, from the CA-72's trial in GarageBand 10.4.14 on macOS 27 (2026-10-11; its
-`docs/decisions.md` R-MAC):
+`docs/decisions.md` R56):
 
 5. **The plugin's own changes are taken when the host is not rendering.** A plugin asks for a
    flush (`clap_host_params.request_flush()`) when its editor changes a parameter, so that the

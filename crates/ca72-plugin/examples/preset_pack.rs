@@ -1,4 +1,4 @@
-//! The presets retired from the plug-in (`sounds/retired.toml`, decisions.md R-RETIRE) written
+//! The presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55) written
 //! into a folder as the user's presets, the pack `scripts/package.sh` zips beside a release's
 //! installers: `cargo run -p ca72-plugin --example preset_pack -- <folder>`. Prints each file;
 //! writes none when no preset is retired.

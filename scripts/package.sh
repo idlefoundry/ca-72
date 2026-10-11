@@ -10,7 +10,7 @@
 #   Linux    CA-72-<version>-Linux-x86_64.tar.gz  (with install.sh)
 #            CA-72-<version>-0.1-presets.zip      (the presets retired from the plug-in,
 #                                                 when there are any: decisions.md
-#                                                 R-RETIRE)
+#                                                 R55)
 #
 # Each carries LICENSE and THIRD-PARTY-NOTICES.txt, inside the bundles as well. On macOS the
 # bundles are signed with $CA72_MACOS_SIGN_APP (a "Developer ID Application" identity), the
@@ -180,7 +180,7 @@ windows() {
     echo "$out/CA-72-$version-Windows-setup.exe"
 }
 
-# The presets retired from the plug-in (`sounds/retired.toml`, decisions.md R-RETIRE) as the
+# The presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55) as the
 # user's presets, for a player of an earlier version to add to the library again; nothing when
 # none is retired. Made with the Linux installer, so that CI's Linux build carries it into each
 # release's draft.

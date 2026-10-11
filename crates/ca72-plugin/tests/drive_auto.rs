@@ -1,4 +1,4 @@
-//! DRIVE's AUTO GAIN measured on the factory presets (decisions.md R-STEREO, the CA-74's R29).
+//! DRIVE's AUTO GAIN measured on the factory presets (decisions.md R45, the CA-74's R29).
 //! Each preset's curve is measured as the plug-in measures it (`drive.rs`: three short notes
 //! through voices made as the engine's first are, without DRIVE and at each of its steps), on
 //! one thread, timed; then the preset's levelling phrase (`preset_levels.rs`) and four held

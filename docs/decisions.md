@@ -2739,7 +2739,52 @@ do." The comparisons with hardware become measurements ([calibration](calibratio
   -2.01, Ladder Kick -1.63, Open Hat -1.59, Ringing Saw Line -1.52, Wooden Mallet -0.82,
   Noise Snare -0.81, Shoreline Wash -0.44; Pink Riser +1.44, still under -18 LUFS.
 
-## R-LOOK. The realistic look: the panel in the Model D's materials, and the CA-74's strip
+## R43. White Lotus, a held bass fitted to a recording, as a factory preset
+**Owner decision, 2026-10-09:** after hearing a preset fitted to the synthesizer bass of a
+studio recording, the owner asked for it to join the factory presets as White Lotus, and
+chose it without feedback.
+
+**Agent decisions, 2026-10-09** (not separately approved):
+- **White Lotus, the 25th preset:** one narrow rectangle at 8' (mixer 10, the other
+  oscillators off), CUTOFF -2.14 and EMPHASIS 7 with both KEYBOARD CONTROL switches on, so
+  the filter rings on each note's third harmonic (on D2 the A3 stands 5.9 dB over the
+  fundamental; on the recording's first note, 5.5 dB); oscillator 3 at LO (FREQUENCY 7.45,
+  11.3 Hz; OSC. 3 CONTROL off, out of the mixer) into FILTER MODULATION at MOD wheel 0.17;
+  LOUDNESS ATTACK 0.5, DECAY 3.5 and SUSTAIN 8.5 with DECAY on; no glide.
+- **Fitted by measurement** to the recording's first 52 s, where the part is long held notes
+  (D2, C2, G2 and B2, each after an F2 on the fourth beat) under little else. The bass was
+  separated with a source-separation model, but each note's harmonics were read from the
+  full mix in windows locked to them, since the separation put some of the synthesizer's
+  upper harmonics in the other stem. The fit weighs H1 to H8, each note's relative to its
+  strongest, toward the first five and toward D2 (the first note and the commonest): an
+  average over many harmonics had hidden the ringing third the owner heard missing. The
+  wobble is fitted to its sidebands (+-11.3 Hz: -21 dB around H2 and H3, -15.5 around H4,
+  -29 around H1, none at half that rate), the note shapes to the stem's level around each
+  start and end (a 1 dB lift settling over half a second, no dip between notes), and glide
+  to the pitch track (without glide within half a semitone 99 % of the time; worse with
+  any). One oscillator: the recording's harmonics show no beating, and a pair exactly in
+  tune fitted only at one locked phase (the score went from 1.7 to 3.6 dB with 2 cents of
+  drift).
+- **On this version's engine, after R42's laws:** the panel fitted first on 0.1.3 (CUTOFF
+  -1.6, OSC. 3 FREQUENCY 7.5, MOD wheel 0.025, SUSTAIN 9) rings on the fourth harmonic here.
+  Fitted again: CUTOFF -2.14; OSC. 3 FREQUENCY 7.45 (LO now reaches 11.36 Hz); MOD wheel
+  0.17, the sidebands the owner heard on 0.1.3's render (-15 dB around H3, -14 around H4);
+  SUSTAIN 8.5 (9 now lifts the start 0.4 dB).
+- **What differs from the recording:** H2 4 to 6 dB strong on D2 and G2 (the narrow
+  rectangle's own); with full tracking every note rings on its third harmonic, where the
+  recording's C2 and B2 ring less; the wobble deeper around H3 and H4 and shallower around
+  H1 and H2. FEEDBACK through EXTERNAL INPUT made the fit worse at every amount tried (EXT 3
+  to 5, FEEDBACK 2 to 3).
+- **Levelled as the others:** MAIN OUTPUT VOLUME 9.78, -18.03 LUFS momentary maximum on
+  `preset_levels.rs`'s bass phrase.
+- The README counts twenty-five and names it. The DAW's copy of the file is not changed here.
+
+**Evidence (omarchy, 2026-10-09):** the plug-in crate's tests in debug, 153 passed, 0 failed
+(the factory file's count now 25; its text still names no trademark); `preset_levels.rs` by
+hand for White Lotus, -18.03 LUFS momentary maximum at VOLUME 9.78.
+
+
+## R44. The realistic look: the panel in the Model D's materials, and the CA-74's strip
 
 **The owner's request, 2026-10-09:** "Give the CA-72's editor a realistic look and feel, as
 the CA-74 (Highstead) got on 2026-10-08, but Moog-oriented: think of the Model D family the
@@ -2757,7 +2802,7 @@ list that drops down over the strip inside the window."
   CC BY 2.0, the photograph this panel was measured from) shows them, only looked at. "the
   photographs taken were of my behrigner, not a model d. and as such they shouldn't be used for
   reference unless i specifically request them to be used": none were.
-- "Also the new panel needs the low/high filter switch we just added": FILTER MODE (R-HP, on
+- "Also the new panel needs the low/high filter switch we just added": FILTER MODE (R46, on
   `cal/hp-mode`) is on the panel in the new look as in the drawn one.
 - Of three directions (A, the panel carried down; B, a programmer after Moog's of 1982; C,
   aluminium modules), with A's buttons orange or blue where they switch something on: "blue and
@@ -2950,7 +2995,7 @@ list that drops down over the strip inside the window."
   panel's area with its board: over the smaller area the 99th percentile, which the board's
   closely matching wood had kept under 32, is 36 on the same face (the commit before, measured
   over the same rows: 1.457 and 36). On `potato` the last column's head (QUALITY, approved
-  apart, R-POTATO) is left out too: 1.445 and 30745 of 32851.
+  apart, R47) is left out too: 1.445 and 30745 of 32851.
 - "I feel like the badge isn't quite in the right place though." / "is it on the same grid as
   everything else?" It was not: its left end 4 units right of the MODIFIERS|OUTPUT line (its
   place on the old board) and a touch above the strip's middle. Then: "maybe it's also partially
@@ -3032,7 +3077,7 @@ list that drops down over the strip inside the window."
   begun as the editor opens, so the drawer's first opening draws only its lit dots: 28 ms. It is
   shared by the editors open at the same scale.
 
-## R-STEREO. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
+## R45. The CA-74's stereo in the CA-72: SPREAD's law and places, the placement, UNISON, DOUBLE
 
 **The owner, 2026-10-09:** "we need to add all the same stereo controls that we added to the
 CA74", then "in fact, i think all controls on that panel should probably be added here", and,
@@ -3297,7 +3342,7 @@ published commit).
 
 - **The number** of this record is a placeholder until the merge.
 
-## R-HP. FILTER MODE: the hardware reference's high-pass
+## R46. FILTER MODE: the hardware reference's high-pass
 **Owner decisions, 2026-10-09.** The CA-72 gets the hardware reference's FILTER MODE switch
 (LO or HI): "I'm just looking to offer the same functionality." Measured on the reference
 first (session HP), then built. On the panel where the reference has it: at the head of the
@@ -3360,7 +3405,7 @@ FILTER MODE at the column's foot).
   of sessions gains session HP when this branch meets `cal/behringer`'s.
 - **The number** of this record, and board4.md's B4-HP, are placeholders until the merge.
 
-## R-POTATO. QUALITY: Potato mode, the light voices, at LO
+## R47. QUALITY: Potato mode, the light voices, at LO
 
 **The owner, 2026-10-10:** "with this release I think we should officially launch potato mode.
 We'll just have a HI/LOW selector switch on the UI, I think. Perhaps we can put it above the
@@ -3383,7 +3428,7 @@ good as you can under that."); saved with the session, not with presets.
   empty: POWER's black ribbed rocker, upright, HI its upper end pressed, LO its lower (the
   worn skin draws it from POWER's picture). The host's parameter `potato`, named Quality, HI or
   LO, HI by default; not a preset's (`library::KEPT`); not learned by MIDI Learn (its menu: "set
-  for the computer, not the sound"). (Since R-ULTRA, a chrome toggle of three positions, and the
+  for the computer, not the sound"). (Since R48, a chrome toggle of three positions, and the
   parameter `quality`.)
 - **The engine at LO:** a light voice beside each circuit voice and beside DOUBLE's twin, made
   with it, played in its place with the same keys, character (its offsets read each sample, as
@@ -3491,7 +3536,7 @@ panel's (276 passed); rustfmt; clippy.
 patch, as R31 measured it; the owner's listening; the README.
 - **The number** of this record is a placeholder until the merge.
 
-## R-ULTRA. QUALITY's ULTRA: the circuit's model with no compromises, and its lamp
+## R48. QUALITY's ULTRA: the circuit's model with no compromises, and its lamp
 
 **The owner, 2026-10-10:** "I think we should also bring back our highest quality mode. Is
 that still in the code? I have a fun UI idea for it." Then: "I think we should have a no
@@ -3530,10 +3575,10 @@ right. Give it the slightest bit of angle"; "Cool. Looks good. Let's run with th
 toggle."
 
 **Agent decisions, 2026-10-10** (not separately approved):
-- **Where:** the branch `ultra`, from `potato` (QUALITY is R-POTATO's switch, given its third
+- **Where:** the branch `ultra`, from `potato` (QUALITY is R47's switch, given its third
   position).
 - **The parameter:** QUALITY becomes the host's enum parameter `quality` (LO, HI, ULTRA, in that
-  order; HI by default), in place of R-POTATO's boolean `potato`, which was never released. It
+  order; HI by default), in place of R47's boolean `potato`, which was never released. It
   stays out of presets (`library::KEPT`) and out of MIDI Learn ("set for the computer, not the
   sound").
 - **The engine at ULTRA:** the circuit's voices with the model's No Compromises setting in place
@@ -3715,7 +3760,7 @@ being placed on them as well? Show me a before/after video once you are done."
   in `sounds/presets.toml`, DOUBLE named on; its MAIN OUTPUT VOLUME 8.6 (it was saved at 10)
   for a momentary maximum of -17.97 LUFS, where the others are levelled (R15; `tests/
   preset_levels.rs`: at 10 it was -11.5). Its tags, ours: fat, glide. (The file kept VOLUME at
-  10 until 2026-10-10, R-RETIRE's branch: the commit named 8.6 but left the line as the owner's;
+  10 until 2026-10-10, R55's branch: the commit named 8.6 but left the line as the owner's;
   measured again at 8.6, -17.96 LUFS.)
 - **The levels:** each voice's output's peak over a block was measured already (for knowing when
   a voice falls silent: `Engine::levels` keeps it); the output's peak is measured (two compares
@@ -3726,7 +3771,7 @@ being placed on them as well? Show me a before/after video once you are done."
   well, its floor and the ring drawn again only as something comes or goes, and what moves and
   its light; the lightning is drawn without blend modes or a clip (a fifth cheaper). The drops
   are drawn only near each (six radii): 2.3 ms a frame for twenty moving at twice the opening
-  size, where they took 5.2 ms (`drops_timings`); with the mock-up's flat drops (R-LOOK), 0.77.
+  size, where they took 5.2 ms (`drops_timings`); with the mock-up's flat drops (R44), 0.77.
   Then, measured whole (below), the opening and the drops were put on one clock, thirty times
   a second, something coming up or going down too (two clocks out of step had presented sixty
   frames a second between them), and the window's frame turned into the screen's pixels a row
@@ -3748,52 +3793,7 @@ being placed on them as well? Show me a before/after video once you are done."
   220 Hz, which the drops would only flicker at).
 
 
-## R43. White Lotus, a held bass fitted to a recording, as a factory preset
-**Owner decision, 2026-10-09:** after hearing a preset fitted to the synthesizer bass of a
-studio recording, the owner asked for it to join the factory presets as White Lotus, and
-chose it without feedback.
-
-**Agent decisions, 2026-10-09** (not separately approved):
-- **White Lotus, the 25th preset:** one narrow rectangle at 8' (mixer 10, the other
-  oscillators off), CUTOFF -2.14 and EMPHASIS 7 with both KEYBOARD CONTROL switches on, so
-  the filter rings on each note's third harmonic (on D2 the A3 stands 5.9 dB over the
-  fundamental; on the recording's first note, 5.5 dB); oscillator 3 at LO (FREQUENCY 7.45,
-  11.3 Hz; OSC. 3 CONTROL off, out of the mixer) into FILTER MODULATION at MOD wheel 0.17;
-  LOUDNESS ATTACK 0.5, DECAY 3.5 and SUSTAIN 8.5 with DECAY on; no glide.
-- **Fitted by measurement** to the recording's first 52 s, where the part is long held notes
-  (D2, C2, G2 and B2, each after an F2 on the fourth beat) under little else. The bass was
-  separated with a source-separation model, but each note's harmonics were read from the
-  full mix in windows locked to them, since the separation put some of the synthesizer's
-  upper harmonics in the other stem. The fit weighs H1 to H8, each note's relative to its
-  strongest, toward the first five and toward D2 (the first note and the commonest): an
-  average over many harmonics had hidden the ringing third the owner heard missing. The
-  wobble is fitted to its sidebands (+-11.3 Hz: -21 dB around H2 and H3, -15.5 around H4,
-  -29 around H1, none at half that rate), the note shapes to the stem's level around each
-  start and end (a 1 dB lift settling over half a second, no dip between notes), and glide
-  to the pitch track (without glide within half a semitone 99 % of the time; worse with
-  any). One oscillator: the recording's harmonics show no beating, and a pair exactly in
-  tune fitted only at one locked phase (the score went from 1.7 to 3.6 dB with 2 cents of
-  drift).
-- **On this version's engine, after R42's laws:** the panel fitted first on 0.1.3 (CUTOFF
-  -1.6, OSC. 3 FREQUENCY 7.5, MOD wheel 0.025, SUSTAIN 9) rings on the fourth harmonic here.
-  Fitted again: CUTOFF -2.14; OSC. 3 FREQUENCY 7.45 (LO now reaches 11.36 Hz); MOD wheel
-  0.17, the sidebands the owner heard on 0.1.3's render (-15 dB around H3, -14 around H4);
-  SUSTAIN 8.5 (9 now lifts the start 0.4 dB).
-- **What differs from the recording:** H2 4 to 6 dB strong on D2 and G2 (the narrow
-  rectangle's own); with full tracking every note rings on its third harmonic, where the
-  recording's C2 and B2 ring less; the wobble deeper around H3 and H4 and shallower around
-  H1 and H2. FEEDBACK through EXTERNAL INPUT made the fit worse at every amount tried (EXT 3
-  to 5, FEEDBACK 2 to 3).
-- **Levelled as the others:** MAIN OUTPUT VOLUME 9.78, -18.03 LUFS momentary maximum on
-  `preset_levels.rs`'s bass phrase.
-- The README counts twenty-five and names it. The DAW's copy of the file is not changed here.
-
-**Evidence (omarchy, 2026-10-09):** the plug-in crate's tests in debug, 153 passed, 0 failed
-(the factory file's count now 25; its text still names no trademark); `preset_levels.rs` by
-hand for White Lotus, -18.03 LUFS momentary maximum at VOLUME 9.78.
-
-
-## R-INNER. INNER: the inner edge of each side's band, and WIDTH, INNER and DETUNE three across
+## R49. INNER: the inner edge of each side's band, and WIDTH, INNER and DETUNE three across
 
 **The owner, 2026-10-10:** "right now, we have a way to control the outer edges, which is
 width ... Imagine we're just dealing with the left-hand side of the stereo spectrum. You have
@@ -3814,7 +3814,7 @@ recommended here: "3 across wins for both".
   as SCATTER puts it at full SPREAD. A voice SCATTER puts in the centre (CENTER's first, EVEN's
   last of an odd number) takes the side its turn falls on, the left first, so INNER clears the
   centre; DOUBLE's pairs keep to the band, a pair in the centre opening to INNER's share either
-  side. The one voice's DOUBLE pair with POLY and UNISON off, all of SPREAD's way out (R-STEREO),
+  side. The one voice's DOUBLE pair with POLY and UNISON off, all of SPREAD's way out (R45),
   stays there.
 - **The parameter:** `inner`, the host's Inner, 0 to 100 %, off by default, after AUTO GAIN, so
   a session or preset saved before reads it 0; a preset holds it (no factory preset names it);
@@ -3823,14 +3823,14 @@ recommended here: "3 across wins for both".
   and it does nothing at SPREAD 0 or with POLY and UNISON off and no DOUBLE.
 - **The display** draws each voice where the engine's gains put it, INNER's band and all, by
   the kit's `voice_at` and `pair_at`, which the gains use too.
-- **The strip, three across** (R-LOOK's A6 redrawn in its STEREO section): VOICES (370, 976) and
+- **The strip, three across** (R44's A6 redrawn in its STEREO section): VOICES (370, 976) and
   STEREO (976, 2370), OUTPUT as it was; WIDTH, INNER and DETUNE 430 apart about STEREO's middle
   (1243, 1673, 2103), each a knob and its readout; the two banks of tabs centred over the
   section as a pair, 180 apart, in their order; the display from WIDTH's unit to DETUNE's, wider
   than before. INNER is a strip knob (51 controls), appended after the others so that no
   control's index moves, with its readout, a switch as WIDTH's (off, and back on at its amount),
   lit where it does something; its tip reads "INNER: 40 %".
-- `docs/panel.png` is left as it was (the 0.1.0 picture, as R-LOOK leaves it): drawn again, it
+- `docs/panel.png` is left as it was (the 0.1.0 picture, as R44 leaves it): drawn again, it
   would be the worn editor's first picture there, for the look's merge to choose.
 
 **Evidence (the Linux reference machine, 2026-10-10):** `preset_render` against renders of
@@ -3877,7 +3877,7 @@ render first"; and having listened to the renders: "k, I think we should remove 
 - **The kit at eb374f8** (its K7's "EDGES dropped", made by a session the owner opened in the
   kit, since a change to the shared kit from here was refused): no `Edges`, EVEN and CENTER
   its placements (indices 0 and 1), and `ALONE` for one voice alone, whose DOUBLE pair goes all
-  of SPREAD's way out (R-STEREO). The voices' mix carries no placement for a lone voice
+  of SPREAD's way out (R45). The voices' mix carries no placement for a lone voice
   (`Option<Placement>`), and its pair takes `ALONE`, as it took EDGES's pair, 1, before; the
   panel's materials from the same commit.
 
@@ -3891,7 +3891,15 @@ kit at eb374f8, against renders of d159f42: three presets each in MONO, POLY and
 and without DOUBLE, EVEN and CENTER, INNER 0 and 60 % (72 renders), and every factory preset
 (24), the same to the bit; tests, 206 passed; rustfmt; clippy with `-D warnings`.
 
-## R-PRIORITY. NOTE PRIORITY (LOW, LAST or HIGH) and RETRIGGER, over GLIDE and DECAY
+**At the merge to main, 2026-10-10** (R44 to R49 together, as the owner asked: "k, can we merge
+this into main now?", INNER with them: "yes"): the kit at 4c0f0f3, its main, where K5 to K7
+were merged (its pull requests 2 and 3); its tree is eb374f8's, the commit pinned before, so
+nothing built changes. The third-party notices leave the kit's crates out, as the CA-74's do:
+they are Idle Foundry's own code under the CA-72's licence, which the notices now say
+(`scripts/notices.py`). The README's picture of the panel (`docs/panel.png`) is the editor's
+window as it opens in this look.
+
+## R50. NOTE PRIORITY (LOW, LAST or HIGH) and RETRIGGER, over GLIDE and DECAY
 
 **The owner, 2026-10-10:** asked what the usual choices of priority are ("lowest note, last
 note, I would guess. Um, are there others?"), was told of the three (LOW, the Model D's own
@@ -3913,7 +3921,7 @@ more recent branches" than `potato`).
   LAST or HIGH has chosen sounds that much longer unless a newer (LAST) or higher (HIGH) one
   takes over. Beyond the 44 keys the chosen key continues the string as a key alone does there
   ("The full MIDI range"). `ca72::voice::Priority`, the panel's `priority` (not the
-  instrument's, as `quality` is not), chosen in `Keys::step`; the light voice (R-POTATO) the
+  instrument's, as `quality` is not), chosen in `Keys::step`; the light voice (R47) the
   same, its keys' presses counted for LAST.
 - **RETRIGGER** (the owner, told single triggering was kept and a retrigger choice not added:
   "ah, yes we should add retrigger for sure"): on, each key pressed starts the contours again,
@@ -3951,7 +3959,7 @@ more recent branches" than `potato`).
   switches' place (x 214), the wheels 25 lower than A6 had them (y 540), every row's legend to
   its left as GLIDE's and DECAY's are (PRIORITY centred at 108, RETRIGGER at 104, moved in from
   their 118, clear of the lever at LOW and of the switch).
-- **The toggle:** QUALITY's chrome toggle (R-ULTRA), its three pictures mirrored about their
+- **The toggle:** QUALITY's chrome toggle (R48), its three pictures mirrored about their
   diagonal (flipped top to bottom, then turned a quarter clockwise), so that the lever moves
   left and right and the light still comes from the upper left (a plain quarter turn would
   light it from the upper right): LOW the lever left (the upright picture's up), LAST out, HIGH
@@ -3977,7 +3985,7 @@ out), the light voice's `the_priority_chooses_the_key_held_that_sounds` and
 panel's and plug-in's tests, 316 passed, 42 ignored; rustfmt; clippy with `-D warnings`. Not
 yet: the installed build in a host.
 
-## R-SKIN. The settings key and the editor's look; menus' heads; VOICES dragged by steps
+## R51. The settings key and the editor's look; menus' heads; VOICES dragged by steps
 
 **The owner, 2026-10-10**, shown a picture of the drawn skin: "why are you drawing it in that old
 skin?", then: "i guess we're maintaining it, that's fine. Maybe we should add a settings button
@@ -4020,7 +4028,7 @@ but "classic" read as realistic), the drag test (VOICES on a step at every pixel
 renders of the rail and of the menus (the realistic look). The core's, panel's and plug-in's
 tests, 317 passed, 42 ignored; rustfmt; clippy with `-D warnings`.
 
-### In hosts (2026-10-10), R-PRIORITY and R-SKIN
+### In hosts (2026-10-10), R50 and R51
 
 **The owner:** "do the windows testing right now", having asked whether the tests cover "the
 issues we had with Cubase and other DAWs before" (told: R36's Cubase behaviour and R31's side
@@ -4063,7 +4071,7 @@ editor tests SUCCESS. Installed as CA-72 PRIORITY for the owner; not opened in L
 Not tried: the Audio Unit and an Intel Mac (a universal build), R41's test (macOS-only, not run on
 this build), Linux hosts, Cubase on macOS.
 
-## R-TYPED. A value typed into a readout
+## R52. A value typed into a readout
 
 **The owner, 2026-10-10:** "i should be able to type into any of the number displays and enter a
 value i want the knob to turn to."
@@ -4071,7 +4079,7 @@ value i want the knob to turn to."
 **Agent decisions, 2026-10-10** (told to the owner as they were begun, not separately approved):
 - **A double click** on a readout begins: VOICES', ENTROPY's, WIDTH's, INNER's, DETUNE's, DRIVE's
   and LEVEL's. A single click does what it did: ENTROPY's, WIDTH's and INNER's readouts switch
-  their amounts off and on (R-STEREO), so a double click there undoes its first press's switch
+  their amounts off and on (R45), so a double click there undoes its first press's switch
   before the typing begins; the others did nothing and are now the strip's targets
   (`StripTarget::Readout`). AUTO GAIN's reads what is measured and takes no value; DETUNE's takes
   none in SCATTER, where its knob does nothing either.
@@ -4100,9 +4108,9 @@ unimplemented (`kNotImplemented`), and keeps them for its own key commands; the 
 first try in REAPER found the presets' drawer open before the double click, which three fresh
 tries did not show again.
 
-## R-KEYS. The keys Cubase gives a VST3 plug-in's view reach the editor
+## R53. The keys Cubase gives a VST3 plug-in's view reach the editor
 
-**The owner, 2026-10-10**, told that a value typed into a readout (R-TYPED) never reached the
+**The owner, 2026-10-10**, told that a value typed into a readout (R52) never reached the
 editor in Cubase, why, and the fix recommended: "absolutely, you should do that."
 
 **What was wrong.** Cubase keeps the keyboard from a VST3 plug-in's own window and gives the
@@ -4141,7 +4149,7 @@ Two runs in REAPER began with the drawer open: the harness moved the pointer and
 and the first press was taken where the real cursor had been (on the name, left there by a click
 in Cubase): not the editor's. Not tried: Cubase on macOS, other hosts' keyboards.
 
-## R-SEMITONES. Oscillators 2 and 3's FREQUENCY: a semitone a mark, or the hardware's dial
+## R54. Oscillators 2 and 3's FREQUENCY: a semitone a mark, or the hardware's dial
 
 **The owner, 2026-10-10:** "For the frequency dials on the octaves, we have two choices. Either
 we follow the [hardware reference's] curves exactly (almost what we're doing today, except I
@@ -4253,7 +4261,7 @@ agent. The owner's Cycle of Fifths converted (oscillator 2's FREQUENCY 5.8494 to
 semitones as before), its old file in `CA-72/Presets-before-semitones`: the test builds before
 this one read it 0.43 semitone sharp now. Not tried: any host, Windows, Linux.
 
-## R-RETIRE. Factory presets retired from the plug-in, and the pack that keeps them
+## R55. Factory presets retired from the plug-in, and the pack that keeps them
 
 **The owner, 2026-10-10:** "for the 0.2.0 release, I want to have a bunch of new presets, and I
 want to remove a lot of the old ones. Will people who downloaded older versions still have
@@ -4318,7 +4326,7 @@ with nothing retired, `package.sh` made no pack. Every preset's level measured o
 on 0.1.3's build (`~/.cache/ca72-baseline-07a7dfb`): each as R42's re-levelling left it, but Cycle
 of Fifths.
 
-## R-MAC. R-PRIORITY to R-KEYS on macOS, in Bitwig Studio (2026-10-11)
+## R56. R50 to R53 on macOS, in Bitwig Studio (2026-10-11)
 
 **The owner, 2026-10-10:** "you should test that on a mac this evening", run at midnight by a
 timer. The Mac (macOS 27.0, Apple silicon, Retina) has no Cubase; Bitwig Studio 5.2.7 was the host,
@@ -4351,10 +4359,9 @@ open with the owner's sets, was not touched.
 **In Ableton Live 12.4.15 beta (2026-10-11, 08:26), the owner:** "You can close my Mac Ableton
 sets. I don't care", then, offered a test in Live and a tidy of the test builds, "i want both".
 Live was quit (a TERM signal: the screen was locked, no dialog could be answered). Its log's start
-named only its default template, but on relaunch its crash recovery named the set open then,
-"Nige.als" (~/Documents/Ableton/Nige Project/, on disk unchanged since 2026-10-09 20:56): its
-recovery files were copied to ~/Documents/Ableton/"Live recovery backup 2026-10-11 (Nige)" with a
-README on restoring them, and the recovery declined. The build, **CA-72 TEST** (main at f60833a,
+named only its default template, but on relaunch its crash recovery named the owner's set open
+then (on disk unchanged since the day before): its recovery files were copied to a backup folder
+beside the owner's sets with a README on restoring them, and the recovery declined. The build, **CA-72 TEST** (main at f60833a,
 the one test build from now on, replaced in place; A6, ULTRA to ULTRA3, PRIORITY and PRIORITY2
 moved to the Trash; clap-validator, Steinberg's validator and pluginval at strictness 5 passed),
 VST3 (Live takes no CLAP), on a new set's MIDI track, the MOTU at 44.1 kHz as Live had it:
@@ -4364,7 +4371,7 @@ VST3 (Live takes no CLAP), on a new set's MIDI track, the MOTU at 44.1 kHz as Li
 - NOTE PRIORITY to LAST ("NOTE PRIORITY (LOW, LAST or HIGH): LAST"); RETRIGGER on; POLY lit;
   VOICES dragged from 4, on 5 with the button down; DRIVE's readout "8.4" and Enter: 8.4; LEVEL
   "-6_" and Escape: 0.0, the window open; FIND "lead": the six presets tagged so; the settings
-  key's menu (now LOOK and R-SEMITONES's FREQUENCY DIALS, each a group under its head), CLASSIC
+  key's menu (now LOOK and R54's FREQUENCY DIALS, each a group under its head), CLASSIC
   drawing the panel as drawn and REALISTIC bringing it back, `settings.toml` following.
 - Live quit without saving the test set.
 
@@ -4405,7 +4412,7 @@ owner: "I don't have logic. What about garage band? And ya, fix bitwig."
 - GarageBand's own project left by another session (ca74-au-test, which wants a CA-74 Audio Unit
   not installed) was opened by GarageBand at launch and closed without saving.
 
-## R-REVIEW. Four faults the CA-74's review of its ports found in the CA-72's code
+## R57. Four faults the CA-74's review of its ports found in the CA-72's code
 
 **The owner, 2026-10-11,** through the CA-74's lead (its brief, `~/Code/ca-74/.lead/for-ca72.md`):
 four faults that independent reviews of the CA-74's ports of the CA-72's opening, settings file and
@@ -4455,7 +4462,7 @@ under an eighth of the area round both, the frame as put together whole). The co
 plug-in's tests, 339 passed, 43 ignored; rustfmt; clippy with `-D warnings`. Not measured: the
 editor's cost at baseview's own frame rate.
 
-## R-PRESENT. The window shown where it changed; the lamps' light kept as pictures
+## R58. The window shown where it changed; the lamps' light kept as pictures
 
 **The owner, 2026-10-11,** told of the CA-74's note (`~/Code/ca-74/.lead/for-ca72.md`, "Also worth
 knowing": converting and presenting only the changed rows and keeping the lamps' light as pictures
@@ -4523,9 +4530,9 @@ would be the next step there. The shutter's blades are SVG, about 6 ms a frame w
 changes; the Tesla lamp's streaks about 3 ms; a strip knob (DETUNE swept) about 2 ms a render; the
 lamps' lens and bezel pictures are resampled at each tick.
 
-## R-COSTS. The costs R-PRESENT left: macOS shown in tiles, the shutter, the lightning, knobs
+## R59. The costs R58 left: macOS shown in tiles, the shutter, the lightning, knobs
 
-**The owner, 2026-10-11,** told what R-PRESENT left ("Still costly, for later": macOS turning and
+**The owner, 2026-10-11,** told what R58 left ("Still costly, for later": macOS turning and
 showing the whole window each frame, the shutter's blades, the Tesla lamp's lightning, a knob
 redrawn, the lamps' pictures resampled each tick): "okay, let's improve those costly items".
 
@@ -4536,7 +4543,7 @@ redrawn, the lamps' pictures resampled each tick): "okay, let's improve those co
   pixel each frame and Core Animation took the whole image again. Now the buffer is kept (`age`
   1, as on Windows and X11), the layer shows it through tiles of 256 pixels (whole points at a
   scale factor of 1 or 2: no seam), and a present gives new images (copies of their pixels) to
-  the tiles its damage touches alone. On macOS the editor so takes R-PRESENT's way: the places
+  the tiles its damage touches alone. On macOS the editor so takes R58's way: the places
   changed turned and sent.
 - **Pictures placed in layers are kept** (`Renderer::placed`): a picture turned, mirrored,
   scaled and moved by fractions of a pixel is resampled once onto a pixmap just round it and put
@@ -4566,7 +4573,7 @@ redrawn, the lamps' pictures resampled each tick): "okay, let's improve those co
 
 **Evidence (2026-10-11):** `costs_timings` (Linux, best of five runs of 100, as drawn before
 and now): the shutter half closed 3.78 and 1.19 ms; the Tesla lamp sparking 1.56 and 0.97; the
-amber lamp lit 0.45 and 0.25 (1.07 after R-PRESENT); a knob turned 1.52 and 0.30.
+amber lamp lit 0.45 and 0.25 (1.07 after R58); a knob turned 1.52 and 0.30.
 `drops_timings`, twenty drops moving: 1.96 and 1.17 ms a frame (0.46 and 0.29 at the opening
 size). `put` against `draw_pixmap`, a 196-pixel square: on the Mac 11 against 104 µs, on Linux
 91 against 148. On the Mac (`softbuffer_copies`, `CA72_TIMINGS=1`), a present of the whole
@@ -4591,7 +4598,7 @@ plug-in's tests, 342 passed, 44 ignored; rustfmt; clippy with `-D warnings`; cli
 Windows not tried again (nothing of its own changed but the drawing). Left: pictures that turn
 each frame (the hamster's wheel, a knob dragged) are resampled each frame, as they must be.
 
-## R-CHECKS. The checks before a release, on the three computers (2026-10-11)
+## R60. The checks before a release, on the three computers (2026-10-11)
 
 **The owner, 2026-10-11:** "are there any more tests you need to run before release? If so, run
 them now and fix any issues. You have access to all 3 computers."
@@ -4602,7 +4609,7 @@ bundles (universal on macOS, with the Audio Unit), the installer (`scripts/packa
 unsigned), the notices' check (Linux), clippy over the workspace with every feature, the
 standalone, every test (Linux with ngspice 47 required), and `scripts/validate.sh` (its editor
 tests included: Linux on XWayland, macOS in the desktop session; Windows' pluginval run there
-separately). Then the editor in hosts, R-PRESENT's and R-COSTS's ways of drawing in each:
+separately). Then the editor in hosts, R58's and R59's ways of drawing in each:
 REAPER 7 (VST3 and CLAP) and Cubase 15 (VST3) on Windows; GarageBand 10.4 (Audio Unit) and
 Bitwig 5.2 (CLAP) on macOS; REAPER 7 (VST3) on Linux. Each host with a renamed build (CA-72
 TEST, or CA-72 PRIORITY in the Windows harness), the owner's installed CA-72 not touched; Live,
@@ -4610,10 +4617,10 @@ open with the owner's set, was left alone.
 
 **Found and fixed:**
 - **macOS: the window drawn in rows bottom to top** (GarageBand: the strip and the rail above
-  the panel). R-COSTS's tiles sit in softbuffer's layer, which upstream always flips; in a
+  the panel). R59's tiles sit in softbuffer's layer, which upstream always flips; in a
   flipped view's layer (baseview's, every plug-in editor's) the two flips undid each other.
   The layer is now flipped only where the layers over it leave the coordinates running up
-  (softbuffer's PATCHES.md, change 2). R-COSTS's test drew softbuffer's layer alone, in a view
+  (softbuffer's PATCHES.md, change 2). R59's test drew softbuffer's layer alone, in a view
   of AppKit's own, which hid it: it now draws the view as AppKit does, a flipped one too (and
   fails without the fix). Seen right in GarageBand and Bitwig afterwards.
 - **Windows: a press with no move of the pointer before it was taken where the pointer had
@@ -4629,8 +4636,9 @@ open with the owner's set, was left alone.
   (it fails when a place is left out of a present).
 - **The notices' check failed** (plugin-kit-materials, GPL, ships no licence file): the look's
   branch had left the kit's crates out of the notices, Idle Foundry's own code under the same
-  licence, as the CA-74's do (8da3aea), but that commit never reached main. Its change taken
-  over, the notices made again.
+  licence, as the CA-74's do (8da3aea), but that commit had not reached main. Its change taken
+  over, the notices made again (and the branch merged in as the records went to GitHub: R44 to
+  R49's numbers, R43 before them, the kit at its main).
 
 **Passed (the final commit's runs are in the commit's message):** the Linux tests (398 then),
 the Windows tests in the desktop session (402, and the window tests at the final commit),
@@ -4654,3 +4662,10 @@ the screen and back, Windows repainting it; GarageBand: closed and opened again)
   or a new one), so the opening's animation there was QUALITY's, driven by the editor's clock.
 - Live (the owner's set open), Logic (not owned), an Intel Mac, a second screen of another
   scale (the tiles are made again when the scale changes; not seen).
+
+**At publication** (the owner: "Yes", to main going to GitHub): main merged with the look's
+branch (pull request 25: R44 to R49's numbers, R43 before them, the kit at its main 4c0f0f3,
+the same tree), the records since numbered R50 to R60 the same way, a private detail of one
+record (the name and folders of a set of the owner's) edited out, and the README's picture of
+the panel (`docs/panel.png`) drawn again as the window opens (`the_window_png`), now with NOTE
+PRIORITY, RETRIGGER and the settings key.

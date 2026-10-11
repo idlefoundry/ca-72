@@ -2,7 +2,7 @@
 //! not be done there, mending the engine's spare voices ([`Spares::mend`]; R18) and starting
 //! and stopping POLY's workers ([`Crew::serve`]; R21), when the audio thread asks, which
 //! allocates nothing and does not wait (a bit set, an unpark). And AUTO GAIN's measurements
-//! ([`Calibration::step`]; R-STEREO), when the editor asks, a render at a time with the audio
+//! ([`Calibration::step`]; R45), when the editor asks, a render at a time with the audio
 //! thread's asks seen to between them.
 //!
 //! nih-plug's background thread did this before. Shared by every instance, it holds the

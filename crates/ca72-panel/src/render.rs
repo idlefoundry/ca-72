@@ -29,7 +29,7 @@ pub struct Scene {
     pub power: bool,
     /// The OVERLOAD lamp's level, 0 dark to 1 fully lit.
     pub overload: f64,
-    /// QUALITY's opening (decisions.md R-ULTRA): what it shows and how far each has come.
+    /// QUALITY's opening (decisions.md R48): what it shows and how far each has come.
     pub opening: crate::ultra::Opening,
     /// DETUNE unused (SCATTER): its knob drawn dimmed, as FEEDBACK's is with EXTERNAL INPUT
     /// shut.
@@ -91,13 +91,13 @@ pub struct Renderer {
     /// The worn skin's pictures, once it has been shown.
     pictures: Option<Pictures>,
     /// The lights' pictures made at this scale, each in its layer's place (left, top, width,
-    /// height: pixels), drawn as their layers change (decisions.md R-PRESENT).
+    /// height: pixels), drawn as their layers change (decisions.md R58).
     lights: Vec<(Glow, [i32; 4], Pixmap)>,
-    /// The overlays drawn at this scale, each in its layer's place (decisions.md R-COSTS).
+    /// The overlays drawn at this scale, each in its layer's place (decisions.md R59).
     overlays: Vec<(String, [i32; 4], Pixmap)>,
     /// Pictures placed in layers (turned, mirrored, scaled, moved by fractions of a pixel), kept
     /// to be put again as they were without being resampled, the least lately used given up
-    /// past [`PLACED_BYTES`] (decisions.md R-COSTS); and the count of the renders, their clock.
+    /// past [`PLACED_BYTES`] (decisions.md R59); and the count of the renders, their clock.
     placed: Vec<Placed>,
     renders: u64,
 }
@@ -1094,7 +1094,7 @@ fn mul255(a: u8, b: u8) -> u8 {
 /// `src` (premultiplied) put over `dst` with its top left corner at pixel (`x`, `y`),
 /// `opacity` (0 to 1) opaque: as tiny-skia's `draw_pixmap` puts a pixmap neither scaled nor
 /// turned at whole pixels, but several times as fast (tiny-skia samples it as a pattern, a
-/// pixel at a time, in floats; decisions.md R-COSTS).
+/// pixel at a time, in floats; decisions.md R59).
 pub(crate) fn put(dst: &mut Pixmap, src: &Pixmap, (x, y): (i32, i32), opacity: f32) {
     let o = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
     if o == 0 {
@@ -1232,7 +1232,7 @@ mod tests {
     /// afresh at its strength as it was at each tick, within three levels of 255 (each light
     /// rounded once more; the Tesla lamp's flash over its steady spill, twice): the amber lamp
     /// and the Tesla lamp, quiet, playing and sparking, at rest and coming up (the flare then
-    /// scaled), at the window's opening scale and a Retina screen's (decisions.md R-PRESENT).
+    /// scaled), at the window's opening scale and a Retina screen's (decisions.md R58).
     #[test]
     fn a_light_from_its_picture_is_the_light_drawn() {
         for scale in [1720.0 / W, 3440.0 / W] {
@@ -1286,7 +1286,7 @@ mod tests {
     }
 
     /// What the layers that cost most cost to draw at a Retina window's scale, as they were
-    /// drawn (SVG, every picture resampled) and as they are (decisions.md R-COSTS): QUALITY's
+    /// drawn (SVG, every picture resampled) and as they are (decisions.md R59): QUALITY's
     /// shutter half closed, the Tesla lamp sparking, the amber lamp lit and playing, a knob
     /// turned. Printed, the best of five runs of 100 (`-- --ignored --nocapture`).
     #[test]
@@ -1363,7 +1363,7 @@ mod tests {
     /// a Retina screen's: on the whole within a quarter of a level of 255, under half a percent
     /// of it more than three levels off, none more than 16 (along the blades' edges, whose
     /// coverage of a pixel is worked out a pixel at a time, not by the rasterizer; decisions.md
-    /// R-COSTS).
+    /// R59).
     #[test]
     fn the_opening_drawn_by_code_is_the_opening_drawn() {
         for scale in [1720.0 / W, 3440.0 / W] {

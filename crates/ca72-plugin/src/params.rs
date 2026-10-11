@@ -106,10 +106,10 @@ pub enum Wave3 {
     NarrowRectangle,
 }
 
-/// Where SCATTER puts the voices (decisions.md R-STEREO, the CA-74's R30): evenly from edge
+/// Where SCATTER puts the voices (decisions.md R45, the CA-74's R30): evenly from edge
 /// to edge, or out from the centre. The CA-74's third, EDGES, is not offered: INNER moves the
 /// voices out from the centre instead, all of them to the edges at 100 % (the owner,
-/// 2026-10-10; decisions.md R-INNER). In this order (the strip's tabs'): a preset's value is
+/// 2026-10-10; decisions.md R49). In this order (the strip's tabs'): a preset's value is
 /// its index, 0 EVEN and 1 CENTER.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scatter {
@@ -153,7 +153,7 @@ pub enum NoiseColor {
     Pink,
 }
 
-/// FILTER MODE, which the original does not have (decisions.md R-HP): LO, the filter as
+/// FILTER MODE, which the original does not have (decisions.md R46): LO, the filter as
 /// drawn; HI, the hardware reference's high-pass (the mixer's output less the filter's).
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterMode {
@@ -165,7 +165,7 @@ pub enum FilterMode {
     Hi,
 }
 
-/// QUALITY (decisions.md R-POTATO, R-ULTRA): LO, the light model (Potato mode); HI, the
+/// QUALITY (decisions.md R47, R48): LO, the light model (Potato mode); HI, the
 /// circuit's model at its real-time setting; ULTRA, the circuit's model with no compromises
 /// (the model's own No Compromises), for offline renders and small projects on powerful
 /// computers. In this order, low to high, as a host lists them.
@@ -182,7 +182,7 @@ pub enum QualityMode {
     Ultra,
 }
 
-/// NOTE PRIORITY (decisions.md R-PRIORITY): which of the keys held sounds while POLY is off
+/// NOTE PRIORITY (decisions.md R50): which of the keys held sounds while POLY is off
 /// (and in UNISON, each voice the same). LOW, the keyboard circuit's own; LAST, the key pressed
 /// last; HIGH, the highest. In this order, as the toggle's positions run left to right.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,13 +227,13 @@ pub struct Ca72Params {
     #[persist = "midi_map"]
     pub midi_map: Arc<MidiMap>,
 
-    /// AUTO GAIN's curve for the sound (decisions.md R-STEREO; `drive.rs`): measured when the
+    /// AUTO GAIN's curve for the sound (decisions.md R45; `drive.rs`): measured when the
     /// sound is changed in the editor, kept with the session so that it plays and renders the
     /// same again.
     #[persist = "drive_curve"]
     pub drive_curve: Calibration,
     /// How the FREQUENCY knobs' dials read on this computer (`settings.rs`; decisions.md
-    /// R-SEMITONES): 0 a semitone a mark, 1 the hardware's. Not the session's: a learned
+    /// R54): 0 a semitone a mark, 1 the hardware's. Not the session's: a learned
     /// controller turns the knob through it ([`Ca72Params::freq_law`]).
     pub freq_law: Arc<AtomicU8>,
 
@@ -262,7 +262,7 @@ pub struct Ca72Params {
     pub osc1_waveform: EnumParam<Wave>,
     #[id = "osc2_range"]
     pub osc2_range: EnumParam<Footage>,
-    /// FREQUENCY (decisions.md R-SEMITONES): its pot's position in the dial's units, -7.5 to
+    /// FREQUENCY (decisions.md R54): its pot's position in the dial's units, -7.5 to
     /// +7.5, the wiper at (value + 7.5) / 15 of its track, as every version has saved it; shown
     /// and typed in semitones ([`frequency`]). The knob reads it through the computer's law
     /// (`ca72::freq_dial`): the dial a semitone a mark (7 printed at 140 degrees, 7.5 at the
@@ -381,39 +381,39 @@ pub struct Ca72Params {
     #[id = "lock"]
     pub lock: BoolParam,
     /// SCATTER's placement, EVEN (the default) or CENTER: where SPREAD puts the voices
-    /// (decisions.md R-STEREO, R-INNER). The last parameter: a session saved before it reads
+    /// (decisions.md R45, R49). The last parameter: a session saved before it reads
     /// EVEN, and one saved with EDGES opens with EVEN too (`Ca72::filter_state`).
     #[id = "placement"]
     pub placement: EnumParam<Scatter>,
-    /// UNISON: VOICES instruments on every key together (decisions.md R-STEREO). After the
+    /// UNISON: VOICES instruments on every key together (decisions.md R45). After the
     /// placement: a session saved before it reads it off.
     #[id = "unison"]
     pub unison: BoolParam,
     /// DOUBLE: each note two voices, detuned up to 100 cents, either side of the centre, 0 to
-    /// 100 % (decisions.md R-STEREO). The last parameter: a session saved before it reads 0.
+    /// 100 % (decisions.md R45). The last parameter: a session saved before it reads 0.
     #[id = "double"]
     pub double: FloatParam,
     /// DRIVE (0 to 24 dB): the mixer's signal into the filter raised, its input pair driven
-    /// harder (decisions.md R-STEREO). After DOUBLE: a session saved before reads it off.
+    /// harder (decisions.md R45). After DOUBLE: a session saved before reads it off.
     #[id = "drive"]
     pub drive: FloatParam,
     /// LEVEL (dB): the output's gain, the plug-in's own, after MAIN OUTPUT's (decisions.md
-    /// R-STEREO). After DRIVE: a session saved before reads 0 dB.
+    /// R45). After DRIVE: a session saved before reads 0 dB.
     #[id = "level"]
     pub level: FloatParam,
     /// AUTO GAIN (on by default): the output brought back down by as much as DRIVE made the
-    /// sound louder, as measured for it (decisions.md R-STEREO). After LEVEL: a session saved
+    /// sound louder, as measured for it (decisions.md R45). After LEVEL: a session saved
     /// before reads it on.
     #[id = "auto_gain"]
     pub auto_gain: BoolParam,
     /// INNER (0 to 100 %): the inner edge of each side's band, a share of SPREAD's way out, the
-    /// centre cleared of voices (decisions.md R-INNER). After AUTO GAIN: a session saved before
+    /// centre cleared of voices (decisions.md R49). After AUTO GAIN: a session saved before
     /// reads 0.
     #[id = "inner"]
     pub inner: FloatParam,
     /// QUALITY, HI by default: at LO the voices are played by the light model, Potato mode,
-    /// for computers the circuit's is too heavy for (decisions.md R-POTATO); at ULTRA by the
-    /// circuit's model with no compromises (R-ULTRA). Not a preset's (`library::KEPT`): it
+    /// for computers the circuit's is too heavy for (decisions.md R47); at ULTRA by the
+    /// circuit's model with no compromises (R48). Not a preset's (`library::KEPT`): it
     /// suits the computer, not the sound; saved with the session. After AUTO GAIN: a session
     /// saved before reads it HI.
     #[id = "quality"]
@@ -844,7 +844,7 @@ mod tests {
 
     /// The host reads FREQUENCY in semitones from the centre (cents under one) and takes them
     /// back so, the value the pot's position as every version saved it (decisions.md
-    /// R-SEMITONES): 0.1.x's +5 is its pot five sixths along, +5.52 semitones on oscillator 2.
+    /// R54): 0.1.x's +5 is its pot five sixths along, +5.52 semitones on oscillator 2.
     #[test]
     fn frequency_reads_in_semitones_and_keeps_the_pot() {
         let p = Ca72Params::default();
@@ -882,7 +882,7 @@ mod tests {
 
     /// SCATTER's placement offers two choices, EVEN (the default) and CENTER, the strip's tabs
     /// in their order, their ids as they were; each the kit's placement of its name, never its
-    /// EDGES (decisions.md R-INNER). The host steps between the two.
+    /// EDGES (decisions.md R49). The host steps between the two.
     #[test]
     fn the_placement_offers_even_and_center() {
         let p = Ca72Params::default();

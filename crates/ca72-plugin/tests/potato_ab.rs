@@ -1,5 +1,5 @@
 //! Each factory preset played in the circuit's model (QUALITY at HI) and in Potato mode (at
-//! LO; decisions.md R-POTATO), for listening to them side by side and for a first look at how
+//! LO; decisions.md R47), for listening to them side by side and for a first look at how
 //! far apart they are: the
 //! preset as its own POLY and VOICES have it, the one instrument a bass line of eighths at
 //! 120 BPM (a legato pair among them, the last note held), POLY chords of its voices. Prints,

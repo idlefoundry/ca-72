@@ -1,4 +1,4 @@
-//! QUALITY's opening (decisions.md R-ULTRA): a round opening in the face over QUALITY, a thin
+//! QUALITY's opening (decisions.md R48): a round opening in the face over QUALITY, a thin
 //! ring of dark steel round it, closed by a camera's iris of eight curved gunmetal blades, the
 //! face's warm black. Under it, an inch down in a shallow well, waits what each setting shows,
 //! one at a time: at LO a hamster in an old brass wheel, at HI a big lamp of the kind old valve
@@ -143,7 +143,7 @@ impl Lamp {
 /// A lamp's light: its filament's flare in the lens, its halo just past the ring, its spill on
 /// the panel round it. Each drawn once a scale at its strongest, a picture the renderer keeps,
 /// and put in the opening with its strength as the picture's opacity, not drawn again at each
-/// tick of the clock as the synth plays (decisions.md R-PRESENT; the CA-74's measure).
+/// tick of the clock as the synth plays (decisions.md R58; the CA-74's measure).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Glow {
     lamp: Lamp,
@@ -786,7 +786,7 @@ impl Streaks {
 }
 
 /// What of the opening is drawn by code, not SVG, at each tick it changes: the shade over the
-/// hamster deep in the well, the shutter, the Tesla lamp's lightning (decisions.md R-COSTS).
+/// hamster deep in the well, the shutter, the Tesla lamp's lightning (decisions.md R59).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Drawn {
     /// Black over the opening, this opaque.
@@ -1127,7 +1127,7 @@ const SHEEN: [(f64, (u8, u8, u8), f64); 3] = [
 /// each with its own sheen over it, are put together a pixel at a time, the sheen only of the
 /// blade on top there: as SVG eight sheens were filled one over the other, most of each hidden
 /// by the next blade's metal, which with the opening's clip was most of the shutter's cost
-/// (decisions.md R-COSTS). As in SVG, all of it is drawn apart and then cut to the opening, once.
+/// (decisions.md R59). As in SVG, all of it is drawn apart and then cut to the opening, once.
 fn draw_shutter(layer: &mut Pixmap, origin: (f32, f32), scale: f32, open: f64) {
     let r = APERTURE;
     let rho = r * CURVE;

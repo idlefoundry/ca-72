@@ -1,5 +1,5 @@
-//! What the plug-in keeps for the computer, not for the session (decisions.md R-ULTRA,
-//! R-SKIN, R-SEMITONES): QUALITY's indicator shown or not, whether ULTRA's note has been read,
+//! What the plug-in keeps for the computer, not for the session (decisions.md R48,
+//! R51, R54): QUALITY's indicator shown or not, whether ULTRA's note has been read,
 //! the look (the skin) the editor is drawn in and how the FREQUENCY knobs' dials read. In the
 //! shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
