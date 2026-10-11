@@ -4138,3 +4138,106 @@ DRIVE's readout set 11 dB exactly (read back through its API), FIND took "lead":
 Two runs in REAPER began with the drawer open: the harness moved the pointer and pressed at once,
 and the first press was taken where the real cursor had been (on the name, left there by a click
 in Cubase): not the editor's. Not tried: Cubase on macOS, other hosts' keyboards.
+
+## R-SEMITONES. Oscillators 2 and 3's FREQUENCY: a semitone a mark, or the hardware's dial
+
+**The owner, 2026-10-10:** "For the frequency dials on the octaves, we have two choices. Either
+we follow the [hardware reference's] curves exactly (almost what we're doing today, except I
+believe we have them pinned at 0), or we create accurate curves that are exact to the dial
+position that they claim to be measuring. I think we do both, use our perfect ones by default,
+but allow the user to use the exact curves if they should so choose." Told that the 0 mark is
+the reference's measured knob's too (its 7 and 26 cents flat were where its knob was set by eye,
+change 29), and asked three things, the owner chose: the law a preference of the computer's in
+the settings key, each knob saved as its pitch, so a session or preset sounds the same through
+either ("a"); Stacked Fifths "a true 4th and 5th"; and for older sessions "one conversion".
+Then: "Build it, and when you're done, test it on existing patches from the old versions of the
+plugin. If successful, merge it into main. Don't forget to make this a selectable option in the
+settings menu."
+
+**Agent decisions, 2026-10-10** (not separately approved):
+- **The knob saves its pot's position, as 0.1.x did** (its plain value -7.5 to +7.5, the wiper at
+  (value + 7.5) / 15 of the track), and the voice reads the pot as it is: change 29's law left the
+  voice and the light voice (`voice.rs`, `light.rs`) for the knob (`ca72::freq_dial`). A pot's
+  position is its pitch, so a sound is the same through either law; and since every released
+  version saved the pot so, their sessions, their hosts' automation and their presets play as
+  they did without a conversion (the "one conversion" the owner chose is not needed for them),
+  the shared library's files keep format 1 (the DAW the model came from, and older versions,
+  read them at their pitch), and the host's lane is the pot's. The host shows and takes the
+  value in semitones from the oscillator's centre: "+7.00 semitones", cents to a tenth under a
+  semitone ("+3.5 cents"); "7", "7 st", "35 cents" or "35c" typed (`params::frequency`).
+- **The curve:** oscillator 2's and 3's semitones from the centre measured on the voice at 61
+  pot positions, A3 held, from the oscillator's resets (`tests/freq_dial.rs`), a quintic in the
+  wiper's distance from the centre: within 0.003 cent of the measured on A3, 0.08 cent on A2 and
+  A5; its inverse by Newton's steps (`Pot::semitones`, `Pot::wiper`). The pot reaches -8.56 and
+  +8.24 semitones (oscillator 2), -8.63 and +8.22 (3). 0.1.5's circuit stood within 1 cent of
+  this everywhere.
+- **SEMITONES** (`Law::Semitones`, the default): the knob at a mark puts the pot where the
+  oscillator stands that many semitones from its centre, -7.5 to +7.5 at the stops (the service
+  manual's 14 to 17 semitones of travel). **HARDWARE**: change 29's law (`Law::Hardware`, its
+  tracks moved to `freq_dial`), the reference's -5 and +5 marks at -6.48 and +6.61 semitones
+  (oscillator 2) from its 0, its stops the pot's ends. Both keep the 0 mark at the centre, where
+  the factory tuning puts the oscillator in unison with oscillator 1. A pot beyond a law's stops
+  (a sound made through the other, or set by the host) shows the knob at its stop and plays its
+  own pitch; a press that does not move the knob leaves it so.
+- **OSC. 3 CONTROL off**: the knob sets the pot as with the control on (the pot then spans 69
+  semitones and the dial gives no interval); the readout reads the dial, as with it on.
+- **The settings key's menu:** under LOOK, FREQUENCY DIALS heading SEMITONES and HARDWARE (the
+  names the agent's), each group's choice marked (`Menu::marked` now one a group); kept in
+  `settings.toml` as `frequency_dials`, "semitones" or "hardware" (anything else, or no file,
+  semitones). Choosing one turns the two knobs at once; the parameters are not touched.
+- **A learned controller** turns the knob, value / 127 of its travel, through the computer's law
+  (`learn::normalized_for`): the plug-in reads the law as it is initialized and the editor as it
+  opens or the law is chosen (`Ca72Params::freq_law`, not saved with the session).
+- **The factory presets** keep their sound: their FREQUENCY values change-29's law had rewritten
+  put back at their pots' positions, to six places, so every preset but Stacked Fifths renders
+  as main's did (those existing in 0.1.5 at its values, within 0.00005; the feedback patches
+  Pulse Strut and Undertow Growl had amplified a 0.005-cent difference left by four places into
+  a different waveform). **Stacked Fifths** at +5.00 and +7.00 semitones, a fourth and a fifth to
+  the cent (they had stood at +5.52 and +7.67 since 0.1.0, set as "5 and 7"): its level -19.98
+  LUFS momentary maximum (-19.95 before), left at VOLUME as it was. **Cycle of Fifths**' second
+  oscillator stands at +7.16 semitones as its owner set it (a fifth 16 cents wide); its
+  description said "about six semitones apart" (change 29's mark), now "about a fifth apart".
+- **Saved by the test builds** (CA-72 CAL, A6, ULTRA, PRIORITY and the rest, between change 29
+  and this) a FREQUENCY value was a mark of change 29's law. The plug-in does not guess which a
+  file holds (a mark key would not survive the DAW that shares the library, which writes a
+  preset's file again without the keys it does not know): the owner's one such preset, Cycle of
+  Fifths in the Mac's library (format 1 with parameters 0.1.5 did not have), is converted in
+  place, its old file kept beside the folder. Their sessions are the renamed builds', which this
+  plug-in's ids do not open.
+
+**Found in the testing, not this change's:** since calibration change 5 (R162 2.96K, the
+reference's oscillator 3 at 198.82 Hz on 8' with OSC. 3 CONTROL off), oscillator 3 with the
+control off sounds 2.48 semitones lower than in 0.1.5 at every FREQUENCY (201.3 Hz at the centre,
+0.1.5 232.4 Hz), as change 5 meant: a 0.1.x session or preset that uses it as a drone or a
+modulation source plays it so. Main and this change agree to the hundredth of a hertz there.
+
+**Evidence (the Linux reference machine, 2026-10-10):** `every_mark_is_its_number_of_semitones`
+(the voice through SEMITONES at -7.5, -7, -5, -3, -1, +1, +3, +5, +7 and +7.5, each oscillator:
+within 0.002 cent on A3, 0.08 on A2, 0.21 on A5), `the_laws_and_their_inverses`,
+`frequency_follows_the_reference_at_its_marks` (HARDWARE's points),
+`frequency_reads_in_semitones_and_keeps_the_pot`,
+`a_controller_turns_a_frequency_knob_through_the_dials_law`,
+`the_settings_key_chooses_how_the_frequency_dials_read` (the menu and its marks, the knobs
+turned and the parameters untouched, the tip, a drag through each law, a knob past its stop
+pressed), `stacked_fifths_is_a_fourth_and_a_fifth`, the settings' file and the light voice's
+pitch law; pictures of the menu and of the knob at +7 through each law
+(`the_window_settings_png`). The factory presets rendered (`preset_render.rs`, ten voices, 3 s)
+against main's at 5dc7b81: 18 the same to the bit, 7 within -119 dB, Stacked Fifths changed. The
+core's, panel's and plug-in's tests, 330 passed, 43 ignored, in release and in debug; rustfmt;
+clippy with `-D warnings`.
+
+**Old patches** (the owner: "test it on existing patches from the old versions"): every
+FREQUENCY value of the factory presets the six releases shipped (one file, the same in each), of
+the presets in the owner's library on the Mac (twelve saved by 0.1.x-era builds, one by a test
+build) and the dial's -5 and +5 marks and stops. No session of a released version was on the
+owner's computers (the one Live set using the CA-72 uses CA-72 CAL), so 0.1.5 made them:
+- **On the voice**, each oscillator alone, A3, its semitones from its centre: this change within
+  1.05 cents of 0.1.5's at every value (the circuit's own change since, main the same); main
+  before it had every value but 0 off, up to 5.4 semitones (Elastic Octaves' oscillator 3 with
+  the control off, +538 cents; the owner's edited Slow Horn Swell's, +431).
+- **As sessions:** 33 states saved through 0.1.5's own CLAP entry point (the oscillator alone,
+  FREQUENCY and OSC. 3 CONTROL set by the host's automation, then saved as a host saves), each
+  opened through this change's: every FREQUENCY value as saved, to the last bit; played (A3, the
+  second half of a second), the oscillator within 1.2 cents of 0.1.5's wherever it follows the
+  keys, and oscillator 3 with the control off 2.47 to 2.50 semitones lower at every value (change
+  5, above: at the centre main and this change both 201.2672 Hz, 0.1.5 232.3974 Hz).
