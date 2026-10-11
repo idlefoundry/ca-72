@@ -25,10 +25,29 @@ const A_SMALL: f64 = 0.02;
 /// The real-time filter's complex response to a small impulse on one mixer channel (the
 /// FFT of `n` samples, the resamplers' latency removed) at the given frequencies.
 fn rt_complex(i0: f64, r14: f64, freqs: &[f64], os: usize, n: usize) -> Vec<(f64, f64)> {
+    rt_complex_mode(i0, r14, freqs, os, n, false)
+}
+
+/// As [`rt_complex`], or, with `voice`, the filter as the voice has it (its trims, the whole
+/// mixer's conductance on the bus) with FILTER MODE at HI.
+fn rt_complex_mode(
+    i0: f64,
+    r14: f64,
+    freqs: &[f64],
+    os: usize,
+    n: usize,
+    voice: bool,
+) -> Vec<(f64, f64)> {
     let mut f = Vcf::new(SR, os);
+    let mut g = G_MIX;
+    if voice {
+        f.circuit = ca72::filter_cal::CALIBRATED.circuit();
+        f.high_pass = true;
+        g = ca72::filter_cal::G_BUS_OFF;
+    }
     f.circuit.r14 = r14;
     let mut re: Vec<f64> = (0..n)
-        .map(|i| f.tick(if i == 0 { A_SMALL * G_MIX } else { 0.0 }, G_MIX, i0) / A_SMALL)
+        .map(|i| f.tick(if i == 0 { A_SMALL * G_MIX } else { 0.0 }, g, i0) / A_SMALL)
         .collect();
     let lat = f.latency();
     let mut im = vec![0.0; n];
@@ -113,6 +132,85 @@ fn small_signal_response_matches_the_circuit() {
     assert!(
         !fail,
         "budget: to 10 kHz and above, 0.3 and 1.0 dB at 4x, 0.2 and 0.35 dB at 8x\n{report}"
+    );
+}
+
+/// FILTER MODE's HI (decisions.md R46) against `filter-mode.lib` on the bench, over cutoff
+/// and emphasis, the filter as the voice has it (its trims and the whole mixer on the bus,
+/// for which `MODE_RT` is taken). HI is the direct branch less the filter's output, and the
+/// direct branch is exact, so HI's error is the output's: it is measured against the larger
+/// of the two branches (|RT - ngspice| over the larger of |MODE_RT x the channel's current|
+/// and |LO|), and the output's own budget (0.3 dB to 10 kHz, 1 dB above at 4x:
+/// `small_signal_response_matches_the_circuit`), with a few degrees of phase, sets it.
+#[test]
+fn filter_mode_matches_the_circuit() {
+    let Some(spice) = for_test("filter_mode_matches_the_circuit") else {
+        return;
+    };
+    let direct = ca72::vcf::MODE_RT * G_MIX;
+    let mut report = String::new();
+    let mut fail = false;
+    for cutoff in [-3.0, 0.0, 3.0, 6.0] {
+        for r14 in [50e3, 10e3, 3e3] {
+            let t = ca72::filter_cal::CALIBRATED;
+            let b = VcfBench {
+                cutoff,
+                r14,
+                r73: t.r73_pos,
+                r39: t.r39,
+                r49: t.r49,
+                filter_mode: true,
+                bus_load: Some(lab::MIXER_REST),
+                ..VcfBench::default()
+            };
+            let tag = format!("vcf-mode-{cutoff}-{r14}");
+            let i0 = setup(&spice, &b, &tag);
+            let ac = lab::ac_complex(
+                &spice,
+                &work_dir(&tag),
+                &b,
+                "hi",
+                20.0,
+                20_000.0,
+                20,
+                Solver::default(),
+            )
+            .expect("ac");
+            let out = lab::ac_complex(
+                &spice,
+                &work_dir(&tag),
+                &b,
+                "out",
+                20.0,
+                20_000.0,
+                20,
+                Solver::default(),
+            )
+            .expect("ac");
+            let freqs: Vec<f64> = ac.iter().map(|p| p.0).collect();
+            let rt = rt_complex_mode(i0, r14, &freqs, 4, 1 << 18, true);
+            let (mut lo, mut hi) = ((0.0, f64::MIN), (0.0, f64::MIN));
+            let mut floor = f64::MAX;
+            for (((f, (nr, ni)), (rr, ri)), (_, (or, oi))) in ac.iter().zip(&rt).zip(&out) {
+                let larger = direct.max((or * or + oi * oi).sqrt());
+                let e = 20.0 * (((rr - nr).powi(2) + (ri - ni).powi(2)).sqrt() / larger).log10();
+                let w = if *f <= 10_000.0 { &mut lo } else { &mut hi };
+                if e > w.1 {
+                    *w = (*f, e);
+                }
+                floor = floor.min(10.0 * ((nr * nr + ni * ni) / (direct * direct)).log10());
+            }
+            fail |= lo.1 > -26.0 || hi.1 > -18.0;
+            report.push_str(&format!(
+                "cutoff {cutoff:+} V, R14 {r14:>6}: I0 {:7.2} uA, HI's floor {floor:+6.1} dB; worst {:+.1} dB at {:.0} Hz (<= 10 kHz), {:+.1} dB at {:.0} Hz (above)\n",
+                i0 * 1e6, lo.1, lo.0, hi.1, hi.0
+            ));
+        }
+    }
+    eprintln!("{report}");
+    assert!(
+        !fail,
+        "budget, against the larger branch: -26 dB to 10 kHz, -18 dB above\n{report}"
     );
 }
 

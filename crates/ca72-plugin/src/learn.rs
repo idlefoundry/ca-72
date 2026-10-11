@@ -2,8 +2,9 @@
 //! own MIDI channel, assigned to one of the plug-in's sound parameters; each instance its own
 //! table, saved with the host's project, not with the sound presets.
 //!
-//! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches and the
-//!   strip's POLY, VOICES, ENTROPY and SPREAD, and LOCK (a host parameter without a control: the
+//! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches, the
+//!   strip's POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD), INNER, SCATTER's placement, DETUNE
+//!   (DOUBLE), DRIVE, LEVEL and AUTO GAIN, and LOCK (a host parameter without a control: the
 //!   drawer's list learns it). Not the wheels (MIDI pitch bend and the modulation wheel, CC 1,
 //!   move them already), POWER (the host's bypass), MIDI BEND RANGE (the player's), nor anything
 //!   but a sound parameter.
@@ -34,6 +35,8 @@ use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, Ordering};
 use nih_plug::prelude::*;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+
+use ca72::freq_dial::Pot;
 
 use crate::params::Ca72Params;
 
@@ -83,7 +86,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK. Its order is the drawer's list; the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 47] = [
+pub const LEARNABLE: [Learnable; 58] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -111,6 +114,7 @@ pub const LEARNABLE: [Learnable; 47] = [
     knob("osc3_volume", "OSCILLATOR-3 VOLUME"),
     switch("osc3_on", "OSCILLATOR-3 ON"),
     switch("noise_type", "NOISE (WHITE or PINK)"),
+    switch("filter_mode", "FILTER MODE (LO or HI)"),
     switch("filter_mod", "FILTER MODULATION"),
     switch("keyboard_control_1", "KEYBOARD CONTROL 1"),
     switch("keyboard_control_2", "KEYBOARD CONTROL 2"),
@@ -132,11 +136,22 @@ pub const LEARNABLE: [Learnable; 47] = [
     // The left hand controller's switches (not its wheels).
     switch("glide_on", "GLIDE (switch)"),
     switch("decay_on", "DECAY (switch)"),
+    stepped("note_priority", "NOTE PRIORITY"),
+    switch("retrigger", "RETRIGGER"),
     // The strip, and LOCK.
     switch("poly", "POLY"),
+    switch("unison", "UNISON"),
     stepped("voices", "VOICES"),
     knob("entropy", "ENTROPY"),
-    knob("spread", "SPREAD"),
+    knob("spread", "WIDTH"),
+    knob("inner", "INNER"),
+    // (Two choices, EVEN and CENTER: a switch, as NOISE's WHITE or PINK.)
+    switch("placement", "SCATTER PLACEMENT"),
+    switch("doubled", "DOUBLE"),
+    knob("double", "DETUNE (DOUBLE)"),
+    knob("drive", "DRIVE"),
+    knob("level", "LEVEL"),
+    switch("auto_gain", "AUTO GAIN"),
     switch("lock", "LOCK (oscillators identical)"),
 ];
 
@@ -668,6 +683,7 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "osc3_volume" => &p.osc3_volume,
         "osc3_on" => &p.osc3_on,
         "noise_type" => &p.noise_type,
+        "filter_mode" => &p.filter_mode,
         "filter_mod" => &p.filter_mod,
         "keyboard_control_1" => &p.keyboard_control_1,
         "keyboard_control_2" => &p.keyboard_control_2,
@@ -686,13 +702,36 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "feedback" => &p.feedback,
         "glide_on" => &p.glide_on,
         "decay_on" => &p.decay_on,
+        "note_priority" => &p.note_priority,
+        "retrigger" => &p.retrigger,
         "poly" => &p.poly,
         "voices" => &p.voices,
         "entropy" => &p.entropy,
         "spread" => &p.spread,
+        "inner" => &p.inner,
         "lock" => &p.lock,
+        "placement" => &p.placement,
+        "unison" => &p.unison,
+        "doubled" => &p.doubled,
+        "double" => &p.double,
+        "drive" => &p.drive,
+        "level" => &p.level,
+        "auto_gain" => &p.auto_gain,
         _ => return None,
     })
+}
+
+/// Where learnable `i`'s controller at `value` (0–127) sets `target`, its parameter
+/// (normalized): a FREQUENCY knob turned to value / 127 of its travel, its pot where the
+/// computer's law puts it then, as the editor's knob (decisions.md R54); anything else
+/// as [`Target::normalized_for`].
+pub fn normalized_for(p: &Ca72Params, i: usize, target: &dyn Target, value: u8) -> f32 {
+    let knob = f64::from(value.min(127)) / 127.0;
+    match LEARNABLE.get(i).map(|l| l.id) {
+        Some("osc2_frequency") => Pot::Two.wiper_at(p.freq_law(), knob) as f32,
+        Some("osc3_frequency") => Pot::Three.wiper_at(p.freq_law(), knob) as f32,
+        _ => target.normalized_for(value),
+    }
 }
 
 /// The knob of learnable index `i`, if it is one (the ones [`Dezip`] moves).
@@ -721,6 +760,10 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "feedback" => &p.feedback,
         "entropy" => &p.entropy,
         "spread" => &p.spread,
+        "inner" => &p.inner,
+        "double" => &p.double,
+        "drive" => &p.drive,
+        "level" => &p.level,
         _ => return None,
     })
 }
@@ -908,7 +951,7 @@ mod tests {
                 counts(Kind::Stepped),
                 counts(Kind::Switch)
             ),
-            (23, 7, 17)
+            (27, 8, 23)
         );
     }
 
@@ -936,8 +979,31 @@ mod tests {
         assert_eq!(m.refused(), None, "nothing said while not learning");
     }
 
-    /// A knob: value / 127 of its travel. A switch: off at 0–63, on at 64–127. A selector: its six
-    /// positions each an equal share of 0–127; VOICES its nine.
+    /// A FREQUENCY knob turned to value / 127 of its travel through the computer's law
+    /// (decisions.md R54): its stops -7.5 and +7.5 semitones and the centre between 63
+    /// and 64 in semitones; the pot's ends at the stops in the hardware's.
+    #[test]
+    fn a_controller_turns_a_frequency_knob_through_the_dials_law() {
+        use ca72::freq_dial::Law;
+        let p = Ca72Params::default();
+        let i = at("osc2_frequency");
+        let t = target(&p, i).expect("a knob");
+        let st = |v: u8| Pot::Two.semitones(f64::from(normalized_for(&p, i, t, v)));
+        assert!((st(0) + 7.5).abs() < 1e-4 && (st(127) - 7.5).abs() < 1e-4);
+        assert!(st(63) < 0.0 && st(64) > 0.0);
+        p.set_freq_law(Law::Hardware);
+        assert_eq!(normalized_for(&p, i, t, 127), 1.0);
+        let three = at("osc3_frequency");
+        let t3 = target(&p, three).expect("a knob");
+        assert_eq!(normalized_for(&p, three, t3, 0), 0.0008);
+        // Any other knob as its normalization has it.
+        let cutoff = at("cutoff");
+        let c = target(&p, cutoff).expect("a knob");
+        assert_eq!(normalized_for(&p, cutoff, c, 64), 64.0 / 127.0);
+    }
+
+    /// A knob: value / 127 of its travel. A switch (SCATTER's placement too): off at 0–63, on at
+    /// 64–127. A selector: its six positions each an equal share of 0–127; VOICES its nine.
     #[test]
     fn a_value_sets_each_kind_through_its_parameters_normalization() {
         let p = Ca72Params::default();
@@ -952,6 +1018,18 @@ mod tests {
         assert_eq!(
             (pink.normalized_for(63), pink.normalized_for(64)),
             (0.0, 1.0)
+        );
+        // SCATTER's placement, two choices: EVEN at 0–63, CENTER at 64–127.
+        let placement = target(&p, at("placement")).expect("a two-way switch");
+        let chosen = |v: u8| p.placement.preview_plain(placement.normalized_for(v));
+        assert_eq!(
+            [chosen(0), chosen(63), chosen(64), chosen(127)],
+            [
+                crate::params::Scatter::Even,
+                crate::params::Scatter::Even,
+                crate::params::Scatter::Centre,
+                crate::params::Scatter::Centre
+            ]
         );
         let range = target(&p, at("osc1_range")).expect("a selector");
         let position = |v: u8| (range.normalized_for(v) * 5.0).round() as u8;

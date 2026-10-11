@@ -570,7 +570,7 @@ impl Threaded {
 
     /// A MIDI note (0 to 127) pressed or released ([`Voice::note`]).
     pub fn note(&mut self, midi: i32, on: bool) {
-        self.keys.note(midi, on);
+        self.keys.note(midi, on, self.panel.retrigger);
     }
 
     /// The passes handed to the workers so far (none go to them in Potato).
@@ -615,7 +615,7 @@ impl Threaded {
             let n = (len - at).min(CHUNK);
             for i in 0..n {
                 js[i] = jacks(at + i);
-                contacts[i] = self.keys.step();
+                contacts[i] = self.keys.step(self.panel.priority);
                 contacts[i].s_trig = js[i].s_trig;
                 ext[i][0] = js[i].ext;
                 loudness[i][0] = js[i].loudness.unwrap_or(f64::NAN);
@@ -748,7 +748,7 @@ impl Threaded {
             if self.feedback > 0.0 {
                 j.ext += self.feedback * self.fed_back;
             }
-            let mut c = self.keys.step();
+            let mut c = self.keys.step(p.priority);
             c.s_trig = j.s_trig;
             let v_kbd = kbd.part.tick(&p, c);
             let control = ctl.part.tick(&p, c);

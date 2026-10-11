@@ -271,3 +271,9 @@ hardware reference's RANGE sits: 0.31 octave higher at a given control voltage
   and Q18's tail at full SUSTAIN 2 % higher, the 3rd harmonic of a driven VCA with it
   (docs/calibration, change 31). With EXT. LOUDNESS overdriven to 9 V and the contour at 2 V,
   ngspice now runs Q21 backwards by 1.8 uA while the VCA is off; the real-time tail stays 0.
+- **B4-HP** (2026-10-09) FILTER MODE, which the original does not have: the hardware
+  reference's switch (decisions.md R46). At HI the VCA takes the mixer's output less the
+  filter's in place of the filter's: the bus's Norton current through 23.6K (the filter's
+  own passband at EMPHASIS 0, the voice's trims and the whole mixer on the bus) and a 3 Hz
+  coupling, less the output (`filter-mode.lib`, behavioural; `vcf::MODE_RT`, `MODE_HZ`).
+  At LO the circuit is the drawing's.

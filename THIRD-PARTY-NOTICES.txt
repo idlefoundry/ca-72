@@ -2,10 +2,12 @@ THIRD-PARTY NOTICES FOR THE CA-72
 
 The CA-72, copyright © 2026 Idle Foundry Ltd., is free software under the GNU General
 Public License, version 3 or later (LICENSE); its source is at
-https://github.com/idlefoundry/ca-72. Its plug-ins are built with the works below, each
-under its own licence, whose notices follow. The crates are those Cargo.lock names, from
-crates.io; the sources of the ones it takes from git repositories are in each release as
-well, CA-72-<version>-git-sources.tar.gz. The macOS Audio Unit wraps the CLAP plug-in
+https://github.com/idlefoundry/ca-72, and the code it shares with Idle Foundry's other
+plug-ins, under the same licence, at https://github.com/idlefoundry/plugin-kit. Its
+plug-ins are built with the works below, each under its own licence, whose notices
+follow. The crates are those Cargo.lock names, from crates.io; the sources of the ones it
+takes from git repositories are in each release as well,
+CA-72-<version>-git-sources.tar.gz. The macOS Audio Unit wraps the CLAP plug-in
 in clap-wrapper, built with the CLAP headers and Apple's AudioUnitSDK, whose sources are
 in the CA-72's repository (third_party).
 Written by scripts/notices.py from Cargo.lock: do not edit by hand.

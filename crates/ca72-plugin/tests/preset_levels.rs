@@ -10,7 +10,9 @@
 //! values changed, to try one), `CA72_LEVELS_OUT` (a directory: each render as
 //! `<preset>.f32`, stereo, interleaved, little-endian), `CA72_PHRASE` (a phrase file of
 //! `scripts/calibration/midi_capture.py`, played instead: the notes and modulation wheel sent
-//! to the hardware reference, at their times, and 3 s after the last).
+//! to the hardware reference, at their times, and 3 s after the last). `CA72_RETIRED`
+//! (set): the presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55)
+//! measured instead, which its pack ships.
 
 #![allow(clippy::unwrap_used)]
 
@@ -18,45 +20,11 @@ mod common;
 
 use ca72_analysis::loudness::loudness;
 use ca72_plugin::engine::{Engine, Event};
-use ca72_plugin::library::{Sound, factory};
-use common::{controls_of, env};
+use ca72_plugin::library::{Sound, factory, parse_factory};
+use common::{controls_of, env, phrase};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
-
-/// A phrase: (start, length) in seconds and the keys held.
-fn phrase(s: &Sound) -> Vec<(f64, f64, Vec<u8>)> {
-    let tag = |t: &str| s.tags.iter().any(|x| x == t);
-    let poly = s.values.iter().any(|(k, v)| k == "poly" && *v >= 0.5);
-    let held = if tag("slow") { 3.0 } else { 1.5 };
-    if tag("drums") {
-        let key = if tag("snare") { 54 } else { 57 };
-        return (0..4).map(|k| (0.6 * k as f64, 0.25, vec![key])).collect();
-    }
-    if tag("fx") {
-        return vec![(0.0, 6.0, vec![48])];
-    }
-    if poly {
-        return [48u8, 53, 55]
-            .iter()
-            .enumerate()
-            .map(|(k, &r)| {
-                let keys = [0u8, 4, 7, 12, 16, 19].iter().map(|d| r + d).collect();
-                (3.0 * k as f64, 2.5, keys)
-            })
-            .collect();
-    }
-    let roots: [u8; 3] = if tag("bass") {
-        [36, 43, 40]
-    } else {
-        [60, 67, 64]
-    };
-    roots
-        .iter()
-        .enumerate()
-        .map(|(k, &r)| ((held + 0.5) * k as f64, held, vec![r]))
-        .collect()
-}
 
 /// `CA72_PHRASE`'s notes and modulation wheel: `[{"t": seconds, "kind": "on" | "off",
 /// "note": n}, {"t": seconds, "kind": "cc", "cc": 1, "value": v}, ...]`.
@@ -161,7 +129,12 @@ fn each_preset_in_its_register() {
         std::fs::create_dir_all(d).unwrap();
     }
     println!("preset               momentary max   integrated  (LUFS)");
-    for s in factory().iter().filter(|s| s.name.contains(&only)) {
+    let sounds = if std::env::var_os("CA72_RETIRED").is_some() {
+        parse_factory(include_str!("../sounds/retired.toml")).unwrap()
+    } else {
+        factory().to_vec()
+    };
+    for s in sounds.iter().filter(|s| s.name.contains(&only)) {
         let s = with_overrides(s);
         let (l, r) = render(&s);
         let m = loudness(&[&l, &r], RATE as u32);

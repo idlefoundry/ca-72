@@ -9,8 +9,9 @@ compiler warnings (`non_snake_case` in `src/win/drop_target.rs`, and
 `mismatched_lifetime_syntaxes`). `src/macos/window.rs` has one `use` list in the order
 today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
-Three changes, all for Windows only, in `src/win/window.rs`, `src/win/drop_target.rs`,
-`src/event.rs` and `src/window.rs` (the CA-72's `docs/decisions.md` R26, R28 and R34):
+Three changes for Windows, in `src/win/window.rs`, `src/win/drop_target.rs`, `src/event.rs`
+and `src/window.rs` (the CA-72's `docs/decisions.md` R26, R28 and R34), and one for macOS
+(below):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -76,6 +77,30 @@ Three changes, all for Windows only, in `src/win/window.rs`, `src/win/drop_targe
 
    The CA-72's test `the_editor_asks_a_dialog_for_every_key_only_while_it_holds_them` checks
    the answer with the drawer and a control's menu open and shut.
+
+And one for macOS, in `src/macos/view.rs` (the CA-72's `docs/decisions.md` R56, 2026-10-11):
+
+4. **A press or release tells the handler where the pointer is first.** baseview's
+   `mouseDown:` and its kind gave the handler the button alone, leaving the pointer where the
+   last `mouseMoved:` had put it. Bitwig Studio's floating plug-in window, while its own window
+   is in front, gets no `mouseMoved:` as the pointer comes onto it, and its first click (which
+   `acceptsFirstMouse:` lets through, as it should) came before the handler knew the pointer was
+   there: the CA-72's editor took it where the pointer had last been seen, and a click on a
+   switch did nothing until a second one. Now each press and release gives the handler a
+   `CursorMoved` at the event's own place first (`cursor_at`, which `mouseMoved:` uses too). Tried in Bitwig 5.2.7 on macOS 27: a click
+   in Bitwig's window, then one on the CA-72's RETRIGGER, three times, each switched it (none
+   did before); a drag begun the same way moved VOICES.
+
+5. **On Windows too, a press or release tells the handler where the pointer is first.** The
+   fourth change took Windows to tell a window of the pointer before a press; it does not
+   always. A press that comes with no `WM_MOUSEMOVE` before it (the pointer set where it is, as
+   a test's harness sets it, or a window come under a pointer that has not moved since) reached
+   the handler with the pointer where it had last been seen: in Cubase 15, a click on the
+   CA-72's POLY tab, the pointer put there at once, did nothing, and the next click took. Now
+   `WM_LBUTTONDOWN` and the other buttons' messages give the handler a `CursorMoved` at the
+   message's own place (its `lParam`, as `WM_MOUSEMOVE` reads it) first. The CA-72's test
+   `a_press_with_no_move_before_it_lands_where_it_is` (`crates/ca72-plugin/src/editor.rs`,
+   Windows) presses POLY with no move before it; without this change nothing is set.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.

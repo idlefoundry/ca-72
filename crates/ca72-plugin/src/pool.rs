@@ -39,7 +39,7 @@
 //! [`Crew`], which the plug-in's helper thread serves, starting and stopping pools
 //! (decisions.md R21, R23).
 
-use crate::engine::{CHUNK, Mix, Playing};
+use crate::engine::{CHUNK, MIX_LEN, Mix, Playing};
 use ca72::threaded::Backoff;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -142,7 +142,7 @@ struct Board<V> {
     /// INPUT's samples, and the audio thread's flush bits ([`ca72_rt::flush_mode`]).
     n: AtomicUsize,
     rate: AtomicU64,
-    mix: [AtomicU64; 4],
+    mix: [AtomicU64; MIX_LEN],
     ext: [AtomicU64; CHUNK],
     flush: AtomicU32,
     quit: AtomicBool,
@@ -805,7 +805,7 @@ mod tests {
     }
 
     fn mix() -> Mix {
-        Mix::from_array([0.0; 4])
+        Mix::from_array([0.0; MIX_LEN])
     }
 
     const EXT: [f64; CHUNK] = [0.0; CHUNK];

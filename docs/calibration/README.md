@@ -534,7 +534,8 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     factory presets move little (levels within 0.01 dB but Undertow Growl's loop, -0.12).
 
 29. **Oscillators 2 and 3's FREQUENCY laws** (`voice::osc2_freq_track`, `osc3_freq_track`,
-    2026-10-09). Session N held an A3 with each oscillator alone, FREQUENCY at both stops,
+    2026-10-09; since R54 the knob's HARDWARE law, `freq_dial::Law::Hardware`, the
+    player's choice, the dial in semitones the default). Session N held an A3 with each oscillator alone, FREQUENCY at both stops,
     -5, 0 and +5, between takes of oscillator 1 alone (its tuning drifted 0.15 cent). From
     oscillator 1 the reference's oscillator 2 stood at -8.05, -6.55, -0.07, +6.54 and +8.23
     semitones, its oscillator 3 (OSC. 3 CONTROL on) at -8.87, -6.99, -0.26, +6.66 and +8.29;
@@ -551,7 +552,8 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
     0.06 and 0.33 semitone short (the CA-72's pots end there). The ngspice benches take the
     pot's position: the netlist is unchanged. The presets' FREQUENCY values (all but 0) are
     rewritten so that each keeps its pot's position (R42): their intervals and oscillator
-    3's rates as they were.
+    3's rates as they were. (R54 took the law out of the voice: a value is the pot's
+    position again, as 0.1.x saved it, and these rewrites were taken back.)
 
 30. **EMPHASIS at 2, 3 and 4** (`voice::emphasis_r14`, 2026-10-09). Upright Pluck played
     from its sheet twice (takes 01 and 34, alike) stood 5 to 6 dB under the reference from
@@ -669,9 +671,10 @@ drives the filter as the reference's 5 does (the third harmonic against level wi
   CA-72's mixer bus; no change): at 8 and 4, oscillator 2 -2.10 and -9.42 dB against the
   reference's -2.29 and -9.55 (oscillator 3's as the reference's oscillator 2's within 0.2
   dB), and the noise, through its 11K, -3.60 and -11.93 against -3.94 and -11.98.
-- **Oscillators 2 and 3's FREQUENCY at their clockwise stops** (change 29): 0.06 and 0.33
-  semitone short of the reference's; the 0 mark at the factory tuning's unison, where the
-  reference's sits wherever its knob is set by eye (7 to 26 cents flat in session N).
+- **Oscillators 2 and 3's FREQUENCY at their clockwise stops** (change 29, the knob's HARDWARE
+  law since R54): 0.06 and 0.33 semitone short of the reference's; the 0 mark at the
+  factory tuning's unison, where the reference's sits wherever its knob is set by eye (7 to
+  26 cents flat in session N).
 - **The presets** are re-levelled and the two that sound the filter's pitch retuned (R42),
   after sessions J's, L's, M's, N's and O's fits too. Seven at MAIN OUTPUT VOLUME 10 are
   quieter than in 0.1.3 and VOLUME cannot raise them: Upright Pluck -5.05 dB, Breath Flute

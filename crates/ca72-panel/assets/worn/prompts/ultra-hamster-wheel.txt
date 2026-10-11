@@ -1,0 +1,12 @@
+Use your image generation tool to make one image, then save it in the current directory as wheel-brass2.png (copy the generated file there). Do nothing else.
+
+The image: one old-fashioned hamster running wheel made of brass wire, the classic kind from an old wire hamster cage, seen exactly from its open front, its axle pointing straight at the camera, so that it appears as a perfect circle. Square image, as large as you can make it.
+- How it is built: an open front (just a round brass wire ring, so the hamster can get in) and a closed back made of many thin straight brass wire spokes, about twenty four, evenly spaced, radiating from a small round brass hub in the middle to the rim, like a bicycle wheel's spokes; between the front ring and the back rim, a ring of short brass wire rungs all the way round (the running surface), seen nearly end-on as small bright stubs evenly spaced just inside the rim; small neat solder joints where the wires meet.
+- Perfectly round and true: the rim an exact circle, every spoke perfectly straight and evenly spaced, nothing bent, dented or warped.
+- Old brass, old school: warm golden where polished by use, darker brown tarnish and a little dull patina here and there; well made, not rusty, not broken, not steampunk, no gears.
+- The background must show clearly through all the gaps between the spokes and rungs.
+- No stand, no base, no hamster, no cage, nothing else.
+- Straight-on orthographic product photograph, the camera exactly in front of the centre, no perspective or tilt; the wheel exactly centred and filling about 85 percent of the frame.
+- Lighting: a ring light all around the camera, perfectly symmetric about the centre: no light from any one side (the wheel turns).
+- On a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
+- No text, symbols, logos, numbers, labels or frame borders anywhere.

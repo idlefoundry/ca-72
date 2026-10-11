@@ -1,0 +1,6 @@
+Use your image generation tool to edit the attached image (toggle-straight.png, in the current directory) into one new image, then save it in the current directory as toggle-slight.png (copy the generated file there). Do nothing else.
+
+The attached image is a three-position chrome bat-handle toggle switch, seen from straight in front, its lever in the middle position pointing exactly at the camera, so only its round tip shows. The edit: the lever tilted the slightest bit downwards, about five degrees from straight out: its round tip now sits just a little below the centre of the bushing, still mostly inside the bushing's opening, and only the barest sliver of the lever's slim shaft shows just above the tip. The lever must still read as being in the middle position, nowhere near thrown down.
+- Identical in every other way: the same framing, size and position (the nut, washer and bushing exactly where they are now), the same polished chrome, the same plain flat mid-grey (#808080) background with no shadow on it, the same soft light from up and to the left.
+- No text, symbols, logos or numbers anywhere.
+Keep the image the same size as the attached one.

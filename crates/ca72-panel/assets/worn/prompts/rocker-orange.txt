@@ -1,0 +1,9 @@
+Use your image generation tool to make one image, then save it in the current directory as rocker-orange.png (copy the generated file there). Do nothing else.
+
+The image: a single rocker switch from the front panel of a 1970s analogue synthesizer, seen from directly above. Landscape image, as large as you can make it.
+- The switch: a wide rectangular paddle of moulded plastic in a vivid orange close to #e8481c, slightly translucent, satin with a very fine moulded texture, about two and a half times as wide as it is tall. It is a rocker: the pivot runs across its middle from top to bottom; the left half lies low and flat, the right half rises in a smooth rounded hump to its raised outer end, which is rounded over; from above the hump shows as a soft change of shading across the right half.
+- Seated in a thin black rectangular opening.
+- Gently used: no scratches, no chips.
+- Straight top-down orthographic product photograph, the camera exactly above the centre, no perspective or tilt; the part exactly centred and filling about 75 percent of the frame; on a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
+- Lighting: a ring light all around the camera, perfectly symmetric about the centre: no light from any one side, no directional highlight, no shadow.
+- No text, symbols, logos or numbers anywhere.

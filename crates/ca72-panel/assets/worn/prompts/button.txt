@@ -1,0 +1,7 @@
+Use your image generation tool to make one image, then save it in the current directory as button.png (copy the generated file there). Do nothing else.
+
+The image: a single square latching push-button cap from a 1970s synthesizer programmer, seen from directly above. Square image, as large as you can make it.
+- The cap: square with slightly rounded corners, matte dark charcoal grey moulded plastic (close to #2e2c2a), its top very slightly concave, a fine moulding texture, gently used (the top a touch smoother and glossier in the middle where fingers press, no scratches or chips).
+- Straight top-down orthographic product photograph, the camera exactly above the centre, no perspective or tilt; the cap exactly centred and filling about 70 percent of the frame; on a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
+- Lighting: a ring light all around the camera, perfectly symmetric about the centre: no light from any one side, no directional highlight, no shadow.
+- No text, symbols, logos or numbers anywhere.

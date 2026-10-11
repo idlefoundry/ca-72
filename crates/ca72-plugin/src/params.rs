@@ -1,17 +1,20 @@
 //! The plug-in's parameters: the front panel's and left hand controller's controls in their
-//! dials' units, MIDI BEND RANGE, and the plug-in's own POLY, VOICES, ENTROPY and SPREAD.
+//! dials' units, MIDI BEND RANGE, and the plug-in's own POLY, VOICES, ENTROPY, SPREAD and INNER.
 //! Their ids are stable (a saved session's settings are found by them): never rename one.
 
 use std::hash::{BuildHasher, Hasher};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
+use ca72::freq_dial::{DIAL_END, Law, Pot};
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::tuning::Range;
-use ca72::voice::{ContourKnobs, OscPanel, Panel, Quality, Waveform};
+use ca72::voice::{ContourKnobs, OscPanel, Panel, Priority, Quality, Waveform};
 use nih_plug::prelude::*;
 
-use crate::engine::{Controls, POLY_VOICES};
+use crate::character::Placement;
+use crate::drive::Calibration;
+use crate::engine::{Controls, DOUBLE_CENTS, DRIVE_TOP, LEVEL_RANGE, POLY_VOICES};
 use crate::learn::MidiMap;
 
 /// RANGE's positions.
@@ -103,6 +106,31 @@ pub enum Wave3 {
     NarrowRectangle,
 }
 
+/// Where SCATTER puts the voices (decisions.md R45, the CA-74's R30): evenly from edge
+/// to edge, or out from the centre. The CA-74's third, EDGES, is not offered: INNER moves the
+/// voices out from the centre instead, all of them to the edges at 100 % (the owner,
+/// 2026-10-10; decisions.md R49). In this order (the strip's tabs'): a preset's value is
+/// its index, 0 EVEN and 1 CENTER.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scatter {
+    #[id = "even"]
+    #[name = "EVEN"]
+    Even,
+    #[id = "centre"]
+    #[name = "CENTER"]
+    Centre,
+}
+
+/// The kit's placement of each choice.
+impl From<Scatter> for Placement {
+    fn from(s: Scatter) -> Placement {
+        match s {
+            Scatter::Even => Placement::Even,
+            Scatter::Centre => Placement::Centre,
+        }
+    }
+}
+
 impl From<Wave3> for Waveform {
     fn from(w: Wave3) -> Waveform {
         match w {
@@ -125,6 +153,61 @@ pub enum NoiseColor {
     Pink,
 }
 
+/// FILTER MODE, which the original does not have (decisions.md R46): LO, the filter as
+/// drawn; HI, the hardware reference's high-pass (the mixer's output less the filter's).
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterMode {
+    #[id = "lo"]
+    #[name = "LO"]
+    Lo,
+    #[id = "hi"]
+    #[name = "HI"]
+    Hi,
+}
+
+/// QUALITY (decisions.md R47, R48): LO, the light model (Potato mode); HI, the
+/// circuit's model at its real-time setting; ULTRA, the circuit's model with no compromises
+/// (the model's own No Compromises), for offline renders and small projects on powerful
+/// computers. In this order, low to high, as a host lists them.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QualityMode {
+    #[id = "lo"]
+    #[name = "LO"]
+    Lo,
+    #[id = "hi"]
+    #[name = "HI"]
+    Hi,
+    #[id = "ultra"]
+    #[name = "ULTRA"]
+    Ultra,
+}
+
+/// NOTE PRIORITY (decisions.md R50): which of the keys held sounds while POLY is off
+/// (and in UNISON, each voice the same). LOW, the keyboard circuit's own; LAST, the key pressed
+/// last; HIGH, the highest. In this order, as the toggle's positions run left to right.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotePriority {
+    #[id = "low"]
+    #[name = "LOW"]
+    Low,
+    #[id = "last"]
+    #[name = "LAST"]
+    Last,
+    #[id = "high"]
+    #[name = "HIGH"]
+    High,
+}
+
+impl From<NotePriority> for Priority {
+    fn from(p: NotePriority) -> Priority {
+        match p {
+            NotePriority::Low => Priority::Low,
+            NotePriority::Last => Priority::Last,
+            NotePriority::High => Priority::High,
+        }
+    }
+}
+
 #[derive(Params)]
 pub struct Ca72Params {
     /// The noise generator's seed, saved with the session so that it renders the same noise
@@ -143,6 +226,16 @@ pub struct Ca72Params {
     /// R34): saved with the session (`crate::learn::Saved`), not with a sound preset.
     #[persist = "midi_map"]
     pub midi_map: Arc<MidiMap>,
+
+    /// AUTO GAIN's curve for the sound (decisions.md R45; `drive.rs`): measured when the
+    /// sound is changed in the editor, kept with the session so that it plays and renders the
+    /// same again.
+    #[persist = "drive_curve"]
+    pub drive_curve: Calibration,
+    /// How the FREQUENCY knobs' dials read on this computer (`settings.rs`; decisions.md
+    /// R54): 0 a semitone a mark, 1 the hardware's. Not the session's: a learned
+    /// controller turns the knob through it ([`Ca72Params::freq_law`]).
+    pub freq_law: Arc<AtomicU8>,
 
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
@@ -169,8 +262,11 @@ pub struct Ca72Params {
     pub osc1_waveform: EnumParam<Wave>,
     #[id = "osc2_range"]
     pub osc2_range: EnumParam<Footage>,
-    /// FREQUENCY in its dial's units: a semitone a mark, 7 printed at 140 degrees, 7.5 at
-    /// the ends of the knob's travel.
+    /// FREQUENCY (decisions.md R54): its pot's position in the dial's units, -7.5 to
+    /// +7.5, the wiper at (value + 7.5) / 15 of its track, as every version has saved it; shown
+    /// and typed in semitones ([`frequency`]). The knob reads it through the computer's law
+    /// (`ca72::freq_dial`): the dial a semitone a mark (7 printed at 140 degrees, 7.5 at the
+    /// ends of the knob's travel), or the hardware's.
     #[id = "osc2_frequency"]
     pub osc2_frequency: FloatParam,
     #[id = "osc2_waveform"]
@@ -208,6 +304,8 @@ pub struct Ca72Params {
     pub osc3_volume: FloatParam,
 
     // MODIFIERS
+    #[id = "filter_mode"]
+    pub filter_mode: EnumParam<FilterMode>,
     #[id = "filter_mod"]
     pub filter_mod: BoolParam,
     #[id = "keyboard_control_1"]
@@ -261,8 +359,8 @@ pub struct Ca72Params {
     pub midi_bend_range: FloatParam,
 
     // The plug-in's own, not the instrument's (decisions.md, "POLY", "ANALOG and SPREAD").
-    /// POLY: one instrument per voice (VOICES of them); off, the one with its keyboard
-    /// circuit's lowest-note priority.
+    /// POLY: one instrument per voice (VOICES of them); off, the one, NOTE PRIORITY choosing
+    /// which of the keys held sounds (LOW, its keyboard circuit's own).
     #[id = "poly"]
     pub poly: BoolParam,
     /// VOICES: how many POLY plays, 2 to 10 (kept while POLY is off).
@@ -282,6 +380,79 @@ pub struct Ca72Params {
     /// keeps a small mismatch of its own; decisions.md R9).
     #[id = "lock"]
     pub lock: BoolParam,
+    /// SCATTER's placement, EVEN (the default) or CENTER: where SPREAD puts the voices
+    /// (decisions.md R45, R49). The last parameter: a session saved before it reads
+    /// EVEN, and one saved with EDGES opens with EVEN too (`Ca72::filter_state`).
+    #[id = "placement"]
+    pub placement: EnumParam<Scatter>,
+    /// UNISON: VOICES instruments on every key together (decisions.md R45). After the
+    /// placement: a session saved before it reads it off.
+    #[id = "unison"]
+    pub unison: BoolParam,
+    /// DOUBLE: each note two voices, detuned up to 100 cents, either side of the centre, 0 to
+    /// 100 % (decisions.md R45). The last parameter: a session saved before it reads 0.
+    #[id = "double"]
+    pub double: FloatParam,
+    /// DRIVE (0 to 24 dB): the mixer's signal into the filter raised, its input pair driven
+    /// harder (decisions.md R45). After DOUBLE: a session saved before reads it off.
+    #[id = "drive"]
+    pub drive: FloatParam,
+    /// LEVEL (dB): the output's gain, the plug-in's own, after MAIN OUTPUT's (decisions.md
+    /// R45). After DRIVE: a session saved before reads 0 dB.
+    #[id = "level"]
+    pub level: FloatParam,
+    /// AUTO GAIN (on by default): the output brought back down by as much as DRIVE made the
+    /// sound louder, as measured for it (decisions.md R45). After LEVEL: a session saved
+    /// before reads it on.
+    #[id = "auto_gain"]
+    pub auto_gain: BoolParam,
+    /// INNER (0 to 100 %): the inner edge of each side's band, a share of SPREAD's way out, the
+    /// centre cleared of voices (decisions.md R49). After AUTO GAIN: a session saved before
+    /// reads 0.
+    #[id = "inner"]
+    pub inner: FloatParam,
+    /// QUALITY, HI by default: at LO the voices are played by the light model, Potato mode,
+    /// for computers the circuit's is too heavy for (decisions.md R47); at ULTRA by the
+    /// circuit's model with no compromises (R48). Not a preset's (`library::KEPT`): it
+    /// suits the computer, not the sound; saved with the session. After AUTO GAIN: a session
+    /// saved before reads it HI.
+    #[id = "quality"]
+    pub quality: EnumParam<QualityMode>,
+    /// DOUBLE (the strip's SCATTER | DOUBLE): each note two voices, DETUNE apart, either side
+    /// of the centre; off, SCATTER, DETUNE unused (the owner, 2026-10-10: DOUBLE had been
+    /// DETUNE above 0, so DETUNE at 0 "instantly switches to scatter"; "make that knob
+    /// unresponsive unless the user is in double mode"). After QUALITY: a session or a preset
+    /// saved before reads it on wherever its DETUNE is above 0 (`Ca72::filter_state`,
+    /// `presets::targets`).
+    #[id = "doubled"]
+    pub doubled: BoolParam,
+    /// NOTE PRIORITY, LOW by default: which key held sounds (the toggle under GLIDE and DECAY).
+    /// A preset's, as any panel control (the owner, 2026-10-10: "This item should be saved per
+    /// patch"). The last parameter: a session or a preset saved before reads it LOW, the
+    /// instrument's own.
+    #[id = "note_priority"]
+    pub note_priority: EnumParam<NotePriority>,
+    /// RETRIGGER, off by default: each key pressed starts the contours again, other keys held
+    /// or not (the switch under GLIDE and DECAY; off, single triggering, the instrument's). A
+    /// preset's, as NOTE PRIORITY. After it: a session or a preset saved before reads it off.
+    #[id = "retrigger"]
+    pub retrigger: BoolParam,
+}
+
+/// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
+/// the pair play as one pitch (a ten-thousandth of a cent: a beat a day), the engine's DOUBLE
+/// being on while its detune is above 0.
+pub const DOUBLED_AT_NONE: f64 = 1e-6;
+
+/// Cents as the strip's DETUNE reads them: a number, whole or to a tenth ("12", "7.2"), as an
+/// instrument's display shows it, without a sign (the CA-74's R34).
+pub fn cents(c: f64) -> String {
+    let c = (c * 10.0).round() / 10.0;
+    if c.fract() == 0.0 {
+        format!("{c:.0}")
+    } else {
+        format!("{c:.1}")
+    }
 }
 
 /// An amount, 0 to 100 %.
@@ -296,6 +467,66 @@ fn percent(name: &str) -> FloatParam {
     )
     .with_unit(" %")
     .with_value_to_string(formatters::v2s_f32_rounded(0))
+}
+
+/// A FREQUENCY pot's offset as the host shows it: cents to a tenth under a semitone ("+3.4
+/// cents"), else semitones to a hundredth ("+7.00 semitones").
+pub fn semitones_text(st: f64) -> String {
+    let c = (st * 1000.0).round() / 10.0;
+    if c == 0.0 {
+        String::from("0 semitones")
+    } else if c.abs() < 100.0 {
+        format!("{c:+.1} cents")
+    } else {
+        format!("{st:+.2} semitones")
+    }
+}
+
+/// Semitones as typed: a number, "semitones" or "st" after it or none; "cents" or "c" after it
+/// for cents.
+pub fn semitones_typed(s: &str) -> Option<f64> {
+    let t = s.trim();
+    let (t, per) = match ["semitones", "semitone", "st"]
+        .iter()
+        .find_map(|u| t.strip_suffix(u))
+    {
+        Some(t) => (t, 1.0),
+        None => match ["cents", "cent", "\u{a2}", "c"]
+            .iter()
+            .find_map(|u| t.strip_suffix(u))
+        {
+            Some(t) => (t, 0.01),
+            None => (t, 1.0),
+        },
+    };
+    let v: f64 = t.trim().trim_start_matches('+').parse().ok()?;
+    v.is_finite().then_some(v * per)
+}
+
+/// The wiper (0..1 of its track) of a FREQUENCY pot at `plain` (the parameter's value).
+pub fn wiper_of(plain: f32) -> f64 {
+    ((f64::from(plain) + DIAL_END) / (2.0 * DIAL_END)).clamp(0.0, 1.0)
+}
+
+/// Oscillator 2's or 3's FREQUENCY ([`Ca72Params::osc2_frequency`]): the pot's position, shown
+/// and typed as its oscillator's offset from the centre (beyond the pot's reach, its end).
+fn frequency(name: &str, pot: Pot) -> FloatParam {
+    let end = DIAL_END as f32;
+    FloatParam::new(
+        name,
+        0.0,
+        FloatRange::Linear {
+            min: -end,
+            max: end,
+        },
+    )
+    .with_value_to_string(Arc::new(move |v| {
+        semitones_text(pot.semitones(wiper_of(v)))
+    }))
+    .with_string_to_value(Arc::new(move |s| {
+        let w = pot.wiper(semitones_typed(s)?);
+        Some(((2.0 * w - 1.0) * DIAL_END) as f32)
+    }))
 }
 
 /// A knob over `lo..hi` in its dial's units.
@@ -325,6 +556,8 @@ impl Default for Ca72Params {
             editor_width: Arc::new(AtomicU32::new(0)),
             preset: Arc::new(RwLock::new(String::new())),
             midi_map: Arc::new(MidiMap::default()),
+            freq_law: Arc::new(AtomicU8::new(0)),
+            drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
             glide: ten("Glide", 0.0),
@@ -334,10 +567,10 @@ impl Default for Ca72Params {
             osc1_range: EnumParam::new("Osc 1 Range", Footage::R8),
             osc1_waveform: EnumParam::new("Osc 1 Waveform", Wave::Sawtooth),
             osc2_range: EnumParam::new("Osc 2 Range", Footage::R8),
-            osc2_frequency: dial("Osc 2 Frequency", -7.5, 7.5, 0.0),
+            osc2_frequency: frequency("Osc 2 Frequency", Pot::Two),
             osc2_waveform: EnumParam::new("Osc 2 Waveform", Wave::Sawtooth),
             osc3_range: EnumParam::new("Osc 3 Range", Footage::R8),
-            osc3_frequency: dial("Osc 3 Frequency", -7.5, 7.5, 0.0),
+            osc3_frequency: frequency("Osc 3 Frequency", Pot::Three),
             osc3_waveform: EnumParam::new("Osc 3 Waveform", Wave3::Sawtooth),
             osc1_on: BoolParam::new("Osc 1 On", true),
             osc1_volume: ten("Osc 1 Volume", 8.0),
@@ -350,6 +583,7 @@ impl Default for Ca72Params {
             noise_type: EnumParam::new("Noise Color", NoiseColor::White),
             osc3_on: BoolParam::new("Osc 3 On", false),
             osc3_volume: ten("Osc 3 Volume", 8.0),
+            filter_mode: EnumParam::new("Filter Mode", FilterMode::Lo),
             filter_mod: BoolParam::new("Filter Modulation", false),
             keyboard_control_1: BoolParam::new("Keyboard Control 1", true),
             keyboard_control_2: BoolParam::new("Keyboard Control 2", false),
@@ -381,9 +615,64 @@ impl Default for Ca72Params {
                 },
             ),
             entropy: percent("Entropy"),
-            spread: percent("Spread"),
+            // (The strip's WIDTH: the id is SPREAD's, as sessions and presets have it; the
+            // CA-74's R31.)
+            spread: percent("Width"),
             feedback: ten("Feedback", 0.0),
             lock: BoolParam::new("Lock (oscillators identical)", false),
+            placement: EnumParam::new("Scatter Placement", Scatter::Even),
+            unison: BoolParam::new("Unison", false),
+            // (The strip's DETUNE, DOUBLE's: its amount in cents, none SCATTER; the CA-74's
+            // R31.)
+            double: percent("Double Detune")
+                .with_unit("")
+                .with_value_to_string(Arc::new(|v| {
+                    if v > 0.0 {
+                        format!("{} cents", cents(f64::from(v) / 100.0 * DOUBLE_CENTS))
+                    } else {
+                        String::from("Off")
+                    }
+                }))
+                .with_string_to_value(Arc::new(|s| {
+                    let t = s.trim();
+                    let t = t
+                        .strip_suffix("cents")
+                        .or_else(|| t.strip_suffix("cent"))
+                        .or_else(|| t.strip_suffix('\u{a2}'))
+                        .unwrap_or(t)
+                        .trim();
+                    if t.eq_ignore_ascii_case("off") {
+                        return Some(0.0);
+                    }
+                    let c: f64 = t.parse().ok()?;
+                    Some((c / DOUBLE_CENTS * 100.0).clamp(0.0, 100.0) as f32)
+                })),
+            drive: FloatParam::new(
+                "Drive",
+                0.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: DRIVE_TOP as f32,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            level: FloatParam::new(
+                "Level",
+                0.0,
+                FloatRange::Linear {
+                    min: LEVEL_RANGE.0 as f32,
+                    max: LEVEL_RANGE.1 as f32,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            auto_gain: BoolParam::new("Auto Gain", true),
+            inner: percent("Inner"),
+            doubled: BoolParam::new("Double", false),
+            quality: EnumParam::new("Quality", QualityMode::Hi),
+            note_priority: EnumParam::new("Note Priority", NotePriority::Low),
+            retrigger: BoolParam::new("Retrigger", false),
         }
     }
 }
@@ -398,6 +687,22 @@ impl std::fmt::Debug for Ca72Params {
 }
 
 impl Ca72Params {
+    /// How the FREQUENCY knobs' dials read on this computer.
+    pub fn freq_law(&self) -> Law {
+        match self.freq_law.load(Ordering::Relaxed) {
+            1 => Law::Hardware,
+            _ => Law::Semitones,
+        }
+    }
+
+    pub fn set_freq_law(&self, law: Law) {
+        let v = match law {
+            Law::Semitones => 0,
+            Law::Hardware => 1,
+        };
+        self.freq_law.store(v, Ordering::Relaxed);
+    }
+
     pub fn seed(&self) -> u64 {
         self.noise_seed.load(Ordering::Relaxed)
     }
@@ -465,6 +770,7 @@ impl Ca72Params {
             mod_mix: ten(&self.mod_mix),
             osc_mod: self.osc_mod.value(),
             filter_mod: self.filter_mod.value(),
+            filter_hi: self.filter_mode.value() == FilterMode::Hi,
             pitch_wheel: value(&self.pitch_wheel),
             mod_wheel: value(&self.mod_wheel),
             ext_volume: ten(&self.ext_volume),
@@ -472,6 +778,8 @@ impl Ca72Params {
             a440: self.a440.value(),
             tune: value(&self.tune) / 2.5,
             quality: Quality::default(),
+            priority: self.note_priority.value().into(),
+            retrigger: self.retrigger.value(),
         };
         Controls {
             panel,
@@ -483,9 +791,114 @@ impl Ca72Params {
             voices: usize::try_from(self.voices.value()).unwrap_or(POLY_VOICES.1),
             entropy: value(&self.entropy) / 100.0,
             spread: value(&self.spread) / 100.0,
+            inner: value(&self.inner) / 100.0,
+            placement: self.placement.value().into(),
+            unison: self.unison.value(),
+            double: if self.doubled.value() {
+                (value(&self.double) / 100.0).max(DOUBLED_AT_NONE)
+            } else {
+                0.0
+            },
+            drive: value(&self.drive),
+            level: value(&self.level),
+            auto_gain: self.auto_gain.value(),
             // The knob's travel through its taper (decisions.md R8).
             feedback: ca72::voice::feedback_law(value(&self.feedback) / 10.0),
             lock: self.lock.value(),
+            potato: self.quality.value() == QualityMode::Lo,
+            ultra: self.quality.value() == QualityMode::Ultra,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The host reads DOUBLE's amount as the strip does, DETUNE in cents (Off at none), and
+    /// takes it back so; SPREAD's is the strip's WIDTH. Their ids are as they were (the
+    /// CA-74's test).
+    #[test]
+    fn double_reads_in_cents_and_spread_is_width() {
+        let p = Ca72Params::default();
+        let d = &p.double;
+        let at = |percent: f32| d.normalized_value_to_string(d.preview_normalized(percent), true);
+        assert_eq!(at(0.0), "Off");
+        assert_eq!(at(60.0), "60 cents");
+        assert_eq!(at(7.2), "7.2 cents");
+        let back = |s: &str| {
+            d.string_to_normalized_value(s)
+                .map(|n| (d.preview_plain(n) * 1000.0).round() / 1000.0)
+        };
+        assert_eq!(back("60 cents"), Some(60.0));
+        assert_eq!(back("60 \u{a2}"), Some(60.0));
+        assert_eq!(back("7.2"), Some(7.2));
+        assert_eq!(back("off"), Some(0.0));
+        assert_eq!(back("140"), Some(100.0), "past 100 cents: the most");
+        assert_eq!((d.name(), p.spread.name()), ("Double Detune", "Width"));
+        assert_eq!(p.inner.name(), "Inner");
+        let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
+        assert!(ids.iter().any(|i| i == "double") && ids.iter().any(|i| i == "spread"));
+        assert!(ids.iter().any(|i| i == "inner"));
+    }
+
+    /// The host reads FREQUENCY in semitones from the centre (cents under one) and takes them
+    /// back so, the value the pot's position as every version saved it (decisions.md
+    /// R54): 0.1.x's +5 is its pot five sixths along, +5.52 semitones on oscillator 2.
+    #[test]
+    fn frequency_reads_in_semitones_and_keeps_the_pot() {
+        let p = Ca72Params::default();
+        let f = &p.osc2_frequency;
+        let shown = |plain: f32| f.normalized_value_to_string(f.preview_normalized(plain), true);
+        assert_eq!(shown(0.0), "0 semitones");
+        assert_eq!(shown(5.0), "+5.52 semitones");
+        assert_eq!(shown(-7.5), "-8.56 semitones");
+        assert_eq!(shown(0.026), "+2.9 cents");
+        let back = |s: &str| {
+            let n = f.string_to_normalized_value(s)?;
+            Some(Pot::Two.semitones(wiper_of(f.preview_plain(n))))
+        };
+        let near = |got: Option<f64>, want: f64| got.is_some_and(|g| (g - want).abs() < 1e-4);
+        assert!(near(back("7"), 7.0));
+        assert!(near(back("+7.00 semitones"), 7.0));
+        assert!(near(back("-5 st"), -5.0));
+        assert!(near(back("+3.4 cents"), 0.034));
+        assert!(near(back("12c"), 0.12));
+        assert!(
+            near(back("20"), Pot::Two.semitones(1.0)),
+            "beyond the pot: its end"
+        );
+        assert_eq!(back("up"), None);
+        // The engine takes the pot's position as the value has it, whatever the law.
+        let c = p.controls();
+        assert_eq!(c.panel.osc[1].freq, 0.5);
+        assert_eq!(
+            (p.freq_law(), Law::default()),
+            (Law::Semitones, Law::Semitones)
+        );
+        p.set_freq_law(Law::Hardware);
+        assert_eq!(p.freq_law(), Law::Hardware);
+    }
+
+    /// SCATTER's placement offers two choices, EVEN (the default) and CENTER, the strip's tabs
+    /// in their order, their ids as they were; each the kit's placement of its name, never its
+    /// EDGES (decisions.md R49). The host steps between the two.
+    #[test]
+    fn the_placement_offers_even_and_center() {
+        let p = Ca72Params::default();
+        assert_eq!(Scatter::variants(), ["EVEN", "CENTER"]);
+        assert_eq!(Scatter::ids(), Some(&["even", "centre"][..]));
+        assert_eq!(
+            ca72_panel::strip::Bank::Placement.words(),
+            Scatter::variants()
+        );
+        assert_eq!(Placement::from(Scatter::Even), Placement::Even);
+        assert_eq!(Placement::from(Scatter::Centre), Placement::Centre);
+        let q = &p.placement;
+        assert_eq!((q.name(), q.value()), ("Scatter Placement", Scatter::Even));
+        assert_eq!(q.step_count(), Some(1));
+        let shown = |n: f32| q.normalized_value_to_string(n, false);
+        assert_eq!((shown(0.0), shown(1.0)), ("EVEN".into(), "CENTER".into()));
+        assert_eq!(p.controls().placement, Placement::Even);
     }
 }

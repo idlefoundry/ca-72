@@ -1,0 +1,8 @@
+Use your image generation tool to make one image, then save it in the current directory as nat-cycle.png (copy the generated file there). Do nothing else.
+
+The image: a sprite sheet of one animated character's running cycle, for an animation. Wide landscape image, as large as you can make it.
+- The character: a golden Syrian hamster drawn as in naturalistic 1970s hand-painted animation made for grown-ups: true-to-life anatomy and proportions (a real hamster's body, small dark eyes, a real face), drawn with a loose, slightly rough dark brown ink line and painted in muted, earthy gouache tones of golden brown, ochre and cream with simple painted shading; lively and characterful but NOT cute: not a mascot, no big eyes, no smile, no human expression; clearly a drawing, not a photograph.
+- Eight frames in a single row, evenly spaced, each frame the same size, nothing touching, every frame exactly the same character at exactly the same size and in exactly the same colours and line.
+- Seen exactly from the side, facing right, running fast on the spot (as on a treadmill): the eight frames are the successive positions of one gallop stride, the legs and the body's stretch changing from frame to frame so that played in order they loop smoothly; its head stays at the same height and place in every frame, its feet on one ground line.
+- On a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
+- No text, symbols, logos, numbers, labels or frame borders anywhere.

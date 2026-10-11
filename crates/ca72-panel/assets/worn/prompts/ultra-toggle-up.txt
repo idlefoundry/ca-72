@@ -1,0 +1,6 @@
+Use your image generation tool to edit the attached image (toggle-bare.png, in the current directory) into one new image, then save it in the current directory as toggle-up.png (copy the generated file there). Do nothing else.
+
+The attached image is a three-position chrome bat-handle toggle switch, seen from straight in front, its lever in the middle position (pointing straight at the camera). The edit: the same switch with its lever thrown UP: the lever tilted about 30 degrees upwards from straight out, so that its slim tapered length now shows, running up from the bushing, its rounded tip above the nut, about one nut's width beyond its edge.
+- Identical in every other way: the same framing, size and position (the nut, washer and bushing exactly where they are now), the same polished chrome, the same plain flat mid-grey (#808080) background with no shadow on it, the same soft light from up and to the left.
+- No text, symbols, logos or numbers anywhere.
+Keep the image the same size as the attached one.

@@ -1,0 +1,24 @@
+* FILTER MODE: the hardware reference's switch, which the original does not have
+* (decisions.md R46; calibration session HP, 2026-10-09). HI is the mixer's output less
+* the filter's: the bus's Norton current (what its switched-on channels would push into a
+* virtual ground) through a transimpedance equal to the filter's own passband at EMPHASIS
+* 0, and a coupling of 3 Hz, less the filter's output. Drawn behaviourally: the reference's
+* circuit is not known, only its transfer (HI = V - 1.002 LO against its MIX output, V flat
+* within 0.25 dB; the coupling set so that V leads LO below 100 Hz as the reference's does:
+* ca72::vcf::MODE_HZ). The filter's output is taken from its rest (a 10 s average), as the
+* real-time model takes it.
+*
+* Ports:
+*   isn   a node whose voltage is the bus's Norton current, 1 V an ampere
+*   out   the filter's output (mm_vcf's out)
+*   hi    HI, for the VCA's input in place of out
+* Parameters: rt (the transimpedance, ohms: ca72::vcf::MODE_RT), fc (the coupling, Hz:
+* ca72::vcf::MODE_HZ).
+.subckt mm_fmode isn out hi params: rt=1 fc=3
+bdir d 0 v = {rt} * v(isn)
+cm   d m {1 / (6.283185307179586 * fc * 100k)}
+rm   m 0 100k
+rr   out rest 1meg
+cr   rest 0 10u
+bhi  hi 0 v = v(m) - (v(out) - v(rest))
+.ends mm_fmode

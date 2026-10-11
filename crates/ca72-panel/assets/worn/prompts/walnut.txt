@@ -1,0 +1,7 @@
+Use your image generation tool to make one image, then save it in the current directory as walnut.png (copy the generated file there). Do nothing else.
+
+The image: a straight-on, orthographic, evenly lit close photograph of a long plank of solid black walnut, as used for the wooden case of a 1970s analogue synthesizer, filling the whole frame edge to edge. Landscape, as large as you can make it.
+- The wood: American black walnut, rich chocolate brown with lighter honey-brown streaks, straight grain running horizontally across the frame with gentle long waves, fine open pores, a hand-rubbed oil finish with a soft satin sheen.
+- Cared for but decades old: smooth and intact, only the faintest signs of handling; no dents, no chips, no stains.
+- No knots, no cracks, no screws, no edges, no joins, no text or marks of any kind.
+- Soft diffuse light from the upper left, no strong reflections, no vignetting, no perspective, sharp focus everywhere.
