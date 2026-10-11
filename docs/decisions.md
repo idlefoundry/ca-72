@@ -4741,3 +4741,11 @@ the same tree), the records since numbered R50 to R60 the same way, a private de
 record (the name and folders of a set of the owner's) edited out, and the README's picture of
 the panel (`docs/panel.png`) drawn again as the window opens (`the_window_png`), now with NOTE
 PRIORITY, RETRIGGER and the settings key.
+
+**Afterwards (2026-10-11), from porting change 5 into plugin-kit (the kit's K9):** an independent
+review there found baseview's count of held buttons read before the press's new `CursorMoved`
+call and written after it, so a press or release let through by a modal loop run from the
+handler would be lost. The count is now read after the call (baseview's `PATCHES.md`, change 5),
+in both copies alike. With it, the seven Windows window tests passed in the desktop session (an
+export of this main with the kit's baseview over its own), the press test failed without change
+5, and clippy over the workspace passed on Windows.
