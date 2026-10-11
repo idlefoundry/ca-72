@@ -260,10 +260,18 @@ impl StripRenderer {
         under: &Pixmap,
         changed: Option<[i32; 4]>,
     ) -> bool {
-        self.render_at(scene, under, changed, Instant::now())
+        // (The drops move on at most [`STEP_S`] apart on this clock, the wall's.)
+        let now = Instant::now();
+        let at = match self.last {
+            Some(t) if now.saturating_duration_since(t).as_secs_f64() < STEP_S => t,
+            _ => now,
+        };
+        self.render_at(scene, under, changed, at)
     }
 
-    /// As [`StripRenderer::render`], the drops eased to `now`.
+    /// As [`StripRenderer::render`], the drops eased to `now`, the caller's clock: they move on
+    /// each time it has moved on (the editor's ticks thirty times a second with QUALITY's
+    /// opening, on baseview's 15 ms frames 30 or 45 ms apart).
     pub fn render_at(
         &mut self,
         scene: &StripScene,
@@ -271,12 +279,12 @@ impl StripRenderer {
         changed: Option<[i32; 4]>,
         now: Instant,
     ) -> bool {
-        // (The drops move on at most [`STEP_S`] apart: they follow the voices, and are drawn
-        // no oftener than the rest that does.)
+        // (The drops move on as the clock does: they follow the voices, and are drawn no
+        // oftener than the rest that does.)
         let dt = self
             .last
             .map_or(0.0, |t| now.saturating_duration_since(t).as_secs_f64());
-        let moved = if self.last.is_none() || dt >= STEP_S {
+        let moved = if self.last.is_none() || dt > 0.0 {
             self.last = Some(now);
             self.liquid.step(scene, dt.min(0.1)).0
         } else {
@@ -1465,6 +1473,41 @@ mod tests {
     use resvg::tiny_skia::{Color, Paint, Rect};
 
     use super::*;
+
+    /// The drops move on each time the caller's clock does, 30 ms apart as well as 45 (the
+    /// editor's ticks on baseview's 15 ms frames: at a thirtieth of a second at the least they
+    /// had missed the 30 ms ones); not when it has not moved; and on the wall's clock, through
+    /// `render`, at most thirty times a second.
+    #[test]
+    fn the_drops_move_on_each_tick_of_the_clock_they_are_given() {
+        let scale = 0.2;
+        let (w, h) = crate::render::size_at(scale);
+        let under = Pixmap::new(w, h).expect("a frame");
+        let mut r = StripRenderer::new(scale);
+        let mut sc = scene(0b1111);
+        let t0 = Instant::now();
+        r.render_at(&sc, &under, None, t0);
+        let mut at = t0;
+        for (k, gap) in [30u64, 45, 30, 30, 45].into_iter().enumerate() {
+            at += Duration::from_millis(gap);
+            sc.levels = (0..4).map(|i| 0.2 + 0.15 * ((k + i) % 4) as f64).collect();
+            r.render_at(&sc, &under, None, at);
+            assert!(r.moved, "tick {k} ({gap} ms) not moved on");
+        }
+        r.render_at(&sc, &under, None, at);
+        assert!(!r.moved, "moved on with the clock still");
+        // The wall's clock: twice at once (its first frame, which makes its still parts, apart),
+        // the second not moved on.
+        let mut q = StripRenderer::new(0.1);
+        let small = Pixmap::new(crate::render::size_at(0.1).0, crate::render::size_at(0.1).1)
+            .expect("a frame");
+        q.render(&sc, &small, None);
+        std::thread::sleep(Duration::from_millis(40));
+        q.render(&sc, &small, None);
+        sc.levels = vec![0.9; 4];
+        q.render(&sc, &small, None);
+        assert!(!q.moved, "moved on twice within a thirtieth of a second");
+    }
 
     /// What drawing the drops costs at the window's opening size and twice it (a Retina
     /// screen), ten voices sounding and moving: printed (`-- --ignored --nocapture`).

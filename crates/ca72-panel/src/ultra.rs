@@ -259,7 +259,7 @@ pub fn ultra_worn(o: &Opening) -> [Layer; 2] {
         }
         let k = l.glow * o.level;
         if k > 0.0 {
-            spill(&mut over, lamp.light().0, k);
+            spill(&mut over, "u-spill", lamp.light().0, k);
         }
     }
     [
@@ -347,12 +347,12 @@ fn flare(s: &mut Svg, lamp: Lamp, sc: f64, k: f64) {
 /// A lamp's light spreading onto the panel round it, `k` (0 to 1) of its most, at the synth's
 /// loudest (the owner: "just add a warm glow to it"): from the ring out, the lamp itself clear
 /// of it (its lens lit by its own light).
-fn spill(s: &mut Svg, colour: &str, k: f64) {
+fn spill(s: &mut Svg, id: &str, colour: &str, k: f64) {
     let r = BOUNDS[2] - 2.0;
     let from = APERTURE + RING;
     put!(
         s,
-        "<defs><radialGradient id='u-spill' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='{}'><stop offset='{}' stop-color='{colour}' stop-opacity='0'/><stop offset='{}' stop-color='{colour}' stop-opacity='{}'/><stop offset='1' stop-color='{colour}' stop-opacity='0'/></radialGradient></defs><circle r='{}' fill='url(#u-spill)'/>",
+        "<defs><radialGradient id='{id}' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='{}'><stop offset='{}' stop-color='{colour}' stop-opacity='0'/><stop offset='{}' stop-color='{colour}' stop-opacity='{}'/><stop offset='1' stop-color='{colour}' stop-opacity='0'/></radialGradient></defs><circle r='{}' fill='url(#{id})'/>",
         N(r),
         N((from - 0.5) / r),
         N(from / r),
@@ -645,7 +645,10 @@ fn streaks(s: &mut Svg, sc: f64, t: f64, power: f64) {
     );
     // The lamp's light round it flickering with them.
     let flash = drawn.iter().map(|d| d.3).sum::<f64>() / f64::from(SLOTS);
-    spill(s, Lamp::Tesla.light().0, 0.5 * flash);
+    // (A gradient of its own: one element of an id is kept in a document, so with the steady
+    // spill's id the panel's glow was painted twice at its full strength, on and off with the
+    // streaks, rather than the steady glow and half a flash: the CA-74's review.)
+    spill(s, "u-spill-flash", Lamp::Tesla.light().0, 0.5 * flash);
 }
 
 // ---- The opening.
@@ -982,6 +985,50 @@ mod tests {
         });
         assert_eq!(quieter[0], back);
         assert_ne!(quieter[1], open);
+    }
+
+    /// No layer of the opening repeats an id (one element of an id is kept in a document: the
+    /// Tesla lamp's flash spill had reused the steady spill's, the glow painted twice and
+    /// flickering: the CA-74's review), in any setting, lit and sparking or not; and the Tesla
+    /// lamp sparking has its steady spill and its flash's.
+    #[test]
+    fn no_layer_of_the_opening_repeats_an_id() {
+        let ids = |doc: &str| -> Vec<String> {
+            doc.split("id='")
+                .skip(1)
+                .filter_map(|r| r.split('\'').next().map(str::to_owned))
+                .collect()
+        };
+        let mut sparking = false;
+        for (hamster, lamp, coil) in [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)] {
+            for level in [0.0, 0.5, 1.0] {
+                for spark in [0.0, 0.37, 1.9] {
+                    let o = Opening {
+                        hamster,
+                        lamp,
+                        coil,
+                        level,
+                        run: level,
+                        spark,
+                        ..Opening::default()
+                    };
+                    for l in ultra_worn(&o) {
+                        for doc in [&l.body, &l.over] {
+                            let mut seen = ids(doc);
+                            let n = seen.len();
+                            seen.sort();
+                            seen.dedup();
+                            assert_eq!(seen.len(), n, "a repeated id: {:?}", ids(doc));
+                        }
+                        if l.over.contains("u-spill-flash") {
+                            assert!(l.over.contains("id='u-spill'"));
+                            sparking = true;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(sparking, "the Tesla lamp never sparked here");
     }
 
     /// The lamps follow the synth: dim at rest, full at its loudest, the filament flaring and

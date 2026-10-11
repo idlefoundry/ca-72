@@ -82,6 +82,10 @@ pub struct Renderer {
     /// The pixels the last render changed: left, top, right, bottom (the last two past the
     /// change).
     damage: Option<[i32; 4]>,
+    /// The same, as the separate places it is in (a few, those that overlap or nearly merged):
+    /// each put together again on its own (the CA-74's review: one rectangle round all of them
+    /// put most of the panel together again for QUALITY's opening and a lamp at once).
+    damages: Vec<[i32; 4]>,
     skin: Skin,
     /// The worn skin's pictures, once it has been shown.
     pictures: Option<Pictures>,
@@ -136,6 +140,7 @@ impl Renderer {
             slots: Vec::new(),
             shown: None,
             damage: None,
+            damages: Vec::new(),
             skin,
             pictures: None,
         };
@@ -456,6 +461,7 @@ impl Renderer {
     /// the frame changed.
     pub fn render(&mut self, scene: &Scene) -> bool {
         self.damage = None;
+        self.damages.clear();
         if self.shown.as_ref() == Some(scene) {
             return false;
         }
@@ -464,18 +470,10 @@ impl Renderer {
         let layers = self.layers(scene);
         let mut changed = self.slots.len() != layers.len();
         // Where the layers changed, as they were and as they are.
-        let mut damage: Option<[i32; 4]> = None;
+        let mut rects: Vec<[i32; 4]> = Vec::new();
         let mut add = |pixels: &Option<(i32, i32, Pixmap)>| {
             if let Some((x, y, p)) = pixels {
-                let r = [*x, *y, x + p.width() as i32, y + p.height() as i32];
-                damage = Some(damage.map_or(r, |d| {
-                    [
-                        d[0].min(r[0]),
-                        d[1].min(r[1]),
-                        d[2].max(r[2]),
-                        d[3].max(r[3]),
-                    ]
-                }));
+                rects.push([*x, *y, x + p.width() as i32, y + p.height() as i32]);
             }
         };
         for slot in self.slots.iter().skip(layers.len()) {
@@ -492,13 +490,16 @@ impl Renderer {
             self.slots[i].layer = Some(layer);
             changed = true;
         }
-        self.damage = if first {
-            Some([0, 0, self.frame.width() as i32, self.frame.height() as i32])
+        self.damages = if first {
+            vec![[0, 0, self.frame.width() as i32, self.frame.height() as i32]]
         } else {
-            damage
+            merged(rects)
         };
-        if changed && let Some(d) = self.damage {
-            self.recompose(d);
+        self.damage = self.damages.iter().copied().reduce(union);
+        if changed {
+            for d in self.damages.clone() {
+                self.recompose(d);
+            }
         }
         changed
     }
@@ -566,6 +567,11 @@ impl Renderer {
         self.damage
     }
 
+    /// The same, as the separate places it is in, each put together again on its own.
+    pub fn damages(&self) -> &[[i32; 4]] {
+        &self.damages
+    }
+
     /// The layers that float over everything (MIDI Learn's ring, the tip, the note, a menu)
     /// drawn again over `onto`, a frame the drawing's size at this scale: the editor's, over the
     /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
@@ -591,6 +597,46 @@ impl Renderer {
     pub fn floating(&self) -> bool {
         self.slots.len() > CONTROLS.len() + FIXED
     }
+}
+
+/// The smallest rectangle round two (left, top, right, bottom).
+fn union(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
+    [
+        a[0].min(b[0]),
+        a[1].min(b[1]),
+        a[2].max(b[2]),
+        a[3].max(b[3]),
+    ]
+}
+
+/// How near two places changed may be, pixels, to be put together again as one.
+const NEAR: i32 = 8;
+
+/// The most places put together again apart; beyond them, one round all.
+const MOST_PLACES: usize = 8;
+
+/// Places changed, those that overlap or come within [`NEAR`] of each other merged (again until
+/// none do), at most [`MOST_PLACES`] of them.
+fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
+    let near = |a: [i32; 4], b: [i32; 4]| {
+        a[0] - NEAR < b[2] && b[0] - NEAR < a[2] && a[1] - NEAR < b[3] && b[1] - NEAR < a[3]
+    };
+    'again: loop {
+        for i in 0..rects.len() {
+            for j in i + 1..rects.len() {
+                if near(rects[i], rects[j]) {
+                    rects[i] = union(rects[i], rects[j]);
+                    rects.swap_remove(j);
+                    continue 'again;
+                }
+            }
+        }
+        break;
+    }
+    if rects.len() > MOST_PLACES {
+        rects = rects.into_iter().reduce(union).into_iter().collect();
+    }
+    rects
 }
 
 /// The layers drawn after the controls whatever the scene: POWER, its lamp, OVERLOAD, QUALITY's
@@ -913,6 +959,7 @@ pub(crate) fn rounded_rect(
 mod tests {
     use super::*;
     use crate::controls::index;
+    use crate::ultra::Opening;
 
     /// A frame put together again where it changed is the frame put together whole, to the
     /// bit: through knobs turned above the strip and on it, a switch, a tip coming and going.
@@ -943,6 +990,51 @@ mod tests {
                 "step {i}: not as put together whole"
             );
         }
+    }
+
+    /// QUALITY's opening and a knob far from it changing in one frame are put together again as
+    /// two places, not one round both (the CA-74's review: most of the panel had been put
+    /// together again), and the frame is still the frame put together whole; places that
+    /// overlap are one.
+    #[test]
+    fn places_changed_apart_are_put_together_again_apart() {
+        let s = 0.25;
+        let mut r = Renderer::new(s, 1.0);
+        let mut scene = Scene {
+            values: [0.5; CONTROLS.len()],
+            ..Scene::default()
+        };
+        scene.opening = Opening {
+            lamp: 1.0,
+            level: 0.2,
+            ..Opening::default()
+        };
+        r.render(&scene);
+        scene.opening.level = 0.8;
+        scene.values[index("tune").expect("TUNE")] = 0.9;
+        assert!(r.render(&scene));
+        let places = r.damages().to_vec();
+        assert_eq!(places.len(), 2, "{places:?}");
+        let area = |d: &[i32; 4]| i64::from(d[2] - d[0]) * i64::from(d[3] - d[1]);
+        let apart: i64 = places.iter().map(area).sum();
+        let round = area(&r.damage().expect("changed"));
+        assert!(
+            apart * 8 < round,
+            "{apart} pixels apart against {round} round both"
+        );
+        let mut whole = Renderer::new(s, 1.0);
+        whole.render(&scene);
+        assert!(r.frame() == whole.frame(), "not as put together whole");
+        assert_eq!(
+            merged(vec![[0, 0, 10, 10], [5, 5, 20, 20], [100, 0, 110, 10]]),
+            vec![[0, 0, 20, 20], [100, 0, 110, 10]]
+        );
+        assert_eq!(
+            merged(vec![[0, 0, 10, 10], [14, 0, 20, 10]]),
+            vec![[0, 0, 20, 10]]
+        );
+        let many: Vec<_> = (0..12).map(|k| [k * 100, 0, k * 100 + 10, 10]).collect();
+        assert_eq!(merged(many), vec![[0, 0, 1110, 10]]);
     }
 
     /// The renderer says where its frame changed: a knob turned on the panel above the strip

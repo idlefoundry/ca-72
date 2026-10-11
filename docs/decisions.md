@@ -4404,3 +4404,53 @@ owner: "I don't have logic. What about garage band? And ya, fix bitwig."
   clicked, so the floating-window first click does not arise there.
 - GarageBand's own project left by another session (ca74-au-test, which wants a CA-74 Audio Unit
   not installed) was opened by GarageBand at launch and closed without saving.
+
+## R-REVIEW. Four faults the CA-74's review of its ports found in the CA-72's code
+
+**The owner, 2026-10-11,** through the CA-74's lead (its brief, `~/Code/ca-74/.lead/for-ca72.md`):
+four faults that independent reviews of the CA-74's ports of the CA-72's opening, settings file and
+frames drawn in part traced to the CA-72's code, each confirmed in its main at 08c6657; then, told
+of them: "yes" (fix them).
+
+**Agent decisions, 2026-10-11** (as the brief proposed, adapted where noted):
+- **QUALITY's opening ran at about 22 frames a second, not 30.** `move_opening` moved on only when
+  a thirtieth of a second had passed since it last had; baseview's frames come every 15 ms on all
+  three systems, so it moved every third frame, 45 ms apart. It now keeps a due time, a thirtieth
+  on from the last due time and never before the present (the brief's "never more than a
+  thirtieth behind" let a stall bring a burst of ticks 15 ms apart; this moves once after a stall
+  and once more at the next frame at most), and moves on by the time since it last moved, at most
+  50 ms (`motion_due`). The strip's drops share its clock and had themselves waited a thirtieth
+  between steps, so they would have missed the 30 ms ticks: on the editor's clock they now move
+  on whenever it has (`StripRenderer::render_at`); on the wall's (`render`), at most thirty times a
+  second as before. The opening's drawing now runs as often as it was meant to: its cost is that
+  much higher (the CA-74 measured about 35 %; not measured here).
+- **The Tesla lamp's glow was painted twice and flickered.** The streaks' flash wrote a second
+  gradient with the steady spill's id into the same layer, and one element of an id is kept, so
+  with a streak drawn the glow was the steady one twice, switching with the streaks. The flash
+  has its own id (`u-spill-flash`).
+- **One editor's settings write undid another's.** Each wrote the whole of what it had read as it
+  opened, so an editor marking ULTRA's note read wrote back an indicator another had hidden, and
+  could show the note again after another had read it; and every write used one temporary name,
+  which two processes could rename into place torn. Now each change writes only its key, under a
+  lock every instance takes (`settings.toml.lock`, the standard library's file lock), the file read
+  again first (`Settings::keep`, `Change`); the note is checked in the file before it is shown; and
+  every write in the library's folder has a temporary name of its own (the process's id and a
+  count), removed if the rename fails.
+- **The panel's damage was one rectangle round every change,** so QUALITY's opening at the top
+  right and a lamp, a wheel, a tip or an automated knob in the same frame put most of the panel
+  together again. It is now a short list, places that overlap or come within 8 pixels merged, at
+  most eight (beyond, one round all), each put together again on its own (`Renderer::damages`);
+  `damage()` still gives one round all, which the strip and the editor's rows take.
+
+**Evidence (the Linux reference machine, 2026-10-11):**
+`the_opening_moves_thirty_times_a_second_on_baseviews_frames` (90 moves in 3 s of 15 ms frames, it
+had been 66; one move after a half-second stall and at most one more within 30 ms),
+`the_drops_move_on_each_tick_of_the_clock_they_are_given`, `no_layer_of_the_opening_repeats_an_id`
+(every setting, lit and sparking or not: it fails with the flash's old id),
+`one_editors_change_does_not_undo_anothers` (two editors' stale copies; four threads keeping a key
+each 25 times at once: all land, never torn, no temporary file left),
+`ultra_s_note_read_elsewhere_is_not_shown_again`,
+`places_changed_apart_are_put_together_again_apart` (the opening and TUNE in one frame: two places,
+under an eighth of the area round both, the frame as put together whole). The core's, panel's and
+plug-in's tests, 339 passed, 43 ignored; rustfmt; clippy with `-D warnings`. Not measured: the
+editor's cost at baseview's own frame rate.

@@ -874,9 +874,17 @@ pub(crate) fn write(file: &Path, t: &toml::Table) -> Result<(), String> {
     if let Some(d) = file.parent() {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
-    let tmp = file.with_extension("toml.tmp");
+    // A temporary name of its own for each write, this process's and its count: with one name
+    // for all, two processes (two hosts, or a host's own plug-in processes) could rename a
+    // file the other was still writing into place (the CA-74's review).
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = file.with_extension(format!("toml.{}-{n}.tmp", std::process::id()));
     std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, file).map_err(|e| format!("{}: {e}", file.display()))
+    std::fs::rename(&tmp, file).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{}: {e}", file.display())
+    })
 }
 
 #[cfg(test)]

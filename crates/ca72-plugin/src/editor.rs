@@ -42,7 +42,7 @@ use crate::library::Library;
 use crate::opening::{ANIMATE_S, Motion, level_of};
 use crate::params::{Ca72Params, QualityMode, Scatter};
 use crate::presets::Browser;
-use crate::settings::Settings;
+use crate::settings::{Change, Settings};
 use crate::update::Update;
 
 /// The share of the usable screen the editor opens at until it is resized.
@@ -711,11 +711,19 @@ struct Editing {
     /// (the one instrument's drop's, and the lamps').
     motion: Motion,
     motion_at: Option<Instant>,
+    /// When the opening is next due to move on: a thirtieth of a second after the last time it
+    /// was due, not after it last moved, so that baseview's 15 ms frames (which reach a
+    /// thirtieth only every third) still move it thirty times a second on average, not 22; and
+    /// never due before the present (after a stalled frame it moves once, and once more at the
+    /// next frame at most, not in a burst).
+    motion_due: Option<Instant>,
     levels: [f64; LEVELS],
     output: f64,
     /// What this computer keeps (`settings.rs`): ULTRA's shutter or always open, ULTRA's
     /// note read. The note shows once ULTRA's lamp is lit, until it is read.
     settings: Settings,
+    /// Where they are kept (none in the tests' editors, which keep nothing on the computer).
+    settings_file: Option<std::path::PathBuf>,
     ultra_note: bool,
     /// A value being typed into a readout (decisions.md R-TYPED): which, and what so far; the
     /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
@@ -902,9 +910,11 @@ impl Editing {
             reveal_shown: 0.0,
             motion: Motion::default(),
             motion_at: None,
+            motion_due: None,
             levels: [0.0; LEVELS],
             output: 0.0,
             settings,
+            settings_file: (!cfg!(test)).then(crate::settings::file),
             ultra_note: false,
             typing: None,
             typing_keys: false,
@@ -927,8 +937,7 @@ impl Editing {
     /// The editor drawn in `skin` from now on, on this computer (decisions.md R-SKIN): its
     /// panel's renderer made again in it (its pictures decoded as it first draws).
     fn set_look(&mut self, skin: Skin) {
-        self.settings.skin = skin;
-        self.keep_settings();
+        self.keep_settings(Change::Skin(skin));
         if self.renderer.skin() != skin {
             self.renderer = Renderer::with_skin(skin, self.renderer.scale(), self.dpr);
             self.composed = None;
@@ -938,15 +947,17 @@ impl Editing {
     /// The FREQUENCY knobs read through `law` from now on, on this computer (decisions.md
     /// R-SEMITONES): each points where its pot is through it, the sound as it was.
     fn set_frequency_dials(&mut self, law: Law) {
-        self.settings.frequency = law;
-        self.keep_settings();
+        self.keep_settings(Change::Frequency(law));
         self.params.set_freq_law(law);
     }
 
-    /// This computer's settings kept (not by the tests' editors).
-    fn keep_settings(&self) {
-        if !cfg!(test) {
-            let _ = self.settings.save();
+    /// `change` made to this computer's settings: this editor's copy, and that key alone in the
+    /// file (not by the tests' editors), so that another editor's changes since this one opened
+    /// stay as they are.
+    fn keep_settings(&mut self, change: Change) {
+        self.settings.apply(change);
+        if let Some(path) = &self.settings_file {
+            let _ = Settings::keep(path, change);
         }
     }
 
@@ -955,12 +966,17 @@ impl Editing {
     /// taken: at most [`ANIMATE_S`] apart (thirty times a second, whatever the screen's rate).
     /// ULTRA's note shown once its lamp is up, until it is read.
     fn move_opening(&mut self, now: Instant, q: QualityMode) {
+        if self.motion_due.is_some_and(|due| now < due) {
+            return;
+        }
+        let tick = Duration::from_secs_f64(ANIMATE_S);
+        self.motion_due = Some(match self.motion_due {
+            Some(due) => (due + tick).max(now),
+            None => now + tick,
+        });
         let since = self
             .motion_at
             .map(|t| now.saturating_duration_since(t).as_secs_f64());
-        if since.is_some_and(|s| s < ANIMATE_S) {
-            return;
-        }
         let (peaks, output) = self.meters.take_levels();
         self.levels = peaks.map(level_of);
         self.output = level_of(output);
@@ -974,8 +990,17 @@ impl Editing {
         }
         self.motion_at = Some(now);
         let on = q == QualityMode::Ultra;
-        if on && self.motion.coil == 1.0 && !self.settings.ultra_note_read {
-            self.ultra_note = true;
+        if on && self.motion.coil == 1.0 && !self.settings.ultra_note_read && !self.ultra_note {
+            // (Read in another editor since this one opened: not shown again, once a computer.)
+            let read = self
+                .settings_file
+                .as_ref()
+                .is_some_and(|p| Settings::read(p).ultra_note_read);
+            if read {
+                self.settings.apply(Change::NoteRead);
+            } else {
+                self.ultra_note = true;
+            }
         }
         if !on {
             self.ultra_note = false;
@@ -1362,8 +1387,7 @@ impl Editing {
         // ULTRA's note showing: the press closes it, read.
         if self.ultra_note {
             self.ultra_note = false;
-            self.settings.ultra_note_read = true;
-            self.keep_settings();
+            self.keep_settings(Change::NoteRead);
             return;
         }
         // A control's menu open: the press is its own (an item, or closing it).
@@ -1374,8 +1398,7 @@ impl Editing {
             Pressed::Nothing => {}
             Pressed::Done => return,
             Pressed::Indicator(shown) => {
-                self.settings.shutter = shown;
-                self.keep_settings();
+                self.keep_settings(Change::Shutter(shown));
                 return;
             }
             Pressed::Dials(law) => {
@@ -3758,6 +3781,57 @@ mod tests {
         e.settings.shutter = true;
         frames(&mut e, t1 + Duration::from_secs(1), 1, QualityMode::Lo);
         assert!(!e.scene.opening.hidden && e.scene.opening.hamster == 1.0);
+    }
+
+    /// ULTRA's note shows once a computer: read in another editor since this one opened (a
+    /// second instance, another host), it is not shown here as the lamp comes up, and this
+    /// editor's own change to another setting writes that key alone (the CA-74's review).
+    #[test]
+    fn ultra_s_note_read_elsewhere_is_not_shown_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("CA-72").join("settings.toml");
+        let (mut e, _, _) = editing();
+        e.settings_file = Some(path.clone());
+        // The other editor reads the note and hides nothing; this one then turns its
+        // indicator... on (as it was): the note stays read in the file.
+        Settings::keep(&path, Change::NoteRead).unwrap();
+        e.keep_settings(Change::Shutter(true));
+        assert!(Settings::read(&path).ultra_note_read);
+        let t0 = Instant::now();
+        for k in 0..150u64 {
+            e.move_opening(t0 + Duration::from_millis(40 * k), QualityMode::Ultra);
+        }
+        assert_eq!(e.motion.coil, 1.0);
+        assert!(!e.ultra_note && e.settings.ultra_note_read);
+    }
+
+    /// What follows the synth moves thirty times a second at baseview's own frame rate, a frame
+    /// every 15 ms (macOS, Windows and X11 alike), which reaches a thirtieth of a second only
+    /// every third frame: about 90 moves in three seconds (it had been 66, 22 a second: the CA-74's
+    /// review); a stalled frame moves it once and the next on time, not in a burst.
+    #[test]
+    fn the_opening_moves_thirty_times_a_second_on_baseviews_frames() {
+        let (mut e, _, _) = editing();
+        let t0 = Instant::now();
+        let mut moved = 0;
+        for k in 0..200u64 {
+            let was = e.motion_at;
+            e.move_opening(t0 + Duration::from_millis(15 * k), QualityMode::Hi);
+            moved += u32::from(e.motion_at != was);
+        }
+        assert!((89..=91).contains(&moved), "{moved} moves in 3 s");
+        // A half-second stall: one move then, the next a thirtieth later or so.
+        let late = t0 + Duration::from_millis(3500);
+        let was = e.motion_at;
+        e.move_opening(late, QualityMode::Hi);
+        assert_ne!(e.motion_at, was);
+        let mut burst = 0;
+        for k in 1..=2u64 {
+            let was = e.motion_at;
+            e.move_opening(late + Duration::from_millis(15 * k), QualityMode::Hi);
+            burst += u32::from(e.motion_at != was);
+        }
+        assert!(burst <= 1, "{burst} moves within 30 ms of a stall");
     }
 
     /// What follows the synth is drawn at most thirty times a second: frames a sixtieth of a
