@@ -9,9 +9,9 @@ was transcribed from the instrument's service documents into SPICE netlists and 
 in ngspice. The real-time models were then derived from those simulations and tested
 against them, the factory calibration procedures included.
 
-[![The CA-72 on YouTube: watch and hear it](docs/video.jpg)](https://youtu.be/QLfwGqYg4wU)
+[![The CA-72 on YouTube: watch and hear it](docs/video.jpg)](https://youtu.be/Ekep7V5lWqA)
 
-Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU).
+Hear it before you download: [the CA-72 on YouTube](https://youtu.be/Ekep7V5lWqA).
 
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
