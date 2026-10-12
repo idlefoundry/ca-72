@@ -5068,6 +5068,35 @@ additions' defaults), and `a_session_of_0_1_opens_translated_and_one_of_0_2_as_s
   and back, minimised and restored, the same to the pixel.
 - **The Mac:** the 0.2.0 release candidate signed, notarised and installed (R65); `target/debug`
   of the main checkout cleaned (10.4 GB) and the owner's Trash emptied, so that the tests have
-  room. The rest follows below.
+  room.
 - **Branches** (the owner: "Yes, delete them"): the fourteen merged into main deleted from the
   Mac's repository, and the CAL build's worktree removed; GitHub's three when main reaches it.
+
+**The final round, on main 026dfea (R66 in), 2026-10-11:**
+- **Linux:** the CI by hand as above, every step passed: 410 tests, none failed (ngspice required,
+  none skipped); clippy with every feature, no warning; the validators as before; the pack, its
+  24 files with LEVEL -0.5 and the 16 knobs written out, the retired file's names and values,
+  read into a fresh library as 43 presets. REAPER 7.79 (VST3), started with the shared folder
+  in the test's own place: the editor whole, a note, the drawer's 19.
+- **Windows:** the CI by hand, every step passed: 415 tests with the window tests in the desktop
+  session, clippy, the installer, the validators (`CMAKE_GENERATOR` as above). REAPER 7.82 (VST3)
+  smoke as on Linux. **0.1's session translated end to end:** 0.1.5 and 026dfea built as one
+  plug-in (the same names and IDs, a test build's); in 0.1.5 EMPHASIS 5, CUTOFF 2, FILTER DECAY
+  6, OSC 1 VOLUME 6 set and the project saved (its state `"version":"0.1.5"`, no LEVEL or
+  DRIVE); opened with 026dfea: 3.67, 1.74, 6.75, 5.82, LEVEL -0.5 dB, DRIVE 0, each
+  `compat::translated`'s value; saved from 026dfea (`"version":"0.2.0"`) and opened again, in
+  the same REAPER and a fresh one, unchanged.
+- **The Mac:** a clean export, universal bundles, the Audio Unit, the unsigned installer, clippy,
+  the standalone; `cargo test --workspace`: 406 passed, 3 failed, R60's three circuit-lab tests
+  with Homebrew's ngspice; `validate.sh` in the desktop session: clap-validator 37 passed,
+  pluginval at strictness 10 SUCCESS, Steinberg's 47, auval not finding the component (R60's
+  registry). GarageBand 10.4.14 (AU) and Bitwig 5.2.7 (CLAP), the owner away: the editor whole,
+  QUALITY's three, CUTOFF dragged, the drawer's 19 and 0.2.0, Horn Bloom chosen, VOICES dimmed
+  and lit, the window reopened the same (Bitwig: the window's corners within 5 of 255).
+- **The release candidate again** (026dfea, R66 in): that export's bundles signed and notarised
+  in a session of the desktop's tmux server, accepted, stapled, `spctl` "Notarized Developer
+  ID"; `CA-72-0.2.0-macOS.pkg` SHA-256
+  f3f1670d82e61f042f781b9040dd21a4f8d43fcfbc926de8174992d160eef0a9, with its logs and the Mac
+  checks' in `~/lab/artifacts/ca-72/0.2.0-rc2/`.
+- **Not done:** auval and pluginval on the Audio Unit on this Mac (its registry), MIDI played in
+  the Mac's hosts (GarageBand takes none from a script), an Intel Mac, Live (the owner's).
