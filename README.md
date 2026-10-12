@@ -231,9 +231,19 @@ Kick, Split Snare, Tight Hat, Loose Hat, Wide Crash, Swarm Riser: one instance a
 Field, eight POLY voices drifting with ENTROPY, and White Lotus, a held bass whose filter
 rings an octave and a fifth above each note.
 
+**Projects saved with 0.1.** From 0.2.0 the circuit is calibrated against a hardware
+instrument ([docs/decisions.md](docs/decisions.md) R42), which changed the laws of a dozen
+knobs (the mixer's VOLUMEs, EXTERNAL INPUT VOLUME, CUTOFF, EMPHASIS, AMOUNT OF CONTOUR, the
+ATTACK, DECAY and SUSTAIN knobs, GLIDE and the MODULATION wheel). A project saved with 0.1
+opens with those knobs moved to where they set what they set in 0.1, and LEVEL at -0.5 dB,
+so that it plays as near to how it sounded as the knobs allow (R66). What the calibration
+changed in the circuit's own parts is not undone: 0.1.5's presets so translated come within
+a decibel of their 0.1.5 level for nineteen of twenty-four, and up to 3.7 dB from it for a
+FEEDBACK patch. Presets you saved yourself with 0.1 are not translated (their files do not say
+which version made them).
+
 **The 0.1 presets.** 0.2.0 has a new set, and 0.1's twenty-four presets are no longer built
-in. A project you saved with 0.1 does not need them: it keeps every setting itself and
-sounds as it did. To choose them again, each release from 0.2.0 has
+in. A project you saved with 0.1 does not need them: it keeps every setting itself. To choose them again, each release from 0.2.0 has
 `CA-72-<version>-0.1-presets.zip`: copy its `.toml` files into the folder above. They are
 listed with your own presets, tagged `0.1`, and copying them never replaces a preset you
 saved.
@@ -430,6 +440,11 @@ The service documents and datasheets the model was derived from are not included
   darker),
   and driven hard at high EMPHASIS it loses its resonance sooner. Every other factory preset
   is within a decibel of the circuit's.
+- Horn Bloom, Brass Choir and Warp Field play POLY's voices with DOUBLE, two instruments a
+  note: at QUALITY HI each takes one and a half to one and three quarter cores of a fast
+  computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,
+  and on a computer of four processors or a slower one they can overload. QUALITY LO plays
+  them for about a fortieth of that ([docs/decisions.md](docs/decisions.md) R67).
 - POLY's voices are shared between the host's audio thread and up to four threads of the
   plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
   [docs/decisions.md](docs/decisions.md) R11, R39), shared by every instance in the

@@ -10,7 +10,9 @@
 //! third-octave band's level (the bands within 60 dB of the strongest). `CA72_SECONDS` (4),
 //! `CA72_ONLY` (a part of a preset's name), `CA72_VOICES` (10), `CA72_PRESETS_FILE` (a file of
 //! presets in the factory's format, read instead of the factory's: an earlier version's, to
-//! hear its sounds, as its sessions hold them, through this engine).
+//! hear its sounds, as its sessions hold them, through this engine), `CA72_FROM_0_1` (set:
+//! each preset's knobs translated as a session 0.1 saved is when it opens, `compat`, those
+//! it does not name at their defaults first, as 0.1 had them).
 //!
 //! `cargo test --release -p ca72-plugin --test preset_render -- --ignored --nocapture`
 
@@ -19,6 +21,7 @@
 mod common;
 
 use ca72_analysis::fft::{hann, power};
+use ca72_plugin::compat;
 use ca72_plugin::engine::Engine;
 use ca72_plugin::library::{Sound, factory, parse_factory};
 use common::{Chords, controls_of, env, play_block};
@@ -28,12 +31,19 @@ const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
 
 /// A preset's render: left and right.
-/// The presets rendered: the factory's, or `CA72_PRESETS_FILE`'s.
+/// The presets rendered: the factory's, or `CA72_PRESETS_FILE`'s; with `CA72_FROM_0_1` set,
+/// translated as 0.1's sessions are.
 fn presets() -> Vec<Sound> {
-    match std::env::var_os("CA72_PRESETS_FILE") {
+    let mut sounds = match std::env::var_os("CA72_PRESETS_FILE") {
         Some(f) => parse_factory(&std::fs::read_to_string(f).unwrap()).unwrap(),
         None => factory().to_vec(),
+    };
+    if std::env::var_os("CA72_FROM_0_1").is_some() {
+        for s in &mut sounds {
+            compat::translate_preset(&mut s.values);
+        }
     }
+    sounds
 }
 
 fn render(s: &Sound, voices: usize, seconds: f64) -> (Vec<f32>, Vec<f32>) {
