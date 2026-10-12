@@ -4925,7 +4925,7 @@ Driven Kick -18.00 (-7.2), Split Snare -18.00 (-6.0), Tight Hat -18.00 (-2.7), L
 (-6.3), Wide Crash -17.88 (-10.5), Swarm Riser -18.00 (-12.0), Warp Field -18.09 (-9.4), White
 Lotus -18.03 (-12.4), Cycle of Fifths -18.15 (-9.7). R62 (SCATTER in MONO) moved none of them.
 
-## R-VOICES. VOICES dimmed where it does nothing
+## R64. VOICES dimmed where it does nothing
 
 **The owner, 2026-10-11:** "something like the driven kick says it has 4 voices, but i don't
 think those 4 voics do anything do they? if so, find all such examples and reduce their voice to

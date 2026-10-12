@@ -2104,7 +2104,7 @@ fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i
 }
 
 /// Whether VOICES does nothing (the owner, 2026-10-11, of a MONO preset's VOICES 4: "I don't
-/// think those 4 voices do anything"; decisions.md R-VOICES): in MONO (neither POLY nor UNISON)
+/// think those 4 voices do anything"; decisions.md R64): in MONO (neither POLY nor UNISON)
 /// with DOUBLE, whose one pair has no place among others, or scattering with WIDTH at 0, where
 /// every one of VOICES's places is the centre (R62). Then its knob is dimmed and not operable,
 /// and its readout not lit nor typed into, as DETUNE's in SCATTER; its value stays for when it
@@ -3137,7 +3137,7 @@ mod tests {
         editing_of(Ca72Params::default(), library)
     }
 
-    /// The editor with POLY on, where VOICES counts (decisions.md R-VOICES).
+    /// The editor with POLY on, where VOICES counts (decisions.md R64).
     fn editing_poly() -> (Editing, Arc<Host>, Arc<Ca72Params>) {
         let params = Ca72Params {
             poly: BoolParam::new("Poly", true),
@@ -5084,7 +5084,7 @@ mod tests {
             );
         }
         // VOICES's knob dragged up: nothing at these defaults, where it does nothing (MONO,
-        // SCATTER, WIDTH 0: R-VOICES); with POLY on, one gesture of VOICES.
+        // SCATTER, WIDTH 0: R64); with POLY on, one gesture of VOICES.
         let drag_voices = |e: &mut Editing| {
             let p = at(e, centre("voices"));
             go(e, p);
@@ -5226,7 +5226,7 @@ mod tests {
         assert!(shown(&d, Readout::Width));
     }
 
-    /// VOICES where it does nothing (R-VOICES): in MONO with DOUBLE, or scattering at WIDTH 0;
+    /// VOICES where it does nothing (R64): in MONO with DOUBLE, or scattering at WIDTH 0;
     /// it counts again with POLY, with UNISON, or with WIDTH up in MONO without DOUBLE (R62).
     /// The editor then draws its knob dimmed, takes no press, drag nor typed value for it, and
     /// leaves its readout unlit; as for DETUNE in SCATTER, the other knobs answer.
@@ -5810,7 +5810,7 @@ mod tests {
         window_frame(&mut e).save_png(out).unwrap();
     }
 
-    /// VOICES dimmed where it does nothing and lit where it counts (decisions.md R-VOICES), in
+    /// VOICES dimmed where it does nothing and lit where it counts (decisions.md R64), in
     /// each look, for a look: `voices-<look>-<state>.png` in `$CA72_VOICES_PNG`, the folder.
     #[test]
     #[ignore = "writes images for a look"]
