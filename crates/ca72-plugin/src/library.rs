@@ -909,7 +909,7 @@ mod tests {
 
     /// The factory file ships inside the plug-in whole, its comments too: no trademark, no
     /// other product's or artist's name, no private record (decisions.md R1).
-    /// Stacked Fifths (0.1's, retired since: R-STARRED) a fourth and a fifth over its root to
+    /// Stacked Fifths (0.1's, retired since: R63) a fourth and a fifth over its root to
     /// the cent (the owner, 2026-10-10: "Become a true 4th and 5th"), the presets' FREQUENCY
     /// values their pots' positions (decisions.md R54); Cycle of Fifths' a fifth 16 cents wide,
     /// as its owner set it.

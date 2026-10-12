@@ -7,7 +7,7 @@
 # pots' positions, -7.5 to 7.5 along the track, as every version saves them; the knob reads
 # them in semitones, or as the hardware's dial, the player's choice (decisions.md R54).
 #
-# 0.2.0's set, the owner's choice (decisions.md R-STARRED): the presets the owner had starred,
+# 0.2.0's set, the owner's choice (decisions.md R63): the presets the owner had starred,
 # each as they had it, those 0.1 carried under new names (0.1's own are in `retired.toml`). The
 # first seventeen began as 0.1's: its Bass, nine documented patches for the instrument the CA-72
 # models (its maker's 1974 sound charts, its 2016 reissue's patch sheets, recreations by ear), a

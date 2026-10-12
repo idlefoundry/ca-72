@@ -4859,7 +4859,7 @@ passed, 32 ignored (the new ones in a debug build too); rustfmt; clippy with `-D
 the Mac, CA-72 TEST built from this branch: clap-validator (37 passed), the VST3 SDK's validator
 (47 passed) and pluginval at strictness 5 pass. Not yet: the installed build in a host.
 
-## R-STARRED. 0.2.0's factory presets: the owner's favourites, 0.1's renamed
+## R63. 0.2.0's factory presets: the owner's favourites, 0.1's renamed
 
 **The owner, 2026-10-11:** "for 0.2.0 I only want the presets I currently have favorited. Any
 preset that i have favorited that existed in 0.1.5 needs to be renamed. Others can keep their
