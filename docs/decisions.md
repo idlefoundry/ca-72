@@ -4925,6 +4925,15 @@ Driven Kick -18.00 (-7.2), Split Snare -18.00 (-6.0), Tight Hat -18.00 (-2.7), L
 (-6.3), Wide Crash -17.88 (-10.5), Swarm Riser -18.00 (-12.0), Warp Field -18.09 (-9.4), White
 Lotus -18.03 (-12.4), Cycle of Fifths -18.15 (-9.7). R62 (SCATTER in MONO) moved none of them.
 
+**The owner's last changes, 2026-10-12:** "i made a few updates to the presets. They are now as I
+want them for release. Please make sure to grab my latest changes." Read from the owner's library
+on the Mac (08:29 EDT; five edits, nothing renamed, deleted or starred) and taken whole: Bright Xylo
+an octave lower (oscillator 1 at 4', 2 and 3 at 16') with NOTE PRIORITY LAST; Split Snare, Tight
+Hat, Loose Hat and Wide Crash with NOTE PRIORITY LAST and RETRIGGER on. Their descriptions say so
+(the agent's). Bright Xylo levelled again by LEVEL, 4.46 to 5.71 dB: -18.00 LUFS momentary
+maximum, its peak -6.3 dBFS; the other four measured where they were (-18.00, -18.00, -18.00,
+-17.88). Bright Xylo costs 7.7 % of a core.
+
 ## R64. VOICES dimmed where it does nothing
 
 **The owner, 2026-10-11:** "something like the driven kick says it has 4 voices, but i don't
