@@ -4889,14 +4889,17 @@ current name."
 - **All twenty-four of 0.1.5's presets moved whole to `retired.toml`** (R55), the seventeen kept
   under new names among them, so the pack is 0.1's whole set at its own names, and no retired
   name is a factory preset's.
-- **Levelled as R15 has it**, MAIN OUTPUT VOLUME for -18 LUFS momentary maximum on each one's
-  phrase (`tests/preset_levels.rs`): nine within 0.12 dB (Feedback Funk 8.96 to 8.711, Singing
-  Drift 6.04 to 9.105, Horn Bloom 7.0174 to 7.248, Brass Choir 3.894 to 6.585, Wide Bow 8.23
-  to 9.456, Wide Crash 8.0716 to 9.809, Cycle of Fifths 7.2399 to 8.044; Warp Field and White
-  Lotus left). Ten stay under at 10: Felt Bass -20.6, Saw Monolith -20.4, Tenor Pluck -33.2,
-  Smoke Flute -24.9, Bright Xylo -22.5, Driven Kick -29.3, Split Snare -19.2, Tight Hat -26.2,
-  Loose Hat -22.0, Swarm Riser -22.7. LEVEL would bring each to -18 with its peak at or under -2.7 dBFS (Tight
-  Hat's); asked of the owner, since R15 leaves a preset at 10 under its level.
+- **Levelled at -18 LUFS momentary maximum** on each one's phrase (`tests/preset_levels.rs`), as
+  R15: MAIN OUTPUT VOLUME first (Feedback Funk 8.96 to 8.711, Singing Drift 6.04 to 9.105, Horn
+  Bloom 7.0174 to 7.248, Brass Choir 3.894 to 6.585, Wide Bow 8.23 to 9.456, Wide Crash 8.0716
+  to 9.809, Cycle of Fifths 7.2399 to 8.044; Warp Field and White Lotus left). **The owner,
+  2026-10-11**, asked whether LEVEL should bring up the ten still under at VOLUME 10 (R15 had left
+  a preset at 10 under its level): "do what you have to to level the volumes. i am done starring
+  things." So LEVEL, the plug-in's output gain after MAIN OUTPUT, by each one's shortfall: Felt
+  Bass +2.57 dB, Saw Monolith +2.41, Smoke Flute +6.85, Bright Xylo +4.46, Driven Kick +11.32,
+  Split Snare +1.24, Tight Hat +8.19, Loose Hat +3.97, Swarm Riser +4.65; every one at -18.00,
+  the highest peak Tight Hat's, -2.7 dBFS. **Tenor Pluck** stays at -21.18: its oscillator, VOLUME
+  and LEVEL are at their tops (LEVEL's +12 dB), and more would take DRIVE or the filter, its sound.
 - **Sessions keep their sound** (R55). `drive::AVERAGE`, the factory presets' average DRIVE
   curve that a session without a measurement of its own takes, is left as it was, so no
   session's AUTO GAIN changes.
@@ -4910,10 +4913,12 @@ current name."
   shown whatever the factory's count. `tests/common`'s `controls_of` takes NOTE PRIORITY and
   RETRIGGER, which no factory preset had named.
 
-**Evidence (omarchy, 2026-10-11):** `cargo test -p ca72-plugin`: the unit tests (182) and every
-integration test pass; clippy clean. Every preset's level measured on its phrase after
-levelling (momentary maximum, LUFS): Felt Bass -20.57, Saw Monolith -20.41, Feedback Funk
--18.05, Tenor Pluck -33.18, Singing Drift -17.97, Horn Bloom -18.06, Brass Choir -18.02, Smoke
-Flute -24.85, Bright Xylo -22.46, Wide Bow -18.09, Driven Kick -29.32, Split Snare -19.24,
-Tight Hat -26.19, Loose Hat -21.97, Wide Crash -17.88, Swarm Riser -22.65, Warp Field -18.09,
-White Lotus -18.03, Cycle of Fifths -18.15.
+**Evidence (omarchy, 2026-10-11, on R62):** the owner's library read again at 19:54, unchanged
+since 19:46. `cargo test -p ca72-plugin`: the unit tests and every integration test pass;
+clippy clean. Every preset's level on its phrase after levelling (momentary maximum, LUFS; peak,
+dBFS): Felt Bass -18.00 (-5.0), Saw Monolith -18.00 (-4.2), Feedback Funk -18.05 (-11.8), Tenor
+Pluck -21.18 (-7.1), Singing Drift -17.97 (-14.1), Horn Bloom -18.06 (-10.4), Brass Choir
+-18.02 (-9.3), Smoke Flute -18.00 (-11.0), Bright Xylo -18.00 (-6.0), Wide Bow -18.09 (-12.5),
+Driven Kick -18.00 (-7.2), Split Snare -18.00 (-6.0), Tight Hat -18.00 (-2.7), Loose Hat -18.00
+(-6.3), Wide Crash -17.88 (-10.5), Swarm Riser -18.00 (-12.0), Warp Field -18.09 (-9.4), White
+Lotus -18.03 (-12.4), Cycle of Fifths -18.15 (-9.7). R62 (SCATTER in MONO) moved none of them.
