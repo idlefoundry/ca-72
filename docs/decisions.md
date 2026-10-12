@@ -5107,5 +5107,14 @@ additions' defaults), and `a_session_of_0_1_opens_translated_and_one_of_0_2_as_s
   ID"; `CA-72-0.2.0-macOS.pkg` SHA-256
   f3f1670d82e61f042f781b9040dd21a4f8d43fcfbc926de8174992d160eef0a9, with its logs and the Mac
   checks' in `~/lab/artifacts/ca-72/0.2.0-rc2/`.
+- **The release candidate with the owner's last presets** (main 721b5bd, R63's last changes; a
+  data change, checked by the unit tests and the presets' levels): universal bundles and the
+  Audio Unit built in the agents' tree (their presets read in the binaries), clap-validator 37
+  passed, Steinberg's 47, pluginval at strictness 5 SUCCESS; signed, notarised, stapled, `spctl`
+  "Notarized Developer ID". `CA-72-0.2.0-macOS.pkg` SHA-256
+  a9751ed47422d1ee20541757f27920a0858bfcca4ddddb39545c50982afde17c, in
+  `~/lab/artifacts/ca-72/0.2.0-rc3/` with its logs. The leftovers of the Mac's checks (an unsigned
+  Audio Unit in `~/Library`, the library folder GarageBand's run made) and the checks' build
+  folders went to the Trash, at the owner's word.
 - **Not done:** auval and pluginval on the Audio Unit on this Mac (its registry), MIDI played in
   the Mac's hosts (GarageBand takes none from a script), an Intel Mac, Live (the owner's).
