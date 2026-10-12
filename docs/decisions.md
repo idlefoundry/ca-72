@@ -4963,8 +4963,8 @@ pre-release. I'm going to test it with the assumption it's our release candidate
 - **0.2.0, a minor version**: the factory presets change (R63, 0.1's in the pack: R55) and a
   MONO session with WIDTH up now scatters (R62), where a patch release changes nothing a
   project or preset holds.
-- **The release candidate** is main at this version built as the release is, on the Mac in a
-  tree of its own: the universal bundles, the Audio Unit, the validators, and
+- **The release candidate** is main at this version built as the release is, on the Mac (in
+  the agents' build tree, the Mac having 5.9 GB free): the universal bundles, the Audio Unit, the validators, and
   `scripts/package.sh` with the Developer ID identities and notarisation required
   (`docs/macos-release.md`). It is installed by its installer over 0.1.x, as a user installs it;
   the CA-72 TEST bundles and the 0.1.x Audio Unit in the user's own Components folder go to the
@@ -4972,3 +4972,17 @@ pre-release. I'm going to test it with the assumption it's our release candidate
 - **Left for the release:** CI on the three systems (main has not run there since PR #25), the
   README's Status line and the release notes, the tag, the Windows and Linux installers and the
   0.1 presets' pack (CI's jobs), publishing.
+
+**Evidence (the Mac, 2026-10-11):** main 5ec29af (tree b6d7b7146f233970e6d3a788e5fc0a4116d15de5),
+exported into `~/Code/ca72-a6-build/ca-72` and built with the 1.97.1 toolchain: VST3 and CLAP
+`x86_64 arm64`, the Audio Unit 0.2.0; clap-validator 0.4.1 37 passed, 0 failed, 7 skipped;
+Steinberg's VST3 validator 47 passed; pluginval 1.0.4 at strictness 5 (GUI tests skipped)
+SUCCESS. Signed and notarised in a session of the desktop's tmux server (the hidden Ghostty
+shell 0.1.5 used started no command this time): Developer ID Application and Installer,
+Accepted, stapled, `spctl` "Notarized Developer ID". auval not run: the tmux session sees no
+third-party Audio Unit. `CA-72-0.2.0-macOS.pkg`, SHA-256
+90eed1dd78670853114f4964c72fb426ed0ff69053d5dde689d879f2d7c7e22b, with the scripts and logs in
+`~/lab/artifacts/ca-72/0.2.0-rc/`. Live quit (asked to, the owner's set offered for saving);
+CA-72 TEST and the 0.1 Audio Unit in `~/Library/Audio/Plug-Ins/Components` to the Trash; the
+installer run by the owner over 0.1.x: the three bundles in `/Library/Audio/Plug-Ins` 0.2.0,
+signed Developer ID Application.
