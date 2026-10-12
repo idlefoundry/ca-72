@@ -152,13 +152,13 @@ tags = ["bass", "plucked"]
 
 [preset.values]
 a440 = 0
-auto_gain = 1
+auto_gain = 0
 contour_amount = 4
 cutoff = -3
 decay_on = 1
 double = 0
 doubled = 0
-drive = 0
+drive = 3
 emphasis = 4
 entropy = 0
 ext_on = 0

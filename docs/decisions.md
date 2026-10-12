@@ -4898,8 +4898,10 @@ current name."
   things." So LEVEL, the plug-in's output gain after MAIN OUTPUT, by each one's shortfall: Felt
   Bass +2.57 dB, Saw Monolith +2.41, Smoke Flute +6.85, Bright Xylo +4.46, Driven Kick +11.32,
   Split Snare +1.24, Tight Hat +8.19, Loose Hat +3.97, Swarm Riser +4.65; every one at -18.00,
-  the highest peak Tight Hat's, -2.7 dBFS. **Tenor Pluck** stays at -21.18: its oscillator, VOLUME
-  and LEVEL are at their tops (LEVEL's +12 dB), and more would take DRIVE or the filter, its sound.
+  the highest peak Tight Hat's, -2.7 dBFS. **Tenor Pluck** reached -21.18 with its oscillator,
+  VOLUME and LEVEL at their tops (LEVEL's +12 dB); offered DRIVE with AUTO GAIN off for the rest,
+  the owner: "add 3db of drive with autogain off." DRIVE 3 dB, AUTO GAIN off: -18.20, its peak
+  -4.8 dBFS.
 - **Sessions keep their sound** (R55). `drive::AVERAGE`, the factory presets' average DRIVE
   curve that a session without a measurement of its own takes, is left as it was, so no
   session's AUTO GAIN changes.
@@ -4917,7 +4919,7 @@ current name."
 since 19:46. `cargo test -p ca72-plugin`: the unit tests and every integration test pass;
 clippy clean. Every preset's level on its phrase after levelling (momentary maximum, LUFS; peak,
 dBFS): Felt Bass -18.00 (-5.0), Saw Monolith -18.00 (-4.2), Feedback Funk -18.05 (-11.8), Tenor
-Pluck -21.18 (-7.1), Singing Drift -17.97 (-14.1), Horn Bloom -18.06 (-10.4), Brass Choir
+Pluck -18.20 (-4.8; DRIVE 3 dB, AUTO GAIN off), Singing Drift -17.97 (-14.1), Horn Bloom -18.06 (-10.4), Brass Choir
 -18.02 (-9.3), Smoke Flute -18.00 (-11.0), Bright Xylo -18.00 (-6.0), Wide Bow -18.09 (-12.5),
 Driven Kick -18.00 (-7.2), Split Snare -18.00 (-6.0), Tight Hat -18.00 (-2.7), Loose Hat -18.00
 (-6.3), Wide Crash -17.88 (-10.5), Swarm Riser -18.00 (-12.0), Warp Field -18.09 (-9.4), White
