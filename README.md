@@ -9,7 +9,7 @@ was transcribed from the instrument's service documents into SPICE netlists and 
 in ngspice. The real-time models were then derived from those simulations and tested
 against them, the factory calibration procedures included.
 
-[![The CA-72 on YouTube: watch and hear it](docs/video.jpg)](https://youtu.be/Ekep7V5lWqA)
+[![The CA-72 on YouTube: watch and hear it](https://raw.githubusercontent.com/idlefoundry/ca-72/053a2ebd711a002df020fc7fb158faa5df099135/docs/video.jpg)](https://youtu.be/Ekep7V5lWqA)
 
 Hear it before you download: [the CA-72 on YouTube](https://youtu.be/Ekep7V5lWqA).
 
