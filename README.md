@@ -32,7 +32,7 @@ signed.
    |---|---|
    | macOS 11 or later, Apple silicon or Intel | `CA-72-<version>-macOS.pkg` |
    | Windows 10 or 11, 64-bit | `CA-72-<version>-Windows-setup.exe` |
-   | Linux, x86-64 (Ubuntu 22.04, Debian 12, Fedora 36 or later) | `CA-72-<version>-Linux-x86_64.tar.gz` |
+   | Linux, x86-64 (Ubuntu 22.04, Debian 12, Fedora 36 or later, or Arch) | `CA-72-<version>-Linux-x86_64.tar.gz` |
 
 2. Run it. On Linux, unpack it and run the script in its folder:
 

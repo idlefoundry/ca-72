@@ -5168,3 +5168,58 @@ passed and clippy; the universal bundles and the Audio Unit, clap-validator 37 p
 ID": `CA-72-0.2.0-macOS.pkg` SHA-256
 9b0dd7003f3fc09dc1ac46370299e59c7997f480779cb76f973aadbf03ce8eeb, the release candidate, with its
 logs in `~/lab/artifacts/ca-72/0.2.0-rc4/`.
+
+## R69. 0.2.0, released (2026-10-12)
+
+**The owner, 2026-10-12:** "verify that there's no dependencies or anything that this new
+release is lacking for any of the platforms. we need to make sure everyone can install it
+without issues. If that's the case, then we're good to release!", and, told the agent would
+merge and publish on green unless something failed: "k, let me know when it's done".
+
+**What each platform needs** (the release's own builds): the Mac's VST3, CLAP and Audio Unit load
+only the system's frameworks and `/usr/lib` (AppKit, AudioToolbox, CoreFoundation,
+CoreGraphics, CoreMIDI, Foundation, QuartzCore; libSystem, libiconv, libobjc, libc++), each with
+x86_64 and arm64 and macOS 11.0 as its least; Windows' VST3 and CLAP (CI's, from the ZIP) import
+only the system's DLLs (kernel32, user32, gdi32, shell32, ole32, oleaut32, avrt, ntdll,
+bcryptprimitives, an api-ms-win-core set of Windows 8 on), the C runtime linked in, x64;
+Linux's (CI's, built on Ubuntu 22.04) need libX11, libxcb and libX11-xcb, as `install.sh` checks,
+and glibc 2.35 at most. Since 0.1.5 the plug-in takes two crates more, `plugin-kit-materials` and
+`plugin-kit-stereo`, Idle Foundry's own, from the public plugin-kit at 4c0f0f3 (in the git
+sources' archive); no system library is new, and nothing asks for more than each processor's
+baseline.
+
+**The release:** main on the Mac (9fbb1f8, the README's status and DOUBLE brought up to date) as
+pull request 26, CI passed on the three systems; merged as ef009fa, whose tree
+(dbde6ea988ec7a89db16053f08d019a76542bf00) is the one the Mac's installer was built and signed
+from; tagged v0.2.0 (annotated). The tag's CI built the Windows installer and ZIP, the Linux
+tarball and the 0.1 presets' pack and drafted the release; the Mac's installer (universal
+bundles, the Audio Unit, clap-validator 37 passed, Steinberg's 47, pluginval at strictness 5,
+signed with the Developer ID identities, notarised, stapled; each bundle inside 0.2.0,
+x86_64 and arm64, `codesign --verify --deep --strict`) uploaded and its line merged into
+`SHA256SUMS.txt`. Every asset downloaded again and checked against it, and the ZIP against its
+own `.sha256`. Published 2026-10-12 13:46 UTC with notes in 0.1.5's form (a row for the 0.1
+presets; what a 0.1 project gets, R66). `releases/latest`, asked anonymously, gives v0.2.0 and
+the three installers the update check looks for; the installer as downloaded from GitHub:
+`spctl` accepted, "Notarized Developer ID", the ticket stapled. GitHub's merged branches deleted
+(calibration, r33- and r35-release-evidence, release-0.2.0); pull requests 11 and 12 closed as
+merged with main's arrival. The installer, its logs and notarisation are in
+`~/lab/artifacts/ca-72/0.2.0/`.
+
+| Asset | SHA-256 |
+|---|---|
+| `CA-72-0.2.0-macOS.pkg` | c8d47b3d587ee79056ee76789ad8ff7ebd2b2f46f7a77679e98dd1e609aecc94 |
+| `CA-72-0.2.0-Windows-setup.exe` | 3e8fe542f342f14add36d2cd1aa30ff707ba3d3e1c6ec3e12db2e4a1fb0df656 |
+| `CA-72-0.2.0-Windows-x86_64.zip` | c6f5cddc9a1c942ed536359bb8ffe680878fab648b8e27dc33222191d7265a28 |
+| `CA-72-0.2.0-Linux-x86_64.tar.gz` | f3126bab1213a25fb0257ee2ab254ced2148d07d53817c3be21cf04b4a85365c |
+| `CA-72-0.2.0-0.1-presets.zip` | 499eccec93e4063645e68d59a512d23e3b4077e0b44863aace21770221a46413 |
+| `CA-72-0.2.0-git-sources.tar.gz` | 22d5c0733c307d510369fe345d5682973cdd33c841a168d49500913299772545 |
+
+**Arch Linux** (the owner, after publication: "what about arch linux systems?"): the released
+tarball installed by its `install.sh` on the Linux reference machine (Omarchy, on Arch; glibc
+2.44), no library reported missing, the installed bundles the release's to the byte, each library
+found in Arch's packages (libx11, libxcb, gcc-libs, glibc); clap-validator 37 passed and 7 skipped,
+Steinberg's validator 47 passed, pluginval at strictness 5 SUCCESS. Arch is named beside the
+other systems in the README and the release's notes.
+
+**Not done:** an Intel Mac, auval on this Mac's registry (CI's macOS job runs it), and Live (the
+owner's).
