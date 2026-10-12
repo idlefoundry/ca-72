@@ -9,15 +9,18 @@
 //! --nocapture` (`CA72_SECONDS`, 4; `CA72_VOICES`, 10; `CA72_ONLY`, a part of a preset's
 //! name; `CA72_NO_FEEDBACK`, set: FEEDBACK at 0; `CA72_DOUBLE`, DOUBLE's amount in %, 0;
 //! `CA72_DRIVE`, DRIVE in dB, 0; `CA72_POTATO`, set: QUALITY at LO, the light voices;
-//! `CA72_ULTRA`, set: QUALITY at ULTRA, the circuit's model with no compromises).
+//! `CA72_ULTRA`, set: QUALITY at ULTRA, the circuit's model with no compromises; `CA72_AS_SET`,
+//! set: each preset as it sets POLY, UNISON, VOICES, DOUBLE and DRIVE, played the same chords,
+//! instead of POLY's ten voices without DOUBLE or DRIVE; `CA72_RETIRED`, set: the presets
+//! retired from the plug-in, `sounds/retired.toml`, instead of the factory's).
 
 #![allow(clippy::unwrap_used)]
 
 mod common;
 
 use ca72_plugin::engine::Engine;
-use ca72_plugin::library::factory;
-use common::{Chords, controls_of, env, play_block};
+use ca72_plugin::library::{factory, parse_factory};
+use common::{Chords, controls_of, env, play_block, played_as};
 use std::time::Instant;
 
 #[test]
@@ -32,20 +35,30 @@ fn each_presets_cost_with_ten_voices() {
     let no_feedback = std::env::var_os("CA72_NO_FEEDBACK").is_some();
     let double: f64 = env("CA72_DOUBLE", 0.0);
     let drive: f64 = env("CA72_DRIVE", 0.0);
-    for s in factory() {
+    let as_set = std::env::var_os("CA72_AS_SET").is_some();
+    let sounds = if std::env::var_os("CA72_RETIRED").is_some() {
+        parse_factory(include_str!("../sounds/retired.toml")).unwrap()
+    } else {
+        factory().to_vec()
+    };
+    for s in &sounds {
         if only.as_ref().is_some_and(|o| !s.name.contains(o.as_str())) {
             continue;
         }
         let mut c = controls_of(s);
-        c.poly = true;
         c.potato = std::env::var_os("CA72_POTATO").is_some();
         c.ultra = std::env::var_os("CA72_ULTRA").is_some();
-        c.voices = voices;
         if no_feedback {
             c.feedback = 0.0;
         }
-        c.double = double / 100.0;
-        c.drive = drive;
+        if as_set {
+            c = played_as(s, c);
+        } else {
+            c.poly = true;
+            c.voices = voices;
+            c.double = double / 100.0;
+            c.drive = drive;
+        }
         let mut e = Engine::new();
         e.set(&c);
         e.prepare(rate, 1);
@@ -64,7 +77,24 @@ fn each_presets_cost_with_ten_voices() {
         let took = start.elapsed().as_secs_f64();
         let share = took / (blocks as f64 * block as f64 / rate);
         let period = block as f64 / rate;
-        rows.push((s.name.clone(), share, worst / period, c.feedback > 0.0));
+        let set = if c.unison {
+            format!("UNISON {}", c.voices)
+        } else if c.poly {
+            format!("POLY {}", c.voices)
+        } else {
+            "MONO".to_owned()
+        };
+        let set = if c.double > 0.0 {
+            format!("{set} DOUBLE")
+        } else {
+            set
+        };
+        rows.push((
+            format!("{} ({set})", s.name),
+            share,
+            worst / period,
+            c.feedback > 0.0,
+        ));
         let _ = workers;
     }
     eprintln!(
@@ -81,13 +111,13 @@ fn each_presets_cost_with_ten_voices() {
         }
     );
     eprintln!(
-        "{:<18} {:>8} {:>13} {:>10}",
+        "{:<36} {:>8} {:>13} {:>10}",
         "preset", "of a core", "worst block", "voices fit"
     );
     for (name, share, worst, fed) in &rows {
         let fits = (0.6 / (share / voices as f64)).floor().min(10.0);
         eprintln!(
-            "{name:<18} {:>7.1} % {:>11.0} % {fits:>10}{}",
+            "{name:<36} {:>7.1} % {:>11.0} % {fits:>10}{}",
             share * 100.0,
             worst * 100.0,
             if *fed { "  FEEDBACK" } else { "" }

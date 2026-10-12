@@ -8,7 +8,9 @@
 //! there and prints, per preset, whether it is the same to the bit, else the difference's
 //! RMS and peak against the reference's, the level's change, and the largest change of a
 //! third-octave band's level (the bands within 60 dB of the strongest). `CA72_SECONDS` (4),
-//! `CA72_ONLY` (a part of a preset's name), `CA72_VOICES` (10).
+//! `CA72_ONLY` (a part of a preset's name), `CA72_VOICES` (10), `CA72_PRESETS_FILE` (a file of
+//! presets in the factory's format, read instead of the factory's: an earlier version's, to
+//! hear its sounds, as its sessions hold them, through this engine).
 //!
 //! `cargo test --release -p ca72-plugin --test preset_render -- --ignored --nocapture`
 
@@ -18,7 +20,7 @@ mod common;
 
 use ca72_analysis::fft::{hann, power};
 use ca72_plugin::engine::Engine;
-use ca72_plugin::library::factory;
+use ca72_plugin::library::{Sound, factory, parse_factory};
 use common::{Chords, controls_of, env, play_block};
 use std::path::PathBuf;
 
@@ -26,8 +28,15 @@ const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
 
 /// A preset's render: left and right.
-fn render(name: &str, voices: usize, seconds: f64) -> (Vec<f32>, Vec<f32>) {
-    let s = factory().iter().find(|s| s.name == name).unwrap();
+/// The presets rendered: the factory's, or `CA72_PRESETS_FILE`'s.
+fn presets() -> Vec<Sound> {
+    match std::env::var_os("CA72_PRESETS_FILE") {
+        Some(f) => parse_factory(&std::fs::read_to_string(f).unwrap()).unwrap(),
+        None => factory().to_vec(),
+    }
+}
+
+fn render(s: &Sound, voices: usize, seconds: f64) -> (Vec<f32>, Vec<f32>) {
     let mut c = controls_of(s);
     c.poly = true;
     c.voices = voices;
@@ -128,11 +137,11 @@ fn each_preset_against_a_reference_render() {
         "preset", "diff RMS", "diff peak", "level", "worst band"
     );
     let mut all_same = true;
-    for s in factory() {
+    for s in &presets() {
         if only.as_ref().is_some_and(|o| !s.name.contains(o.as_str())) {
             continue;
         }
-        let (l, r) = render(&s.name, voices, seconds);
+        let (l, r) = render(s, voices, seconds);
         if let Some(dir) = &out {
             write(&dir.join(file_name(&s.name)), &l, &r);
         }
