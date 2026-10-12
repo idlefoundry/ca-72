@@ -226,6 +226,87 @@ const SILENT: f64 = 1e-6;
 /// for this many samples running, counted across runs (the CA-74's).
 const QUIET: usize = 256;
 
+/// Without POLY or UNISON the one instrument sleeps (is not played, the output silent) once no
+/// key is down, its output has stayed under [`SILENT`] and its slow state (`slow_state`: the
+/// keyboard's hold capacitor and the contours, its twin's too with DOUBLE) has moved less than
+/// [`SETTLED`] over this, s; the next note then starts where it would have (decisions.md
+/// R68, the development line's R30).
+const SLEEP_WINDOW: f64 = 0.05;
+
+/// How little the slow state may move over [`SLEEP_WINDOW`] for the instrument to sleep, V: a
+/// contour falling with a time constant of 10 s is then within 0.2 mV of where it settles.
+const SETTLED: f64 = 1e-6;
+
+/// Whether the one instrument sleeps, and how long it has been silent with its slow state
+/// still (`quiet`, of `window` samples at the host's rate) since `anchor`; the output's peak
+/// over the block so far.
+#[derive(Debug, Clone, Copy, Default)]
+struct Rest {
+    asleep: bool,
+    quiet: usize,
+    window: usize,
+    anchor: [f64; 6],
+    peak: f64,
+    /// Sleep not allowed (measurements that play on as before: [`Engine::never_sleep`]).
+    never: bool,
+}
+
+impl Rest {
+    /// The output's samples, as they are made.
+    fn heard(&mut self, l: &[f32], r: &[f32]) {
+        for y in l.iter().chain(r) {
+            self.peak = self.peak.max(f64::from(y.abs()));
+        }
+    }
+
+    /// After a block of `n` samples: the instrument's slow state then (None while a key is
+    /// down or its voice is out of reach), the block's peak reckoned.
+    fn after(&mut self, state: Option<[f64; 6]>, n: usize) {
+        let silent = self.peak < SILENT;
+        self.peak = 0.0;
+        match state {
+            Some(st) if silent && !self.never && !self.asleep => {
+                if self.quiet == 0 {
+                    self.anchor = st;
+                }
+                self.quiet += n;
+                if self.quiet >= self.window {
+                    self.asleep = st
+                        .iter()
+                        .zip(&self.anchor)
+                        .all(|(a, b)| (a - b).abs() < SETTLED);
+                    self.quiet = 0;
+                }
+            }
+            _ => self.quiet = 0,
+        }
+    }
+
+    fn wake(&mut self) {
+        (self.asleep, self.quiet, self.peak) = (false, 0, 0.0);
+    }
+}
+
+/// The one instrument's slow state (its voice's, and its twin's while DOUBLE plays it), the
+/// model QUALITY plays.
+fn slow_state(p: &Playing) -> Option<[f64; 6]> {
+    let v = if p.potato {
+        p.light.slow_state()?
+    } else {
+        p.voice.slow_state()?
+    };
+    let t = if p.double || p.twin.live {
+        if p.potato {
+            p.twin.light.slow_state()?
+        } else {
+            p.twin.voice.slow_state()?
+        }
+    } else {
+        [0.0; 3]
+    };
+    Some([v[0], v[1], v[2], t[0], t[1], t[2]])
+}
+
 /// The time constant, seconds, with which a voice's place follows SPREAD, INNER, the
 /// placement, VOICES and DOUBLE: plugin-kit's (its K6; decisions.md R45, the CA-74's R27
 /// and R28).
@@ -793,6 +874,8 @@ pub struct Engine {
     /// Each voice's output's peak over the last block (the editor's drops and lamps follow
     /// them; each slot's peak is kept anyway, for knowing when its voice falls silent).
     levels: [f32; LEVELS],
+    /// The one instrument asleep, or how near it is (decisions.md R68).
+    rest: Rest,
     over: Option<Oversampled>,
     rate: f64,
     seed: u64,
@@ -876,6 +959,7 @@ impl Engine {
         Engine {
             slots: Vec::new(),
             levels: [0.0; LEVELS],
+            rest: Rest::default(),
             over: None,
             rate: 0.0,
             seed: 0,
@@ -925,6 +1009,8 @@ impl Engine {
     /// them (decisions.md R18). New voices stop the workers, here ([`Engine::start_workers`]
     /// plans them again).
     pub fn prepare(&mut self, rate: f64, seed: u64) {
+        self.rest.wake();
+        self.rest.window = (SLEEP_WINDOW * rate).ceil() as usize;
         let reseeded = seed != self.seed;
         self.seed = seed;
         if rate == self.rate && !self.slots.is_empty() {
@@ -1127,6 +1213,7 @@ impl Engine {
     /// key first (the notes then sounding stop; the next notes play in the new way).
     pub fn set(&mut self, c: &Controls) {
         if *c != self.controls {
+            self.rest.wake();
             if c.poly != self.controls.poly
                 || c.potato != self.controls.potato
                 || c.unison != self.controls.unison
@@ -1186,6 +1273,7 @@ impl Engine {
     }
 
     pub fn event(&mut self, e: Event) {
+        self.rest.wake();
         match e {
             Event::Note { key, on } => {
                 let Some(h) = self.held.get_mut(usize::from(key)) else {
@@ -1379,6 +1467,7 @@ impl Engine {
     /// R62): the host resets the plug-in, and sends All Notes Off as its transport
     /// stops, so that a part plays and renders its places alike each time.
     pub fn release_all(&mut self) {
+        self.rest.wake();
         for key in 0..self.held.len() {
             if std::mem::take(&mut self.held[key]) && self.instruments() > 0 {
                 self.one_note(key as i32, false);
@@ -1420,6 +1509,12 @@ impl Engine {
     /// finite taken as 0: decisions.md R18); silence before [`Engine::prepare`]. With POWER
     /// off, once faded out, the voices rest (the MIDI input still reaches them).
     pub fn tick_stereo(&mut self, ext: f32) -> (f32, f32) {
+        if self.rest.asleep {
+            if self.dormant(&[ext]) {
+                return (0.0, 0.0);
+            }
+            self.rest.wake();
+        }
         self.settle();
         let on = self.controls.power;
         if (!on && self.fade == 0.0) || self.slots.is_empty() {
@@ -1446,7 +1541,11 @@ impl Engine {
                 (l, r)
             }
         };
-        self.faded(l, r)
+        let (l, r) = self.faded(l, r);
+        if !self.many() {
+            self.rest.heard(&[l], &[r]);
+        }
+        (l, r)
     }
 
     /// `left.len()` output samples, left and right, with `ext[i]` at EXTERNAL INPUT (an empty
@@ -1454,8 +1553,38 @@ impl Engine {
     /// samples, to the bit, as as many [`Engine::tick_stereo`]. With POLY the voices play
     /// [`CHUNK`] samples at a time, one after another (a voice's state, some 30 KB, then stays
     /// in the processor's nearest cache), or shared with the workers, and are summed in their
-    /// order (decisions.md R11).
+    /// order (decisions.md R11). The one instrument asleep, and nothing at EXTERNAL INPUT:
+    /// silence, as as many samples would give, without them (decisions.md R68).
     pub fn render(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
+        let len = left.len().min(right.len());
+        if self.rest.asleep {
+            if self.dormant(&ext[..ext.len().min(len)]) {
+                left[..len].fill(0.0);
+                right[..len].fill(0.0);
+                return;
+            }
+            self.rest.wake();
+        }
+        self.render_voices(ext, &mut left[..len], &mut right[..len]);
+        if !self.many() {
+            self.rest.heard(&left[..len], &right[..len]);
+        }
+    }
+
+    /// Whether the one instrument, asleep, stays so for samples with `ext` at EXTERNAL INPUT:
+    /// POWER on and faded in, no All Sound Off fading, and nothing there.
+    fn dormant(&self, ext: &[f32]) -> bool {
+        !self.many()
+            && self.controls.power
+            && !self.hush
+            && self.fade == 1.0
+            && ext
+                .iter()
+                .all(|x| !x.is_finite() || f64::from(x.abs()) < SILENT)
+    }
+
+    /// [`Engine::render`]'s samples, played.
+    fn render_voices(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
         let len = left.len().min(right.len());
         let at = |i: usize| ext.get(i).copied().filter(|x| x.is_finite()).unwrap_or(0.0);
         // (At QUALITY's LO the one instrument too plays a run at a time: its light voice costs
@@ -1728,6 +1857,13 @@ impl Engine {
     /// and falling with a time constant of [`LAMP_FALL`]; POLY's voices let go and fallen
     /// silent over the block freed.
     pub fn end_block(&mut self, len: usize) -> f32 {
+        if !self.many() && !self.rest.asleep {
+            let state = self
+                .slots
+                .first()
+                .and_then(|s| with_voice(s, |p| slow_state(p)));
+            self.rest.after(state.flatten(), len);
+        }
         let mut peak = 0.0f64;
         // (UNISON's instruments, which take their keys straight, are held while a key is.)
         let held = if self.controls.unison && self.held.iter().any(|h| *h) {
@@ -1789,6 +1925,18 @@ impl Engine {
             let at = if self.mix().scatter { self.turn } else { 0 };
             u32::from(self.held.iter().any(|h| *h)) << at.min(LEVELS - 1)
         }
+    }
+
+    /// Whether the one instrument sleeps: silent and settled, not played until an event, a
+    /// control changed or a sound at EXTERNAL INPUT wakes it (decisions.md R68).
+    pub fn asleep(&self) -> bool {
+        self.rest.asleep
+    }
+
+    /// The one instrument never to sleep (or to again): for measuring what it costs waiting.
+    pub fn never_sleep(&mut self, never: bool) {
+        self.rest.never = never;
+        self.rest.wake();
     }
 
     /// The voices sounding now (POLY or UNISON on), or 1 (off).
@@ -3862,5 +4010,180 @@ mod tests {
                 .iter()
                 .all(|v| !v.potato)
         );
+    }
+
+    /// The one instrument at 48 kHz with `c`.
+    fn one_instrument(c: &Controls) -> Engine {
+        let mut e = Engine::new();
+        e.set(c);
+        e.prepare(48_000.0, 1);
+        e
+    }
+
+    /// `seconds` of blocks of 256 samples, `ext` at EXTERNAL INPUT: the output's peak.
+    fn played_for(e: &mut Engine, seconds: f64, ext: f32) -> f32 {
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        let x = [ext; 256];
+        let mut peak = 0.0f32;
+        for _ in 0..(seconds * 48_000.0 / 256.0).ceil() as usize {
+            e.render(&x, &mut l, &mut r);
+            e.end_block(256);
+            peak = l.iter().chain(&r).fold(peak, |m, y| m.max(y.abs()));
+        }
+        peak
+    }
+
+    /// Played until asleep, at most `seconds`: whether it fell asleep.
+    fn sleeps_within(e: &mut Engine, seconds: f64) -> bool {
+        let mut t = 0.0;
+        while !e.asleep() && t < seconds {
+            played_for(e, 0.1, 0.0);
+            t += 0.1;
+        }
+        e.asleep()
+    }
+
+    /// The one instrument sleeps once silent and settled, never while a key is down, and wakes
+    /// for a note, a control moved, a wheel, All Notes Off and a sound at EXTERNAL INPUT; asleep,
+    /// the output is silent. So at QUALITY LO and with DOUBLE; never with POLY or UNISON, whose
+    /// voices are freed instead, nor while A-440 sounds (decisions.md R68).
+    #[test]
+    fn a_silent_settled_instrument_sleeps_and_wakes() {
+        let mut e = one_instrument(&Controls::default());
+        assert!(sleeps_within(&mut e, 30.0), "awake with nothing played");
+        assert_eq!(played_for(&mut e, 0.1, 0.0), 0.0);
+        e.event(Event::Note { key: 60, on: true });
+        assert!(!e.asleep());
+        assert!(played_for(&mut e, 1.0, 0.0) > 0.01, "the note silent");
+        played_for(&mut e, 4.0, 0.0);
+        assert!(!e.asleep(), "asleep with a key down");
+        e.event(Event::Note { key: 60, on: false });
+        assert!(
+            sleeps_within(&mut e, 30.0),
+            "awake 30 s after the key was let go"
+        );
+        let mut c = Controls::default();
+        c.panel.cutoff = 0.7;
+        e.set(&c);
+        assert!(!e.asleep(), "a control moved left it asleep");
+        assert!(sleeps_within(&mut e, 30.0));
+        e.set(&c);
+        assert!(e.asleep(), "the same controls again woke it");
+        e.event(Event::Modulation(0.5));
+        assert!(!e.asleep(), "the wheel left it asleep");
+        assert!(sleeps_within(&mut e, 30.0));
+        e.release_all();
+        assert!(!e.asleep(), "All Notes Off left it asleep");
+        assert!(sleeps_within(&mut e, 30.0));
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        e.render(&[0.0, 0.0, 0.25], &mut l, &mut r);
+        assert!(!e.asleep(), "a sound at EXTERNAL INPUT left it asleep");
+        e.never_sleep(true);
+        assert!(!sleeps_within(&mut e, 5.0), "asleep when told never to");
+        for (what, c) in [
+            (
+                "QUALITY LO",
+                Controls {
+                    potato: true,
+                    ..Controls::default()
+                },
+            ),
+            (
+                "DOUBLE",
+                Controls {
+                    double: 0.3,
+                    ..Controls::default()
+                },
+            ),
+        ] {
+            let mut e = one_instrument(&c);
+            assert!(
+                sleeps_within(&mut e, 30.0),
+                "{what}: awake with nothing played"
+            );
+            e.event(Event::Note { key: 60, on: true });
+            assert!(
+                played_for(&mut e, 0.5, 0.0) > 0.01,
+                "{what}: the note silent"
+            );
+            e.event(Event::Note { key: 60, on: false });
+            assert!(sleeps_within(&mut e, 30.0), "{what}: awake after the note");
+        }
+        for (what, c) in [
+            (
+                "POLY",
+                Controls {
+                    poly: true,
+                    ..Controls::default()
+                },
+            ),
+            (
+                "UNISON",
+                Controls {
+                    unison: true,
+                    ..Controls::default()
+                },
+            ),
+        ] {
+            let mut e = one_instrument(&c);
+            assert!(
+                !sleeps_within(&mut e, 5.0),
+                "{what}: the one instrument's sleep"
+            );
+        }
+        let mut c = Controls::default();
+        c.panel.a440 = true;
+        let mut e = one_instrument(&c);
+        assert!(!sleeps_within(&mut e, 5.0), "asleep while A-440 sounds");
+    }
+
+    /// An instrument woken from sleep plays its next note as one that never slept: at rest its
+    /// contours within 20 uV of the other's, through the note its keyboard voltage the same,
+    /// its contours within 0.5 mV of their 5 V (a sample or two of time: they tick at a
+    /// sub-rate whose cycle stopped while it slept), its level within 0.1 dB. Otherwise only
+    /// its free-running oscillators' and noise's phases differ (decisions.md R68).
+    #[test]
+    fn a_woken_instrument_plays_its_next_note_as_one_that_never_slept() {
+        let (mut a, mut b) = (
+            one_instrument(&Controls::default()),
+            one_instrument(&Controls::default()),
+        );
+        b.never_sleep(true);
+        for e in [&mut a, &mut b] {
+            e.event(Event::Note { key: 48, on: true });
+            played_for(e, 0.5, 0.0);
+            e.event(Event::Note { key: 48, on: false });
+        }
+        assert!(sleeps_within(&mut a, 30.0));
+        played_for(&mut b, 30.0, 0.0);
+        assert!(!b.asleep());
+        let probe = |e: &Engine| {
+            let p = e.slots[0].play.lock().unwrap();
+            let (f, l, _) = p.voice.envelopes();
+            (f, l, p.voice.probe().0)
+        };
+        let (x, y) = (probe(&a), probe(&b));
+        let rested = (x.0 - y.0).abs().max((x.1 - y.1).abs());
+        assert!(rested < 2e-5, "the contours {rested:e} V apart at rest");
+        for e in [&mut a, &mut b] {
+            e.event(Event::Note { key: 55, on: true });
+        }
+        assert!(!a.asleep());
+        let (mut contours, mut keyboard, mut power) = (0.0f64, 0.0f64, [0.0f64; 2]);
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        for _ in 0..(0.5 * 48_000.0 / 256.0) as usize {
+            for (k, e) in [&mut a, &mut b].into_iter().enumerate() {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                power[k] += l.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>();
+            }
+            let (x, y) = (probe(&a), probe(&b));
+            contours = contours.max((x.0 - y.0).abs()).max((x.1 - y.1).abs());
+            keyboard = keyboard.max((x.2 - y.2).abs());
+        }
+        assert!(keyboard < 1e-9, "the keyboard {keyboard:e} V apart");
+        assert!(contours < 5e-4, "the contours {contours:e} V apart");
+        let db = 10.0 * (power[0] / power[1]).log10();
+        assert!(db.abs() < 0.1, "levels {db:.3} dB apart");
     }
 }
