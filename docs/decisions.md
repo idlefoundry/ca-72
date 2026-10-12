@@ -4924,3 +4924,32 @@ Pluck -18.20 (-4.8; DRIVE 3 dB, AUTO GAIN off), Singing Drift -17.97 (-14.1), Ho
 Driven Kick -18.00 (-7.2), Split Snare -18.00 (-6.0), Tight Hat -18.00 (-2.7), Loose Hat -18.00
 (-6.3), Wide Crash -17.88 (-10.5), Swarm Riser -18.00 (-12.0), Warp Field -18.09 (-9.4), White
 Lotus -18.03 (-12.4), Cycle of Fifths -18.15 (-9.7). R62 (SCATTER in MONO) moved none of them.
+
+## R-VOICES. VOICES dimmed where it does nothing
+
+**The owner, 2026-10-11:** "something like the driven kick says it has 4 voices, but i don't
+think those 4 voics do anything do they? if so, find all such examples and reduce their voice to
+1", then "when something is polyphonic, this doesn't apply. i only mean with mono patches
+specifically". Told that VOICES goes from 2 to 10 (R7) and offered three ways (VOICES down to
+1; the presets at 2; VOICES dimmed wherever it does nothing, every sound's and not only the
+presets'), with dimming recommended: "ya, i think you're right. do it".
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **Where VOICES does nothing** (`editor::voices_inert`): MONO, neither POLY nor UNISON, with
+  DOUBLE on (the one pair has no place among others: R62) or with WIDTH at 0 (every one of
+  VOICES's places the centre). Found by the engine's code (`mix_of`, `places`) and by
+  rendering each factory preset's phrase at its VOICES and at 2: to the bit the same in all
+  twelve MONO presets without SCATTER's spread (Felt Bass, Saw Monolith, Feedback Funk, Tenor
+  Pluck, Singing Drift, Wide Bow, Driven Kick, Split Snare, Tight Hat, Loose Hat, Wide Crash,
+  White Lotus); different in Bright Xylo (MONO, SCATTER, WIDTH 100: its 8 places), and in
+  Smoke Flute and Swarm Riser (UNISON).
+- **Shown as DETUNE is in SCATTER:** its knob dimmed (the realistic look shades it, the drawn
+  one draws it at half opacity: `Scene::voices_off`), not operable (no press, drag, wheel or
+  step), its readout unlit (R62 had unlit it with DOUBLE only) and not typed into. Its value
+  is kept, and the host, a learned controller and a preset still set it: it counts again as
+  POLY, UNISON or WIDTH make it. The presets keep their VOICES (4 in most MONO ones), so
+  switching POLY on gives the voices it gave before.
+- The editor's tests that work VOICES at the defaults (MONO, SCATTER, WIDTH 0) do so with POLY
+  on (`editing_poly`); `voices_is_dimmed_where_it_does_nothing` holds the rule in each mode and
+  the editor's refusals. `the_window_voices_pngs` (by hand, `$CA72_VOICES_PNG`) draws it dimmed
+  and lit in both looks.

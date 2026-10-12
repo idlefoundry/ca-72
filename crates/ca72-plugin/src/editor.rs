@@ -1152,9 +1152,13 @@ impl Editing {
     }
 
     /// A value to be typed into readout `r` (decisions.md R52): not AUTO GAIN's, which reads
-    /// what is measured, nor DETUNE's in SCATTER, where its knob does nothing either.
+    /// what is measured, nor DETUNE's in SCATTER or VOICES's where it does nothing
+    /// ([`voices_inert`]), their knobs doing nothing either.
     fn start_typing(&mut self, r: Readout) {
-        if !r.typed() || (r == Readout::Detune && !self.params.doubled.value()) {
+        if !r.typed()
+            || (r == Readout::Detune && !self.params.doubled.value())
+            || (r == Readout::Voices && voices_inert(&self.params))
+        {
             return;
         }
         self.typing = Some((r, String::new()));
@@ -1274,11 +1278,14 @@ impl Editing {
     }
 
     /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
-    /// knob unresponsive unless the user is in double mode"), which is drawn dimmed then.
+    /// knob unresponsive unless the user is in double mode") and VOICES where it does nothing
+    /// ([`voices_inert`]), each drawn dimmed then.
     fn operable(&self, i: usize) -> bool {
-        CONTROLS
-            .get(i)
-            .is_none_or(|c| c.param != "double" || self.params.doubled.value())
+        CONTROLS.get(i).is_none_or(|c| match c.param {
+            "double" => self.params.doubled.value(),
+            "voices" => !voices_inert(&self.params),
+            _ => true,
+        })
     }
 
     /// A switch set, a gesture of its own; nothing if it is so already.
@@ -1835,6 +1842,7 @@ impl Editing {
         }
         self.scene.power = !self.params.bypass.value();
         self.scene.detune_off = !self.params.doubled.value();
+        self.scene.voices_off = voices_inert(&self.params);
         self.scene.overload = Meters::load(&self.meters.overload);
         self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
@@ -2095,6 +2103,17 @@ fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i
     }
 }
 
+/// Whether VOICES does nothing (the owner, 2026-10-11, of a MONO preset's VOICES 4: "I don't
+/// think those 4 voices do anything"; decisions.md R-VOICES): in MONO (neither POLY nor UNISON)
+/// with DOUBLE, whose one pair has no place among others, or scattering with WIDTH at 0, where
+/// every one of VOICES's places is the centre (R62). Then its knob is dimmed and not operable,
+/// and its readout not lit nor typed into, as DETUNE's in SCATTER; its value stays for when it
+/// counts again.
+fn voices_inert(p: &Ca72Params) -> bool {
+    let c = p.controls();
+    !c.poly && !c.unison && (p.doubled.value() || c.spread <= 0.0)
+}
+
 /// What the strip shows, from the parameters, the voices sounding (a bit a voice), their levels
 /// (0 to 1, by voice) and the output's, and the scene before (its rail, hover and MIDI Learn's
 /// ring are set elsewhere).
@@ -2139,7 +2158,7 @@ fn strip_scene(
         (String::new(), false)
     };
     let readouts = [
-        (format!("{voices}"), !alone),
+        (format!("{voices}"), !voices_inert(p)),
         (percent(c.entropy), c.entropy > 0.0),
         (percent(c.spread), c.spread > 0.0),
         (
@@ -3115,8 +3134,24 @@ mod tests {
     }
 
     fn editing_with(library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        editing_of(Ca72Params::default(), library)
+    }
+
+    /// The editor with POLY on, where VOICES counts (decisions.md R-VOICES).
+    fn editing_poly() -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        let params = Ca72Params {
+            poly: BoolParam::new("Poly", true),
+            ..Ca72Params::default()
+        };
+        editing_of(
+            params,
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        )
+    }
+
+    fn editing_of(params: Ca72Params, library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
         let host = Arc::new(Host::default());
-        let params = Arc::new(Ca72Params::default());
+        let params = Arc::new(params);
         let context: Arc<dyn GuiContext> = host.clone();
         let e = Editing::new(
             context,
@@ -3561,7 +3596,7 @@ mod tests {
     /// AUTO GAIN's reads what is measured and takes none.
     #[test]
     fn a_value_typed_into_a_readout_sets_its_knob() {
-        let (mut e, host, params) = editing();
+        let (mut e, host, params) = editing_poly();
         let double = |e: &mut Editing, t: StripTarget| {
             let p = on_strip(e, strip_at(t));
             click(e, p);
@@ -4723,7 +4758,7 @@ mod tests {
     /// forbids (decisions.md R18).
     #[test]
     fn a_wheels_gesture_ends_before_another_begins() {
-        let (mut e, host, params) = editing();
+        let (mut e, host, params) = editing_poly();
         let cutoff = params.cutoff.as_ptr();
         let p = at(&e, centre("cutoff"));
         go(&mut e, p);
@@ -5048,14 +5083,21 @@ mod tests {
                 vec![Call::Begin(p), Call::Set(p, 0.5), Call::End(p)]
             );
         }
-        // VOICES's knob dragged up: one gesture of VOICES.
-        let voices = params.voices.as_ptr();
-        let p = at(&e, centre("voices"));
-        go(&mut e, p);
-        press(&mut e);
-        go(&mut e, below(p, -120.0));
-        release(&mut e);
-        let calls = host.take();
+        // VOICES's knob dragged up: nothing at these defaults, where it does nothing (MONO,
+        // SCATTER, WIDTH 0: R-VOICES); with POLY on, one gesture of VOICES.
+        let drag_voices = |e: &mut Editing| {
+            let p = at(e, centre("voices"));
+            go(e, p);
+            press(e);
+            go(e, below(p, -120.0));
+            release(e);
+        };
+        drag_voices(&mut e);
+        assert_eq!(host.take(), vec![], "VOICES dragged where it does nothing");
+        let (mut poly_e, poly_host, poly_params) = editing_poly();
+        let voices = poly_params.voices.as_ptr();
+        drag_voices(&mut poly_e);
+        let calls = poly_host.take();
         well_formed(&calls);
         assert_eq!(calls.first(), Some(&Call::Begin(voices)));
         assert_eq!(calls.last(), Some(&Call::End(voices)));
@@ -5182,6 +5224,66 @@ mod tests {
         assert!(matches!(&d.field, Field::Double(pairs) if pairs.len() == 1));
         assert!(!shown(&d, Readout::Voices), "VOICES lit with DOUBLE");
         assert!(shown(&d, Readout::Width));
+    }
+
+    /// VOICES where it does nothing (R-VOICES): in MONO with DOUBLE, or scattering at WIDTH 0;
+    /// it counts again with POLY, with UNISON, or with WIDTH up in MONO without DOUBLE (R62).
+    /// The editor then draws its knob dimmed, takes no press, drag nor typed value for it, and
+    /// leaves its readout unlit; as for DETUNE in SCATTER, the other knobs answer.
+    #[test]
+    fn voices_is_dimmed_where_it_does_nothing() {
+        let params = |poly: bool, unison: bool, doubled: bool, width: f32| Ca72Params {
+            poly: BoolParam::new("Poly", poly),
+            unison: BoolParam::new("Unison", unison),
+            doubled: BoolParam::new("Double", doubled),
+            spread: FloatParam::new(
+                "Width",
+                width,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            ),
+            ..Ca72Params::default()
+        };
+        for (poly, unison, doubled, width, inert) in [
+            (false, false, true, 100.0, true),
+            (false, false, true, 0.0, true),
+            (false, false, false, 0.0, true),
+            (false, false, false, 100.0, false),
+            (true, false, false, 0.0, false),
+            (true, false, true, 0.0, false),
+            (false, true, true, 0.0, false),
+            (false, true, false, 100.0, false),
+        ] {
+            let p = params(poly, unison, doubled, width);
+            assert_eq!(
+                voices_inert(&p),
+                inert,
+                "POLY {poly}, UNISON {unison}, DOUBLE {doubled}, WIDTH {width}"
+            );
+            let s = strip_scene(&p, 0, (&[], 0.0), StripScene::default());
+            assert_eq!(s.readouts[0].1, !inert, "the readout lit");
+        }
+        // The editor, at the defaults (MONO, SCATTER, WIDTH 0).
+        let (mut e, host, params) = editing();
+        assert!(voices_inert(&params));
+        e.draw();
+        assert!(e.scene.voices_off);
+        let voices = ca72_panel::controls::index("voices").expect("a control");
+        let cutoff = ca72_panel::controls::index("cutoff").expect("a control");
+        assert!(!e.operable(voices) && e.operable(cutoff));
+        host.take();
+        let pt = at(&e, centre("voices"));
+        click(&mut e, pt);
+        go(&mut e, pt);
+        wheel(&mut e, 1.0);
+        e.end_gestures();
+        assert!(host.take().is_empty(), "VOICES took a press or the wheel");
+        e.start_typing(Readout::Voices);
+        assert!(e.typing.is_none());
+        e.start_typing(Readout::Drive);
+        assert!(e.typing.is_some());
     }
 
     #[test]
@@ -5706,6 +5808,50 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         window_frame(&mut e).save_png(out).unwrap();
+    }
+
+    /// VOICES dimmed where it does nothing and lit where it counts (decisions.md R-VOICES), in
+    /// each look, for a look: `voices-<look>-<state>.png` in `$CA72_VOICES_PNG`, the folder.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_window_voices_pngs() {
+        let Some(out) = std::env::var_os("CA72_VOICES_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let amount = |name: &str, v: f32| {
+            FloatParam::new(
+                name,
+                v,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+        };
+        let states = [
+            ("mono-width-0", false, false, 0.0),
+            ("mono-double", false, true, 60.0),
+            ("mono-width-100", false, false, 100.0),
+            ("poly", true, false, 60.0),
+        ];
+        for (look, skin) in [("realistic", Skin::Worn), ("classic", Skin::Drawn)] {
+            for (state, poly, doubled, width) in states {
+                let params = Ca72Params {
+                    poly: BoolParam::new("Poly", poly),
+                    doubled: BoolParam::new("Double", doubled),
+                    spread: amount("Width", width),
+                    ..Ca72Params::default()
+                };
+                let dir = tempfile::tempdir().unwrap();
+                let (mut e, _host, _params) = editing_of(params, Library::at(dir.path()));
+                // (Not `set_look`, which keeps the look in this computer's settings.)
+                e.renderer = Renderer::with_skin(skin, e.renderer.scale(), e.dpr);
+                e.composed = None;
+                window_frame(&mut e)
+                    .save_png(out.join(format!("voices-{look}-{state}.png")))
+                    .unwrap();
+            }
+        }
     }
 
     /// The window's frame as shown (the panel's renderer's whole drawing, the strip's parts over

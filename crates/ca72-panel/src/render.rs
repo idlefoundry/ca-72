@@ -34,6 +34,8 @@ pub struct Scene {
     /// DETUNE unused (SCATTER): its knob drawn dimmed, as FEEDBACK's is with EXTERNAL INPUT
     /// shut.
     pub detune_off: bool,
+    /// VOICES where it does nothing (the plug-in's `voices_inert`): dimmed, as DETUNE.
+    pub voices_off: bool,
     /// A tip: its text, centred above (x, y) in the drawing.
     pub tip: Option<(String, f64, f64)>,
     /// MIDI Learn (decisions.md R34): the control being learned, by its index in [`CONTROLS`]
@@ -52,6 +54,7 @@ impl Default for Scene {
             overload: 0.0,
             opening: crate::ultra::Opening::default(),
             detune_off: false,
+            voices_off: false,
             tip: None,
             learning: None,
             note: None,
@@ -377,9 +380,12 @@ impl Renderer {
                 };
                 let mut layer = control(c, v, midi);
                 // FEEDBACK while EXTERNAL INPUT is closed: dimmed as the parts with no
-                // parameter are, still operable; DETUNE in SCATTER: dimmed so, and not operable
-                // (the editor's `operable`).
-                if (silent && c.param == "feedback") || (scene.detune_off && c.param == "double") {
+                // parameter are, still operable; DETUNE in SCATTER and VOICES where it does
+                // nothing: dimmed so, and not operable (the editor's `operable`).
+                if (silent && c.param == "feedback")
+                    || (scene.detune_off && c.param == "double")
+                    || (scene.voices_off && c.param == "voices")
+                {
                     if worn {
                         // (A picture is not dimmed: the knob is shaded.)
                         layer.over.push_str(&format!(
