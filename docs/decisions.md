@@ -5159,3 +5159,12 @@ and `a_woken_instrument_plays_its_next_note_as_one_that_never_slept` (at rest th
 within 0.1 dB). Each fails with what it guards broken: without the wake on events, and sleeping
 as soon as the output is silent (the contours then 24 mV apart). Clippy with every target; the
 plug-in's 233 tests.
+
+**On main 866f6dc, 2026-10-12:** Windows (a clean export, MSVC 1.97.1): clippy with every
+feature and target, no warning; `cargo test --workspace` 417 passed, none failed, the seven window
+tests in the desktop session; the bundles and the installer. The Mac: the plug-in's 233 tests
+passed and clippy; the universal bundles and the Audio Unit, clap-validator 37 passed, Steinberg's
+47, pluginval at strictness 5 SUCCESS; signed, notarised, stapled, `spctl` "Notarized Developer
+ID": `CA-72-0.2.0-macOS.pkg` SHA-256
+9b0dd7003f3fc09dc1ac46370299e59c7997f480779cb76f973aadbf03ce8eeb, the release candidate, with its
+logs in `~/lab/artifacts/ca-72/0.2.0-rc4/`.
