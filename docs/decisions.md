@@ -5214,5 +5214,12 @@ merged with main's arrival. The installer, its logs and notarisation are in
 | `CA-72-0.2.0-0.1-presets.zip` | 499eccec93e4063645e68d59a512d23e3b4077e0b44863aace21770221a46413 |
 | `CA-72-0.2.0-git-sources.tar.gz` | 22d5c0733c307d510369fe345d5682973cdd33c841a168d49500913299772545 |
 
+**Arch Linux** (the owner, after publication: "what about arch linux systems?"): the released
+tarball installed by its `install.sh` on the Linux reference machine (Omarchy, on Arch; glibc
+2.44), no library reported missing, the installed bundles the release's to the byte, each library
+found in Arch's packages (libx11, libxcb, gcc-libs, glibc); clap-validator 37 passed and 7 skipped,
+Steinberg's validator 47 passed, pluginval at strictness 5 SUCCESS. Arch is named beside the
+other systems in the README and the release's notes.
+
 **Not done:** an Intel Mac, auval on this Mac's registry (CI's macOS job runs it), and Live (the
 owner's).
