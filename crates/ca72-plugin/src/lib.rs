@@ -3,6 +3,7 @@
 //! (up to ten), placed across the stereo output by SPREAD.
 
 pub mod character;
+pub mod compat;
 pub mod drive;
 pub mod editor;
 pub mod engine;
@@ -250,6 +251,9 @@ impl Plugin for Ca72 {
     /// A state without MIDI assignments (saved before MIDI Learn) opens with none, whatever the
     /// instance had; a table that is not understood is none either (decisions.md R34).
     ///
+    /// A state 0.1 saved has the knobs whose laws 0.2.0's calibration measured moved to where
+    /// they set what they set then (`compat`, decisions.md R-TRANSLATE).
+    ///
     /// A session saved with SCATTER's EDGES, no longer offered (INNER does its work: decisions.md
     /// R49), or with a placement not understood, opens with EVEN, the default, not at what
     /// the instance had.
@@ -304,6 +308,11 @@ impl Plugin for Ca72 {
                 "placement".to_owned(),
                 ParamValue::I32(even.to_index() as i32),
             );
+        }
+        // A state 0.1 saved: each knob whose law 0.2.0's calibration changed moved to where it
+        // sets what it set (decisions.md R-TRANSLATE).
+        if compat::before_0_2(&state.version) {
+            compat::translate(&mut state.params);
         }
     }
 
@@ -563,6 +572,37 @@ mod tests {
         let side: [&mut [f32]; 2] = [&mut a, &mut b];
         let mixed: Vec<f32> = (0..4).map(|i| mono(&side, i)).collect();
         assert_eq!(mixed, [2.0, 0.0, 1.0, 0.0]);
+    }
+
+    /// A session 0.1 saved opens translated into 0.2.0's calibration: its EMPHASIS where 0.2.0's
+    /// law sets what 0.1's did, LEVEL trimmed and DRIVE at none (decisions.md R-TRANSLATE); one
+    /// saved by 0.2.0 opens as it was saved.
+    #[test]
+    fn a_session_of_0_1_opens_translated_and_one_of_0_2_as_saved() {
+        let state = |version: &str| PluginState {
+            version: version.to_owned(),
+            params: [("emphasis", 5.0f32), ("tune", 0.5)]
+                .iter()
+                .map(|&(k, v)| (k.to_owned(), ParamValue::F32(v)))
+                .collect(),
+            fields: Default::default(),
+        };
+        let f32_of = |s: &PluginState, id: &str| match s.params.get(id) {
+            Some(ParamValue::F32(v)) => Some(*v),
+            _ => None,
+        };
+        let mut old = state("0.1.5");
+        Ca72::filter_state(&mut old);
+        let want = compat::translated("emphasis", 5.0).unwrap() as f32;
+        assert_eq!(f32_of(&old, "emphasis"), Some(want));
+        assert!((want - 5.0).abs() > 0.1, "EMPHASIS's law changed: {want}");
+        assert_eq!(f32_of(&old, "tune"), Some(0.5));
+        assert_eq!(f32_of(&old, "level"), Some(compat::LEVEL_FROM_0_1 as f32));
+        assert_eq!(f32_of(&old, "drive"), Some(0.0));
+        let mut new = state("0.2.0");
+        Ca72::filter_state(&mut new);
+        assert_eq!(f32_of(&new, "emphasis"), Some(5.0));
+        assert_eq!(f32_of(&new, "level"), None);
     }
 
     /// A session saved before ENTROPY, with ANALOG's amount, opens with ENTROPY at its
