@@ -223,11 +223,18 @@ the name and a drawer drops down over the strip, in three sections:
 
 The library is a folder of files, `Idle Foundry/CA-72/Presets` in your user data folder
 (`~/Library/Application Support` on macOS, `%APPDATA%` on Windows, `~/.local/share` on
-Linux). The twenty-five factory
-presets are built in, among them a drum kit and a riser made on the panel alone (Ladder
-Kick, Noise Snare, Closed Hat, Open Hat, Noise Crash, Pink Riser: one instance a drum),
-Warped Pad, eight POLY voices drifting with ENTROPY, and White Lotus, a held bass whose
-filter rings an octave and a fifth above each note.
+Linux). The nineteen factory
+presets are built in, among them a drum kit and a riser made on the panel alone (Driven
+Kick, Split Snare, Tight Hat, Loose Hat, Wide Crash, Swarm Riser: one instance a drum), Warp
+Field, eight POLY voices drifting with ENTROPY, and White Lotus, a held bass whose filter
+rings an octave and a fifth above each note.
+
+**The 0.1 presets.** 0.2.0 has a new set, and 0.1's twenty-four presets are no longer built
+in. A project you saved with 0.1 does not need them: it keeps every setting itself and
+sounds as it did. To choose them again, each release from 0.2.0 has
+`CA-72-<version>-0.1-presets.zip`: copy its `.toml` files into the folder above. They are
+listed with your own presets, tagged `0.1`, and copying them never replaces a preset you
+saved.
 
 ## MIDI Learn
 
@@ -416,8 +423,9 @@ The service documents and datasheets the model was derived from are not included
   High Fidelity quality remains in `crates/ca72` and the lab.
 - **Potato mode (QUALITY at LO) is close to the circuit, not the same**
   ([docs/decisions.md](docs/decisions.md) R47): a FEEDBACK loop can settle into another
-  oscillation than the circuit's (Undertow Growl is about 3 dB quieter as its notes start,
-  Pulse Strut about 1), the light filter's top octaves fall faster (Ringing Saw Line darker),
+  oscillation than the circuit's (Feedback Funk is about 1 dB quieter as its notes start, 0.1's
+  Undertow Growl about 3), the light filter's top octaves fall faster (0.1's Ringing Saw Line
+  darker),
   and driven hard at high EMPHASIS it loses its resonance sooner. Every other factory preset
   is within a decibel of the circuit's.
 - POLY's voices are shared between the host's audio thread and up to four threads of the

@@ -898,8 +898,8 @@ mod tests {
     #[test]
     fn the_factory_file_is_read_whole() {
         let f = factory();
-        assert_eq!(f.len(), 26);
-        assert_eq!(f[0].name, "Bass");
+        assert_eq!(f.len(), 19);
+        assert_eq!(f[0].name, "Felt Bass");
         assert!(f.iter().all(|s| !s.values.is_empty()));
         assert!(
             f.iter()
@@ -909,14 +909,20 @@ mod tests {
 
     /// The factory file ships inside the plug-in whole, its comments too: no trademark, no
     /// other product's or artist's name, no private record (decisions.md R1).
-    /// Stacked Fifths a fourth and a fifth over its root to the cent (the owner, 2026-10-10:
-    /// "Become a true 4th and 5th"), the presets' FREQUENCY values their pots' positions
-    /// (decisions.md R54); Cycle of Fifths' a fifth 16 cents wide, as its owner set it.
+    /// Stacked Fifths (0.1's, retired since: R63) a fourth and a fifth over its root to
+    /// the cent (the owner, 2026-10-10: "Become a true 4th and 5th"), the presets' FREQUENCY
+    /// values their pots' positions (decisions.md R54); Cycle of Fifths' a fifth 16 cents wide,
+    /// as its owner set it.
     #[test]
     fn stacked_fifths_is_a_fourth_and_a_fifth() {
         use ca72::freq_dial::Pot;
         let at = |name: &str, id: &str, pot: Pot| {
-            let s = factory().iter().find(|s| s.name == name).expect("a preset");
+            let retired = parse_factory(RETIRED_FILE).unwrap();
+            let s = factory()
+                .iter()
+                .chain(&retired)
+                .find(|s| s.name == name)
+                .expect("a preset");
             let (_, v) = s.values.iter().find(|(k, _)| k == id).expect("a value");
             pot.semitones(crate::params::wiper_of(*v as f32))
         };
@@ -1054,21 +1060,22 @@ mod tests {
         );
         assert_eq!(names(&lib.search("", &[], false, true)), ["Deep Bass"]);
         lib.favorite("deep bass", true).unwrap();
-        lib.favorite("Lead", true).unwrap();
+        lib.favorite("Singing Drift", true).unwrap();
         assert_eq!(
             names(&lib.search("", &[], true, false)),
-            ["Deep Bass", "Lead"]
+            ["Deep Bass", "Singing Drift"]
         );
-        lib.tag("Bass", vec!["bass".into(), "mine".into()]).unwrap();
+        lib.tag("Felt Bass", vec!["bass".into(), "mine".into()])
+            .unwrap();
         assert_eq!(
             names(&lib.search("", &["mine".into()], false, false)),
-            ["Bass"]
+            ["Felt Bass"]
         );
         assert!(lib.tags().contains(&"midnight".to_owned()));
         lib.rename("Deep Bass", "Deeper Bass").unwrap();
         assert!(!dir.path().join("Deep Bass.toml").exists());
         assert!(lib.find("Deeper Bass").unwrap().favorite);
-        assert!(lib.rename("Deeper Bass", "lead").is_err());
+        assert!(lib.rename("Deeper Bass", "singing drift").is_err());
         lib.remove("Deeper Bass").unwrap();
         assert!(lib.search("", &[], false, true).is_empty());
         assert!(check_name("a/b").is_err() && check_name(" x").is_err() && check_name("").is_err());
@@ -1079,34 +1086,34 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::at(dir.path());
         let edited = lib
-            .save("lead", vec![("emphasis".into(), 9.0)], None)
+            .save("singing drift", vec![("emphasis".into(), 9.0)], None)
             .unwrap();
         assert_eq!(edited.origin, Origin::Edited);
-        assert_eq!(edited.replaces.as_deref(), Some("Lead"));
-        assert_eq!(edited.sound.tags, ["lead", "glide"]);
+        assert_eq!(edited.replaces.as_deref(), Some("Singing Drift"));
+        assert_eq!(edited.sound.tags, ["lead", "glide", "prog"]);
         assert_eq!(
             lib.entries()
                 .0
                 .iter()
-                .filter(|e| same(&e.sound.name, "lead"))
+                .filter(|e| same(&e.sound.name, "singing drift"))
                 .count(),
             1
         );
-        assert_eq!(lib.revert("lead").unwrap(), "Lead");
-        assert_eq!(lib.find("Lead").unwrap().origin, Origin::Factory);
-        lib.rename("Bass", "Round Bass").unwrap();
-        assert!(lib.find("Bass").is_none());
+        assert_eq!(lib.revert("singing drift").unwrap(), "Singing Drift");
+        assert_eq!(lib.find("Singing Drift").unwrap().origin, Origin::Factory);
+        lib.rename("Felt Bass", "Round Bass").unwrap();
+        assert!(lib.find("Felt Bass").is_none());
         assert_eq!(lib.find("Round Bass").unwrap().origin, Origin::Edited);
         lib.revert("Round Bass").unwrap();
-        assert!(lib.find("Bass").is_some());
-        lib.remove("Bass").unwrap();
-        lib.save("Lead", vec![], None).unwrap();
-        lib.remove("Lead").unwrap();
-        assert!(lib.find("Bass").is_none() && lib.find("Lead").is_none());
-        assert!(!dir.path().join("Lead.toml").exists());
-        assert_eq!(lib.restore().unwrap(), ["Bass", "Lead"]);
+        assert!(lib.find("Felt Bass").is_some());
+        lib.remove("Felt Bass").unwrap();
+        lib.save("Singing Drift", vec![], None).unwrap();
+        lib.remove("Singing Drift").unwrap();
+        assert!(lib.find("Felt Bass").is_none() && lib.find("Singing Drift").is_none());
+        assert!(!dir.path().join("Singing Drift.toml").exists());
+        assert_eq!(lib.restore().unwrap(), ["Felt Bass", "Singing Drift"]);
         assert_eq!(lib.entries().0.len(), factory().len());
-        assert!(lib.revert("Bass").is_err());
+        assert!(lib.revert("Felt Bass").is_err());
     }
 
     /// `factory` is the folder's own file (the factory presets' marks): no preset takes the
@@ -1115,17 +1122,17 @@ mod tests {
     fn factory_is_no_presets_name() {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::at(dir.path());
-        lib.favorite("Lead", true).unwrap();
-        lib.tag("Bass", vec!["mine".into()]).unwrap();
+        lib.favorite("Singing Drift", true).unwrap();
+        lib.tag("Felt Bass", vec!["mine".into()]).unwrap();
         for n in ["factory", "Factory", "FACTORY"] {
             assert!(
                 lib.save(n, vec![("cutoff".into(), 1.0)], None).is_err(),
                 "{n}"
             );
-            assert!(lib.rename("Lead", n).is_err(), "{n}");
+            assert!(lib.rename("Singing Drift", n).is_err(), "{n}");
         }
-        assert!(lib.find("Lead").unwrap().favorite);
-        assert_eq!(lib.find("Bass").unwrap().sound.tags, ["mine"]);
+        assert!(lib.find("Singing Drift").unwrap().favorite);
+        assert_eq!(lib.find("Felt Bass").unwrap().sound.tags, ["mine"]);
         assert!(lib.save("Factory Floor", vec![], None).is_ok());
     }
 
@@ -1173,7 +1180,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::at(dir.path());
         assert!(lib.save("aux", vec![], None).is_err());
-        assert!(lib.rename("Lead", "NUL.lead").is_err());
+        assert!(lib.rename("Singing Drift", "NUL.lead").is_err());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
@@ -1214,24 +1221,24 @@ mod tests {
     fn an_unreadable_overlay_is_left_as_it_is() {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::at(dir.path());
-        lib.save("Lead", vec![("cutoff".into(), 1.0)], None)
+        lib.save("Singing Drift", vec![("cutoff".into(), 1.0)], None)
             .unwrap();
         let overlay = dir.path().join("factory.toml");
         for text in [
-            "format = 1\n[presets.Bass\nfavorite = true\n",
-            "format = 2\n[presets.Bass]\nfavorite = true\nrating = 5\n",
+            "format = 1\n[presets.\"Felt Bass\"\nfavorite = true\n",
+            "format = 2\n[presets.\"Felt Bass\"]\nfavorite = true\nrating = 5\n",
             "format = 1\npresets = 3\n",
         ] {
             std::fs::write(&overlay, text).unwrap();
-            let e = lib.favorite("Bass", true).unwrap_err();
+            let e = lib.favorite("Felt Bass", true).unwrap_err();
             assert!(e.contains("factory.toml cannot be read"), "{e}");
-            assert!(lib.tag("Bass", vec!["x".into()]).is_err());
-            assert!(lib.remove("Bass").is_err());
-            assert!(lib.remove("Lead").is_err());
-            assert!(lib.revert("Lead").is_err());
+            assert!(lib.tag("Felt Bass", vec!["x".into()]).is_err());
+            assert!(lib.remove("Felt Bass").is_err());
+            assert!(lib.remove("Singing Drift").is_err());
+            assert!(lib.revert("Singing Drift").is_err());
             assert!(lib.restore().is_err());
             assert_eq!(std::fs::read_to_string(&overlay).unwrap(), text);
-            assert!(dir.path().join("Lead.toml").exists());
+            assert!(dir.path().join("Singing Drift.toml").exists());
             let (list, bad) = lib.entries();
             assert_eq!(list.len(), factory().len());
             assert_eq!(bad.len(), 1, "{bad:?}");
@@ -1247,22 +1254,28 @@ mod tests {
         let overlay = dir.path().join("factory.toml");
         std::fs::write(
             &overlay,
-            "format = 1\nnote = \"kept\"\n\n[presets.Lead]\nfavorite = true\nrating = 5\n\n[presets.bass]\nhidden = true\ntags = [\"low\"]\n",
+            "format = 1\nnote = \"kept\"\n\n[presets.\"Singing Drift\"]\nfavorite = true\nrating = 5\n\n[presets.\"felt bass\"]\nhidden = true\ntags = [\"low\"]\n",
         )
         .unwrap();
-        assert!(lib.find("Lead").unwrap().favorite);
-        assert!(lib.find("Bass").is_none(), "hidden whatever the key's case");
-        lib.favorite("Lead", false).unwrap();
-        assert_eq!(lib.restore().unwrap(), ["bass"]);
-        assert_eq!(lib.find("Bass").unwrap().sound.tags, ["low"]);
-        lib.tag("Bass", vec!["round".into()]).unwrap();
+        assert!(lib.find("Singing Drift").unwrap().favorite);
+        assert!(
+            lib.find("Felt Bass").is_none(),
+            "hidden whatever the key's case"
+        );
+        lib.favorite("Singing Drift", false).unwrap();
+        assert_eq!(lib.restore().unwrap(), ["felt bass"]);
+        assert_eq!(lib.find("Felt Bass").unwrap().sound.tags, ["low"]);
+        lib.tag("Felt Bass", vec!["round".into()]).unwrap();
         let t: toml::Table = std::fs::read_to_string(&overlay).unwrap().parse().unwrap();
         assert_eq!(t["note"].as_str(), Some("kept"));
-        assert_eq!(t["presets"]["Lead"]["rating"].as_integer(), Some(5));
-        assert!(t["presets"]["Lead"].get("favorite").is_none());
-        assert_eq!(t["presets"]["bass"]["tags"][0].as_str(), Some("round"));
-        assert!(t["presets"].get("Bass").is_none());
-        assert_eq!(lib.find("Bass").unwrap().sound.tags, ["round"]);
+        assert_eq!(
+            t["presets"]["Singing Drift"]["rating"].as_integer(),
+            Some(5)
+        );
+        assert!(t["presets"]["Singing Drift"].get("favorite").is_none());
+        assert_eq!(t["presets"]["felt bass"]["tags"][0].as_str(), Some("round"));
+        assert!(t["presets"].get("Felt Bass").is_none());
+        assert_eq!(lib.find("Felt Bass").unwrap().sound.tags, ["round"]);
     }
 
     fn toml_files(dir: &Path) -> Vec<String> {
@@ -1374,19 +1387,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("Mine.toml"),
-            "format = 1\nname = \"Mine\"\nreplaces = \"lead\"\n\n[values]\ncutoff = 1\n",
+            "format = 1\nname = \"Mine\"\nreplaces = \"singing drift\"\n\n[values]\ncutoff = 1\n",
         )
         .unwrap();
         let lib = Library::at(dir.path());
         let e = lib.find("Mine").unwrap();
         assert_eq!(
             (e.origin, e.replaces.as_deref()),
-            (Origin::Edited, Some("Lead"))
+            (Origin::Edited, Some("Singing Drift"))
         );
-        assert!(lib.find("Lead").is_none());
+        assert!(lib.find("Singing Drift").is_none());
         lib.remove("Mine").unwrap();
-        assert!(lib.find("Lead").is_none() && lib.find("Mine").is_none());
-        assert_eq!(lib.restore().unwrap(), ["Lead"]);
+        assert!(lib.find("Singing Drift").is_none() && lib.find("Mine").is_none());
+        assert_eq!(lib.restore().unwrap(), ["Singing Drift"]);
     }
 
     /// The folder is parsed again only when it changed: a file of the same name, size and
@@ -1471,7 +1484,7 @@ mod cross {
             Some(vec!["cross".into()]),
         )
         .unwrap();
-        lib.favorite("Pulse Strut", true).unwrap();
+        lib.favorite("Feedback Funk", true).unwrap();
         for e in lib
             .entries()
             .0

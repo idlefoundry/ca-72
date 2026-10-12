@@ -20,7 +20,6 @@ mod common;
 use ca72::preamp::InLoop;
 use ca72_analysis::fft::{hann, power};
 use ca72_plugin::engine::{Engine, Event};
-use ca72_plugin::library::factory;
 use common::{controls_of, env};
 
 const RATE: f64 = 48_000.0;
@@ -35,7 +34,7 @@ fn play(
     seconds: f64,
     seed: u64,
 ) -> (Vec<f64>, Vec<f32>) {
-    let s = factory().iter().find(|s| s.name == preset).unwrap();
+    let s = &common::preset(preset);
     let mut c = controls_of(s);
     c.poly = false;
     c.feedback = ca72::voice::feedback_law(knob / 10.0);

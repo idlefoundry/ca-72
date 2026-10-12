@@ -4858,3 +4858,67 @@ ten voices) against main: all 26 the same to the bit. The plug-in's and the pane
 passed, 32 ignored (the new ones in a debug build too); rustfmt; clippy with `-D warnings`. On
 the Mac, CA-72 TEST built from this branch: clap-validator (37 passed), the VST3 SDK's validator
 (47 passed) and pluginval at strictness 5 pass. Not yet: the installed build in a host.
+
+## R63. 0.2.0's factory presets: the owner's favourites, 0.1's renamed
+
+**The owner, 2026-10-11:** "for 0.2.0 I only want the presets I currently have favorited. Any
+preset that i have favorited that existed in 0.1.5 needs to be renamed. Others can keep their
+current name."
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **The favourites as the drawer shows them**, read from the owner's library on the Mac at
+  19:46 (EDT; Wooden Mallet starred at 19:42 and saved again at 19:44, after a first reading
+  at 19:29): the stars in
+  `factory.toml` and in their own files, a factory preset with an edit of theirs counted by the
+  edit's. Nineteen; not kept: Lead, Elastic Octaves, Undertow Growl, Cruising Whistle, Stacked
+  Fifths, Ringing Saw Line, Shoreline Wash.
+- **Each as the owner has it.** Thirteen are their edits, their values whole (every control
+  named, but MIDI BEND RANGE, the player's, which Wooden Mallet's file of 2026-10-03 held):
+  Wooden Mallet (RETRIGGER on, SPREAD 100, VOLUME 10), and, saved that day, Brass Tutti, Breath Flute, Hollow Glider, Ladder Kick, Noise Crash,
+  Noise Snare, Pink Riser, Slow Bow, Slow Horn Swell, Upright Pluck and Warped Pad (DOUBLE on
+  most, DRIVE, ENTROPY and SPREAD, UNISON, an octave, NOTE PRIORITY LAST, RETRIGGER), and Cycle
+  of Fifths (four voices, DOUBLE 30 cents, oscillator 3 and FILTER MODULATION off). Six are the
+  factory's as they were: Bass, Three Saw Slab, Pulse Strut, Closed Hat, Open Hat, White Lotus.
+  Their descriptions say what the edits changed; their tags are the owner's.
+- **The seventeen from 0.1.5 renamed** (names proposed by the agent, the owner's to change):
+  Bass Felt Bass, Three Saw Slab Saw Monolith, Pulse Strut Feedback Funk, Upright Pluck Tenor
+  Pluck, Hollow Glider Singing Drift, Slow Horn Swell Horn Bloom, Brass Tutti Brass Choir,
+  Breath Flute Smoke Flute, Wooden Mallet Bright Xylo, Slow Bow Wide Bow, Ladder Kick Driven Kick, Noise Snare Split
+  Snare, Closed Hat Tight Hat, Open Hat Loose Hat, Noise Crash Wide Crash, Pink Riser Swarm
+  Riser, Warped Pad Warp Field. White Lotus and Cycle of Fifths keep theirs.
+- **All twenty-four of 0.1.5's presets moved whole to `retired.toml`** (R55), the seventeen kept
+  under new names among them, so the pack is 0.1's whole set at its own names, and no retired
+  name is a factory preset's.
+- **Levelled at -18 LUFS momentary maximum** on each one's phrase (`tests/preset_levels.rs`), as
+  R15: MAIN OUTPUT VOLUME first (Feedback Funk 8.96 to 8.711, Singing Drift 6.04 to 9.105, Horn
+  Bloom 7.0174 to 7.248, Brass Choir 3.894 to 6.585, Wide Bow 8.23 to 9.456, Wide Crash 8.0716
+  to 9.809, Cycle of Fifths 7.2399 to 8.044; Warp Field and White Lotus left). **The owner,
+  2026-10-11**, asked whether LEVEL should bring up the ten still under at VOLUME 10 (R15 had left
+  a preset at 10 under its level): "do what you have to to level the volumes. i am done starring
+  things." So LEVEL, the plug-in's output gain after MAIN OUTPUT, by each one's shortfall: Felt
+  Bass +2.57 dB, Saw Monolith +2.41, Smoke Flute +6.85, Bright Xylo +4.46, Driven Kick +11.32,
+  Split Snare +1.24, Tight Hat +8.19, Loose Hat +3.97, Swarm Riser +4.65; every one at -18.00,
+  the highest peak Tight Hat's, -2.7 dBFS. **Tenor Pluck** stays at -21.18: its oscillator, VOLUME
+  and LEVEL are at their tops (LEVEL's +12 dB), and more would take DRIVE or the filter, its sound.
+- **Sessions keep their sound** (R55). `drive::AVERAGE`, the factory presets' average DRIVE
+  curve that a session without a measurement of its own takes, is left as it was, so no
+  session's AUTO GAIN changes.
+- **The owner's own library** is left as it is: in 0.2.0 their thirteen edits list as their own
+  presets beside the factory's of the same sound, and the stars keyed by 0.1's names mark
+  nothing; theirs to tidy.
+- **The tests** that named 0.1's presets name 0.2.0's, or take a retired one by name through
+  `tests/common`'s `preset` (the factory's, else `retired.toml`'s): the measurements made on
+  Lead, Pulse Strut, Undertow Growl, Stacked Fifths and Brass Tutti keep them. The editor's
+  scrolling tests add twelve presets of the user's, so that the list runs below the rows
+  shown whatever the factory's count. `tests/common`'s `controls_of` takes NOTE PRIORITY and
+  RETRIGGER, which no factory preset had named.
+
+**Evidence (omarchy, 2026-10-11, on R62):** the owner's library read again at 19:54, unchanged
+since 19:46. `cargo test -p ca72-plugin`: the unit tests and every integration test pass;
+clippy clean. Every preset's level on its phrase after levelling (momentary maximum, LUFS; peak,
+dBFS): Felt Bass -18.00 (-5.0), Saw Monolith -18.00 (-4.2), Feedback Funk -18.05 (-11.8), Tenor
+Pluck -21.18 (-7.1), Singing Drift -17.97 (-14.1), Horn Bloom -18.06 (-10.4), Brass Choir
+-18.02 (-9.3), Smoke Flute -18.00 (-11.0), Bright Xylo -18.00 (-6.0), Wide Bow -18.09 (-12.5),
+Driven Kick -18.00 (-7.2), Split Snare -18.00 (-6.0), Tight Hat -18.00 (-2.7), Loose Hat -18.00
+(-6.3), Wide Crash -17.88 (-10.5), Swarm Riser -18.00 (-12.0), Warp Field -18.09 (-9.4), White
+Lotus -18.03 (-12.4), Cycle of Fifths -18.15 (-9.7). R62 (SCATTER in MONO) moved none of them.

@@ -21,7 +21,7 @@ use ca72_analysis::loudness::loudness as measure;
 use ca72_plugin::drive::{AVERAGE, Calibration, Curve, HEARD, STEPS};
 use ca72_plugin::engine::Controls;
 use ca72_plugin::library::{Sound, factory};
-use common::{controls_of, env, phrase, play, played_as};
+use common::{controls_of, env, phrase, play, played_as, preset};
 use std::time::{Duration, Instant};
 
 /// DRIVE's settings played: every 3 dB, the curve's steps and the points between them.
@@ -251,7 +251,7 @@ fn auto_on_the_factory_presets() {
 #[test]
 fn auto_brings_a_preset_back_and_off_it_is_louder() {
     let rate = 16_000.0;
-    let s = factory().iter().find(|s| s.name == "Lead").unwrap();
+    let s = &preset("Lead");
     let c = played_as(s, controls_of(s));
     let (curve, _) = measured(&c, rate);
     let material = its_phrase(s);
@@ -291,10 +291,7 @@ fn a_measurement_beside_the_voices() {
     let seconds: f64 = env("CA72_SECONDS", 10.0);
     let workers: usize = env("CA72_WORKERS", 3);
     let name = std::env::var("CA72_ONLY").unwrap_or_else(|_| "Brass Tutti".to_owned());
-    let s = factory()
-        .iter()
-        .find(|s| s.name.contains(name.as_str()))
-        .unwrap();
+    let s = &preset(&name);
     let mut c = controls_of(s);
     (c.poly, c.voices, c.drive) = (true, 10, 12.0);
     let period = Duration::from_secs_f64(block as f64 / rate);
