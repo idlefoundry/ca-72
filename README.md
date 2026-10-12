@@ -93,7 +93,9 @@ and sends nothing of yours.
   its own parts under ENTROPY and its own place under SPREAD, their oscillators at
   different points of their cycles; turned down so that it sounds about as loud as one
   voice. It outranks POLY. Switching it, or VOICES while it is on, stops the notes
-  sounding.
+  sounding. With POLY and UNISON off, VOICES counts only as the one voice's places (SPREAD,
+  below); with DOUBLE on or WIDTH at 0 it changes nothing, and is dimmed and does not turn,
+  as DETUNE is without DOUBLE.
 - **ENTROPY** (0 to 100 %, off by default): each voice its own parts, as if built from a
   different batch: the three oscillators' tuning, the filter's cutoff and EMPHASIS, the
   contours' times and GLIDE, each off by a little; the oscillators and the cutoff drift
