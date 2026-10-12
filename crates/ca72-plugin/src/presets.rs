@@ -1032,7 +1032,7 @@ mod tests {
         let s = ParamSetter::new(&Host);
         let mut b = Browser::new(Library::at(dir.path()));
         b.show(true, &p);
-        let bass = lib.find("Bass").unwrap();
+        let bass = lib.find("Felt Bass").unwrap();
         b.choose(&bass, &p, &s);
         b.step(1, &p, &s);
         assert_eq!(map.saved(), before, "chosen");
@@ -1043,8 +1043,8 @@ mod tests {
             b.drawer_press(DrawerTarget::Key(PresetKey::SaveAs), 0.0, &p, &s);
         };
         save_as(&mut b, "Mine");
-        save_as(&mut b, "Lead");
-        assert_eq!(lib.find("Lead").unwrap().origin, Origin::Edited);
+        save_as(&mut b, "Singing Drift");
+        assert_eq!(lib.find("Singing Drift").unwrap().origin, Origin::Edited);
         assert_eq!(map.saved(), before, "saved");
         for f in std::fs::read_dir(dir.path()).unwrap() {
             let text = std::fs::read_to_string(f.unwrap().path()).unwrap();
@@ -1055,7 +1055,7 @@ mod tests {
         }
         // REVERT, of the preset set (the one just saved).
         b.drawer_press(DrawerTarget::Key(PresetKey::Revert), 0.0, &p, &s);
-        assert_eq!(lib.find("Lead").unwrap().origin, Origin::Factory);
+        assert_eq!(lib.find("Singing Drift").unwrap().origin, Origin::Factory);
         assert_eq!(map.saved(), before, "reverted");
         assert!(values_now(&p).iter().all(|(k, _)| !k.contains("midi_map")));
     }
@@ -1094,7 +1094,7 @@ mod tests {
             lib.save(n, vec![], None).unwrap();
         }
         lib.favorite("Pad A", true).unwrap();
-        lib.favorite("Warped Pad", true).unwrap();
+        lib.favorite("Warp Field", true).unwrap();
         let p = Ca72Params::default();
         let s = ParamSetter::new(&Host);
         let mut b = Browser::new(Library::at(dir.path()));
@@ -1113,7 +1113,7 @@ mod tests {
         assert_eq!(b.drawer.editing, None);
         assert_eq!(b.drawer.hint, "Choose a preset first.");
         typed(&mut b, "pad", &p);
-        assert_eq!(rows(&b), ["Pad A", "Pad B", "Warped Pad"]);
+        assert_eq!(rows(&b), ["Pad A", "Pad B", "Warp Field"]);
 
         // Renaming Pad B, FAVORITES leaves it out of the list: the rename stays with it.
         set(&mut b, "Pad B");
@@ -1122,7 +1122,7 @@ mod tests {
         assert_eq!(b.drawer.focus, Some(FieldId::Edit));
         b.drawer.edit = Field::new("Pad Renamed");
         b.drawer_press(DrawerTarget::Tab(Tab::Favourites), 0.0, &p, &s);
-        assert_eq!(rows(&b), ["Pad A", "Warped Pad"]);
+        assert_eq!(rows(&b), ["Pad A", "Warp Field"]);
         assert_eq!(b.drawer.editing, Some(Edit::Rename));
         b.key(&down(Key::Enter), &p, &s);
         assert!(lib.find("Pad B").is_none() && lib.find("Pad Renamed").is_some());
@@ -1135,7 +1135,7 @@ mod tests {
         b.drawer.edit = Field::new("soft");
         lib.save("Pad 0", vec![], None).unwrap();
         b.reread(&p);
-        assert_eq!(rows(&b), ["Pad 0", "Pad A", "Pad Renamed", "Warped Pad"]);
+        assert_eq!(rows(&b), ["Pad 0", "Pad A", "Pad Renamed", "Warp Field"]);
         b.key(&down(Key::Enter), &p, &s);
         assert_eq!(lib.find("Pad Renamed").unwrap().sound.tags, ["soft"]);
         assert!(lib.find("Pad A").unwrap().sound.tags.is_empty());
@@ -1162,10 +1162,10 @@ mod tests {
         b.key(&down(Key::Enter), &p, &s);
         assert_eq!(b.drawer.hint, "Pad Renamed is no longer there.");
         assert_eq!(b.drawer.editing, None);
-        assert!(lib.find("Pad Again").is_none() && lib.find("Warped Pad").is_some());
+        assert!(lib.find("Pad Again").is_none() && lib.find("Warp Field").is_some());
 
         // REVERT of a preset that is not a changed factory one: said, nothing done.
-        set(&mut b, "Warped Pad");
+        set(&mut b, "Warp Field");
         key(&mut b, PresetKey::Revert);
         assert_eq!(
             b.drawer.hint,
@@ -1199,8 +1199,8 @@ mod tests {
     }
 
     /// NOTE PRIORITY and RETRIGGER are a preset's (the owner, 2026-10-10: "This item should be
-    /// saved per patch"; R50): saved with the sound, set by a preset naming them, and
-    /// LOW and off, the instrument's own, by one saved before them (every factory preset).
+    /// saved per patch"; R50): saved with the sound, set by a preset naming them (the factory's
+    /// the owner made since), and LOW and off, the instrument's own, by one saved before them.
     #[test]
     fn note_priority_and_retrigger_are_part_of_a_preset() {
         let dir = tempfile::tempdir().unwrap();
@@ -1213,8 +1213,19 @@ mod tests {
                 .map(|(_, v)| v)
         };
         assert!(values_now(&p).iter().any(|(k, _)| k == "note_priority"));
+        let named = |e: &Entry, id: &str| {
+            e.sound
+                .values
+                .iter()
+                .find(|(k, _)| k == id)
+                .map(|(_, v)| *v)
+        };
         for e in lib.entries().0 {
-            assert_eq!(target(&e), Some(0.0), "{}", e.sound.name);
+            let v = named(&e, "note_priority").map_or(0.0, |v| {
+                let i = crate::params::NotePriority::from_index(v as usize);
+                p.note_priority.preview_normalized(i)
+            });
+            assert_eq!(target(&e), Some(v), "{}", e.sound.name);
         }
         let last = lib
             .save("Lead", vec![("note_priority".to_owned(), 1.0)], None)
@@ -1232,7 +1243,8 @@ mod tests {
         };
         assert!(values_now(&p).iter().any(|(k, _)| k == "retrigger"));
         for e in lib.entries().0 {
-            assert_eq!(retrigger(&e), Some(0.0), "{}", e.sound.name);
+            let v = named(&e, "retrigger").map_or(0.0, |v| if v >= 0.5 { 1.0 } else { 0.0 });
+            assert_eq!(retrigger(&e), Some(v), "{}", e.sound.name);
         }
         let on = lib
             .save("Lead Retrig", vec![("retrigger".to_owned(), 1.0)], None)
@@ -1255,7 +1267,7 @@ mod tests {
                 .find(|(k, _)| *k == id)
                 .map(|(_, v)| v)
         };
-        let brass = lib.find("Brass Tutti").unwrap();
+        let brass = lib.find("Brass Choir").unwrap();
         assert_eq!(target(&brass, "poly"), Some(1.0));
         assert_eq!(
             target(&brass, "voices"),
@@ -1269,7 +1281,7 @@ mod tests {
             target(&brass, "spread"),
             Some(p.spread.preview_normalized(50.0))
         );
-        let bass = lib.find("Bass").unwrap();
+        let bass = lib.find("Felt Bass").unwrap();
         assert_eq!(target(&bass, "poly"), Some(0.0));
         assert_eq!(
             target(&bass, "entropy"),

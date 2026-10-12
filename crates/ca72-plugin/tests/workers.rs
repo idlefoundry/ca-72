@@ -9,11 +9,10 @@
 mod common;
 
 use ca72_plugin::engine::Engine;
-use ca72_plugin::library::factory;
-use common::{Chords, controls_of, play_block};
+use common::{Chords, controls_of, play_block, preset};
 
 fn render(name: &str, workers: usize, flush: u32) -> Vec<f32> {
-    let s = factory().iter().find(|s| s.name == name).unwrap();
+    let s = &preset(name);
     let mut c = controls_of(s);
     c.poly = true;
     c.voices = 10;

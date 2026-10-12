@@ -16,9 +16,12 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.1.5: on machines of 3 and 4 processors the POLY presets no longer overload the
-CPU, and on Linux the editor's window is opaque, since 0.1.4. The macOS installer is signed and
-notarised; the Windows one is not yet signed.
+**Status:** 0.2.0: the circuit calibrated against a hardware instrument, projects saved with
+0.1 translated into it; nineteen new factory presets, 0.1's in a download of their own; the
+realistic look; QUALITY's LO, HI and ULTRA; stereo with SPREAD, INNER, DOUBLE and UNISON;
+DRIVE, LEVEL and AUTO GAIN; FILTER MODE; NOTE PRIORITY and RETRIGGER; and an instance waiting
+costs next to nothing. The macOS installer is signed and notarised; the Windows one is not yet
+signed.
 
 ## Installing
 
@@ -93,7 +96,9 @@ and sends nothing of yours.
   its own parts under ENTROPY and its own place under SPREAD, their oscillators at
   different points of their cycles; turned down so that it sounds about as loud as one
   voice. It outranks POLY. Switching it, or VOICES while it is on, stops the notes
-  sounding.
+  sounding. With POLY and UNISON off, VOICES counts only as the one voice's places (SPREAD,
+  below); with DOUBLE on or WIDTH at 0 it changes nothing, and is dimmed and does not turn,
+  as DETUNE is without DOUBLE.
 - **ENTROPY** (0 to 100 %, off by default): each voice its own parts, as if built from a
   different batch: the three oscillators' tuning, the filter's cutoff and EMPHASIS, the
   contours' times and GLIDE, each off by a little; the oscillators and the cutoff drift
@@ -104,17 +109,23 @@ and sends nothing of yours.
 - **SPREAD** (0 to 100 %, off by default): POLY's or UNISON's voices across the stereo
   field, each as loud wherever it sits, where **SCATTER** puts them: EVEN (the default),
   evenly from edge to edge, the first two at the edges; or CENTER, the first in the centre and
-  the rest spread about it by the golden ratio. With POLY and UNISON off the voice stays in the centre
-  (unless DOUBLE). A voice moves to a new place over 10 ms.
+  the rest spread about it by the golden ratio. With POLY, UNISON and DOUBLE off the one voice
+  goes round VOICES's places, the next at each attack: a note played detached moves on, a note
+  played legato stays where its phrase began (with RETRIGGER every key moves on), so a line
+  jumps about the field in a pattern the playing makes. All Notes Off, or the host resetting
+  the plug-in, starts the pattern again from the first place. A voice moves to a new place
+  over 10 ms; the one voice in about 1.6 ms, within the 7.8 ms its contours take to start
+  after a key, so that a note is heard where it sounds.
 - **INNER** (0 to 100 %, off by default): the inner edge of each side, as a share of SPREAD
   (the strip's WIDTH). SPREAD brings the voices in from the outer edges; INNER moves them out
   from the centre. Each side's voices sit in a band from INNER's share of SPREAD's way out to
   SPREAD's edge, as far across it as SCATTER puts them, and none in the centre: a voice SCATTER
   puts there (CENTER's first, EVEN's last with an odd number of voices) goes to the side its
   turn falls on. With DOUBLE the pairs keep to the band too. At 100 % every voice sits at
-  SPREAD's edge; at SPREAD 0, or with POLY and UNISON off and no DOUBLE, it does nothing.
-- **DOUBLE** (0 to 100 %, off by default): each note two whole voices, up to 20 cents apart,
-  the sharper on the left. With SPREAD the pair goes out to either side of the centre, as
+  SPREAD's edge; at SPREAD 0 it does nothing.
+- **DOUBLE** (the strip's VOICES PLAYED AS: SCATTER by default, or DOUBLE): each note two
+  whole voices, DETUNE apart (0 to 100 cents, a semitone at its top), the sharper on the left;
+  with SCATTER, DETUNE is dimmed and does nothing. With SPREAD the pair goes out to either side of the centre, as
   far as SCATTER puts the note's voice (with INNER at 100 %, and with POLY and UNISON off, all
   of SPREAD's way); at SPREAD 0 both are in the centre. Turned down so that it sounds about as
   loud as one voice a note; it doubles the voices' work. Switching it on or off stops the
@@ -187,8 +198,9 @@ whichever is chosen; only where the knob points changes.
 
 Under the panel, a strip holds the presets' selector and the plug-in's own controls (not the
 instrument's): POLY (click), VOICES (click either side to step), and ENTROPY and SPREAD (drag
-the slider; the switch beside each turns it off and back on at its amount). SPREAD is
-dimmed while POLY is off, and FEEDBACK while EXTERNAL INPUT is closed.
+the slider; the switch beside each turns it off and back on at its amount). VOICES and the
+placement are unlit in MONO with DOUBLE, where they move nothing, and FEEDBACK is dimmed
+while EXTERNAL INPUT is closed.
 
 **Presets.** At the strip's left: the preset last chosen (marked • once you change it), a
 star to make it a favourite, the previous and next preset, and SAVE…. A preset holds every
@@ -217,11 +229,28 @@ the name and a drawer drops down over the strip, in three sections:
 
 The library is a folder of files, `Idle Foundry/CA-72/Presets` in your user data folder
 (`~/Library/Application Support` on macOS, `%APPDATA%` on Windows, `~/.local/share` on
-Linux). The twenty-five factory
-presets are built in, among them a drum kit and a riser made on the panel alone (Ladder
-Kick, Noise Snare, Closed Hat, Open Hat, Noise Crash, Pink Riser: one instance a drum),
-Warped Pad, eight POLY voices drifting with ENTROPY, and White Lotus, a held bass whose
-filter rings an octave and a fifth above each note.
+Linux). The nineteen factory
+presets are built in, among them a drum kit and a riser made on the panel alone (Driven
+Kick, Split Snare, Tight Hat, Loose Hat, Wide Crash, Swarm Riser: one instance a drum), Warp
+Field, eight POLY voices drifting with ENTROPY, and White Lotus, a held bass whose filter
+rings an octave and a fifth above each note.
+
+**Projects saved with 0.1.** From 0.2.0 the circuit is calibrated against a hardware
+instrument ([docs/decisions.md](docs/decisions.md) R42), which changed the laws of a dozen
+knobs (the mixer's VOLUMEs, EXTERNAL INPUT VOLUME, CUTOFF, EMPHASIS, AMOUNT OF CONTOUR, the
+ATTACK, DECAY and SUSTAIN knobs, GLIDE and the MODULATION wheel). A project saved with 0.1
+opens with those knobs moved to where they set what they set in 0.1, and LEVEL at -0.5 dB,
+so that it plays as near to how it sounded as the knobs allow (R66). What the calibration
+changed in the circuit's own parts is not undone: 0.1.5's presets so translated come within
+a decibel of their 0.1.5 level for nineteen of twenty-four, and up to 3.7 dB from it for a
+FEEDBACK patch. Presets you saved yourself with 0.1 are not translated (their files do not say
+which version made them).
+
+**The 0.1 presets.** 0.2.0 has a new set, and 0.1's twenty-four presets are no longer built
+in. A project you saved with 0.1 does not need them: it keeps every setting itself. To choose them again, each release from 0.2.0 has
+`CA-72-<version>-0.1-presets.zip`: copy its `.toml` files into the folder above. They are
+listed with your own presets, tagged `0.1`, and copying them never replaces a preset you
+saved.
 
 ## MIDI Learn
 
@@ -410,10 +439,22 @@ The service documents and datasheets the model was derived from are not included
   High Fidelity quality remains in `crates/ca72` and the lab.
 - **Potato mode (QUALITY at LO) is close to the circuit, not the same**
   ([docs/decisions.md](docs/decisions.md) R47): a FEEDBACK loop can settle into another
-  oscillation than the circuit's (Undertow Growl is about 3 dB quieter as its notes start,
-  Pulse Strut about 1), the light filter's top octaves fall faster (Ringing Saw Line darker),
+  oscillation than the circuit's (Feedback Funk is about 1 dB quieter as its notes start, 0.1's
+  Undertow Growl about 3), the light filter's top octaves fall faster (0.1's Ringing Saw Line
+  darker),
   and driven hard at high EMPHASIS it loses its resonance sooner. Every other factory preset
   is within a decibel of the circuit's.
+- With no note playing an instance costs next to nothing (from 0.2.0; decisions.md R68): with
+  POLY and UNISON off the instrument sleeps once its sound has died away and its contours
+  have settled, and the next note, any MIDI, a control moved or a sound at EXTERNAL INPUT
+  wakes it, playing as it would have; POLY's and UNISON's voices are freed as each falls
+  silent. Before, a waiting instance cost nearly what a playing one does (at ULTRA about a
+  third of a core).
+- Horn Bloom, Brass Choir and Warp Field play POLY's voices with DOUBLE, two instruments a
+  note: at QUALITY HI each takes one and a half to one and three quarter cores of a fast
+  computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,
+  and on a computer of four processors or a slower one they can overload. QUALITY LO plays
+  them for about a fortieth of that ([docs/decisions.md](docs/decisions.md) R67).
 - POLY's voices are shared between the host's audio thread and up to four threads of the
   plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
   [docs/decisions.md](docs/decisions.md) R11, R39), shared by every instance in the

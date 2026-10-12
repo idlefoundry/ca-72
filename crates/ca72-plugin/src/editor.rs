@@ -1152,9 +1152,13 @@ impl Editing {
     }
 
     /// A value to be typed into readout `r` (decisions.md R52): not AUTO GAIN's, which reads
-    /// what is measured, nor DETUNE's in SCATTER, where its knob does nothing either.
+    /// what is measured, nor DETUNE's in SCATTER or VOICES's where it does nothing
+    /// ([`voices_inert`]), their knobs doing nothing either.
     fn start_typing(&mut self, r: Readout) {
-        if !r.typed() || (r == Readout::Detune && !self.params.doubled.value()) {
+        if !r.typed()
+            || (r == Readout::Detune && !self.params.doubled.value())
+            || (r == Readout::Voices && voices_inert(&self.params))
+        {
             return;
         }
         self.typing = Some((r, String::new()));
@@ -1274,11 +1278,14 @@ impl Editing {
     }
 
     /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
-    /// knob unresponsive unless the user is in double mode"), which is drawn dimmed then.
+    /// knob unresponsive unless the user is in double mode") and VOICES where it does nothing
+    /// ([`voices_inert`]), each drawn dimmed then.
     fn operable(&self, i: usize) -> bool {
-        CONTROLS
-            .get(i)
-            .is_none_or(|c| c.param != "double" || self.params.doubled.value())
+        CONTROLS.get(i).is_none_or(|c| match c.param {
+            "double" => self.params.doubled.value(),
+            "voices" => !voices_inert(&self.params),
+            _ => true,
+        })
     }
 
     /// A switch set, a gesture of its own; nothing if it is so already.
@@ -1835,6 +1842,7 @@ impl Editing {
         }
         self.scene.power = !self.params.bypass.value();
         self.scene.detune_off = !self.params.doubled.value();
+        self.scene.voices_off = voices_inert(&self.params);
         self.scene.overload = Meters::load(&self.meters.overload);
         self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
@@ -2095,6 +2103,17 @@ fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i
     }
 }
 
+/// Whether VOICES does nothing (the owner, 2026-10-11, of a MONO preset's VOICES 4: "I don't
+/// think those 4 voices do anything"; decisions.md R64): in MONO (neither POLY nor UNISON)
+/// with DOUBLE, whose one pair has no place among others, or scattering with WIDTH at 0, where
+/// every one of VOICES's places is the centre (R62). Then its knob is dimmed and not operable,
+/// and its readout not lit nor typed into, as DETUNE's in SCATTER; its value stays for when it
+/// counts again.
+fn voices_inert(p: &Ca72Params) -> bool {
+    let c = p.controls();
+    !c.poly && !c.unison && (p.doubled.value() || c.spread <= 0.0)
+}
+
 /// What the strip shows, from the parameters, the voices sounding (a bit a voice), their levels
 /// (0 to 1, by voice) and the output's, and the scene before (its rail, hover and MIDI Learn's
 /// ring are set elsewhere).
@@ -2109,6 +2128,9 @@ fn strip_scene(
     let poly = c.poly && !unison;
     let mono = !poly && !unison;
     let doubled = p.doubled.value();
+    // (MONO with DOUBLE: the one pair, all of WIDTH's way out, whatever VOICES and the
+    // placement; without, it scatters over VOICES's places: decisions.md R62.)
+    let alone = mono && doubled;
     let voices = c.voices.clamp(2, 10);
     let placement = c.placement;
     let mode = Some(if unison { 2 } else { usize::from(poly) });
@@ -2136,9 +2158,9 @@ fn strip_scene(
         (String::new(), false)
     };
     let readouts = [
-        (format!("{voices}"), !mono),
+        (format!("{voices}"), !voices_inert(p)),
         (percent(c.entropy), c.entropy > 0.0),
-        (percent(c.spread), c.spread > 0.0 && (!mono || doubled)),
+        (percent(c.spread), c.spread > 0.0),
         (
             if doubled {
                 crate::params::cents(c.double * crate::engine::DOUBLE_CENTS)
@@ -2150,23 +2172,16 @@ fn strip_scene(
         auto,
         (num3(c.drive), c.drive > 0.0),
         (num3(c.level), true),
-        (
-            percent(c.inner),
-            c.inner > 0.0 && c.spread > 0.0 && (!mono || doubled),
-        ),
+        (percent(c.inner), c.inner > 0.0 && c.spread > 0.0),
     ];
     let on = |k: usize| sounding & (1 << k) != 0;
-    // Where they sound: in MONO the one voice (its pair with DOUBLE, all of WIDTH's way out);
-    // else each of VOICES's voices at its place by the placement, its pair as far out with
-    // DOUBLE (decisions.md R45), each in its side's band by INNER: where the engine's
-    // gains put it, the kit's (R49).
+    // Where they sound: in MONO with DOUBLE the one pair, all of WIDTH's way out; else each of
+    // VOICES's places by the placement (in MONO the one voice at the place of its last attack,
+    // R62), its pair as far out with DOUBLE (decisions.md R45), each in its side's band
+    // by INNER: where the engine's gains put it, the kit's (R49).
     let (width, inner) = (c.spread, c.inner);
-    let field = if mono {
-        if doubled {
-            Field::Double(vec![(place::pair_at(width, inner, place::ALONE), on(0))])
-        } else {
-            Field::Scatter(vec![(0.0, on(0))])
-        }
+    let field = if alone {
+        Field::Double(vec![(place::pair_at(width, inner, place::ALONE), on(0))])
     } else if doubled {
         Field::Double(
             (0..voices)
@@ -2187,7 +2202,7 @@ fn strip_scene(
     };
     // The placement's tab by the plug-in's choice (its tabs are its choices, EVEN and CENTER:
     // not the kit's index, which counts its EDGES); none where it moves nothing.
-    let placement_lit = !mono || doubled;
+    let placement_lit = !alone;
     StripScene {
         mode,
         stereo: Some(usize::from(doubled)),
@@ -2195,10 +2210,10 @@ fn strip_scene(
         auto: c.auto_gain,
         readouts,
         field,
-        // Each voice's level by its place in the field (the one instrument's, the output's),
-        // in steps of a fortieth (a drop does not move for less).
+        // Each voice's level by its place in the field (the one instrument's, the output's, at
+        // whichever place it sounds), in steps of a fortieth (a drop does not move for less).
         levels: if mono {
-            vec![output]
+            vec![output; voices]
         } else {
             levels.iter().take(voices).copied().collect()
         }
@@ -3119,8 +3134,24 @@ mod tests {
     }
 
     fn editing_with(library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        editing_of(Ca72Params::default(), library)
+    }
+
+    /// The editor with POLY on, where VOICES counts (decisions.md R64).
+    fn editing_poly() -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        let params = Ca72Params {
+            poly: BoolParam::new("Poly", true),
+            ..Ca72Params::default()
+        };
+        editing_of(
+            params,
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        )
+    }
+
+    fn editing_of(params: Ca72Params, library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
         let host = Arc::new(Host::default());
-        let params = Arc::new(Ca72Params::default());
+        let params = Arc::new(params);
         let context: Arc<dyn GuiContext> = host.clone();
         let e = Editing::new(
             context,
@@ -3565,7 +3596,7 @@ mod tests {
     /// AUTO GAIN's reads what is measured and takes none.
     #[test]
     fn a_value_typed_into_a_readout_sets_its_knob() {
-        let (mut e, host, params) = editing();
+        let (mut e, host, params) = editing_poly();
         let double = |e: &mut Editing, t: StripTarget| {
             let p = on_strip(e, strip_at(t));
             click(e, p);
@@ -4727,7 +4758,7 @@ mod tests {
     /// forbids (decisions.md R18).
     #[test]
     fn a_wheels_gesture_ends_before_another_begins() {
-        let (mut e, host, params) = editing();
+        let (mut e, host, params) = editing_poly();
         let cutoff = params.cutoff.as_ptr();
         let p = at(&e, centre("cutoff"));
         go(&mut e, p);
@@ -5052,14 +5083,21 @@ mod tests {
                 vec![Call::Begin(p), Call::Set(p, 0.5), Call::End(p)]
             );
         }
-        // VOICES's knob dragged up: one gesture of VOICES.
-        let voices = params.voices.as_ptr();
-        let p = at(&e, centre("voices"));
-        go(&mut e, p);
-        press(&mut e);
-        go(&mut e, below(p, -120.0));
-        release(&mut e);
-        let calls = host.take();
+        // VOICES's knob dragged up: nothing at these defaults, where it does nothing (MONO,
+        // SCATTER, WIDTH 0: R64); with POLY on, one gesture of VOICES.
+        let drag_voices = |e: &mut Editing| {
+            let p = at(e, centre("voices"));
+            go(e, p);
+            press(e);
+            go(e, below(p, -120.0));
+            release(e);
+        };
+        drag_voices(&mut e);
+        assert_eq!(host.take(), vec![], "VOICES dragged where it does nothing");
+        let (mut poly_e, poly_host, poly_params) = editing_poly();
+        let voices = poly_params.voices.as_ptr();
+        drag_voices(&mut poly_e);
+        let calls = poly_host.take();
         well_formed(&calls);
         assert_eq!(calls.first(), Some(&Call::Begin(voices)));
         assert_eq!(calls.last(), Some(&Call::End(voices)));
@@ -5119,22 +5157,133 @@ mod tests {
     }
 
     /// The strip lights the placement's tab by the plug-in's choice, EVEN the first and CENTER
-    /// the second (not by the kit's index, which counts its EDGES); none in MONO without DOUBLE,
-    /// whose one voice has no place among others.
+    /// the second (not by the kit's index, which counts its EDGES), in MONO too, whose one
+    /// voice scatters by it (R62); none in MONO with DOUBLE, whose pair has no place
+    /// among others.
     #[test]
     fn the_strip_lights_the_placements_tab() {
-        let lit = |poly: bool, placement: Scatter| {
+        let lit = |poly: bool, doubled: bool, placement: Scatter| {
             let p = Ca72Params {
                 poly: BoolParam::new("Poly", poly),
+                doubled: BoolParam::new("Double", doubled),
                 placement: EnumParam::new("Scatter Placement", placement),
                 ..Ca72Params::default()
             };
             strip_scene(&p, 0, (&[], 0.0), StripScene::default()).placement
         };
-        assert_eq!(lit(true, Scatter::Even), Some(0));
-        assert_eq!(lit(true, Scatter::Centre), Some(1));
-        assert_eq!(lit(false, Scatter::Centre), None);
+        assert_eq!(lit(true, false, Scatter::Even), Some(0));
+        assert_eq!(lit(true, false, Scatter::Centre), Some(1));
+        assert_eq!(lit(false, false, Scatter::Centre), Some(1));
+        assert_eq!(lit(false, true, Scatter::Centre), None);
         assert_eq!(Bank::Placement.words(), ["EVEN", "CENTER"]);
+    }
+
+    /// In MONO without DOUBLE the strip shows VOICES's places as the engine's gains have them,
+    /// the one voice lit at the place its last attack took (the engine's bit for it), at the
+    /// output's level, with VOICES, WIDTH and INNER lit (R62); with DOUBLE, the one pair,
+    /// and VOICES not lit.
+    #[test]
+    fn mono_shows_its_places_and_the_one_it_sounds_at() {
+        let amount = |name: &str, percent: f32| {
+            FloatParam::new(
+                name,
+                percent,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+        };
+        let scene = |doubled: bool| {
+            let p = Ca72Params {
+                spread: amount("Width", 100.0),
+                inner: amount("Inner", 40.0),
+                doubled: BoolParam::new("Double", doubled),
+                ..Ca72Params::default()
+            };
+            strip_scene(&p, 1 << 2, (&[], 0.5), StripScene::default())
+        };
+        let s = scene(false);
+        let Field::Scatter(places) = &s.field else {
+            panic!("{:?}", s.field);
+        };
+        let lit: Vec<usize> = (0..places.len()).filter(|&k| places[k].1).collect();
+        assert_eq!((places.len(), lit), (4, vec![2]));
+        for (k, &(x, _)) in places.iter().enumerate() {
+            let want = place::voice_at(1.0, 0.4, place::Placement::Even, k, 4);
+            assert_eq!(x, want, "place {k}");
+        }
+        assert_eq!(s.levels[2], 0.5);
+        let shown = |s: &StripScene, r: Readout| {
+            s.readouts[Readout::ALL.iter().position(|&x| x == r).unwrap()].1
+        };
+        for r in [Readout::Voices, Readout::Width, Readout::Inner] {
+            assert!(shown(&s, r), "{r:?} not lit");
+        }
+        let d = scene(true);
+        assert!(matches!(&d.field, Field::Double(pairs) if pairs.len() == 1));
+        assert!(!shown(&d, Readout::Voices), "VOICES lit with DOUBLE");
+        assert!(shown(&d, Readout::Width));
+    }
+
+    /// VOICES where it does nothing (R64): in MONO with DOUBLE, or scattering at WIDTH 0;
+    /// it counts again with POLY, with UNISON, or with WIDTH up in MONO without DOUBLE (R62).
+    /// The editor then draws its knob dimmed, takes no press, drag nor typed value for it, and
+    /// leaves its readout unlit; as for DETUNE in SCATTER, the other knobs answer.
+    #[test]
+    fn voices_is_dimmed_where_it_does_nothing() {
+        let params = |poly: bool, unison: bool, doubled: bool, width: f32| Ca72Params {
+            poly: BoolParam::new("Poly", poly),
+            unison: BoolParam::new("Unison", unison),
+            doubled: BoolParam::new("Double", doubled),
+            spread: FloatParam::new(
+                "Width",
+                width,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            ),
+            ..Ca72Params::default()
+        };
+        for (poly, unison, doubled, width, inert) in [
+            (false, false, true, 100.0, true),
+            (false, false, true, 0.0, true),
+            (false, false, false, 0.0, true),
+            (false, false, false, 100.0, false),
+            (true, false, false, 0.0, false),
+            (true, false, true, 0.0, false),
+            (false, true, true, 0.0, false),
+            (false, true, false, 100.0, false),
+        ] {
+            let p = params(poly, unison, doubled, width);
+            assert_eq!(
+                voices_inert(&p),
+                inert,
+                "POLY {poly}, UNISON {unison}, DOUBLE {doubled}, WIDTH {width}"
+            );
+            let s = strip_scene(&p, 0, (&[], 0.0), StripScene::default());
+            assert_eq!(s.readouts[0].1, !inert, "the readout lit");
+        }
+        // The editor, at the defaults (MONO, SCATTER, WIDTH 0).
+        let (mut e, host, params) = editing();
+        assert!(voices_inert(&params));
+        e.draw();
+        assert!(e.scene.voices_off);
+        let voices = ca72_panel::controls::index("voices").expect("a control");
+        let cutoff = ca72_panel::controls::index("cutoff").expect("a control");
+        assert!(!e.operable(voices) && e.operable(cutoff));
+        host.take();
+        let pt = at(&e, centre("voices"));
+        click(&mut e, pt);
+        go(&mut e, pt);
+        wheel(&mut e, 1.0);
+        e.end_gestures();
+        assert!(host.take().is_empty(), "VOICES took a press or the wheel");
+        e.start_typing(Readout::Voices);
+        assert!(e.typing.is_none());
+        e.start_typing(Readout::Drive);
+        assert!(e.typing.is_some());
     }
 
     #[test]
@@ -5240,6 +5389,16 @@ mod tests {
         e.draw();
     }
 
+    /// A library of the factory's presets and twelve of the user's (`Pad 01` to `Pad 12`), so
+    /// that the list runs on below the rows shown whatever the factory's count.
+    fn long_library(dir: &std::path::Path) -> Library {
+        let lib = Library::at(dir);
+        for i in 1..=12 {
+            lib.save(&format!("Pad {i:02}"), vec![], None).unwrap();
+        }
+        lib
+    }
+
     fn row_of(e: &Editing, name: &str) -> usize {
         e.browser
             .drawer
@@ -5259,7 +5418,7 @@ mod tests {
     #[test]
     fn small_scrolls_add_up_to_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
+        let (mut e, _host, _params) = editing_with(long_library(dir.path()));
         e.draw();
         open(&mut e);
         let list = in_drawer(
@@ -5294,7 +5453,7 @@ mod tests {
     #[test]
     fn the_rail_drops_the_drawer_over_the_strip_and_a_row_sets_the_plugin() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut e, host, params) = editing_with(Library::at(dir.path()));
+        let (mut e, host, params) = editing_with(long_library(dir.path()));
         e.draw();
         let shut = e.window_height();
         assert_eq!(shut, height_for(1720));
@@ -5305,10 +5464,13 @@ mod tests {
         assert_eq!(host.resizes.load(Ordering::Relaxed), 0);
         assert_eq!(e.drawer_span().unwrap(), (DRAWER_TOP, DRAWER_TOP, art::H));
         assert!(!e.browser.bar.below && e.browser.bar.open);
-        assert_eq!(e.browser.drawer.rows.len(), crate::library::factory().len());
+        assert_eq!(
+            e.browser.drawer.rows.len(),
+            crate::library::factory().len() + 12
+        );
         // A row sets every parameter it names (or its default), the preset remembered.
         host.take();
-        let i = row_of(&e, "Undertow Growl");
+        let i = row_of(&e, "Warp Field");
         // Below the rows shown: the wheel scrolls the list to it.
         let list = in_drawer(
             &e,
@@ -5330,7 +5492,7 @@ mod tests {
         let (x, y) = presets_ui::row_centre(&e.browser.drawer, i).expect("shown");
         let pt = in_drawer(&e, (x, y));
         click(&mut e, pt);
-        assert_eq!(preset(&params), "Undertow Growl");
+        assert_eq!(preset(&params), "Warp Field");
         let calls = host.take();
         let set = |p: ParamPtr| {
             calls
@@ -5348,18 +5510,18 @@ mod tests {
         let ends = calls.iter().filter(|c| matches!(c, Call::End(_))).count();
         assert_eq!(begins, ends);
         e.draw();
-        assert_eq!(e.browser.bar.name, "Undertow Growl");
+        assert_eq!(e.browser.bar.name, "Warp Field");
         assert!(e.browser.drawer.rows[i].current);
         // A double click on a row chooses it and closes the drawer.
         e.browser.scroll(-100);
-        let j = row_of(&e, "Brass Tutti");
+        let j = row_of(&e, "Brass Choir");
         let pt = in_drawer(
             &e,
             presets_ui::row_centre(&e.browser.drawer, j).expect("shown"),
         );
         click(&mut e, pt);
         click(&mut e, pt);
-        assert_eq!(preset(&params), "Brass Tutti");
+        assert_eq!(preset(&params), "Brass Choir");
         assert!(!e.browser.open);
         slid(&mut e);
         assert_eq!(e.window_height(), shut);
@@ -5453,8 +5615,8 @@ mod tests {
             .iter()
             .map(|r| r.name.as_str())
             .collect();
-        assert!(names.contains(&"Lead") && names.contains(&"Hollow Glider"));
-        assert!(!names.contains(&"Bass"), "{names:?}");
+        assert!(names.contains(&"Singing Drift") && names.contains(&"Horn Bloom"));
+        assert!(!names.contains(&"Felt Bass"), "{names:?}");
         key(&mut e, Key::Backspace);
         assert_eq!(e.browser.drawer.search.text, "GLID");
         key(&mut e, Key::ArrowDown);
@@ -5484,7 +5646,7 @@ mod tests {
             .drawer
             .chips
             .iter()
-            .position(|(t, _)| t == "whistle")
+            .position(|(t, _)| t == "prog")
             .expect("a chip");
         let setter = ParamSetter::new(e.context.as_ref());
         e.browser
@@ -5496,10 +5658,10 @@ mod tests {
             .iter()
             .map(|r| r.name.as_str())
             .collect();
-        assert_eq!(names, ["Cruising Whistle"]);
+        assert_eq!(names, ["Singing Drift"]);
         let pt = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Next)));
         click(&mut e, pt);
-        assert_eq!(preset(&params), "Cruising Whistle");
+        assert_eq!(preset(&params), "Singing Drift");
     }
 
     /// An arrow choosing a preset ends a wheel's gesture still open on a knob it sets.
@@ -5557,7 +5719,7 @@ mod tests {
         for _ in 0.."My Bass".len() {
             key(&mut e, Key::Backspace);
         }
-        typed(&mut e, "Bass");
+        typed(&mut e, "Felt Bass");
         assert!(e.browser.drawer.replace);
         assert!(e.browser.drawer.hint.contains("factory"));
         key(&mut e, Key::Escape);
@@ -5595,7 +5757,7 @@ mod tests {
         assert!(!e.browser.bar.found, "the bar says the preset is gone");
         // A factory preset deleted (Enter once asked), then restored; the star makes a
         // favourite.
-        let i = row_of(&e, "Lead");
+        let i = row_of(&e, "Singing Drift");
         let setter = ParamSetter::new(e.context.as_ref());
         e.browser
             .drawer_press(DrawerTarget::Row(i), 0.0, &e.params, &setter);
@@ -5606,7 +5768,13 @@ mod tests {
             &setter,
         );
         key(&mut e, Key::Enter);
-        assert!(e.browser.drawer.rows.iter().all(|r| r.name != "Lead"));
+        assert!(
+            e.browser
+                .drawer
+                .rows
+                .iter()
+                .all(|r| r.name != "Singing Drift")
+        );
         let setter = ParamSetter::new(e.context.as_ref());
         e.browser.drawer_press(
             DrawerTarget::Key(PresetKey::Restore),
@@ -5614,10 +5782,10 @@ mod tests {
             &e.params,
             &setter,
         );
-        let i = row_of(&e, "Lead");
+        let i = row_of(&e, "Singing Drift");
         e.browser
             .drawer_press(DrawerTarget::Star(i), 0.0, &e.params, &setter);
-        assert!(lib.find("Lead").unwrap().favorite);
+        assert!(lib.find("Singing Drift").unwrap().favorite);
     }
 
     #[test]
@@ -5640,6 +5808,50 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         window_frame(&mut e).save_png(out).unwrap();
+    }
+
+    /// VOICES dimmed where it does nothing and lit where it counts (decisions.md R64), in
+    /// each look, for a look: `voices-<look>-<state>.png` in `$CA72_VOICES_PNG`, the folder.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_window_voices_pngs() {
+        let Some(out) = std::env::var_os("CA72_VOICES_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let amount = |name: &str, v: f32| {
+            FloatParam::new(
+                name,
+                v,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+        };
+        let states = [
+            ("mono-width-0", false, false, 0.0),
+            ("mono-double", false, true, 60.0),
+            ("mono-width-100", false, false, 100.0),
+            ("poly", true, false, 60.0),
+        ];
+        for (look, skin) in [("realistic", Skin::Worn), ("classic", Skin::Drawn)] {
+            for (state, poly, doubled, width) in states {
+                let params = Ca72Params {
+                    poly: BoolParam::new("Poly", poly),
+                    doubled: BoolParam::new("Double", doubled),
+                    spread: amount("Width", width),
+                    ..Ca72Params::default()
+                };
+                let dir = tempfile::tempdir().unwrap();
+                let (mut e, _host, _params) = editing_of(params, Library::at(dir.path()));
+                // (Not `set_look`, which keeps the look in this computer's settings.)
+                e.renderer = Renderer::with_skin(skin, e.renderer.scale(), e.dpr);
+                e.composed = None;
+                window_frame(&mut e)
+                    .save_png(out.join(format!("voices-{look}-{state}.png")))
+                    .unwrap();
+            }
+        }
     }
 
     /// The window's frame as shown (the panel's renderer's whole drawing, the strip's parts over
@@ -5864,7 +6076,7 @@ mod tests {
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         e.draw();
         open(&mut e);
-        let i = row_of(&e, "Brass Tutti");
+        let i = row_of(&e, "Brass Choir");
         let pt = in_drawer(
             &e,
             presets_ui::row_centre(&e.browser.drawer, i).expect("shown"),

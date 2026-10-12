@@ -1832,6 +1832,46 @@ as I think people might be running into issues."
 by hand); `Cargo.lock` changed only in the workspace's eight crates. The installers are
 CI's, on the pull request.
 
+**The release (2026-10-06, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3),** from a fresh clone of the tag `v0.1.2` (`b1e6d67`, main's commit, whose tree is the
+pull request's head's, `75b1f2f`; clean, version 0.1.2), in a folder of its own beside
+another agent's checkout, which was left untouched. The tag's CI passed and drafted the
+release with its five assets. Over SSH from the Windows reference machine, at low priority
+(`nice -n 19`, 8 jobs), `cargo xtask bundle-universal ca72-plugin --profile bundle` (Rust
+1.97.1, through rustup's proxy: the login shell's `cargo` is stable's) and `scripts/auv2.sh`
+made the bundles and the Audio Unit. Signing could not be done over SSH, where the keychain
+is locked (`codesign`: `errSecInternalComponent`; `notarytool`: `keychainLocked`), so the
+owner ran `scripts/package.sh` with the two Developer ID identities, the notary profile and
+`CA72_REQUIRE_NOTARIZATION=1` in a terminal on the Mac:
+- **Apple's notary service** accepted it: submission `1c5d7685-2a84-4260-8058-e104c4fa5e6c`,
+  status `Accepted`. The ticket is stapled (`stapler validate` passes); the installer is
+  signed `Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)`, trusted timestamp
+  2026-10-06 19:26:06 UTC; Gatekeeper (`spctl --assess --type install`): `accepted`,
+  `source=Notarized Developer ID`. `pkgbuild` printed "write: Permission denied" four times
+  for each bundle, as `package.sh` notes it does on macOS 15 and later; the payload is whole.
+- **The VST3, the CLAP and the Audio Unit in its payload** (expanded with `pkgutil
+  --expand-full`; the first release with the Audio Unit): each signed `Developer ID
+  Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the hardened runtime and a secure
+  timestamp, `codesign --verify --strict` passing; version 0.1.2; `x86_64 arm64`; LICENSE
+  and the notices inside; installed to `/Library/Audio/Plug-Ins/VST3`, `…/CLAP` and
+  `…/Components`. The component's CLAP is the CLAP choice's, byte for byte, its signature
+  valid.
+- **Its SHA-256** is `8c9ed3bba0ba17bc415136cde0cc98a94441fe7a0bf1bcaf044fb3fba9f57a7d`
+  (14,059,118 bytes). It went into the draft with its line added to CI's `SHA256SUMS.txt`;
+  the four files it lists, downloaded again from the draft, passed `sha256sum -c`. CI's
+  Windows plug-in, from the pull request's run, imports Windows' own libraries only (R32).
+- **Published** on the owner's word at 2026-10-06 19:28:40 UTC as the latest release
+  (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.2, six assets), with the notes
+  drafted in #9. The API's `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.2`;
+  the public downloads have the draft's sizes, and the public `SHA256SUMS.txt` is the one
+  uploaded.
+
+`notarization.json`, the build's and the packaging's logs, the commands (`build.sh`) and
+`SHA256SUMS.txt` are kept with the release's evidence outside the repository, as 0.1.1's are.
+The release's clone then went to the Mac's Trash, and R31's test CLAP to the reference
+machine's Recycle Bin; its VST3, which Sandyne had loaded, was gone from the folder once
+Sandyne closed, another change's test build (`CA-72 R34`) in its place.
+
 ## R34. MIDI Learn
 **The owner's request, 2026-10-06:** a focused first MIDI Learn. Each sound control (knobs,
 selectors, switches) learns a hardware controller's absolute 7-bit control change on its exact
@@ -2192,6 +2232,38 @@ MIDI Learn (R34) as 0.1.3.
   `SHA256SUMS.txt`; the macOS installer is built, signed and notarised on the release Mac
   (`docs/macos-release.md`) and put into the draft; then published, with notes in 0.1.2's
   form.
+
+**The release (2026-10-06, the release Mac: an M4 Pro, macOS 27.0, Xcode 27.0, notarytool
+1.1.3).** The pull request's CI passed on the bump (`cb21704`) on every system; it was merged
+(`07a7dfb`, main's commit, its tree `cb21704`'s) and tagged `v0.1.3`, whose CI passed and
+drafted the release with its five assets. The macOS installer was built from a fresh clone at
+`cb21704` (nothing in the build records the commit), made while the tag's CI ran: `cargo xtask
+bundle-universal ca72-plugin --profile bundle` (Rust 1.97.1) and `scripts/auv2.sh`, the bundles
+then passing `scripts/validate.sh` (clap-validator 37 passed, 0 failed, 7 skipped; pluginval at
+strictness 10, SUCCESS; Steinberg's validator 47 passed; auval `-strict`, AU VALIDATION
+SUCCEEDED; pluginval on the Audio Unit, SUCCESS; editor tests skipped), and `scripts/package.sh`
+with the two Developer ID identities, the notary profile and `CA72_REQUIRE_NOTARIZATION=1`
+making `CA-72-0.1.3-macOS.pkg`:
+- **Apple's notary service** accepted it: submission `9892bffb-b042-4427-8e06-2a3155bba08f`,
+  status `Accepted` (some 50 minutes in Apple's queue). The ticket is stapled (`stapler
+  validate` passes); the installer is signed `Developer ID Installer: Idle Foundry Ltd.
+  (3JA8JUZ36W)`, trusted timestamp 2026-10-06 21:14:48 UTC; Gatekeeper: `accepted`,
+  `source=Notarized Developer ID`.
+- **The VST3, the CLAP and the Audio Unit in its payload**: each signed `Developer ID
+  Application: Idle Foundry Ltd. (3JA8JUZ36W)` with the hardened runtime, `codesign --verify
+  --strict --deep` passing; version 0.1.3; `x86_64 arm64`.
+- **Its SHA-256** is `19911160f8398cab3a3f9b103ac4dd5d90970dc2720c3bf3bf3a44c339d3f421`
+  (14,293,865 bytes). It went into the draft with its line added to CI's `SHA256SUMS.txt`; the
+  four files it lists, downloaded again from the draft, passed `shasum -a 256 -c`.
+- **Published** on the owner's word ("are we able to make this the latest release?") at
+  2026-10-06 22:15:21 UTC as the latest release
+  (https://github.com/idlefoundry/ca-72/releases/tag/v0.1.3, six assets), with notes in
+  0.1.2's form. The API's `releases/latest`, which CHECK FOR UPDATES reads, gives `v0.1.3`;
+  the `.pkg` downloaded from the public release matches its checksum and Gatekeeper accepts it.
+
+`notarization.json`, the build's, the validators' and the packaging's logs, the commands
+(`build.sh`) and `SHA256SUMS.txt` are kept with the release's evidence outside the repository,
+as 0.1.1's and 0.1.2's are. The release's clone then went to the Mac's Trash.
 
 ## R36. The editor's switches and buttons in Cubase
 **Owner decision, 2026-10-07.** Users reported that the plug-in's buttons did nothing in
@@ -4669,3 +4741,430 @@ the same tree), the records since numbered R50 to R60 the same way, a private de
 record (the name and folders of a set of the owner's) edited out, and the README's picture of
 the panel (`docs/panel.png`) drawn again as the window opens (`the_window_png`), now with NOTE
 PRIORITY, RETRIGGER and the settings key.
+
+**Afterwards (2026-10-11), from porting change 5 into plugin-kit (the kit's K9):** an independent
+review there found baseview's count of held buttons read before the press's new `CursorMoved`
+call and written after it, so a press or release let through by a modal loop run from the
+handler would be lost. The count is now read after the call (baseview's `PATCHES.md`, change 5),
+in both copies alike. With it, the seven Windows window tests passed in the desktop session (an
+export of this main with the kit's baseview over its own), the press test failed without change
+5, and clippy over the workspace passed on Windows.
+
+## R61. Escape reaches the editor in REAPER's CLAP on Windows
+
+**The owner, 2026-10-11:** "merge anything into main that should be merged. Just don't push
+anything public", while the CA-74's lead, porting its own fix into plugin-kit (the kit's K10),
+found by reading this repository that the CA-72 has the same fault.
+
+**Agent decisions, 2026-10-11:**
+- **The fault:** in REAPER 7.82 on Windows, the CLAP plug-in's window lost Escape while the
+  editor held the keyboard: typing a value into a readout or into the drawer's FIND, Escape
+  closed REAPER's FX window instead of cancelling. REAPER's CLAP window handles Escape before it
+  asks the window what keys it wants (baseview's change 3, R34) and before dispatching it, so
+  that answer could not help.
+- **Taken from plugin-kit as the kit has it** (baseview's `PATCHES.md`, change 6, the CA-74's):
+  a `WH_GETMESSAGE` hook for each library's GUI thread (`src/win/escape.rs`) hands an Escape
+  just removed from the queue to the focused editor while it holds the keys, after putting a
+  `WM_NULL` in its place. Idle Escape, other keys, peeks and other windows go as before. The
+  CA-72's baseview is the kit's, file for file.
+
+**Evidence (2026-10-11, Windows, MSVC 1.97.1):** baseview's three tests of it pass in the
+desktop session, and two fail with the hook's registration taken out; the CA-72's seven window
+tests pass; clippy over the workspace with every feature passes. In REAPER 7.82, CLAP, a renamed
+build of this tree (CA-72 PRIORITY, its own REAPER settings): LEVEL's readout double-clicked,
+"-6" typed, Escape: back to 0.0, the FX window open and in front; the drawer opened, "lead"
+typed into FIND (the list narrowed), Escape: the drawer shut, the window open; Escape with
+nothing held: the FX window closed, as REAPER does. The same build of the commit before
+(without change 6): "-6" typed, Escape closed the FX window. Not tried: the VST3 in REAPER, and
+other hosts on Windows (the kit's K10 tried REAPER's VST3 and Cubase 15 with the CA-74).
+
+## R62. SCATTER in MONO: the one voice at the next of VOICES's places at each attack
+
+**The owner, 2026-10-11:** "what if me made "scatter" an option in mono? So I would imagine
+something like a plucked voice, which we would want to be monophonic, um, would have scat- when
+scatter gets applied to it, it would jump around uh, seemingly at random um, to the listener,
+but there would actually be it would, it would actually be uh, a pattern according to how it was
+played, I assume. Uh, so the order that the notes were played, perhaps, uh, that they they move
+around um, up to as many voices as, as there are." Told that with POLY and UNISON off, WIDTH,
+INNER, VOICES and the placement moved nothing (the voice in the centre) though the switch reads
+SCATTER, so that no new control was needed; that it costs nothing, the one voice only placed
+anew; that CENTER's places, by the golden ratio, sound random and repeat, and EVEN's go from side
+to side; that the voice should move only at a new attack, a legato phrase staying where it began
+and RETRIGGER moving every key; that one voice moved, not a voice a note, keeps MONO (a new key
+takes the one voice's pitch at once, so nothing of the note before is left behind); that Wooden
+Mallet (MONO, WIDTH 60, which did nothing) and sessions saved with MONO and WIDTH up would start
+to scatter; and that moving over the places' 10 ms at an attack might smear it: "this sounds
+great. make it".
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **When the voice moves:** when its trigger contact closes, the start of an attack, which the
+  contours follow (`Voice::trigger_closed` and `Light::trigger_closed`: the keys' gate each model
+  already kept): a key pressed with none held, or with RETRIGGER a key coming down after the
+  contact's 13 ms open (R50). A key pressed while another is held (single triggering) moves
+  nothing, nor does a key let go. A key pressed again within the re-arming time after the last
+  was let go (about 12 ms) closes the contact and moves the voice, though the circuit may not
+  start its contours again.
+- **Where:** VOICES's places as POLY's voices 0, 1, 2 ... have them by the placement, WIDTH and
+  INNER (the kit's `voice_gains`), the next at each closing, round and round (`Playing::turn`);
+  the first attack at the first place (EVEN's left edge; CENTER's centre or, with INNER, the side
+  its turn falls on). VOICES lowered meanwhile takes the turn round its own count.
+- **Starting again:** All Notes Off and the host's reset (`Engine::release_all`) start the
+  pattern again at the first place, so that a part played from its start after either places its
+  notes alike each time.
+- **How fast:** the one voice's place glides with a time constant of a fifth of `TRIGGER_ON`
+  (`TURN_GLIDE`, 1.56 ms), its knobs' moves too, not the kit's 10 ms (`GLIDE`): its contours
+  start 7.8 ms after the contact closes (the light model's `TRIGGER_ON`, fitted to the
+  circuit's), by when the voice is within 0.7 % of its new place; with 10 ms it would be 46 %
+  short, and the attack heard sliding from the place before. What sounds in those 7.8 ms is the
+  note before's tail, already at the new key's pitch, and it moves with it.
+- **DOUBLE in MONO as before:** the one pair all of WIDTH's way out, whatever VOICES and the
+  placement; a twin let go as DOUBLE is switched off plays its tail out where it was, and the
+  voice glides to its first place.
+- **The strip:** in MONO without DOUBLE, VOICES's readout is lit, WIDTH's and INNER's where they
+  are up, and the placement's tab; WHERE THE VOICES SOUND shows VOICES's places with the one
+  voice lit at its last attack's (the engine's bit for it, `Engine::sounding_mask`). With DOUBLE
+  as before: VOICES and the placement unlit. The picture example's MONO strip likewise.
+- **No new parameter, and nothing kept for what was saved before:** a session or preset with
+  POLY, UNISON and DOUBLE off and WIDTH above 0 now scatters. Of the factory presets only Wooden
+  Mallet (MONO, WIDTH 60, VOICES 8, EVEN) does, and it is kept so, scattering, its loudness the
+  same (below).
+
+**The owner, 2026-10-11**, asked whether sessions saved before should open as they sounded
+(recommended: leave them, WIDTH having done nothing there), whether Wooden Mallet should keep
+scattering, and whether the CA-74 should have it too: "okay. what presets would that be?", "ok,
+sounds good" and "yes". Of the presets in the Mac's library only Wooden Mallet (the factory's and
+the owner's copy) scatters; Hollow Glider, Noise Crash, Noise Snare and Slow Bow there are MONO
+with WIDTH up but DOUBLE on, and play as before; the retired presets' pack (R55) holds none yet.
+
+**Evidence (the Linux reference machine, 2026-10-11):** tests:
+`the_one_instrument_takes_the_next_place_at_each_attack` (seven detached notes, each one's left
+and right power at the gains of place `i` mod VOICES within 1e-6: EVEN with four voices, CENTER
+with five and INNER, and EVEN at LO; and the editor's bit for each),
+`a_legato_note_stays_and_retrigger_moves_it`, `all_notes_off_starts_the_pattern_again`,
+`the_one_instrument_is_at_its_new_place_before_its_contours_start` (0.7 % short), and the
+strip's `mono_shows_its_places_and_the_one_it_sounds_at` and
+`the_strip_lights_the_placements_tab`; each seen to fail with the code broken (the kit's glide,
+no turn, no restart, every key moving, the light voice not turning, the strip's old lights).
+Tests that held the one voice in the centre with WIDTH up now hold it there at WIDTH 0
+(`a_chord_fills_the_field_and_one_voice_without_spread_stays_in_the_centre`,
+`inner_clears_the_centre_and_one_voice_stays_there`) or at its first place
+(`a_twin_let_go_plays_its_tail_out_and_takes_no_new_key`; `tests/sound.rs`'s
+`poly_plays_a_chord_and_spread_parts_it`: the same sound at EVEN's left edge, its left side √2
+times the centre's within 1e-5 of the peak, its right silent). `preset_levels` (each factory
+preset as it is set, on its phrase, written out) against main (bc5de77): 25 of the 26 the same to
+the bit; Wooden Mallet scattering, its momentary maximum and integrated loudness the same to the
+hundredth of a dB (-22.80 and -24.11 LUFS). `preset_render` (every factory preset on POLY's
+ten voices) against main: all 26 the same to the bit. The plug-in's and the panel's tests, 266
+passed, 32 ignored (the new ones in a debug build too); rustfmt; clippy with `-D warnings`. On
+the Mac, CA-72 TEST built from this branch: clap-validator (37 passed), the VST3 SDK's validator
+(47 passed) and pluginval at strictness 5 pass. Not yet: the installed build in a host.
+
+## R63. 0.2.0's factory presets: the owner's favourites, 0.1's renamed
+
+**The owner, 2026-10-11:** "for 0.2.0 I only want the presets I currently have favorited. Any
+preset that i have favorited that existed in 0.1.5 needs to be renamed. Others can keep their
+current name."
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **The favourites as the drawer shows them**, read from the owner's library on the Mac at
+  19:46 (EDT; Wooden Mallet starred at 19:42 and saved again at 19:44, after a first reading
+  at 19:29): the stars in
+  `factory.toml` and in their own files, a factory preset with an edit of theirs counted by the
+  edit's. Nineteen; not kept: Lead, Elastic Octaves, Undertow Growl, Cruising Whistle, Stacked
+  Fifths, Ringing Saw Line, Shoreline Wash.
+- **Each as the owner has it.** Thirteen are their edits, their values whole (every control
+  named, but MIDI BEND RANGE, the player's, which Wooden Mallet's file of 2026-10-03 held):
+  Wooden Mallet (RETRIGGER on, SPREAD 100, VOLUME 10), and, saved that day, Brass Tutti, Breath Flute, Hollow Glider, Ladder Kick, Noise Crash,
+  Noise Snare, Pink Riser, Slow Bow, Slow Horn Swell, Upright Pluck and Warped Pad (DOUBLE on
+  most, DRIVE, ENTROPY and SPREAD, UNISON, an octave, NOTE PRIORITY LAST, RETRIGGER), and Cycle
+  of Fifths (four voices, DOUBLE 30 cents, oscillator 3 and FILTER MODULATION off). Six are the
+  factory's as they were: Bass, Three Saw Slab, Pulse Strut, Closed Hat, Open Hat, White Lotus.
+  Their descriptions say what the edits changed; their tags are the owner's.
+- **The seventeen from 0.1.5 renamed** (names proposed by the agent, the owner's to change):
+  Bass Felt Bass, Three Saw Slab Saw Monolith, Pulse Strut Feedback Funk, Upright Pluck Tenor
+  Pluck, Hollow Glider Singing Drift, Slow Horn Swell Horn Bloom, Brass Tutti Brass Choir,
+  Breath Flute Smoke Flute, Wooden Mallet Bright Xylo, Slow Bow Wide Bow, Ladder Kick Driven Kick, Noise Snare Split
+  Snare, Closed Hat Tight Hat, Open Hat Loose Hat, Noise Crash Wide Crash, Pink Riser Swarm
+  Riser, Warped Pad Warp Field. White Lotus and Cycle of Fifths keep theirs.
+- **All twenty-four of 0.1.5's presets moved whole to `retired.toml`** (R55), the seventeen kept
+  under new names among them, so the pack is 0.1's whole set at its own names, and no retired
+  name is a factory preset's.
+- **Levelled at -18 LUFS momentary maximum** on each one's phrase (`tests/preset_levels.rs`), as
+  R15: MAIN OUTPUT VOLUME first (Feedback Funk 8.96 to 8.711, Singing Drift 6.04 to 9.105, Horn
+  Bloom 7.0174 to 7.248, Brass Choir 3.894 to 6.585, Wide Bow 8.23 to 9.456, Wide Crash 8.0716
+  to 9.809, Cycle of Fifths 7.2399 to 8.044; Warp Field and White Lotus left). **The owner,
+  2026-10-11**, asked whether LEVEL should bring up the ten still under at VOLUME 10 (R15 had left
+  a preset at 10 under its level): "do what you have to to level the volumes. i am done starring
+  things." So LEVEL, the plug-in's output gain after MAIN OUTPUT, by each one's shortfall: Felt
+  Bass +2.57 dB, Saw Monolith +2.41, Smoke Flute +6.85, Bright Xylo +4.46, Driven Kick +11.32,
+  Split Snare +1.24, Tight Hat +8.19, Loose Hat +3.97, Swarm Riser +4.65; every one at -18.00,
+  the highest peak Tight Hat's, -2.7 dBFS. **Tenor Pluck** reached -21.18 with its oscillator,
+  VOLUME and LEVEL at their tops (LEVEL's +12 dB); offered DRIVE with AUTO GAIN off for the rest,
+  the owner: "add 3db of drive with autogain off." DRIVE 3 dB, AUTO GAIN off: -18.20, its peak
+  -4.8 dBFS.
+- **Sessions keep their sound** (R55). `drive::AVERAGE`, the factory presets' average DRIVE
+  curve that a session without a measurement of its own takes, is left as it was, so no
+  session's AUTO GAIN changes.
+- **The owner's own library** is left as it is: in 0.2.0 their thirteen edits list as their own
+  presets beside the factory's of the same sound, and the stars keyed by 0.1's names mark
+  nothing; theirs to tidy.
+- **The tests** that named 0.1's presets name 0.2.0's, or take a retired one by name through
+  `tests/common`'s `preset` (the factory's, else `retired.toml`'s): the measurements made on
+  Lead, Pulse Strut, Undertow Growl, Stacked Fifths and Brass Tutti keep them. The editor's
+  scrolling tests add twelve presets of the user's, so that the list runs below the rows
+  shown whatever the factory's count. `tests/common`'s `controls_of` takes NOTE PRIORITY and
+  RETRIGGER, which no factory preset had named.
+
+**Evidence (the Linux reference machine, 2026-10-11, on R62):** the owner's library read again at 19:54, unchanged
+since 19:46. `cargo test -p ca72-plugin`: the unit tests and every integration test pass;
+clippy clean. Every preset's level on its phrase after levelling (momentary maximum, LUFS; peak,
+dBFS): Felt Bass -18.00 (-5.0), Saw Monolith -18.00 (-4.2), Feedback Funk -18.05 (-11.8), Tenor
+Pluck -18.20 (-4.8; DRIVE 3 dB, AUTO GAIN off), Singing Drift -17.97 (-14.1), Horn Bloom -18.06 (-10.4), Brass Choir
+-18.02 (-9.3), Smoke Flute -18.00 (-11.0), Bright Xylo -18.00 (-6.0), Wide Bow -18.09 (-12.5),
+Driven Kick -18.00 (-7.2), Split Snare -18.00 (-6.0), Tight Hat -18.00 (-2.7), Loose Hat -18.00
+(-6.3), Wide Crash -17.88 (-10.5), Swarm Riser -18.00 (-12.0), Warp Field -18.09 (-9.4), White
+Lotus -18.03 (-12.4), Cycle of Fifths -18.15 (-9.7). R62 (SCATTER in MONO) moved none of them.
+
+**The owner's last changes, 2026-10-12:** "i made a few updates to the presets. They are now as I
+want them for release. Please make sure to grab my latest changes." Read from the owner's library
+on the Mac (08:29 EDT; five edits, nothing renamed, deleted or starred) and taken whole: Bright Xylo
+an octave lower (oscillator 1 at 4', 2 and 3 at 16') with NOTE PRIORITY LAST; Split Snare, Tight
+Hat, Loose Hat and Wide Crash with NOTE PRIORITY LAST and RETRIGGER on. Their descriptions say so
+(the agent's). Bright Xylo levelled again by LEVEL, 4.46 to 5.71 dB: -18.00 LUFS momentary
+maximum, its peak -6.3 dBFS; the other four measured where they were (-18.00, -18.00, -18.00,
+-17.88). Bright Xylo costs 7.7 % of a core.
+
+## R64. VOICES dimmed where it does nothing
+
+**The owner, 2026-10-11:** "something like the driven kick says it has 4 voices, but i don't
+think those 4 voics do anything do they? if so, find all such examples and reduce their voice to
+1", then "when something is polyphonic, this doesn't apply. i only mean with mono patches
+specifically". Told that VOICES goes from 2 to 10 (R7) and offered three ways (VOICES down to
+1; the presets at 2; VOICES dimmed wherever it does nothing, every sound's and not only the
+presets'), with dimming recommended: "ya, i think you're right. do it".
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **Where VOICES does nothing** (`editor::voices_inert`): MONO, neither POLY nor UNISON, with
+  DOUBLE on (the one pair has no place among others: R62) or with WIDTH at 0 (every one of
+  VOICES's places the centre). Found by the engine's code (`mix_of`, `places`) and by
+  rendering each factory preset's phrase at its VOICES and at 2: to the bit the same in all
+  twelve MONO presets without SCATTER's spread (Felt Bass, Saw Monolith, Feedback Funk, Tenor
+  Pluck, Singing Drift, Wide Bow, Driven Kick, Split Snare, Tight Hat, Loose Hat, Wide Crash,
+  White Lotus); different in Bright Xylo (MONO, SCATTER, WIDTH 100: its 8 places), and in
+  Smoke Flute and Swarm Riser (UNISON).
+- **Shown as DETUNE is in SCATTER:** its knob dimmed (the realistic look shades it, the drawn
+  one draws it at half opacity: `Scene::voices_off`), not operable (no press, drag, wheel or
+  step), its readout unlit (R62 had unlit it with DOUBLE only) and not typed into. Its value
+  is kept, and the host, a learned controller and a preset still set it: it counts again as
+  POLY, UNISON or WIDTH make it. The presets keep their VOICES (4 in most MONO ones), so
+  switching POLY on gives the voices it gave before.
+- The editor's tests that work VOICES at the defaults (MONO, SCATTER, WIDTH 0) do so with POLY
+  on (`editing_poly`); `voices_is_dimmed_where_it_does_nothing` holds the rule in each mode and
+  the editor's refusals. `the_window_voices_pngs` (by hand, `$CA72_VOICES_PNG`) draws it dimmed
+  and lit in both looks.
+
+## R65. 0.2.0
+
+**The owner, 2026-10-11:** "I think we can delete the CA-72 TEST and install 0.2.0 locally for
+pre-release. I'm going to test it with the assumption it's our release candidate."
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **0.2.0, a minor version**: the factory presets change (R63, 0.1's in the pack: R55) and a
+  MONO session with WIDTH up now scatters (R62), where a patch release changes nothing a
+  project or preset holds.
+- **The release candidate** is main at this version built as the release is, on the Mac (in
+  the agents' build tree, the Mac having 5.9 GB free): the universal bundles, the Audio Unit, the validators, and
+  `scripts/package.sh` with the Developer ID identities and notarisation required
+  (`docs/macos-release.md`). It is installed by its installer over 0.1.x, as a user installs it;
+  the CA-72 TEST bundles and the 0.1.x Audio Unit in the user's own Components folder go to the
+  Trash first, so that no other copy stands in for it in a host.
+- **Left for the release:** CI on the three systems (main has not run there since PR #25), the
+  README's Status line and the release notes, the tag, the Windows and Linux installers and the
+  0.1 presets' pack (CI's jobs), publishing.
+
+**Evidence (the Mac, 2026-10-11):** main 5ec29af (tree b6d7b7146f233970e6d3a788e5fc0a4116d15de5),
+exported into `~/Code/ca72-a6-build/ca-72` and built with the 1.97.1 toolchain: VST3 and CLAP
+`x86_64 arm64`, the Audio Unit 0.2.0; clap-validator 0.4.1 37 passed, 0 failed, 7 skipped;
+Steinberg's VST3 validator 47 passed; pluginval 1.0.4 at strictness 5 (GUI tests skipped)
+SUCCESS. Signed and notarised in a session of the desktop's tmux server (the hidden Ghostty
+shell 0.1.5 used started no command this time): Developer ID Application and Installer,
+Accepted, stapled, `spctl` "Notarized Developer ID". auval not run: the tmux session sees no
+third-party Audio Unit. `CA-72-0.2.0-macOS.pkg`, SHA-256
+90eed1dd78670853114f4964c72fb426ed0ff69053d5dde689d879f2d7c7e22b, with the scripts and logs in
+`~/lab/artifacts/ca-72/0.2.0-rc/`. Live quit (asked to, the owner's set offered for saving);
+CA-72 TEST and the 0.1 Audio Unit in `~/Library/Audio/Plug-Ins/Components` to the Trash; the
+installer run by the owner over 0.1.x: the three bundles in `/Library/Audio/Plug-Ins` 0.2.0,
+signed Developer ID Application.
+
+## R66. Sessions saved by 0.1 translated into 0.2.0's calibration
+
+**The owner, 2026-10-11**, told that 0.1.5's sounds played through 0.2.0 came out up to 7 dB
+from where they were (R42's calibration, R67 below): "For 0.1 projects, I thought we were able to
+translate into the new calibration." Told what could be (the knobs whose laws changed) and what
+could not (the circuit's parts): "Okay, let's make sure we can translate, and not worry about the
+things we can't."
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **The knobs whose laws changed since 0.1.5** (`compat::CHANGED`): the mixer's four VOLUMEs
+  (a straight track, now `volume_track`), EXTERNAL INPUT VOLUME (the drawing's audio taper, now
+  `ext_taper`), CUTOFF, AMOUNT OF CONTOUR and the two SUSTAINs (straight, now their measured
+  tracks), EMPHASIS (`emphasis_r14_drawn`, now `emphasis_r14`), the four ATTACK and DECAY pots
+  and GLIDE (the drawing's tapers, now `time_pot` and `glide_pot` on the reference's points),
+  and the MODULATION wheel (`mod_wheel_r_drawn`, now `mod_wheel_r`). Each moved to the travel at
+  which 0.2.0's law sets what 0.1's set at the travel it held (a bisection on the law, exact to
+  a part in a million of its range); where 0.2.0's law does not reach (the time pots' and the
+  wheel's tops, lower now), the knob's end.
+- **When:** in `Plugin::filter_state`, for a state whose `version` (nih-plug's, the plug-in's
+  version that saved it) is 0.1.x, or empty (the oldest). Test builds saved 0.1.5 with the new
+  calibration, but under names and IDs of their own, which a CA-72 never loads.
+- **What 0.1 did not have** is set to its default, as 0.1 sounded, rather than kept from the
+  instance: DRIVE, AUTO GAIN, INNER, UNISON, DETUNE, FILTER MODE (LO) and the placement (EVEN);
+  QUALITY, the computer's, is left. **LEVEL -0.5 dB** (`compat::LEVEL_FROM_0_1`): R42's VCA trims
+  made the voice 0.2 to 0.6 dB louder, and 0.1.5's presets, translated, played 0.53 dB louder
+  at the median.
+- **Not translated**, being the circuit's parts or the keyboard's: each contour's R1401, the
+  contours' capacitors, peak diodes and release, KEYBOARD CONTROL's R53 and R54, RANGE's R39,
+  oscillator 3's R162, the external input's R61 and R_EXT, the VCA's trims, Q12's gain, the
+  filter's calibrated trims and the keyboard's 0 V on C2. Nor the presets the user saved with 0.1:
+  their files carry no version (format 1 is 0.2.0's too).
+- **The 0.1 presets' pack** (R55) made the same way from 0.1.5's own factory file
+  (`examples/translate_0_1.rs`), in place of the presets as 0.2.0 had levelled them, so that it
+  holds 0.1's sounds; Cruising Whistle's and Ladder Kick's CUTOFF kept as R42 retuned them (their
+  filter's pitch, which a part moved), and Stacked Fifths a true fourth and fifth (the owner's,
+  R54).
+
+**Evidence (the Linux reference machine, 2026-10-11):** `tests/preset_render.rs` (ten POLY voices,
+4 s) with 0.1.5's factory file (`CA72_PRESETS_FILE`) against 0.1.5's own renders (a worktree of
+v0.1.5, `CA72_RENDER_OUT`). Untranslated, the level against 0.1.5's from -3.95 dB (Three Saw
+Slab) to +6.92 (Pink Riser), nine of twenty-four within 1 dB. Translated (`CA72_FROM_0_1`) with
+LEVEL -0.5 dB: seventeen within 1 dB, the median +0.03; the rest Undertow Growl +3.67 (its
+FEEDBACK loop chaotic), Wooden Mallet +2.28, Slow Bow -1.84, Warped Pad +1.43, Ladder Kick +1.42,
+Three Saw Slab -1.24, Brass Tutti +1.20. The pack as made: nineteen within 1 dB, Cruising
+Whistle -0.02 dB (its whistle's band -8 dB from 0.1.5's, -35 untranslated) and Ladder Kick
++0.09. Tests: `compat`'s five (each knob sets what it set, ends and order kept, versions, the
+additions' defaults), and `a_session_of_0_1_opens_translated_and_one_of_0_2_as_saved`.
+
+## R67. The checks before 0.2.0's release
+
+**The owner, 2026-10-11:** "have we completed all tests for release with this build?" Told not
+(R60's checks had run on main before R61 to R65), with a list: "Yes, please do that."
+
+**Found:**
+- **The POLY presets with DOUBLE cost twice 0.1.5's** (`tests/preset_cost.rs`, new
+  `CA72_AS_SET`: each preset as it sets POLY, UNISON, VOICES, DOUBLE and DRIVE, and
+  `CA72_RETIRED`): of a Ryzen 7 7800X3D core, Horn Bloom 181 % (Slow Horn Swell 87), Brass
+  Choir 172 % (Brass Tutti 84), Warp Field 149 % (Warped Pad 73); Cycle of Fifths 73 %, the rest
+  under 53 %. Paced on four processors with one worker (R39's machine): Slow Horn Swell and
+  Warped Pad no block late, Horn Bloom 26 %, Brass Choir every one, Warp Field 7 %. At QUALITY LO
+  4 to 5 %. Offered halving their VOICES (recommended), DOUBLE off, or leaving them with a note:
+  **the owner:** "No. Keep them as is." The README's limitations say so.
+- **0.1's sessions sounded different**: translated (R66).
+- **Linux, CI by hand on 40b6a33** (a clean export, a target of its own): bundles, notices,
+  `package.sh` (the tarball and the 0.1 presets' pack: 24 files, tagged 0.1, the retired file's
+  names and values; read by the plug-in's own `Library` into a fresh library beside the 19 factory
+  presets as 43), clippy with every feature (no warning), the standalone, `cargo test --workspace`
+  with ngspice required (404 passed, none failed), `validate.sh` (clap-validator 37 passed and 7
+  skipped, pluginval at strictness 10 with its editor tests SUCCESS, Steinberg's 47 passed).
+  REAPER 7.79 (VST3): the editor whole, notes and a chord played, QUALITY's three, CUTOFF
+  dragged, the drawer with the 19, Felt Bass chosen and played, VOICES dimmed in MONO and lit in
+  POLY (R64), the window closed and opened again the same to the pixel.
+- **Windows, the same on 40b6a33** (MSVC 1.97.1): bundles, the installer, clippy, 409 tests
+  passed with the seven window tests in the desktop session, `validate.sh` (clap-validator 36
+  passed and 8 skipped, pluginval at strictness 10 SUCCESS, Steinberg's 47) once run with
+  `CMAKE_GENERATOR="Visual Studio 17 2022"` (MinGW's cmake first on that PATH chose GNU, and
+  Steinberg's validator would not link). REAPER 7.82 (VST3 and CLAP) and Cubase Pro 15 (VST3):
+  each check as on Linux, and DRIVE's readout typed in Cubase, the window moved off the screen
+  and back, minimised and restored, the same to the pixel.
+- **The Mac:** the 0.2.0 release candidate signed, notarised and installed (R65); `target/debug`
+  of the main checkout cleaned (10.4 GB) and the owner's Trash emptied, so that the tests have
+  room.
+- **Branches** (the owner: "Yes, delete them"): the fourteen merged into main deleted from the
+  Mac's repository, and the CAL build's worktree removed; GitHub's three when main reaches it.
+
+**The final round, on main 026dfea (R66 in), 2026-10-11:**
+- **Linux:** the CI by hand as above, every step passed: 410 tests, none failed (ngspice required,
+  none skipped); clippy with every feature, no warning; the validators as before; the pack, its
+  24 files with LEVEL -0.5 and the 16 knobs written out, the retired file's names and values,
+  read into a fresh library as 43 presets. REAPER 7.79 (VST3), started with the shared folder
+  in the test's own place: the editor whole, a note, the drawer's 19.
+- **Windows:** the CI by hand, every step passed: 415 tests with the window tests in the desktop
+  session, clippy, the installer, the validators (`CMAKE_GENERATOR` as above). REAPER 7.82 (VST3)
+  smoke as on Linux. **0.1's session translated end to end:** 0.1.5 and 026dfea built as one
+  plug-in (the same names and IDs, a test build's); in 0.1.5 EMPHASIS 5, CUTOFF 2, FILTER DECAY
+  6, OSC 1 VOLUME 6 set and the project saved (its state `"version":"0.1.5"`, no LEVEL or
+  DRIVE); opened with 026dfea: 3.67, 1.74, 6.75, 5.82, LEVEL -0.5 dB, DRIVE 0, each
+  `compat::translated`'s value; saved from 026dfea (`"version":"0.2.0"`) and opened again, in
+  the same REAPER and a fresh one, unchanged.
+- **The Mac:** a clean export, universal bundles, the Audio Unit, the unsigned installer, clippy,
+  the standalone; `cargo test --workspace`: 406 passed, 3 failed, R60's three circuit-lab tests
+  with Homebrew's ngspice; `validate.sh` in the desktop session: clap-validator 37 passed,
+  pluginval at strictness 10 SUCCESS, Steinberg's 47, auval not finding the component (R60's
+  registry). GarageBand 10.4.14 (AU) and Bitwig 5.2.7 (CLAP), the owner away: the editor whole,
+  QUALITY's three, CUTOFF dragged, the drawer's 19 and 0.2.0, Horn Bloom chosen, VOICES dimmed
+  and lit, the window reopened the same (Bitwig: the window's corners within 5 of 255).
+- **The release candidate again** (026dfea, R66 in): that export's bundles signed and notarised
+  in a session of the desktop's tmux server, accepted, stapled, `spctl` "Notarized Developer
+  ID"; `CA-72-0.2.0-macOS.pkg` SHA-256
+  f3f1670d82e61f042f781b9040dd21a4f8d43fcfbc926de8174992d160eef0a9, with its logs and the Mac
+  checks' in `~/lab/artifacts/ca-72/0.2.0-rc2/`.
+- **The release candidate with the owner's last presets** (main 721b5bd, R63's last changes; a
+  data change, checked by the unit tests and the presets' levels): universal bundles and the
+  Audio Unit built in the agents' tree (their presets read in the binaries), clap-validator 37
+  passed, Steinberg's 47, pluginval at strictness 5 SUCCESS; signed, notarised, stapled, `spctl`
+  "Notarized Developer ID". `CA-72-0.2.0-macOS.pkg` SHA-256
+  a9751ed47422d1ee20541757f27920a0858bfcca4ddddb39545c50982afde17c, in
+  `~/lab/artifacts/ca-72/0.2.0-rc3/` with its logs. The leftovers of the Mac's checks (an unsigned
+  Audio Unit in `~/Library`, the library folder GarageBand's run made) and the checks' build
+  folders went to the Trash, at the owner's word.
+- **Not done:** auval and pluginval on the Audio Unit on this Mac (its registry), MIDI played in
+  the Mac's hosts (GarageBand takes none from a script), an Intel Mac, Live (the owner's).
+
+## R68. The one instrument sleeps while nothing plays
+
+**The owner, 2026-10-12:** "why does our plugin cost cpu usage even when it's not playing
+(according to ableton)", then, told that the development line had fixed it (its R30, the `perf`
+branch, never brought over): "oh, we need to include that fix please!"
+
+**Found:** with POLY and UNISON off the one instrument ran every sample whether or not a note
+played, `process` asking the host to keep calling it (`KeepAlive`). Idle, after 10 s of 256-sample
+blocks (the Linux reference machine, one thread): QUALITY HI 5.25 % of a core (a note held
+6.45 %), ULTRA 30.6 % (31.2), DOUBLE 10.4 % (12.5), LO 0.25 % (0.26). POLY's and UNISON's voices
+are freed as each falls silent: 0.02 % idle.
+
+**Agent decisions, 2026-10-12** (not separately approved), the development line's R30 brought
+over to the engine as it is now:
+- **The one instrument sleeps** once no key is down, its output has stayed under -120 dB
+  (POLY's rule for freeing a voice) and its slow state has moved less than 1 uV over 50 ms:
+  `Voice::slow_state` (the keyboard's hold capacitor, the keys beyond the string's ends, both
+  contours; brought back to the circuit's voice, which had lost it, the light voice having kept
+  its own), its twin's too while DOUBLE plays it, of whichever model QUALITY plays. The check
+  runs at each block's end (`Engine::end_block`); asleep, `render` and `tick_stereo` give
+  silence without playing. A note or any other event, a control changed (`Engine::set`, only
+  when something changed), All Notes Off, the engine prepared again, or a sound at EXTERNAL
+  INPUT (over -120 dBFS) wakes it, from the state it slept in. `KeepAlive` stays.
+- **The same sound.** Awake, nothing is computed differently. Asleep, only the free-running
+  oscillators' and noise's phases stop. Every factory preset's phrase (`tests/preset_levels.rs`,
+  each preset as it sets POLY, new `CA72_NEVER_SLEEP`) renders the same to the bit with the
+  sleep and without it, through every note; two differ only in their last 0.14 to 0.18 s,
+  where the sleeping one gives exact silence and the other a residue at -124 dBFS.
+
+**Evidence (the Linux reference machine, 2026-10-12):** idle now 0.001 % of a core at HI, LO,
+ULTRA and with DOUBLE, asleep within 10 s (UNISON and POLY 0.02 %, as before). Tests:
+`a_silent_settled_instrument_sleeps_and_wakes` (asleep with nothing played and silent so;
+awake while a key is down; woken by a note, a control, the wheel, All Notes Off and a sound at
+EXTERNAL INPUT, the same controls again not waking it; never with `never_sleep`; asleep at LO
+and with DOUBLE; never the one instrument's sleep with POLY or UNISON, nor while A-440 sounds)
+and `a_woken_instrument_plays_its_next_note_as_one_that_never_slept` (at rest the contours within
+20 uV, through the next note the keyboard the same and the contours within 0.5 mV, the level
+within 0.1 dB). Each fails with what it guards broken: without the wake on events, and sleeping
+as soon as the output is silent (the contours then 24 mV apart). Clippy with every target; the
+plug-in's 233 tests.
+
+**On main 866f6dc, 2026-10-12:** Windows (a clean export, MSVC 1.97.1): clippy with every
+feature and target, no warning; `cargo test --workspace` 417 passed, none failed, the seven window
+tests in the desktop session; the bundles and the installer. The Mac: the plug-in's 233 tests
+passed and clippy; the universal bundles and the Audio Unit, clap-validator 37 passed, Steinberg's
+47, pluginval at strictness 5 SUCCESS; signed, notarised, stapled, `spctl` "Notarized Developer
+ID": `CA-72-0.2.0-macOS.pkg` SHA-256
+9b0dd7003f3fc09dc1ac46370299e59c7997f480779cb76f973aadbf03ce8eeb, the release candidate, with its
+logs in `~/lab/artifacts/ca-72/0.2.0-rc4/`.

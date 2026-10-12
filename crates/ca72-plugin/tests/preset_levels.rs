@@ -12,7 +12,8 @@
 //! `scripts/calibration/midi_capture.py`, played instead: the notes and modulation wheel sent
 //! to the hardware reference, at their times, and 3 s after the last). `CA72_RETIRED`
 //! (set): the presets retired from the plug-in (`sounds/retired.toml`, decisions.md R55)
-//! measured instead, which its pack ships.
+//! measured instead, which its pack ships. `CA72_NEVER_SLEEP` (set): the one instrument never
+//! sleeps (decisions.md R68), to show that its sleeping changes no sample.
 
 #![allow(clippy::unwrap_used)]
 
@@ -82,6 +83,7 @@ fn render(s: &Sound) -> (Vec<f32>, Vec<f32>) {
     let mut e = Engine::new();
     e.set(&c);
     e.prepare(RATE, 1);
+    e.never_sleep(std::env::var_os("CA72_NEVER_SLEEP").is_some());
     common::workers(&mut e);
     let (notes, wheel, tail) = match phrase_file() {
         Some((n, w)) => (n, w, 3.0),

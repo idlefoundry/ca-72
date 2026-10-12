@@ -48,11 +48,7 @@ fn poly_chords_in_real_time() {
     c.panel.emphasis = 0.5;
     let preset = std::env::var("CA72_PRESET").ok();
     if let Some(name) = &preset {
-        let s = ca72_plugin::library::factory()
-            .iter()
-            .find(|s| s.name == *name)
-            .expect("a factory preset");
-        c = common::controls_of(s);
+        c = common::controls_of(&common::preset(name));
         c.poly = true;
         c.voices = voices;
     }

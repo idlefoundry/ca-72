@@ -217,7 +217,8 @@ fn poly_off_is_the_one_voice_as_before() {
 }
 
 /// POLY: a chord plays on its own voices (louder than one; the one voice plays its lowest
-/// key), and with SPREAD at 100 % they part left and right; one voice stays in the centre.
+/// key), and with SPREAD at 100 % they part left and right; the one voice, the same sound, goes
+/// to the first of VOICES's places (EVEN's left edge: decisions.md R62).
 #[test]
 fn poly_plays_a_chord_and_spread_parts_it() {
     let chord = |c: &Controls| {
@@ -259,8 +260,18 @@ fn poly_plays_a_chord_and_spread_parts_it() {
         spread: 1.0,
         ..Controls::default()
     });
-    assert_eq!(one_l, one_r, "SPREAD moved the one voice");
-    assert_eq!(one_l, ml, "SPREAD changed the one voice");
+    assert!(
+        one_r.iter().all(|&x| x == 0.0),
+        "the one voice not at the left edge"
+    );
+    // (At the edge all of its power on the one side: its centre's two sides' together.)
+    let most = ml.iter().fold(0.0f64, |m, x| m.max(x.abs()));
+    let worst = one_l
+        .iter()
+        .zip(&ml)
+        .map(|(a, b)| (a - std::f64::consts::SQRT_2 * b).abs())
+        .fold(0.0, f64::max);
+    assert!(worst < 1e-5 * most, "SPREAD changed the one voice: {worst}");
 }
 
 /// Every MIDI note plays, in both modes, where the keyboard's scale continues.

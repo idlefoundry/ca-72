@@ -1243,6 +1243,11 @@ impl Light {
         self.held.0 != 0 || self.waiting.0 != 0
     }
 
+    /// As [`crate::voice::Voice::trigger_closed`]: the keys' gate at the last sample.
+    pub fn trigger_closed(&self) -> bool {
+        self.gate
+    }
+
     /// As [`crate::voice::Voice::slow_state`]: the pitch (as volts, an octave a volt) and
     /// the contours, V, once no key is down and the trigger has followed.
     pub fn slow_state(&self) -> Option<[f64; 3]> {
