@@ -4986,3 +4986,88 @@ third-party Audio Unit. `CA-72-0.2.0-macOS.pkg`, SHA-256
 CA-72 TEST and the 0.1 Audio Unit in `~/Library/Audio/Plug-Ins/Components` to the Trash; the
 installer run by the owner over 0.1.x: the three bundles in `/Library/Audio/Plug-Ins` 0.2.0,
 signed Developer ID Application.
+
+## R66. Sessions saved by 0.1 translated into 0.2.0's calibration
+
+**The owner, 2026-10-11**, told that 0.1.5's sounds played through 0.2.0 came out up to 7 dB
+from where they were (R42's calibration, R67 below): "For 0.1 projects, I thought we were able to
+translate into the new calibration." Told what could be (the knobs whose laws changed) and what
+could not (the circuit's parts): "Okay, let's make sure we can translate, and not worry about the
+things we can't."
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **The knobs whose laws changed since 0.1.5** (`compat::CHANGED`): the mixer's four VOLUMEs
+  (a straight track, now `volume_track`), EXTERNAL INPUT VOLUME (the drawing's audio taper, now
+  `ext_taper`), CUTOFF, AMOUNT OF CONTOUR and the two SUSTAINs (straight, now their measured
+  tracks), EMPHASIS (`emphasis_r14_drawn`, now `emphasis_r14`), the four ATTACK and DECAY pots
+  and GLIDE (the drawing's tapers, now `time_pot` and `glide_pot` on the reference's points),
+  and the MODULATION wheel (`mod_wheel_r_drawn`, now `mod_wheel_r`). Each moved to the travel at
+  which 0.2.0's law sets what 0.1's set at the travel it held (a bisection on the law, exact to
+  a part in a million of its range); where 0.2.0's law does not reach (the time pots' and the
+  wheel's tops, lower now), the knob's end.
+- **When:** in `Plugin::filter_state`, for a state whose `version` (nih-plug's, the plug-in's
+  version that saved it) is 0.1.x, or empty (the oldest). Test builds saved 0.1.5 with the new
+  calibration, but under names and IDs of their own, which a CA-72 never loads.
+- **What 0.1 did not have** is set to its default, as 0.1 sounded, rather than kept from the
+  instance: DRIVE, AUTO GAIN, INNER, UNISON, DETUNE, FILTER MODE (LO) and the placement (EVEN);
+  QUALITY, the computer's, is left. **LEVEL -0.5 dB** (`compat::LEVEL_FROM_0_1`): R42's VCA trims
+  made the voice 0.2 to 0.6 dB louder, and 0.1.5's presets, translated, played 0.53 dB louder
+  at the median.
+- **Not translated**, being the circuit's parts or the keyboard's: each contour's R1401, the
+  contours' capacitors, peak diodes and release, KEYBOARD CONTROL's R53 and R54, RANGE's R39,
+  oscillator 3's R162, the external input's R61 and R_EXT, the VCA's trims, Q12's gain, the
+  filter's calibrated trims and the keyboard's 0 V on C2. Nor the presets the user saved with 0.1:
+  their files carry no version (format 1 is 0.2.0's too).
+- **The 0.1 presets' pack** (R55) made the same way from 0.1.5's own factory file
+  (`examples/translate_0_1.rs`), in place of the presets as 0.2.0 had levelled them, so that it
+  holds 0.1's sounds; Cruising Whistle's and Ladder Kick's CUTOFF kept as R42 retuned them (their
+  filter's pitch, which a part moved), and Stacked Fifths a true fourth and fifth (the owner's,
+  R54).
+
+**Evidence (the Linux reference machine, 2026-10-11):** `tests/preset_render.rs` (ten POLY voices,
+4 s) with 0.1.5's factory file (`CA72_PRESETS_FILE`) against 0.1.5's own renders (a worktree of
+v0.1.5, `CA72_RENDER_OUT`). Untranslated, the level against 0.1.5's from -3.95 dB (Three Saw
+Slab) to +6.92 (Pink Riser), nine of twenty-four within 1 dB. Translated (`CA72_FROM_0_1`) with
+LEVEL -0.5 dB: seventeen within 1 dB, the median +0.03; the rest Undertow Growl +3.67 (its
+FEEDBACK loop chaotic), Wooden Mallet +2.28, Slow Bow -1.84, Warped Pad +1.43, Ladder Kick +1.42,
+Three Saw Slab -1.24, Brass Tutti +1.20. The pack as made: nineteen within 1 dB, Cruising
+Whistle -0.02 dB (its whistle's band -8 dB from 0.1.5's, -35 untranslated) and Ladder Kick
++0.09. Tests: `compat`'s five (each knob sets what it set, ends and order kept, versions, the
+additions' defaults), and `a_session_of_0_1_opens_translated_and_one_of_0_2_as_saved`.
+
+## R67. The checks before 0.2.0's release
+
+**The owner, 2026-10-11:** "have we completed all tests for release with this build?" Told not
+(R60's checks had run on main before R61 to R65), with a list: "Yes, please do that."
+
+**Found:**
+- **The POLY presets with DOUBLE cost twice 0.1.5's** (`tests/preset_cost.rs`, new
+  `CA72_AS_SET`: each preset as it sets POLY, UNISON, VOICES, DOUBLE and DRIVE, and
+  `CA72_RETIRED`): of a Ryzen 7 7800X3D core, Horn Bloom 181 % (Slow Horn Swell 87), Brass
+  Choir 172 % (Brass Tutti 84), Warp Field 149 % (Warped Pad 73); Cycle of Fifths 73 %, the rest
+  under 53 %. Paced on four processors with one worker (R39's machine): Slow Horn Swell and
+  Warped Pad no block late, Horn Bloom 26 %, Brass Choir every one, Warp Field 7 %. At QUALITY LO
+  4 to 5 %. Offered halving their VOICES (recommended), DOUBLE off, or leaving them with a note:
+  **the owner:** "No. Keep them as is." The README's limitations say so.
+- **0.1's sessions sounded different**: translated (R66).
+- **Linux, CI by hand on 40b6a33** (a clean export, a target of its own): bundles, notices,
+  `package.sh` (the tarball and the 0.1 presets' pack: 24 files, tagged 0.1, the retired file's
+  names and values; read by the plug-in's own `Library` into a fresh library beside the 19 factory
+  presets as 43), clippy with every feature (no warning), the standalone, `cargo test --workspace`
+  with ngspice required (404 passed, none failed), `validate.sh` (clap-validator 37 passed and 7
+  skipped, pluginval at strictness 10 with its editor tests SUCCESS, Steinberg's 47 passed).
+  REAPER 7.79 (VST3): the editor whole, notes and a chord played, QUALITY's three, CUTOFF
+  dragged, the drawer with the 19, Felt Bass chosen and played, VOICES dimmed in MONO and lit in
+  POLY (R64), the window closed and opened again the same to the pixel.
+- **Windows, the same on 40b6a33** (MSVC 1.97.1): bundles, the installer, clippy, 409 tests
+  passed with the seven window tests in the desktop session, `validate.sh` (clap-validator 36
+  passed and 8 skipped, pluginval at strictness 10 SUCCESS, Steinberg's 47) once run with
+  `CMAKE_GENERATOR="Visual Studio 17 2022"` (MinGW's cmake first on that PATH chose GNU, and
+  Steinberg's validator would not link). REAPER 7.82 (VST3 and CLAP) and Cubase Pro 15 (VST3):
+  each check as on Linux, and DRIVE's readout typed in Cubase, the window moved off the screen
+  and back, minimised and restored, the same to the pixel.
+- **The Mac:** the 0.2.0 release candidate signed, notarised and installed (R65); `target/debug`
+  of the main checkout cleaned (10.4 GB) and the owner's Trash emptied, so that the tests have
+  room. The rest follows below.
+- **Branches** (the owner: "Yes, delete them"): the fourteen merged into main deleted from the
+  Mac's repository, and the CAL build's worktree removed; GitHub's three when main reaches it.
