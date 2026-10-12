@@ -4953,3 +4953,22 @@ presets'), with dimming recommended: "ya, i think you're right. do it".
   on (`editing_poly`); `voices_is_dimmed_where_it_does_nothing` holds the rule in each mode and
   the editor's refusals. `the_window_voices_pngs` (by hand, `$CA72_VOICES_PNG`) draws it dimmed
   and lit in both looks.
+
+## R65. 0.2.0
+
+**The owner, 2026-10-11:** "I think we can delete the CA-72 TEST and install 0.2.0 locally for
+pre-release. I'm going to test it with the assumption it's our release candidate."
+
+**Agent decisions, 2026-10-11** (not separately approved):
+- **0.2.0, a minor version**: the factory presets change (R63, 0.1's in the pack: R55) and a
+  MONO session with WIDTH up now scatters (R62), where a patch release changes nothing a
+  project or preset holds.
+- **The release candidate** is main at this version built as the release is, on the Mac in a
+  tree of its own: the universal bundles, the Audio Unit, the validators, and
+  `scripts/package.sh` with the Developer ID identities and notarisation required
+  (`docs/macos-release.md`). It is installed by its installer over 0.1.x, as a user installs it;
+  the CA-72 TEST bundles and the 0.1.x Audio Unit in the user's own Components folder go to the
+  Trash first, so that no other copy stands in for it in a host.
+- **Left for the release:** CI on the three systems (main has not run there since PR #25), the
+  README's Status line and the release notes, the tag, the Windows and Linux installers and the
+  0.1 presets' pack (CI's jobs), publishing.
