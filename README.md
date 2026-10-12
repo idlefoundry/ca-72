@@ -440,6 +440,12 @@ The service documents and datasheets the model was derived from are not included
   darker),
   and driven hard at high EMPHASIS it loses its resonance sooner. Every other factory preset
   is within a decibel of the circuit's.
+- With no note playing an instance costs next to nothing (from 0.2.0; decisions.md R68): with
+  POLY and UNISON off the instrument sleeps once its sound has died away and its contours
+  have settled, and the next note, any MIDI, a control moved or a sound at EXTERNAL INPUT
+  wakes it, playing as it would have; POLY's and UNISON's voices are freed as each falls
+  silent. Before, a waiting instance cost nearly what a playing one does (at ULTRA about a
+  third of a core).
 - Horn Bloom, Brass Choir and Warp Field play POLY's voices with DOUBLE, two instruments a
   note: at QUALITY HI each takes one and a half to one and three quarter cores of a fast
   computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,

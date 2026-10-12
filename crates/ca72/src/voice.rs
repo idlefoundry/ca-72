@@ -1209,6 +1209,20 @@ impl Voice {
         (self.ctl.env_to.0, self.ctl.env_to.1, self.keys.held())
     }
 
+    /// What moves slowly once no key is down: the keyboard's output (its hold capacitor, and
+    /// the keys beyond the string's ends, as GLIDE has them), V, and the contours (filter,
+    /// loudness), V, at their latest ticks; None while a key is held or waits to retrigger, a
+    /// released key's pitch contact is still closed, or the trigger contact is. A voice whose
+    /// output is silent and whose slow state stands still plays nothing that time would
+    /// change but its free-running oscillators' and noise's phases (the plug-in lets such a
+    /// voice sleep: decisions.md R68, the development line's R30).
+    pub fn slow_state(&self) -> Option<[f64; 3]> {
+        if self.keys.held() || !self.keys.releasing.is_empty() || self.keys.gate {
+            return None;
+        }
+        Some([self.kbd.to, self.ctl.env_to.0, self.ctl.env_to.1])
+    }
+
     /// Whether the trigger contact was closed at the last sample: a key down (RETRIGGER's
     /// once it has come down). It closing is a new attack's start, the contours following
     /// it.

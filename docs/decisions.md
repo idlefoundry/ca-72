@@ -5118,3 +5118,44 @@ additions' defaults), and `a_session_of_0_1_opens_translated_and_one_of_0_2_as_s
   folders went to the Trash, at the owner's word.
 - **Not done:** auval and pluginval on the Audio Unit on this Mac (its registry), MIDI played in
   the Mac's hosts (GarageBand takes none from a script), an Intel Mac, Live (the owner's).
+
+## R68. The one instrument sleeps while nothing plays
+
+**The owner, 2026-10-12:** "why does our plugin cost cpu usage even when it's not playing
+(according to ableton)", then, told that the development line had fixed it (its R30, the `perf`
+branch, never brought over): "oh, we need to include that fix please!"
+
+**Found:** with POLY and UNISON off the one instrument ran every sample whether or not a note
+played, `process` asking the host to keep calling it (`KeepAlive`). Idle, after 10 s of 256-sample
+blocks (the Linux reference machine, one thread): QUALITY HI 5.25 % of a core (a note held
+6.45 %), ULTRA 30.6 % (31.2), DOUBLE 10.4 % (12.5), LO 0.25 % (0.26). POLY's and UNISON's voices
+are freed as each falls silent: 0.02 % idle.
+
+**Agent decisions, 2026-10-12** (not separately approved), the development line's R30 brought
+over to the engine as it is now:
+- **The one instrument sleeps** once no key is down, its output has stayed under -120 dB
+  (POLY's rule for freeing a voice) and its slow state has moved less than 1 uV over 50 ms:
+  `Voice::slow_state` (the keyboard's hold capacitor, the keys beyond the string's ends, both
+  contours; brought back to the circuit's voice, which had lost it, the light voice having kept
+  its own), its twin's too while DOUBLE plays it, of whichever model QUALITY plays. The check
+  runs at each block's end (`Engine::end_block`); asleep, `render` and `tick_stereo` give
+  silence without playing. A note or any other event, a control changed (`Engine::set`, only
+  when something changed), All Notes Off, the engine prepared again, or a sound at EXTERNAL
+  INPUT (over -120 dBFS) wakes it, from the state it slept in. `KeepAlive` stays.
+- **The same sound.** Awake, nothing is computed differently. Asleep, only the free-running
+  oscillators' and noise's phases stop. Every factory preset's phrase (`tests/preset_levels.rs`,
+  each preset as it sets POLY, new `CA72_NEVER_SLEEP`) renders the same to the bit with the
+  sleep and without it, through every note; two differ only in their last 0.14 to 0.18 s,
+  where the sleeping one gives exact silence and the other a residue at -124 dBFS.
+
+**Evidence (the Linux reference machine, 2026-10-12):** idle now 0.001 % of a core at HI, LO,
+ULTRA and with DOUBLE, asleep within 10 s (UNISON and POLY 0.02 %, as before). Tests:
+`a_silent_settled_instrument_sleeps_and_wakes` (asleep with nothing played and silent so;
+awake while a key is down; woken by a note, a control, the wheel, All Notes Off and a sound at
+EXTERNAL INPUT, the same controls again not waking it; never with `never_sleep`; asleep at LO
+and with DOUBLE; never the one instrument's sleep with POLY or UNISON, nor while A-440 sounds)
+and `a_woken_instrument_plays_its_next_note_as_one_that_never_slept` (at rest the contours within
+20 uV, through the next note the keyboard the same and the contours within 0.5 mV, the level
+within 0.1 dB). Each fails with what it guards broken: without the wake on events, and sleeping
+as soon as the output is silent (the contours then 24 mV apart). Clippy with every target; the
+plug-in's 233 tests.
