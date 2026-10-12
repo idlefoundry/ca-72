@@ -16,9 +16,12 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.1.5: on machines of 3 and 4 processors the POLY presets no longer overload the
-CPU, and on Linux the editor's window is opaque, since 0.1.4. The macOS installer is signed and
-notarised; the Windows one is not yet signed.
+**Status:** 0.2.0: the circuit calibrated against a hardware instrument, projects saved with
+0.1 translated into it; nineteen new factory presets, 0.1's in a download of their own; the
+realistic look; QUALITY's LO, HI and ULTRA; stereo with SPREAD, INNER, DOUBLE and UNISON;
+DRIVE, LEVEL and AUTO GAIN; FILTER MODE; NOTE PRIORITY and RETRIGGER; and an instance waiting
+costs next to nothing. The macOS installer is signed and notarised; the Windows one is not yet
+signed.
 
 ## Installing
 
@@ -120,8 +123,9 @@ and sends nothing of yours.
   puts there (CENTER's first, EVEN's last with an odd number of voices) goes to the side its
   turn falls on. With DOUBLE the pairs keep to the band too. At 100 % every voice sits at
   SPREAD's edge; at SPREAD 0 it does nothing.
-- **DOUBLE** (0 to 100 %, off by default): each note two whole voices, up to 20 cents apart,
-  the sharper on the left. With SPREAD the pair goes out to either side of the centre, as
+- **DOUBLE** (the strip's VOICES PLAYED AS: SCATTER by default, or DOUBLE): each note two
+  whole voices, DETUNE apart (0 to 100 cents, a semitone at its top), the sharper on the left;
+  with SCATTER, DETUNE is dimmed and does nothing. With SPREAD the pair goes out to either side of the centre, as
   far as SCATTER puts the note's voice (with INNER at 100 %, and with POLY and UNISON off, all
   of SPREAD's way); at SPREAD 0 both are in the centre. Turned down so that it sounds about as
   loud as one voice a note; it doubles the voices' work. Switching it on or off stops the

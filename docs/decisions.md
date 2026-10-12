@@ -4915,7 +4915,7 @@ current name."
   shown whatever the factory's count. `tests/common`'s `controls_of` takes NOTE PRIORITY and
   RETRIGGER, which no factory preset had named.
 
-**Evidence (omarchy, 2026-10-11, on R62):** the owner's library read again at 19:54, unchanged
+**Evidence (the Linux reference machine, 2026-10-11, on R62):** the owner's library read again at 19:54, unchanged
 since 19:46. `cargo test -p ca72-plugin`: the unit tests and every integration test pass;
 clippy clean. Every preset's level on its phrase after levelling (momentary maximum, LUFS; peak,
 dBFS): Felt Bass -18.00 (-5.0), Saw Monolith -18.00 (-4.2), Feedback Funk -18.05 (-11.8), Tenor
