@@ -5496,3 +5496,12 @@ the guide distinguishes CONTROL-OFF dial positions from CONTROL-ON calibrated in
 The final phrases were rendered again and the project was rebuilt. The critic rechecked
 both corrections and the complete artifacts; no findings remain. This review did not
 claim subjective listening, a Round 2 Live host-open, physical MIDI or hardware recording.
+
+**Round 2 delivery (Mac, 2026-10-14):** Copied the separate musical ZIP and Round 2
+Ableton project to `/Users/idlewile/Downloads/` over the verified `mac-ts` route.
+The Mac verified all 127 ZIP entries/checksums and all 130 project-manifest files,
+24 MIDI clips, 49 resolved audio references, 24 locators, correct CC1/White Lotus
+state and the empty armed capture track. The ZIP SHA-256 is
+`3d458f86f92bc1a0b37a96f8847f1ddc376caf28606ea5ecb8f7ae20470b926a`.
+The new Set was structurally verified without opening over the owner's current Live
+session; the same builder previously loaded the first comparison Set in Live 12.2.7.
