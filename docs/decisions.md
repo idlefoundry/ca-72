@@ -5384,3 +5384,18 @@ tags use that entry's duration. The generator and renderer require ten-second cu
 clips and 4.8-second ordinary clips. The external probe remains 4.8 s, matching example 23.
 The guide's sweep cues, note lengths, repeat-take instructions and duration claims were
 regenerated from the same source.
+
+**Evidence (Linux, 2026-10-14):** All 24 examples rendered successfully. Independent MIDI
+decoding checked ten-second end markers at tick 19,200 for 07/10 and 4.8-second end markers
+at tick 9,216 for the other 22 clips, with no overlapping keys. The seven cutoff cues
+match the new trajectory; cues remain markers rather than automatic hardware control.
+The two sweeps' four raw/listening WAVs contain 480,000 finite mono samples at 48 kHz;
+the other 44 WAVs contain 230,400, and those 22 audio pairs are bit-identical to the prior
+pack. Listening peak headroom is retained. Independent FFT checks at 0.30/4.90/9.45 s
+confirm opening and reclosing, recorded in `measurements.json`. Five malformed copies
+were rejected: a short cutoff clip, a long ordinary clip, a note outside its clip, movement
+after note-off and a partial sweep range. All 120 guide links resolve. Formatting and
+targeted release clippy passed.
+
+The independent read-only critic checked the duration refactor, all MIDI files, all four
+ten-second sweep WAVs, unchanged audio and separate FFT windows. No findings remained.
