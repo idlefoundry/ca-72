@@ -70,6 +70,103 @@ fn strong_contour_does_not_add_radio_crackle() {
 }
 
 #[test]
+fn lo_strong_contour_does_not_fold_into_audible_tones() {
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        for cutoff in [0.5, 0.75] {
+            let reference = render(rate, cutoff, Quality::NoCompromises);
+            let mut voice = ca72::light::Light::new(rate);
+            voice.set_panel(&Panel {
+                cutoff,
+                emphasis: 1.0,
+                contour_amount: 1.0,
+                keyboard_control_1: true,
+                keyboard_control_2: true,
+                ..Panel::default()
+            });
+            let _ = ca72::unconverged::take();
+            let mut out = Vec::new();
+            for i in 0..rate as usize {
+                if i == (0.1 * rate) as usize {
+                    voice.note(60, true);
+                }
+                let y = voice.tick(0.0);
+                assert!(y.is_finite());
+                out.push(y);
+            }
+            assert!(ca72::unconverged::take().is_empty(), "LO solver cap");
+            let signal = out[(rate * 0.3) as usize..(rate * 0.8) as usize]
+                .iter()
+                .map(|x| x * x)
+                .sum::<f64>();
+            assert!(signal > 1.0, "silent LO voice");
+            let delta = 10.0 * (high_band(&out, rate) / high_band(&reference, rate)).log10();
+            eprintln!("LO {rate} Hz, cutoff {cutoff}: excess 8–20 kHz power {delta:+.2} dB");
+            assert!(
+                delta.is_finite() && delta < 3.0,
+                "LO aliasing: {delta:+.2} dB"
+            );
+        }
+    }
+}
+
+/// Regenerate LO's relative high-cutoff fit from the calibrated converter and a
+/// high-rate circuit ladder. Keep the already fitted dial pitch at the join.
+#[test]
+#[ignore = "regenerates the high-cutoff fit; run explicitly after converter changes"]
+fn lo_cutoff_saturation_fit() {
+    use ca72::{filter_cal, light::laws, vcf::Vcf, voice::Jacks};
+    let mut panel = Panel {
+        cutoff: 1.0,
+        contour_amount: 0.0,
+        keyboard_control_1: false,
+        keyboard_control_2: false,
+        ..Panel::default()
+    };
+    for osc in &mut panel.osc {
+        osc.on = false;
+    }
+    let mut voice = Voice::new(48_000.0, panel);
+    let mut base = 0.0;
+    for (i, octaves) in [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 10.0]
+        .into_iter()
+        .enumerate()
+    {
+        voice.tick_jacks(&Jacks {
+            filter: Some(octaves * ca72::voice::FILTER_VOLTS_PER_OCTAVE),
+            ..Jacks::default()
+        });
+        let i0 = voice.filter_probe().0;
+        let rate = 192_000.0;
+        let mut filter = Vcf::new(rate, 4);
+        filter.circuit = filter_cal::CALIBRATED.circuit();
+        filter.circuit.r14 = 0.0;
+        filter.prewarp_hz = 0.0;
+        let _ = ca72::unconverged::take();
+        let out: Vec<_> = (0..19_200)
+            .map(|n| filter.tick(if n < 8 { 20e-6 } else { 0.0 }, filter_cal::G_BUS_OFF, i0))
+            .collect();
+        assert!(out.iter().all(|x| x.is_finite()));
+        assert!(ca72::unconverged::take().is_empty(), "fit solver cap");
+        let window = &out[9_600..];
+        let mean = window.iter().sum::<f64>() / window.len() as f64;
+        let ups: Vec<_> = window
+            .windows(2)
+            .enumerate()
+            .filter(|(_, w)| w[0] < mean && w[1] >= mean)
+            .map(|(n, w)| n as f64 + (mean - w[0]) / (w[1] - w[0]))
+            .collect();
+        assert!(ups.len() > 100, "not oscillating");
+        let hz = rate * (ups.len() - 1) as f64 / (ups[ups.len() - 1] - ups[0]);
+        if i == 0 {
+            base = hz.log2();
+        }
+        let fitted = laws::CUTOFF_SAT_AT[0] + hz.log2() - base;
+        eprintln!("CUT CV {octaves} octaves: {i0:.8} A, {hz:.2} Hz, fitted log2 {fitted:.8}");
+        assert!((fitted - laws::CUTOFF_SAT[i]).abs() < 1e-5);
+    }
+}
+
+#[test]
 fn moving_emphasis_does_not_reset_the_resamplers() {
     let rate = 48_000.0;
     let mut voice = Voice::new(
@@ -211,60 +308,84 @@ fn ultrasonic_regeneration_stays_outside_the_audio_band() {
 #[ignore = "paced CPU measurement; needs a quiet reference machine"]
 fn high_contour_cost() {
     use std::time::{Duration, Instant};
+    enum BenchVoice {
+        Hi(Box<Voice>),
+        Lo(Box<ca72::light::Light>),
+    }
+    impl BenchVoice {
+        fn note(&mut self, key: i32, on: bool) {
+            match self {
+                Self::Hi(v) => v.note(key, on),
+                Self::Lo(v) => v.note(key, on),
+            }
+        }
+        fn tick(&mut self) -> f64 {
+            match self {
+                Self::Hi(v) => v.tick(),
+                Self::Lo(v) => v.tick(0.0),
+            }
+        }
+    }
     let rate = 48_000.0;
-    for block in [128, 256] {
-        for emphasis in [0.7, 1.0] {
-            let mut voice = Voice::new(
-                rate,
-                Panel {
+    for mode in ["HI", "LO"] {
+        for block in [128, 256] {
+            for emphasis in [0.7, 1.0] {
+                let panel = Panel {
                     emphasis,
                     contour_amount: 1.0,
                     quality: Quality::Potato,
                     ..Panel::default()
-                },
-            );
-            voice.note(60, true);
-            for _ in 0..4800 {
-                std::hint::black_box(voice.tick());
-            }
-            let period = Duration::from_secs_f64(block as f64 / rate);
-            let blocks = (rate / block as f64) as usize;
-            let start = Instant::now();
-            let mut worst = Duration::ZERO;
-            let mut total = Duration::ZERO;
-            let mut late = 0;
-            let stride = (0.2 * rate / block as f64) as usize;
-            let gap = (0.02 * rate / block as f64).ceil() as usize;
-            let mut note = 60;
-            for i in 0..blocks {
-                let t = Instant::now();
-                if i % stride == 0 {
-                    voice.note(note, false);
-                }
-                if i % stride == gap {
-                    note = 60 + (i / stride % 5) as i32;
-                    voice.note(note, true);
-                }
-                for _ in 0..block {
+                };
+                let mut voice = if mode == "LO" {
+                    let mut light = ca72::light::Light::new(rate);
+                    light.set_panel(&panel);
+                    BenchVoice::Lo(Box::new(light))
+                } else {
+                    BenchVoice::Hi(Box::new(Voice::new(rate, panel)))
+                };
+                voice.note(60, true);
+                for _ in 0..4800 {
                     std::hint::black_box(voice.tick());
                 }
-                let cost = t.elapsed();
-                worst = worst.max(cost);
-                total += cost;
-                late += usize::from(cost > period.mul_f64(0.75));
-                if let Some(left) =
-                    (start + period * (i as u32 + 1)).checked_duration_since(Instant::now())
-                {
-                    std::thread::sleep(left);
+                let period = Duration::from_secs_f64(block as f64 / rate);
+                let blocks = (rate / block as f64) as usize;
+                let start = Instant::now();
+                let mut worst = Duration::ZERO;
+                let mut total = Duration::ZERO;
+                let mut late = 0;
+                let stride = (0.2 * rate / block as f64) as usize;
+                let gap = (0.02 * rate / block as f64).ceil() as usize;
+                let mut note = 60;
+                for i in 0..blocks {
+                    let t = Instant::now();
+                    if i % stride == 0 {
+                        voice.note(note, false);
+                    }
+                    if i % stride == gap {
+                        note = 60 + (i / stride % 5) as i32;
+                        voice.note(note, true);
+                    }
+                    for _ in 0..block {
+                        std::hint::black_box(voice.tick());
+                    }
+                    let cost = t.elapsed();
+                    worst = worst.max(cost);
+                    total += cost;
+                    late += usize::from(cost > period.mul_f64(0.75));
+                    if let Some(left) =
+                        (start + period * (i as u32 + 1)).checked_duration_since(Instant::now())
+                    {
+                        std::thread::sleep(left);
+                    }
                 }
+                eprintln!(
+                    "{mode}, {block} frames, EMPHASIS {emphasis}: mean {:.3} ms, worst {:.3} ms, {late} blocks over 75 % of {:.3} ms",
+                    total.as_secs_f64() * 1000.0 / blocks as f64,
+                    worst.as_secs_f64() * 1000.0,
+                    period.as_secs_f64() * 1000.0
+                );
+                assert_eq!(late, 0, "single voice exceeds its block budget");
             }
-            eprintln!(
-                "{block} frames, EMPHASIS {emphasis}: mean {:.3} ms, worst {:.3} ms, {late} blocks over 75 % of {:.3} ms",
-                total.as_secs_f64() * 1000.0 / blocks as f64,
-                worst.as_secs_f64() * 1000.0,
-                period.as_secs_f64() * 1000.0
-            );
-            assert_eq!(late, 0, "single voice exceeds its block budget");
         }
     }
 }

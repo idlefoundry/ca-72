@@ -5257,5 +5257,24 @@ lab, all targets, with and without all features; the changed Rust files formatte
 of 2.67; 256 frames mean 0.96 to 0.97 ms, worst 1.71 ms of 5.33. No block exceeded
 75 % of its period. These are single-voice measurements, not a polyphony budget.
 
-Not yet built or tried in a macOS or Windows host, installed, published, or used to
-re-level the factory presets. The owner's installed version is still 0.2.0.
+**LO follow-up, requested before installation:** the separate fitted voice ran its
+nonlinear ladder at the output rate. At high contour it produced aliased resonance
+tones. Its filter now runs at 8x through the existing sparse resamplers; the direct
+FILTER MODE HI branch passes through the same resamplers, and the external feedback
+delay is shortened by their delay to retain the fitted total loop delay. The nonlinear
+input pair is solved with a bracketed Newton iteration, its caps counted. Unbounded
+exponential cutoff above the fitted dial is replaced with relative saturation measured
+from the calibrated converter and a high-rate circuit ladder. The ignored
+`lo_cutoff_saturation_fit` test reproduces the table; it preserves the dial's fitted
+pitch at the join and does not claim new hardware calibration. White noise's fitted
+top at 48 kHz moves from 9.5 to 10 kHz after the filter rate change.
+
+LO's whole-note check passes at 44.1, 48 and 96 kHz, with no solver caps. Relative
+8–20 kHz power versus ULTRA is -15.02/-21.04, -1.92/-2.59 and -6.68/-6.65 dB at
+CUTOFF 0/+2.5 respectively. Its 16 focused unit tests, including pitch, contours,
+resonance, filter mode, noise and the new nonlinear residual check, pass. This
+comparison tests unwanted high-band energy; it does not establish that LO matches
+every detail of ULTRA's spectrum.
+
+Not yet tried in a macOS or Windows host, installed, published, or used to re-level
+the factory presets. The owner's installed version is still 0.2.0.
