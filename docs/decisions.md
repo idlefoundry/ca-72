@@ -5281,7 +5281,7 @@ and 96 kHz and control movement. Its ngspice 47 bench regenerates at 36.75 kHz; 
 4x filter keeps 8 to 20 kHz output power 121 dB below that oscillation's power and
 continues oscillating internally. Existing hardware takes were found on the lab share
 (sessions E and J, EMPHASIS 10, J with AMOUNT OF CONTOUR 10; session I's Ringing Saw
-Line). They do not capture the exact reported patch. Diagnostic WAVs, spectrograms
+Line). They do not capture the exact reported patch. Diagnostic spectrograms
 are retained in [the filter-contour diagnostic record](filter-contour/README.md).
 
 **Checks on the Linux reference machine:** 17 focused debug tests passed, including

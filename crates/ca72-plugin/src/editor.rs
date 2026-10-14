@@ -1216,7 +1216,17 @@ impl Editing {
             if view == self.resize_view() {
                 return;
             }
-            self.width = view.width;
+            // draw() can consume a delayed refusal before the native window follows it.
+            // Refit now so that following the restored width preserves the composed frame.
+            let physical = WindowInfo::from_logical_size(
+                Size::new(
+                    f64::from(view.width),
+                    f64::from(height_for_panel(view.width, view.expanded)),
+                ),
+                self.dpr,
+            )
+            .physical_size();
+            self.fit(self.dpr, view.width, physical.width);
             self.params
                 .editor_width
                 .store(view.saved_width, Ordering::Relaxed);
@@ -5770,6 +5780,34 @@ mod tests {
     }
 
     #[test]
+    fn delayed_width_refusal_keeps_the_restored_frame_through_native_follow() {
+        for dpr in [1.0, 1.25, 2.0] {
+            let (mut e, host, params) = editing();
+            let original = e.width;
+            let physical = (f64::from(original) * dpr).round() as u32;
+            e.fit(dpr, original, physical);
+            e.draw();
+            host.deferred.store(true, Ordering::Relaxed);
+            e.resize(original + 100);
+            let wider = e.width;
+            e.fit(dpr, wider, (f64::from(wider) * dpr).round() as u32);
+            e.draw();
+            let (request, _) = params.editor_resizing.requested().expect("width request");
+            params.editor_resizing.answer(request, false);
+            e.draw();
+            assert_eq!(e.width, original);
+            let composed = e.composed.clone();
+            assert_eq!(composed.as_ref().expect("restored frame").width(), physical);
+            // on_frame follows this restoration before presenting the composed controls.
+            e.fit(dpr, original, physical);
+            assert!(
+                e.composed == composed,
+                "native follow preserves restored controls"
+            );
+        }
+    }
+
+    #[test]
     fn a_refused_shrink_keeps_presets_and_the_compact_preference() {
         let (mut e, host, params) = editing();
         e.toggle_panel();
@@ -7265,6 +7303,32 @@ mod windows_window_tests {
                 "repainting preserves the complete frame"
             );
         }
+        o.close();
+    }
+
+    #[test]
+    fn delayed_width_refusal_preserves_the_native_controls_after_repaint() {
+        let o = Opened::new(true, HostWindow::Dialog);
+        let original = o.size();
+        o.host.deferred.store(true, Ordering::Relaxed);
+        let grip = o.at((art::W - 12.0, art::H - 12.0));
+        o.drag(grip, 120.0);
+        assert!(o.size().0 > original.0);
+        let requests = std::mem::take(&mut *o.host.pending.lock().expect("requests"));
+        let &(request, size) = requests.last().expect("width request");
+        o.host.answer(request, size, false);
+        assert_eq!(settled(&o, original), original);
+        pump(Duration::from_millis(300));
+        let before = every_pixel(&o);
+        assert!(colours(&before) >= 100, "the restored controls are drawn");
+        let flags = RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN;
+        // SAFETY: the test's own windows on their creating thread.
+        unsafe { RedrawWindow(o.parent, null_mut(), null_mut(), flags) };
+        pump(Duration::from_millis(200));
+        assert!(
+            every_pixel(&o) == before,
+            "repainting preserves the restored controls"
+        );
         o.close();
     }
 
