@@ -147,6 +147,9 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then export CA72_REQUIRE_NGSPICE=1; fi
           cargo test --workspace --features ca72-plugin/standalone-production
 
+      - name: Typed persistent-field derive tests
+        run: CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-derive" cargo test --manifest-path third_party/nih-plug/nih_plug_derive/Cargo.toml
+
       - name: Validators, cached
         uses: actions/cache@v5
         with:

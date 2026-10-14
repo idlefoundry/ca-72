@@ -354,9 +354,12 @@ dependencies = [
  "nih_plug",
  "objc2",
  "objc2-foundation",
+ "plugin-kit-queue",
+ "plugin-kit-standalone",
  "plugin-kit-stereo",
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",
+ "resvg",
  "serde",
  "serde_json",
  "softbuffer",
@@ -650,6 +653,28 @@ name = "cpal"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "873dab07c8f743075e57f524c583985fbaf745602acbe916a01539364369a779"
+dependencies = [
+ "alsa 0.9.1",
+ "core-foundation-sys",
+ "coreaudio-rs",
+ "dasp_sample",
+ "jni",
+ "js-sys",
+ "libc",
+ "mach2",
+ "ndk 0.8.0",
+ "ndk-context",
+ "oboe",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "windows 0.54.0",
+]
+
+[[package]]
+name = "cpal"
+version = "0.15.3"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=e93e7e6bdadedcc61b4bf7a358fc0a0c23ce8457#e93e7e6bdadedcc61b4bf7a358fc0a0c23ce8457"
 dependencies = [
  "alsa 0.9.1",
  "core-foundation-sys",
@@ -1396,7 +1421,7 @@ dependencies = [
  "clap",
  "clap-sys",
  "core-foundation",
- "cpal",
+ "cpal 0.15.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam",
  "jack",
  "libc",
@@ -1407,6 +1432,7 @@ dependencies = [
  "nih_plug_derive",
  "objc",
  "parking_lot",
+ "plugin-kit-standalone",
  "raw-window-handle 0.5.2",
  "rtrb",
  "serde",
@@ -1708,6 +1734,25 @@ version = "0.3.1"
 source = "git+https://github.com/idlefoundry/plugin-kit?rev=4c0f0f31041cb28b9dc803996dd01d8f44af5ce8#4c0f0f31041cb28b9dc803996dd01d8f44af5ce8"
 dependencies = [
  "resvg",
+]
+
+[[package]]
+name = "plugin-kit-queue"
+version = "0.3.1"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=e93e7e6bdadedcc61b4bf7a358fc0a0c23ce8457#e93e7e6bdadedcc61b4bf7a358fc0a0c23ce8457"
+
+[[package]]
+name = "plugin-kit-standalone"
+version = "0.3.1"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=e93e7e6bdadedcc61b4bf7a358fc0a0c23ce8457#e93e7e6bdadedcc61b4bf7a358fc0a0c23ce8457"
+dependencies = [
+ "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=e93e7e6bdadedcc61b4bf7a358fc0a0c23ce8457)",
+ "crossbeam-channel",
+ "midir",
+ "plugin-kit-queue",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

@@ -14,9 +14,11 @@ The host services belong in plugin-kit so another instrument can adopt them.
 The owner's keyboard design replaces VOICES, STEREO and OUTPUT with an onscreen
 keyboard. A button beside SAVE and settings on the preview/preset bar swaps between
 the keyboard and the extra controls. The instrument's main panel, left-hand wheels,
-GLIDE and DECAY retain their positions. Switching views never changes a parameter,
+GLIDE and DECAY retain their positions. Switching keyboard/controls never changes a parameter,
 the window's dimensions, a physical MIDI note, or the saved sound. Controls view is
 the hosted plug-in's initial default; standalone initially shows the keyboard.
+The subsequently merged R70 PANEL control retains its separate whole-panel hide/show
+behavior; changing keyboard/controls content does not change that height preference.
 
 ## Research and architectural decision
 
@@ -96,8 +98,10 @@ On failure restore the last working configuration or show an editable stopped st
 The window stays responsive and open. Stream changes and initialization may briefly
 interrupt sound; never reset the patch to defaults.
 
-**Keyboard:** 49 keys, default MIDI 36–84 (C2–C6), ivory whites and charcoal blacks,
-subtle amber held-note indication, C labels and an octave/range header. At the drawing's
+**Keyboard (owner's revised reference, 2026-10-13):** 44 keys, default MIDI 41–84
+(F2–C6), neutral white plastic and polished black plastic, true L/T white-key cutouts
+around recessed black keys, narrow dark clearances, and aligned tops/fronts. Held-note
+indication is subtle amber; it never displaces a key. Keep an octave/range header. At the drawing's
 scale replace x=370..3080 below the 116-unit preset rail; keep x<370 unchanged. Black
 keys take precedence in hit testing. The bar button indicates which view is active.
 Octave down/up clamps to MIDI 0–127 without wrapping. A TYPE switch opts into computer
@@ -135,7 +139,7 @@ when its acceptance criteria are demonstrated; BLOCKED/UNVERIFIED retain the exa
 | S1 | Research and frozen specification | Current code inspected; primary sources cited; known wrapper defects, platform contract and acceptance matrix recorded before implementation |
 | S2 | Shared host core | Capability enumeration, unambiguous identity resolution, supported negotiation, selected channel routing, finite-input sanitization, mono `(L+R)/2`, zero unused channels, bounded queues, overflow recovery, atomic versioned persistence and deterministic fake-device tests |
 | S3 | Production NIH adapter and app entry | Same plug-in/editor/params; open with no hardware; configuration prepared off callback; apply/rollback/recovery preserves sound; parameter edits work stopped and running; no callback locks, allocations, file/network or GUI calls; all threads terminate on close |
-| S4 | Playable keyboard and view switch | Approved visual proof; fixed window and left-hand controls; both skins; hidden control hit-test isolation; mouse/glissando/outside release; typing chords/repeat; octave, view, focus, close and text takeover release local notes; source overlap tests; queue overflow cannot strand notes; audio-owned highlights and panic |
+| S4 | Playable keyboard and view switch | Rendered visual proof under the owner's delegated judgment; keyboard/controls swap preserves height and left-hand controls; both skins; hidden control hit-test isolation; mouse/glissando/outside release; typing chords/repeat/modifier changes; octave, view, focus, close and text takeover release local notes; source overlap tests; queue overflow cannot strand notes; audio-owned highlights and panic |
 | S5 | Audio/MIDI settings UI | Every listed option reflects capabilities; input disabled default; ALL/1–16 filter; refresh; apply/cancel; actual rate/period/duration; errors/recovery shown; inaccessible device remains editable; settings available only to standalone host |
 | S6 | Session and resilience | Restart restores unsaved edits, MIDI map/width/view/working I/O; corrupt/unsupported files retained; failed config not saved; missing/duplicate identities; hotplug notes released; close after lost callback bounded to two seconds; background operations have bounded shutdown |
 | S7 | Packaging and documentation | Buildable standalone target; app/icon/metadata; standalone optional installer choice on all platforms; portable Windows ZIP; Linux install/uninstall and desktop validation; macOS universal signing/input configuration; notices and corresponding sources; README instructions and truthful support limitations |
@@ -171,6 +175,9 @@ their interfaces are fixed. Show the keyboard layout for review while host work
 continues. Integrate app/settings/session; then packaging; then focused and cross-OS
 checks and independent review. After a visual change, show the rendered result and
 allow the owner to review before milestone CI or merging, as circuit-plugin requires.
+The owner explicitly superseded that wait on 2026-10-13: “Do the best you can with the
+keyboard, but don't get stuck on it or wait for me to approve it. Just keep moving
+forward with the rest of the items on the list.” Continue visual judgment and verification.
 Packaging a release candidate is authorized; publishing a release remains a final
 reviewable action, not an automatic consequence of completing code tasks.
 

@@ -67,7 +67,7 @@ DEALINGS IN THE SOFTWARE.
 
 def metadata(platform):
     out = subprocess.check_output(
-        ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", platform],
+        ["cargo", "metadata", "--format-version", "1", "--locked", "--features", "standalone-production", "--filter-platform", platform],
         cwd=ROOT,
     )
     return json.loads(out)

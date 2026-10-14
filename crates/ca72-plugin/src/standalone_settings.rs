@@ -1077,7 +1077,18 @@ mod tests {
             take_requested().is_some(),
             "manual settings remain available after dismissing warning"
         );
-        runtime.shutdown().expect("bounded shutdown");
+        let error = runtime
+            .shutdown()
+            .expect_err("preserved malformed session prevents final save");
+        assert!(error.contains("preserved"));
+        assert!(
+            runtime
+                .handle()
+                .snapshot()
+                .warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("preserved"))
+        );
         assert_eq!(
             std::fs::read_to_string(directory.path().join("session.json")).expect("preserved"),
             "{broken"
