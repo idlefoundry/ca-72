@@ -79,8 +79,13 @@ and sends nothing of yours.
 The keyboard button beside SAVE and settings switches the lower panel between
 VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
 remain visible. Click a key or drag between keys to play; the octave buttons move
-the visible range. TYPE enables computer-keyboard notes, mapped chromatically to
-`A W S E D F T G Y H U J K O L P ;`. It starts off in a plug-in so host shortcuts
+the visible range. TYPE enables a piano layout on your computer keyboard: `A S D F G`
+play `C D E F G`, with `W E T Y U` on the black notes. The full chromatic order is
+`A W S E D F T G Y H U J K O L P ;`. A starts at C3 (MIDI 48); `Z` lowers TYPE
+one octave and `X` raises it. TYPE's octave is independent of the visible range
+and the sound's oscillator RANGE controls, and is remembered on this computer.
+The TYPE header shows A's current note. Shifting releases held TYPE notes while
+pointer and physical MIDI notes continue. TYPE starts off so host shortcuts
 keep working. Text entry takes precedence. PANIC releases notes without changing
 the sound. Selecting the other view releases local keys while physical MIDI notes
 continue. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.

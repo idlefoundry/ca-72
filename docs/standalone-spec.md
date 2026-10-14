@@ -106,8 +106,14 @@ scale replace x=370..3080 below the 116-unit preset rail; keep x<370 unchanged. 
 keys take precedence in hit testing. The bar button indicates which view is active.
 Octave down/up clamps to MIDI 0–127 without wrapping. A TYPE switch opts into computer
 keys; in hosted mode it defaults off and gives host shortcuts back when off. Map
-`A W S E D F T G Y H U J K O L P ;` chromatically from the selected root; repeat keydown
-does not retrigger. No velocity control: the circuit's keyboard is not velocity-sensitive.
+`A W S E D F T G Y H U J K O L P ;` chromatically from TYPE's own C root, so ASDFG
+play CDEFG. Default A is MIDI 48 (labelled C3 here). Z lowers and X raises TYPE's
+root by 12 semitones, once a press, independently of the visible range, physical
+MIDI and the sound's oscillator RANGE controls. Roots clamp to C notes 0–120;
+notes beyond MIDI 127 do not play. TYPE octave changes release only typed owners,
+and visible range changes release only pointer owners. Persist the two octave
+preferences separately, outside presets and host state. Repeat keydown does not
+retrigger. No velocity control: the circuit's keyboard is not velocity-sensitive.
 Mouse press/drag/release plays through the same engine as external MIDI. One-pointer
 touch through OS mouse emulation is supported; native multitouch is not claimed.
 

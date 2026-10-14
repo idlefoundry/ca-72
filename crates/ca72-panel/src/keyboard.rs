@@ -22,6 +22,8 @@ const WHITE_H: f64 = BED[3] - BED[1];
 const BLACK_H: f64 = WHITE_H * 0.66;
 pub const KEYS: usize = 44;
 pub const MAPPING: &str = "awsedftgyhujkolp;";
+/// A starts on C3, independently of the visible F-to-C keyboard and the sound controls.
+pub const TYPE_ROOT: u8 = 48;
 const WHITE_W: f64 = (BED[2] - BED[0]) / 26.0;
 const CLEARANCE: f64 = 3.0;
 const NOTCH_Y: f64 = BED[1] + BLACK_H + 5.0;
@@ -42,6 +44,7 @@ pub enum Target {
 pub struct Scene {
     pub root: u8,
     pub typing: bool,
+    pub typing_root: u8,
     pub held: [u64; 2],
     pub hover: Option<Target>,
     pub skin: Skin,
@@ -52,6 +55,7 @@ impl Default for Scene {
         Self {
             root: 41,
             typing: false,
+            typing_root: TYPE_ROOT,
             held: [0, 0],
             hover: None,
             skin: Skin::Worn,
@@ -81,6 +85,16 @@ pub fn label(note: u8) -> String {
 pub fn shifted(root: u8, up: bool) -> u8 {
     if up {
         root.saturating_add(12).min(84)
+    } else {
+        root.saturating_sub(12)
+    }
+}
+
+/// TYPE always starts on C, with one octave a press and no MIDI-range wrapping.
+pub fn shifted_typing(root: u8, up: bool) -> u8 {
+    let root = root.min(120) / 12 * 12;
+    if up {
+        root.saturating_add(12).min(120)
     } else {
         root.saturating_sub(12)
     }
@@ -201,6 +215,7 @@ pub fn damage(was: Option<&Scene>, now: Option<&Scene>) -> Vec<[f64; 4]> {
         (Some(a), Some(b))
             if a.root == b.root
                 && a.typing == b.typing
+                && a.typing_root == b.typing_root
                 && a.skin == b.skin
                 && a.hover == b.hover =>
         {
@@ -549,9 +564,9 @@ fn drawing(scene: &Scene) -> String {
     out += &format!(
         "<text x='1730' y='1080' font-size='18' text-anchor='middle' fill='#a9a696'>{}</text></g>",
         if scene.typing {
-            "A W S E D F T G Y H U J K O L P ;"
+            format!("A = {} · Z / X OCTAVE", label(scene.typing_root))
         } else {
-            ""
+            String::new()
         }
     );
     out
@@ -665,6 +680,21 @@ fn key_size(source: &Pixmap, s: f64, dark: bool) -> Pixmap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typing_octave_indicator_is_redrawn_when_its_root_changes() {
+        let was = Scene {
+            typing: true,
+            ..Scene::default()
+        };
+        let now = Scene {
+            typing_root: 60,
+            ..was.clone()
+        };
+        assert_eq!(damage(Some(&was), Some(&now)), vec![AREA]);
+        assert!(drawing(&was).contains("A = C3 · Z / X OCTAVE"));
+        assert!(drawing(&now).contains("A = C4 · Z / X OCTAVE"));
+    }
 
     #[test]
     fn natural_keys_have_real_notches_and_aligned_fronts() {

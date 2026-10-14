@@ -5462,3 +5462,36 @@ Windows no-device save/reopen/close and a private Developer ID signed/notarised
 standalone Mac candidate pass. Physical audio/MIDI latency, microphone permission,
 hardware hotplug, Mac GUI and minimum-OS runtime remain unverified. R71 and R72 are reserved for the already open filter fix and 0.2.1 release
 records; this record follows them numerically.
+
+## R-TYPE. Computer keys follow a piano layout with their own octave
+
+**Owner decisions, 2026-10-14.** ASDFG in TYPE should play CDEFG. Computer-keyboard
+notes should have their own octave, with Z lowering and X raising it, as in Live.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- Keep the chromatic key order but anchor it to a separate C root. A defaults to
+  C3 (MIDI 48 in this instrument's labels). Z/X move 12 semitones once a press;
+  roots clamp to C notes 0–120 and keys beyond MIDI 127 stay silent. The visible
+  F-to-C range and oscillator RANGE controls do not change TYPE's MIDI pitches.
+- TYPE's octave is a per-computer preference, outside presets and host state.
+  Existing preferences retain their visible range and get the new C3 TYPE default.
+  The header shows A's note and the Z/X shortcut while TYPE is enabled.
+- An octave change releases only that input's notes. Typed keys remain recorded
+  until keyup, including silent out-of-range keys, so host-forwarded repeats cannot
+  restart them after transposition. Pointer and physical MIDI ownership remain
+  independent; text entry, menus, modifiers and focus retain precedence.
+- The [official keyboard diagram](https://www.ableton.com/en/manual/live-keyboard-shortcuts/#keymidi-map-mode-and-the-computer-midi-keyboard)
+  confirms the white/black key layout and Z/X shortcuts. Live calls MIDI 60 C3;
+  this instrument calls it C4, so the chosen default is not a claim of identical
+  starting pitch. L/O/P/semicolon continue the existing second-octave extension.
+
+**Evidence (the Linux reference machine, 2026-10-14):** restoring the old shared-root
+calculation makes `computer_keys_start_on_c_and_follow_the_piano_layout` fail on A,
+with MIDI 41 instead of 48. Regression checks cover every mapped pitch, octave
+limits, held-note source overlap, known/unknown key codes, repeated octave presses,
+unflagged repeats after transposing, silent out-of-range keys, text takeover,
+separate preference roundtrips and header invalidation. Independent review found
+the two repeat cases and confirmed their fixes. The plug-in's production-feature
+library tests passed: 236 passed, 13 ignored; all three keyboard-panel checks passed.
+Formatting, diff checks and strict clippy for both touched crates, all targets,
+with all features and without optional features passed. Physical devices were not opened.

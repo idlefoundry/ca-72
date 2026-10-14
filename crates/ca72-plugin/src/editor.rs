@@ -975,6 +975,7 @@ impl Editing {
         let mut playing = Playing::default();
         playing.visible = settings.keyboard.unwrap_or(standalone);
         playing.root = settings.keyboard_root;
+        playing.typing_root = settings.typing_root;
         let freq_knobs = [Pot::Two, Pot::Three].map(|pot| FreqKnob {
             params: Arc::clone(&params),
             pot,
@@ -2741,7 +2742,12 @@ impl Editing {
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
         self.reconcile_resize();
         let allowed = self.note_typing_allowed();
+        let typing_root = self.playing.typing_root;
         if self.playing.key(k, allowed) {
+            if self.playing.typing_root != typing_root {
+                self.keep_settings(Change::TypingRoot(self.playing.typing_root));
+                self.composed = None;
+            }
             return true;
         }
         #[cfg(feature = "standalone-production")]
@@ -3667,6 +3673,47 @@ mod tests {
         editing_with(Library::at(
             std::env::temp_dir().join("ca72-editor-tests-no-library"),
         ))
+    }
+
+    #[test]
+    fn typing_octave_is_independent_of_panel_octaves_and_sound_parameters() {
+        let (mut e, host, _) = editing();
+        e.playing.visible = true;
+        let event = |state, character: &str| KeyboardEvent {
+            state,
+            key: Key::Character(character.into()),
+            ..Default::default()
+        };
+        assert!(
+            !e.keyed(&event(KeyState::Down, "x")),
+            "TYPE starts disabled"
+        );
+        e.playing.typing = true;
+        assert!(e.keyed(&event(KeyState::Down, "a")));
+        assert_eq!(e.playing.notes.pop().expect("C3 attack").note, 48);
+        let p = at(&e, (1287.0, keyboard::HEADER));
+        click(&mut e, p);
+        assert_eq!((e.playing.root, e.playing.typing_root), (53, 48));
+        assert!(
+            e.playing.notes.pop().is_none(),
+            "range button leaves TYPE held"
+        );
+        assert!(e.keyed(&event(KeyState::Down, "x")));
+        assert_eq!((e.playing.root, e.settings.keyboard_root), (53, 53));
+        assert_eq!((e.playing.typing_root, e.settings.typing_root), (60, 60));
+        assert!(!e.playing.notes.pop().expect("original pitch released").on);
+        assert!(
+            host.take().is_empty(),
+            "keyboard octaves are outside the sound"
+        );
+        assert!(e.keyed(&event(KeyState::Up, "x")));
+        assert!(e.keyed(&event(KeyState::Up, "a")));
+        assert!(e.keyed(&event(KeyState::Down, "a")));
+        assert_eq!(e.playing.notes.pop().expect("C4 attack").note, 60);
+        e.strip_press(StripTarget::Bar(BarTarget::Name));
+        assert!(!e.note_typing_allowed(), "preset search owns letters");
+        e.keyed(&event(KeyState::Down, "z"));
+        assert_eq!(e.playing.typing_root, 60);
     }
 
     #[test]
