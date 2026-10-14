@@ -109,3 +109,25 @@ uninstall. No product installation or owner's plug-in path was changed.
 The Linux shipped-profile application builds, `--help` exits successfully, and
 unknown/incomplete options exit 2 without accessing a display or device. Its native
 library dependencies include ALSA and X11/OpenGL, with no JACK dependency.
+
+CI run [38508250169](https://github.com/idlefoundry/ca-72/actions/runs/38508250169)
+built the Linux application and installer from `e94218b`. The downloaded archive
+was installed, launched with `--help` and uninstalled under a private prefix.
+Its notices match the committed source, every native library resolves, no JACK
+library is linked, and its maximum GLIBC symbol version is 2.35. Archive SHA-256:
+`ef418002a6c96135890dd351fde624f0753fa9a640140566599e11bbb615fc4b`.
+
+That run compiled both macOS application slices, then exposed a `lipo` argument
+order/parser difference. Both build and package scripts now verify each slice
+separately with the input first. Apple clang 21 built a private universal C
+fixture; the native Apple tool verified arm64 and x86_64 with those exact calls.
+The actual corrected application/package checks remain pending below.
+
+The Windows artifact from that exact run is a GUI x64 executable. Its imports are
+Windows system DLLs only, with no VCRUNTIME or MSVCP redistributable dependency.
+Binary SHA-256: `8aebe8e122f6abfe0599b6f4669541a2035354522c9573e32e76094e76484265`.
+Redirected help/invalid-option CLI checks pass. Two no-device application cycles
+in a private SSH session close via their own WM_CLOSE in 142.73/143.83 ms with
+exit 0, save session.json and restore unsaved cutoff, preset name and editor width.
+The existing per-computer settings file is unchanged. No owner window receives
+focus and no physical endpoint is opened. The test fixture is removed afterward.

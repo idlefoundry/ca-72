@@ -40,7 +40,10 @@ with open(sys.argv[1], "wb") as stream:
         "NSHumanReadableCopyright": "Copyright © 2026 Idle Foundry Ltd. GNU GPL version 3 or later.",
     }, stream)
 PY
-    lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/ca72-standalone"
+    # Apple lipo versions differ in parsing architecture lists. Check each slice.
+    for arch in arm64 x86_64; do
+        lipo "$app/Contents/MacOS/ca72-standalone" -verify_arch "$arch"
+    done
     printf '%s\n' "$app"
     ;;
 Linux)

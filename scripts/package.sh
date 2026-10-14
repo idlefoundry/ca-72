@@ -126,7 +126,9 @@ macos() {
         codesign --force --entitlements "$root/scripts/standalone/entitlements.plist" --sign - "$app"
     fi
     codesign --verify --strict "$app"
-    lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/ca72-standalone"
+    for arch in arm64 x86_64; do
+        lipo "$app/Contents/MacOS/ca72-standalone" -verify_arch "$arch"
+    done
     pkgbuild --analyze --root "$stage/Applications" "$work/standalone.plist" > /dev/null
     plutil -replace 0.BundleIsRelocatable -bool NO "$work/standalone.plist"
     plutil -replace 0.BundleIsVersionChecked -bool NO "$work/standalone.plist"
