@@ -664,7 +664,7 @@ impl IRunLoop for ResizeFrame {
 }
 
 #[test]
-fn a_resize_reports_the_hosts_answer_and_request_identity() {
+fn a_resize_reports_the_hosts_answer_or_queues_to_its_gui_thread() {
     let i = Instance::new(Host::Silent);
     RESIZES.with(|r| r.borrow_mut().clear());
     let accepted = Arc::new(AtomicBool::new(false));
@@ -675,6 +675,13 @@ fn a_resize_reports_the_hosts_answer_and_request_identity() {
         assert_eq!(i.view.set_frame(frame.as_ptr().cast()), kResultOk);
     }
     assert!(i.context.resize_response_will_follow());
+    // Rust's test thread is not AppKit's main thread. macOS must queue this request;
+    // the main-thread host validators exercise its eventual GUI response.
+    if cfg!(target_os = "macos") {
+        assert!(i.context.request_resize());
+        assert!(RESIZES.with(|r| r.borrow().is_empty()));
+        return;
+    }
     assert!(!i.context.request_resize());
     accepted.store(true, Ordering::Relaxed);
     assert!(i.context.request_resize());
