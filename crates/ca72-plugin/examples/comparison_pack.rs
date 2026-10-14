@@ -161,14 +161,13 @@ fn run() -> Result<(), String> {
         &std::fs::read_to_string(root.join("phrases.json")).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    let total = (number(&phrases["seconds"])? * RATE as f64).round() as usize;
-    if total != 230_400 {
-        return Err("expected exactly 4.8 seconds at 48 kHz".into());
+    if phrases["format"].as_u64() != Some(2) || number(&phrases["default_seconds"])? != 4.8 {
+        return Err("expected per-clip timing format 2 with a 4.8-second default".into());
     }
     let (_, input) =
         wav::read(&std::fs::read(root.join("external-input.wav")).map_err(|e| e.to_string())?)?;
-    if input.len() != 1 || input[0].len() != total {
-        return Err("external probe must be mono and the same length".into());
+    if input.len() != 1 || input[0].len() != 230_400 {
+        return Err("external probe must be mono, 4.8 seconds at 48 kHz".into());
     }
     for folder in ["audio/raw", "audio/listening", "panels"] {
         std::fs::create_dir_all(root.join(folder)).map_err(|e| e.to_string())?;
@@ -184,6 +183,16 @@ fn run() -> Result<(), String> {
         if phrase["name"].as_str() != Some(sound.name.as_str()) {
             return Err("bank and phrases differ in order".into());
         }
+        let seconds = number(&phrase["seconds"])?;
+        let expected = if phrase["cutoff_sweep"].is_array() {
+            10.0
+        } else {
+            4.8
+        };
+        if seconds != expected {
+            return Err(format!("{}: unexpected clip duration", sound.name));
+        }
+        let total = (seconds * RATE as f64).round() as usize;
         for (id, value) in &sound.values {
             if !value.is_finite() || !known.iter().any(|(key, _)| *key == id) {
                 return Err(format!("{}: invalid parameter {id}", sound.name));

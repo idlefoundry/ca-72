@@ -15,6 +15,8 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "comparison-presets"
 SECONDS = 4.8
+SWEEP_SECONDS = 10.0
+SWEEP_POINTS = [[0.0, -5], [0.4, -5], [2.4, 0], [4.4, 5], [5.4, 5], [7.4, 0], [9.4, -5]]
 RATE = 48000
 RANGES = ["LO", "32'", "16'", "8'", "4'", "2'"]
 WAVES = ["triangle", "shark tooth", "saw", "square", "wide pulse", "narrow pulse"]
@@ -87,12 +89,12 @@ add("Wide Skyline", "OSC 2 alone, wide pulse, 2': two-octave shift and upper-reg
 add("Narrow Needle", "OSC 3 alone, narrow pulse, 8': high keyboard register.",
     phrase([77, 81, 84, 81]), [osc(3, 3, 5, 6)],
     listen="Thin nasal harmonics on F5/A5/C6; pitch and aliasing at the upper end of the original keyboard.")
-add("Twin Beat", "Gentle low-pass cutoff sweep on two 8' saws, OSC 2 ten cents sharp.", [[0.2, 3.9, 57]],
+add("Twin Beat", "Gentle low-pass cutoff sweep on two 8' saws, OSC 2 ten cents sharp.", [[0.2, 9.3, 57]],
     [osc(1, 3, 2, 4), osc(2, 3, 2, 4, 0.1)],
     dict(cutoff=-5, keyboard_control_1=1),
     listen="The low-pass opens smoothly from the fully counterclockwise stop (-5) to the fully clockwise stop (+5), holds open, then closes to -5, with EMPHASIS 0. Hear the harmonics enter and leave, plus the two oscillators beating on held A3. For a separate beat-rate take, keep cutoff +5 throughout. Ten cents is deliberately between lines; use the displayed cents/tuner.",
     hardware="The stored +10 cents is relative to OSC 2's nominal centre. Match the measured beat rate against OSC 1, including natural centre mismatch and drift. Turn the physical CUTOFF knob according to the sweep timing below, leaving other controls fixed; the MIDI markers are timing cues and do not turn the hardware knob.")
-PATCHES[-1]["cutoff_sweep"] = [[0.0, -5], [0.4, -5], [1.1, 0], [1.8, 5], [2.6, 5], [3.3, 0], [4.0, -5]]
+PATCHES[-1].update(seconds=SWEEP_SECONDS, cutoff_sweep=[point[:] for point in SWEEP_POINTS])
 add("Octave Floor", "OSC 1 + 3, a 16' triangle over a 32' square.", LOW,
     [osc(1, 2, 0, 6), osc(3, 1, 3, 4)],
     dict(cutoff=-1, keyboard_control_2=1),
@@ -102,12 +104,12 @@ add("Fifth Lantern", "OSC 2 + 3, 8' triangle and saw; OSC 3 seven semitones high
     dict(cutoff=2, keyboard_control_1=1, keyboard_control_2=1),
     listen="A fifth inside one synth voice. One MIDI key at a time; this is oscillator interval tuning, not polyphony.",
     hardware="The hardware's +7 marking is only a guide. Tune OSC 3 to exactly +7 semitones relative to OSC 2, then record the actual knob position.")
-add("Three Floors", "Resonant low-pass cutoff sweep on OSC 1 + 2 + 3 at 32'/16'/8'.", [[0.2, 3.9, 53]],
+add("Three Floors", "Resonant low-pass cutoff sweep on OSC 1 + 2 + 3 at 32'/16'/8'.", [[0.2, 9.3, 53]],
     [osc(1, 1, 2, 4), osc(2, 2, 1, 4), osc(3, 3, 3, 4)],
     dict(cutoff=-5, emphasis=8, keyboard_control_1=1, keyboard_control_2=1),
     listen="A stronger resonant sweep opens from the fully counterclockwise stop (-5) to the fully clockwise stop (+5), holds, then closes to -5. Hear the resonant peak move through the three octave layers while their fundamentals remain fixed. EMPHASIS stays at 8; contour amount and filter modulation are 0 so only CUTOFF moves.",
     hardware="Hold F3 (MIDI 53): the 32'/16'/8' oscillators sound F1/F2/F3. Follow the same CUTOFF trajectory as 07, with EMPHASIS 8. Turn only CUTOFF; match the hardware's timing to the embedded MIDI markers.")
-PATCHES[-1]["cutoff_sweep"] = [[0.0, -5], [0.4, -5], [1.1, 0], [1.8, 5], [2.6, 5], [3.3, 0], [4.0, -5]]
+PATCHES[-1].update(seconds=SWEEP_SECONDS, cutoff_sweep=[point[:] for point in SWEEP_POINTS])
 add("Copper Pluck", "Low-pass filter contour and zero loudness sustain: a short two-saw bass.",
     [[round(0.2 + i * 0.5, 3), 0.18, [41, 48, 50, 53, 41, 48, 50, 53][i]] for i in range(8)],
     [osc(1, 2, 2, 5), osc(2, 2, 2, 5)],
@@ -260,8 +262,8 @@ def midi(patch):
     for start, length, key in patch["notes"]:
         events.extend([(round(start * 1920), 4, bytes([0x90, key, 100])),
                        (round((start + length) * 1920), 3, bytes([0x80, key, 0]))])
-    events += [(round(SECONDS * 1920), 5, b"\xb0\x7b\x00"),
-               (round(SECONDS * 1920), 6, b"\xff\x2f\x00")]
+    events += [(round(patch["seconds"] * 1920), 5, b"\xb0\x7b\x00"),
+               (round(patch["seconds"] * 1920), 6, b"\xff\x2f\x00")]
     last, track = 0, bytearray()
     for tick, _, event in sorted(events, key=lambda e: (e[0], e[1])):
         track.extend(vlq(tick - last))
@@ -300,11 +302,14 @@ def validate():
     combinations = set()
     ranges, waves, tracking = set(), set(), set()
     for patch in PATCHES:
+        seconds = patch["seconds"]
+        if seconds != (SWEEP_SECONDS if patch.get("cutoff_sweep") else SECONDS):
+            raise ValueError(f"Unexpected clip duration: {patch['name']}")
         end = 0
         if not patch["notes"]:
             raise ValueError(f"No notes: {patch['name']}")
         for start, length, key in patch["notes"]:
-            if start < end - 1e-9 or length <= 0 or start < 0 or start + length > SECONDS:
+            if start < end - 1e-9 or length <= 0 or start < 0 or start + length > seconds:
                 raise ValueError(f"Overlapping or out-of-window notes: {patch['name']}")
             if not 41 <= key <= 84:
                 raise ValueError(f"Outside the original key range: {patch['name']}")
@@ -315,7 +320,7 @@ def validate():
                 raise ValueError(f"Sweep must begin at the preset's cutoff: {patch['name']}")
             last = -1
             for time, cutoff in sweep:
-                if not math.isfinite(time) or not math.isfinite(cutoff) or not last < time <= SECONDS or not -5 <= cutoff <= 5:
+                if not math.isfinite(time) or not math.isfinite(cutoff) or not last < time <= seconds or not -5 <= cutoff <= 5:
                     raise ValueError(f"Invalid cutoff sweep: {patch['name']}")
                 last = time
             if len(patch["notes"]) != 1 or sweep[-1][0] > end:
@@ -359,7 +364,8 @@ def guide():
     text = """# CA-72: 24 hardware comparison presets
 
 24 loadable user presets for CA-72 0.2.0, with 24 monophonic MIDI phrases. Each take is
-**4.8 seconds including its release window**, 48 kHz mono. All values are initial patch
+**10 seconds for the cutoff sweeps (07 and 10), 4.8 seconds for the other 22 examples**,
+including each release window, 48 kHz mono. All values are initial patch
 settings, with the timed knob gestures below.
 The set uses only sounds obtainable on a Behringer Model D. Names are proposed test labels;
 the factory library is unchanged. **07 and 10 include timed CUTOFF knob sweeps**; the other
@@ -446,7 +452,8 @@ in 13, 19, 20 and 22, not promised as an ordinary concert-pitch register.
     text += """
 ## Cutoff sweeps in 07 and 10
 
-Both take one held note from **0.20 to 4.10 seconds**. Only CUTOFF moves: AMOUNT OF CONTOUR
+Both take one held note from **0.20 to 9.50 seconds** within a **10-second clip**.
+Only CUTOFF moves: AMOUNT OF CONTOUR
 and FILTER MODULATION are 0, and the loudness contour sustains at 10. Example 07 uses
 EMPHASIS **0** on a two-saw A3; 10 uses EMPHASIS **8** on a three-octave F3 stack.
 Both sweeps cover the **entire cutoff-knob range, from the bottom stop to the top stop**,
@@ -456,15 +463,16 @@ then return to the bottom stop.
 |---|---|---|
 | 0.00 | -5 | Fully counterclockwise stop |
 | 0.40 | -5 | Start opening |
-| 1.10 | 0 | Pass the centre line |
-| 1.80 | +5 | Fully clockwise stop |
-| 2.60 | +5 | Start closing |
-| 3.30 | 0 | Pass the centre line |
-| 4.00 | -5 | Return to the bottom stop |
+| 2.40 | 0 | Pass the centre line |
+| 4.40 | +5 | Fully clockwise stop |
+| 5.40 | +5 | Start closing |
+| 7.40 | 0 | Pass the centre line |
+| 9.40 | -5 | Return to the bottom stop |
 
 Move continuously and linearly in **knob position** between these points; hold the start
 and end values outside the moving segments. Anchors use the end stops and centre line. The
-note ends at 4.10 s and the clip ends at 4.80 s, including 0.70 s for release.
+opening and closing each take 4 seconds, with a 1-second hold at the top. The note ends at
+9.50 s and the clip ends at 10.00 s, including 0.50 s for release.
 
 On CA-72, draw these points as linear host automation for **CUTOFF FREQUENCY**, or perform
 the knob gesture manually. The previews use this trajectory, sampled every 1 ms. On the
@@ -507,6 +515,7 @@ key** in seconds. The last column of the table is the input key, not always the 
         if v["ext_on"]:
             text += f"- EXTERNAL INPUT ON, level {v['ext_volume']}; FEEDBACK {v['feedback']}.\n"
         if patch.get("cutoff_sweep"):
+            text += f"- Clip: {patch['seconds']:g} seconds including release.\n"
             text += "- CUTOFF sweep (time / dial): " + "; ".join(f"{a:.2f} / {b:+g}" for a, b in patch["cutoff_sweep"]) + "; linear between points, all other knobs fixed.\n"
         text += "- Notes: " + "; ".join(f"{a:.2f} / {b:.2f} / {note_name(k)} ({k})" for a, b, k in patch["notes"]) + ".\n"
         text += f"\nListen for: {patch['listen']}\n"
@@ -542,7 +551,7 @@ For more rigorous isolation, repeat a phrase after changing **one control only**
 - 07: OSC 2 level 0, then 4; the first take isolates a single ordinary saw. Keep recorded
   listening gains fixed until levelling copies.
 - 07: for the separate beating reference, disable its cutoff trajectory and hold CUTOFF
-  +5 throughout the same 4.8 s phrase.
+  +5 throughout the same 10 s phrase.
 - 10: all three mixer levels 4, then 8; tests mixer saturation without the DRIVE extension.
 - 10: EMPHASIS 0 versus 8 with the identical cutoff trajectory isolates resonance.
 - 11: AMOUNT 0, then 6; or K1/K2 0/0, 1/0, 0/1, 1/1 in four separate 4.8 s takes.
@@ -560,9 +569,9 @@ For more rigorous isolation, repeat a phrase after changing **one control only**
 - 23: EXT level 3 / 6 / 9 in separate takes at unchanged source voltage; tests the preamp.
 - 24: return absent versus present. Use downstream recording gain to level listening copies.
 
-These are repeat takes of the 24 presets, not extra bank entries. Every repeat uses a 4.8 s
-window. No long decay or sub-0.2 Hz modulation can be characterized completely inside five
-seconds; this set samples useful short behaviour rather than claiming full time-range coverage.
+These are repeat takes of the 24 presets, not extra bank entries. Repeats of 07 and 10 use
+10 s; the other examples use 4.8 s. The set samples useful short behaviour rather than
+claiming complete coverage of the envelope and modulation time ranges.
 The Model D's separate LFO, Filter-EG modulation source and extra CV/gate routings are outside
 this pack because they are not shared front-panel functions of CA-72. Its independently
 switchable filter/loudness releases are represented by matching both switches to CA-72's
@@ -589,7 +598,7 @@ the hardware to the CA-72 listening take, then randomize A/B order. Noise and fr
 oscillators will not null sample for sample; compare pitch in cents, harmonic levels,
 noise spectral slope, attack/decay curves, modulation rate/excursion, glide transition time
 and repeat-to-repeat variation. Repeat noise, detuned and feedback takes at least three
-times; the same 4.8 s window applies to each. A successful render alone does not establish
+times; use 10 s for each repeat of 07/10 and 4.8 s for the others. A successful render alone does not establish
 hardware fidelity; no hardware recordings are included in this pack.
 
 For 23, `external-input.wav` is a 4.8 s mono 220 Hz harmonic probe (harmonics 1–4), peak
@@ -639,16 +648,16 @@ def main():
     for patch in PATCHES:
         header = (f"name = {json.dumps(patch['name'])}\n"
                   f"description = {json.dumps(patch['purpose'])}\n"
-                  'tags = ["comparison", "mono", "4.8s"]\n')
+                  f'tags = ["comparison", "mono", "{patch["seconds"]:g}s"]\n')
         values = toml_values(file_values(patch))
         bank += f"\n[[preset]]\n{header}\n[preset.values]\n{values}\n"
         (OUT / "presets" / f"{patch['name']}.toml").write_text(f"format = 1\n{header}\nfavorite = false\n\n[values]\n{values}\n")
         (OUT / "midi" / f"{patch['name']}.mid").write_bytes(midi(patch))
     (OUT / "bank.toml").write_text(bank)
-    (OUT / "phrases.json").write_text(json.dumps(dict(format=1, sample_rate=RATE, seconds=SECONDS, presets=PATCHES), indent=2) + "\n")
+    (OUT / "phrases.json").write_text(json.dumps(dict(format=2, sample_rate=RATE, default_seconds=SECONDS, presets=PATCHES), indent=2) + "\n")
     write_source()
     guide()
-    print(f"{OUT}: 24 presets, 24 monophonic MIDI clips, 4.8 s each; coverage passed")
+    print(f"{OUT}: 24 presets, 24 monophonic MIDI clips; sweeps 10 s, other 22 clips 4.8 s; coverage passed")
 
 
 if __name__ == "__main__":

@@ -400,7 +400,7 @@ retrigger = 0
 [[preset]]
 name = "CMP 07 Twin Beat"
 description = "Gentle low-pass cutoff sweep on two 8' saws, OSC 2 ten cents sharp."
-tags = ["comparison", "mono", "4.8s"]
+tags = ["comparison", "mono", "10s"]
 
 [preset.values]
 tune = 0
@@ -598,7 +598,7 @@ retrigger = 0
 [[preset]]
 name = "CMP 10 Three Floors"
 description = "Resonant low-pass cutoff sweep on OSC 1 + 2 + 3 at 32'/16'/8'."
-tags = ["comparison", "mono", "4.8s"]
+tags = ["comparison", "mono", "10s"]
 
 [preset.values]
 tune = 0

@@ -1,7 +1,7 @@
 {
-  "format": 1,
+  "format": 2,
   "sample_rate": 48000,
-  "seconds": 4.8,
+  "default_seconds": 4.8,
   "presets": [
     {
       "number": 1,
@@ -561,11 +561,11 @@
       "purpose": "Gentle low-pass cutoff sweep on two 8' saws, OSC 2 ten cents sharp.",
       "listen": "The low-pass opens smoothly from the fully counterclockwise stop (-5) to the fully clockwise stop (+5), holds open, then closes to -5, with EMPHASIS 0. Hear the harmonics enter and leave, plus the two oscillators beating on held A3. For a separate beat-rate take, keep cutoff +5 throughout. Ten cents is deliberately between lines; use the displayed cents/tuner.",
       "hardware": "The stored +10 cents is relative to OSC 2's nominal centre. Match the measured beat rate against OSC 1, including natural centre mismatch and drift. Turn the physical CUTOFF knob according to the sweep timing below, leaving other controls fixed; the MIDI markers are timing cues and do not turn the hardware knob.",
-      "seconds": 4.8,
+      "seconds": 10.0,
       "notes": [
         [
           0.2,
-          3.9,
+          9.3,
           57
         ]
       ],
@@ -641,23 +641,23 @@
           -5
         ],
         [
-          1.1,
+          2.4,
           0
         ],
         [
-          1.8,
+          4.4,
           5
         ],
         [
-          2.6,
+          5.4,
           5
         ],
         [
-          3.3,
+          7.4,
           0
         ],
         [
-          4.0,
+          9.4,
           -5
         ]
       ]
@@ -852,11 +852,11 @@
       "purpose": "Resonant low-pass cutoff sweep on OSC 1 + 2 + 3 at 32'/16'/8'.",
       "listen": "A stronger resonant sweep opens from the fully counterclockwise stop (-5) to the fully clockwise stop (+5), holds, then closes to -5. Hear the resonant peak move through the three octave layers while their fundamentals remain fixed. EMPHASIS stays at 8; contour amount and filter modulation are 0 so only CUTOFF moves.",
       "hardware": "Hold F3 (MIDI 53): the 32'/16'/8' oscillators sound F1/F2/F3. Follow the same CUTOFF trajectory as 07, with EMPHASIS 8. Turn only CUTOFF; match the hardware's timing to the embedded MIDI markers.",
-      "seconds": 4.8,
+      "seconds": 10.0,
       "notes": [
         [
           0.2,
-          3.9,
+          9.3,
           53
         ]
       ],
@@ -932,23 +932,23 @@
           -5
         ],
         [
-          1.1,
+          2.4,
           0
         ],
         [
-          1.8,
+          4.4,
           5
         ],
         [
-          2.6,
+          5.4,
           5
         ],
         [
-          3.3,
+          7.4,
           0
         ],
         [
-          4.0,
+          9.4,
           -5
         ]
       ]

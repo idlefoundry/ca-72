@@ -1,7 +1,7 @@
 format = 1
 name = "CMP 10 Three Floors"
 description = "Resonant low-pass cutoff sweep on OSC 1 + 2 + 3 at 32'/16'/8'."
-tags = ["comparison", "mono", "4.8s"]
+tags = ["comparison", "mono", "10s"]
 
 favorite = false
 

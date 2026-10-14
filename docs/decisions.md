@@ -5368,3 +5368,19 @@ The independent read-only reviewer verified the full-stop mapping, interpolation
 updates, MIDI cues and guide, then independently checked all four final sweep WAVs for
 duration, finite mono samples, constant listening gain and peak headroom. Their separate
 FFT spot-check also confirmed opening and reclosing. Review completed with no findings.
+
+**Owner follow-up, 2026-10-14.** Put the pack in the Mac's Downloads folder and make the
+cutoff sweeps ten seconds long, superseding the original five-second limit for 07 and 10.
+
+The two cutoff clips now hold one note from 0.20 to 9.50 s. Each opens from -5 to +5
+between 0.40 and 4.40 s, holds at +5 until 5.40 s, then closes to -5 at 9.40 s. The note
+releases at 9.50 s and the clip ends at 10.00 s. Both complete four-second movements are
+linear in knob position, with the same oscillator and resonance settings. The other 22
+clips, including factory White Lotus and the only HI example, remain 4.8 s.
+
+Timing is now stored and rendered per clip. The phrase manifest is format 2 with a
+4.8-second default; each entry's duration is authoritative. MIDI end markers and duration
+tags use that entry's duration. The generator and renderer require ten-second cutoff
+clips and 4.8-second ordinary clips. The external probe remains 4.8 s, matching example 23.
+The guide's sweep cues, note lengths, repeat-take instructions and duration claims were
+regenerated from the same source.
