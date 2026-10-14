@@ -5505,3 +5505,27 @@ state and the empty armed capture track. The ZIP SHA-256 is
 `3d458f86f92bc1a0b37a96f8847f1ddc376caf28606ea5ecb8f7ae20470b926a`.
 The new Set was structurally verified without opening over the owner's current Live
 session; the same builder previously loaded the first comparison Set in Live 12.2.7.
+
+**Ableton development-build follow-up (Mac, 2026-10-14):** The owner reported
+that Ableton lacked the current local build. Its latest log loaded the user-installed
+public 0.2.2 VST3, whose selected release scope excluded the playable keyboard. The
+current development source `8877dde23f1e88135056126429b2b4d0ff13a72a` has the same tree
+`b87b1bbaf317a68ea7cff662992e46d74ec03d5e` as the three-platform CI-tested `68374595`.
+The Mac CI artifact (run 38625029300, artifact 11924172470) matched GitHub's digest;
+the development VST3 keeps its source version label 0.2.1, parameter ids and 0.2 state
+migration. Its pointer keyboard is available in plug-in hosts and starts hidden unless
+a saved preference enables it; TYPING/PANIC remain standalone controls.
+
+The native universal VST3 was given the package script's metadata/notices, signed in
+the Mac's desktop tmux session with Idle Foundry's Developer ID, and passed strict
+signature verification and native pluginval 5 with GUI tests disabled. Source CI had
+already passed pluginval 10 and all 47 Steinberg tests. Independent review found no
+remaining source, payload or installation findings. The installed user VST3 was
+replaced with whole-bundle renames; the exact previous 0.2.2 bundle remains under
+`~/Library/Application Support/Idle Foundry/CA-72/Build Backups/` outside scan roots.
+The final executable SHA-256 is
+`eda8210e8b35c08167c5f34f5374de3d99d6ba1b542f96034c35097ff5c4bebc`.
+Installed signature/hash and the previous backup hash were rechecked. Build receipts
+are in the Mac's Downloads under `CA-72 Local VST3 Build 8877dde`. Live's loading/UI
+and physical audio/MIDI remain untested during this installation; a fresh Live process
+and any required rescan must load the new build. No public release was changed.
