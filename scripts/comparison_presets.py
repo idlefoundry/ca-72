@@ -433,7 +433,8 @@ For more rigorous isolation, repeat a phrase after changing **one control only**
 - 01: TUNE 0 versus its +1 line, keeping all other settings fixed. Repeat 02 and 03 to
   check global tuning reaches each keyboard-controlled oscillator; the hardware markings
   are a guide, so measure the resulting interval rather than assuming exactly one semitone.
-- 06: during the held C6 at 2.20–2.85 s, move the pitch wheel up and back to centre.
+- 06: during the held C6 at 2.20–2.85 s, move the MIDI controller's pitch wheel fully up
+  and back to centre.
   Before this manual control take, set the same MIDI bend range on both devices (for example
   +/-2 semitones). The shipped MIDI centres bend but does not perform this move. Note the
   upward excursion should reach D6 with that range; the full take still lasts 4.8 s.
