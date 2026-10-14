@@ -148,6 +148,7 @@ fn example_strip(mono: bool) -> ca72_panel::strip::StripScene {
                 .collect(),
         ),
         bar: ca72_panel::presets::BarScene {
+            panel: true,
             name: "Brass Tutti".into(),
             found: true,
             favorite: true,

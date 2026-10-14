@@ -90,7 +90,11 @@ and channel filter (ALL or 1–16). Refresh is available. Unsupported choices ca
 applied. Show actual rate, callback period and `buffer duration = 1000 × frames / rate`
 in ms. Do not label buffer duration as total latency. Show stopped/starting/running/
 recovering/error status and a concise actionable error. Apply and Cancel have explicit
-behavior; Cancel keeps the running configuration.
+behavior; Cancel keeps the running configuration. The primary button is Done when
+the draft matches the applied configuration; Done closes without applying settings
+or restarting audio, including when hardware is unavailable. Actual edits show Apply.
+Reverting an edit restores Done. Apply remains until the host confirms success;
+normalised results restore Done without discarding edits made during application.
 
 **MIDI default (owner revision, 2026-10-14):** new sessions select Automatic,
 resolving the first available input whose name is unique in the inventory. Remember

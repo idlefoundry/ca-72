@@ -2281,6 +2281,7 @@ impl Editing {
         );
         self.strip_scene.keyboard = self.playing.scene(self.renderer.skin());
         self.browser.bar.keyboard = self.playing.visible;
+        self.browser.bar.panel = self.expanded();
         // A value being typed: what is typed so far, lit, the next digit's place marked while
         // there is room for one.
         if let Some((r, text)) = &self.typing
@@ -3692,7 +3693,7 @@ mod tests {
         e.playing.typing = true;
         assert!(e.keyed(&event(KeyState::Down, "a")));
         assert_eq!(e.playing.notes.pop().expect("C3 attack").note, 48);
-        let p = at(&e, (1287.0, keyboard::HEADER));
+        let p = at(&e, (keyboard::UP_X, keyboard::HEADER));
         click(&mut e, p);
         assert_eq!((e.playing.root, e.playing.typing_root), (53, 48));
         assert!(
@@ -3780,7 +3781,7 @@ mod tests {
             host.calls.lock().unwrap().is_empty(),
             "hidden controls cannot gesture"
         );
-        let p = at(&e, (2444.0, keyboard::HEADER));
+        let p = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
         go(&mut e, p);
         press(&mut e);
         release(&mut e);
@@ -3883,7 +3884,7 @@ mod tests {
             assert_eq!(scene.standalone, standalone);
             assert_eq!(scene.typing, standalone);
             e.playing.typing = false;
-            let type_button = at(&e, (2444.0, keyboard::HEADER));
+            let type_button = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
             go(&mut e, type_button);
             press(&mut e);
             release(&mut e);
@@ -3908,7 +3909,7 @@ mod tests {
             assert!(e.playing.key(&key, true));
             assert!(e.playing.notes.pop().expect("local attack").on);
             let generation = e.playing.notes.generation();
-            let panic_button = at(&e, (2690.0, keyboard::HEADER));
+            let panic_button = at(&e, (keyboard::PANIC_X, keyboard::HEADER));
             go(&mut e, panic_button);
             press(&mut e);
             release(&mut e);
@@ -6146,16 +6147,24 @@ mod tests {
     fn a_refused_panel_resize_keeps_the_current_view() {
         let (mut e, host, params) = editing();
         e.draw();
+        assert!(e.browser.bar.panel);
         let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
         host.fixed.store(true, Ordering::Relaxed);
         click(&mut e, panel);
         assert!(params.editor_panel.load(Ordering::Relaxed));
         assert!(e.expanded());
         assert!(!e.resizing_window);
+        e.draw();
+        assert!(e.browser.bar.panel, "refused collapse keeps PANEL active");
         host.fixed.store(false, Ordering::Relaxed);
         click(&mut e, panel);
         assert!(!e.expanded());
+        e.draw();
+        assert!(!e.browser.bar.panel, "collapsed PANEL is neutral");
         host.fixed.store(true, Ordering::Relaxed);
+        click(&mut e, panel);
+        e.draw();
+        assert!(!e.browser.bar.panel, "refused expansion stays neutral");
         let name = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Name)));
         click(&mut e, name);
         assert!(!e.browser.open && !e.expanded());

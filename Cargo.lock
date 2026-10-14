@@ -674,7 +674,7 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.15.3"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9#4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=9ffdba09d5d047ad52838274fd8053537e839458#9ffdba09d5d047ad52838274fd8053537e839458"
 dependencies = [
  "alsa 0.9.1",
  "core-foundation-sys",
@@ -860,7 +860,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1739,14 +1739,14 @@ dependencies = [
 [[package]]
 name = "plugin-kit-queue"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9#4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=9ffdba09d5d047ad52838274fd8053537e839458#9ffdba09d5d047ad52838274fd8053537e839458"
 
 [[package]]
 name = "plugin-kit-standalone"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9#4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=9ffdba09d5d047ad52838274fd8053537e839458#9ffdba09d5d047ad52838274fd8053537e839458"
 dependencies = [
- "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9)",
+ "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=9ffdba09d5d047ad52838274fd8053537e839458)",
  "crossbeam-channel",
  "midir",
  "plugin-kit-queue",
@@ -1948,7 +1948,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2221,7 +2221,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2674,7 +2674,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

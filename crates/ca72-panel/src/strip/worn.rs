@@ -630,13 +630,24 @@ impl StripRenderer {
         if let Some(p) = &self.print {
             p.over(&mut self.frame, r);
         }
-        if scene.bar.keyboard && meets(self.key_part(BarTarget::Keyboard), r) {
-            let mut o = Svg::default();
-            put!(
-                o,
-                "<rect x='2869' y='24' width='86' height='62' rx='7' fill='#b0702b' opacity='.28'/>"
-            );
-            svg_over(&self.options, &mut self.frame, s, &o.0);
+        for (x, width, target) in keys() {
+            let active = match target {
+                BarTarget::Panel => scene.bar.panel,
+                BarTarget::Keyboard => scene.bar.keyboard,
+                _ => false,
+            };
+            if active && meets(self.key_part(target), r) {
+                let mut o = Svg::default();
+                put!(
+                    o,
+                    "<rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='#b0702b' opacity='.28'/>",
+                    N(x - width / 2.0),
+                    N(super::RAIL_Y - PANEL_H - super::KEY_H / 2.0),
+                    N(width),
+                    N(super::KEY_H)
+                );
+                svg_over(&self.options, &mut self.frame, s, &o.0);
+            }
         }
         if let Some(keyboard) = &scene.keyboard {
             self.keyboard.over(&mut self.frame, keyboard, r);
@@ -1782,6 +1793,10 @@ mod tests {
                 41 => sc.bar.name = "Warm Pad".into(),
                 42 => sc.bar.favorite = true,
                 43 => sc.bar.hover = Some(BarTarget::Name),
+                71 => sc.bar.panel = true,
+                72 => sc.bar.keyboard = true,
+                73 => sc.bar.panel = false,
+                74 => sc.bar.keyboard = false,
                 // The drawing changed under a lit tab, a readout, the display, a corner.
                 44 => changed = paint(&mut under, Bank::Mode.tab(2), 90),
                 45 => changed = paint(&mut under, Readout::ALL[4].at(), 120),

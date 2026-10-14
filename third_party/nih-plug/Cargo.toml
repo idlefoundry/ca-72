@@ -73,7 +73,7 @@ baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "579130ecb
 # All the claps!
 clap = { version = "4.1.8", features = ["derive", "wrap_help"], optional = true }
 cpal = { version = "0.15", optional = true }
-plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9", optional = true }
+plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "9ffdba09d5d047ad52838274fd8053537e839458", optional = true }
 jack = { version = "0.11.4", optional = true }
 midir = { version = "0.9.1", optional = true }
 rtrb = { version = "0.2.2", optional = true }

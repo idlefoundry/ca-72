@@ -187,6 +187,7 @@ fn strip_scene(sounding: u32) -> StripScene {
                 .collect(),
         ),
         bar: ca72_panel::presets::BarScene {
+            panel: true,
             name: "Brass Tutti".into(),
             found: true,
             favorite: true,

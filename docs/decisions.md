@@ -5635,3 +5635,44 @@ uses a continuous wood-coloured surface too. Include fractional boundary coverag
 and composite it over the existing trim; inward pixel clipping left a thin dark gap.
 Both skins' incremental/fresh-frame checks pass at 0.44 and 0.87 scale, as do all
 45 panel tests and the approval check. The updated native render was shown to the owner.
+
+## R-SETTINGS-DONE. Done when settings have no unapplied changes
+
+**Owner decision, 2026-10-14.** The Audio & MIDI primary button says Done when
+settings are unchanged and Apply only after changes. Compare the draft with the
+host's applied configuration, retaining a pending submission until acknowledged.
+Done closes without submitting a configuration or restarting audio, even without
+available hardware. No-op choices and edits reverted before application restore
+Done. A failed application keeps Apply; successful normalisation restores Done.
+Keep later edits when an older application completes, including edits back to the
+previously running value. Pointer and Enter use the same primary action.
+
+The host's additive `apply_tracked` receipt identifies completion of the exact
+request; configuration equality or a Running phase can still describe an older
+snapshot. Permit one queued application per dialog. Its receipt returns the
+accepted normalised configuration or failure, including repeated identical
+failures; failure unlocks retry. Re-selecting an unchanged output, input or
+Automatic preserves its subordinate channels and remembered MIDI choice.
+
+The existing missing-MIDI policy is unchanged pending the owner's discussion:
+remember selected inputs, release missing live bindings and retry reconnection;
+do not silently switch to a different controller. The UI currently does not label
+remembered missing ports distinctly or retain them in the selector for deselection.
+
+## R-KEYBOARD-GRID. Keyboard header shares the lower-panel control grid
+
+**Owner decision, 2026-10-14.** Align the OCTAVE group and TYPING/PANIC to the
+same grid as the other controls. Use the strip's existing column anchors: OCTAVE
+on CV, the range display on CW, the typing legend on CI and the paired action
+buttons centred on CO. Keep TYPING/PANIC side by side with equal 230-unit caps
+and a 14-unit gap. Arrow widths and all cap heights reuse the rail's KEY_W/KEY_H.
+Caps and the range bezel share their top, bottom and vertical centre; measured
+glyph centring remains in use. Drawing, material placement and pointer targets
+derive from the same coordinates. Wood, the recessed key bed and key shapes keep
+their existing geometry.
+
+**Active-state follow-up, 2026-10-14.** The owner requested the same coloured
+active treatment for PANEL as for the keyboard and TYPING. Publish the editor's
+expanded state to the rail scene and apply the existing amber cap tint. Collapsed
+or refused expansion stays neutral; refused collapse retains its active finish.
+Both skins and incremental repaint use this same state and shared key geometry.

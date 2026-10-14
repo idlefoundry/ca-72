@@ -30,7 +30,17 @@ const NOTCH_Y: f64 = BED[1] + BLACK_H + 5.0;
 const KEYBED_TOP: f64 = BED[1] - 12.0;
 /// The visible wood ends at the key bed's outer border, three units above its frame.
 pub const HEADER: f64 = (AREA[1] + KEYBED_TOP - 3.0) / 2.0;
-pub const BUTTON_H: f64 = 48.0;
+pub const BUTTON_H: f64 = crate::strip::KEY_H;
+const ARROW_W: f64 = crate::strip::KEY_W;
+const HEADER_GAP: f64 = 14.0;
+const RANGE_W: f64 = 348.0;
+const RANGE_H: f64 = 50.0;
+const RANGE_X: f64 = crate::strip::CW - RANGE_W / 2.0;
+const RANGE_SURROUND: f64 = (BUTTON_H - RANGE_H) / 2.0;
+const ACTION_W: f64 = 230.0;
+pub const UP_X: f64 = RANGE_X + RANGE_W + RANGE_SURROUND + HEADER_GAP + ARROW_W / 2.0;
+pub const TYPING_X: f64 = crate::strip::CO - (ACTION_W + HEADER_GAP) / 2.0;
+pub const PANIC_X: f64 = crate::strip::CO + (ACTION_W + HEADER_GAP) / 2.0;
 /// A held key keeps its material and shading, with a darker surface over the key bed.
 const PRESSED_LEVEL: f32 = 0.65;
 
@@ -45,10 +55,15 @@ pub enum Target {
 }
 
 const BUTTONS: [(f64, f64, &str, Target); 4] = [
-    (817.0, 86.0, "−", Target::Down),
-    (1287.0, 86.0, "+", Target::Up),
-    (2444.0, 230.0, "TYPING", Target::Type),
-    (2690.0, 230.0, "PANIC", Target::Panic),
+    (
+        RANGE_X - RANGE_SURROUND - HEADER_GAP - ARROW_W / 2.0,
+        ARROW_W,
+        "−",
+        Target::Down,
+    ),
+    (UP_X, ARROW_W, "+", Target::Up),
+    (TYPING_X, ACTION_W, "TYPING", Target::Type),
+    (PANIC_X, ACTION_W, "PANIC", Target::Panic),
 ];
 
 fn buttons(standalone: bool) -> impl Iterator<Item = (f64, f64, &'static str, Target)> {
@@ -420,7 +435,12 @@ impl Renderer {
             &mut self.frame,
             &self.glass,
             self.scale,
-            (878.0, HEADER - art::PANEL_H - 25.0, 348.0, 50.0),
+            (
+                RANGE_X,
+                HEADER - art::PANEL_H - RANGE_H / 2.0,
+                RANGE_W,
+                RANGE_H,
+            ),
             &format!(
                 "{} - {}",
                 label(scene.root),
@@ -524,12 +544,13 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
     let text_y = |text: &str, size| fonts.baseline_for_centre(text, size, Weight::Regular, HEADER);
     let octave_y = text_y("OCTAVE", 28.0);
     out += &format!(
-        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='666' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text>",
+        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='{}' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text>",
         if scene.skin == Skin::Worn {
             "none"
         } else {
             "url(#keyboard-wood)"
-        }
+        },
+        crate::strip::CV,
     );
     for (x, w, label, target) in buttons(scene.standalone) {
         let on = target == Target::Type && scene.typing;
@@ -616,7 +637,8 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
         String::new()
     };
     out += &format!(
-        "<text x='1730' y='{}' font-size='18' text-anchor='middle' fill='#a9a696'>{mapping}</text></g>",
+        "<text x='{}' y='{}' font-size='18' text-anchor='middle' fill='#a9a696'>{mapping}</text></g>",
+        crate::strip::CI,
         text_y(&mapping, 18.0)
     );
     out
