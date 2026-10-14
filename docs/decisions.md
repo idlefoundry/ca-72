@@ -5321,3 +5321,12 @@ files, panel and audio were regenerated; all 24 examples remain finite mono, 4.8
 Independent MIDI decoding confirmed no overlapping keys and no CC 1 in example 13. All
 23 other raw/listening audio pairs are bit-identical to the previous pack by SHA-256.
 The White Lotus panel was visually checked; formatting and targeted release clippy passed.
+
+The independent review found that incoming MIDI modulation persists across preset loads
+and can override White Lotus's saved 0.17. The final setup instructions clear it with
+CC 1 = 0 **before** loading the CA-72 preset and setting the hardware MOD DEPTH knob.
+The hardware's MIDI wheel takes over that knob until it is moved (calibration session L),
+so its matched depth is set after the reset. The shared 4.8-second clip omits CC 1 during
+the performance, retaining the original depth on both routes. A reset at clip start was
+considered and rejected because it would take over the hardware's already-matched depth;
+all audio pairs from the fresh-engine check were bit-identical to the prior renders.

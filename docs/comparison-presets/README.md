@@ -30,8 +30,12 @@ NOTE PRIORITY LOW and RETRIGGER off. These are explicitly neutral in every prese
 QUALITY to **ULTRA for offline comparison**, or HI for real-time playing: quality is a
 computer preference, so the preset files do not change it. Pitch bend is centred in each
 MIDI file; MODULATION (CC 1) is explicitly initialized to the listed value except in 13.
-White Lotus keeps its factory modulation setting of 0.17 without a CC 1 override; load
-the preset before playing its clip and leave the modulation controller untouched. No
+**Before a White Lotus take:** send CC 1 = 0 to clear incoming MIDI modulation, then load
+the CA-72 preset and move the hardware MOD DEPTH knob to its matched depth. Complete this
+reset before setting the hardware knob: a MIDI wheel message takes over its depth until
+the knob moves. White Lotus's shared performance clip sends no CC 1, preserving the
+factory's saved 0.17 and the matched hardware knob setting. Leave the modulation controller
+untouched during the take. No
 pitch-bend range setting is needed because the phrases do not bend pitch.
 
 With LOCK off, CA-72 retains its normal small oscillator mismatch and drift even at
@@ -283,13 +287,13 @@ The unchanged factory White Lotus: narrow-pulse bass, a third-harmonic filter ri
 - Modulator: OSC 3 LO triangle, mixer OFF; original FREQUENCY pot value 7.47627, near the clockwise stop, approximately 11 Hz with CONTROL OFF.
 - Filter: LO, CUTOFF -2.14, EMPHASIS 7, AMOUNT 0; K1/K2 1/1.
 - Filter ADS: 0 / 3 / 10; loudness ADS: 0.5 / 3.5 / 8.5; DECAY ON.
-- Modulation: MIX 0, OSC OFF, FILTER ON, preset MODULATION **0.17**, no CC 1 in MIDI.
+- Modulation: MIX 0, OSC OFF, FILTER ON, preset MODULATION **0.17**, no CC 1 in the performance clip; clear incoming state during setup.
 - Original factory exceptions: MAIN VOLUME 9.78; LO filter; inactive OSC 2/OSC 3/NOISE/EXTERNAL INPUT mixer levels 8, all their switches OFF; VOICES 4; AUTO GAIN ON with DRIVE 0 (no gain correction). All saved factory parameter values match White Lotus exactly.
 - Notes: 0.20 / 1.40 / C3 (48); 2.10 / 1.40 / C4 (60).
 
 Listen for: The held narrow-pulse fundamental and its resonant ring an octave and a fifth above. C3 followed by C4 exposes full keyboard tracking and the approximately 11 Hz modulation of the ring. The factory's fine positions are preserved rather than rounded to lines.
 
-Hardware: Set OSC 1 to 8' narrow pulse, mixer 10; all other mixer sources OFF. Use LO filter, cutoff -2.14, emphasis 7, both tracking switches ON, contour amount 0. OSC 3 is a triangle at LO, CONTROL OFF and mixer OFF; tune its rate to approximately 11 Hz. FILTER MODULATION ON, OSCILLATOR MODULATION OFF, MOD MIX 0. Match the modulation excursion with the hardware MOD DEPTH/MIDI wheel. The CA-72 preset keeps MODULATION 0.17 exactly; this MIDI clip sends no CC 1, because 7-bit CC cannot represent 0.17 exactly. Load White Lotus before playing the clip and leave the modulation controller untouched.
+Hardware: Set OSC 1 to 8' narrow pulse, mixer 10; all other mixer sources OFF. Use LO filter, cutoff -2.14, emphasis 7, both tracking switches ON, contour amount 0. OSC 3 is a triangle at LO, CONTROL OFF and mixer OFF; tune its rate to approximately 11 Hz. FILTER MODULATION ON, OSCILLATOR MODULATION OFF, MOD MIX 0. Before recording, send CC 1 = 0 to clear incoming MIDI modulation, then load White Lotus on CA-72 and move the hardware MOD DEPTH knob to match its excursion. A MIDI wheel message takes over the hardware depth until that knob moves, so complete resets before setting the hardware knob. The shared clip sends no CC 1; leave the modulation controller untouched during the take, preserving the CA-72 preset's exact 0.17 and the matched hardware knob depth.
 
 [Preset](presets/CMP%2013%20White%20Lotus.toml) · [MIDI](midi/CMP%2013%20White%20Lotus.mid) · [Listen](audio/listening/CMP%2013%20White%20Lotus.wav) · [Raw](audio/raw/CMP%2013%20White%20Lotus.wav) · [Panel](panels/CMP%2013%20White%20Lotus.png)
 
