@@ -1,0 +1,50 @@
+name: Exact-artifact standalone native checks
+on:
+  push:
+    branches: [codex/standalone-smoke]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  native:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux, os: ubuntu-22.04 }
+          - { name: macOS, os: macos-15 }
+          - { name: Windows, os: windows-2025 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Isolated Linux display and runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libasound2 libx11-6 libx11-xcb1 libxcb1 libgl1
+      - name: Native no-device startup, isolated session restoration and quit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s '-screen 0 1920x1080x24' python scripts/smoke-standalone.py
+          else
+            python scripts/smoke-standalone.py
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: standalone-native-${{ matrix.name }}
+          path: |
+            native-smoke/proof.json
+            native-smoke/*.log
+            native-smoke/session/session.json
+          if-no-files-found: error
