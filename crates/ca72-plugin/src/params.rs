@@ -228,6 +228,7 @@ pub struct Ca72Params {
     pub editor_panel_applied: Arc<AtomicBool>,
     /// Whether presets are temporarily occupying the lower panel, for the host's size query.
     pub editor_presets: Arc<AtomicBool>,
+    pub(crate) editor_resizing: Arc<crate::resizing::Resizing>,
     /// The preset the plug-in was last set to (decisions.md R10), empty when none: saved
     /// with the session, so the bar names it again.
     #[persist = "preset"]
@@ -569,6 +570,7 @@ impl Default for Ca72Params {
             editor_expanded: Arc::new(AtomicBool::new(true)),
             editor_panel_applied: Arc::new(AtomicBool::new(true)),
             editor_presets: Arc::new(AtomicBool::new(false)),
+            editor_resizing: Arc::default(),
             preset: Arc::new(RwLock::new(String::new())),
             midi_map: Arc::new(MidiMap::default()),
             freq_law: Arc::new(AtomicU8::new(0)),
