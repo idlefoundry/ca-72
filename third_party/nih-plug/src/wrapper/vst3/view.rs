@@ -12,8 +12,8 @@ use vst3_sys::VST3;
 
 use super::inner::{Task, WrapperInner};
 use super::util::{ObjectPtr, VstPtr};
-use crate::plugin::vst3::Vst3Plugin;
 use crate::editor::HostKey;
+use crate::plugin::vst3::Vst3Plugin;
 use crate::prelude::{Editor, ParentWindowHandle};
 
 // Alias needed for the VST3 attribute macro
@@ -116,7 +116,11 @@ impl<P: Vst3Plugin> WrapperView<P> {
             modifiers,
             down,
         });
-        if taken { kResultOk } else { kResultFalse }
+        if taken {
+            kResultOk
+        } else {
+            kResultFalse
+        }
     }
 
     pub fn new(inner: Arc<WrapperInner<P>>, editor: Arc<Mutex<Box<dyn Editor>>>) -> Box<Self> {

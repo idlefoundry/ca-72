@@ -19,6 +19,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::local_notes::LocalNotes;
+use crate::playing::Playing;
 use baseview::{
     Event, EventStatus, MouseButton, MouseEvent, ScrollDelta, Size, Window, WindowEvent,
     WindowHandler, WindowInfo, WindowOpenOptions, WindowScalePolicy,
@@ -26,6 +28,7 @@ use baseview::{
 use ca72::freq_dial::{Law, Pot};
 use ca72_panel::art::{self, POWER};
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
+use ca72_panel::keyboard;
 use ca72_panel::learn::{Note, Tone};
 use ca72_panel::presets::{
     BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, PresetKey, ROW_H, drawer_hit,
@@ -314,6 +317,7 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
 pub struct Ca72Editor {
     params: Arc<Ca72Params>,
     meters: Arc<Meters>,
+    local_notes: Arc<LocalNotes>,
     /// The host's scale (f32 bits; 0 none given: the system's, as on macOS).
     scale: AtomicU32,
     open: Arc<AtomicBool>,
@@ -331,6 +335,7 @@ pub struct Ca72Editor {
 pub struct HostKeys {
     holding: AtomicBool,
     queue: Mutex<Vec<KeyboardEvent>>,
+    overflow: AtomicBool,
 }
 
 impl HostKeys {
@@ -342,9 +347,12 @@ impl HostKeys {
         }
         if let Some(e) = host_key_event(k)
             && let Ok(mut q) = self.queue.lock()
-            && q.len() < 64
         {
-            q.push(e);
+            if q.len() < 64 {
+                q.push(e);
+            } else {
+                self.overflow.store(true, Ordering::Release);
+            }
         }
         true
     }
@@ -473,9 +481,18 @@ impl std::fmt::Debug for Ca72Editor {
 
 impl Ca72Editor {
     pub fn new(params: Arc<Ca72Params>, meters: Arc<Meters>) -> Self {
+        Self::with_notes(params, meters, Arc::new(LocalNotes::default()))
+    }
+
+    pub fn with_notes(
+        params: Arc<Ca72Params>,
+        meters: Arc<Meters>,
+        local_notes: Arc<LocalNotes>,
+    ) -> Self {
         Ca72Editor {
             params,
             meters,
+            local_notes,
             scale: AtomicU32::new(0),
             open: Arc::new(AtomicBool::new(false)),
             fitted: Arc::new(AtomicU32::new(0)),
@@ -566,6 +583,7 @@ impl Editor for Ca72Editor {
         let params = Arc::clone(&self.params);
         let meters = Arc::clone(&self.meters);
         let host_keys = Arc::clone(&self.host_keys);
+        let local_notes = Arc::clone(&self.local_notes);
         let parent = window::Parent(parent);
         // No window to open in (no parent, no X11 display): nothing shown, rather than
         // baseview's panic in the host's thread (decisions.md R18).
@@ -580,7 +598,7 @@ impl Editor for Ca72Editor {
                 scale: scale_policy(scale),
             },
             move |window: &mut Window<'_>| {
-                PanelWindow::new(
+                let mut panel = PanelWindow::new(
                     window,
                     context,
                     params,
@@ -589,7 +607,10 @@ impl Editor for Ca72Editor {
                     f64::from(scale.unwrap_or(1.0)),
                     Library::shared(),
                     host_keys,
-                )
+                );
+                panel.editing.playing.notes = local_notes;
+                panel.editing.playing.sync();
+                panel
             },
         );
         self.open.store(true, Ordering::Release);
@@ -763,6 +784,9 @@ struct Editing {
     last_strip_press: Option<(Instant, StripTarget, f32)>,
     /// Oscillators 2 and 3's FREQUENCY knobs, through the computer's law.
     freq_knobs: [FreqKnob; 2],
+    playing: Playing,
+    #[cfg(feature = "standalone-production")]
+    standalone_dialog: Option<crate::standalone_settings::Dialog>,
 }
 
 impl PanelWindow {
@@ -858,7 +882,8 @@ impl PanelWindow {
         // closes or cancels it; decisions.md R34.)
         let asked = std::mem::take(&mut self.editing.browser.wants_keys)
             | std::mem::take(&mut self.editing.learning.take_keys)
-            | std::mem::take(&mut self.editing.typing_keys);
+            | std::mem::take(&mut self.editing.typing_keys)
+            | std::mem::take(&mut self.editing.playing.wants_keys);
         if asked {
             let had = window::take_keys(window);
             if self.keys.is_none() {
@@ -869,7 +894,11 @@ impl PanelWindow {
             .editing
             .learning
             .holds_keys(&self.editing.params.midi_map);
-        let holding = self.editing.browser.open || learning || self.editing.typing.is_some();
+        let holding = self.editing.browser.open
+            || learning
+            || self.editing.typing.is_some()
+            || self.editing.note_typing_allowed()
+            || self.editing.standalone_dialog_open();
         // (And the keys the host gives the view: the editor's while it holds them.)
         self.host_keys.holding.store(holding, Ordering::Release);
         // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
@@ -917,6 +946,10 @@ impl Editing {
             Settings::load()
         };
         params.set_freq_law(settings.frequency);
+        let standalone = context.plugin_api() == PluginApi::Standalone;
+        let mut playing = Playing::default();
+        playing.visible = settings.keyboard.unwrap_or(standalone);
+        playing.root = settings.keyboard_root;
         let freq_knobs = [Pot::Two, Pot::Three].map(|pot| FreqKnob {
             params: Arc::clone(&params),
             pot,
@@ -963,6 +996,9 @@ impl Editing {
             typing_keys: false,
             last_strip_press: None,
             freq_knobs,
+            playing,
+            #[cfg(feature = "standalone-production")]
+            standalone_dialog: None,
         }
         .opened()
     }
@@ -985,6 +1021,27 @@ impl Editing {
             self.renderer = Renderer::with_skin(skin, self.renderer.scale(), self.dpr);
             self.composed = None;
         }
+    }
+
+    fn standalone_dialog_open(&self) -> bool {
+        #[cfg(feature = "standalone-production")]
+        {
+            self.standalone_dialog.is_some()
+        }
+        #[cfg(not(feature = "standalone-production"))]
+        {
+            false
+        }
+    }
+
+    fn note_typing_allowed(&self) -> bool {
+        self.playing.holds_keys()
+            && self.expanded()
+            && !self.browser.open
+            && !self.browser.sliding()
+            && self.typing.is_none()
+            && !self.learning.holds_keys(&self.params.midi_map)
+            && !self.standalone_dialog_open()
     }
 
     /// The FREQUENCY knobs read through `law` from now on, on this computer (decisions.md
@@ -1183,6 +1240,11 @@ impl Editing {
             self.params.editor_expanded.store(was, Ordering::Relaxed);
             return false;
         }
+        if !expanded {
+            self.playing.release();
+            self.playing.hover = None;
+        }
+        self.playing.wants_keys = expanded && self.playing.holds_keys();
         self.resizing_window = true;
         self.composed = None;
         true
@@ -1215,6 +1277,9 @@ impl Editing {
         }
         self.placed = open;
         self.params.editor_presets.store(open, Ordering::Relaxed);
+        if open {
+            self.playing.release();
+        }
         self.browser.below = false;
         let expanded = self.params.editor_panel.load(Ordering::Relaxed) || open;
         if !self.set_panel_height(expanded) {
@@ -1267,6 +1332,7 @@ impl Editing {
     /// what is measured, nor DETUNE's in SCATTER or VOICES's where it does nothing
     /// ([`voices_inert`]), their knobs doing nothing either.
     fn start_typing(&mut self, r: Readout) {
+        self.playing.release();
         if !r.typed()
             || (r == Readout::Detune && !self.params.doubled.value())
             || (r == Readout::Voices && voices_inert(&self.params))
@@ -1479,7 +1545,17 @@ impl Editing {
                 self.set_switch(&self.params.auto_gain, on);
             }
             // The settings' key: its menu, dropping down from under it to its left.
+            StripTarget::Bar(BarTarget::Keyboard) => {
+                self.playing.release();
+                self.playing.visible = !self.playing.visible;
+                self.keep_settings(Change::Keyboard(self.playing.visible));
+                self.playing.wants_keys = self.playing.holds_keys();
+                self.hover = None;
+                self.strip_scene.hover = None;
+                self.composed = None;
+            }
             StripTarget::Bar(BarTarget::Settings) => {
+                self.playing.release();
                 let (x, y) = strip::centre(t);
                 let size = self.renderer.text_size() * MENU_TEXT;
                 self.learning.open_settings_menu(
@@ -1490,6 +1566,12 @@ impl Editing {
                 );
             }
             StripTarget::Bar(b) => {
+                if matches!(
+                    b,
+                    BarTarget::Prev | BarTarget::Next | BarTarget::Name | BarTarget::Save
+                ) {
+                    self.playing.release();
+                }
                 let setter = ParamSetter::new(self.context.as_ref());
                 self.browser.bar_press(b, &self.params, &setter);
                 self.follow_drawer();
@@ -1500,6 +1582,14 @@ impl Editing {
 
     fn press(&mut self, modifiers: Modifiers) {
         let (x, y) = self.in_drawing(self.pointer);
+        #[cfg(feature = "standalone-production")]
+        if let Some(dialog) = &mut self.standalone_dialog {
+            if dialog.press(x, y) {
+                self.standalone_dialog = None;
+            }
+            self.composed = None;
+            return;
+        }
         if !self.expanded() && y >= DRAWER_TOP {
             return;
         }
@@ -1528,6 +1618,12 @@ impl Editing {
             Pressed::Done => return,
             Pressed::Indicator(shown) => {
                 self.keep_settings(Change::Shutter(shown));
+                return;
+            }
+            Pressed::StandaloneSettings => {
+                self.playing.release();
+                #[cfg(feature = "standalone-production")]
+                crate::standalone_settings::request_open();
                 return;
             }
             Pressed::Dials(law) => {
@@ -1564,6 +1660,37 @@ impl Editing {
                 }
             }
             self.follow_drawer();
+            return;
+        }
+        if self.playing.visible
+            && let Some(target) = keyboard::hit(self.playing.root, x, y)
+        {
+            match target {
+                keyboard::Target::Note(note) => self.playing.press(note),
+                keyboard::Target::Down | keyboard::Target::Up => {
+                    self.playing.shift(target == keyboard::Target::Up);
+                    self.keep_settings(Change::KeyboardRoot(self.playing.root));
+                }
+                keyboard::Target::Type => {
+                    self.playing.release();
+                    self.playing.typing = !self.playing.typing;
+                    self.playing.wants_keys = self.playing.typing;
+                }
+                keyboard::Target::Panic => {
+                    #[cfg(feature = "standalone-production")]
+                    if let Some(app) = plugin_kit_standalone::AppHandle::current() {
+                        self.playing.panic_standalone();
+                        app.panic();
+                    } else {
+                        self.playing.panic();
+                    }
+                    #[cfg(not(feature = "standalone-production"))]
+                    self.playing.panic();
+                }
+                keyboard::Target::Back => {}
+            }
+            self.hover = None;
+            self.strip_scene.hover = None;
             return;
         }
         if let Some(t) = strip::hit(x, y) {
@@ -1618,6 +1745,10 @@ impl Editing {
     /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R34),
     /// on the panel or the strip; elsewhere none.
     fn context_menu(&mut self) {
+        if self.standalone_dialog_open() {
+            return;
+        }
+        self.playing.release();
         self.end_gestures();
         let (x, y) = self.in_drawing(self.pointer);
         if !self.expanded() && y >= DRAWER_TOP {
@@ -1625,6 +1756,10 @@ impl Editing {
         }
         let size = self.renderer.text_size() * MENU_TEXT;
         let map = &self.params.midi_map;
+        if self.playing.visible && keyboard::inside(x, y) {
+            self.learning.close_menu();
+            return;
+        }
         if self.in_drawer((x, y)).is_some() || self.on_rail((x, y)).is_some() {
             self.learning.close_menu();
             return;
@@ -1679,6 +1814,29 @@ impl Editing {
 
     /// The pointer moved.
     fn moved(&mut self, modifiers: Modifiers) {
+        if self.standalone_dialog_open() {
+            return;
+        }
+        let (x, y) = self.in_drawing(self.pointer);
+        if self.playing.dragging() {
+            let target = keyboard::hit(self.playing.root, x, y);
+            self.playing.drag(match target {
+                Some(keyboard::Target::Note(note)) => Some(note),
+                _ => None,
+            });
+            return;
+        }
+        self.playing.hover =
+            if self.expanded() && self.playing.visible && self.in_drawer((x, y)).is_none() {
+                keyboard::hit(self.playing.root, x, y)
+            } else {
+                None
+            };
+        if self.playing.hover.is_some() {
+            self.hover = None;
+            self.strip_scene.hover = None;
+            return;
+        }
         if let Some((x0, w0)) = self.resizing {
             // Asked of the host at the next frame: a resize renders the whole panel again.
             let width = clamp_width((f64::from(w0) + self.pointer.0 - x0).round().max(0.0) as u32);
@@ -1750,10 +1908,11 @@ impl Editing {
 
     /// Whether a press is being held: a control or the grip dragged.
     fn dragging(&self) -> bool {
-        self.drag.is_some() || self.resizing.is_some()
+        self.drag.is_some() || self.resizing.is_some() || self.playing.dragging()
     }
 
     fn released(&mut self) {
+        self.playing.release_pointer();
         if self.resizing.take().is_some() {
             return;
         }
@@ -1766,6 +1925,7 @@ impl Editing {
     /// before another begins, as the editor closes and as its window loses the focus or the
     /// pointer's capture. A gesture never begins inside another (decisions.md R18).
     fn end_gestures(&mut self) {
+        self.playing.release_pointer();
         self.typing = None;
         self.end_scroll();
         self.resizing = None;
@@ -1812,10 +1972,16 @@ impl Editing {
     }
 
     fn scrolled(&mut self, delta: ScrollDelta, modifiers: Modifiers) {
+        if self.standalone_dialog_open() {
+            return;
+        }
         if self.drag.is_some() {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
+        if self.playing.visible && keyboard::inside(x, y) {
+            return;
+        }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
             // The list (or the tags, under the pointer) scrolls a row for each row's travel, the rest kept for the next: a
             // wheel's lines (a slow turn on macOS gives fractions of one), a trackpad's or a
@@ -1954,6 +2120,16 @@ impl Editing {
 
     /// The scene from the parameters, the controls operated and what the audio reports.
     fn update_scene(&mut self) {
+        self.playing.sync();
+        if self.playing.active()
+            && !self.note_typing_allowed()
+            && (self.browser.open
+                || self.typing.is_some()
+                || self.learning.holds_keys(&self.params.midi_map)
+                || self.standalone_dialog_open())
+        {
+            self.playing.release();
+        }
         for (i, c) in CONTROLS.iter().enumerate() {
             self.scene.values[i] = match (&self.drag, &self.scroll) {
                 (Some(d), _)
@@ -1982,6 +2158,8 @@ impl Editing {
             (&self.levels, self.output),
             std::mem::take(&mut self.strip_scene),
         );
+        self.strip_scene.keyboard = self.playing.scene(self.renderer.skin());
+        self.browser.bar.keyboard = self.playing.visible;
         // A value being typed: what is typed so far, lit, the next digit's place marked while
         // there is room for one.
         if let Some((r, text)) = &self.typing
@@ -2046,13 +2224,38 @@ impl Editing {
         let preference = self.params.editor_panel.load(Ordering::Relaxed);
         let applied = self.params.editor_panel_applied.load(Ordering::Relaxed);
         if preference != applied {
-            if !self.set_panel_height(preference || self.browser.open) {
+            if !self
+                .set_panel_height(preference || self.browser.open || self.standalone_dialog_open())
+            {
                 self.params.editor_panel.store(applied, Ordering::Relaxed);
             }
             self.params.editor_panel_applied.store(
                 self.params.editor_panel.load(Ordering::Relaxed),
                 Ordering::Relaxed,
             );
+        }
+        #[cfg(feature = "standalone-production")]
+        {
+            if let Some(dialog) = crate::standalone_settings::take_requested()
+                && self.standalone_dialog.is_none()
+            {
+                self.playing.release();
+                self.end_gestures();
+                self.standalone_dialog = Some(dialog);
+                self.playing.wants_keys = true;
+                self.composed = None;
+            }
+            if let Some(dialog) = &mut self.standalone_dialog
+                && dialog.frame()
+            {
+                self.composed = None;
+            }
+        }
+        let requested_height = self.params.editor_panel.load(Ordering::Relaxed)
+            || self.browser.open
+            || self.standalone_dialog_open();
+        if requested_height != self.expanded() {
+            self.set_panel_height(requested_height);
         }
         if self
             .scroll
@@ -2076,7 +2279,7 @@ impl Editing {
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
         let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
-        self.strip_scene.learning = strip_ring;
+        self.strip_scene.learning = strip_ring.filter(|_| !self.playing.visible);
         if self.scene.note.is_some() || self.scene.menu.is_some() {
             self.scene.tip = None;
         }
@@ -2138,7 +2341,9 @@ impl Editing {
             .composed
             .as_ref()
             .is_some_and(|c| (c.width(), c.height()) == (frame.width(), height));
-        self.damage = (kept && !(drawer || shut || self.renderer.floating())).then(|| {
+        self.damage = (kept
+            && !(drawer || shut || self.renderer.floating() || self.standalone_dialog_open()))
+        .then(|| {
             let mut places = self.renderer.damages().to_vec();
             if let Some([x0, y0, x1, y1]) = self.strip.damage() {
                 places.push([x0, foot + y0, x1, foot + y1]);
@@ -2163,6 +2368,12 @@ impl Editing {
             self.damage.as_deref(),
             expanded,
         );
+        #[cfg(feature = "standalone-production")]
+        if let Some(dialog) = &self.standalone_dialog
+            && let Some(frame) = &mut self.composed
+        {
+            dialog.draw(frame, self.renderer.scale());
+        }
         true
     }
 
@@ -2190,6 +2401,8 @@ impl Editing {
             } => self.released(),
             MouseEvent::WheelScrolled { delta, modifiers } => self.scrolled(delta, modifiers),
             MouseEvent::CursorLeft => {
+                self.playing.drag(None);
+                self.playing.hover = None;
                 if self.drag.is_none() {
                     self.hover = None;
                 }
@@ -2401,6 +2614,18 @@ fn strip_scene(
 impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
+        let allowed = self.note_typing_allowed();
+        if self.playing.key(k, allowed) {
+            return true;
+        }
+        #[cfg(feature = "standalone-production")]
+        if let Some(dialog) = &mut self.standalone_dialog {
+            if dialog.key(k) {
+                self.standalone_dialog = None;
+            }
+            self.composed = None;
+            return true;
+        }
         // MIDI Learn first (decisions.md R34): Escape closes a control's menu, the drawer's MIDI
         // list takes the keys it shows, and Escape cancels learning.
         if self.typing.is_some() {
@@ -2475,6 +2700,10 @@ impl WindowHandler for PanelWindow {
     fn on_frame(&mut self, window: &mut Window<'_>) {
         // The keys the host gave the view since the last frame (Cubase), as the window's own,
         // but those the window had too (decisions.md R53).
+        if self.host_keys.overflow.swap(false, Ordering::AcqRel) {
+            self.editing.playing.release();
+            self.host_keys.take();
+        }
         for k in self.host_keys.take() {
             if self.twins.host_new(&k, Instant::now()) {
                 self.key(window, &k);
@@ -2484,6 +2713,7 @@ impl WindowHandler for PanelWindow {
         // sees its release: it ends here (decisions.md R18).
         if self.editing.dragging() && window::lost_capture(window) {
             self.editing.end_gestures();
+            self.editing.playing.release_pointer();
         }
         // The grip's width, asked of the host once a frame.
         self.editing.grip();
@@ -2524,9 +2754,17 @@ impl WindowHandler for PanelWindow {
             }
             // No gesture is left open (decisions.md R18), nor a control's menu (R34; learning
             // goes on: the controller to be learned is elsewhere).
+            Event::Window(WindowEvent::Focused) => {
+                self.editing.playing.focused = true;
+                self.keyboard(window);
+                EventStatus::Ignored
+            }
             Event::Window(WindowEvent::Unfocused | WindowEvent::WillClose) => {
+                self.editing.playing.focused = false;
+                self.editing.playing.release();
                 self.editing.end_gestures();
                 self.editing.learning.close_menu();
+                self.keyboard(window);
                 EventStatus::Ignored
             }
             Event::Mouse(e) => {
@@ -2565,7 +2803,6 @@ impl WindowHandler for PanelWindow {
                     EventStatus::Ignored
                 }
             }
-            _ => EventStatus::Ignored,
         }
     }
 }
@@ -2757,7 +2994,7 @@ mod screen {
 /// surface on baseview's window (the two use different versions of `raw-window-handle`), and
 /// what baseview leaves out: the keyboard given back, and the pointer's capture (Windows).
 #[allow(unsafe_code)]
-mod window {
+pub(crate) mod window {
     use std::num::{NonZeroIsize, NonZeroU32};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::ptr::NonNull;
@@ -2786,7 +3023,7 @@ mod window {
     }
 
     #[cfg(target_os = "linux")]
-    fn display() -> bool {
+    pub(crate) fn display() -> bool {
         use x11::xlib;
         // SAFETY: a connection of our own, closed at once.
         unsafe {
@@ -2800,7 +3037,7 @@ mod window {
     }
 
     #[cfg(not(target_os = "linux"))]
-    fn display() -> bool {
+    pub(crate) fn display() -> bool {
         true
     }
 
@@ -2835,7 +3072,7 @@ mod window {
     }
 
     impl Handle {
-        pub fn new(window: Option<WindowHandle>, closing: super::Closing) -> Self {
+        pub(super) fn new(window: Option<WindowHandle>, closing: super::Closing) -> Self {
             Handle {
                 window,
                 _closing: closing,
@@ -3300,6 +3537,117 @@ mod tests {
         editing_with(Library::at(
             std::env::temp_dir().join("ca72-editor-tests-no-library"),
         ))
+    }
+
+    #[test]
+    fn panel_hide_releases_keyboard_notes_and_view_swap_keeps_the_current_height() {
+        let (mut e, _, _) = editing();
+        e.playing.visible = true;
+        e.playing.typing = true;
+        let key = KeyboardEvent {
+            key: Key::Character("a".into()),
+            ..Default::default()
+        };
+        assert!(e.expanded());
+        assert!(e.keyed(&key));
+        assert!(e.playing.notes.pop().expect("attack").on);
+        let generation = e.playing.notes.generation();
+        e.toggle_panel();
+        assert!(!e.expanded());
+        assert!(e.playing.notes.generation() > generation);
+        assert!(!e.note_typing_allowed());
+        assert!(!e.keyed(&key), "hidden keyboard cannot capture host notes");
+        let compact_height = e.window_height();
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        assert!(!e.playing.visible);
+        assert_eq!(e.window_height(), compact_height);
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        assert!(e.playing.visible);
+        assert_eq!(e.window_height(), compact_height);
+        e.toggle_panel();
+        assert!(e.expanded());
+        assert!(e.note_typing_allowed());
+        assert!(e.keyed(&key));
+        assert!(e.playing.notes.pop().expect("new attack").on);
+    }
+
+    #[test]
+    fn keyboard_view_blocks_hidden_controls_and_releases_for_takeovers() {
+        let (mut e, host, params) = editing();
+        let width = e.width;
+        let height = e.window_height();
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        assert!(e.playing.visible);
+        assert_eq!((e.width, e.window_height()), (width, height));
+        for id in [
+            "voices", "entropy", "spread", "inner", "double", "drive", "level",
+        ] {
+            let p = at(&e, centre(id));
+            go(&mut e, p);
+            press(&mut e);
+            wheel(&mut e, 1.0);
+            release(&mut e);
+        }
+        assert!(
+            host.calls.lock().unwrap().is_empty(),
+            "hidden controls cannot gesture"
+        );
+        let p = at(&e, (2226.0, keyboard::HEADER));
+        go(&mut e, p);
+        press(&mut e);
+        release(&mut e);
+        assert!(e.note_typing_allowed());
+        let key = KeyboardEvent {
+            key: Key::Character("a".into()),
+            ..Default::default()
+        };
+        assert!(e.keyed(&key));
+        let generation = e.playing.notes.generation();
+        e.strip_press(StripTarget::Bar(BarTarget::Name));
+        assert!(e.playing.notes.generation() > generation);
+        assert!(!e.note_typing_allowed());
+        e.browser.show(false, &params);
+        e.follow_drawer();
+        // A readout's typing and a settings menu take over the keyboard as well.
+        let generation = e.playing.notes.generation();
+        e.start_typing(Readout::Level);
+        assert!(e.playing.notes.generation() > generation);
+        assert!(!e.note_typing_allowed());
+        e.end_gestures();
+        e.strip_press(StripTarget::Bar(BarTarget::Settings));
+        assert!(!e.note_typing_allowed());
+        e.learning.close_menu();
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        assert!(!e.playing.visible);
+        assert_eq!((e.width, e.window_height()), (width, height));
+    }
+
+    #[test]
+    fn keyboard_pointer_releases_outside_and_editor_drop_invalidates_pending_notes() {
+        let (mut e, _, _) = editing();
+        e.playing.visible = true;
+        let r = keyboard::rect(41, 48).unwrap();
+        let p = at(&e, ((r[0] + r[2]) / 2.0, r[3] - 20.0));
+        go(&mut e, p);
+        press(&mut e);
+        assert!(e.playing.dragging());
+        assert!(e.playing.notes.pop().expect("mouse attack").on);
+        go(&mut e, Point { x: -20.0, y: -20.0 });
+        assert!(!e.playing.notes.pop().expect("outside release").on);
+        assert!(e.playing.dragging(), "can glissando back inside");
+        go(&mut e, p);
+        assert!(e.playing.notes.pop().expect("reenter attack").on);
+        release(&mut e);
+        assert!(!e.playing.notes.pop().expect("release").on);
+        go(&mut e, p);
+        press(&mut e);
+        let notes = Arc::clone(&e.playing.notes);
+        let generation = notes.generation();
+        drop(e);
+        assert!(
+            notes.generation() > generation,
+            "close releases without relying on a queue slot"
+        );
     }
 
     fn editing_with(library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {

@@ -151,6 +151,8 @@ pub enum BarTarget {
     Save,
     /// The settings' key, at the rail's right end (the strip's rail; the drawn bar has none).
     Settings,
+    /// Swap the extension controls and the piano.
+    Keyboard,
 }
 
 /// What a pointer finds in the drawer.
@@ -295,6 +297,7 @@ pub struct BarScene {
     /// The drawer opens below the bar (else over the panel): which way the arrow points.
     pub below: bool,
     pub hover: Option<BarTarget>,
+    pub keyboard: bool,
 }
 
 // ---- The selector's layout (panel units across, the strip's units down).
@@ -541,7 +544,9 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         BarTarget::Prev => PREV_X + STEP_W / 2.0,
         BarTarget::Name => (NAME_X + NAME_END) / 2.0,
         BarTarget::Next => NEXT_X + STEP_W / 2.0,
-        BarTarget::Save | BarTarget::Settings | BarTarget::Panel => SAVE_X + SAVE_W / 2.0,
+        BarTarget::Save | BarTarget::Settings | BarTarget::Panel | BarTarget::Keyboard => {
+            SAVE_X + SAVE_W / 2.0
+        }
     };
     (x, BAR_MID)
 }
@@ -648,6 +653,7 @@ mod tests {
             r.render(
                 &crate::strip::StripScene {
                     bar: BarScene {
+                        keyboard: false,
                         name: name.into(),
                         found: true,
                         ..BarScene::default()
@@ -751,6 +757,7 @@ mod png {
             strip.render(
                 &crate::strip::StripScene {
                     bar: BarScene {
+                        keyboard: false,
                         name: name.into(),
                         found: true,
                         changed,
@@ -897,6 +904,7 @@ mod png {
                         .collect(),
                 ),
                 bar: BarScene {
+                    keyboard: false,
                     name: "Cycling Bass".into(),
                     found: true,
                     favorite: true,
@@ -947,6 +955,7 @@ mod png {
         strip.render(
             &crate::strip::StripScene {
                 bar: BarScene {
+                    keyboard: false,
                     name: "Undertow Growl".into(),
                     found: true,
                     changed: true,
