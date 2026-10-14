@@ -74,7 +74,7 @@ const VALUE_X: f64 = X + 560.0;
 const NEXT_X: f64 = X + WIDTH - 100.0;
 const BUTTON_Y: f64 = Y + HEIGHT - 125.0;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Choice {
     Output(Option<DeviceId>),
     OutputChannels([u16; 2]),
@@ -158,11 +158,31 @@ impl Dialog {
             let stamp = format!("{snapshot:?}");
             if stamp != self.stamp {
                 self.stamp = stamp;
-                self.snapshot = snapshot;
-                self.changed = true;
+                self.update_snapshot(snapshot);
             }
         }
         std::mem::take(&mut self.changed)
+    }
+
+    fn update_snapshot(&mut self, snapshot: Snapshot) {
+        let menu = (self.snapshot.devices != snapshot.devices)
+            .then(|| self.menu.take())
+            .flatten();
+        self.snapshot = snapshot;
+        if let Some(previous) = menu {
+            // Inventory arrives asynchronously and can change while a selector
+            // is open. Rebuild its choices without changing the user's draft.
+            self.open_menu(previous.row);
+            if let Some(menu) = &mut self.menu
+                && let Some((_, choice)) = previous.options.get(previous.highlighted)
+                && let Some(index) = menu.options.iter().position(|(_, next)| next == choice)
+            {
+                menu.highlighted = index;
+                menu.top = previous.top.min(menu.options.len().saturating_sub(1));
+                menu.move_by(0);
+            }
+        }
+        self.changed = true;
     }
 
     fn output(&self) -> Option<&DeviceId> {
@@ -652,7 +672,10 @@ impl Dialog {
             format!("{} Hz", self.draft.sample_rate)
         };
         let midi = if self.draft.midi_inputs.is_empty() {
-            "No hardware MIDI inputs selected".to_owned()
+            format!(
+                "{} detected; none selected (click to choose)",
+                self.snapshot.devices.midi_inputs.len()
+            )
         } else {
             format!(
                 "{} selected · {}",
@@ -923,6 +946,86 @@ mod tests {
             "invalid persisted channels must remain editable"
         );
         assert_eq!(ellipsize("12345", 3), "12…");
+    }
+
+    #[test]
+    fn open_device_menu_follows_inventory_without_changing_the_draft() {
+        let directory = tempfile::tempdir().expect("test state folder");
+        let mut runtime = plugin_kit_standalone::spawn(
+            Box::new(Noop),
+            None,
+            AppOptions {
+                app_id: "ca72-live-midi-menu-test".into(),
+                state_dir: directory.path().to_owned(),
+                device_access: false,
+            },
+        )
+        .expect("test host without devices");
+        runtime.wait_ready(Duration::from_secs(2)).expect("ready");
+        let mut dialog = Dialog::new(runtime.handle());
+        dialog.open_menu(6);
+        assert_eq!(
+            dialog.menu.as_ref().expect("MIDI selector").options.len(),
+            1
+        );
+        let original = dialog.draft.clone();
+        let mut snapshot = dialog.snapshot.clone();
+        snapshot.devices.midi_inputs = vec!["Keyboard Port 1".into(), "Keyboard Port 2".into()];
+        dialog.update_snapshot(snapshot.clone());
+        assert_eq!(
+            dialog
+                .menu
+                .as_ref()
+                .expect("selector stays open")
+                .options
+                .len(),
+            3
+        );
+        assert_eq!(
+            dialog.draft, original,
+            "discovery does not activate an input"
+        );
+        assert!(dialog.svg().contains("2 detected; none selected"));
+        let event = |key| KeyboardEvent {
+            key,
+            ..Default::default()
+        };
+        dialog.key(&event(Key::ArrowDown));
+        dialog.key(&event(Key::Character(" ".into())));
+        assert_eq!(dialog.draft.midi_inputs, ["Keyboard Port 1"]);
+        snapshot.devices.midi_inputs.reverse();
+        dialog.update_snapshot(snapshot.clone());
+        let menu = dialog
+            .menu
+            .as_ref()
+            .expect("selector stays open after reorder");
+        assert_eq!(menu.options[menu.highlighted].0, "Keyboard Port 1");
+        assert_eq!(dialog.draft.midi_inputs, ["Keyboard Port 1"]);
+        snapshot.devices.midi_inputs = vec!["Keyboard Port 2".into()];
+        dialog.update_snapshot(snapshot);
+        let menu = dialog
+            .menu
+            .as_ref()
+            .expect("selector stays open after unplug");
+        assert_eq!(menu.options.len(), 2);
+        assert!(menu.highlighted < menu.options.len());
+        assert!(
+            !menu
+                .options
+                .iter()
+                .any(|(label, _)| label == "Keyboard Port 1")
+        );
+        assert_eq!(
+            dialog.draft.midi_inputs,
+            ["Keyboard Port 1"],
+            "draft is preserved for reconnection"
+        );
+        assert_eq!(
+            runtime.handle().snapshot().config,
+            Config::initial(),
+            "nothing applied implicitly"
+        );
+        runtime.shutdown().expect("test host closes");
     }
 
     #[test]

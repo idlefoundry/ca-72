@@ -5499,3 +5499,32 @@ the two repeat cases and confirmed their fixes. The plug-in's production-feature
 library tests passed: 236 passed, 13 ignored; all three keyboard-panel checks passed.
 Formatting, diff checks and strict clippy for both touched crates, all targets,
 with all features and without optional features passed. Physical devices were not opened.
+
+## R-MIDI-LIST. Open device selectors follow discovery and hotplug
+
+**Owner report, 2026-10-14.** The standalone did not appear to see the Mac's MIDI
+keyboard, while other hosts did.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- Rebuild an open device selector when its inventory changes, retaining the
+  highlighted device where it still exists and preserving the user's draft.
+  Discovery finishing after opening MIDI INPUTS can no longer leave it showing
+  only the disable option. Removed devices disappear without silently changing
+  the requested input configuration.
+- When hardware MIDI is unselected, show the detected-input count and an explicit
+  prompt to choose inputs. Selecting a MIDI port and applying it remains deliberate.
+
+**Evidence (the Mac and Linux reference machine, 2026-10-14):** CoreMIDI reports
+the keyboard's two sources online; the pinned midir 0.9.1 lists both from main
+and control threads. The running application's saved configuration has no MIDI
+inputs selected. Its actual open selector was not inspected, so the stale menu
+is a confirmed code path rather than a claim about that particular window.
+`open_device_menu_follows_inventory_without_changing_the_draft` covers discovery
+arriving into an empty open MIDI selector, selection, reordering, removal,
+highlight bounds and unchanged running configuration until Apply. Disabling the
+menu rebuild reproduces its regression failure (one option instead of three);
+restoring it passes. The production-feature library suite passed: 237 passed,
+13 ignored. Strict clippy with all features and without optional features,
+formatting and diff checks pass; independent review confirmed the selector logic.
+No audio device
+or MIDI connection was opened, and the running application's preferences were not changed.

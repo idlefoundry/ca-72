@@ -108,6 +108,9 @@ channel pair, sample rate, buffer size and MIDI input(s), then Apply. External
 audio input is disabled initially. The display reports the actual callback size
 and its buffer duration in milliseconds; that is one component of playing latency.
 Cancel discards changes that have not been applied. Refresh checks the device list.
+Hardware MIDI starts unselected. Open **MIDI INPUTS**, check your controller's
+port, click outside the list and Apply. The row shows how many inputs are detected
+when none are selected. Open selectors update as devices arrive or disappear.
 Input/output changes briefly stop playback and retain the sound and editor.
 
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
