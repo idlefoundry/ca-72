@@ -52,7 +52,7 @@ signed.
 The Windows installer is not yet signed, so the first time you run it Windows says "Windows
 protected your PC": click **More info**, then **Run anyway**. To install by hand instead,
 each release from 0.1.5 has `CA-72-<version>-Windows-x86_64.zip`: the same VST3 and CLAP, with
-a `README.txt` that says where to copy them.
+a `README.txt` that says where to copy them. From 0.2.1 the ZIP includes the standalone application too.
 
 The plug-ins go into the usual folders:
 
@@ -63,7 +63,7 @@ The plug-ins go into the usual folders:
 | Linux | `~/.vst3` (`/usr/lib/vst3` with `./install.sh --system`) | `~/.clap` (`/usr/lib/clap`) | |
 
 To uninstall: on macOS, delete `CA-72.vst3`, `CA-72.clap` and `CA-72.component` from those
-folders; on Windows,
+folders and `/Applications/CA-72.app` if installed; on Windows,
 find **CA-72** in **Settings › Apps** and choose **Uninstall**; on Linux, run
 `./install.sh --uninstall` (`./install.sh --uninstall --system` for a system-wide copy). Your
 presets are kept.
@@ -87,9 +87,9 @@ continue. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
 
 ## Standalone application
 
-The development build includes the same instrument as a desktop application.
-The existing published 0.2.0 installers contain plug-ins only; the standalone
-will be included in an installer after its release checks pass.
+The 0.2.1 installers include the same instrument as an optional desktop application.
+On macOS it installs as `/Applications/CA-72.app`; on Windows, open **CA-72**
+from the Start menu; on Linux, use its desktop entry or `ca72-standalone`.
 
 Build it with `scripts/standalone.sh`. It produces `target/bundled/CA-72.app` on
 macOS, `target/bundled/CA-72.exe` on Windows, or `target/bundled/ca72-standalone`
