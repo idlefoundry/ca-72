@@ -216,6 +216,19 @@ fn stopped_edits_and_session_restore_preserve_sound_and_reset_live_controls() {
         session.save().expect("preserved after invalid enum"),
         before
     );
+    let mut malformed: PluginState = serde_json::from_slice(&before).expect("state");
+    malformed.fields.insert("midi_map".into(), "[broken".into());
+    assert!(
+        session
+            .restore(&serde_json::to_vec(&malformed).expect("nested malformed JSON"))
+            .is_err()
+    );
+    assert_eq!(
+        session
+            .save()
+            .expect("preserved after invalid persistent field"),
+        before
+    );
     processor
         .prepare(ProcessConfig {
             sample_rate: 48_000.0,
@@ -322,4 +335,28 @@ fn idle_adapter_overwrites_every_sample_and_preserves_circuit_settling() {
     assert_eq!(params.pitch_wheel.value(), 0.0);
     assert_eq!(params.mod_wheel.value(), 0.0);
     adapter.deactivate();
+}
+
+#[test]
+fn standalone_validation_accepts_the_plugins_existing_state_migrations() {
+    let plugin = Ca72::default();
+    let params = plugin.parameters().clone();
+    let (_adapter, session) = Processor::new(plugin, &[]).expect("adapter");
+    let mut old: PluginState =
+        serde_json::from_slice(&session.save().expect("current state")).expect("state");
+    old.version = "0.1.5".into();
+    old.params
+        .insert("placement".into(), ParamValue::String("edges".into()));
+    old.params.insert("emphasis".into(), ParamValue::F32(5.0));
+    session
+        .restore(&serde_json::to_vec(&old).expect("old state"))
+        .expect("compatible migration");
+    assert_eq!(params.placement.value(), ca72_plugin::params::Scatter::Even);
+    let expected = ca72_plugin::compat::translated("emphasis", 5.0)
+        .expect("documented emphasis translation") as f32;
+    assert_eq!(
+        params.emphasis.value(),
+        expected,
+        "legacy law conversion must apply once"
+    );
 }
