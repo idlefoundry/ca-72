@@ -5259,7 +5259,7 @@ The touched crates' library tests: 243 passed, none failed, 20 ignored; the pane
 image comparison passed. Formatting for both crates and clippy for all their targets, with
 and without optional features, passed. The independent reviewer rechecked the fixes.
 
-## R-STANDALONE. A desktop application and playable lower keyboard
+## R73. A desktop application and playable lower keyboard
 
 **Owner decisions, 2026-10-13.** Add a standalone application, research and write a
 detailed specification with clear success criteria, then implement its tasks. Put
@@ -5294,5 +5294,9 @@ and [acceptance evidence](standalone-verification/README.md) record the research
 sources, regression checks and native virtual-backend tests. Independent final
 review reproduced the original malformed-field and shifted-key failures and
 confirmed their fixes, the seven adapter checks, paired-panic ordering and
-malformed-session close preservation. Package CI is pending. Physical audio/MIDI
-latency, microphone permission and hardware hotplug remain unverified.
+malformed-session close preservation. Native CI passed all three systems on
+`acaa03c`; merged as `c34cb3c` with the same tree. Actual native package/CLI checks,
+Windows no-device save/reopen/close and a private Developer ID signed/notarised
+standalone Mac candidate pass. Physical audio/MIDI latency, microphone permission,
+hardware hotplug, Mac GUI and minimum-OS runtime remain unverified. R71 and R72 are reserved for the already open filter fix and 0.2.1 release
+records; this record follows them numerically.

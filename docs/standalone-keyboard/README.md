@@ -55,5 +55,5 @@ Focused verification on Linux:
 
 Native pointer events use the editor's existing mouse input backend. Touch input
 that the OS maps to mouse input follows that path; independent multitouch voices
-are outside this milestone. Physical hardware and Windows/macOS runtime checks
-remain part of the standalone integration validation.
+are outside this milestone. Windows no-device GUI save/reopen/close and macOS package/CLI checks now pass.
+The macOS GUI, physical-device and minimum-OS runtime checks remain unverified.
