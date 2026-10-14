@@ -5224,11 +5224,13 @@ other systems in the README and the release's notes.
 **Not done:** an Intel Mac, auval on this Mac's registry (CI's macOS job runs it), and Live (the
 owner's).
 
-## R-PANEL. The lower panel can be shown or hidden
+## R70. The lower panel can be shown or hidden
 
 **Owner decision, 2026-10-13.** The whole second panel should show or hide, with "no animation
 of growing". Asked whether hiding it should shorten the window while leaving the synth and
 preset rail visible: "Yes, snap between the short and full window."
+
+The owner reviewed the rendered preview and approved CI and merging the change.
 
 **Agent decisions, 2026-10-13** (not separately approved):
 - PANEL beside the rail's settings key toggles the lower controls. The window's width and
