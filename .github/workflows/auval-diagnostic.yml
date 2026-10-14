@@ -1,0 +1,46 @@
+name: AU validator diagnostic
+on:
+  push:
+    branches: [codex/auval-diagnostic]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnose:
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Exact c16e188 artifact and pinned validator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p diagnostic/artifact diagnostic/validator
+          gh api repos/idlefoundry/ca-72/actions/artifacts/11928323615/zip > diagnostic/candidate.zip
+          echo '247b23989dec09139c21db0a7efe1b6ac34be5afb2785c582d66858e498cb1a8  diagnostic/candidate.zip' | shasum -a 256 -c -
+          unzip -q diagnostic/candidate.zip -d diagnostic/artifact
+          curl -fsSL https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip -o diagnostic/pluginval.zip
+          echo '3c4c533bda0c5059eea3ddaea752d757ee2025041f0f47e6bcb0e87f6082b29f  diagnostic/pluginval.zip' | shasum -a 256 -c -
+          unzip -q diagnostic/pluginval.zip -d diagnostic/validator
+          chmod +x diagnostic/validator/pluginval.app/Contents/MacOS/pluginval
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          ditto diagnostic/artifact/CA-72.component "$HOME/Library/Audio/Plug-Ins/Components/CA-72.component"
+          chmod +x "$HOME/Library/Audio/Plug-Ins/Components/CA-72.component/Contents/MacOS/CA-72"
+          shasum -a 256 "$HOME/Library/Audio/Plug-Ins/Components/CA-72.component/Contents/MacOS/CA-72" > diagnostic/installed-component.sha256
+          sw_vers > diagnostic/os.txt
+          uname -a >> diagnostic/os.txt
+      - name: Direct stress and verbose nested stress, unchanged validator limits
+        run: python3 scripts/diagnose-auval.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: auval-diagnostic
+          path: |
+            diagnostic/*.log
+            diagnostic/*.txt
+            diagnostic/*.json
+            diagnostic/*.sha256
+          if-no-files-found: error
