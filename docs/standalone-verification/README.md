@@ -75,6 +75,11 @@ Final app review additionally reproduced typed-field partial restoration,
 shifted-semicolon stuck notes and double-panic ordering. Regression tests cover
 all corrected behavior.
 
+Final independent re-review confirmed the original wrong-field and shifted-key
+reproductions now pass, with a rejected session remaining byte-identical. Seven
+adapter tests, same/split-boundary paired PANIC and malformed-session close
+preservation pass. No remaining confirmed issue was found in those reviewed paths.
+
 Four Linux installer tests include real GIO launches of a harmless private fixture
 in ordinary, space, percent, quote, dollar, backtick, backslash and equals-containing
 prefixes. Two escaping layers and a static shell program with a positional path

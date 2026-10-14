@@ -5258,3 +5258,41 @@ host responds, as with the existing width grip; later refusal is not handled her
 The touched crates' library tests: 243 passed, none failed, 20 ignored; the panel's approved
 image comparison passed. Formatting for both crates and clippy for all their targets, with
 and without optional features, passed. The independent reviewer rechecked the fixes.
+
+## R-STANDALONE. A desktop application and playable lower keyboard
+
+**Owner decisions, 2026-10-13.** Add a standalone application, research and write a
+detailed specification with clear success criteria, then implement its tasks. Put
+the keyboard in the VOICES/STEREO/OUTPUT area, with a button beside settings to
+switch views. Keep the realistic materials and original Model D proportions,
+uniform key alignment and white-key cutouts around the black keys. The owner later
+delegated visual judgement and directed work to continue without an approval wait.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- Native CoreAudio, WASAPI and ALSA hosting lives in the shared plugin-kit. A thin
+  NIH adapter runs the existing engine, parameters, presets and editor; the legacy
+  JACK development launcher remains available. macOS 11 remains the minimum.
+- Device selection, real external capture, channel routing, sample rate, requested
+  buffer, MIDI inputs/filter, recovery and atomic sessions are available from the
+  editor. Requested buffer duration is labelled separately from playing latency.
+  Independently clocked input uses preallocated, bounded clock correction.
+- The 44-key F-to-C keyboard uses original generated surface assets over true L/T
+  key shapes. Physical MIDI, pointer and typing own notes separately. TYPE starts
+  disabled; focus loss and hidden controls release local notes. Paired PANIC
+  requests are consumed once at the audio boundary. R70's PANEL remains available.
+- Keyboard view and octave use the existing per-computer preferences, outside
+  sound presets and project state. The standalone's instrument and I/O session
+  uses its own versioned state directory. Invalid sessions are preserved and
+  validated completely before any parameter or persistent-field setter runs.
+- Installers add an optional application; Linux also gets a desktop entry and
+  Windows' portable ZIP contains the executable. Existing component locations and
+  session data remain compatible. No release is published by this change.
+
+**Evidence, 2026-10-14:** the [contract](standalone-spec.md),
+[task status](standalone-progress.md), [visual proof](standalone-keyboard/README.md)
+and [acceptance evidence](standalone-verification/README.md) record the researched
+sources, regression checks and native virtual-backend tests. Independent final
+review reproduced the original malformed-field and shifted-key failures and
+confirmed their fixes, the seven adapter checks, paired-panic ordering and
+malformed-session close preservation. Package CI is pending. Physical audio/MIDI
+latency, microphone permission and hardware hotplug remain unverified.

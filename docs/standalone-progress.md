@@ -38,12 +38,13 @@
   direct CA-72 comparison is bit-identical through alternating 128/256-frame blocks,
   note/wheel/controller events and active stereo external input; the processing
   allocation guard observes zero allocations or frees. Session/MIDI Learn and
-  stopped parameter editing tests pass. Cross-platform checks are still pending.
+  stopped parameter editing tests passed. These were initial checks; the later
+  cross-platform results are recorded in the task table and acceptance evidence.
 - Final evidence, independent review corrections, explicit approval delegation,
   preference storage, native virtual callbacks and remaining hardware gaps are
   recorded in [standalone-verification/README.md](standalone-verification/README.md).
-- Linux installer component/upgrade/uninstall tests pass in an isolated prefix,
-  including spaces/percent signs and session preservation (3 tests). Desktop entry
-  validation and packaging shell syntax pass. Native packages are not yet verified.
+- Linux installer component/upgrade/uninstall and real-launch escaping checks pass
+  in an isolated prefix (4 tests). Desktop entry validation and packaging shell
+  syntax pass. Native packages are not yet verified.
 - No owner's hardware opened during research. Physical-interface test selection awaits
   a concrete inventory and authorization; simulated/virtual tests remain available.

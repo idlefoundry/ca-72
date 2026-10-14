@@ -61,7 +61,7 @@ Source: "{#Stage}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversi
 Name: "{commonprograms}\Idle Foundry\CA-72"; Filename: "{app}\CA-72.exe"; IconFilename: "{app}\CA-72.ico"; Components: standalone
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{commoncf64}\VST3\CA-72.vst3"
+Type: filesandordirs; Name: "{commoncf64}\VST3\CA-72.vst3"; Components: vst3
 
 [Code]
 // The maker's folder goes with the last of its programs (RemoveDir leaves it if not empty).
