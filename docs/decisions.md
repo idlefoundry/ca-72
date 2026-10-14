@@ -5445,3 +5445,46 @@ was reopened after the controller fix. The independent critic rechecked all MIDI
 locators, portable guide links, recording configuration and 324 unique global targets;
 no findings remained. The project is in the Mac's Downloads folder. No hardware playback,
 recording or measured I/O-latency check was performed; the owner will choose the ports.
+
+**Owner follow-up, 2026-10-14.** Make another round of examples that is both informative
+and interesting to listen to; the first round's musical material is too repetitive.
+
+Round 2 is a separate 24-preset pack and Ableton project. The original diagnostic pack
+and recording project remain available. The new phrases use syncopated bass hooks,
+call and response, an octave answer, a chromatic turnaround, a noise break, a joined
+glide melody and a minor-nine FM arpeggio. Register, gate length and rests supply accents,
+with velocity fixed at 100 and no backing instruments or processing. Most articulation
+settings were revised on GUI lines while preserving the basic oscillator/range/shape
+coverage. White Lotus's factory sound values are unchanged; its new pentatonic hook is
+original material rather than a transcription of a known theme. Example 15 remains the
+only high-pass patch. The other 22 clips remain 4.8 s; 07/10 remain ten-second full sweeps.
+
+The sweep examples now repeat the same syncopated riff on opening and closing, with a
+one-second tonic hold at the top. Cutoff still reaches both end stops, with contour amount
+and filter modulation zero. Both tracking switches are off to remove cutoff motion caused
+by changing keys. This musical phrase is explicitly distinguished from the first round's
+held-note measurement. Examples 04/05 share the same nominal sounding pitches and rhythm,
+voiced through different pulse shapes and ranges; ordinary oscillator mismatch remains.
+The guide names each musical idea, its diagnostic purpose, full settings and exact notes,
+and suggests same-phrase single-control repeat takes.
+
+The shared renderer accepts an explicit pack directory; its default remains the original
+pack. The shared preset validator retains the held-note default and permits an explicit
+repeating-phrase sweep policy. The musical generator additionally requires every onset,
+gate and note-off to be exactly on the MIDI timing grid: one tick is 25 samples at 48 kHz.
+A 120 ms pickup was corrected to 125 ms before the final render to avoid sub-tick rounding.
+The Ableton generator accepts an explicit pack and Set name, so the new material does not
+replace the first project or its recordings. Controller target 3 remains CC1; White Lotus
+has no CC1 envelope, and automatic resets remain disabled.
+
+**Evidence (Linux, 2026-10-14):** All 24 new presets parsed through the actual library and
+rendered through the plug-in engine at ULTRA, 48 kHz, seed 72. All 48 reference WAVs are
+finite mono, of the expected 230,400 or 480,000 samples, with listening peak headroom
+retained. Independent MIDI decoding matches every onset, gate, key and velocity exactly,
+including all cutoff cues and the absence of White Lotus CC1. The two sweep motifs repeat
+exactly; separate FFT windows confirm opening and reclosing. Twenty-four panels and all
+120 guide links exist. The new Set has 24 aligned MIDI and 48 reference clips, 24 locators,
+the unchanged external probe, an empty armed mono capture track and portable media. Four
+malformed timing/policy/filter cases plus a sub-tick gate were rejected; the original pack's
+held-note guard remains enforced. Source syntax, example formatting and targeted release
+clippy passed. No hardware take was made.

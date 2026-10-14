@@ -126,6 +126,11 @@ def audio_clip(template, clip_id, name, start, seconds, relative, colour, annota
 
 
 def build(args):
+    global PACK, SET_NAME
+    PACK = args.pack.resolve()
+    SET_NAME = args.set_name
+    if Path(SET_NAME).name != SET_NAME or not SET_NAME.endswith(".als"):
+        raise ValueError("Set name must be a plain .als filename")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     (output / "Ableton Project Info").mkdir(exist_ok=True)
@@ -341,6 +346,13 @@ in CA-72. The probe starts exactly with the other example 23 clips.
 
 FEEDBACK 24: Patch the PHONES return according to the full guide before that take.
 """)
+    if SET_NAME != "CA-72 vs Model D - 24 Comparisons.als":
+        instructions = output / "START HERE.txt"
+        text = instructions.read_text().replace("CA-72 vs Model D - 24 Comparisons.als", SET_NAME)
+        if any(p.get("sweep_note_policy") == "repeating_phrase" for p in phrases):
+            text = text.replace("MIDI sends the held note and depth settings.",
+                                "MIDI sends the repeating musical phrase and depth settings.")
+        instructions.write_text(text)
     ET.indent(root)
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     if b"/Users/" in xml or b"Holst" in xml or b"Swing 16ths" in xml:
@@ -364,4 +376,6 @@ if __name__ == "__main__":
     parser.add_argument("--base-set", type=Path, required=True)
     parser.add_argument("--clip-set", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--pack", type=Path, default=PACK)
+    parser.add_argument("--set-name", default=SET_NAME)
     build(parser.parse_args())

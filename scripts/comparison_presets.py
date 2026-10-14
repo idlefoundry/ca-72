@@ -323,8 +323,13 @@ def validate():
                 if not math.isfinite(time) or not math.isfinite(cutoff) or not last < time <= seconds or not -5 <= cutoff <= 5:
                     raise ValueError(f"Invalid cutoff sweep: {patch['name']}")
                 last = time
-            if len(patch["notes"]) != 1 or sweep[-1][0] > end:
-                raise ValueError(f"Sweep must finish during one held note: {patch['name']}")
+            policy = patch.get("sweep_note_policy", "held")
+            if policy not in ("held", "repeating_phrase"):
+                raise ValueError(f"Unknown sweep note policy: {patch['name']}")
+            if sweep[-1][0] > end or (policy == "held" and len(patch["notes"]) != 1):
+                raise ValueError(f"Sweep must finish during its note window: {patch['name']}")
+            if policy == "repeating_phrase" and len(patch["notes"]) < 2:
+                raise ValueError(f"Musical sweep needs a phrase: {patch['name']}")
             if min(point[1] for point in sweep) != -5 or max(point[1] for point in sweep) != 5:
                 raise ValueError(f"Cutoff sweep must reach both end stops: {patch['name']}")
             if patch["values"]["contour_amount"] or patch["values"]["filter_mod"]:
@@ -646,9 +651,10 @@ def main():
         folder.mkdir(parents=True, exist_ok=True)
     bank = "# 24 Model D-accessible comparison patches. See README.md for true interval and timing notation.\nformat = 1\n"
     for patch in PATCHES:
+        tags = patch.get("tags", ["comparison", "mono", f"{patch['seconds']:g}s"])
         header = (f"name = {json.dumps(patch['name'])}\n"
                   f"description = {json.dumps(patch['purpose'])}\n"
-                  f'tags = ["comparison", "mono", "{patch["seconds"]:g}s"]\n')
+                  f"tags = {json.dumps(tags)}\n")
         values = toml_values(file_values(patch))
         bank += f"\n[[preset]]\n{header}\n[preset.values]\n{values}\n"
         (OUT / "presets" / f"{patch['name']}.toml").write_text(f"format = 1\n{header}\nfavorite = false\n\n[values]\n{values}\n")

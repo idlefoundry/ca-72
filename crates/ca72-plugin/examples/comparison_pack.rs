@@ -1,5 +1,6 @@
 //! Render the comparison pack through the plug-in's engine, without opening an audio device.
 //! `cargo run --release -p ca72-plugin --example comparison_pack`
+//! Pass `--pack <directory>` to render another comparison bank with the same format.
 //! The example uses the same preset-to-controls mapping as the existing preset measurements.
 
 #[path = "../tests/common/mod.rs"]
@@ -128,18 +129,32 @@ fn panel(path: &Path, name: &str, values: &[(String, f64)]) -> Result<(), String
 }
 
 fn run() -> Result<(), String> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/comparison-presets");
+    let mut root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/comparison-presets");
+    let mut panels_only = false;
+    let mut custom_root = false;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--pack" if !custom_root => {
+                root = args
+                    .next()
+                    .map(std::path::PathBuf::from)
+                    .ok_or("--pack needs a directory")?;
+                custom_root = true;
+            }
+            "--panels-only" if !panels_only => panels_only = true,
+            _ => {
+                return Err("usage: comparison_pack [--pack <directory>] [--panels-only]".into());
+            }
+        }
+    }
     let sounds = parse_factory(
         &std::fs::read_to_string(root.join("bank.toml")).map_err(|e| e.to_string())?,
     )?;
     if sounds.len() != 24 {
         return Err("expected exactly 24 presets".into());
     }
-    let args: Vec<_> = std::env::args().skip(1).collect();
-    if !args.is_empty() {
-        if args != ["--panels-only"] {
-            return Err("usage: comparison_pack [--panels-only]".into());
-        }
+    if panels_only {
         for sound in &sounds {
             panel(
                 &root.join(format!("panels/{}.png", sound.name)),
