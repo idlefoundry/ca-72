@@ -1,6 +1,6 @@
 format = 1
 name = "CMP 07 Twin Beat"
-description = "OSC 1 + 2, saws at 8', OSC 2 ten cents sharp."
+description = "Gentle low-pass cutoff sweep on two 8' saws, OSC 2 ten cents sharp."
 tags = ["comparison", "mono", "4.8s"]
 
 favorite = false
@@ -34,7 +34,7 @@ filter_mode = 0
 filter_mod = 0
 keyboard_control_1 = 1
 keyboard_control_2 = 0
-cutoff = 4
+cutoff = -5
 emphasis = 0
 contour_amount = 0
 filter_attack = 0

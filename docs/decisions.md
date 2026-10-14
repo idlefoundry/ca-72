@@ -5330,3 +5330,36 @@ so its matched depth is set after the reset. The shared 4.8-second clip omits CC
 the performance, retaining the original depth on both routes. A reset at clip start was
 considered and rejected because it would take over the hardware's already-matched depth;
 all audio pairs from the fresh-engine check were bit-identical to the prior renders.
+
+**Owner follow-up, 2026-10-14.** Include filter sweeps, with cutoff moving from the very
+bottom to the very top of its range.
+
+Examples 07 and 10 now have explicit low-pass cutoff-knob trajectories, complementing the
+existing filter contours in 11/12 and LFO sweep in 20. Both start at the fully
+counterclockwise stop (-5), open to the fully clockwise stop (+5), hold, and close to -5.
+These are the actual parameter endpoints (normalized 0 and 1), beyond the printed +/-4
+lines. The timing is -5 at 0.00/0.40 s, 0 at 1.10 s, +5 at 1.80/2.60 s, 0 at 3.30 s and
+-5 at 4.00 s, linear in knob travel between anchors. One key is held from 0.20 to 4.10 s,
+followed by 0.70 s for release, within the unchanged 4.80 s window. Example 07 keeps its
+two 8' saws on A3 with EMPHASIS 0; 10 keeps its 32'/16'/8' stack on F3 with EMPHASIS 8.
+Filter contour amount and filter modulation are zero so only the cutoff knob moves.
+The pack still has 24 examples, unchanged factory White Lotus at 13 and one HI example at 15.
+
+The MIDI files include named cutoff timing markers as cues; they do not automate the knob.
+The guide gives the exact points for CA-72 host automation or manual performance and the
+matching physical gesture on Model D. The offline renderer follows those points with
+control updates no farther than 1 ms apart. Both generators reject partial-range sweeps;
+initial mismatch, duplicate times, movement after note-off, NaN and competing filter
+modulation were also exercised and rejected by the source generator.
+
+**Evidence (Linux, 2026-10-14):** The full pack rendered successfully. Independent MIDI
+decoding verified the seven correct endpoint/centre markers in each sweep and all 24
+monophonic, 4.8-second phrases. All 48 raw/listening WAVs are finite mono at 48 kHz, with
+230,400 samples each and the listening peak ceiling retained. The other 22 raw/listening
+pairs are bit-identical to the previous pack by SHA-256. Independent 4,096-sample Hann FFTs
+at 0.30/2.20/4.05 s measured power above 1 kHz relative to power above 20 Hz: -75.51/-10.75/
+-67.89 dB in 07 and -97.77/-13.52/-99.14 dB in 10, confirming the rendered filter opens
+and closes. This checks the gesture, not hardware fidelity. All 120 local guide links
+resolve; all 24 panel images exist, and 10's endpoint setting was visually checked.
+Example formatting and targeted release clippy passed. No hardware or real-host recordings
+were made for this revision.

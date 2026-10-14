@@ -87,11 +87,12 @@ add("Wide Skyline", "OSC 2 alone, wide pulse, 2': two-octave shift and upper-reg
 add("Narrow Needle", "OSC 3 alone, narrow pulse, 8': high keyboard register.",
     phrase([77, 81, 84, 81]), [osc(3, 3, 5, 6)],
     listen="Thin nasal harmonics on F5/A5/C6; pitch and aliasing at the upper end of the original keyboard.")
-add("Twin Beat", "OSC 1 + 2, saws at 8', OSC 2 ten cents sharp.", [[0.2, 3.6, 57]],
+add("Twin Beat", "Gentle low-pass cutoff sweep on two 8' saws, OSC 2 ten cents sharp.", [[0.2, 3.9, 57]],
     [osc(1, 3, 2, 4), osc(2, 3, 2, 4, 0.1)],
-    dict(keyboard_control_1=1),
-    listen="Slow beating on held A3. Ten cents is deliberately between lines; use the displayed cents/tuner, rather than an approximate knob angle.",
-    hardware="The stored +10 cents is relative to OSC 2's nominal centre. Match the measured beat rate against OSC 1, including each device's natural centre mismatch and drift.")
+    dict(cutoff=-5, keyboard_control_1=1),
+    listen="The low-pass opens smoothly from the fully counterclockwise stop (-5) to the fully clockwise stop (+5), holds open, then closes to -5, with EMPHASIS 0. Hear the harmonics enter and leave, plus the two oscillators beating on held A3. For a separate beat-rate take, keep cutoff +5 throughout. Ten cents is deliberately between lines; use the displayed cents/tuner.",
+    hardware="The stored +10 cents is relative to OSC 2's nominal centre. Match the measured beat rate against OSC 1, including natural centre mismatch and drift. Turn the physical CUTOFF knob according to the sweep timing below, leaving other controls fixed; the MIDI markers are timing cues and do not turn the hardware knob.")
+PATCHES[-1]["cutoff_sweep"] = [[0.0, -5], [0.4, -5], [1.1, 0], [1.8, 5], [2.6, 5], [3.3, 0], [4.0, -5]]
 add("Octave Floor", "OSC 1 + 3, a 16' triangle over a 32' square.", LOW,
     [osc(1, 2, 0, 6), osc(3, 1, 3, 4)],
     dict(cutoff=-1, keyboard_control_2=1),
@@ -101,10 +102,12 @@ add("Fifth Lantern", "OSC 2 + 3, 8' triangle and saw; OSC 3 seven semitones high
     dict(cutoff=2, keyboard_control_1=1, keyboard_control_2=1),
     listen="A fifth inside one synth voice. One MIDI key at a time; this is oscillator interval tuning, not polyphony.",
     hardware="The hardware's +7 marking is only a guide. Tune OSC 3 to exactly +7 semitones relative to OSC 2, then record the actual knob position.")
-add("Three Floors", "OSC 1 + 2 + 3 at 32'/16'/8': three octave layers, three shapes.", LOW,
+add("Three Floors", "Resonant low-pass cutoff sweep on OSC 1 + 2 + 3 at 32'/16'/8'.", [[0.2, 3.9, 53]],
     [osc(1, 1, 2, 4), osc(2, 2, 1, 4), osc(3, 3, 3, 4)],
-    dict(cutoff=0, keyboard_control_1=1, keyboard_control_2=1),
-    listen="Low saw, middle shark tooth and high square stay in octave relationships; listen for mixer colour as all three sum.")
+    dict(cutoff=-5, emphasis=8, keyboard_control_1=1, keyboard_control_2=1),
+    listen="A stronger resonant sweep opens from the fully counterclockwise stop (-5) to the fully clockwise stop (+5), holds, then closes to -5. Hear the resonant peak move through the three octave layers while their fundamentals remain fixed. EMPHASIS stays at 8; contour amount and filter modulation are 0 so only CUTOFF moves.",
+    hardware="Hold F3 (MIDI 53): the 32'/16'/8' oscillators sound F1/F2/F3. Follow the same CUTOFF trajectory as 07, with EMPHASIS 8. Turn only CUTOFF; match the hardware's timing to the embedded MIDI markers.")
+PATCHES[-1]["cutoff_sweep"] = [[0.0, -5], [0.4, -5], [1.1, 0], [1.8, 5], [2.6, 5], [3.3, 0], [4.0, -5]]
 add("Copper Pluck", "Low-pass filter contour and zero loudness sustain: a short two-saw bass.",
     [[round(0.2 + i * 0.5, 3), 0.18, [41, 48, 50, 53, 41, 48, 50, 53][i]] for i in range(8)],
     [osc(1, 2, 2, 5), osc(2, 2, 2, 5)],
@@ -251,6 +254,9 @@ def midi(patch):
         events.append((0, 2, bytes([0xB0, 1, patch["cc1"]])))
     label = patch["name"].encode()
     events.append((0, 0, b"\xff\x03" + vlq(len(label)) + label))
+    for seconds, cutoff in patch.get("cutoff_sweep", []):
+        label = f"CUTOFF {cutoff:+g}".encode()
+        events.append((round(seconds * 1920), 0, b"\xff\x06" + vlq(len(label)) + label))
     for start, length, key in patch["notes"]:
         events.extend([(round(start * 1920), 4, bytes([0x90, key, 100])),
                        (round((start + length) * 1920), 3, bytes([0x80, key, 0]))])
@@ -303,6 +309,21 @@ def validate():
             if not 41 <= key <= 84:
                 raise ValueError(f"Outside the original key range: {patch['name']}")
             end = start + length
+        sweep = patch.get("cutoff_sweep", [])
+        if sweep:
+            if len(sweep) < 2 or sweep[0] != [0.0, patch["values"]["cutoff"]]:
+                raise ValueError(f"Sweep must begin at the preset's cutoff: {patch['name']}")
+            last = -1
+            for time, cutoff in sweep:
+                if not math.isfinite(time) or not math.isfinite(cutoff) or not last < time <= SECONDS or not -5 <= cutoff <= 5:
+                    raise ValueError(f"Invalid cutoff sweep: {patch['name']}")
+                last = time
+            if len(patch["notes"]) != 1 or sweep[-1][0] > end:
+                raise ValueError(f"Sweep must finish during one held note: {patch['name']}")
+            if min(point[1] for point in sweep) != -5 or max(point[1] for point in sweep) != 5:
+                raise ValueError(f"Cutoff sweep must reach both end stops: {patch['name']}")
+            if patch["values"]["contour_amount"] or patch["values"]["filter_mod"]:
+                raise ValueError(f"Cutoff sweep must move only the cutoff: {patch['name']}")
         values = patch["values"]
         for key in ("poly", "unison", "double", "doubled", "entropy", "spread", "inner", "drive", "level", "lock", "retrigger"):
             if values[key] != 0:
@@ -339,9 +360,11 @@ def guide():
 
 24 loadable user presets for CA-72 0.2.0, with 24 monophonic MIDI phrases. Each take is
 **4.8 seconds including its release window**, 48 kHz mono. All values are initial patch
-settings: no knob automation, no effects, no polyphony, and never two active MIDI keys.
+settings, with the timed knob gestures below.
 The set uses only sounds obtainable on a Behringer Model D. Names are proposed test labels;
-the factory library is unchanged. **13 is the existing White Lotus preset**, with its
+the factory library is unchanged. **07 and 10 include timed CUTOFF knob sweeps**; the other
+22 examples use static knobs, with contour/LFO movement where specified. No effects or
+polyphony, and never two active MIDI keys. **13 is the existing White Lotus preset**, with its
 factory settings preserved. **15 is the only high-pass preset**; the other 23 use LO.
 
 ## Load and play
@@ -393,8 +416,9 @@ Model D modulation-source switches. Leave its dedicated LFO unused; CA-72's LFO 
 for 19–22 start at MOD DEPTH 10 and the listed CC 1, then match modulation excursion.
 White Lotus (13) also uses filter modulation; follow its own depth/rate instructions.
 
-Numbers on 0–10 knobs mean pointer positions. CUTOFF is the signed printed dial; use whole
-numbers (-3, -2, -1, 0, +1, +2, +3, +4). **ATTACK/DECAY also use 0–10 travel positions,
+Numbers on 0–10 knobs mean pointer positions. CUTOFF is the signed dial, with full travel
+from **-5 (fully counterclockwise) to +5 (fully clockwise)**; use printed whole-number
+lines for intermediate positions. **ATTACK/DECAY also use 0–10 travel positions,
 not seconds:** 0 is the counterclockwise stop, 2 the `200 M-SEC.` line, 3 the next line,
 4 the `600 M-SEC.` line, 5 the noon line and 6 the `1 SEC.` line. These choices lie on
 actual GUI ticks. ADS below means ATTACK / DECAY / SUSTAIN, in that order. K1/K2 = on/off
@@ -419,7 +443,45 @@ in 13, 19, 20 and 22, not promised as an ordinary concert-pitch register.
     for patch in PATCHES:
         notes = " → ".join(note_name(n[2]) for n in patch["notes"])
         text += f"| {patch['number']:02} | {patch['name'][7:]} | {oscillator_description(patch['values'])} | {patch['purpose']} | {notes} |\n"
-    text += "\n## Exact settings and timing\n\nAll unspecified controls use the common setup above. Each timing is **start / held length / key** in seconds. The last column of the table is the input key, not always the sounding octave.\n"
+    text += """
+## Cutoff sweeps in 07 and 10
+
+Both take one held note from **0.20 to 4.10 seconds**. Only CUTOFF moves: AMOUNT OF CONTOUR
+and FILTER MODULATION are 0, and the loudness contour sustains at 10. Example 07 uses
+EMPHASIS **0** on a two-saw A3; 10 uses EMPHASIS **8** on a three-octave F3 stack.
+Both sweeps cover the **entire cutoff-knob range, from the bottom stop to the top stop**,
+then return to the bottom stop.
+
+| Time (s) | CUTOFF dial | Action |
+|---|---|---|
+| 0.00 | -5 | Fully counterclockwise stop |
+| 0.40 | -5 | Start opening |
+| 1.10 | 0 | Pass the centre line |
+| 1.80 | +5 | Fully clockwise stop |
+| 2.60 | +5 | Start closing |
+| 3.30 | 0 | Pass the centre line |
+| 4.00 | -5 | Return to the bottom stop |
+
+Move continuously and linearly in **knob position** between these points; hold the start
+and end values outside the moving segments. Anchors use the end stops and centre line. The
+note ends at 4.10 s and the clip ends at 4.80 s, including 0.70 s for release.
+
+On CA-72, draw these points as linear host automation for **CUTOFF FREQUENCY**, or perform
+the knob gesture manually. The previews use this trajectory, sampled every 1 ms. On the
+Model D, turn the physical CUTOFF knob to the same timing. The matching MIDI files contain
+**CUTOFF markers as cues**, plus the held note; they do not move cutoff automatically.
+The exact automation points are also stored in each example's `cutoff_sweep` in
+`phrases.json`. Loading the preset sets the initial -5 position, so playing the note MIDI
+alone without the knob gesture/host automation holds the filter at the bottom stop.
+
+The existing movement tests are complementary: 11 is a quick filter contour, 12 a slow
+contour swell, 20 a reverse-saw LFO sweep, and 13 White Lotus's faster filter modulation.
+
+## Exact settings and timing
+
+All unspecified controls use the common setup above. Each timing is **start / held length /
+key** in seconds. The last column of the table is the input key, not always the sounding octave.
+"""
     for patch in PATCHES:
         v = patch["values"]
         num = patch["number"]
@@ -444,6 +506,8 @@ in 13, 19, 20 and 22, not promised as an ordinary concert-pitch register.
             text += f"- Noise: {'PINK' if v['noise_type'] else 'WHITE'} ON, level {v['noise_volume']}.\n"
         if v["ext_on"]:
             text += f"- EXTERNAL INPUT ON, level {v['ext_volume']}; FEEDBACK {v['feedback']}.\n"
+        if patch.get("cutoff_sweep"):
+            text += "- CUTOFF sweep (time / dial): " + "; ".join(f"{a:.2f} / {b:+g}" for a, b in patch["cutoff_sweep"]) + "; linear between points, all other knobs fixed.\n"
         text += "- Notes: " + "; ".join(f"{a:.2f} / {b:.2f} / {note_name(k)} ({k})" for a, b, k in patch["notes"]) + ".\n"
         text += f"\nListen for: {patch['listen']}\n"
         if patch["hardware"]:
@@ -477,7 +541,10 @@ For more rigorous isolation, repeat a phrase after changing **one control only**
   upward excursion should reach D6 with that range; the full take still lasts 4.8 s.
 - 07: OSC 2 level 0, then 4; the first take isolates a single ordinary saw. Keep recorded
   listening gains fixed until levelling copies.
+- 07: for the separate beating reference, disable its cutoff trajectory and hold CUTOFF
+  +5 throughout the same 4.8 s phrase.
 - 10: all three mixer levels 4, then 8; tests mixer saturation without the DRIVE extension.
+- 10: EMPHASIS 0 versus 8 with the identical cutoff trajectory isolates resonance.
 - 11: AMOUNT 0, then 6; or K1/K2 0/0, 1/0, 0/1, 1/1 in four separate 4.8 s takes.
 - 12: both hardware DECAY switches on, then off; keep every other setting fixed.
 - 13: repeat White Lotus with FILTER MODULATION off, then on, to isolate its 11 Hz
@@ -542,7 +609,8 @@ CA-72 source: `params.rs`, `freq_dial.rs`, `ca72-panel/src/art.rs`, `library.rs`
 engine at **aedde6670cd5210e51bec9b6b19288c3d4327dd6**, the public 0.2.0 line checked
 on 2026-10-13. The pack was revised on 2026-10-14 to include the unchanged White Lotus
 settings from `crates/ca72-plugin/sounds/presets.toml`; the other preset settings and all
-phrases were designed for this pack.
+phrases were designed for this pack. Examples 07 and 10 now include explicit cutoff-knob
+sweep trajectories, alongside the existing contour and LFO sweeps.
 
 From this checkout:
 

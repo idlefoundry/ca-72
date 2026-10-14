@@ -20,6 +20,23 @@ use std::path::Path;
 const RATE: usize = 48_000;
 const BLOCK: usize = 256;
 const SEED: u64 = 72;
+const CONTROL_STEP: usize = RATE / 1_000;
+
+/// Linear in the signed dial's position, with the first/last values held outside the curve.
+fn cutoff_at(points: &[(usize, f64)], at: usize) -> Option<f64> {
+    let first = points.first()?;
+    if at <= first.0 {
+        return Some(first.1);
+    }
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if at <= b.0 {
+            let share = (at - a.0) as f64 / (b.0 - a.0) as f64;
+            return Some(a.1 + share * (b.1 - a.1));
+        }
+    }
+    points.last().map(|p| p.1)
+}
 
 fn write_wav(path: &Path, samples: &[f32]) -> Result<(), String> {
     let bytes: Vec<u8> = samples.iter().flat_map(|x| x.to_le_bytes()).collect();
@@ -217,6 +234,38 @@ fn run() -> Result<(), String> {
         }
         // Releases at a join precede the next attack. No two keys are held at any sample.
         events.sort_by_key(|&(at, on, _)| (at, on));
+        let mut cutoff_sweep = Vec::new();
+        if let Some(points) = phrase["cutoff_sweep"].as_array() {
+            for point in points {
+                let time = number(&point[0])?;
+                let dial = number(&point[1])?;
+                let sample = (time * RATE as f64).round() as usize;
+                if !time.is_finite()
+                    || time < 0.0
+                    || sample >= total
+                    || !(-5.0..=5.0).contains(&dial)
+                    || cutoff_sweep
+                        .last()
+                        .is_some_and(|p: &(usize, f64)| p.0 >= sample)
+                {
+                    return Err(format!("{}: invalid cutoff trajectory", sound.name));
+                }
+                cutoff_sweep.push((sample, dial));
+            }
+            if cutoff_sweep.len() < 2
+                || cutoff_sweep[0].0 != 0
+                || ((cutoff_sweep[0].1 + 5.0) / 10.0 - controls.panel.cutoff).abs() > 1e-9
+                || controls.panel.contour_amount != 0.0
+                || controls.panel.filter_mod
+                || !cutoff_sweep.iter().any(|p| p.1 == -5.0)
+                || !cutoff_sweep.iter().any(|p| p.1 == 5.0)
+            {
+                return Err(format!(
+                    "{}: cutoff sweep does not match its initial patch",
+                    sound.name
+                ));
+            }
+        }
         let mut next = events.iter().peekable();
         let (mut left, mut right) = (vec![0.0; total], vec![0.0; total]);
         let external = phrase["number"].as_u64() == Some(23);
@@ -224,10 +273,20 @@ fn run() -> Result<(), String> {
             let end = (start + BLOCK).min(total);
             let mut at = start;
             while at < end {
+                if let Some(dial) = cutoff_at(&cutoff_sweep, at) {
+                    let cutoff = (dial + 5.0) / 10.0;
+                    if controls.panel.cutoff != cutoff {
+                        controls.panel.cutoff = cutoff;
+                        engine.set(&controls);
+                    }
+                }
                 while let Some(&(_, on, key)) = next.next_if(|e| e.0 <= at) {
                     engine.event(Event::Note { key, on });
                 }
-                let stop = next.peek().map_or(end, |e| e.0.min(end));
+                let mut stop = next.peek().map_or(end, |e| e.0.min(end));
+                if !cutoff_sweep.is_empty() {
+                    stop = stop.min((at / CONTROL_STEP + 1) * CONTROL_STEP);
+                }
                 let input = if external { &input[0][at..stop] } else { &[] };
                 engine.render(input, &mut left[at..stop], &mut right[at..stop]);
                 at = stop;
