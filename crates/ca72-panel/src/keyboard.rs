@@ -45,7 +45,7 @@ pub enum Target {
 const BUTTONS: [(f64, f64, &str, Target); 4] = [
     (817.0, 86.0, "−", Target::Down),
     (1287.0, 86.0, "+", Target::Up),
-    (2444.0, 230.0, "TYPE", Target::Type),
+    (2444.0, 230.0, "TYPING", Target::Type),
     (2690.0, 230.0, "PANIC", Target::Panic),
 ];
 

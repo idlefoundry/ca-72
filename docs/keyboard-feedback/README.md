@@ -16,16 +16,16 @@ Rendered at 0.44 and 0.87 pixels per artwork unit. Both natural and accidental s
 neighbouring keys stay unchanged; release restores the complete frame exactly. The repaint check
 compares with a fresh keyboard renderer rather than two caches with the same history.
 
-The octave controls, range display, TYPE and PANIC share the visible wood's vertical centre.
+The octave controls, range display, TYPING and PANIC share the visible wood's vertical centre.
 The printed labels use the built-in font's visible glyph bounds instead of its em box. Rendering,
-button materials and hit targets use the same header position. The TYPE mapping legend follows
+button materials and hit targets use the same header position. The TYPING mapping legend follows
 that centre as well. The range reuses the preset display's bezel, glass asset, dot font, spacing
 and orange light. The preset display's appearance is unchanged.
 
-TYPE and PANIC sit side by side, with matching 230 × 48-unit caps and a 16-unit gap. Their
+TYPING and PANIC sit side by side, with matching 230 × 48-unit caps and a 16-unit gap. Their
 drawing, materials and click targets share one layout; both labels retain their vertical centre.
 They appear only in the standalone application. Plug-ins keep the playable keys and octave
-controls; TYPE, PANIC and the typing legend are absent, their old positions do nothing, and
+controls; TYPING, PANIC and the typing legend are absent, their old positions do nothing, and
 computer-keyboard note input remains with the host. Visibility follows the actual host API,
 including when a plug-in build includes standalone support. The Audio Unit wraps the CLAP.
 

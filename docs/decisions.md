@@ -5501,3 +5501,6 @@ application, leaving those functions to the DAW. Runtime host API selects their 
 hit targets, independent of build features. Plug-ins keep the pointer keyboard and octave
 controls, with note typing and its legend disabled. The repaint regression includes switching
 between both layouts; editor checks cover actual CLAP, VST3 and standalone contexts.
+
+**Label follow-up, 2026-10-14.** The owner chose TYPING as the compact label for enabling
+computer-keyboard note input. It replaces TYPE on the standalone button.
