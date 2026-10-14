@@ -5488,3 +5488,11 @@ the unchanged external probe, an empty armed mono capture track and portable med
 malformed timing/policy/filter cases plus a sub-tick gate were rejected; the original pack's
 held-note guard remains enforced. Source syntax, example formatting and targeted release
 clippy passed. No hardware take was made.
+
+**Round 2 independent critic:** Score, source, MIDI, signal and project inspection found
+an octave-slide description without an actual octave transition, and a CONTROL-OFF
+oscillator frequency described as a true interval. The glide phrase now joins G3 to G4;
+the guide distinguishes CONTROL-OFF dial positions from CONTROL-ON calibrated intervals.
+The final phrases were rendered again and the project was rebuilt. The critic rechecked
+both corrections and the complete artifacts; no findings remain. This review did not
+claim subjective listening, a Round 2 Live host-open, physical MIDI or hardware recording.

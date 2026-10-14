@@ -29,9 +29,10 @@ Use MONO, priority LOW, RETRIGGER off. UNISON/DOUBLE, ENTROPY/WIDTH/INNER/DRIVE 
 LEVEL is 0 dB and LOCK is off. QUALITY is ULTRA for the renders. Ordinary oscillator
 mismatch and drift remain. MAIN OUTPUT is on, TUNE 0, A-440 off. Patch knobs use 0–10
 travel positions rather than seconds; integer positions are on GUI lines. CUTOFF uses
--5 (bottom stop) through 0 (centre) to +5 (top stop). FREQUENCY intervals below are true
-semitones from nominal centre; files store the calibrated pot conversion. The +10-cent
-detune is the deliberate between-line exception.
+-5 (bottom stop) through 0 (centre) to +5 (top stop). OSC 2 FREQUENCY and OSC 3 with CONTROL
+ON use true semitones from nominal centre; files store the calibrated pot conversion.
+With OSC 3 CONTROL OFF, FREQUENCY gives a dial position, not a semitone interval: match
+the actual LFO rate in Hz. The +10-cent detune is the deliberate between-line exception.
 
 For the hardware, set both filter and loudness DECAY switches to the listed DECAY state.
 LFO/audio-rate examples use OSC 3, NOISE/MOD SRC and the modulation mix; leave the separate
@@ -344,7 +345,7 @@ A joined C-minor hook with small scoops and a wide octave slide.
 - ADS (attack / decay / sustain): filter 0 / 4 / 3; loudness 0 / 2 / 10. DECAY ON.
 - Modulation: MIX 0; OSC OFF, FILTER OFF; CC1 0 / 127.
 - GLIDE 4 (ON); VOLUME 6; FEEDBACK 0.
-- Notes: 0.200 / 0.500 / C3 (48); 0.700 / 0.250 / D#3 (51); 0.950 / 0.250 / F3 (53); 1.200 / 0.750 / G3 (55); 1.950 / 0.250 / A#3 (58); 2.200 / 0.500 / C4 (60); 2.700 / 0.250 / A#3 (58); 2.950 / 0.250 / G3 (55); 3.200 / 0.500 / D#3 (51); 3.700 / 0.450 / C3 (48).
+- Notes: 0.200 / 0.500 / C3 (48); 0.700 / 0.250 / D#3 (51); 0.950 / 0.250 / F3 (53); 1.200 / 0.750 / G3 (55); 1.950 / 0.250 / G4 (67); 2.200 / 0.500 / C4 (60); 2.700 / 0.250 / A#3 (58); 2.950 / 0.250 / G3 (55); 3.200 / 0.500 / D#3 (51); 3.700 / 0.450 / C3 (48).
 
 Listen for: Zero-gap joins keep exactly one key at a time. GLIDE 4 lets the motif move rather than lingering on every transition. The wide jump and falling answer expose glide distance and direction; repeat with glide off, hardware multi-trigger off.
 
@@ -391,7 +392,7 @@ A singing C-minor line, framed by two longer vibrato notes.
 - ADS (attack / decay / sustain): filter 0 / 2 / 0; loudness 0 / 2 / 8. DECAY ON.
 - Modulation: MIX 0; OSC ON, FILTER OFF; CC1 6 / 127.
 - GLIDE 0 (OFF); VOLUME 6; FEEDBACK 0.
-- OSC 3 modulation source: LO, triangle, 3 true semitones, mixer OFF.
+- OSC 3 modulation source: LO, triangle, FREQUENCY dial +3 (CONTROL OFF; match actual LFO rate in Hz), mixer OFF.
 - Notes: 0.200 / 1.000 / C4 (60); 1.450 / 0.200 / D#4 (63); 1.825 / 0.200 / F4 (65); 2.200 / 0.375 / G4 (67); 2.700 / 0.200 / A#4 (70); 3.075 / 0.200 / G4 (67); 3.450 / 0.700 / C4 (60).
 
 Listen for: The held ends expose the LO triangle's smooth pitch modulation; shorter middle notes give it a melodic purpose. OSC 3 CONTROL and its mixer stay off, so the LFO rate does not follow this melody.
@@ -409,7 +410,7 @@ A clipped F-minor ostinato that plays against the free-running filter rhythm.
 - ADS (attack / decay / sustain): filter 0 / 2 / 0; loudness 0 / 2 / 8. DECAY ON.
 - Modulation: MIX 0; OSC OFF, FILTER ON; CC1 26 / 127.
 - GLIDE 0 (OFF); VOLUME 6; FEEDBACK 0.
-- OSC 3 modulation source: LO, reverse saw, 0 true semitones, mixer OFF.
+- OSC 3 modulation source: LO, reverse saw, FREQUENCY dial +0 (CONTROL OFF; match actual LFO rate in Hz), mixer OFF.
 - Notes: 0.200 / 0.225 / F3 (53); 0.450 / 0.150 / F3 (53); 0.950 / 0.150 / C4 (60); 1.200 / 0.225 / F3 (53); 1.450 / 0.150 / D#4 (63); 1.825 / 0.225 / C4 (60); 2.200 / 0.225 / F3 (53); 2.450 / 0.150 / F3 (53); 2.950 / 0.150 / F4 (65); 3.200 / 0.225 / D#4 (63); 3.450 / 0.150 / C4 (60); 3.700 / 0.450 / F3 (53).
 
 Listen for: OSC 3's LO reverse saw moves only the filter. The repeating note rhythm lets its asymmetric fall/reset drift across the groove; it is free-running, not DAW-synchronised. Compare another take changing only the LFO shape.
@@ -444,7 +445,7 @@ A lurching D-minor riff with a flattened-fifth passing note.
 - ADS (attack / decay / sustain): filter 0 / 2 / 0; loudness 0 / 2 / 8. DECAY ON.
 - Modulation: MIX 5; OSC ON, FILTER ON; CC1 13 / 127.
 - GLIDE 0 (OFF); VOLUME 6; FEEDBACK 0.
-- OSC 3 modulation source: LO, square, 0 true semitones, mixer OFF.
+- OSC 3 modulation source: LO, square, FREQUENCY dial +0 (CONTROL OFF; match actual LFO rate in Hz), mixer OFF.
 - Notes: 0.200 / 0.325 / D3 (50); 0.700 / 0.150 / D3 (50); 1.075 / 0.200 / F3 (53); 1.450 / 0.250 / A3 (57); 1.825 / 0.200 / G#3 (56); 2.200 / 0.325 / D4 (62); 2.700 / 0.150 / C4 (60); 3.075 / 0.200 / A3 (57); 3.450 / 0.700 / D3 (50).
 
 Listen for: LO square motion and modulation noise roughen the pitch and cutoff together. The repeated D motif lets you hear the random variation against a stable gesture. The mixer noise remains off; compare MOD MIX 0/5/10 on separate takes.

@@ -142,7 +142,7 @@ revise(15, "High Pass Funk",
     dict(loudness_sustain=6))
 revise(16, "Sliding Hook",
     [(0, 1, 48), (1, .5, 51), (1.5, .5, 53), (2, 1.5, 55),
-     (3.5, .5, 58), (4, 1, 60), (5, .5, 58), (5.5, .5, 55),
+     (3.5, .5, 67), (4, 1, 60), (5, .5, 58), (5.5, .5, 55),
      (6, 1, 51), (7, .9, 48)],
     "A joined C-minor hook with small scoops and a wide octave slide.",
     "Zero-gap joins keep exactly one key at a time. GLIDE 4 lets the motif move rather than lingering on every transition. The wide jump and falling answer expose glide distance and direction; repeat with glide off, hardware multi-trigger off.",
@@ -241,9 +241,10 @@ Use MONO, priority LOW, RETRIGGER off. UNISON/DOUBLE, ENTROPY/WIDTH/INNER/DRIVE 
 LEVEL is 0 dB and LOCK is off. QUALITY is ULTRA for the renders. Ordinary oscillator
 mismatch and drift remain. MAIN OUTPUT is on, TUNE 0, A-440 off. Patch knobs use 0–10
 travel positions rather than seconds; integer positions are on GUI lines. CUTOFF uses
--5 (bottom stop) through 0 (centre) to +5 (top stop). FREQUENCY intervals below are true
-semitones from nominal centre; files store the calibrated pot conversion. The +10-cent
-detune is the deliberate between-line exception.
+-5 (bottom stop) through 0 (centre) to +5 (top stop). OSC 2 FREQUENCY and OSC 3 with CONTROL
+ON use true semitones from nominal centre; files store the calibrated pot conversion.
+With OSC 3 CONTROL OFF, FREQUENCY gives a dial position, not a semitone interval: match
+the actual LFO rate in Hz. The +10-cent detune is the deliberate between-line exception.
 
 For the hardware, set both filter and loudness DECAY switches to the listed DECAY state.
 LFO/audio-rate examples use OSC 3, NOISE/MOD SRC and the modulation mix; leave the separate
@@ -303,7 +304,13 @@ their switches off and levels 0, except the factory's saved inactive White Lotus
         text += f"- GLIDE {v['glide']} ({'ON' if v['glide_on'] else 'OFF'}); VOLUME {v['volume']}; FEEDBACK {v['feedback']}.\n"
         if v["osc3_range"] == 0:
             wave = "reverse saw" if v["osc3_waveform"] == 1 else base.WAVES[v["osc3_waveform"]]
-            text += f"- OSC 3 modulation source: LO, {wave}, {'factory pot '+str(v['osc3_frequency']) if p.get('frequency_storage') == 'pot' else str(v['osc3_frequency'])+' true semitones'}, mixer {'ON' if v['osc3_on'] else 'OFF'}.\n"
+            if p.get("frequency_storage") == "pot":
+                frequency = "factory pot " + str(v["osc3_frequency"])
+            elif v["osc3_control"]:
+                frequency = f"{v['osc3_frequency']:+g} true semitones"
+            else:
+                frequency = f"FREQUENCY dial {v['osc3_frequency']:+g} (CONTROL OFF; match actual LFO rate in Hz)"
+            text += f"- OSC 3 modulation source: LO, {wave}, {frequency}, mixer {'ON' if v['osc3_on'] else 'OFF'}.\n"
         if v["noise_on"]:
             text += f"- Noise: {'PINK' if v['noise_type'] else 'WHITE'}, level {v['noise_volume']}.\n"
         if v["ext_on"]:
