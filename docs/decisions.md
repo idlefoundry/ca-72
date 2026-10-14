@@ -5223,3 +5223,39 @@ other systems in the README and the release's notes.
 
 **Not done:** an Intel Mac, auval on this Mac's registry (CI's macOS job runs it), and Live (the
 owner's).
+
+## R-FILTER-CONTOUR. HI's filter at 4x under strong regeneration
+**Owner report, 2026-10-13:** high EMPHASIS and AMOUNT OF CONTOUR sound harsh and crackly,
+like tuning a shortwave radio. The owner requested a spectrogram.
+
+**Agent decision:** HI keeps its filter at 4x instead of 2x. The cheap oscillator,
+contour and device models remain HI's. A whole C4 note with EMPHASIS and AMOUNT OF
+CONTOUR at 10 reproduces broadband noise while its contour opens the filter above the
+audio band. More Newton iterations at 2x remove much of that noise but leave strong
+aliased tones; 4x removes both. At 44.1 kHz the old voice has 21.77 dB more power from
+8 to 20 kHz than ULTRA; with the fix, +0.16 dB. At 48 and 96 kHz, at CUTOFF 0 and
++2.5, the fixed HI is within 1.66 dB of ULTRA in that band.
+
+The rate is fixed while the controls move. Selecting 4x only above EMPHASIS 7.5 reset
+the resamplers on crossing that mark and introduced a click; the regression checks
+both crossings on a held note. HI's CPU cost rises, and its renders change. ULTRA's
+rate and model do not change. No circuit values, trims or knob laws are changed.
+
+**Evidence:** `crates/ca72-lab/tests/high_contour.rs` checks whole notes at 44.1, 48
+and 96 kHz and control movement. Its ngspice 47 bench regenerates at 36.75 kHz; the
+4x filter keeps 8 to 20 kHz output power 121 dB below that oscillation's power and
+continues oscillating internally. Existing hardware takes were found on the lab share
+(sessions E and J, EMPHASIS 10, J with AMOUNT OF CONTOUR 10; session I's Ringing Saw
+Line). They do not capture the exact reported patch. Diagnostic WAVs, spectrograms
+and patch files are in this worktree's `evidence/filter-contour/`.
+
+**Checks on the Linux reference machine:** 17 focused debug tests passed, including
+the whole voice, resamplers, allocations and new regressions; clippy on the core and
+lab, all targets, with and without all features; the changed Rust files formatted.
+`high_contour_cost`, paced under the exclusive timing lock, retriggering notes at
+48 kHz, passed twice: at EMPHASIS 10, 128 frames mean 0.49 to 0.50 ms, worst 0.95 ms
+of 2.67; 256 frames mean 0.96 to 0.97 ms, worst 1.71 ms of 5.33. No block exceeded
+75 % of its period. These are single-voice measurements, not a polyphony budget.
+
+Not yet built or tried in a macOS or Windows host, installed, published, or used to
+re-level the factory presets. The owner's installed version is still 0.2.0.
