@@ -1063,7 +1063,6 @@ impl Editing {
 
     fn note_typing_allowed(&self) -> bool {
         self.playing.holds_keys()
-            && self.expanded()
             && !self.browser.open
             && !self.browser.sliding()
             && self.typing.is_none()
@@ -1303,10 +1302,10 @@ impl Editing {
                 .editor_presets
                 .store(view.presets, Ordering::Relaxed);
             if !view.expanded {
-                self.playing.release();
+                self.playing.release_pointer();
                 self.playing.hover = None;
             }
-            self.playing.wants_keys = view.expanded && self.playing.holds_keys();
+            self.playing.wants_keys = self.playing.holds_keys();
             self.typing = None;
             self.hover = None;
             self.strip_scene.hover = None;
@@ -1357,10 +1356,10 @@ impl Editing {
             return false;
         }
         if !expanded {
-            self.playing.release();
+            self.playing.release_pointer();
             self.playing.hover = None;
         }
-        self.playing.wants_keys = expanded && self.playing.holds_keys();
+        self.playing.wants_keys = self.playing.holds_keys();
         self.resizing_window = true;
         self.composed = None;
         true
@@ -1665,7 +1664,7 @@ impl Editing {
             }
             // The settings' key: its menu, dropping down from under it to its left.
             StripTarget::Bar(BarTarget::Keyboard) => {
-                self.playing.release();
+                self.playing.release_pointer();
                 self.playing.visible = !self.playing.visible;
                 self.keep_settings(Change::Keyboard(self.playing.visible));
                 self.playing.wants_keys = self.playing.holds_keys();
@@ -3717,7 +3716,7 @@ mod tests {
     }
 
     #[test]
-    fn panel_hide_releases_keyboard_notes_and_view_swap_keeps_the_current_height() {
+    fn panel_hide_and_view_swap_preserve_type_notes_and_the_current_height() {
         let (mut e, _, _) = editing();
         e.playing.visible = true;
         e.playing.typing = true;
@@ -3731,12 +3730,18 @@ mod tests {
         let generation = e.playing.notes.generation();
         e.toggle_panel();
         assert!(!e.expanded());
-        assert!(e.playing.notes.generation() > generation);
-        assert!(!e.note_typing_allowed());
-        assert!(!e.keyed(&key), "hidden keyboard cannot capture host notes");
+        assert_eq!(e.playing.notes.generation(), generation);
+        assert!(e.note_typing_allowed());
+        assert!(e.keyed(&key), "TYPE still owns a held key in compact view");
+        assert!(
+            e.playing.notes.pop().is_none(),
+            "held key does not retrigger"
+        );
         let compact_height = e.window_height();
         e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
         assert!(!e.playing.visible);
+        assert!(e.note_typing_allowed(), "extra controls preserve TYPE");
+        assert_eq!(e.playing.notes.generation(), generation);
         assert_eq!(e.window_height(), compact_height);
         e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
         assert!(e.playing.visible);
@@ -3744,6 +3749,10 @@ mod tests {
         e.toggle_panel();
         assert!(e.expanded());
         assert!(e.note_typing_allowed());
+        let mut up = key.clone();
+        up.state = KeyState::Up;
+        assert!(e.keyed(&up));
+        assert!(!e.playing.notes.pop().expect("original attack released").on);
         assert!(e.keyed(&key));
         assert!(e.playing.notes.pop().expect("new attack").on);
     }
@@ -6154,7 +6163,7 @@ mod tests {
     }
 
     #[test]
-    fn refused_expansion_releases_notes_before_restoring_compact() {
+    fn refused_expansion_preserves_type_notes_when_restoring_compact() {
         let (mut e, host, params) = editing();
         e.toggle_panel();
         e.draw();
@@ -6174,12 +6183,17 @@ mod tests {
         params.editor_resizing.answer(request, false);
         e.draw();
         assert!(!e.expanded());
+        assert_eq!(e.playing.notes.generation(), generation);
+        assert!(e.playing.wants_keys);
+        assert!(e.keyed(&key));
         assert!(
-            e.playing.notes.generation() > generation,
-            "a hidden keyboard cannot leave a local note held"
+            e.playing.notes.pop().is_none(),
+            "held note does not retrigger"
         );
-        assert!(!e.playing.wants_keys);
-        assert!(!e.keyed(&key));
+        let mut up = key;
+        up.state = KeyState::Up;
+        assert!(e.keyed(&up));
+        assert!(!e.playing.notes.pop().expect("original note released").on);
     }
 
     #[test]

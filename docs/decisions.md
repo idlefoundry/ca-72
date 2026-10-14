@@ -5467,6 +5467,7 @@ records; this record follows them numerically.
 
 **Owner decisions, 2026-10-14.** ASDFG in TYPE should play CDEFG. Computer-keyboard
 notes should have their own octave, with Z lowering and X raising it, as in Live.
+TYPE should remain playable after switching from the keyboard to the extra controls.
 
 **Agent decisions, 2026-10-14** (not separately approved):
 - Keep the chromatic key order but anchor it to a separate C root. A defaults to
@@ -5480,6 +5481,9 @@ notes should have their own octave, with Z lowering and X raising it, as in Live
   until keyup, including silent out-of-range keys, so host-forwarded repeats cannot
   restart them after transposition. Pointer and physical MIDI ownership remain
   independent; text entry, menus, modifiers and focus retain precedence.
+- TYPE stays active across keyboard/controls swaps and compact view, releasing
+  only pointer ownership when hiding the keys. Held typed notes and their releases
+  still work, including after a host refuses the lower panel's expansion.
 - The [official keyboard diagram](https://www.ableton.com/en/manual/live-keyboard-shortcuts/#keymidi-map-mode-and-the-computer-midi-keyboard)
   confirms the white/black key layout and Z/X shortcuts. Live calls MIDI 60 C3;
   this instrument calls it C4, so the chosen default is not a claim of identical

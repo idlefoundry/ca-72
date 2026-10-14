@@ -272,7 +272,7 @@ impl Playing {
     }
 
     pub fn holds_keys(&self) -> bool {
-        self.visible && self.typing && self.focused
+        self.typing && self.focused
     }
 
     pub fn scene(&self, skin: ca72_panel::Skin) -> Option<Scene> {

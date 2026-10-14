@@ -113,7 +113,9 @@ MIDI and the sound's oscillator RANGE controls. Roots clamp to C notes 0–120;
 notes beyond MIDI 127 do not play. TYPE octave changes release only typed owners,
 and visible range changes release only pointer owners. Persist the two octave
 preferences separately, outside presets and host state. Repeat keydown does not
-retrigger. No velocity control: the circuit's keyboard is not velocity-sensitive.
+retrigger. TYPE stays enabled across keyboard/controls swaps and compact view;
+only pointer notes release when their visible keyboard is hidden. Focus loss
+and text/menu takeover release local notes. No velocity control: the circuit's keyboard is not velocity-sensitive.
 Mouse press/drag/release plays through the same engine as external MIDI. One-pointer
 touch through OS mouse emulation is supported; native multitouch is not claimed.
 
@@ -145,7 +147,7 @@ when its acceptance criteria are demonstrated; BLOCKED/UNVERIFIED retain the exa
 | S1 | Research and frozen specification | Current code inspected; primary sources cited; known wrapper defects, platform contract and acceptance matrix recorded before implementation |
 | S2 | Shared host core | Capability enumeration, unambiguous identity resolution, supported negotiation, selected channel routing, finite-input sanitization, mono `(L+R)/2`, zero unused channels, bounded queues, overflow recovery, atomic versioned persistence and deterministic fake-device tests |
 | S3 | Production NIH adapter and app entry | Same plug-in/editor/params; open with no hardware; configuration prepared off callback; apply/rollback/recovery preserves sound; parameter edits work stopped and running; no callback locks, allocations, file/network or GUI calls; all threads terminate on close |
-| S4 | Playable keyboard and view switch | Rendered visual proof under the owner's delegated judgment; keyboard/controls swap preserves height and left-hand controls; both skins; hidden control hit-test isolation; mouse/glissando/outside release; typing chords/repeat/modifier changes; octave, view, focus, close and text takeover release local notes; source overlap tests; queue overflow cannot strand notes; audio-owned highlights and panic |
+| S4 | Playable keyboard and view switch | Rendered visual proof under the owner's delegated judgment; keyboard/controls swap preserves height and left-hand controls; both skins; hidden control hit-test isolation; mouse/glissando/outside release; typing chords/repeat/modifier changes; TYPE octave releases typed owners, visible octave/view changes release pointer owners, TYPE continues in controls/compact view, focus/close/text takeover release local notes; source overlap tests; queue overflow cannot strand notes; audio-owned highlights and panic |
 | S5 | Audio/MIDI settings UI | Every listed option reflects capabilities; input disabled default; ALL/1–16 filter; refresh; apply/cancel; actual rate/period/duration; errors/recovery shown; inaccessible device remains editable; settings available only to standalone host |
 | S6 | Session and resilience | Restart restores unsaved edits, MIDI map/width/view/working I/O; corrupt/unsupported files retained; failed config not saved; missing/duplicate identities; hotplug notes released; close after lost callback bounded to two seconds; background operations have bounded shutdown |
 | S7 | Packaging and documentation | Buildable standalone target; app/icon/metadata; standalone optional installer choice on all platforms; portable Windows ZIP; Linux install/uninstall and desktop validation; macOS universal signing/input configuration; notices and corresponding sources; README instructions and truthful support limitations |

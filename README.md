@@ -87,8 +87,9 @@ and the sound's oscillator RANGE controls, and is remembered on this computer.
 The TYPE header shows A's current note. Shifting releases held TYPE notes while
 pointer and physical MIDI notes continue. TYPE starts off so host shortcuts
 keep working. Text entry takes precedence. PANIC releases notes without changing
-the sound. Selecting the other view releases local keys while physical MIDI notes
-continue. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
+the sound. TYPE stays enabled when you show the extra controls or hide the lower
+panel; pointer notes release while typed and physical MIDI notes continue. Focus
+loss releases local notes. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
 
 ## Standalone application
 
