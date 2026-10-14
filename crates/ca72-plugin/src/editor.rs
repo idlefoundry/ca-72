@@ -973,8 +973,10 @@ impl Editing {
         params.set_freq_law(settings.frequency);
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
+        playing.standalone = standalone;
         playing.visible = settings.keyboard.unwrap_or(standalone);
         playing.root = settings.keyboard_root;
+        playing.typing_root = settings.typing_root;
         let freq_knobs = [Pot::Two, Pot::Three].map(|pot| FreqKnob {
             params: Arc::clone(&params),
             pot,
@@ -1062,7 +1064,6 @@ impl Editing {
 
     fn note_typing_allowed(&self) -> bool {
         self.playing.holds_keys()
-            && self.expanded()
             && !self.browser.open
             && !self.browser.sliding()
             && self.typing.is_none()
@@ -1302,10 +1303,10 @@ impl Editing {
                 .editor_presets
                 .store(view.presets, Ordering::Relaxed);
             if !view.expanded {
-                self.playing.release();
+                self.playing.release_pointer();
                 self.playing.hover = None;
             }
-            self.playing.wants_keys = view.expanded && self.playing.holds_keys();
+            self.playing.wants_keys = self.playing.holds_keys();
             self.typing = None;
             self.hover = None;
             self.strip_scene.hover = None;
@@ -1356,10 +1357,10 @@ impl Editing {
             return false;
         }
         if !expanded {
-            self.playing.release();
+            self.playing.release_pointer();
             self.playing.hover = None;
         }
-        self.playing.wants_keys = expanded && self.playing.holds_keys();
+        self.playing.wants_keys = self.playing.holds_keys();
         self.resizing_window = true;
         self.composed = None;
         true
@@ -1664,7 +1665,7 @@ impl Editing {
             }
             // The settings' key: its menu, dropping down from under it to its left.
             StripTarget::Bar(BarTarget::Keyboard) => {
-                self.playing.release();
+                self.playing.release_pointer();
                 self.playing.visible = !self.playing.visible;
                 self.keep_settings(Change::Keyboard(self.playing.visible));
                 self.playing.wants_keys = self.playing.holds_keys();
@@ -1781,7 +1782,7 @@ impl Editing {
             return;
         }
         if self.playing.visible
-            && let Some(target) = keyboard::hit(self.playing.root, x, y)
+            && let Some(target) = keyboard::hit(self.playing.root, x, y, self.playing.standalone)
         {
             match target {
                 keyboard::Target::Note(note) => self.playing.press(note),
@@ -1937,7 +1938,7 @@ impl Editing {
         }
         let (x, y) = self.in_drawing(self.pointer);
         if self.playing.dragging() {
-            let target = keyboard::hit(self.playing.root, x, y);
+            let target = keyboard::hit(self.playing.root, x, y, self.playing.standalone);
             self.playing.drag(match target {
                 Some(keyboard::Target::Note(note)) => Some(note),
                 _ => None,
@@ -1946,7 +1947,7 @@ impl Editing {
         }
         self.playing.hover =
             if self.expanded() && self.playing.visible && self.in_drawer((x, y)).is_none() {
-                keyboard::hit(self.playing.root, x, y)
+                keyboard::hit(self.playing.root, x, y, self.playing.standalone)
             } else {
                 None
             };
@@ -2741,7 +2742,12 @@ impl Editing {
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
         self.reconcile_resize();
         let allowed = self.note_typing_allowed();
+        let typing_root = self.playing.typing_root;
         if self.playing.key(k, allowed) {
+            if self.playing.typing_root != typing_root {
+                self.keep_settings(Change::TypingRoot(self.playing.typing_root));
+                self.composed = None;
+            }
             return true;
         }
         #[cfg(feature = "standalone-production")]
@@ -3618,6 +3624,7 @@ mod tests {
     /// A host that records the editor's gestures (and does not apply them).
     #[derive(Default)]
     struct Host {
+        api: Option<PluginApi>,
         calls: Mutex<Vec<Call>>,
         /// It will not resize the window.
         fixed: AtomicBool,
@@ -3638,7 +3645,7 @@ mod tests {
     #[allow(unsafe_code)]
     impl GuiContext for Host {
         fn plugin_api(&self) -> PluginApi {
-            PluginApi::Clap
+            self.api.unwrap_or(PluginApi::Clap)
         }
         fn request_resize(&self) -> bool {
             self.resizes.fetch_add(1, Ordering::Relaxed);
@@ -3670,8 +3677,49 @@ mod tests {
     }
 
     #[test]
-    fn panel_hide_releases_keyboard_notes_and_view_swap_keeps_the_current_height() {
-        let (mut e, _, _) = editing();
+    fn typing_octave_is_independent_of_panel_octaves_and_sound_parameters() {
+        let (mut e, host, _) = editing_standalone();
+        e.playing.visible = true;
+        let event = |state, character: &str| KeyboardEvent {
+            state,
+            key: Key::Character(character.into()),
+            ..Default::default()
+        };
+        assert!(
+            !e.keyed(&event(KeyState::Down, "x")),
+            "TYPE starts disabled"
+        );
+        e.playing.typing = true;
+        assert!(e.keyed(&event(KeyState::Down, "a")));
+        assert_eq!(e.playing.notes.pop().expect("C3 attack").note, 48);
+        let p = at(&e, (1287.0, keyboard::HEADER));
+        click(&mut e, p);
+        assert_eq!((e.playing.root, e.playing.typing_root), (53, 48));
+        assert!(
+            e.playing.notes.pop().is_none(),
+            "range button leaves TYPE held"
+        );
+        assert!(e.keyed(&event(KeyState::Down, "x")));
+        assert_eq!((e.playing.root, e.settings.keyboard_root), (53, 53));
+        assert_eq!((e.playing.typing_root, e.settings.typing_root), (60, 60));
+        assert!(!e.playing.notes.pop().expect("original pitch released").on);
+        assert!(
+            host.take().is_empty(),
+            "keyboard octaves are outside the sound"
+        );
+        assert!(e.keyed(&event(KeyState::Up, "x")));
+        assert!(e.keyed(&event(KeyState::Up, "a")));
+        assert!(e.keyed(&event(KeyState::Down, "a")));
+        assert_eq!(e.playing.notes.pop().expect("C4 attack").note, 60);
+        e.strip_press(StripTarget::Bar(BarTarget::Name));
+        assert!(!e.note_typing_allowed(), "preset search owns letters");
+        e.keyed(&event(KeyState::Down, "z"));
+        assert_eq!(e.playing.typing_root, 60);
+    }
+
+    #[test]
+    fn panel_hide_and_view_swap_preserve_type_notes_and_the_current_height() {
+        let (mut e, _, _) = editing_standalone();
         e.playing.visible = true;
         e.playing.typing = true;
         let key = KeyboardEvent {
@@ -3684,12 +3732,18 @@ mod tests {
         let generation = e.playing.notes.generation();
         e.toggle_panel();
         assert!(!e.expanded());
-        assert!(e.playing.notes.generation() > generation);
-        assert!(!e.note_typing_allowed());
-        assert!(!e.keyed(&key), "hidden keyboard cannot capture host notes");
+        assert_eq!(e.playing.notes.generation(), generation);
+        assert!(e.note_typing_allowed());
+        assert!(e.keyed(&key), "TYPE still owns a held key in compact view");
+        assert!(
+            e.playing.notes.pop().is_none(),
+            "held key does not retrigger"
+        );
         let compact_height = e.window_height();
         e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
         assert!(!e.playing.visible);
+        assert!(e.note_typing_allowed(), "extra controls preserve TYPE");
+        assert_eq!(e.playing.notes.generation(), generation);
         assert_eq!(e.window_height(), compact_height);
         e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
         assert!(e.playing.visible);
@@ -3697,16 +3751,20 @@ mod tests {
         e.toggle_panel();
         assert!(e.expanded());
         assert!(e.note_typing_allowed());
+        let mut up = key.clone();
+        up.state = KeyState::Up;
+        assert!(e.keyed(&up));
+        assert!(!e.playing.notes.pop().expect("original attack released").on);
         assert!(e.keyed(&key));
         assert!(e.playing.notes.pop().expect("new attack").on);
     }
 
     #[test]
     fn keyboard_view_blocks_hidden_controls_and_releases_for_takeovers() {
-        let (mut e, host, params) = editing();
+        let (mut e, host, params) = editing_standalone();
         let width = e.width;
         let height = e.window_height();
-        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.playing.visible = true;
         assert!(e.playing.visible);
         assert_eq!((e.width, e.window_height()), (width, height));
         for id in [
@@ -3722,7 +3780,7 @@ mod tests {
             host.calls.lock().unwrap().is_empty(),
             "hidden controls cannot gesture"
         );
-        let p = at(&e, (2226.0, keyboard::HEADER));
+        let p = at(&e, (2444.0, keyboard::HEADER));
         go(&mut e, p);
         press(&mut e);
         release(&mut e);
@@ -3797,7 +3855,81 @@ mod tests {
     }
 
     fn editing_of(params: Ca72Params, library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
-        let host = Arc::new(Host::default());
+        editing_for_api(params, library, PluginApi::Clap)
+    }
+
+    fn editing_standalone() -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        editing_for_api(
+            Ca72Params::default(),
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            PluginApi::Standalone,
+        )
+    }
+
+    #[test]
+    fn keyboard_type_and_panic_are_only_available_in_standalone() {
+        for api in [PluginApi::Clap, PluginApi::Vst3, PluginApi::Standalone] {
+            let standalone = api == PluginApi::Standalone;
+            let (mut e, _, _) = editing_for_api(
+                Ca72Params::default(),
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+                api,
+            );
+            e.playing.visible = true;
+            assert_eq!(e.playing.standalone, standalone);
+            e.playing.typing = true;
+            assert_eq!(e.note_typing_allowed(), standalone);
+            let scene = e.playing.scene(Skin::Worn).expect("keyboard");
+            assert_eq!(scene.standalone, standalone);
+            assert_eq!(scene.typing, standalone);
+            e.playing.typing = false;
+            let type_button = at(&e, (2444.0, keyboard::HEADER));
+            go(&mut e, type_button);
+            press(&mut e);
+            release(&mut e);
+            assert_eq!(e.playing.typing, standalone, "{api}: TYPE hit target");
+            let key = KeyboardEvent {
+                key: Key::Character("a".into()),
+                ..Default::default()
+            };
+            assert_eq!(e.keyed(&key), standalone, "{api}: note keys");
+            if standalone {
+                assert!(e.playing.notes.pop().expect("typed attack").on);
+                let up = KeyboardEvent {
+                    state: KeyState::Up,
+                    ..key.clone()
+                };
+                assert!(e.keyed(&up));
+                assert!(!e.playing.notes.pop().expect("typed release").on);
+            } else {
+                assert!(e.playing.notes.pop().is_none());
+            }
+            // A hidden PANIC target must not reset an existing local note.
+            assert!(e.playing.key(&key, true));
+            assert!(e.playing.notes.pop().expect("local attack").on);
+            let generation = e.playing.notes.generation();
+            let panic_button = at(&e, (2690.0, keyboard::HEADER));
+            go(&mut e, panic_button);
+            press(&mut e);
+            release(&mut e);
+            assert_eq!(
+                e.playing.notes.generation() > generation,
+                standalone,
+                "{api}: PANIC hit target"
+            );
+            e.playing.release();
+        }
+    }
+
+    fn editing_for_api(
+        params: Ca72Params,
+        library: Library,
+        api: PluginApi,
+    ) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        let host = Arc::new(Host {
+            api: Some(api),
+            ..Default::default()
+        });
         let params = Arc::new(params);
         let context: Arc<dyn GuiContext> = host.clone();
         let e = Editing::new(
@@ -6107,8 +6239,8 @@ mod tests {
     }
 
     #[test]
-    fn refused_expansion_releases_notes_before_restoring_compact() {
-        let (mut e, host, params) = editing();
+    fn refused_expansion_preserves_type_notes_when_restoring_compact() {
+        let (mut e, host, params) = editing_standalone();
         e.toggle_panel();
         e.draw();
         assert!(!e.expanded());
@@ -6127,12 +6259,17 @@ mod tests {
         params.editor_resizing.answer(request, false);
         e.draw();
         assert!(!e.expanded());
+        assert_eq!(e.playing.notes.generation(), generation);
+        assert!(e.playing.wants_keys);
+        assert!(e.keyed(&key));
         assert!(
-            e.playing.notes.generation() > generation,
-            "a hidden keyboard cannot leave a local note held"
+            e.playing.notes.pop().is_none(),
+            "held note does not retrigger"
         );
-        assert!(!e.playing.wants_keys);
-        assert!(!e.keyed(&key));
+        let mut up = key;
+        up.state = KeyState::Up;
+        assert!(e.keyed(&up));
+        assert!(!e.playing.notes.pop().expect("original note released").on);
     }
 
     #[test]

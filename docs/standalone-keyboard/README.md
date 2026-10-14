@@ -3,15 +3,15 @@
 The lower-right VOICES / STEREO / OUTPUT area swaps with a playable 44-key F2–C6
 keyboard using the piano button in the preset/settings rail. The panel and window
 size remain unchanged when swapping views. The separate PANEL button keeps the
-existing whole-panel show/hide action; hiding it releases local notes and stops
-computer-note capture. Main synthesis controls, pitch/modulation wheels and
+existing whole-panel show/hide action; hiding it releases pointer notes while
+standalone TYPING and physical MIDI continue. Main synthesis controls, pitch/modulation wheels and
 left-hand controls retain their positions. Octave buttons reach all MIDI pitches.
 
 - `native-full.png`: neutral Realistic skin, 1380-pixel full window.
 - `native-closeup.png`: neutral Realistic keybed and rail at 87% panel scale.
-- `mock.html`: durable interactive layout preview using the same final geometry
-  and sprites. Open it locally; click/drag keys, toggle TYPE, press the displayed
-  computer keys, change octave, swap view and use PANIC. It does not produce audio.
+- `mock.html`: original interactive layout study using the generated key sprites;
+  it does not produce audio. Current native header, pressed-key feedback and render
+  instructions are recorded in [keyboard-feedback](../keyboard-feedback/README.md).
 
 Natural keys have L/T silhouettes with real cutouts around their neighbouring
 black keys; the empty recess does not trigger a note. Tops and fronts stay aligned
@@ -20,13 +20,19 @@ source dimensions and crops are in `crates/ca72-panel/assets/keyboard/README.md`
 
 Hosted editors initially show Controls; standalone initially shows Keyboard unless
 a local view preference has been saved. View and octave are local settings, while
-TYPE always starts off. These preferences are absent from preset and DAW state.
+TYPING always starts off in standalone. TYPING and PANIC are absent and inactive
+in hosted plug-ins, which leave note typing to the DAW. Visible range and TYPING octave are separate preferences,
+absent from preset and DAW state. ASDFG plays CDEFG from TYPING's own C root
+(A defaults to MIDI 48); Z/X lowers/raises it by an octave independently of the
+visible range and oscillator RANGE controls.
 Computer-note releases follow the recorded physical key even when Shift changes
 its character; forwarded host releases normalize colon back to semicolon.
-Pointer and computer-key notes share local ownership; physical MIDI has separate
-ownership by channel and pitch. Local release preserves physical MIDI notes.
-Focus loss, closing, panel hide, view/octave changes, preset or text takeover, MIDI Learn and
-settings entry release local notes. Host reset and global CC120/123 clear the
+Pointer and computer-key owners are tracked separately for their shared local
+audio source; physical MIDI has separate ownership by channel and pitch. TYPING
+continues across controls and compact views. Hiding keys or changing the visible
+range releases only pointer notes; Z/X releases only typed notes. Focus loss,
+closing, preset or text takeover, MIDI Learn and settings entry release local
+notes, preserving physical MIDI notes. Host reset and global CC120/123 clear the
 source registry and invalidate queued local attacks. PANIC additionally clears
 hardware-source ownership in production standalone. The UI and hardware panic
 share a boundary reset; fresh local notes wait for that boundary and survive it
@@ -43,7 +49,7 @@ Focused verification on Linux:
 - Panel geometry: every natural key shape, black-key precedence, recess hit tests,
   aligned fronts, all MIDI pitches reachable.
 - Partial-render comparisons: both skins at 44% and 87%, held notes, hover, octave,
-  TYPE and view changes, with pixels outside the keyboard area unchanged.
+  TYPING and view changes, with pixels outside the keyboard area unchanged.
 - Editor interaction: hidden-control isolation, pointer release outside the window,
   editor drop, preset/settings/text takeover and host key forwarding.
 - Source/queue: channel and local ownership overlap, overflow, reset, panic,

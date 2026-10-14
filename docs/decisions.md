@@ -5462,3 +5462,176 @@ Windows no-device save/reopen/close and a private Developer ID signed/notarised
 standalone Mac candidate pass. Physical audio/MIDI latency, microphone permission,
 hardware hotplug, Mac GUI and minimum-OS runtime remain unverified. R71 and R72 are reserved for the already open filter fix and 0.2.1 release
 records; this record follows them numerically.
+
+## R-TYPE. Computer keys follow a piano layout with their own octave
+
+**Owner decisions, 2026-10-14.** ASDFG in TYPE should play CDEFG. Computer-keyboard
+notes should have their own octave, with Z lowering and X raising it, as in Live.
+TYPE should remain playable after switching from the keyboard to the extra controls.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- Keep the chromatic key order but anchor it to a separate C root. A defaults to
+  C3 (MIDI 48 in this instrument's labels). Z/X move 12 semitones once a press;
+  roots clamp to C notes 0–120 and keys beyond MIDI 127 stay silent. The visible
+  F-to-C range and oscillator RANGE controls do not change TYPE's MIDI pitches.
+- TYPE's octave is a per-computer preference, outside presets and host state.
+  Existing preferences retain their visible range and get the new C3 TYPE default.
+  The header shows A's note and the Z/X shortcut while TYPE is enabled.
+- An octave change releases only that input's notes. Typed keys remain recorded
+  until keyup, including silent out-of-range keys, so host-forwarded repeats cannot
+  restart them after transposition. Pointer and physical MIDI ownership remain
+  independent; text entry, menus, modifiers and focus retain precedence.
+- TYPE stays active across keyboard/controls swaps and compact view, releasing
+  only pointer ownership when hiding the keys. Held typed notes and their releases
+  still work, including after a host refuses the lower panel's expansion.
+- The [official keyboard diagram](https://www.ableton.com/en/manual/live-keyboard-shortcuts/#keymidi-map-mode-and-the-computer-midi-keyboard)
+  confirms the white/black key layout and Z/X shortcuts. Live calls MIDI 60 C3;
+  this instrument calls it C4, so the chosen default is not a claim of identical
+  starting pitch. L/O/P/semicolon continue the existing second-octave extension.
+
+**Evidence (the Linux reference machine, 2026-10-14):** restoring the old shared-root
+calculation makes `computer_keys_start_on_c_and_follow_the_piano_layout` fail on A,
+with MIDI 41 instead of 48. Regression checks cover every mapped pitch, octave
+limits, held-note source overlap, known/unknown key codes, repeated octave presses,
+unflagged repeats after transposing, silent out-of-range keys, text takeover,
+separate preference roundtrips and header invalidation. Independent review found
+the two repeat cases and confirmed their fixes. The plug-in's production-feature
+library tests passed: 236 passed, 13 ignored; all three keyboard-panel checks passed.
+Formatting, diff checks and strict clippy for both touched crates, all targets,
+with all features and without optional features passed. Physical devices were not opened.
+
+## R-MIDI-LIST. Open device selectors follow discovery and hotplug
+
+**Owner report, 2026-10-14.** The standalone did not appear to see the Mac's MIDI
+keyboard, while other hosts did.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- Rebuild an open device selector when its inventory changes, retaining the
+  highlighted device where it still exists and preserving the user's draft.
+  Discovery finishing after opening MIDI INPUTS can no longer leave it showing
+  only the disable option. Removed devices disappear without silently changing
+  the requested input configuration.
+- When hardware MIDI is unselected, show the detected-input count and an explicit
+  prompt to choose inputs. Selecting a MIDI port and applying it remains deliberate.
+
+**Evidence (the Mac and Linux reference machine, 2026-10-14):** CoreMIDI reports
+the keyboard's two sources online; the pinned midir 0.9.1 lists both from main
+and control threads. The running application's saved configuration has no MIDI
+inputs selected. Its actual open selector was not inspected, so the stale menu
+is a confirmed code path rather than a claim about that particular window.
+`open_device_menu_follows_inventory_without_changing_the_draft` covers discovery
+arriving into an empty open MIDI selector, selection, reordering, removal,
+highlight bounds and unchanged running configuration until Apply. Disabling the
+menu rebuild reproduces its regression failure (one option instead of three);
+restoring it passes. The production-feature library suite passed: 237 passed,
+13 ignored. Strict clippy with all features and without optional features,
+formatting and diff checks pass; independent review confirmed the selector logic.
+No audio device
+or MIDI connection was opened, and the running application's preferences were not changed.
+
+## R-MIDI-RECOVERY. Automatic input selection and honest discovery failures
+
+**Owner report and request, 2026-10-14.** The updated Mac standalone initially
+reports two MIDI inputs, then the count becomes zero after opening MIDI INPUTS.
+Select a default MIDI input at startup and fix the disappearing inventory.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- New sessions use Automatic: select the first available uniquely named input,
+  avoiding duplicate notes from opening every port. Remember that name across
+  reorder, unplug and restart. Wait for an input when none exists; connect it
+  without restarting running audio. Explicit input selections and Disable persist.
+  Older sessions retain their previous choices, including disabled MIDI; selecting
+  Automatic and applying once enables the new policy for those sessions.
+- Retain the successful MIDI discovery client for the control thread's lifetime.
+  Initialization, port-name and inconsistent-count failures preserve the last good
+  MIDI inventory and active bindings, while audio inventory continues to update.
+  Report discovery errors in settings and clear only their own diagnostic on recovery.
+- A successful stable empty inventory remains empty and releases missing inputs.
+  Report a transition from available inputs to none, with Refresh/reconnect guidance.
+  Successful reconnection clears owned MIDI warnings; unrelated session/audio issues
+  keep priority. The code never fabricates ports to conceal a successful zero count.
+- Automatic's resolved port and normalized Apply results update an untouched dialog.
+  Track edits explicitly: changing back to a previous value is still an edit, and
+  any edit after Apply prevents its result from overwriting the new draft.
+
+**Research and limits:** the [pinned midir CoreMIDI implementation](https://github.com/Boddlnagg/midir/blob/v0.9.1/src/backend/coremidi/mod.rs)
+queries global sources. Apple's [source-count API](https://developer.apple.com/documentation/coremidi/midigetnumberofsources())
+returns a count without an error status. A stable zero cannot be classified as a
+failed query by this API alone. CoreMIDI reports the NI S88 MK2's two ports online;
+250 MIDI-only inventories and 50 inventories surrounding the exact CPAL property
+query ordering kept both sources, with no discovery errors. No audio streams or
+MIDI connections were opened. The user's actual count loss is confirmed by their
+report; client churn or CPAL ordering is not a proven cause. The new build repairs
+confirmed error-handling defects and exposes successful-zero transitions; physical
+playback and disappearance/recovery on the owner's running app remain unverified.
+
+**Software evidence (2026-10-14):** 37 shared-host tests pass, including retained
+client reuse, discovery failure/recovery, true empty inventory, MIDI warning ownership
+and default selection/persistence. Five settings tests pass independently. Returning
+the dialog's old value-equality sync condition reproduces the post-Apply ALL→2→ALL
+failure; explicit edit tracking fixes it. The final pinned host revision is
+`4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9`. The production-feature plug-in library
+suite passes: 238 passed, 13 ignored. Independent reviews found no remaining confirmed
+issues after the corrections.
+
+## R-KEY-FEEDBACK. Keyboard icon and pressed keys
+
+**Owner decision, 2026-10-14.** Remove the last piano key on the keyboard button's right
+and darken a playable key when pressed.
+
+The remaining three natural keys and two accidentals are centred in the button. Held keys
+use darker versions of their surfaces in both looks; the realistic material's alpha remains
+unchanged, so a black key cannot brighten by revealing its background. Local note ownership
+joins the audio snapshot for immediate visual feedback while a device is stopped.
+
+Key masks use fixed key coordinates and integer compositing. Press/release repaint checks
+found a fractional-scale seam when the old mask and float sampler followed the damage patch.
+The regression now compares incremental frames with a fresh keyboard, including black keys.
+The [rendered previews and focused checks](keyboard-feedback/README.md) record the candidate;
+visual review precedes full CI or merging.
+
+**Header follow-up, 2026-10-14.** The owner also asked for the keyboard header's buttons and
+text to be vertically centred on the wood. Their shared centre is now halfway between the
+rail and the key bed's outer border. Labels use their visible glyph bounds for an alphabetic
+baseline; this aligns OCTAVE, the range, plus/minus, TYPE, PANIC and the mapping legend despite
+their different sizes. Button drawing, materials and hit-testing share the same centre.
+The updated preview records the alignment; panel and focused editor checks still pass.
+
+**Display follow-up, 2026-10-14.** The owner asked to reuse the preset screen's pixel lettering
+and bezel for the octave range. It now calls the shared bezel renderer and uses the same glass
+asset, dot font, grid spacing and light colours. Its readout remains centred on the wood;
+the preset display keeps its existing appearance. Updated renderer previews and panel/lint
+checks pass; visual review still precedes full CI or merging.
+
+**Button follow-up, 2026-10-14.** The owner asked to place TYPE and PANIC side by side and
+give them the same size. TYPE now sits just left of PANIC, with both caps 230 × 48 units and
+a 16-unit gap. Header drawing, realistic materials and hit-testing share a single button layout.
+
+**Host follow-up, 2026-10-14.** The owner asked for TYPE and PANIC only in the standalone
+application, leaving those functions to the DAW. Runtime host API selects their visibility and
+hit targets, independent of build features. Plug-ins keep the pointer keyboard and octave
+controls, with note typing and its legend disabled. The repaint regression includes switching
+between both layouts; editor checks cover actual CLAP, VST3 and standalone contexts.
+
+**Label follow-up, 2026-10-14.** The owner chose TYPING as the compact label for enabling
+computer-keyboard note input. It replaces TYPE on the standalone button.
+
+**Integration follow-up, 2026-10-14.** The owner asked to include these UI fixes in
+the MIDI recovery build. Merge the keyboard feedback candidate `cf90cef` into
+the standalone development branch, preserving its icon, materials, pixel display,
+header alignment, grouped buttons, host-specific visibility and TYPING label.
+Retain R-TYPE's separate C-root octave and Z/X legend; TYPING continues through
+controls/compact views in standalone. Plug-ins leave note typing to their host.
+The combined source passes 240 production-feature library tests (13 ignored),
+45 panel unit tests (7 ignored), the panel approval check and strict Clippy for
+both feature configurations. The native combined render was shown to the owner;
+their earlier delegation permits proceeding without another approval wait.
+
+**Frame follow-up, 2026-10-14.** The owner requested straight wood at both sides
+and wood meeting the bottom silver border. Replace the metal substrate and separate
+wood rails with one continuous walnut field around the recessed key bed. Its right
+and bottom limits match the trim's inner edges (`W - 28`, `H - 6`). The drawn skin
+uses a continuous wood-coloured surface too. Include fractional boundary coverage
+and composite it over the existing trim; inward pixel clipping left a thin dark gap.
+Both skins' incremental/fresh-frame checks pass at 0.44 and 0.87 scale, as do all
+45 panel tests and the approval check. The updated native render was shown to the owner.

@@ -79,11 +79,18 @@ and sends nothing of yours.
 The keyboard button beside SAVE and settings switches the lower panel between
 VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
 remain visible. Click a key or drag between keys to play; the octave buttons move
-the visible range. TYPE enables computer-keyboard notes, mapped chromatically to
-`A W S E D F T G Y H U J K O L P ;`. It starts off in a plug-in so host shortcuts
-keep working. Text entry takes precedence. PANIC releases notes without changing
-the sound. Selecting the other view releases local keys while physical MIDI notes
-continue. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
+the visible range. In standalone, TYPING enables a piano layout on your computer keyboard: `A S D F G`
+play `C D E F G`, with `W E T Y U` on the black notes. The full chromatic order is
+`A W S E D F T G Y H U J K O L P ;`. A starts at C3 (MIDI 48); `Z` lowers TYPING
+one octave and `X` raises it. TYPING's octave is independent of the visible range
+and the sound's oscillator RANGE controls, and is remembered on this computer.
+The TYPING header shows A's current note. Shifting releases held TYPING notes while
+pointer and physical MIDI notes continue. TYPING starts off; text entry takes precedence.
+TYPING and PANIC appear only in standalone; plug-ins leave computer-keyboard input
+to the DAW. PANIC releases notes without changing
+the sound. TYPING stays enabled when you show the extra controls or hide the lower
+panel; pointer notes release while typed and physical MIDI notes continue. Focus
+loss releases local notes. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
 
 ## Standalone application
 
@@ -102,6 +109,14 @@ channel pair, sample rate, buffer size and MIDI input(s), then Apply. External
 audio input is disabled initially. The display reports the actual callback size
 and its buffer duration in milliseconds; that is one component of playing latency.
 Cancel discards changes that have not been applied. Refresh checks the device list.
+New sessions use **Automatic** MIDI: the first available input with an unambiguous
+name is selected and remembered. Open **MIDI INPUTS** to choose Automatic, disable
+hardware MIDI, or check specific inputs; click outside the list and Apply.
+Existing sessions retain their choices, including disabled MIDI. To enable the new
+default in an existing session, choose **Automatic (first available input)** and Apply
+once. Open selectors update as devices arrive or disappear. Discovery errors keep
+the last good MIDI list and appear in settings; a successful empty inventory reports
+that no inputs are available. Refresh retries discovery.
 Input/output changes briefly stop playback and retain the sound and editor.
 
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.

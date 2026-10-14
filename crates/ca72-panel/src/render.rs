@@ -1119,7 +1119,7 @@ fn place_picture(
 
 /// `a` times `b` over 255, rounded (as tiny-skia's 8-bit pipeline multiplies).
 #[inline(always)]
-fn mul255(a: u8, b: u8) -> u8 {
+pub(crate) fn mul255(a: u8, b: u8) -> u8 {
     let t = u16::from(a) * u16::from(b) + 128;
     ((t + (t >> 8)) >> 8) as u8
 }
