@@ -142,6 +142,8 @@ pub enum Edit {
 /// What a pointer finds on the bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarTarget {
+    /// Shows or hides the lower panel (the editor's window follows immediately).
+    Panel,
     Star,
     Prev,
     Name,
@@ -539,7 +541,7 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         BarTarget::Prev => PREV_X + STEP_W / 2.0,
         BarTarget::Name => (NAME_X + NAME_END) / 2.0,
         BarTarget::Next => NEXT_X + STEP_W / 2.0,
-        BarTarget::Save | BarTarget::Settings => SAVE_X + SAVE_W / 2.0,
+        BarTarget::Save | BarTarget::Settings | BarTarget::Panel => SAVE_X + SAVE_W / 2.0,
     };
     (x, BAR_MID)
 }
