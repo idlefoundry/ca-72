@@ -1581,12 +1581,13 @@ fn keyboard_every(q: Quality) -> usize {
 }
 
 /// The oscillators' and the filter's oversampling in each quality mode: in Potato the
-/// oscillators at the sample rate and the filter at twice it (at the sample rate its
-/// self-oscillation strays).
+/// oscillators at the sample rate and the filter at four times it. At 2x, high EMPHASIS
+/// and AMOUNT OF CONTOUR can turn ultrasonic regeneration into audible aliasing and
+/// solver crackle. Keep the filter's rate fixed while the controls move.
 fn oversampling(q: Quality) -> (usize, usize) {
     match q {
         Quality::NoCompromises | Quality::HighFidelity => (4, 4),
-        Quality::Potato => (1, 2),
+        Quality::Potato => (1, 4),
     }
 }
 
