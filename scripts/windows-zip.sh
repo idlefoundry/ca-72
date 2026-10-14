@@ -27,6 +27,8 @@ cd "$work/$name"
 binary=CA-72.vst3/Contents/x86_64-win/CA-72.vst3
 cp "$bundles/CA-72.clap" CA-72.clap
 cp -R "$bundles/CA-72.vst3" CA-72.vst3
+cp "$bundles/CA-72.exe" CA-72.exe
+cp "$bundles/CA-72.ico" CA-72.ico
 [ -f "$binary" ] || { echo "windows-zip: no $binary in $bundles" >&2; exit 1; }
 mkdir -p CA-72.vst3/Contents/Resources
 # The CLAP and the VST3 are one library (nih-plug exports both entry points).
@@ -54,8 +56,8 @@ $(printf '%*s' ${#title} '' | tr ' ' '=')
 
 VST3 and CLAP plug-ins for a compatible 64-bit audio host on Windows 10 or 11,
 without the installer. These are the unchanged binaries of the $tag release
-build, from the same CI run as CA-72-$version-Windows-setup.exe. No standalone
-application is included.
+build, from the same CI run as CA-72-$version-Windows-setup.exe. CA-72.exe is the
+standalone application: extract the archive and double-click it to play without a host.
 
 Install
 -------
@@ -93,8 +95,8 @@ Factory presets and fonts are built into the plug-ins; no separate sound or
 font files need installing. Keep LICENSE.txt and THIRD-PARTY-NOTICES.txt with
 your copy. Copies of both are also inside the VST3 bundle's Resources folder.
 
-This is an installer-free plug-in package, not a standalone synthesizer or a
-self-contained portable profile. Your presets and their library settings
+The executable can run from the extracted folder; its session and settings use
+your Windows profile rather than the archive's folder. Your presets and library settings
 remain in:
 %APPDATA%\\Idle Foundry\\CA-72\\Presets
 
