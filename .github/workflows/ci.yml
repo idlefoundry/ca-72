@@ -145,7 +145,7 @@ jobs:
       - name: Tests
         run: |
           if [ "$RUNNER_OS" = Linux ]; then export CA72_REQUIRE_NGSPICE=1; fi
-          cargo test --workspace
+          cargo test --workspace --features ca72-plugin/standalone-production
 
       - name: Validators, cached
         uses: actions/cache@v5

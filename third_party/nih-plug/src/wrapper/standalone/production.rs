@@ -14,7 +14,7 @@ use baseview::{
 };
 use crossbeam::queue::ArrayQueue;
 use plugin_kit_standalone::{
-    AppHandle, AppOptions, AudioBlock, AudioProcessor, ProcessConfig, SessionState,
+    AppHandle, AppOptions, AudioBlock, AudioProcessor, MidiResetScope, ProcessConfig, SessionState,
 };
 use raw_window_handle::HasRawWindowHandle;
 
@@ -224,6 +224,7 @@ impl<P: Plugin> SessionState for Session<P> {
 /// Adapter that owns the exact Plugin instance used by the editor and session.
 pub struct Processor<P: Plugin> {
     plugin: P,
+    midi_reset_scope: MidiResetScope,
     session: Arc<Session<P>>,
     layout: AudioIOLayout,
     main: Buffer<'static>,
@@ -270,6 +271,7 @@ where
         Ok((
             Self {
                 plugin,
+                midi_reset_scope: MidiResetScope::Channel,
                 session: session.clone(),
                 layout,
                 main,
@@ -285,6 +287,12 @@ where
             },
             session,
         ))
+    }
+
+    /// Preserve an instrument's deliberately global controller-reset behavior.
+    pub fn with_midi_reset_scope(mut self, scope: MidiResetScope) -> Self {
+        self.midi_reset_scope = scope;
+        self
     }
 
     /// Transfer the audio task consumers to the host before moving this processor
@@ -321,6 +329,10 @@ impl<P: Plugin> AudioProcessor for Processor<P>
 where
     P::BackgroundTask: Copy,
 {
+    fn midi_reset_scope(&self) -> MidiResetScope {
+        self.midi_reset_scope
+    }
+
     fn prepare(&mut self, config: ProcessConfig) -> Result<(), String> {
         if !config.sample_rate.is_finite()
             || config.sample_rate <= 0.0
@@ -651,8 +663,21 @@ pub fn run_with_transient_parameters<P: Plugin>(
 where
     P::BackgroundTask: Copy,
 {
+    run_with_midi_reset_scope::<P>(options, transient_ids, MidiResetScope::Channel)
+}
+
+/// Choose the controller reset policy explicitly for omni instruments.
+pub fn run_with_midi_reset_scope<P: Plugin>(
+    options: AppOptions,
+    transient_ids: &[&str],
+    midi_reset_scope: MidiResetScope,
+) -> Result<(), String>
+where
+    P::BackgroundTask: Copy,
+{
     setup_logger();
     let (mut processor, session) = Processor::new(P::default(), transient_ids)?;
+    processor.midi_reset_scope = midi_reset_scope;
     let editor = processor
         .editor()
         .ok_or("The standalone instrument requires an editor.")?;

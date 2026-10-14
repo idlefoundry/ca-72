@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,7 +36,7 @@ class Installation(unittest.TestCase):
         self.assertTrue(binary.stat().st_mode & 0o111)
         self.assertFalse((self.prefix / "lib/clap/CA-72.clap").exists())
         desktop = self.prefix / "share/applications/com.idlefoundry.ca72.desktop"
-        self.assertIn('Exec="' + str(binary).replace("%", "%%") + '"', desktop.read_text())
+        self.assertIn('sh "' + str(binary).replace("%", "%%") + '"', desktop.read_text())
         if shutil.which("desktop-file-validate"):
             subprocess.run(["desktop-file-validate", str(desktop)], check=True)
         session = self.prefix / "share/Idle Foundry/CA-72/session.json"
@@ -59,6 +60,25 @@ class Installation(unittest.TestCase):
         self.run_installer(success=False)
         self.assertTrue((self.prefix / "bin/ca72-standalone").exists())
         self.assertTrue((self.prefix / "lib/clap/CA-72.clap").exists())
+
+    @unittest.skipUnless(shutil.which("gio"), "GIO desktop launcher is unavailable")
+    def test_real_launcher_handles_paths_as_data(self):
+        (self.payload / "ca72-standalone").write_text(
+            '#!/usr/bin/env python3\nfrom pathlib import Path\n'
+            'Path(__file__).with_name("launched").write_text("launched safely")\n'
+        )
+        for name in ['ordinary', 'with spaces %', 'a"quote', 'a$dollar', 'a`tick', 'a\\slash', 'a=equals']:
+            with self.subTest(name=name):
+                self.prefix = self.root / name
+                self.run_installer("--standalone-only")
+                desktop = self.prefix / "share/applications/com.idlefoundry.ca72.desktop"
+                result = subprocess.run(["gio", "launch", str(desktop)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                marker = self.prefix / "bin/launched"
+                deadline = time.monotonic() + 2.0
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(marker.read_text(), "launched safely")
 
 
 if __name__ == "__main__":

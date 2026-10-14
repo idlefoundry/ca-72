@@ -416,6 +416,9 @@ On macOS, `scripts/auv2.sh` then builds the Audio Unit, `target/bundled/CA-72.co
 around the CLAP bundle (and for the same processors). It needs
 [CMake](https://cmake.org) 3.21 or later (`brew install cmake`) and takes a few seconds.
 
+Build the desktop application with `scripts/standalone.sh` before packaging. On Linux
+this needs ALSA and OpenGL headers (`libasound2-dev libgl-dev` on Debian/Ubuntu,
+`alsa-lib-devel mesa-libGL-devel` on Fedora, `alsa-lib mesa` on Arch).
 `scripts/package.sh` then makes the installer for the system it runs on, in
 `target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
 Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
@@ -432,7 +435,7 @@ On Linux this also needs the ALSA, JACK and OpenGL headers (Debian and Ubuntu:
 ## Testing
 
 ```sh
-cargo test --workspace
+cargo test --workspace --features ca72-plugin/standalone-production
 ```
 
 The tests take three to eight minutes, building included. They check the real-time models

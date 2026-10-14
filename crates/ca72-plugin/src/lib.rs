@@ -16,6 +16,10 @@ pub mod params;
 pub mod pool;
 pub mod presets;
 pub mod settings;
+#[cfg(feature = "standalone-production")]
+pub mod standalone_error;
+#[cfg(feature = "standalone-production")]
+pub mod standalone_settings;
 pub mod update;
 
 use std::sync::Arc;

@@ -6,7 +6,8 @@ Bug reports, measurements and fixes are welcome.
   or Audio Unit), the CA-72's version, and what you did. A crash report or the host's log
   helps.
 - **Changes:** open a pull request. Before you do, build and test as the README describes
-  (`cargo xtask bundle ca72-plugin --profile bundle`, `cargo test --workspace`), and run
+  (`cargo xtask bundle ca72-plugin --profile bundle`,
+  `cargo test --workspace --features ca72-plugin/standalone-production`), and run
   `cargo fmt --all` and `cargo clippy --workspace --all-targets --all-features -- -D warnings`
   (on Linux `--all-features` needs the ALSA, JACK and OpenGL headers as well:
   `libasound2-dev libjack-jackd2-dev libgl-dev`). CI builds, tests and runs clippy so, with
