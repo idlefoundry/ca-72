@@ -8,7 +8,7 @@ use resvg::{
 
 use crate::{
     Skin, art,
-    fonts::{FAMILY, Fonts},
+    fonts::{FAMILY, Fonts, Weight},
 };
 
 pub const AREA: [f64; 4] = [
@@ -25,7 +25,9 @@ pub const MAPPING: &str = "awsedftgyhujkolp;";
 const WHITE_W: f64 = (BED[2] - BED[0]) / 26.0;
 const CLEARANCE: f64 = 3.0;
 const NOTCH_Y: f64 = BED[1] + BLACK_H + 5.0;
-pub const HEADER: f64 = 1080.0;
+const KEYBED_TOP: f64 = BED[1] - 12.0;
+/// The visible wood ends at the key bed's outer border, three units above its frame.
+pub const HEADER: f64 = (AREA[1] + KEYBED_TOP - 3.0) / 2.0;
 pub const BUTTON_H: f64 = 48.0;
 /// A held key keeps its material and shading, with a darker surface over the key bed.
 const PRESSED_LEVEL: f32 = 0.65;
@@ -221,6 +223,7 @@ pub fn damage(was: Option<&Scene>, now: Option<&Scene>) -> Vec<[f64; 4]> {
 pub struct Renderer {
     scale: f64,
     options: usvg::Options<'static>,
+    fonts: Fonts,
     frame: Pixmap,
     shown: Option<Scene>,
     materials: Option<Materials>,
@@ -241,13 +244,15 @@ impl std::fmt::Debug for Renderer {
 
 impl Renderer {
     pub fn new(scale: f64) -> Self {
+        let fonts = Fonts::new();
         Self {
             scale,
             options: usvg::Options {
-                fontdb: Fonts::new().database(),
+                fontdb: fonts.database(),
                 font_family: FAMILY.into(),
                 ..Default::default()
             },
+            fonts,
             frame: crate::strip::blank(scale).expect("a strip frame"),
             shown: None,
             materials: None,
@@ -292,7 +297,7 @@ impl Renderer {
                         .expect("worn materials loaded")
                         .draw(&mut self.frame, self.scale);
                 }
-                let body = drawing(&still);
+                let body = drawing(&still, &self.fonts);
                 let document = art::document(
                     [
                         0.0,
@@ -321,7 +326,7 @@ impl Renderer {
             } else {
                 self.frame.fill(resvg::tiny_skia::Color::TRANSPARENT);
                 {
-                    let body = drawing(scene);
+                    let body = drawing(scene, &self.fonts);
                     let document = art::document(
                         [
                             0.0,
@@ -454,21 +459,28 @@ impl Renderer {
     }
 }
 
-fn drawing(scene: &Scene) -> String {
+fn drawing(scene: &Scene, fonts: &Fonts) -> String {
     let mut out = String::from(
         "<defs><linearGradient id='keyface' x2='0' y2='1'><stop stop-color='#252523'/><stop offset='1' stop-color='#181918'/></linearGradient><linearGradient id='ivory' x2='.2' y2='1'><stop stop-color='#ccc8b6'/><stop offset='.2' stop-color='#e1dcc8'/><stop offset='1' stop-color='#c9c2af'/></linearGradient><linearGradient id='blackkey' x2='1' y2='1'><stop stop-color='#434441'/><stop offset='.3' stop-color='#242623'/><stop offset='1' stop-color='#101210'/></linearGradient><linearGradient id='keycap' x2='0' y2='1'><stop stop-color='#514e47'/><stop offset='.35' stop-color='#393833'/><stop offset='1' stop-color='#242522'/></linearGradient></defs>",
     );
     // Darker versions of the same gradients; alpha stays opaque even on black keys.
     out += "<defs><linearGradient id='ivory-pressed' x2='.2' y2='1'><stop stop-color='#858276'/><stop offset='.2' stop-color='#928f82'/><stop offset='1' stop-color='#837e72'/></linearGradient><linearGradient id='blackkey-pressed' x2='1' y2='1'><stop stop-color='#2c2c2a'/><stop offset='.3' stop-color='#171917'/><stop offset='1' stop-color='#0a0c0a'/></linearGradient></defs>";
+    let button_y = HEADER - BUTTON_H / 2.0;
+    let text_y = |text: &str, size| fonts.baseline_for_centre(text, size, Weight::Regular, HEADER);
+    let octave_y = text_y("OCTAVE", 28.0);
+    let range = format!(
+        "{} – {}",
+        label(scene.root),
+        label(scene.root.saturating_add(43).min(127))
+    );
+    let range_y = text_y(&range, 28.0);
     out += &format!(
-        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='666' y='1080' font-size='28' text-anchor='middle' dominant-baseline='central' fill='#d9d2c0'>OCTAVE</text><rect x='878' y='1056' width='348' height='48' fill='#111b16' rx='4' stroke='#62594a' stroke-width='8'/><text x='1052' y='1080' font-size='28' text-anchor='middle' dominant-baseline='central' fill='#ff7028'>{} – {}</text>",
+        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='666' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text><rect x='878' y='{button_y}' width='348' height='{BUTTON_H}' fill='#111b16' rx='4' stroke='#62594a' stroke-width='8'/><text x='1052' y='{range_y}' font-size='28' text-anchor='middle' fill='#ff7028'>{range}</text>",
         if scene.skin == Skin::Worn {
             "none"
         } else {
             "url(#keyface)"
-        },
-        label(scene.root),
-        label(scene.root.saturating_add(43).min(127))
+        }
     );
     for (x, w, label, target) in [
         (817.0, 86.0, "−", Target::Down),
@@ -492,17 +504,20 @@ fn drawing(scene: &Scene) -> String {
             "#1a1917"
         };
         out += &format!(
-            "<rect x='{}' y='1056' width='{w}' height='48' fill='{fill}' fill-opacity='{}' rx='7' stroke='{stroke}' stroke-width='5'/><text x='{x}' y='1080' font-size='22' text-anchor='middle' dominant-baseline='central' fill='{}'>{label}</text>",
+            "<rect x='{}' y='{button_y}' width='{w}' height='{BUTTON_H}' fill='{fill}' fill-opacity='{}' rx='7' stroke='{stroke}' stroke-width='5'/><text x='{x}' y='{}' font-size='22' text-anchor='middle' fill='{}'>{label}</text>",
             x - w / 2.0,
             if scene.skin == Skin::Worn {
                 "0.28"
             } else {
                 "1"
             },
+            text_y(label, 22.0),
             if on { "#2a1006" } else { "#d9d2c0" }
         );
     }
-    out += "<rect x='402' y='1110' width='2648' height='632' fill='#0c100e' rx='7' stroke='#241d15' stroke-width='6'/>";
+    out += &format!(
+        "<rect x='402' y='{KEYBED_TOP}' width='2648' height='632' fill='#0c100e' rx='7' stroke='#241d15' stroke-width='6'/>"
+    );
     if scene.skin == Skin::Drawn {
         for dark in [false, true] {
             for relative in 0..KEYS {
@@ -551,13 +566,14 @@ fn drawing(scene: &Scene) -> String {
             }
         }
     }
+    let mapping = if scene.typing {
+        "A W S E D F T G Y H U J K O L P ;"
+    } else {
+        ""
+    };
     out += &format!(
-        "<text x='1730' y='1080' font-size='18' text-anchor='middle' fill='#a9a696'>{}</text></g>",
-        if scene.typing {
-            "A W S E D F T G Y H U J K O L P ;"
-        } else {
-            ""
-        }
+        "<text x='1730' y='{}' font-size='18' text-anchor='middle' fill='#a9a696'>{mapping}</text></g>",
+        text_y(mapping, 18.0)
     );
     out
 }
@@ -618,8 +634,8 @@ impl Materials {
         );
         for (x, y, w, h) in [
             (394.0, 1730.0, 2664.0, 28.0),
-            (394.0, 1110.0, 8.0, 648.0),
-            (3050.0, 1110.0, 8.0, 648.0),
+            (394.0, KEYBED_TOP, 8.0, 648.0),
+            (3050.0, KEYBED_TOP, 8.0, 648.0),
         ] {
             crate::render::fill(
                 frame,

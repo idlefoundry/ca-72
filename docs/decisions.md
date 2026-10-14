@@ -5478,3 +5478,10 @@ found a fractional-scale seam when the old mask and float sampler followed the d
 The regression now compares incremental frames with a fresh keyboard, including black keys.
 The [rendered previews and focused checks](keyboard-feedback/README.md) record the candidate;
 visual review precedes full CI or merging.
+
+**Header follow-up, 2026-10-14.** The owner also asked for the keyboard header's buttons and
+text to be vertically centred on the wood. Their shared centre is now halfway between the
+rail and the key bed's outer border. Labels use their visible glyph bounds for an alphabetic
+baseline; this aligns OCTAVE, the range, plus/minus, TYPE, PANIC and the mapping legend despite
+their different sizes. Button drawing, materials and hit-testing share the same centre.
+The updated preview records the alignment; panel and focused editor checks still pass.

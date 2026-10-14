@@ -92,4 +92,28 @@ impl Fonts {
             -f64::from(face.descender()) / em,
         )
     }
+
+    /// Alphabetic baseline that centres a label's visible glyphs, rather than its em box.
+    pub(crate) fn baseline_for_centre(
+        &self,
+        text: &str,
+        size: f64,
+        weight: Weight,
+        centre: f64,
+    ) -> f64 {
+        let face = self.face(weight);
+        let mut bottom = i16::MAX;
+        let mut top = i16::MIN;
+        for glyph in text.chars().filter_map(|c| face.glyph_index(c)) {
+            if let Some(bounds) = face.glyph_bounding_box(glyph) {
+                bottom = bottom.min(bounds.y_min);
+                top = top.max(bounds.y_max);
+            }
+        }
+        if bottom > top {
+            return centre;
+        }
+        centre
+            + (f64::from(bottom) + f64::from(top)) * size / (2.0 * f64::from(face.units_per_em()))
+    }
 }
