@@ -361,6 +361,78 @@ fn standalone_validation_accepts_the_plugins_existing_state_migrations() {
     );
 }
 
+#[test]
+fn wrong_typed_persisted_fields_reject_the_entire_session_without_mutation() {
+    let plugin = Ca72::default();
+    let params = plugin.parameters().clone();
+    let (_adapter, session) = Processor::new(plugin, &[]).expect("adapter");
+    session.set_parameter(params.cutoff.as_ptr(), 0.2);
+    params.editor_width.store(1250, Ordering::Relaxed);
+    params.editor_panel.store(false, Ordering::Relaxed);
+    *params.preset.write().expect("preset lock") = "Current unsaved sound".into();
+    let before = session.save().expect("original session");
+    for (field, wrong_type) in [
+        ("editor_width", "\"wrong type\""),
+        ("editor_width", "-1"),
+        ("editor_width", "1250.5"),
+        ("preset", "false"),
+        ("editor_panel", "\"false\""),
+    ] {
+        let mut state: PluginState = serde_json::from_slice(&before).expect("state");
+        state
+            .params
+            .insert("cutoff".into(), ParamValue::F32(1000.0));
+        state
+            .fields
+            .insert("preset".into(), "\"Replacement sound\"".into());
+        state.fields.insert(field.into(), wrong_type.into());
+        let error = session
+            .restore(&serde_json::to_vec(&state).expect("valid JSON with wrong type"))
+            .expect_err("typed field must reject the whole restore");
+        assert!(
+            error.contains(field),
+            "error must identify {field}: {error}"
+        );
+        assert_eq!(
+            session.save().expect("state after rejected restore"),
+            before,
+            "a rejected {field} must not change any parameter or persisted field"
+        );
+    }
+}
+
+#[test]
+fn typed_preflight_retains_ca72s_documented_midi_map_repair() {
+    let plugin = Ca72::default();
+    let params = plugin.parameters().clone();
+    let (_adapter, session) = Processor::new(plugin, &[]).expect("adapter");
+    let target = ca72_plugin::learn::LEARNABLE
+        .iter()
+        .position(|parameter| parameter.id == "cutoff")
+        .expect("cutoff learnable");
+    let cc = ca72_plugin::learn::Cc { channel: 4, cc: 74 };
+    params.midi_map.assign(target, cc).expect("MIDI assignment");
+    let before = session.save().expect("state with mapping");
+    for repaired in ["null", "[]", "\"unknown MIDI table\""] {
+        params.midi_map.assign(target, cc).expect("MIDI assignment");
+        let mut state: PluginState = serde_json::from_slice(&before).expect("state");
+        state
+            .params
+            .insert("cutoff".into(), ParamValue::F32(1000.0));
+        state.fields.insert("midi_map".into(), repaired.into());
+        let mut hosted = state.clone();
+        Ca72::filter_state(&mut hosted);
+        session
+            .restore(&serde_json::to_vec(&state).expect("compatible MIDI table repair"))
+            .expect("CA72 deliberately repairs unknown MIDI table shapes");
+        assert_eq!(params.cutoff.value(), 1000.0);
+        assert_eq!(params.midi_map.assignment(target), None);
+        let after: PluginState =
+            serde_json::from_slice(&session.save().expect("repaired session")).expect("state");
+        assert_eq!(after.fields["midi_map"], hosted.fields["midi_map"]);
+    }
+}
+
 #[derive(Default)]
 struct TaskParameters;
 // SAFETY: this test parameter object exposes no pointers at all.
