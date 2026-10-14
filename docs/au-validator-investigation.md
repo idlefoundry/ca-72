@@ -32,3 +32,24 @@ parameters; prove it with a focused host regression before claiming the timeout 
 Evidence is stored under au-render-trace artifacts in each diagnostic Actions run;
 exact input hashes, raw trace, decoded summaries, parent/child samples and result
 codes stay together. No owner hardware, installed plug-ins or DAW sessions are used.
+
+## Evidence-driven execution-budget hypothesis
+
+Run38653356837 records1513 complete nested CLAP calls consuming31.315s. The
+matching direct stress prefix uses different randomized controls and spends1.480s
+in1746 completed calls. No oversized block or dropped trace record occurred.
+The nested workload uses ULTRA/unison and retained doubled tails with A-440 on;
+its172 expensive512-frame blocks consume22.545s. Linux offline replay of captured
+parameter/note/lifecycle records reproduces12.808s processing; forwarding Reset
+changes that to12.716s, so missing Reset is not established as the timeout cause.
+Replay omits state blob/seed and sidechain samples, and is not native AU validation.
+
+The original30000ms requirement above was this investigation's proposed gate, not
+an owner's restriction. The evidence now justifies one diagnostic with a finite
+AU-only180000ms output timeout, original failed pluginval seed, strictness10,
+nested strict stress20 and all editor tests. Use the original589 AU wrapper and
+embedded CLAP bytes with no trace build or DSP changes; outer240s bound per case.
+Require real auval and pluginval exit0 and complete logs before considering a
+production harness budget correction. A failure does not authorize another increase.
+Do not claim the original30s gate passed or a DSP performance defect was repaired.
+Installer behavior remains unchanged.

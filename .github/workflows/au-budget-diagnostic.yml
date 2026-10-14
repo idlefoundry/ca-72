@@ -1,0 +1,56 @@
+name: AU execution budget diagnostic
+on:
+  push:
+    branches: [codex/au-budget-diagnostic]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  trace:
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Exact final candidate CLAP and pinned validator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p diagnostic/artifact diagnostic/validator target/bundled
+          gh api repos/idlefoundry/ca-72/actions/runs/38646776111 --jq .head_sha > diagnostic/product-source.txt
+          test "$(cat diagnostic/product-source.txt)" = 589e5cca08c66d4c8e64c0a337b0b875ee785344
+          gh api repos/idlefoundry/ca-72/actions/artifacts/11932543293/zip > diagnostic/candidate.zip
+          echo 'f17d0d0cf16980d36981c32a55d30ca09acc2ad5517bcbf9e2a502dbc94c847f  diagnostic/candidate.zip' | shasum -a 256 -c -
+          unzip -q diagnostic/candidate.zip -d diagnostic/artifact
+          chmod +x diagnostic/artifact/CA-72.clap/Contents/MacOS/CA-72
+          ditto diagnostic/artifact/CA-72.clap target/bundled/CA-72.clap
+          shasum -a 256 target/bundled/CA-72.clap/Contents/MacOS/CA-72 > diagnostic/clap-input.sha256
+          curl -fsSL https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip -o diagnostic/pluginval.zip
+          echo '3c4c533bda0c5059eea3ddaea752d757ee2025041f0f47e6bcb0e87f6082b29f  diagnostic/pluginval.zip' | shasum -a 256 -c -
+          unzip -q diagnostic/pluginval.zip -d diagnostic/validator
+          chmod +x diagnostic/validator/pluginval.app/Contents/MacOS/pluginval
+      - name: Exact unmodified final candidate Audio Unit
+        run: |
+          chmod +x diagnostic/artifact/CA-72.component/Contents/MacOS/CA-72
+          chmod +x diagnostic/artifact/CA-72.component/Contents/PlugIns/CA-72.clap/Contents/MacOS/CA-72
+          cmp diagnostic/artifact/CA-72.clap/Contents/MacOS/CA-72 diagnostic/artifact/CA-72.component/Contents/PlugIns/CA-72.clap/Contents/MacOS/CA-72
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          ditto diagnostic/artifact/CA-72.component "$HOME/Library/Audio/Plug-Ins/Components/CA-72.component"
+          sw_vers > diagnostic/os.txt
+          shasum -a 256 "$HOME/Library/Audio/Plug-Ins/Components/CA-72.component/Contents/MacOS/CA-72" > diagnostic/original-wrapper.sha256
+      - name: Strict tests, AU-only bounded 180-second execution budget
+        run: python3 scripts/diagnose-au-budget.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: au-budget-evidence
+          path: |
+            diagnostic/**/*.bin
+            diagnostic/**/*.json
+            diagnostic/*.log
+            diagnostic/*.txt
+            diagnostic/*.sha256
+            target/auv2.log
+          if-no-files-found: error
