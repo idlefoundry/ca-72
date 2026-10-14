@@ -30,9 +30,10 @@ thread_local! {
 fn count(counter: &AtomicUsize) {
     if HERE.with(std::cell::Cell::get) && ARMED.swap(false, Ordering::SeqCst) {
         counter.fetch_add(1, Ordering::SeqCst);
-        let bt = std::backtrace::Backtrace::force_capture().to_string();
-        if let Ok(mut f) = FIRST.lock() {
-            f.get_or_insert(bt);
+        if let Ok(mut f) = FIRST.lock()
+            && f.is_none()
+        {
+            *f = Some(std::backtrace::Backtrace::force_capture().to_string());
         }
         ARMED.store(true, Ordering::SeqCst);
     }
@@ -58,14 +59,29 @@ static A: Counting = Counting;
 /// The tests share the counters: one at a time, each from zero.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn start() -> std::sync::MutexGuard<'static, ()> {
+/// Leave this thread disarmed before releasing SERIAL, including if an assertion unwinds.
+/// Otherwise libtest's cleanup can be counted after the next test arms the shared counters.
+struct Session {
+    _serial: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        ARMED.store(false, Ordering::SeqCst);
+        HERE.with(|h| h.set(false));
+    }
+}
+
+fn start() -> Session {
     let guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    ARMED.store(false, Ordering::SeqCst);
+    HERE.with(|h| h.set(false));
     ALLOCS.store(0, Ordering::SeqCst);
     FREES.store(0, Ordering::SeqCst);
     if let Ok(mut f) = FIRST.lock() {
         *f = None;
     }
-    guard
+    Session { _serial: guard }
 }
 
 const RATE: f64 = 48_000.0;
