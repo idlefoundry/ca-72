@@ -354,9 +354,12 @@ dependencies = [
  "nih_plug",
  "objc2",
  "objc2-foundation",
+ "plugin-kit-queue",
+ "plugin-kit-standalone",
  "plugin-kit-stereo",
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",
+ "resvg",
  "serde",
  "serde_json",
  "softbuffer",
@@ -669,6 +672,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "cpal"
+version = "0.15.3"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=9ffdba09d5d047ad52838274fd8053537e839458#9ffdba09d5d047ad52838274fd8053537e839458"
+dependencies = [
+ "alsa 0.9.1",
+ "core-foundation-sys",
+ "coreaudio-rs",
+ "dasp_sample",
+ "jni",
+ "js-sys",
+ "libc",
+ "mach2",
+ "ndk 0.8.0",
+ "ndk-context",
+ "oboe",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "windows 0.54.0",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -835,7 +860,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1396,7 +1421,7 @@ dependencies = [
  "clap",
  "clap-sys",
  "core-foundation",
- "cpal",
+ "cpal 0.15.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam",
  "jack",
  "libc",
@@ -1407,6 +1432,7 @@ dependencies = [
  "nih_plug_derive",
  "objc",
  "parking_lot",
+ "plugin-kit-standalone",
  "raw-window-handle 0.5.2",
  "rtrb",
  "serde",
@@ -1711,6 +1737,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin-kit-queue"
+version = "0.3.1"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=9ffdba09d5d047ad52838274fd8053537e839458#9ffdba09d5d047ad52838274fd8053537e839458"
+
+[[package]]
+name = "plugin-kit-standalone"
+version = "0.3.1"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=9ffdba09d5d047ad52838274fd8053537e839458#9ffdba09d5d047ad52838274fd8053537e839458"
+dependencies = [
+ "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=9ffdba09d5d047ad52838274fd8053537e839458)",
+ "crossbeam-channel",
+ "midir",
+ "plugin-kit-queue",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "plugin-kit-stereo"
 version = "0.3.1"
 source = "git+https://github.com/idlefoundry/plugin-kit?rev=4c0f0f31041cb28b9dc803996dd01d8f44af5ce8#4c0f0f31041cb28b9dc803996dd01d8f44af5ce8"
@@ -1903,7 +1948,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2176,7 +2221,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2629,7 +2674,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

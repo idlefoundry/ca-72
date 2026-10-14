@@ -17,6 +17,12 @@ assert_process_allocs = ["nih_plug/assert_process_allocs"]
 # The plug-in as an application of its own (nih-plug's standalone host), for trying the
 # editor without a host: `cargo run -p ca72-plugin --example standalone --features standalone`.
 standalone = ["nih_plug/standalone"]
+standalone-production = ["nih_plug/standalone-production", "dep:plugin-kit-standalone", "dep:resvg"]
+
+[[bin]]
+name = "ca72-standalone"
+path = "src/bin/standalone.rs"
+required-features = ["standalone-production"]
 
 [[example]]
 name = "standalone"
@@ -34,6 +40,9 @@ ca72-rt.workspace = true
 libm.workspace = true
 ca72-panel = { path = "../ca72-panel" }
 nih_plug.workspace = true
+plugin-kit-queue = { git = "https://github.com/idlefoundry/plugin-kit", rev = "9ffdba09d5d047ad52838274fd8053537e839458" }
+plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "9ffdba09d5d047ad52838274fd8053537e839458", optional = true }
+resvg = { version = "0.45", default-features = false, features = ["text"], optional = true }
 # The editor's window and its pixels: baseview at the revision nih-plug's own examples use,
 # and softbuffer 0.4.8, both patched (third_party/baseview/PATCHES.md,
 # third_party/softbuffer/PATCHES.md). baseview takes `raw-window-handle` 0.5, softbuffer 0.6.

@@ -160,6 +160,7 @@ pub struct StripRenderer {
     damage: Option<[i32; 4]>,
     /// Every frame drawn whole (the tests' reference for one drawn in parts).
     whole: bool,
+    keyboard: crate::keyboard::Renderer,
 }
 
 impl fmt::Debug for StripRenderer {
@@ -193,6 +194,7 @@ impl StripRenderer {
                 ..usvg::Options::default()
             },
             frame: blank(scale).expect("a frame"),
+            keyboard: crate::keyboard::Renderer::new(scale),
             still: None,
             print: None,
             base: None,
@@ -223,6 +225,7 @@ impl StripRenderer {
     pub fn rescale(&mut self, scale: f64) {
         if scale != self.scale {
             self.scale = scale;
+            self.keyboard.rescale(scale);
             if let Some(f) = blank(scale) {
                 self.frame = f;
             }
@@ -284,7 +287,10 @@ impl StripRenderer {
         let dt = self
             .last
             .map_or(0.0, |t| now.saturating_duration_since(t).as_secs_f64());
-        let moved = if self.last.is_none() || dt > 0.0 {
+        let moved = if scene.keyboard.is_some() {
+            self.last = Some(now);
+            false
+        } else if self.last.is_none() || dt > 0.0 {
             self.last = Some(now);
             self.liquid.step(scene, dt.min(0.1)).0
         } else {
@@ -477,19 +483,24 @@ impl StripRenderer {
     /// Where `now` shows something `was` did not (the drops apart: they move by themselves).
     fn changes(&self, was: &StripScene, now: &StripScene) -> Vec<[i32; 4]> {
         let mut out = Vec::new();
-        for (b, x, y) in [
-            (Bank::Mode, was.mode, now.mode),
-            (Bank::Stereo, was.stereo, now.stereo),
-            (Bank::Placement, was.placement, now.placement),
-            (Bank::Auto, was.auto.then_some(0), now.auto.then_some(0)),
-        ] {
-            if x != y {
-                out.extend((0..b.words().len()).map(|i| self.tab_part(b.tab(i))));
-            }
+        for r in crate::keyboard::damage(was.keyboard.as_ref(), now.keyboard.as_ref()) {
+            out.push(self.pixels((r[0], r[1], r[2], r[3])));
         }
-        for (i, r) in Readout::ALL.into_iter().enumerate() {
-            if was.readouts[i] != now.readouts[i] {
-                out.push(self.readout_part(r));
+        if now.keyboard.is_none() {
+            for (b, x, y) in [
+                (Bank::Mode, was.mode, now.mode),
+                (Bank::Stereo, was.stereo, now.stereo),
+                (Bank::Placement, was.placement, now.placement),
+                (Bank::Auto, was.auto.then_some(0), now.auto.then_some(0)),
+            ] {
+                if x != y {
+                    out.extend((0..b.words().len()).map(|i| self.tab_part(b.tab(i))));
+                }
+            }
+            for (i, r) in Readout::ALL.into_iter().enumerate() {
+                if was.readouts[i] != now.readouts[i] {
+                    out.push(self.readout_part(r));
+                }
             }
         }
         if was.bar != now.bar {
@@ -514,8 +525,12 @@ impl StripRenderer {
             .into_iter()
             .map(|at| self.tab_part(at))
             .collect();
-        parts.extend(Readout::ALL.into_iter().map(|rd| self.readout_part(rd)));
-        parts.push(self.window());
+        if scene.keyboard.is_none() {
+            parts.extend(Readout::ALL.into_iter().map(|rd| self.readout_part(rd)));
+            parts.push(self.window());
+        } else {
+            parts.clear();
+        }
         parts.push(self.name_part());
         parts.push(self.signs_part(scene));
         loop {
@@ -541,7 +556,11 @@ impl StripRenderer {
             copy(&mut self.frame, b, r);
         }
         // The lit tabs: their light on the face round them, then the lit cap over the unlit.
-        let lit = lit_tabs(scene);
+        let lit = if scene.keyboard.is_some() {
+            Vec::new()
+        } else {
+            lit_tabs(scene)
+        };
         if self.lit_tab.is_none() {
             let px = |v: f64| (v * s).round().max(1.0) as u32;
             self.lit_tab = Some(plugin_kit_materials::resample(
@@ -583,14 +602,14 @@ impl StripRenderer {
             self.readouts = (0..Readout::ALL.len()).map(|_| None).collect();
         }
         for (i, rd) in Readout::ALL.into_iter().enumerate() {
-            if meets(self.readout_part(rd), r) {
+            if scene.keyboard.is_none() && meets(self.readout_part(rd), r) {
                 let (text, on) = &scene.readouts[i];
                 reading(self, i, rd, text, *on);
             }
         }
         // The voices' drops, behind the display's glass.
         let window = self.window();
-        if meets(window, r) {
+        if scene.keyboard.is_none() && meets(window, r) {
             self.drops(window, scene.detune);
         }
         // The preset's name, its star and arrow (dots); MIDI Learn's ring round the control it
@@ -600,7 +619,7 @@ impl StripRenderer {
         }
         if meets(self.signs_part(scene), r) {
             let mut o = Svg::default();
-            if let Some(c) = scene.learning {
+            if let Some(c) = scene.learning.filter(|_| scene.keyboard.is_none()) {
                 ring(&mut o, c);
             }
             star_key(&mut o, scene.bar.favorite);
@@ -610,6 +629,17 @@ impl StripRenderer {
         // The print over the caps.
         if let Some(p) = &self.print {
             p.over(&mut self.frame, r);
+        }
+        if scene.bar.keyboard && meets(self.key_part(BarTarget::Keyboard), r) {
+            let mut o = Svg::default();
+            put!(
+                o,
+                "<rect x='2869' y='24' width='86' height='62' rx='7' fill='#b0702b' opacity='.28'/>"
+            );
+            svg_over(&self.options, &mut self.frame, s, &o.0);
+        }
+        if let Some(keyboard) = &scene.keyboard {
+            self.keyboard.over(&mut self.frame, keyboard, r);
         }
     }
 
@@ -840,6 +870,25 @@ fn key_marks(o: &mut Svg) {
                 } else {
                     "SAVE"
                 }
+            ),
+            BarTarget::Keyboard => put!(
+                o,
+                "<path d='M {} {} H {} V {} H {} Z M {} {} V {} M {} {} V {}' fill='none' stroke='{KEY_PRINT}' stroke-width='2'/><path d='M {} {} h 5 v 14 h -5 Z M {} {} h 5 v 14 h -5 Z' fill='{KEY_PRINT}'/>",
+                N(x - 15.0),
+                N(y - 13.0),
+                N(x + 15.0),
+                N(y + 13.0),
+                N(x - 15.0),
+                N(x - 5.0),
+                N(y - 13.0),
+                N(y + 13.0),
+                N(x + 5.0),
+                N(y - 13.0),
+                N(y + 13.0),
+                N(x - 8.0),
+                N(y - 13.0),
+                N(x + 2.0),
+                N(y - 13.0)
             ),
             BarTarget::Settings => put!(
                 o,
@@ -1200,6 +1249,16 @@ fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) 
     let (_, y, _, h) = NAME;
     let (left, places, ..) = name_places();
     let top = y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * DOT;
+    screen_dots(scale, left, top, places, &mut each);
+}
+
+fn screen_dots(
+    scale: f64,
+    left: f64,
+    top: f64,
+    places: usize,
+    mut each: impl FnMut(usize, usize, usize, (f32, f32)),
+) {
     for i in 0..places {
         for j in 0..9 {
             for col in 0..5 {
@@ -1209,6 +1268,48 @@ fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) 
             }
         }
     }
+}
+
+/// A centred readout made from the preset display's bezel, glass and pixel lettering.
+pub(crate) fn pixel_screen(
+    options: &usvg::Options<'_>,
+    frame: &mut Pixmap,
+    picture: &Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+    text: &str,
+) {
+    let mut bezel = Svg::default();
+    super::screen_bezel(&mut bezel, (x, y, w, h));
+    svg_over(options, frame, scale, &bezel.0);
+    glass(frame, picture, scale, (x, y, w, h), 3.0);
+    let mut places = ((w - 16.0) / (6.0 * DOT)).floor().max(1.0) as usize;
+    let glyphs: Vec<_> = text.chars().take(places).map(font::glyph).collect();
+    // Keep centred text on the same dot grid, including an even character count.
+    if places > 1 && !(places - glyphs.len()).is_multiple_of(2) {
+        places -= 1;
+    }
+    let start = (places - glyphs.len()) / 2;
+    let left = x + (w - (6 * places - 1) as f64 * DOT) / 2.0;
+    let top = y + h / 2.0 - CAP_LIFT - 3.0 * DOT;
+    let r = DOT * 0.36 * scale;
+    let mut unlit = PathBuilder::new();
+    let mut glow = PathBuilder::new();
+    let mut core = PathBuilder::new();
+    screen_dots(scale, left, top, places, |i, j, col, (px, py)| {
+        unlit.push_circle(px, py, r as f32);
+        if i >= start
+            && glyphs
+                .get(i - start)
+                .is_some_and(|g| g[j] >> (4 - col) & 1 == 1)
+        {
+            glow.push_circle(px, py, (r * 2.1) as f32);
+            core.push_circle(px, py, r as f32);
+        }
+    });
+    fill(frame, unlit, ORANGE, 0.06);
+    fill(frame, glow, ORANGE_GLOW, 0.16);
+    fill(frame, core, ORANGE, 1.0);
 }
 
 // ---- The voices' display: drops of light (the CA-74's LIQUID, its R36).
@@ -1717,5 +1818,101 @@ mod tests {
         assert!(changes > 40, "{changes} frames drawn");
         assert!(drawn < all * changes / 4, "{drawn} pixels drawn");
         assert!(!parts.animating());
+    }
+
+    #[test]
+    fn keyboard_damage_matches_whole_frames_and_stays_in_its_space() {
+        for scale in [0.44, 0.87] {
+            for skin in [crate::Skin::Drawn, crate::Skin::Worn] {
+                let (w, h) = crate::render::size_at(scale);
+                let mut under = Pixmap::new(w, h).expect("frame");
+                under.fill(Color::from_rgba8(40, 36, 30, 255));
+                let mut parts = StripRenderer::new(scale);
+                let mut whole = StripRenderer::new(scale);
+                whole.whole = true;
+                let mut sc = scene(0);
+                sc.keyboard = Some(crate::keyboard::Scene {
+                    skin,
+                    standalone: true,
+                    ..Default::default()
+                });
+                sc.bar.keyboard = true;
+                let now = Instant::now();
+                for i in 0..12 {
+                    match i {
+                        1 => sc.keyboard.as_mut().unwrap().held = [1 << 60, 0],
+                        2 => sc.keyboard.as_mut().unwrap().held = [(1 << 60) | (1 << 61), 1],
+                        3 => sc.keyboard.as_mut().unwrap().held = [0, 1],
+                        4 => sc.keyboard.as_mut().unwrap().held = [0, 0],
+                        5 => sc.keyboard.as_mut().unwrap().root = 53,
+                        6 => sc.keyboard.as_mut().unwrap().typing = true,
+                        7 => {
+                            sc.keyboard.as_mut().unwrap().hover =
+                                Some(crate::keyboard::Target::Type)
+                        }
+                        8 => {
+                            sc.keyboard.as_mut().unwrap().standalone = false;
+                        }
+                        9 => {
+                            sc.keyboard.as_mut().unwrap().standalone = true;
+                        }
+                        10 => {
+                            sc.keyboard = None;
+                            sc.bar.keyboard = false;
+                        }
+                        11 => {
+                            sc.keyboard = Some(crate::keyboard::Scene {
+                                skin,
+                                ..Default::default()
+                            });
+                            sc.bar.keyboard = true;
+                        }
+                        _ => {}
+                    }
+                    assert!(parts.render_at(&sc, &under, None, now));
+                    // Compare with a fresh keyboard, rather than two caches with the same
+                    // repaint history, including black-key presses and releases.
+                    whole.keyboard = crate::keyboard::Renderer::new(scale);
+                    whole.render_at(&sc, &under, None, now);
+                    if parts.frame().data() != whole.frame().data() {
+                        let w = parts.frame().width() as usize;
+                        let differences: Vec<_> = parts
+                            .frame()
+                            .data()
+                            .chunks_exact(4)
+                            .zip(whole.frame().data().chunks_exact(4))
+                            .enumerate()
+                            .filter(|(_, (a, b))| a != b)
+                            .map(|(p, (a, b))| (p % w, p / w, a.to_vec(), b.to_vec()))
+                            .collect();
+                        panic!(
+                            "{skin:?} scale {scale}, step {i}, {} differences first {:?}, damage {:?}",
+                            differences.len(),
+                            &differences[..differences.len().min(8)],
+                            parts.damage()
+                        );
+                    }
+                    if i == 1 {
+                        let r = parts.damage().expect("note damage");
+                        assert!(
+                            f64::from(r[0]) >= 370.0 * scale - 2.0,
+                            "left hand untouched"
+                        );
+                        assert!(
+                            f64::from(r[1]) > crate::strip::RAIL * scale,
+                            "rail untouched"
+                        );
+                        assert!(
+                            f64::from(r[2] - r[0]) < 200.0 * scale,
+                            "one pitch changes only its key"
+                        );
+                    }
+                }
+                assert!(
+                    !parts.render_at(&sc, &under, None, now),
+                    "unchanged keyboard frame stays kept"
+                );
+            }
+        }
     }
 }
