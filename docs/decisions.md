@@ -5374,6 +5374,52 @@ Its regression failed before the repair and passes afterward. The allocation-tes
 also clears its thread marker before releasing its serial lock, including on unwind, and
 records only the first failure backtrace while still counting every allocation and free.
 
+**Release acceptance, 2026-10-14:** the combined source `717c83bf` passed
+[CI on macOS, Windows and Linux](https://github.com/idlefoundry/ca-72/actions/runs/38514437842),
+including the complete workspace tests, production adapters, installers and native Windows
+window tests. Local workspace checks and clippy, with and without all features, also passed
+on each system. Linux and Mac ngspice checks explicitly required version 47. The 74 focused
+editor checks passed, with seven visual/timing checks ignored; the cutoff-saturation fit
+regeneration was run explicitly. Two paced CPU runs on the identical DSP source passed;
+these remain single-voice measurements, not a polyphony budget.
+
+Installed modules were checked by path and executable hash before accepting host results.
+The installed Linux VST3/CLAP passed all required validators. The signed Mac VST3/CLAP/AU
+passed all five validator checks, including strictness-10 pluginval with editors and strict
+auval. Windows installed CLAP and Steinberg validation passed, as did ten fresh strictness-10
+pluginval runs with editors. Windows CLAP also passed 200 fuzz cases across 50 fresh validator
+runs, four case types per run, using the CI artifact unchanged.
+
+Native acceptance used isolated projects with tracks disarmed and outputs muted:
+
+| Platform and host | Window evidence |
+|---|---|
+| Linux standalone | 23 size checks, compact grip and exact full-repaint pixels in a floating window; tiling constrains its outer window |
+| Linux REAPER VST3 and CLAP | 23 size checks per format, MIDI with a dummy device, save/reload and exact repaint pixels |
+| Linux Bitwig CLAP | 23 size checks, compact grip and exact full-repaint pixels; demo mode prevents save/reload |
+| Windows standalone | 22 visible desktop parent/child size checks, compact grip and exact full-repaint pixels |
+| Windows REAPER VST3 and CLAP | 23 size checks per format, compact grip, MIDI in muted projects, save/reload and exact full-repaint pixels |
+| Windows Sandyne VST3 | 23 size checks, compact grip and exact full-repaint pixels; no MIDI/save-reload claim |
+| macOS standalone installer payload | 17 height/preset checks, compact grip, width restoration and exact instrument pixels after reopen; devices disabled |
+| macOS REAPER VST3 | 23 frame checks, compact grip and its following click, MIDI in a muted project, save/reload at 1495 × 907 and exact instrument pixels after reopen |
+| macOS Bitwig CLAP | Eight short/full cycles and temporary preset reveal/restore; no numerical frame, grip, MIDI or save/reload claim |
+
+Each 23-check DAW run includes eight short/full cycles and presets temporarily revealing
+then restoring the compact view. The Mac REAPER drag harness initially hit the host's border;
+the corrected run uses the instrument's grip and waits for the resize to settle before
+releasing. It confirms the next panel click and the resized project's restoration. Minimum-OS
+runtime, physical audio/MIDI latency, hardware hotplug and other installed DAWs remain
+unverified. This acceptance concerns the tested configurations, not every host or display.
+
+PR [#31](https://github.com/idlefoundry/ca-72/pull/31) merged as `1f5a9f4c`, tagged `v0.2.1`.
+The merge/tag tree `96f1a1c411ca9a210e011eb18f78879a43681ee2` equals the tested source tree
+and the Mac package's build tree. The [tag workflow](https://github.com/idlefoundry/ca-72/actions/runs/38576346799)
+produces the Windows/Linux installers, Windows ZIP and pinned dependency sources. The Mac
+package was Developer ID signed, notarized, stapled and accepted by Gatekeeper; its SHA-256
+is `c24ebaccfd5759e0b25153851afc71c2c4d6f540970f77123e90c0a46b3d6032`.
+The [release](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.1) includes the asset
+checksums. Download verification and publication are required before merging this evidence.
+
 ## R73. A desktop application and playable lower keyboard
 
 **Owner decisions, 2026-10-13.** Add a standalone application, research and write a
