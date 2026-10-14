@@ -77,6 +77,13 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 scripts/notices.py --check
 
+      - name: The application's audio libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libasound2-dev libgl-dev
+
+      - name: Standalone application
+        run: scripts/standalone.sh
+
       - name: Inno Setup
         if: runner.os == 'Windows'
         run: choco install innosetup --no-progress -y
@@ -91,6 +98,12 @@ jobs:
             target/bundled/CA-72.vst3
             target/bundled/CA-72.clap
             target/bundled/CA-72.component
+            target/bundled/CA-72.app
+            target/bundled/CA-72.exe
+            target/bundled/CA-72.ico
+            target/bundled/ca72-standalone
+            target/bundled/CA-72.desktop
+            target/bundled/com.idlefoundry.ca72.png
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
