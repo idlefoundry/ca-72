@@ -525,7 +525,7 @@ The service documents and datasheets the model was derived from are not included
   darker),
   and driven hard at high EMPHASIS it loses its resonance sooner. In the 0.2.0 comparison,
   every other factory preset was within a decibel of the circuit's. LO's filter changes in
-  0.2.1 alter its renders; that earlier comparison is not a new calibration of this release.
+  0.2.2 alter its renders; that earlier comparison is not a new calibration of this release.
 - With no note playing an instance costs next to nothing (from 0.2.0; decisions.md R68): with
   POLY and UNISON off the instrument sleeps once its sound has died away and its contours
   have settled, and the next note, any MIDI, a control moved or a sound at EXTERNAL INPUT
@@ -538,7 +538,7 @@ The service documents and datasheets the model was derived from are not included
   computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,
   and on a computer of four processors or a slower one they can overload. QUALITY LO took
   about a fortieth of that then ([docs/decisions.md](docs/decisions.md) R67). Both costs
-  increase with the 0.2.1 filter fixes; the R71 measurements cover one voice, not this full
+  increase with the 0.2.2 filter fixes; the R71 measurements cover one voice, not this full
   polyphony matrix.
 - POLY's voices are shared between the host's audio thread and up to four threads of the
   plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
@@ -548,7 +548,7 @@ The service documents and datasheets the model was derived from are not included
   switched off; one that finds them all taken plays its voices on the host's thread, and
   asks again when its POLY is next switched on (R18, R21). The earlier measurement was
   5 to 10 % of an Apple M4 Pro core a voice (FEEDBACK's presets the most; R13), or half
-  a core to a core for ten voices. It predates the 0.2.1 oversampling changes. How many play in real time
+  a core to a core for ten voices. It predates the 0.2.2 oversampling changes. How many play in real time
   depends on the machine, the host's block size and the host: on a machine of 1 or 2
   processors every voice plays on the host's thread, and on macOS a host whose audio
   threads are not in an audio workgroup runs its share of the voices more slowly. With more
