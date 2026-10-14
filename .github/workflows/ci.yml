@@ -75,7 +75,16 @@ jobs:
 
       - name: The third-party notices up to date
         if: runner.os == 'Linux'
-        run: python3 scripts/notices.py --check
+        run: |
+          python3 scripts/test-notices.py
+          python3 scripts/notices.py --check
+
+      - name: The application's audio libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libasound2-dev libgl-dev
+
+      - name: Standalone application
+        run: scripts/standalone.sh
 
       - name: Inno Setup
         if: runner.os == 'Windows'
@@ -91,6 +100,12 @@ jobs:
             target/bundled/CA-72.vst3
             target/bundled/CA-72.clap
             target/bundled/CA-72.component
+            target/bundled/CA-72.app
+            target/bundled/CA-72.exe
+            target/bundled/CA-72.ico
+            target/bundled/ca72-standalone
+            target/bundled/CA-72.desktop
+            target/bundled/com.idlefoundry.ca72.png
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
@@ -132,7 +147,10 @@ jobs:
       - name: Tests
         run: |
           if [ "$RUNNER_OS" = Linux ]; then export CA72_REQUIRE_NGSPICE=1; fi
-          cargo test --workspace
+          cargo test --workspace --features ca72-plugin/standalone-production
+
+      - name: Typed persistent-field derive tests
+        run: CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-derive" cargo test --manifest-path third_party/nih-plug/nih_plug_derive/Cargo.toml
 
       - name: Validators, cached
         uses: actions/cache@v5

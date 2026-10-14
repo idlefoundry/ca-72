@@ -76,6 +76,55 @@ and sends nothing of yours.
 
 ## Playing it
 
+The keyboard button beside SAVE and settings switches the lower panel between
+VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
+remain visible. Click a key or drag between keys to play; the octave buttons move
+the visible range. TYPE enables computer-keyboard notes, mapped chromatically to
+`A W S E D F T G Y H U J K O L P ;`. It starts off in a plug-in so host shortcuts
+keep working. Text entry takes precedence. PANIC releases notes without changing
+the sound. Selecting the other view releases local keys while physical MIDI notes
+continue. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
+
+## Standalone application
+
+The development build includes the same instrument as a desktop application.
+The existing published 0.2.0 installers contain plug-ins only; the standalone
+will be included in an installer after its release checks pass.
+
+Build it with `scripts/standalone.sh`. It produces `target/bundled/CA-72.app` on
+macOS, `target/bundled/CA-72.exe` on Windows, or `target/bundled/ca72-standalone`
+on Linux. Run it directly, or package it with the plug-ins using `scripts/package.sh`.
+The installer lets you choose the standalone alongside the plug-in formats.
+Linux also accepts `./install.sh --standalone-only` or `--plugins-only`.
+
+Open **Audio & MIDI** from the editor's settings button. Choose your output and
+channel pair, sample rate, buffer size and MIDI input(s), then Apply. External
+audio input is disabled initially. The display reports the actual callback size
+and its buffer duration in milliseconds; that is one component of playing latency.
+Cancel discards changes that have not been applied. Refresh checks the device list.
+Input/output changes briefly stop playback and retain the sound and editor.
+
+CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
+The development JACK launcher is kept separately (Building); direct ASIO and
+native PipeWire are not included in the production host. External input and output
+must support a common nominal sample rate. A bounded capture reservoir adapts
+the input to the output clock, so separately enumerated capture/playback endpoints
+are supported. The reservoir adds input buffering; the displayed output buffer
+duration is not the full input-to-output latency.
+
+The standalone remembers unsaved edits, MIDI Learn, window size and the last
+working audio/MIDI choices in `CA-72/Standalone/session.json` beneath the same
+application-data folder as your presets. Held notes and live wheels are not
+restored. Presets remain shared with the plug-in. A broken or newer session file
+is preserved and reported. Uninstalling keeps presets and the standalone session.
+
+For an isolated editor test, use `ca72-standalone --no-devices --state-dir PATH`;
+this opens no audio or MIDI hardware. The implementation contract and its evidence
+are [standalone-spec.md](docs/standalone-spec.md) and
+[standalone-progress.md](docs/standalone-progress.md).
+
+## Instrument controls
+
 ![The CA-72's panel](docs/panel.png)
 
 - **Keys:** every MIDI note plays. Notes 41 to 84 are the instrument's 44 keys, F to C
@@ -377,6 +426,9 @@ On macOS, `scripts/auv2.sh` then builds the Audio Unit, `target/bundled/CA-72.co
 around the CLAP bundle (and for the same processors). It needs
 [CMake](https://cmake.org) 3.21 or later (`brew install cmake`) and takes a few seconds.
 
+Build the desktop application with `scripts/standalone.sh` before packaging. On Linux
+this needs ALSA and OpenGL headers (`libasound2-dev libgl-dev` on Debian/Ubuntu,
+`alsa-lib-devel mesa-libGL-devel` on Fedora, `alsa-lib mesa` on Arch).
 `scripts/package.sh` then makes the installer for the system it runs on, in
 `target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
 Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
@@ -393,7 +445,7 @@ On Linux this also needs the ALSA, JACK and OpenGL headers (Debian and Ubuntu:
 ## Testing
 
 ```sh
-cargo test --workspace
+cargo test --workspace --features ca72-plugin/standalone-production
 ```
 
 The tests take three to eight minutes, building included. They check the real-time models

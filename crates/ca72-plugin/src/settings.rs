@@ -33,6 +33,11 @@ pub struct Settings {
     /// by default, but allow the user to use the exact curves"). Kept as `frequency_dials`,
     /// "semitones" or "hardware".
     pub frequency: Law,
+    /// Explicit lower-panel view preference. Missing uses Controls in a host, Keyboard in
+    /// standalone; computer typing is deliberately transient and always starts disabled.
+    pub keyboard: Option<bool>,
+    /// First displayed MIDI note (F2 by default), independent of presets and host state.
+    pub keyboard_root: u8,
 }
 
 /// One setting changed, as an editor keeps it (`Settings::keep`).
@@ -42,6 +47,8 @@ pub enum Change {
     NoteRead,
     Skin(Skin),
     Frequency(Law),
+    Keyboard(bool),
+    KeyboardRoot(u8),
 }
 
 impl Change {
@@ -54,6 +61,11 @@ impl Change {
             Change::Skin(Skin::Drawn) => ("skin", "classic".into()),
             Change::Frequency(Law::Semitones) => ("frequency_dials", "semitones".into()),
             Change::Frequency(Law::Hardware) => ("frequency_dials", "hardware".into()),
+            Change::Keyboard(shown) => (
+                "keyboard_view",
+                if shown { "keyboard" } else { "controls" }.into(),
+            ),
+            Change::KeyboardRoot(root) => ("keyboard_root", i64::from(root.min(84)).into()),
         };
         t.insert(key.into(), value);
     }
@@ -66,6 +78,8 @@ impl Default for Settings {
             ultra_note_read: false,
             skin: Skin::Worn,
             frequency: Law::Semitones,
+            keyboard: None,
+            keyboard_root: 41,
         }
     }
 }
@@ -90,6 +104,17 @@ impl Settings {
         Settings {
             shutter: flag("ultra_shutter", d.shutter),
             ultra_note_read: flag("ultra_note_read", d.ultra_note_read),
+            keyboard: match t.get("keyboard_view").and_then(toml::Value::as_str) {
+                Some("keyboard") => Some(true),
+                Some("controls") => Some(false),
+                _ => None,
+            },
+            keyboard_root: t
+                .get("keyboard_root")
+                .and_then(toml::Value::as_integer)
+                .filter(|n| (0..=84).contains(n))
+                .map(|n| n as u8)
+                .unwrap_or(d.keyboard_root),
             // (Anything but CLASSIC, the realistic look.)
             skin: match t.get("skin").and_then(toml::Value::as_str) {
                 Some("classic") => Skin::Drawn,
@@ -110,6 +135,8 @@ impl Settings {
             Change::NoteRead => self.ultra_note_read = true,
             Change::Skin(skin) => self.skin = skin,
             Change::Frequency(law) => self.frequency = law,
+            Change::Keyboard(shown) => self.keyboard = Some(shown),
+            Change::KeyboardRoot(root) => self.keyboard_root = root.min(84),
         }
     }
 
@@ -158,6 +185,35 @@ fn table(path: &Path) -> Result<Option<toml::Table>, String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn keyboard_preferences_roundtrip_without_rewriting_other_settings() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "skin = \"classic\"\nother_app = 5\n").expect("settings");
+        Settings::keep(&path, Change::Keyboard(true)).expect("view saved");
+        Settings::keep(&path, Change::KeyboardRoot(77)).expect("range saved");
+        let read = Settings::read(&path);
+        assert_eq!(read.keyboard, Some(true));
+        assert_eq!(read.keyboard_root, 77);
+        assert_eq!(read.skin, Skin::Drawn);
+        assert!(
+            std::fs::read_to_string(&path)
+                .expect("read")
+                .contains("other_app = 5")
+        );
+        Settings::keep(&path, Change::Keyboard(false)).expect("controls saved");
+        assert_eq!(Settings::read(&path).keyboard, Some(false));
+        for invalid in [-1, 85, 255] {
+            std::fs::write(
+                &path,
+                format!("keyboard_root = {invalid}\nkeyboard_view = \"unknown\"\n"),
+            )
+            .expect("invalid settings");
+            assert_eq!(Settings::read(&path).keyboard_root, 41);
+            assert_eq!(Settings::read(&path).keyboard, None);
+        }
+    }
+
     /// Written and read again; keys it does not know kept; a file it cannot read left alone.
     #[test]
     fn the_settings_are_kept_and_a_bad_file_left_alone() {
@@ -178,6 +234,8 @@ mod tests {
             ultra_note_read: true,
             skin: Skin::Drawn,
             frequency: Law::Hardware,
+            keyboard: None,
+            keyboard_root: 41,
         };
         assert_eq!(Settings::read(&path), s);
         let text = std::fs::read_to_string(&path).expect("read") + "theirs = 3\n";
@@ -250,6 +308,8 @@ mod tests {
                 ultra_note_read: true,
                 skin: Skin::Drawn,
                 frequency: Law::Hardware,
+                keyboard: None,
+                keyboard_root: 41,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))

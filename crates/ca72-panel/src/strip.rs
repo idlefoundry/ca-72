@@ -63,12 +63,13 @@ pub const CO: f64 = (SECTIONS[3].0 + SECTIONS[3].1) / 2.0;
 /// The keys on the rail: their middles across and their widths. The settings' key at the right
 /// end (the owner, 2026-10-10: "a settings button on the right hand side of the preview preset
 /// row"), the name's display a key shorter for it, the gaps between the keys as they were.
-const KEYS: [(f64, f64, BarTarget); 6] = [
+const KEYS: [(f64, f64, BarTarget); 7] = [
     (92.0, 86.0, BarTarget::Star),
     (192.0, 86.0, BarTarget::Prev),
-    (2626.0, 86.0, BarTarget::Next),
-    (2770.0, 170.0, BarTarget::Save),
-    (2912.0, 86.0, BarTarget::Panel),
+    (2526.0, 86.0, BarTarget::Next),
+    (2670.0, 170.0, BarTarget::Save),
+    (2812.0, 86.0, BarTarget::Panel),
+    (2912.0, 86.0, BarTarget::Keyboard),
     (3012.0, 86.0, BarTarget::Settings),
 ];
 pub const KEY_H: f64 = 62.0;
@@ -77,7 +78,7 @@ pub const KEY_W: f64 = 86.0;
 /// The name's display: its window (left, top, width, height), as tall with its surround as
 /// the keys beside it (the owner, 2026-10-09: "Needs to be the same height as the buttons
 /// flanking it").
-pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2300.0, 50.0);
+pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2200.0, 50.0);
 const NAME_SURROUND: f64 = 6.0;
 /// The voices' display, across STEREO's last row from WIDTH's unit's left to DETUNE's right.
 pub const DISPLAY: (f64, f64, f64, f64) = (
@@ -407,6 +408,8 @@ pub struct StripScene {
     pub hover: Option<StripTarget>,
     /// The control MIDI Learn waits for, if it is rung here.
     pub learning: Option<StripControl>,
+    /// None shows the extension controls; Some replaces them with the keyboard.
+    pub keyboard: Option<crate::keyboard::Scene>,
 }
 
 impl Default for StripScene {
@@ -423,6 +426,7 @@ impl Default for StripScene {
             bar: BarScene::default(),
             hover: None,
             learning: None,
+            keyboard: None,
         }
     }
 }

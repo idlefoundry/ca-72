@@ -37,7 +37,20 @@ fn main() {
     // The strip's own parts over the drawing's strip (A6), as the editor shows them.
     let mut strip = ca72_panel::strip::StripRenderer::new(scale);
     let t3 = std::time::Instant::now();
-    let scene = example_strip(mono);
+    let mut scene = example_strip(mono);
+    if std::env::var("CA72_KEYBOARD").is_ok_and(|v| v == "1") {
+        let held = if std::env::var("CA72_KEYS_PLAYED").is_ok_and(|v| v == "1") {
+            [(1u64 << 60), (1u64 << 0) | (1u64 << 3)]
+        } else {
+            [0, 0]
+        };
+        scene.keyboard = Some(ca72_panel::keyboard::Scene {
+            skin,
+            held,
+            ..Default::default()
+        });
+        scene.bar.keyboard = true;
+    }
     strip.render(&scene, r.frame(), None);
     eprintln!("the strip {:?}", t3.elapsed());
     let mut all = r.frame().clone();
@@ -49,6 +62,17 @@ fn main() {
         let n = w.min(sf.width() as usize) * 4;
         let (from, to) = (y * sf.width() as usize * 4, (top + y) * w * 4);
         all.data_mut()[to..to + n].copy_from_slice(&sf.data()[from..from + n]);
+    }
+    if std::env::var("CA72_KEYBOARD_CROP").is_ok_and(|v| v == "1") {
+        let [x0, y0, x1, y1] = [370.0, 925.0, 3080.0, 1750.0].map(|v| (v * scale).round() as u32);
+        let mut cropped = ca72_panel::Pixmap::new(x1 - x0, y1 - y0).expect("keyboard proof crop");
+        let n = (x1 - x0) as usize * 4;
+        for y in y0..y1 {
+            let src = (y as usize * all.width() as usize + x0 as usize) * 4;
+            let dst = (y - y0) as usize * n;
+            cropped.data_mut()[dst..dst + n].copy_from_slice(&all.data()[src..src + n]);
+        }
+        all = cropped;
     }
     if let Err(e) = all.save_png(&out) {
         eprintln!("{out}: {e}");

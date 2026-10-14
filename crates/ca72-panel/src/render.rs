@@ -1193,7 +1193,7 @@ fn put_picture(
 
 /// A rectangle (pixels: left, top, width, height), its corners rounded by `r` if given, filled
 /// with a picture placed by `place`, mirrored tile to tile beyond it.
-fn fill(
+pub(crate) fn fill(
     frame: &mut Pixmap,
     p: &Pixmap,
     (x, y, w, h): (f64, f64, f64, f64),
