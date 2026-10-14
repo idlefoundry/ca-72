@@ -20,13 +20,18 @@ source dimensions and crops are in `crates/ca72-panel/assets/keyboard/README.md`
 
 Hosted editors initially show Controls; standalone initially shows Keyboard unless
 a local view preference has been saved. View and octave are local settings, while
-TYPE always starts off. These preferences are absent from preset and DAW state.
+TYPE always starts off. Visible range and TYPE octave are separate preferences,
+absent from preset and DAW state. ASDFG plays CDEFG from TYPE's own C root
+(A defaults to MIDI 48); Z/X lowers/raises it by an octave independently of the
+visible range and oscillator RANGE controls.
 Computer-note releases follow the recorded physical key even when Shift changes
 its character; forwarded host releases normalize colon back to semicolon.
-Pointer and computer-key notes share local ownership; physical MIDI has separate
-ownership by channel and pitch. Local release preserves physical MIDI notes.
-Focus loss, closing, panel hide, view/octave changes, preset or text takeover, MIDI Learn and
-settings entry release local notes. Host reset and global CC120/123 clear the
+Pointer and computer-key owners are tracked separately for their shared local
+audio source; physical MIDI has separate ownership by channel and pitch. TYPE
+continues across controls and compact views. Hiding keys or changing the visible
+range releases only pointer notes; Z/X releases only typed notes. Focus loss,
+closing, preset or text takeover, MIDI Learn and settings entry release local
+notes, preserving physical MIDI notes. Host reset and global CC120/123 clear the
 source registry and invalidate queued local attacks. PANIC additionally clears
 hardware-source ownership in production standalone. The UI and hardware panic
 share a boundary reset; fresh local notes wait for that boundary and survive it

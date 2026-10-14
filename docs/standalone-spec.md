@@ -92,6 +92,16 @@ in ms. Do not label buffer duration as total latency. Show stopped/starting/runn
 recovering/error status and a concise actionable error. Apply and Cancel have explicit
 behavior; Cancel keeps the running configuration.
 
+**MIDI default (owner revision, 2026-10-14):** new sessions select Automatic,
+resolving the first available input whose name is unique in the inventory. Remember
+that selected name across reorder, disconnect and restart; do not switch to another
+controller while it is absent. With no input yet available, wait for discovery and
+connect when one appears without restarting audio. Specific input selections and
+Disable turn Automatic off. Existing sessions without the new preference retain
+their explicit selections or disabled state; Automatic can be enabled once in settings.
+The dialog follows an asynchronously resolved selection unless the user has edited
+its draft. Applied results update the draft without overwriting edits made after Apply.
+
 Apply releases notes and suspends audio before preparing a candidate. Keep sound,
 MIDI Learn, editor and view. On success activate and save the negotiated configuration.
 On failure restore the last working configuration or show an editable stopped state.
@@ -136,6 +146,13 @@ or unsupported file is preserved and a visible warning accompanies safe defaults
 error notification. A missing selected device clears its notes, reports status and
 leaves the editor usable. Reconnect only an unambiguous matching device; never silently
 switch to a similarly named interface. Close completes independently of future callbacks.
+Retain the MIDI discovery client on the control thread. Initialization, port naming
+or inconsistent-count errors preserve the last good MIDI inventory and active bindings,
+while healthy audio inventory still updates. Show a diagnostic and retry discovery;
+clear only that diagnostic on recovery. A successful stable empty list is a real
+inventory result, releases missing inputs, and reports the transition to no inputs.
+Successful reconnection clears MIDI-owned unavailable warnings, preserving unrelated
+session/audio issues. Never retain ghost ports after a successful empty inventory.
 
 ## Definitions of success and tasks
 
@@ -148,7 +165,7 @@ when its acceptance criteria are demonstrated; BLOCKED/UNVERIFIED retain the exa
 | S2 | Shared host core | Capability enumeration, unambiguous identity resolution, supported negotiation, selected channel routing, finite-input sanitization, mono `(L+R)/2`, zero unused channels, bounded queues, overflow recovery, atomic versioned persistence and deterministic fake-device tests |
 | S3 | Production NIH adapter and app entry | Same plug-in/editor/params; open with no hardware; configuration prepared off callback; apply/rollback/recovery preserves sound; parameter edits work stopped and running; no callback locks, allocations, file/network or GUI calls; all threads terminate on close |
 | S4 | Playable keyboard and view switch | Rendered visual proof under the owner's delegated judgment; keyboard/controls swap preserves height and left-hand controls; both skins; hidden control hit-test isolation; mouse/glissando/outside release; typing chords/repeat/modifier changes; TYPE octave releases typed owners, visible octave/view changes release pointer owners, TYPE continues in controls/compact view, focus/close/text takeover release local notes; source overlap tests; queue overflow cannot strand notes; audio-owned highlights and panic |
-| S5 | Audio/MIDI settings UI | Every listed option reflects capabilities; input disabled default; ALL/1–16 filter; refresh; apply/cancel; actual rate/period/duration; errors/recovery shown; inaccessible device remains editable; settings available only to standalone host |
+| S5 | Audio/MIDI settings UI | Every listed option reflects capabilities; external audio input disabled default; Automatic MIDI selects one unambiguous input for new sessions and waits if none are present; explicit inputs/Disable persist; ALL/1–16 filter; live selectors and resolved drafts; refresh; apply/cancel; actual rate/period/duration; errors/recovery shown; inaccessible device remains editable; settings available only to standalone host |
 | S6 | Session and resilience | Restart restores unsaved edits, MIDI map/width/view/working I/O; corrupt/unsupported files retained; failed config not saved; missing/duplicate identities; hotplug notes released; close after lost callback bounded to two seconds; background operations have bounded shutdown |
 | S7 | Packaging and documentation | Buildable standalone target; app/icon/metadata; standalone optional installer choice on all platforms; portable Windows ZIP; Linux install/uninstall and desktop validation; macOS universal signing/input configuration; notices and corresponding sources; README instructions and truthful support limitations |
 | S8 | Independent review and verification | Reviewer findings resolved; focused tests and fmt/clippy; same-event/input plug-in-versus-app sample parity; no-active-note idle behavior; clean builds/package smoke on all OSes; actual playback, MIDI, external-input and disconnect evidence per OS; 128/256-frame timing observations |
@@ -175,6 +192,13 @@ when its acceptance criteria are demonstrated; BLOCKED/UNVERIFIED retain the exa
    plug-in processing. No busy real-time spin loops; no machine-wide audio settings changed.
 6. Visual: controls/keyboard at normal 1380-pixel width and close-up, both skins, resizing,
    keyboard/controls view reversibility, drawer overlay, menus and damage repaint correctness.
+7. MIDI discovery/default: retain one successful discovery client; initialisation/name/
+   unstable-count failures preserve the last good MIDI list and existing bindings;
+   audio updates still publish; stable empty discovery releases disconnected inputs;
+   recovery clears only owned diagnostics. Automatic waits, selects one unique name,
+   survives reorder/unplug/restart, and leaves explicit selections or Disable intact.
+   Late discovery and applied normalisation update an untouched dialog, preserving
+   unapplied edits and edits made after Apply.
 
 ## Implementation order and evidence gates
 

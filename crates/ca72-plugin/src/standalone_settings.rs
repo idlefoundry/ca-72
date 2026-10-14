@@ -82,6 +82,7 @@ enum Choice {
     InputChannels([u16; 2]),
     Rate(u32),
     Buffer(u32),
+    MidiAuto,
     Midi(Option<String>),
     Channel(Option<u8>),
 }
@@ -130,6 +131,10 @@ pub struct Dialog {
     focus: usize,
     menu: Option<SelectionMenu>,
     local_error: Option<String>,
+    // Returning an edited value to the running value is still an unapplied edit.
+    edited: bool,
+    // Any subsequent edit invalidates this candidate's permission to sync the draft.
+    submitted: Option<Config>,
     next_poll: Instant,
     stamp: String,
     changed: bool,
@@ -145,6 +150,8 @@ impl Dialog {
             focus: 0,
             menu: None,
             local_error: None,
+            edited: false,
+            submitted: None,
             next_poll: Instant::now(),
             stamp: String::new(),
             changed: true,
@@ -165,6 +172,26 @@ impl Dialog {
     }
 
     fn update_snapshot(&mut self, snapshot: Snapshot) {
+        let applied = self.submitted.as_ref().is_some_and(|request| {
+            if self.draft != *request || snapshot.phase != Phase::Running {
+                return false;
+            }
+            let Ok(mut normalised) = negotiate(request, &snapshot.devices) else {
+                return false;
+            };
+            if request.auto_midi && request.midi_inputs.is_empty() {
+                normalised
+                    .config
+                    .midi_inputs
+                    .clone_from(&snapshot.config.midi_inputs);
+            }
+            normalised.config == snapshot.config
+        });
+        if !self.edited || applied {
+            self.draft.clone_from(&snapshot.config);
+            self.edited = false;
+            self.submitted = None;
+        }
         let menu = (self.snapshot.devices != snapshot.devices)
             .then(|| self.menu.take())
             .flatten();
@@ -325,15 +352,19 @@ impl Dialog {
                 .into_iter()
                 .map(|frames| (format!("{frames} frames"), Choice::Buffer(frames)))
                 .collect(),
-            6 => std::iter::once(("Disable hardware MIDI inputs".into(), Choice::Midi(None)))
-                .chain(
-                    self.snapshot
-                        .devices
-                        .midi_inputs
-                        .iter()
-                        .map(|name| (name.clone(), Choice::Midi(Some(name.clone())))),
-                )
-                .collect(),
+            6 => [
+                ("Automatic (first available input)".into(), Choice::MidiAuto),
+                ("Disable hardware MIDI inputs".into(), Choice::Midi(None)),
+            ]
+            .into_iter()
+            .chain(
+                self.snapshot
+                    .devices
+                    .midi_inputs
+                    .iter()
+                    .map(|name| (name.clone(), Choice::Midi(Some(name.clone())))),
+            )
+            .collect(),
             7 => std::iter::once(("ALL".into(), Choice::Channel(None)))
                 .chain(
                     (1..=16).map(|channel| (channel.to_string(), Choice::Channel(Some(channel)))),
@@ -350,12 +381,15 @@ impl Dialog {
             Choice::InputChannels(channels) => self.draft.input_channels == *channels,
             Choice::Rate(rate) => self.draft.sample_rate == *rate,
             Choice::Buffer(frames) => self.draft.buffer_frames == *frames,
-            Choice::Midi(None) => self.draft.midi_inputs.is_empty(),
+            Choice::MidiAuto => self.draft.auto_midi,
+            Choice::Midi(None) => !self.draft.auto_midi && self.draft.midi_inputs.is_empty(),
             Choice::Midi(Some(name)) => self.draft.midi_inputs.contains(name),
             Choice::Channel(channel) => self.draft.midi_channel == *channel,
         }
     }
     fn choose(&mut self, choice: Choice) {
+        self.edited = true;
+        self.submitted = None;
         match choice {
             Choice::Output(id) => {
                 self.draft.output = id;
@@ -375,8 +409,16 @@ impl Dialog {
             Choice::InputChannels(channels) => self.draft.input_channels = channels,
             Choice::Rate(rate) => self.draft.sample_rate = rate,
             Choice::Buffer(frames) => self.draft.buffer_frames = frames,
-            Choice::Midi(None) => self.draft.midi_inputs.clear(),
+            Choice::MidiAuto => {
+                self.draft.auto_midi = true;
+                self.draft.midi_inputs.clear();
+            }
+            Choice::Midi(None) => {
+                self.draft.auto_midi = false;
+                self.draft.midi_inputs.clear();
+            }
             Choice::Midi(Some(name)) => {
+                self.draft.auto_midi = false;
                 if self.draft.midi_inputs.contains(&name) {
                     self.draft.midi_inputs.retain(|selected| selected != &name);
                 } else {
@@ -408,6 +450,10 @@ impl Dialog {
     }
     fn cycle(&mut self, row: usize, direction: i32) {
         self.local_error = None;
+        if row <= 7 && row != 6 {
+            self.edited = true;
+            self.submitted = None;
+        }
         match row {
             0 => {
                 self.draft.output = stepped(&self.choices(), &self.draft.output, direction)
@@ -472,6 +518,7 @@ impl Dialog {
             .validation()
             .and_then(|()| self.app.apply(self.draft.clone()))
             .err();
+        self.submitted = self.local_error.is_none().then(|| self.draft.clone());
         self.changed = true;
     }
 
@@ -671,7 +718,16 @@ impl Dialog {
         } else {
             format!("{} Hz", self.draft.sample_rate)
         };
-        let midi = if self.draft.midi_inputs.is_empty() {
+        let midi = if self.draft.auto_midi {
+            if self.draft.midi_inputs.is_empty() {
+                format!(
+                    "Automatic (first available; {} detected)",
+                    self.snapshot.devices.midi_inputs.len()
+                )
+            } else {
+                format!("Automatic · {}", self.draft.midi_inputs.join(", "))
+            }
+        } else if self.draft.midi_inputs.is_empty() {
             format!(
                 "{} detected; none selected (click to choose)",
                 self.snapshot.devices.midi_inputs.len()
@@ -963,10 +1019,11 @@ mod tests {
         .expect("test host without devices");
         runtime.wait_ready(Duration::from_secs(2)).expect("ready");
         let mut dialog = Dialog::new(runtime.handle());
+        dialog.choose(Choice::Midi(None));
         dialog.open_menu(6);
         assert_eq!(
             dialog.menu.as_ref().expect("MIDI selector").options.len(),
-            1
+            2
         );
         let original = dialog.draft.clone();
         let mut snapshot = dialog.snapshot.clone();
@@ -979,7 +1036,7 @@ mod tests {
                 .expect("selector stays open")
                 .options
                 .len(),
-            3
+            4
         );
         assert_eq!(
             dialog.draft, original,
@@ -1007,7 +1064,7 @@ mod tests {
             .menu
             .as_ref()
             .expect("selector stays open after unplug");
-        assert_eq!(menu.options.len(), 2);
+        assert_eq!(menu.options.len(), 3);
         assert!(menu.highlighted < menu.options.len());
         assert!(
             !menu
@@ -1024,6 +1081,101 @@ mod tests {
             runtime.handle().snapshot().config,
             Config::initial(),
             "nothing applied implicitly"
+        );
+        runtime.shutdown().expect("test host closes");
+    }
+
+    #[test]
+    fn automatic_midi_resolution_updates_only_untouched_or_applied_drafts() {
+        let directory = tempfile::tempdir().expect("test state folder");
+        let mut runtime = plugin_kit_standalone::spawn(
+            Box::new(Noop),
+            None,
+            AppOptions {
+                app_id: "ca72-automatic-midi-test".into(),
+                state_dir: directory.path().to_owned(),
+                device_access: false,
+            },
+        )
+        .expect("test host without devices");
+        runtime.wait_ready(Duration::from_secs(2)).expect("ready");
+        let mut dialog = Dialog::new(runtime.handle());
+        assert!(dialog.selected(&Choice::MidiAuto));
+        assert!(!dialog.selected(&Choice::Midi(None)));
+        let mut snapshot = dialog.snapshot.clone();
+        snapshot.devices.midi_inputs = vec!["Keyboard Port 1".into(), "Keyboard Port 2".into()];
+        snapshot.config.midi_inputs = vec!["Keyboard Port 1".into()];
+        dialog.update_snapshot(snapshot.clone());
+        assert_eq!(dialog.draft.midi_inputs, ["Keyboard Port 1"]);
+        assert!(dialog.svg().contains("Automatic · Keyboard Port 1"));
+
+        dialog.choose(Choice::Midi(None));
+        assert!(!dialog.draft.auto_midi);
+        assert!(dialog.draft.midi_inputs.is_empty());
+        snapshot.devices.midi_inputs.reverse();
+        dialog.update_snapshot(snapshot.clone());
+        assert!(dialog.selected(&Choice::Midi(None)));
+        assert!(dialog.draft.midi_inputs.is_empty(), "keep unapplied edits");
+        dialog.choose(Choice::Midi(Some("Keyboard Port 2".into())));
+        assert!(!dialog.draft.auto_midi);
+        assert_eq!(dialog.draft.midi_inputs, ["Keyboard Port 2"]);
+
+        // Apply can normalise both the device-default rate and Automatic's
+        // selected port. Once the host publishes that result, the draft follows.
+        let id = DeviceId {
+            name: "Test output".into(),
+            input_channels: 0,
+            output_channels: 2,
+        };
+        snapshot.devices.default_output = Some(id.clone());
+        snapshot.devices.audio = vec![DeviceInfo {
+            id,
+            input_configs: Vec::new(),
+            output_configs: vec![StreamCapability {
+                channels: 2,
+                min_sample_rate: 48_000,
+                max_sample_rate: 48_000,
+                buffer_range: Some([16, 8192]),
+            }],
+            sample_rates: vec![48_000],
+            default_sample_rate: 48_000,
+        }];
+        dialog.update_snapshot(snapshot.clone());
+        dialog.choose(Choice::MidiAuto);
+        assert!(dialog.draft.auto_midi);
+        assert!(dialog.draft.midi_inputs.is_empty());
+        dialog.apply();
+        assert!(dialog.local_error.is_none());
+        assert!(dialog.submitted.is_some());
+        snapshot.phase = Phase::Running;
+        snapshot.config = negotiate(&dialog.draft, &snapshot.devices)
+            .expect("supported output")
+            .config;
+        snapshot.config.midi_inputs = vec!["Keyboard Port 2".into()];
+        dialog.update_snapshot(snapshot.clone());
+        assert_eq!(dialog.draft, snapshot.config);
+        assert!(dialog.submitted.is_none());
+        assert!(dialog.svg().contains("Automatic · Keyboard Port 2"));
+
+        dialog.choose(Choice::Channel(Some(2)));
+        dialog.apply();
+        snapshot.config.midi_channel = Some(2);
+        dialog.choose(Choice::Channel(None));
+        assert_eq!(dialog.draft, dialog.snapshot.config);
+        dialog.update_snapshot(snapshot.clone());
+        assert_eq!(
+            dialog.draft.midi_channel, None,
+            "editing back to the old value still counts as a post-Apply edit"
+        );
+
+        dialog.choose(Choice::MidiAuto);
+        dialog.apply();
+        dialog.choose(Choice::Channel(Some(2)));
+        dialog.update_snapshot(snapshot);
+        assert_eq!(dialog.draft.midi_channel, Some(2));
+        assert!(
+            dialog.draft.midi_inputs.is_empty(),
+            "keep edits made after Apply"
         );
         runtime.shutdown().expect("test host closes");
     }
@@ -1092,7 +1244,15 @@ mod tests {
             .as_ref()
             .expect("multi MIDI dropdown")
             .rectangle();
-        dialog.press(left + 100.0, top + 64.0 + 20.0);
+        let index = dialog
+            .menu
+            .as_ref()
+            .expect("MIDI list")
+            .options
+            .iter()
+            .position(|(label, _)| label == "Keyboard < one >")
+            .expect("first port");
+        dialog.press(left + 100.0, top + index as f64 * 64.0 + 20.0);
         assert!(
             dialog.menu.is_some(),
             "multiple inputs can be selected in one list"

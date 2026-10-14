@@ -5528,3 +5528,48 @@ restoring it passes. The production-feature library suite passed: 237 passed,
 formatting and diff checks pass; independent review confirmed the selector logic.
 No audio device
 or MIDI connection was opened, and the running application's preferences were not changed.
+
+## R-MIDI-RECOVERY. Automatic input selection and honest discovery failures
+
+**Owner report and request, 2026-10-14.** The updated Mac standalone initially
+reports two MIDI inputs, then the count becomes zero after opening MIDI INPUTS.
+Select a default MIDI input at startup and fix the disappearing inventory.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- New sessions use Automatic: select the first available uniquely named input,
+  avoiding duplicate notes from opening every port. Remember that name across
+  reorder, unplug and restart. Wait for an input when none exists; connect it
+  without restarting running audio. Explicit input selections and Disable persist.
+  Older sessions retain their previous choices, including disabled MIDI; selecting
+  Automatic and applying once enables the new policy for those sessions.
+- Retain the successful MIDI discovery client for the control thread's lifetime.
+  Initialization, port-name and inconsistent-count failures preserve the last good
+  MIDI inventory and active bindings, while audio inventory continues to update.
+  Report discovery errors in settings and clear only their own diagnostic on recovery.
+- A successful stable empty inventory remains empty and releases missing inputs.
+  Report a transition from available inputs to none, with Refresh/reconnect guidance.
+  Successful reconnection clears owned MIDI warnings; unrelated session/audio issues
+  keep priority. The code never fabricates ports to conceal a successful zero count.
+- Automatic's resolved port and normalized Apply results update an untouched dialog.
+  Track edits explicitly: changing back to a previous value is still an edit, and
+  any edit after Apply prevents its result from overwriting the new draft.
+
+**Research and limits:** the [pinned midir CoreMIDI implementation](https://github.com/Boddlnagg/midir/blob/v0.9.1/src/backend/coremidi/mod.rs)
+queries global sources. Apple's [source-count API](https://developer.apple.com/documentation/coremidi/midigetnumberofsources())
+returns a count without an error status. A stable zero cannot be classified as a
+failed query by this API alone. CoreMIDI reports the NI S88 MK2's two ports online;
+250 MIDI-only inventories and 50 inventories surrounding the exact CPAL property
+query ordering kept both sources, with no discovery errors. No audio streams or
+MIDI connections were opened. The user's actual count loss is confirmed by their
+report; client churn or CPAL ordering is not a proven cause. The new build repairs
+confirmed error-handling defects and exposes successful-zero transitions; physical
+playback and disappearance/recovery on the owner's running app remain unverified.
+
+**Software evidence (2026-10-14):** 37 shared-host tests pass, including retained
+client reuse, discovery failure/recovery, true empty inventory, MIDI warning ownership
+and default selection/persistence. Five settings tests pass independently. Returning
+the dialog's old value-equality sync condition reproduces the post-Apply ALL→2→ALL
+failure; explicit edit tracking fixes it. The final pinned host revision is
+`4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9`. The production-feature plug-in library
+suite passes: 238 passed, 13 ignored. Independent reviews found no remaining confirmed
+issues after the corrections.

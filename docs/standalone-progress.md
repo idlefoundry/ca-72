@@ -50,3 +50,25 @@
   remain unsigned and cannot be published.
 - No owner's hardware opened during research. Physical-interface test selection awaits
   a concrete inventory and authorization; simulated/virtual tests remain available.
+
+## Owner follow-ups, 2026-10-14
+
+- TYPE uses its own C root: ASDFG plays CDEFG and Z/X shifts its octave. TYPE
+  continues in controls and compact views. Visible range and oscillator RANGE
+  changes leave TYPE's MIDI pitches alone. Focus/text/menu takeover retains precedence.
+- Open device selectors rebuild on inventory changes without applying the draft.
+  New sessions use Automatic MIDI, selecting one uniquely named input and remembering
+  it through reorder, unplug and restart. Existing explicit selections or Disable
+  remain intact. Settings follows resolved defaults and successful Apply results;
+  edits after Apply, including returning to an old value, remain unapplied edits.
+- The owner's NI S88 MK2 has two online CoreMIDI sources. Independent fresh/retained
+  midir probes and the exact audio-properties-then-MIDI discovery ordering continued
+  to find both. These property-only probes opened no audio streams or MIDI connections.
+  The owner confirms that the running app's count drops from two to zero after opening
+  MIDI INPUTS. The precise underlying cause has not been reproduced by those probes.
+- Discovery retains its MIDI client and distinguishes initialisation/name/count-race
+  errors from successful empty discovery. Errors retain the last good MIDI list and
+  active bindings while audio inventory updates; successful empty discovery releases
+  missing inputs and produces an actionable notice. Reconnection clears owned MIDI
+  diagnostics without overwriting unrelated issues. Hardware playback and reproduction
+  of the reported connected-keyboard disappearance remain separate verification gaps.

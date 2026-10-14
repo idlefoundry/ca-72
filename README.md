@@ -108,9 +108,14 @@ channel pair, sample rate, buffer size and MIDI input(s), then Apply. External
 audio input is disabled initially. The display reports the actual callback size
 and its buffer duration in milliseconds; that is one component of playing latency.
 Cancel discards changes that have not been applied. Refresh checks the device list.
-Hardware MIDI starts unselected. Open **MIDI INPUTS**, check your controller's
-port, click outside the list and Apply. The row shows how many inputs are detected
-when none are selected. Open selectors update as devices arrive or disappear.
+New sessions use **Automatic** MIDI: the first available input with an unambiguous
+name is selected and remembered. Open **MIDI INPUTS** to choose Automatic, disable
+hardware MIDI, or check specific inputs; click outside the list and Apply.
+Existing sessions retain their choices, including disabled MIDI. To enable the new
+default in an existing session, choose **Automatic (first available input)** and Apply
+once. Open selectors update as devices arrive or disappear. Discovery errors keep
+the last good MIDI list and appear in settings; a successful empty inventory reports
+that no inputs are available. Refresh retries discovery.
 Input/output changes briefly stop playback and retain the sound and editor.
 
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
