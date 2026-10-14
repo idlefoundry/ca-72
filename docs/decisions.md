@@ -5485,3 +5485,9 @@ rail and the key bed's outer border. Labels use their visible glyph bounds for a
 baseline; this aligns OCTAVE, the range, plus/minus, TYPE, PANIC and the mapping legend despite
 their different sizes. Button drawing, materials and hit-testing share the same centre.
 The updated preview records the alignment; panel and focused editor checks still pass.
+
+**Display follow-up, 2026-10-14.** The owner asked to reuse the preset screen's pixel lettering
+and bezel for the octave range. It now calls the shared bezel renderer and uses the same glass
+asset, dot font, grid spacing and light colours. Its readout remains centred on the wood;
+the preset display keeps its existing appearance. Updated renderer previews and panel/lint
+checks pass; visual review still precedes full CI or merging.

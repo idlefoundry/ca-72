@@ -17,9 +17,14 @@ neighbouring keys stay unchanged; release restores the complete frame exactly. T
 compares with a fresh keyboard renderer rather than two caches with the same history.
 
 The octave controls, range display, TYPE and PANIC share the visible wood's vertical centre.
-Their labels use the built-in font's visible glyph bounds instead of its em box. Rendering,
+The printed labels use the built-in font's visible glyph bounds instead of its em box. Rendering,
 button materials and hit targets use the same header position. The TYPE mapping legend follows
-that centre as well.
+that centre as well. The range reuses the preset display's bezel, glass asset, dot font, spacing
+and orange light. The preset display's appearance is unchanged.
+
+Preset display above, octave range below, from the same rendered frame:
+
+![Matching preset and octave screens](preset-and-octave-screens.png)
 
 Before above, centred header below:
 

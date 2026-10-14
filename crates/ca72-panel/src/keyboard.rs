@@ -224,6 +224,7 @@ pub struct Renderer {
     scale: f64,
     options: usvg::Options<'static>,
     fonts: Fonts,
+    glass: Pixmap,
     frame: Pixmap,
     shown: Option<Scene>,
     materials: Option<Materials>,
@@ -253,6 +254,7 @@ impl Renderer {
                 ..Default::default()
             },
             fonts,
+            glass: Pixmap::decode_png(crate::skin::GLASS).expect("preset display glass"),
             frame: crate::strip::blank(scale).expect("a strip frame"),
             shown: None,
             materials: None,
@@ -312,6 +314,7 @@ impl Renderer {
                 let tree = usvg::Tree::from_str(&document, &self.options)
                     .expect("the keyboard's built-in SVG");
                 resvg::render(&tree, Transform::identity(), &mut self.frame.as_mut());
+                self.range_display(scene);
                 self.base = Some((still, self.frame.clone()));
             }
             if scene.skin == Skin::Worn {
@@ -341,6 +344,7 @@ impl Renderer {
                     let tree =
                         usvg::Tree::from_str(&document, &self.options).expect("keyboard SVG");
                     resvg::render(&tree, Transform::identity(), &mut self.frame.as_mut());
+                    self.range_display(scene);
                 }
             }
             self.shown = Some(scene.clone());
@@ -373,6 +377,21 @@ impl Renderer {
             let n = (x1 - x0) as usize * 4;
             destination.data_mut()[dst..dst + n].copy_from_slice(&self.frame.data()[src..src + n]);
         }
+    }
+
+    fn range_display(&mut self, scene: &Scene) {
+        crate::strip::pixel_screen(
+            &self.options,
+            &mut self.frame,
+            &self.glass,
+            self.scale,
+            (878.0, HEADER - art::PANEL_H - 25.0, 348.0, 50.0),
+            &format!(
+                "{} - {}",
+                label(scene.root),
+                label(scene.root.saturating_add(43).min(127))
+            ),
+        );
     }
     fn draw_keys(&mut self, scene: &Scene, dirty: [f64; 4]) {
         let s = self.scale;
@@ -468,14 +487,8 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
     let button_y = HEADER - BUTTON_H / 2.0;
     let text_y = |text: &str, size| fonts.baseline_for_centre(text, size, Weight::Regular, HEADER);
     let octave_y = text_y("OCTAVE", 28.0);
-    let range = format!(
-        "{} – {}",
-        label(scene.root),
-        label(scene.root.saturating_add(43).min(127))
-    );
-    let range_y = text_y(&range, 28.0);
     out += &format!(
-        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='666' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text><rect x='878' y='{button_y}' width='348' height='{BUTTON_H}' fill='#111b16' rx='4' stroke='#62594a' stroke-width='8'/><text x='1052' y='{range_y}' font-size='28' text-anchor='middle' fill='#ff7028'>{range}</text>",
+        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='666' y='{octave_y}' font-size='28' text-anchor='middle' fill='#d9d2c0'>OCTAVE</text>",
         if scene.skin == Skin::Worn {
             "none"
         } else {
