@@ -360,3 +360,99 @@ fn standalone_validation_accepts_the_plugins_existing_state_migrations() {
         "legacy law conversion must apply once"
     );
 }
+
+#[derive(Default)]
+struct TaskParameters;
+// SAFETY: this test parameter object exposes no pointers at all.
+unsafe impl Params for TaskParameters {
+    fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
+        Vec::new()
+    }
+}
+#[derive(Default)]
+struct TaskFlood {
+    params: Arc<TaskParameters>,
+}
+impl Plugin for TaskFlood {
+    const NAME: &'static str = "Task flood test";
+    const VENDOR: &'static str = "Idle Foundry";
+    const URL: &'static str = "";
+    const EMAIL: &'static str = "";
+    const VERSION: &'static str = "0.0.0";
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_output_channels: Some(new_nonzero_u32(2)),
+        ..AudioIOLayout::const_default()
+    }];
+    type SysExMessage = ();
+    type BackgroundTask = u32;
+    fn params(&self) -> Arc<dyn Params> {
+        self.params.clone()
+    }
+    fn process(
+        &mut self,
+        buffer: &mut Buffer,
+        _aux: &mut AuxiliaryBuffers,
+        context: &mut impl ProcessContext<Self>,
+    ) -> ProcessStatus {
+        for task in 0..1024 {
+            context.execute_gui(task);
+            context.execute_background(task);
+        }
+        for channel in buffer.as_slice() {
+            channel.fill(0.0);
+        }
+        ProcessStatus::KeepAlive
+    }
+}
+
+#[test]
+fn callback_task_queues_exhaust_without_spinning_allocating_or_dropping_heap_payloads() {
+    let (mut adapter, _) = Processor::new(TaskFlood::default(), &[]).expect("task adapter");
+    let (mut gui, mut background) = adapter
+        .take_audio_task_receivers()
+        .expect("single consumer transfer");
+    assert!(
+        adapter.take_audio_task_receivers().is_none(),
+        "SPSC consumers cannot be duplicated"
+    );
+    adapter
+        .prepare(ProcessConfig {
+            sample_rate: 48_000.0,
+            max_buffer_frames: 128,
+        })
+        .expect("prepared");
+    let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+    for _ in 0..2 {
+        OPERATIONS.with(|n| n.set(0));
+        TRACK.with(|track| track.set(true));
+        // The consumers are deliberately stopped. 1024 pushes exhaust each
+        // 256-item queue and must immediately reject the Copy payloads.
+        adapter.process(AudioBlock {
+            left: &mut left,
+            right: &mut right,
+            input_left: &[],
+            input_right: &[],
+            midi: &[],
+            panic: false,
+        });
+        TRACK.with(|track| track.set(false));
+        assert_eq!(
+            OPERATIONS.with(Cell::get),
+            0,
+            "task scheduling allocated or freed inside callback"
+        );
+        let mut accepted = 0;
+        while let Ok(task) = gui.pop() {
+            assert_eq!(task, accepted);
+            accepted += 1;
+        }
+        assert_eq!(accepted, 256);
+        let mut accepted = 0;
+        while let Ok(task) = background.pop() {
+            assert_eq!(task, accepted);
+            accepted += 1;
+        }
+        assert_eq!(accepted, 256);
+    }
+    adapter.deactivate();
+}

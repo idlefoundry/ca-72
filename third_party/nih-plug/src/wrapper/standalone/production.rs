@@ -2,6 +2,7 @@
 //! processor has one exclusive owner and never waits for the GUI in a callback.
 
 use std::any::Any;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -22,6 +23,12 @@ use crate::wrapper::state::{self, ParamValue, PluginState};
 use crate::wrapper::util::{process_wrapper, setup_logger};
 
 const TASK_CAPACITY: usize = 256;
+
+/// Single consumers for the audio thread's GUI and background task queues.
+pub type AudioTaskReceivers<P> = (
+    rtrb::Consumer<<P as Plugin>::BackgroundTask>,
+    rtrb::Consumer<<P as Plugin>::BackgroundTask>,
+);
 
 struct Parameter {
     id: String,
@@ -225,10 +232,18 @@ pub struct Processor<P: Plugin> {
     input_right: Vec<f32>,
     rate: f32,
     initialized: bool,
-    init_executor: Mutex<TaskExecutor<P>>,
+    init_executor: Arc<Mutex<TaskExecutor<P>>>,
+    // Each callback-owned producer has exactly one consumer on the GUI or
+    // background thread. There is no CAS retry loop in these callback queues.
+    gui_tasks: RefCell<rtrb::Producer<P::BackgroundTask>>,
+    background_tasks: RefCell<rtrb::Producer<P::BackgroundTask>>,
+    task_receivers: Option<AudioTaskReceivers<P>>,
 }
 
-impl<P: Plugin> Processor<P> {
+impl<P: Plugin> Processor<P>
+where
+    P::BackgroundTask: Copy,
+{
     pub fn new(mut plugin: P, transient_ids: &[&str]) -> Result<(Self, Arc<Session<P>>), String> {
         let layout = *P::AUDIO_IO_LAYOUTS
             .first()
@@ -242,9 +257,11 @@ impl<P: Plugin> Processor<P> {
             return Err("This standalone adapter requires stereo output and at most one stereo auxiliary input.".into());
         }
         let session = Session::new(plugin.params(), transient_ids);
-        let init_executor = Mutex::new(plugin.task_executor());
+        let init_executor = Arc::new(Mutex::new(plugin.task_executor()));
         let mut main = Buffer::default();
         let mut side = Buffer::default();
+        let (gui_tasks, gui_receiver) = rtrb::RingBuffer::new(TASK_CAPACITY);
+        let (background_tasks, background_receiver) = rtrb::RingBuffer::new(TASK_CAPACITY);
         // Reserve only while no stream exists. Callback bindings retain capacity.
         unsafe {
             main.set_slices(0, |s| s.reserve(2));
@@ -262,9 +279,19 @@ impl<P: Plugin> Processor<P> {
                 rate: 48_000.0,
                 initialized: false,
                 init_executor,
+                gui_tasks: RefCell::new(gui_tasks),
+                background_tasks: RefCell::new(background_tasks),
+                task_receivers: Some((gui_receiver, background_receiver)),
             },
             session,
         ))
+    }
+
+    /// Transfer the audio task consumers to the host before moving this processor
+    /// into a stream. The first consumer belongs to the GUI thread, the second
+    /// to its background task worker. Consumers must not be duplicated.
+    pub fn take_audio_task_receivers(&mut self) -> Option<AudioTaskReceivers<P>> {
+        self.task_receivers.take()
     }
 
     fn editor(&mut self) -> Option<Box<dyn Editor>> {
@@ -290,7 +317,10 @@ fn rebind_empty<'a, 'b>(buffer: Buffer<'a>) -> Buffer<'b> {
     unsafe { std::mem::transmute(buffer) }
 }
 
-impl<P: Plugin> AudioProcessor for Processor<P> {
+impl<P: Plugin> AudioProcessor for Processor<P>
+where
+    P::BackgroundTask: Copy,
+{
     fn prepare(&mut self, config: ProcessConfig) -> Result<(), String> {
         if !config.sample_rate.is_finite()
             || config.sample_rate <= 0.0
@@ -388,6 +418,8 @@ impl<P: Plugin> AudioProcessor for Processor<P> {
                 midi: block.midi.iter(),
                 panic_channel: block.panic.then_some(0),
                 transport: Transport::new(self.rate),
+                gui_tasks: &self.gui_tasks,
+                background_tasks: &self.background_tasks,
             };
             if matches!(
                 self.plugin.process(
@@ -450,16 +482,25 @@ struct Processing<'a, P: Plugin> {
     midi: std::slice::Iter<'a, plugin_kit_standalone::MidiEvent>,
     panic_channel: Option<u8>,
     transport: Transport,
+    gui_tasks: &'a RefCell<rtrb::Producer<P::BackgroundTask>>,
+    background_tasks: &'a RefCell<rtrb::Producer<P::BackgroundTask>>,
 }
-impl<P: Plugin> ProcessContext<P> for Processing<'_, P> {
+impl<P: Plugin> ProcessContext<P> for Processing<'_, P>
+where
+    P::BackgroundTask: Copy,
+{
     fn plugin_api(&self) -> PluginApi {
         PluginApi::Standalone
     }
     fn execute_background(&self, task: P::BackgroundTask) {
-        self.session.background(task);
+        if let Ok(mut producer) = self.background_tasks.try_borrow_mut() {
+            let _ = producer.push(task);
+        }
     }
     fn execute_gui(&self, task: P::BackgroundTask) {
-        self.session.task(task);
+        if let Ok(mut producer) = self.gui_tasks.try_borrow_mut() {
+            let _ = producer.push(task);
+        }
     }
     fn transport(&self) -> &Transport {
         &self.transport
@@ -529,8 +570,9 @@ struct AppWindow<P: Plugin> {
     _editor_handle: Box<dyn Any>,
     editor: Arc<Mutex<Box<dyn Editor>>>,
     session: Arc<Session<P>>,
-    executor: TaskExecutor<P>,
+    executor: Arc<Mutex<TaskExecutor<P>>>,
     app: Arc<AppHandle>,
+    audio_tasks: rtrb::Consumer<P::BackgroundTask>,
 }
 impl<P: Plugin> WindowHandler for AppWindow<P> {
     fn on_frame(&mut self, window: &mut Window) {
@@ -551,8 +593,24 @@ impl<P: Plugin> WindowHandler for AppWindow<P> {
             }
         }
         for _ in 0..TASK_CAPACITY {
+            match self.audio_tasks.pop() {
+                Ok(task) => (self
+                    .executor
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner))(
+                    task
+                ),
+                Err(_) => break,
+            }
+        }
+        for _ in 0..TASK_CAPACITY {
             match self.session.tasks.pop() {
-                Some(task) => (self.executor)(task),
+                Some(task) => (self
+                    .executor
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner))(
+                    task
+                ),
                 None => break,
             }
         }
@@ -577,7 +635,10 @@ impl<P: Plugin> WindowHandler for AppWindow<P> {
 }
 
 /// Launch using the instrument's normal editor. Device failure never closes it.
-pub fn run<P: Plugin>(options: AppOptions) -> Result<(), String> {
+pub fn run<P: Plugin>(options: AppOptions) -> Result<(), String>
+where
+    P::BackgroundTask: Copy,
+{
     run_with_transient_parameters::<P>(options, &[])
 }
 
@@ -586,14 +647,20 @@ pub fn run<P: Plugin>(options: AppOptions) -> Result<(), String> {
 pub fn run_with_transient_parameters<P: Plugin>(
     options: AppOptions,
     transient_ids: &[&str],
-) -> Result<(), String> {
+) -> Result<(), String>
+where
+    P::BackgroundTask: Copy,
+{
     setup_logger();
     let (mut processor, session) = Processor::new(P::default(), transient_ids)?;
     let editor = processor
         .editor()
         .ok_or("The standalone instrument requires an editor.")?;
-    let executor = processor.plugin.task_executor();
-    let background_executor = processor.plugin.task_executor();
+    let executor = processor.init_executor.clone();
+    let background_executor = processor.init_executor.clone();
+    let (audio_gui_tasks, mut audio_background_tasks) = processor
+        .take_audio_task_receivers()
+        .ok_or("Standalone task receivers are unavailable.")?;
     let mut runtime =
         plugin_kit_standalone::spawn(Box::new(processor), Some(session.clone()), options)?;
     // Session restoration precedes the editor's first size/view read. This
@@ -609,8 +676,22 @@ pub fn run_with_transient_parameters<P: Plugin>(
             .spawn(move || {
                 while !terminate.load(Ordering::Acquire) {
                     for _ in 0..TASK_CAPACITY {
+                        match audio_background_tasks.pop() {
+                            Ok(task) => (background_executor
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner))(
+                                task
+                            ),
+                            Err(_) => break,
+                        }
+                    }
+                    for _ in 0..TASK_CAPACITY {
                         match session.background_tasks.pop() {
-                            Some(task) => (background_executor)(task),
+                            Some(task) => (background_executor
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner))(
+                                task
+                            ),
                             None => break,
                         }
                     }
@@ -664,6 +745,7 @@ pub fn run_with_transient_parameters<P: Plugin>(
                 session,
                 executor,
                 app,
+                audio_tasks: audio_gui_tasks,
             }
         },
     );
