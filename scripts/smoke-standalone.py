@@ -10,12 +10,13 @@ import subprocess
 import sys
 import time
 
-SOURCE = "e43d39cc0b941f3a6635a50bf75cc6fc45ff07bd"
+SOURCE = "589e5cca08c66d4c8e64c0a337b0b875ee785344"
 ROOT = Path("native-smoke").resolve()
 ROOT.mkdir(exist_ok=True)
 SYSTEM = platform.system()
 ARTIFACT_NAME = {"Darwin": "CA-72-macOS", "Windows": "CA-72-Windows", "Linux": "CA-72-Linux"}[SYSTEM]
-report = {"source": SOURCE, "system": SYSTEM, "hardware_access": False, "complete": False}
+report = {"source": SOURCE, "system": SYSTEM, "hardware_access": False, "complete": False,
+          "close_scope": "native window close after initial app-produced session save; cold-prepare close untested"}
 
 
 def save():
@@ -24,7 +25,7 @@ def save():
 
 def download():
     import zipfile
-    endpoint = "repos/idlefoundry/ca-72/actions/runs/38644759309"
+    endpoint = "repos/idlefoundry/ca-72/actions/runs/38646776111"
     metadata = json.loads(subprocess.check_output(["gh", "api", endpoint]))
     assert metadata["head_sha"] == SOURCE
     inventory = json.loads(subprocess.check_output(["gh", "api", endpoint + "/artifacts"]))
@@ -175,6 +176,7 @@ try:
     for number in range(2):
         with (ROOT / f"launch-{number}.log").open("w") as log:
             command = [str(binary), "--no-devices", "--state-dir", str(ROOT / "session")]
+            opening = time.monotonic()
             proc = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
             launch = {"pid": proc.pid, "command": command, "forced_cleanup": False}
             report["launches"].append(launch)
@@ -185,10 +187,18 @@ try:
                 while time.monotonic() < deadline:
                     assert proc.poll() is None, "app exited before opening its window"
                     windows = inspect(proc.pid)
+                    if windows and "window_seconds" not in launch:
+                        launch["window_seconds"] = time.monotonic() - opening
                     if windows and (ROOT / "session/session.json").exists():
-                        break
+                        saved = json.loads((ROOT / "session/session.json").read_text())
+                        # Both launches must produce their initial save before the
+                        # normal close check. A pre-existing seeded file is insufficient.
+                        if number == 0 or "native_smoke_marker" not in saved:
+                            launch["session_save_seconds"] = time.monotonic() - opening
+                            break
                     time.sleep(0.25)
                 assert windows and (ROOT / "session/session.json").exists(), "window/session startup timed out"
+                assert "session_save_seconds" in launch, "initial app-produced session save timed out"
                 launch["windows"] = windows
                 data, plugin = session()
                 if number == 1:
