@@ -1,0 +1,6 @@
+# Reproducible listening artifacts stay local; the settings, MIDI and generators are tracked.
+audio/
+panels/
+measurements.json
+external-input.wav
+CA-72-comparison-pack.zip

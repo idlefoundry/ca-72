@@ -5258,3 +5258,38 @@ host responds, as with the existing width grip; later refusal is not handled her
 The touched crates' library tests: 243 passed, none failed, 20 ignored; the panel's approved
 image comparison passed. Formatting for both crates and clippy for all their targets, with
 and without optional features, passed. The independent reviewer rechecked the fixes.
+
+## R-COMPARISON-PRESETS. Twenty-four short hardware comparison patches
+
+**Owner request, 2026-10-13.** Twenty-four diverse presets restricted to features accessible
+on the Behringer Model D, including the basic oscillator combinations, suggested musical
+notes and different ranges; each monophonic example at most five seconds, using GUI lines
+where possible. The owner corrected an initial claim about the CA-72's features: high-pass
+and OSC 3's LO LFO are included.
+
+**Agent decisions, 2026-10-13** (not separately approved):
+- An additional user preset pack, not a change to the factory library or audio engine.
+  `docs/comparison-presets/README.md` has every setting, exact MIDI timing, hardware mappings
+  and single-control repeat takes. The bank uses all seven nonempty oscillator combinations,
+  all six ranges and waveform positions, both noise colours, four tracking states, contours,
+  glide, low/high-pass, self-oscillation, three LFO shapes, audio-rate FM, modulation mix,
+  external audio and a hardware-accessible phones feedback route.
+- All 24 phrases last 4.8 seconds including the tail, with no simultaneously held MIDI keys.
+  All extension effects are neutral. The FREQUENCY files use the actual pot conversion;
+  displayed +7 semitones is a GUI line, +10 cents the deliberate fine-setting exception.
+- Raw VOLUME stays at its 6 line. Listening copies use constant downstream gain toward
+  -18 LUFS maximum momentary, capped at -1 dBTP; the two transient presets keep their peak
+  headroom instead of being limited. Normal oscillator mismatch/drift is retained and
+  documented. Preset names are proposed comparison labels, not factory-name decisions.
+
+**Evidence (Linux, 2026-10-13):** The 24 files parsed through the actual user library and
+matched the combined bank. The current plug-in engine rendered all 24 at ULTRA, 48 kHz,
+fixed seed 72, as finite mono audio. The 48 raw/listening WAV files each contain 230,400
+samples (4.8 seconds). Independent MIDI decoding confirmed 24 nonoverlapping, 4.8-second
+phrases. The generator rejects wrong counts, polyphony, overlaps and a missing oscillator
+pair, proven by four malformed copies. All 120 local guide links exist. The 24 panel images
+were rendered with the actual panel and strip; high-pass and LFO panels visually inspected.
+The example's formatting and release clippy passed; the preset library's tests passed
+(18, zero failures, one manual cross-check ignored). Hardware recordings, real-host import
+and cross-platform runs were not made. The audio/panels/measurements are generated local
+artifacts; settings, MIDI and both generators are tracked.
