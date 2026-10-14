@@ -6758,6 +6758,7 @@ mod tests {
 mod windows_window_tests {
     use std::path::PathBuf;
     use std::ptr::null_mut;
+    use std::sync::MutexGuard;
 
     use ca72_panel::presets::BarTarget;
     use nih_plug::context::PluginApi;
@@ -6869,6 +6870,9 @@ mod windows_window_tests {
         }
     }
 
+    // Native capture and focus are shared by the desktop, including across test threads.
+    static DESKTOP: Mutex<()> = Mutex::new(());
+
     /// The editor's window open in the host's, at the narrowest width and a pixel a point.
     struct Opened {
         parent: HWND,
@@ -6878,10 +6882,15 @@ mod windows_window_tests {
         meters: Arc<Meters>,
         handle: baseview::WindowHandle,
         _presets: tempfile::TempDir,
+        // Last to drop: cleanup and all owned window state precede the next fixture.
+        _desktop: MutexGuard<'static, ()>,
     }
 
     impl Opened {
         fn new(resizes_editor: bool, host_kind: HostWindow) -> Self {
+            let desktop = DESKTOP
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // The windows in pixels whatever the screen's scale (baseview sets the process's
             // awareness only once its first window is open, and the tests share the process).
             // SAFETY: this thread's own setting.
@@ -6936,6 +6945,7 @@ mod windows_window_tests {
                 meters,
                 handle,
                 _presets: presets,
+                _desktop: desktop,
             }
         }
 
@@ -6997,10 +7007,17 @@ mod windows_window_tests {
             self.click_bar(BarTarget::Name);
         }
 
-        fn close(mut self) {
+        fn close(self) {
+            drop(self);
+        }
+    }
+
+    impl Drop for Opened {
+        fn drop(&mut self) {
+            // Also clean up after an assertion fails, on the thread that owns the HWNDs.
             self.handle.close();
             pump(Duration::from_millis(100));
-            // SAFETY: the test's own window.
+            // SAFETY: the test's own parent; its child has processed its close request.
             unsafe { DestroyWindow(self.parent) };
         }
     }
