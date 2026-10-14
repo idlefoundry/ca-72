@@ -1,0 +1,734 @@
+//! The keyboard occupies the extension controls' space, keeping the rail and left hand.
+//! Coordinates are panel units; MIDI 60 is labelled C4. Black keys take hit-test priority.
+
+use resvg::{
+    tiny_skia::{FillRule, Mask, PathBuilder, Pixmap, PixmapPaint, Transform},
+    usvg,
+};
+
+use crate::{
+    Skin, art,
+    fonts::{FAMILY, Fonts},
+};
+
+pub const AREA: [f64; 4] = [
+    370.0,
+    art::PANEL_H + crate::strip::RAIL,
+    3080.0,
+    art::H - 6.0,
+];
+pub const BED: [f64; 4] = [414.0, 1122.0, 3038.0, 1728.0];
+const WHITE_H: f64 = BED[3] - BED[1];
+const BLACK_H: f64 = WHITE_H * 0.66;
+pub const KEYS: usize = 44;
+pub const MAPPING: &str = "awsedftgyhujkolp;";
+const WHITE_W: f64 = (BED[2] - BED[0]) / 26.0;
+const CLEARANCE: f64 = 3.0;
+const NOTCH_Y: f64 = BED[1] + BLACK_H + 5.0;
+pub const HEADER: f64 = 1080.0;
+pub const BUTTON_H: f64 = 48.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Note(u8),
+    Down,
+    Up,
+    Type,
+    Panic,
+    Back,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Scene {
+    pub root: u8,
+    pub typing: bool,
+    pub held: [u64; 2],
+    pub hover: Option<Target>,
+    pub skin: Skin,
+}
+
+impl Default for Scene {
+    fn default() -> Self {
+        Self {
+            root: 41,
+            typing: false,
+            held: [0, 0],
+            hover: None,
+            skin: Skin::Worn,
+        }
+    }
+}
+
+pub fn inside(x: f64, y: f64) -> bool {
+    (AREA[0]..AREA[2]).contains(&x) && (AREA[1]..AREA[3]).contains(&y)
+}
+
+pub fn black(note: u8) -> bool {
+    matches!(note % 12, 1 | 3 | 6 | 8 | 10)
+}
+
+pub fn label(note: u8) -> String {
+    format!(
+        "{}{}",
+        [
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+        ][usize::from(note % 12)],
+        i16::from(note) / 12 - 1
+    )
+}
+
+/// Octave transposition retains the F-to-C span except at the MIDI range limits. The final octave leaves notes above MIDI 127 disabled.
+pub fn shifted(root: u8, up: bool) -> u8 {
+    if up {
+        root.saturating_add(12).min(84)
+    } else {
+        root.saturating_sub(12)
+    }
+}
+
+pub fn rect(root: u8, note: u8) -> Option<[f64; 4]> {
+    let relative = note.checked_sub(root)?;
+    if usize::from(relative) >= KEYS {
+        return None;
+    }
+    let whites = (0..relative).filter(|i| !black(root + i)).count() as f64;
+    let x = BED[0] + whites * WHITE_W;
+    Some(if black(note) {
+        [
+            x - WHITE_W * 0.25,
+            BED[1],
+            x + WHITE_W * 0.25,
+            BED[1] + BLACK_H,
+        ]
+    } else {
+        [x, BED[1], x + WHITE_W - 2.0, BED[3]]
+    })
+}
+
+/// The rear of each natural key is a stem, with real spaces for its neighbouring
+/// accidentals. The full-width front remains aligned across the whole keyboard.
+pub fn white_shape(root: u8, note: u8) -> Option<[[f64; 2]; 8]> {
+    if black(note) {
+        return None;
+    }
+    let [x0, y0, x1, y1] = rect(root, note)?;
+    let left = note > root && black(note - 1);
+    let right = usize::from(note - root) + 1 < KEYS && note < 127 && black(note + 1);
+    let stem_left = x0
+        + if left {
+            WHITE_W * 0.25 + CLEARANCE
+        } else {
+            0.0
+        };
+    let stem_right = if right {
+        x0 + WHITE_W * 0.75 - CLEARANCE
+    } else {
+        x1
+    };
+    Some([
+        [stem_left, y0],
+        [stem_right, y0],
+        [stem_right, NOTCH_Y],
+        [x1, NOTCH_Y],
+        [x1, y1],
+        [x0, y1],
+        [x0, NOTCH_Y],
+        [stem_left, NOTCH_Y],
+    ])
+}
+
+fn white_contains(root: u8, note: u8, x: f64, y: f64) -> bool {
+    let Some(shape) = white_shape(root, note) else {
+        return false;
+    };
+    let (left, right) = if y < NOTCH_Y {
+        (shape[0][0], shape[1][0])
+    } else {
+        (shape[5][0], shape[4][0])
+    };
+    (left..right).contains(&x) && (BED[1]..BED[3]).contains(&y)
+}
+
+fn shape_svg(shape: [[f64; 2]; 8]) -> String {
+    let mut path = format!("M {} {}", shape[0][0], shape[0][1]);
+    for [x, y] in &shape[1..] {
+        path += &format!(" L {x} {y}");
+    }
+    path + " Z"
+}
+
+pub fn hit(root: u8, x: f64, y: f64) -> Option<Target> {
+    if !inside(x, y) {
+        return None;
+    }
+    for (cx, w, target) in [
+        (817.0, 86.0, Target::Down),
+        (1287.0, 86.0, Target::Up),
+        (2226.0, 190.0, Target::Type),
+        (2690.0, 230.0, Target::Panic),
+    ] {
+        if (x - cx).abs() <= w / 2.0 && (y - HEADER).abs() <= BUTTON_H / 2.0 {
+            return Some(target);
+        }
+    }
+    for dark in [true, false] {
+        for relative in 0..KEYS {
+            let note = usize::from(root) + relative;
+            if note > 127 {
+                continue;
+            }
+            let note = note as u8;
+            if black(note) != dark {
+                continue;
+            }
+            let in_key = if dark {
+                rect(root, note)
+                    .is_some_and(|r| (r[0]..r[2]).contains(&x) && (r[1]..r[3]).contains(&y))
+            } else {
+                white_contains(root, note, x, y)
+            };
+            if in_key {
+                return Some(Target::Note(note));
+            }
+        }
+    }
+    Some(Target::Back)
+}
+
+pub fn damage(was: Option<&Scene>, now: Option<&Scene>) -> Vec<[f64; 4]> {
+    match (was, now) {
+        (None, None) => Vec::new(),
+        (Some(a), Some(b))
+            if a.root == b.root
+                && a.typing == b.typing
+                && a.skin == b.skin
+                && a.hover == b.hover =>
+        {
+            (0..128)
+                .filter(|n| (a.held[n / 64] ^ b.held[n / 64]) & (1 << (n % 64)) != 0)
+                .filter_map(|n| rect(b.root, n as u8))
+                .map(|[x0, y0, x1, y1]| [x0 - 8.0, y0 - 8.0, x1 + 12.0, y1 + 12.0])
+                .collect()
+        }
+        _ => vec![AREA],
+    }
+}
+
+/// Kept at one scale: nothing is drawn for unchanged notes. The resulting overlay is copied
+/// only in the caller's damaged rectangle, leaving its rail and left-hand pixels untouched.
+pub struct Renderer {
+    scale: f64,
+    options: usvg::Options<'static>,
+    frame: Pixmap,
+    shown: Option<Scene>,
+    materials: Option<Materials>,
+    white: Option<Pixmap>,
+    black: Option<Pixmap>,
+    base: Option<(Scene, Pixmap)>,
+}
+
+impl std::fmt::Debug for Renderer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyboardRenderer")
+            .field("scale", &self.scale)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Renderer {
+    pub fn new(scale: f64) -> Self {
+        Self {
+            scale,
+            options: usvg::Options {
+                fontdb: Fonts::new().database(),
+                font_family: FAMILY.into(),
+                ..Default::default()
+            },
+            frame: crate::strip::blank(scale).expect("a strip frame"),
+            shown: None,
+            materials: None,
+            white: None,
+            black: None,
+            base: None,
+        }
+    }
+
+    pub fn rescale(&mut self, scale: f64) {
+        if self.scale != scale {
+            self.scale = scale;
+            self.frame = crate::strip::blank(scale).expect("a strip frame");
+            self.shown = None;
+            self.base = None;
+            self.white = None;
+            self.black = None;
+        }
+    }
+
+    pub fn over(&mut self, destination: &mut Pixmap, scene: &Scene, clip: [i32; 4]) {
+        if scene.skin == Skin::Worn && self.white.is_none() {
+            let materials = self.materials.get_or_insert_with(Materials::new);
+            self.white = Some(key_size(&materials.white, self.scale, false));
+            self.black = Some(key_size(&materials.black, self.scale, true));
+        }
+        if self.shown.as_ref() != Some(scene) {
+            let mut still = scene.clone();
+            still.held = [0, 0];
+            let rebuilt = self.base.as_ref().is_none_or(|(was, _)| *was != still);
+            if rebuilt {
+                self.frame.fill(resvg::tiny_skia::Color::TRANSPARENT);
+                if scene.skin == Skin::Worn {
+                    self.materials
+                        .as_ref()
+                        .expect("worn materials loaded")
+                        .draw(&mut self.frame, self.scale);
+                }
+                let body = drawing(&still);
+                let document = art::document(
+                    [
+                        0.0,
+                        art::PANEL_H,
+                        f64::from(self.frame.width()) / self.scale,
+                        f64::from(self.frame.height()) / self.scale,
+                    ],
+                    self.frame.width(),
+                    self.frame.height(),
+                    &body,
+                );
+                let tree = usvg::Tree::from_str(&document, &self.options)
+                    .expect("the keyboard's built-in SVG");
+                resvg::render(&tree, Transform::identity(), &mut self.frame.as_mut());
+                self.base = Some((still, self.frame.clone()));
+            }
+            if scene.skin == Skin::Worn {
+                let changed = if rebuilt {
+                    vec![AREA]
+                } else {
+                    damage(self.shown.as_ref(), Some(scene))
+                };
+                for rect in changed {
+                    self.draw_keys(scene, rect);
+                }
+            } else {
+                self.frame.fill(resvg::tiny_skia::Color::TRANSPARENT);
+                {
+                    let body = drawing(scene);
+                    let document = art::document(
+                        [
+                            0.0,
+                            art::PANEL_H,
+                            f64::from(self.frame.width()) / self.scale,
+                            f64::from(self.frame.height()) / self.scale,
+                        ],
+                        self.frame.width(),
+                        self.frame.height(),
+                        &body,
+                    );
+                    let tree =
+                        usvg::Tree::from_str(&document, &self.options).expect("keyboard SVG");
+                    resvg::render(&tree, Transform::identity(), &mut self.frame.as_mut());
+                }
+            }
+            self.shown = Some(scene.clone());
+        }
+        let s = self.scale;
+        let bounds = [
+            (AREA[0] * s).ceil() as i32,
+            ((AREA[1] - art::PANEL_H) * s).ceil() as i32,
+            (AREA[2] * s).floor() as i32,
+            ((AREA[3] - art::PANEL_H) * s).floor() as i32,
+        ];
+        let x0 = clip[0].max(bounds[0]).max(0);
+        let x1 = clip[2]
+            .min(bounds[2])
+            .min(destination.width() as i32)
+            .min(self.frame.width() as i32);
+        let y0 = clip[1].max(bounds[1]).max(0);
+        let y1 = clip[3]
+            .min(bounds[3])
+            .min(destination.height() as i32)
+            .min(self.frame.height() as i32);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let dw = destination.width() as usize;
+        let sw = self.frame.width() as usize;
+        for y in y0..y1 {
+            let dst = (y as usize * dw + x0 as usize) * 4;
+            let src = (y as usize * sw + x0 as usize) * 4;
+            let n = (x1 - x0) as usize * 4;
+            destination.data_mut()[dst..dst + n].copy_from_slice(&self.frame.data()[src..src + n]);
+        }
+    }
+    fn draw_keys(&mut self, scene: &Scene, dirty: [f64; 4]) {
+        let s = self.scale;
+        let x0 = (dirty[0] * s).floor().max(0.0) as i32;
+        let y0 = ((dirty[1] - art::PANEL_H) * s).floor().max(0.0) as i32;
+        let x1 = (dirty[2] * s).ceil().min(f64::from(self.frame.width())) as i32;
+        let y1 = ((dirty[3] - art::PANEL_H) * s)
+            .ceil()
+            .min(f64::from(self.frame.height())) as i32;
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let mut patch = Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32).expect("key damage");
+        let (_, base) = self.base.as_ref().expect("keyboard base");
+        let n = (x1 - x0) as usize * 4;
+        for y in y0..y1 {
+            let src = (y as usize * base.width() as usize + x0 as usize) * 4;
+            let dst = (y - y0) as usize * n;
+            patch.data_mut()[dst..dst + n].copy_from_slice(&base.data()[src..src + n]);
+        }
+        for dark in [false, true] {
+            for relative in 0..KEYS {
+                let note = scene.root + relative as u8;
+                if black(note) != dark {
+                    continue;
+                }
+                let r = rect(scene.root, note).expect("visible key");
+                if r[2] + 12.0 < dirty[0]
+                    || r[0] - 8.0 > dirty[2]
+                    || r[3] + 12.0 < dirty[1]
+                    || r[1] - 8.0 > dirty[3]
+                {
+                    continue;
+                }
+                let held = scene.held[usize::from(note) / 64] & (1 << (note % 64)) != 0;
+                let key = if dark {
+                    self.black.as_ref()
+                } else {
+                    self.white.as_ref()
+                }
+                .expect("key material loaded");
+                let mask = if dark {
+                    None
+                } else {
+                    let points = white_shape(scene.root, note).expect("natural key");
+                    let mut path = PathBuilder::new();
+                    path.move_to(points[0][0] as f32, points[0][1] as f32);
+                    for [x, y] in &points[1..] {
+                        path.line_to(*x as f32, *y as f32);
+                    }
+                    path.close();
+                    let mut mask =
+                        Mask::new(patch.width(), patch.height()).expect("key silhouette");
+                    mask.fill_path(
+                        &path.finish().expect("closed natural key"),
+                        FillRule::Winding,
+                        true,
+                        Transform::from_scale(s as f32, s as f32)
+                            .post_translate(-x0 as f32, -(art::PANEL_H * s) as f32 - y0 as f32),
+                    );
+                    Some(mask)
+                };
+                patch.draw_pixmap(
+                    (r[0] * s).round() as i32 - x0,
+                    ((r[1] - art::PANEL_H) * s).round() as i32 - y0,
+                    key.as_ref(),
+                    &PixmapPaint::default(),
+                    Transform::identity(),
+                    mask.as_ref(),
+                );
+                if held {
+                    let y = if dark { r[3] - 18.0 } else { r[3] - 8.0 };
+                    if let Some(rect) = resvg::tiny_skia::Rect::from_xywh(
+                        ((r[0] + 10.0) * s) as f32 - x0 as f32,
+                        ((y - art::PANEL_H) * s) as f32 - y0 as f32,
+                        ((r[2] - r[0] - 20.0) * s) as f32,
+                        (3.0 * s).max(1.0) as f32,
+                    ) {
+                        let mut paint = resvg::tiny_skia::Paint::default();
+                        paint.set_color_rgba8(174, 106, 48, 180);
+                        patch.fill_rect(rect, &paint, Transform::identity(), None);
+                    }
+                }
+            }
+        }
+        for y in y0..y1 {
+            let dst = (y as usize * self.frame.width() as usize + x0 as usize) * 4;
+            let src = (y - y0) as usize * n;
+            self.frame.data_mut()[dst..dst + n].copy_from_slice(&patch.data()[src..src + n]);
+        }
+    }
+}
+
+fn drawing(scene: &Scene) -> String {
+    let mut out = String::from(
+        "<defs><linearGradient id='keyface' x2='0' y2='1'><stop stop-color='#252523'/><stop offset='1' stop-color='#181918'/></linearGradient><linearGradient id='ivory' x2='.2' y2='1'><stop stop-color='#ccc8b6'/><stop offset='.2' stop-color='#e1dcc8'/><stop offset='1' stop-color='#c9c2af'/></linearGradient><linearGradient id='blackkey' x2='1' y2='1'><stop stop-color='#434441'/><stop offset='.3' stop-color='#242623'/><stop offset='1' stop-color='#101210'/></linearGradient><linearGradient id='keycap' x2='0' y2='1'><stop stop-color='#514e47'/><stop offset='.35' stop-color='#393833'/><stop offset='1' stop-color='#242522'/></linearGradient></defs>",
+    );
+    out += &format!(
+        "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='666' y='1080' font-size='28' text-anchor='middle' dominant-baseline='central' fill='#d9d2c0'>OCTAVE</text><rect x='878' y='1056' width='348' height='48' fill='#111b16' rx='4' stroke='#62594a' stroke-width='8'/><text x='1052' y='1080' font-size='28' text-anchor='middle' dominant-baseline='central' fill='#ff7028'>{} – {}</text>",
+        if scene.skin == Skin::Worn {
+            "none"
+        } else {
+            "url(#keyface)"
+        },
+        label(scene.root),
+        label(scene.root.saturating_add(43).min(127))
+    );
+    for (x, w, label, target) in [
+        (817.0, 86.0, "−", Target::Down),
+        (1287.0, 86.0, "+", Target::Up),
+        (2226.0, 190.0, "TYPE", Target::Type),
+        (2690.0, 230.0, "PANIC", Target::Panic),
+    ] {
+        let on = target == Target::Type && scene.typing;
+        let fill = if scene.skin == Skin::Worn && !on {
+            "none"
+        } else if on {
+            "#b0702b"
+        } else {
+            "url(#keycap)"
+        };
+        let stroke = if scene.hover == Some(target) {
+            "#858174"
+        } else if scene.skin == Skin::Worn {
+            "none"
+        } else {
+            "#1a1917"
+        };
+        out += &format!(
+            "<rect x='{}' y='1056' width='{w}' height='48' fill='{fill}' fill-opacity='{}' rx='7' stroke='{stroke}' stroke-width='5'/><text x='{x}' y='1080' font-size='22' text-anchor='middle' dominant-baseline='central' fill='{}'>{label}</text>",
+            x - w / 2.0,
+            if scene.skin == Skin::Worn {
+                "0.28"
+            } else {
+                "1"
+            },
+            if on { "#2a1006" } else { "#d9d2c0" }
+        );
+    }
+    out += "<rect x='402' y='1110' width='2648' height='632' fill='#0c100e' rx='7' stroke='#241d15' stroke-width='6'/>";
+    if scene.skin == Skin::Drawn {
+        for dark in [false, true] {
+            for relative in 0..KEYS {
+                let note = scene.root + relative as u8;
+                if black(note) != dark {
+                    continue;
+                }
+                let [x0, y0, x1, y1] = rect(scene.root, note).expect("a displayed note");
+                let down =
+                    note <= 127 && scene.held[usize::from(note) / 64] & (1 << (note % 64)) != 0;
+                let fill = match (dark, down, note > 127) {
+                    (_, _, true) => "#626157",
+                    (true, true, false) => "#68503b",
+                    (false, true, false) => "#d1a06c",
+                    (true, false, false) => "url(#blackkey)",
+                    (false, false, false) => "url(#ivory)",
+                };
+                if dark {
+                    out += &format!(
+                        "<rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#060806' opacity='.4'/>",
+                        x0 + 5.0,
+                        y0 + 10.0,
+                        x1 - x0,
+                        y1 - y0
+                    );
+                }
+                if dark {
+                    out += &format!(
+                        "<rect x='{x0}' y='{y0}' width='{}' height='{}' rx='2' fill='{fill}' stroke='#111310' stroke-width='2'/>",
+                        x1 - x0,
+                        y1 - y0,
+                    );
+                } else {
+                    out += &format!(
+                        "<path d='{}' fill='{fill}' stroke='#827b6d' stroke-width='2'/>",
+                        shape_svg(white_shape(scene.root, note).expect("natural key")),
+                    );
+                }
+                if !dark && note.is_multiple_of(12) {
+                    out += &format!(
+                        "<text x='{}' y='1683' font-size='22' text-anchor='middle' fill='#4d493f'>{}</text>",
+                        (x0 + x1) / 2.0,
+                        label(note)
+                    );
+                }
+            }
+        }
+    }
+    out += &format!(
+        "<text x='1730' y='1080' font-size='18' text-anchor='middle' fill='#a9a696'>{}</text></g>",
+        if scene.typing {
+            "A W S E D F T G Y H U J K O L P ;"
+        } else {
+            ""
+        }
+    );
+    out
+}
+
+struct Materials {
+    face: Pixmap,
+    wood: Pixmap,
+    white: Pixmap,
+    black: Pixmap,
+    button: Pixmap,
+}
+impl Materials {
+    fn new() -> Self {
+        let decode = |b: &[u8]| Pixmap::decode_png(b).expect("built-in keyboard material");
+        Self {
+            face: crate::skin::face_picture(),
+            wood: decode(crate::skin::WALNUT),
+            white: crop(
+                &decode(include_bytes!("../assets/keyboard/white-key-v4.png")),
+                [427, 81, 598, 1466],
+            ),
+            black: crop(
+                &decode(include_bytes!("../assets/keyboard/black-key-v4.png")),
+                [497, 49, 678, 1281],
+            ),
+            button: decode(crate::skin::BUTTON),
+        }
+    }
+    fn draw(&self, frame: &mut Pixmap, s: f64) {
+        let k = (640.0 * s) as f32 / self.face.width() as f32;
+        crate::render::fill(
+            frame,
+            &self.face,
+            (
+                AREA[0] * s,
+                (AREA[1] - art::PANEL_H) * s,
+                (AREA[2] - AREA[0]) * s,
+                (AREA[3] - AREA[1]) * s,
+            ),
+            None,
+            Transform::from_scale(k, k)
+                .post_translate((320.0 * s) as f32, ((AREA[1] - art::PANEL_H) * s) as f32),
+        );
+        let along = (art::W * s) as f32 / self.wood.width() as f32;
+        let across = along / 2.2;
+        // The wood below the rail continues its grain, like the original's name board.
+        crate::render::fill(
+            frame,
+            &self.wood,
+            (
+                AREA[0] * s,
+                (AREA[1] - art::PANEL_H) * s,
+                (AREA[2] - AREA[0]) * s,
+                (BED[1] - AREA[1]) * s,
+            ),
+            None,
+            Transform::from_row(along, 0.0, 0.0, across, 0.0, -260.0 * across),
+        );
+        for (x, y, w, h) in [
+            (394.0, 1730.0, 2664.0, 28.0),
+            (394.0, 1110.0, 8.0, 648.0),
+            (3050.0, 1110.0, 8.0, 648.0),
+        ] {
+            crate::render::fill(
+                frame,
+                &self.wood,
+                (x * s, (y - art::PANEL_H) * s, w * s, h * s),
+                None,
+                Transform::from_row(
+                    along,
+                    0.0,
+                    0.0,
+                    across,
+                    0.0,
+                    ((y - art::PANEL_H) * s) as f32 - 480.0 * across,
+                ),
+            );
+        }
+        for (x, w) in [
+            (817.0, 86.0),
+            (1287.0, 86.0),
+            (2226.0, 190.0),
+            (2690.0, 230.0),
+        ] {
+            let cap = plugin_kit_materials::widened(&self.button, w / BUTTON_H);
+            plugin_kit_materials::sprite(frame, &cap, s, (x, HEADER - art::PANEL_H), (w, BUTTON_H));
+        }
+    }
+}
+fn crop(source: &Pixmap, [x0, y0, x1, y1]: [u32; 4]) -> Pixmap {
+    let mut out = Pixmap::new(x1 - x0, y1 - y0).expect("key crop");
+    let n = (x1 - x0) as usize * 4;
+    for y in y0..y1 {
+        let at = (y as usize * source.width() as usize + x0 as usize) * 4;
+        let to = (y - y0) as usize * n;
+        out.data_mut()[to..to + n].copy_from_slice(&source.data()[at..at + n]);
+    }
+    out
+}
+fn key_size(source: &Pixmap, s: f64, dark: bool) -> Pixmap {
+    let width = if dark { WHITE_W * 0.50 } else { WHITE_W - 2.0 };
+    let height = if dark { BLACK_H } else { WHITE_H };
+    plugin_kit_materials::resample(
+        source,
+        (width * s).round().max(1.0) as u32,
+        (height * s).round().max(1.0) as u32,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn natural_keys_have_real_notches_and_aligned_fronts() {
+        for note in [36, 38, 40, 41, 43, 45, 47] {
+            let shape = white_shape(36, note).expect("natural");
+            let r = rect(36, note).expect("visible");
+            assert_eq!(shape[4][1], BED[3]);
+            assert_eq!(shape[5][1], BED[3]);
+            assert_eq!(
+                hit(36, (r[0] + r[2]) / 2.0, BED[3] - 5.0),
+                Some(Target::Note(note))
+            );
+            if note > 36 && black(note - 1) {
+                assert!(shape[0][0] > r[0]);
+                assert_eq!(
+                    hit(36, shape[0][0] - CLEARANCE / 2.0, BED[1] + 20.0),
+                    Some(Target::Back)
+                );
+                assert_eq!(hit(36, r[0] + 5.0, NOTCH_Y - 2.0), Some(Target::Back));
+            }
+            if black(note + 1) {
+                assert!(shape[1][0] < r[2]);
+                assert_eq!(
+                    hit(36, shape[1][0] + CLEARANCE / 2.0, BED[1] + 20.0),
+                    Some(Target::Back)
+                );
+                assert_eq!(hit(36, r[2] - 5.0, NOTCH_Y - 2.0), Some(Target::Back));
+            }
+        }
+        let first = white_shape(41, 41).expect("first F");
+        let last = white_shape(41, 84).expect("last C");
+        assert_eq!(first[0][0], first[5][0]);
+        assert_eq!(last[1][0], last[4][0]);
+        assert!(white_shape(41, 42).is_none());
+    }
+
+    #[test]
+    fn black_keys_win_and_every_midi_note_is_reachable() {
+        let r = rect(36, 37).expect("C sharp");
+        assert_eq!(
+            hit(36, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0),
+            Some(Target::Note(37))
+        );
+        assert_eq!(hit(36, r[0], BED[3] - 10.0), Some(Target::Note(36)));
+        for note in 0..128u8 {
+            let root = (note / 12 * 12).min(84);
+            let r = rect(root, note).expect("visible");
+            let y = if black(note) {
+                (r[1] + r[3]) / 2.0
+            } else {
+                r[3] - 10.0
+            };
+            assert_eq!(
+                hit(root, (r[0] + r[2]) / 2.0, y),
+                Some(Target::Note(note)),
+                "{note}"
+            );
+        }
+        assert_eq!(shifted(84, true), 84);
+        assert_eq!(shifted(0, false), 0);
+        assert_eq!(
+            hit(84, BED[2] - 5.0, BED[3] - 10.0),
+            Some(Target::Note(127))
+        );
+        assert_eq!(hit(36, 100.0, 1400.0), None);
+    }
+}
