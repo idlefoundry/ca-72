@@ -4,7 +4,8 @@
 **4.8 seconds including its release window**, 48 kHz mono. All values are initial patch
 settings: no knob automation, no effects, no polyphony, and never two active MIDI keys.
 The set uses only sounds obtainable on a Behringer Model D. Names are proposed test labels;
-the factory library is unchanged.
+the factory library is unchanged. **13 is the existing White Lotus preset**, with its
+factory settings preserved. **15 is the only high-pass preset**; the other 23 use LO.
 
 ## Load and play
 
@@ -28,8 +29,10 @@ Use **MONO**, UNISON/DOUBLE off, ENTROPY/WIDTH/INNER/DRIVE zero, LEVEL 0 dB, LOC
 NOTE PRIORITY LOW and RETRIGGER off. These are explicitly neutral in every preset. Set
 QUALITY to **ULTRA for offline comparison**, or HI for real-time playing: quality is a
 computer preference, so the preset files do not change it. Pitch bend is centred in each
-MIDI file; MODULATION (CC 1) is explicitly initialized to the listed value. No pitch-bend
-range setting is needed because the phrases do not bend pitch.
+MIDI file; MODULATION (CC 1) is explicitly initialized to the listed value except in 13.
+White Lotus keeps its factory modulation setting of 0.17 without a CC 1 override; load
+the preset before playing its clip and leave the modulation controller untouched. No
+pitch-bend range setting is needed because the phrases do not bend pitch.
 
 With LOCK off, CA-72 retains its normal small oscillator mismatch and drift even at
 ENTROPY 0. A FREQUENCY of 0 is a nominal centre, not a guarantee that the oscillators
@@ -38,12 +41,16 @@ pitches and intervals on the hardware. Keep that pass labelled separately from t
 identical-position pass.
 
 MAIN OUTPUT on, VOLUME **6**, TUNE **0**, A-440 off. Disabled mixer sources have their
-switch OFF and level 0. GLIDE is off except 16; FEEDBACK is 0 except 24. The hardware has
+switch OFF and level 0. **White Lotus (13) is the exception:** its VOLUME 9.78, inactive
+mixer levels, VOICES 4 and AUTO GAIN on at DRIVE 0 are retained as in the factory preset.
+Its tone uses no extension effect; the exact exceptions are listed below. GLIDE is off
+except 16; FEEDBACK is 0 except 24. The hardware has
 separate FILTER DECAY and LOUDNESS DECAY switches: set **both** to the listed CA-72 DECAY
 state. Select **OSC 3**, **NOISE/MOD SRC**, not Filter EG or the separate LFO, for the
 Model D modulation-source switches. Leave its dedicated LFO unused; CA-72's LFO tests use
 **OSC 3 at LO**. Leave MOD SOURCE unpatched. For the non-modulated presets set MOD DEPTH 0;
 for 19–22 start at MOD DEPTH 10 and the listed CC 1, then match modulation excursion.
+White Lotus (13) also uses filter modulation; follow its own depth/rate instructions.
 
 Numbers on 0–10 knobs mean pointer positions. CUTOFF is the signed printed dial; use whole
 numbers (-3, -2, -1, 0, +1, +2, +3, +4). **ATTACK/DECAY also use 0–10 travel positions,
@@ -51,14 +58,17 @@ not seconds:** 0 is the counterclockwise stop, 2 the `200 M-SEC.` line, 3 the ne
 4 the `600 M-SEC.` line, 5 the noon line and 6 the `1 SEC.` line. These choices lie on
 actual GUI ticks. ADS below means ATTACK / DECAY / SUSTAIN, in that order. K1/K2 = on/off
 states: 0/0 no tracking, 1/0 one-third, 0/1 two-thirds, 1/1 full tracking.
+White Lotus retains its original fine settings, including cutoff -2.14, loudness ADS
+0.5 / 3.5 / 8.5 and VOLUME 9.78; these deliberately override the preference for lines.
 
 FREQUENCY is a **true interval from the oscillator's centre**, as CA-72 displays it with
 the SEMITONES knob preference. Files store the correctly converted pot positions. All
 are at 0 except 07 (+10 cents, a deliberate between-line setting) and 09 (+7 semitones,
-on a GUI line). The Model D manual describes its semitone markings as a guide; use a
+on a GUI line), plus White Lotus's LO oscillator near the clockwise stop (stored
+OSC 3 pot value 7.47627, approximately 11 Hz with CONTROL off). The Model D manual describes its semitone markings as a guide; use a
 tuner to reproduce these intervals on hardware. A setting at 8' sounds at the entered
 note; 32'/16' sound two/one octaves down, 4'/2' one/two octaves up. LO is used as modulation
-in 19, 20 and 22, not promised as an ordinary concert-pitch register.
+in 13, 19, 20 and 22, not promised as an ordinary concert-pitch register.
 
 ## The 24 patches at a glance
 
@@ -76,7 +86,7 @@ in 19, 20 and 22, not promised as an ordinary concert-pitch register.
 | 10 | Three Floors | 1: 32' saw, level 4; 2: 16' shark tooth, level 4, freq +0 st; 3: 8' square, level 4, freq +0 st | OSC 1 + 2 + 3 at 32'/16'/8': three octave layers, three shapes. | F2 → A2 → C3 → F3 |
 | 11 | Copper Pluck | 1: 16' saw, level 5; 2: 16' saw, level 5, freq +0 st | Low-pass filter contour and zero loudness sustain: a short two-saw bass. | F2 → C3 → D3 → F3 → F2 → C3 → D3 → F3 |
 | 12 | Slow Bloom | 1: 8' triangle, level 6; 2: 8' saw, level 4, freq +0 st | Independent filter/loudness attack, nonzero sustain and released decay. | C4 |
-| 13 | Gate Cut | 1: 8' square, level 6 | DECAY off: contrast with an envelope that has a sustain plateau. | F3 → C4 → F4 → C5 |
+| 13 | White Lotus | 1: 8' narrow pulse, level 10 | The unchanged factory White Lotus: narrow-pulse bass, a third-harmonic filter ring and OSC 3 LO filter modulation. | C3 → C4 |
 | 14 | Ladder Whistle | All three OFF | Filter self-oscillation, no VCO in the mixer, full keyboard tracking. | F2 → F3 → F4 → F5 |
 | 15 | High Pass Reed | 1: 8' wide pulse, level 5; 3: 4' reverse saw, level 4, freq +0 st | High-pass filter, resonance, contour, two-thirds keyboard tracking. | F2 → F3 → F4 → F5 |
 | 16 | Joined Glide | 1: 8' saw, level 5; 2: 16' wide pulse, level 4, freq +0 st | GLIDE with a continuous monophonic phrase and single triggering. | C3 → E3 → G3 → C4 → G3 → C3 |
@@ -265,19 +275,23 @@ Listen for: Volume rises before the filter has finished opening; after the 2.80 
 
 [Preset](presets/CMP%2012%20Slow%20Bloom.toml) · [MIDI](midi/CMP%2012%20Slow%20Bloom.mid) · [Listen](audio/listening/CMP%2012%20Slow%20Bloom.wav) · [Raw](audio/raw/CMP%2012%20Slow%20Bloom.wav) · [Panel](panels/CMP%2012%20Slow%20Bloom.png)
 
-### 13. Gate Cut
+### 13. White Lotus
 
-DECAY off: contrast with an envelope that has a sustain plateau.
+The unchanged factory White Lotus: narrow-pulse bass, a third-harmonic filter ring and OSC 3 LO filter modulation.
 
-- Oscillators: 1: 8' square, level 6. OSC 3 CONTROL ON.
-- Filter: LO, CUTOFF -1, EMPHASIS 4, AMOUNT 4; K1/K2 0/0.
-- Filter ADS: 0 / 4 / 4; loudness ADS: 0 / 4 / 6; DECAY OFF.
-- Modulation: MIX 0, OSC OFF, FILTER OFF, CC 1 **0 / 127**.
-- Notes: 0.20 / 0.80 / F3 (53); 1.20 / 0.80 / C4 (60); 2.20 / 0.80 / F4 (65); 3.20 / 0.80 / C5 (72).
+- Oscillators: 1: 8' narrow pulse, level 10. OSC 3 CONTROL OFF.
+- Modulator: OSC 3 LO triangle, mixer OFF; original FREQUENCY pot value 7.47627, near the clockwise stop, approximately 11 Hz with CONTROL OFF.
+- Filter: LO, CUTOFF -2.14, EMPHASIS 7, AMOUNT 0; K1/K2 1/1.
+- Filter ADS: 0 / 3 / 10; loudness ADS: 0.5 / 3.5 / 8.5; DECAY ON.
+- Modulation: MIX 0, OSC OFF, FILTER ON, preset MODULATION **0.17**, no CC 1 in MIDI.
+- Original factory exceptions: MAIN VOLUME 9.78; LO filter; inactive OSC 2/OSC 3/NOISE/EXTERNAL INPUT mixer levels 8, all their switches OFF; VOICES 4; AUTO GAIN ON with DRIVE 0 (no gain correction). All saved factory parameter values match White Lotus exactly.
+- Notes: 0.20 / 1.40 / C3 (48); 2.10 / 1.40 / C4 (60).
 
-Listen for: Decay while held still happens; note-off dumps the contours quickly. Repeat with both hardware decay switches on to isolate release behaviour.
+Listen for: The held narrow-pulse fundamental and its resonant ring an octave and a fifth above. C3 followed by C4 exposes full keyboard tracking and the approximately 11 Hz modulation of the ring. The factory's fine positions are preserved rather than rounded to lines.
 
-[Preset](presets/CMP%2013%20Gate%20Cut.toml) · [MIDI](midi/CMP%2013%20Gate%20Cut.mid) · [Listen](audio/listening/CMP%2013%20Gate%20Cut.wav) · [Raw](audio/raw/CMP%2013%20Gate%20Cut.wav) · [Panel](panels/CMP%2013%20Gate%20Cut.png)
+Hardware: Set OSC 1 to 8' narrow pulse, mixer 10; all other mixer sources OFF. Use LO filter, cutoff -2.14, emphasis 7, both tracking switches ON, contour amount 0. OSC 3 is a triangle at LO, CONTROL OFF and mixer OFF; tune its rate to approximately 11 Hz. FILTER MODULATION ON, OSCILLATOR MODULATION OFF, MOD MIX 0. Match the modulation excursion with the hardware MOD DEPTH/MIDI wheel. The CA-72 preset keeps MODULATION 0.17 exactly; this MIDI clip sends no CC 1, because 7-bit CC cannot represent 0.17 exactly. Load White Lotus before playing the clip and leave the modulation controller untouched.
+
+[Preset](presets/CMP%2013%20White%20Lotus.toml) · [MIDI](midi/CMP%2013%20White%20Lotus.mid) · [Listen](audio/listening/CMP%2013%20White%20Lotus.wav) · [Raw](audio/raw/CMP%2013%20White%20Lotus.wav) · [Panel](panels/CMP%2013%20White%20Lotus.png)
 
 ### 14. Ladder Whistle
 
@@ -485,7 +499,9 @@ For more rigorous isolation, repeat a phrase after changing **one control only**
   listening gains fixed until levelling copies.
 - 10: all three mixer levels 4, then 8; tests mixer saturation without the DRIVE extension.
 - 11: AMOUNT 0, then 6; or K1/K2 0/0, 1/0, 0/1, 1/1 in four separate 4.8 s takes.
-- 13: both hardware DECAY switches off, then on; keep every other setting fixed.
+- 12: both hardware DECAY switches on, then off; keep every other setting fixed.
+- 13: repeat White Lotus with FILTER MODULATION off, then on, to isolate its 11 Hz
+  movement without changing the oscillator or filter's resonant tuning.
 - 14: K1/K2 0/0, 1/0, 0/1, 1/1: compare filter-frequency ratios on octave-spaced keys.
 - 15: HI versus LO on exactly the same keys; this is the direct filter-mode A/B.
 - 16: GLIDE 0 versus 6; then add 50 ms gaps if testing contour re-arming separately.
@@ -544,7 +560,9 @@ Hardware controls and mappings were checked against the manufacturer's
 sections 3.1.2–3.1.6, 4.3–4.8 and the MIDI settings. The manual is hosted by Adorama.
 CA-72 source: `params.rs`, `freq_dial.rs`, `ca72-panel/src/art.rs`, `library.rs` and the
 engine at **aedde6670cd5210e51bec9b6b19288c3d4327dd6**, the public 0.2.0 line checked
-on 2026-10-13. The new preset settings and phrases were designed for this pack.
+on 2026-10-13. The pack was revised on 2026-10-14 to include the unchanged White Lotus
+settings from `crates/ca72-plugin/sounds/presets.toml`; the other preset settings and all
+phrases were designed for this pack.
 
 From this checkout:
 
@@ -553,9 +571,11 @@ python3 scripts/comparison_presets.py
 CARGO_BUILD_JOBS=4 nice -n19 ionice -c3 cargo run --release -p ca72-plugin --example comparison_pack
 ```
 
-The Python generator validates count, monophonic timing, range/shape/combination coverage and
-neutral extensions. The renderer validates the bank through the actual preset library,
+The Python generator validates count, monophonic timing, range/shape/combination coverage,
+one or two high-pass examples, exact White Lotus factory values and neutral extensions.
+The renderer validates the bank through the actual preset library,
 renders the same engine used by the plug-in, checks finite mono samples and measurements,
 and writes `audio/raw/`, `audio/listening/`, `panels/` and `measurements.json`. Raw output
-uses the patch's VOLUME 6; listening output has a documented constant gain only. The render
+uses the patch's VOLUME (6 except White Lotus's original 9.78); listening output has a
+documented constant gain only. The render
 uses a fixed seed for reproducibility; a hardware noise stream has no corresponding seed.

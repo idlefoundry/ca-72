@@ -5300,3 +5300,24 @@ and spot-checked panels 09, 15 and 19. No blocking defect was found. Their two g
 corrections were applied: 30 minutes of warm-up before tuning, and distinguishing six
 isolated waveform shapes from their switch positions (ordinary saw is covered in 07).
 Optional TUNE and pitch-wheel control takes were added without changing the saved patches.
+
+**Owner follow-up, 2026-10-14.** Only one or two high-pass examples are needed; one of the
+24 examples should use the existing White Lotus preset.
+
+Example 15 remains the only HI patch. Example 13's Gate Cut was replaced with White Lotus,
+copied from the current factory file without rounding its fine positions or changing any
+saved factory value. Factory defaults are retained where the source omits a parameter;
+AUTO GAIN on at DRIVE 0 is inactive. Its original VOLUME 9.78 is preserved in the raw
+render, with constant gain applied only to the separate listening copy. Its 4.8-second
+monophonic phrase holds C3 (MIDI 48) from 0.20 to 1.60 s, then C4 (60) from 2.10 to 3.50 s,
+with 1.30 s for the final release. The clip sends no CC 1: 7-bit MIDI cannot represent the
+factory modulation setting 0.17 exactly. The guide explains loading the preset and matching
+the hardware's modulation excursion, with its OSC 3 LO triangle at about 11 Hz.
+
+The generator now rejects more than two HI patches, a changed White Lotus factory value or
+a White Lotus CC 1 override; all three rejection paths were exercised. The renderer checks
+its controls against the actual factory White Lotus before rendering. The preset and MIDI
+files, panel and audio were regenerated; all 24 examples remain finite mono, 4.8 seconds.
+Independent MIDI decoding confirmed no overlapping keys and no CC 1 in example 13. All
+23 other raw/listening audio pairs are bit-identical to the previous pack by SHA-256.
+The White Lotus panel was visually checked; formatting and targeted release clippy passed.

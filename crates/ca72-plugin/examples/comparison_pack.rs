@@ -11,7 +11,7 @@ use ca72_panel::presets::BarScene;
 use ca72_panel::strip::{StripRenderer, StripScene};
 use ca72_panel::{CONTROLS, Renderer, Scene};
 use ca72_plugin::engine::{Engine, Event};
-use ca72_plugin::library::{Library, Origin, parse_factory};
+use ca72_plugin::library::{Library, Origin, factory, parse_factory};
 use ca72_plugin::params::Ca72Params;
 use ca72_plugin::presets::sound_params;
 use serde_json::{Value, json};
@@ -78,9 +78,9 @@ fn panel(path: &Path, name: &str, values: &[(String, f64)]) -> Result<(), String
     let mut renderer = Renderer::new(0.5, 1.0);
     renderer.render(&scene);
     let strip_scene = StripScene {
-        auto: false,
+        auto: plain("auto_gain").is_some_and(|v| v >= 0.5),
         readouts: [
-            (String::from("2"), false),
+            (format!("{:.0}", plain("voices").unwrap_or(2.0)), false),
             (String::from("OFF"), false),
             (String::from("OFF"), false),
             (String::from("OFF"), false),
@@ -181,13 +181,24 @@ fn run() -> Result<(), String> {
             return Err(format!("{}: individual file differs from bank", sound.name));
         }
         let mut controls = common::controls_of(sound);
+        if phrase["factory_source"].as_str() == Some("White Lotus") {
+            let original = factory()
+                .iter()
+                .find(|s| s.name == "White Lotus")
+                .ok_or("factory White Lotus is missing")?;
+            if controls != common::controls_of(original) {
+                return Err("comparison White Lotus differs from the factory's controls".into());
+            }
+        }
         controls.ultra = true;
         controls.poly = false;
         let mut engine = Engine::new();
         engine.set(&controls);
         engine.prepare(RATE as f64, SEED);
         engine.event(Event::PitchBend(0.0));
-        engine.event(Event::Modulation(number(&phrase["cc1"])? as f32 / 127.0));
+        if !phrase["cc1"].is_null() {
+            engine.event(Event::Modulation(number(&phrase["cc1"])? as f32 / 127.0));
+        }
         let mut events = Vec::new();
         let mut last_end = 0;
         for note in phrase["notes"].as_array().ok_or("notes is not an array")? {
