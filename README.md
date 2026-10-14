@@ -16,7 +16,8 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/Ekep7V5lWqA
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.0: the circuit calibrated against a hardware instrument, projects saved with
+**Status:** 0.2.1: the lower panel can be shown or hidden instantly; strong filter contours
+in HI and LO keep ultrasonic resonance out of the output. Includes 0.2.0: the circuit calibrated against a hardware instrument, projects saved with
 0.1 translated into it; nineteen new factory presets, 0.1's in a download of their own; the
 realistic look; QUALITY's LO, HI and ULTRA; stereo with SPREAD, INNER, DOUBLE and UNISON;
 DRIVE, LEVEL and AUTO GAIN; FILTER MODE; NOTE PRIORITY and RETRIGGER; and an instance waiting

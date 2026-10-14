@@ -149,6 +149,15 @@ One more from the CA-72's own testing in Cubase 15 on Windows 11 (2026-10-10; it
     An editor that does not override it takes none, as before. The CA-72's
     `crates/ca72-plugin/tests/vst3_host.rs` gives the view keys as Cubase does.
 
+14. **Queued resize refusals reach the editor.** VST3's frame captures an editor's resize
+    request id and size before calling the host, then reports its final answer through
+    `Editor::resize_result`, including requests queued onto Linux's `IRunLoop`. The context
+    identifies wrappers that send these replies; a dropped request reports failure. The
+    default editor hooks retain existing behaviour. The CA-72 uses monotonically numbered
+    GUI transactions to restore the last confirmed view after refusal and ignore replies
+    from superseded requests or closed windows. `tests/vst3_host.rs` exercises synchronous
+    answers and a refusal delivered through the actual Linux run-loop socket.
+
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
-and `nih_plug_derive` here and apply the thirteen changes again, unless upstream has fixed them.
+and `nih_plug_derive` here and apply the fourteen changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.

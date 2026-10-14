@@ -15,6 +15,7 @@ pub mod opening;
 pub mod params;
 pub mod pool;
 pub mod presets;
+mod resizing;
 pub mod settings;
 pub mod update;
 

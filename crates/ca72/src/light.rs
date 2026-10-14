@@ -7,7 +7,7 @@
 //! loop (its gain the emphasis, its own limiter setting how loud it rings), FILTER MODE HI
 //! (the bus less the filter), the plug-in's DRIVE, contours of RC segments with the circuit's
 //! time laws and trigger, and the VCA's measured law. The audio
-//! path runs in single precision at the voice's rate; what the panel and the contours set
+//! path runs in single precision, the filter at eight times the voice's rate; what the panel and the contours set
 //! (the oscillators' increments, the ladder's coefficient) is worked out every
 //! [`CONTROL_EVERY`] samples and followed between.
 //!
@@ -17,6 +17,7 @@
 //! contact has been open 11.5 ms; GLIDE moves the pitch as the circuit's hold does. Nothing here
 //! allocates once made.
 
+use crate::resample::{Decimator, Interpolator};
 use crate::tuning::FREQ_CENTRE;
 #[cfg(test)]
 use crate::voice::OscPanel;
@@ -27,6 +28,9 @@ use crate::voice::{
 
 /// Samples between the control laws' updates.
 pub const CONTROL_EVERY: usize = 16;
+
+/// Keep the nonlinear ladder's ultrasonic harmonics out of the output band.
+const FILTER_OVERSAMPLE: usize = 8;
 
 /// The laws, fitted to the circuit model's measurements at 48 kHz (`tests/potato_reference.rs`;
 /// decisions.md R31), as calibrated against the hardware reference (R42 on): where the circuit
@@ -97,12 +101,12 @@ pub mod laws {
     pub const WHITE: f32 = 0.600;
     pub const PINK: f32 = 0.440;
     pub const NOISE_OHMS: (f64, f64) = (700.0, 26.2e3);
-    pub const WHITE_BAND: (f64, f64) = (60.0, 9_500.0);
+    pub const WHITE_BAND: (f64, f64) = (60.0, 10_000.0);
     pub const PINK_BAND: (f64, f64) = (40.0, 6_500.0);
     /// The white's low-pass at each of `NOISE_TOP_AT`'s rates, Hz: the fit at 48 kHz takes in
     /// the circuit's own top near Nyquist; at 88.2 kHz and over its noise reaches higher.
     pub const NOISE_TOP_AT: [f64; 2] = [48_000.0, 88_200.0];
-    pub const WHITE_TOP: [f64; 2] = [9_500.0, 19_000.0];
+    pub const WHITE_TOP: [f64; 2] = [10_000.0, 19_000.0];
     pub const PINK_TOP: [f64; 2] = [6_500.0, 9_000.0];
 
     /// The ladder's input pair, a tanh on the input less the loop's feedback: the bus in its
@@ -128,6 +132,23 @@ pub mod laws {
     pub const CUTOFF_LOG2: [f32; 21] = [
         5.2, 5.5, 5.81, 6.345, 6.787, 7.257, 7.745, 8.306, 8.878, 9.459, 10.045, 10.626, 11.208,
         11.789, 12.366, 12.874, 13.375, 13.866, 14.229, 14.42, 14.55,
+    ];
+    /// Above the fitted dial's top, Q28 saturates instead of continuing exponentially.
+    /// Relative pitch from the circuit's converter and ladder: CUTOFF at 10, CUT CV
+    /// advanced by 0, 0.5, 1, 1.5, 2, 3, 4, 6 and 10 octaves (R-FILTER-CONTOUR).
+    pub const CUTOFF_SAT_AT: [f64; 9] = [
+        14.55, 15.05, 15.55, 16.05, 16.55, 17.55, 18.55, 20.55, 24.55,
+    ];
+    pub const CUTOFF_SAT: [f64; 9] = [
+        14.55,
+        14.76425192,
+        14.79149723,
+        14.80223027,
+        14.80798777,
+        14.81368897,
+        14.81613421,
+        14.81781641,
+        14.81830415,
     ];
     /// KEYBOARD CONTROL 1, 2 and both: octaves of the cutoff an octave of the keys, from C
     /// (36, where the keyboard's voltage is 0).
@@ -628,7 +649,7 @@ impl Noise {
 }
 
 /// The ladder: four one-pole stages, trapezoidal, the loop solved without delay for its
-/// linear part; the loop's feedback through its own limit (how loud it rings).
+/// nonlinear input pair; the loop's feedback through its own limit (how loud it rings).
 #[derive(Debug, Clone, Copy, Default)]
 struct Ladder {
     s: [f32; 4],
@@ -655,6 +676,43 @@ impl Ladder {
         } else {
             top * tanh(u * inv)
         } - rest_bias;
+        // Solve y = top*tanh((x - k*(g^4*y + rest) + bias)/top) - rest_bias.
+        // Its residual is monotone (slope >= 1). Newton normally takes a few steps;
+        // the pair's limits bracket the root if a step crosses its knee.
+        let q = k * g4;
+        let v = x - k * rest + bias;
+        let (mut lo, mut hi) = (-top - rest_bias, top - rest_bias);
+        let mut converged = false;
+        for _ in 0..24 {
+            let a = (v - q * y) * inv;
+            let t = tanh(a);
+            let r = y - (top * t - rest_bias);
+            if r.abs() < 1e-6 {
+                converged = true;
+                break;
+            }
+            if r < 0.0 {
+                lo = y;
+            } else {
+                hi = y;
+            }
+            let slope = if a.abs() >= 3.0 {
+                0.0
+            } else {
+                let a2 = a * a;
+                let d = (a2 - 9.0) / (a2 + 3.0);
+                d * d / 9.0
+            };
+            let next = y - r / (1.0 + q * top * inv * slope);
+            y = if next >= lo && next <= hi {
+                next
+            } else {
+                (lo + hi) * 0.5
+            };
+        }
+        if !converged {
+            crate::unconverged::note(crate::unconverged::Solver::FilterLoop);
+        }
         for st in s.iter_mut() {
             let v = (y - *st) * g;
             let out = v + *st;
@@ -869,6 +927,8 @@ pub struct Light {
     thump: (f32, f32, f32),
     bias: f32,
     ladder: Ladder,
+    filter_up: Interpolator,
+    filter_down: Decimator,
     /// The ladder's stage gain (and its step a sample) and loop gain.
     g: f32,
     g_step: f32,
@@ -903,6 +963,10 @@ pub struct Light {
 impl Light {
     /// A voice at `rate` Hz, at rest, with the default panel.
     pub fn new(rate: f64) -> Light {
+        let filter_rate = rate * FILTER_OVERSAMPLE as f64;
+        let filter_up = Interpolator::sparse(FILTER_OVERSAMPLE);
+        let filter_down = Decimator::sparse(FILTER_OVERSAMPLE);
+        let filter_delay = filter_up.delay() + filter_down.delay();
         let at = |s: f64| (s * rate).round() as u32;
         let law = ContourLaw::new(Panel::default().filter_contour, true, 0, rate);
         let mut l = Light {
@@ -946,9 +1010,11 @@ impl Light {
                 pink_lp: 0.0,
             },
             noise_c: NoiseLaw::new(rate),
-            feedback_delay: interpolate(&laws::FEEDBACK_AT, &laws::FEEDBACK_DELAY, rate) as f32,
+            feedback_delay: (interpolate(&laws::FEEDBACK_AT, &laws::FEEDBACK_DELAY, rate)
+                - filter_delay)
+                .max(1.0) as f32,
             coupling: (
-                (-std::f64::consts::TAU * laws::COUPLING_HZ / rate).exp() as f32,
+                (-std::f64::consts::TAU * laws::COUPLING_HZ / filter_rate).exp() as f32,
                 0.0,
                 0.0,
             ),
@@ -958,7 +1024,7 @@ impl Light {
                 0.0,
             ),
             mode: (
-                (-std::f64::consts::TAU * laws::MODE_HZ / rate).exp() as f32,
+                (-std::f64::consts::TAU * laws::MODE_HZ / filter_rate).exp() as f32,
                 0.0,
                 0.0,
             ),
@@ -971,6 +1037,8 @@ impl Light {
             thump: (0.0, 0.0, 0.0),
             bias: tanh(laws::BIAS),
             ladder: Ladder::default(),
+            filter_up,
+            filter_down,
             g: 0.0,
             g_step: 0.0,
             k: 0.0,
@@ -1287,6 +1355,8 @@ impl Light {
             Contour::at_rest(&self.set.contours[1]),
         ];
         self.ladder = Ladder::default();
+        self.filter_up.reset();
+        self.filter_down.reset();
         self.coupling = (self.coupling.0, 0.0, 0.0);
         self.droop = (self.droop.0, 0.0, 0.0);
         self.mode = (self.mode.0, 0.0, 0.0);
@@ -1378,8 +1448,14 @@ impl Light {
             + extra;
         let corner = interpolate(&laws::CORNER_AT_LOG2, &laws::CORNER, log2) * s.corner
             + interpolate(&laws::RING_RAISE_AT_LOG2, &laws::RING_RAISE, log2) * (1.0 - s.corner);
-        let hz = f64::from(exp2((log2 + corner) as f32));
-        let w = (std::f64::consts::PI * hz / self.rate).min(1.4);
+        let frequency_log = log2 + corner;
+        let frequency_log = if frequency_log > laws::CUTOFF_SAT_AT[0] {
+            interpolate(&laws::CUTOFF_SAT_AT, &laws::CUTOFF_SAT, frequency_log)
+        } else {
+            frequency_log
+        };
+        let hz = f64::from(exp2(frequency_log as f32));
+        let w = (std::f64::consts::PI * hz / (self.rate * FILTER_OVERSAMPLE as f64)).min(1.4);
         // tan by its Padé form, close enough below 1.4 for the ladder's tuning.
         let w2 = w * w;
         let t = w * (15.0 - w2) / (15.0 - 6.0 * w2);
@@ -1456,7 +1532,7 @@ impl Light {
         let mut inv = self.inv;
         let mut g = self.g + self.g_step;
         self.g = g;
-        let k = self.k;
+        let mut k = self.k;
         let modulating = depth > 0.0 && (osc_mod || filter_mod);
         let needs_noise = noise_gain != 0.0 || (modulating && mix_k > 0.0);
         let (white, pink, red) = if needs_noise {
@@ -1495,10 +1571,8 @@ impl Light {
                         + mix_k * n * (laws::NOISE_OCTAVES_RMS / rms) as f32)
                     + offset
                         * ((1.0 - mix) * laws::MOD_OFFSET.1 + mix * laws::NOISE_OFFSET.1) as f32;
-                // (On the step's prewarped coefficient, tan scaling as the cutoff does below
-                // Nyquist's neighbourhood; the loop's gain as the step has it.)
-                let t = (g / (1.0 - g)) * exp2(octaves);
-                g = t.min(5.8) / (1.0 + t.min(5.8));
+                // Use the same bounded cutoff law for audio-rate modulation and contours.
+                (g, k) = self.coefficients(f64::from(octaves));
             }
         }
         // The oscillators.
@@ -1569,31 +1643,41 @@ impl Light {
             pre = y;
         }
         let bus = gain[0] * w0 + gain[1] * w1 + gain[2] * w2 + noise_gain * noise + ext_bus * pre;
-        let y = self.ladder.tick(
-            laws::DRIVE * self.drive * bus,
-            g.clamp(0.0, 0.999),
-            k,
-            laws::BIAS,
-            self.limit,
-        );
-        // The filter's output coupling; FILTER MODE HI, the bus (through its own coupling)
-        // less it.
-        let y = y * self.pass;
-        let (a, x0, y0) = self.coupling;
-        let lo = a * (y0 + y - x0);
-        self.coupling = (a, y, lo);
-        let y = if self.panel.filter_hi {
-            let (a, x0, y0) = self.mode;
-            let d = self.direct * bus;
-            let direct = a * (y0 + d - x0);
-            self.mode = (a, d, direct);
-            direct - lo
-        } else {
-            // (The direct branch's coupling at rest: in HI it starts from the bus's sample.)
-            self.mode.1 = 0.0;
-            self.mode.2 = 0.0;
-            lo
-        };
+        let mut inputs = [0.0; FILTER_OVERSAMPLE];
+        self.filter_up.push(f64::from(bus), &mut inputs);
+        let mut filtered = 0.0;
+        for input in inputs.iter().take(FILTER_OVERSAMPLE) {
+            let bus = *input as f32;
+            let y = self.ladder.tick(
+                laws::DRIVE * self.drive * bus,
+                g.clamp(0.0, 0.999),
+                k,
+                laws::BIAS,
+                self.limit,
+            );
+            // The filter's output coupling; FILTER MODE HI, the bus (through its own coupling)
+            // less it.
+            let y = y * self.pass;
+            let (a, x0, y0) = self.coupling;
+            let lo = a * (y0 + y - x0);
+            self.coupling = (a, y, lo);
+            let y = if self.panel.filter_hi {
+                let (a, x0, y0) = self.mode;
+                let d = self.direct * bus;
+                let direct = a * (y0 + d - x0);
+                self.mode = (a, d, direct);
+                direct - lo
+            } else {
+                // (The direct branch's coupling at rest: in HI it starts from the bus's sample.)
+                self.mode.1 = 0.0;
+                self.mode.2 = 0.0;
+                lo
+            };
+            if let Some(out) = self.filter_down.push(f64::from(y)) {
+                filtered = out;
+            }
+        }
+        let y = filtered as f32;
         // The VCA on the loudness contour.
         let g = &laws::VCA_GAIN;
         let v = (loud.max(0.0) * (1.0 / laws::VCA_STEP)) as f32;
@@ -1643,6 +1727,37 @@ mod tests {
             let e = exp2(x);
             assert!((e / x.exp2() - 1.0).abs() < 1e-6, "exp2({x}) = {e}");
         }
+    }
+
+    /// The pair must solve its actual feedback, including its knee and stored charge.
+    #[test]
+    fn the_ladder_solves_its_nonlinear_loop() {
+        let _ = crate::unconverged::take();
+        for g in [0.05, 0.2, 0.5, 0.9, 0.999] {
+            for k in [0.0, 2.0, 7.5] {
+                for top in [0.78, 1.0] {
+                    for x in [-10.0, -1.0, 0.0, 1.0, 10.0] {
+                        let before = [0.2, -0.4, 0.6, -0.8];
+                        let mut ladder = Ladder { s: before };
+                        let rest = (1.0 - g)
+                            * (g * (g * (g * before[0] + before[1]) + before[2]) + before[3]);
+                        let inv = 1.0 / top;
+                        let bias = top * tanh(laws::BIAS * inv);
+                        let out = ladder.tick(x, g, k, laws::BIAS, (top, inv, bias));
+                        // Recover the input pair's solution from the first stage's charge.
+                        let y = (ladder.s[0] - before[0]) / (2.0 * g) + before[0];
+                        let residual = y
+                            - (top * tanh((x - k * (g.powi(4) * y + rest) + laws::BIAS) * inv)
+                                - bias);
+                        assert!(
+                            out.is_finite() && residual.abs() < 5e-6,
+                            "g={g}, k={k}, top={top}, x={x}: residual {residual}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(crate::unconverged::take().is_empty(), "LO solver cap");
     }
 
     /// A key sounds at its pitch, and silence follows its release.
