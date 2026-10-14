@@ -365,6 +365,7 @@ class WrapAsAUV2 : public ausdk::AUBase,
   OSStatus Start() override;
   OSStatus Stop() override;
   void Cleanup() override;
+  OSStatus Reset(AudioUnitScope scope, AudioUnitElement element) override;
 
   // latency/tailtime/processing
   virtual Float64 GetLatency() override;

@@ -4,6 +4,7 @@
 #include <limits>
 #include <cassert>
 #include <Block.h>
+#include "detail/auv2/render_trace.h"
 
 extern bool fillAudioUnitCocoaView(AudioUnitCocoaViewInfo *viewInfo, std::shared_ptr<Clap::Plugin>);
 
@@ -188,8 +189,16 @@ WrapAsAUV2::~WrapAsAUV2()
 
 // the very very reduced state machine
 // this is where AUv2 transitions to render-ready
+OSStatus WrapAsAUV2::Reset(AudioUnitScope scope, AudioUnitElement element)
+{
+  ca72_trace::put(13, this, scope, element);
+  return Base::Reset(scope, element);
+}
+
 OSStatus WrapAsAUV2::Initialize()
 {
+  ca72_trace::prepare();
+  ca72_trace::put(1, this);
   if (!_desc) return 2;
 
   // first need to initialize the base to create
@@ -636,6 +645,7 @@ void WrapAsAUV2::flushPendingParameters()
                          }};
   // No output list: nih-plug then leaves the editor's own changes queued for the next
   // block, where they reach the host as before.
+  for (const auto &e : events) ca72_trace::put(11, this, e.param_id, ca72_trace::bits(e.value), e.header.time);
   params->flush(_plugin->_plugin, &in, nullptr);
 }
 
@@ -715,6 +725,7 @@ void WrapAsAUV2::flushEditorParameters()
                              v->push_back(e);
                              return true;
                            }};
+  for (const auto &e : events) ca72_trace::put(11, this, e.param_id, ca72_trace::bits(e.value), e.header.time);
   params->flush(_plugin->_plugin, &in, &out);
   render.unlock();
   for (const auto &e : told)
@@ -1269,7 +1280,10 @@ void WrapAsAUV2::activateCLAP()
                                      &_parametertree, this, maxSampleFrames, _midi_preferred_dialect,
                                      _midi_supported_dialects, clapAudioInputs, clapAudioOutputs);
 
+    ca72_trace::put(2, this, maxSampleFrames, ca72_trace::bits(_plugin->getSampleRate()));
     _plugin->activate();
+    ca72_trace::put(3, this, maxSampleFrames, ca72_trace::bits(_plugin->getSampleRate()));
+    ca72_trace::snapshot(this, _plugin->_plugin, _plugin->_ext._params);
     _plugin->start_processing();
     _initialized = true;
   }
@@ -1298,6 +1312,8 @@ void WrapAsAUV2::deactivateCLAP()
 OSStatus WrapAsAUV2::Render(AudioUnitRenderActionFlags &inFlags, const AudioTimeStamp &inTimeStamp,
                             UInt32 inFrames)
 {
+  ca72_trace::put(4, this, inFrames, GetMaxFramesPerSlice(), ca72_trace::bits(inTimeStamp.mSampleTime), inFlags,
+                  _plugin ? ca72_trace::bits(_plugin->getSampleRate()) : 0, _initialized);
   assert(inFlags == 0);
   if (_initialized && (inFlags == 0))
   {
@@ -1376,6 +1392,7 @@ OSStatus WrapAsAUV2::Render(AudioUnitRenderActionFlags &inFlags, const AudioTime
     //                                        {}
     //                                        );
   }
+  ca72_trace::put(5, this, inFrames);
   return noErr;
 }
 
@@ -1635,7 +1652,10 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
       UInt8 *streamData = (UInt8 *)(CFDataGetBytePtr(juceData));
 
       chunk.setData(streamData, numBytes);
+      ca72_trace::put(14, this);
       _plugin->_ext._state->load(_plugin->_plugin, chunk);
+      ca72_trace::put(15, this);
+      ca72_trace::snapshot(this, _plugin->_plugin, _plugin->_ext._params);
     }
     return noErr;
   }
@@ -1658,7 +1678,10 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
     {
       Clap::StateMemento chunk;
       chunk.setData(pData, lLen);
+      ca72_trace::put(14, this);
       _plugin->_ext._state->load(_plugin->_plugin, chunk);
+      ca72_trace::put(15, this);
+      ca72_trace::snapshot(this, _plugin->_plugin, _plugin->_ext._params);
       // The parameters' values as the state left them, for the host to read at once: the
       // plugin's own request for this (CLAP_PARAM_RESCAN_VALUES) comes on a later idle.
       param_rescan(CLAP_PARAM_RESCAN_VALUES);

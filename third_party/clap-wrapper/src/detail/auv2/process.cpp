@@ -1,4 +1,5 @@
 #include "process.h"
+#include "render_trace.h"
 #include "detail/shared/midi_translation.h"
 
 #include <algorithm>
@@ -306,7 +307,22 @@ void ProcessAdapter::process(ProcessData &data)
   }
 #endif
 
+  ca72_trace::put(6, data.audioUnit, data.numSamples, _events.size(), _clapNumInputs, _clapNumOutputs,
+                  ca72_trace::bits(data.timestamp.mSampleTime), _transport.flags);
+  for (const auto &event : _events) {
+    if (event.header.type == CLAP_EVENT_PARAM_VALUE)
+      ca72_trace::put(11, data.audioUnit, event.param.param_id, ca72_trace::bits(event.param.value), event.header.time);
+    else if (event.header.type == CLAP_EVENT_NOTE_ON || event.header.type == CLAP_EVENT_NOTE_OFF)
+      ca72_trace::put(12, data.audioUnit, event.header.type, event.note.key, ca72_trace::bits(event.note.velocity), event.header.time,
+                      uint64_t(int64_t(event.note.channel)), uint64_t(int64_t(event.note.port_index)), uint64_t(int64_t(event.note.note_id)));
+    else if (event.header.type == CLAP_EVENT_MIDI)
+      ca72_trace::put(16, data.audioUnit, event.midi.data[0] | (uint64_t(event.midi.data[1]) << 8) | (uint64_t(event.midi.data[2]) << 16),
+                      event.header.time, event.midi.port_index);
+    else
+      ca72_trace::put(17, data.audioUnit, event.header.type, event.header.time, event.header.size);
+  }
   _plugin->process(_plugin, &_processData);
+  ca72_trace::put(7, data.audioUnit, data.numSamples);
 
   processOutputEvents();
 
