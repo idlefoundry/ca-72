@@ -5323,7 +5323,7 @@ remain preserved. Acceptance of the withdrawn build does not validate this
 candidate's binaries; the corrected candidate is checked separately before publication.
 
 
-## R-RELEASE. 0.2.2
+## R73. 0.2.2
 
 The release starts at the 0.2.0 tag and adds only R70's panel hide/show, R71's
 HI/LO filter correction and their resize and regression-test support. Production
@@ -5332,4 +5332,49 @@ excluded. The Mac CoreGraphics import ordering is adjusted only because the
 repository's existing formatter requires it; its behaviour does not change.
 
 The package scripts and release workflow match the plug-in-only 0.2.0 baseline.
-Local checks, host acceptance and release provenance are recorded after they run.
+The release tag is `v0.2.2`, commit `f440a30b88e0e9a5ca0d9c745f576bcae71c0ced`,
+from PR #35. Its tree, `e6711cd82a731bdd1b9d3d434f3f2a244dfcf8c0`, is exactly the
+accepted candidate's (`76acd686`); the integration merge retains current main's
+history while restoring the selected production source. The optional development-only
+launcher from 0.2.0 remains unchanged in source and is not packaged.
+
+**Corrected candidate validation, 2026-10-14:** formatting, both full workspace clippy
+configurations, cutoff-fit regeneration and the full workspace tests passed locally:
+431 passed, none failed, 50 ignored. Universal VST3/CLAP and AU builds passed local
+clap-validator, Steinberg's validator, pluginval strictness 10 and strict auval.
+PR CI [38584514287](https://github.com/idlefoundry/ca-72/actions/runs/38584514287)
+passed all three platforms. The Mac job's unchanged retry cleared a nested auval
+timeout; its direct arm64 and Intel AU checks had already passed. The release build
+is [38608650903](https://github.com/idlefoundry/ca-72/actions/runs/38608650903).
+Two independent scope and packaging/licensing reviews found no blocker.
+
+**Native acceptance used these corrected installer payloads:**
+
+| System and host | Result |
+|---|---|
+| macOS, REAPER 7.82 VST3 | Eight full/compact cycles, presets reveal/restore, compact grip, settings, saved project and three MIDI notes restored; exact canvas equality after reload. |
+| macOS, Bitwig 5.2.7 CLAP | Eight full/compact cycles, presets reveal/restore, compact grip, saved dimensions restored; exact canvas equality after editor reopen. |
+| Windows, REAPER VST3 | 23 confirmed native frames, compact grip, presets and settings; saved project and three MIDI notes restored; exact visible repaint equality. |
+| Windows, Sandyne 2.5 VST3 | 23 confirmed native frames, compact grip, presets and settings; exact visible repaint equality. |
+| Linux, REAPER 7.79 VST3 | 23 confirmed native frames at 2x desktop scale, compact grip, saved project and three MIDI notes restored; exact full repaint equality. |
+| Linux, Bitwig 5.2.7 CLAP | 23 confirmed native frames, compact grip and presets; loaded the saved Mac project state; exact full repaint equality. |
+
+The loaded module path and hash were checked. An older system CLAP initially selected
+by Mac Bitwig was excluded, then its scan location was removed temporarily and a fresh
+process loaded the corrected user-installed CLAP. Linux Bitwig used its existing
+PulseAudio driver because its configured EVO4 hardware was disconnected. These editor
+checks do not claim a new hardware recording or factory-preset re-leveling.
+
+The Mac installer is universal, Developer ID signed, Apple-notarized, stapled and
+Gatekeeper accepted. Its SHA-256 is
+`c685ee7dc14e0efe1aaf725e4d891548a8a4ce5cec472cbbd67057ea54531970`.
+The package's signed executable hashes match the native test payloads. CI's unsigned
+Mac package is excluded from the distribution. The release assets retain the required
+Windows manual-install ZIP, checksum sidecar, 0.1 presets, git dependency sources and
+licence notices. The release verification checks fresh downloads against GitHub asset
+digests and checksum manifests, audits all package payloads, checks the downloaded
+Mac package's signature/staple/Gatekeeper result, and checks public Latest routing.
+
+The evidence and verification records accompany the release in the 0.2.2 artifact
+folder. The withdrawn 0.2.1 remains draft with its tag and all nine original assets
+preserved. Its acceptance does not stand in for these corrected candidate checks.
