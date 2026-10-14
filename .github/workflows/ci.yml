@@ -75,7 +75,9 @@ jobs:
 
       - name: The third-party notices up to date
         if: runner.os == 'Linux'
-        run: python3 scripts/notices.py --check
+        run: |
+          python3 scripts/test-notices.py
+          python3 scripts/notices.py --check
 
       - name: The application's audio libraries
         if: runner.os == 'Linux'

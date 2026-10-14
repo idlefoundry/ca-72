@@ -184,7 +184,10 @@ def render():
     crates = {}
     for platform in PLATFORMS:
         for p in linked(metadata(platform)):
-            crates[(p["name"], p["version"])] = p
+            # Equal name/version does not imply equal source or attribution.
+            # Keep vendored and git variants, independent of set iteration order.
+            source = p.get("source") or "path+" + os.path.relpath(p["manifest_path"], ROOT)
+            crates[(p["name"], p["version"], source)] = p
     groups = {}
     for key in sorted(crates):
         p = crates[key]
