@@ -173,6 +173,18 @@ impl Learning {
         self.open.as_ref().map(|o| &o.menu)
     }
 
+    /// Keep a floating menu inside the editor's current viewport, including its compact view.
+    pub fn fit_menu(&mut self, fonts: &Fonts, area: [f64; 4]) {
+        if let Some(open) = &mut self.open {
+            let menu = &open.menu;
+            let (w, h) = menu.extent(fonts);
+            if menu.x < area[0] || menu.y < area[1] || menu.x + w > area[2] || menu.y + h > area[3]
+            {
+                open.menu = menu.clone().placed(fonts, menu.x, menu.y, area);
+            }
+        }
+    }
+
     /// A control's menu opened at (`x`, `y`) on the panel (drawing units) for `place`'s control,
     /// or for a control that cannot be learned (`not`: what it says); `size` the lettering's.
     pub fn open_menu(

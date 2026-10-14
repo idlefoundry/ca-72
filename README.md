@@ -202,6 +202,11 @@ the slider; the switch beside each turns it off and back on at its amount). VOIC
 placement are unlit in MONO with DOUBLE, where they move nothing, and FEEDBACK is dimmed
 while EXTERNAL INPUT is closed.
 
+**The lower panel.** PANEL beside the settings key shows or hides the lower panel's controls.
+The window changes height immediately, with the synth and preset rail always visible; your
+choice is saved with the project. Opening presets reveals a hidden panel temporarily, and
+closing them returns to the short window.
+
 **Presets.** At the strip's left: the preset last chosen (marked • once you change it), a
 star to make it a favourite, the previous and next preset, and SAVE…. A preset holds every
 control but the PITCH wheel, POWER and MIDI BEND RANGE (your keyboard's, which choosing a
@@ -500,9 +505,9 @@ The service documents and datasheets the model was derived from are not included
 - The presets' library is read when the drawer opens and every two seconds while it is
   open, so a change another program makes there shows within two seconds.
 - The first size comes from the main screen on macOS, the primary monitor on Windows, and
-  on Linux the monitor the pointer is on (else the primary). If the window with the
-  presets' drawer below the panel would not fit on the screen, or the host will not
-  resize it, the drawer opens over the panel instead.
+  on Linux the monitor the pointer is on (else the primary). A host that refuses editor
+  resizing keeps the current panel height. Opening presets from the short view needs the
+  host to accept the full height.
 - On Windows and Linux, in a host that gives the editor no display scale (Live and Sandyne, for
   two), the editor draws a pixel a point: the panel fills the window at any size, but the hover
   tips, and MIDI Learn's menu and note, are small on a high-density screen.
