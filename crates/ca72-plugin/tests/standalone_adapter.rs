@@ -2,6 +2,7 @@
 #![cfg(feature = "standalone-production")]
 #![allow(unsafe_code)]
 
+#[cfg(not(feature = "assert_process_allocs"))]
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
@@ -18,8 +19,10 @@ thread_local! {
     static TRACK: Cell<bool> = const { Cell::new(false) };
     static OPERATIONS: Cell<usize> = const { Cell::new(0) };
 }
+#[cfg(not(feature = "assert_process_allocs"))]
 struct Counting;
 // SAFETY: every allocation operation is forwarded unchanged to System.
+#[cfg(not(feature = "assert_process_allocs"))]
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let _ = TRACK.try_with(|track| {
@@ -43,6 +46,7 @@ unsafe impl GlobalAlloc for Counting {
     }
 }
 #[global_allocator]
+#[cfg(not(feature = "assert_process_allocs"))]
 static ALLOCATOR: Counting = Counting;
 
 struct Initial;
