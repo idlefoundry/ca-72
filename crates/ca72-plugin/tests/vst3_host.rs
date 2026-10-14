@@ -616,7 +616,8 @@ fn a_key_the_host_gives_the_view_reaches_the_editor() {
 #[cfg_attr(not(target_os = "linux"), VST3(implements(IPlugFrame)))]
 struct ResizeFrame {
     accepted: Arc<AtomicBool>,
-    #[cfg(target_os = "linux")]
+    // VST3's allocation macro requires every field on every platform.
+    #[allow(dead_code)] // Only Linux registers a run-loop handler.
     handler: Arc<Mutex<Option<(usize, i32)>>>,
 }
 
@@ -667,11 +668,8 @@ fn a_resize_reports_the_hosts_answer_and_request_identity() {
     let i = Instance::new(Host::Silent);
     RESIZES.with(|r| r.borrow_mut().clear());
     let accepted = Arc::new(AtomicBool::new(false));
-    let frame: VstPtr<dyn IPlugFrame> = com(ResizeFrame::allocate(
-        accepted.clone(),
-        #[cfg(target_os = "linux")]
-        Arc::default(),
-    ));
+    let frame: VstPtr<dyn IPlugFrame> =
+        com(ResizeFrame::allocate(accepted.clone(), Arc::default()));
     // SAFETY: the host's frame lives until after the view removes it.
     unsafe {
         assert_eq!(i.view.set_frame(frame.as_ptr().cast()), kResultOk);
