@@ -5223,3 +5223,38 @@ other systems in the README and the release's notes.
 
 **Not done:** an Intel Mac, auval on this Mac's registry (CI's macOS job runs it), and Live (the
 owner's).
+
+## R70. The lower panel can be shown or hidden
+
+**Owner decision, 2026-10-13.** The whole second panel should show or hide, with "no animation
+of growing". Asked whether hiding it should shorten the window while leaving the synth and
+preset rail visible: "Yes, snap between the short and full window."
+
+The owner reviewed the rendered preview and approved CI and merging the change.
+
+**Agent decisions, 2026-10-13** (not separately approved):
+- PANEL beside the rail's settings key toggles the lower controls. The window's width and
+  controls' scale stay fixed; its height changes in one request. The rail's name display is
+  100 drawing units shorter to fit the key, with NEXT and SAVE moved left by the same amount.
+- The controls are shown by default, preserving existing projects' view. The choice is saved
+  with the project as `editor_panel`, outside the sound's parameters and presets. Presets
+  temporarily reveal a hidden panel; closing them restores the compact view. The preset
+  browser's existing slide stays inside the full panel; the window itself never animates.
+- A refused resize keeps the height accepted by the host. The compact view has a grip on the
+  rail's bottom right corner, and hidden controls do not take pointer events.
+
+**Evidence (the Linux reference machine, 2026-10-13):** the editor's 64 tests passed, 7 visual
+or timing tests ignored. New checks cover the immediate height change, temporary preset
+view, unchanged sound controls, reopening compact, refused resizing, the compact grip and
+compact frames drawn in parts matching frames drawn whole. Review found and fixed compact
+menus extending below the viewport and panel visibility recalled into an already open
+editor; both have regression checks. A height-only resize preserves the frame composed
+just before the window follows it; without that guard, its regression check fails with
+"keep the rail and compact grip". Actual editor frames and an
+interactive preview are saved in this chat's visualization folder. Real-host resize checks
+and release CI have not been run. Linux VST3's queued resize can report acceptance before the
+host responds, as with the existing width grip; later refusal is not handled here.
+
+The touched crates' library tests: 243 passed, none failed, 20 ignored; the panel's approved
+image comparison passed. Formatting for both crates and clippy for all their targets, with
+and without optional features, passed. The independent reviewer rechecked the fixes.

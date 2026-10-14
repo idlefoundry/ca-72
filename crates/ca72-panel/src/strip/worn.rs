@@ -830,11 +830,16 @@ fn key_marks(o: &mut Svg) {
                     N(y + 11.0)
                 );
             }
-            BarTarget::Save => put!(
+            BarTarget::Save | BarTarget::Panel => put!(
                 o,
-                "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{KEY_PRINT}'>SAVE</text>",
+                "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{KEY_PRINT}'>{}</text>",
                 N(x),
-                N(y)
+                N(y),
+                if t == BarTarget::Panel {
+                    "PANEL"
+                } else {
+                    "SAVE"
+                }
             ),
             BarTarget::Settings => put!(
                 o,
