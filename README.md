@@ -482,7 +482,11 @@ the first time; on macOS also Apple's auval and pluginval on the Audio Unit, whi
 copies into `~/Library/Audio/Plug-Ins/Components`, where hosts look for it. It needs curl,
 unzip, git, cmake and a C++ compiler (on Windows, Visual Studio's), and on Linux without a
 display `xvfb-run`; `CA72_SKIP_GUI_TESTS=1` leaves out pluginval's editor tests, which open
-windows. CI does all of this on macOS, Windows and Linux.
+windows. The AU pluginval invocation has a finite three-minute inactivity timeout:
+its nested stress test simulates 20 seconds of audio, which ULTRA and unison can
+render slower than real time. All conformance and editor tests remain enabled;
+other formats keep their original timeout. See [the validation evidence](docs/au-validation.md).
+CI does all of this on macOS, Windows and Linux.
 
 The tests that run the circuit simulations need ngspice 47. Without it they say so and
 pass; set `CA72_REQUIRE_NGSPICE=1` to make a missing ngspice a failure.

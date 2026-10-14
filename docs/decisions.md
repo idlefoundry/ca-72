@@ -5682,3 +5682,32 @@ passes; independent review accepted it. No timeout, validator or DSP code change
 Native two-launch checks and full final-head CI must pass on the updated candidate.
 The earlier `e43d39c` proof remains scoped to its original artifacts, including the
 macOS native failure; it is not acceptance of this candidate.
+
+
+## R-AU-VALIDATION-BUDGET. Bound the AU stress run by its actual workload
+
+2026-10-14: the owner requested the AU test pass before further installer work.
+Final integration 589e5cc failed pluginval 1.0.4's default 30-second inactivity
+watchdog inside nested auval. Run 38653356837 wrapped its exact CLAP bytes with
+bounded tracing: 1,513 completed calls consumed 31.315 seconds; the expensive
+ULTRA/unison state had A-440 on; offline replay showed retained doubled voice
+tails. Requests and notes progressed normally. Direct and nested parameter randomization differed, so a
+fast direct pass was not proof of a hang or a controlled performance comparison.
+An offline replay reproduced the workload cost; forwarding missing AU Reset did
+not materially reduce it and is not represented as the repair.
+
+Agent decision following independent review: the AU-only pluginval invocation
+uses a finite 180000 ms inactivity timeout. Its nested `-strict -stress 20`
+simulates 20 seconds of audio, which need not render in 30 wall-clock seconds.
+Strictness 10, all editor/conformance/stress tests, error propagation, direct
+native/Rosetta auval and other validators stay enabled. DSP, quality, product
+binaries and installers are unchanged by this correction. The default-30-second
+failure remains recorded; this is a harness budget change, not a performance fix.
+
+Run 38654571401 uses the original, uninstrumented 589 AU and embedded CLAP from
+CI artifact 11932543293, with its verified archive hash and original pluginval
+seed. Direct strict stress and nested auval exited zero; all pluginval tests
+including editors completed successfully. This fresh auval draw was faster than
+the captured failure, so it does not reproduce the exact failing randomized state.
+`au-validation.md` records the evidence and limits. Full exact-head CI on all
+three OSes remains required before integration merge. No new release or tag.

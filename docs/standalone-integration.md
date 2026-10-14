@@ -42,7 +42,7 @@ identity. An older callback cannot acknowledge a newer UI request. The product c
   from the earlier 0.2.1 preview package.
 - Formatting, strict workspace Clippy with/without all features, touched-crate debug
   tests, typed persistence derives and installer/notices tests pass. Final exact-head
-  CI passes on macOS/Windows/Linux, including unchanged required validators. Hosted
+  CI passes on macOS/Windows/Linux, including all required validator tests and the documented AU execution budget. Hosted
   plug-in regressions and independent final source/package reviews have no blockers.
   Native checks, unperformed physical MIDI/audio checks and any unavailable host
   checks are recorded separately and never represented as passing.
@@ -60,3 +60,15 @@ child and the parent waiting for child stdout. The workload/state difference rem
 unproven. No validator limit or strictness is relaxed. This integration does not
 claim the issue fixed; its required validator result must be obtained independently.
 No additional blind diagnostic retry is authorized by this integration plan.
+
+
+**AU investigation update, 2026-10-14.** The owner resumed this investigation and
+asked to leave installer changes aside. New exact-artifact tracing establishes
+completed render progress and different randomized workloads. The earlier proposal
+to preserve the default 30-second timeout was agent-authored. Supersede that budget
+with a finite AU-only 180000 ms pluginval timeout; strictness 10, nested strict
+stress 20, editor tests, exit-code requirements and other validators remain unchanged.
+This corrects the harness budget and does not claim a DSP performance repair or that
+the original 30-second gate passed. Original failures are preserved. The unmodified
+589 AU passed the full bounded diagnostic; exact-head three-platform CI and final
+review remain required. See `au-validation.md` for evidence and limitations.
