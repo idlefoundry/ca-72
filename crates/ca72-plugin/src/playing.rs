@@ -1,10 +1,16 @@
 //! Editor-side ownership of pointer and typing notes. Never part of a preset or host state.
 
 use ca72_panel::keyboard::{self, Scene};
-use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
+use keyboard_types::{Code, Key, KeyState, KeyboardEvent, Modifiers};
 use std::sync::Arc;
 
 use crate::local_notes::LocalNotes;
+
+#[derive(Clone, Copy, Debug)]
+struct PlayedKey {
+    note: u8,
+    code: Code,
+}
 
 #[derive(Debug)]
 pub struct Playing {
@@ -17,7 +23,7 @@ pub struct Playing {
     pub wants_keys: bool,
     pointer_down: bool,
     pointer_note: Option<u8>,
-    typed: [Option<u8>; 17],
+    typed: [Option<PlayedKey>; 17],
     owned: [u8; 128],
     generation: u64,
 }
@@ -67,6 +73,11 @@ impl Playing {
         self.clear();
         self.notes.panic();
         self.generation = self.notes.generation();
+    }
+
+    pub fn panic_standalone(&mut self) {
+        self.notes.await_standalone_panic();
+        self.panic();
     }
 
     pub fn shift(&mut self, up: bool) {
@@ -138,19 +149,44 @@ impl Playing {
 
     pub fn key(&mut self, event: &KeyboardEvent, allowed: bool) -> bool {
         self.sync();
+        // A key's character may change while held (Shift turns ';' into ':', a
+        // layout/dead key can even produce a named key). Its physical release
+        // still belongs to the recorded pitch, before any modifier/takeover check.
+        if event.code != Code::Unidentified
+            && let Some(index) = self
+                .typed
+                .iter()
+                .position(|held| held.is_some_and(|held| held.code == event.code))
+        {
+            if event.state == KeyState::Up {
+                let held = self.typed[index].take().expect("matched held key");
+                self.own(held.note, false);
+                return true;
+            }
+            return allowed
+                && !event
+                    .modifiers
+                    .intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META);
+        }
         let Key::Character(s) = &event.key else {
             return false;
         };
         if s.len() != 1 {
             return false;
         }
-        let character = s.as_bytes()[0].to_ascii_lowercase();
+        let character = match s.as_bytes()[0].to_ascii_lowercase() {
+            b':' if event.state == KeyState::Up => b';', // Forwarded VST3 release: no code.
+            character => character,
+        };
         let Some(index) = keyboard::MAPPING.bytes().position(|c| c == character) else {
             return false;
         };
         if event.state == KeyState::Up {
-            if let Some(note) = self.typed[index].take() {
-                self.own(note, false);
+            if self.typed[index].is_some_and(|held| {
+                event.code == Code::Unidentified || held.code == Code::Unidentified
+            }) {
+                let held = self.typed[index].take().expect("character fallback");
+                self.own(held.note, false);
                 return true;
             }
             return allowed;
@@ -169,7 +205,10 @@ impl Playing {
         if note > 127 {
             return true;
         }
-        self.typed[index] = Some(note);
+        self.typed[index] = Some(PlayedKey {
+            note,
+            code: event.code,
+        });
         self.own(note, true);
         true
     }
@@ -234,6 +273,52 @@ mod tests {
         assert_eq!(
             events.iter().map(|e| (e.note, e.on)).collect::<Vec<_>>(),
             [(48, true), (48, false), (50, true), (50, false)]
+        );
+    }
+
+    #[test]
+    fn changing_shift_or_other_modifiers_releases_the_recorded_physical_key() {
+        for code in [Code::Semicolon, Code::Unidentified] {
+            let mut p = Playing::default();
+            let mut down = key(KeyState::Down, ";");
+            down.code = code;
+            assert!(p.key(&down, true));
+            assert_eq!(p.notes.pop().expect("semicolon attack").note, 57);
+            let mut up = key(KeyState::Up, ":");
+            up.code = code;
+            up.modifiers = Modifiers::SHIFT | Modifiers::ALT | Modifiers::CONTROL;
+            assert!(p.key(&up, false));
+            let off = p.notes.pop().expect("shifted semicolon release");
+            assert_eq!((off.note, off.on), (57, false));
+            assert!(!p.active());
+        }
+        let mut p = Playing::default();
+        let mut down = key(KeyState::Down, "a");
+        down.code = Code::KeyQ; // Layout character chooses the legend; code owns its release.
+        assert!(p.key(&down, true));
+        assert_eq!(p.notes.pop().expect("layout attack").note, 41);
+        let mut repeat = key(KeyState::Down, "q");
+        repeat.code = Code::KeyQ;
+        repeat.repeat = true;
+        assert!(p.key(&repeat, true));
+        assert!(p.notes.pop().is_none());
+        repeat.modifiers = Modifiers::CONTROL;
+        assert!(!p.key(&repeat, true), "modified repeats remain the host's");
+        let mut up = key(KeyState::Up, "q");
+        up.code = Code::KeyQ;
+        up.modifiers = Modifiers::META;
+        assert!(p.key(&up, false));
+        assert!(!p.notes.pop().expect("recorded code release").on);
+        assert!(!p.active());
+        let mut unmapped = key(KeyState::Down, "q");
+        unmapped.code = Code::KeyA;
+        assert!(
+            !p.key(&unmapped, true),
+            "physical code does not replace legend mapping"
+        );
+        assert!(
+            !p.key(&key(KeyState::Down, ":"), true),
+            "a new shifted character remains unmapped"
         );
     }
 

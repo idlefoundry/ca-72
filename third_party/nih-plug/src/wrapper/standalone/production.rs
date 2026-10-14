@@ -509,6 +509,9 @@ where
     fn plugin_api(&self) -> PluginApi {
         PluginApi::Standalone
     }
+    fn take_standalone_panic(&mut self) -> bool {
+        self.panic_channel.take().is_some()
+    }
     fn execute_background(&self, task: P::BackgroundTask) {
         if let Ok(mut producer) = self.background_tasks.try_borrow_mut() {
             let _ = producer.push(task);

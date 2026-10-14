@@ -1026,7 +1026,7 @@ impl Editing {
     fn standalone_dialog_open(&self) -> bool {
         #[cfg(feature = "standalone-production")]
         {
-            return self.standalone_dialog.is_some();
+            self.standalone_dialog.is_some()
         }
         #[cfg(not(feature = "standalone-production"))]
         {
@@ -1677,11 +1677,15 @@ impl Editing {
                     self.playing.wants_keys = self.playing.typing;
                 }
                 keyboard::Target::Panic => {
-                    self.playing.panic();
                     #[cfg(feature = "standalone-production")]
                     if let Some(app) = plugin_kit_standalone::AppHandle::current() {
+                        self.playing.panic_standalone();
                         app.panic();
+                    } else {
+                        self.playing.panic();
                     }
+                    #[cfg(not(feature = "standalone-production"))]
+                    self.playing.panic();
                 }
                 keyboard::Target::Back => {}
             }

@@ -3,7 +3,7 @@
 //! could fit. The audio thread owns the merged physical/local note state.
 
 use plugin_kit_queue::AtomicQueue;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// A callback takes at most this many local events, including discarded stale events.
 pub const CAPACITY: usize = 256;
@@ -20,6 +20,7 @@ pub struct LocalNotes {
     queue: AtomicQueue,
     generation: AtomicU64,
     panic: AtomicU64,
+    standalone_panic: AtomicBool,
     held: [AtomicU64; 2],
 }
 
@@ -29,6 +30,7 @@ impl Default for LocalNotes {
             queue: AtomicQueue::new(CAPACITY),
             generation: AtomicU64::new(0),
             panic: AtomicU64::new(0),
+            standalone_panic: AtomicBool::new(false),
             held: std::array::from_fn(|_| AtomicU64::new(0)),
         }
     }
@@ -68,6 +70,20 @@ impl LocalNotes {
 
     pub fn panic_generation(&self) -> u64 {
         self.panic.load(Ordering::Acquire)
+    }
+
+    /// The UI pairs its epoch change with a hardware-source panic. Audio must hold fresh
+    /// queued local notes until that boundary, even if the requests span two callbacks.
+    pub fn await_standalone_panic(&self) {
+        self.standalone_panic.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn standalone_panic_pending(&self) -> bool {
+        self.standalone_panic.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn finish_standalone_panic(&self) {
+        self.standalone_panic.store(false, Ordering::Release);
     }
 
     /// Only the plugin's single audio consumer calls this. The producer never advances its
@@ -172,7 +188,6 @@ impl Sources {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
 
     #[test]
     fn releasing_one_source_preserves_the_other_sources_pitch() {
