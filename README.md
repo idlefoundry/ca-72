@@ -104,11 +104,11 @@ Input/output changes briefly stop playback and retain the sound and editor.
 
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
 The development JACK launcher is kept separately (Building); direct ASIO and
-native PipeWire are not included in the production host. A separately named
-input and output cannot yet be proved to share a hardware clock with this backend;
-external input requires an enumerated duplex or aggregate device with a common
-rate. Windows interfaces whose capture and playback endpoints have different
-names may therefore be unavailable for external input in this first host.
+native PipeWire are not included in the production host. External input and output
+must support a common nominal sample rate. A bounded capture reservoir adapts
+the input to the output clock, so separately enumerated capture/playback endpoints
+are supported. The reservoir adds input buffering; the displayed output buffer
+duration is not the full input-to-output latency.
 
 The standalone remembers unsaved edits, MIDI Learn, window size and the last
 working audio/MIDI choices in `CA-72/Standalone/session.json` beneath the same

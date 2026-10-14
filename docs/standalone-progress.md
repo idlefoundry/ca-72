@@ -27,8 +27,18 @@
   textures. The source/provenance and exact generation prompts accompany the assets.
 - CPAL 0.15 exposes names/capabilities rather than stable hardware IDs. Ambiguous
   matches are rejected. Separately named capture/playback endpoints cannot be proved
-  to share a clock: this restricts Windows external-input devices and remains a
-  support limitation, not a passed test of every same-interface endpoint pair.
+  to share a clock. The shared core now adapts input with a preallocated stereo
+  reservoir and occupancy-controlled linear interpolation, bounded to ±1 %.
+  Simulated 60-second runs at 48 kHz, 128/256 frames and ±500 ppm pass with no
+  over/underflow after priming and bounded fill. Equal clocks copy samples exactly.
+  Both endpoints must support a common nominal rate. This implements the clock
+  correction the frozen spec required before allowing independently clocked devices;
+  physical-driver verification remains separate.
+- Shared host core: 19 focused tests and strict Clippy pass on Linux. The adapter's
+  direct CA-72 comparison is bit-identical through alternating 128/256-frame blocks,
+  note/wheel/controller events and active stereo external input; the processing
+  allocation guard observes zero allocations or frees. Session/MIDI Learn and
+  stopped parameter editing tests pass. Cross-platform checks are still pending.
 - Linux installer component/upgrade/uninstall tests pass in an isolated prefix,
   including spaces/percent signs and session preservation (3 tests). Desktop entry
   validation and packaging shell syntax pass. Native packages are not yet verified.
