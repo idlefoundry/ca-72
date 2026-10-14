@@ -110,20 +110,24 @@ interrupt sound; never reset the patch to defaults.
 
 **Keyboard (owner's revised reference, 2026-10-13):** 44 keys, default MIDI 41–84
 (F2–C6), neutral white plastic and polished black plastic, true L/T white-key cutouts
-around recessed black keys, narrow dark clearances, and aligned tops/fronts. Held-note
-indication is subtle amber; it never displaces a key. Keep an octave/range header. At the drawing's
+around recessed black keys, narrow dark clearances, and aligned tops/fronts. Held keys
+darken while retaining their material, shading and position.
+The outer keyboard frame is continuous wood, with straight left/right edges and a
+bottom reaching the silver trim; it contains no exposed metal strip or spliced rails.
+Keep an octave/range header. At the drawing's
 scale replace x=370..3080 below the 116-unit preset rail; keep x<370 unchanged. Black
 keys take precedence in hit testing. The bar button indicates which view is active.
-Octave down/up clamps to MIDI 0–127 without wrapping. A TYPE switch opts into computer
-keys; in hosted mode it defaults off and gives host shortcuts back when off. Map
-`A W S E D F T G Y H U J K O L P ;` chromatically from TYPE's own C root, so ASDFG
-play CDEFG. Default A is MIDI 48 (labelled C3 here). Z lowers and X raises TYPE's
+Octave down/up clamps to MIDI 0–127 without wrapping. A TYPING switch opts into computer
+keys in standalone, defaulting off. TYPING and PANIC are absent and inactive in
+hosted plug-ins, which leave computer-keyboard note input to the DAW. Map
+`A W S E D F T G Y H U J K O L P ;` chromatically from TYPING's own C root, so ASDFG
+play CDEFG. Default A is MIDI 48 (labelled C3 here). Z lowers and X raises TYPING's
 root by 12 semitones, once a press, independently of the visible range, physical
 MIDI and the sound's oscillator RANGE controls. Roots clamp to C notes 0–120;
-notes beyond MIDI 127 do not play. TYPE octave changes release only typed owners,
+notes beyond MIDI 127 do not play. TYPING octave changes release only typed owners,
 and visible range changes release only pointer owners. Persist the two octave
 preferences separately, outside presets and host state. Repeat keydown does not
-retrigger. TYPE stays enabled across keyboard/controls swaps and compact view;
+retrigger. TYPING stays enabled across keyboard/controls swaps and compact view;
 only pointer notes release when their visible keyboard is hidden. Focus loss
 and text/menu takeover release local notes. No velocity control: the circuit's keyboard is not velocity-sensitive.
 Mouse press/drag/release plays through the same engine as external MIDI. One-pointer
@@ -164,7 +168,7 @@ when its acceptance criteria are demonstrated; BLOCKED/UNVERIFIED retain the exa
 | S1 | Research and frozen specification | Current code inspected; primary sources cited; known wrapper defects, platform contract and acceptance matrix recorded before implementation |
 | S2 | Shared host core | Capability enumeration, unambiguous identity resolution, supported negotiation, selected channel routing, finite-input sanitization, mono `(L+R)/2`, zero unused channels, bounded queues, overflow recovery, atomic versioned persistence and deterministic fake-device tests |
 | S3 | Production NIH adapter and app entry | Same plug-in/editor/params; open with no hardware; configuration prepared off callback; apply/rollback/recovery preserves sound; parameter edits work stopped and running; no callback locks, allocations, file/network or GUI calls; all threads terminate on close |
-| S4 | Playable keyboard and view switch | Rendered visual proof under the owner's delegated judgment; keyboard/controls swap preserves height and left-hand controls; both skins; hidden control hit-test isolation; mouse/glissando/outside release; typing chords/repeat/modifier changes; TYPE octave releases typed owners, visible octave/view changes release pointer owners, TYPE continues in controls/compact view, focus/close/text takeover release local notes; source overlap tests; queue overflow cannot strand notes; audio-owned highlights and panic |
+| S4 | Playable keyboard and view switch | Rendered visual proof under the owner's delegated judgment; keyboard/controls swap preserves height and left-hand controls; both skins; hidden control hit-test isolation; mouse/glissando/outside release; typing chords/repeat/modifier changes; TYPING octave releases typed owners, visible octave/view changes release pointer owners, TYPING continues in controls/compact view, focus/close/text takeover release local notes; source overlap tests; queue overflow cannot strand notes; audio-owned highlights and panic |
 | S5 | Audio/MIDI settings UI | Every listed option reflects capabilities; external audio input disabled default; Automatic MIDI selects one unambiguous input for new sessions and waits if none are present; explicit inputs/Disable persist; ALL/1–16 filter; live selectors and resolved drafts; refresh; apply/cancel; actual rate/period/duration; errors/recovery shown; inaccessible device remains editable; settings available only to standalone host |
 | S6 | Session and resilience | Restart restores unsaved edits, MIDI map/width/view/working I/O; corrupt/unsupported files retained; failed config not saved; missing/duplicate identities; hotplug notes released; close after lost callback bounded to two seconds; background operations have bounded shutdown |
 | S7 | Packaging and documentation | Buildable standalone target; app/icon/metadata; standalone optional installer choice on all platforms; portable Windows ZIP; Linux install/uninstall and desktop validation; macOS universal signing/input configuration; notices and corresponding sources; README instructions and truthful support limitations |

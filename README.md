@@ -79,15 +79,16 @@ and sends nothing of yours.
 The keyboard button beside SAVE and settings switches the lower panel between
 VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
 remain visible. Click a key or drag between keys to play; the octave buttons move
-the visible range. TYPE enables a piano layout on your computer keyboard: `A S D F G`
+the visible range. In standalone, TYPING enables a piano layout on your computer keyboard: `A S D F G`
 play `C D E F G`, with `W E T Y U` on the black notes. The full chromatic order is
-`A W S E D F T G Y H U J K O L P ;`. A starts at C3 (MIDI 48); `Z` lowers TYPE
-one octave and `X` raises it. TYPE's octave is independent of the visible range
+`A W S E D F T G Y H U J K O L P ;`. A starts at C3 (MIDI 48); `Z` lowers TYPING
+one octave and `X` raises it. TYPING's octave is independent of the visible range
 and the sound's oscillator RANGE controls, and is remembered on this computer.
-The TYPE header shows A's current note. Shifting releases held TYPE notes while
-pointer and physical MIDI notes continue. TYPE starts off so host shortcuts
-keep working. Text entry takes precedence. PANIC releases notes without changing
-the sound. TYPE stays enabled when you show the extra controls or hide the lower
+The TYPING header shows A's current note. Shifting releases held TYPING notes while
+pointer and physical MIDI notes continue. TYPING starts off; text entry takes precedence.
+TYPING and PANIC appear only in standalone; plug-ins leave computer-keyboard input
+to the DAW. PANIC releases notes without changing
+the sound. TYPING stays enabled when you show the extra controls or hide the lower
 panel; pointer notes release while typed and physical MIDI notes continue. Focus
 loss releases local notes. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
 

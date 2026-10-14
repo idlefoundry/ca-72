@@ -5573,3 +5573,65 @@ failure; explicit edit tracking fixes it. The final pinned host revision is
 `4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9`. The production-feature plug-in library
 suite passes: 238 passed, 13 ignored. Independent reviews found no remaining confirmed
 issues after the corrections.
+
+## R-KEY-FEEDBACK. Keyboard icon and pressed keys
+
+**Owner decision, 2026-10-14.** Remove the last piano key on the keyboard button's right
+and darken a playable key when pressed.
+
+The remaining three natural keys and two accidentals are centred in the button. Held keys
+use darker versions of their surfaces in both looks; the realistic material's alpha remains
+unchanged, so a black key cannot brighten by revealing its background. Local note ownership
+joins the audio snapshot for immediate visual feedback while a device is stopped.
+
+Key masks use fixed key coordinates and integer compositing. Press/release repaint checks
+found a fractional-scale seam when the old mask and float sampler followed the damage patch.
+The regression now compares incremental frames with a fresh keyboard, including black keys.
+The [rendered previews and focused checks](keyboard-feedback/README.md) record the candidate;
+visual review precedes full CI or merging.
+
+**Header follow-up, 2026-10-14.** The owner also asked for the keyboard header's buttons and
+text to be vertically centred on the wood. Their shared centre is now halfway between the
+rail and the key bed's outer border. Labels use their visible glyph bounds for an alphabetic
+baseline; this aligns OCTAVE, the range, plus/minus, TYPE, PANIC and the mapping legend despite
+their different sizes. Button drawing, materials and hit-testing share the same centre.
+The updated preview records the alignment; panel and focused editor checks still pass.
+
+**Display follow-up, 2026-10-14.** The owner asked to reuse the preset screen's pixel lettering
+and bezel for the octave range. It now calls the shared bezel renderer and uses the same glass
+asset, dot font, grid spacing and light colours. Its readout remains centred on the wood;
+the preset display keeps its existing appearance. Updated renderer previews and panel/lint
+checks pass; visual review still precedes full CI or merging.
+
+**Button follow-up, 2026-10-14.** The owner asked to place TYPE and PANIC side by side and
+give them the same size. TYPE now sits just left of PANIC, with both caps 230 × 48 units and
+a 16-unit gap. Header drawing, realistic materials and hit-testing share a single button layout.
+
+**Host follow-up, 2026-10-14.** The owner asked for TYPE and PANIC only in the standalone
+application, leaving those functions to the DAW. Runtime host API selects their visibility and
+hit targets, independent of build features. Plug-ins keep the pointer keyboard and octave
+controls, with note typing and its legend disabled. The repaint regression includes switching
+between both layouts; editor checks cover actual CLAP, VST3 and standalone contexts.
+
+**Label follow-up, 2026-10-14.** The owner chose TYPING as the compact label for enabling
+computer-keyboard note input. It replaces TYPE on the standalone button.
+
+**Integration follow-up, 2026-10-14.** The owner asked to include these UI fixes in
+the MIDI recovery build. Merge the keyboard feedback candidate `cf90cef` into
+the standalone development branch, preserving its icon, materials, pixel display,
+header alignment, grouped buttons, host-specific visibility and TYPING label.
+Retain R-TYPE's separate C-root octave and Z/X legend; TYPING continues through
+controls/compact views in standalone. Plug-ins leave note typing to their host.
+The combined source passes 240 production-feature library tests (13 ignored),
+45 panel unit tests (7 ignored), the panel approval check and strict Clippy for
+both feature configurations. The native combined render was shown to the owner;
+their earlier delegation permits proceeding without another approval wait.
+
+**Frame follow-up, 2026-10-14.** The owner requested straight wood at both sides
+and wood meeting the bottom silver border. Replace the metal substrate and separate
+wood rails with one continuous walnut field around the recessed key bed. Its right
+and bottom limits match the trim's inner edges (`W - 28`, `H - 6`). The drawn skin
+uses a continuous wood-coloured surface too. Include fractional boundary coverage
+and composite it over the existing trim; inward pixel clipping left a thin dark gap.
+Both skins' incremental/fresh-frame checks pass at 0.44 and 0.87 scale, as do all
+45 panel tests and the approval check. The updated native render was shown to the owner.

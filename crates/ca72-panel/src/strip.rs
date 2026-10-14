@@ -19,6 +19,7 @@ use crate::presets::{BarScene, BarTarget};
 use crate::svg::{N, Svg, colour, put};
 
 pub use worn::StripRenderer;
+pub(crate) use worn::pixel_screen;
 
 // ---- The layout.
 
@@ -482,7 +483,11 @@ pub(crate) fn surfaces(s: &mut Svg) {
 /// own frame, from the rail's top).
 pub(crate) fn name_bezel(s: &mut Svg, dy: f64) {
     let (x, y, w, h) = NAME;
-    let y = y + dy;
+    screen_bezel(s, (x, y + dy, w, h));
+}
+
+/// The preset display's bezel, sized for another window in the same strip.
+pub(crate) fn screen_bezel(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64)) {
     let o = NAME_SURROUND;
     let (fx, fy, fw, fh) = (x - o, y - o, w + 2.0 * o, h + 2.0 * o);
     put!(

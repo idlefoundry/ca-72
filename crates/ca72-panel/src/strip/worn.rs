@@ -873,24 +873,21 @@ fn key_marks(o: &mut Svg) {
             ),
             BarTarget::Keyboard => put!(
                 o,
-                "<path d='M {} {} H {} V {} H {} Z M {} {} V {} M {} {} V {} M {} {} V {}' fill='none' stroke='{KEY_PRINT}' stroke-width='2'/><path d='M {} {} h 5 v 14 h -5 Z M {} {} h 5 v 14 h -5 Z' fill='{KEY_PRINT}'/>",
-                N(x - 20.0),
+                "<path d='M {} {} H {} V {} H {} Z M {} {} V {} M {} {} V {}' fill='none' stroke='{KEY_PRINT}' stroke-width='2'/><path d='M {} {} h 5 v 14 h -5 Z M {} {} h 5 v 14 h -5 Z' fill='{KEY_PRINT}'/>",
+                N(x - 15.0),
                 N(y - 13.0),
-                N(x + 20.0),
+                N(x + 15.0),
                 N(y + 13.0),
-                N(x - 20.0),
-                N(x - 10.0),
-                N(y - 13.0),
-                N(y + 13.0),
-                N(x),
+                N(x - 15.0),
+                N(x - 5.0),
                 N(y - 13.0),
                 N(y + 13.0),
-                N(x + 10.0),
+                N(x + 5.0),
                 N(y - 13.0),
                 N(y + 13.0),
-                N(x - 13.0),
+                N(x - 8.0),
                 N(y - 13.0),
-                N(x - 3.0),
+                N(x + 2.0),
                 N(y - 13.0)
             ),
             BarTarget::Settings => put!(
@@ -1252,6 +1249,16 @@ fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) 
     let (_, y, _, h) = NAME;
     let (left, places, ..) = name_places();
     let top = y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * DOT;
+    screen_dots(scale, left, top, places, &mut each);
+}
+
+fn screen_dots(
+    scale: f64,
+    left: f64,
+    top: f64,
+    places: usize,
+    mut each: impl FnMut(usize, usize, usize, (f32, f32)),
+) {
     for i in 0..places {
         for j in 0..9 {
             for col in 0..5 {
@@ -1261,6 +1268,48 @@ fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) 
             }
         }
     }
+}
+
+/// A centred readout made from the preset display's bezel, glass and pixel lettering.
+pub(crate) fn pixel_screen(
+    options: &usvg::Options<'_>,
+    frame: &mut Pixmap,
+    picture: &Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+    text: &str,
+) {
+    let mut bezel = Svg::default();
+    super::screen_bezel(&mut bezel, (x, y, w, h));
+    svg_over(options, frame, scale, &bezel.0);
+    glass(frame, picture, scale, (x, y, w, h), 3.0);
+    let mut places = ((w - 16.0) / (6.0 * DOT)).floor().max(1.0) as usize;
+    let glyphs: Vec<_> = text.chars().take(places).map(font::glyph).collect();
+    // Keep centred text on the same dot grid, including an even character count.
+    if places > 1 && !(places - glyphs.len()).is_multiple_of(2) {
+        places -= 1;
+    }
+    let start = (places - glyphs.len()) / 2;
+    let left = x + (w - (6 * places - 1) as f64 * DOT) / 2.0;
+    let top = y + h / 2.0 - CAP_LIFT - 3.0 * DOT;
+    let r = DOT * 0.36 * scale;
+    let mut unlit = PathBuilder::new();
+    let mut glow = PathBuilder::new();
+    let mut core = PathBuilder::new();
+    screen_dots(scale, left, top, places, |i, j, col, (px, py)| {
+        unlit.push_circle(px, py, r as f32);
+        if i >= start
+            && glyphs
+                .get(i - start)
+                .is_some_and(|g| g[j] >> (4 - col) & 1 == 1)
+        {
+            glow.push_circle(px, py, (r * 2.1) as f32);
+            core.push_circle(px, py, r as f32);
+        }
+    });
+    fill(frame, unlit, ORANGE, 0.06);
+    fill(frame, glow, ORANGE_GLOW, 0.16);
+    fill(frame, core, ORANGE, 1.0);
 }
 
 // ---- The voices' display: drops of light (the CA-74's LIQUID, its R36).
@@ -1784,14 +1833,15 @@ mod tests {
                 let mut sc = scene(0);
                 sc.keyboard = Some(crate::keyboard::Scene {
                     skin,
+                    standalone: true,
                     ..Default::default()
                 });
                 sc.bar.keyboard = true;
                 let now = Instant::now();
-                for i in 0..10 {
+                for i in 0..12 {
                     match i {
                         1 => sc.keyboard.as_mut().unwrap().held = [1 << 60, 0],
-                        2 => sc.keyboard.as_mut().unwrap().held = [1 << 60, 1],
+                        2 => sc.keyboard.as_mut().unwrap().held = [(1 << 60) | (1 << 61), 1],
                         3 => sc.keyboard.as_mut().unwrap().held = [0, 1],
                         4 => sc.keyboard.as_mut().unwrap().held = [0, 0],
                         5 => sc.keyboard.as_mut().unwrap().root = 53,
@@ -1801,10 +1851,16 @@ mod tests {
                                 Some(crate::keyboard::Target::Type)
                         }
                         8 => {
+                            sc.keyboard.as_mut().unwrap().standalone = false;
+                        }
+                        9 => {
+                            sc.keyboard.as_mut().unwrap().standalone = true;
+                        }
+                        10 => {
                             sc.keyboard = None;
                             sc.bar.keyboard = false;
                         }
-                        9 => {
+                        11 => {
                             sc.keyboard = Some(crate::keyboard::Scene {
                                 skin,
                                 ..Default::default()
@@ -1814,6 +1870,9 @@ mod tests {
                         _ => {}
                     }
                     assert!(parts.render_at(&sc, &under, None, now));
+                    // Compare with a fresh keyboard, rather than two caches with the same
+                    // repaint history, including black-key presses and releases.
+                    whole.keyboard = crate::keyboard::Renderer::new(scale);
                     whole.render_at(&sc, &under, None, now);
                     if parts.frame().data() != whole.frame().data() {
                         let w = parts.frame().width() as usize;

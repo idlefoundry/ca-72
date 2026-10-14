@@ -53,9 +53,9 @@
 
 ## Owner follow-ups, 2026-10-14
 
-- TYPE uses its own C root: ASDFG plays CDEFG and Z/X shifts its octave. TYPE
+- TYPING uses its own C root: ASDFG plays CDEFG and Z/X shifts its octave. TYPING
   continues in controls and compact views. Visible range and oscillator RANGE
-  changes leave TYPE's MIDI pitches alone. Focus/text/menu takeover retains precedence.
+  changes leave TYPING's MIDI pitches alone. Focus/text/menu takeover retains precedence.
 - Open device selectors rebuild on inventory changes without applying the draft.
   New sessions use Automatic MIDI, selecting one uniquely named input and remembering
   it through reorder, unplug and restart. Existing explicit selections or Disable

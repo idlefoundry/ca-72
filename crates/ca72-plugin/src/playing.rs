@@ -17,6 +17,7 @@ struct PlayedKey {
 pub struct Playing {
     pub notes: Arc<LocalNotes>,
     pub visible: bool,
+    pub standalone: bool,
     pub typing: bool,
     pub focused: bool,
     pub root: u8,
@@ -36,6 +37,7 @@ impl Default for Playing {
         Self {
             notes: Arc::new(LocalNotes::default()),
             visible: false,
+            standalone: false,
             typing: false,
             focused: true,
             root: 41,
@@ -272,19 +274,30 @@ impl Playing {
     }
 
     pub fn holds_keys(&self) -> bool {
-        self.typing && self.focused
+        self.standalone && self.typing && self.focused
     }
 
     pub fn scene(&self, skin: ca72_panel::Skin) -> Option<Scene> {
-        self.visible.then(|| Scene {
-            root: self.root,
-            typing: self.typing,
-            typing_root: self.typing_root,
-            held: self.notes.held(),
-            hover: self
-                .hover
-                .filter(|t| !matches!(t, keyboard::Target::Note(_) | keyboard::Target::Back)),
-            skin,
+        self.visible.then(|| {
+            let mut held = self.notes.held();
+            // Local presses are visible immediately, even with a stopped audio device.
+            // The audio snapshot still shows notes held by physical MIDI inputs.
+            for (note, count) in self.owned.iter().enumerate() {
+                if *count != 0 {
+                    held[note / 64] |= 1 << (note % 64);
+                }
+            }
+            Scene {
+                root: self.root,
+                standalone: self.standalone,
+                typing: self.standalone && self.typing,
+                typing_root: self.typing_root,
+                held,
+                hover: self
+                    .hover
+                    .filter(|t| !matches!(t, keyboard::Target::Note(_) | keyboard::Target::Back)),
+                skin,
+            }
         })
     }
 }
@@ -305,6 +318,32 @@ mod tests {
             key: Key::Character(character.into()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn locally_pressed_keys_are_visible_without_an_audio_callback() {
+        let mut p = Playing::default();
+        p.visible = true;
+        let held = |p: &Playing| {
+            p.scene(ca72_panel::Skin::Worn)
+                .expect("keyboard shown")
+                .held
+        };
+        p.press(60);
+        assert_eq!(held(&p), [1 << 60, 0]);
+        p.drag(Some(61));
+        assert_eq!(held(&p), [1 << 61, 0]);
+        p.release_pointer();
+        assert_eq!(held(&p), [0, 0]);
+        assert!(p.key(&key(KeyState::Down, "a"), true));
+        assert_eq!(held(&p), [1 << 48, 0]);
+        assert!(p.key(&key(KeyState::Up, "a"), true));
+        assert_eq!(held(&p), [0, 0]);
+        // Releasing a local press must leave the audio thread's physical MIDI visible.
+        p.notes.publish([0, 1]);
+        p.press(64);
+        p.release_pointer();
+        assert_eq!(held(&p), [0, 1]);
     }
 
     #[test]

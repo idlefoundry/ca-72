@@ -973,6 +973,7 @@ impl Editing {
         params.set_freq_law(settings.frequency);
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
+        playing.standalone = standalone;
         playing.visible = settings.keyboard.unwrap_or(standalone);
         playing.root = settings.keyboard_root;
         playing.typing_root = settings.typing_root;
@@ -1781,7 +1782,7 @@ impl Editing {
             return;
         }
         if self.playing.visible
-            && let Some(target) = keyboard::hit(self.playing.root, x, y)
+            && let Some(target) = keyboard::hit(self.playing.root, x, y, self.playing.standalone)
         {
             match target {
                 keyboard::Target::Note(note) => self.playing.press(note),
@@ -1937,7 +1938,7 @@ impl Editing {
         }
         let (x, y) = self.in_drawing(self.pointer);
         if self.playing.dragging() {
-            let target = keyboard::hit(self.playing.root, x, y);
+            let target = keyboard::hit(self.playing.root, x, y, self.playing.standalone);
             self.playing.drag(match target {
                 Some(keyboard::Target::Note(note)) => Some(note),
                 _ => None,
@@ -1946,7 +1947,7 @@ impl Editing {
         }
         self.playing.hover =
             if self.expanded() && self.playing.visible && self.in_drawer((x, y)).is_none() {
-                keyboard::hit(self.playing.root, x, y)
+                keyboard::hit(self.playing.root, x, y, self.playing.standalone)
             } else {
                 None
             };
@@ -3623,6 +3624,7 @@ mod tests {
     /// A host that records the editor's gestures (and does not apply them).
     #[derive(Default)]
     struct Host {
+        api: Option<PluginApi>,
         calls: Mutex<Vec<Call>>,
         /// It will not resize the window.
         fixed: AtomicBool,
@@ -3643,7 +3645,7 @@ mod tests {
     #[allow(unsafe_code)]
     impl GuiContext for Host {
         fn plugin_api(&self) -> PluginApi {
-            PluginApi::Clap
+            self.api.unwrap_or(PluginApi::Clap)
         }
         fn request_resize(&self) -> bool {
             self.resizes.fetch_add(1, Ordering::Relaxed);
@@ -3676,7 +3678,7 @@ mod tests {
 
     #[test]
     fn typing_octave_is_independent_of_panel_octaves_and_sound_parameters() {
-        let (mut e, host, _) = editing();
+        let (mut e, host, _) = editing_standalone();
         e.playing.visible = true;
         let event = |state, character: &str| KeyboardEvent {
             state,
@@ -3717,7 +3719,7 @@ mod tests {
 
     #[test]
     fn panel_hide_and_view_swap_preserve_type_notes_and_the_current_height() {
-        let (mut e, _, _) = editing();
+        let (mut e, _, _) = editing_standalone();
         e.playing.visible = true;
         e.playing.typing = true;
         let key = KeyboardEvent {
@@ -3759,10 +3761,10 @@ mod tests {
 
     #[test]
     fn keyboard_view_blocks_hidden_controls_and_releases_for_takeovers() {
-        let (mut e, host, params) = editing();
+        let (mut e, host, params) = editing_standalone();
         let width = e.width;
         let height = e.window_height();
-        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.playing.visible = true;
         assert!(e.playing.visible);
         assert_eq!((e.width, e.window_height()), (width, height));
         for id in [
@@ -3778,7 +3780,7 @@ mod tests {
             host.calls.lock().unwrap().is_empty(),
             "hidden controls cannot gesture"
         );
-        let p = at(&e, (2226.0, keyboard::HEADER));
+        let p = at(&e, (2444.0, keyboard::HEADER));
         go(&mut e, p);
         press(&mut e);
         release(&mut e);
@@ -3853,7 +3855,81 @@ mod tests {
     }
 
     fn editing_of(params: Ca72Params, library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
-        let host = Arc::new(Host::default());
+        editing_for_api(params, library, PluginApi::Clap)
+    }
+
+    fn editing_standalone() -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        editing_for_api(
+            Ca72Params::default(),
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            PluginApi::Standalone,
+        )
+    }
+
+    #[test]
+    fn keyboard_type_and_panic_are_only_available_in_standalone() {
+        for api in [PluginApi::Clap, PluginApi::Vst3, PluginApi::Standalone] {
+            let standalone = api == PluginApi::Standalone;
+            let (mut e, _, _) = editing_for_api(
+                Ca72Params::default(),
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+                api,
+            );
+            e.playing.visible = true;
+            assert_eq!(e.playing.standalone, standalone);
+            e.playing.typing = true;
+            assert_eq!(e.note_typing_allowed(), standalone);
+            let scene = e.playing.scene(Skin::Worn).expect("keyboard");
+            assert_eq!(scene.standalone, standalone);
+            assert_eq!(scene.typing, standalone);
+            e.playing.typing = false;
+            let type_button = at(&e, (2444.0, keyboard::HEADER));
+            go(&mut e, type_button);
+            press(&mut e);
+            release(&mut e);
+            assert_eq!(e.playing.typing, standalone, "{api}: TYPE hit target");
+            let key = KeyboardEvent {
+                key: Key::Character("a".into()),
+                ..Default::default()
+            };
+            assert_eq!(e.keyed(&key), standalone, "{api}: note keys");
+            if standalone {
+                assert!(e.playing.notes.pop().expect("typed attack").on);
+                let up = KeyboardEvent {
+                    state: KeyState::Up,
+                    ..key.clone()
+                };
+                assert!(e.keyed(&up));
+                assert!(!e.playing.notes.pop().expect("typed release").on);
+            } else {
+                assert!(e.playing.notes.pop().is_none());
+            }
+            // A hidden PANIC target must not reset an existing local note.
+            assert!(e.playing.key(&key, true));
+            assert!(e.playing.notes.pop().expect("local attack").on);
+            let generation = e.playing.notes.generation();
+            let panic_button = at(&e, (2690.0, keyboard::HEADER));
+            go(&mut e, panic_button);
+            press(&mut e);
+            release(&mut e);
+            assert_eq!(
+                e.playing.notes.generation() > generation,
+                standalone,
+                "{api}: PANIC hit target"
+            );
+            e.playing.release();
+        }
+    }
+
+    fn editing_for_api(
+        params: Ca72Params,
+        library: Library,
+        api: PluginApi,
+    ) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        let host = Arc::new(Host {
+            api: Some(api),
+            ..Default::default()
+        });
         let params = Arc::new(params);
         let context: Arc<dyn GuiContext> = host.clone();
         let e = Editing::new(
@@ -6164,7 +6240,7 @@ mod tests {
 
     #[test]
     fn refused_expansion_preserves_type_notes_when_restoring_compact() {
-        let (mut e, host, params) = editing();
+        let (mut e, host, params) = editing_standalone();
         e.toggle_panel();
         e.draw();
         assert!(!e.expanded());
