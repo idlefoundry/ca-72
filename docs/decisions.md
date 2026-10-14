@@ -5363,3 +5363,8 @@ and closes. This checks the gesture, not hardware fidelity. All 120 local guide 
 resolve; all 24 panel images exist, and 10's endpoint setting was visually checked.
 Example formatting and targeted release clippy passed. No hardware or real-host recordings
 were made for this revision.
+
+The independent read-only reviewer verified the full-stop mapping, interpolation, engine
+updates, MIDI cues and guide, then independently checked all four final sweep WAVs for
+duration, finite mono samples, constant listening gain and peak headroom. Their separate
+FFT spot-check also confirmed opening and reclosing. Review completed with no findings.
