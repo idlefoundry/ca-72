@@ -2588,7 +2588,7 @@ mod screen {
 /// surface on baseview's window (the two use different versions of `raw-window-handle`), and
 /// what baseview leaves out: the keyboard given back, and the pointer's capture (Windows).
 #[allow(unsafe_code)]
-mod window {
+pub(crate) mod window {
     use std::num::{NonZeroIsize, NonZeroU32};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::ptr::NonNull;
@@ -2617,7 +2617,7 @@ mod window {
     }
 
     #[cfg(target_os = "linux")]
-    fn display() -> bool {
+    pub(crate) fn display() -> bool {
         use x11::xlib;
         // SAFETY: a connection of our own, closed at once.
         unsafe {
@@ -2631,7 +2631,7 @@ mod window {
     }
 
     #[cfg(not(target_os = "linux"))]
-    fn display() -> bool {
+    pub(crate) fn display() -> bool {
         true
     }
 
@@ -2666,7 +2666,7 @@ mod window {
     }
 
     impl Handle {
-        pub fn new(window: Option<WindowHandle>, closing: super::Closing) -> Self {
+        pub(super) fn new(window: Option<WindowHandle>, closing: super::Closing) -> Self {
             Handle {
                 window,
                 _closing: closing,

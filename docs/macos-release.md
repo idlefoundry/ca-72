@@ -34,6 +34,7 @@ From a clean checkout of the version to release (once:
 ```sh
 cargo xtask bundle-universal ca72-plugin --profile bundle
 scripts/auv2.sh
+scripts/standalone.sh
 export CA72_MACOS_SIGN_APP='Developer ID Application: Idle Foundry Ltd. (3JA8JUZ36W)'
 export CA72_MACOS_SIGN_INSTALLER='Developer ID Installer: Idle Foundry Ltd. (3JA8JUZ36W)'
 export CA72_NOTARY_PROFILE=CA72_NOTARY
@@ -53,6 +54,9 @@ Only after those checks pass does the script replace the distributable in
 
 Distribute the verified `.pkg` from `target/packages/`. The raw bundles in
 `target/bundled/` are development artifacts; the signed payload is inside the installer.
+The installer includes the universal standalone app in Applications. Its hardened
+signature carries the audio-input entitlement, and its Info.plist explains optional
+microphone access; output-only playback does not request microphone permission.
 The existing hosted CI artifacts are unsigned until signing secrets are separately
 configured there. Public macOS releases must use the verified installer produced above.
 Normal Installer confirmation and administrator-password prompts still apply.

@@ -39,11 +39,13 @@ fn main() {
         }),
         device_access,
     };
-    if let Err(error) = nih_plug::wrapper::production::run_with_transient_parameters::<
-        ca72_plugin::Ca72,
-    >(options, &["pitch_wheel", "mod_wheel"])
-    {
+    if let Err(error) = nih_plug::wrapper::production::run_with_midi_reset_scope::<ca72_plugin::Ca72>(
+        options,
+        &["pitch_wheel", "mod_wheel"],
+        plugin_kit_standalone::MidiResetScope::Global,
+    ) {
         eprintln!("CA-72: {error}");
+        ca72_plugin::standalone_error::show(&error);
         std::process::exit(1);
     }
 }

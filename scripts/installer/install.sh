@@ -88,9 +88,15 @@ if [ "$application" = 1 ]; then
     $use_sudo install -m 644 "$here/com.idlefoundry.ca72.png" "$icon"
     $use_sudo install -m 644 "$here/LICENSE.txt" "$app_data/LICENSE.txt"
     $use_sudo install -m 644 "$here/THIRD-PARTY-NOTICES.txt" "$app_data/THIRD-PARTY-NOTICES.txt"
-    # Desktop Exec escaping is distinct from shell escaping; %% means literal %.
-    escaped="$(printf '%s' "$bin/ca72-standalone" | sed 's/\\/\\\\/g; s/"/\\"/g; s/`/\\`/g; s/\$/\\$/g; s/%/%%/g')"
-    { sed '/^Exec=/d' "$here/CA-72.desktop"; printf 'Exec="%s"\n' "$escaped"; } | $use_sudo tee "$desktop" > /dev/null
+    # Exec quoting is decoded after the desktop value's own escaping. Keep the
+    # executable name fixed: GLib rejects literal-percent escapes in that field.
+    # The user's path is a positional argument, never part of the shell program.
+    desktop_arg() {
+        printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/`/\\`/g; s/\$/\\$/g; s/%/%%/g; s/\\/\\\\/g'
+    }
+    escaped="$(desktop_arg "$bin/ca72-standalone")"
+    launcher="$(desktop_arg 'exec "$1"')"
+    { sed '/^Exec=/d' "$here/CA-72.desktop"; printf 'Exec=/bin/sh -c "%s" sh "%s"\n' "$launcher" "$escaped"; } | $use_sudo tee "$desktop" > /dev/null
     echo "Installed standalone app in $bin. Open CA-72 from your applications menu."
 fi
 if command -v ldd > /dev/null 2>&1; then

@@ -5,6 +5,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 profile="${CA72_STANDALONE_PROFILE:-bundle}"
+profile_dir="$profile"
+if [ "$profile" = dev ]; then profile_dir=debug; fi
 target_dir="${CARGO_TARGET_DIR:-$root/target}"
 mkdir -p "$root/target/bundled"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
@@ -18,8 +20,8 @@ Darwin)
     build --target x86_64-apple-darwin
     app="$root/target/bundled/CA-72.app"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-    lipo -create "$target_dir/aarch64-apple-darwin/$profile/ca72-standalone" \
-        "$target_dir/x86_64-apple-darwin/$profile/ca72-standalone" \
+    lipo -create "$target_dir/aarch64-apple-darwin/$profile_dir/ca72-standalone" \
+        "$target_dir/x86_64-apple-darwin/$profile_dir/ca72-standalone" \
         -output "$app/Contents/MacOS/ca72-standalone"
     cp scripts/standalone/CA-72.icns "$app/Contents/Resources/"
     cp LICENSE THIRD-PARTY-NOTICES.txt "$app/Contents/Resources/"
@@ -43,13 +45,13 @@ PY
     ;;
 Linux)
     build
-    cp "$target_dir/$profile/ca72-standalone" "$root/target/bundled/ca72-standalone"
+    cp "$target_dir/$profile_dir/ca72-standalone" "$root/target/bundled/ca72-standalone"
     cp scripts/standalone/CA-72.desktop scripts/standalone/com.idlefoundry.ca72.png "$root/target/bundled/"
     printf '%s\n' "$root/target/bundled/ca72-standalone"
     ;;
 MINGW*|MSYS*|CYGWIN*)
     build
-    cp "$target_dir/$profile/ca72-standalone.exe" "$root/target/bundled/CA-72.exe"
+    cp "$target_dir/$profile_dir/ca72-standalone.exe" "$root/target/bundled/CA-72.exe"
     cp scripts/standalone/CA-72.ico "$root/target/bundled/"
     printf '%s\n' "$root/target/bundled/CA-72.exe"
     ;;
