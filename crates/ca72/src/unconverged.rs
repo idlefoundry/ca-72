@@ -3,8 +3,8 @@
 //! can be off by more than its tolerance: No Compromises' contours held their transistors'
 //! steps to 0.2 V and stopped short 447 times in the worst case's 3 s (up to 5e-6 V at the
 //! contours) before this counted them. The nodal solver's failures are counted by the
-//! circuits that own one (`failed`); Potato's filter stops at two iterations by design and
-//! is not counted.
+//! circuits that own one (`failed`); the circuit's HI filter stops at two iterations by design
+//! and is not counted. The LO ladder's bounded nonlinear loop is counted.
 
 use std::cell::Cell;
 
@@ -33,7 +33,7 @@ pub enum Solver {
     Converter,
     /// The filter's control node and ladder current (`vcf::root`, `FilterExpo::q28`).
     FilterNode,
-    /// The filter's loop (Newton's method each step), outside Potato.
+    /// The filter's loop (Newton's method each step), including LO's fitted ladder.
     FilterLoop,
 }
 

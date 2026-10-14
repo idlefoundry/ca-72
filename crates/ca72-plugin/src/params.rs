@@ -3,7 +3,7 @@
 //! Their ids are stable (a saved session's settings are found by them): never rename one.
 
 use std::hash::{BuildHasher, Hasher};
-use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use ca72::freq_dial::{DIAL_END, Law, Pot};
@@ -218,6 +218,17 @@ pub struct Ca72Params {
     /// until it is resized, when it opens at a share of the screen.
     #[persist = "editor_width"]
     pub editor_width: Arc<AtomicU32>,
+    /// Whether the lower panel's controls are shown, saved with the session, outside presets.
+    #[persist = "editor_panel"]
+    pub editor_panel: Arc<AtomicBool>,
+    /// The window's current height: presets can temporarily reveal a hidden lower panel.
+    /// Set before asking the host to resize, so its size query sees the requested height.
+    pub editor_expanded: Arc<AtomicBool>,
+    /// The last preference the open editor applied, to recognise project state recalled later.
+    pub editor_panel_applied: Arc<AtomicBool>,
+    /// Whether presets are temporarily occupying the lower panel, for the host's size query.
+    pub editor_presets: Arc<AtomicBool>,
+    pub(crate) editor_resizing: Arc<crate::resizing::Resizing>,
     /// The preset the plug-in was last set to (decisions.md R10), empty when none: saved
     /// with the session, so the bar names it again.
     #[persist = "preset"]
@@ -555,6 +566,11 @@ impl Default for Ca72Params {
         Ca72Params {
             noise_seed: Arc::new(AtomicU64::new(fresh_seed())),
             editor_width: Arc::new(AtomicU32::new(0)),
+            editor_panel: Arc::new(AtomicBool::new(true)),
+            editor_expanded: Arc::new(AtomicBool::new(true)),
+            editor_panel_applied: Arc::new(AtomicBool::new(true)),
+            editor_presets: Arc::new(AtomicBool::new(false)),
+            editor_resizing: Arc::default(),
             preset: Arc::new(RwLock::new(String::new())),
             midi_map: Arc::new(MidiMap::default()),
             freq_law: Arc::new(AtomicU8::new(0)),

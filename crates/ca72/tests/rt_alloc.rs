@@ -6,7 +6,7 @@
 
 #![allow(unsafe_code, clippy::unwrap_used)]
 
-use ca72::voice::{Jacks, Voice};
+use ca72::voice::{Jacks, Quality, Voice};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -100,6 +100,12 @@ fn the_voice_does_not_allocate_while_it_plays() {
             detune: [3.0 * (tau * 0.3 * t).sin(), -2.0, 1.5],
             cutoff: 0.03 * (tau * 0.2 * t).sin(),
         });
+    }
+    // HI's filter stays oversampled as EMPHASIS crosses the regeneration region.
+    v.panel.quality = Quality::Potato;
+    for i in 0..4800 {
+        v.panel.emphasis = if i % 256 < 128 { 0.7 } else { 1.0 };
+        v.tick();
     }
     ARMED.store(false, Ordering::SeqCst);
     ONLY_HERE.store(false, Ordering::SeqCst);

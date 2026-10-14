@@ -5168,3 +5168,168 @@ passed and clippy; the universal bundles and the Audio Unit, clap-validator 37 p
 ID": `CA-72-0.2.0-macOS.pkg` SHA-256
 9b0dd7003f3fc09dc1ac46370299e59c7997f480779cb76f973aadbf03ce8eeb, the release candidate, with its
 logs in `~/lab/artifacts/ca-72/0.2.0-rc4/`.
+
+## R70. The lower panel can be shown or hidden
+
+**Owner decision, 2026-10-13.** The whole second panel should show or hide, with "no animation
+of growing". Asked whether hiding it should shorten the window while leaving the synth and
+preset rail visible: "Yes, snap between the short and full window."
+
+The owner reviewed the rendered preview and approved CI and merging the change.
+
+**Agent decisions, 2026-10-13** (not separately approved):
+- PANEL beside the rail's settings key toggles the lower controls. The window's width and
+  controls' scale stay fixed; its height changes in one request. The rail's name display is
+  100 drawing units shorter to fit the key, with NEXT and SAVE moved left by the same amount.
+- The controls are shown by default, preserving existing projects' view. The choice is saved
+  with the project as `editor_panel`, outside the sound's parameters and presets. Presets
+  temporarily reveal a hidden panel; closing them restores the compact view. The preset
+  browser's existing slide stays inside the full panel; the window itself never animates.
+- A refused resize keeps the height accepted by the host. The compact view has a grip on the
+  rail's bottom right corner, and hidden controls do not take pointer events.
+
+**Evidence (the Linux reference machine, 2026-10-13):** the editor's 64 tests passed, 7 visual
+or timing tests ignored. New checks cover the immediate height change, temporary preset
+view, unchanged sound controls, reopening compact, refused resizing, the compact grip and
+compact frames drawn in parts matching frames drawn whole. Review found and fixed compact
+menus extending below the viewport and panel visibility recalled into an already open
+editor; both have regression checks. A height-only resize preserves the frame composed
+just before the window follows it; without that guard, its regression check fails with
+"keep the rail and compact grip". Actual editor frames and an
+interactive preview are saved in this chat's visualization folder. Real-host resize checks
+and release CI have not been run. Linux VST3's queued resize can report acceptance before the
+host responds, as with the existing width grip; later refusal is not handled here.
+
+The touched crates' library tests: 243 passed, none failed, 20 ignored; the panel's approved
+image comparison passed. Formatting for both crates and clippy for all their targets, with
+and without optional features, passed. The independent reviewer rechecked the fixes.
+
+## R71. HI's filter at 4x under strong regeneration
+**Owner report, 2026-10-13:** high EMPHASIS and AMOUNT OF CONTOUR sound harsh and crackly,
+like tuning a shortwave radio. The owner requested a spectrogram.
+
+**Agent decision:** HI keeps its filter at 4x instead of 2x. The cheap oscillator,
+contour and device models remain HI's. A whole C4 note with EMPHASIS and AMOUNT OF
+CONTOUR at 10 reproduces broadband noise while its contour opens the filter above the
+audio band. More Newton iterations at 2x remove much of that noise but leave strong
+aliased tones; 4x removes both. At 44.1 kHz the old voice has 21.77 dB more power from
+8 to 20 kHz than ULTRA; with the fix, +0.16 dB. At 48 and 96 kHz, at CUTOFF 0 and
++2.5, the fixed HI is within 1.66 dB of ULTRA in that band.
+
+The rate is fixed while the controls move. Selecting 4x only above EMPHASIS 7.5 reset
+the resamplers on crossing that mark and introduced a click; the regression checks
+both crossings on a held note. HI's CPU cost rises, and its renders change. ULTRA's
+rate and model do not change. No circuit values, trims or knob laws are changed.
+
+**Evidence:** `crates/ca72-lab/tests/high_contour.rs` checks whole notes at 44.1, 48
+and 96 kHz and control movement. Its ngspice 47 bench regenerates at 36.75 kHz; the
+4x filter keeps 8 to 20 kHz output power 121 dB below that oscillation's power and
+continues oscillating internally. Existing hardware takes were found on the lab share
+(sessions E and J, EMPHASIS 10, J with AMOUNT OF CONTOUR 10; session I's Ringing Saw
+Line). They do not capture the exact reported patch. Diagnostic spectrograms
+are retained in [the filter-contour diagnostic record](filter-contour/README.md).
+
+**Checks on the Linux reference machine:** 17 focused debug tests passed, including
+the whole voice, resamplers, allocations and new regressions; clippy on the core and
+lab, all targets, with and without all features; the changed Rust files formatted.
+`high_contour_cost`, paced under the exclusive timing lock, retriggering notes at
+48 kHz, passed twice: at EMPHASIS 10, 128 frames mean 0.49 to 0.50 ms, worst 0.95 ms
+of 2.67; 256 frames mean 0.96 to 0.97 ms, worst 1.71 ms of 5.33. No block exceeded
+75 % of its period. These are single-voice measurements, not a polyphony budget.
+
+**LO follow-up, requested before installation:** the separate fitted voice ran its
+nonlinear ladder at the output rate. At high contour it produced aliased resonance
+tones. Its filter now runs at 8x through the existing sparse resamplers; the direct
+FILTER MODE HI branch passes through the same resamplers, and the external feedback
+delay is shortened by their delay to retain the fitted total loop delay. The nonlinear
+input pair is solved with a bracketed Newton iteration, its caps counted. Unbounded
+exponential cutoff above the fitted dial is replaced with relative saturation measured
+from the calibrated converter and a high-rate circuit ladder. The ignored
+`lo_cutoff_saturation_fit` test reproduces the table; it preserves the dial's fitted
+pitch at the join and does not claim new hardware calibration. White noise's fitted
+top at 48 kHz moves from 9.5 to 10 kHz after the filter rate change.
+
+LO's whole-note check passes at 44.1, 48 and 96 kHz, with no solver caps. Relative
+8–20 kHz power versus ULTRA is -15.02/-21.04, -1.92/-2.59 and -6.68/-6.65 dB at
+CUTOFF 0/+2.5 respectively. Its 16 focused unit tests, including pitch, contours,
+resonance, filter mode, noise and the new nonlinear residual check, pass. This
+comparison tests unwanted high-band energy; it does not establish that LO matches
+every detail of ULTRA's spectrum.
+
+**Final checks and personal Mac installation, 2026-10-13:** independent DSP review
+signed off source commit `2e1520d`. All 315 non-ignored core and plug-in tests passed
+in debug; the four high-contour regressions passed with ngspice required, and the
+cutoff-fit regeneration passed explicitly. Clippy passed for the core, lab and plug-in,
+all targets, with and without all features. The old LO failed the high-band reproduction
+at 48 kHz (+22.09 dB against ULTRA); the final LO measured -1.92 dB.
+
+Two final paced runs under the exclusive timing lock passed at 48 kHz. HI's worst
+block was 0.95 ms at 128 frames and 1.44 ms at 256; LO's 0.112 and 0.181 ms. LO's
+mean was 0.070 to 0.075 ms at 128 and 0.130 to 0.152 ms at 256. No block exceeded
+75 % of its period. These are one-voice measurements on the Linux reference machine;
+the oversampling increases LO's cost and this is not a new comparison with Surge XT.
+
+The Mac's own worktree built universal arm64/x86_64 VST3, CLAP and AU, deployment
+target 11.0. The high-contour, control-movement, LO unit and callback-allocation tests
+passed on Apple silicon. Signed bundles passed clap-validator (37 passed, 7 skipped),
+pluginval strictness 10 (editor tests skipped while the owner's Live was open), and
+Steinberg's validator (47 passed). The installer was Developer ID signed, accepted
+by Apple's notary service, stapled and accepted by Gatekeeper. It installed all three
+system bundles; their executable hashes match the validated signed staging bundles,
+and the AU embeds the same signed CLAP. The previous bundles were renamed to a
+protected backup before installation, preserving the executable inodes mapped by the
+owner's open Live session. Live was left open; the owner must save and restart it to
+load the fix. The attempted hidden desktop auval launch produced no validation result;
+AU validation remains unverified (its build, signature and embedded CLAP were checked).
+Personal installation remains version 0.2.0. No public release, Windows
+host check, new hardware recording, or factory-preset re-leveling was done.
+
+## R72. 0.2.1
+
+**Owner decision, 2026-10-13:** the combined personal build is approved. Run the full test
+suite and try the editor in hosts on macOS, Linux and Windows, checking the window's height
+changes in particular, then submit and merge the pull request and ship to production.
+
+The release combines R70's instant lower-panel toggle with R71's HI and LO filter fixes.
+Parameter ids, plug-in ids, project migration and the preset format do not change. HI and
+LO renders change, and their filter oversampling increases CPU cost; ULTRA is unchanged.
+The native Windows tests cover repeated toggles with both parent and child resizing,
+presets revealing and restoring a compact view, its width grip, and repainting at both
+heights. Release validation is being recorded separately before publication.
+
+**Resize review and repairs:** a queued VST3 resize had returned success before the host
+answered, so a later refusal could leave the parent and child at different sizes. The
+wrapper now reports that answer with a request id. The editor restores the last confirmed
+view, including the saved width, compact preference and presets, and discards stale replies
+from earlier requests or openings. A run-loop regression exercises Linux's actual queued
+socket path. The native Windows matrix includes synchronous and delayed refusal as well
+as acceptance. At fractional DPI scales, the composed frame now uses the physical viewport
+size, including its last row and the compact grip, rather than the artwork's rounded size.
+
+A second review found that presets opened without a height change had not updated the
+rollback snapshot, and that a pending snapshot could change during state recall. Stable
+non-size state is now refreshed between actions, and each issued action's completed snapshot
+is frozen. Both editor regressions fail on the earlier candidate and pass after the repair.
+
+**Release scope correction, 2026-10-14:** the owner confirmed that this release is
+limited to the audio fix and the panel hide/show feature. The standalone application,
+playable keyboard and unrelated changes are excluded. The earlier 0.2.1 release was
+returned to draft and 0.2.0 restored as latest, with its tag and assets preserved.
+This candidate starts from the 0.2.0 tag and selects the two features and their
+resize, regression-test and allocation-test support from before the standalone merge.
+The owner subsequently authorised building and publishing this corrected scope as latest.
+Version 0.2.2 is the next unused patch version; the withdrawn 0.2.1 tag and assets
+remain preserved. Acceptance of the withdrawn build does not validate this
+candidate's binaries; the corrected candidate is checked separately before publication.
+
+
+## R-RELEASE. 0.2.2
+
+The release starts at the 0.2.0 tag and adds only R70's panel hide/show, R71's
+HI/LO filter correction and their resize and regression-test support. Production
+standalone hosting, the playable keyboard, their dependencies and packaging are
+excluded. The Mac CoreGraphics import ordering is adjusted only because the
+repository's existing formatter requires it; its behaviour does not change.
+
+The package scripts and release workflow match the plug-in-only 0.2.0 baseline.
+Local checks, host acceptance and release provenance are recorded after they run.

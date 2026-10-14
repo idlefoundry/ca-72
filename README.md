@@ -16,7 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.0: the circuit calibrated against a hardware instrument, projects saved with
+**Status:** 0.2.2: the lower panel can be shown or hidden instantly; strong filter contours
+in HI and LO keep ultrasonic resonance out of the output. Both modes use more CPU and their
+renders change; ULTRA is unchanged. Includes 0.2.0: the circuit calibrated against a hardware instrument, projects saved with
 0.1 translated into it; nineteen new factory presets, 0.1's in a download of their own; the
 realistic look; QUALITY's LO, HI and ULTRA; stereo with SPREAD, INNER, DOUBLE and UNISON;
 DRIVE, LEVEL and AUTO GAIN; FILTER MODE; NOTE PRIORITY and RETRIGGER; and an instance waiting
@@ -160,7 +162,8 @@ and sends nothing of yours.
 - **POWER** is the host's bypass: the output fades out over 10 ms and back in.
 - **QUALITY** (a chrome toggle above POWER: ULTRA, HI by default, or LO; not the
   instrument's): at ULTRA the circuit's model plays with no compromises, its most exact, at
-  about seven times the work of HI; one voice takes about a whole core of a fast computer, so
+  high CPU cost; in 0.2.0 it took about seven times the work of HI, with one voice using
+  about a whole core of a fast computer, so
   it is meant for offline renders (export, bounce, freeze) and small projects on powerful
   computers. Choosing it, a shutter in the panel above opens and a lamp comes up and lights
   (or, chosen with a right click on the lamp, ALWAYS OPEN: the lamp stays up and only its
@@ -170,7 +173,9 @@ and sends nothing of yours.
   too heavy for. It follows the same panel, the plug-in's own controls with it, its laws
   fitted to the circuit's (pitch, levels, the filter's cutoff, emphasis and rings, the
   contours, GLIDE, the VCA, DRIVE and FILTER MODE), and sounds close to it but simpler: ten
-  voices take a thirtieth to a fortieth of what they do at HI. Switching it stops the notes
+  voices were a thirtieth to a fortieth of HI's cost in the 0.2.0 measurements. The 0.2.2
+  filter fixes increase both LO and HI's cost; those earlier ratios no longer describe this
+  release. Switching it stops the notes
   sounding (switching between HI and ULTRA does not). It is saved with the session, not with
   presets: it suits the computer, not the sound.
 
@@ -201,6 +206,11 @@ instrument's): POLY (click), VOICES (click either side to step), and ENTROPY and
 the slider; the switch beside each turns it off and back on at its amount). VOICES and the
 placement are unlit in MONO with DOUBLE, where they move nothing, and FEEDBACK is dimmed
 while EXTERNAL INPUT is closed.
+
+**The lower panel.** PANEL beside the settings key shows or hides the lower panel's controls.
+The window changes height immediately, with the synth and preset rail always visible; your
+choice is saved with the project. Opening presets reveals a hidden panel temporarily, and
+closing them returns to the short window.
 
 **Presets.** At the strip's left: the preset last chosen (marked • once you change it), a
 star to make it a favourite, the previous and next preset, and SAVE…. A preset holds every
@@ -442,8 +452,9 @@ The service documents and datasheets the model was derived from are not included
   oscillation than the circuit's (Feedback Funk is about 1 dB quieter as its notes start, 0.1's
   Undertow Growl about 3), the light filter's top octaves fall faster (0.1's Ringing Saw Line
   darker),
-  and driven hard at high EMPHASIS it loses its resonance sooner. Every other factory preset
-  is within a decibel of the circuit's.
+  and driven hard at high EMPHASIS it loses its resonance sooner. In the 0.2.0 comparison,
+  every other factory preset was within a decibel of the circuit's. LO's filter changes in
+  0.2.2 alter its renders; that earlier comparison is not a new calibration of this release.
 - With no note playing an instance costs next to nothing (from 0.2.0; decisions.md R68): with
   POLY and UNISON off the instrument sleeps once its sound has died away and its contours
   have settled, and the next note, any MIDI, a control moved or a sound at EXTERNAL INPUT
@@ -451,19 +462,22 @@ The service documents and datasheets the model was derived from are not included
   silent. Before, a waiting instance cost nearly what a playing one does (at ULTRA about a
   third of a core).
 - Horn Bloom, Brass Choir and Warp Field play POLY's voices with DOUBLE, two instruments a
-  note: at QUALITY HI each takes one and a half to one and three quarter cores of a fast
+  note: in the 0.2.0 measurement at QUALITY HI each took one and a half to one and three
+  quarter cores of a fast
   computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,
-  and on a computer of four processors or a slower one they can overload. QUALITY LO plays
-  them for about a fortieth of that ([docs/decisions.md](docs/decisions.md) R67).
+  and on a computer of four processors or a slower one they can overload. QUALITY LO took
+  about a fortieth of that then ([docs/decisions.md](docs/decisions.md) R67). Both costs
+  increase with the 0.2.2 filter fixes; the R71 measurements cover one voice, not this full
+  polyphony matrix.
 - POLY's voices are shared between the host's audio thread and up to four threads of the
   plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
   [docs/decisions.md](docs/decisions.md) R11, R39), shared by every instance in the
   host. An instance holds them only while its POLY
   is on, taking them a moment after POLY is switched on and giving them back when it is
   switched off; one that finds them all taken plays its voices on the host's thread, and
-  asks again when its POLY is next switched on (R18, R21). A voice takes 5 to 10 % of a
-  core of an Apple M4 Pro (FEEDBACK's presets the
-  most; R13), so ten voices are half a core's work to a core's. How many play in real time
+  asks again when its POLY is next switched on (R18, R21). The earlier measurement was
+  5 to 10 % of an Apple M4 Pro core a voice (FEEDBACK's presets the most; R13), or half
+  a core to a core for ten voices. It predates the 0.2.2 oversampling changes. How many play in real time
   depends on the machine, the host's block size and the host: on a machine of 1 or 2
   processors every voice plays on the host's thread, and on macOS a host whose audio
   threads are not in an audio workgroup runs its share of the voices more slowly. With more
@@ -500,9 +514,9 @@ The service documents and datasheets the model was derived from are not included
 - The presets' library is read when the drawer opens and every two seconds while it is
   open, so a change another program makes there shows within two seconds.
 - The first size comes from the main screen on macOS, the primary monitor on Windows, and
-  on Linux the monitor the pointer is on (else the primary). If the window with the
-  presets' drawer below the panel would not fit on the screen, or the host will not
-  resize it, the drawer opens over the panel instead.
+  on Linux the monitor the pointer is on (else the primary). A host that refuses editor
+  resizing keeps the current panel height. Opening presets from the short view needs the
+  host to accept the full height.
 - On Windows and Linux, in a host that gives the editor no display scale (Live and Sandyne, for
   two), the editor draws a pixel a point: the panel fills the window at any size, but the hover
   tips, and MIDI Learn's menu and note, are small on a high-density screen.

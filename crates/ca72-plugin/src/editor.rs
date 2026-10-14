@@ -10,6 +10,8 @@
 //! the window keeping its size, and takes the keyboard while open; in it the update check
 //! (`crate::update`, R27). A right click opens a control's menu, for MIDI Learn; the drawer's
 //! MIDI button shows its list of assignments (`crate::learning`, R34).
+//! PANEL on the rail shows or hides the whole lower panel. The window snaps to its height;
+//! opening presets temporarily reveals a hidden panel, closing them hides it again.
 
 use std::any::Any;
 use std::collections::VecDeque;
@@ -66,6 +68,14 @@ const MENU_TEXT: f64 = 1.15;
 /// proportions.
 pub fn height_for(width: u32) -> u32 {
     (f64::from(width) * art::H / art::W).round() as u32
+}
+
+fn height_for_panel(width: u32, expanded: bool) -> u32 {
+    if expanded {
+        height_for(width)
+    } else {
+        (f64::from(width) * DRAWER_TOP / art::W).round() as u32
+    }
 }
 
 fn clamp_width(width: u32) -> u32 {
@@ -482,6 +492,15 @@ impl Ca72Editor {
     /// measured again, its size.
     fn opening(&self) -> (u32, u32) {
         self.fitted.store(0, Ordering::Relaxed);
+        self.params.editor_presets.store(false, Ordering::Relaxed);
+        self.params.editor_panel_applied.store(
+            self.params.editor_panel.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.params.editor_expanded.store(
+            self.params.editor_panel.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
         self.size()
     }
 
@@ -506,6 +525,7 @@ impl Ca72Editor {
         Closing {
             open: Arc::clone(&self.open),
             fitted: Arc::clone(&self.fitted),
+            resizing: Arc::clone(&self.params.editor_resizing),
         }
     }
 }
@@ -514,12 +534,14 @@ impl Ca72Editor {
 struct Closing {
     open: Arc<AtomicBool>,
     fitted: Arc<AtomicU32>,
+    resizing: Arc<crate::resizing::Resizing>,
 }
 
 impl Drop for Closing {
     fn drop(&mut self) {
         self.open.store(false, Ordering::Release);
         self.fitted.store(0, Ordering::Relaxed);
+        self.resizing.close();
     }
 }
 
@@ -582,7 +604,28 @@ impl Editor for Ca72Editor {
             0 => self.fitted(),
             w => clamp_width(w),
         };
-        (width, height_for(width))
+        let preference = self.params.editor_panel.load(Ordering::Relaxed);
+        let expanded = if !self.open.load(Ordering::Acquire) {
+            preference
+        } else if preference != self.params.editor_panel_applied.load(Ordering::Relaxed) {
+            preference || self.params.editor_presets.load(Ordering::Relaxed)
+        } else {
+            self.params.editor_expanded.load(Ordering::Relaxed)
+        };
+        (width, height_for_panel(width, expanded))
+    }
+
+    fn resize_request(&self) -> (u64, (u32, u32)) {
+        self.params
+            .editor_resizing
+            .requested()
+            .unwrap_or_else(|| (0, self.size()))
+    }
+
+    fn resize_result(&self, request: u64, accepted: bool) {
+        if self.open.load(Ordering::Acquire) {
+            self.params.editor_resizing.answer(request, accepted);
+        }
     }
 
     fn set_scale_factor(&self, factor: f32) -> bool {
@@ -662,6 +705,7 @@ struct Editing {
     /// Physical pixels a logical pixel, and the window's width in logical pixels.
     dpr: f64,
     width: u32,
+    physical_width: u32,
     renderer: Renderer,
     scene: Scene,
     /// The strip's own parts (over the drawing's strip): their renderer and scene, and
@@ -752,15 +796,16 @@ impl PanelWindow {
         library: Library,
         host_keys: Arc<HostKeys>,
     ) -> Self {
+        let height = height_for_panel(width, params.editor_panel.load(Ordering::Relaxed));
         let physical = (
             (f64::from(width) * dpr).round() as u32,
-            (f64::from(height_for(width)) * dpr).round() as u32,
+            (f64::from(height) * dpr).round() as u32,
         );
         let surface = window::Surface::new(window, physical);
         PanelWindow {
             surface,
             physical,
-            logical: (width, height_for(width)),
+            logical: (width, height),
             shown: None,
             editing: Editing::new(
                 context,
@@ -874,6 +919,23 @@ impl Editing {
         screen: fn(f64) -> Option<(f64, f64)>,
     ) -> Self {
         // (The tests' editors keep nothing on the computer.)
+        params.editor_presets.store(false, Ordering::Relaxed);
+        params.editor_panel_applied.store(
+            params.editor_panel.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        params.editor_expanded.store(
+            params.editor_panel.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        params.editor_resizing.opening(crate::resizing::View {
+            width,
+            saved_width: params.editor_width.load(Ordering::Relaxed),
+            expanded: params.editor_expanded.load(Ordering::Relaxed),
+            panel: params.editor_panel.load(Ordering::Relaxed),
+            applied: params.editor_panel_applied.load(Ordering::Relaxed),
+            presets: false,
+        });
         let settings = if cfg!(test) {
             Settings::default()
         } else {
@@ -890,6 +952,7 @@ impl Editing {
             meters,
             dpr,
             width,
+            physical_width,
             renderer: Renderer::with_skin(settings.skin, f64::from(physical_width) / art::W, dpr),
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
@@ -1069,8 +1132,14 @@ impl Editing {
     /// The renderers at the window's scale: `dpr` physical pixels a logical one, `width`
     /// logical pixels wide, `physical_width` physical ones.
     fn fit(&mut self, dpr: f64, width: u32, physical_width: u32) {
+        // A height-only snap keeps the scale and the frame just composed. In particular,
+        // state recall can ask for that height during draw(), before the window follows it.
+        if self.dpr == dpr && self.width == width && self.physical_width == physical_width {
+            return;
+        }
         self.dpr = dpr;
         self.width = width;
+        self.physical_width = physical_width;
         let scale = f64::from(physical_width) / art::W;
         self.renderer.rescale(scale, dpr);
         self.strip.rescale(scale);
@@ -1086,6 +1155,23 @@ impl Editing {
     fn in_drawing(&self, (x, y): (f64, f64)) -> (f64, f64) {
         let k = self.dpr / self.renderer.scale();
         (x * k, y * k)
+    }
+
+    /// The compact view's grip is on the rail; controls outside the view cannot be hit.
+    fn hit(&self, x: f64, y: f64) -> Option<Target> {
+        if !self.expanded() {
+            let bottom = f64::from(self.physical_height()) / self.renderer.scale();
+            if !(0.0..bottom).contains(&y) {
+                return None;
+            }
+            if x >= art::W - 30.0 && y >= bottom - 30.0 {
+                return Some(Target::Grip);
+            }
+            if y >= DRAWER_TOP {
+                return None;
+            }
+        }
+        interact::hit(self.renderer.layout(), x, y)
     }
 
     /// The drawer's top now (drawing units) and where it is cut off, while it shows: dropping
@@ -1104,9 +1190,132 @@ impl Editing {
         (y >= from && y < to).then_some((x, y - top))
     }
 
-    /// The window's height (logical pixels): the panel and the strip.
+    fn expanded(&self) -> bool {
+        self.params.editor_expanded.load(Ordering::Relaxed)
+    }
+
+    /// The window's height (logical pixels): the synth and rail, with the lower panel shown.
     fn window_height(&self) -> u32 {
-        height_for(self.width)
+        height_for_panel(self.width, self.expanded())
+    }
+
+    fn resize_view(&self) -> crate::resizing::View {
+        crate::resizing::View {
+            width: self.width,
+            saved_width: self.params.editor_width.load(Ordering::Relaxed),
+            expanded: self.expanded(),
+            panel: self.params.editor_panel.load(Ordering::Relaxed),
+            applied: self.params.editor_panel_applied.load(Ordering::Relaxed),
+            presets: self.browser.open,
+        }
+    }
+
+    fn reconcile_resize(&mut self) {
+        self.params.editor_resizing.finish(self.resize_view());
+        if let Some(view) = self.params.editor_resizing.take_restore() {
+            if view == self.resize_view() {
+                return;
+            }
+            // draw() can consume a delayed refusal before the native window follows it.
+            // Refit now so that following the restored width preserves the composed frame.
+            let physical = WindowInfo::from_logical_size(
+                Size::new(
+                    f64::from(view.width),
+                    f64::from(height_for_panel(view.width, view.expanded)),
+                ),
+                self.dpr,
+            )
+            .physical_size();
+            self.fit(self.dpr, view.width, physical.width);
+            self.params
+                .editor_width
+                .store(view.saved_width, Ordering::Relaxed);
+            self.params
+                .editor_expanded
+                .store(view.expanded, Ordering::Relaxed);
+            self.params
+                .editor_panel
+                .store(view.panel, Ordering::Relaxed);
+            self.params
+                .editor_panel_applied
+                .store(view.applied, Ordering::Relaxed);
+            self.browser.show(view.presets, &self.params);
+            self.placed = view.presets;
+            self.params
+                .editor_presets
+                .store(view.presets, Ordering::Relaxed);
+            self.typing = None;
+            self.hover = None;
+            self.strip_scene.hover = None;
+            self.learning.fit_menu(
+                self.renderer.fonts(),
+                [
+                    0.0,
+                    0.0,
+                    art::W,
+                    if view.expanded { art::H } else { DRAWER_TOP },
+                ],
+            );
+            self.composed = None;
+            self.resizing_window = true;
+        }
+    }
+
+    fn ask_resize(&self, width: u32) -> bool {
+        let request = self
+            .params
+            .editor_resizing
+            .issue((width, height_for_panel(width, self.expanded())));
+        let accepted = self.context.request_resize();
+        if !accepted || !self.context.resize_response_will_follow() {
+            self.params.editor_resizing.answer(request, accepted);
+        }
+        accepted
+    }
+
+    fn physical_height(&self) -> u32 {
+        (f64::from(self.window_height()) * self.dpr)
+            .round()
+            .max(1.0) as u32
+    }
+
+    /// Publish the height before asking the host: its size query sees the requested view.
+    /// Refusing a resize leaves the old view intact.
+    fn set_panel_height(&mut self, expanded: bool) -> bool {
+        let was = self
+            .params
+            .editor_expanded
+            .swap(expanded, Ordering::Relaxed);
+        if was == expanded {
+            return true;
+        }
+        if !self.ask_resize(self.width) {
+            self.params.editor_expanded.store(was, Ordering::Relaxed);
+            return false;
+        }
+        self.resizing_window = true;
+        self.composed = None;
+        true
+    }
+
+    /// Show or hide all of the lower panel at once, outside the sound's saved parameters.
+    fn toggle_panel(&mut self) {
+        self.reconcile_resize();
+        let expanded = !self.expanded();
+        if !self.set_panel_height(expanded) {
+            return;
+        }
+        self.params.editor_panel.store(expanded, Ordering::Relaxed);
+        self.params
+            .editor_panel_applied
+            .store(expanded, Ordering::Relaxed);
+        self.typing = None;
+        self.hover = None;
+        self.strip_scene.hover = None;
+        self.browser.show(false, &self.params);
+        self.learning.close_menu();
+        self.follow_drawer();
+        self.params.editor_resizing.finish(self.resize_view());
     }
 
     /// The drawer placed as it opens: always over the strip, the window as it is (A6; it had
@@ -1117,8 +1326,24 @@ impl Editing {
             return;
         }
         self.placed = open;
+        self.params.editor_presets.store(open, Ordering::Relaxed);
         self.browser.below = false;
+        let expanded = self.params.editor_panel.load(Ordering::Relaxed) || open;
+        if !self.set_panel_height(expanded) {
+            // If a host stops accepting sizes mid-session, keep the view it still owns.
+            if open {
+                self.browser.show(false, &self.params);
+                self.placed = false;
+                self.params.editor_presets.store(false, Ordering::Relaxed);
+            } else {
+                self.params.editor_panel.store(true, Ordering::Relaxed);
+                self.params
+                    .editor_panel_applied
+                    .store(true, Ordering::Relaxed);
+            }
+        }
         self.composed = None;
+        self.params.editor_resizing.finish(self.resize_view());
     }
 
     /// The rail's part under the pointer (the drawing's units), if it is over one.
@@ -1327,6 +1552,7 @@ impl Editing {
         };
         self.last_strip_press = Some((now, t, before));
         match t {
+            StripTarget::Bar(BarTarget::Panel) => self.toggle_panel(),
             StripTarget::Readout(_) => {}
             StripTarget::Switch(a) => {
                 let on = self.amount(a).0.unmodulated_normalized_value() <= 0.0;
@@ -1387,6 +1613,9 @@ impl Editing {
 
     fn press(&mut self, modifiers: Modifiers) {
         let (x, y) = self.in_drawing(self.pointer);
+        if !self.expanded() && y >= DRAWER_TOP {
+            return;
+        }
         // A press on the readout a value is being typed into leaves it typed into; anywhere
         // else ends the typing, nothing set (decisions.md R52).
         if let Some((r, _)) = self.typing
@@ -1454,7 +1683,7 @@ impl Editing {
             self.strip_press(t);
             return;
         }
-        let Some(target) = interact::hit(self.renderer.layout(), x, y) else {
+        let Some(target) = self.hit(x, y) else {
             return;
         };
         let now = Instant::now();
@@ -1504,6 +1733,9 @@ impl Editing {
     fn context_menu(&mut self) {
         self.end_gestures();
         let (x, y) = self.in_drawing(self.pointer);
+        if !self.expanded() && y >= DRAWER_TOP {
+            return;
+        }
         let size = self.renderer.text_size() * MENU_TEXT;
         let map = &self.params.midi_map;
         if self.in_drawer((x, y)).is_some() || self.on_rail((x, y)).is_some() {
@@ -1528,7 +1760,7 @@ impl Editing {
             }
             return;
         }
-        let target = interact::hit(self.renderer.layout(), x, y);
+        let target = self.hit(x, y);
         // QUALITY's toggle: its indicator shown or hidden (decisions.md R48).
         if let Some(Target::Control(i) | Target::Legend(i, _)) = target
             && CONTROLS.get(i).is_some_and(|c| c.param == "quality")
@@ -1571,6 +1803,12 @@ impl Editing {
         let Some(d) = &mut self.drag else {
             let at = self.in_drawing(pointer);
             let (x, y) = at;
+            if !self.expanded() && y >= DRAWER_TOP {
+                self.hover = None;
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                return;
+            }
             if self.learning.menu_open() {
                 self.learning.hover(self.renderer.fonts(), at);
             }
@@ -1591,7 +1829,7 @@ impl Editing {
             } else if on_strip.is_some() {
                 (None, on_strip)
             } else {
-                (interact::hit(self.renderer.layout(), x, y), None)
+                (self.hit(x, y), None)
             };
             return;
         };
@@ -1719,12 +1957,13 @@ impl Editing {
             }
             return;
         }
+        if !self.expanded() && y >= DRAWER_TOP {
+            return;
+        }
         if strip::hit(x, y).is_some() {
             return;
         }
-        let Some(Target::Control(i) | Target::Legend(i, _)) =
-            interact::hit(self.renderer.layout(), x, y)
-        else {
+        let Some(Target::Control(i) | Target::Legend(i, _)) = self.hit(x, y) else {
             return;
         };
         if !self.operable(i) {
@@ -1812,17 +2051,19 @@ impl Editing {
 
     /// Asks the host for a window `width` wide: whether it agreed.
     fn resize(&mut self, width: u32) -> bool {
+        self.reconcile_resize();
         if width == self.width {
             return false;
         }
         let old = self.params.editor_width.swap(width, Ordering::Relaxed);
-        let agreed = self.context.request_resize();
+        let agreed = self.ask_resize(width);
         if agreed {
             self.width = width;
             self.resizing_window = true;
         } else {
             self.params.editor_width.store(old, Ordering::Relaxed);
         }
+        self.params.editor_resizing.finish(self.resize_view());
         agreed
     }
 
@@ -1917,6 +2158,19 @@ impl Editing {
 
     /// Brings the frame up to the parameters and the gestures: whether it changed.
     fn draw(&mut self) -> bool {
+        self.reconcile_resize();
+        let preference = self.params.editor_panel.load(Ordering::Relaxed);
+        let applied = self.params.editor_panel_applied.load(Ordering::Relaxed);
+        if preference != applied {
+            if !self.set_panel_height(preference || self.browser.open) {
+                self.params.editor_panel.store(applied, Ordering::Relaxed);
+            }
+            self.params.editor_panel_applied.store(
+                self.params.editor_panel.load(Ordering::Relaxed),
+                Ordering::Relaxed,
+            );
+            self.params.editor_resizing.finish(self.resize_view());
+        }
         if self
             .scroll
             .as_ref()
@@ -1933,6 +2187,9 @@ impl Editing {
         // note or a menu.
         let map = &self.params.midi_map;
         self.learning.poll(map);
+        let bottom = if self.expanded() { art::H } else { DRAWER_TOP };
+        self.learning
+            .fit_menu(self.renderer.fonts(), [0.0, 0.0, art::W, bottom]);
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
         let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
@@ -1988,30 +2245,43 @@ impl Editing {
         // The places that changed, the panel's and the strip's, put together again alone and
         // so shown (decisions.md R58); all of the frame while the drawer moves, something
         // floats over everything, or there is no frame of this size to change.
-        let frame = self.renderer.frame();
+        let height = self.physical_height();
         let kept = self
             .composed
             .as_ref()
-            .is_some_and(|c| (c.width(), c.height()) == (frame.width(), frame.height()));
+            .is_some_and(|c| (c.width(), c.height()) == (self.physical_width, height));
         self.damage = (kept && !(drawer || shut || self.renderer.floating())).then(|| {
             let mut places = self.renderer.damages().to_vec();
             if let Some([x0, y0, x1, y1]) = self.strip.damage() {
                 places.push([x0, foot + y0, x1, foot + y1]);
             }
+            if !self.expanded() {
+                let side = (30.0 * self.renderer.scale()).ceil() as i32;
+                places.push([
+                    self.physical_width as i32 - side,
+                    height as i32 - side,
+                    self.physical_width as i32,
+                    height as i32,
+                ]);
+            }
             places
         });
+        let expanded = self.expanded();
         compose(
             &mut self.composed,
             &self.renderer,
             self.strip.frame(),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
             self.damage.as_deref(),
+            expanded,
+            (self.physical_width, height),
         );
         true
     }
 
     /// The pointer's events: whether the event was the panel's.
     fn mouse(&mut self, e: MouseEvent) -> bool {
+        self.reconcile_resize();
         match e {
             MouseEvent::CursorMoved {
                 position,
@@ -2056,19 +2326,21 @@ fn compose(
     strip: &ca72_panel::Pixmap,
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
     only: Option<&[[i32; 4]]>,
+    expanded: bool,
+    (width, height): (u32, u32),
 ) {
     let frame = renderer.frame();
-    let all = [0, 0, frame.width() as i32, frame.height() as i32];
+    let all = [0, 0, width as i32, height as i32];
     let kept = composed
         .as_ref()
-        .is_some_and(|c| (c.width(), c.height()) == (frame.width(), frame.height()));
+        .is_some_and(|c| (c.width(), c.height()) == (width, height));
     let places = match only {
         Some(places) if kept => places,
         _ => std::slice::from_ref(&all),
     };
     let c = match composed {
         Some(c) if kept => c,
-        _ => composed.insert(frame.clone()),
+        _ => composed.insert(ca72_panel::Pixmap::new(width, height).expect("a frame")),
     };
     let s = renderer.scale();
     let top = (art::PANEL_H * s).round() as i32;
@@ -2079,6 +2351,23 @@ fn compose(
         if let Some((d, at)) = drawer {
             paste(c, d, (at * s).round() as i32, [x0, y0.max(rail), x1, y1]);
         }
+    }
+    // Logical height is rounded before the host applies DPI scaling. If that adds a row
+    // beyond the artwork, extend its last row rather than leave an unpainted viewport edge.
+    if expanded && height > frame.height() {
+        let row = frame.height().saturating_sub(1) as usize;
+        let stride = width as usize * 4;
+        let last = c.data()[row * stride..(row + 1) * stride].to_vec();
+        for y in frame.height() as usize..height as usize {
+            c.data_mut()[y * stride..(y + 1) * stride].copy_from_slice(&last);
+        }
+    }
+    if !expanded {
+        let side = (30.0 * s).ceil() as i32;
+        let grip = [all[2] - side, all[3] - side, all[2], all[3]];
+        paste(c, frame, 0, grip);
+        paste(c, strip, top, grip);
+        ca72_panel::render::compact_grip(c, s);
     }
     if places == [all] && renderer.floating() {
         renderer.draw_floating(c);
@@ -2232,6 +2521,7 @@ fn strip_scene(
 impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
+        self.reconcile_resize();
         // MIDI Learn first (decisions.md R34): Escape closes a control's menu, the drawer's MIDI
         // list takes the keys it shows, and Escape cancels learning.
         if self.typing.is_some() {
@@ -3091,6 +3381,7 @@ mod tests {
         fixed: AtomicBool,
         /// How often it was asked to.
         resizes: AtomicU32,
+        deferred: AtomicBool,
     }
 
     impl Host {
@@ -3110,6 +3401,9 @@ mod tests {
         fn request_resize(&self) -> bool {
             self.resizes.fetch_add(1, Ordering::Relaxed);
             !self.fixed.load(Ordering::Relaxed)
+        }
+        fn resize_response_will_follow(&self) -> bool {
+            self.deferred.load(Ordering::Relaxed)
         }
         unsafe fn raw_begin_set_parameter(&self, param: ParamPtr) {
             self.push(Call::Begin(param));
@@ -4089,7 +4383,15 @@ mod tests {
                 continue;
             }
             let mut whole = None;
-            compose(&mut whole, &e.renderer, e.strip.frame(), None, None);
+            compose(
+                &mut whole,
+                &e.renderer,
+                e.strip.frame(),
+                None,
+                None,
+                true,
+                (e.physical_width, e.physical_height()),
+            );
             assert!(e.composed == whole, "frame {i}: not as put together whole");
             let f = e.composed.as_ref().expect("a frame");
             let mut all = vec![0u32; screen.len()];
@@ -4130,6 +4432,8 @@ mod tests {
             e.strip.frame(),
             Some((e.drawer.frame(), DRAWER_TOP)),
             None,
+            true,
+            (e.physical_width, e.physical_height()),
         );
         assert!(e.composed == whole, "the drawer where its slide ended");
     }
@@ -5310,6 +5614,327 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_panel_key_snaps_and_presets_temporarily_reveal_it() {
+        let (mut e, host, params) = editing();
+        e.draw();
+        let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
+        let full = e.window_height();
+        let values = e.scene.values;
+        click(&mut e, panel);
+        assert!(!params.editor_panel.load(Ordering::Relaxed));
+        assert_eq!(e.window_height(), height_for_panel(e.width, false));
+        assert!(e.window_height() < full && e.resizing_window);
+        e.draw();
+        assert_eq!(host.resizes.load(Ordering::Relaxed), 1);
+        assert_eq!(e.composed.as_ref().unwrap().height(), e.window_height());
+        assert_eq!(e.hit(100.0, DRAWER_TOP + 20.0), None);
+        assert_eq!(e.hit(art::W - 10.0, DRAWER_TOP - 10.0), Some(Target::Grip));
+
+        open(&mut e);
+        assert_eq!(e.window_height(), full);
+        assert!(!params.editor_panel.load(Ordering::Relaxed), "temporary");
+        assert_eq!(host.resizes.load(Ordering::Relaxed), 2);
+        assert!(key(&mut e, Key::Escape));
+        e.follow_drawer();
+        assert_eq!(e.window_height(), height_for_panel(e.width, false));
+        e.draw();
+        assert_eq!(host.resizes.load(Ordering::Relaxed), 3);
+        click(&mut e, panel);
+        assert_eq!(e.window_height(), full);
+        assert!(params.editor_panel.load(Ordering::Relaxed));
+        assert_eq!(host.resizes.load(Ordering::Relaxed), 4);
+        e.draw();
+        assert_eq!(e.scene.values, values, "showing the panel changes no sound");
+        assert!(host.take().is_empty(), "no parameter gestures");
+
+        click(&mut e, panel);
+        params.editor_width.store(e.width, Ordering::Relaxed);
+        let editor = Ca72Editor::new(Arc::clone(&params), Arc::clone(&e.meters));
+        assert_eq!(
+            editor.opening(),
+            (e.width, height_for_panel(e.width, false))
+        );
+    }
+
+    #[test]
+    fn a_refused_panel_resize_keeps_the_current_view() {
+        let (mut e, host, params) = editing();
+        e.draw();
+        let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
+        host.fixed.store(true, Ordering::Relaxed);
+        click(&mut e, panel);
+        assert!(params.editor_panel.load(Ordering::Relaxed));
+        assert!(e.expanded());
+        assert!(!e.resizing_window);
+        host.fixed.store(false, Ordering::Relaxed);
+        click(&mut e, panel);
+        assert!(!e.expanded());
+        host.fixed.store(true, Ordering::Relaxed);
+        let name = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Name)));
+        click(&mut e, name);
+        assert!(!e.browser.open && !e.expanded());
+        assert!(!params.editor_panel.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn the_compact_frame_drawn_in_parts_is_the_frame_drawn_whole() {
+        let (mut e, _, params) = editing();
+        let hostless = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
+        click(&mut e, panel);
+        for i in 0..12 {
+            hostless.automate(params.cutoff.as_ptr(), i as f32 / 12.0);
+            e.draw();
+            let mut whole = None;
+            compose(
+                &mut whole,
+                &e.renderer,
+                e.strip.frame(),
+                None,
+                None,
+                false,
+                (e.physical_width, e.physical_height()),
+            );
+            assert!(e.composed == whole, "compact frame {i}");
+        }
+        let grip = at(&e, (art::W - 10.0, DRAWER_TOP - 10.0));
+        go(&mut e, grip);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        assert!(e.resizing.is_some(), "the compact grip is operable");
+        e.end_gestures();
+    }
+
+    #[test]
+    fn compact_settings_stay_inside_the_view_and_are_operable() {
+        let (mut e, _, _) = editing();
+        let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
+        click(&mut e, panel);
+        let settings = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, settings);
+        e.draw();
+        let menu = e.learning.menu().unwrap();
+        let (_, h) = menu.extent(e.renderer.fonts());
+        assert!(menu.y >= 0.0 && menu.y + h <= DRAWER_TOP);
+        menu_item(&mut e, "CLASSIC");
+        assert_eq!(e.renderer.skin(), Skin::Drawn);
+        assert!(!e.expanded());
+    }
+
+    #[test]
+    fn recalled_panel_visibility_reaches_an_open_editor_and_keeps_presets_visible() {
+        let (mut e, _, params) = editing();
+        params.editor_width.store(e.width, Ordering::Relaxed);
+        let editor = Ca72Editor::new(Arc::clone(&params), Arc::clone(&e.meters));
+        editor.open.store(true, Ordering::Relaxed);
+        params.editor_panel.store(false, Ordering::Relaxed);
+        editor.param_values_changed();
+        assert_eq!(editor.size().1, height_for_panel(e.width, false));
+        e.draw();
+        assert!(!e.expanded() && e.resizing_window);
+        params.editor_panel.store(true, Ordering::Relaxed);
+        assert_eq!(editor.size().1, height_for(e.width));
+        e.draw();
+        assert!(e.expanded());
+        open(&mut e);
+        params.editor_panel.store(false, Ordering::Relaxed);
+        assert_eq!(editor.size().1, height_for(e.width), "presets still shown");
+        e.draw();
+        assert!(e.expanded() && e.browser.open);
+        assert!(key(&mut e, Key::Escape));
+        e.follow_drawer();
+        assert_eq!(editor.size().1, height_for_panel(e.width, false));
+    }
+
+    #[test]
+    fn delayed_refusal_restores_the_view_and_ignores_superseded_requests() {
+        let (mut e, host, params) = editing();
+        host.deferred.store(true, Ordering::Relaxed);
+        e.draw();
+        let original_width = params.editor_width.load(Ordering::Relaxed);
+        e.toggle_panel();
+        let (first, _) = params.editor_resizing.requested().expect("a request");
+        e.draw();
+        e.toggle_panel();
+        e.draw();
+        e.toggle_panel();
+        let (last, _) = params.editor_resizing.requested().expect("a request");
+        params.editor_resizing.answer(first, false);
+        e.draw();
+        assert!(
+            !e.expanded(),
+            "an obsolete refusal cannot undo the last toggle"
+        );
+        params.editor_resizing.answer(last, false);
+        e.draw();
+        assert!(e.expanded());
+        assert!(params.editor_panel.load(Ordering::Relaxed));
+        assert_eq!(params.editor_width.load(Ordering::Relaxed), original_width);
+    }
+
+    #[test]
+    fn delayed_width_refusal_keeps_the_restored_frame_through_native_follow() {
+        for dpr in [1.0, 1.25, 2.0] {
+            let (mut e, host, params) = editing();
+            let original = e.width;
+            let physical = (f64::from(original) * dpr).round() as u32;
+            e.fit(dpr, original, physical);
+            e.draw();
+            host.deferred.store(true, Ordering::Relaxed);
+            e.resize(original + 100);
+            let wider = e.width;
+            e.fit(dpr, wider, (f64::from(wider) * dpr).round() as u32);
+            e.draw();
+            let (request, _) = params.editor_resizing.requested().expect("width request");
+            params.editor_resizing.answer(request, false);
+            e.draw();
+            assert_eq!(e.width, original);
+            let composed = e.composed.clone();
+            assert_eq!(composed.as_ref().expect("restored frame").width(), physical);
+            // on_frame follows this restoration before presenting the composed controls.
+            e.fit(dpr, original, physical);
+            assert!(
+                e.composed == composed,
+                "native follow preserves restored controls"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_shrink_keeps_presets_and_the_compact_preference() {
+        let (mut e, host, params) = editing();
+        e.toggle_panel();
+        e.draw();
+        host.deferred.store(true, Ordering::Relaxed);
+        open(&mut e);
+        e.draw();
+        let (reveal, _) = params.editor_resizing.requested().expect("reveal");
+        params.editor_resizing.answer(reveal, true);
+        e.draw();
+        assert!(e.browser.open);
+        e.browser.show(false, &params);
+        e.follow_drawer();
+        e.draw();
+        let (shrink, _) = params.editor_resizing.requested().expect("shrink");
+        params.editor_resizing.answer(shrink, false);
+        e.draw();
+        assert!(e.browser.open, "the host still owns the full presets view");
+        assert!(e.expanded());
+        assert!(
+            !params.editor_panel.load(Ordering::Relaxed),
+            "retain the compact preference"
+        );
+    }
+
+    #[test]
+    fn refusal_keeps_presets_that_opened_without_changing_height() {
+        let (mut e, host, _) = editing();
+        open(&mut e);
+        e.draw();
+        assert!(e.browser.open);
+        host.fixed.store(true, Ordering::Relaxed);
+        e.toggle_panel();
+        e.draw();
+        assert!(
+            e.browser.open,
+            "a refused toggle must preserve the existing presets view"
+        );
+        e.resize(e.width + 100);
+        e.draw();
+        assert!(
+            e.browser.open,
+            "a refused width must preserve the existing presets view"
+        );
+    }
+
+    #[test]
+    fn recalled_visibility_during_a_queued_width_does_not_retry_refusal() {
+        let (mut e, host, params) = editing();
+        host.deferred.store(true, Ordering::Relaxed);
+        e.resize(e.width + 100);
+        e.draw();
+        let (width, _) = params.editor_resizing.requested().expect("width request");
+        params.editor_panel.store(false, Ordering::Relaxed);
+        e.reconcile_resize();
+        params.editor_resizing.answer(width, true);
+        e.draw();
+        let (compact, _) = params.editor_resizing.requested().expect("height request");
+        let requests = host.resizes.load(Ordering::Relaxed);
+        params.editor_resizing.answer(compact, false);
+        e.draw();
+        assert_eq!(
+            host.resizes.load(Ordering::Relaxed),
+            requests,
+            "refusal must not immediately retry the collapse"
+        );
+        assert_eq!(
+            params.editor_panel.load(Ordering::Relaxed),
+            params.editor_panel_applied.load(Ordering::Relaxed)
+        );
+        let requests = host.resizes.load(Ordering::Relaxed);
+        e.draw();
+        assert_eq!(
+            host.resizes.load(Ordering::Relaxed),
+            requests,
+            "a refusal must not become a retry loop"
+        );
+    }
+
+    #[test]
+    fn frames_fit_the_rounded_physical_viewport_at_fractional_scales() {
+        for width in [861, 862, 1119, 1121] {
+            for dpr in [1.0, 1.25, 1.5, 2.0] {
+                let (mut e, _, _) = editing();
+                let physical_width = (f64::from(width) * dpr).round() as u32;
+                e.fit(dpr, width, physical_width);
+                for expanded in [true, false] {
+                    if expanded != e.expanded() {
+                        e.toggle_panel();
+                    }
+                    e.draw();
+                    let frame = e.composed.as_ref().expect("a frame");
+                    assert_eq!(
+                        (frame.width(), frame.height()),
+                        (physical_width, e.physical_height()),
+                        "width {width}, scale {dpr}, expanded {expanded}"
+                    );
+                    if !expanded {
+                        let bottom = f64::from(e.physical_height()) / dpr;
+                        let (x, y) =
+                            e.in_drawing((f64::from(width) - 1.0 / dpr, bottom - 1.0 / dpr));
+                        assert_eq!(e.hit(x, y), Some(Target::Grip));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_height_only_resize_keeps_the_frame_just_composed() {
+        let (mut e, _, params) = editing();
+        for expanded in [false, true] {
+            params.editor_panel.store(expanded, Ordering::Relaxed);
+            e.draw();
+            let composed = e.composed.clone();
+            assert!(e.resizing_window && composed.is_some());
+            // on_frame follows a resize asked during draw before presenting that frame.
+            let physical = WindowInfo::from_logical_size(
+                Size::new(f64::from(e.width), f64::from(e.window_height())),
+                e.dpr,
+            )
+            .physical_size();
+            e.fit(e.dpr, e.width, physical.width);
+            assert!(e.composed == composed, "keep the rail and compact grip");
+        }
+    }
+
     /// The grip's drag asks the host for a size once a frame at most, the last the pointer
     /// took it to (each resize renders the whole panel again).
     #[test]
@@ -5564,9 +6189,11 @@ mod tests {
         open(&mut e);
         let c = e.composed.as_ref().expect("the window's frame");
         let frame = e.renderer.frame();
+        let viewport_width = e.physical_width as usize;
         let row = |p: &ca72_panel::Pixmap, y: u32| {
             let w = p.width() as usize;
-            p.data()[(y as usize * w) * 4..((y as usize + 1) * w) * 4].to_vec()
+            let left = y as usize * w * 4;
+            p.data()[left..left + viewport_width * 4].to_vec()
         };
         let s = e.renderer.scale();
         let panel = ((art::PANEL_H - 40.0) * s) as u32;
@@ -6064,6 +6691,30 @@ mod tests {
         assert_eq!(host.take(), vec![]);
     }
 
+    /// The compact view, its controls shown, and presets temporarily revealing it, using
+    /// the editor's actual frames for the visual preview.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_lower_panel_png() {
+        let Some(out) = std::env::var_os("CA72_PANEL_PNG") else {
+            return;
+        };
+        let out = std::path::PathBuf::from(out);
+        std::fs::create_dir_all(&out).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let (mut e, _, _) = editing_with(Library::at(dir.path()));
+        window_frame(&mut e).save_png(out.join("full.png")).unwrap();
+        let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
+        click(&mut e, panel);
+        window_frame(&mut e)
+            .save_png(out.join("short.png"))
+            .unwrap();
+        open(&mut e);
+        window_frame(&mut e)
+            .save_png(out.join("presets.png"))
+            .unwrap();
+    }
+
     /// The window's frames stacked (the panel with the drawer over it, the strip, the bar),
     /// written to `$CA72_EDITOR_PNG` for a look.
     #[test]
@@ -6107,6 +6758,7 @@ mod tests {
 mod windows_window_tests {
     use std::path::PathBuf;
     use std::ptr::null_mut;
+    use std::sync::MutexGuard;
 
     use ca72_panel::presets::BarTarget;
     use nih_plug::context::PluginApi;
@@ -6157,6 +6809,9 @@ mod windows_window_tests {
         resizes: AtomicU32,
         /// The gestures the editor began.
         gestures: AtomicU32,
+        deferred: AtomicBool,
+        refused: AtomicBool,
+        pending: Mutex<Vec<(u64, (u32, u32))>>,
     }
 
     impl GuiContext for WindowHost {
@@ -6165,7 +6820,36 @@ mod windows_window_tests {
         }
         fn request_resize(&self) -> bool {
             self.resizes.fetch_add(1, Ordering::Relaxed);
-            let (w, h) = self.editor.size();
+            let (request, size) = self.editor.resize_request();
+            if self.deferred.load(Ordering::Relaxed) {
+                self.pending
+                    .lock()
+                    .expect("resize requests")
+                    .push((request, size));
+                return true;
+            }
+            self.answer(request, size, !self.refused.load(Ordering::Relaxed))
+        }
+        fn resize_response_will_follow(&self) -> bool {
+            true
+        }
+        unsafe fn raw_begin_set_parameter(&self, _param: ParamPtr) {
+            self.gestures.fetch_add(1, Ordering::Relaxed);
+        }
+        unsafe fn raw_set_parameter_normalized(&self, _param: ParamPtr, _normalized: f32) {}
+        unsafe fn raw_end_set_parameter(&self, _param: ParamPtr) {}
+        fn get_state(&self) -> PluginState {
+            panic!("the editor does not read the state")
+        }
+        fn set_state(&self, _state: PluginState) {}
+    }
+
+    impl WindowHost {
+        fn answer(&self, request: u64, (w, h): (u32, u32), accepted: bool) -> bool {
+            if !accepted {
+                self.editor.resize_result(request, false);
+                return false;
+            }
             let (w, h) = (w as i32, h as i32);
             let parent = self.parent as HWND;
             let flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
@@ -6181,18 +6865,13 @@ mod windows_window_tests {
                     RedrawWindow(parent, null_mut(), null_mut(), flags);
                 }
             }
+            self.editor.resize_result(request, true);
             true
         }
-        unsafe fn raw_begin_set_parameter(&self, _param: ParamPtr) {
-            self.gestures.fetch_add(1, Ordering::Relaxed);
-        }
-        unsafe fn raw_set_parameter_normalized(&self, _param: ParamPtr, _normalized: f32) {}
-        unsafe fn raw_end_set_parameter(&self, _param: ParamPtr) {}
-        fn get_state(&self) -> PluginState {
-            panic!("the editor does not read the state")
-        }
-        fn set_state(&self, _state: PluginState) {}
     }
+
+    // Native capture and focus are shared by the desktop, including across test threads.
+    static DESKTOP: Mutex<()> = Mutex::new(());
 
     /// The editor's window open in the host's, at the narrowest width and a pixel a point.
     struct Opened {
@@ -6203,10 +6882,15 @@ mod windows_window_tests {
         meters: Arc<Meters>,
         handle: baseview::WindowHandle,
         _presets: tempfile::TempDir,
+        // Last to drop: cleanup and all owned window state precede the next fixture.
+        _desktop: MutexGuard<'static, ()>,
     }
 
     impl Opened {
         fn new(resizes_editor: bool, host_kind: HostWindow) -> Self {
+            let desktop = DESKTOP
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // The windows in pixels whatever the screen's scale (baseview sets the process's
             // awareness only once its first window is open, and the tests share the process).
             // SAFETY: this thread's own setting.
@@ -6216,7 +6900,8 @@ mod windows_window_tests {
             params.editor_width.store(MIN_WIDTH, Ordering::Relaxed);
             let meters = Arc::new(Meters::default());
             let editor = Arc::new(Ca72Editor::new(Arc::clone(&params), Arc::clone(&meters)));
-            let (w, h) = editor.size();
+            let (w, h) = editor.opening();
+            editor.open.store(true, Ordering::Release);
             let parent = host_window(w, h, host_kind);
             let host = Arc::new(WindowHost {
                 editor: Arc::clone(&editor),
@@ -6225,6 +6910,9 @@ mod windows_window_tests {
                 repaints: host_kind == HostWindow::Dialog,
                 resizes: AtomicU32::new(0),
                 gestures: AtomicU32::new(0),
+                deferred: AtomicBool::new(false),
+                refused: AtomicBool::new(false),
+                pending: Mutex::new(Vec::new()),
             });
             let context: Arc<dyn GuiContext> = host.clone();
             let window_meters = Arc::clone(&meters);
@@ -6257,6 +6945,7 @@ mod windows_window_tests {
                 meters,
                 handle,
                 _presets: presets,
+                _desktop: desktop,
             }
         }
 
@@ -6308,16 +6997,27 @@ mod windows_window_tests {
             pump(Duration::from_millis(400));
         }
 
-        /// A click on the preset's name, in the strip under the panel.
-        fn click_name(&self) {
-            let (x, y) = strip::centre(StripTarget::Bar(BarTarget::Name));
+        fn click_bar(&self, target: BarTarget) {
+            let (x, y) = strip::centre(StripTarget::Bar(target));
             self.drag(self.at((x, y)), 0.0);
         }
 
-        fn close(mut self) {
+        /// A click on the preset's name, in the strip under the panel.
+        fn click_name(&self) {
+            self.click_bar(BarTarget::Name);
+        }
+
+        fn close(self) {
+            drop(self);
+        }
+    }
+
+    impl Drop for Opened {
+        fn drop(&mut self) {
+            // Also clean up after an assertion fails, on the thread that owns the HWNDs.
             self.handle.close();
             pump(Duration::from_millis(100));
-            // SAFETY: the test's own window.
+            // SAFETY: the test's own parent; its child has processed its close request.
             unsafe { DestroyWindow(self.parent) };
         }
     }
@@ -6517,6 +7217,136 @@ mod windows_window_tests {
     #[test]
     fn the_drawer_opens_and_shuts_where_the_host_resizes_the_editors_window() {
         the_drawer_opens_and_shuts(true);
+    }
+
+    /// Repeated height changes travel through actual native windows, including a host that
+    /// resizes the child synchronously from inside the request. Presets temporarily reveal
+    /// the lower panel, then restore the compact view, whose grip still changes the width.
+    fn panel_sizes(resizes_editor: bool) {
+        let o = Opened::new(resizes_editor, HostWindow::OffScreen);
+        let full = (MIN_WIDTH, height_for_panel(MIN_WIDTH, true));
+        let compact = (MIN_WIDTH, height_for_panel(MIN_WIDTH, false));
+        for _ in 0..8 {
+            o.click_bar(BarTarget::Panel);
+            assert_eq!(settled(&o, compact), compact);
+            assert_eq!(o.editor.size(), compact);
+            o.click_bar(BarTarget::Panel);
+            assert_eq!(settled(&o, full), full);
+            assert_eq!(o.editor.size(), full);
+        }
+        assert_eq!(o.host.resizes.load(Ordering::Relaxed), 16);
+        o.click_bar(BarTarget::Panel);
+        assert_eq!(settled(&o, compact), compact);
+        o.click_name();
+        assert_eq!(settled(&o, full), full, "presets reveal the hidden panel");
+        o.click_name();
+        assert_eq!(
+            settled(&o, compact),
+            compact,
+            "presets restore the compact view"
+        );
+        let grip = o.at((art::W - 12.0, DRAWER_TOP - 12.0));
+        o.drag(grip, 120.0);
+        let asked = o.editor.size();
+        assert!(asked.0 > MIN_WIDTH, "the compact grip changes the width");
+        assert_eq!(asked.1, height_for_panel(asked.0, false));
+        assert_eq!(settled(&o, asked), asked);
+        o.click_bar(BarTarget::Panel);
+        let expanded = (asked.0, height_for_panel(asked.0, true));
+        assert_eq!(settled(&o, expanded), expanded, "expanding keeps the width");
+        o.close();
+    }
+
+    #[test]
+    fn panel_sizes_where_the_host_grows_its_own_window() {
+        panel_sizes(false);
+    }
+
+    #[test]
+    fn panel_sizes_where_the_host_resizes_the_editors_window() {
+        panel_sizes(true);
+    }
+
+    #[test]
+    fn refused_and_delayed_panel_sizes_restore_the_native_window() {
+        let o = Opened::new(true, HostWindow::OffScreen);
+        let full = (MIN_WIDTH, height_for_panel(MIN_WIDTH, true));
+        let compact = (MIN_WIDTH, height_for_panel(MIN_WIDTH, false));
+        o.host.refused.store(true, Ordering::Relaxed);
+        o.click_bar(BarTarget::Panel);
+        assert_eq!(o.size(), full);
+        o.host.refused.store(false, Ordering::Relaxed);
+        o.host.deferred.store(true, Ordering::Relaxed);
+        for _ in 0..3 {
+            o.click_bar(BarTarget::Panel);
+        }
+        let requests = std::mem::take(&mut *o.host.pending.lock().expect("requests"));
+        assert_eq!(requests.len(), 3);
+        o.host.answer(requests[0].0, requests[0].1, false);
+        pump(Duration::from_millis(200));
+        assert_eq!(
+            o.size(),
+            compact,
+            "an obsolete refusal does not change the latest view"
+        );
+        o.host.answer(requests[1].0, requests[1].1, true);
+        o.host.answer(requests[2].0, requests[2].1, false);
+        pump(Duration::from_millis(500));
+        assert_eq!(o.size(), full, "the last host-confirmed view is restored");
+        assert_eq!(o.editor.size(), full);
+        o.host.deferred.store(false, Ordering::Relaxed);
+        o.click_bar(BarTarget::Panel);
+        assert_eq!(settled(&o, compact), compact);
+        o.close();
+    }
+
+    #[test]
+    fn changing_panel_height_keeps_the_native_frame_after_repaint() {
+        let o = Opened::new(true, HostWindow::Dialog);
+        for expanded in [false, true, false, true] {
+            o.click_bar(BarTarget::Panel);
+            let asked = (MIN_WIDTH, height_for_panel(MIN_WIDTH, expanded));
+            assert_eq!(settled(&o, asked), asked);
+            pump(Duration::from_millis(400));
+            let before = every_pixel(&o);
+            assert!(colours(&before) >= 100, "the panel is drawn");
+            let flags = RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN;
+            // SAFETY: the test's own windows on their creating thread.
+            unsafe { RedrawWindow(o.parent, null_mut(), null_mut(), flags) };
+            pump(Duration::from_millis(200));
+            assert_eq!(
+                every_pixel(&o),
+                before,
+                "repainting preserves the complete frame"
+            );
+        }
+        o.close();
+    }
+
+    #[test]
+    fn delayed_width_refusal_preserves_the_native_controls_after_repaint() {
+        let o = Opened::new(true, HostWindow::Dialog);
+        let original = o.size();
+        o.host.deferred.store(true, Ordering::Relaxed);
+        let grip = o.at((art::W - 12.0, art::H - 12.0));
+        o.drag(grip, 120.0);
+        assert!(o.size().0 > original.0);
+        let requests = std::mem::take(&mut *o.host.pending.lock().expect("requests"));
+        let &(request, size) = requests.last().expect("width request");
+        o.host.answer(request, size, false);
+        assert_eq!(settled(&o, original), original);
+        pump(Duration::from_millis(300));
+        let before = every_pixel(&o);
+        assert!(colours(&before) >= 100, "the restored controls are drawn");
+        let flags = RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN;
+        // SAFETY: the test's own windows on their creating thread.
+        unsafe { RedrawWindow(o.parent, null_mut(), null_mut(), flags) };
+        pump(Duration::from_millis(200));
+        assert!(
+            every_pixel(&o) == before,
+            "repainting preserves the restored controls"
+        );
+        o.close();
     }
 
     /// A press with no move of the pointer before it (the pointer set where it is, or the
