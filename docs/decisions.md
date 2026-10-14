@@ -5293,3 +5293,10 @@ The example's formatting and release clippy passed; the preset library's tests p
 (18, zero failures, one manual cross-check ignored). Hardware recordings, real-host import
 and cross-platform runs were not made. The audio/panels/measurements are generated local
 artifacts; settings, MIDI and both generators are tracked.
+
+An independent read-only reviewer verified the complete pack, decoded the 24 MIDI files and
+49 WAVs (the external probe included), checked frequency inversion to under 1e-8 semitone,
+and spot-checked panels 09, 15 and 19. No blocking defect was found. Their two guide
+corrections were applied: 30 minutes of warm-up before tuning, and distinguishing six
+isolated waveform shapes from their switch positions (ordinary saw is covered in 07).
+Optional TUNE and pitch-wheel control takes were added without changing the saved patches.

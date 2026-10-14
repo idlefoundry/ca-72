@@ -464,15 +464,24 @@ Hardware: For the closest topology, patch one PHONES output channel into EXT IN 
 The seven nonempty VCO combinations are explicit: **1 (01/04), 2 (02/05), 3 (03/06),
 1+2 (07), 1+3 (08), 2+3 (09), 1+2+3 (10)**. All mixer VCOs are off for 14, 17, 18 and
 23. The six switch ranges are 32' (01), 16' (02), 8' (03), 4' (04), 2' (05) and
-LO (19/20/22). The six waveform positions are isolated in 01–06, including OSC 3's
-distinct reverse saw, and saw is heard in 07. K1/K2's four states occur in 01, 07, 08 and
+LO (19/20/22). Patches 01–06 isolate six distinct shapes, including OSC 3's reverse saw;
+the ordinary saw switch position is covered in 07 and isolated by its control take below.
+K1/K2's four states occur in 01, 07, 08 and
 09. Musical keys span F2 (41) through C6 (84); sounding VCO fundamentals span F0 (21.83 Hz)
 through C6 (1046.50 Hz), with upper harmonics above that. LFOs and filter oscillation need
 separate rate/pitch measurements rather than the oscillator-note assumption.
 
 For more rigorous isolation, repeat a phrase after changing **one control only**:
 
-- 07: OSC 2 level 0, then 4; keep recorded listening gains fixed until levelling copies.
+- 01: TUNE 0 versus its +1 line, keeping all other settings fixed. Repeat 02 and 03 to
+  check global tuning reaches each keyboard-controlled oscillator; the hardware markings
+  are a guide, so measure the resulting interval rather than assuming exactly one semitone.
+- 06: during the held C6 at 2.20–2.85 s, move the pitch wheel up and back to centre.
+  Before this manual control take, set the same MIDI bend range on both devices (for example
+  +/-2 semitones). The shipped MIDI centres bend but does not perform this move. Note the
+  upward excursion should reach D6 with that range; the full take still lasts 4.8 s.
+- 07: OSC 2 level 0, then 4; the first take isolates a single ordinary saw. Keep recorded
+  listening gains fixed until levelling copies.
 - 10: all three mixer levels 4, then 8; tests mixer saturation without the DRIVE extension.
 - 11: AMOUNT 0, then 6; or K1/K2 0/0, 1/0, 0/1, 1/1 in four separate 4.8 s takes.
 - 13: both hardware DECAY switches off, then on; keep every other setting fixed.
@@ -497,7 +506,8 @@ shared DECAY switch. A-440 is for tuning before a take; it is off in musical pre
 
 ## Comparison procedure
 
-Warm the hardware for at least 15 minutes, tune OSC 1 at A3 on 8', then centre/tune OSC 2
+Warm the hardware for approximately **30 minutes before tuning/calibration** (manual
+section 5.1.1), tune OSC 1 at A3 on 8', then centre/tune OSC 2
 and OSC 3 against it. Disable poly chain, set key priority LOW and multi-trigger OFF.
 Record firmware, the unit, temperature, patch positions, and CA-72 version/QUALITY. Both
 devices receive the same MIDI file. No chorus, reverb, stereo widening, dynamics or DAW
