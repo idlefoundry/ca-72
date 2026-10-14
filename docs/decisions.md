@@ -5661,6 +5661,11 @@ remembered missing ports distinctly or retain them in the selector for deselecti
 
 ## R-KEYBOARD-GRID. Keyboard header shares the lower-panel control grid
 
+2026-10-14 font follow-up: the owner approved matching the keyboard's grey-button
+labels to the preset rail. They now use the same built-in URW Gothic, size 20,
+bold (Demi), including the octave buttons. Their visible glyphs remain centred
+using the bold face's measurements. Button geometry remains 62 units high.
+
 **Owner decision, 2026-10-14.** Align the OCTAVE group and TYPING/PANIC to the
 same grid as the other controls. Use the strip's existing column anchors: OCTAVE
 on CV, the range display on CW, the typing legend on CI and the paired action

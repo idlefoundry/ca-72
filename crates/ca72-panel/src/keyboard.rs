@@ -569,14 +569,14 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
             "#1a1917"
         };
         out += &format!(
-            "<rect x='{}' y='{button_y}' width='{w}' height='{BUTTON_H}' fill='{fill}' fill-opacity='{}' rx='7' stroke='{stroke}' stroke-width='5'/><text x='{x}' y='{}' font-size='22' text-anchor='middle' fill='{}'>{label}</text>",
+            "<rect x='{}' y='{button_y}' width='{w}' height='{BUTTON_H}' fill='{fill}' fill-opacity='{}' rx='7' stroke='{stroke}' stroke-width='5'/><text x='{x}' y='{}' font-size='20' font-weight='700' text-anchor='middle' fill='{}'>{label}</text>",
             x - w / 2.0,
             if scene.skin == Skin::Worn {
                 "0.28"
             } else {
                 "1"
             },
-            text_y(label, 22.0),
+            fonts.baseline_for_centre(label, 20.0, Weight::Bold, HEADER),
             if on { "#2a1006" } else { "#d9d2c0" }
         );
     }
