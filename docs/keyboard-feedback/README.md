@@ -22,6 +22,9 @@ button materials and hit targets use the same header position. The TYPE mapping 
 that centre as well. The range reuses the preset display's bezel, glass asset, dot font, spacing
 and orange light. The preset display's appearance is unchanged.
 
+TYPE and PANIC sit side by side, with matching 230 × 48-unit caps and a 16-unit gap. Their
+drawing, materials and click targets share one layout; both labels retain their vertical centre.
+
 Preset display above, octave range below, from the same rendered frame:
 
 ![Matching preset and octave screens](preset-and-octave-screens.png)

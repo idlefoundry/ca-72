@@ -5491,3 +5491,7 @@ and bezel for the octave range. It now calls the shared bezel renderer and uses 
 asset, dot font, grid spacing and light colours. Its readout remains centred on the wood;
 the preset display keeps its existing appearance. Updated renderer previews and panel/lint
 checks pass; visual review still precedes full CI or merging.
+
+**Button follow-up, 2026-10-14.** The owner asked to place TYPE and PANIC side by side and
+give them the same size. TYPE now sits just left of PANIC, with both caps 230 × 48 units and
+a 16-unit gap. Header drawing, realistic materials and hit-testing share a single button layout.

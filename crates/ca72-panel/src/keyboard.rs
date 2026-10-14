@@ -42,6 +42,13 @@ pub enum Target {
     Back,
 }
 
+const BUTTONS: [(f64, f64, &str, Target); 4] = [
+    (817.0, 86.0, "−", Target::Down),
+    (1287.0, 86.0, "+", Target::Up),
+    (2444.0, 230.0, "TYPE", Target::Type),
+    (2690.0, 230.0, "PANIC", Target::Panic),
+];
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub root: u8,
@@ -165,12 +172,7 @@ pub fn hit(root: u8, x: f64, y: f64) -> Option<Target> {
     if !inside(x, y) {
         return None;
     }
-    for (cx, w, target) in [
-        (817.0, 86.0, Target::Down),
-        (1287.0, 86.0, Target::Up),
-        (2226.0, 190.0, Target::Type),
-        (2690.0, 230.0, Target::Panic),
-    ] {
+    for (cx, w, _, target) in BUTTONS {
         if (x - cx).abs() <= w / 2.0 && (y - HEADER).abs() <= BUTTON_H / 2.0 {
             return Some(target);
         }
@@ -495,12 +497,7 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
             "url(#keyface)"
         }
     );
-    for (x, w, label, target) in [
-        (817.0, 86.0, "−", Target::Down),
-        (1287.0, 86.0, "+", Target::Up),
-        (2226.0, 190.0, "TYPE", Target::Type),
-        (2690.0, 230.0, "PANIC", Target::Panic),
-    ] {
+    for (x, w, label, target) in BUTTONS {
         let on = target == Target::Type && scene.typing;
         let fill = if scene.skin == Skin::Worn && !on {
             "none"
@@ -665,12 +662,7 @@ impl Materials {
                 ),
             );
         }
-        for (x, w) in [
-            (817.0, 86.0),
-            (1287.0, 86.0),
-            (2226.0, 190.0),
-            (2690.0, 230.0),
-        ] {
+        for (x, w, _, _) in BUTTONS {
             let cap = plugin_kit_materials::widened(&self.button, w / BUTTON_H);
             plugin_kit_materials::sprite(frame, &cap, s, (x, HEADER - art::PANEL_H), (w, BUTTON_H));
         }

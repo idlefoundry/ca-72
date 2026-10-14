@@ -3722,7 +3722,7 @@ mod tests {
             host.calls.lock().unwrap().is_empty(),
             "hidden controls cannot gesture"
         );
-        let p = at(&e, (2226.0, keyboard::HEADER));
+        let p = at(&e, (2444.0, keyboard::HEADER));
         go(&mut e, p);
         press(&mut e);
         release(&mut e);
