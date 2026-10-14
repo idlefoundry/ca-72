@@ -5529,3 +5529,40 @@ Installed signature/hash and the previous backup hash were rechecked. Build rece
 are in the Mac's Downloads under `CA-72 Local VST3 Build 8877dde`. Live's loading/UI
 and physical audio/MIDI remain untested during this installation; a fresh Live process
 and any required rescan must load the new build. No public release was changed.
+
+**Editable 24-instance Set (owner request, 2026-10-14):** Put all 24 Round 2 presets
+on separate channels with independent CA-72 instances, stagger the musical examples,
+and leave notes editable rather than rendering synthesizer audio.
+
+`scripts/ableton_instruments.py` builds a separate native Live Set with 24 MIDI tracks,
+24 CA-72 VST3 instances and 24 clips containing the original 276 note events. At 120 BPM,
+ordinary examples use four-bar slots and the two ten-second sweeps use eight-bar slots,
+with a two-second initial lead. No example slots overlap. The cutoff sweeps are now
+editable clip automation with the complete -5/+5/-5 gesture. CC1 remains controller
+target 3; White Lotus has no CC1 envelope and automatic controller resets remain off.
+Each instance's complete preset is embedded in its processor state and the 62 visible
+Live parameter-cache rows agree with it; bypass uses Live On/IsOn and stays off.
+
+`comparison_states.rs` loads the actual library bank through the CA-72 VST3 IComponent
+set_state/get_state interfaces and checks every controller value before saving the
+canonical state. It does not initialise processing, open an editor or render audio.
+All factory White Lotus values remain exact, and all instances are mono at ULTRA.
+The generator resets the inherited piano-roll zoom/scroll to default framing. Tracks
+are unarmed, monitoring is Off, MIDI input is disabled and audio routes to Main.
+The 24 supplied preset files are optional; recalling the embedded sounds does not depend
+on importing them into the shared library.
+
+Preset 23 requires an external signal. One additional utility audio track supplies the
+existing unchanged 220 Hz harmonic probe to that instance's Pre FX sidechain, looping
+for its eight-second allocation. Its output is None, so the dry probe is not mixed in;
+only preset 23 has sidechain routing enabled. There are no rendered or frozen synth clips.
+The new project preserves the earlier hardware-recording Sets and reference packs.
+
+**Evidence:** All 24 states round-tripped through the actual VST3 interface; each of
+63 parameters was checked. Independent review decoded the MIDI and parsed the final
+Set: all 276 note events, embedded states/cache rows, White Lotus, controller and cutoff
+envelopes, 24 locators, source routing and 6,937 unique global IDs/references passed.
+The sole WAV is the unchanged finite mono 48 kHz source. Source syntax, example formatting,
+strict targeted release Clippy and diff checks pass. Native Live loading/audio remain
+untested because the owner's Live session is open; no owner app or physical device
+was opened for verification.
