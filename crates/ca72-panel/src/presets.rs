@@ -297,6 +297,8 @@ pub struct BarScene {
     /// The drawer opens below the bar (else over the panel): which way the arrow points.
     pub below: bool,
     pub hover: Option<BarTarget>,
+    /// The lower panel is expanded (the PANEL toggle's active finish).
+    pub panel: bool,
     pub keyboard: bool,
 }
 
@@ -765,6 +767,7 @@ mod png {
                         open: false,
                         below: false,
                         hover: None,
+                        panel: true,
                     },
                     ..crate::strip::StripScene::default()
                 },
@@ -963,6 +966,7 @@ mod png {
                     open: true,
                     below: false,
                     hover: None,
+                    panel: true,
                 },
                 ..crate::strip::StripScene::default()
             },

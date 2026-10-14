@@ -516,6 +516,7 @@ impl Browser {
             below: self.below,
             hover: self.bar.hover,
             keyboard: self.bar.keyboard,
+            panel: self.bar.panel,
         };
     }
 
