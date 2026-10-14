@@ -156,10 +156,21 @@ impl<P: Plugin> SessionState for Session<P> {
     fn restore(&self, bytes: &[u8]) -> Result<(), String> {
         let mut restored: PluginState = serde_json::from_slice(bytes)
             .map_err(|error| format!("The instrument session is invalid: {error}"))?;
+        for (id, value) in &restored.fields {
+            serde_json::from_str::<serde_json::Value>(value).map_err(|_| {
+                format!("The instrument session contains an invalid saved field '{id}'.")
+            })?;
+        }
         // Reject invalid values before changing any shared parameters. Unknown
         // parameters from a newer compatible plugin version may be ignored.
-        restored.params.retain(|id, _| self.by_id.contains_key(id));
-        for (id, value) in &restored.params {
+        // Validate a migrated copy, then let deserialize_object apply the
+        // instrument's compatibility migration exactly once to the original.
+        let mut validated = restored.clone();
+        P::filter_state(&mut validated);
+        for (id, value) in &validated.params {
+            if !self.by_id.contains_key(id) {
+                continue;
+            }
             let ptr = self.by_id[id];
             let valid = match (ptr, value) {
                 (ParamPtr::FloatParam(_), ParamValue::F32(value)) => value.is_finite(),
@@ -181,6 +192,7 @@ impl<P: Plugin> SessionState for Session<P> {
                 ));
             }
         }
+        restored.params.retain(|id, _| self.by_id.contains_key(id));
         for (id, value) in &self.transient_defaults {
             restored.params.insert(id.clone(), value.clone());
         }
