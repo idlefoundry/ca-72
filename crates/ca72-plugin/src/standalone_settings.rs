@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 
 use ca72_panel::{Pixmap, art, fonts::Fonts};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
-use plugin_kit_standalone::{AppHandle, Config, DeviceId, Phase, Snapshot, negotiate};
+use plugin_kit_standalone::{
+    AppHandle, ApplyReceipt, Config, DeviceId, Phase, Snapshot, negotiate,
+};
 
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -122,6 +124,16 @@ fn device_label(id: &DeviceId) -> String {
     )
 }
 
+fn same_settings(left: &Config, right: &Config) -> bool {
+    // The selector is a set of checked inputs; toggling one off/on can change
+    // vector order without changing the requested routing.
+    let mut left = left.clone();
+    let mut right = right.clone();
+    left.midi_inputs.sort();
+    right.midi_inputs.sort();
+    left == right
+}
+
 /// UI model, including an unapplied draft. Cancel simply discards this model.
 #[derive(Debug)]
 pub struct Dialog {
@@ -131,10 +143,12 @@ pub struct Dialog {
     focus: usize,
     menu: Option<SelectionMenu>,
     local_error: Option<String>,
-    // Returning an edited value to the running value is still an unapplied edit.
+    // Edits since the last draft sync or submitted application. Keep these even
+    // when an older application completes with a different, normalised config.
     edited: bool,
-    // Any subsequent edit invalidates this candidate's permission to sync the draft.
+    // Keep the queued candidate until acknowledged, including across later edits.
     submitted: Option<Config>,
+    completion: Option<ApplyReceipt>,
     next_poll: Instant,
     stamp: String,
     changed: bool,
@@ -152,6 +166,7 @@ impl Dialog {
             local_error: None,
             edited: false,
             submitted: None,
+            completion: None,
             next_poll: Instant::now(),
             stamp: String::new(),
             changed: true,
@@ -161,6 +176,13 @@ impl Dialog {
     pub fn frame(&mut self) -> bool {
         if Instant::now() >= self.next_poll {
             self.next_poll = Instant::now() + Duration::from_millis(200);
+            if let Some(receipt) = &self.completion {
+                match receipt.try_result() {
+                    Ok(Some(config)) => self.complete_application(Ok(config)),
+                    Err(error) => self.complete_application(Err(error)),
+                    Ok(None) => {}
+                }
+            }
             let snapshot = self.app.snapshot();
             let stamp = format!("{snapshot:?}");
             if stamp != self.stamp {
@@ -172,25 +194,9 @@ impl Dialog {
     }
 
     fn update_snapshot(&mut self, snapshot: Snapshot) {
-        let applied = self.submitted.as_ref().is_some_and(|request| {
-            if self.draft != *request || snapshot.phase != Phase::Running {
-                return false;
-            }
-            let Ok(mut normalised) = negotiate(request, &snapshot.devices) else {
-                return false;
-            };
-            if request.auto_midi && request.midi_inputs.is_empty() {
-                normalised
-                    .config
-                    .midi_inputs
-                    .clone_from(&snapshot.config.midi_inputs);
-            }
-            normalised.config == snapshot.config
-        });
-        if !self.edited || applied {
+        if !self.edited && self.submitted.is_none() {
             self.draft.clone_from(&snapshot.config);
             self.edited = false;
-            self.submitted = None;
         }
         let menu = (self.snapshot.devices != snapshot.devices)
             .then(|| self.menu.take())
@@ -388,30 +394,39 @@ impl Dialog {
         }
     }
     fn choose(&mut self, choice: Choice) {
-        self.edited = true;
-        self.submitted = None;
+        let previous = self.draft.clone();
         match choice {
             Choice::Output(id) => {
-                self.draft.output = id;
-                self.draft.input = None;
-                self.draft.output_channels =
-                    if self.output().is_some_and(|id| id.output_channels > 1) {
-                        [0, 1]
-                    } else {
-                        [0, 0]
-                    };
+                if self.draft.output != id {
+                    self.draft.output = id;
+                    self.draft.input = None;
+                    self.draft.output_channels =
+                        if self.output().is_some_and(|id| id.output_channels > 1) {
+                            [0, 1]
+                        } else {
+                            [0, 0]
+                        };
+                }
             }
             Choice::OutputChannels(channels) => self.draft.output_channels = channels,
             Choice::Input(id) => {
-                self.draft.input = id;
-                self.draft.input_channels = [0, 0];
+                if self.draft.input != id {
+                    self.draft.input = id;
+                    self.draft.input_channels = [0, 0];
+                }
             }
             Choice::InputChannels(channels) => self.draft.input_channels = channels,
             Choice::Rate(rate) => self.draft.sample_rate = rate,
             Choice::Buffer(frames) => self.draft.buffer_frames = frames,
             Choice::MidiAuto => {
-                self.draft.auto_midi = true;
-                self.draft.midi_inputs.clear();
+                if !self.draft.auto_midi {
+                    self.draft.auto_midi = true;
+                    self.draft.midi_inputs = if self.snapshot.config.auto_midi {
+                        self.snapshot.config.midi_inputs.clone()
+                    } else {
+                        Vec::new()
+                    };
+                }
             }
             Choice::Midi(None) => {
                 self.draft.auto_midi = false;
@@ -427,6 +442,7 @@ impl Dialog {
             }
             Choice::Channel(channel) => self.draft.midi_channel = channel,
         }
+        self.record_edit(&previous);
         self.local_error = None;
         self.changed = true;
     }
@@ -450,18 +466,13 @@ impl Dialog {
     }
     fn cycle(&mut self, row: usize, direction: i32) {
         self.local_error = None;
-        if row <= 7 && row != 6 {
-            self.edited = true;
-            self.submitted = None;
-        }
+        let previous = self.draft.clone();
         match row {
             0 => {
-                self.draft.output = stepped(&self.choices(), &self.draft.output, direction)
+                let output = stepped(&self.choices(), &self.draft.output, direction)
                     .cloned()
                     .flatten();
-                self.draft.input = None;
-                let channels = self.output().map_or(0, |id| id.output_channels);
-                self.draft.output_channels = if channels > 1 { [0, 1] } else { [0, 0] };
+                self.choose(Choice::Output(output));
             }
             1 => {
                 if let Some(channels) = stepped(
@@ -474,9 +485,10 @@ impl Dialog {
             }
             2 => {
                 let choices = self.input_choices();
-                self.draft.input = stepped(&choices, &self.draft.input, direction)
+                let input = stepped(&choices, &self.draft.input, direction)
                     .cloned()
                     .flatten();
+                self.choose(Choice::Input(input));
             }
             3 => {
                 if let Some(channels) = stepped(
@@ -507,18 +519,68 @@ impl Dialog {
             }
             _ => {}
         }
+        self.record_edit(&previous);
         self.focus = row;
         self.changed = true;
     }
     fn validation(&self) -> Result<(), String> {
         negotiate(&self.draft, &self.snapshot.devices).map(|_| ())
     }
+    fn record_edit(&mut self, previous: &Config) {
+        if self.draft != *previous {
+            self.edited =
+                self.submitted.is_some() || !same_settings(&self.draft, &self.snapshot.config);
+        }
+    }
+    fn has_changes(&self) -> bool {
+        self.submitted.is_some() || !same_settings(&self.draft, &self.snapshot.config)
+    }
+    fn complete_application(&mut self, result: Result<Config, String>) {
+        let request = self.submitted.take();
+        self.completion = None;
+        match result {
+            Ok(config) => {
+                if !self.edited
+                    || request
+                        .as_ref()
+                        .is_some_and(|request| same_settings(request, &self.draft))
+                {
+                    self.draft.clone_from(&config);
+                }
+                self.snapshot.config = config;
+                self.local_error = None;
+            }
+            Err(error) => self.local_error = Some(error),
+        }
+        self.edited = !same_settings(&self.draft, &self.snapshot.config);
+        // A newer host snapshot may already have been observed while this
+        // receipt was pending. Always reconcile it after consuming the result.
+        self.stamp.clear();
+        self.changed = true;
+    }
+    fn finish_or_apply(&mut self) -> bool {
+        if !self.has_changes() {
+            return true;
+        }
+        self.apply();
+        false
+    }
     fn apply(&mut self) {
-        self.local_error = self
+        if self.submitted.is_some() {
+            return;
+        }
+        match self
             .validation()
-            .and_then(|()| self.app.apply(self.draft.clone()))
-            .err();
-        self.submitted = self.local_error.is_none().then(|| self.draft.clone());
+            .and_then(|()| self.app.apply_tracked(self.draft.clone()))
+        {
+            Ok(receipt) => {
+                self.local_error = None;
+                self.submitted = Some(self.draft.clone());
+                self.completion = Some(receipt);
+                self.edited = false;
+            }
+            Err(error) => self.local_error = Some(error),
+        }
         self.changed = true;
     }
 
@@ -556,7 +618,7 @@ impl Dialog {
                 return true;
             }
             if (X + WIDTH - 365.0..X + WIDTH - 50.0).contains(&x) {
-                self.apply();
+                return self.finish_or_apply();
             }
             return false;
         }
@@ -641,7 +703,7 @@ impl Dialog {
                     self.changed = true;
                 }
                 9 => return true,
-                10 => self.apply(),
+                10 => return self.finish_or_apply(),
                 _ => self.open_menu(self.focus),
             },
             Key::Character(ref text) if text == " " => self.open_menu(self.focus),
@@ -846,7 +908,12 @@ impl Dialog {
         for (button, (x, width, label, enabled)) in [
             (X + 45.0, 285.0, "REFRESH", true),
             (X + WIDTH - 710.0, 305.0, "CANCEL", true),
-            (X + WIDTH - 365.0, 315.0, "APPLY", self.validation().is_ok()),
+            (
+                X + WIDTH - 365.0,
+                315.0,
+                if self.has_changes() { "APPLY" } else { "DONE" },
+                !self.has_changes() || (self.submitted.is_none() && self.validation().is_ok()),
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -1005,6 +1072,121 @@ mod tests {
     }
 
     #[test]
+    fn done_closes_without_applying_and_only_changed_settings_show_apply() {
+        let directory = tempfile::tempdir().expect("test state folder");
+        let mut runtime = plugin_kit_standalone::spawn(
+            Box::new(Noop),
+            None,
+            AppOptions {
+                app_id: "ca72-settings-done-test".into(),
+                state_dir: directory.path().to_owned(),
+                device_access: false,
+            },
+        )
+        .expect("test host without devices");
+        runtime.wait_ready(Duration::from_secs(2)).expect("ready");
+        let mut dialog = Dialog::new(runtime.handle());
+        let mut snapshot = dialog.snapshot.clone();
+        snapshot.config.midi_inputs = vec!["Remembered keyboard".into()];
+        snapshot.config.input = Some(DeviceId {
+            name: "Remembered interface".into(),
+            input_channels: 2,
+            output_channels: 2,
+        });
+        snapshot.config.input_channels = [1, 1];
+        snapshot.config.output_channels = [1, 1];
+        dialog.update_snapshot(snapshot);
+        assert!(dialog.svg().contains(">DONE</text>"));
+        assert!(!dialog.svg().contains(">APPLY</text>"));
+        assert!(dialog.press(X + WIDTH - 200.0, BUTTON_Y + 30.0));
+        dialog.focus = 10;
+        assert!(dialog.key(&KeyboardEvent {
+            key: Key::Enter,
+            ..Default::default()
+        }));
+        assert!(dialog.submitted.is_none(), "Done never submits settings");
+        let unchanged = dialog.draft.clone();
+        dialog.choose(Choice::MidiAuto);
+        dialog.choose(Choice::Output(dialog.draft.output.clone()));
+        dialog.choose(Choice::Input(dialog.draft.input.clone()));
+        dialog.cycle(0, 1);
+        assert_eq!(
+            dialog.draft, unchanged,
+            "no-op choices preserve dependent settings"
+        );
+        assert!(!dialog.has_changes());
+        dialog.choose(Choice::Midi(None));
+        dialog.choose(Choice::MidiAuto);
+        assert!(
+            !dialog.has_changes(),
+            "returning to Automatic restores its remembered input"
+        );
+        let mut manual = dialog.snapshot.clone();
+        manual.config.auto_midi = false;
+        manual.config.midi_inputs = vec!["Port A".into(), "Port B".into()];
+        dialog.update_snapshot(manual);
+        dialog.choose(Choice::Midi(Some("Port A".into())));
+        dialog.choose(Choice::Midi(Some("Port A".into())));
+        assert!(
+            !dialog.has_changes(),
+            "input selection order does not count as an edit"
+        );
+        let mut automatic = dialog.snapshot.clone();
+        automatic.config = unchanged;
+        dialog.update_snapshot(automatic);
+        if let Some(path) = std::env::var_os("CA72_STANDALONE_DONE_PROOF") {
+            let scale = 1380.0 / art::W;
+            let mut pixmap = Pixmap::new(1380, (art::H * scale).round() as u32).expect("pixels");
+            dialog.draw(&mut pixmap, scale);
+            pixmap.save_png(path).expect("saved Done settings proof");
+        }
+
+        let latest = dialog.app.snapshot();
+        dialog.stamp = format!("{latest:?}");
+        let mut older_accepted = latest.config.clone();
+        older_accepted.midi_inputs = vec!["Older accepted input".into()];
+        dialog.submitted = Some(older_accepted.clone());
+        dialog.complete_application(Ok(older_accepted));
+        dialog.next_poll = Instant::now();
+        dialog.frame();
+        assert_eq!(
+            dialog.draft, latest.config,
+            "completion must reconcile a newer snapshot already observed while pending"
+        );
+
+        dialog.choose(Choice::Channel(None));
+        assert!(
+            !dialog.has_changes(),
+            "choosing the current value is a no-op"
+        );
+        dialog.choose(Choice::Channel(Some(2)));
+        assert!(dialog.svg().contains(">APPLY</text>"));
+        assert!(
+            !dialog.finish_or_apply(),
+            "failed Apply keeps the dialog open"
+        );
+        assert!(
+            dialog.local_error.is_some(),
+            "no output device is available"
+        );
+        assert!(dialog.has_changes());
+        dialog.choose(Choice::Channel(None));
+        assert!(!dialog.has_changes(), "reverting the edit restores Done");
+        dialog.cycle(7, 1);
+        assert!(dialog.has_changes());
+        dialog.cycle(7, -1);
+        assert!(
+            !dialog.has_changes(),
+            "arrow-key edits use the same comparison"
+        );
+        assert!(
+            dialog.finish_or_apply(),
+            "Done works even without audio devices"
+        );
+        runtime.shutdown().expect("test host closes");
+    }
+
+    #[test]
     fn open_device_menu_follows_inventory_without_changing_the_draft() {
         let directory = tempfile::tempdir().expect("test state folder");
         let mut runtime = plugin_kit_standalone::spawn(
@@ -1140,6 +1322,8 @@ mod tests {
             sample_rates: vec![48_000],
             default_sample_rate: 48_000,
         }];
+        snapshot.config.auto_midi = false;
+        snapshot.config.midi_inputs = vec!["Keyboard Port 2".into()];
         dialog.update_snapshot(snapshot.clone());
         dialog.choose(Choice::MidiAuto);
         assert!(dialog.draft.auto_midi);
@@ -1147,30 +1331,98 @@ mod tests {
         dialog.apply();
         assert!(dialog.local_error.is_none());
         assert!(dialog.submitted.is_some());
+        assert!(
+            dialog.has_changes(),
+            "Apply stays until host acknowledgement"
+        );
+        dialog.update_snapshot(snapshot.clone());
+        assert!(
+            dialog.has_changes(),
+            "an old snapshot cannot reset the draft"
+        );
+        assert!(dialog.draft.midi_inputs.is_empty());
         snapshot.phase = Phase::Running;
         snapshot.config = negotiate(&dialog.draft, &snapshot.devices)
             .expect("supported output")
             .config;
         snapshot.config.midi_inputs = vec!["Keyboard Port 2".into()];
+        dialog.complete_application(Ok(snapshot.config.clone()));
         dialog.update_snapshot(snapshot.clone());
         assert_eq!(dialog.draft, snapshot.config);
         assert!(dialog.submitted.is_none());
+        assert!(!dialog.has_changes(), "normalised success restores Done");
         assert!(dialog.svg().contains("Automatic · Keyboard Port 2"));
+
+        // Equality with the current snapshot is not proof of completion, even
+        // when choosing the device-default rate normalises to the running rate.
+        dialog.choose(Choice::Rate(0));
+        dialog.apply();
+        dialog.update_snapshot(snapshot.clone());
+        assert!(
+            dialog.has_changes(),
+            "matching old config cannot acknowledge a request"
+        );
+        dialog.complete_application(Err("Same repeated transition failure".into()));
+        assert!(dialog.submitted.is_none(), "failed receipt permits retry");
+        assert!(dialog.has_changes());
+        dialog.apply();
+        dialog.complete_application(Ok(snapshot.config.clone()));
+        assert!(!dialog.has_changes());
+
+        // Returning to the submitted value resumes following automatic updates
+        // once that request completes; it must not leave a stale edit latch.
+        dialog.choose(Choice::Channel(Some(2)));
+        dialog.apply();
+        let queued = dialog.submitted.clone();
+        dialog.choose(Choice::Channel(Some(3)));
+        dialog.apply();
+        assert_eq!(
+            dialog.submitted, queued,
+            "a pending Apply cannot be replaced"
+        );
+        dialog.choose(Choice::Channel(Some(2)));
+        let mut applied = snapshot.config.clone();
+        applied.midi_channel = Some(2);
+        dialog.complete_application(Ok(applied.clone()));
+        assert!(!dialog.has_changes());
+        let mut automatic = snapshot.clone();
+        automatic.config = applied;
+        automatic.config.midi_inputs = vec!["Keyboard Port 1".into()];
+        dialog.update_snapshot(automatic);
+        assert_eq!(dialog.draft.midi_inputs, ["Keyboard Port 1"]);
+        assert!(
+            !dialog.has_changes(),
+            "completed edits follow automatic host updates"
+        );
+        dialog.update_snapshot(snapshot.clone());
 
         dialog.choose(Choice::Channel(Some(2)));
         dialog.apply();
         snapshot.config.midi_channel = Some(2);
         dialog.choose(Choice::Channel(None));
         assert_eq!(dialog.draft, dialog.snapshot.config);
+        assert!(dialog.has_changes(), "an earlier Apply is still pending");
+        dialog.complete_application(Ok(snapshot.config.clone()));
         dialog.update_snapshot(snapshot.clone());
         assert_eq!(
             dialog.draft.midi_channel, None,
             "editing back to the old value still counts as a post-Apply edit"
         );
+        assert!(
+            dialog.has_changes(),
+            "a late acknowledgement keeps the newer edit"
+        );
 
+        snapshot.config.auto_midi = false;
+        dialog.update_snapshot(snapshot.clone());
+        dialog.choose(Choice::Midi(None));
         dialog.choose(Choice::MidiAuto);
         dialog.apply();
         dialog.choose(Choice::Channel(Some(2)));
+        let mut accepted = snapshot.config.clone();
+        accepted.midi_channel = None;
+        dialog.complete_application(Ok(accepted.clone()));
+        snapshot.config = accepted;
         dialog.update_snapshot(snapshot);
         assert_eq!(dialog.draft.midi_channel, Some(2));
         assert!(
