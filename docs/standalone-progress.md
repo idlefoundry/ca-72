@@ -6,12 +6,12 @@
 |---|---|---|
 | S1 Research/spec | PASS | Current CA-72/kit inspected; two independent research audits; primary documentation and platform constraints in the spec |
 | S2 Shared host core | PASS | 29 host + 2 queue tests on Linux/macOS/Windows; 102 kit workspace tests; private Linux duplex/recovery |
-| S3 NIH adapter/app | INTEGRATED | 7 adapter tests: identical samples/input, zero callback allocations/frees, stopped edits, typed restore and migrations; package CI pending |
+| S3 NIH adapter/app | PASS (software/native lifecycle) | 7 adapter tests: identical samples/input, zero callback allocations/frees, stopped edits, typed restore and migrations; Windows no-device save/reopen/close; three-OS CI green |
 | S4 Keyboard | PASS | 44 keys, true cutouts/aligned fronts, both skins, bounded ownership/typing/panic tests; explicit owner delegation removed the approval wait |
 | S5 Device UI | PASS | Capability dropdowns, multi-MIDI, apply/cancel/refresh, actual metrics and errors; focused dialog tests and proofs |
 | S6 Session/recovery | PASS (software/virtual) | Atomic versioned sessions, typed preflight, bad-file protection, visible close-save errors, single-instance/rollback/source-loss tests |
-| S7 Packaging/docs | INTEGRATED | App targets/icons/metadata, installer choices, portable ZIP, notices/sources; 4 real-launch Linux installer tests; native package CI pending |
-| S8 Verification/review | PARTIAL | Independent defects corrected; 42 SPICE tests; private Linux duplex and 24 CoreAudio virtual cycles pass. Physical I/O/MIDI latency, permission and hotplug checks remain UNVERIFIED |
+| S7 Packaging/docs | PASS (candidate packaging) | App targets/icons/metadata, installer choices, portable ZIP, notices/sources; native packages/portable ZIP tested; private Mac app/installer signed, notarised and Gatekeeper accepted |
+| S8 Verification/review | PARTIAL | Independent defects corrected; 42 SPICE tests; private Linux duplex and 24 CoreAudio virtual cycles pass. Physical I/O/MIDI latency, permission/hotplug, Mac GUI and minimum-OS runtime checks remain UNVERIFIED |
 
 ## Decisions and departures
 
@@ -45,6 +45,8 @@
   recorded in [standalone-verification/README.md](standalone-verification/README.md).
 - Linux installer component/upgrade/uninstall and real-launch escaping checks pass
   in an isolated prefix (4 tests). Desktop entry validation and packaging shell
-  syntax pass. Native packages are not yet verified.
+  syntax pass. Actual Linux/Windows candidates and Mac package metadata/CLI pass;
+  the private Mac standalone candidate is signed and notarised. CI full Mac packages
+  remain unsigned and cannot be published.
 - No owner's hardware opened during research. Physical-interface test selection awaits
   a concrete inventory and authorization; simulated/virtual tests remain available.

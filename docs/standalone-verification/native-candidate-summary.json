@@ -1,0 +1,55 @@
+{
+  "source_commit": "acaa03cb271cb25e4089dfe05f2ab7455d660d17",
+  "merge_commit": "c34cb3c1c36749ae2b27ce8ae8b840cb97e6ae58",
+  "ci_run": 38510356796,
+  "ci_all_platforms": "SUCCESS",
+  "linux": {
+    "maximum_glibc": "2.35",
+    "install_help_uninstall": "PASS",
+    "linked_jack": false
+  },
+  "windows": {
+    "artifact_id": 11869592887,
+    "binary_sha256": "ec8b29849085fd30a048638c4cdca6005ee6f35a783f66dc23b09f4370121977",
+    "native_no_device_cycles": 2,
+    "close_ms": [
+      108.111,
+      151.858
+    ],
+    "exit_codes": [
+      0,
+      0
+    ],
+    "session_reopen": "PASS",
+    "shared_preferences_unchanged": true,
+    "portable_zip_sha256": "0841f5e8994a432bfd0f0b71b1aefabd8da227d54be7ec89fa788ce34c486ef0"
+  },
+  "macos": {
+    "architectures": [
+      "arm64",
+      "x86_64"
+    ],
+    "minimum_deployment": "11.0",
+    "cli": "PASS",
+    "private_candidate_scope": "standalone app only",
+    "developer_id_app_hardened_runtime": true,
+    "audio_input_entitlement": true,
+    "developer_id_installer": true,
+    "notarization": "Accepted",
+    "app_and_pkg_stapled_validated": true,
+    "app_and_pkg_gatekeeper": "Notarized Developer ID",
+    "private_pkg_sha256": "ea244aa8929eed941080b7026194acc7e562ee81351f3044db1fdeb766cfabda",
+    "private_app_zip_sha256": "8750790a5a3132161addff61e57d4e76a8a869055f85966483ba566700330ba7",
+    "ci_full_installer_unsigned": true
+  },
+  "physical_devices_opened": false,
+  "owner_installed_plugins_changed": false,
+  "release_published": false,
+  "unverified": [
+    "physical playback/MIDI/external input and end-to-end latency",
+    "microphone permission grant/denial",
+    "hardware hotplug",
+    "macOS application GUI lifecycle",
+    "Intel/macOS 11 and Windows 10 runtime"
+  ]
+}

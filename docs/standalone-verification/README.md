@@ -63,7 +63,8 @@ application checks include 220 library tests and 7 adapter tests; 42 SPICE tests
 pass. Direct and adapter processing are sample-identical with active stereo input,
 alternating 128/256 frames and note/controller events. Allocation guards observe
 zero callback allocations or frees; idle behavior retains the circuit's settling.
-Strict all-feature Clippy and formatting pass. Native package CI follows below.
+Strict all-feature Clippy and formatting pass. The final native CI and candidate
+checks are recorded below.
 
 ## Independent review and packaging
 
@@ -121,7 +122,7 @@ That run compiled both macOS application slices, then exposed a `lipo` argument
 order/parser difference. Both build and package scripts now verify each slice
 separately with the input first. Apple clang 21 built a private universal C
 fixture; the native Apple tool verified arm64 and x86_64 with those exact calls.
-The actual corrected application/package checks remain pending below.
+The corrected universal application/package checks passed in the final CI run below.
 
 The Windows artifact from that exact run is a GUI x64 executable. Its imports are
 Windows system DLLs only, with no VCRUNTIME or MSVCP redistributable dependency.
@@ -131,3 +132,40 @@ in a private SSH session close via their own WM_CLOSE in 142.73/143.83 ms with
 exit 0, save session.json and restore unsaved cutoff, preset name and editor width.
 The existing per-computer settings file is unchanged. No owner window receives
 focus and no physical endpoint is opened. The test fixture is removed afterward.
+
+## Final candidate acceptance
+
+[CI 38510356796](https://github.com/idlefoundry/ca-72/actions/runs/38510356796)
+passed macOS, Windows and Linux on `acaa03c`. Its merge `c34cb3c` has exactly the
+same tree. Builds, all-feature Clippy, workspace and 17 derive tests, installers
+and platform validators pass. The [candidate summary](native-candidate-summary.json)
+records exact source/artifacts and hashes.
+
+The final Windows executable again passes native no-device start/save/reopen/close,
+with exits 0 in 108.11/151.86 ms and shared preferences unchanged. The real portable
+ZIP contains the actual CI app/icon/plug-ins/licences; all file and archive hashes
+pass. The final Mac app and installer payload are universal arm64/x86_64 with
+Mach-O and plist deployment 11.0, correct icon/executable and microphone purpose.
+The optional installer choice targets /Applications. Payload CLI exits 0/2/2
+without GUI, state writes or hardware. No Homebrew or /usr/local library is linked.
+
+The raw CI app bundle is unsigned; its executable has only the linker's ad hoc
+signature. The CI full installer is unsigned, with an ad hoc sealed app carrying
+the audio-input entitlement. Those artifacts are not public release installers.
+A separate private standalone-only candidate from the exact verified app was signed
+with Developer ID Application, hardened runtime, secure timestamp and audio-input
+entitlement; its expanded installer payload verifies across both architectures.
+Developer ID Installer signing and trusted timestamp pass. Apple notarization
+returned Accepted; both app and package are stapled and validated, and Gatekeeper
+accepts both as Notarized Developer ID. Its resources/notices match the original
+CI payload. Existing credentials worked through a fresh owned desktop session;
+no Keychain was unlocked or changed and the session is closed. Nothing was installed
+or published. This verifies the new application's signing capability, not a signed
+combined plug-in release.
+
+S1–S7 implementation/candidate work is complete within the recorded software and
+virtual/native evidence. S8 remains PARTIAL: physical playback/MIDI/external-input
+latency, permission grant/denial, hardware hotplug, the macOS application's GUI
+lifecycle, Intel/macOS 11 and Windows 10 runtime remain unverified. A broken native
+driver call can still outlive the bounded caller shutdown. The [implementation contract](../standalone-spec.md#implementation-order-and-evidence-gates)
+requires a named physical interface before opening it; none was supplied.

@@ -5366,7 +5366,15 @@ rollback snapshot, and that a pending snapshot could change during state recall.
 non-size state is now refreshed between actions, and each issued action's completed snapshot
 is frozen. Both editor regressions fail on the earlier candidate and pass after the repair.
 
-## R-STANDALONE. A desktop application and playable lower keyboard
+R73's standalone and keyboard arrived on main before publication and are included in the
+combined candidate. Merge review found that a delayed expansion refusal could restore the
+compact view without releasing a keyboard note started while expansion was pending. Rollback
+now releases local notes, clears their hover and restores keyboard capture to match the view.
+Its regression failed before the repair and passes afterward. The allocation-test harness
+also clears its thread marker before releasing its serial lock, including on unwind, and
+records only the first failure backtrace while still counting every allocation and free.
+
+## R73. A desktop application and playable lower keyboard
 
 **Owner decisions, 2026-10-13.** Add a standalone application, research and write a
 detailed specification with clear success criteria, then implement its tasks. Put
@@ -5401,5 +5409,9 @@ and [acceptance evidence](standalone-verification/README.md) record the research
 sources, regression checks and native virtual-backend tests. Independent final
 review reproduced the original malformed-field and shifted-key failures and
 confirmed their fixes, the seven adapter checks, paired-panic ordering and
-malformed-session close preservation. Package CI is pending. Physical audio/MIDI
-latency, microphone permission and hardware hotplug remain unverified.
+malformed-session close preservation. Native CI passed all three systems on
+`acaa03c`; merged as `c34cb3c` with the same tree. Actual native package/CLI checks,
+Windows no-device save/reopen/close and a private Developer ID signed/notarised
+standalone Mac candidate pass. Physical audio/MIDI latency, microphone permission,
+hardware hotplug, Mac GUI and minimum-OS runtime remain unverified. R71 and R72 are reserved for the already open filter fix and 0.2.1 release
+records; this record follows them numerically.
