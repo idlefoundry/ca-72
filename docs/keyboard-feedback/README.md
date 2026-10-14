@@ -31,6 +31,9 @@ Before above, centred header below:
 ![Header alignment](header-before-after.png)
 
 Focused checks: 44 panel unit tests and the panel approval check passed, with 7 visual/timing
-tests ignored; 5 playing tests and 6 keyboard/editor checks passed. Clippy passed for both touched
+tests ignored; 5 playing tests and 8 keyboard/editor checks passed. Clippy passed for both touched
 crates, all targets, with and without all features; formatting passed. Full CI and native host
 checks are deferred until visual review. This is a candidate, separate from released 0.2.1.
+
+Independent read-only review of `f4f9eef` found no actionable issues and confirmed the unchanged
+preset rendering, correct cache invalidation and supported root labels fitting the range screen.
