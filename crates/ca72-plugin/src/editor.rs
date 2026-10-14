@@ -1798,8 +1798,12 @@ impl Editing {
                 keyboard::Target::Panic => {
                     #[cfg(feature = "standalone-production")]
                     if let Some(app) = plugin_kit_standalone::AppHandle::current() {
-                        self.playing.panic_standalone();
-                        app.panic();
+                        let token = self.playing.panic_standalone();
+                        let accepted = app.panic_tagged(token);
+                        debug_assert!(
+                            accepted,
+                            "local panic tokens are nonzero and fit in 63 bits"
+                        );
                     } else {
                         self.playing.panic();
                     }

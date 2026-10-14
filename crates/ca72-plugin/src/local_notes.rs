@@ -3,7 +3,7 @@
 //! could fit. The audio thread owns the merged physical/local note state.
 
 use plugin_kit_queue::AtomicQueue;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A callback takes at most this many local events, including discarded stale events.
 pub const CAPACITY: usize = 256;
@@ -20,7 +20,7 @@ pub struct LocalNotes {
     queue: AtomicQueue,
     generation: AtomicU64,
     panic: AtomicU64,
-    standalone_panic: AtomicBool,
+    standalone_panic: AtomicU64,
     held: [AtomicU64; 2],
 }
 
@@ -30,7 +30,7 @@ impl Default for LocalNotes {
             queue: AtomicQueue::new(CAPACITY),
             generation: AtomicU64::new(0),
             panic: AtomicU64::new(0),
-            standalone_panic: AtomicBool::new(false),
+            standalone_panic: AtomicU64::new(0),
             held: std::array::from_fn(|_| AtomicU64::new(0)),
         }
     }
@@ -65,7 +65,12 @@ impl LocalNotes {
     /// A player's explicit panic: physical and local notes, controllers and old events.
     pub fn panic(&self) {
         self.release();
-        self.panic.fetch_add(1, Ordering::AcqRel);
+        // The shared host reserves zero and packs a token in 63 bits.
+        let _ = self
+            .panic
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                Some(if n >= (u64::MAX >> 1) { 1 } else { n + 1 })
+            });
     }
 
     pub fn panic_generation(&self) -> u64 {
@@ -74,16 +79,19 @@ impl LocalNotes {
 
     /// The UI pairs its epoch change with a hardware-source panic. Audio must hold fresh
     /// queued local notes until that boundary, even if the requests span two callbacks.
-    pub fn await_standalone_panic(&self) {
-        self.standalone_panic.store(true, Ordering::Release);
+    pub fn await_standalone_panic(&self, token: u64) {
+        self.standalone_panic.store(token, Ordering::Release);
     }
 
     pub(crate) fn standalone_panic_pending(&self) -> bool {
-        self.standalone_panic.load(Ordering::Acquire)
+        self.standalone_panic.load(Ordering::Acquire) != 0
     }
 
-    pub(crate) fn finish_standalone_panic(&self) {
-        self.standalone_panic.store(false, Ordering::Release);
+    pub(crate) fn finish_standalone_panic(&self, token: u64) {
+        // An older captured callback must not acknowledge a later UI request.
+        let _ =
+            self.standalone_panic
+                .compare_exchange(token, 0, Ordering::AcqRel, Ordering::Acquire);
     }
 
     /// Only the plugin's single audio consumer calls this. The producer never advances its
@@ -188,6 +196,22 @@ impl Sources {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn only_the_matching_standalone_token_can_finish_a_request_and_wrap_skips_zero() {
+        let notes = LocalNotes::default();
+        notes.panic.store(u64::MAX >> 1, Ordering::Release);
+        notes.panic();
+        assert_eq!(notes.panic_generation(), 1);
+        notes.await_standalone_panic(1);
+        notes.panic();
+        notes.await_standalone_panic(2);
+        notes.finish_standalone_panic(1);
+        assert!(notes.standalone_panic_pending());
+        notes.finish_standalone_panic(2);
+        assert!(!notes.standalone_panic_pending());
+    }
 
     #[test]
     fn releasing_one_source_preserves_the_other_sources_pitch() {

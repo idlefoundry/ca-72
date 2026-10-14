@@ -5653,3 +5653,15 @@ The baseline is `db681b8`. The integration contract and pending acceptance matri
 in `standalone-integration.md`. Existing preview and release evidence remains scoped
 to its original binaries. In particular, the unresolved c16 nested AU validator
 inactivity timeout is not waived or called fixed by this integration.
+
+**PANIC integration review, 2026-10-14.** Two clicks can span an already captured
+callback. A regression first failed on the boolean handshake: the first hardware
+boundary admitted a fresh note belonging to the second UI request. Use the shared
+host's tagged request, captured atomically with its panic flag, and acknowledge
+only an exact local token. Older or generic boundaries reset physical sources
+without clearing a newer pending UI identity. CC120/123 and stream resets do not
+acknowledge a pending UI request. Adapter metadata is consumed once, including on
+invalid blocks. Tokens wrap within 63 bits and skip zero. Regressions cover split
+and coalesced clicks, generic resets, CC120/123, invalid blocks and stale queued
+input. The shared implementation is plugin-kit `fc8448dd`; full integrated
+validation remains required before merge.

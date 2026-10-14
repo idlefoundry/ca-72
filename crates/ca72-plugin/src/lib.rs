@@ -188,7 +188,6 @@ impl Ca72 {
 
     fn clear_note_sources(&mut self) {
         self.local_notes.release();
-        self.local_notes.finish_standalone_panic();
         self.deferred_local = None;
         self.local_generation = self.local_notes.generation();
         self.note_sources.clear();
@@ -198,7 +197,7 @@ impl Ca72 {
     /// Apply one boundary reset before local input. A paired standalone request may arrive
     /// from UI just after the host captured its block: leave fresh notes queued until its
     /// hardware panic arrives, so a later reset cannot kill a note already played.
-    fn local_reset(&mut self, standalone_panic: bool) -> bool {
+    fn local_reset(&mut self, standalone_panic: bool, token: Option<u64>) -> bool {
         let awaiting_standalone = self.local_notes.standalone_panic_pending();
         if awaiting_standalone && !standalone_panic {
             self.release_local_generation();
@@ -207,12 +206,13 @@ impl Ca72 {
         let panic = self.local_notes.panic_generation();
         let ui_panic = panic != self.panic_generation;
         if standalone_panic || ui_panic {
-            self.panic_generation = panic;
             if standalone_panic {
-                self.local_notes.finish_standalone_panic();
+                if let Some(token) = token {
+                    self.local_notes.finish_standalone_panic(token);
+                }
                 // An external host panic invalidates pending local input. The explicit UI
                 // button already advanced its epoch, so coalesce that paired request.
-                if !ui_panic && !awaiting_standalone {
+                if token.is_none() && !ui_panic && !awaiting_standalone {
                     self.local_notes.release();
                 }
             }
@@ -221,9 +221,12 @@ impl Ca72 {
             self.local_notes.publish([0, 0]);
             self.engine.event(Event::AllSoundOff);
             self.engine.event(Event::ResetControllers);
+            if !self.local_notes.standalone_panic_pending() {
+                self.panic_generation = panic;
+            }
         }
         self.release_local_generation();
-        true
+        !self.local_notes.standalone_panic_pending()
     }
 
     fn release_local_generation(&mut self) {
@@ -237,8 +240,8 @@ impl Ca72 {
     }
 
     /// A bounded batch at the next callback's boundary; host events retain their sample offsets.
-    fn local_events(&mut self, standalone_panic: bool) {
-        if !self.local_reset(standalone_panic) {
+    fn local_events(&mut self, standalone_panic: bool, token: Option<u64>) {
+        if !self.local_reset(standalone_panic, token) {
             return;
         }
         for _ in 0..local_notes::CAPACITY {
@@ -251,7 +254,7 @@ impl Ca72 {
             };
             // Observe a UI reset that arrived during the drain before accepting its fresh
             // epoch. If it awaits hardware panic, retain this one event for the next callback.
-            if !self.local_reset(false) {
+            if !self.local_reset(false, None) {
                 self.deferred_local = Some(e);
                 break;
             }
@@ -500,8 +503,9 @@ impl Plugin for Ca72 {
             self.engine.set_curve(c);
         }
         self.engine.set(&self.controls());
+        let panic_token = context.standalone_panic_token();
         let standalone_panic = context.take_standalone_panic();
-        self.local_events(standalone_panic);
+        self.local_events(standalone_panic, panic_token);
         let len = buffer.samples();
         // The voices' deadline: a share of the block's period from now (decisions.md R11);
         // none rendering offline, where every voice is waited for (R18).
@@ -672,6 +676,133 @@ mod tests {
 
     #[test]
     #[cfg(feature = "standalone-production")]
+    fn standalone_invalid_callbacks_and_midi_resets_do_not_acknowledge_ui_tokens() {
+        use nih_plug::wrapper::production::Processor;
+        use plugin_kit_standalone::{AudioBlock, AudioProcessor, MidiEvent, ProcessConfig};
+
+        for kind in [0, 120, 123] {
+            let p = Ca72::default();
+            let notes = p.local_notes.clone();
+            let mut playing = crate::playing::Playing::default();
+            playing.notes = notes.clone();
+            let (mut adapter, _) = Processor::new(p, &[]).expect("standalone adapter");
+            adapter
+                .prepare(ProcessConfig {
+                    sample_rate: 48_000.0,
+                    max_buffer_frames: 128,
+                })
+                .expect("prepared");
+            let token = playing.panic_standalone();
+            let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+            let mut run = |adapter: &mut Processor<Ca72>, panic, midi: &[_]| {
+                adapter.process(AudioBlock {
+                    left: &mut left,
+                    right: &mut right,
+                    input_left: &[],
+                    input_right: &[],
+                    midi,
+                    panic,
+                });
+            };
+            if kind == 0 {
+                adapter.panic_token(Some(token));
+                adapter.process(AudioBlock {
+                    left: &mut [0.0],
+                    right: &mut [],
+                    input_left: &[],
+                    input_right: &[],
+                    midi: &[],
+                    panic: true,
+                });
+            } else {
+                run(
+                    &mut adapter,
+                    false,
+                    &[MidiEvent {
+                        source: 1,
+                        data: [0xb0, kind, 0],
+                        len: 3,
+                    }],
+                );
+            }
+            playing.sync();
+            playing.press(69);
+            // No new metadata is supplied: the invalid call must have consumed its tag.
+            run(&mut adapter, kind == 0, &[]);
+            assert_eq!(
+                notes.held(),
+                [0, 0],
+                "invalid/generic/CC reset cannot finish the UI request"
+            );
+            adapter.panic_token(Some(token));
+            run(&mut adapter, true, &[]);
+            assert_eq!(
+                notes.held(),
+                [0, 1 << 5],
+                "matching boundary admits fresh input"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "standalone-production")]
+    fn repeated_standalone_panics_wait_for_their_own_captured_boundary() {
+        use nih_plug::wrapper::production::Processor;
+        use plugin_kit_standalone::{AudioBlock, AudioProcessor, ProcessConfig};
+
+        // Old captured UI request, generic reset, and coalesced requests respectively.
+        for preceding in [Some(1), Some(0), None] {
+            let p = Ca72::default();
+            let notes = p.local_notes.clone();
+            let mut playing = crate::playing::Playing::default();
+            playing.notes = notes.clone();
+            let (mut adapter, _) = Processor::new(p, &[]).expect("standalone adapter");
+            adapter
+                .prepare(ProcessConfig {
+                    sample_rate: 48_000.0,
+                    max_buffer_frames: 128,
+                })
+                .expect("prepared");
+            let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+            let mut run = |token| {
+                adapter.panic_token(token);
+                adapter.process(AudioBlock {
+                    left: &mut left,
+                    right: &mut right,
+                    input_left: &[],
+                    input_right: &[],
+                    midi: &[],
+                    panic: true,
+                });
+            };
+            let first = playing.panic_standalone();
+            let second = playing.panic_standalone();
+            playing.press(69);
+            let fresh_epoch = notes.generation();
+            if let Some(which) = preceding {
+                run((which == 1).then_some(first));
+                assert_eq!(
+                    notes.held(),
+                    [0, 0],
+                    "old/generic capture cannot acknowledge newer UI input"
+                );
+            }
+            run(Some(second));
+            assert_eq!(
+                notes.generation(),
+                fresh_epoch,
+                "matching capture cannot age fresh input"
+            );
+            assert_eq!(
+                notes.held(),
+                [0, 1 << 5],
+                "fresh note survives its own boundary"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "standalone-production")]
     fn standalone_ui_and_core_panics_coalesce_at_the_same_or_next_boundary() {
         use nih_plug::wrapper::production::Processor;
         use plugin_kit_standalone::{AudioBlock, AudioProcessor, MidiEvent, ProcessConfig};
@@ -689,7 +820,8 @@ mod tests {
                 })
                 .expect("prepared");
             let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
-            let mut run = |panic, midi: &[_]| {
+            let mut run = |panic, token, midi: &[_]| {
+                adapter.panic_token(token);
                 adapter.process(AudioBlock {
                     left: &mut left,
                     right: &mut right,
@@ -705,22 +837,22 @@ mod tests {
                 len: 3,
             };
             playing.press(59);
-            run(false, &[physical(true)]);
+            run(false, None, &[physical(true)]);
             assert_eq!(notes.held(), [(1 << 59) | (1 << 60), 0]);
             // The editor marks the paired request and changes the UI epoch. The core's
             // AudioBlock panic can belong to this callback or the following one.
-            playing.panic_standalone();
+            let token = playing.panic_standalone();
             playing.press(69);
             let fresh_epoch = notes.generation();
             if split_boundary {
-                run(false, &[]);
+                run(false, None, &[]);
                 assert_eq!(
                     notes.held(),
                     [1 << 60, 0],
                     "fresh local input waits for hardware reset"
                 );
             }
-            run(true, &[]);
+            run(true, Some(token), &[]);
             assert_eq!(
                 notes.generation(),
                 fresh_epoch,
@@ -732,21 +864,22 @@ mod tests {
                 "fresh note survives paired panic"
             );
             playing.release_pointer();
-            run(false, &[physical(true)]);
+            run(false, None, &[physical(true)]);
             assert_eq!(
                 notes.held(),
                 [1 << 60, 0],
                 "same physical pitch works after ownership reset"
             );
-            run(false, &[physical(false)]);
+            run(false, None, &[physical(false)]);
             assert_eq!(
                 notes.held(),
                 [0, 0],
                 "physical release does not strand a note"
             );
             playing.press(67);
-            run(false, &[]);
-            run(true, &[]);
+            run(false, None, &[]);
+            playing.press(70);
+            run(true, None, &[]);
             assert_eq!(
                 notes.held(),
                 [0, 0],

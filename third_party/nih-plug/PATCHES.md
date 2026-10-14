@@ -177,3 +177,9 @@ lets opting-in instruments consume its boundary panic before their local MIDI
 queues; otherwise it retains the synthetic CC120/121 sequence. CA-72 uses this to
 coalesce the UI button and hardware-source reset without cancelling notes pressed
 after the button. Ordinary hosted CC120/123 timing and global behavior are unchanged.
+
+Production standalone PANIC identity: the additive ProcessContext token accessor
+and per-block adapter metadata carry the exact token captured by plugin-kit's
+panic flag. Read the token before consuming the panic; direct, untagged and hosted
+callbacks retain their existing behavior. Adapter metadata is consumed even if a
+malformed block is rejected, preventing stale acknowledgements on later calls.

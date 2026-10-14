@@ -83,9 +83,11 @@ impl Playing {
         self.generation = self.notes.generation();
     }
 
-    pub fn panic_standalone(&mut self) {
-        self.notes.await_standalone_panic();
+    pub fn panic_standalone(&mut self) -> u64 {
         self.panic();
+        let token = self.notes.panic_generation();
+        self.notes.await_standalone_panic(token);
+        token
     }
 
     pub fn shift(&mut self, up: bool) {
