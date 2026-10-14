@@ -5399,3 +5399,33 @@ targeted release clippy passed.
 
 The independent read-only critic checked the duration refactor, all MIDI files, all four
 ten-second sweep WAVs, unchanged audio and separate FFT windows. No findings remained.
+
+**Owner follow-up, 2026-10-14.** Create an Ableton project with the comparison clips laid
+out and ready for hardware recording. The owner will configure MIDI output and audio input
+routing later.
+
+The new Arrangement Set has five tracks: Model D MIDI, the existing CA-72 listening
+references, an empty armed mono Model D recording lane, the unchanged raw references, and
+the external-input probe for 23. All 24 examples have named locators and a two-second
+lead-in to their aligned MIDI and audio. Each section occupies 16 bars at 120 BPM, leaving
+space between takes; hardware patches are set manually with transport stopped. The
+recording lane has Monitor Off and unity fader gain. References and probe start muted;
+the MIDI output and probe output are unassigned. The capture input is mono 1 as a
+placeholder. There are no plug-in dependencies, insert effects or return tracks.
+
+The generator uses ordinary saved Live 12 document structures, with fresh automation IDs
+and none of the source Sets' music, recordings or plug-in state. Audio is collected inside
+the project, with Warp, fades, looping and pitch changes off. MIDI notes and depth settings
+come from the comparison manifest. White Lotus has no CC 1 envelope; the Set also disables
+automatic non-automated controller resets at clip start so they cannot replace its matched
+hardware depth. The original reset-before-setting-the-knob instructions are included.
+The project carries the full patch guide, 24 panel images, individual presets/MIDI files,
+a recording checklist and an exact section schedule. `scripts/ableton_comparison.py` builds
+the project from a blank base Set and ordinary clip structures supplied as input files;
+private source Set data and generated project assets are not tracked.
+
+Independent structural checks verified all 24 MIDI notes/timings/velocity/depth settings,
+24 locators, 48 byte-identical reference WAVs, the aligned probe, the empty armed recording
+lane, configurable routing, disabled processing, unique automation IDs and 120 portable
+guide links. The first actual Live import identified that sample marker arrays are required
+even with Warp off; original-speed anchors were added without enabling warping.
