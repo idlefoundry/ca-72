@@ -5566,3 +5566,10 @@ The sole WAV is the unchanged finite mono 48 kHz source. Source syntax, example 
 strict targeted release Clippy and diff checks pass. Native Live loading/audio remain
 untested because the owner's Live session is open; no owner app or physical device
 was opened for verification.
+
+**24-instance delivery (Mac, 2026-10-14):** The separate project is in Downloads as
+`CA-72 Musical Presets - 24 Instances Project`. All 30 manifest files verified on the
+Mac, including the final Set SHA-256
+`4cffc5dce57559a73ec5950fb07803f02fa859bd6c8a265617aba2ebcc02cf41`.
+The remote parser confirmed 24 complete VST3 instances, 24 editable MIDI clips,
+24 locators and one existing external-source WAV. No synth audio was rendered.
