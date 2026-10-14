@@ -20,6 +20,10 @@ SET_NAME = "CA-72 vs Model D - 24 Comparisons.als"
 ARRANGER = "./DeviceChain/MainSequencer/ClipTimeable/ArrangerAutomation/Events"
 AUDIO_ARRANGER = "./DeviceChain/MainSequencer/Sample/ArrangerAutomation/Events"
 GLOBAL_ID_TAGS = {"Pointee", "VolumeModulationTarget", "TranspositionModulationTarget"}
+# Live's controller slots reserve 0 for pitch bend and 1 for channel pressure.
+# CC numbers begin at slot 2, so CC1 is slot 3, not slot 1.
+PITCH_BEND_TARGET = "ControllerTargets.0"
+CC1_TARGET = "ControllerTargets.3"
 
 
 def read_set(path):
@@ -251,9 +255,9 @@ def build(args):
         value(clip, "NoteEditorFoldInZoom", -1)
         value(clip, "NoteEditorFoldInScroll", 0)
         controllers = midi.find("./DeviceChain/MainSequencer/MidiControllers")
-        envelope(clip, 0, controllers.find("ControllerTargets.0").get("Id"), 0)
+        envelope(clip, 0, controllers.find(PITCH_BEND_TARGET).get("Id"), 0)
         if patch["cc1"] is not None:
-            envelope(clip, 1, controllers.find("ControllerTargets.1").get("Id"), patch["cc1"])
+            envelope(clip, 1, controllers.find(CC1_TARGET).get("Id"), patch["cc1"])
         midi.find(ARRANGER).append(clip)
         for kind, folder, lane, channel_colour in [
             ("listening", "CA-72 Listening", listen, 16),

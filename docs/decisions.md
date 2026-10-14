@@ -5429,3 +5429,11 @@ Independent structural checks verified all 24 MIDI notes/timings/velocity/depth 
 lane, configurable routing, disabled processing, unique automation IDs and 120 portable
 guide links. The first actual Live import identified that sample marker arrays are required
 even with Warp off; original-speed anchors were added without enabling warping.
+
+The independent critic found an incorrect MIDI controller offset: the first generator
+used controller target 1 for modulation, but that target is channel pressure. The primary
+DawVert parser and writer both map target 0 to pitch bend, target 1 to pressure and targets
+2 onwards to CC numbers starting at 0. The generator now uses target 3 for CC 1 and target
+0 for centred pitch bend. All 23 depth envelopes were corrected; White Lotus still has no
+CC 1 envelope. These are the ordinary controller slots in the native template; no
+physical MIDI output was tested during project construction.
