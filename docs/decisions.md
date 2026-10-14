@@ -5169,61 +5169,6 @@ ID": `CA-72-0.2.0-macOS.pkg` SHA-256
 9b0dd7003f3fc09dc1ac46370299e59c7997f480779cb76f973aadbf03ce8eeb, the release candidate, with its
 logs in `~/lab/artifacts/ca-72/0.2.0-rc4/`.
 
-## R69. 0.2.0, released (2026-10-12)
-
-**The owner, 2026-10-12:** "verify that there's no dependencies or anything that this new
-release is lacking for any of the platforms. we need to make sure everyone can install it
-without issues. If that's the case, then we're good to release!", and, told the agent would
-merge and publish on green unless something failed: "k, let me know when it's done".
-
-**What each platform needs** (the release's own builds): the Mac's VST3, CLAP and Audio Unit load
-only the system's frameworks and `/usr/lib` (AppKit, AudioToolbox, CoreFoundation,
-CoreGraphics, CoreMIDI, Foundation, QuartzCore; libSystem, libiconv, libobjc, libc++), each with
-x86_64 and arm64 and macOS 11.0 as its least; Windows' VST3 and CLAP (CI's, from the ZIP) import
-only the system's DLLs (kernel32, user32, gdi32, shell32, ole32, oleaut32, avrt, ntdll,
-bcryptprimitives, an api-ms-win-core set of Windows 8 on), the C runtime linked in, x64;
-Linux's (CI's, built on Ubuntu 22.04) need libX11, libxcb and libX11-xcb, as `install.sh` checks,
-and glibc 2.35 at most. Since 0.1.5 the plug-in takes two crates more, `plugin-kit-materials` and
-`plugin-kit-stereo`, Idle Foundry's own, from the public plugin-kit at 4c0f0f3 (in the git
-sources' archive); no system library is new, and nothing asks for more than each processor's
-baseline.
-
-**The release:** main on the Mac (9fbb1f8, the README's status and DOUBLE brought up to date) as
-pull request 26, CI passed on the three systems; merged as ef009fa, whose tree
-(dbde6ea988ec7a89db16053f08d019a76542bf00) is the one the Mac's installer was built and signed
-from; tagged v0.2.0 (annotated). The tag's CI built the Windows installer and ZIP, the Linux
-tarball and the 0.1 presets' pack and drafted the release; the Mac's installer (universal
-bundles, the Audio Unit, clap-validator 37 passed, Steinberg's 47, pluginval at strictness 5,
-signed with the Developer ID identities, notarised, stapled; each bundle inside 0.2.0,
-x86_64 and arm64, `codesign --verify --deep --strict`) uploaded and its line merged into
-`SHA256SUMS.txt`. Every asset downloaded again and checked against it, and the ZIP against its
-own `.sha256`. Published 2026-10-12 13:46 UTC with notes in 0.1.5's form (a row for the 0.1
-presets; what a 0.1 project gets, R66). `releases/latest`, asked anonymously, gives v0.2.0 and
-the three installers the update check looks for; the installer as downloaded from GitHub:
-`spctl` accepted, "Notarized Developer ID", the ticket stapled. GitHub's merged branches deleted
-(calibration, r33- and r35-release-evidence, release-0.2.0); pull requests 11 and 12 closed as
-merged with main's arrival. The installer, its logs and notarisation are in
-`~/lab/artifacts/ca-72/0.2.0/`.
-
-| Asset | SHA-256 |
-|---|---|
-| `CA-72-0.2.0-macOS.pkg` | c8d47b3d587ee79056ee76789ad8ff7ebd2b2f46f7a77679e98dd1e609aecc94 |
-| `CA-72-0.2.0-Windows-setup.exe` | 3e8fe542f342f14add36d2cd1aa30ff707ba3d3e1c6ec3e12db2e4a1fb0df656 |
-| `CA-72-0.2.0-Windows-x86_64.zip` | c6f5cddc9a1c942ed536359bb8ffe680878fab648b8e27dc33222191d7265a28 |
-| `CA-72-0.2.0-Linux-x86_64.tar.gz` | f3126bab1213a25fb0257ee2ab254ced2148d07d53817c3be21cf04b4a85365c |
-| `CA-72-0.2.0-0.1-presets.zip` | 499eccec93e4063645e68d59a512d23e3b4077e0b44863aace21770221a46413 |
-| `CA-72-0.2.0-git-sources.tar.gz` | 22d5c0733c307d510369fe345d5682973cdd33c841a168d49500913299772545 |
-
-**Arch Linux** (the owner, after publication: "what about arch linux systems?"): the released
-tarball installed by its `install.sh` on the Linux reference machine (Omarchy, on Arch; glibc
-2.44), no library reported missing, the installed bundles the release's to the byte, each library
-found in Arch's packages (libx11, libxcb, gcc-libs, glibc); clap-validator 37 passed and 7 skipped,
-Steinberg's validator 47 passed, pluginval at strictness 5 SUCCESS. Arch is named beside the
-other systems in the README and the release's notes.
-
-**Not done:** an Intel Mac, auval on this Mac's registry (CI's macOS job runs it), and Live (the
-owner's).
-
 ## R70. The lower panel can be shown or hidden
 
 **Owner decision, 2026-10-13.** The whole second panel should show or hide, with "no animation
@@ -5366,99 +5311,25 @@ rollback snapshot, and that a pending snapshot could change during state recall.
 non-size state is now refreshed between actions, and each issued action's completed snapshot
 is frozen. Both editor regressions fail on the earlier candidate and pass after the repair.
 
-R73's standalone and keyboard arrived on main before publication and are included in the
-combined candidate. Merge review found that a delayed expansion refusal could restore the
-compact view without releasing a keyboard note started while expansion was pending. Rollback
-now releases local notes, clears their hover and restores keyboard capture to match the view.
-Its regression failed before the repair and passes afterward. The allocation-test harness
-also clears its thread marker before releasing its serial lock, including on unwind, and
-records only the first failure backtrace while still counting every allocation and free.
+**Release scope correction, 2026-10-14:** the owner confirmed that this release is
+limited to the audio fix and the panel hide/show feature. The standalone application,
+playable keyboard and unrelated changes are excluded. The earlier 0.2.1 release was
+returned to draft and 0.2.0 restored as latest, with its tag and assets preserved.
+This candidate starts from the 0.2.0 tag and selects the two features and their
+resize, regression-test and allocation-test support from before the standalone merge.
+The owner subsequently authorised building and publishing this corrected scope as latest.
+Version 0.2.2 is the next unused patch version; the withdrawn 0.2.1 tag and assets
+remain preserved. Acceptance of the withdrawn build does not validate this
+candidate's binaries; the corrected candidate is checked separately before publication.
 
-**Release acceptance, 2026-10-14:** the combined source `717c83bf` passed
-[CI on macOS, Windows and Linux](https://github.com/idlefoundry/ca-72/actions/runs/38514437842),
-including the complete workspace tests, production adapters, installers and native Windows
-window tests. Local workspace checks and clippy, with and without all features, also passed
-on each system. Linux and Mac ngspice checks explicitly required version 47. The 74 focused
-editor checks passed, with seven visual/timing checks ignored; the cutoff-saturation fit
-regeneration was run explicitly. Two paced CPU runs on the identical DSP source passed;
-these remain single-voice measurements, not a polyphony budget.
 
-Installed modules were checked by path and executable hash before accepting host results.
-The installed Linux VST3/CLAP passed all required validators. The signed Mac VST3/CLAP/AU
-passed all five validator checks, including strictness-10 pluginval with editors and strict
-auval. Windows installed CLAP and Steinberg validation passed, as did ten fresh strictness-10
-pluginval runs with editors. Windows CLAP also passed 200 fuzz cases across 50 fresh validator
-runs, four case types per run, using the CI artifact unchanged.
+## R-RELEASE. 0.2.2
 
-Native acceptance used isolated projects with tracks disarmed and outputs muted:
+The release starts at the 0.2.0 tag and adds only R70's panel hide/show, R71's
+HI/LO filter correction and their resize and regression-test support. Production
+standalone hosting, the playable keyboard, their dependencies and packaging are
+excluded. The Mac CoreGraphics import ordering is adjusted only because the
+repository's existing formatter requires it; its behaviour does not change.
 
-| Platform and host | Window evidence |
-|---|---|
-| Linux standalone | 23 size checks, compact grip and exact full-repaint pixels in a floating window; tiling constrains its outer window |
-| Linux REAPER VST3 and CLAP | 23 size checks per format, MIDI with a dummy device, save/reload and exact repaint pixels |
-| Linux Bitwig CLAP | 23 size checks, compact grip and exact full-repaint pixels; demo mode prevents save/reload |
-| Windows standalone | 22 visible desktop parent/child size checks, compact grip and exact full-repaint pixels |
-| Windows REAPER VST3 and CLAP | 23 size checks per format, compact grip, MIDI in muted projects, save/reload and exact full-repaint pixels |
-| Windows Sandyne VST3 | 23 size checks, compact grip and exact full-repaint pixels; no MIDI/save-reload claim |
-| macOS standalone installer payload | 17 height/preset checks, compact grip, width restoration and exact instrument pixels after reopen; devices disabled |
-| macOS REAPER VST3 | 23 frame checks, compact grip and its following click, MIDI in a muted project, save/reload at 1495 × 907 and exact instrument pixels after reopen |
-| macOS Bitwig CLAP | Eight short/full cycles and temporary preset reveal/restore; no numerical frame, grip, MIDI or save/reload claim |
-
-Each 23-check DAW run includes eight short/full cycles and presets temporarily revealing
-then restoring the compact view. The Mac REAPER drag harness initially hit the host's border;
-the corrected run uses the instrument's grip and waits for the resize to settle before
-releasing. It confirms the next panel click and the resized project's restoration. Minimum-OS
-and Intel-Mac runtime, physical audio/MIDI latency, hardware hotplug and other installed DAWs remain
-unverified. This acceptance concerns the tested configurations, not every host or display.
-
-PR [#31](https://github.com/idlefoundry/ca-72/pull/31) merged as `1f5a9f4c`, tagged `v0.2.1`.
-The merge/tag tree `96f1a1c411ca9a210e011eb18f78879a43681ee2` equals the tested source tree
-and the Mac package's build tree. The [tag workflow](https://github.com/idlefoundry/ca-72/actions/runs/38576346799)
-produces the Windows/Linux installers, Windows ZIP and pinned dependency sources. The Mac
-package was Developer ID signed, notarized, stapled and accepted by Gatekeeper; its SHA-256
-is `c24ebaccfd5759e0b25153851afc71c2c4d6f540970f77123e90c0a46b3d6032`.
-The [release](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.1) includes the asset
-checksums. The [release acceptance PR](https://github.com/idlefoundry/ca-72/pull/34)
-records the downloaded-asset verification and final publication result.
-
-## R73. A desktop application and playable lower keyboard
-
-**Owner decisions, 2026-10-13.** Add a standalone application, research and write a
-detailed specification with clear success criteria, then implement its tasks. Put
-the keyboard in the VOICES/STEREO/OUTPUT area, with a button beside settings to
-switch views. Keep the realistic materials and original Model D proportions,
-uniform key alignment and white-key cutouts around the black keys. The owner later
-delegated visual judgement and directed work to continue without an approval wait.
-
-**Agent decisions, 2026-10-14** (not separately approved):
-- Native CoreAudio, WASAPI and ALSA hosting lives in the shared plugin-kit. A thin
-  NIH adapter runs the existing engine, parameters, presets and editor; the legacy
-  JACK development launcher remains available. macOS 11 remains the minimum.
-- Device selection, real external capture, channel routing, sample rate, requested
-  buffer, MIDI inputs/filter, recovery and atomic sessions are available from the
-  editor. Requested buffer duration is labelled separately from playing latency.
-  Independently clocked input uses preallocated, bounded clock correction.
-- The 44-key F-to-C keyboard uses original generated surface assets over true L/T
-  key shapes. Physical MIDI, pointer and typing own notes separately. TYPE starts
-  disabled; focus loss and hidden controls release local notes. Paired PANIC
-  requests are consumed once at the audio boundary. R70's PANEL remains available.
-- Keyboard view and octave use the existing per-computer preferences, outside
-  sound presets and project state. The standalone's instrument and I/O session
-  uses its own versioned state directory. Invalid sessions are preserved and
-  validated completely before any parameter or persistent-field setter runs.
-- Installers add an optional application; Linux also gets a desktop entry and
-  Windows' portable ZIP contains the executable. Existing component locations and
-  session data remain compatible. No release is published by this change.
-
-**Evidence, 2026-10-14:** the [contract](standalone-spec.md),
-[task status](standalone-progress.md), [visual proof](standalone-keyboard/README.md)
-and [acceptance evidence](standalone-verification/README.md) record the researched
-sources, regression checks and native virtual-backend tests. Independent final
-review reproduced the original malformed-field and shifted-key failures and
-confirmed their fixes, the seven adapter checks, paired-panic ordering and
-malformed-session close preservation. Native CI passed all three systems on
-`acaa03c`; merged as `c34cb3c` with the same tree. Actual native package/CLI checks,
-Windows no-device save/reopen/close and a private Developer ID signed/notarised
-standalone Mac candidate pass. Physical audio/MIDI latency, microphone permission,
-hardware hotplug, Mac GUI and minimum-OS runtime remain unverified. R71 and R72 are reserved for the already open filter fix and 0.2.1 release
-records; this record follows them numerically.
+The package scripts and release workflow match the plug-in-only 0.2.0 baseline.
+Local checks, host acceptance and release provenance are recorded after they run.

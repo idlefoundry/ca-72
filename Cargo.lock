@@ -302,7 +302,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "ca72"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ca72-rt",
  "libm",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-analysis"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "libm",
  "serde",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-lab"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ca72",
  "ca72-analysis",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-panel"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "plugin-kit-materials",
  "resvg",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-plugin"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "baseview 0.1.0",
  "ca72",
@@ -354,12 +354,9 @@ dependencies = [
  "nih_plug",
  "objc2",
  "objc2-foundation",
- "plugin-kit-queue",
- "plugin-kit-standalone",
  "plugin-kit-stereo",
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",
- "resvg",
  "serde",
  "serde_json",
  "softbuffer",
@@ -372,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-rt"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -380,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-spice"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "tempfile",
 ]
@@ -653,28 +650,6 @@ name = "cpal"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "873dab07c8f743075e57f524c583985fbaf745602acbe916a01539364369a779"
-dependencies = [
- "alsa 0.9.1",
- "core-foundation-sys",
- "coreaudio-rs",
- "dasp_sample",
- "jni",
- "js-sys",
- "libc",
- "mach2",
- "ndk 0.8.0",
- "ndk-context",
- "oboe",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "windows 0.54.0",
-]
-
-[[package]]
-name = "cpal"
-version = "0.15.3"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f6bc24e16015e1536f571c8f8b2dcda6823b9309#f6bc24e16015e1536f571c8f8b2dcda6823b9309"
 dependencies = [
  "alsa 0.9.1",
  "core-foundation-sys",
@@ -1421,7 +1396,7 @@ dependencies = [
  "clap",
  "clap-sys",
  "core-foundation",
- "cpal 0.15.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cpal",
  "crossbeam",
  "jack",
  "libc",
@@ -1432,7 +1407,6 @@ dependencies = [
  "nih_plug_derive",
  "objc",
  "parking_lot",
- "plugin-kit-standalone",
  "raw-window-handle 0.5.2",
  "rtrb",
  "serde",
@@ -1734,25 +1708,6 @@ version = "0.3.1"
 source = "git+https://github.com/idlefoundry/plugin-kit?rev=4c0f0f31041cb28b9dc803996dd01d8f44af5ce8#4c0f0f31041cb28b9dc803996dd01d8f44af5ce8"
 dependencies = [
  "resvg",
-]
-
-[[package]]
-name = "plugin-kit-queue"
-version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f6bc24e16015e1536f571c8f8b2dcda6823b9309#f6bc24e16015e1536f571c8f8b2dcda6823b9309"
-
-[[package]]
-name = "plugin-kit-standalone"
-version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f6bc24e16015e1536f571c8f8b2dcda6823b9309#f6bc24e16015e1536f571c8f8b2dcda6823b9309"
-dependencies = [
- "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=f6bc24e16015e1536f571c8f8b2dcda6823b9309)",
- "crossbeam-channel",
- "midir",
- "plugin-kit-queue",
- "serde",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -2952,7 +2907,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "nih_plug_xtask",
 ]

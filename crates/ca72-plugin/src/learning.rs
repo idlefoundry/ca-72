@@ -89,7 +89,6 @@ pub enum Item {
     Look(Skin),
     Dials(Law),
     Head,
-    StandaloneSettings,
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -116,7 +115,6 @@ pub enum Pressed {
     Look(Skin),
     /// The settings' menu: the FREQUENCY knobs read through this law.
     Dials(Law),
-    StandaloneSettings,
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -309,8 +307,7 @@ impl Learning {
         size: f64,
         (skin, law): (Skin, Law),
     ) {
-        #[allow(unused_mut)]
-        let mut items = vec![
+        let items = [
             (Item::Head, "LOOK"),
             (Item::Look(Skin::Worn), "REALISTIC"),
             (Item::Look(Skin::Drawn), "CLASSIC"),
@@ -318,11 +315,6 @@ impl Learning {
             (Item::Dials(Law::Semitones), "SEMITONES"),
             (Item::Dials(Law::Hardware), "HARDWARE"),
         ];
-        #[cfg(feature = "standalone-production")]
-        if crate::standalone_settings::available() {
-            items.push((Item::Head, "STANDALONE"));
-            items.push((Item::StandaloneSettings, "AUDIO & MIDI…"));
-        }
         let current = |it: &Item| *it == Item::Look(skin) || *it == Item::Dials(law);
         let mut menu = Menu {
             x,
@@ -332,10 +324,7 @@ impl Learning {
             items: items
                 .iter()
                 .map(|(it, t)| {
-                    let choosable = matches!(
-                        it,
-                        Item::Look(_) | Item::Dials(_) | Item::StandaloneSettings
-                    ) && !current(it);
+                    let choosable = matches!(it, Item::Look(_) | Item::Dials(_)) && !current(it);
                     ((*t).to_owned(), choosable)
                 })
                 .collect(),
@@ -396,7 +385,6 @@ impl Learning {
             (Some(Item::List), l) => return Pressed::List(l),
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
-            (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
             _ => {}

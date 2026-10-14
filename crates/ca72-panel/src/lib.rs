@@ -7,7 +7,6 @@ pub mod art;
 pub mod controls;
 pub mod fonts;
 pub mod interact;
-pub mod keyboard;
 pub mod learn;
 pub mod presets;
 pub mod render;

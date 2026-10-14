@@ -9,14 +9,14 @@ was transcribed from the instrument's service documents into SPICE netlists and 
 in ngspice. The real-time models were then derived from those simulations and tested
 against them, the factory calibration procedures included.
 
-[![The CA-72 on YouTube: watch and hear it](https://raw.githubusercontent.com/idlefoundry/ca-72/053a2ebd711a002df020fc7fb158faa5df099135/docs/video.jpg)](https://youtu.be/Ekep7V5lWqA)
+[![The CA-72 on YouTube: watch and hear it](docs/video.jpg)](https://youtu.be/QLfwGqYg4wU)
 
-Hear it before you download: [the CA-72 on YouTube](https://youtu.be/Ekep7V5lWqA).
+Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU).
 
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.1: the lower panel can be shown or hidden instantly; strong filter contours
+**Status:** 0.2.2: the lower panel can be shown or hidden instantly; strong filter contours
 in HI and LO keep ultrasonic resonance out of the output. Both modes use more CPU and their
 renders change; ULTRA is unchanged. Includes 0.2.0: the circuit calibrated against a hardware instrument, projects saved with
 0.1 translated into it; nineteen new factory presets, 0.1's in a download of their own; the
@@ -34,7 +34,7 @@ signed.
    |---|---|
    | macOS 11 or later, Apple silicon or Intel | `CA-72-<version>-macOS.pkg` |
    | Windows 10 or 11, 64-bit | `CA-72-<version>-Windows-setup.exe` |
-   | Linux, x86-64 (Ubuntu 22.04, Debian 12, Fedora 36 or later, or Arch) | `CA-72-<version>-Linux-x86_64.tar.gz` |
+   | Linux, x86-64 (Ubuntu 22.04, Debian 12, Fedora 36 or later) | `CA-72-<version>-Linux-x86_64.tar.gz` |
 
 2. Run it. On Linux, unpack it and run the script in its folder:
 
@@ -52,7 +52,7 @@ signed.
 The Windows installer is not yet signed, so the first time you run it Windows says "Windows
 protected your PC": click **More info**, then **Run anyway**. To install by hand instead,
 each release from 0.1.5 has `CA-72-<version>-Windows-x86_64.zip`: the same VST3 and CLAP, with
-a `README.txt` that says where to copy them. From 0.2.1 the ZIP includes the standalone application too.
+a `README.txt` that says where to copy them.
 
 The plug-ins go into the usual folders:
 
@@ -63,7 +63,7 @@ The plug-ins go into the usual folders:
 | Linux | `~/.vst3` (`/usr/lib/vst3` with `./install.sh --system`) | `~/.clap` (`/usr/lib/clap`) | |
 
 To uninstall: on macOS, delete `CA-72.vst3`, `CA-72.clap` and `CA-72.component` from those
-folders and `/Applications/CA-72.app` if installed; on Windows,
+folders; on Windows,
 find **CA-72** in **Settings › Apps** and choose **Uninstall**; on Linux, run
 `./install.sh --uninstall` (`./install.sh --uninstall --system` for a system-wide copy). Your
 presets are kept.
@@ -75,55 +75,6 @@ close your host, then run it as above. The CA-72 checks only when you click, thr
 and sends nothing of yours.
 
 ## Playing it
-
-The keyboard button beside SAVE and settings switches the lower panel between
-VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
-remain visible. Click a key or drag between keys to play; the octave buttons move
-the visible range. TYPE enables computer-keyboard notes, mapped chromatically to
-`A W S E D F T G Y H U J K O L P ;`. It starts off in a plug-in so host shortcuts
-keep working. Text entry takes precedence. PANIC releases notes without changing
-the sound. Selecting the other view releases local keys while physical MIDI notes
-continue. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
-
-## Standalone application
-
-The 0.2.1 installers include the same instrument as an optional desktop application.
-On macOS it installs as `/Applications/CA-72.app`; on Windows, open **CA-72**
-from the Start menu; on Linux, use its desktop entry or `ca72-standalone`.
-
-Build it with `scripts/standalone.sh`. It produces `target/bundled/CA-72.app` on
-macOS, `target/bundled/CA-72.exe` on Windows, or `target/bundled/ca72-standalone`
-on Linux. Run it directly, or package it with the plug-ins using `scripts/package.sh`.
-The installer lets you choose the standalone alongside the plug-in formats.
-Linux also accepts `./install.sh --standalone-only` or `--plugins-only`.
-
-Open **Audio & MIDI** from the editor's settings button. Choose your output and
-channel pair, sample rate, buffer size and MIDI input(s), then Apply. External
-audio input is disabled initially. The display reports the actual callback size
-and its buffer duration in milliseconds; that is one component of playing latency.
-Cancel discards changes that have not been applied. Refresh checks the device list.
-Input/output changes briefly stop playback and retain the sound and editor.
-
-CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
-The development JACK launcher is kept separately (Building); direct ASIO and
-native PipeWire are not included in the production host. External input and output
-must support a common nominal sample rate. A bounded capture reservoir adapts
-the input to the output clock, so separately enumerated capture/playback endpoints
-are supported. The reservoir adds input buffering; the displayed output buffer
-duration is not the full input-to-output latency.
-
-The standalone remembers unsaved edits, MIDI Learn, window size and the last
-working audio/MIDI choices in `CA-72/Standalone/session.json` beneath the same
-application-data folder as your presets. Held notes and live wheels are not
-restored. Presets remain shared with the plug-in. A broken or newer session file
-is preserved and reported. Uninstalling keeps presets and the standalone session.
-
-For an isolated editor test, use `ca72-standalone --no-devices --state-dir PATH`;
-this opens no audio or MIDI hardware. The implementation contract and its evidence
-are [standalone-spec.md](docs/standalone-spec.md) and
-[standalone-progress.md](docs/standalone-progress.md).
-
-## Instrument controls
 
 ![The CA-72's panel](docs/panel.png)
 
@@ -222,7 +173,7 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   too heavy for. It follows the same panel, the plug-in's own controls with it, its laws
   fitted to the circuit's (pitch, levels, the filter's cutoff, emphasis and rings, the
   contours, GLIDE, the VCA, DRIVE and FILTER MODE), and sounds close to it but simpler: ten
-  voices were a thirtieth to a fortieth of HI's cost in the 0.2.0 measurements. The 0.2.1
+  voices were a thirtieth to a fortieth of HI's cost in the 0.2.0 measurements. The 0.2.2
   filter fixes increase both LO and HI's cost; those earlier ratios no longer describe this
   release. Switching it stops the notes
   sounding (switching between HI and ULTRA does not). It is saved with the session, not with
@@ -426,9 +377,6 @@ On macOS, `scripts/auv2.sh` then builds the Audio Unit, `target/bundled/CA-72.co
 around the CLAP bundle (and for the same processors). It needs
 [CMake](https://cmake.org) 3.21 or later (`brew install cmake`) and takes a few seconds.
 
-Build the desktop application with `scripts/standalone.sh` before packaging. On Linux
-this needs ALSA and OpenGL headers (`libasound2-dev libgl-dev` on Debian/Ubuntu,
-`alsa-lib-devel mesa-libGL-devel` on Fedora, `alsa-lib mesa` on Arch).
 `scripts/package.sh` then makes the installer for the system it runs on, in
 `target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
 Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
@@ -445,7 +393,7 @@ On Linux this also needs the ALSA, JACK and OpenGL headers (Debian and Ubuntu:
 ## Testing
 
 ```sh
-cargo test --workspace --features ca72-plugin/standalone-production
+cargo test --workspace
 ```
 
 The tests take three to eight minutes, building included. They check the real-time models
@@ -506,7 +454,7 @@ The service documents and datasheets the model was derived from are not included
   darker),
   and driven hard at high EMPHASIS it loses its resonance sooner. In the 0.2.0 comparison,
   every other factory preset was within a decibel of the circuit's. LO's filter changes in
-  0.2.1 alter its renders; that earlier comparison is not a new calibration of this release.
+  0.2.2 alter its renders; that earlier comparison is not a new calibration of this release.
 - With no note playing an instance costs next to nothing (from 0.2.0; decisions.md R68): with
   POLY and UNISON off the instrument sleeps once its sound has died away and its contours
   have settled, and the next note, any MIDI, a control moved or a sound at EXTERNAL INPUT
@@ -519,7 +467,7 @@ The service documents and datasheets the model was derived from are not included
   computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,
   and on a computer of four processors or a slower one they can overload. QUALITY LO took
   about a fortieth of that then ([docs/decisions.md](docs/decisions.md) R67). Both costs
-  increase with the 0.2.1 filter fixes; the R71 measurements cover one voice, not this full
+  increase with the 0.2.2 filter fixes; the R71 measurements cover one voice, not this full
   polyphony matrix.
 - POLY's voices are shared between the host's audio thread and up to four threads of the
   plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
@@ -529,7 +477,7 @@ The service documents and datasheets the model was derived from are not included
   switched off; one that finds them all taken plays its voices on the host's thread, and
   asks again when its POLY is next switched on (R18, R21). The earlier measurement was
   5 to 10 % of an Apple M4 Pro core a voice (FEEDBACK's presets the most; R13), or half
-  a core to a core for ten voices. It predates the 0.2.1 oversampling changes. How many play in real time
+  a core to a core for ten voices. It predates the 0.2.2 oversampling changes. How many play in real time
   depends on the machine, the host's block size and the host: on a machine of 1 or 2
   processors every voice plays on the host's thread, and on macOS a host whose audio
   threads are not in an audio workgroup runs its share of the voices more slowly. With more

@@ -37,13 +37,12 @@ VersionInfoCompany=Idle Foundry Ltd.
 VersionInfoDescription=CA-72 installer
 
 [Types]
-Name: "full"; Description: "Plug-ins and standalone application"
-Name: "custom"; Description: "Choose what to install"; Flags: iscustom
+Name: "full"; Description: "VST3 and CLAP"
+Name: "custom"; Description: "Choose the formats"; Flags: iscustom
 
 [Components]
 Name: "vst3"; Description: "VST3, in C:\Program Files\Common Files\VST3"; Types: full custom
 Name: "clap"; Description: "CLAP, in C:\Program Files\Common Files\CLAP"; Types: full custom
-Name: "standalone"; Description: "Standalone application, with Start menu shortcut"; Types: full custom
 
 [InstallDelete]
 ; A bundle from an earlier version goes first, so that none of its files outlive it.
@@ -52,16 +51,11 @@ Type: filesandordirs; Name: "{commoncf64}\VST3\CA-72.vst3"; Components: vst3
 [Files]
 Source: "{#Stage}\CA-72.vst3\*"; DestDir: "{commoncf64}\VST3\CA-72.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#Stage}\CA-72.clap"; DestDir: "{commoncf64}\CLAP"; Components: clap; Flags: ignoreversion
-Source: "{#Stage}\CA-72.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
-Source: "{#Stage}\CA-72.ico"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 Source: "{#Stage}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Stage}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
-[Icons]
-Name: "{commonprograms}\Idle Foundry\CA-72"; Filename: "{app}\CA-72.exe"; IconFilename: "{app}\CA-72.ico"; Components: standalone
-
 [UninstallDelete]
-Type: filesandordirs; Name: "{commoncf64}\VST3\CA-72.vst3"; Components: vst3
+Type: filesandordirs; Name: "{commoncf64}\VST3\CA-72.vst3"
 
 [Code]
 // The maker's folder goes with the last of its programs (RemoveDir leaves it if not empty).

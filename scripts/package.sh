@@ -40,16 +40,6 @@ if [ "$(uname -s)" = Darwin ] && [ ! -e "$bundles/CA-72.component" ]; then
     echo "package.sh: $bundles/CA-72.component is missing: build it with scripts/auv2.sh" >&2
     exit 1
 fi
-case "$(uname -s)" in
-Darwin) standalone="$bundles/CA-72.app" ;;
-Linux) standalone="$bundles/ca72-standalone" ;;
-MINGW* | MSYS* | CYGWIN*) standalone="$bundles/CA-72.exe" ;;
-*) standalone="" ;;
-esac
-if [ -n "$standalone" ] && [ ! -e "$standalone" ]; then
-    echo "package.sh: $standalone is missing: run scripts/standalone.sh first" >&2
-    exit 1
-fi
 for f in LICENSE THIRD-PARTY-NOTICES.txt; do
     [ -f "$root/$f" ] || { echo "package.sh: $root/$f is missing" >&2; exit 1; }
 done
@@ -71,11 +61,10 @@ macos() {
         : "${CA72_NOTARY_PROFILE:?Set the notarytool keychain profile for a public Mac release}"
     fi
     local stage="$work/stage" pkgs="$work/pkgs"
-    mkdir -p "$stage/VST3" "$stage/CLAP" "$stage/Components" "$stage/Applications" "$pkgs"
+    mkdir -p "$stage/VST3" "$stage/CLAP" "$stage/Components" "$pkgs"
     cp -R "$bundles/CA-72.vst3" "$stage/VST3/"
     cp -R "$bundles/CA-72.clap" "$stage/CLAP/"
     cp -R "$bundles/CA-72.component" "$stage/Components/"
-    cp -R "$bundles/CA-72.app" "$stage/Applications/"
     local kind dir b plist
     # The CLAP before the component, which then carries that same CLAP, signed (R30).
     for kind in vst3 clap component; do
@@ -116,25 +105,6 @@ macos() {
             --identifier "com.idlefoundry.ca-72.$kind.pkg" --version "$version" \
             "$pkgs/$kind.pkg"
     done
-    local app="$stage/Applications/CA-72.app"
-    docs "$app/Contents/Resources"
-    if [ -n "${CA72_MACOS_SIGN_APP:-}" ]; then
-        codesign --force --timestamp --options runtime \
-            --entitlements "$root/scripts/standalone/entitlements.plist" \
-            --sign "$CA72_MACOS_SIGN_APP" "$app"
-    else
-        codesign --force --entitlements "$root/scripts/standalone/entitlements.plist" --sign - "$app"
-    fi
-    codesign --verify --strict "$app"
-    for arch in arm64 x86_64; do
-        lipo "$app/Contents/MacOS/ca72-standalone" -verify_arch "$arch"
-    done
-    pkgbuild --analyze --root "$stage/Applications" "$work/standalone.plist" > /dev/null
-    plutil -replace 0.BundleIsRelocatable -bool NO "$work/standalone.plist"
-    plutil -replace 0.BundleIsVersionChecked -bool NO "$work/standalone.plist"
-    pkgbuild --quiet --root "$stage/Applications" --component-plist "$work/standalone.plist" \
-        --install-location /Applications --identifier com.idlefoundry.ca72.standalone.pkg \
-        --version "$version" "$pkgs/standalone.pkg"
     cat > "$work/distribution.xml" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
@@ -149,7 +119,6 @@ macos() {
         <line choice="vst3"/>
         <line choice="clap"/>
         <line choice="au"/>
-        <line choice="standalone"/>
     </choices-outline>
     <choice id="vst3" title="VST3" description="CA-72.vst3, in /Library/Audio/Plug-Ins/VST3">
         <pkg-ref id="com.idlefoundry.ca-72.vst3.pkg"/>
@@ -160,13 +129,9 @@ macos() {
     <choice id="au" title="Audio Unit" description="CA-72.component, in /Library/Audio/Plug-Ins/Components (Logic Pro, GarageBand)">
         <pkg-ref id="com.idlefoundry.ca-72.component.pkg"/>
     </choice>
-    <choice id="standalone" title="Standalone application" description="CA-72.app, in /Applications; play without an audio host">
-        <pkg-ref id="com.idlefoundry.ca72.standalone.pkg"/>
-    </choice>
     <pkg-ref id="com.idlefoundry.ca-72.vst3.pkg" version="$version" onConclusion="none">vst3.pkg</pkg-ref>
     <pkg-ref id="com.idlefoundry.ca-72.clap.pkg" version="$version" onConclusion="none">clap.pkg</pkg-ref>
     <pkg-ref id="com.idlefoundry.ca-72.component.pkg" version="$version" onConclusion="none">component.pkg</pkg-ref>
-    <pkg-ref id="com.idlefoundry.ca72.standalone.pkg" version="$version" onConclusion="none">standalone.pkg</pkg-ref>
 </installer-gui-script>
 EOF
     local pkg="$work/CA-72-$version-macOS.pkg" final="$out/CA-72-$version-macOS.pkg" sign=()
@@ -198,7 +163,6 @@ windows() {
     local stage="$work/stage"
     mkdir -p "$stage"
     cp -R "$bundles/CA-72.vst3" "$bundles/CA-72.clap" "$stage/"
-    cp "$bundles/CA-72.exe" "$bundles/CA-72.ico" "$stage/"
     mkdir -p "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage"
@@ -260,7 +224,6 @@ linux() {
     local stage="$work/$name"
     mkdir -p "$stage"
     cp -R "$bundles/CA-72.vst3" "$bundles/CA-72.clap" "$stage/"
-    cp "$bundles/ca72-standalone" "$bundles/CA-72.desktop" "$bundles/com.idlefoundry.ca72.png" "$stage/"
     mkdir -p "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage/CA-72.vst3/Contents/Resources"
     docs "$stage"

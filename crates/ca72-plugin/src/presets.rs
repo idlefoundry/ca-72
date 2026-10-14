@@ -515,7 +515,6 @@ impl Browser {
             open: self.open,
             below: self.below,
             hover: self.bar.hover,
-            keyboard: self.bar.keyboard,
         };
     }
 
@@ -591,7 +590,7 @@ impl Browser {
             BarTarget::Name => self.show(!self.open, p),
             BarTarget::Prev => self.step(-1, p, s),
             // (The editor's: its menu.)
-            BarTarget::Settings | BarTarget::Panel | BarTarget::Keyboard => {}
+            BarTarget::Settings | BarTarget::Panel => {}
             BarTarget::Next => self.step(1, p, s),
             BarTarget::Star => {
                 let current = Self::current(p);

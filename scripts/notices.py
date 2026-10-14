@@ -67,7 +67,7 @@ DEALINGS IN THE SOFTWARE.
 
 def metadata(platform):
     out = subprocess.check_output(
-        ["cargo", "metadata", "--format-version", "1", "--locked", "--features", "standalone-production", "--filter-platform", platform],
+        ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", platform],
         cwd=ROOT,
     )
     return json.loads(out)
@@ -184,10 +184,7 @@ def render():
     crates = {}
     for platform in PLATFORMS:
         for p in linked(metadata(platform)):
-            # Equal name/version does not imply equal source or attribution.
-            # Keep vendored and git variants, independent of set iteration order.
-            source = p.get("source") or "path+" + os.path.relpath(p["manifest_path"], ROOT)
-            crates[(p["name"], p["version"], source)] = p
+            crates[(p["name"], p["version"])] = p
     groups = {}
     for key in sorted(crates):
         p = crates[key]

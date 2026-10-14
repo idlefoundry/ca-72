@@ -27,13 +27,6 @@ where
     fn map<F, R>(&self, f: F) -> R
     where
         F: Fn(&T) -> R;
-
-    /// Check that a saved value can be deserialized as this field's actual type,
-    /// without changing the field. Implementations may override this to perform
-    /// additional checks, but must not mutate shared state during validation.
-    fn validate(&self, serialized: &'a str) -> Result<(), serde_json::Error> {
-        deserialize_field::<T>(serialized).map(|_| ())
-    }
 }
 
 /// Wrapper for implementing an `Arc<I>` wrapper for an `I: PersistentField<T>`. Having both options
@@ -53,9 +46,6 @@ macro_rules! impl_persistent_arc {
             {
                 self.as_ref().map(f)
             }
-            fn validate(&self, serialized: &'a str) -> Result<(), serde_json::Error> {
-                PersistentField::validate(self.as_ref(), serialized)
-            }
         }
     };
 
@@ -73,9 +63,6 @@ macro_rules! impl_persistent_arc {
             {
                 self.as_ref().map(f)
             }
-            fn validate(&self, serialized: &'a str) -> Result<(), serde_json::Error> {
-                PersistentField::validate(self.as_ref(), serialized)
-            }
         }
     };
     ($ty:ty, $inner_ty:ty) => {
@@ -88,9 +75,6 @@ macro_rules! impl_persistent_arc {
                 F: Fn(&$inner_ty) -> R,
             {
                 self.as_ref().map(f)
-            }
-            fn validate(&self, serialized: &'a str) -> Result<(), serde_json::Error> {
-                PersistentField::validate(self.as_ref(), serialized)
             }
         }
     };
