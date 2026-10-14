@@ -1,6 +1,7 @@
 //! Renders the panel to a PNG: `cargo run -p ca72-panel --example png -- out.png [scale]`
 //! (pixels a panel unit, 0.5 by default); `CA72_SKIN=worn` in the worn skin; `CA72_MONO=1` the
 //! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places).
+//! `CA72_STANDALONE=1` shows the standalone keyboard's TYPE and PANIC controls.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -47,6 +48,7 @@ fn main() {
         scene.keyboard = Some(ca72_panel::keyboard::Scene {
             skin,
             held,
+            standalone: std::env::var("CA72_STANDALONE").is_ok_and(|v| v == "1"),
             ..Default::default()
         });
         scene.bar.keyboard = true;

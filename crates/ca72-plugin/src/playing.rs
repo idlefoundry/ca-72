@@ -16,6 +16,7 @@ struct PlayedKey {
 pub struct Playing {
     pub notes: Arc<LocalNotes>,
     pub visible: bool,
+    pub standalone: bool,
     pub typing: bool,
     pub focused: bool,
     pub root: u8,
@@ -33,6 +34,7 @@ impl Default for Playing {
         Self {
             notes: Arc::new(LocalNotes::default()),
             visible: false,
+            standalone: false,
             typing: false,
             focused: true,
             root: 41,
@@ -214,7 +216,7 @@ impl Playing {
     }
 
     pub fn holds_keys(&self) -> bool {
-        self.visible && self.typing && self.focused
+        self.standalone && self.visible && self.typing && self.focused
     }
 
     pub fn scene(&self, skin: ca72_panel::Skin) -> Option<Scene> {
@@ -229,7 +231,8 @@ impl Playing {
             }
             Scene {
                 root: self.root,
-                typing: self.typing,
+                standalone: self.standalone,
+                typing: self.standalone && self.typing,
                 held,
                 hover: self
                     .hover

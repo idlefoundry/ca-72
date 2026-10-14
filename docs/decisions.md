@@ -5495,3 +5495,9 @@ checks pass; visual review still precedes full CI or merging.
 **Button follow-up, 2026-10-14.** The owner asked to place TYPE and PANIC side by side and
 give them the same size. TYPE now sits just left of PANIC, with both caps 230 × 48 units and
 a 16-unit gap. Header drawing, realistic materials and hit-testing share a single button layout.
+
+**Host follow-up, 2026-10-14.** The owner asked for TYPE and PANIC only in the standalone
+application, leaving those functions to the DAW. Runtime host API selects their visibility and
+hit targets, independent of build features. Plug-ins keep the pointer keyboard and octave
+controls, with note typing and its legend disabled. The repaint regression includes switching
+between both layouts; editor checks cover actual CLAP, VST3 and standalone contexts.

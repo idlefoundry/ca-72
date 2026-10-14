@@ -1833,11 +1833,12 @@ mod tests {
                 let mut sc = scene(0);
                 sc.keyboard = Some(crate::keyboard::Scene {
                     skin,
+                    standalone: true,
                     ..Default::default()
                 });
                 sc.bar.keyboard = true;
                 let now = Instant::now();
-                for i in 0..10 {
+                for i in 0..12 {
                     match i {
                         1 => sc.keyboard.as_mut().unwrap().held = [1 << 60, 0],
                         2 => sc.keyboard.as_mut().unwrap().held = [(1 << 60) | (1 << 61), 1],
@@ -1850,10 +1851,16 @@ mod tests {
                                 Some(crate::keyboard::Target::Type)
                         }
                         8 => {
+                            sc.keyboard.as_mut().unwrap().standalone = false;
+                        }
+                        9 => {
+                            sc.keyboard.as_mut().unwrap().standalone = true;
+                        }
+                        10 => {
                             sc.keyboard = None;
                             sc.bar.keyboard = false;
                         }
-                        9 => {
+                        11 => {
                             sc.keyboard = Some(crate::keyboard::Scene {
                                 skin,
                                 ..Default::default()

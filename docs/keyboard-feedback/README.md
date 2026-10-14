@@ -24,6 +24,14 @@ and orange light. The preset display's appearance is unchanged.
 
 TYPE and PANIC sit side by side, with matching 230 × 48-unit caps and a 16-unit gap. Their
 drawing, materials and click targets share one layout; both labels retain their vertical centre.
+They appear only in the standalone application. Plug-ins keep the playable keys and octave
+controls; TYPE, PANIC and the typing legend are absent, their old positions do nothing, and
+computer-keyboard note input remains with the host. Visibility follows the actual host API,
+including when a plug-in build includes standalone support. The Audio Unit wraps the CLAP.
+
+Standalone header above, plug-in header below:
+
+![Standalone and plug-in headers](standalone-and-plugin-header.png)
 
 Preset display above, octave range below, from the same rendered frame:
 
@@ -34,7 +42,9 @@ Before above, centred header below:
 ![Header alignment](header-before-after.png)
 
 Focused checks: 44 panel unit tests and the panel approval check passed, with 7 visual/timing
-tests ignored; 5 playing tests and 8 keyboard/editor checks passed. Clippy passed for both touched
+tests ignored; 5 playing tests and 9 keyboard/editor checks passed. The keyboard/editor checks
+also passed with all features enabled, and the refused-expansion note-release check passed.
+Clippy passed for both touched
 crates, all targets, with and without all features; formatting passed. Full CI and native host
 checks are deferred until visual review. This is a candidate, separate from released 0.2.1.
 

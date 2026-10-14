@@ -49,9 +49,16 @@ const BUTTONS: [(f64, f64, &str, Target); 4] = [
     (2690.0, 230.0, "PANIC", Target::Panic),
 ];
 
+fn buttons(standalone: bool) -> impl Iterator<Item = (f64, f64, &'static str, Target)> {
+    BUTTONS.into_iter().filter(move |(_, _, _, target)| {
+        standalone || !matches!(target, Target::Type | Target::Panic)
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub root: u8,
+    pub standalone: bool,
     pub typing: bool,
     pub held: [u64; 2],
     pub hover: Option<Target>,
@@ -62,6 +69,7 @@ impl Default for Scene {
     fn default() -> Self {
         Self {
             root: 41,
+            standalone: false,
             typing: false,
             held: [0, 0],
             hover: None,
@@ -168,11 +176,11 @@ fn shape_svg(shape: [[f64; 2]; 8]) -> String {
     path + " Z"
 }
 
-pub fn hit(root: u8, x: f64, y: f64) -> Option<Target> {
+pub fn hit(root: u8, x: f64, y: f64, standalone: bool) -> Option<Target> {
     if !inside(x, y) {
         return None;
     }
-    for (cx, w, _, target) in BUTTONS {
+    for (cx, w, _, target) in buttons(standalone) {
         if (x - cx).abs() <= w / 2.0 && (y - HEADER).abs() <= BUTTON_H / 2.0 {
             return Some(target);
         }
@@ -206,6 +214,7 @@ pub fn damage(was: Option<&Scene>, now: Option<&Scene>) -> Vec<[f64; 4]> {
         (None, None) => Vec::new(),
         (Some(a), Some(b))
             if a.root == b.root
+                && a.standalone == b.standalone
                 && a.typing == b.typing
                 && a.skin == b.skin
                 && a.hover == b.hover =>
@@ -299,7 +308,7 @@ impl Renderer {
                     self.materials
                         .as_ref()
                         .expect("worn materials loaded")
-                        .draw(&mut self.frame, self.scale);
+                        .draw(&mut self.frame, self.scale, scene.standalone);
                 }
                 let body = drawing(&still, &self.fonts);
                 let document = art::document(
@@ -497,7 +506,7 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
             "url(#keyface)"
         }
     );
-    for (x, w, label, target) in BUTTONS {
+    for (x, w, label, target) in buttons(scene.standalone) {
         let on = target == Target::Type && scene.typing;
         let fill = if scene.skin == Skin::Worn && !on {
             "none"
@@ -576,7 +585,7 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
             }
         }
     }
-    let mapping = if scene.typing {
+    let mapping = if scene.standalone && scene.typing {
         "A W S E D F T G Y H U J K O L P ;"
     } else {
         ""
@@ -612,7 +621,7 @@ impl Materials {
             button: decode(crate::skin::BUTTON),
         }
     }
-    fn draw(&self, frame: &mut Pixmap, s: f64) {
+    fn draw(&self, frame: &mut Pixmap, s: f64, standalone: bool) {
         let k = (640.0 * s) as f32 / self.face.width() as f32;
         crate::render::fill(
             frame,
@@ -662,7 +671,7 @@ impl Materials {
                 ),
             );
         }
-        for (x, w, _, _) in BUTTONS {
+        for (x, w, _, _) in buttons(standalone) {
             let cap = plugin_kit_materials::widened(&self.button, w / BUTTON_H);
             plugin_kit_materials::sprite(frame, &cap, s, (x, HEADER - art::PANEL_H), (w, BUTTON_H));
         }
@@ -711,24 +720,30 @@ mod tests {
             assert_eq!(shape[4][1], BED[3]);
             assert_eq!(shape[5][1], BED[3]);
             assert_eq!(
-                hit(36, (r[0] + r[2]) / 2.0, BED[3] - 5.0),
+                hit(36, (r[0] + r[2]) / 2.0, BED[3] - 5.0, false),
                 Some(Target::Note(note))
             );
             if note > 36 && black(note - 1) {
                 assert!(shape[0][0] > r[0]);
                 assert_eq!(
-                    hit(36, shape[0][0] - CLEARANCE / 2.0, BED[1] + 20.0),
+                    hit(36, shape[0][0] - CLEARANCE / 2.0, BED[1] + 20.0, false),
                     Some(Target::Back)
                 );
-                assert_eq!(hit(36, r[0] + 5.0, NOTCH_Y - 2.0), Some(Target::Back));
+                assert_eq!(
+                    hit(36, r[0] + 5.0, NOTCH_Y - 2.0, false),
+                    Some(Target::Back)
+                );
             }
             if black(note + 1) {
                 assert!(shape[1][0] < r[2]);
                 assert_eq!(
-                    hit(36, shape[1][0] + CLEARANCE / 2.0, BED[1] + 20.0),
+                    hit(36, shape[1][0] + CLEARANCE / 2.0, BED[1] + 20.0, false),
                     Some(Target::Back)
                 );
-                assert_eq!(hit(36, r[2] - 5.0, NOTCH_Y - 2.0), Some(Target::Back));
+                assert_eq!(
+                    hit(36, r[2] - 5.0, NOTCH_Y - 2.0, false),
+                    Some(Target::Back)
+                );
             }
         }
         let first = white_shape(41, 41).expect("first F");
@@ -742,10 +757,10 @@ mod tests {
     fn black_keys_win_and_every_midi_note_is_reachable() {
         let r = rect(36, 37).expect("C sharp");
         assert_eq!(
-            hit(36, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0),
+            hit(36, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0, false),
             Some(Target::Note(37))
         );
-        assert_eq!(hit(36, r[0], BED[3] - 10.0), Some(Target::Note(36)));
+        assert_eq!(hit(36, r[0], BED[3] - 10.0, false), Some(Target::Note(36)));
         for note in 0..128u8 {
             let root = (note / 12 * 12).min(84);
             let r = rect(root, note).expect("visible");
@@ -755,7 +770,7 @@ mod tests {
                 r[3] - 10.0
             };
             assert_eq!(
-                hit(root, (r[0] + r[2]) / 2.0, y),
+                hit(root, (r[0] + r[2]) / 2.0, y, false),
                 Some(Target::Note(note)),
                 "{note}"
             );
@@ -763,9 +778,9 @@ mod tests {
         assert_eq!(shifted(84, true), 84);
         assert_eq!(shifted(0, false), 0);
         assert_eq!(
-            hit(84, BED[2] - 5.0, BED[3] - 10.0),
+            hit(84, BED[2] - 5.0, BED[3] - 10.0, false),
             Some(Target::Note(127))
         );
-        assert_eq!(hit(36, 100.0, 1400.0), None);
+        assert_eq!(hit(36, 100.0, 1400.0, false), None);
     }
 }
