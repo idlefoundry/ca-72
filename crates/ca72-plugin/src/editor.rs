@@ -1272,7 +1272,6 @@ impl Editing {
     /// Publish the height before asking the host: its size query sees the requested view.
     /// Refusing a resize leaves the old view intact.
     fn set_panel_height(&mut self, expanded: bool) -> bool {
-        self.reconcile_resize();
         let was = self
             .params
             .editor_expanded
@@ -1291,6 +1290,7 @@ impl Editing {
 
     /// Show or hide all of the lower panel at once, outside the sound's saved parameters.
     fn toggle_panel(&mut self) {
+        self.reconcile_resize();
         let expanded = !self.expanded();
         if !self.set_panel_height(expanded) {
             return;
@@ -1305,6 +1305,7 @@ impl Editing {
         self.browser.show(false, &self.params);
         self.learning.close_menu();
         self.follow_drawer();
+        self.params.editor_resizing.finish(self.resize_view());
     }
 
     /// The drawer placed as it opens: always over the strip, the window as it is (A6; it had
@@ -1332,6 +1333,7 @@ impl Editing {
             }
         }
         self.composed = None;
+        self.params.editor_resizing.finish(self.resize_view());
     }
 
     /// The rail's part under the pointer (the drawing's units), if it is over one.
@@ -2051,6 +2053,7 @@ impl Editing {
         } else {
             self.params.editor_width.store(old, Ordering::Relaxed);
         }
+        self.params.editor_resizing.finish(self.resize_view());
         agreed
     }
 
@@ -2156,6 +2159,7 @@ impl Editing {
                 self.params.editor_panel.load(Ordering::Relaxed),
                 Ordering::Relaxed,
             );
+            self.params.editor_resizing.finish(self.resize_view());
         }
         if self
             .scroll
@@ -2507,6 +2511,7 @@ fn strip_scene(
 impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
+        self.reconcile_resize();
         // MIDI Learn first (decisions.md R34): Escape closes a control's menu, the drawer's MIDI
         // list takes the keys it shows, and Escape cancels learning.
         if self.typing.is_some() {
@@ -5787,6 +5792,60 @@ mod tests {
         assert!(
             !params.editor_panel.load(Ordering::Relaxed),
             "retain the compact preference"
+        );
+    }
+
+    #[test]
+    fn refusal_keeps_presets_that_opened_without_changing_height() {
+        let (mut e, host, _) = editing();
+        open(&mut e);
+        e.draw();
+        assert!(e.browser.open);
+        host.fixed.store(true, Ordering::Relaxed);
+        e.toggle_panel();
+        e.draw();
+        assert!(
+            e.browser.open,
+            "a refused toggle must preserve the existing presets view"
+        );
+        e.resize(e.width + 100);
+        e.draw();
+        assert!(
+            e.browser.open,
+            "a refused width must preserve the existing presets view"
+        );
+    }
+
+    #[test]
+    fn recalled_visibility_during_a_queued_width_does_not_retry_refusal() {
+        let (mut e, host, params) = editing();
+        host.deferred.store(true, Ordering::Relaxed);
+        e.resize(e.width + 100);
+        e.draw();
+        let (width, _) = params.editor_resizing.requested().expect("width request");
+        params.editor_panel.store(false, Ordering::Relaxed);
+        e.reconcile_resize();
+        params.editor_resizing.answer(width, true);
+        e.draw();
+        let (compact, _) = params.editor_resizing.requested().expect("height request");
+        let requests = host.resizes.load(Ordering::Relaxed);
+        params.editor_resizing.answer(compact, false);
+        e.draw();
+        assert_eq!(
+            host.resizes.load(Ordering::Relaxed),
+            requests,
+            "refusal must not immediately retry the collapse"
+        );
+        assert_eq!(
+            params.editor_panel.load(Ordering::Relaxed),
+            params.editor_panel_applied.load(Ordering::Relaxed)
+        );
+        let requests = host.resizes.load(Ordering::Relaxed);
+        e.draw();
+        assert_eq!(
+            host.resizes.load(Ordering::Relaxed),
+            requests,
+            "a refusal must not become a retry loop"
         );
     }
 

@@ -71,7 +71,18 @@ impl Resizing {
         let mut s = self.0.lock().expect("resize state");
         let id = s.serial;
         if let Some(r) = s.requests.get_mut(&id) {
-            r.view = Some(view);
+            // Freeze the completed action, before a later state recall can change it.
+            if r.view.is_none() && view.panel == view.applied {
+                r.view = Some(view);
+            }
+        } else if s.restore.is_none()
+            && view.panel == view.applied
+            && s.confirmed
+                .is_some_and(|c| c.width == view.width && c.expanded == view.expanded)
+        {
+            // Presets can open without changing the full window's size. Keep that stable
+            // non-size state so a subsequent refusal restores what the player was seeing.
+            s.confirmed = Some(view);
         }
         Self::resolve(&mut s);
     }

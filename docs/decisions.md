@@ -5282,7 +5282,7 @@ and 96 kHz and control movement. Its ngspice 47 bench regenerates at 36.75 kHz; 
 continues oscillating internally. Existing hardware takes were found on the lab share
 (sessions E and J, EMPHASIS 10, J with AMOUNT OF CONTOUR 10; session I's Ringing Saw
 Line). They do not capture the exact reported patch. Diagnostic WAVs, spectrograms
-and patch files are in this worktree's `evidence/filter-contour/`.
+are retained in [the filter-contour diagnostic record](filter-contour/README.md).
 
 **Checks on the Linux reference machine:** 17 focused debug tests passed, including
 the whole voice, resamplers, allocations and new regressions; clippy on the core and
@@ -5360,3 +5360,8 @@ from earlier requests or openings. A run-loop regression exercises Linux's actua
 socket path. The native Windows matrix includes synchronous and delayed refusal as well
 as acceptance. At fractional DPI scales, the composed frame now uses the physical viewport
 size, including its last row and the compact grip, rather than the artwork's rounded size.
+
+A second review found that presets opened without a height change had not updated the
+rollback snapshot, and that a pending snapshot could change during state recall. Stable
+non-size state is now refreshed between actions, and each issued action's completed snapshot
+is frozen. Both editor regressions fail on the earlier candidate and pass after the repair.
