@@ -35,7 +35,7 @@ an allocating task destructor. The sole task executor is shared on control threa
 
 ## Native backend evidence
 
-The reproducible [private Linux fixture](https://github.com/idlefoundry/plugin-kit/blob/e93e7e6bdadedcc61b4bf7a358fc0a0c23ce8457/scripts/standalone-virtual/verify.py)
+The reproducible [private Linux fixture](https://github.com/idlefoundry/plugin-kit/blob/f6bc24e16015e1536f571c8f8b2dcda6823b9309/scripts/standalone-virtual/verify.py)
 creates only its own socket, dummy driver, null sink/source and streams. No session
 manager, udev, physical nodes or owner's configuration is involved. It verifies
 stereo playback/capture at 48 kHz/128 requested frames, 44.1 kHz/256 and 48 kHz/256,
@@ -98,3 +98,14 @@ bounded; a broken OS call can leave a detached control thread until it returns.
 Ordinary virtual-device close returned the sole processor and stopped callbacks.
 Physical audio/MIDI latency, permission and hotplug remain UNVERIFIED. No physical
 device was opened, no owner's installed plug-in was replaced, and no release was published.
+
+The final Windows installer was compiled and exercised with silent install and
+uninstall using fake payloads, a unique application identity, lowest privilege
+and all component paths under a private temporary directory. A standalone-only
+installation preserves an existing unselected VST3 bundle on uninstall. A selected
+VST3 installation replaces its stale bundle and removes the selected bundle on
+uninstall. No product installation or owner's plug-in path was changed.
+
+The Linux shipped-profile application builds, `--help` exits successfully, and
+unknown/incomplete options exit 2 without accessing a display or device. Its native
+library dependencies include ALSA and X11/OpenGL, with no JACK dependency.
