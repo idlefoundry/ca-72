@@ -5462,3 +5462,19 @@ Windows no-device save/reopen/close and a private Developer ID signed/notarised
 standalone Mac candidate pass. Physical audio/MIDI latency, microphone permission,
 hardware hotplug, Mac GUI and minimum-OS runtime remain unverified. R71 and R72 are reserved for the already open filter fix and 0.2.1 release
 records; this record follows them numerically.
+
+## R-KEY-FEEDBACK. Keyboard icon and pressed keys
+
+**Owner decision, 2026-10-14.** Remove the last piano key on the keyboard button's right
+and darken a playable key when pressed.
+
+The remaining three natural keys and two accidentals are centred in the button. Held keys
+use darker versions of their surfaces in both looks; the realistic material's alpha remains
+unchanged, so a black key cannot brighten by revealing its background. Local note ownership
+joins the audio snapshot for immediate visual feedback while a device is stopped.
+
+Key masks use fixed key coordinates and integer compositing. Press/release repaint checks
+found a fractional-scale seam when the old mask and float sampler followed the damage patch.
+The regression now compares incremental frames with a fresh keyboard, including black keys.
+The [rendered previews and focused checks](keyboard-feedback/README.md) record the candidate;
+visual review precedes full CI or merging.

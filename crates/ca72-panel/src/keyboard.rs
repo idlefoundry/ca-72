@@ -2,7 +2,7 @@
 //! Coordinates are panel units; MIDI 60 is labelled C4. Black keys take hit-test priority.
 
 use resvg::{
-    tiny_skia::{FillRule, Mask, PathBuilder, Pixmap, PixmapPaint, Transform},
+    tiny_skia::{FillRule, Mask, PathBuilder, Pixmap, Transform},
     usvg,
 };
 
@@ -27,6 +27,8 @@ const CLEARANCE: f64 = 3.0;
 const NOTCH_Y: f64 = BED[1] + BLACK_H + 5.0;
 pub const HEADER: f64 = 1080.0;
 pub const BUTTON_H: f64 = 48.0;
+/// A held key keeps its material and shading, with a darker surface over the key bed.
+const PRESSED_LEVEL: f32 = 0.65;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
@@ -224,6 +226,8 @@ pub struct Renderer {
     materials: Option<Materials>,
     white: Option<Pixmap>,
     black: Option<Pixmap>,
+    white_pressed: Option<Pixmap>,
+    black_pressed: Option<Pixmap>,
     base: Option<(Scene, Pixmap)>,
 }
 
@@ -249,6 +253,8 @@ impl Renderer {
             materials: None,
             white: None,
             black: None,
+            white_pressed: None,
+            black_pressed: None,
             base: None,
         }
     }
@@ -261,6 +267,8 @@ impl Renderer {
             self.base = None;
             self.white = None;
             self.black = None;
+            self.white_pressed = None;
+            self.black_pressed = None;
         }
     }
 
@@ -269,6 +277,8 @@ impl Renderer {
             let materials = self.materials.get_or_insert_with(Materials::new);
             self.white = Some(key_size(&materials.white, self.scale, false));
             self.black = Some(key_size(&materials.black, self.scale, true));
+            self.white_pressed = self.white.as_ref().map(pressed_key);
+            self.black_pressed = self.black.as_ref().map(pressed_key);
         }
         if self.shown.as_ref() != Some(scene) {
             let mut still = scene.clone();
@@ -393,13 +403,16 @@ impl Renderer {
                     continue;
                 }
                 let held = scene.held[usize::from(note) / 64] & (1 << (note % 64)) != 0;
-                let key = if dark {
-                    self.black.as_ref()
-                } else {
-                    self.white.as_ref()
+                let key = match (dark, held) {
+                    (true, true) => self.black_pressed.as_ref(),
+                    (false, true) => self.white_pressed.as_ref(),
+                    (true, false) => self.black.as_ref(),
+                    (false, false) => self.white.as_ref(),
                 }
                 .expect("key material loaded");
-                let mask = if dark {
+                let key_x = (r[0] * s).round() as i32;
+                let key_y = ((r[1] - art::PANEL_H) * s).round() as i32;
+                let clipped = if dark {
                     None
                 } else {
                     let points = white_shape(scene.root, note).expect("natural key");
@@ -409,38 +422,28 @@ impl Renderer {
                         path.line_to(*x as f32, *y as f32);
                     }
                     path.close();
-                    let mut mask =
-                        Mask::new(patch.width(), patch.height()).expect("key silhouette");
+                    let mut mask = Mask::new(key.width(), key.height()).expect("key silhouette");
                     mask.fill_path(
                         &path.finish().expect("closed natural key"),
                         FillRule::Winding,
                         true,
-                        Transform::from_scale(s as f32, s as f32)
-                            .post_translate(-x0 as f32, -(art::PANEL_H * s) as f32 - y0 as f32),
+                        Transform::from_scale(s as f32, s as f32).post_translate(
+                            -key_x as f32,
+                            -(art::PANEL_H * s) as f32 - key_y as f32,
+                        ),
                     );
-                    Some(mask)
+                    // Keep the mask in the key's coordinates. Moving the damage rectangle
+                    // must not change edge coverage at fractional scales.
+                    let mut clipped = key.clone();
+                    clipped.apply_mask(&mask);
+                    Some(clipped)
                 };
-                patch.draw_pixmap(
-                    (r[0] * s).round() as i32 - x0,
-                    ((r[1] - art::PANEL_H) * s).round() as i32 - y0,
-                    key.as_ref(),
-                    &PixmapPaint::default(),
-                    Transform::identity(),
-                    mask.as_ref(),
+                crate::render::put(
+                    &mut patch,
+                    clipped.as_ref().unwrap_or(key),
+                    (key_x - x0, key_y - y0),
+                    1.0,
                 );
-                if held {
-                    let y = if dark { r[3] - 18.0 } else { r[3] - 8.0 };
-                    if let Some(rect) = resvg::tiny_skia::Rect::from_xywh(
-                        ((r[0] + 10.0) * s) as f32 - x0 as f32,
-                        ((y - art::PANEL_H) * s) as f32 - y0 as f32,
-                        ((r[2] - r[0] - 20.0) * s) as f32,
-                        (3.0 * s).max(1.0) as f32,
-                    ) {
-                        let mut paint = resvg::tiny_skia::Paint::default();
-                        paint.set_color_rgba8(174, 106, 48, 180);
-                        patch.fill_rect(rect, &paint, Transform::identity(), None);
-                    }
-                }
             }
         }
         for y in y0..y1 {
@@ -455,6 +458,8 @@ fn drawing(scene: &Scene) -> String {
     let mut out = String::from(
         "<defs><linearGradient id='keyface' x2='0' y2='1'><stop stop-color='#252523'/><stop offset='1' stop-color='#181918'/></linearGradient><linearGradient id='ivory' x2='.2' y2='1'><stop stop-color='#ccc8b6'/><stop offset='.2' stop-color='#e1dcc8'/><stop offset='1' stop-color='#c9c2af'/></linearGradient><linearGradient id='blackkey' x2='1' y2='1'><stop stop-color='#434441'/><stop offset='.3' stop-color='#242623'/><stop offset='1' stop-color='#101210'/></linearGradient><linearGradient id='keycap' x2='0' y2='1'><stop stop-color='#514e47'/><stop offset='.35' stop-color='#393833'/><stop offset='1' stop-color='#242522'/></linearGradient></defs>",
     );
+    // Darker versions of the same gradients; alpha stays opaque even on black keys.
+    out += "<defs><linearGradient id='ivory-pressed' x2='.2' y2='1'><stop stop-color='#858276'/><stop offset='.2' stop-color='#928f82'/><stop offset='1' stop-color='#837e72'/></linearGradient><linearGradient id='blackkey-pressed' x2='1' y2='1'><stop stop-color='#2c2c2a'/><stop offset='.3' stop-color='#171917'/><stop offset='1' stop-color='#0a0c0a'/></linearGradient></defs>";
     out += &format!(
         "<g font-family='{FAMILY}'><rect x='370' y='1041' width='2710' height='728' fill='{}'/><path d='M 371 1041 V 1769' stroke='#c2bdab' stroke-width='2'/><text x='666' y='1080' font-size='28' text-anchor='middle' dominant-baseline='central' fill='#d9d2c0'>OCTAVE</text><rect x='878' y='1056' width='348' height='48' fill='#111b16' rx='4' stroke='#62594a' stroke-width='8'/><text x='1052' y='1080' font-size='28' text-anchor='middle' dominant-baseline='central' fill='#ff7028'>{} – {}</text>",
         if scene.skin == Skin::Worn {
@@ -510,8 +515,8 @@ fn drawing(scene: &Scene) -> String {
                     note <= 127 && scene.held[usize::from(note) / 64] & (1 << (note % 64)) != 0;
                 let fill = match (dark, down, note > 127) {
                     (_, _, true) => "#626157",
-                    (true, true, false) => "#68503b",
-                    (false, true, false) => "#d1a06c",
+                    (true, true, false) => "url(#blackkey-pressed)",
+                    (false, true, false) => "url(#ivory-pressed)",
                     (true, false, false) => "url(#blackkey)",
                     (false, false, false) => "url(#ivory)",
                 };
@@ -660,6 +665,17 @@ fn key_size(source: &Pixmap, s: f64, dark: bool) -> Pixmap {
         (width * s).round().max(1.0) as u32,
         (height * s).round().max(1.0) as u32,
     )
+}
+
+fn pressed_key(source: &Pixmap) -> Pixmap {
+    let mut key = source.clone();
+    // Preserve the silhouette's alpha; translucency could brighten a dark key's face.
+    for pixel in key.data_mut().chunks_exact_mut(4) {
+        for channel in &mut pixel[..3] {
+            *channel = (f32::from(*channel) * PRESSED_LEVEL).round() as u8;
+        }
+    }
+    key
 }
 
 #[cfg(test)]

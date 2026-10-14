@@ -873,24 +873,21 @@ fn key_marks(o: &mut Svg) {
             ),
             BarTarget::Keyboard => put!(
                 o,
-                "<path d='M {} {} H {} V {} H {} Z M {} {} V {} M {} {} V {} M {} {} V {}' fill='none' stroke='{KEY_PRINT}' stroke-width='2'/><path d='M {} {} h 5 v 14 h -5 Z M {} {} h 5 v 14 h -5 Z' fill='{KEY_PRINT}'/>",
-                N(x - 20.0),
+                "<path d='M {} {} H {} V {} H {} Z M {} {} V {} M {} {} V {}' fill='none' stroke='{KEY_PRINT}' stroke-width='2'/><path d='M {} {} h 5 v 14 h -5 Z M {} {} h 5 v 14 h -5 Z' fill='{KEY_PRINT}'/>",
+                N(x - 15.0),
                 N(y - 13.0),
-                N(x + 20.0),
+                N(x + 15.0),
                 N(y + 13.0),
-                N(x - 20.0),
-                N(x - 10.0),
-                N(y - 13.0),
-                N(y + 13.0),
-                N(x),
+                N(x - 15.0),
+                N(x - 5.0),
                 N(y - 13.0),
                 N(y + 13.0),
-                N(x + 10.0),
+                N(x + 5.0),
                 N(y - 13.0),
                 N(y + 13.0),
-                N(x - 13.0),
+                N(x - 8.0),
                 N(y - 13.0),
-                N(x - 3.0),
+                N(x + 2.0),
                 N(y - 13.0)
             ),
             BarTarget::Settings => put!(
@@ -1791,7 +1788,7 @@ mod tests {
                 for i in 0..10 {
                     match i {
                         1 => sc.keyboard.as_mut().unwrap().held = [1 << 60, 0],
-                        2 => sc.keyboard.as_mut().unwrap().held = [1 << 60, 1],
+                        2 => sc.keyboard.as_mut().unwrap().held = [(1 << 60) | (1 << 61), 1],
                         3 => sc.keyboard.as_mut().unwrap().held = [0, 1],
                         4 => sc.keyboard.as_mut().unwrap().held = [0, 0],
                         5 => sc.keyboard.as_mut().unwrap().root = 53,
@@ -1814,6 +1811,9 @@ mod tests {
                         _ => {}
                     }
                     assert!(parts.render_at(&sc, &under, None, now));
+                    // Compare with a fresh keyboard, rather than two caches with the same
+                    // repaint history, including black-key presses and releases.
+                    whole.keyboard = crate::keyboard::Renderer::new(scale);
                     whole.render_at(&sc, &under, None, now);
                     if parts.frame().data() != whole.frame().data() {
                         let w = parts.frame().width() as usize;
