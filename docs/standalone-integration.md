@@ -8,7 +8,7 @@ a release or tag. The withdrawn 0.2.1 tag, draft and assets remain untouched.
 
 Source inventory: preview `8877dde`, settings/grid `c16e188`, font `95ba2e9`, and
 the already incorporated keyboard-feedback branch `cf90cef`. Shared production
-hosting uses plugin-kit `fc8448dd`, including tracked Apply receipts and exact PANIC request
+hosting uses plugin-kit `f7aaa2b0`, including cold-start readiness, tracked Apply receipts and exact PANIC request
 identity. An older callback cannot acknowledge a newer UI request. The product contract remains
 `standalone-spec.md`; this document defines integration acceptance.
 

@@ -5665,3 +5665,20 @@ invalid blocks. Tokens wrap within 63 bits and skip zero. Regressions cover spli
 and coalesced clicks, generic resets, CC120/123, invalid blocks and stale queued
 input. The shared implementation is plugin-kit `fc8448dd`; full integrated
 validation remains required before merge.
+
+
+## R-STARTUP-READY. Restore the standalone editor before cold DSP preparation
+
+2026-10-14: exact-head native app checks passed two launch/restore/close cycles on
+Linux and Windows. On macOS a fresh session passed, but reopening its saved state
+reported the two-second startup timeout. The control thread later saved the restored
+value successfully. Its readiness handshake included cold circuit factory preparation,
+which can take seconds; the editor only needs restored fields and configuration.
+
+Pin plugin-kit `f7aaa2b0` (PR9): publish restored state/configuration readiness before
+cold processor warmup; keep preparation/deactivation on the control thread before
+commands or audio devices. A channel-gated regression failed before the fix and now
+passes; independent review accepted it. No timeout, validator or DSP code changes.
+Native two-launch checks and full final-head CI must pass on the updated candidate.
+The earlier `e43d39c` proof remains scoped to its original artifacts, including the
+macOS native failure; it is not acceptance of this candidate.
