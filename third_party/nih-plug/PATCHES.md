@@ -162,3 +162,9 @@ are preallocated SPSC queues; task payloads must be `Copy`. The shared host is
 dependency. CA-72 explicitly retains its global CC120/123 reset semantics.
 Enum state validation adds `EnumParamInner::has_id` without changing hosted APIs.
 These files and the optional feature are also maintained in plugin-kit.
+
+`ProcessContext::take_standalone_panic` defaults to false. The production context
+lets opting-in instruments consume its boundary panic before their local MIDI
+queues; otherwise it retains the synthetic CC120/121 sequence. CA-72 uses this to
+coalesce the UI button and hardware-source reset without cancelling notes pressed
+after the button. Ordinary hosted CC120/123 timing and global behavior are unchanged.

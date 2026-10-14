@@ -45,6 +45,7 @@ pub struct Ca72 {
     note_sources: local_notes::Sources,
     local_generation: u64,
     panic_generation: u64,
+    deferred_local: Option<local_notes::LocalEvent>,
     /// The host's sample rate (for each block's deadline).
     rate: f64,
     /// The plug-in's own thread for what the audio thread asks of it (decisions.md R23),
@@ -86,6 +87,7 @@ impl Ca72 {
             note_sources: local_notes::Sources::default(),
             local_generation: 0,
             panic_generation: 0,
+            deferred_local: None,
             rate: 48_000.0,
             helper: None,
             dezip: Dezip::default(),
@@ -185,24 +187,45 @@ impl Ca72 {
 
     fn clear_note_sources(&mut self) {
         self.local_notes.release();
+        self.local_notes.finish_standalone_panic();
+        self.deferred_local = None;
         self.local_generation = self.local_notes.generation();
         self.note_sources.clear();
         self.local_notes.publish([0, 0]);
     }
 
-    /// A bounded batch at the next callback's boundary; host events retain their sample offsets.
-    fn local_events(&mut self) {
+    /// Apply one boundary reset before local input. A paired standalone request may arrive
+    /// from UI just after the host captured its block: leave fresh notes queued until its
+    /// hardware panic arrives, so a later reset cannot kill a note already played.
+    fn local_reset(&mut self, standalone_panic: bool) -> bool {
+        let awaiting_standalone = self.local_notes.standalone_panic_pending();
+        if awaiting_standalone && !standalone_panic {
+            self.release_local_generation();
+            return false;
+        }
         let panic = self.local_notes.panic_generation();
-        if panic != self.panic_generation {
+        let ui_panic = panic != self.panic_generation;
+        if standalone_panic || ui_panic {
             self.panic_generation = panic;
-            // The UI already advanced the generation when it asked for panic. Keep fresh
-            // notes pressed after that request, while discarding everything from before it.
+            if standalone_panic {
+                self.local_notes.finish_standalone_panic();
+                // An external host panic invalidates pending local input. The explicit UI
+                // button already advanced its epoch, so coalesce that paired request.
+                if !ui_panic && !awaiting_standalone {
+                    self.local_notes.release();
+                }
+            }
             self.note_sources.clear();
             self.local_generation = self.local_notes.generation();
             self.local_notes.publish([0, 0]);
             self.engine.event(Event::AllSoundOff);
             self.engine.event(Event::ResetControllers);
         }
+        self.release_local_generation();
+        true
+    }
+
+    fn release_local_generation(&mut self) {
         let generation = self.local_notes.generation();
         if generation != self.local_generation {
             self.local_generation = generation;
@@ -210,11 +233,28 @@ impl Ca72 {
             self.note_sources
                 .release_local(|key| engine.event(Event::Note { key, on: false }));
         }
+    }
+
+    /// A bounded batch at the next callback's boundary; host events retain their sample offsets.
+    fn local_events(&mut self, standalone_panic: bool) {
+        if !self.local_reset(standalone_panic) {
+            return;
+        }
         for _ in 0..local_notes::CAPACITY {
-            let Some(e) = self.local_notes.pop() else {
+            let Some(e) = self
+                .deferred_local
+                .take()
+                .or_else(|| self.local_notes.pop())
+            else {
                 break;
             };
-            if e.generation == generation && self.note_sources.local(e.note, e.on) {
+            // Observe a UI reset that arrived during the drain before accepting its fresh
+            // epoch. If it awaits hardware panic, retain this one event for the next callback.
+            if !self.local_reset(false) {
+                self.deferred_local = Some(e);
+                break;
+            }
+            if e.generation == self.local_generation && self.note_sources.local(e.note, e.on) {
                 self.engine.event(Event::Note {
                     key: e.note,
                     on: e.on,
@@ -459,7 +499,8 @@ impl Plugin for Ca72 {
             self.engine.set_curve(c);
         }
         self.engine.set(&self.controls());
-        self.local_events();
+        let standalone_panic = context.take_standalone_panic();
+        self.local_events(standalone_panic);
         let len = buffer.samples();
         // The voices' deadline: a share of the block's period from now (decisions.md R11);
         // none rendering offline, where every voice is waited for (R18).
@@ -625,6 +666,92 @@ mod tests {
             let a = block(&mut local, &mut lc, 256);
             let b = block(&mut physical, &mut pc, 256);
             assert!(a == b, "local and physical MIDI differ in block {i}");
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "standalone-production")]
+    fn standalone_ui_and_core_panics_coalesce_at_the_same_or_next_boundary() {
+        use nih_plug::wrapper::production::Processor;
+        use plugin_kit_standalone::{AudioBlock, AudioProcessor, MidiEvent, ProcessConfig};
+
+        for split_boundary in [false, true] {
+            let p = Ca72::default();
+            let notes = p.local_notes.clone();
+            let mut playing = crate::playing::Playing::default();
+            playing.notes = notes.clone();
+            let (mut adapter, _) = Processor::new(p, &[]).expect("standalone adapter");
+            adapter
+                .prepare(ProcessConfig {
+                    sample_rate: 48_000.0,
+                    max_buffer_frames: 128,
+                })
+                .expect("prepared");
+            let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+            let mut run = |panic, midi: &[_]| {
+                adapter.process(AudioBlock {
+                    left: &mut left,
+                    right: &mut right,
+                    input_left: &[],
+                    input_right: &[],
+                    midi,
+                    panic,
+                });
+            };
+            let physical = |on| MidiEvent {
+                source: 1,
+                data: [if on { 0x90 } else { 0x80 }, 60, 100],
+                len: 3,
+            };
+            playing.press(59);
+            run(false, &[physical(true)]);
+            assert_eq!(notes.held(), [(1 << 59) | (1 << 60), 0]);
+            // The editor marks the paired request and changes the UI epoch. The core's
+            // AudioBlock panic can belong to this callback or the following one.
+            playing.panic_standalone();
+            playing.press(69);
+            let fresh_epoch = notes.generation();
+            if split_boundary {
+                run(false, &[]);
+                assert_eq!(
+                    notes.held(),
+                    [1 << 60, 0],
+                    "fresh local input waits for hardware reset"
+                );
+            }
+            run(true, &[]);
+            assert_eq!(
+                notes.generation(),
+                fresh_epoch,
+                "the two panic paths share one UI epoch"
+            );
+            assert_eq!(
+                notes.held(),
+                [0, 1 << 5],
+                "fresh note survives paired panic"
+            );
+            playing.release_pointer();
+            run(false, &[physical(true)]);
+            assert_eq!(
+                notes.held(),
+                [1 << 60, 0],
+                "same physical pitch works after ownership reset"
+            );
+            run(false, &[physical(false)]);
+            assert_eq!(
+                notes.held(),
+                [0, 0],
+                "physical release does not strand a note"
+            );
+            playing.press(67);
+            run(false, &[]);
+            run(true, &[]);
+            assert_eq!(
+                notes.held(),
+                [0, 0],
+                "external standalone panic clears local input too"
+            );
+            adapter.deactivate();
         }
     }
 

@@ -21,12 +21,16 @@ source dimensions and crops are in `crates/ca72-panel/assets/keyboard/README.md`
 Hosted editors initially show Controls; standalone initially shows Keyboard unless
 a local view preference has been saved. View and octave are local settings, while
 TYPE always starts off. These preferences are absent from preset and DAW state.
+Computer-note releases follow the recorded physical key even when Shift changes
+its character; forwarded host releases normalize colon back to semicolon.
 Pointer and computer-key notes share local ownership; physical MIDI has separate
 ownership by channel and pitch. Local release preserves physical MIDI notes.
 Focus loss, closing, panel hide, view/octave changes, preset or text takeover, MIDI Learn and
 settings entry release local notes. Host reset and global CC120/123 clear the
 source registry and invalidate queued local attacks. PANIC additionally clears
-hardware-source ownership in production standalone.
+hardware-source ownership in production standalone. The UI and hardware panic
+share a boundary reset; fresh local notes wait for that boundary and survive it
+even when the two requests arrive in successive callbacks.
 
 The shared packed-u64 queue holds 256 local messages. Its producer and consumer
 make one attempt and never retry or wait. Overflow requests local release through
