@@ -5408,7 +5408,7 @@ Each 23-check DAW run includes eight short/full cycles and presets temporarily r
 then restoring the compact view. The Mac REAPER drag harness initially hit the host's border;
 the corrected run uses the instrument's grip and waits for the resize to settle before
 releasing. It confirms the next panel click and the resized project's restoration. Minimum-OS
-runtime, physical audio/MIDI latency, hardware hotplug and other installed DAWs remain
+and Intel-Mac runtime, physical audio/MIDI latency, hardware hotplug and other installed DAWs remain
 unverified. This acceptance concerns the tested configurations, not every host or display.
 
 PR [#31](https://github.com/idlefoundry/ca-72/pull/31) merged as `1f5a9f4c`, tagged `v0.2.1`.
@@ -5418,7 +5418,8 @@ produces the Windows/Linux installers, Windows ZIP and pinned dependency sources
 package was Developer ID signed, notarized, stapled and accepted by Gatekeeper; its SHA-256
 is `c24ebaccfd5759e0b25153851afc71c2c4d6f540970f77123e90c0a46b3d6032`.
 The [release](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.1) includes the asset
-checksums. Download verification and publication are required before merging this evidence.
+checksums. The [release acceptance PR](https://github.com/idlefoundry/ca-72/pull/34)
+records the downloaded-asset verification and final publication result.
 
 ## R73. A desktop application and playable lower keyboard
 
