@@ -5437,3 +5437,11 @@ DawVert parser and writer both map target 0 to pitch bend, target 1 to pressure 
 0 for centred pitch bend. All 23 depth envelopes were corrected; White Lotus still has no
 CC 1 envelope. These are the ordinary controller slots in the native template; no
 physical MIDI output was tested during project construction.
+
+**Evidence (Mac and Linux, 2026-10-14):** The final Set loaded successfully in the Mac's
+installed Live 12.2.7. All 49 sample references resolved, and Live created 49 corresponding
+analysis files. The Mac's project files matched the SHA-256 manifest. The corrected Set
+was reopened after the controller fix. The independent critic rechecked all MIDI, audio,
+locators, portable guide links, recording configuration and 324 unique global targets;
+no findings remained. The project is in the Mac's Downloads folder. No hardware playback,
+recording or measured I/O-latency check was performed; the owner will choose the ports.
