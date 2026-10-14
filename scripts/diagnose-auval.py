@@ -123,16 +123,23 @@ validator = str(OUT.resolve() / "validator/pluginval.app/Contents/MacOS/pluginva
 # this disposable runner. Read each command again immediately before signalling.
 raw, rows = processes()
 (OUT / "registry-refresh-processes.txt").write_text(raw)
+registry_actions = []
 for pid, (_, _, command) in rows.items():
     if Path(command.split()[0]).name != "AudioComponentRegistrar":
         continue
-    current = subprocess.run(["ps", "-p", str(pid), "-o", "args="],
+    current = subprocess.run(["ps", "-p", str(pid), "-o", "uid=,args="],
                              text=True, capture_output=True)
-    if current.stdout.strip() == command:
+    identity = current.stdout.strip().split(None, 1)
+    if len(identity) == 2 and identity[1] == command:
+        if int(identity[0]) != os.getuid():
+            registry_actions.append({"pid": pid, "command": command, "action": "skip-system-owner"})
+            continue
+        registry_actions.append({"pid": pid, "command": command, "action": "refresh-own-registrar"})
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+(OUT / "registry-refresh.json").write_text(json.dumps(registry_actions, indent=2) + "\n")
 results = [run_probe("direct-stress", ["auval", "-strict", "-stress", "20", "-v", "aumu", "CA72", "IdlF"])]
 if results[0]["reader_stopped"]:
     results.append(run_probe("nested-verbose", [
