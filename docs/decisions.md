@@ -5711,3 +5711,30 @@ including editors completed successfully. This fresh auval draw was faster than
 the captured failure, so it does not reproduce the exact failing randomized state.
 `au-validation.md` records the evidence and limits. Full exact-head CI on all
 three OSes remains required before integration merge. No new release or tag.
+
+## R-LINUX-PANEL-REPAINT. Submit a snapped panel's frame in its input event
+
+2026-10-14: the owner confirmed that a scoped Hyprland `no_anim` rule removed the
+long stretch in Bitwig's CA-72 CLAP window, but controls still briefly stretched
+or jumped. The installed/running binary matched CI main `edf44ab`. A height-only
+PANEL change preserves renderer scale; however, its input event resized the
+native window and software surface without drawing/presenting the new image.
+The next X11 frame callback could be 15 ms away. This is an identified submission
+gap, not proof that all remaining host/compositor artifacts have this cause.
+
+On Linux, an input-triggered height-only resize now draws and fully presents at
+the end of the action. Draw-time reconciliation and native follow still precede
+presentation, preserving delayed host refusal/restore. Width dragging and normal
+frame pacing remain scheduled; macOS/Windows do not take this repaint path.
+
+A native regression creates only its own off-screen X11 parent/child windows,
+without a processor or audio device. It invokes actual PanelWindow input handling
+immediately after a scheduled frame, checking a successful full surface submission
+and correct composed/native dimensions before another frame can run. It covers
+both accepted directions, unchanged control scale and synchronous refusal. The
+original code fails at the first accepted collapse; the candidate submits in the
+same event (roughly 5–8 ms on this machine, descriptive rather than a timing gate).
+CI runs this test under Xvfb explicitly. Existing queued refusal, recall,
+fractional-size and once-per-frame grip regressions remain required. The native
+harness does not establish visual acceptance in Bitwig; that remains a separate
+check of the installed candidate. No DSP, preset or installer behavior changes.

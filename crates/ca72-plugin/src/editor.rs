@@ -850,8 +850,9 @@ impl PanelWindow {
     fn key(&mut self, window: &mut Window<'_>, k: &KeyboardEvent) -> bool {
         self.editing.touched = true;
         let taken = self.editing.keyed(k);
-        self.follow(window);
+        let height_changed = self.follow(window);
         self.keyboard(window);
+        self.repaint_height_change(window, height_changed);
         taken
     }
 
@@ -877,16 +878,33 @@ impl PanelWindow {
     /// The window resized to what the editor asks (the grip, the drawer below the bar),
     /// when it asked: on macOS baseview reports no resize of its own making, so the frames
     /// follow here; elsewhere the report that follows finds the size already taken.
-    fn follow(&mut self, window: &mut Window<'_>) {
+    fn follow(&mut self, window: &mut Window<'_>) -> bool {
         if !std::mem::take(&mut self.editing.resizing_window) {
-            return;
+            return false;
         }
         let want = (self.editing.width, self.editing.window_height());
-        if want != self.logical {
-            let size = Size::new(f64::from(want.0), f64::from(want.1));
-            window.resize(size);
-            self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
+        if want == self.logical {
+            return false;
         }
+        let height_only = want.0 == self.logical.0;
+        let size = Size::new(f64::from(want.0), f64::from(want.1));
+        window.resize(size);
+        self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
+        height_only
+    }
+
+    /// X11's next timer tick can be 15 ms away. Submit the resized frame at the end
+    /// of this input event instead of leaving the compositor the old-sized image.
+    /// Keep this outside resize/draw: a draw can reconcile a delayed host refusal.
+    fn repaint_height_change(&mut self, window: &mut Window<'_>, height_changed: bool) {
+        if !cfg!(target_os = "linux") || !height_changed {
+            return;
+        }
+        self.editing.draw();
+        self.follow(window);
+        self.keyboard(window);
+        self.present(false);
+        self.shown = Some(Instant::now());
     }
 
     /// The keyboard as the drawer wants it: taken when a field takes the caret (baseview's
@@ -2923,8 +2941,9 @@ impl WindowHandler for PanelWindow {
                 // The drawer opening or shutting below the bar: the window follows (the
                 // owner, 2026-10-02: on macOS it had stayed drawn at the old size until
                 // reopened).
-                self.follow(window);
+                let height_changed = self.follow(window);
                 self.keyboard(window);
+                self.repaint_height_change(window, height_changed);
                 status
             }
             // The drawer, while open, takes the keys (the host keeps its shortcuts).
@@ -3539,6 +3558,11 @@ pub(crate) mod window {
             {
                 self.inner = None;
             }
+        }
+
+        #[cfg(all(test, target_os = "linux"))]
+        pub fn presented(&self) -> bool {
+            self.whole
         }
 
         /// Shows frames (premultiplied RGBA, opaque), one under the other from the top left
@@ -8081,3 +8105,6 @@ mod windows_window_tests {
         o.close();
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_resize_tests;
