@@ -5733,3 +5733,45 @@ must be Developer ID signed, notarised, stapled and accepted by Gatekeeper.
 Every uploaded asset must be downloaded again and checked against the manifest.
 Exact release artifacts and verification evidence are recorded separately when
 those checks complete; earlier checks retain their original source/binary scope.
+
+
+**Publication evidence, 2026-10-14.** [CA-72 0.2.3](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.3)
+is public and Latest. PR #41 was fast-forwarded to main at the exact tested commit
+`a28ba0a0c9a7f6b748d1789d8eedfb637f4faba5`, which the annotated `v0.2.3` tag
+also names. PR #40 remains open and unmerged; its repaint experiment is excluded.
+
+- [Release PR CI 38668501280](https://github.com/idlefoundry/ca-72/actions/runs/38668501280)
+  and [tag CI 38670736059](https://github.com/idlefoundry/ca-72/actions/runs/38670736059)
+  passed Linux, Windows and macOS. Raw logs were independently audited, including
+  strict Clippy, workspace and derive tests, CLAP/VST3/Steinberg validators and
+  editor tests. Direct native and Intel/Rosetta strict AU validation passed;
+  nested AU pluginval passed strictness 10 with the finite 180000 ms inactivity
+  budget. This remains a validation budget correction, not a DSP performance claim.
+- The universal Mac package was signed from release PR artifact 11942903792 at
+  that exact source commit. Executable and data sections match its verified CI
+  originals. All four components are universal, require macOS 11 and carry
+  Developer ID Application signatures; the standalone has the audio-input
+  entitlement. The installer has the matching Developer ID Installer signature,
+  Apple's Accepted notarisation result and a validated staple. A fresh downloaded,
+  quarantine-marked copy passed signature, staple and Gatekeeper assessment.
+  Its SHA-256 is `861f313b500853a61a142f331da79be7f136ce9bd97cd35dbe3f3484b095ff4f`.
+- Final tag Windows and Linux installers match their digest-verified CI inputs.
+  The actual Windows compressed installer was extracted without executing it;
+  all eight payload files match the final binaries, icon, licence and notices.
+  Windows binaries use system libraries without a Visual C++ Redistributable
+  dependency. Linux payloads match the raw artifacts and retain the glibc 2.35
+  floor. Installer choices and metadata are unchanged from the reviewed sources.
+- All nine uploaded assets were downloaded afresh. Their bytes match GitHub's
+  asset digests; `SHA256SUMS.txt` covers the other eight assets, including the
+  notices and Windows ZIP checksum sidecar. The Windows ZIP's internal manifest
+  and recorded tag artifact provenance, 24 retired presets, and git-pinned
+  dependency sources were independently checked. Anonymous Latest API/page
+  requests resolve to 0.2.3, and all nine public asset URLs return HTTP 200.
+- Published 0.2.2 and withdrawn draft 0.2.1 retain their original asset identities,
+  sizes and digests. No earlier download was replaced.
+
+The earlier no-device native launch/save/restore/close checks remain scoped to
+`589e5cc` and their recorded binaries. There is no new claim of a complete physical
+audio/MIDI, hotplug, latency, minimum-OS runtime or external-host matrix for this
+release. Immediate close during cold preparation remains untested. The known brief
+Linux host/compositor panel stretch is deferred and listed in the release notes.

@@ -47,7 +47,7 @@ identity. An older callback cannot acknowledge a newer UI request. The product c
   Native checks, unperformed physical MIDI/audio checks and any unavailable host
   checks are recorded separately and never represented as passing.
 
-## Validation ledger
+## Initial validation ledger
 
 Pending: integrated-source checks, all three platform jobs, current candidate native
 app/installer/host checks and independent final review. Earlier preview evidence is
@@ -72,3 +72,24 @@ This corrects the harness budget and does not claim a DSP performance repair or 
 the original 30-second gate passed. Original failures are preserved. The unmodified
 589 AU passed the full bounded diagnostic; exact-head three-platform CI and final
 review remain required. See `au-validation.md` for evidence and limitations.
+
+
+## Completed integration and publication, 2026-10-14
+
+PR #39 integrated the feature at `edf44ab`. Its tested tree passed CI 38655014787
+and post-merge CI 38657626743 on all three platforms, with independent final source
+and package reviews. The AU validation budget and its limits are recorded above;
+the earlier default-timeout failures remain preserved.
+
+PR #41 changes version and public documentation on that validated source. Its exact
+commit `a28ba0a` passed release PR CI 38668501280 and tag CI 38670736059 and is now
+published as [0.2.3](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.3).
+The signed/notarised Mac payload, final Windows/Linux installers and all nine fresh
+downloads passed the package and provenance audits recorded in [the release
+record](decisions.md). PR #40 is excluded.
+
+This closes the initial software/build/validator integration ledger. Earlier native
+and physical-device evidence keeps its original source scope. The unperformed
+physical I/O, MIDI/hotplug, latency, minimum-OS and external-host matrix checks remain
+unverified; immediate close during cold preparation is also untested. Publication
+does not turn those gaps into passing tests.
