@@ -5711,3 +5711,25 @@ including editors completed successfully. This fresh auval draw was faster than
 the captured failure, so it does not reproduce the exact failing randomized state.
 `au-validation.md` records the evidence and limits. Full exact-head CI on all
 three OSes remains required before integration merge. No new release or tag.
+
+## R-RELEASE-0.2.3. 0.2.3
+
+**Owner authorisation, 2026-10-14.** Publish the validated standalone/keyboard
+integration from main, excluding PR #40's Linux repaint experiment. The owner
+confirmed that the experiment did not remove the visible stretch and deferred it.
+The publication request authorises release signing, tagging, upload and publication.
+The existing installer choices are retained; no installer redesign is included.
+
+The base is `edf44abeab34e4ae5a4c01839026641c99b97d23`, whose post-merge CI run
+38657626743 passed Linux, macOS and Windows, including the AU checks. This release
+preparation changes the workspace/package version and public documentation only.
+The engine, editor, host adapter, dependencies and packaging sources match that
+validated base. The already published 0.2.2 assets and withdrawn 0.2.1 draft remain
+preserved. Release notes are in `releases/0.2.3.md`.
+
+Before publication, the 0.2.3 commit must pass all three CI jobs, independent
+documentation/provenance review, and package verification. The macOS installer
+must be Developer ID signed, notarised, stapled and accepted by Gatekeeper.
+Every uploaded asset must be downloaded again and checked against the manifest.
+Exact release artifacts and verification evidence are recorded separately when
+those checks complete; earlier checks retain their original source/binary scope.

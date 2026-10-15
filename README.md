@@ -1,7 +1,7 @@
 # CA-72
 
-A synthesizer plug-in, VST3 and CLAP for macOS, Windows and Linux and an Audio Unit for macOS,
-by Idle Foundry:
+A synthesizer for macOS, Windows and Linux, as a standalone application, VST3 and CLAP
+plug-in, and an Audio Unit for macOS, by Idle Foundry:
 monophonic like the instrument it models, or one whole instrument per note with POLY. Its
 voice is modelled from the circuit of a 1970s analogue synthesizer, the
 Minimoog Model D of about 1972-73 with the CA3046 ("old") oscillator board. Every board
@@ -16,7 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.2: the lower panel can be shown or hidden instantly; strong filter contours
+**Status:** 0.2.3: a standalone application with audio and MIDI selection, a playable lower
+keyboard, and independent computer-keyboard octaves. Includes 0.2.2: PANEL shows or hides the
+lower controls; strong filter contours
 in HI and LO keep ultrasonic resonance out of the output. Both modes use more CPU and their
 renders change; ULTRA is unchanged. Includes 0.2.0: the circuit calibrated against a hardware instrument, projects saved with
 0.1 translated into it; nineteen new factory presets, 0.1's in a download of their own; the
@@ -52,7 +54,8 @@ signed.
 The Windows installer is not yet signed, so the first time you run it Windows says "Windows
 protected your PC": click **More info**, then **Run anyway**. To install by hand instead,
 each release from 0.1.5 has `CA-72-<version>-Windows-x86_64.zip`: the same VST3 and CLAP, with
-a `README.txt` that says where to copy them. Development ZIPs also include the standalone application; released 0.2.2 packages remain plug-in-only.
+a `README.txt` that says where to copy them. From 0.2.3, the installers and Windows ZIP
+also include the standalone application.
 
 The plug-ins go into the usual folders:
 
@@ -76,9 +79,6 @@ and sends nothing of yours.
 
 ## Playing it
 
-The following keyboard and standalone features are in development on this branch;
-they are not included in the released 0.2.2 installers.
-
 The keyboard button beside SAVE and settings switches the lower panel between
 VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
 remain visible. Click a key or drag between keys to play; the octave buttons move
@@ -95,9 +95,9 @@ the sound. TYPING stays enabled when you show the extra controls or hide the low
 panel; pointer notes release while typed and physical MIDI notes continue. Focus
 loss releases local notes. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
 
-## Standalone application (in development)
+## Standalone application
 
-Development installers include the same instrument as an optional desktop application.
+The installers include the same instrument as an optional desktop application.
 On macOS it installs as `/Applications/CA-72.app`; on Windows, open **CA-72**
 from the Start menu; on Linux, use its desktop entry or `ca72-standalone`.
 
@@ -105,6 +105,9 @@ Build it with `scripts/standalone.sh`. It produces `target/bundled/CA-72.app` on
 macOS, `target/bundled/CA-72.exe` on Windows, or `target/bundled/ca72-standalone`
 on Linux. Run it directly, or package it with the plug-ins using `scripts/package.sh`.
 The installer lets you choose the standalone alongside the plug-in formats.
+A fresh standalone session opens with the lower keyboard visible; a fresh plug-in
+instance opens with the extra controls. The keyboard/controls preference is shared
+on this computer, and the panel's expanded state is saved with the session or project.
 Linux also accepts `./install.sh --standalone-only` or `--plugins-only`.
 
 Open **Audio & MIDI** from the editor's settings button. Choose your output and
