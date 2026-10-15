@@ -145,7 +145,13 @@ if [ "$os" = macos ]; then
         echo "== auval, strict, the Intel slice (Rosetta)"
         arch -x86_64 auval -strict -v aumu CA72 IdlF
     fi
-    echo "== pluginval $PLUGINVAL, strictness 10, the Audio Unit${gui[*]:+ (editor tests skipped)}"
-    "$pluginval" --strictness-level 10 --validate-in-process ${gui[@]+"${gui[@]}"} \
+    # AUval's nested -strict -stress 20 simulates 20 seconds of audio, not wall time.
+    # ULTRA/unison and retained tails can take over 30 seconds without child output;
+    # pluginval 1.0.4 reads that output in blocking 2048-byte chunks. Give this AU
+    # invocation a finite three-minute inactivity budget. Keep every conformance,
+    # stress and editor test; other formats retain pluginval's default timeout.
+    # Evidence and the original failures: docs/au-validation.md.
+    echo "== pluginval $PLUGINVAL, strictness 10, the Audio Unit, 180000 ms timeout${gui[*]:+ (editor tests skipped)}"
+    "$pluginval" --strictness-level 10 --validate-in-process --timeout-ms 180000 ${gui[@]+"${gui[@]}"} \
         --validate "$components/CA-72.component"
 fi

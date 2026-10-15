@@ -161,3 +161,25 @@ One more from the CA-72's own testing in Cubase 15 on Windows 11 (2026-10-10; it
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
 and `nih_plug_derive` here and apply the fourteen changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.
+
+The standalone app adds a separate `standalone-production` feature. Its adapter
+in `src/wrapper/standalone/production.rs` owns the instrument exclusively, keeps
+the ordinary parameter/state/editor APIs, validates sessions before mutation,
+and passes auxiliary input through to the same processing path. Audio task queues
+are preallocated SPSC queues; task payloads must be `Copy`. The shared host is
+`plugin-kit-standalone`, whose baseline avoids the development launcher's JACK
+dependency. CA-72 explicitly retains its global CC120/123 reset semantics.
+Enum state validation adds `EnumParamInner::has_id` without changing hosted APIs.
+These files and the optional feature are also maintained in plugin-kit.
+
+`ProcessContext::take_standalone_panic` defaults to false. The production context
+lets opting-in instruments consume its boundary panic before their local MIDI
+queues; otherwise it retains the synthetic CC120/121 sequence. CA-72 uses this to
+coalesce the UI button and hardware-source reset without cancelling notes pressed
+after the button. Ordinary hosted CC120/123 timing and global behavior are unchanged.
+
+Production standalone PANIC identity: the additive ProcessContext token accessor
+and per-block adapter metadata carry the exact token captured by plugin-kit's
+panic flag. Read the token before consuming the panic; direct, untagged and hosted
+callbacks retain their existing behavior. Adapter metadata is consumed even if a
+malformed block is rejected, preventing stale acknowledgements on later calls.

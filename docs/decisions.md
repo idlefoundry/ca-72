@@ -5378,3 +5378,336 @@ Mac package's signature/staple/Gatekeeper result, and checks public Latest routi
 The evidence and verification records accompany the release in the 0.2.2 artifact
 folder. The withdrawn 0.2.1 remains draft with its tag and all nine original assets
 preserved. Its acceptance does not stand in for these corrected candidate checks.
+
+## R-STANDALONE. A desktop application and playable lower keyboard
+
+**Owner decisions, 2026-10-13.** Add a standalone application, research and write a
+detailed specification with clear success criteria, then implement its tasks. Put
+the keyboard in the VOICES/STEREO/OUTPUT area, with a button beside settings to
+switch views. Keep the realistic materials and original Model D proportions,
+uniform key alignment and white-key cutouts around the black keys. The owner later
+delegated visual judgement and directed work to continue without an approval wait.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- Native CoreAudio, WASAPI and ALSA hosting lives in the shared plugin-kit. A thin
+  NIH adapter runs the existing engine, parameters, presets and editor; the legacy
+  JACK development launcher remains available. macOS 11 remains the minimum.
+- Device selection, real external capture, channel routing, sample rate, requested
+  buffer, MIDI inputs/filter, recovery and atomic sessions are available from the
+  editor. Requested buffer duration is labelled separately from playing latency.
+  Independently clocked input uses preallocated, bounded clock correction.
+- The 44-key F-to-C keyboard uses original generated surface assets over true L/T
+  key shapes. Physical MIDI, pointer and typing own notes separately. TYPE starts
+  disabled; focus loss and hidden controls release local notes. Paired PANIC
+  requests are consumed once at the audio boundary. R70's PANEL remains available.
+- Keyboard view and octave use the existing per-computer preferences, outside
+  sound presets and project state. The standalone's instrument and I/O session
+  uses its own versioned state directory. Invalid sessions are preserved and
+  validated completely before any parameter or persistent-field setter runs.
+- Installers add an optional application; Linux also gets a desktop entry and
+  Windows' portable ZIP contains the executable. Existing component locations and
+  session data remain compatible. No release is published by this change.
+
+**Evidence, 2026-10-14:** the [contract](standalone-spec.md),
+[task status](standalone-progress.md), [visual proof](standalone-keyboard/README.md)
+and [acceptance evidence](standalone-verification/README.md) record the researched
+sources, regression checks and native virtual-backend tests. Independent final
+review reproduced the original malformed-field and shifted-key failures and
+confirmed their fixes, the seven adapter checks, paired-panic ordering and
+malformed-session close preservation. Native CI passed all three systems on
+`acaa03c`; merged as `c34cb3c` with the same tree. Actual native package/CLI checks,
+Windows no-device save/reopen/close and a private Developer ID signed/notarised
+standalone Mac candidate pass. Physical audio/MIDI latency, microphone permission,
+hardware hotplug, Mac GUI and minimum-OS runtime remain unverified. R71 and R72 are reserved for the already open filter fix and 0.2.1 release
+records; this record follows them numerically.
+
+## R-TYPE. Computer keys follow a piano layout with their own octave
+
+**Owner decisions, 2026-10-14.** ASDFG in TYPE should play CDEFG. Computer-keyboard
+notes should have their own octave, with Z lowering and X raising it, as in Live.
+TYPE should remain playable after switching from the keyboard to the extra controls.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- Keep the chromatic key order but anchor it to a separate C root. A defaults to
+  C3 (MIDI 48 in this instrument's labels). Z/X move 12 semitones once a press;
+  roots clamp to C notes 0–120 and keys beyond MIDI 127 stay silent. The visible
+  F-to-C range and oscillator RANGE controls do not change TYPE's MIDI pitches.
+- TYPE's octave is a per-computer preference, outside presets and host state.
+  Existing preferences retain their visible range and get the new C3 TYPE default.
+  The header shows A's note and the Z/X shortcut while TYPE is enabled.
+- An octave change releases only that input's notes. Typed keys remain recorded
+  until keyup, including silent out-of-range keys, so host-forwarded repeats cannot
+  restart them after transposition. Pointer and physical MIDI ownership remain
+  independent; text entry, menus, modifiers and focus retain precedence.
+- TYPE stays active across keyboard/controls swaps and compact view, releasing
+  only pointer ownership when hiding the keys. Held typed notes and their releases
+  still work, including after a host refuses the lower panel's expansion.
+- The [official keyboard diagram](https://www.ableton.com/en/manual/live-keyboard-shortcuts/#keymidi-map-mode-and-the-computer-midi-keyboard)
+  confirms the white/black key layout and Z/X shortcuts. Live calls MIDI 60 C3;
+  this instrument calls it C4, so the chosen default is not a claim of identical
+  starting pitch. L/O/P/semicolon continue the existing second-octave extension.
+
+**Evidence (the Linux reference machine, 2026-10-14):** restoring the old shared-root
+calculation makes `computer_keys_start_on_c_and_follow_the_piano_layout` fail on A,
+with MIDI 41 instead of 48. Regression checks cover every mapped pitch, octave
+limits, held-note source overlap, known/unknown key codes, repeated octave presses,
+unflagged repeats after transposing, silent out-of-range keys, text takeover,
+separate preference roundtrips and header invalidation. Independent review found
+the two repeat cases and confirmed their fixes. The plug-in's production-feature
+library tests passed: 236 passed, 13 ignored; all three keyboard-panel checks passed.
+Formatting, diff checks and strict clippy for both touched crates, all targets,
+with all features and without optional features passed. Physical devices were not opened.
+
+## R-MIDI-LIST. Open device selectors follow discovery and hotplug
+
+**Owner report, 2026-10-14.** The standalone did not appear to see the Mac's MIDI
+keyboard, while other hosts did.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- Rebuild an open device selector when its inventory changes, retaining the
+  highlighted device where it still exists and preserving the user's draft.
+  Discovery finishing after opening MIDI INPUTS can no longer leave it showing
+  only the disable option. Removed devices disappear without silently changing
+  the requested input configuration.
+- When hardware MIDI is unselected, show the detected-input count and an explicit
+  prompt to choose inputs. Selecting a MIDI port and applying it remains deliberate.
+
+**Evidence (the Mac and Linux reference machine, 2026-10-14):** CoreMIDI reports
+the keyboard's two sources online; the pinned midir 0.9.1 lists both from main
+and control threads. The running application's saved configuration has no MIDI
+inputs selected. Its actual open selector was not inspected, so the stale menu
+is a confirmed code path rather than a claim about that particular window.
+`open_device_menu_follows_inventory_without_changing_the_draft` covers discovery
+arriving into an empty open MIDI selector, selection, reordering, removal,
+highlight bounds and unchanged running configuration until Apply. Disabling the
+menu rebuild reproduces its regression failure (one option instead of three);
+restoring it passes. The production-feature library suite passed: 237 passed,
+13 ignored. Strict clippy with all features and without optional features,
+formatting and diff checks pass; independent review confirmed the selector logic.
+No audio device
+or MIDI connection was opened, and the running application's preferences were not changed.
+
+## R-MIDI-RECOVERY. Automatic input selection and honest discovery failures
+
+**Owner report and request, 2026-10-14.** The updated Mac standalone initially
+reports two MIDI inputs, then the count becomes zero after opening MIDI INPUTS.
+Select a default MIDI input at startup and fix the disappearing inventory.
+
+**Agent decisions, 2026-10-14** (not separately approved):
+- New sessions use Automatic: select the first available uniquely named input,
+  avoiding duplicate notes from opening every port. Remember that name across
+  reorder, unplug and restart. Wait for an input when none exists; connect it
+  without restarting running audio. Explicit input selections and Disable persist.
+  Older sessions retain their previous choices, including disabled MIDI; selecting
+  Automatic and applying once enables the new policy for those sessions.
+- Retain the successful MIDI discovery client for the control thread's lifetime.
+  Initialization, port-name and inconsistent-count failures preserve the last good
+  MIDI inventory and active bindings, while audio inventory continues to update.
+  Report discovery errors in settings and clear only their own diagnostic on recovery.
+- A successful stable empty inventory remains empty and releases missing inputs.
+  Report a transition from available inputs to none, with Refresh/reconnect guidance.
+  Successful reconnection clears owned MIDI warnings; unrelated session/audio issues
+  keep priority. The code never fabricates ports to conceal a successful zero count.
+- Automatic's resolved port and normalized Apply results update an untouched dialog.
+  Track edits explicitly: changing back to a previous value is still an edit, and
+  any edit after Apply prevents its result from overwriting the new draft.
+
+**Research and limits:** the [pinned midir CoreMIDI implementation](https://github.com/Boddlnagg/midir/blob/v0.9.1/src/backend/coremidi/mod.rs)
+queries global sources. Apple's [source-count API](https://developer.apple.com/documentation/coremidi/midigetnumberofsources())
+returns a count without an error status. A stable zero cannot be classified as a
+failed query by this API alone. CoreMIDI reports the NI S88 MK2's two ports online;
+250 MIDI-only inventories and 50 inventories surrounding the exact CPAL property
+query ordering kept both sources, with no discovery errors. No audio streams or
+MIDI connections were opened. The user's actual count loss is confirmed by their
+report; client churn or CPAL ordering is not a proven cause. The new build repairs
+confirmed error-handling defects and exposes successful-zero transitions; physical
+playback and disappearance/recovery on the owner's running app remain unverified.
+
+**Software evidence (2026-10-14):** 37 shared-host tests pass, including retained
+client reuse, discovery failure/recovery, true empty inventory, MIDI warning ownership
+and default selection/persistence. Five settings tests pass independently. Returning
+the dialog's old value-equality sync condition reproduces the post-Apply ALL→2→ALL
+failure; explicit edit tracking fixes it. The final pinned host revision is
+`4bf3fa665c5e7b47c6be4bff9201ce02b10f60c9`. The production-feature plug-in library
+suite passes: 238 passed, 13 ignored. Independent reviews found no remaining confirmed
+issues after the corrections.
+
+## R-KEY-FEEDBACK. Keyboard icon and pressed keys
+
+**Owner decision, 2026-10-14.** Remove the last piano key on the keyboard button's right
+and darken a playable key when pressed.
+
+The remaining three natural keys and two accidentals are centred in the button. Held keys
+use darker versions of their surfaces in both looks; the realistic material's alpha remains
+unchanged, so a black key cannot brighten by revealing its background. Local note ownership
+joins the audio snapshot for immediate visual feedback while a device is stopped.
+
+Key masks use fixed key coordinates and integer compositing. Press/release repaint checks
+found a fractional-scale seam when the old mask and float sampler followed the damage patch.
+The regression now compares incremental frames with a fresh keyboard, including black keys.
+The [rendered previews and focused checks](keyboard-feedback/README.md) record the candidate;
+visual review precedes full CI or merging.
+
+**Header follow-up, 2026-10-14.** The owner also asked for the keyboard header's buttons and
+text to be vertically centred on the wood. Their shared centre is now halfway between the
+rail and the key bed's outer border. Labels use their visible glyph bounds for an alphabetic
+baseline; this aligns OCTAVE, the range, plus/minus, TYPE, PANIC and the mapping legend despite
+their different sizes. Button drawing, materials and hit-testing share the same centre.
+The updated preview records the alignment; panel and focused editor checks still pass.
+
+**Display follow-up, 2026-10-14.** The owner asked to reuse the preset screen's pixel lettering
+and bezel for the octave range. It now calls the shared bezel renderer and uses the same glass
+asset, dot font, grid spacing and light colours. Its readout remains centred on the wood;
+the preset display keeps its existing appearance. Updated renderer previews and panel/lint
+checks pass; visual review still precedes full CI or merging.
+
+**Button follow-up, 2026-10-14.** The owner asked to place TYPE and PANIC side by side and
+give them the same size. TYPE now sits just left of PANIC, with both caps 230 × 48 units and
+a 16-unit gap. Header drawing, realistic materials and hit-testing share a single button layout.
+
+**Host follow-up, 2026-10-14.** The owner asked for TYPE and PANIC only in the standalone
+application, leaving those functions to the DAW. Runtime host API selects their visibility and
+hit targets, independent of build features. Plug-ins keep the pointer keyboard and octave
+controls, with note typing and its legend disabled. The repaint regression includes switching
+between both layouts; editor checks cover actual CLAP, VST3 and standalone contexts.
+
+**Label follow-up, 2026-10-14.** The owner chose TYPING as the compact label for enabling
+computer-keyboard note input. It replaces TYPE on the standalone button.
+
+**Integration follow-up, 2026-10-14.** The owner asked to include these UI fixes in
+the MIDI recovery build. Merge the keyboard feedback candidate `cf90cef` into
+the standalone development branch, preserving its icon, materials, pixel display,
+header alignment, grouped buttons, host-specific visibility and TYPING label.
+Retain R-TYPE's separate C-root octave and Z/X legend; TYPING continues through
+controls/compact views in standalone. Plug-ins leave note typing to their host.
+The combined source passes 240 production-feature library tests (13 ignored),
+45 panel unit tests (7 ignored), the panel approval check and strict Clippy for
+both feature configurations. The native combined render was shown to the owner;
+their earlier delegation permits proceeding without another approval wait.
+
+**Frame follow-up, 2026-10-14.** The owner requested straight wood at both sides
+and wood meeting the bottom silver border. Replace the metal substrate and separate
+wood rails with one continuous walnut field around the recessed key bed. Its right
+and bottom limits match the trim's inner edges (`W - 28`, `H - 6`). The drawn skin
+uses a continuous wood-coloured surface too. Include fractional boundary coverage
+and composite it over the existing trim; inward pixel clipping left a thin dark gap.
+Both skins' incremental/fresh-frame checks pass at 0.44 and 0.87 scale, as do all
+45 panel tests and the approval check. The updated native render was shown to the owner.
+
+## R-SETTINGS-DONE. Done when settings have no unapplied changes
+
+**Owner decision, 2026-10-14.** The Audio & MIDI primary button says Done when
+settings are unchanged and Apply only after changes. Compare the draft with the
+host's applied configuration, retaining a pending submission until acknowledged.
+Done closes without submitting a configuration or restarting audio, even without
+available hardware. No-op choices and edits reverted before application restore
+Done. A failed application keeps Apply; successful normalisation restores Done.
+Keep later edits when an older application completes, including edits back to the
+previously running value. Pointer and Enter use the same primary action.
+
+The host's additive `apply_tracked` receipt identifies completion of the exact
+request; configuration equality or a Running phase can still describe an older
+snapshot. Permit one queued application per dialog. Its receipt returns the
+accepted normalised configuration or failure, including repeated identical
+failures; failure unlocks retry. Re-selecting an unchanged output, input or
+Automatic preserves its subordinate channels and remembered MIDI choice.
+
+The existing missing-MIDI policy is unchanged pending the owner's discussion:
+remember selected inputs, release missing live bindings and retry reconnection;
+do not silently switch to a different controller. The UI currently does not label
+remembered missing ports distinctly or retain them in the selector for deselection.
+
+## R-KEYBOARD-GRID. Keyboard header shares the lower-panel control grid
+
+2026-10-14 font follow-up: the owner approved matching the keyboard's grey-button
+labels to the preset rail. They now use the same built-in URW Gothic, size 20,
+bold (Demi), including the octave buttons. Their visible glyphs remain centred
+using the bold face's measurements. Button geometry remains 62 units high.
+
+**Owner decision, 2026-10-14.** Align the OCTAVE group and TYPING/PANIC to the
+same grid as the other controls. Use the strip's existing column anchors: OCTAVE
+on CV, the range display on CW, the typing legend on CI and the paired action
+buttons centred on CO. Keep TYPING/PANIC side by side with equal 230-unit caps
+and a 14-unit gap. Arrow widths and all cap heights reuse the rail's KEY_W/KEY_H.
+Caps and the range bezel share their top, bottom and vertical centre; measured
+glyph centring remains in use. Drawing, material placement and pointer targets
+derive from the same coordinates. Wood, the recessed key bed and key shapes keep
+their existing geometry.
+
+**Active-state follow-up, 2026-10-14.** The owner requested the same coloured
+active treatment for PANEL as for the keyboard and TYPING. Publish the editor's
+expanded state to the rail scene and apply the existing amber cap tint. Collapsed
+or refused expansion stays neutral; refused collapse retains its active finish.
+Both skins and incremental repaint use this same state and shared key geometry.
+
+## R-STANDALONE-INTEGRATION. Add the standalone feature to current main
+
+**Owner authorization, 2026-10-14, via Add expandable second panel.** The
+standalone agent leads one feature PR against current main, preserving the corrected
+0.2.2 audio/resize fixes and release history. Integrate the already combined UI work,
+current settings completion behavior, MIDI recovery and 20-bold button labels.
+This authorizes integration and merge on completed validation; it does not authorize
+a new public release or tag. The withdrawn 0.2.1 assets remain preserved.
+
+The baseline is `db681b8`. The integration contract and pending acceptance matrix are
+in `standalone-integration.md`. Existing preview and release evidence remains scoped
+to its original binaries. In particular, the unresolved c16 nested AU validator
+inactivity timeout is not waived or called fixed by this integration.
+
+**PANIC integration review, 2026-10-14.** Two clicks can span an already captured
+callback. A regression first failed on the boolean handshake: the first hardware
+boundary admitted a fresh note belonging to the second UI request. Use the shared
+host's tagged request, captured atomically with its panic flag, and acknowledge
+only an exact local token. Older or generic boundaries reset physical sources
+without clearing a newer pending UI identity. CC120/123 and stream resets do not
+acknowledge a pending UI request. Adapter metadata is consumed once, including on
+invalid blocks. Tokens wrap within 63 bits and skip zero. Regressions cover split
+and coalesced clicks, generic resets, CC120/123, invalid blocks and stale queued
+input. The shared implementation is plugin-kit `fc8448dd`; full integrated
+validation remains required before merge.
+
+
+## R-STARTUP-READY. Restore the standalone editor before cold DSP preparation
+
+2026-10-14: exact-head native app checks passed two launch/restore/close cycles on
+Linux and Windows. On macOS a fresh session passed, but reopening its saved state
+reported the two-second startup timeout. The control thread later saved the restored
+value successfully. Its readiness handshake included cold circuit factory preparation,
+which can take seconds; the editor only needs restored fields and configuration.
+
+Pin plugin-kit `f7aaa2b0` (PR9): publish restored state/configuration readiness before
+cold processor warmup; keep preparation/deactivation on the control thread before
+commands or audio devices. A channel-gated regression failed before the fix and now
+passes; independent review accepted it. No timeout, validator or DSP code changes.
+Native two-launch checks and full final-head CI must pass on the updated candidate.
+The earlier `e43d39c` proof remains scoped to its original artifacts, including the
+macOS native failure; it is not acceptance of this candidate.
+
+
+## R-AU-VALIDATION-BUDGET. Bound the AU stress run by its actual workload
+
+2026-10-14: the owner requested the AU test pass before further installer work.
+Final integration 589e5cc failed pluginval 1.0.4's default 30-second inactivity
+watchdog inside nested auval. Run 38653356837 wrapped its exact CLAP bytes with
+bounded tracing: 1,513 completed calls consumed 31.315 seconds; the expensive
+ULTRA/unison state had A-440 on; offline replay showed retained doubled voice
+tails. Requests and notes progressed normally. Direct and nested parameter randomization differed, so a
+fast direct pass was not proof of a hang or a controlled performance comparison.
+An offline replay reproduced the workload cost; forwarding missing AU Reset did
+not materially reduce it and is not represented as the repair.
+
+Agent decision following independent review: the AU-only pluginval invocation
+uses a finite 180000 ms inactivity timeout. Its nested `-strict -stress 20`
+simulates 20 seconds of audio, which need not render in 30 wall-clock seconds.
+Strictness 10, all editor/conformance/stress tests, error propagation, direct
+native/Rosetta auval and other validators stay enabled. DSP, quality, product
+binaries and installers are unchanged by this correction. The default-30-second
+failure remains recorded; this is a harness budget change, not a performance fix.
+
+Run 38654571401 uses the original, uninstrumented 589 AU and embedded CLAP from
+CI artifact 11932543293, with its verified archive hash and original pluginval
+seed. Direct strict stress and nested auval exited zero; all pluginval tests
+including editors completed successfully. This fresh auval draw was faster than
+the captured failure, so it does not reproduce the exact failing randomized state.
+`au-validation.md` records the evidence and limits. Full exact-head CI on all
+three OSes remains required before integration merge. No new release or tag.

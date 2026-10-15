@@ -34,7 +34,7 @@ signed.
    |---|---|
    | macOS 11 or later, Apple silicon or Intel | `CA-72-<version>-macOS.pkg` |
    | Windows 10 or 11, 64-bit | `CA-72-<version>-Windows-setup.exe` |
-   | Linux, x86-64 (Ubuntu 22.04, Debian 12, Fedora 36 or later) | `CA-72-<version>-Linux-x86_64.tar.gz` |
+   | Linux, x86-64 (Ubuntu 22.04, Debian 12, Fedora 36 or later, or Arch) | `CA-72-<version>-Linux-x86_64.tar.gz` |
 
 2. Run it. On Linux, unpack it and run the script in its folder:
 
@@ -52,7 +52,7 @@ signed.
 The Windows installer is not yet signed, so the first time you run it Windows says "Windows
 protected your PC": click **More info**, then **Run anyway**. To install by hand instead,
 each release from 0.1.5 has `CA-72-<version>-Windows-x86_64.zip`: the same VST3 and CLAP, with
-a `README.txt` that says where to copy them.
+a `README.txt` that says where to copy them. Development ZIPs also include the standalone application; released 0.2.2 packages remain plug-in-only.
 
 The plug-ins go into the usual folders:
 
@@ -63,7 +63,7 @@ The plug-ins go into the usual folders:
 | Linux | `~/.vst3` (`/usr/lib/vst3` with `./install.sh --system`) | `~/.clap` (`/usr/lib/clap`) | |
 
 To uninstall: on macOS, delete `CA-72.vst3`, `CA-72.clap` and `CA-72.component` from those
-folders; on Windows,
+folders and `/Applications/CA-72.app` if installed; on Windows,
 find **CA-72** in **Settings › Apps** and choose **Uninstall**; on Linux, run
 `./install.sh --uninstall` (`./install.sh --uninstall --system` for a system-wide copy). Your
 presets are kept.
@@ -75,6 +75,74 @@ close your host, then run it as above. The CA-72 checks only when you click, thr
 and sends nothing of yours.
 
 ## Playing it
+
+The following keyboard and standalone features are in development on this branch;
+they are not included in the released 0.2.2 installers.
+
+The keyboard button beside SAVE and settings switches the lower panel between
+VOICES/STEREO/OUTPUT and a playable 44-key keyboard. The wheels, GLIDE and DECAY
+remain visible. Click a key or drag between keys to play; the octave buttons move
+the visible range. In standalone, TYPING enables a piano layout on your computer keyboard: `A S D F G`
+play `C D E F G`, with `W E T Y U` on the black notes. The full chromatic order is
+`A W S E D F T G Y H U J K O L P ;`. A starts at C3 (MIDI 48); `Z` lowers TYPING
+one octave and `X` raises it. TYPING's octave is independent of the visible range
+and the sound's oscillator RANGE controls, and is remembered on this computer.
+The TYPING header shows A's current note. Shifting releases held TYPING notes while
+pointer and physical MIDI notes continue. TYPING starts off; text entry takes precedence.
+TYPING and PANIC appear only in standalone; plug-ins leave computer-keyboard input
+to the DAW. PANIC releases notes without changing
+the sound. TYPING stays enabled when you show the extra controls or hide the lower
+panel; pointer notes release while typed and physical MIDI notes continue. Focus
+loss releases local notes. The default range is F2–C6, MIDI 41–84, middle C at MIDI 60.
+
+## Standalone application (in development)
+
+Development installers include the same instrument as an optional desktop application.
+On macOS it installs as `/Applications/CA-72.app`; on Windows, open **CA-72**
+from the Start menu; on Linux, use its desktop entry or `ca72-standalone`.
+
+Build it with `scripts/standalone.sh`. It produces `target/bundled/CA-72.app` on
+macOS, `target/bundled/CA-72.exe` on Windows, or `target/bundled/ca72-standalone`
+on Linux. Run it directly, or package it with the plug-ins using `scripts/package.sh`.
+The installer lets you choose the standalone alongside the plug-in formats.
+Linux also accepts `./install.sh --standalone-only` or `--plugins-only`.
+
+Open **Audio & MIDI** from the editor's settings button. Choose your output and
+channel pair, sample rate, buffer size and MIDI input(s), then Apply. When no
+settings have changed, Done closes the dialog without restarting audio. External
+audio input is disabled initially. The display reports the actual callback size
+and its buffer duration in milliseconds; that is one component of playing latency.
+Cancel discards changes that have not been applied. Refresh checks the device list.
+New sessions use **Automatic** MIDI: the first available input with an unambiguous
+name is selected and remembered. Open **MIDI INPUTS** to choose Automatic, disable
+hardware MIDI, or check specific inputs; click outside the list and Apply.
+Existing sessions retain their choices, including disabled MIDI. To enable the new
+default in an existing session, choose **Automatic (first available input)** and Apply
+once. Open selectors update as devices arrive or disappear. Discovery errors keep
+the last good MIDI list and appear in settings; a successful empty inventory reports
+that no inputs are available. Refresh retries discovery.
+Input/output changes briefly stop playback and retain the sound and editor.
+
+CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
+The development JACK launcher is kept separately (Building); direct ASIO and
+native PipeWire are not included in the production host. External input and output
+must support a common nominal sample rate. A bounded capture reservoir adapts
+the input to the output clock, so separately enumerated capture/playback endpoints
+are supported. The reservoir adds input buffering; the displayed output buffer
+duration is not the full input-to-output latency.
+
+The standalone remembers unsaved edits, MIDI Learn, window size and the last
+working audio/MIDI choices in `CA-72/Standalone/session.json` beneath the same
+application-data folder as your presets. Held notes and live wheels are not
+restored. Presets remain shared with the plug-in. A broken or newer session file
+is preserved and reported. Uninstalling keeps presets and the standalone session.
+
+For an isolated editor test, use `ca72-standalone --no-devices --state-dir PATH`;
+this opens no audio or MIDI hardware. The implementation contract and its evidence
+are [standalone-spec.md](docs/standalone-spec.md) and
+[standalone-progress.md](docs/standalone-progress.md).
+
+## Instrument controls
 
 ![The CA-72's panel](docs/panel.png)
 
@@ -377,6 +445,9 @@ On macOS, `scripts/auv2.sh` then builds the Audio Unit, `target/bundled/CA-72.co
 around the CLAP bundle (and for the same processors). It needs
 [CMake](https://cmake.org) 3.21 or later (`brew install cmake`) and takes a few seconds.
 
+Build the desktop application with `scripts/standalone.sh` before packaging. On Linux
+this needs ALSA and OpenGL headers (`libasound2-dev libgl-dev` on Debian/Ubuntu,
+`alsa-lib-devel mesa-libGL-devel` on Fedora, `alsa-lib mesa` on Arch).
 `scripts/package.sh` then makes the installer for the system it runs on, in
 `target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
 Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
@@ -393,7 +464,7 @@ On Linux this also needs the ALSA, JACK and OpenGL headers (Debian and Ubuntu:
 ## Testing
 
 ```sh
-cargo test --workspace
+cargo test --workspace --features ca72-plugin/standalone-production
 ```
 
 The tests take three to eight minutes, building included. They check the real-time models
@@ -411,7 +482,11 @@ the first time; on macOS also Apple's auval and pluginval on the Audio Unit, whi
 copies into `~/Library/Audio/Plug-Ins/Components`, where hosts look for it. It needs curl,
 unzip, git, cmake and a C++ compiler (on Windows, Visual Studio's), and on Linux without a
 display `xvfb-run`; `CA72_SKIP_GUI_TESTS=1` leaves out pluginval's editor tests, which open
-windows. CI does all of this on macOS, Windows and Linux.
+windows. The AU pluginval invocation has a finite three-minute inactivity timeout:
+its nested stress test simulates 20 seconds of audio, which ULTRA and unison can
+render slower than real time. All conformance and editor tests remain enabled;
+other formats keep their original timeout. See [the validation evidence](docs/au-validation.md).
+CI does all of this on macOS, Windows and Linux.
 
 The tests that run the circuit simulations need ngspice 47. Without it they say so and
 pass; set `CA72_REQUIRE_NGSPICE=1` to make a missing ngspice a failure.
