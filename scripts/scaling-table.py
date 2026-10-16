@@ -2,7 +2,8 @@
 """The scaling sweep's lines (scripts/scaling-sweep.sh) as Markdown tables (decisions.md
 R-THREADS): for each quality and block, a row per instance count, a column per worker count,
 each cell the blocks' mean share of the period / the worst block's / late blocks / voices'
-runs not heard. `scaling-table.py FILE [--split]` (`--split` reads ultra-split-sweep.sh's)."""
+runs not heard. `scaling-table.py FILE [--split|--threads]` (`--split` reads
+ultra-split-sweep.sh's, `--threads` threads-measure.sh's: the built engine's own counts)."""
 
 import sys
 from collections import defaultdict
@@ -60,5 +61,25 @@ def split(path):
         )
 
 
+def threads(path):
+    rows = parse(path, "scaling: ")
+    print("\n| Frames | Case | Held | Mean | Worst | Late | Not heard |")
+    print("|---|---|---|---|---|---|---|")
+    for r in rows:
+        args = dict(a.split("=", 1) for a in r.get("args", "").split(",") if "=" in a)
+        q, poly = r["quality"].upper(), r.get("poly") == "true"
+        if q == "ULTRA":
+            who = f"{r['voices']} POLY voices" if poly else "the one instrument"
+            how = "whole" if args.get("CA72_SPLIT") == "0" else "auto"
+            case = f"ULTRA, {who}, {how}"
+        else:
+            case = f"HI, {r['instances']} instance(s) of {r['voices']} voices"
+        print(
+            f"| {r['block']} | {case} | {r['held']} | {float(r['mean']):.0f} | {float(r['worst']):.0f} | "
+            f"{r['late']} of {r['blocks']} | {r['silent_runs']} |"
+        )
+
+
 if __name__ == "__main__":
-    (split if "--split" in sys.argv else scaling)(sys.argv[1])
+    mode = {"--split": split, "--threads": threads}
+    next((mode[a] for a in sys.argv if a in mode), scaling)(sys.argv[1])

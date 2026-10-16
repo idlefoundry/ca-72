@@ -701,6 +701,18 @@ pub struct Voice {
     fed_back: f64,
 }
 
+/// A voice's parts lent for a run ([`Voice::lend`]).
+pub(crate) struct Lent<'a> {
+    pub panel: &'a Panel,
+    pub keys: &'a mut Keys,
+    pub kbd: &'a mut KeyboardPart,
+    pub ctl: &'a mut ControlPart,
+    pub bias: &'a mut BiasPart,
+    pub pre: &'a mut PreampPart,
+    pub front: &'a mut FrontPart,
+    pub back: &'a mut BackPart,
+}
+
 /// The keys: which are held, and which released keys' pitch contacts are still closed.
 #[derive(Debug, Clone)]
 pub struct Keys {
@@ -1335,6 +1347,40 @@ impl Voice {
         self.audio.take_overload_peak()
     }
 
+    /// Whether [`crate::threaded::Helpers`] play the voice: at No Compromises, with FEEDBACK
+    /// off, its pitch and contour paths following its panel.
+    pub fn splits(&self) -> bool {
+        self.panel.quality == Quality::NoCompromises
+            && self.feedback == 0.0
+            && self.control_quality.is_none()
+    }
+
+    /// The voice lent to [`crate::threaded::Helpers`] for a run: what its threads run (the
+    /// preamplifier set as [`Voice::tick_jacks`] sets it with FEEDBACK off), and what the
+    /// caller's does.
+    pub(crate) fn lend(&mut self) -> Lent<'_> {
+        self.audio.pre.accurate = false;
+        self.audio.pre.in_loop = self.in_loop;
+        Lent {
+            panel: &self.panel,
+            keys: &mut self.keys,
+            kbd: &mut self.kbd,
+            ctl: &mut self.ctl,
+            bias: &mut self.bias,
+            pre: &mut self.audio.pre,
+            front: &mut self.audio.front,
+            back: &mut self.audio.back,
+        }
+    }
+
+    /// After a run lent ([`Voice::lend`]): the last sample's contours, probes and output, as
+    /// [`Voice::tick_jacks`] keeps them.
+    pub(crate) fn lent_ran(&mut self, ctl: (f64, f64), probe: (f64, f64, f64), y: f64) {
+        self.last_ctl = ctl;
+        self.audio.last = probe;
+        self.fed_back = y;
+    }
+
     /// The voice's parts, for running them on threads of their own
     /// ([`crate::threaded`]).
     pub fn into_parts(self) -> (Panel, Keys, KeyboardPart, ControlPart, BiasPart, AudioPart) {
@@ -1410,6 +1456,11 @@ fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourP
 }
 
 impl Keys {
+    /// Whether the trigger contact was closed at the last step ([`Voice::trigger_closed`]).
+    pub(crate) fn gate(&self) -> bool {
+        self.gate
+    }
+
     /// A MIDI note (0 to 127) pressed or released: the 44 keys F to C (41 to 84) are the
     /// instrument's, the rest continue its key string ([`Keys::step`]). With `retrigger`, a key
     /// pressed waits until the trigger contact has been open [`RETRIGGER_GAP`], opening it
@@ -1749,6 +1800,11 @@ impl PreampPart {
         };
         laps.lap(crate::prof::Part::Preamp);
         i
+    }
+
+    /// The OVERLOAD lamp after the last sample, its brightest left for [`PreampPart::lamp`].
+    pub(crate) fn lamp_now(&self) -> f64 {
+        self.overload
     }
 
     /// The OVERLOAD lamp after the last sample, and its brightest since the last call to

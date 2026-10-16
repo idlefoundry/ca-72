@@ -435,6 +435,89 @@ fn poly_with_workers_neither_allocates_nor_frees_while_it_plays() {
     assert!(shared > 0, "no workers once POLY was switched on again");
 }
 
+/// ULTRA's split voices (decisions.md R-THREADS): POLY's voices and the one instrument each
+/// lent a crew for a run, POLY switched as it plays (the crews let go with their pool and
+/// asked for again, the one instrument then holding its own), DOUBLE and FEEDBACK switched (a
+/// voice with FEEDBACK plays whole), each block given its deadline: no allocation, no free on
+/// the audio thread, and voices played split.
+#[test]
+fn ultra_s_split_voices_neither_allocate_nor_free_while_they_play() {
+    use ca72_plugin::engine::{DEADLINE, set_split_for_measurement};
+    use std::time::{Duration, Instant};
+    let _serial = start();
+    set_split_for_measurement(Some(2));
+    let mut e = Engine::new();
+    let mut c = Controls {
+        poly: true,
+        voices: 2,
+        ultra: true,
+        drive: 4.0,
+        ..Controls::default()
+    };
+    e.set(&c);
+    e.prepare(RATE, 7);
+    // (Ordinary threads: this plays as fast as it goes.)
+    e.start_workers(2, None);
+    let period = Duration::from_secs_f64(BLOCK as f64 / RATE);
+    let (mut l, mut r) = ([0.0f32; BLOCK], [0.0f32; BLOCK]);
+    let mut due = false;
+    HERE.with(|h| h.set(true));
+    ARMED.store(true, Ordering::SeqCst);
+    let mut sink = 0.0f32;
+    let mut at = 0usize;
+    // (Short: ULTRA is slow, the more so in a debug build.)
+    let seconds = if cfg!(debug_assertions) { 0.4 } else { 1.5 };
+    while at < (seconds * RATE) as usize {
+        let b = at / BLOCK;
+        e.set_deadline(Some(Instant::now() + period.mul_f64(DEADLINE)));
+        if b.is_multiple_of(25) {
+            for k in [45u8, 52] {
+                e.event(Event::Note {
+                    key: k + (b / 25 % 3) as u8,
+                    on: true,
+                });
+            }
+        }
+        if b % 25 == 18 {
+            for k in [45u8, 52] {
+                e.event(Event::Note {
+                    key: k + (b / 25 % 3) as u8,
+                    on: false,
+                });
+            }
+        }
+        c.poly = b / 40 % 2 == 0;
+        c.double = if b / 30 % 2 == 1 { 0.3 } else { 0.0 };
+        c.feedback = if b % 70 < 60 { 0.0 } else { 0.3 };
+        e.set(&c);
+        e.render(&[], &mut l[..BLOCK / 2], &mut r[..BLOCK / 2]);
+        e.event(Event::PitchBend((at as f32 * 1e-4).sin()));
+        e.render(&[], &mut l[BLOCK / 2..], &mut r[BLOCK / 2..]);
+        sink += l.iter().chain(&r).sum::<f32>();
+        sink += e.end_block(BLOCK);
+        serve(&mut e, b, &mut due);
+        at += BLOCK;
+    }
+    ARMED.store(false, Ordering::SeqCst);
+    std::hint::black_box(sink);
+    let (runs, _) = e.split_runs();
+    e.release_all();
+    drop(e);
+    set_split_for_measurement(None);
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "ULTRA's split voices allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+    );
+    assert!(runs > 0, "no voice played split");
+}
+
 /// What the plug-in asks of its helper thread at a block's end (decisions.md R23), the
 /// spares mended and POLY's workers served, asked again and again while the helper does it:
 /// no allocation, no free on the asking thread.

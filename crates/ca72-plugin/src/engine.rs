@@ -25,7 +25,8 @@ use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
-use crate::pool::{Ask, Crew, MAX, Pool, Shared};
+use crate::pool::{Ask, Crew, MAX, Need, Pool, Shared, Split};
+use ca72::threaded::Helpers;
 use plugin_kit_stereo::place::{
     ALONE, DOUBLE_TRIM, glide_share, pair_gains, unison_trim, voice_gains,
 };
@@ -524,6 +525,54 @@ pub struct Playing {
     /// again: the first place); and whether its trigger contact was closed at its last sample.
     turn: Option<usize>,
     closed: bool,
+    /// ULTRA's split crew lent to it (decisions.md R-THREADS), whether this run plays on it,
+    /// and what a split run works out before and after (kept here: some 40 KB, too much for
+    /// a host's audio thread's stack).
+    split: Option<Split>,
+    split_now: bool,
+    scratch: Option<Box<Scratch>>,
+    /// Runs it has played split, for the tests and measurements.
+    split_runs: u64,
+}
+
+/// The most notes a split run carries for a voice (a key's change at most twice a sample).
+const RUN_NOTES: usize = 2 * CHUNK;
+
+/// What a split run works out for a voice and its twin: the notes at their samples, the jacks
+/// each sample, the samples given and the trigger contact after each.
+#[derive(Debug, Clone)]
+struct Scratch {
+    notes: [[(usize, i32, bool); RUN_NOTES]; 2],
+    count: [usize; 2],
+    jacks: [[Jacks; CHUNK]; 2],
+    out: [[f64; CHUNK]; 2],
+    closed: [[bool; CHUNK]; 2],
+}
+
+impl Scratch {
+    fn new() -> Box<Scratch> {
+        Box::new(Scratch {
+            notes: [[(0, 0, false); RUN_NOTES]; 2],
+            count: [0; 2],
+            jacks: [[Jacks::default(); CHUNK]; 2],
+            out: [[0.0; CHUNK]; 2],
+            closed: [[false; CHUNK]; 2],
+        })
+    }
+}
+
+/// Whether voice `p` plays this run on `crew`, lent it now: unless it holds a crew whose pool
+/// has gone (the last of it, which is not dropped on the audio thread: a later pool takes it
+/// back, [`crate::pool::Play::recall`]).
+fn lend(p: &mut Playing, crew: &Split) -> bool {
+    match &p.split {
+        Some(a) if Arc::ptr_eq(a, crew) => true,
+        Some(a) if Arc::strong_count(a) == 1 => false,
+        _ => {
+            p.split = Some(crew.clone());
+            true
+        }
+    }
 }
 
 /// Where a run puts a voice and its twin: their gains (left, right), DOUBLE's half detune,
@@ -551,6 +600,18 @@ impl Playing {
         if self.potato {
             self.play_light_from(ext, rate, m, share);
             return;
+        }
+        if self.split_now
+            && let Some(crew) = self.split.take()
+        {
+            let played = match crew.try_lock() {
+                Ok(mut h) => self.play_split_from(&mut h, ext, rate, m, share),
+                Err(_) => false,
+            };
+            self.split = Some(crew);
+            if played {
+                return;
+            }
         }
         let mut p = self.places(m);
         self.voice.set_drive(m.drive);
@@ -621,6 +682,152 @@ impl Playing {
             twin_peak,
             p.twin_on.then_some((hl, hr)),
         );
+    }
+
+    /// [`Playing::play_from`] on helpers (ULTRA, decisions.md R-THREADS): the voice, then its
+    /// twin, each on the crew's six threads, the same samples to the bit. The gates, keys and
+    /// jacks are worked out first (none hangs on the voices' output), then the voices played,
+    /// then their places and SCATTER's turn sample by sample as the whole run has them. False,
+    /// and nothing played, if the voices cannot be split (broken, FEEDBACK on).
+    fn play_split_from(
+        &mut self,
+        crew: &mut Helpers,
+        ext: &[f64],
+        rate: f64,
+        m: &Mix,
+        share: f64,
+    ) -> bool {
+        let n = ext.len().min(CHUNK);
+        let mut p = self.places(m);
+        if self.broken
+            || n < ext.len()
+            || !Helpers::take(&self.voice)
+            || (p.twin_on && !Helpers::take(&self.twin.voice))
+        {
+            return false;
+        }
+        let Some(mut s) = self.scratch.take() else {
+            return false;
+        };
+        self.voice.set_drive(m.drive);
+        self.twin.voice.set_drive(m.drive);
+        let note = i32::from(self.note);
+        s.count = [0; 2];
+        for (k, &x) in ext.iter().enumerate() {
+            let gate = if self.drop {
+                self.drop = false;
+                false
+            } else {
+                self.gate
+            };
+            let (notes, count) = (&mut s.notes[0], &mut s.count[0]);
+            self.key.step(gate, note, |key, on| {
+                if *count < RUN_NOTES {
+                    notes[*count] = (k, key, on);
+                    *count += 1;
+                }
+            });
+            let mut j = jacks(&mut self.character, x, rate, m);
+            if p.doubled {
+                j.detune = j.detune.map(|d| d - p.half);
+            }
+            s.jacks[0][k] = j;
+            if p.twin_on {
+                let t = &mut *self.twin;
+                let (notes, count) = (&mut s.notes[1], &mut s.count[1]);
+                t.key.step(gate && p.doubled, note, |key, on| {
+                    if *count < RUN_NOTES {
+                        notes[*count] = (k, key, on);
+                        *count += 1;
+                    }
+                });
+                let mut j = jacks(&mut t.character, x, rate, m);
+                if p.doubled {
+                    j.detune = j.detune.map(|d| d + p.half);
+                }
+                s.jacks[1][k] = j;
+            }
+        }
+        {
+            let Scratch {
+                notes,
+                count,
+                jacks,
+                out,
+                closed,
+            } = &mut *s;
+            let [o0, o1] = out;
+            let [c0, c1] = closed;
+            crew.play(
+                &mut self.voice,
+                &notes[0][..count[0]],
+                &jacks[0][..n],
+                &mut o0[..n],
+                &mut c0[..n],
+            );
+            if p.twin_on {
+                crew.play(
+                    &mut self.twin.voice,
+                    &notes[1][..count[1]],
+                    &jacks[1][..n],
+                    &mut o1[..n],
+                    &mut c1[..n],
+                );
+            }
+        }
+        let (mut gl, mut gr) = self.pan.unwrap_or(p.voice);
+        let (mut hl, mut hr) = self.twin.pan.unwrap_or(p.twin);
+        let (mut peak, mut twin_peak) = (0.0f64, 0.0f64);
+        for k in 0..n {
+            gl += (p.voice.0 - gl) * share;
+            gr += (p.voice.1 - gr) * share;
+            if p.twin_on {
+                hl += (p.twin.0 - hl) * share;
+                hr += (p.twin.1 - hr) * share;
+            }
+            if self.broken {
+                (self.out[0][k], self.out[1][k]) = (0.0, 0.0);
+                continue;
+            }
+            let mut y = s.out[0][k];
+            if !y.is_finite() {
+                self.broken = true;
+                y = 0.0;
+            }
+            self.turned(s.closed[0][k], m, &mut p);
+            let (mut left, mut right, mut most) = (y * gl, y * gr, y.abs());
+            if p.twin_on {
+                let mut z = s.out[1][k];
+                if !z.is_finite() {
+                    self.broken = true;
+                    z = 0.0;
+                }
+                left += z * hl;
+                right += z * hr;
+                most = most.max(z.abs());
+                twin_peak = twin_peak.max(z.abs());
+            }
+            peak = peak.max(most);
+            self.out[0][k] = left;
+            self.out[1][k] = right;
+        }
+        self.scratch = Some(s);
+        self.split_runs += 1;
+        self.peak = peak;
+        self.pan = Some((gl, gr));
+        self.twin
+            .ran(n, p.doubled, twin_peak, p.twin_on.then_some((hl, hr)));
+        true
+    }
+
+    /// The split crew it holds, handed to `into` while it has room ([`crate::pool::Play`]).
+    pub(crate) fn recall(&mut self, into: &mut Vec<Split>) {
+        if into.len() < into.capacity()
+            && let Some(a) = self.split.take()
+        {
+            into.push(a);
+        }
+        self.split_now = false;
     }
 
     /// [`Playing::play_from`] at QUALITY's LO: the light voices played in the circuit's
@@ -1084,6 +1291,10 @@ impl Engine {
                     double: false,
                     turn: None,
                     closed: false,
+                    split: None,
+                    split_now: false,
+                    scratch: Some(Scratch::new()),
+                    split_runs: 0,
                 })),
                 note: 0,
                 gate: false,
@@ -1121,28 +1332,33 @@ impl Engine {
         }
     }
 
-    /// `workers` threads of the plug-in's own to share POLY's voices with the caller's
-    /// thread, made audio threads for blocks of `period` (None: left ordinary, for
-    /// measurements that run as fast as they go; decisions.md R11); 0, none. Held only while
-    /// POLY is on (R21): started here if it is, else when it is switched on, off the audio
-    /// thread ([`Crew::serve`]); let go when it is switched off. Not on the audio thread.
-    /// Workers already running for these voices, as many and for the same period, are kept
-    /// while POLY stays on (a host's state loaded into a running instance prepares it again:
-    /// decisions.md R18). Returns how many run (none with POLY off, or if the system would not
-    /// start them).
+    /// Up to `workers` threads of the plug-in's own ([`AUTO`]: as many as the instance's share
+    /// of the process's budget and its cap give, decisions.md R-THREADS) to share POLY's voices
+    /// with the caller's thread, and at ULTRA this machine's split crews, made audio threads for
+    /// blocks of `period` (None: left ordinary, for measurements that run as fast as they go;
+    /// decisions.md R11); 0 workers, none. Held only while the instance needs threads (R21, as
+    /// R-THREADS changed it: POLY or UNISON on, or ULTRA chosen where this machine splits
+    /// voices): started here if it does, else when it comes to, off the audio thread
+    /// ([`Crew::serve`]); let go when it no longer does, or started again when its share
+    /// moves. Not on the audio thread. Threads already running for these voices, as many and
+    /// for the same period, are kept while they are needed (a host's state loaded into a
+    /// running instance prepares it again: decisions.md R18). Returns how many workers run
+    /// (none with POLY off, or if the system would not start them).
     pub fn start_workers(&mut self, workers: usize, period: Option<Duration>) -> usize {
-        if self.pool.is_some() && self.workers == (workers, period) && self.many() {
+        if self.pool.is_some() && self.workers == (workers, period) && self.need().is_some() {
             return self.workers();
         }
         self.stop_workers();
         self.workers = (workers, period);
-        if workers == 0 || self.slots.is_empty() {
+        if (workers == 0 && split_voices() == 0) || self.slots.is_empty() {
             return 0;
         }
         let voices: Vec<Shared> = self.slots.iter().map(|s| s.play.clone()).collect();
-        self.plan = self.crew.plan(&voices, workers, period);
-        if self.many() {
-            self.pool = self.crew.start(self.plan);
+        // (ULTRA's split crews made from a voice's parts, spare between runs.)
+        let template = self.slots[0].play.lock().ok().map(|p| p.voice.clone());
+        self.plan = self.crew.plan(&voices, workers, period, template);
+        if let Some(need) = self.need() {
+            self.pool = self.crew.start(self.plan, need);
             self.ask = Ask::Answered;
             #[cfg(test)]
             {
@@ -1166,7 +1382,7 @@ impl Engine {
     /// ([`Engine::take_serving`]) and taken once it is ready, every voice played here until
     /// then; switched off, the pool let go, to be stopped there.
     fn follow_poly(&mut self) {
-        let on = self.many();
+        let on = self.need();
         if self
             .crew
             .follow(on, self.plan, &mut self.pool, &mut self.ask)
@@ -1201,6 +1417,18 @@ impl Engine {
     /// still held by a late one (a measurement's count; the plug-in does not read it).
     pub fn silent_runs(&self) -> u64 {
         self.silent_runs
+    }
+
+    /// The voices' runs played split so far (ULTRA, decisions.md R-THREADS), and the split crews
+    /// held: for the tests and measurements, not the audio thread (it takes the voices' locks).
+    #[doc(hidden)]
+    pub fn split_runs(&self) -> (u64, usize) {
+        let runs = self
+            .slots
+            .iter()
+            .filter_map(|s| s.play.lock().ok().map(|p| p.split_runs))
+            .sum();
+        (runs, self.pool.as_ref().map_or(0, |p| p.splits().len()))
     }
 
     /// The workers sharing POLY's voices.
@@ -1268,6 +1496,32 @@ impl Engine {
     /// Whether more than the one instrument plays: POLY's voices or UNISON's.
     fn many(&self) -> bool {
         self.controls.poly || self.controls.unison
+    }
+
+    /// What the instance asks threads for (decisions.md R-THREADS): POLY's or UNISON's voices
+    /// to share, and at ULTRA its voices to split where this machine splits any, the one
+    /// instrument's too (so it holds threads with POLY off, R21 as changed there); none else.
+    fn need(&self) -> Option<Need> {
+        let split = self.controls.ultra && split_voices() > 0;
+        match (self.many(), split) {
+            (true, _) => Some(Need {
+                workers: true,
+                split,
+            }),
+            (false, true) => Some(Need {
+                workers: false,
+                split: true,
+            }),
+            (false, false) => None,
+        }
+    }
+
+    /// The split crews lent this run (at ULTRA), if any.
+    fn crews(&self) -> &[Split] {
+        match &self.pool {
+            Some(p) if self.controls.ultra => p.splits(),
+            _ => &[],
+        }
     }
 
     /// The voices that take every key through their keyboard circuits, as the one instrument
@@ -1599,7 +1853,8 @@ impl Engine {
         let at = |i: usize| ext.get(i).copied().filter(|x| x.is_finite()).unwrap_or(0.0);
         // (At QUALITY's LO the one instrument too plays a run at a time: its light voice costs
         // too little for a lock and a place worked out each sample to be nothing beside it.)
-        let runs = self.many() || self.controls.potato;
+        // (At ULTRA with a split crew, too: a run is the crew's pass.)
+        let runs = self.many() || self.controls.potato || !self.crews().is_empty();
         if !runs || self.over.is_some() || self.slots.is_empty() {
             for i in 0..len {
                 (left[i], right[i]) = self.tick_stereo(at(i));
@@ -1667,6 +1922,7 @@ impl Engine {
             return;
         };
         self.bring_up(0, &mut p);
+        p.split_now = self.crews().first().is_some_and(|c| lend(&mut p, c));
         p.play_from(&ext[..n], rate, mix, self.one_glide(mix));
         self.turn = p.turn.unwrap_or(0);
         l[..n].copy_from_slice(&p.out[0][..n]);
@@ -1715,6 +1971,15 @@ impl Engine {
             drop(p);
             list[count] = k;
             count += 1;
+        }
+        // At ULTRA, every sounding voice split if there are crews for all of them, each its own
+        // (splitting only some gains nothing: decisions.md R-THREADS); else every one whole.
+        let crews = self.crews();
+        let split = share && count > 0 && crews.len() >= count;
+        for (j, &k) in list[..count].iter().enumerate() {
+            if let Ok(mut p) = self.slots[k].play.try_lock() {
+                p.split_now = split && lend(&mut p, &crews[j]);
+            }
         }
         let deadline = self.deadline;
         // (At QUALITY's LO a voice costs less than waking a worker for it: every voice here.)
@@ -1848,6 +2113,7 @@ impl Engine {
                 return (0.0, 0.0);
             };
             self.bring_up(0, &mut p);
+            p.split_now = false;
             // (The one voice at its turn's place, or DOUBLE's pair; at SPREAD 0 in the centre,
             // both sides whole. The voice's key is the keyboard's.)
             p.play_from(&[ext], rate, &mix, self.one_glide(&mix));
@@ -2055,37 +2321,107 @@ impl Engine {
     }
 }
 
-/// How many workers share POLY's voices on this machine (decisions.md R11, R39):
-/// [`workers_for`] its processors.
+/// Today's count, the least the process's budget holds (decisions.md R11, R39, R-THREADS):
+/// [`workers_for`] this machine's hardware threads.
 pub fn default_workers() -> usize {
-    workers_for(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get))
+    workers_for(ca72_rt::cores().all)
 }
 
-/// A measurement's own size of the process's budget of workers (0: [`default_workers`], as
-/// the plug-in always has it). Only the benches set it.
+/// [`Engine::start_workers`]'s ask for as many workers as this machine gives an instance (the
+/// plug-in's, decisions.md R-THREADS).
+pub const AUTO: usize = usize::MAX;
+
+/// A measurement's own size of the process's budget of threads (0: none, the plug-in's way:
+/// [`budget_workers`]'s rule). Only the benches set it.
 static BUDGET_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// The process's budget of workers made audio threads ([`crate::pool`]): [`default_workers`]
-/// unless a measurement has set its own ([`set_budget_for_measurement`]).
-pub fn budget_workers() -> usize {
+/// A measurement's or a test's own count of ULTRA's split voices (`usize::MAX`: none,
+/// [`split_voices_for`] this machine's fast cores).
+static SPLIT_OVERRIDE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+/// The process's budget of threads made audio threads ([`crate::pool`]) while `instances` of
+/// the plug-in's hold threads (decisions.md R-THREADS, approved 2026-10-16): this machine's
+/// hardware threads less two (the system's and the host's) and less one for each instance's
+/// host thread, and never fewer than today's count ([`default_workers`]); a measurement's own
+/// if it has set one ([`set_budget_for_measurement`]).
+pub fn budget_workers(instances: usize) -> usize {
     match BUDGET_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
-        0 => default_workers(),
+        0 => budget_for(ca72_rt::cores().all, instances),
         n => n,
     }
 }
 
-/// Sets the process's budget of workers for a measurement (0: back to [`default_workers`]).
-/// Not for the plug-in: the benches' way to try more workers than this machine is given.
+/// [`budget_workers`] on a machine of `all` hardware threads.
+pub fn budget_for(all: usize, instances: usize) -> usize {
+    workers_for(all).max(all.saturating_sub(2 + instances))
+}
+
+/// The most workers an instance's pool holds (decisions.md R-THREADS): this machine's fast
+/// cores less two (so that one instance's voices stay on them: on a hybrid processor, workers
+/// past its performance cores made one instance slower), never fewer than today's count;
+/// none fewer than its share while a measurement sets the budget.
+pub fn instance_cap() -> usize {
+    if BUDGET_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+        return usize::MAX;
+    }
+    cap_for(ca72_rt::cores())
+}
+
+/// [`instance_cap`] on a machine of these cores.
+pub fn cap_for(c: ca72_rt::Cores) -> usize {
+    workers_for(c.all).max(c.fast.saturating_sub(2))
+}
+
+/// How many of an instance's voices ULTRA plays split, each on six threads (decisions.md
+/// R-THREADS): [`split_voices_for`] this machine's fast cores, or a measurement's own.
+pub fn split_voices() -> usize {
+    match SPLIT_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        usize::MAX => split_voices_for(ca72_rt::cores().fast),
+        n => n,
+    }
+}
+
+/// ULTRA's split voices on a machine of `fast` fast cores: none below 6 (on 4 cores or fewer
+/// ULTRA stays as it was, the owner's rule; 5 was not measured), one from 6 to 9, two from 10.
+/// Three were not clean where measured, so not more.
+pub fn split_voices_for(fast: usize) -> usize {
+    match fast {
+        0..=5 => 0,
+        6..=9 => 1,
+        _ => 2,
+    }
+}
+
+/// What a lone instance with POLY on holds at HI: its workers.
+pub fn workers_alone() -> usize {
+    budget_workers(1).min(instance_cap()).min(MAX - 1)
+}
+
+/// Sets the process's budget of threads for a measurement (0: back to [`budget_workers`]'s
+/// rule), an instance's pool then bounded by its share alone. Not for the plug-in: the benches'
+/// way to try more workers than this machine is given.
 #[doc(hidden)]
 pub fn set_budget_for_measurement(workers: usize) {
     BUDGET_OVERRIDE.store(workers, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// The workers for a machine of `n` processors (decisions.md R11, R39): a third of them less
-/// two, at most four (four on the Mac's 14, two on 8), and at least one from 3 up, so that on a
-/// machine of 3 or 4 (an older quad-core) POLY's voices are not all on the host's thread while
-/// its other processors idle; none on 1 or 2, where the host's thread and a worker would be all
-/// the machine has.
+/// Sets how many voices ULTRA splits, for a measurement or a test (None: back to this
+/// machine's, [`split_voices_for`]). Not for the plug-in.
+#[doc(hidden)]
+pub fn set_split_for_measurement(voices: Option<usize>) {
+    SPLIT_OVERRIDE.store(
+        voices.unwrap_or(usize::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The workers for a machine of `n` processors before R-THREADS (decisions.md R11, R39), now
+/// the least the process's budget holds ([`budget_workers`]): a third of them less two, at most
+/// four (four on the Mac's 14, two on 8), and at least one from 3 up, so that on a machine of 3
+/// or 4 (an older quad-core) POLY's voices are not all on the host's thread while its other
+/// processors idle; none on 1 or 2, where the host's thread and a worker would be all the
+/// machine has.
 pub fn workers_for(n: usize) -> usize {
     if n < 3 {
         0
@@ -2506,6 +2842,10 @@ impl Probe {
                     double: false,
                     turn: None,
                     closed: false,
+                    split: None,
+                    split_now: false,
+                    scratch: None,
+                    split_runs: 0,
                 }
             })
             .collect();
@@ -2665,6 +3005,38 @@ mod tests {
         );
         assert_eq!(workers_for(0), 0);
         assert_eq!(workers_for(256), 4);
+    }
+
+    /// The count by the machine (decisions.md R-THREADS) on the three measured: the budget the
+    /// hardware threads less two and less the instances, never below today's; an instance's
+    /// cap the fast cores less two, never below today's; ULTRA's split voices by the fast
+    /// cores, none on 4 cores or fewer.
+    #[test]
+    fn the_count_follows_the_machine() {
+        use ca72_rt::Cores;
+        // The M4 Pro (10 fast of 14), the i5-13600K (6 of 20), the 7800X3D (16 of 16).
+        let mac = Cores { all: 14, fast: 10 };
+        let windows = Cores { all: 20, fast: 6 };
+        let linux = Cores { all: 16, fast: 16 };
+        let budget =
+            |c: Cores| -> Vec<usize> { [1, 2, 4, 8].map(|a| budget_for(c.all, a)).to_vec() };
+        assert_eq!(budget(mac), [11, 10, 8, 4]);
+        assert_eq!(budget(windows), [17, 16, 14, 10]);
+        assert_eq!(budget(linux), [13, 12, 10, 6]);
+        assert_eq!([mac, windows, linux].map(cap_for), [8, 4, 14]);
+        assert_eq!(
+            [mac, windows, linux].map(|c| split_voices_for(c.fast)),
+            [2, 1, 2]
+        );
+        // Today's count the least: a machine of 4 (CI's) keeps its one worker (its budget,
+        // below its cap of 2) and splits none.
+        let quad = Cores { all: 4, fast: 4 };
+        assert_eq!(
+            (budget_for(4, 1), budget_for(4, 8), cap_for(quad)),
+            (1, 1, 2)
+        );
+        assert_eq!((0..=5).map(split_voices_for).max(), Some(0));
+        assert_eq!((split_voices_for(9), split_voices_for(64)), (1, 2));
     }
 
     /// A voice that a worker late from an earlier run still holds sits the next runs out:
@@ -2903,7 +3275,7 @@ mod tests {
     /// back in the budget once the helper thread has stopped them.
     #[test]
     fn an_instance_holds_workers_only_while_poly_is_on() {
-        static THREE: Budget = Budget::new(|| 3);
+        static THREE: Budget = Budget::new(|_| 3);
         let mut e = planned(&THREE, false, 2);
         assert_eq!((e.workers(), THREE.held()), (0, 0));
         assert!(!switch(&mut e, false));
@@ -2934,7 +3306,7 @@ mod tests {
     /// when POLY is next switched on, by which time the second has given them back.
     #[test]
     fn an_instance_with_poly_off_leaves_its_workers_to_one_with_it_on() {
-        static FOUR: Budget = Budget::new(|| 4);
+        static FOUR: Budget = Budget::new(|_| 4);
         let mut off = planned(&FOUR, false, 4);
         let mut on = planned(&FOUR, true, 4);
         assert_eq!((off.workers(), on.workers()), (0, 4));
@@ -2960,7 +3332,7 @@ mod tests {
     /// every worker; nothing is kept from the budget.
     #[test]
     fn a_pool_for_voices_gone_is_stopped() {
-        static TWO: Budget = Budget::new(|| 2);
+        static TWO: Budget = Budget::new(|_| 2);
         let mut e = planned(&TWO, false, 2);
         assert!(switch(&mut e, true));
         serve(&e);

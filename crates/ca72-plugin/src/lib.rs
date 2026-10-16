@@ -466,13 +466,13 @@ impl Plugin for Ca72 {
             )
             .ok();
         }
-        // POLY's workers, audio threads for the host's largest block (decisions.md R11), held
-        // only while POLY is on: started here if it is, else on the helper thread when it is
-        // switched on (R21, R23). A host loading a state into the running instance comes here
-        // again with the audio thread waiting: running workers are kept then (R18).
+        // POLY's workers and ULTRA's split crews, audio threads for the host's largest block
+        // (decisions.md R11), as many as this machine gives the instance (R-THREADS), held only
+        // while it needs them: started here if it does, else on the helper thread when it comes
+        // to (R21, R23). A host loading a state into the running instance comes here again with
+        // the audio thread waiting: running threads are kept then (R18).
         let period = std::time::Duration::from_secs_f64(block as f64 / rate);
-        self.engine
-            .start_workers(crate::engine::default_workers(), Some(period));
+        self.engine.start_workers(crate::engine::AUTO, Some(period));
         true
     }
 
@@ -1706,9 +1706,9 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let held = || crate::pool::BUDGET.held();
-        // (A machine of 1 or 2 processors has none to give, one of 3 to 7 one: R11, R39.
-        // CI's have 3 or 4.)
-        let most = crate::engine::default_workers();
+        // (A lone instance's share, at most its cap: R-THREADS. A machine of 1 or 2
+        // processors has none to give, one of 3 to 7 one: R11, R39. CI's have 3 or 4.)
+        let most = crate::engine::workers_alone();
         let mut p = initialised(false);
         assert_eq!((p.engine.workers(), held()), (0, 0));
         // (POLY as `process` reads it at a block's start.)

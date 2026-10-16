@@ -2,9 +2,13 @@
 //! in one process, each on a host audio thread of its own, all paced to the same
 //! `CA72_BLOCK`-frame period (256) at 48 kHz and started together, as a host's tracks are;
 //! `CA72_WORKERS` workers (4) made audio threads for the whole process, out of one budget of
-//! that size (`engine::set_budget_for_measurement`). `CA72_SHARE=fair` (the default) asks for
-//! an even share of them for each instance; `first` asks for all of them for each, as the
-//! plug-in does today (the first instance started takes them, R18).
+//! that size (`engine::set_budget_for_measurement`), each instance asking for an even share of
+//! them (`CA72_SHARE=first`: all of them; before R-THREADS was built the first instance
+//! started took them, R18; now the budget shares them evenly either way). With `CA72_AUTO=1`
+//! the plug-in's own counts instead (`engine::AUTO`, no budget set: decisions.md R-THREADS).
+//! `CA72_POLY=0` plays the one instrument (its chords of one note); `CA72_SPLIT` sets how many
+//! voices ULTRA splits (this machine's by default; 0, every voice whole). Each instance has the
+//! plug-in's helper thread, which starts and stops its threads as they ask (R23).
 //!
 //! Each instance plays `poly_bench`'s load: POLY on, `CA72_VOICES` voices (10 at HI, 4 at
 //! ULTRA) playing a changing chord of as many notes every half second, the modulation moving;
@@ -24,7 +28,10 @@
 
 mod common;
 
-use ca72_plugin::engine::{Controls, DEADLINE, Engine, Event, set_budget_for_measurement};
+use ca72_plugin::engine::{
+    AUTO, Controls, DEADLINE, Engine, Event, set_budget_for_measurement, set_split_for_measurement,
+};
+use ca72_plugin::helper::{Helper, SERVE};
 use common::env;
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
@@ -33,6 +40,10 @@ struct Ran {
     took: Vec<f64>,
     silent: u64,
     peak: f32,
+    /// At the end: its workers, its split crews and its runs played split.
+    workers: usize,
+    crews: usize,
+    split_runs: u64,
 }
 
 #[test]
@@ -46,12 +57,19 @@ fn workers_and_instances_in_real_time() {
     let voices: usize = env("CA72_VOICES", if ultra { 4 } else { 10 });
     let fair = std::env::var("CA72_SHARE").map_or(true, |s| s != "first");
     let host_wg = env("CA72_HOST_WG", 1) == 1;
+    let auto = env("CA72_AUTO", 0) == 1;
+    let poly = env("CA72_POLY", 1) == 1;
     let rate = 48_000.0;
     let period = Duration::from_secs_f64(block as f64 / rate);
-    set_budget_for_measurement(workers.max(1));
+    if !auto {
+        set_budget_for_measurement(workers.max(1));
+    }
+    if let Ok(n) = std::env::var("CA72_SPLIT") {
+        set_split_for_measurement(n.parse().ok());
+    }
 
     let mut c = Controls {
-        poly: true,
+        poly,
         voices,
         entropy: 0.5,
         spread: 0.7,
@@ -76,7 +94,9 @@ fn workers_and_instances_in_real_time() {
         let mut e = Engine::new();
         e.set(&c);
         e.prepare(rate, 1 + k as u64);
-        let ask = if workers == 0 {
+        let ask = if auto {
+            AUTO
+        } else if workers == 0 {
             0
         } else if fair {
             workers / instances + usize::from(k < workers % instances)
@@ -95,12 +115,17 @@ fn workers_and_instances_in_real_time() {
         .enumerate()
         .map(|(k, mut e)| {
             let (go, start_at, c) = (go.clone(), start_at.clone(), c);
+            // (The plug-in's helper thread, started off the audio thread, as at activation.)
+            let helper = Helper::start(e.spares(), e.crew(), Default::default()).unwrap();
             std::thread::Builder::new()
                 .name(format!("ca72-host-{k}"))
                 .spawn(move || {
-                    host(
-                        k, &mut e, c, block, seconds, period, host_wg, &go, &start_at,
-                    )
+                    let ran = host(
+                        k, &mut e, c, block, seconds, period, host_wg, &go, &start_at, &helper,
+                    );
+                    drop(e);
+                    drop(helper);
+                    ran
                 })
                 .unwrap()
         })
@@ -121,18 +146,33 @@ fn workers_and_instances_in_real_time() {
         .fold(0.0, f64::max);
     let silent: u64 = ran.iter().map(|r| r.silent).sum();
     let got_s: Vec<String> = got.iter().map(ToString::to_string).collect();
+    let held: Vec<String> = ran
+        .iter()
+        .map(|r| format!("{}w{}s", r.workers, r.crews))
+        .collect();
+    let split_runs: u64 = ran.iter().map(|r| r.split_runs).sum();
     println!(
-        "scaling: quality={} block={block} instances={instances} workers={workers} share={} got={} voices={voices} seconds={seconds} mean={mean:.1} worst_instance_mean={worst_mean:.1} p50={:.1} p99={:.1} p999={:.1} worst={:.1} late={late} blocks={blocks} silent_runs={silent} demotions={} load={load}",
+        "scaling: quality={} block={block} instances={instances} workers={workers} share={} poly={poly} got={} held={} split_runs={split_runs} voices={voices} seconds={seconds} mean={mean:.1} worst_instance_mean={worst_mean:.1} p50={:.1} p99={:.1} p999={:.1} worst={:.1} late={late} blocks={blocks} silent_runs={silent} demotions={} load={load} cores={}/{}",
         if ultra { "ultra" } else { "hi" },
-        if fair { "fair" } else { "first" },
+        if auto {
+            "auto"
+        } else if fair {
+            "fair"
+        } else {
+            "first"
+        },
         got_s.join("+"),
+        held.join("+"),
         q(0.5),
         q(0.99),
         q(0.999),
         all[all.len() - 1] / p_ms * 100.0,
         ca72_rt::demotions(),
+        ca72_rt::cores().fast,
+        ca72_rt::cores().all,
     );
     set_budget_for_measurement(0);
+    set_split_for_measurement(None);
     assert!(
         ran.iter().all(|r| r.peak > 0.01),
         "an instance's chords were not heard"
@@ -152,6 +192,7 @@ fn host(
     host_wg: bool,
     go: &Barrier,
     start_at: &std::sync::Mutex<Option<Instant>>,
+    helper: &Helper,
 ) -> Ran {
     let rate = 48_000.0;
     let voices = c.voices;
@@ -231,6 +272,9 @@ fn host(
             peak = peak.max(l.abs()).max(r.abs());
         }
         e.end_block(block);
+        if e.take_serving() {
+            helper.ask(SERVE);
+        }
         if let Some(w) = &wg {
             w.finish();
         }
@@ -246,10 +290,18 @@ fn host(
     if let (Some(w), Some(t)) = (&wg, token) {
         w.leave(t);
     }
+    let (split_runs, crews) = e.split_runs();
+    let workers = e.workers();
+    // (None let go before every instance has played its blocks: one dropped earlier would move
+    // the others' shares in their last blocks.)
+    go.wait();
     Ran {
         took,
         silent: e.silent_runs() - silent_from,
         peak,
+        workers,
+        crews,
+        split_runs,
     }
 }
 

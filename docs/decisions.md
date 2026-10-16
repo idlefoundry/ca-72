@@ -5933,9 +5933,9 @@ conditions:
 - with more cores, ULTRA's voices are spread over them (the six-thread voice);
 - no lookahead and no added latency.
 
-**Status: measured and proposed; nothing shipped changes.** The proposal below waits for the
-owner's approval. The code added for the measurements (end of this record) leaves the
-plug-in's behaviour as it was.
+**Status: approved and built on the branch (2026-10-16), not released.** Decisions 1 to 3 were
+approved as proposed, 4 deferred (AUTO only) and 5 tried (below); what was built, and how it
+measured, is at the end of this record. The owner decides how it is released.
 
 ### How it was measured
 - **`tests/scaling_bench.rs`** runs 1 to 8 instances in one process. Each runs on a host
@@ -6196,9 +6196,10 @@ item 4); no lookahead, no added latency.
 
 ### For the owner to decide
 1. The count: B = max(today's, N − 2 − A), C = max(today's, F − 2), shared evenly (B, C).
-2. Shares that follow the instances (C), rather than one pool for the process.
+   **Approved.**
+2. Shares that follow the instances (C), rather than one pool for the process. **Approved.**
 3. ULTRA's split: S = 0, 1 or 2 by F, only when every sounding voice can be split, the one
-   instrument at ULTRA included (so it holds threads with POLY off) (D).
+   instrument at ULTRA included (so it holds threads with POLY off) (D). **Approved.**
 4. The override's form (E). **Answered:** AUTO only for now.
 5. Before building D on the Mac: whether to try the helpers in a work interval first (item 4).
    **Answered:** yes. It was tried; below.
@@ -6253,10 +6254,10 @@ block, % of the period; the late blocks (of 1,875 at 256 frames, 3,750 at 128); 
 - **This run's baseline is better than the split grid's** (one split voice, 6 threads, 256
   frames: 24–35 % mean and 0–4 late here, against 31 % and 7 earlier): the machine's state
   differs from run to run. The pairs above are what compare.
-- **Proposed for D:** on macOS each crew's helpers join a work interval of their own. One of
-  them opens it at a block's first pass and closes it when the block's passes are done, as the
-  pool's first worker does, rather than a driver thread (that thread was the prototype's
-  shortcut). This is part of building D, which waits on decisions 1 to 3.
+- **Proposed for D, and built (below):** on macOS each crew's helpers join a work interval of
+  their own. One of them opens it at a block's first pass and closes it when the block's passes
+  are done, as the pool's first worker does, rather than a driver thread (that thread was the
+  prototype's shortcut).
 
 ### Not done
 - Nothing beyond 14 cores or 20 hardware threads: the formulas' values there (a 32-core
@@ -6268,7 +6269,7 @@ block, % of the period; the late blocks (of 1,875 at 256 frames, 3,750 at 128); 
 - The 8-instance points on the Mac were not run again.
 - ULTRA split in the engine itself, the crews, the rebalancing and the override are not built.
 
-### The code added for the measurements (none of it changes the plug-in)
+### The code added for the measurements (before the build, none of it changed the plug-in)
 - `engine::set_budget_for_measurement` and `engine::budget_workers`: the process's budget is
   `default_workers()` unless a measurement sets its own. The plug-in never sets it, and the
   pool's budget reads `budget_workers` where it read `default_workers`.
@@ -6278,3 +6279,191 @@ block, % of the period; the late blocks (of 1,875 at 256 frames, 3,750 at 128); 
 - `tests/scaling_bench.rs`, `tests/ultra_split.rs` (measurements by hand, `--ignored`; the
   exactness test runs with the others), `scripts/scaling-sweep.sh`, `scaling-sweep.ps1`,
   `ultra-split-sweep.sh` and `scaling-table.py`, and the raw lines in `docs/threads/`.
+
+### Approved, and built (2026-10-16)
+
+**The owner, 2026-10-16** (relayed): "Yes, I accept decisions 1 through 3 as as proposed."
+With 4 (AUTO only, no override) and 5 (the helpers' interval, tried above), the work: the
+count (B and C), even shares that follow the instances, ULTRA's split with the one instrument
+holding helpers while ULTRA is chosen, and on macOS each split voice's helpers in a work
+interval opened by one of its own helpers. Not to be pushed or released yet.
+
+**Agent decisions, 2026-10-16** (not separately approved):
+
+**What was built:**
+- **The machine** (`ca72_rt::cores`, read once): N, the hardware threads the process may use;
+  F, the fast ones, read as in A. On the three machines it reads 10 of 14 (the Mac), 6 of 20
+  (Windows), 16 of 16 (Linux).
+- **The count** (`engine::budget_workers`, `instance_cap`, `split_voices`; `budget_for`, `cap_for`
+  and `split_voices_for` the rules alone):
+  - B = max(`workers_for(N)`, N − 2 − A) for A instances holding threads;
+  - C = max(`workers_for(N)`, F − 2);
+  - S = 0 below 6 fast cores, 1 from 6 to 9, 2 from 10.
+
+  The plug-in asks for `engine::AUTO` at activation, where it asked for `default_workers()`.
+  `default_workers()` is still today's count, now the floor.
+- **The budget** (`pool.rs`):
+  - An instance that needs threads takes a **seat** (`Seat`) when its first pool is started,
+    and gives it up when it needs none (its pool let go with nothing asked for, a new plan, or
+    the plug-in dropped).
+  - The seats share B evenly in the order they came, the remainder to the first. Claims are
+    counted as before.
+  - At a block's start the audio thread lets its pool go and asks again (one atomic load a
+    block) when either:
+    - its seat's share is no longer the share it was started at; or
+    - it got less than its share and some of the budget is free again.
+
+    Its voices play on its host thread until the new pool comes (the helper thread starts it,
+    R23).
+  - Pools started unpaced (the tests' and measurements') take no seat and are not bounded by
+    a share.
+- **ULTRA's split** (`ca72::threaded::Helpers`, `pool::Split`, `Playing::play_split_from`):
+  - `Threaded`'s five workers became `Parts`, shared with the new `Helpers`.
+  - `Helpers` are five threads any voice lends its keyboard circuit, contours, VCA's bias,
+    preamplifier and back to for a run, swapped in before it and back after it (between
+    passes, under the workers' own locks; nothing is allocated). Between runs the voice is
+    whole again: everything else the engine reads of it is as before. The voice's front and
+    keys run on the thread that plays it.
+  - A pool started for ULTRA holds the instance's crews (`Arc<Mutex<Helpers>>`). Each run, if
+    every sounding voice can have its own crew, each is lent one and plays split; otherwise
+    every voice plays whole.
+  - The keys stepped, the notes pressed at their samples, ENTROPY's character and SPREAD's
+    places are worked out before the voices play. SCATTER's turn and the places' glides follow
+    them, sample by sample. The samples are the whole voice's to the bit.
+  - A crew is never dropped on the audio thread. A pool takes its crews back from its voices
+    before it is let go (`Play::recall`), and a voice holding the last reference to a crew
+    whose pool has gone keeps it, unused, until a later pool takes it back.
+- **The work interval** (macOS): each crew's helpers join an interval of their own
+  (`ca72::threaded::Interval`, the plug-in's `SplitInterval` over `ca72_rt::WorkInterval`).
+  The keyboard's helper opens it at its first pass after the host's block count moves on
+  (`Pool::block`) and closes it when it parks; each helper leaves it before it ends.
+- **R21, changed:** an instance holds threads while it needs them: workers while POLY or
+  UNISON is on, crews while ULTRA is chosen on a machine that splits voices. So at ULTRA the
+  one instrument (POLY and UNISON off) holds one crew of five helpers with POLY off, from the
+  budget, and gives it back when ULTRA is left (its pool let go and its seat given up, as when
+  POLY was switched off).
+- No override (decision 4): the counts are the machine's. The measurement hooks remain
+  (`set_budget_for_measurement`, now with the cap lifted while set, and
+  `set_split_for_measurement`).
+
+**Where it differs from the proposal, and why:**
+1. **C caps the pool's workers, not the split voices' threads, which the share alone bounds.**
+   With C (8 on the Mac) bounding them too, the Mac could not split two voices (11 threads),
+   which the measurements showed it should.
+2. **The cap is POLY's ten voices less one, not VOICES less one.** VOICES is dragged by
+   steps (R51), and each step would start the pool again.
+3. **A doubled note's twin plays on its voice's crew, after the voice**, not on a crew of its
+   own. The voice's thread waits for its crew anyway, so a second crew would only be idle.
+   The doubled note then takes two split runs, still about half of what it takes whole. One
+   crew per sounding note.
+4. **The one instrument holds one crew**, for the same reason.
+5. **A pool now wakes at most its voices less one workers a run** (before, all of them).
+   Idle workers spin a moment after waking, beside a split voice's helpers. With ten HI
+   voices and fewer than ten workers, as many wake as before.
+6. **ULTRA's need does not depend on FEEDBACK.** A voice with FEEDBACK on plays whole and
+   the crew waits, so moving FEEDBACK does not start the threads again.
+7. **A restart costs a moment.** Until the new pool comes (some milliseconds), the
+   instance's voices play on its host thread, and blocks may be late then. This happens when
+   instances are activated, switch POLY, UNISON or ULTRA, or come and go.
+
+**Tests** (all new ones pass on the Mac; the exactness tests also pass on Linux and Windows):
+- `ca72/tests/helpers.rs`:
+  - one crew lent in turn to two voices gives each its own samples to the bit, notes inside
+    runs, with the trigger contact, the OVERLOAD lamp and the probes;
+  - the helpers open their interval once a block, close it every time and leave it when
+    they end.
+- `ca72-plugin/tests/ultra_split_engine.rs`: the engine's split voices are its whole voices to
+  the bit, for POLY, POLY with DOUBLE, UNISON, the one instrument (scattering) and the one
+  instrument with DOUBLE; with fewer crews than voices, every voice whole and the same samples.
+- `realtime.rs`, `ultra_s_split_voices_neither_allocate_nor_free_while_they_play`: POLY, DOUBLE
+  and FEEDBACK switched, the crews let go and asked for again; no allocation and no free on the
+  audio thread.
+- `pool.rs`: `seats_share_the_budget_evenly` and `the_shares_follow_the_instances` (a pool
+  restarted at its new share when a second instance sits down, the short one asked again once
+  some is free, both settled, and the share all back when the first leaves).
+- `engine.rs`, `the_count_follows_the_machine`: B, C and S on the three machines measured and
+  on a quad-core.
+- `ca72-rt`: the fast cores are among all of them; a kernel CPU list read.
+- **The workspace's tests** (as CI runs them, `--features ca72-plugin/standalone-production`,
+  the Mac, debug): 489 passed, 3 failed, 53 ignored. The 3 are `ca72-lab`'s ngspice tests
+  (`vco_electrical`'s two, `vco_osc23`'s one: "Timestep too small"), and they fail the same way
+  on the base commit (`bcb6c0b`) on this Mac; nothing here touches them.
+- **Lint and format:** clippy as CI runs it (`--workspace --all-targets --all-features -D
+  warnings`) is clean. rustfmt is clean on every crate file. (`cargo fmt --all` cannot run in
+  this worktree, which sits inside the main checkout; rustfmt was run on the files directly.)
+
+**Measured with the built engine** (2026-10-16):
+- **How.** `tests/scaling_bench.rs` with the plug-in's own counts (`CA72_AUTO=1`):
+  - each instance has the plug-in's helper thread;
+  - no instance is let go until every instance has played its blocks;
+  - `scripts/threads-measure.sh` (`.ps1`) runs the grid, 10 s a run, one machine at a time.
+- **The load is not the prototype's.** It is the scaling bench's chords with ENTROPY and
+  SPREAD and without DRIVE. So the built engine's whole voices cost more than the prototype's,
+  and split is compared with whole within each run (alternated, twice).
+- **Conditions:**
+  - the Mac: Ableton Live open (about 0.4 core), load average 4 to 6.7, no other session's work;
+  - Linux: load average 2.7 to 5.6 (other users);
+  - Windows: about 14 % busy before.
+- **Raw lines:** `docs/threads/built-*.txt`.
+
+ULTRA (one instance): the mean / the worst block, % of the period · late blocks · runs not heard,
+for each of the two repeats:
+
+| Machine, frames | One instrument, split | One instrument, whole | Two POLY voices, split | Two POLY voices, whole |
+|---|---|---|---|---|
+| Mac, 256 | 38–39 / 72–90 · 0, 0 | 56–57 / 130–132 · 40, 40 | 50–51 / 103–122 · 2, 3 · 14, 10 | 60 / 185 · 42, 41 · 61, 79 |
+| Mac, 128 | 31 / 109–114 · 1, 1 | 58 / 157–167 · 86, 81 | 45 / 116–119 · 8, 6 · 25, 16 | 61 / 163–166 · 90, 90 · 130, 100 |
+| Linux, 256 | 37–38 / 112–115 · 4, 2 | 80 / 186 · 157, 154 | 41–42 / 160–170 · 17, 18 · 21, 25 | 88–94 / 304 · 352, 540 · 792, 1,015 |
+| Linux, 128 | 36–37 / 148–177 · 33, 29 | 79–80 / 210–213 · 317, 337 | 42 / 187–192 · 40, 37 · 31, 19 | 80 / 211–216 · 347, 303 · 1,530, 1,414 |
+| Windows, 256 | 31 / 84–92 · 0, 0 | 69 / 189–217 · 108, 107 | (one crew: whole) 69 / 223 · 75, 73 | 69 / 222 · 85, 73 |
+| Windows, 128 | 30–31 / 94–95 · 0, 0 | 70 / 265–321 · 202, 198 | (one crew: whole) 68 / 181–185 · 121, 122 | 68–69 / 182–185 · 123, 120 |
+
+- **The one instrument at ULTRA:**
+  - **Mac and Windows:** no late block in 1,875 at 256 frames. At 128 frames, Windows none in
+    3,750 and the Mac 1.
+  - **Linux:** 2 to 4 late at 256, about 30 at 128, against 154 to 337 whole.
+  - **Against the prototype** (its split 6-thread rows):
+    - Windows matches (0 and 0 to 1 late);
+    - Linux matches at 256 (5) and 128 (27);
+    - the Mac is better, as the work interval made the prototype: with it in the A/B, 0 late at
+      256 and 0 to 8 at 128; in the split grid without it, 7 and 42.
+- **Two POLY voices at ULTRA**, split (the Mac and Linux, two crews): late blocks an eighth to
+  a thirtieth of whole, and the runs not heard a fifth to an eightieth. This is as the
+  prototype found (Mac 4 late and 23 not heard, Linux 14 and 23, at 256 frames). Windows has one
+  crew, so two voices play whole: the same as whole.
+- **Four ULTRA voices** play whole (more than S); the counts are in the raw lines.
+
+HI (ten voices an instance), the plug-in's own counts against the prototype's runs at the same
+counts (the mean / the worst block · late · not heard; at 256 frames):
+
+| Machine | 1 instance | 2 instances | 4 instances | 8 instances |
+|---|---|---|---|---|
+| Mac, built | 8: 24 / 37 · 0 | 5 + 5: 27 / 44 · 0 | 2 each: 52 / 94 · 0 · 73 | 1 each of 4: 95 / 293 · 7,483 · 805 |
+| Mac, prototype | 8: 24 / 43 · 0 | 10: 27 / 49 · 0 | 8 (repeats): 52 / 94–102 · 0–1 · 64–66 | (not repeated) |
+| Linux, built | 9: 26 / 39 · 0 | 6 + 6: 42 / 66 · 0 | 3, 3, 2, 2: 66 / 137 · 28 · 1,037 | 6 of 8: 116 / 320 · 7,655 |
+| Linux, prototype | 9: 26 / 40 · 0 | 12: 41 / 65 · 0 | 10: 66 / 123 · 15 · 904 | 6: 113 / 307 · 6,838 |
+| Windows, built | 4: 28 / 86 · 0 · 4 | 4 + 4: 52 / 98 · 0 · 252 | 4, 4, 3, 3: 49 / 78 · 0 · 78 | 10: 82 / 216 · 1,162 |
+| Windows, prototype | 4: 28 / 54 · 0 | 8: 49 / 92 · 0 · 189 | 12: 52 / 97 · 0 · 83 | 10: 82 / 227 · 1,185 |
+
+- **The shares settle where the formula puts them**, on all three machines, the instances
+  started in turn as a host activates them.
+- **The figures are the prototype's at the same counts, within the machines' noise.**
+  - Windows' one instance had a higher worst block in this run (86 against 54 % of the
+    period) with the same mean and 99th percentile (28 and 40 %): single blocks, none late.
+  - At 128 frames the pattern is the same (the raw lines).
+- **Against today's first come** (item 1), the 2- and 4-instance rows have no instance late in
+  every block. With 8 instances the Mac's budget is its floor (4) and half its blocks are late
+  (7,483 of 15,000, against 13,125 with today's rule); its first sweep suggested 8 or more
+  workers would help there (about 2,000 late), but that sweep was noisy and the rule is as
+  approved.
+
+**Not done:**
+- ULTRA's note (R48) still says one voice takes about a whole core.
+- More than two split voices.
+- Linux on a hybrid processor.
+- Anything beyond 14 cores (unverified, as above).
+- Real hosts.
+- The restart's cost in a host while instances come and go (measured here only as each run's
+  first blocks, in the warm-up).
+
+No benchmark or real-time thread was left running on any of the three machines.

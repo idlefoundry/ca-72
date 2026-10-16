@@ -1,6 +1,6 @@
-//! POLY's voices on worker threads of the plug-in's own (decisions.md R11): the host's audio
-//! thread and a few workers (up to four) share each run of samples' voices, every voice played whole by
-//! one of them, and the host's thread sums them in the voices' order, so the output is the
+//! POLY's voices on worker threads of the plug-in's own (decisions.md R11, R-THREADS): the
+//! host's audio thread and workers (as many as the machine gives the instance) share each run of
+//! samples' voices, every voice played whole by one of them (or at ULTRA on a crew of its own), and the host's thread sums them in the voices' order, so the output is the
 //! same to the bit as with every voice on the host's thread.
 //!
 //! Safe Rust only, as `ca72::threaded`: each voice sits behind a mutex that the audio thread
@@ -32,16 +32,25 @@
 //! run. A run carries the audio thread's floating-point flush bits (nih-plug's flush-to-zero),
 //! which a worker takes before it plays.
 //!
-//! Workers made audio threads come out of one budget for the process: all instances' together
-//! are at most [`crate::engine::budget_workers`] (`default_workers`, unless a measurement sets
-//! its own). An instance given fewer plays the rest on the host's thread; a pool's go back when
-//! it stops (decisions.md R18). An instance holds a
-//! pool only while POLY is on: its audio thread asks for one and lets it go through a
-//! [`Crew`], which the plug-in's helper thread serves, starting and stopping pools
-//! (decisions.md R21, R23).
+//! Workers made audio threads come out of one budget for the process (decisions.md R18,
+//! R-THREADS): all instances' together are at most [`crate::engine::budget_workers`] for the
+//! instances holding threads, shared evenly among them in the order they came (each takes a
+//! [`Seat`]); an instance's pool holds at most [`crate::engine::instance_cap`] workers. A pool
+//! whose share has changed, or which got less than its share while some is free again, is let
+//! go and asked for again, so the shares follow the instances. An instance holds a pool only
+//! while it needs threads (POLY's or UNISON's voices, or ULTRA's split voices): its audio
+//! thread asks for one and lets it go through a [`Crew`], which the plug-in's helper thread
+//! serves, starting and stopping pools (decisions.md R21, R23).
+//!
+//! With ULTRA a pool also holds up to [`crate::engine::split_voices`] crews of five helpers
+//! (`ca72::threaded::Helpers`), each lent to a voice for a run, which then plays on six threads
+//! (decisions.md R-THREADS); they count against the instance's share, and while its voices are
+//! split no more of its workers are woken than the voices less one. On macOS each crew's
+//! helpers join a work interval of their own, opened by the keyboard's helper.
 
 use crate::engine::{CHUNK, MIX_LEN, Mix, Playing};
-use ca72::threaded::Backoff;
+use ca72::threaded::{Backoff, Helpers};
+use ca72::voice::Voice;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{JoinHandle, Thread};
@@ -67,28 +76,55 @@ pub type Shared<V = Playing> = Arc<Mutex<V>>;
 pub trait Play: Send + 'static {
     /// `n` samples, `ext` at EXTERNAL INPUT, into the voice's own buffer.
     fn play(&mut self, n: usize, ext: &[f64; CHUNK], rate: f64, mix: &Mix);
+
+    /// The split crews the voice holds ([`Crew`]'s), handed to `into` (whose room is kept).
+    fn recall(&mut self, into: &mut Vec<Split>) {
+        let _ = into;
+    }
 }
 
 impl Play for Playing {
     fn play(&mut self, n: usize, ext: &[f64; CHUNK], rate: f64, mix: &Mix) {
         Playing::play(self, n, ext, rate, mix);
     }
+
+    fn recall(&mut self, into: &mut Vec<Split>) {
+        Playing::recall(self, into);
+    }
 }
 
-/// How many workers made audio threads the pools of the process may hold together, and how
-/// many they hold.
+/// A crew of five helpers a voice borrows for a run at ULTRA (`ca72::threaded::Helpers`).
+pub type Split = Arc<Mutex<Helpers>>;
+
+/// What an instance asks threads for: POLY's or UNISON's voices to share (`workers`), and
+/// ULTRA's voices to split (`split`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Need {
+    pub workers: bool,
+    pub split: bool,
+}
+
+/// How many threads made audio threads the pools of the process may hold together (`most`,
+/// for as many instances as hold seats), how many they hold, an instance's most workers
+/// (`cap`), and the instances holding threads, each one's share.
 pub(crate) struct Budget {
-    most: fn() -> usize,
+    most: fn(usize) -> usize,
+    cap: fn() -> usize,
     held: AtomicUsize,
+    seats: Mutex<Vec<Arc<AtomicUsize>>>,
+    seated: AtomicUsize,
 }
 
 impl Budget {
-    /// One of the tests' own, of `most` workers.
+    /// One of the tests' own, of `most` threads, no instance's capped.
     #[cfg(test)]
-    pub(crate) const fn new(most: fn() -> usize) -> Budget {
+    pub(crate) const fn new(most: fn(usize) -> usize) -> Budget {
         Budget {
             most,
+            cap: || usize::MAX,
             held: AtomicUsize::new(0),
+            seats: Mutex::new(Vec::new()),
+            seated: AtomicUsize::new(0),
         }
     }
 
@@ -97,9 +133,45 @@ impl Budget {
         self.held.load(Ordering::Acquire)
     }
 
-    /// Up to `want` workers: as many as are left.
+    /// The most for the instances seated now (at least one).
+    fn most(&self) -> usize {
+        (self.most)(self.seated.load(Ordering::Acquire).max(1))
+    }
+
+    /// How many are free now.
+    fn free(&self) -> usize {
+        self.most()
+            .saturating_sub(self.held.load(Ordering::Acquire))
+    }
+
+    /// A seat for an instance, its share from now on; every seat's share worked out again.
+    fn sit(&'static self) -> Seat {
+        let share = Arc::new(AtomicUsize::new(0));
+        let mut seats = lock(&self.seats);
+        seats.push(share.clone());
+        self.reshare(&seats);
+        Seat {
+            budget: self,
+            share,
+        }
+    }
+
+    /// Every seat's share: the most for as many, evenly, the remainder to the first seated.
+    fn reshare(&self, seats: &[Arc<AtomicUsize>]) {
+        let n = seats.len();
+        self.seated.store(n, Ordering::Release);
+        if n == 0 {
+            return;
+        }
+        let most = (self.most)(n);
+        for (k, seat) in seats.iter().enumerate() {
+            seat.store(most / n + usize::from(k < most % n), Ordering::Release);
+        }
+    }
+
+    /// Up to `want` threads: as many as are left.
     fn claim(&self, want: usize) -> usize {
-        let most = (self.most)();
+        let most = self.most();
         let mut held = self.held.load(Ordering::Acquire);
         loop {
             let k = want.min(most.saturating_sub(held));
@@ -126,8 +198,91 @@ impl Budget {
 /// The plug-in's, for all its instances in the process.
 pub(crate) static BUDGET: Budget = Budget {
     most: crate::engine::budget_workers,
+    cap: crate::engine::instance_cap,
     held: AtomicUsize::new(0),
+    seats: Mutex::new(Vec::new()),
+    seated: AtomicUsize::new(0),
 };
+
+/// An instance's place in the budget while it holds threads: its share, which moves as others
+/// come and go. Given up when dropped, the others' shares worked out again.
+pub(crate) struct Seat {
+    budget: &'static Budget,
+    share: Arc<AtomicUsize>,
+}
+
+impl Drop for Seat {
+    fn drop(&mut self) {
+        let mut seats = lock(&self.budget.seats);
+        seats.retain(|s| !Arc::ptr_eq(s, &self.share));
+        self.budget.reshare(&seats);
+    }
+}
+
+/// The threads a pool for `need` needs at once: its workers, or its split voices', each on six
+/// threads, its front on the thread that plays it (the host's for the first, a worker's for the
+/// others; with no workers, every split voice on the host's), whichever is more.
+fn threads(need: Need, workers: usize, splits: usize) -> usize {
+    let split = match (splits, need.workers) {
+        (0, _) => 0,
+        (s, true) => 6 * s - 1,
+        (s, false) => 5 * s,
+    };
+    workers.max(split)
+}
+
+/// The workers and split crews for `need` within `share` threads, `ask` workers at most and an
+/// instance's `cap`, `most` split voices (one for the one instrument).
+fn sizes(need: Need, share: usize, ask: usize, cap: usize, most: usize) -> (usize, usize) {
+    let workers = if need.workers {
+        share.min(ask).min(cap).min(MAX - 1)
+    } else {
+        0
+    };
+    let splits = match (need.split, need.workers) {
+        (false, _) => 0,
+        (true, true) => most.min(share.saturating_add(1) / 6),
+        // (The one instrument: one crew, DOUBLE's twin played on it after the voice.)
+        (true, false) => most.min(share / 5).min(1),
+    };
+    (workers, splits)
+}
+
+/// A crew's work interval on macOS (`ca72_rt::WorkInterval`), for its helpers: they work to the
+/// host's period (decisions.md R11, R-THREADS).
+struct SplitInterval {
+    interval: ca72_rt::WorkInterval,
+    period: Duration,
+}
+
+thread_local! {
+    /// A helper's membership of its crew's interval.
+    static JOINED: std::cell::RefCell<Option<ca72_rt::JoinToken>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+impl ca72::threaded::Interval for SplitInterval {
+    fn join(&self) -> bool {
+        let token = self.interval.join();
+        let joined = token.is_some();
+        JOINED.with(|j| *j.borrow_mut() = token);
+        joined
+    }
+
+    fn leave(&self) {
+        if let Some(t) = JOINED.with(|j| j.borrow_mut().take()) {
+            self.interval.leave(t);
+        }
+    }
+
+    fn start(&self) -> bool {
+        self.interval.start(self.period)
+    }
+
+    fn finish(&self) {
+        self.interval.finish();
+    }
+}
 
 /// What a run offers the workers.
 struct Board<V> {
@@ -191,19 +346,45 @@ fn take<V>(b: &Board<V>, run: u32) -> Option<(usize, usize)> {
     }
 }
 
-/// The workers and their board.
+/// The workers and their board, and the split crews.
 pub struct Pool<V: Play = Playing> {
     board: Arc<Board<V>>,
     threads: Vec<(Thread, Option<JoinHandle<()>>)>,
     run: u32,
-    /// The budget its workers came out of, and how many.
+    /// The budget its threads came out of, and how many.
     budget: Option<(&'static Budget, usize)>,
+    /// ULTRA's split crews, the host's block count their keyboards' helpers open their
+    /// intervals by, and the crews recalled from the voices before the pool is stopped (room
+    /// kept for every voice's two).
+    splits: Vec<Split>,
+    split_block: Arc<AtomicU64>,
+    recalled: Vec<Split>,
+    /// What it was started for: the need, its seat's share and the share it was started at, and
+    /// whether it got less.
+    need: Need,
+    share: Option<Arc<AtomicUsize>>,
+    target: usize,
+    short: bool,
+}
+
+/// What a pool is started with ([`Pool::start_from`]).
+struct Spec<'a, V> {
+    workers: usize,
+    voices: &'a [Shared<V>],
+    period: Option<Duration>,
+    need: Need,
+    /// Split crews, made from this voice's parts, at most.
+    splits: usize,
+    template: Option<&'a Voice>,
+    share: Option<Arc<AtomicUsize>>,
+    target: usize,
 }
 
 impl<V: Play> std::fmt::Debug for Pool<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pool")
             .field("workers", &self.threads.len())
+            .field("splits", &self.splits.len())
             .finish()
     }
 }
@@ -224,21 +405,50 @@ impl<V: Play> Pool<V> {
         for v in voices {
             drop(v.lock());
         }
-        Pool::start_from(&BUDGET, workers, voices, period)
+        Pool::start_from(
+            &BUDGET,
+            Spec {
+                workers,
+                voices,
+                period,
+                need: Need {
+                    workers: true,
+                    split: false,
+                },
+                splits: 0,
+                template: None,
+                share: None,
+                target: 0,
+            },
+        )
     }
 
     /// As [`Pool::start`], from `budget`, the voices' locks not taken: a [`Crew`] starts a
     /// pool while the audio thread may be trying them (they were taken once when the voices
     /// were built).
-    fn start_from(
-        budget: &'static Budget,
-        workers: usize,
-        voices: &[Shared<V>],
-        period: Option<Duration>,
-    ) -> std::io::Result<Pool<V>> {
-        let workers = match period {
-            Some(_) => budget.claim(workers),
-            None => workers,
+    fn start_from(budget: &'static Budget, spec: Spec<'_, V>) -> std::io::Result<Pool<V>> {
+        let Spec {
+            workers,
+            voices,
+            period,
+            need,
+            splits,
+            template,
+            share,
+            target,
+        } = spec;
+        let splits = if template.is_some() { splits } else { 0 };
+        let want = threads(need, workers, splits);
+        let got = match period {
+            Some(_) => budget.claim(want),
+            None => want,
+        };
+        // (Given less, as many workers and split voices as that holds.)
+        let (workers, splits) = if got < want {
+            let (w, s) = sizes(need, got, workers, usize::MAX, splits);
+            (w.min(workers), s)
+        } else {
+            (workers, splits)
         };
         let board = Arc::new(Board {
             claim: AtomicU64::new(0),
@@ -256,7 +466,7 @@ impl<V: Play> Pool<V> {
                 .filter(|_| workers > 0)
                 .and_then(|_| ca72_rt::WorkInterval::new("CA-72 voices")),
         });
-        if period.is_some() && workers > 0 {
+        if period.is_some() && (workers > 0 || splits > 0) {
             ca72_rt::watch();
         }
         // (The pool first: should a worker not start, those started stop and are joined and
@@ -265,7 +475,14 @@ impl<V: Play> Pool<V> {
             board,
             threads: Vec::with_capacity(workers),
             run: 0,
-            budget: period.map(|_| (budget, workers)),
+            budget: period.map(|_| (budget, got)),
+            splits: Vec::with_capacity(splits),
+            split_block: Arc::new(AtomicU64::new(0)),
+            recalled: Vec::with_capacity(2 * voices.len()),
+            need,
+            share,
+            target,
+            short: got < want,
         };
         for k in 0..workers {
             #[cfg(test)]
@@ -278,6 +495,30 @@ impl<V: Play> Pool<V> {
                 .spawn(move || work(&b, period, k == 0))?;
             pool.threads.push((handle.thread().clone(), Some(handle)));
         }
+        if let Some(template) = template {
+            for _ in 0..splits {
+                let start: ca72::threaded::Start = Arc::new(move || {
+                    if let Some(p) = period {
+                        let _ = ca72_rt::promote(p, p / 2);
+                    }
+                });
+                let interval = period
+                    .and_then(|p| {
+                        ca72_rt::WorkInterval::new("CA-72 split voice").map(|interval| {
+                            Arc::new(SplitInterval {
+                                interval,
+                                period: p,
+                            }) as Arc<dyn ca72::threaded::Interval>
+                        })
+                    })
+                    .map(|i| (i, pool.split_block.clone()));
+                let crew = Arc::new(Mutex::new(Helpers::new(template.clone(), start, interval)?));
+                // (Its lock taken once here, off the audio thread: on macOS the standard
+                // library makes a mutex's lock on its first use.)
+                drop(crew.lock());
+                pool.splits.push(crew);
+            }
+        }
         Ok(pool)
     }
 
@@ -285,9 +526,40 @@ impl<V: Play> Pool<V> {
         self.threads.len()
     }
 
+    /// ULTRA's split crews, to be lent to the voices for a run.
+    pub fn splits(&self) -> &[Split] {
+        &self.splits
+    }
+
+    /// What it was started for.
+    pub(crate) fn need(&self) -> Need {
+        self.need
+    }
+
+    /// Whether it is to be started again: its seat's share has changed, or it got less than
+    /// its share and some is free again (decisions.md R-THREADS).
+    pub(crate) fn stale(&self) -> bool {
+        let moved = self
+            .share
+            .as_ref()
+            .is_some_and(|s| s.load(Ordering::Acquire) != self.target);
+        moved || (self.short && self.budget.is_some_and(|(b, _)| b.free() > 0))
+    }
+
+    /// The split crews its voices hold, taken back from every voice not held now (a late
+    /// worker's keeps its), to be stopped with the pool, off the audio thread.
+    fn recall(&mut self) {
+        for v in &self.board.voices {
+            if let Ok(mut p) = v.try_lock() {
+                p.recall(&mut self.recalled);
+            }
+        }
+    }
+
     /// A host's block begins.
     pub fn block(&self) {
         self.board.block.fetch_add(1, Ordering::Release);
+        self.split_block.fetch_add(1, Ordering::Release);
     }
 
     /// Plays the voices at `list` (places among the voices, in the order they are summed)
@@ -318,9 +590,9 @@ impl<V: Play> Pool<V> {
             return played;
         }
         let run = self.offer(&list[..count], n, ext, rate, mix);
-        if count > 1 {
-            self.wake();
-        }
+        // (No more workers woken than the voices less this thread's one: the others would only
+        // spin, beside a split voice's helpers among them.)
+        self.wake(count.saturating_sub(1));
         let b = &*self.board;
         // This thread's share: whatever no worker has taken.
         let mut here = [false; MAX];
@@ -375,8 +647,8 @@ impl<V: Play> Pool<V> {
         self.run
     }
 
-    fn wake(&self) {
-        for (t, _) in &self.threads {
+    fn wake(&self, n: usize) {
+        for (t, _) in self.threads.iter().take(n) {
             t.unpark();
         }
     }
@@ -403,7 +675,8 @@ impl<V: Play> Drop for Pool<V> {
     }
 }
 
-/// An instance's workers, held only while POLY is on (decisions.md R21): its audio thread asks
+/// An instance's threads, held only while it needs them (decisions.md R21, R-THREADS): its
+/// workers while POLY or UNISON is on, its split crews while ULTRA is chosen; its audio thread asks
 /// for a pool and lets it go ([`Crew::follow`]), never waiting and never starting or stopping a
 /// thread; the plug-in's helper thread stops the pools let go and starts the one asked for
 /// ([`Crew::serve`]), for the voices last planned ([`Crew::plan`]). A pool started for a plan
@@ -416,21 +689,27 @@ pub struct Crew<V: Play = Playing> {
     serving: Mutex<()>,
     plan: Mutex<Plan<V>>,
     hand: Mutex<Hand<V>>,
+    /// The instance's seat in the budget while it holds or asks for threads (the helper
+    /// thread's).
+    seat: Mutex<Option<Seat>>,
 }
 
-/// What a pool is started for: the voices, how many workers and the period they are made
-/// audio threads for; a new generation each time it is set.
+/// What a pool is started for: the voices, how many workers at most and the period they are
+/// made audio threads for, and a voice to make split crews from (ULTRA's); a new generation
+/// each time it is set.
 struct Plan<V> {
     generation: u64,
     voices: Vec<Shared<V>>,
     workers: usize,
     period: Option<Duration>,
+    template: Option<Voice>,
 }
 
 /// What passes between the audio thread and the helper thread.
 struct Hand<V: Play> {
-    /// The plan's generation the audio thread asks a pool for (0: none).
+    /// The plan's generation the audio thread asks a pool for (0: none), and for what.
     want: u64,
+    need: Need,
     /// The answer for a generation: its pool, or none (the system would not start one).
     ready: Option<(u64, Option<Pool<V>>)>,
     /// A pool the audio thread let go, to be stopped.
@@ -480,12 +759,15 @@ impl<V: Play> Crew<V> {
                 voices: Vec::new(),
                 workers: 0,
                 period: None,
+                template: None,
             }),
             hand: Mutex::new(Hand {
                 want: 0,
+                need: Need::default(),
                 ready: None,
                 back: None,
             }),
+            seat: Mutex::new(None),
         };
         // (Its lock taken once here, off the audio thread: on macOS the standard library may
         // make a mutex's lock on its first use.)
@@ -493,11 +775,18 @@ impl<V: Play> Crew<V> {
         crew
     }
 
-    /// Pools from now on for `workers` workers sharing `voices`, made audio threads for blocks
-    /// of `period` ([`Pool::start`]); returns the plan's generation. Any pool started or let go
-    /// for an earlier plan is stopped, here (one being started is waited for), and its ask
-    /// withdrawn. Not on the audio thread.
-    pub fn plan(&self, voices: &[Shared<V>], workers: usize, period: Option<Duration>) -> u64 {
+    /// Pools from now on for up to `workers` workers sharing `voices`, made audio threads for
+    /// blocks of `period` ([`Pool::start`]), with ULTRA's split crews made from `template`'s
+    /// parts; returns the plan's generation. Any pool started or let go for an earlier plan is
+    /// stopped, here (one being started is waited for), its ask withdrawn and the seat given
+    /// up. Not on the audio thread.
+    pub fn plan(
+        &self,
+        voices: &[Shared<V>],
+        workers: usize,
+        period: Option<Duration>,
+        template: Option<Voice>,
+    ) -> u64 {
         let _serving = lock(&self.serving);
         let (generation, old) = {
             let mut p = lock(&self.plan);
@@ -506,7 +795,10 @@ impl<V: Play> Crew<V> {
             p.period = period;
             (
                 p.generation,
-                std::mem::replace(&mut p.voices, voices.to_vec()),
+                (
+                    std::mem::replace(&mut p.voices, voices.to_vec()),
+                    std::mem::replace(&mut p.template, template),
+                ),
             )
         };
         drop(old);
@@ -516,25 +808,59 @@ impl<V: Play> Crew<V> {
             (h.ready.take(), h.back.take())
         };
         drop(stop);
+        drop(lock(&self.seat).take());
         generation
     }
 
     /// Nothing planned: as [`Crew::plan`], for no voices.
     pub fn clear(&self) {
-        self.plan(&[], 0, None);
+        self.plan(&[], 0, None, None);
     }
 
-    /// A pool for plan `generation` while it is the plan, or none (another planned since, or
-    /// the system would not start one). Not on the audio thread.
-    pub fn start(&self, generation: u64) -> Option<Pool<V>> {
-        let (voices, workers, period) = {
-            let p = lock(&self.plan);
-            if p.generation != generation || p.workers == 0 || p.voices.is_empty() {
-                return None;
-            }
-            (p.voices.clone(), p.workers, p.period)
+    /// A pool for plan `generation` and `need` while it is the plan, or none (another planned
+    /// since, or the system would not start one): within the instance's share of the budget,
+    /// its seat taken if it has none. Not on the audio thread.
+    pub fn start(&self, generation: u64, need: Need) -> Option<Pool<V>> {
+        let p = lock(&self.plan);
+        if p.generation != generation
+            || p.voices.is_empty()
+            || (p.workers == 0 && !need.split)
+            || need == Need::default()
+        {
+            return None;
+        }
+        let share = lock(&self.seat)
+            .get_or_insert_with(|| self.budget.sit())
+            .share
+            .clone();
+        let target = share.load(Ordering::Acquire);
+        // (Unpaced, for measurements, the share does not bound it.)
+        let room = if p.period.is_some() {
+            target
+        } else {
+            usize::MAX
         };
-        Pool::start_from(self.budget, workers, &voices, period).ok()
+        let (workers, splits) = sizes(
+            need,
+            room,
+            p.workers,
+            (self.budget.cap)(),
+            crate::engine::split_voices(),
+        );
+        Pool::start_from(
+            self.budget,
+            Spec {
+                workers,
+                voices: &p.voices,
+                period: p.period,
+                need,
+                splits,
+                template: p.template.as_ref(),
+                share: Some(share),
+                target,
+            },
+        )
+        .ok()
     }
 
     /// The audio thread's asks served: the pools it let go stopped (their workers back in the
@@ -542,23 +868,28 @@ impl<V: Play> Crew<V> {
     /// audio thread: the plug-in's helper thread (decisions.md R21, R23).
     pub fn serve(&self) {
         let _serving = lock(&self.serving);
-        if let Some(generation) = self.tidy() {
-            self.deliver(generation, self.start(generation));
+        if let Some((generation, need)) = self.tidy() {
+            self.deliver(generation, self.start(generation, need));
         }
     }
 
-    /// The pools let go, or ready for an ask withdrawn, stopped; the generation asked for, if a
-    /// pool is to be started for it.
-    fn tidy(&self) -> Option<u64> {
-        let (stop, start) = {
+    /// The pools let go, or ready for an ask withdrawn, stopped (and with nothing asked for,
+    /// the seat given up); the generation and need asked for, if a pool is to be started.
+    fn tidy(&self) -> Option<(u64, Need)> {
+        let (stop, start, idle) = {
             let mut h = lock(&self.hand);
             let want = h.want;
             let stale = h.ready.take_if(|(g, _)| *g != want);
-            let start = (want != 0 && h.ready.is_none()).then_some(want);
-            ((h.back.take(), stale), start)
+            let start = (want != 0 && h.ready.is_none()).then_some((want, h.need));
+            let back = h.back.take();
+            let idle = want == 0 && h.ready.is_none() && back.is_some();
+            ((back, stale), start, idle)
         };
         // (Stopped once the lock is let go: the audio thread may be trying it.)
         drop(stop);
+        if idle {
+            drop(lock(&self.seat).take());
+        }
         start
     }
 
@@ -586,15 +917,19 @@ impl<V: Play> Crew<V> {
     /// [`Crew::serve`] is due.
     pub(crate) fn follow(
         &self,
-        on: bool,
+        on: Option<Need>,
         generation: u64,
         pool: &mut Option<Pool<V>>,
         ask: &mut Ask,
     ) -> bool {
-        let settled = if on {
-            pool.is_some() || *ask == Ask::Answered
-        } else {
-            pool.is_none() && *ask == Ask::Not
+        // (A pool for another need, or whose share has moved: let go and asked for again.)
+        let again = match (on, pool.as_ref()) {
+            (Some(need), Some(p)) => p.need() != need || p.stale(),
+            _ => false,
+        };
+        let settled = match on {
+            Some(_) => !again && (pool.is_some() || *ask == Ask::Answered),
+            None => pool.is_none() && *ask == Ask::Not,
         };
         if settled || generation == 0 {
             return false;
@@ -602,7 +937,21 @@ impl<V: Play> Crew<V> {
         let Ok(mut h) = self.hand.try_lock() else {
             return false;
         };
-        if on {
+        if let Some(need) = on {
+            if again {
+                if h.back.is_some() {
+                    // (The last one let go not stopped yet: asked again at a later block.)
+                    return true;
+                }
+                if let Some(mut p) = pool.take() {
+                    p.recall();
+                    h.back = Some(p);
+                }
+                h.want = generation;
+                h.need = need;
+                *ask = Ask::Waiting;
+                return true;
+            }
             // (With no pool here: taking the answer drops nothing. One may be ready for an ask
             // withdrawn and made again since.)
             if let Some((_, answer)) = h.ready.take_if(|(g, _)| *g == generation) {
@@ -613,9 +962,12 @@ impl<V: Play> Crew<V> {
             }
             if *ask == Ask::Not {
                 h.want = generation;
+                h.need = need;
                 *ask = Ask::Waiting;
                 return true;
             }
+            // (Asked for another need meanwhile: the answer, when it comes, is let go again.)
+            h.need = need;
             return false;
         }
         // A pool started for an ask withdrawn is stopped by the helper thread: a pool
@@ -626,7 +978,10 @@ impl<V: Play> Crew<V> {
         *ask = Ask::Not;
         let mut due = h.ready.is_some();
         if pool.is_some() && h.back.is_none() {
-            h.back = pool.take();
+            if let Some(mut p) = pool.take() {
+                p.recall();
+                h.back = Some(p);
+            }
             due = true;
         }
         due
@@ -811,6 +1166,27 @@ mod tests {
 
     const EXT: [f64; CHUNK] = [0.0; CHUNK];
 
+    /// What POLY asks for at HI.
+    const POLY_NEED: Need = Need {
+        workers: true,
+        split: false,
+    };
+    const POLY: Option<Need> = Some(POLY_NEED);
+
+    /// A pool of `workers` for `voices`, as [`Pool::start`] starts one.
+    fn spec(workers: usize, voices: &[Shared<Fake>], period: Option<Duration>) -> Spec<'_, Fake> {
+        Spec {
+            workers,
+            voices,
+            period,
+            need: POLY_NEED,
+            splits: 0,
+            template: None,
+            share: None,
+            target: 0,
+        }
+    }
+
     /// Waits up to 5 s for `f`.
     fn until(what: &str, f: impl Fn() -> bool) {
         let t = Instant::now();
@@ -829,7 +1205,7 @@ mod tests {
         let mut pool = Pool::start(1, &voices, None).unwrap();
         let held = voices[0].lock().unwrap();
         let run = pool.offer(&[0], 64, &EXT, 48_000.0, &mix());
-        pool.wake();
+        pool.wake(usize::MAX);
         until("the worker took nothing", || {
             pool.board.claim.load(Ordering::Acquire) & 0xff == 1
         });
@@ -866,7 +1242,7 @@ mod tests {
         let mut pool = Pool::start(1, &voices, None).unwrap();
         // Voice 0 alone, taken by the worker, which is held up playing it past the run's end.
         pool.offer(&[0], 64, &EXT, 48_000.0, &mix());
-        pool.wake();
+        pool.wake(usize::MAX);
         until("the worker took nothing", || {
             started.load(Ordering::Acquire)
         });
@@ -940,40 +1316,34 @@ mod tests {
     /// stops. Ordinary workers (for measurements) are not counted.
     #[test]
     fn workers_come_out_of_one_budget() {
-        static THREE: Budget = Budget {
-            most: || 3,
-            held: AtomicUsize::new(0),
-        };
+        static THREE: Budget = Budget::new(|_| 3);
         let voices = fakes(2);
         let period = Some(Duration::from_millis(5));
-        let a = Pool::start_from(&THREE, 2, &voices, period).unwrap();
-        let b = Pool::start_from(&THREE, 2, &voices, period).unwrap();
-        let mut c = Pool::start_from(&THREE, 2, &voices, period).unwrap();
+        let a = Pool::start_from(&THREE, spec(2, &voices, period)).unwrap();
+        let b = Pool::start_from(&THREE, spec(2, &voices, period)).unwrap();
+        let mut c = Pool::start_from(&THREE, spec(2, &voices, period)).unwrap();
         assert_eq!((a.workers(), b.workers(), c.workers()), (2, 1, 0));
-        assert_eq!(THREE.held.load(Ordering::Acquire), 3);
+        assert_eq!(THREE.held(), 3);
         let played = c.play(&[0, 1], 16, &EXT, 48_000.0, &mix(), None);
         assert_eq!(&played[..2], &[true, true]);
-        let ordinary = Pool::start_from(&THREE, 4, &voices, None).unwrap();
+        let ordinary = Pool::start_from(&THREE, spec(4, &voices, None)).unwrap();
         assert_eq!(ordinary.workers(), 4);
         drop(a);
-        assert_eq!(THREE.held.load(Ordering::Acquire), 1);
-        let d = Pool::start_from(&THREE, 4, &voices, period).unwrap();
+        assert_eq!(THREE.held(), 1);
+        let d = Pool::start_from(&THREE, spec(4, &voices, period)).unwrap();
         assert_eq!(d.workers(), 2);
         drop((b, c, d, ordinary));
-        assert_eq!(THREE.held.load(Ordering::Acquire), 0);
+        assert_eq!(THREE.held(), 0);
     }
 
     /// A worker the system will not start: those started stop and are joined (nothing holds
     /// the voices any more), and the budget is given back.
     #[test]
     fn a_worker_not_started_stops_the_others() {
-        static FOUR: Budget = Budget {
-            most: || 4,
-            held: AtomicUsize::new(0),
-        };
+        static FOUR: Budget = Budget::new(|_| 4);
         let voices = fakes(2);
         REFUSE.set(Some(2));
-        let r = Pool::start_from(&FOUR, 3, &voices, Some(Duration::from_millis(5)));
+        let r = Pool::start_from(&FOUR, spec(3, &voices, Some(Duration::from_millis(5))));
         REFUSE.set(None);
         assert!(r.is_err());
         assert_eq!(FOUR.held.load(Ordering::Acquire), 0);
@@ -987,33 +1357,33 @@ mod tests {
     /// step here is the audio thread's or the helper thread's, run in turn.
     #[test]
     fn a_crew_holds_workers_only_while_poly_is_on() {
-        static THREE: Budget = Budget::new(|| 3);
+        static THREE: Budget = Budget::new(|_| 3);
         let voices = fakes(3);
         let crew = Crew::with_budget(&THREE);
-        let plan = crew.plan(&voices, 2, Some(Duration::from_millis(5)));
+        let plan = crew.plan(&voices, 2, Some(Duration::from_millis(5)), None);
         let (mut pool, mut ask) = (None, Ask::Not);
-        assert!(!crew.follow(false, plan, &mut pool, &mut ask));
+        assert!(!crew.follow(None, plan, &mut pool, &mut ask));
         crew.serve();
         assert_eq!(THREE.held(), 0);
         assert!(
-            crew.follow(true, plan, &mut pool, &mut ask),
+            crew.follow(POLY, plan, &mut pool, &mut ask),
             "not asked for"
         );
         assert!(
-            !crew.follow(true, plan, &mut pool, &mut ask),
+            !crew.follow(POLY, plan, &mut pool, &mut ask),
             "asked for twice"
         );
         assert!(pool.is_none());
         crew.serve();
         assert_eq!(THREE.held(), 2);
-        assert!(!crew.follow(true, plan, &mut pool, &mut ask));
+        assert!(!crew.follow(POLY, plan, &mut pool, &mut ask));
         assert_eq!(pool.as_ref().map(Pool::workers), Some(2));
         let played = pool
             .as_mut()
             .unwrap()
             .play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), None);
         assert_eq!(&played[..3], &[true; 3]);
-        assert!(crew.follow(false, plan, &mut pool, &mut ask), "not let go");
+        assert!(crew.follow(None, plan, &mut pool, &mut ask), "not let go");
         assert!(pool.is_none());
         assert_eq!(THREE.held(), 2, "stopped on the audio thread");
         crew.serve();
@@ -1028,13 +1398,14 @@ mod tests {
     /// stopped as it comes. No worker is kept from the budget.
     #[test]
     fn poly_switched_quickly_keeps_no_worker() {
-        static FOUR: Budget = Budget::new(|| 4);
+        static FOUR: Budget = Budget::new(|_| 4);
         let voices = fakes(3);
         let crew = Crew::with_budget(&FOUR);
-        let plan = crew.plan(&voices, 3, Some(Duration::from_millis(5)));
+        let plan = crew.plan(&voices, 3, Some(Duration::from_millis(5)), None);
         let (mut pool, mut ask) = (None, Ask::Not);
-        let mut follow =
-            |on: bool, pool: &mut Option<Pool<Fake>>| crew.follow(on, plan, pool, &mut ask);
+        let mut follow = |on: bool, pool: &mut Option<Pool<Fake>>| {
+            crew.follow(on.then_some(POLY_NEED), plan, pool, &mut ask)
+        };
         // On and off before the helper thread serves.
         assert!(follow(true, &mut pool));
         follow(false, &mut pool);
@@ -1061,8 +1432,8 @@ mod tests {
         assert_eq!(FOUR.held(), 0);
         // Off while the helper thread is starting the pool: stopped as it comes.
         assert!(follow(true, &mut pool));
-        let asked = crew.tidy().unwrap();
-        let started = crew.start(asked);
+        let (asked, need) = crew.tidy().unwrap();
+        let started = crew.start(asked, need);
         assert_eq!(FOUR.held(), 3);
         follow(false, &mut pool);
         crew.deliver(asked, started);
@@ -1071,42 +1442,123 @@ mod tests {
         assert!(pool.is_none(), "a pool taken for an ask withdrawn");
     }
 
+    /// Instances share the budget evenly in the order they came, the remainder to the first
+    /// (decisions.md R-THREADS); one leaving gives the others its share.
+    #[test]
+    fn seats_share_the_budget_evenly() {
+        static TEN: Budget = Budget::new(|n| 12 - n);
+        let a = TEN.sit();
+        let share = |s: &Seat| s.share.load(Ordering::Acquire);
+        assert_eq!(share(&a), 11);
+        let b = TEN.sit();
+        let c = TEN.sit();
+        // (9 for three: 3 each.)
+        assert_eq!([share(&a), share(&b), share(&c)], [3, 3, 3]);
+        let d = TEN.sit();
+        // (8 for four.)
+        assert_eq!([share(&a), share(&b), share(&c), share(&d)], [2, 2, 2, 2]);
+        drop(b);
+        // (9 for three again, a and c and d.)
+        assert_eq!([share(&a), share(&c), share(&d)], [3, 3, 3]);
+        drop((a, c));
+        assert_eq!(share(&d), 11);
+    }
+
+    /// A pool started at its instance's whole share is let go and asked for again when
+    /// another instance takes a seat, and comes back at its new share; the other's pool, which
+    /// got less while the first held more, is asked for again once some is free, until both
+    /// hold their shares (decisions.md R-THREADS). Each step the audio thread's or a helper
+    /// thread's, in turn.
+    #[test]
+    fn the_shares_follow_the_instances() {
+        static SIX: Budget = Budget::new(|_| 6);
+        let period = Some(Duration::from_millis(5));
+        let (va, vb) = (fakes(8), fakes(8));
+        let (a, b) = (Crew::with_budget(&SIX), Crew::with_budget(&SIX));
+        let (pa, pb) = (a.plan(&va, 8, period, None), b.plan(&vb, 8, period, None));
+        let (mut poola, mut aska) = (None, Ask::Not);
+        let (mut poolb, mut askb) = (None, Ask::Not);
+        assert!(a.follow(POLY, pa, &mut poola, &mut aska));
+        a.serve();
+        a.follow(POLY, pa, &mut poola, &mut aska);
+        assert_eq!(
+            poola.as_ref().map(Pool::workers),
+            Some(6),
+            "alone: the whole budget"
+        );
+        // The second instance asks: seated, its share 3, but only what is free (none).
+        assert!(b.follow(POLY, pb, &mut poolb, &mut askb));
+        b.serve();
+        b.follow(POLY, pb, &mut poolb, &mut askb);
+        assert_eq!(poolb.as_ref().map(Pool::workers), Some(0));
+        // The first sees its share moved: let go, asked for again, back at 3.
+        assert!(
+            a.follow(POLY, pa, &mut poola, &mut aska),
+            "not asked for again"
+        );
+        assert!(poola.is_none());
+        a.serve();
+        a.follow(POLY, pa, &mut poola, &mut aska);
+        assert_eq!(poola.as_ref().map(Pool::workers), Some(3));
+        // The second, short while some is free: asked for again, now its 3.
+        assert!(
+            b.follow(POLY, pb, &mut poolb, &mut askb),
+            "the short one not asked again"
+        );
+        b.serve();
+        b.follow(POLY, pb, &mut poolb, &mut askb);
+        assert_eq!(poolb.as_ref().map(Pool::workers), Some(3));
+        assert_eq!(SIX.held(), 6);
+        // Settled: neither asks again.
+        assert!(!a.follow(POLY, pa, &mut poola, &mut aska));
+        assert!(!b.follow(POLY, pb, &mut poolb, &mut askb));
+        // The first switched off: its seat given up; the second's share is all again.
+        assert!(a.follow(None, pa, &mut poola, &mut aska));
+        a.serve();
+        assert!(b.follow(POLY, pb, &mut poolb, &mut askb));
+        b.serve();
+        b.follow(POLY, pb, &mut poolb, &mut askb);
+        assert_eq!(poolb.as_ref().map(Pool::workers), Some(6));
+        drop(poolb);
+        assert_eq!(SIX.held(), 0);
+    }
+
     /// A new plan (the voices built anew at a new rate, the plug-in deactivated) stops a pool
     /// ready or let go for the old one, and an ask for the old one starts nothing; a pool for
     /// the old plan that comes later is stopped. The audio thread asks again for the new.
     #[test]
     fn a_new_plan_stops_the_old_ones_pools() {
-        static TWO: Budget = Budget::new(|| 2);
+        static TWO: Budget = Budget::new(|_| 2);
         let (voices, others) = (fakes(2), fakes(2));
         let period = Some(Duration::from_millis(5));
         let crew = Crew::with_budget(&TWO);
-        let old = crew.plan(&voices, 2, period);
+        let old = crew.plan(&voices, 2, period, None);
         let (mut pool, mut ask) = (None, Ask::Not);
-        assert!(crew.follow(true, old, &mut pool, &mut ask));
+        assert!(crew.follow(POLY, old, &mut pool, &mut ask));
         crew.serve();
         assert_eq!(TWO.held(), 2);
-        let new = crew.plan(&others, 2, period);
+        let new = crew.plan(&others, 2, period, None);
         assert_eq!(TWO.held(), 0, "the old plan's pool kept");
         // (The engine forgets its ask with its plan.)
         (pool, ask) = (None, Ask::Not);
-        assert!(crew.follow(true, new, &mut pool, &mut ask));
-        let asked = crew.tidy().unwrap();
+        assert!(crew.follow(POLY, new, &mut pool, &mut ask));
+        let (asked, need) = crew.tidy().unwrap();
         crew.clear();
-        assert!(crew.start(asked).is_none(), "started for a plan gone");
+        assert!(crew.start(asked, need).is_none(), "started for a plan gone");
         crew.deliver(asked, None);
         // A pool for the old plan that comes after the new one: stopped.
-        let new = crew.plan(&others, 2, period);
+        let new = crew.plan(&others, 2, period, None);
         (pool, ask) = (None, Ask::Not);
-        assert!(crew.follow(true, new, &mut pool, &mut ask));
-        let asked = crew.tidy().unwrap();
-        let late = crew.start(asked);
-        let newer = crew.plan(&voices, 2, period);
+        assert!(crew.follow(POLY, new, &mut pool, &mut ask));
+        let (asked, need) = crew.tidy().unwrap();
+        let late = crew.start(asked, need);
+        let newer = crew.plan(&voices, 2, period, None);
         crew.deliver(asked, late);
         assert_eq!(TWO.held(), 0);
         (pool, ask) = (None, Ask::Not);
-        assert!(crew.follow(true, newer, &mut pool, &mut ask));
+        assert!(crew.follow(POLY, newer, &mut pool, &mut ask));
         crew.serve();
-        crew.follow(true, newer, &mut pool, &mut ask);
+        crew.follow(POLY, newer, &mut pool, &mut ask);
         assert_eq!(pool.as_ref().map(Pool::workers), Some(2));
         drop(pool);
         assert_eq!(TWO.held(), 0);
