@@ -162,6 +162,16 @@ pub fn triangle(buf: f64) -> f64 {
         * (p2 - p0 + f * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + f * (3.0 * (p1 - p2) + p3 - p0)))
 }
 
+/// The lab's line for an output (decisions.md R-BLEP): its chosen kernel, unless
+/// `CA72_BLEP_LINES` (outputs by name, comma-separated: `saw`, `tri`, `rect`) leaves it out,
+/// to measure what correcting only the outputs a voice uses would cost.
+fn lab_line(name: &str) -> BlepLine {
+    match std::env::var("CA72_BLEP_LINES") {
+        Ok(l) if !l.split(',').any(|n| n.trim() == name) => BlepLine::default(),
+        _ => BlepLine::lab(),
+    }
+}
+
 /// The triangle shaper's slope against the buffer (the lab's corners, decisions.md R-BLEP).
 fn triangle_slope(buf: f64) -> f64 {
     const H: f64 = 1e-4;
@@ -301,9 +311,9 @@ impl Vco {
             fall_in: None,
             rect_is_low: false,
             guess: None,
-            saw: BlepLine::lab(),
-            tri: BlepLine::lab(),
-            rect: BlepLine::lab(),
+            saw: lab_line("saw"),
+            tri: lab_line("tri"),
+            rect: lab_line("rect"),
             blamp: crate::blep::chosen().is_some_and(|l| l.blamp),
             fold: fold_corner(&ShaperParams::default()),
             dec: [

@@ -11,6 +11,7 @@
 //!                                        the real-time oscillator, tuned the 1973 way
 //! ca72-lab alias [--model circuit|light] [--os N] [--blep SPEC] [--rates R,..] [--keys K,..]
 //!                                        the oscillators' aliasing (decisions.md R-BLEP)
+//! ca72-lab blepcost [rounds] [SPEC ..]   one oscillator's time a sample with each kernel
 //! ```
 //! Ranges: lo, 32, 16, 8, 4, 2. Keys count from the keyboard's lowest F (0..43).
 
@@ -34,6 +35,7 @@ fn main() -> ExitCode {
         Some("waves") => spice().and_then(|s| waves(&s, rest)),
         Some("render") => render(rest),
         Some("alias") => alias(rest),
+        Some("blepcost") => blepcost(rest),
         Some("play") => play(rest),
         Some("stim") => stim(rest),
         Some("filterlaw") => filterlaw(rest),
@@ -432,6 +434,121 @@ fn alias(rest: &[String]) -> Res {
         }
     }
     ca72::blep::set(None);
+    Ok(())
+}
+
+/// `ca72-lab blepcost [rounds] [SPEC ..]` (decisions.md R-BLEP): one oscillator's time a
+/// sample at 48 kHz with each kernel (`plugin` for the plug-in's own; `os2:` before a SPEC
+/// for the circuit's at 2x), the circuit's (all three outputs, as the voice ticks it, A4
+/// and A7 on 2') and the light model's (its sawtooth, triangle and narrow rectangle at A4
+/// and A7): the least of `rounds` (15) runs of a second's samples each, the candidates
+/// taken in turn within each round, so that a busy machine slows them alike.
+fn blepcost(rest: &[String]) -> Res {
+    use ca72::voice::Waveform;
+    use std::time::Instant;
+    let rounds: usize = rest.first().and_then(|r| r.parse().ok()).unwrap_or(15);
+    let specs: Vec<String> = if rest.len() > 1 {
+        rest[1..].to_vec()
+    } else {
+        [
+            "plugin",
+            "poly2+blamp",
+            "lagrange4+blamp",
+            "bspline4+blamp",
+            "sinc8+blamp",
+            "sinc16+blamp",
+            "sinc32+blamp",
+            "min16+blamp",
+            "os2:plugin",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+    };
+    let rate = 48_000.0;
+    let n = 48_000usize;
+    let parse = |s: &str| -> Result<(usize, Option<ca72::blep::Lab>), String> {
+        let (os, k) = s.strip_prefix("os2:").map_or((1, s), |k| (2, k));
+        Ok((
+            os,
+            if k == "plugin" {
+                None
+            } else {
+                Some(ca72::blep::Lab::parse(k)?)
+            },
+        ))
+    };
+    // Each candidate's oscillators, made once.
+    let mut circuits = Vec::new();
+    let mut lights = Vec::new();
+    for s in &specs {
+        let (os, lab) = parse(s)?;
+        ca72::blep::set(lab);
+        let mut row = Vec::new();
+        for key in [4.0, 40.0] {
+            let mut v = ca72::vco::Vco::new(rate, os);
+            let (t, _) = ca72::tuning::folkman_1973(&mut v, rate, ca72::tuning::Tuning::default());
+            let i_in =
+                v.expo
+                    .input_current(&ca72::tuning::osc1_inputs(&t, key, ca72::tuning::Range::R2));
+            v.reset();
+            row.push((v, i_in));
+        }
+        circuits.push(row);
+        lights.push(lab);
+    }
+    let mut best_c = vec![[f64::MAX; 2]; specs.len()];
+    let mut best_l = vec![[f64::MAX; 6]; specs.len()];
+    let waves = [
+        Waveform::Sawtooth,
+        Waveform::Triangle,
+        Waveform::NarrowRectangle,
+    ];
+    for _ in 0..rounds {
+        for (j, row) in circuits.iter_mut().enumerate() {
+            for (k, (v, i_in)) in row.iter_mut().enumerate() {
+                let t = Instant::now();
+                let mut acc = 0.0;
+                for _ in 0..n {
+                    let o = v.tick(*i_in, 0.0);
+                    acc += o.saw + o.tri + o.rect;
+                }
+                std::hint::black_box(acc);
+                best_c[j][k] = best_c[j][k].min(t.elapsed().as_secs_f64() * 1e9 / n as f64);
+            }
+            ca72::blep::set(lights[j]);
+            for (w, wave) in waves.iter().enumerate() {
+                for (k, hz) in [440.0, 3520.0].into_iter().enumerate() {
+                    let t = Instant::now();
+                    let x = ca72::light::lab_oscillator(rate, hz, *wave, n);
+                    std::hint::black_box(&x);
+                    let ns = t.elapsed().as_secs_f64() * 1e9 / n as f64;
+                    best_l[j][w * 2 + k] = best_l[j][w * 2 + k].min(ns);
+                }
+            }
+        }
+    }
+    ca72::blep::set(None);
+    println!("ns a sample, the least of {rounds} runs of {n} samples at 48 kHz");
+    println!(
+        "{:<18} {:>9} {:>9}   {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "candidate",
+        "circ A4",
+        "circ A7",
+        "saw A4",
+        "saw A7",
+        "tri A4",
+        "tri A7",
+        "nar A4",
+        "nar A7"
+    );
+    for (j, s) in specs.iter().enumerate() {
+        print!("{s:<18} {:>9.1} {:>9.1}  ", best_c[j][0], best_c[j][1]);
+        for v in best_l[j] {
+            print!(" {v:>8.2}");
+        }
+        println!();
+    }
     Ok(())
 }
 
