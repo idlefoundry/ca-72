@@ -220,8 +220,15 @@ fn valid_date(d: &str) -> bool {
             .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
 }
 
-/// Checks the manifest against the pack's files and the plug-in.
-pub fn check(m: &Manifest, files: &Files, context: &Context<'_>, report: &mut Report) {
+/// Checks the manifest against the pack's files and the plug-in (`first_party`: the pack is
+/// signed as Idle Foundry's own, and may use its id prefix).
+pub fn check(
+    m: &Manifest,
+    files: &Files,
+    context: &Context<'_>,
+    first_party: bool,
+    report: &mut Report,
+) {
     let at = Some(crate::MANIFEST);
     if !valid_id(&m.id) {
         report.reject(
@@ -233,11 +240,14 @@ pub fn check(m: &Manifest, files: &Files, context: &Context<'_>, report: &mut Re
                 m.id
             ),
         );
-    } else if m.id.starts_with(OFFICIAL_PREFIX) && !context.built_in {
+    } else if m.id.starts_with(OFFICIAL_PREFIX) && !context.built_in && !first_party {
         report.reject(
             "manifest.id",
             at,
-            format!("`{OFFICIAL_PREFIX}` is kept for the plug-in's makers' own packs"),
+            format!(
+                "`{OFFICIAL_PREFIX}` is kept for the plug-in's makers' own packs (built in, or \
+                 signed as theirs)"
+            ),
         );
     }
     if !plain(&m.name, 64) {
@@ -398,6 +408,7 @@ pub fn check(m: &Manifest, files: &Files, context: &Context<'_>, report: &mut Re
     }
     for path in files.paths() {
         let untracked = path != crate::MANIFEST
+            && path != crate::signature::SIGNATURE
             && !text_files.contains(&path)
             && !path.ends_with(".md")
             && m.asset(path).is_none();

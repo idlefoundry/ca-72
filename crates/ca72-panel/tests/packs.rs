@@ -18,6 +18,7 @@ fn official_context<'a>(pictures: &'a [(&'static str, &'static [u8])]) -> Contex
         official_licence: "GPL-3.0-or-later",
         built_in: true,
         test_drawings: true,
+        keys: &[],
     }
 }
 
@@ -277,4 +278,215 @@ fn a_packs_typeface_is_used_only_if_it_prints_every_legend() {
     );
     // Drawn all the same, in the built-in typeface.
     let _ = frame(look, 0.3);
+}
+
+// ---- Pack files, signatures and updates (the marketplace's: decisions.md R-SKIN-PACKS).
+
+use skin_pack::signature::{self, Publisher, TrustedKey};
+
+/// A key for the tests (from fixed bytes: never one the plug-in trusts).
+fn test_key() -> (String, TrustedKey) {
+    let secret = "07".repeat(32);
+    let key = signature::signing_key(&secret).expect("a key");
+    let public = signature::public_key(&signature::public_hex(&key)).expect("its public half");
+    (
+        secret,
+        TrustedKey {
+            id: "test-1",
+            public,
+        },
+    )
+}
+
+/// The starter's files, its manifest's id and version changed, read from a folder.
+fn starter_files(id: &str, version: &str) -> Files {
+    let dir = edited(|d| {
+        replace(&d.join("skin.toml"), "org.example.ca72-starter", id);
+        replace(
+            &d.join("skin.toml"),
+            "version = \"1.0.0\"",
+            &format!("version = \"{version}\""),
+        );
+    });
+    let mut r = Report::default();
+    Files::read_dir(dir.path(), &Limits::default(), &mut r)
+}
+
+/// `files` signed with the test key, as a pack file in `dir`, named `name`.
+fn signed_pack_file(
+    dir: &Path,
+    name: &str,
+    files: &Files,
+    (id, version): (&str, &str),
+    publisher: Publisher,
+) -> std::path::PathBuf {
+    let (secret, _) = test_key();
+    let key = signature::signing_key(&secret).expect("a key");
+    let sig = signature::sign(
+        files,
+        (id, version),
+        ("test-1", &key),
+        publisher,
+        "2026-10-16",
+    );
+    let mut r = Report::default();
+    let with_sig = Files::from_memory(
+        files.iter().chain([(signature::SIGNATURE, sig.as_bytes())]),
+        &Limits::default(),
+        &mut r,
+    );
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        skin_pack::archive::write(&with_sig).expect("written"),
+    )
+    .expect("saved");
+    path
+}
+
+#[test]
+fn a_signed_pack_file_loads_as_published_and_unsigned_without_its_key() {
+    let out = tempfile::tempdir().expect("a folder");
+    let files = starter_files("org.example.night", "1.0.0");
+    let path = signed_pack_file(
+        out.path(),
+        "night.ifskin",
+        &files,
+        ("org.example.night", "1.0.0"),
+        Publisher::Marketplace,
+    );
+    let (_, key) = test_key();
+    let look = Look::open_with(&path, &Limits::default(), &[key]).unwrap_or_else(|r| panic!("{r}"));
+    assert_eq!(
+        look.signed.as_ref().map(|s| s.publisher),
+        Some(Publisher::Marketplace)
+    );
+    assert!(!look.first_party());
+    // Without the key (an older plug-in, a newer key): as if unsigned, and it loads.
+    let look = Look::open(&path).unwrap_or_else(|r| panic!("{r}"));
+    assert!(look.signed.is_none());
+    assert!(look.report.has("signature.unknown-key"), "{}", look.report);
+}
+
+#[test]
+fn a_pack_changed_after_it_was_signed_is_refused() {
+    let out = tempfile::tempdir().expect("a folder");
+    let files = starter_files("org.example.night", "1.0.0");
+    let path = signed_pack_file(
+        out.path(),
+        "night.ifskin",
+        &files,
+        ("org.example.night", "1.0.0"),
+        Publisher::Marketplace,
+    );
+    // Unpacked, one legend changed, packed again.
+    let mut r = Report::default();
+    let read = skin_pack::archive::read_file(&path, &Limits::default(), &mut r);
+    let layout = String::from_utf8(read.get("layout.toml").expect("its layout").to_vec())
+        .expect("text")
+        .replacen("\"TUNE\"", "\"TUNED\"", 1);
+    let changed = Files::from_memory(
+        read.iter().map(|(p, b)| {
+            if p == "layout.toml" {
+                (p, layout.as_bytes())
+            } else {
+                (p, b)
+            }
+        }),
+        &Limits::default(),
+        &mut r,
+    );
+    std::fs::write(&path, skin_pack::archive::write(&changed).expect("written")).expect("saved");
+    let (_, key) = test_key();
+    let report = Look::open_with(&path, &Limits::default(), &[key]).expect_err("refused");
+    assert!(report.has("signature.invalid"), "{report}");
+}
+
+/// The makers' id prefix: refused unsigned, or signed as a seller's; allowed signed as theirs.
+#[test]
+fn only_a_first_party_signature_allows_the_makers_ids() {
+    let out = tempfile::tempdir().expect("a folder");
+    let id = "com.idlefoundry.ca72.dusk";
+    let files = starter_files(id, "1.0.0");
+    let (_, key) = test_key();
+    let first = signed_pack_file(
+        out.path(),
+        "a.ifskin",
+        &files,
+        (id, "1.0.0"),
+        Publisher::FirstParty,
+    );
+    let look =
+        Look::open_with(&first, &Limits::default(), &[key]).unwrap_or_else(|r| panic!("{r}"));
+    assert!(look.first_party());
+    let seller = signed_pack_file(
+        out.path(),
+        "b.ifskin",
+        &files,
+        (id, "1.0.0"),
+        Publisher::Marketplace,
+    );
+    let r = Look::open_with(&seller, &Limits::default(), &[key]).expect_err("refused");
+    assert!(r.has("manifest.id"), "{r}");
+    let r = Look::open_with(&first, &Limits::default(), &[]).expect_err("refused unsigned");
+    assert!(r.has("manifest.id"), "{r}");
+    // And never the built-in looks' own ids, signed or not.
+    let builtin = ca72_panel::look::REALISTIC;
+    let files = starter_files(builtin, "1.0.0");
+    let p = signed_pack_file(
+        out.path(),
+        "c.ifskin",
+        &files,
+        (builtin, "1.0.0"),
+        Publisher::FirstParty,
+    );
+    assert!(Look::open_with(&p, &Limits::default(), &[key]).is_err());
+}
+
+/// An update added beside a pack is the one used; an unsigned copy never replaces a published
+/// pack, whatever its version.
+#[test]
+fn a_packs_update_replaces_it_and_an_unsigned_copy_does_not() {
+    let skins = tempfile::tempdir().expect("a folder");
+    let (_, key) = test_key();
+    let id = "org.example.night";
+    signed_pack_file(
+        skins.path(),
+        "night-1.0.0.ifskin",
+        &starter_files(id, "1.0.0"),
+        (id, "1.0.0"),
+        Publisher::Marketplace,
+    );
+    signed_pack_file(
+        skins.path(),
+        "night-1.1.0.ifskin",
+        &starter_files(id, "1.1.0"),
+        (id, "1.1.0"),
+        Publisher::Marketplace,
+    );
+    let found = ca72_panel::look::discover_with(skins.path(), &[key]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].as_ref().map(|l| l.version.as_str()).ok(),
+        Some("1.1.0")
+    );
+    // An unsigned folder of the same id, "version 9": the published 1.1.0 stays.
+    let copy = skins.path().join("night-copy");
+    std::fs::create_dir_all(&copy).expect("a folder");
+    copy_dir_files(&starter_files(id, "9.0.0"), &copy);
+    let found = ca72_panel::look::discover_with(skins.path(), &[key]);
+    assert_eq!(found.len(), 1);
+    let kept = found[0].as_ref().expect("a look");
+    assert_eq!(
+        (kept.version.as_str(), kept.signed.is_some()),
+        ("1.1.0", true)
+    );
+}
+
+fn copy_dir_files(files: &Files, to: &Path) {
+    for (p, b) in files.iter() {
+        let path = to.join(p);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("a folder");
+        std::fs::write(path, b).expect("written");
+    }
 }

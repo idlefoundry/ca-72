@@ -120,11 +120,15 @@ fn scan(text: &str, limits: &Limits) -> Result<(), String> {
         if !node.is_element() {
             continue;
         }
-        let Some(id) = node
+        // Only the plain `id`, as usvg reads it; one in another namespace (`xml:id`) refused,
+        // so that the count and usvg never resolve a name to different elements.
+        if node
             .attributes()
-            .find(|a| a.name() == "id")
-            .map(|a| a.value())
-        else {
+            .any(|a| a.name() == "id" && a.namespace().is_some())
+        {
+            return Err("an `id` in a namespace (`xml:id`): give elements a plain `id`".into());
+        }
+        let Some(id) = node.attribute("id") else {
             continue;
         };
         let in_metadata = node
@@ -637,6 +641,7 @@ mod tests {
     #[test]
     fn ids_are_given_once_and_only_to_svgs_elements() {
         assert!(refused("<rect id='a'/><circle id='a'/>").contains("two elements"));
+        assert!(refused("<rect xml:id='p' id='q'/><rect fill='url(#p)'/>").contains("namespace"));
         assert!(
             refused("<metadata><x:d xmlns:x='urn:x' id='p'/></metadata><rect fill='url(#p)'/>")
                 .contains("inside `metadata`")

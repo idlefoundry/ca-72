@@ -16,8 +16,12 @@ roxmltree = "0.20"
 ttf-parser = "0.25"
 png = "0.17"
 serde = { workspace = true }
+# Marketplace packs' signatures, checked offline against the plug-in's keys.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 sha2 = "0.10"
 toml = "0.7"
+# A pack in one file: a ZIP archive, stored or deflated (nothing else read).
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

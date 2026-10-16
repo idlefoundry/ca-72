@@ -6046,3 +6046,44 @@ skins and sell them on a marketplace Idle Foundry hosts. Bundles (one purchase, 
 several plug-ins) are the marketplace's, not the format's: a pack stays for one plug-in.
 Idle Foundry is the seller of record: sellers license Idle Foundry, which licenses buyers (the
 declarations' "authorizes customer licensing"). A buyer gets a pack's updates.
+
+**Pack files and signatures, 2026-10-16.** The owner, of the agent's recommendations for the
+marketplace (a single-file format, offline signatures, no copy protection): "Yes: build the
+single-file pack format and offline signature checking next, locally, with tests."
+
+**Agent decisions** (not separately approved):
+- **A pack file is a ZIP** (`skin_pack::archive`): the folder's files at its top, or in one
+  folder at its top; read in memory within the folder's limits; only stored and deflated
+  entries; encrypted entries and links refused; each entry read no further than its limit,
+  whatever its header says; too many entries refused before any is read. `zip` 8 with its
+  deflate alone (MIT; `flate2`, already built in). **Its extension, `.ifskin`, is a placeholder:
+  the name is the owner's.**
+- **Signatures** (`skin_pack::signature`): Ed25519 (`ed25519-dalek` 2, BSD-3-Clause, with its
+  RustCrypto crates). `signature.toml` signs its key's id, the pack's id and version, the
+  publisher (`marketplace` or `first-party`), the date, and a digest of every other file (each
+  path with its SHA-256). Checked offline against `look::TRUSTED_KEYS`, which is empty: there is
+  no marketplace, and its keys are its owner's to make (`pack_keygen`), the secret never in a
+  repository. Unsigned packs load; a key not known counts as no signature (an older plug-in, a
+  newer key); a signature that does not match refuses the pack. Only a first-party signature
+  allows the `com.idlefoundry.*` prefix; the built-in looks' ids are never an installed pack's.
+- **Updates**: of the same id installed more than once, a signed pack before an unsigned one,
+  then the newer version. An update is added beside its pack; the setting names the id and
+  follows it. The plug-in never asks the network whether there is one.
+- **Not copy protection.** A signature proves provenance and integrity; a pack works however it
+  was obtained (the plug-in is GPL: such a check could lawfully be removed from it).
+- Tools: `pack_keygen`, `pack_sign`, `pack_archive` (`skin-pack`'s examples); `check_pack`
+  reads pack files and takes `--trust <id>:<key>`.
+
+**Evidence (the Mac, 2026-10-16):** `skin-pack`'s tests (archive: a pack file read as its
+folder and written the same, paths out of the pack, a ZIP bomb stopped at its limit, too many
+entries, not a ZIP; signatures: a signed pack known by its publisher, a changed file, version
+or claimed publisher refused, another key not trusted, an unknown key as unsigned) and
+`ca72-panel`'s (a signed pack file loads as published, and as unsigned without its key; a pack
+changed after signing refused; the makers' prefix only with a first-party signature, the
+built-in ids never; an update replaces its pack and an unsigned copy never does). The tools run
+once end to end in a scratch folder (a key made, its secret file `-rw-------`, the starter
+signed, written as a pack file and checked with and without the key), the test key deleted.
+The archive's own test found a bug as it was written: an archive whose every entry began `../`
+(or `/`) had that taken as its one folder and stripped, and its names passed; only a folder a
+pack could hold is stripped now. Also the earlier review's last finding: an id in a namespace
+(`xml:id`) is refused, as usvg reads only the plain `id`.

@@ -47,8 +47,8 @@ packs, so a copy must be given another id before it will load.
 
 ## Installing
 
-A pack is a folder. Put it in the `Skins` folder of Idle Foundry's shared folder, one folder
-per pack:
+A pack is a folder while it is being made, and a single **pack file** (`<name>.ifskin`) as
+the marketplace delivers it. Put either in the `Skins` folder of Idle Foundry's shared folder:
 
 | System | Folder |
 |---|---|
@@ -61,10 +61,85 @@ LOOK after REALISTIC and CLASSIC. A pack that cannot be used is shown with "(CAN
 the reasons are in the plug-in's log. No store login or network check is needed to use an
 installed pack, and none is made.
 
+**Updates.** If the same pack (the same `id`) is installed more than once, the newest version is
+used. A pack's update can simply be added beside it, and the setting, which names the pack by
+its id, follows it. A signed pack is always preferred over an unsigned copy, whatever version
+the copy claims, so a published pack can't be displaced by an unsigned file.
+
 The look chosen is a setting for the computer (`settings.toml`), not something the session
 saves. If the chosen pack is missing or refused, the editor draws the pack's base look
 (REALISTIC or CLASSIC) and keeps the setting, so the pack is used again once it is back. An
 older CA-72 reads only the base look.
+
+## Pack files
+
+A pack file is a ZIP archive of the pack's folder, its files at the top or in one folder at the
+top. It is read as the folder is, within the same limits, without being unpacked to disk. On top
+of the folder's rules:
+
+- only stored or deflated entries are read;
+- encrypted entries and links are refused;
+- an archive with more entries than a pack may hold is refused before anything is read;
+- each entry is read no further than its size limit, whatever its header claims (a "ZIP bomb"
+  stops at the limit).
+
+```bash
+cargo run -p skin-pack --example pack_archive -- path/to/pack night.ifskin
+```
+
+This writes a folder as a pack file: its files in order, the same bytes every time.
+
+## Signatures
+
+When a pack passes the marketplace's review, the marketplace signs it: `signature.toml` in the
+pack, made with the marketplace's secret key. The plug-in checks it **offline**, against public
+keys built into it. There is no login and no network. A signature proves two things: that the
+files are the ones the marketplace reviewed, and who published them.
+
+| The pack | What the plug-in does |
+|---|---|
+| Unsigned | Loads it (anyone's pack, made and shared outside the marketplace). |
+| Signed by a key the plug-in doesn't know (a newer key than an older plug-in has) | Loads it as unsigned. |
+| Signed, but any file, its id or its version changed since | Refuses it. |
+| Signed by the marketplace | Loads it as published by the marketplace. |
+| Signed as first-party | Loads it as published by Idle Foundry. Only these may use the `com.idlefoundry.*` id prefix. |
+
+The built-in looks' own ids can't be taken by any installed pack, signed or not.
+
+What is signed is every field of the signature: its key's id, the pack's id and version, the
+publisher (`marketplace` or `first-party`), the date, and a digest of every file of the pack
+(each path with its SHA-256).
+
+**A signature is neither copy protection nor a licence.** A pack works however it was obtained:
+the plug-in is GPL, so anyone may lawfully remove such a check from it, and protection would
+burden only honest buyers. The pack's licence, and the marketplace's terms with its buyer, say
+what a buyer may do.
+
+The marketplace's tools:
+
+```bash
+cargo run -p skin-pack --example pack_keygen -- market.key
+```
+
+This makes a key. The secret goes to a new file readable only by its owner, and the public half
+is printed for the plug-in's `TRUSTED_KEYS`.
+
+```bash
+cargo run -p skin-pack --example pack_sign -- path/to/pack market.key market-2027 marketplace 2027-01-15
+```
+
+This signs a reviewed pack (`marketplace` or `first-party`).
+
+```bash
+cargo run --release -p ca72-panel --example check_pack -- night.ifskin --trust market-2027:<public key>
+```
+
+This checks a signed pack before the key is built into the plug-in.
+
+**Keys.** The secret key stays on the machine that signs and in an offline backup, never in a
+repository. A plug-in learns of a new key, or a retired one, only when it is updated, so a new
+key is added to the plug-ins well before it is first used. **No key is built into the CA-72
+yet:** until one is, every pack loads as unsigned.
 
 ## Checking a pack
 
@@ -93,6 +168,7 @@ night-panel/
   pictures/knob.png    pictures replacing the realistic look's (optional)
   fonts/Face-Bold.otf  a typeface (optional)
   NOTICES.txt          third-party notices (as their licences ask)
+  signature.toml       the marketplace's signature (it writes this; see Signatures)
   README.md            anything you like
 ```
 
@@ -357,5 +433,6 @@ These are each flagged for separate review, and none is supported:
 - animation;
 - the strip's and the keyboard's pictures and layout;
 - colours of the drawn (classic) parts other than through a drawing;
-- packs as single archive files;
-- packs shared between plug-ins.
+- packs shared between plug-ins (bundles are the marketplace's: several packs sold together);
+- telling the user that a pack has an update (the marketplace does, when the user opens it;
+  the plug-in never asks the network).

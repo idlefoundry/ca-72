@@ -19,6 +19,7 @@ use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
 use serde::Deserialize;
 use skin_pack::paths::{self, FileKind};
+use skin_pack::signature::{Signed, TrustedKey};
 use skin_pack::{Context, Limits, Pack, Report};
 
 use crate::arrangement::Arrangement;
@@ -31,6 +32,15 @@ pub const PLUGIN: &str = "ca-72";
 
 /// The plug-in's own artwork's licence.
 pub const OFFICIAL_LICENCE: &str = "GPL-3.0-or-later";
+
+/// The marketplace's public keys this plug-in trusts, each by the id its signatures name.
+///
+/// None yet: there is no marketplace. Its keys are made by its owner, offline
+/// (`cargo run -p skin-pack --example pack_keygen`), the secret kept where the marketplace signs
+/// and nowhere else, and only the public half put here, a new one added before an old one is
+/// retired (a plug-in does not hear of a key's revocation until it is updated). Until then every
+/// pack loads as unsigned.
+pub const TRUSTED_KEYS: &[TrustedKey] = &[];
 
 /// The built-in looks' ids.
 pub const CLASSIC: &str = "com.idlefoundry.ca72.classic";
@@ -57,6 +67,8 @@ pub struct Look {
     pub licence: String,
     pub creators: Vec<String>,
     pub report: Report,
+    /// Its signature, checked: who published it, if the marketplace did.
+    pub signed: Option<Signed>,
 }
 
 impl std::fmt::Debug for Look {
@@ -86,6 +98,7 @@ impl Look {
             licence: OFFICIAL_LICENCE.into(),
             creators: vec!["Idle Foundry Ltd.".into()],
             report: Report::default(),
+            signed: None,
         }
     }
 
@@ -112,12 +125,14 @@ impl Look {
         self.id == CLASSIC || self.id == REALISTIC
     }
 
-    /// The pack in the folder at `dir`, read and checked: its look, or what rejected it.
-    pub fn open(dir: &Path) -> Result<Look, Report> {
-        Self::open_with(dir, &Limits::default())
+    /// The pack at `path` (a folder, or a pack file, `<name>.ifskin`), read and checked: its
+    /// look, or what rejected it.
+    pub fn open(path: &Path) -> Result<Look, Report> {
+        Self::open_with(path, &Limits::default(), TRUSTED_KEYS)
     }
 
-    pub fn open_with(dir: &Path, limits: &Limits) -> Result<Look, Report> {
+    /// The same, within `limits`, its signature checked against `keys`.
+    pub fn open_with(path: &Path, limits: &Limits, keys: &[TrustedKey]) -> Result<Look, Report> {
         let official = skin::official_pictures();
         let context = Context {
             plugin: PLUGIN,
@@ -125,8 +140,20 @@ impl Look {
             official_licence: OFFICIAL_LICENCE,
             built_in: false,
             test_drawings: true,
+            keys,
         };
-        let pack = Pack::open(dir, limits, &context)?;
+        let pack = Pack::open(path, limits, &context)?;
+        // The built-in looks' own ids are theirs alone: an installed pack, signed or not, never
+        // takes one.
+        if pack.manifest.id == CLASSIC || pack.manifest.id == REALISTIC {
+            let mut report = pack.report;
+            report.reject(
+                "manifest.id",
+                Some(skin_pack::MANIFEST),
+                "the id of a look built into the plug-in",
+            );
+            return Err(report);
+        }
         Self::from_pack(pack, limits)
     }
 
@@ -314,7 +341,15 @@ impl Look {
             licence: m.license.clone(),
             creators: m.creators.iter().map(|c| c.name.clone()).collect(),
             report,
+            signed: pack.signed.clone(),
         })
+    }
+
+    /// Published by Idle Foundry (signed as its own).
+    pub fn first_party(&self) -> bool {
+        self.signed
+            .as_ref()
+            .is_some_and(|s| s.publisher == skin_pack::signature::Publisher::FirstParty)
     }
 }
 
@@ -438,23 +473,62 @@ fn fitting(
     true
 }
 
-/// Every pack in the folder at `dir` (each a folder of its own), read and checked: its look, or
-/// its folder's name and what rejected it. A folder that is not a pack's is passed over.
+/// Every pack in the folder at `dir` (a folder or a pack file each), read and checked against
+/// [`TRUSTED_KEYS`]: its look, or its name there and what rejected it. Something that is not a
+/// pack is passed over (no link is followed). Of the same pack (its id) found more than once,
+/// one is kept ([`supersedes`]): a pack's update, added beside it, is the one used.
 pub fn discover(dir: &Path) -> Vec<Result<Look, (String, Report)>> {
+    discover_with(dir, TRUSTED_KEYS)
+}
+
+pub fn discover_with(dir: &Path, keys: &[TrustedKey]) -> Vec<Result<Look, (String, Report)>> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut folders: Vec<_> = entries
+    let mut found: Vec<_> = entries
         .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter(|e| e.path().join(skin_pack::MANIFEST).is_file())
-        .collect();
-    folders.sort_by_key(std::fs::DirEntry::file_name);
-    folders
-        .into_iter()
-        .take(64)
-        .map(|e| {
-            Look::open(&e.path()).map_err(|r| (e.file_name().to_string_lossy().into_owned(), r))
+        .filter(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => e.path().join(skin_pack::MANIFEST).is_file(),
+            Ok(t) if t.is_file() => skin_pack::archive::is_pack_file(&e.path()),
+            _ => false,
         })
-        .collect()
+        .collect();
+    found.sort_by_key(std::fs::DirEntry::file_name);
+    let mut out: Vec<Result<Look, (String, Report)>> = Vec::new();
+    for e in found.into_iter().take(64) {
+        match Look::open_with(&e.path(), &Limits::default(), keys) {
+            Ok(look) => {
+                let same = out
+                    .iter()
+                    .position(|o| o.as_ref().is_ok_and(|l| l.id == look.id));
+                match same {
+                    Some(i) => {
+                        let replaces = out[i].as_ref().is_ok_and(|old| supersedes(&look, old));
+                        if replaces {
+                            out[i] = Ok(look);
+                        }
+                    }
+                    None => out.push(Ok(look)),
+                }
+            }
+            Err(r) => out.push(Err((e.file_name().to_string_lossy().into_owned(), r))),
+        }
+    }
+    out
+}
+
+/// Whether `a` is used rather than `b`, the same pack: a signed one over an unsigned one (an
+/// unsigned copy, whatever its version, never takes a published pack's place), then the newer.
+fn supersedes(a: &Look, b: &Look) -> bool {
+    match (a.signed.is_some(), b.signed.is_some()) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => newer(&a.version, &b.version),
+    }
+}
+
+/// Whether version `a` (`major.minor.patch`, as a manifest's) is newer than `b`.
+fn newer(a: &str, b: &str) -> bool {
+    let parts = |v: &str| -> Vec<u64> { v.split('.').map(|p| p.parse().unwrap_or(0)).collect() };
+    parts(a) > parts(b)
 }

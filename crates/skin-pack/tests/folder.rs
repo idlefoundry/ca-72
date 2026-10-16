@@ -26,6 +26,7 @@ fn context() -> Context<'static> {
         official_licence: "GPL-3.0-or-later",
         built_in: false,
         test_drawings: true,
+        keys: &[],
     }
 }
 

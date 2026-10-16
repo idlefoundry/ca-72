@@ -5,19 +5,35 @@
 //! marketplace's review must look at (the pack loads, but is not cleared for sale: the checks
 //! never clear anything), and notes. With a PNG's path, writes the panel drawn in the pack's
 //! look, every control at the middle of its travel, in both letterings (`<name>.png` and
-//! `<name>-large.png`). Exits 1 if the pack is rejected.
+//! `<name>-large.png`). Exits 1 if the pack is rejected. The pack may be a folder or a pack file
+//! (`.ifskin`). `--trust <key-id>:<public-key>` checks its signature against that key too (the
+//! marketplace's, before the plug-in has it built in).
 
 use std::path::Path;
 
 use ca72_panel::{CONTROLS, Lettering, Look, Renderer, Scene};
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let mut keys: Vec<skin_pack::signature::TrustedKey> = ca72_panel::look::TRUSTED_KEYS.to_vec();
+    while let Some(i) = args.iter().position(|a| a == "--trust") {
+        let given = args.get(i + 1).cloned().unwrap_or_default();
+        let (id, public) = given.split_once(':').unwrap_or(("", ""));
+        let Some(public) = skin_pack::signature::public_key(public) else {
+            eprintln!("--trust <key-id>:<public key, 64 hexadecimal digits>");
+            std::process::exit(2);
+        };
+        keys.push(skin_pack::signature::TrustedKey {
+            id: Box::leak(id.to_owned().into_boxed_str()),
+            public,
+        });
+        args.drain(i..=(i + 1).min(args.len() - 1));
+    }
     let Some(dir) = args.first() else {
-        eprintln!("check_pack <folder> [preview.png]");
+        eprintln!("check_pack <folder or .ifskin> [preview.png] [--trust <key-id>:<public-key>]");
         std::process::exit(2);
     };
-    let look = match Look::open(Path::new(dir)) {
+    let look = match Look::open_with(Path::new(dir), &skin_pack::Limits::default(), &keys) {
         Ok(look) => look,
         Err(report) => {
             print!("{report}");
@@ -27,7 +43,7 @@ fn main() {
     };
     print!("{}", look.report);
     println!(
-        "LOADS: {} {} ({}), drawn {}, {}{}.",
+        "LOADS: {} {} ({}), drawn {}, {}{}{}.",
         look.name,
         look.version,
         look.licence,
@@ -35,6 +51,13 @@ fn main() {
             "realistic"
         } else {
             "classic"
+        },
+        if look.first_party() {
+            "published by Idle Foundry, "
+        } else if look.signed.is_some() {
+            "published by the marketplace, "
+        } else {
+            "unsigned, "
         },
         if look.fonts.is_some() {
             "in its own typeface"

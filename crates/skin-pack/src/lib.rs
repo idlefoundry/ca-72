@@ -16,11 +16,13 @@
 //! terms stay its own: the plug-in's licence is not applied to a pack, nor a pack's to the
 //! plug-in. A seller's declarations are kept as declared, never as cleared.
 
+pub mod archive;
 pub mod font;
 pub mod licence;
 pub mod manifest;
 pub mod paths;
 pub mod picture;
+pub mod signature;
 pub mod svg;
 
 use std::collections::BTreeMap;
@@ -405,7 +407,7 @@ impl Files {
 }
 
 /// At most `limit` bytes of a file: more is an error (the file grew since its size was read).
-fn read_at_most(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn read_at_most(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let file = std::fs::File::open(path).map_err(|e| format!("cannot be read: {e}"))?;
     let mut bytes = Vec::new();
@@ -433,6 +435,8 @@ pub struct Context<'a> {
     /// Draw each SVG drawing as a test, against its time limit (a pack being installed or
     /// reviewed; a built-in pack's are tested by the plug-in's tests instead).
     pub test_drawings: bool,
+    /// The marketplace's public keys the plug-in trusts (`signature`).
+    pub keys: &'a [signature::TrustedKey],
 }
 
 /// The id prefix kept for the plug-ins' makers' own packs.
@@ -445,13 +449,19 @@ pub struct Pack {
     pub files: Files,
     /// What the checks found (no rejection).
     pub report: Report,
+    /// Its signature, checked: who published it, if the marketplace did.
+    pub signed: Option<signature::Signed>,
 }
 
 impl Pack {
-    /// The pack in the folder at `root`.
-    pub fn open(root: &Path, limits: &Limits, context: &Context<'_>) -> Result<Pack, Report> {
+    /// The pack at `path`: a folder, or a pack file (`<name>.ifskin`).
+    pub fn open(path: &Path, limits: &Limits, context: &Context<'_>) -> Result<Pack, Report> {
         let mut report = Report::default();
-        let files = Files::read_dir(root, limits, &mut report);
+        let files = if archive::is_pack_file(path) {
+            archive::read_file(path, limits, &mut report)
+        } else {
+            Files::read_dir(path, limits, &mut report)
+        };
         Self::check(files, report, limits, context)
     }
 
@@ -473,7 +483,16 @@ impl Pack {
         let Some(manifest) = manifest::read(text, &mut report) else {
             return Err(report);
         };
-        manifest::check(&manifest, &files, context, &mut report);
+        let signed = signature::verify(
+            &files,
+            (&manifest.id, &manifest.version),
+            context.keys,
+            &mut report,
+        );
+        let first_party = signed
+            .as_ref()
+            .is_some_and(|s| s.publisher == signature::Publisher::FirstParty);
+        manifest::check(&manifest, &files, context, first_party, &mut report);
         check_files(&files, &manifest, limits, context, &mut report);
         if report.rejected() {
             Err(report)
@@ -482,6 +501,7 @@ impl Pack {
                 manifest,
                 files,
                 report,
+                signed,
             })
         }
     }
