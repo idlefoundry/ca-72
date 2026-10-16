@@ -35,7 +35,7 @@ use ca72_panel::presets::{
     in_tags,
 };
 use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
-use ca72_panel::{CONTROLS, Kind, Renderer, Scene, Skin, Target, interact};
+use ca72_panel::{CONTROLS, Kind, Lettering, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::editor::HostKey;
 use nih_plug::prelude::*;
@@ -988,7 +988,12 @@ impl Editing {
             dpr,
             width,
             physical_width,
-            renderer: Renderer::with_skin(settings.skin, f64::from(physical_width) / art::W, dpr),
+            renderer: Renderer::with_look(
+                settings.skin,
+                settings.lettering,
+                f64::from(physical_width) / art::W,
+                dpr,
+            ),
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
             strip_scene: StripScene::default(),
@@ -1046,7 +1051,20 @@ impl Editing {
     fn set_look(&mut self, skin: Skin) {
         self.keep_settings(Change::Skin(skin));
         if self.renderer.skin() != skin {
-            self.renderer = Renderer::with_skin(skin, self.renderer.scale(), self.dpr);
+            let lettering = self.renderer.lettering();
+            self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
+            self.composed = None;
+        }
+    }
+
+    /// The editor's lettering printed at `lettering`'s sizes from now on, on this computer
+    /// (R-LETTERING): its panel's renderer made again with them, in the look it is in (the
+    /// tip's, notes' and menus' lettering follow it).
+    fn set_lettering(&mut self, lettering: Lettering) {
+        self.keep_settings(Change::Lettering(lettering));
+        if self.renderer.lettering() != lettering {
+            let skin = self.renderer.skin();
+            self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
             self.composed = None;
         }
     }
@@ -1681,7 +1699,11 @@ impl Editing {
                     self.renderer.fonts(),
                     (x + strip::KEY_W / 2.0, y + strip::KEY_H / 2.0 + 6.0),
                     size,
-                    (self.settings.skin, self.settings.frequency),
+                    (
+                        self.settings.skin,
+                        self.settings.lettering,
+                        self.settings.frequency,
+                    ),
                 );
             }
             StripTarget::Bar(b) => {
@@ -1751,6 +1773,10 @@ impl Editing {
             }
             Pressed::Look(skin) => {
                 self.set_look(skin);
+                return;
+            }
+            Pressed::Lettering(lettering) => {
+                self.set_lettering(lettering);
                 return;
             }
             Pressed::List(chosen) => {
@@ -4532,6 +4558,79 @@ mod tests {
         e.draw();
     }
 
+    /// The settings key's LETTERING (R-LETTERING): STANDARD by default, marked and not to be
+    /// chosen. LARGE prints the panel's and the strip's lettering a size larger, in the look the
+    /// editor is in, the menus' and the tip's with it, and is kept; a look chosen after keeps it;
+    /// STANDARD brings the standard back. In the large lettering the settings' menu still fits
+    /// the window, the panel shown or hidden.
+    #[test]
+    fn the_settings_key_chooses_the_lettering() {
+        let (mut e, _, _) = editing();
+        assert_eq!(
+            (e.settings.lettering, e.renderer.lettering()),
+            (Lettering::Standard, Lettering::Standard)
+        );
+        let tip = e.renderer.text_size();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert_eq!(
+            menu_items(&e)[3..6],
+            [
+                ("LETTERING".to_owned(), false),
+                ("STANDARD".to_owned(), false),
+                ("LARGE".to_owned(), true),
+            ]
+        );
+        assert_eq!(
+            e.learning.menu().map(|m| m.marked.clone()),
+            Some(vec![1, 4, 7])
+        );
+        let standard = e.learning.menu().expect("a menu").size;
+        menu_item(&mut e, "LARGE");
+        assert_eq!(
+            (
+                e.settings.lettering,
+                e.renderer.lettering(),
+                e.renderer.skin()
+            ),
+            (Lettering::Large, Lettering::Large, Skin::Worn)
+        );
+        assert!((e.renderer.text_size() / tip - 1.25).abs() < 1e-9);
+        assert!(e.learning.menu().is_none());
+        e.draw();
+        click(&mut e, key);
+        let m = e.learning.menu().expect("a menu");
+        assert!((m.size / standard - 1.25).abs() < 1e-9);
+        let (w, h) = m.extent(e.renderer.fonts());
+        assert!(m.x >= 0.0 && m.x + w <= art::W && m.y + h <= art::H);
+        assert_eq!(menu_items(&e)[5], ("LARGE".to_owned(), false));
+        menu_item(&mut e, "CLASSIC");
+        assert_eq!(
+            (e.renderer.skin(), e.renderer.lettering()),
+            (Skin::Drawn, Lettering::Large)
+        );
+        e.draw();
+        // The panel hidden: the menu within the view, above the drawer.
+        let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
+        click(&mut e, panel);
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        e.draw();
+        let m = e.learning.menu().expect("a menu");
+        let (_, h) = m.extent(e.renderer.fonts());
+        assert!(m.y >= 0.0 && m.y + h <= DRAWER_TOP, "{} + {h}", m.y);
+        menu_item(&mut e, "STANDARD");
+        assert_eq!(
+            (
+                e.settings.lettering,
+                e.renderer.lettering(),
+                e.renderer.skin()
+            ),
+            (Lettering::Standard, Lettering::Standard, Skin::Drawn)
+        );
+        e.draw();
+    }
+
     /// The settings key's FREQUENCY DIALS (decisions.md R54): SEMITONES by default, each
     /// group's choice marked. HARDWARE turns oscillators 2 and 3's knobs to where the hardware's
     /// dial has their pots, the parameters (the sound) as they were, and the tip still reads
@@ -4544,7 +4643,7 @@ mod tests {
         let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
         click(&mut e, key);
         assert_eq!(
-            menu_items(&e)[3..],
+            menu_items(&e)[6..],
             [
                 ("FREQUENCY DIALS".to_owned(), false),
                 ("SEMITONES".to_owned(), false),
@@ -4555,7 +4654,7 @@ mod tests {
             e.learning
                 .menu()
                 .map(|m| (m.heads.clone(), m.marked.clone())),
-            Some((vec![0, 3], vec![1, 4]))
+            Some((vec![0, 3, 6], vec![1, 4, 7]))
         );
         // Oscillator 2 at +5 semitones, oscillator 3's pot at its clockwise end (+8.22).
         let ps: Arc<dyn Params> = params.clone();
@@ -4596,7 +4695,7 @@ mod tests {
         click(&mut e, key);
         assert_eq!(
             e.learning.menu().map(|m| m.marked.clone()),
-            Some(vec![1, 5])
+            Some(vec![1, 4, 8])
         );
         let away = at(&e, (0.0, 0.0));
         click(&mut e, away);
@@ -6967,6 +7066,58 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut e, _host, _params) = editing_with(Library::at(dir.path()));
         window_frame(&mut e).save_png(out).unwrap();
+    }
+
+    /// The large lettering (R-LETTERING) beside the standard, for a look: in
+    /// `$CA72_LETTERING_PNG`, the folder, the window as it opens on a 1920 by 1080 screen (1380
+    /// wide) in each look and lettering, `<look>-<lettering>.png`; and in the realistic look with
+    /// the settings' menu open, `settings-<lettering>.png`, and CUTOFF FREQUENCY's,
+    /// `knob-<lettering>.png`.
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_lettering_pngs() {
+        let Some(out) = std::env::var_os("CA72_LETTERING_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        for (name, lettering) in [
+            ("standard", Lettering::Standard),
+            ("large", Lettering::Large),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let host = Arc::new(Host {
+                api: Some(PluginApi::Clap),
+                ..Default::default()
+            });
+            let context: Arc<dyn GuiContext> = host.clone();
+            let mut e = Editing::new(
+                context,
+                Arc::new(Ca72Params::default()),
+                Arc::new(Meters::default()),
+                (1380, 1380, 1.0),
+                Library::at(dir.path()),
+                |_| None,
+            );
+            e.set_lettering(lettering);
+            for (look, skin) in [("classic", Skin::Drawn), ("realistic", Skin::Worn)] {
+                e.set_look(skin);
+                window_frame(&mut e)
+                    .save_png(out.join(format!("{look}-{name}.png")))
+                    .unwrap();
+            }
+            let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+            click(&mut e, key);
+            window_frame(&mut e)
+                .save_png(out.join(format!("settings-{name}.png")))
+                .unwrap();
+            let away = at(&e, (0.0, 0.0));
+            click(&mut e, away);
+            let knob = at(&e, centre("cutoff"));
+            right_click(&mut e, knob);
+            window_frame(&mut e)
+                .save_png(out.join(format!("knob-{name}.png")))
+                .unwrap();
+        }
     }
 
     /// VOICES dimmed where it does nothing and lit where it counts (decisions.md R64), in

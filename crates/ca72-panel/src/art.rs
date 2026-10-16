@@ -29,9 +29,59 @@ pub const STRIP_H: f64 = 850.0;
 /// The drawing's height: the panel and the strip.
 pub const H: f64 = PANEL_H + STRIP_H;
 
-/// Lettering sizes: the legends, the dials' numbers, the section titles.
-const LEG: f64 = 19.0;
-const NUM: f64 = 15.0;
+/// How large the lettering is printed (R-LETTERING): as the photograph has it, or a size
+/// larger for those who find that hard to read at the size the editor opens, chosen in the
+/// settings' menu. LARGE moves four legends clear of what grew beside them; the controls stay
+/// where they are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Lettering {
+    #[default]
+    Standard,
+    Large,
+}
+
+impl Lettering {
+    /// The panel's legends.
+    pub const fn legend(self) -> f64 {
+        match self {
+            Lettering::Standard => 19.0,
+            Lettering::Large => 22.0,
+        }
+    }
+
+    /// The dials' numbers and the panel's small print (ON, LO and HI, the left hand's).
+    pub const fn number(self) -> f64 {
+        match self {
+            Lettering::Standard => 15.0,
+            Lettering::Large => 17.0,
+        }
+    }
+
+    /// The strip's legends.
+    pub const fn strip_legend(self) -> f64 {
+        match self {
+            Lettering::Standard => 21.0,
+            Lettering::Large => 23.0,
+        }
+    }
+
+    /// The strip's small print (the readouts' units, the display's L and R).
+    pub const fn strip_small(self) -> f64 {
+        match self {
+            Lettering::Standard => 16.0,
+            Lettering::Large => 18.0,
+        }
+    }
+
+    /// The tip's, a note's and the menus' lettering, against the standard's.
+    pub const fn text(self) -> f64 {
+        match self {
+            Lettering::Standard => 1.0,
+            Lettering::Large => 1.25,
+        }
+    }
+}
+
 /// The section titles' capitals are printed 38.5 units tall (the typeface's are 0.74 em).
 const TITLE: f64 = 52.0;
 /// The baseline of the section titles along the panel's foot.
@@ -75,6 +125,8 @@ pub(crate) const LH_PRIORITY: f64 = 95.0;
 const LH_PRIORITY_LABEL: f64 = 108.0;
 pub(crate) const LH_RETRIGGER: f64 = 185.0;
 const LH_RETRIGGER_LABEL: f64 = 104.0;
+/// RETRIGGER's centre in the large lettering: its right end as clear of its switch.
+const LH_RETRIGGER_LABEL_LARGE: f64 = 96.0;
 pub(crate) const LH_WHEELS: [f64; 2] = [82.0, 204.0];
 /// The wheels' centre (25 lower than A6 had it, for NOTE PRIORITY's and RETRIGGER's rows).
 pub(crate) const WHEEL_Y: f64 = 540.0;
@@ -187,7 +239,8 @@ fn text(s: &mut Svg, x: f64, y: f64, t: &str, size: f64, style: Style, start: bo
 }
 
 fn legend(s: &mut Svg, x: f64, y: f64, t: &str) {
-    text(s, x, y, t, LEG, Style::Legend, false, "");
+    let size = s.1.legend();
+    text(s, x, y, t, size, Style::Legend, false, "");
 }
 
 fn lettered(s: &mut Svg, x: f64, y: f64, t: &str, size: f64) {
@@ -391,6 +444,7 @@ fn marks(dial: Dial) -> DialMarks {
 
 fn draw_dial(s: &mut Svg, cx: f64, cy: f64, dial: Dial) {
     let d = marks(dial);
+    let num = s.1.number();
     put!(s, "<g transform='translate({} {})'>", N(cx), N(cy));
     for (a, r0, r1, w) in d.ticks {
         let (x0, y0) = polar(r0, a);
@@ -400,13 +454,13 @@ fn draw_dial(s: &mut Svg, cx: f64, cy: f64, dial: Dial) {
     for (a, t, at) in d.labels {
         // Wider numbers sit a little further out at the sides.
         let r = at.unwrap_or(
-            d.r + 0.3 * NUM * STRETCH * (t.chars().count() as f64 - 1.0) * rad(a).sin().abs(),
+            d.r + 0.3 * num * STRETCH * (t.chars().count() as f64 - 1.0) * rad(a).sin().abs(),
         );
         let (x, y) = polar(r, a);
-        lettered(s, x, y, t, NUM);
+        lettered(s, x, y, t, num);
     }
     for (x, y, t) in d.captions {
-        lettered(s, x, y, t, NUM - 1.0);
+        lettered(s, x, y, t, num - 1.0);
     }
     s.0.push_str("</g>");
 }
@@ -435,6 +489,8 @@ pub struct Layout {
     legend_r: [[f64; 6]; 3],
     /// Each title's width if spaced out to its printed one.
     titles: [Option<f64>; 5],
+    /// The lettering's size.
+    lettering: Lettering,
 }
 
 /// The section titles: their printed extent along the foot, text and baseline.
@@ -480,6 +536,12 @@ fn path_box(d: &str) -> [f64; 4] {
 impl Layout {
     /// Measures the lettering, as the mock-up did once the page's fonts had loaded.
     pub fn measure(fonts: &Fonts) -> Self {
+        Self::measure_in(fonts, Lettering::Standard)
+    }
+
+    /// The same, the lettering printed at `lettering`'s sizes.
+    pub fn measure_in(fonts: &Fonts, lettering: Lettering) -> Self {
+        let num = lettering.number();
         let (ascent, descent) = fonts.extent(Weight::Bold);
         let mut legend_r = [[SIX_LEGEND; 6]; 3];
         for set in [Legends::Ranges, Legends::Waves12, Legends::Waves3] {
@@ -496,13 +558,13 @@ impl Layout {
                         p[3] * GLYPH + 1.5,
                     ]
                 } else {
-                    let adv = fonts.advance(texts[i], NUM, Weight::Bold, 0.0);
-                    let y0 = NUM * 0.36 - ascent * NUM;
+                    let adv = fonts.advance(texts[i], num, Weight::Bold, 0.0);
+                    let y0 = num * 0.36 - ascent * num;
                     [
                         -adv / 2.0 * STRETCH - 0.35,
                         y0 - 0.35,
                         adv / 2.0 * STRETCH + 0.35,
-                        y0 + (ascent + descent) * NUM + 0.35,
+                        y0 + (ascent + descent) * num + 0.35,
                     ]
                 };
                 let (x1, y1) = polar(SIX_TICK.0, a);
@@ -531,7 +593,16 @@ impl Layout {
         let titles = TITLES.map(|(x0, x1, t, _)| {
             (fonts.advance(t, TITLE, Weight::Bold, 0.0) <= x1 - x0).then_some(x1 - x0)
         });
-        Self { legend_r, titles }
+        Self {
+            legend_r,
+            titles,
+            lettering,
+        }
+    }
+
+    /// The lettering's size.
+    pub fn lettering(&self) -> Lettering {
+        self.lettering
     }
 
     /// Where a selector's legend `i` is, about its axis.
@@ -557,7 +628,7 @@ pub fn document(view: [f64; 4], px: u32, py: u32, body: &str) -> String {
 /// Everything that does not move: the wood, the panel's face and lettering, the dials'
 /// marks, and the parts with no parameter (PHONES, the controller's jacks), dimmed.
 pub fn background(layout: &Layout) -> String {
-    let mut s = Svg::default();
+    let mut s = Svg(String::new(), layout.lettering);
     wood(&mut s);
     panel(&mut s, layout, Ink::All);
     strip_face(&mut s);
@@ -578,7 +649,7 @@ enum Ink {
 /// The print alone, as the background has it: the face's and the column's lettering, rules,
 /// dials' marks and selectors' legends, and the grip's lines in the corner.
 pub fn printed(layout: &Layout) -> String {
-    let mut s = Svg::default();
+    let mut s = Svg(String::new(), layout.lettering);
     grip(&mut s);
     panel(&mut s, layout, Ink::Print);
     column(&mut s, Ink::Print);
@@ -827,9 +898,12 @@ fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
     legend(s, 1022.0, 57.0, "WAVEFORM");
     legend(s, 822.0, 260.0, "OSCILLATOR –2");
     legend(s, 822.0, 471.0, "OSCILLATOR –3");
-    // Printed smaller than its neighbours.
-    lettered(s, 488.0, 490.0, "OSC. 3", 16.0);
-    lettered(s, 488.0, 509.0, "CONTROL", 16.0);
+    // Printed smaller than its neighbours; in the large lettering 10 higher, clear of RANGE's
+    // 32' beside it, which grows with the numbers.
+    let large = s.1 == Lettering::Large;
+    let up = if large { 10.0 } else { 0.0 };
+    lettered(s, 488.0, 490.0 - up, "OSC. 3", 16.0);
+    lettered(s, 488.0, 509.0 - up, "CONTROL", 16.0);
     // MIXER: five rows, the oscillators' VOLUME joined to their rockers by a line.
     legend(s, 1221.0, 59.0, "VOLUME");
     for (i, y) in [170.0, 274.0, 377.0, 481.0, 583.0].into_iter().enumerate() {
@@ -851,16 +925,25 @@ fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
     legend(s, 1910.0, 114.0, "FILTER");
     legend(s, 1910.0, 134.0, "MODE");
     legend(s, 1860.0, 207.0, "LO");
-    legend(s, 1954.0, 207.0, "HI");
+    // In the large lettering the legends right of the switches end where the switches do
+    // (1961), the second ON clear of ATTACK TIME's 200; KEYBOARD CONTROL's lines are 20 apart
+    // as the other legends' of two lines are, in the middle between its switches.
+    let right = if large { 1944.0 } else { 1954.0 };
+    let keyboard = if large {
+        [426.0, 446.0]
+    } else {
+        [431.0, 448.0]
+    };
+    legend(s, right, 207.0, "HI");
     legend(s, 1910.0, 236.0, "FILTER");
     legend(s, 1910.0, 256.0, "MODULATION");
-    legend(s, 1954.0, 329.0, "ON");
-    legend(s, 1954.0, 350.0, "ON");
+    legend(s, right, 329.0, "ON");
+    legend(s, right, 350.0, "ON");
     legend(s, 1837.0, 385.0, "1");
-    legend(s, 1910.0, 431.0, "KEYBOARD");
-    legend(s, 1910.0, 448.0, "CONTROL");
+    legend(s, 1910.0, keyboard[0], "KEYBOARD");
+    legend(s, 1910.0, keyboard[1], "CONTROL");
     legend(s, 1837.0, 485.0, "2");
-    legend(s, 1954.0, 523.0, "ON");
+    legend(s, right, 523.0, "ON");
     // MODIFIERS.
     lettered(s, 2282.0, 31.0, "FILTER", 31.0);
     legend(s, 2081.0, 55.0, "CUTOFF FREQUENCY");
@@ -951,7 +1034,8 @@ fn selector_marks(s: &mut Svg, c: &Control, set: Legends, layout: &Layout) {
                 N(3.0 / GLYPH)
             );
         } else {
-            lettered(s, 0.0, 0.0, t, NUM);
+            let num = s.1.number();
+            lettered(s, 0.0, 0.0, t, num);
         }
         s.0.push_str("</g>");
     }
@@ -1012,17 +1096,22 @@ fn column(s: &mut Svg, ink: Ink) {
     }
     legend(s, LH_LABEL, LH_ROWS[0], "GLIDE");
     legend(s, LH_LABEL, LH_ROWS[1], "DECAY");
-    lettered(s, LH_ROCKER + 36.0, LH_ROWS[0] + 34.0, "ON", NUM);
-    lettered(s, LH_ROCKER + 36.0, LH_ROWS[1] + 34.0, "ON", NUM);
+    let num = s.1.number();
+    lettered(s, LH_ROCKER + 36.0, LH_ROWS[0] + 34.0, "ON", num);
+    lettered(s, LH_ROCKER + 36.0, LH_ROWS[1] + 34.0, "ON", num);
     // NOTE PRIORITY, its lever's places round it as QUALITY's are (LAST, the lever out, above
     // it; LOW and HIGH under its ends), and RETRIGGER, its ON as GLIDE's.
     legend(s, LH_PRIORITY_LABEL, LH_PRIORITY, "PRIORITY");
-    legend(s, LH_RETRIGGER_LABEL, LH_RETRIGGER, "RETRIGGER");
-    lettered(s, LH_ROCKER + 36.0, LH_RETRIGGER + 34.0, "ON", NUM);
+    let retrigger = match s.1 {
+        Lettering::Standard => LH_RETRIGGER_LABEL,
+        Lettering::Large => LH_RETRIGGER_LABEL_LARGE,
+    };
+    legend(s, retrigger, LH_RETRIGGER, "RETRIGGER");
+    lettered(s, LH_ROCKER + 36.0, LH_RETRIGGER + 34.0, "ON", num);
     let (px, py) = (LH_ROCKER, LH_PRIORITY);
-    lettered(s, px, py - 33.0, "LAST", NUM);
-    lettered(s, px - 40.0, py + 38.0, "LOW", NUM);
-    lettered(s, px + 40.0, py + 38.0, "HIGH", NUM);
+    lettered(s, px, py - 33.0, "LAST", num);
+    lettered(s, px - 40.0, py + 38.0, "LOW", num);
+    lettered(s, px + 40.0, py + 38.0, "HIGH", num);
     let label_y = WHEEL_Y + 73.0 * WHEEL_SCALE + 16.0;
     legend(s, LH_WHEELS[0], label_y, "PITCH");
     legend(s, LH_WHEELS[1], label_y, "MOD.");

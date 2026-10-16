@@ -1,6 +1,7 @@
 //! Renders the panel to a PNG: `cargo run -p ca72-panel --example png -- out.png [scale]`
 //! (pixels a panel unit, 0.5 by default); `CA72_SKIN=worn` in the worn skin; `CA72_MONO=1` the
-//! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places).
+//! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places); `CA72_LETTERING=
+//! large` in the large lettering.
 //! `CA72_STANDALONE=1` shows the standalone keyboard's TYPING and PANIC controls.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
@@ -14,7 +15,11 @@ fn main() {
         Ok("worn") => Skin::Worn,
         _ => Skin::Drawn,
     };
-    let mut r = Renderer::with_skin(skin, scale, 1.0);
+    let lettering = match std::env::var("CA72_LETTERING").as_deref() {
+        Ok("large") => ca72_panel::Lettering::Large,
+        _ => ca72_panel::Lettering::Standard,
+    };
+    let mut r = Renderer::with_look(skin, lettering, scale, 1.0);
     let built = t0.elapsed();
     let mut scene = Scene::default();
     // The plugin's defaults: as the mock-up was drawn; the strip's knobs at what its readouts

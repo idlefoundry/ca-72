@@ -16,7 +16,7 @@ pub mod strip;
 mod svg;
 pub mod ultra;
 
-pub use art::{H, Layout, PLATE_NAME, W};
+pub use art::{H, Layout, Lettering, PLATE_NAME, W};
 pub use controls::{CONTROLS, Control, Kind};
 pub use interact::Target;
 pub use render::{Renderer, Scene};

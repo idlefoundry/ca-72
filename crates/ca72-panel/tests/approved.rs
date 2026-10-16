@@ -8,9 +8,13 @@
 //! strip and the face are compared, the plate's place there left out. The last column's head,
 //! above POWER's lamp, is left out: QUALITY, its toggle and ULTRA's lamp came after the mock-up
 //! and were approved in their own (decisions.md R47, R48).
+//!
+//! The large lettering (R-LETTERING, a setting) is compared with `approved-large.png`: the
+//! same mock-up, but where the large lettering changes the drawing, the renderer's pixels, as
+//! the owner approved them on 2026-10-15 (as the switch column has the renderer's).
 
 use ca72_panel::art::{COL, PANEL_H, PH, PLATE_H, PLATE_X, PLATE_Y, TOP, W};
-use ca72_panel::{CONTROLS, Renderer, Scene};
+use ca72_panel::{CONTROLS, Lettering, Renderer, Scene, Skin};
 use resvg::tiny_skia::Pixmap;
 
 /// The width of the mock-up's column, left of the panel.
@@ -33,9 +37,19 @@ fn outside_quality(x: u32, y: u32) -> bool {
 
 #[test]
 fn the_panel_is_drawn_as_approved() {
-    let approved = Pixmap::load_png(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/approved.png"))
+    drawn_as_approved(Lettering::Standard, "approved.png");
+}
+
+#[test]
+fn the_panel_in_the_large_lettering_is_drawn_as_approved() {
+    drawn_as_approved(Lettering::Large, "approved-large.png");
+}
+
+/// The panel drawn in `lettering` against the approved drawing in `file`.
+fn drawn_as_approved(lettering: Lettering, file: &str) {
+    let approved = Pixmap::load_png(format!("{}/tests/{file}", env!("CARGO_MANIFEST_DIR")))
         .expect("the approved panel");
-    let mut r = Renderer::new(1.0, 1.0);
+    let mut r = Renderer::with_look(Skin::Drawn, lettering, 1.0, 1.0);
     r.render(&Scene {
         values: [0.5; CONTROLS.len()],
         ..Scene::default()
@@ -70,7 +84,7 @@ fn the_panel_is_drawn_as_approved() {
     let allowed = (W * 1057.0 / 100.0) as usize;
     // The margin, for the record on each machine (`-- --nocapture`).
     println!(
-        "the panel as drawn against approved.png: mean difference {mean:.3}, {strong} pixels 32 levels or more apart (passes under 1.5 and {allowed})"
+        "the panel as drawn against {file}: mean difference {mean:.3}, {strong} pixels 32 levels or more apart (passes under 1.5 and {allowed})"
     );
     // Text rasterises a little lighter here than in the browser that drew the mock-up.
     assert!(

@@ -5775,3 +5775,62 @@ The earlier no-device native launch/save/restore/close checks remain scoped to
 audio/MIDI, hotplug, latency, minimum-OS runtime or external-host matrix for this
 release. Immediate close during cold preparation remains untested. The known brief
 Linux host/compositor panel stretch is deferred and listed in the release notes.
+
+## R-LETTERING. LETTERING: a larger print, a setting
+
+**Owner decisions, 2026-10-15.** The owner reported complaints about readability from people
+using the plug-in, and later that "users were complaining about the size of the menu
+lettering as well". At the size the editor opens on a 1920 by 1080 screen (1380 logical pixels
+wide, 0.444 of the drawing), the panel's legends were 8.4 pixels and its dials' numbers 6.7.
+Shown the editor rendered at that size with the lettering as it was, at legends 25 and numbers
+20, and at a middle step, the owner asked "what about slightly smaller text?" and chose the
+middle step: "Go with the middle size: fix the four tight spots (RETRIGGER, KEYBOARD CONTROL,
+OSC. 3 CONTROL, ON/ON), update the approval test, and show me before/after renders before
+anything is merged." Shown those, the owner asked to "make the increased font size a menu
+option": "this is just SOME people, so I want it as an option, not as a general change."
+
+**Agent decisions, 2026-10-15** (not separately approved):
+- **The setting.** The settings' menu has LETTERING between LOOK and FREQUENCY DIALS:
+  STANDARD (the default, the panel as it was, to the pixel) and LARGE. It is this computer's,
+  kept in `settings.toml` as `lettering`, "standard" or "large" (anything else standard), in
+  both looks; a look chosen keeps it (`art::Lettering`, `Renderer::with_look`,
+  `Editing::set_lettering`).
+- **LARGE's sizes.** The panel's legends 19 to 22 units and its numbers (dials' numbers, ON,
+  LO and HI, the left hand's small print) 15 to 17; the strip's legends 21 to 23 and its small
+  print (dB, L and R) 16 to 18. On screen at 0.444: legends 9.8 pixels, numbers 7.5, the
+  strip's 10.2 and 8.0. The section titles, the tabs' caps, SAVE, the displays and OSC. 3
+  CONTROL (printed smaller than its neighbours, 16) are as they were.
+- **LARGE's menus.** The tip, the notes and every menu (the settings', each control's) a
+  quarter larger: menus 13.8 to 17.25 logical pixels, the tip 12 to 15. On a window the size
+  of a 1920 by 1080 screen's the settings' menu is then too tall to drop below its key and is
+  moved up within the window, over the rail's right end, as any menu that does not fit is.
+- **Rejected: legends 25, numbers 20.** About a dozen collisions with the controls where they
+  are: CUTOFF FREQUENCY into EMPHASIS, FILTER MODULATION over the divider, OSCILLATOR MODULATION
+  and MODULATION MIX across theirs, RANGE on its 16' and 8'. That size needs the panel laid out
+  again, not its print enlarged.
+- **The four tight spots, in LARGE only, each control where it was.** RETRIGGER's centre 104
+  to 96, its right end clear of its switch. KEYBOARD and CONTROL 431 and 448 to 426 and 446:
+  20 apart as the other two-line legends are (17 had them touching at 22), centred in the gap
+  between their switches. OSC. 3 and CONTROL 10 higher (480, 499), clear of RANGE's 32' beside
+  them, which grows with the numbers. The column's right-hand legends (HI and the three ONs)
+  1954 to 1944, their right ends at the switches' (1961), the second ON clear of ATTACK TIME's
+  200.
+- **The approval tests.** `approved.png` is unchanged and the standard lettering is still
+  compared with it. LARGE is compared with `approved-large.png`: the same mock-up, but where
+  the large lettering changes the drawing (100,676 pixels of the panel, the drawn skin at one
+  unit a pixel, every control at half its travel) the renderer's pixels, as the switch column
+  has the renderer's (R46); the limits are the same. Over the large lettering the test guards
+  the drawing as reviewed, not the mock-up.
+
+**Evidence (the Mac, 2026-10-15):** The standard lettering's renders (both looks, 2760 pixels
+wide) are the same to the pixel as `main`'s before the change; the large lettering's the same
+to the pixel as the renders the owner reviewed. `the_panel_is_drawn_as_approved`: mean
+difference 1.444, 30,745 pixels 32 levels or more apart (limits 1.5 and 32,851), as before;
+`the_panel_in_the_large_lettering_is_drawn_as_approved`: 0.965 and 17,557.
+`cargo test -p ca72-panel`: 47 passed, 7 ignored; `cargo test -p ca72-plugin --lib --tests`:
+the library's 236 passed, 14 ignored, `the_settings_key_chooses_the_lettering` among them, and
+every integration test passed; clippy with `-D warnings` on both crates. `the_lettering_pngs` (ignored, `$CA72_LETTERING_PNG`) writes the
+window in each look and lettering and with the menus open. Not tried: a host; the presets'
+drawer and the keyboard view, whose lettering LARGE leaves as it was; spacing the other
+two-line legends wider in LARGE (OSCILLATOR MODULATION, FILTER MODE, FILTER MODULATION,
+EXTERNAL INPUT VOLUME sit tighter at 20 apart, not touching).

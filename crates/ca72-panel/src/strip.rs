@@ -88,10 +88,9 @@ pub const DISPLAY: (f64, f64, f64, f64) = (
     CD - CW + 2.0 * UNIT_HALF,
     124.0,
 );
-/// The font sizes: section titles, banks' and knobs' legends, small print.
+/// The section titles' size (the legends' and the small print's are the lettering's:
+/// `art::Lettering`).
 const TITLE: f64 = 52.0;
-const LEGEND: f64 = 21.0;
-const SMALL: f64 = 16.0;
 
 /// The banks of tabs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -534,6 +533,7 @@ pub(crate) fn screen_bezel(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64)) {
 pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
     let top = PANEL_H + RAIL;
     let foot = art::H;
+    let (legend, small) = (s.1.strip_legend(), s.1.strip_small());
     let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64| {
         put!(
             s,
@@ -563,29 +563,29 @@ pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
     }
     for b in Bank::ALL {
         let (_, y, _, _) = b.recess();
-        text(s, b.x(), y - 26.0, b.title(), LEGEND);
+        text(s, b.x(), y - 26.0, b.title(), legend);
     }
     let knob_legends = [
         "VOICES", "ENTROPY", "WIDTH", "DETUNE", "DRIVE", "LEVEL", "INNER",
     ];
     for ((_, x, y), t) in KNOBS.iter().zip(knob_legends) {
-        text(s, *x, y - 109.0, t, LEGEND);
+        text(s, *x, y - 109.0, t, legend);
     }
     for r in Readout::ALL {
         if let Some(u) = r.unit() {
             let (x, y, w, _) = r.window();
-            text(s, x + w + 26.0, y + READOUT.1 / 2.0, u, SMALL);
+            text(s, x + w + 26.0, y + READOUT.1 / 2.0, u, small);
         }
     }
     let (dx, dy, dw, dh) = DISPLAY;
-    text(s, dx - 22.0, dy + dh / 2.0, "L", SMALL);
-    text(s, dx + dw + 22.0, dy + dh / 2.0, "R", SMALL);
+    text(s, dx - 22.0, dy + dh / 2.0, "L", small);
+    text(s, dx + dw + 22.0, dy + dh / 2.0, "R", small);
     text(
         s,
         dx + dw / 2.0,
         dy - 32.0,
         "WHERE THE VOICES SOUND",
-        LEGEND,
+        legend,
     );
 }
 

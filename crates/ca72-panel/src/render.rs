@@ -10,7 +10,7 @@ use resvg::tiny_skia::{
 };
 use resvg::usvg;
 
-use crate::art::{self, Blend, H, Layer, Layout, W};
+use crate::art::{self, Blend, H, Layer, Layout, Lettering, W};
 use crate::controls::{CONTROLS, Kind, Mark, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
@@ -184,8 +184,14 @@ impl Renderer {
 
     /// A renderer drawing the panel in `skin`.
     pub fn with_skin(skin: Skin, scale: f64, ui: f64) -> Self {
+        Self::with_look(skin, Lettering::Standard, scale, ui)
+    }
+
+    /// A renderer drawing the panel in `skin`, its lettering printed at `lettering`'s sizes
+    /// (and the tip's, a note's and the menus' with it).
+    pub fn with_look(skin: Skin, lettering: Lettering, scale: f64, ui: f64) -> Self {
         let fonts = Fonts::new();
-        let layout = Layout::measure(&fonts);
+        let layout = Layout::measure_in(&fonts, lettering);
         let options = usvg::Options {
             fontdb: fonts.database(),
             font_family: FAMILY.into(),
@@ -219,6 +225,11 @@ impl Renderer {
     /// The skin the panel is drawn in.
     pub fn skin(&self) -> Skin {
         self.skin
+    }
+
+    /// The size its lettering is printed at.
+    pub fn lettering(&self) -> Lettering {
+        self.layout.lettering()
     }
 
     /// Redraws everything at a new scale.
@@ -448,13 +459,7 @@ impl Renderer {
             out.push(learn::ring(c));
         }
         if let Some((t, x, y)) = &scene.tip {
-            out.push(art::tip(
-                &self.fonts,
-                *x,
-                *y,
-                t,
-                TIP_TEXT * self.ui / self.scale,
-            ));
+            out.push(art::tip(&self.fonts, *x, *y, t, self.text_size()));
         }
         if let Some(n) = &scene.note {
             out.push(learn::note(&self.fonts, n));
@@ -468,7 +473,7 @@ impl Renderer {
     /// The lettering's size of the tip, a note and a menu, in drawing units (its logical pixels at
     /// this scale).
     pub fn text_size(&self) -> f64 {
-        TIP_TEXT * self.ui / self.scale
+        TIP_TEXT * self.layout.lettering().text() * self.ui / self.scale
     }
 
     /// A layer's pixels, aligned to the frame's: their place and their image (its body, its

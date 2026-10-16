@@ -38,9 +38,9 @@ pub fn escape(s: &str) -> String {
     out
 }
 
-/// An SVG document being written.
+/// An SVG document being written, and the size its lettering is printed at.
 #[derive(Debug, Default)]
-pub struct Svg(pub String);
+pub struct Svg(pub String, pub crate::art::Lettering);
 
 impl Svg {
     /// Writes formatted text.

@@ -12,7 +12,7 @@ use ca72_panel::fonts::Fonts;
 use ca72_panel::learn::{Menu, Note, PANEL, Tone, above};
 use ca72_panel::presets::{MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone};
 use ca72_panel::strip::{StripControl, span};
-use ca72_panel::{Skin, Target};
+use ca72_panel::{Lettering, Skin, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 
 use crate::learn::{Assigned, Cc, LEARNABLE, MidiMap, RESERVED_TEXT, index, reserved};
@@ -83,10 +83,11 @@ pub enum Item {
     /// Tesla lamp, through the shutter) shown, or hidden (the panel blank there).
     Show,
     Hide,
-    /// The settings' (decisions.md R51): the look the editor is drawn in, and how the
-    /// FREQUENCY knobs' dials read (R54), each under its group's head (which does
-    /// nothing).
+    /// The settings' (decisions.md R51): the look the editor is drawn in, its lettering's
+    /// size (R-LETTERING), and how the FREQUENCY knobs' dials read (R54), each under its
+    /// group's head (which does nothing).
     Look(Skin),
+    Lettering(Lettering),
     Dials(Law),
     Head,
     StandaloneSettings,
@@ -114,6 +115,8 @@ pub enum Pressed {
     Indicator(bool),
     /// The settings' menu: the editor drawn in this look.
     Look(Skin),
+    /// The settings' menu: the editor's lettering printed at this size.
+    Lettering(Lettering),
     /// The settings' menu: the FREQUENCY knobs read through this law.
     Dials(Law),
     StandaloneSettings,
@@ -300,20 +303,24 @@ impl Learning {
     /// The settings' menu (decisions.md R51; the rail's settings key, the owner: "We can let
     /// people change their skin there"), opened with its top right corner at (`x`, `y`): under
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
-    /// marked); under FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`,
-    /// marked: decisions.md R54).
+    /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
+    /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
+    /// decisions.md R54).
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, law): (Skin, Law),
+        (skin, lettering, law): (Skin, Lettering, Law),
     ) {
         #[allow(unused_mut)]
         let mut items = vec![
             (Item::Head, "LOOK"),
             (Item::Look(Skin::Worn), "REALISTIC"),
             (Item::Look(Skin::Drawn), "CLASSIC"),
+            (Item::Head, "LETTERING"),
+            (Item::Lettering(Lettering::Standard), "STANDARD"),
+            (Item::Lettering(Lettering::Large), "LARGE"),
             (Item::Head, "FREQUENCY DIALS"),
             (Item::Dials(Law::Semitones), "SEMITONES"),
             (Item::Dials(Law::Hardware), "HARDWARE"),
@@ -323,7 +330,9 @@ impl Learning {
             items.push((Item::Head, "STANDALONE"));
             items.push((Item::StandaloneSettings, "AUDIO & MIDI…"));
         }
-        let current = |it: &Item| *it == Item::Look(skin) || *it == Item::Dials(law);
+        let current = |it: &Item| {
+            *it == Item::Look(skin) || *it == Item::Lettering(lettering) || *it == Item::Dials(law)
+        };
         let mut menu = Menu {
             x,
             y,
@@ -334,7 +343,10 @@ impl Learning {
                 .map(|(it, t)| {
                     let choosable = matches!(
                         it,
-                        Item::Look(_) | Item::Dials(_) | Item::StandaloneSettings
+                        Item::Look(_)
+                            | Item::Lettering(_)
+                            | Item::Dials(_)
+                            | Item::StandaloneSettings
                     ) && !current(it);
                     ((*t).to_owned(), choosable)
                 })
@@ -398,6 +410,7 @@ impl Learning {
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
+            (Some(Item::Lettering(l)), _) => return Pressed::Lettering(*l),
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
             _ => {}
         }

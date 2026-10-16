@@ -1,6 +1,7 @@
 //! What the plug-in keeps for the computer, not for the session (decisions.md R48,
 //! R51, R54): QUALITY's indicator shown or not, whether ULTRA's note has been read,
-//! the look (the skin) the editor is drawn in and how the FREQUENCY knobs' dials read. In the
+//! the look (the skin) the editor is drawn in, its lettering's size and how the FREQUENCY
+//! knobs' dials read. In the
 //! shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, and as one changes only that key written, the file read again under a lock
@@ -11,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use ca72::freq_dial::Law;
-use ca72_panel::Skin;
+use ca72_panel::{Lettering, Skin};
 
 use crate::library::{shared_dir, write};
 
@@ -28,6 +29,11 @@ pub struct Settings {
     /// one (`Skin::Worn`) unless CLASSIC (`Skin::Drawn`) is chosen (the owner, 2026-10-10: "all
     /// future versions default to the new skin"). Kept as `skin`, "realistic" or "classic".
     pub skin: Skin,
+    /// How large the editor's lettering is printed, chosen with the same key: as the panel
+    /// has it unless LARGE is chosen (the owner, 2026-10-15: "this is just SOME people, so I
+    /// want it as an option, not as a general change"; decisions.md R-LETTERING). Kept as
+    /// `lettering`, "standard" or "large".
+    pub lettering: Lettering,
     /// How oscillators 2 and 3's FREQUENCY knobs' dials read, chosen with the same key: a
     /// semitone a mark unless HARDWARE is chosen (the owner, 2026-10-10: "use our perfect ones
     /// by default, but allow the user to use the exact curves"). Kept as `frequency_dials`,
@@ -48,6 +54,7 @@ pub enum Change {
     Shutter(bool),
     NoteRead,
     Skin(Skin),
+    Lettering(Lettering),
     Frequency(Law),
     Keyboard(bool),
     KeyboardRoot(u8),
@@ -62,6 +69,8 @@ impl Change {
             Change::NoteRead => ("ultra_note_read", true.into()),
             Change::Skin(Skin::Worn) => ("skin", "realistic".into()),
             Change::Skin(Skin::Drawn) => ("skin", "classic".into()),
+            Change::Lettering(Lettering::Standard) => ("lettering", "standard".into()),
+            Change::Lettering(Lettering::Large) => ("lettering", "large".into()),
             Change::Frequency(Law::Semitones) => ("frequency_dials", "semitones".into()),
             Change::Frequency(Law::Hardware) => ("frequency_dials", "hardware".into()),
             Change::Keyboard(shown) => (
@@ -81,6 +90,7 @@ impl Default for Settings {
             shutter: true,
             ultra_note_read: false,
             skin: Skin::Worn,
+            lettering: Lettering::Standard,
             frequency: Law::Semitones,
             keyboard: None,
             keyboard_root: 41,
@@ -131,6 +141,11 @@ impl Settings {
                 Some("classic") => Skin::Drawn,
                 _ => d.skin,
             },
+            // (Anything but LARGE, the standard lettering.)
+            lettering: match t.get("lettering").and_then(toml::Value::as_str) {
+                Some("large") => Lettering::Large,
+                _ => d.lettering,
+            },
             // (Anything but HARDWARE, semitones.)
             frequency: match t.get("frequency_dials").and_then(toml::Value::as_str) {
                 Some("hardware") => Law::Hardware,
@@ -145,6 +160,7 @@ impl Settings {
             Change::Shutter(shown) => self.shutter = shown,
             Change::NoteRead => self.ultra_note_read = true,
             Change::Skin(skin) => self.skin = skin,
+            Change::Lettering(lettering) => self.lettering = lettering,
             Change::Frequency(law) => self.frequency = law,
             Change::Keyboard(shown) => self.keyboard = Some(shown),
             Change::KeyboardRoot(root) => self.keyboard_root = root.min(84),
@@ -249,6 +265,7 @@ mod tests {
             Change::Shutter(false),
             Change::NoteRead,
             Change::Skin(Skin::Drawn),
+            Change::Lettering(Lettering::Large),
             Change::Frequency(Law::Hardware),
         ] {
             Settings::keep(&path, c).expect("kept");
@@ -257,6 +274,7 @@ mod tests {
             shutter: false,
             ultra_note_read: true,
             skin: Skin::Drawn,
+            lettering: Lettering::Large,
             frequency: Law::Hardware,
             keyboard: None,
             keyboard_root: 41,
@@ -266,6 +284,7 @@ mod tests {
         let text = std::fs::read_to_string(&path).expect("read") + "theirs = 3\n";
         std::fs::write(&path, &text).expect("written");
         Settings::keep(&path, Change::Skin(Skin::Worn)).expect("kept");
+        Settings::keep(&path, Change::Lettering(Lettering::Standard)).expect("kept");
         Settings::keep(&path, Change::Frequency(Law::Semitones)).expect("kept");
         let after = std::fs::read_to_string(&path).expect("read");
         assert!(after.contains("theirs = 3"), "{after}");
@@ -279,6 +298,12 @@ mod tests {
         assert_eq!(Settings::read(&path).skin, Skin::Worn);
         std::fs::write(&path, "skin = \"classic\"\n").expect("written");
         assert_eq!(Settings::read(&path).skin, Skin::Drawn);
+        // The lettering: standard unless the file says large.
+        assert!(after.contains("lettering = \"standard\""), "{after}");
+        std::fs::write(&path, "lettering = \"large\"\n").expect("written");
+        assert_eq!(Settings::read(&path).lettering, Lettering::Large);
+        std::fs::write(&path, "lettering = \"huge\"\n").expect("written");
+        assert_eq!(Settings::read(&path).lettering, Lettering::Standard);
         // The FREQUENCY dials: semitones unless the file says hardware.
         assert!(after.contains("frequency_dials = \"semitones\""), "{after}");
         std::fs::write(&path, "frequency_dials = \"hardware\"\n").expect("written");
@@ -311,6 +336,7 @@ mod tests {
         let changes = [
             Change::Shutter(true),
             Change::Skin(Skin::Drawn),
+            Change::Lettering(Lettering::Large),
             Change::Frequency(Law::Hardware),
             Change::NoteRead,
         ];
@@ -332,6 +358,7 @@ mod tests {
                 shutter: true,
                 ultra_note_read: true,
                 skin: Skin::Drawn,
+                lettering: Lettering::Large,
                 frequency: Law::Hardware,
                 keyboard: None,
                 keyboard_root: 41,
