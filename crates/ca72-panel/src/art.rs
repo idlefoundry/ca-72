@@ -149,7 +149,9 @@ pub(crate) const TOGGLE: (f64, f64) = (50.0, 50.0 * 291.0 / 180.0);
 pub(crate) const ULTRA_AT: (f64, f64) = (3023.0, 92.0);
 
 /// The editor's resize grip, in the drawing's bottom right corner (left, top, right, bottom).
-pub const GRIP: [f64; 4] = [W - 54.0, H - 54.0, W, H];
+pub const GRIP: [f64; 4] = [W - 90.0, H - 60.0, W, H];
+/// The grip's lines' corner: inside the strip's trim (28 at its right end, 6 along its foot).
+const GRIP_CORNER: (f64, f64) = (W - 36.0, H - 14.0);
 
 /// The waveform pictograms, drawn 24 by 14 and printed about 18 by 10 (`GLYPH`).
 const GLYPH: f64 = 0.75;
@@ -635,6 +637,7 @@ pub fn background(layout: &Layout) -> String {
     crate::strip::surfaces(&mut s);
     column(&mut s, Ink::All);
     strip_print(&mut s);
+    grip(&mut s);
     s.0
 }
 
@@ -650,10 +653,10 @@ enum Ink {
 /// dials' marks and selectors' legends, and the grip's lines in the corner.
 pub fn printed(layout: &Layout) -> String {
     let mut s = Svg(String::new(), layout.lettering);
-    grip(&mut s);
     panel(&mut s, layout, Ink::Print);
     column(&mut s, Ink::Print);
     strip_print(&mut s);
+    grip(&mut s);
     s.0
 }
 
@@ -811,20 +814,22 @@ fn wood(s: &mut Svg) {
     for (x, y, r) in top_screws() {
         screw(s, x, y, r);
     }
-    grip(s);
 }
 
-/// The resize grip's three lines in the drawing's corner.
+/// The resize grip's four lines in the strip's bottom right corner, on its face inside the
+/// trim, drawn last, plain to see (R-SIZE: people had not found it; drawn at the drawing's
+/// corner, under the trim, it had not shown in CLASSIC and only in part in REALISTIC).
 fn grip(s: &mut Svg) {
-    for k in 1..=3 {
-        let d = 12.0 * f64::from(k);
+    let (x, y) = GRIP_CORNER;
+    for k in 1..=4 {
+        let d = 11.0 * f64::from(k);
         put!(
             s,
-            "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{LEGEND}' stroke-opacity='0.3' stroke-width='3' stroke-linecap='round'/>",
-            N(W - 10.0 - d),
-            N(H - 10.0),
-            N(W - 10.0),
-            N(H - 10.0 - d)
+            "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{LEGEND}' stroke-opacity='0.65' stroke-width='4' stroke-linecap='round'/>",
+            N(x - d),
+            N(y),
+            N(x),
+            N(y - d)
         );
     }
 }

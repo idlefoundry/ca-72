@@ -22,12 +22,13 @@ use std::time::{Duration, Instant};
 use crate::local_notes::LocalNotes;
 use crate::playing::Playing;
 use baseview::{
-    Event, EventStatus, MouseButton, MouseEvent, ScrollDelta, Size, Window, WindowEvent,
-    WindowHandler, WindowInfo, WindowOpenOptions, WindowScalePolicy,
+    Event, EventStatus, MouseButton, MouseCursor, MouseEvent, ScrollDelta, Size, Window,
+    WindowEvent, WindowHandler, WindowInfo, WindowOpenOptions, WindowScalePolicy,
 };
 use ca72::freq_dial::{Law, Pot};
 use ca72_panel::art::{self, POWER};
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
+use ca72_panel::fonts::Weight;
 use ca72_panel::keyboard;
 use ca72_panel::learn::{Note, Tone};
 use ca72_panel::presets::{
@@ -57,6 +58,28 @@ pub const DEFAULT_WIDTH: u32 = 1380;
 /// How small and large the grip makes it.
 const MIN_WIDTH: u32 = 860;
 const MAX_WIDTH: u32 = 3108;
+
+/// The compact view's grip's square in the rail's bottom right corner (drawing units): where
+/// it is drawn (`render::compact_grip`) and found.
+const COMPACT_GRIP: f64 = 44.0;
+/// The SIZE menu's sizes (R-SIZE): shares of the size the editor opens at on a 1920 by 1080
+/// screen ([`DEFAULT_WIDTH`]); after them, the size it opens at on this screen.
+const SIZES: [(&str, f64); 5] = [
+    ("75%", 0.75),
+    ("100%", 1.0),
+    ("125%", 1.25),
+    ("150%", 1.5),
+    ("200%", 2.0),
+];
+/// The grip's tip.
+const GRIP_TIP: &str = "DRAG TO RESIZE";
+
+/// Where the settings' menu and the SIZE menu open: their top right corner under the rail's
+/// settings key, at its right end.
+fn settings_menu_corner() -> (f64, f64) {
+    let (x, y) = strip::centre(StripTarget::Bar(BarTarget::Settings));
+    (x + strip::KEY_W / 2.0, y + strip::KEY_H / 2.0 + 6.0)
+}
 
 /// Two presses within this long are a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -709,6 +732,8 @@ struct PanelWindow {
     /// come both ways.
     host_keys: Arc<HostKeys>,
     twins: KeyTwins,
+    /// The pointer's look as last set (R-SIZE: the resize arrows over the grip).
+    cursor: MouseCursor,
 }
 
 impl Drop for PanelWindow {
@@ -768,8 +793,8 @@ struct Editing {
     /// editor opens too): asked again once nothing is held ([`Editing::measure_when_done`]).
     touched: bool,
     gripped: Option<u32>,
-    /// The usable screen (logical pixels) at the window's scale (the editor's opening size).
-    #[allow(dead_code)]
+    /// The usable screen (logical pixels) at the window's scale (the editor's opening size, the
+    /// SIZE menu's FIT TO SCREEN and the sizes that fit).
     screen: fn(f64) -> Option<(f64, f64)>,
     /// How far the drawer was down (`Browser::reveal`) in the last frame composed.
     reveal_shown: f64,
@@ -842,6 +867,7 @@ impl PanelWindow {
             keys: None,
             host_keys,
             twins: KeyTwins::default(),
+            cursor: MouseCursor::Default,
         }
     }
 
@@ -887,6 +913,25 @@ impl PanelWindow {
             window.resize(size);
             self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
         }
+    }
+
+    /// The pointer's look: the resize arrows over the grip and while it is dragged (R-SIZE),
+    /// else the system's. Not on macOS, where baseview has no cursors (its `set_mouse_cursor` is
+    /// `todo!()`): there the grip's tip says what it does.
+    fn cursor(&mut self, window: &mut Window<'_>) {
+        let want = if self.editing.on_grip() {
+            MouseCursor::NwseResize
+        } else {
+            MouseCursor::Default
+        };
+        if want == self.cursor {
+            return;
+        }
+        self.cursor = want;
+        #[cfg(not(target_os = "macos"))]
+        window.set_mouse_cursor(want);
+        #[cfg(target_os = "macos")]
+        let _ = window;
     }
 
     /// The keyboard as the drawer wants it: taken when a field takes the caret (baseview's
@@ -1055,6 +1100,29 @@ impl Editing {
             self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
             self.composed = None;
         }
+    }
+
+    /// The SIZE menu's sizes (R-SIZE): [`SIZES`], then FIT TO SCREEN, the size the editor
+    /// opens at on this screen; each its label, its width (logical pixels) and whether the
+    /// window at it, as it is now (the panel shown or not), fits the screen (all, where the
+    /// screen is not known).
+    fn sizes(&self) -> Vec<(&'static str, u32, bool)> {
+        let screen = (self.screen)(self.dpr);
+        let expanded = self.expanded();
+        let fits = |w: u32| {
+            screen.is_none_or(|(sw, sh)| {
+                f64::from(w) <= sw && f64::from(height_for_panel(w, expanded)) <= sh
+            })
+        };
+        let mut sizes: Vec<_> = SIZES
+            .iter()
+            .map(|&(t, k)| {
+                let w = clamp_width((f64::from(DEFAULT_WIDTH) * k).round() as u32);
+                (t, w, fits(w))
+            })
+            .collect();
+        sizes.push(("FIT TO SCREEN", fitted_width(screen), true));
+        sizes
     }
 
     /// The editor's lettering printed at `lettering`'s sizes from now on, on this computer
@@ -1240,7 +1308,7 @@ impl Editing {
             if !(0.0..bottom).contains(&y) {
                 return None;
             }
-            if x >= art::W - 30.0 && y >= bottom - 30.0 {
+            if x >= art::W - COMPACT_GRIP && y >= bottom - COMPACT_GRIP {
                 return Some(Target::Grip);
             }
             if y >= DRAWER_TOP {
@@ -1693,11 +1761,10 @@ impl Editing {
             }
             StripTarget::Bar(BarTarget::Settings) => {
                 self.playing.release();
-                let (x, y) = strip::centre(t);
                 let size = self.renderer.text_size() * MENU_TEXT;
                 self.learning.open_settings_menu(
                     self.renderer.fonts(),
-                    (x + strip::KEY_W / 2.0, y + strip::KEY_H / 2.0 + 6.0),
+                    settings_menu_corner(),
                     size,
                     (
                         self.settings.skin,
@@ -1777,6 +1844,23 @@ impl Editing {
             }
             Pressed::Lettering(lettering) => {
                 self.set_lettering(lettering);
+                return;
+            }
+            Pressed::SizeMenu => {
+                let size = self.renderer.text_size() * MENU_TEXT;
+                let sizes = self.sizes();
+                self.learning.open_size_menu(
+                    self.renderer.fonts(),
+                    settings_menu_corner(),
+                    size,
+                    &sizes,
+                    self.width,
+                );
+                return;
+            }
+            Pressed::Size(width) => {
+                // Asked of the host at the next frame, as the grip's are.
+                self.gripped = Some(width);
                 return;
             }
             Pressed::List(chosen) => {
@@ -2367,8 +2451,27 @@ impl Editing {
                     art::TOP + POWER.1 - 64.0,
                 ))
             }
-            Target::Grip => None,
+            Target::Grip => {
+                // Above the grip, its right end at the window's (R-SIZE).
+                let size = self.renderer.text_size();
+                let w = self
+                    .renderer
+                    .fonts()
+                    .advance(GRIP_TIP, size, Weight::Regular, 0.0)
+                    + 0.8 * size;
+                let top = if self.expanded() {
+                    art::GRIP[1]
+                } else {
+                    f64::from(self.physical_height()) / self.renderer.scale() - COMPACT_GRIP
+                };
+                Some((GRIP_TIP.to_owned(), art::W - 8.0 - w / 2.0, top))
+            }
         }
+    }
+
+    /// Whether the pointer is over the grip, or dragging it.
+    fn on_grip(&self) -> bool {
+        self.resizing.is_some() || self.hover == Some(Target::Grip)
     }
 
     /// Brings the frame up to the parameters and the gestures: whether it changed.
@@ -2613,7 +2716,7 @@ fn compose(
         }
     }
     if !expanded {
-        let side = (30.0 * s).ceil() as i32;
+        let side = (COMPACT_GRIP * s).ceil() as i32;
         let grip = [all[2] - side, all[3] - side, all[2], all[3]];
         paste(c, frame, 0, grip);
         paste(c, strip, top, grip);
@@ -2951,6 +3054,7 @@ impl WindowHandler for PanelWindow {
                 // reopened).
                 self.follow(window);
                 self.keyboard(window);
+                self.cursor(window);
                 status
             }
             // The drawer, while open, takes the keys (the host keeps its shortcuts).
@@ -4643,7 +4747,7 @@ mod tests {
         let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
         click(&mut e, key);
         assert_eq!(
-            menu_items(&e)[6..],
+            menu_items(&e)[6..9],
             [
                 ("FREQUENCY DIALS".to_owned(), false),
                 ("SEMITONES".to_owned(), false),
@@ -4654,7 +4758,7 @@ mod tests {
             e.learning
                 .menu()
                 .map(|m| (m.heads.clone(), m.marked.clone())),
-            Some((vec![0, 3, 6], vec![1, 4, 7]))
+            Some((vec![0, 3, 6, 9], vec![1, 4, 7]))
         );
         // Oscillator 2 at +5 semitones, oscillator 3's pot at its clockwise end (+8.22).
         let ps: Arc<dyn Params> = params.clone();
@@ -6203,6 +6307,142 @@ mod tests {
         );
     }
 
+    /// The settings key's WINDOW: SIZE… (R-SIZE) opens the SIZE menu where the settings' was:
+    /// shares of the size the editor opens at on a 1920 by 1080 screen, then FIT TO SCREEN; the
+    /// size the window is marked and not to be chosen. A size chosen is asked of the host as
+    /// the grip's are, and saved with the session. Where the screen is known, sizes too large
+    /// for it cannot be chosen, and FIT TO SCREEN is the size the editor opens at on it.
+    #[test]
+    fn the_settings_key_s_size_menu_resizes_the_window() {
+        let (mut e, host, params) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        let items = menu_items(&e);
+        assert_eq!(
+            items[9..11],
+            [
+                ("WINDOW".to_owned(), false),
+                ("SIZE\u{2026}".to_owned(), true)
+            ]
+        );
+        menu_item(&mut e, "SIZE\u{2026}");
+        let m = e.learning.menu().expect("the SIZE menu");
+        assert_eq!(m.title, "SIZE");
+        let labels: Vec<_> = m.items.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["75%", "100%", "125%", "150%", "200%", "FIT TO SCREEN"]
+        );
+        // (At 1720 wide, none of them: none marked; the screen not known, all fit.)
+        assert!(m.marked.is_empty() && m.items.iter().all(|(_, can)| *can));
+        let (w, h) = m.extent(e.renderer.fonts());
+        assert!(m.x >= 0.0 && m.x + w <= art::W && m.y + h <= art::H);
+        menu_item(&mut e, "100%");
+        assert!(e.learning.menu().is_none());
+        // (Asked of the host at the next frame, as the grip's are.)
+        e.grip();
+        e.draw();
+        assert_eq!(
+            (e.width, params.editor_width.load(Ordering::Relaxed)),
+            (DEFAULT_WIDTH, DEFAULT_WIDTH)
+        );
+        assert_eq!(host.resizes.load(Ordering::Relaxed), 1);
+        e.fit(1.0, DEFAULT_WIDTH, height_for(DEFAULT_WIDTH));
+        e.draw();
+        // A screen 1512 by 945 (a 14-inch MacBook Pro's, less its menu bar).
+        e.screen = |_| Some((1512.0, 945.0));
+        let sizes = e.sizes();
+        assert_eq!(
+            sizes
+                .iter()
+                .map(|&(_, w, fits)| (w, fits))
+                .collect::<Vec<_>>(),
+            [
+                (1035, true),
+                (1380, true),
+                (1725, false),
+                (2070, false),
+                (2760, false),
+                (fitted_width(Some((1512.0, 945.0))), true),
+            ]
+        );
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        menu_item(&mut e, "SIZE\u{2026}");
+        assert_eq!(
+            e.learning
+                .menu()
+                .map(|m| (m.marked.clone(), m.items[1].1, m.items[2].1)),
+            Some((vec![1], false, false)),
+            "100% marked; 125% too large for the screen"
+        );
+        menu_item(&mut e, "FIT TO SCREEN");
+        e.grip();
+        e.draw();
+        assert_eq!(e.width, fitted_width(Some((1512.0, 945.0))));
+    }
+
+    /// The grip (R-SIZE): over it, the tip says what it does, within the window, in the full
+    /// view and the compact; and its lines are plain to see.
+    #[test]
+    fn the_grip_says_what_it_does() {
+        let (mut e, _, _) = editing();
+        e.draw();
+        let p = at(&e, (art::W - 20.0, art::H - 20.0));
+        go(&mut e, p);
+        assert!(e.on_grip());
+        let (t, x, _) = e.tip().expect("a tip");
+        assert_eq!(t, GRIP_TIP);
+        let size = e.renderer.text_size();
+        let w = e.renderer.fonts().advance(&t, size, Weight::Regular, 0.0) + 0.8 * size;
+        assert!(x + w / 2.0 <= art::W && x - w / 2.0 >= 0.0);
+        e.draw();
+        assert!(e.scene.tip.is_some());
+        let p = at(&e, (art::W / 2.0, art::H / 2.0));
+        go(&mut e, p);
+        assert!(!e.on_grip());
+        // The compact view's, in the rail's corner.
+        let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
+        click(&mut e, panel);
+        e.draw();
+        let p = at(&e, (art::W - 20.0, DRAWER_TOP - 20.0));
+        go(&mut e, p);
+        assert!(e.on_grip());
+        assert_eq!(e.tip().map(|(t, ..)| t), Some(GRIP_TIP.to_owned()));
+        // The drawing's grip: on the strip's face inside its trim, brighter than the face.
+        let mut r = Renderer::new(0.5, 1.0);
+        r.render(&Scene::default());
+        let f = r.frame();
+        let px = |x: f64, y: f64| {
+            f.pixel((x * 0.5) as u32, (y * 0.5) as u32)
+                .expect("in it")
+                .red()
+        };
+        assert!(px(art::W - 47.0, art::H - 25.0) > px(art::W - 150.0, art::H - 40.0) + 60);
+    }
+
+    /// The large lettering's settings' menu in the smallest window, the panel hidden: made
+    /// smaller to fit the view rather than running off it (R-LETTERING).
+    #[test]
+    fn a_menu_too_tall_for_the_view_is_made_smaller() {
+        let (mut e, _, _) = editing();
+        e.set_lettering(Lettering::Large);
+        assert!(e.resize(MIN_WIDTH));
+        e.fit(1.0, MIN_WIDTH, height_for(MIN_WIDTH));
+        e.draw();
+        let panel = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Panel)));
+        click(&mut e, panel);
+        e.draw();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        e.draw();
+        let m = e.learning.menu().expect("a menu");
+        let (w, h) = m.extent(e.renderer.fonts());
+        assert!(m.y >= 0.0 && m.y + h <= DRAWER_TOP + 1e-6, "{} + {h}", m.y);
+        assert!(m.x >= 0.0 && m.x + w <= art::W);
+        assert!(m.size < e.renderer.text_size() * MENU_TEXT, "made smaller");
+    }
+
     #[test]
     fn the_panel_key_snaps_and_presets_temporarily_reveal_it() {
         let (mut e, host, params) = editing();
@@ -7071,8 +7311,9 @@ mod tests {
     /// The large lettering (R-LETTERING) beside the standard, for a look: in
     /// `$CA72_LETTERING_PNG`, the folder, the window as it opens on a 1920 by 1080 screen (1380
     /// wide) in each look and lettering, `<look>-<lettering>.png`; and in the realistic look with
-    /// the settings' menu open, `settings-<lettering>.png`, and CUTOFF FREQUENCY's,
-    /// `knob-<lettering>.png`.
+    /// the settings' menu open, `settings-<lettering>.png`, CUTOFF FREQUENCY's,
+    /// `knob-<lettering>.png`, and the SIZE menu, `size-<lettering>.png` (R-SIZE); and the
+    /// pointer over the grip, its tip shown, `grip-<lettering>.png`.
     #[test]
     #[ignore = "writes images for a look"]
     fn the_lettering_pngs() {
@@ -7116,6 +7357,19 @@ mod tests {
             right_click(&mut e, knob);
             window_frame(&mut e)
                 .save_png(out.join(format!("knob-{name}.png")))
+                .unwrap();
+            let away = at(&e, (0.0, 0.0));
+            click(&mut e, away);
+            click(&mut e, key);
+            menu_item(&mut e, "SIZE\u{2026}");
+            window_frame(&mut e)
+                .save_png(out.join(format!("size-{name}.png")))
+                .unwrap();
+            click(&mut e, away);
+            let grip = at(&e, (art::W - 50.0, art::H - 30.0));
+            go(&mut e, grip);
+            window_frame(&mut e)
+                .save_png(out.join(format!("grip-{name}.png")))
                 .unwrap();
         }
     }

@@ -17,24 +17,25 @@ use crate::learn::{self, Menu, Note};
 use crate::skin::{Part, Pictures, Skin};
 use crate::ultra::Glow;
 
-/// The compact editor's grip, within the rail's bottom right corner.
+/// The compact editor's grip, within the rail's bottom right corner: as plain as the
+/// drawing's (R-SIZE).
 pub fn compact_grip(frame: &mut Pixmap, scale: f64) {
     let (w, h) = (frame.width() as f32, frame.height() as f32);
     let s = scale as f32;
     let mut path = PathBuilder::new();
-    for k in 1..=3 {
-        let d = 7.0 * k as f32 * s;
+    for k in 1..=4 {
+        let d = 8.0 * k as f32 * s;
         path.move_to(w - 5.0 * s - d, h - 5.0 * s);
         path.line_to(w - 5.0 * s, h - 5.0 * s - d);
     }
     if let Some(path) = path.finish() {
         let mut paint = Paint::default();
-        paint.set_color_rgba8(217, 210, 192, 77);
+        paint.set_color_rgba8(217, 210, 192, 166);
         frame.stroke_path(
             &path,
             &paint,
             &resvg::tiny_skia::Stroke {
-                width: 2.0 * s,
+                width: 3.0 * s,
                 line_cap: resvg::tiny_skia::LineCap::Round,
                 ..Default::default()
             },

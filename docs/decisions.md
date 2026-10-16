@@ -5834,3 +5834,49 @@ window in each look and lettering and with the menus open. Not tried: a host; th
 drawer and the keyboard view, whose lettering LARGE leaves as it was; spacing the other
 two-line legends wider in LARGE (OSCILLATOR MODULATION, FILTER MODE, FILTER MODULATION,
 EXTERNAL INPUT VOLUME sit tighter at 20 apart, not touching).
+
+## R-SIZE. WINDOW › SIZE…, and a grip that can be seen
+
+**Owner decisions, 2026-10-15.** The owner reported that "a few people saying they can't or
+don't know how to resize the window". Offered a SIZE group in the settings' menu, a grip that
+can be seen (a resize pointer and a tip) and, later and on its own, resizing by the host's
+window edge, the owner chose the first two, to be released with the large lettering
+(R-LETTERING): "add the menu size group + grip then release that along side the new lettering
+option."
+
+**Agent decisions, 2026-10-15** (not separately approved):
+- **SIZE as a menu of its own.** The settings' menu has WINDOW › SIZE…, which opens the SIZE
+  menu where the settings' was, as STANDALONE › AUDIO & MIDI… opens its dialog. Six more items
+  in the settings' menu would have made it taller than the compact view of a small window.
+- **The sizes.** 75 %, 100 %, 125 %, 150 % and 200 % of 1380 logical pixels wide (the size the
+  editor opens at on a 1920 by 1080 screen, `DEFAULT_WIDTH`), each within the grip's limits
+  (860 to 3108), then FIT TO SCREEN, the size it opens at on this screen (R6). A size whose
+  window, the panel shown or hidden as it is, would be wider or taller than the usable screen
+  cannot be chosen; the size the window is, marked. A size chosen is asked of the host at the
+  next frame, as the grip's are, and saved with the session as theirs are.
+- **The grip had not been seen.** Drawn at the drawing's corner (10 units in), it lay under
+  the strip's aluminium trim (28 units at its right end, 6 along its foot), drawn after it: in
+  CLASSIC it did not show at all, in REALISTIC only its ends. It is now drawn last, its corner
+  inside the trim (36 and 14 units in), four lines instead of three, at 65 % instead of 30 %
+  and 4 units wide instead of 3; the compact view's grip likewise (four lines, 65 %), its
+  square 44 units instead of 30. The grip's area is 90 by 60 units.
+- **Its tip,** DRAG TO RESIZE, over it, its right end at the window's. **Its pointer**, the
+  resize arrows (`MouseCursor::NwseResize`) over the grip and while it is dragged, on Windows
+  and Linux. Not on macOS: baseview's macOS `set_mouse_cursor` is `todo!()` (it would panic).
+- **A menu too tall for the view is made smaller** (`Menu::placed`), its lettering with it:
+  the large lettering's settings' menu ran off the compact view's foot in a window at its
+  smallest (860 wide).
+- **Not done: the host's window edge.** nih-plug's VST3 and CLAP wrappers answer that the
+  editor cannot be resized (`can_resize`), so a host's edge does nothing. Doing it means the
+  wrappers' size constraints and the hosts' resizes within resizes that have aborted hosts
+  before (R26), in plugin-kit's nih-plug; it is left for its own change.
+- **PR #40 kept out.** Its Linux repaint presents a frame within the input event only for a
+  height-only resize (PANEL); a SIZE choice changes the width, so it would not take that path.
+  The owner had found on 2026-10-14 that it did not remove the visible stretch in Bitwig
+  (R-RELEASE-0.2.3), and it conflicts with `main`.
+
+**Evidence (the Mac, 2026-10-15):** `the_settings_key_s_size_menu_resizes_the_window`,
+`the_grip_says_what_it_does`, `a_menu_too_tall_for_the_view_is_made_smaller` and
+`a_menu_too_tall_is_made_smaller`; with R-LETTERING's, `cargo test -p ca72-panel -p
+ca72-plugin --lib --tests`: 325 passed, none failed; clippy with `-D warnings`.
+`the_lettering_pngs` writes the SIZE menu and the grip's tip. Not tried: a host.

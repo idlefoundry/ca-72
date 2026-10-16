@@ -91,6 +91,10 @@ pub enum Item {
     Dials(Law),
     Head,
     StandaloneSettings,
+    /// The settings' WINDOW: SIZE…, the SIZE menu wanted (R-SIZE).
+    SizeMenu,
+    /// The SIZE menu's: the window this wide (logical pixels).
+    Size(u32),
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -120,6 +124,10 @@ pub enum Pressed {
     /// The settings' menu: the FREQUENCY knobs read through this law.
     Dials(Law),
     StandaloneSettings,
+    /// The settings' menu: SIZE…, the SIZE menu wanted where the settings' was.
+    SizeMenu,
+    /// The SIZE menu: the window this wide (logical pixels).
+    Size(u32),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -324,6 +332,8 @@ impl Learning {
             (Item::Head, "FREQUENCY DIALS"),
             (Item::Dials(Law::Semitones), "SEMITONES"),
             (Item::Dials(Law::Hardware), "HARDWARE"),
+            (Item::Head, "WINDOW"),
+            (Item::SizeMenu, "SIZE\u{2026}"),
         ];
         #[cfg(feature = "standalone-production")]
         if crate::standalone_settings::available() {
@@ -347,6 +357,7 @@ impl Learning {
                             | Item::Lettering(_)
                             | Item::Dials(_)
                             | Item::StandaloneSettings
+                            | Item::SizeMenu
                     ) && !current(it);
                     ((*t).to_owned(), choosable)
                 })
@@ -370,6 +381,46 @@ impl Learning {
         self.open = Some(Open {
             learnable: None,
             items: items.into_iter().map(|(it, _)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// The SIZE menu (R-SIZE; the settings' WINDOW: SIZE…), opened with its top right corner
+    /// at (`x`, `y`) as the settings' is: `sizes`, each its label, the window's width (logical
+    /// pixels) and whether it fits the screen; the one the window is (`width`) marked, it and
+    /// those that do not fit not to be chosen.
+    pub fn open_size_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        sizes: &[(&str, u32, bool)],
+        width: u32,
+    ) {
+        let mut menu = Menu {
+            x,
+            y,
+            size,
+            title: "SIZE".to_owned(),
+            items: sizes
+                .iter()
+                .map(|&(t, w, fits)| (t.to_owned(), fits && w != width))
+                .collect(),
+            heads: Vec::new(),
+            marked: sizes
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, w, _))| *w == width)
+                .map(|(i, _)| i)
+                .collect(),
+            hover: None,
+        };
+        let (w, _) = menu.extent(fonts);
+        menu = menu.placed(fonts, x - w, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: sizes.iter().map(|&(_, w, _)| Item::Size(w)).collect(),
             menu,
         });
         self.take_keys = true;
@@ -411,6 +462,8 @@ impl Learning {
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
             (Some(Item::Lettering(l)), _) => return Pressed::Lettering(*l),
+            (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,
+            (Some(Item::Size(w)), _) => return Pressed::Size(*w),
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
             _ => {}
         }

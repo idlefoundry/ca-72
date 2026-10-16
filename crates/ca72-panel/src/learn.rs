@@ -106,8 +106,15 @@ impl Menu {
     }
 
     /// The menu moved to fit within `area` (left, top, right, bottom), its top left corner at
-    /// (`x`, `y`) where it can be.
+    /// (`x`, `y`) where it can be; its lettering made smaller where the menu would be taller or
+    /// wider than `area` (the large lettering in a small window: R-LETTERING), its extent
+    /// growing with its lettering's size.
     pub fn placed(mut self, fonts: &Fonts, x: f64, y: f64, area: [f64; 4]) -> Menu {
+        let (w, h) = self.extent(fonts);
+        let k = ((area[2] - area[0]) / w).min((area[3] - area[1]) / h);
+        if k < 1.0 {
+            self.size *= k;
+        }
         let (w, h) = self.extent(fonts);
         self.x = x.min(area[2] - w).max(area[0]);
         self.y = y.min(area[3] - h).max(area[1]);
@@ -397,6 +404,22 @@ mod tests {
         let (w, h) = m.extent(&fonts);
         assert!(m.x >= 0.0 && m.x + w <= W + 1e-9, "{} {w}", m.x);
         assert!(m.y >= 0.0 && m.y + h <= H + 1e-9, "{} {h}", m.y);
+    }
+
+    /// A menu taller than the area it is placed in is made smaller to fit it, its lettering
+    /// with it; one that fits keeps its size.
+    #[test]
+    fn a_menu_too_tall_is_made_smaller() {
+        let fonts = Fonts::new();
+        let m = menu_at(0.0, 0.0);
+        let (_, h) = m.extent(&fonts);
+        let area = [0.0, 0.0, W, h / 2.0];
+        let small = m.clone().placed(&fonts, 10.0, 10.0, area);
+        let (w2, h2) = small.extent(&fonts);
+        assert!((small.size - m.size / 2.0).abs() < 1e-9, "{}", small.size);
+        assert!(small.y >= 0.0 && small.y + h2 <= area[3] + 1e-9);
+        assert!(small.x + w2 <= W);
+        assert_eq!(m.clone().placed(&fonts, 10.0, 10.0, PANEL).size, m.size);
     }
 
     /// A note over a control at the panel's left edge stays on the panel.
