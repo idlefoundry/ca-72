@@ -11,6 +11,10 @@ use crate::{
     fonts::{FAMILY, Fonts, Weight},
 };
 
+/// The keys' sprites (`assets/keyboard/README.md`).
+pub(crate) static WHITE_KEY: &[u8] = include_bytes!("../assets/keyboard/white-key-v4.png");
+pub(crate) static BLACK_KEY: &[u8] = include_bytes!("../assets/keyboard/black-key-v4.png");
+
 pub const AREA: [f64; 4] = [
     370.0,
     art::PANEL_H + crate::strip::RAIL,
@@ -655,14 +659,8 @@ impl Materials {
         let decode = |b: &[u8]| Pixmap::decode_png(b).expect("built-in keyboard material");
         Self {
             wood: decode(crate::skin::WALNUT),
-            white: crop(
-                &decode(include_bytes!("../assets/keyboard/white-key-v4.png")),
-                [427, 81, 598, 1466],
-            ),
-            black: crop(
-                &decode(include_bytes!("../assets/keyboard/black-key-v4.png")),
-                [497, 49, 678, 1281],
-            ),
+            white: crop(&decode(WHITE_KEY), [427, 81, 598, 1466]),
+            black: crop(&decode(BLACK_KEY), [497, 49, 678, 1281]),
             button: decode(crate::skin::BUTTON),
         }
     }

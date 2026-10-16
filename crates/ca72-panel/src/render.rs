@@ -3,6 +3,7 @@
 //! worn one's pictures turned and moved in the drawn parts' places.
 
 use std::fmt;
+use std::sync::Arc;
 
 use resvg::tiny_skia::{
     BlendMode, Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint,
@@ -10,12 +11,40 @@ use resvg::tiny_skia::{
 };
 use resvg::usvg;
 
+use crate::arrangement::Arrangement;
 use crate::art::{self, Blend, H, Layer, Layout, Lettering, W};
 use crate::controls::{CONTROLS, Kind, Mark, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
+use crate::look::Look;
 use crate::skin::{Part, Pictures, Skin};
 use crate::ultra::Glow;
+
+/// A skin pack's drawing over `frame` at `scale`, its view stretched over the panel (the
+/// wooden strip and the face, the drawing's whole width) and nothing outside it.
+fn draw_pack_art(frame: &mut Pixmap, scale: f64, drawing: &usvg::Tree) {
+    let (pw, ph) = (
+        (W * scale).round().max(1.0) as u32,
+        (art::PANEL_H * scale).round().max(1.0) as u32,
+    );
+    let Some(mut layer) = Pixmap::new(pw, ph) else {
+        return;
+    };
+    let size = drawing.size();
+    resvg::render(
+        drawing,
+        Transform::from_scale(pw as f32 / size.width(), ph as f32 / size.height()),
+        &mut layer.as_mut(),
+    );
+    frame.draw_pixmap(
+        0,
+        0,
+        layer.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
+}
 
 /// The compact editor's grip, within the rail's bottom right corner: as plain as the
 /// drawing's (R-SIZE).
@@ -101,6 +130,10 @@ struct Slot {
 /// The panel's renderer at a scale.
 pub struct Renderer {
     fonts: Fonts,
+    /// What the panel is drawn with (a built-in look, or a skin pack's), and where everything
+    /// on it is (its layout).
+    look: Look,
+    arrangement: Arc<Arrangement>,
     layout: Layout,
     options: usvg::Options<'static>,
     /// Pixels a panel unit; pixels a logical pixel (for the tip, sized for reading).
@@ -191,8 +224,18 @@ impl Renderer {
     /// A renderer drawing the panel in `skin`, its lettering printed at `lettering`'s sizes
     /// (and the tip's, a note's and the menus' with it).
     pub fn with_look(skin: Skin, lettering: Lettering, scale: f64, ui: f64) -> Self {
-        let fonts = Fonts::new();
-        let layout = Layout::measure_in(&fonts, lettering);
+        Self::with_pack(Look::of(skin), lettering, scale, ui)
+    }
+
+    /// A renderer drawing the panel in `look` (a skin pack's, or a built-in one).
+    pub fn with_pack(look: Look, lettering: Lettering, scale: f64, ui: f64) -> Self {
+        let skin = look.base;
+        let arrangement = Arc::clone(&look.arrangement);
+        let fonts = look
+            .fonts
+            .and_then(|(regular, bold)| Fonts::with(regular, bold).ok())
+            .unwrap_or_default();
+        let layout = Layout::measure_in(&fonts, lettering, &arrangement);
         let options = usvg::Options {
             fontdb: fonts.database(),
             font_family: FAMILY.into(),
@@ -202,6 +245,8 @@ impl Renderer {
         let empty = || Pixmap::new(w, h).expect("a frame of at least a pixel");
         let mut r = Self {
             fonts,
+            look,
+            arrangement,
             layout,
             options,
             scale,
@@ -266,6 +311,16 @@ impl Renderer {
         &self.layout
     }
 
+    /// Where everything on the panel is.
+    pub fn arrangement(&self) -> &Arrangement {
+        &self.arrangement
+    }
+
+    /// What the panel is drawn with.
+    pub fn look(&self) -> &Look {
+        &self.look
+    }
+
     pub fn fonts(&self) -> &Fonts {
         &self.fonts
     }
@@ -287,11 +342,34 @@ impl Renderer {
             f64::from(w) / self.scale,
             f64::from(h) / self.scale,
         ];
-        let doc = art::document(view, w, h, &art::background(&self.layout));
         self.background
             .fill(Color::from_rgba8(0x3b, 0x22, 0x13, 0xff));
-        if let Ok(tree) = usvg::Tree::from_str(&doc, &self.options) {
-            resvg::render(&tree, Transform::identity(), &mut self.background.as_mut());
+        let svg = |frame: &mut Pixmap, body: &str, options: &usvg::Options<'_>| {
+            let doc = art::document(view, w, h, body);
+            if let Ok(tree) = usvg::Tree::from_str(&doc, options) {
+                resvg::render(&tree, Transform::identity(), &mut frame.as_mut());
+            }
+        };
+        match self.look.art.clone() {
+            None => svg(
+                &mut self.background,
+                &art::background(&self.layout, &self.arrangement),
+                &self.options,
+            ),
+            // A pack's drawing between the panel's surfaces and its print.
+            Some(drawing) => {
+                svg(
+                    &mut self.background,
+                    &art::background_surfaces(&self.layout, &self.arrangement),
+                    &self.options,
+                );
+                draw_pack_art(&mut self.background, self.scale, &drawing);
+                svg(
+                    &mut self.background,
+                    &art::panel_print(&self.layout, &self.arrangement),
+                    &self.options,
+                );
+            }
         }
         self.frame = self.background.clone();
     }
@@ -304,7 +382,10 @@ impl Renderer {
         let view = [0.0, 0.0, f64::from(w) / s, f64::from(h) / s];
         self.background
             .fill(Color::from_rgba8(0x1d, 0x1b, 0x1a, 0xff));
-        let pictures = self.pictures.get_or_insert_with(Pictures::load);
+        let (overrides, tint) = (&self.look.pictures, self.look.face_tint);
+        let pictures = self
+            .pictures
+            .get_or_insert_with(|| Pictures::load_with(overrides, tint));
         let bg = &mut self.background;
         // The wood: its grain along the top strip and the strip's rail; each board its own band
         // of the picture, drawn out along the grain.
@@ -351,10 +432,14 @@ impl Renderer {
                 resvg::render(&tree, Transform::identity(), &mut frame.as_mut());
             }
         };
-        svg_over(bg, &art::worn_overlay());
+        svg_over(bg, &art::worn_overlay(&self.arrangement));
+        // A skin pack's drawing, over the surfaces and under the print.
+        if let Some(drawing) = &self.look.art {
+            draw_pack_art(bg, s, drawing);
+        }
         // The print, worn into the face: its texture showing through it a little.
         if let Some(mut print) = Pixmap::new(w, h) {
-            svg_over(&mut print, &art::printed(&self.layout));
+            svg_over(&mut print, &art::printed(&self.layout, &self.arrangement));
             worn_into(&mut print, bg);
             bg.draw_pixmap(
                 0,
@@ -369,7 +454,7 @@ impl Renderer {
             );
         }
         // The screws, each turned as it was last tightened, and the jacks.
-        for (i, (x, y, r)) in art::screws().into_iter().enumerate() {
+        for (i, (x, y, r)) in art::screws(&self.arrangement).into_iter().enumerate() {
             let d = (2.0 * r * s).round().max(1.0) as u32;
             let deg = (i as f32 * 47.0) % 180.0;
             put_picture(
@@ -381,7 +466,7 @@ impl Renderer {
                 (1.0, 1.0),
             );
         }
-        for (x, y, r, nut) in art::jacks() {
+        for (x, y, r, nut) in art::jacks(&self.arrangement) {
             let d = (2.0 * if nut { r + 6.0 } else { r * 1.12 } * s)
                 .round()
                 .max(1.0) as u32;
@@ -408,7 +493,9 @@ impl Renderer {
         } else {
             art::control
         };
-        let mut out: Vec<Layer> = CONTROLS
+        let a = &self.arrangement;
+        let mut out: Vec<Layer> = a
+            .controls
             .iter()
             .zip(scene.values)
             .map(|(c, v)| {
@@ -438,25 +525,34 @@ impl Renderer {
                 layer
             })
             .collect();
+        // The fixtures, each drawn about the official layout's place and moved to this one's.
+        let at = |(x, y): (f64, f64)| (art::COL + x, art::TOP + y);
+        let moved = |mut l: Layer, to: (f64, f64)| {
+            l.origin = to;
+            l
+        };
         if worn {
-            out.push(art::power_worn(scene.power));
-            out.push(art::lamp_worn(scene.power));
-            out.push(art::overload_worn(scene.overload));
-            out.extend(crate::ultra::ultra_worn(&scene.opening));
+            out.push(moved(art::power_worn(scene.power), at(a.power)));
+            out.push(moved(art::lamp_worn(scene.power), at(a.lamp)));
+            out.push(moved(art::overload_worn(scene.overload), at(a.overload)));
+            out.extend(crate::ultra::ultra_worn(&scene.opening).map(|l| moved(l, a.ultra_at())));
         } else {
-            out.push(art::power(scene.power));
-            out.push(art::lamp(scene.power));
-            out.push(art::overload(scene.overload));
-            out.push(crate::ultra::ultra(&scene.opening));
+            out.push(moved(art::power(scene.power), at(a.power)));
+            out.push(moved(art::lamp(scene.power), at(a.lamp)));
+            out.push(moved(art::overload(scene.overload), at(a.overload)));
+            out.push(moved(crate::ultra::ultra(&scene.opening), a.ultra_at()));
             // (The drawn skin's opening is one layer: an empty second keeps the count.)
             out.push(Layer::default());
         }
-        out.push(if worn {
-            art::plate_worn()
-        } else {
-            art::plate()
-        });
-        if let Some(c) = scene.learning.and_then(|i| CONTROLS.get(i)) {
+        out.push(moved(
+            if worn {
+                art::plate_worn()
+            } else {
+                art::plate()
+            },
+            a.plate_at(),
+        ));
+        if let Some(c) = scene.learning.and_then(|i| a.controls.get(i)) {
             out.push(learn::ring(c));
         }
         if let Some((t, x, y)) = &scene.tip {
@@ -645,7 +741,10 @@ impl Renderer {
             self.placed[i].used = self.renders;
             return Some(i);
         }
-        let pictures = self.pictures.get_or_insert_with(Pictures::load);
+        let (overrides, tint) = (&self.look.pictures, self.look.face_tint);
+        let pictures = self
+            .pictures
+            .get_or_insert_with(|| Pictures::load_with(overrides, tint));
         let picture = pictures.part(key.part, key.size.0, key.size.1);
         let at = (f64::from_bits(key.at.0), f64::from_bits(key.at.1));
         let (x, y, pixels) = place_picture(

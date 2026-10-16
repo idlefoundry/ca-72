@@ -52,8 +52,58 @@ static HAMSTER_ASLEEP: &[u8] = include_bytes!("../assets/worn/hamster-asleep.png
 pub const STRIDE: usize = 8;
 static PLATE: &[u8] = include_bytes!("../assets/worn/plate.png");
 
-/// The face's picture is kept grey; its colour, a black a touch warm, is this over it.
-const FACE_TINT: [f32; 3] = [1.03, 1.0, 0.94];
+/// The worn skin's pictures a skin pack may replace (decisions.md R-SKIN-PACKS), by the name a
+/// pack gives each in its `[look.pictures]`: each the built-in file's name without `.png`.
+pub const SLOTS: [(&str, &[u8]); 27] = [
+    ("walnut", WALNUT),
+    ("face", FACE),
+    ("knob", KNOB),
+    ("knob-big", KNOB_BIG),
+    ("pointer", POINTER),
+    ("rocker-blue", ROCKER_BLUE),
+    ("rocker-orange", ROCKER_ORANGE),
+    ("power", POWER),
+    ("jewel", JEWEL),
+    ("jack", JACK),
+    ("screw", SCREW),
+    ("toggle-up", TOGGLE_UP),
+    ("toggle-mid", TOGGLE_MID),
+    ("toggle-down", TOGGLE_DOWN),
+    ("ultra-lens-off", ULTRA_LENS_OFF),
+    ("ultra-lens-on", ULTRA_LENS_ON),
+    ("ultra-bezel-off", ULTRA_BEZEL_OFF),
+    ("ultra-bezel-on", ULTRA_BEZEL_ON),
+    ("ultra-floor", ULTRA_FLOOR),
+    ("tesla-lens-off", TESLA_LENS_OFF),
+    ("tesla-lens-on", TESLA_LENS_ON),
+    ("tesla-bezel-off", TESLA_BEZEL_OFF),
+    ("tesla-bezel-on", TESLA_BEZEL_ON),
+    ("hamster-wheel", HAMSTER_WHEEL),
+    ("hamster-run", HAMSTER_RUN),
+    ("hamster-asleep", HAMSTER_ASLEEP),
+    ("plate", PLATE),
+];
+
+/// Every picture built into the plug-in, by name: the worn skin's, the strip's and the
+/// keyboard's. A pack under another licence holding a copy of one is put to review
+/// (`skin_pack::Context::official`).
+pub fn official_pictures() -> Vec<(&'static str, &'static [u8])> {
+    let mut all: Vec<(&'static str, &'static [u8])> = SLOTS.to_vec();
+    all.extend([
+        ("button", BUTTON),
+        ("display-glass", GLASS),
+        ("white-key", crate::keyboard::WHITE_KEY),
+        ("black-key", crate::keyboard::BLACK_KEY),
+    ]);
+    all
+}
+
+/// A pack's pictures, by slot (decoded, premultiplied): each drawn instead of the built-in one.
+pub type Overrides = std::collections::BTreeMap<&'static str, Pixmap>;
+
+/// The face's picture is kept grey; its colour, a black a touch warm, is this over it (the
+/// official REALISTIC pack's `face_tint`).
+pub const FACE_TINT: [f32; 3] = [1.03, 1.0, 0.94];
 
 /// A part's picture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -163,11 +213,16 @@ const KEPT: usize = 72;
 /// The face's picture, its grey coloured: a black a touch warm.
 pub(crate) fn face_picture() -> Pixmap {
     let face = Pixmap::decode_png(FACE).expect("a built-in picture decodes");
-    recoloured(&face, |c| {
+    tinted(&face, FACE_TINT)
+}
+
+/// A picture with each channel scaled by `tint`.
+fn tinted(p: &Pixmap, tint: [f32; 3]) -> Pixmap {
+    recoloured(p, |c| {
         [
-            f32::from(c[0]) * FACE_TINT[0],
-            f32::from(c[1]) * FACE_TINT[1],
-            f32::from(c[2]) * FACE_TINT[2],
+            f32::from(c[0]) * tint[0],
+            f32::from(c[1]) * tint[1],
+            f32::from(c[2]) * tint[2],
         ]
     })
 }
@@ -176,9 +231,33 @@ impl Pictures {
     /// The pictures decoded (once, as the worn skin is first shown); the face's grey coloured,
     /// the ivory rockers made from the blue ones and OVERLOAD's jewel from POWER's.
     pub fn load() -> Pictures {
-        let png = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
-        let face = face_picture();
-        let rocker_blue = png(ROCKER_BLUE);
+        Self::load_with(&Overrides::new(), None)
+    }
+
+    /// The same, a pack's pictures instead of the built-in ones where it has them (a pack's
+    /// face coloured by its `face_tint` if it gives one; the parts made from others made from
+    /// the pack's).
+    pub fn load_with(overrides: &Overrides, face_tint: Option<[f32; 3]>) -> Pictures {
+        let decode = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
+        let slot = |name: &str| {
+            SLOTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, b)| *b)
+                .expect("a slot")
+        };
+        let png = |name: &str| {
+            overrides
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| decode(slot(name)))
+        };
+        let face = match (overrides.get("face"), face_tint) {
+            (Some(p), Some(t)) => tinted(p, t),
+            (Some(p), None) => p.clone(),
+            (None, _) => face_picture(),
+        };
+        let rocker_blue = png("rocker-blue");
         // The ivory of the controller's switches: the blue's shading, the drawing's ivory.
         let rocker_ivory = recoloured(&rocker_blue, |c| {
             let l =
@@ -186,7 +265,7 @@ impl Pictures {
             let k = (l / 0.42).min(1.22);
             [224.0 * k, 215.0 * k, 190.0 * k]
         });
-        let jewel = png(JEWEL);
+        let jewel = png("jewel");
         // OVERLOAD's lens: dark, a glass with the bulb behind it; the chrome as it is.
         let jewel_dark = recoloured(&jewel, |c| {
             let (r, g) = (f32::from(c[0]), f32::from(c[1]));
@@ -196,45 +275,45 @@ impl Pictures {
                 [r, g, f32::from(c[2])]
             }
         });
-        let (knob, knob_big, pointer) = (png(KNOB), png(KNOB_BIG), png(POINTER));
+        let (knob, knob_big, pointer) = (png("knob"), png("knob-big"), png("pointer"));
         let caps = [
             capped(&knob, KNOB_CAP),
             capped(&knob_big, BIG_CAP),
             capped(&pointer, POINTER_CAP),
         ];
         Pictures {
-            walnut: png(WALNUT),
+            walnut: png("walnut"),
             face,
             knob,
             knob_big,
             pointer,
             rocker_blue,
-            rocker_orange: png(ROCKER_ORANGE),
+            rocker_orange: png("rocker-orange"),
             rocker_ivory,
-            power: png(POWER),
+            power: png("power"),
             jewel,
             jewel_dark,
-            jack: png(JACK),
-            screw: png(SCREW),
+            jack: png("jack"),
+            screw: png("screw"),
             caps,
-            toggle: [png(TOGGLE_UP), png(TOGGLE_MID), png(TOGGLE_DOWN)],
+            toggle: [png("toggle-up"), png("toggle-mid"), png("toggle-down")],
             ultra: [
-                png(ULTRA_LENS_OFF),
-                png(ULTRA_LENS_ON),
-                png(ULTRA_BEZEL_OFF),
-                png(ULTRA_BEZEL_ON),
-                png(ULTRA_FLOOR),
+                png("ultra-lens-off"),
+                png("ultra-lens-on"),
+                png("ultra-bezel-off"),
+                png("ultra-bezel-on"),
+                png("ultra-floor"),
             ],
             tesla: [
-                png(TESLA_LENS_OFF),
-                png(TESLA_LENS_ON),
-                png(TESLA_BEZEL_OFF),
-                png(TESLA_BEZEL_ON),
+                png("tesla-lens-off"),
+                png("tesla-lens-on"),
+                png("tesla-bezel-off"),
+                png("tesla-bezel-on"),
             ],
-            hamster: frames(&png(HAMSTER_RUN)),
-            wheel: png(HAMSTER_WHEEL),
-            asleep: png(HAMSTER_ASLEEP),
-            plate: png(PLATE),
+            hamster: frames(&png("hamster-run")),
+            wheel: png("hamster-wheel"),
+            asleep: png("hamster-asleep"),
+            plate: png("plate"),
             scaled: Vec::new(),
         }
     }

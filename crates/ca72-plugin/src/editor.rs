@@ -26,7 +26,7 @@ use baseview::{
     WindowEvent, WindowHandler, WindowInfo, WindowOpenOptions, WindowScalePolicy,
 };
 use ca72::freq_dial::{Law, Pot};
-use ca72_panel::art::{self, POWER};
+use ca72_panel::art;
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
 use ca72_panel::fonts::Weight;
 use ca72_panel::keyboard;
@@ -36,7 +36,7 @@ use ca72_panel::presets::{
     in_tags,
 };
 use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
-use ca72_panel::{CONTROLS, Kind, Lettering, Renderer, Scene, Skin, Target, interact};
+use ca72_panel::{CONTROLS, Kind, Lettering, Look, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::editor::HostKey;
 use nih_plug::prelude::*;
@@ -48,7 +48,7 @@ use crate::library::Library;
 use crate::opening::{ANIMATE_S, Motion, level_of};
 use crate::params::{Ca72Params, QualityMode, Scatter};
 use crate::presets::Browser;
-use crate::settings::{Change, Settings};
+use crate::settings::{Change, PackId, Settings};
 use crate::update::Update;
 
 /// The share of the usable screen the editor opens at until it is resized.
@@ -744,6 +744,70 @@ impl Drop for PanelWindow {
 }
 
 /// The panel being operated: what the pointer does to the parameters, and the scene drawn.
+/// The folder skin packs are installed in (decisions.md R-SKIN-PACKS): the shared folder's
+/// `Skins`, a folder each, for every Idle Foundry plug-in (each pack names the one it is for).
+#[cfg(not(test))]
+fn packs_dir() -> std::path::PathBuf {
+    crate::library::shared_dir().join("Skins")
+}
+
+/// An installed skin pack, as the settings' menu lists it: its name, and its look if it can be
+/// used (else its folder's name, and why not in the log).
+#[derive(Clone, Debug)]
+struct Installed {
+    name: String,
+    look: Option<Look>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The packs a test has installed (none of the user's are read in the tests).
+    static TEST_PACKS: std::cell::RefCell<Vec<Installed>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The skin packs installed on this computer, each read and checked (in the tests, the test's).
+fn installed() -> Vec<Installed> {
+    #[cfg(test)]
+    {
+        TEST_PACKS.with(|p| p.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        ca72_panel::look::discover(&packs_dir())
+            .into_iter()
+            .map(|found| match found {
+                Ok(look) => Installed {
+                    name: look.name.clone(),
+                    look: Some(look),
+                },
+                Err((folder, report)) => {
+                    nih_log!("The skin pack in {folder} cannot be used:\n{report}");
+                    Installed {
+                        name: folder,
+                        look: None,
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+/// The look the settings choose: the pack chosen, if it is installed and can be used, else the
+/// built-in look (the pack's base, kept with it). A pack missing or refused changes nothing
+/// but the look: the sound, presets, automation and the session are not the look's.
+fn chosen_look(settings: &Settings, installed: &[Installed]) -> Look {
+    settings
+        .pack
+        .and_then(|id| {
+            installed
+                .iter()
+                .filter_map(|p| p.look.as_ref())
+                .find(|l| l.id == id.as_str())
+                .cloned()
+        })
+        .unwrap_or_else(|| Look::of(settings.skin))
+}
+
 struct Editing {
     context: Arc<dyn GuiContext>,
     params: Arc<Ca72Params>,
@@ -753,6 +817,9 @@ struct Editing {
     width: u32,
     physical_width: u32,
     renderer: Renderer,
+    /// The skin packs installed, as last looked for (as the editor opened, if one is chosen, and
+    /// as the settings' menu opens).
+    installed: Vec<Installed>,
     scene: Scene,
     /// The strip's own parts (over the drawing's strip): their renderer and scene, and
     /// ENTROPY's, WIDTH's, DETUNE's and INNER's last amount but 0 (their switches, and SCATTER |
@@ -1015,6 +1082,11 @@ impl Editing {
         } else {
             Settings::load()
         };
+        let installed = if settings.pack.is_some() {
+            installed()
+        } else {
+            Vec::new()
+        };
         params.set_freq_law(settings.frequency);
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
@@ -1033,12 +1105,13 @@ impl Editing {
             dpr,
             width,
             physical_width,
-            renderer: Renderer::with_look(
-                settings.skin,
+            renderer: Renderer::with_pack(
+                chosen_look(&settings, &installed),
                 settings.lettering,
                 f64::from(physical_width) / art::W,
                 dpr,
             ),
+            installed,
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
             strip_scene: StripScene::default(),
@@ -1095,11 +1168,31 @@ impl Editing {
     /// panel's renderer made again in it (its pictures decoded as it first draws).
     fn set_look(&mut self, skin: Skin) {
         self.keep_settings(Change::Skin(skin));
-        if self.renderer.skin() != skin {
-            let lettering = self.renderer.lettering();
-            self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
-            self.composed = None;
+        let look = Look::of(skin);
+        if self.renderer.look().id != look.id {
+            self.draw_in(look);
         }
+    }
+
+    /// The editor drawn in installed pack `i`'s look from now on, on this computer
+    /// (decisions.md R-SKIN-PACKS).
+    fn set_pack(&mut self, i: usize) {
+        let Some(look) = self.installed.get(i).and_then(|p| p.look.clone()) else {
+            return;
+        };
+        if let Some(id) = PackId::new(&look.id) {
+            self.keep_settings(Change::Pack(id, look.base));
+        }
+        if self.renderer.look().id != look.id {
+            self.draw_in(look);
+        }
+    }
+
+    /// The panel's renderer made again in `look` (its pictures decoded as it first draws).
+    fn draw_in(&mut self, look: Look) {
+        let lettering = self.renderer.lettering();
+        self.renderer = Renderer::with_pack(look, lettering, self.renderer.scale(), self.dpr);
+        self.composed = None;
     }
 
     /// The SIZE menu's sizes (R-SIZE): [`SIZES`], then FIT TO SCREEN, the size the editor
@@ -1131,8 +1224,8 @@ impl Editing {
     fn set_lettering(&mut self, lettering: Lettering) {
         self.keep_settings(Change::Lettering(lettering));
         if self.renderer.lettering() != lettering {
-            let skin = self.renderer.skin();
-            self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
+            let look = self.renderer.look().clone();
+            self.renderer = Renderer::with_pack(look, lettering, self.renderer.scale(), self.dpr);
             self.composed = None;
         }
     }
@@ -1256,9 +1349,11 @@ impl Editing {
             lines,
         };
         let (w, h) = note.extent(self.renderer.fonts());
-        // (Its box's right edge a little left of the lamp's column, its top at the lamp's.)
-        note.x = art::COL + 2940.0 - w / 2.0;
-        note.y = art::TOP + 40.0 + h + size * 0.4;
+        // (Its box's right edge a little left of the lamp's column, its top at the lamp's: where
+        // the layout has QUALITY's opening.)
+        let (ux, uy) = self.renderer.arrangement().ultra;
+        note.x = art::COL + ux - 83.0 - w / 2.0;
+        note.y = art::TOP + uy - 52.0 + h + size * 0.4;
         note
     }
 
@@ -1315,7 +1410,7 @@ impl Editing {
                 return None;
             }
         }
-        interact::hit(self.renderer.layout(), x, y)
+        interact::hit(self.renderer.layout(), self.renderer.arrangement(), x, y)
     }
 
     /// The drawer's top now (drawing units) and where it is cut off, while it shows: dropping
@@ -1762,6 +1857,18 @@ impl Editing {
             StripTarget::Bar(BarTarget::Settings) => {
                 self.playing.release();
                 let size = self.renderer.text_size() * MENU_TEXT;
+                // The packs installed now (one may have been added since the editor opened).
+                self.installed = installed();
+                let packs: Vec<(String, bool)> = self
+                    .installed
+                    .iter()
+                    .map(|p| (p.name.clone(), p.look.is_some()))
+                    .collect();
+                let shown = &self.renderer.look().id;
+                let pack = self
+                    .installed
+                    .iter()
+                    .position(|p| p.look.as_ref().is_some_and(|l| &l.id == shown));
                 self.learning.open_settings_menu(
                     self.renderer.fonts(),
                     settings_menu_corner(),
@@ -1771,6 +1878,7 @@ impl Editing {
                         self.settings.lettering,
                         self.settings.frequency,
                     ),
+                    (&packs, pack),
                 );
             }
             StripTarget::Bar(b) => {
@@ -1840,6 +1948,10 @@ impl Editing {
             }
             Pressed::Look(skin) => {
                 self.set_look(skin);
+                return;
+            }
+            Pressed::Pack(i) => {
+                self.set_pack(i);
                 return;
             }
             Pressed::Lettering(lettering) => {
@@ -1943,7 +2055,7 @@ impl Editing {
                 if !self.operable(i) {
                     return;
                 }
-                let kind = CONTROLS[i].kind;
+                let kind = self.renderer.arrangement().control(i).kind;
                 if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
                     if let Some(p) = self.operated(i) {
                         self.set_once(i, f64::from(p.default()));
@@ -2122,7 +2234,7 @@ impl Editing {
             d.at = pointer;
             d.fine = fine;
         }
-        let kind = CONTROLS[d.control].kind;
+        let kind = self.renderer.arrangement().control(d.control).kind;
         if let Some(v) = interact::drag(
             &kind,
             d.base,
@@ -2170,13 +2282,14 @@ impl Editing {
     /// A drag over, its gesture ended: `released` by the pointer (a press that did not move
     /// then picks what it pressed), else cut short.
     fn let_go(&mut self, d: Drag, released: bool) {
-        let kind = CONTROLS[d.control].kind;
+        let placed = *self.renderer.arrangement().control(d.control);
+        let kind = placed.kind;
         let mut v = d.value;
         if released && !d.moved {
             let picked = match d.pressed {
                 Target::Legend(_, k) => Some(k as f64 / 5.0),
                 _ => {
-                    let (cx, cy) = CONTROLS[d.control].centre();
+                    let (cx, cy) = placed.centre();
                     let (x, y) = self.in_drawing(d.from);
                     interact::click(&kind, v, x - cx, y - cy)
                 }
@@ -2295,7 +2408,7 @@ impl Editing {
                 travel: 0.0,
             });
         }
-        let kind = CONTROLS[i].kind;
+        let kind = self.renderer.arrangement().control(i).kind;
         let Some(s) = &mut self.scroll else { return };
         s.last = Instant::now();
         s.travel = travel;
@@ -2317,7 +2430,7 @@ impl Editing {
 
     fn end_scroll(&mut self) {
         let Some(s) = self.scroll.take() else { return };
-        let kind = CONTROLS[s.control].kind;
+        let kind = self.renderer.arrangement().control(s.control).kind;
         let v = interact::release(&kind, s.value);
         if let Some(p) = self.operated(s.control) {
             let setter = self.setter();
@@ -2424,7 +2537,7 @@ impl Editing {
         };
         match target {
             Target::Control(i) | Target::Legend(i, _) => {
-                let c = &CONTROLS[i];
+                let c = *self.renderer.arrangement().control(i);
                 let p = self.operated(i)?;
                 let (x, y) = c.centre();
                 let top = art::bounds(&c.kind)[1];
@@ -2447,8 +2560,8 @@ impl Editing {
                 };
                 Some((
                     format!("POWER: {state}"),
-                    art::COL + POWER.0,
-                    art::TOP + POWER.1 - 64.0,
+                    self.renderer.arrangement().power_at().0,
+                    self.renderer.arrangement().power_at().1 - 64.0,
                 ))
             }
             Target::Grip => {
@@ -3745,6 +3858,7 @@ mod tests {
     use nih_plug::wrapper::state::PluginState;
 
     use super::*;
+    use ca72_panel::art::POWER;
     use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, PresetKey};
     use ca72_panel::ultra;
 
@@ -4660,6 +4774,82 @@ mod tests {
             (Skin::Worn, Skin::Worn)
         );
         e.draw();
+    }
+
+    /// Installed skin packs (decisions.md R-SKIN-PACKS) under LOOK, after the built-in two, one
+    /// that cannot be used shown so and not to be chosen. Choosing one draws the editor in it,
+    /// a click finding each control where its layout has it; nothing but the look changes (not
+    /// one parameter is set); and the pack gone, the editor falls back to the pack's base look.
+    #[test]
+    fn the_settings_key_chooses_an_installed_pack() {
+        let starter = Look::open(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/skin-packs/starter"
+        )))
+        .unwrap_or_else(|r| panic!("{r}"));
+        TEST_PACKS.with(|p| {
+            *p.borrow_mut() = vec![
+                Installed {
+                    name: "STARTER".into(),
+                    look: Some(starter.clone()),
+                },
+                Installed {
+                    name: "broken-pack".into(),
+                    look: None,
+                },
+            ]
+        });
+        let (mut e, host, _) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert_eq!(
+            menu_items(&e)[..5],
+            [
+                ("LOOK".to_owned(), false),
+                ("REALISTIC".to_owned(), false),
+                ("CLASSIC".to_owned(), true),
+                ("STARTER".to_owned(), true),
+                ("broken-pack (CANNOT BE USED)".to_owned(), false),
+            ]
+        );
+        host.take();
+        menu_item(&mut e, "STARTER");
+        assert_eq!(e.renderer.look().id, starter.id);
+        assert_eq!(
+            (
+                e.settings.skin,
+                e.settings.pack.map(|p| p.as_str().to_owned())
+            ),
+            (Skin::Drawn, Some(starter.id.clone()))
+        );
+        assert!(host.take().is_empty(), "a look set a parameter");
+        e.draw();
+        // A click finds TUNE where the pack has it, not where the official panel does.
+        let tune = ca72_panel::controls::index("tune").expect("a control");
+        let moved = e.renderer.arrangement().control(tune).centre();
+        assert_ne!(moved, CONTROLS[tune].centre());
+        assert_eq!(e.hit(moved.0, moved.1), Some(Target::Control(tune)));
+        // Marked in the menu, as the look shown.
+        click(&mut e, key);
+        assert_eq!(e.learning.menu().map(|m| m.marked[0]), Some(3));
+        menu_item(&mut e, "REALISTIC");
+        assert_eq!(e.settings.pack, None);
+        // The pack chosen, then gone: its base look, the setting kept for when it is back.
+        let mut settings = Settings::default();
+        settings.apply(Change::Pack(
+            PackId::new(&starter.id).expect("an id"),
+            Skin::Drawn,
+        ));
+        assert_eq!(chosen_look(&settings, &[]).id, ca72_panel::look::CLASSIC);
+        let refused = Installed {
+            name: "STARTER".into(),
+            look: None,
+        };
+        assert_eq!(
+            chosen_look(&settings, &[refused]).id,
+            ca72_panel::look::CLASSIC
+        );
+        TEST_PACKS.with(|p| p.borrow_mut().clear());
     }
 
     /// The settings key's LETTERING (R-LETTERING): STANDARD by default, marked and not to be

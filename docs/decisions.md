@@ -5919,3 +5919,124 @@ which the annotated `v0.2.4` tag names.
   Developer ID").
 - On the lab share macOS writes `._` files beside each download; the downloads are checked in
   a local folder (`~/.cache`). The scripts and logs are in `~/lab/artifacts/ca-72/0.2.4/`.
+
+## R-SKIN-PACKS. Skin packs: the looks as artwork and data, in one open format
+
+**The owner's request, 2026-10-16** (a written brief). A skin system for Idle Foundry's
+plug-ins: the functionality, the renderer and the code that loads skins open source under the
+existing licences, and all released artwork free and included. New artwork may carry its
+creator's licence, open or proprietary and paid, with price and licence independent. Skins
+are non-executable artwork and declarative appearance data; behaviour, DSP and control logic
+stay in the open-source application; scripts, custom widget code or copied GPL material are
+flagged for separate review. Each pack's assets, licence, credits and third-party notices are
+identifiable; the repository's GPL is not applied to a pack, nor a pack's terms to the plug-in.
+No GPL artwork copied into a proprietary pack without additional permission; no fonts, stock
+assets or third-party branding unless their licences permit it. One open, documented format
+for official and community skins; no store login or network check to use an installed skin.
+Packs validated as untrusted input; a missing or incompatible pack falls back safely without
+affecting sound, presets, automation or session recall. Licence and provenance fields for a
+future marketplace's review; seller declarations cover the right to distribute and authorize
+customer licensing, and are not clearance. A local prototype and tests only: no release, no
+checkout, no seller agreement, no licence changed; choices affecting the separation of code
+and artwork reported first.
+
+**Owner decisions, 2026-10-16**, of the agent's questions:
+1. A pack may change the **layout and the legends**, not only the pictures ("This allows
+   people to be creative. We will publish this ability along with agent skills so people can
+   use Claude Code or ChatGPT to create new layouts"), within limits.
+2. **SVG allowed**, as a strict subset, its cost checked ("Is there a check we could run around
+   this?": counted, then drawn as a test against a time limit).
+3. **Fonts allowed**, sorted by a scan of what each says of its licence (pass, reject or
+   review), never cleared by it.
+4. The **format's documentation and a starter are CC0**; the loader and the checks stay GPL.
+5. The **official looks become packs** in the same format, built in, under the GPL.
+6. A **crate in this repository** first, with nothing particular to the CA-72 in it, to move to
+   plugin-kit once agreed; packs are **folders** (no archive to unpack).
+7. The agents' **starting point is a CC0 starter** with a layout of its own; the official
+   layout stays GPL.
+8. The **official panel converted to layout data** now: "We're not going to release it without
+   thorough testing, so it is effectively c. Be sure to benchmark it so that we know if there are
+   performance costs in doing so."
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **`crates/skin-pack`** reads a pack's folder within limits (no link followed, no path out of
+  it, only `.toml`, `.txt`, `.md`, `.png`, `.svg`, `.otf`, `.ttf`, code and archives refused by
+  their first bytes whatever their names), its manifest (`skin.toml`: id, version, plug-in,
+  licence as SPDX or `LicenseRef-`, licence texts, creators, each asset's provenance with an
+  optional SHA-256, notices, a seller's declarations), PNG decoded whole within its size, SVG
+  read strictly (no DTD, an element allowlist, references inside the drawing only, `use`
+  counted as all it repeats, a test drawing timed) and fonts (one face a file, embedding
+  permission, the licence its tables name). Its findings are rejected, review or note; nothing
+  is ever reported as cleared. A price in a manifest is rejected: it is the store's.
+- **The layout's data, `packs/official/layout.toml`.** The panel's controls (place, a knob's
+  size, a switch's size, colour and "on" end, a toggle's orientation), rules, titles, legends
+  (with their places in the large lettering), the fixtures' places (POWER, the lamps, QUALITY's
+  opening, the plate, PHONES, the strip's screws). `art::panel`, the worn overlay, the screws,
+  the jacks, hit-testing, the editor's drags and tips and the fixtures' layers all take places
+  from it (`crate::arrangement`). What a control is and does, its dial's and its legends' values,
+  and the left hand's and the strip's controls stay the plug-in's: they state real values or
+  are its own. `CONTROLS` keeps the official places too; a test holds the two equal.
+- **The renderer takes a `Look`** (`crate::look`): the base (classic or realistic), the layout,
+  pictures by slot (the 27 worn pictures, PNG or SVG drawn at the built-in size), a drawing over
+  the panel's surfaces and under its print, a typeface (used only if it prints and fits every
+  legend; else URW Gothic and review), the face's tint (`face_tint`, which the official
+  REALISTIC sets: it had been in code). A pack's fonts are kept for the process's life (their
+  faces borrow them), each distinct font once.
+- **The editor** lists packs installed in the shared folder's `Skins` under LOOK; a pack that
+  cannot be used is listed so, its reasons in the log. The choice is the computer's
+  (`settings.toml`'s `skin_pack`, with `skin` its base, which an older CA-72 reads); a pack
+  missing or refused draws its base and keeps the setting. Nothing a look does reaches a
+  parameter, a preset or the session.
+- **Not in this version:** the strip's and keyboard's pictures and layout, the classic look's
+  colours (but by a drawing), animation, archives, packs shared between plug-ins, checking a
+  pack off the editor's thread (packs are checked as the editor opens with one chosen, and as
+  the settings' menu opens).
+
+**What bears on the separation of code and artwork** (each for the owner's attention; none
+changes a licence):
+- The official layout's data is GPL and built into the plug-in, as the drawing code it replaced
+  was. A pack made from it is under the GPL; the starter (CC0) has its own.
+- The repository now holds CC0 files (`docs/skin-packs.md`, `docs/skin-packs/starter/`), each
+  saying so. `CONTRIBUTING.md` still says every contribution is GPL: a contribution to those
+  files would need its own terms there. Left for the owner.
+- Packs are loaded at run time from the user's folder and are never in the installers; the
+  plug-in and a pack are separate works, each under its own terms. Counsel should confirm this
+  reading before any pack is sold.
+- The official pictures were made with an image generator. The checks put generated assets to
+  review (whether they are protected, and so licensable, differs between countries); the
+  official REALISTIC pack's 27 reviews are exactly these.
+- URW Gothic's embedding permission is "preview and print": the scan puts it to review in a
+  pack. The plug-in's own use of it (its AGPL with the font exception, built in) is unchanged.
+
+**Evidence (the Mac, an M4 Pro, 2026-10-16; nothing committed, pushed or released):**
+- **The converted panel is the panel.** Before any change, `examples/golden.rs` wrote 32 frames
+  from `main` (both looks, both letterings, 0.44 and 1.0 pixels a unit, four scenes drawn in
+  turn so that partial redraws are compared too; written twice, identical). After the conversion
+  every one is identical to the pixel. `the_official_packs_draw_as_the_built_in_looks`: CLASSIC
+  and REALISTIC, read back as packs through the checks, draw byte for byte as the built-in looks.
+- **Its cost.** `examples/look_bench.rs` and `examples/frames.rs`, `main`'s build and this one
+  run in turn, three rounds each, at `nice 19` (the owner's host was open), medians of medians:
+  every built-in look's opening, first frame, knob, switch and POWER within 2 % of `main`'s, and
+  no frame of `frames` slower (CUTOFF 0.30 and 1.20 ms, DRIVE 1.10 and 3.70 to 3.80 ms, at 0.44
+  and 0.87). The layout costs nothing measurable: it is read once a process.
+- **A pack's cost.** Reading and checking a pack: the starter 12 ms (its drawing drawn as a test
+  at 3000 pixels), the official REALISTIC as a folder 59 ms (its 27 pictures decoded). Opening the
+  starter's look: 30 ms at 0.44 and 41 ms at 0.87 (CLASSIC's 29 and 31: its drawing, 10 ms at
+  the larger size); its frames as CLASSIC's. REALISTIC as a pack opens in 134 and 458 ms (the
+  built-in's 165 and 489: its pictures were decoded when it was read).
+- **Tests.** `cargo test -p skin-pack -p ca72-panel -p ca72-plugin --features
+  ca72-plugin/standalone-production --no-fail-fast`: 392 passed, none failed (the pack crate's
+  38: paths out of the pack, links, code by its first bytes, sizes, names differing in case,
+  SVG's code, animation, text, outside references, DTD and entities, `use` bombs, costs and the
+  timed test, PNG headers and truncation, fonts, licences, price, declarations, provenance,
+  hashes, the official artwork copied; the panel's: the official layout, layouts refused, the
+  official packs, the starter's places found by clicks, pictures by slot, a typeface that
+  cannot print a legend; the plug-in's: the settings' key, a pack chosen, no parameter set, the
+  fallback, `settings.toml`'s keys). Clippy with `-D warnings` on the three crates; `cargo fmt`;
+  `scripts/notices.py` regenerated (sha2 and six RustCrypto crates, MIT or Apache-2.0) and
+  `--check` passes.
+- **Not run:** the whole workspace's suite to its end. `ca72-lab`'s `vco_electrical` fails two
+  tests on this Mac (ngspice 47 from Homebrew: "Timestep too small ... node hold") on `main`
+  as on this branch, and its circuit tests wrote 5.5 GB into `target/ca72-lab`, which filled the
+  disk; they were deleted, and the crates this work does not touch were not run again. CI
+  (Linux with ngspice, Windows) has not run this branch. Not tried in a host.

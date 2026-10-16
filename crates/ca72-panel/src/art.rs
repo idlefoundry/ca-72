@@ -7,7 +7,8 @@
 //! What never moves is drawn once ([`background`]); each control, lamp and the name plate
 //! is a layer of its own, drawn over it ([`Layer`]).
 
-use crate::controls::{CONTROLS, Colour, Control, Dial, Kind, Legends, Mark, Orient, Place};
+use crate::arrangement::Arrangement;
+use crate::controls::{Colour, Control, Dial, Kind, Legends, Mark, Orient, Place};
 use crate::fonts::{FAMILY, Fonts, Weight};
 use crate::skin::Part;
 use crate::svg::{N, Svg, colour::*, defs, escape, put};
@@ -82,14 +83,10 @@ impl Lettering {
     }
 }
 
-/// The section titles' capitals are printed 38.5 units tall (the typeface's are 0.74 em).
-const TITLE: f64 = 52.0;
-/// The baseline of the section titles along the panel's foot.
-const TITLE_Y: f64 = 727.0;
 /// The panel's lettering is about 9 % wider than the typeface at the same capital height:
 /// its legends are drawn stretched so (the section titles, set to their printed widths, and
 /// the name plate are not).
-const STRETCH: f64 = 1.09;
+pub(crate) const STRETCH: f64 = 1.09;
 
 /// The name plate's name, the instrument's. Its maker's name is under it.
 pub const PLATE_NAME: &str = "CA-72";
@@ -136,7 +133,10 @@ pub const WHEEL_SCALE: f64 = 1.75;
 const SLOT_W: f64 = 60.0;
 const SLOT_H: f64 = 146.0;
 
-/// The POWER switch (the plugin's bypass) and its lamp, on the panel.
+/// The POWER switch (the plugin's bypass) and its lamp, on the panel. These places, QUALITY's,
+/// ULTRA's and the plate's are the official layout's (`packs/official/layout.toml`, held equal to
+/// them by its tests): the parts are drawn here about them, and the renderer moves each to where
+/// the layout shown has it (`crate::arrangement`).
 pub const POWER: (f64, f64) = (3023.0, 580.0);
 pub(crate) const LAMP_AT: (f64, f64) = (3023.0, 426.0);
 /// The OVERLOAD lamp, on the panel.
@@ -489,20 +489,11 @@ fn set_index(set: Legends) -> usize {
 pub struct Layout {
     /// Each legend's radius about its selector's axis, by legend set and position.
     legend_r: [[f64; 6]; 3],
-    /// Each title's width if spaced out to its printed one.
-    titles: [Option<f64>; 5],
+    /// Each title's width if spaced out to its printed one, by its index in the layout's.
+    titles: Vec<Option<f64>>,
     /// The lettering's size.
     lettering: Lettering,
 }
-
-/// The section titles: their printed extent along the foot, text and baseline.
-const TITLES: [(f64, f64, &str, f64); 5] = [
-    (45.0, 406.0, "CONTROLLERS", TITLE_Y),
-    (532.0, 1028.0, "OSCILLATOR BANK", TITLE_Y),
-    (1442.0, 1591.0, "MIXER", 724.0),
-    (2111.0, 2382.0, "MODIFIERS", 724.0),
-    (2670.0, 2868.0, "OUTPUT", 723.0),
-];
 
 /// The extent of a pictogram's path (its commands are absolute M, L, H and V).
 fn path_box(d: &str) -> [f64; 4] {
@@ -536,13 +527,14 @@ fn path_box(d: &str) -> [f64; 4] {
 }
 
 impl Layout {
-    /// Measures the lettering, as the mock-up did once the page's fonts had loaded.
+    /// Measures the lettering of the official layout, as the mock-up did once the page's fonts
+    /// had loaded.
     pub fn measure(fonts: &Fonts) -> Self {
-        Self::measure_in(fonts, Lettering::Standard)
+        Self::measure_in(fonts, Lettering::Standard, &Arrangement::official())
     }
 
-    /// The same, the lettering printed at `lettering`'s sizes.
-    pub fn measure_in(fonts: &Fonts, lettering: Lettering) -> Self {
+    /// The same, the lettering printed at `lettering`'s sizes, its titles `arrangement`'s.
+    pub fn measure_in(fonts: &Fonts, lettering: Lettering, arrangement: &Arrangement) -> Self {
         let num = lettering.number();
         let (ascent, descent) = fonts.extent(Weight::Bold);
         let mut legend_r = [[SIX_LEGEND; 6]; 3];
@@ -592,9 +584,14 @@ impl Layout {
         }
         // A title spans its printed width, spaced out to it, never squeezed: one wider by
         // nature is set at its own width, centred.
-        let titles = TITLES.map(|(x0, x1, t, _)| {
-            (fonts.advance(t, TITLE, Weight::Bold, 0.0) <= x1 - x0).then_some(x1 - x0)
-        });
+        let titles = arrangement
+            .titles
+            .iter()
+            .map(|t| {
+                let (x0, x1) = t.span;
+                (fonts.advance(&t.text, t.size, Weight::Bold, 0.0) <= x1 - x0).then_some(x1 - x0)
+            })
+            .collect();
         Self {
             legend_r,
             titles,
@@ -629,33 +626,56 @@ pub fn document(view: [f64; 4], px: u32, py: u32, body: &str) -> String {
 
 /// Everything that does not move: the wood, the panel's face and lettering, the dials'
 /// marks, and the parts with no parameter (PHONES, the controller's jacks), dimmed.
-pub fn background(layout: &Layout) -> String {
+pub fn background(layout: &Layout, arrangement: &Arrangement) -> String {
     let mut s = Svg(String::new(), layout.lettering);
-    wood(&mut s);
-    panel(&mut s, layout, Ink::All);
+    wood(&mut s, arrangement);
+    panel(&mut s, layout, arrangement, Ink::All);
     strip_face(&mut s);
     crate::strip::surfaces(&mut s);
     column(&mut s, Ink::All);
-    strip_print(&mut s);
+    strip_print(&mut s, arrangement);
     grip(&mut s);
     s.0
 }
 
-/// What a part of the drawing draws: all of it, or its print alone (the worn skin lays the
-/// print over pictures of the surfaces: decisions.md R44).
+/// What a part of the drawing draws: all of it, its print alone (the worn skin lays the
+/// print over pictures of the surfaces: decisions.md R44), or its surfaces alone (a skin pack's
+/// drawing goes between them and the print: decisions.md R-SKIN-PACKS).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Ink {
     All,
     Print,
+    Surface,
+}
+
+/// The background with the panel's surfaces but not its print ([`panel_print`]): a skin pack's
+/// drawing goes between them.
+pub fn background_surfaces(layout: &Layout, arrangement: &Arrangement) -> String {
+    let mut s = Svg(String::new(), layout.lettering);
+    wood(&mut s, arrangement);
+    panel(&mut s, layout, arrangement, Ink::Surface);
+    strip_face(&mut s);
+    crate::strip::surfaces(&mut s);
+    column(&mut s, Ink::All);
+    strip_print(&mut s, arrangement);
+    grip(&mut s);
+    s.0
+}
+
+/// The panel's print alone: its rules, titles, dials' marks and legends.
+pub fn panel_print(layout: &Layout, arrangement: &Arrangement) -> String {
+    let mut s = Svg(String::new(), layout.lettering);
+    panel(&mut s, layout, arrangement, Ink::Print);
+    s.0
 }
 
 /// The print alone, as the background has it: the face's and the column's lettering, rules,
 /// dials' marks and selectors' legends, and the grip's lines in the corner.
-pub fn printed(layout: &Layout) -> String {
+pub fn printed(layout: &Layout, arrangement: &Arrangement) -> String {
     let mut s = Svg(String::new(), layout.lettering);
-    panel(&mut s, layout, Ink::Print);
+    panel(&mut s, layout, arrangement, Ink::Print);
     column(&mut s, Ink::Print);
-    strip_print(&mut s);
+    strip_print(&mut s, arrangement);
     grip(&mut s);
     s.0
 }
@@ -700,9 +720,13 @@ pub(crate) fn strip_trims(s: &mut Svg) {
 }
 
 /// The strip's print (`strip::print`) and its knobs' dials.
-fn strip_print(s: &mut Svg) {
+fn strip_print(s: &mut Svg, arrangement: &Arrangement) {
     crate::strip::print(s, FAMILY);
-    for c in CONTROLS.iter().filter(|c| c.place == Place::Strip) {
+    for c in arrangement
+        .controls
+        .iter()
+        .filter(|c| c.place == Place::Strip)
+    {
         if let Kind::Knob { dial, .. } = c.kind {
             let (x, y) = c.centre();
             draw_dial(s, x, y, dial);
@@ -710,11 +734,13 @@ fn strip_print(s: &mut Svg) {
     }
 }
 
-/// The top strip's screws: centre and radius, in the drawing.
-fn top_screws() -> impl Iterator<Item = (f64, f64, f64)> {
-    [0.05, 0.35, 0.65, 0.95]
-        .into_iter()
-        .map(|x| (COL + x * PW, TOP - 22.0, 7.0))
+/// The top strip's screws: centre and radius, in the drawing (the layout's, in the face's
+/// units).
+fn top_screws(arrangement: &Arrangement) -> impl Iterator<Item = (f64, f64, f64)> + '_ {
+    arrangement
+        .screws
+        .iter()
+        .map(|&(x, y, r)| (COL + x, TOP + y, r))
 }
 
 /// The left hand's screws, in its own place: its switches' and its wheels' mountings (no
@@ -740,9 +766,9 @@ fn column_screws() -> Vec<(f64, f64, f64)> {
 }
 
 /// Every screw's centre and radius, in the drawing.
-pub fn screws() -> Vec<(f64, f64, f64)> {
+pub fn screws(arrangement: &Arrangement) -> Vec<(f64, f64, f64)> {
     let (lx, ly) = crate::strip::LEFT_HAND;
-    top_screws()
+    top_screws(arrangement)
         .chain(
             column_screws()
                 .into_iter()
@@ -753,19 +779,20 @@ pub fn screws() -> Vec<(f64, f64, f64)> {
 
 /// The jacks with no parameter (the controller's GLIDE and DECAY, the panel's PHONES): centre,
 /// radius and whether a nut is round it, in the drawing.
-pub fn jacks() -> Vec<(f64, f64, f64, bool)> {
+pub fn jacks(arrangement: &Arrangement) -> Vec<(f64, f64, f64, bool)> {
     let (lx, ly) = crate::strip::LEFT_HAND;
     LH_ROWS
         .iter()
         .map(|y| (lx + LH_JACK, ly + y, 22.0, true))
-        .chain([(COL + PHONES.0, TOP + PHONES.1, 34.0, false)])
+        .chain(
+            arrangement
+                .phones
+                .map(|(x, y, r)| (COL + x, TOP + y, r, false)),
+        )
         .collect()
 }
 
-/// The PHONES jack, on the panel.
-const PHONES: (f64, f64) = (2855.0, 581.0);
-
-fn wood(s: &mut Svg) {
+fn wood(s: &mut Svg, arrangement: &Arrangement) {
     // The top strip and the strip's rail. No cheeks: the ends are square.
     put!(
         s,
@@ -811,7 +838,7 @@ fn wood(s: &mut Svg) {
     // 330 units wide: the panel's wood stays as approved.
     grain(s, -330.0, 6.0, W + 330.0, TOP - 12.0, true, 7);
     grain(s, 0.0, PANEL_H + 6.0, W, crate::strip::RAIL - 12.0, true, 6);
-    for (x, y, r) in top_screws() {
+    for (x, y, r) in top_screws(arrangement) {
         screw(s, x, y, r);
     }
 }
@@ -834,9 +861,11 @@ fn grip(s: &mut Svg) {
     }
 }
 
-fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
+/// The face and its print, as `arrangement` lays them out: the rules, the section titles,
+/// the dials' marks and the selectors' legends, the legends, and the PHONES jack.
+fn panel(s: &mut Svg, layout: &Layout, arrangement: &Arrangement, ink: Ink) {
     put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
-    if ink == Ink::All {
+    if ink != Ink::Print {
         put!(
             s,
             "<rect x='0' y='0' width='{}' height='{}' fill='{PANEL}'/>",
@@ -850,147 +879,70 @@ fn panel(s: &mut Svg, layout: &Layout, ink: Ink) {
         );
         trims(s);
     }
-    // Section dividers (broken where a label or a switch sits across one).
-    let divider = |s: &mut Svg, x: f64, gaps: &[(f64, f64)]| {
-        let mut y = 9.0;
-        for &(a, b) in gaps.iter().chain([(PH - 7.0, PH)].iter()) {
-            line(s, x, y, x, a, 4.0);
-            y = b;
-        }
-    };
-    divider(s, 445.0, &[(198.0, 297.0)]);
-    divider(s, 1122.0, &[]);
-    divider(s, 1908.0, &[(98.0, 319.0), (356.0, 414.0), (420.0, 514.0)]);
-    divider(s, 2578.0, &[]);
-    divider(s, 2956.0, &[]);
-    // (From beside the column: KEYBOARD CONTROL 2 sits across the line's old start.)
-    line(s, 1976.0, 447.0, 2578.0, 447.0, 4.0);
+    if ink != Ink::Surface {
+        print(s, layout, arrangement);
+    }
+    // The PHONES jack has no parameter: drawn for the panel's sake, dimmed.
+    if ink != Ink::Print
+        && let Some((x, y, r)) = arrangement.phones
+    {
+        put!(
+            s,
+            "<g transform='translate({} {})' opacity='0.5'>",
+            N(x),
+            N(y)
+        );
+        jack(s, r, false);
+        s.0.push_str("</g>");
+    }
+    s.0.push_str("</g>");
+}
+
+/// The face's print, in its own place.
+fn print(s: &mut Svg, layout: &Layout, arrangement: &Arrangement) {
+    for l in &arrangement.lines {
+        line(s, l.from.0, l.from.1, l.to.0, l.to.1, l.width);
+    }
     // Section titles along the foot, as wide as printed.
-    for (i, (x0, x1, t, y)) in TITLES.iter().enumerate() {
-        let spaced = layout.titles[i].map_or(String::new(), |w| {
-            format!("textLength='{}' lengthAdjust='spacing'", N(w))
-        });
+    for (i, t) in arrangement.titles.iter().enumerate() {
+        let spaced = layout
+            .titles
+            .get(i)
+            .copied()
+            .flatten()
+            .map_or(String::new(), |w| {
+                format!("textLength='{}' lengthAdjust='spacing'", N(w))
+            });
         text(
             s,
-            (x0 + x1) / 2.0,
-            y - TITLE * 0.36,
-            t,
-            TITLE,
+            (t.span.0 + t.span.1) / 2.0,
+            t.baseline - t.size * 0.36,
+            &t.text,
+            t.size,
             Style::Title,
             false,
             &spaced,
         );
     }
     // The dials' marks and the selectors' ticks and legends.
-    for c in CONTROLS.iter().filter(|c| c.place == Place::Panel) {
+    for c in arrangement
+        .controls
+        .iter()
+        .filter(|c| c.place == Place::Panel)
+    {
         match c.kind {
             Kind::Knob { dial, .. } => draw_dial(s, c.x, c.y, dial),
             Kind::Selector(set) => selector_marks(s, c, set, layout),
             _ => {}
         }
     }
-    // CONTROLLERS.
-    legend(s, 229.0, 162.0, "TUNE");
-    legend(s, 446.0, 212.0, "OSCILLATOR");
-    legend(s, 446.0, 232.0, "MODULATION");
-    legend(s, 492.0, 313.0, "ON");
-    legend(s, 128.0, 381.0, "GLIDE");
-    legend(s, 332.0, 381.0, "MODULATION MIX");
-    // OSCILLATOR BANK.
-    legend(s, 618.0, 57.0, "RANGE");
-    legend(s, 821.0, 57.0, "OSCILLATOR –1");
-    legend(s, 821.0, 81.0, "FREQUENCY");
-    legend(s, 1022.0, 57.0, "WAVEFORM");
-    legend(s, 822.0, 260.0, "OSCILLATOR –2");
-    legend(s, 822.0, 471.0, "OSCILLATOR –3");
-    // Printed smaller than its neighbours; in the large lettering 10 higher, clear of RANGE's
-    // 32' beside it, which grows with the numbers.
-    let large = s.1 == Lettering::Large;
-    let up = if large { 10.0 } else { 0.0 };
-    lettered(s, 488.0, 490.0 - up, "OSC. 3", 16.0);
-    lettered(s, 488.0, 509.0 - up, "CONTROL", 16.0);
-    // MIXER: five rows, the oscillators' VOLUME joined to their rockers by a line.
-    legend(s, 1221.0, 59.0, "VOLUME");
-    for (i, y) in [170.0, 274.0, 377.0, 481.0, 583.0].into_iter().enumerate() {
-        if i % 2 == 0 {
-            line(s, 1316.0, y, 1361.0, y, 4.0);
-        } else {
-            line(s, 1477.0, y, 1522.0, y, 4.0);
+    for t in &arrangement.texts {
+        let (x, y) = t.at_in(s.1);
+        match t.size {
+            None => legend(s, x, y, &t.text),
+            Some(size) => lettered(s, x, y, &t.text, size),
         }
-        legend(s, 1467.0, y + 40.0, "ON");
     }
-    legend(s, 1620.0, 144.0, "EXTERNAL");
-    legend(s, 1622.0, 164.0, "INPUT VOLUME");
-    legend(s, 1622.0, 385.0, "NOISE VOLUME");
-    legend(s, 1763.0, 226.0, "OVERLOAD");
-    legend(s, 1764.0, 407.0, "WHITE");
-    legend(s, 1764.0, 558.0, "PINK");
-    // The column as the hardware reference has it (decisions.md R46): FILTER MODE at its
-    // head, the original's three switches 122 units lower.
-    legend(s, 1910.0, 114.0, "FILTER");
-    legend(s, 1910.0, 134.0, "MODE");
-    legend(s, 1860.0, 207.0, "LO");
-    // In the large lettering the legends right of the switches end where the switches do
-    // (1961), the second ON clear of ATTACK TIME's 200; KEYBOARD CONTROL's lines are 20 apart
-    // as the other legends' of two lines are, in the middle between its switches.
-    let right = if large { 1944.0 } else { 1954.0 };
-    let keyboard = if large {
-        [426.0, 446.0]
-    } else {
-        [431.0, 448.0]
-    };
-    legend(s, right, 207.0, "HI");
-    legend(s, 1910.0, 236.0, "FILTER");
-    legend(s, 1910.0, 256.0, "MODULATION");
-    legend(s, right, 329.0, "ON");
-    legend(s, right, 350.0, "ON");
-    legend(s, 1837.0, 385.0, "1");
-    legend(s, 1910.0, keyboard[0], "KEYBOARD");
-    legend(s, 1910.0, keyboard[1], "CONTROL");
-    legend(s, 1837.0, 485.0, "2");
-    legend(s, right, 523.0, "ON");
-    // MODIFIERS.
-    lettered(s, 2282.0, 31.0, "FILTER", 31.0);
-    legend(s, 2081.0, 55.0, "CUTOFF FREQUENCY");
-    legend(s, 2280.0, 55.0, "EMPHASIS");
-    legend(s, 2482.0, 32.0, "AMOUNT");
-    legend(s, 2482.0, 54.0, "OF CONTOUR");
-    for ly in [266.0, 486.0] {
-        legend(s, 2081.0, ly, "ATTACK TIME");
-        legend(s, 2281.0, ly, "DECAY TIME");
-        legend(s, 2483.0, ly, "SUSTAIN LEVEL");
-    }
-    lettered(s, 2284.0, 462.0, "LOUDNESS CONTOUR", 27.0);
-    // OUTPUT.
-    legend(s, 2681.0, 51.0, "VOLUME");
-    legend(s, 2854.0, 51.0, "MAIN OUTPUT");
-    legend(s, 2902.0, 200.0, "ON");
-    legend(s, 2682.0, 336.0, "A–440");
-    legend(s, 2728.0, 410.0, "ON");
-    // The phones' VOLUME knob is FEEDBACK (a control: decisions.md R8).
-    legend(s, 2682.0, 485.0, "FEEDBACK");
-    legend(s, 2856.0, 485.0, "PHONES");
-    // The PHONES jack has no parameter: drawn for the panel's sake, dimmed.
-    if ink == Ink::All {
-        put!(
-            s,
-            "<g transform='translate({} {})' opacity='0.5'>",
-            N(PHONES.0),
-            N(PHONES.1)
-        );
-        jack(s, 34.0, false);
-        s.0.push_str("</g>");
-    }
-    // POWER: the plugin's bypass. The lamp is lit while it plays.
-    // QUALITY: its toggle's three positions round it (ULTRA's lamp above, drawn as it moves).
-    let (qx, qy) = QUALITY_AT;
-    legend(s, qx, 168.0, "QUALITY");
-    lettered(s, qx, qy - 50.0, "ULTRA", 15.0);
-    lettered(s, qx - 40.0, qy, "HI", 15.0);
-    lettered(s, qx, qy + 52.0, "LO", 15.0);
-    legend(s, 3023.0, 465.0, "POWER");
-    legend(s, 3023.0, 500.0, "ON");
-    s.0.push_str("</g>");
 }
 
 /// The aluminium trim at the face's ends and along its foot, in the face's own place.
@@ -2006,7 +1958,7 @@ pub fn overload_worn(level: f64) -> Layer {
 /// wood's edges rounded over where the lamp falls and darker where they turn away, the shadow
 /// the top strip casts on the faces, the face's aluminium trim, and each moving part's shadow,
 /// soft, down and to the right (a part's shadow is the same whichever way it is turned).
-pub fn worn_overlay() -> String {
+pub fn worn_overlay(arrangement: &Arrangement) -> String {
     let mut s = Svg::default();
     put!(
         s,
@@ -2043,7 +1995,7 @@ pub fn worn_overlay() -> String {
     strip_trims(&mut s);
     s.0.push_str("</g>");
     // The moving parts' shadows.
-    for c in CONTROLS.iter() {
+    for c in &arrangement.controls {
         let (x, y) = c.centre();
         match c.kind {
             // A tall knob casts a long soft shadow away from the lamp, and a dark one where it
@@ -2088,11 +2040,11 @@ pub fn worn_overlay() -> String {
     put!(
         s,
         "<rect x='{}' y='{}' width='48' height='124' rx='3' fill='#000' fill-opacity='0.55' filter='url(#softer)'/>",
-        N(COL + POWER.0 - 21.0),
-        N(TOP + POWER.1 - 59.0)
+        N(COL + arrangement.power.0 - 21.0),
+        N(TOP + arrangement.power.1 - 59.0)
     );
     // (QUALITY's opening's ring casts its own, with it: it can be hidden, `ultra::ring_shade`.)
-    for ((x, y), r) in [(LAMP_AT, 20.0), (OVERLOAD_AT, 24.0)] {
+    for ((x, y), r) in [(arrangement.lamp, 20.0), (arrangement.overload, 24.0)] {
         put!(
             s,
             "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.55' filter='url(#softer)'/>",
@@ -2101,7 +2053,7 @@ pub fn worn_overlay() -> String {
             N(r)
         );
     }
-    for (x, y, r, nut) in jacks() {
+    for (x, y, r, nut) in jacks(arrangement) {
         put!(
             s,
             "<circle cx='{}' cy='{}' r='{}' fill='#000' fill-opacity='0.5' filter='url(#softer)'/>",

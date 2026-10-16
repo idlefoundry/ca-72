@@ -29,6 +29,10 @@ pub struct Settings {
     /// one (`Skin::Worn`) unless CLASSIC (`Skin::Drawn`) is chosen (the owner, 2026-10-10: "all
     /// future versions default to the new skin"). Kept as `skin`, "realistic" or "classic".
     pub skin: Skin,
+    /// A skin pack's look chosen instead (decisions.md R-SKIN-PACKS), by its id: kept as
+    /// `skin_pack`, with `skin` its base look (what an older CA-72, or this one without the
+    /// pack, draws instead).
+    pub pack: Option<PackId>,
     /// How large the editor's lettering is printed, chosen with the same key: as the panel
     /// has it unless LARGE is chosen (the owner, 2026-10-15: "this is just SOME people, so I
     /// want it as an option, not as a general change"; decisions.md R-LETTERING). Kept as
@@ -48,12 +52,51 @@ pub struct Settings {
     pub typing_root: u8,
 }
 
+/// A skin pack's id, as its manifest gives it (lower-case letters, digits, `-` and `.`, at
+/// most 64 bytes), kept without allocating.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct PackId {
+    bytes: [u8; 64],
+    len: u8,
+}
+
+impl PackId {
+    pub fn new(id: &str) -> Option<PackId> {
+        let ok = !id.is_empty()
+            && id.len() <= 64
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.');
+        ok.then(|| {
+            let mut bytes = [0; 64];
+            bytes[..id.len()].copy_from_slice(id.as_bytes());
+            PackId {
+                bytes,
+                len: id.len() as u8,
+            }
+        })
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("")
+    }
+}
+
+impl std::fmt::Debug for PackId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PackId({})", self.as_str())
+    }
+}
+
 /// One setting changed, as an editor keeps it (`Settings::keep`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {
     Shutter(bool),
     NoteRead,
+    /// A built-in look (a pack's no longer chosen).
     Skin(Skin),
+    /// A skin pack's look, and its base look.
+    Pack(PackId, Skin),
     Lettering(Lettering),
     Frequency(Law),
     Keyboard(bool),
@@ -64,11 +107,21 @@ pub enum Change {
 impl Change {
     /// Its key and value in the file.
     fn put(self, t: &mut toml::Table) {
+        let name = |skin| match skin {
+            Skin::Worn => "realistic",
+            Skin::Drawn => "classic",
+        };
         let (key, value): (&str, toml::Value) = match self {
             Change::Shutter(shown) => ("ultra_shutter", shown.into()),
             Change::NoteRead => ("ultra_note_read", true.into()),
-            Change::Skin(Skin::Worn) => ("skin", "realistic".into()),
-            Change::Skin(Skin::Drawn) => ("skin", "classic".into()),
+            Change::Skin(skin) => {
+                t.remove("skin_pack");
+                ("skin", name(skin).into())
+            }
+            Change::Pack(id, base) => {
+                t.insert("skin_pack".into(), id.as_str().into());
+                ("skin", name(base).into())
+            }
             Change::Lettering(Lettering::Standard) => ("lettering", "standard".into()),
             Change::Lettering(Lettering::Large) => ("lettering", "large".into()),
             Change::Frequency(Law::Semitones) => ("frequency_dials", "semitones".into()),
@@ -90,6 +143,7 @@ impl Default for Settings {
             shutter: true,
             ultra_note_read: false,
             skin: Skin::Worn,
+            pack: None,
             lettering: Lettering::Standard,
             frequency: Law::Semitones,
             keyboard: None,
@@ -141,6 +195,10 @@ impl Settings {
                 Some("classic") => Skin::Drawn,
                 _ => d.skin,
             },
+            pack: t
+                .get("skin_pack")
+                .and_then(toml::Value::as_str)
+                .and_then(PackId::new),
             // (Anything but LARGE, the standard lettering.)
             lettering: match t.get("lettering").and_then(toml::Value::as_str) {
                 Some("large") => Lettering::Large,
@@ -159,7 +217,14 @@ impl Settings {
         match change {
             Change::Shutter(shown) => self.shutter = shown,
             Change::NoteRead => self.ultra_note_read = true,
-            Change::Skin(skin) => self.skin = skin,
+            Change::Skin(skin) => {
+                self.skin = skin;
+                self.pack = None;
+            }
+            Change::Pack(id, base) => {
+                self.skin = base;
+                self.pack = Some(id);
+            }
             Change::Lettering(lettering) => self.lettering = lettering,
             Change::Frequency(law) => self.frequency = law,
             Change::Keyboard(shown) => self.keyboard = Some(shown),
@@ -254,6 +319,30 @@ mod tests {
         }
     }
 
+    /// A pack's look is kept with its base, which an older CA-72 reads; a built-in one chosen
+    /// again forgets the pack (decisions.md R-SKIN-PACKS).
+    #[test]
+    fn a_packs_look_is_kept_with_its_base() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let path = dir.path().join("settings.toml");
+        let id = PackId::new("org.example.night-panel").expect("an id");
+        Settings::keep(&path, Change::Pack(id, Skin::Drawn)).expect("kept");
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(text.contains("skin = \"classic\""), "{text}");
+        assert!(
+            text.contains("skin_pack = \"org.example.night-panel\""),
+            "{text}"
+        );
+        let read = Settings::read(&path);
+        assert_eq!((read.skin, read.pack), (Skin::Drawn, Some(id)));
+        Settings::keep(&path, Change::Skin(Skin::Worn)).expect("kept");
+        let read = Settings::read(&path);
+        assert_eq!((read.skin, read.pack), (Skin::Worn, None));
+        // An id a pack could not have is not read as one.
+        std::fs::write(&path, "skin_pack = \"../../evil\"\n").expect("written");
+        assert_eq!(Settings::read(&path).pack, None);
+    }
+
     /// Written and read again; keys it does not know kept; a file it cannot read left alone.
     #[test]
     fn the_settings_are_kept_and_a_bad_file_left_alone() {
@@ -274,6 +363,7 @@ mod tests {
             shutter: false,
             ultra_note_read: true,
             skin: Skin::Drawn,
+            pack: None,
             lettering: Lettering::Large,
             frequency: Law::Hardware,
             keyboard: None,
@@ -358,6 +448,7 @@ mod tests {
                 shutter: true,
                 ultra_note_read: true,
                 skin: Skin::Drawn,
+                pack: None,
                 lettering: Lettering::Large,
                 frequency: Law::Hardware,
                 keyboard: None,
