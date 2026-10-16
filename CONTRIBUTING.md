@@ -21,4 +21,6 @@ Bug reports, measurements and fixes are welcome.
 - **Decisions** are recorded in `docs/decisions.md`; a change of behaviour adds to it.
 
 By contributing you agree that your contribution is licensed under the GNU General Public
-License, version 3 or later, as the rest of the CA-72 is.
+License, version 3 or later, as the rest of the CA-72 is, except for contributions to the skin
+packs' format and its examples (`docs/skin-packs.md`, `docs/skin-packs/`), which are dedicated to
+the public domain under CC0 1.0, as those files are.

@@ -6056,8 +6056,8 @@ single-file pack format and offline signature checking next, locally, with tests
   folder at its top; read in memory within the folder's limits; only stored and deflated
   entries; encrypted entries and links refused; each entry read no further than its limit,
   whatever its header says; too many entries refused before any is read. `zip` 8 with its
-  deflate alone (MIT; `flate2`, already built in). **Its extension, `.ifskin`, is a placeholder:
-  the name is the owner's.**
+  deflate alone (MIT; `flate2`, already built in). Its extension, `.ifskin`, the owner's
+  (kept: below).
 - **Signatures** (`skin_pack::signature`): Ed25519 (`ed25519-dalek` 2, BSD-3-Clause, with its
   RustCrypto crates). `signature.toml` signs its key's id, the pack's id and version, the
   publisher (`marketplace` or `first-party`), the date, and a digest of every other file (each
@@ -6087,3 +6087,9 @@ The archive's own test found a bug as it was written: an archive whose every ent
 (or `/`) had that taken as its one folder and stripped, and its names passed; only a folder a
 pack could hold is stripped now. Also the earlier review's last finding: an id in a namespace
 (`xml:id`) is refused, as usvg reads only the plain `id`.
+
+**Owner decisions, 2026-10-16, later.** The pack file's extension stays `.ifskin`.
+`CONTRIBUTING.md` says that contributions to the skin packs' format and examples
+(`docs/skin-packs.md`, `docs/skin-packs/`) are CC0, as those files are, and the rest GPL. Packs
+ship before the marketplace: a CA-72 release may carry the format with community packs, unsigned
+and installed by hand, while the marketplace is designed.
