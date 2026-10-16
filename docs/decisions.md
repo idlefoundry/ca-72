@@ -5896,6 +5896,31 @@ Developer ID signed, notarised, stapled and accepted by Gatekeeper; every upload
 downloaded again and checked against the manifest. The evidence is recorded when those checks
 complete.
 
+**Owner check, 2026-10-16.** The owner installed the signed macOS installer before
+publication: "I tried the 0.2.4 build on my Mac and it looks good. Finish the draft and publish
+0.2.4."
+
+**Publication evidence, 2026-10-16.** [CA-72 0.2.4](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.4)
+is public and Latest (also to an anonymous request, which the update check makes). PR #44 was
+fast-forwarded to `main` at the exact tested commit `ec5d2aee04ce3b7320f64eb105281ccd5cc62d2c`,
+which the annotated `v0.2.4` tag names.
+- [PR CI 38843349685](https://github.com/idlefoundry/ca-72/actions/runs/38843349685) and
+  [tag CI 38845351212](https://github.com/idlefoundry/ca-72/actions/runs/38845351212) passed on
+  Linux, Windows and macOS; the tag's drafted the release.
+- The macOS installer was made from the PR run's unsigned universal bundles (artifact digest
+  `sha256:afa8fa2d…`, checked), signed with Developer ID, notarised (submission
+  `45123f3e-359c-4db0-87be-32bdaa6c16fb`, Accepted), stapled and accepted by Gatekeeper, on the
+  Mac from the agent's own session (no detour through a desktop shell was needed). Each
+  bundle's executable and data sections are the CI build's, byte for byte; the Audio Unit's
+  embedded CLAP is the signed CLAP.
+- `CA-72-0.2.4-macOS.pkg` sha256 `ef6b1052b913ba7ada7826ed12e654f5c784d747acece1e6cffa55ed5688fa65`,
+  90,797,995 bytes. All nine assets were downloaded again and checked against
+  `SHA256SUMS.txt` and GitHub's digests; the published installer, downloaded once more with
+  the quarantine flag set, passed `pkgutil`, `stapler validate` and Gatekeeper ("Notarized
+  Developer ID").
+- On the lab share macOS writes `._` files beside each download; the downloads are checked in
+  a local folder (`~/.cache`). The scripts and logs are in `~/lab/artifacts/ca-72/0.2.4/`.
+
 ## R-MAC-FIXES. The Mac's own: the lab's VCO bench, and the pointer over the grip
 
 **Owner decision, 2026-10-16.** After 0.2.4: "please identify and fix those Mac specific
