@@ -341,6 +341,16 @@ pub fn demotions() -> u64 {
     0
 }
 
+/// Whether the calling thread is scheduled as an audio thread now, as the system reports it
+/// (macOS: not time-sharing, so a time-constraint thread the system has demoted for running
+/// past its computation reports false; None elsewhere). For measurements.
+pub fn scheduled_realtime() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    return sys::scheduled_realtime();
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
 /// Whether the calling thread runs at real-time priority (Linux: `SCHED_FIFO` or
 /// `SCHED_RR`; elsewhere false).
 pub fn is_realtime() -> bool {
@@ -416,6 +426,31 @@ mod sys {
         // that must be given back: this one takes none.)
         fn pthread_mach_thread_np(thread: libc::pthread_t) -> u32;
         fn thread_policy_set(thread: u32, flavor: u32, info: *mut i32, count: u32) -> i32;
+        fn thread_info(thread: u32, flavor: u32, info: *mut i32, count: *mut u32) -> i32;
+    }
+
+    /// `THREAD_BASIC_INFO` and its size in `natural_t`s; `POLICY_TIMESHARE`.
+    const THREAD_BASIC_INFO: u32 = 3;
+    const THREAD_BASIC_INFO_COUNT: u32 = 10;
+    const POLICY_TIMESHARE: i32 = 1;
+
+    /// Whether the calling thread is scheduled other than time-sharing now: a time-constraint
+    /// thread the system has demoted (its fail-safe, for running past its computation without
+    /// blocking) reports time-sharing until it is restored. None if the system does not say.
+    pub fn scheduled_realtime() -> Option<bool> {
+        let mut info = [0i32; THREAD_BASIC_INFO_COUNT as usize];
+        let mut count = THREAD_BASIC_INFO_COUNT;
+        // SAFETY: a buffer of `count` 32-bit words for the basic info of our own thread.
+        let kr = unsafe {
+            thread_info(
+                pthread_mach_thread_np(libc::pthread_self()),
+                THREAD_BASIC_INFO,
+                info.as_mut_ptr(),
+                &mut count,
+            )
+        };
+        // (user_time and system_time, two words each, then cpu_usage, then the policy.)
+        (kr == 0 && count >= 6).then(|| info[5] != POLICY_TIMESHARE)
     }
 
     pub fn promote(period: Duration, computation: Duration) -> Result<(), String> {
@@ -1057,6 +1092,51 @@ mod tests {
     fn the_fast_cores_are_among_all_of_them() {
         let c = cores();
         assert!(c.fast >= 1 && c.fast <= c.all, "{c:?}");
+    }
+
+    /// macOS reports a thread promoted here as scheduled other than time-sharing, and an
+    /// ordinary one as time-sharing (the check `scheduled_realtime` makes of a demotion).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_promoted_thread_is_reported_scheduled_as_audio() {
+        let ordinary = std::thread::spawn(scheduled_realtime).join().unwrap();
+        assert_eq!(ordinary, Some(false));
+        let promoted = std::thread::spawn(|| {
+            let ok = promote(Duration::from_millis(5), Duration::from_micros(2500));
+            (ok.is_ok(), scheduled_realtime())
+        })
+        .join()
+        .unwrap();
+        assert_eq!(promoted, (true, Some(true)));
+    }
+
+    /// macOS's fail-safe as `scheduled_realtime` sees it: a time-constraint thread that spins
+    /// without blocking far past its computation is reported time-sharing (on the Mac, after
+    /// 1.0 s; still so 0.5 s after it blocks). One CPU for up to 2 s.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "holds a CPU for up to two seconds"]
+    fn a_time_constraint_thread_spinning_past_its_computation_is_demoted() {
+        let (demoted_after, restored) = std::thread::spawn(|| {
+            promote(Duration::from_millis(5), Duration::from_micros(2500)).unwrap();
+            let t = std::time::Instant::now();
+            let mut demoted_after = None;
+            while t.elapsed() < Duration::from_secs(2) {
+                if scheduled_realtime() == Some(false) {
+                    demoted_after = Some(t.elapsed());
+                    break;
+                }
+                std::hint::spin_loop();
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            (demoted_after, scheduled_realtime())
+        })
+        .join()
+        .unwrap();
+        eprintln!(
+            "demoted after {demoted_after:?}; after 0.5 s asleep, scheduled as audio: {restored:?}"
+        );
+        assert!(demoted_after.is_some(), "never demoted");
     }
 
     /// A kernel CPU list read as the kernel writes it.

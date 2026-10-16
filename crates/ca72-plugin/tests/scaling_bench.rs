@@ -40,6 +40,10 @@ struct Ran {
     took: Vec<f64>,
     silent: u64,
     peak: f32,
+    /// Blocks whose end found the host thread demoted from the audio threads' scheduling
+    /// (macOS's time-constraint fail-safe; `ca72_rt::scheduled_realtime`), and whether it had it.
+    demoted: usize,
+    promoted: bool,
     /// At the end: its workers, its split crews and its runs played split.
     workers: usize,
     crews: usize,
@@ -107,6 +111,21 @@ fn workers_and_instances_in_real_time() {
         engines.push(e);
     }
     let load = load_average();
+    // A canary at ordinary priority: it sleeps 10 ms at a time and keeps its worst oversleep,
+    // which grows if the audio threads keep ordinary work off the processors (a stall).
+    let canary_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let canary = {
+        let stop = canary_stop.clone();
+        std::thread::spawn(move || {
+            let mut worst = 0.0f64;
+            while !stop.load(std::sync::atomic::Ordering::Acquire) {
+                let t = Instant::now();
+                std::thread::sleep(Duration::from_millis(10));
+                worst = worst.max(t.elapsed().as_secs_f64() * 1e3 - 10.0);
+            }
+            worst
+        })
+    };
 
     let go = Arc::new(Barrier::new(instances));
     let start_at = Arc::new(std::sync::Mutex::new(None::<Instant>));
@@ -131,6 +150,8 @@ fn workers_and_instances_in_real_time() {
         })
         .collect();
     let ran: Vec<Ran> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    canary_stop.store(true, std::sync::atomic::Ordering::Release);
+    let canary_ms = canary.join().unwrap();
 
     let p_ms = period.as_secs_f64() * 1e3;
     let mut all: Vec<f64> = ran.iter().flat_map(|r| r.took.iter().copied()).collect();
@@ -151,8 +172,10 @@ fn workers_and_instances_in_real_time() {
         .map(|r| format!("{}w{}s", r.workers, r.crews))
         .collect();
     let split_runs: u64 = ran.iter().map(|r| r.split_runs).sum();
+    let demoted: usize = ran.iter().map(|r| r.demoted).sum();
+    let promoted = ran.iter().filter(|r| r.promoted).count();
     println!(
-        "scaling: quality={} block={block} instances={instances} workers={workers} share={} poly={poly} got={} held={} split_runs={split_runs} voices={voices} seconds={seconds} mean={mean:.1} worst_instance_mean={worst_mean:.1} p50={:.1} p99={:.1} p999={:.1} worst={:.1} late={late} blocks={blocks} silent_runs={silent} demotions={} load={load} cores={}/{}",
+        "scaling: quality={} block={block} instances={instances} workers={workers} share={} poly={poly} got={} held={} split_runs={split_runs} voices={voices} seconds={seconds} mean={mean:.1} worst_instance_mean={worst_mean:.1} p50={:.1} p99={:.1} p999={:.1} worst={:.1} late={late} blocks={blocks} silent_runs={silent} demotions={} load={load} cores={}/{} canary_ms={canary_ms:.2} promoted={promoted} demoted_blocks={demoted}",
         if ultra { "ultra" } else { "hi" },
         if auto {
             "auto"
@@ -196,7 +219,9 @@ fn host(
 ) -> Ran {
     let rate = 48_000.0;
     let voices = c.voices;
-    let _rt = ca72_rt::promote(period, period / 2);
+    let rt = ca72_rt::promote(period, period / 2);
+    let promoted = rt.is_ok() && ca72_rt::scheduled_realtime() != Some(false);
+    let mut demoted = 0;
     ca72_rt::watch();
     let wg = host_wg
         .then(|| ca72_rt::WorkInterval::new("scaling_bench host"))
@@ -283,6 +308,9 @@ fn host(
         }
         if i >= warm {
             took.push(t.elapsed().as_secs_f64() * 1e3);
+            if promoted && ca72_rt::scheduled_realtime() == Some(false) {
+                demoted += 1;
+            }
         }
         let elapsed = start.elapsed().as_secs_f64() / period.as_secs_f64();
         next = (next + 1).max(elapsed.ceil() as u32);
@@ -297,6 +325,8 @@ fn host(
     go.wait();
     Ran {
         took,
+        demoted,
+        promoted,
         silent: e.silent_runs() - silent_from,
         peak,
         workers,

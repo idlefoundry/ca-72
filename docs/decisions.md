@@ -6467,3 +6467,119 @@ counts (the mean / the worst block · late · not heard; at 256 frames):
   first blocks, in the warm-up).
 
 No benchmark or real-time thread was left running on any of the three machines.
+
+### Six and eight instances on the Mac, and a macOS rule proposed (2026-10-16)
+
+**The owner, reviewing the eight-instance result** (relayed):
+- re-measure 6 and 8 HI instances on the Mac, on the built branch;
+- report whether more than N − 2 − A measurably helps on macOS;
+- check for demoted time-constraint threads or a stalled system;
+- propose a macOS rule if it helps and is safe, but do not build it.
+
+**How it was measured** (`scripts/mac-budget-sweep.sh`, raw lines in
+`docs/threads/mac-budget.txt`; from 18:52 local time):
+- The setup:
+  - the built engine at `d82e9b2`;
+  - 6 and 8 instances of ten HI voices (the scaling bench's chords), each with the plug-in's
+    helper thread;
+  - process budgets of 4, 6, 8, 10 and 12 workers shared evenly
+    (`set_budget_for_measurement`);
+  - 256 and 128 frames, 10 s each.
+- Three repeats, the budgets in a different order each time (4 6 8 10 12; 12 8 4 10 6;
+  6 10 12 4 8), so that drift spreads across them.
+- Before each run the load and the busiest processes were logged:
+  - Live open throughout (0.2 to 0.4 core);
+  - in some runs another application (Codex, CodexBar) took up to 0.9 core;
+  - load average 3 to 12 (the bench's own threads among it);
+  - no other session's builds or benchmarks.
+- **A stall canary:** an ordinary thread sleeping 10 ms at a time, its worst oversleep kept
+  (`canary_ms`). It stays a few milliseconds unless the audio threads keep ordinary work off
+  the processors.
+- **Demotion:** `log show` returns nothing from this session's shell, so the kernel's log
+  could not be read. Instead, `ca72_rt::scheduled_realtime` reads the thread's scheduling from
+  `thread_info` (a time-constraint thread demoted by the system's fail-safe reports
+  time-sharing).
+  - Checked first: a promoted thread reports scheduled as audio
+    (`a_promoted_thread_is_reported_scheduled_as_audio`).
+  - A promoted thread spinning without blocking is reported demoted after 1.0 s, and is still
+    so 0.5 s after it blocks
+    (`a_time_constraint_thread_spinning_past_its_computation_is_demoted`, by hand).
+  - The bench checks each instance's host thread at every block's end. The workers were not
+    checked: they park between runs.
+  - Six runs at the heaviest settings were made again with this check
+    (`docs/threads/mac-demotion.txt`).
+
+**Results** (the three repeats' values: the mean and the worst block, % of the period; late
+blocks and voices' runs not heard). B is what the built rule gives (N − 2 − A, at least 4): 6
+for 6 instances, 4 for 8.
+
+| Frames, instances | Workers | Mean | Worst | Late (of the blocks) | Not heard |
+|---|---|---|---|---|---|
+| 256, 6 (11,250 blocks) | 4 | 77–78 | 238–252 | 3,074, 3,739, 3,753 | 125–193 |
+| | **6 (B)** | 69–71 | 196–269 | 138, 128, 104 | 1,938–2,005 |
+| | 8 | 69–71 | 252–265 | 114, 98, 127 | 1,863–2,194 |
+| | 10 | 70–72 | 280–357 | 137, 111, 112 | 2,061–2,606 |
+| | 12 | 72–73 | 372–376 | 130, 126, 93 | 2,305–2,522 |
+| 128, 6 (22,500 blocks) | 4 | 77–79 | 237–275 | 7,480, 7,489, 7,475 | 278–293 |
+| | **6 (B)** | 67–70 | 183–270 | 427, 323, 325 | 5,957–6,179 |
+| | 8 | 71 | 198–275 | 316, 260, 356 | 4,439–4,732 |
+| | 10 | 72–73 | 262–284 | 418, 335, 402 | 4,467–4,895 |
+| | 12 | 73–74 | 292–360 | 434, 417, 436 | 4,669–4,997 |
+| 256, 8 (15,000 blocks) | **4 (B)** | 93–95 | 277–280 | 7,550, 7,637, 7,596 | 949–1,284 |
+| | 6 | 92–93 | 355–387 | 4,337, 4,220, 4,319 | 3,008–4,247 |
+| | 8 | 89–91 | 380–390 | 2,235, 1,772, 2,000 | 5,212–5,397 |
+| | 10 | 89–93 | 397–573 | 1,956, 1,678, 2,227 | 4,533–4,999 |
+| | 12 | 89–92 | 384–495 | 1,780, 1,930, 1,922 | 4,370–4,618 |
+| 128, 8 (30,000 blocks) | **4 (B)** | 98–99 | 356–368 | 15,254, 15,154, 15,151 | 1,581–1,704 |
+| | 6 | 93–94 | 382–471 | 9,699, 9,299, 9,410 | 6,830–8,969 |
+| | 8 | 92 | 371–381 | 9,703, 7,773, 9,217 | 13,434–14,324 |
+| | 10 | 90–91 | 465–495 | 6,506, 6,223, 7,162 | 9,591–11,485 |
+| | 12 | 92 | 496–554 | 7,063, 7,144, 7,177 | 9,218–9,518 |
+
+**What it shows:**
+- **With 6 instances, more than B (6) does not measurably help at 256 frames.**
+  - The late blocks are within the repeats' spread from 6 to 12 (93 to 138).
+  - The runs not heard rise a little.
+  - The worst block grows: about 250 % of the period at 6, 372 % at 12.
+- **At 128 frames, 8 helps a little:** late blocks 260 to 356 against 323 to 427, and runs not
+  heard about 4,600 against 6,100. 10 and 12 are no better than 6.
+- **With 8 instances, B (4) leaves four instances with no worker, and each is late in every
+  block**: 7,600 of 15,000 late at 256 frames, 15,200 of 30,000 at 128.
+  - One worker for every instance (8) cuts the late blocks to 1,800 to 2,200 at 256 frames, a
+    quarter. At 128 it cuts them to 7,800 to 9,700, a half to three fifths.
+  - 10 and 12 give a little more at 128 (6,200 to 7,200 late), and nothing measurable at 256.
+  - The runs not heard rise as workers are added: with workers, a slow voice is silenced for a
+    run instead of the whole block being late. 5,300 runs not heard of about 300,000 voices'
+    runs (1.8 %) at 8 workers, against half of all blocks late at 4.
+- **The worst block is 2 to 6 times the period in every setting.** Eight instances
+  of ten HI voices (80 voices) do not play cleanly on this machine at any budget. This is the
+  work (item 1), not the count.
+- **No demotion and no stall:**
+  - every host thread was promoted, and none was demoted in any of the six checked runs:
+    8 instances with 12 workers (20 audio threads on 14 cores) at 128 and 256 frames, 8 with 8
+    at 256, 6 with 12 at 256 and 128, and 8 with 4 at 128;
+  - the canary's worst oversleep was 5.3 to 16.8 ms in the sweep's 60 runs, and 5.5 to 7.4 ms in
+    the checked six.
+
+**On the safety margin.** macOS bounds a time-constraint thread: one that runs far past its
+computation without blocking is demoted (here after 1.0 s), so a runaway cannot hold a CPU for
+good, as one at `SCHED_FIFO` with throttling off could on the Linux machine (2026-09-30). Up to
+20 audio threads on the Mac's 14 cores, nothing was demoted and ordinary work kept running.
+So on macOS the margin can be relaxed to give every instance at least one worker, which is
+where the gain is. Past that, more workers gained little, and the worst blocks grew.
+
+**Proposed for macOS (not built; the owner decides):**
+- **The rule:** on macOS only, B = max(today's count, N − 2 − A, min(A + 2, N − 2)): every
+  instance holding threads at least one worker and two over, never more than N − 2 in all.
+  Elsewhere B stays as approved.
+- **On the Mac** (N 14) it gives 11, 10, 8, 8 and 10 for 1, 2, 4, 6 and 8 instances, against
+  11, 10, 8, 6 and 4 now.
+- **The measurements behind it:**
+  - at 6 instances, 8 is as good as 6 at 256 frames and better at 128;
+  - at 8 instances, 10 is as good as 8 at 256 and better at 128, against 4: late blocks a
+    quarter at 256 and under half at 128.
+- **Not measured:** more than 8 instances; this rule's numbers on another Mac.
+
+**Not done:**
+- The workers' own scheduling was not checked for demotion (only the host threads').
+- The kernel's log could not be read from here.
