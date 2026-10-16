@@ -1,0 +1,90 @@
+# The layout, `layout.toml`
+
+*CC0 1.0. Checked against the CA-72's `skin-packs` prototype, October 2026; `docs/skin-packs.md`
+is the authority.*
+
+## Coordinates
+
+Units, not pixels. The face's top left corner is `0, 0`; x runs right to **3108**, y runs
+down to **795**. The wooden strip above the face runs from **y = -130** to 0. Everything in
+the layout (controls with their click areas, fixtures, rules, legends, titles) must stay
+inside x 0 to 3108, y -130 to 795.
+
+The drawing (`art/panel.svg`) uses the same x but **y + 130**: see [drawing.md](drawing.md).
+
+## The 42 controls, by kind
+
+Every one must appear exactly once as a `[[control]]` with its `param` and `at` (its centre).
+Others are rejected (the left-hand column and the lower strip are the plug-in's own).
+
+| Kind | Params | Fields allowed besides `param`, `at` |
+|---|---|---|
+| Knob (21) | `tune`, `glide`, `mod_mix`, `osc2_frequency`, `osc3_frequency`, `osc1_volume`, `osc2_volume`, `osc3_volume`, `ext_volume`, `noise_volume`, `cutoff`, `emphasis`, `contour_amount`, `filter_attack`, `filter_decay`, `filter_sustain`, `loudness_attack`, `loudness_decay`, `loudness_sustain`, `volume`, `feedback` | `big = true/false` (`osc2_frequency`, `osc3_frequency` are big unless set false) |
+| Selector (6) | `osc1_range`, `osc2_range`, `osc3_range`, `osc1_waveform`, `osc2_waveform`, `osc3_waveform` | none |
+| Rocker (14) | `osc_mod`, `osc3_control`, `osc1_on`, `osc2_on`, `osc3_on`, `ext_on`, `noise_on`, `noise_type`, `filter_mode`, `filter_mod`, `keyboard_control_1`, `keyboard_control_2`, `main_output`, `a440` | `size = [w, h]` (16 to 240 each), `colour` (`blue`, `red`, `black`, `ivory`), `on` (`right`, `top`, `bottom`) |
+| Toggle (1) | `quality` | `size = [w, h]` (16 to 240; default 50 by 81), `across = true` |
+
+A field that doesn't apply to a control's kind is rejected (`layout.control`). A rocker that
+is on at `top` or `bottom` reads best taller than wide (`size = [55, 111]`); one on at `right`
+wider than tall (`size = [108, 50]`).
+
+The plug-in prints each knob's dial numbers and each selector's legends itself, round the
+control: they are not in the layout and can't be changed. Leave room for them.
+
+## Click areas and spacing
+
+No two click areas may overlap, nor any with POWER's (`layout.overlap`), and none may reach
+outside the panel (`layout.outside`). Click areas, from the centre:
+
+| Kind | Click area | Room it needs to look right (with dial print) |
+|---|---|---|
+| Knob | a square of ±62 | about 200 across, 170 down |
+| Big knob | ±73 | about 220 across, 190 down |
+| Selector | ±60 | about 200 across, 170 down |
+| Rocker, toggle | ±(w/2 + 4), ±(h/2 + 4) | its size plus a legend |
+| POWER | ±26 across, ±64 down | |
+
+The starter spaces its columns 222 apart and its rows 240 apart, with legends 100 below each
+centre: copy that rhythm when regrouping, and check the large-lettering preview, where
+legends are wider.
+
+## Fixtures
+
+```toml
+[fixtures]
+power = [x, y]          # POWER's switch, centre; needs 64 clear all round
+lamp = [x, y]           # its lamp, radius 24
+overload = [x, y]       # OVERLOAD's lamp, radius 34
+ultra = [x, y]          # QUALITY's opening (ULTRA's lamp, LO's hamster), radius 54
+plate = [x, y]          # the name plate's top left corner; it is 261 by 82
+phones = [x, y, r]      # optional; r up to 60
+screws = [[x, y, r]]    # optional; at most 32, r up to 60
+```
+
+The plate prints "CA-72" and "IDLE FOUNDRY" itself: that is the plug-in's own name, and a
+pack may move the plate but cannot change or remove what it says. Don't add other makers'
+names anywhere.
+
+## Print
+
+```toml
+[[line]]                  # a rule; at most 300
+from = [x, y]
+to = [x, y]
+width = 2                 # 0.5 to 20
+
+[[text]]                  # a legend, centred on `at` (the middle of its capitals); at most 300
+text = "CUTOFF"           # 1 to 48 characters
+at = [x, y]
+# size = 16               # 6 to 80; without it the panel's legend size (19, large 22)
+# large = [x, y]          # its place in the large lettering, if it must move there
+
+[[title]]                 # a section title, spaced out across its span; at most 16
+text = "FILTER"
+span = [x0, x1]           # x0 < x1
+baseline = y              # its top (baseline - 60) must be inside the panel too
+# size = 52               # 6 to 80
+```
+
+Legends are printed in capitals by convention; keep them short. Text goes only in the layout:
+an SVG drawing may not contain text.
