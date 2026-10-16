@@ -1,0 +1,73 @@
+# 2026-10-16T21:13:59Z helper work interval A/B, Mac
+# rep 1 load { 5.71 7.18 8.05 } top: voices_inert-f97adb1a66204ec1 99.7%; Ableton 51.0%; WindowServer 44.7%; 
+split: block=256 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=24.1 p50=22.1 p99=55.1 p999=67.7 worst=68.8 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 1 load { 5.53 7.09 8.01 } top: voices_inert-f97adb1a66204ec1 98.5%; Ableton 51.2%; WindowServer 47.8%; 
+split: block=256 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=24.6 p50=22.7 p99=55.0 p999=68.3 worst=69.5 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 1 load { 5.29 6.96 7.94 } top: Ableton 50.9%; WindowServer 46.3%; vst3_host-223302f7aa56dbef 41.7%; 
+split: block=256 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=29.2 p50=24.0 p99=68.9 p999=93.2 worst=128.7 late=1 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 1 load { 6.81 7.21 8.01 } top: rustc 329.5%; WindowServer 54.1%; Ableton 54.1%; 
+split: block=256 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=29.0 p50=23.3 p99=64.4 p999=74.9 worst=92.2 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 1 load { 6.37 7.10 7.96 } top: Ableton 50.6%; WindowServer 48.1%; Codex 45.0%; 
+split: block=256 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=37.2 p50=36.9 p99=73.3 p999=123.4 worst=133.5 late=4 blocks=1875 silent_runs=7 demotions=0 rt=true helper_wg=false intervals=0
+# rep 1 load { 6.46 7.09 7.95 } top: Ableton 51.1%; WindowServer 42.9%; Codex 33.6%; 
+split: block=256 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=38.1 p50=37.9 p99=67.6 p999=95.3 worst=123.4 late=2 blocks=1875 silent_runs=6 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 1 load { 6.85 7.15 7.96 } top: Ableton 51.8%; WindowServer 42.1%; Codex 32.5%; 
+split: block=128 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=41.8 p50=35.1 p99=97.0 p999=156.2 worst=198.8 late=36 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 1 load { 5.78 6.90 7.85 } top: Ableton 52.4%; WindowServer 44.1%; Codex 32.7%; 
+split: block=128 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=30.7 p50=24.1 p99=67.2 p999=86.6 worst=90.8 late=0 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=4500
+# rep 1 load { 6.12 6.92 7.84 } top: Ableton 51.4%; WindowServer 43.1%; Codex 27.9%; 
+split: block=128 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=33.7 p50=27.9 p99=85.8 p999=144.3 worst=206.1 late=17 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 1 load { 6.04 6.87 7.81 } top: Ableton 52.9%; WindowServer 45.4%; Codex 30.8%; 
+split: block=128 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=29.5 p50=26.0 p99=71.1 p999=96.2 worst=105.5 late=4 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=4500
+# rep 1 load { 5.79 6.78 7.77 } top: Ableton 51.9%; WindowServer 45.2%; Codex 34.2%; 
+split: block=128 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=42.2 p50=34.1 p99=90.6 p999=125.5 worst=184.1 late=20 blocks=3750 silent_runs=150 demotions=0 rt=true helper_wg=false intervals=0
+# rep 1 load { 6.56 6.90 7.80 } top: Ableton 49.9%; WindowServer 43.0%; Codex 27.7%; 
+split: block=128 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=37.0 p50=29.9 p99=73.5 p999=92.8 worst=117.2 late=4 blocks=3750 silent_runs=24 demotions=0 rt=true helper_wg=true intervals=4500
+# rep 2 load { 6.14 6.79 7.74 } top: Ableton 53.0%; WindowServer 42.8%; Codex 33.4%; 
+split: block=256 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=34.0 p50=28.8 p99=73.9 p999=114.9 worst=116.3 late=4 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 2 load { 5.42 6.61 7.66 } top: Ableton 53.2%; WindowServer 41.4%; Codex 34.0%; 
+split: block=256 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=29.6 p50=24.5 p99=66.3 p999=76.9 worst=85.8 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 2 load { 5.04 6.49 7.60 } top: Ableton 50.2%; WindowServer 35.6%; Codex 27.6%; 
+split: block=256 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=36.3 p50=33.4 p99=80.3 p999=114.5 worst=122.6 late=6 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 2 load { 5.19 6.45 7.57 } top: Ableton 51.6%; WindowServer 40.6%; Codex 34.7%; 
+split: block=256 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=30.8 p50=25.8 p99=65.7 p999=86.3 worst=94.2 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 2 load { 5.30 6.43 7.55 } top: Ableton 51.3%; WindowServer 41.1%; Codex 31.3%; 
+split: block=256 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=40.8 p50=39.9 p99=80.5 p999=131.0 worst=135.2 late=4 blocks=1875 silent_runs=18 demotions=0 rt=true helper_wg=false intervals=0
+# rep 2 load { 4.94 6.29 7.48 } top: Ableton 52.6%; WindowServer 42.3%; Codex 35.0%; 
+split: block=256 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=37.2 p50=35.9 p99=67.7 p999=122.9 worst=125.1 late=4 blocks=1875 silent_runs=4 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 2 load { 5.94 6.43 7.51 } top: npm 109.2%; (node) 106.9%; npm 105.2%; 
+split: block=128 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=35.4 p50=28.5 p99=80.8 p999=148.9 worst=180.9 late=14 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 2 load { 6.89 6.61 7.56 } top: Ableton 42.2%; WindowServer 40.2%; Codex 26.7%; 
+split: block=128 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=27.2 p50=24.7 p99=63.6 p999=85.5 worst=123.7 late=1 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=4500
+# rep 2 load { 7.07 6.67 7.56 } top: Ableton 43.3%; WindowServer 36.7%; Codex 20.3%; 
+split: block=128 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=33.6 p50=27.6 p99=81.3 p999=111.1 worst=172.9 late=7 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 2 load { 7.12 6.69 7.56 } top: Codex 170.3%; Codex 116.2%; intelligenceflowd 78.8%; 
+split: block=128 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=30.4 p50=24.9 p99=80.7 p999=91.6 worst=119.7 late=2 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=4500
+# rep 2 load { 7.68 6.85 7.60 } top: Ableton 50.9%; WindowServer 45.4%; Codex 35.6%; 
+split: block=128 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=43.6 p50=38.4 p99=98.3 p999=137.9 worst=181.6 late=35 blocks=3750 silent_runs=188 demotions=0 rt=true helper_wg=false intervals=0
+# rep 2 load { 7.05 6.74 7.55 } top: Ableton 50.4%; WindowServer 43.9%; Codex 28.9%; 
+split: block=128 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=36.2 p50=30.0 p99=75.8 p999=100.4 worst=121.4 late=6 blocks=3750 silent_runs=18 demotions=0 rt=true helper_wg=true intervals=4500
+# rep 3 load { 6.43 6.62 7.50 } top: Codex 73.7%; Ableton 51.0%; WindowServer 43.5%; 
+split: block=256 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=34.7 p50=30.4 p99=74.2 p999=93.8 worst=99.9 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 3 load { 5.64 6.44 7.42 } top: Ableton 52.5%; WindowServer 41.2%; Codex 33.8%; 
+split: block=256 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=29.6 p50=24.7 p99=64.5 p999=74.7 worst=85.9 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 3 load { 5.60 6.41 7.39 } top: Codex 51.5%; Ableton 50.7%; WindowServer 41.4%; 
+split: block=256 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=34.3 p50=29.6 p99=76.6 p999=123.6 worst=147.7 late=5 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 3 load { 6.22 6.50 7.41 } top: Codex 92.8%; Ableton 50.0%; WindowServer 41.1%; 
+split: block=256 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=30.1 p50=24.8 p99=66.0 p999=81.3 worst=92.2 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 3 load { 5.89 6.42 7.37 } top: Ableton 52.1%; WindowServer 42.4%; Codex 36.7%; 
+split: block=256 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=40.1 p50=39.5 p99=75.3 p999=113.5 worst=131.6 late=4 blocks=1875 silent_runs=20 demotions=0 rt=true helper_wg=false intervals=0
+# rep 3 load { 5.67 6.35 7.33 } top: Ableton 52.5%; WindowServer 43.0%; Codex 35.2%; 
+split: block=256 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=38.3 p50=37.7 p99=70.1 p999=121.9 worst=137.6 late=5 blocks=1875 silent_runs=6 demotions=0 rt=true helper_wg=true intervals=2250
+# rep 3 load { 5.94 6.38 7.32 } top: Ableton 52.2%; WindowServer 44.7%; Codex 33.4%; 
+split: block=128 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=34.4 p50=27.7 p99=87.0 p999=129.9 worst=170.7 late=17 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 3 load { 5.81 6.33 7.29 } top: Ableton 51.9%; WindowServer 45.1%; Codex 35.3%; 
+split: block=128 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=29.9 p50=24.9 p99=79.9 p999=94.2 worst=123.6 late=3 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=4500
+# rep 3 load { 5.41 6.22 7.24 } top: Ableton 51.5%; WindowServer 40.8%; Codex 28.4%; 
+split: block=128 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=40.2 p50=34.3 p99=87.8 p999=128.5 worst=167.4 late=14 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# rep 3 load { 5.94 6.31 7.26 } top: Codex 73.3%; Ableton 53.2%; WindowServer 44.4%; 
+split: block=128 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=32.5 p50=25.1 p99=83.0 p999=104.0 worst=123.5 late=8 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=true intervals=4500
+# rep 3 load { 6.01 6.31 7.24 } top: Ableton 52.4%; WindowServer 44.3%; Codex 38.7%; 
+split: block=128 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=42.5 p50=36.5 p99=91.7 p999=148.7 worst=190.6 late=23 blocks=3750 silent_runs=143 demotions=0 rt=true helper_wg=false intervals=0
+# rep 3 load { 6.54 6.41 7.26 } top: Ableton 51.0%; WindowServer 44.7%; Codex 38.4%; 
+split: block=128 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=38.0 p50=31.6 p99=73.7 p999=116.5 worst=122.2 late=5 blocks=3750 silent_runs=16 demotions=0 rt=true helper_wg=true intervals=4500

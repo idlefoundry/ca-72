@@ -11,6 +11,12 @@
 //! promoted host thread at `CA72_BLOCK` frames (256), 2 s then `CA72_SECONDS` (10) measured,
 //! each block given the plug-in's deadline. Prints one `split:` line.
 //!
+//! `CA72_HELPER_WG=1` (macOS) puts the split voices' helpers in a work interval of their own,
+//! as the pool's workers are in theirs (decisions.md R11): a driver thread, a member too,
+//! opens it at each block's start with the period as its deadline and closes it when the
+//! block's runs are done, as the pool's first worker does for its own (the host's thread
+//! cannot join one, R11). Off by default: the split numbers in R-THREADS are without it.
+//!
 //! `the_split_voice_with_drive_is_the_voice` checks the prototype's samples: the same to the
 //! bit as the whole voice's with DRIVE, as the engine plays it.
 //!
@@ -25,8 +31,8 @@ use ca72::voice::{Jacks, Panel, Quality, Voice};
 use ca72_plugin::engine::{CHUNK, DEADLINE, MIX_LEN, Mix, set_budget_for_measurement};
 use ca72_plugin::pool::{Play, Pool, Shared};
 use common::env;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const RATE: f64 = 48_000.0;
@@ -110,12 +116,59 @@ fn panel(at: usize) -> Panel {
 /// ordinary).
 static PERIOD_US: AtomicU64 = AtomicU64::new(0);
 
+/// The split voices' helpers' work interval, when they join one (`CA72_HELPER_WG`).
+static HELPER_WG: OnceLock<Option<ca72_rt::WorkInterval>> = OnceLock::new();
+
 fn helper_start() {
     let us = PERIOD_US.load(Ordering::Relaxed);
     if us > 0 {
         let period = Duration::from_micros(us);
         let _ = ca72_rt::promote(period, period / 2);
     }
+    // (Joined for good: the measurement never lets its split voices go, so no helper ends
+    // while joined, which would stop the process.)
+    if let Some(Some(wg)) = HELPER_WG.get()
+        && let Some(token) = wg.join()
+    {
+        std::mem::forget(token);
+    }
+}
+
+/// The driver of the helpers' interval: a member that opens it when told a block has begun
+/// (`begun` moves on) and closes it when told it is done (`ended` catches up).
+struct Driver {
+    begun: AtomicU64,
+    ended: AtomicU64,
+    quit: AtomicBool,
+}
+
+fn drive_interval(d: &Driver, wg: &ca72_rt::WorkInterval, period: Duration) -> u64 {
+    let _ = ca72_rt::promote(period, period / 2);
+    let token = wg.join();
+    let (mut seen, mut open, mut opened) = (0u64, false, 0u64);
+    while !d.quit.load(Ordering::Acquire) {
+        let begun = d.begun.load(Ordering::Acquire);
+        if begun != seen {
+            seen = begun;
+            if open {
+                wg.finish();
+            }
+            open = wg.start(period);
+            opened += u64::from(open);
+        }
+        if open && d.ended.load(Ordering::Acquire) == seen {
+            wg.finish();
+            open = false;
+        }
+        std::thread::park_timeout(Duration::from_millis(50));
+    }
+    if open {
+        wg.finish();
+    }
+    if let Some(t) = token {
+        wg.leave(t);
+    }
+    opened
 }
 
 fn voices(n: usize, split: usize) -> Vec<Shared<Played>> {
@@ -218,12 +271,33 @@ fn split_ultra_voices_in_real_time() {
     let db: f64 = env("CA72_DRIVE", 6.0);
     let period = Duration::from_secs_f64(block as f64 / RATE);
     PERIOD_US.store(period.as_micros() as u64, Ordering::Relaxed);
+    let helper_wg = env("CA72_HELPER_WG", 0) == 1;
+    if helper_wg {
+        let _ = HELPER_WG.set(ca72_rt::WorkInterval::new("CA-72 split voice"));
+    }
     let helpers = 5 * split;
     let ask = budget.saturating_sub(helpers);
     set_budget_for_measurement(ask.max(1));
     let vs = voices(n, split);
     let mut pool = Pool::start(ask, &vs, Some(period)).unwrap();
     let workers = pool.workers();
+    let driver = Arc::new(Driver {
+        begun: AtomicU64::new(0),
+        ended: AtomicU64::new(0),
+        quit: AtomicBool::new(false),
+    });
+    let driving = (helper_wg && split > 0)
+        .then(|| {
+            let d = driver.clone();
+            std::thread::Builder::new()
+                .name("ca72-split-interval".into())
+                .spawn(move || {
+                    let wg = HELPER_WG.get().and_then(Option::as_ref);
+                    wg.map_or(0, |wg| drive_interval(&d, wg, period))
+                })
+                .ok()
+        })
+        .flatten();
     let rt = ca72_rt::promote(period, period / 2);
     ca72_rt::watch();
     let m = mix(db);
@@ -243,6 +317,10 @@ fn split_ultra_voices_in_real_time() {
         let t = Instant::now();
         let deadline = Some(t + period.mul_f64(DEADLINE));
         pool.block();
+        if let Some(h) = &driving {
+            driver.begun.store(b as u64 + 1, Ordering::Release);
+            h.thread().unpark();
+        }
         let at0 = b * block;
         let mut at = at0;
         while at < at0 + block {
@@ -271,16 +349,25 @@ fn split_ultra_voices_in_real_time() {
         if b >= warm {
             took.push(t.elapsed().as_secs_f64() * 1e3);
         }
+        if let Some(h) = &driving {
+            driver.ended.store(b as u64 + 1, Ordering::Release);
+            h.thread().unpark();
+        }
         let elapsed = start.elapsed().as_secs_f64() / period.as_secs_f64();
         next = (next + 1).max(elapsed.ceil() as u32);
     }
     let p_ms = period.as_secs_f64() * 1e3;
     let late = took.iter().filter(|&&t| t > p_ms).count();
+    let opened = driving.map_or(0, |h| {
+        driver.quit.store(true, Ordering::Release);
+        h.thread().unpark();
+        h.join().unwrap_or(0)
+    });
     let mean = took.iter().sum::<f64>() / took.len() as f64 / p_ms * 100.0;
     took.sort_by(f64::total_cmp);
     let q = |x: f64| took[((took.len() - 1) as f64 * x) as usize] / p_ms * 100.0;
     println!(
-        "split: block={block} voices={n} split={split} budget={budget} threads={} workers={workers} helpers={helpers} drive={db} mean={mean:.1} p50={:.1} p99={:.1} p999={:.1} worst={:.1} late={late} blocks={} silent_runs={silent} demotions={} rt={}",
+        "split: block={block} voices={n} split={split} budget={budget} threads={} workers={workers} helpers={helpers} drive={db} mean={mean:.1} p50={:.1} p99={:.1} p999={:.1} worst={:.1} late={late} blocks={} silent_runs={silent} demotions={} rt={} helper_wg={helper_wg} intervals={opened}",
         1 + workers + helpers,
         q(0.5),
         q(0.99),
@@ -292,5 +379,9 @@ fn split_ultra_voices_in_real_time() {
     );
     assert!(peak > 1e-3, "the voices were not heard");
     drop(pool);
+    // (The split voices' helpers are joined to their interval for good: kept, not ended.)
+    if helper_wg {
+        std::mem::forget(vs);
+    }
     set_budget_for_measurement(0);
 }

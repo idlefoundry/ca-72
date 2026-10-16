@@ -6180,7 +6180,8 @@ that finds too few takes what there is and asks again at the next generation.
   1,875, against 72 whole; two POLY voices at ULTRA about 4 late and 23 runs not heard, against
   3 and 489. ULTRA's note (R48) can say what this machine plays.
 
-**E. The override (Advanced).** The computer's settings file (`settings.toml`, R48) gains
+**E. The override (Advanced).** *Deferred by the owner (below): AUTO only for now; none of
+this is to be built yet.* The computer's settings file (`settings.toml`, R48) gains
 `threads`: `auto` (A to C) or a number from 0 to N − 2, an instance's workers (0: every voice on
 the host's thread). It also gains `ultra_split`: `auto` (D), `off`, or a number from 0 to 2.
 In the settings menu: ADVANCED › THREADS… with AUTO and the numbers, showing what AUTO
@@ -6198,8 +6199,64 @@ item 4); no lookahead, no added latency.
 2. Shares that follow the instances (C), rather than one pool for the process.
 3. ULTRA's split: S = 0, 1 or 2 by F, only when every sounding voice can be split, the one
    instrument at ULTRA included (so it holds threads with POLY off) (D).
-4. The override's form (E).
+4. The override's form (E). **Answered:** AUTO only for now.
 5. Before building D on the Mac: whether to try the helpers in a work interval first (item 4).
+   **Answered:** yes. It was tried; below.
+
+### The owner's answers on 4 and 5, and the work interval tried
+
+**The owner, 2026-10-16** (relayed): "Why don't we just try everything on auto right now with
+regards to question 4? And then, yes, try the cheaper option on Mac to see if it helps
+anything." So there is no override for now: no `threads` or `ultra_split` setting and no
+ADVANCED › THREADS… menu. Decisions 1 to 3 are still open.
+
+**What was tried (the prototype only).** In `tests/ultra_split.rs`, `CA72_HELPER_WG=1` puts
+the split voices' helpers in a work interval of their own (`ca72_rt::WorkInterval`, as the
+pool's workers are in theirs, R11). The host's thread cannot join one (R11), and only a member
+may open or close it. So a driver thread, a member too, is woken at each block's start and
+opens the interval with the period as its deadline, then closes it when woken at the block's
+end. That mirrors the pool, whose first worker opens its interval at a block's first run. The
+interval opened once per block in every run (2,250 at 256 frames, 4,500 at 128, warm-up
+included). `ca72::threaded` and the plug-in are unchanged.
+
+**How it was measured.** The Mac, from 17:14 local time:
+- Three configurations, each at 256 and 128 frames, with and without the interval, run in
+  turn and repeated three times, 10 s each.
+- The machine was not quiet, but each with/without pair ran under the same conditions:
+  - repeat 1: another project's test (`voices_inert`, one core);
+  - repeat 2: `npm` processes (about three cores);
+  - repeat 3: Ableton Live 12 open (about half a core), as throughout.
+- Load average 5.7 to 6.5. No watchdog demotions. Raw lines: `docs/threads/split-helper-wg-mac.txt`.
+
+**Results:** the three repeats' values, without → with the interval: the mean and the worst
+block, % of the period; the late blocks (of 1,875 at 256 frames, 3,750 at 128); runs not heard.
+
+| Frames | Voices, threads | Mean | Worst block | Late blocks | Not heard |
+|---|---|---|---|---|---|
+| 256 | 1 split, 6 | 24, 34, 35 → 25, 30, 30 | 69, 116, 100 → 70, 86, 86 | 0, 4, 0 → 0, 0, 0 | 0 → 0 |
+| 256 | 1 split, 12 | 29, 36, 34 → 29, 31, 30 | 129, 123, 148 → 92, 94, 92 | 1, 6, 5 → 0, 0, 0 | 0 → 0 |
+| 256 | 2 split, 12 | 37, 41, 40 → 38, 37, 38 | 134, 135, 132 → 123, 125, 138 | 4, 4, 4 → 2, 4, 5 | 7, 18, 20 → 6, 4, 6 |
+| 128 | 1 split, 6 | 42, 35, 34 → 31, 27, 30 | 199, 181, 171 → 91, 124, 124 | 36, 14, 17 → 0, 1, 3 | 0 → 0 |
+| 128 | 1 split, 12 | 34, 34, 40 → 30, 30, 32 | 206, 173, 167 → 106, 120, 124 | 17, 7, 14 → 4, 2, 8 | 0 → 0 |
+| 128 | 2 split, 12 | 42, 44, 42 → 37, 36, 38 | 184, 182, 191 → 117, 121, 122 | 20, 35, 23 → 4, 6, 5 | 150, 188, 143 → 24, 18, 16 |
+
+**What it shows:**
+- **It helps, most at 128 frames.**
+  - One split voice: the worst block falls by about a third at 128 frames and its late blocks
+    from 14–36 to 0–3 of 3,750, close to Windows' (item 4). At 256 frames no block is late in
+    any repeat.
+  - Two split voices at 128 frames: late blocks fall from 20–35 to 4–6, the runs not heard from
+    143–188 to 16–24, the worst block from about 185 % to 120 %.
+  - At 256 frames two split voices change little: the late blocks stay at 2 to 5.
+- So, as R11 found for the pool's workers, the system ran the helpers slower without an
+  interval.
+- **This run's baseline is better than the split grid's** (one split voice, 6 threads, 256
+  frames: 24–35 % mean and 0–4 late here, against 31 % and 7 earlier): the machine's state
+  differs from run to run. The pairs above are what compare.
+- **Proposed for D:** on macOS each crew's helpers join a work interval of their own. One of
+  them opens it at a block's first pass and closes it when the block's passes are done, as the
+  pool's first worker does, rather than a driver thread (that thread was the prototype's
+  shortcut). This is part of building D, which waits on decisions 1 to 3.
 
 ### Not done
 - Nothing beyond 14 cores or 20 hardware threads: the formulas' values there (a 32-core
