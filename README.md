@@ -233,7 +233,8 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   below the cutoff, the deepest bass coming back, and as EMPHASIS rises, a shelf with the
   resonance's peak on it rather than a high-pass. At LO the filter is the drawing's.
 - **POWER** is the host's bypass: the output fades out over 10 ms and back in.
-- **QUALITY** (a chrome toggle above POWER: ULTRA, HI by default, or LO; not the
+- **QUALITY** (a chrome toggle above POWER: ULTRA, HI, or LO, LO by default for a new
+  instance from 0.2.5, HI before; projects keep theirs, those from 0.1 open at HI; not the
   instrument's): at ULTRA the circuit's model plays with no compromises, its most exact, at
   high CPU cost; in 0.2.0 it took about seven times the work of HI, with one voice using
   about a whole core of a fast computer, so

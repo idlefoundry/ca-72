@@ -3985,6 +3985,18 @@ mod tests {
         )
     }
 
+    /// An editor whose instance is at QUALITY HI (a new one is at LO: R-LO-DEFAULT).
+    fn editing_at_hi() -> (Editing, Arc<Host>, Arc<Ca72Params>) {
+        let params = Ca72Params {
+            quality: EnumParam::new("Quality", QualityMode::Hi),
+            ..Ca72Params::default()
+        };
+        editing_of(
+            params,
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        )
+    }
+
     fn editing_of(params: Ca72Params, library: Library) -> (Editing, Arc<Host>, Arc<Ca72Params>) {
         editing_for_api(params, library, PluginApi::Clap)
     }
@@ -4354,7 +4366,7 @@ mod tests {
     /// its own as a rocker's: above its nut ULTRA, below it LO, on it (HI already) nothing.
     #[test]
     fn quality_goes_where_its_toggle_is_clicked() {
-        let (mut e, host, params) = editing();
+        let (mut e, host, params) = editing_at_hi();
         let q = params.quality.as_ptr();
         let (x, y) = centre("quality");
         let up = at(&e, (x, y - 40.0));
@@ -4908,7 +4920,7 @@ mod tests {
     /// press reads it, and not again; with the shutter off, its own times.
     #[test]
     fn quality_s_opening_follows_quality_and_ultra_s_note_is_read_once() {
-        let (mut e, _, _) = editing();
+        let (mut e, _, _) = editing_at_hi();
         assert_eq!(
             (e.motion.lamp, e.motion.coil),
             (1.0, 0.0),

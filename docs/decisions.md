@@ -5919,3 +5919,26 @@ that does not change over the grip on macOS (R-SIZE).
 --test vco_osc23`: 5 passed (3 had failed), with either change alone as well. `NSCursor`
 answers to `_windowResizeNorthWestSouthEastCursor` and `…NorthEastSouthWest…` on this Mac.
 Not tried: the pointer seen over the grip in a host (to be checked in the next build).
+
+## R-LO-DEFAULT. QUALITY at LO for a new instance
+
+**Owner decision, 2026-10-16.** During 0.2.4's release: "Can we make the plugin default to “LO”
+quality setting for new users?", and "You can push this update first if changing this single
+setting requires you to rerun CI, but if you can make that change without, please do so now."
+A parameter's default is in the binaries, so it needed a new build: 0.2.4 was published as
+tested, and this follows it.
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **What changes.** QUALITY's default is LO (Potato mode, R47), not HI, so a new instance
+  (and the standalone's first session) plays the light voices: 2.1 to 3.8 % of a core for ten
+  POLY voices against 78 to 107 % at HI (R47's measurement, three presets), so a first try
+  works on a slower computer. "New users" is taken as new instances: a parameter's default cannot tell a
+  new user from an existing one, and the choice per computer that could (like LOOK) would hide
+  the default from a host's own reset.
+- **What does not.** A project keeps the QUALITY it was saved with (every 0.2 session saves
+  it); presets never carried it (`library::KEPT`). A session saved before QUALITY existed
+  (0.1's) opens at HI, as it did from 0.2.0 to 0.2.4, not at the new default
+  (`Ca72::filter_state`), so no old project changes its sound.
+- **Tests.** `a_new_instance_is_at_lo_and_an_old_session_at_hi`; the two editor tests that
+  began from a new instance's HI (`quality_goes_where_its_toggle_is_clicked`,
+  `quality_s_opening_follows_quality_and_ultra_s_note_is_read_once`) begin at HI explicitly.
