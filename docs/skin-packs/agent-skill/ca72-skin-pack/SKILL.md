@@ -110,6 +110,11 @@ For a new pack, in `$PACK/skin.toml`:
 - `[[creators]]`: the user (ask how to credit them). Credit your own part honestly in the
   assets' provenance, not as a creator with a person's name.
 - Update `README.md` to describe this pack (`.md` files need no provenance).
+- Leave out `requires`. Add `requires = "ca-72 >= x.y.z"` only if the pack truly needs a
+  later CA-72 than the one it is checked with: an earlier one will refuse it.
+
+In `$PACK/layout.toml`, keep `controls = 1` as the starter has it. It names the revision of the
+CA-72's controls the layout was made for, so that a later CA-72 can place controls added since.
 
 ### 3. Run the first check
 
@@ -133,13 +138,22 @@ pictures or a font. Edit the TOML by hand or line by line; a regular expression 
 a short script is fine: keep the script outside `$PACK`. After each:
 
 1. Run the check.
-2. **Open and look at both previews**, `preview.png` (standard lettering) and
+2. After any change to an SVG (the drawing or a picture), see what it costs to draw:
+   ```bash
+   cd "$CA72" && cargo run --release -p skin-pack --example svg_cost -- "$PACK/art/panel.svg"
+   ```
+   It shows the drawing's counts and its time to draw, then the same with each costly kind of
+   part left out. `work` is the cost in pixel-equivalents, against a limit of 60 million. A picture is
+   costed at its slot's width: pass it after the file (`... pictures/knob.svg 512`). Keep well
+   under the limit; tall or diagonal lines (stripes, hatching) and big filtered or
+   see-through areas are what cost (see [reference/drawing.md](reference/drawing.md)).
+3. **Open and look at both previews**, `preview.png` (standard lettering) and
    `preview-large.png` (large lettering). Look for: legends running into dials, knobs or each
    other; dial numbers clipped by neighbours; titles not over their group; the drawing's bands
    or shapes not lined up with the controls (remember the 130 offset), or crossing a legend;
    poor contrast between print and drawing, or controls that vanish into it (black rockers
    on a dark face); anything cut off at the panel's edges.
-3. Fix what you see as well as what the check reports. The check knows click areas and
+4. Fix what you see as well as what the check reports. The check knows click areas and
    limits, not taste: a pack can load and still look crowded.
 
 The preview shows the whole editor. Only the wooden strip and the face above the lower wood
@@ -155,8 +169,11 @@ the plug-in's own and can't be changed.
   each one that remains to the user in plain words: what it means and why it is there. Some
   are expected and right for an AI-made pack (`provenance.generated`,
   `declaration.missing`). Never hide one by recording something untrue.
-- **Note**: for the record. Mention anything the user would want to know (a font's vendor or
-  trademark, a picture drawn at other proportions).
+- **Note**: for the record, but **read every note**. A layout or `[look]` field the plug-in
+  doesn't know is only noted (`layout.unknown`, `look.unknown`), so a typo (`colour` spelt
+  `color`, `bigg = true`) loads without it and with nothing but a note. In a pack you made,
+  every such note is a mistake: fix it. Mention the rest the user would want to know (a font's
+  vendor or trademark, a picture drawn at other proportions).
 
 ### 6. Deliver it as a pack file
 
@@ -179,7 +196,9 @@ signs a pack once its review passes, and an unsigned pack loads for anyone who i
 ### Updating a pack
 
 An update keeps the pack's `id` and raises its `version` (`major.minor.patch`: patch for
-fixes, minor for additions, major for a new look). The plug-in uses the newest version of an
+fixes, minor for additions, major for a new look). Its layout keeps its `controls` value
+unless you remake it for a newer revision of the CA-72's controls (then place every control
+that revision has). The plug-in uses the newest version of an
 id installed more than once, so the update can sit beside the old one. A signed pack is always
 preferred over an unsigned copy of the same id, whatever version the copy claims: tell the
 user that their unsigned update of a published pack won't show while the signed one is

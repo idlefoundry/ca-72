@@ -5,7 +5,9 @@ is the authority.*
 
 ## The manifest, `skin.toml`
 
-Unknown fields are rejected. A complete one for a pack an agent made with a user:
+The manifest is strict: an unknown field is rejected, because its licence, provenance and
+declarations are what a review relies on. (A layout or `[look]` field the plug-in doesn't know
+is only noted.) A complete one for a pack an agent made with a user:
 
 ```toml
 format = 1
@@ -78,6 +80,10 @@ finding go away.
   pack, not an update.
 - `com.idlefoundry.*` ids load only with Idle Foundry's first-party signature; a creator never
   uses one. The built-in looks' own ids never load, signed or not.
+- `requires = "ca-72 >= x.y.z"` only when a pack truly needs a later CA-72 (an earlier one
+  refuses it, `manifest.requires`). Leave it out otherwise.
+- An update's layout keeps its `controls` value unless it is remade for a newer revision of
+  the CA-72's controls.
 - `version` is `major.minor.patch`. Raise it for every release (patch for fixes, minor for
   additions, major for a new look). With the same id installed twice, the plug-in uses the
   newest version, except that a signed pack always beats an unsigned copy, whatever version

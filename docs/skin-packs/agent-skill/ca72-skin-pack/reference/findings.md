@@ -13,7 +13,7 @@ these first and check again: later problems may only show once earlier ones are 
 
 | Code | Usual cause | Fix |
 |---|---|---|
-| `manifest.syntax`, `manifest.fields`, `look.fields`, `layout.syntax` | Bad TOML, or a field the format doesn't have (a typo, `color` for `colour`) | Correct the TOML; use only documented fields |
+| `manifest.syntax`, `manifest.fields`, `look.fields`, `layout.syntax` | Bad TOML; a manifest field the format doesn't have (the manifest is strict); a known field with a value of the wrong type | Correct the TOML. (An unknown *layout* or `[look]` field is only noted: see the notes below) |
 | `manifest.store` | `price`, `currency`, `sku`, `license_key` or `drm` | Remove it. Never add one |
 | `manifest.id` | Id not lower-case dotted; `com.idlefoundry.*` without a first-party signature; a built-in look's id | Use the user's own `org.<name>.<pack>` |
 | `signature.invalid` | A signed pack changed since signing (a file, its id or version), or a signature that doesn't match | Don't edit signed packs. Work on an unsigned copy; on the user's own copy, remove `signature.toml` with their agreement (it then loads as unsigned) |
@@ -28,10 +28,11 @@ these first and check again: later problems may only show once earlier ones are 
 | `layout.overlap` | Two click areas overlap, or one overlaps POWER | Move them apart: knobs need 124 between centres (big 146, selectors 120) plus room for their print |
 | `layout.outside` | A control, fixture, plate, screw or PHONES reaches past x 0 to 3108, y -130 to 795 | Move it in, allowing for its click area or radius |
 | `layout.line`, `layout.text`, `layout.title`, `layout.count`, `layout.number`, `layout.format` | A rule outside or of width beyond 0.5 to 20; a legend empty, over 48 characters or sized beyond 6 to 80; a title's span reversed or its top outside; too many; not a number; `format` not 1 | Correct the entry |
-| `svg.refused` | `<text>`, `<style>`, a script, an outside reference, a DTD, animation, an element not on the list | Rewrite without it ([drawing.md](drawing.md)) |
-| `svg.slow`, `svg.size` | Drawing took over 250 ms; no size | Fewer or smaller blurs and patterns; give `viewBox` |
+| `svg.refused` | `<text>`, `<style>`, a script, an outside reference, a DTD, animation, an element not on the list, an `id` used twice; or a count or the cost to draw (60 million pixel-equivalents) past its limit | Rewrite without it; for cost, run `svg_cost` and cut what it shows ([drawing.md](drawing.md)) |
+| `svg.slow`, `svg.size` | The timed test drawing took over 250 ms; no size | Run `svg_cost`; fewer tall lines, smaller filters and layers; give `viewBox` |
+| `manifest.requires` | `requires` not `"ca-72 >= major.minor.patch"`, or naming a CA-72 later than this one | Remove it unless the pack truly needs a later CA-72 |
 | `file.type`, `file.executable` | A file type not allowed, or code/an archive whatever its name | Remove it (and keep previews outside the pack) |
-| `path.*`, `pack.*`, `file.size`, `text.encoding`, `picture.png` | Names, depth, links, sizes, counts (in a folder or a pack file), non-UTF-8 text, a broken PNG | Rename, flatten, shrink or re-save |
+| `path.*`, `pack.*` (`pack.pixels`: over 16 million picture pixels, embedded ones included), `file.size`, `text.encoding`, `picture.png` | Names, depth, links, sizes, counts (in a folder or a pack file), non-UTF-8 text, a broken PNG | Rename, flatten, shrink or re-save |
 | `font.file`, `font.embedding` (restricted), `font.licence` ("personal use", "demo"...) | A font that isn't a single OTF/TTF face, or whose maker forbids carrying it | Remove the font |
 | `declaration.signed` | Declarations without `declared_by` and a `declared_on` date | Remove `[declarations]`: they are the user's to make |
 
@@ -52,11 +53,20 @@ listing it. Fix the ones that are mistakes; explain the rest in plain words.
 | `licence.text` | An open licence without its text in the pack. Add `LICENSE.txt`. |
 | `asset.official-copy` | A byte-for-byte copy of the plug-in's GPL picture in a pack under another licence. Remove it and draw your own. |
 | `font.licence`, `font.embedding` (preview and print), `font.notice`, `font.reserved-name` | The font's licence is uncertain, disagrees with what was declared, its licence text is missing, or a changed font keeps a reserved name. Fix it or remove the font. |
-| `look.fonts` | The pack's typeface lacks a glyph or runs a legend off the panel, so the built-in typeface is used. Shorten or move the legend, or drop the font. |
+| `look.fonts` | The pack's typeface can't print a legend, or something the plug-in prints (printable ASCII, "–", "…"), so the built-in typeface is used. Check it with `font_info`; use a fuller font or none. |
+| `look.fit` | A legend runs off the panel in either lettering size, in the typeface used, and is drawn cut off. Mistake: move it in or shorten it. |
+| `look.glyphs` | The built-in typeface (Latin, Greek, Cyrillic) can't print some legends: they'd show as empty boxes. Bring a typeface that has them, or change the legends. |
+| `layout.print-outside` | A control's own printed dial or legends would be cut off at the panel's edge. Mistake: move it in. |
+| `layout.full` | A control added in a later CA-72 found no free place, so the official layout is used for this pack (its drawing, pictures and typeface still its own). Leave room, or remake the layout for the newer revision. |
 
-## Note: for the record
+## Note: for the record, and read every one
 
-`signature.none` (unsigned: not published by the marketplace, and it loads all the same; every
+`layout.unknown`, `look.unknown` (a field the plug-in doesn't read, passed over: **in a pack you
+made, a typo to fix**; in an older plug-in reading a newer pack, expected), `layout.newer` (a
+control a later CA-72 has, in a layout made for it), `layout.added` (a control added since the
+layout's revision, placed by the plug-in), `layout.renamed`, `layout.retired`, `layout.kind` (a
+control renamed, retired or changed in kind since, followed), `svg.untested` (the timed test was
+skipped while another ran; the counted cost bounds it), `signature.none` (unsigned: not published by the marketplace, and it loads all the same; every
 pack you make is unsigned), `signature.unknown-key` (signed with a key this plug-in doesn't
 know, so treated as unsigned), `signature.valid` (who signed it and when: published, not
 cleared), `licence.terms` (the pack's licence and that the plug-in's doesn't apply to it),

@@ -1,7 +1,9 @@
 //! What a pack's drawing costs (decisions.md R-SKIN-PACKS): `cargo run --release -p skin-pack
-//! --example svg_cost -- <drawing.svg> [side]`. Prints its counts against the limits and how long
-//! it takes to draw `side` pixels across (3000 by default; waited for up to a minute), then the
-//! same with each of its costly kinds of part left out, to find what costs.
+//! --example svg_cost -- <drawing.svg> [side]`. Prints its counts and its work against the
+//! limits, costed and drawn `side` pixels across (the size the plug-in uses it at: 3000 for the
+//! panel's drawing, a picture's slot's width; without it, its own size, at most 3000), and how
+//! long it takes to draw (waited for up to a minute); then the same with each of its costly kinds
+//! of part left out, to find what costs.
 
 use std::time::Instant;
 
@@ -14,15 +16,19 @@ fn main() {
         eprintln!("svg_cost <drawing.svg> [side]");
         std::process::exit(2);
     };
-    let side: u32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(3000);
+    let side: Option<u32> = args.get(1).and_then(|s| s.parse().ok());
     let text = std::fs::read_to_string(path).expect("the drawing");
     let limits = Limits::default();
     let time = |label: &str, text: &str| {
         let t = Instant::now();
-        match svg::parse(text.as_bytes(), &limits) {
+        match svg::parse_at(text.as_bytes(), &limits, side) {
             Ok((tree, cost)) => {
                 let parsed = t.elapsed().as_secs_f64() * 1000.0;
-                let drawn = match svg::test_draw(&tree, side, 60_000) {
+                let own = tree.size();
+                let at = side.unwrap_or_else(|| {
+                    (own.width().max(own.height()).ceil() as u32).min(limits.svg_test_side)
+                });
+                let drawn = match svg::test_draw(&tree, at, 60_000) {
                     Drawn::In(ms) => format!("{ms} ms"),
                     other => format!("{other:?}"),
                 };

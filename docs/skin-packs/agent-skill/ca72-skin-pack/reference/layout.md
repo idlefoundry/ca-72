@@ -3,6 +3,23 @@
 *CC0 1.0. Checked against the CA-72's `skin-packs` prototype, October 2026; `docs/skin-packs.md`
 is the authority.*
 
+## The header
+
+```toml
+format = 1
+controls = 1    # the revision of the CA-72's controls this layout was made for
+```
+
+Keep `controls` as the starter has it. A later CA-72 uses it to place controls added since
+(`layout.added`, a note; `layout.full`, a review, if the panel has no room, when the official
+layout is used for the pack) and to follow renamed, retired or changed ones (`layout.renamed`,
+`layout.retired`, `layout.kind`, notes). A control that existed in the layout's revision and
+isn't placed is still refused.
+
+A field the plug-in doesn't know is passed over with a note (`layout.unknown`), not refused.
+That keeps old CA-72s reading newer layouts, but it means a misspelt field is silently
+ignored: read every note.
+
 ## Coordinates
 
 Units, not pixels. The face's top left corner is `0, 0`; x runs right to **3108**, y runs
@@ -29,7 +46,9 @@ is on at `top` or `bottom` reads best taller than wide (`size = [55, 111]`); one
 wider than tall (`size = [108, 50]`).
 
 The plug-in prints each knob's dial numbers and each selector's legends itself, round the
-control: they are not in the layout and can't be changed. Leave room for them.
+control: they are not in the layout and can't be changed. Leave room for them, including at
+the panel's edges: a control whose own dial or legends would be cut off by the edge goes to
+review (`layout.print-outside`), though its click area fits.
 
 ## Click areas and spacing
 
@@ -86,5 +105,8 @@ baseline = y              # its top (baseline - 60) must be inside the panel too
 # size = 52               # 6 to 80
 ```
 
-Legends are printed in capitals by convention; keep them short. Text goes only in the layout:
+Legends are printed in capitals by convention; keep them short. One that runs off the panel
+in either lettering size, in the typeface used, is drawn cut off (`look.fit`, a review): move
+it in or shorten it. The built-in typeface prints Latin, Greek and Cyrillic, not Arabic or
+Chinese (`look.glyphs`, a review): for other scripts bring a typeface that has them. Text goes only in the layout:
 an SVG drawing may not contain text.

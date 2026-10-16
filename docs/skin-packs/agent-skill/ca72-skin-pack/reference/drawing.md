@@ -43,10 +43,33 @@ fonts: write the SVG yourself, or strip those out.
 
 20,000 elements drawn (each reference, a `use`, `href` or `url(#name)`, counts as all it
 repeats; one that repeats itself is refused), 200,000 path segments, 32 filter primitives, a
-blur's deviation of at most 64, 4096 pattern tiles over all that patterns fill, embedded
-pictures within the picture limits, and a test drawing at 3000 pixels across within 250 ms
-(`svg.slow`). Large blurs and fine patterns over large areas are what usually break these:
-prefer gradients.
+blur's deviation of at most 64, 4096 pattern tiles over all that patterns fill (and 20,000
+elements drawn in those tiles), and embedded pictures within the picture limits.
+
+### What it costs to draw
+
+Counts don't bound the cost: a few long lines across the panel cost more than thousands of
+small shapes. The check estimates the work at the size the drawing is used (the panel's
+drawing 3000 pixels across, a picture at its slot's size) in pixel-equivalents, and refuses
+past **60 million**:
+
+| Work | Counts |
+|---|---|
+| a pixel painted (a fill's box; a stroke's length by its width) | 1 |
+| a pixel row a path's edges cross | 100 |
+| a pixel of a layer (a group's `opacity`, a clip, a mask) | 6 |
+| a pixel of a filter's region | 10 for each primitive |
+
+Edge rows are counted for every edge, by how far it climbs: the sum, over all edges, of the
+pixel rows each spans (a stroke's twice over). So tall or diagonal lines are what cost:
+hundreds of stripes or hatching running down or across the panel add up fast, while
+horizontal edges cost almost nothing and short shapes little. Keep tall and diagonal edges
+few; put `opacity` on shapes rather than on big groups; keep filters to small regions;
+prefer gradients to blurs and to hatching. Run `svg_cost` (SKILL.md, step 4) on every drawing you
+make: it prints the cost part by part, with each costly kind left out in turn.
+
+A timed test drawing (250 ms, `svg.slow`) is a backstop. If it is skipped because another
+drawing's test is running, `svg.untested` notes it; the counted cost still bounds the drawing.
 
 Write the SVG by hand or with a script, and keep it readable: name gradients and groups, and
 put a `<title>` saying what it is.
@@ -76,7 +99,9 @@ A coding agent draws slot pictures best as SVG (a knob from above: concentric ci
 radial gradients, a dot at twelve o'clock). A picture made with an image generator is
 `origin = "generated"` with that generator named as the `tool`.
 
-Picture limits: 4096 pixels a side, 48 million pixels in all, 8 MiB a file.
+Picture limits: 4096 pixels a side, **16 million pixels in all**, pictures embedded in SVGs
+counted too (`pack.pixels`), 8 MiB a file. A PNG or SVG picture at other proportions than its
+slot is stretched and noted (`look.picture`).
 
 ## Fonts
 
@@ -95,6 +120,16 @@ Apache-2.0, CC0-1.0, MIT, Unlicense, Bitstream-Vera), from its maker's own sourc
 - don't rename or change a font whose licence reserves its name;
 - one face per file, `.otf` or `.ttf`, at most 4 fonts, 4 MiB each.
 
-The font must have a glyph for every legend and title (and "CA-72", the plate's) and keep
-every legend on the panel in both letterings; otherwise the built-in typeface is used and a
-`look.fonts` review finding says why.
+The font must have a glyph for every legend and title, "CA-72" (the plate's) and everything
+the plug-in prints itself: printable ASCII, "–" and "…". Otherwise the built-in typeface is
+used and a `look.fonts` review finding says why. A legend that runs off the panel in the font
+is drawn cut off (`look.fit`, a review): the font is still used, and the layout is what to
+fix. See what a font says of itself and what it lacks before using it:
+
+```bash
+cd "$CA72" && cargo run -p skin-pack --example font_info -- fonts/Face-Regular.ttf "EVERY LEGEND"
+```
+
+It prints its names (family, copyright, licence and link, trademark), its maker, its
+embedding permission, the printable ASCII it lacks and whether it has each character of the
+text given.
