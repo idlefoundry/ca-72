@@ -27,6 +27,7 @@ fn context() -> Context<'static> {
         built_in: false,
         test_drawings: true,
         keys: &[],
+        plugin_version: None,
     }
 }
 
@@ -364,4 +365,41 @@ fn a_font_with_no_licence_named_or_a_restrictive_one_goes_to_review() {
         .find(|f| f.code == "font.licence")
         .expect("its licence");
     assert_eq!(font.severity, Severity::Review, "{}", p.report);
+}
+
+/// `requires`: an earlier plug-in says plainly that the pack needs a later one.
+#[test]
+fn a_pack_needing_a_later_plugin_says_so() {
+    let with = |req: &str, have: Option<&str>| {
+        let dir = pack("CC0-1.0");
+        write(
+            dir.path(),
+            "skin.toml",
+            manifest("CC0-1.0", "")
+                .replacen(
+                    "plugin = \"ca-72\"\n",
+                    &format!("plugin = \"ca-72\"\nrequires = \"{req}\"\n"),
+                    1,
+                )
+                .as_bytes(),
+        );
+        let context = Context {
+            plugin_version: have,
+            ..context()
+        };
+        Pack::open(dir.path(), &Limits::default(), &context)
+    };
+    assert!(with("ca-72 >= 0.1.0", Some("0.2.4")).is_ok());
+    let r = with("ca-72 >= 9.0.0", Some("0.2.4")).expect_err("refused");
+    assert!(r.has("manifest.requires"));
+    assert!(
+        r.findings
+            .iter()
+            .any(|f| f.message.contains("9.0.0 or newer")),
+        "{r}"
+    );
+    assert!(with("ca-74 >= 0.1.0", Some("0.2.4")).is_err());
+    assert!(with("ca-72 0.4", Some("0.2.4")).is_err());
+    // Where no plug-in is (a marketplace's tools), the version is not checked.
+    assert!(with("ca-72 >= 9.0.0", None).is_ok());
 }

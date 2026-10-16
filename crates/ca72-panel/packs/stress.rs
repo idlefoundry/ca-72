@@ -131,7 +131,7 @@ fn panel_params(pred: impl Fn(&Kind) -> bool) -> Vec<&'static str> {
 /// the print at its counts.
 pub fn edge_layout() -> String {
     let mut s = String::from(
-        "# EDGE: the layout at its limits (a stress pack, made by code).\nformat = 1\n\n",
+        "# EDGE: the layout at its limits (a stress pack, made by code).\nformat = 1\ncontrols = 1\n\n",
     );
     // Fixtures: POWER in the bottom left corner, the lamps beside it, QUALITY's opening in the
     // middle, the plate in the bottom right corner, PHONES at the largest radius, 32 screws.

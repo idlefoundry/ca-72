@@ -12,6 +12,8 @@
 # a layout says where it is and how it looks.
 
 format = 1
+# The revision of the CA-72's panel controls this layout was made for.
+controls = 1
 
 [fixtures]
 # POWER's switch, its lamp and OVERLOAD's lamp: centres.

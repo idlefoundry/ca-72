@@ -6148,3 +6148,36 @@ or hung.
 0.87 (39 and 84 MB); HEAVY 215 and 659 ms (63 and 125 MB); EDGE 229 and 688 ms (21 and 48 MB);
 the rest as their base look. A knob's frame 0.2 to 1.4 ms in every pack. Not yet: the slow x86
 machine, and the stress packs installed in hosts on each OS.
+
+**Compatibility over time, 2026-10-16.** The agent named the format's cost: it is now a promise,
+and a CA-72 that adds a control would have refused every existing pack (a layout had to place
+every control). The owner chose, of the agent's options, to place a control added later at its
+official place if free, else the nearest free spot, else to use the official layout for that pack
+("option A"); and to make layouts and `[look]` tolerant of fields they don't know, with notes,
+the manifest strict, and a `requires` for packs that need a later CA-72 ("option A").
+
+**Agent decisions** (not separately approved):
+- `controls::ControlSet` (`CONTROL_SET`, revision 1): the panel controls' history, each control's
+  revision, renames, retirements and changes of kind; never edited once released, only added
+  to. A layout's `controls` (1 if absent) is the revision it was made for. The reader takes the
+  set as a value, so tests simulate a later CA-72 against today's layouts.
+- Placing a control added later (`arrangement::free_spot`): its click area and printed dial on
+  the panel and over nothing of the layout's (controls, POWER, the lamps, QUALITY's opening, the
+  plate, PHONES), at its official place or the nearest free one, searched outward in rings 8
+  units apart. A panel with no room: the official layout (`layout.full`, a review).
+- Unknown fields in a layout or `[look]`: read into the rest of each table and noted
+  (`layout.unknown`, `look.unknown`); a name a later revision has, in a layout made for it:
+  passed over (`layout.newer`). The manifest keeps `deny_unknown_fields`; `requires =
+  "<plug-in> >= major.minor.patch"` is checked against the plug-in's version (none in the
+  marketplace's tools).
+- `tests/compat/v1/`: the starter as it was (without a `controls` key), the official layout, EDGE's
+  layout and a pack file signed with the stress key, frozen; `tests/compat.rs` loads each with
+  every control where it was put, and the signature verifiable. Never edited; each later
+  revision adds a folder.
+
+**Evidence (the Mac, 2026-10-16):** the compatibility tests; a later revision simulated (A-440
+added: at its official place when free, the nearest free place, found by a click, when FEEDBACK
+took it; refused on this revision; a renamed, a retired and a changed control followed; a layout
+for a later CA-72 with unknown names and fields loaded with notes, the same names refused when
+made for this revision; a full panel has no free place); `requires` checked; a later `[look]`
+field noted. The stress packs and the official looks' 32 frames as before.

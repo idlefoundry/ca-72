@@ -138,6 +138,7 @@ fn context() -> Context<'static> {
         built_in: false,
         test_drawings: false,
         keys: &[],
+        plugin_version: None,
     }
 }
 

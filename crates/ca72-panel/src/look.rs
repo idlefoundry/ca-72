@@ -144,6 +144,7 @@ impl Look {
             built_in: false,
             test_drawings: true,
             keys,
+            plugin_version: Some(env!("CARGO_PKG_VERSION")),
         };
         let pack = Pack::open(path, limits, &context)?;
         // The built-in looks' own ids are theirs alone: an installed pack, signed or not, never
@@ -176,6 +177,30 @@ impl Look {
                 return Err(report);
             }
         };
+        let unknown: Vec<String> = spec
+            .rest
+            .keys()
+            .map(|k| format!("look.{k}"))
+            .chain(
+                spec.fonts
+                    .iter()
+                    .flat_map(|f| f.rest.keys().map(|k| format!("look.fonts.{k}"))),
+            )
+            .collect();
+        if !unknown.is_empty() {
+            report.note(
+                "look.unknown",
+                at,
+                format!(
+                    "passed over, not read by this CA-72: {}",
+                    unknown
+                        .iter()
+                        .map(|k| format!("`{k}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            );
+        }
         let base = match spec.base.as_str() {
             "classic" => Skin::Drawn,
             "realistic" => Skin::Worn,
@@ -405,8 +430,11 @@ impl Look {
     }
 }
 
+/// What a `[look]` holds that this build does not read: noted, not refused (a field a later
+/// CA-72 reads is passed over by an earlier one).
+type Rest = BTreeMap<String, toml::Value>;
+
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct LookTable {
     base: String,
     #[serde(default)]
@@ -419,14 +447,17 @@ struct LookTable {
     pictures: BTreeMap<String, String>,
     #[serde(default)]
     face_tint: Option<[f32; 3]>,
+    #[serde(flatten)]
+    rest: Rest,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FontsTable {
     regular: String,
     #[serde(default)]
     bold: Option<String>,
+    #[serde(flatten)]
+    rest: Rest,
 }
 
 /// A pack's font's bytes kept for as long as the plug-in runs (its faces borrow them), each

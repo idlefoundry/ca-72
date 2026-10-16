@@ -50,6 +50,7 @@ fn main() {
         built_in: false,
         test_drawings: true,
         keys: &[],
+        plugin_version: None,
     };
     let pack = match Pack::check(files.clone(), report, &limits, &context) {
         Ok(p) => p,

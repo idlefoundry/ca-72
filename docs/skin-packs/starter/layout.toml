@@ -3,6 +3,8 @@
 # Dedicated to the public domain under CC0 1.0 (LICENSE.txt). The format: docs/skin-packs.md.
 
 format = 1
+# The revision of the CA-72's panel controls this layout was made for.
+controls = 1
 
 [fixtures]
 power = [3040, -65]

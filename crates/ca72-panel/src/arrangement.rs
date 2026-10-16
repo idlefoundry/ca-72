@@ -9,13 +9,14 @@
 //! end, and set every printed legend, rule and title. The left hand's controls and the strip's
 //! are the plug-in's own and stay where they are.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use serde::Deserialize;
 use skin_pack::Report;
 
 use crate::art::{self, PH, PW, TOP};
-use crate::controls::{CONTROLS, Colour, Control, Kind, Orient, Place};
+use crate::controls::{CONTROL_SET, CONTROLS, Colour, Control, ControlSet, Kind, Orient, Place};
 
 /// The layout data's format.
 pub const FORMAT: u32 = 1;
@@ -91,10 +92,16 @@ pub struct Arrangement {
     pub screws: Vec<(f64, f64, f64)>,
 }
 
+/// What a layout's tables hold that this build does not read: noted, not refused (a field a
+/// later format adds is passed over by an earlier plug-in).
+type Rest = BTreeMap<String, toml::Value>;
+
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct File {
     format: u32,
+    /// The revision of the panel's controls it was made for (`controls::ControlSet`).
+    #[serde(default)]
+    controls: Option<u32>,
     fixtures: Fixtures,
     #[serde(default)]
     control: Vec<ControlEntry>,
@@ -104,10 +111,11 @@ struct File {
     title: Vec<TitleEntry>,
     #[serde(default)]
     text: Vec<TextEntry>,
+    #[serde(flatten)]
+    rest: Rest,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Fixtures {
     power: [f64; 2],
     lamp: [f64; 2],
@@ -118,10 +126,11 @@ struct Fixtures {
     phones: Option<[f64; 3]>,
     #[serde(default)]
     screws: Vec<[f64; 3]>,
+    #[serde(flatten)]
+    rest: Rest,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ControlEntry {
     param: String,
     at: [f64; 2],
@@ -135,28 +144,31 @@ struct ControlEntry {
     on: Option<String>,
     #[serde(default)]
     across: Option<bool>,
+    #[serde(flatten)]
+    rest: Rest,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct LineEntry {
     from: [f64; 2],
     to: [f64; 2],
     width: f64,
+    #[serde(flatten)]
+    rest: Rest,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TitleEntry {
     text: String,
     span: [f64; 2],
     baseline: f64,
     #[serde(default)]
     size: Option<f64>,
+    #[serde(flatten)]
+    rest: Rest,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TextEntry {
     text: String,
     at: [f64; 2],
@@ -164,6 +176,8 @@ struct TextEntry {
     size: Option<f64>,
     #[serde(default)]
     large: Option<[f64; 2]>,
+    #[serde(flatten)]
+    rest: Rest,
 }
 
 /// The section titles' size (their capitals 38.5 units tall).
@@ -218,6 +232,16 @@ impl Arrangement {
     }
 
     pub fn read_at(text: &str, path: &str, report: &mut Report) -> Option<Arrangement> {
+        Self::read_with(text, path, &CONTROL_SET, report)
+    }
+
+    /// The same, against the panel controls' history `set` (this build's, or a test's).
+    pub fn read_with(
+        text: &str,
+        path: &str,
+        set: &ControlSet,
+        report: &mut Report,
+    ) -> Option<Arrangement> {
         let at = Some(path);
         let file: File = match toml::from_str(text) {
             Ok(f) => f,
@@ -234,15 +258,81 @@ impl Arrangement {
             );
             return None;
         }
+        // The revision of the controls it was made for (a format-1 layout without one: the first).
+        let made_for = file.controls.unwrap_or(1);
         let before = report.findings.len();
+        let mut notes: Vec<(&'static str, String)> = Vec::new();
+        if made_for == 0 {
+            report.reject("layout.controls", at, "`controls` is 1 or more".to_owned());
+            return None;
+        }
+        if made_for > set.revision {
+            notes.push((
+                "layout.newer",
+                format!(
+                    "made for revision {made_for} of the panel's controls, this CA-72 has {}: \
+                     what it does not know is passed over",
+                    set.revision
+                ),
+            ));
+        }
+        // What this build does not read, noted.
+        let mut unknown: Vec<String> = Vec::new();
+        let mut rest = |table: &str, r: &Rest| {
+            for k in r.keys() {
+                let name = format!("{table}{k}");
+                if !unknown.contains(&name) {
+                    unknown.push(name);
+                }
+            }
+        };
+        rest("", &file.rest);
+        rest("fixtures.", &file.fixtures.rest);
+        file.control.iter().for_each(|e| rest("control.", &e.rest));
+        file.line.iter().for_each(|e| rest("line.", &e.rest));
+        file.title.iter().for_each(|e| rest("title.", &e.rest));
+        file.text.iter().for_each(|e| rest("text.", &e.rest));
+        if !unknown.is_empty() {
+            notes.push((
+                "layout.unknown",
+                format!(
+                    "passed over, not read by this CA-72: {}",
+                    unknown
+                        .iter()
+                        .take(12)
+                        .map(|k| format!("`{k}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ));
+        }
         let mut reject = |code, msg: String| report.reject(code, at, msg);
 
-        // The controls: every one of the panel's, once each, its kind's look only.
+        // The controls: every one of the panel's, once each, its kind's look only; one renamed
+        // since the layout was made found by its old name, one retired since passed over.
         let mut controls: Vec<Control> = CONTROLS.to_vec();
         let mut placed = vec![false; CONTROLS.len()];
         for e in &file.control {
-            let Some(i) = CONTROLS.iter().position(|c| c.param == e.param) else {
-                reject("layout.control", format!("`{}`: no such control", e.param));
+            let name = set.current(&e.param, made_for);
+            if name != e.param {
+                notes.push(("layout.renamed", format!("`{}` is now `{name}`", e.param)));
+            }
+            if set.retired_since(name, made_for) {
+                notes.push((
+                    "layout.retired",
+                    format!("`{name}` is no longer a control: passed over"),
+                ));
+                continue;
+            }
+            let Some(i) = CONTROLS.iter().position(|c| c.param == name) else {
+                if made_for > set.revision {
+                    notes.push((
+                        "layout.newer",
+                        format!("`{name}`: not a control this CA-72 has, passed over"),
+                    ));
+                } else {
+                    reject("layout.control", format!("`{name}`: no such control"));
+                }
                 continue;
             };
             let official = CONTROLS[i];
@@ -270,8 +360,16 @@ impl Arrangement {
             }
             let kind = match look_of(official.kind, e) {
                 Ok(k) => k,
+                // Its kind changed since: drawn in the new kind's own look.
+                Err(_) if set.kind_changed_since(name, made_for) => {
+                    notes.push((
+                        "layout.kind",
+                        format!("`{name}` is another kind of control now: drawn in its own look"),
+                    ));
+                    official.kind
+                }
                 Err(why) => {
-                    reject("layout.control", format!("`{}`: {why}", e.param));
+                    reject("layout.control", format!("`{name}`: {why}"));
                     continue;
                 }
             };
@@ -282,15 +380,22 @@ impl Arrangement {
                 ..official
             };
         }
+        // A control the layout does not place: one added since it was made, placed by the
+        // plug-in below; one it should have placed, refused.
+        let mut added: Vec<usize> = Vec::new();
         for (i, c) in CONTROLS.iter().enumerate() {
             if c.place == Place::Panel && !placed[i] {
-                reject(
-                    "layout.control",
-                    format!(
-                        "`{}` is not placed: a layout places every control of the panel",
-                        c.param
-                    ),
-                );
+                if set.since(c.param) > made_for {
+                    added.push(i);
+                } else {
+                    reject(
+                        "layout.control",
+                        format!(
+                            "`{}` is not placed: a layout places every control of the panel",
+                            c.param
+                        ),
+                    );
+                }
             }
         }
 
@@ -480,11 +585,71 @@ impl Arrangement {
         if let Some(why) = cut_off {
             report.review("layout.print-outside", at, why);
         }
+        for (code, why) in notes {
+            report.note(code, at, why);
+        }
         if report.findings[before..]
             .iter()
             .any(|f| f.severity == skin_pack::Severity::Reject)
         {
             return None;
+        }
+        // The controls added since the layout was made, placed by the plug-in: each at its
+        // official place if nothing of the layout's is there, else at the free place nearest it.
+        // A panel with no room: the official layout instead (the pack's pictures, drawing and
+        // typeface still its own), and a review.
+        if !added.is_empty() {
+            let mut occupied: Vec<[f64; 4]> = panel.iter().map(|(_, b)| *b).collect();
+            occupied.push(power_box);
+            for (_, p, r) in fixtures {
+                occupied.push([p[0] - r, p[1] - r, p[0] + r, p[1] + r]);
+            }
+            occupied.push([
+                plate[0],
+                plate[1],
+                plate[0] + art::PLATE_W,
+                plate[1] + art::PLATE_H,
+            ]);
+            if let Some(p) = fx.phones {
+                occupied.push([p[0] - p[2], p[1] - p[2], p[0] + p[2], p[1] + p[2]]);
+            }
+            for i in added {
+                let official = CONTROLS[i];
+                match free_spot(&official, &occupied) {
+                    Some((x, y)) => {
+                        let b = hit_bounds(&official.kind);
+                        occupied.push([x + b[0], y + b[1], x + b[2], y + b[3]]);
+                        controls[i] = Control { x, y, ..official };
+                        report.note(
+                            "layout.added",
+                            at,
+                            format!(
+                                "`{}` came after this layout was made: placed {}",
+                                official.param,
+                                if (x, y) == (official.x, official.y) {
+                                    "at its official place".to_owned()
+                                } else {
+                                    format!(
+                                        "at {x:.0}, {y:.0}, the free place nearest its official one"
+                                    )
+                                }
+                            ),
+                        );
+                    }
+                    None => {
+                        report.review(
+                            "layout.full",
+                            at,
+                            format!(
+                                "no room on the panel for `{}`, which came after this layout was \
+                                 made: the official layout is used instead",
+                                official.param
+                            ),
+                        );
+                        return Some((*Self::official()).clone());
+                    }
+                }
+            }
         }
         let pair = |p: [f64; 2]| (p[0], p[1]);
         Some(Arrangement {
@@ -547,6 +712,46 @@ impl Arrangement {
     pub fn ultra_at(&self) -> (f64, f64) {
         (art::COL + self.ultra.0, TOP + self.ultra.1)
     }
+}
+
+/// Where a control added since a layout was made goes: at its official place (where `c` is) if
+/// it is free there (its click area and its printed dial on the panel, over nothing in
+/// `occupied`), else at the free place nearest it, searched outward in rings 8 units apart;
+/// `None` if the panel has none.
+pub fn free_spot(c: &Control, occupied: &[[f64; 4]]) -> Option<(f64, f64)> {
+    let b = hit_bounds(&c.kind);
+    let e = art::print_extent(&c.kind);
+    let fits = |(x, y): (f64, f64)| {
+        let hit = [x + b[0], y + b[1], x + b[2], y + b[3]];
+        inside(hit)
+            && (e == [0.0; 4] || inside([x + e[0], y + e[1], x + e[2], y + e[3]]))
+            && !occupied.iter().any(|o| overlap(hit, *o))
+    };
+    let (x0, y0) = (c.x, c.y);
+    if fits((x0, y0)) {
+        return Some((x0, y0));
+    }
+    const STEP: f64 = 8.0;
+    let rings = ((PW.max(PH + TOP)) / STEP).ceil() as i64;
+    for n in 1..=rings {
+        let r = n as f64 * STEP;
+        let mut ring: Vec<(f64, f64)> = Vec::with_capacity(8 * n as usize);
+        for k in -n..=n {
+            let d = k as f64 * STEP;
+            ring.push((x0 + d, y0 - r));
+            ring.push((x0 + d, y0 + r));
+            if k.abs() < n {
+                ring.push((x0 - r, y0 + d));
+                ring.push((x0 + r, y0 + d));
+            }
+        }
+        let dist = |p: &(f64, f64)| (p.0 - x0).hypot(p.1 - y0);
+        ring.sort_by(|a, b| dist(a).total_cmp(&dist(b)));
+        if let Some(p) = ring.into_iter().find(|p| fits(*p)) {
+            return Some(p);
+        }
+    }
+    None
 }
 
 /// A control's kind as a layout's entry makes it look: its official kind, its look changed
@@ -723,6 +928,135 @@ mod tests {
         assert!(r.has("layout.overlap"), "{r}");
         let r = rejected(&OFFICIAL.replacen("at = [229, 273]", "at = [nan, 273]", 1));
         assert!(r.has("layout.number") || r.has("layout.syntax"), "{r}");
+    }
+
+    // ---- A later CA-72, simulated: the panel's controls as they might change.
+
+    /// A later revision: A-440 added in revision 2, OSC MOD once called `oscillator_modulation`
+    /// (renamed in 2), an `old_knob` retired in 2, TUNE's kind changed in 2.
+    const LATER: ControlSet = ControlSet {
+        revision: 2,
+        added: &[("a440", 2)],
+        renamed: &[("oscillator_modulation", "osc_mod", 2)],
+        retired: &[("old_knob", 2)],
+        kind_changed: &[("tune", 2)],
+    };
+
+    /// The official layout as a revision-1 layout without A-440.
+    fn without_a440() -> String {
+        let start = OFFICIAL.find("param = \"a440\"").expect("there");
+        let block = OFFICIAL[..start].rfind("[[control]]").expect("its block");
+        let end = start + OFFICIAL[start..].find("[[control]]").expect("the next");
+        format!("{}{}", &OFFICIAL[..block], &OFFICIAL[end..])
+    }
+
+    #[test]
+    fn a_control_added_later_goes_to_its_official_place_when_it_is_free() {
+        let mut report = Report::default();
+        let a = Arrangement::read_with(&without_a440(), "layout.toml", &LATER, &mut report)
+            .unwrap_or_else(|| panic!("{report}"));
+        let i = crate::controls::index("a440").expect("a control");
+        assert_eq!(
+            (a.controls[i].x, a.controls[i].y),
+            (CONTROLS[i].x, CONTROLS[i].y)
+        );
+        assert!(report.has("layout.added") && !report.rejected(), "{report}");
+        // Without the later revision, the same layout is refused: it should have placed it.
+        let mut report = Report::default();
+        assert!(Arrangement::read(&without_a440(), &mut report).is_none());
+        assert!(report.has("layout.control"));
+    }
+
+    #[test]
+    fn a_control_added_later_goes_to_the_nearest_free_place() {
+        // FEEDBACK moved onto A-440's official place.
+        let text = without_a440().replacen("at = [2680, 580]", "at = [2682, 375]", 1);
+        let mut report = Report::default();
+        let a = Arrangement::read_with(&text, "layout.toml", &LATER, &mut report)
+            .unwrap_or_else(|| panic!("{report}"));
+        let i = crate::controls::index("a440").expect("a control");
+        let c = a.controls[i];
+        assert_ne!((c.x, c.y), (CONTROLS[i].x, CONTROLS[i].y));
+        // On the panel, over nothing, and found where it is.
+        let b = hit_bounds(&c.kind);
+        let mine = [c.x + b[0], c.y + b[1], c.x + b[2], c.y + b[3]];
+        assert!(inside(mine));
+        for (j, o) in a.controls.iter().enumerate() {
+            if j != i && o.place == Place::Panel {
+                let ob = hit_bounds(&o.kind);
+                assert!(
+                    !overlap(mine, [o.x + ob[0], o.y + ob[1], o.x + ob[2], o.y + ob[3]]),
+                    "{}",
+                    o.param
+                );
+            }
+        }
+        let layout = crate::Layout::measure(&crate::fonts::Fonts::new());
+        let (x, y) = c.centre();
+        assert_eq!(
+            crate::interact::hit(&layout, &a, x, y),
+            Some(crate::Target::Control(i))
+        );
+        let note = report
+            .findings
+            .iter()
+            .find(|f| f.code == "layout.added")
+            .expect("noted");
+        assert!(note.message.contains("nearest"), "{note}");
+    }
+
+    #[test]
+    fn a_full_panel_has_no_free_place() {
+        let i = crate::controls::index("a440").expect("a control");
+        assert_eq!(free_spot(&CONTROLS[i], &[CANVAS]), None);
+        assert!(free_spot(&CONTROLS[i], &[]).is_some());
+    }
+
+    #[test]
+    fn renamed_retired_and_changed_controls_are_followed() {
+        let text = OFFICIAL
+            .replacen(
+                "param = \"osc_mod\"",
+                "param = \"oscillator_modulation\"",
+                1,
+            )
+            .replacen(
+                "param = \"tune\"\nat = [229, 273]",
+                "param = \"tune\"\nat = [229, 273]\ncolour = \"red\"",
+                1,
+            )
+            + "\n[[control]]\nparam = \"old_knob\"\nat = [10, 10]\n";
+        let mut report = Report::default();
+        let a = Arrangement::read_with(&text, "layout.toml", &LATER, &mut report)
+            .unwrap_or_else(|| panic!("{report}"));
+        for code in ["layout.renamed", "layout.retired", "layout.kind"] {
+            assert!(report.has(code), "{code}: {report}");
+        }
+        let i = crate::controls::index("osc_mod").expect("a control");
+        assert_eq!((a.controls[i].x, a.controls[i].y), (444.0, 269.0));
+        // The same on this build's revision: refused (no such names; a field that does not apply).
+        let mut report = Report::default();
+        assert!(Arrangement::read(&text, &mut report).is_none());
+    }
+
+    /// A layout made for a later CA-72, read by this one: names and fields it does not know
+    /// passed over, with notes.
+    #[test]
+    fn a_layout_for_a_later_ca72_loads_what_this_one_knows() {
+        let text = OFFICIAL.replacen("controls = 1", "controls = 3", 1)
+            + "\n[[control]]\nparam = \"future_knob\"\nat = [10, 10]\nglow = true\n\n\
+               [[sticker]]\nat = [5, 5]\n";
+        let mut report = Report::default();
+        let a = Arrangement::read(&text, &mut report).unwrap_or_else(|| panic!("{report}"));
+        assert!(
+            report.has("layout.newer") && report.has("layout.unknown"),
+            "{report}"
+        );
+        assert_eq!(a.controls.len(), CONTROLS.len());
+        // Made for this revision, a name it does not know is a mistake: refused.
+        let text = OFFICIAL.to_owned() + "\n[[control]]\nparam = \"future_knob\"\nat = [10, 10]\n";
+        let mut report = Report::default();
+        assert!(Arrangement::read(&text, &mut report).is_none());
     }
 
     #[test]

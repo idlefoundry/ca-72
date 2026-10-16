@@ -194,6 +194,7 @@ id = "org.example.night-panel"   # lower case, dotted, yours; com.idlefoundry.* 
 name = "NIGHT PANEL"             # as the settings menu lists it
 version = "1.0.0"                # major.minor.patch
 plugin = "ca-72"
+# requires = "ca-72 >= 0.4.0"    # optional: the CA-72 it needs at least (see Compatibility)
 summary = "A dark panel."        # optional
 license = "CC-BY-4.0"            # an SPDX expression, or LicenseRef-<name>
 license_files = ["LICENSE.txt"]  # required for a LicenseRef-, expected for the rest
@@ -372,6 +373,7 @@ runs down: the face from 0 to 795, the wooden strip above it from -130 to 0.
 
 ```toml
 format = 1
+controls = 1              # the revision of the CA-72's controls it was made for (see Compatibility)
 
 [fixtures]
 power = [3023, 580]       # POWER's switch (centre)
@@ -437,6 +439,34 @@ The controls' parameters:
 > `filter_mod`, `keyboard_control_1`, `keyboard_control_2`, `cutoff`, `emphasis`,
 > `contour_amount`, `filter_attack`, `filter_decay`, `filter_sustain`, `loudness_attack`,
 > `loudness_decay`, `loudness_sustain`, `volume`, `main_output`, `a440`, `feedback`, `quality`.
+
+## Compatibility: packs keep working as the CA-72 changes
+
+A pack made today must keep working on later CA-72s, and a pack made for a later one should do
+its best on an earlier one.
+
+- **Each layout says which revision of the CA-72's controls it was made for** (`controls = 1`;
+  a layout without it is made for the first). The plug-in keeps a record of its controls over
+  time: when each arrived, and any rename, retirement or change of kind since.
+- **A control added after the pack was made** is placed by the plug-in: at its official place if
+  nothing of the pack's is there, else at the nearest free spot on the panel (`layout.added`, a
+  note). If the panel has no room, the official layout is used for that pack, its pictures,
+  drawing and typeface still its own (`layout.full`, a review).
+- **A renamed control** is found by its old name (`layout.renamed`); **a retired one** is passed
+  over (`layout.retired`); **one whose kind changed** is drawn in its new kind's own look, the
+  pack's look settings for the old kind passed over (`layout.kind`). All are notes.
+- **A control the pack should have placed but didn't** (one that existed when it was made) is
+  still refused: that is a mistake, not age.
+- **A layout or `[look]` field this CA-72 doesn't read** (a later one's) is passed over with a
+  note (`layout.unknown`, `look.unknown`), not refused; `check_pack` shows it, so typos are seen.
+  So is a control's name a later CA-72 has (`layout.newer`) in a layout made for a later
+  revision.
+- **The manifest stays strict**: its licence, provenance and declarations are what a review
+  relies on, so an unknown field there is refused.
+- **`requires`**: a pack that truly needs a later CA-72 says so (`requires = "ca-72 >= 0.4.0"`),
+  and an earlier one refuses it with that reason, instead of drawing it wrong.
+- **Packs as they were are kept as tests.** Samples of every released format and revision live in
+  `crates/ca72-panel/tests/compat/`, never edited; every build must load each as it was made.
 
 ## Making a pack with an AI agent
 

@@ -444,6 +444,9 @@ pub struct Context<'a> {
     pub test_drawings: bool,
     /// The marketplace's public keys the plug-in trusts (`signature`).
     pub keys: &'a [signature::TrustedKey],
+    /// The plug-in's version (`major.minor.patch`), against which a pack's `requires` is
+    /// checked; `None` where no plug-in is (a marketplace's tools).
+    pub plugin_version: Option<&'a str>,
 }
 
 /// The id prefix kept for the plug-ins' makers' own packs.

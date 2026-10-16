@@ -20,6 +20,10 @@ pub struct Manifest {
     pub version: String,
     /// The plug-in it is for (`ca-72`).
     pub plugin: String,
+    /// The plug-in's version it needs at least (`ca-72 >= 0.4.0`), when it uses something an
+    /// earlier one does not have: an earlier one then says so, rather than drawing it wrong.
+    #[serde(default)]
+    pub requires: Option<String>,
     #[serde(default)]
     pub summary: Option<String>,
     /// The pack's licence: an SPDX expression or a `LicenseRef-`.
@@ -210,6 +214,12 @@ fn valid_version(v: &str) -> bool {
             .all(|p| !p.is_empty() && p.len() <= 6 && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// Whether version `a` (`major.minor.patch`) is newer than `b`.
+fn newer(a: &str, b: &str) -> bool {
+    let parts = |v: &str| -> Vec<u64> { v.split('.').map(|p| p.parse().unwrap_or(0)).collect() };
+    parts(a) > parts(b)
+}
+
 fn valid_date(d: &str) -> bool {
     let b = d.as_bytes();
     b.len() == 10
@@ -260,6 +270,31 @@ pub fn check(
     }
     if !valid_version(&m.version) {
         report.reject("manifest.version", at, "a version is `major.minor.patch`");
+    }
+    if let Some(req) = &m.requires {
+        let parsed = req
+            .split_once(">=")
+            .map(|(p, v)| (p.trim(), v.trim()))
+            .filter(|(p, v)| *p == m.plugin && valid_version(v));
+        match (parsed, context.plugin_version) {
+            (None, _) => report.reject(
+                "manifest.requires",
+                at,
+                format!(
+                    "`{req}`: `requires` is \"{} >= major.minor.patch\"",
+                    m.plugin
+                ),
+            ),
+            (Some((_, needed)), Some(have)) if newer(needed, have) => report.reject(
+                "manifest.requires",
+                at,
+                format!(
+                    "it needs {} {needed} or newer: this is {have}",
+                    m.plugin.to_uppercase()
+                ),
+            ),
+            _ => {}
+        }
     }
     if m.plugin != context.plugin {
         report.reject(

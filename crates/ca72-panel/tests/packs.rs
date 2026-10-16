@@ -19,6 +19,7 @@ fn official_context<'a>(pictures: &'a [(&'static str, &'static [u8])]) -> Contex
         built_in: true,
         test_drawings: true,
         keys: &[],
+        plugin_version: None,
     }
 }
 
@@ -494,4 +495,15 @@ fn copy_dir_files(files: &Files, to: &Path) {
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("a folder");
         std::fs::write(path, b).expect("written");
     }
+}
+
+/// A `[look]` field this CA-72 does not read (a later one's) is noted, not refused.
+#[test]
+fn a_look_field_from_a_later_ca72_is_passed_over() {
+    let dir = edited(|d| {
+        let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+        std::fs::write(d.join("skin.toml"), text + "glow = 0.5\n").expect("written");
+    });
+    let look = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
+    assert!(look.report.has("look.unknown"), "{}", look.report);
 }
