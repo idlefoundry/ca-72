@@ -588,8 +588,7 @@ The service documents and datasheets the model was derived from are not included
   0.1 to 0.4 s; the same rate again is immediate.
 - Below 8 kHz the voice runs at 2, 4 or 8 times the host's rate.
 - The panel has no keyboard control (the presets' drawer and its MIDI list do), and a host
-  cannot resize the editor; use the grip or **WINDOW › SIZE…**. On macOS the pointer does not
-  change over the grip (its tip says what it does).
+  cannot resize the editor; use the grip or **WINDOW › SIZE…**.
 - LETTERING › LARGE leaves the presets' drawer, the keyboard view and the strip's buttons as
   they are.
 - MIDI Learn takes absolute 7-bit control changes only: not relative encoders, 14-bit

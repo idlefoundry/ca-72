@@ -916,8 +916,7 @@ impl PanelWindow {
     }
 
     /// The pointer's look: the resize arrows over the grip and while it is dragged (R-SIZE),
-    /// else the system's. Not on macOS, where baseview has no cursors (its `set_mouse_cursor` is
-    /// `todo!()`): there the grip's tip says what it does.
+    /// else the system's (on macOS through baseview's change 7, `R-MAC-FIXES`).
     fn cursor(&mut self, window: &mut Window<'_>) {
         let want = if self.editing.on_grip() {
             MouseCursor::NwseResize
@@ -928,10 +927,7 @@ impl PanelWindow {
             return;
         }
         self.cursor = want;
-        #[cfg(not(target_os = "macos"))]
         window.set_mouse_cursor(want);
-        #[cfg(target_os = "macos")]
-        let _ = window;
     }
 
     /// The keyboard as the drawer wants it: taken when a field takes the caret (baseview's

@@ -4730,6 +4730,7 @@ the screen and back, Windows repainting it; GarageBand: closed and opened again)
   Homebrew's ngspice 47, built with KLU: "Timestep too small" at the VCO's hold node. They pass
   with Linux's ngspice 47 (and on Windows); CI's Mac has no ngspice and skips them. The lab is
   not part of the plug-in; `.options sparse` did not help.
+  **Fixed 2026-10-16** (R-MAC-FIXES): the bench's hold switch closed at 1 ohm, not 1 milliohm.
 - The synth played in the Mac's hosts: GarageBand took no MIDI from a script (its virtual input
   or a new one), so the opening's animation there was QUALITY's, driven by the editor's clock.
 - Live (the owner's set open), Logic (not owned), an Intel Mac, a second screen of another
@@ -5894,3 +5895,27 @@ Before publication the release commit must pass all three CI jobs; the macOS ins
 Developer ID signed, notarised, stapled and accepted by Gatekeeper; every uploaded asset
 downloaded again and checked against the manifest. The evidence is recorded when those checks
 complete.
+
+## R-MAC-FIXES. The Mac's own: the lab's VCO bench, and the pointer over the grip
+
+**Owner decision, 2026-10-16.** After 0.2.4: "please identify and fix those Mac specific
+issues": the three circuit-lab tests that fail on the Mac (R60's notes), and the pointer
+that does not change over the grip on macOS (R-SIZE).
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **The lab's VCO bench.** `vco_electrical` (twice) and `vco_osc23` stopped on the Mac with
+  Homebrew's ngspice 47, built with KLU: "Timestep too small ... trouble with node \"hold\"",
+  0.8 ms into the run. The bench holds the ramp at -2 V through a switch that opens 1 us in;
+  closed it was 1 milliohm, open 1e14 ohm, a ratio of 1e17 that KLU's factorisation did not
+  survive. Either 1 ohm closed or 1e12 open passed; 1 ohm closed is chosen, so that the open
+  switch's leak (what the measurement sees) stays as it was, at 2 pA at most.
+- **The pointer on macOS.** baseview's macOS `set_mouse_cursor` was `todo!()`; it is now
+  baseview's change 7 (`third_party/baseview/PATCHES.md`): each look mapped to an `NSCursor`,
+  the diagonal resize arrows to the ones AppKit's own window corners use, shown again as the
+  pointer moves and as AppKit updates it. The editor sets it on every system (R-SIZE's).
+  plugin-kit's baseview has the same `todo!()`; it is to take the change too.
+
+**Evidence (the Mac, macOS 27.0, 2026-10-16):** `cargo test -p ca72-lab --test vco_electrical
+--test vco_osc23`: 5 passed (3 had failed), with either change alone as well. `NSCursor`
+answers to `_windowResizeNorthWestSouthEastCursor` and `…NorthEastSouthWest…` on this Mac.
+Not tried: the pointer seen over the grip in a host (to be checked in the next build).
