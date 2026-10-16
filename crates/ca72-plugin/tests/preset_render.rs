@@ -49,6 +49,9 @@ fn presets() -> Vec<Sound> {
 fn render(s: &Sound, voices: usize, seconds: f64) -> (Vec<f32>, Vec<f32>) {
     let mut c = controls_of(s);
     c.poly = true;
+    // (The lab's, decisions.md R-BLEP: QUALITY at LO or ULTRA.)
+    c.potato = std::env::var_os("CA72_POTATO").is_some();
+    c.ultra = std::env::var_os("CA72_ULTRA").is_some();
     c.voices = voices;
     let mut e = Engine::new();
     e.set(&c);

@@ -5,6 +5,7 @@
 //! come from `libm`, so renders are the same on every platform.
 
 pub mod a440;
+pub mod blep;
 pub mod a440_table;
 pub mod contour;
 pub mod devices;

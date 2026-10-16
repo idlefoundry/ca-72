@@ -9,6 +9,8 @@
 //! ca72-lab waves <range> <key> <out.csv>   two periods of every node, ngspice
 //! ca72-lab render <range> <key> <out.wav> [seconds] [oversample]
 //!                                        the real-time oscillator, tuned the 1973 way
+//! ca72-lab alias [--model circuit|light] [--os N] [--blep SPEC] [--rates R,..] [--keys K,..]
+//!                                        the oscillators' aliasing (decisions.md R-BLEP)
 //! ```
 //! Ranges: lo, 32, 16, 8, 4, 2. Keys count from the keyboard's lowest F (0..43).
 
@@ -31,6 +33,7 @@ fn main() -> ExitCode {
         Some("tables") => spice().and_then(|s| tables(&s)),
         Some("waves") => spice().and_then(|s| waves(&s, rest)),
         Some("render") => render(rest),
+        Some("alias") => alias(rest),
         Some("play") => play(rest),
         Some("stim") => stim(rest),
         Some("filterlaw") => filterlaw(rest),
@@ -314,6 +317,121 @@ fn render(rest: &[String]) -> Res {
     }
     std::fs::write(&path, wav_f32(3, 48_000, &data)).map_err(|e| format!("{path}: {e}"))?;
     eprintln!("{path}: {seconds} s, tuning {t:?}");
+    Ok(())
+}
+
+/// `ca72-lab alias`: the oscillators' aliasing with a band-limiting kernel (decisions.md
+/// R-BLEP; `--blep` as `CA72_BLEP`, none for the plug-in's own), one line a measurement,
+/// tab-separated: the model, the kernel, the oversampling, the rate, the waveform, the key
+/// (A4 is 4 on 2'), the frequency, the aliasing's total and loudest component against the
+/// fundamental (dB) and where, and the harmonics against a reference's (the mean from 10 to
+/// 20 kHz and the largest, dB): the circuit's at 8x with the plug-in's kernel, the light
+/// waveform's own Fourier series.
+fn alias(rest: &[String]) -> Res {
+    use ca72::voice::Waveform;
+    use ca72_lab::alias::{N, against, analyse, circuit, light, light_ideal};
+    let mut model = "circuit".to_owned();
+    let mut os = 1usize;
+    let mut blep = None;
+    let mut rates = vec![44_100.0, 48_000.0, 96_000.0];
+    let mut keys = vec![4.0, 16.0, 28.0, 40.0];
+    let mut args = rest.iter();
+    let list = |s: Option<&String>| -> Result<Vec<f64>, String> {
+        s.ok_or("a list")?
+            .split(',')
+            .map(|v| v.parse::<f64>().map_err(|e| format!("{v}: {e}")))
+            .collect()
+    };
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--model" => model = args.next().ok_or("--model")?.clone(),
+            "--os" => {
+                os = args
+                    .next()
+                    .ok_or("--os")?
+                    .parse()
+                    .map_err(|e| format!("--os: {e}"))?
+            }
+            "--blep" => blep = Some(ca72::blep::Lab::parse(args.next().ok_or("--blep")?)?),
+            "--rates" => rates = list(args.next())?,
+            "--keys" => keys = list(args.next())?,
+            other => return Err(format!("ca72-lab alias: unknown {other}")),
+        }
+    }
+    let name = std::env::args()
+        .skip_while(|a| a != "--blep")
+        .nth(1)
+        .unwrap_or_else(|| "plugin".into());
+    let row = |rate: f64, wave: &str, key: f64, m: &ca72_lab::alias::Measure, r: &[f64]| {
+        let (top, worst) = against(m, r);
+        println!(
+            "{model}\t{name}\t{os}\t{rate}\t{wave}\t{key}\t{:.2}\t{:.1}\t{:.1}\t{:.0}\t{top:.2}\t{worst:.2}",
+            m.f0, m.total_db, m.loudest_db, m.loudest_hz
+        );
+    };
+    for &rate in &rates {
+        for &key in &keys {
+            // The plug-in's kernel at 8x: the reference, and the frequency.
+            ca72::blep::set(None);
+            let mut reference = Vec::new();
+            for width in [0.0, -1.5, -2.5] {
+                let (w, f0) = circuit(rate, 8, key, width, N);
+                reference.push((
+                    analyse(&w[0], rate, f0),
+                    analyse(&w[1], rate, f0),
+                    analyse(&w[2], rate, f0),
+                ));
+            }
+            let f0 = reference[0].0.f0;
+            ca72::blep::set(blep);
+            match model.as_str() {
+                "circuit" => {
+                    for (i, width) in [0.0, -1.5, -2.5].into_iter().enumerate() {
+                        let (w, f) = circuit(rate, os, key, width, N);
+                        if i == 0 {
+                            row(
+                                rate,
+                                "saw",
+                                key,
+                                &analyse(&w[0], rate, f),
+                                &reference[0].0.harmonics,
+                            );
+                            row(
+                                rate,
+                                "tri",
+                                key,
+                                &analyse(&w[1], rate, f),
+                                &reference[0].1.harmonics,
+                            );
+                        }
+                        let wave = ["square", "wide", "narrow"][i];
+                        row(
+                            rate,
+                            wave,
+                            key,
+                            &analyse(&w[2], rate, f),
+                            &reference[i].2.harmonics,
+                        );
+                    }
+                }
+                "light" => {
+                    for (wave, w) in [
+                        ("saw", Waveform::Sawtooth),
+                        ("tri", Waveform::Triangle),
+                        ("shark", Waveform::SharkTooth),
+                        ("square", Waveform::Square),
+                        ("wide", Waveform::WideRectangle),
+                        ("narrow", Waveform::NarrowRectangle),
+                    ] {
+                        let x = light(rate, f0, w, N);
+                        row(rate, wave, key, &analyse(&x, rate, f0), &light_ideal(f0, w));
+                    }
+                }
+                other => return Err(format!("ca72-lab alias: no model {other}")),
+            }
+        }
+    }
+    ca72::blep::set(None);
     Ok(())
 }
 

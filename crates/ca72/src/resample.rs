@@ -3,17 +3,46 @@
 
 /// A signal with discontinuities corrected by two-point polynomial band-limited steps
 /// (polyBLEP). Values come out one sample late: a step between samples n-1 and n corrects
-/// both, so sample n-1 is held until sample n is known.
+/// both, so sample n-1 is held until sample n is known. (The lab's candidates, decisions.md
+/// R-BLEP: another kernel's line in `lab` when [`BlepLine::lab`] made it; otherwise
+/// untouched.)
 #[derive(Debug, Clone, Default)]
 pub struct BlepLine {
     held: f64,
     next_correction: f64,
+    lab: Option<Box<crate::blep::Line>>,
 }
 
 impl BlepLine {
+    /// The lab's choice of kernel ([`crate::blep::chosen`]), or the plug-in's polyBLEP.
+    pub fn lab() -> BlepLine {
+        BlepLine {
+            lab: crate::blep::chosen()
+                .map(|l| Box::new(crate::blep::Line::new(crate::blep::Tables::of(l.kernel)))),
+            ..BlepLine::default()
+        }
+    }
+
+    /// Starts again from silence, its kernel kept.
+    pub fn clear(&mut self) {
+        self.held = 0.0;
+        self.next_correction = 0.0;
+        if let Some(l) = &mut self.lab {
+            l.clear();
+        }
+    }
+
+    /// How many samples late its values come out.
+    pub fn delay(&self) -> usize {
+        self.lab.as_ref().map_or(1, |l| l.tables.delay)
+    }
+
     /// Records a step of `delta` at `frac` of the way from the previous sample to the one
     /// about to be pushed (0 < frac <= 1).
     pub fn step(&mut self, delta: f64, frac: f64) {
+        if let Some(l) = &mut self.lab {
+            return l.step(delta, frac);
+        }
         // d: time from the step to the coming sample, in samples.
         let d = (1.0 - frac).clamp(0.0, 1.0);
         self.held += delta * d * d * 0.5;
@@ -24,13 +53,35 @@ impl BlepLine {
     /// sample to the coming one: the limit of two opposite steps closing together, spread
     /// over the two samples by their distance (its area is kept exactly).
     pub fn impulse(&mut self, area: f64, frac: f64) {
+        if let Some(l) = &mut self.lab {
+            return l.impulse(area, frac);
+        }
         let d = (1.0 - frac).clamp(0.0, 1.0);
         self.held += area * d;
         self.next_correction += area * (1.0 - d);
     }
 
+    /// The lab's: a corner, the slope growing by `slope` (value a sample) at `frac`
+    /// (band-limited ramp, BLAMP). Only a lab line corrects it.
+    pub fn ramp(&mut self, slope: f64, frac: f64) {
+        if let Some(l) = &mut self.lab {
+            l.ramp(slope, frac);
+        }
+    }
+
+    /// The lab's: a rounded corner, the slope growing by `slope` evenly over `width`
+    /// samples from `frac`.
+    pub fn fillet(&mut self, slope: f64, frac: f64, width: f64) {
+        if let Some(l) = &mut self.lab {
+            l.fillet(slope, frac, width);
+        }
+    }
+
     /// Pushes the naive value of the new sample; returns the previous sample, corrected.
     pub fn push(&mut self, naive: f64) -> f64 {
+        if let Some(l) = &mut self.lab {
+            return l.push(naive);
+        }
         let out = self.held;
         self.held = naive + self.next_correction;
         self.next_correction = 0.0;

@@ -544,12 +544,18 @@ impl Held {
 struct Osc {
     phase: f32,
     wave: Waveform,
+    /// The lab's kernel and whether corners are corrected (decisions.md R-BLEP), if it chose
+    /// one.
+    lab: Option<(&'static crate::blep::Tables, bool)>,
 }
 
 impl Osc {
     /// One sample at increment `dt` (cycles a sample, under a half) and its reciprocal.
     #[inline(always)]
     fn tick(&mut self, dt: f32, inv: f32) -> f32 {
+        if let Some((t, blamp)) = self.lab {
+            return self.tick_lab(dt, inv, t, blamp);
+        }
         let mut p = self.phase + dt;
         if p >= 1.0 {
             p -= 1.0;
@@ -578,6 +584,57 @@ impl Osc {
                 let q = p + laws::SHARK_AHEAD;
                 let q = if q >= 1.0 { q - 1.0 } else { q };
                 laws::SHARK_TRIANGLE * (4.0 * (q - 0.5).abs() - 1.0) + laws::SHARK_SAWTOOTH * fall()
+            }
+            Waveform::Sawtooth => laws::SAWTOOTH * fall(),
+            Waveform::ReverseSawtooth => -laws::REVERSE_SAWTOOTH * fall(),
+            Waveform::Square => laws::SQUARE * rect(laws::DUTY[0]),
+            Waveform::WideRectangle => laws::WIDE * rect(laws::DUTY[1]),
+            Waveform::NarrowRectangle => laws::NARROW * rect(laws::DUTY[2]),
+        }
+    }
+
+    /// [`Osc::tick`] with the lab's kernel: every edge within its reach corrected from the
+    /// phase (no samples held back), and with `blamp` the triangles' corners.
+    fn tick_lab(&mut self, dt: f32, inv: f32, t: &crate::blep::Tables, blamp: bool) -> f32 {
+        use crate::blep::around;
+        let mut p = self.phase + dt;
+        if p >= 1.0 {
+            p -= 1.0;
+        }
+        self.phase = p;
+        // A step of `h` at phase `at`; a corner at `at` where the slope (a unit of phase)
+        // grows by `g`.
+        let step = |at: f32, h: f64| around(t, p, at, inv, |t, x| h * t.step_residual(x));
+        let corner = |at: f32, g: f32| {
+            if !blamp {
+                return 0.0;
+            }
+            let g = f64::from(g * dt);
+            around(t, p, at, inv, |t, x| g * t.ramp_residual(x))
+        };
+        let fall = || 1.0 - 2.0 * p + step(0.0, 2.0);
+        let rect = |d: f32| {
+            let naive = if p < d { 1.0 } else { -1.0 };
+            naive + step(0.0, 2.0) - step(d, 2.0) - (2.0 * d - 1.0)
+        };
+        match self.wave {
+            Waveform::Triangle => {
+                const B: f32 = laws::TRIANGLE_BOTTOM;
+                let t = if p < B {
+                    1.0 - p * (2.0 / B)
+                } else {
+                    (p - B) * (2.0 / (1.0 - B)) - 1.0
+                };
+                let g = 2.0 / B + 2.0 / (1.0 - B);
+                laws::TRIANGLE * (t + corner(0.0, -g) + corner(B, g))
+            }
+            Waveform::SharkTooth => {
+                let q = p + laws::SHARK_AHEAD;
+                let q = if q >= 1.0 { q - 1.0 } else { q };
+                let tri = 4.0 * (q - 0.5).abs() - 1.0
+                    + corner(0.5 - laws::SHARK_AHEAD, 8.0)
+                    + corner(1.0 - laws::SHARK_AHEAD, -8.0);
+                laws::SHARK_TRIANGLE * tri + laws::SHARK_SAWTOOTH * fall()
             }
             Waveform::Sawtooth => laws::SAWTOOTH * fall(),
             Waveform::ReverseSawtooth => -laws::REVERSE_SAWTOOTH * fall(),
@@ -996,6 +1053,7 @@ impl Light {
             osc: [Osc {
                 phase: 0.0,
                 wave: Waveform::Sawtooth,
+                lab: crate::blep::light(),
             }; 3],
             dt: [0.0; 3],
             dt_step: [0.0; 3],
@@ -1710,6 +1768,18 @@ impl Light {
         self.fed_at = (self.fed_at + 1) & 127;
         out
     }
+}
+
+/// The lab's (decisions.md R-BLEP): `n` samples of one light oscillator alone at `rate`,
+/// `hz`, its waveform at its level, with the kernel the lab chose ([`crate::blep::chosen`]).
+pub fn lab_oscillator(rate: f64, hz: f64, wave: Waveform, n: usize) -> Vec<f32> {
+    let mut o = Osc {
+        phase: 0.0,
+        wave,
+        lab: crate::blep::light(),
+    };
+    let dt = (hz / rate) as f32;
+    (0..n).map(|_| o.tick(dt, 1.0 / dt)).collect()
 }
 
 #[cfg(test)]

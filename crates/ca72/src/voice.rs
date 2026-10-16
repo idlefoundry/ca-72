@@ -1587,8 +1587,21 @@ fn keyboard_every(q: Quality) -> usize {
 fn oversampling(q: Quality) -> (usize, usize) {
     match q {
         Quality::NoCompromises | Quality::HighFidelity => (4, 4),
-        Quality::Potato => (1, 4),
+        Quality::Potato => (potato_oscillators(), 4),
     }
+}
+
+/// The lab's (decisions.md R-BLEP): Potato's oscillators' oversampling, `CA72_HI_OSC_OS`
+/// (1, 2, 4 or 8) if set, else 1.
+fn potato_oscillators() -> usize {
+    static OS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *OS.get_or_init(|| {
+        std::env::var("CA72_HI_OSC_OS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|v| [1, 2, 4, 8].contains(v))
+            .unwrap_or(1)
+    })
 }
 
 /// The contours' sub-rate (samples a tick) in each quality mode: in Potato a quarter of the
