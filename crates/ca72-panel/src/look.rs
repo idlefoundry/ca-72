@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
 use serde::Deserialize;
+use skin_pack::paths::{self, FileKind};
 use skin_pack::{Context, Limits, Pack, Report};
 
 use crate::arrangement::Arrangement;
@@ -157,7 +158,17 @@ impl Look {
                 return Err(report);
             }
         };
-        let file = |path: &str, report: &mut Report| -> Option<Vec<u8>> {
+        // A file `[look]` names, of a kind it may be: every file the renderer uses has passed
+        // the check for its kind (a font named `.txt` would have skipped the font's).
+        let file = |path: &str, kinds: &[FileKind], report: &mut Report| -> Option<Vec<u8>> {
+            if !paths::kind(path).is_some_and(|k| kinds.contains(&k)) {
+                report.reject(
+                    "look.file",
+                    Some(path),
+                    format!("named in `[look]` as one of {kinds:?}, which it is not"),
+                );
+                return None;
+            }
             let bytes = pack.files.get(path).map(<[u8]>::to_vec);
             if bytes.is_none() {
                 report.reject(
@@ -173,7 +184,10 @@ impl Look {
         let arrangement = match &spec.layout {
             None => Arrangement::official(),
             Some(path) => {
-                let text = pack.text(path).map(str::to_owned);
+                let text = path
+                    .ends_with(".toml")
+                    .then(|| pack.text(path).map(str::to_owned))
+                    .flatten();
                 match text {
                     None => {
                         report.reject(
@@ -202,7 +216,7 @@ impl Look {
                 );
                 continue;
             };
-            let Some(bytes) = file(path, &mut report) else {
+            let Some(bytes) = file(path, &[FileKind::Png, FileKind::Svg], &mut report) else {
                 continue;
             };
             let picture = if path.ends_with(".svg") {
@@ -249,7 +263,7 @@ impl Look {
         let art = match &spec.art {
             None => None,
             Some(path) if path.ends_with(".svg") => {
-                let bytes = file(path, &mut report);
+                let bytes = file(path, &[FileKind::Svg], &mut report);
                 match bytes.map(|b| skin_pack::svg::parse(&b, limits)) {
                     Some(Ok((tree, _))) => Some(Arc::new(tree)),
                     Some(Err(why)) => {
@@ -270,9 +284,9 @@ impl Look {
         let fonts = match &spec.fonts {
             None => None,
             Some(f) => {
-                let regular = file(&f.regular, &mut report);
+                let regular = file(&f.regular, &[FileKind::Font], &mut report);
                 let bold = match &f.bold {
-                    Some(b) => file(b, &mut report),
+                    Some(b) => file(b, &[FileKind::Font], &mut report),
                     None => regular.clone(),
                 };
                 match (regular, bold) {

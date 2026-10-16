@@ -57,6 +57,8 @@ pub struct Limits {
     pub svg_segments: usize,
     pub svg_filters: usize,
     pub svg_blur: f32,
+    /// A pattern's tiles over what it fills, all its uses together.
+    pub svg_tiles: usize,
     /// A drawing's test, drawn with its longer side this many pixels: its time limit.
     pub svg_test_side: u32,
     pub svg_test_ms: u64,
@@ -80,6 +82,7 @@ impl Default for Limits {
             svg_segments: 200_000,
             svg_filters: 32,
             svg_blur: 64.0,
+            svg_tiles: 4096,
             svg_test_side: 3000,
             svg_test_ms: 250,
             fonts: 4,

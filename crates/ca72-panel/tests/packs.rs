@@ -257,6 +257,24 @@ fn a_packs_typeface_is_used_only_if_it_prints_every_legend() {
     let look = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
     assert!(look.fonts.is_none());
     assert!(look.report.has("look.fonts"), "{}", look.report);
+    // A font named as another kind of file is refused: it would have skipped the font's checks.
+    let dir = edited(|d| {
+        std::fs::write(d.join("notes.txt"), "plain text, not a font").expect("written");
+        let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+        std::fs::write(
+            d.join("skin.toml"),
+            text.replace(
+                "[look]",
+                "[[assets]]\npath = \"notes.txt\"\norigin = \"original\"\n\n[look]",
+            ) + "fonts = { regular = \"notes.txt\" }\n",
+        )
+        .expect("written");
+    });
+    assert!(
+        Look::open(dir.path())
+            .expect_err("refused")
+            .has("look.file")
+    );
     // Drawn all the same, in the built-in typeface.
     let _ = frame(look, 0.3);
 }
