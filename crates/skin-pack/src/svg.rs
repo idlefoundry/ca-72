@@ -109,14 +109,35 @@ fn scan(text: &str, limits: &Limits) -> Result<(), String> {
     if root.tag_name().name() != "svg" || root.tag_name().namespace() != Some(SVG_NS) {
         return Err("not an SVG document (its root is not `svg` in SVG's namespace)".into());
     }
+    // The ids references resolve to: SVG's elements outside `metadata`, as usvg keeps them;
+    // one given twice, or one inside `metadata`, refused (either would let the count follow
+    // another element than the one usvg draws).
     let mut ids: HashMap<&str, roxmltree::Node<'_, '_>> = HashMap::new();
     for node in doc.descendants() {
-        if node.is_element() {
-            if let Some(id) = node.attribute("id") {
-                ids.insert(id, node);
-            }
-        } else if node.is_pi() {
+        if node.is_pi() {
             return Err("a processing instruction".into());
+        }
+        if !node.is_element() {
+            continue;
+        }
+        let Some(id) = node
+            .attributes()
+            .find(|a| a.name() == "id")
+            .map(|a| a.value())
+        else {
+            continue;
+        };
+        let in_metadata = node
+            .ancestors()
+            .skip(1)
+            .any(|a| a.tag_name().name() == "metadata");
+        if in_metadata || node.tag_name().namespace() != Some(SVG_NS) {
+            return Err(format!(
+                "`{id}`: an id on an element that is not SVG's, or inside `metadata`"
+            ));
+        }
+        if ids.insert(id, node).is_some() {
+            return Err(format!("`{id}`: an id given to two elements"));
         }
     }
     for node in doc.descendants().filter(roxmltree::Node::is_element) {
@@ -352,9 +373,11 @@ fn cost_of(
                 cost.nodes += 1;
                 cost.segments += p.data().len();
                 cost.over(limits)?;
-                for paint in [
-                    p.fill().map(usvg::Fill::paint),
-                    p.stroke().map(usvg::Stroke::paint),
+                // Each paint with what it covers: a fill its path's box, a stroke its stroke's
+                // (half its width beyond the path all round).
+                for (paint, covered) in [
+                    p.fill().map(|f| (f.paint(), p.bounding_box())),
+                    p.stroke().map(|s| (s.paint(), p.stroke_bounding_box())),
                 ]
                 .into_iter()
                 .flatten()
@@ -363,8 +386,8 @@ fn cost_of(
                         if in_pattern {
                             return Err("a pattern inside a pattern".into());
                         }
-                        // Its tiles over what it fills: the area filled over a tile's.
-                        let filled = p.data().bounds();
+                        // Its tiles over what it covers: the area covered over a tile's.
+                        let filled = covered;
                         let (r, t) = (pat.rect(), pat.transform());
                         let tile = f64::from(r.width())
                             * f64::from(r.height())
@@ -416,13 +439,25 @@ pub enum Drawn {
     In(u64),
     /// Not done by its deadline (left to finish on its own thread, its result unused).
     Late,
+    /// Not drawn: an earlier test drawing ran past its deadline and is still running.
+    Refused,
     /// The drawing has no size to draw at.
     Sizeless,
 }
 
+/// A test drawing that ran past its deadline is still running: no other is started until it
+/// ends, so that at most one runaway drawing ever runs at a time (in a process: a plug-in's
+/// instances share it).
+static RUNAWAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Draws `tree` with its longer side `side` pixels on a thread of its own, waiting for it no
-/// longer than `deadline_ms`: the waiting itself is bounded, whatever the drawing costs.
+/// longer than `deadline_ms`: the waiting itself is bounded, whatever the drawing costs. While
+/// an earlier drawing runs past its deadline, none is drawn ([`Drawn::Refused`]).
 pub fn test_draw(tree: &usvg::Tree, side: u32, deadline_ms: u64) -> Drawn {
+    use std::sync::atomic::Ordering;
+    if RUNAWAY.load(Ordering::Acquire) {
+        return Drawn::Refused;
+    }
     let size = tree.size();
     let k = side as f32 / size.width().max(size.height());
     let (w, h) = (
@@ -434,19 +469,33 @@ pub fn test_draw(tree: &usvg::Tree, side: u32, deadline_ms: u64) -> Drawn {
     };
     let tree = tree.clone();
     let (tx, rx) = std::sync::mpsc::channel();
+    // Whether the drawing ended within its deadline: it clears RUNAWAY as it ends if not.
+    let late = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let late_here = std::sync::Arc::clone(&late);
     let spawned = std::thread::Builder::new()
         .name("skin-pack test drawing".into())
         .spawn(move || {
             let t = Instant::now();
             resvg::render(&tree, Transform::from_scale(k, k), &mut pixmap.as_mut());
             let _ = tx.send(t.elapsed().as_millis() as u64);
+            if late_here.swap(true, Ordering::AcqRel) {
+                RUNAWAY.store(false, Ordering::Release);
+            }
         });
     if spawned.is_err() {
-        return Drawn::Late;
+        return Drawn::Refused;
     }
     match rx.recv_timeout(std::time::Duration::from_millis(deadline_ms.max(1))) {
         Ok(ms) => Drawn::In(ms),
-        Err(_) => Drawn::Late,
+        Err(_) => {
+            // Marked late; if the drawing ended in between, it has marked it first, and
+            // nothing is running.
+            RUNAWAY.store(true, Ordering::Release);
+            if late.swap(true, Ordering::AcqRel) {
+                RUNAWAY.store(false, Ordering::Release);
+            }
+            Drawn::Late
+        }
     }
 }
 
@@ -474,6 +523,12 @@ pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut
                         limits.svg_test_side,
                         limits.svg_test_ms * 2 + 1
                     ),
+                ),
+                Drawn::Refused => report.reject(
+                    "svg.slow",
+                    Some(path),
+                    "not drawn as a test: an earlier drawing's test is still running past its \
+                     deadline",
                 ),
                 Drawn::Sizeless => {
                     report.reject("svg.size", Some(path), "it has no size to draw at")
@@ -576,6 +631,25 @@ mod tests {
                       <rect width='10' height='10' fill='url(#a)'/></pattern></defs>\
                       <rect width='100' height='100' fill='url(#b)'/>";
         assert!(refused(nested).contains("pattern inside a pattern"));
+    }
+
+    /// Ids resolve as usvg resolves them: one given twice, or hidden in `metadata`, is refused.
+    #[test]
+    fn ids_are_given_once_and_only_to_svgs_elements() {
+        assert!(refused("<rect id='a'/><circle id='a'/>").contains("two elements"));
+        assert!(
+            refused("<metadata><x:d xmlns:x='urn:x' id='p'/></metadata><rect fill='url(#p)'/>")
+                .contains("inside `metadata`")
+        );
+    }
+
+    /// A pattern's tiles under a stroke are counted over the stroke, however thin the path.
+    #[test]
+    fn a_stroked_patterns_tiles_are_counted_over_the_stroke() {
+        let line = "<defs><pattern id='p' width='0.1' height='0.1' patternUnits='userSpaceOnUse'>\
+                    <rect width='0.1' height='0.1'/></pattern></defs>\
+                    <line x1='0' y1='50' x2='100' y2='50' stroke='url(#p)' stroke-width='60'/>";
+        assert!(refused(line).contains("tiles"), "{}", refused(line));
     }
 
     /// A tiny tile over a large fill: millions of tiles, refused before anything is drawn.

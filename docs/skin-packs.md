@@ -237,14 +237,16 @@ evenly all round, because the panel lays its own fixed lamp over them.
 - event attributes (`on...`);
 - any reference outside the drawing: an `href` other than `#name`, a `url(...)` other than
   `url(#name)`, or an `<image>` other than embedded PNG data (`data:image/png;base64,...`);
-- a pattern filled with another pattern.
+- a pattern filled with another pattern;
+- an `id` given to two elements, or to anything that is not SVG's or is inside `<metadata>`.
 
 **Limits:** 20,000 elements drawn, each reference (a `use`, a `href`, a `url(#name)`) counted
 as everything it repeats (a reference that repeats itself is refused); 200,000 path segments;
 32 filter primitives; a blur's deviation of at most 64; 4096 pattern tiles over what patterns
 fill, all their uses together; embedded pictures within the picture limits. The counting stops
 as soon as a limit is passed. A drawing is also drawn as a test, 3000 pixels across, on a thread
-of its own, and must take no longer than 250 ms.
+of its own, and must take no longer than 250 ms. While a test drawing runs past its deadline,
+no other is drawn: the pack checked meanwhile is refused, and can be checked again later.
 
 ### Fonts
 

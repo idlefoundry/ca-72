@@ -6040,3 +6040,9 @@ changes a licence):
   as on this branch, and its circuit tests wrote 5.5 GB into `target/ca72-lab`, which filled the
   disk; they were deleted, and the crates this work does not touch were not run again. CI
   (Linux with ngspice, Windows) has not run this branch. Not tried in a host.
+
+**Owner decisions on the marketplace, 2026-10-16.** Regular users and Idle Foundry both make
+skins and sell them on a marketplace Idle Foundry hosts. Bundles (one purchase, packs for
+several plug-ins) are the marketplace's, not the format's: a pack stays for one plug-in.
+Idle Foundry is the seller of record: sellers license Idle Foundry, which licenses buyers (the
+declarations' "authorizes customer licensing"). A buyer gets a pack's updates.
