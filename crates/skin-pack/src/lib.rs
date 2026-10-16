@@ -61,6 +61,10 @@ pub struct Limits {
     pub svg_blur: f32,
     /// A pattern's tiles over what it fills, all its uses together.
     pub svg_tiles: usize,
+    /// What a drawing may cost to draw, in pixel-equivalents at the test drawing's size
+    /// (`svg::Cost::work`): about 100 ms on an M4 Pro, half a second on a machine five times
+    /// slower. It bounds what drawing costs; the timed test is a backstop.
+    pub svg_work: f64,
     /// A drawing's test, drawn with its longer side this many pixels: its time limit.
     pub svg_test_side: u32,
     pub svg_test_ms: u64,
@@ -79,12 +83,15 @@ impl Default for Limits {
             total_bytes: 64 << 20,
             text_bytes: 256 << 10,
             picture_side: 4096,
-            picture_pixels: 48_000_000,
+            // About three times the official REALISTIC look's pictures (decisions.md R-SKIN-PACKS:
+            // 48 million let one look hold some 400 MB).
+            picture_pixels: 16_000_000,
             svg_nodes: 20_000,
             svg_segments: 200_000,
             svg_filters: 32,
             svg_blur: 64.0,
             svg_tiles: 4096,
+            svg_work: 60.0e6,
             svg_test_side: 3000,
             svg_test_ms: 250,
             fonts: 4,
@@ -545,7 +552,7 @@ fn check_files(
                 }
             }
             Some(paths::FileKind::Svg) => {
-                svg::check(path, bytes, limits, context.test_drawings, report);
+                pixels += svg::check(path, bytes, limits, context.test_drawings, report);
             }
             Some(paths::FileKind::Font) => {
                 fonts += 1;

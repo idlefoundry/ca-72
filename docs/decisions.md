@@ -6093,3 +6093,58 @@ pack could hold is stripped now. Also the earlier review's last finding: an id i
 (`docs/skin-packs.md`, `docs/skin-packs/`) are CC0, as those files are, and the rest GPL. Packs
 ship before the marketplace: a CA-72 release may carry the format with community packs, unsigned
 and installed by hand, while the marketplace is designed.
+
+**Stress packs, 2026-10-16.** The owner agreed to test the system with packs that each push one
+part of the format to its limits, the showcase pack after: "Let's make the stress testing packs
+first. And then once we've ironed out all the issues, if there are any, we'll make the showcase
+pack after that." And to the fonts BABEL needed: "you have my okay to download whatever you need
+for this test."
+
+**What was made** (`crates/ca72-panel/packs/stress.rs`, made by code, CC0; `tests/stress.rs`
+holds each to its outcome; `examples/stress_packs.rs` writes them out, checks and measures them):
+EDGE (every control moved, click areas touching, sizes at their bounds, fixtures moved, 300
+rules, 300 legends, 16 titles), HEAVY (a drawing at SVG's limits, pictures at the pixel cap),
+EVERY PICTURE (the 27 pictures as drawings, some at other proportions, some see-through),
+MINIMAL (a manifest alone; a layout with no print; realistic with no pictures), LIFECYCLE (one
+pack as versions, folder and pack file, signed and not, cut short, changed after signing) and
+BABEL (a wide typeface; Greek, Arabic, Chinese and an emoji in the built-in one; right-to-left
+legends in a typeface that has them; a typeface lacking a legend's glyphs). BABEL carries two
+OFL fonts from Google Fonts' repository (`tests/fonts`, test files only, never in the plug-in).
+HOSTILE: more malicious pack files (a link entry, names differing in case) and fuzzing
+(`skin-pack/tests/fuzz.rs`, `ca72-panel/tests/fuzz_layout.rs`): pack files mutated as bytes and
+inside, drawings, manifests, licences, fonts and layouts; 50,000 cases a reader, none panicked
+or hung.
+
+**What they found, and what changed** (agent decisions, not separately approved):
+- **A drawing's counts did not bound its cost.** HEAVY, within every count, took 9.8 s to draw
+  (340 long paths crossing the panel); the timed test refused it, but the abandoned draw kept a
+  core busy, and while it ran other packs' drawings were refused. The check now estimates the
+  work, in pixel-equivalents at the size the drawing is used (an edge's pixel row 100, a painted
+  pixel 1, a layer's 6, a filter primitive's region 10: measured on synthetic drawings, about
+  1.6 ms a million on the M4 Pro) and refuses past 60 million (about 100 ms here, half a second
+  on a machine five times slower). The panel's drawing is costed 3000 pixels across, a picture at
+  its slot's size. The timed test is a backstop; another drawing's runaway no longer refuses a
+  pack (its test is skipped, with a note). Pattern tiles' elements are counted too.
+- **Memory.** HEAVY's look held its 27 pictures decoded (200 MB) and the renderer a second copy,
+  and the editor keeps every installed pack's look for its menu. A look now keeps its pictures
+  as the pack holds them (PNG bytes, drawings), decoded by a renderer as it first needs them;
+  the pixel cap is 16 million (it was 48: about three times the official set now), and pictures
+  embedded in drawings count with them (they had escaped it). HEAVY: 400 MB to 63 MB.
+- **POWER could not be near an edge:** it was checked as a circle 64 across; now by its switch.
+- **A drawing given as a picture at other proportions was stretched without a note** (a PNG's
+  was noted): now noted.
+- **Print cut off at the panel's edges was not seen**: a control's printed dial or legends
+  (`layout.print-outside`) and a legend running off the panel in the typeface used
+  (`look.fit`) go to review. A typeface that does not fit a legend is now still used (one long
+  legend had discarded a pack's typeface); only one that cannot print a character is not.
+- **Glyphs.** A pack's typeface must print what the plug-in prints too (printable ASCII, "–",
+  "…"), not only the layout's legends; and legends the built-in typeface cannot print (it has
+  Latin, Greek and Cyrillic) go to review (`look.glyphs`): they would have printed as nothing.
+- Tools: `skin-pack`'s `svg_cost` (what a drawing costs, part by part) and `font_info` (what a
+  font says of itself, and what it lacks).
+
+**Evidence (the Mac, 2026-10-16, the owner's host and other sessions running, load about 10):**
+`stress_packs`, medians of one run: the built-in REALISTIC opens in 183 ms at 0.44 and 531 ms at
+0.87 (39 and 84 MB); HEAVY 215 and 659 ms (63 and 125 MB); EDGE 229 and 688 ms (21 and 48 MB);
+the rest as their base look. A knob's frame 0.2 to 1.4 ms in every pack. Not yet: the slow x86
+machine, and the stress packs installed in hosts on each OS.

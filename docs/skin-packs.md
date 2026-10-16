@@ -183,7 +183,8 @@ The folder is read as untrusted input:
   `desktop.ini` and `__MACOSX` are ignored.
 - **No links** of any kind, and no special files.
 - **Limits:** 256 files; 8 MiB per file, 256 KiB per text file, 4 MiB per font; 64 MiB in all.
-  Pictures at most 4096 pixels a side and 48 million pixels in all. At most 4 fonts.
+  Pictures at most 4096 pixels a side and 16 million pixels in all (about three times the
+  official REALISTIC look's), pictures embedded in drawings counted with them. At most 4 fonts.
 
 ## The manifest, `skin.toml`
 
@@ -261,10 +262,15 @@ walnut = "pictures/walnut.svg"
   the face, the realistic look's trim and shadows) and under its print, controls, screws and
   jacks. Nothing outside the panel is drawn. The strip below the panel, which holds the
   plug-in's own controls, is not part of a pack's drawing.
-- **The typeface** prints the panel's legends, titles, tips and menus. It is used only if it
-  has a glyph for every legend and keeps every legend on the panel in both lettering sizes.
-  Otherwise the built-in typeface (URW Gothic) is used and the pack goes to review. Without a
-  `bold`, the regular is used for both.
+- **The typeface** prints the panel's legends, titles, dial numbers, tips and menus. It is used
+  only if it has a glyph for every legend and for everything the plug-in prints itself
+  (printable ASCII, "–" and "…"); otherwise the built-in typeface (URW Gothic) is used and the
+  pack goes to review. Without a `bold`, the regular is used for both.
+- **Legends that won't print or fit go to review.** A legend the typeface in use can't print
+  (the built-in one has Latin, Greek and Cyrillic, but not Arabic or Chinese) would show as
+  nothing: `look.glyphs`. A legend that runs off the panel, in either lettering size, is drawn
+  cut off: `look.fit`. A control placed so that its own printed dial or legends would be cut off
+  at the panel's edge: `layout.print-outside`. Each is the layout's to fix.
 
 ### Pictures
 
@@ -319,10 +325,25 @@ evenly all round, because the panel lays its own fixed lamp over them.
 **Limits:** 20,000 elements drawn, each reference (a `use`, a `href`, a `url(#name)`) counted
 as everything it repeats (a reference that repeats itself is refused); 200,000 path segments;
 32 filter primitives; a blur's deviation of at most 64; 4096 pattern tiles over what patterns
-fill, all their uses together; embedded pictures within the picture limits. The counting stops
-as soon as a limit is passed. A drawing is also drawn as a test, 3000 pixels across, on a thread
-of its own, and must take no longer than 250 ms. While a test drawing runs past its deadline,
-no other is drawn: the pack checked meanwhile is refused, and can be checked again later.
+fill, all their uses together, and 20,000 elements drawn in those tiles; embedded pictures
+within the picture limits.
+
+**What drawing it costs.** Counts of parts don't bound the cost by themselves: a few long lines
+crossing the whole panel cost far more than thousands of small shapes. So the check also
+estimates the work, at the size the drawing is used (the panel's drawing 3000 pixels across;
+a picture at its slot's size), in "pixel-equivalents":
+
+- each pixel painted counts 1 (a fill's box; a stroke's length by its width);
+- each pixel row a path's edges cross counts 100;
+- each pixel of a layer (a group's opacity, a clip, a mask) counts 6;
+- each pixel of a filter's region counts 10, for each of its primitives.
+
+At most **60 million**: about 100 ms on an M4 Pro, half a second on a machine five times
+slower. The counting stops as soon as a limit is passed.
+
+A drawing is also drawn once as a test, on a thread of its own, against a 250 ms limit, as a
+backstop. While another drawing's test is still running past its deadline, the test is
+skipped, with a note: the counted cost already bounds it.
 
 ### Fonts
 

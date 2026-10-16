@@ -1400,6 +1400,47 @@ pub fn bounds(kind: &Kind) -> [f64; 4] {
     }
 }
 
+/// The box a control's printed dial (its ticks, numbers and captions) or legends take about its
+/// centre (left, top, right, bottom), in the large lettering (the larger): what a layout must
+/// leave room for at the panel's edges. A switch's and a toggle's legends are the layout's own.
+pub fn print_extent(kind: &Kind) -> [f64; 4] {
+    let num = Lettering::Large.number();
+    // A text's half width at `size` (a capital about 0.62 of it, stretched as legends are).
+    let half = |t: &str, size: f64| t.chars().count() as f64 * size * 0.62 * STRETCH / 2.0;
+    match *kind {
+        Kind::Knob { dial, .. } => {
+            let d = marks(dial);
+            // The numbers round the dial: each where it is printed, its box about it.
+            let mut b = [0.0f64; 4];
+            let mut grow = |x: f64, y: f64, hw: f64, hh: f64| {
+                b = [
+                    b[0].min(x - hw),
+                    b[1].min(y - hh),
+                    b[2].max(x + hw),
+                    b[3].max(y + hh),
+                ];
+            };
+            for (_, r0, r1, _) in &d.ticks {
+                grow(0.0, 0.0, r0.max(*r1), r0.max(*r1));
+            }
+            for (a, t, at) in &d.labels {
+                let (x, y) = polar(at.unwrap_or(d.r), *a);
+                grow(x, y, half(t, num) + 2.0, num * 0.6);
+            }
+            for (x, y, t) in &d.captions {
+                grow(*x, *y, half(t, num - 1.0) + 2.0, num * 0.6);
+            }
+            b
+        }
+        Kind::Selector(_) => {
+            let r = SIX_LEGEND + 20.0;
+            let x = r * rad(SIX[5]).sin().abs() + 20.0;
+            [-x, -(r + num), x, 64.0]
+        }
+        _ => [0.0; 4],
+    }
+}
+
 /// Where a wheel is drawn: its parameter `v`, moved on by a MIDI keyboard's wheel `midi`
 /// (the bend adds, 0.5 centred; the modulation wheel goes as far as the greater).
 pub fn wheel_shown(detent: bool, v: f64, midi: f64) -> f64 {

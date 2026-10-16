@@ -205,8 +205,13 @@ fn a_packs_pictures_replace_the_built_in_ones_by_slot() {
     });
     let look = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
     assert_eq!(look.pictures.len(), 1);
-    let knob = &look.pictures["knob"];
+    // Kept as the drawing it is; drawn at the built-in knob's size as a renderer needs it.
+    let knob = look.pictures["knob"].picture((512, 512)).expect("drawn");
     assert_eq!((knob.width(), knob.height()), (512, 512));
+    assert!(matches!(
+        look.pictures["knob"],
+        ca72_panel::skin::Source::Svg(_)
+    ));
     let base = Look::realistic();
     assert!(frame(look, 0.3) != frame(base, 0.3));
     // A slot that is not one of the plug-in's is refused.

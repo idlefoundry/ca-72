@@ -15,7 +15,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
 use serde::Deserialize;
 use skin_pack::paths::{self, FileKind};
@@ -26,6 +25,10 @@ use crate::arrangement::Arrangement;
 use crate::art::{self, Lettering};
 use crate::fonts::{Fonts, Weight};
 use crate::skin::{self, Overrides, Skin};
+
+/// The width, in pixels, a pack's drawing over the panel is costed at: about the panel's at
+/// the size the editor opens on a high-density screen (each larger window costs more).
+pub const ART_SIDE: u32 = 3000;
 
 /// The plug-in's id in a pack's manifest.
 pub const PLUGIN: &str = "ca-72";
@@ -246,38 +249,45 @@ impl Look {
             let Some(bytes) = file(path, &[FileKind::Png, FileKind::Svg], &mut report) else {
                 continue;
             };
-            let picture = if path.ends_with(".svg") {
-                let size = official_size(official);
-                skin_pack::svg::parse(&bytes, limits)
-                    .ok()
-                    .and_then(|(tree, _)| draw_at(&tree, size))
-            } else if path.ends_with(".png") {
-                Pixmap::decode_png(&bytes).ok()
-            } else {
-                None
-            };
-            match picture {
-                Some(p) => {
-                    let (ow, oh) = official_size(official);
-                    let (k0, k1) = (
-                        f64::from(p.width()) / f64::from(p.height()),
-                        f64::from(ow) / f64::from(oh),
-                    );
-                    if (k0 / k1 - 1.0).abs() > 0.02 {
-                        report.note(
-                            "look.picture",
-                            Some(path),
-                            format!(
-                                "drawn at the built-in {name}'s proportions ({ow} by {oh}): it is {} by {}",
-                                p.width(),
-                                p.height()
-                            ),
-                        );
+            // Kept as the pack holds it (decoded by a renderer as it first needs it); its size
+            // read now, to note proportions not the built-in picture's (it is drawn stretched
+            // to them).
+            let size = skin::png_size(official);
+            let (source, own) = if path.ends_with(".svg") {
+                // Its cost counted at the size it is drawn: the built-in picture's.
+                match skin_pack::svg::parse_at(&bytes, limits, Some(size.0.max(size.1))) {
+                    Ok((tree, _)) => {
+                        let own = (tree.size().width(), tree.size().height());
+                        (Some(skin::Source::Svg(Arc::new(tree))), own)
                     }
-                    pictures.insert(slot, p);
+                    Err(why) => {
+                        report.reject("look.picture", Some(path), why);
+                        continue;
+                    }
                 }
-                None => report.reject("look.picture", Some(path), "a PNG or SVG picture"),
+            } else {
+                let (w, h) = skin::png_size(&bytes);
+                (
+                    Some(skin::Source::Png(Arc::new(bytes))),
+                    (w as f32, h as f32),
+                )
+            };
+            let Some(source) = source else { continue };
+            let (k0, k1) = (
+                f64::from(own.0) / f64::from(own.1.max(1.0)),
+                f64::from(size.0) / f64::from(size.1),
+            );
+            if (k0 / k1 - 1.0).abs() > 0.02 {
+                report.note(
+                    "look.picture",
+                    Some(path),
+                    format!(
+                        "drawn at the built-in {name}'s proportions ({} by {}): it is {} by {}",
+                        size.0, size.1, own.0, own.1
+                    ),
+                );
             }
+            pictures.insert(slot, source);
         }
 
         if let Some(t) = spec.face_tint
@@ -291,7 +301,8 @@ impl Look {
             None => None,
             Some(path) if path.ends_with(".svg") => {
                 let bytes = file(path, &[FileKind::Svg], &mut report);
-                match bytes.map(|b| skin_pack::svg::parse(&b, limits)) {
+                // Its cost counted drawn as the panel is in a large window.
+                match bytes.map(|b| skin_pack::svg::parse_at(&b, limits, Some(ART_SIDE))) {
                     Some(Ok((tree, _))) => Some(Arc::new(tree)),
                     Some(Err(why)) => {
                         report.reject("look.art", Some(path), why);
@@ -325,6 +336,47 @@ impl Look {
                 }
             }
         };
+        // The legends that run off the panel in the typeface used (the pack's, or the built-in
+        // one): drawn cut off, and put to review (the layout's to move, not the typeface's).
+        let used = fonts
+            .and_then(|(r, b)| Fonts::with(r, b).ok())
+            .unwrap_or_default();
+        let off = run_off(&used, &arrangement);
+        if !off.is_empty() {
+            report.review(
+                "look.fit",
+                None,
+                format!(
+                    "in its typeface, {} would run off the panel",
+                    off.iter()
+                        .take(8)
+                        .map(|t| format!("\"{t}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            );
+        }
+        // Without a typeface of its own (or with one not used), the built-in one prints the
+        // legends: what it cannot print would show as empty boxes.
+        if fonts.is_none() {
+            let missing = unprintable(&Fonts::new(), &arrangement);
+            if !missing.is_empty() {
+                report.review(
+                    "look.glyphs",
+                    None,
+                    format!(
+                        "the built-in typeface has no glyph for some of {}: they would print as \
+                         empty boxes (bring a typeface that has them)",
+                        missing
+                            .iter()
+                            .take(8)
+                            .map(|t| format!("\"{t}\""))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                );
+            }
+        }
         if report.rejected() {
             return Err(report);
         }
@@ -377,24 +429,6 @@ struct FontsTable {
     bold: Option<String>,
 }
 
-/// A built-in picture's size, from its header.
-fn official_size(png: &[u8]) -> (u32, u32) {
-    let be = |i: usize| u32::from_be_bytes([png[i], png[i + 1], png[i + 2], png[i + 3]]);
-    (be(16), be(20))
-}
-
-/// A drawing drawn `size` pixels, stretched to it.
-fn draw_at(tree: &usvg::Tree, (w, h): (u32, u32)) -> Option<Pixmap> {
-    let mut p = Pixmap::new(w, h)?;
-    let s = tree.size();
-    resvg::render(
-        tree,
-        Transform::from_scale(w as f32 / s.width(), h as f32 / s.height()),
-        &mut p.as_mut(),
-    );
-    Some(p)
-}
-
 /// A pack's font's bytes kept for as long as the plug-in runs (its faces borrow them), each
 /// distinct font once however often a pack is chosen.
 fn keep(bytes: Vec<u8>) -> &'static [u8] {
@@ -412,8 +446,47 @@ fn keep(bytes: Vec<u8>) -> &'static [u8] {
     leaked
 }
 
-/// Whether a pack's typeface prints every legend of `arrangement` and keeps each on the panel
-/// in both letterings (reported if not).
+/// What the plug-in itself prints in a look's typeface, besides a layout's legends (its dials'
+/// numbers, its selectors' legends, its plate, tips, notes and menus): printable ASCII, the en
+/// dash and the ellipsis. A pack's typeface must have them all.
+pub const PLUGIN_PRINT: &str = concat!(
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`",
+    "abcdefghijklmnopqrstuvwxyz{|}~\u{2013}\u{2026}"
+);
+
+/// The legends and titles of `arrangement` that `fonts` cannot print in full.
+fn unprintable<'a>(fonts: &Fonts, arrangement: &'a Arrangement) -> Vec<&'a str> {
+    arrangement
+        .texts
+        .iter()
+        .map(|t| t.text.as_str())
+        .chain(arrangement.titles.iter().map(|t| t.text.as_str()))
+        .filter(|t| !fonts.covers(t))
+        .collect()
+}
+
+/// The legends of `arrangement` that run off the panel in `fonts`, in either lettering.
+fn run_off(fonts: &Fonts, arrangement: &Arrangement) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for lettering in [Lettering::Standard, Lettering::Large] {
+        for t in &arrangement.texts {
+            let size = t.size.unwrap_or(lettering.legend());
+            let (x, y) = t.at_in(lettering);
+            let half = fonts.advance(&t.text, size, Weight::Bold, 0.0) * art::STRETCH / 2.0;
+            let inside = x - half >= 0.0
+                && x + half <= art::PW
+                && y - size >= -art::TOP
+                && y + size <= art::PH;
+            if !inside && !out.contains(&t.text) {
+                out.push(t.text.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Whether a pack's typeface prints every legend of `arrangement` and what the plug-in prints
+/// (reported if not: the built-in typeface is then used).
 fn fitting(
     (regular, bold): (&'static [u8], &'static [u8]),
     arrangement: &Arrangement,
@@ -435,7 +508,7 @@ fn fitting(
         .iter()
         .map(|t| t.text.as_str())
         .chain(arrangement.titles.iter().map(|t| t.text.as_str()))
-        .chain([art::PLATE_NAME]);
+        .chain([art::PLATE_NAME, PLUGIN_PRINT]);
     for t in texts {
         if !fonts.covers(t) {
             report.review(
@@ -446,28 +519,6 @@ fn fitting(
                 ),
             );
             return false;
-        }
-    }
-    for lettering in [Lettering::Standard, Lettering::Large] {
-        for t in &arrangement.texts {
-            let size = t.size.unwrap_or(lettering.legend());
-            let (x, y) = t.at_in(lettering);
-            let half = fonts.advance(&t.text, size, Weight::Bold, 0.0) * art::STRETCH / 2.0;
-            let inside = x - half >= 0.0
-                && x + half <= art::PW
-                && y - size >= -art::TOP
-                && y + size <= art::PH;
-            if !inside {
-                report.review(
-                    "look.fonts",
-                    None,
-                    format!(
-                        "in its typeface \"{}\" runs off the panel: the built-in typeface is used",
-                        t.text
-                    ),
-                );
-                return false;
-            }
         }
     }
     true

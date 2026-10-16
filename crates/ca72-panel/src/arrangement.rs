@@ -338,10 +338,35 @@ impl Arrangement {
             }
         }
 
-        // The fixtures.
+        // A control whose printed dial or legends would be cut off at the panel's edges: drawn
+        // so, and put to review (its print is the plug-in's, its place the layout's).
+        let cut: Vec<&str> = controls
+            .iter()
+            .enumerate()
+            .filter(|(i, c)| c.place == Place::Panel && placed[*i])
+            .filter(|(_, c)| {
+                let e = art::print_extent(&c.kind);
+                e != [0.0; 4] && !inside([c.x + e[0], c.y + e[1], c.x + e[2], c.y + e[3]])
+            })
+            .map(|(_, c)| c.param)
+            .collect();
+        let cut_off = (!cut.is_empty()).then(|| {
+            format!(
+                "the printed dial or legends of {} would be cut off at the panel's edge",
+                cut.iter()
+                    .map(|p| format!("`{p}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        });
+
+        // The fixtures: POWER by its switch's extent, the lamps and QUALITY's opening by their
+        // radius.
         let fx = &file.fixtures;
-        let fixtures: [(&str, [f64; 2], f64); 4] = [
-            ("power", fx.power, 64.0),
+        if !finite(fx.power) || !inside(power_box) {
+            reject("layout.outside", "`power` reaches outside the panel".into());
+        }
+        let fixtures: [(&str, [f64; 2], f64); 3] = [
             ("lamp", fx.lamp, 24.0),
             ("overload", fx.overload, 34.0),
             (
@@ -451,6 +476,9 @@ impl Arrangement {
                     format!("title `{}`: its extent, baseline or size", t.text),
                 );
             }
+        }
+        if let Some(why) = cut_off {
+            report.review("layout.print-outside", at, why);
         }
         if report.findings[before..]
             .iter()

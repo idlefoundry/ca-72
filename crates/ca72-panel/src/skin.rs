@@ -98,8 +98,56 @@ pub fn official_pictures() -> Vec<(&'static str, &'static [u8])> {
     all
 }
 
-/// A pack's pictures, by slot (decoded, premultiplied): each drawn instead of the built-in one.
-pub type Overrides = std::collections::BTreeMap<&'static str, Pixmap>;
+/// A pack's picture for a slot, as the pack holds it: a PNG's bytes, or a drawing. It is decoded
+/// (or drawn) only as a renderer first needs it, so that a look in a list holds no pixels.
+#[derive(Clone)]
+pub enum Source {
+    Png(std::sync::Arc<Vec<u8>>),
+    Svg(std::sync::Arc<resvg::usvg::Tree>),
+}
+
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Source::Png(b) => write!(f, "Png({} bytes)", b.len()),
+            Source::Svg(_) => f.write_str("Svg"),
+        }
+    }
+}
+
+impl Source {
+    /// Its pixels (premultiplied): a PNG decoded as it is, a drawing drawn `size` pixels.
+    pub fn picture(&self, size: (u32, u32)) -> Option<Pixmap> {
+        match self {
+            Source::Png(bytes) => Pixmap::decode_png(bytes).ok(),
+            Source::Svg(tree) => draw_at(tree, size),
+        }
+    }
+}
+
+/// A drawing drawn `w` by `h` pixels, stretched to them.
+pub fn draw_at(tree: &resvg::usvg::Tree, (w, h): (u32, u32)) -> Option<Pixmap> {
+    let mut p = Pixmap::new(w, h)?;
+    let s = tree.size();
+    resvg::render(
+        tree,
+        Transform::from_scale(w as f32 / s.width(), h as f32 / s.height()),
+        &mut p.as_mut(),
+    );
+    Some(p)
+}
+
+/// A PNG's size, from its header.
+pub fn png_size(png: &[u8]) -> (u32, u32) {
+    let be = |i: usize| {
+        png.get(i..i + 4)
+            .map_or(0, |b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    (be(16), be(20))
+}
+
+/// A pack's pictures, by slot: each drawn instead of the built-in one.
+pub type Overrides = std::collections::BTreeMap<&'static str, Source>;
 
 /// The face's picture is kept grey; its colour, a black a touch warm, is this over it (the
 /// official REALISTIC pack's `face_tint`).
@@ -246,15 +294,16 @@ impl Pictures {
                 .map(|(_, b)| *b)
                 .expect("a slot")
         };
-        let png = |name: &str| {
+        // A pack's picture (decoded now, or drawn at the built-in one's size), else the built-in.
+        let pack = |name: &str| {
             overrides
                 .get(name)
-                .cloned()
-                .unwrap_or_else(|| decode(slot(name)))
+                .and_then(|src| src.picture(png_size(slot(name))))
         };
-        let face = match (overrides.get("face"), face_tint) {
-            (Some(p), Some(t)) => tinted(p, t),
-            (Some(p), None) => p.clone(),
+        let png = |name: &str| pack(name).unwrap_or_else(|| decode(slot(name)));
+        let face = match (pack("face"), face_tint) {
+            (Some(p), Some(t)) => tinted(&p, t),
+            (Some(p), None) => p,
             (None, _) => face_picture(),
         };
         let rocker_blue = png("rocker-blue");

@@ -302,6 +302,27 @@ mod tests {
         assert!(files.is_empty() && r.has("pack.files"), "{r}");
     }
 
+    /// A link inside a pack file, and two names that differ only in case: refused.
+    #[test]
+    fn links_and_names_differing_in_case_are_refused() {
+        let mut out = Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut out);
+            let o = zip::write::SimpleFileOptions::default();
+            z.add_symlink("notes.txt", "/etc/passwd", o)
+                .expect("a link");
+            z.start_file("README.md", o).expect("an entry");
+            z.write_all(b"a").expect("written");
+            z.start_file("readme.md", o).expect("an entry");
+            z.write_all(b"b").expect("written");
+            z.finish().expect("finished");
+        }
+        let mut r = Report::default();
+        let files = read(&out.into_inner(), &Limits::default(), &mut r);
+        assert!(!files.contains("notes.txt"));
+        assert!(r.has("path.link") && r.has("path.duplicate"), "{r}");
+    }
+
     #[test]
     fn what_is_not_a_zip_is_not_a_pack_file() {
         let mut r = Report::default();

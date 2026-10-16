@@ -306,9 +306,29 @@ pub struct Cost {
     pub segments: usize,
     pub filters: usize,
     pub blur: f32,
-    /// A pattern's tiles over what it fills, all its uses together.
+    /// A pattern's tiles over what it fills, all its uses together, and the elements those
+    /// tiles draw (each tile draws the pattern's).
     pub tiles: f64,
+    pub tile_nodes: f64,
+    /// At the test drawing's size: the pixel rows the edges of every path cross (what drawing
+    /// a path costs, more than its segments' count: a long line crosses many), and the pixels
+    /// painted (fills, strokes, pictures, and each layer a group draws into: a filter's region
+    /// once a primitive, a clip's, a mask's, a group's opacity).
+    pub edges: f64,
+    pub area: f64,
+    /// What drawing it costs, in pixel-equivalents at the test drawing's size: each pixel row an
+    /// edge crosses [`EDGE`], each pixel painted 1, each pixel of a layer [`LAYER`], of a filter's
+    /// region [`FILTER`] a primitive (measured on an M4 Pro: about 1.6 ms a million).
+    pub work: f64,
+    /// The pixels of the pictures embedded in it, decoded (counted with the pack's own).
+    pub pixels: u64,
 }
+
+/// What an edge's pixel row, a layer's pixel and a filter primitive's pixel cost against a
+/// pixel painted (measured, decisions.md R-SKIN-PACKS).
+pub const EDGE: f64 = 100.0;
+pub const LAYER: f64 = 6.0;
+pub const FILTER: f64 = 10.0;
 
 impl Cost {
     /// Why it is past `limits`, if it is.
@@ -334,21 +354,90 @@ impl Cost {
         if self.tiles > limits.svg_tiles as f64 {
             return Err(format!("a pattern's tiles, more than {}", limits.svg_tiles));
         }
+        if self.tile_nodes > limits.svg_nodes as f64 {
+            return Err(format!(
+                "more than {} elements drawn in a pattern's tiles",
+                limits.svg_nodes
+            ));
+        }
+        if self.work > limits.svg_work {
+            return Err(format!(
+                "drawing it costs about {:.0} million pixel-equivalents (its edges {:.1} million \
+                 pixel rows, {:.0} million pixels painted), more than {:.0} million",
+                self.work / 1e6,
+                self.edges / 1e6,
+                self.area / 1e6,
+                limits.svg_work / 1e6
+            ));
+        }
         Ok(())
     }
 }
 
-/// Counts what `group` costs into `cost`, stopping as soon as it is past `limits` (`in_pattern`:
-/// inside a pattern's tile, where another pattern is refused).
+/// The pixel rows a path's edges cross and its length in pixels, `k` pixels a unit, its points
+/// placed by `t` (a curve's by its control points' extent and polygon, which hold it).
+fn edges_of(path: &resvg::tiny_skia::Path, t: Transform, k: f64) -> (f64, f64, usize) {
+    use resvg::tiny_skia::{PathSegment, Point};
+    let at = |mut p: Point| {
+        t.map_point(&mut p);
+        (f64::from(p.x), f64::from(p.y))
+    };
+    let (mut rows, mut length, mut count) = (0.0, 0.0, 0usize);
+    let (mut last, mut start) = ((0.0, 0.0), (0.0, 0.0));
+    for seg in path.segments() {
+        let ps: Vec<(f64, f64)> = match seg {
+            PathSegment::MoveTo(p) => {
+                last = at(p);
+                start = last;
+                continue;
+            }
+            PathSegment::LineTo(p) => vec![at(p)],
+            PathSegment::QuadTo(a, b) => vec![at(a), at(b)],
+            PathSegment::CubicTo(a, b, c) => vec![at(a), at(b), at(c)],
+            PathSegment::Close => vec![start],
+        };
+        let lo = ps.iter().map(|p| p.1).fold(last.1, f64::min);
+        let hi = ps.iter().map(|p| p.1).fold(last.1, f64::max);
+        rows += (hi - lo) * k;
+        let mut from = last;
+        for p in &ps {
+            length += (p.0 - from.0).hypot(p.1 - from.1) * k;
+            from = *p;
+        }
+        last = ps.last().copied().unwrap_or(last);
+        count += 1;
+    }
+    (rows, length, count)
+}
+
+/// A rectangle's area, `k` pixels a unit.
+fn area(w: f32, h: f32, k: f64) -> f64 {
+    f64::from(w.max(0.0)) * f64::from(h.max(0.0)) * k * k
+}
+
+/// The elements a group draws (a pattern's tile's).
+fn nodes_in(group: &usvg::Group) -> usize {
+    1 + group
+        .children()
+        .iter()
+        .map(|n| match n {
+            usvg::Node::Group(g) => nodes_in(g),
+            _ => 1,
+        })
+        .sum::<usize>()
+}
+
+/// Counts what `group` costs into `cost`, `k` pixels a unit at the test drawing's size, stopping
+/// as soon as it is past `limits`. `in_pattern`: inside a pattern's tile, where another pattern
+/// is refused and the parts' cost is the tiles' (counted where the pattern is used).
 fn cost_of(
     group: &usvg::Group,
     cost: &mut Cost,
     pictures: &mut Vec<Arc<Vec<u8>>>,
     limits: &Limits,
-    in_pattern: bool,
+    (k, in_pattern): (f64, bool),
 ) -> Result<(), String> {
     cost.nodes += 1;
-    cost.over(limits)?;
     for f in group.filters() {
         cost.filters += f.primitives().len();
         for p in f.primitives() {
@@ -363,19 +452,66 @@ fn cost_of(
             }
         }
     }
+    // A layer of its own, drawn and then composed: a filter's region once a primitive, a clip's,
+    // a mask's, an opacity's.
+    if !in_pattern {
+        let layers = group
+            .filters()
+            .iter()
+            .map(|f| f.primitives().len())
+            .sum::<usize>()
+            + usize::from(group.clip_path().is_some())
+            + usize::from(group.mask().is_some())
+            + usize::from(group.opacity().get() < 1.0);
+        if layers > 0 {
+            let b = group.abs_layer_bounding_box();
+            let px = area(b.width(), b.height(), k);
+            let filters = group
+                .filters()
+                .iter()
+                .map(|f| f.primitives().len())
+                .sum::<usize>() as f64;
+            cost.area += layers as f64 * px;
+            cost.work += px * (filters * FILTER + (layers as f64 - filters) * LAYER);
+        }
+    }
     cost.over(limits)?;
     if let Some(c) = group.clip_path() {
-        cost_of(c.root(), cost, pictures, limits, in_pattern)?;
+        cost_of(c.root(), cost, pictures, limits, (k, in_pattern))?;
     }
     if let Some(m) = group.mask() {
-        cost_of(m.root(), cost, pictures, limits, in_pattern)?;
+        cost_of(m.root(), cost, pictures, limits, (k, in_pattern))?;
     }
     for node in group.children() {
         match node {
-            usvg::Node::Group(g) => cost_of(g, cost, pictures, limits, in_pattern)?,
+            usvg::Node::Group(g) => cost_of(g, cost, pictures, limits, (k, in_pattern))?,
             usvg::Node::Path(p) => {
                 cost.nodes += 1;
                 cost.segments += p.data().len();
+                if !in_pattern {
+                    // A fill: its edges once, its box; a stroke: its outline both sides of each
+                    // segment and its width at each, its box.
+                    let (rows, length, count) = edges_of(p.data(), p.abs_transform(), k);
+                    if p.fill().is_some() {
+                        let b = p.abs_bounding_box();
+                        let px = area(b.width(), b.height(), k);
+                        cost.edges += rows;
+                        cost.area += px;
+                        cost.work += rows * EDGE + px;
+                    }
+                    if let Some(st) = p.stroke() {
+                        let t = p.abs_transform();
+                        let scale = f64::from((t.sx * t.sy - t.kx * t.ky).abs().sqrt());
+                        let width = f64::from(st.width().get()) * scale * k;
+                        // Its outline's two sides (and each segment's ends, across its width, however
+                        // level it runs), and the band it paints: its length by its width (at least a
+                        // pixel: its edges are drawn however thin).
+                        let rows = 2.0 * rows + count as f64 * width.max(1.0);
+                        cost.edges += rows;
+                        cost.area += length * width.max(1.0);
+                        cost.work += rows * EDGE + length * width.max(1.0);
+                    }
+                }
                 cost.over(limits)?;
                 // Each paint with what it covers: a fill its path's box, a stroke its stroke's
                 // (half its width beyond the path all round).
@@ -390,26 +526,34 @@ fn cost_of(
                         if in_pattern {
                             return Err("a pattern inside a pattern".into());
                         }
-                        // Its tiles over what it covers: the area covered over a tile's.
-                        let filled = covered;
+                        // Its tiles over what it covers, and what they draw.
                         let (r, t) = (pat.rect(), pat.transform());
                         let tile = f64::from(r.width())
                             * f64::from(r.height())
                             * f64::from((t.sx * t.sy - t.kx * t.ky).abs());
-                        cost.tiles += if tile > 0.0 {
-                            (f64::from(filled.width()) * f64::from(filled.height()) / tile)
+                        let tiles = if tile > 0.0 {
+                            (f64::from(covered.width()) * f64::from(covered.height()) / tile)
                                 .ceil()
                                 .max(1.0)
                         } else {
                             f64::INFINITY
                         };
+                        cost.tiles += tiles;
+                        cost.tile_nodes += tiles * nodes_in(pat.root()) as f64;
                         cost.over(limits)?;
-                        cost_of(pat.root(), cost, pictures, limits, true)?;
+                        cost_of(pat.root(), cost, pictures, limits, (k, true))?;
                     }
                 }
             }
             usvg::Node::Image(i) => {
                 cost.nodes += 1;
+                if !in_pattern {
+                    // (A picture resampled as it is drawn: twice a fill's pixel.)
+                    let b = i.abs_bounding_box();
+                    let px = area(b.width(), b.height(), k);
+                    cost.area += px;
+                    cost.work += 2.0 * px;
+                }
                 if let usvg::ImageKind::PNG(data) = i.kind() {
                     pictures.push(data.clone());
                 }
@@ -420,18 +564,50 @@ fn cost_of(
     cost.over(limits)
 }
 
-/// A pack's drawing read: its tree, within `limits` (`Err` with why not). The plug-in reads a
-/// pack's drawings only through this.
+/// A pack's drawing read: its tree, within `limits`, its cost counted at its own size (its
+/// longer side at most `svg_test_side` pixels) (`Err` with why not). The plug-in reads a pack's
+/// drawings only through this or [`parse_at`].
 pub fn parse(bytes: &[u8], limits: &Limits) -> Result<(usvg::Tree, Cost), String> {
+    parse_at(bytes, limits, None)
+}
+
+/// The side, in pixels, a drawing's cost is counted at: `side` if given, else its own size's
+/// longer side, at most `svg_test_side`.
+fn side_of(tree: &usvg::Tree, limits: &Limits, side: Option<u32>) -> u32 {
+    let size = tree.size();
+    side.unwrap_or_else(|| {
+        (size.width().max(size.height()).ceil() as u32).min(limits.svg_test_side)
+    })
+    .max(1)
+}
+
+/// A pack's drawing read as [`parse`] reads it, its cost counted drawn with its longer side
+/// `side` pixels (the size a plug-in draws it at) if given.
+pub fn parse_at(
+    bytes: &[u8],
+    limits: &Limits,
+    side: Option<u32>,
+) -> Result<(usvg::Tree, Cost), String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "not UTF-8 text".to_owned())?;
     scan(text, limits)?;
     let tree =
         usvg::Tree::from_str(text, &options()).map_err(|e| format!("cannot be read: {e}"))?;
     let mut cost = Cost::default();
     let mut pictures = Vec::new();
-    cost_of(tree.root(), &mut cost, &mut pictures, limits, false)?;
+    // Counted at the size it is drawn.
+    let size = tree.size();
+    let k = f64::from(side_of(&tree, limits, side)) / f64::from(size.width().max(size.height()));
+    cost_of(tree.root(), &mut cost, &mut pictures, limits, (k, false))?;
     for p in pictures {
-        crate::picture::decode(&p, limits).map_err(|e| format!("an embedded picture: {e}"))?;
+        let (w, h) =
+            crate::picture::decode(&p, limits).map_err(|e| format!("an embedded picture: {e}"))?;
+        cost.pixels += u64::from(w) * u64::from(h);
+        if cost.pixels > limits.picture_pixels {
+            return Err(format!(
+                "its embedded pictures are more than {} pixels together",
+                limits.picture_pixels
+            ));
+        }
     }
     Ok((tree, cost))
 }
@@ -503,36 +679,41 @@ pub fn test_draw(tree: &usvg::Tree, side: u32, deadline_ms: u64) -> Drawn {
     }
 }
 
-/// Checks a drawing of a pack, drawing it as a test if `test`.
-pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut Report) {
-    match parse(bytes, limits) {
+/// Checks a drawing of a pack, drawing it as a test if `test`: the pixels of the pictures
+/// embedded in it (counted with the pack's), if it is not refused.
+pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut Report) -> u64 {
+    let parsed = parse(bytes, limits);
+    let pixels = parsed.as_ref().map_or(0, |(_, cost)| cost.pixels);
+    match parsed {
         Err(why) => report.reject("svg.refused", Some(path), why),
         // (Waited for twice its limit, so that a drawing just over it is measured.)
         Ok((tree, _)) if test => {
-            match test_draw(&tree, limits.svg_test_side, limits.svg_test_ms * 2 + 1) {
+            let side = side_of(&tree, limits, None);
+            match test_draw(&tree, side, limits.svg_test_ms * 2 + 1) {
                 Drawn::In(ms) if ms <= limits.svg_test_ms => {}
                 Drawn::In(ms) => report.reject(
                     "svg.slow",
                     Some(path),
                     format!(
-                        "drawn {} pixels across in {ms} ms, more than {} ms",
-                        limits.svg_test_side, limits.svg_test_ms
+                        "drawn {side} pixels across in {ms} ms, more than {} ms",
+                        limits.svg_test_ms
                     ),
                 ),
                 Drawn::Late => report.reject(
                     "svg.slow",
                     Some(path),
                     format!(
-                        "not drawn {} pixels across within {} ms",
-                        limits.svg_test_side,
+                        "not drawn {side} pixels across within {} ms",
                         limits.svg_test_ms * 2 + 1
                     ),
                 ),
-                Drawn::Refused => report.reject(
-                    "svg.slow",
+                // (Its cost is bounded by its counted work, which it passed: the timed test is
+                // a backstop, and another pack's runaway does not refuse this one.)
+                Drawn::Refused => report.note(
+                    "svg.untested",
                     Some(path),
                     "not drawn as a test: an earlier drawing's test is still running past its \
-                     deadline",
+                     deadline (its counted cost is within the limit)",
                 ),
                 Drawn::Sizeless => {
                     report.reject("svg.size", Some(path), "it has no size to draw at")
@@ -541,6 +722,7 @@ pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut
         }
         Ok(_) => {}
     }
+    pixels
 }
 
 #[cfg(test)]
@@ -737,14 +919,18 @@ mod tests {
 
     #[test]
     fn a_slow_drawing_is_refused_by_its_test() {
+        // (Its own size 2000 pixels: drawn so as its test.)
         let s = svg(
             "<filter id='f'><feGaussianBlur stdDeviation='60'/></filter>\
              <rect width='100' height='100' filter='url(#f)'/>",
-        );
+        )
+        .replace("width='100' height='100'>", "width='2000' height='2000'>");
         let mut r = Report::default();
+        // (Its cost not capped here: the timed test, the backstop, is what is tested.)
         let limits = Limits {
             svg_test_ms: 0,
             svg_test_side: 2000,
+            svg_work: f64::INFINITY,
             ..Limits::default()
         };
         check("art/slow.svg", s.as_bytes(), &limits, true, &mut r);
