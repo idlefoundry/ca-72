@@ -33,8 +33,9 @@
 //! which a worker takes before it plays.
 //!
 //! Workers made audio threads come out of one budget for the process: all instances' together
-//! are at most [`crate::engine::default_workers`]. An instance given fewer plays the rest on
-//! the host's thread; a pool's go back when it stops (decisions.md R18). An instance holds a
+//! are at most [`crate::engine::budget_workers`] (`default_workers`, unless a measurement sets
+//! its own). An instance given fewer plays the rest on the host's thread; a pool's go back when
+//! it stops (decisions.md R18). An instance holds a
 //! pool only while POLY is on: its audio thread asks for one and lets it go through a
 //! [`Crew`], which the plug-in's helper thread serves, starting and stopping pools
 //! (decisions.md R21, R23).
@@ -124,7 +125,7 @@ impl Budget {
 
 /// The plug-in's, for all its instances in the process.
 pub(crate) static BUDGET: Budget = Budget {
-    most: crate::engine::default_workers,
+    most: crate::engine::budget_workers,
     held: AtomicUsize::new(0),
 };
 

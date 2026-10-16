@@ -928,6 +928,9 @@ pub struct Engine {
     pool: Option<Pool>,
     workers: (usize, Option<Duration>),
     deadline: Option<Instant>,
+    /// Voices' runs not heard (a worker past the deadline, or the voice still held by one), for
+    /// the measurements ([`Engine::silent_runs`]).
+    silent_runs: u64,
     /// Where POLY's workers are started and stopped off the audio thread, the plan they are
     /// started for there (0: none), this thread's ask for them and whether the helper
     /// thread is to serve it (decisions.md R21, R23).
@@ -991,6 +994,7 @@ impl Engine {
             pool: None,
             workers: (0, None),
             deadline: None,
+            silent_runs: 0,
             crew: Arc::new(Crew::new()),
             plan: 0,
             ask: Ask::Not,
@@ -1191,6 +1195,12 @@ impl Engine {
     /// was last asked.
     pub fn take_mending(&mut self) -> bool {
         std::mem::take(&mut self.mend)
+    }
+
+    /// Voices' runs not heard so far: a worker not done by the block's deadline, or the voice
+    /// still held by a late one (a measurement's count; the plug-in does not read it).
+    pub fn silent_runs(&self) -> u64 {
+        self.silent_runs
     }
 
     /// The workers sharing POLY's voices.
@@ -1697,6 +1707,7 @@ impl Engine {
             let play = self.slots[k].play.clone();
             let Ok(mut p) = play.try_lock() else {
                 self.slots[k].peak = self.slots[k].peak.max(SILENT);
+                self.silent_runs += 1;
                 continue;
             };
             self.bring_up(k, &mut p);
@@ -1724,6 +1735,7 @@ impl Engine {
             }
         };
         for (&ok, &k) in played.iter().zip(&list[..count]) {
+            self.silent_runs += u64::from(!ok);
             let s = &mut self.slots[k];
             s.ran(ok);
             // (A voice not heard this run is not known to have fallen silent: it is not freed
@@ -2047,6 +2059,26 @@ impl Engine {
 /// [`workers_for`] its processors.
 pub fn default_workers() -> usize {
     workers_for(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get))
+}
+
+/// A measurement's own size of the process's budget of workers (0: [`default_workers`], as
+/// the plug-in always has it). Only the benches set it.
+static BUDGET_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The process's budget of workers made audio threads ([`crate::pool`]): [`default_workers`]
+/// unless a measurement has set its own ([`set_budget_for_measurement`]).
+pub fn budget_workers() -> usize {
+    match BUDGET_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => default_workers(),
+        n => n,
+    }
+}
+
+/// Sets the process's budget of workers for a measurement (0: back to [`default_workers`]).
+/// Not for the plug-in: the benches' way to try more workers than this machine is given.
+#[doc(hidden)]
+pub fn set_budget_for_measurement(workers: usize) {
+    BUDGET_OVERRIDE.store(workers, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The workers for a machine of `n` processors (decisions.md R11, R39): a third of them less

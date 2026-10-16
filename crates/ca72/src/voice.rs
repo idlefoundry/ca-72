@@ -937,6 +937,13 @@ pub struct BackPart {
     emphasis: Memo<f64>,
 }
 
+impl BackPart {
+    /// [`Voice::set_drive`] for the back on a thread of its own ([`crate::threaded`]).
+    pub fn set_drive(&mut self, gain: f64) {
+        self.vcf.set_drive(gain);
+    }
+}
+
 /// The external input's scale: the jack's voltage for a sample of 1.0, the same as the
 /// output's (so a render fed back to the input behaves as the instrument does; A25).
 pub const INPUT_VOLTS: f64 = 5.0;

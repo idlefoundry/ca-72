@@ -573,6 +573,19 @@ impl Threaded {
         self.keys.note(midi, on, self.panel.retrigger);
     }
 
+    /// The plug-in's DRIVE ([`Voice::set_drive`]), for the passes that follow: set on the back
+    /// between passes, when its worker does not hold it (false if it could not be: a worker
+    /// stopped holding it).
+    pub fn set_drive(&mut self, gain: f64) -> bool {
+        match self.back.shared.job.try_lock() {
+            Ok(mut job) => {
+                job.part.set_drive(gain);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     /// The passes handed to the workers so far (none go to them in Potato).
     pub fn passes(&self) -> u64 {
         self.pass
