@@ -5965,13 +5965,27 @@ plug-in's behaviour as it was.
     first sweep's HI 256-frame runs with 4 and 8 instances, other sessions' builds and
     benchmarks ran too (load average up to 24). Those 4-instance points were run again, twice,
     on a quieter machine (`scaling-mac-repeats.txt`; the repeats are what the tables show). The
-    8-instance points were not run again and are left out of the conclusions. Other
-    sessions' benchmarks (about two cores) also ran during parts of the ULTRA grid, which was
-    not run again; the split grid ran on a quieter machine.
+    8-instance points were not run again and are left out of the conclusions. From about
+    15:05 to 16:30 local time, the whole of the first sweep, another session's work also ran:
+    builds, clippy and renders at nice 10 to 19, and from 15:39 to 16:21 `preset_cost` on one
+    thread at normal priority. So the Mac's first sweep, ULTRA's grid among it, may be noisy.
+    The repeats (from 16:45) and the split grid (from 16:31) ran after it. The repeated 1- and
+    2-instance points agree with the first sweep's within 2 points of the period (27 / 40
+    against 25 / 40, 46 / 73 against 46 / 73).
   - **The Linux reference machine:** Ryzen 7 7800X3D, 8 cores, 16 hardware threads, one kind of
-    core, real-time throttling off as the owner set it.
+    core, real-time throttling off as the owner set it. Its load average was 1.5 to 3 before the
+    runs (other users' applications).
   - **The Windows machine:** i5-13600K, 6 performance cores with two hardware threads each and
     8 efficiency cores, 20 hardware threads in all.
+  - The three machines ran their grids at the same time, each only its own (they share no
+    processor). Each machine's runs were one at a time.
+  - **The cores as each system reports them** (2026-10-16):
+    - the Mac: `hw.nperflevels` 2, `hw.perflevel0.physicalcpu` 10 (`logicalcpu` 10),
+      `hw.perflevel1.physicalcpu` 4, 14 logical;
+    - Windows: `GetLogicalProcessorInformationEx` (cores), `EfficiencyClass` 1: 6 cores, 12
+      logical processors; class 0: 8 cores, 8 logical; 20 in all;
+    - Linux: no `/sys/devices/cpu_core` (not Intel hybrid); `cpu_capacity` 1024 on all 16, and
+      one `cpuinfo_max_freq` (5.05 GHz); 8 physical cores (`core_cpus_list`), 16 logical.
 - **Safety in the runs.** On Linux and Windows, no scaling run had more host threads and
   workers together than the hardware threads less two. On Linux no split run had more threads,
   the host's among them, than the hardware threads less two. On Windows one split run had 19
@@ -6021,6 +6035,17 @@ performance cores.**
   audio threads on 10 performance cores) still had at most 1 late block in 7,500 in both
   repeats. The collapse the first sweep showed from 7 workers on came from the other sessions'
   load: it did not repeat.
+
+**Where the curves flatten** (HI, 256 frames):
+
+| Machine | One instance | Four instances |
+|---|---|---|
+| Mac | 9 workers, one voice a thread (mean 19 %); flat to 12 | 8 (52 %); flat to 12 |
+| Linux | about 10 (24 %), 12 a little better (23 %) | still falling at 10, the most run |
+| Windows | 4 to 6 (28 %), worse from 7 | 10 to 12 (52 %) |
+
+None of these machines has more than 14 cores (20 hardware threads), so how the curves go
+further is not known.
 
 **3. ULTRA's whole voices are limited by one voice's worst block, not by the number of
 workers.** With one instance and 4 ULTRA voices, the mean stops falling at 3 workers (one
@@ -6075,6 +6100,9 @@ runs not heard. At 256 frames 1,875 blocks are measured, at 128 frames 3,750:
 | M4 Pro | F = 10, N = 14 | | | yes |
 | i5-13600K | | F = 6, N = 20 | F = 6 | Windows only |
 | 7800X3D | | F = 16 | F = 16, N = 16 | Linux only |
+
+Beyond 14 cores (20 hardware threads) the formulas below are not verified: their values
+there follow from the rule, not from a measurement.
 
 Measured: on Windows the 7th thread of one instance and those after it are slower (item 2),
 so the second hardware threads of a hybrid processor's performance cores are not counted.
@@ -6174,6 +6202,8 @@ item 4); no lookahead, no added latency.
 5. Before building D on the Mac: whether to try the helpers in a work interval first (item 4).
 
 ### Not done
+- Nothing beyond 14 cores or 20 hardware threads: the formulas' values there (a 32-core
+  machine's budget, say) are unverified.
 - A 5-core machine, a 6-core machine without hybrid cores, Linux on the hybrid i5, Intel macs
   (one kind of core) and AMD's mixed-core processors were not measured.
 - Real hosts were not used (the bench stands in for them). Other plug-ins' threads were not
