@@ -16,7 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.3: a standalone application with audio and MIDI selection, a playable lower
+**Status:** 0.2.4: LETTERING › LARGE in the settings menu prints the panel's lettering and
+the menus a size larger, and WINDOW › SIZE… sets the window's size; the resize grip can be
+seen. Includes 0.2.3: a standalone application with audio and MIDI selection, a playable lower
 keyboard, and independent computer-keyboard octaves. Includes 0.2.2: PANEL shows or hides the
 lower controls; strong filter contours
 in HI and LO keep ultrasonic resonance out of the output. Both modes use more CPU and their
@@ -259,8 +261,10 @@ The editor works like the panel:
 - **Switches:** click.
 - **Wheels:** drag. The PITCH wheel settles into its centre detent when let go near it.
 - **Size:** the editor opens at 80 % of the screen's usable width. Drag the grip at the
-  bottom right corner to change it. The panel keeps its proportions, and a size you set
-  is saved with the session.
+  bottom right corner to change it, or choose a size from the settings key's **WINDOW ›
+  SIZE…**: 75 % to 200 % of the size it opens at on a 1920 by 1080 screen, or **FIT TO
+  SCREEN**. Sizes too large for the screen can't be chosen. The panel keeps its proportions,
+  and a size you set is saved with the session.
 
 Hovering over a control shows its name and value.
 
@@ -271,6 +275,11 @@ stands (cents under a semitone). The settings key (the gear at the strip's right
 wider than a semitone near the centre and narrower towards the stops, which reach 8 to 8.6
 semitones. The choice is the computer's, not the sound's: a session or preset keeps its pitch
 whichever is chosen; only where the knob points changes.
+
+**Lettering.** If the panel's print is hard to read at the size the editor opens, choose
+**LETTERING › LARGE** from the settings key. It prints the panel's and the strip's legends and
+numbers a size larger, and the menus and tips a quarter larger, in either look. **STANDARD**,
+the default, is the panel as printed. The choice is the computer's, kept like the look.
 
 Under the panel, a strip holds the presets' selector and the plug-in's own controls (not the
 instrument's): POLY (click), VOICES (click either side to step), and ENTROPY and SPREAD (drag
@@ -579,7 +588,10 @@ The service documents and datasheets the model was derived from are not included
   0.1 to 0.4 s; the same rate again is immediate.
 - Below 8 kHz the voice runs at 2, 4 or 8 times the host's rate.
 - The panel has no keyboard control (the presets' drawer and its MIDI list do), and a host
-  cannot resize the editor; use the grip.
+  cannot resize the editor; use the grip or **WINDOW › SIZE…**. On macOS the pointer does not
+  change over the grip (its tip says what it does).
+- LETTERING › LARGE leaves the presets' drawer, the keyboard view and the strip's buttons as
+  they are.
 - MIDI Learn takes absolute 7-bit control changes only: not relative encoders, 14-bit
   controller pairs, NRPN or RPN, or MIDI 2.0. A controller is learned on one channel (no
   "any channel"); there is no pick-up takeover, no profile of assignments to reuse across

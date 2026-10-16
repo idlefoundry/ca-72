@@ -5880,3 +5880,17 @@ option."
 `a_menu_too_tall_is_made_smaller`; with R-LETTERING's, `cargo test -p ca72-panel -p
 ca72-plugin --lib --tests`: 325 passed, none failed; clippy with `-D warnings`.
 `the_lettering_pngs` writes the SIZE menu and the grip's tip. Not tried: a host.
+
+## R-RELEASE-0.2.4. 0.2.4
+
+**Owner authorisation, 2026-10-15.** Release R-SIZE alongside R-LETTERING ("add the menu size
+group + grip then release that along side the new lettering option"), PR #40 reviewed and kept
+out (R-SIZE). The request authorises merging, signing, tagging, upload and publication.
+
+The sound engine, parameter identifiers, preset format and installers are unchanged from 0.2.3;
+the editor changes, and the computer's settings file gains one key, `lettering` (SIZE's width
+is the session's, as the grip's is). Release notes are in `releases/0.2.4.md`.
+Before publication the release commit must pass all three CI jobs; the macOS installer must be
+Developer ID signed, notarised, stapled and accepted by Gatekeeper; every uploaded asset
+downloaded again and checked against the manifest. The evidence is recorded when those checks
+complete.
