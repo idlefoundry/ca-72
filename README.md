@@ -16,7 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.4: LETTERING › LARGE in the settings menu prints the panel's lettering and
+**Status:** 0.2.5: a new instance starts at QUALITY LO, the light voices (projects keep their
+own; 0.1's open at HI), and on macOS the pointer shows resize arrows over the grip. Includes
+0.2.4: LETTERING › LARGE in the settings menu prints the panel's lettering and
 the menus a size larger, and WINDOW › SIZE… sets the window's size; the resize grip can be
 seen. Includes 0.2.3: a standalone application with audio and MIDI selection, a playable lower
 keyboard, and independent computer-keyboard octaves. Includes 0.2.2: PANEL shows or hides the

@@ -5967,3 +5967,16 @@ tested, and this follows it.
 - **Tests.** `a_new_instance_is_at_lo_and_an_old_session_at_hi`; the two editor tests that
   began from a new instance's HI (`quality_goes_where_its_toggle_is_clicked`,
   `quality_s_opening_follows_quality_and_ultra_s_note_is_read_once`) begin at HI explicitly.
+
+## R-RELEASE-0.2.5. 0.2.5
+
+**Owner authorisation, 2026-10-16.** "Once PR #46's CI is green, bump to 0.2.5 and release it
+the same way as 0.2.4": R-MAC-FIXES and R-LO-DEFAULT. The request authorises merging, signing,
+tagging, upload and publication.
+
+The sound engine, parameter identifiers, preset format and installers are unchanged from
+0.2.4; QUALITY's default and baseview's macOS pointer change, and the circuit lab's VCO bench
+(not part of the plug-in). Release notes are in `releases/0.2.5.md`. Before publication the
+release commit must pass all three CI jobs; the macOS installer must be Developer ID signed,
+notarised, stapled and accepted by Gatekeeper; every uploaded asset downloaded again and
+checked against the manifest.
