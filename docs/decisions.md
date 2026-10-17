@@ -6214,3 +6214,15 @@ concept's crops and the prompts on the lab's share (`ca-72/look/signal-basin`).
 finding (its drawing's counted cost about 39 million of 60), in its own typeface, both
 letterings; `a_packs_knob_caps_turn_with_them_when_it_says_so`; the panel's, the packs' and the
 plug-in's tests; the official looks' frames unchanged. Not yet: hosts, the slow machine.
+
+**SIGNAL BASIN's layout, made to follow the concept, 2026-10-16.** The owner asked why the
+layout did not follow the concept's: the agent had kept the official order of the oscillators'
+selectors, routed the signal its own way (a bottom "basin"), added a band of titles, and briefed
+the reviewer to judge the look only. At the owner's word the layout was rebuilt to the
+concept's arrangement and the reviewer's brief widened to the arrangement: the oscillators'
+rows in its order (RANGE, WAVEFORM, FREQUENCY, VOLUME, ON), their lines through grommets into a
+copper bus in a channel of its own, the bus into the FILTER (titled on a cartouche) and the two
+contours, a framed teal central bay, the plate over the right-hand bays. The concept's fourth row
+(the external input and noise) does not fit (the face holds three rows of dials, about 200
+units each, and a title): they have a column beside the oscillators, their lines run in the gaps
+between the rows to the bus. Reviewed: fail (round 6), pass (7), confirmed (8).

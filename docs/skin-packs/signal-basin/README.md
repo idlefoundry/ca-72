@@ -4,9 +4,10 @@
 (`LICENSE.txt`).*
 
 Weathered teal enamel with black panels let into it, edged in copper and screwed down with
-bronze screws; satin cream knobs, black lamp rockers and amber lamps, in a walnut case. Every sound source sits in a row of its own, and copper lines carry
-each one into a collector and down into the basin along the foot of the panel, then up into
-the filter, as the signal goes.
+bronze screws; satin cream knobs, black lamp rockers and amber lamps, in a walnut case. Its arrangement follows the concept's: the controllers' bay; a
+framed central bay holding the external input and noise, three oscillator rows whose copper
+lines leave through grommets into a bus, and the bus feeding the FILTER and the two contours;
+then OUTPUT's and POWER's bays.
 
 Install it by copying this folder into Idle Foundry's `Skins` folder (docs/skin-packs.md says
 where) and choosing SIGNAL BASIN under LOOK in the editor's settings menu.

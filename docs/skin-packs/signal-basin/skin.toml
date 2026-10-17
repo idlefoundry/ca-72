@@ -1,5 +1,5 @@
-# SIGNAL BASIN, a skin pack for the CA-72: teal enamel panels edged in copper, ivory knobs, the
-# signal's way drawn from each source into one basin. The format: docs/skin-packs.md.
+# SIGNAL BASIN, a skin pack for the CA-72: black panels in weathered teal, edged in copper, cream
+# knobs, the signal's way drawn from each source into one copper bus. The format: docs/skin-packs.md.
 # Dedicated to the public domain under CC0 1.0 (LICENSE.txt).
 
 format = 1
@@ -7,7 +7,7 @@ id = "org.idlefoundry.signal-basin"
 name = "SIGNAL BASIN"
 version = "0.1.0"
 plugin = "ca-72"
-summary = "Teal enamel and copper: every source in a row of its own, all flowing to one basin."
+summary = "Weathered teal and copper: every source in a row of its own, flowing into one copper bus."
 license = "CC0-1.0"
 license_files = ["LICENSE.txt"]
 
