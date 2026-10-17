@@ -569,6 +569,21 @@ fn channel(v: f64, r_src: f64, volume: f64, on: bool, r_series: f64) -> (f64, f6
     (v_w * g, g)
 }
 
+/// The outputs (sawtooth, triangle, rectangle) [`waveform_source`] takes from oscillator `n`
+/// (0, 1, 2) for a waveform, which alone are band-limited in full (decisions.md R-BLEP):
+/// oscillator 3's reverse sawtooth stage takes its sawtooth; the shark tooth of oscillators
+/// 1 and 2 mixes the sawtooth and the triangle.
+fn outputs_of(w: Waveform, n: usize) -> [bool; 3] {
+    match w {
+        Waveform::Triangle => [false, true, false],
+        Waveform::Sawtooth => [true, false, false],
+        Waveform::SharkTooth | Waveform::ReverseSawtooth => [true, n != 2, false],
+        Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle => {
+            [false, false, true]
+        }
+    }
+}
+
 /// An oscillator's selected output as a Thevenin source (board 1's output dividers:
 /// sawtooth R34/R33, triangle R28/R23 behind Q1, rectangle R22 against R13 as Q12
 /// switches), the shark tooth through R030 and R031. For oscillator 3, `rev` is its reverse
@@ -792,6 +807,12 @@ pub struct ControlPart {
     count: usize,
     env_from: (f64, f64),
     env_to: (f64, f64),
+    /// The contours' outputs of the last samples, the newest at `env_at`: they reach the
+    /// filter and the VCA [`contour_delay`] late, as late as the oscillators' band-limiting
+    /// holds their sound back beyond the one sample it used to, so that attacks keep their
+    /// shape (decisions.md R-BLEP).
+    env_past: [(f64, f64); ENV_PAST],
+    env_at: usize,
     noise: Noise,
     /// The ATTACK and DECAY pots' laws (filter, loudness).
     pots: [Memo<f64>; 4],
@@ -1050,6 +1071,8 @@ impl Voice {
             count: 0,
             env_from: (0.0, 0.0),
             env_to: (0.0, 0.0),
+            env_past: [(0.0, 0.0); ENV_PAST],
+            env_at: 0,
             noise,
             pots: [Memo::NEW; 4],
             last_noise: NoiseOut::default(),
@@ -1066,6 +1089,7 @@ impl Voice {
         let o = ctl.contours.tick(false, &cp);
         ctl.env_from = (o.filter, o.loudness);
         ctl.env_to = ctl.env_from;
+        ctl.env_past = [ctl.env_from; ENV_PAST];
         Voice {
             panel,
             keys: Keys {
@@ -1591,6 +1615,17 @@ fn oversampling(q: Quality) -> (usize, usize) {
     }
 }
 
+/// How late the contours reach the filter and the VCA, samples: what the oscillators'
+/// band-limiting delays their sound beyond the one sample of the two-point polyBLEP it
+/// replaced ([`crate::resample::BLEP_DELAY`] at the oscillators' rate less one; decisions.md
+/// R-BLEP), so that an attack keeps the shape it had: 15 in Potato, 3.75 in the others.
+fn contour_delay(q: Quality) -> f64 {
+    (crate::resample::BLEP_DELAY as f64 - 1.0) / oversampling(q).0 as f64
+}
+
+/// The contours' past outputs kept, samples (more than [`contour_delay`] in any mode).
+const ENV_PAST: usize = 32;
+
 /// The contours' sub-rate (samples a tick) in each quality mode: in Potato a quarter of the
 /// others'.
 fn contour_every(q: Quality) -> usize {
@@ -1625,6 +1660,15 @@ impl ControlPart {
         let a = ((self.count - 1) % self.contour_every + 1) as f64 / self.contour_every as f64;
         let env_f = self.env_from.0 + (self.env_to.0 - self.env_from.0) * a;
         let env_l = self.env_from.1 + (self.env_to.1 - self.env_from.1) * a;
+        // As late as the oscillators' band-limiting (interpolated between samples).
+        self.env_at = (self.env_at + 1) % ENV_PAST;
+        self.env_past[self.env_at] = (env_f, env_l);
+        let late = contour_delay(p.quality);
+        let (whole, part) = (late as usize, late.fract());
+        let at = |k: usize| self.env_past[(self.env_at + ENV_PAST - k) % ENV_PAST];
+        let (e0, e1) = (at(whole), at(whole + 1));
+        let env_f = e0.0 + (e1.0 - e0.0) * part;
+        let env_l = e0.1 + (e1.1 - e0.1) * part;
         // Board 3: the noise. Not computed while nothing hears it: its mixer channel off and
         // the modulation mix taking none of it (its gain exactly 0) or neither modulation
         // switch on; it resumes where it stopped (decisions.md R11). The front then takes
@@ -1832,6 +1876,7 @@ impl FrontPart {
             let i_in = d.apply(&mut self.vcos[n].expo);
             self.vcos[n].set_oversample(oversampling(p.quality).0);
             self.vcos[n].table_on = p.quality == Quality::Potato;
+            self.vcos[n].set_outputs(outputs_of(op.waveform, n));
             let o = self.vcos[n].tick(i_in, op.waveform.width());
             self.last_i[n] = self.vcos[n].timing_current();
             // Oscillator 3's reverse sawtooth stage runs while its sawtooth or reverse
