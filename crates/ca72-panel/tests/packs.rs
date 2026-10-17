@@ -781,3 +781,54 @@ fn a_packs_switches_show_their_state_and_its_wheels_their_colour() {
     assert_eq!(wheel.colours.wheel, Some((0x80, 0x60, 0x40)));
     assert!(draw(wheel, 0.0) != draw(one, 0.0));
 }
+
+/// The keyboard view in a look: given an official one it is drawn exactly as before; a pack's
+/// keys and its drawing over the case change it.
+#[test]
+fn a_packs_keyboard_is_its_own() {
+    use ca72_panel::strip::{StripRenderer, StripScene};
+    let s = 0.2;
+    let scene = StripScene {
+        keyboard: Some(ca72_panel::keyboard::Scene {
+            skin: Skin::Worn,
+            ..Default::default()
+        }),
+        ..StripScene::default()
+    };
+    let draw = |look: &Look, set: bool| {
+        let mut r = Renderer::with_pack(look.clone(), Lettering::Standard, s, 1.0);
+        r.render(&Scene::default());
+        let mut strip = StripRenderer::new(s);
+        if set {
+            strip.set_look(look);
+        }
+        strip.render(&scene, r.frame(), None);
+        strip.frame().data().to_vec()
+    };
+    let realistic = Look::realistic();
+    assert!(draw(&realistic, false) == draw(&realistic, true));
+    let dir = edited(|d| {
+        let ivory = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 80'><rect width='10' height='80' fill='#ec8'/></svg>";
+        let case = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3108 850'><rect x='370' y='116' width='2710' height='728' fill='#123'/></svg>";
+        std::fs::write(d.join("art/white.svg"), ivory).expect("written");
+        std::fs::write(d.join("art/case.svg"), case).expect("written");
+        replace(
+            &d.join("skin.toml"),
+            "base = \"classic\"",
+            "base = \"realistic\"",
+        );
+        let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+        let assets = ["art/white.svg", "art/case.svg"]
+            .map(|p| format!("[[assets]]\npath = \"{p}\"\norigin = \"original\"\n\n"))
+            .concat();
+        std::fs::write(
+            d.join("skin.toml"),
+            text.replace("[look]", &format!("{assets}[look]"))
+                + "keyboard_art = \"art/case.svg\"\n\n[look.pictures]\nwhite-key = \"art/white.svg\"\n",
+        )
+        .expect("written");
+    });
+    let pack = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
+    assert!(pack.keyboard_art.is_some());
+    assert!(draw(&pack, true) != draw(&realistic, true));
+}

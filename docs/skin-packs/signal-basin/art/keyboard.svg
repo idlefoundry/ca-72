@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3108 850" width="3108" height="850">
+<title>SIGNAL BASIN's keyboard: its keys in a copper-rimmed bed, in a teal case edged in copper</title>
+<defs>
+<linearGradient id="rim" x1="0" y1="0" x2="0.25" y2="1"><stop offset="0" stop-color="#c08a60"/><stop offset="0.5" stop-color="#8a5a3a"/><stop offset="1" stop-color="#4e3020"/></linearGradient>
+<radialGradient id="head" cx="0.34" cy="0.3" r="0.8"><stop offset="0" stop-color="#9a7452"/><stop offset="0.25" stop-color="#5a3e2a"/><stop offset="1" stop-color="#2a1c12"/></radialGradient>
+<radialGradient id="drop"><stop offset="0.55" stop-color="#000" stop-opacity="0.5"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+<linearGradient id="slip" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a3e2c"/><stop offset="1" stop-color="#2a1c12"/></linearGradient>
+<radialGradient id="grime"><stop offset="0" stop-color="#050302" stop-opacity="0.34"/><stop offset="1" stop-color="#050302" stop-opacity="0"/></radialGradient>
+<radialGradient id="scuff"><stop offset="0" stop-color="#9fc6c4" stop-opacity="0.07"/><stop offset="1" stop-color="#9fc6c4" stop-opacity="0"/></radialGradient>
+<g id="sc"><circle r="16" cx="0.9" cy="2.2" fill="url(#drop)"/><circle r="12.5" fill="url(#head)" stroke="#140d08" stroke-width="1"/><path d="M-7.4,-1.5H-1.5V-7.4H1.5V-1.5H7.4V1.5H1.5V7.4H-1.5V1.5H-7.4Z" fill="#140d08"/><path d="M-7.4,1.5H-1.5V7.4M1.5,1.5H7.4" fill="none" stroke="#9a7452" stroke-opacity="0.5" stroke-width="0.8"/></g>
+</defs>
+<path fill-rule="evenodd" fill="#020809" fill-opacity="0.45" d="M370,116H3080V844H370ZM388,118H3064A10,10 0 0 1 3074,128V830A10,10 0 0 1 3064,840H388A10,10 0 0 1 378,830V128A10,10 0 0 1 388,118Z"/>
+<path d="M388,118H3064A10,10 0 0 1 3074,128V830A10,10 0 0 1 3064,840H388A10,10 0 0 1 378,830V128A10,10 0 0 1 388,118Z" fill="#04161a" fill-opacity="0.18"/>
+<ellipse cx="2908.1" cy="828.7" rx="27.6" ry="12.0" fill="url(#scuff)"/>
+<ellipse cx="2859.9" cy="131.7" rx="65.6" ry="12.9" fill="url(#scuff)"/>
+<ellipse cx="1918.5" cy="817.7" rx="65.7" ry="13.6" fill="url(#scuff)"/>
+<ellipse cx="1927.9" cy="133.9" rx="54.1" ry="11.1" fill="url(#scuff)"/>
+<ellipse cx="766.0" cy="125.2" rx="28.1" ry="7.8" fill="url(#scuff)"/>
+<ellipse cx="2259.0" cy="127.7" rx="55.6" ry="8.2" fill="url(#scuff)"/>
+<ellipse cx="885.7" cy="815.1" rx="37.6" ry="14.9" fill="url(#scuff)"/>
+<ellipse cx="923.3" cy="811.3" rx="30.8" ry="7.8" fill="url(#scuff)"/>
+<ellipse cx="1269.4" cy="824.8" rx="47.5" ry="15.4" fill="url(#scuff)"/>
+<ellipse cx="2643.8" cy="807.4" rx="34.0" ry="14.3" fill="url(#scuff)"/>
+<ellipse cx="929.7" cy="821.5" rx="61.8" ry="9.0" fill="url(#scuff)"/>
+<ellipse cx="2345.7" cy="150.7" rx="47.5" ry="13.8" fill="url(#scuff)"/>
+<ellipse cx="624.3" cy="801.7" rx="46.9" ry="8.6" fill="url(#scuff)"/>
+<ellipse cx="2138.8" cy="156.3" rx="30.6" ry="11.0" fill="url(#scuff)"/>
+<path d="M389,121H3063A8,8 0 0 1 3071,129V829A8,8 0 0 1 3063,837H389A8,8 0 0 1 381,829V129A8,8 0 0 1 389,121Z" fill="none" stroke="#000" stroke-opacity="0.45" stroke-width="2.5"/>
+<path d="M388,118H3064A10,10 0 0 1 3074,128V830A10,10 0 0 1 3064,840H388A10,10 0 0 1 378,830V128A10,10 0 0 1 388,118Z" fill="none" stroke="url(#rim)" stroke-width="2.8"/>
+<path d="M388.2,119.4H3063.7999999999997A8.8,8.8 0 0 1 3072.6,128.20000000000002V829.8000000000001A8.8,8.8 0 0 1 3063.7999999999997,838.6H388.2A8.8,8.8 0 0 1 379.4,829.8000000000001V128.20000000000002A8.8,8.8 0 0 1 388.2,119.4Z" fill="none" stroke="#d6a07a" stroke-opacity="0.35" stroke-width="0.8" stroke-dasharray="42,35,17,20,56,38,29,18,39,22,63,32,64,7,33,37,59,19,33,34,31,12,73,9"/>
+<circle cx="400" cy="148" r="26" fill="url(#grime)"/>
+<use href="#sc" transform="translate(400 148) rotate(77)"/>
+<circle cx="3052" cy="148" r="26" fill="url(#grime)"/>
+<use href="#sc" transform="translate(3052 148) rotate(46)"/>
+<path d="M405,176H3047A12,12 0 0 1 3059,188V814A12,12 0 0 1 3047,826H405A12,12 0 0 1 393,814V188A12,12 0 0 1 405,176Z" fill="#000" fill-opacity="0.35"/>
+<path d="M406,178H3046A11,11 0 0 1 3057,189V813A11,11 0 0 1 3046,824H406A11,11 0 0 1 395,813V189A11,11 0 0 1 406,178Z" fill="none" stroke="url(#rim)" stroke-width="3"/>
+<path d="M1068,119H1418A8,8 0 0 1 1426,127V171A8,8 0 0 1 1418,179H1068A8,8 0 0 1 1060,171V127A8,8 0 0 1 1068,119Z" fill="#0a0e10" fill-opacity="0.85"/>
+<path d="M1068,120H1418A7,7 0 0 1 1425,127V171A7,7 0 0 1 1418,178H1068A7,7 0 0 1 1061,171V127A7,7 0 0 1 1068,120Z" fill="none" stroke="url(#rim)" stroke-width="3.2"/>
+<path d="M1063,176V122H1423" fill="none" stroke="#b88258" stroke-opacity="0.55" stroke-width="1"/>
+<rect x="396" y="827" width="2660" height="10" rx="3" fill="url(#slip)"/>
+<rect x="396" y="829.3" width="2660" height="0.5" fill="#1a0f08" fill-opacity="0.36"/>
+<rect x="396" y="834.6" width="2660" height="0.9" fill="#1a0f08" fill-opacity="0.37"/>
+<rect x="396" y="831.6" width="2660" height="0.6" fill="#1a0f08" fill-opacity="0.48"/>
+<rect x="396" y="831.6" width="2660" height="0.6" fill="#1a0f08" fill-opacity="0.40"/>
+<rect x="396" y="828.5" width="2660" height="0.7" fill="#1a0f08" fill-opacity="0.33"/>
+<rect x="396" y="827" width="2660" height="1.4" fill="#b88258" fill-opacity="0.7"/>
+<use href="#sc" transform="translate(408 832.0) scale(0.42) rotate(74)"/>
+<use href="#sc" transform="translate(3044 832.0) scale(0.42) rotate(39)"/>
+</svg>

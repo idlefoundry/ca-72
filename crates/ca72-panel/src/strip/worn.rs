@@ -278,12 +278,7 @@ impl StripRenderer {
     /// glass, the lamps' colour, the tabs' and keys' print.
     pub fn set_look(&mut self, look: &crate::look::Look) {
         let png = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
-        let size = |name: &str| {
-            crate::skin::STRIP_SLOTS
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map_or((1, 1), |(_, b)| crate::skin::png_size(b))
-        };
+        let size = |name: &str| crate::skin::slot_size(name).unwrap_or((1, 1));
         let pack = |name: &str| look.pictures.get(name).and_then(|p| p.picture(size(name)));
         let button = png(BUTTON);
         self.lighting = match (pack("tab"), pack("tab-lit")) {
@@ -323,6 +318,7 @@ impl StripRenderer {
         self.glows.clear();
         self.readouts.clear();
         self.shown = None;
+        self.keyboard.set_look(look, self.lamp);
     }
 
     /// Drawn over a panel renderer's frame beginning at the drawing's row `top` (its

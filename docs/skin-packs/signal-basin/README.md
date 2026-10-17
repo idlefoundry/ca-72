@@ -75,6 +75,14 @@ lens, generated off from a crop of the concept and on as an edit of it, cropped 
 plug-in shows each state's picture rather than mirroring one. The PITCH and MOD wheels are
 shaded by the plug-in in the manifest's `wheel` colour.
 
+## The keyboard view (2026-10-17)
+
+The keyboard view follows a third concept picture. Its case is laid in the pack's face
+(`keyboard_case = "face"`) and drawn over by `art/keyboard.svg` (`keyboard.py`): the case edged in
+copper and screwed down, a copper rim round the key bed, a copper bezel round the range display,
+a walnut key slip under the keys. Its keys were generated from a crop of that concept, cut out
+and sized, the black one darkened to a deeper gloss.
+
 ## The prompts
 
 ### `knob` (with a crop of the concept picture)
@@ -267,3 +275,26 @@ shaded by the plug-in in the manifest's `wheel` colour.
 > Use your image generation tool to edit the first attached picture (switch.png: an illuminated rocker switch, OFF, its right half an unlit amber lens), then save the result in the current directory as switch-on.png (copy the generated file there). Do nothing else.
 >
 > Keep everything exactly the same (the bezel, the two halves, their size and place in the frame, the transparent background) except the right half's amber lens: now LIT from behind, as in the second attached picture: a warm glowing amber (#ffa040) brightest in its middle (a soft hot core, #ffd080), its edges a deeper orange, a little glow spilling onto the bezel round it. The left half unchanged. No text, symbols, logos or numbers anywhere.
+
+### `white-key` (with a crop of the keyboard concept's keys)
+
+> Use your image generation tool to make one image, then save it in the current directory as white-key.png (copy the generated file there). Do nothing else.
+>
+> The attached picture is cropped from a concept picture of a synthesizer's keyboard. Make ONE of its white keys alone, as a standalone product picture, seen from directly above (straight down onto the keyboard), its back end at the top of the picture and its front end at the bottom:
+> - A tall, narrow, plain rectangular key about 8 times as long as it is wide, of the same warm cream ivory as the attached keys (close to #e8dcc2), satin, with a very soft gradient along its length (a touch darker towards the back), its front end's corners slightly rounded and a narrow lip along the front edge catching a little light.
+> - Full width all along its length: NO notches, no cut-outs (the plug-in cuts the black keys' notches itself).
+> - No black keys, no neighbouring keys, no keyboard frame, no lettering.
+> - Straight top-down orthographic, the key filling about 90 percent of a tall portrait frame's height, centred; sharp focus.
+> - Lighting: soft and even from above, no cast shadow.
+> - Background: fully transparent (a PNG with an alpha channel). If that is not possible, a perfectly flat plain mid-grey (#808080).
+
+### `black-key` (with a crop of the keyboard concept's keys)
+
+> Use your image generation tool to make one image, then save it in the current directory as black-key.png (copy the generated file there). Do nothing else.
+>
+> The attached picture is cropped from a concept picture of a synthesizer's keyboard. Make ONE of its black keys alone, as a standalone product picture, seen from directly above (straight down onto the keyboard), its back end at the top of the picture and its front end at the bottom:
+> - A narrow key about 6.8 times as long as it is wide, glossy black, exactly as the attached black keys: its flat top face with a soft sheen and a slightly lighter edge along its long sides, and at its front end a bevelled slope down to its front face catching a little light.
+> - No white keys, no neighbouring keys, no frame, no lettering.
+> - Straight top-down orthographic, the key filling about 90 percent of a tall portrait frame's height, centred; sharp focus.
+> - Lighting: soft and even from above, no cast shadow.
+> - Background: fully transparent (a PNG with an alpha channel). If that is not possible, a perfectly flat plain mid-grey (#808080).

@@ -179,6 +179,9 @@ jobs = {
     "tab-lit": lambda: boxed("tab-lit", (256, 255)),
     "key": lambda: boxed("key", (256, 255)),
     "glass": lambda: texture("glass", (900, 507)),
+    # The keyboard view's keys.
+    "white-key": lambda: boxed("white-key", (171, 1385)),
+    "black-key": lambda: boxed("black-key", (181, 1232)),
 }
 for name, job in jobs.items():
     if (only and name not in only) or not os.path.exists(os.path.join(src, name + ".png")):

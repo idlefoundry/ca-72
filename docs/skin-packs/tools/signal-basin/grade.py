@@ -116,8 +116,14 @@ def screw():
     a = hsv_scale(a, 0.75, 0.62)
     save("screw", a)
 
+def black_key():
+    # A deeper gloss black (the reviewer: "a little grey").
+    a = load("black-key")
+    a[..., :3] = a[..., :3] * 0.62
+    save("black-key", a)
+
 jobs = {"walnut": walnut, "knob": lambda: knob("knob"), "knob-big": lambda: knob("knob-big"),
-        "pointer": lambda: knob("pointer"), "face": face, "plate": plate, "screw": screw}
+        "pointer": lambda: knob("pointer"), "face": face, "plate": plate, "screw": screw, "black-key": black_key}
 for n, j in jobs.items():
     if not only or n in only:
         j(); print("graded", n)

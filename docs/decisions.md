@@ -6310,3 +6310,17 @@ picture's hump with the plug-in's paddle light over it).
 the official looks untouched (their rockers have no picture on); every test, clippy, fmt.
 SIGNAL BASIN's switches, remade from a crop of the concept's, and wheels passed by the reviewing
 agent (rounds 3 and 4).
+
+**The keyboard view in a pack's look, 2026-10-17** (the owner's step 2, "start step 2: the
+keyboard view"). **Agent decisions** (not separately approved):
+- The keyboard renderer takes the look (`keyboard::Renderer::set_look`, from the strip's): its
+  walnut, the rail key's cap for its header keys, its glass, lamp colour and typeface.
+- Picture slots `white-key` and `black-key` (one key each, from above; the plug-in cuts the
+  notches); `skin::slot_size` gives each strip slot its size.
+- `[look] keyboard_art` (a drawing over the case, under the key bed, keys and print, in the
+  strip's units; the realistic look only) and `keyboard_case` ("wood", the default, or "face":
+  the case in the face's picture, laid as the strip's face is).
+
+**Evidence (the Mac, 2026-10-17):** `a_packs_keyboard_is_its_own` (an official look draws the
+keyboard as before; a pack's keys and drawing change it); every test, clippy, fmt. SIGNAL BASIN's
+keyboard view passed by the reviewing agent, its last notes taken. Not yet: the presets' drawer.

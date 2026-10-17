@@ -70,6 +70,11 @@ pub struct Look {
     /// Its drawing over the plug-in's strip's surfaces (the rail and the sections under the
     /// panel), under their print and parts.
     pub strip_art: Option<Arc<usvg::Tree>>,
+    /// Its drawing over the keyboard view's case, under its key bed, keys and print (in the
+    /// strip's units).
+    pub keyboard_art: Option<Arc<usvg::Tree>>,
+    /// The keyboard view's case in the face's picture rather than the wood's.
+    pub keyboard_face: bool,
     /// Its colours for what the strip lights and prints (none: the built-in ones).
     pub colours: Colours,
     /// Its typeface (regular, bold), if it brings one that prints and fits every legend.
@@ -107,6 +112,8 @@ impl Look {
             caps_turn: false,
             art: None,
             strip_art: None,
+            keyboard_art: None,
+            keyboard_face: false,
             colours: Colours::default(),
             fonts: None,
             licence: OFFICIAL_LICENCE.into(),
@@ -292,7 +299,7 @@ impl Look {
             // Kept as the pack holds it (decoded by a renderer as it first needs it); its size
             // read now, to note proportions not the built-in picture's (it is drawn stretched
             // to them).
-            let size = skin::png_size(official);
+            let size = skin::slot_size(name).unwrap_or_else(|| skin::png_size(official));
             let (source, own) = if path.ends_with(".svg") {
                 // Its cost counted at the size it is drawn: the built-in picture's.
                 match skin_pack::svg::parse_at(&bytes, limits, Some(size.0.max(size.1))) {
@@ -362,6 +369,43 @@ impl Look {
             Some(path) => {
                 report.reject("look.strip-art", Some(path), "the strip's drawing is SVG");
                 None
+            }
+        };
+
+        // The drawing over the keyboard view's case.
+        let keyboard_art = match &spec.keyboard_art {
+            None => None,
+            Some(path) if path.ends_with(".svg") => {
+                let bytes = file(path, &[FileKind::Svg], &mut report);
+                match bytes.map(|b| skin_pack::svg::parse_at(&b, limits, Some(ART_SIDE))) {
+                    Some(Ok((tree, _))) => Some(Arc::new(tree)),
+                    Some(Err(why)) => {
+                        report.reject("look.keyboard-art", Some(path), why);
+                        None
+                    }
+                    None => None,
+                }
+            }
+            Some(path) => {
+                report.reject(
+                    "look.keyboard-art",
+                    Some(path),
+                    "the keyboard's drawing is SVG",
+                );
+                None
+            }
+        };
+
+        let keyboard_face = match spec.keyboard_case.as_deref() {
+            None | Some("wood") => false,
+            Some("face") => true,
+            Some(_) => {
+                report.reject(
+                    "look.keyboard-case",
+                    at,
+                    "keyboard_case: \"wood\" or \"face\"",
+                );
+                false
             }
         };
 
@@ -484,6 +528,8 @@ impl Look {
             caps_turn,
             art,
             strip_art,
+            keyboard_art,
+            keyboard_face,
             colours,
             fonts,
             licence: m.license.clone(),
@@ -522,6 +568,10 @@ struct LookTable {
     knob_caps: Option<String>,
     #[serde(default)]
     strip_art: Option<String>,
+    #[serde(default)]
+    keyboard_art: Option<String>,
+    #[serde(default)]
+    keyboard_case: Option<String>,
     #[serde(default)]
     colours: Option<ColoursTable>,
     #[serde(flatten)]

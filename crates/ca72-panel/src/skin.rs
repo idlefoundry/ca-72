@@ -90,7 +90,7 @@ pub const SLOTS: [(&str, &[u8]); 27] = [
 /// the rail's keys' cap; the readouts' and displays' glass; and the ivory rocker (the left
 /// hand's switches, the layout's ivory ones), else made from the blue; and each rocker on, if a
 /// pack draws its rockers' two states (a lamp lit) rather than one picture mirrored.
-pub const STRIP_SLOTS: [(&str, &[u8]); 8] = [
+pub const STRIP_SLOTS: [(&str, &[u8]); 10] = [
     ("tab", BUTTON),
     ("tab-lit", BUTTON),
     ("key", BUTTON),
@@ -99,7 +99,23 @@ pub const STRIP_SLOTS: [(&str, &[u8]); 8] = [
     ("rocker-blue-on", ROCKER_BLUE),
     ("rocker-orange-on", ROCKER_ORANGE),
     ("rocker-ivory-on", ROCKER_BLUE),
+    ("white-key", crate::keyboard::WHITE_KEY),
+    ("black-key", crate::keyboard::BLACK_KEY),
 ];
+
+/// A strip slot's picture's size, where it is not its built-in file's: the keys' (their
+/// pictures are cut from larger ones).
+pub fn slot_size(name: &str) -> Option<(u32, u32)> {
+    match name {
+        "white-key" => Some((171, 1385)),
+        "black-key" => Some((181, 1232)),
+        _ => STRIP_SLOTS
+            .iter()
+            .chain(SLOTS.iter())
+            .find(|(n, _)| *n == name)
+            .map(|(_, b)| png_size(b)),
+    }
+}
 
 /// The slot of a rocker's picture on, by the part of its picture off.
 pub fn on_slot(part: Part) -> Option<&'static str> {
@@ -299,7 +315,7 @@ pub(crate) fn face_picture() -> Pixmap {
 }
 
 /// A picture with each channel scaled by `tint`.
-fn tinted(p: &Pixmap, tint: [f32; 3]) -> Pixmap {
+pub(crate) fn tinted(p: &Pixmap, tint: [f32; 3]) -> Pixmap {
     recoloured(p, |c| {
         [
             f32::from(c[0]) * tint[0],

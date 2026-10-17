@@ -31,6 +31,11 @@ origin = "original"
 author = "Idle Foundry Ltd."
 
 [[assets]]
+path = "art/keyboard.svg"
+origin = "original"
+author = "Idle Foundry Ltd."
+
+[[assets]]
 path = "pictures/walnut.png"
 origin = "generated"
 author = "Idle Foundry Ltd."
@@ -164,6 +169,20 @@ tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and siz
 note = "The switch on again (rocker-blue-on.png): the left hand's switches as the panel's."
 
 [[assets]]
+path = "pictures/white-key.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/black-key.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
 path = "fonts/BarlowCondensed-SemiBold.ttf"
 origin = "third-party"
 author = "The Barlow Project Authors"
@@ -193,6 +212,9 @@ fonts = { regular = "fonts/BarlowCondensed-Medium.ttf", bold = "fonts/BarlowCond
 knob_caps = "turn"
 # The strip under the panel: its bays and the signal's way into OUTPUT.
 strip_art = "art/strip.svg"
+# The keyboard view: its case teal as the bays, edged in copper.
+keyboard_art = "art/keyboard.svg"
+keyboard_case = "face"
 
 # The strip's lamps a warm amber; the tabs' and keys' print cream, on black Bakelite.
 [look.colours]
@@ -222,3 +244,5 @@ glass = "pictures/glass.png"
 rocker-ivory = "pictures/rocker-ivory.png"
 rocker-blue-on = "pictures/rocker-blue-on.png"
 rocker-ivory-on = "pictures/rocker-ivory-on.png"
+white-key = "pictures/white-key.png"
+black-key = "pictures/black-key.png"

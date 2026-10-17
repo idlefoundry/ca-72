@@ -254,6 +254,8 @@ fonts = { regular = "fonts/Face-Regular.otf", bold = "fonts/Face-Bold.otf" }  # 
 face_tint = [1.03, 1.0, 0.94] # optional: the face picture's channels scaled (0 to 2)
 knob_caps = "turn"           # optional: "still" (the default) or "turn" (see Pictures)
 strip_art = "art/strip.svg"  # optional: drawn over the plug-in's strip (see The strip)
+keyboard_art = "art/keyboard.svg" # optional: drawn over the keyboard view's case (see The strip)
+keyboard_case = "face"       # optional: the keyboard view's case in "wood" (the default) or "face"
 
 [look.colours]               # optional: the strip's (see The strip), each "#rrggbb"
 lamp = "#ffa040"             # its readouts' lit segments, its displays' dots, the voices' drops
@@ -341,7 +343,18 @@ keeps its controls where they are, but a pack may dress it: its wood and face ar
 - **Colours** in `[look.colours]`: the lamps' (`lamp`), from which the plug-in makes their glow
   and the drops' light as it does its own orange's, and the tabs' and keys' print.
 
-The keyboard and the presets' drawer are not yet a pack's to dress.
+**The keyboard view** (the keyboard shown in place of VOICES, STEREO and OUTPUT) is dressed too:
+its header keys are the pack's `key`, its range display the pack's `glass` and `lamp`, its
+lettering the pack's typeface, its case the pack's `walnut` (or, with `keyboard_case = "face"`,
+its `face`, laid as the strip's face), and:
+
+- `keyboard_art`: a drawing over its case, in the strip's units (3108 by 850 from the rail's
+  top; the case from x 370 to 3080, y 116 to 844; the key bed 402 to 3050, 185 to 817; the
+  range display 1069 to 1417, 124 to 174), drawn under its key bed, keys and print.
+- Pictures `white-key` and `black-key`: one key each, seen from above, its back at the top
+  (171 × 1385 and 181 × 1232). The white key whole: the plug-in cuts the black keys' notches.
+
+The presets' drawer is not yet a pack's to dress.
 
 ### Drawings: SVG's allowed subset
 
