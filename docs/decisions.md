@@ -6729,3 +6729,45 @@ Released 0.2.4 claims today's 4 a process (first come within it): 40 on any of t
 6. **Compare** with the hosting mode at **Together** (one process), then with released 0.2.4
    back in `~/.clap` in both modes.
 7. **Report:** the thread counts, the canary's worst, the dropouts and any `ca72:` lines.
+
+### ULTRA's note, as this computer plays it (2026-10-16)
+
+**The owner, 2026-10-16** (relayed): "approved", the new text for ULTRA's first-time note (R48),
+with their wording for the line about dropouts: first "with many voices or too small of a
+buffer, it may drop out", then "multiple" in place of "many".
+
+**Why:** ULTRA was measured at 3.7 to 6.4 times HI's cost over the 19 factory presets (8.5 with
+FEEDBACK). That was the coordinating session's measurement on the Linux machine today,
+`preset_cost` at HI and with `CA72_ULTRA`; it was not repeated here. So the note's "SEVEN
+TIMES" was out of date, and the note did not say that a voice may now be split.
+
+**Built** (`editor.rs`, `ultra_note_lines`): the note follows what the engine decides for this
+computer, `engine::split_voices() > 0`. Each version's accent line, `ULTRA · NO COMPROMISES`, and
+its last two dim lines (`RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.`, `CLICK
+TO CLOSE`) are as before.
+- **Where it splits a voice:**
+  - THE CIRCUIT'S MODEL EXACTLY, AT ABOUT FIVE TIMES THE WORK OF HI.
+  - ON THIS COMPUTER ONE VOICE IS SPREAD OVER SIX THREADS AND
+  - CAN BE PLAYED LIVE. WITH MULTIPLE VOICES OR TOO SMALL OF A BUFFER,
+  - IT MAY DROP OUT.
+  - IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL
+  - PROJECTS ON POWERFUL COMPUTERS.
+- **Where it does not:**
+  - THE CIRCUIT'S MODEL EXACTLY, AT ABOUT FIVE TIMES THE WORK OF HI.
+  - ONE VOICE TAKES UP TO A WHOLE CORE OF A FAST COMPUTER.
+  - IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL
+  - PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.
+- **Rewrapped, as the owner allowed:** "ON THIS COMPUTER ONE VOICE IS SPREAD OVER SIX THREADS
+  AND CAN BE" was 776 units wide at the note's size, wider than the old note's widest line (763,
+  "IT IS MEANT FOR OFFLINE RENDERS…"). So "CAN BE" moved to the next line (760), and "IT MAY
+  DROP OUT." to the last.
+
+**Checks:**
+- `ultra_s_note_says_what_this_computer_plays`:
+  - the note shown is the one for this computer's split voices;
+  - both versions say what they should, with the accent and dim lines as before;
+  - no line is wider than the old note's widest;
+  - the box is within the panel and left of the lamp's opening, at the window's opening size.
+- The window at its opening size, with each version drawn (`the_ultra_pngs`, `note-split.png`
+  and `note-whole.png`), was looked at: each note sits as the old one did, its box the same
+  width, right of the FILTER section and left of the lamp.

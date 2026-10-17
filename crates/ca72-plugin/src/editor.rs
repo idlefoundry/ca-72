@@ -1222,33 +1222,20 @@ impl Editing {
     }
 
     /// ULTRA's note: what it is for (the owner: "only intended for offline renders, or small
-    /// projects on powerful PCs"), left of its lamp; a press anywhere closes it, read.
+    /// projects on powerful PCs") and what it costs, as this computer plays it (whether it
+    /// splits an ULTRA voice over six threads: `engine::split_voices`, decisions.md R-THREADS),
+    /// left of its lamp; a press anywhere closes it, read.
     fn ultra_note(&self) -> Note {
+        self.ultra_note_for(crate::engine::split_voices() > 0)
+    }
+
+    /// [`Editing::ultra_note`] for a computer that splits an ULTRA voice (`splits`) or not.
+    fn ultra_note_for(&self, splits: bool) -> Note {
         let size = self.renderer.text_size();
-        let lines = vec![
-            ("ULTRA · NO COMPROMISES".to_owned(), Tone::Accent),
-            (
-                "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SEVEN TIMES THE WORK OF HI:".to_owned(),
-                Tone::Plain,
-            ),
-            (
-                "ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER.".to_owned(),
-                Tone::Plain,
-            ),
-            (
-                "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL".to_owned(),
-                Tone::Plain,
-            ),
-            (
-                "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.".to_owned(),
-                Tone::Plain,
-            ),
-            (
-                "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.".to_owned(),
-                Tone::Dim,
-            ),
-            ("CLICK TO CLOSE".to_owned(), Tone::Dim),
-        ];
+        let lines = ultra_note_lines(splits)
+            .iter()
+            .map(|&(t, tone)| (t.to_owned(), tone))
+            .collect();
         let mut note = Note {
             x: 0.0,
             y: 0.0,
@@ -3734,6 +3721,62 @@ pub(crate) mod window {
             }
         }
     }
+}
+
+/// ULTRA's note's lines (decisions.md R48; the owner approved this text on 2026-10-16,
+/// R-THREADS): ULTRA's cost against HI (3.7 to 6.4 times over the factory presets, more with
+/// FEEDBACK), and on a computer that splits an ULTRA voice over six threads (`splits`) that one
+/// voice plays live there; else what one voice takes.
+fn ultra_note_lines(splits: bool) -> Vec<(&'static str, Tone)> {
+    let mut lines = vec![
+        ("ULTRA · NO COMPROMISES", Tone::Accent),
+        (
+            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT FIVE TIMES THE WORK OF HI.",
+            Tone::Plain,
+        ),
+    ];
+    if splits {
+        lines.extend([
+            // (Wrapped so that no line is wider than the note's widest before.)
+            (
+                "ON THIS COMPUTER ONE VOICE IS SPREAD OVER SIX THREADS AND",
+                Tone::Plain,
+            ),
+            (
+                "CAN BE PLAYED LIVE. WITH MULTIPLE VOICES OR TOO SMALL OF A BUFFER,",
+                Tone::Plain,
+            ),
+            ("IT MAY DROP OUT.", Tone::Plain),
+            (
+                "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL",
+                Tone::Plain,
+            ),
+            ("PROJECTS ON POWERFUL COMPUTERS.", Tone::Plain),
+        ]);
+    } else {
+        lines.extend([
+            (
+                "ONE VOICE TAKES UP TO A WHOLE CORE OF A FAST COMPUTER.",
+                Tone::Plain,
+            ),
+            (
+                "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL",
+                Tone::Plain,
+            ),
+            (
+                "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.",
+                Tone::Plain,
+            ),
+        ]);
+    }
+    lines.extend([
+        (
+            "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.",
+            Tone::Dim,
+        ),
+        ("CLICK TO CLOSE", Tone::Dim),
+    ]);
+    lines
 }
 
 #[cfg(test)]
@@ -7524,6 +7567,12 @@ mod tests {
         e.scene.note = Some(e.ultra_note());
         e.renderer.render(&e.scene);
         e.renderer.frame().save_png(out.join("note.png")).unwrap();
+        // Both of its texts: a computer that splits an ULTRA voice, and one that does not.
+        for (splits, name) in [(true, "note-split.png"), (false, "note-whole.png")] {
+            e.scene.note = Some(e.ultra_note_for(splits));
+            e.renderer.render(&e.scene);
+            e.renderer.frame().save_png(out.join(name)).unwrap();
+        }
         // QUALITY's menu, its toggle right-clicked.
         e.ultra_note = false;
         e.settings.ultra_note_read = true;
@@ -7535,6 +7584,88 @@ mod tests {
         e.scene.menu = e.learning.menu().cloned();
         e.renderer.render(&e.scene);
         e.renderer.frame().save_png(out.join("menu.png")).unwrap();
+    }
+
+    /// ULTRA's note as this computer plays it (decisions.md R-THREADS): where it splits an
+    /// ULTRA voice over six threads, that one voice plays live; where it does not, what one
+    /// voice takes. Either fits where the old one did, left of the lamp at the window's opening
+    /// size: no line wider than the old note's widest, its box within the panel.
+    #[test]
+    fn ultra_s_note_says_what_this_computer_plays() {
+        let (e, _host, _params) = editing();
+        let split = e.ultra_note_for(true);
+        let whole = e.ultra_note_for(false);
+        let text = |n: &Note| -> Vec<String> { n.lines.iter().map(|(t, _)| t.clone()).collect() };
+        assert_eq!(
+            text(&e.ultra_note()),
+            text(&e.ultra_note_for(crate::engine::split_voices() > 0)),
+            "not as this computer plays it"
+        );
+        for (n, says) in [
+            (
+                &split,
+                "ON THIS COMPUTER ONE VOICE IS SPREAD OVER SIX THREADS AND",
+            ),
+            (
+                &whole,
+                "ONE VOICE TAKES UP TO A WHOLE CORE OF A FAST COMPUTER.",
+            ),
+        ] {
+            assert_eq!(
+                n.lines[0],
+                ("ULTRA · NO COMPROMISES".to_owned(), Tone::Accent)
+            );
+            assert!(
+                text(n)
+                    .iter()
+                    .any(|t| t.contains("ABOUT FIVE TIMES THE WORK OF HI"))
+            );
+            assert!(text(n).iter().any(|t| t == says), "{:?}", text(n));
+            let dim: Vec<_> = n.lines.iter().rev().take(2).collect();
+            assert_eq!(dim[0], &("CLICK TO CLOSE".to_owned(), Tone::Dim));
+            assert_eq!(
+                dim[1].0,
+                "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT."
+            );
+        }
+        assert!(
+            text(&split)
+                .join(" ")
+                .contains("WITH MULTIPLE VOICES OR TOO SMALL OF A BUFFER")
+        );
+        assert!(
+            text(&whole)
+                .iter()
+                .any(|t| t.ends_with("PLAYED LIVE, IT MAY DROP OUT."))
+        );
+        // The old note's widest line, as wide as any may be.
+        let fonts = e.renderer.fonts();
+        let wide = |t: &str| fonts.advance(t, split.size, Weight::Regular, 0.0);
+        let old = [
+            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SEVEN TIMES THE WORK OF HI:",
+            "ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER.",
+            "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL",
+            "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.",
+            "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.",
+        ]
+        .map(wide)
+        .into_iter()
+        .fold(0.0, f64::max);
+        for n in [&split, &whole] {
+            for (t, _) in &n.lines {
+                assert!(wide(t) <= old + 1e-9, "{t}: {} against {old}", wide(t));
+            }
+            // Its box: left of the lamp's opening, within the panel (not pushed in by the
+            // panel's edge), its foot within the panel's height.
+            let (w, h) = n.extent(fonts);
+            let (left, right) = (n.x - w / 2.0, n.x + w / 2.0);
+            let top = n.y - n.size * 0.4 - h;
+            assert!(
+                left >= 0.0 && right < art::COL + 3023.0 - 53.6,
+                "{left}..{right}"
+            );
+            assert!(top >= 0.0 && n.y <= art::PANEL_H, "{top}..{}", n.y);
+        }
     }
 
     /// MIDI Learn drawn (decisions.md R34), for looking at: CUTOFF being learned (ringed, its
