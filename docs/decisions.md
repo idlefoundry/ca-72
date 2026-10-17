@@ -6405,7 +6405,7 @@ the aliasing of its output and of the filter's own output (the voice's probe) fr
 at +12 dB; the results are [band-limiting/ultra-filter-halfband.tsv](band-limiting/ultra-filter-halfband.tsv).
 - **The last stage makes no measurable difference.** At 44.1, 48 and 96 kHz every figure with
   139 taps is within 0.1 dB of 79's (with 23 taps, within 0.7 dB). The filter run at 8x
-  instead of 4x changes them by about 2 dB at most either way.
+  instead of 4x changes them by 2.7 dB at most, either way.
 - **What aliases is after the filter, the VCA.** The open sawtooth at A4 at 44.1 kHz carries
   -71.5 dB at the filter's output and -45.5 dB at the voice's; the loudest component, 19.9
   kHz, is its 55th harmonic (24.19 kHz) folded (at 48 kHz its 64th, folded to 19.85 kHz). The
@@ -6414,8 +6414,9 @@ at +12 dB; the results are [band-limiting/ultra-filter-halfband.tsv](band-limiti
   filter. The resonant patches' figures are mostly the filter ringing at its own frequency
   against the sawtooth's, not aliasing.
 - **Its cost:** the decimator's 40 ns an output sample would be 60 (0.09 % of a core a
-  voice), and 15 samples more, inside FEEDBACK's loop, whose length is calibrated in samples
-  (`docs/circuit`), and before the VCA, whose loudness contour would have to wait for them.
+  voice), and 15 samples more, inside FEEDBACK's loop, whose length sets how it oscillates (the
+  light model's `FEEDBACK_DELAY` counts the circuit's loop in samples), and before the VCA,
+  whose loudness contour would have to wait for them.
 
 **For the owner to decide:** the filter's last halfband stays at 79 taps (recommended: no
 measurable gain, a longer FEEDBACK loop). The VCA's signal path at the output rate is what
