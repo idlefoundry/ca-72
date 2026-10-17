@@ -6030,3 +6030,31 @@ GarageBand and Logic checks remain open.
   the quarantine flag set, passed `pkgutil`, `stapler validate` and Gatekeeper ("Notarized
   Developer ID").
 - The scripts and logs are in `~/lab/artifacts/ca-72/0.2.5/`.
+
+## R-CPU-EXACT. CPU without changing a sample
+
+**Owner decisions, 2026-10-17.** CPU use being the users' first complaint, the owner decided that
+HI and ULTRA stay bit-identical to 0.2.5, "only do the changes that keep the sound the same", and
+that the worker budget (R-THREADS) goes out without the band-limiting, latency and ULTRA VCA
+changes; then "Okay, proceed!" to the exact shortcuts a three-agent council and the profiles named.
+
+**Agent decisions, 2026-10-17** (not separately approved):
+- **OVERLOAD's lamp driver a step every 8 samples.** The driver is a peak detector (Q25 into
+  0.47 uF, let down through 780 kilohms, a third of a second) that only lights the lamp; the
+  audio reads none of it. It was a nodal solve every sample beside the preamplifier's four
+  substeps (ULTRA, and HI's circuit inside FEEDBACK's loop). It now steps every 8 samples, its
+  step 8 samples long, on the highest the amplifier reached in them, so a peak between steps
+  still lights it.
+- **The filter's ladder bias keeps its temperature's part.** `VcfCircuit::bias` is worked out
+  again whenever the tail current moves; the transistor at the temperature (`Bjt::at`) and C_mu
+  at the fixed V_bc are kept for the ladder, V_bc and temperature they were worked out for. The
+  same arithmetic, so the same bias.
+- **`preset_render` takes `CA72_POTATO` and `CA72_ULTRA`,** as `preset_cost` does, to compare
+  each mode to the bit.
+
+**Evidence (the Mac, 2026-10-17, binaries built from 0d478a5 plus the switches and from this
+change, run alternately):** every factory preset the same to the bit at HI (ten voices) and ULTRA
+(four voices), 4 s each (`preset_render`). `preset_cost` at ULTRA, four voices, the mean of two
+runs each: Feedback Funk 395 to 380 % of a core (-3.9 %); the other eighteen presets, without the
+preamplifier, within ±1 % (no change beyond noise: the bias's temperature part is a small share of
+it, the tail current's iterations the rest).
