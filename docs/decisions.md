@@ -5919,3 +5919,31 @@ which the annotated `v0.2.4` tag names.
   Developer ID").
 - On the lab share macOS writes `._` files beside each download; the downloads are checked in
   a local folder (`~/.cache`). The scripts and logs are in `~/lab/artifacts/ca-72/0.2.4/`.
+
+## R-AU-PITCH-BEND. Preserve the AU MIDI pitch wheel (issue 43)
+
+The AU adapter converted channel pitch bend into CLAP per-note tuning whenever
+an instrument preferred typed CLAP notes, including ports that also support MIDI.
+nih-plug maps that expression to `PolyTuning`, which CA-72 does not follow; its
+`MidiPitchBend` handler never received the wheel. The conversion also imposed a
+fixed two-semitone range. Preserve the original MIDI bytes when the port supports
+MIDI or MPE, so the instrument applies its own MIDI BEND RANGE. CLAP-only ports
+retain the existing tuning fallback. Other event translations, the DSP and the
+production component identity are unchanged.
+
+The AU build now runs five adapter regression groups and nine in-memory public-AU
+render cases. These exercise MIDI bytes and MIDI 1/2 event-list entry points,
+ranges 0/2/7, both bend directions, centering, CC121 reset, note delivery/release,
+CC120/123 and MIDI 2's distinct zero-velocity semantics. The tests use disposable
+state without physical audio or MIDI output; event-list checks require macOS 12.
+They do not establish native end-to-end MIDI 2 hardware support.
+
+On macOS 27.0/M4 Pro, the fixed 0.2.4 review build passes all five adapter groups,
+all nine render cases and strict auval under a separate arm64 test identity.
+The embedded engine's 28 compiled code/data sections match the installed 0.2.4
+engine. The unchanged release fails the six nonzero-range render cases. The
+previous 0.2.3 GarageBand reproduction and Apple DLS control establish the original
+host symptom, but fixed-build GarageBand playback remains blocked by the unsaved
+`ca74-au-test` project; the project switch was canceled. Live/physical controller
+input and Logic have not been tested. These results do not claim resolution in
+GarageBand or Logic. No test-identity packaging is part of the production change.
