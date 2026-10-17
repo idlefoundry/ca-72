@@ -4449,7 +4449,8 @@ mod tests {
     /// alone, as on Windows and X11 (decisions.md R58), the screen so made the same as
     /// the whole frame's at every frame. Every other frame's QUALITY column and STEREO display
     /// kept, written to `$CA72_RUN`, the folder, as `frames.rgba` (`size.txt`: its width and
-    /// height), with the times in `times.txt` (`-- --ignored --nocapture`).
+    /// height), with the times in `times.txt` (`-- --ignored --nocapture`). With
+    /// `CA72_NO_FRAMES` set, the times alone (the frames are 2 GB, in memory and on disk).
     #[test]
     #[ignore = "plays the window for a while"]
     fn the_window_played() {
@@ -4457,6 +4458,7 @@ mod tests {
             return;
         };
         std::fs::create_dir_all(&out).unwrap();
+        let keep_frames = std::env::var_os("CA72_NO_FRAMES").is_none();
         let dir = tempfile::tempdir().unwrap();
         let host = Arc::new(Host::default());
         let params = Arc::new(Ca72Params::default());
@@ -4607,7 +4609,7 @@ mod tests {
             }
             whole.push(drawn + turned);
             places.push(drawn + in_places);
-            if k % 2 == 0 {
+            if keep_frames && k % 2 == 0 {
                 let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
                 let mut img = vec![0u8; fw * fh * 4];
                 for (r, x0) in [(column, 0usize), (stereo, column.2 + 12)] {
@@ -4620,8 +4622,10 @@ mod tests {
                 frames.extend_from_slice(&img);
             }
         }
-        std::fs::write(out.join("frames.rgba"), &frames).unwrap();
-        std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
+        if keep_frames {
+            std::fs::write(out.join("frames.rgba"), &frames).unwrap();
+            std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
+        }
         let said = |times: &[f64]| {
             let total: f64 = times.iter().sum();
             let mean = total / times.len() as f64;
