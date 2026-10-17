@@ -12,6 +12,7 @@
 //! ca72-lab alias [--model circuit|light] [--os N] [--rates R,..] [--keys K,..]
 //!                                        the oscillators' aliasing (decisions.md R-BLEP)
 //! ca72-lab osccost [rounds]              one oscillator's time a sample, by outputs used
+//! ca72-lab filteralias [rates]           the voice's aliasing in ULTRA, the filter's own
 //! ```
 //! Ranges: lo, 32, 16, 8, 4, 2. Keys count from the keyboard's lowest F (0..43).
 
@@ -36,6 +37,7 @@ fn main() -> ExitCode {
         Some("render") => render(rest),
         Some("alias") => alias(rest),
         Some("osccost") => osccost(rest),
+        Some("filteralias") => filteralias(rest),
         Some("play") => play(rest),
         Some("stim") => stim(rest),
         Some("filterlaw") => filterlaw(rest),
@@ -472,6 +474,156 @@ fn osccost(rest: &[String]) -> Res {
     println!("ns a sample, the least of {rounds} runs of {n} samples at 48 kHz");
     for (name, _, _, best) in &cases {
         println!("{name:<20} {best:>8.1}");
+    }
+    Ok(())
+}
+
+/// `ca72-lab filteralias [rates]` (decisions.md R-BLEP; the filter's last halfband measured,
+/// not built): the whole voice in ULTRA, a note held, its output's aliasing from 20 Hz to
+/// 20 kHz against its fundamental (as `ca72-lab alias` measures an oscillator), for patches
+/// that make the filter itself produce what lies above the band: self-oscillation at full
+/// EMPHASIS, a bright sawtooth through an open or ringing filter, and DRIVE. The filter's
+/// decimator's last stage is `CA72_FILTER_LAST_HALFBAND` taps long if set (79 unless).
+fn filteralias(rest: &[String]) -> Res {
+    use ca72::tuning::Range;
+    use ca72::voice::{Panel, Quality, Voice, Waveform};
+    use ca72_lab::alias::{N, analyse};
+    let rates: Vec<f64> = rest
+        .first()
+        .map(|r| r.split(',').filter_map(|v| v.parse().ok()).collect())
+        .unwrap_or_else(|| vec![44_100.0, 48_000.0, 96_000.0]);
+    let base = || {
+        let mut p = Panel::default();
+        p.quality = Quality::NoCompromises;
+        for o in &mut p.osc {
+            o.on = false;
+        }
+        p.noise_on = false;
+        p.ext_on = false;
+        p.contour_amount = 0.0;
+        p.keyboard_control_1 = false;
+        p.keyboard_control_2 = false;
+        p.filter_contour.sustain = 1.0;
+        p.loudness_contour.sustain = 1.0;
+        p
+    };
+    let saw = |cutoff: f64, emphasis: f64| {
+        let mut p = base();
+        p.osc[0].on = true;
+        p.osc[0].volume = 1.0;
+        p.osc[0].waveform = Waveform::Sawtooth;
+        p.osc[0].range = Range::R8;
+        p.cutoff = cutoff;
+        p.emphasis = emphasis;
+        p
+    };
+    let whistle = |cutoff: f64| {
+        let mut p = base();
+        p.cutoff = cutoff;
+        p.emphasis = 1.0;
+        p
+    };
+    // (name, panel, MIDI note, DRIVE's gain, whether the oscillators set the frequency)
+    let patches: Vec<(&str, Panel, i32, f64, bool)> = vec![
+        ("whistle, CUTOFF 0.55", whistle(0.55), 60, 1.0, false),
+        ("whistle, CUTOFF 0.7", whistle(0.7), 60, 1.0, false),
+        ("whistle, CUTOFF 0.85", whistle(0.85), 60, 1.0, false),
+        ("saw A4, open", saw(1.0, 0.0), 69, 1.0, true),
+        ("saw A6, open", saw(1.0, 0.0), 93, 1.0, true),
+        ("saw A4, EMPHASIS 0.8", saw(0.8, 0.8), 69, 1.0, true),
+        ("saw A4, open, DRIVE +12 dB", saw(1.0, 0.0), 69, 3.98, true),
+        (
+            "saw A6, EMPHASIS 0.8, DRIVE +12 dB",
+            saw(0.8, 0.8),
+            93,
+            3.98,
+            true,
+        ),
+        (
+            "whistle, CUTOFF 0.7, DRIVE +12 dB",
+            whistle(0.7),
+            60,
+            3.98,
+            false,
+        ),
+    ];
+    let last = std::env::var("CA72_FILTER_LAST_HALFBAND").unwrap_or_else(|_| "79".into());
+    for &rate in &rates {
+        for (name, panel, note, drive, from_osc) in &patches {
+            let mut v = Voice::new(rate, *panel);
+            // (`CA72_QUALITY=hifi`: High Fidelity, ULTRA but for the VCA's plain signal path.)
+            v.panel.quality = if std::env::var("CA72_QUALITY").as_deref() == Ok("hifi") {
+                Quality::HighFidelity
+            } else {
+                Quality::NoCompromises
+            };
+            v.set_drive(*drive);
+            v.note(*note, true);
+            let warm = (0.5 * rate) as usize;
+            for _ in 0..warm {
+                v.tick();
+            }
+            let r0 = v.probe_resets(0);
+            let mut filter_out = Vec::with_capacity(N);
+            let x: Vec<f64> = (0..N)
+                .map(|_| {
+                    let y = v.tick();
+                    filter_out.push(v.probe().2);
+                    y
+                })
+                .collect();
+            let r1 = v.probe_resets(0);
+            let f0 = if *from_osc {
+                rate * (r1.1 - r0.1) as f64 / (r1.0 - r0.0)
+            } else {
+                // A steady, nearly sinusoidal oscillation: its rising crossings of its mean.
+                let mean = x.iter().sum::<f64>() / x.len() as f64;
+                let mut first = None;
+                let mut last_t = 0.0;
+                let mut count = 0usize;
+                for i in 1..x.len() {
+                    let (a, b) = (x[i - 1] - mean, x[i] - mean);
+                    if a < 0.0 && b >= 0.0 {
+                        let t = (i - 1) as f64 + a / (a - b);
+                        if first.is_none() {
+                            first = Some(t);
+                        } else {
+                            count += 1;
+                        }
+                        last_t = t;
+                    }
+                }
+                first.map_or(0.0, |t0| rate * count as f64 / (last_t - t0))
+            };
+            let m = analyse(&x, rate, f0);
+            let mf = analyse(&filter_out, rate, f0);
+            println!(
+                "{last}\t{rate}\t{name}\t{f0:.2}\t{:.1}\t{:.1}\t{:.0}\t{:.1}\t{:.1}\t{:.0}",
+                m.total_db, m.loudest_db, m.loudest_hz, mf.total_db, mf.loudest_db, mf.loudest_hz
+            );
+        }
+    }
+    // The decimator's own time an output sample at 4x, and its delay, by its last stage's
+    // taps: the least of 25 runs of a second at 48 kHz.
+    let input: Vec<f64> = (0..4 * 48_000).map(|i| (i as f64 * 0.37).sin()).collect();
+    for taps in [79, 139] {
+        let mut d = ca72::resample::Decimator::with_last_taps(4, taps);
+        let mut best = f64::MAX;
+        for _ in 0..25 {
+            let t = std::time::Instant::now();
+            let mut acc = 0.0;
+            for &x in &input {
+                if let Some(y) = d.push(x) {
+                    acc += y;
+                }
+            }
+            std::hint::black_box(acc);
+            best = best.min(t.elapsed().as_secs_f64() * 1e9 / 48_000.0);
+        }
+        println!(
+            "decimator 4x, last stage {taps} taps: {best:.1} ns an output sample, {} samples late",
+            d.delay()
+        );
     }
     Ok(())
 }

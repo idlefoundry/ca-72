@@ -955,7 +955,14 @@ impl Vcf {
             bias: (f64::NAN, f64::NAN, VcfCircuit::default().bias(0.0, 25.0)),
             up_n,
             up_g: Interpolator::new(os),
-            down: Decimator::new(os),
+            // (The lab's: `CA72_FILTER_LAST_HALFBAND` taps in its last stage, if set.)
+            down: match std::env::var("CA72_FILTER_LAST_HALFBAND")
+                .ok()
+                .and_then(|l| l.parse().ok())
+            {
+                Some(last) => Decimator::with_last_taps(os, last),
+                None => Decimator::new(os),
+            },
             other: os,
             other_rs: (
                 Interpolator::new(os),

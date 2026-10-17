@@ -429,6 +429,12 @@ impl Decimator {
         Self::with_last(factor, LAST_HALFBAND, make)
     }
 
+    /// The lab's (decisions.md R-BLEP, the filter's last halfband measured, not built):
+    /// [`Decimator::new`] with its last stage `last` taps long.
+    pub fn with_last_taps(factor: usize, last: usize) -> Decimator {
+        Self::with_last(factor, last, Halfband::new)
+    }
+
     fn with_last(factor: usize, last: usize, make: fn(usize, f64) -> Halfband) -> Decimator {
         let stages = stages_len(factor);
         let stages = (0..stages)

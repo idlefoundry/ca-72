@@ -1610,7 +1610,8 @@ fn keyboard_every(q: Quality) -> usize {
 /// solver crackle. Keep the filter's rate fixed while the controls move.
 fn oversampling(q: Quality) -> (usize, usize) {
     match q {
-        Quality::NoCompromises | Quality::HighFidelity => (4, 4),
+        // (The lab's, decisions.md R-BLEP: the filter's at `CA72_FILTER_OS` in ULTRA if set.)
+        Quality::NoCompromises | Quality::HighFidelity => (4, ultra_filter_os()),
         Quality::Potato => (1, 4),
     }
 }
@@ -1629,6 +1630,18 @@ fn contour_delay(q: Quality) -> f64 {
 
 /// The contours' past outputs kept, samples (more than [`contour_delay`] in any mode).
 const ENV_PAST: usize = 32;
+
+/// The lab's: ULTRA's filter's oversampling, `CA72_FILTER_OS` (2, 4 or 8) if set, else 4.
+fn ultra_filter_os() -> usize {
+    static OS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *OS.get_or_init(|| {
+        std::env::var("CA72_FILTER_OS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|v| [2, 4, 8].contains(v))
+            .unwrap_or(4)
+    })
+}
 
 /// The contours' sub-rate (samples a tick) in each quality mode: in Potato a quarter of the
 /// others'.
