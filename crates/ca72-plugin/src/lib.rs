@@ -18,6 +18,7 @@ pub mod playing;
 pub mod pool;
 pub mod presets;
 mod resizing;
+pub mod seats;
 pub mod settings;
 #[cfg(feature = "standalone-production")]
 pub mod standalone_error;

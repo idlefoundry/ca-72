@@ -518,6 +518,84 @@ fn ultra_s_split_voices_neither_allocate_nor_free_while_they_play() {
     assert!(runs > 0, "no voice played split");
 }
 
+/// The budget shared with other processes by seat files (decisions.md R-THREADS): POLY's
+/// workers made audio threads (so their instance takes a seat and its file), the plug-in's
+/// helper serving them and looking at the seats as it does, POLY switched as it plays (the
+/// seat given up and taken again): no file operation, no allocation and no free on the audio
+/// thread, and a seat file held while POLY was on.
+#[test]
+fn the_seats_neither_touch_files_nor_allocate_on_the_audio_thread() {
+    use ca72_plugin::engine::DEADLINE;
+    use ca72_plugin::helper::{Helper, SERVE};
+    use std::time::{Duration, Instant};
+    let _serial = start();
+    let dir = tempfile::tempdir().unwrap();
+    // SAFETY: set before this test starts any thread of its own; the seats' folder is read
+    // once a process, the first time a seat is taken.
+    unsafe { std::env::set_var("CA72_SEATS_DIR", dir.path()) };
+    let mut e = Engine::new();
+    let mut c = Controls {
+        poly: true,
+        voices: 6,
+        ..Controls::default()
+    };
+    e.set(&c);
+    e.prepare(RATE, 7);
+    let period = Duration::from_secs_f64(BLOCK as f64 / RATE);
+    e.start_workers(2, Some(period));
+    let helper = Helper::start(e.spares(), e.crew(), Default::default()).unwrap();
+    let (mut l, mut r) = ([0.0f32; BLOCK], [0.0f32; BLOCK]);
+    let mut seated = 0u32;
+    let io = ca72_plugin::seats::io_here();
+    HERE.with(|h| h.set(true));
+    ARMED.store(true, Ordering::SeqCst);
+    let mut sink = 0.0f32;
+    for b in 0..1500usize {
+        e.set_deadline(Some(Instant::now() + period.mul_f64(DEADLINE)));
+        if b.is_multiple_of(40) {
+            for k in [45u8, 52, 57] {
+                e.event(Event::Note { key: k, on: true });
+            }
+        }
+        if b % 40 == 30 {
+            for k in [45u8, 52, 57] {
+                e.event(Event::Note { key: k, on: false });
+            }
+        }
+        c.poly = b / 300 % 2 == 0;
+        e.set(&c);
+        e.render(&[], &mut l, &mut r);
+        sink += l.iter().chain(&r).sum::<f32>();
+        sink += e.end_block(BLOCK);
+        if e.take_serving() {
+            helper.ask(SERVE);
+        }
+        if b % 50 == 49 {
+            ARMED.store(false, Ordering::SeqCst);
+            seated = seated.max(ca72_plugin::pool::seats_now().1);
+            ARMED.store(true, Ordering::SeqCst);
+        }
+    }
+    ARMED.store(false, Ordering::SeqCst);
+    std::hint::black_box(sink);
+    let io_after = ca72_plugin::seats::io_here();
+    drop(helper);
+    drop(e);
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(io_after, io, "the seats' files touched on the audio thread");
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "the seats allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+    );
+    assert!(seated >= 1, "no seat file held while POLY was on");
+}
+
 /// What the plug-in asks of its helper thread at a block's end (decisions.md R23), the
 /// spares mended and POLY's workers served, asked again and again while the helper does it:
 /// no allocation, no free on the asking thread.

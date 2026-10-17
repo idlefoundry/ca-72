@@ -11,6 +11,8 @@ bin=$(ls -t target/release/deps/scaling_bench-* | grep -v '\.d$' | head -1)
 # (Matched by its process name, the binary's first 15 characters: nothing else has it.)
 name=$(basename "$bin" | cut -c1-15)
 dir=$(mktemp -d)
+# (The processes' own seats folder, shared by them alone: decisions.md R-THREADS.)
+export CA72_SEATS_DIR="$dir/seats"
 echo "# $(date -u +%FT%TZ) processes=$n load $(cut -d' ' -f1-3 /proc/loadavg)" | tee -a "$out"
 # The canary: its worst oversleep, in ms, rewritten every 100 ms.
 python3 -I - "$dir/canary" <<'PY' &
@@ -33,8 +35,10 @@ chrt -f 98 bash -c '
         [ -e "$1.stop" ] && exit 0
     done' guard "$dir/canary" "$limit" "$name" &
 guard=$!
+# (Every process's blocks from the same moment, once all have started and taken their seats.)
+start_at=$(python3 -I -c 'import time; print(time.time() + 8)')
 for k in $(seq 1 "$n"); do
-    timeout -s KILL 40 env CA72_AUTO=1 CA72_INSTANCES=1 CA72_QUALITY=hi CA72_SECONDS=8 \
+    timeout -s KILL 50 env CA72_START_AT="$start_at" CA72_AUTO=1 CA72_INSTANCES=1 CA72_QUALITY=hi CA72_SECONDS=8 \
         "$bin" --ignored --nocapture --test-threads 1 > "$dir/out.$k" 2> "$dir/err.$k" &
 done
 abort=0; t0=$(date +%s)

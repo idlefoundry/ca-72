@@ -9,6 +9,8 @@
 //! `CA72_POLY=0` plays the one instrument (its chords of one note); `CA72_SPLIT` sets how many
 //! voices ULTRA splits (this machine's by default; 0, every voice whole). Each instance has the
 //! plug-in's helper thread, which starts and stops its threads as they ask (R23).
+//! `CA72_START_AT` (seconds since the Unix epoch) starts every instance's blocks at that time,
+//! so that separate processes are measured over the same window.
 //!
 //! Each instance plays `poly_bench`'s load: POLY on, `CA72_VOICES` voices (10 at HI, 4 at
 //! ULTRA) playing a changing chord of as many notes every half second, the modulation moving;
@@ -44,8 +46,14 @@ struct Ran {
     /// (macOS's time-constraint fail-safe; `ca72_rt::scheduled_realtime`), and whether it had it.
     demoted: usize,
     promoted: bool,
-    /// At the end: its workers, its split crews and its runs played split.
+    /// At the end: its workers, its split crews, its runs played split, and the instances
+    /// seated in every process as this process counted them.
     workers: usize,
+    seated: usize,
+    /// Halfway through and three quarters through: its workers and the instances seated in
+    /// every process.
+    mid: (usize, usize),
+    later: (usize, usize),
     crews: usize,
     split_runs: u64,
 }
@@ -172,10 +180,15 @@ fn workers_and_instances_in_real_time() {
         .map(|r| format!("{}w{}s", r.workers, r.crews))
         .collect();
     let split_runs: u64 = ran.iter().map(|r| r.split_runs).sum();
+    let seated = ran.iter().map(|r| r.seated).max().unwrap_or(0);
+    let mid: Vec<String> = ran
+        .iter()
+        .map(|r| format!("{}w/{},{}w/{}", r.mid.0, r.mid.1, r.later.0, r.later.1))
+        .collect();
     let demoted: usize = ran.iter().map(|r| r.demoted).sum();
     let promoted = ran.iter().filter(|r| r.promoted).count();
     println!(
-        "scaling: quality={} block={block} instances={instances} workers={workers} share={} poly={poly} got={} held={} split_runs={split_runs} voices={voices} seconds={seconds} mean={mean:.1} worst_instance_mean={worst_mean:.1} p50={:.1} p99={:.1} p999={:.1} worst={:.1} late={late} blocks={blocks} silent_runs={silent} demotions={} load={load} cores={}/{} canary_ms={canary_ms:.2} promoted={promoted} demoted_blocks={demoted}",
+        "scaling: quality={} block={block} instances={instances} workers={workers} share={} poly={poly} got={} held={} split_runs={split_runs} voices={voices} seconds={seconds} mean={mean:.1} worst_instance_mean={worst_mean:.1} p50={:.1} p99={:.1} p999={:.1} worst={:.1} late={late} blocks={blocks} silent_runs={silent} demotions={} load={load} cores={}/{} canary_ms={canary_ms:.2} promoted={promoted} demoted_blocks={demoted} seated={seated} mid={}",
         if ultra { "ultra" } else { "hi" },
         if auto {
             "auto"
@@ -193,6 +206,7 @@ fn workers_and_instances_in_real_time() {
         ca72_rt::demotions(),
         ca72_rt::cores().fast,
         ca72_rt::cores().all,
+        mid.join("+"),
     );
     set_budget_for_measurement(0);
     set_split_for_measurement(None);
@@ -222,6 +236,8 @@ fn host(
     let rt = ca72_rt::promote(period, period / 2);
     let promoted = rt.is_ok() && ca72_rt::scheduled_realtime() != Some(false);
     let mut demoted = 0;
+    let mut mid = (0, 0);
+    let mut later = (0, 0);
     ca72_rt::watch();
     let wg = host_wg
         .then(|| ca72_rt::WorkInterval::new("scaling_bench host"))
@@ -239,10 +255,21 @@ fn host(
     let mut events = Vec::with_capacity(64);
     let (mut lb, mut rb) = (vec![0.0f32; block], vec![0.0f32; block]);
     go.wait();
-    let start = *start_at
-        .lock()
-        .unwrap()
-        .get_or_insert_with(|| Instant::now() + Duration::from_millis(5));
+    // (With `CA72_START_AT`, seconds since the Unix epoch, every process's instances start
+    // together: separate processes measured over the same window.)
+    let start = *start_at.lock().unwrap().get_or_insert_with(|| {
+        let at = std::env::var("CA72_START_AT")
+            .ok()
+            .and_then(|t| t.parse::<f64>().ok())
+            .and_then(|t| {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()?
+                    .as_secs_f64();
+                (t > now).then(|| Duration::from_secs_f64(t - now))
+            });
+        Instant::now() + at.unwrap_or(Duration::from_millis(5))
+    });
     let mut next = 0u32;
     let mut silent_from = 0;
     for i in 0..warm + blocks {
@@ -306,6 +333,13 @@ fn host(
         if i == warm {
             silent_from = e.silent_runs();
         }
+        if i == warm + blocks / 2 {
+            // (Halfway: every instance and process long started, none yet ending.)
+            mid = (e.workers(), ca72_plugin::pool::seats_now().0);
+        }
+        if i == warm + blocks * 3 / 4 {
+            later = (e.workers(), ca72_plugin::pool::seats_now().0);
+        }
         if i >= warm {
             took.push(t.elapsed().as_secs_f64() * 1e3);
             if promoted && ca72_rt::scheduled_realtime() == Some(false) {
@@ -320,6 +354,8 @@ fn host(
     }
     let (split_runs, crews) = e.split_runs();
     let workers = e.workers();
+    // (The instances holding threads in every process, as this one counts them by the seats.)
+    let seated = ca72_plugin::pool::seats_now().0;
     // (None let go before every instance has played its blocks: one dropped earlier would move
     // the others' shares in their last blocks.)
     go.wait();
@@ -332,6 +368,9 @@ fn host(
         workers,
         crews,
         split_runs,
+        seated,
+        mid,
+        later,
     }
 }
 

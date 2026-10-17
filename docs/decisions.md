@@ -6678,7 +6678,7 @@ Released 0.2.4 claims today's 4 a process (first come within it): 40 on any of t
   - A host that runs plug-ins as another user does not share them.
   - Not measured in a host.
 
-**The Bitwig check (for the owner, at the Linux machine):**
+**The Bitwig check (for the owner, at the Linux machine; superseded by the steps for the build with the shared budget, below):**
 1. **Mind the risk.** This branch's build, eight instances each in its own process, is the case
    the emulation stopped at 126 ms. Real-time throttling is off on this machine (the owner's
    setting); for the test it can be turned on as a safety net and back after, if the owner
@@ -6771,3 +6771,151 @@ TO CLOSE`) are as before.
 - The window at its opening size, with each version drawn (`the_ultra_pngs`, `note-split.png`
   and `note-whole.png`), was looked at: each note sits as the old one did, its box the same
   width, right of the FILTER section and left of the lamp.
+
+### One budget for every CA-72 process of the user, built (2026-10-16)
+
+**The owner, 2026-10-16** (relayed): "ya, build it": the seat files proposed above.
+
+**Built** (`crates/ca72-plugin/src/seats.rs`; `pool.rs`; the helper):
+- **Seat files.** 64 files in a folder of the user's own:
+  - macOS: `$TMPDIR/CA-72 seats`;
+  - Windows: `%TEMP%\CA-72 seats`;
+  - Linux: `$XDG_RUNTIME_DIR/ca72-seats`, else `/tmp/ca72-seats-<uid>`, made private to the user
+    and not used if another user owns it;
+  - `CA72_SEATS_DIR` puts it elsewhere, for the tests and measurements.
+
+  An instance that takes a seat in its process's budget also takes an exclusive, non-blocking
+  lock on a free seat file (`std::fs::File::try_lock`: `flock` on macOS and Linux, `LockFileEx`
+  on Windows). Giving up the seat lets the lock go, and a process's ending, however it ends,
+  lets all of its locks go (the kernel's doing).
+- **The count.** A is the seat files held by every process (each tried and let go at once if
+  free; the look made twice, 0.5 ms apart, and only seats held both times counted), plus any
+  of this process's instances that found no seat file. A seat that cannot be tried counts as
+  held, so an error can only make a share smaller. Each instance's share is B(A) shared
+  evenly in the seat files' order.
+- **When it is counted.** When an instance of this process takes or gives up a seat (where
+  pools are started and stopped), and by the helper threads at most every 0.5 s (`LOOK`; a
+  helper now waits at most that long). When the count changes the shares move, and pools
+  restart as they do within a process.
+- **The audio thread never touches the files.** It reads its pool's share, an atomic, as
+  before.
+- If the folder or its files cannot be had, the budget is the process's alone, as before.
+
+**Tests** (all pass on the Mac; the seat and cross-process tests also on Linux and Windows):
+- `seats.rs`:
+  - a seat taken is held to another set of the files (another process's, as the kernel counts
+    locks) and free once given back or its files closed;
+  - a killed holder's seats are free again (a child process holding three, killed);
+  - the seats' file operations are counted on the thread that makes them.
+- `pool.rs`, `the_shares_follow_other_processes_instances`: a child process holding two seats
+  moves this process's shares (11 alone, 3 for three, 2 each for four), and killed, gives
+  them back (5 each for two, 11 alone).
+- `realtime.rs`, `the_seats_neither_touch_files_nor_allocate_on_the_audio_thread`: POLY's paced
+  workers taking a seat and its file, the plug-in's helper looking at the seats, POLY switched
+  as it plays. No file operation (counted per thread), no allocation and no free on the audio
+  thread, and a seat file held while POLY was on.
+- **The workspace's tests** (the Mac, as CI runs them): 496 passed, 3 failed: `ca72-lab`'s three
+  ngspice tests, which fail the same way on the base commit. Clippy as CI runs it (and the
+  plug-in's library for Windows) and rustfmt are clean.
+
+**Separate processes, measured again** (`scripts/separate-processes.sh`, now with each process's
+seats in a folder of the run's own, and every process's blocks started at one moment,
+`CA72_START_AT`, after all have started and taken their seats; raw lines in
+`docs/threads/separate-processes-seats-*.txt`):
+- **The Linux machine,** the same guards and escalation as before (the ordinary canary, its
+  limit of 100 ms, the monitor and the `SCHED_FIFO` 98 guard, the watchdog, timeouts). Load
+  average about 1.4 before each round; the owner's Bitwig open throughout.
+- Each process's workers and the instances it counted were sampled halfway through its blocks.
+
+| Processes | Workers (each, halfway) | In all | B for that many | Instances each counted | Late blocks (each, of 1,875) | Canary's worst | Watchdog |
+|---|---|---|---|---|---|---|---|
+| 1 | 9 | 9 | 13 (cap 9) | 1 | 0 | 0.8 ms | none |
+| 2 | 6, 6 | 12 | 12 | 2 | 0, 0 | 0.9 ms | none |
+| 4 | 2, 3, 2, 3 | 10 | 10 | 4 | 11, 0, 10, 0 | 2.4 ms | none |
+| 8 | 1 for six, 0 for two | 6 | 6 | 8 | 577–654 (one worker), 834–854 (none) | 2.9 ms | none |
+
+(The rows for 1 and 2 are from the first round, before the common start, as each process
+held them at its end; for 4 and 8, the common start's, halfway.)
+
+- **Eight processes now stay within the budget.** They hold 6 audio-thread workers between
+  them, not 72, and the canary never came near its limit: 2.9 ms, against 126 ms and the
+  round stopped before the seats.
+- Eight instances of ten HI voices are still too much work for this machine (nearly half the
+  blocks of the two without a worker late, a third of the others'). The rule gives eight what it gives
+  eight in one process (item 1), but no longer more than the machine.
+- **The earlier rounds of this run, without the common start** (in the raw lines), showed what
+  happens as a host starts its processes one by one.
+  - Each instance, alone at first, takes a lone instance's share until the others' seats are
+    counted (at most 0.5 s after they sit).
+  - On this machine the first ones' workers slowed the later ones' start by seconds.
+  - The counts each process kept were right for the processes alive when it counted. Then the
+    last to start, at their halfway point, counted the ones that had already finished.
+- **The Mac and Windows,** started together, each process one instance of ten HI voices:
+
+| Machine | Processes | Workers (each) | In all | B | Counted | Late (each) |
+|---|---|---|---|---|---|---|
+| Mac | 2 | 5, 5 | 10 | 10 | 2 | 0, 0 |
+| Mac | 4 | 2 each | 8 | 8 | 4 | 0, 1, 0, 0 |
+| Windows | 2 | 4, 4 (the cap) | 8 | 16 | 2 | 0, 0 |
+| Windows | 4 | 4, 4, 3, 3 | 14 | 14 | 4 | 0, 2, 0, 0 |
+
+  On the Mac other work was running meanwhile (another session's `preset_render`, another
+  project's tests, Spotlight; load average 17 to 23), which does not bear on the counts.
+- **The lab copies** were cleaned up afterwards, and checked:
+  - on the Linux machine, moved to the user's Trash with `gio trash` and seen in
+    `~/.local/share/Trash/files`;
+  - on Windows, the copy moved to `C:\Users\idlewile\Code\tmp\holding`, not the Recycle Bin.
+  - The copied archive on Windows was deleted after it was unpacked, and each run's own
+    temporary folder on the Linux machine was removed by the script.
+
+**The Bitwig check for this build** (for the owner, at the Linux machine):
+1. **Copy the branch from the Mac and build it.**
+
+   ```
+   rsync -az --exclude target --exclude .git --exclude .claude ~/Code/ca-72/.claude/worktrees/goofy-ellis-af3f5d/ omarchy-ts:Code/ca72-threads/
+   ```
+
+   Then on the Linux machine:
+
+   ```
+   cd ~/Code/ca72-threads && cargo xtask bundle ca72-plugin --profile bundle
+   ```
+
+   Back up `~/.clap/CA-72.clap` (and `~/.vst3/CA-72.vst3`), then copy in the new ones from
+   `target/bundled`.
+2. **Watch ordinary work** in a terminal. This prints the oversleep, in milliseconds, whenever
+   it passes 20:
+
+   ```
+   python3 -c "import time
+   while True:
+       t=time.monotonic(); time.sleep(0.01); d=(time.monotonic()-t-0.01)*1e3
+       d>20 and print(round(d,1),flush=True)"
+   ```
+
+   In a second terminal, count CA-72's worker threads:
+
+   ```
+   watch -n1 'ps -eLo comm | grep -c ca72-voices'
+   ```
+
+   And list the seats taken (the instances counted; the folder always has 64 files, the
+   locks are what count):
+
+   ```
+   lslocks | grep ca72-seats
+   ```
+3. **Set up Bitwig.** Settings › Plug-ins › plug-in hosting mode **Individually** (each plug-in in
+   its own process).
+   - Eight instrument tracks, each with CA-72: POLY on, VOICES 10, QUALITY HI.
+   - One clip of ten-note chords copied to all eight, looping.
+   - Play for a minute. Expect about 6 worker threads in all once the eight are up (the budget
+     for eight), not 72; a moment more while they start.
+4. **If the desktop stops answering for a second or more, stop the transport.** The
+   plug-in's watchdog demotes its threads after 0.5 s and says so in Bitwig's log (lines that
+   begin `ca72:`).
+5. **Compare** with **Together** (one process): the same count. Eight instances of ten voices
+   will drop out either way on this machine; what the check shows is that separate processes
+   no longer multiply the threads.
+6. **Afterwards,** put the backed-up released plug-ins back. Real-time throttling need not be
+   turned on for this build (the owner's setting is left alone).

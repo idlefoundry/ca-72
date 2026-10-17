@@ -49,6 +49,7 @@
 //! helpers join a work interval of their own, opened by the keyboard's helper.
 
 use crate::engine::{CHUNK, MIX_LEN, Mix, Playing};
+use crate::seats::SeatFiles;
 use ca72::threaded::{Backoff, Helpers};
 use ca72::voice::Voice;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
@@ -104,27 +105,59 @@ pub struct Need {
     pub split: bool,
 }
 
-/// How many threads made audio threads the pools of the process may hold together (`most`,
-/// for as many instances as hold seats), how many they hold, an instance's most workers
-/// (`cap`), and the instances holding threads, each one's share.
+/// How many threads made audio threads the pools may hold together (`most`, for as many
+/// instances as hold seats, in every CA-72 process of the user: [`crate::seats`]), how many
+/// this process's hold, an instance's most workers (`cap`), and this process's instances
+/// holding threads, each one's share and seat file.
 pub(crate) struct Budget {
     most: fn(usize) -> usize,
     cap: fn() -> usize,
     held: AtomicUsize,
-    seats: Mutex<Vec<Arc<AtomicUsize>>>,
+    seats: Mutex<Vec<SeatEntry>>,
     seated: AtomicUsize,
+    /// Where the seat files are (None: this process's seats alone), opened once; the other
+    /// processes' seats at the last look, and when that was.
+    dir: fn() -> Option<std::path::PathBuf>,
+    files: std::sync::OnceLock<Option<SeatFiles>>,
+    others: AtomicU64,
+    looked: Mutex<Option<Instant>>,
 }
 
+/// One of this process's seats: its share, and the seat file it holds (None if there was none
+/// to have).
+struct SeatEntry {
+    share: Arc<AtomicUsize>,
+    file: Option<usize>,
+}
+
+/// How often the helper threads look at the other processes' seats ([`Budget::refresh`]).
+pub(crate) const LOOK: Duration = Duration::from_millis(500);
+
 impl Budget {
-    /// One of the tests' own, of `most` threads, no instance's capped.
+    /// One of the tests' own, of `most` threads, no instance's capped, its seats the process's
+    /// alone.
     #[cfg(test)]
     pub(crate) const fn new(most: fn(usize) -> usize) -> Budget {
+        Budget::with_files(most, || None)
+    }
+
+    /// One of the tests' own, of `most` threads, no instance's capped, its seat files in the
+    /// folder `dir` gives.
+    #[cfg(test)]
+    pub(crate) const fn with_files(
+        most: fn(usize) -> usize,
+        dir: fn() -> Option<std::path::PathBuf>,
+    ) -> Budget {
         Budget {
             most,
             cap: || usize::MAX,
             held: AtomicUsize::new(0),
             seats: Mutex::new(Vec::new()),
             seated: AtomicUsize::new(0),
+            dir,
+            files: std::sync::OnceLock::new(),
+            others: AtomicU64::new(0),
+            looked: Mutex::new(None),
         }
     }
 
@@ -133,39 +166,109 @@ impl Budget {
         self.held.load(Ordering::Acquire)
     }
 
+    /// The instances holding seats in every process, at the last count.
+    pub(crate) fn seated(&self) -> usize {
+        self.seated.load(Ordering::Acquire)
+    }
+
+    /// [`Budget::refresh`] now, whenever it last looked (the tests').
+    #[cfg(test)]
+    pub(crate) fn refresh_now(&self) {
+        *lock(&self.looked) = None;
+        self.refresh();
+    }
+
     /// The most for the instances seated now (at least one).
     fn most(&self) -> usize {
         (self.most)(self.seated.load(Ordering::Acquire).max(1))
     }
 
-    /// How many are free now.
+    /// How many are free now (of this process's count).
     fn free(&self) -> usize {
         self.most()
             .saturating_sub(self.held.load(Ordering::Acquire))
     }
 
-    /// A seat for an instance, its share from now on; every seat's share worked out again.
+    /// The seat files, opened the first time (never on an audio thread: seats are taken and
+    /// given up only where pools are started and stopped).
+    fn files(&self) -> Option<&SeatFiles> {
+        self.files
+            .get_or_init(|| (self.dir)().and_then(|d| SeatFiles::open(&d)))
+            .as_ref()
+    }
+
+    /// A seat for an instance, its share from now on, a seat file taken with it; every seat's
+    /// share worked out again, the other processes' counted now.
     fn sit(&'static self) -> Seat {
         let share = Arc::new(AtomicUsize::new(0));
         let mut seats = lock(&self.seats);
-        seats.push(share.clone());
-        self.reshare(&seats);
+        let file = self.files().and_then(SeatFiles::take);
+        seats.push(SeatEntry {
+            share: share.clone(),
+            file,
+        });
+        self.look_and_reshare(&seats);
         Seat {
             budget: self,
             share,
         }
     }
 
-    /// Every seat's share: the most for as many, evenly, the remainder to the first seated.
-    fn reshare(&self, seats: &[Arc<AtomicUsize>]) {
-        let n = seats.len();
+    /// The other processes' seats counted now ([`SeatFiles::others`]), and the shares worked
+    /// out again for them.
+    fn look_and_reshare(&self, seats: &[SeatEntry]) {
+        let others = self.files().map_or(0, SeatFiles::others);
+        self.others.store(others, Ordering::Release);
+        *lock(&self.looked) = Some(Instant::now());
+        self.reshare(seats, others);
+    }
+
+    /// The other processes' seats looked at again, at most every [`LOOK`], while this process
+    /// holds any; the shares worked out again if they have changed. The helper threads' (never
+    /// an audio thread's).
+    pub(crate) fn refresh(&self) {
+        let seats = lock(&self.seats);
+        if seats.is_empty() || self.files().is_none() {
+            return;
+        }
+        if lock(&self.looked).is_some_and(|t| t.elapsed() < LOOK) {
+            return;
+        }
+        let before = self.others.load(Ordering::Acquire);
+        let others = self.files().map_or(0, SeatFiles::others);
+        *lock(&self.looked) = Some(Instant::now());
+        if others != before {
+            self.others.store(others, Ordering::Release);
+            self.reshare(&seats, others);
+        }
+    }
+
+    /// Every seat's share: the most for every instance seated in every process, evenly, the
+    /// remainder to the first seats (the seat files' order, then this process's instances that
+    /// hold none).
+    fn reshare(&self, seats: &[SeatEntry], others: u64) {
+        let mine = seats
+            .iter()
+            .filter_map(|e| e.file)
+            .fold(0u64, |m, k| m | (1 << k));
+        let filed = (others | mine).count_ones() as usize;
+        let n = filed + seats.iter().filter(|e| e.file.is_none()).count();
         self.seated.store(n, Ordering::Release);
         if n == 0 {
             return;
         }
         let most = (self.most)(n);
-        for (k, seat) in seats.iter().enumerate() {
-            seat.store(most / n + usize::from(k < most % n), Ordering::Release);
+        let mut unfiled = 0;
+        for e in seats {
+            let rank = match e.file {
+                Some(k) => ((others | mine) & ((1u64 << k) - 1)).count_ones() as usize,
+                None => {
+                    unfiled += 1;
+                    filed + unfiled - 1
+                }
+            };
+            e.share
+                .store(most / n + usize::from(rank < most % n), Ordering::Release);
         }
     }
 
@@ -195,17 +298,34 @@ impl Budget {
     }
 }
 
-/// The plug-in's, for all its instances in the process.
+/// The plug-in's, for all its instances in the process, its seats shared with every CA-72
+/// process of the user ([`crate::seats::user_dir`]).
 pub(crate) static BUDGET: Budget = Budget {
     most: crate::engine::budget_workers,
     cap: crate::engine::instance_cap,
     held: AtomicUsize::new(0),
     seats: Mutex::new(Vec::new()),
     seated: AtomicUsize::new(0),
+    dir: crate::seats::user_dir,
+    files: std::sync::OnceLock::new(),
+    others: AtomicU64::new(0),
+    looked: Mutex::new(None),
 };
 
+/// The instances holding threads in every CA-72 process of the user at the plug-in's last
+/// count, and the seat files this process holds: for the measurements.
+#[doc(hidden)]
+pub fn seats_now() -> (usize, u32) {
+    let files = BUDGET.files.get().and_then(Option::as_ref);
+    (
+        BUDGET.seated(),
+        files.map_or(0, |f| f.held_here().count_ones()),
+    )
+}
+
 /// An instance's place in the budget while it holds threads: its share, which moves as others
-/// come and go. Given up when dropped, the others' shares worked out again.
+/// come and go, in this process or another. Given up when dropped (its seat file let go), the
+/// others' shares worked out again.
 pub(crate) struct Seat {
     budget: &'static Budget,
     share: Arc<AtomicUsize>,
@@ -213,9 +333,18 @@ pub(crate) struct Seat {
 
 impl Drop for Seat {
     fn drop(&mut self) {
-        let mut seats = lock(&self.budget.seats);
-        seats.retain(|s| !Arc::ptr_eq(s, &self.share));
-        self.budget.reshare(&seats);
+        let b = self.budget;
+        let mut seats = lock(&b.seats);
+        if let Some(at) = seats
+            .iter()
+            .position(|e| Arc::ptr_eq(&e.share, &self.share))
+        {
+            let e = seats.remove(at);
+            if let (Some(k), Some(files)) = (e.file, b.files()) {
+                files.give_back(k);
+            }
+        }
+        b.look_and_reshare(&seats);
     }
 }
 
@@ -1521,6 +1650,34 @@ mod tests {
         assert_eq!(poolb.as_ref().map(Pool::workers), Some(6));
         drop(poolb);
         assert_eq!(SIX.held(), 0);
+    }
+
+    /// The budget's shares follow the instances of other processes too (decisions.md
+    /// R-THREADS): another process holding two seats, this one's lone instance shares with
+    /// them, the first seat's the remainder; that process killed, its share is all again.
+    #[test]
+    fn the_shares_follow_other_processes_instances() {
+        static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap()).path();
+        static TEN: Budget =
+            Budget::with_files(|n| 12 - n, || DIR.get().map(|d| d.path().to_path_buf()));
+        let share = |s: &Seat| s.share.load(Ordering::Acquire);
+        let a = TEN.sit();
+        assert_eq!((TEN.seated(), share(&a)), (1, 11));
+        let mut child = crate::seats::tests::holder(dir, 2);
+        TEN.refresh_now();
+        // (9 for three, 3 each.)
+        assert_eq!((TEN.seated(), share(&a)), (3, 3));
+        let b = TEN.sit();
+        // (8 for four: 2 each; this process's two among them.)
+        assert_eq!((TEN.seated(), share(&a), share(&b)), (4, 2, 2));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        TEN.refresh_now();
+        // (10 for two: 5 each.)
+        assert_eq!((TEN.seated(), share(&a), share(&b)), (2, 5, 5));
+        drop(b);
+        assert_eq!((TEN.seated(), share(&a)), (1, 11));
     }
 
     /// A new plan (the voices built anew at a new rate, the plug-in deactivated) stops a pool
