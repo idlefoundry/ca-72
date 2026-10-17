@@ -7180,3 +7180,48 @@ after. With the new rule: 0 pixels apart, and 0 changed 4 s after, in 3 runs wit
 diagnostic and 5 without. Then `cargo test --workspace --features
 ca72-plugin/standalone-production` as CI runs it; and the editor's tests and clippy on the Mac
 (see the PR).
+**Evidence (the Mac, 2026-10-17):** `a_packs_keyboard_is_its_own` (an official look draws the
+keyboard as before; a pack's keys and drawing change it); every test, clippy, fmt. SIGNAL BASIN's
+keyboard view passed by the reviewing agent, its last notes taken. Not yet: the presets' drawer.
+
+## R-EDITOR-CPU. The editor's cost while sound plays
+
+**Owner decisions, 2026-10-17.** CPU use is the users' first complaint. Told where it goes (a
+three-agent council and measurements: LO about 1.5 % of a core a voice on the M4 Pro, HI 7 to
+12 %, ULTRA 33 to 108 %), the owner decided: LO stays the default in every version; HI and ULTRA
+stay bit-identical to 0.2.5, only changes that keep the sound the same; the band-limiting, latency
+and ULTRA VCA work waits, the worker budget (R-THREADS) going out alone; and "spend time focusing
+on the editor too. that's something that adds cost to all 3 performance modes." Asked to start
+on the editor's changes that keep its look: "Okay, start."
+
+**Measured first (the Mac, 2026-10-17, `the_window_played`, a window 3440 pixels across):** 11.3 %
+of one core on the editor's thread with only the changed places turned (macOS since R59, Windows,
+X11), 16.6 % with every frame turned whole (two runs each; 9.5 and 13.7 % earlier in the day, the
+machine less busy). Sampled (`/usr/bin/sample`): about a third the panel's renderer (QUALITY's
+shutter's paths, `ultra::Drawn`; pictures scaled bicubic; layers whose SVG changes rasterized
+again), a seventh the strip (most of it the voices' drops, `Liquid::draw`), a tenth composing.
+What the editor draws while sound plays mostly moves: the shutter follows the output thirty times
+a second, the drops the voices, the layers' bodies change (a cache of rasterized bodies hit 9 times
+in 183 and was taken out). The SVG drawn over a layer repeats (4 different in 467 draws), but drawn
+once and put it differs by up to 2 in 255 in 8 % of the channels it covers, for 0.3 % of a core:
+not done, the look being kept to the bit.
+
+**Agent decisions, 2026-10-17** (not separately approved):
+- **Unseen, drawn every 250 ms and not shown.** baseview's frame timer runs whether or not the
+  window can be seen, so the shutter and the drops were drawn thirty times a second behind other
+  windows, minimised, on another Space or with the host hidden. `window::seen` asks macOS for the
+  occlusion state of the window holding the view (`occlusionState`, through `objc`, the version
+  baseview takes) and Windows whether the view is shown and its top window not minimised; X11
+  says nothing reliable without a compositor and is left as it was. Unseen, the keys, gestures
+  and the host are attended to every frame as before and the scene drawn every 250 ms (a resize,
+  the drawer, MIDI Learn kept up), nothing shown; seen again, the frame is shown whole at once.
+- **The drops' columns' dx squared once for all their rows,** the same sums in the same order:
+  200 frames at two scales hashed whole, the same before and after; 0.71 to 0.66 ms a frame for
+  ten voices' drops at 3440 pixels.
+- **`CA72_NO_FRAMES`** keeps `the_window_played` to its times: its frames are 2 GB in memory and
+  on disk, and on a nearly full disk the run failed before printing them.
+
+**Evidence (the Mac, 2026-10-17):** the panel's and plug-in's tests in debug; clippy with
+`-D warnings` on macOS, `cargo check` of the plug-in for `x86_64-pc-windows-msvc`. Not yet: the
+unseen window in hosts (Live, Logic, Reaper; Activity Monitor with the window covered, minimised
+and the host in the background), and on Windows.
