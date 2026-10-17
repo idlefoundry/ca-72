@@ -6294,3 +6294,19 @@ one, in both skins; a pack's tabs, keys, lamp and print colours and its drawing 
 colour not `#rrggbb` refused); every panel, pack and plug-in test, clippy, fmt. SIGNAL BASIN's
 strip passed by the reviewing agent (round 2, its last notes taken). Not yet: the keyboard and
 the drawer, hosts.
+
+**Switches and wheels, 2026-10-17.** The owner: the pitch and mod wheels unlike the concept's,
+and its on/off switches "look much better. Ours have a weird curve in the middle" (the rocker
+picture's hump with the plug-in's paddle light over it).
+
+**Agent decisions** (not separately approved):
+- `rocker-blue-on`, `rocker-orange-on`, `rocker-ivory-on`: a rocker's picture ON. Given, the
+  rocker shows its plain picture off and this one on, neither mirrored, and the plug-in neither
+  lights nor shadows a paddle over it (`render.rs`, the layer rewritten when the look has it).
+- `[look.colours] wheel`: the PITCH and MOD wheels' colour, as sRGB (made linear for their
+  shading). Their shape and shading stay the plug-in's.
+
+**Evidence (the Mac, 2026-10-17):** `a_packs_switches_show_their_state_and_its_wheels_their_colour`;
+the official looks untouched (their rockers have no picture on); every test, clippy, fmt.
+SIGNAL BASIN's switches, remade from a crop of the concept's, and wheels passed by the reviewing
+agent (rounds 3 and 4).

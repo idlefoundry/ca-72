@@ -88,14 +88,28 @@ pub const SLOTS: [(&str, &[u8]); 27] = [
 /// strip's renderer: a tab's cap (the built-in one is made translucent amber and lit from it)
 /// and, if the pack gives one, the tab lit (otherwise lit from the cap as the built-in one is);
 /// the rail's keys' cap; the readouts' and displays' glass; and the ivory rocker (the left
-/// hand's switches, the layout's ivory ones), else made from the blue.
-pub const STRIP_SLOTS: [(&str, &[u8]); 5] = [
+/// hand's switches, the layout's ivory ones), else made from the blue; and each rocker on, if a
+/// pack draws its rockers' two states (a lamp lit) rather than one picture mirrored.
+pub const STRIP_SLOTS: [(&str, &[u8]); 8] = [
     ("tab", BUTTON),
     ("tab-lit", BUTTON),
     ("key", BUTTON),
     ("glass", GLASS),
     ("rocker-ivory", ROCKER_BLUE),
+    ("rocker-blue-on", ROCKER_BLUE),
+    ("rocker-orange-on", ROCKER_ORANGE),
+    ("rocker-ivory-on", ROCKER_BLUE),
 ];
+
+/// The slot of a rocker's picture on, by the part of its picture off.
+pub fn on_slot(part: Part) -> Option<&'static str> {
+    match part {
+        Part::RockerBlue => Some("rocker-blue-on"),
+        Part::RockerOrange => Some("rocker-orange-on"),
+        Part::RockerIvory => Some("rocker-ivory-on"),
+        _ => None,
+    }
+}
 
 /// Every picture built into the plug-in, by name: the worn skin's, the strip's and the
 /// keyboard's. A pack under another licence holding a copy of one is put to review
@@ -178,6 +192,11 @@ pub enum Part {
     RockerBlue,
     RockerOrange,
     RockerIvory,
+    /// A rocker on, as a skin pack draws it (its plain picture then shown off, neither
+    /// mirrored): a switch with a lamp lit, say.
+    RockerBlueOn,
+    RockerOrangeOn,
+    RockerIvoryOn,
     /// The POWER rocker, its upper half raised.
     Power,
     /// The POWER lamp's red jewel in its chrome bezel, and OVERLOAD's darker one.
@@ -242,6 +261,8 @@ pub struct Pictures {
     rocker_blue: Pixmap,
     rocker_orange: Pixmap,
     rocker_ivory: Pixmap,
+    /// A pack's rockers on (blue, orange, ivory), if it draws them.
+    rockers_on: [Option<Pixmap>; 3],
     power: Pixmap,
     jewel: Pixmap,
     jewel_dark: Pixmap,
@@ -365,6 +386,7 @@ impl Pictures {
             rocker_blue,
             rocker_orange: png("rocker-orange"),
             rocker_ivory,
+            rockers_on: ["rocker-blue-on", "rocker-orange-on", "rocker-ivory-on"].map(pack),
             power: png("power"),
             jewel,
             jewel_dark,
@@ -401,6 +423,9 @@ impl Pictures {
             Part::RockerBlue => &self.rocker_blue,
             Part::RockerOrange => &self.rocker_orange,
             Part::RockerIvory => &self.rocker_ivory,
+            Part::RockerBlueOn => self.rockers_on[0].as_ref().unwrap_or(&self.rocker_blue),
+            Part::RockerOrangeOn => self.rockers_on[1].as_ref().unwrap_or(&self.rocker_orange),
+            Part::RockerIvoryOn => self.rockers_on[2].as_ref().unwrap_or(&self.rocker_ivory),
             Part::Power => &self.power,
             Part::Jewel => &self.jewel,
             Part::JewelDark => &self.jewel_dark,

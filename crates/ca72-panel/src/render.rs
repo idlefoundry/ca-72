@@ -602,6 +602,24 @@ impl Renderer {
                     _ => 0.0,
                 };
                 let mut layer = control(c, v, midi);
+                // A pack's rocker drawn in its two states: its picture on or off, neither
+                // mirrored, no paddle lit or shadowed by the plug-in.
+                if worn
+                    && let Some(sp) = layer.sprites.first_mut()
+                    && let Some(slot) = crate::skin::on_slot(sp.part)
+                    && self.look.pictures.contains_key(slot)
+                {
+                    if v >= 0.5 {
+                        sp.part = match sp.part {
+                            Part::RockerBlue => Part::RockerBlueOn,
+                            Part::RockerOrange => Part::RockerOrangeOn,
+                            _ => Part::RockerIvoryOn,
+                        };
+                    }
+                    sp.flip = (false, false);
+                    layer.paddle = None;
+                    layer.body = String::new();
+                }
                 // FEEDBACK while EXTERNAL INPUT is closed: dimmed as the parts with no
                 // parameter are, still operable; DETUNE in SCATTER and VOICES where it does
                 // nothing: dimmed so, and not operable (the editor's `operable`).
@@ -814,7 +832,13 @@ impl Renderer {
             d.draw(&mut pixmap, origin, s as f32);
         }
         if let Some(wheel) = layer.wheel {
-            draw_wheel(&mut pixmap, (ox * s - x0, oy * s - y0), s, wheel);
+            // (A look's colour as written, sRGB: the wheel is shaded in linear light.)
+            let albedo = self
+                .look
+                .colours
+                .wheel
+                .map(|(r, g, b)| [r, g, b].map(|v| (f64::from(v) / 255.0).powf(2.2)));
+            draw_wheel(&mut pixmap, (ox * s - x0, oy * s - y0), s, wheel, albedo);
         }
         if let Some(paddle) = layer.paddle {
             light_paddle(&mut pixmap, (ox * s - x0, oy * s - y0), s, paddle);
@@ -1200,7 +1224,13 @@ fn light_paddle(frame: &mut Pixmap, at: (f64, f64), s: f64, p: art::PaddleArt) {
 /// (above, and up and to the left of, the panel): its ridges every 8 degrees rolling with it,
 /// each lit on its flank towards the lamp; its rim rounded over at its sides; its ends going
 /// down into the slot's shade; PITCH's line or MOD.'s dot rolling with it.
-fn draw_wheel(frame: &mut Pixmap, at: (f64, f64), s: f64, wheel: art::WheelArt) {
+fn draw_wheel(
+    frame: &mut Pixmap,
+    at: (f64, f64),
+    s: f64,
+    wheel: art::WheelArt,
+    albedo: Option<[f64; 3]>,
+) {
     let k = art::WHEEL_SCALE;
     let (hw, hh, r, corner) = (24.0 * k, 67.0 * k, 84.0 * k, 10.0 * k);
     let unit = |(x, y, z): (f64, f64, f64)| {
@@ -1208,7 +1238,8 @@ fn draw_wheel(frame: &mut Pixmap, at: (f64, f64), s: f64, wheel: art::WheelArt) 
         (x / n, y / n, z / n)
     };
     let (light, half) = lamp_vectors();
-    let albedo = [0.80, 0.765, 0.67];
+    // Its colour: a look's, else the built-in cream.
+    let albedo = albedo.unwrap_or([0.80, 0.765, 0.67]);
     let (fw, fh) = (frame.width() as i32, frame.height() as i32);
     let x0 = ((at.0 - hw * s).floor() as i32).max(0);
     let x1 = ((at.0 + hw * s).ceil() as i32).min(fw);

@@ -373,6 +373,7 @@ impl Look {
                 ("drops", &c.drops, &mut colours.drops),
                 ("tab_print", &c.tab_print, &mut colours.tab_print),
                 ("key_print", &c.key_print, &mut colours.key_print),
+                ("wheel", &c.wheel, &mut colours.wheel),
             ] {
                 if let Some(v) = value {
                     match hex(v) {
@@ -537,6 +538,8 @@ struct ColoursTable {
     tab_print: Option<String>,
     #[serde(default)]
     key_print: Option<String>,
+    #[serde(default)]
+    wheel: Option<String>,
     #[serde(flatten)]
     rest: Rest,
 }
@@ -550,6 +553,8 @@ pub struct Colours {
     pub drops: Option<(u8, u8, u8)>,
     pub tab_print: Option<(u8, u8, u8)>,
     pub key_print: Option<(u8, u8, u8)>,
+    /// The PITCH and MOD wheels' (else the built-in cream).
+    pub wheel: Option<(u8, u8, u8)>,
 }
 
 /// A colour written `#rrggbb`.

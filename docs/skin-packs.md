@@ -260,6 +260,7 @@ lamp = "#ffa040"             # its readouts' lit segments, its displays' dots, t
 drops = "#ffa62a"            # optional: the voices' drops' light (else made from lamp)
 tab_print = "#e6dcc4"        # the tabs' lettering
 key_print = "#e6dcc4"        # the rail's keys' marks and lettering
+wheel = "#c4b08e"            # the PITCH and MOD wheels' colour (they are shaded by the plug-in)
 
 [look.pictures]              # optional: realistic only; pictures replacing the built-in ones
 knob = "pictures/knob.png"
@@ -335,6 +336,7 @@ keeps its controls where they are, but a pack may dress it: its wood and face ar
 | `key` | The rail's keys' cap, square, widened as a tab's | 256 × 255 |
 | `glass` | The readouts' and the displays' glass, empty | 900 × 507 |
 | `rocker-ivory` | The ivory rocker (the left hand's switches, and a layout's ivory ones), as `rocker-blue`; otherwise made from `rocker-blue` | 512 × 194 |
+| `rocker-blue-on`, `rocker-orange-on`, `rocker-ivory-on` | A rocker ON, as the pack draws it (a lamp lit, say), framed exactly as the rocker's own picture. Given, that rocker shows its plain picture when off and this one when on, neither mirrored, and the plug-in neither lights nor shadows a rocking paddle on it: for switches that are flat keys with a lamp rather than paddles. Without it, the one picture is mirrored, as before | 512 × 194, 512 × 181 |
 
 - **Colours** in `[look.colours]`: the lamps' (`lamp`), from which the plug-in makes their glow
   and the drops' light as it does its own orange's, and the tabs' and keys' print.

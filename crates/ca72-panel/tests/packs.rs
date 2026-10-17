@@ -720,3 +720,64 @@ fn a_packs_strip_is_its_own() {
             .has("look.colour")
     );
 }
+
+/// A pack's rockers in two states: its picture on drawn when on and its plain one when off,
+/// neither mirrored and no paddle lit by the plug-in; without its picture on, mirrored as
+/// before. And a pack's wheel colour shades the PITCH and MOD wheels.
+#[test]
+fn a_packs_switches_show_their_state_and_its_wheels_their_colour() {
+    let with = |on: bool, wheel: bool| {
+        edited(move |d| {
+            let off = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 8'><rect width='20' height='8' fill='#111'/><rect x='15' y='2' width='4' height='4' fill='#420'/></svg>";
+            let lit = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 8'><rect width='20' height='8' fill='#111'/><rect x='15' y='2' width='4' height='4' fill='#fa4'/></svg>";
+            std::fs::write(d.join("art/off.svg"), off).expect("written");
+            std::fs::write(d.join("art/on.svg"), lit).expect("written");
+            replace(
+                &d.join("skin.toml"),
+                "base = \"classic\"",
+                "base = \"realistic\"",
+            );
+            let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+            let assets = ["art/off.svg", "art/on.svg"]
+                .map(|p| format!("[[assets]]\npath = \"{p}\"\norigin = \"original\"\n\n"))
+                .concat();
+            let colours = if wheel {
+                "\n[look.colours]\nwheel = \"#806040\"\n"
+            } else {
+                ""
+            };
+            let pictures = if on {
+                "\n[look.pictures]\nrocker-blue = \"art/off.svg\"\nrocker-blue-on = \"art/on.svg\"\n"
+            } else {
+                "\n[look.pictures]\nrocker-blue = \"art/off.svg\"\n"
+            };
+            std::fs::write(
+                d.join("skin.toml"),
+                text.replace("[look]", &format!("{assets}[look]")) + colours + pictures,
+            )
+            .expect("written");
+        })
+    };
+    let s = 0.3;
+    let draw = |look: Look, value: f64| {
+        let mut r = Renderer::with_pack(look, Lettering::Standard, s, 1.0);
+        let mut scene = Scene::default();
+        let i = ca72_panel::controls::index("osc1_on").expect("OSC 1 ON");
+        scene.values[i] = value;
+        r.render(&scene);
+        r.frame().data().to_vec()
+    };
+    let open = |on, wheel| {
+        let dir = with(on, wheel);
+        Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"))
+    };
+    let (two, one) = (open(true, false), open(false, false));
+    // On, the two-state pack differs from the mirrored one; off, they are the same picture
+    // unmirrored against mirrored, so they differ too, but the two-state pack's off and on
+    // differ only by the lamp.
+    assert!(draw(two.clone(), 1.0) != draw(one.clone(), 1.0));
+    assert!(draw(two.clone(), 0.0) != draw(two.clone(), 1.0));
+    let wheel = open(false, true);
+    assert_eq!(wheel.colours.wheel, Some((0x80, 0x60, 0x40)));
+    assert!(draw(wheel, 0.0) != draw(one, 0.0));
+}

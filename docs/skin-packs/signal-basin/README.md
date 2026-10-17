@@ -68,6 +68,13 @@ face (`spill.py`). `rocker-ivory.png` is the black rocker again, so that the lef
 switches match the panel's; the screw picture (the left hand's mountings) darkened to the
 drawn screws' bronze. The lamps' colours are the manifest's (`[look.colours]`).
 
+**The switches.** Every on/off switch (the oscillators' ON, the left hand's, the filter's) is
+the concept's illuminated switch: a bezel round a plain Bakelite half and a translucent amber
+lens, generated off from a crop of the concept and on as an edit of it, cropped on one frame
+(`switches.py`), and given as `rocker-blue` and `rocker-blue-on` (and the ivory again), so the
+plug-in shows each state's picture rather than mirroring one. The PITCH and MOD wheels are
+shaded by the plug-in in the manifest's `wheel` colour.
+
 ## The prompts
 
 ### `knob` (with a crop of the concept picture)
@@ -240,3 +247,23 @@ drawn screws' bronze. The lamps' colours are the manifest's (`[look.colours]`).
 > The attached picture is cropped from a concept picture of a synthesizer's lower panel: a numeric readout's window of near-black quiet glass (its amber digit is drawn by the plug-in, so leave it out). Make a straight-on, evenly lit close photograph of exactly that glass, empty: near-black smoked glass with a very faint cool tint, the faintest fine mesh just visible behind it, a soft even sheen, filling a landscape frame (about 16 by 9) edge to edge, as large as you can make it.
 > - Completely empty: no digits, segments, letters, dots, frame, bezel or marks.
 > - Even across the frame: no vignetting, no gradient, no reflections of objects; sharp focus.
+
+### `switch` (with a crop of the strip's concept's switch)
+
+> Use your image generation tool to make one image, then save it in the current directory as switch.png (copy the generated file there). Do nothing else.
+>
+> The attached picture is cropped from a concept picture of a synthesizer panel: an illuminated on/off rocker switch, shown ON. Make exactly that switch as a standalone product picture, but OFF:
+> - A landscape switch about 2.2 times as wide as it is tall, seen from straight in front, exactly as the attached one: a dark charcoal rectangular bezel with softly rounded corners and a thin light edge along its top, and inside it a key made of TWO halves side by side, divided by a thin dark line down the middle.
+> - The LEFT half: plain dark Bakelite, satin, with a thin light edge along its top.
+> - The RIGHT half: a translucent amber lens, almost filling that half (a small margin round it), UNLIT: a deep smoky brown-amber glass, dark but clearly a window, with a faint reflection along its top.
+> - Flat and even, no lettering, no symbols.
+> - Straight-on orthographic, the switch filling about 90 percent of the frame's width, a landscape frame, sharp focus.
+> - Lighting: soft, from up and to the left, no cast shadow.
+> - Background: fully transparent (a PNG with an alpha channel). If that is not possible, a perfectly flat plain mid-grey (#808080).
+> - No text, symbols, logos or numbers anywhere.
+
+### `switch-on` (with a crop of the strip's concept's switch)
+
+> Use your image generation tool to edit the first attached picture (switch.png: an illuminated rocker switch, OFF, its right half an unlit amber lens), then save the result in the current directory as switch-on.png (copy the generated file there). Do nothing else.
+>
+> Keep everything exactly the same (the bezel, the two halves, their size and place in the frame, the transparent background) except the right half's amber lens: now LIT from behind, as in the second attached picture: a warm glowing amber (#ffa040) brightest in its middle (a soft hot core, #ffd080), its edges a deeper orange, a little glow spilling onto the bezel round it. The left half unchanged. No text, symbols, logos or numbers anywhere.
