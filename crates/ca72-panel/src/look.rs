@@ -520,10 +520,9 @@ fn run_off(fonts: &Fonts, arrangement: &Arrangement) -> Vec<String> {
             let size = t.size.unwrap_or(lettering.legend());
             let (x, y) = t.at_in(lettering);
             let half = fonts.advance(&t.text, size, Weight::Bold, 0.0) * art::STRETCH / 2.0;
-            let inside = x - half >= 0.0
-                && x + half <= art::PW
-                && y - size >= -art::TOP
-                && y + size <= art::PH;
+            let c = arrangement.panel.canvas();
+            let inside =
+                x - half >= c[0] && x + half <= c[2] && y - size >= c[1] && y + size <= c[3];
             if !inside && !out.contains(&t.text) {
                 out.push(t.text.clone());
             }

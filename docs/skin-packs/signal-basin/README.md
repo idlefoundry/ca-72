@@ -4,10 +4,12 @@
 (`LICENSE.txt`).*
 
 Weathered teal enamel with black panels let into it, edged in copper and screwed down with
-bronze screws; satin cream knobs, black lamp rockers and amber lamps, in a walnut case. Its arrangement follows the concept's: the controllers' bay; a
-framed central bay holding the external input and noise, three oscillator rows whose copper
-lines leave through grommets into a bus, and the bus feeding the FILTER and the two contours;
-then OUTPUT's and POWER's bays.
+bronze screws; satin cream knobs, black lamp rockers and amber lamps, in a walnut case. Its arrangement follows the concept's, on a face taller than the
+official one (1030 units, its layout's `[panel]`): the controllers' bay; a framed central bay
+holding four rows (the three oscillators, and the external input and noise as the fourth)
+whose copper lines leave through grommets into a bus, and the bus feeding the FILTER and the
+two contours; then OUTPUT's and POWER's bays. Its editor window is taller than the official
+looks' at the same width.
 
 Install it by copying this folder into Idle Foundry's `Skins` folder (docs/skin-packs.md says
 where) and choosing SIGNAL BASIN under LOOK in the editor's settings menu.

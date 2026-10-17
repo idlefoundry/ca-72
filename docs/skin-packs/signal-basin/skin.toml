@@ -7,7 +7,7 @@ id = "org.idlefoundry.signal-basin"
 name = "SIGNAL BASIN"
 version = "0.1.0"
 plugin = "ca-72"
-summary = "Weathered teal and copper: every source in a row of its own, flowing into one copper bus."
+summary = "Weathered teal and copper: four rows of sources flowing into one copper bus, on a taller panel."
 license = "CC0-1.0"
 license_files = ["LICENSE.txt"]
 

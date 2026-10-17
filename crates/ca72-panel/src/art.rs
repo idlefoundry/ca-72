@@ -30,6 +30,60 @@ pub const STRIP_H: f64 = 850.0;
 /// The drawing's height: the panel and the strip.
 pub const H: f64 = PANEL_H + STRIP_H;
 
+/// A look's panel's size (decisions.md R-SKIN-PACKS): its wooden strip's height and its face's
+/// (drawing units), the width always [`PW`]. Its face's foot is always at [`PANEL_H`], where
+/// the plug-in's strip begins, so that everything under it keeps its place in the drawing;
+/// a panel taller than the official one reaches above the drawing's 0, a shorter one starts
+/// below it. Places on the face are kept as the official panel's ([`TOP`] its face's top):
+/// a layout's are moved by [`Panel::shift`] as it is read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Panel {
+    pub wood: f64,
+    pub face: f64,
+}
+
+impl Panel {
+    /// The official panel's.
+    pub const OFFICIAL: Panel = Panel {
+        wood: TOP,
+        face: PH,
+    };
+    /// What a pack may choose: the face's height, and the wooden strip's (or none).
+    pub const FACE: (f64, f64) = (700.0, 1200.0);
+    pub const WOOD: (f64, f64) = (60.0, 200.0);
+
+    /// The drawing's y of the face's top.
+    pub fn face_top(&self) -> f64 {
+        PANEL_H - self.face
+    }
+
+    /// The drawing's y of the panel's top, the wooden strip's: where the frame begins.
+    pub fn top(&self) -> f64 {
+        PANEL_H - self.face - self.wood
+    }
+
+    /// The panel's height: the wooden strip and the face.
+    pub fn height(&self) -> f64 {
+        self.wood + self.face
+    }
+
+    /// The drawing's height from the panel's top: the panel and the strip.
+    pub fn drawing_h(&self) -> f64 {
+        H - self.top()
+    }
+
+    /// What a layout's face units are moved by to be the official panel's (its face's foot
+    /// at [`PH`]).
+    pub fn shift(&self) -> f64 {
+        PH - self.face
+    }
+
+    /// The canvas in the official panel's face units: the wooden strip and the face.
+    pub fn canvas(&self) -> [f64; 4] {
+        [0.0, self.top() - TOP, PW, PH]
+    }
+}
+
 /// How large the lettering is printed (R-LETTERING): as the photograph has it, or a size
 /// larger for those who find that hard to read at the size the editor opens, chosen in the
 /// settings' menu. LARGE moves four legends clear of what grew beside them; the controls stay
@@ -793,13 +847,18 @@ pub fn jacks(arrangement: &Arrangement) -> Vec<(f64, f64, f64, bool)> {
 }
 
 fn wood(s: &mut Svg, arrangement: &Arrangement) {
-    // The top strip and the strip's rail. No cheeks: the ends are square.
-    put!(
-        s,
-        "<rect x='0' y='0' width='{}' height='{}' fill='url(#wood-h)'/>",
-        N(W),
-        N(TOP)
-    );
+    // The top strip (the panel's size's, if any) and the strip's rail. No cheeks: the ends
+    // are square.
+    let p = arrangement.panel;
+    if p.wood > 0.0 {
+        put!(
+            s,
+            "<rect x='0' y='{}' width='{}' height='{}' fill='url(#wood-h)'/>",
+            N(p.top()),
+            N(W),
+            N(p.wood)
+        );
+    }
     put!(
         s,
         "<rect x='0' y='{}' width='{}' height='{}' fill='url(#wood-h)'/>",
@@ -836,7 +895,9 @@ fn wood(s: &mut Svg, arrangement: &Arrangement) {
     };
     // The top strip's grain laid out as when the left hand's column stood left of the panel,
     // 330 units wide: the panel's wood stays as approved.
-    grain(s, -330.0, 6.0, W + 330.0, TOP - 12.0, true, 7);
+    if p.wood > 12.0 {
+        grain(s, -330.0, p.top() + 6.0, W + 330.0, p.wood - 12.0, true, 7);
+    }
     grain(s, 0.0, PANEL_H + 6.0, W, crate::strip::RAIL - 12.0, true, 6);
     for (x, y, r) in top_screws(arrangement) {
         screw(s, x, y, r);
@@ -866,18 +927,25 @@ fn grip(s: &mut Svg) {
 fn panel(s: &mut Svg, layout: &Layout, arrangement: &Arrangement, ink: Ink) {
     put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
     if ink != Ink::Print {
+        // (Its top in the face's units: 0 on the official panel.)
+        let face = arrangement.panel.face;
+        let y = PH - face;
         put!(
             s,
-            "<rect x='0' y='0' width='{}' height='{}' fill='{PANEL}'/>",
+            "<rect x='0' y='{}' width='{}' height='{}' fill='{PANEL}'/>",
+            N(y),
             N(PW),
-            N(PH)
+            N(face)
         );
         put!(
             s,
-            "<rect x='0' y='0' width='{}' height='7' fill='{SHADOW}' fill-opacity='{SHADOW_OPACITY}'/>",
+            "<rect x='0' y='{}' width='{}' height='7' fill='{SHADOW}' fill-opacity='{SHADOW_OPACITY}'/>",
+            N(y),
             N(PW)
         );
-        trims(s);
+        put!(s, "<g transform='translate(0 {})'>", N(y));
+        trims(s, face);
+        s.0.push_str("</g>");
     }
     if ink != Ink::Surface {
         print(s, layout, arrangement);
@@ -945,23 +1013,24 @@ fn print(s: &mut Svg, layout: &Layout, arrangement: &Arrangement) {
     }
 }
 
-/// The aluminium trim at the face's ends and along its foot, in the face's own place.
-pub(crate) fn trims(s: &mut Svg) {
+/// The aluminium trim at the face's ends and along its foot, in the face's own place (its top
+/// left corner), the face `face` tall.
+pub(crate) fn trims(s: &mut Svg, face: f64) {
     put!(
         s,
         "<rect x='0' y='0' width='15' height='{}' fill='url(#trim)'/>",
-        N(PH)
+        N(face)
     );
     put!(
         s,
         "<rect x='{}' y='0' width='28' height='{}' fill='url(#trim)'/>",
         N(PW - 28.0),
-        N(PH)
+        N(face)
     );
     put!(
         s,
         "<rect x='0' y='{}' width='{}' height='6' fill='url(#trim)'/>",
-        N(PH - 6.0),
+        N(face - 6.0),
         N(PW)
     );
 }
@@ -2011,12 +2080,19 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
         "<defs><linearGradient id='edge-lit' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#ffe6c8' stop-opacity='0.16'/><stop offset='1' stop-color='#ffe6c8' stop-opacity='0'/></linearGradient><linearGradient id='edge-dark' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0'/><stop offset='1' stop-color='#000' stop-opacity='0.45'/></linearGradient><linearGradient id='under-wood' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0.6'/><stop offset='1' stop-color='#000' stop-opacity='0'/></linearGradient><filter id='long' x='-0.6' y='-0.6' width='2.2' height='2.2'><feGaussianBlur stdDeviation='7'/></filter><filter id='soft' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='3.5'/></filter><filter id='softer' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='2'/></filter></defs>"
     );
     let rail = crate::strip::RAIL;
-    for (y, h, fill) in [
-        (0.0, 10.0, "edge-lit"),
-        (TOP - 14.0, 14.0, "edge-dark"),
+    let p = arrangement.panel;
+    let wood = if p.wood > 0.0 {
+        vec![
+            (p.top(), 10.0, "edge-lit"),
+            (p.face_top() - 14.0, 14.0, "edge-dark"),
+        ]
+    } else {
+        vec![]
+    };
+    for (y, h, fill) in wood.into_iter().chain([
         (PANEL_H, 10.0, "edge-lit"),
         (PANEL_H + rail - 14.0, 14.0, "edge-dark"),
-    ] {
+    ]) {
         put!(
             s,
             "<rect x='0' y='{}' width='{}' height='{}' fill='url(#{fill})'/>",
@@ -2025,7 +2101,10 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
             N(h)
         );
     }
-    for y in [TOP, PANEL_H + rail] {
+    for y in [p.face_top(), PANEL_H + rail] {
+        if y == p.face_top() && p.wood == 0.0 {
+            continue;
+        }
         put!(
             s,
             "<rect x='{}' y='{}' width='{}' height='14' fill='url(#under-wood)'/>",
@@ -2034,8 +2113,13 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
             N(PW)
         );
     }
-    put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
-    trims(&mut s);
+    put!(
+        s,
+        "<g transform='translate({} {})'>",
+        N(COL),
+        N(p.face_top())
+    );
+    trims(&mut s, p.face);
     s.0.push_str("</g>");
     put!(s, "<g transform='translate(0 {})'>", N(PANEL_H + rail));
     strip_trims(&mut s);

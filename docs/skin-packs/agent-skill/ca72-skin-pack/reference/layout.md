@@ -27,7 +27,16 @@ down to **795**. The wooden strip above the face runs from **y = -130** to 0. Ev
 the layout (controls with their click areas, fixtures, rules, legends, titles) must stay
 inside x 0 to 3108, y -130 to 795.
 
-The drawing (`art/panel.svg`) uses the same x but **y + 130**: see [drawing.md](drawing.md).
+**A taller or shorter panel.** A `[panel]` table gives the face another height (`face`, 700 to
+1200) and the wooden strip another (`wood`, 60 to 200, or 0 for none; 130 if absent); the width
+stays 3108. Then everything stays inside x 0 to 3108, y `-wood` to `face`. Use it when the
+design needs room, not by default: a taller panel makes the editor's window taller at the same
+width. Four rows of knobs with legends need a face of about 1,000. Give the pack
+`requires = "ca-72 >= <the first version with [panel]>"` so that an older CA-72 refuses it
+with a reason instead of rejecting its layout.
+
+The drawing (`art/panel.svg`) uses the same x but **y + wood** (130): see
+[drawing.md](drawing.md).
 
 ## The 42 controls, by kind
 

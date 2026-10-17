@@ -260,7 +260,8 @@ walnut = "pictures/walnut.svg"
 ```
 
 - **The drawing** (`art`) is stretched over the panel: the wooden strip and the face, 3108 by
-  925 units (give it `viewBox="0 0 3108 925"`). It is drawn over the panel's surfaces (the wood,
+  925 units for the official panel's size (give it `viewBox="0 0 3108 925"`), or 3108 by the
+  wooden strip and the face together for a layout's own (see The panel's size). It is drawn over the panel's surfaces (the wood,
   the face, the realistic look's trim and shadows) and under its print, controls, screws and
   jacks. Nothing outside the panel is drawn. The strip below the panel, which holds the
   plug-in's own controls, is not part of a pack's drawing.
@@ -377,7 +378,24 @@ The official layout is the reference for every field: it is
 is a CC0 one to begin from.
 
 Units are the drawing's. The face's top left corner is at 0, 0, x runs right (0 to 3108) and y
-runs down: the face from 0 to 795, the wooden strip above it from -130 to 0.
+runs down: the face from 0 to 795, the wooden strip above it from -130 to 0 (for the official
+panel's size; a layout may choose another, below).
+
+**The panel's size.** A layout may give its panel another height:
+
+```toml
+[panel]
+face = 1000               # the face's height: 700 to 1200 (the official panel's is 795)
+wood = 130                # optional: the wooden strip's, 60 to 200, or 0 for none (130)
+```
+
+Its width is always 3108. Its places are then in its own size's units: the face from 0 to
+`face`, the wooden strip from `-wood` to 0, and its drawing 3108 by `wood + face`. The editor's
+window keeps its width and changes its height to fit (the strip below the panel, with the
+plug-in's own controls, is the same at every size); if a host will not resize the window, the
+look shown before stays. A CA-72 older than `[panel]` passes it over and reads the layout at
+the official size, where a taller layout's controls fall outside the panel and it is refused:
+give such a pack `requires` (see Compatibility).
 
 ```toml
 format = 1

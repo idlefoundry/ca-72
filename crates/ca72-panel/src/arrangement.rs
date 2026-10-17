@@ -15,7 +15,7 @@ use std::sync::{Arc, OnceLock};
 use serde::Deserialize;
 use skin_pack::Report;
 
-use crate::art::{self, PH, PW, TOP};
+use crate::art::{self, PW, Panel, TOP};
 use crate::controls::{CONTROL_SET, CONTROLS, Colour, Control, ControlSet, Kind, Orient, Place};
 
 /// The layout data's format.
@@ -90,6 +90,9 @@ pub struct Arrangement {
     pub phones: Option<(f64, f64, f64)>,
     /// The wooden strip's screws: centre and radius, in the face's units.
     pub screws: Vec<(f64, f64, f64)>,
+    /// The panel's size. Every place above is in the official panel's face units (its face's
+    /// foot at [`PH`]), a layout's moved so as it was read ([`Panel::shift`]).
+    pub panel: Panel,
 }
 
 /// What a layout's tables hold that this build does not read: noted, not refused (a field a
@@ -103,6 +106,9 @@ struct File {
     #[serde(default)]
     controls: Option<u32>,
     fixtures: Fixtures,
+    /// The panel's size, if not the official panel's.
+    #[serde(default)]
+    panel: Option<PanelEntry>,
     #[serde(default)]
     control: Vec<ControlEntry>,
     #[serde(default)]
@@ -126,6 +132,17 @@ struct Fixtures {
     phones: Option<[f64; 3]>,
     #[serde(default)]
     screws: Vec<[f64; 3]>,
+    #[serde(flatten)]
+    rest: Rest,
+}
+
+#[derive(Deserialize)]
+struct PanelEntry {
+    /// The face's height.
+    face: f64,
+    /// The wooden strip's above it (the official panel's if absent; 0: none).
+    #[serde(default)]
+    wood: Option<f64>,
     #[serde(flatten)]
     rest: Rest,
 }
@@ -183,11 +200,23 @@ struct TextEntry {
 /// The section titles' size (their capitals 38.5 units tall).
 pub const TITLE_SIZE: f64 = 52.0;
 
-/// The canvas a layout draws on, in the face's units: the face and the wooden strip above it.
-const CANVAS: [f64; 4] = [0.0, -TOP, PW, PH];
+/// The canvas the official layout draws on, in the face's units: the face and the wooden strip
+/// above it. (A pack's panel's size gives its own: [`canvas`].)
+#[cfg(test)]
+const CANVAS: [f64; 4] = [0.0, -TOP, PW, art::PH];
 
+/// The canvas of a panel `p`'s size, in its layout's face units.
+fn canvas(p: Panel) -> [f64; 4] {
+    [0.0, -p.wood, PW, p.face]
+}
+
+fn inside_of(c: [f64; 4], r: [f64; 4]) -> bool {
+    r[0] >= c[0] && r[1] >= c[1] && r[2] <= c[2] && r[3] <= c[3]
+}
+
+#[cfg(test)]
 fn inside(r: [f64; 4]) -> bool {
-    r[0] >= CANVAS[0] && r[1] >= CANVAS[1] && r[2] <= CANVAS[2] && r[3] <= CANVAS[3]
+    inside_of(CANVAS, r)
 }
 
 fn overlap(a: [f64; 4], b: [f64; 4]) -> bool {
@@ -288,6 +317,9 @@ impl Arrangement {
         };
         rest("", &file.rest);
         rest("fixtures.", &file.fixtures.rest);
+        if let Some(p) = &file.panel {
+            rest("panel.", &p.rest);
+        }
         file.control.iter().for_each(|e| rest("control.", &e.rest));
         file.line.iter().for_each(|e| rest("line.", &e.rest));
         file.title.iter().for_each(|e| rest("title.", &e.rest));
@@ -307,6 +339,27 @@ impl Arrangement {
             ));
         }
         let mut reject = |code, msg: String| report.reject(code, at, msg);
+
+        // The panel's size: its face's height and its wooden strip's, the width the plug-in's.
+        let size = file.panel.as_ref().map_or(Panel::OFFICIAL, |p| Panel {
+            face: p.face,
+            wood: p.wood.unwrap_or(TOP),
+        });
+        let (f, w) = (Panel::FACE, Panel::WOOD);
+        if !(f.0..=f.1).contains(&size.face)
+            || !(size.wood == 0.0 || (w.0..=w.1).contains(&size.wood))
+        {
+            reject(
+                "layout.panel",
+                format!(
+                    "the panel's face {} to {} units tall, its wooden strip {} to {} (or 0)",
+                    f.0, f.1, w.0, w.1
+                ),
+            );
+            return None;
+        }
+        let canvas = canvas(size);
+        let inside = |r: [f64; 4]| inside_of(canvas, r);
 
         // The controls: every one of the panel's, once each, its kind's look only; one renamed
         // since the layout was made found by its old name, one retired since passed over.
@@ -615,7 +668,7 @@ impl Arrangement {
             }
             for i in added {
                 let official = CONTROLS[i];
-                match free_spot(&official, &occupied) {
+                match free_spot(&official, &occupied, canvas) {
                     Some((x, y)) => {
                         let b = hit_bounds(&official.kind);
                         occupied.push([x + b[0], y + b[1], x + b[2], y + b[3]]);
@@ -651,7 +704,12 @@ impl Arrangement {
                 }
             }
         }
-        let pair = |p: [f64; 2]| (p[0], p[1]);
+        // Every place moved to the official panel's face units (its foot at PH).
+        let d = size.shift();
+        let pair = |p: [f64; 2]| (p[0], p[1] + d);
+        for c in controls.iter_mut().filter(|c| c.place == Place::Panel) {
+            c.y += d;
+        }
         Some(Arrangement {
             controls,
             lines: file
@@ -668,8 +726,8 @@ impl Arrangement {
                 .into_iter()
                 .map(|t| Title {
                     text: t.text,
-                    span: pair(t.span),
-                    baseline: t.baseline,
+                    span: (t.span[0], t.span[1]),
+                    baseline: t.baseline + d,
                     size: t.size.unwrap_or(TITLE_SIZE),
                 })
                 .collect(),
@@ -688,8 +746,9 @@ impl Arrangement {
             overload: pair(fx.overload),
             ultra: pair(fx.ultra),
             plate: pair(fx.plate),
-            phones: fx.phones.map(|p| (p[0], p[1], p[2])),
-            screws: fx.screws.iter().map(|s| (s[0], s[1], s[2])).collect(),
+            phones: fx.phones.map(|p| (p[0], p[1] + d, p[2])),
+            screws: fx.screws.iter().map(|s| (s[0], s[1] + d, s[2])).collect(),
+            panel: size,
         })
     }
 
@@ -718,9 +777,10 @@ impl Arrangement {
 /// it is free there (its click area and its printed dial on the panel, over nothing in
 /// `occupied`), else at the free place nearest it, searched outward in rings 8 units apart;
 /// `None` if the panel has none.
-pub fn free_spot(c: &Control, occupied: &[[f64; 4]]) -> Option<(f64, f64)> {
+pub fn free_spot(c: &Control, occupied: &[[f64; 4]], canvas: [f64; 4]) -> Option<(f64, f64)> {
     let b = hit_bounds(&c.kind);
     let e = art::print_extent(&c.kind);
+    let inside = |r: [f64; 4]| inside_of(canvas, r);
     let fits = |(x, y): (f64, f64)| {
         let hit = [x + b[0], y + b[1], x + b[2], y + b[3]];
         inside(hit)
@@ -732,7 +792,7 @@ pub fn free_spot(c: &Control, occupied: &[[f64; 4]]) -> Option<(f64, f64)> {
         return Some((x0, y0));
     }
     const STEP: f64 = 8.0;
-    let rings = ((PW.max(PH + TOP)) / STEP).ceil() as i64;
+    let rings = ((PW.max(canvas[3] - canvas[1])) / STEP).ceil() as i64;
     for n in 1..=rings {
         let r = n as f64 * STEP;
         let mut ring: Vec<(f64, f64)> = Vec::with_capacity(8 * n as usize);
@@ -1008,8 +1068,8 @@ mod tests {
     #[test]
     fn a_full_panel_has_no_free_place() {
         let i = crate::controls::index("a440").expect("a control");
-        assert_eq!(free_spot(&CONTROLS[i], &[CANVAS]), None);
-        assert!(free_spot(&CONTROLS[i], &[]).is_some());
+        assert_eq!(free_spot(&CONTROLS[i], &[CANVAS], CANVAS), None);
+        assert!(free_spot(&CONTROLS[i], &[], CANVAS).is_some());
     }
 
     #[test]

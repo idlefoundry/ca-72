@@ -73,10 +73,11 @@ fn main() {
         });
         scene.bar.keyboard = true;
     }
+    strip.set_under_top(r.top_px());
     strip.render(&scene, r.frame(), None);
     eprintln!("the strip {:?}", t3.elapsed());
     let mut all = r.frame().clone();
-    let top = (ca72_panel::art::PANEL_H * scale).round() as usize;
+    let top = r.strip_row() as usize;
     let w = all.width() as usize;
     let sf = strip.frame();
     let rows = (sf.height() as usize).min(all.height() as usize - top);

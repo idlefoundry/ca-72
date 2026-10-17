@@ -15,7 +15,7 @@
 
 use std::any::Any;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -91,17 +91,53 @@ const NOTCH: f64 = 40.0;
 const MENU_TEXT: f64 = 1.15;
 
 /// The editor's height at `width`: the panel and the strip under it, in the drawing's
-/// proportions.
+/// proportions (the official panel's).
 pub fn height_for(width: u32) -> u32 {
-    (f64::from(width) * art::H / art::W).round() as u32
+    height_with(width, art::Panel::OFFICIAL)
 }
 
+/// The same with a panel of `panel`'s size (a skin pack's: decisions.md R-SKIN-PACKS).
+pub fn height_with(width: u32, panel: art::Panel) -> u32 {
+    (f64::from(width) * panel.drawing_h() / art::W).round() as u32
+}
+
+/// The official panel's (the tests' measure).
+#[cfg(test)]
 fn height_for_panel(width: u32, expanded: bool) -> u32 {
+    height_in(width, expanded, art::Panel::OFFICIAL)
+}
+
+/// The window's height at `width`, the lower panel shown (`expanded`) or not, the panel `panel`.
+fn height_in(width: u32, expanded: bool, panel: art::Panel) -> u32 {
     if expanded {
-        height_for(width)
+        height_with(width, panel)
     } else {
-        (f64::from(width) * DRAWER_TOP / art::W).round() as u32
+        (f64::from(width) * (DRAWER_TOP - panel.top()) / art::W).round() as u32
     }
+}
+
+/// The panel's size of the look chosen on this computer, as an editor last opened or changed
+/// to it: the window's height before an editor opens (its look is read as it opens, and the
+/// window asked to follow it if it differs). The official panel's (0) until then.
+static CHOSEN_PANEL: AtomicU64 = AtomicU64::new(0);
+
+fn chosen_panel() -> art::Panel {
+    match CHOSEN_PANEL.load(Ordering::Relaxed) {
+        0 => art::Panel::OFFICIAL,
+        bits => art::Panel {
+            wood: f64::from(f32::from_bits((bits >> 32) as u32)),
+            face: f64::from(f32::from_bits(bits as u32)),
+        },
+    }
+}
+
+fn choose_panel(p: art::Panel) {
+    let bits = if p == art::Panel::OFFICIAL {
+        0
+    } else {
+        (u64::from((p.wood as f32).to_bits()) << 32) | u64::from((p.face as f32).to_bits())
+    };
+    CHOSEN_PANEL.store(bits, Ordering::Relaxed);
 }
 
 fn clamp_width(width: u32) -> u32 {
@@ -112,7 +148,7 @@ fn clamp_width(width: u32) -> u32 {
 /// (logical pixels), its height kept within the same share.
 fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
     screen.map_or(DEFAULT_WIDTH, |(w, h)| {
-        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / art::H);
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / chosen_panel().drawing_h());
         clamp_width(w.round() as u32)
     })
 }
@@ -656,7 +692,7 @@ impl Editor for Ca72Editor {
         } else {
             self.params.editor_expanded.load(Ordering::Relaxed)
         };
-        (width, height_for_panel(width, expanded))
+        (width, height_in(width, expanded, chosen_panel()))
     }
 
     fn resize_request(&self) -> (u64, (u32, u32)) {
@@ -837,6 +873,9 @@ struct Editing {
     damage: Option<Vec<[i32; 4]>>,
     /// A size asked of the window.
     resizing_window: bool,
+    /// The window to be asked to follow the look's panel's size (it opened at the size last
+    /// chosen, and the look read as it opened has another).
+    panel_due: bool,
     /// The drawer placed for its opening (below the strip or over the panel), asked once.
     placed: bool,
     /// The update check in the drawer; dropped with the editor, it ends a check under way.
@@ -912,7 +951,11 @@ impl PanelWindow {
         library: Library,
         host_keys: Arc<HostKeys>,
     ) -> Self {
-        let height = height_for_panel(width, params.editor_panel.load(Ordering::Relaxed));
+        let height = height_in(
+            width,
+            params.editor_panel.load(Ordering::Relaxed),
+            chosen_panel(),
+        );
         let physical = (
             (f64::from(width) * dpr).round() as u32,
             (f64::from(height) * dpr).round() as u32,
@@ -1121,6 +1164,7 @@ impl Editing {
             composed: None,
             damage: None,
             resizing_window: false,
+            panel_due: false,
             placed: false,
             update: Update::default(),
             learning: Learning::default(),
@@ -1157,6 +1201,12 @@ impl Editing {
     /// As it opens: what QUALITY's setting shows up in its opening, not moving (the hamster
     /// asleep); it watches the levels, and the voices' peaks held while it was shut are let go.
     fn opened(mut self) -> Self {
+        // The window opened at the panel's size last chosen; the look's may differ.
+        self.strip.set_under_top(self.renderer.top_px());
+        if self.panel() != chosen_panel() {
+            choose_panel(self.panel());
+            self.panel_due = true;
+        }
         self.meters.watchers.fetch_add(1, Ordering::Relaxed);
         let _ = self.meters.take_levels();
         self.motion = Motion::at(self.params.quality.value(), 0.0);
@@ -1189,9 +1239,41 @@ impl Editing {
     }
 
     /// The panel's renderer made again in `look` (its pictures decoded as it first draws).
+    ///
+    /// A look whose panel is another size than the one shown asks the window to follow it, its
+    /// width kept (decisions.md R-SKIN-PACKS); the host refusing, the look shown stays.
     fn draw_in(&mut self, look: Look) {
         let lettering = self.renderer.lettering();
-        self.renderer = Renderer::with_pack(look, lettering, self.renderer.scale(), self.dpr);
+        let before = self.panel();
+        let renderer = Renderer::with_pack(look, lettering, self.renderer.scale(), self.dpr);
+        let was = std::mem::replace(&mut self.renderer, renderer);
+        if self.panel() != before {
+            if !self.ask_resize(self.width) {
+                self.renderer = was;
+                return;
+            }
+            choose_panel(self.panel());
+            self.resizing_window = true;
+        }
+        self.strip.set_under_top(self.renderer.top_px());
+        self.composed = None;
+    }
+
+    /// The window asked to follow the look's panel as it opened; the host refusing, the look's
+    /// base drawn instead (its panel the official one, as the window is).
+    fn follow_panel(&mut self) {
+        if !std::mem::take(&mut self.panel_due) {
+            return;
+        }
+        if self.ask_resize(self.width) {
+            self.resizing_window = true;
+        } else {
+            let base = Look::of(self.renderer.look().base);
+            let lettering = self.renderer.lettering();
+            self.renderer = Renderer::with_pack(base, lettering, self.renderer.scale(), self.dpr);
+            choose_panel(self.panel());
+        }
+        self.strip.set_under_top(self.renderer.top_px());
         self.composed = None;
     }
 
@@ -1204,7 +1286,7 @@ impl Editing {
         let expanded = self.expanded();
         let fits = |w: u32| {
             screen.is_none_or(|(sw, sh)| {
-                f64::from(w) <= sw && f64::from(height_for_panel(w, expanded)) <= sh
+                f64::from(w) <= sw && f64::from(height_in(w, expanded, self.panel())) <= sh
             })
         };
         let mut sizes: Vec<_> = SIZES
@@ -1382,6 +1464,7 @@ impl Editing {
         let scale = f64::from(physical_width) / art::W;
         self.renderer.rescale(scale, dpr);
         self.strip.rescale(scale);
+        self.strip.set_under_top(self.renderer.top_px());
         self.drawer.rescale(scale);
         self.composed = None;
     }
@@ -1393,13 +1476,14 @@ impl Editing {
     /// The pointer's place in the drawing.
     fn in_drawing(&self, (x, y): (f64, f64)) -> (f64, f64) {
         let k = self.dpr / self.renderer.scale();
-        (x * k, y * k)
+        (x * k, y * k + self.renderer.top())
     }
 
     /// The compact view's grip is on the rail; controls outside the view cannot be hit.
     fn hit(&self, x: f64, y: f64) -> Option<Target> {
         if !self.expanded() {
-            let bottom = f64::from(self.physical_height()) / self.renderer.scale();
+            let bottom =
+                f64::from(self.physical_height()) / self.renderer.scale() + self.renderer.top();
             if !(0.0..bottom).contains(&y) {
                 return None;
             }
@@ -1435,7 +1519,12 @@ impl Editing {
 
     /// The window's height (logical pixels): the synth and rail, with the lower panel shown.
     fn window_height(&self) -> u32 {
-        height_for_panel(self.width, self.expanded())
+        height_in(self.width, self.expanded(), self.panel())
+    }
+
+    /// The panel's size, its look's.
+    fn panel(&self) -> art::Panel {
+        self.renderer.arrangement().panel
     }
 
     fn resize_view(&self) -> crate::resizing::View {
@@ -1460,7 +1549,7 @@ impl Editing {
             let physical = WindowInfo::from_logical_size(
                 Size::new(
                     f64::from(view.width),
-                    f64::from(height_for_panel(view.width, view.expanded)),
+                    f64::from(height_in(view.width, view.expanded, self.panel())),
                 ),
                 self.dpr,
             )
@@ -1495,7 +1584,7 @@ impl Editing {
                 self.renderer.fonts(),
                 [
                     0.0,
-                    0.0,
+                    self.renderer.top(),
                     art::W,
                     if view.expanded { art::H } else { DRAWER_TOP },
                 ],
@@ -1509,7 +1598,7 @@ impl Editing {
         let request = self
             .params
             .editor_resizing
-            .issue((width, height_for_panel(width, self.expanded())));
+            .issue((width, height_in(width, self.expanded(), self.panel())));
         let accepted = self.context.request_resize();
         if !accepted || !self.context.resize_response_will_follow() {
             self.params.editor_resizing.answer(request, accepted);
@@ -2575,7 +2664,8 @@ impl Editing {
                 let top = if self.expanded() {
                     art::GRIP[1]
                 } else {
-                    f64::from(self.physical_height()) / self.renderer.scale() - COMPACT_GRIP
+                    f64::from(self.physical_height()) / self.renderer.scale() + self.renderer.top()
+                        - COMPACT_GRIP
                 };
                 Some((GRIP_TIP.to_owned(), art::W - 8.0 - w / 2.0, top))
             }
@@ -2590,6 +2680,7 @@ impl Editing {
     /// Brings the frame up to the parameters and the gestures: whether it changed.
     fn draw(&mut self) -> bool {
         self.reconcile_resize();
+        self.follow_panel();
         let preference = self.params.editor_panel.load(Ordering::Relaxed);
         let applied = self.params.editor_panel_applied.load(Ordering::Relaxed);
         if preference != applied {
@@ -2644,8 +2735,10 @@ impl Editing {
         let map = &self.params.midi_map;
         self.learning.poll(map);
         let bottom = if self.expanded() { art::H } else { DRAWER_TOP };
-        self.learning
-            .fit_menu(self.renderer.fonts(), [0.0, 0.0, art::W, bottom]);
+        self.learning.fit_menu(
+            self.renderer.fonts(),
+            [0.0, self.renderer.top(), art::W, bottom],
+        );
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
         let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
@@ -2665,7 +2758,7 @@ impl Editing {
         // (The strip's parts drawn again over the panel's frame where it changed there: the
         // panel's places that reach the strip, not QUALITY's opening above it as well.)
         // (The drops move on with QUALITY's opening, on its clock: the two in one frame.)
-        let foot = (art::PANEL_H * self.renderer.scale()).round() as i32;
+        let foot = self.renderer.strip_row();
         let under = self
             .renderer
             .damages()
@@ -2809,13 +2902,20 @@ fn compose(
         _ => composed.insert(ca72_panel::Pixmap::new(width, height).expect("a frame")),
     };
     let s = renderer.scale();
-    let top = (art::PANEL_H * s).round() as i32;
-    let rail = (DRAWER_TOP * s).round() as i32;
+    // (The frame begins at the panel's top, the drawing's row `origin`.)
+    let origin = renderer.top_px();
+    let top = renderer.strip_row();
+    let rail = (DRAWER_TOP * s).round() as i32 - origin;
     for &[x0, y0, x1, y1] in places {
         paste(c, frame, 0, [x0, y0, x1, y1]);
         paste(c, strip, top, [x0, y0, x1, y1]);
         if let Some((d, at)) = drawer {
-            paste(c, d, (at * s).round() as i32, [x0, y0.max(rail), x1, y1]);
+            paste(
+                c,
+                d,
+                (at * s).round() as i32 - origin,
+                [x0, y0.max(rail), x1, y1],
+            );
         }
     }
     // Logical height is rounded before the host applies DPI scaling. If that adds a row

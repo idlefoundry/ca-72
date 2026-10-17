@@ -554,3 +554,92 @@ fn a_packs_knob_caps_turn_with_them_when_it_says_so() {
             .has("look.knob-caps")
     );
 }
+
+/// A layout's `[panel]`: its face's height and its wooden strip's. Its places are moved so
+/// that the face's foot stays where the plug-in's strip begins; the frame grows upward; a
+/// control is drawn and found where the layout put it; the strip under it is drawn as under the
+/// official panel; and sizes outside the limits are refused.
+#[test]
+fn a_pack_chooses_its_panels_size() {
+    use ca72_panel::art::{self, Panel};
+    use ca72_panel::strip::{StripRenderer, StripScene};
+    let sized = |panel: &str| {
+        let panel = panel.to_owned();
+        edited(move |d| {
+            let layout = d.join("layout.toml");
+            let text = std::fs::read_to_string(&layout).expect("read");
+            std::fs::write(
+                &layout,
+                text.replacen("[fixtures]", &format!("{panel}\n[fixtures]"), 1),
+            )
+            .expect("written");
+        })
+    };
+    let dir = sized("[panel]\nface = 1000\n");
+    let tall = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
+    let p = tall.arrangement.panel;
+    assert_eq!(
+        p,
+        Panel {
+            wood: art::TOP,
+            face: 1000.0
+        }
+    );
+    assert_eq!(p.top(), art::PANEL_H - 1130.0);
+    // The starter's CUTOFF, 600 down its face: 400 above the face's foot, as on any panel.
+    let cutoff = ca72_panel::controls::index("cutoff").expect("CUTOFF");
+    let c = tall.arrangement.controls[cutoff];
+    assert_eq!((c.x, c.y), (111.0, 600.0 - 205.0));
+    let (cx, cy) = c.centre();
+    assert_eq!(cy, art::PANEL_H - 400.0);
+    let s = 0.25;
+    let mut r = Renderer::with_pack(tall.clone(), Lettering::Standard, s, 1.0);
+    assert_eq!(r.size(), ca72_panel::render::size_for(s, p));
+    assert_eq!(
+        r.size().1,
+        ((art::H * s).ceil() as i32 - (p.top() * s).round() as i32) as u32
+    );
+    let mut scene = Scene::default();
+    r.render(&scene);
+    scene.values[cutoff] = 0.9;
+    assert!(r.render(&scene));
+    let d = r.damage().expect("CUTOFF drawn again");
+    let row = ((cy - p.top()) * s).round() as i32;
+    assert!(d[1] < row && row < d[3], "{d:?} {row}");
+    assert_eq!(
+        ca72_panel::interact::hit(r.layout(), r.arrangement(), cx, cy),
+        Some(ca72_panel::Target::Control(cutoff))
+    );
+    assert_eq!(
+        r.strip_row(),
+        (art::PANEL_H * s).round() as i32 - r.top_px()
+    );
+    // The strip under it as under the same pack at the official size.
+    let official = Look::open(starter()).unwrap_or_else(|r| panic!("{r}"));
+    let mut under = Renderer::with_pack(official, Lettering::Standard, s, 1.0);
+    let mut r = Renderer::with_pack(tall, Lettering::Standard, s, 1.0);
+    under.render(&Scene::default());
+    r.render(&Scene::default());
+    let (mut a, mut b) = (StripRenderer::new(s), StripRenderer::new(s));
+    b.set_under_top(r.top_px());
+    a.render(&StripScene::default(), under.frame(), None);
+    b.render(&StripScene::default(), r.frame(), None);
+    assert!(a.frame().data() == b.frame().data());
+    // No wood; and sizes outside the limits refused.
+    let dir = sized("[panel]\nface = 900\nwood = 0\n");
+    let bare = Look::open(dir.path()).expect_err("its plate is on wood it no longer has");
+    assert!(bare.has("layout.outside"), "{bare}");
+    for panel in [
+        "[panel]\nface = 600\n",
+        "[panel]\nface = 900\nwood = 30\n",
+        "[panel]\nface = 1300\n",
+    ] {
+        let dir = sized(panel);
+        assert!(
+            Look::open(dir.path())
+                .expect_err("refused")
+                .has("layout.panel"),
+            "{panel}"
+        );
+    }
+}

@@ -33,7 +33,8 @@ hold what you'll look up as you go:
 - [reference/layout.md](reference/layout.md): coordinates, the 42 controls by kind, their click
   areas and spacing, fixtures, legends, rules and titles.
 - [reference/drawing.md](reference/drawing.md): the SVG subset, the drawing's coordinates
-  (offset 130 from the layout's), picture slots and fonts.
+  (offset 130 from the layout's, or the wooden strip's own height with a `[panel]` size),
+  picture slots and fonts.
 - [reference/provenance.md](reference/provenance.md): the manifest, licences, provenance for
   generated work, declarations, ids, versions and updates, signatures, and what must never go
   in a pack.
@@ -150,7 +151,7 @@ a short script is fine: keep the script outside `$PACK`. After each:
 3. **Open and look at both previews**, `preview.png` (standard lettering) and
    `preview-large.png` (large lettering). Look for: legends running into dials, knobs or each
    other; dial numbers clipped by neighbours; titles not over their group; the drawing's bands
-   or shapes not lined up with the controls (remember the 130 offset), or crossing a legend;
+   or shapes not lined up with the controls (remember the 130 offset, or the `[panel]`'s wood), or crossing a legend;
    poor contrast between print and drawing, or controls that vanish into it (black rockers
    on a dark face); anything cut off at the panel's edges.
 4. Fix what you see as well as what the check reports. The check knows click areas and

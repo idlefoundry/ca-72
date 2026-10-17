@@ -6226,3 +6226,41 @@ contours, a framed teal central bay, the plate over the right-hand bays. The con
 (the external input and noise) does not fit (the face holds three rows of dials, about 200
 units each, and a title): they have a column beside the oscillators, their lines run in the gaps
 between the rows to the bus. Reviewed: fail (round 6), pass (7), confirmed (8).
+
+**A pack's panel's size, 2026-10-16.** The owner, on why SIGNAL BASIN could not have the
+concept's four rows: "we need to make it so that our UI system allows the UX designer to change
+panel dimensions." Of the agent's options the owner chose: a layout may change its face's height
+and its wooden strip's, the width staying 3108 ("1a"); the face 700 to 1200 units, the wood 60
+to 200 or none ("2"); and the window keeping its width and changing its height to follow the
+look ("3a").
+
+**Agent decisions** (not separately approved):
+- `[panel] face, wood` in the layout (`arrangement.rs`, `art::Panel`). The face's foot stays at
+  the drawing's `PANEL_H` (925), where the plug-in's strip begins, so the strip, its drawer, the
+  keyboard and the editor's own logic keep their coordinates: a taller panel reaches above the
+  drawing's 0. A layout's places are moved as it is read so that they are the official panel's
+  (its face's foot at 795), so the code that draws and finds the controls is unchanged; only the
+  wood, the face, its trims and shadows, the pack's drawing and the lamp's falloff are drawn at
+  the panel's size. The renderer's frame begins at the panel's top (`top_px`, `strip_row`), the
+  strip renderer is told where (`set_under_top`), and the editor's pointer, composing, menus and
+  window height follow it.
+- The window: its width kept, its height from the look's panel; asked of the host when a look
+  of another size is chosen, and as an editor opens if the look read then differs from the one
+  last chosen in this process (`CHOSEN_PANEL`). A host refusing at once keeps the look shown
+  (the owner's 3a had offered drawing the panel scaled to fit the window instead; the agent
+  kept the look, which needs no second way of composing the frame). A refusal that comes later,
+  after the look has changed, is not handled: the window and the look disagree until the next
+  resize.
+- An older CA-72 passes `[panel]` over and reads the layout at the official size (a taller one's
+  controls then fall outside its panel: refused, its base look drawn). `requires` names the
+  first version with `[panel]` once it is numbered.
+- Fixed: a pack's drawing is stretched to end exactly at the strip's first row (rounded on its
+  own, it spilled a row into the strip on a tall panel).
+
+**Evidence (the Mac, 2026-10-16):** the official looks' 32 golden frames identical to the commit
+before the change; `a_pack_chooses_its_panels_size` (a 1000-unit face: places moved, the frame's
+size, a control drawn and found where its layout put it, the strip under it the same as under
+the official size, sizes outside the limits and a plate without wood refused); every panel,
+pack and plug-in test; SIGNAL BASIN rebuilt with the concept's four rows on a 1030-unit face and
+passed by the reviewing agent (rounds 9 and 10, its last notes taken). Not yet: hosts (the window resized by a look),
+the slow machine.

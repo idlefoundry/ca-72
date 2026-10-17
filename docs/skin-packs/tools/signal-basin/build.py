@@ -1,25 +1,36 @@
 #!/usr/bin/env python3
 """Signal Basin: writes the pack's layout.toml and art/panel.svg from one description of the
 panel, so that the drawing's panels, rules and arrows sit where the layout's controls are.
-Units are the layout's: the face 0..3108 by 0..795, the strip above it -130..0."""
+Units are the layout's: the face 0..3108 by 0..FACE, the wooden strip above it -WOOD..0."""
 import sys, os, math
 
 out = sys.argv[1]
 os.makedirs(os.path.join(out, "art"), exist_ok=True)
 
-# The concept's arrangement: from the left, the controllers' teal column, the sources' (the
-# external input and noise, which the concept puts in a fourth row: the panel's height has
-# room for three rows of dials), three oscillator rows feeding a copper bus, the bus feeding
-# the FILTER and the two contours' panels, then OUTPUT's and POWER's teal columns.
-PANEL_Y = [(18, 279), (299, 528), (548, 777)]    # the three rows' modules, 20 apart
-R = [176, 425, 674]                              # their knobs' centres
+# The concept's arrangement, on a taller face (the layout's [panel]): from the left, the
+# controllers' teal bay; a framed teal central bay holding four rows (the three oscillators and,
+# as the concept's fourth, the external input and noise) whose copper lines run into a bus, the
+# bus feeding the FILTER and the two contours; then OUTPUT's and POWER's bays.
+FACE, WOOD = 1030, 130                           # the panel's size
+TALL = (6, FACE - 6)                             # a bay
+INNER = (30, FACE - 30)                          # inside the central bay
+GAP = 14
+rows_h = (INNER[1] - INNER[0] - 3 * GAP) / 4
+PANEL_Y = [(INNER[0] + i * (rows_h + GAP), INNER[0] + i * (rows_h + GAP) + rows_h) for i in range(4)]
+R = [round(t + 130) for t, _ in PANEL_Y]          # the rows' knobs' centres
+# The modifiers: the FILTER's the tall one, as the concept's, its title inside; the two
+# contours' alike.
+MGAP = 20
+filter_h = 380
+contour_h = (INNER[1] - INNER[0] - 2 * MGAP - filter_h) / 2
+MOD_Y = [(INNER[0], INNER[0] + filter_h)]
+MOD_Y.append((MOD_Y[0][1] + MGAP, MOD_Y[0][1] + MGAP + contour_h))
+MOD_Y.append((MOD_Y[1][1] + MGAP, MOD_Y[1][1] + MGAP + contour_h))
+MR = [round(MOD_Y[0][0] + 200)] + [round(t + (contour_h - 209) / 2 + 114) for t, _ in MOD_Y[1:]]
 LEG = 106                                        # a legend's height above its knob
-TALL = (6, 789)                                  # a bay
-INNER = (18, 777)                                # a module the height of the central bay
-X = {"ctl": (30, 340), "bay": (348, 2597), "src": (360, 676), "osc": (698, 1724),
-     "mod": (1834, 2585), "out": (2605, 2959), "pwr": (2967, 3078)}
-BUS = 1769                                       # the bus, in the channel between them
-FEED = 687                                       # the sources' feeder, in the gap beside them
+X = {"ctl": (30, 340), "bay": (348, 2597), "osc": (372, 1524), "mod": (1714, 2573),
+     "out": (2605, 2959), "pwr": (2967, 3078)}
+BUS = 1594                                       # the bus, in the channel between them
 
 controls, texts, lines = [], [], []
 
@@ -40,29 +51,17 @@ def text(t, x, y, size=22):
         e["size"] = size
     texts.append(e)
 
-# CONTROLLERS.
+# CONTROLLERS: a knob in each of the first three rows, the two switches in the fourth.
 for (p, t), y in zip([("tune", "TUNE"), ("glide", "GLIDE"), ("mod_mix", "MODULATION MIX")], R):
-    knob(p, 138, y)
-    text(t, 138, y - LEG)
-mid = [(R[0] + R[1]) / 2, (R[1] + R[2]) / 2]
-rocker("osc_mod", 290, mid[0], on="top")
-text("OSC.", 290, mid[0] - 84, 17); text("MOD.", 290, mid[0] - 64, 17)
-rocker("osc3_control", 290, mid[1], on="top")
-text("OSC. 3", 290, mid[1] - 84, 17); text("CONTROL", 290, mid[1] - 64, 17)
-
-# SOURCES: each a knob and its ON switch, as the concept's fourth row, stood on end.
-SK, SR = 474, 634
-knob("ext_volume", SK, R[0]); rocker("ext_on", SR, R[0], on="top")
-text("EXTERNAL INPUT", SK, R[0] - LEG); text("ON", SR, R[0] - LEG)
-knob("noise_volume", SK, R[1]); rocker("noise_on", SR, R[1], on="top")
-text("NOISE", SK, R[1] - LEG); text("ON", SR, R[1] - LEG)
-rocker("noise_type", SK, R[2], on="bottom")
-text("WHITE", SK, R[2] - 76); text("PINK", SK, R[2] + 76)
-text("OVERLOAD", SR, R[2] - 48)
+    knob(p, 185, y)
+    text(t, 185, y - LEG)
+for p, x, t in [("osc_mod", 115, ("OSC.", "MOD.")), ("osc3_control", 255, ("OSC. 3", "CONTROL"))]:
+    rocker(p, x, R[3] + 10, on="top")
+    text(t[0], x, R[3] + 10 - 84, 17); text(t[1], x, R[3] + 10 - 64, 17)
 
 # OSCILLATORS: one row each, in the concept's order.
-COL = {"range": 819, "wave": 1059, "freq": 1299, "vol": 1529, "on": 1665}
-for i, y in enumerate(R):
+COL = {"range": 499, "wave": 759, "freq": 1019, "vol": 1304, "on": 1474}
+for i, y in enumerate(R[:3]):
     n = i + 1
     knob(f"osc{n}_range", COL["range"], y)
     knob(f"osc{n}_waveform", COL["wave"], y)
@@ -76,37 +75,51 @@ for i, y in enumerate(R):
     if n > 1:
         text("FREQUENCY", COL["freq"], y - LEG)
 
+# The concept's fourth row: the external input, its ON, the noise, its colour and its ON.
+y4 = R[3]
+knob("ext_volume", COL["range"], y4); text("EXTERNAL INPUT", COL["range"], y4 - LEG)
+OV = (COL["range"] + COL["wave"]) / 2 + 10
+text("OVERLOAD", OV, y4 - 46, 17)
+rocker("ext_on", COL["wave"], y4, on="top"); text("ON", COL["wave"], y4 - LEG)
+knob("noise_volume", COL["freq"], y4); text("NOISE", COL["freq"], y4 - LEG)
+rocker("noise_type", COL["vol"], y4, on="bottom")
+text("WHITE", COL["vol"], y4 - 76); text("PINK", COL["vol"], y4 + 76)
+rocker("noise_on", COL["on"], y4, on="top"); text("ON", COL["on"], y4 - LEG)
+
 # MODIFIERS: the FILTER's panel, titled as the concept's, and the two contours'.
-FX = [1950, 2145, 2340]
-text("FILTER", 2145, PANEL_Y[0][0] + 5, 21)
+FX = [1834, 2074, 2314]
+FC = (FX[0] + FX[2]) / 2
+text("FILTER", FC, MOD_Y[0][0] + 38, 28)
 for p, t, x in zip(["cutoff", "emphasis", "contour_amount"], ["CUTOFF", "EMPHASIS", "CONTOUR AMOUNT"], FX):
-    knob(p, x, R[0]); text(t, x, R[0] - LEG)
-for pre, y in [("filter", R[1]), ("loudness", R[2])]:
+    knob(p, x, MR[0]); text(t, x, MR[0] - LEG)
+for pre, y in [("filter", MR[1]), ("loudness", MR[2])]:
     for p, x in zip(["attack", "decay", "sustain"], FX):
         knob(f"{pre}_{p}", x, y); text(p.upper(), x, y - LEG)
-RX = 2508
-text("FILTER", RX, 52, 17); text("MODE", RX, 70, 17)
-rocker("filter_mode", RX, 110)
-text("FILTER MOD.", RX, 168, 17)
-rocker("filter_mod", RX, 210)
-text("KEYBOARD", RX, R[1] - LEG, 17)
-rocker("keyboard_control_1", RX, R[1] - 50); text("1", RX - 67, R[1] - 50)
-rocker("keyboard_control_2", RX, R[1] + 40); text("2", RX - 67, R[1] + 40)
+RX = 2500
+text("FILTER", RX, MR[0] - 108, 17); text("MODE", RX, MR[0] - 90, 17)
+rocker("filter_mode", RX, MR[0] - 50)
+text("FILTER MOD.", RX, MR[0] + 12, 17)
+rocker("filter_mod", RX, MR[0] + 52)
+text("KEYBOARD", RX, MR[1] - LEG, 17)
+rocker("keyboard_control_1", RX, MR[1] - 50); text("1", RX - 67, MR[1] - 50)
+rocker("keyboard_control_2", RX, MR[1] + 40); text("2", RX - 67, MR[1] + 40)
 
-# OUTPUT.
+# OUTPUT: spread down its bay.
 OK_, ORK = 2721, 2891
-knob("volume", OK_, R[0]); text("VOLUME", OK_, R[0] - LEG)
-rocker("main_output", ORK, R[0]); text("MAIN", ORK, R[0] - LEG - 9, 17); text("OUTPUT", ORK, R[0] - LEG + 9, 17)
-knob("feedback", OK_, R[1] + 12); text("FEEDBACK", OK_, R[1] + 12 - LEG)
-rocker("a440", ORK, R[1] + 12); text("A–440", ORK, R[1] + 12 - LEG)
-PH = ((X["out"][0] + X["out"][1]) / 2, 652)
+O1, O2 = round(FACE * 0.2), round(FACE * 0.52)
+knob("volume", OK_, O1); text("VOLUME", OK_, O1 - LEG)
+rocker("main_output", ORK, O1); text("MAIN", ORK, O1 - LEG - 9, 17); text("OUTPUT", ORK, O1 - LEG + 9, 17)
+knob("feedback", OK_, O2); text("FEEDBACK", OK_, O2 - LEG)
+rocker("a440", ORK, O2); text("A–440", ORK, O2 - LEG)
+PH = ((X["out"][0] + X["out"][1]) / 2, round(FACE * 0.82))
 text("PHONES", PH[0], PH[1] - 58)
 
-# QUALITY and POWER.
+# QUALITY and POWER: spread down their bay.
 PX = 3022
-controls.append({"param": "quality", "at": [PX, 266], "size": [50, 80.83333333333333], "across": False})
-for t, x, y, s in [("QUALITY", PX, 168, None), ("ULTRA", PX, 216, 15), ("HI", PX - 40, 266, 15),
-                   ("LO", PX, 318, 15), ("POWER", PX, 465, None), ("ON", PX, 500, None)]:
+Q, LA, PW_ = 330, 610, 790
+controls.append({"param": "quality", "at": [PX, Q], "size": [50, 80.83333333333333], "across": False})
+for t, x, y, s in [("QUALITY", PX, Q - 98, None), ("ULTRA", PX, Q - 50, 15), ("HI", PX - 40, Q, 15),
+                   ("LO", PX, Q + 52, 15), ("POWER", PX, LA + 39, None), ("ON", PX, LA + 74, None)]:
     text(t, x, y, s)
 
 def fmt(v):
@@ -121,19 +134,24 @@ def fmt(v):
     return repr(v)
 
 with open(os.path.join(out, "layout.toml"), "w") as f:
-    f.write(f"""# SIGNAL BASIN's panel: every source in a row of its own, all flowing into one copper bus and on
-# to the filter and contours, as a signal does. Dedicated to the public domain under CC0 1.0 (LICENSE.txt). The format: the
-# CA-72's docs/skin-packs.md. Units are the drawing's: the face 0 to 3108 by 0 to 795, the
-# strip above it -130 to 0.
+    f.write(f"""# SIGNAL BASIN's panel: the concept's four rows of sources, all flowing into one copper bus
+# and on to the filter and contours, as a signal does, on a face taller than the official one.
+# Dedicated to the public domain under CC0 1.0 (LICENSE.txt). The format: the CA-72's
+# docs/skin-packs.md. Units are the drawing's: the face 0 to 3108 by 0 to {FACE}, the
+# wooden strip above it -{WOOD} to 0.
 
 format = 1
 controls = 1
 
+[panel]
+face = {FACE}
+wood = {WOOD}
+
 [fixtures]
-power = [{PX}, 580]
-lamp = [{PX}, 426]
-overload = [{SR}, {R[2]}]
-ultra = [{PX}, 92]
+power = [{PX}, {PW_}]
+lamp = [{PX}, {LA}]
+overload = [{OV}, {y4}]
+ultra = [{PX}, 130]
 plate = [2788, -106]
 phones = [{PH[0]}, {PH[1]}, 34]
 screws = []
@@ -143,12 +161,12 @@ screws = []
     for t in texts:
         f.write("\n[[text]]\n" + "".join(f"{k} = {fmt(v)}\n" for k, v in t.items()))
 
-# The drawing: 3108 by 925, the face's y + 130.
-Y = 130
+# The drawing: 3108 by the wood and the face, the face's y + the wood.
+Y = WOOD
 teal = [(X[k][0], TALL[0], X[k][1], TALL[1]) for k in ("ctl", "bay", "out", "pwr")]
 bay = teal[1]
-inset = [(X["osc"][0], a, X["osc"][1], b) for a, b in PANEL_Y] + [(X["src"][0], INNER[0], X["src"][1], INNER[1])]
-inset += [(X["mod"][0], a, X["mod"][1], b) for a, b in PANEL_Y]
+inset = [(X["osc"][0], a, X["osc"][1], b) for a, b in PANEL_Y]
+inset += [(X["mod"][0], a, X["mod"][1], b) for a, b in MOD_Y]
 panels = teal + inset
 
 def rr(x0, y0, x1, y1, r):
@@ -157,7 +175,7 @@ def rr(x0, y0, x1, y1, r):
             f"H{x0+r}A{r},{r} 0 0 1 {x0},{y1-r}V{y0+r}A{r},{r} 0 0 1 {x0+r},{y0}Z")
 
 COPPER = "#a8724c"
-svg = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3108 925" width="3108" height="925">',
+svg = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3108 {WOOD + FACE}" width="3108" height="{WOOD + FACE}">',
        "<title>SIGNAL BASIN: black panels let into weathered teal, edged in copper, the signal's way drawn between them</title>",
        '<defs>',
        # A rim lit from the upper left: bright copper above, dark below.
@@ -194,13 +212,13 @@ svg = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3108 925" width="31
 import random
 rnd = random.Random(72)
 for x0 in (0, 3082):
-    svg.append(f'<rect x="{x0}" y="{Y}" width="26" height="795" fill="url(#cheek)"/>')
+    svg.append(f'<rect x="{x0}" y="{Y}" width="26" height="{FACE}" fill="url(#cheek)"/>')
     for _ in range(9):
         gx = x0 + rnd.uniform(1.5, 24.5)
-        svg.append(f'<rect x="{gx:.1f}" y="{Y}" width="{rnd.uniform(0.4, 1.2):.1f}" height="795" fill="#1a0f08" fill-opacity="{rnd.uniform(0.25, 0.55):.2f}"/>')
-    svg.append(f'<rect x="{x0 + (26 if x0 == 0 else -3)}" y="{Y}" width="3" height="795" fill="#000" fill-opacity="0.55"/>')
+        svg.append(f'<rect x="{gx:.1f}" y="{Y}" width="{rnd.uniform(0.4, 1.2):.1f}" height="{FACE}" fill="#1a0f08" fill-opacity="{rnd.uniform(0.25, 0.55):.2f}"/>')
+    svg.append(f'<rect x="{x0 + (26 if x0 == 0 else -3)}" y="{Y}" width="3" height="{FACE}" fill="#000" fill-opacity="0.55"/>')
 # The face weathered: darker towards its edges.
-svg.append(f'<rect x="10" y="{Y}" width="3088" height="795" fill="url(#vignette)"/>')
+svg.append(f'<rect x="10" y="{Y}" width="3088" height="{FACE}" fill="url(#vignette)"/>')
 for x0, y0, x1, y1 in [q for q in panels if q != bay]:
     for k, o in ((5, 0.2), (2, 0.3)):
         svg.append(f'<path fill-rule="evenodd" d="{rr(x0 + k * 0.6, y0 + k, x1 + k * 0.6, y1 + k, 10 + k)}{rr(x0, y0, x1, y1, 10)}" fill="#000" fill-opacity="{o}"/>')
@@ -286,6 +304,10 @@ for x0, y0, x1, y1 in panels:
     d = rr(x0, y0, x1, y1, 10)
     if (x0, y0, x1, y1) == bay:
         svg.append(f'<path d="{d}" fill="none" stroke="url(#frame)" stroke-width="1.6"/>')
+        # Its screws in its top and bottom margins, in from its corners.
+        for sx, sy in [(x0 + 60, y0 + 12), (x1 - 60, y0 + 12), (x0 + 60, y1 - 12), (x1 - 60, y1 - 12)]:
+            svg.append(f'<circle cx="{sx}" cy="{sy + Y}" r="{wear.uniform(20, 26):.1f}" fill="url(#grime)"/>')
+            svg.append(f'<use href="#sc" transform="translate({sx} {sy + Y}) scale(0.85) rotate({rnd.uniform(0, 90):.0f})"/>')
         continue
     # Its shadow inside the rim, then the rim, bevelled: bright above, dark below.
     svg.append(f'<path d="{rr(x0 + 3, y0 + 3, x1 - 3, y1 - 3, 8)}" fill="none" stroke="#000" stroke-opacity="0.45" stroke-width="2.5"/>')
@@ -328,28 +350,19 @@ def arrow(pts, head=True, w=2.6):
         r = (bx - L * math.cos(a) - W * math.sin(a), by - L * math.sin(a) + W * math.cos(a))
         svg.append('<polygon points="' + " ".join(f"{x:.1f},{y + Y:.1f}" for x, y in (tip, l, r)) + f'" fill="{COPPER}"/>')
 
-# Each oscillator out through its module's rim into the bus; the bus into the FILTER's and
-# each contour's module; the sources along the gaps between the oscillators' rows into the bus,
-# as the concept's fourth row.
+# Each row out through its module's rim into the bus (the fourth's from the noise's ON, the
+# external input's way led into the noise's first, as the concept's); the bus into the
+# FILTER's and each contour's module at its middle.
 def grommet(x, y):
     svg.append(f'<circle cx="{x}" cy="{y + Y}" r="6.5" fill="#2a1a10" stroke="#a8724c" stroke-width="2"/>')
 for y in R:
     arrow([(COL["on"] + 29, y), (BUS - 9, y)])
     grommet(X["osc"][1], y)
-OUT_Y = [(a + b) / 2 for a, b in PANEL_Y]
-gaps = [(PANEL_Y[0][1] + PANEL_Y[1][0]) / 2, (PANEL_Y[1][1] + PANEL_Y[2][0]) / 2]
-arrow([(BUS, min(OUT_Y)), (BUS, max(R + gaps))], head=False, w=3.2)
+arrow([(COL["wave"] + 29, R[3]), (COL["freq"] - 118, R[3])])
+OUT_Y = [(a + b) / 2 for a, b in MOD_Y]
+arrow([(BUS, min(OUT_Y + R)), (BUS, max(OUT_Y + R))], head=False, w=3.2)
 for y in OUT_Y:
     arrow([(BUS, y), (X["mod"][0] - 20, y)])
-for y, g in zip(R[:2], gaps):
-    arrow([(SR + 29, y), (FEED, y), (FEED, g), (BUS - 9, g)])
-    grommet(X["src"][1], y)
-fx0, fx1 = 2145 - 72, 2145 + 72
-fy = PANEL_Y[0][0]
-# (Clear of the bay's frame above it by a sliver of teal.)
-svg.append(f'<path d="{rr(fx0 + 1, fy - 6, fx1 + 1, fy + 19, 5)}" fill="#000" fill-opacity="0.4"/>')
-svg.append(f'<path d="{rr(fx0, fy - 7, fx1, fy + 17, 5)}" fill="#0b0f11" stroke="url(#rim)" stroke-width="2.4"/>')
-svg.append(f'<path d="{rr(fx0 + 3, fy - 4, fx1 - 3, fy + 14, 3)}" fill="none" stroke="#000" stroke-opacity="0.5" stroke-width="1.2"/>')
 svg.append("</svg>")
 with open(os.path.join(out, "art", "panel.svg"), "w") as f:
     f.write("\n".join(svg) + "\n")

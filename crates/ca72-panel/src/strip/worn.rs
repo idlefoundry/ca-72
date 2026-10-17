@@ -161,6 +161,9 @@ pub struct StripRenderer {
     /// Every frame drawn whole (the tests' reference for one drawn in parts).
     whole: bool,
     keyboard: crate::keyboard::Renderer,
+    /// The drawing's row the frame it is drawn over begins at (the panel renderer's
+    /// `top_px`: 0 for the official panel, less for a taller one).
+    under_top: i32,
 }
 
 impl fmt::Debug for StripRenderer {
@@ -214,6 +217,17 @@ impl StripRenderer {
             shown: None,
             damage: None,
             whole: false,
+            under_top: 0,
+        }
+    }
+
+    /// Drawn over a panel renderer's frame beginning at the drawing's row `top` (its
+    /// `top_px`): the strip is the same, its place in that frame not.
+    pub fn set_under_top(&mut self, top: i32) {
+        if top != self.under_top {
+            self.under_top = top;
+            self.base = None;
+            self.shown = None;
         }
     }
 
@@ -306,7 +320,7 @@ impl StripRenderer {
         // differently, the drops' window while they move. (The drawing's change cut to the
         // strip first: a change above it, QUALITY's opening's, made the strip from the top of
         // its window over, almost all of it, at every tick.)
-        let top = (PANEL_H * self.scale).round() as i32;
+        let top = (PANEL_H * self.scale).round() as i32 - self.under_top;
         let mut dirty = None;
         if self.whole || self.base.is_none() {
             self.make_base(under, all);
@@ -376,7 +390,7 @@ impl StripRenderer {
             return;
         };
         let (fw, fh) = (base.width() as i32, base.height() as i32);
-        let top = (PANEL_H * s).round() as i32;
+        let top = (PANEL_H * s).round() as i32 - self.under_top;
         let (uw, uh) = (under.width() as i32, under.height() as i32);
         let Some([x0, y0, x1, y1]) = within(rect, [0, 0, fw.min(uw), fh.min((uh - top).max(0))])
         else {

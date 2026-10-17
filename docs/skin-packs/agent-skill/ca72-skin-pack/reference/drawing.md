@@ -9,6 +9,9 @@ Give it `viewBox="0 0 3108 925"`. It covers the wooden strip (y 0 to 130) and th
 to 925), and is stretched over them. **Its y is the layout's y + 130**: a control at layout
 `[777, 360]` is at `777, 490` in the drawing. Its x is the layout's x.
 
+With a layout's own `[panel]` size, the viewBox is `0 0 3108 <wood + face>` and its y is the
+layout's y + `wood`: the wooden strip from 0 to `wood`, the face from `wood` to `wood + face`.
+
 It is drawn over the panel's surfaces (the wood, the face, the realistic look's trim and
 shadows) and under the print, controls, screws and jacks. So:
 
