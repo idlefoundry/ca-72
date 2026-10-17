@@ -9,6 +9,9 @@
 //! ca72-lab waves <range> <key> <out.csv>   two periods of every node, ngspice
 //! ca72-lab render <range> <key> <out.wav> [seconds] [oversample]
 //!                                        the real-time oscillator, tuned the 1973 way
+//! ca72-lab alias [--model circuit|light] [--os N] [--rates R,..] [--keys K,..]
+//!                                        the oscillators' aliasing (decisions.md R-BLEP)
+//! ca72-lab osccost [rounds]              one oscillator's time a sample, by outputs used
 //! ```
 //! Ranges: lo, 32, 16, 8, 4, 2. Keys count from the keyboard's lowest F (0..43).
 
@@ -31,6 +34,8 @@ fn main() -> ExitCode {
         Some("tables") => spice().and_then(|s| tables(&s)),
         Some("waves") => spice().and_then(|s| waves(&s, rest)),
         Some("render") => render(rest),
+        Some("alias") => alias(rest),
+        Some("osccost") => osccost(rest),
         Some("play") => play(rest),
         Some("stim") => stim(rest),
         Some("filterlaw") => filterlaw(rest),
@@ -314,6 +319,160 @@ fn render(rest: &[String]) -> Res {
     }
     std::fs::write(&path, wav_f32(3, 48_000, &data)).map_err(|e| format!("{path}: {e}"))?;
     eprintln!("{path}: {seconds} s, tuning {t:?}");
+    Ok(())
+}
+
+/// `ca72-lab alias`: the oscillators' aliasing (decisions.md R-BLEP), one line a
+/// measurement, tab-separated: the model, the kernel, the oversampling, the rate, the waveform, the key
+/// (A4 is 4 on 2'), the frequency, the aliasing's total and loudest component against the
+/// fundamental (dB) and where, and the harmonics against a reference's (the mean from 10 to
+/// 20 kHz and the largest, dB): the circuit's at 8x, the light waveform's own Fourier
+/// series.
+fn alias(rest: &[String]) -> Res {
+    use ca72::voice::Waveform;
+    use ca72_lab::alias::{N, against, analyse, circuit, light, light_ideal};
+    let mut model = "circuit".to_owned();
+    let mut os = 1usize;
+    let mut rates = vec![44_100.0, 48_000.0, 96_000.0];
+    let mut keys = vec![4.0, 16.0, 28.0, 40.0];
+    let mut args = rest.iter();
+    let list = |s: Option<&String>| -> Result<Vec<f64>, String> {
+        s.ok_or("a list")?
+            .split(',')
+            .map(|v| v.parse::<f64>().map_err(|e| format!("{v}: {e}")))
+            .collect()
+    };
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--model" => model = args.next().ok_or("--model")?.clone(),
+            "--os" => {
+                os = args
+                    .next()
+                    .ok_or("--os")?
+                    .parse()
+                    .map_err(|e| format!("--os: {e}"))?
+            }
+            "--rates" => rates = list(args.next())?,
+            "--keys" => keys = list(args.next())?,
+            other => return Err(format!("ca72-lab alias: unknown {other}")),
+        }
+    }
+    let name = "built";
+    let row = |rate: f64, wave: &str, key: f64, m: &ca72_lab::alias::Measure, r: &[f64]| {
+        let (top, worst) = against(m, r);
+        println!(
+            "{model}\t{name}\t{os}\t{rate}\t{wave}\t{key}\t{:.2}\t{:.1}\t{:.1}\t{:.0}\t{top:.2}\t{worst:.2}",
+            m.f0, m.total_db, m.loudest_db, m.loudest_hz
+        );
+    };
+    for &rate in &rates {
+        for &key in &keys {
+            // At 8x: the reference, and the frequency.
+            let mut reference = Vec::new();
+            for width in [0.0, -1.5, -2.5] {
+                let (w, f0) = circuit(rate, 8, key, width, N);
+                reference.push((
+                    analyse(&w[0], rate, f0),
+                    analyse(&w[1], rate, f0),
+                    analyse(&w[2], rate, f0),
+                ));
+            }
+            let f0 = reference[0].0.f0;
+            match model.as_str() {
+                "circuit" => {
+                    for (i, width) in [0.0, -1.5, -2.5].into_iter().enumerate() {
+                        let (w, f) = circuit(rate, os, key, width, N);
+                        if i == 0 {
+                            row(
+                                rate,
+                                "saw",
+                                key,
+                                &analyse(&w[0], rate, f),
+                                &reference[0].0.harmonics,
+                            );
+                            row(
+                                rate,
+                                "tri",
+                                key,
+                                &analyse(&w[1], rate, f),
+                                &reference[0].1.harmonics,
+                            );
+                        }
+                        let wave = ["square", "wide", "narrow"][i];
+                        row(
+                            rate,
+                            wave,
+                            key,
+                            &analyse(&w[2], rate, f),
+                            &reference[i].2.harmonics,
+                        );
+                    }
+                }
+                "light" => {
+                    for (wave, w) in [
+                        ("saw", Waveform::Sawtooth),
+                        ("tri", Waveform::Triangle),
+                        ("shark", Waveform::SharkTooth),
+                        ("square", Waveform::Square),
+                        ("wide", Waveform::WideRectangle),
+                        ("narrow", Waveform::NarrowRectangle),
+                    ] {
+                        let x = light(rate, f0, w, N);
+                        row(rate, wave, key, &analyse(&x, rate, f0), &light_ideal(f0, w));
+                    }
+                }
+                other => return Err(format!("ca72-lab alias: no model {other}")),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `ca72-lab osccost [rounds]` (decisions.md R-BLEP): oscillator 1's time a sample at 48 kHz
+/// at HI's 1x and ULTRA's 4x, A4 and A7 on 2', with every output corrected and with only the
+/// sawtooth, the triangle or the rectangle (as the voice asks for its waveform's): the least of
+/// `rounds` (25) runs of a second's samples each, taken in turn within each round, so that a
+/// busy machine slows them alike.
+fn osccost(rest: &[String]) -> Res {
+    use ca72::tuning::{Range, Tuning, folkman_1973, osc1_inputs};
+    use std::time::Instant;
+    let rounds: usize = rest.first().and_then(|r| r.parse().ok()).unwrap_or(25);
+    let (rate, n) = (48_000.0, 48_000usize);
+    let masks = [
+        ("all", [true; 3]),
+        ("saw", [true, false, false]),
+        ("tri", [false, true, false]),
+        ("rect", [false, false, true]),
+    ];
+    let mut cases = Vec::new();
+    for os in [1, 4] {
+        for (name, mask) in masks {
+            for key in [4.0, 40.0] {
+                let mut v = ca72::vco::Vco::new(rate, os);
+                let (t, _) = folkman_1973(&mut v, rate, Tuning::default());
+                let i_in = v.expo.input_current(&osc1_inputs(&t, key, Range::R2));
+                v.reset();
+                v.set_outputs(mask);
+                cases.push((format!("{os}x {name} key {key}"), v, i_in, f64::MAX));
+            }
+        }
+    }
+    for _ in 0..rounds {
+        for (_, v, i_in, best) in &mut cases {
+            let t = Instant::now();
+            let mut acc = 0.0;
+            for _ in 0..n {
+                let o = v.tick(*i_in, 0.0);
+                acc += o.saw + o.tri + o.rect;
+            }
+            std::hint::black_box(acc);
+            *best = best.min(t.elapsed().as_secs_f64() * 1e9 / n as f64);
+        }
+    }
+    println!("ns a sample, the least of {rounds} runs of {n} samples at 48 kHz");
+    for (name, _, _, best) in &cases {
+        println!("{name:<20} {best:>8.1}");
+    }
     Ok(())
 }
 
