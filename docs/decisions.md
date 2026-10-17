@@ -5920,7 +5920,9 @@ which the annotated `v0.2.4` tag names.
 - On the lab share macOS writes `._` files beside each download; the downloads are checked in
   a local folder (`~/.cache`). The scripts and logs are in `~/lab/artifacts/ca-72/0.2.4/`.
 
-## R-BLEP. Less aliasing at HI's cost: the oscillators' band-limiting, measured (nothing shipped)
+## R-BLEP. The oscillators band-limited by a 32-tap windowed sinc, corners and all
+
+The study came first (to "For the owner to decide"), then the owner's answers and the build.
 
 **Owner decisions, 2026-10-16** (passed on by the session that started this work). A tester
 showed that ULTRA is too heavy to play live, and users find HI heavy too. HI's default must
@@ -6241,3 +6243,150 @@ differences below what can be heard.
 - **Not tried:** delaying the contours to match; the knee as several fillets; single-precision
   or polyphase tables; oscillator 3's reverse sawtooth stage (it follows the saw); paced
   worst blocks; Windows and Linux.
+
+### The owner's answers
+
+**Owner decisions, 2026-10-16** (passed on by the session that started this work), to the five
+questions above: "1. a 2. Yes. 3. If it's more accurate in it's renders, then we should do
+that, no? That is it's primary focus, is a render engine. 4. Yes. 5. Yes."
+1. HI and LO get the 32-tap sinc with BLAMP, the contours delayed to match, only the outputs in
+   use corrected.
+2. Its cost is accepted. **This relaxes the rule of the same morning** that HI's default must
+   not cost more CPU: about 7 % more, as the prototype measured, was acceptable (the build
+   costs less: below).
+3. ULTRA gets the same kernel, because accuracy comes first in a render engine; its renders,
+   and the lab's references for it, change. Its limit at 44.1 kHz, its last halfband, is
+   measured for the owner to decide (below), not built.
+4. HI's 15 samples of latency are accepted.
+5. The sound changes accepted, without levelling the factory presets again.
+
+### Built
+
+Branch `claude/lucid-fermi-67e20c`, from `main`, without the lab's switch (`lab/band-limiting`
+stays as the study's prototype).
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **One kernel in every mode.** `BlepLine` (`resample.rs`) spreads each step, impulse, corner
+  and rounded corner over the 16 samples either side of it from the kernel's tables (made
+  once a process with `libm`, so the same on every platform; 8,193 points each), and gives its
+  values 16 samples late. The two-point polyBLEP is gone. The circuit's oscillator corrects
+  the reset, the hold's end and the triangle's fold (a fillet 0.15 V of the buffer wide).
+- **Only the outputs in use.** The voice tells each oscillator which outputs its waveform
+  takes (`Vco::set_outputs`): the sawtooth, the triangle or the rectangle, the sawtooth and
+  triangle for the shark tooth of oscillators 1 and 2, and the sawtooth for oscillator 3's
+  reverse sawtooth stage. The others are still made but not corrected (their decimators at
+  4x still run). Taken up again, an output's corrections start with its next event.
+- **The contours wait as long as the oscillators' sound.** The filter's and loudness contours
+  reach the filter and the VCA late by what the kernel adds over the polyBLEP's one sample:
+  15 samples at HI, 3.75 at ULTRA (interpolated), none at LO. The keyboard's pitch is not
+  delayed. So an attack keeps the shape it had, and a whole note starts 0.31 ms later at HI
+  (48 kHz) and 0.08 ms later at ULTRA. Driven Kick's 315 Hz band, -2.5 dB without the delay,
+  is within 0.1 dB with it. The noise-only presets now start those samples later as a whole.
+- **LO in single precision.** The light oscillators read single-precision tables and work out
+  every edge and corner within reach from their phase: no latency, and no contour delay.
+- **The checks.** `ca72-lab alias` and `ca72-lab osccost` stay in the lab;
+  `tests/aliasing.rs` (ca72-lab) holds the aliasing of HI, ULTRA and LO (each waveform, A4 and
+  A7, 44.1, 48 and 96 kHz) about 3 dB under the levels below; `resample.rs` tests the
+  kernel's tables and a corrected step. `preset_render` takes `CA72_POTATO` and `CA72_ULTRA`.
+
+**What changed by design.** Every render of the oscillators changes in every mode. No stored
+golden render exists in the repository to record again: the lab's references are ngspice runs
+of the circuit (`circuits/boards/reference/`), which this does not touch, and the suite's
+comparisons with them hold budgets, which the new oscillators keep (`vco_realtime`'s
+waveforms against the circuit below 20 kHz, among them). What changed is the bit-exact
+comparison by hand: `preset_render` against `main`'s renders, all 19 factory presets, ten
+voices:
+
+| Mode | Level | Worst third-octave band | Difference's RMS against the render |
+|---|---:|---|---|
+| HI | within 0.09 dB | +3.8 dB at 20 kHz (bright presets); otherwise within 0.8 dB | -43 to +5 dB (the 15 samples' shift) |
+| LO | within 0.08 dB | +4.1 dB at 20 kHz; otherwise within 1.1 dB | -23 to -68 dB (Feedback Funk -6); 4 presets the same to the bit |
+| ULTRA | within 0.03 dB | within 0.5 dB (Feedback Funk's loop 1.4 dB) | -0.1 to -55 dB (3.75 samples' shift) |
+
+**Aliasing as built** (oscillator 1 alone, total against the fundamental, dB, before → after;
+the full matrix is [band-limiting/aliasing-built.tsv](band-limiting/aliasing-built.tsv)):
+
+| Mode, waveform | 44.1 kHz, A4 / A7 | 48 kHz, A4 / A7 | 96 kHz, A4 / A7 |
+|---|---|---|---|
+| HI saw | -36 → -86 / -25 → -93 | -39 → -113 / -27 → -102 | -60 → -123 / -50 → -114 |
+| HI triangle | -61 → -73 / -32 → -62 | -64 → -76 / -36 → -63 | -82 → -104 / -51 → -69 |
+| HI narrow rectangle | -34 → -89 / -22 → -90 | -36 → -110 / -23 → -98 | -57 → -120 / -52 → -115 |
+| ULTRA saw | -67 → -67 / -59 → -60 | -78 → -126 / -65 → -116 | -96 → -136 / -80 → -127 |
+| ULTRA triangle | -92 → -94 / -64 → -72 | -97 → -122 / -66 → -74 | -110 → -134 / -88 → -98 |
+| ULTRA narrow rectangle | -69 → -70 / -56 → -56 | -76 → -124 / -71 → -113 | -95 → -133 / -88 → -125 |
+| LO saw | -36 → -86 / -25 → -93 | -39 → -112 / -28 → -102 | -60 → -120 / -51 → -113 |
+| LO triangle | -60 → -135 / -31 → -110 | -62 → -137 / -35 → -118 | -76 → -140 / -49 → -125 |
+| LO narrow rectangle | -34 → -87 / -22 → -90 | -36 → -110 / -23 → -98 | -58 → -118 / -53 → -112 |
+
+The square, wide rectangle and shark tooth go the same way (the matrix). Every harmonic
+below 20 kHz is within 1.3 dB of the 8x render's.
+
+**Cost as built.** With only the outputs in use corrected, the build costs far less than the
+prototype did:
+- **Ten voices** (`preset_cost`): `main`'s build and this one interleaved, the least of four
+  two-second rounds (three one-second rounds at ULTRA), the 19 presets' mean.
+
+  | Mode | `main` | Built | Change (median; range) |
+  |---|---:|---:|---|
+  | HI | 103.7 % | 104.3 % | +0.6 % (+0.7; -0.3 to +1.7) |
+  | LO | 14.8 % | 15.3 % | +3.6 % (+4.3; -1.2 to +8.6) |
+  | ULTRA | 556.9 % | 559.8 % | +0.4 % (+0.2; -1.1 to +2.4) |
+
+- **One oscillator** (`ca72-lab osccost`, ns a sample at 48 kHz, A4 / A7, the least of 25
+  runs): at 1x `main` takes 27.3 / 37.5; the build 29.0 / 46.5 with the sawtooth in use, 30.3 /
+  56.8 the triangle, 28.4 / 41.3 the rectangle, 31.9 / 66.2 all three. At 4x `main` takes 170 /
+  181, the build 179 to 192 / 193 to 209 by output.
+
+**Latency.** HI's oscillators 16 samples (was 1), LO's none (as before), ULTRA's 26.25 (was
+22.5; its decimators' 22.25 and the kernel's 4). The contours follow (above). The plug-in
+reports no latency to hosts, as before.
+
+### ULTRA's last halfband (measured, not built)
+
+At 44.1 kHz ULTRA's aliasing is its decimators': their last halfband (79 taps, Kaiser beta
+10.06) passes to 0.417 of the output rate and stops from 0.583 (25.7 kHz), so what lies
+between 22 and 26 kHz at 4x folds into 18 to 22 kHz. To keep 20 Hz to 20 kHz clean at 44.1
+kHz it must pass 20 kHz and stop from 24.1. Measured on branch `lab/ultra-halfband` (the
+oscillators' decimators only; `CA72_LAST_HALFBAND`; the matrix is
+[band-limiting/ultra-halfband.tsv](band-limiting/ultra-halfband.tsv)), with the built kernel:
+
+| Last halfband | 44.1 kHz: saw A4 / A7, worst saw or rectangle | 48 kHz worst | 96 kHz worst | Oscillator at 4x, A4 / A7 | Latency |
+|---|---|---:|---:|---|---:|
+| 79 taps (today) | -67 / -60, -56 | -113 | -125 | 178 / 216 ns | 22.25 |
+| 99 | -81 / -84, -79 | -113 | -125 | | 27.25 |
+| 119 | -102 / -118, -100 | -114 | -125 | 229 / 261 ns | 32.25 |
+| 139 | -117 / -118, -111 | -115 | -125 | 259 / 292 ns | 37.25 |
+| 159, 199 | as 139 | -116, -117 | -125 | | 42.25, 52.25 |
+
+(Latency: the decimators' delay in output samples, the kernel's 4 more.) 139 taps make ULTRA
+at 44.1 kHz as clean as at 48: -111 dB at the worst against -56. Its harmonics below 20 kHz
+move by 0.18 dB at most. It costs each oscillator about 80 ns a sample at 4x, three
+oscillators about 1.2 % of a core a voice (ULTRA's voice is about 56 % of a core), and adds
+15 samples of latency (the contours would wait for those too). The filter's decimator at 4x
+has the same last stage; the filter's own ultrasonic products fold the same way at 44.1 kHz,
+not measured here. Decimating only the outputs in use would pay for most of it: today all
+three outputs' decimators run.
+
+**For the owner to decide:** ULTRA's last halfband at 139 taps (recommended: 44.1 kHz then
+as clean as 48 kHz, for about 1.2 % of a core a voice and 15 samples), with the filter's
+decimator to match or not; or as it is.
+
+**For the merge.** The threads work (branch `claude/goofy-ellis-af3f5d`, unmerged, R-THREADS)
+also changes `voice.rs` (`BackPart::set_drive` and others) and `threaded.rs`. This build
+changes `voice.rs` in other places (`ControlPart`'s contour delay, the oscillators' outputs
+in use, `outputs_of`, `contour_delay`) and not `threaded.rs`: the two merge without a conflict
+in the code (`git merge-tree`); only this file conflicts, both records appended at its end.
+
+**Evidence (the Mac, 2026-10-16; commit on `claude/lucid-fermi-67e20c`, and
+`lab/ultra-halfband`):**
+- **Suite.** `cargo test --workspace --features ca72-plugin/standalone-production` (debug):
+  every test passes but three ngspice tests (`vco_electrical`'s two and `vco_osc23`), which fail
+  the same way on `main` on this Mac ("Timestep too small" at the hold node, ngspice-47 from
+  Homebrew with KLU): not this change's. The new tests pass (`tests/aliasing.rs`, the
+  kernel's two).
+- **Lints.** `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes (the
+  vendored baseview's warnings as before); rustfmt on the changed files.
+- **Machine.** Shared again: the cost rounds ran at a load average of about 24, `main` and the
+  build interleaved; the aliasing runs are deterministic.
+- **Not tried:** the longer halfband built; decimating only the outputs in use; paced worst
+  blocks; Windows and Linux; hosts. Not pushed.
