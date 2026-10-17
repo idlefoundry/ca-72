@@ -321,7 +321,15 @@ impl Learning {
         size: f64,
         (skin, lettering, law): (Skin, Lettering, Law),
     ) {
-        #[allow(unused_mut)]
+        let version_line = if crate::update::BUILD.is_empty() {
+            crate::update::VERSION.to_owned()
+        } else {
+            format!(
+                "{} · BUILD {}",
+                crate::update::VERSION,
+                crate::update::BUILD.to_uppercase()
+            )
+        };
         let mut items = vec![
             (Item::Head, "LOOK"),
             (Item::Look(Skin::Worn), "REALISTIC"),
@@ -340,6 +348,9 @@ impl Learning {
             items.push((Item::Head, "STANDALONE"));
             items.push((Item::StandaloneSettings, "AUDIO & MIDI…"));
         }
+        // Last, which build this is (build.rs): the release's version, or that and its commit.
+        items.push((Item::Head, "VERSION"));
+        items.push((Item::Not, version_line.as_str()));
         let current = |it: &Item| {
             *it == Item::Look(skin) || *it == Item::Lettering(lettering) || *it == Item::Dials(law)
         };

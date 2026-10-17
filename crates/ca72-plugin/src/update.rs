@@ -26,6 +26,23 @@ const LATEST: &str = "https://api.github.com/repos/idlefoundry/ca-72/releases/la
 /// This build's version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The commit this build was made from, empty for a build of the release's tag (build.rs).
+pub const BUILD: &str = env!("CA72_BUILD");
+
+/// The version as the editor shows it: `0.2.4` for the release; any other build adds its
+/// commit, `0.2.4 · 602B298`, so that it cannot pass for the release.
+pub fn shown() -> String {
+    shown_for(VERSION, BUILD)
+}
+
+fn shown_for(version: &str, build: &str) -> String {
+    if build.is_empty() {
+        version.to_owned()
+    } else {
+        format!("{version} · {}", build.to_uppercase())
+    }
+}
+
 /// How long curl may take, in seconds; the editor ends it if it runs on past `PATIENCE`.
 const CURL_SECONDS: u32 = 20;
 const PATIENCE: Duration = Duration::from_secs(30);
@@ -419,8 +436,8 @@ impl Update {
     /// What the drawer shows of it.
     pub fn scene(&self) -> UpdateScene {
         let (text, tone, button) = match &self.state {
-            State::Idle => (format!("CA-72 {VERSION}"), Tone::Dim, "CHECK FOR UPDATES"),
-            State::Checking(_) => (format!("CA-72 {VERSION}"), Tone::Dim, "CHECKING…"),
+            State::Idle => (format!("CA-72 {}", shown()), Tone::Dim, "CHECK FOR UPDATES"),
+            State::Checking(_) => (format!("CA-72 {}", shown()), Tone::Dim, "CHECKING…"),
             State::Latest => (
                 format!("{VERSION} IS UP TO DATE"),
                 Tone::Dim,
@@ -673,6 +690,23 @@ mod tests {
         assert!(update_fits(&checking));
     }
 
+    /// The version as shown (build.rs): the release's alone; any other build with its commit,
+    /// which still fits the drawer beside its button, a long version's too.
+    #[test]
+    fn a_build_other_than_the_release_names_its_commit() {
+        assert_eq!(shown_for("0.2.4", ""), "0.2.4");
+        assert_eq!(shown_for("0.2.4", "602b298"), "0.2.4 · 602B298");
+        assert_eq!(shown(), shown_for(VERSION, BUILD));
+        for button in ["CHECK FOR UPDATES", "CHECKING…"] {
+            let s = UpdateScene {
+                text: format!("CA-72 {}", shown_for("10.10.10", "602b298")),
+                tone: Tone::Dim,
+                button: button.into(),
+            };
+            assert!(update_fits(&s), "{s:?}");
+        }
+    }
+
     /// A canned answer, by the release it names, for a stand-in for curl to print.
     fn canned(release: &str) -> PathBuf {
         std::env::temp_dir().join(format!("ca72-update-tests-{release}.json"))
@@ -755,7 +789,7 @@ mod tests {
         let s = u.scene();
         assert_eq!(
             (s.text.as_str(), s.button.as_str()),
-            (format!("CA-72 {VERSION}").as_str(), "CHECK FOR UPDATES")
+            (format!("CA-72 {}", shown()).as_str(), "CHECK FOR UPDATES")
         );
         u.press();
         assert_eq!(u.scene().button, "CHECKING…");

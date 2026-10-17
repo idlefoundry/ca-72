@@ -7929,3 +7929,34 @@ warnings`) clean; rustfmt on the changed files. Built in a target folder of its 
 threads work's, shared, took the merged branch's sources for this one's (one package to it),
 which the first render comparison caught. Not tried: hosts (the latency each reports and
 compensates), Windows and Linux, paced worst blocks.
+
+## R-VERSION. This build's version in the settings menu
+
+**The owner, 2026-10-17**, after a local build of the release candidate that also read 0.2.4
+had been taken for the release: "why don't we have versions shown in the plugin settings menu
+so there's no confusion?"
+
+**Built:**
+- **Which build this is** (`crates/ca72-plugin/build.rs`): a build of the release's tag
+  (`v<version>`, found by `git tag --points-at HEAD` or CI's `GITHUB_REF`) is its version
+  alone; any other build carries the commit it was made from (`update::BUILD`). A source tree
+  without git builds as the version alone. The build script runs again when the checkout
+  moves to another commit or the tags change.
+- **The settings menu** ends with VERSION and, under it, `0.2.4` for the release or
+  `0.2.4 · BUILD 602B298` for any other build; neither is to be chosen, and pressing them does
+  nothing.
+- **The presets drawer** (R27) shows the same: `CA-72 0.2.4`, or `CA-72 0.2.4 · 602B298`. The
+  update check still compares the version alone.
+- **The library's tests get a seats folder of their own** (`seats::user_dir`, `cfg!(test)`;
+  R-THREADS's shared budget). With Live and the standalone app holding the user's seats,
+  `the_workers_follow_poly_through_the_plug_ins_life` found no workers and failed every time;
+  a host playing on the computer no longer takes the tests' workers.
+
+**Evidence (the Mac, 2026-10-17, Live and the standalone app running the candidate):** the
+plug-in library's 250 tests pass, among them the new `a_build_other_than_the_release_names_its_commit`
+(the drawer's label fits beside its button with a long version and a commit) and
+`the_settings_menu_ends_with_this_build_s_version` (the menu within the window); the three tests
+that read the old label or the menu's heads updated. The workspace's suite (`--features
+ca72-plugin/standalone-production`) gives 509 passed, and 3 failed: the ngspice tests of
+`vco_electrical` and `vco_osc23` that fail the same way before this change on this Mac. Clippy
+(all targets, all features, `-D warnings`) clean; rustfmt on the changed files.

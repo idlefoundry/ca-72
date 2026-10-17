@@ -46,6 +46,13 @@ pub fn user_dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("CA72_SEATS_DIR").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d));
     }
+    // The library's own tests: a folder of theirs (the processes they start included), so
+    // that a plug-in playing in a host on this computer does not leave them without workers
+    // (on 2026-10-17, Live and the standalone app holding the user's seats failed
+    // `the_workers_follow_poly_through_the_plug_ins_life` every time).
+    if cfg!(test) {
+        return Some(std::env::temp_dir().join("ca72-seats-tests"));
+    }
     #[cfg(target_os = "linux")]
     {
         if let Some(run) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {

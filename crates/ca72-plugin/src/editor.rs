@@ -4705,6 +4705,37 @@ mod tests {
         e.draw();
     }
 
+    /// The settings key's last group: VERSION, and under it this build's (build.rs, the
+    /// owner: "why don't we have versions shown in the plugin settings menu so there's no
+    /// confusion?"): the release's version alone, any other build's with its commit. Neither
+    /// is to be chosen, and pressing the version leaves the menu open as it is.
+    #[test]
+    fn the_settings_menu_ends_with_this_build_s_version() {
+        let (mut e, _, _) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let line = if crate::update::BUILD.is_empty() {
+            crate::update::VERSION.to_owned()
+        } else {
+            format!(
+                "{} · BUILD {}",
+                crate::update::VERSION,
+                crate::update::BUILD.to_uppercase()
+            )
+        };
+        assert_eq!(
+            items[items.len() - 2..],
+            [("VERSION".to_owned(), false), (line.clone(), false)]
+        );
+        let m = e.learning.menu().expect("a menu");
+        let (w, h) = m.extent(e.renderer.fonts());
+        assert!(m.x >= 0.0 && m.x + w <= art::W && m.y + h <= art::H);
+        menu_item(&mut e, &line);
+        assert!(e.learning.menu().is_some(), "the version closed the menu");
+        e.draw();
+    }
+
     /// The settings key's LETTERING (R-LETTERING): STANDARD by default, marked and not to be
     /// chosen. LARGE prints the panel's and the strip's lettering a size larger, in the look the
     /// editor is in, the menus' and the tip's with it, and is kept; a look chosen after keeps it;
@@ -4801,7 +4832,7 @@ mod tests {
             e.learning
                 .menu()
                 .map(|m| (m.heads.clone(), m.marked.clone())),
-            Some((vec![0, 3, 6, 9], vec![1, 4, 7]))
+            Some((vec![0, 3, 6, 9, 11], vec![1, 4, 7]))
         );
         // Oscillator 2 at +5 semitones, oscillator 3's pot at its clockwise end (+8.22).
         let ps: Arc<dyn Params> = params.clone();
@@ -7736,7 +7767,7 @@ mod tests {
     /// touched and the drawer stays open.
     #[test]
     fn the_drawer_checks_for_updates() {
-        use crate::update::{RELEASES, VERSION, fake};
+        use crate::update::{RELEASES, fake, shown};
         let dir = tempfile::tempdir().unwrap();
         let (mut e, host, _params) = editing_with(Library::at(dir.path()));
         e.update = Update::with(fake::no_curl, fake::browser);
@@ -7745,7 +7776,7 @@ mod tests {
         let s = &e.browser.drawer.update;
         assert_eq!(
             (s.text.as_str(), s.button.as_str()),
-            (format!("CA-72 {VERSION}").as_str(), "CHECK FOR UPDATES")
+            (format!("CA-72 {}", shown()).as_str(), "CHECK FOR UPDATES")
         );
         let button = in_drawer(&e, presets_ui::update_centre());
         go(&mut e, button);
