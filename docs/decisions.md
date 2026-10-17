@@ -6421,7 +6421,205 @@ at +12 dB; the results are [band-limiting/ultra-filter-halfband.tsv](band-limiti
 **For the owner to decide:** the filter's last halfband stays at 79 taps (recommended: no
 measurable gain, a longer FEEDBACK loop). The VCA's signal path at the output rate is what
 aliases in ULTRA at 44.1 and 48 kHz (-45 dB on an open sawtooth); running it oversampled
-would be the next measurement, not made here.
+is measured next (below).
+
+### ULTRA's VCA oversampled (measured, not built)
+
+ULTRA's VCA signal path (`Vca::signal`, from `BackPart::tick`) runs at the output rate and is
+nonlinear, and it is what aliases in ULTRA's voice (above). Prototyped on branch
+`lab/ultra-vca-os` (from this branch), behind `CA72_VCA_OS`, read once; unset, the voice
+runs today's code, and every factory preset's ULTRA render is the same to the bit as this
+branch's. ULTRA only; HI, LO and the defaults are unchanged.
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **Two ways to feed it.**
+  - `interp2` and `interp4` interpolate the filter's output again (`Interpolator::new`), run
+    the signal path at 2x or 4x and decimate it (`Decimator::new`, 79 taps last). The filter
+    keeps its own decimator. `interp8` is the reference the others converge to.
+  - `filter4` hands the VCA the filter's own samples at 4x, before its decimator
+    (`Vcf::tick_oversampled`), and decimates the VCA's output with a decimator of the same
+    design. The filter's decimator moves after the VCA, and nothing is resampled twice.
+  - `filter2` takes the filter's samples through its decimator's first stage (the 23-tap
+    halfband, 4x to 2x), runs the VCA at 2x and ends with the 79-tap stage: the filter's
+    decimator's two stages with the VCA between them.
+- **The bias stays at the output rate.** `Vca::control` (the tails, the chain, Q18's solve)
+  still runs once a sample, on its own copy of the VCA. Its drive (`VcaDrive`, twenty values)
+  is interpolated linearly across the sample's steps, up to the sample's own on the last.
+  Only the signal path's states (C6, C8, C2) step at the higher rate. The A-440 is held for a
+  sample.
+- **The lab's code.** `VcaOversampled` (`vca.rs`) does it. `ca72-lab filteralias` is ported
+  from `lab/ultra-filter-halfband`; it also prints each render's level and harmonics below
+  20 kHz, and times the signal path alone. `CA72_VCA_OS_PROBE` keeps the filter's own output
+  for the probe when its decimator has moved. `vca_realtime.rs` (ca72-lab) runs its tests
+  through the oversampled path under the same switch: its sources are taken at the path's own
+  rate, and the reference is shifted by the path's delay.
+
+**Aliasing** (`ca72-lab filteralias`, total against the fundamental, dB; the voice's output,
+and the filter's own output as today's build has it; the full matrix, with every render's
+harmonics, is [band-limiting/vca-oversampled.tsv](band-limiting/vca-oversampled.tsv)):
+
+| Rate, patch | Today | `interp2` | `interp4` | `interp8` | `filter2` | `filter4` | Filter's output |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 44.1 kHz, saw A4 open | -45.5 | -70.7 | -71.4 | -71.0 | -70.1 | -70.1 | -71.5 |
+| 44.1, saw A6 open | -40.5 | -66.6 | -66.6 | -66.3 | -64.2 | -64.2 | -67.1 |
+| 44.1, saw A4 open, DRIVE +12 dB | -33.1 | -64.5 | -65.0 | -65.1 | -53.9 | -59.3 | -58.2 |
+| 44.1, saw A4, EMPHASIS 0.8 | -34.4 | -41.4 | -41.4 | -41.4 | -41.4 | -41.4 | -41.5 |
+| 44.1, whistle CUTOFF 0.85 (14.9 kHz) | -39.4 | -51.5 | -51.5 | -51.5 | -51.5 | -51.5 | -51.4 |
+| 48 kHz, saw A4 open | -48.1 | -73.2 | -73.2 | -73.2 | -71.4 | -71.4 | -73.2 |
+| 48, saw A6 open | -42.4 | -68.7 | -68.7 | -68.7 | -66.4 | -66.4 | -68.4 |
+| 48, saw A4 open, DRIVE +12 dB | -35.2 | -62.5 | -62.6 | -62.6 | -56.1 | -60.0 | -58.8 |
+| 48, saw A4, EMPHASIS 0.8 | -35.5 | -42.5 | -42.5 | -42.5 | -42.5 | -42.5 | -42.6 |
+| 48, whistle CUTOFF 0.85 | -39.7 | -59.6 | -59.6 | -59.6 | -59.6 | -59.6 | -59.6 |
+| 96 kHz, saw A4 open | -74.0 | -76.8 | -76.8 | -76.8 | -76.9 | -76.9 | -76.5 |
+| 96, saw A4 open, DRIVE +12 dB | -57.7 | -66.2 | -66.2 | -66.2 | -65.5 | -65.5 | -64.4 |
+
+- **Oversampled at all, the voice is as clean as its filter.** Today the voice is 24 to 27 dB
+  above its filter's figure on the open sawtooths at 44.1 and 48 kHz. Every variant brings it
+  to within 3 dB of the filter's, but `filter2` with DRIVE (4.3 dB above). The whistle at
+  14.9 kHz goes from -39 dB to the filter's -51.5 (44.1 kHz) and -59.6 (48). At 96 kHz the
+  gain is 3 to 9 dB.
+- **2x is enough.** `interp2` is within 0.7 dB of `interp8` everywhere. What is left is the
+  filter's own aliasing, which its decimator does not change (measured above). The resonant
+  patches (EMPHASIS 0.8, the whistles) agree within 0.1 dB in every variant; their figures
+  are the filter's.
+- **Fed the filter's own samples, the VCA hears what the circuit's does.** The filter's
+  output at 4x carries its harmonics up to 88 kHz (at 44.1), which the circuit's VCA also
+  takes in. `interp` takes them off before the VCA, as today's build does. Compared over the
+  harmonics below 20 kHz within 60 dB of the fundamental:
+  - `interp` and `filter4` differ by up to 1.1 dB with DRIVE at +12 dB (0.3 dB on an open
+    sawtooth, 0.2 at EMPHASIS 0.8);
+  - `filter2` and `filter4` agree within 0.06 dB;
+  - today's build differs from `filter4` by up to 0.9 dB.
+- **The ultrasonic products fold in their turn.** `filter4` with DRIVE reads -59.3 dB at 44.1
+  kHz (the filter's own -58.2), `filter2` -53.9. Without DRIVE, `filter` reads 0.6 to 2.4 dB
+  above `interp`.
+- **Levels** are within 0.01 dB of today's in every render.
+
+**Cost** (`preset_cost`, ten voices, ULTRA, one-second rounds; the unchanged build
+`claude/lucid-fermi-67e20c` and the lab's interleaved, three rounds, the least of each
+preset's, the 19 presets' mean; load averages 4 to 6, the first round's first run 14; the
+raw figures are [band-limiting/vca-oversampled-presets.txt](band-limiting/vca-oversampled-presets.txt)):
+
+| | Of a core | Change (median; range) | A voice |
+|---|---:|---|---:|
+| Unchanged build | 528.1 % | | |
+| Lab, `CA72_VCA_OS` unset | 529.3 % | +0.2 % (+0.6; -1.2 to +1.8) | +0.1 % of a core |
+| `interp2` | 556.8 % | +5.4 % (+5.7; +1.9 to +8.4) | +2.9 % |
+| `interp4` | 597.8 % | +13.2 % (+12.9; +7.1 to +19.3) | +7.0 % |
+| `filter2` | 546.6 % | +3.5 % (+3.6; +0.9 to +5.7) | +1.9 % |
+| `filter4` | 582.2 % | +10.2 % (+11.3; +3.0 to +18.1) | +5.4 % |
+
+The signal path alone (`filteralias`: a 1 kHz sine at 0.5 V, the contour full, ns an output
+sample at 48 kHz, the least of four runs) takes 491 ns at the output rate, 1,042 (`interp2`),
+2,016 (`interp4`), 1,030 (`filter2`) and 2,012 (`filter4`). The step costs the same whatever
+feeds it. `filter` saves the second resampling (the filter's decimator, 38 ns, moves rather
+than doubles).
+
+**Latency** (output samples):
+
+| | The sound through the VCA | The VCA's response to the loudness contour | The gain ahead of the filter's sound (today 44.5) | FEEDBACK's loop (today 90) |
+|---|---:|---:|---:|---:|
+| `interp2` | +39 | +20 | 63.5 | 129 |
+| `interp4` | +44.5 | +23 | 66 | 134.5 |
+| `filter2` | 0 | +20 | 24.5 | 90 |
+| `filter4` | 0 | +23 | 21.5 | 90 |
+
+- **FEEDBACK's loop** in ULTRA is the cable's sample, the preamplifier's resamplers' 44.5 and
+  the filter's 44.5 (the light model's `FEEDBACK_DELAY` counts the circuit's as 88 at 44.1
+  and 48 kHz). `interp` lengthens it by 43 to 49 %, which changes how FEEDBACK oscillates.
+  `filter` leaves it as it is.
+- **The loudness contour.** The bias is worked out at the output rate and stepped across the
+  sample. So a change of it reaches the output through the decimator, 20 or 23 samples later
+  than today (0.4 or 0.5 ms at 48 kHz), and (factor - 1) / factor of a sample more, since the
+  decimator gives its output on the first of a sample's steps.
+- **Against the sound.** Today the gain meets the filter's output 44.5 samples (the filter's
+  resamplers) earlier than the circuit's would. `filter` does not delay the sound, so the gain
+  moves 20 or 23 samples later against it: nearer the circuit, where they meet at once.
+  `interp` delays the sound by 39 or 44.5 and the gain by 20 or 23, so the gain runs further
+  ahead. Keeping today's alignment would take a loudness delay of its own (`contour_delay`
+  also delays the filter's contour).
+
+**What the presets hear** (`preset_render`, ULTRA at 48 kHz, two seconds, against the lab
+with the switch unset; the full tables are in
+[band-limiting/vca-oversampled-presets.txt](band-limiting/vca-oversampled-presets.txt)):
+- **`filter4` and `filter2`:**
+  - Levels are within 0.01 dB, but Feedback Funk's (+0.03 and +0.04 dB). The difference's RMS is 24 to
+    63 dB below each render, and Feedback Funk's 3 to 4 dB below: a loop that sensitive
+    diverges, but its worst band moves by -1.1 dB (31 Hz).
+  - Every third-octave band is within 1.3 dB, but Driven Kick's 1.26 kHz (+3.6 dB; +3.1 at
+    2x) and Cycle of Fifths' 250 Hz (-2.1; -1.6).
+  - The bright presets' 20 kHz band falls by up to 0.6 dB (Horn Bloom), the aliasing taken
+    out.
+- **`interp`:**
+  - Every render is 39 or 44.5 samples later, so the difference's RMS is mostly about the
+    render's own (up to 3.5 dB above it).
+  - Feedback Funk's 630 Hz band rises by 14.5 dB (2x) and 13.0 (4x): the longer loop
+    oscillates otherwise.
+  - Driven Kick's 1.26 kHz band rises by 2.8 and 2.5 dB.
+- **Driven Kick's 1.26 kHz band** moves in every variant, so it is the preset most sensitive
+  to the VCA's rate and timing. R-BLEP's contour delay (above) moved its 315 Hz band by 2.5 dB.
+
+**Against ngspice** (`vca_realtime.rs`, release; today's path, then with `CA72_VCA_OS` at 2x
+and 4x): every test passes in all three, and the VCA's sound holds.
+- The gain over contour and over EXT. LOUDNESS (0.15 dB budget) and the driven VCA's
+  harmonics move by 0.01 dB at most. Those tests run at 192 kHz, where the path's rate is
+  already far above the tone's harmonics. The bias, the balance procedure and the static
+  transfer do not involve the signal path's rate.
+- The thump of a contour step (budget 3 % of its 123 mV peak) reads 1.40 to 1.43 mV at the
+  worst at 2x and 4x, against 1.39 to 1.40 today.
+- A tremolo at EXT. LOUDNESS (the one test of the signal path against an audio-rate bias, at
+  48 kHz) is within 0.1 dB up to 100 Hz. At 1 kHz the difference falls from 27.7 dB below the
+  output to 31.1 (2x) and 33.5 (4x), as `tremolo_step_budget` found the model's step converge
+  (31.4 and 33.8).
+- The first run at 2x and 4x failed the thump and the tremolo, by the output's alignment. The
+  bias reaches the output (factor - 1) / factor of a sample later than the decimator's delay.
+  `VcaOversampled::bias_latency` counts it, and the tests shift the reference by it.
+
+**Options for the owner:**
+1. **As it is.** ULTRA's voice aliases at -45 dB on an open sawtooth at 44.1 kHz (-48 at 48),
+   -33 with DRIVE: 24 to 27 dB above its filter.
+2. **`filter4`: the VCA at the filter's rate, the filter's decimator after it.**
+   - The voice is as clean as its filter, DRIVE included.
+   - The VCA takes in what the circuit's does.
+   - No latency is added to the sound or to FEEDBACK's loop, and the gain meets the sound 23
+     samples nearer the circuit's timing.
+   - +10.2 % on ULTRA (5.4 % of a core a voice).
+3. **`filter2`: the VCA at 2x between the filter's decimator's two stages.**
+   - As clean as `filter4` except with DRIVE (-54 dB at 44.1 kHz, 4.3 above the filter).
+   - The same latencies as `filter4`.
+   - +3.5 % (1.9 % of a core a voice).
+4. **`interp2`: the filter's output interpolated again, the VCA at 2x.**
+   - The cleanest figures (within 0.7 dB of 8x).
+   - The VCA no longer hears the filter's ultrasonic output.
+   - The sound and FEEDBACK's loop get 39 samples more (90 to 129), which changes Feedback
+     Funk, and the gain runs 19 samples further ahead of the sound.
+   - +5.4 % (2.9 % of a core a voice).
+
+**Recommendation: 2, `filter4`.** It is the only variant that ends the VCA's aliasing and also
+keeps the VCA as the circuit has it: fed the filter's whole output, with nothing added to the
+loop or the sound. ULTRA is the render engine (its whole voices cannot be played live anyway,
+R-THREADS), so accuracy is worth its 10 %. If ULTRA's cost must not grow by that much, take
+`filter2`: it is the same except for DRIVE, for a third of the cost. Not `interp`, which moves
+FEEDBACK. Built, it would be the voice's code (`VcaOversampled` in `BackPart`), with the bias
+interpolated as here.
+- **Two things to settle in a build:** the VCA's states when ULTRA is switched on during a
+  note (the lab copies the VCA once, when the voice is made); and whether the oversampled path
+  can take High Fidelity's plain solve (1e-9, one Newton step a sample) at the higher rate,
+  which might cost less. Neither was measured here.
+
+**For the owner to decide:** whether ULTRA's VCA runs oversampled, and which way (1 to 4
+above; recommended: 2).
+
+**Evidence (the Mac, 2026-10-16 and 17; branch `lab/ultra-vca-os`):**
+- **Suite.** `vca_realtime.rs` (release): 9 pass, 1 ignored, at 1x, 2x and 4x. ca72's unit
+  tests (debug): 76 pass. `cargo clippy -p ca72 -p ca72-lab --all-targets -- -D warnings`
+  passes; rustfmt on the changed files.
+- **Same to the bit.** The lab with `CA72_VCA_OS` unset renders every factory preset at ULTRA
+  the same to the bit as `claude/lucid-fermi-67e20c` (`preset_render`, two seconds).
+- **Machine.** Shared, load averages 4 to 14 while the cost rounds ran (interleaved); the
+  aliasing runs are deterministic.
+- **Not tried:** HI or LO; the threaded ULTRA split (R-THREADS, another branch); paced worst
+  blocks; Windows and Linux; hosts. Not pushed.
 
 **For the merge.** The threads work (branch `claude/goofy-ellis-af3f5d`, unmerged, R-THREADS)
 also changes `voice.rs` (`BackPart::set_drive` and others) and `threaded.rs`. This build

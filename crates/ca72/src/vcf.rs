@@ -1124,6 +1124,54 @@ impl Vcf {
         out
     }
 
+    /// The lab's (decisions.md R-BLEP, the VCA oversampled): [`Vcf::tick`]'s samples at the
+    /// loop's rate into `xs` (as many as its oversampling), not decimated; with `decimate`,
+    /// its output at the sample rate as well (otherwise 0).
+    pub fn tick_oversampled(
+        &mut self,
+        i_bus: f64,
+        g_bus: f64,
+        i0: f64,
+        xs: &mut [f64; 8],
+        decimate: bool,
+    ) -> f64 {
+        let mut laps = crate::prof::Laps::start();
+        let mut ns = [0.0f64; 8];
+        let mut gs = [0.0f64; 8];
+        self.up_n.push(i_bus, &mut ns);
+        let (g, n, held) = self.g_held;
+        if g_bus.to_bits() == g.to_bits() && n >= G_HOLD {
+            gs = held;
+        } else {
+            self.up_g.push(g_bus, &mut gs);
+            let n = if g_bus.to_bits() == g.to_bits() {
+                n + 1
+            } else {
+                0
+            };
+            self.g_held = (g_bus, n, gs);
+        }
+        laps.lap(Part::FilterResample);
+        let mut out = 0.0;
+        let mut iters = 0;
+        for k in 0..self.oversample {
+            let v = self.step(ns[k], gs[k].max(0.0), i0, &mut iters, &mut laps);
+            let v = self.filter_mode(ns[k], v);
+            xs[k] = v;
+            if decimate && let Some(o) = self.down.push(v) {
+                out = o;
+            }
+            laps.lap(Part::FilterResample);
+        }
+        self.last_iterations = iters;
+        out
+    }
+
+    /// The filter's oversampling.
+    pub fn oversample(&self) -> usize {
+        self.oversample
+    }
+
     /// FILTER MODE over one step, at the loop's rate so that the two branches line up: the
     /// direct branch's coupling (trapezoidal, as the loop) charged in LO as well, as its
     /// capacitor would be; LO's output `v` as it is, or HI.

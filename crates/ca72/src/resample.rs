@@ -425,6 +425,12 @@ impl Decimator {
         Self::with_last(factor, OSCILLATOR_LAST_HALFBAND, Halfband::new)
     }
 
+    /// The lab's (decisions.md R-BLEP): [`Decimator::new`] with its last stage `last` taps
+    /// long.
+    pub fn with_last_taps(factor: usize, last: usize) -> Decimator {
+        Self::with_last(factor, last, Halfband::new)
+    }
+
     fn with(factor: usize, make: fn(usize, f64) -> Halfband) -> Decimator {
         Self::with_last(factor, LAST_HALFBAND, make)
     }

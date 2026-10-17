@@ -4,15 +4,83 @@
 //! and the distortion of a driven VCA; the EXT. LOUDNESS jack (J3) plugged, steady and at
 //! audio rate.
 //!
+//! With `CA72_VCA_OS` set (decisions.md R-BLEP, the VCA oversampled, the lab's): the signal
+//! path at 2 (`interp2`, `filter2`) or 4 (`interp4`, `filter4`) times each test's rate, on
+//! the bias worked out at its rate ([`Rt`]).
+//!
 //! The known difference: the output pair loads the second pair's collectors about 5 %
 //! less in the model (its linearised base current), which leaves the gain 0.1 dB high.
 
-use ca72::vca::{CONTOUR_FULL, Vca, VcaCircuit};
+use ca72::vca::{CONTOUR_FULL, Vca, VcaCircuit, VcaOsFrom, VcaOversampled};
 use ca72_lab::bench::Solver;
 use ca72_lab::vca::{self as lab, VcaBench};
 use ca72_lab::work_dir;
 use ca72_spice::{Ngspice, Plot, for_test};
 use std::f64::consts::PI;
+
+/// The real-time VCA as these tests run it: [`Vca::tick`], or with `CA72_VCA_OS` set its
+/// signal path oversampled ([`VcaOversampled`]) on the bias [`Vca::control`] works out at the
+/// test's rate, the input taken at the signal path's own rate (no interpolator: the test's
+/// sources are functions of time), its output [`Rt::delay`] samples late.
+struct Rt {
+    v: Vca,
+    os: Option<VcaOversampled>,
+    sr: f64,
+}
+
+impl Rt {
+    fn new(c: VcaCircuit, sr: f64, cont: f64) -> Rt {
+        let v = Vca::new(c, sr, cont);
+        let factor = match std::env::var("CA72_VCA_OS").as_deref() {
+            Ok("interp2" | "filter2") => Some(2),
+            Ok("interp4" | "filter4") => Some(4),
+            _ => None,
+        };
+        Rt {
+            os: factor.map(|f| VcaOversampled::new(&v, f, VcaOsFrom::Interpolated)),
+            v,
+            sr,
+        }
+    }
+
+    /// One sample, the input `x` a function of time and this sample's time `t`.
+    fn tick_with(&mut self, x: impl Fn(f64) -> f64, t: f64, cont: f64) -> f64 {
+        match &mut self.os {
+            None => self.v.tick(x(t), cont),
+            Some(os) => {
+                let d = self.v.control(cont);
+                let m = os.factor;
+                let xs: Vec<f64> = (0..m)
+                    .map(|k| x(t - (m - 1 - k) as f64 / (m as f64 * self.sr)))
+                    .collect();
+                os.signal_at_rate(&xs, &d)
+            }
+        }
+    }
+
+    /// One sample with a steady input `x`.
+    fn tick(&mut self, x: f64, cont: f64) -> f64 {
+        self.tick_with(|_| x, 0.0, cont)
+    }
+
+    /// How late the output is, samples (the oversampled path's decimator).
+    fn delay(&self) -> f64 {
+        self.os.as_ref().map_or(0.0, VcaOversampled::bias_latency)
+    }
+}
+
+impl std::ops::Deref for Rt {
+    type Target = Vca;
+    fn deref(&self) -> &Vca {
+        &self.v
+    }
+}
+
+impl std::ops::DerefMut for Rt {
+    fn deref_mut(&mut self) -> &mut Vca {
+        &mut self.v
+    }
+}
 
 fn circuit(b: &VcaBench) -> VcaCircuit {
     // A source plugged into J3 holds the input itself (the normal contact open).
@@ -67,7 +135,7 @@ fn rt_gain(b: &VcaBench, hz: f64) -> f64 {
 /// [`rt_gain`] with the bias solved every `every` samples (None: the VCA's own interval).
 fn rt_gain_every(b: &VcaBench, hz: f64, every: Option<usize>) -> f64 {
     let sr = 192_000.0;
-    let mut v = Vca::new(circuit(b), sr, b.cont);
+    let mut v = Rt::new(circuit(b), sr, b.cont);
     if let Some(e) = every {
         v.control_every = e;
     }
@@ -78,7 +146,7 @@ fn rt_gain_every(b: &VcaBench, hz: f64, every: Option<usize>) -> f64 {
     let m = (periods / hz * sr).round() as usize;
     let n = (settle * sr) as usize + m;
     let out: Vec<f64> = (0..n)
-        .map(|i| v.tick(a * (2.0 * PI * hz * i as f64 / sr).sin(), b.cont))
+        .map(|i| v.tick_with(|t| a * (2.0 * PI * hz * t).sin(), i as f64 / sr, b.cont))
         .collect();
     let (mut p, mut q) = (0.0, 0.0);
     for (k, y) in out[n - m..].iter().enumerate() {
@@ -339,8 +407,8 @@ fn thump_matches_the_circuit() {
         .expect("tran");
         let sr = 48_000.0;
         let n = (tstop * sr) as usize;
-        let ng = resampled(&p, 0.0, sr, n);
-        let mut v = Vca::new(c, sr, 0.0);
+        let mut v = Rt::new(c, sr, 0.0);
+        let ng = resampled(&p, -v.delay() / sr, sr, n);
         let rt: Vec<f64> = (0..n).map(|i| v.tick(0.0, cont(i as f64 / sr))).collect();
         let peak = ng.iter().fold(0.0f64, |a, x| a.max(x.abs()));
         let (k, err) = ng
@@ -418,10 +486,10 @@ fn drive_distortion_matches_the_circuit() {
         let sr = 192_000.0;
         let n = (0.1 * sr) as usize;
         let ng = resampled(&p, tstop - 0.1, sr, n);
-        let mut v = Vca::new(c, sr, cont);
+        let mut v = Rt::new(c, sr, cont);
         let total = (tstop * sr) as usize;
         let rt: Vec<f64> = (0..total)
-            .map(|i| v.tick(amp * (2.0 * PI * hz * i as f64 / sr).sin(), cont))
+            .map(|i| v.tick_with(|t| amp * (2.0 * PI * hz * t).sin(), i as f64 / sr, cont))
             .collect();
         let hn = harmonics_at(&ng, sr, hz, 7);
         let hr = harmonics_at(&rt[total - n..], sr, hz, 7);
@@ -526,7 +594,7 @@ fn the_loudness_jack_overdrive_matches_the_circuit() {
                 Solver::default(),
             )
             .expect("ac");
-            let mut rt = Vca::new(circuit(&b), 48e3, cont);
+            let mut rt = Rt::new(circuit(&b), 48e3, cont);
             let rest = rt.rest_output(cont);
             let r = rt.bias();
             // Solved every sample as with the jack plugged: how many solves do not settle.
@@ -615,8 +683,8 @@ fn the_loudness_jack_follows_audio_rate_cv() {
             .expect("tran");
         let sr = 48_000.0;
         let n = (0.2 * sr) as usize;
-        let ng = resampled(&plots[0], tstop - 0.2, sr, n);
-        let mut v = Vca::new(circuit(&b), sr, CONTOUR_FULL);
+        let mut v = Rt::new(circuit(&b), sr, CONTOUR_FULL);
+        let ng = resampled(&plots[0], tstop - 0.2 - v.delay() / sr, sr, n);
         // As the voice runs it with the jack plugged: the bias solved every sample.
         v.control_every = 1;
         let total = (tstop * sr) as usize;
@@ -625,7 +693,7 @@ fn the_loudness_jack_follows_audio_rate_cv() {
                 let t = i as f64 / sr;
                 v.circuit.ext = 3.0 + 2.0 * (2.0 * PI * hz * t).sin();
                 v.circuit.r_j3 = 0.0;
-                v.tick(0.05 * (2.0 * PI * 1000.0 * t).sin(), CONTOUR_FULL)
+                v.tick_with(|t| 0.05 * (2.0 * PI * 1000.0 * t).sin(), t, CONTOUR_FULL)
             })
             .collect();
         let tail = &rt[total - n..];

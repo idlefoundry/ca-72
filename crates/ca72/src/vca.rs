@@ -1213,6 +1213,113 @@ impl Vca {
     }
 }
 
+/// Where the lab's oversampled VCA (decisions.md R-BLEP, the VCA oversampled, measured not
+/// built) takes its input from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VcaOsFrom {
+    /// The filter's output at the sample rate, interpolated again.
+    Interpolated,
+    /// The filter's own samples at 4x, before its decimator (at 2x, after its decimator's
+    /// first stage): the filter's decimator then follows the VCA.
+    FilterRate,
+}
+
+/// The lab's (decisions.md R-BLEP, the VCA oversampled, measured not built): the VCA's
+/// signal path ([`Vca::signal`]) at `factor` times the sample rate, its output decimated
+/// by a [`Decimator::new`]; its bias ([`Vca::control`]'s) still worked out at the sample
+/// rate and interpolated linearly between samples.
+#[derive(Debug, Clone)]
+pub struct VcaOversampled {
+    pub vca: Vca,
+    pub factor: usize,
+    pub from: VcaOsFrom,
+    up: crate::resample::Interpolator,
+    /// From the filter's 4x to 2x (a 23-tap halfband, the filter's decimator's first stage).
+    first: crate::resample::Decimator,
+    down: crate::resample::Decimator,
+    last: Option<[f64; VcaDrive::LEN]>,
+}
+
+impl VcaOversampled {
+    /// The signal path of `vca` (at its rate, at rest) at `factor` (2, 4 or 8) times it.
+    pub fn new(vca: &Vca, factor: usize, from: VcaOsFrom) -> VcaOversampled {
+        let mut v = vca.clone();
+        v.h /= factor as f64;
+        VcaOversampled {
+            vca: v,
+            factor,
+            from,
+            up: crate::resample::Interpolator::new(factor),
+            first: crate::resample::Decimator::with_last_taps(2, 23),
+            down: crate::resample::Decimator::new(factor),
+            last: None,
+        }
+    }
+
+    /// The delay it adds to the signal, output samples: the interpolator's and the
+    /// decimator's ([`VcaOsFrom::Interpolated`]), or none (the filter's decimator moved
+    /// after it).
+    pub fn latency(&self) -> f64 {
+        match self.from {
+            VcaOsFrom::Interpolated => self.up.delay() + self.down.delay(),
+            VcaOsFrom::FilterRate => 0.0,
+        }
+    }
+
+    /// How much later than at the sample rate a change of its bias reaches the output,
+    /// output samples: its decimator's delay, and (factor - 1) / factor more, since the bias
+    /// is interpolated up to the last of a sample's steps and the decimator gives its output
+    /// on the first.
+    pub fn bias_latency(&self) -> f64 {
+        self.down.delay() + (self.factor - 1) as f64 / self.factor as f64
+    }
+
+    /// One output sample: the filter's output `v_in` (from its rest; at the sample rate),
+    /// on the bias `d`.
+    pub fn signal(&mut self, v_in: f64, d: &VcaDrive) -> f64 {
+        let mut xs = [0.0f64; 8];
+        self.up.push(v_in, &mut xs);
+        self.signal_at_rate(&xs[..self.factor], d)
+    }
+
+    /// One output sample from the filter's four samples `xs` at 4x (before its decimator),
+    /// on the bias `d`.
+    pub fn signal_at_4x(&mut self, xs: &[f64], d: &VcaDrive) -> f64 {
+        if self.factor == 4 {
+            return self.signal_at_rate(xs, d);
+        }
+        let mut half = [0.0f64; 2];
+        let mut n = 0;
+        for &x in xs {
+            if let Some(y) = self.first.push(x) {
+                half[n] = y;
+                n += 1;
+            }
+        }
+        self.signal_at_rate(&half[..n], d)
+    }
+
+    /// One output sample from `xs`, the input at its own rate (`factor` samples), on the
+    /// bias `d`.
+    pub fn signal_at_rate(&mut self, xs: &[f64], d: &VcaDrive) -> f64 {
+        let to = d.to_array();
+        let from = self.last.unwrap_or(to);
+        self.last = Some(to);
+        let m = xs.len() as f64;
+        let mut out = 0.0;
+        for (k, &x) in xs.iter().enumerate() {
+            let t = (k + 1) as f64 / m;
+            let dk =
+                VcaDrive::from_array(&std::array::from_fn(|i| from[i] + t * (to[i] - from[i])));
+            let y = self.vca.signal(x, &dk);
+            if let Some(o) = self.down.push(y) {
+                out = o;
+            }
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod bench {
     use super::*;

@@ -38,7 +38,7 @@ use crate::tuning::{
     Buses, FREQ_CENTRE, HIGH_A, LOW_A, OPEN_BUS, Osc, Range, SECOND_A, Tuning, folkman_1973_buses,
     folkman_1973_osc_buses, osc_drive_with,
 };
-use crate::vca::{Vca, VcaCircuit, VcaDrive};
+use crate::vca::{Vca, VcaCircuit, VcaDrive, VcaOsFrom, VcaOversampled};
 use crate::vcf::{ExpoTable, FilterExpo, Vcf};
 use crate::vco::{Vco, VcoOut};
 
@@ -956,6 +956,9 @@ pub struct BackPart {
     a440: A440,
     /// EMPHASIS's law.
     emphasis: Memo<f64>,
+    /// The lab's (decisions.md R-BLEP, the VCA oversampled, measured not built): in ULTRA the
+    /// VCA's signal path oversampled, as `CA72_VCA_OS` has it ([`vca_os`]).
+    vca_os: Option<Box<VcaOversampled>>,
 }
 
 /// The external input's scale: the jack's voltage for a sample of 1.0, the same as the
@@ -1159,6 +1162,8 @@ impl Voice {
                         f.prepare(oversampling(Quality::Potato).1);
                         f
                     },
+                    vca_os: vca_os()
+                        .map(|(factor, from)| Box::new(VcaOversampled::new(&vca, factor, from))),
                     vca,
                     a440: A440::new(rate),
                     emphasis: Memo::NEW,
@@ -1627,6 +1632,30 @@ fn contour_delay(q: Quality) -> f64 {
         - Decimator::delay_of(os, LAST_HALFBAND)
 }
 
+/// The lab's (decisions.md R-BLEP, the VCA oversampled, measured not built): ULTRA's VCA's
+/// signal path oversampled if `CA72_VCA_OS` is `interp2`, `interp4` or `interp8` (the
+/// filter's output interpolated again) or `filter2` or `filter4` (the filter's own samples at 4x, before its
+/// decimator, which then follows the VCA); otherwise at the sample rate.
+fn vca_os() -> Option<(usize, VcaOsFrom)> {
+    static OS: std::sync::OnceLock<Option<(usize, VcaOsFrom)>> = std::sync::OnceLock::new();
+    *OS.get_or_init(|| match std::env::var("CA72_VCA_OS").as_deref() {
+        Ok("interp2") => Some((2, VcaOsFrom::Interpolated)),
+        Ok("interp4") => Some((4, VcaOsFrom::Interpolated)),
+        Ok("interp8") => Some((8, VcaOsFrom::Interpolated)),
+        Ok("filter2") => Some((2, VcaOsFrom::FilterRate)),
+        Ok("filter4") => Some((4, VcaOsFrom::FilterRate)),
+        _ => None,
+    })
+}
+
+/// The lab's: with the VCA fed the filter's own samples, the filter's output at the sample
+/// rate is still worked out for [`Voice::probe`] if `CA72_VCA_OS_PROBE` is set (it costs a
+/// decimator).
+fn vca_os_probe() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("CA72_VCA_OS_PROBE").is_some())
+}
+
 /// The contours' past outputs kept, samples (more than [`contour_delay`] in any mode).
 const ENV_PAST: usize = 32;
 
@@ -1985,6 +2014,29 @@ impl BackPart {
         self.vcf.set_oversample(oversampling(p.quality).1);
         self.vcf.set_quality(p.quality);
         self.vcf.high_pass = p.filter_hi;
+        // (The lab's: in ULTRA the VCA oversampled, `CA72_VCA_OS`.)
+        if p.quality == Quality::NoCompromises
+            && let Some(os) = &mut self.vca_os
+        {
+            let (y, xs) = if os.from == VcaOsFrom::FilterRate && self.vcf.oversample() == 4 {
+                let mut xs = [0.0f64; 8];
+                let probe = vca_os_probe();
+                let y = self
+                    .vcf
+                    .tick_oversampled(f.i_bus, f.g_bus, f.i0, &mut xs, probe);
+                (y, Some(xs))
+            } else {
+                (self.vcf.tick(f.i_bus, f.g_bus, f.i0), None)
+            };
+            laps.lap(crate::prof::Part::Filter);
+            os.vca.a440 = self.a440.tick(p.a440);
+            let out = match xs {
+                Some(xs) => os.signal_at_4x(&xs[..4], d),
+                None => os.signal(y, d),
+            };
+            laps.lap(crate::prof::Part::Vca);
+            return (y, out / 5.0);
+        }
         let y = self.vcf.tick(f.i_bus, f.g_bus, f.i0);
         laps.lap(crate::prof::Part::Filter);
         self.vca.a440 = self.a440.tick(p.a440);
