@@ -406,6 +406,22 @@ impl Decimator {
         Self::with(factor, Halfband::sparse)
     }
 
+    /// The lab's (decisions.md R-BLEP, ULTRA's last halfband measured, not built):
+    /// [`Decimator::new`] with its last stage `len` taps long, Kaiser beta `beta`.
+    pub fn with_last(factor: usize, len: usize, beta: f64) -> Decimator {
+        let stages = stages_len(factor);
+        let stages = (0..stages)
+            .map(|i| {
+                if i + 1 == stages {
+                    Halfband::new(len, beta)
+                } else {
+                    Halfband::new(23, 10.06)
+                }
+            })
+            .collect();
+        Decimator { stages }
+    }
+
     fn with(factor: usize, make: fn(usize, f64) -> Halfband) -> Decimator {
         let stages = stages_len(factor);
         let stages = (0..stages)

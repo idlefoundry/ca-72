@@ -366,6 +366,13 @@ impl Vco {
         self.dec[0].delay() + BLEP_DELAY as f64 / self.oversample as f64
     }
 
+    /// The lab's (decisions.md R-BLEP, ULTRA's last halfband measured, not built): the
+    /// decimators' last stage `len` taps long, Kaiser beta `beta`, from silence.
+    pub fn set_last_halfband(&mut self, len: usize, beta: f64) {
+        let d = || Decimator::with_last(self.oversample, len, beta);
+        self.dec = [d(), d(), d()];
+    }
+
     /// Which outputs (sawtooth, triangle, rectangle) to correct from now on: the voice's
     /// selected waveform's ([`crate::voice`]); all of them unless set. An output left out is
     /// still made, uncorrected (it aliases): taken up again, its corrections start with the

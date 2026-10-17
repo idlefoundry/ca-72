@@ -449,6 +449,14 @@ fn osccost(rest: &[String]) -> Res {
         for (name, mask) in masks {
             for key in [4.0, 40.0] {
                 let mut v = ca72::vco::Vco::new(rate, os);
+                if os == 4
+                    && let Ok(spec) = std::env::var("CA72_LAST_HALFBAND")
+                {
+                    let mut it = spec.split(':');
+                    let len = it.next().and_then(|l| l.parse().ok()).unwrap_or(79);
+                    let beta = it.next().and_then(|b| b.parse().ok()).unwrap_or(10.06);
+                    v.set_last_halfband(len, beta);
+                }
                 let (t, _) = folkman_1973(&mut v, rate, Tuning::default());
                 let i_in = v.expo.input_current(&osc1_inputs(&t, key, Range::R2));
                 v.reset();

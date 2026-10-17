@@ -149,6 +149,15 @@ pub fn circuit(
     n: usize,
 ) -> ([Vec<f64>; 3], f64) {
     let mut v = ca72::vco::Vco::new(rate, oversample);
+    // (The lab's: ULTRA's last halfband `CA72_LAST_HALFBAND` = taps[:beta] long, at 4x.)
+    if oversample == 4
+        && let Ok(spec) = std::env::var("CA72_LAST_HALFBAND")
+    {
+        let mut it = spec.split(':');
+        let len = it.next().and_then(|l| l.parse().ok()).unwrap_or(79);
+        let beta = it.next().and_then(|b| b.parse().ok()).unwrap_or(10.06);
+        v.set_last_halfband(len, beta);
+    }
     let t = tuned(rate);
     v.expo.r11 = t.r11;
     v.expo.a8 = t.a8;
