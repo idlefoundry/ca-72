@@ -725,6 +725,8 @@ struct PanelWindow {
     logical: (u32, u32),
     /// When the frame was last shown on the window (none since it opened or resized).
     shown: Option<Instant>,
+    /// When the frame was last drawn while the window could not be seen ([`HIDDEN_DRAW`]).
+    hidden_drawn: Option<Instant>,
     editing: Editing,
     /// The keyboard the drawer took from another window (Windows), given back as it shuts.
     keys: Option<window::Keys>,
@@ -856,6 +858,7 @@ impl PanelWindow {
             physical,
             logical: (width, height),
             shown: None,
+            hidden_drawn: None,
             editing: Editing::new(
                 context,
                 params,
@@ -2935,6 +2938,12 @@ const REPAINT: Option<Duration> = if cfg!(target_os = "linux") {
     None
 };
 
+/// How often the frame is drawn while the window cannot be seen (covered by other windows,
+/// minimised, on another desktop, the host hidden): the scene kept up (the drawer, a resize, MIDI
+/// Learn) without drawing the shutter and the levels thirty times a second for nobody. Nothing is
+/// shown meanwhile; the window seen again is shown whole at once.
+const HIDDEN_DRAW: Duration = Duration::from_millis(250);
+
 /// Whether the frame must be shown again though nothing in it changed: not yet shown since
 /// the window opened or resized, or (Linux) shown longer ago than [`REPAINT`].
 fn repaint_due(shown: Option<Instant>, now: Instant) -> bool {
@@ -2968,6 +2977,20 @@ impl WindowHandler for PanelWindow {
         self.editing.grip();
         self.follow(window);
         let now = Instant::now();
+        // Unseen, drawn only now and then and not shown; seen again, shown whole.
+        let seen = window::seen(window);
+        if !seen {
+            self.shown = None;
+            if self
+                .hidden_drawn
+                .is_some_and(|at| now.saturating_duration_since(at) < HIDDEN_DRAW)
+            {
+                self.keyboard(window);
+                self.editing.measure_when_done();
+                return;
+            }
+            self.hidden_drawn = Some(now);
+        }
         let changed = self.editing.draw();
         // A drawer that has just slid shut has asked the host for the shorter window: the
         // editor's view follows in the same frame, before anything is shown. A frame between
@@ -2979,7 +3002,7 @@ impl WindowHandler for PanelWindow {
         self.keyboard(window);
         // (Shown again whole when due: X11 may have dropped any of it.)
         let due = repaint_due(self.shown, now);
-        if changed || due {
+        if seen && (changed || due) {
             self.present(changed && !due);
             self.shown = Some(now);
         }
@@ -3410,6 +3433,54 @@ pub(crate) mod window {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (window, keys);
+        }
+    }
+
+    /// Whether any of the editor's window can be seen: macOS's occlusion state of the window
+    /// holding it (covered whole, minimised, on another Space or its application hidden: not
+    /// seen); on Windows, shown and its top window not minimised. X11 says nothing reliable
+    /// without a compositor: always seen there.
+    // (objc 0.2's `msg_send!` asks after a `cargo-clippy` feature this crate does not have.)
+    #[cfg_attr(target_os = "macos", allow(unexpected_cfgs))]
+    pub fn seen(window: &baseview::Window<'_>) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use cocoa::appkit::{NSWindow, NSWindowOcclusionState};
+            use cocoa::base::{id, nil};
+            use objc::{msg_send, sel, sel_impl};
+            let RawWindowHandle::AppKit(h) = window.raw_window_handle() else {
+                return true;
+            };
+            let view = h.ns_view as id;
+            if view == nil {
+                return true;
+            }
+            // SAFETY: baseview's view, on the main thread that runs its frames; its window
+            // is nil until the host puts it in one.
+            let holder: id = unsafe { msg_send![view, window] };
+            if holder == nil {
+                return true;
+            }
+            // SAFETY: `holder` is an NSWindow.
+            let state = unsafe { holder.occlusionState() };
+            state.contains(NSWindowOcclusionState::NSWindowOcclusionStateVisible)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use winapi::um::winuser::{GA_ROOT, GetAncestor, IsIconic, IsWindowVisible};
+            let Some(hwnd) = hwnd(window) else {
+                return true;
+            };
+            // SAFETY: the editor's window and its top window, on the thread that owns them.
+            unsafe {
+                let top = GetAncestor(hwnd, GA_ROOT);
+                IsWindowVisible(hwnd) != 0 && (top.is_null() || IsIconic(top) == 0)
+            }
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let _ = window;
+            true
         }
     }
 

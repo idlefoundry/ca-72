@@ -352,6 +352,7 @@ dependencies = [
  "keyboard-types",
  "libm",
  "nih_plug",
+ "objc",
  "objc2",
  "objc2-foundation",
  "plugin-kit-queue",
