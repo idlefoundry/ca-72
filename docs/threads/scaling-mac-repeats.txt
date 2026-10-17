@@ -1,0 +1,52 @@
+# rep 1 load { 6.49 6.88 7.82 }
+scaling: quality=hi block=256 instances=1 workers=4 share=fair got=4 voices=10 seconds=10 mean=25.2 worst_instance_mean=25.2 p50=24.6 p99=35.7 p999=38.8 worst=40.2 late=0 blocks=1875 silent_runs=0 demotions=0 load=6.49
+# rep 1 load { 6.61 6.90 7.81 }
+scaling: quality=hi block=256 instances=1 workers=8 share=fair got=8 voices=10 seconds=10 mean=24.1 worst_instance_mean=24.1 p50=23.3 p99=34.9 p999=40.2 worst=47.1 late=0 blocks=1875 silent_runs=0 demotions=0 load=6.40
+# rep 1 load { 6.48 6.85 7.78 }
+scaling: quality=hi block=256 instances=1 workers=9 share=fair got=9 voices=10 seconds=10 mean=19.1 worst_instance_mean=19.1 p50=18.8 p99=29.6 p999=33.1 worst=37.7 late=0 blocks=1875 silent_runs=0 demotions=0 load=6.48
+# rep 1 load { 7.15 6.99 7.81 }
+scaling: quality=hi block=256 instances=2 workers=4 share=fair got=2+2 voices=10 seconds=10 mean=46.0 worst_instance_mean=46.1 p50=44.5 p99=65.2 p999=71.9 worst=72.8 late=0 blocks=3750 silent_runs=0 demotions=0 load=7.15
+# rep 1 load { 7.05 6.97 7.80 }
+scaling: quality=hi block=256 instances=2 workers=8 share=fair got=4+4 voices=10 seconds=10 mean=26.8 worst_instance_mean=26.9 p50=25.6 p99=38.8 p999=45.2 worst=47.3 late=0 blocks=3750 silent_runs=0 demotions=0 load=7.05
+# rep 1 load { 6.07 6.76 7.71 }
+scaling: quality=hi block=256 instances=2 workers=12 share=fair got=6+6 voices=10 seconds=10 mean=28.4 worst_instance_mean=28.5 p50=28.0 p99=41.0 p999=47.9 worst=53.2 late=0 blocks=3750 silent_runs=0 demotions=0 load=6.07
+# rep 1 load { 5.68 6.65 7.66 }
+scaling: quality=hi block=256 instances=4 workers=4 share=fair got=1+1+1+1 voices=10 seconds=10 mean=58.4 worst_instance_mean=58.6 p50=56.3 p99=82.8 p999=91.4 worst=95.3 late=0 blocks=7500 silent_runs=134 demotions=0 load=5.78
+# rep 1 load { 6.67 6.82 7.70 }
+scaling: quality=hi block=256 instances=4 workers=5 share=fair got=2+1+1+1 voices=10 seconds=10 mean=55.6 worst_instance_mean=58.8 p50=55.4 p99=80.7 p999=90.7 worst=93.7 late=0 blocks=7500 silent_runs=86 demotions=0 load=6.67
+# rep 1 load { 6.82 6.84 7.69 }
+scaling: quality=hi block=256 instances=4 workers=6 share=fair got=2+2+1+1 voices=10 seconds=10 mean=53.8 worst_instance_mean=61.1 p50=54.0 p99=83.2 p999=91.6 worst=114.5 late=3 blocks=7500 silent_runs=118 demotions=0 load=6.76
+# rep 1 load { 6.76 6.83 7.67 }
+scaling: quality=hi block=256 instances=4 workers=7 share=fair got=2+2+2+1 voices=10 seconds=10 mean=53.1 worst_instance_mean=63.3 p50=51.2 p99=82.1 p999=97.8 worst=123.2 late=6 blocks=7500 silent_runs=154 demotions=0 load=6.76
+# rep 1 load { 8.18 7.15 7.77 }
+scaling: quality=hi block=256 instances=4 workers=8 share=fair got=2+2+2+2 voices=10 seconds=10 mean=52.2 worst_instance_mean=52.6 p50=51.2 p99=75.2 p999=84.6 worst=101.9 late=1 blocks=7500 silent_runs=66 demotions=0 load=8.18
+# rep 1 load { 9.86 7.54 7.90 }
+scaling: quality=hi block=256 instances=4 workers=10 share=fair got=3+3+2+2 voices=10 seconds=10 mean=51.6 worst_instance_mean=53.4 p50=51.0 p99=75.1 p999=85.9 worst=121.3 late=1 blocks=7500 silent_runs=76 demotions=0 load=9.86
+# rep 1 load { 10.26 7.72 7.96 }
+scaling: quality=hi block=256 instances=4 workers=12 share=fair got=3+3+3+3 voices=10 seconds=10 mean=51.2 worst_instance_mean=51.6 p50=50.4 p99=75.1 p999=85.3 worst=103.3 late=1 blocks=7500 silent_runs=59 demotions=0 load=10.26
+# rep 2 load { 11.22 8.01 8.06 }
+scaling: quality=hi block=256 instances=1 workers=4 share=fair got=4 voices=10 seconds=10 mean=25.9 worst_instance_mean=25.9 p50=25.4 p99=36.3 p999=39.4 worst=41.6 late=0 blocks=1875 silent_runs=0 demotions=0 load=10.56
+# rep 2 load { 9.63 7.82 7.99 }
+scaling: quality=hi block=256 instances=1 workers=8 share=fair got=8 voices=10 seconds=10 mean=24.2 worst_instance_mean=24.2 p50=23.3 p99=35.5 p999=40.7 worst=43.4 late=0 blocks=1875 silent_runs=0 demotions=0 load=9.63
+# rep 2 load { 9.26 7.82 7.99 }
+scaling: quality=hi block=256 instances=1 workers=9 share=fair got=9 voices=10 seconds=10 mean=19.1 worst_instance_mean=19.1 p50=18.9 p99=29.0 p999=35.8 worst=37.6 late=0 blocks=1875 silent_runs=0 demotions=0 load=9.26
+# rep 2 load { 9.98 8.03 8.06 }
+scaling: quality=hi block=256 instances=2 workers=4 share=fair got=2+2 voices=10 seconds=10 mean=46.2 worst_instance_mean=46.2 p50=44.6 p99=65.7 p999=72.3 worst=73.9 late=0 blocks=3750 silent_runs=0 demotions=0 load=9.98
+# rep 2 load { 8.98 7.91 8.02 }
+scaling: quality=hi block=256 instances=2 workers=8 share=fair got=4+4 voices=10 seconds=10 mean=27.0 worst_instance_mean=27.1 p50=25.8 p99=39.4 p999=45.6 worst=57.1 late=0 blocks=3750 silent_runs=0 demotions=0 load=8.98
+# rep 2 load { 8.84 7.91 8.02 }
+scaling: quality=hi block=256 instances=2 workers=12 share=fair got=6+6 voices=10 seconds=10 mean=28.2 worst_instance_mean=28.4 p50=27.8 p99=40.5 p999=48.2 worst=51.3 late=0 blocks=3750 silent_runs=0 demotions=0 load=8.29
+# rep 2 load { 9.13 8.00 8.04 }
+scaling: quality=hi block=256 instances=4 workers=4 share=fair got=1+1+1+1 voices=10 seconds=10 mean=58.5 worst_instance_mean=58.6 p50=56.4 p99=82.2 p999=91.2 worst=93.1 late=0 blocks=7500 silent_runs=121 demotions=0 load=9.13
+# rep 2 load { 9.42 8.13 8.09 }
+scaling: quality=hi block=256 instances=4 workers=5 share=fair got=2+1+1+1 voices=10 seconds=10 mean=55.6 worst_instance_mean=58.8 p50=55.4 p99=80.4 p999=91.5 worst=101.7 late=1 blocks=7500 silent_runs=95 demotions=0 load=9.42
+# rep 2 load { 10.03 8.31 8.15 }
+scaling: quality=hi block=256 instances=4 workers=6 share=fair got=2+2+1+1 voices=10 seconds=10 mean=53.8 worst_instance_mean=61.2 p50=54.1 p99=80.8 p999=92.9 worst=103.9 late=2 blocks=7500 silent_runs=117 demotions=0 load=10.03
+# rep 2 load { 10.36 8.46 8.21 }
+scaling: quality=hi block=256 instances=4 workers=7 share=fair got=2+2+2+1 voices=10 seconds=10 mean=53.1 worst_instance_mean=63.7 p50=51.1 p99=81.8 p999=98.7 worst=124.4 late=8 blocks=7500 silent_runs=136 demotions=0 load=10.36
+# rep 2 load { 10.70 8.59 8.26 }
+scaling: quality=hi block=256 instances=4 workers=8 share=fair got=2+2+2+2 voices=10 seconds=10 mean=52.2 worst_instance_mean=52.8 p50=51.1 p99=75.1 p999=85.2 worst=93.5 late=0 blocks=7500 silent_runs=64 demotions=0 load=10.24
+# rep 2 load { 9.36 8.40 8.19 }
+scaling: quality=hi block=256 instances=4 workers=10 share=fair got=3+3+2+2 voices=10 seconds=10 mean=51.5 worst_instance_mean=53.5 p50=50.9 p99=75.1 p999=84.9 worst=110.3 late=1 blocks=7500 silent_runs=62 demotions=0 load=9.36
+# rep 2 load { 10.41 8.68 8.30 }
+scaling: quality=hi block=256 instances=4 workers=12 share=fair got=3+3+3+3 voices=10 seconds=10 mean=51.1 worst_instance_mean=51.3 p50=50.4 p99=75.1 p999=84.7 worst=93.9 late=0 blocks=7500 silent_runs=79 demotions=0 load=10.41

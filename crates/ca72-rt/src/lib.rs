@@ -135,6 +135,199 @@ pub fn watch() {
     watchdog::start();
 }
 
+/// The hardware threads the process may use (`available_parallelism`, which follows its
+/// affinity and quotas), and the fast ones among them (decisions.md R-THREADS): the
+/// performance cores, counting their second hardware threads only on a processor with one
+/// kind of core (on a hybrid processor the threads after its performance cores' first go to
+/// its efficiency cores before their second threads, and a voice there is slower). Read once.
+///
+/// - macOS: `hw.perflevel0.physicalcpu` where `hw.nperflevels` is more than 1;
+/// - Windows: `GetLogicalProcessorInformationEx`, the cores of the highest `EfficiencyClass`
+///   where the classes differ;
+/// - Linux: the cores among `/sys/devices/cpu_core/cpus` (Intel's hybrid processors), else
+///   those of the largest `cpu_capacity` where it differs (ARM's);
+/// - elsewhere, or where the system does not say, every hardware thread.
+pub fn cores() -> Cores {
+    static CORES: std::sync::OnceLock<Cores> = std::sync::OnceLock::new();
+    *CORES.get_or_init(|| {
+        let all = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+        let fast = cores::fast().map_or(all, |f| f.clamp(1, all));
+        Cores { all, fast }
+    })
+}
+
+/// [`cores`]' answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cores {
+    /// Every hardware thread the process may use.
+    pub all: usize,
+    /// The fast ones ([`cores`]).
+    pub fast: usize,
+}
+
+mod cores {
+    /// The fast cores where the processor has more than one kind (None: one kind, or not
+    /// known).
+    #[cfg(target_os = "macos")]
+    pub fn fast() -> Option<usize> {
+        let levels = sysctl("hw.nperflevels")?;
+        (levels > 1)
+            .then(|| sysctl("hw.perflevel0.physicalcpu"))
+            .flatten()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sysctl(name: &str) -> Option<usize> {
+        let name = std::ffi::CString::new(name).ok()?;
+        let mut v: libc::c_int = 0;
+        let mut len = std::mem::size_of::<libc::c_int>();
+        // SAFETY: a NUL-terminated name, an int's buffer and its length.
+        let r = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                (&raw mut v).cast(),
+                &raw mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (r == 0 && v > 0).then_some(v as usize)
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn fast() -> Option<usize> {
+        use windows_sys::Win32::System::SystemInformation::{
+            GetLogicalProcessorInformationEx, RelationProcessorCore,
+            SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+        };
+        let mut len = 0u32;
+        // SAFETY: asked for the length only.
+        unsafe {
+            GetLogicalProcessorInformationEx(RelationProcessorCore, std::ptr::null_mut(), &mut len)
+        };
+        if len == 0 {
+            return None;
+        }
+        // (u64s: the records' alignment.)
+        let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+        let p = buf
+            .as_mut_ptr()
+            .cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>();
+        // SAFETY: a buffer of `len` bytes.
+        if unsafe { GetLogicalProcessorInformationEx(RelationProcessorCore, p, &mut len) } == 0 {
+            return None;
+        }
+        let mut classes = Vec::new();
+        let mut off = 0usize;
+        while off + std::mem::size_of::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>() <= len as usize {
+            // SAFETY: within the buffer the system filled, one record of `Size` bytes at a time.
+            let r = unsafe {
+                &*buf
+                    .as_ptr()
+                    .cast::<u8>()
+                    .add(off)
+                    .cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>()
+            };
+            if r.Size == 0 {
+                break;
+            }
+            // SAFETY: the record is a processor core's (the relation asked for).
+            classes.push(unsafe { r.Anonymous.Processor.EfficiencyClass });
+            off += r.Size as usize;
+        }
+        let top = *classes.iter().max()?;
+        let mixed = classes.iter().any(|&c| c != top);
+        mixed.then(|| classes.iter().filter(|&&c| c == top).count())
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn fast() -> Option<usize> {
+        let mine = affinity()?;
+        let read = |p: String| std::fs::read_to_string(p).ok();
+        // The physical cores among `cpus` (each counted once, by its first hardware thread).
+        let cores_of = |cpus: &[usize]| {
+            let mut firsts: Vec<usize> = cpus
+                .iter()
+                .filter_map(|c| {
+                    read(format!(
+                        "/sys/devices/system/cpu/cpu{c}/topology/core_cpus_list"
+                    ))
+                    .or_else(|| {
+                        read(format!(
+                            "/sys/devices/system/cpu/cpu{c}/topology/thread_siblings_list"
+                        ))
+                    })
+                    .and_then(|l| list(&l).first().copied())
+                })
+                .collect();
+            firsts.sort_unstable();
+            firsts.dedup();
+            firsts.len()
+        };
+        if let Some(l) = read("/sys/devices/cpu_core/cpus".into()) {
+            let p: Vec<usize> = list(&l).into_iter().filter(|c| mine.contains(c)).collect();
+            if !p.is_empty() {
+                return Some(cores_of(&p));
+            }
+        }
+        let caps: Vec<(usize, u64)> = mine
+            .iter()
+            .filter_map(|&c| {
+                read(format!("/sys/devices/system/cpu/cpu{c}/cpu_capacity"))
+                    .and_then(|x| x.trim().parse().ok())
+                    .map(|x| (c, x))
+            })
+            .collect();
+        let top = caps.iter().map(|&(_, x)| x).max()?;
+        if caps.len() != mine.len() || caps.iter().all(|&(_, x)| x == top) {
+            return None;
+        }
+        let fast: Vec<usize> = caps
+            .iter()
+            .filter(|&&(_, x)| x == top)
+            .map(|&(c, _)| c)
+            .collect();
+        Some(cores_of(&fast))
+    }
+
+    /// The CPUs the process may run on.
+    #[cfg(target_os = "linux")]
+    fn affinity() -> Option<Vec<usize>> {
+        // SAFETY: a zeroed cpu_set_t is a valid empty set, filled for pid 0 (this thread).
+        unsafe {
+            let mut set: libc::cpu_set_t = std::mem::zeroed();
+            if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 {
+                return None;
+            }
+            Some(
+                (0..libc::CPU_SETSIZE as usize)
+                    .filter(|&c| libc::CPU_ISSET(c, &set))
+                    .collect(),
+            )
+        }
+    }
+
+    /// A kernel CPU list ("0-3,8,10-11").
+    #[cfg(any(target_os = "linux", test))]
+    pub(crate) fn list(s: &str) -> Vec<usize> {
+        let mut v = Vec::new();
+        for part in s.trim().split(',').filter(|p| !p.is_empty()) {
+            let mut ends = part.splitn(2, '-').map(|x| x.trim().parse::<usize>());
+            match (ends.next(), ends.next()) {
+                (Some(Ok(a)), None) => v.push(a),
+                (Some(Ok(a)), Some(Ok(b))) if a <= b => v.extend(a..=b),
+                _ => {}
+            }
+        }
+        v
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    pub fn fast() -> Option<usize> {
+        None
+    }
+}
+
 /// How long a CPU's ordinary threads may go without running while a thread promoted here
 /// runs there before the watchdog makes those ordinary (Linux).
 pub const STARVED: Duration = Duration::from_millis(500);
@@ -146,6 +339,16 @@ pub fn demotions() -> u64 {
     return watchdog::DEMOTIONS.load(std::sync::atomic::Ordering::Relaxed);
     #[cfg(not(target_os = "linux"))]
     0
+}
+
+/// Whether the calling thread is scheduled as an audio thread now, as the system reports it
+/// (macOS: not time-sharing, so a time-constraint thread the system has demoted for running
+/// past its computation reports false; None elsewhere). For measurements.
+pub fn scheduled_realtime() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    return sys::scheduled_realtime();
+    #[cfg(not(target_os = "macos"))]
+    None
 }
 
 /// Whether the calling thread runs at real-time priority (Linux: `SCHED_FIFO` or
@@ -223,6 +426,31 @@ mod sys {
         // that must be given back: this one takes none.)
         fn pthread_mach_thread_np(thread: libc::pthread_t) -> u32;
         fn thread_policy_set(thread: u32, flavor: u32, info: *mut i32, count: u32) -> i32;
+        fn thread_info(thread: u32, flavor: u32, info: *mut i32, count: *mut u32) -> i32;
+    }
+
+    /// `THREAD_BASIC_INFO` and its size in `natural_t`s; `POLICY_TIMESHARE`.
+    const THREAD_BASIC_INFO: u32 = 3;
+    const THREAD_BASIC_INFO_COUNT: u32 = 10;
+    const POLICY_TIMESHARE: i32 = 1;
+
+    /// Whether the calling thread is scheduled other than time-sharing now: a time-constraint
+    /// thread the system has demoted (its fail-safe, for running past its computation without
+    /// blocking) reports time-sharing until it is restored. None if the system does not say.
+    pub fn scheduled_realtime() -> Option<bool> {
+        let mut info = [0i32; THREAD_BASIC_INFO_COUNT as usize];
+        let mut count = THREAD_BASIC_INFO_COUNT;
+        // SAFETY: a buffer of `count` 32-bit words for the basic info of our own thread.
+        let kr = unsafe {
+            thread_info(
+                pthread_mach_thread_np(libc::pthread_self()),
+                THREAD_BASIC_INFO,
+                info.as_mut_ptr(),
+                &mut count,
+            )
+        };
+        // (user_time and system_time, two words each, then cpu_usage, then the policy.)
+        (kr == 0 && count >= 6).then(|| info[5] != POLICY_TIMESHARE)
     }
 
     pub fn promote(period: Duration, computation: Duration) -> Result<(), String> {
@@ -858,6 +1086,66 @@ mod workgroup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The fast cores are among the machine's, at least one.
+    #[test]
+    fn the_fast_cores_are_among_all_of_them() {
+        let c = cores();
+        assert!(c.fast >= 1 && c.fast <= c.all, "{c:?}");
+    }
+
+    /// macOS reports a thread promoted here as scheduled other than time-sharing, and an
+    /// ordinary one as time-sharing (the check `scheduled_realtime` makes of a demotion).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_promoted_thread_is_reported_scheduled_as_audio() {
+        let ordinary = std::thread::spawn(scheduled_realtime).join().unwrap();
+        assert_eq!(ordinary, Some(false));
+        let promoted = std::thread::spawn(|| {
+            let ok = promote(Duration::from_millis(5), Duration::from_micros(2500));
+            (ok.is_ok(), scheduled_realtime())
+        })
+        .join()
+        .unwrap();
+        assert_eq!(promoted, (true, Some(true)));
+    }
+
+    /// macOS's fail-safe as `scheduled_realtime` sees it: a time-constraint thread that spins
+    /// without blocking far past its computation is reported time-sharing (on the Mac, after
+    /// 1.0 s; still so 0.5 s after it blocks). One CPU for up to 2 s.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "holds a CPU for up to two seconds"]
+    fn a_time_constraint_thread_spinning_past_its_computation_is_demoted() {
+        let (demoted_after, restored) = std::thread::spawn(|| {
+            promote(Duration::from_millis(5), Duration::from_micros(2500)).unwrap();
+            let t = std::time::Instant::now();
+            let mut demoted_after = None;
+            while t.elapsed() < Duration::from_secs(2) {
+                if scheduled_realtime() == Some(false) {
+                    demoted_after = Some(t.elapsed());
+                    break;
+                }
+                std::hint::spin_loop();
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            (demoted_after, scheduled_realtime())
+        })
+        .join()
+        .unwrap();
+        eprintln!(
+            "demoted after {demoted_after:?}; after 0.5 s asleep, scheduled as audio: {restored:?}"
+        );
+        assert!(demoted_after.is_some(), "never demoted");
+    }
+
+    /// A kernel CPU list read as the kernel writes it.
+    #[test]
+    fn a_cpu_list_is_read() {
+        assert_eq!(cores::list("0-3,8,10-11\n"), vec![0, 1, 2, 3, 8, 10, 11]);
+        assert_eq!(cores::list(""), Vec::<usize>::new());
+    }
+
     use std::hint::black_box;
 
     /// The flush bits are set and read back, the other controls kept, and flush a denormal

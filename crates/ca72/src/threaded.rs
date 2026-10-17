@@ -24,6 +24,11 @@
 //! everything below their priority on that CPU (the kernel's interrupt threads among it,
 //! where real-time throttling is off) starves: on 2026-09-30 three voices at once stalled
 //! the machine until it was reset.
+//!
+//! [`Helpers`] are the same five threads for any voice, lent its parts for a run (the
+//! plug-in's ULTRA, decisions.md R-THREADS): the voice stays whole between runs. They may
+//! join a work interval ([`Interval`]), which the keyboard's helper opens at a block's first
+//! pass and closes when it parks.
 
 use crate::noise::NoiseOut;
 use crate::vca::VcaDrive;
@@ -143,7 +148,8 @@ impl Stage<CTL_OUTS, DRIVE> for BiasPart {
 impl Stage<1, 2> for PreampPart {
     fn run(&mut self, p: &Panel, _: Contacts, x: &[f64; 1], out: &mut [f64; 2]) {
         out[0] = self.tick(p, x[0]);
-        out[1] = self.lamp().0;
+        // (Its brightest stays the part's, for the voice it is lent from to take.)
+        out[1] = self.lamp_now();
     }
 }
 
@@ -178,6 +184,95 @@ struct Job<P, const I: usize> {
     len: usize,
     /// Whether the audio thread runs at real-time priority, for a worker that follows it.
     realtime: Option<bool>,
+}
+
+/// What each worker calls first on its own thread (to take the audio threads' priority, say).
+pub type Start = Arc<dyn Fn() + Send + Sync>;
+
+/// A work interval the helpers join ([`Helpers::new`]; macOS's `os_workgroup` interval in the
+/// plug-in): told when each of the host's blocks begins and ends, the system runs its members
+/// fast enough to meet the block's deadline, where it would clock threads busy a part of each
+/// period down (decisions.md R11, R-THREADS). The model has none of its own.
+pub trait Interval: Send + Sync {
+    /// The calling thread joins it; false if it cannot.
+    fn join(&self) -> bool;
+    /// The calling thread, which joined it, leaves it (before it ends: macOS stops a process
+    /// one of whose threads ends joined).
+    fn leave(&self);
+    /// A block's work begins now (by a member).
+    fn start(&self) -> bool;
+    /// The block's work is done (by the member that began it).
+    fn finish(&self);
+}
+
+/// A worker's place in its helpers' interval: a member, and the first part's (the
+/// keyboard's) worker the one that opens it at a block's first pass and closes it when it
+/// parks, the block's passes done, as the plug-in's pool's first worker does its own.
+#[derive(Clone)]
+struct Clock {
+    interval: Arc<dyn Interval>,
+    /// The host's blocks so far ([`Helpers::block`]): the driver's only.
+    block: Option<Arc<AtomicU64>>,
+}
+
+/// A worker in its interval for as long as it runs, the interval it opened closed and left
+/// when it ends.
+struct Member {
+    clock: Option<Clock>,
+    joined: bool,
+    open: bool,
+    block: u64,
+}
+
+impl Member {
+    fn new(clock: Option<Clock>) -> Member {
+        let joined = clock.as_ref().is_some_and(|c| c.interval.join());
+        Member {
+            clock,
+            joined,
+            open: false,
+            block: 0,
+        }
+    }
+
+    /// A pass begins: the driver opens the interval at a block's first.
+    fn pass(&mut self) {
+        let Some(c) = self.clock.as_ref().filter(|_| self.joined) else {
+            return;
+        };
+        let Some(b) = &c.block else {
+            return;
+        };
+        let now = b.load(Ordering::Acquire);
+        if now != self.block {
+            self.block = now;
+            if self.open {
+                c.interval.finish();
+            }
+            self.open = c.interval.start();
+        }
+    }
+
+    /// Parking, the block's passes done: the interval it opened closed.
+    fn idle(&mut self) {
+        if self.open {
+            if let Some(c) = &self.clock {
+                c.interval.finish();
+            }
+            self.open = false;
+        }
+    }
+}
+
+impl Drop for Member {
+    fn drop(&mut self) {
+        self.idle();
+        if self.joined
+            && let Some(c) = &self.clock
+        {
+            c.interval.leave();
+        }
+    }
 }
 
 /// How the workers follow the audio thread's scheduling ([`Threaded::following`]): at real-
@@ -273,8 +368,9 @@ impl<P: Stage<I, O>, const I: usize, const O: usize> Worker<P, I, O> {
         part: P,
         name: &str,
         links: Links,
-        start: fn(),
+        start: &Start,
         follow: Option<Follow>,
+        clock: Option<Clock>,
     ) -> std::io::Result<Worker<P, I, O>> {
         let shared = Arc::new(Shared {
             job: Mutex::new(Job {
@@ -303,9 +399,10 @@ impl<P: Stage<I, O>, const I: usize, const O: usize> Worker<P, I, O> {
         // nothing).
         drop(shared.job.lock());
         let s = shared.clone();
+        let start = start.clone();
         let handle = std::thread::Builder::new()
             .name(name.to_owned())
-            .spawn(move || work::<P, I, O>(&s, start, follow.map(|f| f.set)))?;
+            .spawn(move || work::<P, I, O>(&s, &start, follow.map(|f| f.set), clock))?;
         Ok(Worker {
             shared,
             thread: handle.thread().clone(),
@@ -388,8 +485,9 @@ impl<P, const I: usize, const O: usize> Drop for Worker<P, I, O> {
 /// the pass's samples, publishing each, and marks the pass done.
 fn work<P: Stage<I, O>, const I: usize, const O: usize>(
     s: &Shared<P, I>,
-    start: fn(),
+    start: &Start,
     follow: Option<fn(bool)>,
+    clock: Option<Clock>,
 ) {
     struct Alive<'a>(&'a AtomicBool);
     impl Drop for Alive<'_> {
@@ -405,6 +503,8 @@ fn work<P: Stage<I, O>, const I: usize, const O: usize>(
     std::thread::park_timeout(Duration::from_nanos(1));
     let _ = Instant::now().elapsed();
     start();
+    // (Dropped last, as the thread ends: the interval it opened closed and left.)
+    let mut member = Member::new(clock);
     let mut seen = 0;
     // This thread's scheduling as last set to follow the audio thread's.
     let mut mine = None;
@@ -422,9 +522,11 @@ fn work<P: Stage<I, O>, const I: usize, const O: usize>(
             if idle.waited() < SPIN {
                 idle.snooze();
             } else {
+                member.idle();
                 std::thread::park();
             }
         }
+        member.pass();
         {
             // The part is let go before the pass is marked done (the audio thread's next
             // `begin` only tries the lock).
@@ -474,13 +576,11 @@ fn work<P: Stage<I, O>, const I: usize, const O: usize>(
     }
 }
 
-/// The voice with its keyboard circuit, contours, preamplifier and back on threads of their
-/// own.
+/// The five parts' workers and their passes: the voice's keyboard circuit, contours, VCA's
+/// bias, preamplifier and back on threads of their own, beside the caller's, which runs the
+/// front ([`Threaded`]'s, or a voice's lent to [`Helpers`]).
 #[derive(Debug)]
-pub struct Threaded {
-    pub panel: Panel,
-    keys: Keys,
-    front: FrontPart,
+struct Parts {
     kbd: Worker<KeyboardPart, 0, 1>,
     ctl: Worker<ControlPart, 1, CTL_OUTS>,
     bias: Worker<BiasPart, CTL_OUTS, DRIVE>,
@@ -490,37 +590,42 @@ pub struct Threaded {
     /// The VCA's bias of the last sample every worker gave (the back's input when one has
     /// stopped and the output is silent).
     last_drive: [f64; DRIVE],
-    /// The OVERLOAD lamp after the last sample and its brightest since it was last read.
-    overload: f64,
-    overload_peak: f64,
     /// Samples output silent because a worker had stopped (tests require none).
-    pub failed: u64,
-    /// How the workers follow the audio thread's scheduling, if they do.
-    follow: Option<Follow>,
-    /// FEEDBACK, as [`Voice::feedback`]: on, the parts run in turn on the caller's thread
-    /// (a one-sample loop from the output to the preamplifier leaves nothing to pipeline).
-    pub feedback: f64,
-    /// The last output sample, for FEEDBACK.
-    fed_back: f64,
+    failed: u64,
 }
 
-impl Threaded {
-    /// Splits the voice and starts its five workers, each of which calls `start` first (to
-    /// take the audio threads' priority, say).
-    pub fn new(voice: Voice, start: fn()) -> std::io::Result<Threaded> {
-        Threaded::build(voice, start, None)
-    }
+/// What [`Parts::run`] keeps from sample to sample for the voice: the OVERLOAD lamp after the
+/// last sample given and its brightest, the last output sample, and the last sample's
+/// contours (filter, loudness) and probes (the keyboard's voltage, the mixer bus's current,
+/// the filter's output).
+#[derive(Debug, Default, Clone, Copy)]
+struct Ran {
+    overload: f64,
+    overload_peak: f64,
+    y: f64,
+    ctl: (f64, f64),
+    probe: (f64, f64, f64),
+}
 
-    /// As [`Threaded::new`], the workers following the scheduling of the thread that plays
-    /// the voice ([`Follow`]): each pass carries whether that thread is at real-time
-    /// priority.
-    pub fn following(voice: Voice, start: fn(), follow: Follow) -> std::io::Result<Threaded> {
-        Threaded::build(voice, start, Some(follow))
-    }
-
-    fn build(voice: Voice, start: fn(), follow: Option<Follow>) -> std::io::Result<Threaded> {
-        let (panel, mut keys, kbd, ctl, bias, audio) = voice.into_parts();
-        keys.reserve();
+impl Parts {
+    /// The parts on workers of their own, each calling `start` first; with `clock`, in that
+    /// interval, the keyboard's worker opening and closing it by the host's blocks.
+    fn spawn(
+        (kbd, ctl, bias, pre, back): (KeyboardPart, ControlPart, BiasPart, PreampPart, BackPart),
+        start: &Start,
+        follow: Option<Follow>,
+        clock: Option<(Arc<dyn Interval>, Arc<AtomicU64>)>,
+    ) -> std::io::Result<Parts> {
+        let member = || {
+            clock.as_ref().map(|(i, _)| Clock {
+                interval: i.clone(),
+                block: None,
+            })
+        };
+        let driver = clock.as_ref().map(|(i, b)| Clock {
+            interval: i.clone(),
+            block: Some(b.clone()),
+        });
         let last_drive = bias.drive().to_array();
         // The contours' thread feeds the bias's.
         let ctl_links = Links::given();
@@ -534,21 +639,19 @@ impl Threaded {
             },
             start,
             follow,
+            member(),
         )?;
         let ctl_links = Links {
             feeds: Some(bias.shared.clone()),
             ..ctl_links
         };
-        Ok(Threaded {
-            panel,
-            keys,
-            front: audio.front,
-            kbd: Worker::spawn(kbd, "ca72-keyboard", Links::given(), start, follow)?,
-            ctl: Worker::spawn(ctl, "ca72-contours", ctl_links, start, follow)?,
+        Ok(Parts {
+            kbd: Worker::spawn(kbd, "ca72-keyboard", Links::given(), start, follow, driver)?,
+            ctl: Worker::spawn(ctl, "ca72-contours", ctl_links, start, follow, member())?,
             bias,
-            pre: Worker::spawn(audio.pre, "ca72-preamp", Links::given(), start, follow)?,
+            pre: Worker::spawn(pre, "ca72-preamp", Links::given(), start, follow, member())?,
             back: Worker::spawn(
-                audio.back,
+                back,
                 "ca72-filter",
                 Links {
                     streamed: true,
@@ -556,54 +659,61 @@ impl Threaded {
                 },
                 start,
                 follow,
+                member(),
             )?,
             pass: 0,
             last_drive,
-            overload: 0.0,
-            overload_peak: 0.0,
             failed: 0,
-            follow,
-            feedback: 0.0,
-            fed_back: 0.0,
         })
     }
 
-    /// A MIDI note (0 to 127) pressed or released ([`Voice::note`]).
-    pub fn note(&mut self, midi: i32, on: bool) {
-        self.keys.note(midi, on, self.panel.retrigger);
+    /// The workers' parts and `parts` swapped, between passes (each worker's lock free); false,
+    /// and nothing swapped, if a worker has stopped holding its part.
+    fn swap(
+        &self,
+        kbd: &mut KeyboardPart,
+        ctl: &mut ControlPart,
+        bias: &mut BiasPart,
+        pre: &mut PreampPart,
+        back: &mut BackPart,
+    ) -> bool {
+        let locks = (
+            self.kbd.shared.job.try_lock(),
+            self.ctl.shared.job.try_lock(),
+            self.bias.shared.job.try_lock(),
+            self.pre.shared.job.try_lock(),
+            self.back.shared.job.try_lock(),
+        );
+        let (Ok(mut k), Ok(mut c), Ok(mut b), Ok(mut p), Ok(mut f)) = locks else {
+            return false;
+        };
+        std::mem::swap(&mut k.part, kbd);
+        std::mem::swap(&mut c.part, ctl);
+        std::mem::swap(&mut b.part, bias);
+        std::mem::swap(&mut p.part, pre);
+        std::mem::swap(&mut f.part, back);
+        true
     }
 
-    /// The passes handed to the workers so far (none go to them in Potato).
-    pub fn passes(&self) -> u64 {
-        self.pass
-    }
-
-    /// The OVERLOAD lamp after the last sample ([`Voice::overload`]).
-    pub fn overload(&self) -> f64 {
-        self.overload
-    }
-
-    /// The OVERLOAD lamp's brightest since the last call ([`Voice::take_overload_peak`]).
-    pub fn take_overload_peak(&mut self) -> f64 {
-        std::mem::take(&mut self.overload_peak)
-    }
-
-    /// `len` samples: `jacks(i)` at the jacks, each output sample to `out(i, y)`. The same
-    /// samples [`Voice::tick_jacks`] gives. In Potato the parts run in turn on the caller's
-    /// thread ([`Threaded::process_in_turn`]).
-    pub fn process(
+    /// `len` samples on the workers' parts and the caller's `front`, the keys stepped here:
+    /// first `notes(i, keys)` for sample `i`, then `jacks(i)` at the jacks; each output sample
+    /// to `out(i, y)` and the trigger contact after it to `closed(i, c)`. The same samples
+    /// [`Voice::tick_jacks`] gives (FEEDBACK off). A sample some worker did not give is silent
+    /// and counted in `failed`.
+    #[allow(clippy::too_many_arguments)]
+    fn run(
         &mut self,
+        p: &Panel,
+        rt: Option<bool>,
+        keys: &mut Keys,
+        front: &mut FrontPart,
         len: usize,
+        mut notes: impl FnMut(usize, &mut Keys),
         jacks: impl Fn(usize) -> Jacks,
         mut out: impl FnMut(usize, f64),
+        mut closed: impl FnMut(usize, bool),
+        ran: &mut Ran,
     ) {
-        if self.panel.quality == Quality::Potato || self.feedback > 0.0 {
-            self.process_in_turn(len, jacks, out);
-            return;
-        }
-        let p = self.panel;
-        // Whether this thread is at real-time priority, for the workers to follow.
-        let rt = self.follow.map(|f| (f.realtime)());
         let mut contacts = [Contacts::default(); CHUNK];
         let mut js = [Jacks::default(); CHUNK];
         // The external input (the preamplifier's) and EXT. LOUDNESS (the control part's,
@@ -614,21 +724,23 @@ impl Threaded {
         while at < len {
             let n = (len - at).min(CHUNK);
             for i in 0..n {
+                notes(at + i, keys);
                 js[i] = jacks(at + i);
-                contacts[i] = self.keys.step(self.panel.priority);
+                contacts[i] = keys.step(p.priority);
                 contacts[i].s_trig = js[i].s_trig;
+                closed(at + i, keys.gate());
                 ext[i][0] = js[i].ext;
                 loudness[i][0] = js[i].loudness.unwrap_or(f64::NAN);
             }
             self.pass += 1;
             let pass = self.pass;
             // (The bias before the contours, which feed it from the start of their pass.)
-            let bias_ok = self.bias.begin(pass, (&p, rt), n, &contacts, &[]);
+            let bias_ok = self.bias.begin(pass, (p, rt), n, &contacts, &[]);
             let ok = [
-                self.kbd.begin(pass, (&p, rt), n, &contacts, &[[]; CHUNK]),
-                self.ctl.begin(pass, (&p, rt), n, &contacts, &loudness),
-                self.pre.begin(pass, (&p, rt), n, &contacts, &ext),
-                self.back.begin(pass, (&p, rt), n, &contacts, &[]),
+                self.kbd.begin(pass, (p, rt), n, &contacts, &[[]; CHUNK]),
+                self.ctl.begin(pass, (p, rt), n, &contacts, &loudness),
+                self.pre.begin(pass, (p, rt), n, &contacts, &ext),
+                self.back.begin(pass, (p, rt), n, &contacts, &[]),
             ];
             let all = bias_ok && ok.iter().all(|&b| b);
             // The front, sample by sample, feeding the back (every sample of the pass, even
@@ -657,9 +769,12 @@ impl Threaded {
                                 red: c[4],
                             },
                         };
-                        self.overload = pr[1];
-                        self.overload_peak = self.overload_peak.max(pr[1]);
-                        let f = self.front.tick(&p, jack, k[0], &ctl, pr[0]);
+                        ran.overload = pr[1];
+                        ran.overload_peak = ran.overload_peak.max(pr[1]);
+                        ran.ctl = (c[0], c[1]);
+                        let f = front.tick(p, jack, k[0], &ctl, pr[0]);
+                        ran.probe.0 = k[0];
+                        ran.probe.1 = f.i_bus;
                         self.last_drive = b;
                         given[i] = true;
                         let mut fed = [0.0; BACK_INS];
@@ -681,7 +796,8 @@ impl Threaded {
             for (i, &given) in given.iter().enumerate().take(n) {
                 match (given, ok[3].then(|| self.back.take(i)).flatten()) {
                     (true, Some(o)) => {
-                        self.fed_back = o[1];
+                        ran.y = o[1];
+                        ran.probe.2 = o[0];
                         out(at + i, o[1]);
                     }
                     _ => {
@@ -713,6 +829,139 @@ impl Threaded {
             at += n;
         }
     }
+}
+
+/// The voice with its keyboard circuit, contours, preamplifier and back on threads of their
+/// own.
+#[derive(Debug)]
+pub struct Threaded {
+    pub panel: Panel,
+    keys: Keys,
+    front: FrontPart,
+    parts: Parts,
+    /// The OVERLOAD lamp after the last sample and its brightest since it was last read.
+    overload: f64,
+    overload_peak: f64,
+    /// Samples output silent because a worker had stopped (tests require none).
+    pub failed: u64,
+    /// How the workers follow the audio thread's scheduling, if they do.
+    follow: Option<Follow>,
+    /// FEEDBACK, as [`Voice::feedback`]: on, the parts run in turn on the caller's thread
+    /// (a one-sample loop from the output to the preamplifier leaves nothing to pipeline).
+    pub feedback: f64,
+    /// The last output sample, for FEEDBACK.
+    fed_back: f64,
+}
+
+impl Threaded {
+    /// Splits the voice and starts its five workers, each of which calls `start` first (to
+    /// take the audio threads' priority, say).
+    pub fn new(voice: Voice, start: fn()) -> std::io::Result<Threaded> {
+        Threaded::build(voice, start, None)
+    }
+
+    /// As [`Threaded::new`], the workers following the scheduling of the thread that plays
+    /// the voice ([`Follow`]): each pass carries whether that thread is at real-time
+    /// priority.
+    pub fn following(voice: Voice, start: fn(), follow: Follow) -> std::io::Result<Threaded> {
+        Threaded::build(voice, start, Some(follow))
+    }
+
+    fn build(voice: Voice, start: fn(), follow: Option<Follow>) -> std::io::Result<Threaded> {
+        let (panel, mut keys, kbd, ctl, bias, audio) = voice.into_parts();
+        keys.reserve();
+        let start: Start = Arc::new(start);
+        Ok(Threaded {
+            panel,
+            keys,
+            front: audio.front,
+            parts: Parts::spawn(
+                (kbd, ctl, bias, audio.pre, audio.back),
+                &start,
+                follow,
+                None,
+            )?,
+            overload: 0.0,
+            overload_peak: 0.0,
+            failed: 0,
+            follow,
+            feedback: 0.0,
+            fed_back: 0.0,
+        })
+    }
+
+    /// A MIDI note (0 to 127) pressed or released ([`Voice::note`]).
+    pub fn note(&mut self, midi: i32, on: bool) {
+        self.keys.note(midi, on, self.panel.retrigger);
+    }
+
+    /// The plug-in's DRIVE ([`Voice::set_drive`]), for the passes that follow: set on the back
+    /// between passes, when its worker does not hold it (false if it could not be: a worker
+    /// stopped holding it).
+    pub fn set_drive(&mut self, gain: f64) -> bool {
+        match self.parts.back.shared.job.try_lock() {
+            Ok(mut job) => {
+                job.part.set_drive(gain);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// The passes handed to the workers so far (none go to them in Potato).
+    pub fn passes(&self) -> u64 {
+        self.parts.pass
+    }
+
+    /// The OVERLOAD lamp after the last sample ([`Voice::overload`]).
+    pub fn overload(&self) -> f64 {
+        self.overload
+    }
+
+    /// The OVERLOAD lamp's brightest since the last call ([`Voice::take_overload_peak`]).
+    pub fn take_overload_peak(&mut self) -> f64 {
+        std::mem::take(&mut self.overload_peak)
+    }
+
+    /// `len` samples: `jacks(i)` at the jacks, each output sample to `out(i, y)`. The same
+    /// samples [`Voice::tick_jacks`] gives. In Potato the parts run in turn on the caller's
+    /// thread ([`Threaded::process_in_turn`]).
+    pub fn process(
+        &mut self,
+        len: usize,
+        jacks: impl Fn(usize) -> Jacks,
+        mut out: impl FnMut(usize, f64),
+    ) {
+        if self.panel.quality == Quality::Potato || self.feedback > 0.0 {
+            self.process_in_turn(len, jacks, out);
+            return;
+        }
+        let p = self.panel;
+        // Whether this thread is at real-time priority, for the workers to follow.
+        let rt = self.follow.map(|f| (f.realtime)());
+        let mut ran = Ran {
+            overload: self.overload,
+            y: self.fed_back,
+            ..Ran::default()
+        };
+        let failed = self.parts.failed;
+        self.parts.run(
+            &p,
+            rt,
+            &mut self.keys,
+            &mut self.front,
+            len,
+            |_, _| {},
+            jacks,
+            &mut out,
+            |_, _| {},
+            &mut ran,
+        );
+        self.failed += self.parts.failed - failed;
+        self.overload = ran.overload;
+        self.overload_peak = self.overload_peak.max(ran.overload_peak);
+        self.fed_back = ran.y;
+    }
 
     /// [`Threaded::process`] with every part run in turn on the caller's thread, as
     /// [`Voice::tick_jacks`] runs them, the workers left parked (Potato: a Potato voice
@@ -728,12 +977,20 @@ impl Threaded {
         mut out: impl FnMut(usize, f64),
     ) {
         let p = self.panel;
+        // (The workers' shares held here, so that the parts' state may change meanwhile.)
+        let w = (
+            self.parts.kbd.shared.clone(),
+            self.parts.ctl.shared.clone(),
+            self.parts.bias.shared.clone(),
+            self.parts.pre.shared.clone(),
+            self.parts.back.shared.clone(),
+        );
         let parts = (
-            self.kbd.shared.job.try_lock(),
-            self.ctl.shared.job.try_lock(),
-            self.bias.shared.job.try_lock(),
-            self.pre.shared.job.try_lock(),
-            self.back.shared.job.try_lock(),
+            w.0.job.try_lock(),
+            w.1.job.try_lock(),
+            w.2.job.try_lock(),
+            w.3.job.try_lock(),
+            w.4.job.try_lock(),
         );
         let (Ok(mut kbd), Ok(mut ctl), Ok(mut bias), Ok(mut pre), Ok(mut back)) = parts else {
             self.failed += len as u64;
@@ -743,6 +1000,7 @@ impl Threaded {
             return;
         };
         pre.part.accurate = self.feedback > 0.0;
+        let mut last_drive = self.parts.last_drive;
         for i in 0..len {
             let mut j = jacks(i);
             if self.feedback > 0.0 {
@@ -759,9 +1017,105 @@ impl Threaded {
             self.overload_peak = self.overload_peak.max(lamp);
             let f = self.front.tick(&p, &j, v_kbd, &control, i_pre);
             let (_, y) = back.part.tick(&p, &f, &d);
-            self.last_drive = d.to_array();
+            last_drive = d.to_array();
             self.fed_back = y;
             out(i, y);
         }
+        self.parts.last_drive = last_drive;
+    }
+}
+
+/// Five helper threads for any voice's parts, lent them for a run (the plug-in's ULTRA,
+/// decisions.md R-THREADS): the voice's keyboard circuit, contours, VCA's bias, preamplifier
+/// and back run on them as [`Threaded`]'s do, its front and keys on the caller's thread, the
+/// same samples to the bit as [`Voice::tick_jacks`]. A run swaps the voice's parts with the
+/// helpers' (the parts of the voice they were made from, spare) and back again, so between
+/// runs the voice is whole: any voice may borrow them, and nothing is allocated.
+#[derive(Debug)]
+pub struct Helpers {
+    parts: Parts,
+}
+
+impl Helpers {
+    /// Five helpers, each calling `start` first, the parts of `spare` theirs between runs;
+    /// with `interval`, its members, the keyboard's helper opening it at the first pass after
+    /// the host's block count (the [`AtomicU64`]) moves on and closing it when it parks.
+    pub fn new(
+        spare: Voice,
+        start: Start,
+        interval: Option<(Arc<dyn Interval>, Arc<AtomicU64>)>,
+    ) -> std::io::Result<Helpers> {
+        let (_, _, kbd, ctl, bias, audio) = spare.into_parts();
+        Ok(Helpers {
+            parts: Parts::spawn(
+                (kbd, ctl, bias, audio.pre, audio.back),
+                &start,
+                None,
+                interval,
+            )?,
+        })
+    }
+
+    /// Whether `v` plays on helpers: at No Compromises, with FEEDBACK off (its one-sample loop
+    /// leaves nothing to pipeline), its pitch and contour paths following its panel.
+    pub fn take(v: &Voice) -> bool {
+        v.splits()
+    }
+
+    /// `len` samples of `v` ([`Helpers::take`]): its notes `notes` (sample, MIDI note, on; in
+    /// order) pressed before their samples, `jacks[i]` at the jacks, each output sample to
+    /// `out[i]` and its trigger contact after it to `closed[i]`. The same samples as as many of
+    /// [`Voice::tick_jacks`], the notes as [`Voice::note`] before each. Returns the samples
+    /// left silent (a helper stopped; then, if it stopped holding a part, the whole run).
+    pub fn play(
+        &mut self,
+        v: &mut Voice,
+        notes: &[(usize, i32, bool)],
+        jacks: &[Jacks],
+        out: &mut [f64],
+        closed: &mut [bool],
+    ) -> u64 {
+        let len = jacks.len().min(out.len()).min(closed.len());
+        let lent = v.lend();
+        if !self
+            .parts
+            .swap(lent.kbd, lent.ctl, lent.bias, lent.pre, lent.back)
+        {
+            out[..len].fill(0.0);
+            return len as u64;
+        }
+        let failed = self.parts.failed;
+        let p = *lent.panel;
+        let mut ran = Ran::default();
+        let mut next = 0;
+        self.parts.run(
+            &p,
+            None,
+            lent.keys,
+            lent.front,
+            len,
+            |i, keys| {
+                while let Some(&(at, midi, on)) = notes.get(next)
+                    && at <= i
+                {
+                    keys.note(midi, on, p.retrigger);
+                    next += 1;
+                }
+            },
+            |i| jacks[i],
+            |i, y| out[i] = y,
+            |i, c| closed[i] = c,
+            &mut ran,
+        );
+        // (Back between passes: every worker has finished its pass and let go.)
+        self.parts
+            .swap(lent.kbd, lent.ctl, lent.bias, lent.pre, lent.back);
+        v.lent_ran(ran.ctl, ran.probe, ran.y);
+        self.parts.failed - failed
+    }
+
+    /// Samples left silent so far because a helper had stopped (tests require none).
+    pub fn failed(&self) -> u64 {
+        self.parts.failed
     }
 }
