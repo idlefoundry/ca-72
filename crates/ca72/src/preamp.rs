@@ -78,6 +78,12 @@ const LNODES: usize = 10;
 /// Substeps a sample for the preamplifier.
 pub const SUBSTEPS: usize = 4;
 
+/// Samples a step of the OVERLOAD lamp's driver: a peak detector (Q25 charging 0.47 uF, let down
+/// through 780 kilohms, a third of a second) that only lights the lamp, so solved at a sixth of
+/// 48 kHz on the highest the amplifier reached meanwhile, not every sample (performance: it
+/// was a nodal solve a sample beside the preamplifier's four). The audio is not touched.
+const LAMP_EVERY: usize = 8;
+
 /// R61, the preamplifier's feedback resistor against R62 1K: 200K on Figure 9-11; 232K, where
 /// the hardware reference's gain sits (board4.md B4-8: 0.97 dB above the drawing's).
 pub const R61: f64 = 232e3;
@@ -328,6 +334,11 @@ pub struct Preamp {
     down_amp: Decimator,
     down_out: Decimator,
     last: (f64, f64),
+    /// The lamp driver: samples since its last step, the amplifier's highest since, and the
+    /// lamp as that step left it.
+    lamp_wait: usize,
+    lamp_peak: f64,
+    lamp_lit: f64,
     r_in: f64,
     on: bool,
     /// Potato: the preamplifier and lamp as [`Plain`] from their parts, not the circuit
@@ -446,6 +457,9 @@ impl Preamp {
             down_amp,
             down_out: Decimator::new(SUBSTEPS),
             last: (0.0, 0.0),
+            lamp_wait: LAMP_EVERY - 1,
+            lamp_peak: f64::NEG_INFINITY,
+            lamp_lit: 0.0,
             r_in: r_src,
             on: true,
             plain: None,
@@ -530,18 +544,24 @@ impl Preamp {
         self.outputs()
     }
 
-    /// The lamp driver over the sample, and the outputs.
+    /// The lamp driver, a step every [`LAMP_EVERY`] samples, and the outputs.
     fn outputs(&mut self) -> PreampOut {
         let (amp, out) = self.last;
-        self.lamp.set(LAMP_IN, self.net.v(AMP));
-        if !Self::step(&mut self.lamp, self.dt) {
-            self.failed += 1;
+        self.lamp_peak = self.lamp_peak.max(self.net.v(AMP));
+        self.lamp_wait += 1;
+        if self.lamp_wait >= LAMP_EVERY {
+            self.lamp.set(LAMP_IN, self.lamp_peak);
+            if !Self::step(&mut self.lamp, self.dt * self.lamp_wait as f64) {
+                self.failed += 1;
+            }
+            (self.lamp_wait, self.lamp_peak) = (0, f64::NEG_INFINITY);
+            let i_lamp = (15.0 - self.lamp.v(LAMP)) / self.circuit.r_lamp;
+            self.lamp_lit = (i_lamp / self.circuit.i_lamp).max(0.0);
         }
-        let i_lamp = (15.0 - self.lamp.v(LAMP)) / self.circuit.r_lamp;
         PreampOut {
             amp,
             i_bus: if self.on { out / 33e3 } else { 0.0 },
-            lamp: (i_lamp / self.circuit.i_lamp).max(0.0),
+            lamp: self.lamp_lit,
         }
     }
 }
