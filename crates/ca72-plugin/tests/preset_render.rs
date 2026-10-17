@@ -12,7 +12,8 @@
 //! presets in the factory's format, read instead of the factory's: an earlier version's, to
 //! hear its sounds, as its sessions hold them, through this engine), `CA72_FROM_0_1` (set:
 //! each preset's knobs translated as a session 0.1 saved is when it opens, `compat`, those
-//! it does not name at their defaults first, as 0.1 had them).
+//! it does not name at their defaults first, as 0.1 had them), `CA72_POTATO` (set: QUALITY at
+//! LO, the light voices), `CA72_ULTRA` (set: QUALITY at ULTRA); else QUALITY at HI.
 //!
 //! `cargo test --release -p ca72-plugin --test preset_render -- --ignored --nocapture`
 
@@ -50,6 +51,8 @@ fn render(s: &Sound, voices: usize, seconds: f64) -> (Vec<f32>, Vec<f32>) {
     let mut c = controls_of(s);
     c.poly = true;
     c.voices = voices;
+    c.potato = std::env::var_os("CA72_POTATO").is_some();
+    c.ultra = std::env::var_os("CA72_ULTRA").is_some();
     let mut e = Engine::new();
     e.set(&c);
     e.prepare(RATE, 1);
