@@ -16,7 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.4: LETTERING › LARGE in the settings menu prints the panel's lettering and
+**Status:** 0.2.5: a new instance starts at QUALITY LO, the light voices (projects keep their
+own; 0.1's open at HI), and on macOS the pointer shows resize arrows over the grip. Includes
+0.2.4: LETTERING › LARGE in the settings menu prints the panel's lettering and
 the menus a size larger, and WINDOW › SIZE… sets the window's size; the resize grip can be
 seen. Includes 0.2.3: a standalone application with audio and MIDI selection, a playable lower
 keyboard, and independent computer-keyboard octaves. Includes 0.2.2: PANEL shows or hides the
@@ -233,7 +235,8 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   below the cutoff, the deepest bass coming back, and as EMPHASIS rises, a shelf with the
   resonance's peak on it rather than a high-pass. At LO the filter is the drawing's.
 - **POWER** is the host's bypass: the output fades out over 10 ms and back in.
-- **QUALITY** (a chrome toggle above POWER: ULTRA, HI by default, or LO; not the
+- **QUALITY** (a chrome toggle above POWER: ULTRA, HI, or LO, LO by default for a new
+  instance from 0.2.5, HI before; projects keep theirs, those from 0.1 open at HI; not the
   instrument's): at ULTRA the circuit's model plays with no compromises, its most exact, at
   high CPU cost; in 0.2.0 it took about seven times the work of HI, with one voice using
   about a whole core of a fast computer, so
@@ -597,8 +600,7 @@ The service documents and datasheets the model was derived from are not included
   0.1 to 0.4 s; the same rate again is immediate.
 - Below 8 kHz the voice runs at 2, 4 or 8 times the host's rate.
 - The panel has no keyboard control (the presets' drawer and its MIDI list do), and a host
-  cannot resize the editor; use the grip or **WINDOW › SIZE…**. On macOS the pointer does not
-  change over the grip (its tip says what it does).
+  cannot resize the editor; use the grip or **WINDOW › SIZE…**.
 - LETTERING › LARGE leaves the presets' drawer, the keyboard view and the strip's buttons as
   they are.
 - MIDI Learn takes absolute 7-bit control changes only: not relative encoders, 14-bit

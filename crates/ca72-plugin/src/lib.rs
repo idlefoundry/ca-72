@@ -409,6 +409,14 @@ impl Plugin for Ca72 {
                 ParamValue::I32(low.to_index() as i32),
             );
         }
+        // And before QUALITY (0.1's): HI, as such a session played until LO became the default
+        // for new instances (R-LO-DEFAULT).
+        if !state.params.contains_key("quality") {
+            state.params.insert(
+                "quality".to_owned(),
+                ParamValue::I32(params::QualityMode::Hi.to_index() as i32),
+            );
+        }
         // And before RETRIGGER: off, single triggering, the instrument's own.
         if !state.params.contains_key("retrigger") {
             state
@@ -1090,6 +1098,35 @@ mod tests {
     /// A session saved before NOTE PRIORITY and RETRIGGER opens with LOW (its index, as nih-plug
     /// sets an enum by one) and RETRIGGER off, the instrument's own, not at what the instance
     /// had (R50); one saved since keeps its own.
+    /// A new instance plays at LO (R-LO-DEFAULT); a session saved before QUALITY (0.1's) opens
+    /// at HI, as it did until 0.2.4, not at the new default; one saved since keeps its own.
+    #[test]
+    fn a_new_instance_is_at_lo_and_an_old_session_at_hi() {
+        assert_eq!(
+            Ca72Params::default().quality.value(),
+            params::QualityMode::Lo
+        );
+        let filtered = |params: Vec<(String, ParamValue)>| {
+            let mut s = PluginState {
+                version: "0.1.5".to_owned(),
+                params: params.into_iter().collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            s.params.remove("quality")
+        };
+        let hi = params::QualityMode::Hi.to_index() as i32;
+        assert!(matches!(
+            filtered(vec![("cutoff".to_owned(), ParamValue::F32(3.0))]),
+            Some(ParamValue::I32(i)) if i == hi
+        ));
+        let lo = ("quality".to_owned(), ParamValue::String("lo".to_owned()));
+        assert!(matches!(
+            filtered(vec![lo]),
+            Some(ParamValue::String(id)) if id == "lo"
+        ));
+    }
+
     #[test]
     fn an_old_session_opens_with_note_priority_low_and_no_retrigger() {
         let filtered_as = |params: Vec<(String, ParamValue)>, id: &str| {

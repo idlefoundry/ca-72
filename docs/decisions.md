@@ -4730,6 +4730,7 @@ the screen and back, Windows repainting it; GarageBand: closed and opened again)
   Homebrew's ngspice 47, built with KLU: "Timestep too small" at the VCO's hold node. They pass
   with Linux's ngspice 47 (and on Windows); CI's Mac has no ngspice and skips them. The lab is
   not part of the plug-in; `.options sparse` did not help.
+  **Fixed 2026-10-16** (R-MAC-FIXES): the bench's hold switch closed at 1 ohm, not 1 milliohm.
 - The synth played in the Mac's hosts: GarageBand took no MIDI from a script (its virtual input
   or a new one), so the opening's animation there was QUALITY's, driven by the editor's clock.
 - Live (the owner's set open), Logic (not owned), an Intel Mac, a second screen of another
@@ -5919,6 +5920,116 @@ which the annotated `v0.2.4` tag names.
   Developer ID").
 - On the lab share macOS writes `._` files beside each download; the downloads are checked in
   a local folder (`~/.cache`). The scripts and logs are in `~/lab/artifacts/ca-72/0.2.4/`.
+
+## R-AU-PITCH-BEND. Preserve the AU MIDI pitch wheel (issue 43)
+
+The AU adapter converted channel pitch bend into CLAP per-note tuning whenever
+an instrument preferred typed CLAP notes, including ports that also support MIDI.
+nih-plug maps that expression to `PolyTuning`, which CA-72 does not follow; its
+`MidiPitchBend` handler never received the wheel. The conversion also imposed a
+fixed two-semitone range. Preserve the original MIDI bytes when the port supports
+MIDI or MPE, so the instrument applies its own MIDI BEND RANGE. CLAP-only ports
+retain the existing tuning fallback. Other event translations, the DSP and the
+production component identity are unchanged.
+
+The AU build now runs five adapter regression groups and nine in-memory public-AU
+render cases. These exercise MIDI bytes and MIDI 1/2 event-list entry points,
+ranges 0/2/7, both bend directions, centering, CC121 reset, note delivery/release,
+CC120/123 and MIDI 2's distinct zero-velocity semantics. The tests use disposable
+state without physical audio or MIDI output; event-list checks require macOS 12.
+They do not establish native end-to-end MIDI 2 hardware support.
+
+On macOS 27.0/M4 Pro, the fixed 0.2.4 review build passes all five adapter groups,
+all nine render cases and strict auval under a separate arm64 test identity.
+The embedded engine's 28 compiled code/data sections match the installed 0.2.4
+engine. The unchanged release fails the six nonzero-range render cases. The
+previous 0.2.3 GarageBand reproduction and Apple DLS control establish the original
+host symptom, but fixed-build GarageBand playback remains blocked by the unsaved
+`ca74-au-test` project; the project switch was canceled. Live/physical controller
+input and Logic have not been tested. These results do not claim resolution in
+GarageBand or Logic. No test-identity packaging is part of the production change.
+
+## R-MAC-FIXES. The Mac's own: the lab's VCO bench, and the pointer over the grip
+
+**Owner decision, 2026-10-16.** After 0.2.4: "please identify and fix those Mac specific
+issues": the three circuit-lab tests that fail on the Mac (R60's notes), and the pointer
+that does not change over the grip on macOS (R-SIZE).
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **The lab's VCO bench.** `vco_electrical` (twice) and `vco_osc23` stopped on the Mac with
+  Homebrew's ngspice 47, built with KLU: "Timestep too small ... trouble with node \"hold\"",
+  0.8 ms into the run. The bench holds the ramp at -2 V through a switch that opens 1 us in;
+  closed it was 1 milliohm, open 1e14 ohm, a ratio of 1e17 that KLU's factorisation did not
+  survive. Either 1 ohm closed or 1e12 open passed; 1 ohm closed is chosen, so that the open
+  switch's leak (what the measurement sees) stays as it was, at 2 pA at most.
+- **The pointer on macOS.** baseview's macOS `set_mouse_cursor` was `todo!()`; it is now
+  baseview's change 7 (`third_party/baseview/PATCHES.md`): each look mapped to an `NSCursor`,
+  the diagonal resize arrows to the ones AppKit's own window corners use, shown again as the
+  pointer moves and as AppKit updates it. The editor sets it on every system (R-SIZE's).
+  plugin-kit's baseview has the same `todo!()`; it is to take the change too.
+
+**Evidence (the Mac, macOS 27.0, 2026-10-16):** `cargo test -p ca72-lab --test vco_electrical
+--test vco_osc23`: 5 passed (3 had failed), with either change alone as well. `NSCursor`
+answers to `_windowResizeNorthWestSouthEastCursor` and `…NorthEastSouthWest…` on this Mac.
+Not tried: the pointer seen over the grip in a host (to be checked in the next build).
+
+## R-LO-DEFAULT. QUALITY at LO for a new instance
+
+**Owner decision, 2026-10-16.** During 0.2.4's release: "Can we make the plugin default to “LO”
+quality setting for new users?", and "You can push this update first if changing this single
+setting requires you to rerun CI, but if you can make that change without, please do so now."
+A parameter's default is in the binaries, so it needed a new build: 0.2.4 was published as
+tested, and this follows it.
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **What changes.** QUALITY's default is LO (Potato mode, R47), not HI, so a new instance
+  (and the standalone's first session) plays the light voices: 2.1 to 3.8 % of a core for ten
+  POLY voices against 78 to 107 % at HI (R47's measurement, three presets), so a first try
+  works on a slower computer. "New users" is taken as new instances: a parameter's default cannot tell a
+  new user from an existing one, and the choice per computer that could (like LOOK) would hide
+  the default from a host's own reset.
+- **What does not.** A project keeps the QUALITY it was saved with (every 0.2 session saves
+  it); presets never carried it (`library::KEPT`). A session saved before QUALITY existed
+  (0.1's) opens at HI, as it did from 0.2.0 to 0.2.4, not at the new default
+  (`Ca72::filter_state`), so no old project changes its sound.
+- **Tests.** `a_new_instance_is_at_lo_and_an_old_session_at_hi`; the two editor tests that
+  began from a new instance's HI (`quality_goes_where_its_toggle_is_clicked`,
+  `quality_s_opening_follows_quality_and_ultra_s_note_is_read_once`) begin at HI explicitly.
+
+## R-RELEASE-0.2.5. 0.2.5
+
+**Owner authorisation, 2026-10-16.** "Once PR #46's CI is green, bump to 0.2.5 and release it
+the same way as 0.2.4": R-MAC-FIXES and R-LO-DEFAULT. The request authorises merging, signing,
+tagging, upload and publication. On 2026-10-17 the owner added PR #47, R-AU-PITCH-BEND (issue
+43): "release both of those right now". #47 was merged to `main` first and merged into 0.2.5's
+branch.
+
+The sound engine, parameter identifiers, preset format and installers are unchanged from
+0.2.4; QUALITY's default, baseview's macOS pointer and the AU wrapper's pitch bend change, and the
+circuit lab's VCO bench (not part of the plug-in). Release notes are in `releases/0.2.5.md`. Before publication the
+release commit must pass all three CI jobs; the macOS installer must be Developer ID signed,
+notarised, stapled and accepted by Gatekeeper; every uploaded asset downloaded again and
+checked against the manifest.
+
+**Publication evidence, 2026-10-17.** [CA-72 0.2.5](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.5)
+is public and Latest (also to an anonymous request, which the update check makes). PR #47 was
+merged to `main`, then merged into PR #46's branch; PR #46 was fast-forwarded to `main` at the
+exact tested commit `212967e3efe0945c60c44fa4272f51a854d5f3eb`, which the annotated `v0.2.5` tag
+names. No host test of the installed 0.2.5 was made before publication; R-AU-PITCH-BEND's
+GarageBand and Logic checks remain open.
+- [PR CI 39066363897](https://github.com/idlefoundry/ca-72/actions/runs/39066363897) and
+  [tag CI 39068050615](https://github.com/idlefoundry/ca-72/actions/runs/39068050615) passed on
+  Linux, Windows and macOS; the tag's drafted the release.
+- The macOS installer was made from the PR run's unsigned universal bundles (artifact digest
+  `sha256:fb77cc38…`, checked), signed with Developer ID, notarised (submission
+  `b9a0ee91-5eed-4f94-88f0-4384f4a72b64`, Accepted), stapled and accepted by Gatekeeper, on the
+  Mac from the agent's own session.
+- `CA-72-0.2.5-macOS.pkg` sha256 `8b8745fa04c1f5f269a9ba8f1ae7150f63efe2e8cf77d399f7c5cd00f59be2f5`,
+  90,804,304 bytes. All nine assets were downloaded again and checked against
+  `SHA256SUMS.txt` and GitHub's digests; the published installer, downloaded once more with
+  the quarantine flag set, passed `pkgutil`, `stapler validate` and Gatekeeper ("Notarized
+  Developer ID").
+- The scripts and logs are in `~/lab/artifacts/ca-72/0.2.5/`.
 
 ## R-THREADS. Threads by the machine: measurements, and a proposal for approval
 

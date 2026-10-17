@@ -39,3 +39,23 @@ target_add_auv2_wrapper(
     INSTRUMENT_TYPE "aumu"
     MACOS_EMBEDDED_CLAP_LOCATION "${CA72_CLAP}"
 )
+
+# Exercise the actual AU event adapter: no editor or physical audio/MIDI device.
+enable_testing()
+add_executable(ca72-au-midi-tests
+    tests/midi.cpp
+    ${CLAP_WRAPPER_ROOT}/src/detail/auv2/process.cpp
+    ${CLAP_WRAPPER_ROOT}/src/detail/auv2/parameter.cpp
+)
+target_link_libraries(ca72-au-midi-tests PRIVATE ca72-auv2-clap-wrapper-auv2-lib
+    "-framework Foundation" "-framework CoreFoundation"
+    "-framework AudioToolbox" "-framework CoreMIDI")
+add_test(NAME au-midi-adapter COMMAND ca72-au-midi-tests)
+
+add_executable(ca72-au-render-tests tests/render.mm)
+target_compile_options(ca72-au-render-tests PRIVATE -fobjc-arc)
+target_link_libraries(ca72-au-render-tests PRIVATE "-framework Foundation"
+    "-framework AudioToolbox" "-framework CoreMIDI")
+add_test(NAME au-midi-render COMMAND ca72-au-render-tests $<TARGET_BUNDLE_DIR:ca72-auv2>)
+set_tests_properties(au-midi-render PROPERTIES TIMEOUT 120
+    ENVIRONMENT "IDLE_FOUNDRY_SHARED=${CMAKE_CURRENT_BINARY_DIR}/test-user-data")
