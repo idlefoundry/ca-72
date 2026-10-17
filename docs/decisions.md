@@ -6597,3 +6597,135 @@ where the gain is. Past that, more workers gained little, and the worst blocks g
   Mac (the scaling bench, `CA72_AUTO=1`, 2 s) settled at 2, 2 and six of 1: 10 in all.
 - The plug-in's library, `realtime.rs` and `workers.rs` tests pass, clippy as CI runs it is
   clean, and rustfmt is clean.
+
+### Hosts that run each plug-in in a process of its own (2026-10-16)
+
+**The owner, 2026-10-16** (relayed): "Yes, you can run the [Bitwig] test." The concern: the
+budget (`pool::BUDGET`) is the process's. Bitwig can host each plug-in in a process of its own
+(REAPER has a like option), and then every instance counts itself alone (A = 1) and takes a
+lone instance's share.
+
+**What each process claims, from the code.** A lone instance's budget is B(1); its pool holds
+min(B(1), C, 9) workers at HI with POLY on. At ULTRA with POLY it also holds S crews of five
+helpers, claiming max(workers, 6S − 1) threads (S = 2 here).
+
+| Machine (N, F) | B(1) | C | Workers at HI | Audio threads with its host thread | 8 processes |
+|---|---|---|---|---|---|
+| 7800X3D (16, 16) | 13 | 14 | 9 | 10 (20 at ULTRA with POLY, at most 12 busy) | 80 on 16 CPUs |
+| M4 Pro (14, 10) | 11 | 8 | 8 | 9 | 72 on 14 cores |
+| i5-13600K (20, 6) | 17 | 4 | 4 | 5 | 40 on 20 |
+
+Released 0.2.4 claims today's 4 a process (first come within it): 40 on any of them.
+
+**Emulated on the Linux machine** (`scripts/separate-processes.sh`; raw lines in
+`docs/threads/separate-processes-linux.txt`):
+- **The setup:** N processes of the scaling bench, one instance each (HI, ten voices, the
+  plug-in's own counts), started together and escalated 1, 2, 4, 8, each round only after the
+  last was clean.
+- **The guards:**
+  - an ordinary-priority canary process sleeping 10 ms at a time, its worst oversleep logged;
+  - a monitor that kills every bench process if the canary oversleeps more than 100 ms;
+  - a second guard doing the same at `SCHED_FIFO` 98, above the audio threads, in case they
+    starved the first;
+  - each process's own watchdog (demotion after 500 ms);
+  - a hard `timeout` on every process and on the round.
+- **Conditions:** load average 0.4 before the first round. The owner's Bitwig was open, its
+  plug-in host's threads at real-time priority 50 and PipeWire's at 83, the whole time.
+
+| Processes | Audio threads | Each process | Late | Canary's worst | Watchdog |
+|---|---|---|---|---|---|
+| 1 | 10 | 9 workers: 25 % mean, worst 39–40 % | 0 | 0.7 ms | none |
+| 2 | 20 | 9 workers each: worst 34–38 % | 0 | 1.1 ms | none |
+| 4 | 40 | 9 workers each: means 22–29 %, worst 41–57 % | 0 | 4.3 ms | none |
+| 8 | 80 | **aborted** about 3 s in, before any block was measured | – | **126 ms** | none (it acts at 500 ms) |
+
+- **Oversubscription is confirmed.** At 8 processes the ordinary-priority canary was kept off
+  the processors for 126 ms within seconds of the start, and the real-time guard stopped the
+  round. The machine answered at once after, and nothing of the bench was left running. The
+  escalation stopped there, as agreed.
+- At 4 processes (40 threads) every instance was clean: better than four instances in one
+  process (28 late blocks), since each had 9 workers. Too many threads is not, up to there, a
+  loss in itself. What 8 shows is the risk the budget exists to bound: on a machine with
+  real-time throttling off, nothing but the plug-in's own watchdog stands between 80 such
+  threads and the September stall.
+- **Released 0.2.4 is exposed too, less:** 4 a process, 40 for eight, the case that ran clean
+  here.
+
+**Proposed (not built; the owner decides): one budget for every CA-72 process of the user.**
+- **Seats as locked files.** In a folder of the user's temporary files (`$TMPDIR` on macOS,
+  `$XDG_RUNTIME_DIR` or `/tmp/ca72-$UID` on Linux, `%TEMP%` on Windows), 64 seat files. An
+  instance that needs threads takes an exclusive, non-blocking advisory lock on a free one
+  (`flock` on macOS and Linux, `LockFileEx` on Windows) instead of only a seat in its process's
+  list, and keeps it while it holds threads.
+- **Crash-safe by the kernel.** A process's locks are released when it exits or is killed, so
+  no count is left behind (a named semaphore or a counter in shared memory would be, by a
+  crash).
+- **The count.** Each process's helper thread probes the seats (a non-blocking lock tried on
+  each and let go at once if it was free) when its own instances change and twice a second.
+  A is the seats held, and each instance's share is B(A) shared evenly in the seats' order.
+  When A changes, the shares move and the pools restart as they do now within a process. No
+  audio thread touches the files.
+- **What it costs, measured** (`scripts/seats-probe.py`, Python, so an upper bound): probing 64
+  seats, 8 of them held by another process, takes 33 µs on the Mac and 57 µs on the Linux
+  machine, the helper thread's work twice a second. A holder killed with its locks held left
+  none held.
+- **Limits:**
+  - Shares only, not claims, across processes: while instances restart at new shares, the
+    total may pass B for some milliseconds (within a process the shared claim counter prevents
+    that).
+  - A sandboxed host on macOS has a temporary folder of its own: its processes share seats
+    with each other, not with other hosts.
+  - A host that runs plug-ins as another user does not share them.
+  - Not measured in a host.
+
+**The Bitwig check (for the owner, at the Linux machine):**
+1. **Mind the risk.** This branch's build, eight instances each in its own process, is the case
+   the emulation stopped at 126 ms. Real-time throttling is off on this machine (the owner's
+   setting); for the test it can be turned on as a safety net and back after, if the owner
+   chooses:
+
+   ```
+   sudo sysctl -w kernel.sched_rt_runtime_us=950000
+   sudo sysctl -w kernel.sched_rt_runtime_us=1000000
+   ```
+
+   The first command turns throttling on, the second sets it back to the owner's setting.
+2. **Get the branch's build.** The branch is local to the Mac, so copy it over:
+
+   ```
+   rsync -az --exclude target --exclude .git --exclude .claude ~/Code/ca-72/.claude/worktrees/goofy-ellis-af3f5d/ omarchy-ts:Code/ca72-threads/
+   ```
+
+   Then on the Linux machine, back up `~/.clap/CA-72.clap` and copy in the new one:
+
+   ```
+   cd ~/Code/ca72-threads && cargo xtask bundle ca72-plugin --profile bundle
+   ```
+
+   The new `target/bundled/CA-72.clap` replaces it (the VST3 likewise).
+3. **Watch ordinary work in a terminal.** This prints the oversleep, in milliseconds, whenever
+   it passes 20:
+
+   ```
+   python3 -c "import time
+   while True:
+       t=time.monotonic(); time.sleep(0.01); d=(time.monotonic()-t-0.01)*1e3
+       d>20 and print(round(d,1),flush=True)"
+   ```
+
+   In a second terminal, count CA-72's audio threads:
+
+   ```
+   watch -n1 'ps -eLo rtprio,comm | grep -c ca72-'
+   ```
+4. **Set up Bitwig.** Settings › Plug-ins › plug-in hosting mode: **Individually** (each plug-in
+   in its own process).
+   - Eight instrument tracks, each with CA-72: POLY on, VOICES 10, QUALITY HI.
+   - One clip of ten-note chords copied to all eight, looping.
+   - Play for a minute, with the DSP meter and the dropouts in view.
+5. **If the desktop stops answering for a second or more, stop the transport.** The plug-in's
+   watchdog demotes its threads after 0.5 s and says so in Bitwig's log (lines that begin
+   `ca72:`).
+6. **Compare** with the hosting mode at **Together** (one process), then with released 0.2.4
+   back in `~/.clap` in both modes.
+7. **Report:** the thread counts, the canary's worst, the dropouts and any `ca72:` lines.
