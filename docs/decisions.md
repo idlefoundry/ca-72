@@ -6030,6 +6030,7 @@ GarageBand and Logic checks remain open.
   the quarantine flag set, passed `pkgutil`, `stapler validate` and Gatekeeper ("Notarized
   Developer ID").
 - The scripts and logs are in `~/lab/artifacts/ca-72/0.2.5/`.
+
 ## R-THREADS. Threads by the machine: measurements, and a proposal for approval
 
 **The owner's request, 2026-10-16** (relayed by the session that started this work). Assign
