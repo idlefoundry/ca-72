@@ -6010,3 +6010,23 @@ circuit lab's VCO bench (not part of the plug-in). Release notes are in `release
 release commit must pass all three CI jobs; the macOS installer must be Developer ID signed,
 notarised, stapled and accepted by Gatekeeper; every uploaded asset downloaded again and
 checked against the manifest.
+
+**Publication evidence, 2026-10-17.** [CA-72 0.2.5](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.5)
+is public and Latest (also to an anonymous request, which the update check makes). PR #47 was
+merged to `main`, then merged into PR #46's branch; PR #46 was fast-forwarded to `main` at the
+exact tested commit `212967e3efe0945c60c44fa4272f51a854d5f3eb`, which the annotated `v0.2.5` tag
+names. No host test of the installed 0.2.5 was made before publication; R-AU-PITCH-BEND's
+GarageBand and Logic checks remain open.
+- [PR CI 39066363897](https://github.com/idlefoundry/ca-72/actions/runs/39066363897) and
+  [tag CI 39068050615](https://github.com/idlefoundry/ca-72/actions/runs/39068050615) passed on
+  Linux, Windows and macOS; the tag's drafted the release.
+- The macOS installer was made from the PR run's unsigned universal bundles (artifact digest
+  `sha256:fb77cc38…`, checked), signed with Developer ID, notarised (submission
+  `b9a0ee91-5eed-4f94-88f0-4384f4a72b64`, Accepted), stapled and accepted by Gatekeeper, on the
+  Mac from the agent's own session.
+- `CA-72-0.2.5-macOS.pkg` sha256 `8b8745fa04c1f5f269a9ba8f1ae7150f63efe2e8cf77d399f7c5cd00f59be2f5`,
+  90,804,304 bytes. All nine assets were downloaded again and checked against
+  `SHA256SUMS.txt` and GitHub's digests; the published installer, downloaded once more with
+  the quarantine flag set, passed `pkgutil`, `stapler validate` and Gatekeeper ("Notarized
+  Developer ID").
+- The scripts and logs are in `~/lab/artifacts/ca-72/0.2.5/`.
