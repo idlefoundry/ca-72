@@ -531,6 +531,13 @@ impl LadderBias {
     }
 }
 
+/// The part of the ladder's bias that follows the temperature alone ([`VcfCircuit::ladder_at`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LadderAt {
+    m: crate::devices::BjtAt,
+    c_mu: f64,
+}
+
 /// Potato's ladder bias: [`VcfCircuit::bias`] on 1024 points of the tail current's
 /// logarithm from 1e-9 to 1e-2 A, linear between (outside, the bias worked out).
 const BIAS_POINTS: usize = 1024;
@@ -541,7 +548,23 @@ impl VcfCircuit {
     /// its emitter current less its base currents (Gummel-Poon at the stage's current, the
     /// pair balanced); the pairs' small-signal base currents and series resistances.
     pub fn bias(&self, i0: f64, celsius: f64) -> LadderBias {
-        let m = self.ladder.at(celsius);
+        self.bias_at(i0, &self.ladder_at(celsius))
+    }
+
+    /// What [`VcfCircuit::bias`] takes from the temperature alone, for a caller to keep:
+    /// the ladder's transistor at it, and C_mu at the ladder's fixed V_bc.
+    pub fn ladder_at(&self, celsius: f64) -> LadderAt {
+        let q = &self.ladder;
+        LadderAt {
+            m: q.at(celsius),
+            c_mu: junction_capacitance(q.cjc, q.vjc, q.mjc, self.ladder_vbc),
+        }
+    }
+
+    /// [`VcfCircuit::bias`] with its temperature's part `at` ([`VcfCircuit::ladder_at`]):
+    /// the same arithmetic, so the same bias to the bit.
+    pub fn bias_at(&self, i0: f64, at: &LadderAt) -> LadderBias {
+        let m = at.m;
         let (vbc, vaf) = (self.ladder_vbc, self.ladder.vaf);
         let mut e = [0.0; 4];
         let mut v_stage = [0.0; 4];
@@ -559,7 +582,7 @@ impl VcfCircuit {
         let mut c_stage = [0.0; 4];
         let mut slopes = [0.0; 4];
         let q = &self.ladder;
-        let c_mu = junction_capacitance(q.cjc, q.vjc, q.mjc, vbc);
+        let c_mu = at.c_mu;
         let c_je = JunctionCapacitance::new(q.cje, q.vje, q.mje);
         for k in 0..4 {
             let ic = 0.5 * e[k];
@@ -885,6 +908,10 @@ pub struct Vcf {
     f_prev: Option<[f64; STATES]>,
     /// The ladder's bias for the last (i0, celsius).
     bias: (f64, f64, LadderBias),
+    /// Its temperature's part, for the ladder's transistor, V_bc and temperature it was
+    /// worked out for (performance: the bias is worked out again whenever the tail current
+    /// moves, a contour's every sample, the temperature seldom).
+    ladder_at: Option<(Bjt, f64, f64, LadderAt)>,
     up_n: Interpolator,
     up_g: Interpolator,
     down: Decimator,
@@ -953,6 +980,7 @@ impl Vcf {
             y: [0.0; STATES],
             f_prev: None,
             bias: (f64::NAN, f64::NAN, VcfCircuit::default().bias(0.0, 25.0)),
+            ladder_at: None,
             up_n,
             up_g: Interpolator::new(os),
             down: Decimator::new(os),
@@ -1143,7 +1171,22 @@ impl Vcf {
             } else {
                 None
             };
-            let bias = from_table.unwrap_or_else(|| self.circuit.bias(i0, self.celsius));
+            let bias = match from_table {
+                Some(b) => b,
+                None => {
+                    let c = &self.circuit;
+                    let key = (c.ladder, c.ladder_vbc.to_bits(), self.celsius.to_bits());
+                    let at = match self.ladder_at {
+                        Some((q, vbc, t, at)) if (q, vbc.to_bits(), t.to_bits()) == key => at,
+                        _ => {
+                            let at = c.ladder_at(self.celsius);
+                            self.ladder_at = Some((c.ladder, c.ladder_vbc, self.celsius, at));
+                            at
+                        }
+                    };
+                    c.bias_at(i0, &at)
+                }
+            };
             self.bias = (i0, self.celsius, bias);
             self.warp = None;
         }
