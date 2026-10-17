@@ -21,7 +21,7 @@
 use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
-use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
+use ca72::voice::{Jacks, LINE_UP, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
@@ -207,6 +207,43 @@ const LAMP_FALL: f32 = 0.05;
 /// key's fundamental on 2' (4.2 kHz) stays under its Nyquist frequency, and the model's
 /// factory calibration fails at much lower rates (it gives NaN at 1.2 kHz).
 pub const MIN_VOICE_RATE: f64 = 8_000.0;
+
+/// The most samples [`OutputDelay`] holds back.
+const LINE_UP_MOST: usize = 64;
+
+/// The output held back so that every QUALITY mode's sound comes out together, ULTRA's
+/// the latest ([`LINE_UP`]): a ring of each channel's last samples, made with the engine
+/// (nothing allocated on the audio thread).
+#[derive(Debug, Clone)]
+struct OutputDelay {
+    ring: [[f32; LINE_UP_MOST]; 2],
+    at: usize,
+}
+
+impl OutputDelay {
+    fn new() -> OutputDelay {
+        OutputDelay {
+            ring: [[0.0; LINE_UP_MOST]; 2],
+            at: 0,
+        }
+    }
+
+    /// `left` and `right` held back `late` samples (less than [`LINE_UP_MOST`]).
+    fn hold(&mut self, late: usize, left: &mut [f32], right: &mut [f32]) {
+        let late = late.min(LINE_UP_MOST - 1);
+        for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+            self.ring[0][self.at] = *l;
+            self.ring[1][self.at] = *r;
+            let k = (self.at + LINE_UP_MOST - late) % LINE_UP_MOST;
+            (*l, *r) = (self.ring[0][k], self.ring[1][k]);
+            self.at = (self.at + 1) % LINE_UP_MOST;
+        }
+    }
+
+    fn clear(&mut self) {
+        *self = OutputDelay::new();
+    }
+}
 
 /// How long POWER takes to fade the output out or in, s (switched at once, it clicks).
 const POWER_FADE: f64 = 0.01;
@@ -1084,6 +1121,8 @@ pub struct Engine {
     /// The one instrument asleep, or how near it is (decisions.md R68).
     rest: Rest,
     over: Option<Oversampled>,
+    /// HI's and LO's output held back to come out with ULTRA's ([`LINE_UP`]).
+    line_up: OutputDelay,
     rate: f64,
     seed: u64,
     controls: Controls,
@@ -1171,6 +1210,7 @@ impl Engine {
             levels: [0.0; LEVELS],
             rest: Rest::default(),
             over: None,
+            line_up: OutputDelay::new(),
             rate: 0.0,
             seed: 0,
             gain: output_gain(controls.volume, controls.main_output),
@@ -1252,6 +1292,7 @@ impl Engine {
         }
         self.stop_workers();
         self.rate = rate;
+        self.line_up.clear();
         self.fade_step = (1.0 / (POWER_FADE * rate)).min(1.0);
         self.hush_step = (1.0 / (HUSH_FADE * rate)).min(1.0);
         self.hush = false;
@@ -1771,8 +1812,18 @@ impl Engine {
 
     /// One output sample, left and right, with `ext` at EXTERNAL INPUT (a sample that is not
     /// finite taken as 0: decisions.md R18); silence before [`Engine::prepare`]. With POWER
-    /// off, once faded out, the voices rest (the MIDI input still reaches them).
+    /// off, once faded out, the voices rest (the MIDI input still reaches them). Held back as
+    /// [`Engine::render`] holds it ([`LINE_UP`]).
     pub fn tick_stereo(&mut self, ext: f32) -> (f32, f32) {
+        let (l, r) = self.voices_stereo(ext);
+        let (mut l, mut r) = ([l], [r]);
+        let late = self.lined_up();
+        self.line_up.hold(late, &mut l, &mut r);
+        (l[0], r[0])
+    }
+
+    /// [`Engine::tick_stereo`]'s sample before it is held back.
+    fn voices_stereo(&mut self, ext: f32) -> (f32, f32) {
         if self.rest.asleep {
             if self.dormant(&[ext]) {
                 return (0.0, 0.0);
@@ -1825,14 +1876,47 @@ impl Engine {
             if self.dormant(&ext[..ext.len().min(len)]) {
                 left[..len].fill(0.0);
                 right[..len].fill(0.0);
+                // (What the output still holds back comes out, as with the voices playing.)
+                let late = self.lined_up();
+                self.line_up.hold(late, &mut left[..len], &mut right[..len]);
                 return;
             }
             self.rest.wake();
         }
         self.render_voices(ext, &mut left[..len], &mut right[..len]);
+        let late = self.lined_up();
+        self.line_up.hold(late, &mut left[..len], &mut right[..len]);
         if !self.many() {
             self.rest.heard(&left[..len], &right[..len]);
         }
+    }
+
+    /// The plug-in's latency, host samples (decisions.md R-LATENCY): how late ULTRA's sound
+    /// comes out, the voices' ([`ca72::voice::latency`]) and, below [`MIN_VOICE_RATE`], the
+    /// engine's resamplers'; rounded. The same in every QUALITY mode (HI's and LO's sound
+    /// held back to come out with ULTRA's: [`LINE_UP`]), so a host's compensation never
+    /// changes with it.
+    pub fn latency(&self) -> u32 {
+        let voices = ca72::voice::latency(Quality::NoCompromises);
+        let late = match &self.over {
+            Some(o) => voices / o.factor as f64 + o.up.delay() + o.down[0].delay(),
+            None => voices,
+        };
+        late.round() as u32
+    }
+
+    /// How many host samples the output is held back in the QUALITY mode playing
+    /// ([`LINE_UP`]).
+    fn lined_up(&self) -> usize {
+        let at_voices = if self.controls.ultra {
+            0
+        } else if self.controls.potato {
+            LINE_UP.1
+        } else {
+            LINE_UP.0
+        };
+        let factor = self.over.as_ref().map_or(1, |o| o.factor);
+        (at_voices as f64 / factor as f64).round() as usize
     }
 
     /// Whether the one instrument, asleep, stays so for samples with `ext` at EXTERNAL INPUT:
@@ -1857,7 +1941,7 @@ impl Engine {
         let runs = self.many() || self.controls.potato || !self.crews().is_empty();
         if !runs || self.over.is_some() || self.slots.is_empty() {
             for i in 0..len {
-                (left[i], right[i]) = self.tick_stereo(at(i));
+                (left[i], right[i]) = self.voices_stereo(at(i));
             }
             return;
         }

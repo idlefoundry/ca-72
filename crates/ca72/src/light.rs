@@ -29,6 +29,9 @@ use crate::voice::{
 /// Samples between the control laws' updates.
 pub const CONTROL_EVERY: usize = 16;
 
+/// The contours' past outputs kept, samples (more than [`Light`]'s filter's delay).
+const LATE_PAST: usize = 64;
+
 /// Keep the nonlinear ladder's ultrasonic harmonics out of the output band.
 const FILTER_OVERSAMPLE: usize = 8;
 
@@ -982,6 +985,18 @@ pub struct Light {
     g_step: f32,
     k: f32,
     contours: [Contour; 2],
+    /// The contours' volts of the last samples (filter, loudness), the newest at `late_at`:
+    /// each reaches what it shapes as late as the sound does ([`Light::late_contours`];
+    /// decisions.md R-LATENCY), these samples late (filter, loudness).
+    late_past: [(f64, f64); LATE_PAST],
+    late_at: usize,
+    late: (f64, f64),
+    /// The filter contour as it reaches the ladder, V.
+    filter_volts: f64,
+    /// Oscillator 1's resets (its phase's wraps), a probe: the latest's time in samples and
+    /// how many, and the samples played.
+    resets: (f64, u64),
+    samples: u64,
     count: usize,
     /// ENTROPY's offsets: each oscillator's cents and the cutoff's octaves.
     detune: [f64; 3],
@@ -1014,7 +1029,8 @@ impl Light {
         let filter_rate = rate * FILTER_OVERSAMPLE as f64;
         let filter_up = Interpolator::sparse(FILTER_OVERSAMPLE);
         let filter_down = Decimator::sparse(FILTER_OVERSAMPLE);
-        let filter_delay = filter_up.delay() + filter_down.delay();
+        let to_ladder = filter_up.delay();
+        let filter_delay = to_ladder + filter_down.delay();
         let at = |s: f64| (s * rate).round() as u32;
         let law = ContourLaw::new(Panel::default().filter_contour, true, 0, rate);
         let mut l = Light {
@@ -1092,6 +1108,21 @@ impl Light {
             g_step: 0.0,
             k: 0.0,
             contours: [Contour::at_rest(&law); 2],
+            late_past: [(0.0, 0.0); LATE_PAST],
+            late_at: 0,
+            // The filter contour as late as its sound at the ladder's input (the input
+            // resampler's delay, less the control step's: the ladder's coefficients follow it
+            // a step late); the loudness contour reaching the VCA when ULTRA's does once the
+            // output is lined up (`voice::LINE_UP`): 46.75 samples.
+            late: (
+                (to_ladder - (CONTROL_EVERY - 1) as f64).max(0.0),
+                (crate::voice::latency(crate::voice::Quality::NoCompromises)
+                    - crate::voice::LINE_UP.1 as f64)
+                    .max(0.0),
+            ),
+            filter_volts: 0.0,
+            resets: (0.0, 0),
+            samples: 0,
             count: 0,
             detune: [0.0; 3],
             cutoff_offset: 0.0,
@@ -1124,7 +1155,40 @@ impl Light {
             Contour::at_rest(&l.set.contours[0]),
             Contour::at_rest(&l.set.contours[1]),
         ];
+        l.settle_late();
         l
+    }
+
+    /// The contours' past as they are now (at rest).
+    fn settle_late(&mut self) {
+        let now = (self.contours[0].volts, self.contours[1].volts);
+        self.late_past = [now; LATE_PAST];
+        self.filter_volts = now.0;
+    }
+
+    /// The contours' outputs this sample (filter, loudness) kept; the filter contour as it
+    /// reaches the ladder ([`Light::filter_volts`]) and the loudness contour as it reaches the
+    /// VCA, each [`Light::late`] late (interpolated between samples): as late as the sound
+    /// each shapes, as the circuit has them (decisions.md R-LATENCY).
+    #[inline(always)]
+    fn late_contours(&mut self, filter: f64, loud: f64) -> f64 {
+        self.late_at = (self.late_at + 1) % LATE_PAST;
+        self.late_past[self.late_at] = (filter, loud);
+        let at = |late: f64| {
+            let (whole, part) = (late as usize, late.fract());
+            let k = |k: usize| self.late_past[(self.late_at + LATE_PAST - k) % LATE_PAST];
+            (k(whole), k(whole + 1), part)
+        };
+        let (f0, f1, part) = at(self.late.0);
+        self.filter_volts = f0.0 + (f1.0 - f0.0) * part;
+        let (l0, l1, part) = at(self.late.1);
+        l0.1 + (l1.1 - l0.1) * part
+    }
+
+    /// Oscillator 1's latest reset (its phase's wrap) in samples since the voice was made,
+    /// exact, and how many there have been (a probe: decisions.md R-LATENCY).
+    pub fn probe_resets(&self) -> (f64, u64) {
+        self.resets
     }
 
     pub fn rate(&self) -> f64 {
@@ -1403,6 +1467,7 @@ impl Light {
             Contour::at_rest(&self.set.contours[0]),
             Contour::at_rest(&self.set.contours[1]),
         ];
+        self.settle_late();
         self.ladder = Ladder::default();
         self.filter_up.reset();
         self.filter_down.reset();
@@ -1466,7 +1531,7 @@ impl Light {
         self.k = k;
         let log2 = self.set.cutoff
             + self.set.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
-            + self.set.contour * (self.contours[0].volts - self.set.contours[0].rest)
+            + self.set.contour * (self.filter_volts - self.set.contours[0].rest)
             + self.cutoff_offset;
         // The passband at this cutoff.
         let pass = interpolate(&laws::PASS_AT_LOG2, &laws::PASS_DB, log2);
@@ -1489,7 +1554,7 @@ impl Light {
     #[inline(always)]
     fn coefficients(&self, extra: f64) -> (f32, f32) {
         let s = &self.set;
-        let rise = self.contours[0].volts - s.contours[0].rest;
+        let rise = self.filter_volts - s.contours[0].rest;
         let log2 = s.cutoff
             + s.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
             + s.contour * rise
@@ -1564,8 +1629,9 @@ impl Light {
             }
         }
         let trigger = self.trigger;
-        self.contours[0].tick(trigger, &self.set.contours[0]);
+        let filter = self.contours[0].tick(trigger, &self.set.contours[0]);
         let loud = self.contours[1].tick(trigger, &self.set.contours[1]);
+        let loud = self.late_contours(filter, loud);
 
         // (What the panel sets, read as needed: not the whole of it copied each sample.)
         let s = &self.set;
@@ -1627,8 +1693,16 @@ impl Light {
         // The oscillators.
         // (Each oscillator's increment's reciprocal the control step's: its edges' places in
         // samples exact at a steady pitch, off by the step's change while it moves.)
+        self.samples += 1;
         let w0 = if gain[0] != 0.0 {
-            self.osc[0].tick(dt[0], inv[0])
+            let before = self.osc[0].phase;
+            let w = self.osc[0].tick(dt[0], inv[0]);
+            if self.osc[0].phase < before {
+                // (It wrapped this sample, its phase now so many increments past.)
+                let at = (self.samples - 1) as f64 - f64::from(self.osc[0].phase / dt[0]);
+                self.resets = (at, self.resets.1 + 1);
+            }
+            w
         } else {
             0.0
         };

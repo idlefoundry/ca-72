@@ -819,10 +819,8 @@ pub struct ControlPart {
     count: usize,
     env_from: (f64, f64),
     env_to: (f64, f64),
-    /// The contours' outputs of the last samples, the newest at `env_at`: they reach the
-    /// filter and the VCA [`contour_delay`] late, as late as the oscillators' band-limiting
-    /// holds their sound back beyond the one sample it used to, so that attacks keep their
-    /// shape (decisions.md R-BLEP).
+    /// The contours' outputs of the last samples, the newest at `env_at`: each reaches what
+    /// it shapes as late as the sound does ([`contour_delays`]; decisions.md R-LATENCY).
     env_past: [(f64, f64); ENV_PAST],
     env_at: usize,
     noise: Noise,
@@ -1449,7 +1447,7 @@ impl Voice {
             None => p,
         };
         let v_kbd = self.kbd.tick(&pc, c);
-        let ctl = self.ctl.tick(&pc, c);
+        let ctl = self.ctl.tick_for(&pc, c, p.quality);
         self.last_ctl = (ctl.env_f, ctl.env_l);
         let d = self.bias.tick(ctl.env_l, j.loudness, p.quality);
         self.audio.tick(&p, j, v_kbd, &ctl, &d)
@@ -1673,20 +1671,68 @@ fn oversampling(q: Quality) -> (usize, usize) {
     }
 }
 
-/// How late the contours reach the filter and the VCA, samples: what the oscillators'
-/// band-limiting delays their sound beyond what it did before decisions.md R-BLEP (the
-/// two-point polyBLEP's one sample at the oscillators' rate, their decimators' last stage
-/// 79 taps long), so that an attack keeps the shape it had: 15 in Potato (the kernel's 16
-/// samples less one), 18.75 in the others (3.75 the kernel's, 15 the longer last stage's).
-fn contour_delay(q: Quality) -> f64 {
-    use crate::resample::{BLEP_DELAY, Decimator, LAST_HALFBAND, OSCILLATOR_LAST_HALFBAND};
-    let os = oversampling(q).0;
-    (BLEP_DELAY as f64 - 1.0) / os as f64 + Decimator::delay_of(os, OSCILLATOR_LAST_HALFBAND)
-        - Decimator::delay_of(os, LAST_HALFBAND)
+/// How late the voice's sound comes out at a quality, samples: the oscillators'
+/// band-limiting and decimators, and the filter's resamplers either side of it
+/// (decisions.md R-LATENCY; the circuit's own delays, the filter's phase among them, are
+/// the sound's, not this). 60.5 in Potato, 85.75 in the others.
+pub fn latency(q: Quality) -> f64 {
+    let (to_filter, out) = filter_resamplers(q);
+    oscillator_latency(q) + to_filter + out
 }
 
-/// The contours' past outputs kept, samples (more than [`contour_delay`] in any mode).
-const ENV_PAST: usize = 32;
+/// The oscillators' outputs' delay at a quality, samples (their [`crate::vco::Vco::latency`]):
+/// 16 in Potato, 41.25 in the others.
+fn oscillator_latency(q: Quality) -> f64 {
+    use crate::resample::{BLEP_DELAY, Decimator, OSCILLATOR_LAST_HALFBAND};
+    let os = oversampling(q).0;
+    BLEP_DELAY as f64 / os as f64 + Decimator::delay_of(os, OSCILLATOR_LAST_HALFBAND)
+}
+
+/// The filter's resamplers' delays at a quality, samples (its input's interpolator, its
+/// output's decimator: [`crate::vcf::Vcf::latency`] together): 22.25 and 22.25.
+fn filter_resamplers(q: Quality) -> (f64, f64) {
+    use crate::resample::{Decimator, Interpolator, LAST_HALFBAND};
+    let os = oversampling(q).1;
+    (
+        Interpolator::delay_of(os),
+        Decimator::delay_of(os, LAST_HALFBAND),
+    )
+}
+
+/// How many samples HI's and LO's sound (Potato's and the light model's) is held back at the
+/// plug-in's output so that it comes out with ULTRA's (decisions.md R-LATENCY): ULTRA's
+/// oscillators' sound reaches the output 26.0 samples after HI's and 39.0 after LO's at
+/// 44.1, 48 and 96 kHz, measured (the plug-in's `tests/latency.rs`, which holds it): 25.25
+/// and 38.5 of it the oscillators' and the filters' resamplers ([`latency`], the light
+/// model's filter's), the rest the filters' own phase, a little less in the cheaper models.
+pub const LINE_UP: (usize, usize) = (26, 39);
+
+/// How late the contours reach what they shape, samples (decisions.md R-LATENCY), less the
+/// delay of their own sub-rate (`every` samples a tick, interpolated: `every` - 1):
+/// - the filter contour meets its sound at the filter's input: the oscillators' delayed by
+///   the filter's input resampler;
+/// - the loudness contour reaches the VCA when ULTRA's does once the output is lined up
+///   ([`LINE_UP`]): in ULTRA as late as its whole path ([`latency`]), in Potato that less the
+///   samples its output is held back. So every mode's attack comes out with ULTRA's, and
+///   each meets its sound as in the circuit (the filter's own phase still the circuit's).
+///
+/// At 48 kHz: 31.25 and 52.75 in Potato, 62.5 and 84.75 in the others.
+fn contour_delays(audio: Quality, every: usize) -> (f64, f64) {
+    let own = every as f64 - 1.0;
+    let (to_filter, _) = filter_resamplers(audio);
+    let held = if audio == Quality::Potato {
+        LINE_UP.0 as f64
+    } else {
+        0.0
+    };
+    (
+        (oscillator_latency(audio) + to_filter - own).max(0.0),
+        (latency(Quality::NoCompromises) - held - own).max(0.0),
+    )
+}
+
+/// The contours' past outputs kept, samples (more than [`contour_delays`] in any mode).
+const ENV_PAST: usize = 128;
 
 /// The contours' sub-rate (samples a tick) in each quality mode: in Potato a quarter of the
 /// others'.
@@ -1701,6 +1747,13 @@ impl ControlPart {
     /// One sample of the contours (at their sub-rate, interpolated: a block's delay) and
     /// the noise (its loads follow the panel), for the trigger contact and EXT. S-TRIG.
     pub fn tick(&mut self, p: &Panel, c: Contacts) -> ControlOut {
+        self.tick_for(p, c, p.quality)
+    }
+
+    /// [`ControlPart::tick`] for an audio path at `audio`'s quality, which the contours'
+    /// delays follow ([`contour_delays`]), whatever quality the contours run at
+    /// ([`Voice::hold_control_quality`]).
+    pub fn tick_for(&mut self, p: &Panel, c: Contacts, audio: Quality) -> ControlOut {
         let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
         let mut laps = crate::prof::Laps::start();
         if self.count.is_multiple_of(self.contour_every) {
@@ -1722,15 +1775,20 @@ impl ControlPart {
         let a = ((self.count - 1) % self.contour_every + 1) as f64 / self.contour_every as f64;
         let env_f = self.env_from.0 + (self.env_to.0 - self.env_from.0) * a;
         let env_l = self.env_from.1 + (self.env_to.1 - self.env_from.1) * a;
-        // As late as the oscillators' band-limiting (interpolated between samples).
+        // Each as late as the sound it shapes (interpolated between samples).
         self.env_at = (self.env_at + 1) % ENV_PAST;
         self.env_past[self.env_at] = (env_f, env_l);
-        let late = contour_delay(p.quality);
-        let (whole, part) = (late as usize, late.fract());
-        let at = |k: usize| self.env_past[(self.env_at + ENV_PAST - k) % ENV_PAST];
-        let (e0, e1) = (at(whole), at(whole + 1));
-        let env_f = e0.0 + (e1.0 - e0.0) * part;
-        let env_l = e0.1 + (e1.1 - e0.1) * part;
+        let (late_f, late_l) = contour_delays(audio, self.contour_every);
+        let at = |late: f64| {
+            let (whole, part) = (late as usize, late.fract());
+            let k = |k: usize| self.env_past[(self.env_at + ENV_PAST - k) % ENV_PAST];
+            let (e0, e1) = (k(whole), k(whole + 1));
+            (e0, e1, part)
+        };
+        let (f0, f1, part) = at(late_f);
+        let env_f = f0.0 + (f1.0 - f0.0) * part;
+        let (l0, l1, part) = at(late_l);
+        let env_l = l0.1 + (l1.1 - l0.1) * part;
         // Board 3: the noise. Not computed while nothing hears it: its mixer channel off and
         // the modulation mix taking none of it (its gain exactly 0) or neither modulation
         // switch on; it resumes where it stopped (decisions.md R11). The front then takes

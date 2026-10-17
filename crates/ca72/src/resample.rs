@@ -550,6 +550,21 @@ impl Interpolator {
             .sum()
     }
 
+    /// The group delay in input samples of an interpolator by `factor`, as
+    /// [`Interpolator::delay`] gives it (nothing made).
+    pub fn delay_of(factor: usize) -> f64 {
+        (0..stages_len(factor))
+            .map(|k| {
+                let len = if k == 0 {
+                    LAST_HALFBAND
+                } else {
+                    FIRST_HALFBANDS
+                };
+                ((len | 1) / 2) as f64 / f64::from(1u32 << (k + 1))
+            })
+            .sum()
+    }
+
     pub fn reset(&mut self) {
         self.stages.iter_mut().for_each(Halfband::reset);
     }
@@ -596,6 +611,12 @@ mod tests {
             assert_eq!(Decimator::delay_of(factor, LAST_HALFBAND), d);
             let d = Decimator::for_oscillators(factor).delay();
             assert_eq!(Decimator::delay_of(factor, OSCILLATOR_LAST_HALFBAND), d);
+        }
+        for factor in [1, 2, 4, 8] {
+            assert_eq!(
+                Interpolator::delay_of(factor),
+                Interpolator::new(factor).delay()
+            );
         }
         // At ULTRA's 4x the longer last stage is 15 samples later.
         assert_eq!(

@@ -7282,6 +7282,7 @@ stays as the study's prototype).
   delayed. So an attack keeps the shape it had, and a whole note starts 0.31 ms later at HI
   (48 kHz) and 0.08 ms later at ULTRA. Driven Kick's 315 Hz band, -2.5 dB without the delay,
   is within 0.1 dB with it. The noise-only presets now start those samples later as a whole.
+  (**Since R-LATENCY**, each contour as late as the sound it shapes, in every mode.)
 - **LO in single precision.** The light oscillators read single-precision tables and work out
   every edge and corner within reach from their phase: no latency, and no contour delay.
 - **The checks.** `ca72-lab alias` and `ca72-lab osccost` stay in the lab;
@@ -7381,7 +7382,8 @@ unchanged; the filter's decimator is measured, not built.
   ULTRA's oscillators (and the lab's High Fidelity's) run at 4x; HI's at 1x have no
   decimator, so HI's renders do not change.
 - **The contours wait for these 15 samples too:** 18.75 samples in ULTRA (`contour_delay`,
-  from `Decimator::delay_of`, which a test checks against the decimators made).
+  from `Decimator::delay_of`, which a test checks against the decimators made). (**Since
+  R-LATENCY**, as late as the whole sound: 84.75.)
 - **The aliasing test tightened:** `tests/aliasing.rs` holds ULTRA's sawtooth and rectangles
   under -105 dB and its triangle under -70 at 44.1 kHz as at 48 and 96.
 
@@ -7442,3 +7444,103 @@ in the code (`git merge-tree`); only this file conflicts, both records appended 
   build interleaved; the aliasing runs are deterministic.
 - **Not tried:** the longer halfband built; decimating only the outputs in use; paced worst
   blocks; Windows and Linux; hosts. Not pushed.
+
+## R-LATENCY. One latency, ULTRA's, in every QUALITY mode; the contours meet their sound
+
+**Owner decisions, 2026-10-16** (passed on by the session that started this work). The
+plug-in reported no latency, though every QUALITY mode delays its sound, each by a different
+amount; reporting each mode's own would make a host compensate afresh at every switch (a
+CLAP host restarts the plug-in). Of the options put to them, the owner chose to report one
+fixed latency, ULTRA's, in every mode and to hold HI's and LO's output back to match: "B".
+The measurement then showed that the contours reach the VCA far earlier than the sound they
+shape (in ULTRA about 20 samples late against the sound's 86), so that reporting 86 alone
+would place every note's onset about 1.4 ms early. Of (a), the latency reported and HI and
+LO held back, and (b), that and each mode's contours delayed by the path of the sound they
+shape, the owner chose "b". EXTERNAL INPUT's remaining difference between the modes stays,
+recorded below.
+
+**Measured** (the Mac, 2026-10-16 and 17, `crates/ca72-plugin/tests/latency.rs`, by hand):
+- **The oscillators' sound**, a sawtooth (16', A3) through the filter wide open: each reset's
+  exact time (the oscillator's own account) against the output's steepest point. LO 48.07,
+  48.14 and 48.98 samples at 44.1, 48 and 96 kHz; HI 61.14, 61.20 and 61.88; ULTRA 87.12, 87.19
+  and 87.88. The resamplers' and band-limiting's delays account for 47.25, 60.5 and 85.75 of
+  them (LO: the filter's 8x resamplers, 23.625 each way; HI: the oscillators' 16 and the
+  filter's 4x resamplers, 22.25 each way; ULTRA: the oscillators' 41.25 and the same filter
+  resamplers); the rest is the filter's own phase, the circuit's (1.4 to 2.1 samples in
+  ULTRA, 0.6 to 1.4 in HI, 0.8 to 1.7 in LO).
+- **EXTERNAL INPUT**, an impulse, a key held: LO 48.1, HI 45.5, ULTRA 89.9 samples (ULTRA's
+  preamplifier, oversampled, about 44 more; HI's and LO's none).
+- **The contours** reached the VCA about 20 samples late in ULTRA (R-BLEP's 18.75 and the
+  contours' sub-rate's 1), 22 in HI (15 and 7) and none in LO: the VCA opened 66 samples
+  before the sound it shapes arrived in ULTRA, 38.5 in HI and 47 in LO.
+
+**Agent decisions, 2026-10-16 and 17** (not separately approved):
+- **The latency is the model's own delays,** the resamplers' and the band-limiting's, not the
+  circuit's (the filter's phase is the sound's). ULTRA's is 85.75 samples at any rate; the
+  plug-in reports 86 (`Engine::latency`; in host samples, with the engine's own resamplers
+  when it runs the voices faster than a host below 8 kHz), set in `initialize`, never while
+  it plays, the same whatever QUALITY is.
+- **HI and LO held back by what was measured,** 26 and 39 samples (`voice::LINE_UP`), not the
+  resamplers' 25.25 and 38.5: the cheaper filters have a little less phase of their own
+  (0.74 and 0.55 samples), and with these the oscillators' sound lines up with ULTRA's within
+  0.1 sample at 44.1, 48 and 96 kHz. The engine holds its output back in a ring of 64 samples
+  a channel made with it; FEEDBACK's loop is inside each voice, so it is not lengthened.
+  Switching QUALITY moves the output by up to 39 samples at the switch, where the voices
+  change anyway. A sample at a time (`Engine::tick_stereo`) is held back as a block is, so the
+  two stay the same to the bit; asleep, the engine still lets out what the ring holds.
+- **Each contour as late as the sound it shapes, less its own sub-rate's delay** (`every` - 1
+  samples: 7 in HI, 1 in ULTRA):
+  - the filter contour meets its sound at the filter's input, the oscillators' delayed by the
+    filter's input resampler: 31.25 samples in HI, 62.5 in ULTRA, 8.625 in LO (its ladder's
+    coefficients follow a 16-sample control step);
+  - the loudness contour reaches the VCA when ULTRA's does once the output is lined up:
+    84.75 samples in ULTRA (its whole path less one), 52.75 in HI (85.75 less 26 and 7), 46.75
+    in LO (less 39). So every mode's attack comes out with ULTRA's, and in each the envelope
+    meets its sound as in the circuit, 1.45 samples before it (the filter's phase).
+  This replaces R-BLEP's contour delay, which kept attacks as they had been rather than as
+  the circuit has them.
+- **Left as they are:** EXTERNAL INPUT's sound, once lined up, comes out 18.4 samples earlier
+  in HI than in ULTRA and 2.8 in LO (ULTRA's preamplifier's delay; no one delay at the output
+  can line up both paths); the keyboard's voltage at the filter (KEYBOARD CONTROL) and
+  oscillator 3's modulation reach the filter without the oscillators' delay, as before; HI's
+  keyboard circuit and contours still read the keys every 8 samples, as before.
+
+**The checks** (`crates/ca72-plugin/tests/latency.rs` and the plug-in's own tests):
+- the oscillators' sound in HI and LO, held back, within half a sample of ULTRA's at 44.1, 48
+  and 96 kHz;
+- HI's attacks with its contours computed as ULTRA's (so only the delays differ), held back:
+  a sawtooth's 1, 10 and 50 % points and the VCA's thump's 1 and 10 % points within half a
+  sample of ULTRA's at the three rates (measured within 0.11 sample; the thump's later half,
+  half a second on, follows each VCA's own model);
+- the engine's latency 86 in every mode at the three rates, through switches; the engine's
+  output held back by 26 in HI and 0 in ULTRA against the voice's own;
+- `initialize` tells the host 86 once, whatever QUALITY is (`one_latency_is_reported_in_
+  every_quality_mode`);
+- nothing allocated on the audio thread: the rings are arrays made with the voices and the
+  engine, and `realtime.rs` switches ULTRA and LO while it plays.
+
+Two tests changed with the timing, by design: `sound.rs`'s comparison of the one voice with
+the engine (`poly_off_is_the_one_voice_as_before`) takes the voice 26 samples later, and All
+Sound Off's fade is over 26 samples later (`all_sound_off_silences_...`), HI's output being
+held back.
+
+**What the renders do** (`preset_render`, the 19 factory presets, ten voices, against the
+merged branch before this, each mode's holding back taken out): levels within 0.11 dB in
+every mode. Each attack starts later against its own sound by the contours' new delay: 66
+samples in ULTRA, about 38 in HI, about 46 in LO (a preset with a slow attack more, where its
+first 1 % falls in another cycle). Where an attack meets a fast sweep of pitch or cutoff the
+spectrum changes: Driven Kick's worst third-octave band +11 dB in ULTRA, +4.7 in HI, -17 in LO;
+Felt Bass -6.2 dB in ULTRA; Tenor Pluck -3.5 to -4.4 dB in every mode; Tight Hat +3.5 in HI;
+Cycle of Fifths -3.3 in LO; the others within 3 dB (Feedback Funk's loop, chaotic, moves
+whatever changes). Before, each envelope ran ahead of the sound it shaped by 0.8 ms (HI) to
+1.4 ms (ULTRA) at 48 kHz.
+
+**Evidence (the Mac, 2026-10-17; branch `latency-b` on the merged branch
+`integrate/threads-band-limiting` at `5752dfc`):** the workspace's suite
+(`--features ca72-plugin/standalone-production`, debug) passes but for the two ngspice tests of
+`vco_electrical` and `vco_osc23`, which fail the same way before this change ("Timestep too
+small" at the hold node, this Mac's ngspice-47); clippy (all targets, all features, `-D
+warnings`) clean; rustfmt on the changed files. Built in a target folder of its own: the
+threads work's, shared, took the merged branch's sources for this one's (one package to it),
+which the first render comparison caught. Not tried: hosts (the latency each reports and
+compensates), Windows and Linux, paced worst blocks.

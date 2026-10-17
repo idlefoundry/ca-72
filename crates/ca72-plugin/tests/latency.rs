@@ -1,12 +1,13 @@
-//! Each QUALITY mode's latency, measured (decisions.md R-LATENCY): a note's onset, its
-//! waveform's lag behind ULTRA's, and an impulse's through EXTERNAL INPUT.
-//!
-//! By hand: `cargo test --release -p ca72-plugin --test latency -- --ignored --nocapture`.
+//! Every QUALITY mode's sound comes out with ULTRA's, and the plug-in reports one latency
+//! (decisions.md R-LATENCY): the oscillators' sound and the attacks line up within half a
+//! sample at 44.1, 48 and 96 kHz once HI's and LO's output is held back ([`LINE_UP`]), and the
+//! engine's latency is the same in every mode. The measurements behind the figures run by
+//! hand: `cargo test --release -p ca72-plugin --test latency -- --ignored --nocapture`.
 
 #![allow(clippy::unwrap_used)]
 
 use ca72::tuning::Range;
-use ca72::voice::{Quality, Voice, Waveform};
+use ca72::voice::{LINE_UP, Quality, Voice, Waveform};
 use ca72_plugin::engine::{Controls, Engine, Event};
 
 const RATE: f64 = 48_000.0;
@@ -15,11 +16,13 @@ const BLOCK: usize = 256;
 /// One sawtooth, 32', through the filter wide open; the contours' attack as short as it goes
 /// and their sustain full; no noise, no external input unless `ext`.
 fn patch(mode: &str, ext: bool) -> Controls {
-    let mut c = Controls::default();
-    c.potato = mode == "LO";
-    c.ultra = mode == "ULTRA";
-    c.entropy = 0.0;
-    c.lock = true;
+    let mut c = Controls {
+        potato: mode == "LO",
+        ultra: mode == "ULTRA",
+        entropy: 0.0,
+        lock: true,
+        ..Controls::default()
+    };
     let p = &mut c.panel;
     for o in &mut p.osc {
         o.on = false;
@@ -97,7 +100,9 @@ fn lag(a: &[f64], b: &[f64], reach: isize) -> f64 {
 /// The first sample at which `x`'s magnitude reaches `share` of its peak after `from`.
 fn onset(x: &[f64], from: usize, share: f64) -> f64 {
     let peak = x[from..].iter().fold(0.0f64, |m, v| m.max(v.abs()));
-    let i = (from..x.len()).find(|&i| x[i].abs() >= share * peak).unwrap();
+    let i = (from..x.len())
+        .find(|&i| x[i].abs() >= share * peak)
+        .unwrap();
     // (Between the samples either side of the crossing.)
     let (a, b) = (x[i - 1].abs(), x[i].abs());
     (i - 1) as f64 + (share * peak - a) / (b - a)
@@ -145,39 +150,63 @@ fn each_modes_latency() {
     }
 }
 
-/// The circuit's oscillator path at a quality: oscillator 1's sawtooth (16') through the
-/// filter wide open, a key held; each of its resets' exact time (the oscillator's own
-/// account) against where the output's jump is steepest. The mean over the resets from half
-/// a second to a second and a half: samples.
-fn oscillator_path(q: Quality) -> f64 {
+/// Each mode's oscillator path at `rate`: oscillator 1's sawtooth (16') through the filter
+/// wide open, a key held; each of its resets' exact time (the oscillator's own account,
+/// `probe_resets`) against where the output's jump is steepest. The mean over the resets
+/// from half a second to a second and a half: samples.
+fn oscillator_path(mode: &str, rate: f64) -> f64 {
     let mut c = patch("ULTRA", false);
     c.panel.osc[0].range = Range::R16;
-    let mut v = Voice::new(RATE, c.panel);
-    v.panel.quality = q;
-    v.note(57, true);
-    let n = (1.6 * RATE) as usize;
+    let n = (1.6 * rate) as usize;
     let mut y = Vec::with_capacity(n);
     let mut resets = Vec::new();
-    let mut last = v.probe_resets(0).1;
-    for i in 0..n {
-        y.push(v.tick());
-        let (t, count) = v.probe_resets(0);
-        if count != last {
-            last = count;
-            // (The reset fell within this sample's tick: `t` - ceil(`t`) of a sample before.)
-            resets.push(i as f64 + (t - t.ceil()));
+    let mut note = |tick: &mut dyn FnMut() -> (f64, (f64, u64))| {
+        let mut last = 0;
+        for i in 0..n {
+            let (out, (t, count)) = tick();
+            y.push(out);
+            if count != last {
+                last = count;
+                resets.push((i, t));
+            }
         }
+    };
+    if mode == "LO" {
+        let mut l = ca72::light::Light::new(rate);
+        l.set_panel(&c.panel);
+        l.note(57, true);
+        note(&mut || {
+            let out = l.tick(0.0);
+            (out, l.probe_resets())
+        });
+    } else {
+        let mut v = Voice::new(rate, c.panel);
+        v.panel.quality = if mode == "HI" {
+            Quality::Potato
+        } else {
+            Quality::NoCompromises
+        };
+        v.note(57, true);
+        let mut i = 0usize;
+        note(&mut || {
+            let out = v.tick();
+            let (t, count) = v.probe_resets(0);
+            i += 1;
+            // (The voice's oscillator counts its own samples: the reset fell within this
+            // sample's tick, `t` - ceil(`t`) of a sample before it.)
+            (out, ((i - 1) as f64 + (t - t.ceil()), count))
+        });
     }
     let mut sum = 0.0;
     let mut k = 0;
-    for &r in resets
+    for &(_, r) in resets
         .iter()
-        .filter(|&&r| r > 0.5 * RATE && r < 1.5 * RATE)
+        .filter(|&&(_, r)| r > 0.5 * rate && r < 1.5 * rate)
     {
-        // The jump's steepest point within 200 samples after the reset (the derivative's
+        // The jump's steepest point within 400 samples after the reset (the derivative's
         // peak between samples, interpolated).
         let from = r as usize;
-        let d: Vec<f64> = (from..from + 200).map(|i| y[i + 1] - y[i]).collect();
+        let d: Vec<f64> = (from..from + 400).map(|i| y[i + 1] - y[i]).collect();
         let j = (1..d.len() - 1)
             .max_by(|&a, &b| d[a].abs().total_cmp(&d[b].abs()))
             .unwrap();
@@ -192,11 +221,13 @@ fn oscillator_path(q: Quality) -> f64 {
 #[test]
 #[ignore = "a measurement, run by hand"]
 fn each_modes_oscillator_path_and_onset() {
-    for (name, q) in [("HI", Quality::Potato), ("ULTRA", Quality::NoCompromises)] {
-        eprintln!(
-            "{name:<6} the oscillators' jumps reach the output {:.2} samples after them",
-            oscillator_path(q)
-        );
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        for m in ["LO", "HI", "ULTRA"] {
+            eprintln!(
+                "{rate} {m:<6} the oscillators' jumps reach the output {:.2} samples after them",
+                oscillator_path(m, rate)
+            );
+        }
     }
     // Onsets: an A5 on 2', its envelope (the RMS over a period) reaching a tenth and half
     // of its held level.
@@ -224,5 +255,115 @@ fn each_modes_oscillator_path_and_onset() {
             cross(0.5),
             cross(0.9)
         );
+    }
+}
+
+#[test]
+fn the_oscillators_sound_lines_up_in_every_mode() {
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        let ultra = oscillator_path("ULTRA", rate);
+        for (m, held) in [("HI", LINE_UP.0), ("LO", LINE_UP.1)] {
+            let off = oscillator_path(m, rate) + held as f64 - ultra;
+            assert!(
+                off.abs() <= 0.5,
+                "{m} at {rate} Hz: {off:+.2} samples off ULTRA"
+            );
+        }
+    }
+}
+
+/// A voice's output for `seconds` at `rate`, a key pressed at `at` and held: oscillator 1's
+/// sawtooth on 8' (none with `quiet`, so that only the VCA's thump as it opens is heard), its
+/// contours computed as ULTRA's whatever its quality (only the delays then differ).
+fn attack(q: Quality, rate: f64, quiet: bool) -> Vec<f64> {
+    let mut c = patch("ULTRA", false);
+    c.panel.osc[0].range = Range::R8;
+    c.panel.osc[0].on = !quiet;
+    let mut v = Voice::new(rate, c.panel);
+    v.panel.quality = q;
+    v.hold_control_quality(Some(Quality::NoCompromises));
+    let at = (0.25 * rate) as usize;
+    (0..(0.4 * rate) as usize)
+        .map(|i| {
+            if i == at {
+                v.note(57, true);
+            }
+            v.tick()
+        })
+        .collect()
+}
+
+#[test]
+fn hi_s_attacks_come_out_with_ultra_s() {
+    // Where each attack first reaches 1, 10 and 50 % of its peak (interpolated between
+    // samples): a sawtooth, and the VCA's thump alone as it starts (its half way, half a
+    // second on, is the VCAs' own: HI's bias from a table).
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        let at = (0.25 * rate) as usize;
+        for quiet in [true, false] {
+            let u = attack(Quality::NoCompromises, rate, quiet);
+            let h = attack(Quality::Potato, rate, quiet);
+            let shares: &[f64] = if quiet {
+                &[0.01, 0.1]
+            } else {
+                &[0.01, 0.1, 0.5]
+            };
+            for &share in shares {
+                let off = onset(&h, at, share) + LINE_UP.0 as f64 - onset(&u, at, share);
+                assert!(
+                    off.abs() <= 0.5,
+                    "{rate} Hz, {}, {} %: HI {off:+.2} samples off ULTRA",
+                    if quiet {
+                        "the VCA's thump"
+                    } else {
+                        "a sawtooth"
+                    },
+                    share * 100.0
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_engine_reports_one_latency_in_every_mode() {
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        let mut e = Engine::new();
+        let mut reported = Vec::new();
+        for m in ["LO", "HI", "ULTRA", "HI", "LO"] {
+            e.set(&patch(m, false));
+            e.prepare(rate, 1);
+            reported.push(e.latency());
+        }
+        // ULTRA's sound's delay (85.75 samples), rounded.
+        assert!(reported.iter().all(|&l| l == 86), "{rate} Hz: {reported:?}");
+    }
+}
+
+#[test]
+fn the_engine_lines_hi_and_lo_up_with_ultra() {
+    // The engine's output in each mode against the voice's own: held back by LINE_UP in HI
+    // and LO, not at all in ULTRA (their latest samples' lag, cross-correlated).
+    let at = (0.25 * RATE) as usize;
+    let n = (0.5 * RATE) as usize;
+    for (m, q, held) in [
+        ("HI", Quality::Potato, LINE_UP.0),
+        ("ULTRA", Quality::NoCompromises, 0),
+    ] {
+        let c = patch(m, false);
+        let e = play(&c, at, 0.5, &[]);
+        let mut v = Voice::new(RATE, c.panel);
+        v.panel.quality = q;
+        let x: Vec<f64> = (0..n)
+            .map(|i| {
+                if i == at {
+                    v.note(33, true);
+                }
+                v.tick()
+            })
+            .collect();
+        let w = |x: &[f64]| x[n - 9_600..n - 200].to_vec();
+        let off = lag(&w(&x), &w(&e), 60) - held as f64;
+        assert!(off.abs() <= 0.5, "{m}: the engine {off:+.2} samples off");
     }
 }
