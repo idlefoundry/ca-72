@@ -6264,3 +6264,33 @@ the official size, sizes outside the limits and a plate without wood refused); e
 pack and plug-in test; SIGNAL BASIN rebuilt with the concept's four rows on a 1030-unit face and
 passed by the reviewing agent (rounds 9 and 10, its last notes taken). Not yet: hosts (the window resized by a look),
 the slow machine.
+
+**The strip in a pack's look, 2026-10-16.** The owner: "you need to work with codex to
+re-imagine the lower panel as well. Including the keyboard and preset panels. Everything needs
+to be in the same theme." Codex made three concept pictures (the strip, the keyboard view, the
+presets' drawer, in SIGNAL BASIN's theme) and a written proposal. Of the agent's options the
+owner chose: packs restyle these parts with their layout fixed ("1a"); the drawer's lettering
+the pack's choice of the dot-matrix or its typeface, the tags kept as text ("2a"); the work in
+three steps, the strip first, each shown and reviewed against its concept before the next ("3").
+
+**Agent decisions, the strip** (not separately approved):
+- `[look] strip_art`: a drawing of the strip (3108 by 850, y from the rail's top), drawn by the
+  panel renderer over the strip's wood and face and under its print (in the drawn skin the
+  strip's print laid again over it), its cost counted as the panel's drawing's.
+- Picture slots for the strip (`skin::STRIP_SLOTS`): `tab` and `tab-lit` (a square cap, the
+  strip widening it as the built-in one; given both, the tabs' two states are the pack's
+  pictures and no light is spilt round them), `key`, `glass`, and `rocker-ivory` (otherwise
+  made from `rocker-blue` as before).
+- `[look.colours]`: `lamp` (the readouts' segments, the displays' dots; their glow and the drops'
+  light made from it as the orange's are), `drops`, `tab_print`, `key_print`. The strip renderer
+  takes the look (`StripRenderer::set_look`) and its typeface for the tabs' and keys' print.
+- `strip_places` (an example) prints the strip's places for drawing round them.
+- Not reachable yet: the strip's printed section dividers (they print over a drawing), the
+  readouts' glow and unlit segments, the star key's colour (the keys' print), the wheels.
+
+**Evidence (the Mac, 2026-10-16):** the official looks' 32 golden frames identical to the commit
+before; `a_packs_strip_is_its_own` (the strip given an official look draws exactly as without
+one, in both skins; a pack's tabs, keys, lamp and print colours and its drawing change it; a
+colour not `#rrggbb` refused); every panel, pack and plug-in test, clippy, fmt. SIGNAL BASIN's
+strip passed by the reviewing agent (round 2, its last notes taken). Not yet: the keyboard and
+the drawer, hosts.

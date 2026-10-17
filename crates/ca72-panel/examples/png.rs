@@ -73,6 +73,7 @@ fn main() {
         });
         scene.bar.keyboard = true;
     }
+    strip.set_look(r.look());
     strip.set_under_top(r.top_px());
     strip.render(&scene, r.frame(), None);
     eprintln!("the strip {:?}", t3.elapsed());
@@ -85,6 +86,51 @@ fn main() {
         let n = w.min(sf.width() as usize) * 4;
         let (from, to) = (y * sf.width() as usize * 4, (top + y) * w * 4);
         all.data_mut()[to..to + n].copy_from_slice(&sf.data()[from..from + n]);
+    }
+    // `CA72_DRAWER=1`: the presets' drawer open over the strip, as the editor shows it.
+    if std::env::var("CA72_DRAWER").is_ok_and(|v| v == "1") {
+        use ca72_panel::presets::{Current, DRAWER_TOP, DrawerRenderer, DrawerScene, Row};
+        let mut drawer = DrawerRenderer::new(scale);
+        let presets = [
+            "Brass Tutti",
+            "Deep Mod Bass",
+            "Glass Lead",
+            "Night Pad",
+            "Pluck Ladder",
+        ];
+        drawer.render(&DrawerScene {
+            chips: ["bass", "brass", "lead", "pad", "pluck"]
+                .iter()
+                .map(|t| ((*t).to_owned(), *t == "lead"))
+                .collect(),
+            rows: (0..18)
+                .map(|i| Row {
+                    name: format!("{} {}", presets[i % presets.len()], i / presets.len() + 1),
+                    tags: "lead bright".into(),
+                    origin: (i == 3).then_some("EDITED"),
+                    favorite: i % 4 == 0,
+                    current: i == 0,
+                })
+                .collect(),
+            current: Some(Current {
+                name: "Brass Tutti 1".into(),
+                origin: None,
+                tags: "brass".into(),
+                favorite: false,
+            }),
+            total: 18,
+            ..DrawerScene::default()
+        });
+        let d = drawer.frame();
+        let at = (DRAWER_TOP * scale).round() as usize - r.top_px().max(0) as usize
+            + (-r.top_px()).max(0) as usize;
+        let w = all.width() as usize;
+        let rows = (d.height() as usize).min(all.height() as usize - at);
+        for y in 0..rows {
+            let n = w.min(d.width() as usize) * 4;
+            let (from, to) = (y * d.width() as usize * 4, (at + y) * w * 4);
+            all.data_mut()[to..to + n].copy_from_slice(&d.data()[from..from + n]);
+        }
     }
     if std::env::var("CA72_KEYBOARD_CROP").is_ok_and(|v| v == "1") {
         let [x0, y0, x1, y1] = [370.0, 925.0, 3080.0, 1750.0].map(|v| (v * scale).round() as u32);

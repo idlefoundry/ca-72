@@ -110,8 +110,14 @@ def plate():
     a[cu] = hsv_scale(a[cu][None], 0.7, 0.72)[0]
     save("plate", a)
 
+def screw():
+    # Darkened to the drawn screws' smoky bronze (the strip's mountings beside them).
+    a = load("screw")
+    a = hsv_scale(a, 0.75, 0.62)
+    save("screw", a)
+
 jobs = {"walnut": walnut, "knob": lambda: knob("knob"), "knob-big": lambda: knob("knob-big"),
-        "pointer": lambda: knob("pointer"), "face": face, "plate": plate}
+        "pointer": lambda: knob("pointer"), "face": face, "plate": plate, "screw": screw}
 for n, j in jobs.items():
     if not only or n in only:
         j(); print("graded", n)

@@ -723,6 +723,16 @@ pub fn panel_print(layout: &Layout, arrangement: &Arrangement) -> String {
     s.0
 }
 
+/// The strip's print alone (the left hand's legends, the strip's, the grip's lines): laid again
+/// over a skin pack's drawing of the strip in the drawn skin.
+pub fn strip_printed(layout: &Layout, arrangement: &Arrangement) -> String {
+    let mut s = Svg(String::new(), layout.lettering);
+    column(&mut s, Ink::Print);
+    strip_print(&mut s, arrangement);
+    grip(&mut s);
+    s.0
+}
+
 /// The print alone, as the background has it: the face's and the column's lettering, rules,
 /// dials' marks and selectors' legends, and the grip's lines in the corner.
 pub fn printed(layout: &Layout, arrangement: &Arrangement) -> String {

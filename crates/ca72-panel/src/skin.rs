@@ -84,6 +84,19 @@ pub const SLOTS: [(&str, &[u8]); 27] = [
     ("plate", PLATE),
 ];
 
+/// The strip's pictures a skin pack may replace (decisions.md R-SKIN-PACKS), drawn by the
+/// strip's renderer: a tab's cap (the built-in one is made translucent amber and lit from it)
+/// and, if the pack gives one, the tab lit (otherwise lit from the cap as the built-in one is);
+/// the rail's keys' cap; the readouts' and displays' glass; and the ivory rocker (the left
+/// hand's switches, the layout's ivory ones), else made from the blue.
+pub const STRIP_SLOTS: [(&str, &[u8]); 5] = [
+    ("tab", BUTTON),
+    ("tab-lit", BUTTON),
+    ("key", BUTTON),
+    ("glass", GLASS),
+    ("rocker-ivory", ROCKER_BLUE),
+];
+
 /// Every picture built into the plug-in, by name: the worn skin's, the strip's and the
 /// keyboard's. A pack under another licence holding a copy of one is put to review
 /// (`skin_pack::Context::official`).
@@ -294,6 +307,7 @@ impl Pictures {
         let slot = |name: &str| {
             SLOTS
                 .iter()
+                .chain(STRIP_SLOTS.iter())
                 .find(|(n, _)| *n == name)
                 .map(|(_, b)| *b)
                 .expect("a slot")
@@ -312,11 +326,13 @@ impl Pictures {
         };
         let rocker_blue = png("rocker-blue");
         // The ivory of the controller's switches: the blue's shading, the drawing's ivory.
-        let rocker_ivory = recoloured(&rocker_blue, |c| {
-            let l =
-                (0.3 * f32::from(c[0]) + 0.59 * f32::from(c[1]) + 0.11 * f32::from(c[2])) / 255.0;
-            let k = (l / 0.42).min(1.22);
-            [224.0 * k, 215.0 * k, 190.0 * k]
+        let rocker_ivory = pack("rocker-ivory").unwrap_or_else(|| {
+            recoloured(&rocker_blue, |c| {
+                let l = (0.3 * f32::from(c[0]) + 0.59 * f32::from(c[1]) + 0.11 * f32::from(c[2]))
+                    / 255.0;
+                let k = (l / 0.42).min(1.22);
+                [224.0 * k, 215.0 * k, 190.0 * k]
+            })
         });
         let jewel = png("jewel");
         // OVERLOAD's lens: dark, a glass with the bulb behind it; the chrome as it is.

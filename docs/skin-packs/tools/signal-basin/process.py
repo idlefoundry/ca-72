@@ -174,6 +174,11 @@ jobs = {
     "plate": lambda: boxed("plate", (1044, 328)),
     "walnut": lambda: texture("walnut", (1400, 788)),
     "face": lambda: texture("face", (1024, 1024), tile=True),
+    # The strip's (STRIP_SLOTS): square caps, widened by the strip; the glass.
+    "tab": lambda: boxed("tab", (256, 255)),
+    "tab-lit": lambda: boxed("tab-lit", (256, 255)),
+    "key": lambda: boxed("key", (256, 255)),
+    "glass": lambda: texture("glass", (900, 507)),
 }
 for name, job in jobs.items():
     if (only and name not in only) or not os.path.exists(os.path.join(src, name + ".png")):

@@ -54,6 +54,20 @@ where) and choosing SIGNAL BASIN under LOOK in the editor's settings menu.
     by the light about it, 60 pixels round) and made seamless (its half-turned copy blended in
     towards its edges) so that it tiles.
 
+## The strip (2026-10-16)
+
+The plug-in's strip under the panel follows a second concept picture, made by the same model
+from the panel and a written brief of every control the strip keeps. `art/strip.svg` was written
+by `strip.py` (with the CA-72's `strip_places` example's places): teal bays edged in copper and
+screwed down, faint recesses behind the tabs, black windows round the readouts and a framed one
+round the voices' display, the signal's way into OUTPUT, wood at the ends and foot. The tabs'
+caps (unlit and lit), the rail's keys' cap and the glass were generated from crops of that
+concept as the panel's parts were, then cut out and sized; the tabs' lamp windows made nearly
+twice as large, alike in both (`window.py`), and the lit one's light spilt a little onto its
+face (`spill.py`). `rocker-ivory.png` is the black rocker again, so that the left hand's
+switches match the panel's; the screw picture (the left hand's mountings) darkened to the
+drawn screws' bronze. The lamps' colours are the manifest's (`[look.colours]`).
+
 ## The prompts
 
 ### `knob` (with a crop of the concept picture)
@@ -186,3 +200,43 @@ where) and choosing SIGNAL BASIN under LOOK in the editor's settings menu.
 > - Straight top-down orthographic product photograph, the camera exactly above the centre, no perspective or tilt; the part exactly centred and filling about 75 percent of the frame; on a perfectly flat, uniform, plain mid-grey (#808080) background with no texture, no gradient and no cast shadow on it; sharp focus everywhere.
 > - Lighting: a ring light all around the camera, perfectly symmetric about the centre: no light from any one side, no directional highlight, no shadow.
 > - No text, symbols, logos or numbers anywhere.
+
+### `tab` (with crops of the strip's concept)
+
+> Use your image generation tool to make one image, then save it in the current directory as tab.png (copy the generated file there). Do nothing else.
+>
+> The attached pictures are cropped from a concept picture of a synthesizer's lower panel: black Bakelite selector keys, one lit (an amber lamp window glowing at its right end) and one not. Make the key's cap alone, unlit, as a standalone product picture, so that a plug-in can widen it: it keeps the picture's left half and right half and repeats its middle column between them.
+> - A SQUARE cap, seen from straight in front: black Bakelite with a soft satin sheen, a narrow bevelled edge all round catching a little light along its top, slightly rounded corners, exactly as the attached keys' caps.
+> - In its right half, centred vertically and about a fifth of the cap's width from its right edge, a small square lamp window about a sixth of the cap's width: deep, dark brown-amber glass, UNLIT, sunk slightly into the cap.
+> - Its face otherwise plain and even, especially down its middle column (which will be repeated): no texture, no lettering.
+> - Straight-on orthographic, the cap filling about 90 percent of a square frame, sharp focus.
+> - Lighting: soft, from up and to the left, no cast shadow.
+> - Background: fully transparent (a PNG with an alpha channel). If that is not possible, a perfectly flat plain mid-grey (#808080).
+> - No text, symbols, logos or numbers anywhere.
+
+### `tab-lit` (with crops of the strip's concept)
+
+> Use your image generation tool to edit the attached picture (tab.png: a black Bakelite key's cap with an unlit amber lamp window), then save the result in the current directory as tab-lit.png (copy the generated file there). Do nothing else.
+>
+> Keep everything exactly the same (the cap, its size and place in the frame, its bevel, its sheen, the window's size and place, the transparent background) except the lamp window: now LIT, a warm amber (#ffa040) glowing evenly from a small bulb behind its glass, bright but not white-hot, with only a slight soft spill of amber light onto the cap round the window's edge (as in the second attached picture). The rest of the cap unchanged.
+> - No text, symbols, logos or numbers anywhere.
+
+### `key` (with crops of the strip's concept)
+
+> Use your image generation tool to make one image, then save it in the current directory as key.png (copy the generated file there). Do nothing else.
+>
+> The attached picture is cropped from a concept picture of a synthesizer's preset rail: a black Bakelite push key (its SAVE lettering is printed by the plug-in, so leave it out). Make the key's cap alone as a standalone product picture, so that a plug-in can widen it: it keeps the picture's left half and right half and repeats its middle column between them.
+> - A SQUARE cap seen from straight in front: black Bakelite with a soft satin sheen, a bevelled edge all round catching a little light along its top, slightly rounded corners, a thin dark gap round it, exactly as the attached key.
+> - Its face plain and even, especially down its middle column: no lamp, no texture, no lettering.
+> - Straight-on orthographic, the cap filling about 90 percent of a square frame, sharp focus.
+> - Lighting: soft, from up and to the left, no cast shadow.
+> - Background: fully transparent (a PNG with an alpha channel). If that is not possible, a perfectly flat plain mid-grey (#808080).
+> - No text, symbols, logos or numbers anywhere.
+
+### `glass` (with crops of the strip's concept)
+
+> Use your image generation tool to make one image, then save it in the current directory as glass.png (copy the generated file there). Do nothing else.
+>
+> The attached picture is cropped from a concept picture of a synthesizer's lower panel: a numeric readout's window of near-black quiet glass (its amber digit is drawn by the plug-in, so leave it out). Make a straight-on, evenly lit close photograph of exactly that glass, empty: near-black smoked glass with a very faint cool tint, the faintest fine mesh just visible behind it, a soft even sheen, filling a landscape frame (about 16 by 9) edge to edge, as large as you can make it.
+> - Completely empty: no digits, segments, letters, dots, frame, bezel or marks.
+> - Even across the frame: no vignetting, no gradient, no reflections of objects; sharp focus.

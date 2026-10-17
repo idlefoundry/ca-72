@@ -3,6 +3,17 @@
 *CC0 1.0. Checked against the CA-72's `skin-packs` prototype, October 2026; `docs/skin-packs.md`
 is the authority.*
 
+## The strip's drawing, `strip_art`
+
+The plug-in's strip under the panel (the presets' rail and the VOICES, STEREO and OUTPUT
+sections) has its own drawing: `viewBox="0 0 3108 850"`, y from the rail's top (the rail 0 to
+116). Run `cargo run -p ca72-panel --example strip_places` for every tab, readout window,
+display and knob, and draw bays and windows round them; the strip's controls stay where they
+are. Its tabs, keys, glass and lamp colour are the pack's too: see `docs/skin-packs.md`, The
+strip. Make `tab` and `tab-lit` square caps framed alike (the lit one an edit of the unlit):
+the strip widens them by repeating their middle column, so keep anything particular (a lamp
+window) in one half.
+
 ## The drawing, `art/panel.svg`
 
 Give it `viewBox="0 0 3108 925"`. It covers the wooden strip (y 0 to 130) and the face (y 130

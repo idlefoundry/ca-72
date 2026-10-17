@@ -253,6 +253,13 @@ art = "art/panel.svg"        # optional: drawn over the panel's surfaces, under 
 fonts = { regular = "fonts/Face-Regular.otf", bold = "fonts/Face-Bold.otf" }  # optional
 face_tint = [1.03, 1.0, 0.94] # optional: the face picture's channels scaled (0 to 2)
 knob_caps = "turn"           # optional: "still" (the default) or "turn" (see Pictures)
+strip_art = "art/strip.svg"  # optional: drawn over the plug-in's strip (see The strip)
+
+[look.colours]               # optional: the strip's (see The strip), each "#rrggbb"
+lamp = "#ffa040"             # its readouts' lit segments, its displays' dots, the voices' drops
+drops = "#ffa62a"            # optional: the voices' drops' light (else made from lamp)
+tab_print = "#e6dcc4"        # the tabs' lettering
+key_print = "#e6dcc4"        # the rail's keys' marks and lettering
 
 [look.pictures]              # optional: realistic only; pictures replacing the built-in ones
 knob = "pictures/knob.png"
@@ -264,7 +271,7 @@ walnut = "pictures/walnut.svg"
   wooden strip and the face together for a layout's own (see The panel's size). It is drawn over the panel's surfaces (the wood,
   the face, the realistic look's trim and shadows) and under its print, controls, screws and
   jacks. Nothing outside the panel is drawn. The strip below the panel, which holds the
-  plug-in's own controls, is not part of a pack's drawing.
+  plug-in's own controls, has a drawing of its own (`strip_art`: see The strip).
 - **The typeface** prints the panel's legends, titles, dial numbers, tips and menus. It is used
   only if it has a glyph for every legend and for everything the plug-in prints itself
   (printable ASCII, "–" and "…"); otherwise the built-in typeface (URW Gothic) is used and the
@@ -307,6 +314,32 @@ this setting passes over it (`look.unknown`) and draws the caps still.
 | `hamster-wheel`, `hamster-asleep` | LO's hamster's wheel; the hamster asleep | 300 × 300, 300 × 289 |
 | `hamster-run` | The hamster's run: eight frames side by side | 1840 × 120 |
 | `plate` | The name plate, blank (its lettering is printed on it) | 1044 × 328 |
+
+### The strip
+
+The plug-in's strip under the panel (the presets' rail, the left hand, VOICES, STEREO and OUTPUT)
+keeps its controls where they are, but a pack may dress it: its wood and face are the pack's
+`walnut` and `face`, its knobs the pack's knobs, its legends the pack's typeface, and:
+
+- **A drawing** (`strip_art`), stretched over the strip as the panel's drawing is over the
+  panel: 3108 by 850 units (`viewBox="0 0 3108 850"`), y from the rail's top (the rail 0 to
+  116, the sections below it). It is drawn over the strip's wood and face and under its print,
+  knobs, tabs, keys and glass. `cargo run -p ca72-panel --example strip_places` prints where
+  each of those is, to draw bays, recesses and windows round them.
+- **Pictures** in `[look.pictures]`:
+
+| Slot | What | Built-in size |
+|---|---|---|
+| `tab` | A tab's cap (MONO, POLY, SCATTER...), square: the strip keeps its left and right halves and repeats its middle column to the tab's width. Without `tab-lit`, it is made translucent amber and lit from inside, as the built-in one is | 256 × 255 |
+| `tab-lit` | The same cap lit, framed exactly as `tab` (an edit of it): a tab's two states, no light spilt round it | 256 × 255 |
+| `key` | The rail's keys' cap, square, widened as a tab's | 256 × 255 |
+| `glass` | The readouts' and the displays' glass, empty | 900 × 507 |
+| `rocker-ivory` | The ivory rocker (the left hand's switches, and a layout's ivory ones), as `rocker-blue`; otherwise made from `rocker-blue` | 512 × 194 |
+
+- **Colours** in `[look.colours]`: the lamps' (`lamp`), from which the plug-in makes their glow
+  and the drops' light as it does its own orange's, and the tabs' and keys' print.
+
+The keyboard and the presets' drawer are not yet a pack's to dress.
 
 ### Drawings: SVG's allowed subset
 
@@ -508,7 +541,7 @@ These are each flagged for separate review, and none is supported:
 
 - scripts or custom widget code;
 - animation;
-- the strip's and the keyboard's pictures and layout;
+- the strip's layout, the keyboard's and the presets' drawer's pictures and layout;
 - colours of the drawn (classic) parts other than through a drawing;
 - packs shared between plug-ins (bundles are the marketplace's: several packs sold together);
 - telling the user that a pack has an update (the marketplace does, when the user opens it;

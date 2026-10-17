@@ -26,6 +26,11 @@ origin = "original"
 author = "Idle Foundry Ltd."
 
 [[assets]]
+path = "art/strip.svg"
+origin = "original"
+author = "Idle Foundry Ltd."
+
+[[assets]]
 path = "pictures/walnut.png"
 origin = "generated"
 author = "Idle Foundry Ltd."
@@ -110,6 +115,41 @@ tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and siz
 note = "Its prompt and every step after it: README.md."
 
 [[assets]]
+path = "pictures/tab.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/tab-lit.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/key.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/glass.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/rocker-ivory.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "The black rocker's picture (rocker-blue.png) again: the left hand's switches as the panel's."
+
+[[assets]]
 path = "fonts/BarlowCondensed-SemiBold.ttf"
 origin = "third-party"
 author = "The Barlow Project Authors"
@@ -137,6 +177,15 @@ art = "art/panel.svg"
 fonts = { regular = "fonts/BarlowCondensed-Medium.ttf", bold = "fonts/BarlowCondensed-SemiBold.ttf" }
 # Each knob's line runs from its middle: the whole knob turns.
 knob_caps = "turn"
+# The strip under the panel: its bays and the signal's way into OUTPUT.
+strip_art = "art/strip.svg"
+
+# The strip's lamps a warm amber; the tabs' and keys' print cream, on black Bakelite.
+[look.colours]
+lamp = "#ffa040"
+drops = "#ffa62a"
+tab_print = "#e6dcc4"
+key_print = "#e6dcc4"
 
 [look.pictures]
 walnut = "pictures/walnut.png"
@@ -151,3 +200,8 @@ jewel = "pictures/jewel.png"
 jack = "pictures/jack.png"
 screw = "pictures/screw.png"
 plate = "pictures/plate.png"
+tab = "pictures/tab.png"
+tab-lit = "pictures/tab-lit.png"
+key = "pictures/key.png"
+glass = "pictures/glass.png"
+rocker-ivory = "pictures/rocker-ivory.png"

@@ -44,6 +44,32 @@ fn draw_pack_art(frame: &mut Pixmap, scale: f64, foot: i32, drawing: &usvg::Tree
     );
 }
 
+/// A skin pack's drawing of the strip over `frame` at `scale`, stretched over the plug-in's strip
+/// (the rail and the sections, the drawing's whole width, from the frame's row `foot` down).
+fn draw_strip_art(frame: &mut Pixmap, scale: f64, foot: i32, drawing: &usvg::Tree) {
+    let (pw, ph) = (
+        (W * scale).round().max(1.0) as u32,
+        (frame.height() as i32 - foot).max(1) as u32,
+    );
+    let Some(mut layer) = Pixmap::new(pw, ph) else {
+        return;
+    };
+    let size = drawing.size();
+    resvg::render(
+        drawing,
+        Transform::from_scale(pw as f32 / size.width(), ph as f32 / size.height()),
+        &mut layer.as_mut(),
+    );
+    frame.draw_pixmap(
+        0,
+        foot,
+        layer.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
+}
+
 /// The compact editor's grip, within the rail's bottom right corner: as plain as the
 /// drawing's (R-SIZE).
 pub fn compact_grip(frame: &mut Pixmap, scale: f64) {
@@ -376,26 +402,39 @@ impl Renderer {
                 resvg::render(&tree, Transform::identity(), &mut frame.as_mut());
             }
         };
-        match self.look.art.clone() {
-            None => svg(
+        match (self.look.art.clone(), self.look.strip_art.clone()) {
+            (None, None) => svg(
                 &mut self.background,
                 &art::background(&self.layout, &self.arrangement),
                 &self.options,
             ),
-            // A pack's drawing between the panel's surfaces and its print.
-            Some(drawing) => {
+            // A pack's drawings between the panel's and the strip's surfaces and their print
+            // (the strip's print laid again over its drawing).
+            (panel, strip) => {
                 svg(
                     &mut self.background,
                     &art::background_surfaces(&self.layout, &self.arrangement),
                     &self.options,
                 );
                 let foot = self.strip_row();
-                draw_pack_art(&mut self.background, self.scale, foot, &drawing);
+                if let Some(drawing) = panel {
+                    draw_pack_art(&mut self.background, self.scale, foot, &drawing);
+                }
+                if let Some(drawing) = &strip {
+                    draw_strip_art(&mut self.background, self.scale, foot, drawing);
+                }
                 svg(
                     &mut self.background,
                     &art::panel_print(&self.layout, &self.arrangement),
                     &self.options,
                 );
+                if strip.is_some() {
+                    svg(
+                        &mut self.background,
+                        &art::strip_printed(&self.layout, &self.arrangement),
+                        &self.options,
+                    );
+                }
             }
         }
         self.frame = self.background.clone();
@@ -491,6 +530,9 @@ impl Renderer {
         // A skin pack's drawing, over the surfaces and under the print.
         if let Some(drawing) = &self.look.art {
             draw_pack_art(bg, s, foot, drawing);
+        }
+        if let Some(drawing) = &self.look.strip_art {
+            draw_strip_art(bg, s, foot, drawing);
         }
         // The print, worn into the face: its texture showing through it a little.
         if let Some(mut print) = Pixmap::new(w, h) {

@@ -643,3 +643,80 @@ fn a_pack_chooses_its_panels_size() {
         );
     }
 }
+
+/// The strip in a look (decisions.md R-SKIN-PACKS): given an official look it is drawn exactly
+/// as before; a pack's tabs, keys, glass, lamp colour and print colours change it, and its
+/// drawing of the strip changes the panel renderer's strip, not its panel.
+#[test]
+fn a_packs_strip_is_its_own() {
+    use ca72_panel::strip::{StripRenderer, StripScene};
+    let s = 0.2;
+    let scene = StripScene::default();
+    let draw = |look: &Look, set: bool| {
+        let mut r = Renderer::with_pack(look.clone(), Lettering::Standard, s, 1.0);
+        r.render(&Scene::default());
+        let mut strip = StripRenderer::new(s);
+        if set {
+            strip.set_look(look);
+        }
+        strip.render(&scene, r.frame(), None);
+        (
+            r.frame().data().to_vec(),
+            strip.frame().data().to_vec(),
+            r.strip_row(),
+        )
+    };
+    for look in [Look::realistic(), Look::classic()] {
+        assert!(draw(&look, false).1 == draw(&look, true).1, "{}", look.id);
+    }
+    // A pack's strip: a red tab, a green key, the lamps blue, and a drawing over the strip.
+    let dir = edited(|d| {
+        let red = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><rect width='10' height='10' rx='3' fill='#a22'/></svg>";
+        let green = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><rect width='10' height='10' rx='3' fill='#2a2'/></svg>";
+        let bands = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3108 850'><rect x='300' y='200' width='2500' height='500' fill='#123'/></svg>";
+        std::fs::write(d.join("art/tab.svg"), red).expect("written");
+        std::fs::write(d.join("art/key.svg"), green).expect("written");
+        std::fs::write(d.join("art/strip.svg"), bands).expect("written");
+        replace(
+            &d.join("skin.toml"),
+            "base = \"classic\"",
+            "base = \"realistic\"",
+        );
+        let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+        let assets = ["art/tab.svg", "art/key.svg", "art/strip.svg"]
+            .map(|p| format!("[[assets]]\npath = \"{p}\"\norigin = \"original\"\n\n"))
+            .concat();
+        std::fs::write(
+            d.join("skin.toml"),
+            text.replace("[look]", &format!("{assets}[look]"))
+                + "strip_art = \"art/strip.svg\"\n\n[look.colours]\nlamp = \"#3080ff\"\ntab_print = \"#ffffff\"\nkey_print = \"#ffffff\"\n\n[look.pictures]\ntab = \"art/tab.svg\"\nkey = \"art/key.svg\"\n",
+        )
+        .expect("written");
+    });
+    let pack = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
+    assert!(pack.strip_art.is_some());
+    assert_eq!(pack.colours.lamp, Some((0x30, 0x80, 0xff)));
+    let base = Look::realistic();
+    let (bp, bs, row) = draw(&base, true);
+    let (pp, ps, prow) = draw(&pack, true);
+    assert_eq!(row, prow);
+    assert!(bs != ps, "the strip's parts drawn in the pack's");
+    // The panel renderer: its strip changed by the drawing, its panel above the strip as the
+    // starter's drawing leaves it (compared with the same pack without its strip drawing).
+    let w = (ca72_panel::W * s).ceil() as usize * 4;
+    let row = row as usize;
+    assert!(bp[row * w..] != pp[row * w..]);
+    let bad = edited(|d| {
+        let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+        std::fs::write(
+            d.join("skin.toml"),
+            text + "\n[look.colours]\nlamp = \"orange\"\n",
+        )
+        .expect("written");
+    });
+    assert!(
+        Look::open(bad.path())
+            .expect_err("refused")
+            .has("look.colour")
+    );
+}

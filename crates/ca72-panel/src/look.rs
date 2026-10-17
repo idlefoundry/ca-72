@@ -67,6 +67,11 @@ pub struct Look {
     pub caps_turn: bool,
     /// Its drawing over the panel's surfaces, under its print.
     pub art: Option<Arc<usvg::Tree>>,
+    /// Its drawing over the plug-in's strip's surfaces (the rail and the sections under the
+    /// panel), under their print and parts.
+    pub strip_art: Option<Arc<usvg::Tree>>,
+    /// Its colours for what the strip lights and prints (none: the built-in ones).
+    pub colours: Colours,
     /// Its typeface (regular, bold), if it brings one that prints and fits every legend.
     pub fonts: Option<(&'static [u8], &'static [u8])>,
     /// Its licence (an SPDX expression), its creators, and what its checks found.
@@ -101,6 +106,8 @@ impl Look {
             face_tint: None,
             caps_turn: false,
             art: None,
+            strip_art: None,
+            colours: Colours::default(),
             fonts: None,
             licence: OFFICIAL_LICENCE.into(),
             creators: vec!["Idle Foundry Ltd.".into()],
@@ -267,7 +274,11 @@ impl Look {
         // The pictures, by slot: PNG as it is, SVG drawn at the built-in picture's size.
         let mut pictures = Overrides::new();
         for (name, path) in &spec.pictures {
-            let Some(&(slot, official)) = skin::SLOTS.iter().find(|(n, _)| n == name) else {
+            let Some(&(slot, official)) = skin::SLOTS
+                .iter()
+                .chain(skin::STRIP_SLOTS.iter())
+                .find(|(n, _)| n == name)
+            else {
                 report.reject(
                     "look.picture",
                     at,
@@ -333,6 +344,49 @@ impl Look {
                 false
             }
         };
+
+        // The drawing over the strip, as the panel's.
+        let strip_art = match &spec.strip_art {
+            None => None,
+            Some(path) if path.ends_with(".svg") => {
+                let bytes = file(path, &[FileKind::Svg], &mut report);
+                match bytes.map(|b| skin_pack::svg::parse_at(&b, limits, Some(ART_SIDE))) {
+                    Some(Ok((tree, _))) => Some(Arc::new(tree)),
+                    Some(Err(why)) => {
+                        report.reject("look.strip-art", Some(path), why);
+                        None
+                    }
+                    None => None,
+                }
+            }
+            Some(path) => {
+                report.reject("look.strip-art", Some(path), "the strip's drawing is SVG");
+                None
+            }
+        };
+
+        // The strip's colours.
+        let mut colours = Colours::default();
+        if let Some(c) = &spec.colours {
+            for (name, value, slot) in [
+                ("lamp", &c.lamp, &mut colours.lamp),
+                ("drops", &c.drops, &mut colours.drops),
+                ("tab_print", &c.tab_print, &mut colours.tab_print),
+                ("key_print", &c.key_print, &mut colours.key_print),
+            ] {
+                if let Some(v) = value {
+                    match hex(v) {
+                        Some(rgb) => *slot = Some(rgb),
+                        None => report.reject(
+                            "look.colour",
+                            at,
+                            format!("colours.{name}: a colour as #rrggbb"),
+                        ),
+                    }
+                }
+            }
+            rest_of("look.colours.", &c.rest, &mut report);
+        }
 
         // The drawing over the panel.
         let art = match &spec.art {
@@ -428,6 +482,8 @@ impl Look {
             face_tint: spec.face_tint,
             caps_turn,
             art,
+            strip_art,
+            colours,
             fonts,
             licence: m.license.clone(),
             creators: m.creators.iter().map(|c| c.name.clone()).collect(),
@@ -463,8 +519,64 @@ struct LookTable {
     face_tint: Option<[f32; 3]>,
     #[serde(default)]
     knob_caps: Option<String>,
+    #[serde(default)]
+    strip_art: Option<String>,
+    #[serde(default)]
+    colours: Option<ColoursTable>,
     #[serde(flatten)]
     rest: Rest,
+}
+
+#[derive(Deserialize)]
+struct ColoursTable {
+    #[serde(default)]
+    lamp: Option<String>,
+    #[serde(default)]
+    drops: Option<String>,
+    #[serde(default)]
+    tab_print: Option<String>,
+    #[serde(default)]
+    key_print: Option<String>,
+    #[serde(flatten)]
+    rest: Rest,
+}
+
+/// A look's colours for the strip (decisions.md R-SKIN-PACKS): its lamps' (the readouts' lit
+/// segments, the displays' dots, the voices' drops), the tabs' print and the rail's keys'.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Colours {
+    pub lamp: Option<(u8, u8, u8)>,
+    /// The voices' drops' light (else made from `lamp`).
+    pub drops: Option<(u8, u8, u8)>,
+    pub tab_print: Option<(u8, u8, u8)>,
+    pub key_print: Option<(u8, u8, u8)>,
+}
+
+/// A colour written `#rrggbb`.
+fn hex(v: &str) -> Option<(u8, u8, u8)> {
+    let h = v.strip_prefix('#')?;
+    if h.len() != 6 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let b = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some((b(0)?, b(2)?, b(4)?))
+}
+
+/// A table's fields this build does not read, noted.
+fn rest_of(table: &str, rest: &Rest, report: &mut Report) {
+    if !rest.is_empty() {
+        report.note(
+            "look.unknown",
+            Some(skin_pack::MANIFEST),
+            format!(
+                "passed over, not read by this CA-72: {}",
+                rest.keys()
+                    .map(|k| format!("`{table}{k}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        );
+    }
 }
 
 #[derive(Deserialize)]

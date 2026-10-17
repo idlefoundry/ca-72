@@ -1202,6 +1202,7 @@ impl Editing {
     /// asleep); it watches the levels, and the voices' peaks held while it was shut are let go.
     fn opened(mut self) -> Self {
         // The window opened at the panel's size last chosen; the look's may differ.
+        self.strip.set_look(self.renderer.look());
         self.strip.set_under_top(self.renderer.top_px());
         if self.panel() != chosen_panel() {
             choose_panel(self.panel());
@@ -1255,6 +1256,7 @@ impl Editing {
             choose_panel(self.panel());
             self.resizing_window = true;
         }
+        self.strip.set_look(self.renderer.look());
         self.strip.set_under_top(self.renderer.top_px());
         self.composed = None;
     }
@@ -1272,6 +1274,7 @@ impl Editing {
             let lettering = self.renderer.lettering();
             self.renderer = Renderer::with_pack(base, lettering, self.renderer.scale(), self.dpr);
             choose_panel(self.panel());
+            self.strip.set_look(self.renderer.look());
         }
         self.strip.set_under_top(self.renderer.top_px());
         self.composed = None;

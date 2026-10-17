@@ -450,6 +450,7 @@ impl Renderer {
                 label(scene.root),
                 label(scene.root.saturating_add(43).min(127))
             ),
+            &crate::strip::Lamp::ORANGE,
         );
     }
     fn draw_keys(&mut self, scene: &Scene, dirty: [f64; 4]) {
