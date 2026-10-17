@@ -6920,6 +6920,80 @@ held them at its end; for 4 and 8, the common start's, halfway.)
 6. **Afterwards,** put the backed-up released plug-ins back. Real-time throttling need not be
    turned on for this build (the owner's setting is left alone).
 
+### ULTRA's split measured again on the merge with R-BLEP and R-LATENCY (2026-10-17)
+
+**The owner, 2026-10-17** (relayed): "Yes", to re-running the ULTRA split measurements on the
+merge (`integrate/threads-band-limiting`, `2241e70`) before release, measurement only.
+
+**What changed under it:** R-BLEP's 32-tap sinc and BLAMP oscillators (and ULTRA's oscillator
+decimators with a 139-tap last halfband); R-LATENCY's one reported latency of 86; and ULTRA's VCA
+at 4x on the filter's own samples (about 10.6 % more of ULTRA's cost, on the back part, the
+thread the split voice waits on longest).
+
+**How:** on the branch `measure/ultra-split-2241e70`, made from `2241e70` (nothing committed on
+the merge itself). `scripts/ultra-recheck.sh` (`.ps1`) ran, 10 s a run, one machine at a time:
+- the prototype's split grid for one and two voices (`tests/ultra_split.rs`: whole on 4 or 12
+  threads, split on 6 or 12, DRIVE at 6 dB; the Mac's helpers without a work interval, as
+  before);
+- the built engine's checks (`tests/scaling_bench.rs`, `CA72_AUTO=1`): the one instrument and
+  two POLY voices at ULTRA, split by the machine's rule and whole (`CA72_SPLIT=0`), in turn,
+  twice;
+- at 256 and 128 frames.
+
+Raw lines: `docs/threads/recheck-2241e70-*.txt`. The figures before are `d82e9b2`'s
+(`docs/threads/split-*.txt`, `built-*.txt`); `011e99c` changed nothing on this path.
+`scripts/ultra-recheck-table.py` puts them side by side.
+- **First, the samples:** the split voice is still the whole voice to the bit on the merge
+  (`the_split_voice_with_drive_is_the_voice`, `split_voices_are_the_whole_voices_to_the_bit`,
+  `ca72/tests/helpers.rs`), on the Mac, Linux and Windows.
+- **Conditions:**
+  - the Mac: load average 3.6 to 4.9, Live closed, nothing heavy of another session's;
+  - Windows: about 2 % busy before.
+
+**The built engine** (the mean / the worst block, % of the period, for the two repeats · late
+blocks · runs not heard; 1,875 blocks at 256 frames, 3,750 at 128):
+
+| Machine, frames | One instrument, split: before → now | One instrument, whole: before → now | Two POLY voices, split: before → now | Two POLY voices, whole: before → now |
+|---|---|---|---|---|
+| Mac, 256 | 38–39 / 72–90 · 0 → 49 / 74–75 · 0 | 56–57 / 130–132 · 40 → 64 / 133–134 · 43–44 | 50–51 / 103–122 · 2–3 · 10–14 → 57 / 104–122 · 1–2 · 8–9 | 60 / 185 · 41–42 · 61–79 → 67 / 191–192 · 53 · 103–116 |
+| Mac, 128 | 31 / 109–114 · 1 → 44 / 84 · 0 | 58 / 157–167 · 81–86 → 65–66 / 149–154 · 90–91 | 45 / 116–119 · 6–8 · 16–25 → 56 / 117–121 · 10 · 43–44 | 61 / 163–166 · 90 · 100–130 → 68 / 158–166 · 94–95 · 183–186 |
+| Windows, 256 | 31 / 84–92 · 0 → 34 / 76–79 · 0 | 69 / 189–217 · 107–108 → 77–78 / 187–274 · 134–135 | (one crew: whole) 69 / 223–224 · 73–75 → 77 / 234–237 · 103–113 | 69 / 221–223 · 73–85 → 77–78 / 232–234 · 108–110 |
+| Windows, 128 | 30–31 / 94–95 · 0 → 33 / 91–94 · 0 | 70 / 265–321 · 198–202 → 79–80 / 342–359 · 302 | (one crew: whole) 68 / 181–185 · 121–122 → 76 / 180–182 · 161–166 | 68–69 / 182–185 · 120–123 → 76–77 / 181–182 · 159–164 |
+
+**The prototype** (one run each, before → now): mean / worst · late.
+- **The Mac:**
+  - 256 frames: one voice whole 53 / 166 · 72 → 63 / 165 · 100; split on 6 threads 31 / 149 · 7
+    → 43 / 103 · 1; two voices whole 51 / 167 · 3 → 55 / 263 · 44, split 41 / 135 · 4 → 49 /
+    139 · 6.
+  - 128 frames: one voice split 47 / 212 · 42 → 55 / 172 · 51 (without the work interval the
+    built engine has); two split 34 / 119 · 3 → 52 / 167 · 18.
+- **Windows:**
+  - 256 frames: one voice whole 55 / 171 · 81 → 63 / 209 · 103; split 28 / 75 · 0 → 34 / 80 ·
+    0; two voices split 54 / 186 · 43 → 54 / 160 · 36.
+  - 128 frames: one voice split 27 / 112 · 1 → 34 / 93 · 0.
+
+**What it shows:**
+- **ULTRA costs more, as expected.** A voice played whole takes 12 to 16 % more of the period
+  (the Mac's one instrument 56–57 % → 64 %, Windows' 69 % → 77–78 %).
+- **Split, the voice's time grows by more than that** (the Mac's one instrument 38–39 % → 49 %
+  at 256 frames, 31 % → 44 % at 128). The VCA's new work is on the back part, which was already
+  the split voice's longest thread, so all of it lands on the path the block waits for.
+  Windows' grew less (31 % → 33–34 %).
+- **The split still plays ULTRA live where the rule splits.**
+  - **The one instrument:** no late block, on the Mac and on Windows, at 256 and 128 frames.
+    The worst blocks are 74 to 94 % of the period; the Mac's 99th percentile is 66 to 68 %.
+  - **Two POLY voices on the Mac:** 1 to 2 late blocks of 1,875 at 256 frames and 10 of 3,750
+    at 128, against 53 and 95 whole.
+- **The thresholds hold on these machines.**
+  - Windows (6 fast cores, S = 1): its split one voice is clean.
+  - The Mac (10 fast cores, S = 2): two split voices are far better than whole and about as
+    good as before.
+
+  The margin is smaller than it was: the split one instrument's mean is now about half the
+  period on the Mac at 256 frames.
+
+**Linux:** pending, see below.
+
 ## R-BLEP. The oscillators band-limited by a 32-tap windowed sinc, corners and all
 
 The study came first (to "For the owner to decide"), then the owner's answers and the build.
