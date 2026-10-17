@@ -6948,7 +6948,11 @@ Raw lines: `docs/threads/recheck-2241e70-*.txt`. The figures before are `d82e9b2
   `ca72/tests/helpers.rs`), on the Mac, Linux and Windows.
 - **Conditions:**
   - the Mac: load average 3.6 to 4.9, Live closed, nothing heavy of another session's;
-  - Windows: about 2 % busy before.
+  - Windows: about 2 % busy before;
+  - Linux: below.
+- **Cleanup:** the lab copies went to the Linux machine's Trash (`gio trash`, checked) and to
+  Windows' `C:\Users\idlewile\Code\tmp\holding`. No benchmark or real-time thread was left
+  running.
 
 **The built engine** (the mean / the worst block, % of the period, for the two repeats · late
 blocks · runs not heard; 1,875 blocks at 256 frames, 3,750 at 128):
@@ -6984,7 +6988,7 @@ blocks · runs not heard; 1,875 blocks at 256 frames, 3,750 at 128):
     The worst blocks are 74 to 94 % of the period; the Mac's 99th percentile is 66 to 68 %.
   - **Two POLY voices on the Mac:** 1 to 2 late blocks of 1,875 at 256 frames and 10 of 3,750
     at 128, against 53 and 95 whole.
-- **The thresholds hold on these machines.**
+- **The thresholds hold on the Mac and Windows** (Linux below).
   - Windows (6 fast cores, S = 1): its split one voice is clean.
   - The Mac (10 fast cores, S = 2): two split voices are far better than whole and about as
     good as before.
@@ -6992,7 +6996,29 @@ blocks · runs not heard; 1,875 blocks at 256 frames, 3,750 at 128):
   The margin is smaller than it was: the split one instrument's mean is now about half the
   period on the Mac at 256 frames.
 
-**Linux:** pending, see below.
+**Linux** (the 7800X3D), run once the owner had paused the 808 agents that were busy there: 10:38
+to 10:44, under the lab's exclusive timing lock (`flock -x ~/.cache/daw-timing.lock`); load
+average 1.2 to 2.6 before each run (logged per run), Bitwig open.
+
+| Frames | One instrument, split: before → now | One instrument, whole: before → now | Two POLY voices, split: before → now | Two POLY voices, whole: before → now |
+|---|---|---|---|---|
+| 256 | 37–38 / 112–115 · 2–4 → 38–40 / 97–113 · 0–4 | 80 / 186 · 154–157 → 86 / 188–189 · 171–202 | 41–42 / 160–170 · 17–18 · 21–25 → 44–45 / 156 · 14–17 · 21–28 | 88–94 / 304 · 352–540 → 87–88 / 263–269 · 194–195 |
+| 128 | 36–37 / 148–177 · 29–33 → 38–39 / 141–143 · 25–30 | 79–80 / 210–213 · 317–337 → 85–87 / 207–218 · 339–446 | 42 / 187–192 · 37–40 → 44–46 / 157–183 · 32–37 | 80 / 211–216 · 303–347 → 86–87 / 206–232 · 364–391 |
+
+**The prototype on Linux** (one run each, before → now: mean / worst · late):
+- 256 frames: one voice whole 65 / 198 · 130 → 73 / 183 · 162; split on 6 threads 34 / 111 · 5
+  → 40 / 100 · 1; two split 37 / 155 · 14 → 46 / 145 · 17.
+- 128 frames: one split 31 / 156 · 27 → 38 / 138 · 21.
+
+**What Linux shows:**
+- **The split holds as it was.** The one instrument has 0 to 4 late blocks of 1,875 at 256 frames
+  and 25 to 30 of 3,750 at 128; two POLY voices 14 to 17 and 32 to 37. Each is within its spread
+  before.
+- **The voices played whole are later than before:** the one instrument at 256 frames 171 to
+  202 late, against 154 to 157.
+- **The split one instrument's mean barely moved** (37–38 % → 38–40 %), unlike the Mac's (38–39 %
+  → 49 %). On this machine the back part's thread had room the Mac's did not.
+- **S's thresholds hold here too** (16 fast threads, S = 2), on the three machines measured.
 
 ## R-BLEP. The oscillators band-limited by a 32-tap windowed sinc, corners and all
 

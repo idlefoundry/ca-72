@@ -18,6 +18,7 @@ echo "# $(date -u +%FT%TZ) $(uname -srm) cpus=$(getconf _NPROCESSORS_ONLN) $(git
 for block in 256 128; do
     for c in "1 4 0" "1 6 1" "1 12 1" "2 12 0" "2 12 2"; do
         set -- $c
+        echo "# load $(uptime | sed 's/.*load average[s]*: //')" | tee -a "$out"
         env CA72_SECONDS="$seconds" CA72_BLOCK=$block CA72_VOICES=$1 CA72_BUDGET=$2 CA72_SPLIT=$3 \
             "$split" split_ultra --ignored --nocapture --test-threads 1 2>/dev/null |
             grep -o 'split:.*' | tee -a "$out" || echo "# failed: split $block $c" | tee -a "$out"
@@ -26,6 +27,7 @@ for block in 256 128; do
         for s in auto 0; do
             for who in "CA72_POLY=0 CA72_VOICES=1" "CA72_VOICES=2"; do
                 extra=$who; [ "$s" = 0 ] && extra="$who CA72_SPLIT=0"
+                echo "# load $(uptime | sed 's/.*load average[s]*: //')" | tee -a "$out"
                 env CA72_AUTO=1 CA72_SECONDS="$seconds" CA72_QUALITY=ultra CA72_BLOCK=$block $extra \
                     "$bench" --ignored --nocapture --test-threads 1 2>/dev/null |
                     grep -o 'scaling:.*' | sed "s/\$/ args=$(echo "$extra" | tr ' ' ',') rep=$rep/" | tee -a "$out" ||
