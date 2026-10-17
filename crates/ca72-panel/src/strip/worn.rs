@@ -1338,12 +1338,13 @@ struct Drop {
 
 /// The drops, each easing to where the scene puts it: a drop's id is its voice's (with DOUBLE
 /// its twin's `TWIN +` its voice's); and DOUBLE's beat, its phase (radians), and the light's
-/// sums, kept from frame to frame.
+/// sums and a drop's columns' dx squared, kept from frame to frame.
 #[derive(Debug, Default)]
 struct Liquid {
     drops: BTreeMap<u32, Drop>,
     beat: f64,
     sums: (Vec<f32>, Vec<f32>),
+    dx2: Vec<f32>,
 }
 
 const TWIN: u32 = 1000;
@@ -1560,15 +1561,22 @@ impl Liquid {
                 reached[3].max(by),
             ];
             let (a, b, dx0) = (a as f32, b as f32, dx0 as f32);
+            // (Each column's dx squared once for all the rows, the same sums as before: a
+            // plain loop the compiler can take four pixels at a time.)
+            let dx2 = &mut self.dx2;
+            dx2.clear();
+            dx2.extend((lx..rx.max(lx)).map(|x| {
+                let dx = x as f32 + 0.5 - dx0;
+                dx * dx
+            }));
             for y in ty..by {
                 let dy = y as f32 + 0.5 - cy as f32;
                 let dy2 = dy * dy + 1.0;
                 let row = (y - y0) as usize * w;
                 let span = row + (lx - x0) as usize..row + (rx.max(lx) - x0) as usize;
                 let (fa, fb) = (&mut sums_a[span.clone()], &mut sums_b[span]);
-                for (i, (sa, sb)) in fa.iter_mut().zip(fb.iter_mut()).enumerate() {
-                    let dx = (lx + i as i32) as f32 + 0.5 - dx0;
-                    let q = 1.0 / (dx * dx + dy2);
+                for ((sa, sb), &d) in fa.iter_mut().zip(fb.iter_mut()).zip(dx2.iter()) {
+                    let q = 1.0 / (d + dy2);
                     *sa += a * q;
                     *sb += b * q;
                 }
