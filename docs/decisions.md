@@ -6583,3 +6583,17 @@ where the gain is. Past that, more workers gained little, and the worst blocks g
 **Not done:**
 - The workers' own scheduling was not checked for demotion (only the host threads').
 - The kernel's log could not be read from here.
+
+### The macOS rule, approved and built (2026-10-16)
+
+**The owner, 2026-10-16** (relayed): "Yes, build the Mac OS rule."
+
+**Built:**
+- `engine::budget_for_macos`: B = max(today's count, N − 2 − A, min(A + 2, N − 2)) on macOS,
+  where `budget_workers` uses it (`cfg!(target_os = "macos")`).
+- Linux and Windows keep `budget_for`, as approved.
+- On the Mac it gives 11, 10, 8, 8, 10 and 12 for 1, 2, 4, 6, 8 and 10 or more instances.
+- `the_count_follows_the_machine` checks both rules. A functional run of 8 instances on the
+  Mac (the scaling bench, `CA72_AUTO=1`, 2 s) settled at 2, 2 and six of 1: 10 in all.
+- The plug-in's library, `realtime.rs` and `workers.rs` tests pass, clippy as CI runs it is
+  clean, and rustfmt is clean.

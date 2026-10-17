@@ -2343,18 +2343,30 @@ static SPLIT_OVERRIDE: std::sync::atomic::AtomicUsize =
 /// The process's budget of threads made audio threads ([`crate::pool`]) while `instances` of
 /// the plug-in's hold threads (decisions.md R-THREADS, approved 2026-10-16): this machine's
 /// hardware threads less two (the system's and the host's) and less one for each instance's
-/// host thread, and never fewer than today's count ([`default_workers`]); a measurement's own
-/// if it has set one ([`set_budget_for_measurement`]).
+/// host thread, and never fewer than today's count ([`default_workers`]); on macOS, too,
+/// every instance at least one worker and two over ([`budget_for_macos`]); a measurement's
+/// own if it has set one ([`set_budget_for_measurement`]).
 pub fn budget_workers(instances: usize) -> usize {
     match BUDGET_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        0 if cfg!(target_os = "macos") => budget_for_macos(ca72_rt::cores().all, instances),
         0 => budget_for(ca72_rt::cores().all, instances),
         n => n,
     }
 }
 
-/// [`budget_workers`] on a machine of `all` hardware threads.
+/// [`budget_workers`] on a machine of `all` hardware threads (Linux and Windows).
 pub fn budget_for(all: usize, instances: usize) -> usize {
     workers_for(all).max(all.saturating_sub(2 + instances))
+}
+
+/// [`budget_workers`] on a Mac of `all` hardware threads (decisions.md R-THREADS, the macOS
+/// rule approved 2026-10-16): [`budget_for`]'s, or the instances and two over if more, never
+/// more than the hardware threads less two. macOS demotes a time-constraint thread that runs
+/// far past its computation, so the margin for the instances' host threads is not needed there
+/// as on Linux at `SCHED_FIFO`; with eight instances on the Mac, every instance given a worker
+/// made a quarter of the blocks late that four workers did (the others none, late every block).
+pub fn budget_for_macos(all: usize, instances: usize) -> usize {
+    budget_for(all, instances).max((instances + 2).min(all.saturating_sub(2)))
 }
 
 /// The most workers an instance's pool holds (decisions.md R-THREADS): this machine's fast
@@ -3020,7 +3032,10 @@ mod tests {
         let linux = Cores { all: 16, fast: 16 };
         let budget =
             |c: Cores| -> Vec<usize> { [1, 2, 4, 8].map(|a| budget_for(c.all, a)).to_vec() };
-        assert_eq!(budget(mac), [11, 10, 8, 4]);
+        // (The Mac's own rule: every instance a worker and two over, at most N - 2.)
+        let macos = [1, 2, 4, 6, 8, 10, 12, 16].map(|a| budget_for_macos(mac.all, a));
+        assert_eq!(macos, [11, 10, 8, 8, 10, 12, 12, 12]);
+        assert_eq!(budget_for_macos(4, 8), 2);
         assert_eq!(budget(windows), [17, 16, 14, 10]);
         assert_eq!(budget(linux), [13, 12, 10, 6]);
         assert_eq!([mac, windows, linux].map(cap_for), [8, 4, 14]);
