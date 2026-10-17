@@ -5921,6 +5921,34 @@ which the annotated `v0.2.4` tag names.
 - On the lab share macOS writes `._` files beside each download; the downloads are checked in
   a local folder (`~/.cache`). The scripts and logs are in `~/lab/artifacts/ca-72/0.2.4/`.
 
+## R-AU-PITCH-BEND. Preserve the AU MIDI pitch wheel (issue 43)
+
+The AU adapter converted channel pitch bend into CLAP per-note tuning whenever
+an instrument preferred typed CLAP notes, including ports that also support MIDI.
+nih-plug maps that expression to `PolyTuning`, which CA-72 does not follow; its
+`MidiPitchBend` handler never received the wheel. The conversion also imposed a
+fixed two-semitone range. Preserve the original MIDI bytes when the port supports
+MIDI or MPE, so the instrument applies its own MIDI BEND RANGE. CLAP-only ports
+retain the existing tuning fallback. Other event translations, the DSP and the
+production component identity are unchanged.
+
+The AU build now runs five adapter regression groups and nine in-memory public-AU
+render cases. These exercise MIDI bytes and MIDI 1/2 event-list entry points,
+ranges 0/2/7, both bend directions, centering, CC121 reset, note delivery/release,
+CC120/123 and MIDI 2's distinct zero-velocity semantics. The tests use disposable
+state without physical audio or MIDI output; event-list checks require macOS 12.
+They do not establish native end-to-end MIDI 2 hardware support.
+
+On macOS 27.0/M4 Pro, the fixed 0.2.4 review build passes all five adapter groups,
+all nine render cases and strict auval under a separate arm64 test identity.
+The embedded engine's 28 compiled code/data sections match the installed 0.2.4
+engine. The unchanged release fails the six nonzero-range render cases. The
+previous 0.2.3 GarageBand reproduction and Apple DLS control establish the original
+host symptom, but fixed-build GarageBand playback remains blocked by the unsaved
+`ca74-au-test` project; the project switch was canceled. Live/physical controller
+input and Logic have not been tested. These results do not claim resolution in
+GarageBand or Logic. No test-identity packaging is part of the production change.
+
 ## R-MAC-FIXES. The Mac's own: the lab's VCO bench, and the pointer over the grip
 
 **Owner decision, 2026-10-16.** After 0.2.4: "please identify and fix those Mac specific
@@ -5972,11 +6000,13 @@ tested, and this follows it.
 
 **Owner authorisation, 2026-10-16.** "Once PR #46's CI is green, bump to 0.2.5 and release it
 the same way as 0.2.4": R-MAC-FIXES and R-LO-DEFAULT. The request authorises merging, signing,
-tagging, upload and publication.
+tagging, upload and publication. On 2026-10-17 the owner added PR #47, R-AU-PITCH-BEND (issue
+43): "release both of those right now". #47 was merged to `main` first and merged into 0.2.5's
+branch.
 
 The sound engine, parameter identifiers, preset format and installers are unchanged from
-0.2.4; QUALITY's default and baseview's macOS pointer change, and the circuit lab's VCO bench
-(not part of the plug-in). Release notes are in `releases/0.2.5.md`. Before publication the
+0.2.4; QUALITY's default, baseview's macOS pointer and the AU wrapper's pitch bend change, and the
+circuit lab's VCO bench (not part of the plug-in). Release notes are in `releases/0.2.5.md`. Before publication the
 release commit must pass all three CI jobs; the macOS installer must be Developer ID signed,
 notarised, stapled and accepted by Gatekeeper; every uploaded asset downloaded again and
 checked against the manifest.

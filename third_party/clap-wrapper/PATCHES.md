@@ -86,3 +86,19 @@ To update: copy the same paths from a newer tag (and the SDKs at the versions it
 fetches), apply these changes again if upstream has not made its own, build the component
 (`scripts/auv2.sh`), validate it (`scripts/validate.sh`: auval and pluginval, several runs),
 play it in GarageBand or Logic, and record the tag, commit and hash here.
+
+6. **A channel pitch wheel remains MIDI when the port supports it** (issue 43,
+   2026-10-15). The AU process adapter converted pitch bend into a channel-wide
+   `CLAP_NOTE_EXPRESSION_TUNING` whenever the plug-in preferred typed CLAP notes,
+   even when its port also advertised raw MIDI. nih-plug turns that into
+   `PolyTuning`; CA-72 follows `MidiPitchBend`, not per-note tuning. The wheel was
+   therefore ignored, and the conversion imposed a two-semitone range instead of
+   the instrument's own MIDI BEND RANGE. `ProcessAdapter::addMIDIEvent` now keeps
+   the original MIDI bytes when a CLAP-preferred port also supports MIDI or MPE.
+   CLAP-only ports keep the existing tuning fallback. Notes, pressure and other
+   controllers retain their existing translations; the CLAP, VST3 and standalone
+   wrappers are unchanged. The AU build runs the adapter regression and an
+   in-memory public-AU-API render matrix (`scripts/auv2/tests/`, CTest): both
+   directions, centre/reset, ranges 0, 2 and 7, note-off and panic, with MIDI bytes
+   and MIDI 1/2 UMP input (the event-list API requires macOS 12). The adapter test
+   also checks mixed MIDI/MPE dialects and the CLAP-only fallback.
