@@ -1616,11 +1616,15 @@ fn oversampling(q: Quality) -> (usize, usize) {
 }
 
 /// How late the contours reach the filter and the VCA, samples: what the oscillators'
-/// band-limiting delays their sound beyond the one sample of the two-point polyBLEP it
-/// replaced ([`crate::resample::BLEP_DELAY`] at the oscillators' rate less one; decisions.md
-/// R-BLEP), so that an attack keeps the shape it had: 15 in Potato, 3.75 in the others.
+/// band-limiting delays their sound beyond what it did before decisions.md R-BLEP (the
+/// two-point polyBLEP's one sample at the oscillators' rate, their decimators' last stage
+/// 79 taps long), so that an attack keeps the shape it had: 15 in Potato (the kernel's 16
+/// samples less one), 18.75 in the others (3.75 the kernel's, 15 the longer last stage's).
 fn contour_delay(q: Quality) -> f64 {
-    (crate::resample::BLEP_DELAY as f64 - 1.0) / oversampling(q).0 as f64
+    use crate::resample::{BLEP_DELAY, Decimator, LAST_HALFBAND, OSCILLATOR_LAST_HALFBAND};
+    let os = oversampling(q).0;
+    (BLEP_DELAY as f64 - 1.0) / os as f64 + Decimator::delay_of(os, OSCILLATOR_LAST_HALFBAND)
+        - Decimator::delay_of(os, LAST_HALFBAND)
 }
 
 /// The contours' past outputs kept, samples (more than [`contour_delay`] in any mode).

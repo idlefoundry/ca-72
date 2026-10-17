@@ -22,7 +22,8 @@
 //!   exact times, the reset's areas band-limited impulses, and the slope's jumps (the reset,
 //!   the hold's end, the triangle's fold as a rounded corner) band-limited ramps, all from one
 //!   windowed sinc ([`crate::resample::BlepLine`]); a halfband decimator brings each output
-//!   down. Only the outputs in use are corrected ([`Vco::set_outputs`]).
+//!   down, its last stage long enough to keep 20 Hz to 20 kHz clean at 44.1 kHz
+//!   ([`Decimator::for_oscillators`]). Only the outputs in use are corrected ([`Vco::set_outputs`]).
 //!
 //! Outputs are the board's open-circuit voltages (unloaded): the mixer's loading belongs
 //! to the mixer's model. The reset's sub-microsecond shape is represented by what it does
@@ -290,9 +291,9 @@ impl Vco {
             table: None,
             table_on: false,
             dec_other: [
-                Decimator::new(oversample),
-                Decimator::new(oversample),
-                Decimator::new(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
             ],
             v: CoreParams::default().v_top0,
             hold_left: 0.0,
@@ -307,9 +308,9 @@ impl Vco {
             outputs: [true; 3],
             fold: fold_corner(&ShaperParams::default()),
             dec: [
-                Decimator::new(oversample),
-                Decimator::new(oversample),
-                Decimator::new(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
             ],
             ticks: 0,
             last_reset: 0.0,
@@ -323,7 +324,7 @@ impl Vco {
     /// plays ([`Vco::set_oversample`]) and the converter's table for its trims as they are
     /// ([`crate::expo::ConverterTable`]; not on the audio thread: both are made here).
     pub fn prepare(&mut self, oversample: usize) {
-        let d = || Decimator::new(oversample);
+        let d = || Decimator::for_oscillators(oversample);
         self.dec_other = [d(), d(), d()];
         self.other = oversample;
         // (One a process for each converter's circuit and temperature.)

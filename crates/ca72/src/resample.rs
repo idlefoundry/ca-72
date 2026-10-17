@@ -388,6 +388,19 @@ impl Halfband {
     }
 }
 
+/// Taps in a decimator's halfbands before its last.
+const FIRST_HALFBANDS: usize = 23;
+
+/// Taps in a decimator's last halfband ([`Decimator::new`]): it passes to 0.417 of the output
+/// rate and stops from 0.583 (20 and 28 kHz at 48 kHz) by about 100 dB.
+pub const LAST_HALFBAND: usize = 79;
+
+/// Taps in the oscillators' decimators' last halfband ([`Decimator::for_oscillators`]): it
+/// passes to 0.4535 of the output rate and stops from 0.5465 (20 and 24.1 kHz at 44.1 kHz), so
+/// that nothing folds into 20 Hz to 20 kHz at 44.1 kHz either (79 taps stop only from 25.7
+/// kHz there; decisions.md R-BLEP, the owner's choice of 2026-10-16).
+pub const OSCILLATOR_LAST_HALFBAND: usize = 139;
+
 /// Decimation by 2^stages: a short halfband first, a long one last.
 #[derive(Debug, Clone)]
 pub struct Decimator {
@@ -406,18 +419,40 @@ impl Decimator {
         Self::with(factor, Halfband::sparse)
     }
 
+    /// [`Decimator::new`] for the oscillators' outputs: its last stage
+    /// [`OSCILLATOR_LAST_HALFBAND`] taps long (decisions.md R-BLEP; at 4x, ULTRA's).
+    pub fn for_oscillators(factor: usize) -> Decimator {
+        Self::with_last(factor, OSCILLATOR_LAST_HALFBAND, Halfband::new)
+    }
+
     fn with(factor: usize, make: fn(usize, f64) -> Halfband) -> Decimator {
+        Self::with_last(factor, LAST_HALFBAND, make)
+    }
+
+    fn with_last(factor: usize, last: usize, make: fn(usize, f64) -> Halfband) -> Decimator {
         let stages = stages_len(factor);
         let stages = (0..stages)
             .map(|i| {
                 if i + 1 == stages {
-                    make(79, 10.06)
+                    make(last, 10.06)
                 } else {
-                    make(23, 10.06)
+                    make(FIRST_HALFBANDS, 10.06)
                 }
             })
             .collect();
         Decimator { stages }
+    }
+
+    /// The group delay in output samples of a decimator by `factor` whose last stage is
+    /// `last` taps long, as [`Decimator::delay`] gives it (nothing made).
+    pub fn delay_of(factor: usize, last: usize) -> f64 {
+        let n = stages_len(factor);
+        (0..n)
+            .map(|k| {
+                let len = if k + 1 == n { last } else { FIRST_HALFBANDS };
+                ((len | 1) / 2) as f64 / f64::from(1u32 << (n - k))
+            })
+            .sum()
     }
 
     pub fn push(&mut self, x: f64) -> Option<f64> {
@@ -552,6 +587,22 @@ mod tests {
         // A rounded corner's correction ends too.
         assert!(t.fillet(k + 3.0, 2.0).abs() < 1e-9);
         assert!(t.fillet(-k, 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_decimators_delay_is_known_before_it_is_made() {
+        for factor in [1, 2, 4, 8] {
+            let d = Decimator::new(factor).delay();
+            assert_eq!(Decimator::delay_of(factor, LAST_HALFBAND), d);
+            let d = Decimator::for_oscillators(factor).delay();
+            assert_eq!(Decimator::delay_of(factor, OSCILLATOR_LAST_HALFBAND), d);
+        }
+        // At ULTRA's 4x the longer last stage is 15 samples later.
+        assert_eq!(
+            Decimator::delay_of(4, OSCILLATOR_LAST_HALFBAND)
+                - Decimator::delay_of(4, LAST_HALFBAND),
+            15.0
+        );
     }
 
     #[test]

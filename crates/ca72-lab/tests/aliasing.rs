@@ -39,17 +39,11 @@ fn hi_oscillators_alias_below_80_db() {
 }
 
 #[test]
-fn ultra_oscillators_alias_below_105_db_at_48_and_96_khz() {
-    let (steps, tri) = circuit_worst(4, &RATES[1..]);
+fn ultra_oscillators_alias_below_105_db() {
+    // (At 44.1 kHz too, by the oscillators' longer last halfband.)
+    let (steps, tri) = circuit_worst(4, &RATES);
     assert!(steps < -105.0, "sawtooth and rectangles: {steps:.1} dB");
     assert!(tri < -70.0, "triangle: {tri:.1} dB");
-    // At 44.1 kHz its last halfband sets the limit (it stops from 25.7 kHz).
-    let (steps, tri) = circuit_worst(4, &RATES[..1]);
-    assert!(
-        steps < -53.0,
-        "44.1 kHz, sawtooth and rectangles: {steps:.1} dB"
-    );
-    assert!(tri < -68.0, "44.1 kHz, triangle: {tri:.1} dB");
 }
 
 #[test]
