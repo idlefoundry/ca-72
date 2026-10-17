@@ -6338,10 +6338,10 @@ prototype did:
   181, the build 179 to 192 / 193 to 209 by output.
 
 **Latency.** HI's oscillators 16 samples (was 1), LO's none (as before), ULTRA's 26.25 (was
-22.5; its decimators' 22.25 and the kernel's 4). The contours follow (above). The plug-in
-reports no latency to hosts, as before.
+22.5; its decimators' 22.25 and the kernel's 4; **since the longer last halfband, below,
+41.25**). The contours follow (above). The plug-in reports no latency to hosts, as before.
 
-### ULTRA's last halfband (measured, not built)
+### ULTRA's last halfband (measured, then built: below)
 
 At 44.1 kHz ULTRA's aliasing is its decimators': their last halfband (79 taps, Kaiser beta
 10.06) passes to 0.417 of the output rate and stops from 0.583 (25.7 kHz), so what lies
@@ -6363,13 +6363,64 @@ at 44.1 kHz as clean as at 48: -111 dB at the worst against -56. Its harmonics b
 move by 0.18 dB at most. It costs each oscillator about 80 ns a sample at 4x, three
 oscillators about 1.2 % of a core a voice (ULTRA's voice is about 56 % of a core), and adds
 15 samples of latency (the contours would wait for those too). The filter's decimator at 4x
-has the same last stage; the filter's own ultrasonic products fold the same way at 44.1 kHz,
-not measured here. Decimating only the outputs in use would pay for most of it: today all
-three outputs' decimators run.
+has the same last stage (measured below). Decimating only the outputs in use would pay for
+most of it: all three outputs' decimators run.
 
 **For the owner to decide:** ULTRA's last halfband at 139 taps (recommended: 44.1 kHz then
 as clean as 48 kHz, for about 1.2 % of a core a voice and 15 samples), with the filter's
 decimator to match or not; or as it is.
+
+**Owner decision, 2026-10-16** (passed on by the session that started this work): "Okay, do
+it for ultra". The oscillators' decimators get the 139-tap last stage; HI and LO are
+unchanged; the filter's decimator is measured, not built.
+
+**Built** (agent decisions, not separately approved):
+- **The oscillators' decimators only.** `Decimator::for_oscillators` ends in a 139-tap
+  halfband (`OSCILLATOR_LAST_HALFBAND`, Kaiser beta 10.06 as before); `Decimator::new` keeps
+  79 for the filter, the noise and the preamplifier, and LO's sparse ones are unchanged. Only
+  ULTRA's oscillators (and the lab's High Fidelity's) run at 4x; HI's at 1x have no
+  decimator, so HI's renders do not change.
+- **The contours wait for these 15 samples too:** 18.75 samples in ULTRA (`contour_delay`,
+  from `Decimator::delay_of`, which a test checks against the decimators made).
+- **The aliasing test tightened:** `tests/aliasing.rs` holds ULTRA's sawtooth and rectangles
+  under -105 dB and its triangle under -70 at 44.1 kHz as at 48 and 96.
+
+**As built:** ULTRA's sawtooth and rectangles at 44.1 kHz -111 dB at the worst (was -56; the
+sawtooth -117 and -118 at A4 and A7), at 48 kHz -115, at 96 kHz -125; its triangle -73 at the
+worst. Its oscillators' latency is 41.25 samples (37.25 the decimators', 4 the kernel's).
+- **Cost** (`preset_cost`, ten voices, ULTRA, against the branch before it, the least of three
+  interleaved one-second rounds): 541.6 % of a core to 548.5 %, +1.2 % (median +1.5; -0.3 to
+  +2.5), 0.69 % of a core a voice.
+- **Renders** (`preset_render`, ULTRA at 48 kHz, against the branch before it): levels within
+  0.06 dB; every third-octave band within 0.6 dB but White Lotus's at 62 Hz (+1.3 dB) and
+  Feedback Funk's loop (1.4 dB); the difference's RMS mostly the 15 samples' shift.
+
+### The filter's last halfband in ULTRA (measured, not built)
+
+The filter's decimator at 4x has the same 79-tap last stage. Measured on branch
+`lab/ultra-filter-halfband` (`ca72-lab filteralias`): ULTRA's whole voice with a note held,
+the aliasing of its output and of the filter's own output (the voice's probe) from 20 Hz to
+20 kHz against the fundamental, for self-oscillation at full EMPHASIS (CUTOFF 0.55, 0.7, 0.85:
+1.6, 5.3 and 14.9 kHz), a bright sawtooth (A4 and A6, 8') open and at EMPHASIS 0.8, and DRIVE
+at +12 dB; the results are [band-limiting/ultra-filter-halfband.tsv](band-limiting/ultra-filter-halfband.tsv).
+- **The last stage makes no measurable difference.** At 44.1, 48 and 96 kHz every figure with
+  139 taps is within 0.1 dB of 79's (with 23 taps, within 0.7 dB). The filter run at 8x
+  instead of 4x changes them by about 2 dB at most either way.
+- **What aliases is after the filter, the VCA.** The open sawtooth at A4 at 44.1 kHz carries
+  -71.5 dB at the filter's output and -45.5 dB at the voice's; the loudest component, 19.9
+  kHz, is its 55th harmonic (24.19 kHz) folded (at 48 kHz its 64th, folded to 19.85 kHz). The
+  VCA's signal path runs at the output rate and is nonlinear (in High Fidelity's plain path
+  too: the same figures); DRIVE's open sawtooth reads -33 dB at the voice and -58 at the
+  filter. The resonant patches' figures are mostly the filter ringing at its own frequency
+  against the sawtooth's, not aliasing.
+- **Its cost:** the decimator's 40 ns an output sample would be 60 (0.09 % of a core a
+  voice), and 15 samples more, inside FEEDBACK's loop, whose length is calibrated in samples
+  (`docs/circuit`), and before the VCA, whose loudness contour would have to wait for them.
+
+**For the owner to decide:** the filter's last halfband stays at 79 taps (recommended: no
+measurable gain, a longer FEEDBACK loop). The VCA's signal path at the output rate is what
+aliases in ULTRA at 44.1 and 48 kHz (-45 dB on an open sawtooth); running it oversampled
+would be the next measurement, not made here.
 
 **For the merge.** The threads work (branch `claude/goofy-ellis-af3f5d`, unmerged, R-THREADS)
 also changes `voice.rs` (`BackPart::set_drive` and others) and `threaded.rs`. This build
@@ -6377,8 +6428,8 @@ changes `voice.rs` in other places (`ControlPart`'s contour delay, the oscillato
 in use, `outputs_of`, `contour_delay`) and not `threaded.rs`: the two merge without a conflict
 in the code (`git merge-tree`); only this file conflicts, both records appended at its end.
 
-**Evidence (the Mac, 2026-10-16; commit on `claude/lucid-fermi-67e20c`, and
-`lab/ultra-halfband`):**
+**Evidence (the Mac, 2026-10-16; commits on `claude/lucid-fermi-67e20c`, and
+`lab/ultra-halfband`, `lab/ultra-filter-halfband`):**
 - **Suite.** `cargo test --workspace --features ca72-plugin/standalone-production` (debug):
   every test passes but three ngspice tests (`vco_electrical`'s two and `vco_osc23`), which fail
   the same way on `main` on this Mac ("Timestep too small" at the hold node, ngspice-47 from
