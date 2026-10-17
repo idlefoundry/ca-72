@@ -1328,6 +1328,9 @@ pub struct Layer {
     pub sprites: Vec<Sprite>,
     pub lights: Vec<Light>,
     pub overlays: Vec<Overlay>,
+    /// Its overlays are the lamp's on a turning part's plastic and still cap (a knob's, a
+    /// selector's): left off for a look whose caps turn, whose pictures carry their own light.
+    pub round: bool,
     pub drawn: Vec<crate::ultra::Drawn>,
     pub over: String,
     /// A wheel the worn skin's renderer draws, and a rocker's paddle it lights by its shape
@@ -1779,6 +1782,7 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                     sprite(cap, (d, d), CAP_TURN, (false, false)),
                 ],
                 overlays: round_lights(size.skirt, d / 2.0 * cap_share),
+                round: true,
                 ..Layer::default()
             }
         }
@@ -1792,6 +1796,7 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                     sprite(Part::PointerCap, (d, d), CAP_TURN, (false, false)),
                 ],
                 overlays: round_lights(SELECTOR_R, d / 2.0 * POINTER_CAP),
+                round: true,
                 ..Layer::default()
             }
         }

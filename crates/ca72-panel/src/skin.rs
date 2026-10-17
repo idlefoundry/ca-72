@@ -279,13 +279,17 @@ impl Pictures {
     /// The pictures decoded (once, as the worn skin is first shown); the face's grey coloured,
     /// the ivory rockers made from the blue ones and OVERLOAD's jewel from POWER's.
     pub fn load() -> Pictures {
-        Self::load_with(&Overrides::new(), None)
+        Self::load_with(&Overrides::new(), None, false)
     }
 
     /// The same, a pack's pictures instead of the built-in ones where it has them (a pack's
     /// face coloured by its `face_tint` if it gives one; the parts made from others made from
-    /// the pack's).
-    pub fn load_with(overrides: &Overrides, face_tint: Option<[f32; 3]>) -> Pictures {
+    /// the pack's; its knobs' caps left in their pictures, to turn with them, if `caps_turn`).
+    pub fn load_with(
+        overrides: &Overrides,
+        face_tint: Option<[f32; 3]>,
+        caps_turn: bool,
+    ) -> Pictures {
         let decode = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
         let slot = |name: &str| {
             SLOTS
@@ -325,11 +329,17 @@ impl Pictures {
             }
         });
         let (knob, knob_big, pointer) = (png("knob"), png("knob-big"), png("pointer"));
-        let caps = [
-            capped(&knob, KNOB_CAP),
-            capped(&knob_big, BIG_CAP),
-            capped(&pointer, POINTER_CAP),
-        ];
+        let caps = if caps_turn {
+            // Nothing drawn still over the turned knob: its cap is in its picture.
+            [&knob, &knob_big, &pointer]
+                .map(|p| Pixmap::new(p.width(), p.height()).expect("a picture's size"))
+        } else {
+            [
+                capped(&knob, KNOB_CAP),
+                capped(&knob_big, BIG_CAP),
+                capped(&pointer, POINTER_CAP),
+            ]
+        };
         Pictures {
             walnut: png("walnut"),
             face,

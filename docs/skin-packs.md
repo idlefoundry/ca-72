@@ -252,6 +252,7 @@ layout = "layout.toml"       # optional: the official layout if absent
 art = "art/panel.svg"        # optional: drawn over the panel's surfaces, under its print
 fonts = { regular = "fonts/Face-Regular.otf", bold = "fonts/Face-Bold.otf" }  # optional
 face_tint = [1.03, 1.0, 0.94] # optional: the face picture's channels scaled (0 to 2)
+knob_caps = "turn"           # optional: "still" (the default) or "turn" (see Pictures)
 
 [look.pictures]              # optional: realistic only; pictures replacing the built-in ones
 knob = "pictures/knob.png"
@@ -281,6 +282,13 @@ built-in one's proportions. Lay out your pictures as the built-in ones are laid 
 described in `crates/ca72-panel/assets/worn/README.md`): the same framing, the part centred,
 on a transparent ground. Round parts that turn (knobs, pointers, the bezels) should be lit
 evenly all round, because the panel lays its own fixed lamp over them.
+
+**Knob caps.** The built-in knobs have spun aluminium caps, whose sheen lies where the lamp is
+however the knob is turned, so the middle of a knob's picture (its cap, the share the table
+gives) is drawn still over the turned knob. A knob whose mark crosses its middle (a line from
+its centre to its edge) needs the whole picture to turn: `knob_caps = "turn"` in `[look]`.
+It applies to the knobs, the big knobs and the pointer knobs together. A CA-72 older than
+this setting passes over it (`look.unknown`) and draws the caps still.
 
 | Slot | What | Built-in size |
 |---|---|---|

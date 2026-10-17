@@ -6181,3 +6181,36 @@ took it; refused on this revision; a renamed, a retired and a changed control fo
 for a later CA-72 with unknown names and fields loaded with notes, the same names refused when
 made for this revision; a full panel has no free place); `requires` checked; a later `[look]`
 field noted. The stress packs and the official looks' 32 frames as before.
+
+**The first showcase pack, SIGNAL BASIN, 2026-10-16** (`docs/skin-packs/signal-basin`, CC0, its
+typeface Barlow Condensed under the OFL). The owner chose it from Codex's twelve concept
+pictures (with Cutoff Court, Courtyard Current and Residual Service to follow, one at a time),
+its art made by the image generator ("1a"), it free under CC0 and Residual Service later
+proprietary ("a mix"). The first attempt, its parts generated from words, "looked nothing like"
+the concept; the owner asked for each part to be cropped from the concept and recreated by Codex
+on a transparent ground, and then for the result to be improved "till it passes a critic agent":
+a separate reviewing agent compared the render with the concept round by round (fail, fail,
+pass, pass, pass), and its wear was added at the owner's word. Its scripts, outside the pack (a
+pack holds no code), are in `docs/skin-packs/tools/signal-basin`; the generated originals, the
+concept's crops and the prompts on the lab's share (`ca-72/look/signal-basin`).
+
+**Agent decisions** (not separately approved):
+- `[look] knob_caps = "turn"` (default `"still"`): the concept's knobs have a line from their
+  middle, which the plug-in's still cap (made for a spun aluminium cap's sheen) would have held
+  still. With it, the knobs', big knobs' and pointer knobs' caps are left in their pictures and
+  turn, and the plug-in's lamp and cap lights over them (made for black plastic and aluminium,
+  a brass-looking ring on cream) are left off (`Layer::round`). An earlier CA-72 passes the
+  field over (`look.unknown`) and draws the caps still.
+- Found, not fixed: a drawing's embedded PNG pictures, which the format allows and counts, are
+  never drawn (resvg is built without `raster-images`). SIGNAL BASIN draws its screws as
+  vectors instead. The fix (resvg's feature, which adds three image decoders, or drawing them in
+  the plug-in's code, or refusing them) is the owner's to choose; it is proposed as its own
+  task.
+- A rocker's lamp lies in its picture's flat half, so that it shows at the switch's "on" end;
+  its lamp stays lit when off (one picture, mirrored). POWER stays a rocker: its slot is too
+  narrow for the concept's toggle.
+
+**Evidence (the Mac, 2026-10-16):** `check_pack` loads it with no layout, legend or drawing
+finding (its drawing's counted cost about 39 million of 60), in its own typeface, both
+letterings; `a_packs_knob_caps_turn_with_them_when_it_says_so`; the panel's, the packs' and the
+plug-in's tests; the official looks' frames unchanged. Not yet: hosts, the slow machine.

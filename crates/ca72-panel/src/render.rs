@@ -382,10 +382,14 @@ impl Renderer {
         let view = [0.0, 0.0, f64::from(w) / s, f64::from(h) / s];
         self.background
             .fill(Color::from_rgba8(0x1d, 0x1b, 0x1a, 0xff));
-        let (overrides, tint) = (&self.look.pictures, self.look.face_tint);
+        let (overrides, tint, turn) = (
+            &self.look.pictures,
+            self.look.face_tint,
+            self.look.caps_turn,
+        );
         let pictures = self
             .pictures
-            .get_or_insert_with(|| Pictures::load_with(overrides, tint));
+            .get_or_insert_with(|| Pictures::load_with(overrides, tint, turn));
         let bg = &mut self.background;
         // The wood: its grain along the top strip and the strip's rail; each board its own band
         // of the picture, drawn out along the grain.
@@ -665,8 +669,10 @@ impl Renderer {
                 None,
             );
         }
-        // Each overlay from its picture, drawn once in the layer's place, with its blend.
-        for o in &layer.overlays {
+        // Each overlay from its picture, drawn once in the layer's place, with its blend (a
+        // knob's lamp and cap lights not, where the look's caps turn: its picture is lit).
+        let skip = layer.round && self.look.caps_turn;
+        for o in layer.overlays.iter().filter(|_| !skip) {
             let place = [x0 as i32, y0 as i32, w as i32, h as i32];
             let made = self
                 .overlays
@@ -741,10 +747,14 @@ impl Renderer {
             self.placed[i].used = self.renders;
             return Some(i);
         }
-        let (overrides, tint) = (&self.look.pictures, self.look.face_tint);
+        let (overrides, tint, turn) = (
+            &self.look.pictures,
+            self.look.face_tint,
+            self.look.caps_turn,
+        );
         let pictures = self
             .pictures
-            .get_or_insert_with(|| Pictures::load_with(overrides, tint));
+            .get_or_insert_with(|| Pictures::load_with(overrides, tint, turn));
         let picture = pictures.part(key.part, key.size.0, key.size.1);
         let at = (f64::from_bits(key.at.0), f64::from_bits(key.at.1));
         let (x, y, pixels) = place_picture(

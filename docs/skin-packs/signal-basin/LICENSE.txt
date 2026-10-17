@@ -1,0 +1,19 @@
+CC0 1.0 Universal
+
+The SIGNAL BASIN skin pack for the CA-72 (this folder: every file in it but its typeface, in
+fonts/) is dedicated to the public domain. To the extent possible under law, Idle Foundry Ltd. has waived all copyright and
+related or neighboring rights to it. You may copy, change, distribute and sell it, and packs
+made from it, under any licence you choose, without asking.
+
+The full legal code: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+Its pictures were made with an image generator (README.md has each prompt). Whether such
+pictures are protected by copyright at all differs between countries; where they are, this
+dedication covers them.
+
+This dedication covers the pack's own files only. It does not cover the CA-72 plug-in, its
+code or its official artwork, which are under the GNU General Public License, version 3 or
+later.
+
+Its typeface, Barlow Condensed (fonts/), is The Barlow Project Authors' work under the SIL Open
+Font License 1.1 (fonts/OFL.txt), not this dedication.

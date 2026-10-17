@@ -62,6 +62,9 @@ pub struct Look {
     /// colour (each channel scaled).
     pub pictures: Arc<Overrides>,
     pub face_tint: Option<[f32; 3]>,
+    /// Whether its knobs' and pointer knobs' caps turn with them (`knob_caps = "turn"`: a line
+    /// across a knob's top, say) or are drawn still, as a spun aluminium cap's sheen should be.
+    pub caps_turn: bool,
     /// Its drawing over the panel's surfaces, under its print.
     pub art: Option<Arc<usvg::Tree>>,
     /// Its typeface (regular, bold), if it brings one that prints and fits every legend.
@@ -96,6 +99,7 @@ impl Look {
             arrangement: Arrangement::official(),
             pictures: Arc::new(Overrides::new()),
             face_tint: None,
+            caps_turn: false,
             art: None,
             fonts: None,
             licence: OFFICIAL_LICENCE.into(),
@@ -321,6 +325,15 @@ impl Look {
             report.reject("look.face-tint", at, "a face tint of 0 to 2 a channel");
         }
 
+        let caps_turn = match spec.knob_caps.as_deref() {
+            None | Some("still") => false,
+            Some("turn") => true,
+            Some(_) => {
+                report.reject("look.knob-caps", at, "knob_caps: \"still\" or \"turn\"");
+                false
+            }
+        };
+
         // The drawing over the panel.
         let art = match &spec.art {
             None => None,
@@ -413,6 +426,7 @@ impl Look {
             arrangement,
             pictures: Arc::new(pictures),
             face_tint: spec.face_tint,
+            caps_turn,
             art,
             fonts,
             licence: m.license.clone(),
@@ -447,6 +461,8 @@ struct LookTable {
     pictures: BTreeMap<String, String>,
     #[serde(default)]
     face_tint: Option<[f32; 3]>,
+    #[serde(default)]
+    knob_caps: Option<String>,
     #[serde(flatten)]
     rest: Rest,
 }

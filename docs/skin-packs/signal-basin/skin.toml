@@ -1,0 +1,153 @@
+# SIGNAL BASIN, a skin pack for the CA-72: teal enamel panels edged in copper, ivory knobs, the
+# signal's way drawn from each source into one basin. The format: docs/skin-packs.md.
+# Dedicated to the public domain under CC0 1.0 (LICENSE.txt).
+
+format = 1
+id = "org.idlefoundry.signal-basin"
+name = "SIGNAL BASIN"
+version = "0.1.0"
+plugin = "ca-72"
+summary = "Teal enamel and copper: every source in a row of its own, all flowing to one basin."
+license = "CC0-1.0"
+license_files = ["LICENSE.txt"]
+
+[[creators]]
+name = "Idle Foundry Ltd."
+role = "layout, drawing and pictures"
+
+[[assets]]
+path = "layout.toml"
+origin = "original"
+author = "Idle Foundry Ltd."
+
+[[assets]]
+path = "art/panel.svg"
+origin = "original"
+author = "Idle Foundry Ltd."
+
+[[assets]]
+path = "pictures/walnut.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/face.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/knob.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/knob-big.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/pointer.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/rocker-blue.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/rocker-orange.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/power.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/jewel.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/jack.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/screw.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "pictures/plate.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and sized with Python (Pillow 12.3, NumPy 2.5)"
+note = "Its prompt and every step after it: README.md."
+
+[[assets]]
+path = "fonts/BarlowCondensed-SemiBold.ttf"
+origin = "third-party"
+author = "The Barlow Project Authors"
+source = "Barlow Condensed SemiBold 1.4, https://github.com/google/fonts/tree/main/ofl/barlowcondensed"
+license = "OFL-1.1"
+sha256 = "7b619d14bc2327509a9ef32b0890f709626f7ecc9ff61191c2a4314c5499d2d9"
+
+[[assets]]
+path = "fonts/BarlowCondensed-Medium.ttf"
+origin = "third-party"
+author = "The Barlow Project Authors"
+source = "Barlow Condensed Medium 1.4, https://github.com/google/fonts/tree/main/ofl/barlowcondensed"
+license = "OFL-1.1"
+sha256 = "262bd143292ce479ee0cd09a42b47ab173fca8e9c6eb5ed0b5c8a845bc371d17"
+
+[[notices]]
+name = "Barlow Condensed"
+license = "OFL-1.1"
+file = "fonts/OFL.txt"
+
+[look]
+base = "realistic"
+layout = "layout.toml"
+art = "art/panel.svg"
+fonts = { regular = "fonts/BarlowCondensed-Medium.ttf", bold = "fonts/BarlowCondensed-SemiBold.ttf" }
+# Each knob's line runs from its middle: the whole knob turns.
+knob_caps = "turn"
+
+[look.pictures]
+walnut = "pictures/walnut.png"
+face = "pictures/face.png"
+knob = "pictures/knob.png"
+knob-big = "pictures/knob-big.png"
+pointer = "pictures/pointer.png"
+rocker-blue = "pictures/rocker-blue.png"
+rocker-orange = "pictures/rocker-orange.png"
+power = "pictures/power.png"
+jewel = "pictures/jewel.png"
+jack = "pictures/jack.png"
+screw = "pictures/screw.png"
+plate = "pictures/plate.png"

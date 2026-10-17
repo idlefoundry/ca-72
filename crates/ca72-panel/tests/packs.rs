@@ -507,3 +507,50 @@ fn a_look_field_from_a_later_ca72_is_passed_over() {
     let look = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
     assert!(look.report.has("look.unknown"), "{}", look.report);
 }
+
+/// `knob_caps = "turn"`: a knob's cap turns with it, so that a mark across its middle turns as
+/// a whole; without it (or "still") the cap is drawn still, as a spun cap's sheen should be.
+#[test]
+fn a_packs_knob_caps_turn_with_them_when_it_says_so() {
+    let with = |caps: Option<&str>| {
+        edited(|d| {
+            // A white knob with a black bar from its middle to twelve o'clock.
+            std::fs::write(
+                d.join("art/knob.svg"),
+                "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><circle cx='5' cy='5' r='4.9' fill='#eee'/><rect x='4.5' y='0.2' width='1' height='4.8' fill='#000'/></svg>",
+            )
+            .expect("written");
+            replace(
+                &d.join("skin.toml"),
+                "base = \"classic\"",
+                "base = \"realistic\"",
+            );
+            let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+            let caps = caps.map_or(String::new(), |c| format!("knob_caps = \"{c}\"\n"));
+            std::fs::write(
+                d.join("skin.toml"),
+                text.replace(
+                    "[look]",
+                    "[[assets]]\npath = \"art/knob.svg\"\norigin = \"original\"\n\n[look]",
+                ) + &caps
+                    + "\n[look.pictures]\nknob = \"art/knob.svg\"\n",
+            )
+            .expect("written");
+        })
+    };
+    let open = |caps| {
+        let dir = with(caps);
+        Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"))
+    };
+    let (still, said_still, turn) = (open(None), open(Some("still")), open(Some("turn")));
+    assert!(!still.caps_turn && !said_still.caps_turn && turn.caps_turn);
+    assert!(!turn.report.has("look.unknown"), "{}", turn.report);
+    // The bar's middle drawn still at twelve o'clock, or turned with the knob.
+    assert!(frame(still, 0.3) != frame(turn, 0.3));
+    let dir = with(Some("spin"));
+    assert!(
+        Look::open(dir.path())
+            .expect_err("refused")
+            .has("look.knob-caps")
+    );
+}

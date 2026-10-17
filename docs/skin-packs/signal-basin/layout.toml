@@ -1,0 +1,517 @@
+# SIGNAL BASIN's panel: every source in a row of its own, all flowing to one basin, as a
+# signal does. Dedicated to the public domain under CC0 1.0 (LICENSE.txt). The format: the
+# CA-72's docs/skin-packs.md. Units are the drawing's: the face 0 to 3108 by 0 to 795, the
+# strip above it -130 to 0.
+
+format = 1
+controls = 1
+
+[fixtures]
+power = [3028, 580]
+lamp = [3028, 426]
+overload = [1725, 652]
+ultra = [3028, 92]
+plate = [2578, -106]
+phones = [2880, 518, 34]
+screws = []
+
+[[control]]
+param = "tune"
+at = [145, 140]
+
+[[control]]
+param = "glide"
+at = [145, 396]
+
+[[control]]
+param = "mod_mix"
+at = [145, 652]
+
+[[control]]
+param = "osc_mod"
+at = [305, 268]
+size = [54, 100]
+colour = "blue"
+on = "top"
+
+[[control]]
+param = "osc3_control"
+at = [305, 524]
+size = [54, 100]
+colour = "blue"
+on = "top"
+
+[[control]]
+param = "osc1_range"
+at = [560, 140]
+
+[[control]]
+param = "osc1_waveform"
+at = [970, 140]
+
+[[control]]
+param = "osc1_volume"
+at = [1185, 140]
+
+[[control]]
+param = "osc1_on"
+at = [1350, 140]
+size = [54, 100]
+colour = "blue"
+on = "top"
+
+[[control]]
+param = "osc2_range"
+at = [560, 396]
+
+[[control]]
+param = "osc2_frequency"
+at = [765, 396]
+big = true
+
+[[control]]
+param = "osc2_waveform"
+at = [970, 396]
+
+[[control]]
+param = "osc2_volume"
+at = [1185, 396]
+
+[[control]]
+param = "osc2_on"
+at = [1350, 396]
+size = [54, 100]
+colour = "blue"
+on = "top"
+
+[[control]]
+param = "osc3_range"
+at = [560, 652]
+
+[[control]]
+param = "osc3_frequency"
+at = [765, 652]
+big = true
+
+[[control]]
+param = "osc3_waveform"
+at = [970, 652]
+
+[[control]]
+param = "osc3_volume"
+at = [1185, 652]
+
+[[control]]
+param = "osc3_on"
+at = [1350, 652]
+size = [54, 100]
+colour = "blue"
+on = "top"
+
+[[control]]
+param = "ext_on"
+at = [1550, 140]
+size = [54, 100]
+colour = "blue"
+on = "top"
+
+[[control]]
+param = "ext_volume"
+at = [1725, 140]
+
+[[control]]
+param = "noise_on"
+at = [1550, 396]
+size = [54, 100]
+colour = "blue"
+on = "top"
+
+[[control]]
+param = "noise_volume"
+at = [1725, 396]
+
+[[control]]
+param = "noise_type"
+at = [1550, 652]
+size = [54, 100]
+colour = "blue"
+on = "bottom"
+
+[[control]]
+param = "cutoff"
+at = [1975, 140]
+
+[[control]]
+param = "emphasis"
+at = [2170, 140]
+
+[[control]]
+param = "contour_amount"
+at = [2365, 140]
+
+[[control]]
+param = "filter_attack"
+at = [1975, 396]
+
+[[control]]
+param = "filter_decay"
+at = [2170, 396]
+
+[[control]]
+param = "filter_sustain"
+at = [2365, 396]
+
+[[control]]
+param = "loudness_attack"
+at = [1975, 652]
+
+[[control]]
+param = "loudness_decay"
+at = [2170, 652]
+
+[[control]]
+param = "loudness_sustain"
+at = [2365, 652]
+
+[[control]]
+param = "filter_mode"
+at = [2525, 98]
+size = [108, 50]
+colour = "blue"
+on = "right"
+
+[[control]]
+param = "filter_mod"
+at = [2525, 185]
+size = [108, 50]
+colour = "blue"
+on = "right"
+
+[[control]]
+param = "keyboard_control_1"
+at = [2525, 344]
+size = [108, 50]
+colour = "blue"
+on = "right"
+
+[[control]]
+param = "keyboard_control_2"
+at = [2525, 436]
+size = [108, 50]
+colour = "blue"
+on = "right"
+
+[[control]]
+param = "volume"
+at = [2715, 140]
+
+[[control]]
+param = "main_output"
+at = [2880, 140]
+size = [108, 50]
+colour = "blue"
+on = "right"
+
+[[control]]
+param = "feedback"
+at = [2715, 396]
+
+[[control]]
+param = "a440"
+at = [2880, 356]
+size = [108, 50]
+colour = "blue"
+on = "right"
+
+[[control]]
+param = "quality"
+at = [3028, 266]
+size = [50, 80.83333333333333]
+across = false
+
+[[text]]
+text = "TUNE"
+at = [145, 34]
+size = 22
+
+[[text]]
+text = "GLIDE"
+at = [145, 290]
+size = 22
+
+[[text]]
+text = "MODULATION MIX"
+at = [145, 546]
+size = 22
+
+[[text]]
+text = "OSC."
+at = [305, 184]
+size = 17
+
+[[text]]
+text = "MOD."
+at = [305, 204]
+size = 17
+
+[[text]]
+text = "OSC. 3"
+at = [305, 440]
+size = 17
+
+[[text]]
+text = "CONTROL"
+at = [305, 460]
+size = 17
+
+[[text]]
+text = "1"
+at = [410, 140]
+size = 28
+
+[[text]]
+text = "RANGE"
+at = [560, 34]
+size = 22
+
+[[text]]
+text = "WAVEFORM"
+at = [970, 34]
+size = 22
+
+[[text]]
+text = "VOLUME"
+at = [1185, 34]
+size = 22
+
+[[text]]
+text = "ON"
+at = [1350, 34]
+size = 22
+
+[[text]]
+text = "2"
+at = [410, 396]
+size = 28
+
+[[text]]
+text = "RANGE"
+at = [560, 290]
+size = 22
+
+[[text]]
+text = "WAVEFORM"
+at = [970, 290]
+size = 22
+
+[[text]]
+text = "VOLUME"
+at = [1185, 290]
+size = 22
+
+[[text]]
+text = "ON"
+at = [1350, 290]
+size = 22
+
+[[text]]
+text = "FREQUENCY"
+at = [765, 278]
+size = 22
+
+[[text]]
+text = "3"
+at = [410, 652]
+size = 28
+
+[[text]]
+text = "RANGE"
+at = [560, 546]
+size = 22
+
+[[text]]
+text = "WAVEFORM"
+at = [970, 546]
+size = 22
+
+[[text]]
+text = "VOLUME"
+at = [1185, 546]
+size = 22
+
+[[text]]
+text = "ON"
+at = [1350, 546]
+size = 22
+
+[[text]]
+text = "FREQUENCY"
+at = [765, 534]
+size = 22
+
+[[text]]
+text = "ON"
+at = [1550, 34]
+size = 22
+
+[[text]]
+text = "EXTERNAL INPUT"
+at = [1725, 34]
+size = 22
+
+[[text]]
+text = "ON"
+at = [1550, 290]
+size = 22
+
+[[text]]
+text = "NOISE"
+at = [1725, 290]
+size = 22
+
+[[text]]
+text = "WHITE"
+at = [1550, 576]
+size = 22
+
+[[text]]
+text = "PINK"
+at = [1550, 728]
+size = 22
+
+[[text]]
+text = "OVERLOAD"
+at = [1725, 604]
+size = 22
+
+[[text]]
+text = "CUTOFF"
+at = [1975, 34]
+size = 22
+
+[[text]]
+text = "EMPHASIS"
+at = [2170, 34]
+size = 22
+
+[[text]]
+text = "CONTOUR AMOUNT"
+at = [2365, 34]
+size = 22
+
+[[text]]
+text = "ATTACK"
+at = [1975, 290]
+size = 22
+
+[[text]]
+text = "DECAY"
+at = [2170, 290]
+size = 22
+
+[[text]]
+text = "SUSTAIN"
+at = [2365, 290]
+size = 22
+
+[[text]]
+text = "ATTACK"
+at = [1975, 546]
+size = 22
+
+[[text]]
+text = "DECAY"
+at = [2170, 546]
+size = 22
+
+[[text]]
+text = "SUSTAIN"
+at = [2365, 546]
+size = 22
+
+[[text]]
+text = "FILTER"
+at = [2525, 40]
+size = 17
+
+[[text]]
+text = "MODE"
+at = [2525, 58]
+size = 17
+
+[[text]]
+text = "FILTER MOD."
+at = [2525, 142]
+size = 17
+
+[[text]]
+text = "KEYBOARD"
+at = [2525, 300]
+size = 17
+
+[[text]]
+text = "1"
+at = [2458, 344]
+size = 22
+
+[[text]]
+text = "2"
+at = [2458, 436]
+size = 22
+
+[[text]]
+text = "VOLUME"
+at = [2715, 34]
+size = 22
+
+[[text]]
+text = "MAIN"
+at = [2880, 25]
+size = 17
+
+[[text]]
+text = "OUTPUT"
+at = [2880, 43]
+size = 17
+
+[[text]]
+text = "FEEDBACK"
+at = [2715, 290]
+size = 22
+
+[[text]]
+text = "A–440"
+at = [2880, 316]
+size = 22
+
+[[text]]
+text = "PHONES"
+at = [2880, 462]
+size = 22
+
+[[text]]
+text = "QUALITY"
+at = [3028, 168]
+
+[[text]]
+text = "ULTRA"
+at = [3028, 216]
+size = 15
+
+[[text]]
+text = "HI"
+at = [2988, 266]
+size = 15
+
+[[text]]
+text = "LO"
+at = [3028, 318]
+size = 15
+
+[[text]]
+text = "POWER"
+at = [3028, 465]
+
+[[text]]
+text = "ON"
+at = [3028, 500]
