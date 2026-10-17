@@ -38,7 +38,7 @@ use crate::tuning::{
     Buses, FREQ_CENTRE, HIGH_A, LOW_A, OPEN_BUS, Osc, Range, SECOND_A, Tuning, folkman_1973_buses,
     folkman_1973_osc_buses, osc_drive_with,
 };
-use crate::vca::{Vca, VcaCircuit, VcaDrive};
+use crate::vca::{OversampledVca, Vca, VcaCircuit, VcaDrive};
 use crate::vcf::{ExpoTable, FilterExpo, Vcf};
 use crate::vco::{Vco, VcoOut};
 
@@ -961,8 +961,14 @@ pub struct FrontOut {
 #[derive(Debug, Clone)]
 pub struct BackPart {
     vcf: Vcf,
-    /// The VCA's signal path ([`Vca::signal`]) on the bias [`ControlPart`] works out.
+    /// The VCA's signal path ([`Vca::signal`]) on the bias [`ControlPart`] works out: at the
+    /// sample rate, and in ULTRA at the filter's (decisions.md R-BLEP, ULTRA's VCA at 4x).
     vca: Vca,
+    vca_4x: OversampledVca,
+    /// Whether the last sample ran ULTRA's VCA, and the last output sample (V, before the
+    /// output's scale): what a switch between the two takes over.
+    ultra: bool,
+    last_out: f64,
     a440: A440,
     /// EMPHASIS's law.
     emphasis: Memo<f64>,
@@ -1176,7 +1182,10 @@ impl Voice {
                         f.prepare(oversampling(Quality::Potato).1);
                         f
                     },
+                    vca_4x: OversampledVca::new(&vca, ULTRA_VCA_OVERSAMPLING),
                     vca,
+                    ultra: false,
+                    last_out: 0.0,
                     a440: A440::new(rate),
                     emphasis: Memo::NEW,
                 },
@@ -1716,7 +1725,10 @@ pub const LINE_UP: (usize, usize) = (26, 39);
 ///   samples its output is held back. So every mode's attack comes out with ULTRA's, and
 ///   each meets its sound as in the circuit (the filter's own phase still the circuit's).
 ///
-/// At 48 kHz: 31.25 and 52.75 in Potato, 62.5 and 84.75 in the others.
+/// In ULTRA the VCA's bias reaches the output [`vca_bias_latency`] later, through its VCA's
+/// decimator, so its loudness contour comes that much earlier.
+///
+/// At 48 kHz: 31.25 and 52.75 in Potato, 62.5 and 61.75 in the others.
 fn contour_delays(audio: Quality, every: usize) -> (f64, f64) {
     let own = every as f64 - 1.0;
     let (to_filter, _) = filter_resamplers(audio);
@@ -1727,8 +1739,28 @@ fn contour_delays(audio: Quality, every: usize) -> (f64, f64) {
     };
     (
         (oscillator_latency(audio) + to_filter - own).max(0.0),
-        (latency(Quality::NoCompromises) - held - own).max(0.0),
+        (latency(Quality::NoCompromises) - held - vca_bias_latency(audio) - own).max(0.0),
     )
+}
+
+/// ULTRA's VCA's oversampling (decisions.md R-BLEP): the filter's.
+const ULTRA_VCA_OVERSAMPLING: usize = 4;
+
+/// Whether the VCA runs at the filter's rate at a quality: in ULTRA (and the lab's High
+/// Fidelity, ULTRA but for the VCA's plain solve); not in Potato (HI) or the light model (LO).
+fn vca_oversampled(q: Quality) -> bool {
+    matches!(q, Quality::NoCompromises | Quality::HighFidelity)
+}
+
+/// How much later than at the sample rate the VCA's bias reaches the output at a quality,
+/// samples: in ULTRA through its VCA's decimator ([`OversampledVca::bias_latency`], 23), so
+/// its loudness contour comes that much earlier; in the others none.
+fn vca_bias_latency(q: Quality) -> f64 {
+    if vca_oversampled(q) && oversampling(q).1 == ULTRA_VCA_OVERSAMPLING {
+        OversampledVca::bias_latency(ULTRA_VCA_OVERSAMPLING)
+    } else {
+        0.0
+    }
 }
 
 /// The contours' past outputs kept, samples (more than [`contour_delays`] in any mode).
@@ -2106,12 +2138,35 @@ impl BackPart {
         self.vcf.set_oversample(oversampling(p.quality).1);
         self.vcf.set_quality(p.quality);
         self.vcf.high_pass = p.filter_hi;
-        let y = self.vcf.tick(f.i_bus, f.g_bus, f.i0);
-        laps.lap(crate::prof::Part::Filter);
-        self.vca.a440 = self.a440.tick(p.a440);
-        self.vca.plain_signal = p.quality != Quality::NoCompromises;
-        let out = self.vca.signal(y, d);
+        let ultra = vca_oversampled(p.quality) && self.vcf.oversample() == ULTRA_VCA_OVERSAMPLING;
+        let a440 = self.a440.tick(p.a440);
+        if ultra != self.ultra {
+            // QUALITY switched: the other signal path carries on from this one's states.
+            if ultra {
+                self.vca_4x.take_over(&self.vca, self.last_out);
+            } else {
+                self.vca_4x.hand_over(&mut self.vca);
+            }
+            self.ultra = ultra;
+        }
+        let (y, out) = if ultra {
+            // ULTRA: the VCA at the filter's rate on the filter's own samples; the filter's
+            // decimator still gives its output (the probe's, and HI's after a switch).
+            let mut xs = [0.0f64; 8];
+            let y = self.vcf.tick_oversampled(f.i_bus, f.g_bus, f.i0, &mut xs);
+            laps.lap(crate::prof::Part::Filter);
+            self.vca_4x.set_a440(a440);
+            self.vca_4x.set_plain(p.quality != Quality::NoCompromises);
+            (y, self.vca_4x.signal(&xs, d))
+        } else {
+            let y = self.vcf.tick(f.i_bus, f.g_bus, f.i0);
+            laps.lap(crate::prof::Part::Filter);
+            self.vca.a440 = a440;
+            self.vca.plain_signal = p.quality != Quality::NoCompromises;
+            (y, self.vca.signal(y, d))
+        };
         laps.lap(crate::prof::Part::Vca);
+        self.last_out = out;
         (y, out / 5.0)
     }
 }

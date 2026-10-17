@@ -99,13 +99,20 @@ fn lag(a: &[f64], b: &[f64], reach: isize) -> f64 {
 
 /// The first sample at which `x`'s magnitude reaches `share` of its peak after `from`.
 fn onset(x: &[f64], from: usize, share: f64) -> f64 {
-    let peak = x[from..].iter().fold(0.0f64, |m, v| m.max(v.abs()));
-    let i = (from..x.len())
-        .find(|&i| x[i].abs() >= share * peak)
-        .unwrap();
+    onset_at(x, from, share * peak(x, from))
+}
+
+/// `x`'s largest magnitude after `from`.
+fn peak(x: &[f64], from: usize) -> f64 {
+    x[from..].iter().fold(0.0f64, |m, v| m.max(v.abs()))
+}
+
+/// The first sample at which `x`'s magnitude reaches `level` after `from`.
+fn onset_at(x: &[f64], from: usize, level: f64) -> f64 {
+    let i = (from..x.len()).find(|&i| x[i].abs() >= level).unwrap();
     // (Between the samples either side of the crossing.)
     let (a, b) = (x[i - 1].abs(), x[i].abs());
-    (i - 1) as f64 + (share * peak - a) / (b - a)
+    (i - 1) as f64 + (level - a) / (b - a)
 }
 
 #[test]
@@ -295,9 +302,11 @@ fn attack(q: Quality, rate: f64, quiet: bool) -> Vec<f64> {
 
 #[test]
 fn hi_s_attacks_come_out_with_ultra_s() {
-    // Where each attack first reaches 1, 10 and 50 % of its peak (interpolated between
+    // Where each attack first reaches 1, 10 and 50 % of HI's peak (interpolated between
     // samples): a sawtooth, and the VCA's thump alone as it starts (its half way, half a
-    // second on, is the VCAs' own: HI's bias from a table).
+    // second on, is the VCAs' own: HI's bias from a table). The same level for both: ULTRA's
+    // VCA takes in the filter's output above the band (decisions.md R-BLEP, ULTRA's VCA at
+    // 4x), which raises a sawtooth's peaks by 0.15 dB at 44.1 and 48 kHz.
     for rate in [44_100.0, 48_000.0, 96_000.0] {
         let at = (0.25 * rate) as usize;
         for quiet in [true, false] {
@@ -309,7 +318,8 @@ fn hi_s_attacks_come_out_with_ultra_s() {
                 &[0.01, 0.1, 0.5]
             };
             for &share in shares {
-                let off = onset(&h, at, share) + LINE_UP.0 as f64 - onset(&u, at, share);
+                let level = share * peak(&h, at);
+                let off = onset_at(&h, at, level) + LINE_UP.0 as f64 - onset_at(&u, at, level);
                 assert!(
                     off.abs() <= 0.5,
                     "{rate} Hz, {}, {} %: HI {off:+.2} samples off ULTRA",
