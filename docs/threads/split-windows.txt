@@ -1,0 +1,21 @@
+# 2026-10-16T20:42:59Z Windows cpus=20
+split: block=256 voices=1 split=0 budget=4 threads=5 workers=4 helpers=0 drive=6 mean=54.8 p50=45.3 p99=132.0 p999=150.8 worst=170.8 late=81 blocks=1875 silent_runs=0 demotions=0 rt=true
+split: block=256 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=28.3 p50=27.6 p99=59.6 p999=74.6 worst=75.4 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true
+split: block=256 voices=1 split=1 budget=8 threads=9 workers=3 helpers=5 drive=6 mean=28.2 p50=27.5 p99=60.4 p999=75.8 worst=78.0 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true
+split: block=256 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=28.4 p50=27.6 p99=63.0 p999=80.9 worst=81.4 late=0 blocks=1875 silent_runs=0 demotions=0 rt=true
+split: block=256 voices=2 split=0 budget=6 threads=7 workers=6 helpers=0 drive=6 mean=56.1 p50=47.2 p99=164.3 p999=203.0 worst=216.8 late=70 blocks=1875 silent_runs=110 demotions=0 rt=true
+split: block=256 voices=2 split=0 budget=12 threads=13 workers=12 helpers=0 drive=6 mean=56.1 p50=52.6 p99=125.7 p999=171.4 worst=211.6 late=53 blocks=1875 silent_runs=318 demotions=0 rt=true
+split: block=256 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=53.5 p50=52.9 p99=133.8 p999=176.7 worst=186.2 late=43 blocks=1875 silent_runs=79 demotions=0 rt=true
+split: block=256 voices=2 split=2 budget=14 threads=15 workers=4 helpers=10 drive=6 mean=53.1 p50=52.3 p99=131.5 p999=173.1 worst=208.3 late=47 blocks=1875 silent_runs=116 demotions=0 rt=true
+split: block=256 voices=3 split=0 budget=14 threads=15 workers=14 helpers=0 drive=6 mean=59.6 p50=55.1 p99=148.7 p999=255.8 worst=277.1 late=64 blocks=1875 silent_runs=437 demotions=0 rt=true
+split: block=256 voices=3 split=3 budget=18 threads=19 workers=3 helpers=15 drive=6 mean=60.1 p50=58.7 p99=144.3 p999=213.4 worst=251.4 late=52 blocks=1875 silent_runs=184 demotions=0 rt=true
+split: block=128 voices=1 split=0 budget=4 threads=5 workers=4 helpers=0 drive=6 mean=55.0 p50=46.0 p99=152.8 p999=180.1 worst=288.5 late=140 blocks=3750 silent_runs=0 demotions=0 rt=true
+split: block=128 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=27.2 p50=25.9 p99=66.8 p999=89.4 worst=112.3 late=1 blocks=3750 silent_runs=0 demotions=0 rt=true
+split: block=128 voices=1 split=1 budget=8 threads=9 workers=3 helpers=5 drive=6 mean=27.0 p50=25.7 p99=65.0 p999=90.8 worst=93.1 late=0 blocks=3750 silent_runs=0 demotions=0 rt=true
+split: block=128 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=27.4 p50=26.0 p99=67.8 p999=89.8 worst=115.7 late=1 blocks=3750 silent_runs=0 demotions=0 rt=true
+split: block=128 voices=2 split=0 budget=6 threads=7 workers=6 helpers=0 drive=6 mean=56.0 p50=48.1 p99=139.3 p999=177.7 worst=189.5 late=111 blocks=3750 silent_runs=240 demotions=0 rt=true
+split: block=128 voices=2 split=0 budget=12 threads=13 workers=12 helpers=0 drive=6 mean=56.0 p50=51.1 p99=127.1 p999=171.5 worst=176.3 late=88 blocks=3750 silent_runs=431 demotions=0 rt=true
+split: block=128 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=41.8 p50=38.6 p99=93.7 p999=159.6 worst=168.8 late=34 blocks=3750 silent_runs=71 demotions=0 rt=true
+split: block=128 voices=2 split=2 budget=14 threads=15 workers=4 helpers=10 drive=6 mean=42.3 p50=37.3 p99=120.1 p999=178.4 worst=211.8 late=52 blocks=3750 silent_runs=131 demotions=0 rt=true
+split: block=128 voices=3 split=0 budget=14 threads=15 workers=14 helpers=0 drive=6 mean=59.8 p50=57.6 p99=129.8 p999=178.0 worst=247.6 late=86 blocks=3750 silent_runs=896 demotions=0 rt=true
+split: block=128 voices=3 split=3 budget=18 threads=19 workers=3 helpers=15 drive=6 mean=50.1 p50=45.8 p99=148.1 p999=217.6 worst=248.7 late=75 blocks=3750 silent_runs=171 demotions=0 rt=true
