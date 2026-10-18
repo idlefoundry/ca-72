@@ -7181,9 +7181,6 @@ after. With the new rule: 0 pixels apart, and 0 changed 4 s after, in 3 runs wit
 diagnostic and 5 without. Then `cargo test --workspace --features
 ca72-plugin/standalone-production` as CI runs it; and the editor's tests and clippy on the Mac
 (see the PR).
-**Evidence (the Mac, 2026-10-17):** `a_packs_keyboard_is_its_own` (an official look draws the
-keyboard as before; a pack's keys and drawing change it); every test, clippy, fmt. SIGNAL BASIN's
-keyboard view passed by the reviewing agent, its last notes taken. Not yet: the presets' drawer.
 
 ## R-EDITOR-CPU. The editor's cost while sound plays
 
