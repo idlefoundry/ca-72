@@ -6031,6 +6031,40 @@ GarageBand and Logic checks remain open.
   Developer ID").
 - The scripts and logs are in `~/lab/artifacts/ca-72/0.2.5/`.
 
+## R-STILL-LONGER. The Windows window test waits out the hamster's pause
+
+**Agent decisions, 2026-10-18** (not separately approved; asked for by the session releasing
+0.2.6, whose PR #50 fails on Windows in the same test):
+- **What failed.** From 0.2.5, `windows_window_tests::the_window_shown_in_places_is_the_window_shown_whole`
+  failed on Windows at times: `main`'s run 39068098309 ("52 pixels shown otherwise than in the
+  whole frame") on commit `212967e`, whose PR run 39066363897 and tag run 39068050615 passed on
+  Windows; #50's runs with 58 and 35. 0.2.4 and every earlier run passed.
+- **Why.** Not a place missed by the partial present (R58, R59): the test's idea of still. It
+  called the window still once two frames 400 ms apart were alike. A new instance is at LO
+  since R-LO-DEFAULT, so the test's QUALITY opening shows the hamster, not HI's lamp: once the
+  synth is quiet his wheel slows for about 1.9 s (`opening::PACE`, its turn read in quarter
+  degrees, so it creeps in steps), stands `DOZE_AFTER` (1 s), and he curls up asleep over
+  `DOZE_S` (0.7 s). Two looks inside that slowing or that pause were alike; he moved after, and
+  where Windows' repaint came after he had started to doze, it showed the pixels he had
+  changed. HI's lamp only dims smoothly, with no pause; the test was written against it.
+- **The change.** Still is now the same frame at every look, 400 ms apart, for `DOZE_AFTER`
+  plus a second (2 s), within 20 s. `DOZE_AFTER` is `pub(crate)` so the test names the pause
+  it waits out. The test stays at LO, a new instance's QUALITY, so it covers the hamster's run
+  and doze shown in places. Nothing in the editor or the panel changes.
+
+**Evidence (Windows 11, the lab's `DESKTOP-KHN6H8K`, in the desktop session by a scheduled
+task; a debug build of `main` at `0d478a5`, 0.2.5's code, with a diagnostic, 2026-10-18).**
+With the old rule the test alone passed every time, but called the window still about 1.52 s
+after the synth went quiet (10 runs of 11 timed; once 3.1 s); in each of the 9 runs that
+looked, 63 to 69 pixels had changed 4 s later, unrepainted, all inside a 10 by 6 pixel box at
+the hamster's feet (x 831 to 841, y 66 to 72 of an 860-pixel-wide window; the opening's middle
+at 836, 61). A full repaint then matched that later frame to the pixel each time, so the pixels
+shown in places were right. Calling it still after 1.7 to 4.5 s of quiet: 0 pixels changed
+after. With the new rule: 0 pixels apart, and 0 changed 4 s after, in 3 runs with the
+diagnostic and 5 without. Then `cargo test --workspace --features
+ca72-plugin/standalone-production` as CI runs it; and the editor's tests and clippy on the Mac
+(see the PR).
+
 ## R-SKIN-PACKS. Skin packs: the looks as artwork and data, in one open format
 
 **The owner's request, 2026-10-16** (a written brief). A skin system for Idle Foundry's
