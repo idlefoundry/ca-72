@@ -7294,7 +7294,7 @@ added; `before` = c3ada88, `cpu-release`; `after` = this branch; each built on i
 
 **Owner authorisation, 2026-10-17.** "Merge hi-pairs into cpu-release, run the full checks, push
 and open a release PR against main": R-THREADS (the worker budget, without the band-limiting,
-latency and ULTRA VCA work, held by the owner the same day), R-CPU-EXACT and R-HI-PAIRS; and, the
+latency and ULTRA VCA work, held by the owner the same day), R-CPU-EXACT and R-HI-PAIRS; R-SPIN (the owner, 2026-10-18); and, the
 owner asked on 2026-10-18 ("I want editor-perf to be included in this release. So test this in
 any way that you need to."), R-EDITOR-CPU. The request authorises the pull request; merging, signing, tagging, upload and publication wait for
 the owner's go.
@@ -7388,6 +7388,33 @@ not done, the look being kept to the bit.
 `-D warnings` on macOS, `cargo check` of the plug-in for `x86_64-pc-windows-msvc`. Not yet: the
 unseen window in hosts (Live, Logic, Reaper; Activity Monitor with the window covered, minimised
 and the host in the background), and on Windows.
+
+## R-SPIN. Workers spin 50 us, not 200, before they park
+
+**Owner decision, 2026-10-18.** The measurement pass (`docs/work/cpu-measurements-2026-10.md`
+on the measuring session's branch, item 4) found `pool::SPIN` at 50 us took 12 to 28 points of
+a core off the process for one to ten HI voices on the Mac (one voice 63 to 68 % down to 43 to
+48 %), late blocks unchanged. Asked whether to test it on the other systems and put it in 0.2.6:
+"Yes, do the tests and add it to 0.2.6".
+
+**Agent decision, 2026-10-18:** `SPIN` 50 us. A block's runs follow each other within
+microseconds (its second `CHUNK`), so 50 us still catches them; the next block is 2.7 ms away at
+128 frames and 48 kHz, so a worker parks and wakes for every block either way, and the longer
+spin was mostly spent after a block's last voice.
+
+**Evidence (2026-10-18; `poly_bench` paced, Feedback Funk, four workers made audio threads, 48
+kHz, 20 s, the 200 and 50 us builds alternated in two rounds of opposite order, built from this
+branch on each machine; process CPU from the shell's `time` on Linux, the process's own
+processor time on Windows):**
+- **Linux, Ryzen 7 7800X3D** (real-time granted; the timing lock): process CPU the same within
+  half a point at one, four and ten voices, 128 and 256 frames (9.5, 14 and 27 %); no late block
+  in any run (0 of 7,500 and 3,750); the worst blocks alike.
+- **Windows, i5-13600K** (unpinned, as a host runs it): process CPU within about two points
+  either way (20 to 22 %, 26 to 29 %, 30 to 32 %); late blocks only at ten voices, as many at 200
+  us as at 50 (128 frames: 4 and 3, then 3 and 1; 256 frames: 1 and 9, then 6 and 0); the worst
+  blocks alike.
+- So the saving is the Mac's: parking a thread costs little on Linux and Windows, and the spin
+  with it. On none of the three is the 50 us spin later.
 
 ## R-BLEP. The oscillators band-limited by a 32-tap windowed sinc, corners and all
 
