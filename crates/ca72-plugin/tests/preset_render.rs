@@ -85,9 +85,11 @@ fn settings(voices: usize, seconds: f64) -> String {
         None => "factory".into(),
     };
     // DOUBLE only where set, so a reference made without it reads the same as before.
-    let double = match env("CA72_DOUBLE", 0.0) {
-        d if d == 0.0 => String::new(),
-        d => format!(" double {d}"),
+    let d: f64 = env("CA72_DOUBLE", 0.0);
+    let double = if d == 0.0 {
+        String::new()
+    } else {
+        format!(" double {d}")
     };
     format!(
         "quality {} voices {voices} seconds {seconds} presets {presets} from_0_1 {}{double}",
