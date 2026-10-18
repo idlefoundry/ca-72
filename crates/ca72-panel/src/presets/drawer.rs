@@ -181,10 +181,12 @@ pub enum PresetKey {
     /// MIDI Learn's list in the presets' place, or back.
     MidiLearn,
     Close,
+    /// Restore the sound of a fresh instance, keeping the player's preferences.
+    Init,
 }
 
 impl PresetKey {
-    pub const ALL: [PresetKey; 8] = [
+    pub const ALL: [PresetKey; 9] = [
         PresetKey::Rename,
         PresetKey::Tags,
         PresetKey::Delete,
@@ -193,6 +195,7 @@ impl PresetKey {
         PresetKey::Restore,
         PresetKey::MidiLearn,
         PresetKey::Close,
+        PresetKey::Init,
     ];
 
     fn legend(self) -> &'static str {
@@ -205,10 +208,15 @@ impl PresetKey {
             PresetKey::Restore => "RESTORE",
             PresetKey::MidiLearn => "MIDI LEARN",
             PresetKey::Close => "CLOSE",
+            PresetKey::Init => "INIT",
         }
     }
 
     fn centre(self) -> (f64, f64) {
+        if self == PresetKey::Init {
+            // A dedicated action beside PRESET, above the existing two rows of keys.
+            return (KEY_X[3], LABEL_Y);
+        }
         let i = PresetKey::ALL.iter().position(|k| *k == self).unwrap_or(0);
         (KEY_X[i % 4], KEY_Y[i / 4])
     }
@@ -1497,6 +1505,9 @@ fn print_svg() -> String {
         text(&mut s, d.x, LABEL_Y, t, LABEL, "start");
     }
     for k in PresetKey::ALL {
+        if k == PresetKey::Init {
+            continue;
+        }
         let (x, y) = k.centre();
         text(&mut s, x, y - LEGEND_RISE, k.legend(), KEY_LEGEND, "middle");
     }
@@ -1588,7 +1599,7 @@ impl DrawerRenderer {
                 &mut self.frame,
                 &still,
                 self.scale,
-                (KEY_X[0] - w, KEY_Y[0] - h, KEY_X[3] + w, KEY_Y[1] + h),
+                (KEY_X[0] - w, 0.0, KEY_X[3] + w, KEY_Y[1] + h),
             );
             let mut o = Svg::default();
             for k in &keys.held {
@@ -1706,6 +1717,16 @@ fn make_still(scale: f64, pictures: &Pictures) -> Pixmap {
     for k in PresetKey::ALL {
         sprite(&mut still, &cap, s, k.centre(), KEY);
     }
+    let (x, y) = PresetKey::Init.centre();
+    svg_over(
+        &options,
+        &mut still,
+        s,
+        &format!(
+            "<text x='{x}' y='{y}' font-family='{FAMILY}' font-size='27' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>INIT</text>",
+            colour::LEGEND
+        ),
+    );
     still
 }
 
@@ -1933,6 +1954,29 @@ mod tests {
         }
         assert_eq!(drawer_hit(&s, 10.0, DRAWER_H + 1.0), None);
         const { assert!(ROWS_SHOWN >= 15 && TAG_LINES >= 16) };
+    }
+
+    /// Init is available before any preset is selected, while editing, and in MIDI Learn.
+    #[test]
+    fn init_is_found_without_a_preset_or_selection() {
+        for s in [
+            DrawerScene::default(),
+            DrawerScene {
+                editing: Some(Edit::Save),
+                ..DrawerScene::default()
+            },
+            DrawerScene {
+                midi: Some(MidiList::default()),
+                ..DrawerScene::default()
+            },
+        ] {
+            let (x, y) = key_centre(PresetKey::Init);
+            assert_eq!(
+                drawer_hit(&s, x, y),
+                Some(DrawerTarget::Key(PresetKey::Init))
+            );
+            assert!(y + KEY.1 / 2.0 < KEY_Y[0] - LEGEND_RISE);
+        }
     }
 
     /// MIDI Learn's list in the list's place: its rows and their words found where drawn; the
