@@ -6161,3 +6161,27 @@ DAW, native host window or hardware device. Workspace/all-target clippy passes w
 features and all features; the final colour and marker changes also pass the panel's focused
 regressions and clippy. The separate Apple silicon standalone build uses its own data folder
 through review launchers; no installed plug-in or the skin-packs checkout is replaced.
+
+**Selection review candidate, 2026-10-18.** The owner found the selected preset hard to
+distinguish after the warmer-orange revision and suggested the previous brighter yellow for
+it. Ordinary rows retain the revised darker orange; only the current preset's row uses
+(255, 197, 110), with a filled triangle. A hovered non-current row uses brighter orange and
+an outline arrow, distinct from the current and ordinary rows. Unavailable actions keep their
+shading. A selected star stays gold when hovered. No text, filtering or preset state changes.
+The per-item ink is part of redraw equality; both the old and new row are restored and drawn
+again when selection moves. Visual acceptance remains with the owner.
+
+The candidate comparison uses identical fixtures (Brass Tutti current, Hollow Glider
+hovered), labels the revision as for review, and identifies historical update text as renderer
+test data. It is a new Library image, retaining the earlier ones. The focused tests check
+palette/marker distinctions and move/clear selection independently of hover at widths 860,
+1035 and 3108, comparing every frame with a fresh whole redraw and checking an unaffected
+ordinary row's pixels. The a64685a test artifact is superseded; the rebuilt review candidate
+will be separately named and continue to use isolated data, without installation or launch.
+
+**Selection candidate evidence (the Mac, 2026-10-18):** 52 panel tests and both approved-image
+tests pass; 7 affected editor drawer tests pass, with the optional image test ignored.
+Workspace/all-target clippy passes with default and all features, and the optimised arm64
+standalone rebuild succeeds. Source and image review found no defect in the per-item ink,
+selected-star hover or partial redraw. User visual acceptance is pending; no native editor,
+DAW or audio device was opened by this work.
