@@ -7058,3 +7058,13 @@ change, run alternately):** every factory preset the same to the bit at HI (ten 
 runs each: Feedback Funk 395 to 380 % of a core (-3.9 %); the other eighteen presets, without the
 preamplifier, within ±1 % (no change beyond noise: the bias's temperature part is a small share of
 it, the tail current's iterations the rest).
+
+**Correction, later the same day:** ULTRA's renders are not repeatable over time on this machine
+in 0.2.5 itself: `main`'s own binary, serial (no workers), matched its ULTRA references at 19:16
+and again minutes apart later, then differed from them in every preset (the same way in two runs
+in a row) an hour on; HI and LO matched every time. The ULTRA comparison above (minutes apart) is
+therefore weaker evidence than HI's. The two changes keep ULTRA's sound by construction: the lamp
+driver is its own circuit, read by nothing in the audio, and the bias's temperature part is the
+same arithmetic on the same inputs. Why 0.2.5's ULTRA is not repeatable is not yet known (to find
+before ULTRA is offered as the render engine; a candidate is something it takes from another
+thread at a time that follows the machine's load).
