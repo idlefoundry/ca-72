@@ -294,8 +294,11 @@ impl Look {
             }
         };
 
-        // The pictures, by slot: PNG as it is, SVG drawn at the built-in picture's size.
+        // The pictures, by slot: PNG as it is, SVG drawn at the built-in picture's size. Each
+        // slot decodes its own, so the pixels are counted by slot as well as by file: one large
+        // picture named by every slot is that many pictures' pixels.
         let mut pictures = Overrides::new();
+        let mut slot_pixels = 0u64;
         for (name, path) in &spec.pictures {
             let Some(&(slot, official)) = skin::SLOTS
                 .iter()
@@ -336,6 +339,10 @@ impl Look {
                 )
             };
             let Some(source) = source else { continue };
+            slot_pixels += match &source {
+                skin::Source::Svg(_) => u64::from(size.0) * u64::from(size.1),
+                skin::Source::Png(_) => own.0 as u64 * own.1 as u64,
+            };
             let (k0, k1) = (
                 f64::from(own.0) / f64::from(own.1.max(1.0)),
                 f64::from(size.0) / f64::from(size.1),
@@ -351,6 +358,17 @@ impl Look {
                 );
             }
             pictures.insert(slot, source);
+        }
+        if slot_pixels > limits.picture_pixels {
+            report.reject(
+                "look.pixels",
+                at,
+                format!(
+                    "the slots' pictures are {slot_pixels} pixels together, decoded each for its \
+                     slot: more than {}",
+                    limits.picture_pixels
+                ),
+            );
         }
 
         if let Some(t) = spec.face_tint
@@ -836,11 +854,73 @@ fn fitting(
 /// [`TRUSTED_KEYS`]: its look, or its name there and what rejected it. Something that is not a
 /// pack is passed over (no link is followed). Of the same pack (its id) found more than once,
 /// one is kept ([`supersedes`]): a pack's update, added beside it, is the one used.
+///
+/// A pack read before and unchanged since (its files' paths, sizes and times the same) is not
+/// checked again: the settings' menu asks each time it opens, and a pack's checks (every
+/// picture decoded, every drawing timed) take long enough to stall the editor.
 pub fn discover(dir: &Path) -> Vec<Result<Look, (String, Report)>> {
-    discover_with(dir, TRUSTED_KEYS)
+    discover_in(dir, TRUSTED_KEYS, true)
 }
 
 pub fn discover_with(dir: &Path, keys: &[TrustedKey]) -> Vec<Result<Look, (String, Report)>> {
+    discover_in(dir, keys, false)
+}
+
+/// What each pack read was found to be, by its path and its files' stamp ([`stamp`]).
+type Checked = Vec<(std::path::PathBuf, u64, Result<Look, Report>)>;
+static CHECKED: Mutex<Checked> = Mutex::new(Vec::new());
+
+/// A pack's (folder or file) files as they are now: each one's path, size and modification
+/// time, hashed; none if it cannot be read or holds more than a pack may (it is then checked,
+/// and refused, every time).
+fn stamp(path: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut todo = vec![path.to_path_buf()];
+    let mut seen = 0usize;
+    while let Some(p) = todo.pop() {
+        let m = std::fs::symlink_metadata(&p).ok()?;
+        seen += 1;
+        if seen > Limits::default().files * 2 + 1 {
+            return None;
+        }
+        (p.as_os_str(), m.len(), m.modified().ok(), m.is_dir()).hash(&mut h);
+        if m.is_dir() {
+            let mut names: Vec<_> = std::fs::read_dir(&p)
+                .ok()?
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .collect();
+            names.sort();
+            todo.extend(names);
+        }
+    }
+    Some(h.finish())
+}
+
+/// `path`'s pack read and checked, or (`cached`) as found before if its files are unchanged.
+fn open_cached(path: &Path, keys: &[TrustedKey], cached: bool) -> Result<Look, Report> {
+    let stamp = cached.then(|| stamp(path)).flatten();
+    let lock = || CHECKED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(st) = stamp
+        && let Some((_, _, found)) = lock().iter().find(|(p, s, _)| p == path && *s == st)
+    {
+        return found.clone();
+    }
+    let found = Look::open_with(path, &Limits::default(), keys);
+    if let Some(st) = stamp {
+        let mut checked = lock();
+        checked.retain(|(p, _, _)| p != path && p.exists());
+        checked.push((path.to_path_buf(), st, found.clone()));
+    }
+    found
+}
+
+fn discover_in(
+    dir: &Path,
+    keys: &[TrustedKey],
+    cached: bool,
+) -> Vec<Result<Look, (String, Report)>> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -855,7 +935,7 @@ pub fn discover_with(dir: &Path, keys: &[TrustedKey]) -> Vec<Result<Look, (Strin
     found.sort_by_key(std::fs::DirEntry::file_name);
     let mut out: Vec<Result<Look, (String, Report)>> = Vec::new();
     for e in found.into_iter().take(64) {
-        match Look::open_with(&e.path(), &Limits::default(), keys) {
+        match open_cached(&e.path(), keys, cached) {
             Ok(look) => {
                 let same = out
                     .iter()

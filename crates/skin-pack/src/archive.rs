@@ -67,8 +67,11 @@ pub fn read(bytes: &[u8], limits: &Limits, report: &mut Report) -> Files {
         return Files::default();
     }
     // A pack's files at its top, or all in one folder at its top (as archivers make them).
+    // (An archiver's own files, `__MACOSX/` beside the folder, say, left out first: they are
+    // passed over, so they do not make a second folder at the top.)
     let names: Vec<String> = (0..zip.len())
         .filter_map(|i| zip.name_for_index(i).map(str::to_owned))
+        .filter(|n| !metadata(n))
         .collect();
     let prefix = common_folder(&names);
     let mut read: Vec<(String, Vec<u8>)> = Vec::new();
@@ -102,16 +105,14 @@ pub fn read(bytes: &[u8], limits: &Limits, report: &mut Report) -> Files {
             .and_then(|p| raw.strip_prefix(p))
             .unwrap_or(&raw)
             .to_owned();
+        if metadata(&name) {
+            continue;
+        }
         if entry.is_dir() {
             let dir = name.trim_end_matches('/');
             if !dir.is_empty() {
                 paths::check_dir(dir, limits, report);
             }
-            continue;
-        }
-        if paths::ignored(name.rsplit('/').next().unwrap_or(&name))
-            || name.split('/').any(|p| p == "__MACOSX")
-        {
             continue;
         }
         let Some(kind) = paths::check(&name, limits, report) else {
@@ -171,6 +172,14 @@ pub fn read(bytes: &[u8], limits: &Limits, report: &mut Report) -> Files {
         limits,
         report,
     )
+}
+
+/// An entry an archiver or a file manager adds (`__MACOSX/` and what is in it, `.DS_Store`...):
+/// passed over.
+fn metadata(name: &str) -> bool {
+    let trimmed = name.trim_end_matches('/');
+    paths::ignored(trimmed.rsplit('/').next().unwrap_or(trimmed))
+        || trimmed.split('/').any(|p| p == "__MACOSX")
 }
 
 /// The one folder every entry is in, if there is one and no manifest at the top.
@@ -253,6 +262,17 @@ mod tests {
             files.contains("skin.toml") && files.contains("LICENSE.txt"),
             "{r}"
         );
+        // The same with macOS's archiver's metadata beside its folder (passed over).
+        let z = zip_of(&[
+            ("night/skin.toml", b"format = 1\n", DEFLATED),
+            ("night/LICENSE.txt", b"x", DEFLATED),
+            ("__MACOSX/night/._skin.toml", b"x", DEFLATED),
+            ("__MACOSX/._night", b"x", DEFLATED),
+        ]);
+        let mut r = Report::default();
+        let files = read(&z, &Limits::default(), &mut r);
+        assert!(r.findings.is_empty(), "{r}");
+        assert!(files.contains("skin.toml") && !files.contains("__MACOSX/night/._skin.toml"));
         // Written and read again, the same.
         let again = read(&write(&files).expect("written"), &Limits::default(), &mut r);
         assert_eq!(again, files);

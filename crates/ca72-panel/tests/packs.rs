@@ -920,3 +920,97 @@ fn a_packs_drawer_is_its_own() {
         assert!(r.has(code), "{code}: {r}");
     }
 }
+
+/// A pack's pictures are counted by slot as well as by file (each slot decodes its own): one
+/// large picture named by many slots is that many pictures' pixels, and refused past the limit.
+#[test]
+fn a_picture_named_by_many_slots_is_counted_for_each() {
+    let slots = [
+        "knob",
+        "knob-big",
+        "pointer",
+        "face",
+        "plate",
+        "walnut",
+        "screw",
+        "jack",
+        "jewel",
+        "power",
+        "rocker-blue",
+        "rocker-orange",
+        "tab",
+        "tab-lit",
+        "key",
+        "glass",
+        "rocker-ivory",
+        "white-key",
+        "black-key",
+    ];
+    let pack_with = |n: usize| {
+        edited(|d| {
+            let big = ca72_panel::Pixmap::new(1000, 1000).expect("a picture");
+            std::fs::write(d.join("art/big.png"), big.encode_png().expect("encoded"))
+                .expect("written");
+            replace(
+                &d.join("skin.toml"),
+                "base = \"classic\"",
+                "base = \"realistic\"",
+            );
+            let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+            let named: String = slots[..n]
+                .iter()
+                .map(|s| format!("{s} = \"art/big.png\"\n"))
+                .collect();
+            std::fs::write(
+                d.join("skin.toml"),
+                text.replace(
+                    "[look]",
+                    "[[assets]]\npath = \"art/big.png\"\norigin = \"original\"\n\n[look]",
+                ) + "\n[look.pictures]\n"
+                    + &named,
+            )
+            .expect("written");
+        })
+    };
+    // One million pixels: in one slot, within the limit; in all of them, past it.
+    let one = pack_with(1);
+    Look::open(one.path()).unwrap_or_else(|r| panic!("{r}"));
+    let all = pack_with(slots.len());
+    let r = Look::open(all.path()).expect_err("refused");
+    assert!(r.has("look.pixels"), "{r}");
+}
+
+/// The packs installed are read once while unchanged (the settings' menu asks each time it
+/// opens): one edited is read again, its change shown.
+#[test]
+fn an_installed_pack_is_read_again_only_when_it_changes() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let pack = dir.path().join("starter");
+    std::fs::create_dir_all(&pack).expect("a folder");
+    copy(starter(), &pack);
+    let names = || {
+        ca72_panel::look::discover(dir.path())
+            .into_iter()
+            .map(|f| {
+                f.map(|l| l.name)
+                    .unwrap_or_else(|(n, r)| panic!("{n}: {r}"))
+            })
+            .collect::<Vec<_>>()
+    };
+    let first = names();
+    assert_eq!(first.len(), 1);
+    assert_eq!(names(), first);
+    let manifest = pack.join("skin.toml");
+    let text = std::fs::read_to_string(&manifest).expect("read");
+    let name_line = text
+        .lines()
+        .find(|l| l.starts_with("name = "))
+        .expect("a name")
+        .to_owned();
+    std::fs::write(
+        &manifest,
+        text.replace(&name_line, "name = \"STARTER, EDITED\""),
+    )
+    .expect("written");
+    assert_eq!(names(), vec!["STARTER, EDITED".to_owned()]);
+}
