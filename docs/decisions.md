@@ -7124,8 +7124,8 @@ DOUBLE switch and from this change):**
   the release head, alternated, the mean of two runs):** Linux, Ryzen 7 7800X3D (under the timing
   lock): HI 2286 to 2175 (-4.9 %), with DOUBLE 4652 to 4403 (-5.4 %); Windows, i5-13600K: HI
   2457 to 2312 (-5.9 %), with DOUBLE 4908 to 4672 (-4.8 %), the presets spread more widely
-  there. A third of the Mac's saving: why (the x86-64 baseline's code for the two lanes, or
-  those cores already overlapping one voice's elimination) is not yet known.
+  there. A third of the Mac's saving at first; why, and the SSE2 elimination that brings x86 to
+  -7 to -9 %, are below ("Why x86 saved a third as much").
 - The core's, real-time library's and plug-in's tests; clippy with `-D warnings`.
 
 ### Why x86 saved a third as much, and the elimination in SSE2 (2026-10-18)

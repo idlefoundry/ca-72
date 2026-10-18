@@ -16,7 +16,7 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.6: HI uses less CPU with POLY or DOUBLE (about 15 % on Apple silicon, about 5 % on
+**Status:** 0.2.6: HI uses less CPU with POLY or DOUBLE (about 15 % on Apple silicon, 7 to 9 % on
 Intel and AMD), the sound the same to the bit; more than one instance shares the worker threads evenly, stronger
 computers get more of them, on six fast cores or more ULTRA spreads a voice over six threads, and
 the panel rests while its window is minimised (on macOS also hidden or covered).
