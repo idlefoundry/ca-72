@@ -637,6 +637,49 @@ impl Playing {
                 (self.out[0][k], self.out[1][k]) = (0.0, 0.0);
                 continue;
             }
+            if p.twin_on && self.voice.pairs() && self.twin.voice.pairs() {
+                // HI with the twin sounding: the voice's and its twin's filters solved side by
+                // side (decisions.md R-HI-PAIRS), each the same samples to the bit. Their keys
+                // and jacks first (neither hangs on the other's output), then the two to the
+                // filter, the pair, and each on from it.
+                let voice = &mut self.voice;
+                self.key.step(gate, note, |k, on| voice.note(k, on));
+                let mut j = jacks(&mut self.character, x, rate, m);
+                if p.doubled {
+                    j.detune = j.detune.map(|d| d - p.half);
+                }
+                let t = &mut self.twin;
+                let twin = &mut t.voice;
+                t.key
+                    .step(gate && p.doubled, note, |k, on| twin.note(k, on));
+                let mut jt = jacks(&mut t.character, x, rate, m);
+                if p.doubled {
+                    jt.detune = jt.detune.map(|d| d + p.half);
+                }
+                let hv = self.voice.before_filter(&j);
+                let ht = self.twin.voice.before_filter(&jt);
+                let (fv, ft) = Voice::filter_pair(&mut self.voice, &hv, &mut self.twin.voice, &ht);
+                let mut y = self.voice.after_filter(&hv, fv);
+                if !y.is_finite() {
+                    self.broken = true;
+                    y = 0.0;
+                }
+                self.turned(self.voice.trigger_closed(), m, &mut p);
+                let (mut left, mut right, mut most) = (y * gl, y * gr, y.abs());
+                let mut z = self.twin.voice.after_filter(&ht, ft);
+                if !z.is_finite() {
+                    self.broken = true;
+                    z = 0.0;
+                }
+                left += z * hl;
+                right += z * hr;
+                most = most.max(z.abs());
+                twin_peak = twin_peak.max(z.abs());
+                peak = peak.max(most);
+                self.out[0][k] = left;
+                self.out[1][k] = right;
+                continue;
+            }
             let voice = &mut self.voice;
             self.key.step(gate, note, |k, on| voice.note(k, on));
             let mut j = jacks(&mut self.character, x, rate, m);
