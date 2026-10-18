@@ -6470,3 +6470,6 @@ row's band teal, the arrows lit). Format limits left: the drawer's full width wi
 hand's bay, the tags and tabs as text rather than lamp keys, no scrollbar or column header, the
 plug-in's dim level for a pressed key's legend and for the count, the 8-unit lip (the displays
 reach near the drawer's foot).
+
+**The owner, 2026-10-18,** on the drawer's renders (browsing, typing, MIDI Learn): "ya, this looks
+good to me."
