@@ -7280,6 +7280,8 @@ not done, the look being kept to the bit.
   is left as it was. A window covered by others is drawn as before on Windows. Unseen, the keys, gestures
   and the host are attended to every frame as before and the scene drawn every 250 ms (a resize,
   the drawer, MIDI Learn kept up), nothing shown; seen again, the frame is shown whole at once.
+  Audio Units are excepted by R-AU-REMOTE-VISIBILITY below: their native window need not be
+  the surface the host presents.
 - **The drops' columns' dx squared once for all their rows,** the same sums in the same order:
   200 frames at two scales hashed whole, the same before and after; 0.71 to 0.66 ms a frame for
   ten voices' drops at 3440 pixels.
@@ -7391,3 +7393,56 @@ This change concerns the panel renderer and its regression coverage. Init and th
 version display remain separate. Native Logic/GarageBand rendering validation is still
 under investigation separately; offscreen checks do not establish release acceptance in
 those hosts. No installed plug-in, host window or audio device was used for this work.
+
+## R-AU-REMOTE-VISIBILITY. A remote AU view keeps presenting
+
+**Decision, 2026-10-18.** Keep R-EDITOR-CPU's native-window occlusion optimization for
+ordinary CLAP, VST3 and both standalone adapters. Except AUv2: a remote view may be visible
+while its local NSWindow's Visible occlusion bit is clear. The original gate suppresses
+all presentations in that case, including the first image on reopening. The local window's
+visibility is not authoritative for the host's remotely presented surface.
+
+**Implementation.** The AUv2 wrapper advertises the private, versioned host capability
+`com.idlefoundry.native-window-occlusion-unreliable/1`. `IHost` defaults to no marker;
+only `WrapAsAUV2` opts out, per instance. The CLAP backend queries presence once during
+initialization and caches it in that instance's GUI context. `PluginApi` remains `Clap`.
+The editor bypasses macOS's native occlusion gate only for that capability. Missing markers,
+unknown versions, VST3 and standalone retain the original policy. Rust neither dereferences
+nor retains the static marker pointer, and the frame timer makes no host extension calls.
+The AU wrapper and embedded CLAP must be rebuilt together. No hidden-window CPU saving is
+claimed for AU; changed-frame suppression and the other performance work remain.
+
+**Evidence (GarageBand 10.4.14, macOS 27.0, Apple silicon, 2026-10-18).** A distinct
+diagnostic build based on `2c0a584` ran in a fresh AUHostingService, separately from the
+production instrument, with transport stopped. Its visibly rendered proxy had a backing
+`NSKVONotifying_NSServiceViewControllerWindow` with raw occlusion state 8192, Visible bit
+clear and `isVisible=true`. The logged rectangle alone did not prove that it was wholly
+off-screen; the unreliable visibility signal is the relevant observation.
+
+- The diagnostic's original-policy switch, on reopen: a blank visible editor, 929 frame
+  callbacks, 55 draws and zero presentation calls across a contiguous 13.996-second sample.
+- With the capability policy: the full panel returned on the next frame, about 14 ms after
+  the test switch. Two more editor reopenings each made an initial presentation call.
+- Editor close: no callbacks, draws or presentation calls in a verified 3.173-second interval.
+- Native host preset loading exercised a visible redraw. The exact resulting parameter
+  value and direct knob-drag interaction were not independently asserted.
+- The host's Hide command was issued; the retained view continued drawing an unchanged
+  scene. Actual disappearance from screen and restore still need hands-on confirmation.
+
+These are diagnostic call counts, not compositor acknowledgements or production FPS/CPU
+measurements. The full/blank panel outcomes were also observed in native screenshots.
+Diagnostic logging, mode switches, identities and test-data paths are not in product code.
+The experiment predates the later worker-spin change; integration preserves that work.
+
+**Regression coverage.** The C++ proxy test checks local/default dispatch, the remote marker,
+unknown versions, instance isolation and the standard GUI extension. The Rust tests exercise
+actual CLAP construction, initialization and GUI context propagation, including no early
+query and one query per instance. CI runs the vendored crate's tests explicitly because
+workspace tests do not execute dependency unit tests. A separate extracted production-frame
+harness passed the remote/hidden/restore cases with the correction and failed the original
+remote case; that mock is control-flow evidence, not native-host validation.
+
+**Remaining acceptance.** Direct TUNE drag and independently observed GarageBand Hide/restore;
+Logic (not installed during the experiment); ordinary direct CLAP/VST3 and standalone
+visible/hidden/reopen smoke tests; normal release validators and production CPU measurements.
+Do not treat approval to include the correction as evidence that these checks passed.

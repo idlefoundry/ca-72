@@ -42,6 +42,12 @@ target_add_auv2_wrapper(
 
 # Exercise the actual AU event adapter: no editor or physical audio/MIDI device.
 enable_testing()
+add_executable(ca72-native-occlusion-tests tests/occlusion.cpp)
+target_link_libraries(ca72-native-occlusion-tests PRIVATE ca72-auv2-clap-wrapper-auv2-lib
+    "-framework Foundation" "-framework CoreFoundation"
+    "-framework AudioToolbox" "-framework CoreMIDI")
+add_test(NAME native-occlusion-capability COMMAND ca72-native-occlusion-tests)
+
 add_executable(ca72-au-midi-tests
     tests/midi.cpp
     ${CLAP_WRAPPER_ROOT}/src/detail/auv2/process.cpp
