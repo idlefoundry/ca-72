@@ -7128,6 +7128,68 @@ DOUBLE switch and from this change):**
   those cores already overlapping one voice's elimination) is not yet known.
 - The core's, real-time library's and plug-in's tests; clippy with `-D warnings`.
 
+### Why x86 saved a third as much, and the elimination in SSE2 (2026-10-18)
+
+**Agent decisions, 2026-10-18** (not separately approved; asked for by the session releasing
+0.2.6; merging waits for the owner):
+- **The cause, two parts.** (1) On x86-64 the paired elimination compiled to scalar code. Its
+  lanes form (`pair::solve5_lanes`: each lane's pivot searched and its rows swapped by reading
+  and writing `.0[lane]`, each lane's step kept or skipped by a select on a `[bool; 2]`) gives
+  LLVM a branch per lane: on x86-64 (`x86_64-unknown-linux-gnu`, SSE2) it updated the rows one
+  lane at a time, a `movsd` load, `mulsd`, `subsd` and `movsd` store and a `testb`/`je` per lane
+  and entry, the matrix in a 1224-byte frame indexed by a loop over the columns (48 `mulsd`, 35
+  `subsd`, 47 branches, 217 stack accesses in the elimination alone). AArch64 has the same
+  structure but 32 vector registers, `fcsel` and cheap lane moves, and lost less to it. Alone,
+  the loop elimination (`vcf::pair_tests::pair_timing`, 20,000 of a HI filter's own Jacobians):
+  M4 Pro 101 ns a voice scalar, 35 paired (-66 %); Ryzen 7 7800X3D 88 and 54 (-39 %); i5-13600K
+  76 to 83 and 49 (-36 to -41 %). (2) The elimination is a smaller part of an x86 HI voice: its
+  scalar form is faster there than on the M4 (76 to 88 ns against 101) while the rest of the voice
+  is about 1.45 times slower (the Ryzen's 0.2.5, 2279 % of a core in all, against the M4's 1785).
+  The voice's saving over the elimination's gives its share: M4 15.5 / 66, about 23 %; Ryzen
+  4.7 / 39 and 8.1 / 65, about 12.5 %; i5 5.1 / 39 and 7.4 / 62, about 12.5 %. The same share
+  from both forms on both machines: the model holds. So x86 can't reach the M4's 15 % by the
+  elimination alone; what it can reach, the elimination's full saving, it now does.
+- **`pair::sse2::solve5`**, used on x86-64 (elsewhere the lanes form as before), in SSE2
+  intrinsics (x86-64's baseline; no SSE4.1, AVX or FMA assumed): each lane's pivot by comparing
+  both lanes at once (`MAXPD` returns its first operand only where it is the greater, a NaN
+  included, the scalar's `>`), the rows swapped by a masked exchange only if some lane's pivot
+  is not on the diagonal, a row's step done unmasked where both lanes take it (`MOVMSKPD`),
+  masked where one does, skipped where neither does; a column at a time (`column::<COL>`, a
+  constant) so that the loops unroll. Each lane does the scalar's multiplies and subtracts in the
+  scalar's order (no FMA, no reassociation); entries no later step reads (below a pivot in its
+  column, and left of it when rows are swapped) are left as they were rather than computed.
+  `unsafe` in the core crate for the first time, allowed for this module alone: the intrinsics
+  touch registers only, no memory.
+- **A test that keeps it exact**: `vcf::pair_tests::the_paired_solve5_is_the_scalars_to_the_bit`
+  (not ignored), 200,000 random pairs of 5 by 5 systems with zeros of both signs, values below
+  the pivot floor, ties in magnitude, repeated rows and zero columns, each lane of both paired
+  forms against `solve::<5, true>`, to the bit.
+
+**Evidence (2026-10-18; `ref` = 5870fdd, 0.2.5's engine, with `preset_render`'s DOUBLE switch
+added; `before` = c3ada88, `cpu-release`; `after` = this branch; each built on its machine):**
+- `preset_render`, every factory preset, ten voices, 4 s, at HI one thread, DOUBLE at 50 %, 3
+  workers and 12: `before` and `after` the same to the bit as `ref` on the Mac, the Ryzen
+  (Linux) and the i5 (Windows), in all four. (The first check on x86 of the pairs against 0.2.5's
+  own samples.)
+- `cargo test --release -p ca72` (`tests/pairs.rs` among them) on all three; clippy
+  `-D warnings` for aarch64 and x86-64.
+- `pair_timing` with the SSE2 form: Ryzen 31 ns a voice (-65 %, against the lanes form's -39 %),
+  i5 30 to 32 (-60 to -63 %). A loop over the columns first gave 39 and 38: the unrolling is a
+  quarter of the gain.
+- `preset_cost`, ten voices, one thread, alternated: Ryzen (timing lock, two runs each) at HI
+  `ref` 2279, `before` 2171 (-4.7 %), `after` 2094 (-8.1 %; -6 to -12 % a preset); with DOUBLE
+  at 50 % 4589, 4340 (-5.4 %), 4190 (-8.7 %). i5 (pinned to one P-core, three runs each) at HI
+  1990, 1888 (-5.1 %), 1843 (-7.4 %; -5 to -11 %); with DOUBLE 4026, 3800 (-5.6 %), 3661
+  (-9.1 %). The Mac (aarch64 code unchanged; the machine busy with other sessions): `before`
+  1628, `after` 1620; with DOUBLE 3197 and 3200, no change.
+- **The i5's earlier spread**: unpinned, Windows ran `preset_cost` partly on the efficiency
+  cores (0.2.5 at 2457 unpinned on 2026-10-18, 1990 pinned, runs up to 6 % apart unpinned and
+  within 1 % pinned). Measure on that machine pinned (`ProcessorAffinity`), or say which.
+- **Not done**: the lanes form unrolled a column at a time for AArch64 (the Mac's own
+  elimination might gain; NEON intrinsics would be a second copy of this one). The rest of the
+  x86 voice (the loop's evaluation, `fast::tanh`, the tables, the resamplers) is now the larger
+  part of the gap; pairing the evaluation cost more than it saved on the Mac (above).
+
 ## R-RELEASE-0.2.6. 0.2.6
 
 **Owner authorisation, 2026-10-17.** "Merge hi-pairs into cpu-release, run the full checks, push
