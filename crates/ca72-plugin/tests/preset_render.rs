@@ -15,9 +15,11 @@
 //! it does not name at their defaults first, as 0.1 had them), `CA72_POTATO` (set: QUALITY at
 //! LO, the light voices), `CA72_ULTRA` (set: QUALITY at ULTRA); else QUALITY at HI. A switch
 //! is set by `1` or nothing; any other value, or a number that does not read as one, stops the
-//! run. `CA72_RENDER_OUT` writes the run's settings beside the renders (`settings.txt`: QUALITY,
-//! the voices, the seconds, the presets), and a reference's, where it has them, must be the
-//! run's, else the comparison stops (decisions.md R-RENDER-SETTINGS).
+//! run. Once every render asked for is written, `CA72_RENDER_OUT` writes the run's settings
+//! beside them (`settings.txt`: QUALITY, the voices, the seconds, the presets' file by a digest
+//! of its contents, then the renders' files), and removes an earlier run's at the start; a
+//! reference's settings, where it has them, must be the run's, and each render compared must
+//! be among those it lists, else the comparison stops (decisions.md R-RENDER-SETTINGS).
 //!
 //! `cargo test --release -p ca72-plugin --test preset_render -- --ignored --nocapture`
 
@@ -66,9 +68,21 @@ fn quality() -> &'static str {
 
 /// What a render depends on besides the code and the preset, as one line: two renders made
 /// with different settings differ however repeatable the engine is (the voices' count changes
-/// the first sample: decisions.md R-RENDER-SETTINGS).
+/// the first sample: decisions.md R-RENDER-SETTINGS). A presets file is named by its contents'
+/// digest (FNV-1a, 64 bits), not its path, which may hold another version's later.
 fn settings(voices: usize, seconds: f64) -> String {
-    let presets = std::env::var("CA72_PRESETS_FILE").unwrap_or_else(|_| "factory".into());
+    let presets = match std::env::var_os("CA72_PRESETS_FILE") {
+        Some(f) => {
+            let digest = std::fs::read(f)
+                .unwrap()
+                .iter()
+                .fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
+                    (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+                });
+            format!("file-{digest:016x}")
+        }
+        None => "factory".into(),
+    };
     format!(
         "quality {} voices {voices} seconds {seconds} presets {presets} from_0_1 {}",
         quality(),
@@ -173,21 +187,32 @@ fn each_preset_against_a_reference_render() {
         "set CA72_RENDER_OUT, CA72_RENDER_REF or both"
     );
     let made = settings(voices, seconds);
-    if let Some(dir) = &reference {
-        match std::fs::read_to_string(dir.join(SETTINGS)) {
-            Ok(theirs) => assert_eq!(
-                theirs.trim(),
-                made,
-                "the reference in {} was rendered with other settings than this run",
-                dir.display()
-            ),
-            Err(_) => eprintln!("(no {SETTINGS} beside the reference: its settings not checked)"),
-        }
-    }
+    // The reference's renders made with this run's settings (None: a reference from before
+    // settings were kept, not checked). Read before an output there is begun.
+    let listed: Option<Vec<String>> = reference.as_ref().and_then(|dir| {
+        let Ok(theirs) = std::fs::read_to_string(dir.join(SETTINGS)) else {
+            eprintln!("(no {SETTINGS} beside the reference: its settings not checked)");
+            return None;
+        };
+        let mut lines = theirs.lines();
+        assert_eq!(
+            lines.next().unwrap_or_default(),
+            made,
+            "the reference in {} was rendered with other settings than this run",
+            dir.display()
+        );
+        Some(lines.map(str::to_owned).collect())
+    });
+    // (An earlier run's settings removed until this one's renders are all written: an output
+    // left half made, or holding another run's renders, lists none of them.)
     if let Some(dir) = &out {
         std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join(SETTINGS), format!("{made}\n")).unwrap();
+        match std::fs::remove_file(dir.join(SETTINGS)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => panic!("{SETTINGS}: {e}"),
+            _ => {}
+        }
     }
+    let mut written = Vec::new();
     eprintln!(
         "{:<18} {:>10} {:>10} {:>9} {:>11}",
         "preset", "diff RMS", "diff peak", "level", "worst band"
@@ -200,10 +225,19 @@ fn each_preset_against_a_reference_render() {
         let (l, r) = render(s, voices, seconds);
         if let Some(dir) = &out {
             write(&dir.join(file_name(&s.name)), &l, &r);
+            written.push(file_name(&s.name));
         }
         let Some(dir) = &reference else {
             continue;
         };
+        if let Some(listed) = &listed {
+            assert!(
+                listed.contains(&file_name(&s.name)),
+                "{}: not among the renders {SETTINGS} lists in {}",
+                s.name,
+                dir.display()
+            );
+        }
         let (rl, rr) = read(&dir.join(file_name(&s.name)));
         assert_eq!(rl.len(), l.len(), "{}: another length", s.name);
         let same = l
@@ -246,6 +280,10 @@ fn each_preset_against_a_reference_render() {
             worst.1,
             worst.0,
         );
+    }
+    if let Some(dir) = &out {
+        let list: String = written.iter().map(|f| format!("{f}\n")).collect();
+        std::fs::write(dir.join(SETTINGS), format!("{made}\n{list}")).unwrap();
     }
     if reference.is_some() && all_same {
         eprintln!("every preset the same to the bit");

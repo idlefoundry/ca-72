@@ -6090,7 +6090,11 @@ references of four.
   `CA72_VOICES=10`. The 19:47 run's "three presets" were its `tail -3`; every preset differed.
 - **Change (tests only).** `preset_render` writes the run's settings (QUALITY, voices, seconds,
   presets, 0.1's translation) to `settings.txt` beside `CA72_RENDER_OUT`'s renders, and stops if a
-  reference's are not the run's. A reference without the file is compared with a note. A switch
+  reference's are not the run's. A presets file is named there by a digest of its contents, not
+  its path. The file lists the renders the run wrote. It is removed when a run begins and written
+  once every render is, so an output left half made, or holding an earlier run's renders, lists
+  none of them; a render compared must be on the reference's list. A reference without the file
+  is compared with a note. A switch
   (`CA72_ULTRA`, `CA72_POTATO`, `CA72_FROM_0_1`) takes `1` or nothing; any other value stops the run,
   and so does setting both qualities. The shared `env` stops on a value that does not parse
   (it fell back to the default). The engine is unchanged: HI, LO and ULTRA render every preset the
