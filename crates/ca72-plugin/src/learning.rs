@@ -313,7 +313,8 @@ impl Learning {
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
-    /// decisions.md R54).
+    /// decisions.md R54). The title always names this build's version, independent of the
+    /// update check; opening this menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
@@ -347,7 +348,7 @@ impl Learning {
             x,
             y,
             size,
-            title: "SETTINGS".to_owned(),
+            title: format!("SETTINGS · CA-72 {}", crate::update::VERSION),
             items: items
                 .iter()
                 .map(|(it, t)| {
