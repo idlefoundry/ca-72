@@ -982,6 +982,10 @@ pub struct BackPart {
     a440: A440,
     /// EMPHASIS's law.
     emphasis: Memo<f64>,
+    /// The output sample [`Voice::filter_pair`] worked out whole, by [`BackPart::tick`], for a
+    /// voice it does not pair (ULTRA, whose VCA takes the filter's own samples, or two voices
+    /// at different qualities), for [`Voice::after_filter`] to give.
+    ready: Option<f64>,
 }
 
 impl BackPart {
@@ -1198,6 +1202,7 @@ impl Voice {
                     last_out: 0.0,
                     a440: A440::new(rate),
                     emphasis: Memo::NEW,
+                    ready: None,
                 },
                 last: (0.0, 0.0, 0.0),
             },
@@ -1484,7 +1489,8 @@ impl Voice {
             None => p,
         };
         let v_kbd = self.kbd.tick(&pc, c);
-        let ctl = self.ctl.tick(&pc, c);
+        // (The contours' delays follow the audio path's quality, as in `tick_at`.)
+        let ctl = self.ctl.tick_for(&pc, c, p.quality);
         self.last_ctl = (ctl.env_f, ctl.env_l);
         let d = self.bias.tick(ctl.env_l, j.loudness, p.quality);
         let i_pre = self.audio.pre.tick(&p, j.ext);
@@ -1494,22 +1500,29 @@ impl Voice {
     }
 
     /// Two voices' filters over the sample, from [`Voice::before_filter`]: solved side by
-    /// side where both play HI, else one after the other.
+    /// side where both play HI. Otherwise each voice's back runs whole, as
+    /// [`Voice::tick_jacks`] runs it (ULTRA's VCA takes the filter's own samples: decisions.md
+    /// R-BLEP), its output kept for [`Voice::after_filter`].
     pub fn filter_pair(a: &mut Voice, ha: &Halfway, b: &mut Voice, hb: &Halfway) -> (f64, f64) {
+        if !(a.pairs() && b.pairs() && ha.p.quality == hb.p.quality) {
+            let alone = |v: &mut Voice, h: &Halfway| {
+                let (y, out) = v.audio.back.tick(&h.p, &h.f, &h.d);
+                v.audio.back.ready = Some(out);
+                y
+            };
+            return (alone(a, ha), alone(b, hb));
+        }
         let _fast = crate::ulp::FastScope::new(ha.p.quality != Quality::NoCompromises);
         let x = |h: &Halfway| (h.f.i_bus, h.f.g_bus, h.f.i0);
-        if ha.p.quality != hb.p.quality {
-            let ya = a.audio.back.vcf.tick(ha.f.i_bus, ha.f.g_bus, ha.f.i0);
-            let _fast = crate::ulp::FastScope::new(hb.p.quality != Quality::NoCompromises);
-            let yb = b.audio.back.vcf.tick(hb.f.i_bus, hb.f.g_bus, hb.f.i0);
-            return (ya, yb);
-        }
         Vcf::tick_pair(&mut a.audio.back.vcf, &mut b.audio.back.vcf, x(ha), x(hb))
     }
 
     /// [`Voice::tick_jacks`] from the filter's output `y` on: the VCA; the output sample.
     pub fn after_filter(&mut self, h: &Halfway, y: f64) -> f64 {
-        let out = self.audio.back.after_filter(&h.p, y, &h.d);
+        let out = match self.audio.back.ready.take() {
+            Some(out) => out,
+            None => self.audio.back.after_filter(&h.p, y, &h.d),
+        };
         self.audio.last = (h.v_kbd, h.f.i_bus, y);
         self.fed_back = out;
         out
@@ -2251,9 +2264,16 @@ impl BackPart {
     /// [`BackPart::tick`] from the filter's output `y` on: the output sample.
     fn after_filter(&mut self, p: &Panel, y: f64, d: &VcaDrive) -> f64 {
         let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
+        // Only HI comes here (a pair): just switched from ULTRA, this path carries on from the
+        // 4x VCA's states, as in `tick`.
+        if self.ultra {
+            self.vca_4x.hand_over(&mut self.vca);
+            self.ultra = false;
+        }
         self.vca.a440 = self.a440.tick(p.a440);
         self.vca.plain_signal = p.quality != Quality::NoCompromises;
         let out = self.vca.signal(y, d);
+        self.last_out = out;
         out / 5.0
     }
 }

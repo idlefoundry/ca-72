@@ -8329,3 +8329,28 @@ that read the old label or the menu's heads updated. The workspace's suite (`--f
 ca72-plugin/standalone-production`) gives 509 passed, and 3 failed: the ngspice tests of
 `vco_electrical` and `vco_osc23` that fail the same way before this change on this Mac. Clippy
 (all targets, all features, `-D warnings`) clean; rustfmt on the changed files.
+
+## R-PAIRS-WITH-FIDELITY. 0.2.6's paired filters with ULTRA's 4x VCA and the contours' delays
+
+**Found on 2026-10-18**, merging 0.2.6 (R-HI-PAIRS) into this work: R-HI-PAIRS's
+`ultra_and_mixed_pairs_play_each_voice_alone` failed from the first sample. R-HI-PAIRS splits a
+voice's sample into `Voice::before_filter`, `Voice::filter_pair` and `Voice::after_filter`, and
+two parts of it no longer matched `Voice::tick_jacks`:
+- **ULTRA's VCA** (R-BLEP, at 4x) takes the filter's own samples before its decimator; the split
+  path ran ULTRA's filter decimated and its VCA at 1x.
+- **The contours' delays** (R-LATENCY) follow the audio path's quality (`ControlPart::tick_for`);
+  the split path took the contours' quality, which differs while a QUALITY switch is held
+  (`Voice::hold_control_quality`).
+
+**Fixed:** `filter_pair` solves a pair side by side only where both voices play HI, as before;
+any other voice's back runs whole (`BackPart::tick`), its output kept for `after_filter`.
+`before_filter` takes the contours with `tick_for` at the audio path's quality. The paired path's
+VCA takes over the 4x VCA's states at a switch from ULTRA and leaves its last output for the
+switch back, as `BackPart::tick` does. HI's pairs are unchanged: the same operations in the same
+order.
+
+**Evidence (the Mac, 2026-10-18):** `tests/pairs.rs`: R-HI-PAIRS's two tests pass (HI pairs,
+ULTRA and mixed pairs the same to the bit as alone), and a new one,
+`a_pair_switched_between_ultra_and_hi_plays_each_voice_alone` (both voices from ULTRA to HI, one
+back to ULTRA and again to HI, then both to ULTRA, under held notes), passes; with the
+hand-over taken out of the paired path it fails.
