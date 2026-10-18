@@ -7211,8 +7211,11 @@ not done, the look being kept to the bit.
   window can be seen, so the shutter and the drops were drawn thirty times a second behind other
   windows, minimised, on another Space or with the host hidden. `window::seen` asks macOS for the
   occlusion state of the window holding the view (`occlusionState`, through `objc`, the version
-  baseview takes) and Windows whether the view is shown and its top window not minimised; X11
-  says nothing reliable without a compositor and is left as it was. Unseen, the keys, gestures
+  baseview takes) and Windows whether its top window is minimised (not `IsWindowVisible`: in a
+  session without a desktop on the screen, as an agent's over SSH on the lab PC, every window
+  answers that it is not visible though it is drawn and shown, and the editor showed nothing:
+  five of the real-window tests failed so); X11 says nothing reliable without a compositor and
+  is left as it was. A window covered by others is drawn as before on Windows. Unseen, the keys, gestures
   and the host are attended to every frame as before and the scene drawn every 250 ms (a resize,
   the drawer, MIDI Learn kept up), nothing shown; seen again, the frame is shown whole at once.
 - **The drops' columns' dx squared once for all their rows,** the same sums in the same order:

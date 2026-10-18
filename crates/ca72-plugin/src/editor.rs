@@ -3448,8 +3448,10 @@ pub(crate) mod window {
 
     /// Whether any of the editor's window can be seen: macOS's occlusion state of the window
     /// holding it (covered whole, minimised, on another Space or its application hidden: not
-    /// seen); on Windows, shown and its top window not minimised. X11 says nothing reliable
-    /// without a compositor: always seen there.
+    /// seen); on Windows, its top window not minimised (not `IsWindowVisible`: in a session
+    /// without a desktop on the screen, as an agent's over SSH, every window says it is not
+    /// visible though it is drawn and shown, and the editor would show nothing). X11 says
+    /// nothing reliable without a compositor: always seen there.
     // (objc 0.2's `msg_send!` asks after a `cargo-clippy` feature this crate does not have.)
     #[cfg_attr(target_os = "macos", allow(unexpected_cfgs))]
     pub fn seen(window: &baseview::Window<'_>) -> bool {
@@ -3477,14 +3479,14 @@ pub(crate) mod window {
         }
         #[cfg(target_os = "windows")]
         {
-            use winapi::um::winuser::{GA_ROOT, GetAncestor, IsIconic, IsWindowVisible};
+            use winapi::um::winuser::{GA_ROOT, GetAncestor, IsIconic};
             let Some(hwnd) = hwnd(window) else {
                 return true;
             };
             // SAFETY: the editor's window and its top window, on the thread that owns them.
             unsafe {
                 let top = GetAncestor(hwnd, GA_ROOT);
-                IsWindowVisible(hwnd) != 0 && (top.is_null() || IsIconic(top) == 0)
+                top.is_null() || IsIconic(top) == 0
             }
         }
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
