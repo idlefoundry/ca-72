@@ -6262,3 +6262,33 @@ empty and MIDI states. Workspace/all-target clippy passes with default and all f
 formatting and whitespace checks pass. The optimised arm64 standalone rebuild succeeds.
 Free disk was checked before builds (24–25 GiB available); no caches or files were deleted.
 No native editor, DAW or audio/MIDI device was opened by the agent.
+
+**Substantial unselected-text darkening candidate, 2026-10-18.** The owner found 2005956
+too subtle and requested a clearly visible change, targeting roughly 25–30% lower
+rendered luminance. Inactive ordinary/secondary/faint levels now use 0.65/0.475/0.40,
+leaving all active levels and the existing exceptions for quieter selected-control text
+untouched. Amber hue, gold preset/triangle, hovered/focused appearance, artwork and layout
+remain unchanged. Existing state regressions retain their active assertions; only inactive
+expectations change.
+
+The actual 1035-pixel renders against 2005956 measure 27.47% lower mean linear luminance
+on 3,614 ordinary-list stroke pixels, 28.76% on secondary tags and 27.59% on faint-count
+text. Measurements linearise sRGB and use Rec.709 weights on fixed baseline amber-stroke
+masks, excluding the selected tag, antialias fringe and background. Gold/hovered glyph
+regions, focused Search and button caps remain pixel-identical. A first pass measured
+23% lower list luminance and was increased to meet the requested range before upload.
+
+Full-browser comparison: Library `libfile_8297d8be4f64819193417e0a2c72209c`. Enlarged
+preset-list comparison: Library `libfile_d308d4b729c881918843df0390b963f0`. Both use the
+same contents, loaded Brass Tutti, hovered Hollow Glider, focused Search, dimensions and
+screen settings; the crop repeats source pixels at 3x without colour adjustments.
+Historical update text is identified as fixture data. Earlier images and builds are
+retained. Owner visual acceptance of this substantial adjustment remains pending.
+
+**Substantial candidate evidence (the Mac, 2026-10-18):** 53 panel tests, 2 approved-image
+tests and 7 editor drawer tests pass (8 panel image tests and 1 optional editor image test
+ignored in those suites). The separate 32-image matrix rendered successfully and was
+inspected across both looks/lettering contexts and small-window browsing, editing, empty
+and MIDI states. Default/all-feature workspace/all-target clippy, formatting and whitespace
+checks pass; the optimised arm64 standalone rebuild succeeds. Free disk checked before
+builds (24–25 GiB). No file/cache deletion, native editor, DAW or audio/MIDI device launch.
