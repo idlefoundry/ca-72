@@ -70,6 +70,21 @@ const CLOSED: u64 = 1 << 16;
 /// How long an idle worker spins for the next run before it parks.
 const SPIN: Duration = Duration::from_micros(200);
 
+/// EXPLORATION ONLY: the workers' time spent spinning (ns), and how often they parked.
+pub static SPUN_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static PARKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// EXPLORATION ONLY: `CA72_SPIN_US` overrides [`SPIN`].
+fn spin_for() -> Duration {
+    static US: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    US.get_or_init(|| {
+        std::env::var("CA72_SPIN_US")
+            .ok()
+            .and_then(|v| v.parse().ok())
+    })
+    .map_or(SPIN, Duration::from_micros)
+}
+
 /// A voice as the engine and the workers share it.
 pub type Shared<V = Playing> = Arc<Mutex<V>>;
 
@@ -1153,6 +1168,7 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
     loop {
         let since = Instant::now();
         let mut spins = 0u32;
+        let mut counted = false;
         let run = loop {
             if b.quit.load(Ordering::Acquire) {
                 if let Some((i, _)) = interval
@@ -1164,10 +1180,13 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
             }
             let run = (b.claim.load(Ordering::Acquire) >> 32) as u32;
             if run != seen {
+                if !counted {
+                    SPUN_NS.fetch_add(since.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                }
                 break run;
             }
             spins = spins.wrapping_add(1);
-            if !spins.is_multiple_of(64) || since.elapsed() < SPIN {
+            if !spins.is_multiple_of(64) || since.elapsed() < spin_for() {
                 std::hint::spin_loop();
             } else {
                 if let Some((i, _)) = interval
@@ -1175,6 +1194,11 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
                 {
                     i.finish();
                     open = false;
+                }
+                if !counted {
+                    SPUN_NS.fetch_add(since.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    PARKS.fetch_add(1, Ordering::Relaxed);
+                    counted = true;
                 }
                 std::thread::park();
             }

@@ -1393,3 +1393,294 @@ fn solve<const N: usize, const RECIP: bool>(mut m: [[f64; N]; N], mut r: [f64; N
     }
     x
 }
+
+/// EXPLORATION ONLY (not for merging): two voices' loop eliminations in one pass, each lane
+/// the scalar [`solve_loop`]'s operations in its order, to see whether two lanes are worth it
+/// and stay the same to the bit. `cargo test --release -p ca72 --lib simd_probe -- --ignored
+/// --nocapture`.
+#[cfg(test)]
+mod simd_probe {
+    use super::*;
+    use std::ops::{Add, Div, Mul, Neg, Sub};
+
+    #[derive(Clone, Copy, Debug)]
+    #[repr(C, align(16))]
+    struct L<const N: usize>([f64; N]);
+
+    impl<const N: usize> L<N> {
+        #[inline(always)]
+        fn s(x: f64) -> Self {
+            L([x; N])
+        }
+        #[inline(always)]
+        fn sel(m: [bool; N], a: Self, b: Self) -> Self {
+            L(std::array::from_fn(|k| if m[k] { a.0[k] } else { b.0[k] }))
+        }
+    }
+    macro_rules! op {
+        ($t:ident, $f:ident, $o:tt) => {
+            impl<const N: usize> $t for L<N> {
+                type Output = Self;
+                #[inline(always)]
+                fn $f(self, b: Self) -> Self {
+                    L(std::array::from_fn(|k| self.0[k] $o b.0[k]))
+                }
+            }
+        };
+    }
+    op!(Add, add, +);
+    op!(Sub, sub, -);
+    op!(Mul, mul, *);
+    op!(Div, div, /);
+    impl<const N: usize> Neg for L<N> {
+        type Output = Self;
+        #[inline(always)]
+        fn neg(self) -> Self {
+            L(std::array::from_fn(|k| -self.0[k]))
+        }
+    }
+
+    type Jac = [[f64; STATES]; STATES];
+
+    /// [`solve`] at N = 5 with reciprocals, two lanes: each lane's pivots and skips its own.
+    #[inline(always)]
+    fn solve5<const N: usize>(mut m: [[L<N>; 5]; 5], mut r: [L<N>; 5]) -> [L<N>; 5] {
+        let mut inv = [L::<N>::s(0.0); 5];
+        for col in 0..5 {
+            for lane in 0..N {
+                let mut p = col;
+                for i in col + 1..5 {
+                    if m[i][col].0[lane].abs() > m[p][col].0[lane].abs() {
+                        p = i;
+                    }
+                }
+                if p != col {
+                    for c in 0..5 {
+                        let t = m[col][c].0[lane];
+                        m[col][c].0[lane] = m[p][c].0[lane];
+                        m[p][c].0[lane] = t;
+                    }
+                    let t = r[col].0[lane];
+                    r[col].0[lane] = r[p].0[lane];
+                    r[p].0[lane] = t;
+                }
+            }
+            let d = m[col][col];
+            let live: [bool; N] = std::array::from_fn(|k| d.0[k].abs() >= 1e-300);
+            inv[col] = L::sel(live, L::<N>::s(1.0) / d, inv[col]);
+            let pivot = m[col];
+            for i in col + 1..5 {
+                let f = m[i][col] * inv[col];
+                let go: [bool; N] = std::array::from_fn(|k| live[k] && f.0[k] != 0.0);
+                for c in col..5 {
+                    m[i][c] = L::sel(go, m[i][c] - f * pivot[c], m[i][c]);
+                }
+                r[i] = L::sel(go, r[i] - f * r[col], r[i]);
+            }
+        }
+        let mut x = [L::<N>::s(0.0); 5];
+        for i in (0..5).rev() {
+            let mut s = r[i];
+            for k in i + 1..5 {
+                s = s - m[i][k] * x[k];
+            }
+            let zero: [bool; N] = std::array::from_fn(|k| m[i][i].0[k].abs() < 1e-300);
+            x[i] = L::sel(zero, L::<N>::s(0.0), s * inv[i]);
+        }
+        x
+    }
+
+    /// [`solve_loop`] with reciprocals for two voices.
+    #[inline(never)]
+    fn solve_loop2(j: [&Jac; 2], hh: [f64; 2], r: [&[f64; STATES]; 2]) -> [[f64; STATES]; 2] {
+        solve_loop_n::<2>(j, hh, r)
+    }
+
+    #[inline(never)]
+    fn solve_loop1(j: &Jac, hh: f64, r: &[f64; STATES]) -> [f64; STATES] {
+        solve_loop_n::<1>([j], [hh], [r])[0]
+    }
+
+    #[inline(always)]
+    fn solve_loop_n<const N: usize>(
+        j: [&Jac; N],
+        hh: [f64; N],
+        r: [&[f64; STATES]; N],
+    ) -> [[f64; STATES]; N] {
+        let hh = L::<N>(hh);
+        let a = |i: usize, k: usize| {
+            L::<N>::s(if i == k { 1.0 } else { 0.0 }) - hh * L(std::array::from_fn(|l| j[l][i][k]))
+        };
+        let rr = |i: usize| L::<N>(std::array::from_fn(|l| r[l][i]));
+        let (a11, a22, a33) = (a(1, 1), a(2, 2), a(3, 3));
+        let a21 = a(2, 1);
+        let a32 = a(3, 2);
+        let one = L::<N>::s(1.0);
+        let (i11, i22, i33) = (one / a11, one / a22, one / a33);
+        let (p1, q1) = (rr(1) * i11, -a(1, 0) * i11);
+        let (p2, q2) = ((rr(2) - a21 * p1) * i22, -a21 * q1 * i22);
+        let (p3, q3, s3) = ((rr(3) - a32 * p2) * i33, -a32 * q2 * i33, -a(3, W) * i33);
+        let (aw2, aw3) = (a(W, 2), a(W, 3));
+        let dw = a(W, W) + aw3 * s3;
+        let iw = one / dw;
+        let (pw, qw) = (
+            (rr(W) - aw2 * p2 - aw3 * p3) * iw,
+            -(aw2 * q2 + aw3 * q3) * iw,
+        );
+        const IN: [usize; 4] = [Q10, NT, VB, Q27];
+        let mut m = [[L::<N>::s(0.0); 5]; 5];
+        let mut b = [L::<N>::s(0.0); 5];
+        let a0w = a(0, W);
+        m[0][0] = a(0, 0) + a0w * qw;
+        b[0] = rr(0) - a0w * pw;
+        for (c, &n) in IN.iter().enumerate() {
+            m[0][c + 1] = a(0, n);
+        }
+        for (row, &k) in IN.iter().enumerate() {
+            let akw = a(k, W);
+            m[row + 1][0] = akw * qw;
+            b[row + 1] = rr(k) - akw * pw;
+            for (c, &n) in IN.iter().enumerate() {
+                m[row + 1][c + 1] = a(k, n);
+            }
+        }
+        let u = solve5(m, b);
+        let x0 = u[0];
+        let xw = pw + qw * x0;
+        let mut x = [[0.0; STATES]; N];
+        let x1 = p1 + q1 * x0;
+        let x2 = p2 + q2 * x0;
+        let x3 = p3 + q3 * x0 + s3 * xw;
+        for lane in 0..N {
+            x[lane][0] = x0.0[lane];
+            x[lane][1] = x1.0[lane];
+            x[lane][2] = x2.0[lane];
+            x[lane][3] = x3.0[lane];
+            x[lane][W] = xw.0[lane];
+            for (c, &n) in IN.iter().enumerate() {
+                x[lane][n] = u[c + 1].0[lane];
+            }
+        }
+        x
+    }
+
+    #[test]
+    #[ignore = "prints timings"]
+    fn simd_probe() {
+        // Real Jacobians: a HI (Potato) filter, calibrated, a saw through it, its cutoff swept.
+        let mut v = Vcf::new(48_000.0, 4);
+        v.circuit = crate::filter_cal::CALIBRATED.circuit();
+        v.prepare(4);
+        v.set_quality(crate::voice::Quality::Potato);
+        let n = 20_000;
+        let (mut jacs, mut rs) = (Vec::with_capacity(n), Vec::with_capacity(n));
+        let mut seed = 12345u64;
+        let mut rnd = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 1e-3
+        };
+        for k in 0..n {
+            let t = k as f64 / 48_000.0;
+            let saw = 2.0 * ((t * 110.0) % 1.0) - 1.0;
+            let i0 = 1e-5 * 2f64.powf(4.0 * (t * 3.0).sin());
+            v.tick(20e-6 * saw, 3e-5, i0);
+            jacs.push(v.jac);
+            rs.push(std::array::from_fn::<f64, STATES, _>(|_| rnd()));
+        }
+        let hh = 0.5 * v.h;
+        // The same to the bit, lane by lane.
+        let mut checked = 0;
+        for k in (0..n - 1).step_by(2) {
+            let two = solve_loop2([&jacs[k], &jacs[k + 1]], [hh, hh], [&rs[k], &rs[k + 1]]);
+            for lane in 0..2 {
+                let one = solve_loop::<true>(&jacs[k + lane], hh, &rs[k + lane]);
+                for i in 0..STATES {
+                    assert_eq!(
+                        one[i].to_bits(),
+                        two[lane][i].to_bits(),
+                        "pair {k} lane {lane} x[{i}]"
+                    );
+                }
+                checked += 1;
+            }
+        }
+        // Times: the scalar elimination twice against the pair once, many passes.
+        let passes = 200;
+        let mut sink = 0.0;
+        let t = std::time::Instant::now();
+        for _ in 0..passes {
+            for k in (0..n - 1).step_by(2) {
+                let a = solve_loop::<true>(std::hint::black_box(&jacs[k]), hh, &rs[k]);
+                let b = solve_loop::<true>(std::hint::black_box(&jacs[k + 1]), hh, &rs[k + 1]);
+                sink += a[0] + b[0];
+            }
+        }
+        let scalar = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        for _ in 0..passes {
+            for k in (0..n - 1).step_by(2) {
+                let x = solve_loop2(
+                    std::hint::black_box([&jacs[k], &jacs[k + 1]]),
+                    [hh, hh],
+                    [&rs[k], &rs[k + 1]],
+                );
+                sink += x[0][0] + x[1][0];
+            }
+        }
+        let pair = t.elapsed().as_secs_f64();
+        // The branch-free version for one voice alone (its lanes the same voice).
+        let t = std::time::Instant::now();
+        for _ in 0..passes {
+            for k in 0..n {
+                let x = solve_loop2(
+                    std::hint::black_box([&jacs[k], &jacs[k]]),
+                    [hh, hh],
+                    [&rs[k], &rs[k]],
+                );
+                sink += x[0][0];
+            }
+        }
+        let alone = t.elapsed().as_secs_f64();
+        // The branch-free version, one lane.
+        let t = std::time::Instant::now();
+        for _ in 0..passes {
+            for k in 0..n {
+                let x = solve_loop1(std::hint::black_box(&jacs[k]), hh, &rs[k]);
+                sink += x[0];
+            }
+        }
+        let one_lane = t.elapsed().as_secs_f64();
+        for k in 0..n {
+            let a = solve_loop::<true>(&jacs[k], hh, &rs[k]);
+            let b = solve_loop1(&jacs[k], hh, &rs[k]);
+            assert!(
+                a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()),
+                "one lane {k}"
+            );
+        }
+        // The scalar again, last (warm-up ruled out).
+        let t = std::time::Instant::now();
+        for _ in 0..passes {
+            for k in 0..n {
+                let a = solve_loop::<true>(std::hint::black_box(&jacs[k]), hh, &rs[k]);
+                sink += a[0];
+            }
+        }
+        let scalar2 = t.elapsed().as_secs_f64();
+        let calls = (passes * n) as f64;
+        println!(
+            "branch-free, two lanes of one voice: {:.1} ns; branch-free one lane: {:.1} ns (the same to the bit); scalar again: {:.1} ns",
+            alone / calls * 1e9,
+            one_lane / calls * 1e9,
+            scalar2 / calls * 1e9
+        );
+        println!(
+            "{checked} eliminations the same to the bit; scalar {:.1} ns each, paired {:.1} ns each: {:.2}x ({sink:.1e})",
+            scalar / calls * 1e9,
+            pair / calls * 1e9,
+            scalar / pair
+        );
+    }
+}

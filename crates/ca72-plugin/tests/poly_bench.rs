@@ -157,6 +157,15 @@ fn poly_chords_in_real_time() {
     let q = |x: f64| sorted[((sorted.len() - 1) as f64 * x) as usize];
     let mean = took.iter().sum::<f64>() / took.len() as f64;
     eprintln!(
+        "SPIN: workers spun {:.1} ms in all ({:.2} % of a core over the run), parked {} times",
+        ca72_plugin::pool::SPUN_NS.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6,
+        ca72_plugin::pool::SPUN_NS.load(std::sync::atomic::Ordering::Relaxed) as f64
+            / 1e9
+            / seconds
+            * 100.0,
+        ca72_plugin::pool::PARKS.load(std::sync::atomic::Ordering::Relaxed),
+    );
+    println!(
         "CA-72{}: {voices} POLY voices at {block}-frame blocks ({p_ms:.3} ms), {seconds} s paced on one thread and {workers} workers: mean {mean:.3} ms, p50 {:.3}, p99 {:.3}, p99.9 {:.3}, worst {:.3}; {late} of {} late; {:.1} % of the thread; peak {peak:.3}; real-time: {rt:?}, demoted by the watchdog {} times",
         preset
             .as_deref()
