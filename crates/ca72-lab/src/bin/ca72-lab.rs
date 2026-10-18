@@ -1253,8 +1253,8 @@ fn audio_priority() {
     }
 }
 
-/// `ca72-lab crowd [--voices N] [--threads T] [--block N] [--seconds S] [--quality MODE]
-/// [--paced]`: the crowd benchmark (`ca72_lab::worst::crowd`; Potato): N voices
+/// `ca72-lab crowd [--voices N] [--threads T] [--block N] [--rate HZ] [--seconds S]
+/// [--quality MODE] [--paced] [--pool]`: the crowd benchmark (`ca72_lab::worst::crowd`; Potato): N voices
 /// (default 100) under the worst case's load, a fraction of a second apart in it, on T
 /// threads (default the machine's less two), each thread running its voices in turn each
 /// block;
@@ -1282,6 +1282,7 @@ fn crowd(rest: &[String]) -> Res {
             "--voices" => o.voices = value()?.parse().map_err(|e| format!("--voices: {e}"))?,
             "--threads" => threads = Some(value()?.parse().map_err(|e| format!("--threads: {e}"))?),
             "--block" => o.block = value()?.parse().map_err(|e| format!("--block: {e}"))?,
+            "--rate" => o.rate = value()?.parse().map_err(|e| format!("--rate: {e}"))?,
             "--seconds" => o.seconds = value()?.parse().map_err(|e| format!("--seconds: {e}"))?,
             "--quality" => o.quality = quality(value()?)?,
             "--paced" => o.paced = true,
@@ -1317,7 +1318,7 @@ fn crowd(rest: &[String]) -> Res {
     Ok(())
 }
 
-/// `ca72-lab worst [--block N] [--seconds S] [--serial] [--quality MODE] [--paced]`: the
+/// `ca72-lab worst [--block N] [--rate HZ] [--seconds S] [--serial] [--quality MODE] [--paced]`: the
 /// worst-case benchmark (`ca72_lab::worst`): every control moving at once, the
 /// external input on, fast notes with GLIDE, in blocks of N samples (default 256, the
 /// quality modes' target), in a quality mode (default no-compromises); with `--paced` each
@@ -1424,6 +1425,7 @@ fn worst(rest: &[String]) -> Res {
         let mut value = || args.next().ok_or(format!("{a} needs a value"));
         match a.as_str() {
             "--block" => o.block = value()?.parse().map_err(|e| format!("--block: {e}"))?,
+            "--rate" => o.rate = value()?.parse().map_err(|e| format!("--rate: {e}"))?,
             "--seconds" => o.seconds = value()?.parse().map_err(|e| format!("--seconds: {e}"))?,
             "--serial" => o.serial = true,
             "--quality" => o.quality = quality(value()?)?,

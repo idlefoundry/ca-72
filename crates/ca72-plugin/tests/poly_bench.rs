@@ -8,6 +8,8 @@
 //! cutoff swept). Prints each block's time, the late blocks and the watchdog's demotions.
 //!
 //! `CA72_PRESET` plays a factory preset (its panel as it is, nothing swept) instead.
+//! `CA72_RATE` (48000) is the sample rate; `CA72_QUALITY` (lo, hi or ultra) sets QUALITY and
+//! `CA72_DOUBLE` DOUBLE's amount in %, else as the panel or preset has them.
 //! `CA72_WORKERS` (0) shares the voices with that many workers, made audio threads as the
 //! plug-in makes them (at most the process's budget of them, R18), each block given the
 //! plug-in's deadline (decisions.md R11).
@@ -29,7 +31,7 @@ fn poly_chords_in_real_time() {
     let voices: usize = env("CA72_VOICES", 10);
     let seconds: f64 = env("CA72_SECONDS", 60.0);
     let block: usize = env("CA72_BLOCK", 256);
-    let rate = 48_000.0;
+    let rate: f64 = env("CA72_RATE", 48_000.0);
     let mut c = Controls {
         poly: true,
         voices,
@@ -51,6 +53,17 @@ fn poly_chords_in_real_time() {
         c = common::controls_of(&common::preset(name));
         c.poly = true;
         c.voices = voices;
+    }
+    // `CA72_QUALITY` (lo, hi or ultra) sets QUALITY; unset, as the panel or preset has it.
+    match std::env::var("CA72_QUALITY").ok().as_deref() {
+        Some("lo") => (c.potato, c.ultra) = (true, false),
+        Some("hi") => (c.potato, c.ultra) = (false, false),
+        Some("ultra") => (c.potato, c.ultra) = (false, true),
+        _ => {}
+    }
+    // `CA72_DOUBLE`: DOUBLE's amount in % (as it is when unset).
+    if let Ok(d) = std::env::var("CA72_DOUBLE") {
+        c.double = d.parse::<f64>().unwrap() / 100.0;
     }
     let mut e = Engine::new();
     e.set(&c);
@@ -157,10 +170,18 @@ fn poly_chords_in_real_time() {
     let q = |x: f64| sorted[((sorted.len() - 1) as f64 * x) as usize];
     let mean = took.iter().sum::<f64>() / took.len() as f64;
     eprintln!(
-        "CA-72{}: {voices} POLY voices at {block}-frame blocks ({p_ms:.3} ms), {seconds} s paced on one thread and {workers} workers: mean {mean:.3} ms, p50 {:.3}, p99 {:.3}, p99.9 {:.3}, worst {:.3}; {late} of {} late; {:.1} % of the thread; peak {peak:.3}; real-time: {rt:?}, demoted by the watchdog {} times",
+        "CA-72{}: {voices} POLY voices (QUALITY {}, DOUBLE {}) at {rate} Hz, {block}-frame blocks ({p_ms:.3} ms), {seconds} s paced on one thread and {workers} workers: mean {mean:.3} ms, p50 {:.3}, p99 {:.3}, p99.9 {:.3}, worst {:.3}; {late} of {} late; {:.1} % of the thread; peak {peak:.3}; real-time: {rt:?}, demoted by the watchdog {} times",
         preset
             .as_deref()
             .map_or(String::new(), |n| format!(" ({n})")),
+        if c.potato {
+            "LO"
+        } else if c.ultra {
+            "ULTRA"
+        } else {
+            "HI"
+        },
+        c.double,
         q(0.5),
         q(0.99),
         q(0.999),
