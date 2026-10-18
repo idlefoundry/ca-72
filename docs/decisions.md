@@ -6324,3 +6324,38 @@ keyboard view"). **Agent decisions** (not separately approved):
 **Evidence (the Mac, 2026-10-17):** `a_packs_keyboard_is_its_own` (an official look draws the
 keyboard as before; a pack's keys and drawing change it); every test, clippy, fmt. SIGNAL BASIN's
 keyboard view passed by the reviewing agent, its last notes taken. Not yet: the presets' drawer.
+
+**The presets' drawer in a pack's look, 2026-10-17** (the owner's step 3, "start step 3: the
+presets drawer"; their decisions 1a, the drawer restyled with its layout fixed, and 2a, its
+displays lettered in dots or the pack's typeface, the tags kept as text). **Agent decisions**
+(not separately approved):
+- The drawer renderer takes the look (`DrawerRenderer::set_look`, called wherever the editor
+  dresses the strip): its face (as the panel's, tinted), the strip's `glass` and `key`, its lamp
+  colour for the dots, its typeface and `tab_print` for the print. The still it shares between
+  instances is keyed by scale and by the look's dressing (0 for every official look, which
+  draws the built-in drawer: no extra work, no change).
+- `[look]` `drawer_art` (a drawing over the face, under the print, glass and keys, in the
+  drawer's units, 3108 by 734), `drawer_lettering` ("dots" or "type"), `drawer_legends`
+  ("above" or "caps") and `drawer_titles` ("left" or "centre"); `[look.colours]` `display`
+  (lettering not lit) and `selection` (the current row's band).
+- In type lettering: what is lit in the lamp colour, the rest in `display` at four strengths
+  from the plug-in's levels; the stars, arrows and the current row's mark drawn as shapes; a
+  field's text set in the typeface, its caret where the typeface puts the characters before it,
+  and a press in a field turned into the dots' place of the nearest character gap
+  (`DrawerRenderer::press_x`) before the presets' browser places the caret, so the browser stays
+  counted in characters.
+- The list's rows and MIDI Learn's are made of an item per column (mark, star, name, origin,
+  tags) rather than one padded line, so that a typeface keeps the columns; the dots drawn are
+  the same.
+
+**Evidence (the Mac, 2026-10-17):** the official looks' drawer byte-identical to the commit
+before (the png example, both skins, scales 0.5 and 1); `a_packs_drawer_is_its_own` (the
+official looks draw the built-in drawer; a pack's drawing and options change it; a press after a
+field's fifth character, set in the typeface, lands nearer than five dot characters; unknown
+values refused); every panel test, the plug-in's unit tests, clippy, fmt. The plug-in's other
+test binaries were not linked: the Mac's disk was full. SIGNAL BASIN's drawer passed by the
+reviewing agent against the concept (round 2: its secondary lettering warmed to cream, the current
+row's band teal, the arrows lit). Format limits left: the drawer's full width without the left
+hand's bay, the tags and tabs as text rather than lamp keys, no scrollbar or column header, the
+plug-in's dim level for a pressed key's legend and for the count, the 8-unit lip (the displays
+reach near the drawer's foot).

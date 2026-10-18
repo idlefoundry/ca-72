@@ -1203,6 +1203,7 @@ impl Editing {
     fn opened(mut self) -> Self {
         // The window opened at the panel's size last chosen; the look's may differ.
         self.strip.set_look(self.renderer.look());
+        self.drawer.set_look(self.renderer.look());
         self.strip.set_under_top(self.renderer.top_px());
         if self.panel() != chosen_panel() {
             choose_panel(self.panel());
@@ -1257,6 +1258,7 @@ impl Editing {
             self.resizing_window = true;
         }
         self.strip.set_look(self.renderer.look());
+        self.drawer.set_look(self.renderer.look());
         self.strip.set_under_top(self.renderer.top_px());
         self.composed = None;
     }
@@ -1275,6 +1277,7 @@ impl Editing {
             self.renderer = Renderer::with_pack(base, lettering, self.renderer.scale(), self.dpr);
             choose_panel(self.panel());
             self.strip.set_look(self.renderer.look());
+            self.drawer.set_look(self.renderer.look());
         }
         self.strip.set_under_top(self.renderer.top_px());
         self.composed = None;
@@ -2089,6 +2092,8 @@ impl Editing {
                 Some(t) => {
                     self.learning.list = false;
                     let setter = ParamSetter::new(self.context.as_ref());
+                    // (A field's caret where its look's typeface sets the characters.)
+                    let dx = self.drawer.press_x(&self.browser.drawer, t, dx);
                     self.browser.drawer_press(t, dx, &self.params, &setter);
                 }
             }

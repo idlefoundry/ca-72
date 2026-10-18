@@ -75,6 +75,18 @@ pub struct Look {
     pub keyboard_art: Option<Arc<usvg::Tree>>,
     /// The keyboard view's case in the face's picture rather than the wood's.
     pub keyboard_face: bool,
+    /// Its drawing over the presets' drawer's face, under its displays' glass, its keys and
+    /// its print (in the drawer's units).
+    pub drawer_art: Option<Arc<usvg::Tree>>,
+    /// The drawer's displays lettered in its typeface (`drawer_lettering = "type"`) rather
+    /// than in dots.
+    pub drawer_type: bool,
+    /// The drawer's keys' legends printed on their caps (`drawer_legends = "caps"`) rather
+    /// than over them.
+    pub drawer_caps: bool,
+    /// The drawer's sections' titles centred over them, larger (`drawer_titles = "centre"`),
+    /// rather than at their left.
+    pub drawer_centred: bool,
     /// Its colours for what the strip lights and prints (none: the built-in ones).
     pub colours: Colours,
     /// Its typeface (regular, bold), if it brings one that prints and fits every legend.
@@ -114,6 +126,10 @@ impl Look {
             strip_art: None,
             keyboard_art: None,
             keyboard_face: false,
+            drawer_art: None,
+            drawer_type: false,
+            drawer_caps: false,
+            drawer_centred: false,
             colours: Colours::default(),
             fonts: None,
             licence: OFFICIAL_LICENCE.into(),
@@ -409,6 +425,62 @@ impl Look {
             }
         };
 
+        // The drawing over the presets' drawer, and how its displays and keys are lettered.
+        let drawer_art = match &spec.drawer_art {
+            None => None,
+            Some(path) if path.ends_with(".svg") => {
+                let bytes = file(path, &[FileKind::Svg], &mut report);
+                match bytes.map(|b| skin_pack::svg::parse_at(&b, limits, Some(ART_SIDE))) {
+                    Some(Ok((tree, _))) => Some(Arc::new(tree)),
+                    Some(Err(why)) => {
+                        report.reject("look.drawer-art", Some(path), why);
+                        None
+                    }
+                    None => None,
+                }
+            }
+            Some(path) => {
+                report.reject("look.drawer-art", Some(path), "the drawer's drawing is SVG");
+                None
+            }
+        };
+        let drawer_type = match spec.drawer_lettering.as_deref() {
+            None | Some("dots") => false,
+            Some("type") => true,
+            Some(_) => {
+                report.reject(
+                    "look.drawer-lettering",
+                    at,
+                    "drawer_lettering: \"dots\" or \"type\"",
+                );
+                false
+            }
+        };
+        let drawer_caps = match spec.drawer_legends.as_deref() {
+            None | Some("above") => false,
+            Some("caps") => true,
+            Some(_) => {
+                report.reject(
+                    "look.drawer-legends",
+                    at,
+                    "drawer_legends: \"above\" or \"caps\"",
+                );
+                false
+            }
+        };
+        let drawer_centred = match spec.drawer_titles.as_deref() {
+            None | Some("left") => false,
+            Some("centre") => true,
+            Some(_) => {
+                report.reject(
+                    "look.drawer-titles",
+                    at,
+                    "drawer_titles: \"left\" or \"centre\"",
+                );
+                false
+            }
+        };
+
         // The strip's colours.
         let mut colours = Colours::default();
         if let Some(c) = &spec.colours {
@@ -418,6 +490,8 @@ impl Look {
                 ("tab_print", &c.tab_print, &mut colours.tab_print),
                 ("key_print", &c.key_print, &mut colours.key_print),
                 ("wheel", &c.wheel, &mut colours.wheel),
+                ("display", &c.display, &mut colours.display),
+                ("selection", &c.selection, &mut colours.selection),
             ] {
                 if let Some(v) = value {
                     match hex(v) {
@@ -530,6 +604,10 @@ impl Look {
             strip_art,
             keyboard_art,
             keyboard_face,
+            drawer_art,
+            drawer_type,
+            drawer_caps,
+            drawer_centred,
             colours,
             fonts,
             licence: m.license.clone(),
@@ -573,6 +651,14 @@ struct LookTable {
     #[serde(default)]
     keyboard_case: Option<String>,
     #[serde(default)]
+    drawer_art: Option<String>,
+    #[serde(default)]
+    drawer_lettering: Option<String>,
+    #[serde(default)]
+    drawer_legends: Option<String>,
+    #[serde(default)]
+    drawer_titles: Option<String>,
+    #[serde(default)]
     colours: Option<ColoursTable>,
     #[serde(flatten)]
     rest: Rest,
@@ -590,6 +676,10 @@ struct ColoursTable {
     key_print: Option<String>,
     #[serde(default)]
     wheel: Option<String>,
+    #[serde(default)]
+    display: Option<String>,
+    #[serde(default)]
+    selection: Option<String>,
     #[serde(flatten)]
     rest: Rest,
 }
@@ -605,6 +695,11 @@ pub struct Colours {
     pub key_print: Option<(u8, u8, u8)>,
     /// The PITCH and MOD wheels' (else the built-in cream).
     pub wheel: Option<(u8, u8, u8)>,
+    /// The drawer's displays' lettering that is not lit, in its typeface (else the tabs'
+    /// print's, else a cream).
+    pub display: Option<(u8, u8, u8)>,
+    /// The drawer's current row's band, lettered in its typeface (else faintly the lamps').
+    pub selection: Option<(u8, u8, u8)>,
 }
 
 /// A colour written `#rrggbb`.

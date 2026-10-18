@@ -832,3 +832,91 @@ fn a_packs_keyboard_is_its_own() {
     assert!(pack.keyboard_art.is_some());
     assert!(draw(&pack, true) != draw(&realistic, true));
 }
+
+/// A pack dresses the presets' drawer (decisions.md R-SKIN-PACKS): the official looks draw the
+/// built-in drawer; a pack's drawing over its face, its displays lettered in its typeface, its
+/// keys' legends on their caps and its titles centred draw another, a press in a field placing
+/// the caret where that typeface sets the characters; a value it does not know is refused.
+#[test]
+fn a_packs_drawer_is_its_own() {
+    use ca72_panel::presets::{
+        DrawerRenderer, DrawerScene, DrawerTarget, Field, FieldId, caret_at,
+    };
+    let scene = DrawerScene {
+        search: Field {
+            text: "Brass Tutti".into(),
+            caret: 0,
+        },
+        focus: Some(FieldId::Search),
+        ..DrawerScene::default()
+    };
+    let draw = |look: Option<&Look>| {
+        let mut d = DrawerRenderer::new(0.25);
+        if let Some(l) = look {
+            d.set_look(l);
+        }
+        d.render(&scene);
+        d.frame().data().to_vec()
+    };
+    let built_in = draw(None);
+    assert!(draw(Some(&Look::realistic())) == built_in);
+    assert!(draw(Some(&Look::of(Skin::Drawn))) == built_in);
+
+    let pack_with = |fields: &str| {
+        edited(|d| {
+            let art = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3108 734'><rect x='30' y='10' width='750' height='714' fill='#123'/></svg>";
+            std::fs::write(d.join("art/drawer.svg"), art).expect("written");
+            let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+            std::fs::write(
+                d.join("skin.toml"),
+                text.replace(
+                    "[look]",
+                    "[[assets]]\npath = \"art/drawer.svg\"\norigin = \"original\"\n\n[look]",
+                ) + fields,
+            )
+            .expect("written");
+        })
+    };
+    let dir = pack_with(
+        "drawer_art = \"art/drawer.svg\"\ndrawer_lettering = \"type\"\ndrawer_legends = \"caps\"\ndrawer_titles = \"centre\"\n\n[look.colours]\ndisplay = \"#e6dcc4\"\n",
+    );
+    let pack = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
+    assert!(pack.drawer_art.is_some() && pack.drawer_type);
+    assert!(pack.drawer_caps && pack.drawer_centred);
+    assert!(draw(Some(&pack)) != built_in);
+
+    // Along the search field, the first place a press puts the caret after its fifth
+    // character: set in the typeface, nearer than five of the dots' characters.
+    let first_at = |d: &DrawerRenderer, k: usize| {
+        (630..7500)
+            .map(|x| f64::from(x) / 10.0)
+            .find(|&x| {
+                let t = DrawerTarget::Field(FieldId::Search);
+                caret_at(&scene, FieldId::Search, d.press_x(&scene, t, x)) >= k
+            })
+            .expect("a place")
+    };
+    let dots = DrawerRenderer::new(0.25);
+    let mut typed = DrawerRenderer::new(0.25);
+    typed.set_look(&pack);
+    assert!(first_at(&typed, 5) < first_at(&dots, 5) - 20.0);
+    let ends = |d: &DrawerRenderer| {
+        let t = DrawerTarget::Field(FieldId::Search);
+        (
+            caret_at(&scene, FieldId::Search, d.press_x(&scene, t, 0.0)),
+            caret_at(&scene, FieldId::Search, d.press_x(&scene, t, 3000.0)),
+        )
+    };
+    assert_eq!(ends(&typed), (0, 11));
+
+    for (field, code) in [
+        ("drawer_lettering = \"neon\"\n", "look.drawer-lettering"),
+        ("drawer_legends = \"under\"\n", "look.drawer-legends"),
+        ("drawer_titles = \"right\"\n", "look.drawer-titles"),
+        ("drawer_art = \"art/drawer.png\"\n", "look.drawer-art"),
+    ] {
+        let dir = pack_with(field);
+        let r = Look::open(dir.path()).expect_err("refused");
+        assert!(r.has(code), "{code}: {r}");
+    }
+}

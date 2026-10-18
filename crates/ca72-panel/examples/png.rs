@@ -87,10 +87,16 @@ fn main() {
         let (from, to) = (y * sf.width() as usize * 4, (top + y) * w * 4);
         all.data_mut()[to..to + n].copy_from_slice(&sf.data()[from..from + n]);
     }
-    // `CA72_DRAWER=1`: the presets' drawer open over the strip, as the editor shows it.
-    if std::env::var("CA72_DRAWER").is_ok_and(|v| v == "1") {
-        use ca72_panel::presets::{Current, DRAWER_TOP, DrawerRenderer, DrawerScene, Row};
+    // `CA72_DRAWER=1`: the presets' drawer open over the strip, as the editor shows it; `edit`,
+    // a search typed and the preset being renamed; `midi`, MIDI Learn's list.
+    let drawer_shown = std::env::var("CA72_DRAWER").unwrap_or_default();
+    if ["1", "edit", "midi"].contains(&drawer_shown.as_str()) {
+        use ca72_panel::presets::{
+            Current, DRAWER_TOP, DrawerRenderer, DrawerScene, DrawerTarget, Edit, Field, FieldId,
+            MidiList, MidiRow, Row,
+        };
         let mut drawer = DrawerRenderer::new(scale);
+        drawer.set_look(r.look());
         let presets = [
             "Brass Tutti",
             "Deep Mod Bass",
@@ -98,7 +104,7 @@ fn main() {
             "Night Pad",
             "Pluck Ladder",
         ];
-        drawer.render(&DrawerScene {
+        let mut scene = DrawerScene {
             chips: ["bass", "brass", "lead", "pad", "pluck"]
                 .iter()
                 .map(|t| ((*t).to_owned(), *t == "lead"))
@@ -120,7 +126,41 @@ fn main() {
             }),
             total: 18,
             ..DrawerScene::default()
-        });
+        };
+        if drawer_shown == "edit" {
+            scene.search = Field {
+                text: "bra".into(),
+                caret: 3,
+            };
+            scene.editing = Some(Edit::Rename);
+            scene.edit = Field {
+                text: "Brass Tutti 1".into(),
+                caret: 5,
+            };
+            scene.focus = Some(FieldId::Edit);
+            scene.hover = Some(DrawerTarget::Row(2));
+        }
+        if drawer_shown == "midi" {
+            let row = |name: &str, assignment: &str| MidiRow {
+                name: name.into(),
+                assignment: assignment.into(),
+                waiting: false,
+            };
+            scene.midi = Some(MidiList {
+                rows: vec![
+                    row("TUNE", "CC 21"),
+                    row("GLIDE", ""),
+                    row("CUTOFF", "CC 74"),
+                    row("EMPHASIS", "CC 71"),
+                ],
+                chosen: 1,
+                keys: "ENTER: LEARN \u{b7} DELETE: REMOVE".into(),
+                reserved: "CC 0, 32, 120 TO 127 ARE NOT LEARNED".into(),
+                status: "CHOOSE A CONTROL, THEN MOVE A CONTROLLER".into(),
+                ..MidiList::default()
+            });
+        }
+        drawer.render(&scene);
         let d = drawer.frame();
         let at = (DRAWER_TOP * scale).round() as usize - r.top_px().max(0) as usize
             + (-r.top_px()).max(0) as usize;

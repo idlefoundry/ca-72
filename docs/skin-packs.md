@@ -256,6 +256,10 @@ knob_caps = "turn"           # optional: "still" (the default) or "turn" (see Pi
 strip_art = "art/strip.svg"  # optional: drawn over the plug-in's strip (see The strip)
 keyboard_art = "art/keyboard.svg" # optional: drawn over the keyboard view's case (see The strip)
 keyboard_case = "face"       # optional: the keyboard view's case in "wood" (the default) or "face"
+drawer_art = "art/drawer.svg" # optional: drawn over the presets' drawer's face (see The strip)
+drawer_lettering = "type"    # optional: its displays in "dots" (the default) or the typeface
+drawer_legends = "caps"      # optional: its keys' legends "above" them (the default) or on them
+drawer_titles = "centre"     # optional: its sections' titles at their "left" (the default) or centred
 
 [look.colours]               # optional: the strip's (see The strip), each "#rrggbb"
 lamp = "#ffa040"             # its readouts' lit segments, its displays' dots, the voices' drops
@@ -263,6 +267,8 @@ drops = "#ffa62a"            # optional: the voices' drops' light (else made fro
 tab_print = "#e6dcc4"        # the tabs' lettering
 key_print = "#e6dcc4"        # the rail's keys' marks and lettering
 wheel = "#c4b08e"            # the PITCH and MOD wheels' colour (they are shaded by the plug-in)
+display = "#e6dcc4"          # the drawer's displays' lettering in the typeface, where not lit
+selection = "#12303a"        # the drawer's current row's band, in the typeface lettering
 
 [look.pictures]              # optional: realistic only; pictures replacing the built-in ones
 knob = "pictures/knob.png"
@@ -354,7 +360,26 @@ its `face`, laid as the strip's face), and:
 - Pictures `white-key` and `black-key`: one key each, seen from above, its back at the top
   (171 × 1385 and 181 × 1232). The white key whole: the plug-in cuts the black keys' notches.
 
-The presets' drawer is not yet a pack's to dress.
+**The presets' drawer** (FIND, PRESETS and PRESET, shown in place of the strip's sections) keeps
+its displays and keys where they are, and is dressed too: its face is the pack's `face` (as the
+panel's, tinted by `face_tint`), its displays' glass the pack's `glass`, its keys the pack's `key`,
+its dots the pack's `lamp`, its print the pack's typeface in `tab_print`'s colour, and:
+
+- `drawer_art`: a drawing over its face, in the drawer's own units (3108 by 734, y from the
+  rail's foot: the strip's y less 116), drawn under its print, glass and keys. Its places: the
+  search display from x 63 to 750, y 51 to 98; the tags' 63 to 750, 110 to 707; the list's 814
+  to 2290, 51 to 707; PRESET's display 2354 to 3032, 244 to 707 (each with a 6-unit bezel the
+  plug-in draws round it); PRESET's eight keys 136 by 51, centred at x 2422, 2603, 2784 and 2965,
+  y 99 and 197; the sections' titles across y 20 to 42.
+- `drawer_lettering = "type"`: its displays lettered in the pack's typeface rather than in dots
+  (no unlit dots shown): what is lit (the current preset, a chosen tag or tab, a title) in the
+  `lamp` colour, the rest in `display` (else `tab_print`, else a cream), fainter as the plug-in
+  dims it; text typed into a field in `display`, its caret lit. The stars, arrows and the current
+  row's mark are drawn as shapes, not letters. A press in a field puts the caret where the
+  typeface sets the characters.
+- `drawer_legends = "caps"`: the keys' legends printed on their caps, in `key_print`, rather than
+  above them.
+- `drawer_titles = "centre"`: FIND, PRESETS and PRESET centred over their sections and larger.
 
 ### Drawings: SVG's allowed subset
 

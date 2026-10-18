@@ -14,6 +14,15 @@ strip. Make `tab` and `tab-lit` square caps framed alike (the lit one an edit of
 the strip widens them by repeating their middle column, so keep anything particular (a lamp
 window) in one half.
 
+## The keyboard view's and the presets' drawer's drawings
+
+`keyboard_art` covers the keyboard view's case, in the strip's units. `drawer_art` covers the
+presets' drawer: `viewBox="0 0 3108 734"`, y from the rail's foot (the strip's y less 116). Its
+displays and keys stay where they are, and their places are listed in `docs/skin-packs.md`, The
+strip. The displays reach within 27 units of the drawer's foot, so keep frames round them slim.
+`drawer_lettering = "type"` letters the drawer's displays in the pack's typeface, in `lamp` and
+`display`, rather than in dots.
+
 ## The drawing, `art/panel.svg`
 
 Give it `viewBox="0 0 3108 925"`. It covers the wooden strip (y 0 to 130) and the face (y 130

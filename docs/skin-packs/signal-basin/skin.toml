@@ -36,6 +36,11 @@ origin = "original"
 author = "Idle Foundry Ltd."
 
 [[assets]]
+path = "art/drawer.svg"
+origin = "original"
+author = "Idle Foundry Ltd."
+
+[[assets]]
 path = "pictures/walnut.png"
 origin = "generated"
 author = "Idle Foundry Ltd."
@@ -215,6 +220,12 @@ strip_art = "art/strip.svg"
 # The keyboard view: its case teal as the bays, edged in copper.
 keyboard_art = "art/keyboard.svg"
 keyboard_case = "face"
+# The presets' drawer: its bays as the strip's, its displays lettered in the pack's typeface, its
+# keys' legends on them, its sections' titles centred.
+drawer_art = "art/drawer.svg"
+drawer_lettering = "type"
+drawer_legends = "caps"
+drawer_titles = "centre"
 
 # The strip's lamps a warm amber; the tabs' and keys' print cream, on black Bakelite.
 [look.colours]
@@ -223,6 +234,8 @@ drops = "#ffa62a"
 tab_print = "#e6dcc4"
 key_print = "#e6dcc4"
 wheel = "#d8c4a0"
+display = "#e6dcc4"
+selection = "#12303a"
 
 [look.pictures]
 walnut = "pictures/walnut.png"

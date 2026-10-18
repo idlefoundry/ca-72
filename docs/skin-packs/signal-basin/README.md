@@ -83,6 +83,16 @@ copper and screwed down, a copper rim round the key bed, a copper bezel round th
 a walnut key slip under the keys. Its keys were generated from a crop of that concept, cut out
 and sized, the black one darkened to a deeper gloss.
 
+## The presets' drawer (2026-10-17)
+
+The drawer follows a fourth concept picture, its displays and keys where the plug-in has them.
+`art/drawer.svg` (`drawer.py`) draws FIND, PRESETS and PRESET as teal bays edged in copper, a small
+screw in each corner, each display in a copper rim (FIND's two in one frame, a copper bar between),
+a dark recess behind PRESET's keys, walnut at the ends and a slim lip at the foot. Its displays are
+lettered in the pack's typeface (`drawer_lettering = "type"`): cream, the current preset amber on a
+teal band (`selection`); its keys' legends are printed on them; its titles are centred. No new
+pictures: its glass and keys are the strip's.
+
 ## The prompts
 
 ### `knob` (with a crop of the concept picture)

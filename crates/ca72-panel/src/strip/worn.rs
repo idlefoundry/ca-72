@@ -38,8 +38,8 @@ const SEG_OFF_OPACITY: f64 = 0.05;
 /// orange's are.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Lamp {
-    on: (u8, u8, u8),
-    glow: (u8, u8, u8),
+    pub(crate) on: (u8, u8, u8),
+    pub(crate) glow: (u8, u8, u8),
     drop: (f64, f64, f64),
 }
 
