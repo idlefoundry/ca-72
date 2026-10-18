@@ -163,6 +163,7 @@ const FAINT: f32 = 0.5;
 /// Orange strokes close to the original display against quieter glass, with a little red glow.
 /// Unlit dots stay below the lettering's contrast even at the minimum window width.
 const DOT_ON: (u8, u8, u8) = (255, 140, 58);
+const DOT_SELECTED: (u8, u8, u8) = (255, 197, 110);
 const DOT_GLOW: (u8, u8, u8) = (255, 72, 10);
 const UNLIT: f32 = 0.025;
 
@@ -267,6 +268,23 @@ pub fn tab_of(s: &DrawerScene) -> Tab {
 
 // ---- What the displays show.
 
+/// The current preset alone uses gold; the rest of the display keeps its orange ink.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+enum Ink {
+    #[default]
+    Amber,
+    Selected,
+}
+
+impl Ink {
+    fn colour(self) -> (u8, u8, u8) {
+        match self {
+            Ink::Amber => DOT_ON,
+            Ink::Selected => DOT_SELECTED,
+        }
+    }
+}
+
 /// Characters on a display: from dot `col`, its top at dot `row`, `lv` bright.
 #[derive(Clone, Debug, PartialEq)]
 struct Item {
@@ -274,6 +292,7 @@ struct Item {
     lv: f32,
     col: usize,
     row: usize,
+    ink: Ink,
 }
 
 /// (A control character, from a file written elsewhere, is shown as if it were not there.)
@@ -283,6 +302,7 @@ fn item(text: &str, lv: f32, col: usize, row: usize) -> Item {
         lv,
         col,
         row,
+        ink: Ink::Amber,
     }
 }
 
@@ -292,6 +312,8 @@ const CARET: char = '\u{2581}';
 /// A selected tag's one-column bar, aligned at the left of its glyph cell. Two blank dot
 /// columns then separate it from the tag; a five-column arrow would overlap its first letter.
 const TAG_SELECTED: char = '\u{258f}';
+/// A filled arrow for the current preset, distinct from the hover row's outline arrow.
+const ROW_SELECTED: char = '\u{25b6}';
 
 /// A character's dots, nine rows of five (the last two below the line): the font's, the
 /// signs' and the caret's.
@@ -308,6 +330,7 @@ fn glyph(c: char) -> [u8; 9] {
         '\u{25bc}' => seven(&DOWN),
         CARET => [0, 0, 0, 0, 0, 0, 0, 0, 0x1f],
         TAG_SELECTED => seven(&[0x10; 7]),
+        ROW_SELECTED => seven(&[0x10, 0x18, 0x1c, 0x1f, 0x1c, 0x18, 0x10]),
         _ => font::glyph(c),
     }
 }
@@ -425,6 +448,7 @@ fn field_items(out: &mut Vec<Item>, s: &DrawerScene, id: FieldId, placeholder: &
             lv: BRIGHT,
             col: col + 6 * at,
             row,
+            ink: Ink::Amber,
         });
     }
 }
@@ -542,16 +566,29 @@ fn list_items(s: &DrawerScene) -> Vec<Item> {
             NORMAL
         };
         let star = if r.favorite { '\u{2605}' } else { '\u{2606}' };
+        let mark = if r.current {
+            ROW_SELECTED
+        } else if pointed {
+            '>'
+        } else {
+            ' '
+        };
         let text = format!(
-            "{} {star} {:<NAME_CHARS$} {:<6} {}",
-            if r.current { ">" } else { " " },
+            "{mark} {star} {:<NAME_CHARS$} {:<6} {}",
             cut(&r.name, NAME_CHARS),
             r.origin.unwrap_or(""),
             r.tags
         );
-        out.push(item(&cut(&text, n - 2), lv, COL, row));
+        let ink = if r.current { Ink::Selected } else { Ink::Amber };
+        out.push(Item {
+            ink,
+            ..item(&cut(&text, n - 2), lv, COL, row)
+        });
         if s.hover == Some(DrawerTarget::Star(i)) {
-            out.push(item(&star.to_string(), BRIGHT, COL + 6 * STAR_AT, row));
+            out.push(Item {
+                ink,
+                ..item(&star.to_string(), BRIGHT, COL + 6 * STAR_AT, row)
+            });
         }
     }
     more(&mut out, s.first, s.rows.len(), n);
@@ -1804,10 +1841,17 @@ fn make_still(scale: f64, pictures: &Pictures) -> Pixmap {
 /// Only the titles are worn into the face; the action names are clear on the key caps.
 const PRINT_H: f64 = 50.0;
 
+#[derive(Clone, Copy, Debug, Default)]
+struct LitDot {
+    lv: f32,
+    ink: Ink,
+}
+
 /// Each dot of a display lit by `items`, as bright as the brightest over it (none: 0).
-fn lit_dots(d: &Display, items: &[Item]) -> Vec<f32> {
+/// Gold wins a tie, so hovering the selected star cannot turn it back to ordinary orange.
+fn lit_dots(d: &Display, items: &[Item]) -> Vec<LitDot> {
     let (cols, rows) = (d.cols(), d.rows());
-    let mut lit = vec![0.0f32; cols * rows];
+    let mut lit = vec![LitDot::default(); cols * rows];
     for it in items {
         for (n, ch) in it.text.chars().enumerate() {
             let g = glyph(ch);
@@ -1816,7 +1860,12 @@ fn lit_dots(d: &Display, items: &[Item]) -> Vec<f32> {
                     let (c, row) = (it.col + 6 * n + b, it.row + j);
                     if bits >> (4 - b) & 1 == 1 && c < cols && row < rows {
                         let v = &mut lit[row * cols + c];
-                        *v = v.max(it.lv);
+                        if it.lv > v.lv || (it.lv == v.lv && it.ink > v.ink) {
+                            *v = LitDot {
+                                lv: it.lv,
+                                ink: it.ink,
+                            };
+                        }
                     }
                 }
             }
@@ -1865,7 +1914,7 @@ fn redraw(
     still: &Pixmap,
     scale: f64,
     d: &Display,
-    lit: &[f32],
+    lit: &[LitDot],
     (from, to): (f64, f64),
 ) {
     let (_, oy) = d.origin();
@@ -1898,20 +1947,20 @@ fn redraw(
     let last = ((to + 1.0).ceil().max(0.0) as usize).min(rows);
     let (ox, _) = d.origin();
     // By brightness (to a twentieth): the glows first, then the dots over them.
-    let mut by: BTreeMap<u8, Vec<Disc>> = BTreeMap::new();
+    let mut by: BTreeMap<(Ink, u8), Vec<Disc>> = BTreeMap::new();
     for j in first..last {
         for c in 0..cols {
-            let v = lit[j * cols + c];
+            let LitDot { lv: v, ink } = lit[j * cols + c];
             if v > 0.0 {
                 let x = ((ox + c as f64 * d.pitch) * scale) as f32 - x0 as f32;
                 let y = ((oy + j as f64 * d.pitch) * scale) as f32 - top as f32;
-                by.entry((v * 20.0).round() as u8)
+                by.entry((ink, (v * 20.0).round() as u8))
                     .or_default()
                     .push((x, y, r));
             }
         }
     }
-    for (&q, ds) in &by {
+    for (&(_, q), ds) in &by {
         let glows: Vec<Disc> = ds.iter().map(|&(x, y, r)| (x, y, r * 2.1)).collect();
         discs(
             &mut band,
@@ -1921,8 +1970,8 @@ fn redraw(
             0.08 * f32::from(q) / 20.0,
         );
     }
-    for (&q, ds) in &by {
-        discs(&mut band, &mut cover, ds, DOT_ON, f32::from(q) / 20.0);
+    for (&(ink, q), ds) in &by {
+        discs(&mut band, &mut cover, ds, ink.colour(), f32::from(q) / 20.0);
     }
     for y in y0..y1 {
         let (i, b) = (
@@ -2267,7 +2316,7 @@ mod tests {
         let chars =
             |t: &str, from: usize, n: usize| t.chars().skip(from).take(n).collect::<String>();
         let current = row(1);
-        assert_eq!(chars(&current, 0, 3), "> \u{2606}");
+        assert_eq!(chars(&current, 0, 3), "\u{25b6} \u{2606}");
         assert_eq!(chars(&current, NAME_AT, 9), "Preset 1 ");
         let edited = row(2);
         assert_eq!(
@@ -2277,6 +2326,94 @@ mod tests {
         assert_eq!(chars(&edited, NAME_AT + NAME_CHARS + 1, 6), "EDITED");
         assert_eq!(chars(&edited, NAME_AT + NAME_CHARS + 8, 9), "bass dark");
         assert_eq!(chars(&row(0), 2, 1), "\u{2605}");
+    }
+
+    /// Selection is gold with a filled marker; hover is brighter orange with an outline
+    /// marker; ordinary presets keep the user's darker orange and unmarked rows.
+    #[test]
+    fn selected_hovered_and_ordinary_presets_have_distinct_treatments() {
+        let mut s = scene();
+        s.hover = Some(DrawerTarget::Row(3));
+        let items = list_items(&s);
+        let row = |i| {
+            items
+                .iter()
+                .find(|it| it.row == list_row(i) && it.col == COL)
+                .expect("preset row")
+        };
+        let (selected, hovered, ordinary) = (row(1), row(3), row(7));
+        assert_eq!(selected.ink.colour(), (255, 197, 110));
+        assert_eq!(selected.lv, BRIGHT);
+        assert!(selected.text.starts_with(ROW_SELECTED));
+        assert_eq!(hovered.ink.colour(), (255, 140, 58));
+        assert_eq!(hovered.lv, POINTED);
+        assert!(hovered.text.starts_with('>'));
+        assert_eq!(ordinary.ink.colour(), (255, 140, 58));
+        assert_eq!(ordinary.lv, 0.78);
+        assert!(ordinary.text.starts_with(' '));
+        assert!(hovered.lv > ordinary.lv);
+        // Hovering its star must not repaint part of the current row in orange.
+        s.hover = Some(DrawerTarget::Star(1));
+        assert!(
+            list_items(&s)
+                .iter()
+                .filter(|it| it.row == list_row(1))
+                .all(|it| it.ink == Ink::Selected)
+        );
+    }
+
+    /// Moving/clearing selection and moving hover independently clears the old gold and
+    /// both markers, matching a fresh frame each time. An uninvolved ordinary row stays
+    /// identical, so changing selection cannot recolour the rest of the list.
+    #[test]
+    fn moving_selection_and_hover_redraws_without_stale_gold() {
+        for scale in [860.0 / W, 1035.0 / W, 1.0] {
+            let mut s = scene();
+            s.hover = Some(DrawerTarget::Row(3));
+            let mut states = vec![s.clone()];
+            s.rows[1].current = false;
+            s.rows[2].current = true;
+            s.current.as_mut().unwrap().name = "Preset 2".into();
+            states.push(s.clone());
+            s.hover = Some(DrawerTarget::Row(4));
+            states.push(s.clone());
+            s.rows[2].current = false;
+            s.current = None;
+            states.push(s.clone());
+            s.hover = None;
+            states.push(s.clone());
+            s.rows[1].current = true;
+            s.current = scene().current;
+            s.hover = Some(DrawerTarget::Star(1));
+            states.push(s);
+
+            let (_, oy) = LIST.origin();
+            let top = ((oy + (list_row(7) as f64 - 1.5) * LIST.pitch) * scale).round();
+            let bottom = ((oy + (list_row(7) as f64 + 9.5) * LIST.pitch) * scale).round();
+            let ordinary_rect = IntRect::from_xywh(
+                (LIST.x * scale).round() as i32,
+                top as i32,
+                (LIST.w * scale).round() as u32,
+                (bottom - top) as u32,
+            )
+            .unwrap();
+            let mut parts = DrawerRenderer::new(scale);
+            let mut ordinary_before = None;
+            for state in states {
+                parts.render(&state);
+                let mut whole = DrawerRenderer::new(scale);
+                whole.render(&state);
+                assert!(
+                    parts.frame().data() == whole.frame().data(),
+                    "selection/hover left stale pixels at scale {scale}"
+                );
+                let ordinary = parts.frame().clone_rect(ordinary_rect).unwrap();
+                match &ordinary_before {
+                    Some(before) => assert_eq!(ordinary.data(), before),
+                    None => ordinary_before = Some(ordinary.data().to_vec()),
+                }
+            }
+        }
     }
 
     /// Drawn line by line as by the whole: a frame drawn again where a pointer moved from row
