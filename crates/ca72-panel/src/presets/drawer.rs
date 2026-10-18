@@ -157,9 +157,14 @@ const UPDATE_LINE: usize = STATUS_LINES - 1;
 /// the pointer; the list's; what is said aside; what is barely there.
 const BRIGHT: f32 = 1.0;
 const POINTED: f32 = 1.0;
-const NORMAL: f32 = 0.85;
-const DIM: f32 = 0.7;
-const FAINT: f32 = 0.6;
+const NORMAL: f32 = 0.815;
+const DIM: f32 = 0.66;
+const FAINT: f32 = 0.55;
+/// Keep the preceding appearance within hovered, focused or chosen controls, including
+/// their quieter placeholders and action labels. Only unselected items move halfway back.
+const ACTIVE_NORMAL: f32 = 0.85;
+const ACTIVE_DIM: f32 = 0.7;
+const ACTIVE_FAINT: f32 = 0.6;
 /// Orange strokes close to the original display against quieter glass, with a little red glow.
 /// Unlit dots stay below the lettering's contrast even at the minimum window width.
 const DOT_ON: (u8, u8, u8) = (255, 140, 58);
@@ -427,6 +432,10 @@ fn shown_from(f: &Field, chars: usize) -> usize {
     f.caret.saturating_sub(chars.saturating_sub(1))
 }
 
+fn field_active(s: &DrawerScene, id: FieldId) -> bool {
+    s.focus == Some(id) || s.hover == Some(DrawerTarget::Field(id))
+}
+
 /// A field's line: its text (else, empty, what it is for, faintly), and its caret when it has
 /// the keyboard.
 fn field_items(out: &mut Vec<Item>, s: &DrawerScene, id: FieldId, placeholder: &str) {
@@ -436,7 +445,12 @@ fn field_items(out: &mut Vec<Item>, s: &DrawerScene, id: FieldId, placeholder: &
     let f = field_of(s, id);
     let from = shown_from(f, chars);
     if f.text.is_empty() {
-        out.push(item(placeholder, FAINT, col, row));
+        let lv = if field_active(s, id) {
+            ACTIVE_FAINT
+        } else {
+            FAINT
+        };
+        out.push(item(placeholder, lv, col, row));
     } else {
         let shown: String = f.text.chars().skip(from).take(chars).collect();
         out.push(item(&shown, BRIGHT, col, row));
@@ -532,7 +546,7 @@ fn list_items(s: &DrawerScene) -> Vec<Item> {
         let lv = if t == tab {
             BRIGHT
         } else if s.hover == Some(DrawerTarget::Tab(t)) {
-            NORMAL
+            ACTIVE_NORMAL
         } else {
             FAINT
         };
@@ -671,7 +685,7 @@ fn midi_items(s: &DrawerScene, m: &MidiList) -> Vec<Item> {
         let (said, said_lv) = if r.waiting {
             ("MOVE A CONTROLLER NOW", BRIGHT)
         } else if r.assignment.is_empty() {
-            ("-", DIM)
+            ("-", if chosen || pointed { ACTIVE_DIM } else { DIM })
         } else {
             (r.assignment.as_str(), lv)
         };
@@ -684,6 +698,8 @@ fn midi_items(s: &DrawerScene, m: &MidiList) -> Vec<Item> {
         for (a, w, from, _) in acts {
             let lv = if s.hover == Some(DrawerTarget::MidiAction(i, a)) {
                 BRIGHT
+            } else if chosen || pointed {
+                ACTIVE_NORMAL
             } else {
                 NORMAL
             };
@@ -761,8 +777,13 @@ fn status_items(s: &DrawerScene) -> Vec<Item> {
         }
         (None, Some(Edit::Save)) => {
             line(&mut out, 0, "SAVE THE SOUND AS", BRIGHT);
-            line(&mut out, 2, "NAME", DIM);
-            line(&mut out, 3, "TAGS", DIM);
+            for (k, id, label) in [
+                (2, FieldId::SaveName, "NAME"),
+                (3, FieldId::SaveTags, "TAGS"),
+            ] {
+                let lv = if field_active(s, id) { ACTIVE_DIM } else { DIM };
+                line(&mut out, k, label, lv);
+            }
             field_items(&mut out, s, FieldId::SaveName, "");
             field_items(&mut out, s, FieldId::SaveTags, "bass, dark");
             hint(&mut out, 5, 2);
@@ -1946,7 +1967,8 @@ fn redraw(
     let first = (from - 1.0).floor().max(0.0) as usize;
     let last = ((to + 1.0).ceil().max(0.0) as usize).min(rows);
     let (ox, _) = d.origin();
-    // By brightness (to a twentieth): the glows first, then the dots over them.
+    // Half the preceding brightness step permits a midpoint without rounding ordinary
+    // text all the way back. Existing active levels still land on their exact old steps.
     let mut by: BTreeMap<(Ink, u8), Vec<Disc>> = BTreeMap::new();
     for j in first..last {
         for c in 0..cols {
@@ -1954,7 +1976,7 @@ fn redraw(
             if v > 0.0 {
                 let x = ((ox + c as f64 * d.pitch) * scale) as f32 - x0 as f32;
                 let y = ((oy + j as f64 * d.pitch) * scale) as f32 - top as f32;
-                by.entry((ink, (v * 20.0).round() as u8))
+                by.entry((ink, (v * 40.0).round() as u8))
                     .or_default()
                     .push((x, y, r));
             }
@@ -1967,11 +1989,11 @@ fn redraw(
             &mut cover,
             &glows,
             DOT_GLOW,
-            0.08 * f32::from(q) / 20.0,
+            0.08 * f32::from(q) / 40.0,
         );
     }
     for (&(ink, q), ds) in &by {
-        discs(&mut band, &mut cover, ds, ink.colour(), f32::from(q) / 20.0);
+        discs(&mut band, &mut cover, ds, ink.colour(), f32::from(q) / 40.0);
     }
     for y in y0..y1 {
         let (i, b) = (
@@ -2349,7 +2371,7 @@ mod tests {
         assert_eq!(hovered.lv, POINTED);
         assert!(hovered.text.starts_with('>'));
         assert_eq!(ordinary.ink.colour(), (255, 140, 58));
-        assert_eq!(ordinary.lv, 0.85);
+        assert_eq!(ordinary.lv, 0.815);
         assert!(ordinary.text.starts_with(' '));
         assert!(hovered.lv > ordinary.lv);
         // Hovering its star must not repaint part of the current row in orange.
@@ -2360,6 +2382,94 @@ mod tests {
                 .filter(|it| it.row == list_row(1))
                 .all(|it| it.ink == Ink::Selected)
         );
+    }
+
+    /// Darkening unselected text must retain even the quieter parts of a hovered/focused
+    /// control, rather than changing placeholders, hovered tabs or chosen MIDI row actions.
+    #[test]
+    fn cursor_selected_items_keep_their_previous_brightness() {
+        for id in [FieldId::Search, FieldId::SaveName, FieldId::SaveTags] {
+            let mut s = DrawerScene {
+                editing: Some(Edit::Save),
+                ..scene()
+            };
+            let placeholder = |s: &DrawerScene| {
+                let mut items = Vec::new();
+                field_items(&mut items, s, id, "EMPTY");
+                items[0].lv
+            };
+            assert_eq!(placeholder(&s), 0.55);
+            s.focus = Some(id);
+            assert_eq!(placeholder(&s), 0.6);
+            s.focus = None;
+            s.hover = Some(DrawerTarget::Field(id));
+            assert_eq!(placeholder(&s), 0.6);
+            if id != FieldId::Search {
+                let label = if id == FieldId::SaveName {
+                    "NAME"
+                } else {
+                    "TAGS"
+                };
+                let level = |s: &DrawerScene| {
+                    status_items(s)
+                        .iter()
+                        .find(|it| it.text == label)
+                        .unwrap()
+                        .lv
+                };
+                assert_eq!(level(&s), 0.7);
+                s.hover = None;
+                s.focus = Some(id);
+                assert_eq!(level(&s), 0.7);
+                s.focus = None;
+                assert_eq!(level(&s), 0.66);
+            }
+        }
+        let mut s = scene();
+        s.hover = Some(DrawerTarget::Tab(Tab::Favourites));
+        let tab = |s: &DrawerScene| {
+            list_items(s)
+                .iter()
+                .find(|it| it.text == "FAVORITES")
+                .unwrap()
+                .lv
+        };
+        assert_eq!(tab(&s), 0.85);
+        s.hover = None;
+        assert_eq!(tab(&s), 0.55);
+        s.midi = Some(MidiList {
+            chosen: 0,
+            rows: (0..3)
+                .map(|i| MidiRow {
+                    name: format!("CONTROL {i}"),
+                    assignment: String::new(),
+                    waiting: false,
+                })
+                .collect(),
+            ..MidiList::default()
+        });
+        for hover in [
+            DrawerTarget::MidiRow(1),
+            DrawerTarget::MidiAction(1, MidiAction::Learn),
+        ] {
+            s.hover = Some(hover);
+            let items = list_items(&s);
+            for i in [0, 1] {
+                let row: Vec<_> = items.iter().filter(|it| it.row == list_row(i)).collect();
+                assert_eq!(row[0].lv, 1.0);
+                assert_eq!(row[1].text, "-");
+                assert_eq!(row[1].lv, 0.7);
+                let action_level = if hover == DrawerTarget::MidiAction(i, MidiAction::Learn) {
+                    1.0
+                } else {
+                    0.85
+                };
+                assert_eq!(row[2].lv, action_level);
+            }
+            let inactive: Vec<_> = items.iter().filter(|it| it.row == list_row(2)).collect();
+            assert_eq!(inactive[0].lv, 0.815);
+            assert_eq!(inactive[1].lv, 0.66);
+        }
     }
 
     /// Moving/clearing selection and moving hover independently clears the old gold and
