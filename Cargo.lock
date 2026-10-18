@@ -317,7 +317,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "ca72"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "ca72-rt",
  "libm",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-analysis"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "libm",
  "serde",
@@ -333,7 +333,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-lab"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "ca72",
  "ca72-analysis",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-panel"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "plugin-kit-materials",
  "resvg",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-plugin"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "baseview 0.1.0",
  "ca72",
@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-rt"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-spice"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "tempfile",
 ]
@@ -2287,7 +2287,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "skin-pack"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "ed25519-dalek",
  "png",
@@ -3175,7 +3175,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "nih_plug_xtask",
 ]

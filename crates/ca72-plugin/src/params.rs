@@ -423,11 +423,11 @@ pub struct Ca72Params {
     /// reads 0.
     #[id = "inner"]
     pub inner: FloatParam,
-    /// QUALITY, HI by default: at LO the voices are played by the light model, Potato mode,
-    /// for computers the circuit's is too heavy for (decisions.md R47); at ULTRA by the
-    /// circuit's model with no compromises (R48). Not a preset's (`library::KEPT`): it
-    /// suits the computer, not the sound; saved with the session. After AUTO GAIN: a session
-    /// saved before reads it HI.
+    /// QUALITY, LO by default for a new instance (R-LO-DEFAULT; HI until 0.2.4): at LO the
+    /// voices are played by the light model, Potato mode, for computers the circuit's is too
+    /// heavy for (decisions.md R47); at ULTRA by the circuit's model with no compromises (R48).
+    /// Not a preset's (`library::KEPT`): it suits the computer, not the sound; saved with the
+    /// session. After AUTO GAIN: a session saved before it reads it HI (`filter_state`).
     #[id = "quality"]
     pub quality: EnumParam<QualityMode>,
     /// DOUBLE (the strip's SCATTER | DOUBLE): each note two voices, DETUNE apart, either side
@@ -687,7 +687,7 @@ impl Default for Ca72Params {
             auto_gain: BoolParam::new("Auto Gain", true),
             inner: percent("Inner"),
             doubled: BoolParam::new("Double", false),
-            quality: EnumParam::new("Quality", QualityMode::Hi),
+            quality: EnumParam::new("Quality", QualityMode::Lo),
             note_priority: EnumParam::new("Note Priority", NotePriority::Low),
             retrigger: BoolParam::new("Retrigger", false),
         }

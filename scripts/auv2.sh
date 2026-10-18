@@ -40,6 +40,7 @@ cmake -S "$root/scripts/auv2" -B "$build" -DCMAKE_BUILD_TYPE=Release \
     -DCLAP_WRAPPER_ROOT="$third/clap-wrapper" -DCLAP_SDK_ROOT="$third/clap" \
     -DAUDIOUNIT_SDK_ROOT="$third/AudioUnitSDK" > "$build.log"
 cmake --build "$build" --config Release --parallel >> "$build.log"
+ctest --test-dir "$build" --output-on-failure
 
 # Signed ad hoc, as the bundler signs the others; scripts/package.sh signs it for a release.
 rm -rf "$bundles/CA-72.component"

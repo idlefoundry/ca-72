@@ -246,10 +246,12 @@ pub fn measure(
     // A running oscillator has no DC equilibrium, so the bench holds the ramp at -2 V
     // through a switch that opens 1 us into the run: the operating point is then the held
     // circuit's (it converges, and slow parts such as C13's 135 ms filter start settled),
-    // and the oscillator starts from it. The open switch leaks 2 pA at most.
+    // and the oscillator starts from it. The open switch leaks 2 pA at most. Closed, it is
+    // 1 ohm, not 1 milliohm: KLU (Homebrew's ngspice 47 is built with it) gave up on the
+    // hold node with the switch's 1e17 ratio of off to on ("Timestep too small", R-MAC-FIXES).
     let held = format!(
         "{net}vhold hold 0 -2\nshold ramp hold hctl 0 swhold\n\
-         vhctl hctl 0 pwl(0 1 1u 1 1.001u 0)\n.model swhold sw(vt=0.5 vh=0 ron=1m roff=1e14)\n"
+         vhctl hctl 0 pwl(0 1 1u 1 1.001u 0)\n.model swhold sw(vt=0.5 vh=0 ron=1 roff=1e14)\n"
     );
     let op = spice.run(&held, &["op"], &work.join("op"))?;
     let i_exp = op[0].scalar("i(v.x1.vexp)");
