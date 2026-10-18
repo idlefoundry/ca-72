@@ -157,26 +157,25 @@ fn the_plug_ins_own_artwork_in_a_pack_under_other_terms_goes_to_review() {
     assert!(copy.message.contains("additional permission"));
 }
 
+/// (Unix's links: making one on Windows needs a privilege a test does not have.)
+#[cfg(unix)]
 #[test]
 fn a_link_out_of_the_pack_is_never_followed() {
     let dir = pack("CC0-1.0");
     let outside = tempfile::tempdir().expect("a folder");
     write(outside.path(), "secret.txt", b"not the pack's");
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(
-            outside.path().join("secret.txt"),
-            dir.path().join("notes.txt"),
-        )
-        .expect("a link");
-        std::os::unix::fs::symlink(outside.path(), dir.path().join("more")).expect("a link");
-        let r = rejected(dir.path(), "path.link");
-        assert_eq!(
-            r.findings.iter().filter(|f| f.code == "path.link").count(),
-            2,
-            "{r}"
-        );
-    }
+    std::os::unix::fs::symlink(
+        outside.path().join("secret.txt"),
+        dir.path().join("notes.txt"),
+    )
+    .expect("a link");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("more")).expect("a link");
+    let r = rejected(dir.path(), "path.link");
+    assert_eq!(
+        r.findings.iter().filter(|f| f.code == "path.link").count(),
+        2,
+        "{r}"
+    );
 }
 
 #[test]

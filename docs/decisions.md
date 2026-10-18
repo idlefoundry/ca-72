@@ -6518,3 +6518,14 @@ public history either. Everything the format gained for it (the panel's size, th
 keyboard's and drawer's dressing, the switches' states, the wheels' colour) is tested here with
 packs of the tests' own. `CONTRIBUTING.md` now asks that the editor's look go through the
 system.
+
+**The pull request's review and CI, 2026-10-18.** Codex's review found three faults, fixed: a
+pack file's root found after macOS's `__MACOSX/` is left out; a look's pictures counted by slot
+as well as by file (`look.pixels`), one large picture named by every slot being that many
+decoded; an installed pack read once while unchanged, so that SETTINGS does not check every pack
+each time it opens (the first check is still on the editor's thread: a follow-up). CI then
+refused the starter's own drawing on its runners (`svg.slow`, 330 to 458 ms against 250), as a
+busy desktop had: the timed test, a backstop to the drawing's counted cost (`svg_work`, about
+half a second on a machine five times slower than an M4 Pro), now allows 2 s, so that a drawing
+within its cost is never refused for the machine's speed or load. **Agent decision** (not
+separately approved).

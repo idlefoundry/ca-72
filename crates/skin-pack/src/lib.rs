@@ -65,7 +65,10 @@ pub struct Limits {
     /// (`svg::Cost::work`): about 100 ms on an M4 Pro, half a second on a machine five times
     /// slower. It bounds what drawing costs; the timed test is a backstop.
     pub svg_work: f64,
-    /// A drawing's test, drawn with its longer side this many pixels: its time limit.
+    /// A drawing's test, drawn with its longer side this many pixels: its time limit. (A
+    /// backstop well past what `svg_work` allows on a slow machine, so that a drawing within
+    /// the cost is never refused for the machine's speed or how busy it is: at 250 ms, the
+    /// starter's own drawing was refused on CI's runners and under a busy desktop.)
     pub svg_test_side: u32,
     pub svg_test_ms: u64,
     /// Fonts in a pack, and a font's size.
@@ -93,7 +96,7 @@ impl Default for Limits {
             svg_tiles: 4096,
             svg_work: 60.0e6,
             svg_test_side: 3000,
-            svg_test_ms: 250,
+            svg_test_ms: 2000,
             fonts: 4,
             font_bytes: 4 << 20,
         }
