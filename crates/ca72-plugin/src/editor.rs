@@ -725,6 +725,8 @@ struct PanelWindow {
     logical: (u32, u32),
     /// When the frame was last shown on the window (none since it opened or resized).
     shown: Option<Instant>,
+    /// When the frame was last drawn while the window could not be seen ([`HIDDEN_DRAW`]).
+    hidden_drawn: Option<Instant>,
     editing: Editing,
     /// The keyboard the drawer took from another window (Windows), given back as it shuts.
     keys: Option<window::Keys>,
@@ -856,6 +858,7 @@ impl PanelWindow {
             physical,
             logical: (width, height),
             shown: None,
+            hidden_drawn: None,
             editing: Editing::new(
                 context,
                 params,
@@ -2935,6 +2938,18 @@ const REPAINT: Option<Duration> = if cfg!(target_os = "linux") {
     None
 };
 
+/// How often the frame is drawn while the window cannot be seen (covered by other windows,
+/// minimised, on another desktop, the host hidden): the scene kept up (the drawer, a resize, MIDI
+/// Learn) without drawing the shutter and the levels thirty times a second for nobody. Nothing is
+/// shown meanwhile; the window seen again is shown whole at once.
+const HIDDEN_DRAW: Duration = Duration::from_millis(250);
+
+/// The tests' counts of the frames drawn and shown by the editors' windows (R-EDITOR-CPU).
+#[cfg(test)]
+static DRAWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(test)]
+static SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Whether the frame must be shown again though nothing in it changed: not yet shown since
 /// the window opened or resized, or (Linux) shown longer ago than [`REPAINT`].
 fn repaint_due(shown: Option<Instant>, now: Instant) -> bool {
@@ -2968,6 +2983,22 @@ impl WindowHandler for PanelWindow {
         self.editing.grip();
         self.follow(window);
         let now = Instant::now();
+        // Unseen, drawn only now and then and not shown; seen again, shown whole.
+        let seen = window::seen(window);
+        if !seen {
+            self.shown = None;
+            if self
+                .hidden_drawn
+                .is_some_and(|at| now.saturating_duration_since(at) < HIDDEN_DRAW)
+            {
+                self.keyboard(window);
+                self.editing.measure_when_done();
+                return;
+            }
+            self.hidden_drawn = Some(now);
+        }
+        #[cfg(test)]
+        DRAWN.fetch_add(1, Ordering::Relaxed);
         let changed = self.editing.draw();
         // A drawer that has just slid shut has asked the host for the shorter window: the
         // editor's view follows in the same frame, before anything is shown. A frame between
@@ -2979,7 +3010,9 @@ impl WindowHandler for PanelWindow {
         self.keyboard(window);
         // (Shown again whole when due: X11 may have dropped any of it.)
         let due = repaint_due(self.shown, now);
-        if changed || due {
+        if seen && (changed || due) {
+            #[cfg(test)]
+            SHOWN.fetch_add(1, Ordering::Relaxed);
             self.present(changed && !due);
             self.shown = Some(now);
         }
@@ -3410,6 +3443,56 @@ pub(crate) mod window {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (window, keys);
+        }
+    }
+
+    /// Whether any of the editor's window can be seen: macOS's occlusion state of the window
+    /// holding it (covered whole, minimised, on another Space or its application hidden: not
+    /// seen); on Windows, its top window not minimised (not `IsWindowVisible`: in a session
+    /// without a desktop on the screen, as an agent's over SSH, every window says it is not
+    /// visible though it is drawn and shown, and the editor would show nothing). X11 says
+    /// nothing reliable without a compositor: always seen there.
+    // (objc 0.2's `msg_send!` asks after a `cargo-clippy` feature this crate does not have.)
+    #[cfg_attr(target_os = "macos", allow(unexpected_cfgs))]
+    pub fn seen(window: &baseview::Window<'_>) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use cocoa::appkit::{NSWindow, NSWindowOcclusionState};
+            use cocoa::base::{id, nil};
+            use objc::{msg_send, sel, sel_impl};
+            let RawWindowHandle::AppKit(h) = window.raw_window_handle() else {
+                return true;
+            };
+            let view = h.ns_view as id;
+            if view == nil {
+                return true;
+            }
+            // SAFETY: baseview's view, on the main thread that runs its frames; its window
+            // is nil until the host puts it in one.
+            let holder: id = unsafe { msg_send![view, window] };
+            if holder == nil {
+                return true;
+            }
+            // SAFETY: `holder` is an NSWindow.
+            let state = unsafe { holder.occlusionState() };
+            state.contains(NSWindowOcclusionState::NSWindowOcclusionStateVisible)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use winapi::um::winuser::{GA_ROOT, GetAncestor, IsIconic};
+            let Some(hwnd) = hwnd(window) else {
+                return true;
+            };
+            // SAFETY: the editor's window and its top window, on the thread that owns them.
+            unsafe {
+                let top = GetAncestor(hwnd, GA_ROOT);
+                top.is_null() || IsIconic(top) == 0
+            }
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let _ = window;
+            true
         }
     }
 
@@ -4212,7 +4295,8 @@ mod tests {
     /// alone, as on Windows and X11 (decisions.md R58), the screen so made the same as
     /// the whole frame's at every frame. Every other frame's QUALITY column and STEREO display
     /// kept, written to `$CA72_RUN`, the folder, as `frames.rgba` (`size.txt`: its width and
-    /// height), with the times in `times.txt` (`-- --ignored --nocapture`).
+    /// height), with the times in `times.txt` (`-- --ignored --nocapture`). With
+    /// `CA72_NO_FRAMES` set, the times alone (the frames are 2 GB, in memory and on disk).
     #[test]
     #[ignore = "plays the window for a while"]
     fn the_window_played() {
@@ -4220,6 +4304,7 @@ mod tests {
             return;
         };
         std::fs::create_dir_all(&out).unwrap();
+        let keep_frames = std::env::var_os("CA72_NO_FRAMES").is_none();
         let dir = tempfile::tempdir().unwrap();
         let host = Arc::new(Host::default());
         let params = Arc::new(Ca72Params::default());
@@ -4370,7 +4455,7 @@ mod tests {
             }
             whole.push(drawn + turned);
             places.push(drawn + in_places);
-            if k % 2 == 0 {
+            if keep_frames && k % 2 == 0 {
                 let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
                 let mut img = vec![0u8; fw * fh * 4];
                 for (r, x0) in [(column, 0usize), (stereo, column.2 + 12)] {
@@ -4383,8 +4468,10 @@ mod tests {
                 frames.extend_from_slice(&img);
             }
         }
-        std::fs::write(out.join("frames.rgba"), &frames).unwrap();
-        std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
+        if keep_frames {
+            std::fs::write(out.join("frames.rgba"), &frames).unwrap();
+            std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
+        }
         let said = |times: &[f64]| {
             let total: f64 = times.iter().sum();
             let mean = total / times.len() as f64;
@@ -7892,6 +7979,7 @@ mod windows_window_tests {
     };
 
     use super::*;
+    use crate::opening::DOZE_AFTER;
 
     /// The host's window. Off the screen, where nothing drawn in it shows, its painting kept
     /// off the editor's window (`WS_CLIPCHILDREN`). Or as a host's dialog (REAPER's FX window):
@@ -8481,9 +8569,13 @@ mod windows_window_tests {
 
     /// The window shown where it changed (decisions.md R58, R59: on Windows the
     /// changed places alone are turned and sent to the window) is the window shown whole: the
-    /// synth playing (QUALITY's lamp following it, the voices' drops), a knob turned, the
+    /// synth playing (QUALITY's opening following it, the voices' drops), a knob turned, the
     /// presets' drawer sliding open and shut, then all of it still; every pixel of the window
-    /// then as when Windows has the editor repaint all of it.
+    /// then as when Windows has the editor repaint all of it. Still is the same frame at every
+    /// look for longer than anything on the panel holds still before it moves again: at LO, a
+    /// new instance's QUALITY (R-LO-DEFAULT), the hamster's wheel stops and he stands
+    /// [`DOZE_AFTER`] before he dozes off (two frames alike 400 ms apart, there, were called
+    /// still and he curled up after: R-STILL-LONGER).
     #[test]
     fn the_window_shown_in_places_is_the_window_shown_whole() {
         let o = Opened::new(false, HostWindow::Dialog);
@@ -8510,17 +8602,19 @@ mod windows_window_tests {
         play(0.5, 700);
         o.click_name();
         play(0.0, 300);
-        // Still: the same frame twice, a while apart.
-        let until = Instant::now() + Duration::from_secs(10);
+        // Still: the same frame at every look, 400 ms apart, for a second past the longest
+        // anything holds still.
+        let span = Duration::from_secs_f64(DOZE_AFTER + 1.0);
+        let until = Instant::now() + Duration::from_secs(20);
         let mut still = every_pixel(&o);
-        loop {
+        let mut since = Instant::now();
+        while since.elapsed() < span {
             pump(Duration::from_millis(400));
             let now = every_pixel(&o);
-            if now == still {
-                break;
+            if now != still {
+                assert!(Instant::now() < until, "the window never still");
+                (still, since) = (now, Instant::now());
             }
-            assert!(Instant::now() < until, "the window never still");
-            still = now;
         }
         assert!(colours(&still) >= 100, "the panel shown");
         // Windows asks for all of it again: the editor shows its whole frame.
@@ -8532,6 +8626,78 @@ mod windows_window_tests {
         let apart = still.iter().zip(&whole).filter(|(a, b)| a != b).count();
         assert!(
             apart == 0,
+            "{apart} pixels shown otherwise than in the whole frame"
+        );
+        o.close();
+    }
+
+    /// An editor whose window cannot be seen (its host's window minimised) draws its frame a
+    /// few times a second instead of at the screen's rate, and shows none of it; seen again,
+    /// it shows its whole frame (decisions.md R-EDITOR-CPU).
+    #[test]
+    fn an_unseen_window_draws_seldom_and_is_whole_when_seen_again() {
+        use winapi::um::winuser::{SW_MINIMIZE, SW_RESTORE, ShowWindow};
+        let o = Opened::new(false, HostWindow::Dialog);
+        let play = |levels: f32, ms: u64| {
+            let until = Instant::now() + Duration::from_millis(ms);
+            let mut k = 0u32;
+            while Instant::now() < until {
+                let mut l = [0.0f32; LEVELS];
+                for (v, l) in l.iter_mut().enumerate().take(4) {
+                    *l = levels * (0.6 + 0.4 * ((k as usize + v) % 3) as f32 / 2.0);
+                }
+                o.meters.publish(0.0, (0.5, 0.0), 0b1111);
+                o.meters.publish_levels(&l, levels);
+                pump(Duration::from_millis(30));
+                k += 1;
+            }
+        };
+        let counts = || (DRAWN.load(Ordering::Relaxed), SHOWN.load(Ordering::Relaxed));
+        play(0.6, 800);
+        let (d0, s0) = counts();
+        play(0.6, 2000);
+        let (d1, s1) = counts();
+        // SAFETY: the test's own window.
+        unsafe { ShowWindow(o.parent, SW_MINIMIZE) };
+        play(0.6, 400);
+        let (d2, s2) = counts();
+        play(0.6, 2000);
+        let (d3, s3) = counts();
+        let (seen, unseen) = (d1 - d0, d3 - d2);
+        println!(
+            "2 s seen: {seen} frames drawn, {} shown; 2 s unseen: {unseen} drawn, {} shown",
+            s1 - s0,
+            s3 - s2
+        );
+        assert!(seen >= 40, "{seen} frames drawn in 2 s while seen");
+        assert!(unseen <= 12, "{unseen} frames drawn in 2 s while unseen");
+        assert_eq!(s3 - s2, 0, "frames shown while unseen");
+        // SAFETY: the test's own window.
+        unsafe { ShowWindow(o.parent, SW_RESTORE) };
+        play(0.0, 300);
+        // Still (as `the_window_shown_in_places_is_the_window_shown_whole` waits for it), then
+        // the window shown whole by Windows' own repaint: the same pixels.
+        let span = Duration::from_secs_f64(crate::opening::DOZE_AFTER + 1.0);
+        let until = Instant::now() + Duration::from_secs(20);
+        let mut still = every_pixel(&o);
+        let mut since = Instant::now();
+        while since.elapsed() < span {
+            pump(Duration::from_millis(400));
+            let now = every_pixel(&o);
+            if now != still {
+                assert!(Instant::now() < until, "the window never still");
+                (still, since) = (now, Instant::now());
+            }
+        }
+        assert!(colours(&still) >= 100, "the panel shown again");
+        let flags = RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN;
+        // SAFETY: the test's own windows.
+        unsafe { RedrawWindow(o.parent, null_mut(), null_mut(), flags) };
+        pump(Duration::from_millis(200));
+        let whole = every_pixel(&o);
+        let apart = still.iter().zip(&whole).filter(|(a, b)| a != b).count();
+        assert_eq!(
+            apart, 0,
             "{apart} pixels shown otherwise than in the whole frame"
         );
         o.close();

@@ -130,6 +130,8 @@ fn helper_start() {
     if let Some(Some(wg)) = HELPER_WG.get()
         && let Some(token) = wg.join()
     {
+        // (Off macOS the token is an empty stand-in: forgetting it does nothing there.)
+        #[allow(clippy::forget_non_drop)]
         std::mem::forget(token);
     }
 }

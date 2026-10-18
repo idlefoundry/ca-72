@@ -7131,6 +7131,264 @@ average 1.2 to 2.6 before each run (logged per run), Bitwig open.
   → 49 %). On this machine the back part's thread had room the Mac's did not.
 - **S's thresholds hold here too** (16 fast threads, S = 2), on the three machines measured.
 
+## R-CPU-EXACT. CPU without changing a sample
+
+**Owner decisions, 2026-10-17.** CPU use being the users' first complaint, the owner decided that
+HI and ULTRA stay bit-identical to 0.2.5, "only do the changes that keep the sound the same", and
+that the worker budget (R-THREADS) goes out without the band-limiting, latency and ULTRA VCA
+changes; then "Okay, proceed!" to the exact shortcuts a three-agent council and the profiles named.
+
+**Agent decisions, 2026-10-17** (not separately approved):
+- **OVERLOAD's lamp driver a step every 8 samples.** The driver is a peak detector (Q25 into
+  0.47 uF, let down through 780 kilohms, a third of a second) that only lights the lamp; the
+  audio reads none of it. It was a nodal solve every sample beside the preamplifier's four
+  substeps (ULTRA, and HI's circuit inside FEEDBACK's loop). It now steps every 8 samples, its
+  step 8 samples long, on the highest the amplifier reached in them, so a peak between steps
+  still lights it.
+- **The filter's ladder bias keeps its temperature's part.** `VcfCircuit::bias` is worked out
+  again whenever the tail current moves; the transistor at the temperature (`Bjt::at`) and C_mu
+  at the fixed V_bc are kept for the ladder, V_bc and temperature they were worked out for. The
+  same arithmetic, so the same bias.
+- **`preset_render` takes `CA72_POTATO` and `CA72_ULTRA`,** as `preset_cost` does, to compare
+  each mode to the bit.
+
+**Evidence (the Mac, 2026-10-17, binaries built from 0d478a5 plus the switches and from this
+change, run alternately):** every factory preset the same to the bit at HI (ten voices) and ULTRA
+(four voices), 4 s each (`preset_render`). `preset_cost` at ULTRA, four voices, the mean of two
+runs each: Feedback Funk 395 to 380 % of a core (-3.9 %); the other eighteen presets, without the
+preamplifier, within ±1 % (no change beyond noise: the bias's temperature part is a small share of
+it, the tail current's iterations the rest).
+
+**Correction, later the same day, withdrawn on 2026-10-18:** a note here said ULTRA's renders
+were not repeatable over time in 0.2.5. They are. The runs that differed were the comparing
+script's fault: `env $e` in zsh, with `e="CA72_ULTRA=1 CA72_VOICES=4"`, set one variable (zsh does
+not split an unquoted parameter), so those renders played ten voices against references of four.
+The ULTRA comparisons above set both variables themselves and stand. (Found by the session that
+looked into it; its branch makes `preset_render` refuse references of another length.)
+
+## R-HI-PAIRS. Two HI voices' filters solved side by side
+
+**Owner decisions, 2026-10-17.** HI and ULTRA stay bit-identical to 0.2.5 (R-CPU-EXACT). Of the
+avenues that keep the sound, two voices per SIMD register was measured as the one worth building
+(a prototype of the filter's elimination for two voices: 20,000 real HI eliminations the same to
+the bit, 91 ns against 34 ns a voice); asked whether to build it, the owner: "do the HI fix
+first."
+
+**Agent decisions, 2026-10-17** (not separately approved):
+- **The filter's loop elimination for two voices at once** (`vcf::solve_loop_pair`), a lane a
+  voice, each lane the scalar's operations in the scalar's order (Rust does not fuse a multiply
+  and an add unasked): each lane picks its own pivots, and a step the scalar skips (a zero pivot,
+  a zero factor) is kept as it was in that lane, not computed (a computed `a - 0 * p` can turn
+  -0.0 into +0.0). The divisions and sums of the two lanes run in one register; a single voice's
+  elimination is a chain each step of which waits on the last, so two fill each other's waits.
+- **`Vcf::tick_pair`**: two filters at HI (Potato, reciprocals, the same oversampling); each its
+  own resampling, bias, prewarping and Newton iterations (one, or two if the first did not
+  converge), their eliminations paired while both iterate and the single filter's where only one
+  does. `Vcf::tick` and `Vcf::step` are untouched: ULTRA and any filter alone take them as before.
+- **`Voice::before_filter`, `Voice::filter_pair`, `Voice::after_filter`**: `Voice::tick_jacks`
+  cut at the filter, each part copied from it as it was.
+- **Each voice and its DOUBLE twin** (`Playing::play_from`, the one instrument included): with
+  the twin sounding and both at HI, both voices' keys and jacks first (neither hangs on the other's
+  output), then each to its filter, the pair, and each on from it. `turned` (the one instrument
+  scattering) changes the voice's own place only.
+- **POLY's voices two at a time** (`Playing::play_pair`): two voices' runs a sample of each in
+  turn, where both play HI on their own (no twin sounding, not split); else one after the other.
+  Without workers the engine plays the list two at a time. With workers, voices are taken two at
+  a time (`pool::take_some`) when the run has more voices than threads to play them (more voices
+  than workers and the audio thread), so that pairing never leaves a thread idle that could have
+  played a voice; each voice keeps its own lock, buffer and done mark, and the outputs are summed
+  in order as before.
+- **Not paired:** LO (the light voices), ULTRA (its elementary functions are the system's,
+  called a voice at a time), and a lone voice without DOUBLE.
+- **The loop's evaluation paired too: tried, measured, taken out** (the owner asked for it,
+  2026-10-17). Two filters of one circuit evaluated a lane each (`eval_sparse` at Potato: the
+  arithmetic in lanes in the scalar's order, the tables and `fast::tanh` the scalar's a lane at a
+  time) gave every factory preset the same to the bit, but cost more than the elimination paired
+  alone: ten HI voices, one thread, 1479 against 1541 % of a core (+4.1 %; a first version, its
+  Jacobian gathered and then scattered, +6 %). The elimination is one chain of dependent steps
+  that two voices fill; the evaluation is mostly independent operations that one voice already
+  overlaps, so packing two costs more than it saves. Pairing `fast::tanh` and the tables
+  themselves (gathers, per-lane branches) was not tried.
+
+**Evidence (the Mac, 2026-10-17, binaries built from `cpu-release` with `preset_render`'s
+DOUBLE switch and from this change):**
+- `tests/pairs.rs`: two voices set apart (notes, cutoffs, emphasis, FEEDBACK, the jacks, a
+  waveform and the filter's mode changed), alone and paired: 120,000 samples at HI the same to the
+  bit; ULTRA and mixed qualities, each alone.
+- `preset_render`, every factory preset, ten voices, 4 s, the same to the bit at HI: one thread,
+  with DOUBLE at 50 %, and with 3 workers (pairs taken) and 12 (not).
+- `preset_cost`, ten voices, one thread, the mean of two runs each, alternated: at HI 1785 to
+  1509 % of a core in all (-15.5 %; -11 to -22 % a preset, the hats the most); with DOUBLE at 50 %,
+  3491 to 2895 (-17.1 %; -13 to -24 %).
+- **On x86 (2026-10-18, the same `preset_cost`, built on each machine from 5870fdd and from
+  the release head, alternated, the mean of two runs):** Linux, Ryzen 7 7800X3D (under the timing
+  lock): HI 2286 to 2175 (-4.9 %), with DOUBLE 4652 to 4403 (-5.4 %); Windows, i5-13600K: HI
+  2457 to 2312 (-5.9 %), with DOUBLE 4908 to 4672 (-4.8 %), the presets spread more widely
+  there. A third of the Mac's saving at first; why, and the SSE2 elimination that brings x86 to
+  -7 to -9 %, are below ("Why x86 saved a third as much").
+- The core's, real-time library's and plug-in's tests; clippy with `-D warnings`.
+
+### Why x86 saved a third as much, and the elimination in SSE2 (2026-10-18)
+
+**Agent decisions, 2026-10-18** (not separately approved; asked for by the session releasing
+0.2.6; merging waits for the owner):
+- **The cause, two parts.** (1) On x86-64 the paired elimination compiled to scalar code. Its
+  lanes form (`pair::solve5_lanes`: each lane's pivot searched and its rows swapped by reading
+  and writing `.0[lane]`, each lane's step kept or skipped by a select on a `[bool; 2]`) gives
+  LLVM a branch per lane: on x86-64 (`x86_64-unknown-linux-gnu`, SSE2) it updated the rows one
+  lane at a time, a `movsd` load, `mulsd`, `subsd` and `movsd` store and a `testb`/`je` per lane
+  and entry, the matrix in a 1224-byte frame indexed by a loop over the columns (48 `mulsd`, 35
+  `subsd`, 47 branches, 217 stack accesses in the elimination alone). AArch64 has the same
+  structure but 32 vector registers, `fcsel` and cheap lane moves, and lost less to it. Alone,
+  the loop elimination (`vcf::pair_tests::pair_timing`, 20,000 of a HI filter's own Jacobians):
+  M4 Pro 101 ns a voice scalar, 35 paired (-66 %); Ryzen 7 7800X3D 88 and 54 (-39 %); i5-13600K
+  76 to 83 and 49 (-36 to -41 %). (2) The elimination is a smaller part of an x86 HI voice: its
+  scalar form is faster there than on the M4 (76 to 88 ns against 101) while the rest of the voice
+  is about 1.45 times slower (the Ryzen's 0.2.5, 2279 % of a core in all, against the M4's 1785).
+  The voice's saving over the elimination's gives its share: M4 15.5 / 66, about 23 %; Ryzen
+  4.7 / 39 and 8.1 / 65, about 12.5 %; i5 5.1 / 39 and 7.4 / 62, about 12.5 %. The same share
+  from both forms on both machines: the model holds. So x86 can't reach the M4's 15 % by the
+  elimination alone; what it can reach, the elimination's full saving, it now does.
+- **`pair::sse2::solve5`**, used on x86-64 (elsewhere the lanes form as before), in SSE2
+  intrinsics (x86-64's baseline; no SSE4.1, AVX or FMA assumed): each lane's pivot by comparing
+  both lanes at once (`MAXPD` returns its first operand only where it is the greater, a NaN
+  included, the scalar's `>`), the rows swapped by a masked exchange only if some lane's pivot
+  is not on the diagonal, a row's step done unmasked where both lanes take it (`MOVMSKPD`),
+  masked where one does, skipped where neither does; a column at a time (`column::<COL>`, a
+  constant) so that the loops unroll. Each lane does the scalar's multiplies and subtracts in the
+  scalar's order (no FMA, no reassociation); entries no later step reads (below a pivot in its
+  column, and left of it when rows are swapped) are left as they were rather than computed.
+  `unsafe` in the core crate for the first time, allowed for this module alone: the intrinsics
+  touch registers only, no memory.
+- **A test that keeps it exact**: `vcf::pair_tests::the_paired_solve5_is_the_scalars_to_the_bit`
+  (not ignored), 200,000 random pairs of 5 by 5 systems with zeros of both signs, values below
+  the pivot floor, ties in magnitude, repeated rows and zero columns, each lane of both paired
+  forms against `solve::<5, true>`, to the bit.
+
+**Evidence (2026-10-18; `ref` = 5870fdd, 0.2.5's engine, with `preset_render`'s DOUBLE switch
+added; `before` = c3ada88, `cpu-release`; `after` = this branch; each built on its machine):**
+- `preset_render`, every factory preset, ten voices, 4 s, at HI one thread, DOUBLE at 50 %, 3
+  workers and 12: `before` and `after` the same to the bit as `ref` on the Mac, the Ryzen
+  (Linux) and the i5 (Windows), in all four. (The first check on x86 of the pairs against 0.2.5's
+  own samples.)
+- `cargo test --release -p ca72` (`tests/pairs.rs` among them) on all three; clippy
+  `-D warnings` for aarch64 and x86-64.
+- `pair_timing` with the SSE2 form: Ryzen 31 ns a voice (-65 %, against the lanes form's -39 %),
+  i5 30 to 32 (-60 to -63 %). A loop over the columns first gave 39 and 38: the unrolling is a
+  quarter of the gain.
+- `preset_cost`, ten voices, one thread, alternated: Ryzen (timing lock, two runs each) at HI
+  `ref` 2279, `before` 2171 (-4.7 %), `after` 2094 (-8.1 %; -6 to -12 % a preset); with DOUBLE
+  at 50 % 4589, 4340 (-5.4 %), 4190 (-8.7 %). i5 (pinned to one P-core, three runs each) at HI
+  1990, 1888 (-5.1 %), 1843 (-7.4 %; -5 to -11 %); with DOUBLE 4026, 3800 (-5.6 %), 3661
+  (-9.1 %). The Mac (aarch64 code unchanged; the machine busy with other sessions): `before`
+  1628, `after` 1620; with DOUBLE 3197 and 3200, no change.
+- **The i5's earlier spread**: unpinned, Windows ran `preset_cost` partly on the efficiency
+  cores (0.2.5 at 2457 unpinned on 2026-10-18, 1990 pinned, runs up to 6 % apart unpinned and
+  within 1 % pinned). Measure on that machine pinned (`ProcessorAffinity`), or say which.
+- **Not done**: the lanes form unrolled a column at a time for AArch64 (the Mac's own
+  elimination might gain; NEON intrinsics would be a second copy of this one). The rest of the
+  x86 voice (the loop's evaluation, `fast::tanh`, the tables, the resamplers) is now the larger
+  part of the gap; pairing the evaluation cost more than it saved on the Mac (above).
+
+## R-RELEASE-0.2.6. 0.2.6
+
+**Owner authorisation, 2026-10-17.** "Merge hi-pairs into cpu-release, run the full checks, push
+and open a release PR against main": R-THREADS (the worker budget, without the band-limiting,
+latency and ULTRA VCA work, held by the owner the same day), R-CPU-EXACT and R-HI-PAIRS; and, the
+owner asked on 2026-10-18 ("I want editor-perf to be included in this release. So test this in
+any way that you need to."), R-EDITOR-CPU. The request authorises the pull request; merging, signing, tagging, upload and publication wait for
+the owner's go.
+
+LO's and HI's samples are the same to the bit as 0.2.5's (`preset_render`, every factory
+preset); ULTRA's sound is unchanged (the OVERLOAD lamp's driver is not read by the audio; the
+split voice gives the serial voice's samples); parameter identifiers, the preset format and the
+installers are unchanged. Release notes are in `releases/0.2.6.md`. Before publication the
+release commit must pass all three CI jobs; the macOS installer must be Developer ID signed,
+notarised, stapled and accepted by Gatekeeper; every uploaded asset downloaded again and checked
+against the manifest.
+
+## R-STILL-LONGER. The Windows window test waits out the hamster's pause
+
+**Agent decisions, 2026-10-18** (not separately approved; asked for by the session releasing
+0.2.6, whose PR #50 fails on Windows in the same test):
+- **What failed.** From 0.2.5, `windows_window_tests::the_window_shown_in_places_is_the_window_shown_whole`
+  failed on Windows at times: `main`'s run 39068098309 ("52 pixels shown otherwise than in the
+  whole frame") on commit `212967e`, whose PR run 39066363897 and tag run 39068050615 passed on
+  Windows; #50's runs with 58 and 35. 0.2.4 and every earlier run passed.
+- **Why.** Not a place missed by the partial present (R58, R59): the test's idea of still. It
+  called the window still once two frames 400 ms apart were alike. A new instance is at LO
+  since R-LO-DEFAULT, so the test's QUALITY opening shows the hamster, not HI's lamp: once the
+  synth is quiet his wheel slows for about 1.9 s (`opening::PACE`, its turn read in quarter
+  degrees, so it creeps in steps), stands `DOZE_AFTER` (1 s), and he curls up asleep over
+  `DOZE_S` (0.7 s). Two looks inside that slowing or that pause were alike; he moved after, and
+  where Windows' repaint came after he had started to doze, it showed the pixels he had
+  changed. HI's lamp only dims smoothly, with no pause; the test was written against it.
+- **The change.** Still is now the same frame at every look, 400 ms apart, for `DOZE_AFTER`
+  plus a second (2 s), within 20 s. `DOZE_AFTER` is `pub(crate)` so the test names the pause
+  it waits out. The test stays at LO, a new instance's QUALITY, so it covers the hamster's run
+  and doze shown in places. Nothing in the editor or the panel changes.
+
+**Evidence (Windows 11, the lab's `DESKTOP-KHN6H8K`, in the desktop session by a scheduled
+task; a debug build of `main` at `0d478a5`, 0.2.5's code, with a diagnostic, 2026-10-18).**
+With the old rule the test alone passed every time, but called the window still about 1.52 s
+after the synth went quiet (10 runs of 11 timed; once 3.1 s); in each of the 9 runs that
+looked, 63 to 69 pixels had changed 4 s later, unrepainted, all inside a 10 by 6 pixel box at
+the hamster's feet (x 831 to 841, y 66 to 72 of an 860-pixel-wide window; the opening's middle
+at 836, 61). A full repaint then matched that later frame to the pixel each time, so the pixels
+shown in places were right. Calling it still after 1.7 to 4.5 s of quiet: 0 pixels changed
+after. With the new rule: 0 pixels apart, and 0 changed 4 s after, in 3 runs with the
+diagnostic and 5 without. Then `cargo test --workspace --features
+ca72-plugin/standalone-production` as CI runs it; and the editor's tests and clippy on the Mac
+(see the PR).
+
+## R-EDITOR-CPU. The editor's cost while sound plays
+
+**Owner decisions, 2026-10-17.** CPU use is the users' first complaint. Told where it goes (a
+three-agent council and measurements: LO about 1.5 % of a core a voice on the M4 Pro, HI 7 to
+12 %, ULTRA 33 to 108 %), the owner decided: LO stays the default in every version; HI and ULTRA
+stay bit-identical to 0.2.5, only changes that keep the sound the same; the band-limiting, latency
+and ULTRA VCA work waits, the worker budget (R-THREADS) going out alone; and "spend time focusing
+on the editor too. that's something that adds cost to all 3 performance modes." Asked to start
+on the editor's changes that keep its look: "Okay, start."
+
+**Measured first (the Mac, 2026-10-17, `the_window_played`, a window 3440 pixels across):** 11.3 %
+of one core on the editor's thread with only the changed places turned (macOS since R59, Windows,
+X11), 16.6 % with every frame turned whole (two runs each; 9.5 and 13.7 % earlier in the day, the
+machine less busy). Sampled (`/usr/bin/sample`): about a third the panel's renderer (QUALITY's
+shutter's paths, `ultra::Drawn`; pictures scaled bicubic; layers whose SVG changes rasterized
+again), a seventh the strip (most of it the voices' drops, `Liquid::draw`), a tenth composing.
+What the editor draws while sound plays mostly moves: the shutter follows the output thirty times
+a second, the drops the voices, the layers' bodies change (a cache of rasterized bodies hit 9 times
+in 183 and was taken out). The SVG drawn over a layer repeats (4 different in 467 draws), but drawn
+once and put it differs by up to 2 in 255 in 8 % of the channels it covers, for 0.3 % of a core:
+not done, the look being kept to the bit.
+
+**Agent decisions, 2026-10-17** (not separately approved):
+- **Unseen, drawn every 250 ms and not shown.** baseview's frame timer runs whether or not the
+  window can be seen, so the shutter and the drops were drawn thirty times a second behind other
+  windows, minimised, on another Space or with the host hidden. `window::seen` asks macOS for the
+  occlusion state of the window holding the view (`occlusionState`, through `objc`, the version
+  baseview takes) and Windows whether its top window is minimised (not `IsWindowVisible`: in a
+  session without a desktop on the screen, as an agent's over SSH on the lab PC, every window
+  answers that it is not visible though it is drawn and shown, and the editor showed nothing:
+  five of the real-window tests failed so); X11 says nothing reliable without a compositor and
+  is left as it was. A window covered by others is drawn as before on Windows. Unseen, the keys, gestures
+  and the host are attended to every frame as before and the scene drawn every 250 ms (a resize,
+  the drawer, MIDI Learn kept up), nothing shown; seen again, the frame is shown whole at once.
+- **The drops' columns' dx squared once for all their rows,** the same sums in the same order:
+  200 frames at two scales hashed whole, the same before and after; 0.71 to 0.66 ms a frame for
+  ten voices' drops at 3440 pixels.
+- **Thirty frames a second stay** (the owner, 2026-10-17, shown a trial at twenty: 11.45 to
+  10.1 % of a core, 834 to 662 frames presented in the measure's 24 s): "I don't approve
+  dropping the FPS".
+- **`CA72_NO_FRAMES`** keeps `the_window_played` to its times: its frames are 2 GB in memory and
+  on disk, and on a nearly full disk the run failed before printing them.
+
+**Evidence (the Mac, 2026-10-17):** the panel's and plug-in's tests in debug; clippy with
+`-D warnings` on macOS, `cargo check` of the plug-in for `x86_64-pc-windows-msvc`. Not yet: the
+unseen window in hosts (Live, Logic, Reaper; Activity Monitor with the window covered, minimised
+and the host in the background), and on Windows.
+
 ## R-BLEP. The oscillators band-limited by a 32-tap windowed sinc, corners and all
 
 The study came first (to "For the owner to decide"), then the owner's answers and the build.

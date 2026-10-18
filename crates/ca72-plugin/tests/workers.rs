@@ -19,7 +19,11 @@ fn render(name: &str, workers: usize, flush: u32) -> Vec<f32> {
     let mut e = Engine::new();
     e.set(&c);
     e.prepare(48_000.0, 1);
-    assert_eq!(e.start_workers(workers, None), workers);
+    // (As many as asked within an instance's cap on this machine: decisions.md R-THREADS.)
+    let started = workers
+        .min(ca72_plugin::engine::instance_cap())
+        .min(ca72_plugin::pool::MAX - 1);
+    assert_eq!(e.start_workers(workers, None), started);
     let mut chords = Chords::new(10, 48_000.0);
     let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
     let mut events = Vec::with_capacity(64);

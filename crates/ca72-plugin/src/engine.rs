@@ -622,6 +622,16 @@ struct Places {
     twin_on: bool,
 }
 
+/// A voice's run in [`Playing::play_pair`]: its places, its pan as it glides, its peak, its
+/// key.
+struct Lane {
+    p: Places,
+    gl: f64,
+    gr: f64,
+    peak: f64,
+    note: i32,
+}
+
 impl Playing {
     /// A run of `n` samples with `ext` at EXTERNAL INPUT: its key moved on a sample at a time
     /// (the drop at the first), its character's offsets and its place; with DOUBLE its twin
@@ -674,6 +684,49 @@ impl Playing {
                 (self.out[0][k], self.out[1][k]) = (0.0, 0.0);
                 continue;
             }
+            if p.twin_on && self.voice.pairs() && self.twin.voice.pairs() {
+                // HI with the twin sounding: the voice's and its twin's filters solved side by
+                // side (decisions.md R-HI-PAIRS), each the same samples to the bit. Their keys
+                // and jacks first (neither hangs on the other's output), then the two to the
+                // filter, the pair, and each on from it.
+                let voice = &mut self.voice;
+                self.key.step(gate, note, |k, on| voice.note(k, on));
+                let mut j = jacks(&mut self.character, x, rate, m);
+                if p.doubled {
+                    j.detune = j.detune.map(|d| d - p.half);
+                }
+                let t = &mut self.twin;
+                let twin = &mut t.voice;
+                t.key
+                    .step(gate && p.doubled, note, |k, on| twin.note(k, on));
+                let mut jt = jacks(&mut t.character, x, rate, m);
+                if p.doubled {
+                    jt.detune = jt.detune.map(|d| d + p.half);
+                }
+                let hv = self.voice.before_filter(&j);
+                let ht = self.twin.voice.before_filter(&jt);
+                let (fv, ft) = Voice::filter_pair(&mut self.voice, &hv, &mut self.twin.voice, &ht);
+                let mut y = self.voice.after_filter(&hv, fv);
+                if !y.is_finite() {
+                    self.broken = true;
+                    y = 0.0;
+                }
+                self.turned(self.voice.trigger_closed(), m, &mut p);
+                let (mut left, mut right, mut most) = (y * gl, y * gr, y.abs());
+                let mut z = self.twin.voice.after_filter(&ht, ft);
+                if !z.is_finite() {
+                    self.broken = true;
+                    z = 0.0;
+                }
+                left += z * hl;
+                right += z * hr;
+                most = most.max(z.abs());
+                twin_peak = twin_peak.max(z.abs());
+                peak = peak.max(most);
+                self.out[0][k] = left;
+                self.out[1][k] = right;
+                continue;
+            }
             let voice = &mut self.voice;
             self.key.step(gate, note, |k, on| voice.note(k, on));
             let mut j = jacks(&mut self.character, x, rate, m);
@@ -719,6 +772,126 @@ impl Playing {
             twin_peak,
             p.twin_on.then_some((hl, hr)),
         );
+    }
+
+    /// Two voices' runs ([`Playing::play`]) side by side, a sample of each in turn, their
+    /// filters solved together (decisions.md R-HI-PAIRS) where both play HI on their own (no
+    /// twin sounding, not split, not broken at the start): each voice the same samples to the
+    /// bit as played alone; else one run after the other.
+    pub fn play_pair(
+        a: &mut Playing,
+        b: &mut Playing,
+        n: usize,
+        ext: &[f64; CHUNK],
+        rate: f64,
+        m: &Mix,
+    ) {
+        let share = glide_share(rate);
+        let ext = &ext[..n];
+        let alone = |p: &Playing| {
+            p.potato || p.split_now || p.broken || !p.voice.pairs() || p.places(m).twin_on
+        };
+        if alone(a) || alone(b) {
+            a.play_from(ext, rate, m, share);
+            b.play_from(ext, rate, m, share);
+            return;
+        }
+        let (mut la, mut lb) = (a.lane(m), b.lane(m));
+        for (k, &x) in ext.iter().enumerate() {
+            let ja = a.lane_in(&mut la, k, x, rate, m, share);
+            let jb = b.lane_in(&mut lb, k, x, rate, m, share);
+            match (ja, jb) {
+                (Some(ja), Some(jb)) => {
+                    let ha = a.voice.before_filter(&ja);
+                    let hb = b.voice.before_filter(&jb);
+                    let (fa, fb) = Voice::filter_pair(&mut a.voice, &ha, &mut b.voice, &hb);
+                    let ya = a.voice.after_filter(&ha, fa);
+                    a.lane_out(&mut la, k, ya, m);
+                    let yb = b.voice.after_filter(&hb, fb);
+                    b.lane_out(&mut lb, k, yb, m);
+                }
+                (Some(ja), None) => {
+                    let y = a.voice.tick_jacks(&ja);
+                    a.lane_out(&mut la, k, y, m);
+                }
+                (None, Some(jb)) => {
+                    let y = b.voice.tick_jacks(&jb);
+                    b.lane_out(&mut lb, k, y, m);
+                }
+                (None, None) => {}
+            }
+        }
+        a.lane_end(&la, n);
+        b.lane_end(&lb, n);
+    }
+
+    /// [`Playing::play_from`]'s start without a twin sounding: its places, DRIVE and pan.
+    fn lane(&mut self, m: &Mix) -> Lane {
+        let p = self.places(m);
+        self.voice.set_drive(m.drive);
+        self.twin.voice.set_drive(m.drive);
+        let (gl, gr) = self.pan.unwrap_or(p.voice);
+        Lane {
+            p,
+            gl,
+            gr,
+            peak: 0.0,
+            note: i32::from(self.note),
+        }
+    }
+
+    /// A sample's start in [`Playing::play_from`] without a twin sounding: the gate, the pan
+    /// gliding, the key and the jacks; None (the sample silent) if the voice is broken.
+    fn lane_in(
+        &mut self,
+        l: &mut Lane,
+        k: usize,
+        x: f64,
+        rate: f64,
+        m: &Mix,
+        share: f64,
+    ) -> Option<Jacks> {
+        let gate = if self.drop {
+            self.drop = false;
+            false
+        } else {
+            self.gate
+        };
+        l.gl += (l.p.voice.0 - l.gl) * share;
+        l.gr += (l.p.voice.1 - l.gr) * share;
+        if self.broken {
+            (self.out[0][k], self.out[1][k]) = (0.0, 0.0);
+            return None;
+        }
+        let voice = &mut self.voice;
+        self.key.step(gate, l.note, |k, on| voice.note(k, on));
+        let mut j = jacks(&mut self.character, x, rate, m);
+        if l.p.doubled {
+            j.detune = j.detune.map(|d| d - l.p.half);
+        }
+        Some(j)
+    }
+
+    /// A sample's end in [`Playing::play_from`] without a twin sounding: the voice's output
+    /// `y` placed.
+    fn lane_out(&mut self, l: &mut Lane, k: usize, y: f64, m: &Mix) {
+        let mut y = y;
+        if !y.is_finite() {
+            self.broken = true;
+            y = 0.0;
+        }
+        self.turned(self.voice.trigger_closed(), m, &mut l.p);
+        let (left, right, most) = (y * l.gl, y * l.gr, y.abs());
+        l.peak = l.peak.max(most);
+        self.out[0][k] = left;
+        self.out[1][k] = right;
+    }
+
+    /// [`Playing::play_from`]'s end without a twin sounding, `n` samples played.
+    fn lane_end(&mut self, l: &Lane, n: usize) {
+        self.peak = l.peak;
+        self.pan = Some((l.gl, l.gr));
+        self.twin.ran(n, l.p.doubled, 0.0, None);
     }
 
     /// [`Playing::play_from`] on helpers (ULTRA, decisions.md R-THREADS): the voice, then its
@@ -2073,12 +2246,30 @@ impl Engine {
                 pool.play(&list[..count], n, ext, rate, mix, deadline)
             }
             _ => {
+                // (Two at a time, their filters solved together at HI: decisions.md
+                // R-HI-PAIRS. Each writes its own samples; they are summed in order below.)
                 let mut played = [false; MAX];
-                for (ok, &k) in played.iter_mut().zip(&list[..count]) {
-                    if let Ok(mut p) = self.slots[k].play.try_lock() {
-                        p.play(n, ext, rate, mix);
-                        *ok = true;
+                let mut i = 0;
+                while i < count {
+                    let a = self.slots[list[i]].play.try_lock();
+                    let b = (i + 1 < count).then(|| self.slots[list[i + 1]].play.try_lock());
+                    match (a, b) {
+                        (Ok(mut a), Some(Ok(mut b))) => {
+                            Playing::play_pair(&mut a, &mut b, n, ext, rate, mix);
+                            (played[i], played[i + 1]) = (true, true);
+                        }
+                        (a, b) => {
+                            if let Ok(mut a) = a {
+                                a.play(n, ext, rate, mix);
+                                played[i] = true;
+                            }
+                            if let Some(Ok(mut b)) = b {
+                                b.play(n, ext, rate, mix);
+                                played[i + 1] = true;
+                            }
+                        }
                     }
+                    i += 2;
                 }
                 played
             }
@@ -3071,6 +3262,13 @@ mod tests {
         }
     }
 
+    /// The workers [`Engine::start_workers`] starts for `asked` without a period on this
+    /// machine: as many as asked, within an instance's cap (decisions.md R-THREADS: one on CI's
+    /// three-core Mac, two on its Windows and Linux machines) and the pool's most.
+    fn started(asked: usize) -> usize {
+        asked.min(instance_cap()).min(MAX - 1)
+    }
+
     fn four_voices(workers: usize) -> Engine {
         let mut e = Engine::new();
         e.set(&Controls {
@@ -3079,7 +3277,7 @@ mod tests {
             ..Controls::default()
         });
         e.prepare(48_000.0, 1);
-        assert_eq!(e.start_workers(workers, None), workers);
+        assert_eq!(e.start_workers(workers, None), started(workers));
         for key in [45, 52, 57, 64] {
             e.event(Event::Note { key, on: true });
         }
@@ -3298,14 +3496,14 @@ mod tests {
         };
         e.set(&c);
         e.prepare(48_000.0, 1);
-        assert_eq!(e.start_workers(2, None), 2);
+        assert_eq!(e.start_workers(2, None), started(2));
         e.prepare(48_000.0, 2);
-        assert_eq!(e.start_workers(2, None), 2);
+        assert_eq!(e.start_workers(2, None), started(2));
         assert_eq!(e.pool_starts, 1, "started again at the same rate");
         e.prepare(44_100.0, 2);
         assert_eq!(e.workers(), 0, "kept with the old voices");
-        assert_eq!(e.start_workers(2, None), 2);
-        assert_eq!(e.start_workers(1, None), 1);
+        assert_eq!(e.start_workers(2, None), started(2));
+        assert_eq!(e.start_workers(1, None), started(1));
         assert_eq!(e.pool_starts, 3);
         c.poly = false;
         e.set(&c);

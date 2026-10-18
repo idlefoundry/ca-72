@@ -486,7 +486,7 @@ fn ultra_s_split_voices_neither_allocate_nor_free_while_they_play() {
                 });
             }
         }
-        c.poly = b / 40 % 2 == 0;
+        c.poly = (b / 40).is_multiple_of(2);
         c.double = if b / 30 % 2 == 1 { 0.3 } else { 0.0 };
         c.feedback = if b % 70 < 60 { 0.0 } else { 0.3 };
         e.set(&c);

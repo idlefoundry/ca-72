@@ -531,6 +531,13 @@ impl LadderBias {
     }
 }
 
+/// The part of the ladder's bias that follows the temperature alone ([`VcfCircuit::ladder_at`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LadderAt {
+    m: crate::devices::BjtAt,
+    c_mu: f64,
+}
+
 /// Potato's ladder bias: [`VcfCircuit::bias`] on 1024 points of the tail current's
 /// logarithm from 1e-9 to 1e-2 A, linear between (outside, the bias worked out).
 const BIAS_POINTS: usize = 1024;
@@ -541,7 +548,23 @@ impl VcfCircuit {
     /// its emitter current less its base currents (Gummel-Poon at the stage's current, the
     /// pair balanced); the pairs' small-signal base currents and series resistances.
     pub fn bias(&self, i0: f64, celsius: f64) -> LadderBias {
-        let m = self.ladder.at(celsius);
+        self.bias_at(i0, &self.ladder_at(celsius))
+    }
+
+    /// What [`VcfCircuit::bias`] takes from the temperature alone, for a caller to keep:
+    /// the ladder's transistor at it, and C_mu at the ladder's fixed V_bc.
+    pub fn ladder_at(&self, celsius: f64) -> LadderAt {
+        let q = &self.ladder;
+        LadderAt {
+            m: q.at(celsius),
+            c_mu: junction_capacitance(q.cjc, q.vjc, q.mjc, self.ladder_vbc),
+        }
+    }
+
+    /// [`VcfCircuit::bias`] with its temperature's part `at` ([`VcfCircuit::ladder_at`]):
+    /// the same arithmetic, so the same bias to the bit.
+    pub fn bias_at(&self, i0: f64, at: &LadderAt) -> LadderBias {
+        let m = at.m;
         let (vbc, vaf) = (self.ladder_vbc, self.ladder.vaf);
         let mut e = [0.0; 4];
         let mut v_stage = [0.0; 4];
@@ -559,7 +582,7 @@ impl VcfCircuit {
         let mut c_stage = [0.0; 4];
         let mut slopes = [0.0; 4];
         let q = &self.ladder;
-        let c_mu = junction_capacitance(q.cjc, q.vjc, q.mjc, vbc);
+        let c_mu = at.c_mu;
         let c_je = JunctionCapacitance::new(q.cje, q.vje, q.mje);
         for k in 0..4 {
             let ic = 0.5 * e[k];
@@ -838,6 +861,348 @@ fn solve_loop<const RECIP: bool>(
     x
 }
 
+/// Two voices' loop eliminations at once ([`solve_loop`] with reciprocals, HI's), each voice
+/// in a lane of its own doing the scalar's operations in the scalar's order: the same results
+/// to the bit, about two and a half times faster than one after the other (decisions.md
+/// R-HI-PAIRS). Each lane picks its own pivots and skips its own zero steps (kept as they
+/// were, so that a zero's sign is the scalar's).
+fn solve_loop_pair(
+    j: [&[[f64; STATES]; STATES]; 2],
+    hh: [f64; 2],
+    r: [&[f64; STATES]; 2],
+) -> [[f64; STATES]; 2] {
+    solve_loop_pair_by(j, hh, r, pair::solve5)
+}
+
+/// [`solve_loop_pair`] with the 5 by 5 elimination `solve5`.
+#[inline(always)]
+fn solve_loop_pair_by(
+    j: [&[[f64; STATES]; STATES]; 2],
+    hh: [f64; 2],
+    r: [&[f64; STATES]; 2],
+    solve5: impl Fn([[pair::L; 5]; 5], [pair::L; 5]) -> [pair::L; 5],
+) -> [[f64; STATES]; 2] {
+    use pair::L;
+    let hh = L(hh);
+    let a = |i: usize, k: usize| {
+        L::s(if i == k { 1.0 } else { 0.0 }) - hh * L([j[0][i][k], j[1][i][k]])
+    };
+    let rr = |i: usize| L([r[0][i], r[1][i]]);
+    let (a11, a22, a33) = (a(1, 1), a(2, 2), a(3, 3));
+    let a21 = a(2, 1);
+    let a32 = a(3, 2);
+    let one = L::s(1.0);
+    let (i11, i22, i33) = (one / a11, one / a22, one / a33);
+    let (p1, q1) = (rr(1) * i11, -a(1, 0) * i11);
+    let (p2, q2) = ((rr(2) - a21 * p1) * i22, -a21 * q1 * i22);
+    let (p3, q3, s3) = ((rr(3) - a32 * p2) * i33, -a32 * q2 * i33, -a(3, W) * i33);
+    let (aw2, aw3) = (a(W, 2), a(W, 3));
+    let dw = a(W, W) + aw3 * s3;
+    let iw = one / dw;
+    let (pw, qw) = (
+        (rr(W) - aw2 * p2 - aw3 * p3) * iw,
+        -(aw2 * q2 + aw3 * q3) * iw,
+    );
+    const IN: [usize; 4] = [Q10, NT, VB, Q27];
+    let mut m = [[L::s(0.0); 5]; 5];
+    let mut b = [L::s(0.0); 5];
+    let a0w = a(0, W);
+    m[0][0] = a(0, 0) + a0w * qw;
+    b[0] = rr(0) - a0w * pw;
+    for (c, &n) in IN.iter().enumerate() {
+        m[0][c + 1] = a(0, n);
+    }
+    for (row, &k) in IN.iter().enumerate() {
+        let akw = a(k, W);
+        m[row + 1][0] = akw * qw;
+        b[row + 1] = rr(k) - akw * pw;
+        for (c, &n) in IN.iter().enumerate() {
+            m[row + 1][c + 1] = a(k, n);
+        }
+    }
+    let u = solve5(m, b);
+    let x0 = u[0];
+    let xw = pw + qw * x0;
+    let (x1, x2, x3) = (p1 + q1 * x0, p2 + q2 * x0, p3 + q3 * x0 + s3 * xw);
+    let mut x = [[0.0; STATES]; 2];
+    for (lane, x) in x.iter_mut().enumerate() {
+        x[0] = x0.0[lane];
+        x[1] = x1.0[lane];
+        x[2] = x2.0[lane];
+        x[3] = x3.0[lane];
+        x[W] = xw.0[lane];
+        for (c, &n) in IN.iter().enumerate() {
+            x[n] = u[c + 1].0[lane];
+        }
+    }
+    x
+}
+
+/// Two lanes of f64, each operation each lane's own (the compiler puts them in one register).
+mod pair {
+    use std::ops::{Add, Div, Mul, Neg, Sub};
+
+    #[derive(Clone, Copy, Debug)]
+    #[repr(C, align(16))]
+    pub(super) struct L(pub(super) [f64; 2]);
+
+    impl L {
+        #[inline(always)]
+        pub(super) fn s(x: f64) -> L {
+            L([x, x])
+        }
+
+        /// Each lane `a`'s where `m` says, else `b`'s.
+        #[inline(always)]
+        #[cfg_attr(target_arch = "x86_64", allow(dead_code))]
+        pub(super) fn sel(m: [bool; 2], a: L, b: L) -> L {
+            L([
+                if m[0] { a.0[0] } else { b.0[0] },
+                if m[1] { a.0[1] } else { b.0[1] },
+            ])
+        }
+    }
+
+    macro_rules! op {
+        ($t:ident, $f:ident, $o:tt) => {
+            impl $t for L {
+                type Output = L;
+                #[inline(always)]
+                fn $f(self, b: L) -> L {
+                    L([self.0[0] $o b.0[0], self.0[1] $o b.0[1]])
+                }
+            }
+        };
+    }
+    op!(Add, add, +);
+    op!(Sub, sub, -);
+    op!(Mul, mul, *);
+    op!(Div, div, /);
+
+    impl Neg for L {
+        type Output = L;
+        #[inline(always)]
+        fn neg(self) -> L {
+            L([-self.0[0], -self.0[1]])
+        }
+    }
+
+    /// [`super::solve`] at 5 with reciprocals, a lane a voice: on x86-64 its SSE2 form
+    /// ([`sse2::solve5`]), elsewhere [`solve5_lanes`].
+    #[inline(always)]
+    pub(super) fn solve5(m: [[L; 5]; 5], r: [L; 5]) -> [L; 5] {
+        #[cfg(target_arch = "x86_64")]
+        return sse2::solve5(m, r);
+        #[cfg(not(target_arch = "x86_64"))]
+        return solve5_lanes(m, r);
+    }
+
+    /// [`super::solve`] at 5 with reciprocals, a lane a voice, each lane's pivot searched
+    /// and swapped by itself.
+    #[inline(always)]
+    #[cfg_attr(target_arch = "x86_64", allow(dead_code))]
+    pub(super) fn solve5_lanes(mut m: [[L; 5]; 5], mut r: [L; 5]) -> [L; 5] {
+        let mut inv = [L::s(0.0); 5];
+        for col in 0..5 {
+            for lane in 0..2 {
+                let mut p = col;
+                for i in col + 1..5 {
+                    if m[i][col].0[lane].abs() > m[p][col].0[lane].abs() {
+                        p = i;
+                    }
+                }
+                if p != col {
+                    // (Rows col and p, col above, swapped in this lane alone.)
+                    let (above, below) = m.split_at_mut(p);
+                    for (x, y) in above[col].iter_mut().zip(below[0].iter_mut()) {
+                        std::mem::swap(&mut x.0[lane], &mut y.0[lane]);
+                    }
+                    let (above, below) = r.split_at_mut(p);
+                    std::mem::swap(&mut above[col].0[lane], &mut below[0].0[lane]);
+                }
+            }
+            let d = m[col][col];
+            let live = [d.0[0].abs() >= 1e-300, d.0[1].abs() >= 1e-300];
+            inv[col] = L::sel(live, L::s(1.0) / d, inv[col]);
+            let pivot = m[col];
+            for i in col + 1..5 {
+                let f = m[i][col] * inv[col];
+                let go = [live[0] && f.0[0] != 0.0, live[1] && f.0[1] != 0.0];
+                for c in col..5 {
+                    m[i][c] = L::sel(go, m[i][c] - f * pivot[c], m[i][c]);
+                }
+                r[i] = L::sel(go, r[i] - f * r[col], r[i]);
+            }
+        }
+        let mut x = [L::s(0.0); 5];
+        for i in (0..5).rev() {
+            let mut s = r[i];
+            for k in i + 1..5 {
+                s = s - m[i][k] * x[k];
+            }
+            let zero = [m[i][i].0[0].abs() < 1e-300, m[i][i].0[1].abs() < 1e-300];
+            x[i] = L::sel(zero, L::s(0.0), s * inv[i]);
+        }
+        x
+    }
+
+    /// [`solve5_lanes`] in SSE2's registers (x86-64's baseline, no more assumed): each
+    /// lane's pivot found by comparing both lanes at once and the rows swapped under a mask,
+    /// a step's rows updated unmasked where both lanes take it, a column at a time; the same
+    /// operations in each lane in the same order, so the same results to the bit. On x86-64
+    /// the lanes' form is compiled to scalar code: its per-lane pivots and selects become a
+    /// branch and a scalar multiply and subtract per lane and entry, the matrix kept in
+    /// memory and indexed by a loop over the columns (decisions.md R-HI-PAIRS).
+    #[cfg(target_arch = "x86_64")]
+    #[allow(unsafe_code, clippy::needless_range_loop)]
+    pub(super) mod sse2 {
+        use super::L;
+        use std::arch::x86_64::*;
+
+        #[inline(always)]
+        fn v(x: L) -> __m128d {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
+            unsafe { _mm_set_pd(x.0[1], x.0[0]) }
+        }
+
+        #[inline(always)]
+        fn l(x: __m128d) -> L {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
+            unsafe { L([_mm_cvtsd_f64(x), _mm_cvtsd_f64(_mm_unpackhi_pd(x, x))]) }
+        }
+
+        /// Each lane `a`'s where `m` is set, else `b`'s.
+        #[inline(always)]
+        fn sel(m: __m128d, a: __m128d, b: __m128d) -> __m128d {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
+            unsafe { _mm_or_pd(_mm_and_pd(m, a), _mm_andnot_pd(m, b)) }
+        }
+
+        /// `x` and `y` swapped in the lanes `m` sets.
+        #[inline(always)]
+        fn swap(x: &mut __m128d, y: &mut __m128d, m: __m128d) {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
+            unsafe {
+                let t = _mm_and_pd(_mm_xor_pd(*x, *y), m);
+                *x = _mm_xor_pd(*x, t);
+                *y = _mm_xor_pd(*y, t);
+            }
+        }
+
+        /// One column's step of the elimination: its pivots, rows swapped, the rows below
+        /// it updated. A step a column (`COL` a constant) so that the compiler unrolls
+        /// every loop and keeps the matrix in registers where it can (a loop over the
+        /// columns kept it in memory, indexed).
+        #[inline(always)]
+        fn column<const COL: usize>(
+            m: &mut [[__m128d; 5]; 5],
+            r: &mut [__m128d; 5],
+            inv: &mut [__m128d; 5],
+        ) {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
+            unsafe {
+                let sign = _mm_set1_pd(-0.0);
+                // Each lane's pivot row (the first of the largest, as the scalar's `>`
+                // keeps): MAXPD gives its first operand where it is the greater, else the
+                // second (a NaN included), the scalar's comparison.
+                let mut best = _mm_andnot_pd(sign, m[COL][COL]);
+                let mut at = _mm_set1_pd(COL as f64);
+                for i in COL + 1..5 {
+                    let a = _mm_andnot_pd(sign, m[i][COL]);
+                    let gt = _mm_cmpgt_pd(a, best);
+                    best = _mm_max_pd(a, best);
+                    at = sel(gt, _mm_set1_pd(i as f64), at);
+                }
+                if _mm_movemask_pd(_mm_cmpneq_pd(at, _mm_set1_pd(COL as f64))) != 0 {
+                    for i in COL + 1..5 {
+                        let e = _mm_cmpeq_pd(at, _mm_set1_pd(i as f64));
+                        if _mm_movemask_pd(e) != 0 {
+                            // (Columns before `COL` are read no more.)
+                            for c in COL..5 {
+                                let (mut x, mut y) = (m[COL][c], m[i][c]);
+                                swap(&mut x, &mut y, e);
+                                (m[COL][c], m[i][c]) = (x, y);
+                            }
+                            let (mut x, mut y) = (r[COL], r[i]);
+                            swap(&mut x, &mut y, e);
+                            (r[COL], r[i]) = (x, y);
+                        }
+                    }
+                }
+                let d = m[COL][COL];
+                let live = _mm_cmpnlt_pd(_mm_andnot_pd(sign, d), _mm_set1_pd(1e-300));
+                inv[COL] = _mm_and_pd(live, _mm_div_pd(_mm_set1_pd(1.0), d));
+                let pivot = m[COL];
+                let rc = r[COL];
+                for i in COL + 1..5 {
+                    let f = _mm_mul_pd(m[i][COL], inv[COL]);
+                    let go = _mm_and_pd(live, _mm_cmpneq_pd(f, _mm_setzero_pd()));
+                    // (Column `COL` itself is read no more below the pivot.)
+                    match _mm_movemask_pd(go) {
+                        3 => {
+                            for c in COL + 1..5 {
+                                m[i][c] = _mm_sub_pd(m[i][c], _mm_mul_pd(f, pivot[c]));
+                            }
+                            r[i] = _mm_sub_pd(r[i], _mm_mul_pd(f, rc));
+                        }
+                        0 => {}
+                        _ => {
+                            for c in COL + 1..5 {
+                                let n = _mm_sub_pd(m[i][c], _mm_mul_pd(f, pivot[c]));
+                                m[i][c] = sel(go, n, m[i][c]);
+                            }
+                            r[i] = sel(go, _mm_sub_pd(r[i], _mm_mul_pd(f, rc)), r[i]);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// Back substitution's row `I`.
+        #[inline(always)]
+        fn back<const I: usize>(
+            m: &[[__m128d; 5]; 5],
+            r: &[__m128d; 5],
+            inv: &[__m128d; 5],
+            x: &mut [__m128d; 5],
+        ) {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
+            unsafe {
+                let mut s = r[I];
+                for k in I + 1..5 {
+                    s = _mm_sub_pd(s, _mm_mul_pd(m[I][k], x[k]));
+                }
+                let z = _mm_cmplt_pd(
+                    _mm_andnot_pd(_mm_set1_pd(-0.0), m[I][I]),
+                    _mm_set1_pd(1e-300),
+                );
+                x[I] = _mm_andnot_pd(z, _mm_mul_pd(s, inv[I]));
+            }
+        }
+
+        #[inline(always)]
+        pub(in super::super) fn solve5(m: [[L; 5]; 5], r: [L; 5]) -> [L; 5] {
+            let mut m = m.map(|row| row.map(v));
+            let mut r = r.map(v);
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
+            let zero = unsafe { _mm_setzero_pd() };
+            let mut inv = [zero; 5];
+            column::<0>(&mut m, &mut r, &mut inv);
+            column::<1>(&mut m, &mut r, &mut inv);
+            column::<2>(&mut m, &mut r, &mut inv);
+            column::<3>(&mut m, &mut r, &mut inv);
+            column::<4>(&mut m, &mut r, &mut inv);
+            let mut x = [zero; 5];
+            back::<4>(&m, &r, &inv, &mut x);
+            back::<3>(&m, &r, &inv, &mut x);
+            back::<2>(&m, &r, &inv, &mut x);
+            back::<1>(&m, &r, &inv, &mut x);
+            back::<0>(&m, &r, &inv, &mut x);
+            x.map(l)
+        }
+    }
+}
+
 /// Where [`VcfCircuit::eval_full`] puts the Jacobian and, if asked, the output's gradient.
 type JacobianOut<'a> = (
     &'a mut [[f64; STATES]; STATES],
@@ -885,6 +1250,10 @@ pub struct Vcf {
     f_prev: Option<[f64; STATES]>,
     /// The ladder's bias for the last (i0, celsius).
     bias: (f64, f64, LadderBias),
+    /// Its temperature's part, for the ladder's transistor, V_bc and temperature it was
+    /// worked out for (performance: the bias is worked out again whenever the tail current
+    /// moves, a contour's every sample, the temperature seldom).
+    ladder_at: Option<(Bjt, f64, f64, LadderAt)>,
     up_n: Interpolator,
     up_g: Interpolator,
     down: Decimator,
@@ -953,6 +1322,7 @@ impl Vcf {
             y: [0.0; STATES],
             f_prev: None,
             bias: (f64::NAN, f64::NAN, VcfCircuit::default().bias(0.0, 25.0)),
+            ladder_at: None,
             up_n,
             up_g: Interpolator::new(os),
             down: Decimator::new(os),
@@ -1162,7 +1532,22 @@ impl Vcf {
             } else {
                 None
             };
-            let bias = from_table.unwrap_or_else(|| self.circuit.bias(i0, self.celsius));
+            let bias = match from_table {
+                Some(b) => b,
+                None => {
+                    let c = &self.circuit;
+                    let key = (c.ladder, c.ladder_vbc.to_bits(), self.celsius.to_bits());
+                    let at = match self.ladder_at {
+                        Some((q, vbc, t, at)) if (q, vbc.to_bits(), t.to_bits()) == key => at,
+                        _ => {
+                            let at = c.ladder_at(self.celsius);
+                            self.ladder_at = Some((c.ladder, c.ladder_vbc, self.celsius, at));
+                            at
+                        }
+                    };
+                    c.bias_at(i0, &at)
+                }
+            };
             self.bias = (i0, self.celsius, bias);
             self.warp = None;
         }
@@ -1284,6 +1669,177 @@ impl Vcf {
         laps.lap(Part::FilterSolve);
         out
     }
+
+    /// [`Vcf::tick`] for two filters at HI (Potato) and the same oversampling, their loops'
+    /// eliminations solved side by side ([`solve_loop_pair`]): each filter's output and state
+    /// the same to the bit as ticked alone (decisions.md R-HI-PAIRS); otherwise each ticked in
+    /// turn. `x` is each one's (mixer bus current, its conductance, ladder current).
+    pub fn tick_pair(
+        a: &mut Vcf,
+        b: &mut Vcf,
+        xa: (f64, f64, f64),
+        xb: (f64, f64, f64),
+    ) -> (f64, f64) {
+        if !(a.potato && b.potato && a.recip && b.recip && a.oversample == b.oversample) {
+            return (a.tick(xa.0, xa.1, xa.2), b.tick(xb.0, xb.1, xb.2));
+        }
+        let (nsa, gsa) = a.resampled(xa.0, xa.1);
+        let (nsb, gsb) = b.resampled(xb.0, xb.1);
+        let (mut oa, mut ob) = (0.0, 0.0);
+        let (mut ia, mut ib) = (0, 0);
+        for k in 0..a.oversample {
+            let (va, vb) = Vcf::step_pair(
+                (a, (nsa[k], gsa[k].max(0.0), xa.2), &mut ia),
+                (b, (nsb[k], gsb[k].max(0.0), xb.2), &mut ib),
+            );
+            let va = a.filter_mode(nsa[k], va);
+            if let Some(o) = a.down.push(va) {
+                oa = o;
+            }
+            let vb = b.filter_mode(nsb[k], vb);
+            if let Some(o) = b.down.push(vb) {
+                ob = o;
+            }
+        }
+        a.last_iterations = ia;
+        b.last_iterations = ib;
+        (oa, ob)
+    }
+
+    /// [`Vcf::tick`]'s resampling of the bus current and conductance to the loop's rate.
+    fn resampled(&mut self, i_bus: f64, g_bus: f64) -> ([f64; 8], [f64; 8]) {
+        let mut ns = [0.0f64; 8];
+        let mut gs = [0.0f64; 8];
+        self.up_n.push(i_bus, &mut ns);
+        let (g, n, held) = self.g_held;
+        if g_bus.to_bits() == g.to_bits() && n >= G_HOLD {
+            gs = held;
+        } else {
+            self.up_g.push(g_bus, &mut gs);
+            let n = if g_bus.to_bits() == g.to_bits() {
+                n + 1
+            } else {
+                0
+            };
+            self.g_held = (g_bus, n, gs);
+        }
+        (ns, gs)
+    }
+
+    /// [`Vcf::step`] at Potato for two filters, each its own Newton iterations (at most two,
+    /// one if it converged), their eliminations paired while both iterate.
+    fn step_pair(
+        (a, xa, ia): (&mut Vcf, (f64, f64, f64), &mut usize),
+        (b, xb, ib): (&mut Vcf, (f64, f64, f64), &mut usize),
+    ) -> (f64, f64) {
+        type Done = Option<([f64; STATES], f64, [f64; STATES])>;
+        let da = a.drive(xa.0, xa.1, xa.2);
+        let db = b.drive(xb.0, xb.1, xb.2);
+        let (ca, cb) = (a.circuit, b.circuit);
+        let (ha, hb) = (a.h, b.h);
+        let (y0a, y0b) = (a.y, b.y);
+        let fa_old = match a.f_prev {
+            Some(f) => f,
+            None => ca.eval_from(&y0a, &da, None, &mut a.zs).0,
+        };
+        let fb_old = match b.f_prev {
+            Some(f) => f,
+            None => cb.eval_from(&y0b, &db, None, &mut b.zs).0,
+        };
+        let (mut ya, mut yb) = (y0a, y0b);
+        for i in 0..STATES {
+            ya[i] = y0a[i] + ha * fa_old[i];
+        }
+        for i in 0..STATES {
+            yb[i] = y0b[i] + hb * fb_old[i];
+        }
+        let (mut done_a, mut done_b): (Done, Done) = (None, None);
+        let iterations = 2;
+        for it in 0..iterations {
+            // Each filter still iterating: its loop evaluated and its residual.
+            let res = |v: &mut Vcf,
+                       c: &VcfCircuit,
+                       d: &Drive,
+                       y: &[f64; STATES],
+                       y0: &[f64; STATES],
+                       f_old: &[f64; STATES],
+                       h: f64,
+                       n: &mut usize| {
+                *n += 1;
+                let (fy, out) = c.eval_sparse(
+                    y,
+                    d,
+                    Some((&mut v.jac, Some(&mut v.gout))),
+                    &mut v.zs,
+                    false,
+                );
+                let mut r = [0.0; STATES];
+                for i in 0..STATES {
+                    r[i] = y[i] - y0[i] - 0.5 * h * (f_old[i] + fy[i]);
+                }
+                (fy, out, r)
+            };
+            let ra = done_a
+                .is_none()
+                .then(|| res(a, &ca, &da, &ya, &y0a, &fa_old, ha, ia));
+            let rb = done_b
+                .is_none()
+                .then(|| res(b, &cb, &db, &yb, &y0b, &fb_old, hb, ib));
+            let (dya, dyb) = match (&ra, &rb) {
+                (Some(x), Some(z)) => {
+                    let [p, q] =
+                        solve_loop_pair([&a.jac, &b.jac], [0.5 * ha, 0.5 * hb], [&x.2, &z.2]);
+                    (Some(p), Some(q))
+                }
+                (Some(x), None) => (Some(solve_loop::<true>(&a.jac, 0.5 * ha, &x.2)), None),
+                (None, Some(z)) => (None, Some(solve_loop::<true>(&b.jac, 0.5 * hb, &z.2))),
+                (None, None) => break,
+            };
+            let update = |y: &mut [f64; STATES],
+                          tol: f64,
+                          r: Option<([f64; STATES], f64, [f64; STATES])>,
+                          dy: Option<[f64; STATES]>,
+                          done: &mut Done| {
+                if let (Some((fy, out, _)), Some(dy)) = (r, dy) {
+                    let mut big = 0.0f64;
+                    for i in 0..STATES {
+                        y[i] -= dy[i];
+                        big = big.max(dy[i].abs());
+                    }
+                    if big < tol || it + 1 == iterations {
+                        *done = Some((fy, out, dy));
+                    }
+                }
+            };
+            update(&mut ya, a.tol, ra, dya, &mut done_a);
+            update(&mut yb, b.tol, rb, dyb, &mut done_b);
+        }
+        let finish = |v: &mut Vcf, c: &VcfCircuit, d: &Drive, y: [f64; STATES], done: Done| {
+            v.y = y;
+            let (f_new, out) = match done {
+                Some((fy, out, dy)) => {
+                    let mut f = fy;
+                    for (i, cols) in JAC_ROWS.iter().enumerate() {
+                        for &k in *cols {
+                            f[i] -= v.jac[i][k] * dy[k];
+                        }
+                    }
+                    let mut o = out;
+                    for (g, d) in v.gout[W..].iter().zip(&dy[W..]) {
+                        o -= g * d;
+                    }
+                    (f, o)
+                }
+                None => c.eval_from(&y, d, None, &mut v.zs),
+            };
+            v.f_prev = Some(f_new);
+            out
+        };
+        (
+            finish(a, &ca, &da, ya, done_a),
+            finish(b, &cb, &db, yb, done_b),
+        )
+    }
 }
 
 /// A table's value and slope at x by cubic Hermite interpolation (Catmull-Rom slopes);
@@ -1368,4 +1924,180 @@ fn solve<const N: usize, const RECIP: bool>(mut m: [[f64; N]; N], mut r: [f64; N
         };
     }
     x
+}
+
+#[cfg(test)]
+mod pair_tests {
+    use super::pair::L;
+    use super::*;
+
+    /// A random number generator for the tests (a 64-bit LCG's top bits).
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            self.0 >> 11
+        }
+
+        fn unit(&mut self) -> f64 {
+            self.next() as f64 / (1u64 << 53) as f64 - 0.5
+        }
+
+        /// An entry that tests the elimination's corners now and then: zeros of both signs,
+        /// values below the pivot floor, ties in magnitude.
+        fn entry(&mut self) -> f64 {
+            match self.next() % 16 {
+                0 => 0.0,
+                1 => -0.0,
+                2 => 1e-301 * self.unit(),
+                3 => 0.25,
+                4 => -0.25,
+                _ => self.unit() * 2f64.powi((self.next() % 20) as i32 - 10),
+            }
+        }
+    }
+
+    /// Both forms of the paired 5 by 5 elimination against the scalar's, lane by lane, to
+    /// the bit, on matrices that pivot, tie, skip zeros and fall below the pivot floor.
+    #[test]
+    fn the_paired_solve5_is_the_scalars_to_the_bit() {
+        let mut g = Rng(7);
+        for n in 0..200_000 {
+            let mut ms = [[[0.0; 5]; 5]; 2];
+            let mut rs = [[0.0; 5]; 2];
+            for lane in 0..2 {
+                for row in ms[lane].iter_mut() {
+                    for x in row.iter_mut() {
+                        *x = g.entry();
+                    }
+                }
+                for x in rs[lane].iter_mut() {
+                    *x = g.entry();
+                }
+                // Now and then a row the same as another's, or a column of zeros.
+                match g.next() % 8 {
+                    0 => ms[lane][(n % 4) + 1] = ms[lane][0],
+                    1 => (0..5).for_each(|i| ms[lane][i][n % 5] = 0.0),
+                    _ => {}
+                }
+            }
+            let m: [[L; 5]; 5] =
+                std::array::from_fn(|i| std::array::from_fn(|k| L([ms[0][i][k], ms[1][i][k]])));
+            let r: [L; 5] = std::array::from_fn(|i| L([rs[0][i], rs[1][i]]));
+            let forms = [pair::solve5_lanes(m, r), pair::solve5(m, r)];
+            for (lane, (ml, rl)) in ms.iter().zip(&rs).enumerate() {
+                let one = solve::<5, true>(*ml, *rl);
+                for x in &forms {
+                    for i in 0..5 {
+                        // (A NaN's bits are its own; what matters is that both are NaN.)
+                        let (a, b) = (one[i], x[i].0[lane]);
+                        assert!(
+                            a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan()),
+                            "matrix {n} lane {lane} x[{i}]: {a:e} against {b:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The loop's elimination alone: the scalar's twice against each paired form once, on
+    /// a HI filter's own Jacobians (decisions.md R-HI-PAIRS). `cargo test --release -p ca72
+    /// --lib pair_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "prints timings"]
+    fn pair_timing() {
+        let mut v = Vcf::new(48_000.0, 4);
+        v.circuit = crate::filter_cal::CALIBRATED.circuit();
+        v.prepare(4);
+        v.set_quality(crate::voice::Quality::Potato);
+        let n = 20_000;
+        let (mut jacs, mut rs) = (Vec::with_capacity(n), Vec::with_capacity(n));
+        let mut g = Rng(12345);
+        for k in 0..n {
+            let t = k as f64 / 48_000.0;
+            let saw = 2.0 * ((t * 110.0) % 1.0) - 1.0;
+            let i0 = 1e-5 * 2f64.powf(4.0 * (t * 3.0).sin());
+            v.tick(20e-6 * saw, 3e-5, i0);
+            jacs.push(v.jac);
+            rs.push(std::array::from_fn::<f64, STATES, _>(|_| g.unit() * 1e-3));
+        }
+        let hh = 0.5 * v.h;
+        #[inline(never)]
+        fn lanes(
+            j: [&[[f64; STATES]; STATES]; 2],
+            hh: [f64; 2],
+            r: [&[f64; STATES]; 2],
+        ) -> [[f64; STATES]; 2] {
+            solve_loop_pair_by(j, hh, r, pair::solve5_lanes)
+        }
+        #[inline(never)]
+        fn shipped(
+            j: [&[[f64; STATES]; STATES]; 2],
+            hh: [f64; 2],
+            r: [&[f64; STATES]; 2],
+        ) -> [[f64; STATES]; 2] {
+            solve_loop_pair_by(j, hh, r, pair::solve5)
+        }
+        #[inline(never)]
+        fn scalar(j: &[[f64; STATES]; STATES], hh: f64, r: &[f64; STATES]) -> [f64; STATES] {
+            solve_loop::<true>(j, hh, r)
+        }
+        for k in (0..n - 1).step_by(2) {
+            let j = [&jacs[k], &jacs[k + 1]];
+            let r = [&rs[k], &rs[k + 1]];
+            for two in [lanes(j, [hh; 2], r), shipped(j, [hh; 2], r)] {
+                for lane in 0..2 {
+                    let one = scalar(j[lane], hh, r[lane]);
+                    assert!(
+                        one.iter()
+                            .zip(&two[lane])
+                            .all(|(a, b)| a.to_bits() == b.to_bits())
+                    );
+                }
+            }
+        }
+        let passes = 200;
+        let calls = (passes * n) as f64;
+        let mut sink = 0.0;
+        let mut time = |name: &str, f: &dyn Fn(usize) -> f64| {
+            let mut best = f64::INFINITY;
+            for _ in 0..3 {
+                let t = std::time::Instant::now();
+                for _ in 0..passes {
+                    for k in (0..n - 1).step_by(2) {
+                        sink += f(k);
+                    }
+                }
+                best = best.min(t.elapsed().as_secs_f64());
+            }
+            println!("{name}: {:.1} ns a voice", best / calls * 1e9);
+            best
+        };
+        let pick =
+            |k: usize| std::hint::black_box(([&jacs[k], &jacs[k + 1]], [&rs[k], &rs[k + 1]]));
+        let s = time("scalar, one voice after the other", &|k| {
+            let (j, r) = pick(k);
+            scalar(j[0], hh, r[0])[0] + scalar(j[1], hh, r[1])[0]
+        });
+        let a = time("paired, each lane by itself (solve5_lanes)", &|k| {
+            let (j, r) = pick(k);
+            let x = lanes(j, [hh; 2], r);
+            x[0][0] + x[1][0]
+        });
+        let b = time("paired, as shipped on this target (solve5)", &|k| {
+            let (j, r) = pick(k);
+            let x = shipped(j, [hh; 2], r);
+            x[0][0] + x[1][0]
+        });
+        println!(
+            "saved a voice: lanes {:.0} %, shipped {:.0} % ({sink:.1e})",
+            100.0 * (1.0 - a / s),
+            100.0 * (1.0 - b / s)
+        );
+    }
 }
