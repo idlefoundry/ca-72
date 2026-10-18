@@ -6185,3 +6185,27 @@ Workspace/all-target clippy passes with default and all features, and the optimi
 standalone rebuild succeeds. Source and image review found no defect in the per-item ink,
 selected-star hover or partial redraw. User visual acceptance is pending; no native editor,
 DAW or audio device was opened by this work.
+
+**Other browser text, review candidate, 2026-10-18.** The owner accepted the selected preset's
+new treatment ("okay, that's fine") and asked for a little more brightness in the other
+browser text, suggesting that the screen effect might be too strong. Inspection found the
+glass picture and unlit grid drawn into the still background before the text; no screen
+filter is applied over the lit glyphs. The smallest targeted adjustment leaves all artwork,
+colour, dot size and screen settings unchanged: ordinary text 0.78 to 0.85, secondary 0.62 to
+0.70, faint 0.50 to 0.60. The gold active row and its filled triangle, hover's amber outline
+arrow and full brightness, and keyboard focus's caret and full brightness are unchanged.
+
+The new before/after compares the drawer at 792e19e with this adjustment using the identical
+fixture, loaded preset, hover/focus, dimensions and screen settings. It is a separate Library
+image; historical update text is explicitly identified as renderer fixture data. This
+brightness adjustment remains a candidate for review, with no production release authority.
+
+**Brightness candidate evidence (the Mac, 2026-10-18):** 52 panel tests and both
+approved-image tests pass; 7 affected editor drawer tests pass, with its optional image
+test ignored. Workspace/all-target clippy passes with default and all features; formatting
+and whitespace checks pass. The optimised arm64 standalone rebuild succeeds. The matched
+before/after is Library `libfile_b95d1962b294819184c9d89a83e4ccdd`; both panes keep Brass Tutti
+current, Hollow Glider hovered and Search focused at 1035 pixels. The 32-image matrix
+covers both looks, both lettering sizes, small windows and browsing/edit/empty/MIDI states.
+No native editor, DAW or audio/MIDI device was opened. The owner has accepted the prior
+gold selection treatment; acceptance of this secondary-text brightness lift is pending.
