@@ -3810,7 +3810,7 @@ fn ultra_note_lines(splits: bool) -> Vec<(&'static str, Tone)> {
     let mut lines = vec![
         ("ULTRA · NO COMPROMISES", Tone::Accent),
         (
-            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT FIVE TIMES THE WORK OF HI.",
+            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SIX TIMES THE WORK OF HI.",
             Tone::Plain,
         ),
     ];
@@ -7713,7 +7713,7 @@ mod tests {
             assert!(
                 text(n)
                     .iter()
-                    .any(|t| t.contains("ABOUT FIVE TIMES THE WORK OF HI"))
+                    .any(|t| t.contains("ABOUT SIX TIMES THE WORK OF HI"))
             );
             assert!(text(n).iter().any(|t| t == says), "{:?}", text(n));
             let dim: Vec<_> = n.lines.iter().rev().take(2).collect();
