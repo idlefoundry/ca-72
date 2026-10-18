@@ -6101,3 +6101,63 @@ uses the drawer action, saves and reloads the result, checks a user's preset nam
 untouched, and compares three notes' stereo renders at LO, HI and ULTRA with seed 12345:
 15,360 stereo samples at each quality match to the bit and are finite and non-silent.
 Both tests and plug-in library/test clippy pass. No host or audio device was opened for them.
+
+## R-PRESET-READABILITY. Read the presets' drawer at a small width
+
+**Owner authorisation, 2026-10-18.** Implement issue 69's brighter preset-browser text and
+larger small button captions; show a before/after picture and supply a separate test build
+before production release. After the first image the owner asked to bring the preset-browser
+font colour closer to the original: "I think we might have gone too far." The revised text
+keeps a modest contrast improvement in the original darker orange family, with the larger
+button captions retained. Wider 4K scaling work stays outside this change.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- The drawer keeps its dot-matrix displays, with modestly brighter orange strokes, darker glass, quieter
+  unlit dots and less glow. Active tabs have an underline, selected tags have a separate marker,
+  and unavailable current-preset actions are shaded. Their existing click behaviour stays.
+- The action captions are clear print on the caps rather than small worn captions above them.
+  The caps are enlarged without moving their centres or removing an action; the longest caption
+  is measured to fit inside its cap. INIT remains separately placed beside PRESET.
+- The drawer uses the same materials and lettering in both looks; the review includes the full
+  panel around it in CLASSIC and REALISTIC with STANDARD and LARGE lettering. An ignored
+  offscreen harness, `preset_readability_png`, reproduces 32 frames at widths 860, 1035, 1380
+  and 3108, including browsing, empty, editing and MIDI Learn states.
+- A review found the selected-tag marker overlapping the first character; its corrected layout
+  uses a one-dot-wide bar with two blank dot columns before the caption. The final review image compares main `5e7abe9` plus the
+  same INIT action against the final readability change, with identical scene and dimensions.
+
+**Evidence (the Mac, Rust 1.97.1, 2026-10-18):** `readable_key_captions_fit_separate_buttons`
+checks caption fit and separate hit regions; `readable_states_redraw_as_a_whole_frame` compares
+partial and whole redraws at the minimum, default and maximum widths. The panel's approved
+images remain unchanged. Offscreen review images are in the task's `readability-evidence`
+folder. No DAW, native host window or audio device was opened.
+
+## R-SETTINGS-VERSION. Settings names the installed build
+
+**Owner authorisation, 2026-10-18.** Implement only issue 75's installed-version display in
+Settings. The changelog and What's New modal are outside this work.
+
+**Agent decision, 2026-10-18** (not separately approved): the Settings title names CA-72 and
+`update::VERSION`, the existing `CARGO_PKG_VERSION` metadata used by the plug-in. No menu row
+or update action is added. It stays present while an update check is idle or has failed;
+opening Settings makes no network request. An available online version continues to be
+identified separately in the presets' drawer's existing update status.
+
+**Evidence (the Mac, Rust 1.97.1, 2026-10-18):** the Settings test compares the title against
+`Ca72::VERSION`, checks that opening the menu leaves update status unchanged, and checks the
+title after an offline failure. The nine Settings tests and the smallest-window menu-fit
+check pass; the offscreen Settings image was visually checked. No changelog, sound,
+project-state, preset or device-setting change is part of the display.
+
+The screenshot harness's historical update text and preset counters are deterministic fixture
+data, not a live release check; the executable's package metadata remains 0.2.5. The evidence
+folder's README identifies this explicitly.
+
+**Combined regression evidence (the Mac, 2026-10-18):** the panel's library suite and both
+approved-image tests; the plug-in's library suite (242 passed, 14 ignored) and the
+standalone-production library suite (251 passed, 14 ignored); 4 CLAP, 8 VST3, 16 sound and
+7 standalone-adapter tests pass. These host adapters are in-process test harnesses, with no
+DAW, native host window or hardware device. Workspace/all-target clippy passes with default
+features and all features; the final colour and marker changes also pass the panel's focused
+regressions and clippy. The separate Apple silicon standalone build uses its own data folder
+through review launchers; no installed plug-in or the skin-packs checkout is replaced.
