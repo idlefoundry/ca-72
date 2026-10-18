@@ -879,6 +879,96 @@ mod png {
         }
     }
 
+    /// A reproducible offscreen review at the minimum width, the smallest SIZE menu entry,
+    /// the default width and the largest supported width. The drawer shares its materials
+    /// across looks and lettering settings; the whole window verifies it in each context.
+    #[test]
+    #[ignore = "writes the preset readability review matrix"]
+    fn preset_readability_png() {
+        let Some(dir) = std::env::var_os("CA72_READABILITY_PNG") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for width in [860, 1035, 1380, 3108] {
+            let scale = f64::from(width) / art::W;
+            let mut drawer = DrawerRenderer::new(scale);
+            let found = browsing();
+            drawer.render(&found);
+            for (look, skin) in [("classic", crate::Skin::Drawn), ("worn", crate::Skin::Worn)] {
+                for (size, lettering) in [
+                    ("normal", crate::Lettering::Standard),
+                    ("large", crate::Lettering::Large),
+                ] {
+                    let mut panel = crate::Renderer::with_look(skin, lettering, scale, 1.0);
+                    panel.render(&crate::Scene::default());
+                    let mut whole = panel.frame().clone();
+                    whole.draw_pixmap(
+                        0,
+                        (DRAWER_TOP * scale).round() as i32,
+                        drawer.frame().as_ref(),
+                        &resvg::tiny_skia::PixmapPaint::default(),
+                        resvg::tiny_skia::Transform::identity(),
+                        None,
+                    );
+                    whole
+                        .save_png(dir.join(format!("{look}-{size}-{width}.png")))
+                        .unwrap();
+                }
+            }
+            // Active field, held action, unavailable preset actions, and MIDI Learn's list.
+            let states = [
+                ("browsing", found.clone()),
+                (
+                    "editing",
+                    DrawerScene {
+                        editing: Some(Edit::Save),
+                        save_name: Field::new("An intentionally long name to exercise scrolling"),
+                        save_tags: Field::new("bass, dark"),
+                        focus: Some(FieldId::SaveTags),
+                        hover: Some(DrawerTarget::Key(PresetKey::Init)),
+                        ..found.clone()
+                    },
+                ),
+                ("empty", DrawerScene::default()),
+                (
+                    "midi",
+                    DrawerScene {
+                        midi: Some(MidiList {
+                            rows: vec![
+                                MidiRow {
+                                    name: "CUTOFF FREQUENCY".into(),
+                                    assignment: "CH 1 · CC 74".into(),
+                                    waiting: false,
+                                },
+                                MidiRow {
+                                    name: "OSCILLATOR-2 FREQUENCY".into(),
+                                    assignment: String::new(),
+                                    waiting: true,
+                                },
+                            ],
+                            chosen: 1,
+                            keys: "UP, DOWN: CHOOSE · ENTER: LEARN · ESC: CANCEL".into(),
+                            reserved: "NOT LEARNED: CC 0 AND 32 (BANK), 1 (MODULATION WHEEL)"
+                                .into(),
+                            status: "MOVE A CONTROLLER NOW".into(),
+                            tone: Tone::News,
+                            ..MidiList::default()
+                        }),
+                        ..found.clone()
+                    },
+                ),
+            ];
+            for (name, scene) in states {
+                drawer.render(&scene);
+                drawer
+                    .frame()
+                    .save_png(dir.join(format!("drawer-{name}-{width}.png")))
+                    .unwrap();
+            }
+        }
+    }
+
     /// The whole window in the worn skin at a pixel a unit, the panel as it opens over the
     /// strip (MONO's tab lit, a favourite's name on the rail, five of eight voices sounding), as
     /// `window.png` in `$CA72_WINDOW_PNG`, the folder: for looking at the strip; and with the
