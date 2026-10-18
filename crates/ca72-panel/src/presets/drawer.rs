@@ -157,12 +157,12 @@ const UPDATE_LINE: usize = STATUS_LINES - 1;
 /// the pointer; the list's; what is said aside; what is barely there.
 const BRIGHT: f32 = 1.0;
 const POINTED: f32 = 1.0;
-const NORMAL: f32 = 0.9;
-const DIM: f32 = 0.78;
-const FAINT: f32 = 0.68;
-/// Warm amber strokes against quiet glass, with a little red glow; unlit dots stay below
-/// the lettering's contrast even at the minimum window width.
-const DOT_ON: (u8, u8, u8) = (255, 197, 110);
+const NORMAL: f32 = 0.78;
+const DIM: f32 = 0.62;
+const FAINT: f32 = 0.5;
+/// Orange strokes close to the original display against quieter glass, with a little red glow.
+/// Unlit dots stay below the lettering's contrast even at the minimum window width.
+const DOT_ON: (u8, u8, u8) = (255, 140, 58);
 const DOT_GLOW: (u8, u8, u8) = (255, 72, 10);
 const UNLIT: f32 = 0.025;
 
