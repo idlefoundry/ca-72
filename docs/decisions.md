@@ -7068,3 +7068,50 @@ driver is its own circuit, read by nothing in the audio, and the bias's temperat
 same arithmetic on the same inputs. Why 0.2.5's ULTRA is not repeatable is not yet known (to find
 before ULTRA is offered as the render engine; a candidate is something it takes from another
 thread at a time that follows the machine's load).
+
+## R-HI-PAIRS. Two HI voices' filters solved side by side
+
+**Owner decisions, 2026-10-17.** HI and ULTRA stay bit-identical to 0.2.5 (R-CPU-EXACT). Of the
+avenues that keep the sound, two voices per SIMD register was measured as the one worth building
+(a prototype of the filter's elimination for two voices: 20,000 real HI eliminations the same to
+the bit, 91 ns against 34 ns a voice); asked whether to build it, the owner: "do the HI fix
+first."
+
+**Agent decisions, 2026-10-17** (not separately approved):
+- **The filter's loop elimination for two voices at once** (`vcf::solve_loop_pair`), a lane a
+  voice, each lane the scalar's operations in the scalar's order (Rust does not fuse a multiply
+  and an add unasked): each lane picks its own pivots, and a step the scalar skips (a zero pivot,
+  a zero factor) is kept as it was in that lane, not computed (a computed `a - 0 * p` can turn
+  -0.0 into +0.0). The divisions and sums of the two lanes run in one register; a single voice's
+  elimination is a chain each step of which waits on the last, so two fill each other's waits.
+- **`Vcf::tick_pair`**: two filters at HI (Potato, reciprocals, the same oversampling); each its
+  own resampling, bias, prewarping and Newton iterations (one, or two if the first did not
+  converge), their eliminations paired while both iterate and the single filter's where only one
+  does. `Vcf::tick` and `Vcf::step` are untouched: ULTRA and any filter alone take them as before.
+- **`Voice::before_filter`, `Voice::filter_pair`, `Voice::after_filter`**: `Voice::tick_jacks`
+  cut at the filter, each part copied from it as it was.
+- **Each voice and its DOUBLE twin** (`Playing::play_from`, the one instrument included): with
+  the twin sounding and both at HI, both voices' keys and jacks first (neither hangs on the other's
+  output), then each to its filter, the pair, and each on from it. `turned` (the one instrument
+  scattering) changes the voice's own place only.
+- **POLY's voices two at a time** (`Playing::play_pair`): two voices' runs a sample of each in
+  turn, where both play HI on their own (no twin sounding, not split); else one after the other.
+  Without workers the engine plays the list two at a time. With workers, voices are taken two at
+  a time (`pool::take_some`) when the run has more voices than threads to play them (more voices
+  than workers and the audio thread), so that pairing never leaves a thread idle that could have
+  played a voice; each voice keeps its own lock, buffer and done mark, and the outputs are summed
+  in order as before.
+- **Not paired:** LO (the light voices), ULTRA (its elementary functions are the system's,
+  called a voice at a time), and a lone voice without DOUBLE.
+
+**Evidence (the Mac, 2026-10-17, binaries built from `cpu-release` with `preset_render`'s
+DOUBLE switch and from this change):**
+- `tests/pairs.rs`: two voices set apart (notes, cutoffs, emphasis, FEEDBACK, the jacks, a
+  waveform and the filter's mode changed), alone and paired: 120,000 samples at HI the same to the
+  bit; ULTRA and mixed qualities, each alone.
+- `preset_render`, every factory preset, ten voices, 4 s, the same to the bit at HI: one thread,
+  with DOUBLE at 50 %, and with 3 workers (pairs taken) and 12 (not).
+- `preset_cost`, ten voices, one thread, the mean of two runs each, alternated: at HI 1785 to
+  1509 % of a core in all (-15.5 %; -11 to -22 % a preset, the hats the most); with DOUBLE at 50 %,
+  3491 to 2895 (-17.1 %; -13 to -24 %).
+- The core's, real-time library's and plug-in's tests; clippy with `-D warnings`.

@@ -78,6 +78,16 @@ pub trait Play: Send + 'static {
     /// `n` samples, `ext` at EXTERNAL INPUT, into the voice's own buffer.
     fn play(&mut self, n: usize, ext: &[f64; CHUNK], rate: f64, mix: &Mix);
 
+    /// Two voices' runs, each as [`Play::play`] plays it (the engine's solve their filters
+    /// together at HI: decisions.md R-HI-PAIRS).
+    fn play_pair(a: &mut Self, b: &mut Self, n: usize, ext: &[f64; CHUNK], rate: f64, mix: &Mix)
+    where
+        Self: Sized,
+    {
+        a.play(n, ext, rate, mix);
+        b.play(n, ext, rate, mix);
+    }
+
     /// The split crews the voice holds ([`Crew`]'s), handed to `into` (whose room is kept).
     fn recall(&mut self, into: &mut Vec<Split>) {
         let _ = into;
@@ -87,6 +97,10 @@ pub trait Play: Send + 'static {
 impl Play for Playing {
     fn play(&mut self, n: usize, ext: &[f64; CHUNK], rate: f64, mix: &Mix) {
         Playing::play(self, n, ext, rate, mix);
+    }
+
+    fn play_pair(a: &mut Self, b: &mut Self, n: usize, ext: &[f64; CHUNK], rate: f64, mix: &Mix) {
+        Playing::play_pair(a, b, n, ext, rate, mix);
     }
 
     fn recall(&mut self, into: &mut Vec<Split>) {
@@ -430,6 +444,8 @@ struct Board<V> {
     mix: [AtomicU64; MIX_LEN],
     ext: [AtomicU64; CHUNK],
     flush: AtomicU32,
+    /// Whether the run's voices are taken two at a time ([`take_some`]).
+    pair: AtomicBool,
     quit: AtomicBool,
     voices: Vec<Shared<V>>,
     /// The host's blocks so far, and the work interval the workers join, the first of them
@@ -470,6 +486,37 @@ fn take<V>(b: &Board<V>, run: u32) -> Option<(usize, usize)> {
             .compare_exchange_weak(w, w + 1, Ordering::AcqRel, Ordering::Acquire)
         {
             Ok(_) => return Some((next, slot)),
+            Err(x) => w = x,
+        }
+    }
+}
+
+/// As [`take`], two voices at once where `two` and two are left: each one's list place and
+/// place among the voices (decisions.md R-HI-PAIRS).
+type Taken = ((usize, usize), Option<(usize, usize)>);
+
+fn take_some<V>(b: &Board<V>, run: u32, two: bool) -> Option<Taken> {
+    if !two {
+        return take(b, run).map(|t| (t, None));
+    }
+    let mut w = b.claim.load(Ordering::Acquire);
+    loop {
+        let (r, count, next) = (
+            (w >> 32) as u32,
+            ((w >> 8) & 0xff) as usize,
+            (w & 0xff) as usize,
+        );
+        if r != run || w & CLOSED != 0 || next >= count {
+            return None;
+        }
+        let k = if next + 1 < count { 2 } else { 1 };
+        let first = b.list[next].load(Ordering::Relaxed);
+        let second = (k == 2).then(|| b.list[next + 1].load(Ordering::Relaxed));
+        match b
+            .claim
+            .compare_exchange_weak(w, w + k as u64, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) => return Some(((next, first), second.map(|s| (next + 1, s)))),
             Err(x) => w = x,
         }
     }
@@ -588,6 +635,7 @@ impl<V: Play> Pool<V> {
             mix: std::array::from_fn(|_| AtomicU64::new(0)),
             ext: std::array::from_fn(|_| AtomicU64::new(0)),
             flush: AtomicU32::new(0),
+            pair: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             voices: voices.to_vec(),
             block: AtomicU64::new(0),
@@ -718,18 +766,44 @@ impl<V: Play> Pool<V> {
             }
             return played;
         }
+        // More voices than threads to play them: two at a time, their filters solved together
+        // at HI (decisions.md R-HI-PAIRS); else one at a time, as many threads at work as can be.
+        let two = count > self.threads.len() + 1;
+        self.board.pair.store(two, Ordering::Relaxed);
         let run = self.offer(&list[..count], n, ext, rate, mix);
-        // (No more workers woken than the voices less this thread's one: the others would only
-        // spin, beside a split voice's helpers among them.)
-        self.wake(count.saturating_sub(1));
+        // (No more workers woken than the voices, or pairs, less this thread's one: the others
+        // would only spin, beside a split voice's helpers among them.)
+        let units = if two { count.div_ceil(2) } else { count };
+        self.wake(units.saturating_sub(1));
         let b = &*self.board;
         // This thread's share: whatever no worker has taken.
         let mut here = [false; MAX];
-        while let Some((i, slot)) = take(b, run) {
-            here[i] = true;
-            if let Ok(mut p) = b.voices[slot].try_lock() {
-                p.play(n, ext, rate, mix);
-                played[i] = true;
+        while let Some((x, y)) = take_some(b, run, two) {
+            here[x.0] = true;
+            let px = b.voices[x.1].try_lock();
+            let Some(y) = y else {
+                if let Ok(mut p) = px {
+                    p.play(n, ext, rate, mix);
+                    played[x.0] = true;
+                }
+                continue;
+            };
+            here[y.0] = true;
+            match (px, b.voices[y.1].try_lock()) {
+                (Ok(mut p), Ok(mut q)) => {
+                    V::play_pair(&mut p, &mut q, n, ext, rate, mix);
+                    (played[x.0], played[y.0]) = (true, true);
+                }
+                (px, py) => {
+                    if let Ok(mut p) = px {
+                        p.play(n, ext, rate, mix);
+                        played[x.0] = true;
+                    }
+                    if let Ok(mut q) = py {
+                        q.play(n, ext, rate, mix);
+                        played[y.0] = true;
+                    }
+                }
             }
         }
         for (i, &slot) in list.iter().enumerate().take(count) {
@@ -1206,28 +1280,57 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
             ca72_rt::set_flush_mode(want);
             flush = want;
         }
-        while let Some((_, slot)) = take(b, run) {
-            let (mut p, poisoned) = match b.voices[slot].lock() {
+        let two = b.pair.load(Ordering::Relaxed);
+        while let Some(((_, slot), other)) = take_some(b, run, two) {
+            let lock = |slot: usize| match b.voices[slot].lock() {
                 Ok(p) => (p, false),
                 Err(e) => (e.into_inner(), true),
             };
+            let (mut p, poisoned) = lock(slot);
+            let mut q = other.map(|(_, s)| (s, lock(s)));
             // Held up between taking the voice and locking it, past the run's end: the
             // voice is left as it is, neither played nor marked (decisions.md R18).
             if !current(b, run) {
                 break;
             }
-            let mark = if poisoned {
-                u64::from(run) | FAILED
-            } else {
-                p.play(n, &ext, rate, &mix);
-                u64::from(run)
+            let failed = u64::from(run) | FAILED;
+            let (mark, mark_q) = match &mut q {
+                // Two voices taken: their filters solved together where both can be.
+                Some((_, (q, false))) if !poisoned => {
+                    V::play_pair(&mut p, q, n, &ext, rate, &mix);
+                    (u64::from(run), u64::from(run))
+                }
+                Some((_, (q, q_poisoned))) => {
+                    let mark = if poisoned {
+                        failed
+                    } else {
+                        p.play(n, &ext, rate, &mix);
+                        u64::from(run)
+                    };
+                    let mark_q = if *q_poisoned {
+                        failed
+                    } else {
+                        q.play(n, &ext, rate, &mix);
+                        u64::from(run)
+                    };
+                    (mark, mark_q)
+                }
+                None if poisoned => (failed, 0),
+                None => {
+                    p.play(n, &ext, rate, &mix);
+                    (u64::from(run), 0)
+                }
             };
-            // The voice let go before it is marked: once marked, the caller's thread may close
-            // the run and take the voice in the next, and a lock still held here would fail its
-            // `try_lock` there, the voice silent for that run (seen in CI as samples that
+            // The voices let go before they are marked: once marked, the caller's thread may
+            // close the run and take a voice in the next, and a lock still held here would fail
+            // its `try_lock` there, the voice silent for that run (seen in CI as samples that
             // differed from one thread's).
             drop(p);
+            let q = q.map(|(s, _)| s);
             b.done[slot].store(mark, Ordering::Release);
+            if let Some(s) = q {
+                b.done[s].store(mark_q, Ordering::Release);
+            }
         }
     }
 }
