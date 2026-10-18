@@ -6238,3 +6238,27 @@ editing and MIDI Learn checked too. Workspace/all-target clippy passes with defa
 all features; formatting and whitespace checks pass. The optimised arm64 standalone
 build succeeds. Free disk was checked before building (25 GiB available); no files or
 caches were deleted. No editor, DAW or audio/MIDI device was opened by the agent.
+
+**Darker unselected text candidate, 2026-10-18.** The owner reviewed the midpoint and
+asked, "go darker on unselected text please." Only unselected, non-hovered and non-focused
+text now renders at ordinary 0.80, secondary 0.60 and faint 0.50: the actual amber
+brightness levels previously rendered by 792e19e. Explicit levels avoid applying the
+old nominal 0.78/0.62 values differently under the finer grouping introduced for the
+midpoint. All active constants, exceptions for quieter active-control text, gold
+selection/triangle, hover/focus behavior, artwork and layout remain unchanged.
+
+Library `libfile_f30fb095174c8191b58bb12570569f6c` is a new matched comparison against
+8139a7c, using the same contents, loaded Brass Tutti, hovered Hollow Glider, focused
+Search, dimensions and screen settings. Pixel checks confirm unchanged gold/hovered
+glyph regions, focused Search and button caps; unselected text darkens. All preceding
+images/builds are retained. The cursor-state and redraw regressions remain in place,
+with only inactive-level expectations updated. This is a candidate for owner review.
+
+**Darker candidate evidence (the Mac, 2026-10-18):** 53 panel tests and both approved-image
+tests pass; 7 affected editor drawer tests pass (8 panel image tests and 1 optional editor
+image test ignored in those suites). The 32-image matrix rendered successfully and was
+visually checked across both looks/lettering contexts and small-window browsing, editing,
+empty and MIDI states. Workspace/all-target clippy passes with default and all features;
+formatting and whitespace checks pass. The optimised arm64 standalone rebuild succeeds.
+Free disk was checked before builds (24–25 GiB available); no caches or files were deleted.
+No native editor, DAW or audio/MIDI device was opened by the agent.
