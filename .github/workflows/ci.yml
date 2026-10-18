@@ -153,6 +153,12 @@ jobs:
       - name: Typed persistent-field derive tests
         run: CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-derive" cargo test --manifest-path third_party/nih-plug/nih_plug_derive/Cargo.toml
 
+      - name: Linux standalone window identity
+        if: runner.os == 'Linux'
+        run: |
+          python3 scripts/test-linux-window-identity.py
+          CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-window-identity" cargo test --manifest-path third_party/baseview/Cargo.toml --lib
+
       - name: Validators, cached
         uses: actions/cache@v5
         with:

@@ -467,6 +467,12 @@ this needs ALSA and OpenGL headers (`libasound2-dev libgl-dev` on Debian/Ubuntu,
 `target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
 Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
 
+On Linux, a source build also needs the desktop entry and icon installed for the dock
+to identify it. Install the packaged archive with `./install.sh --standalone-only`.
+Running a bare executable does not register those files. See the
+[Linux window identity checks](docs/issue-49-linux-icon.md) for a standalone-only source
+installation and Ubuntu validation steps.
+
 To try the plug-in without a host, run it as an application of its own:
 
 ```sh

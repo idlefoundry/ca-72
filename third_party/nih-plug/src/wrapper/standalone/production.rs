@@ -763,6 +763,7 @@ where
             title: P::NAME.to_owned(),
             size: Size::new(f64::from(width), f64::from(height)),
             scale: WindowScalePolicy::SystemScaleFactor,
+            #[cfg(not(target_os = "linux"))]
             gl_config: None,
         },
         move |window| {
