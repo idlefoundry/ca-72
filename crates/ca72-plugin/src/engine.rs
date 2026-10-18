@@ -3178,6 +3178,13 @@ mod tests {
         }
     }
 
+    /// The workers [`Engine::start_workers`] starts for `asked` on this machine, a lone
+    /// instance: as many as asked, within its cap and the process's budget (decisions.md
+    /// R-THREADS: one on CI's three-core Mac).
+    fn started(asked: usize) -> usize {
+        asked.min(instance_cap()).min(budget_workers(1))
+    }
+
     fn four_voices(workers: usize) -> Engine {
         let mut e = Engine::new();
         e.set(&Controls {
@@ -3186,7 +3193,7 @@ mod tests {
             ..Controls::default()
         });
         e.prepare(48_000.0, 1);
-        assert_eq!(e.start_workers(workers, None), workers);
+        assert_eq!(e.start_workers(workers, None), started(workers));
         for key in [45, 52, 57, 64] {
             e.event(Event::Note { key, on: true });
         }
@@ -3405,14 +3412,14 @@ mod tests {
         };
         e.set(&c);
         e.prepare(48_000.0, 1);
-        assert_eq!(e.start_workers(2, None), 2);
+        assert_eq!(e.start_workers(2, None), started(2));
         e.prepare(48_000.0, 2);
-        assert_eq!(e.start_workers(2, None), 2);
+        assert_eq!(e.start_workers(2, None), started(2));
         assert_eq!(e.pool_starts, 1, "started again at the same rate");
         e.prepare(44_100.0, 2);
         assert_eq!(e.workers(), 0, "kept with the old voices");
-        assert_eq!(e.start_workers(2, None), 2);
-        assert_eq!(e.start_workers(1, None), 1);
+        assert_eq!(e.start_workers(2, None), started(2));
+        assert_eq!(e.start_workers(1, None), started(1));
         assert_eq!(e.pool_starts, 3);
         c.poly = false;
         e.set(&c);
