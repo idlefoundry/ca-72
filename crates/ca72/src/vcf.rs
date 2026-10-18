@@ -1084,79 +1084,114 @@ mod pair {
             }
         }
 
+        /// One column's step of the elimination: its pivots, rows swapped, the rows below
+        /// it updated. A step a column (`COL` a constant) so that the compiler unrolls
+        /// every loop and keeps the matrix in registers where it can (a loop over the
+        /// columns kept it in memory, indexed).
+        #[inline(always)]
+        fn column<const COL: usize>(
+            m: &mut [[__m128d; 5]; 5],
+            r: &mut [__m128d; 5],
+            inv: &mut [__m128d; 5],
+        ) {
+            unsafe {
+                let sign = _mm_set1_pd(-0.0);
+                // Each lane's pivot row (the first of the largest, as the scalar's `>`
+                // keeps): MAXPD gives its first operand where it is the greater, else the
+                // second (a NaN included), the scalar's comparison.
+                let mut best = _mm_andnot_pd(sign, m[COL][COL]);
+                let mut at = _mm_set1_pd(COL as f64);
+                for i in COL + 1..5 {
+                    let a = _mm_andnot_pd(sign, m[i][COL]);
+                    let gt = _mm_cmpgt_pd(a, best);
+                    best = _mm_max_pd(a, best);
+                    at = sel(gt, _mm_set1_pd(i as f64), at);
+                }
+                if _mm_movemask_pd(_mm_cmpneq_pd(at, _mm_set1_pd(COL as f64))) != 0 {
+                    for i in COL + 1..5 {
+                        let e = _mm_cmpeq_pd(at, _mm_set1_pd(i as f64));
+                        if _mm_movemask_pd(e) != 0 {
+                            // (Columns before `COL` are read no more.)
+                            for c in COL..5 {
+                                let (mut x, mut y) = (m[COL][c], m[i][c]);
+                                swap(&mut x, &mut y, e);
+                                (m[COL][c], m[i][c]) = (x, y);
+                            }
+                            let (mut x, mut y) = (r[COL], r[i]);
+                            swap(&mut x, &mut y, e);
+                            (r[COL], r[i]) = (x, y);
+                        }
+                    }
+                }
+                let d = m[COL][COL];
+                let live = _mm_cmpnlt_pd(_mm_andnot_pd(sign, d), _mm_set1_pd(1e-300));
+                inv[COL] = _mm_and_pd(live, _mm_div_pd(_mm_set1_pd(1.0), d));
+                let pivot = m[COL];
+                let rc = r[COL];
+                for i in COL + 1..5 {
+                    let f = _mm_mul_pd(m[i][COL], inv[COL]);
+                    let go = _mm_and_pd(live, _mm_cmpneq_pd(f, _mm_setzero_pd()));
+                    // (Column `COL` itself is read no more below the pivot.)
+                    match _mm_movemask_pd(go) {
+                        3 => {
+                            for c in COL + 1..5 {
+                                m[i][c] = _mm_sub_pd(m[i][c], _mm_mul_pd(f, pivot[c]));
+                            }
+                            r[i] = _mm_sub_pd(r[i], _mm_mul_pd(f, rc));
+                        }
+                        0 => {}
+                        _ => {
+                            for c in COL + 1..5 {
+                                let n = _mm_sub_pd(m[i][c], _mm_mul_pd(f, pivot[c]));
+                                m[i][c] = sel(go, n, m[i][c]);
+                            }
+                            r[i] = sel(go, _mm_sub_pd(r[i], _mm_mul_pd(f, rc)), r[i]);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// Back substitution's row `I`.
+        #[inline(always)]
+        fn back<const I: usize>(
+            m: &[[__m128d; 5]; 5],
+            r: &[__m128d; 5],
+            inv: &[__m128d; 5],
+            x: &mut [__m128d; 5],
+        ) {
+            unsafe {
+                let mut s = r[I];
+                for k in I + 1..5 {
+                    s = _mm_sub_pd(s, _mm_mul_pd(m[I][k], x[k]));
+                }
+                let z = _mm_cmplt_pd(
+                    _mm_andnot_pd(_mm_set1_pd(-0.0), m[I][I]),
+                    _mm_set1_pd(1e-300),
+                );
+                x[I] = _mm_andnot_pd(z, _mm_mul_pd(s, inv[I]));
+            }
+        }
+
         #[inline(always)]
         pub(in super::super) fn solve5(m: [[L; 5]; 5], r: [L; 5]) -> [L; 5] {
-            unsafe {
-                let mut m = m.map(|row| row.map(v));
-                let mut r = r.map(v);
-                let sign = _mm_set1_pd(-0.0);
-                let tiny = _mm_set1_pd(1e-300);
-                let zero = _mm_setzero_pd();
-                let mut inv = [zero; 5];
-                for col in 0..5 {
-                    // Each lane's pivot row (the first of the largest, as the scalar's `>`
-                    // keeps): MAXPD gives its first operand where it is the greater, else the
-                    // second (a NaN included), the scalar's comparison.
-                    let mut best = _mm_andnot_pd(sign, m[col][col]);
-                    let mut at = _mm_set1_pd(col as f64);
-                    for i in col + 1..5 {
-                        let a = _mm_andnot_pd(sign, m[i][col]);
-                        let gt = _mm_cmpgt_pd(a, best);
-                        best = _mm_max_pd(a, best);
-                        at = sel(gt, _mm_set1_pd(i as f64), at);
-                    }
-                    if _mm_movemask_pd(_mm_cmpneq_pd(at, _mm_set1_pd(col as f64))) != 0 {
-                        for i in col + 1..5 {
-                            let e = _mm_cmpeq_pd(at, _mm_set1_pd(i as f64));
-                            if _mm_movemask_pd(e) != 0 {
-                                // (Columns before `col` are read no more.)
-                                let (above, below) = m.split_at_mut(i);
-                                for c in col..5 {
-                                    swap(&mut above[col][c], &mut below[0][c], e);
-                                }
-                                let (above, below) = r.split_at_mut(i);
-                                swap(&mut above[col], &mut below[0], e);
-                            }
-                        }
-                    }
-                    let d = m[col][col];
-                    let live = _mm_cmpnlt_pd(_mm_andnot_pd(sign, d), tiny);
-                    inv[col] = _mm_and_pd(live, _mm_div_pd(_mm_set1_pd(1.0), d));
-                    let pivot = m[col];
-                    let rc = r[col];
-                    for i in col + 1..5 {
-                        let f = _mm_mul_pd(m[i][col], inv[col]);
-                        let go = _mm_and_pd(live, _mm_cmpneq_pd(f, zero));
-                        // (Column `col` itself is read no more below the pivot.)
-                        match _mm_movemask_pd(go) {
-                            3 => {
-                                for c in col + 1..5 {
-                                    m[i][c] = _mm_sub_pd(m[i][c], _mm_mul_pd(f, pivot[c]));
-                                }
-                                r[i] = _mm_sub_pd(r[i], _mm_mul_pd(f, rc));
-                            }
-                            0 => {}
-                            _ => {
-                                for c in col + 1..5 {
-                                    let n = _mm_sub_pd(m[i][c], _mm_mul_pd(f, pivot[c]));
-                                    m[i][c] = sel(go, n, m[i][c]);
-                                }
-                                r[i] = sel(go, _mm_sub_pd(r[i], _mm_mul_pd(f, rc)), r[i]);
-                            }
-                        }
-                    }
-                }
-                let mut x = [zero; 5];
-                for i in (0..5).rev() {
-                    let mut s = r[i];
-                    for k in i + 1..5 {
-                        s = _mm_sub_pd(s, _mm_mul_pd(m[i][k], x[k]));
-                    }
-                    let z = _mm_cmplt_pd(_mm_andnot_pd(sign, m[i][i]), tiny);
-                    x[i] = _mm_andnot_pd(z, _mm_mul_pd(s, inv[i]));
-                }
-                x.map(l)
-            }
+            let mut m = m.map(|row| row.map(v));
+            let mut r = r.map(v);
+            // SAFETY: as above.
+            let zero = unsafe { _mm_setzero_pd() };
+            let mut inv = [zero; 5];
+            column::<0>(&mut m, &mut r, &mut inv);
+            column::<1>(&mut m, &mut r, &mut inv);
+            column::<2>(&mut m, &mut r, &mut inv);
+            column::<3>(&mut m, &mut r, &mut inv);
+            column::<4>(&mut m, &mut r, &mut inv);
+            let mut x = [zero; 5];
+            back::<4>(&m, &r, &inv, &mut x);
+            back::<3>(&m, &r, &inv, &mut x);
+            back::<2>(&m, &r, &inv, &mut x);
+            back::<1>(&m, &r, &inv, &mut x);
+            back::<0>(&m, &r, &inv, &mut x);
+            x.map(l)
         }
     }
 }
