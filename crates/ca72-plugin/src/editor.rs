@@ -4759,6 +4759,11 @@ mod tests {
     #[test]
     fn the_settings_key_chooses_the_look() {
         let (mut e, _, _) = editing();
+        e.update = Update::with(
+            crate::update::fake::no_curl,
+            crate::update::fake::no_browser,
+        );
+        let update = e.update.scene();
         assert_eq!(
             (e.settings.skin, e.renderer.skin()),
             (Skin::Worn, Skin::Worn)
@@ -4767,8 +4772,9 @@ mod tests {
         click(&mut e, key);
         assert_eq!(
             e.learning.menu().map(|m| m.title.as_str()),
-            Some("SETTINGS")
+            Some(format!("SETTINGS · CA-72 {}", crate::Ca72::VERSION).as_str())
         );
+        assert_eq!(e.update.scene(), update, "opening Settings does not check");
         assert_eq!(
             menu_items(&e)[..3],
             [
@@ -4802,6 +4808,14 @@ mod tests {
             (Skin::Worn, Skin::Worn)
         );
         e.draw();
+        e.update.press();
+        assert_eq!(e.update.scene().text, "COULD NOT CHECK");
+        click(&mut e, key);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.as_str()),
+            Some(format!("SETTINGS · CA-72 {}", crate::Ca72::VERSION).as_str())
+        );
+        assert_eq!(e.update.scene().text, "COULD NOT CHECK");
     }
 
     /// The settings key's LETTERING (R-LETTERING): STANDARD by default, marked and not to be
