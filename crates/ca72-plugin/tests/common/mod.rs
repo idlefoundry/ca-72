@@ -27,11 +27,27 @@ pub fn preset(name: &str) -> Sound {
         .unwrap_or_else(|| panic!("no preset {name}"))
 }
 
+/// The variable `name` read as a `T`, `default` if it is not set; a value set that does not
+/// read as one stops the run, as a default in its place would measure something not asked for
+/// (zsh's `env $e`, with `e="CA72_ULTRA=1 CA72_VOICES=4"`, sets one variable: decisions.md
+/// R-RENDER-SETTINGS).
 pub fn env<T: std::str::FromStr>(name: &str, default: T) -> T {
-    std::env::var(name)
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(default)
+    match std::env::var(name) {
+        Err(_) => default,
+        Ok(s) => s
+            .parse()
+            .unwrap_or_else(|_| panic!("{name}={s:?} does not read as its value")),
+    }
+}
+
+/// Whether the switch `name` is set: unset, off; `1` or empty, on; anything else stops the run
+/// (as [`env`]).
+pub fn switch(name: &str) -> bool {
+    match std::env::var(name) {
+        Err(_) => false,
+        Ok(s) if s.is_empty() || s == "1" => true,
+        Ok(s) => panic!("{name}={s:?}: set it to 1 (or leave it unset)"),
+    }
 }
 
 /// The engine's controls a preset sets (the plug-in's own mapping, `Ca72Params::controls`,

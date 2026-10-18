@@ -7320,3 +7320,44 @@ processor time on Windows):**
   blocks alike.
 - So the saving is the Mac's: parking a thread costs little on Linux and Windows, and the spin
   with it. On none of the three is the 50 us spin later.
+
+## R-RENDER-SETTINGS. ULTRA is repeatable; a comparison's settings are checked
+
+**Agent finding, 2026-10-18** (placeholder id; not yet reviewed by the owner). R-CPU-EXACT's
+correction (branch `cpu-release`, 5870fdd) says ULTRA's renders are not repeatable over time on
+the Mac in 0.2.5 itself. They are. The comparisons that differed rendered ten voices against
+references of four.
+- **ULTRA is repeatable.** The binary that made the ULTRA references at 19:12 on 2026-10-17
+  (main with `CA72_ULTRA`, saved at 19:10) rendered every factory preset the same to the bit
+  against them at 10:17 on 2026-10-18 (`CA72_ULTRA=1 CA72_VOICES=4`, workers 0). A new build of
+  main did the same in four runs at load averages from 4.5 to 22, and once on the efficiency cores
+  alone (`taskpolicy -c background`). So did `cpu-release` at 5870fdd, whose ULTRA plays two
+  voices split over helper threads on the M4 Pro (R-THREADS), and the saved `rel-preset_render`
+  (19:56). Nothing in ULTRA's serial engine depends on time or another thread: there is no clock,
+  no pool or deadline without workers, the factory voice and shared tables are made once per
+  process from the rate alone, and `ulp::FastScope` is off at ULTRA on the one thread.
+- **What differed.** Both failing comparisons (19:47 and 20:23) ran
+  `env $e CA72_RENDER_REF=… preset_render` with `e="CA72_ULTRA=1 CA72_VOICES=4"` under zsh, which
+  does not split an unquoted parameter. `env` got one assignment, `CA72_ULTRA="1 CA72_VOICES=4"`:
+  ULTRA on (any value counted), `CA72_VOICES` unset, so 10 voices. HI's `e` was empty and LO's
+  a single assignment, so they matched. The first differing sample is the first one (frame 0,
+  left): -2.85e-6 in the reference against -7.12e-6, the idle voices' hiss, 10/4 = 2.5 times as
+  much. Felt Bass's line (2.2 dB) was reproduced exactly both by that command and by
+  `CA72_VOICES=10`. The 19:47 run's "three presets" were its `tail -3`; every preset differed.
+- **Change (tests only).** `preset_render` writes the run's settings (QUALITY, voices, seconds,
+  presets, 0.1's translation) to `settings.txt` beside `CA72_RENDER_OUT`'s renders, and stops if a
+  reference's are not the run's. A presets file is named there by a digest of its contents, not
+  its path. The file lists the renders the run wrote. It is removed when a run begins and written
+  once every render is, so an output left half made, or holding an earlier run's renders, lists
+  none of them; a render compared must be on the reference's list. A reference without the file
+  is compared with a note. A switch
+  (`CA72_ULTRA`, `CA72_POTATO`, `CA72_FROM_0_1`) takes `1` or nothing; any other value stops the run,
+  and so does setting both qualities. The shared `env` stops on a value that does not parse
+  (it fell back to the default). The engine is unchanged: HI, LO and ULTRA render every preset the
+  same to the bit as main's.
+- **Also learned.** Cargo names a test's binary by its metadata, not its code: main's and
+  `cpu-release`'s `preset_render` are both `preset_render-d3ac7cd2e0e0b1e9`, so a binary run later
+  by its target path can be another version's. Copy a binary aside to compare against it later.
+- **Merged into `cpu-release` for 0.2.6 (2026-10-18):** R-CPU-EXACT's correction is withdrawn
+  there; its ULTRA comparison minutes apart is as good evidence as HI's. `CA72_DOUBLE` (R-HI-PAIRS)
+  reads through the same checked `env`, and `settings.txt` names DOUBLE where it is not 0.
