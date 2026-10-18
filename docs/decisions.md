@@ -6209,3 +6209,32 @@ current, Hollow Glider hovered and Search focused at 1035 pixels. The 32-image m
 covers both looks, both lettering sizes, small windows and browsing/edit/empty/MIDI states.
 No native editor, DAW or audio/MIDI device was opened. The owner has accepted the prior
 gold selection treatment; acceptance of this secondary-text brightness lift is pending.
+
+**Restrained midpoint candidate, 2026-10-18.** The owner found the non-active text in
+e853b2f a little too light and asked to move it halfway toward 792e19e, then clarified:
+"Just unselected items to get darker"; cursor-hovered and keyboard-focused items must
+stay as they are. Ordinary/secondary/faint levels move from 0.85/0.70/0.60 to
+0.815/0.66/0.55. Dot grouping now permits half the previous brightness step, so actual
+rendered levels become 0.825/0.65/0.55 rather than rounding ordinary text all the way
+back to its preceding 0.80. All existing active levels remain on their exact old steps.
+
+Gold selection and its triangle, hover/focus, selected tabs/tags, button caps and screen
+artwork stay unchanged. Quieter text within an active control also retains its preceding
+levels: empty-field placeholders, hovered tabs, MIDI row actions/empty assignments and
+the label beside a focused or hovered Save field. Regression coverage distinguishes
+these from inactive items and retains the existing gold/hover/ordinary and redraw checks.
+
+The new matched comparison uses e853b2f and the same fixture, current Brass Tutti, hovered
+Hollow Glider, focused Search, dimensions and screen settings. Pixel checks confirm that
+the current row, hovered row, focused Search and button-cap regions are unchanged; only
+unselected text darkens. Library `libfile_fdfacd594cf08191b092f128758b0afa` is a separate
+image, retaining all preceding comparisons. This midpoint remains a review candidate.
+
+**Midpoint evidence (the Mac, 2026-10-18):** 53 panel tests and 2 approved-image tests
+pass; 7 affected editor drawer tests pass (8 panel image tests and 1 optional editor
+image test ignored in these suites). Both 32-image matrices rendered separately; the
+candidate was inspected in both looks and lettering contexts and at small widths, with
+editing and MIDI Learn checked too. Workspace/all-target clippy passes with default and
+all features; formatting and whitespace checks pass. The optimised arm64 standalone
+build succeeds. Free disk was checked before building (25 GiB available); no files or
+caches were deleted. No editor, DAW or audio/MIDI device was opened by the agent.
