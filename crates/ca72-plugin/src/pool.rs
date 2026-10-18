@@ -67,8 +67,11 @@ const FAILED: u64 = 1 << 63;
 /// The claim word's mark of a run over: its player has returned.
 const CLOSED: u64 = 1 << 16;
 
-/// How long an idle worker spins for the next run before it parks.
-const SPIN: Duration = Duration::from_micros(200);
+/// How long an idle worker spins for the next run before it parks: long enough for a block's
+/// next run (its second [`crate::engine::CHUNK`]), not the next block, which is milliseconds
+/// away; 200 us spent most of it after a block's last voice, a fifth of a core and more for
+/// one HI voice (decisions.md R-SPIN).
+const SPIN: Duration = Duration::from_micros(50);
 
 /// A voice as the engine and the workers share it.
 pub type Shared<V = Playing> = Arc<Mutex<V>>;
