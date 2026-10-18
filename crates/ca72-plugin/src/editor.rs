@@ -2984,7 +2984,11 @@ impl WindowHandler for PanelWindow {
         self.follow(window);
         let now = Instant::now();
         // Unseen, drawn only now and then and not shown; seen again, shown whole.
-        let seen = window::seen(window);
+        // A remote AU view may be visible through its host's proxy while its native backing
+        // window is occluded. Keep presenting when that window cannot describe visibility.
+        let seen = (cfg!(target_os = "macos")
+            && !self.editing.context.native_window_occlusion_reliable())
+            || window::seen(window);
         if !seen {
             self.shown = None;
             if self
