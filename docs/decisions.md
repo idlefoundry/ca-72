@@ -7446,3 +7446,6 @@ remote case; that mock is control-flow evidence, not native-host validation.
 Logic (not installed during the experiment); ordinary direct CLAP/VST3 and standalone
 visible/hidden/reopen smoke tests; normal release validators and production CPU measurements.
 Do not treat approval to include the correction as evidence that these checks passed.
+
+**Owner's acceptance, 2026-10-18.** Told these checks remained, the owner did them by hand:
+"i did hands on checks. we're good".
