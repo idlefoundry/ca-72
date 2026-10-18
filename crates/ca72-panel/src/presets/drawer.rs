@@ -157,9 +157,9 @@ const UPDATE_LINE: usize = STATUS_LINES - 1;
 /// the pointer; the list's; what is said aside; what is barely there.
 const BRIGHT: f32 = 1.0;
 const POINTED: f32 = 1.0;
-const NORMAL: f32 = 0.78;
-const DIM: f32 = 0.62;
-const FAINT: f32 = 0.5;
+const NORMAL: f32 = 0.85;
+const DIM: f32 = 0.7;
+const FAINT: f32 = 0.6;
 /// Orange strokes close to the original display against quieter glass, with a little red glow.
 /// Unlit dots stay below the lettering's contrast even at the minimum window width.
 const DOT_ON: (u8, u8, u8) = (255, 140, 58);
@@ -2349,7 +2349,7 @@ mod tests {
         assert_eq!(hovered.lv, POINTED);
         assert!(hovered.text.starts_with('>'));
         assert_eq!(ordinary.ink.colour(), (255, 140, 58));
-        assert_eq!(ordinary.lv, 0.78);
+        assert_eq!(ordinary.lv, 0.85);
         assert!(ordinary.text.starts_with(' '));
         assert!(hovered.lv > ordinary.lv);
         // Hovering its star must not repaint part of the current row in orange.
