@@ -7861,6 +7861,7 @@ mod windows_window_tests {
     };
 
     use super::*;
+    use crate::opening::DOZE_AFTER;
 
     /// The host's window. Off the screen, where nothing drawn in it shows, its painting kept
     /// off the editor's window (`WS_CLIPCHILDREN`). Or as a host's dialog (REAPER's FX window):
@@ -8450,9 +8451,13 @@ mod windows_window_tests {
 
     /// The window shown where it changed (decisions.md R58, R59: on Windows the
     /// changed places alone are turned and sent to the window) is the window shown whole: the
-    /// synth playing (QUALITY's lamp following it, the voices' drops), a knob turned, the
+    /// synth playing (QUALITY's opening following it, the voices' drops), a knob turned, the
     /// presets' drawer sliding open and shut, then all of it still; every pixel of the window
-    /// then as when Windows has the editor repaint all of it.
+    /// then as when Windows has the editor repaint all of it. Still is the same frame at every
+    /// look for longer than anything on the panel holds still before it moves again: at LO, a
+    /// new instance's QUALITY (R-LO-DEFAULT), the hamster's wheel stops and he stands
+    /// [`DOZE_AFTER`] before he dozes off (two frames alike 400 ms apart, there, were called
+    /// still and he curled up after: R-STILL-LONGER).
     #[test]
     fn the_window_shown_in_places_is_the_window_shown_whole() {
         let o = Opened::new(false, HostWindow::Dialog);
@@ -8479,17 +8484,19 @@ mod windows_window_tests {
         play(0.5, 700);
         o.click_name();
         play(0.0, 300);
-        // Still: the same frame twice, a while apart.
-        let until = Instant::now() + Duration::from_secs(10);
+        // Still: the same frame at every look, 400 ms apart, for a second past the longest
+        // anything holds still.
+        let span = Duration::from_secs_f64(DOZE_AFTER + 1.0);
+        let until = Instant::now() + Duration::from_secs(20);
         let mut still = every_pixel(&o);
-        loop {
+        let mut since = Instant::now();
+        while since.elapsed() < span {
             pump(Duration::from_millis(400));
             let now = every_pixel(&o);
-            if now == still {
-                break;
+            if now != still {
+                assert!(Instant::now() < until, "the window never still");
+                (still, since) = (now, Instant::now());
             }
-            assert!(Instant::now() < until, "the window never still");
-            still = now;
         }
         assert!(colours(&still) >= 100, "the panel shown");
         // Windows asks for all of it again: the editor shows its whole frame.

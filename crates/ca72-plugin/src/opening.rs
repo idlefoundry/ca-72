@@ -15,12 +15,14 @@ const RISE_S: f64 = 0.05;
 const FALL_S: f64 = 0.3;
 /// The hamster: his wheel's turn at a full run (degrees a second), a frame of his run at a full
 /// run (seconds), how fast he picks up a run and drops it (per second), how loud the synth must
-/// be for him to run, and how long he stands before he dozes off and takes to doze.
+/// be for him to run, and how long he stands before he dozes off (the longest the opening
+/// holds still before it moves again: the editor's tests wait out more than it before they call
+/// the window still) and takes to doze.
 const SPIN: f64 = 137.5;
 const FRAME_S: f64 = 0.075;
 const PACE: f64 = 3.0;
 const RUN_AT: f64 = 0.05;
-const DOZE_AFTER: f64 = 1.0;
+pub(crate) const DOZE_AFTER: f64 = 1.0;
 const DOZE_S: f64 = 0.7;
 
 /// A peak as the level shown (0 to 1).
