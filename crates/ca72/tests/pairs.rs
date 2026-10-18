@@ -7,7 +7,7 @@
 use ca72::voice::{Jacks, Quality, Voice};
 
 /// Two voices, each played alone and played as a pair, `seconds` long: the same samples.
-fn pair_matches_alone(qa: Quality, qb: Quality, seconds: f64) {
+fn pair_matches_alone(qa: Quality, qb: Quality, seconds: f64, one_emphasis: bool) {
     let rate = 48_000.0;
     let tau = 2.0 * core::f64::consts::PI;
     let mut a = Voice::prototype(rate);
@@ -19,7 +19,9 @@ fn pair_matches_alone(qa: Quality, qb: Quality, seconds: f64) {
     b.set_seed(11);
     b.panel.quality = qb;
     b.panel.cutoff = 0.55;
-    b.panel.emphasis = 0.95;
+    // (One EMPHASIS, as POLY's voices and a twin share it: one circuit, so their loops are
+    // evaluated together too.)
+    b.panel.emphasis = if one_emphasis { 0.6 } else { 0.95 };
     b.panel.osc[2].on = true;
     let (mut a1, mut b1) = (a.clone(), b.clone());
     let jacks = |t: f64, k: f64| Jacks {
@@ -55,7 +57,7 @@ fn pair_matches_alone(qa: Quality, qb: Quality, seconds: f64) {
         match i {
             2_500 => each(&|v| v.note(60, true)),
             12_000 => each(&|v| v.feedback = 0.4),
-            24_000 => each(&|v| v.panel.emphasis = 0.2),
+            24_000 if !one_emphasis => each(&|v| v.panel.emphasis = 0.2),
             36_000 => each(&|v| v.note(60, false)),
             48_000 => each(&|v| v.note(64, true)),
             _ => {}
@@ -84,16 +86,19 @@ fn pair_matches_alone(qa: Quality, qb: Quality, seconds: f64) {
         a.probe() == a1.probe() && b.probe() == b1.probe(),
         "the voices' last state"
     );
-    println!("{qa:?}/{qb:?}: {compared} samples the same to the bit");
+    println!(
+        "{qa:?}/{qb:?} (one emphasis: {one_emphasis}): {compared} samples the same to the bit"
+    );
 }
 
 #[test]
 fn a_hi_pair_gives_each_voice_its_own_samples() {
-    pair_matches_alone(Quality::Potato, Quality::Potato, 1.25);
+    pair_matches_alone(Quality::Potato, Quality::Potato, 1.25, false);
+    pair_matches_alone(Quality::Potato, Quality::Potato, 1.25, true);
 }
 
 #[test]
 fn ultra_and_mixed_pairs_play_each_voice_alone() {
-    pair_matches_alone(Quality::NoCompromises, Quality::NoCompromises, 0.2);
-    pair_matches_alone(Quality::Potato, Quality::NoCompromises, 0.2);
+    pair_matches_alone(Quality::NoCompromises, Quality::NoCompromises, 0.2, true);
+    pair_matches_alone(Quality::Potato, Quality::NoCompromises, 0.2, true);
 }

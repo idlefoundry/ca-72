@@ -7103,6 +7103,15 @@ first."
   in order as before.
 - **Not paired:** LO (the light voices), ULTRA (its elementary functions are the system's,
   called a voice at a time), and a lone voice without DOUBLE.
+- **The loop's evaluation paired too: tried, measured, taken out** (the owner asked for it,
+  2026-10-17). Two filters of one circuit evaluated a lane each (`eval_sparse` at Potato: the
+  arithmetic in lanes in the scalar's order, the tables and `fast::tanh` the scalar's a lane at a
+  time) gave every factory preset the same to the bit, but cost more than the elimination paired
+  alone: ten HI voices, one thread, 1479 against 1541 % of a core (+4.1 %; a first version, its
+  Jacobian gathered and then scattered, +6 %). The elimination is one chain of dependent steps
+  that two voices fill; the evaluation is mostly independent operations that one voice already
+  overlaps, so packing two costs more than it saves. Pairing `fast::tanh` and the tables
+  themselves (gathers, per-lane branches) was not tried.
 
 **Evidence (the Mac, 2026-10-17, binaries built from `cpu-release` with `preset_render`'s
 DOUBLE switch and from this change):**
