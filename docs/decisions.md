@@ -7218,6 +7218,9 @@ not done, the look being kept to the bit.
 - **The drops' columns' dx squared once for all their rows,** the same sums in the same order:
   200 frames at two scales hashed whole, the same before and after; 0.71 to 0.66 ms a frame for
   ten voices' drops at 3440 pixels.
+- **Thirty frames a second stay** (the owner, 2026-10-17, shown a trial at twenty: 11.45 to
+  10.1 % of a core, 834 to 662 frames presented in the measure's 24 s): "I don't approve
+  dropping the FPS".
 - **`CA72_NO_FRAMES`** keeps `the_window_played` to its times: its frames are 2 GB in memory and
   on disk, and on a nearly full disk the run failed before printing them.
 
