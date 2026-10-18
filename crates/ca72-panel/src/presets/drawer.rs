@@ -157,11 +157,11 @@ const UPDATE_LINE: usize = STATUS_LINES - 1;
 /// the pointer; the list's; what is said aside; what is barely there.
 const BRIGHT: f32 = 1.0;
 const POINTED: f32 = 1.0;
-const NORMAL: f32 = 0.815;
-const DIM: f32 = 0.66;
-const FAINT: f32 = 0.55;
+const NORMAL: f32 = 0.8;
+const DIM: f32 = 0.6;
+const FAINT: f32 = 0.5;
 /// Keep the preceding appearance within hovered, focused or chosen controls, including
-/// their quieter placeholders and action labels. Only unselected items move halfway back.
+/// their quieter placeholders and action labels. Only unselected items get darker.
 const ACTIVE_NORMAL: f32 = 0.85;
 const ACTIVE_DIM: f32 = 0.7;
 const ACTIVE_FAINT: f32 = 0.6;
@@ -2371,7 +2371,7 @@ mod tests {
         assert_eq!(hovered.lv, POINTED);
         assert!(hovered.text.starts_with('>'));
         assert_eq!(ordinary.ink.colour(), (255, 140, 58));
-        assert_eq!(ordinary.lv, 0.815);
+        assert_eq!(ordinary.lv, 0.8);
         assert!(ordinary.text.starts_with(' '));
         assert!(hovered.lv > ordinary.lv);
         // Hovering its star must not repaint part of the current row in orange.
@@ -2398,7 +2398,7 @@ mod tests {
                 field_items(&mut items, s, id, "EMPTY");
                 items[0].lv
             };
-            assert_eq!(placeholder(&s), 0.55);
+            assert_eq!(placeholder(&s), 0.5);
             s.focus = Some(id);
             assert_eq!(placeholder(&s), 0.6);
             s.focus = None;
@@ -2422,7 +2422,7 @@ mod tests {
                 s.focus = Some(id);
                 assert_eq!(level(&s), 0.7);
                 s.focus = None;
-                assert_eq!(level(&s), 0.66);
+                assert_eq!(level(&s), 0.6);
             }
         }
         let mut s = scene();
@@ -2436,7 +2436,7 @@ mod tests {
         };
         assert_eq!(tab(&s), 0.85);
         s.hover = None;
-        assert_eq!(tab(&s), 0.55);
+        assert_eq!(tab(&s), 0.5);
         s.midi = Some(MidiList {
             chosen: 0,
             rows: (0..3)
@@ -2467,8 +2467,8 @@ mod tests {
                 assert_eq!(row[2].lv, action_level);
             }
             let inactive: Vec<_> = items.iter().filter(|it| it.row == list_row(2)).collect();
-            assert_eq!(inactive[0].lv, 0.815);
-            assert_eq!(inactive[1].lv, 0.66);
+            assert_eq!(inactive[0].lv, 0.8);
+            assert_eq!(inactive[1].lv, 0.6);
         }
     }
 
