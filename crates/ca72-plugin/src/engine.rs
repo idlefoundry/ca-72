@@ -3178,11 +3178,11 @@ mod tests {
         }
     }
 
-    /// The workers [`Engine::start_workers`] starts for `asked` on this machine, a lone
-    /// instance: as many as asked, within its cap and the process's budget (decisions.md
-    /// R-THREADS: one on CI's three-core Mac).
+    /// The workers [`Engine::start_workers`] starts for `asked` without a period on this
+    /// machine: as many as asked, within an instance's cap (decisions.md R-THREADS: one on CI's
+    /// three-core Mac, two on its Windows and Linux machines) and the pool's most.
     fn started(asked: usize) -> usize {
-        asked.min(instance_cap()).min(budget_workers(1))
+        asked.min(instance_cap()).min(MAX - 1)
     }
 
     fn four_voices(workers: usize) -> Engine {
