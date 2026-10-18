@@ -7059,15 +7059,12 @@ runs each: Feedback Funk 395 to 380 % of a core (-3.9 %); the other eighteen pre
 preamplifier, within ±1 % (no change beyond noise: the bias's temperature part is a small share of
 it, the tail current's iterations the rest).
 
-**Correction, later the same day:** ULTRA's renders are not repeatable over time on this machine
-in 0.2.5 itself: `main`'s own binary, serial (no workers), matched its ULTRA references at 19:16
-and again minutes apart later, then differed from them in every preset (the same way in two runs
-in a row) an hour on; HI and LO matched every time. The ULTRA comparison above (minutes apart) is
-therefore weaker evidence than HI's. The two changes keep ULTRA's sound by construction: the lamp
-driver is its own circuit, read by nothing in the audio, and the bias's temperature part is the
-same arithmetic on the same inputs. Why 0.2.5's ULTRA is not repeatable is not yet known (to find
-before ULTRA is offered as the render engine; a candidate is something it takes from another
-thread at a time that follows the machine's load).
+**Correction, later the same day, withdrawn on 2026-10-18:** a note here said ULTRA's renders
+were not repeatable over time in 0.2.5. They are. The runs that differed were the comparing
+script's fault: `env $e` in zsh, with `e="CA72_ULTRA=1 CA72_VOICES=4"`, set one variable (zsh does
+not split an unquoted parameter), so those renders played ten voices against references of four.
+The ULTRA comparisons above set both variables themselves and stand. (Found by the session that
+looked into it; its branch makes `preset_render` refuse references of another length.)
 
 ## R-HI-PAIRS. Two HI voices' filters solved side by side
 
