@@ -6852,19 +6852,24 @@ FEEDBACK). That was the coordinating session's measurement on the Linux machine 
 `preset_cost` at HI and with `CA72_ULTRA`; it was not repeated here. So the note's "SEVEN
 TIMES" was out of date, and the note did not say that a voice may now be split.
 
+**Updated, 2026-10-18 (the owner: "Sure, change that line"):** "FIVE" became "SIX". R-HI-PAIRS
+made HI lighter after the measurement above, so ULTRA's cost against HI's rose: on the Mac (M4
+Pro), `preset_cost` over the 19 factory presets, ten POLY voices, two interleaved rounds, gave
+ULTRA a median of 6.3 times HI (3.9 to 9.8 across the presets) on `cpu-release` at `2c0a584`.
+
 **Built** (`editor.rs`, `ultra_note_lines`): the note follows what the engine decides for this
 computer, `engine::split_voices() > 0`. Each version's accent line, `ULTRA · NO COMPROMISES`, and
 its last two dim lines (`RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.`, `CLICK
 TO CLOSE`) are as before.
 - **Where it splits a voice:**
-  - THE CIRCUIT'S MODEL EXACTLY, AT ABOUT FIVE TIMES THE WORK OF HI.
+  - THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SIX TIMES THE WORK OF HI.
   - ON THIS COMPUTER ONE VOICE IS SPREAD OVER SIX THREADS AND
   - CAN BE PLAYED LIVE. WITH MULTIPLE VOICES OR TOO SMALL OF A BUFFER,
   - IT MAY DROP OUT.
   - IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL
   - PROJECTS ON POWERFUL COMPUTERS.
 - **Where it does not:**
-  - THE CIRCUIT'S MODEL EXACTLY, AT ABOUT FIVE TIMES THE WORK OF HI.
+  - THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SIX TIMES THE WORK OF HI.
   - ONE VOICE TAKES UP TO A WHOLE CORE OF A FAST COMPUTER.
   - IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL
   - PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.

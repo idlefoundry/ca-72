@@ -83,6 +83,14 @@ public:
     // A short release makes note-off/CC123 checks about MIDI delivery, rather
     // than the default patch's several-second analogue envelope tail.
     json[@"params"][@"loudness_decay"][@"f32"] = @0.0;
+    // Each new instance seeds its parts' mismatch at random (ENTROPY's drift and the
+    // oscillators' floor, decisions.md R9), which moved the first note's pitch from run
+    // to run, now and then past the tolerance: LOCK on and ENTROPY at 0, the circuit as
+    // drawn, so the pitch checks are about MIDI delivery alone.
+    require(json[@"params"][@"lock"] && json[@"params"][@"entropy"][@"f32"],
+            "state has no LOCK or ENTROPY");
+    json[@"params"][@"lock"] = [@{@"bool" : @YES} mutableCopy];
+    json[@"params"][@"entropy"][@"f32"] = @0.0;
     NSData *encoded = [NSJSONSerialization dataWithJSONObject:json options:0 error:&error];
     require(encoded && !error, "cannot encode test state");
     uint64_t length = CFSwapInt64HostToLittle(encoded.length);
