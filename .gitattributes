@@ -1,0 +1,12 @@
+# The skin packs' text files (the official looks the plug-in builds in, the starter, the
+# compatibility tests' packs): the same bytes on every system. A pack's files are compared and
+# signed by their bytes, and the tests edit them as text; Windows' checkout had given them CRLF.
+crates/ca72-panel/packs/**/*.toml text eol=lf
+crates/ca72-panel/tests/compat/**/*.toml text eol=lf
+crates/ca72-panel/tests/compat/**/*.svg text eol=lf
+crates/ca72-panel/tests/compat/**/*.md text eol=lf
+crates/ca72-panel/tests/compat/**/*.txt text eol=lf
+docs/skin-packs/**/*.toml text eol=lf
+docs/skin-packs/**/*.svg text eol=lf
+docs/skin-packs/**/*.md text eol=lf
+docs/skin-packs/**/*.txt text eol=lf
