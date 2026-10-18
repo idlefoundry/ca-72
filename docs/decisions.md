@@ -7135,8 +7135,9 @@ DOUBLE switch and from this change):**
 
 **Owner authorisation, 2026-10-17.** "Merge hi-pairs into cpu-release, run the full checks, push
 and open a release PR against main": R-THREADS (the worker budget, without the band-limiting,
-latency and ULTRA VCA work, held by the owner the same day), R-CPU-EXACT and R-HI-PAIRS. The
-request authorises the pull request; merging, signing, tagging, upload and publication wait for
+latency and ULTRA VCA work, held by the owner the same day), R-CPU-EXACT and R-HI-PAIRS; and, the
+owner asked on 2026-10-18 ("I want editor-perf to be included in this release. So test this in
+any way that you need to."), R-EDITOR-CPU. The request authorises the pull request; merging, signing, tagging, upload and publication wait for
 the owner's go.
 
 LO's and HI's samples are the same to the bit as 0.2.5's (`preset_render`, every factory
