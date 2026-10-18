@@ -1281,55 +1281,75 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
             flush = want;
         }
         let two = b.pair.load(Ordering::Relaxed);
+        let lock = |slot: usize| match b.voices[slot].lock() {
+            Ok(p) => (p, false),
+            Err(e) => (e.into_inner(), true),
+        };
+        let failed = u64::from(run) | FAILED;
         while let Some(((_, slot), other)) = take_some(b, run, two) {
-            let lock = |slot: usize| match b.voices[slot].lock() {
-                Ok(p) => (p, false),
-                Err(e) => (e.into_inner(), true),
-            };
-            let (mut p, poisoned) = lock(slot);
-            let mut q = other.map(|(_, s)| (s, lock(s)));
-            // Held up between taking the voice and locking it, past the run's end: the
-            // voice is left as it is, neither played nor marked (decisions.md R18).
-            if !current(b, run) {
-                break;
-            }
-            let failed = u64::from(run) | FAILED;
-            let (mark, mark_q) = match &mut q {
-                // Two voices taken: their filters solved together where both can be.
-                Some((_, (q, false))) if !poisoned => {
-                    V::play_pair(&mut p, q, n, &ext, rate, &mix);
-                    (u64::from(run), u64::from(run))
+            let Some((_, other)) = other else {
+                let (mut p, poisoned) = lock(slot);
+                // Held up between taking the voice and locking it, past the run's end: the
+                // voice is left as it is, neither played nor marked (decisions.md R18).
+                if !current(b, run) {
+                    break;
                 }
-                Some((_, (q, q_poisoned))) => {
-                    let mark = if poisoned {
-                        failed
-                    } else {
-                        p.play(n, &ext, rate, &mix);
-                        u64::from(run)
-                    };
-                    let mark_q = if *q_poisoned {
-                        failed
-                    } else {
-                        q.play(n, &ext, rate, &mix);
-                        u64::from(run)
-                    };
-                    (mark, mark_q)
-                }
-                None if poisoned => (failed, 0),
-                None => {
+                let mark = if poisoned {
+                    failed
+                } else {
                     p.play(n, &ext, rate, &mix);
-                    (u64::from(run), 0)
-                }
+                    u64::from(run)
+                };
+                // The voice let go before it is marked: once marked, the caller's thread may
+                // close the run and take the voice in the next, and a lock still held here would
+                // fail its `try_lock` there, the voice silent for that run (seen in CI as samples
+                // that differed from one thread's).
+                drop(p);
+                b.done[slot].store(mark, Ordering::Release);
+                continue;
             };
-            // The voices let go before they are marked: once marked, the caller's thread may
-            // close the run and take a voice in the next, and a lock still held here would fail
-            // its `try_lock` there, the voice silent for that run (seen in CI as samples that
-            // differed from one thread's).
-            drop(p);
-            let q = q.map(|(s, _)| s);
-            b.done[slot].store(mark, Ordering::Release);
-            if let Some(s) = q {
-                b.done[s].store(mark_q, Ordering::Release);
+            // Two voices taken: their filters solved together where both are free now
+            // (decisions.md R-HI-PAIRS); else each alone, a free one first, so that a voice
+            // another thread still holds keeps its partner waiting no longer than alone.
+            let free = |slot: usize| match b.voices[slot].try_lock() {
+                Ok(p) => Some((p, false)),
+                Err(std::sync::TryLockError::Poisoned(e)) => Some((e.into_inner(), true)),
+                Err(std::sync::TryLockError::WouldBlock) => None,
+            };
+            match (free(slot), free(other)) {
+                (Some((mut p, false)), Some((mut q, false))) => {
+                    if !current(b, run) {
+                        break;
+                    }
+                    V::play_pair(&mut p, &mut q, n, &ext, rate, &mix);
+                    drop(p);
+                    drop(q);
+                    b.done[slot].store(u64::from(run), Ordering::Release);
+                    b.done[other].store(u64::from(run), Ordering::Release);
+                }
+                (gp, gq) => {
+                    let mut each = [(slot, gp), (other, gq)];
+                    each.sort_by_key(|(_, g)| g.is_none());
+                    let mut over = false;
+                    for (s, g) in each {
+                        let (mut p, poisoned) = g.unwrap_or_else(|| lock(s));
+                        if !current(b, run) {
+                            over = true;
+                            break;
+                        }
+                        let mark = if poisoned {
+                            failed
+                        } else {
+                            p.play(n, &ext, rate, &mix);
+                            u64::from(run)
+                        };
+                        drop(p);
+                        b.done[s].store(mark, Ordering::Release);
+                    }
+                    if over {
+                        break;
+                    }
+                }
             }
         }
     }
