@@ -954,6 +954,7 @@ mod pair {
 
         /// Each lane `a`'s where `m` says, else `b`'s.
         #[inline(always)]
+        #[cfg_attr(target_arch = "x86_64", allow(dead_code))]
         pub(super) fn sel(m: [bool; 2], a: L, b: L) -> L {
             L([
                 if m[0] { a.0[0] } else { b.0[0] },
@@ -999,6 +1000,7 @@ mod pair {
     /// [`super::solve`] at 5 with reciprocals, a lane a voice, each lane's pivot searched
     /// and swapped by itself.
     #[inline(always)]
+    #[cfg_attr(target_arch = "x86_64", allow(dead_code))]
     pub(super) fn solve5_lanes(mut m: [[L; 5]; 5], mut r: [L; 5]) -> [L; 5] {
         let mut inv = [L::s(0.0); 5];
         for col in 0..5 {
@@ -1044,39 +1046,42 @@ mod pair {
         x
     }
 
-    /// [`solve5_lanes`] in SSE2's registers (x86-64's baseline): each lane's pivot found by
-    /// comparing the lanes at once and the rows swapped under a mask, a step's rows updated
-    /// unmasked where both lanes take it; the same operations in each lane, in the same
-    /// order, and so the same results to the bit. Two things the lanes' form leaves to the
-    /// compiler cost x86 dearly (decisions.md R-HI-PAIRS): a lane read or written alone
-    /// (a value stored a half at a time and loaded whole waits for the store to land), and a
-    /// select of each lane by a branch.
+    /// [`solve5_lanes`] in SSE2's registers (x86-64's baseline, no more assumed): each
+    /// lane's pivot found by comparing both lanes at once and the rows swapped under a mask,
+    /// a step's rows updated unmasked where both lanes take it, a column at a time; the same
+    /// operations in each lane in the same order, so the same results to the bit. On x86-64
+    /// the lanes' form is compiled to scalar code: its per-lane pivots and selects become a
+    /// branch and a scalar multiply and subtract per lane and entry, the matrix kept in
+    /// memory and indexed by a loop over the columns (decisions.md R-HI-PAIRS).
     #[cfg(target_arch = "x86_64")]
-    #[allow(unsafe_code)]
+    #[allow(unsafe_code, clippy::needless_range_loop)]
     pub(super) mod sse2 {
         use super::L;
         use std::arch::x86_64::*;
 
         #[inline(always)]
         fn v(x: L) -> __m128d {
-            // SAFETY (here and below): SSE2 is part of the x86-64 baseline.
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
             unsafe { _mm_set_pd(x.0[1], x.0[0]) }
         }
 
         #[inline(always)]
         fn l(x: __m128d) -> L {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
             unsafe { L([_mm_cvtsd_f64(x), _mm_cvtsd_f64(_mm_unpackhi_pd(x, x))]) }
         }
 
         /// Each lane `a`'s where `m` is set, else `b`'s.
         #[inline(always)]
         fn sel(m: __m128d, a: __m128d, b: __m128d) -> __m128d {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
             unsafe { _mm_or_pd(_mm_and_pd(m, a), _mm_andnot_pd(m, b)) }
         }
 
         /// `x` and `y` swapped in the lanes `m` sets.
         #[inline(always)]
         fn swap(x: &mut __m128d, y: &mut __m128d, m: __m128d) {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
             unsafe {
                 let t = _mm_and_pd(_mm_xor_pd(*x, *y), m);
                 *x = _mm_xor_pd(*x, t);
@@ -1094,6 +1099,7 @@ mod pair {
             r: &mut [__m128d; 5],
             inv: &mut [__m128d; 5],
         ) {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
             unsafe {
                 let sign = _mm_set1_pd(-0.0);
                 // Each lane's pivot row (the first of the largest, as the scalar's `>`
@@ -1160,6 +1166,7 @@ mod pair {
             inv: &[__m128d; 5],
             x: &mut [__m128d; 5],
         ) {
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
             unsafe {
                 let mut s = r[I];
                 for k in I + 1..5 {
@@ -1177,7 +1184,7 @@ mod pair {
         pub(in super::super) fn solve5(m: [[L; 5]; 5], r: [L; 5]) -> [L; 5] {
             let mut m = m.map(|row| row.map(v));
             let mut r = r.map(v);
-            // SAFETY: as above.
+            // SAFETY: SSE2 is in the x86-64 baseline; no memory is touched.
             let zero = unsafe { _mm_setzero_pd() };
             let mut inv = [zero; 5];
             column::<0>(&mut m, &mut r, &mut inv);
@@ -2027,7 +2034,11 @@ mod pair_tests {
             for two in [lanes(j, [hh; 2], r), shipped(j, [hh; 2], r)] {
                 for lane in 0..2 {
                     let one = scalar(j[lane], hh, r[lane]);
-                    assert!(one.iter().zip(&two[lane]).all(|(a, b)| a.to_bits() == b.to_bits()));
+                    assert!(
+                        one.iter()
+                            .zip(&two[lane])
+                            .all(|(a, b)| a.to_bits() == b.to_bits())
+                    );
                 }
             }
         }
@@ -2048,9 +2059,8 @@ mod pair_tests {
             println!("{name}: {:.1} ns a voice", best / calls * 1e9);
             best
         };
-        let pick = |k: usize| {
-            std::hint::black_box(([&jacs[k], &jacs[k + 1]], [&rs[k], &rs[k + 1]]))
-        };
+        let pick =
+            |k: usize| std::hint::black_box(([&jacs[k], &jacs[k + 1]], [&rs[k], &rs[k + 1]]));
         let s = time("scalar, one voice after the other", &|k| {
             let (j, r) = pick(k);
             scalar(j[0], hh, r[0])[0] + scalar(j[1], hh, r[1])[0]
