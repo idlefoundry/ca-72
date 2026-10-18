@@ -6064,3 +6064,40 @@ after. With the new rule: 0 pixels apart, and 0 changed 4 s after, in 3 runs wit
 diagnostic and 5 without. Then `cargo test --workspace --features
 ca72-plugin/standalone-production` as CI runs it; and the editor's tests and clippy on the Mac
 (see the PR).
+
+## R-INIT. Start a patch from the instrument's fresh-instance sound
+
+**Owner decision, 2026-10-18.** Implement issue 55 as a clearly visible INIT action in the
+presets' menu. Recall the existing fresh-instance sound, not zeroed knobs, and preserve player
+and computer preferences. The owner will try a separate test build before production release.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- INIT is a dedicated key beside PRESET, available without choosing a preset first. It uses
+  `Ca72Params`' parameter defaults directly, through normal host parameter gestures; it does
+  not create or replace a library entry, including a user's preset named Init. The current
+  preset is cleared, as on a fresh instance, and SAVE AS can keep the new patch.
+- The starting patch on main `5e7abe9` is oscillator 1 alone, sawtooth at 8', its mixer at 8;
+  oscillators 2 and 3 off, also sawtooth at 8', FREQUENCY centred, mixer levels 8; noise off,
+  white, level 8; external input off, level 5. TUNE and GLIDE are 0, modulation mix and wheel
+  0, oscillator modulation off, oscillator 3 keyboard control on. Filter mode LO, modulation
+  off, first keyboard-control switch on and second off; CUTOFF centred, EMPHASIS 0, CONTOUR
+  AMOUNT 5. The filter's ATTACK/DECAY/SUSTAIN are 0/4/5; loudness 0/4/8. MAIN OUTPUT is on at
+  10; A-440 off; GLIDE switch off; DECAY switch on; NOTE PRIORITY LOW; RETRIGGER off.
+  POLY and UNISON are off, VOICES 4, ENTROPY/WIDTH/INNER/DETUNE/FEEDBACK/DRIVE/LEVEL 0,
+  placement EVEN, DOUBLE and LOCK off, AUTO GAIN on.
+- The existing sound-preset exclusions stay: PITCH wheel, bypass, QUALITY and MIDI BEND RANGE.
+  MIDI assignments, the instance's random seed, editor dimensions and visibility, look,
+  lettering, frequency-dial law, keyboard and audio-device preferences are not reset.
+  The engine's running oscillators and envelopes are not restarted; audio equivalence is
+  checked with equivalent seed, phase and initial engine state, as for a new instance.
+- No factory preset, parameter ID, preset format or saved-project migration changes.
+
+**Evidence (the Mac, Rust 1.97.1, 2026-10-18):**
+`init_restores_every_sound_default_and_preserves_preferences` changes every hosted parameter,
+including one only 0.0000002 from its normalised default, then checks all sound defaults and
+the exclusions; a second INIT adds no gestures and no file is written.
+`init_saved_and_reloaded_matches_a_fresh_instances_state_and_audio` starts from Brass Choir,
+uses the drawer action, saves and reloads the result, checks a user's preset named Init is
+untouched, and compares three notes' stereo renders at LO, HI and ULTRA with seed 12345:
+15,360 stereo samples at each quality match to the bit and are finite and non-silent.
+Both tests and plug-in library/test clippy pass. No host or audio device was opened for them.
