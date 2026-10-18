@@ -7123,6 +7123,12 @@ DOUBLE switch and from this change):**
 - `preset_cost`, ten voices, one thread, the mean of two runs each, alternated: at HI 1785 to
   1509 % of a core in all (-15.5 %; -11 to -22 % a preset, the hats the most); with DOUBLE at 50 %,
   3491 to 2895 (-17.1 %; -13 to -24 %).
+- **On x86 (2026-10-18, the same `preset_cost`, built on each machine from 5870fdd and from
+  the release head, alternated, the mean of two runs):** Linux, Ryzen 7 7800X3D (under the timing
+  lock): HI 2286 to 2175 (-4.9 %), with DOUBLE 4652 to 4403 (-5.4 %); Windows, i5-13600K: HI
+  2457 to 2312 (-5.9 %), with DOUBLE 4908 to 4672 (-4.8 %), the presets spread more widely
+  there. A third of the Mac's saving: why (the x86-64 baseline's code for the two lanes, or
+  those cores already overlapping one voice's elimination) is not yet known.
 - The core's, real-time library's and plug-in's tests; clippy with `-D warnings`.
 
 ## R-RELEASE-0.2.6. 0.2.6
