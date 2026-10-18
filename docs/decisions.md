@@ -6064,3 +6064,33 @@ after. With the new rule: 0 pixels apart, and 0 changed 4 s after, in 3 runs wit
 diagnostic and 5 without. Then `cargo test --workspace --features
 ca72-plugin/standalone-production` as CI runs it; and the editor's tests and clippy on the Mac
 (see the PR).
+
+## R-PRESET-READABILITY. The preset drawer's labels and selected sound are easier to read
+
+**Owner decision, 2026-10-18.** Improve the preset browser's text contrast and small action
+labels (#69). After reviewing matched renders at native size and an enlarged list crop,
+the owner approved the final visibility treatment and requested a separate pull request.
+
+**Implementation:** action names sit on larger caps in clear print, with their existing
+centres and separate hit regions. Quieter glass and unlit dots leave more contrast for
+amber lettering. The current preset alone uses gold and a filled triangle; hover uses
+brighter amber and an outline arrow. Selected tags and tabs have distinct markers, while
+unavailable actions are shaded. Unselected text remains darker than selected, hovered or
+focused controls, including the quieter labels and placeholders within those controls.
+Moving and clearing selection restores the old row, including its colour and marker.
+
+**Evidence (the Mac, Rust 1.97.1, 2026-10-18):** 52 panel library tests and 2 approved-image
+tests pass, as do 7 affected editor drawer tests. Eight panel image tests and one optional
+editor image test are ignored in those suites. The separate 32-image matrix renders both
+looks and lettering settings at widths 860, 1035, 1380 and 3108; browsing, editing, empty
+and MIDI states were checked at small widths. The selected/hovered/ordinary and active
+placeholder/MIDI tests retain separate assertions; redraw tests compare partial updates
+with fresh whole frames. The preset list, FIND, PRESET and existing action-cap regions
+match the approved review render to the pixel after excluding the separate Init action.
+Formatting, whitespace and workspace/all-target clippy pass with default and all features.
+Fresh independent source review found no issues.
+
+This change concerns the panel renderer and its regression coverage. Init and the Settings
+version display remain separate. Native Logic/GarageBand rendering validation is still
+under investigation separately; offscreen checks do not establish release acceptance in
+those hosts. No installed plug-in, host window or audio device was used for this work.
