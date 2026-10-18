@@ -7384,6 +7384,8 @@ not done, the look being kept to the bit.
   is left as it was. A window covered by others is drawn as before on Windows. Unseen, the keys, gestures
   and the host are attended to every frame as before and the scene drawn every 250 ms (a resize,
   the drawer, MIDI Learn kept up), nothing shown; seen again, the frame is shown whole at once.
+  Audio Units are excepted by R-AU-REMOTE-VISIBILITY below: their native window need not be
+  the surface the host presents.
 - **The drops' columns' dx squared once for all their rows,** the same sums in the same order:
   200 frames at two scales hashed whole, the same before and after; 0.71 to 0.66 ms a frame for
   ten voices' drops at 3440 pixels.
@@ -7424,6 +7426,133 @@ processor time on Windows):**
   blocks alike.
 - So the saving is the Mac's: parking a thread costs little on Linux and Windows, and the spin
   with it. On none of the three is the 50 us spin later.
+
+## R-RENDER-SETTINGS. ULTRA is repeatable; a comparison's settings are checked
+
+**Agent finding, 2026-10-18** (placeholder id; not yet reviewed by the owner). R-CPU-EXACT's
+correction (branch `cpu-release`, 5870fdd) says ULTRA's renders are not repeatable over time on
+the Mac in 0.2.5 itself. They are. The comparisons that differed rendered ten voices against
+references of four.
+- **ULTRA is repeatable.** The binary that made the ULTRA references at 19:12 on 2026-10-17
+  (main with `CA72_ULTRA`, saved at 19:10) rendered every factory preset the same to the bit
+  against them at 10:17 on 2026-10-18 (`CA72_ULTRA=1 CA72_VOICES=4`, workers 0). A new build of
+  main did the same in four runs at load averages from 4.5 to 22, and once on the efficiency cores
+  alone (`taskpolicy -c background`). So did `cpu-release` at 5870fdd, whose ULTRA plays two
+  voices split over helper threads on the M4 Pro (R-THREADS), and the saved `rel-preset_render`
+  (19:56). Nothing in ULTRA's serial engine depends on time or another thread: there is no clock,
+  no pool or deadline without workers, the factory voice and shared tables are made once per
+  process from the rate alone, and `ulp::FastScope` is off at ULTRA on the one thread.
+- **What differed.** Both failing comparisons (19:47 and 20:23) ran
+  `env $e CA72_RENDER_REF=… preset_render` with `e="CA72_ULTRA=1 CA72_VOICES=4"` under zsh, which
+  does not split an unquoted parameter. `env` got one assignment, `CA72_ULTRA="1 CA72_VOICES=4"`:
+  ULTRA on (any value counted), `CA72_VOICES` unset, so 10 voices. HI's `e` was empty and LO's
+  a single assignment, so they matched. The first differing sample is the first one (frame 0,
+  left): -2.85e-6 in the reference against -7.12e-6, the idle voices' hiss, 10/4 = 2.5 times as
+  much. Felt Bass's line (2.2 dB) was reproduced exactly both by that command and by
+  `CA72_VOICES=10`. The 19:47 run's "three presets" were its `tail -3`; every preset differed.
+- **Change (tests only).** `preset_render` writes the run's settings (QUALITY, voices, seconds,
+  presets, 0.1's translation) to `settings.txt` beside `CA72_RENDER_OUT`'s renders, and stops if a
+  reference's are not the run's. A presets file is named there by a digest of its contents, not
+  its path. The file lists the renders the run wrote. It is removed when a run begins and written
+  once every render is, so an output left half made, or holding an earlier run's renders, lists
+  none of them; a render compared must be on the reference's list. A reference without the file
+  is compared with a note. A switch
+  (`CA72_ULTRA`, `CA72_POTATO`, `CA72_FROM_0_1`) takes `1` or nothing; any other value stops the run,
+  and so does setting both qualities. The shared `env` stops on a value that does not parse
+  (it fell back to the default). The engine is unchanged: HI, LO and ULTRA render every preset the
+  same to the bit as main's.
+- **Also learned.** Cargo names a test's binary by its metadata, not its code: main's and
+  `cpu-release`'s `preset_render` are both `preset_render-d3ac7cd2e0e0b1e9`, so a binary run later
+  by its target path can be another version's. Copy a binary aside to compare against it later.
+- **Merged into `cpu-release` for 0.2.6 (2026-10-18):** R-CPU-EXACT's correction is withdrawn
+  there; its ULTRA comparison minutes apart is as good evidence as HI's. `CA72_DOUBLE` (R-HI-PAIRS)
+  reads through the same checked `env`, and `settings.txt` names DOUBLE where it is not 0.
+
+## R-PRESET-READABILITY. The preset drawer's labels and selected sound are easier to read
+
+**Owner decision, 2026-10-18.** Improve the preset browser's text contrast and small action
+labels (#69). After reviewing matched renders at native size and an enlarged list crop,
+the owner approved the final visibility treatment and requested a separate pull request.
+
+**Implementation:** action names sit on larger caps in clear print, with their existing
+centres and separate hit regions. Quieter glass and unlit dots leave more contrast for
+amber lettering. The current preset alone uses gold and a filled triangle; hover uses
+brighter amber and an outline arrow. Selected tags and tabs have distinct markers, while
+unavailable actions are shaded. Unselected text remains darker than selected, hovered or
+focused controls, including the quieter labels and placeholders within those controls.
+Moving and clearing selection restores the old row, including its colour and marker.
+
+**Evidence (the Mac, Rust 1.97.1, 2026-10-18):** 52 panel library tests and 2 approved-image
+tests pass, as do 7 affected editor drawer tests. Eight panel image tests and one optional
+editor image test are ignored in those suites. The separate 32-image matrix renders both
+looks and lettering settings at widths 860, 1035, 1380 and 3108; browsing, editing, empty
+and MIDI states were checked at small widths. The selected/hovered/ordinary and active
+placeholder/MIDI tests retain separate assertions; redraw tests compare partial updates
+with fresh whole frames. The preset list, FIND, PRESET and existing action-cap regions
+match the approved review render to the pixel after excluding the separate Init action.
+Formatting, whitespace and workspace/all-target clippy pass with default and all features.
+Fresh independent source review found no issues.
+
+This change concerns the panel renderer and its regression coverage. Init and the Settings
+version display remain separate. Native Logic/GarageBand rendering validation is still
+under investigation separately; offscreen checks do not establish release acceptance in
+those hosts. No installed plug-in, host window or audio device was used for this work.
+
+## R-AU-REMOTE-VISIBILITY. A remote AU view keeps presenting
+
+**Decision, 2026-10-18.** Keep R-EDITOR-CPU's native-window occlusion optimization for
+ordinary CLAP, VST3 and both standalone adapters. Except AUv2: a remote view may be visible
+while its local NSWindow's Visible occlusion bit is clear. The original gate suppresses
+all presentations in that case, including the first image on reopening. The local window's
+visibility is not authoritative for the host's remotely presented surface.
+
+**Implementation.** The AUv2 wrapper advertises the private, versioned host capability
+`com.idlefoundry.native-window-occlusion-unreliable/1`. `IHost` defaults to no marker;
+only `WrapAsAUV2` opts out, per instance. The CLAP backend queries presence once during
+initialization and caches it in that instance's GUI context. `PluginApi` remains `Clap`.
+The editor bypasses macOS's native occlusion gate only for that capability. Missing markers,
+unknown versions, VST3 and standalone retain the original policy. Rust neither dereferences
+nor retains the static marker pointer, and the frame timer makes no host extension calls.
+The AU wrapper and embedded CLAP must be rebuilt together. No hidden-window CPU saving is
+claimed for AU; changed-frame suppression and the other performance work remain.
+
+**Evidence (GarageBand 10.4.14, macOS 27.0, Apple silicon, 2026-10-18).** A distinct
+diagnostic build based on `2c0a584` ran in a fresh AUHostingService, separately from the
+production instrument, with transport stopped. Its visibly rendered proxy had a backing
+`NSKVONotifying_NSServiceViewControllerWindow` with raw occlusion state 8192, Visible bit
+clear and `isVisible=true`. The logged rectangle alone did not prove that it was wholly
+off-screen; the unreliable visibility signal is the relevant observation.
+
+- The diagnostic's original-policy switch, on reopen: a blank visible editor, 929 frame
+  callbacks, 55 draws and zero presentation calls across a contiguous 13.996-second sample.
+- With the capability policy: the full panel returned on the next frame, about 14 ms after
+  the test switch. Two more editor reopenings each made an initial presentation call.
+- Editor close: no callbacks, draws or presentation calls in a verified 3.173-second interval.
+- Native host preset loading exercised a visible redraw. The exact resulting parameter
+  value and direct knob-drag interaction were not independently asserted.
+- The host's Hide command was issued; the retained view continued drawing an unchanged
+  scene. Actual disappearance from screen and restore still need hands-on confirmation.
+
+These are diagnostic call counts, not compositor acknowledgements or production FPS/CPU
+measurements. The full/blank panel outcomes were also observed in native screenshots.
+Diagnostic logging, mode switches, identities and test-data paths are not in product code.
+The experiment predates the later worker-spin change; integration preserves that work.
+
+**Regression coverage.** The C++ proxy test checks local/default dispatch, the remote marker,
+unknown versions, instance isolation and the standard GUI extension. The Rust tests exercise
+actual CLAP construction, initialization and GUI context propagation, including no early
+query and one query per instance. CI runs the vendored crate's tests explicitly because
+workspace tests do not execute dependency unit tests. A separate extracted production-frame
+harness passed the remote/hidden/restore cases with the correction and failed the original
+remote case; that mock is control-flow evidence, not native-host validation.
+
+**Remaining acceptance.** Direct TUNE drag and independently observed GarageBand Hide/restore;
+Logic (not installed during the experiment); ordinary direct CLAP/VST3 and standalone
+visible/hidden/reopen smoke tests; normal release validators and production CPU measurements.
+Do not treat approval to include the correction as evidence that these checks passed.
+
+**Owner's acceptance, 2026-10-18.** Told these checks remained, the owner did them by hand:
+"i did hands on checks. we're good".
 
 ## R-BLEP. The oscillators band-limited by a 32-tap windowed sinc, corners and all
 

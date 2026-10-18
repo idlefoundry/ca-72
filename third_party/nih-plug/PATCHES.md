@@ -158,8 +158,19 @@ One more from the CA-72's own testing in Cubase 15 on Windows 11 (2026-10-10; it
     from superseded requests or closed windows. `tests/vst3_host.rs` exercises synchronous
     answers and a refusal delivered through the actual Linux run-loop socket.
 
+15. **A remote wrapper can opt out of native-window occlusion.** The additive
+    `GuiContext::native_window_occlusion_reliable()` defaults to true. CLAP queries the
+    private presence-only host capability
+    `com.idlefoundry.native-window-occlusion-unreliable/1` once during initialization,
+    caches the answer per instance, and exposes it through the GUI context. The AUv2
+    wrapper advertises this capability because a remotely presented editor's local
+    NSWindow need not describe its visible proxy. `PluginApi` remains `Clap`; ordinary
+    CLAP hosts, VST3 and both standalone adapters retain the default. The filtered
+    `visibility_tests` unit tests exercise the actual CLAP initialization and context;
+    CI runs them explicitly because this vendored crate is outside the workspace.
+
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
-and `nih_plug_derive` here and apply the fourteen changes again, unless upstream has fixed them.
+and `nih_plug_derive` here and apply the fifteen changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.
 
 The standalone app adds a separate `standalone-production` feature. Its adapter
