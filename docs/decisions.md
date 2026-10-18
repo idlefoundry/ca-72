@@ -7124,3 +7124,19 @@ DOUBLE switch and from this change):**
   1509 % of a core in all (-15.5 %; -11 to -22 % a preset, the hats the most); with DOUBLE at 50 %,
   3491 to 2895 (-17.1 %; -13 to -24 %).
 - The core's, real-time library's and plug-in's tests; clippy with `-D warnings`.
+
+## R-RELEASE-0.2.6. 0.2.6
+
+**Owner authorisation, 2026-10-17.** "Merge hi-pairs into cpu-release, run the full checks, push
+and open a release PR against main": R-THREADS (the worker budget, without the band-limiting,
+latency and ULTRA VCA work, held by the owner the same day), R-CPU-EXACT and R-HI-PAIRS. The
+request authorises the pull request; merging, signing, tagging, upload and publication wait for
+the owner's go.
+
+LO's and HI's samples are the same to the bit as 0.2.5's (`preset_render`, every factory
+preset); ULTRA's sound is unchanged (the OVERLOAD lamp's driver is not read by the audio; the
+split voice gives the serial voice's samples); parameter identifiers, the preset format and the
+installers are unchanged. Release notes are in `releases/0.2.6.md`. Before publication the
+release commit must pass all three CI jobs; the macOS installer must be Developer ID signed,
+notarised, stapled and accepted by Gatekeeper; every uploaded asset downloaded again and checked
+against the manifest.
