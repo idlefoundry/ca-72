@@ -25,7 +25,7 @@ use super::{
     MidiRow, STAR, Tone, UP, UpdateScene,
 };
 use crate::art::{self, W};
-use crate::fonts::{FAMILY, Fonts};
+use crate::fonts::{FAMILY, Fonts, Weight};
 use crate::svg::{N, Svg, colour, put};
 
 /// A display: its window (left, top, width, height) and its dots' pitch.
@@ -114,14 +114,12 @@ const DISPLAYS: [Display; 4] = [SEARCH, TAGS, LIST, STATUS];
 
 /// The sections' titles, printed over their displays: their middles' height and size.
 const LABEL_Y: f64 = 31.0;
-const LABEL: f64 = 18.0;
-/// The keys: their size, the middles of their columns and rows, their legends' size and
-/// height above their middles.
-const KEY: (f64, f64) = (136.0, 51.0);
+const LABEL: f64 = 26.0;
+/// The keys: their size, the middles of their columns and rows, their legends' size.
+const KEY: (f64, f64) = (164.0, 61.0);
 const KEY_X: [f64; 4] = [2422.0, 2603.0, 2784.0, 2965.0];
 const KEY_Y: [f64; 2] = [99.0, 197.0];
-const KEY_LEGEND: f64 = 15.5;
-const LEGEND_RISE: f64 = 36.0;
+const KEY_LEGEND: f64 = 28.0;
 
 /// A line of characters is nine dots tall (two of them a descender's); lines this many apart.
 const LINE: usize = 9;
@@ -158,15 +156,15 @@ const UPDATE_LINE: usize = STATUS_LINES - 1;
 /// How bright a line is: the current preset's, a tab's or tag's chosen, a field's; one under
 /// the pointer; the list's; what is said aside; what is barely there.
 const BRIGHT: f32 = 1.0;
-const POINTED: f32 = 0.82;
-const NORMAL: f32 = 0.62;
-const DIM: f32 = 0.42;
-const FAINT: f32 = 0.3;
-/// The dots' colours (the rail's name's: the mock-up's orange, their glow a deeper red), and
-/// how faintly every dot shows unlit.
-const DOT_ON: (u8, u8, u8) = (255, 112, 40);
+const POINTED: f32 = 1.0;
+const NORMAL: f32 = 0.9;
+const DIM: f32 = 0.78;
+const FAINT: f32 = 0.68;
+/// Warm amber strokes against quiet glass, with a little red glow; unlit dots stay below
+/// the lettering's contrast even at the minimum window width.
+const DOT_ON: (u8, u8, u8) = (255, 197, 110);
 const DOT_GLOW: (u8, u8, u8) = (255, 72, 10);
-const UNLIT: f32 = 0.055;
+const UNLIT: f32 = 0.025;
 
 /// The PRESET section's keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -219,6 +217,14 @@ impl PresetKey {
         }
         let i = PresetKey::ALL.iter().position(|k| *k == self).unwrap_or(0);
         (KEY_X[i % 4], KEY_Y[i / 4])
+    }
+
+    fn size(self) -> (f64, f64) {
+        if self == PresetKey::Init {
+            (136.0, 45.0)
+        } else {
+            KEY
+        }
     }
 }
 
@@ -464,6 +470,14 @@ fn tags_items(s: &DrawerScene) -> Vec<Item> {
             TAG_COL[i % 2],
             tag_row(line - s.tags_first),
         ));
+        if *on {
+            out.push(item(
+                ">",
+                BRIGHT,
+                TAG_COL[i % 2] - 3,
+                tag_row(line - s.tags_first),
+            ));
+        }
     }
     let lines = s.chips.len().div_ceil(2);
     let sign = TAG_COL[0] + 6 * (n - 1);
@@ -495,6 +509,14 @@ fn list_items(s: &DrawerScene) -> Vec<Item> {
             FAINT
         };
         out.push(item(w, lv, COL + 6 * tab_span(t).0, TAB_ROW));
+        if t == tab {
+            out.push(item(
+                &CARET.to_string().repeat(w.len()),
+                BRIGHT,
+                COL + 6 * tab_span(t).0,
+                TAB_ROW,
+            ));
+        }
     }
     if s.rows.is_empty() {
         out.push(item(
@@ -766,6 +788,7 @@ fn status_items(s: &DrawerScene) -> Vec<Item> {
 struct KeysShown {
     pointed: Option<PresetKey>,
     held: Vec<PresetKey>,
+    unavailable: Vec<PresetKey>,
 }
 
 fn keys_shown(s: &DrawerScene) -> KeysShown {
@@ -787,6 +810,17 @@ fn keys_shown(s: &DrawerScene) -> KeysShown {
             _ => None,
         },
         held,
+        unavailable: PresetKey::ALL
+            .into_iter()
+            .filter(|k| match k {
+                PresetKey::Rename | PresetKey::Tags | PresetKey::Delete => s.current.is_none(),
+                PresetKey::Revert => s
+                    .current
+                    .as_ref()
+                    .is_none_or(|c| c.origin != Some("EDITED")),
+                _ => false,
+            })
+            .collect(),
     }
 }
 
@@ -812,7 +846,8 @@ pub fn drawer_hit(s: &DrawerScene, x: f64, y: f64) -> Option<DrawerTarget> {
     }
     for k in PresetKey::ALL {
         let (kx, ky) = k.centre();
-        if (x - kx).abs() <= KEY.0 / 2.0 + 4.0 && (y - ky).abs() <= KEY.1 / 2.0 + 4.0 {
+        let (w, h) = k.size();
+        if (x - kx).abs() <= w / 2.0 + 4.0 && (y - ky).abs() <= h / 2.0 + 4.0 {
             return Some(DrawerTarget::Key(k));
         }
     }
@@ -1168,17 +1203,18 @@ fn plate_svg() -> String {
     }
     for k in PresetKey::ALL {
         let (x, y) = k.centre();
+        let (w, h) = k.size();
         soft_shadow(
             &mut s,
-            (x - KEY.0 / 2.0 + 3.0, y - KEY.1 / 2.0 + 5.0, KEY.0, KEY.1),
+            (x - w / 2.0 + 3.0, y - h / 2.0 + 5.0, w, h),
             9.0,
             3.0,
             0.6,
             (
-                x - KEY.0 / 2.0 + 8.0,
-                y - KEY.1 / 2.0 + 8.0,
-                KEY.0 - 16.0,
-                KEY.1 - 16.0,
+                x - w / 2.0 + 8.0,
+                y - h / 2.0 + 8.0,
+                w - 16.0,
+                h - 16.0,
                 4.0,
             ),
         );
@@ -1347,7 +1383,7 @@ fn glass(frame: &mut Pixmap, p: &Pixmap, scale: f64, d: &Display) {
             .map(|&(a, b, t)| {
                 let (a, b) = (row[a], row[b]);
                 let mix = |u: u8, v: u8| {
-                    ((f32::from(u) + (f32::from(v) - f32::from(u)) * t) * 256.0) as u32
+                    ((f32::from(u) + (f32::from(v) - f32::from(u)) * t) * 0.6 * 256.0) as u32
                 };
                 [
                     mix(a.red(), b.red()),
@@ -1488,7 +1524,7 @@ fn grid(frame: &mut Pixmap, scale: f64, d: &Display, alpha: f32, (r, g, b): (u8,
     }
 }
 
-/// The print: the sections' titles over their displays, the keys' legends over them.
+/// The print: the sections' titles over their displays.
 fn print_svg() -> String {
     let mut s = Svg::default();
     let text = |s: &mut Svg, x: f64, y: f64, t: &str, size: f64, anchor: &str| {
@@ -1504,14 +1540,33 @@ fn print_svg() -> String {
     for (d, t) in [(SEARCH, "FIND"), (LIST, "PRESETS"), (STATUS, "PRESET")] {
         text(&mut s, d.x, LABEL_Y, t, LABEL, "start");
     }
+    s.0
+}
+
+/// Action names on their caps, in clear print rather than tiny worn captions above them.
+/// Keep the longest one, MIDI LEARN, inside the cap with the same margin as the others.
+fn key_print_svg(fonts: &Fonts) -> String {
+    let mut s = Svg::default();
     for k in PresetKey::ALL {
-        if k == PresetKey::Init {
-            continue;
-        }
         let (x, y) = k.centre();
-        text(&mut s, x, y - LEGEND_RISE, k.legend(), KEY_LEGEND, "middle");
+        let size = key_legend_size(fonts, k);
+        let baseline = fonts.baseline_for_centre(k.legend(), size, Weight::Bold, y);
+        put!(
+            s,
+            "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' fill='{}'>{}</text>",
+            N(x),
+            N(baseline),
+            N(size),
+            colour::LEGEND,
+            k.legend()
+        );
     }
     s.0
+}
+
+fn key_legend_size(fonts: &Fonts, k: PresetKey) -> f64 {
+    let advance = fonts.advance(k.legend(), KEY_LEGEND, Weight::Bold, 0.0);
+    KEY_LEGEND * ((k.size().0 - 16.0) / advance).min(1.0)
 }
 
 impl DrawerRenderer {
@@ -1604,27 +1659,41 @@ impl DrawerRenderer {
             let mut o = Svg::default();
             for k in &keys.held {
                 let (x, y) = k.centre();
+                let (w, h) = k.size();
                 put!(
                     o,
                     "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#000' fill-opacity='0.34'/><rect x='{}' y='{}' width='{}' height='5' rx='2.5' fill='#000' fill-opacity='0.3'/>",
-                    N(x - KEY.0 / 2.0 + 2.0),
-                    N(y - KEY.1 / 2.0 + 2.0),
-                    N(KEY.0 - 4.0),
-                    N(KEY.1 - 4.0),
-                    N(x - KEY.0 / 2.0 + 6.0),
-                    N(y - KEY.1 / 2.0 + 3.0),
-                    N(KEY.0 - 12.0)
+                    N(x - w / 2.0 + 2.0),
+                    N(y - h / 2.0 + 2.0),
+                    N(w - 4.0),
+                    N(h - 4.0),
+                    N(x - w / 2.0 + 6.0),
+                    N(y - h / 2.0 + 3.0),
+                    N(w - 12.0)
+                );
+            }
+            for k in &keys.unavailable {
+                let (x, y) = k.centre();
+                let (w, h) = k.size();
+                put!(
+                    o,
+                    "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#000' fill-opacity='0.32'/>",
+                    N(x - w / 2.0),
+                    N(y - h / 2.0),
+                    N(w),
+                    N(h)
                 );
             }
             if let Some(k) = keys.pointed {
                 let (x, y) = k.centre();
+                let (w, h) = k.size();
                 put!(
                     o,
                     "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#fff' fill-opacity='0.07'/>",
-                    N(x - KEY.0 / 2.0 + 2.0),
-                    N(y - KEY.1 / 2.0 + 2.0),
-                    N(KEY.0 - 4.0),
-                    N(KEY.1 - 4.0)
+                    N(x - w / 2.0 + 2.0),
+                    N(y - h / 2.0 + 2.0),
+                    N(w - 4.0),
+                    N(h - 4.0)
                 );
             }
             if !o.0.is_empty() {
@@ -1714,24 +1783,22 @@ fn make_still(scale: f64, pictures: &Pictures) -> Pixmap {
         grid(&mut still, s, &d, UNLIT, DOT_ON);
     }
     let cap = widened(&pictures.button, KEY.0 / KEY.1);
+    let init_size = PresetKey::Init.size();
+    let init_cap = widened(&pictures.button, init_size.0 / init_size.1);
     for k in PresetKey::ALL {
-        sprite(&mut still, &cap, s, k.centre(), KEY);
+        let picture = if k == PresetKey::Init {
+            &init_cap
+        } else {
+            &cap
+        };
+        sprite(&mut still, picture, s, k.centre(), k.size());
     }
-    let (x, y) = PresetKey::Init.centre();
-    svg_over(
-        &options,
-        &mut still,
-        s,
-        &format!(
-            "<text x='{x}' y='{y}' font-family='{FAMILY}' font-size='27' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}'>INIT</text>",
-            colour::LEGEND
-        ),
-    );
+    svg_over(&options, &mut still, s, &key_print_svg(&fonts));
     still
 }
 
-/// The print's band across the drawer's top: the titles and the keys' legends are in it.
-const PRINT_H: f64 = 190.0;
+/// Only the titles are worn into the face; the action names are clear on the key caps.
+const PRINT_H: f64 = 50.0;
 
 /// Each dot of a display lit by `items`, as bright as the brightest over it (none: 0).
 fn lit_dots(d: &Display, items: &[Item]) -> Vec<f32> {
@@ -1807,7 +1874,9 @@ fn redraw(
     if x0 >= x1 || y0 >= y1 {
         return;
     }
-    let r = (d.pitch * 0.36 * scale) as f32;
+    // Nearly joined at the minimum width: a lit stroke keeps its coverage when each dot is
+    // about a pixel across, instead of becoming a faint scatter of separate pinpoints.
+    let r = (d.pitch * 0.45 * scale) as f32;
     let margin = (2.1 * r).ceil() as i64 + 2;
     let (top, foot) = ((y0 - margin).max(0), (y1 + margin).min(fh));
     let (bw, bh) = ((x1 - x0) as usize, (foot - top) as usize);
@@ -1845,7 +1914,7 @@ fn redraw(
             &mut cover,
             &glows,
             DOT_GLOW,
-            0.16 * f32::from(q) / 20.0,
+            0.08 * f32::from(q) / 20.0,
         );
     }
     for (&q, ds) in &by {
@@ -1975,7 +2044,69 @@ mod tests {
                 drawer_hit(&s, x, y),
                 Some(DrawerTarget::Key(PresetKey::Init))
             );
-            assert!(y + KEY.1 / 2.0 < KEY_Y[0] - LEGEND_RISE);
+            assert!(y + PresetKey::Init.size().1 / 2.0 < KEY_Y[0] - KEY.1 / 2.0);
+        }
+    }
+
+    /// The enlarged captions stay inside their buttons; their hit regions stay separate at
+    /// the minimum supported width too. Init keeps the existing actions in their places.
+    #[test]
+    fn readable_key_captions_fit_separate_buttons() {
+        let fonts = Fonts::new();
+        for (i, k) in PresetKey::ALL.into_iter().enumerate() {
+            let (x, y) = k.centre();
+            let (w, h) = k.size();
+            let size = key_legend_size(&fonts, k);
+            assert!(size >= 25.0, "{k:?}: {size}");
+            assert!(fonts.advance(k.legend(), size, Weight::Bold, 0.0) <= w - 15.9);
+            assert!(x - w / 2.0 > 0.0 && x + w / 2.0 < W);
+            assert!(y - h / 2.0 > 0.0 && y + h / 2.0 < STATUS.y);
+            for other in &PresetKey::ALL[i + 1..] {
+                let (ox, oy) = other.centre();
+                let (ow, oh) = other.size();
+                assert!(
+                    (x - ox).abs() > (w + ow) / 2.0 + 8.0 || (y - oy).abs() > (h + oh) / 2.0 + 8.0,
+                    "{k:?} overlaps {other:?}"
+                );
+            }
+        }
+    }
+
+    /// Every field, action and selection transition is the same when drawn in parts as in a
+    /// new frame, including the minimum width and the largest supported width.
+    #[test]
+    fn readable_states_redraw_as_a_whole_frame() {
+        for scale in [860.0 / W, 1380.0 / W, 1.0] {
+            let base = scene();
+            let states = [
+                base.clone(),
+                DrawerScene {
+                    focus: Some(FieldId::Search),
+                    search: Field::new("bass"),
+                    favourites: true,
+                    hover: Some(DrawerTarget::Key(PresetKey::Init)),
+                    ..base.clone()
+                },
+                DrawerScene {
+                    editing: Some(Edit::Save),
+                    save_name: Field::new("New sound"),
+                    focus: Some(FieldId::SaveName),
+                    ..base.clone()
+                },
+                DrawerScene::default(),
+                base,
+            ];
+            let mut parts = DrawerRenderer::new(scale);
+            for state in states {
+                parts.render(&state);
+                let mut whole = DrawerRenderer::new(scale);
+                whole.render(&state);
+                assert_eq!(
+                    parts.frame().data(),
+                    whole.frame().data(),
+                    "changed parts differ at scale {scale}"
+                );
+            }
         }
     }
 
