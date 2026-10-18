@@ -52,8 +52,149 @@ static HAMSTER_ASLEEP: &[u8] = include_bytes!("../assets/worn/hamster-asleep.png
 pub const STRIDE: usize = 8;
 static PLATE: &[u8] = include_bytes!("../assets/worn/plate.png");
 
-/// The face's picture is kept grey; its colour, a black a touch warm, is this over it.
-const FACE_TINT: [f32; 3] = [1.03, 1.0, 0.94];
+/// The worn skin's pictures a skin pack may replace (decisions.md R-SKIN-PACKS), by the name a
+/// pack gives each in its `[look.pictures]`: each the built-in file's name without `.png`.
+pub const SLOTS: [(&str, &[u8]); 27] = [
+    ("walnut", WALNUT),
+    ("face", FACE),
+    ("knob", KNOB),
+    ("knob-big", KNOB_BIG),
+    ("pointer", POINTER),
+    ("rocker-blue", ROCKER_BLUE),
+    ("rocker-orange", ROCKER_ORANGE),
+    ("power", POWER),
+    ("jewel", JEWEL),
+    ("jack", JACK),
+    ("screw", SCREW),
+    ("toggle-up", TOGGLE_UP),
+    ("toggle-mid", TOGGLE_MID),
+    ("toggle-down", TOGGLE_DOWN),
+    ("ultra-lens-off", ULTRA_LENS_OFF),
+    ("ultra-lens-on", ULTRA_LENS_ON),
+    ("ultra-bezel-off", ULTRA_BEZEL_OFF),
+    ("ultra-bezel-on", ULTRA_BEZEL_ON),
+    ("ultra-floor", ULTRA_FLOOR),
+    ("tesla-lens-off", TESLA_LENS_OFF),
+    ("tesla-lens-on", TESLA_LENS_ON),
+    ("tesla-bezel-off", TESLA_BEZEL_OFF),
+    ("tesla-bezel-on", TESLA_BEZEL_ON),
+    ("hamster-wheel", HAMSTER_WHEEL),
+    ("hamster-run", HAMSTER_RUN),
+    ("hamster-asleep", HAMSTER_ASLEEP),
+    ("plate", PLATE),
+];
+
+/// The strip's pictures a skin pack may replace (decisions.md R-SKIN-PACKS), drawn by the
+/// strip's renderer: a tab's cap (the built-in one is made translucent amber and lit from it)
+/// and, if the pack gives one, the tab lit (otherwise lit from the cap as the built-in one is);
+/// the rail's keys' cap; the readouts' and displays' glass; and the ivory rocker (the left
+/// hand's switches, the layout's ivory ones), else made from the blue; and each rocker on, if a
+/// pack draws its rockers' two states (a lamp lit) rather than one picture mirrored.
+pub const STRIP_SLOTS: [(&str, &[u8]); 10] = [
+    ("tab", BUTTON),
+    ("tab-lit", BUTTON),
+    ("key", BUTTON),
+    ("glass", GLASS),
+    ("rocker-ivory", ROCKER_BLUE),
+    ("rocker-blue-on", ROCKER_BLUE),
+    ("rocker-orange-on", ROCKER_ORANGE),
+    ("rocker-ivory-on", ROCKER_BLUE),
+    ("white-key", crate::keyboard::WHITE_KEY),
+    ("black-key", crate::keyboard::BLACK_KEY),
+];
+
+/// A strip slot's picture's size, where it is not its built-in file's: the keys' (their
+/// pictures are cut from larger ones).
+pub fn slot_size(name: &str) -> Option<(u32, u32)> {
+    match name {
+        "white-key" => Some((171, 1385)),
+        "black-key" => Some((181, 1232)),
+        _ => STRIP_SLOTS
+            .iter()
+            .chain(SLOTS.iter())
+            .find(|(n, _)| *n == name)
+            .map(|(_, b)| png_size(b)),
+    }
+}
+
+/// The slot of a rocker's picture on, by the part of its picture off.
+pub fn on_slot(part: Part) -> Option<&'static str> {
+    match part {
+        Part::RockerBlue => Some("rocker-blue-on"),
+        Part::RockerOrange => Some("rocker-orange-on"),
+        Part::RockerIvory => Some("rocker-ivory-on"),
+        _ => None,
+    }
+}
+
+/// Every picture built into the plug-in, by name: the worn skin's, the strip's and the
+/// keyboard's. A pack under another licence holding a copy of one is put to review
+/// (`skin_pack::Context::official`).
+pub fn official_pictures() -> Vec<(&'static str, &'static [u8])> {
+    let mut all: Vec<(&'static str, &'static [u8])> = SLOTS.to_vec();
+    all.extend([
+        ("button", BUTTON),
+        ("display-glass", GLASS),
+        ("white-key", crate::keyboard::WHITE_KEY),
+        ("black-key", crate::keyboard::BLACK_KEY),
+    ]);
+    all
+}
+
+/// A pack's picture for a slot, as the pack holds it: a PNG's bytes, or a drawing. It is decoded
+/// (or drawn) only as a renderer first needs it, so that a look in a list holds no pixels.
+#[derive(Clone)]
+pub enum Source {
+    Png(std::sync::Arc<Vec<u8>>),
+    Svg(std::sync::Arc<resvg::usvg::Tree>),
+}
+
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Source::Png(b) => write!(f, "Png({} bytes)", b.len()),
+            Source::Svg(_) => f.write_str("Svg"),
+        }
+    }
+}
+
+impl Source {
+    /// Its pixels (premultiplied): a PNG decoded as it is, a drawing drawn `size` pixels.
+    pub fn picture(&self, size: (u32, u32)) -> Option<Pixmap> {
+        match self {
+            Source::Png(bytes) => Pixmap::decode_png(bytes).ok(),
+            Source::Svg(tree) => draw_at(tree, size),
+        }
+    }
+}
+
+/// A drawing drawn `w` by `h` pixels, stretched to them.
+pub fn draw_at(tree: &resvg::usvg::Tree, (w, h): (u32, u32)) -> Option<Pixmap> {
+    let mut p = Pixmap::new(w, h)?;
+    let s = tree.size();
+    resvg::render(
+        tree,
+        Transform::from_scale(w as f32 / s.width(), h as f32 / s.height()),
+        &mut p.as_mut(),
+    );
+    Some(p)
+}
+
+/// A PNG's size, from its header.
+pub fn png_size(png: &[u8]) -> (u32, u32) {
+    let be = |i: usize| {
+        png.get(i..i + 4)
+            .map_or(0, |b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    (be(16), be(20))
+}
+
+/// A pack's pictures, by slot: each drawn instead of the built-in one.
+pub type Overrides = std::collections::BTreeMap<&'static str, Source>;
+
+/// The face's picture is kept grey; its colour, a black a touch warm, is this over it (the
+/// official REALISTIC pack's `face_tint`).
+pub const FACE_TINT: [f32; 3] = [1.03, 1.0, 0.94];
 
 /// A part's picture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -67,6 +208,11 @@ pub enum Part {
     RockerBlue,
     RockerOrange,
     RockerIvory,
+    /// A rocker on, as a skin pack draws it (its plain picture then shown off, neither
+    /// mirrored): a switch with a lamp lit, say.
+    RockerBlueOn,
+    RockerOrangeOn,
+    RockerIvoryOn,
     /// The POWER rocker, its upper half raised.
     Power,
     /// The POWER lamp's red jewel in its chrome bezel, and OVERLOAD's darker one.
@@ -131,6 +277,8 @@ pub struct Pictures {
     rocker_blue: Pixmap,
     rocker_orange: Pixmap,
     rocker_ivory: Pixmap,
+    /// A pack's rockers on (blue, orange, ivory), if it draws them.
+    rockers_on: [Option<Pixmap>; 3],
     power: Pixmap,
     jewel: Pixmap,
     jewel_dark: Pixmap,
@@ -163,11 +311,16 @@ const KEPT: usize = 72;
 /// The face's picture, its grey coloured: a black a touch warm.
 pub(crate) fn face_picture() -> Pixmap {
     let face = Pixmap::decode_png(FACE).expect("a built-in picture decodes");
-    recoloured(&face, |c| {
+    tinted(&face, FACE_TINT)
+}
+
+/// A picture with each channel scaled by `tint`.
+pub(crate) fn tinted(p: &Pixmap, tint: [f32; 3]) -> Pixmap {
+    recoloured(p, |c| {
         [
-            f32::from(c[0]) * FACE_TINT[0],
-            f32::from(c[1]) * FACE_TINT[1],
-            f32::from(c[2]) * FACE_TINT[2],
+            f32::from(c[0]) * tint[0],
+            f32::from(c[1]) * tint[1],
+            f32::from(c[2]) * tint[2],
         ]
     })
 }
@@ -176,17 +329,49 @@ impl Pictures {
     /// The pictures decoded (once, as the worn skin is first shown); the face's grey coloured,
     /// the ivory rockers made from the blue ones and OVERLOAD's jewel from POWER's.
     pub fn load() -> Pictures {
-        let png = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
-        let face = face_picture();
-        let rocker_blue = png(ROCKER_BLUE);
+        Self::load_with(&Overrides::new(), None, false)
+    }
+
+    /// The same, a pack's pictures instead of the built-in ones where it has them (a pack's
+    /// face coloured by its `face_tint` if it gives one; the parts made from others made from
+    /// the pack's; its knobs' caps left in their pictures, to turn with them, if `caps_turn`).
+    pub fn load_with(
+        overrides: &Overrides,
+        face_tint: Option<[f32; 3]>,
+        caps_turn: bool,
+    ) -> Pictures {
+        let decode = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
+        let slot = |name: &str| {
+            SLOTS
+                .iter()
+                .chain(STRIP_SLOTS.iter())
+                .find(|(n, _)| *n == name)
+                .map(|(_, b)| *b)
+                .expect("a slot")
+        };
+        // A pack's picture (decoded now, or drawn at the built-in one's size), else the built-in.
+        let pack = |name: &str| {
+            overrides
+                .get(name)
+                .and_then(|src| src.picture(png_size(slot(name))))
+        };
+        let png = |name: &str| pack(name).unwrap_or_else(|| decode(slot(name)));
+        let face = match (pack("face"), face_tint) {
+            (Some(p), Some(t)) => tinted(&p, t),
+            (Some(p), None) => p,
+            (None, _) => face_picture(),
+        };
+        let rocker_blue = png("rocker-blue");
         // The ivory of the controller's switches: the blue's shading, the drawing's ivory.
-        let rocker_ivory = recoloured(&rocker_blue, |c| {
-            let l =
-                (0.3 * f32::from(c[0]) + 0.59 * f32::from(c[1]) + 0.11 * f32::from(c[2])) / 255.0;
-            let k = (l / 0.42).min(1.22);
-            [224.0 * k, 215.0 * k, 190.0 * k]
+        let rocker_ivory = pack("rocker-ivory").unwrap_or_else(|| {
+            recoloured(&rocker_blue, |c| {
+                let l = (0.3 * f32::from(c[0]) + 0.59 * f32::from(c[1]) + 0.11 * f32::from(c[2]))
+                    / 255.0;
+                let k = (l / 0.42).min(1.22);
+                [224.0 * k, 215.0 * k, 190.0 * k]
+            })
         });
-        let jewel = png(JEWEL);
+        let jewel = png("jewel");
         // OVERLOAD's lens: dark, a glass with the bulb behind it; the chrome as it is.
         let jewel_dark = recoloured(&jewel, |c| {
             let (r, g) = (f32::from(c[0]), f32::from(c[1]));
@@ -196,45 +381,52 @@ impl Pictures {
                 [r, g, f32::from(c[2])]
             }
         });
-        let (knob, knob_big, pointer) = (png(KNOB), png(KNOB_BIG), png(POINTER));
-        let caps = [
-            capped(&knob, KNOB_CAP),
-            capped(&knob_big, BIG_CAP),
-            capped(&pointer, POINTER_CAP),
-        ];
+        let (knob, knob_big, pointer) = (png("knob"), png("knob-big"), png("pointer"));
+        let caps = if caps_turn {
+            // Nothing drawn still over the turned knob: its cap is in its picture.
+            [&knob, &knob_big, &pointer]
+                .map(|p| Pixmap::new(p.width(), p.height()).expect("a picture's size"))
+        } else {
+            [
+                capped(&knob, KNOB_CAP),
+                capped(&knob_big, BIG_CAP),
+                capped(&pointer, POINTER_CAP),
+            ]
+        };
         Pictures {
-            walnut: png(WALNUT),
+            walnut: png("walnut"),
             face,
             knob,
             knob_big,
             pointer,
             rocker_blue,
-            rocker_orange: png(ROCKER_ORANGE),
+            rocker_orange: png("rocker-orange"),
             rocker_ivory,
-            power: png(POWER),
+            rockers_on: ["rocker-blue-on", "rocker-orange-on", "rocker-ivory-on"].map(pack),
+            power: png("power"),
             jewel,
             jewel_dark,
-            jack: png(JACK),
-            screw: png(SCREW),
+            jack: png("jack"),
+            screw: png("screw"),
             caps,
-            toggle: [png(TOGGLE_UP), png(TOGGLE_MID), png(TOGGLE_DOWN)],
+            toggle: [png("toggle-up"), png("toggle-mid"), png("toggle-down")],
             ultra: [
-                png(ULTRA_LENS_OFF),
-                png(ULTRA_LENS_ON),
-                png(ULTRA_BEZEL_OFF),
-                png(ULTRA_BEZEL_ON),
-                png(ULTRA_FLOOR),
+                png("ultra-lens-off"),
+                png("ultra-lens-on"),
+                png("ultra-bezel-off"),
+                png("ultra-bezel-on"),
+                png("ultra-floor"),
             ],
             tesla: [
-                png(TESLA_LENS_OFF),
-                png(TESLA_LENS_ON),
-                png(TESLA_BEZEL_OFF),
-                png(TESLA_BEZEL_ON),
+                png("tesla-lens-off"),
+                png("tesla-lens-on"),
+                png("tesla-bezel-off"),
+                png("tesla-bezel-on"),
             ],
-            hamster: frames(&png(HAMSTER_RUN)),
-            wheel: png(HAMSTER_WHEEL),
-            asleep: png(HAMSTER_ASLEEP),
-            plate: png(PLATE),
+            hamster: frames(&png("hamster-run")),
+            wheel: png("hamster-wheel"),
+            asleep: png("hamster-asleep"),
+            plate: png("plate"),
             scaled: Vec::new(),
         }
     }
@@ -247,6 +439,9 @@ impl Pictures {
             Part::RockerBlue => &self.rocker_blue,
             Part::RockerOrange => &self.rocker_orange,
             Part::RockerIvory => &self.rocker_ivory,
+            Part::RockerBlueOn => self.rockers_on[0].as_ref().unwrap_or(&self.rocker_blue),
+            Part::RockerOrangeOn => self.rockers_on[1].as_ref().unwrap_or(&self.rocker_orange),
+            Part::RockerIvoryOn => self.rockers_on[2].as_ref().unwrap_or(&self.rocker_ivory),
             Part::Power => &self.power,
             Part::Jewel => &self.jewel,
             Part::JewelDark => &self.jewel_dark,

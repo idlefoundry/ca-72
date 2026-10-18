@@ -1,0 +1,246 @@
+# The CA-72's REALISTIC look as a skin pack, built into the plug-in (decisions.md R-SKIN-PACKS):
+# the format every pack uses (docs/skin-packs.md). `cargo run -p ca72-panel --example
+# export_pack -- realistic <folder>` writes it out as a folder.
+
+format = 1
+id = "com.idlefoundry.ca72.realistic"
+name = "REALISTIC"
+version = "1.0.0"
+plugin = "ca-72"
+summary = "The panel in pictures of the original's materials, gently used."
+license = "GPL-3.0-or-later"
+license_files = ["LICENSE.txt"]
+
+[[creators]]
+name = "Idle Foundry Ltd."
+role = "layout, pictures and drawing"
+
+[[assets]]
+path = "layout.toml"
+origin = "original"
+author = "Idle Foundry Ltd."
+note = "Measured from a photograph of the instrument, Wikimedia Commons' Minimoog panel.jpg (Alex Harden, cropped by Clusternote, CC BY 2.0), only looked at: the photograph is not included."
+
+[[assets]]
+path = "pictures/walnut.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/face.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/knob.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/knob-big.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/pointer.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/rocker-blue.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/rocker-orange.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/power.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/jewel.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/jack.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/screw.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/toggle-up.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/toggle-mid.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/toggle-down.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/ultra-lens-off.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/ultra-lens-on.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/ultra-bezel-off.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/ultra-bezel-on.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/ultra-floor.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/tesla-lens-off.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/tesla-lens-on.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/tesla-bezel-off.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/tesla-bezel-on.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/hamster-wheel.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/hamster-run.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/hamster-asleep.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[[assets]]
+path = "pictures/plate.png"
+origin = "generated"
+author = "Idle Foundry Ltd."
+tool = "OpenAI's image model through the Codex CLI 0.160.1, then cut out and adjusted with ImageMagick 7"
+note = "Its prompt and every step after it: assets/worn/README.md in the CA-72's repository."
+
+[look]
+base = "realistic"
+layout = "layout.toml"
+# The face's picture is grey; its colour, a black a touch warm.
+face_tint = [1.03, 1.0, 0.94]
+
+[look.pictures]
+walnut = "pictures/walnut.png"
+face = "pictures/face.png"
+knob = "pictures/knob.png"
+knob-big = "pictures/knob-big.png"
+pointer = "pictures/pointer.png"
+rocker-blue = "pictures/rocker-blue.png"
+rocker-orange = "pictures/rocker-orange.png"
+power = "pictures/power.png"
+jewel = "pictures/jewel.png"
+jack = "pictures/jack.png"
+screw = "pictures/screw.png"
+toggle-up = "pictures/toggle-up.png"
+toggle-mid = "pictures/toggle-mid.png"
+toggle-down = "pictures/toggle-down.png"
+ultra-lens-off = "pictures/ultra-lens-off.png"
+ultra-lens-on = "pictures/ultra-lens-on.png"
+ultra-bezel-off = "pictures/ultra-bezel-off.png"
+ultra-bezel-on = "pictures/ultra-bezel-on.png"
+ultra-floor = "pictures/ultra-floor.png"
+tesla-lens-off = "pictures/tesla-lens-off.png"
+tesla-lens-on = "pictures/tesla-lens-on.png"
+tesla-bezel-off = "pictures/tesla-bezel-off.png"
+tesla-bezel-on = "pictures/tesla-bezel-on.png"
+hamster-wheel = "pictures/hamster-wheel.png"
+hamster-run = "pictures/hamster-run.png"
+hamster-asleep = "pictures/hamster-asleep.png"
+plate = "pictures/plate.png"
