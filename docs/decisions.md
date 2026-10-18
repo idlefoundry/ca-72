@@ -8390,3 +8390,29 @@ ULTRA and mixed pairs the same to the bit as alone), and a new one,
 `a_pair_switched_between_ultra_and_hi_plays_each_voice_alone` (both voices from ULTRA to HI, one
 back to ULTRA and again to HI, then both to ULTRA, under held notes), passes; with the
 hand-over taken out of the paired path it fails.
+
+## R-PREPARE-STACK. The voices built on a thread with a main thread's stack
+
+**Found on 2026-10-18** by CI on PR #87 (this work on 0.2.6): on macOS, pluginval stopped with
+"Illegal instruction" in the Audio Unit's audio processing test, at its first 48 kHz block after
+the 44.1 kHz ones. Reproduced on the Mac with the same pluginval (1.0.4) and run under lldb: a
+stack overflow (`EXC_BAD_ACCESS` at the stack's guard) in `Engine::prepare` → `made_voice` →
+`Voice::prototype` → `Voice::new` → the keyboard circuit's first solve, on pluginval's own
+thread. A macOS secondary thread has 512 KB of stack. CLAP and VST3 passed because pluginval
+prepares those on the main thread (8 MB).
+- **Why now:** a voice is 44 KB with this work (35 KB in 0.2.6: the oscillators' kernels, the
+  4x VCA, the contours' delay lines), and building voices in place keeps several on the stack.
+  In the crashing build, `Voice::prototype` took 220 KB, `Engine::prepare` 143 KB,
+  `Voice::new` 106 KB and `made_voice` 44 KB. A voice is first made for a rate (the keyboard's
+  calibration) only once per rate, which is why 44.1 kHz passed and 48 kHz did not.
+
+**Fixed:** `Engine::prepare` does its work (`prepare_here`) on a thread of its own, named
+`ca72-prepare`, with an 8 MB stack (`PREPARE_STACK`), joined before it returns. A panic there
+is the caller's, as before; if no thread can be had, the work runs in place, as before. Hosts
+prepare a plug-in apart from the audio thread, and the plug-in already starts its helper
+threads here.
+
+**Evidence (the Mac, 2026-10-18):** `prepare_fits_a_hosts_secondary_thread` prepares an engine
+at a rate no voice has been made at, from a thread with 512 KB of stack: it passes, and without
+the fix it overflows. pluginval 1.0.4, strictness 10, in process, on the rebuilt Audio Unit:
+see below.

@@ -271,6 +271,10 @@ const QUIET: usize = 256;
 /// R68, the development line's R30).
 const SLEEP_WINDOW: f64 = 0.05;
 
+/// The stack [`Engine::prepare`] builds the voices on, bytes: a main thread's on macOS
+/// (decisions.md R-PREPARE-STACK; it needed more than 512 KB in October 2026).
+const PREPARE_STACK: usize = 8 << 20;
+
 /// How little the slow state may move over [`SLEEP_WINDOW`] for the instrument to sleep, V: a
 /// contour falling with a time constant of 10 s is then within 0.2 mV of where it settles.
 const SETTLED: f64 = 1e-6;
@@ -1433,6 +1437,38 @@ impl Engine {
     /// them (decisions.md R18). New voices stop the workers, here ([`Engine::start_workers`]
     /// plans them again).
     pub fn prepare(&mut self, rate: f64, seed: u64) {
+        // On a thread of its own with a main thread's stack (decisions.md R-PREPARE-STACK):
+        // a voice made for a rate the first time solves the keyboard circuit, and with the
+        // slots' voices, twins and spares built in place that took more than 512 KB, all a
+        // macOS host's secondary thread has (pluginval initialising the Audio Unit on its own
+        // thread overflowed it). Not the audio thread: hosts prepare a plug-in apart from it.
+        let mut once = Some((&mut *self, rate, seed));
+        let ran = std::thread::scope(|s| {
+            std::thread::Builder::new()
+                .name("ca72-prepare".to_owned())
+                .stack_size(PREPARE_STACK)
+                .spawn_scoped(s, || {
+                    if let Some((e, rate, seed)) = once.take() {
+                        e.prepare_here(rate, seed);
+                    }
+                })
+                .map(|h| h.join())
+        });
+        match ran {
+            Ok(Ok(())) => {}
+            // A panic in it is the caller's, as it would have been here.
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            // No thread to be had: here, as before.
+            Err(_) => {
+                if let Some((e, rate, seed)) = once.take() {
+                    e.prepare_here(rate, seed);
+                }
+            }
+        }
+    }
+
+    /// [`Engine::prepare`]'s work, on whichever thread runs it.
+    fn prepare_here(&mut self, rate: f64, seed: u64) {
         self.rest.wake();
         self.rest.window = (SLEEP_WINDOW * rate).ceil() as usize;
         let reseeded = seed != self.seed;
@@ -4604,6 +4640,27 @@ mod tests {
         // (Two seconds: the VCA's thump dies away over about one, as the circuit's does.)
         loudest(&mut e, 2.0);
         assert_eq!(e.sounding(), 0, "POLY's light voices not freed");
+    }
+
+    /// The voices built on a thread of their own (decisions.md R-PREPARE-STACK): an engine
+    /// prepared, at a rate no voice has been made at yet, from a thread with no more stack than
+    /// a macOS host's secondary thread has (512 KB), as pluginval initialises an Audio Unit.
+    #[test]
+    fn prepare_fits_a_hosts_secondary_thread() {
+        // (The engine made here, on the test's thread: in a debug build its construction alone
+        // takes more than 512 KB, which a release build does not; `prepare` is what a host
+        // calls on its own thread.)
+        let mut e = Box::new(Engine::new());
+        let made = std::thread::Builder::new()
+            .stack_size(512 << 10)
+            .spawn(move || {
+                e.prepare(47_250.0, 1);
+                e.slots.len()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(made, POLY_VOICES.2);
     }
 
     /// QUALITY at ULTRA (decisions.md R48): the circuit's voices play with no compromises,
