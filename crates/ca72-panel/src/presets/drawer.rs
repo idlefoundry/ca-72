@@ -289,6 +289,9 @@ fn item(text: &str, lv: f32, col: usize, row: usize) -> Item {
 /// The caret: a line of dots under the character it is before, as a character display's cursor
 /// (steady: it does not blink).
 const CARET: char = '\u{2581}';
+/// A selected tag's one-column bar, aligned at the left of its glyph cell. Two blank dot
+/// columns then separate it from the tag; a five-column arrow would overlap its first letter.
+const TAG_SELECTED: char = '\u{258f}';
 
 /// A character's dots, nine rows of five (the last two below the line): the font's, the
 /// signs' and the caret's.
@@ -304,6 +307,7 @@ fn glyph(c: char) -> [u8; 9] {
         '\u{25b2}' => seven(&UP),
         '\u{25bc}' => seven(&DOWN),
         CARET => [0, 0, 0, 0, 0, 0, 0, 0, 0x1f],
+        TAG_SELECTED => seven(&[0x10; 7]),
         _ => font::glyph(c),
     }
 }
@@ -472,7 +476,7 @@ fn tags_items(s: &DrawerScene) -> Vec<Item> {
         ));
         if *on {
             out.push(item(
-                ">",
+                &TAG_SELECTED.to_string(),
                 BRIGHT,
                 TAG_COL[i % 2] - 3,
                 tag_row(line - s.tags_first),
@@ -2069,6 +2073,49 @@ mod tests {
                     "{k:?} overlaps {other:?}"
                 );
             }
+        }
+    }
+
+    /// Each selected tag's marker leaves a clear gap before its caption in both columns;
+    /// even a full-length caption remains inside the display.
+    #[test]
+    fn selected_tag_markers_stay_clear_of_both_captions() {
+        let s = DrawerScene {
+            chips: vec![("abcdefghijklm".into(), true); 2],
+            ..DrawerScene::default()
+        };
+        let items = tags_items(&s);
+        for col in TAG_COL {
+            let caption = items.iter().find(|it| it.col == col).expect("tag caption");
+            let marker = items
+                .iter()
+                .find(|it| it.col == col - 3)
+                .expect("selected marker");
+            let occupied = |it: &Item| {
+                it.text
+                    .chars()
+                    .enumerate()
+                    .flat_map(|(n, ch)| {
+                        glyph(ch).into_iter().flat_map(move |bits| {
+                            (0..5)
+                                .filter(move |b| bits >> (4 - b) & 1 == 1)
+                                .map(move |b| it.col + 6 * n + b)
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(caption.text, "abcdefghijklm");
+            assert!(
+                occupied(marker).into_iter().all(|c| c + 1 < caption.col),
+                "marker overlaps the caption at column {col}"
+            );
+            assert!(
+                occupied(caption)
+                    .into_iter()
+                    .chain(occupied(marker))
+                    .all(|c| c < TAGS.cols())
+            );
+            assert!(caption.row + LINE <= TAGS.rows());
         }
     }
 
