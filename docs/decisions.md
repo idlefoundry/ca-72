@@ -6857,6 +6857,10 @@ made HI lighter after the measurement above, so ULTRA's cost against HI's rose: 
 Pro), `preset_cost` over the 19 factory presets, ten POLY voices, two interleaved rounds, gave
 ULTRA a median of 6.3 times HI (3.9 to 9.8 across the presets) on `cpu-release` at `2c0a584`.
 
+**With this work (R-BLEP's band-limiting and ULTRA's VCA at 4x), 2026-10-18 (the owner: "Sure,
+change that line"):** "SIX" became "SEVEN". The same measurement against the fidelity branch at
+`c112d08` gave ULTRA a median of 7.2 times HI (4.8 to 10.3 across the presets).
+
 **Built** (`editor.rs`, `ultra_note_lines`): the note follows what the engine decides for this
 computer, `engine::split_voices() > 0`. Each version's accent line, `ULTRA · NO COMPROMISES`, and
 its last two dim lines (`RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.`, `CLICK
