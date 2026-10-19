@@ -369,6 +369,7 @@ dependencies = [
  "baseview 0.1.0",
  "ca72",
  "ca72-analysis",
+ "ca72-fx",
  "ca72-panel",
  "ca72-rt",
  "clap-sys 0.5.0 (git+https://github.com/micahrj/clap-sys.git?rev=25d7f53fdb6363ad63fbd80049cb7a42a97ac156)",

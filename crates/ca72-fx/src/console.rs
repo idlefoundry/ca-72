@@ -219,7 +219,7 @@ impl Console {
             .enumerate()
             .map(|(i, s)| {
                 format!(
-                    "{}. {} ({}){}{} latency {} crashes {} misses {}{}",
+                    "{}. {} ({}){}{} latency {} crashes {} misses {} at frame {}{}",
                     i + 1,
                     s.name,
                     s.format,
@@ -233,6 +233,7 @@ impl Console {
                     s.latency,
                     s.crashes,
                     s.misses,
+                    s.position,
                     s.error
                         .as_deref()
                         .map(|e| format!(" ({e})"))

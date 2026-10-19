@@ -128,6 +128,8 @@ pub struct SlotStatus {
     pub crashes: u32,
     pub misses: u64,
     pub helper_pid: Option<u32>,
+    /// The frame of the block it was given last (the chain's own count, from 0).
+    pub position: i64,
     /// Its parameters, for a view of them.
     pub params: Vec<protocol::ParamInfo>,
 }
@@ -504,6 +506,10 @@ impl Chain {
                     crashes,
                     misses,
                     helper_pid: pid,
+                    position: s
+                        .inst
+                        .as_ref()
+                        .map_or(0, |i| i.position.load(Ordering::Relaxed)),
                     params,
                 }
             })

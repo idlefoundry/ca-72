@@ -649,17 +649,22 @@ fn save_state(inst: &Instance, proc: &HelperProc) -> Result<Vec<u8>, String> {
 /// A helper's stdout closed: it exited, crashed or was killed. Its instances are marked
 /// down, another helper is started and they are restored.
 fn on_exit(inner: &Arc<Inner>, group: &Arc<Group>, proc: &Arc<HelperProc>) {
-    let how = proc.reap();
     if inner.closing.load(Ordering::Acquire) || group.retired.load(Ordering::Acquire) {
+        let _ = proc.reap();
         return;
     }
     let instances: Vec<Arc<Instance>> = lock(&group.instances).clone();
+    // Down at once, before the process is reaped: a crashed process can take a while to
+    // end (its core written), and meanwhile its node would wait out every block's deadline.
     for inst in &instances {
         inst.status.store(DOWN, Ordering::Release);
         inst.submitted_at.store(0, Ordering::Release);
         inst.transport.mark_dead();
         inst.crashes.fetch_add(1, Ordering::Relaxed);
         inst.notify();
+    }
+    let how = proc.reap();
+    for inst in &instances {
         let mut detail = if inst.hung.swap(false, Ordering::AcqRel) {
             format!(
                 "its helper (pid {}) stopped returning blocks for {:?}; the watchdog killed it",

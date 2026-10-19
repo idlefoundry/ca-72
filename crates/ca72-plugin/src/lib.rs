@@ -7,6 +7,8 @@ pub mod compat;
 pub mod drive;
 pub mod editor;
 pub mod engine;
+#[cfg(feature = "fx-host")]
+pub mod fx;
 pub mod helper;
 pub mod learn;
 pub mod learning;
@@ -58,6 +60,10 @@ pub struct Ca72 {
     dezip: Dezip,
     /// AUTO GAIN's curve's writes as the audio thread last read them (`drive.rs`).
     curve_seen: u64,
+    /// The standalone application's effects after the synth (`fx.rs`, docs/fx-host.md):
+    /// none in the plug-ins.
+    #[cfg(feature = "fx-host")]
+    fx: Option<ca72_fx::Runner>,
 }
 
 impl std::fmt::Debug for Ca72 {
@@ -94,6 +100,8 @@ impl Ca72 {
             helper: None,
             dezip: Dezip::default(),
             curve_seen: 0,
+            #[cfg(feature = "fx-host")]
+            fx: crate::fx::take_runner(),
         }
     }
 }
@@ -482,6 +490,11 @@ impl Plugin for Ca72 {
         // the audio thread waiting: running threads are kept then (R18).
         let period = std::time::Duration::from_secs_f64(block as f64 / rate);
         self.engine.start_workers(crate::engine::AUTO, Some(period));
+        // The effects at the device's rate and block (the audio thread is stopped here).
+        #[cfg(feature = "fx-host")]
+        if let Some(fx) = &mut self.fx {
+            fx.prepare(rate, block);
+        }
         true
     }
 
@@ -505,6 +518,8 @@ impl Plugin for Ca72 {
         aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        #[cfg(feature = "fx-host")]
+        let started = std::time::Instant::now();
         // (A knob whose parameter something else has set since a learned controller moved it
         // stops gliding: the host's automation, the editor and presets set the voices as ever.)
         self.dezip.follow(&self.params);
@@ -600,6 +615,18 @@ impl Plugin for Ca72 {
                 ch.iter().take(len).fold(m, |m, v| m.max(v.abs()))
             });
             self.meters.publish_levels(self.engine.levels(), peak);
+        }
+        // The standalone's effects, after the synth and its meters: each effect's block is
+        // waited for until a share of the period from the block's start, then the effect
+        // passes the sound on dry (docs/fx-host.md).
+        #[cfg(feature = "fx-host")]
+        if let Some(fx) = &mut self.fx
+            && !fx.is_empty()
+            && let [left, right, ..] = &mut out[..]
+        {
+            let deadline =
+                started + std::time::Duration::from_secs_f64(period * crate::fx::DEADLINE);
+            fx.process(&mut left[..len], &mut right[..len], Some(deadline));
         }
         self.ask_helper();
         ProcessStatus::KeepAlive
