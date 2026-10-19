@@ -5,12 +5,14 @@
 //! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches, the
 //!   strip's POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD), INNER, SCATTER's placement, DETUNE
 //!   (DOUBLE), DRIVE, LEVEL and AUTO GAIN, and LOCK (a host parameter without a control: the
-//!   drawer's list learns it). Not the wheels (MIDI pitch bend and the modulation wheel, CC 1,
-//!   move them already), POWER (the host's bypass), MIDI BEND RANGE (the player's), nor anything
+//!   drawer's list learns it). The MOD wheel learns its computer setting separately
+//!   (R-MODWHEEL-SOURCE). Not PITCH (MIDI pitch bend), POWER (the host's bypass),
+//!   MIDI BEND RANGE (the player's), nor anything
 //!   but a sound parameter.
-//! - **What is not learned** ([`reserved`]): bank select (CC 0, 32), the modulation wheel (CC 1),
+//! - **What is not learned** ([`reserved`], [`MidiMap::reserved`]): bank select (CC 0, 32),
+//!   the wheel's chosen CC,
 //!   data entry and RPN/NRPN (CC 6, 38, 96–101) and the channel mode messages (CC 120–127). The
-//!   ones the plug-in follows (CC 1, 120, 121, 123) keep doing what they did.
+//!   channel mode actions (CC 120, 121, 123) keep doing what they did.
 //! - **One controller a parameter, one parameter a controller**: learning a parameter replaces its
 //!   controller; learning a controller another parameter had moves it ([`MidiMap::assign`] says
 //!   which). Removing one leaves the sound as it is.
@@ -36,6 +38,7 @@ use nih_plug::prelude::*;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
+use crate::mod_wheel::Source;
 use ca72::freq_dial::Pot;
 
 use crate::params::Ca72Params;
@@ -160,11 +163,13 @@ pub fn index(id: &str) -> Option<usize> {
     LEARNABLE.iter().position(|l| l.id == id)
 }
 
+/// A learning target outside the sound assignments: it changes the computer's wheel source.
+pub const MOD_WHEEL: usize = LEARNABLE.len();
+
 /// Why a control change is not learned, if it is not: what it is.
 pub fn reserved(cc: u8) -> Option<&'static str> {
     Some(match cc {
         0 | 32 => "bank select",
-        1 => "the modulation wheel",
         6 | 38 => "data entry",
         96 | 97 => "data increment and decrement",
         98..=101 => "an RPN or NRPN number",
@@ -179,7 +184,7 @@ pub fn reserved(cc: u8) -> Option<&'static str> {
 }
 
 /// The reserved controllers, as the editor lists them.
-pub const RESERVED_TEXT: &str = "NOT LEARNED: CC 0 AND 32 (BANK), 1 (MODULATION WHEEL), 6, 38 AND \
+pub const RESERVED_TEXT: &str = "NOT LEARNED: CC 0 AND 32 (BANK), 6, 38 AND \
                                  96-101 (DATA ENTRY, RPN, NRPN), 120-127 (CHANNEL MODE)";
 
 /// A controller: a MIDI channel (0 to 15; shown 1 to 16) and a control change (0 to 127).
@@ -261,6 +266,9 @@ pub struct MidiMap {
     refused: AtomicU32,
     /// Counts every change of the assignments (the editor's lists follow it).
     version: AtomicU32,
+    /// The computer's wheel source, with a generation above its low byte. No file access or
+    /// lock on the audio thread; switching away and back between callbacks still clears it.
+    wheel_source: AtomicU64,
 }
 
 impl Default for MidiMap {
@@ -272,6 +280,7 @@ impl Default for MidiMap {
             caught: AtomicU64::new(0),
             refused: AtomicU32::new(0),
             version: AtomicU32::new(0),
+            wheel_source: AtomicU64::new(u64::from(Source::DEFAULT.code())),
         }
     }
 }
@@ -286,6 +295,50 @@ impl std::fmt::Debug for MidiMap {
 }
 
 impl MidiMap {
+    pub fn wheel_source(&self) -> Source {
+        Source::of_code(self.wheel_word() as u8)
+    }
+
+    pub fn wheel_word(&self) -> u64 {
+        self.wheel_source.load(Ordering::Acquire)
+    }
+
+    /// Chosen in Settings or learned from the wheel. Every assignment of that CC, on every
+    /// channel, is removed: the wheel follows it on any channel. Never saved in `midi_map`.
+    pub fn set_wheel_source(&self, source: Source) {
+        let _w = self.lock();
+        let source = Source::of_code(source.code());
+        if source == self.wheel_source() {
+            return;
+        }
+        if let Source::Cc(cc) = source {
+            for channel in 0..16 {
+                self.routes[channel * 128 + usize::from(cc)].store(NONE, Ordering::Release);
+            }
+        }
+        let word = self.wheel_word();
+        self.wheel_source.store(
+            (word.wrapping_add(256) & !255) | u64::from(source.code()),
+            Ordering::Release,
+        );
+        self.version.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub fn reserved(&self, cc: u8) -> Option<&'static str> {
+        if self.wheel_source() == Source::Cc(cc) {
+            Some("the modulation wheel source")
+        } else {
+            reserved(cc)
+        }
+    }
+
+    pub fn reserved_text(&self) -> String {
+        match self.wheel_source() {
+            Source::Cc(cc) => format!("{RESERVED_TEXT} · CC {cc} (MOD WHEEL SOURCE, ALL CHANNELS)"),
+            source => format!("{RESERVED_TEXT} · MOD WHEEL SOURCE: {}", source.text()),
+        }
+    }
+
     // ---- The audio thread's: loads, a compare-and-swap and stores, nothing else.
 
     /// A learnable control change `cc` on `channel` (0 to 15), on the audio thread: caught for
@@ -302,6 +355,11 @@ impl MidiMap {
             if target == 0 {
                 break;
             }
+            // Use this arming's target: the editor may have moved learning from the wheel
+            // to a sound control since the event arrived. A reserved CC leaves it waiting.
+            if target as usize - 1 != MOD_WHEEL && self.reserved(cc).is_some() {
+                return Incoming::Unassigned;
+            }
             let disarmed = a & !((1 << TARGET_BITS) - 1);
             if self
                 .armed
@@ -316,6 +374,9 @@ impl MidiMap {
                 self.caught.store(word, Ordering::Release);
                 return Incoming::Caught;
             }
+        }
+        if self.reserved(cc).is_some() {
+            return Incoming::Unassigned;
         }
         match self.routes[c.slot()].load(Ordering::Acquire) {
             NONE => Incoming::Unassigned,
@@ -383,10 +444,25 @@ impl MidiMap {
     /// replaces it), and a parameter that had `cc` loses it (it moves). None if either is not
     /// learnable.
     pub fn assign(&self, param: usize, cc: Cc) -> Option<Assigned> {
-        if param >= LEARNABLE.len() || !cc.learnable() {
+        if !cc.learnable() {
+            return None;
+        }
+        if param == MOD_WHEEL {
+            self.set_wheel_source(Source::Cc(cc.cc));
+            return Some(Assigned {
+                param,
+                cc,
+                replaced: None,
+                displaced: None,
+            });
+        }
+        if param >= LEARNABLE.len() {
             return None;
         }
         let _w = self.lock();
+        if self.reserved(cc.cc).is_some() {
+            return None;
+        }
         let before = self.slot_of(param);
         if let Some(s) = before {
             self.routes[s].store(NONE, Ordering::Release);
@@ -429,7 +505,7 @@ impl MidiMap {
             r.store(NONE, Ordering::Release);
         }
         for &(i, c) in &saved.0 {
-            if i < LEARNABLE.len() && c.learnable() {
+            if i < LEARNABLE.len() && c.learnable() && self.reserved(c.cc).is_none() {
                 self.routes[c.slot()].store(i as u8 + 1, Ordering::Release);
             }
         }
@@ -439,7 +515,7 @@ impl MidiMap {
     /// Learnable parameter `param` armed: the next learnable control change is its controller.
     /// Another armed before is no longer (arming another moves the learning).
     pub fn arm(&self, param: usize) {
-        if param >= LEARNABLE.len() {
+        if param > MOD_WHEEL {
             return;
         }
         self.rearm(param as u32 + 1);
@@ -959,11 +1035,11 @@ mod tests {
     /// are not learned; every other control change is.
     #[test]
     fn the_reserved_controllers_are_not_learned() {
-        let reserved_ccs: Vec<u8> = (0..=127).filter(|&c| reserved(c).is_some()).collect();
+        let m = MidiMap::default();
+        let reserved_ccs: Vec<u8> = (0..=127).filter(|&c| m.reserved(c).is_some()).collect();
         let mut want = vec![0, 1, 6, 32, 38, 96, 97, 98, 99, 100, 101];
         want.extend(120..=127);
         assert_eq!(reserved_ccs, want);
-        let m = MidiMap::default();
         for &c in &want {
             assert_eq!(m.assign(0, cc(0, c)), None, "CC {c}");
         }
@@ -977,6 +1053,57 @@ mod tests {
         m.cancel();
         m.refuse(7);
         assert_eq!(m.refused(), None, "nothing said while not learning");
+    }
+
+    #[test]
+    fn the_wheel_learns_a_computer_source_and_reserves_it_on_all_channels() {
+        let m = MidiMap::default();
+        m.assign(at("cutoff"), cc(0, 11));
+        m.assign(at("emphasis"), cc(15, 11));
+        m.arm(MOD_WHEEL);
+        assert_eq!(m.incoming(3, 0), Incoming::Unassigned);
+        assert_eq!(m.armed(), Some(MOD_WHEEL), "bank select refused");
+        assert_eq!(m.incoming(3, 11), Incoming::Caught);
+        assert_eq!(m.poll().map(|a| a.param), Some(MOD_WHEEL));
+        assert_eq!(m.wheel_source(), Source::Cc(11));
+        assert!(
+            m.saved().0.is_empty(),
+            "wheel source is never project state"
+        );
+        assert!(
+            m.reserved_text()
+                .contains("CC 11 (MOD WHEEL SOURCE, ALL CHANNELS)")
+        );
+        for channel in 0..16 {
+            assert_eq!(m.assign(at("cutoff"), cc(channel, 11)), None);
+            m.arm(at("cutoff"));
+            assert_eq!(m.incoming(channel, 11), Incoming::Unassigned);
+            assert_eq!(m.armed(), Some(at("cutoff")));
+        }
+        m.cancel();
+        assert!(m.assign(at("glide"), cc(0, 1)).is_some(), "CC 1 freed");
+        let saved = m.saved();
+        assert_eq!(
+            Saved::from_text(&serde_json::to_string(&saved).expect("JSON")),
+            saved
+        );
+        m.set_wheel_source(Source::ChannelPressure);
+        assert!(m.assign(at("cutoff"), cc(0, 11)).is_some());
+        m.set_wheel_source(Source::DEFAULT);
+        assert!(m.assignment(at("glide")).is_none(), "new wheel CC removed");
+        m.load(&saved);
+        assert!(
+            m.saved().0.is_empty(),
+            "state cannot restore a conflicting assignment"
+        );
+        m.arm(MOD_WHEEL);
+        assert_eq!(
+            m.incoming(15, 1),
+            Incoming::Caught,
+            "wheel can learn its current CC"
+        );
+        assert!(m.poll().is_some());
+        assert_eq!(m.wheel_source(), Source::Cc(1));
     }
 
     /// A FREQUENCY knob turned to value / 127 of its travel through the computer's law
@@ -1201,7 +1328,7 @@ mod tests {
             {"param":"glide","channel":1,"cc":128},
             {"param":"glide","channel":1,"cc":-1},
             {"param":"glide","channel":"1","cc":14},
-            {"param":"glide","channel":1,"cc":1},
+            {"param":"glide","channel":1,"cc":0},
             {"param":"glide","channel":1,"cc":120},
             {"param":"glide","channel":1},
             "nonsense",

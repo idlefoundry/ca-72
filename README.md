@@ -262,7 +262,12 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   until it is changed in the window.
 - **LEVEL** (-30 to +12 dB, 0 by default): the output's gain, after MAIN OUTPUT's.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
-  default), and the modulation wheel (CC 1) moves the MODULATION wheel. All sound off,
+  default). SETTINGS > MOD WHEEL SOURCE chooses what moves the MODULATION wheel: CC 1
+  by default, another available CC, channel aftertouch, or the strongest polyphonic
+  aftertouch of the notes held. The common choices include breath (CC 2), foot (CC 4),
+  expression (CC 11) and timbre (CC 74); OTHER… reaches the other available numbers.
+  The source follows any MIDI channel and stays on this computer, outside presets and
+  projects. Changing it clears the old MIDI value. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
@@ -415,14 +420,19 @@ learn **LOCK**, which has no control on the panel.
 
 **What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches, the left
 hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD),
-INNER, SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Not
-the PITCH and MODULATION wheels (MIDI pitch bend and the modulation wheel, CC 1, move them
-already), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
+INNER, SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Right-click the
+MODULATION wheel and choose MIDI LEARN to set this computer's wheel source to a CC,
+on every channel. Its menu also opens the source choices in Settings. Not learned:
+PITCH (MIDI pitch bend moves it), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
 
-**Controllers that are not learned:** CC 0 and 32 (bank select), CC 1 (the modulation
-wheel), CC 6, 38 and 96–101 (data entry, RPN and NRPN), and CC 120–127 (the channel mode
-messages). Moving one while a control waits says so, and it waits on. CC 1, 120 (all sound
-off), 121 (reset all controllers) and 123 (all notes off) do what they always did.
+**Controllers that are not learned by sound controls:** the wheel's chosen CC on every
+channel, CC 0 and 32 (bank select), CC 6, 38 and 96–101 (data entry, RPN and NRPN), and
+CC 120–127 (the channel mode messages). The last groups cannot be wheel sources either.
+Choosing a CC for the wheel removes that CC's other assignments; choosing another source
+frees it again. The MIDI list names the wheel's source. Moving a reserved CC while a
+sound control waits says so, and it waits on. CC 120 (all sound off), 121 (reset all
+controllers) and 123 (all notes off) keep their actions; CC 121 resets the wheel's MIDI
+value for every source.
 
 **How a controller moves a control:** its value, 0 to 127, sets a knob to that share of its
 travel (127 is the top); RANGE and WAVEFORM to one of their six positions, each an equal
