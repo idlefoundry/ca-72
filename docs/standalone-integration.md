@@ -8,8 +8,9 @@ a release or tag. The withdrawn 0.2.1 tag, draft and assets remain untouched.
 
 Source inventory: preview `8877dde`, settings/grid `c16e188`, font `95ba2e9`, and
 the already incorporated keyboard-feedback branch `cf90cef`. Shared production
-hosting uses plugin-kit `f7aaa2b0`, including cold-start readiness, tracked Apply receipts and exact PANIC request
-identity. An older callback cannot acknowledge a newer UI request. The product contract remains
+hosting uses plugin-kit `3137cdeb`, including cold-start readiness, tracked Apply receipts, exact PANIC request
+identity, device listing by property reads off the control thread, and on macOS a microphone request that
+never stops the output while it waits (R-DEVICE-LISTING). An older callback cannot acknowledge a newer UI request. The product contract remains
 `standalone-spec.md`; this document defines integration acceptance.
 
 ## Definition of success
