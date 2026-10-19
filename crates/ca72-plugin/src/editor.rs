@@ -6060,7 +6060,8 @@ mod tests {
         // Up and down never step presets (the owner: left and right, as the rail's keys).
         for arrow in [Key::ArrowUp, Key::ArrowDown] {
             let before = current();
-            assert!(!keyed(&mut e, arrow), "{arrow:?} left free");
+            let name = format!("{arrow:?}");
+            assert!(!keyed(&mut e, arrow), "{name} left free");
             assert_eq!(current(), before);
         }
         e.playing.typing = true;
