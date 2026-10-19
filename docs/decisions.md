@@ -8083,3 +8083,14 @@ No real key was generated, and no test key was added to the built-in list.
 **Not tried:** native Windows ACL tests or native macOS key creation, a live host's menu, or a
 release with the real first-party key. The owner must make and back up that key and insert only
 its public half before the release candidate; the empty slot deliberately blocks it meanwhile.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found CI's
+tagged release built the bundles and ran `package.sh` without either variable, so a tag could
+have put installers without the key into the draft release. CI now sets
+`CA72_PUBLIC_RELEASE` at the workflow level to `1` exactly when it runs for a `v*` tag (the
+release job's own condition) and `0` otherwise, so the bundles, installers, clippy and tests of
+a tag carry the gate and pull requests and branches do not. `scripts/test-release-gate.py`,
+run in CI's Linux job, failed before the change (the variable was absent) and passes after:
+on for `refs/tags/v0.2.7`, off for a pull request, `main` and `skin-system`, the same prefix as
+the release job, and no job or step overriding it. With `CA72_PUBLIC_RELEASE=1`, `package.sh`
+stopped at the gate (exit 101); with `0` it went on. Not run on GitHub: no tag was pushed.
