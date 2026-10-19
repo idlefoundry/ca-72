@@ -1402,6 +1402,11 @@ mod tests {
     /// 1000, realtime and offline. MONO with RETRIGGER, and POLY.
     #[test]
     fn arpeggiated_notes_play_through_the_engine_as_played_ones() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (poly, retrigger) in [(false, true), (true, false)] {
             for (len, mode) in [(256, ProcessMode::Realtime), (1000, ProcessMode::Offline)] {
                 let (mut a, mut b) = (initialised(poly), initialised(poly));
@@ -1522,6 +1527,11 @@ mod tests {
     /// with GLIDE and HIGH priority, POLY and UNISON, realtime and offline.
     #[test]
     fn a_held_drone_plays_through_the_engine_as_held_keys() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let cases: [(&str, &[(&str, f32)]); 4] = [
             ("mono retrigger", &[("retrigger", 1.0)]),
             (
@@ -1608,6 +1618,11 @@ mod tests {
     /// holds; the sustain pedal under it changes none of that.
     #[test]
     fn a_drone_leaves_nothing_stuck() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(false);
         let mut c = hostless(&p);
         let chord = |c: &mut TestProcessContext<Ca72>, keys: &[u8]| {
