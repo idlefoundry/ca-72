@@ -36,14 +36,10 @@ pub const PLUGIN: &str = "ca-72";
 /// The plug-in's own artwork's licence.
 pub const OFFICIAL_LICENCE: &str = "GPL-3.0-or-later";
 
-/// The marketplace's public keys this plug-in trusts, each by the id its signatures name.
-///
-/// None yet: there is no marketplace. Its keys are made by its owner, offline
-/// (`cargo run -p skin-pack --example pack_keygen`), the secret kept where the marketplace signs
-/// and nowhere else, and only the public half put here, a new one added before an old one is
-/// retired (a plug-in does not hear of a key's revocation until it is updated). Until then every
-/// pack loads as unsigned.
-pub const TRUSTED_KEYS: &[TrustedKey] = &[];
+/// Idle Foundry's public key, with room for rotation and a future marketplace's keys.
+/// The owner fills `skin_pack::keys::IDLE_FOUNDRY_KEY` before the release; unsigned packs
+/// remain the main route and need no key. The signer and the editor share this list.
+pub use skin_pack::keys::TRUSTED_KEYS;
 
 /// The built-in looks' ids.
 pub const CLASSIC: &str = "com.idlefoundry.ca72.classic";
@@ -95,7 +91,7 @@ pub struct Look {
     pub licence: String,
     pub creators: Vec<String>,
     pub report: Report,
-    /// Its signature, checked: who published it, if the marketplace did.
+    /// Its signature, checked: who published it, if signed by a trusted key.
     pub signed: Option<Signed>,
 }
 
@@ -640,6 +636,21 @@ impl Look {
         self.signed
             .as_ref()
             .is_some_and(|s| s.publisher == skin_pack::signature::Publisher::FirstParty)
+    }
+
+    /// The settings menu's name and trust. Every name gets a status, so a pack's own name
+    /// cannot impersonate a checked publisher by ending in the same words.
+    pub fn menu_name(&self) -> String {
+        let label = if self.first_party() {
+            "IDLE FOUNDRY"
+        } else if self.signed.is_some() {
+            "MARKETPLACE"
+        } else if self.report.has("signature.unknown-key") {
+            "UNKNOWN SIGNING KEY"
+        } else {
+            "UNSIGNED"
+        };
+        format!("{} ({label})", self.name)
     }
 }
 

@@ -75,6 +75,7 @@ fn a_pack_file_signed_in_v1_stays_verifiable() {
     let trusted = skin_pack::signature::TrustedKey {
         id: "stress-test",
         public,
+        first_party: true,
     };
     let look = Look::open_with(
         &v1("lifecycle-1.1.0.ifskin"),

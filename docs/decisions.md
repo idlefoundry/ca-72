@@ -7923,3 +7923,55 @@ Do not treat approval to include the correction as evidence that these checks pa
 
 **Owner's acceptance, 2026-10-18.** Told these checks remained, the owner did them by hand:
 "i did hands on checks. we're good".
+
+## R-SKIN-KEYS. The first-party skin key ships before any signed packs
+
+**Owner decision, 2026-10-18** (issue #83's distribution/signing choice): "manual,
+unsigned packs stay the main route, PLUS Idle Foundry's own first-party public key built into
+0.3.0, so signed first-party packs can come later without waiting for an update." The owner
+will make the pair on a machine of their choice before the 0.3.0 release candidate:
+"you must NOT generate the real key, and no secret key may ever be committed or written inside a
+repository."
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One public slot.** `skin_pack::keys::IDLE_FOUNDRY_KEY` stays `None` until the owner fills it.
+  The editor and signing tool share `TRUSTED_KEYS`. Release and bundle builds refuse an empty
+  slot at compile time; debug builds stay usable for the owner's key-making and release check.
+  CI's bundle builds enforce that gate. Public Mac packaging also runs `check_release_key`,
+  which checks the key's id, first-party role, presence in the list and Ed25519 public half.
+  No real key was generated.
+- **A key's authority is explicit.** A first-party key can attest to Idle Foundry's packs; a
+  future marketplace key cannot claim that publisher. Rotation adds a second id, such as
+  `idlefoundry-2`, before use and keeps the old key for existing packs. Revocation needs a
+  plug-in update, as before.
+- **Offline tools.** `pack_keygen` refuses destinations in Git work trees, including linked
+  worktrees and links, and bare repositories; it creates a new owner-only file and prints the
+  public constant with backup advice. `pack_sign` reads the secret from a file or stdin, signs
+  a folder or `.ifskin`, and checks the signed result against the built-in keys before an
+  atomic replacement. It checks the format; `check_pack` supplies the CA-72's full look checks.
+- **Small labels.** The settings menu marks verified packs `(IDLE FOUNDRY)` or `(MARKETPLACE)`;
+  an unknown key is `(UNKNOWN SIGNING KEY)` and counts as unsigned. Unsigned packs are
+  `(UNSIGNED)` and keep their loading behaviour. Every name gets a status, so a pack's own name
+  cannot impersonate the trusted label. Invalid known-key signatures refuse the pack with advice
+  to get an unchanged copy from its publisher. Unknown keys cannot be verified, as before.
+
+**Evidence (Linux, 2026-10-18; Rust 1.97.1, ngspice 47):** `cargo test -p skin-pack -p
+ca72-panel -p ca72-plugin`: 454 passed, 39 ignored. The final `cargo test -p skin-pack`: 66
+passed, including both tools' examples. `CA72_REQUIRE_NGSPICE=1 cargo test --workspace`: 603
+passed, 56 ignored, none failed. Clippy for the three touched crates, all targets, with and
+without all features: passed with warnings denied. The skin crate's all-target Windows GNU
+cross-clippy also passed. Formatting, the diff's whitespace and `package.sh`'s shell syntax
+passed. Tests used `TMPDIR=/var/tmp`: a pre-existing `/tmp/.git` marker correctly made the
+key tool refuse that temporary directory in the initial run.
+
+The release diagnostic refused the missing public key; both release and bundle checks failed
+at the intended compile-time gate, including a release with debug assertions enabled. The
+key-making CLI refused a path under this worktree's `target` without creating a file. Fixed
+throwaway keys cover trusted, unknown, unsigned, tampered and wrong-id signatures, marketplace
+keys claiming first-party authority, and the release check. An independent read-only review
+was completed and its findings corrected. No owner settings or installed plug-ins were used.
+No real key was generated, and no test key was added to the built-in list.
+
+**Not tried:** native Windows ACL tests or native macOS key creation, a live host's menu, or a
+release with the real first-party key. The owner must make and back up that key and insert only
+its public half before the release candidate; the empty slot deliberately blocks it meanwhile.
