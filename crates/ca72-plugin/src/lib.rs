@@ -20,6 +20,7 @@ pub mod presets;
 mod resizing;
 pub mod seats;
 pub mod settings;
+pub mod smooth;
 #[cfg(feature = "standalone-production")]
 pub mod standalone_error;
 #[cfg(feature = "standalone-production")]
@@ -37,8 +38,9 @@ use crate::engine::{
     ALL_NOTES_OFF, ALL_SOUND_OFF, Engine, Event, MODULATION_WHEEL, RESET_CONTROLLERS,
 };
 use crate::helper::{Helper, MEND, SERVE};
-use crate::learn::{Dezip, Incoming};
+use crate::learn::Incoming;
 use crate::params::Ca72Params;
+use crate::smooth::Smooth;
 
 /// Names the standalone application before its first window opens: on Linux, the X11 class of
 /// every top-level window, the editor's and the error window's alike, whatever each one's
@@ -62,9 +64,9 @@ pub struct Ca72 {
     /// The plug-in's own thread for what the audio thread asks of it (decisions.md R23),
     /// started when the plug-in is first initialised (none if the system would not start it).
     helper: Option<Helper>,
-    /// The knobs learned MIDI controllers have just moved, gliding in the voices (decisions.md
-    /// R34).
-    dezip: Dezip,
+    /// Where the voices have each continuous knob, gliding to its parameter's new value
+    /// (decisions.md R34, R-KNOB-GLIDE).
+    smooth: Smooth,
     /// AUTO GAIN's curve's writes as the audio thread last read them (`drive.rs`).
     curve_seen: u64,
 }
@@ -101,7 +103,7 @@ impl Ca72 {
             deferred_local: None,
             rate: 48_000.0,
             helper: None,
-            dezip: Dezip::default(),
+            smooth: Smooth::default(),
             curve_seen: 0,
         }
     }
@@ -282,7 +284,8 @@ impl Ca72 {
     /// Learnable parameter `i`'s controller at `value` (0..1, as the host gives a control change;
     /// 7 bits), `timing` samples into the block: the parameter set through the host, as the
     /// host's automation sets it (the editor and the host following, the state holding it), and
-    /// a knob gliding there in the voices ([`Dezip`]). Whether it changed.
+    /// a knob gliding there in the voices over `learn::DEZIP` ([`Smooth::learned`]). Whether it
+    /// changed.
     fn learned(
         &mut self,
         i: usize,
@@ -298,19 +301,16 @@ impl Ca72 {
         if target.at(normalized) {
             return false;
         }
-        let knob = learn::knob_param(&self.params, i);
-        let from = knob.map(|k| self.dezip.value(k));
         context.set_parameter_normalized(target.ptr(), normalized, timing);
-        if let (Some(k), Some(from)) = (knob, from) {
-            self.dezip.start(i, k, from, k.value());
+        if let Some(k) = learn::LEARNABLE.get(i).and_then(|l| smooth::index(l.id)) {
+            self.smooth.learned(k, &self.params);
         }
         true
     }
 
-    /// The engine's controls: the parameters, a knob a learned controller has just moved where
-    /// its glide has it.
+    /// The engine's controls: the parameters, each continuous knob where the voices have it.
     fn controls(&self) -> crate::engine::Controls {
-        self.params.controls_with(&|k| self.dezip.value(k))
+        self.params.controls_with(&|k| self.smooth.value(k))
     }
 
     /// What the engine asks done off the audio thread since the last block, asked of the
@@ -482,7 +482,8 @@ impl Plugin for Ca72 {
         let block = config.max_buffer_size.max(1) as usize;
         let rate = f64::from(config.sample_rate);
         self.rate = rate;
-        self.dezip.prepare(rate);
+        // (Every knob at its value at once: a session or a project's state lands, R-KNOB-GLIDE.)
+        self.smooth.prepare(rate, block, &self.params);
         // (AUTO GAIN's measurements on the helper thread: decisions.md R45.)
         self.engine.calibrate_with(self.params.drive_curve.clone());
         if self.helper.is_none() {
@@ -511,7 +512,7 @@ impl Plugin for Ca72 {
 
     fn reset(&mut self) {
         self.clear_note_sources();
-        self.dezip.clear();
+        self.smooth.land(&self.params);
         self.engine.set(&self.params.controls());
         self.engine.release_all();
         self.engine.event(Event::ResetControllers);
@@ -523,9 +524,9 @@ impl Plugin for Ca72 {
         aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        // (A knob whose parameter something else has set since a learned controller moved it
-        // stops gliding: the host's automation, the editor and presets set the voices as ever.)
-        self.dezip.follow(&self.params);
+        // (A continuous knob with a new value glides there from where the voices have it, or
+        // lands there if a preset set it: decisions.md R-KNOB-GLIDE.)
+        self.smooth.follow(&self.params);
         // (A curve measured after DRIVE was turned glides in; a preset's or a session's is the
         // sound's at once: decisions.md R-AUTO-GAIN-DRIVE.)
         if let Some(c) = self.params.drive_curve.read(&mut self.curve_seen) {
@@ -554,8 +555,8 @@ impl Plugin for Ca72 {
         // The samples between one event and the next, a run at a time (the engine plays
         // POLY's voices one after another over a run: decisions.md R11), the side chain mixed
         // to mono. A learned MIDI controller sets its parameter at its event, and the voices take
-        // it from there; while a knob it moved glides, a run is at most `DEZIP_STEP` samples
-        // (decisions.md R34).
+        // it from there; while a knob glides, a run is at most `smooth::STEP` samples
+        // (decisions.md R34, R-KNOB-GLIDE).
         const RUN: usize = 128;
         let (mut ext, mut l, mut r) = ([0.0f32; RUN], [0.0f32; RUN], [0.0f32; RUN]);
         let mut i = 0;
@@ -569,16 +570,16 @@ impl Plugin for Ca72 {
                 learned |= self.midi(e, context);
                 next = context.next_event();
             }
-            if learned || glided || self.dezip.moving() {
-                self.dezip.follow(&self.params);
+            if learned || glided || self.smooth.moving() {
+                self.smooth.follow(&self.params);
                 self.engine.set(&self.controls());
             }
             let mut end = next
                 .map_or(len, |e| e.timing() as usize)
                 .min(len)
                 .min(i + RUN);
-            if self.dezip.moving() {
-                end = end.min(i + learn::DEZIP_STEP);
+            if self.smooth.moving() {
+                end = end.min(i + smooth::STEP);
             }
             let n = end - i;
             let ext = match side {
@@ -603,8 +604,8 @@ impl Plugin for Ca72 {
                 }
                 [] => self.engine.render(ext, &mut l[..n], &mut r[..n]),
             }
-            glided = self.dezip.moving();
-            self.dezip.advance(n, &self.params);
+            glided = self.smooth.moving();
+            self.smooth.advance(n);
             i = end;
         }
         // (Past the block's end: a parameter set here reaches the voices at the next block's
@@ -658,7 +659,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// A context with no host, for the plug-in's parameters (nih-plug's `TestProcessContext`).
-    fn hostless(p: &Ca72) -> TestProcessContext<Ca72> {
+    pub(crate) fn hostless(p: &Ca72) -> TestProcessContext<Ca72> {
         let params: Arc<dyn Params> = p.params.clone();
         TestProcessContext::new(params, 48_000.0, ProcessMode::Realtime)
     }
@@ -1274,7 +1275,7 @@ mod tests {
     /// One block of `len` samples processed as a host calls `process`, with the events pushed to
     /// `c` (stereo, no side chain): its left channel.
     #[allow(unsafe_code)]
-    fn block(p: &mut Ca72, c: &mut TestProcessContext<Ca72>, len: usize) -> Vec<f32> {
+    pub(crate) fn block(p: &mut Ca72, c: &mut TestProcessContext<Ca72>, len: usize) -> Vec<f32> {
         let (mut l, mut r) = (vec![0.0f32; len], vec![0.0f32; len]);
         let mut buffer = Buffer::default();
         // SAFETY: both slices are `len` long and live until `process` has returned.
@@ -1419,8 +1420,9 @@ mod tests {
     }
 
     /// A knob a learned controller moves is at its new value at once (the host's, the editor's,
-    /// the state's), and the voices glide there over `DEZIP` (10 ms), set every `DEZIP_STEP`
-    /// samples; anything else setting it meanwhile (the host's automation) ends the glide there.
+    /// the state's), and the voices glide there over `DEZIP` (10 ms), set every `smooth::STEP`
+    /// samples; the host's automation meanwhile glides on from where the voices are, over 30 ms
+    /// (decisions.md R-KNOB-GLIDE).
     #[test]
     fn a_knob_a_controller_moves_glides_in_the_voices_alone() {
         let mut p = initialised(false);
@@ -1440,21 +1442,31 @@ mod tests {
         // 480 samples at 48 kHz: there, exactly.
         block(&mut p, &mut c, 352);
         assert_eq!(p.controls(), p.params.controls());
-        assert!(!p.dezip.moving());
-        // Automation meanwhile: no more glide.
+        assert!(!p.smooth.moving());
+        // Automation meanwhile: on from where the voices are, over 30 ms.
         c.push_event(cc(0, 0, 74, 0));
         block(&mut p, &mut c, 64);
-        assert!(p.dezip.moving());
+        assert!(p.smooth.moving());
+        let there = p.controls().panel.cutoff;
         assert!(c.automate(p.params.cutoff.as_ptr(), 0.75));
-        block(&mut p, &mut c, 64);
-        assert!(!p.dezip.moving());
+        block(&mut p, &mut c, 32);
+        let gliding = p.controls().panel.cutoff;
+        // (From where the controller's glide had it, on toward 0.75 and not yet there.)
+        assert!(
+            there > 0.75 && gliding < there && gliding > 0.75,
+            "{there} {gliding}"
+        );
+        for _ in 0..45 {
+            block(&mut p, &mut c, 32);
+        }
+        assert!(!p.smooth.moving());
         assert_eq!(p.controls(), p.params.controls());
         assert_eq!(p.params.cutoff.value(), 2.5);
         // Switches and selectors do not glide.
         p.params.midi_map.assign(learnable("osc1_range"), on(0, 21));
         c.push_event(cc(0, 0, 21, 127));
         block(&mut p, &mut c, 64);
-        assert!(!p.dezip.moving());
+        assert!(!p.smooth.moving());
         assert_eq!(p.controls(), p.params.controls());
     }
 
@@ -1474,9 +1486,10 @@ mod tests {
         let render = |id: &str, from: f64, to: f64, emphasis: f32, how: usize| -> Vec<f32> {
             let mut p = initialised(false);
             let mut c = hostless(&p);
-            if how == 1 {
-                // (The voices following each step at once: glides one sample long.)
-                p.dezip.prepare(1.0 / learn::DEZIP);
+            if how < 2 {
+                // (The voices following each step at once, the automation's and the
+                // controller's: glides one sample long, R34's measurement as it was made.)
+                p.smooth.prepare(1.0 / learn::DEZIP, 1, &p.params);
             }
             let i = learnable(id);
             p.params.midi_map.assign(i, on(0, 74));
@@ -1692,6 +1705,10 @@ mod tests {
         c.automate(p.params.emphasis.as_ptr(), 0.3);
         block(&mut p, &mut c, 32);
         assert_eq!(p.params.emphasis.value(), 3.0);
+        // (The voices glide there over 30 ms: decisions.md R-KNOB-GLIDE.)
+        for _ in 0..45 {
+            block(&mut p, &mut c, 32);
+        }
         assert_eq!(p.controls(), p.params.controls());
         // The controller again, later in a run: from its sample.
         c.push_event(cc(16, 0, 71, 0));
@@ -1784,7 +1801,7 @@ mod tests {
     }
 
     /// A plug-in, POLY as `poly`, initialised as a host does at 48 kHz in blocks of 256.
-    fn initialised(poly: bool) -> Ca72 {
+    pub(crate) fn initialised(poly: bool) -> Ca72 {
         let config = BufferConfig {
             sample_rate: 48_000.0,
             min_buffer_size: None,
