@@ -9,7 +9,11 @@ publish.workspace = true
 
 [dependencies]
 # The plug-ins' resvg (its usvg and tiny-skia), for SVG's parsing and a timed test drawing.
-resvg = { version = "0.45", default-features = false }
+# `raster-images` draws the PNGs a drawing embeds (with them it links JPEG, GIF and WebP
+# decoders that a pack's drawing never reaches: `svg::options` hands resvg only PNG).
+resvg = { version = "0.45", default-features = false, features = ["raster-images"] }
+# usvg's own parser of `data:` URLs, to read a drawing's embedded pictures as usvg will.
+data-url = "0.3"
 # usvg's own XML parser, to read an SVG strictly (no DTD) before usvg sees it.
 roxmltree = "0.20"
 # fontdb's and rustybuzz's font parser, to read a font's tables.

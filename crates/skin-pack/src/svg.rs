@@ -95,8 +95,13 @@ fn urls_internal(value: &str) -> bool {
     true
 }
 
-/// The drawing's text read strictly, its elements and attributes checked: `Err` with why not.
-fn scan(text: &str, limits: &Limits) -> Result<(), String> {
+/// Why a drawing is refused: its finding's code (`svg.refused`, or `svg.picture` for a picture
+/// it embeds) and why.
+type Refusal = (&'static str, String);
+
+/// The drawing's text read strictly, its elements and attributes checked, then the pictures it
+/// embeds: `Err` with why not.
+fn scan(text: &str, limits: &Limits) -> Result<(), Refusal> {
     let doc = roxmltree::Document::parse_with_options(
         text,
         roxmltree::ParsingOptions {
@@ -104,7 +109,18 @@ fn scan(text: &str, limits: &Limits) -> Result<(), String> {
             nodes_limit: u32::try_from(limits.svg_nodes * 4).unwrap_or(u32::MAX),
         },
     )
-    .map_err(|e| format!("not well-formed XML without a DTD: {e}"))?;
+    .map_err(|e| {
+        (
+            "svg.refused",
+            format!("not well-formed XML without a DTD: {e}"),
+        )
+    })?;
+    parts(&doc, limits).map_err(|why| ("svg.refused", why))?;
+    pictures(&doc, limits).map_err(|why| ("svg.picture", why))
+}
+
+/// The drawing's elements and attributes checked: `Err` with why not.
+fn parts(doc: &roxmltree::Document<'_>, limits: &Limits) -> Result<(), String> {
     let root = doc.root_element();
     if root.tag_name().name() != "svg" || root.tag_name().namespace() != Some(SVG_NS) {
         return Err("not an SVG document (its root is not `svg` in SVG's namespace)".into());
@@ -181,16 +197,11 @@ fn scan(text: &str, limits: &Limits) -> Result<(), String> {
                 ));
             }
             if an == "href" && (ns.is_none() || ns == Some(XLINK_NS)) {
+                // (An `<image>`'s, its picture, checked with the pictures.)
                 let v = attr.value().trim();
-                let ok = if name == "image" {
-                    v.starts_with("data:image/png;base64,")
-                } else {
-                    internal(v)
-                };
-                if !ok {
+                if name != "image" && !internal(v) {
                     return Err(format!(
-                        "`{name}` refers to `{}`: a drawing refers only to its own parts (and \
-                         its pictures are PNG data inside it)",
+                        "`{name}` refers to `{}`: a drawing refers only to its own parts",
                         v.chars().take(60).collect::<String>()
                     ));
                 }
@@ -216,6 +227,47 @@ fn scan(text: &str, limits: &Limits) -> Result<(), String> {
              repeats), more than {}",
             limits.svg_nodes
         ));
+    }
+    Ok(())
+}
+
+/// Checks the pictures a drawing embeds as a pack's own pictures are checked: each `<image>`'s
+/// `href` PNG data inside the drawing (`data:image/png;base64,...`), read by usvg's own parser of
+/// `data:` URLs, and decoded whole within the pictures' limits, all of them together within the
+/// pack's pixels (each refused from its header, before it is decoded, past what is left).
+fn pictures(doc: &roxmltree::Document<'_>, limits: &Limits) -> Result<(), String> {
+    let mut left = limits.picture_pixels;
+    let images = doc.descendants().filter(|n| {
+        n.is_element() && n.tag_name().name() == "image" && n.tag_name().namespace() == Some(SVG_NS)
+    });
+    for node in images {
+        let hrefs = node.attributes().filter(|a| {
+            a.name() == "href" && (a.namespace().is_none() || a.namespace() == Some(XLINK_NS))
+        });
+        for attr in hrefs {
+            let v = attr.value().trim();
+            let shown = v.chars().take(40).collect::<String>();
+            if !v.starts_with("data:") {
+                return Err(format!(
+                    "`image` refers to `{shown}`, outside the drawing (a file or a URL): embed \
+                     the picture in it as PNG data, `data:image/png;base64,...`"
+                ));
+            }
+            if !v.starts_with("data:image/png;base64,") {
+                return Err(format!(
+                    "`image` holds `{shown}...`: a drawing's pictures are PNG, embedded as \
+                     `data:image/png;base64,...`"
+                ));
+            }
+            let data = data_url::DataUrl::process(v)
+                .ok()
+                .and_then(|url| url.decode_to_vec().ok())
+                .ok_or_else(|| "an embedded picture whose base64 cannot be read".to_owned())?
+                .0;
+            let (w, h) = crate::picture::decode_within(&data, limits, left)
+                .map_err(|e| format!("an embedded picture: {e}"))?;
+            left -= u64::from(w) * u64::from(h);
+        }
     }
     Ok(())
 }
@@ -318,17 +370,20 @@ pub struct Cost {
     pub area: f64,
     /// What drawing it costs, in pixel-equivalents at the test drawing's size: each pixel row an
     /// edge crosses [`EDGE`], each pixel painted 1, each pixel of a layer [`LAYER`], of a filter's
-    /// region [`FILTER`] a primitive (measured on an M4 Pro: about 1.6 ms a million).
+    /// region [`FILTER`] a primitive, each of an embedded picture's own pixels [`DECODE`]
+    /// (measured on an M4 Pro: about 1.6 ms a million).
     pub work: f64,
-    /// The pixels of the pictures embedded in it, decoded (counted with the pack's own).
+    /// The pixels of the pictures embedded in it, decoded each time it is drawn, each counted as
+    /// often as it is drawn (counted with the pack's own).
     pub pixels: u64,
 }
 
-/// What an edge's pixel row, a layer's pixel and a filter primitive's pixel cost against a
-/// pixel painted (measured, decisions.md R-SKIN-PACKS).
+/// What an edge's pixel row, a layer's pixel, a filter primitive's pixel and an embedded
+/// picture's pixel decoded cost against a pixel painted (measured, decisions.md R-SKIN-PACKS).
 pub const EDGE: f64 = 100.0;
 pub const LAYER: f64 = 6.0;
 pub const FILTER: f64 = 10.0;
+pub const DECODE: f64 = 5.0;
 
 impl Cost {
     /// Why it is past `limits`, if it is.
@@ -433,7 +488,6 @@ fn nodes_in(group: &usvg::Group) -> usize {
 fn cost_of(
     group: &usvg::Group,
     cost: &mut Cost,
-    pictures: &mut Vec<Arc<Vec<u8>>>,
     limits: &Limits,
     (k, in_pattern): (f64, bool),
 ) -> Result<(), String> {
@@ -477,14 +531,14 @@ fn cost_of(
     }
     cost.over(limits)?;
     if let Some(c) = group.clip_path() {
-        cost_of(c.root(), cost, pictures, limits, (k, in_pattern))?;
+        cost_of(c.root(), cost, limits, (k, in_pattern))?;
     }
     if let Some(m) = group.mask() {
-        cost_of(m.root(), cost, pictures, limits, (k, in_pattern))?;
+        cost_of(m.root(), cost, limits, (k, in_pattern))?;
     }
     for node in group.children() {
         match node {
-            usvg::Node::Group(g) => cost_of(g, cost, pictures, limits, (k, in_pattern))?,
+            usvg::Node::Group(g) => cost_of(g, cost, limits, (k, in_pattern))?,
             usvg::Node::Path(p) => {
                 cost.nodes += 1;
                 cost.segments += p.data().len();
@@ -541,12 +595,18 @@ fn cost_of(
                         cost.tiles += tiles;
                         cost.tile_nodes += tiles * nodes_in(pat.root()) as f64;
                         cost.over(limits)?;
-                        cost_of(pat.root(), cost, pictures, limits, (k, true))?;
+                        cost_of(pat.root(), cost, limits, (k, true))?;
                     }
                 }
             }
             usvg::Node::Image(i) => {
                 cost.nodes += 1;
+                // Its own pixels, decoded each time it is drawn (in a pattern's tile, once for
+                // each of the pattern's uses).
+                let own = i.size();
+                let decoded = (f64::from(own.width()) * f64::from(own.height())).ceil();
+                cost.pixels = cost.pixels.saturating_add(decoded as u64);
+                cost.work += decoded * DECODE;
                 if !in_pattern {
                     // (A picture resampled as it is drawn: twice a fill's pixel.)
                     let b = i.abs_bounding_box();
@@ -554,9 +614,7 @@ fn cost_of(
                     cost.area += px;
                     cost.work += 2.0 * px;
                 }
-                if let usvg::ImageKind::PNG(data) = i.kind() {
-                    pictures.push(data.clone());
-                }
+                cost.over(limits)?;
             }
             usvg::Node::Text(_) => cost.nodes += 1,
         }
@@ -588,26 +646,34 @@ pub fn parse_at(
     limits: &Limits,
     side: Option<u32>,
 ) -> Result<(usvg::Tree, Cost), String> {
-    let text = std::str::from_utf8(bytes).map_err(|_| "not UTF-8 text".to_owned())?;
+    read_at(bytes, limits, side).map_err(|(_, why)| why)
+}
+
+/// [`parse_at`], refused with its finding's code.
+fn read_at(
+    bytes: &[u8],
+    limits: &Limits,
+    side: Option<u32>,
+) -> Result<(usvg::Tree, Cost), Refusal> {
+    let refused = |why: String| ("svg.refused", why);
+    let text = std::str::from_utf8(bytes).map_err(|_| refused("not UTF-8 text".into()))?;
     scan(text, limits)?;
-    let tree =
-        usvg::Tree::from_str(text, &options()).map_err(|e| format!("cannot be read: {e}"))?;
+    let tree = usvg::Tree::from_str(text, &options())
+        .map_err(|e| refused(format!("cannot be read: {e}")))?;
     let mut cost = Cost::default();
-    let mut pictures = Vec::new();
     // Counted at the size it is drawn.
     let size = tree.size();
     let k = f64::from(side_of(&tree, limits, side)) / f64::from(size.width().max(size.height()));
-    cost_of(tree.root(), &mut cost, &mut pictures, limits, (k, false))?;
-    for p in pictures {
-        let (w, h) =
-            crate::picture::decode(&p, limits).map_err(|e| format!("an embedded picture: {e}"))?;
-        cost.pixels += u64::from(w) * u64::from(h);
-        if cost.pixels > limits.picture_pixels {
-            return Err(format!(
-                "its embedded pictures are more than {} pixels together",
-                limits.picture_pixels
-            ));
-        }
+    cost_of(tree.root(), &mut cost, limits, (k, false)).map_err(refused)?;
+    if cost.pixels > limits.picture_pixels {
+        return Err((
+            "svg.picture",
+            format!(
+                "its embedded pictures are {} pixels as drawn (each counted as often as it is \
+                 drawn), more than {}",
+                cost.pixels, limits.picture_pixels
+            ),
+        ));
     }
     Ok((tree, cost))
 }
@@ -682,10 +748,10 @@ pub fn test_draw(tree: &usvg::Tree, side: u32, deadline_ms: u64) -> Drawn {
 /// Checks a drawing of a pack, drawing it as a test if `test`: the pixels of the pictures
 /// embedded in it (counted with the pack's), if it is not refused.
 pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut Report) -> u64 {
-    let parsed = parse(bytes, limits);
+    let parsed = read_at(bytes, limits, None);
     let pixels = parsed.as_ref().map_or(0, |(_, cost)| cost.pixels);
     match parsed {
-        Err(why) => report.reject("svg.refused", Some(path), why),
+        Err((code, why)) => report.reject(code, Some(path), why),
         // (Waited for twice its limit, so that a drawing just over it is measured.)
         Ok((tree, _)) if test => {
             let side = side_of(&tree, limits, None);
@@ -859,10 +925,176 @@ mod tests {
             refused("<image xlink:href='https://example.com/x.png' width='1' height='1'/>")
                 .contains("refers")
         );
-        assert!(refused("<image href='data:image/svg+xml;base64,AAAA'/>").contains("refers"));
+        assert!(refused("<image href='data:image/svg+xml;base64,AAAA'/>").contains("are PNG"));
         assert!(refused("<use href='other.svg#a'/>").contains("refers"));
         assert!(refused("<rect fill='url(other.svg#g)'/>").contains("outside"));
         assert!(refused("<rect style=\"fill:url('file:///x')\"/>").contains("outside"));
+    }
+
+    /// `data` in base64, as a drawing embeds it.
+    fn base64(data: &[u8]) -> String {
+        const DIGITS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in data.chunks(3) {
+            let n = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+            for i in 0..4 {
+                out.push(if i <= chunk.len() {
+                    char::from(DIGITS[(n >> (18 - 6 * i)) as usize & 63])
+                } else {
+                    '='
+                });
+            }
+        }
+        out
+    }
+
+    /// A PNG `w` by `h` of one colour.
+    fn solid(w: u32, h: u32, rgba: [u8; 4]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut e = png::Encoder::new(&mut out, w, h);
+        e.set_color(png::ColorType::Rgba);
+        let mut writer = e.write_header().expect("header");
+        writer
+            .write_image_data(&rgba.repeat((w * h) as usize))
+            .expect("data");
+        drop(writer);
+        out
+    }
+
+    fn image(png: &[u8], attrs: &str) -> String {
+        format!(
+            "<image {attrs} href='data:image/png;base64,{}'/>",
+            base64(png)
+        )
+    }
+
+    /// What `check` finds in a drawing of `body`.
+    fn found(body: &str, limits: &Limits) -> Report {
+        let mut r = Report::default();
+        check("art/panel.svg", svg(body).as_bytes(), limits, false, &mut r);
+        r
+    }
+
+    /// A PNG embedded in a drawing is drawn, its pixels counted with the pack's and its decoding
+    /// as drawing work.
+    #[test]
+    fn an_embedded_png_is_drawn() {
+        let body = image(
+            &solid(20, 10, [200, 30, 40, 255]),
+            "x='10' y='10' width='80' height='40'",
+        );
+        let (tree, cost) = parse(svg(&body).as_bytes(), &Limits::default()).expect("read");
+        assert_eq!(cost.pixels, 200);
+        assert!(cost.work >= 200.0 * DECODE, "{cost:?}");
+        let mut pixmap = Pixmap::new(100, 100).expect("a pixmap");
+        resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
+        let at = |x: u32, y: u32| pixmap.pixel(x, y).expect("a pixel");
+        let inside = at(50, 30);
+        assert_eq!(
+            (inside.red(), inside.green(), inside.blue(), inside.alpha()),
+            (200, 30, 40, 255)
+        );
+        assert_eq!(at(50, 80).alpha(), 0);
+        assert!(found(&body, &Limits::default()).to_string().is_empty());
+        // Used twice, drawn twice: counted twice.
+        let twice = format!(
+            "<defs>{}</defs><use href='#p'/><use href='#p' x='40'/>",
+            image(&solid(20, 10, [0; 4]), "id='p' width='20' height='10'")
+        );
+        let (_, cost) = parse(svg(&twice).as_bytes(), &Limits::default()).expect("read");
+        assert_eq!(cost.pixels, 400);
+    }
+
+    /// An embedded picture is checked as a pack's own: past its limits, damaged, or not PNG,
+    /// refused, and its finding says so (`svg.picture`).
+    #[test]
+    fn an_embedded_picture_past_its_limits_or_not_png_is_refused() {
+        let limits = Limits::default();
+        let code = |body: &str, limits: &Limits, says: &str| {
+            let r = found(body, limits);
+            assert!(r.has("svg.picture"), "{body:.80}: {r}");
+            assert!(r.to_string().contains(says), "{says}: {r}");
+        };
+        // Wider than a picture may be, refused from its header.
+        code(
+            &image(&solid(4097, 1, [0; 4]), "width='9' height='9'"),
+            &limits,
+            "at most 4096",
+        );
+        // Together past the pack's pixels, the second refused before it is decoded.
+        let small = Limits {
+            picture_pixels: 100,
+            ..Limits::default()
+        };
+        let one = image(&solid(8, 8, [0; 4]), "width='8' height='8'");
+        assert!(found(&one, &small).to_string().is_empty());
+        code(
+            &format!("{one}{one}"),
+            &small,
+            "left of the pictures' limit",
+        );
+        // Drawn more often than the pixels allow.
+        let uses = format!("<defs>{}</defs>", image(&solid(8, 8, [0; 4]), "id='p'"))
+            + &"<use href='#p'/>".repeat(2);
+        code(&uses, &small, "as drawn");
+        // Damaged: truncated, or its base64 unreadable.
+        let png = solid(64, 64, [9; 4]);
+        code(
+            &image(&png[..png.len() / 2], ""),
+            &limits,
+            "embedded picture",
+        );
+        code(
+            "<image href='data:image/png;base64,iVBOR%%%'/>",
+            &limits,
+            "base64",
+        );
+        // A JPEG, as itself or labelled PNG; a GIF; a drawing.
+        let jpeg = [0xff, 0xd8, 0xff, 0xe0, 0, 16, b'J', b'F', b'I', b'F', 0];
+        code(
+            &format!("<image href='data:image/jpeg;base64,{}'/>", base64(&jpeg)),
+            &limits,
+            "are PNG",
+        );
+        code(&image(&jpeg, ""), &limits, "not a PNG");
+        code(
+            "<image href='data:image/gif;base64,R0lGODlh'/>",
+            &limits,
+            "are PNG",
+        );
+        code(
+            "<image href='data:image/svg+xml,%3Csvg/%3E'/>",
+            &limits,
+            "are PNG",
+        );
+        code("<image href='data:image/png,%89PNG'/>", &limits, "are PNG");
+    }
+
+    /// An `<image>` refers to nothing outside the drawing: a file, a URL, either `href`.
+    #[test]
+    fn an_external_picture_is_refused() {
+        for href in [
+            "href='pictures/screw.png'",
+            "xlink:href='https://example.com/screw.png'",
+            "href='file:///etc/passwd'",
+            "href='../screw.png'",
+        ] {
+            let r = found(
+                &format!("<image {href} width='9' height='9'/>"),
+                &Limits::default(),
+            );
+            assert!(r.has("svg.picture"), "{href}: {r}");
+            assert!(r.to_string().contains("outside the drawing"), "{r}");
+        }
+        // One `href` embedded and the other outside: refused too.
+        let both = format!(
+            "<image xlink:href='screw.png' href='data:image/png;base64,{}'/>",
+            base64(&solid(2, 2, [0; 4]))
+        );
+        assert!(found(&both, &Limits::default()).has("svg.picture"));
     }
 
     #[test]

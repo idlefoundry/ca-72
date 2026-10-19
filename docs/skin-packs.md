@@ -401,7 +401,8 @@ its dots the pack's `lamp`, its print the pack's typeface in `tab_print`'s colou
   licence's RDF);
 - event attributes (`on...`);
 - any reference outside the drawing: an `href` other than `#name`, a `url(...)` other than
-  `url(#name)`, or an `<image>` other than embedded PNG data (`data:image/png;base64,...`);
+  `url(#name)`, or an `<image>` other than embedded PNG data (`data:image/png;base64,...`;
+  `svg.picture`, below);
 - a pattern filled with another pattern;
 - an `id` given to two elements, or to anything that is not SVG's or is inside `<metadata>`.
 
@@ -411,6 +412,15 @@ as everything it repeats (a reference that repeats itself is refused); 200,000 p
 fill, all their uses together, and 20,000 elements drawn in those tiles; embedded pictures
 within the picture limits.
 
+**Pictures in a drawing.** An `<image>` holds a PNG inside the drawing, as
+`href="data:image/png;base64,..."` (or `xlink:href`), and nothing else. A file, a URL, a JPEG,
+GIF, WebP or SVG, or PNG data not in base64 is refused, with the code `svg.picture`. Each
+embedded picture is checked as a pack's own pictures are. It is decoded whole: a damaged one is
+refused, not drawn in part. It is at most 4096 pixels a side and not animated. Its pixels count
+toward the pack's 16 million once for every time it is drawn: each `use` of it, and inside a
+pattern's tile, each use of the pattern. Embed a picture at about the size it is drawn. Its
+decoding is drawing work (below), so a 4096-pixel square alone costs more than a drawing may.
+
 **What drawing it costs.** Counts of parts don't bound the cost by themselves: a few long lines
 crossing the whole panel cost far more than thousands of small shapes. So the check also
 estimates the work, at the size the drawing is used (the panel's drawing 3000 pixels across;
@@ -419,7 +429,9 @@ a picture at its slot's size), in "pixel-equivalents":
 - each pixel painted counts 1 (a fill's box; a stroke's length by its width);
 - each pixel row a path's edges cross counts 100;
 - each pixel of a layer (a group's opacity, a clip, a mask) counts 6;
-- each pixel of a filter's region counts 10, for each of its primitives.
+- each pixel of a filter's region counts 10, for each of its primitives;
+- each pixel an embedded picture covers counts 2, and each of the picture's own pixels counts 5,
+  because it is decoded each time the drawing is drawn.
 
 At most **60 million**: about 100 ms on an M4 Pro, half a second on a machine five times
 slower. The counting stops as soon as a limit is passed.

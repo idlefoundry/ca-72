@@ -8,7 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-resvg = { version = "0.45", default-features = false, features = ["text"] }
+# `raster-images`: the PNGs a pack's drawing embeds, checked by `skin-pack` (nothing else
+# reaches it: the official art embeds none).
+resvg = { version = "0.45", default-features = false, features = ["text", "raster-images"] }
 # The worn skins' materials (plugin-kit's K5), from github.com/idlefoundry/plugin-kit at the
 # commit the plug-in takes its K6 and K7 at (the kit's main, K5 to K7 merged).
 plugin-kit-materials = { git = "https://github.com/idlefoundry/plugin-kit", rev = "4c0f0f31041cb28b9dc803996dd01d8f44af5ce8" }

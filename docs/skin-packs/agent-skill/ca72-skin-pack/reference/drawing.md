@@ -59,7 +59,7 @@ interactive elements, `on...` attributes, anything of SVG's inside `<metadata>` 
 hold only other namespaces' data, such as a licence's RDF), a pattern filled with another
 pattern, an `id` given to two elements (or to anything not SVG's, or inside `<metadata>`),
 and any reference outside the file: only `href="#name"`, `url(#name)` and `<image>`
-with `data:image/png;base64,...`. Drawing programs often add `<style>`, editor namespaces and
+with `data:image/png;base64,...` (an `<image>` refused is `svg.picture`, below). Drawing programs often add `<style>`, editor namespaces and
 fonts: write the SVG yourself, or strip those out.
 
 ### Limits
@@ -68,6 +68,19 @@ fonts: write the SVG yourself, or strip those out.
 repeats; one that repeats itself is refused), 200,000 path segments, 32 filter primitives, a
 blur's deviation of at most 64, 4096 pattern tiles over all that patterns fill (and 20,000
 elements drawn in those tiles), and embedded pictures within the picture limits.
+
+### Pictures in a drawing (`svg.picture`)
+
+An `<image>` may hold only a PNG embedded in the drawing:
+`<image x="..." y="..." width="..." height="..." href="data:image/png;base64,..."/>`. It is
+refused if it refers to a file or a URL, or holds a JPEG, GIF, WebP or SVG, or PNG data not
+in base64. Each picture is checked as a pack's own: decoded whole (a damaged one is refused),
+4096 pixels a side at most, not animated. Its pixels count toward the pack's 16 million once
+for each time it is drawn (each `use`, each use of a pattern holding it). Embed each picture at
+about the size it is drawn, not larger: decoding it is drawing work (5 for each of its pixels,
+below), so one 4096-pixel square alone is past the limit. Prefer vectors for anything a
+coding agent can draw. Keep pictures for texture (grain, a photographed surface), and convert
+a JPEG to PNG before embedding it.
 
 ### What it costs to draw
 
@@ -82,6 +95,8 @@ past **60 million**:
 | a pixel row a path's edges cross | 100 |
 | a pixel of a layer (a group's `opacity`, a clip, a mask) | 6 |
 | a pixel of a filter's region | 10 for each primitive |
+| a pixel an embedded picture covers | 2 |
+| a pixel of an embedded picture's own, decoded each time it is drawn | 5 |
 
 Edge rows are counted for every edge, by how far it climbs: the sum, over all edges, of the
 pixel rows each spans (a stroke's twice over). So tall or diagonal lines are what cost:

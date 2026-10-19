@@ -6529,3 +6529,31 @@ busy desktop had: the timed test, a backstop to the drawing's counted cost (`svg
 half a second on a machine five times slower than an M4 Pro), now allows 2 s, so that a drawing
 within its cost is never refused for the machine's speed or load. **Agent decision** (not
 separately approved).
+
+**Pictures embedded in a pack's drawings, 2026-10-18.** The owner asked for a follow-up after
+SIGNAL BASIN's screws had to be redrawn as vectors: the PNGs its drawing embedded were not drawn,
+silently, because the workspace built resvg without its `raster-images` feature. **Agent
+decisions** (not separately approved):
+- **resvg's `raster-images` on** (in `skin-pack` and `ca72-panel`). It cannot be limited to PNG:
+  it links JPEG, GIF and WebP decoders too (`zune-jpeg`, `gif`, `image-webp` and their
+  dependencies). None of them is reachable from a pack: the subset admits only
+  `data:image/png;base64,` in an `<image>`, and `svg::options` hands resvg only PNG and resolves
+  no file or URL. resvg decodes a PNG with tiny-skia's `png`, the crate the pack's own pictures
+  are read with. Decoding the pictures through the pack's checks instead would have meant drawing
+  them outside resvg, out of order with its groups, clips, masks and opacity.
+- **An embedded picture is checked as a pack's own** (`svg.picture`, a code of its own rather
+  than `svg.refused`). Each `<image>`'s `href` and `xlink:href` must be PNG data in the drawing.
+  A file, a URL, another type or unreadable base64 is refused, read by usvg's own `data:` parser
+  (`data-url`), so that the check and the drawing read the same bytes. Each picture is then
+  decoded whole within `picture.rs`'s limits (4096 a side, not animated, not damaged). All of a
+  drawing's pictures together are within the pack's 16 million pixels, each refused from its
+  header before it is decoded past what is left, so that a drawing holding many vast blank PNGs
+  (a few kilobytes each) cannot make the check decode billions of pixels. As drawn, each occurrence (a
+  `use`, a pattern's use) counts again toward the pack's pixels.
+- **Decoding is drawing work.** resvg decodes a picture each time it draws it, so each of its
+  own pixels costs `svg::DECODE` = 5 pixel-equivalents, as well as the 2 for each pixel it
+  covers. Measured on the M4 Pro (2048-pixel squares embedded and drawn 1 pixel across, medians
+  of 7): 2.5 to 7.6 ms a million (RGBA noise with Sub filtering 2.5, RGB noise with Paeth 7.6,
+  16-bit RGBA 6.6, a flat colour 5.6), 1.6 to 4.7 pixel-equivalents at 1.6 ms a million. A
+  4096-pixel square alone (84 million) is past `svg_work`'s 60 million. A drawing's picture
+  should be about the size it is drawn, which the docs say.

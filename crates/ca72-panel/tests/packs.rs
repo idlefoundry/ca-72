@@ -231,6 +231,69 @@ fn a_packs_pictures_replace_the_built_in_ones_by_slot() {
     );
 }
 
+/// `data` in base64, as a drawing embeds a picture.
+fn base64(data: &[u8]) -> String {
+    const DIGITS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..4 {
+            out.push(if i <= chunk.len() {
+                char::from(DIGITS[(n >> (18 - 6 * i)) as usize & 63])
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+
+/// A pack's drawing that embeds a PNG draws it: a knob drawn as an SVG whose cap is a picture.
+#[test]
+fn a_packs_drawing_draws_the_png_it_embeds() {
+    let mut cap = resvg::tiny_skia::Pixmap::new(8, 8).expect("a pixmap");
+    cap.fill(resvg::tiny_skia::Color::from_rgba8(40, 160, 90, 255));
+    let png = cap.encode_png().expect("encoded");
+    let dir = edited(|d| {
+        std::fs::write(
+            d.join("art/knob.svg"),
+            format!(
+                "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'>\
+                 <circle cx='5' cy='5' r='5' fill='#222'/>\
+                 <image x='3' y='3' width='4' height='4' href='data:image/png;base64,{}'/></svg>",
+                base64(&png)
+            ),
+        )
+        .expect("written");
+        replace(
+            &d.join("skin.toml"),
+            "base = \"classic\"",
+            "base = \"realistic\"",
+        );
+        let text = std::fs::read_to_string(d.join("skin.toml")).expect("read");
+        std::fs::write(
+            d.join("skin.toml"),
+            text.replace(
+                "[look]",
+                "[[assets]]\npath = \"art/knob.svg\"\norigin = \"original\"\n\n[look]",
+            ) + "\n[look.pictures]\nknob = \"art/knob.svg\"\n",
+        )
+        .expect("written");
+    });
+    let look = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
+    let knob = look.pictures["knob"].picture((512, 512)).expect("drawn");
+    let at = |x: u32, y: u32| {
+        let p = knob.pixel(x, y).expect("a pixel");
+        (p.red(), p.green(), p.blue(), p.alpha())
+    };
+    // The picture in the middle, the drawing's own circle round it.
+    assert_eq!(at(256, 256), (40, 160, 90, 255));
+    assert_eq!(at(256, 60), (0x22, 0x22, 0x22, 255));
+}
+
 /// A typeface that cannot print a legend is not used: the built-in one is, and the pack goes
 /// to review; one that can is used.
 #[test]

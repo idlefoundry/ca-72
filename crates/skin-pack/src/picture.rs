@@ -17,6 +17,12 @@ pub fn check(path: &str, bytes: &[u8], limits: &Limits, report: &mut Report) -> 
 
 /// Decodes a PNG within `limits`, discarding its pixels: its size.
 pub fn decode(bytes: &[u8], limits: &Limits) -> Result<(u32, u32), String> {
+    decode_within(bytes, limits, u64::MAX)
+}
+
+/// Decodes a PNG within `limits` and of at most `pixels` pixels (refused from its header, before
+/// anything is decoded, if more), discarding its pixels: its size.
+pub fn decode_within(bytes: &[u8], limits: &Limits, pixels: u64) -> Result<(u32, u32), String> {
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("not a PNG".into());
     }
@@ -37,6 +43,11 @@ pub fn decode(bytes: &[u8], limits: &Limits) -> Result<(u32, u32), String> {
         return Err(format!(
             "{w} by {h} pixels: a picture is at most {} pixels a side",
             limits.picture_side
+        ));
+    }
+    if u64::from(w) * u64::from(h) > pixels {
+        return Err(format!(
+            "{w} by {h} pixels, more than the {pixels} pixels left of the pictures' limit"
         ));
     }
     if reader.info().animation_control.is_some() {
