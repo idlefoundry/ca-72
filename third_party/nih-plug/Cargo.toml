@@ -76,7 +76,7 @@ baseview = { path = "../baseview", optional = true }
 # All the claps!
 clap = { version = "4.1.8", features = ["derive", "wrap_help"], optional = true }
 cpal = { version = "0.15", optional = true }
-plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "ba59f242c38a0066706783ede7eeeb053fd8b220", optional = true }
+plugin-kit-standalone = { git = "https://github.com/idlefoundry/plugin-kit", rev = "3137cdeb547d95936b9517aafbd0439ce95b036d", optional = true }
 jack = { version = "0.11.4", optional = true }
 midir = { version = "0.9.1", optional = true }
 rtrb = { version = "0.2.2", optional = true }

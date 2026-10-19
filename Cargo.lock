@@ -659,7 +659,7 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.15.3"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=ba59f242c38a0066706783ede7eeeb053fd8b220#ba59f242c38a0066706783ede7eeeb053fd8b220"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=3137cdeb547d95936b9517aafbd0439ce95b036d#3137cdeb547d95936b9517aafbd0439ce95b036d"
 dependencies = [
  "alsa 0.9.1",
  "core-foundation-sys",
@@ -1724,14 +1724,14 @@ dependencies = [
 [[package]]
 name = "plugin-kit-queue"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=ba59f242c38a0066706783ede7eeeb053fd8b220#ba59f242c38a0066706783ede7eeeb053fd8b220"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=3137cdeb547d95936b9517aafbd0439ce95b036d#3137cdeb547d95936b9517aafbd0439ce95b036d"
 
 [[package]]
 name = "plugin-kit-standalone"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=ba59f242c38a0066706783ede7eeeb053fd8b220#ba59f242c38a0066706783ede7eeeb053fd8b220"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=3137cdeb547d95936b9517aafbd0439ce95b036d#3137cdeb547d95936b9517aafbd0439ce95b036d"
 dependencies = [
- "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=ba59f242c38a0066706783ede7eeeb053fd8b220)",
+ "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=3137cdeb547d95936b9517aafbd0439ce95b036d)",
  "crossbeam-channel",
  "midir",
  "plugin-kit-queue",
