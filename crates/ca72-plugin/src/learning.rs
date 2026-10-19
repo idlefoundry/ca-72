@@ -319,7 +319,9 @@ impl Learning {
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
     /// decisions.md R54). Under LOOK, after the built-in two, each installed skin pack (`packs`:
-    /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any).
+    /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any). The
+    /// title always names this build's version, independent of the update check; opening this
+    /// menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
@@ -374,7 +376,7 @@ impl Learning {
             x,
             y,
             size,
-            title: "SETTINGS".to_owned(),
+            title: format!("SETTINGS · CA-72 {}", crate::update::VERSION),
             items: items
                 .iter()
                 .enumerate()
