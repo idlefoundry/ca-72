@@ -160,7 +160,7 @@ macos() {
     <choice id="au" title="Audio Unit" description="CA-72.component, in /Library/Audio/Plug-Ins/Components (Logic Pro, GarageBand)">
         <pkg-ref id="com.idlefoundry.ca-72.component.pkg"/>
     </choice>
-    <choice id="standalone" title="Standalone application" description="CA-72.app, in /Applications; play without an audio host">
+    <choice id="standalone" title="Standalone application" description="CA-72.app, in /Applications; play without an audio host. After installing, you can move the app in Finder, including to an external drive. Plug-ins stay in their standard folders. Reconnect the drive to run the app; updates install a new copy in /Applications.">
         <pkg-ref id="com.idlefoundry.ca72.standalone.pkg"/>
     </choice>
     <pkg-ref id="com.idlefoundry.ca-72.vst3.pkg" version="$version" onConclusion="none">vst3.pkg</pkg-ref>
