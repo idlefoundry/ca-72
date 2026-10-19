@@ -89,12 +89,8 @@ fn plugins() -> [catalog::Found; 2] {
 /// A value in the plug-in's units as its parameter takes it: a CLAP parameter in its own
 /// units, a VST3 one normalized over its plain range.
 fn value(chain: &Chain, at: usize, id: u32, units: f64) -> f64 {
-    let st = chain.status();
-    let p = st[at]
-        .params
-        .iter()
-        .find(|p| p.id == id)
-        .expect("the parameter");
+    let params = chain.params(at);
+    let p = params.iter().find(|p| p.id == id).expect("the parameter");
     match (p.plain.first(), p.plain.last()) {
         (Some(lo), Some(hi)) if hi > lo => p.min + (p.max - p.min) * (units - lo) / (hi - lo),
         _ => units,
@@ -284,8 +280,21 @@ fn the_chain_is_ordered_saved_to_its_file_and_restored() {
     c.set_bypass(1, false).unwrap();
     let (input, l, _) = play(&mut r, 0, 2);
     assert_eq!(l, input.iter().map(|x| x * 0.25 * 0.5).collect::<Vec<_>>());
+    // Replaced: the CLAP effect in place of the VST3 one, at unity, the other kept.
+    assert!(c.active());
+    c.replace(0, &plugins()[0]).unwrap();
+    let st = c.status();
+    assert_eq!(
+        (st[0].format.as_str(), st[1].format.as_str()),
+        ("clap", "clap")
+    );
+    let (input, l, _) = play(&mut r, 0, 2);
+    assert_eq!(l, input.iter().map(|x| x * 0.5).collect::<Vec<_>>());
     c.remove(0).unwrap();
     assert_eq!(c.status().len(), 1);
+    c.set_bypass(0, true).unwrap();
+    assert!(!c.active(), "only a bypassed effect");
+    c.set_bypass(0, false).unwrap();
     c.shutdown().unwrap();
     drop(r);
     drop(c);
@@ -509,7 +518,7 @@ fn third_party_effects_load_play_and_keep_their_state() {
         let st = &c.status()[0];
         eprintln!(
             "{what}: {} parameters, latency {}, helper {:?}",
-            st.params.len(),
+            c.params(0).len(),
             st.latency,
             st.helper_pid
         );
@@ -548,5 +557,41 @@ fn third_party_effects_load_play_and_keep_their_state() {
         );
         c.shutdown().unwrap();
         c2.shutdown().unwrap();
+    }
+}
+
+/// What the chain costs the audio thread (run by hand, `--ignored`, best in release): four
+/// test effects in sync, 128 frames at 48 kHz, paced, 10 s; the time `Runner::process`
+/// takes per block, its median, 99th percentile and worst, and the blocks missed.
+#[test]
+#[ignore]
+fn the_chains_cost() {
+    for effects in [1usize, 4] {
+        let (c, mut r) = Chain::new(options(true));
+        r.prepare(RATE, 128);
+        for k in 0..effects {
+            c.add(&plugins()[k % 2]).unwrap();
+        }
+        let period = Duration::from_secs_f64(128.0 / RATE);
+        let (mut l, mut rr) = signal(0, 128);
+        let mut took = Vec::new();
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(10) {
+            let t = Instant::now();
+            r.process(&mut l, &mut rr, Some(t + period.mul_f64(0.9)));
+            took.push(t.elapsed());
+            std::thread::sleep(period.saturating_sub(t.elapsed()));
+        }
+        took.sort();
+        let at = |q: f64| took[((took.len() - 1) as f64 * q) as usize];
+        let misses: u64 = c.status().iter().map(|s| s.misses).sum();
+        eprintln!(
+            "{effects} effect(s), {} blocks: median {:?}, p99 {:?}, worst {:?}, misses {misses}",
+            took.len(),
+            at(0.5),
+            at(0.99),
+            took[took.len() - 1]
+        );
+        c.shutdown().unwrap();
     }
 }

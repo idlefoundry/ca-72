@@ -130,8 +130,6 @@ pub struct SlotStatus {
     pub helper_pid: Option<u32>,
     /// The frame of the block it was given last (the chain's own count, from 0).
     pub position: i64,
-    /// Its parameters, for a view of them.
-    pub params: Vec<protocol::ParamInfo>,
 }
 
 /// A slot on the audio thread.
@@ -257,42 +255,42 @@ impl Chain {
 
     /// Adds a found effect at the chain's end; its place.
     pub fn add(&self, found: &catalog::Found) -> Result<usize, String> {
-        if found.kind == catalog::Kind::Instrument {
-            return Err(format!(
-                "{} is an instrument: only effects are hosted",
-                found.desc.name
-            ));
-        }
-        self.insert(
-            SavedSlot {
-                format: found.desc.format.clone(),
-                path: found.path.clone(),
-                plugin: found.desc.id.clone(),
-                name: found.desc.name.clone(),
-                vendor: found.desc.vendor.clone(),
-                bypass: false,
-                state: None,
-            },
-            false,
-        )
+        let saved = new_slot(found)?;
+        self.insert(saved, false, None)
     }
 
     /// Adds an effect as saved (its state restored) at the chain's end; its place. One whose
     /// plug-in cannot be loaded is kept, missing: dry, its state saved again as it was.
     pub fn add_saved(&self, saved: SavedSlot) -> Result<usize, String> {
-        self.insert(saved, true)
+        self.insert(saved, true, None)
     }
 
-    /// Adds an effect at the end; one that does not load is kept, missing, if `keep`, else
-    /// an error.
-    fn insert(&self, saved: SavedSlot, keep: bool) -> Result<usize, String> {
+    /// Puts a found effect in place of the one at `at` (the drawer's "replace"): the old one
+    /// goes only once the new one has loaded.
+    pub fn replace(&self, at: usize, found: &catalog::Found) -> Result<(), String> {
+        let saved = new_slot(found)?;
+        self.insert(saved, false, Some(at)).map(|_| ())
+    }
+
+    /// Loads an effect into a slot of its own and puts it at the end, or in place of the one
+    /// at `replace`; one that does not load is kept, missing, if `keep`, else an error.
+    fn insert(
+        &self,
+        saved: SavedSlot,
+        keep: bool,
+        replace: Option<usize>,
+    ) -> Result<usize, String> {
         let shared = &self.shared;
         shared.drain_retired();
         let mut core = lock(&shared.core);
-        if core.slots.len() >= MAX_SLOTS {
+        if let Some(at) = replace {
+            if at >= core.slots.len() {
+                return Err(format!("there is no effect {}", at + 1));
+            }
+        } else if core.slots.len() >= MAX_SLOTS {
             return Err(format!("the chain holds {MAX_SLOTS} effects at most"));
         }
-        let at = core.slots.len();
+        let at = replace.unwrap_or(core.slots.len());
         let bypass = Arc::new(AtomicBool::new(saved.bypass));
         let state = match saved.state.as_deref().map(protocol::unhex).transpose() {
             Ok(s) => s,
@@ -322,22 +320,43 @@ impl Chain {
             node: inst.as_ref().map(|i| Box::new(shared.node(i, core.block))),
             bypass: bypass.clone(),
         };
-        if lock(&shared.to_audio)
-            .push(Msg::Insert { at, stage })
-            .is_err()
-        {
-            if let Some(i) = &inst {
-                shared.sandbox.unload(i);
-            }
-            return Err("the audio thread is not taking changes".into());
-        }
-        core.slots.push(Slot {
+        let slot = Slot {
             saved,
             inst,
             bypass,
             error,
-        });
+        };
+        let sent = {
+            let mut q = lock(&shared.to_audio);
+            if q.slots() < 2 {
+                Err(stage)
+            } else {
+                if replace.is_some() {
+                    let _ = q.push(Msg::Remove { at });
+                }
+                q.push(Msg::Insert { at, stage }).map_err(|e| match e {
+                    rtrb::PushError::Full(Msg::Insert { stage, .. }) => stage,
+                    rtrb::PushError::Full(_) => unreachable!("an insert was pushed"),
+                })
+            }
+        };
+        if sent.is_err() {
+            if let Some(i) = &slot.inst {
+                shared.sandbox.unload(i);
+            }
+            return Err("the audio thread is not taking changes".into());
+        }
+        let old = match replace {
+            Some(at) => Some(std::mem::replace(&mut core.slots[at], slot)),
+            None => {
+                core.slots.push(slot);
+                None
+            }
+        };
         drop(core);
+        if let Some(i) = old.as_ref().and_then(|o| o.inst.as_ref()) {
+            shared.sandbox.unload(i);
+        }
         shared.save();
         Ok(at)
     }
@@ -473,8 +492,8 @@ impl Chain {
             .iter()
             .map(|s| {
                 let bypass = s.bypass.load(Ordering::Acquire);
-                let (health, latency, crashes, misses, pid, params) = match &s.inst {
-                    None => (Health::Missing, 0, 0, 0, None, Vec::new()),
+                let (health, latency, crashes, misses, pid) = match &s.inst {
+                    None => (Health::Missing, 0, 0, 0, None),
                     Some(i) => (
                         match i.status() {
                             sandbox::RUNNING => Health::Running,
@@ -486,7 +505,6 @@ impl Chain {
                         i.crashes.load(Ordering::Relaxed),
                         i.misses.load(Ordering::Relaxed),
                         i.helper_pid(),
-                        i.info.params.clone(),
                     ),
                 };
                 SlotStatus {
@@ -510,10 +528,30 @@ impl Chain {
                         .inst
                         .as_ref()
                         .map_or(0, |i| i.position.load(Ordering::Relaxed)),
-                    params,
                 }
             })
             .collect()
+    }
+
+    /// The parameters of the effect at `at`, as it listed them when loaded (none if it is
+    /// missing).
+    pub fn params(&self, at: usize) -> Vec<protocol::ParamInfo> {
+        lock(&self.shared.core)
+            .slots
+            .get(at)
+            .and_then(|s| s.inst.as_ref())
+            .map(|i| i.info.params.clone())
+            .unwrap_or_default()
+    }
+
+    /// Whether any effect is playing (loaded, not bypassed): the FX key's light.
+    pub fn active(&self) -> bool {
+        lock(&self.shared.core).slots.iter().any(|s| {
+            !s.bypass.load(Ordering::Acquire)
+                && s.inst.as_ref().is_some_and(|i| {
+                    i.status() != sandbox::FAILED && i.status() != sandbox::RETIRED
+                })
+        })
     }
 
     /// The chain's latency now, in frames: the sum of its running effects' that are not
@@ -605,6 +643,25 @@ impl Chain {
         }
         saved
     }
+}
+
+/// A found effect as a new slot: an instrument refused.
+fn new_slot(found: &catalog::Found) -> Result<SavedSlot, String> {
+    if found.kind == catalog::Kind::Instrument {
+        return Err(format!(
+            "{} is an instrument: only effects are hosted",
+            found.desc.name
+        ));
+    }
+    Ok(SavedSlot {
+        format: found.desc.format.clone(),
+        path: found.path.clone(),
+        plugin: found.desc.id.clone(),
+        name: found.desc.name.clone(),
+        vendor: found.desc.vendor.clone(),
+        bypass: false,
+        state: None,
+    })
 }
 
 impl Shared {

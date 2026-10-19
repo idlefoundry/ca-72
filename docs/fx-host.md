@@ -220,21 +220,28 @@ On the audio thread (`Runner::process` and the nodes):
 - no waiting past the deadline, ever; a late, dead or missing effect is dry at once.
 
 The helpers' audio threads ask for real-time scheduling (DAW-v3's `rt::promote`); the
-synth's own threads are as before. `crates/ca72-fx-helper/tests/no_alloc.rs` counts every allocation and free on the playing
-thread (a counting global allocator) over 400 paced blocks through two effects while the
-chain is changed under them (a parameter, a bypass, a move, a helper killed and restored, an
+synth's own threads are as before. `crates/ca72-fx-helper/tests/no_alloc.rs` counts every
+allocation and free on the playing thread (a counting global allocator) over 400 paced
+blocks through two effects while the chain is changed under them (a parameter, a bypass, a move, a helper killed and restored, an
 effect taken out): none (and 800 when one small `Vec` a block is slipped in, to prove the
-count). Not measured yet: the chain's cost per block on the slow-machine matrix (the CPU
-rule in the circuit-plugin playbook).
+count). The chain's cost to the audio thread (`the_chains_cost`, `--ignored`, release, this
+computer, a Ryzen 7 7800X3D, load about 3, the helpers without real-time priority, 128
+frames at 48 kHz, paced, 10 s): one test effect, a median of 7.6 µs a block, 14 µs at the
+99th percentile, 0.38 ms at worst; four, 28 µs, 42 µs and 1.3 ms (half the 2.7 ms period);
+no block missed. So the round trips are cheap and the tail is the scheduler's. Not measured
+yet: the slow-machine matrix (the CPU rule in the circuit-plugin playbook), heavy effects,
+and the Mac and Windows.
 
 ## The temporary interface
 
 `--fx-console`: the standalone reads commands on standard input (`help`, `scan`, `add N`,
-`add-file PATH [ID]`, `remove S`, `move S T`, `bypass S on|off`, `editor S [close]`,
+`add-file PATH [ID]`, `replace S N`, `remove S`, `move S T`, `bypass S on|off`, `editor S [close]`,
 `param S ID VALUE`, `params S`, `chain`, `events`, `kill S`, `save`); `--fx-mode
 sync|pipelined`; `CA72_FX_PATH`, `CA72_FX_STANDARD_FOLDERS`, `CA72_FX_HELPER`, `CA72_FX_LOG`
 (the helpers' stderr). It drives only `Chain`'s public calls, which the FX-A drawer will
-call; on Windows the release build has no console, so it is a Linux and macOS testing aid.
+call (`add`, `replace`, `remove`, `move_to`, `set_bypass`, `open_editor`, `status`,
+`active` for the key's light, `latency`, `events_from`, and `catalog::scan` for the list,
+best on a thread of its own as it may take seconds); on Windows the release build has no console, so it is a Linux and macOS testing aid.
 
 ## Tests and what was tried (Linux, omarchy, 2026-10-18)
 

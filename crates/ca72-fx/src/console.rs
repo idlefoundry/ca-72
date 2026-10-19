@@ -15,6 +15,7 @@ effects console (temporary, for testing):
   scan                  list the effects found (numbered)
   add N                 add effect N of the last scan at the chain's end
   add-file PATH [ID]    add the effect in a plug-in file (its first, or ID)
+  replace S N           put effect N of the last scan in place of effect S
   remove S              take out the chain's effect S (1 to 4)
   move S T              move effect S to place T
   bypass S on|off       bypass effect S, or not
@@ -106,6 +107,22 @@ impl Console {
                 let at = self.chain.add(&found)?;
                 Ok(format!("effect {}: {}", at + 1, found.desc.name))
             })(),
+            Some("replace") => (|| {
+                let s = slot(1)?;
+                let n: usize = words
+                    .get(2)
+                    .ok_or("replace S N")?
+                    .parse()
+                    .map_err(|_| "a number from the scan")?;
+                let found = self
+                    .catalog
+                    .effects()
+                    .nth(n.wrapping_sub(1))
+                    .cloned()
+                    .ok_or("no such effect in the last scan")?;
+                self.chain.replace(s, &found)?;
+                Ok(self.show())
+            })(),
             Some("remove") => slot(1)
                 .and_then(|s| self.chain.remove(s))
                 .map(|()| self.show()),
@@ -140,10 +157,9 @@ impl Console {
                 self.chain.set_param(s, id, v)?;
                 Ok(format!("effect {}: {id} = {v}", s + 1))
             })(),
-            Some("params") => slot(1).and_then(|s| {
-                let st = self.chain.status();
-                let e = st.get(s).ok_or("there is no such effect")?;
-                Ok(e.params
+            Some("params") => slot(1).map(|s| {
+                self.chain
+                    .params(s)
                     .iter()
                     .filter(|p| !p.hidden)
                     .map(|p| {
@@ -153,7 +169,7 @@ impl Console {
                         )
                     })
                     .collect::<Vec<_>>()
-                    .join("\n"))
+                    .join("\n")
             }),
             Some("chain") => Ok(self.show()),
             Some("events") => Ok(self.events()),
