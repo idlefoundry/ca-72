@@ -70,3 +70,16 @@ bug_fixes = [
   "Linux: docks show the CA-72's own icon instead of a gear.",
   "CLAP: a note sent at velocity zero through CLAP's note events now plays.",
 ]
+
+[[release]]
+version = "0.2.8"
+features = []
+performance_improvements = []
+bug_fixes = [
+  "AUTO GAIN no longer moves the level a second after you change a preset or a knob; only DRIVE changes it.",
+  "Presets play at their own AUTO GAIN level the moment you choose them.",
+  "The standalone asks for the microphone only when you choose an external input, and keeps playing while it asks.",
+  "An audio device that doesn't answer is named instead of leaving AUDIO & MIDI empty; MIDI keeps working.",
+  "Mac: MIDI controllers plugged in while the app runs now appear.",
+  "The standalone quits with Command-Q on a Mac and Ctrl+Q on Linux, saving your session.",
+]
