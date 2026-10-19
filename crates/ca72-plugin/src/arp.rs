@@ -27,6 +27,9 @@
 //! Nothing here allocates: the keys are bit sets, the times beats (quarter notes) turned into
 //! the block's samples as each block begins.
 
+/// The sustain pedal's control change.
+pub const SUSTAIN: u8 = 64;
+
 /// The shortest note it plays, seconds (GATE at 0 %).
 pub const SHORTEST: f64 = 0.005;
 

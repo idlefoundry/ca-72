@@ -208,12 +208,93 @@ impl From<NotePriority> for Priority {
     }
 }
 
+/// The arpeggiator's DIRECTION (decisions.md R-ARP): UP, DOWN, UP/DOWN or RANDOM, the
+/// drawer's tabs left to right.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArpDirection {
+    #[id = "up"]
+    #[name = "UP"]
+    Up,
+    #[id = "down"]
+    #[name = "DOWN"]
+    Down,
+    #[id = "up_down"]
+    #[name = "UP/DOWN"]
+    UpDown,
+    #[id = "random"]
+    #[name = "RANDOM"]
+    Random,
+}
+
+impl From<ArpDirection> for crate::arp::Direction {
+    fn from(d: ArpDirection) -> crate::arp::Direction {
+        match d {
+            ArpDirection::Up => crate::arp::Direction::Up,
+            ArpDirection::Down => crate::arp::Direction::Down,
+            ArpDirection::UpDown => crate::arp::Direction::UpDown,
+            ArpDirection::Random => crate::arp::Direction::Random,
+        }
+    }
+}
+
+/// The arpeggiator's RATE (decisions.md R-ARP): a note value, slow to fast as its dial turns,
+/// each straight value's dotted and triplet ones between it and the next
+/// (`crate::arp::RATES`, in the same order).
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArpRate {
+    #[id = "1/2"]
+    #[name = "1/2"]
+    Half,
+    #[id = "1/4d"]
+    #[name = "1/4 dotted"]
+    QuarterDotted,
+    #[id = "1/2t"]
+    #[name = "1/2 triplet"]
+    HalfTriplet,
+    #[id = "1/4"]
+    #[name = "1/4"]
+    Quarter,
+    #[id = "1/8d"]
+    #[name = "1/8 dotted"]
+    EighthDotted,
+    #[id = "1/4t"]
+    #[name = "1/4 triplet"]
+    QuarterTriplet,
+    #[id = "1/8"]
+    #[name = "1/8"]
+    Eighth,
+    #[id = "1/16d"]
+    #[name = "1/16 dotted"]
+    SixteenthDotted,
+    #[id = "1/8t"]
+    #[name = "1/8 triplet"]
+    EighthTriplet,
+    #[id = "1/16"]
+    #[name = "1/16"]
+    Sixteenth,
+    #[id = "1/32d"]
+    #[name = "1/32 dotted"]
+    ThirtySecondDotted,
+    #[id = "1/16t"]
+    #[name = "1/16 triplet"]
+    SixteenthTriplet,
+    #[id = "1/32"]
+    #[name = "1/32"]
+    ThirtySecond,
+}
+
+/// The arpeggiator's OCTAVES: 1 to 4.
+pub const ARP_OCTAVES: (i32, i32) = (1, 4);
+
 #[derive(Params)]
 pub struct Ca72Params {
     /// The noise generator's seed, saved with the session so that it renders the same noise
     /// again.
     #[persist = "noise_seed"]
     pub noise_seed: Arc<AtomicU64>,
+    /// The standalone's TEMPO (beats a minute, f64 bits; decisions.md R-ARP), this computer's
+    /// (`settings.rs`), the arpeggiator's while the host gives none.
+    pub tempo: Arc<AtomicU64>,
     /// The editor's width in logical pixels (its height follows the panel's proportions); 0
     /// until it is resized, when it opens at a share of the screen.
     #[persist = "editor_width"]
@@ -449,6 +530,28 @@ pub struct Ca72Params {
     /// preset's, as NOTE PRIORITY. After it: a session or a preset saved before reads it off.
     #[id = "retrigger"]
     pub retrigger: BoolParam,
+
+    // The arpeggiator (decisions.md R-ARP), the plug-in's own, after everything else, so that
+    // no parameter before it moves. A preset's, as any sound parameter: a preset or a session
+    // saved before reads it off (`Ca72::filter_state`, `presets::targets`).
+    /// ON: the keys held played in turn (off: as played).
+    #[id = "arp_on"]
+    pub arp_on: BoolParam,
+    /// LATCH: the chord last played kept playing after its keys are let go.
+    #[id = "arp_latch"]
+    pub arp_latch: BoolParam,
+    #[id = "arp_direction"]
+    pub arp_direction: EnumParam<ArpDirection>,
+    #[id = "arp_rate"]
+    pub arp_rate: EnumParam<ArpRate>,
+    #[id = "arp_octaves"]
+    pub arp_octaves: IntParam,
+    /// GATE: each note's length, a share of its step (0 %: [`crate::arp::SHORTEST`]).
+    #[id = "arp_gate"]
+    pub arp_gate: FloatParam,
+    /// SWING: every second step late, up to three quarters of the way through the pair.
+    #[id = "arp_swing"]
+    pub arp_swing: FloatParam,
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -565,6 +668,7 @@ impl Default for Ca72Params {
     fn default() -> Self {
         Ca72Params {
             noise_seed: Arc::new(AtomicU64::new(fresh_seed())),
+            tempo: Arc::new(AtomicU64::new(DEFAULT_TEMPO.to_bits())),
             editor_width: Arc::new(AtomicU32::new(0)),
             editor_panel: Arc::new(AtomicBool::new(true)),
             editor_expanded: Arc::new(AtomicBool::new(true)),
@@ -690,6 +794,29 @@ impl Default for Ca72Params {
             quality: EnumParam::new("Quality", QualityMode::Lo),
             note_priority: EnumParam::new("Note Priority", NotePriority::Low),
             retrigger: BoolParam::new("Retrigger", false),
+            arp_on: BoolParam::new("Arp", false),
+            arp_latch: BoolParam::new("Arp Latch", false),
+            arp_direction: EnumParam::new("Arp Direction", ArpDirection::Up),
+            arp_rate: EnumParam::new("Arp Rate", ArpRate::Sixteenth),
+            arp_octaves: IntParam::new(
+                "Arp Octaves",
+                1,
+                IntRange::Linear {
+                    min: ARP_OCTAVES.0,
+                    max: ARP_OCTAVES.1,
+                },
+            ),
+            arp_gate: FloatParam::new(
+                "Arp Gate",
+                50.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+            .with_unit(" %")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
+            arp_swing: percent("Arp Swing"),
         }
     }
 }
@@ -703,7 +830,44 @@ impl std::fmt::Debug for Ca72Params {
     }
 }
 
+/// The standalone's TEMPO for a new computer (the owner, 2026-10-18: "default 120").
+pub const DEFAULT_TEMPO: f64 = 120.0;
+/// How slow and fast TEMPO goes, beats a minute.
+pub const TEMPO_RANGE: (f64, f64) = (30.0, 300.0);
+
 impl Ca72Params {
+    /// The standalone's TEMPO, beats a minute.
+    pub fn tempo(&self) -> f64 {
+        let t = f64::from_bits(self.tempo.load(Ordering::Relaxed));
+        if t.is_finite() {
+            t.clamp(TEMPO_RANGE.0, TEMPO_RANGE.1)
+        } else {
+            DEFAULT_TEMPO
+        }
+    }
+
+    pub fn set_tempo(&self, bpm: f64) {
+        let t = if bpm.is_finite() {
+            bpm.clamp(TEMPO_RANGE.0, TEMPO_RANGE.1)
+        } else {
+            DEFAULT_TEMPO
+        };
+        self.tempo.store(t.to_bits(), Ordering::Relaxed);
+    }
+
+    /// The arpeggiator's settings, as its parameters have them.
+    pub fn arp(&self) -> crate::arp::Settings {
+        crate::arp::Settings {
+            on: self.arp_on.value(),
+            latch: self.arp_latch.value(),
+            direction: self.arp_direction.value().into(),
+            step: crate::arp::RATES[self.arp_rate.value().to_index()].1,
+            octaves: self.arp_octaves.value().clamp(ARP_OCTAVES.0, ARP_OCTAVES.1) as u8,
+            gate: f64::from(self.arp_gate.value()) / 100.0,
+            swing: f64::from(self.arp_swing.value()) / 100.0,
+        }
+    }
+
     /// How the FREQUENCY knobs' dials read on this computer.
     pub fn freq_law(&self) -> Law {
         match self.freq_law.load(Ordering::Relaxed) {
@@ -895,6 +1059,41 @@ mod tests {
         );
         p.set_freq_law(Law::Hardware);
         assert_eq!(p.freq_law(), Law::Hardware);
+    }
+
+    /// The arpeggiator's parameters (R-ARP): their ids after every other, off by default at a
+    /// sixteenth, UP, an octave, GATE 50 % and no SWING; RATE's choices are the scheduler's
+    /// note values in order, its names a host shows.
+    #[test]
+    fn the_arpeggiator_is_off_by_default_its_ids_last() {
+        let p = Ca72Params::default();
+        let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
+        let at = |id: &str| ids.iter().position(|i| i == id).expect(id);
+        for id in [
+            "arp_on",
+            "arp_latch",
+            "arp_direction",
+            "arp_rate",
+            "arp_octaves",
+            "arp_gate",
+            "arp_swing",
+        ] {
+            assert!(at(id) > at("retrigger"), "{id}");
+        }
+        let a = p.arp();
+        assert!(!a.on && !a.latch);
+        assert_eq!(a.direction, crate::arp::Direction::Up);
+        assert_eq!((a.step, a.octaves, a.gate, a.swing), (0.25, 1, 0.5, 0.0));
+        assert_eq!(ArpRate::variants().len(), crate::arp::RATES.len());
+        assert_eq!(ArpRate::variants()[1], "1/4 dotted");
+        assert_eq!(ArpRate::variants()[2], "1/2 triplet");
+        assert_eq!(
+            ArpDirection::variants(),
+            ["UP", "DOWN", "UP/DOWN", "RANDOM"]
+        );
+        assert_eq!(p.tempo(), DEFAULT_TEMPO);
+        p.set_tempo(1000.0);
+        assert_eq!(p.tempo(), TEMPO_RANGE.1);
     }
 
     /// SCATTER's placement offers two choices, EVEN (the default) and CENTER, the strip's tabs
