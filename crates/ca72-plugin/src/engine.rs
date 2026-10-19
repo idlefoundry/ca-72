@@ -3404,8 +3404,16 @@ mod tests {
                             &mut a,
                             &mut b,
                         );
+                        // (The legacy mix's output held back as the engine's is, to come
+                        // out with ULTRA's: decisions.md R-LATENCY.)
+                        let (mut fa, mut fb) = ([0.0f32; CHUNK], [0.0f32; CHUNK]);
                         for i in 0..CHUNK {
-                            let (a, b) = reference.faded(a[i], b[i]);
+                            (fa[i], fb[i]) = reference.faded(a[i], b[i]);
+                        }
+                        let late = reference.lined_up();
+                        reference.line_up.hold(late, &mut fa, &mut fb);
+                        for i in 0..CHUNK {
+                            let (a, b) = (fa[i], fb[i]);
                             assert_eq!(
                                 (l[i].to_bits(), r[i].to_bits()),
                                 (a.to_bits(), b.to_bits()),

@@ -83,3 +83,24 @@ bug_fixes = [
   "Mac: MIDI controllers plugged in while the app runs now appear.",
   "The standalone quits with Command-Q on a Mac and Ctrl+Q on Linux, saving your session.",
 ]
+
+[[release]]
+version = "0.3.0"
+features = [
+  "An arpeggiator: press ARP on the rail for ON, HOLD, DIRECTION, RATE, OCTAVES, GATE and SWING, in time with your host.",
+  "HOLD with the arpeggiator off keeps your notes sounding as a drone until you play a new chord.",
+  "Standalone: press FX for four slots of your own CLAP and VST3 effects; one that crashes never stops the synth.",
+  "Standalone: SETTINGS > AGENTS > ALLOW lets an AI agent play and set up the CA-72 through MCP, on this computer only.",
+  "The Left and Right arrow keys, or MIDI pads you assign, choose the previous and next preset.",
+  "Settings > MOD WHEEL SOURCE chooses the CC or aftertouch that moves the MOD wheel.",
+  "Command-click (Ctrl-click on Windows and Linux) a knob to type an exact value.",
+  "Skin packs: the editor's looks are now packs in one open format.",
+]
+performance_improvements = [
+  "Much cleaner high notes in every QUALITY mode; ULTRA's VCA now runs at four times the sample rate.",
+  "One latency in every QUALITY mode, so switching QUALITY never shifts your timing.",
+]
+bug_fixes = [
+  "Knobs follow every fraction of a trackpad or mouse movement.",
+  "The Audio Unit no longer crashes when a host prepares it on a thread with a small stack.",
+]
