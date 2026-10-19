@@ -95,6 +95,9 @@ pub enum Item {
     SizeMenu,
     /// The SIZE menu's: the window this wide (logical pixels).
     Size(u32),
+    /// The settings' AGENTS (the standalone's; decisions.md R-MCP): AI agents allowed to
+    /// operate it through MCP, or not.
+    Agents(bool),
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -128,6 +131,8 @@ pub enum Pressed {
     SizeMenu,
     /// The SIZE menu: the window this wide (logical pixels).
     Size(u32),
+    /// The settings' menu: agents allowed (true) or not.
+    Agents(bool),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -313,13 +318,14 @@ impl Learning {
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
-    /// decisions.md R54).
+    /// decisions.md R54); in the standalone, under AGENTS, whether AI agents may operate it
+    /// (`agents`, marked; none in a host: decisions.md R-MCP).
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, lettering, law): (Skin, Lettering, Law),
+        (skin, lettering, law, agents): (Skin, Lettering, Law, Option<bool>),
     ) {
         #[allow(unused_mut)]
         let mut items = vec![
@@ -340,8 +346,16 @@ impl Learning {
             items.push((Item::Head, "STANDALONE"));
             items.push((Item::StandaloneSettings, "AUDIO & MIDI…"));
         }
+        if agents.is_some() {
+            items.push((Item::Head, "AGENTS"));
+            items.push((Item::Agents(true), "ALLOW"));
+            items.push((Item::Agents(false), "OFF"));
+        }
         let current = |it: &Item| {
-            *it == Item::Look(skin) || *it == Item::Lettering(lettering) || *it == Item::Dials(law)
+            *it == Item::Look(skin)
+                || *it == Item::Lettering(lettering)
+                || *it == Item::Dials(law)
+                || agents.is_some_and(|a| *it == Item::Agents(a))
         };
         let mut menu = Menu {
             x,
@@ -356,6 +370,7 @@ impl Learning {
                         Item::Look(_)
                             | Item::Lettering(_)
                             | Item::Dials(_)
+                            | Item::Agents(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                     ) && !current(it);
@@ -465,6 +480,7 @@ impl Learning {
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,
             (Some(Item::Size(w)), _) => return Pressed::Size(*w),
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
+            (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
             _ => {}
         }
         Pressed::Done

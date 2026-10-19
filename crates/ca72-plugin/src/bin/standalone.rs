@@ -11,6 +11,8 @@ fn main() {
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--no-devices" => device_access = false,
+            // AI agents allowed for this session, whatever the settings say (docs/mcp.md).
+            "--agents" => ca72_plugin::agent::force(true),
             "--state-dir" => match arguments.next().filter(|path| !path.starts_with("--")) {
                 Some(path) => state_dir = Some(std::path::PathBuf::from(path)),
                 None => {
@@ -20,7 +22,7 @@ fn main() {
             },
             "--help" | "-h" => {
                 println!(
-                    "CA-72 standalone\n\nAudio and MIDI settings are in the editor's settings menu.\n--no-devices     Open the editor without accessing audio or MIDI hardware\n--state-dir DIR  Keep this session in a separate directory"
+                    "CA-72 standalone\n\nAudio and MIDI settings are in the editor's settings menu.\n--no-devices     Open the editor without accessing audio or MIDI hardware\n--state-dir DIR  Keep this session in a separate directory\n--agents         Allow AI agents (MCP, through ca72-mcp) for this session"
                 );
                 return;
             }

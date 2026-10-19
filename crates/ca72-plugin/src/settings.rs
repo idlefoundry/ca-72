@@ -1,7 +1,7 @@
 //! What the plug-in keeps for the computer, not for the session (decisions.md R48,
 //! R51, R54): QUALITY's indicator shown or not, whether ULTRA's note has been read,
 //! the look (the skin) the editor is drawn in, its lettering's size and how the FREQUENCY
-//! knobs' dials read. In the
+//! knobs' dials read, and whether agents may operate the standalone application (R-MCP). In the
 //! shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, and as one changes only that key written, the file read again under a lock
@@ -46,6 +46,10 @@ pub struct Settings {
     pub keyboard_root: u8,
     /// TYPE's C-based octave, independent of the visible range and sound controls.
     pub typing_root: u8,
+    /// Whether AI agents may operate the standalone application through MCP (`crate::agent`;
+    /// decisions.md R-MCP): off unless the player turns it on (SETTINGS: AGENTS). Kept as
+    /// `agents`, true or false.
+    pub agents: bool,
 }
 
 /// One setting changed, as an editor keeps it (`Settings::keep`).
@@ -59,6 +63,7 @@ pub enum Change {
     Keyboard(bool),
     KeyboardRoot(u8),
     TypingRoot(u8),
+    Agents(bool),
 }
 
 impl Change {
@@ -79,6 +84,7 @@ impl Change {
             ),
             Change::KeyboardRoot(root) => ("keyboard_root", i64::from(root.min(84)).into()),
             Change::TypingRoot(root) => ("typing_root", i64::from(root.min(120) / 12 * 12).into()),
+            Change::Agents(on) => ("agents", on.into()),
         };
         t.insert(key.into(), value);
     }
@@ -95,6 +101,7 @@ impl Default for Settings {
             keyboard: None,
             keyboard_root: 41,
             typing_root: ca72_panel::keyboard::TYPE_ROOT,
+            agents: false,
         }
     }
 }
@@ -119,6 +126,7 @@ impl Settings {
         Settings {
             shutter: flag("ultra_shutter", d.shutter),
             ultra_note_read: flag("ultra_note_read", d.ultra_note_read),
+            agents: flag("agents", d.agents),
             keyboard: match t.get("keyboard_view").and_then(toml::Value::as_str) {
                 Some("keyboard") => Some(true),
                 Some("controls") => Some(false),
@@ -165,6 +173,7 @@ impl Settings {
             Change::Keyboard(shown) => self.keyboard = Some(shown),
             Change::KeyboardRoot(root) => self.keyboard_root = root.min(84),
             Change::TypingRoot(root) => self.typing_root = root.min(120) / 12 * 12,
+            Change::Agents(on) => self.agents = on,
         }
     }
 
@@ -267,6 +276,7 @@ mod tests {
             Change::Skin(Skin::Drawn),
             Change::Lettering(Lettering::Large),
             Change::Frequency(Law::Hardware),
+            Change::Agents(true),
         ] {
             Settings::keep(&path, c).expect("kept");
         }
@@ -279,8 +289,14 @@ mod tests {
             keyboard: None,
             keyboard_root: 41,
             typing_root: ca72_panel::keyboard::TYPE_ROOT,
+            agents: true,
         };
         assert_eq!(Settings::read(&path), s);
+        assert!(
+            std::fs::read_to_string(&path)
+                .expect("read")
+                .contains("agents = true")
+        );
         let text = std::fs::read_to_string(&path).expect("read") + "theirs = 3\n";
         std::fs::write(&path, &text).expect("written");
         Settings::keep(&path, Change::Skin(Skin::Worn)).expect("kept");
@@ -363,6 +379,7 @@ mod tests {
                 keyboard: None,
                 keyboard_root: 41,
                 typing_root: ca72_panel::keyboard::TYPE_ROOT,
+                agents: false,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))
