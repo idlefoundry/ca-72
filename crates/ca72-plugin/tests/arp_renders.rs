@@ -535,3 +535,77 @@ fn calibration() {
         }
     }
 }
+
+/// The shortest note as a floor (the owner, 2026-10-19: "NEVER below the minimum gate
+/// length"): 1/32 at 300 BPM (25 ms steps) and with SWING 100 % (its short steps 12.5 ms, so each
+/// note is held over the next's start), GATE 0 and 100 %, in MONO, MONO with RETRIGGER, POLY
+/// and UNISON, NOTE PRIORITY LOW and HIGH: every step's window sounds with the default contour;
+/// with a plucked one (sustain 0), where single triggering cannot start the contours again in a
+/// gap under the circuit's re-arm time, the steps that fade are counted.
+#[test]
+#[ignore = "renders for listening, run by hand"]
+fn shortest_floor() {
+    let quarter = 60.0 / 300.0;
+    let step = ca72_plugin::arp::RATES[12].1 * quarter;
+    let n = 48;
+    for swing in [0.0f32, 1.0] {
+        // The steps' starts (SWING delays every second by SWING × half a step).
+        let starts: Vec<f64> = (0..=n)
+            .map(|k| {
+                k as f64 * step
+                    + if k % 2 == 1 {
+                        f64::from(swing) * step / 2.0
+                    } else {
+                        0.0
+                    }
+            })
+            .collect();
+        for gate in [0.0f32, 1.0] {
+            for (mode, set) in [
+                ("mono", vec![]),
+                ("mono-high", vec![("note_priority", 1.0)]),
+                ("mono-retrigger", vec![("retrigger", 1.0)]),
+                ("poly", vec![("poly", 1.0)]),
+                ("unison", vec![("unison", 1.0)]),
+            ] {
+                for pluck in [false, true] {
+                    let mut s = vec![
+                        ("arp_on", 1.0),
+                        ("arp_rate", rate(12)),
+                        ("arp_gate", gate),
+                        ("arp_swing", swing),
+                    ];
+                    s.extend(set.clone());
+                    if pluck {
+                        s.extend(PLUCK);
+                    }
+                    let a = render(
+                        &s,
+                        starts[n] + 0.2,
+                        &[vec![Ev::Tempo(0, 300.0)], held(0, &[72, 76, 79])].concat(),
+                    );
+                    let windows: Vec<&[f32]> = (0..n)
+                        .map(|k| &a.0[secs(starts[k])..secs(starts[k + 1])])
+                        .collect();
+                    let quietest = windows
+                        .iter()
+                        .map(|w| db(rms(w)))
+                        .fold(f64::INFINITY, f64::min);
+                    let name = format!(
+                        "floor-1-32-300bpm-swing{}-gate{}-{mode}{}",
+                        swing * 100.0,
+                        gate * 100.0,
+                        if pluck { "-pluck" } else { "" }
+                    );
+                    if swing > 0.0 && gate == 0.0 {
+                        save(&name, &a);
+                    }
+                    println!(
+                        "{name}: {}/{n} steps sound, the quietest step {quietest:.1} dBFS",
+                        windows.iter().filter(|w| sounds(w)).count()
+                    );
+                }
+            }
+        }
+    }
+}

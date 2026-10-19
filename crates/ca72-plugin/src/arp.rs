@@ -31,9 +31,16 @@
 //!   held at least [`SHORTEST`], so that its contours start (the trigger closes 7.8 ms after a
 //!   key goes down), and let go at least [`REARM`] before the next, so that they start again
 //!   (the trigger re-arms once the keys have been up about 12 ms); GATE sets where between the
-//!   two the note is let go. A step too short for both keeps the note's and shortens the gap. At
-//!   100 % tied, the next note pressed before the last is let go (legato: single triggering and
-//!   GLIDE take it so), but for the same key again, which is let go first.
+//!   two the note is let go. A step too short for both keeps the note's and shortens the gap; one
+//!   shorter than the note itself holds it over the next's start (the owner: "the gate in the arp
+//!   should NEVER go below the minimum gate length to trigger a sound in the device"), the two
+//!   overlapping until it has had its [`SHORTEST`]. At 100 % tied, the next note pressed before
+//!   the last is let go (legato: single triggering and GLIDE take it so). The same key again
+//!   (one key held, a pattern's repeat, a note folded down from past 127) is let go and pressed
+//!   again once it has been held [`SHORTEST`]; before that it cannot be pressed twice, so the
+//!   step is tied into it, the note held on to that step's release. Letting the keys go (or
+//!   HOLD off) lets a note go at once only once it has had its [`SHORTEST`]; switching ON off,
+//!   All Notes Off and a reset let every note go at once.
 //!
 //! Nothing here allocates: the keys are bit sets and a list of 128, the times beats (quarter
 //! notes) turned into the block's samples as each block begins.
@@ -258,6 +265,19 @@ pub fn audible(p: u8) -> u8 {
     }
 }
 
+/// A note it sounds: its key, when it was pressed and when it is let go (beats; none: tied to
+/// the next step, GATE 100 %).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Held {
+    key: u8,
+    on: f64,
+    off: Option<f64>,
+}
+
+/// How many notes may sound at once: steps under a quarter of [`SHORTEST`] (2.5 ms; past the
+/// tempos and RATEs it plays, but for a bar's last step cut very short) let the oldest go early.
+const OVERLAP: usize = 8;
+
 /// The arpeggiator. Every key the note sources pass goes through it ([`Arp::key`]); what it
 /// plays it hands `out` (key, on), the engine's `Event::Note`.
 #[derive(Debug)]
@@ -286,10 +306,9 @@ pub struct Arp {
     bar: f64,
     /// The next step, while it plays.
     next: Option<Step>,
-    /// The key sounding and when it is let go (beats; none: tied to the next step), and the
-    /// soonest it may be (beats).
-    sounding: Option<u8>,
-    off: Option<f64>,
+    /// The notes sounding (more than one only while a note shorter than its step's allows is
+    /// held to [`SHORTEST`] over the next's start).
+    sounding: [Option<Held>; OVERLAP],
     /// The note last played (as the pattern has it, past 127 too), UP/DOWN's way (up), and
     /// ORDER's place: the octave, the key and its place in the order.
     last: Option<u8>,
@@ -323,8 +342,7 @@ impl Arp {
             anchor: 0.0,
             bar: f64::INFINITY,
             next: None,
-            sounding: None,
-            off: None,
+            sounding: [None; OVERLAP],
             last: None,
             rising: true,
             place: None,
@@ -342,9 +360,22 @@ impl Arp {
         self.s.on
     }
 
-    /// The key it sounds now, if any.
+    /// The key it sounds now (the last pressed), if any.
     pub fn sounding(&self) -> Option<u8> {
         self.sounding
+            .iter()
+            .flatten()
+            .max_by(|a, b| a.on.total_cmp(&b.on))
+            .map(|h| h.key)
+    }
+
+    /// When the next note sounding is let go (beats), if one is to be.
+    fn next_off(&self) -> Option<f64> {
+        self.sounding
+            .iter()
+            .flatten()
+            .filter_map(|h| h.off)
+            .min_by(f64::total_cmp)
     }
 
     /// A block begins: `s` its settings, `clock` the host's transport, `len` samples long.
@@ -434,8 +465,13 @@ impl Arp {
                 };
                 let moved = !self.locked || jumped.abs() > 1e-4;
                 self.locked = true;
-                if moved && let Some(off) = &mut self.off {
-                    *off += jumped;
+                if moved {
+                    for h in self.sounding.iter_mut().flatten() {
+                        h.on += jumped;
+                        if let Some(off) = &mut h.off {
+                            *off += jumped;
+                        }
+                    }
                 }
                 let stale = self
                     .next
@@ -466,7 +502,7 @@ impl Arp {
                 0
             };
             if self.notes().is_empty() {
-                self.silence(out);
+                self.stop(self.pos, out);
             }
         }
         // RATE or SWING moved: the next step on the grid as it now is.
@@ -578,8 +614,7 @@ impl Arp {
         self.pedal = false;
         self.pressed = 0;
         self.next = None;
-        self.sounding = None;
-        self.off = None;
+        self.sounding = [None; OVERLAP];
         self.last = None;
         self.place = None;
     }
@@ -596,7 +631,7 @@ impl Arp {
             return None;
         }
         let step = self.next.map(|n| n.beat);
-        let off = self.sounding.and(self.off);
+        let off = self.next_off();
         let t = match (step, off) {
             (Some(a), Some(b)) => a.min(b),
             (a, b) => a.or(b)?,
@@ -612,14 +647,11 @@ impl Arp {
         // (A bounded loop: a step's length is never below a sample's worth of beats for long,
         // and each pass moves the next step on.)
         for _ in 0..64 {
-            let off = self
-                .sounding
-                .and(self.off)
-                .filter(|&o| self.sample(o) <= at);
+            let off = self.next_off().filter(|&o| self.sample(o) <= at);
             let step = self.next.filter(|n| self.sample(n.beat) <= at);
             match (off, step) {
-                (Some(o), Some(n)) if o <= n.beat + EPS => self.let_go(out),
-                (Some(_), None) => self.let_go(out),
+                (Some(o), Some(n)) if o <= n.beat + EPS => self.let_go(o, out),
+                (Some(o), None) => self.let_go(o, out),
                 (_, Some(n)) => self.play(n, out),
                 (None, None) => return,
             }
@@ -662,20 +694,40 @@ impl Arp {
     fn follow(&mut self, before: Wide, at: usize, out: &mut impl FnMut(u8, bool)) {
         let now = self.notes();
         if now.is_empty() {
-            if !before.is_empty() || self.sounding.is_some() {
-                self.silence(out);
+            if !before.is_empty() || self.sounding().is_some() {
+                self.stop(self.beat(at), out);
             }
         } else if self.next.is_none() {
             self.start(self.beat(at));
         }
     }
 
-    /// Its note let go, nothing more to play.
-    fn silence(&mut self, out: &mut impl FnMut(u8, bool)) {
-        if let Some(k) = self.sounding.take() {
-            out(k, false);
+    /// Nothing more to play from beat `t` (the keys let go, HOLD off): each note let go now, but
+    /// one not yet held [`SHORTEST`], which is let go then (the owner: "NEVER below the minimum
+    /// gate length").
+    fn stop(&mut self, t: f64, out: &mut impl FnMut(u8, bool)) {
+        let shortest = SHORTEST * self.bps;
+        for slot in &mut self.sounding {
+            if let Some(h) = slot {
+                if t - h.on >= shortest - EPS {
+                    out(h.key, false);
+                    *slot = None;
+                } else {
+                    h.off = Some(h.on + shortest);
+                }
+            }
         }
-        self.off = None;
+        self.next = None;
+        self.last = None;
+        self.rising = true;
+        self.place = None;
+    }
+
+    /// Every note let go at once, nothing more to play (ON switched off, its keys handed back).
+    fn silence(&mut self, out: &mut impl FnMut(u8, bool)) {
+        for h in self.sounding.iter_mut().filter_map(Option::take) {
+            out(h.key, false);
+        }
         self.next = None;
         self.last = None;
         self.rising = true;
@@ -759,52 +811,100 @@ impl Arp {
         }
     }
 
-    /// Step `n` played: its key pressed, the last let go (before it, or after it when tied),
-    /// its own release set and the next step.
+    /// Step `n` played: its key pressed, its release set, and the next step. The notes tied to
+    /// it (GATE 100 %) let go after it is pressed (legato), or at their [`SHORTEST`] if they are
+    /// younger. Its key still sounding: let go and pressed again if it has been held
+    /// [`SHORTEST`], else tied into this step, held on to the step's release (a key cannot be
+    /// down twice, and no note is cut short).
     fn play(&mut self, n: Step, out: &mut impl FnMut(u8, bool)) {
         let next = self.after(n);
         self.next = Some(next);
         let Some(p) = self.pick() else {
-            self.silence(out);
+            self.stop(n.beat, out);
             return;
         };
-        let k = audible(p);
-        match self.sounding {
-            // Tied (GATE 100 %): the next pressed first, as legato, unless it is the same key.
-            Some(was) if was != k => {
-                out(k, true);
-                out(was, false);
-            }
-            Some(was) => {
-                out(was, false);
-                out(k, true);
-            }
-            None => out(k, true),
-        }
-        self.sounding = Some(k);
+        let (k, t) = (audible(p), n.beat);
+        let shortest = SHORTEST * self.bps;
+        let off = (self.s.gate < 1.0).then(|| t + self.held_for(next.beat - t));
         self.last = Some(p);
-        let length = next.beat - n.beat;
-        self.off = (self.s.gate < 1.0).then(|| n.beat + self.held_for(length));
+        let same = self
+            .sounding
+            .iter()
+            .position(|h| h.is_some_and(|h| h.key == k));
+        let tied = match same.and_then(|i| self.sounding[i].map(|h| (i, h))) {
+            Some((i, h)) if t - h.on < shortest - EPS => {
+                self.sounding[i] = Some(Held {
+                    off: off.map(|o| o.max(h.on + shortest)),
+                    ..h
+                });
+                true
+            }
+            Some((i, h)) => {
+                out(h.key, false);
+                self.sounding[i] = None;
+                false
+            }
+            None => false,
+        };
+        if !tied {
+            out(k, true);
+            let slot = match self.sounding.iter().position(Option::is_none) {
+                Some(i) => i,
+                // (All full: the oldest let go early.)
+                None => {
+                    let i = (0..OVERLAP)
+                        .min_by(|&a, &b| {
+                            let on = |i: usize| self.sounding[i].map_or(0.0, |h| h.on);
+                            on(a).total_cmp(&on(b))
+                        })
+                        .unwrap_or(0);
+                    if let Some(h) = self.sounding[i].take() {
+                        out(h.key, false);
+                    }
+                    i
+                }
+            };
+            self.sounding[slot] = Some(Held { key: k, on: t, off });
+        }
+        for slot in &mut self.sounding {
+            if let Some(h) = slot
+                && h.key != k
+                && h.off.is_none()
+            {
+                if t - h.on >= shortest - EPS {
+                    out(h.key, false);
+                    *slot = None;
+                } else {
+                    h.off = Some(h.on + shortest);
+                }
+            }
+        }
     }
 
     /// How long a note is held in a step `length` beats long: GATE's share of what lies between
-    /// the shortest note and the shortest gap; in a step too short for both, the note's.
+    /// the shortest note and the shortest gap; in a step too short for both, the shortest note,
+    /// over the next step's start if need be (the owner: "the gate in the arp should NEVER go
+    /// below the minimum gate length to trigger a sound in the device").
     fn held_for(&self, length: f64) -> f64 {
         let (on, gap) = (SHORTEST * self.bps, REARM * self.bps);
         let room = length - on - gap;
         if room >= 0.0 {
             on + self.s.gate * room
         } else {
-            on.min(length)
+            on
         }
     }
 
-    /// The note sounding let go at its time.
-    fn let_go(&mut self, out: &mut impl FnMut(u8, bool)) {
-        if let Some(k) = self.sounding.take() {
-            out(k, false);
+    /// The note due to be let go at beat `o` let go.
+    fn let_go(&mut self, o: f64, out: &mut impl FnMut(u8, bool)) {
+        if let Some(slot) = self
+            .sounding
+            .iter_mut()
+            .find(|h| h.is_some_and(|h| h.off == Some(o)))
+            && let Some(h) = slot.take()
+        {
+            out(h.key, false);
         }
-        self.off = None;
     }
 
     /// The next note to play, as the direction has it (past 127 as the pattern has it).
@@ -1479,14 +1579,26 @@ mod tests {
         l.host = Some(0.0);
         l.bar = Some((0.0, 4.0));
         l.jump = Some((72_001, 4.0));
-        l.run(90_000, &[(0, 60, true)]);
+        l.run(90_000, &[(0, 60, true), (0, 64, true)]);
         assert!(
             ons(&l.played).iter().any(|e| e.0 == 72_001),
             "{:?}",
             ons(&l.played)
         );
-        l.run(91_000, &[(90_500, 60, false)]);
+        l.run(91_000, &[(90_500, 60, false), (90_500, 64, false)]);
         balanced(&l.played);
+        // One key: the loop's step a sample after the last is the same key, not yet held its
+        // shortest: tied into it (not pressed again), the next step 6000 on.
+        let mut l = Exact::new(arp(Direction::Up), 256);
+        l.host = Some(0.0);
+        l.bar = Some((0.0, 4.0));
+        l.jump = Some((72_001, 4.0));
+        l.run(90_000, &[(0, 60, true)]);
+        let at: Vec<usize> = ons(&l.played).iter().map(|e| e.0).collect();
+        assert!(
+            at.contains(&72_000) && !at.contains(&72_001) && at.contains(&78_001),
+            "{at:?}"
+        );
     }
 
     /// A tempo changed between blocks: the next steps follow it from where they were.
@@ -1622,6 +1734,85 @@ mod tests {
         };
         let p = played(s, 128, 6000 * 5, &[(0, 115, true), (10, 115, false)]);
         assert_eq!(on_keys(&p), [115, 127, 127, 127, 127]);
+    }
+
+    /// The shortest note is a floor at every RATE, tempo, GATE and SWING (the owner, 2026-10-19:
+    /// "the gate in the arp should NEVER go below the minimum gate length to trigger a sound in
+    /// the device"): every note, pressed to let go, is held at least `SHORTEST`, the keys let go
+    /// at the end included; a step shorter than that overlaps the last note, or, the same key,
+    /// ties into it; every step sounds (a key is down at each); nothing is stuck. One key, a
+    /// chord, ORDER with a pitch two keys reach, and notes folded down from past 127.
+    #[test]
+    fn no_note_is_shorter_than_the_shortest() {
+        let floor = SHORTEST * RATE - 1.0;
+        let patterns: [(&str, Direction, u8, &[u8]); 4] = [
+            ("one key", Direction::Up, 1, &[60]),
+            ("chord", Direction::Up, 2, &[60, 64, 67]),
+            ("order, C4 C5", Direction::Order, 2, &[60, 72]),
+            ("folded", Direction::UpDown, 4, &[115]),
+        ];
+        let mut notes = 0;
+        for (name, direction, octaves, keys) in patterns {
+            for (label, beats) in RATES {
+                for tempo in [30.0, 60.0, 97.0, 120.0, 180.0, 225.0, 240.0, 300.0, 1000.0] {
+                    for gate in [0.0, 0.12, 0.5, 0.9, 0.99, 1.0] {
+                        for swing in [0.0, 1.0] {
+                            let s = Settings {
+                                gate,
+                                swing,
+                                octaves,
+                                step: beats,
+                                ..arp(direction)
+                            };
+                            let step = beats * 60.0 / tempo * RATE;
+                            let end = (step * 12.0) as usize + 7;
+                            let mut events: Vec<(usize, u8, bool)> =
+                                keys.iter().map(|&key| (0, key, true)).collect();
+                            events.extend(keys.iter().map(|&key| (end, key, false)));
+                            let p = played_with(s, 4096, end + 4000, &events, |r| {
+                                r.tempo = tempo;
+                            });
+                            let what = format!(
+                                "{name}, RATE {label}, {tempo} BPM, GATE {gate}, SWING {swing}"
+                            );
+                            balanced(&p);
+                            notes += p.iter().filter(|e| e.2).count();
+                            let mut down = [None::<usize>; 128];
+                            for &(at, key, on) in &p {
+                                if on {
+                                    down[usize::from(key)] = Some(at);
+                                } else if let Some(from) = down[usize::from(key)].take() {
+                                    assert!(
+                                        (at - from) as f64 >= floor,
+                                        "{what}: {key} held {} samples: {p:?}",
+                                        at - from
+                                    );
+                                }
+                            }
+                            // Every step: a key down just after it.
+                            let mut n = 0;
+                            loop {
+                                let t = n as f64 * step
+                                    + if n % 2 == 1 { swing * step / 2.0 } else { 0.0 };
+                                let t = t.ceil() as usize;
+                                if t >= end {
+                                    break;
+                                }
+                                let mut d = [0i32; 128];
+                                for &(_, key, on) in p.iter().filter(|e| e.0 <= t) {
+                                    d[usize::from(key)] += if on { 1 } else { -1 };
+                                }
+                                let sounding = d.iter().any(|v| *v > 0);
+                                assert!(sounding, "{what}: step {n} at {t} silent: {p:?}");
+                                n += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // (Every case played its dozen steps: 4 patterns, 13 RATEs, 9 tempos, 6 GATEs, 2 SWINGs.)
+        assert!(notes > 4 * 13 * 9 * 6 * 2 * 8, "{notes} notes");
     }
 
     /// HOLD with ON off, a drone (the owner, 2026-10-19): the keys pass as played, held after

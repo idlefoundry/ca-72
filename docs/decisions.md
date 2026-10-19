@@ -8367,6 +8367,36 @@ playing PR #96; and the owner's requests relayed with the night's brief):
   place is put together again (counting it as floating had made every frame whole; the editor's
   part-and-whole test caught it).
 
+**Owner rule, 2026-10-19 (later):** "the gate in the arp should NEVER go below the minimum gate
+length to trigger a sound in the device." `SHORTEST` (20 ms) was a floor only where the step
+allowed it (a step shorter than 20 ms held the note the step's length); it is now absolute:
+- **Agent decisions:** every note is held at least `SHORTEST`, whatever GATE, RATE, SWING or
+  tempo. A step shorter than that (SWING's short steps at the fastest RATEs, a host's tempo past
+  375 at 1/32, a bar's last step cut short) presses the next note while the last is still held,
+  and lets the last go at its 20 ms: up to eight notes may sound at once (`arp::OVERLAP`; a ninth
+  lets the oldest go early, which takes steps under 2.5 ms). Overlapping notes are the engine's
+  as any held keys: POLY gives each a voice, MONO and UNISON play them by NOTE PRIORITY (the
+  later sounds legato, or once the earlier is let go), RETRIGGER waits its gap. **The same key
+  again** while it is still under its `SHORTEST` cannot be pressed twice: the step is tied into
+  the note, which is held on to that step's release (never re-struck short); once it has had
+  its `SHORTEST`, the same key is let go and pressed again, as before. The gap floor (`REARM`)
+  stays wherever the step has room for both. Letting the keys go, and HOLD off, let a note go at
+  once only when it has had its `SHORTEST` (else at it); switching ON off, All Notes Off, PANIC
+  and a reset let everything go at once, as the engine does.
+- **Evidence:** `no_note_is_shorter_than_the_shortest` (`arp.rs`): all 13 RATEs, at 30, 60, 97,
+  120, 180, 225, 240 and 300 BPM and a host's 1000, GATE 0, 12, 50, 90, 99 and 100 %, SWING 0
+  and 100 %, for one key, a chord, ORDER with C4 and C5 (a pitch two keys reach) and notes folded
+  down from past 127 (UP/DOWN from G8 over four octaves): every note, pressed to let go, held at
+  least 960 samples at 48 kHz (the keys let go at the end included), a key down at every step,
+  nothing stuck, no key down twice; over 45 000 notes. Renders (`arp_renders` `shortest_floor`,
+  `wav/floor-*`): 1/32 at 300 BPM, SWING 0 and 100 % (25 and 12.5 ms steps), GATE 0 and 100 %,
+  in MONO with LOW and HIGH priority, MONO with RETRIGGER, POLY and UNISON: every step's window
+  sounding (-17.8 to -21.0 dBFS at the quietest) with the default contour. With a contour of
+  sustain 0, MONO (single triggering) and UNISON fade at 1/32 and 300 BPM without SWING (18 and
+  21 of 48 steps sounding): the 5 ms gap is under the circuit's re-arm time (11.5 to 12 ms), so
+  the contours cannot start again; RETRIGGER and POLY sound every step. No gate can change that
+  short of a longer step, a slower tempo, RETRIGGER or POLY.
+
 **Not done:** listening, in the standalone or a host (renders measured instead); the installed
 plug-ins in a DAW; the Mac and Windows builds; the standalone with an audio device (it ran with
 `--no-devices`; its process is the one the renders ran).

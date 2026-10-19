@@ -1744,6 +1744,10 @@ mod tests {
         c.push_event(note(5, 0, 60, false));
         block(&mut p, &mut c, 256);
         assert_eq!(p.params.cutoff.value(), 5.0);
+        // (The note let go after its shortest, 20 ms: not held on by a pedal.)
+        for _ in 0..4 {
+            block(&mut p, &mut c, 256);
+        }
         assert_eq!((p.arp.sounding(), p.arp.due()), (None, None), "not a pedal");
     }
 
