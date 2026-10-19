@@ -185,10 +185,12 @@ pub enum PresetKey {
     /// MIDI Learn's list in the presets' place, or back.
     MidiLearn,
     Close,
+    /// Restore the sound of a fresh instance, keeping the player's preferences.
+    Init,
 }
 
 impl PresetKey {
-    pub const ALL: [PresetKey; 8] = [
+    pub const ALL: [PresetKey; 9] = [
         PresetKey::Rename,
         PresetKey::Tags,
         PresetKey::Delete,
@@ -197,6 +199,7 @@ impl PresetKey {
         PresetKey::Restore,
         PresetKey::MidiLearn,
         PresetKey::Close,
+        PresetKey::Init,
     ];
 
     fn legend(self) -> &'static str {
@@ -209,12 +212,25 @@ impl PresetKey {
             PresetKey::Restore => "RESTORE",
             PresetKey::MidiLearn => "MIDI LEARN",
             PresetKey::Close => "CLOSE",
+            PresetKey::Init => "INIT",
         }
     }
 
     fn centre(self) -> (f64, f64) {
+        if self == PresetKey::Init {
+            // A dedicated action beside PRESET, above the existing two rows of keys.
+            return (KEY_X[3], LABEL_Y);
+        }
         let i = PresetKey::ALL.iter().position(|k| *k == self).unwrap_or(0);
         (KEY_X[i % 4], KEY_Y[i / 4])
+    }
+
+    fn size(self) -> (f64, f64) {
+        if self == PresetKey::Init {
+            (136.0, 45.0)
+        } else {
+            KEY
+        }
     }
 }
 
@@ -892,7 +908,7 @@ pub fn drawer_hit(s: &DrawerScene, x: f64, y: f64) -> Option<DrawerTarget> {
     }
     for k in PresetKey::ALL {
         let (kx, ky) = k.centre();
-        let (w, h) = KEY;
+        let (w, h) = k.size();
         if (x - kx).abs() <= w / 2.0 + 4.0 && (y - ky).abs() <= h / 2.0 + 4.0 {
             return Some(DrawerTarget::Key(k));
         }
@@ -1249,7 +1265,7 @@ fn plate_svg() -> String {
     }
     for k in PresetKey::ALL {
         let (x, y) = k.centre();
-        let (w, h) = KEY;
+        let (w, h) = k.size();
         soft_shadow(
             &mut s,
             (x - w / 2.0 + 3.0, y - h / 2.0 + 5.0, w, h),
@@ -1634,7 +1650,7 @@ fn key_print_svg(fonts: &Fonts) -> String {
 
 fn key_legend_size(fonts: &Fonts, k: PresetKey) -> f64 {
     let advance = fonts.advance(k.legend(), KEY_LEGEND, Weight::Bold, 0.0);
-    KEY_LEGEND * ((KEY.0 - 16.0) / advance).min(1.0)
+    KEY_LEGEND * ((k.size().0 - 16.0) / advance).min(1.0)
 }
 
 impl DrawerRenderer {
@@ -1722,12 +1738,12 @@ impl DrawerRenderer {
                 &mut self.frame,
                 &still,
                 self.scale,
-                (KEY_X[0] - w, KEY_Y[0] - h, KEY_X[3] + w, KEY_Y[1] + h),
+                (KEY_X[0] - w, 0.0, KEY_X[3] + w, KEY_Y[1] + h),
             );
             let mut o = Svg::default();
             for k in &keys.held {
                 let (x, y) = k.centre();
-                let (w, h) = KEY;
+                let (w, h) = k.size();
                 put!(
                     o,
                     "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#000' fill-opacity='0.34'/><rect x='{}' y='{}' width='{}' height='5' rx='2.5' fill='#000' fill-opacity='0.3'/>",
@@ -1742,7 +1758,7 @@ impl DrawerRenderer {
             }
             for k in &keys.unavailable {
                 let (x, y) = k.centre();
-                let (w, h) = KEY;
+                let (w, h) = k.size();
                 put!(
                     o,
                     "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#000' fill-opacity='0.32'/>",
@@ -1754,7 +1770,7 @@ impl DrawerRenderer {
             }
             if let Some(k) = keys.pointed {
                 let (x, y) = k.centre();
-                let (w, h) = KEY;
+                let (w, h) = k.size();
                 put!(
                     o,
                     "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#fff' fill-opacity='0.07'/>",
@@ -1851,8 +1867,15 @@ fn make_still(scale: f64, pictures: &Pictures) -> Pixmap {
         grid(&mut still, s, &d, UNLIT, DOT_ON);
     }
     let cap = widened(&pictures.button, KEY.0 / KEY.1);
+    let init_size = PresetKey::Init.size();
+    let init_cap = widened(&pictures.button, init_size.0 / init_size.1);
     for k in PresetKey::ALL {
-        sprite(&mut still, &cap, s, k.centre(), KEY);
+        let picture = if k == PresetKey::Init {
+            &init_cap
+        } else {
+            &cap
+        };
+        sprite(&mut still, picture, s, k.centre(), k.size());
     }
     svg_over(&options, &mut still, s, &key_print_svg(&fonts));
     still
@@ -2099,14 +2122,37 @@ mod tests {
         const { assert!(ROWS_SHOWN >= 15 && TAG_LINES >= 16) };
     }
 
+    /// Init is available before any preset is selected, while editing, and in MIDI Learn.
+    #[test]
+    fn init_is_found_without_a_preset_or_selection() {
+        for s in [
+            DrawerScene::default(),
+            DrawerScene {
+                editing: Some(Edit::Save),
+                ..DrawerScene::default()
+            },
+            DrawerScene {
+                midi: Some(MidiList::default()),
+                ..DrawerScene::default()
+            },
+        ] {
+            let (x, y) = key_centre(PresetKey::Init);
+            assert_eq!(
+                drawer_hit(&s, x, y),
+                Some(DrawerTarget::Key(PresetKey::Init))
+            );
+            assert!(y + PresetKey::Init.size().1 / 2.0 < KEY_Y[0] - KEY.1 / 2.0);
+        }
+    }
+
     /// The enlarged captions stay inside their buttons; their hit regions stay separate at
-    /// the minimum supported width too. The existing actions keep their centres.
+    /// the minimum supported width too. Init keeps the existing actions in their places.
     #[test]
     fn readable_key_captions_fit_separate_buttons() {
         let fonts = Fonts::new();
         for (i, k) in PresetKey::ALL.into_iter().enumerate() {
             let (x, y) = k.centre();
-            let (w, h) = KEY;
+            let (w, h) = k.size();
             let size = key_legend_size(&fonts, k);
             assert!(size >= 25.0, "{k:?}: {size}");
             assert!(fonts.advance(k.legend(), size, Weight::Bold, 0.0) <= w - 15.9);
@@ -2114,7 +2160,7 @@ mod tests {
             assert!(y - h / 2.0 > 0.0 && y + h / 2.0 < STATUS.y);
             for other in &PresetKey::ALL[i + 1..] {
                 let (ox, oy) = other.centre();
-                let (ow, oh) = KEY;
+                let (ow, oh) = other.size();
                 assert!(
                     (x - ox).abs() > (w + ow) / 2.0 + 8.0 || (y - oy).abs() > (h + oh) / 2.0 + 8.0,
                     "{k:?} overlaps {other:?}"
@@ -2179,6 +2225,10 @@ mod tests {
                     search: Field::new("bass"),
                     favourites: true,
                     hover: Some(DrawerTarget::Key(PresetKey::SaveAs)),
+                    ..base.clone()
+                },
+                DrawerScene {
+                    hover: Some(DrawerTarget::Key(PresetKey::Init)),
                     ..base.clone()
                 },
                 DrawerScene {

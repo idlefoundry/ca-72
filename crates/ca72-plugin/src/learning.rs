@@ -91,6 +91,7 @@ pub enum Item {
     Dials(Law),
     Head,
     StandaloneSettings,
+    WhatsNew,
     /// The settings' WINDOW: SIZE…, the SIZE menu wanted (R-SIZE).
     SizeMenu,
     /// The SIZE menu's: the window this wide (logical pixels).
@@ -127,6 +128,7 @@ pub enum Pressed {
     /// The settings' menu: the FREQUENCY knobs read through this law.
     Dials(Law),
     StandaloneSettings,
+    WhatsNew,
     /// The settings' menu: SIZE…, the SIZE menu wanted where the settings' was.
     SizeMenu,
     /// The SIZE menu: the window this wide (logical pixels).
@@ -319,7 +321,8 @@ impl Learning {
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
-    /// decisions.md R54).
+    /// decisions.md R54). The title always names this build's version, independent of the
+    /// update check; opening this menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
@@ -340,6 +343,7 @@ impl Learning {
             (Item::Dials(Law::Hardware), "HARDWARE"),
             (Item::Head, "WINDOW"),
             (Item::SizeMenu, "SIZE\u{2026}"),
+            (Item::WhatsNew, "WHAT'S NEW…"),
         ];
         #[cfg(feature = "standalone-production")]
         if crate::standalone_settings::available() {
@@ -353,7 +357,7 @@ impl Learning {
             x,
             y,
             size,
-            title: "SETTINGS".to_owned(),
+            title: format!("SETTINGS · CA-72 {}", crate::update::VERSION),
             items: items
                 .iter()
                 .map(|(it, t)| {
@@ -364,6 +368,7 @@ impl Learning {
                             | Item::Dials(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
+                            | Item::WhatsNew
                     ) && !current(it);
                     ((*t).to_owned(), choosable)
                 })
@@ -508,6 +513,7 @@ impl Learning {
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
+            (Some(Item::WhatsNew), _) => return Pressed::WhatsNew,
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
             (Some(Item::Lettering(l)), _) => return Pressed::Lettering(*l),
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,

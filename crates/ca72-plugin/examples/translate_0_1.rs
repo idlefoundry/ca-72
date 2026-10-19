@@ -6,7 +6,7 @@
 //! (the two presets whose filter's pitch R42 retuned through CUTOFF).
 
 use ca72_plugin::compat::translate_preset;
-use ca72_plugin::library::parse_factory;
+use ca72_plugin::library::{FORMAT, parse_factory};
 use toml::Value;
 
 fn number(x: f64) -> Value {
@@ -36,11 +36,20 @@ fn main() {
         })
         .collect();
     let text = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{file}: {e}"));
-    let presets = parse_factory(&text).unwrap_or_else(|e| panic!("{file}: {e}"));
-    let mut out = String::new();
+    let out = translate_file(&text, &kept).unwrap_or_else(|e| panic!("{file}: {e}"));
+    print!("{out}");
+}
+
+/// A complete preset file, stamped with the scale its translated values use.
+fn translate_file(text: &str, kept: &[(String, String, f64)]) -> Result<String, String> {
+    let presets = parse_factory(text)?;
+    let mut out = format!(
+        "format = {FORMAT}\nversion = {:?}\n",
+        env!("CARGO_PKG_VERSION")
+    );
     for mut s in presets {
         translate_preset(&mut s.values);
-        for (n, k, v) in &kept {
+        for (n, k, v) in kept {
             if *n == s.name
                 && let Some(x) = s.values.iter_mut().find(|(id, _)| id == k)
             {
@@ -65,5 +74,31 @@ fn main() {
             out.push_str(&format!("{k} = {}\n", number(*v)));
         }
     }
-    print!("{out}");
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translated_output_does_not_migrate_entropy_again_when_read() {
+        for (old, want) in [(0.0, 5.0), (40.0, 43.0)] {
+            let input = format!(
+                "format = 1\n[[preset]]\nname = \"Old\"\n[preset.values]\nentropy = {old}\n"
+            );
+            let output = translate_file(&input, &[]).expect("translated file");
+            let table: toml::Table = output.parse().expect("TOML");
+            assert_eq!(table["version"].as_str(), Some(env!("CARGO_PKG_VERSION")));
+            let sounds = parse_factory(&output).expect("current preset");
+            assert_eq!(
+                sounds[0]
+                    .values
+                    .iter()
+                    .find(|(k, _)| k == "entropy")
+                    .map(|(_, v)| *v),
+                Some(want)
+            );
+        }
+    }
 }

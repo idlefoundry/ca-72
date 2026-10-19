@@ -26,7 +26,7 @@ pub enum Dial {
     /// The arpeggiator's (decisions.md R-ARP): RATE, its note values 2 (a half note) to 32, the
     /// straight ones numbered, the dotted and triplet ones between them unnumbered ticks.
     ArpRate,
-    /// OCTAVES, 1 to 4.
+    /// OCTAVES, 1 to 5.
     ArpOctaves,
     /// GATE and SWING: 0 to 100 %.
     Percent,
@@ -39,7 +39,7 @@ impl Dial {
         match self {
             Dial::Voices => Some(8),
             Dial::ArpRate => Some(12),
-            Dial::ArpOctaves => Some(3),
+            Dial::ArpOctaves => Some(4),
             _ => None,
         }
     }

@@ -2,7 +2,7 @@
 //! instrument built on the same model):
 //! ENTROPY, each voice its own parts and its oscillators' and cutoff's slow movements, and
 //! SPREAD, where a voice sits in the stereo field. Neither is the instrument's; at 0 neither
-//! does anything (the circuit as drawn).
+//! adds any offsets (the circuit as drawn; R-ENTROPY-FLOOR).
 
 /// ENTROPY's figures at 100 %: the standard deviations of a voice's own tolerances, and of
 /// its oscillators' movements.
@@ -184,5 +184,53 @@ impl Character {
         voices: usize,
     ) -> (f32, f32) {
         plugin_kit_stereo::place::voice_gains(spread, inner, placement, self.voice, voices)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// R-ENTROPY-FLOOR: the three contributions at 0.2.6's minimum, sampled separately
+    /// so the fixed tuning spread cannot be mistaken for movement during a held note.
+    #[test]
+    fn the_legacy_pitch_floor_is_tuning_drift_and_waver() {
+        let mut sum = [0.0; 3];
+        let mut squares = [0.0; 3];
+        let mut count = 0.0;
+        for seed in 1..=64 {
+            let mut c = Character::new(seed, 0, 3, 6);
+            for sample in 0..96_000 {
+                let (cents, _) = c.offsets(0.75, 48_000.0);
+                if sample < 48_000 {
+                    continue;
+                }
+                for (k, cents) in cents.into_iter().enumerate() {
+                    let parts = [
+                        0.75 * entropy::CENTS * c.tune[k],
+                        0.75 * entropy::DRIFT_CENTS * c.drift[k],
+                        0.75 * c.waver[k],
+                    ];
+                    assert!((parts.iter().sum::<f64>() - cents).abs() < 1e-14);
+                    for i in 0..3 {
+                        sum[i] += parts[i];
+                        squares[i] += parts[i] * parts[i];
+                    }
+                    count += 1.0;
+                }
+            }
+        }
+        let sd: [f64; 3] =
+            std::array::from_fn(|i| (squares[i] / count - (sum[i] / count).powi(2)).sqrt());
+        eprintln!(
+            "legacy floor, cents SD: tuning {}, drift {}, waver {}",
+            sd[0], sd[1], sd[2]
+        );
+        for (got, nominal) in sd.into_iter().zip([3.0, 2.25, 0.3]) {
+            assert!(
+                (0.8 * nominal..1.2 * nominal).contains(&got),
+                "{got} for {nominal}"
+            );
+        }
     }
 }

@@ -749,9 +749,10 @@ fn midi_learn_neither_allocates_nor_frees() {
 }
 
 /// The arpeggiator (decisions.md R-ARP) neither allocates nor frees while it plays: the keys
-/// held and let go, LATCH, the sustain pedal, its every setting automated, the transport
-/// playing, jumping back (a loop) and stopping, ON switched off and on with keys held, All Notes
-/// Off, a block at a time, in the plug-in's own process.
+/// held and let go, HOLD (with ON off, its drone too), the sustain pedal, its every setting
+/// automated (ORDER and OCTAVES 5 among them), the transport playing, jumping back (a loop) and
+/// stopping, ON switched off and on with keys held, All Notes Off, a block at a time, in the
+/// plug-in's own process.
 #[test]
 fn the_arpeggiator_neither_allocates_nor_frees() {
     use ca72_plugin::Ca72;
@@ -837,12 +838,12 @@ fn the_arpeggiator_neither_allocates_nor_frees() {
         );
         beats += BLOCK as f64 * 2.0 / RATE;
         if b % 40 == 0 {
-            for (i, k) in [48u8, 55, 60, 64].iter().enumerate() {
+            for (i, k) in [48u8, 55, 60, 64, 120].iter().enumerate() {
                 c.push_event(key(i as u32 * 7, *k + (b / 40 % 5) as u8, true));
             }
         }
         if b % 40 == 30 {
-            for k in [48u8, 55, 60, 64] {
+            for k in [48u8, 55, 60, 64, 120] {
                 c.push_event(key(64, k + (b / 40 % 5) as u8, false));
             }
         }
@@ -854,12 +855,12 @@ fn the_arpeggiator_neither_allocates_nor_frees() {
         }
         let k = (b / 23) as f32;
         c.automate(a.arp_latch.as_ptr(), if b % 160 < 80 { 0.0 } else { 1.0 });
-        c.automate(a.arp_direction.as_ptr(), (k % 4.0) / 3.0);
+        c.automate(a.arp_direction.as_ptr(), (k % 5.0) / 4.0);
         c.automate(a.arp_rate.as_ptr(), (k % 13.0) / 12.0);
-        c.automate(a.arp_octaves.as_ptr(), (k % 4.0) / 3.0);
+        c.automate(a.arp_octaves.as_ptr(), (k % 5.0) / 4.0);
         c.automate(a.arp_gate.as_ptr(), (k * 0.37) % 1.0);
         c.automate(a.arp_swing.as_ptr(), (k * 0.61) % 1.0);
-        c.automate(a.arp_on.as_ptr(), if b % 210 < 200 { 1.0 } else { 0.0 });
+        c.automate(a.arp_on.as_ptr(), if b % 210 < 150 { 1.0 } else { 0.0 });
         ARMED.store(true, Ordering::SeqCst);
         p.process(&mut buffer, &mut aux, &mut c);
     }

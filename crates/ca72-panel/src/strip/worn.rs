@@ -1328,13 +1328,34 @@ pub(crate) fn pixel_screen(
     frame: &mut Pixmap,
     picture: &Pixmap,
     scale: f64,
-    (x, y, w, h): (f64, f64, f64, f64),
+    window: (f64, f64, f64, f64),
     text: &str,
+) {
+    screen_still(options, frame, picture, scale, window);
+    screen_text(frame, scale, window, text);
+}
+
+/// A pixel screen's bezel and glass, which do not change with what it reads.
+pub(crate) fn screen_still(
+    options: &usvg::Options<'_>,
+    frame: &mut Pixmap,
+    picture: &Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
 ) {
     let mut bezel = Svg::default();
     super::screen_bezel(&mut bezel, (x, y, w, h));
     svg_over(options, frame, scale, &bezel.0);
     glass(frame, picture, scale, (x, y, w, h), 3.0);
+}
+
+/// A pixel screen's dots, `text` lit, centred, over its glass.
+pub(crate) fn screen_text(
+    frame: &mut Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+    text: &str,
+) {
     let mut places = ((w - 16.0) / (6.0 * DOT)).floor().max(1.0) as usize;
     let glyphs: Vec<_> = text.chars().take(places).map(font::glyph).collect();
     // Keep centred text on the same dot grid, including an even character count.

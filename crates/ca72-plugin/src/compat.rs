@@ -1,4 +1,5 @@
-//! Sessions saved by 0.1 translated into 0.2.0's calibration (decisions.md R-TRANSLATE).
+//! Older sessions and presets translated into the current controls (R-TRANSLATE,
+//! R-ENTROPY-FLOOR).
 //!
 //! From 0.2.0 the circuit is calibrated to the owner's hardware reference (R42): the laws of a
 //! dozen knobs were measured on it in place of the drawing's tapers and straight tracks, so the
@@ -30,6 +31,36 @@ pub fn before_0_2(version: &str) -> bool {
     }
     let mut n = version.split('.').map(|x| x.trim().parse::<u32>().ok());
     matches!((n.next().flatten(), n.next().flatten()), (Some(0), Some(minor)) if minor < 2)
+}
+
+/// Before the extended ENTROPY travel (0.2.7); an absent writer version is legacy.
+pub fn before_entropy_floor(version: &str) -> bool {
+    let version = version.trim();
+    if version.is_empty() {
+        return true;
+    }
+    let mut n = version.split('.');
+    let major = n.next().and_then(|v| v.parse::<u32>().ok());
+    let minor = n.next().and_then(|v| v.parse::<u32>().ok());
+    let patch = n
+        .next()
+        .and_then(|v| v.split(['-', '+']).next()?.parse::<u32>().ok())
+        .unwrap_or(0);
+    matches!((major, minor), (Some(0), Some(m)) if m < 2 || (m == 2 && patch < 7))
+}
+
+/// The new percent for a legacy ENTROPY percent (R-ENTROPY-FLOOR).
+pub fn entropy_percent(old: f64) -> f64 {
+    5.0 + 0.95 * old.clamp(0.0, 100.0)
+}
+
+/// A legacy preset's ENTROPY, including the old default if it did not name one.
+pub fn translate_entropy_preset(values: &mut Vec<(String, f64)>) {
+    if let Some((_, v)) = values.iter_mut().find(|(k, _)| k == "entropy") {
+        *v = entropy_percent(*v);
+    } else {
+        values.push(("entropy".to_owned(), 5.0));
+    }
 }
 
 /// A knob whose law 0.2.0 changed: its parameter's ID, its plain value at the knob's two ends,
@@ -267,6 +298,41 @@ pub fn translate_preset(values: &mut Vec<(String, f64)>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entropy_moves_the_old_range_to_five_through_one_hundred() {
+        assert_eq!(entropy_percent(0.0), 5.0);
+        assert_eq!(entropy_percent(40.0), 43.0);
+        assert_eq!(entropy_percent(100.0), 100.0);
+        for i in 0..=1000 {
+            let old = f64::from(i) / 10.0;
+            let new = entropy_percent(old);
+            let depth = crate::engine::entropy_depth(new / 100.0);
+            assert!((depth - old / 100.0 * 2.0).abs() < 1e-15);
+        }
+        for version in [
+            "",
+            "0.1.5",
+            "0.2",
+            "0.2.0",
+            "0.2.6",
+            "0.2.6+build",
+            " 0.2.6 ",
+        ] {
+            assert!(before_entropy_floor(version), "{version}");
+        }
+        for version in [
+            "0.2.7",
+            "0.2.7-beta.1",
+            "0.2.7+build.1",
+            "0.2.8",
+            "0.3.0",
+            "1.0.0",
+            "nightly",
+        ] {
+            assert!(!before_entropy_floor(version), "{version}");
+        }
+    }
 
     #[test]
     fn the_versions_before_0_2_are_0_1s() {
