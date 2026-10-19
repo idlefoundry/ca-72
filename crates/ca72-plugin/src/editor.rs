@@ -766,6 +766,89 @@ impl Drop for PanelWindow {
     }
 }
 
+/// The host's context as the panel's controls set the parameters through it, noting a change
+/// of DRIVE or AUTO GAIN (decisions.md R-AUTO-GAIN-DRIVE): the one change that asks for AUTO
+/// GAIN's curve. It keeps what each was last set to here (normalized, f32's bits; NaN: not
+/// yet), since a host may change a parameter only later (CLAP's, at its next block).
+struct Watched {
+    context: Arc<dyn GuiContext>,
+    drive: ParamPtr,
+    auto_gain: ParamPtr,
+    moved: AtomicBool,
+    drive_set: AtomicU32,
+    auto_gain_set: AtomicU32,
+}
+
+impl Watched {
+    fn new(context: Arc<dyn GuiContext>, params: &Ca72Params) -> Self {
+        Watched {
+            context,
+            drive: params.drive.as_ptr(),
+            auto_gain: params.auto_gain.as_ptr(),
+            moved: AtomicBool::new(false),
+            drive_set: AtomicU32::new(f32::NAN.to_bits()),
+            auto_gain_set: AtomicU32::new(f32::NAN.to_bits()),
+        }
+    }
+
+    /// Whether DRIVE or AUTO GAIN has been set here since this was last asked.
+    fn take_moved(&self) -> bool {
+        self.moved.swap(false, Ordering::AcqRel)
+    }
+
+    /// DRIVE (dB) and AUTO GAIN as last set here, else as the parameters have them.
+    fn drive_and_auto_gain(&self, p: &Ca72Params) -> (f32, bool) {
+        let set =
+            |a: &AtomicU32| Some(f32::from_bits(a.load(Ordering::Acquire))).filter(|v| !v.is_nan());
+        let drive = set(&self.drive_set).map_or(p.drive.value(), |v| p.drive.preview_plain(v));
+        let auto = set(&self.auto_gain_set).map_or(p.auto_gain.value(), |v| v >= 0.5);
+        (drive, auto)
+    }
+}
+
+#[allow(unsafe_code)]
+impl GuiContext for Watched {
+    fn plugin_api(&self) -> PluginApi {
+        self.context.plugin_api()
+    }
+    fn native_window_occlusion_reliable(&self) -> bool {
+        self.context.native_window_occlusion_reliable()
+    }
+    fn request_resize(&self) -> bool {
+        self.context.request_resize()
+    }
+    fn resize_response_will_follow(&self) -> bool {
+        self.context.resize_response_will_follow()
+    }
+    unsafe fn raw_begin_set_parameter(&self, param: ParamPtr) {
+        // SAFETY: the caller's, passed on.
+        unsafe { self.context.raw_begin_set_parameter(param) }
+    }
+    unsafe fn raw_set_parameter_normalized(&self, param: ParamPtr, normalized: f32) {
+        if param == self.drive {
+            self.drive_set
+                .store(normalized.to_bits(), Ordering::Release);
+            self.moved.store(true, Ordering::Release);
+        } else if param == self.auto_gain {
+            self.auto_gain_set
+                .store(normalized.to_bits(), Ordering::Release);
+            self.moved.store(true, Ordering::Release);
+        }
+        // SAFETY: the caller's, passed on.
+        unsafe { self.context.raw_set_parameter_normalized(param, normalized) }
+    }
+    unsafe fn raw_end_set_parameter(&self, param: ParamPtr) {
+        // SAFETY: the caller's, passed on.
+        unsafe { self.context.raw_end_set_parameter(param) }
+    }
+    fn get_state(&self) -> PluginState {
+        self.context.get_state()
+    }
+    fn set_state(&self, state: PluginState) {
+        self.context.set_state(state);
+    }
+}
+
 /// The panel being operated: what the pointer does to the parameters, and the scene drawn.
 struct Editing {
     context: Arc<dyn GuiContext>,
@@ -812,9 +895,10 @@ struct Editing {
     /// the window to, asked of the host at the next frame (once a frame, however often the
     /// pointer moves).
     resizing: Option<(f64, u32)>,
-    /// A press, release, wheel or key here since AUTO GAIN's curve was last asked for (as the
-    /// editor opens too): asked again once nothing is held ([`Editing::measure_when_done`]).
-    touched: bool,
+    /// The controls' way to the host, watching for DRIVE and AUTO GAIN changed here: AUTO
+    /// GAIN's curve is asked for once nothing is held after one ([`Editing::measure_when_done`];
+    /// decisions.md R-AUTO-GAIN-DRIVE). The presets set the parameters through `context`.
+    watched: Watched,
     gripped: Option<u32>,
     /// The usable screen (logical pixels) at the window's scale (the editor's opening size, the
     /// SIZE menu's FIT TO SCREEN and the sizes that fit).
@@ -900,7 +984,6 @@ impl PanelWindow {
     /// A key, the window's own or the host's: the editor's to act on (whether it took it), the
     /// window's size and keyboard following.
     fn key(&mut self, window: &mut Window<'_>, k: &KeyboardEvent) -> bool {
-        self.editing.touched = true;
         let taken = self.editing.keyed(k);
         self.follow(window);
         self.keyboard(window);
@@ -1049,6 +1132,7 @@ impl Editing {
             params: Arc::clone(&params),
             pot,
         });
+        let watched = Watched::new(Arc::clone(&context), &params);
         Editing {
             context,
             params,
@@ -1083,7 +1167,7 @@ impl Editing {
             resizing: None,
             gripped: None,
             screen,
-            touched: true,
+            watched,
             reveal_shown: 0.0,
             motion: Motion::default(),
             motion_at: None,
@@ -1314,13 +1398,22 @@ impl Editing {
         note
     }
 
-    /// A change made here done (nothing held, no wheel's gesture open): AUTO GAIN's curve asked
-    /// for the sound as it now is, measured unless it is already its (decisions.md R45,
-    /// the CA-74's R29). Only the editor asks: the host's automation and learned controllers
-    /// never do, so that a render does not depend on when a measurement finished.
+    /// A change of DRIVE or AUTO GAIN made here done (nothing held, no wheel's gesture open):
+    /// AUTO GAIN's curve asked for the sound as it now is, measured unless it is already its
+    /// (decisions.md R45, the CA-74's R29). Nothing else asks (R-AUTO-GAIN-DRIVE, the owner:
+    /// "This should only be remeasured when drive changes"): a curve that arrives while a note
+    /// plays moves its level, so another control, a preset, a key or the window opening never
+    /// starts one; nor do the host's automation and learned controllers, so that a render does
+    /// not depend on when a measurement finished. Without DRIVE or with AUTO GAIN off nothing
+    /// is measured (the curve does nothing there).
     fn measure_when_done(&mut self) {
-        if self.touched && !self.dragging() && self.scroll.is_none() {
-            self.touched = false;
+        if self.dragging() || self.scroll.is_some() || !self.watched.take_moved() {
+            return;
+        }
+        // (DRIVE and AUTO GAIN as set here: the host may not have taken them yet. Neither is
+        // part of the sound measured.)
+        let (drive, auto) = self.watched.drive_and_auto_gain(&self.params);
+        if auto && drive > 0.0 {
             self.params.drive_curve.ask(&self.params.controls());
         }
     }
@@ -1344,7 +1437,7 @@ impl Editing {
     }
 
     fn setter(&self) -> ParamSetter<'_> {
-        ParamSetter::new(self.context.as_ref())
+        ParamSetter::new(&self.watched)
     }
 
     /// The pointer's place in the drawing.
@@ -3201,12 +3294,6 @@ impl WindowHandler for PanelWindow {
             }
             Event::Mouse(e) => {
                 let released = matches!(e, MouseEvent::ButtonReleased { .. });
-                self.editing.touched |= matches!(
-                    e,
-                    MouseEvent::ButtonPressed { .. }
-                        | MouseEvent::ButtonReleased { .. }
-                        | MouseEvent::WheelScrolled { .. }
-                );
                 let status = if self.editing.mouse(e) {
                     EventStatus::Captured
                 } else {
@@ -4496,6 +4583,87 @@ mod tests {
         editing_with(Library::at(
             std::env::temp_dir().join("ca72-editor-tests-no-library"),
         ))
+    }
+
+    /// R-AUTO-GAIN-DRIVE (the owner: "This should only be remeasured when drive changes"):
+    /// with DRIVE up, the window opening, CUTOFF turned, a key, a preset chosen and QUALITY
+    /// switched ask for no measurement of AUTO GAIN's curve, so nothing arrives while a note
+    /// plays; the preset's own curve is in force at once. DRIVE changed here asks; so does AUTO
+    /// GAIN switched on, and nothing does with AUTO GAIN off.
+    #[test]
+    fn only_drive_or_auto_gain_changed_here_asks_for_auto_gains_curve() {
+        // (The test's host applies nothing: the parameters stay at their defaults, DRIVE 0,
+        // AUTO GAIN on; the editor goes by what it set.)
+        let (mut e, host, params) = editing();
+        let cal = &params.drive_curve;
+        let asked = |e: &mut Editing| {
+            e.measure_when_done();
+            cal.waiting()
+        };
+        assert!(!asked(&mut e), "the window opening");
+        let cutoff = CONTROLS
+            .iter()
+            .position(|c| c.param == "cutoff")
+            .expect("CUTOFF");
+        e.set_once(cutoff, 0.7);
+        assert!(!host.take().is_empty());
+        assert!(!asked(&mut e), "CUTOFF turned");
+        keyed(&mut e, Key::Character("a".into()));
+        assert!(!asked(&mut e), "a key");
+        let quality = CONTROLS
+            .iter()
+            .position(|c| c.param == "quality")
+            .expect("QUALITY");
+        e.set_once(quality, 1.0);
+        assert!(!asked(&mut e), "QUALITY switched");
+        // A factory preset: its curve (QUALITY LO, as the instance is) at once, nothing asked.
+        let smoke = crate::library::factory()
+            .iter()
+            .find(|s| s.name == "Smoke Flute")
+            .expect("Smoke Flute")
+            .clone();
+        let entry = e.browser.library.find(&smoke.name).expect("listed");
+        // (Through the host, as the presets set the parameters.)
+        let host_context: &dyn GuiContext = host.as_ref();
+        let setter = ParamSetter::new(host_context);
+        e.browser.choose(&entry, &params, &setter);
+        assert_eq!(Some(cal.saved().db), smoke.drive_curve_lo);
+        assert!(!asked(&mut e), "a preset chosen");
+        // DRIVE typed into its readout: asked, once nothing is held.
+        let readout = on_strip(&e, strip_at(StripTarget::Readout(Readout::Drive)));
+        click(&mut e, readout);
+        click(&mut e, readout);
+        for c in "13".chars() {
+            keyed(&mut e, Key::Character(c.to_string()));
+        }
+        keyed(&mut e, Key::Enter);
+        assert!(asked(&mut e), "DRIVE changed here");
+        // Measured: the sound's own curve; AUTO GAIN switched off and on here asks again only
+        // when it is not the sound's.
+        cal.set_rate(crate::engine::MIN_VOICE_RATE);
+        cal.measure_now();
+        assert!(!cal.waiting());
+        // (As the strip's switch sets it.)
+        let switch = |e: &Editing, on: bool| {
+            let s = e.setter();
+            s.begin_set_parameter(&params.auto_gain);
+            s.set_parameter(&params.auto_gain, on);
+            s.end_set_parameter(&params.auto_gain);
+        };
+        switch(&e, true);
+        assert!(
+            !asked(&mut e),
+            "AUTO GAIN on, the curve already the sound's"
+        );
+        switch(&e, false);
+        assert!(!asked(&mut e), "AUTO GAIN off: nothing to measure");
+        // (Another sound meanwhile: the preset's curve again, its key none.)
+        e.browser.choose(&entry, &params, &setter);
+        switch(&e, true);
+        assert!(
+            asked(&mut e),
+            "AUTO GAIN switched on, the curve not the sound's"
+        );
     }
 
     #[test]
