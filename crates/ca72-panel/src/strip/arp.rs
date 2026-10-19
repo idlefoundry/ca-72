@@ -244,16 +244,13 @@ impl ArpRenderer {
     /// At `scale`, in `skin` and `lettering`: what does not change made on a thread of its own,
     /// begun now (as the editor opens, so that the drawer's first drop waits for none of it).
     pub fn new(scale: f64, skin: Skin, lettering: Lettering) -> Self {
-        let fonts = Fonts::new();
         let mut r = ArpRenderer {
             scale,
             skin,
             lettering,
-            options: usvg::Options {
-                fontdb: fonts.database(),
-                font_family: FAMILY.into(),
-                ..usvg::Options::default()
-            },
+            // (What it draws as it goes, the readouts' segments and the pointer's tab, has no
+            // lettering: no fonts loaded for it as the editor opens.)
+            options: usvg::Options::default(),
             warming: None,
             still: None,
             frame: Pixmap::new(1, 1).expect("a pixel"),
