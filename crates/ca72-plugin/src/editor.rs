@@ -4753,6 +4753,43 @@ mod tests {
         assert!(!Readout::Auto.typed());
     }
 
+    /// ENTROPY's new reading and OFF/recall use the entire travel, including below 5 %.
+    #[test]
+    fn entropy_displays_the_new_amount_and_recalls_it_after_off() {
+        let (mut e, host, params) = editing();
+        let context = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        let p = params.entropy.as_ptr();
+        let shown = |e: &mut Editing| {
+            e.draw();
+            e.strip_scene.readouts[Readout::ALL
+                .iter()
+                .position(|r| *r == Readout::Entropy)
+                .unwrap()]
+            .clone()
+        };
+        assert_eq!(shown(&mut e), ("5".to_owned(), true));
+        for (amount, text) in [(0.05, "5"), (0.02, "2"), (0.43, "43")] {
+            assert!(context.automate(p, amount));
+            assert_eq!(shown(&mut e), (text.to_owned(), true));
+            e.switch_amount(Readout::Entropy, false);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, 0.0), Call::End(p)]
+            );
+            assert!(context.automate(p, 0.0));
+            assert_eq!(shown(&mut e), ("OFF".to_owned(), false));
+            e.switch_amount(Readout::Entropy, true);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, amount), Call::End(p)]
+            );
+        }
+    }
+
     /// The rail's settings key (decisions.md R51) opens its menu: under LOOK the editor's
     /// looks, the realistic by default, marked and not to be chosen; CLASSIC draws the editor in
     /// the drawn skin and is kept, REALISTIC brings the realistic back.
@@ -6223,17 +6260,18 @@ mod tests {
             host.take(),
             vec![Call::Begin(auto), Call::Set(auto, 0.0), Call::End(auto)]
         );
-        // ENTROPY's, WIDTH's and INNER's switches: on from 0 at half way (they never were).
-        for (r, p) in [
-            (Readout::Entropy, params.entropy.as_ptr()),
-            (Readout::Width, params.spread.as_ptr()),
-            (Readout::Inner, params.inner.as_ptr()),
+        // ENTROPY starts at the old minimum, now 5 %: its first click turns it off.
+        // WIDTH and INNER start off: their first click recalls half way (they never were).
+        for (r, p, to) in [
+            (Readout::Entropy, params.entropy.as_ptr(), 0.0),
+            (Readout::Width, params.spread.as_ptr(), 0.5),
+            (Readout::Inner, params.inner.as_ptr(), 0.5),
         ] {
             let at = on_strip(&e, strip_at(StripTarget::Switch(r)));
             click(&mut e, at);
             assert_eq!(
                 host.take(),
-                vec![Call::Begin(p), Call::Set(p, 0.5), Call::End(p)]
+                vec![Call::Begin(p), Call::Set(p, to), Call::End(p)]
             );
         }
         // VOICES's knob dragged up: nothing at these defaults, where it does nothing (MONO,

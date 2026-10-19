@@ -178,13 +178,15 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   sounding. With POLY and UNISON off, VOICES counts only as the one voice's places (SPREAD,
   below); with DOUBLE on or WIDTH at 0 it changes nothing, and is dimmed and does not turn,
   as DETUNE is without DOUBLE.
-- **ENTROPY** (0 to 100 %, off by default): each voice its own parts, as if built from a
-  different batch: the three oscillators' tuning, the filter's cutoff and EMPHASIS, the
-  contours' times and GLIDE, each off by a little; the oscillators and the cutoff drift
-  slowly and waver. It applies to the one voice with POLY off too. At 0 each oscillator
-  still keeps a tiny mismatch and drift of its own, as no two real ones are the same:
-  perfectly identical oscillators lock in phase and sound louder, not better. The host
-  parameter **Lock** makes them identical (the circuit as drawn), its level matched.
+- **ENTROPY** (0 to 100 %, 5 % by default): each voice its own parts, as if built from a
+  different batch. At 5 % the oscillators have the small tuning mismatch, slow drift and
+  waver that previous versions had at 0 %. Below 5 % these fall linearly to steady pitch
+  at 0 %. Above 5 % the previous range continues: the filter's cutoff and EMPHASIS, the
+  contours' times and GLIDE vary between voices too. The host parameter **Lock** removes
+  the oscillator mismatch and movement at any amount, with its existing level match.
+  The panel's deliberate pitch modulation remains available, including noise modulation.
+  Older presets and projects move to the equivalent new value when loaded. A DAW's
+  automation lanes keep their normalised positions and play the new mapping.
 - **SPREAD** (0 to 100 %, off by default): POLY's or UNISON's voices across the stereo
   field, each as loud wherever it sits, where **SCATTER** puts them: EVEN (the default),
   evenly from edge to edge, the first two at the edges; or CENTER, the first in the centre and
