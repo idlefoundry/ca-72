@@ -941,6 +941,8 @@ struct Editing {
     /// Where they are kept (none in the tests' editors, which keep nothing on the computer).
     settings_file: Option<std::path::PathBuf>,
     ultra_note: bool,
+    whats_new: Option<ca72_panel::whats_new::View>,
+    whats_new_checked: bool,
     /// A value being typed into a readout (decisions.md R52): which, and what so far; the
     /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
     /// a switch had before it), for a double click.
@@ -1083,7 +1085,8 @@ impl PanelWindow {
             || learning
             || self.editing.typing.is_some()
             || self.editing.note_typing_allowed()
-            || self.editing.standalone_dialog_open();
+            || self.editing.standalone_dialog_open()
+            || self.editing.whats_new.is_some();
         // (And the keys the host gives the view: the editor's while it holds them.)
         self.host_keys.holding.store(holding, Ordering::Release);
         // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
@@ -1213,6 +1216,8 @@ impl Editing {
             settings,
             settings_file: (!cfg!(test)).then(crate::settings::file),
             ultra_note: false,
+            whats_new: None,
+            whats_new_checked: false,
             typing: None,
             typing_keys: false,
             last_strip_press: None,
@@ -1272,6 +1277,33 @@ impl Editing {
         self.motion = Motion::at(self.params.quality.value(), 0.0);
         self.scene.opening = self.motion.opening(!self.settings.shutter);
         self
+    }
+
+    /// Called only by an editor window's frame, once it is actually visible. Neither
+    /// constructing the plug-in/editor nor drawing a hidden editor consumes the claim.
+    fn release_notes_when_visible(&mut self, visible: bool) {
+        if !visible || self.whats_new_checked {
+            return;
+        }
+        self.whats_new_checked = true;
+        if let Some(path) = &self.settings_file {
+            match crate::settings::claim_release_notes(path, crate::update::VERSION) {
+                Ok(Some(notes)) => self.show_release_notes(notes),
+                Ok(None) => {}
+                Err(error) => nih_log!("Could not keep What's New history: {error}"),
+            }
+        }
+    }
+
+    fn show_release_notes(&mut self, notes: crate::whats_new::Notes) {
+        self.whats_new = Some(notes.view());
+        let height = f64::from(self.physical_height()) / self.renderer.scale();
+        if let Some(view) = &mut self.whats_new {
+            view.fit(self.renderer.fonts(), height, self.settings.lettering);
+        }
+        self.list_travel = 0.0;
+        self.typing_keys = true;
+        self.composed = None;
     }
 
     /// The editor drawn in `skin` from now on, on this computer (decisions.md R51): its
@@ -1346,6 +1378,7 @@ impl Editing {
             && self.typing.is_none()
             && !self.learning.holds_keys(&self.params.midi_map)
             && !self.standalone_dialog_open()
+            && self.whats_new.is_none()
     }
 
     /// The FREQUENCY knobs read through `law` from now on, on this computer (decisions.md
@@ -2129,6 +2162,13 @@ impl Editing {
 
     fn press(&mut self, modifiers: Modifiers) {
         let (x, y) = self.in_drawing(self.pointer);
+        if let Some(notes) = &mut self.whats_new {
+            if notes.press(x, y) {
+                self.whats_new = None;
+            }
+            self.composed = None;
+            return;
+        }
         #[cfg(feature = "standalone-production")]
         if let Some(dialog) = &mut self.standalone_dialog {
             if dialog.press(x, y) {
@@ -2174,6 +2214,10 @@ impl Editing {
             Pressed::Done => return,
             Pressed::Indicator(shown) => {
                 self.keep_settings(Change::Shutter(shown));
+                return;
+            }
+            Pressed::WhatsNew => {
+                self.show_release_notes(crate::whats_new::current());
                 return;
             }
             Pressed::StandaloneSettings => {
@@ -2373,7 +2417,7 @@ impl Editing {
     /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R34),
     /// on the panel or the strip; elsewhere none.
     fn context_menu(&mut self) {
-        if self.standalone_dialog_open() {
+        if self.standalone_dialog_open() || self.whats_new.is_some() {
             return;
         }
         self.playing.release();
@@ -2474,7 +2518,7 @@ impl Editing {
 
     /// The pointer moved.
     fn moved(&mut self, modifiers: Modifiers) {
-        if self.standalone_dialog_open() {
+        if self.standalone_dialog_open() || self.whats_new.is_some() {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
@@ -2662,6 +2706,20 @@ impl Editing {
     }
 
     fn scrolled(&mut self, delta: ScrollDelta, modifiers: Modifiers) {
+        if let Some(notes) = &mut self.whats_new {
+            let rows = match delta {
+                ScrollDelta::Lines { y, .. } => f64::from(y),
+                ScrollDelta::Pixels { y, .. } => {
+                    f64::from(y) * self.dpr / self.renderer.scale() / 60.0
+                }
+            };
+            self.list_travel += rows;
+            let whole = self.list_travel.trunc();
+            notes.scroll(-(whole as i32));
+            self.list_travel -= whole;
+            self.composed = None;
+            return;
+        }
         if self.standalone_dialog_open() {
             return;
         }
@@ -3068,6 +3126,10 @@ impl Editing {
             .learning
             .list
             .then(|| self.learning.list_scene(&self.params.midi_map));
+        let notes_height = f64::from(self.physical_height()) / self.renderer.scale();
+        if let Some(notes) = &mut self.whats_new {
+            notes.fit(self.renderer.fonts(), notes_height, self.settings.lettering);
+        }
         let panel = self.renderer.render(&self.scene);
         self.strip_scene.bar.clone_from(&self.browser.bar);
         // (The strip's parts drawn again over the panel's frame where it changed there: the
@@ -3135,7 +3197,8 @@ impl Editing {
                 || shut
                 || lower_moving
                 || self.renderer.floating()
-                || self.standalone_dialog_open()))
+                || self.standalone_dialog_open()
+                || self.whats_new.is_some()))
         .then(|| {
             let mut places = self.renderer.damages().to_vec();
             if let Some([x0, y0, x1, y1]) = self.strip.damage() {
@@ -3178,6 +3241,11 @@ impl Editing {
             && let Some(frame) = &mut self.composed
         {
             dialog.draw(frame, self.renderer.scale());
+        }
+        if let Some(notes) = &self.whats_new
+            && let Some(frame) = &mut self.composed
+        {
+            notes.draw(frame, self.renderer.scale(), self.renderer.fonts());
         }
         true
     }
@@ -3544,6 +3612,25 @@ impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
         self.reconcile_resize();
+        if let Some(notes) = &mut self.whats_new {
+            if k.state == KeyState::Up {
+                self.playing.key(k, false);
+            }
+            if k.state == KeyState::Down {
+                match k.key {
+                    Key::Escape | Key::Enter => self.whats_new = None,
+                    Key::ArrowDown => notes.scroll(1),
+                    Key::ArrowUp => notes.scroll(-1),
+                    Key::PageDown => notes.page(1),
+                    Key::PageUp => notes.page(-1),
+                    Key::Home => notes.home(),
+                    Key::End => notes.end(),
+                    _ => {}
+                }
+                self.composed = None;
+            }
+            return true;
+        }
         let allowed = self.note_typing_allowed();
         let typing_root = self.playing.typing_root;
         if self.playing.key(k, allowed) {
@@ -3692,6 +3779,13 @@ impl WindowHandler for PanelWindow {
                 return;
             }
             self.hidden_drawn = Some(now);
+        }
+        if !self.editing.whats_new_checked {
+            self.editing
+                .release_notes_when_visible(window::release_notes_visible(
+                    window,
+                    self.editing.context.native_window_occlusion_reliable(),
+                ));
         }
         #[cfg(test)]
         DRAWN.fetch_add(1, Ordering::Relaxed);
@@ -4192,6 +4286,69 @@ pub(crate) mod window {
         }
     }
 
+    /// Stricter than repaint visibility: an unmapped scan/test editor must not consume
+    /// What's New. A remote AU's backing window can be occluded while its attached view
+    /// is presented by the host, so only that case ignores native occlusion (R-AU-REMOTE-VISIBILITY).
+    #[cfg_attr(target_os = "macos", allow(unexpected_cfgs))]
+    pub fn release_notes_visible(window: &baseview::Window<'_>, reliable: bool) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use cocoa::base::{id, nil};
+            use objc::{msg_send, sel, sel_impl};
+            let RawWindowHandle::AppKit(h) = window.raw_window_handle() else {
+                return false;
+            };
+            let view = h.ns_view as id;
+            if view == nil {
+                return false;
+            }
+            // SAFETY: baseview's live NSView, read on its GUI thread.
+            let (holder, hidden): (id, objc::runtime::BOOL) = unsafe {
+                (
+                    msg_send![view, window],
+                    msg_send![view, isHiddenOrHasHiddenAncestor],
+                )
+            };
+            if holder == nil || hidden != objc::runtime::NO {
+                return false;
+            }
+            // SAFETY: the live view's NSWindow, on its GUI thread. BOOL differs between
+            // Intel and Apple silicon; Rust's bool is not AppKit's return type on Intel.
+            let visible: objc::runtime::BOOL = unsafe { msg_send![holder, isVisible] };
+            visible != objc::runtime::NO && (!reliable || seen(window))
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use winapi::um::winuser::IsWindowVisible;
+            let _ = reliable;
+            // SAFETY: baseview's live HWND, read on its GUI thread.
+            hwnd(window).is_some_and(|hwnd| unsafe { IsWindowVisible(hwnd) } != 0) && seen(window)
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use x11rb::protocol::xproto::{ConnectionExt, MapState};
+            let _ = reliable;
+            let xid = match window.raw_window_handle() {
+                RawWindowHandle::Xcb(h) => h.window,
+                RawWindowHandle::Xlib(h) => h.window as u32,
+                _ => return false,
+            };
+            let Ok((connection, _)) = x11rb::connect(None) else {
+                return false;
+            };
+            connection
+                .get_window_attributes(xid)
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+                .is_some_and(|attributes| attributes.map_state == MapState::VIEWABLE)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        {
+            let _ = (window, reliable);
+            false
+        }
+    }
+
     /// Whether the editor's window has lost the pointer's capture (Windows: baseview
     /// captures it at a press and lets it go at the release, and ignores its loss, at Alt-Tab
     /// mid-drag, when no release comes). Elsewhere a release always comes.
@@ -4620,6 +4777,171 @@ mod tests {
             panic!("the editor does not read the state")
         }
         fn set_state(&self, _state: PluginState) {}
+    }
+
+    #[test]
+    fn release_notes_wait_for_a_visible_editor_and_reopen_without_changing_the_sound() {
+        use crate::engine::{Engine, Event};
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        let (mut e, host, params) = editing();
+        e.settings_file = Some(path.clone());
+        e.update = Update::with(
+            crate::update::fake::no_curl,
+            crate::update::fake::no_browser,
+        );
+        e.draw();
+        let controls = params.controls();
+        let preset = crate::presets::values_now(&params);
+        let fields = params.serialize_fields();
+        let update = e.update.scene();
+        let render = || {
+            let mut engine = Engine::new();
+            engine.set(&params.controls());
+            engine.prepare(48_000.0, 12345);
+            engine.event(Event::Note { key: 60, on: true });
+            (0..4096)
+                .map(|_| {
+                    let (l, r) = engine.tick_stereo(0.0);
+                    (l.to_bits(), r.to_bits())
+                })
+                .collect::<Vec<_>>()
+        };
+        let audio = render();
+        assert!(audio.iter().any(|&(l, _)| f32::from_bits(l).abs() > 0.001));
+        for _ in 0..3 {
+            e.release_notes_when_visible(false);
+            e.draw();
+        }
+        assert!(!e.whats_new_checked && e.whats_new.is_none());
+        assert!(!path.exists(), "a hidden editor never consumes the history");
+        e.release_notes_when_visible(true);
+        assert!(e.whats_new.is_some());
+        let saved = std::fs::read(&path).expect("claim kept");
+        e.draw();
+        assert!(keyed(&mut e, Key::Escape));
+        assert!(e.whats_new.is_none());
+        e.release_notes_when_visible(true);
+        assert!(e.whats_new.is_none(), "dismissal is final for this editor");
+        e.strip_press(StripTarget::Bar(BarTarget::Settings));
+        assert!(menu_items(&e).contains(&("WHAT'S NEW…".to_owned(), true)));
+        menu_item(&mut e, "WHAT'S NEW…");
+        assert!(e.whats_new.is_some(), "manual reopening remains available");
+        e.scrolled(ScrollDelta::Lines { x: 0.0, y: -2.0 }, Modifiers::empty());
+        e.draw();
+        assert!(keyed(&mut e, Key::End));
+        assert!(keyed(&mut e, Key::Home));
+        assert!(keyed(&mut e, Key::Enter));
+        e.draw();
+        assert!(e.whats_new.is_none());
+        assert_eq!(params.controls(), controls);
+        assert_eq!(crate::presets::values_now(&params), preset);
+        assert_eq!(
+            params.serialize_fields(),
+            fields,
+            "saved project fields unchanged"
+        );
+        assert_eq!(render(), audio, "audio remains bit-identical");
+        assert!(host.take().is_empty(), "no sound parameter gestures");
+        assert_eq!(e.update.scene(), update, "no network request");
+        assert_eq!(
+            std::fs::read(&path).expect("settings"),
+            saved,
+            "reopening/dismissal write nothing"
+        );
+        drop(e);
+        for api in [PluginApi::Clap, PluginApi::Vst3, PluginApi::Standalone] {
+            let (mut restarted, _, _) = editing_for_api(
+                Ca72Params::default(),
+                Library::at(dir.path().join("library")),
+                api,
+            );
+            restarted.settings_file = Some(path.clone());
+            restarted.release_notes_when_visible(true);
+            assert!(
+                restarted.whats_new.is_none(),
+                "shared history after restart: {api}"
+            );
+        }
+    }
+
+    #[test]
+    fn release_notes_do_not_interrupt_a_held_typing_note_or_lose_its_release() {
+        let (mut e, _, _) = editing_standalone();
+        e.playing.typing = true;
+        let down = KeyboardEvent {
+            key: Key::Character("a".into()),
+            ..Default::default()
+        };
+        assert!(e.keyed(&down));
+        assert!(e.playing.notes.pop().expect("attack").on);
+        let generation = e.playing.notes.generation();
+        e.show_release_notes(crate::whats_new::current());
+        e.draw();
+        assert_eq!(e.playing.notes.generation(), generation);
+        assert!(
+            e.playing.notes.pop().is_none(),
+            "opening leaves the note sounding"
+        );
+        let up = KeyboardEvent {
+            state: KeyState::Up,
+            ..down
+        };
+        assert!(e.keyed(&up));
+        assert!(!e.playing.notes.pop().expect("release through the notes").on);
+        assert!(keyed(&mut e, Key::Escape));
+    }
+
+    #[test]
+    fn release_notes_fit_both_looks_lettering_sizes_and_compact_views() {
+        for skin in [Skin::Drawn, Skin::Worn] {
+            for lettering in [Lettering::Standard, Lettering::Large] {
+                for expanded in [false, true] {
+                    let (mut e, host, _) = editing();
+                    e.set_look(skin);
+                    e.set_lettering(lettering);
+                    e.params.editor_panel.store(expanded, Ordering::Relaxed);
+                    e.set_panel_height(expanded);
+                    e.fit(1.0, MIN_WIDTH, MIN_WIDTH);
+                    e.show_release_notes(
+                        crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                            .expect("combined notes"),
+                    );
+                    e.draw();
+                    assert_eq!(e.expanded(), expanded);
+                    assert_eq!(
+                        e.composed.as_ref().expect("notes frame").height(),
+                        e.physical_height()
+                    );
+                    if let Some(out) = std::env::var_os("CA72_WHATS_NEW_PNG") {
+                        let out = std::path::Path::new(&out);
+                        std::fs::create_dir_all(out).expect("evidence folder");
+                        e.composed
+                            .as_ref()
+                            .expect("notes frame")
+                            .save_png(
+                                out.join(format!("notes-{skin:?}-{lettering:?}-{expanded}.png")),
+                            )
+                            .expect("PNG");
+                    }
+                    let close = at(
+                        &e,
+                        (
+                            art::W - 300.0,
+                            f64::from(e.physical_height()) / e.renderer.scale()
+                                - if lettering == Lettering::Large {
+                                    52.5
+                                } else {
+                                    42.0
+                                },
+                        ),
+                    );
+                    click(&mut e, close);
+                    assert!(e.whats_new.is_none(), "close button works in each view");
+                    assert!(host.take().is_empty());
+                }
+            }
+        }
     }
 
     fn editing() -> (Editing, Arc<Host>, Arc<Ca72Params>) {

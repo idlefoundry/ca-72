@@ -61,6 +61,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libx11-dev libx11-xcb-dev libxcb1-dev
 
+      - name: Bundled release notes match the build
+        run: cargo test -p ca72-plugin --lib whats_new::tests::bundled_notes_match_the_build_and_the_maintained_sources
+
       - name: Bundles
         run: |
           if [ "$RUNNER_OS" = macOS ]; then

@@ -531,3 +531,60 @@ fn entropy_saved_by_an_old_version_moves_once_and_automation_uses_the_new_range(
     assert!(b.load(&a.save()));
     assert_eq!(b.value("entropy"), 0.0);
 }
+
+/// Scanner-style construction, live processing and offline rendering all leave the
+/// shared What's New history alone when no editor opens. Child processes isolate the
+/// settings override from the other host tests.
+#[test]
+fn no_editor_means_no_release_notes_during_scanning_or_rendering() {
+    if std::env::var_os("CA72_NOTES_HEADLESS_CHILD").is_some() {
+        use clap_sys::ext::render::{CLAP_EXT_RENDER, CLAP_RENDER_OFFLINE, clap_plugin_render};
+        let path = ca72_plugin::settings::file();
+        let before = std::fs::read(&path).ok();
+        for _ in 0..3 {
+            let instance = Instance::new();
+            let state = instance.save();
+            instance.process(&[]);
+            let render: &clap_plugin_render = instance.extension(CLAP_EXT_RENDER);
+            // SAFETY: the live instance's CLAP render extension, on its main test thread.
+            assert!(unsafe { (render.set.unwrap())(instance.plugin, CLAP_RENDER_OFFLINE) });
+            instance.process(&[]);
+            assert_eq!(
+                instance.save(),
+                state,
+                "processing adds no release-note project state"
+            );
+        }
+        assert_eq!(std::fs::read(&path).ok(), before, "no editor, no claim");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("shared data folder");
+    for existing in [false, true] {
+        if existing {
+            let folder = dir.path().join("CA-72");
+            std::fs::create_dir_all(&folder).expect("settings folder");
+            std::fs::write(
+                folder.join("settings.toml"),
+                "last_version_shown = '0.2.3'\n",
+            )
+            .expect("previous version");
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "no_editor_means_no_release_notes_during_scanning_or_rendering",
+                "--nocapture",
+            ])
+            .env("CA72_NOTES_HEADLESS_CHILD", "1")
+            .env("IDLE_FOUNDRY_SHARED", dir.path())
+            .env("CA72_SEATS_DIR", dir.path().join("seats"))
+            .output()
+            .expect("headless host");
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

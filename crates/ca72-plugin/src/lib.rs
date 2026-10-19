@@ -30,6 +30,7 @@ pub mod standalone_error;
 #[cfg(feature = "standalone-production")]
 pub mod standalone_settings;
 pub mod update;
+pub mod whats_new;
 
 use std::sync::Arc;
 

@@ -8056,3 +8056,70 @@ the inventory, the design, the tools and what comes next.
 - The AGENTS menu in the running application. The menu itself was drawn in a test
   (`CA72_AGENTS_PNG`); in the application it sits below STANDALONE's AUDIO & MIDI….
 - Hosts and plug-ins.
+
+## R-WHATS-NEW. Offline release highlights after an update
+
+**Owner instruction, 2026-10-18 (#75, overnight job).** Build the machinery with a
+"deliberately plain, clearly temporary presentation, kept separate from the logic so the
+chosen look can replace it". The owner is choosing between a dialog in the AUDIO & MIDI
+style and a drawer on the panel's face. Neither look is decided here. SETTINGS already
+shows the installed build's version (R-VERSION).
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **Bundled highlights.** `docs/releases/notes.toml` condenses the maintained Markdown
+  notes, with Features, Performance improvements, Bug fixes. This checkout has sources
+  for 0.2.3 to 0.2.7; missing historical changes are not invented. The current entry follows
+  0.2.7's draft, which must be revised along with the draft before publication. A release
+  test checks the workspace/build version, current entry and maintained releases. CI runs
+  it before bundling on each platform. `docs/whats-new.md` records the release steps.
+- **Ranges.** A safe previous semantic version selects every available entry after it
+  through the installed version. The view lists exactly the releases included, and each
+  combined item names its release. First installs and unsafe history show current
+  highlights. Semantic-version precedence ignores build metadata; a downgrade and the
+  same version show nothing automatically.
+- **One claim on this computer.** The existing shared `CA-72/settings.toml` stores
+  `last_version_shown`, under its existing file lock. Reading, comparing and replacing
+  happen under one lock, preserving other keys. The highest version shown is retained
+  across downgrades. The claim is kept before displaying, so a crash immediately after
+  it can consume that automatic showing; Settings remains available. Unreadable or
+  unwritable settings suppress the automatic display without overwriting a bad file.
+- **Only a visible editor.** The claim is made in the editor window's frame, after a
+  visibility check, never in construction, activation or processing. The claim's check is
+  stricter than the repaint policy: X11 requires a mapped, viewable window, Windows a
+  visible window with its top window not minimised, macOS an attached, unhidden view with
+  its window visible. A remote AU uses its attached view rather than unreliable backing
+  window occlusion (R-AU-REMOTE-VISIBILITY). No audio or project state participates.
+- **Manual reopening.** SETTINGS > WHAT'S NEW always opens the current release's
+  highlights, without claiming or rewriting history or starting an update check.
+- **Temporary view.** A separate panel module accepts prepared content, wraps and scrolls
+  it inside the current viewport in either look and lettering size, including compact
+  views. Page buttons, the wheel and keyboard navigation reach all entries; CLOSE,
+  Escape and Enter dismiss it. It does not resize the saved window or become project
+  state. The final presentation still needs the owner's choice.
+
+**Verification (Linux x86, Rust 1.97.1, 2026-10-19).** The touched crates' tests pass,
+including release ranges, unknown history, downgrades, restart persistence, twelve
+simultaneous threads and eight separate host processes claiming one version. A real CLAP
+entry-point test constructs instances, processes live and offline, and saves state with no
+editor: shared history is untouched on both a fresh install and an existing settings file.
+Editor tests show, dismiss and reopen the notes without sound gestures, preset changes or
+saved-field changes, with audio identical to the bit. A held typing note continues and its
+release passes through the notes. The view's tests wrap, scroll to the last entry and close
+at multiple widths, both lettering sizes and compact/full heights; eight editor renders
+cover both looks. Both approved panel images still pass. Clippy for the touched crates,
+all targets, passes with default and all features. `target/whats-new-evidence/` holds the
+logs and PNGs. No native host, installed plug-in or audio device was opened; macOS and
+Windows execution and the remote AU's visibility still need host acceptance. The final
+appearance, current-only manual view and claim-before-display policy await the owner's
+confirmation at review.
+
+The full workspace run, including standalone support with ngspice 47 required, passed
+537 tests, 0 failed, 57 ignored at `56b9a1e`. Independent source review found one macOS
+ABI mismatch: AppKit's `BOOL` is a signed char on Intel and a Rust bool only on Apple
+silicon. The visibility check now uses `objc::runtime::BOOL` for both native Boolean
+results. It also requires `NSWindow.isVisible` for remote AU views, bypassing only the
+occlusion bit. The existing remote-view evidence above had `isVisible=true`, so this
+preserves that observed case while excluding an ordered-out backing window. A hidden
+host proxy whose backing window remains visible still needs native host acceptance.
+This final correction is macOS-only; Linux does not compile or execute those calls.
