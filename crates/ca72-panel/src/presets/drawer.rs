@@ -2104,15 +2104,16 @@ fn make_still(scale: f64, pictures: &Pictures, dress: &Dress) -> Pixmap {
     // A look's drawing over the face, under the print, the glass and the keys.
     if let Some(art) = &dress.art {
         let size = art.size();
-        if let Some(mut layer) = Pixmap::new(w, h) {
-            resvg::render(
+        if let Some(mut layer) = Pixmap::new(w, h)
+            && skin_pack::svg::render(
                 art,
                 Transform::from_scale(
                     (W * s) as f32 / size.width(),
                     (DRAWER_H * s) as f32 / size.height(),
                 ),
                 &mut layer.as_mut(),
-            );
+            )
+        {
             still.draw_pixmap(
                 0,
                 0,

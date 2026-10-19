@@ -17,6 +17,23 @@ pub fn check(path: &str, bytes: &[u8], limits: &Limits, report: &mut Report) -> 
 
 /// Decodes a PNG within `limits`, discarding its pixels: its size.
 pub fn decode(bytes: &[u8], limits: &Limits) -> Result<(u32, u32), String> {
+    let mut reader = read(bytes, limits)?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("its pixels cannot be read: {e}"))?;
+    let info = reader.info();
+    Ok((info.width, info.height))
+}
+
+/// A PNG's size, from its header, within `limits` (nothing decoded).
+pub(crate) fn header(bytes: &[u8], limits: &Limits) -> Result<(u32, u32), String> {
+    let reader = read(bytes, limits)?;
+    Ok((reader.info().width, reader.info().height))
+}
+
+/// A PNG's reader, its header read and its size within `limits`.
+fn read<'a>(bytes: &'a [u8], limits: &Limits) -> Result<png::Reader<&'a [u8]>, String> {
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("not a PNG".into());
     }
@@ -29,7 +46,7 @@ pub fn decode(bytes: &[u8], limits: &Limits) -> Result<(u32, u32), String> {
         },
     );
     decoder.set_transformations(png::Transformations::EXPAND);
-    let mut reader = decoder
+    let reader = decoder
         .read_info()
         .map_err(|e| format!("its header cannot be read: {e}"))?;
     let (w, h) = (reader.info().width, reader.info().height);
@@ -42,11 +59,7 @@ pub fn decode(bytes: &[u8], limits: &Limits) -> Result<(u32, u32), String> {
     if reader.info().animation_control.is_some() {
         return Err("an animated PNG: a pack's pictures are still".into());
     }
-    let mut buf = vec![0; reader.output_buffer_size()];
-    reader
-        .next_frame(&mut buf)
-        .map_err(|e| format!("its pixels cannot be read: {e}"))?;
-    Ok((w, h))
+    Ok(reader)
 }
 
 #[cfg(test)]

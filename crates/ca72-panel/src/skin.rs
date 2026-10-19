@@ -168,16 +168,17 @@ impl Source {
     }
 }
 
-/// A drawing drawn `w` by `h` pixels, stretched to them.
+/// A drawing drawn `w` by `h` pixels, stretched to them (`None` if it cannot be drawn there
+/// within its buffers' limits: `skin_pack::svg::render`).
 pub fn draw_at(tree: &resvg::usvg::Tree, (w, h): (u32, u32)) -> Option<Pixmap> {
     let mut p = Pixmap::new(w, h)?;
     let s = tree.size();
-    resvg::render(
+    skin_pack::svg::render(
         tree,
         Transform::from_scale(w as f32 / s.width(), h as f32 / s.height()),
         &mut p.as_mut(),
-    );
-    Some(p)
+    )
+    .then_some(p)
 }
 
 /// A PNG's size, from its header.

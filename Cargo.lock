@@ -2280,6 +2280,7 @@ dependencies = [
  "roxmltree",
  "serde",
  "sha2",
+ "simplecss",
  "tempfile",
  "toml",
  "ttf-parser",

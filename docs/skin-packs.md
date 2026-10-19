@@ -402,7 +402,9 @@ its dots the pack's `lamp`, its print the pack's typeface in `tab_print`'s colou
 - event attributes (`on...`);
 - any reference outside the drawing: an `href` other than `#name`, a `url(...)` other than
   `url(#name)`, or an `<image>` other than embedded PNG data (`data:image/png;base64,...`);
-- a pattern filled with another pattern;
+- a pattern filled with another pattern, or whose own elements are filled or stroked with it
+  (by an element around the pattern, which they inherit from, also through `inherit`, whichever
+  of their own declarations wins);
 - an `id` given to two elements, or to anything that is not SVG's or is inside `<metadata>`.
 
 **Limits:** 20,000 elements drawn, each reference (a `use`, a `href`, a `url(#name)`) counted
@@ -424,9 +426,31 @@ a picture at its slot's size), in "pixel-equivalents":
 At most **60 million**: about 100 ms on an M4 Pro, half a second on a machine five times
 slower. The counting stops as soon as a limit is passed.
 
-A drawing is also drawn once as a test, on a thread of its own, against a 250 ms limit, as a
+**What drawing it holds.** The renderer allocates a buffer for each layer, pattern tile,
+filter result, clip and mask, and a buffer it cannot have ends the plug-in's host at once (it
+is not an error the plug-in can catch). So before anything is drawn, the check also counts
+those buffers, at the size the drawing is used, each as large as the renderer makes it:
+
+- a group's layer (its opacity, clip, mask or filter): its box, at most five times the
+  drawing's size each way;
+- a pattern's tile, at its transformed size, however little of it shows;
+- a filter's whole region (it is not cut to the drawing) for each primitive, with its inputs,
+  copies and scratch;
+- a clip's or a mask's copies of the layer it cuts, and again for each clip or mask that cuts
+  it;
+- an embedded picture, decoded.
+
+Each buffer is at most **16 million pixels**, and all of them together, counted as if none were
+freed, at most **256 MB**. Coordinates, filter offsets and blurs too large for the renderer's
+integer arithmetic are refused, and elements may be nested (references followed) at most 64
+deep. When the plug-in draws a pack's drawing, larger than it was checked at (a large window on
+a high-resolution screen) or stretched to a part's proportions, its buffers are counted again
+there, against four times these limits: past them, it is not drawn.
+
+A drawing is also drawn once as a test, on a thread of its own, against a 2 s limit, as a
 backstop. While another drawing's test is still running past its deadline, the test is
-skipped, with a note: the counted cost already bounds it.
+skipped, with a note: the counted cost already bounds it. A test drawing that panics refuses
+its pack (`svg.panicked`), and the packs after it are tested as before.
 
 ### Fonts
 

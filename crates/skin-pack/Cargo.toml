@@ -12,6 +12,8 @@ publish.workspace = true
 resvg = { version = "0.45", default-features = false }
 # usvg's own XML parser, to read an SVG strictly (no DTD) before usvg sees it.
 roxmltree = "0.20"
+# usvg's own CSS tokenizer, to read a style's declarations as usvg reads them.
+simplecss = "0.2"
 # fontdb's and rustybuzz's font parser, to read a font's tables.
 ttf-parser = "0.25"
 png = "0.17"
