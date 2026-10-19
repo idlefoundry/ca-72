@@ -25,6 +25,16 @@ pub enum Dial {
     Level,
 }
 
+/// The time dial's labelled marks: angle in degrees and milliseconds (R-KNOB-ENTRY).
+pub const TIME_MARKS: [(f64, f64); 6] = [
+    (-120.0, 10.0),
+    (-90.0, 200.0),
+    (-30.0, 600.0),
+    (30.0, 1000.0),
+    (67.0, 5000.0),
+    (108.0, 10000.0),
+];
+
 /// A selector's legends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Legends {

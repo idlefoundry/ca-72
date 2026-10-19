@@ -15,6 +15,7 @@ pub mod skin;
 pub mod strip;
 mod svg;
 pub mod ultra;
+pub mod value_entry;
 pub mod whats_new;
 
 pub use art::{H, Layout, Lettering, PLATE_NAME, W};
