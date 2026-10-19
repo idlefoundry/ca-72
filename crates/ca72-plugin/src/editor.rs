@@ -1015,6 +1015,7 @@ impl Editing {
             Settings::load()
         };
         params.set_freq_law(settings.frequency);
+        params.set_tempo(f64::from(settings.tempo));
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
         playing.standalone = standalone;
@@ -2479,11 +2480,12 @@ impl Editing {
         }
         #[cfg(feature = "standalone-production")]
         {
-            if let Some(dialog) = crate::standalone_settings::take_requested()
+            if let Some(mut dialog) = crate::standalone_settings::take_requested()
                 && self.standalone_dialog.is_none()
             {
                 self.playing.release();
                 self.end_gestures();
+                dialog.set_tempo(self.settings.tempo);
                 self.standalone_dialog = Some(dialog);
                 self.playing.wants_keys = true;
                 self.composed = None;
@@ -2492,6 +2494,15 @@ impl Editing {
                 && dialog.frame()
             {
                 self.composed = None;
+            }
+            // TEMPO changed there: the arpeggiator's at once, and this computer's (R-ARP).
+            if let Some(bpm) = self
+                .standalone_dialog
+                .as_mut()
+                .and_then(crate::standalone_settings::Dialog::take_tempo)
+            {
+                self.keep_settings(Change::Tempo(bpm));
+                self.params.set_tempo(f64::from(bpm));
             }
         }
         let requested_height = self.params.editor_panel.load(Ordering::Relaxed)

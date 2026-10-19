@@ -547,9 +547,11 @@ impl Plugin for Ca72 {
     ) -> bool {
         // How this computer's FREQUENCY dials read: a learned controller turns the knob through
         // it, the editor open or not (decisions.md R54).
+        // And the standalone's TEMPO, the arpeggiator's where the host gives none (R-ARP).
         if !cfg!(test) {
-            self.params
-                .set_freq_law(crate::settings::Settings::load().frequency);
+            let settings = crate::settings::Settings::load();
+            self.params.set_freq_law(settings.frequency);
+            self.params.set_tempo(f64::from(settings.tempo));
         }
         self.engine.set(&self.params.controls());
         self.engine
