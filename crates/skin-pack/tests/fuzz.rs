@@ -3,6 +3,7 @@
 //! repeated), each read as a pack would be. A reader must never panic, never take long, and
 //! always answer (loaded or refused). `SKIN_PACK_FUZZ=<n>` runs `n` cases a reader (300 by
 //! default); a case that fails is written to the system's temporary folder to reproduce.
+//! `SKIN_PACK_FUZZ_SEED=<u64>` selects another repeatable mutation sequence.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
@@ -93,7 +94,11 @@ fn mutate(seed: &[u8], rng: &mut Rng) -> Vec<u8> {
 /// Runs `read` on `cases()` mutations of each seed: it must not panic, nor take more than
 /// `most` (a debug build's).
 fn fuzz(name: &str, seeds: &[Vec<u8>], most: Duration, read: impl Fn(&[u8])) {
-    let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ name.len() as u64);
+    let seed = std::env::var("SKIN_PACK_FUZZ_SEED")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ name.len() as u64 ^ seed);
     for k in 0..cases() {
         let seed = &seeds[k % seeds.len()];
         let input = mutate(seed, &mut rng);
@@ -225,13 +230,60 @@ fn packs_mutated_inside_never_panic_or_hang() {
     }
 }
 
+/// A drawing read as the plug-in reads one at 300 pixels; if it is read, drawn as a test (it
+/// must not be past the limits it was read within), and drawn stretched to a strip
+/// (as a part's picture may be: its buffers counted again there).
+fn read_and_draw(b: &[u8]) {
+    use resvg::tiny_skia::{Pixmap, Transform};
+    if let Ok((tree, _)) = svg::parse_at(b, &Limits::default(), Some(300)) {
+        let drawn = svg::test_draw(&tree, 300, 2_000);
+        assert_ne!(drawn, svg::Drawn::TooLarge, "the test drawing");
+        let size = tree.size();
+        let mut strip = Pixmap::new(300, 30).expect("a pixmap");
+        let stretch = Transform::from_scale(300.0 / size.width(), 30.0 / size.height());
+        let _ = svg::render(&tree, stretch, &mut strip.as_mut());
+    }
+}
+
 #[test]
 fn drawings_never_panic_or_hang() {
     let seeds = vec![SVG.as_bytes().to_vec()];
     fuzz("svg", &seeds, Duration::from_secs(5), |b| {
-        if let Ok((tree, _)) = svg::parse(b, &Limits::default()) {
-            let _ = svg::test_draw(&tree, 300, 2_000);
-        }
+        read_and_draw(b);
+    });
+}
+
+#[test]
+fn drawing_buffers_never_panic_or_hang() {
+    let seeds = vec![
+        include_bytes!("fixtures/vast-pattern/art/panel.svg").to_vec(),
+        include_bytes!("fixtures/pattern-fuzz-17237.svg").to_vec(),
+        include_bytes!("fixtures/embedded-png.svg").to_vec(),
+        include_bytes!("fixtures/embedded-png-huge.svg").to_vec(),
+        br"<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>
+        <defs><radialGradient id='g' gradientTransform='matrix(1 0 1 1 0 0)'>
+        <stop offset='0' stop-color='#123'/><stop offset='1' stop-color='#abc'/>
+        </radialGradient></defs><g transform='matrix(1 .1 .1 1 2 2)' opacity='.5'>
+        <path d='M0 0 Q20 10 30 20 C40 30 50 10 90 20 Z' fill='url(#g)' stroke='#abc'
+        stroke-width='2' stroke-dasharray='1 2' stroke-dashoffset='1'/></g></svg>"
+            .to_vec(),
+        br"<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>
+        <defs><pattern id='p' width='10' height='10' patternUnits='userSpaceOnUse'
+        patternTransform='matrix(1 0 1 1 0 0)'><g opacity='.5'><rect width='10' height='10'/></g>
+        </pattern><mask id='a'><rect width='100' height='100' fill='url(#p)'/></mask>
+        <mask id='b' mask='url(#a)'><rect width='100' height='100'/></mask>
+        <clipPath id='c'><rect width='100' height='100'/></clipPath>
+        <clipPath id='d' clip-path='url(#c)'><rect width='100' height='100'/></clipPath>
+        <filter id='f' filterUnits='userSpaceOnUse' width='100' height='100'>
+        <feFlood result='f'/><feGaussianBlur stdDeviation='2'/><feOffset dx='1' dy='2'/>
+        <feColorMatrix type='saturate' values='.5'/><feComposite in2='f' operator='in'/>
+        <feMerge><feMergeNode in='SourceGraphic'/><feMergeNode/></feMerge></filter></defs>
+        <g opacity='.5' mask='url(#b)' clip-path='url(#d)' filter='url(#f)'>
+        <rect width='100' height='100' fill='url(#p)'/></g></svg>"
+            .to_vec(),
+    ];
+    fuzz("buffers", &seeds, Duration::from_secs(5), |b| {
+        read_and_draw(b);
     });
 }
 

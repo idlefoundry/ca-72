@@ -106,6 +106,68 @@ fn a_good_pack_is_read_with_its_terms_and_its_declarations_as_declared() {
     assert!(p.report.has("licence.terms"));
 }
 
+/// Packs whose checking once aborted the process (an allocation that fails is not a panic):
+/// each read in a child process, so that a regression fails this test, not the run.
+#[test]
+fn packs_that_once_aborted_their_check_are_refused_in_a_child_process() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let drawing = |name: &str| {
+        let dir = pack("CC-BY-4.0");
+        write(
+            dir.path(),
+            "art/panel.svg",
+            &std::fs::read(fixtures.join(name)).expect("the fixture"),
+        );
+        dir
+    };
+    // The pack made by hand, and the fuzzer's case as a pack's drawing.
+    let fuzzed = drawing("pattern-fuzz-17237.svg");
+    for dir in [fixtures.join("vast-pattern"), fuzzed.path().to_owned()] {
+        let out = std::process::Command::new(std::env::current_exe().expect("this test"))
+            .args([
+                "--exact",
+                "a_pack_named_by_the_parent_is_checked",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD_PACK, &dir)
+            .output()
+            .expect("a child process");
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{}: the check ended {}:\n{said}\n{}",
+            dir.display(),
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(said.contains("refused: svg.refused"), "{said}");
+        assert!(said.contains("a pattern's tile"), "{said}");
+    }
+}
+
+/// The pack a parent test names, checked with its test drawings, in this process.
+const CHILD_PACK: &str = "SKIN_PACK_TEST_CHILD_PACK";
+
+#[test]
+fn a_pack_named_by_the_parent_is_checked() {
+    let Some(dir) = std::env::var_os(CHILD_PACK) else {
+        return;
+    };
+    match open(Path::new(&dir)) {
+        Ok(p) => println!("accepted:\n{}", p.report),
+        Err(r) => {
+            let codes: Vec<&str> = r
+                .findings
+                .iter()
+                .filter(|f| f.severity == Severity::Reject)
+                .map(|f| f.code)
+                .collect();
+            println!("refused: {}\n{r}", codes.join(", "));
+        }
+    }
+}
+
 #[test]
 fn price_and_licence_are_independent() {
     // An open pack may be sold, and a proprietary one carries its own terms: neither is the
