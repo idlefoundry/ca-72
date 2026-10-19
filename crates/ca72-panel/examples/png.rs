@@ -203,10 +203,7 @@ fn drop_arp(
     );
     let depth = (arp::DEPTH * scale).round() as usize;
     for y in 0..depth.min(f.height() as usize) {
-        let (from, to) = (
-            (y * f.width() as usize + x0) * 4,
-            ((top + y) * w + x0) * 4,
-        );
+        let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
         let n = (x1 - x0) * 4;
         all.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
     }

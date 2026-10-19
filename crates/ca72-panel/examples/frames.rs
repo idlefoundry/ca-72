@@ -136,7 +136,10 @@ fn arp(s: f64, panel: &mut Renderer) {
     let put = |d: &ArpRenderer, c: &mut Pixmap| {
         let top = arp::top_px(s) as usize;
         let f = d.frame();
-        let (x0, x1) = ((arp::LEFT * s).round() as usize, (arp::RIGHT * s).round() as usize);
+        let (x0, x1) = (
+            (arp::LEFT * s).round() as usize,
+            (arp::RIGHT * s).round() as usize,
+        );
         let w = c.width() as usize;
         for y in 0..f.height() as usize {
             let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
@@ -190,7 +193,9 @@ fn arp(s: f64, panel: &mut Renderer) {
         sc.knobs[2] = 0.3 + 0.01 * i as f64;
         sc.readouts[2].0 = format!("{}", 30 + i);
     });
-    times("a drawer tab pressed (DIRECTION)", &mut |i, sc| sc.direction = i % 4);
+    times("a drawer tab pressed (DIRECTION)", &mut |i, sc| {
+        sc.direction = i % 4
+    });
     times("the drawer open, nothing changed", &mut |_, _| {});
 }
 
