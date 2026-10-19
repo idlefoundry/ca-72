@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-fx"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "daw-ipc",
  "rtrb",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-fx-helper"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "ca72-fx",
  "daw-helper",
@@ -803,7 +803,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "daw-helper"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "clap-sys 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "daw-ipc",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "daw-ipc"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "libc",
  "serde",
@@ -828,7 +828,7 @@ dependencies = [
 
 [[package]]
 name = "daw-test-plugin"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "clap-sys 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libloading 0.8.9",
@@ -837,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "daw-test-vst3"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "libloading 0.8.9",
  "vst3",
