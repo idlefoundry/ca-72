@@ -1,9 +1,9 @@
 # DAW-v3's plug-in hosting, patched
 
-The four crates as VENDORED.md says, with one change, in `daw-helper/src/vst3.rs`, to be
-offered to DAW-v3 itself (its D78 lists it as not yet done):
+The four crates as VENDORED.md says, with two changes, to be offered to DAW-v3 itself:
 
-1. **A VST3 editor on Linux gets the host's run loop (`IRunLoop`).** DAW-v3's `Frame`, the
+1. **A VST3 editor on Linux gets the host's run loop (`IRunLoop`)** (`daw-helper/src/vst3.rs`;
+   DAW-v3's D78 lists it as not yet done). DAW-v3's `Frame`, the
    `IPlugFrame` a VST3 view is given, now also answers for `Steinberg::Linux::IRunLoop`: the
    view's file descriptors (`registerEventHandler`) are polled without waiting and its
    timers (`registerTimer`) fired, both from `gui_service` on the helper's main thread, every
@@ -19,3 +19,15 @@ offered to DAW-v3 itself (its D78 lists it as not yet done):
    defaults. Telling the controller the processor's state at creation
    (`setComponentState`) did not change it; how they expect their first values is still to
    be found (docs/fx-host.md).
+
+2. **macOS's wait functions are looked up at run time** (`daw-ipc/src/wake.rs`). The
+   transport called `os_sync_wait_on_address`, `..._with_timeout` and
+   `os_sync_wake_by_address_all` (macOS 14.4 and later) through a plain `extern` block, so
+   every program linking `daw-ipc` referred to them strongly (`nm -m`: "(undefined) external
+   ... (from libSystem)") and would not start before macOS 14.4. That was DAW-v3's own
+   floor; the CA-72's standalone, which now links `daw-ipc`, supports macOS 11. They are now
+   looked up once with `dlsym(RTLD_DEFAULT, ...)`; where they are missing a wait polls the
+   word every 50 µs until it changes or its time is up, and a wake does nothing. On the Mac
+   (macOS 27, 2026-10-18), built for macOS 11: no `os_sync` symbol referred to, clippy
+   clean, `daw-ipc`'s tests (with one new for the polled wait) and the chain's pass. Not
+   tried on a system before 14.4.

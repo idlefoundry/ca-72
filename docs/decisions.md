@@ -7491,7 +7491,8 @@ built yet, to share the arpeggiator's drawer.
 **Agent decisions, 2026-10-18 (for the owner's review; docs/fx-host.md has the reasons and
 nine questions):**
 - DAW-v3's `daw-ipc`, `daw-helper` and test plug-ins vendored in `third_party/daw-v3`
-  (one patch: a run loop for VST3 editors on Linux); its `daw-sandbox` adapted into
+  (two patches: a run loop for VST3 editors on Linux; macOS's wait functions looked up
+  at run time); its `daw-sandbox` adapted into
   `crates/ca72-fx`; the plug-ins loaded only in `ca72-fx-helper`, one process per effect.
 - Synchronous by default (no latency added), each effect's block waited for until 0.9 of the
   period, then dry; pipelined as an option (`--fx-mode`).
@@ -7507,6 +7508,7 @@ nine questions):**
 plug-ins in both formats (exact output, bypass identical to the bit, latency, order, save
 and restore, a sample-rate change, crash, hang and kill in real time); the standalone with
 the default device; Dragonfly Reverb 3.2.10's eight effects loaded, played and restored, their
-editors drawn (the VST3 ones' knobs at zero, unsolved). Windows and macOS not tried; a macOS
-blocker found (the transport's `os_sync_wait_on_address`, macOS 14.4, linked into the
-application).
+editors drawn (the VST3 ones' knobs at zero, unsolved). The chain's tests pass on the Mac and on Windows too
+(the standalone not built there). A macOS blocker found and fixed: the transport linked
+`os_sync_wait_on_address` (macOS 14.4) into the application (minimum 11); now looked up at
+run time (third_party/daw-v3/PATCHES.md).

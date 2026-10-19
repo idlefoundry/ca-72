@@ -276,7 +276,11 @@ sidechains or mono ports; MIDI to effects; heavy effects against the deadline; a
 
 ## Windows and macOS
 
-Built and tried only on Linux tonight. What each needs:
+Built and tried mostly on Linux tonight. Cheap checks elsewhere (fresh clones in temporary
+folders, removed after): the chain's nine tests (crash, hang and kill in real time
+included) and `daw-ipc`'s pass on the Mac (macOS 27, Apple silicon, built for macOS 11) and
+on Windows 11 (MSVC 1.97.1, over SSH, so without the editor test); clippy clean on the Mac.
+The standalone itself was not built on either. What each needs:
 
 - **Both:** `scripts/standalone.sh` now builds `ca72-fx-helper` and puts it beside the app
   (`target/bundled/ca72-fx-helper[.exe]`; macOS `CA-72.app/Contents/Helpers/`, where
@@ -289,13 +293,12 @@ Built and tried only on Linux tonight. What each needs:
   and **`com.apple.security.cs.disable-library-validation`** (it loads other vendors'
   libraries) and perhaps `allow-unsigned-executable-memory` for some plug-ins; the
   application itself needs neither, which is the point of the helper. A helper with no Dock
-  icon: DAW-v3 makes it an accessory application. **A blocker:** the transport calls
-  `os_sync_wait_on_address` (macOS 14.4 and later) through a plain `extern` declaration,
-  and `daw-ipc` is linked into the application itself, whose minimum is macOS 11.0: on
-  macOS before 14.4 the application would likely not start at all (a missing symbol at
-  launch), effects or none. Before a macOS release, `daw-ipc` must look the functions up at
-  run time (`dlsym`) or weak-link them, and the chain be off where they are missing (or fall
-  back to another wake-up); to be checked on the Mac (a question). DAW-v3's D78 notes
+  icon: DAW-v3 makes it an accessory application. The transport's wait functions,
+  `os_sync_wait_on_address` and its kin, are macOS 14.4's, and DAW-v3 linked them, so the
+  application (minimum macOS 11.0) would not have started before 14.4 once it linked
+  `daw-ipc`: found tonight (`nm -m` on the Mac) and fixed (PATCHES.md, 2: looked up at run
+  time, a polled wait without them). Not tried on a system before 14.4; whether effects
+  should run there at all is a question. DAW-v3's D78 notes
   the module entry gets no bundle reference yet on macOS, which some plug-ins need. Editors
   float (no reparenting across processes on macOS).
 - **Windows:** the helper is started without a console (`CREATE_NO_WINDOW`); named events
@@ -339,10 +342,10 @@ trademarks in the product). The test plug-ins are never shipped.
    the name)? Recommendation: yes to both.
 4. **Move `ca72-fx` to plugin-kit** so the CA-74, MC-79 and the 808 standalones get it?
    Recommendation: yes, after FX-A is built and 0.3.0 ships, as the standalone host did.
-5. **macOS older than 14.4** (the app supports 11.0): once the transport's wake-up is
-   looked up at run time so that the app starts there, effects off on those systems, or a
-   slower wake-up fallback? Recommendation: off there for 0.3.0, said in the drawer.
-6. **Upstream the run-loop patch to DAW-v3** (it is DAW-v3's D78 gap)? Recommendation: yes,
+5. **macOS older than 14.4** (the app supports 11.0): the transport now starts there with
+   a polled wait (a wake-up up to 50 µs late, a little CPU). Effects on with it, or off on
+   those systems? Recommendation: on, after one try on an old Mac if one is to hand.
+6. **Upstream the two patches to DAW-v3** (the run loop is DAW-v3's D78 gap)? Recommendation: yes,
    from this branch's PATCHES.md, by the agent working on DAW-v3.
 7. **"VST3" and "CLAP" on screen** in the effect list: allowed, as format names (the
    plug-ins already ship as VST3 and CLAP)? Recommendation: show the format as small print.
