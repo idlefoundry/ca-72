@@ -153,10 +153,11 @@ Do not use a throwaway test key in a release.
    ```
 
    This fails if the public key is missing, weak, not marked first-party, has the wrong id, or
-   is absent from the trust list. Release and bundle builds also fail at compile time while
-   the slot is empty, even when built by hand. CI's bundle builds enforce that gate; public
-   Mac packaging runs the diagnostic too. Debug builds remain available to make and insert
-   the key.
+   is absent from the trust list. A public release's builds also fail at compile time while
+   the slot is empty: the release sets `CA72_PUBLIC_RELEASE=1` (the Mac's
+   `CA72_REQUIRE_NOTARIZATION=1` counts too), and `scripts/package.sh` runs this diagnostic
+   under either. Ordinary release and bundle builds, CI's included, are not blocked, so work
+   continues before the key exists.
 
 4. Finish and check the pack, then sign its folder or `.ifskin` (the date is the publication
    date). The secret is read from a file, never as a command-line argument:

@@ -24,9 +24,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n 1)"
-# A public Mac release checks before packaging too; release/bundle builds enforce the slot
-# both in CI and when built by hand (decisions.md R-SKIN-KEYS).
-if [ "${CA72_REQUIRE_NOTARIZATION:-0}" = 1 ]; then
+# A public release (CA72_PUBLIC_RELEASE=1, or the Mac's CA72_REQUIRE_NOTARIZATION=1) checks
+# the first-party key before packaging; its builds refuse an empty slot too (decisions.md
+# R-SKIN-KEYS). CI's packaging of every change does neither.
+if [ "${CA72_PUBLIC_RELEASE:-0}" = 1 ] || [ "${CA72_REQUIRE_NOTARIZATION:-0}" = 1 ]; then
     (cd "$root" && cargo run -q -p skin-pack --example check_release_key)
 fi
 bundles="$root/target/bundled"

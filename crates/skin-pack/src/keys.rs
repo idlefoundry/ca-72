@@ -14,7 +14,7 @@ pub const TRUSTED_KEYS: &[TrustedKey] = match IDLE_FOUNDRY_KEY {
     None => &[],
 };
 
-// This covers `release` and `bundle`, including bundles built outside the release scripts.
+// A public release's builds (`CA72_PUBLIC_RELEASE=1`, or the Mac's `CA72_REQUIRE_NOTARIZATION=1`).
 #[cfg(skin_pack_release)]
 const _: () = assert!(
     IDLE_FOUNDRY_KEY.is_some(),

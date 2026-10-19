@@ -32,6 +32,7 @@ From a clean checkout of the version to release (once:
 `rustup target add x86_64-apple-darwin aarch64-apple-darwin` and `brew install cmake`):
 
 ```sh
+export CA72_PUBLIC_RELEASE=1
 cargo run -p skin-pack --example check_release_key
 cargo xtask bundle-universal ca72-plugin --profile bundle
 scripts/auv2.sh
@@ -44,8 +45,8 @@ scripts/package.sh
 ```
 
 Before the 0.3.0 release candidate, fill the first-party skin public key as described in
-[Signing first-party packs](skin-packs.md#signing-first-party-packs). An empty slot blocks
-release/bundle builds; the first command above diagnoses it before the universal build.
+[Signing first-party packs](skin-packs.md#signing-first-party-packs). With
+`CA72_PUBLIC_RELEASE=1` an empty slot blocks the build; the diagnostic above reports it first.
 
 The four exports may be kept in a local file outside the repository and loaded with
 `source`; it holds identity names and the Keychain profile's name, never the notarization

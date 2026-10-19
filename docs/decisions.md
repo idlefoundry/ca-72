@@ -7935,10 +7935,13 @@ repository."
 
 **Agent decisions, 2026-10-18** (not separately approved):
 - **One public slot.** `skin_pack::keys::IDLE_FOUNDRY_KEY` stays `None` until the owner fills it.
-  The editor and signing tool share `TRUSTED_KEYS`. Release and bundle builds refuse an empty
-  slot at compile time; debug builds stay usable for the owner's key-making and release check.
-  CI's bundle builds enforce that gate. Public Mac packaging also runs `check_release_key`,
-  which checks the key's id, first-party role, presence in the list and Ed25519 public half.
+  The editor and signing tool share `TRUSTED_KEYS`. A public release's builds refuse an empty
+  slot at compile time: the gate is on when the release sets `CA72_PUBLIC_RELEASE=1` (or the
+  Mac's `CA72_REQUIRE_NOTARIZATION=1`). It is not tied to Cargo's `release` or `bundle`
+  profile, because CI builds and packages every change with those profiles and would fail
+  until the key exists (changed by the coordinating agent, 2026-10-18). `package.sh` also runs
+  `check_release_key` under either variable, which checks the key's id, first-party role,
+  presence in the list and Ed25519 public half.
   No real key was generated.
 - **A key's authority is explicit.** A first-party key can attest to Idle Foundry's packs; a
   future marketplace key cannot claim that publisher. Rotation adds a second id, such as
@@ -7964,8 +7967,9 @@ cross-clippy also passed. Formatting, the diff's whitespace and `package.sh`'s s
 passed. Tests used `TMPDIR=/var/tmp`: a pre-existing `/tmp/.git` marker correctly made the
 key tool refuse that temporary directory in the initial run.
 
-The release diagnostic refused the missing public key; both release and bundle checks failed
-at the intended compile-time gate, including a release with debug assertions enabled. The
+The release diagnostic refused the missing public key, and a build with
+`CA72_PUBLIC_RELEASE=1` failed at the compile-time gate; release and bundle builds without it
+build as before. The
 key-making CLI refused a path under this worktree's `target` without creating a file. Fixed
 throwaway keys cover trusted, unknown, unsigned, tampered and wrong-id signatures, marketplace
 keys claiming first-party authority, and the release check. An independent read-only review
