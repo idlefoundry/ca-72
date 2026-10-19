@@ -101,6 +101,30 @@ class Installation(unittest.TestCase):
         self.assertEqual((self.home / ".vst3/CA-72.vst3/binary").read_text(), "old\n")
         self.assertFalse(self.prefix.exists())
 
+    @unittest.skipIf(os.geteuid() == 0, "root writes through read-only permissions")
+    def test_read_only_prefix_leaves_plugins_and_app_untouched(self):
+        # A read-only drive passes the folder check; permissions stand in for its mount.
+        self.run_installer()
+        (self.payload / "CA-72.vst3/binary").write_text("replacement")
+        (self.payload / "ca72-standalone").write_text("updated app")
+        folders = [self.prefix, *(path for path in self.prefix.rglob("*") if path.is_dir())]
+        for folder in folders:
+            folder.chmod(0o555)
+        self.addCleanup(lambda: [folder.chmod(0o755) for folder in folders])
+        for args in [(), ("--standalone-only",)]:
+            with self.subTest(args=args):
+                result = self.run_installer(*args, success=False)
+                self.assertIn("not writable", result.stderr)
+                self.assertEqual((self.home / ".vst3/CA-72.vst3/binary").read_text(), "old\n")
+                self.assertEqual((self.prefix / "bin/ca72-standalone").read_text(), "fixture\n")
+        # An empty read-only folder fails the same way, before any plug-in is replaced.
+        self.prefix = self.root / "empty read-only"
+        self.prefix.mkdir(mode=0o555)
+        self.addCleanup(self.prefix.chmod, 0o755)
+        result = self.run_installer(success=False)
+        self.assertIn("not writable", result.stderr)
+        self.assertEqual((self.home / ".vst3/CA-72.vst3/binary").read_text(), "old\n")
+
     def test_prefix_must_be_absolute(self):
         self.prefix = Path("relative")
         result = self.run_installer(success=False)

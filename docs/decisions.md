@@ -7542,3 +7542,14 @@ a custom location applies to what can live anywhere: the standalone application 
 Not tried: a physical external SSD; a host rescan from real system plug-in folders (those
 folders were deliberately untouched); Mac app relocation or a rebuilt, signed and notarised
 Mac package. No Rust source or crate manifest changes are included.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found a
+prefix that exists but cannot be written, such as a drive mounted read-only, passed the folder
+check; the plug-ins were then replaced before the app's first write failed, leaving new
+plug-ins with the old app. `install.sh` now writes and removes a probe file in each chosen
+application destination (or its nearest existing folder) before touching any plug-in, and
+stops with "not writable; nothing was changed". A new installer test, with an installed prefix
+and an empty one made read-only, failed before the change (the VST3 was replaced) and passes
+after; all ten installer tests pass. The same script under a real read-only bind mount, in a
+user namespace, left the plug-ins as they were.
+

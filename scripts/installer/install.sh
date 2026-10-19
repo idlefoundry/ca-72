@@ -81,6 +81,19 @@ if [ "$application" = 1 ]; then
         [ -f "$here/$f" ] || { echo "install.sh: $here/$f is missing; unpack the whole archive" >&2; exit 1; }
     done
 fi
+# A read-only drive passes the folder check above, and set -e would stop at the first
+# write, after the plug-ins were replaced: write to each application destination first.
+writable() {
+    folder="$1"
+    while [ ! -d "$folder" ]; do folder="$(dirname "$folder")"; done
+    probe="$($use_sudo mktemp "$folder/.ca72-install.XXXXXX" 2> /dev/null)" || return 1
+    $use_sudo rm -f "$probe"
+}
+if [ "$application" = 1 ]; then
+    for folder in "$bin" "$(dirname "$desktop")" "$(dirname "$icon")" "$app_data"; do
+        writable "$folder" || { echo "install.sh: $folder is not writable; nothing was changed" >&2; exit 1; }
+    done
+fi
 if [ "$plugins" = 1 ]; then
     $use_sudo mkdir -p "$vst3" "$clap"
     $use_sudo rm -rf "$vst3/CA-72.vst3"

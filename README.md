@@ -92,8 +92,8 @@ to move. Your own presets, settings and standalone session stay in your user pro
   the app in its `bin` subfolder and licences in `share`; the menu entry and icon stay in your
   usual desktop folders. Add `--standalone-only` to omit plug-ins, or `--system` for a
   system-wide installation. Reuse the same flags and prefix to update or uninstall. A missing
-  destination folder stops installation before any plug-ins are replaced; check the drive is
-  mounted at the same path first. The app cannot launch while it is disconnected. `--prefix`
+  or read-only destination folder stops installation before any plug-ins are replaced; check
+  the drive is mounted, writable, at the same path first. The app cannot launch while it is disconnected. `--prefix`
   applies only to the standalone; it does not change the plug-in folders or your `PATH`.
   Use a subfolder on the drive rather than its mount point: the empty mount-point directory
   can remain after disconnecting, and the script cannot distinguish it from a local folder.
