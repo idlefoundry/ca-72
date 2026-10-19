@@ -31,6 +31,8 @@ fn main() {
         }
     }
     let options = plugin_kit_standalone::AppOptions {
+        // This identifies saved sessions and MIDI clients, not a Wayland surface.
+        // Linux's X11 window uses Ca72::NAME and the launcher's StartupWMClass.
         app_id: "com.idlefoundry.ca-72".into(),
         state_dir: state_dir.unwrap_or_else(|| {
             ca72_plugin::library::shared_dir()
