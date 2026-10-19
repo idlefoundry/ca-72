@@ -8079,3 +8079,91 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-QUIT. The standalone quits with each system's own shortcuts
+
+**The owner, 2026-10-19:** "Command Q on Mac does not close the plugin [the standalone]. And I
+guess we should also check for Linux and Windows, whether or not we can close with the standard
+app closing shortcuts there. I assume it's because there's no menu item that allows for a
+shortcut close like that."
+
+**The cause.** As the owner guessed. On macOS the app's window is baseview's, whose
+`open_blocking` gave the application no main menu: no Quit item, so no ⌘Q, and the key went to
+the editor's view, which has no use for it (TYPING ignores keys with Command). Only the window's
+close button and the Dock's Quit closed it, and the Dock's Quit goes through AppKit's own
+`terminate:`, which ends the process inside AppKit (`exit`), past the app's shutdown after its
+window closes, the session's save at the end among it (read from the code; not tried with the
+old build). On Linux nothing handled Ctrl+Q: the window manager's close (`WM_DELETE_WINDOW`) was the
+only way. On Windows Alt+F4 already worked: baseview leaves Alt's keys (`WM_SYSKEYDOWN`) to
+`DefWindowProcW` whatever the editor does with them, which closes the app's window, the editor's
+window focused or not; baseview's change 9 removed only the drag border and maximise box.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- **One way out.** Every way of quitting closes the app's window as its close button does, so
+  that nih-plug's `run_with_midi_reset_scope` returns and the app shuts down as it always has
+  after its window closes: the session saved, audio and MIDI stopped, the task worker joined,
+  then `bin/standalone.rs`'s `finish`, the one function the app leaves through (an error it
+  stopped with is shown there). Whatever must end with the app (the effects chain's shutdown,
+  an unclean-exit marker's removal) goes in `finish` or before it, and runs whichever way the
+  app was quit.
+- **macOS: an application's menus** (baseview's change 11, `third_party/baseview/PATCHES.md`).
+  The app's own menu, named after the app (About CA-72, Hide CA-72 ⌘H, Hide Others ⌥⌘H, Show
+  All, Quit CA-72 ⌘Q) and a Window menu (Minimize ⌘M, Close ⌘W); macOS adds its own items to
+  both (Quit and Keep Windows, Fill, Center, Close All and the rest). AppKit gives a key with
+  Command to the main menu before any view, so ⌘Q quits while the editor holds the keyboard
+  (TYPING, a value or a preset's name being typed, MIDI Learn) and never reaches it. The Quit
+  item and ⌘Q (`applicationShouldTerminate:`) and the quit Apple event (the Dock's Quit,
+  logging out, restarting, shutting down) close the window. The Apple event is answered with
+  no error: AppKit's `terminate:` cancelled answers "user cancelled", which would cancel a
+  logout. ⌘W closes the window, which quits the app, as its close button always has.
+- **Linux: Ctrl+Q**, Shift or not, with no other modifier, the Q of the layout baseview reads.
+  The editor takes it first of any key, before TYPING, a typed value, the presets' drawer, MIDI
+  Learn and What's New, and asks the app's window to close (`app_window::request_quit`, acted
+  on at the window's next frame); the app's window takes it itself when the editor's window has
+  not the keys (X11 gives keys to the window under the pointer). A plug-in's editor leaves it
+  to its host, as every key it does not use.
+- **Windows: unchanged.** Alt+F4 and the close button were already the clean way out. Ctrl+Q is
+  not a Windows convention and is not added.
+- **The release notes' test** (`whats_new::bundled_notes_match_the_build_and_the_maintained_sources`)
+  required bundled highlights for every `docs/releases/<version>.md`, so a draft for the next
+  release failed it until the version was raised; and a catalogue entry above the build's
+  version fails it too. Notes above the build's version are now the next release's draft, their
+  entry due when the version is raised (`docs/whats-new.md`). The owner should confirm this.
+
+**Evidence.**
+- **Tests.** `ctrl_q_quits_on_linux_and_no_other_key_does` (`crates/ca72-plugin/src/editor.rs`)
+  checks the shortcut on each system: Ctrl+Q and Ctrl+Shift+Q on Linux; not Q alone, Ctrl+Alt+Q,
+  Ctrl+Super+Q, Ctrl+W or Ctrl+Q's release; nothing on macOS or Windows (⌘Q, Alt+F4).
+  `ctrl_q_quits_the_standalone_before_typing_or_a_value_has_it` (Linux): in the standalone with
+  TYPING on, Ctrl+Q asks to quit and plays no note; with DRIVE's value being typed, it asks to
+  quit and types nothing; in a CLAP or VST3 editor it asks nothing. `tests/mac_quit.rs` (macOS,
+  main thread): ⌘Q posted as the keyboard gives it closes a window of its own, `open_blocking`
+  returns and the view never has the key; the menus' titles, keys, modifiers and actions; the
+  quit Apple event sent from another process closes the window and is answered with no error
+  (with the delegate's handler left out, it is answered -128). All pass; Clippy for
+  `ca72-plugin`, all targets, with `standalone-production`, passes on Linux and macOS, and
+  baseview's on Linux.
+- **Linux** (omarchy, Hyprland 0.56 under XWayland, the debug standalone, `--no-devices`, its own
+  `IDLE_FOUNDRY_SHARED` and `--state-dir`, on a hidden workspace, synthetic X key events): Ctrl+Q
+  to the editor's window and to the app's window each closed it, exit status 0 within 0.25 s,
+  `session.json` (absent before) written 3 to 14 ms after the key; Q alone, Ctrl+W, Shift+Q and
+  Alt+Q left it running; the window manager's close: exit 0 in 0.32 s, the session written.
+- **Windows 11** (the desktop session through a `schtasks /IT` task, `--release`, `--no-devices`,
+  throwaway state): Alt+F4 with the editor's window focused, and again after focusing it
+  explicitly: exit code 0 in 0.10 and 0.06 s, `session.json` written 20 ms after; the close
+  button, found by `WM_NCHITTEST` and clicked: exit code 0 in 0.04 s, the session written.
+- **macOS 27** (the owner's Mac, a test app "CA-72 QUIT", bundle id
+  `com.idlefoundry.ca72-quit.standalone`, its own app id and state, `--no-devices`, launched in
+  the owner's session, driven by System Events from a Ghostty window): System Events read the
+  menu bar as Apple, CA-72 QUIT, Window, and the app's menu as About CA-72 QUIT, Hide CA-72 QUIT,
+  Hide Others, Show All, Quit CA-72 QUIT (and macOS's Quit and Keep Windows). ⌘Q, the Quit item
+  clicked, AppleScript's `quit` (the Apple event the Dock sends) and ⌘W each closed it within
+  0.33 s, `session.json` written 0.11 to 0.20 s after; run as the shell's child, ⌘Q left exit
+  status 0. The test app was put in the Trash afterwards.
+
+**Not tried:** logging out, restarting and the Dock's own menu (the Apple event they send was
+sent by AppleScript and by the test); the effects chain's shutdown (not on `main`; it runs after
+the window closes on its branch, so a quit reaches it); audio and MIDI devices open while
+quitting (every run used `--no-devices`: the Mac's audio device was not to be touched; the
+shutdown is the close button's, unchanged); X11 under GNOME or KDE, and Wayland's own windows
+(the app runs under XWayland).
