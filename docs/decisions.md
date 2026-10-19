@@ -8545,3 +8545,53 @@ it, R-FX-HOST); LOADING and RESTARTING seen on screen (the test effects loaded a
 within the screenshots' tenth of a second; both in the tests); the Mac and Windows; a scan of
 the standard folders on a computer with many plug-ins; Escape with the list open in the real
 window (the keyboard is not asked for while the list shows).
+
+## R-FX-MAC. Effects heard, and their windows opened again, on the Mac (issue 82)
+
+**The owner's report, 2026-10-19** (the CA-72 TEST standalone on the Mac, 47 effects found):
+"the plugins themselves will load, which is good. I can click add an effect. I can scan, I can
+search through my plugins on my computer, which is fantastic. And I can load up the plugin. The
+plugin window pops up and I can change things. However, there is no audible effect. So something
+is wrong, even when it's clearly on... The sound still goes through, but it's like it's in bypass
+mode. And then the other issue is once I've closed the plugin window, clicking on the slot should
+open it up again, and it doesn't..."
+
+**Causes and fixes:**
+- **No effect heard.** The synth runs the chain only if `Runner::is_empty` says it has effects,
+  and the runner learnt of the chain's changes (an effect added, removed, moved) only inside
+  `Runner::process`. An effect added to an empty chain therefore waited on its queue for a block
+  that never came: it loaded, its window opened and it read as running, with no misses, while
+  every block went out as the synth made it. A chain restored at start was heard (`prepare`
+  takes the changes), which is how the Linux runs played. Not the deadline nor macOS's waits:
+  the third-party effects played paced at 48 kHz in 256-frame blocks with a deadline of 0.9 of
+  the period, none missed. `is_empty` now takes the changes first (no allocation, no locks).
+- **A window not opened again.** The click reached the drawer and the helper each time, and the
+  helper opened a new window, but behind the CA-72's: the click had just made the CA-72 the
+  active application, and the helper, an accessory application that was not active, ordered its
+  window front with `makeKeyAndOrderFront:`, which leaves an inactive application's window behind
+  the active one's. The same for an open window asked for again. The helper now also sends
+  `orderFrontRegardless` (third_party/daw-v3/PATCHES.md, change 3). The window comes up in front
+  without taking the keyboard: the player's first click on it gives it the keyboard.
+
+**Evidence (2026-10-19):**
+- omarchy: `ca72-fx-helper`'s new `an_effect_added_while_the_synth_plays_is_heard_at_once` (the
+  chain run as the synth runs it, real time at 48 kHz and 256 frames, each block due by 0.9 of
+  its period, an effect added while it plays; both formats): fails without the fix (never wet),
+  passes with it (wet from the block it was added in, none dry or missed after). The editor's
+  `a_slots_name_clicked_again_opens_its_window_again`; the helper's GUI test opens, closes and
+  opens again, and asks again for an open window (`CA72_FX_GUI_TEST=1`).
+- Mac (macOS 27, the owner's ValhallaRoom, kHs Distortion and kHs Gain VST3): the new
+  `third_party_effects_are_heard_in_real_time` (`CA72_FX_THIRD_PARTY`) played each paced at
+  48 kHz, 256 frames: none missed, worst block 0.7 to 1.9 ms (kHs Gain at 0 dB comes out as it
+  went in). The real standalone, a build of this branch with a diagnostic measure of its output
+  in the audio callback, on a virtual output device at 44.1 kHz and 256 frames (the Mac's own
+  device and rate untouched), a note from a virtual MIDI source, ValhallaRoom added from the
+  console while it played: before the fix the output was the synth's to the bit (the effect at
+  frame 0, never given a block); after it, the output differed from the synth by -26 to -35 dBFS
+  (the synth at -30.4 dBFS), every block through the chain, none missed, and equal to it again
+  with the effect bypassed. The window, with clicks posted to the standalone and the screen's
+  window order read: opened, closed with its close button, opened again (behind the CA-72's
+  before the fix, in front after it); covered by the CA-72's and asked for again (in front).
+
+**Not done:** Windows and Linux windows (unchanged; a helper's window on Windows may meet the same
+rule, untried); a keyboard for the effect's window without a click.

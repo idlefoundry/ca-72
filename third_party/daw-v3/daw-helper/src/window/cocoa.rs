@@ -226,8 +226,13 @@ impl Window {
         send!(self.window, c"windowNumber"; unsafe extern "C" fn(Id, Sel) -> i64) as u64
     }
 
+    /// Shows the window in front, of every application's windows: the helper is not the active
+    /// application (the host is, whose window was just clicked to ask for this), and an
+    /// inactive one's `makeKeyAndOrderFront:` leaves its window behind the active one's (CA-72
+    /// patch 3, third_party/daw-v3/PATCHES.md).
     pub fn show(&mut self) {
         send!(self.window, c"makeKeyAndOrderFront:", std::ptr::null_mut::<c_void>(); unsafe extern "C" fn(Id, Sel, Id));
+        send!(self.window, c"orderFrontRegardless"; unsafe extern "C" fn(Id, Sel));
         self.shown = true;
     }
 

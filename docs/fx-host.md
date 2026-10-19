@@ -355,7 +355,7 @@ trademarks in the product). The test plug-ins are never shipped.
 5. **macOS older than 14.4** (the app supports 11.0): the transport now starts there with
    a polled wait (a wake-up up to 50 µs late, a little CPU). Effects on with it, or off on
    those systems? Recommendation: on, after one try on an old Mac if one is to hand.
-6. **Upstream the two patches to DAW-v3** (the run loop is DAW-v3's D78 gap)? Recommendation: yes,
+6. **Upstream the three patches to DAW-v3** (the run loop is DAW-v3's D78 gap)? Recommendation: yes,
    from this branch's PATCHES.md, by the agent working on DAW-v3.
 7. **"VST3" and "CLAP" on screen** in the effect list: allowed, as format names (the
    plug-ins already ship as VST3 and CLAP)? Recommendation: show the format as small print.
