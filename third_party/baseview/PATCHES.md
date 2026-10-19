@@ -9,7 +9,7 @@ compiler warnings (`non_snake_case` in `src/win/drop_target.rs`, and
 `mismatched_lifetime_syntaxes`). `src/macos/window.rs` has one `use` list in the order
 today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
-Five changes for Windows (1 to 3, 5 and 6), in `src/win/window.rs`, `src/win/drop_target.rs`,
+Six changes for Windows (1 to 3, 5, 6 and 8), in `src/win/window.rs`, `src/win/drop_target.rs`,
 `src/win/escape.rs`, `src/event.rs` and `src/window.rs` (the first three the CA-72's
 `docs/decisions.md` R26, R28 and R34), and three for macOS (4, 7 and 8, below):
 
@@ -166,6 +166,25 @@ And one for macOS, in `src/macos/view.rs` (the CA-72's `docs/decisions.md` R56, 
    without the layer's scale set it fails ("the view's layer left at another scale"). Tried on
    macOS 27 with a Retina screen and a 4K monitor switched to 1x: the standalone and Ableton Live
    12.2.7 (VST3) drew at half size on the 1x monitor before, and whole after.
+
+And one more for Windows, in `src/win/window.rs` (the CA-72's `docs/decisions.md`
+R-WIN-STANDALONE, issue 64, 2026-10-18):
+
+9. **A window of its own has no frame to drag and no maximise box.** A window baseview opens
+   with no parent (an application's, as the CA-72's standalone opens through nih-plug's
+   `production.rs`) had `WS_SIZEBOX` and `WS_MAXIMIZEBOX`. Its handler sizes what it holds and
+   is told nothing it can follow when the frame is dragged or the window maximised: the
+   CA-72's editor stayed as it was, in the window's top left corner, black beyond it (or cut
+   off, the window made smaller). Now such a window has neither; its handler sizes it
+   (`Window::resize`), as on macOS, whose window baseview never made resizable. A parented
+   window (a plug-in's editor in a host) is unchanged. The CA-72's test
+   `the_standalone_s_window_is_its_editor_s_at_every_scale` (`crates/ca72-plugin/src/editor.rs`,
+   Windows) fails with the two styles put back ("a frame to drag").
+
+   This copy is also the one nih-plug's standalone opens its window with since that change
+   (`third_party/nih-plug/Cargo.toml`), without the `opengl` feature, which neither window
+   uses; it had taken upstream's `579130e` from git, whose X11 backend is this one's and whose
+   Windows and macOS backends lack this copy's changes.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.

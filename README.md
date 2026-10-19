@@ -140,6 +140,10 @@ the input to the output clock, so separately enumerated capture/playback endpoin
 are supported. The reservoir adds input buffering; the displayed output buffer
 duration is not the full input-to-output latency.
 
+The standalone's window is the panel's size: resize it with the grip at the panel's corner
+or the settings button's WINDOW › SIZE. On Windows it opens at the scale of the main
+display, and its frame cannot be dragged or maximized.
+
 The standalone remembers unsaved edits, MIDI Learn, window size and the last
 working audio/MIDI choices in `CA-72/Standalone/session.json` beneath the same
 application-data folder as your presets. Held notes and live wheels are not
