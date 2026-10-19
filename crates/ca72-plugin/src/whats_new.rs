@@ -177,6 +177,9 @@ mod tests {
                     .all(|e| !e.trim().is_empty() && e.ends_with('.'))
             );
         }
+        // (Notes for a release above the build's are its draft, written as its changes are
+        // made: their highlights are due once the version is raised to it.)
+        let build = Version::parse(VERSION).expect("build version");
         for entry in std::fs::read_dir(root.join("docs/releases")).expect("release sources") {
             let path = entry.expect("release file").path();
             if path.extension().is_some_and(|ext| ext == "md")
@@ -185,6 +188,7 @@ mod tests {
                     .and_then(|s| s.to_str())
                     .and_then(|s| Version::parse(s).ok())
                 && version >= Version::new(0, 2, 0)
+                && version <= build
             {
                 assert!(
                     versions.contains(&version),

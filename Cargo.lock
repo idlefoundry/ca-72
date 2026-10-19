@@ -1409,6 +1409,7 @@ dependencies = [
  "cpal 0.15.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam",
  "jack",
+ "keyboard-types",
  "libc",
  "log",
  "midi-consts",
