@@ -8079,3 +8079,88 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-AUTO-GAIN-DRIVE. AUTO GAIN measures a sound only when DRIVE is changed
+
+**The owner, 2026-10-19,** in the standalone on the Mac: "I'm getting a volume adjustment
+happening. I'm pressing on a key, it's going out, and at one, it hits one volume level and
+then it seemingly adjusts and drops it down", then "even on 0.2.6, this seems to be
+happening", and "auto gain is only supposed to be brought into effect when the user changes
+the gain. I think auto gain currently is affecting everything that passes through, which is
+not its intention." Told the cause and offered three changes (measure only when DRIVE
+changes; presets carry their curves; DRIVE's level follows the knob, with any refinement
+gliding): "Yes, absolutely. This should only be remeasured when drive changes. I recommend,
+yes, all three of your recommendations, absolutely. Let's do it, and let's get it shipped
+out in 0.2.8 immediately."
+
+**The cause (Linux, 2026-10-19; not a 0.2.7 regression).** AUTO GAIN (R45) is no
+compressor: with a curve in force, it is one fixed gain for the whole note (on the engine's
+renders of 14 presets, LO and HI, AUTO GAIN on against off differs by the same amount in
+every 10 ms window, to 0.01 dB: Horn Bloom -9.52 dB, Smoke Flute -9.78, Driven Kick -5.48).
+But the curve was measured afresh after any press, release, wheel or key in the plug-in's
+window, and as the window opened, whenever the sound's key (the panel, LOCK, ENTROPY,
+FEEDBACK, QUALITY) differed from the curve's: a preset chosen, a knob turned, QUALITY
+switched. The measurement takes the helper about 0.7 to 1.7 s (R45's figures); until it
+finished, the previous sound's curve or the presets' average stood in, and when it landed
+the output glided to the new correction in 10 ms. A note played just after the change
+began at one level and stepped to another about a second in. With the average standing in
+and the sound's curve landing 0.85 s into a held note: Smoke Flute -2.6 dB, Singing Drift
+-0.3 (LO) and -0.6 (HI), Horn Bloom +0.4 to +0.5, Driven Kick +7; between two sounds' curves
+it can be far more (the factory curves at 24 dB run from -3.9 to -21.7 dB). Only a sound
+with DRIVE above 0 and AUTO GAIN on is touched. 0.2.6 and 0.2.7 do the same: between their
+tags `ca72-rt` is unchanged, the plugin-kit pin is the same, and ENTROPY's translation renders
+to the bit (R-ENTROPY-FLOOR). The other falls heard after an attack in the factory presets
+are their contours (a decay to a lower SUSTAIN, a filter contour closing), and repeated
+notes on Felt Bass and Saw Monolith differ by 3 to 9 dB through the beating of their
+deliberately detuned oscillators (one oscillator alone, within about 1 dB): nothing else
+changes a note's gain after it starts.
+
+**What changed.**
+- **Measured only when DRIVE or AUTO GAIN is changed in the editor** (`editor.rs`: the
+  controls set the parameters through a context that notes those two; `Editing::
+  measure_when_done`), once nothing is held, and only with DRIVE above 0 and AUTO GAIN on.
+  Another control, a preset, Init, a key, a wheel, QUALITY or the window opening asks for
+  nothing; the host's automation and learned controllers never did. The sound's key is as
+  before, so DRIVE turned with the sound unchanged since its curve was measured measures
+  nothing; with the sound changed meanwhile (CUTOFF turned, say), DRIVE's change measures it
+  then. The editor goes by DRIVE and AUTO GAIN as it set them, since CLAP hosts take a
+  parameter only at their next block.
+- **Presets carry their curves.** Each factory preset has `drive_curve` (QUALITY HI, ULTRA
+  too) and `drive_curve_lo`, measured as the plug-in measures them at 48 kHz, written and
+  checked by `tests/factory_curves.rs`; a preset the user saves keeps the curve in force as
+  it was saved, at its quality (`Library::save_with_curve`). Chosen, a preset's curve is in
+  force at the next block, nothing measured (`Calibration::load_preset`); its key is none, so
+  DRIVE's next change measures the sound (at 48 kHz, the same to the bit: its level does not
+  move; at another rate or quality, by a fraction of a decibel, gliding). Init takes the
+  presets' average, as a fresh instance has.
+- **A preset saved before (no curve) keeps the curve in force** until DRIVE is next changed
+  (agent decision, the coordinator's preference: no level change on load). Taking the
+  average instead would make such a preset load at the same level whatever came before it,
+  but would move the level on load for any sound already measured; the owner may prefer
+  that.
+- **DRIVE's turns follow the curve in force,** drawn straight between its steps, as before,
+  with the controls' 10 ms glide: no step a second later. A curve measured after DRIVE's
+  change (the helper's, marked so the audio thread can tell it from a preset's or a
+  session's) glides in with a time constant of 0.3 s (`REFINE_GLIDE`, `Engine::refine_curve`):
+  5.6 dB comes in at under 0.02 dB a millisecond. A preset's or a session's curve stays the
+  sound's at once.
+- Sessions are as before: the curve and its key saved and restored; an old session's curve
+  stays in force until DRIVE is changed.
+
+**Evidence (Linux x86, Rust 1.97.1, 2026-10-19).** `preset_render` against v0.2.7's release
+build: every factory preset the same to the bit. `tests/factory_curves.rs`: every factory
+preset's curves the plug-in's measurement at 48 kHz to the bit (by hand, both qualities, all
+19), one preset measured in the debug build too, every preset with both curves.
+`only_drive_or_auto_gain_changed_here_asks_for_auto_gains_curve` (the window opening, CUTOFF,
+a key, QUALITY and a preset ask for nothing; the preset's curve is in force at once; DRIVE
+typed and AUTO GAIN switched on ask; AUTO GAIN off does not; the code before asked as the
+window opened, its editor starting as touched). `a_measured_curve_glides_in_and_a_presets_is_the_sounds_at_once`,
+`a_presets_curve_is_in_force_at_the_next_block_and_a_measured_one_glides_in` and
+`a_presets_curve_is_saved_and_read_back` (with old and malformed files: none). `cargo test
+-p ca72-plugin`: all passed but `the_workers_follow_poly_through_the_plug_ins_life`, which
+failed once while another job's workspace tests held this machine's worker seats and passed
+three times alone. `cargo clippy -p ca72-plugin --all-targets -- -D warnings` and rustfmt.
+The renders and numbers of the investigation are outside the repository (the night's
+`volumedrop-out`). Untested here: a native host or the standalone on macOS or Windows, and a
+listening check by the owner. plugin-kit's own module text still describes measuring on any
+change of the sound; the kit's code is unchanged.
