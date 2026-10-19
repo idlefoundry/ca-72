@@ -5,10 +5,10 @@
 )]
 
 fn main() {
-    // A safe start asked for (decisions.md R-FX-SAFETY): the keys read first, as near the
-    // opening as can be.
-    let mut safe_start = ca72_plugin::fx::safe_start_keys_held();
     ca72_plugin::identify_standalone();
+    // A safe start asked for (decisions.md R-FX-SAFETY): the keys read first, as near the
+    // opening as can be (after the name, which every window must have from the start).
+    let mut safe_start = ca72_plugin::fx::safe_start_keys_held();
     let mut device_access = true;
     let mut state_dir = None;
     let mut fx_console = false;
