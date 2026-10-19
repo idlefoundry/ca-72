@@ -83,6 +83,12 @@ newer release is out, **[ DOWNLOAD ]** opens its installer for your computer in 
 close your host, then run it as above. The CA-72 checks only when you click, through your system's `curl`,
 and sends nothing of yours.
 
+Settings also has **WHAT'S NEW…**, which opens this version's bundled highlights without
+an internet connection. The first visible editor after an install or update shows them
+automatically, once for your OS user on that computer. When an earlier shown version is
+known, that automatic view includes the available intervening releases. Settings always
+reopens the current release's highlights.
+
 ## Playing it
 
 The keyboard button beside SAVE and settings switches the lower panel between
@@ -479,6 +485,11 @@ cargo run --release -p ca72-plugin --example standalone --features standalone
 
 On Linux this also needs the ALSA, JACK and OpenGL headers (Debian and Ubuntu:
 `libasound2-dev libjack-jackd2-dev libgl-dev`).
+
+The offline What's New highlights are compiled from `docs/releases/notes.toml`, condensed
+from the Markdown release notes beside it. Before changing the release version, follow
+[Updating the bundled notes](docs/whats-new.md). CI checks that this build and every maintained
+release from 0.2.0 onwards have entries before making its bundles.
 
 ## Testing
 

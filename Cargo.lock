@@ -361,6 +361,7 @@ dependencies = [
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",
  "resvg",
+ "semver",
  "serde",
  "serde_json",
  "softbuffer",
