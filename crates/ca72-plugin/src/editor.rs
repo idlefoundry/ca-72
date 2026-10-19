@@ -348,7 +348,14 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
 enum Typed {
     Strip(Readout),
     Arp(usize),
+    /// The standalone's TEMPO screen.
+    Tempo,
 }
+
+/// Logical pixels a beat a minute while the TEMPO screen is dragged (with SHIFT, four times
+/// as many), and a trackpad's travel a beat a minute.
+const TEMPO_DRAG: f64 = 2.0;
+const TEMPO_SCROLL: f64 = 8.0;
 
 /// The arpeggiator's drawer (decisions.md R-ARP): open or not, and its slide, as the presets'
 /// drawer's (`presets::SLIDE`).
@@ -860,6 +867,12 @@ struct Editing {
     arp_drawer: ArpDrawer,
     arp_shown: f64,
     last_arp_press: Option<(Instant, ArpTarget)>,
+    /// The standalone's TEMPO screen (decisions.md R-ARP): dragged (from where, logical pixels
+    /// down, at what tempo, SHIFT held; the tempo the drag began at), its last press (for a
+    /// double click), and a trackpad's travel over it not yet a beat a minute.
+    tempo_drag: Option<(f64, f64, bool, u16)>,
+    last_tempo_press: Option<Instant>,
+    tempo_travel: f64,
     composed: Option<ca72_panel::Pixmap>,
     /// Where the window's frame changed in the last `draw` that changed it (pixels: left,
     /// top, right, bottom), or none when it may have changed anywhere (decisions.md R58).
@@ -1151,6 +1164,9 @@ impl Editing {
             arp_drawer: ArpDrawer::default(),
             arp_shown: 0.0,
             last_arp_press: None,
+            tempo_drag: None,
+            last_tempo_press: None,
+            tempo_travel: 0.0,
             composed: None,
             damage: None,
             resizing_window: false,
@@ -1700,6 +1716,59 @@ impl Editing {
         self.typing_keys = true;
     }
 
+    /// The standalone's TEMPO set to `bpm` (within 30 to 300, whole beats), the arpeggiator's at
+    /// once, and this computer's: written now if `kept`, else when the gesture ends.
+    fn set_tempo(&mut self, bpm: f64, kept: bool) {
+        if !bpm.is_finite() {
+            return;
+        }
+        let bpm = crate::settings::tempo_within(bpm.round().clamp(0.0, 1000.0) as u16);
+        self.params.set_tempo(f64::from(bpm));
+        if kept {
+            self.keep_settings(Change::Tempo(bpm));
+        } else {
+            self.settings.apply(Change::Tempo(bpm));
+        }
+    }
+
+    /// The tempo as the screen reads it.
+    fn tempo_now(&self) -> f64 {
+        self.params.tempo().round()
+    }
+
+    /// A press on the TEMPO screen: a drag begun, or, the second of a double click, a tempo
+    /// typed into it.
+    fn tempo_press(&mut self, modifiers: Modifiers) {
+        let now = Instant::now();
+        if self
+            .last_tempo_press
+            .is_some_and(|at| now - at < DOUBLE_CLICK)
+        {
+            self.last_tempo_press = None;
+            self.tempo_drag = None;
+            self.playing.release();
+            self.typing = Some((Typed::Tempo, String::new()));
+            self.typing_keys = true;
+            return;
+        }
+        self.last_tempo_press = Some(now);
+        self.tempo_drag = Some((
+            self.pointer.1,
+            self.tempo_now(),
+            modifiers.contains(Modifiers::SHIFT),
+            self.settings.tempo,
+        ));
+    }
+
+    /// The TEMPO screen's drag ended: its tempo, if it moved, kept for this computer.
+    fn tempo_let_go(&mut self) {
+        if let Some((.., began)) = self.tempo_drag.take()
+            && self.settings.tempo != began
+        {
+            self.keep_settings(Change::Tempo(self.settings.tempo));
+        }
+    }
+
     /// A key while a value is typed: a digit, the point or the sign added where they fit, the
     /// last taken back, Enter setting the value, Escape leaving it; every key is the editor's
     /// meanwhile.
@@ -1723,6 +1792,8 @@ impl Editing {
                         (Typed::Arp(0), 't' | 'T') => cells > 0 && !ended,
                         (Typed::Arp(1), '0'..='9') => cells < 1,
                         (Typed::Arp(1), _) => false,
+                        (Typed::Tempo, '0'..='9') => cells < 3,
+                        (Typed::Tempo, _) => false,
                         (_, '0'..='9') => cells < 3,
                         (_, '.') => !text.contains('.') && cells < 3,
                         (Typed::Strip(r), '-') => text.is_empty() && matches!(r, Readout::Level),
@@ -1743,6 +1814,11 @@ impl Editing {
                 match r {
                     Typed::Strip(r) => self.set_typed(r, &text),
                     Typed::Arp(i) => self.set_arp_typed(i, &text),
+                    Typed::Tempo => {
+                        if let Ok(bpm) = text.parse::<f64>() {
+                            self.set_tempo(bpm, true);
+                        }
+                    }
                 }
             }
             Key::Escape => self.typing = None,
@@ -2073,6 +2149,7 @@ impl Editing {
                 Typed::Arp(i) => {
                     self.in_arp((x, y)) && arp_ui::hit(x, y) == Some(ArpTarget::Readout(i))
                 }
+                Typed::Tempo => art::tempo_hit(x, y),
             };
             if on_it {
                 return;
@@ -2141,6 +2218,11 @@ impl Editing {
                 self.show_midi_list(chosen);
                 return;
             }
+        }
+        // The standalone's TEMPO screen, on the wood above the panel (R-ARP).
+        if self.playing.standalone && art::tempo_hit(x, y) {
+            self.tempo_press(modifiers);
+            return;
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
             match drawer_hit(&self.browser.drawer, dx, dy) {
@@ -2359,6 +2441,17 @@ impl Editing {
         if self.standalone_dialog_open() || self.whats_new.is_some() {
             return;
         }
+        if let Some((from, bpm, fine, _)) = &mut self.tempo_drag {
+            // (SHIFT pressed or let go mid-drag: on from here, at the other pace.)
+            let now = modifiers.contains(Modifiers::SHIFT);
+            if now != *fine {
+                (*from, *bpm, *fine) = (self.pointer.1, self.params.tempo().round(), now);
+            }
+            let per = if *fine { 4.0 * TEMPO_DRAG } else { TEMPO_DRAG };
+            let to = *bpm + (*from - self.pointer.1) / per;
+            self.set_tempo(to, false);
+            return;
+        }
         let (x, y) = self.in_drawing(self.pointer);
         if self.playing.dragging() {
             let target = keyboard::hit(self.playing.root, x, y, self.playing.standalone);
@@ -2462,11 +2555,15 @@ impl Editing {
 
     /// Whether a press is being held: a control or the grip dragged.
     fn dragging(&self) -> bool {
-        self.drag.is_some() || self.resizing.is_some() || self.playing.dragging()
+        self.drag.is_some()
+            || self.resizing.is_some()
+            || self.playing.dragging()
+            || self.tempo_drag.is_some()
     }
 
     fn released(&mut self) {
         self.playing.release_pointer();
+        self.tempo_let_go();
         if self.resizing.take().is_some() {
             return;
         }
@@ -2480,6 +2577,7 @@ impl Editing {
     /// pointer's capture. A gesture never begins inside another (decisions.md R18).
     fn end_gestures(&mut self) {
         self.playing.release_pointer();
+        self.tempo_let_go();
         self.typing = None;
         self.end_scroll();
         self.resizing = None;
@@ -2555,6 +2653,25 @@ impl Editing {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
+        // The TEMPO screen: a beat a minute a notch (up faster), or a trackpad's travel.
+        if self.playing.standalone && art::tempo_hit(x, y) {
+            let beats = match delta {
+                ScrollDelta::Lines { y, .. } => f64::from(y.signum()),
+                ScrollDelta::Pixels { y, .. } => {
+                    if f64::from(y) * self.tempo_travel < 0.0 {
+                        self.tempo_travel = 0.0;
+                    }
+                    self.tempo_travel += f64::from(y) / TEMPO_SCROLL;
+                    let whole = self.tempo_travel.trunc();
+                    self.tempo_travel -= whole;
+                    whole
+                }
+            };
+            if beats != 0.0 {
+                self.set_tempo(self.tempo_now() + beats, true);
+            }
+            return;
+        }
         if self.playing.visible && keyboard::inside(x, y) {
             return;
         }
@@ -2734,6 +2851,10 @@ impl Editing {
             Meters::load(&self.meters.modulation),
         );
         self.scene.tip = self.tip();
+        self.scene.tempo = self
+            .playing
+            .standalone
+            .then(|| format!("{} BPM", self.tempo_now()));
         self.strip_scene = strip_scene(
             &self.params,
             self.meters.voices.load(Ordering::Relaxed),
@@ -2770,6 +2891,7 @@ impl Editing {
                     }
                 }
                 Typed::Arp(i) => self.arp_scene.readouts[(*i).min(3)] = (shown, true),
+                Typed::Tempo => self.scene.tempo = Some(format!("{shown} BPM")),
             }
         }
     }
@@ -5069,6 +5191,78 @@ mod tests {
             Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
             PluginApi::Standalone,
         )
+    }
+
+    /// The standalone's TEMPO screen (decisions.md R-ARP; the owner's option D): it reads the
+    /// tempo, and is set as the readouts are: dragged up and down, a beat a minute a notch of
+    /// the wheel, a tempo typed after a double click, 30 to 300; Escape leaves it as it was. In
+    /// a plug-in there is none (the host gives the tempo) and the wood does nothing.
+    #[test]
+    fn the_standalone_s_tempo_screen_sets_the_tempo() {
+        let (mut e, _, params) = editing_standalone();
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("120 BPM"));
+        let (x, y, w, h) = art::TEMPO_SCREEN;
+        let p = at(&e, (x + w / 2.0, y + h / 2.0));
+        // Dragged up 20 logical pixels: ten beats a minute faster; let go, kept.
+        go(&mut e, p);
+        press(&mut e);
+        for dy in 1..=20 {
+            go(&mut e, below(p, -f64::from(dy)));
+        }
+        release(&mut e);
+        assert_eq!(params.tempo(), 130.0);
+        assert_eq!(e.settings.tempo, 130);
+        // Down past the slowest: 30 (a press of its own, not a double click's second).
+        e.last_tempo_press = None;
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, 1000.0));
+        release(&mut e);
+        assert_eq!(params.tempo(), 30.0);
+        // The wheel: a beat a minute a notch.
+        go(&mut e, p);
+        wheel(&mut e, 1.0);
+        wheel(&mut e, 1.0);
+        assert_eq!(params.tempo(), 32.0);
+        wheel(&mut e, -1.0);
+        assert_eq!(params.tempo(), 31.0);
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("31 BPM"));
+        // Typed: double-clicked, 96, Enter; 999 is the fastest, 300; Escape leaves it.
+        let typed = |e: &mut Editing, text: &str, end: Key| {
+            e.last_tempo_press = None;
+            click(e, p);
+            click(e, p);
+            assert_eq!(e.typing.as_ref().map(|t| t.0), Some(Typed::Tempo), "{text}");
+            e.update_scene();
+            assert_eq!(e.scene.tempo.as_deref(), Some("_ BPM"));
+            for c in text.chars() {
+                keyed(e, Key::Character(c.to_string()));
+            }
+            keyed(e, end);
+        };
+        typed(&mut e, "96", Key::Enter);
+        assert_eq!((params.tempo(), e.settings.tempo), (96.0, 96));
+        typed(&mut e, "999", Key::Enter);
+        assert_eq!(params.tempo(), 300.0);
+        typed(&mut e, "12", Key::Enter);
+        assert_eq!(params.tempo(), 30.0);
+        typed(&mut e, "150", Key::Escape);
+        assert_eq!(params.tempo(), 30.0);
+        assert!(e.typing.is_none());
+        // A plug-in: no screen; the wood there does nothing.
+        let (mut e, host, params) = editing();
+        e.update_scene();
+        assert_eq!(e.scene.tempo, None);
+        let p = at(&e, (x + w / 2.0, y + h / 2.0));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -40.0));
+        release(&mut e);
+        wheel(&mut e, 1.0);
+        assert_eq!(params.tempo(), 120.0);
+        assert!(host.take().is_empty());
     }
 
     #[test]
