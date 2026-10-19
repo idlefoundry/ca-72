@@ -7880,3 +7880,80 @@ top-level window takes that class whatever its title; without one, the title sta
 A protocol test for a window titled `CA-72 — error` failed before the change (its class was the
 title) and passes after; a plug-in test checks the class against the launcher and that `main`
 names the application before anything else.
+
+
+## R-INSTALL-DESTINATION. Choose the standalone application's folder
+
+**Owner request, 2026-10-18 (issue #54).** Support a chosen installation folder, including an
+external SSD: "Plug-ins must stay where hosts look for them (VST3 and CLAP's standard folders);
+a custom location applies to what can live anywhere: the standalone application and its files."
+
+**Agent decisions, 2026-10-18** (not separately approved):
+
+- **Windows shows the destination page on every install and upgrade.** Program Files remains
+  the default; Inno Setup remembers the previous folder with the same AppId. The page names
+  the fixed VST3 and CLAP folders and explains what moves: the optional app, licences and
+  uninstaller. It also explains that presets and settings stay, and an external drive must
+  be connected to run, update or uninstall the app.
+- **An upgrade stays in the previous folder.** Changing it requires uninstalling first, then
+  installing again; otherwise the old app and uninstall log would be stranded. A missing drive
+  stops before any installed plug-in is replaced, including on a silent update. Reconnect it
+  with the same drive letter. No installer entry removes the user's presets or settings.
+- **Linux's `--prefix` applies to the app and its licence files.** VST3 and CLAP stay in the
+  usual user folders, or `/usr/lib` with `--system`; the desktop entry and icon also stay in
+  their usual folders, so the menu can find them. A prefix must be absolute and already exist,
+  to avoid silently creating a replacement folder when a drive is absent. The same prefix and
+  component/system flags are needed to update or uninstall. Check that the drive is mounted
+  at the same path; an empty mount point alone does not prove a drive is connected. Earlier
+  scripts moved plug-ins with `--prefix` too; their copies need uninstalling with the earlier
+  script first. The README says so.
+- **The Mac app can move in Finder after installation.** Keep its bundle whole; reconnect its
+  drive to run it. The package still installs and updates `/Applications/CA-72.app`; replace
+  the moved copy after an update. Its choice description and the README explain this. The
+  package's destinations, bundle relocation settings, signing and notarisation are unchanged.
+  A package chooser for arbitrary app folders is not added.
+
+**Evidence (2026-10-18):**
+
+- Linux: `python3 scripts/test-standalone-install.py`, nine tests passed, including GIO
+  launching paths with spaces, percent signs, quotes, dollar signs, backticks and backslashes;
+  fixed plug-in and desktop folders with a custom app prefix; an update; missing-drive
+  rejection before replacing a plug-in; default installation; and uninstall keeping presets,
+  settings, a session and an unrelated file. Shell syntax checks passed for `install.sh` and
+  `package.sh`; the macOS distribution XML parses with the new description.
+- Windows 11 (build 26200), Inno Setup 6.7.3: the production script compiles. The production
+  destination page was opened and its rendering checked. For installation, a copy changed
+  only the AppId and the system folder constants to isolated fixture folders: the owner's
+  installed CA-72 must not be replaced. The payload was the public 0.2.6 Windows ZIP, checked
+  against its file manifest. A `subst S:` drive stood in for an external disk; no second
+  writable physical drive was available.
+- The isolated installer installed all components with the app in
+  `S:\Apps with spaces\CA-72`, and the installed app opened a native window with
+  `IDLE_FOUNDRY_SHARED` in the test folder and `--no-devices`, then closed normally and saved
+  its session. An upgrade from fixture version 0.2.6 to 0.2.7 (version metadata only; the same
+  released binaries) remembered the app folder without `/DIR`. An upgrade from the original
+  installer layout also retained its folder. A requested folder change and a disconnected
+  drive were rejected. Uninstall removed the installed binaries, shortcut and test registry
+  entry, keeping user data and an unrelated file. The real installation's registry entry,
+  presets, settings and installed binaries were unchanged by hash.
+
+- `cargo test --workspace`, ngspice 47 required, four build jobs and four test threads,
+  isolated shared data: 494 passed, 0 failed, 56 ignored, exit 0.
+  `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` also passed.
+  An independent source review found no actionable regressions.
+
+Not tried: a physical external SSD; a host rescan from real system plug-in folders (those
+folders were deliberately untouched); Mac app relocation or a rebuilt, signed and notarised
+Mac package. No Rust source or crate manifest changes are included.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found a
+prefix that exists but cannot be written, such as a drive mounted read-only, passed the folder
+check; the plug-ins were then replaced before the app's first write failed, leaving new
+plug-ins with the old app. `install.sh` now writes and removes a probe file in each chosen
+application destination (or its nearest existing folder) before touching any plug-in, and
+stops with "not writable; nothing was changed". A new installer test, with an installed prefix
+and an empty one made read-only, failed before the change (the VST3 was replaced) and passes
+after; all ten installer tests pass. The same script under a real read-only bind mount, in a
+user namespace, left the plug-ins as they were.
+
