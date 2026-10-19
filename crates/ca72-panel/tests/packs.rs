@@ -300,6 +300,7 @@ fn test_key() -> (String, TrustedKey) {
         TrustedKey {
             id: "test-1",
             public,
+            first_party: true,
         },
     )
 }
@@ -368,10 +369,25 @@ fn a_signed_pack_file_loads_as_published_and_unsigned_without_its_key() {
         Some(Publisher::Marketplace)
     );
     assert!(!look.first_party());
+    assert_eq!(look.menu_name(), format!("{} (MARKETPLACE)", look.name));
     // Without the key (an older plug-in, a newer key): as if unsigned, and it loads.
     let look = Look::open(&path).unwrap_or_else(|r| panic!("{r}"));
     assert!(look.signed.is_none());
     assert!(look.report.has("signature.unknown-key"), "{}", look.report);
+    assert_eq!(
+        look.menu_name(),
+        format!("{} (UNKNOWN SIGNING KEY)", look.name)
+    );
+}
+
+#[test]
+fn an_unsigned_packs_menu_name_cannot_claim_a_trusted_publisher() {
+    let mut look = Look::open(starter()).unwrap_or_else(|r| panic!("{r}"));
+    assert!(look.signed.is_none());
+    assert!(look.report.has("signature.none"));
+    assert_eq!(look.menu_name(), format!("{} (UNSIGNED)", look.name));
+    look.name = "NIGHT (IDLE FOUNDRY)".into();
+    assert_eq!(look.menu_name(), "NIGHT (IDLE FOUNDRY) (UNSIGNED)");
 }
 
 #[test]
@@ -425,6 +441,7 @@ fn only_a_first_party_signature_allows_the_makers_ids() {
     let look =
         Look::open_with(&first, &Limits::default(), &[key]).unwrap_or_else(|r| panic!("{r}"));
     assert!(look.first_party());
+    assert_eq!(look.menu_name(), format!("{} (IDLE FOUNDRY)", look.name));
     let seller = signed_pack_file(
         out.path(),
         "b.ifskin",

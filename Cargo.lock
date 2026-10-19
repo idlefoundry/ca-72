@@ -2275,6 +2275,7 @@ name = "skin-pack"
 version = "0.2.7"
 dependencies = [
  "ed25519-dalek",
+ "getrandom 0.4.3",
  "png",
  "resvg",
  "roxmltree",
@@ -2284,6 +2285,8 @@ dependencies = [
  "tempfile",
  "toml",
  "ttf-parser",
+ "windows-sys 0.61.2",
+ "zeroize",
  "zip",
 ]
 

@@ -7,7 +7,7 @@
 //! look, every control at the middle of its travel, in both letterings (`<name>.png` and
 //! `<name>-large.png`). Exits 1 if the pack is rejected. The pack may be a folder or a pack file
 //! (`.ifskin`). `--trust <key-id>:<public-key>` checks its signature against that key too (the
-//! marketplace's, before the plug-in has it built in).
+//! owner's, before the plug-in has it built in; this grants first-party trust for the check).
 
 use std::path::Path;
 
@@ -26,6 +26,7 @@ fn main() {
         keys.push(skin_pack::signature::TrustedKey {
             id: Box::leak(id.to_owned().into_boxed_str()),
             public,
+            first_party: true,
         });
         args.drain(i..=(i + 1).min(args.len() - 1));
     }
@@ -56,6 +57,8 @@ fn main() {
             "published by Idle Foundry, "
         } else if look.signed.is_some() {
             "published by the marketplace, "
+        } else if look.report.has("signature.unknown-key") {
+            "signed by an unknown key (treated as unsigned), "
         } else {
             "unsigned, "
         },

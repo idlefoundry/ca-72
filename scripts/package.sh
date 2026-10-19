@@ -24,6 +24,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n 1)"
+# A public release (CA72_PUBLIC_RELEASE=1, or the Mac's CA72_REQUIRE_NOTARIZATION=1) checks
+# the first-party key before packaging; its builds refuse an empty slot too (decisions.md
+# R-SKIN-KEYS). CI sets CA72_PUBLIC_RELEASE=1 for a version tag only, not for other changes.
+if [ "${CA72_PUBLIC_RELEASE:-0}" = 1 ] || [ "${CA72_REQUIRE_NOTARIZATION:-0}" = 1 ]; then
+    (cd "$root" && cargo run -q -p skin-pack --example check_release_key)
+fi
 bundles="$root/target/bundled"
 out="$root/target/packages"
 work="$root/target/packaging"

@@ -836,7 +836,7 @@ fn installed() -> Vec<Installed> {
             .into_iter()
             .map(|found| match found {
                 Ok(look) => Installed {
-                    name: look.name.clone(),
+                    name: look.menu_name(),
                     look: Some(look),
                 },
                 Err((folder, report)) => {
@@ -5632,7 +5632,7 @@ mod tests {
         TEST_PACKS.with(|p| {
             *p.borrow_mut() = vec![
                 Installed {
-                    name: "STARTER".into(),
+                    name: starter.menu_name(),
                     look: Some(starter.clone()),
                 },
                 Installed {
@@ -5650,12 +5650,12 @@ mod tests {
                 ("LOOK".to_owned(), false),
                 ("REALISTIC".to_owned(), false),
                 ("CLASSIC".to_owned(), true),
-                ("STARTER".to_owned(), true),
+                ("STARTER (UNSIGNED)".to_owned(), true),
                 ("broken-pack (CANNOT BE USED)".to_owned(), false),
             ]
         );
         host.take();
-        menu_item(&mut e, "STARTER");
+        menu_item(&mut e, "STARTER (UNSIGNED)");
         assert_eq!(e.renderer.look().id, starter.id);
         assert_eq!(
             (

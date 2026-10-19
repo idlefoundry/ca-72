@@ -1,7 +1,6 @@
-//! A marketplace pack's signature (decisions.md R-SKIN-PACKS): `signature.toml` in the pack,
-//! made by the marketplace when a pack passes its review, and checked by the plug-in offline
-//! against the public keys built into it. No login and no network: a signature proves that the
-//! files are the ones the marketplace reviewed and published, and who published them. It is not
+//! A pack's signature (decisions.md R-SKIN-KEYS): `signature.toml` in the pack, made by Idle
+//! Foundry or a future marketplace, and checked offline against the public keys built into the
+//! plug-in. No login and no network: a signature proves who published these files. It is not
 //! copy protection (a pack works however it was obtained) and not a licence.
 //!
 //! What is signed: the signature's own fields (its key's id, the pack's id and version, the
@@ -25,6 +24,8 @@ pub const SIGNATURE: &str = "signature.toml";
 pub struct TrustedKey {
     pub id: &'static str,
     pub public: [u8; 32],
+    /// May attest to Idle Foundry's own packs; a marketplace key cannot claim this.
+    pub first_party: bool,
 }
 
 /// Who a signature says published the pack.
@@ -32,7 +33,7 @@ pub struct TrustedKey {
 pub enum Publisher {
     /// A seller's pack, reviewed and published by the marketplace.
     Marketplace,
-    /// Idle Foundry's own pack, published by the marketplace.
+    /// Idle Foundry's own pack, signed by its first-party key.
     FirstParty,
 }
 
@@ -113,7 +114,7 @@ fn unhex<const N: usize>(s: &str) -> Option<[u8; N]> {
     Some(out)
 }
 
-/// A signing key from its 32 secret bytes in hexadecimal (the marketplace's tool's key file).
+/// A signing key from its 32 secret bytes in hexadecimal (the owner's key file).
 pub fn signing_key(secret_hex: &str) -> Option<SigningKey> {
     unhex::<32>(secret_hex).map(|b| SigningKey::from_bytes(&b))
 }
@@ -129,7 +130,7 @@ pub fn public_key(public_hex: &str) -> Option<[u8; 32]> {
 }
 
 /// The signature of the pack in `files` (its id and version its manifest's), as the text of its
-/// `signature.toml`: what the marketplace's tool writes into a pack it has reviewed.
+/// `signature.toml`: what the publisher's tool writes into the pack.
 pub fn sign(
     files: &Files,
     (pack, version): (&str, &str),
@@ -141,8 +142,8 @@ pub fn sign(
     let m = message(key_id, pack, version, publisher.name(), signed_on, &d);
     let s = key.sign(&m);
     format!(
-        "# This pack's signature, made by the marketplace as it published the pack: it proves the\n\
-         # files are the ones it reviewed. Any change to the pack breaks it.\n\
+        "# This pack's signature proves who published these files.\n\
+         # Any change to the pack breaks it.\n\
          format = 1\nkey = \"{key_id}\"\npack = \"{pack}\"\nversion = \"{version}\"\n\
          publisher = \"{}\"\nsigned_on = \"{signed_on}\"\ndigest = \"{d}\"\nsignature = \"{}\"\n",
         publisher.name(),
@@ -164,7 +165,7 @@ pub fn verify(
         report.note(
             "signature.none",
             None,
-            "unsigned: not published by the marketplace (it loads all the same)",
+            "unsigned: no trusted publisher signature (it loads all the same)",
         );
         return None;
     };
@@ -214,9 +215,13 @@ pub fn verify(
         report.reject(
             "signature.invalid",
             at,
-            format!("{why}: the pack is not the one the marketplace signed"),
+            format!("{why}: the pack cannot be used; get an unchanged copy from its publisher"),
         );
     };
+    if publisher == Publisher::FirstParty && !key.first_party {
+        invalid(report, "this key cannot sign Idle Foundry packs");
+        return None;
+    }
     if file.pack != pack || file.version != version {
         invalid(report, "signed for another pack or version");
         return None;
@@ -249,7 +254,12 @@ pub fn verify(
         "signature.valid",
         at,
         format!(
-            "signed by the marketplace's key `{}` on {} ({})",
+            "signed by {} with key `{}` on {} ({})",
+            if publisher == Publisher::FirstParty {
+                "Idle Foundry"
+            } else {
+                "the marketplace"
+            },
             file.key,
             file.signed_on,
             publisher.name()
@@ -286,6 +296,7 @@ mod tests {
             TrustedKey {
                 id: "test-1",
                 public,
+                first_party: true,
             },
         )
     }
@@ -309,7 +320,44 @@ mod tests {
         let mut r = Report::default();
         let s = verify(&f, ("org.example.x", "1.0.0"), &[key], &mut r).expect("signed");
         assert_eq!(s.publisher, Publisher::FirstParty);
+        assert!(
+            r.findings
+                .iter()
+                .any(|f| f.message.contains("signed by Idle Foundry"))
+        );
         assert!(!r.rejected(), "{r}");
+    }
+
+    #[test]
+    fn unsigned_packs_need_no_key() {
+        let mut r = Report::default();
+        assert!(verify(&files(&[]), ("org.example.x", "1.0.0"), &[], &mut r).is_none());
+        assert!(!r.rejected() && r.has("signature.none"), "{r}");
+    }
+
+    #[test]
+    fn a_key_id_is_signed_too_and_marketplace_keys_cannot_claim_idle_foundry() {
+        let (f, key) = signed(Publisher::FirstParty);
+        let text = std::str::from_utf8(f.get(SIGNATURE).expect("signed")).expect("text");
+        let changed = files(&[(SIGNATURE, text.replace("test-1", "test-2").as_bytes())]);
+        let other_id = TrustedKey {
+            id: "test-2",
+            ..key
+        };
+        let mut r = Report::default();
+        assert!(verify(&changed, ("org.example.x", "1.0.0"), &[other_id], &mut r).is_none());
+        assert!(r.has("signature.invalid"), "{r}");
+        // An unknown id still loads as unsigned, as an older plug-in treats a newer key.
+        let mut r = Report::default();
+        assert!(verify(&changed, ("org.example.x", "1.0.0"), &[key], &mut r).is_none());
+        assert!(!r.rejected() && r.has("signature.unknown-key"), "{r}");
+        let mut r = Report::default();
+        let marketplace = TrustedKey {
+            first_party: false,
+            ..key
+        };
+        assert!(verify(&f, ("org.example.x", "1.0.0"), &[marketplace], &mut r).is_none());
+        assert!(r.has("signature.invalid"), "{r}");
     }
 
     #[test]
@@ -342,6 +390,7 @@ mod tests {
             public: SigningKey::from_bytes(&[9u8; 32])
                 .verifying_key()
                 .to_bytes(),
+            first_party: true,
         };
         let mut r = Report::default();
         assert!(verify(&f, ("org.example.x", "1.0.0"), &[other], &mut r).is_none());
