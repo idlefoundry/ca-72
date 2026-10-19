@@ -25,6 +25,11 @@ effects console (temporary, for testing):
   chain                 the chain, its latency, each effect's health
   events                what happened to the effects since the last time
   kill S                kill effect S's helper (to try the recovery)
+  retry S               try effect S again (one turned off, missing, or off)
+  fresh S               load effect S without its saved settings (kept, set aside)
+  aside S               give effect S back its settings set aside
+  on                    turn the effects back on after a safe start
+  wait                  wait until no effect is loading
   save                  save the chain now
   help                  this";
 
@@ -177,6 +182,27 @@ impl Console {
                 .and_then(|s| self.chain.kill(s))
                 .map(|()| "killed".into()),
             Some("save") => self.chain.save_now().map(|()| "saved".into()),
+            Some("retry") => slot(1)
+                .and_then(|s| self.chain.retry(s))
+                .map(|()| self.show()),
+            Some("fresh") => slot(1)
+                .and_then(|s| self.chain.load_without_settings(s))
+                .map(|()| self.show()),
+            Some("aside") => slot(1)
+                .and_then(|s| self.chain.try_set_aside(s))
+                .map(|()| self.show()),
+            Some("on") => {
+                self.chain.turn_on();
+                Ok(self.show())
+            }
+            Some("wait") => {
+                let done = self.chain.wait_loaded(Duration::from_secs(120));
+                Ok(format!(
+                    "{}\n{}",
+                    if done { "loaded" } else { "still loading" },
+                    self.show()
+                ))
+            }
             Some(w) => Err(format!("`{w}`? (help lists the commands)")),
         };
         result.unwrap_or_else(|e| format!("error: {e}"))
@@ -235,16 +261,27 @@ impl Console {
             .enumerate()
             .map(|(i, s)| {
                 format!(
-                    "{}. {} ({}){}{} latency {} crashes {} misses {} at frame {}{}",
+                    "{}. {} ({}){}{}{}{} latency {} crashes {} misses {} at frame {}{}",
                     i + 1,
                     s.name,
                     s.format,
                     if s.bypass { " BYPASSED" } else { "" },
                     match s.health {
                         Health::Running => "",
+                        Health::Loading => " LOADING",
                         Health::Restarting => " RESTARTING",
-                        Health::Failed => " FAILED",
+                        Health::Disabled => " TURNED OFF",
                         Health::Missing => " MISSING",
+                        Health::Off => " OFF (safe start)",
+                    },
+                    s.disabled
+                        .as_ref()
+                        .map(|d| format!(" [{}, {} time(s)]", d.why, d.times))
+                        .unwrap_or_default(),
+                    if s.set_aside {
+                        " (its settings set aside)"
+                    } else {
+                        ""
                     },
                     s.latency,
                     s.crashes,

@@ -2,6 +2,7 @@
 //! by a helper (`ca72-fx-helper --scan`), never by the application. After DAW-v3's
 //! `daw-sandbox/src/locate.rs` (commit cb15558), with the standalone's own variables.
 
+use crate::sandbox::Fault;
 use daw_ipc::protocol::PluginDesc;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -142,6 +143,18 @@ pub fn no_console(command: &mut Command) {
 /// The plug-ins in a file, listed by a helper process of its own, killed after `timeout`: a
 /// plug-in that crashes or hangs when loaded costs its own entry, nothing more.
 pub fn scan(helper: &Path, file: &Path, timeout: Duration) -> Result<Vec<PluginDesc>, String> {
+    scan_file(helper, file, timeout).map_err(|(_, e)| e)
+}
+
+/// As [`scan`], a failure said with whether the plug-in crashed or hung its helper
+/// (decisions.md R-FX-SAFETY: it is then not listed again until it changes, or the player
+/// asks).
+pub fn scan_file(
+    helper: &Path,
+    file: &Path,
+    timeout: Duration,
+) -> Result<Vec<PluginDesc>, (Fault, String)> {
+    let refused = |e: String| (Fault::Refused, e);
     let mut command = Command::new(helper);
     command
         .arg("--scan")
@@ -152,7 +165,7 @@ pub fn scan(helper: &Path, file: &Path, timeout: Duration) -> Result<Vec<PluginD
     no_console(&mut command);
     let mut child = command
         .spawn()
-        .map_err(|e| format!("cannot start {}: {e}", helper.display()))?;
+        .map_err(|e| refused(format!("cannot start {}: {e}", helper.display())))?;
     // Read as it comes, so that a plug-in that writes much cannot fill the pipe and stall.
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
@@ -177,10 +190,13 @@ pub fn scan(helper: &Path, file: &Path, timeout: Duration) -> Result<Vec<PluginD
             Ok(None) if start.elapsed() > timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("listing its plug-ins took longer than {timeout:?}"));
+                return Err((
+                    Fault::Hung,
+                    format!("listing its plug-ins took longer than {timeout:?}"),
+                ));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(refused(e.to_string())),
         }
     };
     let out = out.join().unwrap_or_default();
@@ -188,11 +204,19 @@ pub fn scan(helper: &Path, file: &Path, timeout: Duration) -> Result<Vec<PluginD
     if !status.success() {
         let last = String::from_utf8_lossy(&err);
         let last = last.lines().last().unwrap_or("").trim().to_owned();
-        return Err(if last.is_empty() {
-            format!("its helper {}", crate::helper::describe(status))
+        let fault = if crashed(status) {
+            Fault::Crashed
         } else {
-            last
-        });
+            Fault::Refused
+        };
+        return Err((
+            fault,
+            if last.is_empty() || fault == Fault::Crashed {
+                format!("its helper {}", crate::helper::describe(status))
+            } else {
+                last
+            },
+        ));
     }
     // The listing is the last line: a plug-in may print before it.
     let text = String::from_utf8_lossy(&out);
@@ -201,5 +225,18 @@ pub fn scan(helper: &Path, file: &Path, timeout: Duration) -> Result<Vec<PluginD
         .rev()
         .find(|l| l.starts_with('['))
         .unwrap_or("");
-    serde_json::from_str(line).map_err(|e| format!("its listing could not be read: {e}"))
+    serde_json::from_str(line).map_err(|e| refused(format!("its listing could not be read: {e}")))
+}
+
+/// Whether a helper ended by crashing (a signal; on Windows an exception's status), not by
+/// saying no.
+fn crashed(s: std::process::ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if s.signal().is_some() {
+            return true;
+        }
+    }
+    s.code().is_some_and(|c| c as u32 >= 0xC000_0000)
 }

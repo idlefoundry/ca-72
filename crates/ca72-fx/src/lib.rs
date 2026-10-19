@@ -11,7 +11,13 @@
 //! - [`node`]: one effect on the audio thread, synchronous or pipelined;
 //! - [`console`]: a plain line-command interface to the chain, for testing until its view
 //!   is designed;
-//! - [`locate`]: finding the helper and the plug-in files.
+//! - [`locate`]: finding the helper and the plug-in files;
+//! - [`launch`]: whether the application closed properly last time (a safe start if not).
+//!
+//! No effect can stop the synth starting or playing, nor keep it from starting again
+//! (decisions.md R-FX-SAFETY): effects load while it plays, one that crashes or hangs as it
+//! loads or keeps crashing is turned off and stays off until the player tries it again, and a
+//! start after a run that did not close, or with Shift held, loads none of them.
 //!
 //! Nothing here loads plug-in code or links a plug-in SDK: that is the helper's. The
 //! crate does not depend on the CA-72's synth, so that another instrument can take it.
@@ -20,15 +26,17 @@ pub mod catalog;
 pub mod chain;
 pub mod console;
 pub mod helper;
+pub mod launch;
 pub mod locate;
 pub mod node;
 pub mod sandbox;
 
 pub use catalog::{Catalog, Found, Kind};
 pub use chain::{
-    Chain, ChainOptions, Health, MAX_SLOTS, Runner, SavedChain, SavedSlot, SlotStatus,
+    Chain, ChainOptions, Disabled, Health, MAX_SLOTS, Restore, Runner, SavedChain, SavedSlot,
+    SlotStatus,
 };
-pub use sandbox::{Event, Sandbox, SandboxOptions};
+pub use sandbox::{Event, Fault, Sandbox, SandboxOptions};
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;

@@ -1,13 +1,14 @@
 //! The chain's audio side never allocates or frees memory (docs/fx-host.md): a counting
 //! global allocator, counting only on the thread that plays, while blocks go through two
 //! effects in real time and the chain is changed under them (a parameter, a bypass, a move,
-//! an effect taken out) and one effect's helper is killed and restored. A binary of its own:
+//! an effect taken out, the chain restored as at a start, its effect joining as it plays) and
+//! one effect's helper is killed and restored. A binary of its own:
 //! the allocator is the process's.
 
 #![allow(unsafe_code)]
 
 use ca72_fx::chain::ChainOptions;
-use ca72_fx::{Chain, Kind, catalog};
+use ca72_fx::{Chain, Health, Kind, Restore, catalog};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -98,13 +99,21 @@ fn the_audio_side_never_allocates() {
     let period = Duration::from_secs_f64(256.0 / 48_000.0);
     // A first block outside the count: lazily made things (the clock's, the thread's).
     r.process(&mut l, &mut rr, Some(Instant::now() + period));
-    for k in 0..400 {
+    let mut saved = None;
+    for k in 0..600 {
         match k {
             50 => c.set_param(0, 1, 0.5).unwrap(),
             100 => c.set_bypass(1, true).unwrap(),
             150 => c.move_to(1, 0).unwrap(),
             200 => c.kill(1).unwrap(),
             300 => c.remove(0).unwrap(),
+            // The chain restored as at a start (R-FX-SAFETY): put in place dry, its effect
+            // joining from its loading thread while the audio plays.
+            350 => saved = Some(c.saved()),
+            360 => assert!(
+                c.restore_as(saved.as_ref().unwrap(), Restore::Background)
+                    .is_empty()
+            ),
             _ => {}
         }
         let t = Instant::now();
@@ -119,5 +128,10 @@ fn the_audio_side_never_allocates() {
         "allocations on the audio side"
     );
     assert_eq!(c.len(), 1);
+    assert_eq!(
+        c.status()[0].health,
+        Health::Running,
+        "restored while it played"
+    );
     c.shutdown().unwrap();
 }
