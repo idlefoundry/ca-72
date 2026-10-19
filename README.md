@@ -306,8 +306,11 @@ are [standalone-spec.md](docs/standalone-spec.md) and
 
 The editor works like the panel:
 
-- **Knobs:** drag up or down, or use the mouse wheel. Hold Shift to turn finely, and
-  double-click to return a control to its default.
+- **Knobs:** drag up or down, or scroll: a mouse wheel turns a knob a notch at a time, a
+  trackpad or a Magic Mouse as far as you move (on Linux, a trackpad also a notch at a time).
+  Hold Shift to turn finely, and double-click to return a control to its default. What you
+  hear follows a knob over 30 ms, so it moves smoothly however it is turned, by the editor or
+  by your host's automation; a preset you choose sounds at once.
 - **RANGE and WAVEFORM:** drag or scroll, click either side to step, or click a printed
   position to go straight to it.
 - **Switches:** click.

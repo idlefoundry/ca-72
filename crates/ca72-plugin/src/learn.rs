@@ -23,7 +23,7 @@
 //!   (`ProcessContext::set_parameter_normalized`, `third_party/nih-plug/PATCHES.md` change 10):
 //!   a knob to value / 127 of its travel, a selector (or VOICES) to the position its share of
 //!   0–127 falls in, a switch off at 0–63 and on at 64–127. The value jumps there ("jump"
-//!   takeover); a knob's voices follow it over [`DEZIP`] ([`Dezip`]).
+//!   takeover); a knob's voices follow it over [`DEZIP`] (`crate::smooth::Smooth::learned`).
 //!
 //! The audio thread reads the table and arms nothing: it only ever loads [`MidiMap`]'s atomics,
 //! takes an arming with a compare-and-swap and posts what it caught in an atomic word. Every
@@ -734,7 +734,7 @@ pub fn normalized_for(p: &Ca72Params, i: usize, target: &dyn Target, value: u8) 
     }
 }
 
-/// The knob of learnable index `i`, if it is one (the ones [`Dezip`] moves).
+/// The knob of learnable index `i`, if it is one (each glides: `crate::smooth::KNOBS`).
 pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
     Some(match LEARNABLE.get(i)?.id {
         "tune" => &p.tune,
@@ -771,127 +771,9 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
 /// How long the voices take to follow a knob a learned controller moves, s: a 7-bit controller
 /// moves a knob in steps of 1/127 of its travel, which the voices would otherwise take as steps
 /// (MAIN OUTPUT VOLUME's click: decisions.md R34 measures them). The parameter itself (the
-/// host's, the editor's, the state's) is at the new value at once.
+/// host's, the editor's, the state's) is at the new value at once. Every other change of a
+/// knob glides over `smooth::GLIDE` (decisions.md R-KNOB-GLIDE).
 pub const DEZIP: f64 = 0.010;
-
-/// While a knob glides, the voices' controls are set again every this many samples.
-pub const DEZIP_STEP: usize = 32;
-
-/// A knob gliding to where a learned controller put it: the knob (its parameter's address, to
-/// know it by), from and to (its plain values), and the samples gone and in all.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Glide {
-    knob: usize,
-    from: f32,
-    to: f32,
-    done: u32,
-    len: u32,
-}
-
-impl Glide {
-    fn now(&self) -> f32 {
-        if self.done >= self.len {
-            self.to
-        } else {
-            self.from + (self.to - self.from) * (self.done as f32 / self.len as f32)
-        }
-    }
-}
-
-/// The knobs that learned controllers move, gliding over [`DEZIP`] to their parameters' values
-/// (the voices only: the parameters are at the new values at once). Only these knobs glide, and
-/// only after a learned change: the host's automation, the editor and presets set the voices as
-/// they always have. A glide ends early where anything else sets the parameter meanwhile.
-#[derive(Clone, Debug)]
-pub struct Dezip {
-    glides: [Option<Glide>; LEARNABLE.len()],
-    moving: usize,
-    len: u32,
-}
-
-impl Default for Dezip {
-    fn default() -> Self {
-        Dezip {
-            glides: [None; LEARNABLE.len()],
-            moving: 0,
-            len: 1,
-        }
-    }
-}
-
-impl Dezip {
-    /// The glides' length at `rate` Hz.
-    pub fn prepare(&mut self, rate: f64) {
-        self.len = (DEZIP * rate).round().max(1.0) as u32;
-        self.clear();
-    }
-
-    /// No glide.
-    pub fn clear(&mut self) {
-        self.glides = [None; LEARNABLE.len()];
-        self.moving = 0;
-    }
-
-    /// Whether a knob glides.
-    pub fn moving(&self) -> bool {
-        self.moving > 0
-    }
-
-    /// Learnable knob `i`, `knob`, set from `from` (where the voices had it) to `to`: it glides
-    /// there, from where it is if it was gliding.
-    pub fn start(&mut self, i: usize, knob: &FloatParam, from: f32, to: f32) {
-        let Some(slot) = self.glides.get_mut(i) else {
-            return;
-        };
-        let from = slot.map_or(from, |g| g.now());
-        if slot.is_none() {
-            self.moving += 1;
-        }
-        *slot = Some(Glide {
-            knob: std::ptr::from_ref(knob) as usize,
-            from,
-            to,
-            done: 0,
-            len: self.len.max(1),
-        });
-    }
-
-    /// `n` samples on; a glide whose knob's parameter has been set elsewhere meanwhile (not at its
-    /// end) ends.
-    pub fn advance(&mut self, n: usize, p: &Ca72Params) {
-        if self.moving == 0 {
-            return;
-        }
-        for (i, slot) in self.glides.iter_mut().enumerate() {
-            let Some(g) = slot else { continue };
-            g.done = g.done.saturating_add(n as u32);
-            let set_elsewhere = knob_param(p, i).is_none_or(|k| k.value() != g.to);
-            if g.done >= g.len || set_elsewhere {
-                *slot = None;
-                self.moving -= 1;
-            }
-        }
-    }
-
-    /// The glides ended where anything other than a learned controller set their knobs: at a
-    /// run's start, before the voices' controls are taken.
-    pub fn follow(&mut self, p: &Ca72Params) {
-        self.advance(0, p);
-    }
-
-    /// Where the voices have `knob` now: its glide's place, else its value.
-    pub fn value(&self, knob: &FloatParam) -> f32 {
-        if self.moving > 0 {
-            let at = std::ptr::from_ref(knob) as usize;
-            for g in self.glides.iter().flatten() {
-                if g.knob == at {
-                    return g.now();
-                }
-            }
-        }
-        knob.value()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1257,39 +1139,5 @@ mod tests {
             fields.get(STATE_KEY).map(String::as_str),
             Some(r#"{"version":1,"assignments":[{"param":"cutoff","channel":1,"cc":74}]}"#)
         );
-    }
-
-    /// A knob glides over `DEZIP` to the value a learned controller set, from where the voices
-    /// had it (from where it was gliding, if it was), and stops gliding when anything else sets
-    /// its parameter.
-    #[test]
-    fn a_knob_glides_to_a_learned_value_and_stops_where_set_elsewhere() {
-        let p = Ca72Params::default();
-        let i = at("cutoff");
-        let k = knob_param(&p, i).expect("a knob");
-        let mut d = Dezip::default();
-        d.prepare(48_000.0);
-        assert_eq!(d.value(k), 0.0);
-        // (The parameter itself stays at its default here: as if set elsewhere unless `to`
-        // is its value.)
-        d.start(i, k, 4.0, 0.0);
-        assert!(d.moving());
-        assert_eq!(d.value(k), 4.0);
-        d.advance(240, &p);
-        assert!((d.value(k) - 2.0).abs() < 1e-5, "{}", d.value(k));
-        d.advance(240, &p);
-        assert!(!d.moving());
-        assert_eq!(d.value(k), 0.0);
-        // Set elsewhere meanwhile (its value is not the glide's end): the glide ends.
-        d.start(i, k, 0.0, 3.0);
-        d.follow(&p);
-        assert!(!d.moving());
-        assert_eq!(d.value(k), k.value());
-        // A second change mid-glide glides on from where it was.
-        d.start(i, k, 4.0, 0.0);
-        d.advance(120, &p);
-        let mid = d.value(k);
-        d.start(i, k, 99.0, 0.0);
-        assert_eq!(d.value(k), mid);
     }
 }
