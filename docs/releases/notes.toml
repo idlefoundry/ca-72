@@ -56,8 +56,17 @@ bug_fixes = [
 [[release]]
 version = "0.2.7"
 features = [
-  "ENTROPY reaches steady oscillator pitch at 0 %. From 0 to 5 % it brings back the small tuning mismatch, slow drift and waver. New instances start at 5 %, the old minimum.",
-  "Old presets and saved projects move to the new ENTROPY scale automatically. Existing automation uses the new scale: move old values to 5 + 0.95 times the old amount to keep their previous amounts.",
+  "INIT in the preset drawer resets the sound to the fresh-instance patch; your settings stay as they are.",
+  "ENTROPY reaches steady pitch at 0 %. 5 % sounds as the old 0 % did, and new instances start there.",
+  "Earlier presets and projects move to the new ENTROPY scale automatically. Old automation uses the new scale.",
+  "Settings shows the version you're running, and this note shows what changed after an update.",
+  "Choose where the standalone app installs, an external drive included. Plug-ins stay where hosts look.",
 ]
 performance_improvements = []
-bug_fixes = []
+bug_fixes = [
+  "Mac: on a non-Retina monitor beside a Retina screen, the panel fills its window instead of a corner.",
+  "Mac: the app opens at its window's size on any screen instead of being cut off on the right.",
+  "Windows: the app's window is exactly its panel at every display scale, with no black space.",
+  "Linux: docks show the CA-72's own icon instead of a gear.",
+  "CLAP: a note sent at velocity zero through CLAP's note events now plays.",
+]
