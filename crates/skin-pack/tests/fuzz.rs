@@ -3,7 +3,9 @@
 //! repeated), each read as a pack would be. A reader must never panic, never take long, and
 //! always answer (loaded or refused). `SKIN_PACK_FUZZ=<n>` runs `n` cases a reader (300 by
 //! default); a case that fails is written to the system's temporary folder to reproduce.
-//! `SKIN_PACK_FUZZ_SEED=<u64>` selects another repeatable mutation sequence.
+//! `SKIN_PACK_FUZZ_SEED=<u64>` selects another repeatable mutation sequence;
+//! `SKIN_PACK_FUZZ_LAST=<file>` writes each case there before it is read, so that a case that
+//! aborts the process (which no test can catch) is left there.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
@@ -99,9 +101,14 @@ fn fuzz(name: &str, seeds: &[Vec<u8>], most: Duration, read: impl Fn(&[u8])) {
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
     let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ name.len() as u64 ^ seed);
+    let last = std::env::var_os("SKIN_PACK_FUZZ_LAST")
+        .map(|p| std::path::PathBuf::from(p).with_extension(name));
     for k in 0..cases() {
         let seed = &seeds[k % seeds.len()];
         let input = mutate(seed, &mut rng);
+        if let Some(last) = &last {
+            std::fs::write(last, &input).expect("the case written");
+        }
         let t = Instant::now();
         let ok = catch_unwind(AssertUnwindSafe(|| read(&input))).is_ok();
         let took = t.elapsed();

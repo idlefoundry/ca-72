@@ -106,23 +106,50 @@ fn a_good_pack_is_read_with_its_terms_and_its_declarations_as_declared() {
     assert!(p.report.has("licence.terms"));
 }
 
-/// Packs whose checking once aborted the process (an allocation that fails is not a panic):
-/// each read in a child process, so that a regression fails this test, not the run.
+/// Packs whose checking once aborted the process (an allocation that fails, or a stack that
+/// overflows, is not a panic): each read in a child process, so that a regression fails this
+/// test, not the run.
 #[test]
 fn packs_that_once_aborted_their_check_are_refused_in_a_child_process() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let drawing = |name: &str| {
+    let drawing = |svg: Vec<u8>| {
         let dir = pack("CC-BY-4.0");
-        write(
-            dir.path(),
-            "art/panel.svg",
-            &std::fs::read(fixtures.join(name)).expect("the fixture"),
-        );
+        write(dir.path(), "art/panel.svg", &svg);
         dir
     };
-    // The pack made by hand, and the fuzzer's case as a pack's drawing.
-    let fuzzed = drawing("pattern-fuzz-17237.svg");
-    for dir in [fixtures.join("vast-pattern"), fuzzed.path().to_owned()] {
+    let fixture = |name: &str| std::fs::read(fixtures.join(name)).expect("the fixture");
+    // The fuzzer's cases, as a pack's drawing.
+    let packs = [
+        (
+            drawing(fixture("pattern-fuzz-17237.svg")),
+            "a pattern's tile",
+        ),
+        (
+            drawing(fixture("inherited-pattern-fuzz.svg")),
+            "repeats itself",
+        ),
+        (
+            drawing(
+                format!(
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'>{}\
+                     <rect width='1' height='1'/>{}</svg>",
+                    "<g>".repeat(2000),
+                    "</g>".repeat(2000)
+                )
+                .into_bytes(),
+            ),
+            "64 deep",
+        ),
+        // (A panic, in usvg's reading.)
+        (
+            drawing(fixture("embedded-png-huge.svg")),
+            "an embedded picture",
+        ),
+    ];
+    // The pack made by hand, and those.
+    let dirs = std::iter::once((fixtures.join("vast-pattern"), "a pattern's tile"))
+        .chain(packs.iter().map(|(d, why)| (d.path().to_owned(), *why)));
+    for (dir, why) in dirs {
         let out = std::process::Command::new(std::env::current_exe().expect("this test"))
             .args([
                 "--exact",
@@ -142,7 +169,7 @@ fn packs_that_once_aborted_their_check_are_refused_in_a_child_process() {
             String::from_utf8_lossy(&out.stderr)
         );
         assert!(said.contains("refused: svg.refused"), "{said}");
-        assert!(said.contains("a pattern's tile"), "{said}");
+        assert!(said.contains(why), "not {why}: {said}");
     }
 }
 

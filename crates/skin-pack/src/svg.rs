@@ -304,6 +304,61 @@ fn references<'a>(node: roxmltree::Node<'a, '_>) -> Vec<&'a str> {
     out
 }
 
+/// The patterns a shape or a `use` paints with that it inherits (a `fill` or `stroke` set by an
+/// ancestor, not by itself): a pattern's own elements inherit from the pattern's ancestors, so a
+/// pattern inside a group filled with it fills its own elements with itself, and usvg's reading
+/// recurses until its stack overflows (found by the fuzzer: the root's `fill='url(#p)'`).
+fn inherited_patterns<'a, 'i>(
+    node: roxmltree::Node<'a, 'i>,
+    ids: &HashMap<&str, roxmltree::Node<'a, 'i>>,
+) -> Vec<&'a str> {
+    const PAINTS: &[&str] = &[
+        "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use",
+    ];
+    if !PAINTS.contains(&node.tag_name().name()) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for property in ["fill", "stroke"] {
+        // The nearest element that sets it, as an attribute or in its style.
+        let set = |n: roxmltree::Node<'a, 'i>| -> Option<&'a str> {
+            let style = n.attribute("style").and_then(|style| {
+                style.split(';').find_map(|d| {
+                    let (k, v) = d.split_once(':')?;
+                    (k.trim() == property).then_some(v)
+                })
+            });
+            // (`inherit` sets nothing: the value is an ancestor's.)
+            style
+                .or_else(|| n.attribute(property))
+                .filter(|v| v.trim() != "inherit")
+        };
+        if set(node).is_some() {
+            continue;
+        }
+        let Some(value) = node.ancestors().skip(1).find_map(set) else {
+            continue;
+        };
+        if let Some(id) = value
+            .trim()
+            .strip_prefix("url(")
+            .map(|v| v.trim_start().trim_start_matches(['\'', '"']))
+            .and_then(|v| v.strip_prefix('#'))
+        {
+            let id = &id[..id
+                .find(|c: char| c == ')' || c == '\'' || c == '"' || c.is_whitespace())
+                .unwrap_or(id.len())];
+            if ids
+                .get(id)
+                .is_some_and(|t| t.tag_name().name() == "pattern")
+            {
+                out.push(id);
+            }
+        }
+    }
+    out
+}
+
 /// How many elements `node` draws, each of its references counted as what it repeats (`Err` on
 /// a loop or past `most`).
 fn expanded<'a, 'i>(
@@ -323,7 +378,11 @@ fn expanded<'a, 'i>(
         return Ok((n, depth));
     }
     if path.contains(&node.id()) {
-        return Err("a reference that repeats itself (a `use` or a `url(#...)`)".into());
+        return Err(
+            "a reference that repeats itself (a `use` or a `url(#...)`, or a pattern's elements \
+             filled with the pattern they are in)"
+                .into(),
+        );
     }
     path.push(node.id());
     let mut n = 1usize;
@@ -336,7 +395,10 @@ fn expanded<'a, 'i>(
             break;
         }
     }
-    for id in references(node) {
+    for id in references(node)
+        .into_iter()
+        .chain(inherited_patterns(node, ids))
+    {
         if n > most {
             break;
         }
@@ -944,6 +1006,12 @@ mod tests {
         )
     }
 
+    fn refused_whole(drawing: &str) -> String {
+        parse(drawing.as_bytes(), &Limits::default())
+            .err()
+            .unwrap_or_else(|| panic!("accepted: {drawing}"))
+    }
+
     fn refused(body: &str) -> String {
         parse(svg(body).as_bytes(), &Limits::default())
             .err()
@@ -1081,6 +1149,54 @@ mod tests {
     }
 
     /// Ten `use`s of ten `use`s of ... : a few hundred bytes drawing millions of shapes.
+    #[test]
+    fn a_pattern_filled_with_itself_by_inheritance_is_refused_before_usvg_reads_it() {
+        // (usvg's reading recursed until its stack overflowed, which aborts: checked here by
+        // the scan alone, which runs before it.)
+        let fuzzed = std::str::from_utf8(include_bytes!(
+            "../tests/fixtures/inherited-pattern-fuzz.svg"
+        ))
+        .expect("text");
+        let pattern = "<pattern id='p' width='10' height='10' patternUnits='userSpaceOnUse'>";
+        let used = "<rect width='10' height='10' fill='url(#p)'/>";
+        for drawing in [
+            fuzzed.to_owned(),
+            svg(&format!(
+                "<g fill='url(#p)'>{pattern}<rect width='5' height='5'/></pattern></g>\
+                 <rect width='10' height='10' fill='url(#p)'/>"
+            )),
+            svg(&format!(
+                "<g style='stroke: url(#p)'><g fill='inherit'>{pattern}\
+                 <rect width='5' height='5'/></pattern></g></g>{used}"
+            )),
+            svg(&format!(
+                "<rect id='r' width='5' height='5'/><g fill='url(#p)'>{pattern}\
+                 <use href='#r'/></pattern></g>{used}"
+            )),
+            svg(&format!(
+                "<g fill='url(#q)'>{}<rect width='5' height='5'/></pattern></g>\
+                 {pattern}<rect width='5' height='5' fill='url(#q)'/></pattern>{used}",
+                pattern.replace("'p'", "'q'")
+            )),
+        ] {
+            let why = scan(&drawing, &Limits::default()).unwrap_err();
+            assert!(why.contains("repeats itself"), "{drawing}: {why}");
+        }
+        // A pattern's own fill, or one its elements set themselves, is not its own.
+        for drawing in [
+            svg(&format!(
+                "<g fill='url(#p)'>{pattern}<rect width='5' height='5' fill='red'/></pattern>\
+                 </g><rect width='10' height='10' fill='url(#p)'/>"
+            )),
+            svg(&format!(
+                "<g fill='red'>{pattern}<rect width='5' height='5'/></pattern></g>\
+                 <rect width='10' height='10' fill='url(#p)'/>"
+            )),
+        ] {
+            parse(drawing.as_bytes(), &Limits::default()).expect("a pattern filled red");
+        }
+    }
+
     #[test]
     fn uses_that_multiply_are_counted_as_drawn() {
         let mut body = String::from("<defs><rect id='l0' width='1' height='1'/>");
@@ -1412,6 +1528,61 @@ mod tests {
         }
         body.push_str("</defs><use href='#r99'/>");
         assert!(refused(&body).contains("64 deep"));
+    }
+
+    #[test]
+    fn a_drawing_nested_as_deep_as_allowed_is_read_and_drawn_on_a_small_stack() {
+        // Windows gives a thread 1 MB by default: a host's editor thread may have no more.
+        let deep = |depth: usize| {
+            svg(&format!(
+                "<clipPath id='c'><rect width='90' height='90'/></clipPath>{}\
+                 <rect width='1' height='1' fill='#123'/>{}",
+                "<g opacity='.9' clip-path='url(#c)'>".repeat(depth),
+                "</g>".repeat(depth)
+            ))
+        };
+        // References followed count as deep: a `use` of a group of a `use`..., and a clip
+        // clipped by a clip...
+        let uses = |depth: usize| {
+            let mut body = String::from("<defs><rect id='u0' width='1' height='1'/>");
+            for i in 1..=depth {
+                body.push_str(&format!(
+                    "<g id='u{i}' opacity='.9'><use href='#u{}'/></g>",
+                    i - 1
+                ));
+            }
+            svg(&format!("{body}</defs><use href='#u{depth}'/>"))
+        };
+        let clips = |depth: usize| {
+            let mut body =
+                String::from("<clipPath id='c0'><rect width='90' height='90'/></clipPath>");
+            for i in 1..=depth {
+                body.push_str(&format!(
+                    "<clipPath id='c{i}' clip-path='url(#c{})'><rect width='90' height='90'/>\
+                     </clipPath>",
+                    i - 1
+                ));
+            }
+            svg(&format!(
+                "{body}<rect width='9' height='9' clip-path='url(#c{depth})'/>"
+            ))
+        };
+        for drawing in [deep(60), uses(30), clips(60)] {
+            let read = std::thread::Builder::new()
+                .stack_size(1 << 20)
+                .spawn(move || {
+                    let (tree, _) = parse(drawing.as_bytes(), &Limits::default())?;
+                    let mut pixmap = Pixmap::new(100, 100).expect("a pixmap");
+                    Ok::<bool, String>(render(&tree, Transform::identity(), &mut pixmap.as_mut()))
+                })
+                .expect("a thread")
+                .join()
+                .expect("read and drawn");
+            assert_eq!(read, Ok(true));
+        }
+        for drawing in [deep(70), uses(40), clips(70)] {
+            assert!(refused_whole(&drawing).contains("64 deep"), "{drawing}");
+        }
     }
 
     #[test]
