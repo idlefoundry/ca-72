@@ -51,6 +51,8 @@ use crate::presets::Browser;
 use crate::settings::{Change, Settings};
 use crate::update::Update;
 
+mod agent;
+
 /// The share of the usable screen the editor opens at until it is resized.
 const SCREEN_SHARE: f64 = 0.8;
 /// The editor's width at first where the screen's size is unknown, in logical pixels.
@@ -831,6 +833,9 @@ struct Editing {
     playing: Playing,
     #[cfg(feature = "standalone-production")]
     standalone_dialog: Option<crate::standalone_settings::Dialog>,
+    /// AI agents operating the editor through MCP, while allowed (`editor/agent.rs`;
+    /// decisions.md R-MCP).
+    agents: agent::Agents,
 }
 
 impl PanelWindow {
@@ -1076,8 +1081,31 @@ impl Editing {
             playing,
             #[cfg(feature = "standalone-production")]
             standalone_dialog: None,
+            agents: agent::Agents::default(),
         }
         .opened()
+        .listening()
+    }
+
+    /// Listening for agents if they are allowed (not in the tests' editors, which open no
+    /// socket of their own).
+    fn listening(mut self) -> Self {
+        if !cfg!(test) {
+            self.sync_agents();
+        }
+        self
+    }
+
+    /// Agents allowed or not from now on (SETTINGS: AGENTS), on this computer; off, for this
+    /// session too (`--agents`).
+    fn set_agents(&mut self, on: bool) {
+        self.keep_settings(Change::Agents(on));
+        if !on {
+            crate::agent::force(false);
+        }
+        self.agents.stop = false;
+        self.agents.error = None;
+        self.sync_agents();
     }
 
     /// As it opens: what QUALITY's setting shows up in its opening, not moving (the hamster
@@ -1756,6 +1784,7 @@ impl Editing {
                         self.settings.skin,
                         self.settings.lettering,
                         self.settings.frequency,
+                        self.playing.standalone.then(|| self.agents_allowed()),
                     ),
                 );
             }
@@ -1832,6 +1861,10 @@ impl Editing {
                 self.set_lettering(lettering);
                 return;
             }
+            Pressed::Agents(on) => {
+                self.set_agents(on);
+                return;
+            }
             Pressed::SizeMenu => {
                 let size = self.renderer.text_size() * MENU_TEXT;
                 let sizes = self.sizes();
@@ -1891,21 +1924,7 @@ impl Editing {
                     self.playing.typing = !self.playing.typing;
                     self.playing.wants_keys = self.playing.typing;
                 }
-                keyboard::Target::Panic => {
-                    #[cfg(feature = "standalone-production")]
-                    if let Some(app) = plugin_kit_standalone::AppHandle::current() {
-                        let token = self.playing.panic_standalone();
-                        let accepted = app.panic_tagged(token);
-                        debug_assert!(
-                            accepted,
-                            "local panic tokens are nonzero and fit in 63 bits"
-                        );
-                    } else {
-                        self.playing.panic();
-                    }
-                    #[cfg(not(feature = "standalone-production"))]
-                    self.playing.panic();
-                }
+                keyboard::Target::Panic => self.panic(),
                 keyboard::Target::Back => {}
             }
             self.hover = None;
@@ -1959,6 +1978,24 @@ impl Editing {
                 self.resizing = Some((self.pointer.0, self.width));
             }
         }
+    }
+
+    /// PANIC: every note off, from every source, and the controllers reset (the keyboard's
+    /// button, and an agent's).
+    fn panic(&mut self) {
+        #[cfg(feature = "standalone-production")]
+        if let Some(app) = plugin_kit_standalone::AppHandle::current() {
+            let token = self.playing.panic_standalone();
+            let accepted = app.panic_tagged(token);
+            debug_assert!(
+                accepted,
+                "local panic tokens are nonzero and fit in 63 bits"
+            );
+        } else {
+            self.playing.panic();
+        }
+        #[cfg(not(feature = "standalone-production"))]
+        self.playing.panic();
     }
 
     /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R34),
@@ -2978,6 +3015,11 @@ impl WindowHandler for PanelWindow {
         if self.editing.dragging() && window::lost_capture(window) {
             self.editing.end_gestures();
             self.editing.playing.release_pointer();
+        }
+        // What agents ask, carried out as the player's edits are, before the frame is drawn.
+        if self.editing.serve_agents() {
+            self.follow(window);
+            self.keyboard(window);
         }
         // The grip's width, asked of the host once a frame.
         self.editing.grip();
