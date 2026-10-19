@@ -7646,3 +7646,30 @@ After those fixes, `cargo test -p ca72-plugin --no-fail-fast` passed 302 tests,
 or Windows build, installed plug-in, or audio device was used for this job. The numerical
 rounding limit, preserving deliberate panel modulation at 0 %, and 0.2.7 as the first
 writer of the new scale are recorded here for the owner's confirmation at review.
+
+
+## R-CLAP-ENVELOPES. Zero-velocity typed notes are attacks
+
+**Agent finding, 2026-10-18** (issue 57; not separately reviewed by the owner).
+`event_of` treated every zero-velocity `NoteOn` as a release. CLAP expressly permits a
+native note-on at velocity 0. nih-plug's MIDI decoder already turns MIDI 1's zero-velocity
+note-on bytes into `NoteOff`; VST3 preserves its native note-on velocity. Accept typed
+`NoteOn` as an attack, leaving MIDI 1 releases in the decoder. No panel setting, saved id
+or contour model changes. The existing keyboard-source test now constructs its MIDI
+zero-velocity release through that decoder.
+
+**Evidence (Linux, 2026-10-18):** the native CLAP regression failed before the correction,
+held RMS 0. The headless CLAP matrix covers 126 mode/priority/retrigger/buffer combinations
+in both note dialects, with direct filter and loudness contour checks in 54 configurations
+across LO, HI and ULTRA. REAPER 7.79 rendered the isolated MIDI item in CLAP and VST3 in
+all 18 mode/priority/retrigger combinations: 36 renders, 504 sounding windows, all above
+RMS 0.102, final residual RMS 0.0046 to 0.0065. Bitwig 5.2.7 loaded the renamed CLAP, but
+MIDI playback and rendering there remain unverified. The disposable profile's graphics
+and file-chooser failures and Demo Mode's export restriction are recorded in
+`docs/work/linux-clap-envelopes-2026-10.md`, with the reproduction, bounds and draft reply.
+
+This establishes a missing-note defect, not the cause of the reporter's intermittent
+failure. Their host, patch and MIDI are still unknown; both linked forum pages returned
+HTTP 403. Do not treat ordinary mono legato, the circuit's approximately 12 ms trigger
+re-arming interval, or issue 15 as an explanation for separated-note failures. CC64
+currently has no built-in pedal function; changing that is a separate feature decision.
