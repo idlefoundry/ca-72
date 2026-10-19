@@ -210,37 +210,72 @@ mod sys {
     const OS_SYNC_WAKE_BY_ADDRESS_SHARED: u32 = 1;
     const OS_CLOCK_MACH_ABSOLUTE_TIME: u32 = 32;
 
-    // From <os/os_sync_wait_on_address.h>, macOS 14.4 and later.
-    unsafe extern "C" {
-        fn os_sync_wait_on_address(addr: *mut c_void, value: u64, size: usize, flags: u32) -> i32;
-        fn os_sync_wait_on_address_with_timeout(
-            addr: *mut c_void,
-            value: u64,
-            size: usize,
-            flags: u32,
-            clockid: u32,
-            timeout_ns: u64,
-        ) -> i32;
-        fn os_sync_wake_by_address_all(addr: *mut c_void, size: usize, flags: u32) -> i32;
+    // From <os/os_sync_wait_on_address.h>, macOS 14.4 and later: looked up when first
+    // needed (CA-72 patch, third_party/daw-v3/PATCHES.md), not linked, so that a program
+    // with this crate starts on older systems, where waits poll the word instead.
+    type Wait = unsafe extern "C" fn(*mut c_void, u64, usize, u32) -> i32;
+    type WaitTimeout = unsafe extern "C" fn(*mut c_void, u64, usize, u32, u32, u64) -> i32;
+    type Wake = unsafe extern "C" fn(*mut c_void, usize, u32) -> i32;
+
+    struct Api {
+        wait: Wait,
+        wait_timeout: WaitTimeout,
+        wake: Wake,
+    }
+
+    fn api() -> Option<&'static Api> {
+        static API: std::sync::OnceLock<Option<Api>> = std::sync::OnceLock::new();
+        API.get_or_init(|| {
+            let find = |name: &std::ffi::CStr| {
+                // SAFETY: looking a symbol up by its name in the loaded images.
+                let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
+                (!p.is_null()).then_some(p)
+            };
+            let (w, t, k) = (
+                find(c"os_sync_wait_on_address")?,
+                find(c"os_sync_wait_on_address_with_timeout")?,
+                find(c"os_sync_wake_by_address_all")?,
+            );
+            // SAFETY: each pointer is the function of that name, of the signature its header
+            // declares.
+            Some(unsafe {
+                Api {
+                    wait: std::mem::transmute::<*mut c_void, Wait>(w),
+                    wait_timeout: std::mem::transmute::<*mut c_void, WaitTimeout>(t),
+                    wake: std::mem::transmute::<*mut c_void, Wake>(k),
+                }
+            })
+        })
+        .as_ref()
+    }
+
+    /// Before macOS 14.4: the word looked at every 50 µs until it changes or the time is up.
+    pub(super) fn poll(word: &AtomicU32, current: u32, timeout: Option<Duration>) {
+        use std::sync::atomic::Ordering;
+        let until = timeout.map(|t| std::time::Instant::now() + super::clamp(t));
+        while word.load(Ordering::Acquire) == current {
+            if until.is_some_and(|u| std::time::Instant::now() >= u) {
+                return;
+            }
+            std::thread::sleep(Duration::from_micros(50));
+        }
     }
 
     pub fn wait(word: &AtomicU32, current: u32, timeout: Option<Duration>) {
+        let Some(api) = api() else {
+            return poll(word, current, timeout);
+        };
         let addr = word.as_ptr() as *mut c_void;
         // SAFETY: waiting on a valid, aligned 4-byte word in shared memory; the call
         // returns at once if the word no longer holds `current`.
         unsafe {
             match timeout {
                 None => {
-                    os_sync_wait_on_address(
-                        addr,
-                        u64::from(current),
-                        4,
-                        OS_SYNC_WAIT_ON_ADDRESS_SHARED,
-                    );
+                    (api.wait)(addr, u64::from(current), 4, OS_SYNC_WAIT_ON_ADDRESS_SHARED);
                 }
                 Some(t) => {
                     let ns = super::clamp(t).as_nanos().max(1) as u64;
-                    os_sync_wait_on_address_with_timeout(
+                    (api.wait_timeout)(
                         addr,
                         u64::from(current),
                         4,
@@ -254,9 +289,12 @@ mod sys {
     }
 
     pub fn wake(word: &AtomicU32) {
+        let Some(api) = api() else {
+            return;
+        };
         // SAFETY: waking waiters on a valid, aligned word.
         unsafe {
-            os_sync_wake_by_address_all(
+            (api.wake)(
                 word.as_ptr() as *mut c_void,
                 4,
                 OS_SYNC_WAKE_BY_ADDRESS_SHARED,
@@ -328,6 +366,28 @@ mod tests {
     use super::*;
     use crate::shm::{Shm, unique_name};
     use std::sync::Arc;
+
+    /// The wait before macOS 14.4 (CA-72 patch): it ends when the word changes, or at its
+    /// time.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_polled_wait_sees_a_change_and_times_out() {
+        use std::sync::atomic::Ordering;
+        let word = Arc::new(AtomicU32::new(5));
+        let w = word.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            w.store(6, Ordering::Release);
+        });
+        let start = std::time::Instant::now();
+        sys::poll(&word, 5, Some(std::time::Duration::from_secs(5)));
+        assert_eq!(word.load(Ordering::Acquire), 6);
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        t.join().unwrap();
+        let start = std::time::Instant::now();
+        sys::poll(&word, 6, Some(std::time::Duration::from_millis(30)));
+        assert!(start.elapsed() >= std::time::Duration::from_millis(30));
+    }
 
     #[test]
     fn wakes_a_waiter_and_times_out() {
