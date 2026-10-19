@@ -3267,6 +3267,110 @@ mod tests {
         }
     }
 
+    /// Issue 57: inspect both contours themselves, as well as the CLAP host's audio. A
+    /// separated key must start and hold every instrument's contours; overlapping keys keep
+    /// them held, whether RETRIGGER starts a fresh attack or ordinary legato carries on.
+    #[test]
+    fn separated_and_overlapping_keys_start_and_hold_both_contours() {
+        for (potato, ultra) in [(true, false), (false, false), (false, true)] {
+            for mode in 0..3 {
+                for priority in [Priority::Low, Priority::Last, Priority::High] {
+                    for retrigger in [false, true] {
+                        let mut c = Controls {
+                            potato,
+                            ultra,
+                            poly: mode == 1,
+                            unison: mode == 2,
+                            voices: 2,
+                            lock: true,
+                            ..Controls::default()
+                        };
+                        c.panel.priority = priority;
+                        c.panel.retrigger = retrigger;
+                        c.panel.decay = false;
+                        let mut e = Engine::new();
+                        e.set(&c);
+                        e.prepare(48_000.0, 51826);
+                        for key in [60, 64, 60] {
+                            e.event(Event::Note { key, on: true });
+                            for _ in 0..40 {
+                                let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
+                                e.render(&[], &mut l, &mut r);
+                                e.end_block(256);
+                            }
+                            let check = |e: &Engine, keys: &[u8]| {
+                                let mut count = 0;
+                                for (k, s) in e.slots.iter().enumerate() {
+                                    if !(k < e.instruments() || mode == 1 && s.gate) {
+                                        continue;
+                                    }
+                                    if mode == 1 {
+                                        assert!(
+                                            keys.contains(&s.note),
+                                            "unexpected POLY key {}",
+                                            s.note
+                                        );
+                                    }
+                                    let p = s.play.lock().unwrap();
+                                    let (f, l) = if potato {
+                                        p.light.contours()
+                                    } else {
+                                        let (f, l, _) = p.voice.envelopes();
+                                        (f, l)
+                                    };
+                                    assert!(
+                                        f > 0.3 && l > 0.3,
+                                        "LO {potato}, ULTRA {ultra}, mode {mode}, {priority:?}, retrigger {retrigger}, key {key}: {f}, {l} V"
+                                    );
+                                    count += 1;
+                                }
+                                let expected = if mode == 1 {
+                                    keys.len()
+                                } else {
+                                    e.instruments()
+                                };
+                                assert_eq!(count, expected, "mode {mode}: held voices");
+                            };
+                            check(&e, &[key]);
+                            e.event(Event::Note { key: 67, on: true });
+                            let (mut l, mut r) = ([0.0; 2048], [0.0; 2048]);
+                            e.render(&[], &mut l, &mut r);
+                            e.end_block(2048);
+                            check(&e, &[key, 67]);
+                            if key == 64 {
+                                e.event(Event::AllNotesOff);
+                            } else {
+                                e.event(Event::Note { key: 67, on: false });
+                                e.render(&[], &mut l, &mut r);
+                                e.end_block(2048);
+                                check(&e, &[key]);
+                                e.event(Event::Note { key, on: false });
+                            }
+                            for _ in 0..5 {
+                                e.render(&[], &mut l, &mut r);
+                                e.end_block(2048);
+                            }
+                            assert!(e.held.iter().all(|&held| !held));
+                            for s in &e.slots {
+                                let p = s.play.lock().unwrap();
+                                let (f, l) = if potato {
+                                    p.light.contours()
+                                } else {
+                                    let (f, l, _) = p.voice.envelopes();
+                                    (f, l)
+                                };
+                                assert!(
+                                    f < 0.3 && l < 0.3,
+                                    "contours did not release: {f}, {l} V, LO {potato}, ULTRA {ultra}, mode {mode}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Reset-to-reset frequency removes the sampling grid's apparent period jitter. With
     /// modulation at rest there is no held-note pitch movement at 0 %, unlocked too.
     #[test]

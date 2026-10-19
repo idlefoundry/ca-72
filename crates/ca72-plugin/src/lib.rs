@@ -163,9 +163,11 @@ fn arp_clock(t: &Transport, rate: f64, tempo: f64) -> arp::Clock {
 /// The host's MIDI as the engine takes it (any channel), if it takes it.
 fn event_of(e: NoteEvent<()>) -> Option<Event> {
     Some(match e {
-        NoteEvent::NoteOn { note, velocity, .. } => Event::Note {
+        // Native CLAP (and VST3) permits a zero-velocity attack. MIDI's zero-velocity
+        // note-on has already become NoteOff in the wrapper's MIDI decoder.
+        NoteEvent::NoteOn { note, .. } => Event::Note {
             key: note,
-            on: velocity > 0.0,
+            on: true,
         },
         NoteEvent::NoteOff { note, .. } | NoteEvent::Choke { note, .. } => Event::Note {
             key: note,
@@ -1097,15 +1099,13 @@ mod tests {
         block(&mut p, &mut c, 128);
         p.reset();
         assert_eq!(p.local_notes.held(), [0, 0]);
-        c.push_event(NoteEvent::NoteOn {
-            timing: 3,
-            voice_id: None,
-            channel: 0,
-            note: 60,
-            velocity: 0.0,
-        });
+        c.push_event(NoteEvent::from_midi(3, &[0x90, 60, 0]).expect("MIDI zero-velocity release"));
         block(&mut p, &mut c, 128);
-        assert_eq!(p.local_notes.held(), [0, 0], "velocity zero is a release");
+        assert_eq!(
+            p.local_notes.held(),
+            [0, 0],
+            "MIDI velocity zero is a release"
+        );
         // CA-72's reserved CC120/123 have always been global, irrespective of channel.
         // Keep that compatibility behavior and invalidate local attacks alongside the engine.
         for controller in [ALL_NOTES_OFF, ALL_SOUND_OFF] {
