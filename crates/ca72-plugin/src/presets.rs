@@ -1537,7 +1537,7 @@ mod tests {
         );
         assert_eq!(
             target(&brass, "entropy"),
-            Some(p.entropy.preview_normalized(40.0))
+            Some(p.entropy.preview_normalized(43.0))
         );
         assert_eq!(
             target(&brass, "spread"),
@@ -1547,7 +1547,7 @@ mod tests {
         assert_eq!(target(&bass, "poly"), Some(0.0));
         assert_eq!(
             target(&bass, "entropy"),
-            Some(p.entropy.preview_normalized(0.0))
+            Some(p.entropy.preview_normalized(5.0))
         );
         // Every factory preset names all four.
         for e in lib.entries().0 {

@@ -506,3 +506,28 @@ fn instances_keep_their_own_assignments() {
     assert_eq!(b.value("cutoff"), 0.5);
     assert_eq!(a.process(&[In::Cc(0, 0, 74, 127)]).len(), 1);
 }
+
+/// The serialized state takes the same versioned migration as an actual host load, and
+/// a second save/load keeps its reading. Host automation still sets the new travel.
+#[test]
+fn entropy_saved_by_an_old_version_moves_once_and_automation_uses_the_new_range() {
+    let a = Instance::new();
+    assert!((a.value("entropy") - 0.05).abs() < 1e-7);
+    for (old, new) in [(0.0, 5.0), (40.0, 43.0), (100.0, 100.0)] {
+        let mut state = json_of(&a.save());
+        state["version"] = "0.2.6".into();
+        state["params"]["entropy"] = serde_json::json!({"f32": old});
+        assert!(a.load(&bytes_of(&state)));
+        assert!((a.value("entropy") - new / 100.0).abs() < 1e-7);
+        let saved = a.save();
+        assert_eq!(json_of(&saved)["version"], env!("CARGO_PKG_VERSION"));
+        let b = Instance::new();
+        assert!(b.load(&saved));
+        assert_eq!(a.value("entropy"), b.value("entropy"));
+    }
+    a.process(&[In::Param(0, "entropy", 0.0)]);
+    assert_eq!(a.value("entropy"), 0.0);
+    let b = Instance::new();
+    assert!(b.load(&a.save()));
+    assert_eq!(b.value("entropy"), 0.0);
+}

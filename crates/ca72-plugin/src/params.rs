@@ -631,7 +631,16 @@ impl Default for Ca72Params {
                     max: POLY_VOICES.2 as i32,
                 },
             ),
-            entropy: percent("Entropy"),
+            entropy: FloatParam::new(
+                "Entropy",
+                5.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 100.0,
+                },
+            )
+            .with_unit(" %")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
             // (The strip's WIDTH: the id is SPREAD's, as sessions and presets have it; the
             // CA-74's R31.)
             spread: percent("Width"),

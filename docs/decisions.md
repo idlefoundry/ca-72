@@ -7553,3 +7553,96 @@ checks pass. A separate read-only source review found no product bugs or unrelat
 All checks use this worktree's target, shared-data and worker-seat folders. No native host,
 installed plug-in or audio device was opened; host acceptance of the new action remains
 untested here.
+
+## R-ENTROPY-FLOOR. ENTROPY reaches steady oscillator pitch at 0 %
+
+**Owner decision, 2026-10-18 (#68).** "we had decided to make our current 0% to be 5%,
+and then scale our current entropy to 5->100%. This means all current patches will have
+at least 5% entropy, which I think is good." The new reading is `5 + 0.95 × old`, linear
+from the old minimum at 5 % to the old maximum at 100 %. Below 5 %, the oscillators'
+random tuning offsets, drift and waver fall linearly to none at 0 %. New instances begin
+at 5 %, preserving the previous default sound. LOCK retains its existing pitch suppression
+and gain trim; ENTROPY's OFF action now reaches steady pitch, and ON recalls its amount.
+
+**Compatibility.** Old presets and saved projects move to the new reading on load. The
+owner accepted the exception for a DAW's automation lanes: they hold only normalised knob
+positions, and old automation plays the new mapping. A lane at 0 now means steady pitch;
+an old lane is not shifted to 5 %.
+
+**Investigation (Linux, 2026-10-18).** At 0.2.6's minimum with LOCK off, each oscillator
+has three independent character contributions: a fixed standard-normal tuning offset
+(nominal SD 3 cents), mean-reverting drift (SD 2.25 cents, time constant 4 s, stepped
+every 64 samples), and one-pole-filtered noise (SD 0.3 cent, cutoff 30 Hz). The fixed
+offset differs between oscillators and voices but does not move during a held note.
+`the_legacy_pitch_floor_is_tuning_drift_and_waver`, before changing the mapping, sampled
+64 seeds, all three oscillators, at 48 kHz for 2 s, discarding the first second: measured
+SDs 2.9664092073, 2.3263836871 and 0.3020300236 cents respectively. LOCK sets all three
+pitch contributions to zero, at every ENTROPY amount. At the old minimum there are no
+random cutoff or panel tolerances; these begin above the new 5 %.
+
+The circuit has no other autonomous random oscillator-pitch source. Its noise generator
+can deliberately modulate pitch through OSCILLATOR MODULATION, MODULATION MIX and the
+MODULATION wheel, including with LOCK. This is the instrument's musical modulation,
+and remains available at 0 %. Oscillator 3 modulation, pitch bend, GLIDE, fixed circuit
+calibration, DOUBLE's deliberate detuning and random initial voice phases also remain;
+none is random movement added to a held oscillator's pitch. Mixer hiss and noise at
+the audio mixer do not modulate oscillator pitch. Steady-pitch acceptance has these
+intentional modulation controls at rest.
+
+**Agent decisions, 2026-10-18** (not separately approved): the first version with this
+mapping is provisionally 0.2.7. Preset format 1 gains a writer `version`, as nih-plug's
+project state already has; absent versions denote the old mapping. Factory and retired
+files store translated amounts and the new version. Reading migrates in memory, without
+rewriting the user's library; subsequent writes include the current writer version.
+
+**Numerical limit.** Project parameters are saved as `f32`. Compressing the old 0..100
+interval into 5..100 cannot retain every representable old value without another stored
+representation. The translation is mathematically equivalent; its forward rounding can
+change the recovered old reading by at most about 0.000004016 percentage point (the
+largest half-ULP of the new reading, divided by 0.95), or about 0.00000008031 in the
+character's depth. For example, an old saved 51.00910186767578125 % becomes
+53.458648681640625 %, which recovers 51.00910387541118496 %: a difference of
+0.00000200773540371 percentage point. `fractional_entropy_state_migration_has_a_bounded_rounding_error`
+checks representative fractional states against a 0.0000041 bound and asserts that this
+example is not exact. Bit identity for every fractional host state is not claimed.
+
+**Render evidence (Linux x86, Rust 1.97.1, 2026-10-18).** The unmodified `preset_render`
+harness was built from 0.2.6's `1a1dd6c` before the mapping changed, its binary copied
+aside, and compared with the new build. Both use 48 kHz, seed 1, four voices, 256-frame
+blocks and the same chord sequence. All 19 factory presets at 0.5 s in LO, HI and ULTRA
+are identical to the bit: 57 comparisons, 23,808 stereo frames each. Felt Bass (old 0 %),
+Brass Choir (40 %) and Swarm Riser (100 %) also match over 4 s in all three qualities:
+nine comparisons, 192,000 stereo frames each. This harness supplies the files' plain
+values as `f64`; it does not establish bit identity after a host's `f32` parameter
+quantisation. The files and SHA-256 manifests are in this worktree's
+`target/entropy-evidence`, alongside the commands' logs. The permanent regression test
+`translated_entropy_renders_identically_to_the_legacy_mix` compares the actual engine
+with the old pitch/cutoff mix and panel tolerances, independently calculated at old
+0, 20, 40 and 100 %, LOCK off and on, HI and LO, with the same initial state.
+
+**Steady pitch and integration.** `zero_entropy_has_steady_pitch_in_every_oscillator`
+measures all three HI oscillators' reset-to-reset frequencies across eight quarter-second
+windows, after half a second's settling, at two seeds: less than 0.01 cent movement.
+`zero_entropy_has_steady_audio_pitch_in_every_quality` measures each oscillator alone
+from its audio in LO, HI and ULTRA, with intentional modulation at rest: voiced-frame
+medians across four quarter-second windows move at most 0.004038, 0.015446 and 0.004610
+cent respectively (a 0.05-cent gate; the audio estimate includes waveform and sampling
+variation). The offsets test asserts zero detune at 0 % and under LOCK, and zero cutoff
+movement throughout 0..5 %. State tests include the real CLAP save/load interface,
+resaving without a second migration and host automation using the new position. Readout
+and OFF/recall tests cover the new default, 2 % and 43 %.
+
+Independent source review found two writer-version edge cases, both corrected: the
+historical-preset converter now emits a complete file with its writer version, and the
+version gate understands semver build metadata. Tests cover reading the converter's
+output without migrating twice and `0.2.7+build` retaining the new scale.
+
+The full workspace run passed 503 tests, 0 failed, 56 ignored with ngspice 47 available,
+before the final converter/version edge-case fixes and additional regression tests.
+After those fixes, `cargo test -p ca72-plugin --no-fail-fast` passed 302 tests,
+0 failed, 31 ignored; the converter example's regression passed separately. Formatting,
+`cargo clippy -p ca72-plugin --all-targets -- -D warnings` and the same command with
+`--all-features` passed. The reviewer rechecked both fixes and found no further defects. No native DAW, macOS
+or Windows build, installed plug-in, or audio device was used for this job. The numerical
+rounding limit, preserving deliberate panel modulation at 0 %, and 0.2.7 as the first
+writer of the new scale are recorded here for the owner's confirmation at review.
