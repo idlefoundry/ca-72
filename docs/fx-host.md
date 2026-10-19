@@ -235,8 +235,8 @@ and the Mac and Windows.
 ## The temporary interface
 
 `--fx-console`: the standalone reads commands on standard input (`help`, `scan`, `add N`,
-`add-file PATH [ID]`, `replace S N`, `remove S`, `move S T`, `bypass S on|off`, `editor S [close]`,
-`param S ID VALUE`, `params S`, `chain`, `events`, `kill S`, `save`); `--fx-mode
+`add-file PATH [ID]`, `replace S N`, `remove S`, `move S T`, `bypass S on|off`, `editor S
+[close]`, `param S ID VALUE`, `params S`, `chain`, `events`, `kill S`, `save`); `--fx-mode
 sync|pipelined`; `CA72_FX_PATH`, `CA72_FX_STANDARD_FOLDERS`, `CA72_FX_HELPER`, `CA72_FX_LOG`
 (the helpers' stderr). It drives only `Chain`'s public calls, which the FX-A drawer will
 call (`add`, `replace`, `remove`, `move_to`, `set_bypass`, `open_editor`, `status`,
