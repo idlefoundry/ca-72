@@ -33,6 +33,10 @@ required-features = ["standalone"]
 name = "softbuffer_copies"
 harness = false
 
+[[test]]
+name = "backing_scale"
+harness = false
+
 [dependencies]
 ca72.workspace = true
 # The workers' real-time scheduling (decisions.md R11).
