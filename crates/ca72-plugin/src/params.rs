@@ -238,9 +238,9 @@ pub struct Ca72Params {
     #[persist = "midi_map"]
     pub midi_map: Arc<MidiMap>,
 
-    /// AUTO GAIN's curve for the sound (decisions.md R45; `drive.rs`): measured when the
-    /// sound is changed in the editor, kept with the session so that it plays and renders the
-    /// same again.
+    /// AUTO GAIN's curve for the sound (decisions.md R45; `drive.rs`): measured when DRIVE or
+    /// AUTO GAIN is changed in the editor, a preset's taken as it is chosen (R-AUTO-GAIN-DRIVE),
+    /// kept with the session so that it plays and renders the same again.
     #[persist = "drive_curve"]
     pub drive_curve: Calibration,
     /// How the FREQUENCY knobs' dials read on this computer (`settings.rs`; decisions.md

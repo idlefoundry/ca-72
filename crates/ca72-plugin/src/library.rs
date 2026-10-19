@@ -30,6 +30,8 @@ use std::time::SystemTime;
 
 use toml::Value;
 
+use crate::drive::STEPS;
+
 /// The format of the files this reads and writes.
 pub const FORMAT: i64 = 1;
 
@@ -48,13 +50,55 @@ const OVERLAY: &str = "factory";
 const DEVICES: &[&str] = &["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"];
 const NUMBERED_DEVICES: &[&str] = &["COM", "LPT"];
 
-/// A preset's sound: its values (plain) and what a browser shows.
+/// A preset's sound: its values (plain), AUTO GAIN's curve for it, and what a browser shows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sound {
     pub name: String,
     pub description: String,
     pub tags: Vec<String>,
     pub values: Vec<(String, f64)>,
+    /// AUTO GAIN's curve for the sound (`drive.rs`), measured at QUALITY HI (ULTRA too) and at
+    /// LO: in force as soon as the preset is chosen, so that its level is its own at once
+    /// (decisions.md R-AUTO-GAIN-DRIVE). None in a preset saved before.
+    pub drive_curve: Option<[f32; STEPS]>,
+    pub drive_curve_lo: Option<[f32; STEPS]>,
+}
+
+impl Sound {
+    /// AUTO GAIN's curve for the sound at QUALITY LO (`lo`) or above: that quality's, else
+    /// the other's.
+    pub fn curve(&self, lo: bool) -> Option<[f32; STEPS]> {
+        if lo {
+            self.drive_curve_lo.or(self.drive_curve)
+        } else {
+            self.drive_curve.or(self.drive_curve_lo)
+        }
+    }
+}
+
+/// A curve as a preset names it: [`STEPS`] numbers, else none (one not understood is left
+/// out: the preset plays with the curve in force, as one saved before curves did).
+fn curve_of(v: Option<&Value>) -> Option<[f32; STEPS]> {
+    let a = v?.as_array()?;
+    let db: Vec<f32> = a
+        .iter()
+        .map(|x| match x {
+            Value::Integer(i) => Some(*i as f32),
+            Value::Float(f) => Some(*f as f32),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    let db = <[f32; STEPS]>::try_from(db.as_slice()).ok()?;
+    db.iter().all(|d| d.is_finite()).then_some(db)
+}
+
+/// A curve as a preset's file holds it: each correction written as short as it reads back.
+fn curve_value(db: &[f32; STEPS]) -> Value {
+    Value::Array(
+        db.iter()
+            .map(|d| Value::Float(d.to_string().parse().unwrap_or(0.0)))
+            .collect(),
+    )
 }
 
 /// Where a preset comes from.
@@ -127,6 +171,8 @@ fn sound_of(t: &toml::Table) -> Result<Sound, String> {
         description,
         tags,
         values,
+        drive_curve: curve_of(t.get("drive_curve")),
+        drive_curve_lo: curve_of(t.get("drive_curve_lo")),
     })
 }
 
@@ -681,6 +727,12 @@ impl Library {
             };
             values.insert(k.clone(), v);
         }
+        if let Some(db) = &sound.drive_curve {
+            t.insert("drive_curve".into(), curve_value(db));
+        }
+        if let Some(db) = &sound.drive_curve_lo {
+            t.insert("drive_curve_lo".into(), curve_value(db));
+        }
         t.insert("values".into(), Value::Table(values));
         self.put(file, &t)
     }
@@ -693,6 +745,18 @@ impl Library {
         name: &str,
         values: Vec<(String, f64)>,
         tags: Option<Vec<String>>,
+    ) -> Result<Entry, String> {
+        self.save_with_curve(name, values, tags, None)
+    }
+
+    /// [`Library::save`], with AUTO GAIN's curve heard as it was saved, at QUALITY LO or above
+    /// (`(lo, db)`; decisions.md R-AUTO-GAIN-DRIVE).
+    pub fn save_with_curve(
+        &self,
+        name: &str,
+        values: Vec<(String, f64)>,
+        tags: Option<Vec<String>>,
+        curve: Option<(bool, [f32; STEPS])>,
     ) -> Result<Entry, String> {
         let name = name.trim();
         check_name(name)?;
@@ -716,6 +780,8 @@ impl Library {
             description,
             tags: tags.unwrap_or(old_tags),
             values,
+            drive_curve: curve.and_then(|(lo, db)| (!lo).then_some(db)),
+            drive_curve_lo: curve.and_then(|(lo, db)| lo.then_some(db)),
         };
         let file = self.place(name, own.as_deref())?;
         self.write_user(&file, &sound, favorite, replaces.as_deref())?;
@@ -1017,6 +1083,8 @@ mod tests {
             description: "Retired.".into(),
             tags: vec!["bass".into()],
             values: vec![("cutoff".into(), cutoff), ("osc1_range".into(), 3.0)],
+            drive_curve: None,
+            drive_curve_lo: None,
         };
         let pack = [sound("Old Pluck", -3.0), sound("Old Pad", 0.25)];
         assert_eq!(write_pack(dir.path(), &pack).unwrap().len(), 2);
@@ -1523,6 +1591,64 @@ mod tests {
         assert_eq!(pad.origin, Origin::User);
         assert!(pad.sound.values.contains(&("voices".to_owned(), 6.0)));
         assert_eq!(bad.len(), 1);
+    }
+
+    /// R-AUTO-GAIN-DRIVE: a preset saved with AUTO GAIN's curve reads back with it, at the
+    /// quality it was heard at, each correction to the bit; one saved before has none, and one
+    /// not understood is none too (it plays with the curve in force).
+    #[test]
+    fn a_presets_curve_is_saved_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let db = [-5.962_001_f32, -11.82312, -17.329_067, -21.718_765];
+        let e = lib
+            .save_with_curve(
+                "Curved",
+                vec![("drive".into(), 9.9)],
+                None,
+                Some((true, db)),
+            )
+            .unwrap();
+        assert_eq!(
+            (e.sound.drive_curve, e.sound.drive_curve_lo),
+            (None, Some(db))
+        );
+        assert_eq!(
+            e.sound.curve(false),
+            Some(db),
+            "the other quality's stands in"
+        );
+        let e = lib
+            .save_with_curve(
+                "Curved",
+                vec![("drive".into(), 9.9)],
+                None,
+                Some((false, db)),
+            )
+            .unwrap();
+        assert_eq!(
+            (e.sound.drive_curve, e.sound.drive_curve_lo),
+            (Some(db), None)
+        );
+        let reread = Library::at(dir.path()).find("Curved").unwrap();
+        assert_eq!(reread.sound.drive_curve, Some(db));
+        for (name, curve) in [
+            ("Before", ""),
+            ("Short", "drive_curve = [-1.0, -2.0]\n"),
+            ("Words", "drive_curve = [\"a\", -2.0, -3.0, -4.0]\n"),
+        ] {
+            std::fs::write(
+                dir.path().join(format!("{name}.toml")),
+                format!("format = 1\nversion = \"0.2.7\"\nname = {name:?}\n{curve}\n[values]\ndrive = 6\n"),
+            )
+            .unwrap();
+            let e = Library::at(dir.path()).find(name).unwrap();
+            assert_eq!(
+                (e.sound.drive_curve, e.sound.drive_curve_lo),
+                (None, None),
+                "{name}"
+            );
+        }
     }
 }
 

@@ -285,7 +285,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "ca72"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "ca72-rt",
  "libm",
@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-analysis"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "libm",
  "serde",
@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-lab"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "ca72",
  "ca72-analysis",
@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-panel"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "plugin-kit-materials",
  "resvg",
@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-plugin"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "baseview",
  "ca72",
@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-rt"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-spice"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "tempfile",
 ]
@@ -659,7 +659,7 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.15.3"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f7aaa2b01655db5ec7432bd7b71733b8553aa5dd#f7aaa2b01655db5ec7432bd7b71733b8553aa5dd"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=bcc4d8f7706043dccdecfe8b115ba129f84ec39c#bcc4d8f7706043dccdecfe8b115ba129f84ec39c"
 dependencies = [
  "alsa 0.9.1",
  "core-foundation-sys",
@@ -1409,6 +1409,7 @@ dependencies = [
  "cpal 0.15.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam",
  "jack",
+ "keyboard-types",
  "libc",
  "log",
  "midi-consts",
@@ -1724,14 +1725,14 @@ dependencies = [
 [[package]]
 name = "plugin-kit-queue"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f7aaa2b01655db5ec7432bd7b71733b8553aa5dd#f7aaa2b01655db5ec7432bd7b71733b8553aa5dd"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=bcc4d8f7706043dccdecfe8b115ba129f84ec39c#bcc4d8f7706043dccdecfe8b115ba129f84ec39c"
 
 [[package]]
 name = "plugin-kit-standalone"
 version = "0.3.1"
-source = "git+https://github.com/idlefoundry/plugin-kit?rev=f7aaa2b01655db5ec7432bd7b71733b8553aa5dd#f7aaa2b01655db5ec7432bd7b71733b8553aa5dd"
+source = "git+https://github.com/idlefoundry/plugin-kit?rev=bcc4d8f7706043dccdecfe8b115ba129f84ec39c#bcc4d8f7706043dccdecfe8b115ba129f84ec39c"
 dependencies = [
- "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=f7aaa2b01655db5ec7432bd7b71733b8553aa5dd)",
+ "cpal 0.15.3 (git+https://github.com/idlefoundry/plugin-kit?rev=bcc4d8f7706043dccdecfe8b115ba129f84ec39c)",
  "crossbeam-channel",
  "midir",
  "plugin-kit-queue",
@@ -2937,7 +2938,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "nih_plug_xtask",
 ]

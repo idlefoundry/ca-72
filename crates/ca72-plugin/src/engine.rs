@@ -95,6 +95,11 @@ pub const LEVELS: usize = POLY_VOICES.2;
 /// and the note stops being one).
 pub const DRIVE_TOP: f64 = 24.0;
 
+/// How long a curve measured after DRIVE was turned takes to come in, s (its glide's time
+/// constant; decisions.md R-AUTO-GAIN-DRIVE): slow enough that a refinement arriving while a
+/// note plays is not heard as a step, quick beside the measurement itself.
+pub const REFINE_GLIDE: f64 = 0.3;
+
 /// LEVEL's range, dB (the CA-74's).
 pub const LEVEL_RANGE: (f64, f64) = (-30.0, 12.0);
 
@@ -1288,12 +1293,16 @@ pub struct Engine {
     restart: bool,
     /// AUTO GAIN (decisions.md R45): the sound's curve (`drive.rs`), the correction the
     /// controls ask for from it (1: none), the correction gliding to it a sample at a time,
-    /// and the glide's share a sample at the host's rate. Only it glides: the output's other
-    /// gains step as they did.
+    /// and the glide's share a sample at the host's rate: the controls' (DRIVE turned, a
+    /// preset's or a session's curve, [`GLIDE`]'s), a measured curve's ([`REFINE_GLIDE`]'s,
+    /// R-AUTO-GAIN-DRIVE), and the one gliding now. Only it glides: the output's other gains
+    /// step as they did.
     curve: Curve<STEPS>,
     auto: f64,
     auto_now: f64,
     auto_share: f64,
+    auto_refine: f64,
+    auto_glide: f64,
     /// Where AUTO GAIN's measurements are asked for and kept, told the voices' rate.
     calibration: Option<Calibration>,
     /// The output's gain under POWER (0 off, 1 on), and its step a sample while it fades.
@@ -1370,6 +1379,8 @@ impl Engine {
             auto: 1.0,
             auto_now: 1.0,
             auto_share: 1.0,
+            auto_refine: 1.0,
+            auto_glide: 1.0,
             calibration: None,
             fade: 1.0,
             fade_step: 1.0,
@@ -1450,6 +1461,8 @@ impl Engine {
         self.glide = glide_share(voice_rate);
         self.turn_glide = 1.0 - (-1.0 / (TURN_GLIDE * voice_rate)).exp();
         (self.auto_now, self.auto_share) = (self.auto, glide_share(rate));
+        self.auto_refine = 1.0 - (-1.0 / (REFINE_GLIDE * rate)).exp();
+        self.auto_glide = self.auto_share;
         if let Some(c) = &self.calibration {
             c.set_rate(voice_rate);
         }
@@ -1654,7 +1667,7 @@ impl Engine {
                 * unison_trim_of(c)
                 * double_trim(c)
                 * level_gain(c.level);
-            self.auto = auto_trim(c, &self.curve);
+            self.follow_auto(auto_trim(c, &self.curve), false);
             self.apply();
         }
     }
@@ -2255,7 +2268,7 @@ impl Engine {
         }
         // (As the one voice was: the gain, then the fade; AUTO GAIN's correction, gliding,
         // between them, 1 without DRIVE.)
-        self.auto_now += (self.auto - self.auto_now) * self.auto_share;
+        self.auto_now += (self.auto - self.auto_now) * self.auto_glide;
         let (l, r) = (
             (l * self.gain * self.auto_now * self.fade) as f32,
             (r * self.gain * self.auto_now * self.fade) as f32,
@@ -2287,10 +2300,32 @@ impl Engine {
         mix_of(&self.controls, self.voices())
     }
 
-    /// AUTO GAIN's curve for the sound (`drive.rs`), the correction following it.
+    /// AUTO GAIN's curve for the sound (`drive.rs`), the correction following it: a preset's
+    /// or a session's, the sound's at once ([`GLIDE`]).
     pub fn set_curve(&mut self, curve: Curve<STEPS>) {
         self.curve = curve;
-        self.auto = auto_trim(&self.controls, &curve);
+        self.follow_auto(auto_trim(&self.controls, &curve), false);
+    }
+
+    /// A curve measured for the sound after DRIVE was turned (decisions.md R-AUTO-GAIN-DRIVE):
+    /// the correction glides to it over [`REFINE_GLIDE`], so that a refinement arriving while a
+    /// note plays moves its level unheard.
+    pub fn refine_curve(&mut self, curve: Curve<STEPS>) {
+        self.curve = curve;
+        self.follow_auto(auto_trim(&self.controls, &curve), true);
+    }
+
+    /// The correction's new target, glided to slowly (a measured curve) or as the controls
+    /// glide; a target unchanged leaves a glide under way as it is.
+    fn follow_auto(&mut self, auto: f64, refine: bool) {
+        if auto != self.auto {
+            self.auto = auto;
+            self.auto_glide = if refine {
+                self.auto_refine
+            } else {
+                self.auto_share
+            };
+        }
     }
 
     /// AUTO GAIN's curve the engine plays with.
@@ -4808,6 +4843,85 @@ mod tests {
             ),
         );
         assert_eq!(a, b);
+    }
+
+    /// R-AUTO-GAIN-DRIVE: a curve measured while a note plays glides in over REFINE_GLIDE (5.6
+    /// dB here, at most 0.02 dB a millisecond, 1 - 1/e of the way after REFINE_GLIDE); a
+    /// preset's or a session's is the sound's within the controls' glide (10 ms; within a hundredth
+    /// of a decibel after 0.1 s).
+    #[test]
+    fn a_measured_curve_glides_in_and_a_presets_is_the_sounds_at_once() {
+        let c = Controls {
+            drive: 12.0,
+            ..sustained()
+        };
+        let quieter = Curve([-8.0, -14.0, -18.0, -20.0]);
+        let run = |refine: bool| -> Vec<f32> {
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            e.event(Event::Note { key: 45, on: true });
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut y = Vec::new();
+            for k in 0..200 {
+                if k == 40 {
+                    if refine {
+                        e.refine_curve(quieter);
+                    } else {
+                        e.set_curve(quieter);
+                    }
+                }
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                y.extend_from_slice(&l);
+            }
+            y
+        };
+        let off = {
+            let mut e = Engine::new();
+            e.set(&Controls {
+                auto_gain: false,
+                ..c
+            });
+            e.prepare(48_000.0, 9);
+            e.event(Event::Note { key: 45, on: true });
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut y = Vec::new();
+            for _ in 0..200 {
+                e.render(&[], &mut l, &mut r);
+                e.end_block(256);
+                y.extend_from_slice(&l);
+            }
+            y
+        };
+        let at = 40 * 256;
+        // The correction in dB, sample by sample, where the output is not near nought.
+        let db = |y: &[f32]| -> Vec<(usize, f64)> {
+            y.iter()
+                .zip(&off)
+                .enumerate()
+                .skip(at)
+                .filter(|(_, (_, b))| b.abs() > 1e-3)
+                .map(|(i, (a, b))| (i, 20.0 * (f64::from(*a) / f64::from(*b)).log10()))
+                .collect()
+        };
+        let (from, to) = (AVERAGE.at(12.0, DRIVE_TOP), quieter.at(12.0, DRIVE_TOP));
+        let refined = db(&run(true));
+        // (At most the glide's first slope: the step spread over REFINE_GLIDE.)
+        let steepest = (to - from).abs() / (REFINE_GLIDE * 1000.0) * 1.05;
+        for w in refined.windows(2) {
+            let per_ms = (w[1].1 - w[0].1).abs() / (w[1].0 - w[0].0) as f64 * 48.0;
+            assert!(per_ms < steepest, "{per_ms} dB a millisecond at {}", w[1].0);
+        }
+        let tau = at + (REFINE_GLIDE * 48_000.0) as usize;
+        let near = refined.iter().find(|(i, _)| *i >= tau).unwrap().1;
+        // (The glide is the gain's, not its decibels'.)
+        let gain = |db: f64| 10f64.powf(db / 20.0);
+        let gone = (gain(near) - gain(from)) / (gain(to) - gain(from));
+        assert!((gone - (1.0 - (-1.0f64).exp())).abs() < 0.02, "{gone}");
+        let loaded = db(&run(false));
+        let soon = loaded.iter().find(|(i, _)| *i >= at + 48 * 100).unwrap().1;
+        assert!((soon - to).abs() < 0.01, "{soon} against {to}");
     }
 
     /// Blocks of `e` for `seconds`, the loudest sample's level.

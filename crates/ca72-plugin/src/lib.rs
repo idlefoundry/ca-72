@@ -526,8 +526,14 @@ impl Plugin for Ca72 {
         // (A knob whose parameter something else has set since a learned controller moved it
         // stops gliding: the host's automation, the editor and presets set the voices as ever.)
         self.dezip.follow(&self.params);
+        // (A curve measured after DRIVE was turned glides in; a preset's or a session's is the
+        // sound's at once: decisions.md R-AUTO-GAIN-DRIVE.)
         if let Some(c) = self.params.drive_curve.read(&mut self.curve_seen) {
-            self.engine.set_curve(c);
+            if self.params.drive_curve.measured(&c) {
+                self.engine.refine_curve(c);
+            } else {
+                self.engine.set_curve(c);
+            }
         }
         self.engine.set(&self.controls());
         let panic_token = context.standalone_panic_token();
@@ -1948,6 +1954,41 @@ mod tests {
             w.release();
         }
         assert!(left.iter().chain(&right).all(|x| x.is_finite()));
+    }
+
+    /// R-AUTO-GAIN-DRIVE: a preset's curve, loaded as the presets load it, is the engine's at
+    /// the next block and nothing is measured for it; a curve the helper measured (the sound's
+    /// after DRIVE was turned) is the engine's too, gliding in.
+    #[test]
+    fn a_presets_curve_is_in_force_at_the_next_block_and_a_measured_one_glides_in() {
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        let smoke = crate::library::factory()
+            .iter()
+            .find(|s| s.name == "Smoke Flute")
+            .expect("Smoke Flute");
+        let db = smoke.drive_curve.expect("its curve");
+        p.params.drive_curve.load_preset(db);
+        assert!(!p.params.drive_curve.waiting());
+        assert!(!p.params.drive_curve.measured(&drive::Curve(db)));
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.engine.curve(), drive::Curve(db));
+        // A measurement (as DRIVE turned in the editor asks for one).
+        let mut controls = p.params.controls();
+        controls.panel.cutoff = 0.2;
+        p.params.drive_curve.ask(&controls);
+        until("measured", || !p.params.drive_curve.waiting());
+        until("stored and marked", || {
+            let saved = p.params.drive_curve.saved();
+            saved.sound == drive::sound(&controls)
+                && p.params.drive_curve.measured(&drive::Curve(saved.db))
+        });
+        let measured = drive::Curve(p.params.drive_curve.saved().db);
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.engine.curve(), measured);
     }
 
     /// AUTO GAIN's curve is the session's (decisions.md R45, the CA-74's R29): saved,

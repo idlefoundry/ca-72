@@ -29,7 +29,7 @@ use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::prelude::*;
 
 use crate::library::{self, Entry, Library, Origin};
-use crate::params::Ca72Params;
+use crate::params::{Ca72Params, QualityMode};
 
 /// How long the drawer takes to slide open or shut.
 pub const SLIDE: Duration = Duration::from_millis(140);
@@ -551,6 +551,11 @@ impl Browser {
                 q.set_once(s, v);
             }
         }
+        // Its AUTO GAIN curve in force at once, nothing measured (decisions.md
+        // R-AUTO-GAIN-DRIVE); a preset saved before curves keeps the one in force.
+        if let Some(db) = e.sound.curve(p.quality.value() == QualityMode::Lo) {
+            p.drive_curve.load_preset(db);
+        }
         Self::set_current(p, &e.sound.name);
         self.wanted = Some((e.sound.name.clone(), targets(p, e)));
         self.rows(p);
@@ -569,6 +574,8 @@ impl Browser {
                 }
             }
         }
+        // (AUTO GAIN's curve a fresh instance's too: the presets' average.)
+        p.drive_curve.load(&crate::drive::unmeasured());
         Self::set_current(p, "");
         self.wanted = None;
         self.last_row = None;
@@ -681,7 +688,15 @@ impl Browser {
                 return;
             }
         };
-        match self.library.save(&name, values_now(p), Some(tags)) {
+        // (With AUTO GAIN's curve as it is heard: the preset plays at this level again.)
+        let curve = (
+            p.quality.value() == QualityMode::Lo,
+            p.drive_curve.saved().db,
+        );
+        match self
+            .library
+            .save_with_curve(&name, values_now(p), Some(tags), Some(curve))
+        {
             Ok(e) => {
                 Self::set_current(p, &e.sound.name);
                 self.wanted = Some((e.sound.name.clone(), targets(p, &e)));

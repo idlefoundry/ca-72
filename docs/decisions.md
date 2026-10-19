@@ -8080,6 +8080,312 @@ host gesture reached by presses, wheel, right clicks or keys behind it. Renders 
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
 
+## R-RELEASE-0.2.7. 0.2.7
+
+**Owner decisions, 2026-10-19.** The owner chose the release's contents from the overnight
+brief: #92 (Linux dock icon), #101 (CLAP velocity-zero notes), #102 and #103 (Mac second
+monitor), #97 (Windows standalone at every display scale), #95 (choose the install folder) and
+#106 (What's New), with #94 (Init, the version in Settings) and #93 (ENTROPY's new floor)
+already merged: "I've selected a bunch of your changes/bug fixes that I would like released as
+0.2.7 as soon as possible." What's New's look: "WN-A is my choice", and after trying the
+stand-in in a test build, "on standalone, i don't like that this What's New screen wasn't a
+modal." Version 0.2.7: "0.2.7 is fine." The coordinator chose #94's version display over
+`fidelity`'s and the merge order, as the owner left it: "your choice which one. Your choice on
+merge order as well." Publication: "is there any reason why we shouldn't? Otherwise, let's do it."
+
+**Publication evidence, 2026-10-19.** [CA-72 0.2.7](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.7)
+is public and Latest, also to an anonymous request (which the update check makes). The picks were
+merged into one branch, `release-0.2.7`, after the review bot's findings on #92, #95 and #106
+were fixed on their branches. The merge kept every decisions record. Baseview's patches are
+numbered 8 (#102), 9 (#97) and 10 (#92). #97's switch of the standalone onto the patched
+baseview on every platform replaced #92's Linux-only alias, and #92's checks follow it.
+- [PR #110](https://github.com/idlefoundry/ca-72/pull/110)'s CI
+  ([39262486786](https://github.com/idlefoundry/ca-72/actions/runs/39262486786)) passed on
+  Linux, Windows and macOS. Locally on Linux, the workspace tests with ngspice and the standalone
+  features passed (548), as did clippy (all features), fmt, notices, and the window-identity and
+  installer scripts. `main` is the merge `41646f12919b65d9c4c691d25bc53ff6b65d44dd`, which the
+  annotated `v0.2.7` tag names. The tag's CI
+  ([39266513280](https://github.com/idlefoundry/ca-72/actions/runs/39266513280)) passed in all
+  four jobs and drafted the release.
+- The macOS installer was built on the Mac from a clean checkout of the tag, as
+  `docs/macos-release.md` describes (0.2.6's was made from CI's bundles). It was signed with
+  Developer ID inside the owner's session, where the keychain is open, notarised (submission
+  `682f01b9-0812-40c7-94ae-237f8ae2991f`, Accepted) and stapled. `pkgutil`, Gatekeeper
+  ("Notarized Developer ID") and `codesign --verify --deep --strict` passed for every bundle,
+  and the Audio Unit carries the signed CLAP byte for byte.
+- `CA-72-0.2.7-macOS.pkg` sha256 `9f39b02ee9b5b9880f9e658c97134d7a09747281d67335af7da8091f424a5d78`,
+  91,703,952 bytes. After publication all six downloads were fetched again without a login and
+  checked against `SHA256SUMS.txt`: every one matched.
+- No host test of the installed 0.2.7 package was made before publication. The same code ran in
+  the owner's renamed test builds.
+- Issues #48, #49, #54, #64 and #75 closed with the release; #57 stays open (#101 fixed a real
+  defect, but the reporter's cause is unconfirmed). Known and not fixed in 0.2.7, as in earlier
+  releases: the standalone asks for microphone access at launch, and a device that doesn't answer
+  leaves AUDIO & MIDI empty (#112, for 0.2.8). The release's scripts and logs are in
+  `~/lab/artifacts/ca-72/0.2.7/` on the Mac.
+
+
+## R-QUIT. The standalone quits with each system's own shortcuts
+
+**The owner, 2026-10-19:** "Command Q on Mac does not close the plugin [the standalone]. And I
+guess we should also check for Linux and Windows, whether or not we can close with the standard
+app closing shortcuts there. I assume it's because there's no menu item that allows for a
+shortcut close like that."
+
+**The cause.** As the owner guessed. On macOS the app's window is baseview's, whose
+`open_blocking` gave the application no main menu: no Quit item, so no ⌘Q, and the key went to
+the editor's view, which has no use for it (TYPING ignores keys with Command). Only the window's
+close button and the Dock's Quit closed it, and the Dock's Quit goes through AppKit's own
+`terminate:`, which ends the process inside AppKit (`exit`), past the app's shutdown after its
+window closes, the session's save at the end among it (read from the code; not tried with the
+old build). On Linux nothing handled Ctrl+Q: the window manager's close (`WM_DELETE_WINDOW`) was the
+only way. On Windows Alt+F4 already worked: baseview leaves Alt's keys (`WM_SYSKEYDOWN`) to
+`DefWindowProcW` whatever the editor does with them, which closes the app's window, the editor's
+window focused or not; baseview's change 9 removed only the drag border and maximise box.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- **One way out.** Every way of quitting closes the app's window as its close button does, so
+  that nih-plug's `run_with_midi_reset_scope` returns and the app shuts down as it always has
+  after its window closes: the session saved, audio and MIDI stopped, the task worker joined,
+  then `bin/standalone.rs`'s `finish`, the one function the app leaves through (an error it
+  stopped with is shown there). Whatever must end with the app (the effects chain's shutdown,
+  an unclean-exit marker's removal) goes in `finish` or before it, and runs whichever way the
+  app was quit.
+- **macOS: an application's menus** (baseview's change 11, `third_party/baseview/PATCHES.md`).
+  The app's own menu, named after the app (About CA-72, Hide CA-72 ⌘H, Hide Others ⌥⌘H, Show
+  All, Quit CA-72 ⌘Q) and a Window menu (Minimize ⌘M, Close ⌘W); macOS adds its own items to
+  both (Quit and Keep Windows, Fill, Center, Close All and the rest). AppKit gives a key with
+  Command to the main menu before any view, so ⌘Q quits while the editor holds the keyboard
+  (TYPING, a value or a preset's name being typed, MIDI Learn) and never reaches it. The Quit
+  item and ⌘Q (`applicationShouldTerminate:`) and the quit Apple event (the Dock's Quit,
+  logging out, restarting, shutting down) close the window. The Apple event is answered with
+  no error: AppKit's `terminate:` cancelled answers "user cancelled", which would cancel a
+  logout. ⌘W closes the window, which quits the app, as its close button always has.
+- **Linux: Ctrl+Q**, Shift or not, with no other modifier, the Q of the layout baseview reads.
+  The editor takes it first of any key, before TYPING, a typed value, the presets' drawer, MIDI
+  Learn and What's New, and asks the app's window to close (`app_window::request_quit`, acted
+  on at the window's next frame); the app's window takes it itself when the editor's window has
+  not the keys (X11 gives keys to the window under the pointer). A plug-in's editor leaves it
+  to its host, as every key it does not use.
+- **Windows: unchanged.** Alt+F4 and the close button were already the clean way out. Ctrl+Q is
+  not a Windows convention and is not added.
+- **The release notes' test** (`whats_new::bundled_notes_match_the_build_and_the_maintained_sources`)
+  required bundled highlights for every `docs/releases/<version>.md`, so a draft for the next
+  release failed it until the version was raised; and a catalogue entry above the build's
+  version fails it too. Notes above the build's version are now the next release's draft, their
+  entry due when the version is raised (`docs/whats-new.md`). The owner should confirm this.
+
+**Evidence.**
+- **Tests.** `ctrl_q_quits_on_linux_and_no_other_key_does` (`crates/ca72-plugin/src/editor.rs`)
+  checks the shortcut on each system: Ctrl+Q and Ctrl+Shift+Q on Linux; not Q alone, Ctrl+Alt+Q,
+  Ctrl+Super+Q, Ctrl+W or Ctrl+Q's release; nothing on macOS or Windows (⌘Q, Alt+F4).
+  `ctrl_q_quits_the_standalone_before_typing_or_a_value_has_it` (Linux): in the standalone with
+  TYPING on, Ctrl+Q asks to quit and plays no note; with DRIVE's value being typed, it asks to
+  quit and types nothing; in a CLAP or VST3 editor it asks nothing. `tests/mac_quit.rs` (macOS,
+  main thread): ⌘Q posted as the keyboard gives it closes a window of its own, `open_blocking`
+  returns and the view never has the key; the menus' titles, keys, modifiers and actions; the
+  quit Apple event sent from another process closes the window and is answered with no error
+  (with the delegate's handler left out, it is answered -128). All pass; Clippy for
+  `ca72-plugin`, all targets, with `standalone-production`, passes on Linux and macOS, and
+  baseview's on Linux.
+- **Linux** (omarchy, Hyprland 0.56 under XWayland, the debug standalone, `--no-devices`, its own
+  `IDLE_FOUNDRY_SHARED` and `--state-dir`, on a hidden workspace, synthetic X key events): Ctrl+Q
+  to the editor's window and to the app's window each closed it, exit status 0 within 0.25 s,
+  `session.json` (absent before) written 3 to 14 ms after the key; Q alone, Ctrl+W, Shift+Q and
+  Alt+Q left it running; the window manager's close: exit 0 in 0.32 s, the session written.
+- **Windows 11** (the desktop session through a `schtasks /IT` task, `--release`, `--no-devices`,
+  throwaway state): Alt+F4 with the editor's window focused, and again after focusing it
+  explicitly: exit code 0 in 0.10 and 0.06 s, `session.json` written 20 ms after; the close
+  button, found by `WM_NCHITTEST` and clicked: exit code 0 in 0.04 s, the session written.
+- **macOS 27** (the owner's Mac, a test app "CA-72 QUIT", bundle id
+  `com.idlefoundry.ca72-quit.standalone`, its own app id and state, `--no-devices`, launched in
+  the owner's session, driven by System Events from a Ghostty window): System Events read the
+  menu bar as Apple, CA-72 QUIT, Window, and the app's menu as About CA-72 QUIT, Hide CA-72 QUIT,
+  Hide Others, Show All, Quit CA-72 QUIT (and macOS's Quit and Keep Windows). ⌘Q, the Quit item
+  clicked, AppleScript's `quit` (the Apple event the Dock sends) and ⌘W each closed it within
+  0.33 s, `session.json` written 0.11 to 0.20 s after; run as the shell's child, ⌘Q left exit
+  status 0. The test app was put in the Trash afterwards.
+
+**Not tried:** logging out, restarting and the Dock's own menu (the Apple event they send was
+sent by AppleScript and by the test); the effects chain's shutdown (not on `main`; it runs after
+the window closes on its branch, so a quit reaches it); audio and MIDI devices open while
+quitting (every run used `--no-devices`: the Mac's audio device was not to be touched; the
+shutdown is the close button's, unchanged); X11 under GNOME or KDE, and Wayland's own windows
+(the app runs under XWayland).
+
+
+## R-DEVICE-LISTING. The standalone lists devices without opening them (issue #112)
+
+**What happened, 2026-10-19.** On the owner's Mac the released 0.2.7 standalone and a test
+build opened with no audio devices and no MIDI ports in AUDIO & MIDI, and no error. plugin-kit's
+runtime listed devices with cpal on its control thread; for every device cpal's CoreAudio probe
+made a HAL AudioUnit and set its device, which creates an IO proc, just to read the buffer frame
+size range. For five virtual drivers (Immersed, Steam Streaming Microphone and Speakers, Virtual
+Desktop Mic and Speakers) that call never returned, so nothing was published and MIDI was never
+polled. After a reboot cleared the drivers the owner found the other face of the same probe:
+"The one thing that jumps out to me is having to request access for the microphone. Why is that
+a thing? We're not even allowing input at the moment from what I saw in the standalone app. So
+why are we requesting access for the microphone? And I don't think we should be requesting
+access for that unless the user specified that they were wanting to use the microphone input."
+The input probe's AudioUnit had input enabled; enabling input is what asks.
+
+**Fix (plugin-kit `3137cde`, its K-DEVICE-LISTING and K-MICROPHONE-WAIT; PR
+idlefoundry/plugin-kit#10).**
+
+- cpal's probes read the range as a device property (its `third_party/cpal` change 3). Listing is
+  CoreAudio property reads only: name, stream configuration per scope, nominal and available
+  sample rates, buffer frame size range, default device. Only opening a stream makes an
+  AudioUnit, and an input is opened only when an external input is chosen.
+- Audio devices are listed by a worker with a 1.5-second limit per device, MIDI ports by a
+  worker of their own; the control loop reads their results without waiting. A device past the
+  limit is left out and named in the dialog's status ("Steam Streaming Speakers isn't
+  responding."), and later rounds skip it while its call is blocked. Opening the chosen device
+  describes only devices of its name.
+- On macOS the MIDI worker runs its run loop for an instant before each poll. CoreMIDI announces
+  new endpoints there; without it (as on 0.2.7's control thread) a controller plugged in after
+  launch was never listed. Found while checking this fix.
+- The microphone is asked for without waiting (kit `3137cde`, for 0.2.8). With listing fixed,
+  choosing an external input showed the prompt as it should, but opening the input waited for
+  the answer (`CreateIOProcID` on the control thread, the call that had hung), so sound stopped
+  and the dialog read STARTING until the user answered. The runtime now reads the permission
+  first, without waiting (AVFoundation's `authorizationStatusForMediaType:`). Granted: the
+  input opens. Never asked: it asks with AVFoundation's request, which returns at once, plays
+  the output alone and shows "Waiting for microphone permission… The external input starts
+  once access is allowed."; an Allow opens the input. Refused (now or before): the input is
+  neither opened nor asked for, the synth keeps playing, and the status reads "Microphone access
+  denied. Allow CA-72 in System Settings › Privacy & Security › Microphone." The chosen input
+  stays chosen and saved, so once access is allowed, by the prompt or later in System Settings
+  (read again every two seconds), it opens without choosing it again. Windows and Linux are
+  unchanged. The Info.plist's microphone purpose string, which the request needs, stays.
+
+**Evidence (2026-10-19).** plugin-kit's standalone tests pass on Linux, Windows (MSVC) and the
+owner's Mac (macOS 27): fake hosts whose devices block (one; five; one whose name never
+answers), MIDI that stalls and recovers, and the control loop with a blocked device (MIDI
+published before the audio list, commands handled, the list published naming the device,
+the queued apply answered, shutdown under two seconds). On the Mac,
+`listing_mac_devices_makes_no_audio_unit` listed all ten devices, the five drivers that had
+hung included, in 79 ms with no AudioUnit made. The CA-72's standalone tests pass on Linux.
+
+A renamed build, "CA-72 DEV" (bundle id `com.idlefoundry.ca72-dev.standalone`, its own
+session), was installed in `~/Applications` on the owner's Mac, its microphone permission reset
+with `tccutil reset Microphone` for that id only, and launched with `open`:
+
+- External input disabled: AUDIO & MIDI's inventory (read from the runtime's snapshot) held the
+  ten devices, default output MacBook Pro Speakers, RUNNING at the device's own 44.1 kHz and 256
+  frames, no error. TCC's log for the process shows only preflight status checks (no request,
+  no prompt). A virtual MIDI source published before launch was listed and chosen
+  automatically; one published while it ran appeared within two seconds, and its removal gave
+  the usual "No MIDI inputs available (previously 1)" notice.
+- External input MacBook Pro Microphone (chosen in the saved session, as Apply would save it):
+  TCC logged a microphone request (`preflight=no`) and `AUTHREQ_PROMPTING` for the app's bundle
+  id the moment the input was opened. The prompt was left unanswered and the app closed; no
+  decision was recorded, and the permission was reset again afterwards.
+
+With the microphone fix (kit `3137cde`): the kit's tests pass on Linux and Windows (52 + 2) and
+the Mac (54 + 2), strict Clippy clean on all three. They run the whole control loop with fake
+streams that render and a fake permission: the prompt pending (output frames advance, the
+notice shows, the input isn't opened, a second Apply asks nothing more) then allowed (the input
+opens, the notice clears); refused (the output keeps running, the denial, the choice kept);
+already denied (never asked or opened; allowed later in settings, the next poll opens it). A new
+CA-72 DEV at this commit, its permission reset and an external input (MacBook Pro Microphone)
+saved, was launched: TCC logged `AUTHREQ_PROMPTING` a second after launch, and five seconds
+later the runtime read RUNNING at 44.1 kHz with 194,304 frames rendered, 280,576 two seconds
+later, the waiting notice shown and the input not open. Someone at the Mac then clicked Allow
+(TCC's `AUTHREQ_RESULT authValue=2`, user consent): within a second the notice had given way to
+the session's own MIDI warning, frames kept advancing, and a sample of the process showed two
+CoreAudio IO threads, the output's and the input's. The app was ended by its PID, the
+permission reset, no prompt window was left, and the app and its build were moved to the Trash.
+
+**Not yet seen.** Don't Allow on the installed app (the tests cover it), and the dialog itself
+on screen: its state was read from the runtime. The signed, hardened release app has not been
+tried; the DEV builds are ad-hoc signed.
+
+
+## R-AUTO-GAIN-DRIVE. AUTO GAIN measures a sound only when DRIVE is changed
+
+**The owner, 2026-10-19,** in the standalone on the Mac: "I'm getting a volume adjustment
+happening. I'm pressing on a key, it's going out, and at one, it hits one volume level and
+then it seemingly adjusts and drops it down", then "even on 0.2.6, this seems to be
+happening", and "auto gain is only supposed to be brought into effect when the user changes
+the gain. I think auto gain currently is affecting everything that passes through, which is
+not its intention." Told the cause and offered three changes (measure only when DRIVE
+changes; presets carry their curves; DRIVE's level follows the knob, with any refinement
+gliding): "Yes, absolutely. This should only be remeasured when drive changes. I recommend,
+yes, all three of your recommendations, absolutely. Let's do it, and let's get it shipped
+out in 0.2.8 immediately."
+
+**The cause (Linux, 2026-10-19; not a 0.2.7 regression).** AUTO GAIN (R45) is no
+compressor: with a curve in force, it is one fixed gain for the whole note (on the engine's
+renders of 14 presets, LO and HI, AUTO GAIN on against off differs by the same amount in
+every 10 ms window, to 0.01 dB: Horn Bloom -9.52 dB, Smoke Flute -9.78, Driven Kick -5.48).
+But the curve was measured afresh after any press, release, wheel or key in the plug-in's
+window, and as the window opened, whenever the sound's key (the panel, LOCK, ENTROPY,
+FEEDBACK, QUALITY) differed from the curve's: a preset chosen, a knob turned, QUALITY
+switched. The measurement takes the helper about 0.7 to 1.7 s (R45's figures); until it
+finished, the previous sound's curve or the presets' average stood in, and when it landed
+the output glided to the new correction in 10 ms. A note played just after the change
+began at one level and stepped to another about a second in. With the average standing in
+and the sound's curve landing 0.85 s into a held note: Smoke Flute -2.6 dB, Singing Drift
+-0.3 (LO) and -0.6 (HI), Horn Bloom +0.4 to +0.5, Driven Kick +7; between two sounds' curves
+it can be far more (the factory curves at 24 dB run from -3.9 to -21.7 dB). Only a sound
+with DRIVE above 0 and AUTO GAIN on is touched. 0.2.6 and 0.2.7 do the same: between their
+tags `ca72-rt` is unchanged, the plugin-kit pin is the same, and ENTROPY's translation renders
+to the bit (R-ENTROPY-FLOOR). The other falls heard after an attack in the factory presets
+are their contours (a decay to a lower SUSTAIN, a filter contour closing), and repeated
+notes on Felt Bass and Saw Monolith differ by 3 to 9 dB through the beating of their
+deliberately detuned oscillators (one oscillator alone, within about 1 dB): nothing else
+changes a note's gain after it starts.
+
+**What changed.**
+- **Measured only when DRIVE or AUTO GAIN is changed in the editor** (`editor.rs`: the
+  controls set the parameters through a context that notes those two; `Editing::
+  measure_when_done`), once nothing is held, and only with DRIVE above 0 and AUTO GAIN on.
+  Another control, a preset, Init, a key, a wheel, QUALITY or the window opening asks for
+  nothing; the host's automation and learned controllers never did. The sound's key is as
+  before, so DRIVE turned with the sound unchanged since its curve was measured measures
+  nothing; with the sound changed meanwhile (CUTOFF turned, say), DRIVE's change measures it
+  then. The editor goes by DRIVE and AUTO GAIN as it set them, since CLAP hosts take a
+  parameter only at their next block.
+- **Presets carry their curves.** Each factory preset has `drive_curve` (QUALITY HI, ULTRA
+  too) and `drive_curve_lo`, measured as the plug-in measures them at 48 kHz, written and
+  checked by `tests/factory_curves.rs`; a preset the user saves keeps the curve in force as
+  it was saved, at its quality (`Library::save_with_curve`). Chosen, a preset's curve is in
+  force at the next block, nothing measured (`Calibration::load_preset`); its key is none, so
+  DRIVE's next change measures the sound (at 48 kHz, the same to the bit: its level does not
+  move; at another rate or quality, by a fraction of a decibel, gliding). Init takes the
+  presets' average, as a fresh instance has.
+- **A preset saved before (no curve) keeps the curve in force** until DRIVE is next changed
+  (agent decision, the coordinator's preference: no level change on load). Taking the
+  average instead would make such a preset load at the same level whatever came before it,
+  but would move the level on load for any sound already measured; the owner may prefer
+  that.
+- **DRIVE's turns follow the curve in force,** drawn straight between its steps, as before,
+  with the controls' 10 ms glide: no step a second later. A curve measured after DRIVE's
+  change (the helper's, marked so the audio thread can tell it from a preset's or a
+  session's) glides in with a time constant of 0.3 s (`REFINE_GLIDE`, `Engine::refine_curve`):
+  5.6 dB comes in at under 0.02 dB a millisecond. A preset's or a session's curve stays the
+  sound's at once.
+- Sessions are as before: the curve and its key saved and restored; an old session's curve
+  stays in force until DRIVE is changed.
+
+**Evidence (Linux x86, Rust 1.97.1, 2026-10-19).** `preset_render` against v0.2.7's release
+build: every factory preset the same to the bit. `tests/factory_curves.rs`: every factory
+preset's curves the plug-in's measurement at 48 kHz to the bit (by hand, both qualities, all
+19), one preset measured in the debug build too, every preset with both curves.
+`only_drive_or_auto_gain_changed_here_asks_for_auto_gains_curve` (the window opening, CUTOFF,
+a key, QUALITY and a preset ask for nothing; the preset's curve is in force at once; DRIVE
+typed and AUTO GAIN switched on ask; AUTO GAIN off does not; the code before asked as the
+window opened, its editor starting as touched). `a_measured_curve_glides_in_and_a_presets_is_the_sounds_at_once`,
+`a_presets_curve_is_in_force_at_the_next_block_and_a_measured_one_glides_in` and
+`a_presets_curve_is_saved_and_read_back` (with old and malformed files: none). `cargo test
+-p ca72-plugin`: all passed but `the_workers_follow_poly_through_the_plug_ins_life`, which
+failed once while another job's workspace tests held this machine's worker seats and passed
+three times alone. `cargo clippy -p ca72-plugin --all-targets -- -D warnings` and rustfmt.
+The renders and numbers of the investigation are outside the repository (the night's
+`volumedrop-out`). Untested here: a native host or the standalone on macOS or Windows, and a
+listening check by the owner. plugin-kit's own module text still describes measuring on any
+change of the sound; the kit's code is unchanged.
+
 ## R-POLY-CRACKLE. Crackles in POLY at HI: voices short of time; DOUBLE's voices taken one at a time
 
 **The report, 2026-10-19** (by email to the owner, from a sound-design teacher; an Intel
