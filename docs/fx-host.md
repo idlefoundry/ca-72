@@ -18,9 +18,8 @@ questions for the owner.
   (the rail's pixel screen, about 400 units wide, 12 characters) with an ON tab (bypass)
   beside it. A click on a name opens the effect's window; a drag reorders; a right-click
   offers replace and remove; an empty slot reads "+ ADD EFFECT" and opens the effect list.
-  The key stays lit while any effect is active. Not built tonight: the drawer is to share
-  the arpeggiator's drawer mechanics (branch `arpeggiator`), and the engine came first. Until
-  it is built, a plain console drives the chain (below).
+  The key stays lit while any effect is active. Built on branch `fx-drawer`, sharing the
+  arpeggiator's drawer (decisions.md R-FX-DRAWER); the console (below) stays for testing.
 
 ## Architecture
 
@@ -234,7 +233,8 @@ and the Mac and Windows.
 
 ## The temporary interface
 
-`--fx-console`: the standalone reads commands on standard input (`help`, `scan`, `add N`,
+The drawer (R-FX-DRAWER) is the player's interface. `--fx-console`, for testing: the
+standalone reads commands on standard input (`help`, `scan`, `add N`,
 `add-file PATH [ID]`, `replace S N`, `remove S`, `move S T`, `bypass S on|off`, `editor S
 [close]`, `param S ID VALUE`, `params S`, `chain`, `events`, `kill S`, `save`); `--fx-mode
 sync|pipelined`; `CA72_FX_PATH`, `CA72_FX_STANDARD_FOLDERS`, `CA72_FX_HELPER`, `CA72_FX_LOG`

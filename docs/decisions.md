@@ -7667,3 +7667,113 @@ editors drawn (the VST3 ones' knobs at zero, unsolved). The chain's tests pass o
 (the standalone not built there). A macOS blocker found and fixed: the transport linked
 `os_sync_wait_on_address` (macOS 14.4) into the application (minimum 11); now looked up at
 run time (third_party/daw-v3/PATCHES.md).
+
+## R-FX-DRAWER. The effects' drawer: an FX key on the standalone's rail (issue 82)
+
+**Owner decisions, 2026-10-18** (FX-A, chosen from the coordinator's mock-ups over an AUDIO &
+MIDI-style dialog and slots in the left column; relayed with the night's brief): in the
+standalone application only, the DAW plug-ins keeping their rail as it is, an **FX** key on the
+walnut rail after **ARP**, the preset's name's screen a key shorter again for it. Pressed, it drops
+a one-row drawer inside the window, about 170 units deep, over the top of whichever lower page
+shows, "the same mechanics and edge as the arpeggiator's drawer (share code; don't duplicate it;
+only one drawer is open at a time)". Four slots side by side, each with a SLOT legend, a dot screen
+(the rail's, about 400 units wide, twelve characters) and an ON tab beside it (bypass), lit while
+its effect plays. A click on a name opens the effect's own window; a slot dragged onto another
+moves it there; a right click offers replace and remove "in the editor's existing menu style"; an
+empty slot reads "+ ADD EFFECT" and opens the effects' list, "a dropdown list in the presets
+list's style, listing found effects by name and maker", its scan off the editor's thread with a
+visible SCANNING. The FX key lit while any effect is active. A failed or given-up effect shown
+plainly on its slot, "its name dimmed and a short word ... keep it subtle". The mock's lip and
+shadow were a composite: the arpeggiator's drawer's real edge instead.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One drawer from the rail, its plate shared.** `strip/lower.rs` is what the arpeggiator's
+  drawer and the effects' share: the plate (the strip's face from another place, the rail's
+  shadow across its top, its left edge lit, its foot in shade), the print worn into it, the lamp,
+  the shadow it casts, the lit tabs and their words. `strip/arp.rs` draws its plate with it now
+  (the same look; its edges drawn before its recesses rather than in one pass with them). In the
+  editor one `Dropped` holds which drawer is down: ARP with the effects' drawer open puts it away
+  and drops its own from the rail anew, and FX the same; PANEL hiding the lower page puts either
+  away at once. `compose` lays either the same way, with what hangs under it (its shadow; the
+  effects' list).
+- **The rail's keys by build.** `strip::Rail`: the plug-ins' (as before, to the pixel) or the
+  standalone's, FX at 2912 and the keys left of it a key's pitch (100 units) to the left, the
+  name 2000 units wide; chosen as the editor opens, the standalone's rail only when the
+  application has a chain (its helper found). The name's surround is the strip's renderer's
+  alone now (the drawn skin had it twice, once in the drawing: it would have shown past the
+  shorter name).
+- **The slots.** Equal quarters of the drawer, each a screen 400 by 50 units in the rail's bezel
+  and glass, twelve places of the rail's dots, the name centred and cut with an ellipsis; a 20-unit
+  gap, then the 150-unit tab of the strip's amber caps reading ON; the legend over the pair. Every
+  tab has room (tested: none touches its screen or the next slot's light). An effect's whole name
+  and maker are the tip over its screen. Only the first empty slot reads "+ ADD EFFECT" (an
+  effect is always added at the chain's end); the others are dark. A bypassed effect keeps its name
+  lit, its tab dark. The small print under a screen, in the legends' colour at 72 %: LOADING while
+  it loads, RESTARTING while its helper is started again, CRASHED once given up on (dry), MISSING
+  when its plug-in is not on this computer, FAILED for five seconds where a chosen effect would not
+  load; its name dimmed with it.
+- **Clicks and drags.** A press on a name and a move of more than 12 units carries the slot: its
+  name dimmed, the slot under the pointer ringed in MIDI Learn's accent; let go there, the chain's
+  `move_to` (the others keep their order). A press let go without moving opens its window. The
+  tab bypasses (shown at once). Right click: the effect's name as the menu's title, REPLACE… and
+  REMOVE. While something loads, the slots wait (no drag, no menu).
+- **The list.** It drops from under the drawer's foot below its slot (clamped within the
+  drawer's ends), a plate of the drawer's face with its own edges and shadow, and a display of the
+  presets' list's dots and smoothed glass (the rail's glass drawn out over it showed bands; R44):
+  a title (ADD TO SLOT n or REPLACE SLOT n) with SCANNING… or the number found at its right, then
+  eleven rows a view of name, maker and format (CLAP, VST3: the owner's question 7 in
+  docs/fx-host.md is still open; small and dimmer), and SCAN AGAIN last. Sorted by name, maker,
+  format. Always eleven rows deep, as the presets' list is, so that its plate is made once, on
+  the drawer's thread as the editor opens (first made each drop it cost 105 to 215 ms; now 3 to 10).
+  A press elsewhere puts it away and does nothing else; Escape too; the wheel scrolls it.
+- **Never waiting on the chain.** The drawer reads the chain with `try_status` and `try_active`
+  (new in `ca72-fx`: none while the chain is busy, the last reading kept), every tenth of a second
+  or as soon as something done there finishes. What loads or opens a window runs on a thread of
+  the drawer's, in order; a bypass on another, so a tab answers while an effect loads. And
+  `Chain::insert` no longer holds the chain while the plug-in loads (seconds for some): it checks
+  the place, loads, then checks again (and loads again if the device changed the rate meanwhile).
+  The scan runs on a thread of its own the first time the list opens, its results kept for the
+  application's life; again only from SCAN AGAIN. The `fx_view::Effects` trait is the drawer's
+  reach into the chain (the standalone's `fx::Host`; the tests' own), so the editor's tests run
+  without helpers.
+- **Two fixes found in the real standalone.** With the keyboard page showing, a right click or
+  the wheel on a drawer from the rail (either) went to the keyboard under it; and a menu over the
+  keyboard did not light the item under the pointer. Both answer the drawer and the menu now.
+- `Chain::params` (the effects' parameter lists) is not used: FX-A shows no effect's parameters.
+
+**Evidence (Linux, omarchy, 2026-10-18):**
+- Panel: `strip::fx`'s `the_drawer_finds_each_part_where_it_is_drawn` (screens, tabs, list rows,
+  room for each tab, within the drawer and the window), `drawn_in_parts_it_is_drawn_whole` (a tab,
+  a crash, the pointer, a carry, the list opened, scrolled, pointed at and put away; both skins,
+  0.44 and 0.87) and the arpeggiator's tests as before. Editor:
+  `the_fx_key_drops_its_drawer_one_drawer_at_a_time` (the rails, FX and ARP each putting the
+  other away, the frame put together whole, the key's light, PANEL) and
+  `the_fx_drawer_operates_the_chain` (window, bypass, a drag that moves, the list and a row
+  added, REPLACE… and REMOVE, the wheel, a press elsewhere, nothing under the drawer; the keyboard
+  shown); `fx_view`'s tests of the slots' states and the list. `cargo test -p ca72-panel`,
+  `-p ca72-plugin --features standalone-production --lib`, `-p ca72-fx`, workspace clippy
+  `-D warnings` with all targets.
+- The real standalone (release, `--no-devices`, `IDLE_FOUNDRY_SHARED` and `--state-dir` in the
+  worktree, `CA72_FX_PATH` the DAW-v3 test plug-ins and Dragonfly Reverb 3.2.10's CLAP and VST3,
+  `CA72_FX_STANDARD_FOLDERS=0`), driven by synthetic X events: the key, SCANNING then ten
+  effects, three added, a bypass, a carry and a move, two effects' windows opened (a CLAP and a
+  VST3), REMOVE, REPLACE…, a helper killed six times (CRASHED), closed and opened again with the
+  chain as it was (bypass, order, states) and with a plug-in moved away (MISSING); ARP and FX
+  putting each other away.
+- Frame times (`cargo run --release -p ca72-panel --example frames`, before (the merge) and after
+  in turn, each from its own target; full log on the branch's summary): the panel's, the strip's
+  and the arpeggiator's cases as before within the noise, with either rail (0.87 of the drawing:
+  CUTOFF 2.7 and 2.7 ms median, DRIVE 6.3 and 6.2, a tab 1.8 and 1.9; the frames example's opening
+  372, 915 and 769 ms before, 372, 904 and 782 after, at 0.44, 0.87 and 1.0). The effects' drawer
+  at 0.44, 0.87 and 1.0: its renderer made as the editor opens 0.02 ms (its still parts, the
+  list's plate among them, on its thread: 83, 128 and 144 ms); its first drop once they are made
+  2.2, 5.1 and 6.2 ms; a tab 0.1, 0.3 and 0.5 ms; a carry 0.3, 0.7 and 0.8; the list dropped 2.8,
+  7.9 and 10.3 ms, pointed at 2.1, 5.2 and 6.6, scrolled 2.2, 5.3 and 6.7; open and still,
+  nothing.
+
+**Not done:** an audio device (the standalone ran with `--no-devices`, so no effect was heard
+and the chain's audio path was not run from the drawer; the engine's own tests and runs cover
+it, R-FX-HOST); LOADING and RESTARTING seen on screen (the test effects loaded and restarted
+within the screenshots' tenth of a second; both in the tests); the Mac and Windows; a scan of
+the standard folders on a computer with many plug-ins; Escape with the list open in the real
+window (the keyboard is not asked for while the list shows).

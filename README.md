@@ -136,6 +136,16 @@ give one): 120 BPM until you choose another from its list (or step it a beat at 
 the left and right arrow keys). It applies at once, needs no Apply, and is kept for this
 computer.
 
+**FX**, on the standalone's rail after ARP (from 0.3.0), drops a drawer of four slots for your
+own CLAP and VST3 effects, run after the synthesizer, left to right. **+ ADD EFFECT** lists the
+effects in your CLAP and VST3 folders (scanned the first time you open it, each plug-in loaded in
+a process of its own; **SCAN AGAIN** after installing more). Click an effect's name to open its
+window, its **ON** tab to bypass it, drag a name onto another slot to move it there, and
+right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while an effect plays. An
+effect that crashes is started again; after five crashes it is passed by and its slot says
+CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
+each effect's settings are saved in `effects.json` beside `session.json`.
+
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
 The development JACK launcher is kept separately (Building); direct ASIO and
 native PipeWire are not included in the production host. External input and output
