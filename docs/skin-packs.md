@@ -6,9 +6,10 @@ them, copy them and build on them under any terms you like. The CA-72 itself, it
 official artwork are under the GNU General Public License, version 3 or later.*
 
 **Status: a prototype (decisions.md R-SKIN-PACKS).** The format, the checks and the CA-72's
-support for packs exist on the `skin-packs` branch, with tests. Nothing has been released:
-there is no store, no seller agreement and no review process yet. The format may still change
-before its first release.
+support for packs exist on the `skin-system` branch, with tests. Nothing has been released:
+there is no store, no seller agreement and no review process yet. Manual, unsigned packs remain
+the main route. The first-party public key is to ship in 0.3.0 so Idle Foundry can publish signed
+packs later without a plug-in update. The format may still change before its first release.
 
 A skin pack changes how the CA-72's editor looks: where each control is on the panel, how each
 looks, every legend, rule and title printed on it, the pictures its realistic look is made of,
@@ -48,7 +49,7 @@ packs, so a copy must be given another id before it will load.
 ## Installing
 
 A pack is a folder while it is being made, and a single **pack file** (`<name>.ifskin`) as
-the marketplace delivers it. Put either in the `Skins` folder of Idle Foundry's shared folder:
+a creator shares it. Put either in the `Skins` folder of Idle Foundry's shared folder:
 
 | System | Folder |
 |---|---|
@@ -58,8 +59,12 @@ the marketplace delivers it. Put either in the `Skins` folder of Idle Foundry's 
 
 The settings key on the editor's rail opens its menu, which lists the installed packs under
 LOOK after REALISTIC and CLASSIC. A pack that cannot be used is shown with "(CANNOT BE USED)";
-the reasons are in the plug-in's log. No store login or network check is needed to use an
-installed pack, and none is made.
+the reasons are in the plug-in's log. A verified first-party pack has "(IDLE FOUNDRY)" after its
+name; a future marketplace pack has "(MARKETPLACE)". An unknown signing key is labelled
+"(UNKNOWN SIGNING KEY)" and treated as unsigned. An unsigned pack is labelled "(UNSIGNED)" and loads as before. Every pack has a status after
+its name, so a creator cannot impersonate the verified label by naming an unsigned pack that
+way.
+No store login or network check is needed to use an installed pack, and none is made.
 
 **Updates.** If the same pack (the same `id`) is installed more than once, the newest version is
 used. A pack's update can simply be added beside it, and the setting, which names the pack by
@@ -91,60 +96,115 @@ This writes a folder as a pack file: its files in order, the same bytes every ti
 
 ## Signatures
 
-When a pack passes the marketplace's review, the marketplace signs it: `signature.toml` in the
-pack, made with the marketplace's secret key. The plug-in checks it **offline**, against public
-keys built into it. There is no login and no network. A signature proves two things: that the
-files are the ones the marketplace reviewed, and who published them.
+Manual, unsigned packs remain the main route. Idle Foundry can also sign its own packs:
+`signature.toml` in the pack, made with its secret key. The plug-in checks it **offline**, against
+public keys built into it. There is no login and no network. A signature proves who published
+these files. A marketplace could have its own key later, once it has a review process.
 
 | The pack | What the plug-in does |
 |---|---|
-| Unsigned | Loads it (anyone's pack, made and shared outside the marketplace). |
-| Signed by a key the plug-in doesn't know (a newer key than an older plug-in has) | Loads it as unsigned. |
-| Signed, but any file, its id or its version changed since | Refuses it. |
-| Signed by the marketplace | Loads it as published by the marketplace. |
-| Signed as first-party | Loads it as published by Idle Foundry. Only these may use the `com.idlefoundry.*` id prefix. |
+| Unsigned | Loads it (anyone's pack, made and shared manually). |
+| Signed by a key the plug-in does not know (a newer key than an older plug-in has) | Loads it as unsigned; it cannot verify that signature. |
+| Signature still names a known key, but any file, id, version, key id or publisher changed since | Refuses it, with `signature.invalid` and advice to get an unchanged copy from its publisher. |
+| Signed by a future marketplace key | Loads it as published by the marketplace. That key cannot claim to be Idle Foundry. |
+| Signed as first-party by Idle Foundry's key | Loads it as published by Idle Foundry. Only these may use the `com.idlefoundry.*` id prefix. |
 
-The built-in looks' own ids can't be taken by any installed pack, signed or not.
+The built-in looks' own ids cannot be taken by any installed pack, signed or not.
 
 What is signed is every field of the signature: its key's id, the pack's id and version, the
 publisher (`marketplace` or `first-party`), the date, and a digest of every file of the pack
 (each path with its SHA-256).
 
-**A signature is neither copy protection nor a licence.** A pack works however it was obtained:
-the plug-in is GPL, so anyone may lawfully remove such a check from it, and protection would
-burden only honest buyers. The pack's licence, and the marketplace's terms with its buyer, say
-what a buyer may do.
+**A signature is neither copy protection nor a licence.** A pack works however it was obtained.
+Its licence says what its user may do; a signature grants no additional rights.
 
-The marketplace's tools:
+## Signing first-party packs
 
-```bash
-cargo run -p skin-pack --example pack_keygen -- market.key
-```
+The owner makes the real key pair on a machine of their choice before the 0.3.0 release
+candidate. No secret key belongs in any repository, including an ignored folder or a worktree's
+`target`. The tools work offline; build them first if the signing machine will be disconnected.
+Do not use a throwaway test key in a release.
 
-This makes a key. The secret goes to a new file readable only by its owner, and the public half
-is printed for the plug-in's `TRUSTED_KEYS`.
+1. Choose an existing private folder **outside every Git work tree**, then generate the key
+   there. This example assumes `$HOME/offline-signing` already exists outside a repository:
 
-```bash
-cargo run -p skin-pack --example pack_sign -- path/to/pack market.key market-2027 marketplace 2027-01-15
-```
+   ```sh
+   cargo run -p skin-pack --example pack_keygen -- "$HOME/offline-signing/idlefoundry-1.key"
+   ```
 
-This signs a reviewed pack (`marketplace` or `first-party`).
+   The tool refuses paths in work trees (including linked worktrees and paths through links),
+   bare repositories, existing files and existing links (including Windows alternate data streams). Git must be available to check the
+   destination. It uses the operating system's randomness, creates the secret with owner-only
+   access (0600 on macOS/Linux; a protected user-only DACL on Windows, refusing volumes without
+   persistent ACLs), and prints only the
+   public half and its id, `idlefoundry-1`. It never prints the secret. Keep that file private.
 
-```bash
-cargo run --release -p ca72-panel --example check_pack -- night.ifskin --trust market-2027:<public key>
-```
+2. Make an **offline backup** of the secret, outside any repository, and keep it securely.
+   Keep the signing copy on the machine that signs. Never commit either copy. Losing the secret
+   means this key cannot sign future packs; the public half cannot recover it.
 
-This checks a signed pack before the key is built into the plug-in.
+3. Paste the printed `pub const IDLE_FOUNDRY_KEY: Option<TrustedKey> = Some(...)` line into
+   `crates/skin-pack/src/keys.rs`, replacing its `None` constant. Commit **only the public
+   constant**. `ca72_panel::look::TRUSTED_KEYS`, the signer and the release gate share that list.
+   Check it before building the release:
 
-**Keys.** The secret key stays on the machine that signs and in an offline backup, never in a
-repository. A plug-in learns of a new key, or a retired one, only when it is updated, so a new
-key is added to the plug-ins well before it is first used. **No key is built into the CA-72
-yet:** until one is, every pack loads as unsigned.
+   ```sh
+   cargo run -p skin-pack --example check_release_key
+   ```
+
+   This fails if the public key is missing, weak, not marked first-party, has the wrong id, or
+   is absent from the trust list. A public release's builds also fail at compile time while
+   the slot is empty: the release sets `CA72_PUBLIC_RELEASE=1` (the Mac's
+   `CA72_REQUIRE_NOTARIZATION=1` counts too), and `scripts/package.sh` runs this diagnostic
+   under either. CI sets `CA72_PUBLIC_RELEASE=1` when it runs for a version tag (`v*`), for
+   the bundles, the installers and the tests alike. Ordinary release and bundle builds, CI's
+   for branches and pull requests included, are not blocked, so work continues before the key
+   exists.
+
+4. Finish and check the pack, then sign its folder or `.ifskin` (the date is the publication
+   date). The secret is read from a file, never as a command-line argument:
+
+   ```sh
+   cargo run -p ca72-panel --example check_pack -- path/to/pack
+   cargo run -p skin-pack --example pack_sign -- path/to/pack "$HOME/offline-signing/idlefoundry-1.key" idlefoundry-1 first-party 2026-10-18
+   ```
+
+   For a first-party `com.idlefoundry.*` id, the unsigned check initially refuses that reserved
+   prefix; the signer checks the signed pack with the built-in key, which permits it. All
+   other findings still apply. `pack_sign` accepts `.ifskin` in the same position and replaces
+   it atomically; for a folder it replaces only `signature.toml`. The signer checks the format
+   and verifies the signature against the built-in public keys **before writing**. A missing
+   key id or a secret that does not match it refuses the operation.
+
+   To read from stdin, use `-` for the file argument. Redirect from the secret file or a secure
+   secret provider; never type the secret into a shell command:
+
+   ```sh
+   cargo run -p skin-pack --example pack_sign -- night.ifskin - idlefoundry-1 first-party 2026-10-18 < "$HOME/offline-signing/idlefoundry-1.key"
+   ```
+
+5. Verify with the CA-72's full look checks, using the built-in key by default:
+
+   ```sh
+   cargo run -p ca72-panel --example check_pack -- night.ifskin
+   ```
+
+   It must report `signature.valid`, "published by Idle Foundry", and `LOADS`. No `--trust`
+   override belongs in the release verification. After signing, any change to a pack requires
+   signing it again. To turn a signed folder into a pack file, use `pack_archive` as above.
+
+**Rotation and a future marketplace.** Add a second public key, such as `idlefoundry-2`, to
+`TRUSTED_KEYS` beside the first, with `first_party: true`, and ship it before using it. Keep the
+first key for existing packs. A marketplace key would be another entry with its own id and
+`first_party: false`; it cannot sign as Idle Foundry. A plug-in learns of a new key or a retired
+one only when updated: there is no online revocation. A maker can use `check_pack --trust
+<key-id>:<public-key>` for a local check before a public key is built in; this explicitly grants
+first-party trust for that check alone and does not change the shipped keys.
 
 ## Checking a pack
 
 ```bash
-cargo run --release -p ca72-panel --example check_pack -- path/to/pack preview.png
+cargo run -p ca72-panel --example check_pack -- path/to/pack preview.png
 ```
 
 This prints what the checks found and draws the panel in the pack's look, in both lettering

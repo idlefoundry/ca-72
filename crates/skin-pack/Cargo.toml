@@ -7,6 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# These examples' guards are regression tests too, including in plain `cargo test`.
+[[example]]
+name = "pack_keygen"
+test = true
+
+[[example]]
+name = "pack_sign"
+test = true
+
 [dependencies]
 # The plug-ins' resvg (its usvg and tiny-skia), for SVG's parsing and a timed test drawing.
 resvg = { version = "0.45", default-features = false }
@@ -16,7 +25,7 @@ roxmltree = "0.20"
 ttf-parser = "0.25"
 png = "0.17"
 serde = { workspace = true }
-# Marketplace packs' signatures, checked offline against the plug-in's keys.
+# Packs' signatures, checked offline against Idle Foundry's and future marketplace keys.
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 sha2 = "0.10"
 toml = "0.7"
@@ -24,7 +33,12 @@ toml = "0.7"
 zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
+getrandom = "0.4"
+zeroize = "1"
 tempfile = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_SystemServices"] }
 
 [lints]
 workspace = true

@@ -18,6 +18,7 @@
 
 pub mod archive;
 pub mod font;
+pub mod keys;
 pub mod licence;
 pub mod manifest;
 pub mod paths;
@@ -445,7 +446,7 @@ pub struct Context<'a> {
     /// Draw each SVG drawing as a test, against its time limit (a pack being installed or
     /// reviewed; a built-in pack's are tested by the plug-in's tests instead).
     pub test_drawings: bool,
-    /// The marketplace's public keys the plug-in trusts (`signature`).
+    /// Idle Foundry's and any future marketplace's public keys (`signature`).
     pub keys: &'a [signature::TrustedKey],
     /// The plug-in's version (`major.minor.patch`), against which a pack's `requires` is
     /// checked; `None` where no plug-in is (a marketplace's tools).
@@ -462,7 +463,7 @@ pub struct Pack {
     pub files: Files,
     /// What the checks found (no rejection).
     pub report: Report,
-    /// Its signature, checked: who published it, if the marketplace did.
+    /// Its signature, checked: who published it, if signed by a trusted key.
     pub signed: Option<signature::Signed>,
 }
 

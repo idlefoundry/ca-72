@@ -63,6 +63,7 @@ pub fn test_key() -> (String, TrustedKey) {
         TrustedKey {
             id: "stress-test",
             public,
+            first_party: true,
         },
     )
 }
