@@ -15,7 +15,7 @@
 
 use std::any::Any;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -26,7 +26,7 @@ use baseview::{
     WindowEvent, WindowHandler, WindowInfo, WindowOpenOptions, WindowScalePolicy,
 };
 use ca72::freq_dial::{Law, Pot};
-use ca72_panel::art::{self, POWER};
+use ca72_panel::art;
 use ca72_panel::controls::{FEEDBACK_SILENT, feedback_silent};
 use ca72_panel::fonts::Weight;
 use ca72_panel::keyboard;
@@ -39,7 +39,7 @@ use ca72_panel::strip::arp::{self as arp_ui, ArpBank, ArpRenderer, ArpScene, Arp
 use ca72_panel::strip::fx::{self as fx_ui, FxRenderer, FxScene};
 use ca72_panel::strip::lower as lower_ui;
 use ca72_panel::strip::{self, Bank, Field, Rail, Readout, StripRenderer, StripScene, StripTarget};
-use ca72_panel::{CONTROLS, Kind, Lettering, Renderer, Scene, Skin, Target, interact};
+use ca72_panel::{CONTROLS, Kind, Lettering, Look, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::editor::HostKey;
 use nih_plug::prelude::*;
@@ -52,7 +52,7 @@ use crate::library::Library;
 use crate::opening::{ANIMATE_S, Motion, level_of};
 use crate::params::{ArpDirection, ArpRate, Ca72Params, QualityMode, Scatter};
 use crate::presets::Browser;
-use crate::settings::{Change, Settings};
+use crate::settings::{Change, PackId, Settings};
 use crate::update::Update;
 
 mod agent;
@@ -99,17 +99,53 @@ const SCROLL_PIXELS_PER_LINE: f64 = 40.0;
 const MENU_TEXT: f64 = 1.15;
 
 /// The editor's height at `width`: the panel and the strip under it, in the drawing's
-/// proportions.
+/// proportions (the official panel's).
 pub fn height_for(width: u32) -> u32 {
-    (f64::from(width) * art::H / art::W).round() as u32
+    height_with(width, art::Panel::OFFICIAL)
 }
 
+/// The same with a panel of `panel`'s size (a skin pack's: decisions.md R-SKIN-PACKS).
+pub fn height_with(width: u32, panel: art::Panel) -> u32 {
+    (f64::from(width) * panel.drawing_h() / art::W).round() as u32
+}
+
+/// The official panel's (the tests' measure).
+#[cfg(test)]
 fn height_for_panel(width: u32, expanded: bool) -> u32 {
+    height_in(width, expanded, art::Panel::OFFICIAL)
+}
+
+/// The window's height at `width`, the lower panel shown (`expanded`) or not, the panel `panel`.
+fn height_in(width: u32, expanded: bool, panel: art::Panel) -> u32 {
     if expanded {
-        height_for(width)
+        height_with(width, panel)
     } else {
-        (f64::from(width) * DRAWER_TOP / art::W).round() as u32
+        (f64::from(width) * (DRAWER_TOP - panel.top()) / art::W).round() as u32
     }
+}
+
+/// The panel's size of the look chosen on this computer, as an editor last opened or changed
+/// to it: the window's height before an editor opens (its look is read as it opens, and the
+/// window asked to follow it if it differs). The official panel's (0) until then.
+static CHOSEN_PANEL: AtomicU64 = AtomicU64::new(0);
+
+fn chosen_panel() -> art::Panel {
+    match CHOSEN_PANEL.load(Ordering::Relaxed) {
+        0 => art::Panel::OFFICIAL,
+        bits => art::Panel {
+            wood: f64::from(f32::from_bits((bits >> 32) as u32)),
+            face: f64::from(f32::from_bits(bits as u32)),
+        },
+    }
+}
+
+fn choose_panel(p: art::Panel) {
+    let bits = if p == art::Panel::OFFICIAL {
+        0
+    } else {
+        (u64::from((p.wood as f32).to_bits()) << 32) | u64::from((p.face as f32).to_bits())
+    };
+    CHOSEN_PANEL.store(bits, Ordering::Relaxed);
 }
 
 fn clamp_width(width: u32) -> u32 {
@@ -120,7 +156,7 @@ fn clamp_width(width: u32) -> u32 {
 /// (logical pixels), its height kept within the same share.
 fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
     screen.map_or(DEFAULT_WIDTH, |(w, h)| {
-        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / art::H);
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / chosen_panel().drawing_h());
         clamp_width(w.round() as u32)
     })
 }
@@ -801,7 +837,7 @@ impl Editor for Ca72Editor {
         } else {
             self.params.editor_expanded.load(Ordering::Relaxed)
         };
-        (width, height_for_panel(width, expanded))
+        (width, height_in(width, expanded, chosen_panel()))
     }
 
     fn resize_request(&self) -> (u64, (u32, u32)) {
@@ -978,6 +1014,70 @@ impl GuiContext for Watched {
 }
 
 /// The panel being operated: what the pointer does to the parameters, and the scene drawn.
+/// The folder skin packs are installed in (decisions.md R-SKIN-PACKS): the shared folder's
+/// `Skins`, a folder each, for every Idle Foundry plug-in (each pack names the one it is for).
+#[cfg(not(test))]
+fn packs_dir() -> std::path::PathBuf {
+    crate::library::shared_dir().join("Skins")
+}
+
+/// An installed skin pack, as the settings' menu lists it: its name, and its look if it can be
+/// used (else its folder's name, and why not in the log).
+#[derive(Clone, Debug)]
+struct Installed {
+    name: String,
+    look: Option<Look>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The packs a test has installed (none of the user's are read in the tests).
+    static TEST_PACKS: std::cell::RefCell<Vec<Installed>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The skin packs installed on this computer, each read and checked (in the tests, the test's).
+fn installed() -> Vec<Installed> {
+    #[cfg(test)]
+    {
+        TEST_PACKS.with(|p| p.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        ca72_panel::look::discover(&packs_dir())
+            .into_iter()
+            .map(|found| match found {
+                Ok(look) => Installed {
+                    name: look.menu_name(),
+                    look: Some(look),
+                },
+                Err((folder, report)) => {
+                    nih_log!("The skin pack in {folder} cannot be used:\n{report}");
+                    Installed {
+                        name: folder,
+                        look: None,
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+/// The look the settings choose: the pack chosen, if it is installed and can be used, else the
+/// built-in look (the pack's base, kept with it). A pack missing or refused changes nothing
+/// but the look: the sound, presets, automation and the session are not the look's.
+fn chosen_look(settings: &Settings, installed: &[Installed]) -> Look {
+    settings
+        .pack
+        .and_then(|id| {
+            installed
+                .iter()
+                .filter_map(|p| p.look.as_ref())
+                .find(|l| l.id == id.as_str())
+                .cloned()
+        })
+        .unwrap_or_else(|| Look::of(settings.skin))
+}
+
 struct Editing {
     context: Arc<dyn GuiContext>,
     params: Arc<Ca72Params>,
@@ -987,6 +1087,9 @@ struct Editing {
     width: u32,
     physical_width: u32,
     renderer: Renderer,
+    /// The skin packs installed, as last looked for (as the editor opened, if one is chosen, and
+    /// as the settings' menu opens).
+    installed: Vec<Installed>,
     scene: Scene,
     /// The strip's own parts (over the drawing's strip): their renderer and scene, and
     /// ENTROPY's, WIDTH's, DETUNE's and INNER's last amount but 0 (their switches, and SCATTER |
@@ -1025,6 +1128,9 @@ struct Editing {
     damage: Option<Vec<[i32; 4]>>,
     /// A size asked of the window.
     resizing_window: bool,
+    /// The window to be asked to follow the look's panel's size (it opened at the size last
+    /// chosen, and the look read as it opened has another).
+    panel_due: bool,
     /// The drawer placed for its opening (below the strip or over the panel), asked once.
     placed: bool,
     /// The update check in the drawer; dropped with the editor, it ends a check under way.
@@ -1107,7 +1213,11 @@ impl PanelWindow {
         library: Library,
         host_keys: Arc<HostKeys>,
     ) -> Self {
-        let height = height_for_panel(width, params.editor_panel.load(Ordering::Relaxed));
+        let height = height_in(
+            width,
+            params.editor_panel.load(Ordering::Relaxed),
+            chosen_panel(),
+        );
         let physical = (
             (f64::from(width) * dpr).round() as u32,
             (f64::from(height) * dpr).round() as u32,
@@ -1268,6 +1378,11 @@ impl Editing {
         } else {
             Settings::load()
         };
+        let installed = if settings.pack.is_some() {
+            installed()
+        } else {
+            Vec::new()
+        };
         params.set_freq_law(settings.frequency);
         params.midi_map.set_wheel_source(settings.mod_wheel_source);
         params.set_tempo(f64::from(settings.tempo));
@@ -1295,12 +1410,13 @@ impl Editing {
             dpr,
             width,
             physical_width,
-            renderer: Renderer::with_look(
-                settings.skin,
+            renderer: Renderer::with_pack(
+                chosen_look(&settings, &installed),
                 settings.lettering,
                 f64::from(physical_width) / art::W,
                 dpr,
             ),
+            installed,
             scene: Scene::default(),
             strip: StripRenderer::new(f64::from(physical_width) / art::W),
             strip_scene: StripScene::default(),
@@ -1326,6 +1442,7 @@ impl Editing {
             composed: None,
             damage: None,
             resizing_window: false,
+            panel_due: false,
             placed: false,
             update: Update::default(),
             learning: Learning::default(),
@@ -1406,6 +1523,15 @@ impl Editing {
     /// As it opens: what QUALITY's setting shows up in its opening, not moving (the hamster
     /// asleep); it watches the levels, and the voices' peaks held while it was shut are let go.
     fn opened(mut self) -> Self {
+        // The window opened at the panel's size last chosen; the look's may differ.
+        self.strip.set_look(self.renderer.look());
+        self.drawer.set_look(self.renderer.look());
+        self.dress_drawers();
+        self.strip.set_under_top(self.renderer.top_px());
+        if self.panel() != chosen_panel() {
+            choose_panel(self.panel());
+            self.panel_due = true;
+        }
         self.meters.watchers.fetch_add(1, Ordering::Relaxed);
         let _ = self.meters.take_levels();
         self.motion = Motion::at(self.params.quality.value(), 0.0);
@@ -1444,15 +1570,80 @@ impl Editing {
     /// panel's renderer made again in it (its pictures decoded as it first draws).
     fn set_look(&mut self, skin: Skin) {
         self.keep_settings(Change::Skin(skin));
-        if self.renderer.skin() != skin {
-            let lettering = self.renderer.lettering();
-            self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
-            self.arp.set_look(skin, lettering);
-            if let Some(fx) = &mut self.fx {
-                fx.set_look(skin, lettering);
-            }
-            self.composed = None;
+        let look = Look::of(skin);
+        if self.renderer.look().id != look.id {
+            self.draw_in(look);
         }
+    }
+
+    /// The editor drawn in installed pack `i`'s look from now on, on this computer
+    /// (decisions.md R-SKIN-PACKS).
+    fn set_pack(&mut self, i: usize) {
+        let Some(look) = self.installed.get(i).and_then(|p| p.look.clone()) else {
+            return;
+        };
+        if let Some(id) = PackId::new(&look.id) {
+            self.keep_settings(Change::Pack(id, look.base));
+        }
+        if self.renderer.look().id != look.id {
+            self.draw_in(look);
+        }
+    }
+
+    /// The panel's renderer made again in `look` (its pictures decoded as it first draws).
+    ///
+    /// A look whose panel is another size than the one shown asks the window to follow it, its
+    /// width kept (decisions.md R-SKIN-PACKS); the host refusing, the look shown stays.
+    fn draw_in(&mut self, look: Look) {
+        let lettering = self.renderer.lettering();
+        let before = self.panel();
+        let renderer = Renderer::with_pack(look, lettering, self.renderer.scale(), self.dpr);
+        let was = std::mem::replace(&mut self.renderer, renderer);
+        if self.panel() != before {
+            if !self.ask_resize(self.width) {
+                self.renderer = was;
+                return;
+            }
+            choose_panel(self.panel());
+            self.resizing_window = true;
+        }
+        self.strip.set_look(self.renderer.look());
+        self.drawer.set_look(self.renderer.look());
+        self.dress_drawers();
+        self.strip.set_under_top(self.renderer.top_px());
+        self.composed = None;
+    }
+
+    /// The drawers dropped from the rail (the arpeggiator's and the effects') drawn in the
+    /// look's base skin and lettering: a pack's look dresses neither (decisions.md R-SKIN-PACKS),
+    /// so they draw its base's built-in artwork.
+    fn dress_drawers(&mut self) {
+        let (skin, lettering) = (self.renderer.skin(), self.renderer.lettering());
+        self.arp.set_look(skin, lettering);
+        if let Some(fx) = &mut self.fx {
+            fx.set_look(skin, lettering);
+        }
+    }
+
+    /// The window asked to follow the look's panel as it opened; the host refusing, the look's
+    /// base drawn instead (its panel the official one, as the window is).
+    fn follow_panel(&mut self) {
+        if !std::mem::take(&mut self.panel_due) {
+            return;
+        }
+        if self.ask_resize(self.width) {
+            self.resizing_window = true;
+        } else {
+            let base = Look::of(self.renderer.look().base);
+            let lettering = self.renderer.lettering();
+            self.renderer = Renderer::with_pack(base, lettering, self.renderer.scale(), self.dpr);
+            choose_panel(self.panel());
+            self.strip.set_look(self.renderer.look());
+            self.drawer.set_look(self.renderer.look());
+            self.dress_drawers();
+        }
+        self.strip.set_under_top(self.renderer.top_px());
+        self.composed = None;
     }
 
     /// The SIZE menu's sizes (R-SIZE): [`SIZES`], then FIT TO SCREEN, the size the editor
@@ -1464,7 +1655,7 @@ impl Editing {
         let expanded = self.expanded();
         let fits = |w: u32| {
             screen.is_none_or(|(sw, sh)| {
-                f64::from(w) <= sw && f64::from(height_for_panel(w, expanded)) <= sh
+                f64::from(w) <= sw && f64::from(height_in(w, expanded, self.panel())) <= sh
             })
         };
         let mut sizes: Vec<_> = SIZES
@@ -1484,12 +1675,9 @@ impl Editing {
     fn set_lettering(&mut self, lettering: Lettering) {
         self.keep_settings(Change::Lettering(lettering));
         if self.renderer.lettering() != lettering {
-            let skin = self.renderer.skin();
-            self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
-            self.arp.set_look(skin, lettering);
-            if let Some(fx) = &mut self.fx {
-                fx.set_look(skin, lettering);
-            }
+            let look = self.renderer.look().clone();
+            self.renderer = Renderer::with_pack(look, lettering, self.renderer.scale(), self.dpr);
+            self.dress_drawers();
             self.composed = None;
         }
     }
@@ -1655,9 +1843,11 @@ impl Editing {
             lines,
         };
         let (w, h) = note.extent(self.renderer.fonts());
-        // (Its box's right edge a little left of the lamp's column, its top at the lamp's.)
-        note.x = art::COL + 2940.0 - w / 2.0;
-        note.y = art::TOP + 40.0 + h + size * 0.4;
+        // (Its box's right edge a little left of the lamp's column, its top at the lamp's: where
+        // the layout has QUALITY's opening.)
+        let (ux, uy) = self.renderer.arrangement().ultra;
+        note.x = art::COL + ux - 83.0 - w / 2.0;
+        note.y = art::TOP + uy - 52.0 + h + size * 0.4;
         note
     }
 
@@ -1695,6 +1885,7 @@ impl Editing {
         let scale = f64::from(physical_width) / art::W;
         self.renderer.rescale(scale, dpr);
         self.strip.rescale(scale);
+        self.strip.set_under_top(self.renderer.top_px());
         self.drawer.rescale(scale);
         self.arp.rescale(scale);
         if let Some(fx) = &mut self.fx {
@@ -1710,13 +1901,14 @@ impl Editing {
     /// The pointer's place in the drawing.
     fn in_drawing(&self, (x, y): (f64, f64)) -> (f64, f64) {
         let k = self.dpr / self.renderer.scale();
-        (x * k, y * k)
+        (x * k, y * k + self.renderer.top())
     }
 
     /// The compact view's grip is on the rail; controls outside the view cannot be hit.
     fn hit(&self, x: f64, y: f64) -> Option<Target> {
         if !self.expanded() {
-            let bottom = f64::from(self.physical_height()) / self.renderer.scale();
+            let bottom =
+                f64::from(self.physical_height()) / self.renderer.scale() + self.renderer.top();
             if !(0.0..bottom).contains(&y) {
                 return None;
             }
@@ -1727,7 +1919,7 @@ impl Editing {
                 return None;
             }
         }
-        interact::hit(self.renderer.layout(), x, y)
+        interact::hit(self.renderer.layout(), self.renderer.arrangement(), x, y)
     }
 
     /// The drawer's top now (drawing units) and where it is cut off, while it shows: dropping
@@ -1787,7 +1979,12 @@ impl Editing {
 
     /// The window's height (logical pixels): the synth and rail, with the lower panel shown.
     fn window_height(&self) -> u32 {
-        height_for_panel(self.width, self.expanded())
+        height_in(self.width, self.expanded(), self.panel())
+    }
+
+    /// The panel's size, its look's.
+    fn panel(&self) -> art::Panel {
+        self.renderer.arrangement().panel
     }
 
     fn resize_view(&self) -> crate::resizing::View {
@@ -1812,7 +2009,7 @@ impl Editing {
             let physical = WindowInfo::from_logical_size(
                 Size::new(
                     f64::from(view.width),
-                    f64::from(height_for_panel(view.width, view.expanded)),
+                    f64::from(height_in(view.width, view.expanded, self.panel())),
                 ),
                 self.dpr,
             )
@@ -1848,7 +2045,7 @@ impl Editing {
                 self.renderer.fonts(),
                 [
                     0.0,
-                    0.0,
+                    self.renderer.top(),
                     art::W,
                     if view.expanded { art::H } else { DRAWER_TOP },
                 ],
@@ -1862,7 +2059,7 @@ impl Editing {
         let request = self
             .params
             .editor_resizing
-            .issue((width, height_for_panel(width, self.expanded())));
+            .issue((width, height_in(width, self.expanded(), self.panel())));
         let accepted = self.context.request_resize();
         if !accepted || !self.context.resize_response_will_follow() {
             self.params.editor_resizing.answer(request, accepted);
@@ -2395,6 +2592,18 @@ impl Editing {
             StripTarget::Bar(BarTarget::Settings) => {
                 self.playing.release();
                 let size = self.renderer.text_size() * MENU_TEXT;
+                // The packs installed now (one may have been added since the editor opened).
+                self.installed = installed();
+                let packs: Vec<(String, bool)> = self
+                    .installed
+                    .iter()
+                    .map(|p| (p.name.clone(), p.look.is_some()))
+                    .collect();
+                let shown = &self.renderer.look().id;
+                let pack = self
+                    .installed
+                    .iter()
+                    .position(|p| p.look.as_ref().is_some_and(|l| &l.id == shown));
                 self.learning.open_settings_menu(
                     self.renderer.fonts(),
                     settings_menu_corner(),
@@ -2406,6 +2615,7 @@ impl Editing {
                         self.params.midi_map.wheel_source(),
                         self.playing.standalone.then(|| self.agents_allowed()),
                     ),
+                    (&packs, pack),
                 );
             }
             StripTarget::Bar(b) => {
@@ -2462,7 +2672,7 @@ impl Editing {
                 Typed::Arp(i) => {
                     self.in_arp((x, y)) && arp_ui::hit(x, y) == Some(ArpTarget::Readout(i))
                 }
-                Typed::Tempo => art::tempo_hit(x, y),
+                Typed::Tempo => art::tempo_hit(self.renderer.arrangement(), x, y),
             };
             if on_it {
                 return;
@@ -2520,6 +2730,10 @@ impl Editing {
                 self.set_look(skin);
                 return;
             }
+            Pressed::Pack(i) => {
+                self.set_pack(i);
+                return;
+            }
             Pressed::Lettering(lettering) => {
                 self.set_lettering(lettering);
                 return;
@@ -2560,7 +2774,7 @@ impl Editing {
             return;
         }
         // The standalone's TEMPO screen, on the wood above the panel (R-ARP).
-        if self.playing.standalone && art::tempo_hit(x, y) {
+        if self.playing.standalone && art::tempo_hit(self.renderer.arrangement(), x, y) {
             self.tempo_press(modifiers);
             return;
         }
@@ -2581,6 +2795,8 @@ impl Editing {
                 Some(t) => {
                     self.learning.list = false;
                     let setter = ParamSetter::new(self.context.as_ref());
+                    // (A field's caret where its look's typeface sets the characters.)
+                    let dx = self.drawer.press_x(&self.browser.drawer, t, dx);
                     self.browser.drawer_press(t, dx, &self.params, &setter);
                 }
             }
@@ -2666,7 +2882,7 @@ impl Editing {
                 if !self.operable(i) {
                     return;
                 }
-                let kind = CONTROLS[i].kind;
+                let kind = self.renderer.arrangement().control(i).kind;
                 if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
                     if let Some(p) = self.operated(i) {
                         self.set_once(i, f64::from(p.default()));
@@ -2934,7 +3150,7 @@ impl Editing {
         if (pointer.0 - d.from.0).abs() + (pointer.1 - d.from.1).abs() > 3.0 {
             d.moved = true;
         }
-        let kind = CONTROLS[d.control].kind;
+        let kind = self.renderer.arrangement().control(d.control).kind;
         // The click threshold belongs to switches and selectors. A continuous control
         // follows even a sub-pixel movement from the press, with no initial jump.
         if !d.moved && !kind.is_continuous() {
@@ -3001,13 +3217,14 @@ impl Editing {
     /// A drag over, its gesture ended: `released` by the pointer (a press that did not move
     /// then picks what it pressed), else cut short.
     fn let_go(&mut self, d: Drag, released: bool) {
-        let kind = CONTROLS[d.control].kind;
+        let placed = *self.renderer.arrangement().control(d.control);
+        let kind = placed.kind;
         let mut v = d.value;
         if released && !d.moved {
             let picked = match d.pressed {
                 Target::Legend(_, k) => Some(k as f64 / 5.0),
                 _ => {
-                    let (cx, cy) = CONTROLS[d.control].centre();
+                    let (cx, cy) = placed.centre();
                     let (x, y) = self.in_drawing(d.from);
                     interact::click(&kind, v, x - cx, y - cy)
                 }
@@ -3066,7 +3283,7 @@ impl Editing {
         }
         let (x, y) = self.in_drawing(self.pointer);
         // The TEMPO screen: a beat a minute a notch (up faster), or a trackpad's travel.
-        if self.playing.standalone && art::tempo_hit(x, y) {
+        if self.playing.standalone && art::tempo_hit(self.renderer.arrangement(), x, y) {
             let beats = match delta {
                 ScrollDelta::Lines { y, .. } => f64::from(y.signum()),
                 ScrollDelta::Pixels { y, .. } => {
@@ -3174,7 +3391,7 @@ impl Editing {
                 travel: 0.0,
             });
         }
-        let kind = CONTROLS[i].kind;
+        let kind = self.renderer.arrangement().control(i).kind;
         let Some(s) = &mut self.scroll else { return };
         s.last = Instant::now();
         let notches = if kind.is_continuous() {
@@ -3208,7 +3425,7 @@ impl Editing {
 
     fn end_scroll(&mut self) {
         let Some(s) = self.scroll.take() else { return };
-        let kind = CONTROLS[s.control].kind;
+        let kind = self.renderer.arrangement().control(s.control).kind;
         let v = interact::release(&kind, s.value);
         if let Some(p) = self.operated(s.control) {
             let setter = self.setter();
@@ -3358,7 +3575,7 @@ impl Editing {
         };
         match target {
             Target::Control(i) | Target::Legend(i, _) => {
-                let c = &CONTROLS[i];
+                let c = *self.renderer.arrangement().control(i);
                 let p = self.operated(i)?;
                 let (x, y) = c.centre();
                 let top = art::bounds(&c.kind)[1];
@@ -3381,8 +3598,8 @@ impl Editing {
                 };
                 Some((
                     format!("POWER: {state}"),
-                    art::COL + POWER.0,
-                    art::TOP + POWER.1 - 64.0,
+                    self.renderer.arrangement().power_at().0,
+                    self.renderer.arrangement().power_at().1 - 64.0,
                 ))
             }
             Target::Grip => {
@@ -3396,7 +3613,8 @@ impl Editing {
                 let top = if self.expanded() {
                     art::GRIP[1]
                 } else {
-                    f64::from(self.physical_height()) / self.renderer.scale() - COMPACT_GRIP
+                    f64::from(self.physical_height()) / self.renderer.scale() + self.renderer.top()
+                        - COMPACT_GRIP
                 };
                 Some((GRIP_TIP.to_owned(), art::W - 8.0 - w / 2.0, top))
             }
@@ -3411,6 +3629,7 @@ impl Editing {
     /// Brings the frame up to the parameters and the gestures: whether it changed.
     fn draw(&mut self) -> bool {
         self.reconcile_resize();
+        self.follow_panel();
         let preference = self.params.editor_panel.load(Ordering::Relaxed);
         let applied = self.params.editor_panel_applied.load(Ordering::Relaxed);
         if preference != applied {
@@ -3475,8 +3694,10 @@ impl Editing {
         self.poll_midi_learn();
         let map = &self.params.midi_map;
         let bottom = if self.expanded() { art::H } else { DRAWER_TOP };
-        self.learning
-            .fit_menu(self.renderer.fonts(), [0.0, 0.0, art::W, bottom]);
+        self.learning.fit_menu(
+            self.renderer.fonts(),
+            [0.0, self.renderer.top(), art::W, bottom],
+        );
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
         let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
@@ -3500,7 +3721,7 @@ impl Editing {
         // (The strip's parts drawn again over the panel's frame where it changed there: the
         // panel's places that reach the strip, not QUALITY's opening above it as well.)
         // (The drops move on with QUALITY's opening, on its clock: the two in one frame.)
-        let foot = (art::PANEL_H * self.renderer.scale()).round() as i32;
+        let foot = self.renderer.strip_row();
         let under = self
             .renderer
             .damages()
@@ -3574,7 +3795,8 @@ impl Editing {
                 _ => self.arp.damage(),
             };
             if lower && let Some([x0, y0, x1, y1]) = lower_damage {
-                let top = lower_ui::top_px(self.renderer.scale());
+                // (Its rows the drawing's; the frame's begin at the panel's top.)
+                let top = lower_ui::top_px(self.renderer.scale()) - self.renderer.top_px();
                 places.push([x0, top + y0, x1, top + y1]);
             }
             if !self.expanded() {
@@ -3685,8 +3907,10 @@ fn compose(
         _ => composed.insert(ca72_panel::Pixmap::new(width, height).expect("a frame")),
     };
     let s = renderer.scale();
-    let top = (art::PANEL_H * s).round() as i32;
-    let rail = (DRAWER_TOP * s).round() as i32;
+    // (The frame begins at the panel's top, the drawing's row `origin`.)
+    let origin = renderer.top_px();
+    let top = renderer.strip_row();
+    let rail = (DRAWER_TOP * s).round() as i32 - origin;
     let (left, right) = (
         (lower_ui::LEFT * s).round() as i32,
         (lower_ui::RIGHT * s).round() as i32,
@@ -3696,7 +3920,7 @@ fn compose(
         paste(c, strip, top, [x0, y0, x1, y1]);
         if let Some(l) = &lower {
             // (Its frame's rows the drawing's from `top_px` down, open; moved up as it slides.)
-            let at = lower_ui::top_px(s) - ((lower_ui::TOP - l.top) * s).round() as i32;
+            let at = lower_ui::top_px(s) - ((lower_ui::TOP - l.top) * s).round() as i32 - origin;
             let place = [x0.max(left), y0.max(rail), x1.min(right), y1];
             paste(
                 c,
@@ -3714,7 +3938,12 @@ fn compose(
             }
         }
         if let Some((d, at)) = drawer {
-            paste(c, d, (at * s).round() as i32, [x0, y0.max(rail), x1, y1]);
+            paste(
+                c,
+                d,
+                (at * s).round() as i32 - origin,
+                [x0, y0.max(rail), x1, y1],
+            );
         }
     }
     // Logical height is rounded before the host applies DPI scaling. If that adds a row
@@ -5126,6 +5355,7 @@ mod tests {
     use nih_plug::wrapper::state::PluginState;
 
     use super::*;
+    use ca72_panel::art::POWER;
     use ca72_panel::presets::{self as presets_ui, BarTarget, DrawerTarget, FieldId, PresetKey};
     use ca72_panel::ultra;
 
@@ -7087,6 +7317,82 @@ mod tests {
         assert_eq!(e.update.scene().text, "COULD NOT CHECK");
     }
 
+    /// Installed skin packs (decisions.md R-SKIN-PACKS) under LOOK, after the built-in two, one
+    /// that cannot be used shown so and not to be chosen. Choosing one draws the editor in it,
+    /// a click finding each control where its layout has it; nothing but the look changes (not
+    /// one parameter is set); and the pack gone, the editor falls back to the pack's base look.
+    #[test]
+    fn the_settings_key_chooses_an_installed_pack() {
+        let starter = Look::open(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/skin-packs/starter"
+        )))
+        .unwrap_or_else(|r| panic!("{r}"));
+        TEST_PACKS.with(|p| {
+            *p.borrow_mut() = vec![
+                Installed {
+                    name: starter.menu_name(),
+                    look: Some(starter.clone()),
+                },
+                Installed {
+                    name: "broken-pack".into(),
+                    look: None,
+                },
+            ]
+        });
+        let (mut e, host, _) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert_eq!(
+            menu_items(&e)[..5],
+            [
+                ("LOOK".to_owned(), false),
+                ("REALISTIC".to_owned(), false),
+                ("CLASSIC".to_owned(), true),
+                ("STARTER (UNSIGNED)".to_owned(), true),
+                ("broken-pack (CANNOT BE USED)".to_owned(), false),
+            ]
+        );
+        host.take();
+        menu_item(&mut e, "STARTER (UNSIGNED)");
+        assert_eq!(e.renderer.look().id, starter.id);
+        assert_eq!(
+            (
+                e.settings.skin,
+                e.settings.pack.map(|p| p.as_str().to_owned())
+            ),
+            (Skin::Drawn, Some(starter.id.clone()))
+        );
+        assert!(host.take().is_empty(), "a look set a parameter");
+        e.draw();
+        // A click finds TUNE where the pack has it, not where the official panel does.
+        let tune = ca72_panel::controls::index("tune").expect("a control");
+        let moved = e.renderer.arrangement().control(tune).centre();
+        assert_ne!(moved, CONTROLS[tune].centre());
+        assert_eq!(e.hit(moved.0, moved.1), Some(Target::Control(tune)));
+        // Marked in the menu, as the look shown.
+        click(&mut e, key);
+        assert_eq!(e.learning.menu().map(|m| m.marked[0]), Some(3));
+        menu_item(&mut e, "REALISTIC");
+        assert_eq!(e.settings.pack, None);
+        // The pack chosen, then gone: its base look, the setting kept for when it is back.
+        let mut settings = Settings::default();
+        settings.apply(Change::Pack(
+            PackId::new(&starter.id).expect("an id"),
+            Skin::Drawn,
+        ));
+        assert_eq!(chosen_look(&settings, &[]).id, ca72_panel::look::CLASSIC);
+        let refused = Installed {
+            name: "STARTER".into(),
+            look: None,
+        };
+        assert_eq!(
+            chosen_look(&settings, &[refused]).id,
+            ca72_panel::look::CLASSIC
+        );
+        TEST_PACKS.with(|p| p.borrow_mut().clear());
+    }
+
     /// The settings key's LETTERING (R-LETTERING): STANDARD by default, marked and not to be
     /// chosen. LARGE prints the panel's and the strip's lettering a size larger, in the look the
     /// editor is in, the menus' and the tip's with it, and is kept; a look chosen after keeps it;
@@ -7581,6 +7887,91 @@ mod tests {
         e.draw();
         e.draw();
         assert!(e.lower.settled());
+    }
+
+    /// A skin pack's taller panel (decisions.md R-SKIN-PACKS) begins the frame above the
+    /// drawing's top: the arpeggiator's drawer (R-ARP) is still laid under the rail, the frame
+    /// shown the frame put together whole, its plate where it is drawn, its knobs found and
+    /// turned there; the standalone's TEMPO screen mirrors the pack's name plate, on the taller
+    /// panel's wood, and is found there.
+    #[test]
+    fn a_taller_packs_panel_keeps_the_arp_drawer_and_the_tempo_screen_in_place() {
+        let starter = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/skin-packs/starter");
+        let dir = tempfile::tempdir().expect("a pack's folder");
+        std::fs::create_dir(dir.path().join("art")).expect("its art's folder");
+        for f in ["skin.toml", "LICENSE.txt", "README.md", "art/panel.svg"] {
+            std::fs::copy(format!("{starter}/{f}"), dir.path().join(f)).expect("copied");
+        }
+        let layout = std::fs::read_to_string(format!("{starter}/layout.toml")).expect("a layout");
+        std::fs::write(
+            dir.path().join("layout.toml"),
+            layout.replacen("[fixtures]", "[panel]\nface = 1000\n\n[fixtures]", 1),
+        )
+        .expect("written");
+        let tall = Look::open(dir.path()).unwrap_or_else(|r| panic!("{r}"));
+        let (mut e, host, params) = editing_standalone();
+        e.playing.visible = false;
+        e.draw_in(tall);
+        let (s, origin, top) = (e.renderer.scale(), e.renderer.top_px(), e.renderer.top());
+        assert!(origin < 0, "a taller panel");
+        // A point of the drawing in the window, whose frame begins at the panel's top.
+        let at_tall = |e: &Editing, (x, y): (f64, f64)| at(e, (x, y - top));
+        e.draw();
+        let p = at_tall(&e, strip_at(StripTarget::Bar(BarTarget::Arp)));
+        click(&mut e, p);
+        assert!(e.lower.open);
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.lower.settled());
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        let c = e.composed.as_ref().expect("a frame");
+        let px = |p: &ca72_panel::Pixmap, x: usize, y: i32| {
+            let i = (y as usize * p.width() as usize + x) * 4;
+            p.data()[i..i + 4].to_vec()
+        };
+        let (x, y) = (
+            (2000.0 * s) as usize,
+            ((arp_ui::TOP + 200.0) * s).round() as i32,
+        );
+        assert_eq!(
+            px(c, x, y - origin),
+            px(e.arp.frame(), x, y - arp_ui::top_px(s))
+        );
+        // GATE turned where it is drawn.
+        host.take();
+        let gate = params.arp_gate.as_ptr();
+        let p = at_tall(&e, centre("arp_gate"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -30.0));
+        release(&mut e);
+        let calls = host.take();
+        assert!(calls.contains(&Call::Begin(gate)), "{calls:?}");
+        // The TEMPO screen as far down the taller panel's wood as the official one is down its.
+        let plate = e.renderer.arrangement().plate_at();
+        let (x, y, w, h) = art::tempo_window(plate);
+        assert_eq!(y - art::TEMPO_SCREEN.1, plate.1 - art::PLATE_Y);
+        assert!(top < y && y + h < top + art::TOP, "on the wood: {y}");
+        e.update_scene();
+        assert_eq!(e.scene.tempo.as_deref(), Some("120 BPM"));
+        let p = at_tall(&e, (x + w / 2.0, y + h / 2.0));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -10.0));
+        release(&mut e);
+        assert_eq!(params.tempo(), 125.0);
     }
 
     /// The rail's ARP key drops the arpeggiator's drawer over the lower page, inside the window

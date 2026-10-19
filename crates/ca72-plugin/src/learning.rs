@@ -107,6 +107,9 @@ pub enum Item {
     /// size (R-LETTERING), and how the FREQUENCY knobs' dials read (R54), each under its
     /// group's head (which does nothing).
     Look(Skin),
+    /// An installed skin pack's look, by its place in the editor's list (decisions.md
+    /// R-SKIN-PACKS).
+    Pack(usize),
     Lettering(Lettering),
     Dials(Law),
     Head,
@@ -148,6 +151,8 @@ pub enum Pressed {
     Indicator(bool),
     /// The settings' menu: the editor drawn in this look.
     Look(Skin),
+    /// The settings' menu: the editor drawn in this installed pack's look.
+    Pack(usize),
     /// The settings' menu: the editor's lettering printed at this size.
     Lettering(Lettering),
     /// The settings' menu: the FREQUENCY knobs read through this law.
@@ -376,21 +381,40 @@ impl Learning {
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
-    /// decisions.md R54); under MOD WHEEL SOURCE, what moves the MOD wheel (`source`:
-    /// R-MODWHEEL-SOURCE); in the standalone, under AGENTS, whether AI agents may operate it
-    /// (`agents`, marked; none in a host: decisions.md R-MCP). The title always names this
-    /// build's version, independent of the update check; opening this menu does not start a check.
+    /// decisions.md R54). Under LOOK, after the built-in two, each installed skin pack (`packs`:
+    /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any); under
+    /// MOD WHEEL SOURCE, what moves the MOD wheel (`source`: R-MODWHEEL-SOURCE); in the
+    /// standalone, under AGENTS, whether AI agents may operate it (`agents`, marked; none in a
+    /// host: decisions.md R-MCP). The title always names this build's version, independent of the
+    /// update check; opening this menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
         (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<bool>),
+        (packs, pack): (&[(String, bool)], Option<usize>),
     ) {
-        let mut items = vec![
-            (Item::Head, "LOOK"),
-            (Item::Look(Skin::Worn), "REALISTIC"),
-            (Item::Look(Skin::Drawn), "CLASSIC"),
+        let mut items: Vec<(Item, String)> = vec![
+            (Item::Head, "LOOK".into()),
+            (Item::Look(Skin::Worn), "REALISTIC".into()),
+            (Item::Look(Skin::Drawn), "CLASSIC".into()),
+        ];
+        let mut unusable = Vec::new();
+        for (i, (name, usable)) in packs.iter().enumerate() {
+            if !usable {
+                unusable.push(items.len());
+            }
+            items.push((
+                Item::Pack(i),
+                if *usable {
+                    name.clone()
+                } else {
+                    format!("{name} (CANNOT BE USED)")
+                },
+            ));
+        }
+        let rest: Vec<(Item, &str)> = vec![
             (Item::Head, "LETTERING"),
             (Item::Lettering(Lettering::Standard), "STANDARD"),
             (Item::Lettering(Lettering::Large), "LARGE"),
@@ -403,19 +427,23 @@ impl Learning {
             (Item::Head, "MOD WHEEL SOURCE"),
             (Item::WheelMenu(None), "CHOOSE SOURCE…"),
         ];
+        items.extend(rest.into_iter().map(|(it, t)| (it, t.to_owned())));
         #[cfg(feature = "standalone-production")]
         if crate::standalone_settings::available() {
-            items.push((Item::Head, "STANDALONE"));
-            items.push((Item::StandaloneSettings, "AUDIO & MIDI…"));
+            items.push((Item::Head, "STANDALONE".into()));
+            items.push((Item::StandaloneSettings, "AUDIO & MIDI…".into()));
         }
         if agents.is_some() {
-            items.push((Item::Head, "AGENTS"));
-            items.push((Item::Agents(true), "ALLOW"));
-            items.push((Item::Agents(false), "OFF"));
+            items.push((Item::Head, "AGENTS".into()));
+            items.push((Item::Agents(true), "ALLOW".into()));
+            items.push((Item::Agents(false), "OFF".into()));
         }
         let current = |it: &Item| {
-            *it == Item::Look(skin)
-                || *it == Item::Lettering(lettering)
+            let look = match pack {
+                Some(p) => *it == Item::Pack(p),
+                None => *it == Item::Look(skin),
+            };
+            look || *it == Item::Lettering(lettering)
                 || *it == Item::Dials(law)
                 || agents.is_some_and(|a| *it == Item::Agents(a))
         };
@@ -426,22 +454,25 @@ impl Learning {
             title: format!("SETTINGS · CA-72 {}", crate::update::VERSION),
             items: items
                 .iter()
-                .map(|(it, t)| {
+                .enumerate()
+                .map(|(i, (it, t))| {
                     let choosable = matches!(
                         it,
                         Item::Look(_)
+                            | Item::Pack(_)
                             | Item::Lettering(_)
                             | Item::Dials(_)
                             | Item::Agents(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
-                    ) && !current(it);
+                    ) && !current(it)
+                        && !unusable.contains(&i);
                     let choosable = choosable || matches!(it, Item::WheelMenu(_));
                     let text = if matches!(it, Item::WheelMenu(_)) {
                         format!("{}…", source.text())
                     } else {
-                        (*t).to_owned()
+                        t.clone()
                     };
                     (text, choosable)
                 })
@@ -666,6 +697,7 @@ impl Learning {
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
             (Some(Item::WhatsNew), _) => return Pressed::WhatsNew,
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
+            (Some(Item::Pack(i)), _) => return Pressed::Pack(*i),
             (Some(Item::Lettering(l)), _) => return Pressed::Lettering(*l),
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,
             (Some(Item::Size(w)), _) => return Pressed::Size(*w),

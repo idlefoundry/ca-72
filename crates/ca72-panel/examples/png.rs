@@ -14,6 +14,8 @@
 //! given up on; `CA72_FX=safety` a slot turned off after a crash, one after a hang, one
 //! loading; `CA72_FX=off` a safe start's slots (decisions.md R-FX-SAFETY); `CA72_FX=rail` the
 //! rail alone.
+//! `CA72_PACK=<folder>` in a skin pack's look (decisions.md R-SKIN-PACKS), what its checks
+//! found printed.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -30,7 +32,19 @@ fn main() {
         Ok("large") => ca72_panel::Lettering::Large,
         _ => ca72_panel::Lettering::Standard,
     };
-    let mut r = Renderer::with_look(skin, lettering, scale, 1.0);
+    let mut r = match std::env::var("CA72_PACK") {
+        Ok(dir) => match ca72_panel::Look::open(std::path::Path::new(&dir)) {
+            Ok(look) => {
+                print!("{}", look.report);
+                Renderer::with_pack(look, lettering, scale, 1.0)
+            }
+            Err(report) => {
+                eprint!("{report}");
+                std::process::exit(1);
+            }
+        },
+        Err(_) => Renderer::with_look(skin, lettering, scale, 1.0),
+    };
     let arp = std::env::var("CA72_ARP").is_ok_and(|v| v == "1");
     let fx = std::env::var("CA72_FX").ok();
     let built = t0.elapsed();
@@ -76,6 +90,8 @@ fn main() {
         });
         scene.bar.keyboard = true;
     }
+    strip.set_look(r.look());
+    strip.set_under_top(r.top_px());
     scene.bar.arp = arp;
     if fx.is_some() {
         strip.set_rail(ca72_panel::strip::Rail::Effects);
@@ -84,7 +100,7 @@ fn main() {
     strip.render(&scene, r.frame(), None);
     eprintln!("the strip {:?}", t3.elapsed());
     let mut all = r.frame().clone();
-    let top = (ca72_panel::art::PANEL_H * scale).round() as usize;
+    let top = r.strip_row() as usize;
     let w = all.width() as usize;
     let sf = strip.frame();
     let rows = (sf.height() as usize).min(all.height() as usize - top);
@@ -97,7 +113,92 @@ fn main() {
         drop_arp(&mut all, &mut r, scale, skin, lettering);
     }
     if let Some(fx) = fx.filter(|v| v != "rail") {
-        drop_fx(&mut all, scale, skin, lettering, &fx);
+        drop_fx(&mut all, scale, r.top_px(), skin, lettering, &fx);
+    }
+    // `CA72_DRAWER=1`: the presets' drawer open over the strip, as the editor shows it; `edit`,
+    // a search typed and the preset being renamed; `midi`, MIDI Learn's list.
+    let drawer_shown = std::env::var("CA72_DRAWER").unwrap_or_default();
+    if ["1", "edit", "midi"].contains(&drawer_shown.as_str()) {
+        use ca72_panel::presets::{
+            Current, DRAWER_TOP, DrawerRenderer, DrawerScene, DrawerTarget, Edit, Field, FieldId,
+            MidiList, MidiRow, Row,
+        };
+        let mut drawer = DrawerRenderer::new(scale);
+        drawer.set_look(r.look());
+        let presets = [
+            "Brass Tutti",
+            "Deep Mod Bass",
+            "Glass Lead",
+            "Night Pad",
+            "Pluck Ladder",
+        ];
+        let mut scene = DrawerScene {
+            chips: ["bass", "brass", "lead", "pad", "pluck"]
+                .iter()
+                .map(|t| ((*t).to_owned(), *t == "lead"))
+                .collect(),
+            rows: (0..18)
+                .map(|i| Row {
+                    name: format!("{} {}", presets[i % presets.len()], i / presets.len() + 1),
+                    tags: "lead bright".into(),
+                    origin: (i == 3).then_some("EDITED"),
+                    favorite: i % 4 == 0,
+                    current: i == 0,
+                })
+                .collect(),
+            current: Some(Current {
+                name: "Brass Tutti 1".into(),
+                origin: None,
+                tags: "brass".into(),
+                favorite: false,
+            }),
+            total: 18,
+            ..DrawerScene::default()
+        };
+        if drawer_shown == "edit" {
+            scene.search = Field {
+                text: "bra".into(),
+                caret: 3,
+            };
+            scene.editing = Some(Edit::Rename);
+            scene.edit = Field {
+                text: "Brass Tutti 1".into(),
+                caret: 5,
+            };
+            scene.focus = Some(FieldId::Edit);
+            scene.hover = Some(DrawerTarget::Row(2));
+        }
+        if drawer_shown == "midi" {
+            let row = |name: &str, assignment: &str| MidiRow {
+                name: name.into(),
+                assignment: assignment.into(),
+                waiting: false,
+            };
+            scene.midi = Some(MidiList {
+                rows: vec![
+                    row("TUNE", "CC 21"),
+                    row("GLIDE", ""),
+                    row("CUTOFF", "CC 74"),
+                    row("EMPHASIS", "CC 71"),
+                ],
+                chosen: 1,
+                keys: "ENTER: LEARN \u{b7} DELETE: REMOVE".into(),
+                reserved: "CC 0, 32, 120 TO 127 ARE NOT LEARNED".into(),
+                status: "CHOOSE A CONTROL, THEN MOVE A CONTROLLER".into(),
+                ..MidiList::default()
+            });
+        }
+        drawer.render(&scene);
+        let d = drawer.frame();
+        let at = (DRAWER_TOP * scale).round() as usize - r.top_px().max(0) as usize
+            + (-r.top_px()).max(0) as usize;
+        let w = all.width() as usize;
+        let rows = (d.height() as usize).min(all.height() as usize - at);
+        for y in 0..rows {
+            let n = w.min(d.width() as usize) * 4;
+            let (from, to) = (y * d.width() as usize * 4, (at + y) * w * 4);
+            all.data_mut()[to..to + n].copy_from_slice(&d.data()[from..from + n]);
+        }
     }
     if std::env::var("CA72_KEYBOARD_CROP").is_ok_and(|v| v == "1") {
         let [x0, y0, x1, y1] = [370.0, 925.0, 3080.0, 1750.0].map(|v| (v * scale).round() as u32);
@@ -219,7 +320,8 @@ fn drop_arp(
     );
     eprintln!("the arpeggiator's drawer {:?}", t.elapsed());
     let (w, f) = (all.width() as usize, drawer.frame());
-    let top = arp::top_px(scale) as usize;
+    // (The frame begins at the panel's top: a skin pack's taller panel's above the drawing's.)
+    let top = (arp::top_px(scale) - r.top_px()) as usize;
     let (x0, x1) = (
         (arp::LEFT * scale).round() as usize,
         (arp::RIGHT * scale).round() as usize,
@@ -247,6 +349,7 @@ fn drop_arp(
 fn drop_fx(
     all: &mut ca72_panel::Pixmap,
     scale: f64,
+    origin: i32,
     skin: Skin,
     lettering: ca72_panel::Lettering,
     how: &str,
@@ -336,7 +439,7 @@ fn drop_fx(
     drawer.render(&scene);
     eprintln!("the effects' drawer {:?}", t.elapsed());
     let (w, f) = (all.width() as usize, drawer.frame());
-    let top = fx::top_px(scale) as usize;
+    let top = (fx::top_px(scale) - origin) as usize;
     let (x0, x1) = (
         (fx::LEFT * scale).round() as usize,
         (fx::RIGHT * scale).round() as usize,

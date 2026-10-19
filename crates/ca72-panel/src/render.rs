@@ -3,6 +3,7 @@
 //! worn one's pictures turned and moved in the drawn parts' places.
 
 use std::fmt;
+use std::sync::Arc;
 
 use resvg::tiny_skia::{
     BlendMode, Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint,
@@ -10,12 +11,70 @@ use resvg::tiny_skia::{
 };
 use resvg::usvg;
 
+use crate::arrangement::Arrangement;
 use crate::art::{self, Blend, H, Layer, Layout, Lettering, W};
 use crate::controls::{CONTROLS, Kind, Mark, Place, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
+use crate::look::Look;
 use crate::skin::{Part, Pictures, Skin};
 use crate::ultra::Glow;
+
+/// A skin pack's drawing over `frame` at `scale`, its view stretched over the panel (the
+/// wooden strip and the face, the drawing's whole width, from the frame's top to `foot`, the
+/// row the plug-in's strip begins at) and nothing outside it.
+fn draw_pack_art(frame: &mut Pixmap, scale: f64, foot: i32, drawing: &usvg::Tree) {
+    let (pw, ph) = ((W * scale).round().max(1.0) as u32, foot.max(1) as u32);
+    let Some(mut layer) = Pixmap::new(pw, ph) else {
+        return;
+    };
+    let size = drawing.size();
+    // (Not drawn if it cannot be within its buffers' limits at this size.)
+    if !skin_pack::svg::render(
+        drawing,
+        Transform::from_scale(pw as f32 / size.width(), ph as f32 / size.height()),
+        &mut layer.as_mut(),
+    ) {
+        return;
+    }
+    frame.draw_pixmap(
+        0,
+        0,
+        layer.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
+}
+
+/// A skin pack's drawing of the strip over `frame` at `scale`, stretched over the plug-in's strip
+/// (the rail and the sections, the drawing's whole width, from the frame's row `foot` down).
+fn draw_strip_art(frame: &mut Pixmap, scale: f64, foot: i32, drawing: &usvg::Tree) {
+    let (pw, ph) = (
+        (W * scale).round().max(1.0) as u32,
+        (frame.height() as i32 - foot).max(1) as u32,
+    );
+    let Some(mut layer) = Pixmap::new(pw, ph) else {
+        return;
+    };
+    let size = drawing.size();
+    // (Not drawn if it cannot be within its buffers' limits at this size.)
+    if !skin_pack::svg::render(
+        drawing,
+        Transform::from_scale(pw as f32 / size.width(), ph as f32 / size.height()),
+        &mut layer.as_mut(),
+    ) {
+        return;
+    }
+    frame.draw_pixmap(
+        0,
+        foot,
+        layer.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
+}
 
 /// The compact editor's grip, within the rail's bottom right corner: as plain as the
 /// drawing's (R-SIZE).
@@ -107,6 +166,10 @@ struct Slot {
 /// The panel's renderer at a scale.
 pub struct Renderer {
     fonts: Fonts,
+    /// What the panel is drawn with (a built-in look, or a skin pack's), and where everything
+    /// on it is (its layout).
+    look: Look,
+    arrangement: Arc<Arrangement>,
     layout: Layout,
     options: usvg::Options<'static>,
     /// Pixels a panel unit; pixels a logical pixel (for the tip, sized for reading).
@@ -174,12 +237,24 @@ impl fmt::Debug for Renderer {
     }
 }
 
-/// The frame's size at `scale` pixels a panel unit.
+/// The frame's size at `scale` pixels a panel unit, the official panel's.
 pub fn size_at(scale: f64) -> (u32, u32) {
+    size_for(scale, art::Panel::OFFICIAL)
+}
+
+/// The frame's size at `scale` for a panel of `panel`'s size: from its top (the drawing's
+/// [`art::Panel::top`], the frame's first row: [`top_row`]) to the drawing's foot.
+pub fn size_for(scale: f64, panel: art::Panel) -> (u32, u32) {
     (
         (W * scale).ceil().max(1.0) as u32,
-        (H * scale).ceil().max(1.0) as u32,
+        ((H * scale).ceil() as i32 - top_row(scale, panel)).max(1) as u32,
     )
+}
+
+/// The drawing's row (at `scale`) the frame of a panel of `panel`'s size begins at: 0 for the
+/// official panel's, less for a taller one.
+pub fn top_row(scale: f64, panel: art::Panel) -> i32 {
+    (panel.top() * scale).round() as i32
 }
 
 /// The tip's lettering, in logical pixels.
@@ -200,17 +275,29 @@ impl Renderer {
     /// A renderer drawing the panel in `skin`, its lettering printed at `lettering`'s sizes
     /// (and the tip's, a note's and the menus' with it).
     pub fn with_look(skin: Skin, lettering: Lettering, scale: f64, ui: f64) -> Self {
-        let fonts = Fonts::new();
-        let layout = Layout::measure_in(&fonts, lettering);
+        Self::with_pack(Look::of(skin), lettering, scale, ui)
+    }
+
+    /// A renderer drawing the panel in `look` (a skin pack's, or a built-in one).
+    pub fn with_pack(look: Look, lettering: Lettering, scale: f64, ui: f64) -> Self {
+        let skin = look.base;
+        let arrangement = Arc::clone(&look.arrangement);
+        let fonts = look
+            .fonts
+            .and_then(|(regular, bold)| Fonts::with(regular, bold).ok())
+            .unwrap_or_default();
+        let layout = Layout::measure_in(&fonts, lettering, &arrangement);
         let options = usvg::Options {
             fontdb: fonts.database(),
             font_family: FAMILY.into(),
             ..usvg::Options::default()
         };
-        let (w, h) = size_at(scale);
+        let (w, h) = size_for(scale, arrangement.panel);
         let empty = || Pixmap::new(w, h).expect("a frame of at least a pixel");
         let mut r = Self {
             fonts,
+            look,
+            arrangement,
             layout,
             options,
             scale,
@@ -248,7 +335,7 @@ impl Renderer {
         if scale == self.scale && ui == self.ui {
             return;
         }
-        let (w, h) = size_at(scale);
+        let (w, h) = size_for(scale, self.arrangement.panel);
         self.scale = scale;
         self.ui = ui;
         self.background = Pixmap::new(w, h).expect("a frame of at least a pixel");
@@ -277,6 +364,32 @@ impl Renderer {
         &self.layout
     }
 
+    /// The drawing's row its frame begins at ([`top_row`]): the frame's pixel `y` is the
+    /// drawing's `y + top_px()`.
+    pub fn top_px(&self) -> i32 {
+        top_row(self.scale, self.arrangement.panel)
+    }
+
+    /// The drawing's y at the frame's top (its first row's).
+    pub fn top(&self) -> f64 {
+        f64::from(self.top_px()) / self.scale
+    }
+
+    /// The frame's row the plug-in's strip begins at (the panel's foot).
+    pub fn strip_row(&self) -> i32 {
+        (art::PANEL_H * self.scale).round() as i32 - self.top_px()
+    }
+
+    /// Where everything on the panel is.
+    pub fn arrangement(&self) -> &Arrangement {
+        &self.arrangement
+    }
+
+    /// What the panel is drawn with.
+    pub fn look(&self) -> &Look {
+        &self.look
+    }
+
     pub fn fonts(&self) -> &Fonts {
         &self.fonts
     }
@@ -294,15 +407,52 @@ impl Renderer {
         let (w, h) = (self.background.width(), self.background.height());
         let view = [
             0.0,
-            0.0,
+            self.top(),
             f64::from(w) / self.scale,
             f64::from(h) / self.scale,
         ];
-        let doc = art::document(view, w, h, &art::background(&self.layout));
         self.background
             .fill(Color::from_rgba8(0x3b, 0x22, 0x13, 0xff));
-        if let Ok(tree) = usvg::Tree::from_str(&doc, &self.options) {
-            resvg::render(&tree, Transform::identity(), &mut self.background.as_mut());
+        let svg = |frame: &mut Pixmap, body: &str, options: &usvg::Options<'_>| {
+            let doc = art::document(view, w, h, body);
+            if let Ok(tree) = usvg::Tree::from_str(&doc, options) {
+                resvg::render(&tree, Transform::identity(), &mut frame.as_mut());
+            }
+        };
+        match (self.look.art.clone(), self.look.strip_art.clone()) {
+            (None, None) => svg(
+                &mut self.background,
+                &art::background(&self.layout, &self.arrangement),
+                &self.options,
+            ),
+            // A pack's drawings between the panel's and the strip's surfaces and their print
+            // (the strip's print laid again over its drawing).
+            (panel, strip) => {
+                svg(
+                    &mut self.background,
+                    &art::background_surfaces(&self.layout, &self.arrangement),
+                    &self.options,
+                );
+                let foot = self.strip_row();
+                if let Some(drawing) = panel {
+                    draw_pack_art(&mut self.background, self.scale, foot, &drawing);
+                }
+                if let Some(drawing) = &strip {
+                    draw_strip_art(&mut self.background, self.scale, foot, drawing);
+                }
+                svg(
+                    &mut self.background,
+                    &art::panel_print(&self.layout, &self.arrangement),
+                    &self.options,
+                );
+                if strip.is_some() {
+                    svg(
+                        &mut self.background,
+                        &art::strip_printed(&self.layout, &self.arrangement),
+                        &self.options,
+                    );
+                }
+            }
         }
         self.frame = self.background.clone();
     }
@@ -312,10 +462,21 @@ impl Renderer {
     fn draw_worn_background(&mut self) {
         let s = self.scale;
         let (w, h) = (self.background.width(), self.background.height());
-        let view = [0.0, 0.0, f64::from(w) / s, f64::from(h) / s];
+        // (The frame's top in the drawing, and the panel's size.)
+        let top = self.top();
+        let panel = self.arrangement.panel;
+        let foot = self.strip_row();
+        let view = [0.0, top, f64::from(w) / s, f64::from(h) / s];
         self.background
             .fill(Color::from_rgba8(0x1d, 0x1b, 0x1a, 0xff));
-        let pictures = self.pictures.get_or_insert_with(Pictures::load);
+        let (overrides, tint, turn) = (
+            &self.look.pictures,
+            self.look.face_tint,
+            self.look.caps_turn,
+        );
+        let pictures = self
+            .pictures
+            .get_or_insert_with(|| Pictures::load_with(overrides, tint, turn));
         let bg = &mut self.background;
         // The wood: its grain along the top strip and the strip's rail; each board its own band
         // of the picture, drawn out along the grain.
@@ -323,35 +484,55 @@ impl Renderer {
         let along = (art::W * s) as f32 / wood.width() as f32;
         let across = along / 2.2;
         for (y, hh, band) in [
-            (0.0, art::TOP, 40.0),
+            (panel.top(), panel.wood, 40.0),
             (art::PANEL_H, crate::strip::RAIL, 260.0),
         ] {
+            if hh <= 0.0 {
+                continue;
+            }
             fill(
                 bg,
                 wood,
-                (0.0, y * s, art::W * s, hh * s),
+                (0.0, (y - top) * s, art::W * s, hh * s),
                 None,
-                Transform::from_row(along, 0.0, 0.0, across, 0.0, (y * s) as f32 - band * across),
+                Transform::from_row(
+                    along,
+                    0.0,
+                    0.0,
+                    across,
+                    0.0,
+                    ((y - top) * s) as f32 - band * across,
+                ),
             );
         }
         // The faces: the picture 640 units across, mirrored tile to tile.
         let face = &pictures.face;
         let k = (640.0 * s) as f32 / face.width() as f32;
         let at = |x: f64, y: f64| {
-            Transform::from_scale(k, k).post_translate((x * s) as f32, (y * s) as f32)
+            Transform::from_scale(k, k).post_translate((x * s) as f32, ((y - top) * s) as f32)
         };
         fill(
             bg,
             face,
-            (art::COL * s, art::TOP * s, art::PW * s, art::PH * s),
+            (
+                art::COL * s,
+                (panel.face_top() - top) * s,
+                art::PW * s,
+                panel.face * s,
+            ),
             None,
-            at(art::COL, art::TOP),
+            at(art::COL, panel.face_top()),
         );
         let strip_top = art::PANEL_H + crate::strip::RAIL;
         fill(
             bg,
             face,
-            (0.0, strip_top * s, art::W * s, (art::H - strip_top) * s),
+            (
+                0.0,
+                (strip_top - top) * s,
+                art::W * s,
+                (art::H - strip_top) * s,
+            ),
             None,
             at(320.0, strip_top),
         );
@@ -362,10 +543,17 @@ impl Renderer {
                 resvg::render(&tree, Transform::identity(), &mut frame.as_mut());
             }
         };
-        svg_over(bg, &art::worn_overlay());
+        svg_over(bg, &art::worn_overlay(&self.arrangement));
+        // A skin pack's drawing, over the surfaces and under the print.
+        if let Some(drawing) = &self.look.art {
+            draw_pack_art(bg, s, foot, drawing);
+        }
+        if let Some(drawing) = &self.look.strip_art {
+            draw_strip_art(bg, s, foot, drawing);
+        }
         // The print, worn into the face: its texture showing through it a little.
         if let Some(mut print) = Pixmap::new(w, h) {
-            svg_over(&mut print, &art::printed(&self.layout));
+            svg_over(&mut print, &art::printed(&self.layout, &self.arrangement));
             worn_into(&mut print, bg);
             bg.draw_pixmap(
                 0,
@@ -380,33 +568,33 @@ impl Renderer {
             );
         }
         // The screws, each turned as it was last tightened, and the jacks.
-        for (i, (x, y, r)) in art::screws().into_iter().enumerate() {
+        for (i, (x, y, r)) in art::screws(&self.arrangement).into_iter().enumerate() {
             let d = (2.0 * r * s).round().max(1.0) as u32;
             let deg = (i as f32 * 47.0) % 180.0;
             put_picture(
                 bg,
                 pictures.part(Part::Screw, d, d),
-                (x * s, y * s),
+                (x * s, (y - top) * s),
                 deg,
                 (false, false),
                 (1.0, 1.0),
             );
         }
-        for (x, y, r, nut) in art::jacks() {
+        for (x, y, r, nut) in art::jacks(&self.arrangement) {
             let d = (2.0 * if nut { r + 6.0 } else { r * 1.12 } * s)
                 .round()
                 .max(1.0) as u32;
             put_picture(
                 bg,
                 pictures.part(Part::Jack, d, d),
-                (x * s, y * s),
+                (x * s, (y - top) * s),
                 20.0,
                 (false, false),
                 (1.0, 1.0),
             );
         }
         // The lamp's light over all of it.
-        lamp(bg, s);
+        lamp(bg, s, panel.drawing_h());
         self.frame = self.background.clone();
     }
 
@@ -419,7 +607,9 @@ impl Renderer {
         } else {
             art::control
         };
-        let mut out: Vec<Layer> = CONTROLS
+        let a = &self.arrangement;
+        let mut out: Vec<Layer> = a
+            .controls
             .iter()
             .zip(scene.values)
             .map(|(c, v)| {
@@ -433,6 +623,24 @@ impl Renderer {
                     _ => 0.0,
                 };
                 let mut layer = control(c, v, midi);
+                // A pack's rocker drawn in its two states: its picture on or off, neither
+                // mirrored, no paddle lit or shadowed by the plug-in.
+                if worn
+                    && let Some(sp) = layer.sprites.first_mut()
+                    && let Some(slot) = crate::skin::on_slot(sp.part)
+                    && self.look.pictures.contains_key(slot)
+                {
+                    if v >= 0.5 {
+                        sp.part = match sp.part {
+                            Part::RockerBlue => Part::RockerBlueOn,
+                            Part::RockerOrange => Part::RockerOrangeOn,
+                            _ => Part::RockerIvoryOn,
+                        };
+                    }
+                    sp.flip = (false, false);
+                    layer.paddle = None;
+                    layer.body = String::new();
+                }
                 // FEEDBACK while EXTERNAL INPUT is closed: dimmed as the parts with no
                 // parameter are, still operable; DETUNE in SCATTER and VOICES where it does
                 // nothing: dimmed so, and not operable (the editor's `operable`).
@@ -453,33 +661,42 @@ impl Renderer {
                 layer
             })
             .collect();
+        // The fixtures, each drawn about the official layout's place and moved to this one's.
+        let at = |(x, y): (f64, f64)| (art::COL + x, art::TOP + y);
+        let moved = |mut l: Layer, to: (f64, f64)| {
+            l.origin = to;
+            l
+        };
         if worn {
-            out.push(art::power_worn(scene.power));
-            out.push(art::lamp_worn(scene.power));
-            out.push(art::overload_worn(scene.overload));
-            out.extend(crate::ultra::ultra_worn(&scene.opening));
+            out.push(moved(art::power_worn(scene.power), at(a.power)));
+            out.push(moved(art::lamp_worn(scene.power), at(a.lamp)));
+            out.push(moved(art::overload_worn(scene.overload), at(a.overload)));
+            out.extend(crate::ultra::ultra_worn(&scene.opening).map(|l| moved(l, a.ultra_at())));
         } else {
-            out.push(art::power(scene.power));
-            out.push(art::lamp(scene.power));
-            out.push(art::overload(scene.overload));
-            out.push(crate::ultra::ultra(&scene.opening));
+            out.push(moved(art::power(scene.power), at(a.power)));
+            out.push(moved(art::lamp(scene.power), at(a.lamp)));
+            out.push(moved(art::overload(scene.overload), at(a.overload)));
+            out.push(moved(crate::ultra::ultra(&scene.opening), a.ultra_at()));
             // (The drawn skin's opening is one layer: an empty second keeps the count.)
             out.push(Layer::default());
         }
-        out.push(if worn {
-            art::plate_worn()
-        } else {
-            art::plate()
-        });
+        out.push(moved(
+            if worn {
+                art::plate_worn()
+            } else {
+                art::plate()
+            },
+            a.plate_at(),
+        ));
         // (Always a layer, none in a plug-in, so that the count stays.)
         out.push(
             scene
                 .tempo
                 .as_deref()
-                .map(art::tempo_screen)
+                .map(|t| art::tempo_screen(t, a))
                 .unwrap_or_default(),
         );
-        if let Some(c) = scene.learning.and_then(|i| CONTROLS.get(i)) {
+        if let Some(c) = scene.learning.and_then(|i| a.controls.get(i)) {
             out.push(learn::ring(c));
         }
         if let Some((t, x, y)) = &scene.tip {
@@ -503,17 +720,19 @@ impl Renderer {
         TIP_TEXT * self.layout.lettering().text() * self.ui / self.scale
     }
 
-    /// Control `i` at `v` (normalized) as this skin draws it, alone, for a frame drawn apart (the
+    /// Control `i` at `v` (normalized) as this look draws it, alone, for a frame drawn apart (the
     /// arpeggiator's drawer, `crate::strip::arp`): its pixels and where their top left corner
-    /// is in this frame's pixels (the drawing's).
+    /// is in the drawing's pixels (not this frame's, which a taller pack's panel begins above
+    /// the drawing's top).
     pub fn paint_control(&mut self, i: usize, v: f64) -> Option<(i32, i32, Pixmap)> {
-        let c = CONTROLS.get(i)?;
+        let c = *self.arrangement.controls.get(i)?;
         let layer = if self.skin == Skin::Worn {
-            art::control_worn(c, v, 0.0)
+            art::control_worn(&c, v, 0.0)
         } else {
-            art::control(c, v, 0.0)
+            art::control(&c, v, 0.0)
         };
-        self.render_layer(&layer)
+        let top = self.top_px();
+        self.render_layer(&layer).map(|(x, y, p)| (x, y + top, p))
     }
 
     /// A layer's pixels, aligned to the frame's: their place and their image (its body, its
@@ -552,7 +771,14 @@ impl Renderer {
             if let Some((_, still)) = &self.screens {
                 put(&mut pixmap, still, (0, 0), 1.0);
             }
-            crate::strip::screen_text(&mut pixmap, s, window, &screen.text);
+            // (The built-in glass and lamp: a skin pack does not dress the TEMPO screen.)
+            crate::strip::screen_text(
+                &mut pixmap,
+                s,
+                window,
+                &screen.text,
+                &crate::strip::Lamp::ORANGE,
+            );
         }
         // Each picture placed (resampled once; kept if it is placed so again), then put with
         // its opacity: drawn so whether it was kept or not.
@@ -624,8 +850,10 @@ impl Renderer {
                 None,
             );
         }
-        // Each overlay from its picture, drawn once in the layer's place, with its blend.
-        for o in &layer.overlays {
+        // Each overlay from its picture, drawn once in the layer's place, with its blend (a
+        // knob's lamp and cap lights not, where the look's caps turn: its picture is lit).
+        let skip = layer.round && self.look.caps_turn;
+        for o in layer.overlays.iter().filter(|_| !skip) {
             let place = [x0 as i32, y0 as i32, w as i32, h as i32];
             let made = self
                 .overlays
@@ -674,7 +902,13 @@ impl Renderer {
             d.draw(&mut pixmap, origin, s as f32);
         }
         if let Some(wheel) = layer.wheel {
-            draw_wheel(&mut pixmap, (ox * s - x0, oy * s - y0), s, wheel);
+            // (A look's colour as written, sRGB: the wheel is shaded in linear light.)
+            let albedo = self
+                .look
+                .colours
+                .wheel
+                .map(|(r, g, b)| [r, g, b].map(|v| (f64::from(v) / 255.0).powf(2.2)));
+            draw_wheel(&mut pixmap, (ox * s - x0, oy * s - y0), s, wheel, albedo);
         }
         if let Some(paddle) = layer.paddle {
             light_paddle(&mut pixmap, (ox * s - x0, oy * s - y0), s, paddle);
@@ -690,7 +924,7 @@ impl Renderer {
             let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
             resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
         }
-        Some((x0 as i32, y0 as i32, pixmap))
+        Some((x0 as i32, y0 as i32 - self.top_px(), pixmap))
     }
 
     /// The picture placed as `key` says, kept or placed now (and kept): its index in
@@ -700,7 +934,14 @@ impl Renderer {
             self.placed[i].used = self.renders;
             return Some(i);
         }
-        let pictures = self.pictures.get_or_insert_with(Pictures::load);
+        let (overrides, tint, turn) = (
+            &self.look.pictures,
+            self.look.face_tint,
+            self.look.caps_turn,
+        );
+        let pictures = self
+            .pictures
+            .get_or_insert_with(|| Pictures::load_with(overrides, tint, turn));
         let picture = pictures.part(key.part, key.size.0, key.size.1);
         let at = (f64::from_bits(key.at.0), f64::from_bits(key.at.1));
         let (x, y, pixels) = place_picture(
@@ -911,13 +1152,19 @@ const FIXED: usize = 7;
 /// near it (the face's sheen, catching the specks of its texture), falling off towards the far
 /// corner. Each pixel's light multiplied (`LAMP`: at the lamp, far from it, and how far its
 /// light reaches across and down, as shares of the drawing).
-fn lamp(frame: &mut Pixmap, s: f64) {
-    lamp_at(frame, s, (0, 0));
+fn lamp(frame: &mut Pixmap, s: f64, height: f64) {
+    lamp_in(frame, s, (0, 0), height);
 }
 
-/// The lamp's light over `frame`, a part of the drawing whose top left pixel is the drawing's
-/// pixel `at` (the arpeggiator's drawer's plate: `crate::strip::arp`).
+/// The lamp's light over `frame`, a part of the official panel's drawing whose top left pixel is
+/// the drawing's pixel `at` (the drawers dropped from the rail: `crate::strip::lower`).
 pub(crate) fn lamp_at(frame: &mut Pixmap, s: f64, at: (i32, i32)) {
+    lamp_in(frame, s, at, art::H);
+}
+
+/// The lamp's light over `frame`, its top left pixel `at` from the top left of a drawing
+/// `height` tall (a skin pack's panel may be taller than the official one).
+fn lamp_in(frame: &mut Pixmap, s: f64, at: (i32, i32), height: f64) {
     const LAMP: (f64, f64, f64, f64) = (1.26, 0.84, 0.55, 0.9);
     let (w, h) = (frame.width() as usize, frame.height() as usize);
     let across: Vec<f64> = (0..w)
@@ -928,7 +1175,7 @@ pub(crate) fn lamp_at(frame: &mut Pixmap, s: f64, at: (i32, i32)) {
         .collect();
     let down: Vec<f64> = (0..h)
         .map(|y| {
-            let v = (y as f64 + f64::from(at.1) + 0.5) / s / art::H;
+            let v = (y as f64 + f64::from(at.1) + 0.5) / s / height;
             (-(v / LAMP.3).powi(2)).exp()
         })
         .collect();
@@ -1059,7 +1306,13 @@ fn light_paddle(frame: &mut Pixmap, at: (f64, f64), s: f64, p: art::PaddleArt) {
 /// (above, and up and to the left of, the panel): its ridges every 8 degrees rolling with it,
 /// each lit on its flank towards the lamp; its rim rounded over at its sides; its ends going
 /// down into the slot's shade; PITCH's line or MOD.'s dot rolling with it.
-fn draw_wheel(frame: &mut Pixmap, at: (f64, f64), s: f64, wheel: art::WheelArt) {
+fn draw_wheel(
+    frame: &mut Pixmap,
+    at: (f64, f64),
+    s: f64,
+    wheel: art::WheelArt,
+    albedo: Option<[f64; 3]>,
+) {
     let k = art::WHEEL_SCALE;
     let (hw, hh, r, corner) = (24.0 * k, 67.0 * k, 84.0 * k, 10.0 * k);
     let unit = |(x, y, z): (f64, f64, f64)| {
@@ -1067,7 +1320,8 @@ fn draw_wheel(frame: &mut Pixmap, at: (f64, f64), s: f64, wheel: art::WheelArt) 
         (x / n, y / n, z / n)
     };
     let (light, half) = lamp_vectors();
-    let albedo = [0.80, 0.765, 0.67];
+    // Its colour: a look's, else the built-in cream.
+    let albedo = albedo.unwrap_or([0.80, 0.765, 0.67]);
     let (fw, fh) = (frame.width() as i32, frame.height() as i32);
     let x0 = ((at.0 - hw * s).floor() as i32).max(0);
     let x1 = ((at.0 + hw * s).ceil() as i32).min(fw);
@@ -1537,15 +1791,16 @@ mod tests {
     fn the_tempo_screen_mirrors_the_name_plate() {
         let (x, y, w, h) = art::TEMPO_SCREEN;
         let o = crate::strip::NAME_SURROUND;
+        let official = Arrangement::official();
+        assert_eq!(art::tempo_window(official.plate_at()), art::TEMPO_SCREEN);
+        let tempo_hit = |x, y| art::tempo_hit(&official, x, y);
         assert_eq!(
             (x - o, y - o),
             (art::W - art::PLATE_X - art::PLATE_W, art::PLATE_Y)
         );
         assert_eq!((w + 2.0 * o, h + 2.0 * o), (art::PLATE_W, art::PLATE_H));
-        assert!(
-            art::tempo_hit(x + w / 2.0, y + h / 2.0) && art::tempo_hit(x - o + 0.5, y - o + 0.5)
-        );
-        assert!(!art::tempo_hit(x - o - 1.0, y) && !art::tempo_hit(x, y + h + o + 1.0));
+        assert!(tempo_hit(x + w / 2.0, y + h / 2.0) && tempo_hit(x - o + 0.5, y - o + 0.5));
+        assert!(!tempo_hit(x - o - 1.0, y) && !tempo_hit(x, y + h + o + 1.0));
         assert!(y + h + o < art::TOP, "on the wood");
     }
 

@@ -638,6 +638,74 @@ pub const CONTROLS: [Control; 59] = [
     arp_knob("arp_swing", "SWING", 3, Dial::Percent),
 ];
 
+/// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made
+/// for one CA-72 works on later ones: the revision of the panel's controls this build has, and
+/// each change since the first. A layout says which revision it was made for (`controls`):
+/// a control added since is placed by the plug-in, a renamed one found by its old name, a
+/// retired one passed over, and a control whose kind changed drawn in its own kind's look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ControlSet {
+    pub revision: u32,
+    /// Controls added after the first revision: each with the revision it came in.
+    pub added: &'static [(&'static str, u32)],
+    /// Controls renamed: the old name, the new, and the revision of the change.
+    pub renamed: &'static [(&'static str, &'static str, u32)],
+    /// Controls removed: the name, and the revision it went in.
+    pub retired: &'static [(&'static str, u32)],
+    /// Controls whose kind changed (a switch become a toggle): the name, and the revision.
+    pub kind_changed: &'static [(&'static str, u32)],
+}
+
+/// This build's panel controls: the first revision, nothing changed yet. Never edit an entry
+/// once released: add to it (and raise `revision`) as controls come, go, or change.
+pub const CONTROL_SET: ControlSet = ControlSet {
+    revision: 1,
+    added: &[],
+    renamed: &[],
+    retired: &[],
+    kind_changed: &[],
+};
+
+impl ControlSet {
+    /// The revision a control came in (1 for the first's).
+    pub fn since(&self, param: &str) -> u32 {
+        self.added
+            .iter()
+            .find(|(p, _)| *p == param)
+            .map_or(1, |(_, r)| *r)
+    }
+
+    /// A name a layout of revision `made_for` uses, as this build knows it: renamed since
+    /// (`Some(new)`), or the same.
+    pub fn current<'a>(&self, name: &'a str, made_for: u32) -> &'a str
+    where
+        'static: 'a,
+    {
+        let mut name = name;
+        // (A chain of renames followed in order.)
+        for (old, new, at) in self.renamed {
+            if *old == name && *at > made_for {
+                name = new;
+            }
+        }
+        name
+    }
+
+    /// Whether `param` was retired after revision `made_for`.
+    pub fn retired_since(&self, param: &str, made_for: u32) -> bool {
+        self.retired
+            .iter()
+            .any(|(p, at)| *p == param && *at > made_for)
+    }
+
+    /// Whether `param`'s kind changed after revision `made_for`.
+    pub fn kind_changed_since(&self, param: &str, made_for: u32) -> bool {
+        self.kind_changed
+            .iter()
+            .any(|(p, at)| *p == param && *at > made_for)
+    }
+}
+
 /// The index of the control operating `param`.
 pub fn index(param: &str) -> Option<usize> {
     CONTROLS.iter().position(|c| c.param == param)

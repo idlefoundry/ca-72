@@ -19,7 +19,7 @@ use resvg::usvg;
 
 use super::lower::{self, LitTabs, Look};
 pub use super::lower::{LEFT, RIGHT, SHADOW, TOP, top_px};
-use super::worn::{Reading, copy, meets, readout_patch, svg_over, union, within};
+use super::worn::{Lamp, Reading, copy, meets, readout_patch, svg_over, union, within};
 use super::{READOUT, RECESS_PAD, UNIT_READOUT};
 use crate::art::{self, Lettering};
 use crate::fonts::FAMILY;
@@ -516,7 +516,15 @@ impl ArpRenderer {
                 .is_none_or(|d| d.text != *text || d.lit != *lit)
             {
                 let (x, y, w, h) = readout(i);
-                self.readouts[i] = readout_patch(&self.options, s, (x, y - oy, w, h), text, *lit);
+                // (The built-in lamp's: a skin pack does not dress the drawer, R-SKIN-PACKS.)
+                self.readouts[i] = readout_patch(
+                    &self.options,
+                    s,
+                    (x, y - oy, w, h),
+                    text,
+                    *lit,
+                    &Lamp::ORANGE,
+                );
             }
             if let Some(d) = &self.readouts[i] {
                 crate::render::put(&mut self.frame, &d.patch, (d.left, d.top), 1.0);

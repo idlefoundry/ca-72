@@ -22,7 +22,7 @@ use crate::presets::{BarScene, BarTarget};
 use crate::svg::{N, Svg, colour, put};
 
 pub use worn::StripRenderer;
-pub(crate) use worn::{pixel_screen, screen_still, screen_text};
+pub(crate) use worn::{Lamp, pixel_screen, screen_still, screen_text};
 
 // ---- The layout.
 

@@ -3,12 +3,14 @@
 //! window and no plugin: the editor shows its frames and turns pointer gestures into
 //! parameter changes with it.
 
+pub mod arrangement;
 pub mod art;
 pub mod controls;
 pub mod fonts;
 pub mod interact;
 pub mod keyboard;
 pub mod learn;
+pub mod look;
 pub mod presets;
 pub mod render;
 pub mod skin;
@@ -18,9 +20,11 @@ pub mod ultra;
 pub mod value_entry;
 pub mod whats_new;
 
+pub use arrangement::Arrangement;
 pub use art::{H, Layout, Lettering, PLATE_NAME, W};
 pub use controls::{CONTROLS, Control, Kind};
 pub use interact::Target;
+pub use look::Look;
 pub use render::{Renderer, Scene};
 /// The frames' type.
 pub use resvg::tiny_skia::Pixmap;

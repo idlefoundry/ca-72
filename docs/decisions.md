@@ -7378,6 +7378,581 @@ diagnostic and 5 without. Then `cargo test --workspace --features
 ca72-plugin/standalone-production` as CI runs it; and the editor's tests and clippy on the Mac
 (see the PR).
 
+## R-SKIN-PACKS. Skin packs: the looks as artwork and data, in one open format
+
+**The owner's request, 2026-10-16** (a written brief). A skin system for Idle Foundry's
+plug-ins: the functionality, the renderer and the code that loads skins open source under the
+existing licences, and all released artwork free and included. New artwork may carry its
+creator's licence, open or proprietary and paid, with price and licence independent. Skins
+are non-executable artwork and declarative appearance data; behaviour, DSP and control logic
+stay in the open-source application; scripts, custom widget code or copied GPL material are
+flagged for separate review. Each pack's assets, licence, credits and third-party notices are
+identifiable; the repository's GPL is not applied to a pack, nor a pack's terms to the plug-in.
+No GPL artwork copied into a proprietary pack without additional permission; no fonts, stock
+assets or third-party branding unless their licences permit it. One open, documented format
+for official and community skins; no store login or network check to use an installed skin.
+Packs validated as untrusted input; a missing or incompatible pack falls back safely without
+affecting sound, presets, automation or session recall. Licence and provenance fields for a
+future marketplace's review; seller declarations cover the right to distribute and authorize
+customer licensing, and are not clearance. A local prototype and tests only: no release, no
+checkout, no seller agreement, no licence changed; choices affecting the separation of code
+and artwork reported first.
+
+**Owner decisions, 2026-10-16**, of the agent's questions:
+1. A pack may change the **layout and the legends**, not only the pictures ("This allows
+   people to be creative. We will publish this ability along with agent skills so people can
+   use Claude Code or ChatGPT to create new layouts"), within limits.
+2. **SVG allowed**, as a strict subset, its cost checked ("Is there a check we could run around
+   this?": counted, then drawn as a test against a time limit).
+3. **Fonts allowed**, sorted by a scan of what each says of its licence (pass, reject or
+   review), never cleared by it.
+4. The **format's documentation and a starter are CC0**; the loader and the checks stay GPL.
+5. The **official looks become packs** in the same format, built in, under the GPL.
+6. A **crate in this repository** first, with nothing particular to the CA-72 in it, to move to
+   plugin-kit once agreed; packs are **folders** (no archive to unpack).
+7. The agents' **starting point is a CC0 starter** with a layout of its own; the official
+   layout stays GPL.
+8. The **official panel converted to layout data** now: "We're not going to release it without
+   thorough testing, so it is effectively c. Be sure to benchmark it so that we know if there are
+   performance costs in doing so."
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **`crates/skin-pack`** reads a pack's folder within limits (no link followed, no path out of
+  it, only `.toml`, `.txt`, `.md`, `.png`, `.svg`, `.otf`, `.ttf`, code and archives refused by
+  their first bytes whatever their names), its manifest (`skin.toml`: id, version, plug-in,
+  licence as SPDX or `LicenseRef-`, licence texts, creators, each asset's provenance with an
+  optional SHA-256, notices, a seller's declarations), PNG decoded whole within its size, SVG
+  read strictly (no DTD, an element allowlist, references inside the drawing only, `use`
+  counted as all it repeats, a test drawing timed) and fonts (one face a file, embedding
+  permission, the licence its tables name). Its findings are rejected, review or note; nothing
+  is ever reported as cleared. A price in a manifest is rejected: it is the store's.
+- **The layout's data, `packs/official/layout.toml`.** The panel's controls (place, a knob's
+  size, a switch's size, colour and "on" end, a toggle's orientation), rules, titles, legends
+  (with their places in the large lettering), the fixtures' places (POWER, the lamps, QUALITY's
+  opening, the plate, PHONES, the strip's screws). `art::panel`, the worn overlay, the screws,
+  the jacks, hit-testing, the editor's drags and tips and the fixtures' layers all take places
+  from it (`crate::arrangement`). What a control is and does, its dial's and its legends' values,
+  and the left hand's and the strip's controls stay the plug-in's: they state real values or
+  are its own. `CONTROLS` keeps the official places too; a test holds the two equal.
+- **The renderer takes a `Look`** (`crate::look`): the base (classic or realistic), the layout,
+  pictures by slot (the 27 worn pictures, PNG or SVG drawn at the built-in size), a drawing over
+  the panel's surfaces and under its print, a typeface (used only if it prints and fits every
+  legend; else URW Gothic and review), the face's tint (`face_tint`, which the official
+  REALISTIC sets: it had been in code). A pack's fonts are kept for the process's life (their
+  faces borrow them), each distinct font once.
+- **The editor** lists packs installed in the shared folder's `Skins` under LOOK; a pack that
+  cannot be used is listed so, its reasons in the log. The choice is the computer's
+  (`settings.toml`'s `skin_pack`, with `skin` its base, which an older CA-72 reads); a pack
+  missing or refused draws its base and keeps the setting. Nothing a look does reaches a
+  parameter, a preset or the session.
+- **Not in this version:** the strip's and keyboard's pictures and layout, the classic look's
+  colours (but by a drawing), animation, archives, packs shared between plug-ins, checking a
+  pack off the editor's thread (packs are checked as the editor opens with one chosen, and as
+  the settings' menu opens).
+
+**What bears on the separation of code and artwork** (each for the owner's attention; none
+changes a licence):
+- The official layout's data is GPL and built into the plug-in, as the drawing code it replaced
+  was. A pack made from it is under the GPL; the starter (CC0) has its own.
+- The repository now holds CC0 files (`docs/skin-packs.md`, `docs/skin-packs/starter/`), each
+  saying so. `CONTRIBUTING.md` still says every contribution is GPL: a contribution to those
+  files would need its own terms there. Left for the owner.
+- Packs are loaded at run time from the user's folder and are never in the installers; the
+  plug-in and a pack are separate works, each under its own terms. Counsel should confirm this
+  reading before any pack is sold.
+- The official pictures were made with an image generator. The checks put generated assets to
+  review (whether they are protected, and so licensable, differs between countries); the
+  official REALISTIC pack's 27 reviews are exactly these.
+- URW Gothic's embedding permission is "preview and print": the scan puts it to review in a
+  pack. The plug-in's own use of it (its AGPL with the font exception, built in) is unchanged.
+
+**Evidence (the Mac, an M4 Pro, 2026-10-16; nothing committed, pushed or released):**
+- **The converted panel is the panel.** Before any change, `examples/golden.rs` wrote 32 frames
+  from `main` (both looks, both letterings, 0.44 and 1.0 pixels a unit, four scenes drawn in
+  turn so that partial redraws are compared too; written twice, identical). After the conversion
+  every one is identical to the pixel. `the_official_packs_draw_as_the_built_in_looks`: CLASSIC
+  and REALISTIC, read back as packs through the checks, draw byte for byte as the built-in looks.
+- **Its cost.** `examples/look_bench.rs` and `examples/frames.rs`, `main`'s build and this one
+  run in turn, three rounds each, at `nice 19` (the owner's host was open), medians of medians:
+  every built-in look's opening, first frame, knob, switch and POWER within 2 % of `main`'s, and
+  no frame of `frames` slower (CUTOFF 0.30 and 1.20 ms, DRIVE 1.10 and 3.70 to 3.80 ms, at 0.44
+  and 0.87). The layout costs nothing measurable: it is read once a process.
+- **A pack's cost.** Reading and checking a pack: the starter 12 ms (its drawing drawn as a test
+  at 3000 pixels), the official REALISTIC as a folder 59 ms (its 27 pictures decoded). Opening the
+  starter's look: 30 ms at 0.44 and 41 ms at 0.87 (CLASSIC's 29 and 31: its drawing, 10 ms at
+  the larger size); its frames as CLASSIC's. REALISTIC as a pack opens in 134 and 458 ms (the
+  built-in's 165 and 489: its pictures were decoded when it was read).
+- **Tests.** `cargo test -p skin-pack -p ca72-panel -p ca72-plugin --features
+  ca72-plugin/standalone-production --no-fail-fast`: 392 passed, none failed (the pack crate's
+  38: paths out of the pack, links, code by its first bytes, sizes, names differing in case,
+  SVG's code, animation, text, outside references, DTD and entities, `use` bombs, costs and the
+  timed test, PNG headers and truncation, fonts, licences, price, declarations, provenance,
+  hashes, the official artwork copied; the panel's: the official layout, layouts refused, the
+  official packs, the starter's places found by clicks, pictures by slot, a typeface that
+  cannot print a legend; the plug-in's: the settings' key, a pack chosen, no parameter set, the
+  fallback, `settings.toml`'s keys). Clippy with `-D warnings` on the three crates; `cargo fmt`;
+  `scripts/notices.py` regenerated (sha2 and six RustCrypto crates, MIT or Apache-2.0) and
+  `--check` passes.
+- **Not run:** the whole workspace's suite to its end. `ca72-lab`'s `vco_electrical` fails two
+  tests on this Mac (ngspice 47 from Homebrew: "Timestep too small ... node hold") on `main`
+  as on this branch, and its circuit tests wrote 5.5 GB into `target/ca72-lab`, which filled the
+  disk; they were deleted, and the crates this work does not touch were not run again. CI
+  (Linux with ngspice, Windows) has not run this branch. Not tried in a host.
+
+**Owner decisions on the marketplace, 2026-10-16.** Regular users and Idle Foundry both make
+skins and sell them on a marketplace Idle Foundry hosts. Bundles (one purchase, packs for
+several plug-ins) are the marketplace's, not the format's: a pack stays for one plug-in.
+Idle Foundry is the seller of record: sellers license Idle Foundry, which licenses buyers (the
+declarations' "authorizes customer licensing"). A buyer gets a pack's updates.
+
+**Pack files and signatures, 2026-10-16.** The owner, of the agent's recommendations for the
+marketplace (a single-file format, offline signatures, no copy protection): "Yes: build the
+single-file pack format and offline signature checking next, locally, with tests."
+
+**Agent decisions** (not separately approved):
+- **A pack file is a ZIP** (`skin_pack::archive`): the folder's files at its top, or in one
+  folder at its top; read in memory within the folder's limits; only stored and deflated
+  entries; encrypted entries and links refused; each entry read no further than its limit,
+  whatever its header says; too many entries refused before any is read. `zip` 8 with its
+  deflate alone (MIT; `flate2`, already built in). Its extension, `.ifskin`, the owner's
+  (kept: below).
+- **Signatures** (`skin_pack::signature`): Ed25519 (`ed25519-dalek` 2, BSD-3-Clause, with its
+  RustCrypto crates). `signature.toml` signs its key's id, the pack's id and version, the
+  publisher (`marketplace` or `first-party`), the date, and a digest of every other file (each
+  path with its SHA-256). Checked offline against `look::TRUSTED_KEYS`, which is empty: there is
+  no marketplace, and its keys are its owner's to make (`pack_keygen`), the secret never in a
+  repository. Unsigned packs load; a key not known counts as no signature (an older plug-in, a
+  newer key); a signature that does not match refuses the pack. Only a first-party signature
+  allows the `com.idlefoundry.*` prefix; the built-in looks' ids are never an installed pack's.
+- **Updates**: of the same id installed more than once, a signed pack before an unsigned one,
+  then the newer version. An update is added beside its pack; the setting names the id and
+  follows it. The plug-in never asks the network whether there is one.
+- **Not copy protection.** A signature proves provenance and integrity; a pack works however it
+  was obtained (the plug-in is GPL: such a check could lawfully be removed from it).
+- Tools: `pack_keygen`, `pack_sign`, `pack_archive` (`skin-pack`'s examples); `check_pack`
+  reads pack files and takes `--trust <id>:<key>`.
+
+**Evidence (the Mac, 2026-10-16):** `skin-pack`'s tests (archive: a pack file read as its
+folder and written the same, paths out of the pack, a ZIP bomb stopped at its limit, too many
+entries, not a ZIP; signatures: a signed pack known by its publisher, a changed file, version
+or claimed publisher refused, another key not trusted, an unknown key as unsigned) and
+`ca72-panel`'s (a signed pack file loads as published, and as unsigned without its key; a pack
+changed after signing refused; the makers' prefix only with a first-party signature, the
+built-in ids never; an update replaces its pack and an unsigned copy never does). The tools run
+once end to end in a scratch folder (a key made, its secret file `-rw-------`, the starter
+signed, written as a pack file and checked with and without the key), the test key deleted.
+The archive's own test found a bug as it was written: an archive whose every entry began `../`
+(or `/`) had that taken as its one folder and stripped, and its names passed; only a folder a
+pack could hold is stripped now. Also the earlier review's last finding: an id in a namespace
+(`xml:id`) is refused, as usvg reads only the plain `id`.
+
+**Owner decisions, 2026-10-16, later.** The pack file's extension stays `.ifskin`.
+`CONTRIBUTING.md` says that contributions to the skin packs' format and examples
+(`docs/skin-packs.md`, `docs/skin-packs/`) are CC0, as those files are, and the rest GPL. Packs
+ship before the marketplace: a CA-72 release may carry the format with community packs, unsigned
+and installed by hand, while the marketplace is designed.
+
+**Stress packs, 2026-10-16.** The owner agreed to test the system with packs that each push one
+part of the format to its limits, the showcase pack after: "Let's make the stress testing packs
+first. And then once we've ironed out all the issues, if there are any, we'll make the showcase
+pack after that." And to the fonts BABEL needed: "you have my okay to download whatever you need
+for this test."
+
+**What was made** (`crates/ca72-panel/packs/stress.rs`, made by code, CC0; `tests/stress.rs`
+holds each to its outcome; `examples/stress_packs.rs` writes them out, checks and measures them):
+EDGE (every control moved, click areas touching, sizes at their bounds, fixtures moved, 300
+rules, 300 legends, 16 titles), HEAVY (a drawing at SVG's limits, pictures at the pixel cap),
+EVERY PICTURE (the 27 pictures as drawings, some at other proportions, some see-through),
+MINIMAL (a manifest alone; a layout with no print; realistic with no pictures), LIFECYCLE (one
+pack as versions, folder and pack file, signed and not, cut short, changed after signing) and
+BABEL (a wide typeface; Greek, Arabic, Chinese and an emoji in the built-in one; right-to-left
+legends in a typeface that has them; a typeface lacking a legend's glyphs). BABEL carries two
+OFL fonts from Google Fonts' repository (`tests/fonts`, test files only, never in the plug-in).
+HOSTILE: more malicious pack files (a link entry, names differing in case) and fuzzing
+(`skin-pack/tests/fuzz.rs`, `ca72-panel/tests/fuzz_layout.rs`): pack files mutated as bytes and
+inside, drawings, manifests, licences, fonts and layouts; 50,000 cases a reader, none panicked
+or hung.
+
+**What they found, and what changed** (agent decisions, not separately approved):
+- **A drawing's counts did not bound its cost.** HEAVY, within every count, took 9.8 s to draw
+  (340 long paths crossing the panel); the timed test refused it, but the abandoned draw kept a
+  core busy, and while it ran other packs' drawings were refused. The check now estimates the
+  work, in pixel-equivalents at the size the drawing is used (an edge's pixel row 100, a painted
+  pixel 1, a layer's 6, a filter primitive's region 10: measured on synthetic drawings, about
+  1.6 ms a million on the M4 Pro) and refuses past 60 million (about 100 ms here, half a second
+  on a machine five times slower). The panel's drawing is costed 3000 pixels across, a picture at
+  its slot's size. The timed test is a backstop; another drawing's runaway no longer refuses a
+  pack (its test is skipped, with a note). Pattern tiles' elements are counted too.
+- **Memory.** HEAVY's look held its 27 pictures decoded (200 MB) and the renderer a second copy,
+  and the editor keeps every installed pack's look for its menu. A look now keeps its pictures
+  as the pack holds them (PNG bytes, drawings), decoded by a renderer as it first needs them;
+  the pixel cap is 16 million (it was 48: about three times the official set now), and pictures
+  embedded in drawings count with them (they had escaped it). HEAVY: 400 MB to 63 MB.
+- **POWER could not be near an edge:** it was checked as a circle 64 across; now by its switch.
+- **A drawing given as a picture at other proportions was stretched without a note** (a PNG's
+  was noted): now noted.
+- **Print cut off at the panel's edges was not seen**: a control's printed dial or legends
+  (`layout.print-outside`) and a legend running off the panel in the typeface used
+  (`look.fit`) go to review. A typeface that does not fit a legend is now still used (one long
+  legend had discarded a pack's typeface); only one that cannot print a character is not.
+- **Glyphs.** A pack's typeface must print what the plug-in prints too (printable ASCII, "–",
+  "…"), not only the layout's legends; and legends the built-in typeface cannot print (it has
+  Latin, Greek and Cyrillic) go to review (`look.glyphs`): they would have printed as nothing.
+- Tools: `skin-pack`'s `svg_cost` (what a drawing costs, part by part) and `font_info` (what a
+  font says of itself, and what it lacks).
+
+**Evidence (the Mac, 2026-10-16, the owner's host and other sessions running, load about 10):**
+`stress_packs`, medians of one run: the built-in REALISTIC opens in 183 ms at 0.44 and 531 ms at
+0.87 (39 and 84 MB); HEAVY 215 and 659 ms (63 and 125 MB); EDGE 229 and 688 ms (21 and 48 MB);
+the rest as their base look. A knob's frame 0.2 to 1.4 ms in every pack. Not yet: the slow x86
+machine, and the stress packs installed in hosts on each OS.
+
+**Compatibility over time, 2026-10-16.** The agent named the format's cost: it is now a promise,
+and a CA-72 that adds a control would have refused every existing pack (a layout had to place
+every control). The owner chose, of the agent's options, to place a control added later at its
+official place if free, else the nearest free spot, else to use the official layout for that pack
+("option A"); and to make layouts and `[look]` tolerant of fields they don't know, with notes,
+the manifest strict, and a `requires` for packs that need a later CA-72 ("option A").
+
+**Agent decisions** (not separately approved):
+- `controls::ControlSet` (`CONTROL_SET`, revision 1): the panel controls' history, each control's
+  revision, renames, retirements and changes of kind; never edited once released, only added
+  to. A layout's `controls` (1 if absent) is the revision it was made for. The reader takes the
+  set as a value, so tests simulate a later CA-72 against today's layouts.
+- Placing a control added later (`arrangement::free_spot`): its click area and printed dial on
+  the panel and over nothing of the layout's (controls, POWER, the lamps, QUALITY's opening, the
+  plate, PHONES), at its official place or the nearest free one, searched outward in rings 8
+  units apart. A panel with no room: the official layout (`layout.full`, a review).
+- Unknown fields in a layout or `[look]`: read into the rest of each table and noted
+  (`layout.unknown`, `look.unknown`); a name a later revision has, in a layout made for it:
+  passed over (`layout.newer`). The manifest keeps `deny_unknown_fields`; `requires =
+  "<plug-in> >= major.minor.patch"` is checked against the plug-in's version (none in the
+  marketplace's tools).
+- `tests/compat/v1/`: the starter as it was (without a `controls` key), the official layout, EDGE's
+  layout and a pack file signed with the stress key, frozen; `tests/compat.rs` loads each with
+  every control where it was put, and the signature verifiable. Never edited; each later
+  revision adds a folder.
+
+**Evidence (the Mac, 2026-10-16):** the compatibility tests; a later revision simulated (A-440
+added: at its official place when free, the nearest free place, found by a click, when FEEDBACK
+took it; refused on this revision; a renamed, a retired and a changed control followed; a layout
+for a later CA-72 with unknown names and fields loaded with notes, the same names refused when
+made for this revision; a full panel has no free place); `requires` checked; a later `[look]`
+field noted. The stress packs and the official looks' 32 frames as before.
+
+**The first showcase pack, SIGNAL BASIN, 2026-10-16** (`docs/skin-packs/signal-basin`, CC0, its
+typeface Barlow Condensed under the OFL; not published yet: see "Held back" at this record's
+end). The owner chose it from Codex's twelve concept pictures (with Cutoff Court, Courtyard
+Current and Residual Service to follow, one at a time), its art made by the image generator
+("1a"), it free under CC0 and Residual Service later proprietary ("a mix"). The first
+attempt, its parts generated from words, "looked nothing like"
+the concept; the owner asked for each part to be cropped from the concept and recreated by Codex
+on a transparent ground, and then for the result to be improved "till it passes a critic agent":
+a separate reviewing agent compared the render with the concept round by round (fail, fail,
+pass, pass, pass), and its wear was added at the owner's word. Its scripts, outside the pack (a
+pack holds no code), are in `docs/skin-packs/tools/signal-basin`; the generated originals, the
+concept's crops and the prompts on the lab's share (`ca-72/look/signal-basin`).
+
+**Agent decisions** (not separately approved):
+- `[look] knob_caps = "turn"` (default `"still"`): the concept's knobs have a line from their
+  middle, which the plug-in's still cap (made for a spun aluminium cap's sheen) would have held
+  still. With it, the knobs', big knobs' and pointer knobs' caps are left in their pictures and
+  turn, and the plug-in's lamp and cap lights over them (made for black plastic and aluminium,
+  a brass-looking ring on cream) are left off (`Layer::round`). An earlier CA-72 passes the
+  field over (`look.unknown`) and draws the caps still.
+- Found, not fixed: a drawing's embedded PNG pictures, which the format allows and counts, are
+  never drawn (resvg is built without `raster-images`). SIGNAL BASIN draws its screws as
+  vectors instead. The fix (resvg's feature, which adds three image decoders, or drawing them in
+  the plug-in's code, or refusing them) is the owner's to choose; it is proposed as its own
+  task.
+- A rocker's lamp lies in its picture's flat half, so that it shows at the switch's "on" end;
+  its lamp stays lit when off (one picture, mirrored). POWER stays a rocker: its slot is too
+  narrow for the concept's toggle.
+
+**Evidence (the Mac, 2026-10-16):** `check_pack` loads it with no layout, legend or drawing
+finding (its drawing's counted cost about 39 million of 60), in its own typeface, both
+letterings; `a_packs_knob_caps_turn_with_them_when_it_says_so`; the panel's, the packs' and the
+plug-in's tests; the official looks' frames unchanged. Not yet: hosts, the slow machine.
+
+**SIGNAL BASIN's layout, made to follow the concept, 2026-10-16.** The owner asked why the
+layout did not follow the concept's: the agent had kept the official order of the oscillators'
+selectors, routed the signal its own way (a bottom "basin"), added a band of titles, and briefed
+the reviewer to judge the look only. At the owner's word the layout was rebuilt to the
+concept's arrangement and the reviewer's brief widened to the arrangement: the oscillators'
+rows in its order (RANGE, WAVEFORM, FREQUENCY, VOLUME, ON), their lines through grommets into a
+copper bus in a channel of its own, the bus into the FILTER (titled on a cartouche) and the two
+contours, a framed teal central bay, the plate over the right-hand bays. The concept's fourth row
+(the external input and noise) does not fit (the face holds three rows of dials, about 200
+units each, and a title): they have a column beside the oscillators, their lines run in the gaps
+between the rows to the bus. Reviewed: fail (round 6), pass (7), confirmed (8).
+
+**A pack's panel's size, 2026-10-16.** The owner, on why SIGNAL BASIN could not have the
+concept's four rows: "we need to make it so that our UI system allows the UX designer to change
+panel dimensions." Of the agent's options the owner chose: a layout may change its face's height
+and its wooden strip's, the width staying 3108 ("1a"); the face 700 to 1200 units, the wood 60
+to 200 or none ("2"); and the window keeping its width and changing its height to follow the
+look ("3a").
+
+**Agent decisions** (not separately approved):
+- `[panel] face, wood` in the layout (`arrangement.rs`, `art::Panel`). The face's foot stays at
+  the drawing's `PANEL_H` (925), where the plug-in's strip begins, so the strip, its drawer, the
+  keyboard and the editor's own logic keep their coordinates: a taller panel reaches above the
+  drawing's 0. A layout's places are moved as it is read so that they are the official panel's
+  (its face's foot at 795), so the code that draws and finds the controls is unchanged; only the
+  wood, the face, its trims and shadows, the pack's drawing and the lamp's falloff are drawn at
+  the panel's size. The renderer's frame begins at the panel's top (`top_px`, `strip_row`), the
+  strip renderer is told where (`set_under_top`), and the editor's pointer, composing, menus and
+  window height follow it.
+- The window: its width kept, its height from the look's panel; asked of the host when a look
+  of another size is chosen, and as an editor opens if the look read then differs from the one
+  last chosen in this process (`CHOSEN_PANEL`). A host refusing at once keeps the look shown
+  (the owner's 3a had offered drawing the panel scaled to fit the window instead; the agent
+  kept the look, which needs no second way of composing the frame). A refusal that comes later,
+  after the look has changed, is not handled: the window and the look disagree until the next
+  resize.
+- An older CA-72 passes `[panel]` over and reads the layout at the official size (a taller one's
+  controls then fall outside its panel: refused, its base look drawn). `requires` names the
+  first version with `[panel]` once it is numbered.
+- Fixed: a pack's drawing is stretched to end exactly at the strip's first row (rounded on its
+  own, it spilled a row into the strip on a tall panel).
+
+**Evidence (the Mac, 2026-10-16):** the official looks' 32 golden frames identical to the commit
+before the change; `a_pack_chooses_its_panels_size` (a 1000-unit face: places moved, the frame's
+size, a control drawn and found where its layout put it, the strip under it the same as under
+the official size, sizes outside the limits and a plate without wood refused); every panel,
+pack and plug-in test; SIGNAL BASIN rebuilt with the concept's four rows on a 1030-unit face and
+passed by the reviewing agent (rounds 9 and 10, its last notes taken). Not yet: hosts (the
+window resized by a look), the slow machine.
+
+**The strip in a pack's look, 2026-10-16.** The owner: "you need to work with codex to
+re-imagine the lower panel as well. Including the keyboard and preset panels. Everything needs
+to be in the same theme." Codex made three concept pictures (the strip, the keyboard view, the
+presets' drawer, in SIGNAL BASIN's theme) and a written proposal. Of the agent's options the
+owner chose: packs restyle these parts with their layout fixed ("1a"); the drawer's lettering
+the pack's choice of the dot-matrix or its typeface, the tags kept as text ("2a"); the work in
+three steps, the strip first, each shown and reviewed against its concept before the next ("3").
+
+**Agent decisions, the strip** (not separately approved):
+- `[look] strip_art`: a drawing of the strip (3108 by 850, y from the rail's top), drawn by the
+  panel renderer over the strip's wood and face and under its print (in the drawn skin the
+  strip's print laid again over it), its cost counted as the panel's drawing's.
+- Picture slots for the strip (`skin::STRIP_SLOTS`): `tab` and `tab-lit` (a square cap, the
+  strip widening it as the built-in one; given both, the tabs' two states are the pack's
+  pictures and no light is spilt round them), `key`, `glass`, and `rocker-ivory` (otherwise
+  made from `rocker-blue` as before).
+- `[look.colours]`: `lamp` (the readouts' segments, the displays' dots; their glow and the drops'
+  light made from it as the orange's are), `drops`, `tab_print`, `key_print`. The strip renderer
+  takes the look (`StripRenderer::set_look`) and its typeface for the tabs' and keys' print.
+- `strip_places` (an example) prints the strip's places for drawing round them.
+- Not reachable yet: the strip's printed section dividers (they print over a drawing), the
+  readouts' glow and unlit segments, the star key's colour (the keys' print), the wheels.
+
+**Evidence (the Mac, 2026-10-16):** the official looks' 32 golden frames identical to the commit
+before; `a_packs_strip_is_its_own` (the strip given an official look draws exactly as without
+one, in both skins; a pack's tabs, keys, lamp and print colours and its drawing change it; a
+colour not `#rrggbb` refused); every panel, pack and plug-in test, clippy, fmt. SIGNAL BASIN's
+strip passed by the reviewing agent (round 2, its last notes taken). Not yet: the keyboard and
+the drawer, hosts.
+
+**Switches and wheels, 2026-10-17.** The owner: the pitch and mod wheels unlike the concept's,
+and its on/off switches "look much better. Ours have a weird curve in the middle" (the rocker
+picture's hump with the plug-in's paddle light over it).
+
+**Agent decisions** (not separately approved):
+- `rocker-blue-on`, `rocker-orange-on`, `rocker-ivory-on`: a rocker's picture ON. Given, the
+  rocker shows its plain picture off and this one on, neither mirrored, and the plug-in neither
+  lights nor shadows a paddle over it (`render.rs`, the layer rewritten when the look has it).
+- `[look.colours] wheel`: the PITCH and MOD wheels' colour, as sRGB (made linear for their
+  shading). Their shape and shading stay the plug-in's.
+
+**Evidence (the Mac, 2026-10-17):** `a_packs_switches_show_their_state_and_its_wheels_their_colour`;
+the official looks untouched (their rockers have no picture on); every test, clippy, fmt.
+SIGNAL BASIN's switches, remade from a crop of the concept's, and wheels passed by the reviewing
+agent (rounds 3 and 4).
+
+**The keyboard view in a pack's look, 2026-10-17** (the owner's step 2, "start step 2: the
+keyboard view"). **Agent decisions** (not separately approved):
+- The keyboard renderer takes the look (`keyboard::Renderer::set_look`, from the strip's): its
+  walnut, the rail key's cap for its header keys, its glass, lamp colour and typeface.
+- Picture slots `white-key` and `black-key` (one key each, from above; the plug-in cuts the
+  notches); `skin::slot_size` gives each strip slot its size.
+- `[look] keyboard_art` (a drawing over the case, under the key bed, keys and print, in the
+  strip's units; the realistic look only) and `keyboard_case` ("wood", the default, or "face":
+  the case in the face's picture, laid as the strip's face is).
+
+**Evidence (the Mac, 2026-10-17):** `a_packs_keyboard_is_its_own` (an official look draws the
+keyboard as before; a pack's keys and drawing change it); every test, clippy, fmt. SIGNAL BASIN's
+keyboard view passed by the reviewing agent, its last notes taken. Not yet: the presets' drawer.
+
+**The presets' drawer in a pack's look, 2026-10-17** (the owner's step 3, "start step 3: the
+presets drawer"; their decisions 1a, the drawer restyled with its layout fixed, and 2a, its
+displays lettered in dots or the pack's typeface, the tags kept as text). **Agent decisions**
+(not separately approved):
+- The drawer renderer takes the look (`DrawerRenderer::set_look`, called wherever the editor
+  dresses the strip): its face (as the panel's, tinted), the strip's `glass` and `key`, its lamp
+  colour for the dots, its typeface and `tab_print` for the print. The still it shares between
+  instances is keyed by scale and by the look's dressing (0 for every official look, which
+  draws the built-in drawer: no extra work, no change).
+- `[look]` `drawer_art` (a drawing over the face, under the print, glass and keys, in the
+  drawer's units, 3108 by 734), `drawer_lettering` ("dots" or "type"), `drawer_legends`
+  ("above" or "caps") and `drawer_titles` ("left" or "centre"); `[look.colours]` `display`
+  (lettering not lit) and `selection` (the current row's band).
+- In type lettering: what is lit in the lamp colour, the rest in `display` at four strengths
+  from the plug-in's levels; the stars, arrows and the current row's mark drawn as shapes; a
+  field's text set in the typeface, its caret where the typeface puts the characters before it,
+  and a press in a field turned into the dots' place of the nearest character gap
+  (`DrawerRenderer::press_x`) before the presets' browser places the caret, so the browser stays
+  counted in characters.
+- The list's rows and MIDI Learn's are made of an item per column (mark, star, name, origin,
+  tags) rather than one padded line, so that a typeface keeps the columns; the dots drawn are
+  the same.
+
+**Evidence (the Mac, 2026-10-17):** the official looks' drawer byte-identical to the commit
+before (the png example, both skins, scales 0.5 and 1); `a_packs_drawer_is_its_own` (the
+official looks draw the built-in drawer; a pack's drawing and options change it; a press after a
+field's fifth character, set in the typeface, lands nearer than five dot characters; unknown
+values refused); every panel test, the plug-in's unit tests, clippy, fmt. The plug-in's other
+test binaries were not linked: the Mac's disk was full. SIGNAL BASIN's drawer passed by the
+reviewing agent against the concept (round 2: its secondary lettering warmed to cream, the current
+row's band teal, the arrows lit). Format limits left: the drawer's full width without the left
+hand's bay, the tags and tabs as text rather than lamp keys, no scrollbar or column header, the
+plug-in's dim level for a pressed key's legend and for the count, the 8-unit lip (the displays
+reach near the drawer's foot).
+
+**The owner, 2026-10-18,** on the drawer's renders (browsing, typing, MIDI Learn): "ya, this looks
+good to me."
+
+**Held back, 2026-10-18.** The owner, asking for the pull request: "I don't want this demo skin
+pack included yet. I just want to make sure that the UI from now onward uses this new system."
+The system, its format, the official looks as packs, the CC0 starter and the agent's skill are
+merged; SIGNAL BASIN (its pack and its scripts, the paths above) stays on the maintainer's own
+branch until the owner releases it, and the change is one commit so that the pack is not in the
+public history either. Everything the format gained for it (the panel's size, the strip's,
+keyboard's and drawer's dressing, the switches' states, the wheels' colour) is tested here with
+packs of the tests' own. `CONTRIBUTING.md` now asks that the editor's look go through the
+system.
+
+**The pull request's review and CI, 2026-10-18.** Codex's review found three faults, fixed: a
+pack file's root found after macOS's `__MACOSX/` is left out; a look's pictures counted by slot
+as well as by file (`look.pixels`), one large picture named by every slot being that many
+decoded; an installed pack read once while unchanged, so that SETTINGS does not check every pack
+each time it opens (the first check is still on the editor's thread: a follow-up). CI then
+refused the starter's own drawing on its runners (`svg.slow`, 330 to 458 ms against 250), as a
+busy desktop had: the timed test, a backstop to the drawing's counted cost (`svg_work`, about
+half a second on a machine five times slower than an M4 Pro), now allows 2 s, so that a drawing
+within its cost is never refused for the machine's speed or load. **Agent decision** (not
+separately approved).
+
+**With R-PRESET-READABILITY (merged from main, 2026-10-18).** Main put every key's legend on its
+cap, larger and fitted to it, and made the current preset gold. In a look: the legends are on the
+caps in every look, in its `key_print` colour and its typeface (`drawer_legends` is still read, so
+a pack that sets it loads, but no longer moves them: "above" would not fit over the larger keys);
+the current preset is gold over the built-in lamps and in the lamps' own colour over a look's
+`lamp`; lettered in a typeface, the current row keeps its band and filled arrow, the row under the
+pointer has an outlined arrow, a chosen tag its bar and the chosen tab its underline.
+**Agent decision** (not separately approved), in resolving the merge.
+
+**What a pack's drawing may allocate, and a test drawing that panics, 2026-10-18 (night).** The
+review of the pull request (2026-10-18) found two faults that block 0.3.0, fixed on
+`skin-pack-guards`:
+- **A pack could end the host.** A drawing whose `<pattern>` tile is vast (10 by 1e9 units; the
+  fuzzer's, at 50,000 cases, 10 by 1e14) passed every check; resvg then allocated the tile at
+  that size as the pack was checked, and an allocation that fails aborts the process, whichever
+  thread it is on. The parsed tree's buffers are now counted before anything is drawn, at the
+  size the drawing is used, each as resvg sizes it (`svg/memory.rs`, read against resvg 0.45's
+  `render_group`, `render_pattern_pixmap`, `clip::apply`, `mask::apply` and the filters): a
+  group's layer cut to five times the target each way; a pattern's tile; a filter's whole
+  region, eight buffers a primitive for its result, inputs, copies and scratch; a clip's two and
+  a mask's three copies of the layer, again for each that cuts them; an embedded picture decoded.
+  At most **16 million pixels a buffer** (as the pictures' pixels) **and 256 MB together**,
+  counted as if nothing were freed, or the drawing is refused (`svg.refused`); `svg_work` already
+  keeps a legitimate drawing's layers to some 10 million pixels. Coordinates, filter offsets and
+  blurs past the renderer's integer range are refused too.
+- **A test drawing that panicked switched the backstop off** for the rest of the process: its
+  thread died without answering, the wait took that for a drawing past its deadline ("not drawn
+  ... within 4001 ms", in 0 ms) and set `RUNAWAY`, which nothing then cleared. The drawing now
+  runs under `catch_unwind` and always answers; a panic refuses its pack (`svg.panicked`); the
+  drawings still running late are counted, each taken off as it ends.
+
+The longer fuzzing found three more ways to end the process, all in reading, before any drawing:
+2000 nested groups and a pattern whose own rectangle inherits `fill='url(#p)'` from the root
+(usvg's reading recursed until the stack overflowed), and a vast embedded PNG's header (usvg
+panicked placing it). Elements may now be nested, references followed, at most 64 deep, counted
+before the XML reader sees them; a fill or stroke a shape or `use` inherits is followed as a
+reference when it names a pattern, so that such a loop is refused; an embedded PNG's header is
+read within the picture limits first, and any panic in usvg's reading refuses the drawing.
+
+**Agent decisions** (not separately approved):
+- The bound is checked where the drawing is read (`svg::parse_at`, at the size the plug-in uses
+  it: the panel's 3000 pixels across, a slot's own size) and again wherever it is drawn: the
+  plug-in draws a pack's drawings through `skin_pack::svg::render`, which counts the buffers at
+  that transform and size against four times the limits (`svg::DRAWN_MARGIN`: a large window on
+  a high-resolution screen, a drawing stretched to a part's proportions) and catches a panic;
+  past them, the drawing is not drawn (a slot falls back to the built-in picture). So nothing a
+  pack holds reaches an allocation the check has not bounded, whatever size it is drawn at.
+- The sum is a bound, not a measure: resvg frees a layer once it is composed, so a drawing holds
+  less. It could refuse a drawing within `svg_work` that clips and masks large layers many
+  times over; the official looks, the starter and the stress packs pass as before. HEAVY, the
+  heaviest drawing the tests hold, counts 125 MB at 3000 pixels; the starter's 11 MB.
+- A thread that cannot be started for the test drawing skips the test with a note (as an earlier
+  runaway does), rather than refusing the pack: that is the machine's state, not the pack's.
+- The 64-deep limit: a drawing nested to it reads and draws on a 1 MB stack (Windows' default
+  for a thread) in a debug build with half of it to spare.
+
+**Evidence (omarchy, 2026-10-18):** the pack made by hand
+(`crates/skin-pack/tests/fixtures/vast-pattern`: its tile asks for some 17 TB) and the fuzzer's
+cases are read in a child process by `skin-pack`
+(`packs_that_once_aborted_their_check_are_refused_in_a_child_process`) and by the panel beside the
+starter (`a_pack_whose_check_once_aborted_is_refused_and_the_next_loads`): on `skin-system`
+(f073a5d) each child aborted (SIGABRT: "memory allocation of 17179869180000 bytes failed", or a
+stack overflow) or panicked; now each pack is refused, and the starter loads.
+`a_test_drawing_that_panics_refuses_its_pack_and_the_next_is_tested`,
+`a_drawing_that_panics_after_its_deadline_releases_the_backstop`,
+`two_drawings_past_their_deadline_both_hold_the_backstop`. The fuzzer (release, 8 GB of address
+space a run, so that a large allocation fails too): before, case 17237 at 50,000 cases a reader
+aborted ("memory allocation of 257698037700 bytes failed"); now 2,000,000 cases a reader for each
+of eight seeds (`SKIN_PACK_FUZZ_SEED` 0, 1, 2, 3, 77, 144, 2026, 4242), six readers, 96 million
+cases (32 million drawings), none failing; the first such run is what found the inherited pattern's
+loop. The 32 golden frames and 36 png renders (the official looks in both skins at scales 0.5 and
+1, with the keyboard, the drawer and large lettering, and the starter pack) byte-identical to
+`skin-system`'s; `skin-pack` and `ca72-panel` tests (173), the plug-in's (309,
+`standalone-production`), clippy, fmt, `notices.py --check`. Not yet: a host with a pack, the Mac
+and Windows.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found the
+scan took a pattern element's first `fill` or `stroke` declaration, where CSS applies the last:
+with `style='fill:red; fill:inherit'` under a group filled `url(#p)`, it saw red and missed the
+pattern. The scan now reads an element's declarations with usvg's own tokenizer (`simplecss`,
+already in the build through usvg) and decides which wins both as usvg 0.45 does (the style's
+after the attribute, each replacing the last unless that was `!important`, so the first
+`!important` stays; `inherit` copying the ancestor's value and importance) and as CSS does
+(`!important`, then the style over the attribute, then the later); a pattern inherited under
+either counts. Each element's declarations are now read once, top down, not once for each
+descendant. The new unit test failed before the change on the review's case and passes after,
+with a stroke, the style over the attribute, usvg's kept `!important` and CSS's `!important`
+refused, and four drawings where red wins accepted. Checked in a child process, usvg 0.45.1
+itself did not overflow on any of these declared cases: an `inherit` becomes an explicit copy,
+which its own pass turns to `none` inside the pattern; only a fill set by no declaration
+overflowed it. So this keeps the scan's count and refusals right, and guards a future usvg,
+rather than closing a crash in this one. `skin-pack`'s tests (78), clippy, fmt and
+`notices.py --check` pass.
+
+**With R-ARP, R-FX-DRAWER and R-MCP (merged for 0.3.0, 2026-10-19).** The arpeggiator's and the
+effects' drawers, their rail keys and the standalone's TEMPO screen came after the format, which
+has no slots for them. In a pack's look: the rail's ARP and FX keys are the rail's keys (the
+pack's `key` cap and `key_print`, its typeface), and the standalone's rail, a key shorter for FX,
+is the strip renderer's as before (`strip_places` prints both rails, for a `strip_art` drawn round
+them); the drawers draw the look's base skin's built-in artwork (face, glass, amber tabs, orange
+lamp), their knobs the panel's (the pack's knob pictures and caps, through the panel's renderer),
+and the TEMPO screen its built-in glass and lamp, mirroring the pack's name plate (its layout's
+`plate`), so that on a taller panel it stays on the wood. A pack that wants the drawers in its
+own theme would need slots or a drawing for them (a later revision of the format; not added
+here). The drawers' arpeggiator knobs are the plug-in's own (`Place::Arp`): a layout cannot place
+them, and `CONTROL_SET` (the panel's controls) is unchanged. On a taller panel the drawers are
+laid, damaged and found in the drawing's rows from the panel's top (`top_px`), as the presets'
+drawer is; their lamp's falloff is the official panel's. **Agent decisions** (not separately
+approved), in resolving the merge.
+
 ## R-EDITOR-CPU. The editor's cost while sound plays
 
 **Owner decisions, 2026-10-17.** CPU use is the users' first complaint. Told where it goes (a
@@ -8813,6 +9388,73 @@ in `target/knob-resolution-evidence/`. No worker or sound code was changed.
 Not tried: physical trackpads or a Magic Mouse, native macOS or Windows events, or audible
 sweeps in a host. No claim is made that the editor change alone resolves the audible zipper
 noise reported in #107. The reporting user's 2018 MacBook Pro still needs acceptance.
+
+## R-SKIN-KEYS. The first-party skin key ships before any signed packs
+
+**Owner decision, 2026-10-18** (issue #83's distribution/signing choice): "manual,
+unsigned packs stay the main route, PLUS Idle Foundry's own first-party public key built into
+0.3.0, so signed first-party packs can come later without waiting for an update." The owner
+will make the pair on a machine of their choice before the 0.3.0 release candidate:
+"you must NOT generate the real key, and no secret key may ever be committed or written inside a
+repository."
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One public slot.** `skin_pack::keys::IDLE_FOUNDRY_KEY` stays `None` until the owner fills it.
+  The editor and signing tool share `TRUSTED_KEYS`. A public release's builds refuse an empty
+  slot at compile time: the gate is on when the release sets `CA72_PUBLIC_RELEASE=1` (or the
+  Mac's `CA72_REQUIRE_NOTARIZATION=1`). It is not tied to Cargo's `release` or `bundle`
+  profile, because CI builds and packages every change with those profiles and would fail
+  until the key exists (changed by the coordinating agent, 2026-10-18). `package.sh` also runs
+  `check_release_key` under either variable, which checks the key's id, first-party role,
+  presence in the list and Ed25519 public half.
+  No real key was generated.
+- **A key's authority is explicit.** A first-party key can attest to Idle Foundry's packs; a
+  future marketplace key cannot claim that publisher. Rotation adds a second id, such as
+  `idlefoundry-2`, before use and keeps the old key for existing packs. Revocation needs a
+  plug-in update, as before.
+- **Offline tools.** `pack_keygen` refuses destinations in Git work trees, including linked
+  worktrees and links, and bare repositories; it creates a new owner-only file and prints the
+  public constant with backup advice. `pack_sign` reads the secret from a file or stdin, signs
+  a folder or `.ifskin`, and checks the signed result against the built-in keys before an
+  atomic replacement. It checks the format; `check_pack` supplies the CA-72's full look checks.
+- **Small labels.** The settings menu marks verified packs `(IDLE FOUNDRY)` or `(MARKETPLACE)`;
+  an unknown key is `(UNKNOWN SIGNING KEY)` and counts as unsigned. Unsigned packs are
+  `(UNSIGNED)` and keep their loading behaviour. Every name gets a status, so a pack's own name
+  cannot impersonate the trusted label. Invalid known-key signatures refuse the pack with advice
+  to get an unchanged copy from its publisher. Unknown keys cannot be verified, as before.
+
+**Evidence (Linux, 2026-10-18; Rust 1.97.1, ngspice 47):** `cargo test -p skin-pack -p
+ca72-panel -p ca72-plugin`: 454 passed, 39 ignored. The final `cargo test -p skin-pack`: 66
+passed, including both tools' examples. `CA72_REQUIRE_NGSPICE=1 cargo test --workspace`: 603
+passed, 56 ignored, none failed. Clippy for the three touched crates, all targets, with and
+without all features: passed with warnings denied. The skin crate's all-target Windows GNU
+cross-clippy also passed. Formatting, the diff's whitespace and `package.sh`'s shell syntax
+passed. Tests used `TMPDIR=/var/tmp`: a pre-existing `/tmp/.git` marker correctly made the
+key tool refuse that temporary directory in the initial run.
+
+The release diagnostic refused the missing public key, and a build with
+`CA72_PUBLIC_RELEASE=1` failed at the compile-time gate; release and bundle builds without it
+build as before. The
+key-making CLI refused a path under this worktree's `target` without creating a file. Fixed
+throwaway keys cover trusted, unknown, unsigned, tampered and wrong-id signatures, marketplace
+keys claiming first-party authority, and the release check. An independent read-only review
+was completed and its findings corrected. No owner settings or installed plug-ins were used.
+No real key was generated, and no test key was added to the built-in list.
+
+**Not tried:** native Windows ACL tests or native macOS key creation, a live host's menu, or a
+release with the real first-party key. The owner must make and back up that key and insert only
+its public half before the release candidate; the empty slot deliberately blocks it meanwhile.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found CI's
+tagged release built the bundles and ran `package.sh` without either variable, so a tag could
+have put installers without the key into the draft release. CI now sets
+`CA72_PUBLIC_RELEASE` at the workflow level to `1` exactly when it runs for a `v*` tag (the
+release job's own condition) and `0` otherwise, so the bundles, installers, clippy and tests of
+a tag carry the gate and pull requests and branches do not. `scripts/test-release-gate.py`,
+run in CI's Linux job, failed before the change (the variable was absent) and passes after:
+on for `refs/tags/v0.2.7`, off for a pull request, `main` and `skin-system`, the same prefix as
+the release job, and no job or step overriding it. With `CA72_PUBLIC_RELEASE=1`, `package.sh`
+stopped at the gate (exit 101); with `0` it went on. Not run on GitHub: no tag was pushed.
 
 ## R-ARP. An arpeggiator, in a drawer dropped from the rail's ARP key
 

@@ -8,13 +8,14 @@
 //! three places, or their legends); the wheels stay where they are left, the PITCH wheel
 //! settling into its centre detent when let go near it (it has no spring).
 
-use crate::art::{self, BIG, GRIP, Layout, POWER, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
+use crate::arrangement::Arrangement;
+use crate::art::{self, BIG, GRIP, Layout, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
 use crate::controls::{CONTROLS, Kind, Place};
 
 /// What is under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
-    /// A control, by its index in [`CONTROLS`].
+    /// A control, by its index in [`crate::CONTROLS`].
     Control(usize),
     /// A selector's legend: the selector's index and the legend's position.
     Legend(usize, usize),
@@ -28,9 +29,10 @@ fn in_rect(x: f64, y: f64, r: [f64; 4]) -> bool {
     x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]
 }
 
-/// What is at (x, y) in the drawing (the arpeggiator's drawer's knobs apart: [`hit_arp`]).
-pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
-    for (i, c) in CONTROLS.iter().enumerate() {
+/// What is at (x, y) in the drawing, the panel laid out as `arrangement` has it (the
+/// arpeggiator's drawer's knobs apart: [`hit_arp`]).
+pub fn hit(layout: &Layout, arrangement: &Arrangement, x: f64, y: f64) -> Option<Target> {
+    for (i, c) in arrangement.controls.iter().enumerate() {
         if c.place == Place::Arp {
             continue;
         }
@@ -63,7 +65,7 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
             return Some(Target::Control(i));
         }
     }
-    let (px, py) = (art::COL + POWER.0, art::TOP + POWER.1);
+    let (px, py) = arrangement.power_at();
     if in_rect(x - px, y - py, POWER_BOUNDS) {
         return Some(Target::Power);
     }
@@ -200,8 +202,13 @@ pub fn release(kind: &Kind, v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::art::POWER;
     use crate::controls::index;
     use crate::fonts::Fonts;
+
+    fn hit(l: &Layout, x: f64, y: f64) -> Option<Target> {
+        super::hit(l, &Arrangement::official(), x, y)
+    }
 
     fn layout() -> Layout {
         Layout::measure(&Fonts::new())
