@@ -902,8 +902,9 @@ impl PanelWindow {
     fn key(&mut self, window: &mut Window<'_>, k: &KeyboardEvent) -> bool {
         self.editing.touched = true;
         let taken = self.editing.keyed(k);
-        self.follow(window);
+        let height_changed = self.follow(window);
         self.keyboard(window);
+        self.repaint_height_change(window, height_changed);
         taken
     }
 
@@ -928,17 +929,37 @@ impl PanelWindow {
 
     /// The window resized to what the editor asks (the grip, the drawer below the bar),
     /// when it asked: on macOS baseview reports no resize of its own making, so the frames
-    /// follow here; elsewhere the report that follows finds the size already taken.
-    fn follow(&mut self, window: &mut Window<'_>) {
+    /// follow here; elsewhere the report that follows finds the size already taken. Whether
+    /// the window took a new height at the width it had.
+    fn follow(&mut self, window: &mut Window<'_>) -> bool {
         if !std::mem::take(&mut self.editing.resizing_window) {
-            return;
+            return false;
         }
         let want = (self.editing.width, self.editing.window_height());
-        if want != self.logical {
-            let size = Size::new(f64::from(want.0), f64::from(want.1));
-            window.resize(size);
-            self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
+        if want == self.logical {
+            return false;
         }
+        let height_only = want.0 == self.logical.0;
+        let size = Size::new(f64::from(want.0), f64::from(want.1));
+        window.resize(size);
+        self.resized(&WindowInfo::from_logical_size(size, self.editing.dpr));
+        height_only
+    }
+
+    /// On X11 the next frame can be 15 ms away: a height the window has just taken (PANEL,
+    /// the drawer) is drawn and shown whole at the end of the event that took it, not left
+    /// to the compositor as the old image (decisions.md R-LINUX-PANEL-REPAINT). Outside
+    /// `resized` and `draw`: a draw can reconcile a host's delayed refusal, which the
+    /// window follows before anything is shown. The grip's widths keep the frames' pace.
+    fn repaint_height_change(&mut self, window: &mut Window<'_>, height_changed: bool) {
+        if !cfg!(target_os = "linux") || !height_changed {
+            return;
+        }
+        self.editing.draw();
+        self.follow(window);
+        self.keyboard(window);
+        self.present(false);
+        self.shown = Some(Instant::now());
     }
 
     /// The pointer's look: the resize arrows over the grip and while it is dragged (R-SIZE),
@@ -3198,9 +3219,10 @@ impl WindowHandler for PanelWindow {
                 // The drawer opening or shutting below the bar: the window follows (the
                 // owner, 2026-10-02: on macOS it had stayed drawn at the old size until
                 // reopened).
-                self.follow(window);
+                let height_changed = self.follow(window);
                 self.keyboard(window);
                 self.cursor(window);
+                self.repaint_height_change(window, height_changed);
                 status
             }
             // The drawer, while open, takes the keys (the host keeps its shortcuts).
@@ -3918,6 +3940,11 @@ pub(crate) mod window {
             };
             s.resize(size);
             s
+        }
+
+        #[cfg(all(test, target_os = "linux"))]
+        pub fn presented(&self) -> bool {
+            self.whole
         }
 
         pub fn resize(&mut self, (w, h): (u32, u32)) {
@@ -9693,3 +9720,6 @@ mod windows_window_tests {
         }
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_resize_tests;

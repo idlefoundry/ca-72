@@ -8079,3 +8079,47 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-LINUX-PANEL-REPAINT. Submit a snapped panel's frame in its input event
+
+2026-10-14: the owner confirmed that a scoped Hyprland `no_anim` rule removed the
+long stretch in Bitwig's CA-72 CLAP window, but controls still briefly stretched
+or jumped. A height-only PANEL change preserves renderer scale; however, its input
+event resized the native window and software surface without drawing or presenting
+the new image, and the next X11 frame callback could be 15 ms away.
+
+On Linux, an input-triggered height-only resize now draws and fully presents at
+the end of the action. Draw-time reconciliation and native follow still precede
+presentation, preserving a delayed host refusal and restore. Width changes (the
+grip, SIZE) keep the normal frame pacing; macOS and Windows do not take this path.
+First proposed as PR #40 on 0.1.x; re-applied to 0.2.7's editor (What's New, the
+window fixes of #97, #102 and #103) without other changes.
+
+A native regression creates only its own off-screen X11 parent/child windows,
+without a processor or audio device. It invokes actual PanelWindow input handling
+immediately after a scheduled frame, checking a successful full surface submission
+and correct composed/native dimensions before another frame can run. It covers
+both accepted directions, unchanged control scale and synchronous refusal. The
+earlier code fails at the first accepted collapse; this one submits in the same
+event (5 to 8 ms on omarchy, descriptive rather than a timing gate). `scripts/validate.sh`
+runs it, under Xvfb in CI.
+
+**Bitwig 5.2.7 on Linux, 2026-10-19 (issue #65).** Renamed CLAP builds of 0.2.7 and of
+this change, in an isolated Bitwig profile on a nested Hyprland 0.56 (Omarchy's look and
+window rules, the owner's `no_anim` rule for the test build's title), every composited
+frame captured (`ext-image-copy-capture`, about 60 a second), the same clicks by a
+virtual pointer. Per PANEL click, in both builds alike: one compositor frame (3 to 26 ms)
+shows the old image scaled into the new window (squashed on collapse, stretched on
+expand); that frame comes from the compositor drawing XWayland's old buffer in the new
+box, and the editor's early present does not remove it. On expand, both builds then show
+the old view at the top and black below for 230 to 265 ms, until the 250 ms whole repaint
+(`REPAINT`): Bitwig grows its window after the editor's child has taken the new height,
+the X server discards what was drawn outside the old parent, and baseview ignores the
+`Expose` that follows. Collapse is correct after the one squashed frame in both (this
+change 7 to 37 ms after the click, 0.2.7 24 to 64 ms). So this change alone makes no
+visible difference in Bitwig. A test build adding `Expose` → `WindowEvent::Damaged` to
+baseview's X11 loop showed the expanded panel 18 to 33 ms after the click with this change,
+but not on 0.2.7 (its frame is not yet shown when the `Expose` comes, so nothing is
+presented); that baseview change is issue #65's to adopt, with the SIZE, grip and
+reopen paths, which this change does not touch. No DSP, preset or installer behaviour
+changes.

@@ -119,6 +119,16 @@ elif [ "$os" = linux ] && [ -z "${DISPLAY:-}" ]; then
     display=(xvfb-run -a)
 fi
 
+# Exercise the Linux input/presentation boundary on a real native surface. Use the
+# same disposable display as the editor validator when there is no desktop.
+if [ "$os" = linux ] && [ "${CA72_SKIP_GUI_TESTS:-0}" != 1 ]; then
+    echo "== Linux native panel resize"
+    ${display[@]+"${display[@]}"} cargo test --manifest-path "$root/Cargo.toml" \
+        -p ca72-plugin --lib --features standalone-production \
+        editor::linux_resize_tests::panel_resize_presents_before_the_next_frame_callback \
+        -- --ignored --nocapture
+fi
+
 echo "== clap-validator $CLAP_VALIDATOR"
 "$clap" validate "$bundles/CA-72.clap"
 echo "== pluginval $PLUGINVAL, strictness 10${gui[*]:+, editor tests skipped}"
