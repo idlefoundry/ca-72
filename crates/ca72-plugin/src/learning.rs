@@ -91,6 +91,7 @@ pub enum Item {
     Dials(Law),
     Head,
     StandaloneSettings,
+    WhatsNew,
     /// The settings' WINDOW: SIZE…, the SIZE menu wanted (R-SIZE).
     SizeMenu,
     /// The SIZE menu's: the window this wide (logical pixels).
@@ -124,6 +125,7 @@ pub enum Pressed {
     /// The settings' menu: the FREQUENCY knobs read through this law.
     Dials(Law),
     StandaloneSettings,
+    WhatsNew,
     /// The settings' menu: SIZE…, the SIZE menu wanted where the settings' was.
     SizeMenu,
     /// The SIZE menu: the window this wide (logical pixels).
@@ -335,6 +337,7 @@ impl Learning {
             (Item::Dials(Law::Hardware), "HARDWARE"),
             (Item::Head, "WINDOW"),
             (Item::SizeMenu, "SIZE\u{2026}"),
+            (Item::WhatsNew, "WHAT'S NEW…"),
         ];
         #[cfg(feature = "standalone-production")]
         if crate::standalone_settings::available() {
@@ -359,6 +362,7 @@ impl Learning {
                             | Item::Dials(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
+                            | Item::WhatsNew
                     ) && !current(it);
                     ((*t).to_owned(), choosable)
                 })
@@ -461,6 +465,7 @@ impl Learning {
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
+            (Some(Item::WhatsNew), _) => return Pressed::WhatsNew,
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
             (Some(Item::Lettering(l)), _) => return Pressed::Lettering(*l),
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,

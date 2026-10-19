@@ -1,5 +1,11 @@
 # nih-plug, patched
 
+**Linux standalone identity, 2026-10-18 (CA-72 issue #49).** The standalone opens its
+window through the repository's patched baseview on every platform (R-WIN-STANDALONE), so on
+Linux the top-level window takes the application's `WM_CLASS` from baseview's change 10 (set by
+`ca72_plugin::identify_standalone()`). The previous separate git dependency did not set it. See
+`docs/issue-49-linux-icon.md` and `scripts/test-linux-window-identity.py`.
+
 The `nih_plug` crate and its derive macros from
 [robbert-vdh/nih-plug](https://github.com/robbert-vdh/nih-plug) at commit
 `de421011f41a6d10fc8c7a6084e4f4dee0143683` (ISC, `LICENSE`; its VST3 bindings are
@@ -188,6 +194,18 @@ lets opting-in instruments consume its boundary panic before their local MIDI
 queues; otherwise it retains the synthetic CC120/121 sequence. CA-72 uses this to
 coalesce the UI button and hardware-source reset without cancelling notes pressed
 after the button. Ordinary hosted CC120/123 timing and global behavior are unchanged.
+
+The production standalone's window (the CA-72's `docs/decisions.md` R-WIN-STANDALONE, issue
+64): `app_window` in `production.rs`. On Windows the process is made aware of each monitor's
+scale before the editor measures the screen (`app_window::scale`, the primary monitor's, where
+the window opens), the editor is told that scale before it is first asked its size, and the
+window opens at the same scale (`app_window::options`); before, baseview set the awareness only
+after its first window was open and scaled the window by the monitor's scale while the editor,
+told none, drew at 1, black beyond it at 125 % and more. A resize from outside (Windows scales a
+window whose monitor's scale changes) is undone at the next frame on Windows (`refits`, `fit`).
+The window is baseview's patched copy (`../baseview`, its change 9: no frame to drag and no
+maximise box), not upstream's from git; the `opengl` feature, and with it `gl_config`, is gone
+from both standalone adapters. macOS and Linux keep the system's scale policy, as before.
 
 Production standalone PANIC identity: the additive ProcessContext token accessor
 and per-block adapter metadata carry the exact token captured by plugin-kit's

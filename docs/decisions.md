@@ -7646,3 +7646,436 @@ After those fixes, `cargo test -p ca72-plugin --no-fail-fast` passed 302 tests,
 or Windows build, installed plug-in, or audio device was used for this job. The numerical
 rounding limit, preserving deliberate panel modulation at 0 %, and 0.2.7 as the first
 writer of the new scale are recorded here for the owner's confirmation at review.
+
+
+## R-CLAP-ENVELOPES. Zero-velocity typed notes are attacks
+
+**Agent finding, 2026-10-18** (issue 57; not separately reviewed by the owner).
+`event_of` treated every zero-velocity `NoteOn` as a release. CLAP expressly permits a
+native note-on at velocity 0. nih-plug's MIDI decoder already turns MIDI 1's zero-velocity
+note-on bytes into `NoteOff`; VST3 preserves its native note-on velocity. Accept typed
+`NoteOn` as an attack, leaving MIDI 1 releases in the decoder. No panel setting, saved id
+or contour model changes. The existing keyboard-source test now constructs its MIDI
+zero-velocity release through that decoder.
+
+**Evidence (Linux, 2026-10-18):** the native CLAP regression failed before the correction,
+held RMS 0. The headless CLAP matrix covers 126 mode/priority/retrigger/buffer combinations
+in both note dialects, with direct filter and loudness contour checks in 54 configurations
+across LO, HI and ULTRA. REAPER 7.79 rendered the isolated MIDI item in CLAP and VST3 in
+all 18 mode/priority/retrigger combinations: 36 renders, 504 sounding windows, all above
+RMS 0.102, final residual RMS 0.0046 to 0.0065. Bitwig 5.2.7 loaded the renamed CLAP, but
+MIDI playback and rendering there remain unverified. The disposable profile's graphics
+and file-chooser failures and Demo Mode's export restriction are recorded in
+`docs/work/linux-clap-envelopes-2026-10.md`, with the reproduction, bounds and draft reply.
+
+This establishes a missing-note defect, not the cause of the reporter's intermittent
+failure. Their host, patch and MIDI are still unknown; both linked forum pages returned
+HTTP 403. Do not treat ordinary mono legato, the circuit's approximately 12 ms trigger
+re-arming interval, or issue 15 as an explanation for separated-note failures. CC64
+currently has no built-in pedal function; changing that is a separate feature decision.
+
+
+## R-TWO-SCREENS. The editor keeps its size on a screen of another scale (issue #48)
+
+**Agent decisions, 2026-10-18** (not separately approved; the issue was given to fix):
+- **The report.** Issue #48: on a MacBook Pro with an ultrawide monitor, the editor drew fine on
+  the laptop's screen, but on the ultrawide at half its size in the top left corner of its
+  window, the rest empty; in Cubase, Ableton Live and Kushview Element.
+- **Why.** Not the editor's size asked of the host in the wrong units: the window keeps its size,
+  the frame shrinks. The laptop's screen is Retina (2 pixels a point) and the monitor 1x. As the
+  window moves between them, AppKit tells baseview's view (its `viewDidChangeBackingProperties:`
+  handler sends `Resized` at the new scale, and the editor draws its frame for it, 1382 pixels
+  wide for a window of 1382 points) but leaves the view's layer at the scale it was made with, 2.
+  softbuffer's layer follows the view's layer's `contentsScale` and lays its tiles out at it
+  (R59), so the 1x frame filled 691 points. It never mended itself: a later frame (an octave
+  changed) still showed at half size, since nothing changed the layer's scale; only closing the
+  editor did. A trace of the standalone (the window's scale, the view's layer's, softbuffer's
+  tiles) showed, on the move to the 1x monitor, the window at 1, `Resized` at 1, the frame 1382
+  by 789, and both layers still at 2. Calling NSView's own `viewDidChangeBackingProperties:`
+  first (baseview's handler replaces it without calling it) changed nothing. The window opened
+  straight on the 1x monitor showed the same.
+- **The change.** baseview's change 8 (`third_party/baseview/PATCHES.md`): the handler sets the
+  view's layer's `contentsScale` to the window's `backingScaleFactor`, without animation, before
+  it sends `Resized`, and whether or not the size in pixels changed. softbuffer's observer
+  carries it to its layer, and the editor's next frame (shown whole after a resize) is tiled at
+  the new scale. Nothing in the editor, nor softbuffer, changes. And `becomeFirstResponder` no
+  longer messages a nil window (a debug build stopped there as the new test opened the window).
+- **Test.** `crates/ca72-plugin/tests/backing_scale.rs` (on the main thread, `harness = false`,
+  macOS): baseview's view opened in a window, its layer left at the other scale as AppKit leaves
+  it, the view told; the view's layer and softbuffer's must take the window's scale, and the
+  frame shown then must fill the view, its tiles at that scale. Without the change it fails
+  ("the view's layer left at another scale"). A test cannot move a window to another screen, so
+  it reproduces what AppKit leaves behind rather than the move itself.
+
+**Evidence (the Mac, macOS 27, M4 Pro; its Retina screen at 1728 by 1117 points and a 4K
+monitor, switched for the test from "looks like 1920 by 1080" HiDPI to 1920 by 1080 at 1x and
+restored after, 2026-10-18).** The standalone of `main` at `1a1dd6c`: whole on the Retina
+screen and on the 4K at HiDPI; at half size on the 4K at 1x, moved there or opened there, and
+still after a click that changed the panel. The released CA-72 in Live 12.2.7 (VST3): the same
+picture as the issue's. With the change, the standalone and a renamed VST3 build ("CA-72 I48",
+removed after) in Live: whole on the 1x monitor, and on the Retina screen before and after.
+Screenshots are kept with the night's records, not in the repository.
+
+**Seen as the change was tried (changed since, below).** The standalone opened on the 1x monitor (the screen in use)
+drew its editor wider than its window, cut off on the right, before and after the change: its
+window was sized for the Retina screen (1382 points, 80 % of 1728) and the editor, measuring the
+screen again as it opened (R19's `opening`), took the monitor's (about 1472, read from the
+pictures). The editor's opening size comes from AppKit's "main" screen, the one in use, which may
+differ between the host's question and the window's opening. Not the issue's picture; not tried in
+a host.
+
+**The window and its editor the same size wherever it opens. Agent decisions, 2026-10-18,
+later the same night** (not separately approved; the fix was asked for):
+- **Why, traced.** The standalone asks the editor's size before baseview makes its window
+  (nih-plug's wrapper), and the editor measured AppKit's main screen: with no window of the
+  application's yet, the Mac's main display, its Retina screen (1728 by 1084 points usable, so
+  1382 wide). macOS put the new window on the screen in use, the 1x monitor, and made it the key
+  window; the editor, opening (R19's `opening`), measured the main screen again, now the
+  monitor's, the key window's (1920 by 1050: 1471 wide), and drew a frame of 1471 by 840 points
+  in a window of 1382 by 789. A trace of each measurement and of the size opened showed the two,
+  in that order.
+- **The change.** The editor opens at the size the host was last told, the size of its window:
+  `opening` no longer measures the screen. The width is measured at the host's first question
+  (or as the editor opens, if it asked none) and kept until the editor closes, as R19 kept it
+  while open. A scale the host gives after asking (Windows, Linux, where the screen is measured
+  in its pixels) has it measured again at the next question. The SIZE menu's FIT TO SCREEN still
+  measures the screen in use.
+- **What it costs.** An editor opening on another screen than the one measured opens fitted to
+  the one measured: the standalone on the 1x monitor opens 1382 wide, not 1471. To fit it to the
+  screen it lands on, the window would be resized once open (a frame at one size, then the
+  next); not done.
+- **In a host.** Live 12.2.7 (VST3) asks the size first and opens the editor in its plug-in
+  window, already made that size; it puts that window on the screen of its own main window (a
+  window reopened after being moved to the monitor came back on the Retina screen). The trace
+  there showed one measurement, the Retina screen's, and the editor opened at it in a window that
+  size; moved to the monitor, it stayed whole. Live's main window could not be moved to the
+  monitor (neither by the accessibility interface nor by dragging), so an editor opened on the
+  monitor in Live was not seen.
+- **Test.** `the_editor_opens_at_the_size_the_host_was_told`: an editor measuring a screen of the
+  test's is told its size on a Retina screen's measure, and opens as the screen in use becomes the
+  monitor's; it must open at the size told, and measure the monitor once it has closed. Without
+  the change it fails (opened 1478 by 844, told 1382 by 789).
+  `the_screen_is_measured_where_the_host_has_not_asked_in_this_scale` covers a host that asks
+  nothing first and one that gives its scale after asking.
+
+**Evidence (the Mac, the 4K monitor at 1x again and restored after, 2026-10-18).** The
+standalone opened on the monitor (from a terminal there, the window placed by macOS): with
+`opening` measuring again as before, its window 1382 points wide and the editor 1471, cut off on
+the right and at the bottom; with the change, whole, and whole on the Retina screen. In Live, a
+renamed VST3 build ("CA-72 OPN", removed after): whole on the Retina screen and moved to the
+monitor.
+
+
+## R-WIN-STANDALONE. The Windows standalone's window is its panel's, at any display scale
+
+**The report (issue 64).** A Windows 11 user of the standalone: "opens up with a large
+background window with extra black space in it", the VST3 fine (KVR forum, 2026-10-16).
+
+**Agent decisions, 2026-10-18** (not separately approved; the owner is asked to confirm the
+second):
+- **The cause, reproduced.** With 0.2.6's released `CA-72.exe` and with `main` (`1a1dd6c`) on
+  Windows 11 at 125 %, 150 % and 175 % (the lab's 1920 by 1080 display; Windows offers no more
+  there), the window's client was the panel's size times the display's scale, and the panel
+  itself was drawn at 1: 1429 by 816 pixels around a panel of 1143 by 653 at 125 %, 1412 by 806
+  around 941 by 537 at 150 %, 1505 by 859 around 860 by 491 at 175 %, black to its right and
+  below. nih-plug's standalone opened its window at the system's scale (baseview's
+  `SystemScaleFactor`), which baseview measures only after the window is open, having made the
+  process aware of each monitor's scale only then; the editor, told no scale (as in Ableton
+  Live, R18), measured the screen first and drew at 1. At 100 % the two agreed, which is why it
+  went unseen. And at any scale the window's frame could be dragged or the window maximised,
+  which the editor does not follow: black beyond the panel, or the panel cut off (the grip with
+  it). A window open while the display's scale changes was scaled by Windows, the panel left as
+  it was.
+- **The window and the panel share one scale.** On Windows the standalone makes the process
+  aware of each monitor's scale before anything is measured, takes the primary monitor's scale
+  (where the window opens), tells the editor that scale before asking its size, and opens its
+  window at the same scale (nih-plug's `production::app_window`, `third_party/nih-plug/PATCHES.md`).
+  The panel opens at the same share of the screen as before (80 %, R6), sharp, and the SIZE
+  menu's sizes (R-SIZE) are logical pixels as in a host that gives a scale. The saved width is
+  logical, so a session restored at another scale opens at the same share of the panel's size.
+- **No frame to drag and no maximise box** (for the owner to confirm). The standalone's
+  window is sized by the panel alone, with the grip and WINDOW › SIZE, as on macOS, whose
+  window was never resizable: baseview's change 9 (`third_party/baseview/PATCHES.md`). The
+  alternative, the panel following a dragged frame, needs the editor to take a size from
+  outside (with its proportions, a maximised window would still show bars), which the hosts'
+  edge resize (R-SIZE, "Not done") would need too; left for that change.
+- **A resize from outside is undone** (Windows): a window scaled by Windows as its display's
+  scale changes, or maximised by another program, is fitted to the panel again at its next
+  frame (`app_window::refits`). The panel keeps the scale it opened at until the window is
+  opened again, as an editor in a host does (R19). Not on Linux or macOS, where a window
+  manager may hold a window at a size of its own.
+- **One baseview.** nih-plug's standalone took upstream's baseview at `579130e` from git, a
+  second copy beside the editor's patched one (`third_party/baseview`); it now opens its window
+  with the patched copy, without the `opengl` feature neither window uses (the release's
+  `CA-72.exe` linked `OPENGL32.dll` for nothing; this build does not). Its X11 backend is the same code; the macOS
+  backend's differences are upstream's later fixes and the CA-72's changes 4 and 7, which the
+  editor already runs on.
+
+**Evidence (Windows 11 `DESKTOP-KHN6H8K`, 1920 by 1080, in the desktop session; 2026-10-18).**
+The display's scale was changed live (`SystemParametersInfo`'s logical DPI override) to 125,
+150 and 175 % and put back to 100 %, its registry key as before. The fixed build
+(`ca72-standalone`, `--release`, `--no-devices`, its own `IDLE_FOUNDRY_SHARED`): the window's
+client equal to the panel's window at each scale (1446 by 826 at 100 %, 1429 by 816 at 125 %,
+1412 by 806 at 150 %, 1505 by 859 at 175 %); PANEL off and on (1505 by 504 and back); SIZE
+75 % at 125 % (1294 by 739), closed and opened again at that size; the frame's corner dragged
+by the pointer, a double click on the title and Win+Up: no change; 125 % to 150 % and to 100 %
+while open: the window kept to the panel; minimised and restored. The new test
+`the_standalone_s_window_is_its_editor_s_at_every_scale` (`crates/ca72-plugin/src/editor.rs`,
+Windows, `standalone-production`) opens the window as the app does at 1, 1.25, 1.5, 1.75 and 2
+whatever the display's scale, clicks PANEL off and on, and scales the window from outside:
+the window's client is the panel's window, pixel for pixel, each time, and its style has no
+thick frame and no maximise box. It fails without each part: the scale not told the editor
+("at 1.25, opened: the editor's window", 860 by 491 for 1075 by 614), the old styles ("at 1: a
+frame to drag") and no refit ("at 1, scaled by Windows", 1016 by 550 for 860 by 491). All 14
+`windows_window_tests` pass (MSVC, 1.97.1). The VST3 of this tree in REAPER 7.82: presets'
+drawer opened, shut and reopened, a row chosen, the arrows, PANEL off and the drawer over the
+compact view, no fault. Linux: the standalone built and opened (Hyprland 0.56 under XWayland).
+
+**Not tried:** macOS (the app window now opens through the patched baseview; CI builds it),
+200 % and more (not offered on this display), two displays at different scales (the window
+opens on the primary display, at its scale). Linux under a tiling window manager shows the
+same black space when the manager tiles the window larger than the panel (Hyprland tiled it
+2536 by 1390); the X11 code is the same as before, so this change leaves it as it was.
+
+
+## R-LINUX-ICON. The Linux standalone identifies itself to the dock
+
+**Owner request, 2026-10-18.** Follow up issue #49, a source build showing a gear in Ubuntu
+26.10: rebase the existing fix, check X11 and Wayland identity, "document in the README how a
+source build gets its desktop file and icon", and verify on Hyprland and Ubuntu GNOME.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- Both Linux standalone adapters use the local patched baseview. A top-level X11 window's
+  initial title becomes both strings of `WM_CLASS`, set before mapping; parented editors keep
+  their host's identity. The adapters use `P::NAME`, `CA-72`, which matches `StartupWMClass`.
+  Linux retains the editor's non-OpenGL features; the other platforms' dependency is unchanged.
+- This is X11, through XWayland on Wayland desktops. `AppOptions.app_id` is a saved-session and
+  MIDI identifier, not a Wayland surface id. It stays `com.idlefoundry.ca-72` so existing
+  sessions load. A future native Wayland surface would need `com.idlefoundry.ca72`, the desktop
+  file's stem. The installed desktop id, icon name and `StartupWMClass` stay as they are.
+- The README gives a standalone-only source installation, since a bare executable does not
+  register desktop files. Protocol, product-name, dependency and installation checks enforce
+  the identities and feature selection. The metadata checks may fetch their locked target
+  dependencies, including ones not built on Linux.
+
+**Evidence (the Linux reference machine, 2026-10-18):** Hyprland 0.56.2 reports class and initial
+class `CA-72`, `xwayland: true`; `xprop` confirms both class strings and the title. Ubuntu 26.10's
+GNOME Shell 51.0, in a new VM's live Wayland desktop: the bare binary shows a gear; the same
+binary after `install.sh --standalone-only` shows the CA-72 icon. The installed desktop entry
+launches it, and its pinned icon groups with the running window. Screenshots retained with the
+job's summary. Protocol tests: 4 passed; plug-in tests with production standalone: 308 passed,
+31 ignored; nih-plug library: 68 passed; Python identity: 3 passed; installer: 4 passed. Product
+and legacy release builds, plug-in clippy with default/all features, baseview's default-feature
+clippy, formatting and notices pass. Direct vendored clippy has existing upstream warnings;
+checks with allowances limited to those categories pass. Details and remaining limits are in
+`docs/issue-49-linux-icon.md`. No native Xorg session, other-platform builds or playback test;
+no full workspace repeat beside the other agents' runs. Independent source review found no
+remaining defects.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found the
+fatal-error window, titled `CA-72 — error`, would take that title as its X11 class and so miss
+`StartupWMClass`. The class now comes from the application: the standalone names itself first
+(`identify_standalone`, `Ca72::NAME`, through baseview's new `set_application_class`), and every
+top-level window takes that class whatever its title; without one, the title stays the class.
+A protocol test for a window titled `CA-72 — error` failed before the change (its class was the
+title) and passes after; a plug-in test checks the class against the launcher and that `main`
+names the application before anything else.
+
+
+## R-INSTALL-DESTINATION. Choose the standalone application's folder
+
+**Owner request, 2026-10-18 (issue #54).** Support a chosen installation folder, including an
+external SSD: "Plug-ins must stay where hosts look for them (VST3 and CLAP's standard folders);
+a custom location applies to what can live anywhere: the standalone application and its files."
+
+**Agent decisions, 2026-10-18** (not separately approved):
+
+- **Windows shows the destination page on every install and upgrade.** Program Files remains
+  the default; Inno Setup remembers the previous folder with the same AppId. The page names
+  the fixed VST3 and CLAP folders and explains what moves: the optional app, licences and
+  uninstaller. It also explains that presets and settings stay, and an external drive must
+  be connected to run, update or uninstall the app.
+- **An upgrade stays in the previous folder.** Changing it requires uninstalling first, then
+  installing again; otherwise the old app and uninstall log would be stranded. A missing drive
+  stops before any installed plug-in is replaced, including on a silent update. Reconnect it
+  with the same drive letter. No installer entry removes the user's presets or settings.
+- **Linux's `--prefix` applies to the app and its licence files.** VST3 and CLAP stay in the
+  usual user folders, or `/usr/lib` with `--system`; the desktop entry and icon also stay in
+  their usual folders, so the menu can find them. A prefix must be absolute and already exist,
+  to avoid silently creating a replacement folder when a drive is absent. The same prefix and
+  component/system flags are needed to update or uninstall. Check that the drive is mounted
+  at the same path; an empty mount point alone does not prove a drive is connected. Earlier
+  scripts moved plug-ins with `--prefix` too; their copies need uninstalling with the earlier
+  script first. The README says so.
+- **The Mac app can move in Finder after installation.** Keep its bundle whole; reconnect its
+  drive to run it. The package still installs and updates `/Applications/CA-72.app`; replace
+  the moved copy after an update. Its choice description and the README explain this. The
+  package's destinations, bundle relocation settings, signing and notarisation are unchanged.
+  A package chooser for arbitrary app folders is not added.
+
+**Evidence (2026-10-18):**
+
+- Linux: `python3 scripts/test-standalone-install.py`, nine tests passed, including GIO
+  launching paths with spaces, percent signs, quotes, dollar signs, backticks and backslashes;
+  fixed plug-in and desktop folders with a custom app prefix; an update; missing-drive
+  rejection before replacing a plug-in; default installation; and uninstall keeping presets,
+  settings, a session and an unrelated file. Shell syntax checks passed for `install.sh` and
+  `package.sh`; the macOS distribution XML parses with the new description.
+- Windows 11 (build 26200), Inno Setup 6.7.3: the production script compiles. The production
+  destination page was opened and its rendering checked. For installation, a copy changed
+  only the AppId and the system folder constants to isolated fixture folders: the owner's
+  installed CA-72 must not be replaced. The payload was the public 0.2.6 Windows ZIP, checked
+  against its file manifest. A `subst S:` drive stood in for an external disk; no second
+  writable physical drive was available.
+- The isolated installer installed all components with the app in
+  `S:\Apps with spaces\CA-72`, and the installed app opened a native window with
+  `IDLE_FOUNDRY_SHARED` in the test folder and `--no-devices`, then closed normally and saved
+  its session. An upgrade from fixture version 0.2.6 to 0.2.7 (version metadata only; the same
+  released binaries) remembered the app folder without `/DIR`. An upgrade from the original
+  installer layout also retained its folder. A requested folder change and a disconnected
+  drive were rejected. Uninstall removed the installed binaries, shortcut and test registry
+  entry, keeping user data and an unrelated file. The real installation's registry entry,
+  presets, settings and installed binaries were unchanged by hash.
+
+- `cargo test --workspace`, ngspice 47 required, four build jobs and four test threads,
+  isolated shared data: 494 passed, 0 failed, 56 ignored, exit 0.
+  `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` also passed.
+  An independent source review found no actionable regressions.
+
+Not tried: a physical external SSD; a host rescan from real system plug-in folders (those
+folders were deliberately untouched); Mac app relocation or a rebuilt, signed and notarised
+Mac package. No Rust source or crate manifest changes are included.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found a
+prefix that exists but cannot be written, such as a drive mounted read-only, passed the folder
+check; the plug-ins were then replaced before the app's first write failed, leaving new
+plug-ins with the old app. `install.sh` now writes and removes a probe file in each chosen
+application destination (or its nearest existing folder) before touching any plug-in, and
+stops with "not writable; nothing was changed". A new installer test, with an installed prefix
+and an empty one made read-only, failed before the change (the VST3 was replaced) and passes
+after; all ten installer tests pass. The same script under a real read-only bind mount, in a
+user namespace, left the plug-ins as they were.
+
+
+## R-WHATS-NEW. Offline release highlights after an update
+
+**Owner instruction, 2026-10-18 (#75, overnight job).** Build the machinery with a
+"deliberately plain, clearly temporary presentation, kept separate from the logic so the
+chosen look can replace it". The owner is choosing between a dialog in the AUDIO & MIDI
+style and a drawer on the panel's face. Neither look is decided here. SETTINGS already
+shows the installed build's version (R-VERSION).
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **Bundled highlights.** `docs/releases/notes.toml` condenses the maintained Markdown
+  notes, with Features, Performance improvements, Bug fixes. This checkout has sources
+  for 0.2.3 to 0.2.7; missing historical changes are not invented. The current entry follows
+  0.2.7's draft, which must be revised along with the draft before publication. A release
+  test checks the workspace/build version, current entry and maintained releases. CI runs
+  it before bundling on each platform. `docs/whats-new.md` records the release steps.
+- **Ranges.** A safe previous semantic version selects every available entry after it
+  through the installed version. The view lists exactly the releases included, and each
+  combined item names its release. First installs and unsafe history show current
+  highlights. Semantic-version precedence ignores build metadata; a downgrade and the
+  same version show nothing automatically.
+- **One claim on this computer.** The existing shared `CA-72/settings.toml` stores
+  `last_version_shown`, under its existing file lock. Reading, comparing and replacing
+  happen under one lock, preserving other keys. The highest version shown is retained
+  across downgrades. The claim is kept before displaying, so a crash immediately after
+  it can consume that automatic showing; Settings remains available. Unreadable or
+  unwritable settings suppress the automatic display without overwriting a bad file.
+- **Only a visible editor.** The claim is made in the editor window's frame, after a
+  visibility check, never in construction, activation or processing. The claim's check is
+  stricter than the repaint policy: X11 requires a mapped, viewable window, Windows a
+  visible window with its top window not minimised, macOS an attached, unhidden view with
+  its window visible. A remote AU uses its attached view rather than unreliable backing
+  window occlusion (R-AU-REMOTE-VISIBILITY). No audio or project state participates.
+- **Manual reopening.** SETTINGS > WHAT'S NEW always opens the current release's
+  highlights, without claiming or rewriting history or starting an update check.
+- **Temporary view.** A separate panel module accepts prepared content, wraps and scrolls
+  it inside the current viewport in either look and lettering size, including compact
+  views. Page buttons, the wheel and keyboard navigation reach all entries; CLOSE,
+  Escape and Enter dismiss it. It does not resize the saved window or become project
+  state. Replaced by WN-A below.
+
+**Verification (Linux x86, Rust 1.97.1, 2026-10-19).** The touched crates' tests pass,
+including release ranges, unknown history, downgrades, restart persistence, twelve
+simultaneous threads and eight separate host processes claiming one version. A real CLAP
+entry-point test constructs instances, processes live and offline, and saves state with no
+editor: shared history is untouched on both a fresh install and an existing settings file.
+Editor tests show, dismiss and reopen the notes without sound gestures, preset changes or
+saved-field changes, with audio identical to the bit. A held typing note continues and its
+release passes through the notes. The view's tests wrap, scroll to the last entry and close
+at multiple widths, both lettering sizes and compact/full heights; eight editor renders
+cover both looks. Both approved panel images still pass. Clippy for the touched crates,
+all targets, passes with default and all features. `target/whats-new-evidence/` holds the
+logs and PNGs. No native host, installed plug-in or audio device was opened; macOS and
+Windows execution and the remote AU's visibility still need host acceptance. The
+current-only manual view and claim-before-display policy await the owner's confirmation at
+review; the appearance is WN-A, below.
+
+The full workspace run, including standalone support with ngspice 47 required, passed
+537 tests, 0 failed, 57 ignored at `56b9a1e`. Independent source review found one macOS
+ABI mismatch: AppKit's `BOOL` is a signed char on Intel and a Rust bool only on Apple
+silicon. The visibility check now uses `objc::runtime::BOOL` for both native Boolean
+results. It also requires `NSWindow.isVisible` for remote AU views, bypassing only the
+occlusion bit. The existing remote-view evidence above had `isVisible=true`, so this
+preserves that observed case while excluding an ordered-out backing window. A hidden
+host proxy whose backing window remains visible still needs native host acceptance.
+This final correction is macOS-only; Linux does not compile or execute those calls.
+
+**Owner's choice, 2026-10-19: WN-A.** Of the two mock-ups on the review page, the owner
+chose WN-A: the notes in a dialog in the style of the standalone's AUDIO & MIDI dialog,
+drawn over the dimmed editor, in every build (the plug-ins and the standalone). Its
+colours and sizes are that dialog's: the box #1f2228, edged #4a4640, corners of 20, over
+#08090b at .72; WHAT'S NEW at 52 in #f0a030; under it, at 31 in #a6a5a1, the version
+installed and the releases covered ("CA-72 0.2.7 is installed · Changes since 0.2.5,
+including 0.2.6"); FEATURES, PERFORMANCE IMPROVEMENTS and BUG FIXES at 30, letter-spaced;
+the notes at 33 in #ebe6d8 after a "·"; at 27 the footnote "Shown once after an update ·
+SETTINGS › WHAT'S NEW shows it again"; one button, GOT IT, at DONE's place and in its
+style. Told of the Mac test build's stand-in, which filled the window: "on standalone, i
+don't like that this What's New screen wasn't a modal." So the dialog is a bounded box,
+inset from the window's edges at every size, the editor visible behind it; nothing behind
+takes a press, wheel or key while it shows; GOT IT, Escape or Enter closes it. The stand-in's
+paging row (PREVIOUS, NEXT, the line count, CLOSE · ESC) is gone: scrolling is enough.
+
+**Agent decisions, building WN-A (2026-10-19):**
+
+- **Sizes.** The dialog keeps the AUDIO & MIDI dialog's place and width in the drawing, so
+  it shrinks with the window. Its height follows the view: the mock-up's margins (155 and
+  140 of 1775) in the full view; in the compact view, 60 and 55, with the footnote beside
+  GOT IT, to leave the notes room. LARGE lettering sets all of its text and spacing a
+  quarter larger, as the menus and tips (`Lettering::text`).
+- **The notes.** They wrap under their bullet (the following lines start where the text
+  does) and scroll a line at a time: the wheel or trackpad, the arrow keys, Page Up and
+  Down, Home and End. A slim scroll bar in the dialog's colours (#15171b, thumb #82715c)
+  shows only when they are longer than the dialog; a press on its track pages. A section's
+  title is never left alone at the foot. Combined releases keep naming each note's release
+  (above), set before it in the subtitle's grey rather than as "0.2.6:", which the mock-up,
+  showing no labels, did not settle. The owner should confirm the labels.
+- **Coverage wording.** "Highlights of this release" when no earlier shown version is
+  known; "Changes since 0.2.6" for one release; "Changes since 0.2.3, including 0.2.4,
+  0.2.5 and 0.2.6" for several, naming only releases with bundled notes.
+- **Speed.** The dialog's picture is made once for a scale and layout; the notes are drawn
+  into a strip a line at a time as each first shows; each frame dims the editor with a
+  table, copies the dialog's opaque rows and blends only its edges, then copies the lines
+  that show. Measured in a Retina window (3440 pixels across, full view, notes since 0.2.3,
+  release build, `release_notes_frame_timings`): opening 33 to 41 ms, the first the
+  slowest (the stand-in's 28 to 29 ms, measured the same way at 68b30ba); a frame with the
+  panel changing behind it 6.5 ms (stand-in 25 ms); a line scrolled 6.6 ms (stand-in
+  25 ms); the panel alone 1.1 ms. Opening still makes its pictures on the UI thread.
+- **Review fix (PR #106).** Trackpad travel left over from one direction is cleared when the
+  direction reverses, as in the drawer's list; the line pitch, not a fixed 60 units, sets
+  the travel. A regression test fails without the fix.
+
+**Verification of WN-A (Linux x86, 2026-10-19).** The panel module's tests wrap every line
+clear of the scroll bar, scroll to the last note and back, page from the track, close with
+GOT IT, keep the dialog inside the compact and full views at both lettering sizes and three
+widths, and show lines drawn as they come into view to be identical, to the bit, to lines
+drawn at once. Editor tests close the notes with GOT IT in both looks, both lettering sizes,
+compact and full; in the standalone at its default and smallest widths, compact and full,
+they find the window's edges dimmed outside the box and no control, menu, drawer, note or
+host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
+owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
+worktree. No macOS or Windows host has shown it yet.

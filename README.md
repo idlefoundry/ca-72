@@ -71,17 +71,53 @@ The plug-ins go into the usual folders:
 | Windows | `C:\Program Files\Common Files\VST3` | `C:\Program Files\Common Files\CLAP` | |
 | Linux | `~/.vst3` (`/usr/lib/vst3` with `./install.sh --system`) | `~/.clap` (`/usr/lib/clap`) | |
 
+**Choosing a folder or external drive.** The standalone application and its licence files can
+live elsewhere. The installers keep plug-ins in the folders above so hosts can find them.
+Factory sounds and artwork are built into the binaries; there is no separate sound library
+to move. Your own presets, settings and standalone session stay in your user profile.
+
+- **Windows:** choose the app folder on **Select Destination Location**. The default is
+  `C:\Program Files\Idle Foundry\CA-72`; the licences and uninstaller also go there, even
+  if you select only plug-ins. Updates remember the folder and show it again. To move an
+  existing installation, uninstall it first, then run the installer and choose the new
+  folder. If an external drive is disconnected, the app and its uninstaller cannot launch;
+  an update stops until you reconnect it with the same drive letter. Installed plug-ins
+  continue to work from the system drive.
+- **macOS:** the package installs the app in `/Applications`. Move `CA-72.app` in Finder to
+  your chosen folder or external drive, keeping the bundle whole. The drive must be connected
+  to run it. Updates put a new copy in `/Applications`; quit the app, replace your moved copy
+  with the new one and open that copy. VST3, CLAP and Audio Unit stay in `/Library/Audio/Plug-Ins`.
+- **Linux:** mount the drive, create a folder on it, then run
+  `./install.sh --prefix "/media/you/SSD/CA-72"` with that existing absolute folder. This puts
+  the app in its `bin` subfolder and licences in `share`; the menu entry and icon stay in your
+  usual desktop folders. Add `--standalone-only` to omit plug-ins, or `--system` for a
+  system-wide installation. Reuse the same flags and prefix to update or uninstall. A missing
+  or read-only destination folder stops installation before any plug-ins are replaced; check
+  the drive is mounted, writable, at the same path first. The app cannot launch while it is disconnected. `--prefix`
+  applies only to the standalone; it does not change the plug-in folders or your `PATH`.
+  Use a subfolder on the drive rather than its mount point: the empty mount-point directory
+  can remain after disconnecting, and the script cannot distinguish it from a local folder.
+  If an older script installed plug-ins beneath a custom prefix, uninstall those copies
+  with that script first.
+
 To uninstall: on macOS, delete `CA-72.vst3`, `CA-72.clap` and `CA-72.component` from those
-folders and `/Applications/CA-72.app` if installed; on Windows,
+folders and `CA-72.app` from wherever you keep it; on Windows,
 find **CA-72** in **Settings › Apps** and choose **Uninstall**; on Linux, run
 `./install.sh --uninstall` (`./install.sh --uninstall --system` for a system-wide copy). Your
-presets are kept.
+presets, settings and standalone session are kept.
 
 **Updating.** Open the presets' drawer (click the preset's name under the panel) and click
 **[ CHECK FOR UPDATES ]** at the foot of the PRESET display, under the version you have. If a
 newer release is out, **[ DOWNLOAD ]** opens its installer for your computer in your browser:
 close your host, then run it as above. The CA-72 checks only when you click, through your system's `curl`,
 and sends nothing of yours.
+
+Settings also has **WHAT'S NEW…**, which opens this version's bundled highlights without
+an internet connection, in a dialog over the panel; **GOT IT** or Escape closes it. The first
+visible editor after an install or update shows them automatically, once for your OS user
+on that computer. When an earlier shown version is
+known, that automatic view includes the available intervening releases. Settings always
+reopens the current release's highlights.
 
 ## Playing it
 
@@ -139,6 +175,10 @@ must support a common nominal sample rate. A bounded capture reservoir adapts
 the input to the output clock, so separately enumerated capture/playback endpoints
 are supported. The reservoir adds input buffering; the displayed output buffer
 duration is not the full input-to-output latency.
+
+The standalone's window is the panel's size: resize it with the grip at the panel's corner
+or the settings button's WINDOW › SIZE. On Windows it opens at the scale of the main
+display, and its frame cannot be dragged or maximized.
 
 The standalone remembers unsaved edits, MIDI Learn, window size and the last
 working audio/MIDI choices in `CA-72/Standalone/session.json` beneath the same
@@ -471,6 +511,26 @@ this needs ALSA and OpenGL headers (`libasound2-dev libgl-dev` on Debian/Ubuntu,
 `target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
 Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
 
+On Linux, a source build also needs the desktop entry and icon installed for the dock
+to identify it. Install the packaged archive with `./install.sh --standalone-only`, or
+install just the application from source after `scripts/standalone.sh`:
+
+```sh
+mkdir -p target/standalone-install
+cp target/bundled/ca72-standalone scripts/standalone/CA-72.desktop \
+  scripts/standalone/com.idlefoundry.ca72.png scripts/installer/install.sh \
+  THIRD-PARTY-NOTICES.txt target/standalone-install/
+cp LICENSE target/standalone-install/LICENSE.txt
+sh target/standalone-install/install.sh --standalone-only
+```
+
+This installs `~/.local/bin/ca72-standalone`, the launcher
+`com.idlefoundry.ca72.desktop` and its icon for your user. Open **CA-72** from your
+applications menu. Running a bare executable does not register those files. The Linux
+window uses X11, through XWayland in a Wayland session; its class is `CA-72`, matching
+the launcher's `StartupWMClass`. See the
+[Linux window identity checks](docs/issue-49-linux-icon.md) for the checks and evidence.
+
 To try the plug-in without a host, run it as an application of its own:
 
 ```sh
@@ -479,6 +539,11 @@ cargo run --release -p ca72-plugin --example standalone --features standalone
 
 On Linux this also needs the ALSA, JACK and OpenGL headers (Debian and Ubuntu:
 `libasound2-dev libjack-jackd2-dev libgl-dev`).
+
+The offline What's New highlights are compiled from `docs/releases/notes.toml`, condensed
+from the Markdown release notes beside it. Before changing the release version, follow
+[Updating the bundled notes](docs/whats-new.md). CI checks that this build and every maintained
+release from 0.2.0 onwards have entries before making its bundles.
 
 ## Testing
 

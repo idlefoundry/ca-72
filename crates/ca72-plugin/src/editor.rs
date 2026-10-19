@@ -346,6 +346,8 @@ pub struct Ca72Editor {
     open: Arc<AtomicBool>,
     /// The width fitted to the screen for this opening (0 not yet measured).
     fitted: Arc<AtomicU32>,
+    /// What measures the screen ([`screen::usable`]; a test's own screen).
+    screen: fn(Option<f64>) -> Option<(f64, f64)>,
     /// The keys the host gives the editor's view rather than its window (decisions.md R53).
     host_keys: Arc<HostKeys>,
 }
@@ -519,6 +521,7 @@ impl Ca72Editor {
             scale: AtomicU32::new(0),
             open: Arc::new(AtomicBool::new(false)),
             fitted: Arc::new(AtomicU32::new(0)),
+            screen: screen::usable,
             host_keys: Arc::new(HostKeys::default()),
         }
     }
@@ -528,10 +531,12 @@ impl Ca72Editor {
         (s > 0.0 && s.is_finite()).then_some(s)
     }
 
-    /// The editor opening: the drawer shut (the window does not open grown), the screen
-    /// measured again, its size.
+    /// The editor opening: the drawer shut (the window does not open grown), at the size the
+    /// host was last told, the size of its window. The screen is not measured again: the one
+    /// in use may have changed since the host asked (macOS's main screen is the one with the
+    /// key window; the standalone's own window, sized on the Retina screen, had become it on a
+    /// 1x monitor, and the editor was drawn wider than it; decisions.md R-TWO-SCREENS).
     fn opening(&self) -> (u32, u32) {
-        self.fitted.store(0, Ordering::Relaxed);
         self.params.editor_presets.store(false, Ordering::Relaxed);
         self.params.editor_panel_applied.store(
             self.params.editor_panel.load(Ordering::Relaxed),
@@ -544,14 +549,15 @@ impl Ca72Editor {
         self.size()
     }
 
-    /// The width fitted to the screen, measured once an opening and kept until the editor
-    /// closes. Measured afresh at each of the host's questions, it changed with the drawer
-    /// (on Linux it is the monitor under the pointer), and the panel was drawn again at
-    /// another scale as the drawer opened and shut (the owner, 2026-10-03; decisions.md R19).
+    /// The width fitted to the screen, measured once an opening (at the host's first question,
+    /// or as the editor opens if it asked none) and kept until the editor closes. Measured
+    /// afresh at each of the host's questions, it changed with the drawer (on Linux it is the
+    /// monitor under the pointer), and the panel was drawn again at another scale as the
+    /// drawer opened and shut (the owner, 2026-10-03; decisions.md R19).
     fn fitted(&self) -> u32 {
         match self.fitted.load(Ordering::Relaxed) {
             0 => {
-                let w = fitted_width(screen::usable(self.host_scale().map(f64::from)));
+                let w = fitted_width((self.screen)(self.host_scale().map(f64::from)));
                 self.fitted.store(w, Ordering::Relaxed);
                 w
             }
@@ -598,11 +604,13 @@ fn scale_policy(host: Option<f32>) -> WindowScalePolicy {
     }
 }
 
-impl Editor for Ca72Editor {
-    fn spawn(
+impl Ca72Editor {
+    /// The editor's window opened in `parent`, its presets from `library` (the tests' own).
+    fn spawn_with(
         &self,
         parent: ParentWindowHandle,
         context: Arc<dyn GuiContext>,
+        library: Library,
     ) -> Box<dyn Any + Send> {
         let (width, height) = self.opening();
         let scale = self.host_scale();
@@ -631,7 +639,7 @@ impl Editor for Ca72Editor {
                     meters,
                     width,
                     f64::from(scale.unwrap_or(1.0)),
-                    Library::shared(),
+                    library,
                     host_keys,
                 );
                 panel.editing.playing.notes = local_notes;
@@ -641,6 +649,16 @@ impl Editor for Ca72Editor {
         );
         self.open.store(true, Ordering::Release);
         Box::new(window::Handle::new(Some(window), self.closing()))
+    }
+}
+
+impl Editor for Ca72Editor {
+    fn spawn(
+        &self,
+        parent: ParentWindowHandle,
+        context: Arc<dyn GuiContext>,
+    ) -> Box<dyn Any + Send> {
+        self.spawn_with(parent, context, Library::shared())
     }
 
     fn size(&self) -> (u32, u32) {
@@ -677,7 +695,10 @@ impl Editor for Ca72Editor {
         if self.open.load(Ordering::Acquire) {
             return false;
         }
-        self.scale.store(factor.to_bits(), Ordering::Relaxed);
+        // A width measured in the old scale's pixels (Windows, Linux) is measured again.
+        if self.scale.swap(factor.to_bits(), Ordering::Relaxed) != factor.to_bits() {
+            self.fitted.store(0, Ordering::Relaxed);
+        }
         true
     }
 
@@ -820,6 +841,8 @@ struct Editing {
     /// Where they are kept (none in the tests' editors, which keep nothing on the computer).
     settings_file: Option<std::path::PathBuf>,
     ultra_note: bool,
+    whats_new: Option<ca72_panel::whats_new::View>,
+    whats_new_checked: bool,
     /// A value being typed into a readout (decisions.md R52): which, and what so far; the
     /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
     /// a switch had before it), for a double click.
@@ -959,7 +982,8 @@ impl PanelWindow {
             || learning
             || self.editing.typing.is_some()
             || self.editing.note_typing_allowed()
-            || self.editing.standalone_dialog_open();
+            || self.editing.standalone_dialog_open()
+            || self.editing.whats_new.is_some();
         // (And the keys the host gives the view: the editor's while it holds them.)
         self.host_keys.holding.store(holding, Ordering::Release);
         // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
@@ -1069,6 +1093,8 @@ impl Editing {
             settings,
             settings_file: (!cfg!(test)).then(crate::settings::file),
             ultra_note: false,
+            whats_new: None,
+            whats_new_checked: false,
             typing: None,
             typing_keys: false,
             last_strip_press: None,
@@ -1088,6 +1114,33 @@ impl Editing {
         self.motion = Motion::at(self.params.quality.value(), 0.0);
         self.scene.opening = self.motion.opening(!self.settings.shutter);
         self
+    }
+
+    /// Called only by an editor window's frame, once it is actually visible. Neither
+    /// constructing the plug-in/editor nor drawing a hidden editor consumes the claim.
+    fn release_notes_when_visible(&mut self, visible: bool) {
+        if !visible || self.whats_new_checked {
+            return;
+        }
+        self.whats_new_checked = true;
+        if let Some(path) = &self.settings_file {
+            match crate::settings::claim_release_notes(path, crate::update::VERSION) {
+                Ok(Some(notes)) => self.show_release_notes(notes),
+                Ok(None) => {}
+                Err(error) => nih_log!("Could not keep What's New history: {error}"),
+            }
+        }
+    }
+
+    fn show_release_notes(&mut self, notes: crate::whats_new::Notes) {
+        self.whats_new = Some(notes.view());
+        let height = f64::from(self.physical_height()) / self.renderer.scale();
+        if let Some(view) = &mut self.whats_new {
+            view.fit(self.renderer.fonts(), height, self.settings.lettering);
+        }
+        self.list_travel = 0.0;
+        self.typing_keys = true;
+        self.composed = None;
     }
 
     /// The editor drawn in `skin` from now on, on this computer (decisions.md R51): its
@@ -1154,6 +1207,7 @@ impl Editing {
             && self.typing.is_none()
             && !self.learning.holds_keys(&self.params.midi_map)
             && !self.standalone_dialog_open()
+            && self.whats_new.is_none()
     }
 
     /// The FREQUENCY knobs read through `law` from now on, on this computer (decisions.md
@@ -1776,6 +1830,13 @@ impl Editing {
 
     fn press(&mut self, modifiers: Modifiers) {
         let (x, y) = self.in_drawing(self.pointer);
+        if let Some(notes) = &mut self.whats_new {
+            if notes.press(x, y) {
+                self.whats_new = None;
+            }
+            self.composed = None;
+            return;
+        }
         #[cfg(feature = "standalone-production")]
         if let Some(dialog) = &mut self.standalone_dialog {
             if dialog.press(x, y) {
@@ -1812,6 +1873,10 @@ impl Editing {
             Pressed::Done => return,
             Pressed::Indicator(shown) => {
                 self.keep_settings(Change::Shutter(shown));
+                return;
+            }
+            Pressed::WhatsNew => {
+                self.show_release_notes(crate::whats_new::current());
                 return;
             }
             Pressed::StandaloneSettings => {
@@ -1964,7 +2029,7 @@ impl Editing {
     /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R34),
     /// on the panel or the strip; elsewhere none.
     fn context_menu(&mut self) {
-        if self.standalone_dialog_open() {
+        if self.standalone_dialog_open() || self.whats_new.is_some() {
             return;
         }
         self.playing.release();
@@ -2033,7 +2098,7 @@ impl Editing {
 
     /// The pointer moved.
     fn moved(&mut self, modifiers: Modifiers) {
-        if self.standalone_dialog_open() {
+        if self.standalone_dialog_open() || self.whats_new.is_some() {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
@@ -2191,6 +2256,28 @@ impl Editing {
     }
 
     fn scrolled(&mut self, delta: ScrollDelta, modifiers: Modifiers) {
+        if let Some(notes) = &mut self.whats_new {
+            // A line for each line's travel, the rest kept for the next event, as the
+            // drawer's list; a turn the other way starts again (PR #106's review: a
+            // trackpad's fraction left from one way had eaten the first of the other).
+            let lines = match delta {
+                ScrollDelta::Lines { y, .. } => f64::from(y),
+                ScrollDelta::Pixels { y, .. } => {
+                    f64::from(y) * self.dpr / self.renderer.scale() / notes.line_height()
+                }
+            };
+            if lines * self.list_travel < 0.0 {
+                self.list_travel = 0.0;
+            }
+            self.list_travel += lines;
+            let whole = self.list_travel.trunc();
+            if whole != 0.0 {
+                notes.scroll(-(whole as i32));
+                self.list_travel -= whole;
+                self.composed = None;
+            }
+            return;
+        }
         if self.standalone_dialog_open() {
             return;
         }
@@ -2533,6 +2620,10 @@ impl Editing {
             .learning
             .list
             .then(|| self.learning.list_scene(&self.params.midi_map));
+        let notes_height = f64::from(self.physical_height()) / self.renderer.scale();
+        if let Some(notes) = &mut self.whats_new {
+            notes.fit(self.renderer.fonts(), notes_height, self.settings.lettering);
+        }
         let panel = self.renderer.render(&self.scene);
         self.strip_scene.bar.clone_from(&self.browser.bar);
         // (The strip's parts drawn again over the panel's frame where it changed there: the
@@ -2580,7 +2671,11 @@ impl Editing {
             .as_ref()
             .is_some_and(|c| (c.width(), c.height()) == (self.physical_width, height));
         self.damage = (kept
-            && !(drawer || shut || self.renderer.floating() || self.standalone_dialog_open()))
+            && !(drawer
+                || shut
+                || self.renderer.floating()
+                || self.standalone_dialog_open()
+                || self.whats_new.is_some()))
         .then(|| {
             let mut places = self.renderer.damages().to_vec();
             if let Some([x0, y0, x1, y1]) = self.strip.damage() {
@@ -2612,6 +2707,11 @@ impl Editing {
             && let Some(frame) = &mut self.composed
         {
             dialog.draw(frame, self.renderer.scale());
+        }
+        if let Some(notes) = &mut self.whats_new
+            && let Some(frame) = &mut self.composed
+        {
+            notes.draw(frame, self.renderer.scale(), self.renderer.fonts());
         }
         true
     }
@@ -2861,6 +2961,25 @@ impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
         self.reconcile_resize();
+        if let Some(notes) = &mut self.whats_new {
+            if k.state == KeyState::Up {
+                self.playing.key(k, false);
+            }
+            if k.state == KeyState::Down {
+                match k.key {
+                    Key::Escape | Key::Enter => self.whats_new = None,
+                    Key::ArrowDown => notes.scroll(1),
+                    Key::ArrowUp => notes.scroll(-1),
+                    Key::PageDown => notes.page(1),
+                    Key::PageUp => notes.page(-1),
+                    Key::Home => notes.home(),
+                    Key::End => notes.end(),
+                    _ => {}
+                }
+                self.composed = None;
+            }
+            return true;
+        }
         let allowed = self.note_typing_allowed();
         let typing_root = self.playing.typing_root;
         if self.playing.key(k, allowed) {
@@ -3000,6 +3119,13 @@ impl WindowHandler for PanelWindow {
                 return;
             }
             self.hidden_drawn = Some(now);
+        }
+        if !self.editing.whats_new_checked {
+            self.editing
+                .release_notes_when_visible(window::release_notes_visible(
+                    window,
+                    self.editing.context.native_window_occlusion_reliable(),
+                ));
         }
         #[cfg(test)]
         DRAWN.fetch_add(1, Ordering::Relaxed);
@@ -3500,6 +3626,69 @@ pub(crate) mod window {
         }
     }
 
+    /// Stricter than repaint visibility: an unmapped scan/test editor must not consume
+    /// What's New. A remote AU's backing window can be occluded while its attached view
+    /// is presented by the host, so only that case ignores native occlusion (R-AU-REMOTE-VISIBILITY).
+    #[cfg_attr(target_os = "macos", allow(unexpected_cfgs))]
+    pub fn release_notes_visible(window: &baseview::Window<'_>, reliable: bool) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use cocoa::base::{id, nil};
+            use objc::{msg_send, sel, sel_impl};
+            let RawWindowHandle::AppKit(h) = window.raw_window_handle() else {
+                return false;
+            };
+            let view = h.ns_view as id;
+            if view == nil {
+                return false;
+            }
+            // SAFETY: baseview's live NSView, read on its GUI thread.
+            let (holder, hidden): (id, objc::runtime::BOOL) = unsafe {
+                (
+                    msg_send![view, window],
+                    msg_send![view, isHiddenOrHasHiddenAncestor],
+                )
+            };
+            if holder == nil || hidden != objc::runtime::NO {
+                return false;
+            }
+            // SAFETY: the live view's NSWindow, on its GUI thread. BOOL differs between
+            // Intel and Apple silicon; Rust's bool is not AppKit's return type on Intel.
+            let visible: objc::runtime::BOOL = unsafe { msg_send![holder, isVisible] };
+            visible != objc::runtime::NO && (!reliable || seen(window))
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use winapi::um::winuser::IsWindowVisible;
+            let _ = reliable;
+            // SAFETY: baseview's live HWND, read on its GUI thread.
+            hwnd(window).is_some_and(|hwnd| unsafe { IsWindowVisible(hwnd) } != 0) && seen(window)
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use x11rb::protocol::xproto::{ConnectionExt, MapState};
+            let _ = reliable;
+            let xid = match window.raw_window_handle() {
+                RawWindowHandle::Xcb(h) => h.window,
+                RawWindowHandle::Xlib(h) => h.window as u32,
+                _ => return false,
+            };
+            let Ok((connection, _)) = x11rb::connect(None) else {
+                return false;
+            };
+            connection
+                .get_window_attributes(xid)
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+                .is_some_and(|attributes| attributes.map_state == MapState::VIEWABLE)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        {
+            let _ = (window, reliable);
+            false
+        }
+    }
+
     /// Whether the editor's window has lost the pointer's capture (Windows: baseview
     /// captures it at a press and lets it go at the release, and ignores its loss, at Alt-Tab
     /// mid-drag, when no release comes). Elsewhere a release always comes.
@@ -3928,6 +4117,358 @@ mod tests {
             panic!("the editor does not read the state")
         }
         fn set_state(&self, _state: PluginState) {}
+    }
+
+    #[test]
+    fn release_notes_wait_for_a_visible_editor_and_reopen_without_changing_the_sound() {
+        use crate::engine::{Engine, Event};
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        let (mut e, host, params) = editing();
+        e.settings_file = Some(path.clone());
+        e.update = Update::with(
+            crate::update::fake::no_curl,
+            crate::update::fake::no_browser,
+        );
+        e.draw();
+        let controls = params.controls();
+        let preset = crate::presets::values_now(&params);
+        let fields = params.serialize_fields();
+        let update = e.update.scene();
+        let render = || {
+            let mut engine = Engine::new();
+            engine.set(&params.controls());
+            engine.prepare(48_000.0, 12345);
+            engine.event(Event::Note { key: 60, on: true });
+            (0..4096)
+                .map(|_| {
+                    let (l, r) = engine.tick_stereo(0.0);
+                    (l.to_bits(), r.to_bits())
+                })
+                .collect::<Vec<_>>()
+        };
+        let audio = render();
+        assert!(audio.iter().any(|&(l, _)| f32::from_bits(l).abs() > 0.001));
+        for _ in 0..3 {
+            e.release_notes_when_visible(false);
+            e.draw();
+        }
+        assert!(!e.whats_new_checked && e.whats_new.is_none());
+        assert!(!path.exists(), "a hidden editor never consumes the history");
+        e.release_notes_when_visible(true);
+        assert!(e.whats_new.is_some());
+        let saved = std::fs::read(&path).expect("claim kept");
+        e.draw();
+        assert!(keyed(&mut e, Key::Escape));
+        assert!(e.whats_new.is_none());
+        e.release_notes_when_visible(true);
+        assert!(e.whats_new.is_none(), "dismissal is final for this editor");
+        e.strip_press(StripTarget::Bar(BarTarget::Settings));
+        assert!(menu_items(&e).contains(&("WHAT'S NEW…".to_owned(), true)));
+        menu_item(&mut e, "WHAT'S NEW…");
+        assert!(e.whats_new.is_some(), "manual reopening remains available");
+        e.scrolled(ScrollDelta::Lines { x: 0.0, y: -2.0 }, Modifiers::empty());
+        e.draw();
+        assert!(keyed(&mut e, Key::End));
+        assert!(keyed(&mut e, Key::Home));
+        assert!(keyed(&mut e, Key::Enter));
+        e.draw();
+        assert!(e.whats_new.is_none());
+        assert_eq!(params.controls(), controls);
+        assert_eq!(crate::presets::values_now(&params), preset);
+        assert_eq!(
+            params.serialize_fields(),
+            fields,
+            "saved project fields unchanged"
+        );
+        assert_eq!(render(), audio, "audio remains bit-identical");
+        assert!(host.take().is_empty(), "no sound parameter gestures");
+        assert_eq!(e.update.scene(), update, "no network request");
+        assert_eq!(
+            std::fs::read(&path).expect("settings"),
+            saved,
+            "reopening/dismissal write nothing"
+        );
+        drop(e);
+        for api in [PluginApi::Clap, PluginApi::Vst3, PluginApi::Standalone] {
+            let (mut restarted, _, _) = editing_for_api(
+                Ca72Params::default(),
+                Library::at(dir.path().join("library")),
+                api,
+            );
+            restarted.settings_file = Some(path.clone());
+            restarted.release_notes_when_visible(true);
+            assert!(
+                restarted.whats_new.is_none(),
+                "shared history after restart: {api}"
+            );
+        }
+    }
+
+    #[test]
+    fn release_notes_do_not_interrupt_a_held_typing_note_or_lose_its_release() {
+        let (mut e, _, _) = editing_standalone();
+        e.playing.typing = true;
+        let down = KeyboardEvent {
+            key: Key::Character("a".into()),
+            ..Default::default()
+        };
+        assert!(e.keyed(&down));
+        assert!(e.playing.notes.pop().expect("attack").on);
+        let generation = e.playing.notes.generation();
+        e.show_release_notes(crate::whats_new::current());
+        e.draw();
+        assert_eq!(e.playing.notes.generation(), generation);
+        assert!(
+            e.playing.notes.pop().is_none(),
+            "opening leaves the note sounding"
+        );
+        let up = KeyboardEvent {
+            state: KeyState::Up,
+            ..down
+        };
+        assert!(e.keyed(&up));
+        assert!(!e.playing.notes.pop().expect("release through the notes").on);
+        assert!(keyed(&mut e, Key::Escape));
+    }
+
+    /// What the notes cost a frame in a Retina window (3440 pixels across), full view: the
+    /// frame that opens them, a frame in which the panel behind them changes, a frame that
+    /// scrolls them, against a frame of the panel alone (`-- --ignored --nocapture`, in
+    /// release).
+    #[test]
+    #[ignore = "prints timings"]
+    fn release_notes_frame_timings() {
+        let (mut e, _, _) = editing();
+        e.params.editor_panel.store(true, Ordering::Relaxed);
+        e.set_panel_height(true);
+        e.fit(2.0, 1720, 3440);
+        e.draw();
+        let ms = |t: Instant, n: u32| t.elapsed().as_secs_f64() * 1000.0 / f64::from(n);
+        let n = 20;
+        let t = Instant::now();
+        for _ in 0..n {
+            e.composed = None;
+            e.draw();
+        }
+        println!("the panel alone, all of it: {:.2} ms a frame", ms(t, n));
+        let (mut opening, mut laid_out) = (Vec::new(), Vec::new());
+        for _ in 0..5 {
+            let t = Instant::now();
+            e.show_release_notes(
+                crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                    .expect("combined notes"),
+            );
+            laid_out.push(ms(t, 1));
+            e.draw();
+            opening.push(ms(t, 1));
+            assert!(keyed(&mut e, Key::Escape));
+            e.draw();
+        }
+        println!("opening the notes: {opening:.2?} ms (laid out in {laid_out:.2?} ms)");
+        e.show_release_notes(
+            crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                .expect("combined notes"),
+        );
+        e.draw();
+        let t = Instant::now();
+        for _ in 0..n {
+            e.composed = None;
+            e.draw();
+        }
+        println!("the panel changing behind them: {:.2} ms a frame", ms(t, n));
+        let t = Instant::now();
+        for i in 0..n {
+            keyed(
+                &mut e,
+                if i % 2 == 0 {
+                    Key::ArrowDown
+                } else {
+                    Key::ArrowUp
+                },
+            );
+            e.draw();
+        }
+        println!("a line scrolled: {:.2} ms a frame", ms(t, n));
+    }
+
+    /// The notes are a modal dialog in the standalone too (the owner, 2026-10-19, of the
+    /// stand-in: "on standalone, i don't like that this What's New screen wasn't a modal"):
+    /// at its default size and its smallest, compact and full, a box inset from the window's
+    /// edges over the editor dimmed, which takes no click, wheel or key meanwhile; GOT IT
+    /// closes it. With CA72_WHATS_NEW_PNG, a folder, the frames written there.
+    #[test]
+    fn release_notes_are_a_modal_dialog_in_the_standalone_at_every_size() {
+        for width in [DEFAULT_WIDTH, MIN_WIDTH] {
+            for expanded in [false, true] {
+                let (mut e, host, params) = editing_standalone();
+                e.params.editor_panel.store(expanded, Ordering::Relaxed);
+                e.set_panel_height(expanded);
+                e.fit(1.0, width, width);
+                e.show_release_notes(
+                    crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                        .expect("combined notes"),
+                );
+                e.draw();
+                let frame = e.composed.as_ref().expect("notes frame");
+                assert_eq!(frame.width(), width);
+                if let Some(out) = std::env::var_os("CA72_WHATS_NEW_PNG") {
+                    let out = std::path::Path::new(&out);
+                    std::fs::create_dir_all(out).expect("evidence folder");
+                    let view = if expanded { "full" } else { "compact" };
+                    frame
+                        .save_png(out.join(format!("standalone-{view}-{width}.png")))
+                        .expect("PNG");
+                }
+                // The window's edges show the editor, dimmed, round the dialog's box.
+                let (w, h) = (frame.width() - 1, frame.height() - 1);
+                for (x, y) in [(0, 0), (w, 0), (0, h), (w, h), (w / 2, 2), (w / 2, h - 2)] {
+                    let p = frame.pixel(x, y).expect("pixel");
+                    assert_ne!(
+                        [p.red(), p.green(), p.blue()],
+                        [0x1f, 0x22, 0x28],
+                        "({x}, {y}) is outside the box"
+                    );
+                }
+                let notes = e.whats_new.as_ref().expect("notes");
+                let [x, y, bw, bh] = notes.button();
+                let bottom = f64::from(e.physical_height()) / e.renderer.scale();
+                assert!(x + bw < art::W - 300.0 && y + bh < bottom - 40.0);
+                // Nothing behind it takes a press, a wheel or a key.
+                let controls = params.controls();
+                for place in [(230.0, 400.0), (1500.0, 600.0), (3000.0, bottom - 20.0)] {
+                    let p = at(&e, place);
+                    click(&mut e, p);
+                    e.scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 }, Modifiers::empty());
+                    e.context_menu();
+                }
+                e.playing.typing = true;
+                let key = KeyboardEvent {
+                    key: Key::Character("a".into()),
+                    ..Default::default()
+                };
+                assert!(e.keyed(&key), "the notes keep the keys");
+                assert!(e.playing.notes.pop().is_none(), "no note played");
+                assert!(e.whats_new.is_some() && e.learning.menu().is_none());
+                assert!(!e.browser.open);
+                assert_eq!(params.controls(), controls);
+                assert!(host.take().is_empty());
+                let close = at(&e, (x + bw / 2.0, y + bh / 2.0));
+                click(&mut e, close);
+                assert!(e.whats_new.is_none());
+            }
+        }
+    }
+
+    /// A trackpad's travel the other way starts afresh (PR #106's review): what was left of
+    /// a line from one way does not eat the first line of the other.
+    #[test]
+    fn release_notes_scroll_back_at_once_when_a_trackpad_turns() {
+        let (mut e, _, _) = editing();
+        e.show_release_notes(
+            crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                .expect("combined notes"),
+        );
+        e.draw();
+        let notes = e.whats_new.as_mut().expect("notes");
+        assert!(notes.scrolls());
+        notes.scroll(3);
+        let line = notes.line_height() * e.renderer.scale() / e.dpr;
+        let pixels = |lines: f64| ScrollDelta::Pixels {
+            x: 0.0,
+            y: (lines * line) as f32,
+        };
+        // Most of a line down, then a little up and most of one up: a line up.
+        e.scrolled(pixels(-0.9), Modifiers::empty());
+        assert_eq!(e.whats_new.as_ref().expect("notes").position(), 3);
+        e.scrolled(pixels(0.3), Modifiers::empty());
+        e.scrolled(pixels(0.8), Modifiers::empty());
+        assert_eq!(e.whats_new.as_ref().expect("notes").position(), 2);
+        // And the same way, fractions add up to whole lines.
+        for _ in 0..4 {
+            e.scrolled(pixels(-0.6), Modifiers::empty());
+        }
+        assert_eq!(e.whats_new.as_ref().expect("notes").position(), 4);
+        e.scrolled(ScrollDelta::Lines { x: 0.0, y: 2.0 }, Modifiers::empty());
+        assert_eq!(e.whats_new.as_ref().expect("notes").position(), 2);
+    }
+
+    #[test]
+    fn release_notes_fit_both_looks_lettering_sizes_and_compact_views() {
+        for skin in [Skin::Drawn, Skin::Worn] {
+            for lettering in [Lettering::Standard, Lettering::Large] {
+                for expanded in [false, true] {
+                    let (mut e, host, _) = editing();
+                    e.set_look(skin);
+                    e.set_lettering(lettering);
+                    e.params.editor_panel.store(expanded, Ordering::Relaxed);
+                    e.set_panel_height(expanded);
+                    e.fit(1.0, MIN_WIDTH, MIN_WIDTH);
+                    e.show_release_notes(
+                        crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                            .expect("combined notes"),
+                    );
+                    e.draw();
+                    assert_eq!(e.expanded(), expanded);
+                    assert_eq!(
+                        e.composed.as_ref().expect("notes frame").height(),
+                        e.physical_height()
+                    );
+                    // (With CA72_WHATS_NEW_PNG, a folder: the frames written there, at the
+                    // smallest width and at the mock-up's, 1554 pixels.)
+                    if let Some(out) = std::env::var_os("CA72_WHATS_NEW_PNG") {
+                        let out = std::path::Path::new(&out);
+                        std::fs::create_dir_all(out).expect("evidence folder");
+                        let view = if expanded { "full" } else { "compact" };
+                        for width in [MIN_WIDTH, 1554] {
+                            e.fit(1.0, width, width);
+                            e.draw();
+                            e.composed
+                                .as_ref()
+                                .expect("notes frame")
+                                .save_png(out.join(format!(
+                                    "notes-{skin:?}-{lettering:?}-{view}-{width}.png"
+                                )))
+                                .expect("PNG");
+                        }
+                        // Scrolled to the end; and at the full view, an update from 0.2.5,
+                        // the mock-up's.
+                        keyed(&mut e, Key::End);
+                        e.draw();
+                        let frame = e.composed.as_ref().expect("notes frame");
+                        frame
+                            .save_png(
+                                out.join(format!(
+                                    "notes-{skin:?}-{lettering:?}-{view}-1554-end.png"
+                                )),
+                            )
+                            .expect("PNG");
+                        if expanded {
+                            e.show_release_notes(
+                                crate::whats_new::assemble(Some("0.2.5"), crate::update::VERSION)
+                                    .expect("an update"),
+                            );
+                            e.draw();
+                            e.composed
+                                .as_ref()
+                                .expect("notes frame")
+                                .save_png(out.join(format!(
+                                    "notes-{skin:?}-{lettering:?}-since-0.2.5-1554.png"
+                                )))
+                                .expect("PNG");
+                        }
+                        e.fit(1.0, MIN_WIDTH, MIN_WIDTH);
+                        e.draw();
+                    }
+                    let [x, y, w, h] = e.whats_new.as_ref().expect("notes").button();
+                    assert!(y + h < f64::from(e.physical_height()) / e.renderer.scale());
+                    let close = at(&e, (x + w / 2.0, y + h / 2.0));
+                    click(&mut e, close);
+                    assert!(e.whats_new.is_none(), "close button works in each view");
+                    assert!(host.take().is_empty());
+                }
+            }
+        }
     }
 
     fn editing() -> (Editing, Arc<Host>, Arc<Ca72Params>) {
@@ -7226,8 +7767,8 @@ mod tests {
         );
     }
 
-    /// The editor's width, fitted to the screen as it opens, stays, and is measured again
-    /// when it next opens.
+    /// The editor's width, fitted to the screen, stays while it is open, and is measured again
+    /// for its next opening.
     #[test]
     fn the_width_stays_until_the_editor_opens_again() {
         let ed = Ca72Editor::new(Arc::new(Ca72Params::default()), Arc::new(Meters::default()));
@@ -7239,6 +7780,78 @@ mod tests {
             ed.fitted.load(Ordering::Relaxed),
             0,
             "measured again next time"
+        );
+    }
+
+    thread_local! {
+        /// The usable screen a test's editor measures, in physical pixels.
+        static SCREEN: std::cell::Cell<Option<(f64, f64)>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// A test's screen, in the window's units where the host gave a scale (as Windows'
+    /// [`screen::usable`]).
+    fn test_screen(scale: Option<f64>) -> Option<(f64, f64)> {
+        let k = scale.unwrap_or(1.0);
+        SCREEN.get().map(|(w, h)| (w / k, h / k))
+    }
+
+    /// An editor measuring [`SCREEN`].
+    fn on_test_screen() -> Ca72Editor {
+        let mut ed = Ca72Editor::new(Arc::new(Ca72Params::default()), Arc::new(Meters::default()));
+        ed.screen = test_screen;
+        ed
+    }
+
+    /// The editor opens at the size the host was told, whichever screen is in use by then: the
+    /// standalone was told its size on the Mac's Retina screen (the main screen then), its
+    /// window opened on a 1x monitor, and the editor, measuring that monitor as it opened, was
+    /// drawn wider than its window, cut off on the right (R-TWO-SCREENS).
+    #[test]
+    fn the_editor_opens_at_the_size_the_host_was_told() {
+        let (retina, monitor) = ((1728.0, 1084.0), (1920.0, 1055.0));
+        assert_ne!(
+            fitted_width(Some(retina)),
+            fitted_width(Some(monitor)),
+            "screens that fit different widths"
+        );
+        let ed = on_test_screen();
+        SCREEN.set(Some(retina));
+        let told = ed.size();
+        assert_eq!(told.0, fitted_width(Some(retina)));
+        SCREEN.set(Some(monitor));
+        assert_eq!(ed.opening(), told, "the window's size");
+        ed.open.store(true, Ordering::Release);
+        assert_eq!(ed.size(), told, "asked again while open");
+        drop(ed.closing());
+        assert_eq!(
+            ed.size().0,
+            fitted_width(Some(monitor)),
+            "the screen in use measured when it next opens"
+        );
+    }
+
+    /// A host that asks nothing before it opens the editor has it fitted to the screen in use
+    /// then; one that gives a scale after asking has the screen measured again in that scale's
+    /// pixels (Windows, Linux).
+    #[test]
+    fn the_screen_is_measured_where_the_host_has_not_asked_in_this_scale() {
+        let ed = on_test_screen();
+        SCREEN.set(Some((2560.0, 1400.0)));
+        assert_eq!(ed.opening().0, fitted_width(Some((2560.0, 1400.0))));
+        drop(ed.closing());
+
+        let ed = on_test_screen();
+        let told = ed.size();
+        assert!(ed.set_scale_factor(2.0));
+        let scaled = ed.size();
+        assert_eq!(scaled.0, fitted_width(Some((1280.0, 700.0))));
+        assert_ne!(scaled, told);
+        assert!(ed.set_scale_factor(2.0));
+        SCREEN.set(Some((1920.0, 1040.0)));
+        assert_eq!(
+            ed.opening(),
+            scaled,
+            "the same scale: the size the host was told"
         );
     }
 
@@ -8845,5 +9458,238 @@ mod windows_window_tests {
         o.drag(o.at((art::W / 2.0, 20.0)), 0.0);
         assert!(!asks(), "the menu shut");
         o.close();
+    }
+
+    /// The standalone's window and its editor at a scale (decisions.md R-WIN-STANDALONE, issue
+    /// 64): the window's client the editor's window, pixel for pixel, as it opens, as the editor
+    /// resizes it and once Windows has scaled the window for its monitor's new scale; and no
+    /// frame to drag and no maximise box. The window as the app opens it (nih-plug's
+    /// `production::app_window::options`, baseview's window of its own), the editor in it as it
+    /// opens there, and a handler that fits the window as the app's does (`app_window::fit`
+    /// and `refits`). Before, the editor
+    /// drew at 1 in a window at the monitor's scale (at 125 %, 1143 by 653 pixels in a client of
+    /// 1429 by 816, black beyond it), and the frame could be dragged and maximised with the
+    /// editor left as it was.
+    #[cfg(feature = "standalone-production")]
+    #[test]
+    fn the_standalone_s_window_is_its_editor_s_at_every_scale() {
+        use nih_plug::wrapper::production::app_window;
+        use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+        use winapi::um::winuser::{GWL_STYLE, GetWindowLongPtrW, WS_MAXIMIZEBOX, WS_THICKFRAME};
+
+        /// As the app's context: a resize asked is made at the window's next frame.
+        struct App {
+            resize: AtomicBool,
+        }
+        impl GuiContext for App {
+            fn plugin_api(&self) -> PluginApi {
+                PluginApi::Standalone
+            }
+            fn request_resize(&self) -> bool {
+                self.resize.store(true, Ordering::Release);
+                true
+            }
+            unsafe fn raw_begin_set_parameter(&self, _param: ParamPtr) {}
+            unsafe fn raw_set_parameter_normalized(&self, _param: ParamPtr, _normalized: f32) {}
+            unsafe fn raw_end_set_parameter(&self, _param: ParamPtr) {}
+            fn get_state(&self) -> PluginState {
+                panic!("the editor does not read the state")
+            }
+            fn set_state(&self, _state: PluginState) {}
+        }
+
+        /// What was seen at a step: the window's client, the editor's, what the editor asks.
+        type Seen = ((u32, u32), (u32, u32), (u32, u32));
+
+        /// The app's window's handler: at its frames the steps (a look, then a click on PANEL
+        /// or the window scaled from outside), then it closes.
+        struct Frames {
+            editor: Arc<Ca72Editor>,
+            app: Arc<App>,
+            _handle: Box<dyn Any + Send>,
+            window: HWND,
+            frames: u32,
+            seen: Arc<Mutex<Vec<Seen>>>,
+            style: Arc<AtomicU32>,
+        }
+        impl Frames {
+            fn client(w: HWND) -> (u32, u32) {
+                let mut r = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                // SAFETY: the test's own window and a rectangle of this function's.
+                unsafe { GetClientRect(w, &mut r) };
+                ((r.right - r.left) as u32, (r.bottom - r.top) as u32)
+            }
+            fn look(&self) {
+                // SAFETY: the test's own window.
+                let child = unsafe { GetWindow(self.window, GW_CHILD) };
+                let seen = (
+                    Self::client(self.window),
+                    Self::client(child),
+                    self.editor.size(),
+                );
+                self.seen.lock().expect("seen").push(seen);
+            }
+            fn click_panel(&self) {
+                // SAFETY: the test's own window.
+                let child = unsafe { GetWindow(self.window, GW_CHILD) };
+                let k = f64::from(Self::client(child).0) / art::W;
+                let (x, y) = strip::centre(StripTarget::Bar(BarTarget::Panel));
+                let at = ((((y * k).round() as u32) << 16) | ((x * k).round() as u32 & 0xFFFF))
+                    as LPARAM;
+                // SAFETY: messages posted to the test's own window.
+                unsafe {
+                    PostMessageW(child, WM_MOUSEMOVE, 0, at);
+                    PostMessageW(child, WM_LBUTTONDOWN, MK_LBUTTON as WPARAM, at);
+                    PostMessageW(child, WM_LBUTTONUP, 0, at);
+                }
+            }
+        }
+        impl baseview::WindowHandler for Frames {
+            fn on_frame(&mut self, window: &mut Window<'_>) {
+                if self.app.resize.swap(false, Ordering::AcqRel) {
+                    app_window::fit(window, self.editor.size());
+                }
+                self.frames += 1;
+                match self.frames {
+                    20 => {
+                        // SAFETY: the test's own window.
+                        let style = unsafe { GetWindowLongPtrW(self.window, GWL_STYLE) };
+                        self.style.store(style as u32, Ordering::Relaxed);
+                        self.look();
+                        self.click_panel();
+                    }
+                    50 => {
+                        self.look();
+                        self.click_panel();
+                    }
+                    80 => {
+                        self.look();
+                        // The window scaled by Windows, as when its monitor's scale changes
+                        // (from 125 % to 150 %, the window's client 1.2 times larger).
+                        let (w, h) = Self::client(self.window);
+                        let (w, h) = (w as i32 * 6 / 5, h as i32 * 6 / 5);
+                        // SAFETY: the test's own window, on its thread.
+                        unsafe {
+                            SetWindowPos(
+                                self.window,
+                                null_mut(),
+                                0,
+                                0,
+                                w,
+                                h,
+                                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                            )
+                        };
+                    }
+                    110 => {
+                        self.look();
+                        window.close();
+                    }
+                    _ => {}
+                }
+            }
+            fn on_event(&mut self, _window: &mut Window<'_>, event: Event) -> EventStatus {
+                if app_window::refits(&event) {
+                    self.app.resize.store(true, Ordering::Release);
+                }
+                EventStatus::Ignored
+            }
+        }
+
+        let _desktop = DESKTOP
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // The windows in pixels whatever the screen's scale, as `app_window::scale` makes the
+        // app's process (the scale here is the test's, not the monitor's).
+        // SAFETY: this thread's own setting.
+        unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
+            let presets = tempfile::tempdir().expect("a temporary folder");
+            let params = Arc::new(Ca72Params::default());
+            params.editor_width.store(MIN_WIDTH, Ordering::Relaxed);
+            let editor = Arc::new(Ca72Editor::new(
+                Arc::clone(&params),
+                Arc::new(Meters::default()),
+            ));
+            let options = app_window::options("CA-72".into(), editor.as_ref(), Some(scale));
+            let app = Arc::new(App {
+                resize: AtomicBool::new(false),
+            });
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let style = Arc::new(AtomicU32::new(0));
+            let (handler_editor, handler_app, handler_seen, handler_style) = (
+                Arc::clone(&editor),
+                Arc::clone(&app),
+                Arc::clone(&seen),
+                Arc::clone(&style),
+            );
+            let library = presets.path().to_path_buf();
+            Window::open_blocking(options, move |window: &mut Window<'_>| {
+                let RawWindowHandle::Win32(h) = window.raw_window_handle() else {
+                    panic!("a Win32 window");
+                };
+                let hwnd: HWND = h.hwnd.cast();
+                // Off the screen, not brought to the front.
+                // SAFETY: the window being made, on this thread.
+                unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        null_mut(),
+                        -20000,
+                        -20000,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    )
+                };
+                let context: Arc<dyn GuiContext> = handler_app.clone();
+                let handle = handler_editor.spawn_with(
+                    ParentWindowHandle::Win32Hwnd(h.hwnd),
+                    context,
+                    Library::at(library),
+                );
+                Frames {
+                    editor: handler_editor,
+                    app: handler_app,
+                    _handle: handle,
+                    window: hwnd,
+                    frames: 0,
+                    seen: handler_seen,
+                    style: handler_style,
+                }
+            });
+            let at = |(w, h): (u32, u32)| {
+                let k = f64::from(scale);
+                (
+                    (f64::from(w) * k).round() as u32,
+                    (f64::from(h) * k).round() as u32,
+                )
+            };
+            let seen = seen.lock().expect("seen").clone();
+            assert_eq!(seen.len(), 4, "at {scale}: the window closed early");
+            let full = (MIN_WIDTH, height_for_panel(MIN_WIDTH, true));
+            let compact = (MIN_WIDTH, height_for_panel(MIN_WIDTH, false));
+            for ((window, child, asked), (step, want)) in seen.iter().zip([
+                ("opened", full),
+                ("PANEL off", compact),
+                ("PANEL on", full),
+                ("scaled by Windows", full),
+            ]) {
+                assert_eq!(*asked, want, "at {scale}, {step}: the editor's size");
+                assert_eq!(*child, at(want), "at {scale}, {step}: the editor's window");
+                assert_eq!(
+                    window, child,
+                    "at {scale}, {step}: the app's window's client"
+                );
+            }
+            let style = style.load(Ordering::Relaxed);
+            assert_eq!(style & WS_THICKFRAME, 0, "at {scale}: a frame to drag");
+            assert_eq!(style & WS_MAXIMIZEBOX, 0, "at {scale}: a maximise box");
+        }
     }
 }
