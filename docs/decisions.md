@@ -7703,3 +7703,13 @@ logs and PNGs. No native host, installed plug-in or audio device was opened; mac
 Windows execution and the remote AU's visibility still need host acceptance. The final
 appearance, current-only manual view and claim-before-display policy await the owner's
 confirmation at review.
+
+The full workspace run, including standalone support with ngspice 47 required, passed
+537 tests, 0 failed, 57 ignored at `56b9a1e`. Independent source review found one macOS
+ABI mismatch: AppKit's `BOOL` is a signed char on Intel and a Rust bool only on Apple
+silicon. The visibility check now uses `objc::runtime::BOOL` for both native Boolean
+results. It also requires `NSWindow.isVisible` for remote AU views, bypassing only the
+occlusion bit. The existing remote-view evidence above had `isVisible=true`, so this
+preserves that observed case while excluding an ordered-out backing window. A hidden
+host proxy whose backing window remains visible still needs native host acceptance.
+This final correction is macOS-only; Linux does not compile or execute those calls.

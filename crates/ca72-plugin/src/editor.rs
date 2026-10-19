@@ -3614,13 +3614,19 @@ pub(crate) mod window {
                 return false;
             }
             // SAFETY: baseview's live NSView, read on its GUI thread.
-            let (holder, hidden): (id, bool) = unsafe {
+            let (holder, hidden): (id, objc::runtime::BOOL) = unsafe {
                 (
                     msg_send![view, window],
                     msg_send![view, isHiddenOrHasHiddenAncestor],
                 )
             };
-            holder != nil && !hidden && (!reliable || seen(window))
+            if holder == nil || hidden != objc::runtime::NO {
+                return false;
+            }
+            // SAFETY: the live view's NSWindow, on its GUI thread. BOOL differs between
+            // Intel and Apple silicon; Rust's bool is not AppKit's return type on Intel.
+            let visible: objc::runtime::BOOL = unsafe { msg_send![holder, isVisible] };
+            visible != objc::runtime::NO && (!reliable || seen(window))
         }
         #[cfg(target_os = "windows")]
         {
