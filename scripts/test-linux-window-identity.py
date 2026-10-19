@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check launcher registration and platform dependencies without opening the app."""
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -41,17 +42,23 @@ class WindowIdentity(unittest.TestCase):
             shutil.copy(ROOT / "LICENSE", payload / "LICENSE.txt")
             (payload / "ca72-standalone").write_text("#!/bin/sh\nexit 0\n")
             prefix = root / "prefix with spaces %"
+            # A custom prefix must be an existing folder (R-INSTALL-DESTINATION).
+            prefix.mkdir()
+            # The menu entry and icon go to the user's data folder whatever the app's prefix
+            # (R-INSTALL-DESTINATION); keep both inside this test's folder.
+            data = root / "data"
+            env = dict(os.environ, XDG_DATA_HOME=str(data), HOME=str(root / "home"))
             subprocess.run(
                 ["sh", str(payload / "install.sh"), "--standalone-only", "--prefix", str(prefix)],
-                check=True, capture_output=True, text=True,
+                check=True, capture_output=True, text=True, env=env,
             )
-            entries = list((prefix / "share/applications").glob("*.desktop"))
+            entries = list((data / "applications").glob("*.desktop"))
             self.assertEqual(len(entries), 1)
             fields = dict(line.split("=", 1) for line in entries[0].read_text().splitlines()
                           if "=" in line)
             self.assertEqual(entries[0].stem, fields["Icon"])
             self.assertEqual(fields["StartupWMClass"], "CA-72")
-            icon = prefix / "share/icons/hicolor/512x512/apps" / (fields["Icon"] + ".png")
+            icon = data / "icons/hicolor/512x512/apps" / (fields["Icon"] + ".png")
             self.assertEqual(icon.read_bytes(), (payload / (fields["Icon"] + ".png")).read_bytes())
 
     def test_linux_production_and_development_launchers_use_the_patched_backend(self):
@@ -63,18 +70,18 @@ class WindowIdentity(unittest.TestCase):
                 # The editor shares this crate and omits its feature-gated gl_config field.
                 self.assertNotIn("opengl", features)
 
-    def test_other_platforms_keep_the_existing_standalone_backend(self):
+    def test_every_platform_opens_the_patched_standalone_backend(self):
+        # Since R-WIN-STANDALONE the standalone opens its window with the repository's
+        # patched baseview on every platform, without OpenGL.
         for feature in ["standalone-production", "standalone"]:
-            for target in ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]:
+            for target in ["aarch64-apple-darwin", "x86_64-pc-windows-msvc",
+                           "x86_64-unknown-linux-gnu"]:
                 with self.subTest(feature=feature, target=target):
                     backend, features = window_backend(feature, target)
-                    self.assertIn("opengl", features)
-                    self.assertEqual(
-                        backend["source"],
-                        "git+https://github.com/RustAudio/baseview.git?rev="
-                        "579130ecb4f9f315ae52190af42f0ea46aeaa4a2#579130ecb4f9f315ae52190af42f0ea46aeaa4a2",
-                    )
-
+                    self.assertNotIn("opengl", features)
+                    self.assertIsNone(backend["source"])
+                    self.assertTrue(backend["manifest_path"].endswith(
+                        "third_party/baseview/Cargo.toml"))
 
 if __name__ == "__main__":
     unittest.main()
