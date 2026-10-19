@@ -207,6 +207,17 @@ The window is baseview's patched copy (`../baseview`, its change 9: no frame to 
 maximise box), not upstream's from git; the `opengl` feature, and with it `gl_config`, is gone
 from both standalone adapters. macOS and Linux keep the system's scale policy, as before.
 
+The production standalone's quitting (the CA-72's `docs/decisions.md` R-QUIT, 2026-10-19):
+every way of quitting the app closes its window, as the close button does, so that
+`run_with_midi_reset_scope` returns and shuts the app down as then (its session saved, audio
+and MIDI stopped), and its caller's own way out follows. On macOS the menus and the quit
+Apple event are baseview's change 11; on Windows Alt+F4 is the system's, which baseview leaves
+to `DefWindowProcW`. On Linux `app_window::quits` is Ctrl+Q: the app's window closes at it
+(`window.close()`, as `WM_DELETE_WINDOW` closes it), and an editor that has the keys (X11 gives
+them to the window under the pointer) asks for it with `app_window::request_quit`, which the
+window acts on at its next frame. The manifest takes `keyboard-types` for the key, as baseview
+gives it, with the `standalone-production` feature.
+
 Production standalone PANIC identity: the additive ProcessContext token accessor
 and per-block adapter metadata carry the exact token captured by plugin-kit's
 panic flag. Read the token before consuming the panic; direct, untagged and hosted

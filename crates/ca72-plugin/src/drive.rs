@@ -3,12 +3,14 @@
 //! the plug-in's helper plays a few short notes through voices made as the engine's first are,
 //! with the sound's panel, without DRIVE and at each of its steps, and compares their loudness
 //! (K-weighted, as BS.1770 weighs it): the correction at each step, a curve. The curve is saved
-//! with the session, so that the session plays and renders the same again; it is measured again
-//! only when the sound is changed in the plug-in's own window (a preset chosen there among the
-//! changes), never by the host's automation or a learned controller, so that a render does not
-//! depend on when a measurement finished. Until a sound has been measured, the factory
-//! presets' average stands in ([`AVERAGE`]). The audio thread only reads the curve, without a
-//! lock.
+//! with the session and with a preset (the factory's carry theirs), so that either plays and
+//! renders the same again. It is measured again only when DRIVE or AUTO GAIN is changed in the
+//! plug-in's own window, never by another control, a preset, the window opening, the host's
+//! automation or a learned controller (decisions.md R-AUTO-GAIN-DRIVE): a curve that arrives
+//! while a note plays moves its level, so one is measured only once the player has turned
+//! DRIVE, and glides in.
+//! Until a sound has been measured, the factory presets' average stands in ([`AVERAGE`]). The
+//! audio thread only reads the curve, without a lock.
 //!
 //! The machinery is plugin-kit's (`plugin_kit_stereo::auto_gain`, its K6); what is the
 //! instrument's is here: the steps, the notes played, the average, a sound's key, and the
@@ -16,9 +18,10 @@
 
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use nih_plug::params::persist::PersistentField;
-use plugin_kit_stereo::auto_gain::{self, Measure};
+use plugin_kit_stereo::auto_gain::{self, Job, Measure};
 
 pub use plugin_kit_stereo::auto_gain::{Curve, KWeighted};
 
@@ -93,13 +96,30 @@ impl Measure for Probe {
 /// The curve, shared by the editor (which asks for a sound to be measured), the plug-in's
 /// helper thread (which measures it), the audio thread (which reads it) and the host (which
 /// saves and loads it with the session): the kit's, for this instrument's sounds.
+///
+/// Beside it, the mark of the curve the helper last measured ([`mark`]), so that the audio
+/// thread can tell a measured curve, which glides in, from one a preset or a session loaded,
+/// which is the sound's at once (decisions.md R-AUTO-GAIN-DRIVE).
 #[derive(Debug, Clone)]
-pub struct Calibration(Arc<auto_gain::Calibration<Probe, STEPS>>);
+pub struct Calibration(Arc<auto_gain::Calibration<Probe, STEPS>>, Arc<AtomicU64>);
 
 impl Default for Calibration {
     fn default() -> Self {
-        Calibration(Arc::new(auto_gain::Calibration::new(DRIVE_TOP, AVERAGE)))
+        Calibration(
+            Arc::new(auto_gain::Calibration::new(DRIVE_TOP, AVERAGE)),
+            Arc::new(AtomicU64::new(0)),
+        )
     }
+}
+
+/// A curve's mark: its corrections' bits, mixed (never 0).
+pub fn mark(db: &[f32; STEPS]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for d in db {
+        h ^= u64::from(d.to_bits());
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h | 1
 }
 
 impl Deref for Calibration {
@@ -112,9 +132,47 @@ impl Deref for Calibration {
 
 impl Calibration {
     /// The sound `c` wanted: measured unless the curve is already its, the helper woken. From
-    /// the editor, once a change made there is done.
+    /// the editor, once a change of DRIVE or AUTO GAIN made there is done
+    /// (decisions.md R-AUTO-GAIN-DRIVE).
     pub fn ask(&self, c: &Controls) {
         self.0.ask(sound(c), c);
+    }
+
+    /// A preset's curve, in force at once and nothing measured: kept until DRIVE or AUTO GAIN
+    /// is next changed in the editor, which measures the sound as it is then (the curve is
+    /// not marked as any sound's, so that measurement is made; a factory preset's measures the
+    /// same at 48 kHz, so its level does not move).
+    pub fn load_preset(&self, db: [f32; STEPS]) {
+        self.0.load(&Saved { sound: 0, db });
+    }
+
+    /// The measurement a step further, on the helper thread (the kit's), the curve marked as
+    /// measured once a measurement is stored.
+    pub fn step(&self, job: &mut Option<Job<Probe, STEPS>>) -> bool {
+        let Some(sound) = job.as_ref().map(|_| self.0.saved()) else {
+            return self.0.step(job);
+        };
+        let more = self.0.step(job);
+        if job.is_none() {
+            let now = self.0.saved();
+            if now != sound {
+                self.1.store(mark(&now.db), Ordering::Release);
+            }
+        }
+        more
+    }
+
+    /// The sound asked for measured now, on this thread (the tests; an engine without its
+    /// helper).
+    pub fn measure_now(&self) {
+        let mut job = None;
+        while self.step(&mut job) {}
+    }
+
+    /// Whether `curve` is the one the helper last measured (it glides in), not a preset's or a
+    /// session's (in force at once). For the audio thread: one atomic read.
+    pub fn measured(&self, curve: &Curve<STEPS>) -> bool {
+        self.1.load(Ordering::Acquire) == mark(&curve.0)
     }
 
     /// How many hold it (the tests: whether the helper let it go).

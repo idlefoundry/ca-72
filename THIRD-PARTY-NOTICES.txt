@@ -787,7 +787,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-cpal 0.15.3  https://github.com/idlefoundry/plugin-kit at f7aaa2b01655
+cpal 0.15.3  https://github.com/idlefoundry/plugin-kit at bcc4d8f77060
 ------------------------------------------------------------------------------
                                  Apache License
                            Version 2.0, January 2004
