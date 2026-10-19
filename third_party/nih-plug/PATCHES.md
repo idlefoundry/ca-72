@@ -1,5 +1,14 @@
 # nih-plug, patched
 
+**Linux standalone identity, 2026-10-18 (CA-72 issue #49).** Both standalone features now
+select the repository's patched baseview on Linux, aliased as `baseview` in `src/lib.rs`.
+The Linux backend shares the editor's features without OpenGL; both wrappers omit
+`WindowOpenOptions::gl_config` there, whose field exists only with that feature enabled.
+The previous separate git dependency did not set the top-level window's `WM_CLASS`, so
+patching the editor's backend alone would not fix the dock's application matching. macOS
+and Windows keep their existing git dependency and revision. See
+`docs/issue-49-linux-icon.md` and `scripts/test-linux-window-identity.py`.
+
 The `nih_plug` crate and its derive macros from
 [robbert-vdh/nih-plug](https://github.com/robbert-vdh/nih-plug) at commit
 `de421011f41a6d10fc8c7a6084e4f4dee0143683` (ISC, `LICENSE`; its VST3 bindings are

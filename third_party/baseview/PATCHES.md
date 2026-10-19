@@ -3,15 +3,16 @@
 The `baseview` crate from [RustAudio/baseview](https://github.com/RustAudio/baseview) at
 commit `9a0b42c09d712777b2edb4c5e0cb6baf21e988f0` (MIT OR Apache-2.0, `LICENSE-MIT`,
 `LICENSE-APACHE`), the revision the editor took from git until 0.1.0. The examples, the CI
-and the manifest's `[workspace]`, `[[example]]` and `[dev-dependencies]` tables are left
-out; the manifest names the repository, for the notices, and allows two of upstream's own
+and the manifest's `[[example]]` table are left out; the workspace contains only the resolver
+setting needed for the portable tests, and their dev-dependencies are listed below. The
+manifest names the repository, for the notices, and allows two of upstream's own
 compiler warnings (`non_snake_case` in `src/win/drop_target.rs`, and
 `mismatched_lifetime_syntaxes`). `src/macos/window.rs` has one `use` list in the order
 today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
 Five changes for Windows (1 to 3, 5 and 6), in `src/win/window.rs`, `src/win/drop_target.rs`,
 `src/win/escape.rs`, `src/event.rs` and `src/window.rs` (the first three the CA-72's
-`docs/decisions.md` R26, R28 and R34), and two for macOS (4 and 7, below):
+`docs/decisions.md` R26, R28 and R34), two for macOS (4 and 7), and one for Linux (8, below):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -143,6 +144,17 @@ And one for macOS, in `src/macos/view.rs` (the CA-72's `docs/decisions.md` R56, 
    it; `src/macos/view.rs` shows it again on each `mouseMoved:` (a host's window may have set
    its own) and in a new `cursorUpdate:` (the tracking area already asked for it). Windows and
    Linux are unchanged.
+
+8. **Linux standalone windows identify themselves before mapping** (CA-72 issue #49;
+   `docs/issue-49-linux-icon.md`). The X11 backend mapped its window before setting `WM_NAME`
+   and never set `WM_CLASS`. It now sets the initial title as both the instance and class
+   (`STRING/8`, two NUL-terminated strings), then maps. Only top-level windows receive the
+   class; parented plug-in editors leave application identity to their host. Four portable
+   tests record the actual X11 requests, covering the payload, order, parented windows,
+   another instrument's title and failure before mapping. The standalone wrappers select
+   this backend on Linux; their macOS and Windows dependencies are unchanged. The helper's
+   tests use x11rb as a development dependency on every platform. Ubuntu dock behaviour
+   still needs a graphical check.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.

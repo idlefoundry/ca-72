@@ -13,6 +13,11 @@ mod window;
 mod window_info;
 mod window_open_options;
 
+// The X11 requests can be tested without an X server on every platform.
+#[cfg(any(target_os = "linux", test))]
+#[path = "x11/window_identity.rs"]
+mod x11_window_identity;
+
 #[cfg(feature = "opengl")]
 pub mod gl;
 

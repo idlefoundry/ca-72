@@ -8123,3 +8123,37 @@ occlusion bit. The existing remote-view evidence above had `isVisible=true`, so 
 preserves that observed case while excluding an ordered-out backing window. A hidden
 host proxy whose backing window remains visible still needs native host acceptance.
 This final correction is macOS-only; Linux does not compile or execute those calls.
+
+## R-LINUX-ICON. The Linux standalone identifies itself to the dock
+
+**Owner request, 2026-10-18.** Follow up issue #49, a source build showing a gear in Ubuntu
+26.10: rebase the existing fix, check X11 and Wayland identity, "document in the README how a
+source build gets its desktop file and icon", and verify on Hyprland and Ubuntu GNOME.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- Both Linux standalone adapters use the local patched baseview. A top-level X11 window's
+  initial title becomes both strings of `WM_CLASS`, set before mapping; parented editors keep
+  their host's identity. The adapters use `P::NAME`, `CA-72`, which matches `StartupWMClass`.
+  Linux retains the editor's non-OpenGL features; the other platforms' dependency is unchanged.
+- This is X11, through XWayland on Wayland desktops. `AppOptions.app_id` is a saved-session and
+  MIDI identifier, not a Wayland surface id. It stays `com.idlefoundry.ca-72` so existing
+  sessions load. A future native Wayland surface would need `com.idlefoundry.ca72`, the desktop
+  file's stem. The installed desktop id, icon name and `StartupWMClass` stay as they are.
+- The README gives a standalone-only source installation, since a bare executable does not
+  register desktop files. Protocol, product-name, dependency and installation checks enforce
+  the identities and feature selection. The metadata checks may fetch their locked target
+  dependencies, including ones not built on Linux.
+
+**Evidence (the Linux reference machine, 2026-10-18):** Hyprland 0.56.2 reports class and initial
+class `CA-72`, `xwayland: true`; `xprop` confirms both class strings and the title. Ubuntu 26.10's
+GNOME Shell 51.0, in a new VM's live Wayland desktop: the bare binary shows a gear; the same
+binary after `install.sh --standalone-only` shows the CA-72 icon. The installed desktop entry
+launches it, and its pinned icon groups with the running window. Screenshots retained with the
+job's summary. Protocol tests: 4 passed; plug-in tests with production standalone: 308 passed,
+31 ignored; nih-plug library: 68 passed; Python identity: 3 passed; installer: 4 passed. Product
+and legacy release builds, plug-in clippy with default/all features, baseview's default-feature
+clippy, formatting and notices pass. Direct vendored clippy has existing upstream warnings;
+checks with allowances limited to those categories pass. Details and remaining limits are in
+`docs/issue-49-linux-icon.md`. No native Xorg session, other-platform builds or playback test;
+no full workspace repeat beside the other agents' runs. Independent source review found no
+remaining defects.

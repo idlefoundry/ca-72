@@ -49,6 +49,8 @@ fn main() {
     });
     let effects = effects(&state_dir, fx_mode, fx_console);
     let options = plugin_kit_standalone::AppOptions {
+        // This identifies saved sessions and MIDI clients, not a Wayland surface.
+        // Linux's X11 window uses Ca72::NAME and the launcher's StartupWMClass.
         app_id: "com.idlefoundry.ca-72".into(),
         state_dir,
         device_access,
