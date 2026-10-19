@@ -69,7 +69,10 @@ assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.g
 # Used for the `standalone` feature
 # NOTE: OpenGL support is not needed here, but rust-analyzer gets confused when
 #       some crates do use it and others don't
-baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "579130ecb4f9f315ae52190af42f0ea46aeaa4a2", features = ["opengl"], optional = true }
+# The CA-72's patched copy (`../baseview/PATCHES.md`), the one its editor opens in, so that the
+# standalone's window has its changes too (change 8: no frame to drag; the CA-72's
+# R-WIN-STANDALONE). Without OpenGL, which neither window uses.
+baseview = { path = "../baseview", optional = true }
 # All the claps!
 clap = { version = "4.1.8", features = ["derive", "wrap_help"], optional = true }
 cpal = { version = "0.15", optional = true }
@@ -102,6 +105,7 @@ features = [
   "Win32_UI_WindowsAndMessaging",
   "Win32_System_LibraryLoader",
   "Win32_System_Performance",
+  "Win32_UI_HiDpi",
 ]
 
 
