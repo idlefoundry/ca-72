@@ -277,7 +277,7 @@ mod tests {
         }
         assert!(assemble(Some("0.2.7-rc.1"), "0.2.7+build").is_some());
         assert!(
-            assemble(None, "0.2.8").is_none(),
+            assemble(None, "99.0.0").is_none(),
             "never invent a missing release"
         );
     }
