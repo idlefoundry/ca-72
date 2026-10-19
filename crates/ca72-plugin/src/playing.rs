@@ -29,6 +29,8 @@ pub struct Playing {
     typed: [Option<PlayedKey>; 17],
     octave_keys: [Option<Code>; 2],
     owned: [u8; 128],
+    /// The keys an agent holds (`crate::agent`).
+    agent: [bool; 128],
     generation: u64,
 }
 
@@ -49,6 +51,7 @@ impl Default for Playing {
             typed: [None; 17],
             octave_keys: [None; 2],
             owned: [0; 128],
+            agent: [false; 128],
             generation: 0,
         }
     }
@@ -65,6 +68,7 @@ impl Playing {
 
     fn clear(&mut self) {
         self.owned = [0; 128];
+        self.agent = [false; 128];
         self.typed = [None; 17];
         self.octave_keys = [None; 2];
         self.pointer_note = None;
@@ -168,6 +172,23 @@ impl Playing {
         self.sync();
         self.pointer(None);
         self.pointer_down = false;
+    }
+
+    /// A key an agent presses (`on`) or lets go, owned as the pointer's and the typed keys
+    /// are: it sounds until its last owner lets go.
+    pub fn agent(&mut self, note: u8, on: bool) {
+        self.sync();
+        if note > 127 || self.agent[usize::from(note)] == on {
+            return;
+        }
+        if self.own(note, on) || !on {
+            self.agent[usize::from(note)] = on;
+        }
+    }
+
+    /// The keys an agent holds.
+    pub fn agent_notes(&self) -> Vec<u8> {
+        (0..128u8).filter(|n| self.agent[usize::from(*n)]).collect()
     }
 
     pub fn dragging(&self) -> bool {

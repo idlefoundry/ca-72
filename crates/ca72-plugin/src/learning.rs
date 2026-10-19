@@ -99,6 +99,12 @@ pub enum Item {
     SizeMenu,
     /// The SIZE menu's: the window this wide (logical pixels).
     Size(u32),
+    /// An effects' slot's (decisions.md R-FX-DRAWER, R-FX-SAFETY): another effect in its place,
+    /// none, the effect tried again...
+    Fx(crate::fx_view::FxAction),
+    /// The settings' AGENTS (the standalone's; decisions.md R-MCP): AI agents allowed to
+    /// operate it through MCP, or not.
+    Agents(bool),
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -135,6 +141,11 @@ pub enum Pressed {
     SizeMenu,
     /// The SIZE menu: the window this wide (logical pixels).
     Size(u32),
+    /// An effects' slot's menu: the list to replace its effect, its effect taken out, tried
+    /// again...
+    Fx(crate::fx_view::FxAction),
+    /// The settings' menu: agents allowed (true) or not.
+    Agents(bool),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -321,15 +332,16 @@ impl Learning {
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
     /// decisions.md R54). Under LOOK, after the built-in two, each installed skin pack (`packs`:
-    /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any). The
-    /// title always names this build's version, independent of the update check; opening this
-    /// menu does not start a check.
+    /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any); in
+    /// the standalone, under AGENTS, whether AI agents may operate it (`agents`, marked; none in a
+    /// host: decisions.md R-MCP). The title always names this build's version, independent of the
+    /// update check; opening this menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, lettering, law): (Skin, Lettering, Law),
+        (skin, lettering, law, agents): (Skin, Lettering, Law, Option<bool>),
         (packs, pack): (&[(String, bool)], Option<usize>),
     ) {
         let mut items: Vec<(Item, String)> = vec![
@@ -368,12 +380,19 @@ impl Learning {
             items.push((Item::Head, "STANDALONE".into()));
             items.push((Item::StandaloneSettings, "AUDIO & MIDI…".into()));
         }
+        if agents.is_some() {
+            items.push((Item::Head, "AGENTS".into()));
+            items.push((Item::Agents(true), "ALLOW".into()));
+            items.push((Item::Agents(false), "OFF".into()));
+        }
         let current = |it: &Item| {
             let look = match pack {
                 Some(p) => *it == Item::Pack(p),
                 None => *it == Item::Look(skin),
             };
-            look || *it == Item::Lettering(lettering) || *it == Item::Dials(law)
+            look || *it == Item::Lettering(lettering)
+                || *it == Item::Dials(law)
+                || agents.is_some_and(|a| *it == Item::Agents(a))
         };
         let mut menu = Menu {
             x,
@@ -390,6 +409,7 @@ impl Learning {
                             | Item::Pack(_)
                             | Item::Lettering(_)
                             | Item::Dials(_)
+                            | Item::Agents(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
@@ -462,6 +482,45 @@ impl Learning {
         self.take_keys = true;
     }
 
+    /// An effects' slot's menu (decisions.md R-FX-DRAWER; the owner's FX-A: "right-click to
+    /// replace/remove"), opened at (`x`, `y`): its effect's name as its title, then `items`
+    /// (what the effect's state offers, R-FX-SAFETY, then REPLACE… and REMOVE).
+    pub fn open_fx_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        name: &str,
+        items: &[(crate::fx_view::FxAction, &str)],
+    ) {
+        let items: Vec<(Item, &str)> = items.iter().map(|(a, t)| (Item::Fx(*a), *t)).collect();
+        let menu = Menu {
+            x,
+            y,
+            size,
+            title: name.to_uppercase(),
+            items: items.iter().map(|(_, t)| ((*t).to_owned(), true)).collect(),
+            heads: Vec::new(),
+            marked: Vec::new(),
+            hover: None,
+        }
+        .placed(fonts, x, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: items.into_iter().map(|(it, _)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// Whether (`x`, `y`) is over the open menu (the keyboard under it does not answer the pointer
+    /// there).
+    pub fn over_menu(&self, fonts: &Fonts, (x, y): (f64, f64)) -> bool {
+        self.open
+            .as_ref()
+            .is_some_and(|o| o.menu.hit(fonts, x, y).is_some())
+    }
+
     /// The menu closed.
     pub fn close_menu(&mut self) {
         self.open = None;
@@ -503,6 +562,8 @@ impl Learning {
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,
             (Some(Item::Size(w)), _) => return Pressed::Size(*w),
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
+            (Some(Item::Fx(a)), _) => return Pressed::Fx(*a),
+            (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
             _ => {}
         }
         Pressed::Done

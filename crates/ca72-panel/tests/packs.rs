@@ -110,12 +110,13 @@ fn the_starter_pack_moves_the_controls_and_what_a_click_finds() {
     let mut moved = 0;
     for (i, c) in a.controls.iter().enumerate() {
         let (x, y) = c.centre();
-        assert_eq!(
-            interact::hit(r.layout(), &a, x, y),
-            Some(Target::Control(i)),
-            "{}",
-            c.param
-        );
+        // (The arpeggiator's drawer's knobs, the plug-in's own, are found while it is open.)
+        let found = if c.place == ca72_panel::controls::Place::Arp {
+            interact::hit_arp(x, y)
+        } else {
+            interact::hit(r.layout(), &a, x, y)
+        };
+        assert_eq!(found, Some(Target::Control(i)), "{}", c.param);
         moved += usize::from(c.centre() != official.controls[i].centre());
     }
     assert!(moved >= 40, "{moved} moved");

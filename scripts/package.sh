@@ -123,7 +123,20 @@ macos() {
             "$pkgs/$kind.pkg"
     done
     local app="$stage/Applications/CA-72.app"
+    local host="$app/Contents/Helpers/CA-72 Effects Host.app"
     docs "$app/Contents/Resources"
+    # Inside out: the effects' helper first, a bundle of its own, the only code that may load
+    # other vendors' libraries (disable-library-validation); then the application, which must
+    # not (docs/fx-host.md, R-FX-DOCK).
+    if [ -n "${CA72_MACOS_SIGN_APP:-}" ]; then
+        codesign --force --timestamp --options runtime \
+            --entitlements "$root/scripts/standalone/effects-host-entitlements.plist" \
+            --sign "$CA72_MACOS_SIGN_APP" "$host"
+    else
+        codesign --force --entitlements "$root/scripts/standalone/effects-host-entitlements.plist" \
+            --sign - "$host"
+    fi
+    codesign --verify --strict "$host"
     if [ -n "${CA72_MACOS_SIGN_APP:-}" ]; then
         codesign --force --timestamp --options runtime \
             --entitlements "$root/scripts/standalone/entitlements.plist" \
@@ -131,9 +144,10 @@ macos() {
     else
         codesign --force --entitlements "$root/scripts/standalone/entitlements.plist" --sign - "$app"
     fi
-    codesign --verify --strict "$app"
+    codesign --verify --deep --strict "$app"
     for arch in arm64 x86_64; do
         lipo "$app/Contents/MacOS/ca72-standalone" -verify_arch "$arch"
+        lipo "$host/Contents/MacOS/ca72-fx-helper" -verify_arch "$arch"
     done
     pkgbuild --analyze --root "$stage/Applications" "$work/standalone.plist" > /dev/null
     plutil -replace 0.BundleIsRelocatable -bool NO "$work/standalone.plist"

@@ -394,7 +394,9 @@ keeps its controls where they are, but a pack may dress it: its wood and face ar
   panel: 3108 by 850 units (`viewBox="0 0 3108 850"`), y from the rail's top (the rail 0 to
   116, the sections below it). It is drawn over the strip's wood and face and under its print,
   knobs, tabs, keys and glass. `cargo run -p ca72-panel --example strip_places` prints where
-  each of those is, to draw bays, recesses and windows round them.
+  each of those is, to draw bays, recesses and windows round them. The rail has two sets of
+  keys: the plug-ins' and the standalone's, which adds FX after ARP and shortens the preset's
+  name a key; both are printed.
 - **Pictures** in `[look.pictures]`:
 
 | Slot | What | Built-in size |

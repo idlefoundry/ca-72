@@ -13,7 +13,7 @@ use resvg::usvg;
 
 use crate::arrangement::Arrangement;
 use crate::art::{self, Blend, H, Layer, Layout, Lettering, W};
-use crate::controls::{CONTROLS, Kind, Mark, feedback_silent};
+use crate::controls::{CONTROLS, Kind, Mark, Place, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
 use crate::look::Look;
@@ -130,6 +130,8 @@ pub struct Scene {
     pub learning: Option<usize>,
     pub note: Option<Note>,
     pub menu: Option<Menu>,
+    /// The standalone's TEMPO screen's text (`120 BPM`; decisions.md R-ARP), none in a plug-in.
+    pub tempo: Option<String>,
 }
 
 impl Default for Scene {
@@ -146,6 +148,7 @@ impl Default for Scene {
             learning: None,
             note: None,
             menu: None,
+            tempo: None,
         }
     }
 }
@@ -194,6 +197,9 @@ pub struct Renderer {
     /// past [`PLACED_BYTES`] (decisions.md R59); and the count of the renders, their clock.
     placed: Vec<Placed>,
     renders: u64,
+    /// The TEMPO screen's bezel and glass at this scale, in its layer's place (left, top,
+    /// width, height: pixels), once it is drawn.
+    screens: Option<([i32; 4], Pixmap)>,
 }
 
 /// How much the pictures placed in layers may keep: some dozens of layers' pictures.
@@ -305,6 +311,7 @@ impl Renderer {
             overlays: Vec::new(),
             placed: Vec::new(),
             renders: 0,
+            screens: None,
         };
         r.draw_background();
         r
@@ -338,6 +345,7 @@ impl Renderer {
         self.lights.clear();
         self.overlays.clear();
         self.placed.clear();
+        self.screens = None;
         self.draw_background();
     }
 
@@ -602,6 +610,10 @@ impl Renderer {
             .iter()
             .zip(scene.values)
             .map(|(c, v)| {
+                // (The arpeggiator's drawer draws its own knobs: `Renderer::paint_control`.)
+                if c.place == Place::Arp {
+                    return Layer::default();
+                }
                 let midi = match c.kind {
                     Kind::Wheel { detent: true, .. } => scene.midi.0,
                     Kind::Wheel { .. } => scene.midi.1,
@@ -673,6 +685,14 @@ impl Renderer {
             },
             a.plate_at(),
         ));
+        // (Always a layer, none in a plug-in, so that the count stays.)
+        out.push(
+            scene
+                .tempo
+                .as_deref()
+                .map(|t| art::tempo_screen(t, a))
+                .unwrap_or_default(),
+        );
         if let Some(c) = scene.learning.and_then(|i| a.controls.get(i)) {
             out.push(learn::ring(c));
         }
@@ -692,6 +712,21 @@ impl Renderer {
     /// this scale).
     pub fn text_size(&self) -> f64 {
         TIP_TEXT * self.layout.lettering().text() * self.ui / self.scale
+    }
+
+    /// Control `i` at `v` (normalized) as this look draws it, alone, for a frame drawn apart (the
+    /// arpeggiator's drawer, `crate::strip::arp`): its pixels and where their top left corner
+    /// is in the drawing's pixels (not this frame's, which a taller pack's panel begins above
+    /// the drawing's top).
+    pub fn paint_control(&mut self, i: usize, v: f64) -> Option<(i32, i32, Pixmap)> {
+        let c = *self.arrangement.controls.get(i)?;
+        let layer = if self.skin == Skin::Worn {
+            art::control_worn(&c, v, 0.0)
+        } else {
+            art::control(&c, v, 0.0)
+        };
+        let top = self.top_px();
+        self.render_layer(&layer).map(|(x, y, p)| (x, y + top, p))
     }
 
     /// A layer's pixels, aligned to the frame's: their place and their image (its body, its
@@ -715,6 +750,29 @@ impl Renderer {
             let doc = art::document(view, w, h, &body);
             let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
             resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+        }
+        // A screen: its bezel and glass made once in the layer's place and kept, its dots drawn.
+        if let Some(screen) = &layer.screen {
+            let (wx, wy, ww, wh) = screen.window;
+            let window = (ox + wx - x0 / s, oy + wy - y0 / s, ww, wh);
+            let place = [x0 as i32, y0 as i32, w as i32, h as i32];
+            if self.screens.as_ref().is_none_or(|(at, _)| *at != place) {
+                let glass = Pixmap::decode_png(crate::skin::GLASS).expect("the glass decodes");
+                let mut still = Pixmap::new(w, h)?;
+                crate::strip::screen_still(&self.options, &mut still, &glass, s, window);
+                self.screens = Some((place, still));
+            }
+            if let Some((_, still)) = &self.screens {
+                put(&mut pixmap, still, (0, 0), 1.0);
+            }
+            // (The built-in glass and lamp: a skin pack does not dress the TEMPO screen.)
+            crate::strip::screen_text(
+                &mut pixmap,
+                s,
+                window,
+                &screen.text,
+                &crate::strip::Lamp::ORANGE,
+            );
         }
         // Each picture placed (resampled once; kept if it is placed so again), then put with
         // its opacity: drawn so whether it was kept or not.
@@ -1017,8 +1075,8 @@ impl Renderer {
     /// drawn again over `onto`, a frame the drawing's size at this scale: the editor's, over the
     /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
     pub fn draw_floating(&self, onto: &mut Pixmap) {
-        // (The controls', then POWER's, its lamp's, OVERLOAD's, QUALITY's opening's two and the
-        // name plate's: fixed.)
+        // (The controls', then POWER's, its lamp's, OVERLOAD's, QUALITY's opening's two, the
+        // name plate's and the TEMPO screen's: fixed.)
         let fixed = CONTROLS.len() + FIXED;
         for slot in self.slots.iter().skip(fixed) {
             if let Some((x, y, p)) = &slot.pixels {
@@ -1081,25 +1139,37 @@ fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
 }
 
 /// The layers drawn after the controls whatever the scene: POWER, its lamp, OVERLOAD, QUALITY's
-/// opening (its back and its front) and the name plate.
-const FIXED: usize = 6;
+/// opening (its back and its front), the name plate and the TEMPO screen (empty in a plug-in).
+const FIXED: usize = 7;
 
 /// The panel's lamp, up and to the left, over the whole drawing at `s` pixels a unit: brighter
 /// near it (the face's sheen, catching the specks of its texture), falling off towards the far
 /// corner. Each pixel's light multiplied (`LAMP`: at the lamp, far from it, and how far its
 /// light reaches across and down, as shares of the drawing).
 fn lamp(frame: &mut Pixmap, s: f64, height: f64) {
+    lamp_in(frame, s, (0, 0), height);
+}
+
+/// The lamp's light over `frame`, a part of the official panel's drawing whose top left pixel is
+/// the drawing's pixel `at` (the drawers dropped from the rail: `crate::strip::lower`).
+pub(crate) fn lamp_at(frame: &mut Pixmap, s: f64, at: (i32, i32)) {
+    lamp_in(frame, s, at, art::H);
+}
+
+/// The lamp's light over `frame`, its top left pixel `at` from the top left of a drawing
+/// `height` tall (a skin pack's panel may be taller than the official one).
+fn lamp_in(frame: &mut Pixmap, s: f64, at: (i32, i32), height: f64) {
     const LAMP: (f64, f64, f64, f64) = (1.26, 0.84, 0.55, 0.9);
     let (w, h) = (frame.width() as usize, frame.height() as usize);
     let across: Vec<f64> = (0..w)
         .map(|x| {
-            let u = (x as f64 + 0.5) / s / art::W;
+            let u = (x as f64 + f64::from(at.0) + 0.5) / s / art::W;
             (-((u - 0.2) / LAMP.2).powi(2)).exp()
         })
         .collect();
     let down: Vec<f64> = (0..h)
         .map(|y| {
-            let v = (y as f64 + 0.5) / s / height;
+            let v = (y as f64 + f64::from(at.1) + 0.5) / s / height;
             (-(v / LAMP.3).powi(2)).exp()
         })
         .collect();
@@ -1708,6 +1778,26 @@ mod tests {
         }
     }
 
+    /// The standalone's TEMPO screen mirrors the name plate (the owner's option D): its surround
+    /// as wide and tall, at the same height, as far from the left edge as the plate is from the
+    /// right; found where it is drawn, and only there.
+    #[test]
+    fn the_tempo_screen_mirrors_the_name_plate() {
+        let (x, y, w, h) = art::TEMPO_SCREEN;
+        let o = crate::strip::NAME_SURROUND;
+        let official = Arrangement::official();
+        assert_eq!(art::tempo_window(official.plate_at()), art::TEMPO_SCREEN);
+        let tempo_hit = |x, y| art::tempo_hit(&official, x, y);
+        assert_eq!(
+            (x - o, y - o),
+            (art::W - art::PLATE_X - art::PLATE_W, art::PLATE_Y)
+        );
+        assert_eq!((w + 2.0 * o, h + 2.0 * o), (art::PLATE_W, art::PLATE_H));
+        assert!(tempo_hit(x + w / 2.0, y + h / 2.0) && tempo_hit(x - o + 0.5, y - o + 0.5));
+        assert!(!tempo_hit(x - o - 1.0, y) && !tempo_hit(x, y + h + o + 1.0));
+        assert!(y + h + o < art::TOP, "on the wood");
+    }
+
     #[test]
     fn a_frame_put_together_in_part_is_the_frame_put_together_whole() {
         let s = 0.25;
@@ -1718,14 +1808,21 @@ mod tests {
         };
         r.render(&scene);
         let at = |p: &str| index(p).expect(p);
-        for i in 0..12 {
-            match i % 6 {
+        for i in 0..14 {
+            match i % 7 {
                 0 => scene.values[at("cutoff")] = 0.1 * f64::from(i),
                 1 => scene.values[at("drive")] = 0.08 * f64::from(i),
                 2 => scene.values[at("pitch_wheel")] = 0.05 * f64::from(i),
-                3 => scene.values[at("osc1_on")] = f64::from(i / 6 % 2),
+                3 => scene.values[at("osc1_on")] = f64::from(i / 7 % 2),
                 4 => scene.tip = Some(("CUTOFF: 1.2 kHz".into(), 2100.0, 300.0)),
-                _ => scene.tip = None,
+                // The standalone's TEMPO screen shown, set, and gone (R-ARP).
+                5 => scene.tempo = Some(format!("{} BPM", 100 + i)),
+                _ => {
+                    scene.tip = None;
+                    if i > 7 {
+                        scene.tempo = None;
+                    }
+                }
             }
             assert!(r.render(&scene));
             let mut whole = Renderer::new(s, 1.0);

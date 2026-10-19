@@ -15,8 +15,15 @@ fn main() {
         println!("section {t:?}: x {a} to {b}");
     }
     println!("rows: {:?}", strip::ROWS.map(y));
-    let (x, yy, w, h) = strip::NAME;
-    println!("name: {x} {} {w} {h}", y(yy));
+    // The rail's keys: the plug-ins' (ARP last but the settings), and the standalone's with FX
+    // after ARP and the name a key shorter (decisions.md R-ARP, R-FX-DRAWER).
+    for rail in [strip::Rail::Plugin, strip::Rail::Effects] {
+        let (x, yy, w, h) = rail.name();
+        println!("{rail:?} rail: name {x} {} {w} {h}", y(yy));
+        for (x, w, t) in rail.keys() {
+            println!("{rail:?} rail: key {t:?} middle {x}, {w} wide");
+        }
+    }
     let (x, yy, w, h) = strip::DISPLAY;
     println!("display: {x} {} {w} {h}", y(yy));
     for b in Bank::ALL {

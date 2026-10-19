@@ -1,8 +1,18 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "xtask"]
+# The plug-in hosting the standalone application borrows from the owner's DAW, DAW-v3
+# (third_party/daw-v3/VENDORED.md): members, so that their own tests run here too.
+members = ["crates/*", "xtask", "third_party/daw-v3/*"]
 default-members = ["crates/*"]
-exclude = ["third_party"]
+exclude = [
+    "third_party/AudioUnitSDK",
+    "third_party/baseview",
+    "third_party/clap",
+    "third_party/clap-wrapper",
+    "third_party/nih-plug",
+    "third_party/softbuffer",
+    "third_party/urw-gothic",
+]
 
 [workspace.package]
 version = "0.2.7"
@@ -17,6 +27,11 @@ ca72 = { path = "crates/ca72" }
 ca72-analysis = { path = "crates/ca72-analysis" }
 ca72-rt = { path = "crates/ca72-rt" }
 ca72-spice = { path = "crates/ca72-spice" }
+ca72-fx = { path = "crates/ca72-fx" }
+# The plug-in hosting, from DAW-v3 (third_party/daw-v3): its transport, shared by the
+# standalone and its helper, and the helper's host of CLAP and VST3 plug-ins.
+daw-ipc = { path = "third_party/daw-v3/daw-ipc" }
+daw-helper = { path = "third_party/daw-v3/daw-helper" }
 
 # The plug-in framework (ISC; its VST3 bindings are GPL-3.0): its commit below with ten fixes,
 # to state loading, buses, resizing, the processing mode, the host's null channels and the
@@ -25,12 +40,18 @@ ca72-spice = { path = "crates/ca72-spice" }
 nih_plug = { path = "third_party/nih-plug" }
 nih_plug_xtask = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683" }
 
+# The CLAP and VST3 bindings and the plug-ins' loading, in the effects' helper process
+# only (docs/fx-host.md), as DAW-v3 takes them.
+clap-sys = "0.5"
 libc = "0.2"
+libloading = "0.8"
 libm = "0.2"
+rtrb = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 tempfile = "3.27"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+vst3 = "0.3"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
