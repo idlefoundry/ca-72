@@ -2,6 +2,7 @@
 //! played by MIDI, its EXTERNAL INPUT the side chain; one voice, or with POLY one per note
 //! (up to ten), placed across the stereo output by SPREAD.
 
+pub mod arp;
 pub mod character;
 pub mod compat;
 pub mod drive;
