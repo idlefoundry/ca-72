@@ -743,18 +743,26 @@ pub enum Drawn {
     In(u64),
     /// Not done by its deadline (left to finish on its own thread, its result unused).
     Late,
-    /// Not drawn: an earlier test drawing ran past its deadline and is still running.
+    /// Not drawn: an earlier test drawing ran past its deadline and is still running, or no
+    /// thread could be started for it.
     Refused,
     /// The drawing has no size to draw at.
     Sizeless,
     /// Not drawn: its buffers are past the limits (which [`parse_at`] refuses first).
     TooLarge,
+    /// Drawing it panicked (the panic caught on its thread).
+    Panicked,
 }
 
-/// A test drawing that ran past its deadline is still running: no other is started until it
-/// ends, so that at most one runaway drawing ever runs at a time (in a process: a plug-in's
-/// instances share it).
-static RUNAWAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The test drawings of a process (a plug-in's instances share it).
+static TEST_DRAWINGS: TestDrawings = TestDrawings::new();
+
+/// Test drawings, each on a thread of its own: while one that ran past its deadline is still
+/// running, no other is started.
+struct TestDrawings {
+    /// The drawings still running past their deadline.
+    runaway: std::sync::atomic::AtomicUsize,
+}
 
 /// Draws `tree` with its longer side `side` pixels on a thread of its own, waiting for it no
 /// longer than `deadline_ms`: the waiting itself is bounded, whatever the drawing costs. While
@@ -763,10 +771,6 @@ pub fn test_draw(tree: &usvg::Tree, side: u32, deadline_ms: u64) -> Drawn {
     // (Its buffers checked here too, whoever calls it.)
     if memory::check(tree, side, &Limits::default()).is_err() {
         return Drawn::TooLarge;
-    }
-    use std::sync::atomic::Ordering;
-    if RUNAWAY.load(Ordering::Acquire) {
-        return Drawn::Refused;
     }
     let size = tree.size();
     let k = side as f32 / size.width().max(size.height());
@@ -778,33 +782,58 @@ pub fn test_draw(tree: &usvg::Tree, side: u32, deadline_ms: u64) -> Drawn {
         return Drawn::Sizeless;
     };
     let tree = tree.clone();
-    let (tx, rx) = std::sync::mpsc::channel();
-    // Whether the drawing ended within its deadline: it clears RUNAWAY as it ends if not.
-    let late = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let late_here = std::sync::Arc::clone(&late);
-    let spawned = std::thread::Builder::new()
-        .name("skin-pack test drawing".into())
-        .spawn(move || {
-            let t = Instant::now();
-            resvg::render(&tree, Transform::from_scale(k, k), &mut pixmap.as_mut());
-            let _ = tx.send(t.elapsed().as_millis() as u64);
-            if late_here.swap(true, Ordering::AcqRel) {
-                RUNAWAY.store(false, Ordering::Release);
-            }
-        });
-    if spawned.is_err() {
-        return Drawn::Refused;
+    TEST_DRAWINGS.run(deadline_ms, move || {
+        resvg::render(&tree, Transform::from_scale(k, k), &mut pixmap.as_mut());
+    })
+}
+
+impl TestDrawings {
+    const fn new() -> Self {
+        Self {
+            runaway: std::sync::atomic::AtomicUsize::new(0),
+        }
     }
-    match rx.recv_timeout(std::time::Duration::from_millis(deadline_ms.max(1))) {
-        Ok(ms) => Drawn::In(ms),
-        Err(_) => {
-            // Marked late; if the drawing ended in between, it has marked it first, and
-            // nothing is running.
-            RUNAWAY.store(true, Ordering::Release);
-            if late.swap(true, Ordering::AcqRel) {
-                RUNAWAY.store(false, Ordering::Release);
+
+    /// `draw` on a thread of its own, waited for no longer than `deadline_ms`.
+    fn run(&'static self, deadline_ms: u64, draw: impl FnOnce() + Send + 'static) -> Drawn {
+        use std::sync::atomic::Ordering;
+        if self.runaway.load(Ordering::Acquire) > 0 {
+            return Drawn::Refused;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Whether the drawing ended within its deadline. Whichever of the drawing's thread (as
+        // it ends, however: drawn or panicked) and the waiting caller (at the deadline) marks
+        // it second knows the drawing ran late and has ended: it takes it off `runaway`.
+        let late = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let late_here = Arc::clone(&late);
+        let spawned = std::thread::Builder::new()
+            .name("skin-pack test drawing".into())
+            .spawn(move || {
+                let t = Instant::now();
+                let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(draw))
+                    .map(|()| t.elapsed().as_millis() as u64);
+                let _ = tx.send(drawn);
+                if late_here.swap(true, Ordering::AcqRel) {
+                    self.runaway.fetch_sub(1, Ordering::AcqRel);
+                }
+            });
+        if spawned.is_err() {
+            return Drawn::Refused;
+        }
+        match rx.recv_timeout(std::time::Duration::from_millis(deadline_ms.max(1))) {
+            Ok(Ok(ms)) => Drawn::In(ms),
+            // (The thread sends before it ends, whatever drawing does: a lost answer is a
+            // drawing that did not end well.)
+            Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Drawn::Panicked,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Counted first, then marked late: if the drawing ended in between, it marked
+                // it first, and nothing is running.
+                self.runaway.fetch_add(1, Ordering::AcqRel);
+                if late.swap(true, Ordering::AcqRel) {
+                    self.runaway.fetch_sub(1, Ordering::AcqRel);
+                }
+                Drawn::Late
             }
-            Drawn::Late
         }
     }
 }
@@ -841,6 +870,17 @@ pub fn render(
 /// Checks a drawing of a pack, drawing it as a test if `test`: the pixels of the pictures
 /// embedded in it (counted with the pack's), if it is not refused.
 pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut Report) -> u64 {
+    check_with(path, bytes, limits, test, report, test_draw)
+}
+
+fn check_with(
+    path: &str,
+    bytes: &[u8],
+    limits: &Limits,
+    test: bool,
+    report: &mut Report,
+    draw: impl FnOnce(&usvg::Tree, u32, u64) -> Drawn,
+) -> u64 {
     let parsed = parse(bytes, limits);
     let pixels = parsed.as_ref().map_or(0, |(_, cost)| cost.pixels);
     match parsed {
@@ -848,7 +888,7 @@ pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut
         // (Waited for twice its limit, so that a drawing just over it is measured.)
         Ok((tree, _)) if test => {
             let side = side_of(&tree, limits, None);
-            match test_draw(&tree, side, limits.svg_test_ms * 2 + 1) {
+            match draw(&tree, side, limits.svg_test_ms * 2 + 1) {
                 Drawn::In(ms) if ms <= limits.svg_test_ms => {}
                 Drawn::In(ms) => report.reject(
                     "svg.slow",
@@ -882,6 +922,10 @@ pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut
                     Some(path),
                     "its drawing buffers are past the limits",
                 ),
+                // (Refused for itself: the backstop stays on for the packs after it.)
+                Drawn::Panicked => {
+                    report.reject("svg.panicked", Some(path), "drawing it as a test panicked")
+                }
             }
         }
         Ok(_) => {}
@@ -1099,6 +1143,106 @@ mod tests {
         };
         check("art/slow.svg", s.as_bytes(), &limits, true, &mut r);
         assert!(r.has("svg.slow"), "{r}");
+    }
+
+    /// Test drawings of their own, apart from the process's.
+    fn drawings() -> &'static TestDrawings {
+        Box::leak(Box::new(TestDrawings::new()))
+    }
+
+    #[test]
+    fn a_test_drawing_that_panics_refuses_its_pack_and_the_next_is_tested() {
+        // (Before: the panic was taken for a drawing past its deadline, "not drawn within 4001
+        // ms", and every later pack's test was skipped for as long as the process ran.)
+        let drawings = drawings();
+        let s = svg("<rect width='10' height='10'/>");
+        let limits = Limits::default();
+        let mut report = Report::default();
+        check_with(
+            "art/panics.svg",
+            s.as_bytes(),
+            &limits,
+            true,
+            &mut report,
+            |_, _, ms| drawings.run(ms, || panic!("a test drawing panics")),
+        );
+        assert!(report.has("svg.panicked"), "{report}");
+        assert!(!report.has("svg.slow"), "{report}");
+        assert!(!report.to_string().contains("within"), "{report}");
+        let drawn = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let drawn_here = Arc::clone(&drawn);
+        let mut next = Report::default();
+        check_with(
+            "art/next.svg",
+            s.as_bytes(),
+            &limits,
+            true,
+            &mut next,
+            |_, _, ms| {
+                drawings.run(ms, move || {
+                    drawn_here.store(true, std::sync::atomic::Ordering::Release);
+                })
+            },
+        );
+        assert!(drawn.load(std::sync::atomic::Ordering::Acquire));
+        assert!(next.findings.is_empty(), "{next}");
+    }
+
+    #[test]
+    fn a_drawing_that_panics_after_its_deadline_releases_the_backstop() {
+        use std::sync::atomic::Ordering;
+        let drawings = drawings();
+        let (finish, wait) = std::sync::mpsc::channel::<()>();
+        let late = drawings.run(1, move || {
+            let _ = wait.recv();
+            panic!("a late test drawing panics");
+        });
+        assert_eq!(late, Drawn::Late);
+        assert_eq!(drawings.run(1000, || {}), Drawn::Refused);
+        finish.send(()).expect("the drawing is waiting");
+        let until = Instant::now() + std::time::Duration::from_secs(10);
+        while drawings.runaway.load(Ordering::Acquire) > 0 && Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(matches!(drawings.run(1000, || {}), Drawn::In(_)));
+    }
+
+    #[test]
+    fn two_drawings_past_their_deadline_both_hold_the_backstop() {
+        use std::sync::atomic::Ordering;
+        let drawings = drawings();
+        let wait_for = |n: usize| {
+            let until = Instant::now() + std::time::Duration::from_secs(10);
+            while drawings.runaway.load(Ordering::Acquire) > n && Instant::now() < until {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        };
+        let (finish_a, wait_a) = std::sync::mpsc::channel::<()>();
+        let (finish_b, wait_b) = std::sync::mpsc::channel::<()>();
+        // Both started before either is known to be late (as two instances' checks may be).
+        let a = std::thread::spawn(move || {
+            drawings.run(50, move || {
+                let _ = wait_a.recv();
+            })
+        });
+        let b = std::thread::spawn(move || {
+            drawings.run(50, move || {
+                let _ = wait_b.recv();
+            })
+        });
+        let (a, b) = (a.join().expect("a"), b.join().expect("b"));
+        assert!(a == Drawn::Late || b == Drawn::Late, "{a:?} {b:?}");
+        if a == Drawn::Late && b == Drawn::Late {
+            // The first ends; the second still runs, and the backstop holds.
+            drop(finish_a);
+            wait_for(1);
+            assert_eq!(drawings.run(1000, || {}), Drawn::Refused);
+            drop(finish_b);
+        } else {
+            drop((finish_a, finish_b));
+        }
+        wait_for(0);
+        assert!(matches!(drawings.run(1000, || {}), Drawn::In(_)));
     }
 
     #[test]

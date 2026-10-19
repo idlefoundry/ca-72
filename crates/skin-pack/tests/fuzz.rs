@@ -231,13 +231,16 @@ fn packs_mutated_inside_never_panic_or_hang() {
 }
 
 /// A drawing read as the plug-in reads one at 300 pixels; if it is read, drawn as a test (it
-/// must not be past the limits it was read within), and drawn stretched to a strip
+/// must not panic, nor be past the limits it was read within), and drawn stretched to a strip
 /// (as a part's picture may be: its buffers counted again there).
 fn read_and_draw(b: &[u8]) {
     use resvg::tiny_skia::{Pixmap, Transform};
     if let Ok((tree, _)) = svg::parse_at(b, &Limits::default(), Some(300)) {
         let drawn = svg::test_draw(&tree, 300, 2_000);
-        assert_ne!(drawn, svg::Drawn::TooLarge, "the test drawing");
+        assert!(
+            !matches!(drawn, svg::Drawn::Panicked | svg::Drawn::TooLarge),
+            "the test drawing: {drawn:?}"
+        );
         let size = tree.size();
         let mut strip = Pixmap::new(300, 30).expect("a pixmap");
         let stretch = Transform::from_scale(300.0 / size.width(), 30.0 / size.height());
