@@ -5985,7 +5985,11 @@ tested, and this follows it.
 - **What changes.** QUALITY's default is LO (Potato mode, R47), not HI, so a new instance
   (and the standalone's first session) plays the light voices: 2.1 to 3.8 % of a core for ten
   POLY voices against 78 to 107 % at HI (R47's measurement, three presets), so a first try
-  works on a slower computer. "New users" is taken as new instances: a parameter's default cannot tell a
+  works on a slower computer. (Corrected 2026-10-19, R-LO-WORKERS: since R71's filter, ten LO
+  voices cost 17.8 to 21.4 % of a Ryzen 7 7800X3D core on one thread, every factory preset's
+  sound, against 83 to 146 % at HI: a quarter to a seventh, not a thirtieth. LO's voices are
+  now shared with the workers: on the Ryzen under Linux that takes about half of it off the
+  host's thread with one worker and three quarters with four or more; on Windows less.) "New users" is taken as new instances: a parameter's default cannot tell a
   new user from an existing one, and the choice per computer that could (like LOOK) would hide
   the default from a host's own reset.
 - **What does not.** A project keeps the QUALITY it was saved with (every 0.2 session saves
@@ -8151,3 +8155,106 @@ polyphonic patches") may be the same.
 **Not done:** an Intel Mac, macOS's scheduling of time-constraint workers, Windows, or a host.
 To ask the reporter: whether DOUBLE at WIDTH 0 crackles (expected: yes) and LO does not; which
 MacBook Pro and buffer size.
+
+## R-LO-WORKERS. LO's voices shared with the workers where that lightens the host's thread
+
+**Owner decision, 2026-10-19.** On R-POLY-CRACKLE's finding that LO plays every voice on the
+host's thread: "Low should use extra processor threads if that makes a positive difference to
+the amount of usage that it takes. It shouldn't require that. I would hope that we can keep it
+dynamic... We need to keep this working on older, like 4-core computers for sure. But if
+somebody has, you know, an 8 or a 16-core computer and we can make use of more threads, then
+let's do so."
+
+**Agent decisions, 2026-10-19** (placeholder id; not yet reviewed by the owner):
+- **LO shares its voices with POLY's workers** (and UNISON's), which an instance already holds at
+  LO (R21: the pool follows POLY and UNISON, not QUALITY), so the budget, the seats and each
+  machine's count of workers are as at HI: one worker on a computer of 3 or 4 hardware threads,
+  five on 4 cores with 8 threads, nine on the Ryzen. Nothing is required: with no workers, or
+  one voice, every voice plays on the host's thread as before.
+- **As many threads as pay** (`engine::lo_threads`): a thread a voice up to four voices, then a
+  thread for each two (five threads for ten voices), never more than the pool's workers and the
+  host's thread. "Pays" here: each thread added takes from the host's thread at least half the
+  processor time the workers spend for it, so the host's time falls by more than the computer's
+  total rises. The host's thread waits for the longest of the threads' shares, so the count is
+  the fewest threads for that share (four voices on three threads would be no shorter than on
+  two). DOUBLE's twins, played with their voices, do not change the count: measured, doubled
+  voices wanted the same. `Pool::play` takes the most threads to wake (`threads`; HI and ULTRA
+  pass `MAX`, as before).
+- **Workers park at the block's end** (`Pool::rest`, from `Engine::end_block`): they spun 50 us
+  (R-SPIN) after the block's last run for a run that comes only with the next block. Beside LO's
+  light voices (about 50 us a voice a run of 128 samples) that spin was most of a worker's time:
+  with all nine woken for ten voices, the workers took 42 % of a core for 19 % of voices' work.
+  With the rest, 30 %. A run offered clears it, so the spin between a block's runs is kept. It
+  applies at HI and ULTRA too, where it can only save the same spin.
+- **The break-even** (the Ryzen 7 7800X3D, ordinary threads, paced, 64 to 512 frames): with the
+  rest, sharing pays from two voices, the fewest that can be shared (two voices at 128 frames:
+  the host's thread 4.3 to 2.7 % of a core, the workers 2.5 %); without it, two voices were below
+  it (the workers 4.3 % for 1.8 saved). Past four voices a thread a voice does not pay: ten voices
+  from five threads to ten took 2.2 more points off the host's thread for 7.3 of the workers'
+  (doubled, 3.4 for 18.6).
+- **The samples do not change**: each voice is still played whole by one thread and summed in
+  order.
+
+**Evidence (2026-10-19):**
+- **The same to the bit** (`tests/lo_workers.rs`, `same`): 21 materials (changing chords on 1 to
+  10 voices, with and without DOUBLE, and Horn Bloom, Brass Choir, Warp Field, Cycle of Fifths and
+  Swarm Riser as set), 3 seconds each, against the host's thread alone in blocks of the same
+  size, with 3, 5 and 9 workers by the rule and on 4 and 10 threads whatever it: all 420 renders
+  the same to the bit, none of a voice's runs unheard, the workers' processor time 46 to 380 ms a
+  render. (Swarm Riser's render on the host's thread alone differs between block sizes, as it did
+  before this change: its host-only path is unchanged.) `preset_render`, every factory preset at
+  LO, ten voices, with DOUBLE at 0 and 50 %: with 3, 5 and 9 workers the same to the bit as with
+  none (the 9 workers' run took 4.5 s against 15.5 s, 17.4 s of processor time), and with none the
+  same to the bit as `poly-crackle` (the code before this change, built apart).
+- **The host's thread at LO, paced** (`tests/lo_workers.rs`, `paced`: 48 kHz, each block at its
+  time with the plug-in's deadline, 3 seconds after one unmeasured; fewer workers than the
+  machine's standing for smaller computers; the before is every voice on the host's thread, as
+  `poly-crackle` plays). The figures are the host's thread's time in the plug-in as a share of the
+  period, its mean (and 99th percentile), and the process's processor time in shares of a core.
+  - **Linux, Ryzen 7 7800X3D** (ordinary threads, as R-POLY-CRACKLE measured; two rounds, the
+    order swapped, averaged; 128 frames; the other block sizes alike within a few points):
+
+    | Sound | 1 worker | 2 | 3 | 4 | 9 (the machine's) |
+    |---|---|---|---|---|---|
+    | Ten voices | 22 → 12 (p99 26 → 14) | 22 → 9 | 22 → 7 | 22 → 5 | 21 → 6 (p99 25 → 7) |
+    | Horn Bloom as set | 42 → 23 (p99 51 → 30) | 42 → 17 | 43 → 14 | 43 → 10 | 43 → 10 (p99 51 → 13) |
+    | Brass Choir as set | 34 → 18 | 32 → 14 | 32 → 10 | 32 → 10 | 32 → 10 |
+    | Warp Field as set | 34 → 19 | 34 → 14 | 34 → 10 | 34 → 10 | 34 → 10 |
+    | Cycle of Fifths as set | 19 → 11 | 19 → 9 | 19 → 6 | 19 → 6 | 20 → 6 |
+    | Swarm Riser as set | 17 → 10 | 17 → 9 | 17 → 5 | 17 → 5 | 17 → 5 |
+
+    The process's processor time rose 1 to 14 points (ten voices 22 → 23 with one worker, 22 →
+    26 to 27 with more; Horn Bloom 42 → 46 and 50). Of 320 cases each way, the host's thread
+    alone had no block late and no voice's run unheard; shared, 2 blocks late and 3 runs unheard
+    (ordinary threads, which the system may preempt; the plug-in's workers are audio threads).
+  - **Windows 11, i5-13600K** (the Balanced power plan, as it is set; the measuring thread and
+    the workers in MMCSS's Pro Audio, as a host's and the plug-in's are; processor time from the
+    threads' cycle counts; 128 frames; 4 workers is the plug-in's own count there): ten voices 26
+    → 25 with one worker (p99 50 → 31), 28 → 24 with two, 27 → 20 with four (p99 49 → 27); Horn
+    Bloom 32 → 26, 33 → 26, 34 → 24 (p99 53 → 31). Of 96 cases each way, the host's thread alone
+    had 78 blocks late, shared none (4 runs unheard). But the process's processor time rose from
+    25 to 34 % to 48 to 57 % with one worker and 73 to 131 % with four. There a voice's run costs
+    about half again as much paced as flat out (`preset_cost` on Windows: ten voices 15 to 21 %,
+    as on the Ryzen; paced on the host's thread alone, 26 %): a core busy for a few hundred
+    microseconds a block is not brought up to speed, the more so the thinner the voices are
+    spread. Restricting the process to the performance cores changed nothing.
+  - **Idle** (POLY's ten voices, no note): the same before and after on both (the host's thread
+    0.0 to 0.1 % on Linux, 0.2 to 0.3 % on Windows; no run is offered with no voice sounding).
+- **LO's cost now** (`preset_cost`, one thread, ten POLY voices, each factory preset's sound
+  without DOUBLE, the Ryzen): 17.8 to 21.4 % of a core, against HI's 83 to 146 %: a quarter to a
+  seventh of HI's (about a sixth on average). Each preset as set: Horn Bloom 36 %, Brass Choir
+  28 %, Warp Field 30 %, Swarm Riser 15 %, Cycle of Fifths 17 %.
+- **Tests:** `lo_s_threads_follow_its_voices`; `a_pool_at_rest_shares_the_next_blocks_run` (a run
+  after the workers have parked at a block's end is shared still); the no-allocation test with
+  workers (`poly_with_workers_neither_allocates_nor_frees_while_it_plays`) now switches QUALITY to
+  LO for part of its run.
+
+**For the owner:** on Windows LO shared lightens the host's thread a little on average and
+much at its peaks, and costs the computer more processor time (two to four times the voices'
+own). Whether that is wanted there, and the Mac's figures, are open.
+
+**Not done:** the Mac (another session was signing a release on it): macOS's time-constraint
+workers and work intervals at LO are unmeasured, as is an Intel Mac. No host was tried. The
+Linux measurements used ordinary threads (real-time threads there were demoted by the
+plug-in's own watch, `ca72_rt::watch`, partway through a run on this busy desktop, so those
+figures were set aside).
