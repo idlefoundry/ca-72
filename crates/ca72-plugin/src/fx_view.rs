@@ -10,6 +10,13 @@
 //! its tab bypasses it; a right click offers REPLACE and REMOVE (the editor's menus, MIDI
 //! Learn's); the first empty slot reads "+ ADD EFFECT" and drops the effects' list, the effects
 //! on this computer, found by a scan on a thread of its own the first time it is asked for.
+//!
+//! An effect turned off after it crashed or stopped responding (decisions.md R-FX-SAFETY) shows
+//! its name dimmed over CRASHED or NOT RESPONDING: a click tries it again, and its menu offers
+//! TRY AGAIN and LOAD WITHOUT ITS SETTINGS (first, when its settings are thought the cause). After
+//! a safe start each effect reads OFF: a click turns the effects back on, and the menu offers
+//! TURN EFFECTS BACK ON and TURN THIS ONE ON. One running without its settings offers TRY ITS OLD
+//! SETTINGS. The tip over a slot says why, in a line.
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -20,25 +27,79 @@ use ca72_panel::strip::fx::{
 };
 
 /// How an effect in the chain is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Health {
+    #[default]
     Running,
+    /// Being loaded (at start, tried again): dry meanwhile.
+    Loading,
     /// Its helper died or hung; it is being started again (dry meanwhile).
     Restarting,
-    /// Given up on: dry from now on.
-    Failed,
+    /// Turned off after it crashed, and off at the next start until tried again: dry.
+    Crashed,
+    /// Turned off after it stopped responding, and off at the next start until tried again.
+    NotResponding,
     /// Its plug-in could not be loaded here: dry, its state kept.
     Missing,
+    /// Not loaded this time: a safe start.
+    Off,
+}
+
+impl Health {
+    /// Whether it is turned off or not loaded, so that a click tries it (or, off, turns the
+    /// effects back on) rather than opening its window.
+    fn idle(self) -> bool {
+        matches!(
+            self,
+            Health::Crashed | Health::NotResponding | Health::Missing | Health::Off
+        )
+    }
 }
 
 /// An effect in the chain, as the drawer shows it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SlotInfo {
     pub name: String,
     pub vendor: String,
     pub format: String,
     pub bypass: bool,
     pub health: Health,
+    /// Turned off because its saved settings crash it (or are thought to).
+    pub by_settings: bool,
+    /// It has saved settings (it can be loaded without them).
+    pub has_state: bool,
+    /// It runs without its saved settings, which are kept aside.
+    pub set_aside: bool,
+    /// Its old settings, given back a moment ago, still crashed it.
+    pub try_failed: bool,
+}
+
+/// Why the effects are off this time (a safe start), for the slots' tips.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SafeStart {
+    /// The CA-72 did not close properly last time.
+    DidNotClose,
+    /// The player held Shift (or Option) as it opened.
+    Asked,
+}
+
+/// A slot's menu's items: what each does, and its words.
+pub type MenuItems = Vec<(FxAction, &'static str)>;
+
+/// Something a slot's menu does (the editor's menus hand it back: `learning::Pressed::Fx`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FxAction {
+    /// The list dropped to put another effect in its place.
+    Replace(usize),
+    Remove(usize),
+    /// Tried again (turned off, missing), or turned on (off for a safe start).
+    Retry(usize),
+    /// Loaded without its saved settings, which are kept aside.
+    WithoutSettings(usize),
+    /// Given back its settings kept aside.
+    OldSettings(usize),
+    /// Every effect off for a safe start turned back on.
+    AllOn,
 }
 
 /// An effect found on this computer.
@@ -55,6 +116,9 @@ pub struct Listing {
 pub struct Catalogue {
     pub scanning: bool,
     pub scanned: bool,
+    /// Plug-in files the last scan could not list (crashed or hung their helper, or are not
+    /// plug-ins): remembered, listed again by SCAN AGAIN or when they change (R-FX-SAFETY).
+    pub unlisted: usize,
     pub generation: u64,
     pub effects: Vec<Listing>,
 }
@@ -80,6 +144,17 @@ pub trait Effects: Send + Sync {
     fn set_bypass(&self, slot: usize, on: bool) -> Result<(), String>;
     /// The `slot`th effect's own window opened (or brought forward).
     fn open_editor(&self, slot: usize) -> Result<(), String>;
+    /// The `slot`th effect tried again (turned off, missing; off for a safe start, turned on),
+    /// on a thread of the chain's: it returns at once, the slot loading.
+    fn retry(&self, slot: usize) -> Result<(), String>;
+    /// The `slot`th effect loaded without its saved settings (kept aside), as `retry`.
+    fn without_settings(&self, slot: usize) -> Result<(), String>;
+    /// The `slot`th effect given back the settings kept aside, as `retry`.
+    fn old_settings(&self, slot: usize) -> Result<(), String>;
+    /// Every effect off for a safe start turned back on, as `retry`.
+    fn turn_on(&self);
+    /// Why the effects are off this time, if they are (a safe start).
+    fn safe_start(&self) -> Option<SafeStart>;
 }
 
 /// The standalone's chain, if the application has one (the plug-ins: none).
@@ -103,6 +178,7 @@ enum Job {
     Move(usize, usize),
     Bypass(usize, bool),
     Window(usize),
+    Act(FxAction),
 }
 
 /// What the drawer's threads are doing and have done: an effect being loaded (its slot and
@@ -277,10 +353,14 @@ impl FxView {
             }
             if let Some(e) = self.effect(i) {
                 let (dim, word) = match e.health {
+                    Health::Running if e.try_failed => (false, Some(FxWord::Failed)),
                     Health::Running => (false, None),
+                    Health::Loading => (true, Some(FxWord::Loading)),
                     Health::Restarting => (true, Some(FxWord::Restarting)),
-                    Health::Failed => (true, Some(FxWord::Crashed)),
+                    Health::Crashed => (true, Some(FxWord::Crashed)),
+                    Health::NotResponding => (true, Some(FxWord::NotResponding)),
                     Health::Missing => (true, Some(FxWord::Missing)),
+                    Health::Off => (true, Some(FxWord::Off)),
                 };
                 return FxSlot {
                     text: e.name.clone(),
@@ -348,12 +428,16 @@ impl FxView {
                 "SCANNING\u{2026}".into()
             } else if !c.scanned {
                 String::new()
-            } else if n == 0 {
-                "NONE FOUND".into()
-            } else if n == 1 {
-                "1 EFFECT".into()
             } else {
-                format!("{n} EFFECTS")
+                let found = match n {
+                    0 => "NONE FOUND".to_owned(),
+                    1 => "1 EFFECT".to_owned(),
+                    _ => format!("{n} EFFECTS"),
+                };
+                match c.unlisted {
+                    0 => found,
+                    u => format!("{found}, {u} NOT LISTED"),
+                }
             },
             rows,
             first: o.first,
@@ -458,13 +542,19 @@ impl FxView {
     }
 
     /// The pointer let go: a slot carried onto another moved there; one pressed and not moved,
-    /// its effect's window opened.
+    /// its effect's window opened, or (turned off, missing) it tried again, or (off for a safe
+    /// start) the effects turned back on.
     pub fn released(&mut self) {
         let Some(p) = self.press.take() else { return };
         match (p.carried, p.over) {
             (true, Some(to)) => self.submit(Job::Move(p.slot, to)),
             (true, None) => {}
-            (false, _) => self.submit(Job::Window(p.slot)),
+            (false, _) => match self.effect(p.slot).map(|e| e.health) {
+                Some(Health::Off) => self.act(FxAction::AllOn),
+                Some(h) if h.idle() => self.act(FxAction::Retry(p.slot)),
+                Some(Health::Loading) | None => {}
+                Some(_) => self.submit(Job::Window(p.slot)),
+            },
         }
     }
 
@@ -478,31 +568,80 @@ impl FxView {
         self.press = None;
     }
 
-    /// The slot whose menu a right click at (`x`, `y`) opens, and its effect's name.
-    pub fn menu_for(&self, x: f64, y: f64) -> Option<(usize, String)> {
-        match fx_ui::hit(x, y, None) {
-            Some(FxTarget::Name(i) | FxTarget::Tab(i)) if !self.busy() => {
-                self.effect(i).map(|e| (i, e.name.clone()))
+    /// The menu a right click at (`x`, `y`) opens: its effect's name as its title, and its
+    /// items. What the effect's state offers comes first (TRY AGAIN, LOAD WITHOUT ITS SETTINGS,
+    /// TURN EFFECTS BACK ON...), then REPLACE… and REMOVE.
+    pub fn menu_for(&self, x: f64, y: f64) -> Option<(String, MenuItems)> {
+        let i = match fx_ui::hit(x, y, None) {
+            Some(FxTarget::Name(i) | FxTarget::Tab(i)) if !self.busy() => i,
+            _ => return None,
+        };
+        let e = self.effect(i)?;
+        let mut items = Vec::new();
+        let without = (FxAction::WithoutSettings(i), "LOAD WITHOUT ITS SETTINGS");
+        let again = (FxAction::Retry(i), "TRY AGAIN");
+        match e.health {
+            Health::Off => {
+                items.push((FxAction::AllOn, "TURN EFFECTS BACK ON"));
+                items.push((FxAction::Retry(i), "TURN THIS ONE ON"));
             }
-            _ => None,
+            Health::Crashed | Health::NotResponding if e.by_settings => {
+                items.push(without);
+                items.push(again);
+            }
+            Health::Crashed | Health::NotResponding => {
+                items.push(again);
+                if e.has_state {
+                    items.push(without);
+                }
+            }
+            Health::Missing => items.push(again),
+            Health::Running if e.set_aside => {
+                items.push((FxAction::OldSettings(i), "TRY ITS OLD SETTINGS"));
+            }
+            Health::Running | Health::Loading | Health::Restarting => {}
+        }
+        items.push((FxAction::Replace(i), "REPLACE\u{2026}"));
+        items.push((FxAction::Remove(i), "REMOVE"));
+        Some((e.name.clone(), items))
+    }
+
+    /// A slot's menu's item chosen.
+    pub fn act(&mut self, a: FxAction) {
+        match a {
+            FxAction::Replace(slot) => {
+                if self.effect(slot).is_some() {
+                    self.open_list(slot, true);
+                }
+            }
+            FxAction::Remove(slot) => {
+                if self.effect(slot).is_some() {
+                    self.submit(Job::Remove(slot));
+                }
+            }
+            FxAction::AllOn => {
+                self.submit(Job::Act(a));
+                // (Shown at once; the chain read again confirms it.)
+                for e in &mut self.slots {
+                    if e.health == Health::Off {
+                        e.health = Health::Loading;
+                    }
+                }
+            }
+            FxAction::Retry(slot)
+            | FxAction::WithoutSettings(slot)
+            | FxAction::OldSettings(slot) => {
+                if let Some(e) = self.slots.get_mut(slot) {
+                    e.health = Health::Loading;
+                    e.try_failed = false;
+                    self.submit(Job::Act(a));
+                }
+            }
         }
     }
 
-    /// The menu's REPLACE: the list dropped to replace slot `slot`'s effect.
-    pub fn replace(&mut self, slot: usize) {
-        if self.effect(slot).is_some() {
-            self.open_list(slot, true);
-        }
-    }
-
-    /// The menu's REMOVE.
-    pub fn remove(&mut self, slot: usize) {
-        if self.effect(slot).is_some() {
-            self.submit(Job::Remove(slot));
-        }
-    }
-
-    /// The tip over slot `i`'s name: its effect's whole name and maker.
+    /// The tip over slot `i`'s name: its effect's whole name and maker, or why it is off and what
+    /// a click does (decisions.md R-FX-SAFETY).
     pub fn tip(&self) -> Option<(String, f64, f64)> {
         let Some(FxTarget::Name(i)) = self.hover else {
             return None;
@@ -512,10 +651,41 @@ impl FxView {
         }
         let e = self.effect(i)?;
         let (x, y, w, _) = fx_ui::screen(i);
-        let text = if e.vendor.is_empty() {
+        let named = if e.vendor.is_empty() {
             e.name.clone()
         } else {
             format!("{} ({})", e.name, e.vendor)
+        };
+        let safe = self.effects.as_ref().and_then(|f| f.safe_start());
+        let text = match e.health {
+            Health::Off => match safe {
+                Some(SafeStart::Asked) => {
+                    "Effects off for this start. Click to turn them on".into()
+                }
+                _ => "Effects off: the CA-72 did not close properly. Click to turn them on".into(),
+            },
+            Health::Crashed if e.by_settings => {
+                format!(
+                    "{}: its saved settings crash it. Right-click for choices",
+                    e.name
+                )
+            }
+            Health::Crashed => format!(
+                "{}: turned off after it crashed. Click to try again",
+                e.name
+            ),
+            Health::NotResponding => {
+                format!(
+                    "{}: turned off, it stopped responding. Click to try again",
+                    e.name
+                )
+            }
+            Health::Missing => format!("{}: not found on this computer", e.name),
+            Health::Running if e.try_failed => {
+                format!("{}: its old settings still crash it", e.name)
+            }
+            Health::Running if e.set_aside => format!("{named}, without its saved settings"),
+            _ => named,
         };
         Some((text, x + w / 2.0, y - 6.0))
     }
@@ -544,9 +714,10 @@ impl FxView {
         }
     }
 
-    /// `job` handed to its thread (a bypass to the quick one, the rest in order to the other).
+    /// `job` handed to its thread (a bypass, and what the chain does on threads of its own, to
+    /// the quick one; the rest in order to the other).
     fn submit(&mut self, job: Job) {
-        let lane = if matches!(job, Job::Bypass(..)) {
+        let lane = if matches!(job, Job::Bypass(..) | Job::Act(_)) {
             &self.quick
         } else {
             &self.loads
@@ -572,6 +743,14 @@ fn run(effects: &dyn Effects, pending: &Mutex<Pending>, job: Job) {
         Job::Move(f, t) => effects.move_to(*f, *t),
         Job::Bypass(s, on) => effects.set_bypass(*s, *on),
         Job::Window(s) => effects.open_editor(*s),
+        Job::Act(FxAction::Retry(s)) => effects.retry(*s),
+        Job::Act(FxAction::WithoutSettings(s)) => effects.without_settings(*s),
+        Job::Act(FxAction::OldSettings(s)) => effects.old_settings(*s),
+        Job::Act(FxAction::AllOn) => {
+            effects.turn_on();
+            Ok(())
+        }
+        Job::Act(FxAction::Replace(_) | FxAction::Remove(_)) => Ok(()),
     };
     let mut p = lock(pending);
     if matches!(job, Job::Add(..) | Job::Replace(..)) {
@@ -601,6 +780,8 @@ pub(crate) mod fake {
         pub found: Vec<Listing>,
         pub done: Mutex<Vec<String>>,
         pub scans: Mutex<u32>,
+        pub safe: Mutex<Option<SafeStart>>,
+        pub unlisted: Mutex<usize>,
     }
 
     impl Fake {
@@ -609,8 +790,8 @@ pub(crate) mod fake {
                 name: (*n).into(),
                 vendor: "Maker".into(),
                 format: "clap".into(),
-                bypass: false,
-                health: Health::Running,
+                has_state: true,
+                ..SlotInfo::default()
             };
             Arc::new(Fake {
                 slots: Mutex::new(names.iter().map(info).collect()),
@@ -650,6 +831,7 @@ pub(crate) mod fake {
             Catalogue {
                 scanning: false,
                 scanned: *lock(&self.scans) > 0,
+                unlisted: *lock(&self.unlisted),
                 generation: 1,
                 effects: self.found.clone(),
             }
@@ -667,8 +849,7 @@ pub(crate) mod fake {
                 name: l.name.clone(),
                 vendor: l.vendor.clone(),
                 format: l.format.clone(),
-                bypass: false,
-                health: Health::Running,
+                ..SlotInfo::default()
             });
             Ok(())
         }
@@ -699,6 +880,35 @@ pub(crate) mod fake {
             self.note(format!("window {slot}"));
             Ok(())
         }
+        fn retry(&self, slot: usize) -> Result<(), String> {
+            self.note(format!("retry {slot}"));
+            lock(&self.slots)[slot].health = Health::Running;
+            Ok(())
+        }
+        fn without_settings(&self, slot: usize) -> Result<(), String> {
+            self.note(format!("without settings {slot}"));
+            let mut s = lock(&self.slots);
+            s[slot].health = Health::Running;
+            s[slot].set_aside = true;
+            Ok(())
+        }
+        fn old_settings(&self, slot: usize) -> Result<(), String> {
+            self.note(format!("old settings {slot}"));
+            lock(&self.slots)[slot].try_failed = true;
+            Ok(())
+        }
+        fn turn_on(&self) {
+            self.note("turn on".into());
+            for s in lock(&self.slots).iter_mut() {
+                if s.health == Health::Off {
+                    s.health = Health::Running;
+                }
+            }
+            *lock(&self.safe) = None;
+        }
+        fn safe_start(&self) -> Option<SafeStart> {
+            *lock(&self.safe)
+        }
     }
 }
 
@@ -716,7 +926,7 @@ mod tests {
         {
             let mut s = lock(&fake.slots);
             s[1].bypass = true;
-            s[2].health = Health::Failed;
+            s[2].health = Health::Crashed;
         }
         let mut v = FxView::new(Some(fake.clone()));
         v.poll(Instant::now());
@@ -779,5 +989,12 @@ mod tests {
         assert_eq!(*lock(&fake.scans), 1, "scanned once");
         v.choose(15);
         assert_eq!(*lock(&fake.scans), 2, "SCAN AGAIN");
+        // Files that crashed or hung their helper as they were listed (R-FX-SAFETY) are counted.
+        *lock(&fake.unlisted) = 2;
+        v.open_list(1, false);
+        assert_eq!(
+            v.scene().list.map(|l| l.note),
+            Some("15 EFFECTS, 2 NOT LISTED".into())
+        );
     }
 }

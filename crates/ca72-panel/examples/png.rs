@@ -8,7 +8,9 @@
 //! `CA72_FX=1` the standalone's rail (its FX key, lit) and the effects' drawer over the lower
 //! page (decisions.md R-FX-DRAWER): three effects, the third bypassed, the fourth slot empty;
 //! `CA72_FX=list` with the effects' list dropped for the fourth; `CA72_FX=crashed` the second
-//! given up on; `CA72_FX=rail` the rail alone.
+//! given up on; `CA72_FX=safety` a slot turned off after a crash, one after a hang, one
+//! loading; `CA72_FX=off` a safe start's slots (decisions.md R-FX-SAFETY); `CA72_FX=rail` the
+//! rail alone.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -264,6 +266,31 @@ fn drop_fx(
             dim: true,
             lit: false,
             word: Some(FxWord::Crashed),
+        };
+    }
+    // The safety states (decisions.md R-FX-SAFETY): one off for a safe start, one turned off
+    // after it crashed, one after it stopped responding, one loading.
+    if how == "safety" || how == "off" {
+        let word = |text: &str, word: FxWord| FxSlot {
+            text: text.into(),
+            dim: true,
+            lit: false,
+            word: Some(word),
+        };
+        scene.slots = if how == "off" {
+            [
+                word("Chorus", FxWord::Off),
+                word("Hall Reverb", FxWord::Off),
+                word("Tape Delay", FxWord::Off),
+                slot("+ ADD EFFECT", false),
+            ]
+        } else {
+            [
+                slot("Chorus", true),
+                word("Hall Reverb", FxWord::Crashed),
+                word("Tape Delay", FxWord::NotResponding),
+                word("Shimmer", FxWord::Loading),
+            ]
         };
     }
     if how == "list" {
