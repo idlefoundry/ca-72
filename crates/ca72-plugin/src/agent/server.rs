@@ -11,6 +11,9 @@
 //! answer let go. The socket and its record are removed as the server is dropped (the editor
 //! closing, or agents turned off).
 
+// (Sockets are Unix's in this version: elsewhere the bridge and the server say so.)
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};

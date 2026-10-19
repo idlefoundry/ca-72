@@ -1087,12 +1087,9 @@ impl Editing {
         .listening()
     }
 
-    /// Listening for agents if they are allowed (not in the tests' editors, which open no
-    /// socket of their own).
+    /// Listening for agents if they are allowed.
     fn listening(mut self) -> Self {
-        if !cfg!(test) {
-            self.sync_agents();
-        }
+        self.sync_agents();
         self
     }
 
@@ -7870,6 +7867,57 @@ mod tests {
                 .save_png(out.join(format!("settings-{n}.png")))
                 .unwrap();
         }
+    }
+
+    /// SETTINGS offers AGENTS in the standalone alone (decisions.md R-MCP): ALLOW and OFF, the
+    /// one in force marked; off until chosen. `agents-<n>.png` in `$CA72_AGENTS_PNG`.
+    #[test]
+    fn agents_are_allowed_in_the_standalones_settings_menu() {
+        let out = std::env::var_os("CA72_AGENTS_PNG").map(std::path::PathBuf::from);
+        let (mut e, _host, _) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert!(
+            !menu_items(&e).iter().any(|(t, _)| t == "AGENTS"),
+            "not in a host"
+        );
+        e.learning.close_menu();
+        let (mut e, _host, _) = editing_standalone();
+        assert!(!e.settings.agents && !e.agents_allowed());
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let at = items
+            .iter()
+            .position(|(t, _)| t == "AGENTS")
+            .expect("AGENTS");
+        assert_eq!(
+            items[at + 1..at + 3],
+            [("ALLOW".to_owned(), true), ("OFF".to_owned(), false)]
+        );
+        if let Some(out) = &out {
+            window_frame(&mut e)
+                .save_png(out.join("agents-1.png"))
+                .unwrap();
+        }
+        menu_item(&mut e, "ALLOW");
+        assert!(e.settings.agents && e.agents_allowed());
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let at = items
+            .iter()
+            .position(|(t, _)| t == "AGENTS")
+            .expect("AGENTS");
+        assert_eq!(
+            items[at + 1..at + 3],
+            [("ALLOW".to_owned(), false), ("OFF".to_owned(), true)]
+        );
+        if let Some(out) = &out {
+            window_frame(&mut e)
+                .save_png(out.join("agents-2.png"))
+                .unwrap();
+        }
+        menu_item(&mut e, "OFF");
+        assert!(!e.agents_allowed());
     }
 
     /// The drawer's update check (decisions.md R27): its button the editor's, not the

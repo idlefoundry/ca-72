@@ -6,6 +6,9 @@
 //! closes ends its connection: the next call says so, or (none having been chosen) connects to
 //! the one then open, so that an agent's session outlives the application's restart.
 
+// (Sockets are Unix's in this version: elsewhere the bridge and the server say so.)
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::Duration;

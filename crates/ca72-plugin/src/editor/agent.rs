@@ -51,14 +51,17 @@ impl Editing {
         self.playing.standalone && (self.settings.agents || crate::agent::forced())
     }
 
-    /// The socket open while agents are allowed, closed when they are not.
+    /// The socket open while agents are allowed, closed when they are not (the tests' editors
+    /// open none of their own in the user's folder: they are given one).
     pub(super) fn sync_agents(&mut self) {
         let allowed = self.agents_allowed() && !self.agents.stop;
         match (&self.agents.server, allowed) {
-            (None, true) if self.agents.error.is_none() => match Server::start("standalone") {
-                Ok(s) => self.agents.server = Some(s),
-                Err(e) => self.agents.error = Some(e),
-            },
+            (None, true) if self.agents.error.is_none() && !cfg!(test) => {
+                match Server::start("standalone") {
+                    Ok(s) => self.agents.server = Some(s),
+                    Err(e) => self.agents.error = Some(e),
+                }
+            }
             (Some(_), false) => {
                 self.agents.server = None;
                 for (note, _) in std::mem::take(&mut self.agents.timed) {
@@ -1067,7 +1070,7 @@ fn audio_summary() -> Value {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;

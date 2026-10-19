@@ -142,7 +142,7 @@ fn reachable(_path: &Path) -> bool {
     false
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -159,7 +159,6 @@ mod tests {
     }
 
     /// Records are read oldest first; one whose socket does not answer is removed.
-    #[cfg(unix)]
     #[test]
     fn records_are_read_and_the_dead_removed() {
         use std::os::unix::fs::PermissionsExt;
@@ -185,7 +184,6 @@ mod tests {
     }
 
     /// A folder others may enter is made the user's alone.
-    #[cfg(unix)]
     #[test]
     fn an_open_folder_is_made_private() {
         use std::os::unix::fs::PermissionsExt;
