@@ -1,5 +1,11 @@
 # nih-plug, patched
 
+**Linux standalone identity, 2026-10-18 (CA-72 issue #49).** The standalone opens its
+window through the repository's patched baseview on every platform (R-WIN-STANDALONE), so on
+Linux the top-level window takes the application's `WM_CLASS` from baseview's change 10 (set by
+`ca72_plugin::identify_standalone()`). The previous separate git dependency did not set it. See
+`docs/issue-49-linux-icon.md` and `scripts/test-linux-window-identity.py`.
+
 The `nih_plug` crate and its derive macros from
 [robbert-vdh/nih-plug](https://github.com/robbert-vdh/nih-plug) at commit
 `de421011f41a6d10fc8c7a6084e4f4dee0143683` (ISC, `LICENSE`; its VST3 bindings are

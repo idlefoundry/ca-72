@@ -156,6 +156,12 @@ jobs:
       - name: Native-window visibility capability tests
         run: CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-visibility" cargo test --manifest-path third_party/nih-plug/Cargo.toml --lib visibility_tests
 
+      - name: Linux standalone window identity
+        if: runner.os == 'Linux'
+        run: |
+          python3 scripts/test-linux-window-identity.py
+          CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-window-identity" cargo test --manifest-path third_party/baseview/Cargo.toml --lib
+
       - name: Validators, cached
         uses: actions/cache@v5
         with:

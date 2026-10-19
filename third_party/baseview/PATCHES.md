@@ -3,15 +3,16 @@
 The `baseview` crate from [RustAudio/baseview](https://github.com/RustAudio/baseview) at
 commit `9a0b42c09d712777b2edb4c5e0cb6baf21e988f0` (MIT OR Apache-2.0, `LICENSE-MIT`,
 `LICENSE-APACHE`), the revision the editor took from git until 0.1.0. The examples, the CI
-and the manifest's `[workspace]`, `[[example]]` and `[dev-dependencies]` tables are left
-out; the manifest names the repository, for the notices, and allows two of upstream's own
+and the manifest's `[[example]]` table are left out; the workspace contains only the resolver
+setting needed for the portable tests, and their dev-dependencies are listed below. The
+manifest names the repository, for the notices, and allows two of upstream's own
 compiler warnings (`non_snake_case` in `src/win/drop_target.rs`, and
 `mismatched_lifetime_syntaxes`). `src/macos/window.rs` has one `use` list in the order
 today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
 Six changes for Windows (1 to 3, 5, 6 and 8), in `src/win/window.rs`, `src/win/drop_target.rs`,
 `src/win/escape.rs`, `src/event.rs` and `src/window.rs` (the first three the CA-72's
-`docs/decisions.md` R26, R28 and R34), and three for macOS (4, 7 and 8, below):
+`docs/decisions.md` R26, R28 and R34), three for macOS (4, 7 and 8) and one for Linux (10, below):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -185,6 +186,22 @@ R-WIN-STANDALONE, issue 64, 2026-10-18):
    (`third_party/nih-plug/Cargo.toml`), without the `opengl` feature, which neither window
    uses; it had taken upstream's `579130e` from git, whose X11 backend is this one's and whose
    Windows and macOS backends lack this copy's changes.
+
+And one more for Linux, in `src/x11/` (issue 49, 2026-10-18):
+
+10. **Linux standalone windows identify themselves before mapping** (CA-72 issue #49;
+   `docs/issue-49-linux-icon.md`). The X11 backend mapped its window before setting `WM_NAME`
+   and never set `WM_CLASS`. It now sets the application's class (`set_application_class`, the
+   first name given) or, without one, the initial title as both the instance and class
+   (`STRING/8`, two NUL-terminated strings), then maps. A window titled otherwise, such as an
+   error window, so keeps the application's class. Only top-level windows receive the
+   class; parented plug-in editors leave application identity to their host. Six portable
+   tests record the actual X11 requests, covering the payload, order, parented windows,
+   another instrument's title, a window titled apart from its application, the first class
+   staying, and failure before mapping. The standalone wrappers open their window with this copy
+   on every platform (change 9). The helper's tests use x11rb as a
+   development dependency on every platform. Ubuntu dock behaviour still needs a graphical
+   check.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.

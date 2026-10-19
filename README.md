@@ -475,6 +475,26 @@ this needs ALSA and OpenGL headers (`libasound2-dev libgl-dev` on Debian/Ubuntu,
 `target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
 Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
 
+On Linux, a source build also needs the desktop entry and icon installed for the dock
+to identify it. Install the packaged archive with `./install.sh --standalone-only`, or
+install just the application from source after `scripts/standalone.sh`:
+
+```sh
+mkdir -p target/standalone-install
+cp target/bundled/ca72-standalone scripts/standalone/CA-72.desktop \
+  scripts/standalone/com.idlefoundry.ca72.png scripts/installer/install.sh \
+  THIRD-PARTY-NOTICES.txt target/standalone-install/
+cp LICENSE target/standalone-install/LICENSE.txt
+sh target/standalone-install/install.sh --standalone-only
+```
+
+This installs `~/.local/bin/ca72-standalone`, the launcher
+`com.idlefoundry.ca72.desktop` and its icon for your user. Open **CA-72** from your
+applications menu. Running a bare executable does not register those files. The Linux
+window uses X11, through XWayland in a Wayland session; its class is `CA-72`, matching
+the launcher's `StartupWMClass`. See the
+[Linux window identity checks](docs/issue-49-linux-icon.md) for the checks and evidence.
+
 To try the plug-in without a host, run it as an application of its own:
 
 ```sh

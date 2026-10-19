@@ -39,6 +39,14 @@ use crate::helper::{Helper, MEND, SERVE};
 use crate::learn::{Dezip, Incoming};
 use crate::params::Ca72Params;
 
+/// Names the standalone application before its first window opens: on Linux, the X11 class of
+/// every top-level window, the editor's and the error window's alike, whatever each one's
+/// title. The installed launcher's `StartupWMClass` matches it (decisions.md R-LINUX-ICON).
+#[cfg(feature = "standalone-production")]
+pub fn identify_standalone() {
+    baseview::set_application_class(Ca72::NAME);
+}
+
 pub struct Ca72 {
     params: Arc<Ca72Params>,
     engine: Engine,
