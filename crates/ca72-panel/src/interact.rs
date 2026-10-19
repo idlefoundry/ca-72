@@ -1,8 +1,9 @@
 //! What a pointer at a point of the drawing finds there, and what operating each kind of
 //! control does to its value (normalized, 0..1).
 //!
-//! A knob turns with a vertical drag (fine: a tenth as fast), the mouse wheel nudges it and
-//! a double click restores its default; RANGE and WAVEFORM step between their positions (a
+//! A knob turns with a vertical drag (fine: a tenth as fast), the mouse wheel nudges it a
+//! notch at a time, a trackpad turns it as far as it travels, and a double click restores its
+//! default; RANGE and WAVEFORM step between their positions (a
 //! click on a legend picks it, a click on the knob steps toward the side clicked); a switch
 //! flips at a click anywhere on it; QUALITY's toggle goes to the position clicked (its lever's
 //! three places, or their legends); the wheels stay where they are left, the PITCH wheel
@@ -89,6 +90,32 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
         Kind::Wheel { .. } => (start - dy / 160.0 * rate).clamp(0.0, 1.0),
         Kind::Rocker { .. } | Kind::Toggle { .. } => return None,
     })
+}
+
+/// Whether a scroll turns the control in proportion to its travel ([`turn`]): a knob of
+/// continuous travel or a wheel. A selector, a switch, QUALITY's and NOTE PRIORITY's toggles
+/// and VOICES go a whole [`step`] at a time.
+pub fn continuous(kind: &Kind) -> bool {
+    match kind {
+        Kind::Knob {
+            dial: Dial::Voices, ..
+        } => false,
+        Kind::Knob { .. } | Kind::Wheel { .. } => true,
+        Kind::Selector(_) | Kind::Rocker { .. } | Kind::Toggle { .. } => false,
+    }
+}
+
+/// Where `notches` of the mouse wheel's notches take a continuous control from `v`, a fraction
+/// of a notch too: a trackpad's or a Magic Mouse's travel, as far as it goes (issue #107). A
+/// whole notch is [`step`]'s.
+pub fn turn(kind: &Kind, v: f64, notches: f64, fine: bool) -> f64 {
+    let notch = match (kind, fine) {
+        (Kind::Wheel { .. }, false) => 0.05,
+        (Kind::Wheel { .. }, true) => 0.005,
+        (_, false) => 0.02,
+        (_, true) => 0.002,
+    };
+    (v + notches * notch).clamp(0.0, 1.0)
 }
 
 /// One notch of the mouse wheel or an arrow key, `up` or down.
@@ -247,5 +274,48 @@ mod tests {
         let pitch = &CONTROLS[index("pitch_wheel").expect("a control")].kind;
         assert_eq!(release(pitch, 0.53), 0.5);
         assert_eq!(release(pitch, 0.55), 0.55);
+    }
+
+    /// A trackpad turns a continuous knob or a wheel as far as it travels, a fraction of a notch
+    /// a fraction of a notch's move (issue #107); a whole notch is the wheel's step; a
+    /// selector, a switch, a toggle and VOICES go only a whole step at a time.
+    #[test]
+    fn a_trackpad_turns_continuous_controls_in_proportion() {
+        let knob = &CONTROLS[index("cutoff").expect("a control")].kind;
+        assert!(continuous(knob));
+        for (notches, fine, want) in [
+            (0.25, false, 0.505),
+            (-0.1, false, 0.498),
+            (1.0, false, 0.52),
+            (3.5, false, 0.57),
+            (0.5, true, 0.501),
+        ] {
+            let v = turn(knob, 0.5, notches, fine);
+            assert!((v - want).abs() < 1e-12, "{notches} {fine}: {v}");
+        }
+        assert_eq!(turn(knob, 0.5, 1.0, false), step(knob, 0.5, true, false));
+        assert_eq!(turn(knob, 0.5, -1.0, true), step(knob, 0.5, false, true));
+        assert_eq!(turn(knob, 0.99, 2.0, false), 1.0);
+        assert_eq!(turn(knob, 0.001, -0.5, false), 0.0);
+        // Forty small moves of a quarter notch go as far as ten notches.
+        let mut v = 0.2;
+        for _ in 0..40 {
+            v = turn(knob, v, 0.25, false);
+        }
+        assert!((v - 0.4).abs() < 1e-12, "{v}");
+        let wheel = &CONTROLS[index("mod_wheel").expect("a control")].kind;
+        assert!(continuous(wheel));
+        assert!((turn(wheel, 0.5, 0.5, false) - 0.525).abs() < 1e-12);
+        assert_eq!(turn(wheel, 0.5, 1.0, false), step(wheel, 0.5, true, false));
+        for id in [
+            "voices",
+            "osc1_range",
+            "osc1_on",
+            "quality",
+            "note_priority",
+        ] {
+            let k = &CONTROLS[index(id).expect("a control")].kind;
+            assert!(!continuous(k), "{id}");
+        }
     }
 }

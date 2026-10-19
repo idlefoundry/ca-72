@@ -85,8 +85,37 @@ fn settings_menu_corner() -> (f64, f64) {
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// A mouse wheel's turns are one gesture until it rests this long.
 const SCROLL_REST: Duration = Duration::from_millis(400);
-/// A trackpad's travel that makes a notch, in pixels.
+/// A trackpad's travel that makes a notch, in pixels: a knob turns a notch's move (2 % of
+/// its travel) for each, a fraction for a fraction (issue #107).
 const NOTCH: f64 = 40.0;
+/// Whether a fraction of a line scrolled is a precise device's (Windows: a precision
+/// touchpad's or a free-spinning wheel's `WM_MOUSEWHEEL` of less than a notch; a wheel's
+/// notches are whole lines). On macOS a precise device gives points, and a wheel turned slowly
+/// gives fractions of a line, still a notch each; X11 gives only whole lines.
+const PRECISE_LINES: bool = cfg!(target_os = "windows");
+
+/// How far a scroll turns a control, in the mouse wheel's notches (+ up), and whether in
+/// proportion to its travel (a precise device's: [`interact::turn`]) or a whole notch for any
+/// line (a wheel's: [`interact::step`]). Points (macOS's trackpad and Magic Mouse) count
+/// [`NOTCH`] to a notch; lines, with `precise_lines` (Windows), a line to a notch when
+/// fractional, else a notch whatever their count, as before.
+fn scroll_notches(delta: ScrollDelta, precise_lines: bool) -> (f64, bool) {
+    match delta {
+        ScrollDelta::Pixels { y, .. } => (f64::from(y) / NOTCH, true),
+        ScrollDelta::Lines { y, .. } => {
+            let y = f64::from(y);
+            if precise_lines && y.fract() != 0.0 {
+                (y, true)
+            } else if y > 0.0 {
+                (1.0, false)
+            } else if y < 0.0 {
+                (-1.0, false)
+            } else {
+                (0.0, false)
+            }
+        }
+    }
+}
 /// A control's menu's lettering, against the tip's.
 const MENU_TEXT: f64 = 1.15;
 
@@ -735,6 +764,7 @@ struct Scroll {
     control: usize,
     value: f64,
     last: Instant,
+    /// A stepped control's precise travel not yet a step, in notches.
     travel: f64,
 }
 
@@ -2433,31 +2463,7 @@ impl Editing {
         if !self.operable(i) {
             return;
         }
-        let (notches, travel) = match delta {
-            ScrollDelta::Lines { y, .. } => (
-                if y > 0.0 {
-                    1.0
-                } else if y < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                },
-                0.0,
-            ),
-            ScrollDelta::Pixels { y, .. } => {
-                let travel = self
-                    .scroll
-                    .as_ref()
-                    .filter(|s| s.control == i)
-                    .map_or(0.0, |s| s.travel)
-                    + f64::from(y);
-                if travel.abs() < NOTCH {
-                    (0.0, travel)
-                } else {
-                    (travel.signum(), 0.0)
-                }
-            }
-        };
+        let (notches, precise) = scroll_notches(delta, PRECISE_LINES);
         if self.scroll.as_ref().is_some_and(|s| s.control != i) {
             self.end_scroll();
         }
@@ -2474,21 +2480,31 @@ impl Editing {
             });
         }
         let kind = CONTROLS[i].kind;
+        let fine = modifiers.contains(Modifiers::SHIFT);
         let Some(s) = &mut self.scroll else { return };
         s.last = Instant::now();
-        s.travel = travel;
-        if notches != 0.0 {
-            let v = interact::step(
-                &kind,
-                s.value,
-                notches > 0.0,
-                modifiers.contains(Modifiers::SHIFT),
-            );
-            if v != s.value {
-                s.value = v;
-                if let Some(p) = self.operated(i) {
-                    p.set(&self.setter(), v as f32);
-                }
+        let v = if precise && interact::continuous(&kind) {
+            // A trackpad's travel, as far as it goes (issue #107).
+            interact::turn(&kind, s.value, notches, fine)
+        } else if precise {
+            // A stepped control: a step once a notch's travel has gathered.
+            s.travel += notches;
+            if s.travel.abs() < 1.0 {
+                s.value
+            } else {
+                let up = s.travel > 0.0;
+                s.travel = 0.0;
+                interact::step(&kind, s.value, up, fine)
+            }
+        } else if notches != 0.0 {
+            interact::step(&kind, s.value, notches > 0.0, fine)
+        } else {
+            s.value
+        };
+        if v != s.value {
+            s.value = v;
+            if let Some(p) = self.operated(i) {
+                p.set(&self.setter(), v as f32);
             }
         }
     }
@@ -6769,6 +6785,82 @@ mod tests {
         }
         e.draw();
         assert_eq!(host.take(), vec![Call::End(emphasis)]);
+    }
+
+    /// A trackpad's or a Magic Mouse's points turn a knob as far as they travel (a notch's 2 %
+    /// for every 40 points, a fraction for a fraction; issue #107), in one gesture; VOICES, a
+    /// stepped knob, steps once a notch's travel has gathered.
+    #[test]
+    fn a_trackpad_turns_a_knob_in_proportion_and_voices_by_steps() {
+        let (mut e, host, params) = editing_poly();
+        let pixels = |e: &mut Editing, y: f32| {
+            e.mouse(MouseEvent::WheelScrolled {
+                delta: ScrollDelta::Pixels { x: 0.0, y },
+                modifiers: Modifiers::empty(),
+            });
+        };
+        let p = at(&e, centre("emphasis"));
+        go(&mut e, p);
+        for y in [4.0, 6.0, 30.0, -10.0] {
+            pixels(&mut e, y);
+        }
+        let emphasis = params.emphasis.as_ptr();
+        let calls = host.take();
+        assert_eq!(calls.first(), Some(&Call::Begin(emphasis)));
+        let set: Vec<f32> = calls
+            .iter()
+            .filter_map(|c| match c {
+                Call::Set(p, v) if *p == emphasis => Some(*v),
+                _ => None,
+            })
+            .collect();
+        let want = [0.002, 0.005, 0.02, 0.015];
+        assert_eq!(set.len(), want.len(), "{calls:?}");
+        for (got, want) in set.iter().zip(want) {
+            assert!((got - want).abs() < 1e-6, "{set:?}");
+        }
+        if let Some(s) = &mut e.scroll {
+            s.last -= SCROLL_REST * 2;
+        }
+        e.draw();
+        assert_eq!(host.take(), vec![Call::End(emphasis)]);
+        // VOICES: 30 points nothing; 15 more, a voice.
+        let p = at(&e, centre("voices"));
+        go(&mut e, p);
+        let before = params.voices.unmodulated_normalized_value();
+        pixels(&mut e, 30.0);
+        let voices = params.voices.as_ptr();
+        assert_eq!(host.take(), vec![Call::Begin(voices)]);
+        pixels(&mut e, 15.0);
+        let calls = host.take();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert!(
+            matches!(calls[0], Call::Set(p, v) if p == voices && (v - before - 0.125).abs() < 1e-6),
+            "{calls:?} from {before}"
+        );
+    }
+
+    /// What a scroll is as baseview gives it on each system (issue #107): macOS's points (a
+    /// precise device) in proportion, 40 to a notch; a line a notch whatever its count (a
+    /// wheel's, X11's and macOS's, fractions too); on Windows a fraction of a line (a precision
+    /// touchpad's) in proportion, a line to a notch, and whole lines a notch, as a wheel's.
+    #[test]
+    fn scrolls_read_as_notches_or_travel_as_each_system_reports_them() {
+        let px = |y| ScrollDelta::Pixels { x: 0.0, y };
+        let lines = |y| ScrollDelta::Lines { x: 0.0, y };
+        for windows in [false, true] {
+            assert_eq!(scroll_notches(px(10.0), windows), (0.25, true));
+            assert_eq!(scroll_notches(px(-80.0), windows), (-2.0, true));
+            assert_eq!(scroll_notches(lines(1.0), windows), (1.0, false));
+            assert_eq!(scroll_notches(lines(3.0), windows), (1.0, false));
+            assert_eq!(scroll_notches(lines(-2.0), windows), (-1.0, false));
+            assert_eq!(scroll_notches(lines(0.0), windows), (0.0, false));
+        }
+        assert_eq!(scroll_notches(lines(0.1), false), (1.0, false));
+        assert_eq!(scroll_notches(lines(-0.25), false), (-1.0, false));
+        assert_eq!(scroll_notches(lines(0.25), true), (0.25, true));
+        assert_eq!(scroll_notches(lines(-1.5), true), (-1.5, true));
+        assert_eq!(PRECISE_LINES, cfg!(windows));
     }
 
     /// A wheel's gesture waits for the wheel to rest, and a press ends it before beginning
