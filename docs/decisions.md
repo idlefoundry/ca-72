@@ -8095,7 +8095,8 @@ why are we requesting access for the microphone? And I don't think we should be 
 access for that unless the user specified that they were wanting to use the microphone input."
 The input probe's AudioUnit had input enabled; enabling input is what asks.
 
-**Fix (plugin-kit `ba59f24`, its K-DEVICE-LISTING; PR idlefoundry/plugin-kit#10).**
+**Fix (plugin-kit `3137cde`, its K-DEVICE-LISTING and K-MICROPHONE-WAIT; PR
+idlefoundry/plugin-kit#10).**
 
 - cpal's probes read the range as a device property (its `third_party/cpal` change 3). Listing is
   CoreAudio property reads only: name, stream configuration per scope, nominal and available
@@ -8109,6 +8110,19 @@ The input probe's AudioUnit had input enabled; enabling input is what asks.
 - On macOS the MIDI worker runs its run loop for an instant before each poll. CoreMIDI announces
   new endpoints there; without it (as on 0.2.7's control thread) a controller plugged in after
   launch was never listed. Found while checking this fix.
+- The microphone is asked for without waiting (kit `3137cde`, for 0.2.8). With listing fixed,
+  choosing an external input showed the prompt as it should, but opening the input waited for
+  the answer (`CreateIOProcID` on the control thread, the call that had hung), so sound stopped
+  and the dialog read STARTING until the user answered. The runtime now reads the permission
+  first, without waiting (AVFoundation's `authorizationStatusForMediaType:`). Granted: the
+  input opens. Never asked: it asks with AVFoundation's request, which returns at once, plays
+  the output alone and shows "Waiting for microphone permission… The external input starts
+  once access is allowed."; an Allow opens the input. Refused (now or before): the input is
+  neither opened nor asked for, the synth keeps playing, and the status reads "Microphone access
+  denied. Allow CA-72 in System Settings › Privacy & Security › Microphone." The chosen input
+  stays chosen and saved, so once access is allowed, by the prompt or later in System Settings
+  (read again every two seconds), it opens without choosing it again. Windows and Linux are
+  unchanged. The Info.plist's microphone purpose string, which the request needs, stays.
 
 **Evidence (2026-10-19).** plugin-kit's standalone tests pass on Linux, Windows (MSVC) and the
 owner's Mac (macOS 27): fake hosts whose devices block (one; five; one whose name never
@@ -8133,9 +8147,21 @@ with `tccutil reset Microphone` for that id only, and launched with `open`:
   id the moment the input was opened. The prompt was left unanswered and the app closed; no
   decision was recorded, and the permission was reset again afterwards.
 
-**Not settled, for the owner.** While macOS's microphone prompt is waiting for an answer,
-opening the input waits too (the same CoreAudio call that hung, `CreateIOProcID`): sound stops
-and the dialog reads STARTING until the user answers. Asking for access first (AVFoundation's
-request, which doesn't wait) and starting the output alone meanwhile would avoid that; it is not
-done here. Allow and Don't Allow were not clicked, so what follows each was not seen. The
-dialog itself was not looked at on screen; its inventory was read from the runtime.
+With the microphone fix (kit `3137cde`): the kit's tests pass on Linux and Windows (52 + 2) and
+the Mac (54 + 2), strict Clippy clean on all three. They run the whole control loop with fake
+streams that render and a fake permission: the prompt pending (output frames advance, the
+notice shows, the input isn't opened, a second Apply asks nothing more) then allowed (the input
+opens, the notice clears); refused (the output keeps running, the denial, the choice kept);
+already denied (never asked or opened; allowed later in settings, the next poll opens it). A new
+CA-72 DEV at this commit, its permission reset and an external input (MacBook Pro Microphone)
+saved, was launched: TCC logged `AUTHREQ_PROMPTING` a second after launch, and five seconds
+later the runtime read RUNNING at 44.1 kHz with 194,304 frames rendered, 280,576 two seconds
+later, the waiting notice shown and the input not open. Someone at the Mac then clicked Allow
+(TCC's `AUTHREQ_RESULT authValue=2`, user consent): within a second the notice had given way to
+the session's own MIDI warning, frames kept advancing, and a sample of the process showed two
+CoreAudio IO threads, the output's and the input's. The app was ended by its PID, the
+permission reset, no prompt window was left, and the app and its build were moved to the Trash.
+
+**Not yet seen.** Don't Allow on the installed app (the tests cover it), and the dialog itself
+on screen: its state was read from the runtime. The signed, hardened release app has not been
+tried; the DEV builds are ad-hoc signed.
