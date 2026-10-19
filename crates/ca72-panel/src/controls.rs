@@ -90,6 +90,15 @@ pub enum Kind {
     },
 }
 
+impl Kind {
+    /// Whether every fraction of a drag or scroll can change the value, rather than only
+    /// whole positions. VOICES has a knob's shape but discrete options.
+    pub fn is_continuous(&self) -> bool {
+        matches!(self, Self::Knob { dial, .. } if *dial != Dial::Voices)
+            || matches!(self, Self::Wheel { .. })
+    }
+}
+
 /// The part of the drawing a control's position is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {

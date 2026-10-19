@@ -8079,3 +8079,66 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+
+## R-KNOB-RESOLUTION. Knobs follow fractional pointer and scroll travel
+
+**Owner instruction, 2026-10-19 (issue #107, editor half).** Remove the editor's
+quantisation so continuous knobs take the input's full resolution, including precise macOS
+scroll deltas and HiDPI sub-pixel positions: "Keep the existing drag sensitivity and
+Shift-fine behaviour feel the same in distance travelled." Discrete controls must still
+step. "Do NOT add audio-side parameter smoothing in the DSP"; that assessment is separate.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **Continuous input reaches the host at each event.** A drag already retained its floating
+  point coordinates, but discarded movements until three logical pixels had passed. That
+  click threshold now applies only to discrete controls. A continuous knob still travels
+  its full range in 240 logical pixels, a wheel in 160, with Shift at a tenth of the rate
+  and the existing rebase when Shift changes during a drag. No frame batches these values.
+- **Proportional scroll.** Precise scroll used to wait for 40 logical points, move one
+  notch, and discard all excess. Wheel lines used only the event's sign. Continuous
+  controls now use the complete signed delta, including fractions and multiple lines:
+  40 scroll points still equal one line, a knob's 2 % (0.2 % fine), a wheel's 5 % (0.5 %
+  fine). Ordinary one-line wheel notches keep their increment. Values clamp at the ends
+  without storing travel past the end, so a reversal takes effect at once.
+- **Discrete options keep their positions.** RANGE, WAVEFORM, VOICES, toggles and switches
+  accumulate fractional scroll until a whole notch is ready, keep excess for the next
+  event, and discard an old fraction when the direction changes. The accumulator keeps
+  logical scroll pixels: dividing each quarter-point event into lines first rounded a
+  40-point sum just below one notch, which the new test caught. Shift keeps their existing
+  step size. A common control-kind query distinguishes continuous knobs and wheels from
+  discrete options; no parameter ranges, saved IDs, presets or sound code change.
+- **A future release may have draft notes.** `docs/releases/0.2.8.md` follows 0.2.7's
+  format and explicitly marks its downloads as planned. The existing release-catalog
+  coverage test checks Markdown versions through the installed build, so a future draft
+  does not have to ship in 0.2.7's What's New. The current bundled notes and version stay
+  at 0.2.7.
+
+**Evidence (the Linux reference machine, Rust 1.97.1, 2026-10-19):** the same editor tests
+before and after the change record values passed to the host, with no frame drawn between
+events. Each simulated drag is 384 moves of 1/16 logical pixel over 24 pixels: 336 distinct
+values before, 384 after, at widths 860 and 1720, display scales 1 and 2, normal and Shift.
+Each pixel scroll is 384 quarter-point events: 2 distinct values before, 384 after, both
+directions and rates; the normal final values are 0.452 and 0.548 from 0.5, the fine ones
+0.4952 and 0.5048. All are strictly monotonic. Fractional-line input gives 384 distinct
+values over six lines. Five editor regression tests also cover distance, rebase, limits,
+zero vertical travel, discrete positions, whole thresholds, excess and reversal. A panel
+test checks every continuous control's fractional scroll against its existing notch rate.
+
+`cargo test -p ca72-panel`: 59 passed, 8 ignored; `cargo test -p ca72-plugin`: 329 passed,
+33 ignored. Clippy for both crates, all targets, with default and all features, and
+formatting pass. All 19 factory presets' short HI renders (48 kHz, two voices, 0.25 s)
+are bit-identical to the baseline. An independent source review found no actionable issues.
+
+The full workspace run, ngspice 47 required, stopped at the unchanged
+`the_workers_follow_poly_through_the_plug_ins_life`: 480 passed, one failed, 42 ignored.
+Another test process held a seat in the shared runtime folder; this test expects a lone
+instance's worker share. Its isolated rerun passed with `CA72_SEATS_DIR` under this
+worktree. Continuing all remaining crates there passed 336 tests, 33 ignored; the earlier
+crates' documentation checks also pass. The failure and both continuations are retained
+in `target/knob-resolution-evidence/`. No worker or sound code was changed.
+
+Not tried: physical trackpads or a Magic Mouse, native macOS or Windows events, or audible
+sweeps in a host. No claim is made that the editor change alone resolves the audible zipper
+noise reported in #107. The reporting user's 2018 MacBook Pro still needs acceptance.

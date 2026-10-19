@@ -17,7 +17,8 @@ For each release:
    CI runs `bundled_notes_match_the_build_and_the_maintained_sources` on each platform
    before bundling. It checks the workspace/build version, the current entry, unique
    ordered versions, non-empty highlights and coverage of all maintained Markdown releases
-   from 0.2.0 onwards. Review the wording against the Markdown: this test cannot verify
+   from 0.2.0 through the installed build. Future drafts are not bundled until their release
+   becomes the installed version. Review the wording against the Markdown: this test cannot verify
    that a summary faithfully describes a change.
 
 The automatic view groups releases after the previous shown version through the installed

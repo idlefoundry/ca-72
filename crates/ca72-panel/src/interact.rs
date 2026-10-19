@@ -93,23 +93,36 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
 
 /// One notch of the mouse wheel or an arrow key, `up` or down.
 pub fn step(kind: &Kind, v: f64, up: bool, fine: bool) -> f64 {
-    let sign = if up { 1.0 } else { -1.0 };
+    scroll(kind, v, if up { 1.0 } else { -1.0 }, fine)
+}
+
+/// A wheel's signed travel in notches: fractional for continuous controls, whole for
+/// discrete ones (the editor keeps their remainder until the next event).
+pub fn scroll(kind: &Kind, v: f64, notches: f64, fine: bool) -> f64 {
+    let notches = if kind.is_continuous() {
+        notches
+    } else {
+        notches.trunc()
+    };
+    if notches == 0.0 {
+        return v;
+    }
     match kind {
         // VOICES, 2 to 10: a voice a notch.
         Kind::Knob {
             dial: Dial::Voices, ..
-        } => ((v * 8.0).round() + sign).clamp(0.0, 8.0) / 8.0,
-        Kind::Knob { .. } => (v + sign * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
-        Kind::Selector(_) => (art::position(v) as f64 + sign).clamp(0.0, 5.0) / 5.0,
-        Kind::Wheel { .. } => (v + sign * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
+        } => ((v * 8.0).round() + notches).clamp(0.0, 8.0) / 8.0,
+        Kind::Knob { .. } => (v + notches * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
+        Kind::Selector(_) => (art::position(v) as f64 + notches).clamp(0.0, 5.0) / 5.0,
+        Kind::Wheel { .. } => (v + notches * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
         Kind::Rocker { .. } => {
-            if up {
+            if notches > 0.0 {
                 1.0
             } else {
                 0.0
             }
         }
-        Kind::Toggle { .. } => (toggle_position(v) as f64 + sign).clamp(0.0, 2.0) / 2.0,
+        Kind::Toggle { .. } => (toggle_position(v) as f64 + notches).clamp(0.0, 2.0) / 2.0,
     }
 }
 
@@ -247,5 +260,39 @@ mod tests {
         let pitch = &CONTROLS[index("pitch_wheel").expect("a control")].kind;
         assert_eq!(release(pitch, 0.53), 0.5);
         assert_eq!(release(pitch, 0.55), 0.55);
+    }
+
+    #[test]
+    fn fractional_scroll_preserves_each_continuous_controls_sensitivity() {
+        for c in CONTROLS.iter().filter(|c| c.kind.is_continuous()) {
+            for fine in [false, true] {
+                let mut v = 0.5;
+                let mut values = Vec::new();
+                for _ in 0..160 {
+                    v = scroll(&c.kind, v, 1.0 / 160.0, fine);
+                    values.push(v);
+                }
+                assert!(values.windows(2).all(|v| v[1] > v[0]), "{}", c.param);
+                assert!(
+                    (v - step(&c.kind, 0.5, true, fine)).abs() < 1e-12,
+                    "{}",
+                    c.param
+                );
+                assert_eq!(scroll(&c.kind, v, 0.0, fine), v);
+                assert_eq!(scroll(&c.kind, 1.0, 0.25, fine), 1.0);
+                assert_eq!(scroll(&c.kind, 0.0, -0.25, fine), 0.0);
+            }
+        }
+        for id in [
+            "voices",
+            "osc1_range",
+            "osc1_waveform",
+            "quality",
+            "osc1_on",
+        ] {
+            let kind = &CONTROLS[index(id).expect("control")].kind;
+            assert!(!kind.is_continuous());
+            assert_eq!(scroll(kind, 0.0, 0.75, false), 0.0);
+        }
     }
 }

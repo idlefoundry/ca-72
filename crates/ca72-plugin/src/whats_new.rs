@@ -185,6 +185,7 @@ mod tests {
                     .and_then(|s| s.to_str())
                     .and_then(|s| Version::parse(s).ok())
                 && version >= Version::new(0, 2, 0)
+                && version <= Version::parse(VERSION).expect("build version")
             {
                 assert!(
                     versions.contains(&version),
