@@ -65,6 +65,12 @@ pub struct Limits {
     /// (`svg::Cost::work`): about 100 ms on an M4 Pro, half a second on a machine five times
     /// slower. It bounds what drawing costs; the timed test is a backstop.
     pub svg_work: f64,
+    /// What drawing it may allocate, at the test drawing's size: pixels in any one of its
+    /// buffers (a layer, a pattern's tile, a filter's region, a clip's or a mask's copy), and
+    /// bytes in all of them together, as if none were freed (`svg::Cost::buffer_bytes`).
+    /// Checked before anything is drawn: resvg aborts the process when an allocation fails.
+    pub svg_buffer_pixels: u64,
+    pub svg_buffer_bytes: u64,
     /// A drawing's test, drawn with its longer side this many pixels: its time limit. (A
     /// backstop well past what `svg_work` allows on a slow machine, so that a drawing within
     /// the cost is never refused for the machine's speed or how busy it is: at 250 ms, the
@@ -95,6 +101,9 @@ impl Default for Limits {
             svg_blur: 64.0,
             svg_tiles: 4096,
             svg_work: 60.0e6,
+            // (As the pictures' pixels: a drawing 3000 pixels square is 9 million.)
+            svg_buffer_pixels: 16_000_000,
+            svg_buffer_bytes: 256 << 20,
             svg_test_side: 3000,
             svg_test_ms: 2000,
             fonts: 4,

@@ -18,6 +18,8 @@ use resvg::usvg;
 
 use crate::{Limits, Report};
 
+mod memory;
+
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 
@@ -97,6 +99,7 @@ fn urls_internal(value: &str) -> bool {
 
 /// The drawing's text read strictly, its elements and attributes checked: `Err` with why not.
 fn scan(text: &str, limits: &Limits) -> Result<(), String> {
+    depth_of(text)?;
     let doc = roxmltree::Document::parse_with_options(
         text,
         roxmltree::ParsingOptions {
@@ -208,14 +211,75 @@ fn scan(text: &str, limits: &Limits) -> Result<(), String> {
         }
     }
     // What the references repeat: each element counted as many times as it is drawn or used.
-    let mut memo: HashMap<roxmltree::NodeId, usize> = HashMap::new();
-    let total = expanded(root, &ids, &mut memo, &mut Vec::new(), limits.svg_nodes)?;
+    let inherited = inherited_patterns(root, &ids);
+    let mut memo = HashMap::new();
+    let (total, _) = expanded(
+        root,
+        &ids,
+        &inherited,
+        &mut memo,
+        &mut Vec::new(),
+        limits.svg_nodes,
+    )?;
     if total > limits.svg_nodes {
         return Err(format!(
             "{total} elements drawn (each reference, a `use` or a `url(#...)`, counted as what it \
              repeats), more than {}",
             limits.svg_nodes
         ));
+    }
+    Ok(())
+}
+
+/// roxmltree 0.20's tokenizer is recursive too. Bound lexical nesting before it reads the
+/// XML, leaving all names, attributes, namespaces and well-formedness to the strict parser.
+fn depth_of(mut text: &str) -> Result<(), String> {
+    let mut depth = 0usize;
+    while let Some(at) = text.find('<') {
+        text = &text[at..];
+        let skip = if text.starts_with("<!--") {
+            Some("-->")
+        } else if text.starts_with("<![CDATA[") {
+            Some("]]>")
+        } else if text.starts_with("<?") {
+            Some("?>")
+        } else {
+            None
+        };
+        if let Some(end) = skip {
+            let n = text
+                .find(end)
+                .ok_or("an unfinished XML comment, CDATA or instruction")?;
+            text = &text[n + end.len()..];
+            continue;
+        }
+        if text.starts_with("<!") {
+            return Err("a DTD or other XML declaration: only SVG without a DTD".into());
+        }
+        let mut quote = None;
+        let mut end = None;
+        for (i, b) in text.bytes().enumerate().skip(1) {
+            if let Some(q) = quote {
+                if b == q {
+                    quote = None;
+                }
+            } else if b == b'\'' || b == b'"' {
+                quote = Some(b);
+            } else if b == b'>' {
+                end = Some(i);
+                break;
+            }
+        }
+        let n = end.ok_or("an unfinished XML element")?;
+        if text.starts_with("</") {
+            depth = depth.saturating_sub(1);
+        } else if !text[..n].ends_with('/') {
+            depth += 1;
+            if depth > 64 {
+                return Err("elements nested more than 64 deep".into());
+            }
+        }
+        text = &text[n + 1..];
     }
     Ok(())
 }
@@ -248,40 +312,209 @@ fn references<'a>(node: roxmltree::Node<'a, '_>) -> Vec<&'a str> {
     out
 }
 
+/// A `fill` or `stroke` as usvg resolves it on one element.
+#[derive(Clone, Copy)]
+struct Paint<'a> {
+    value: &'a str,
+    important: bool,
+    /// An ancestor's, by `inherit`.
+    inherited: bool,
+}
+
+/// One property's declarations on an element, in order: its attribute, then its style's (read
+/// by usvg's own tokenizer), each with whether it is `!important`.
+fn declarations<'a>(node: roxmltree::Node<'a, '_>, property: &str) -> Vec<(&'a str, bool)> {
+    let mut out: Vec<_> = node
+        .attribute(property)
+        .map(|v| (v, false))
+        .into_iter()
+        .collect();
+    if let Some(style) = node.attribute("style") {
+        out.extend(
+            simplecss::DeclarationTokenizer::from(style)
+                .filter(|d| d.name == property)
+                .map(|d| (d.value, d.important)),
+        );
+    }
+    out
+}
+
+/// The declaration that wins as usvg 0.45 resolves them: each replaces the one before unless
+/// that one is `!important` (so the first `!important` stays); `inherit` copies the nearest
+/// ancestor's value with that ancestor's importance, and sets nothing when none has one.
+fn usvg_paint<'a>(declared: &[(&'a str, bool)], above: Option<Paint<'a>>) -> Option<Paint<'a>> {
+    let mut paint: Option<Paint<'a>> = None;
+    for &(value, important) in declared {
+        let new = if value.trim() == "inherit" {
+            let Some(above) = above else { continue };
+            Paint {
+                inherited: true,
+                ..above
+            }
+        } else {
+            Paint {
+                value,
+                important,
+                inherited: false,
+            }
+        };
+        if !paint.is_some_and(|p| p.important) {
+            paint = Some(new);
+        }
+    }
+    paint
+}
+
+/// The value that wins as CSS cascades them: `!important` over the rest, then the style over the
+/// attribute, then the later; `inherit` takes the parent's. With whether it is the parent's.
+fn css_paint<'a>(declared: &[(&'a str, bool)], above: Option<&'a str>) -> Option<(&'a str, bool)> {
+    let (_, &(value, _)) = declared
+        .iter()
+        .enumerate()
+        .max_by_key(|&(i, &(_, important))| (important, i))?;
+    if value.trim() == "inherit" {
+        above.map(|v| (v, true))
+    } else {
+        Some((value, false))
+    }
+}
+
+/// The pattern a paint's value names, if it names one.
+fn pattern_named<'a>(
+    value: &'a str,
+    ids: &HashMap<&str, roxmltree::Node<'_, '_>>,
+) -> Option<&'a str> {
+    let id = value
+        .trim()
+        .strip_prefix("url(")
+        .map(|v| v.trim_start().trim_start_matches(['\'', '"']))
+        .and_then(|v| v.strip_prefix('#'))?;
+    let id = &id[..id
+        .find(|c: char| c == ')' || c == '\'' || c == '"' || c.is_whitespace())
+        .unwrap_or(id.len())];
+    ids.get(id)
+        .is_some_and(|t| t.tag_name().name() == "pattern")
+        .then_some(id)
+}
+
+/// For each shape or `use`, the patterns it paints with that it inherits (a `fill` or `stroke`
+/// that an ancestor sets and it does not, or that it takes by `inherit`): a pattern's own
+/// elements inherit from the pattern's ancestors, so a pattern inside a group filled with it
+/// fills its own elements with itself, and usvg's reading recurses until its stack overflows
+/// (found by the fuzzer: the root's `fill='url(#p)'`). Which of an element's declarations wins
+/// is decided as usvg decides it and as CSS does, and a pattern either inherits counts (a
+/// review: `fill:red; fill:inherit` is `inherit`). Each element's declarations are read once.
+fn inherited_patterns<'a>(
+    root: roxmltree::Node<'a, '_>,
+    ids: &HashMap<&str, roxmltree::Node<'_, '_>>,
+) -> HashMap<roxmltree::NodeId, Vec<&'a str>> {
+    const PAINTS: &[&str] = &[
+        "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use",
+    ];
+    // What each element passes down: for a fill and a stroke, usvg's value and CSS's.
+    type Down<'a> = [(Option<Paint<'a>>, Option<&'a str>); 2];
+    let mut down: HashMap<roxmltree::NodeId, Down<'a>> = HashMap::new();
+    let mut out = HashMap::new();
+    // (Descendants in document order: each parent before its children.)
+    for node in root.descendants().filter(roxmltree::Node::is_element) {
+        let above = node
+            .parent_element()
+            .and_then(|p| down.get(&p.id()))
+            .copied()
+            .unwrap_or_default();
+        let mut passed = above;
+        let mut patterns = Vec::new();
+        for (i, property) in ["fill", "stroke"].into_iter().enumerate() {
+            let declared = declarations(node, property);
+            let (usvg_above, css_above) = above[i];
+            let usvg = usvg_paint(&declared, usvg_above);
+            let css = css_paint(&declared, css_above);
+            if PAINTS.contains(&node.tag_name().name()) {
+                // An ancestor's value, where that is what it paints with.
+                let usvg_inherits = match usvg {
+                    Some(p) => p.inherited.then_some(p.value),
+                    None => usvg_above.map(|p| p.value),
+                };
+                let css_inherits = match css {
+                    Some((v, inherited)) => inherited.then_some(v),
+                    None => css_above,
+                };
+                for id in [usvg_inherits, css_inherits]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| pattern_named(v, ids))
+                {
+                    if !patterns.contains(&id) {
+                        patterns.push(id);
+                    }
+                }
+            }
+            passed[i] = (usvg.or(usvg_above), css.map(|(v, _)| v).or(css_above));
+        }
+        down.insert(node.id(), passed);
+        if !patterns.is_empty() {
+            out.insert(node.id(), patterns);
+        }
+    }
+    out
+}
+
 /// How many elements `node` draws, each of its references counted as what it repeats (`Err` on
 /// a loop or past `most`).
 fn expanded<'a, 'i>(
     node: roxmltree::Node<'a, 'i>,
     ids: &HashMap<&str, roxmltree::Node<'a, 'i>>,
-    memo: &mut HashMap<roxmltree::NodeId, usize>,
+    inherited: &HashMap<roxmltree::NodeId, Vec<&'a str>>,
+    memo: &mut HashMap<roxmltree::NodeId, (usize, usize)>,
     path: &mut Vec<roxmltree::NodeId>,
     most: usize,
-) -> Result<usize, String> {
-    if let Some(&n) = memo.get(&node.id()) {
-        return Ok(n);
+) -> Result<(usize, usize), String> {
+    if path.len() >= 64 {
+        return Err("elements and references nested more than 64 deep".into());
+    }
+    if let Some(&(n, depth)) = memo.get(&node.id()) {
+        if path.len() + depth > 64 {
+            return Err("elements and references nested more than 64 deep".into());
+        }
+        return Ok((n, depth));
     }
     if path.contains(&node.id()) {
-        return Err("a reference that repeats itself (a `use` or a `url(#...)`)".into());
+        return Err(
+            "a reference that repeats itself (a `use` or a `url(#...)`, or a pattern's elements \
+             filled with the pattern they are in)"
+                .into(),
+        );
     }
     path.push(node.id());
     let mut n = 1usize;
+    let mut depth = 1usize;
     for child in node.children().filter(roxmltree::Node::is_element) {
-        n = n.saturating_add(expanded(child, ids, memo, path, most)?);
+        let (count, height) = expanded(child, ids, inherited, memo, path, most)?;
+        n = n.saturating_add(count);
+        depth = depth.max(height + 1);
         if n > most {
             break;
         }
     }
-    for id in references(node) {
+    for id in references(node)
+        .into_iter()
+        .chain(inherited.get(&node.id()).into_iter().flatten().copied())
+    {
         if n > most {
             break;
         }
         if let Some(target) = ids.get(id) {
-            n = n.saturating_add(expanded(*target, ids, memo, path, most)?);
+            let (count, height) = expanded(*target, ids, inherited, memo, path, most)?;
+            n = n.saturating_add(count);
+            depth = depth.max(height + 1);
         }
     }
     path.pop();
-    memo.insert(node.id(), n);
-    Ok(n)
+    if path.len() + depth > 64 {
+        return Err("elements and references nested more than 64 deep".into());
+    }
+    memo.insert(node.id(), (n, depth));
+    Ok((n, depth))
 }
 
 /// usvg's options for a pack's drawing: no file is ever read for it (a reference that the scan
@@ -296,6 +529,33 @@ pub fn options() -> usvg::Options<'static> {
             resolve_string: Box::new(|_, _| None),
         },
         ..usvg::Options::default()
+    }
+}
+
+/// [`options`], with each embedded picture's header read within `limits` before usvg sees it
+/// (usvg places a picture by the size its header claims, and panics on a vast one): why one is
+/// refused, into `refused`.
+fn options_within(
+    limits: Limits,
+    refused: Arc<std::sync::Mutex<Option<String>>>,
+) -> usvg::Options<'static> {
+    usvg::Options {
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: Box::new(move |mime, data: Arc<Vec<u8>>, _| {
+                if mime != "image/png" {
+                    return None;
+                }
+                match crate::picture::header(&data, &limits) {
+                    Ok(_) => Some(usvg::ImageKind::PNG(data)),
+                    Err(why) => {
+                        *refused.lock().unwrap_or_else(|e| e.into_inner()) = Some(why);
+                        None
+                    }
+                }
+            }),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..options()
     }
 }
 
@@ -322,6 +582,8 @@ pub struct Cost {
     pub work: f64,
     /// The pixels of the pictures embedded in it, decoded (counted with the pack's own).
     pub pixels: u64,
+    /// An upper bound on bytes allocated for drawing buffers, including intermediate ones.
+    pub buffer_bytes: u64,
 }
 
 /// What an edge's pixel row, a layer's pixel and a filter primitive's pixel cost against a
@@ -333,6 +595,18 @@ pub const FILTER: f64 = 10.0;
 impl Cost {
     /// Why it is past `limits`, if it is.
     fn over(&self, limits: &Limits) -> Result<(), String> {
+        if [
+            self.tiles,
+            self.tile_nodes,
+            self.edges,
+            self.area,
+            self.work,
+        ]
+        .iter()
+        .any(|n| !n.is_finite())
+        {
+            return Err("the drawing's counted cost is not finite".into());
+        }
         if self.nodes > limits.svg_nodes {
             return Err(format!("more than {} elements drawn", limits.svg_nodes));
         }
@@ -590,9 +864,22 @@ pub fn parse_at(
 ) -> Result<(usvg::Tree, Cost), String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "not UTF-8 text".to_owned())?;
     scan(text, limits)?;
-    let tree =
-        usvg::Tree::from_str(text, &options()).map_err(|e| format!("cannot be read: {e}"))?;
-    let mut cost = Cost::default();
+    let refused = Arc::default();
+    // (A panic in usvg's reading, which nothing known causes now, is a refusal too.)
+    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        usvg::Tree::from_str(text, &options_within(*limits, Arc::clone(&refused)))
+    }));
+    if let Some(why) = refused.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        return Err(format!("an embedded picture: {why}"));
+    }
+    let tree = match read {
+        Ok(tree) => tree.map_err(|e| format!("cannot be read: {e}"))?,
+        Err(_) => return Err("cannot be read: reading it failed".into()),
+    };
+    let mut cost = Cost {
+        buffer_bytes: memory::check(&tree, side_of(&tree, limits, side), limits)?,
+        ..Cost::default()
+    };
     let mut pictures = Vec::new();
     // Counted at the size it is drawn.
     let size = tree.size();
@@ -619,24 +906,34 @@ pub enum Drawn {
     In(u64),
     /// Not done by its deadline (left to finish on its own thread, its result unused).
     Late,
-    /// Not drawn: an earlier test drawing ran past its deadline and is still running.
+    /// Not drawn: an earlier test drawing ran past its deadline and is still running, or no
+    /// thread could be started for it.
     Refused,
     /// The drawing has no size to draw at.
     Sizeless,
+    /// Not drawn: its buffers are past the limits (which [`parse_at`] refuses first).
+    TooLarge,
+    /// Drawing it panicked (the panic caught on its thread).
+    Panicked,
 }
 
-/// A test drawing that ran past its deadline is still running: no other is started until it
-/// ends, so that at most one runaway drawing ever runs at a time (in a process: a plug-in's
-/// instances share it).
-static RUNAWAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The test drawings of a process (a plug-in's instances share it).
+static TEST_DRAWINGS: TestDrawings = TestDrawings::new();
+
+/// Test drawings, each on a thread of its own: while one that ran past its deadline is still
+/// running, no other is started.
+struct TestDrawings {
+    /// The drawings still running past their deadline.
+    runaway: std::sync::atomic::AtomicUsize,
+}
 
 /// Draws `tree` with its longer side `side` pixels on a thread of its own, waiting for it no
 /// longer than `deadline_ms`: the waiting itself is bounded, whatever the drawing costs. While
 /// an earlier drawing runs past its deadline, none is drawn ([`Drawn::Refused`]).
 pub fn test_draw(tree: &usvg::Tree, side: u32, deadline_ms: u64) -> Drawn {
-    use std::sync::atomic::Ordering;
-    if RUNAWAY.load(Ordering::Acquire) {
-        return Drawn::Refused;
+    // (Its buffers checked here too, whoever calls it.)
+    if memory::check(tree, side, &Limits::default()).is_err() {
+        return Drawn::TooLarge;
     }
     let size = tree.size();
     let k = side as f32 / size.width().max(size.height());
@@ -648,40 +945,105 @@ pub fn test_draw(tree: &usvg::Tree, side: u32, deadline_ms: u64) -> Drawn {
         return Drawn::Sizeless;
     };
     let tree = tree.clone();
-    let (tx, rx) = std::sync::mpsc::channel();
-    // Whether the drawing ended within its deadline: it clears RUNAWAY as it ends if not.
-    let late = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let late_here = std::sync::Arc::clone(&late);
-    let spawned = std::thread::Builder::new()
-        .name("skin-pack test drawing".into())
-        .spawn(move || {
-            let t = Instant::now();
-            resvg::render(&tree, Transform::from_scale(k, k), &mut pixmap.as_mut());
-            let _ = tx.send(t.elapsed().as_millis() as u64);
-            if late_here.swap(true, Ordering::AcqRel) {
-                RUNAWAY.store(false, Ordering::Release);
-            }
-        });
-    if spawned.is_err() {
-        return Drawn::Refused;
-    }
-    match rx.recv_timeout(std::time::Duration::from_millis(deadline_ms.max(1))) {
-        Ok(ms) => Drawn::In(ms),
-        Err(_) => {
-            // Marked late; if the drawing ended in between, it has marked it first, and
-            // nothing is running.
-            RUNAWAY.store(true, Ordering::Release);
-            if late.swap(true, Ordering::AcqRel) {
-                RUNAWAY.store(false, Ordering::Release);
-            }
-            Drawn::Late
+    TEST_DRAWINGS.run(deadline_ms, move || {
+        resvg::render(&tree, Transform::from_scale(k, k), &mut pixmap.as_mut());
+    })
+}
+
+impl TestDrawings {
+    const fn new() -> Self {
+        Self {
+            runaway: std::sync::atomic::AtomicUsize::new(0),
         }
     }
+
+    /// `draw` on a thread of its own, waited for no longer than `deadline_ms`.
+    fn run(&'static self, deadline_ms: u64, draw: impl FnOnce() + Send + 'static) -> Drawn {
+        use std::sync::atomic::Ordering;
+        if self.runaway.load(Ordering::Acquire) > 0 {
+            return Drawn::Refused;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Whether the drawing ended within its deadline. Whichever of the drawing's thread (as
+        // it ends, however: drawn or panicked) and the waiting caller (at the deadline) marks
+        // it second knows the drawing ran late and has ended: it takes it off `runaway`.
+        let late = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let late_here = Arc::clone(&late);
+        let spawned = std::thread::Builder::new()
+            .name("skin-pack test drawing".into())
+            .spawn(move || {
+                let t = Instant::now();
+                let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(draw))
+                    .map(|()| t.elapsed().as_millis() as u64);
+                let _ = tx.send(drawn);
+                if late_here.swap(true, Ordering::AcqRel) {
+                    self.runaway.fetch_sub(1, Ordering::AcqRel);
+                }
+            });
+        if spawned.is_err() {
+            return Drawn::Refused;
+        }
+        match rx.recv_timeout(std::time::Duration::from_millis(deadline_ms.max(1))) {
+            Ok(Ok(ms)) => Drawn::In(ms),
+            // (The thread sends before it ends, whatever drawing does: a lost answer is a
+            // drawing that did not end well.)
+            Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Drawn::Panicked,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Counted first, then marked late: if the drawing ended in between, it marked
+                // it first, and nothing is running.
+                self.runaway.fetch_add(1, Ordering::AcqRel);
+                if late.swap(true, Ordering::AcqRel) {
+                    self.runaway.fetch_sub(1, Ordering::AcqRel);
+                }
+                Drawn::Late
+            }
+        }
+    }
+}
+
+/// How much larger than [`Limits`] a drawing's buffers may be as the plug-in draws it: it may
+/// be drawn larger than it was checked at (a large window on a high-resolution screen), and
+/// stretched from its own proportions to a part's.
+pub const DRAWN_MARGIN: u64 = 4;
+
+/// Draws a pack's drawing `tree` by `transform` into `pixmap`, as the plug-in draws one: only
+/// if its buffers, at that transform and size, are within [`DRAWN_MARGIN`] times the default
+/// [`Limits`], and a panic in drawing it caught. Whether it was drawn whole (if not, `pixmap`
+/// may hold part of it).
+pub fn render(
+    tree: &usvg::Tree,
+    transform: Transform,
+    pixmap: &mut resvg::tiny_skia::PixmapMut<'_>,
+) -> bool {
+    let limits = Limits::default();
+    let most = Limits {
+        svg_buffer_pixels: limits.svg_buffer_pixels * DRAWN_MARGIN,
+        svg_buffer_bytes: limits.svg_buffer_bytes * DRAWN_MARGIN,
+        ..limits
+    };
+    if memory::check_at(tree, transform, (pixmap.width(), pixmap.height()), &most).is_err() {
+        return false;
+    }
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        resvg::render(tree, transform, pixmap);
+    }))
+    .is_ok()
 }
 
 /// Checks a drawing of a pack, drawing it as a test if `test`: the pixels of the pictures
 /// embedded in it (counted with the pack's), if it is not refused.
 pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut Report) -> u64 {
+    check_with(path, bytes, limits, test, report, test_draw)
+}
+
+fn check_with(
+    path: &str,
+    bytes: &[u8],
+    limits: &Limits,
+    test: bool,
+    report: &mut Report,
+    draw: impl FnOnce(&usvg::Tree, u32, u64) -> Drawn,
+) -> u64 {
     let parsed = parse(bytes, limits);
     let pixels = parsed.as_ref().map_or(0, |(_, cost)| cost.pixels);
     match parsed {
@@ -689,7 +1051,7 @@ pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut
         // (Waited for twice its limit, so that a drawing just over it is measured.)
         Ok((tree, _)) if test => {
             let side = side_of(&tree, limits, None);
-            match test_draw(&tree, side, limits.svg_test_ms * 2 + 1) {
+            match draw(&tree, side, limits.svg_test_ms * 2 + 1) {
                 Drawn::In(ms) if ms <= limits.svg_test_ms => {}
                 Drawn::In(ms) => report.reject(
                     "svg.slow",
@@ -718,6 +1080,15 @@ pub fn check(path: &str, bytes: &[u8], limits: &Limits, test: bool, report: &mut
                 Drawn::Sizeless => {
                     report.reject("svg.size", Some(path), "it has no size to draw at")
                 }
+                Drawn::TooLarge => report.reject(
+                    "svg.refused",
+                    Some(path),
+                    "its drawing buffers are past the limits",
+                ),
+                // (Refused for itself: the backstop stays on for the packs after it.)
+                Drawn::Panicked => {
+                    report.reject("svg.panicked", Some(path), "drawing it as a test panicked")
+                }
             }
         }
         Ok(_) => {}
@@ -734,6 +1105,12 @@ mod tests {
             "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' \
              viewBox='0 0 100 100' width='100' height='100'>{body}</svg>"
         )
+    }
+
+    fn refused_whole(drawing: &str) -> String {
+        parse(drawing.as_bytes(), &Limits::default())
+            .err()
+            .unwrap_or_else(|| panic!("accepted: {drawing}"))
     }
 
     fn refused(body: &str) -> String {
@@ -874,6 +1251,95 @@ mod tests {
 
     /// Ten `use`s of ten `use`s of ... : a few hundred bytes drawing millions of shapes.
     #[test]
+    fn a_pattern_filled_with_itself_by_inheritance_is_refused_before_usvg_reads_it() {
+        // (usvg's reading recursed until its stack overflowed, which aborts: checked here by
+        // the scan alone, which runs before it.)
+        let fuzzed = std::str::from_utf8(include_bytes!(
+            "../tests/fixtures/inherited-pattern-fuzz.svg"
+        ))
+        .expect("text");
+        let pattern = "<pattern id='p' width='10' height='10' patternUnits='userSpaceOnUse'>";
+        let used = "<rect width='10' height='10' fill='url(#p)'/>";
+        for drawing in [
+            fuzzed.to_owned(),
+            svg(&format!(
+                "<g fill='url(#p)'>{pattern}<rect width='5' height='5'/></pattern></g>\
+                 <rect width='10' height='10' fill='url(#p)'/>"
+            )),
+            svg(&format!(
+                "<g style='stroke: url(#p)'><g fill='inherit'>{pattern}\
+                 <rect width='5' height='5'/></pattern></g></g>{used}"
+            )),
+            svg(&format!(
+                "<rect id='r' width='5' height='5'/><g fill='url(#p)'>{pattern}\
+                 <use href='#r'/></pattern></g>{used}"
+            )),
+            svg(&format!(
+                "<g fill='url(#q)'>{}<rect width='5' height='5'/></pattern></g>\
+                 {pattern}<rect width='5' height='5' fill='url(#q)'/></pattern>{used}",
+                pattern.replace("'p'", "'q'")
+            )),
+        ] {
+            let why = scan(&drawing, &Limits::default()).unwrap_err();
+            assert!(why.contains("repeats itself"), "{drawing}: {why}");
+        }
+        // A pattern's own fill, or one its elements set themselves, is not its own.
+        for drawing in [
+            svg(&format!(
+                "<g fill='url(#p)'>{pattern}<rect width='5' height='5' fill='red'/></pattern>\
+                 </g><rect width='10' height='10' fill='url(#p)'/>"
+            )),
+            svg(&format!(
+                "<g fill='red'>{pattern}<rect width='5' height='5'/></pattern></g>\
+                 <rect width='10' height='10' fill='url(#p)'/>"
+            )),
+        ] {
+            parse(drawing.as_bytes(), &Limits::default()).expect("a pattern filled red");
+        }
+    }
+
+    #[test]
+    fn an_inherited_pattern_is_found_whichever_declaration_wins() {
+        // A pattern's rectangle whose own declarations end in `inherit`: the declaration that
+        // wins as usvg resolves them, and as CSS cascades them (a review of R-SKIN-PACKS).
+        let pattern = "<pattern id='p' width='10' height='10' patternUnits='userSpaceOnUse'>";
+        let inside = |above: &str, rect: &str| {
+            svg(&format!(
+                "<g {above}>{pattern}<rect width='5' height='5' {rect}/></pattern></g>\
+                 <rect width='10' height='10' fill='url(#p)'/>"
+            ))
+        };
+        let fill = "fill='url(#p)'";
+        for drawing in [
+            // The later declaration wins (the review's case), for a stroke too.
+            inside(fill, "style='fill:red; fill:inherit'"),
+            inside("stroke='url(#p)'", "style='stroke: red ; stroke: inherit'"),
+            // The style over the attribute.
+            inside(fill, "fill='red' style='fill:inherit'"),
+            // usvg: an inherited value keeps its ancestor's `!important`, and the first
+            // `!important` stays over a later declaration.
+            inside(
+                "style='fill:url(#p) !important'",
+                "style='fill:inherit; fill:red'",
+            ),
+            // CSS: `!important` over a later declaration.
+            inside(fill, "style='fill:inherit !important; fill:red'"),
+        ] {
+            let why = scan(&drawing, &Limits::default()).unwrap_err();
+            assert!(why.contains("repeats itself"), "{drawing}: {why}");
+        }
+        // Red wins in both.
+        for drawing in [
+            inside(fill, "style='fill:inherit; fill:red'"),
+            inside(fill, "fill='inherit' style='fill:red'"),
+            inside(fill, "style='fill:red !important; fill:inherit'"),
+            inside(fill, "style='fill:red; /* fill:inherit */'"),
+        ] {
+            parse(drawing.as_bytes(), &Limits::default()).expect("a pattern filled red");
+        }
+    }
+
+    #[test]
     fn uses_that_multiply_are_counted_as_drawn() {
         let mut body = String::from("<defs><rect id='l0' width='1' height='1'/>");
         for k in 1..8 {
@@ -935,5 +1401,383 @@ mod tests {
         };
         check("art/slow.svg", s.as_bytes(), &limits, true, &mut r);
         assert!(r.has("svg.slow"), "{r}");
+    }
+
+    /// Test drawings of their own, apart from the process's.
+    fn drawings() -> &'static TestDrawings {
+        Box::leak(Box::new(TestDrawings::new()))
+    }
+
+    #[test]
+    fn a_test_drawing_that_panics_refuses_its_pack_and_the_next_is_tested() {
+        // (Before: the panic was taken for a drawing past its deadline, "not drawn within 4001
+        // ms", and every later pack's test was skipped for as long as the process ran.)
+        let drawings = drawings();
+        let s = svg("<rect width='10' height='10'/>");
+        let limits = Limits::default();
+        let mut report = Report::default();
+        check_with(
+            "art/panics.svg",
+            s.as_bytes(),
+            &limits,
+            true,
+            &mut report,
+            |_, _, ms| drawings.run(ms, || panic!("a test drawing panics")),
+        );
+        assert!(report.has("svg.panicked"), "{report}");
+        assert!(!report.has("svg.slow"), "{report}");
+        assert!(!report.to_string().contains("within"), "{report}");
+        let drawn = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let drawn_here = Arc::clone(&drawn);
+        let mut next = Report::default();
+        check_with(
+            "art/next.svg",
+            s.as_bytes(),
+            &limits,
+            true,
+            &mut next,
+            |_, _, ms| {
+                drawings.run(ms, move || {
+                    drawn_here.store(true, std::sync::atomic::Ordering::Release);
+                })
+            },
+        );
+        assert!(drawn.load(std::sync::atomic::Ordering::Acquire));
+        assert!(next.findings.is_empty(), "{next}");
+    }
+
+    #[test]
+    fn a_drawing_that_panics_after_its_deadline_releases_the_backstop() {
+        use std::sync::atomic::Ordering;
+        let drawings = drawings();
+        let (finish, wait) = std::sync::mpsc::channel::<()>();
+        let late = drawings.run(1, move || {
+            let _ = wait.recv();
+            panic!("a late test drawing panics");
+        });
+        assert_eq!(late, Drawn::Late);
+        assert_eq!(drawings.run(1000, || {}), Drawn::Refused);
+        finish.send(()).expect("the drawing is waiting");
+        let until = Instant::now() + std::time::Duration::from_secs(10);
+        while drawings.runaway.load(Ordering::Acquire) > 0 && Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(matches!(drawings.run(1000, || {}), Drawn::In(_)));
+    }
+
+    #[test]
+    fn two_drawings_past_their_deadline_both_hold_the_backstop() {
+        use std::sync::atomic::Ordering;
+        let drawings = drawings();
+        let wait_for = |n: usize| {
+            let until = Instant::now() + std::time::Duration::from_secs(10);
+            while drawings.runaway.load(Ordering::Acquire) > n && Instant::now() < until {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        };
+        let (finish_a, wait_a) = std::sync::mpsc::channel::<()>();
+        let (finish_b, wait_b) = std::sync::mpsc::channel::<()>();
+        // Both started before either is known to be late (as two instances' checks may be).
+        let a = std::thread::spawn(move || {
+            drawings.run(50, move || {
+                let _ = wait_a.recv();
+            })
+        });
+        let b = std::thread::spawn(move || {
+            drawings.run(50, move || {
+                let _ = wait_b.recv();
+            })
+        });
+        let (a, b) = (a.join().expect("a"), b.join().expect("b"));
+        assert!(a == Drawn::Late || b == Drawn::Late, "{a:?} {b:?}");
+        if a == Drawn::Late && b == Drawn::Late {
+            // The first ends; the second still runs, and the backstop holds.
+            drop(finish_a);
+            wait_for(1);
+            assert_eq!(drawings.run(1000, || {}), Drawn::Refused);
+            drop(finish_b);
+        } else {
+            drop((finish_a, finish_b));
+        }
+        wait_for(0);
+        assert!(matches!(drawings.run(1000, || {}), Drawn::In(_)));
+    }
+
+    #[test]
+    fn a_vast_pattern_tile_is_refused_at_every_size_it_is_drawn() {
+        let limits = Limits::default();
+        for bytes in [
+            include_bytes!("../tests/fixtures/vast-pattern/art/panel.svg").as_slice(),
+            include_bytes!("../tests/fixtures/pattern-fuzz-17237.svg").as_slice(),
+        ] {
+            for side in [200, 300, 3000] {
+                let why = parse_at(bytes, &limits, Some(side)).unwrap_err();
+                assert!(why.contains("a pattern's tile"), "{why}");
+            }
+            // Whoever draws it: the test drawing and the plug-in's drawing check it as well.
+            let tree = usvg::Tree::from_data(bytes, &options()).expect("a valid SVG");
+            assert_eq!(test_draw(&tree, 300, 1000), Drawn::TooLarge);
+            let mut pixmap = Pixmap::new(300, 150).expect("a pixmap");
+            assert!(!render(
+                &tree,
+                Transform::from_scale(1.5, 1.5),
+                &mut pixmap.as_mut()
+            ));
+        }
+        let s = svg(
+            "<pattern id='p' width='200' height='200' patternUnits='userSpaceOnUse'>\
+             <rect width='1' height='1'/></pattern>\
+             <rect width='1' height='1' fill='url(#p)'/>",
+        );
+        assert!(parse_at(s.as_bytes(), &limits, Some(100)).is_ok());
+        let why = parse_at(s.as_bytes(), &limits, Some(3000)).unwrap_err();
+        assert!(why.contains("a pattern's tile"), "{why}");
+    }
+
+    #[test]
+    fn a_pattern_tile_is_counted_at_its_transforms_scale() {
+        for (transform, ancestors) in [
+            ("scale(100000)", ""),
+            ("matrix(1 0 1000000 1 0 0)", ""),
+            ("", "scale(100000)"),
+        ] {
+            let s = svg(&format!(
+                "<pattern id='p' width='10' height='10' patternUnits='userSpaceOnUse' \
+                 patternTransform='{transform}'><rect width='1' height='1'/></pattern>\
+                 <g transform='{ancestors}'><rect width='.001' height='.001' fill='url(#p)'/></g>"
+            ));
+            let why = parse(s.as_bytes(), &Limits::default()).unwrap_err();
+            assert!(
+                why.contains("a pattern's tile"),
+                "{transform} {ancestors}: {why}"
+            );
+        }
+    }
+
+    #[test]
+    fn filter_mask_and_layer_buffers_are_bounded_whatever_the_work() {
+        let limits = Limits {
+            svg_work: f64::INFINITY,
+            ..Limits::default()
+        };
+        for body in [
+            // A filter's region is not cut to the drawing.
+            "<filter id='f' filterUnits='userSpaceOnUse' width='100000' height='100000'>\
+             <feFlood/></filter><rect width='1' height='1' filter='url(#f)'/>",
+            "<filter id='f'><feFlood x='-1000000000' width='1000000000'/></filter>\
+             <rect width='1' height='1' filter='url(#f)'/>",
+            "<mask id='m' maskUnits='userSpaceOnUse' width='1000000000' height='100'>\
+             <rect width='1' height='1'/></mask><rect width='1' height='1' mask='url(#m)'/>",
+            "<g opacity='0.5'><rect width='1000000000' height='100'/></g>",
+        ] {
+            let why = parse(svg(body).as_bytes(), &limits).unwrap_err();
+            assert!(
+                why.contains("drawing buffer") || why.contains("integer range"),
+                "{body}: {why}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_layer_is_counted_as_resvg_cuts_it() {
+        // A translucent group far wider than the drawing: resvg cuts its layer to five times
+        // the drawing's size, and so is it counted (here within the limits).
+        let limits = Limits {
+            svg_work: f64::INFINITY,
+            ..Limits::default()
+        };
+        let (_, cost) = parse(
+            svg("<g opacity='.5'><rect x='-100000' width='200000' height='100'/></g>").as_bytes(),
+            &limits,
+        )
+        .expect("a layer cut to the drawing");
+        assert!(cost.buffer_bytes <= (100 * 100 + 500 * 104) * 4, "{cost:?}");
+    }
+
+    #[test]
+    fn chained_clips_masks_and_nested_groups_count_all_their_buffers() {
+        let limits = Limits {
+            svg_work: f64::INFINITY,
+            svg_buffer_bytes: 200_000,
+            ..Limits::default()
+        };
+        for body in [
+            "<clipPath id='a'><rect width='100' height='100'/></clipPath>\
+             <clipPath id='b' clip-path='url(#a)'><rect width='100' height='100'/></clipPath>\
+             <clipPath id='c' clip-path='url(#b)'><rect width='100' height='100'/></clipPath>\
+             <rect width='100' height='100' clip-path='url(#c)'/>",
+            "<mask id='a'><rect width='100' height='100'/></mask>\
+             <mask id='b' mask='url(#a)'><rect width='100' height='100'/></mask>\
+             <rect width='100' height='100' mask='url(#b)'/>",
+            "<g opacity='.5'><g opacity='.5'><g opacity='.5'><g opacity='.5'>\
+             <rect width='100' height='100'/></g></g></g></g>",
+            "<filter id='f'><feFlood/><feGaussianBlur stdDeviation='1'/></filter>\
+             <rect width='100' height='100' filter='url(#f)'/>",
+        ] {
+            let why = parse(svg(body).as_bytes(), &limits).unwrap_err();
+            assert!(why.contains("together"), "{body}: {why}");
+        }
+    }
+
+    #[test]
+    fn a_pattern_in_a_chained_mask_is_counted() {
+        let s = svg(
+            "<pattern id='p' width='10' height='1000000000' patternUnits='userSpaceOnUse'>\
+             <rect width='1' height='1'/></pattern>\
+             <mask id='a'><rect width='10' height='10' fill='url(#p)'/></mask>\
+             <mask id='b' mask='url(#a)'><rect width='10' height='10'/></mask>\
+             <rect width='10' height='10' mask='url(#b)'/>",
+        );
+        let why = parse(s.as_bytes(), &Limits::default()).unwrap_err();
+        assert!(why.contains("a pattern's tile"), "{why}");
+    }
+
+    #[test]
+    fn a_drawing_stretched_past_its_checked_size_is_not_drawn() {
+        // Within the limits as checked, at its own proportions; stretched a million times one
+        // way, its pattern's tile would be past them, and the plug-in does not draw it.
+        let s = svg(
+            "<pattern id='p' width='50' height='50' patternUnits='userSpaceOnUse'>\
+             <rect width='1' height='1'/></pattern><rect width='100' height='100' \
+             fill='url(#p)'/>",
+        );
+        let (tree, _) = parse(s.as_bytes(), &Limits::default()).expect("within the limits");
+        let mut pixmap = Pixmap::new(100, 100).expect("a pixmap");
+        assert!(render(&tree, Transform::identity(), &mut pixmap.as_mut()));
+        assert!(!render(
+            &tree,
+            Transform::from_scale(1.0, 1e6),
+            &mut pixmap.as_mut()
+        ));
+    }
+
+    #[test]
+    fn deeply_nested_elements_are_refused_before_they_are_read() {
+        // (Before: the XML parser's recursion overflowed its thread's stack, which aborts.)
+        let s = svg(&format!(
+            "{}<rect width='1' height='1'/>{}",
+            "<g>".repeat(2000),
+            "</g>".repeat(2000)
+        ));
+        assert!(
+            parse(s.as_bytes(), &Limits::default())
+                .unwrap_err()
+                .contains("64 deep")
+        );
+        let mut body = String::from("<defs><rect id='r0' width='1' height='1'/>");
+        for i in 1..100 {
+            body.push_str(&format!("<g id='r{i}'><use href='#r{}'/></g>", i - 1));
+        }
+        body.push_str("</defs><use href='#r99'/>");
+        assert!(refused(&body).contains("64 deep"));
+    }
+
+    #[test]
+    fn a_drawing_nested_as_deep_as_allowed_is_read_and_drawn_on_a_small_stack() {
+        // Windows gives a thread 1 MB by default: a host's editor thread may have no more.
+        let deep = |depth: usize| {
+            svg(&format!(
+                "<clipPath id='c'><rect width='90' height='90'/></clipPath>{}\
+                 <rect width='1' height='1' fill='#123'/>{}",
+                "<g opacity='.9' clip-path='url(#c)'>".repeat(depth),
+                "</g>".repeat(depth)
+            ))
+        };
+        // References followed count as deep: a `use` of a group of a `use`..., and a clip
+        // clipped by a clip...
+        let uses = |depth: usize| {
+            let mut body = String::from("<defs><rect id='u0' width='1' height='1'/>");
+            for i in 1..=depth {
+                body.push_str(&format!(
+                    "<g id='u{i}' opacity='.9'><use href='#u{}'/></g>",
+                    i - 1
+                ));
+            }
+            svg(&format!("{body}</defs><use href='#u{depth}'/>"))
+        };
+        let clips = |depth: usize| {
+            let mut body =
+                String::from("<clipPath id='c0'><rect width='90' height='90'/></clipPath>");
+            for i in 1..=depth {
+                body.push_str(&format!(
+                    "<clipPath id='c{i}' clip-path='url(#c{})'><rect width='90' height='90'/>\
+                     </clipPath>",
+                    i - 1
+                ));
+            }
+            svg(&format!(
+                "{body}<rect width='9' height='9' clip-path='url(#c{depth})'/>"
+            ))
+        };
+        for drawing in [deep(60), uses(30), clips(60)] {
+            let read = std::thread::Builder::new()
+                .stack_size(1 << 20)
+                .spawn(move || {
+                    let (tree, _) = parse(drawing.as_bytes(), &Limits::default())?;
+                    let mut pixmap = Pixmap::new(100, 100).expect("a pixmap");
+                    Ok::<bool, String>(render(&tree, Transform::identity(), &mut pixmap.as_mut()))
+                })
+                .expect("a thread")
+                .join()
+                .expect("read and drawn");
+            assert_eq!(read, Ok(true));
+        }
+        for drawing in [deep(70), uses(40), clips(70)] {
+            assert!(refused_whole(&drawing).contains("64 deep"), "{drawing}");
+        }
+    }
+
+    #[test]
+    fn nesting_is_counted_past_comments_instructions_cdata_and_quoted_attributes() {
+        let s = svg(&format!(
+            "<!-- {} --><?example {}?><metadata><![CDATA[{}]]></metadata>\
+             <rect width='1' height='1' data-example='{}' />",
+            "<g>".repeat(100),
+            "<g>".repeat(100),
+            "<g>".repeat(100),
+            ">".repeat(100)
+        ));
+        depth_of(&s).expect("nothing nested");
+        // (Its instruction is refused by the scan, as before.)
+        let s = s.replace(&format!("<?example {}?>", "<g>".repeat(100)), "");
+        parse(s.as_bytes(), &Limits::default()).expect("nothing nested");
+    }
+
+    #[test]
+    fn vast_filter_offsets_are_refused() {
+        let why = parse(
+            include_bytes!("../tests/fixtures/offset-fuzz-2222.svg"),
+            &Limits::default(),
+        )
+        .unwrap_err();
+        assert!(why.contains("a filter's offset"), "{why}");
+        for primitive in ["feOffset", "feDropShadow"] {
+            for offset in ["1e30", "-1e30"] {
+                let s = svg(&format!(
+                    "<filter id='f'><{primitive} dx='{offset}'/></filter>\
+                     <rect width='1' height='1' filter='url(#f)'/>"
+                ));
+                let why = parse(s.as_bytes(), &Limits::default()).unwrap_err();
+                assert!(why.contains("a filter's offset"), "{why}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_embedded_picture_is_counted_at_its_own_size() {
+        let (_, cost) = parse(
+            include_bytes!("../tests/fixtures/embedded-png.svg"),
+            &Limits::default(),
+        )
+        .expect("a small embedded PNG");
+        assert_eq!(cost.pixels, 1);
+        assert_eq!(cost.buffer_bytes, (100 * 100 + 3) * 4);
+        // A header claiming a vast picture: refused before anything decodes it.
+        let why = parse(
+            include_bytes!("../tests/fixtures/embedded-png-huge.svg"),
+            &Limits::default(),
+        )
+        .unwrap_err();
+        assert!(why.contains("an embedded picture"), "{why}");
     }
 }

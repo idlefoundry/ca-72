@@ -406,15 +406,16 @@ impl Renderer {
                     if let Some(art) = &self.dressing.art {
                         let (w, h) = (self.frame.width(), self.frame.height());
                         let size = art.size();
-                        if let Some(mut layer) = Pixmap::new(w, h) {
-                            resvg::render(
+                        if let Some(mut layer) = Pixmap::new(w, h)
+                            && skin_pack::svg::render(
                                 art,
                                 Transform::from_scale(
                                     w as f32 / size.width(),
                                     h as f32 / size.height(),
                                 ),
                                 &mut layer.as_mut(),
-                            );
+                            )
+                        {
                             self.frame.draw_pixmap(
                                 0,
                                 0,
