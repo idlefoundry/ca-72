@@ -71,17 +71,53 @@ The plug-ins go into the usual folders:
 | Windows | `C:\Program Files\Common Files\VST3` | `C:\Program Files\Common Files\CLAP` | |
 | Linux | `~/.vst3` (`/usr/lib/vst3` with `./install.sh --system`) | `~/.clap` (`/usr/lib/clap`) | |
 
+**Choosing a folder or external drive.** The standalone application and its licence files can
+live elsewhere. The installers keep plug-ins in the folders above so hosts can find them.
+Factory sounds and artwork are built into the binaries; there is no separate sound library
+to move. Your own presets, settings and standalone session stay in your user profile.
+
+- **Windows:** choose the app folder on **Select Destination Location**. The default is
+  `C:\Program Files\Idle Foundry\CA-72`; the licences and uninstaller also go there, even
+  if you select only plug-ins. Updates remember the folder and show it again. To move an
+  existing installation, uninstall it first, then run the installer and choose the new
+  folder. If an external drive is disconnected, the app and its uninstaller cannot launch;
+  an update stops until you reconnect it with the same drive letter. Installed plug-ins
+  continue to work from the system drive.
+- **macOS:** the package installs the app in `/Applications`. Move `CA-72.app` in Finder to
+  your chosen folder or external drive, keeping the bundle whole. The drive must be connected
+  to run it. Updates put a new copy in `/Applications`; quit the app, replace your moved copy
+  with the new one and open that copy. VST3, CLAP and Audio Unit stay in `/Library/Audio/Plug-Ins`.
+- **Linux:** mount the drive, create a folder on it, then run
+  `./install.sh --prefix "/media/you/SSD/CA-72"` with that existing absolute folder. This puts
+  the app in its `bin` subfolder and licences in `share`; the menu entry and icon stay in your
+  usual desktop folders. Add `--standalone-only` to omit plug-ins, or `--system` for a
+  system-wide installation. Reuse the same flags and prefix to update or uninstall. A missing
+  or read-only destination folder stops installation before any plug-ins are replaced; check
+  the drive is mounted, writable, at the same path first. The app cannot launch while it is disconnected. `--prefix`
+  applies only to the standalone; it does not change the plug-in folders or your `PATH`.
+  Use a subfolder on the drive rather than its mount point: the empty mount-point directory
+  can remain after disconnecting, and the script cannot distinguish it from a local folder.
+  If an older script installed plug-ins beneath a custom prefix, uninstall those copies
+  with that script first.
+
 To uninstall: on macOS, delete `CA-72.vst3`, `CA-72.clap` and `CA-72.component` from those
-folders and `/Applications/CA-72.app` if installed; on Windows,
+folders and `CA-72.app` from wherever you keep it; on Windows,
 find **CA-72** in **Settings › Apps** and choose **Uninstall**; on Linux, run
 `./install.sh --uninstall` (`./install.sh --uninstall --system` for a system-wide copy). Your
-presets are kept.
+presets, settings and standalone session are kept.
 
 **Updating.** Open the presets' drawer (click the preset's name under the panel) and click
 **[ CHECK FOR UPDATES ]** at the foot of the PRESET display, under the version you have. If a
 newer release is out, **[ DOWNLOAD ]** opens its installer for your computer in your browser:
 close your host, then run it as above. The CA-72 checks only when you click, through your system's `curl`,
 and sends nothing of yours.
+
+Settings also has **WHAT'S NEW…**, which opens this version's bundled highlights without
+an internet connection, in a dialog over the panel; **GOT IT** or Escape closes it. The first
+visible editor after an install or update shows them automatically, once for your OS user
+on that computer. When an earlier shown version is
+known, that automatic view includes the available intervening releases. Settings always
+reopens the current release's highlights.
 
 ## Playing it
 
@@ -132,9 +168,9 @@ the last good MIDI list and appear in settings; a successful empty inventory rep
 that no inputs are available. Refresh retries discovery.
 Input/output changes briefly stop playback and retain the sound and editor.
 **TEMPO**, the last row, is the arpeggiator's tempo in the standalone (which has no host to
-give one): 120 BPM until you choose another from its list (or step it a beat at a time with
-the left and right arrow keys). It applies at once, needs no Apply, and is kept for this
-computer.
+give one), the same as the screen at the top left of the panel shows: 120 BPM until you choose
+another from its list (or step it a beat at a time with the left and right arrow keys). It
+applies at once, needs no Apply, and is kept for this computer.
 
 **FX**, on the standalone's rail after ARP (from 0.3.0), drops a drawer of four slots for your
 own CLAP and VST3 effects, run after the synthesizer, left to right. **+ ADD EFFECT** lists the
@@ -153,6 +189,10 @@ must support a common nominal sample rate. A bounded capture reservoir adapts
 the input to the output clock, so separately enumerated capture/playback endpoints
 are supported. The reservoir adds input buffering; the displayed output buffer
 duration is not the full input-to-output latency.
+
+The standalone's window is the panel's size: resize it with the grip at the panel's corner
+or the settings button's WINDOW › SIZE. On Windows it opens at the scale of the main
+display, and its frame cannot be dragged or maximized.
 
 The standalone remembers unsaved edits, MIDI Learn, window size and the last
 working audio/MIDI choices in `CA-72/Standalone/session.json` beneath the same
@@ -192,13 +232,15 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   sounding. With POLY and UNISON off, VOICES counts only as the one voice's places (SPREAD,
   below); with DOUBLE on or WIDTH at 0 it changes nothing, and is dimmed and does not turn,
   as DETUNE is without DOUBLE.
-- **ENTROPY** (0 to 100 %, off by default): each voice its own parts, as if built from a
-  different batch: the three oscillators' tuning, the filter's cutoff and EMPHASIS, the
-  contours' times and GLIDE, each off by a little; the oscillators and the cutoff drift
-  slowly and waver. It applies to the one voice with POLY off too. At 0 each oscillator
-  still keeps a tiny mismatch and drift of its own, as no two real ones are the same:
-  perfectly identical oscillators lock in phase and sound louder, not better. The host
-  parameter **Lock** makes them identical (the circuit as drawn), its level matched.
+- **ENTROPY** (0 to 100 %, 5 % by default): each voice its own parts, as if built from a
+  different batch. At 5 % the oscillators have the small tuning mismatch, slow drift and
+  waver that previous versions had at 0 %. Below 5 % these fall linearly to steady pitch
+  at 0 %. Above 5 % the previous range continues: the filter's cutoff and EMPHASIS, the
+  contours' times and GLIDE vary between voices too. The host parameter **Lock** removes
+  the oscillator mismatch and movement at any amount, with its existing level match.
+  The panel's deliberate pitch modulation remains available, including noise modulation.
+  Older presets and projects move to the equivalent new value when loaded. A DAW's
+  automation lanes keep their normalised positions and play the new mapping.
 - **SPREAD** (0 to 100 %, off by default): POLY's or UNISON's voices across the stereo
   field, each as loud wherever it sits, where **SCATTER** puts them: EVEN (the default),
   evenly from edge to edge, the first two at the edges; or CENTER, the first in the centre and
@@ -238,21 +280,29 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   over the lower controls or the keyboard, and puts it away; the key stays lit while the
   arpeggiator is on. It plays the keys you hold one at a time, in turn, and its notes go
   through the instrument exactly as played ones do (MONO, POLY, UNISON, NOTE PRIORITY,
-  RETRIGGER and GLIDE take them the same way). **ON** switches it on; **LATCH** keeps the chord
-  playing after you let go, until you play a new one with no keys held or switch LATCH off.
-  **DIRECTION**: UP and DOWN in pitch order, UP/DOWN up and back with its ends played once,
-  RANDOM never the same key twice running. **RATE** is a note value on the host's tempo, from
-  a half note (2) to a thirty-second (32), the dotted and triplet values between them (the
-  readout shows `16.` for a dotted sixteenth, `16t` for a triplet). **OCTAVES** (1 to 4)
-  repeats the pattern an octave up each time. **GATE** (0 to 100 %, 50 by default) is each
-  note's length, a share of its step: 0 % is a 5 ms blip, 100 % ties each note into the next
-  (legato). **SWING** (0 to 100 %, 0 by default) delays every second step: 67 % is a triplet
+  RETRIGGER and GLIDE take them the same way). **ON** switches it on; **HOLD** keeps the chord
+  playing after you let go, until you play a new one with no keys held or switch HOLD off.
+  With ON off, HOLD holds the notes you play as you played them, a drone, until you play a new
+  chord or switch HOLD off. **DIRECTION**: UP and DOWN in pitch order, UP/DOWN up and back with
+  its ends played once, RANDOM never the same note twice running, ORDER in the order you
+  pressed the keys (a key added goes on the end). **RATE** is a note value on the host's tempo,
+  from a half note (2) to a thirty-second (32), the dotted and triplet values between them (the
+  readout shows `16.` for a dotted sixteenth, `16t` for a triplet). **OCTAVES** (1 to 5)
+  repeats the pattern an octave up each time; a note that would go past the top of MIDI's
+  range plays in the highest octave it has instead. **GATE** (0 to 100 %, 50 by default) is
+  each note's length, a share of what the instrument can play in a step: even 0 % is held long
+  enough (20 ms) for its contours to start, and each note is let go long enough (13 ms) before
+  the next for them to start again, but at 100 %, which ties each note into the next (legato).
+  **SWING** (0 to 100 %, 0 by default) delays every second step: 67 % is a triplet
   shuffle, 100 % puts it three quarters of the way through the pair. While the host plays, the
   steps lock to its bars and beats (a key pressed up to a quarter of a step late plays at
   once); stopped, the arpeggiator runs at the host's tempo from the moment you press a key;
-  the standalone uses its own **TEMPO** (Audio & MIDI, 120 by default). The sustain pedal
-  (CC 64) holds the keys you let go while the arpeggiator runs (unless MIDI Learn has CC 64;
-  played without the arpeggiator, the instrument ignores the pedal, as before). Every setting
+  the standalone uses its own **TEMPO**, the screen at the panel's top left (drag it, scroll
+  it, or double-click it and type; 30 to 300 BPM, 120 by default; also in Audio & MIDI). In a
+  plug-in the host gives the tempo and there is no screen. The sustain pedal
+  (CC 64) holds the keys you let go while the arpeggiator runs, and under HOLD's drone keeps
+  the keys let go part of the chord (unless MIDI Learn has CC 64; played without either, the
+  instrument ignores the pedal, as before). Every setting
   is a host parameter that can be automated or learned, and is saved with presets and
   projects. It sends no MIDI out.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
@@ -505,6 +555,26 @@ this needs ALSA and OpenGL headers (`libasound2-dev libgl-dev` on Debian/Ubuntu,
 `target/packages` (on macOS from the universal bundles and the Audio Unit; on Windows from
 Git Bash, with [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
 
+On Linux, a source build also needs the desktop entry and icon installed for the dock
+to identify it. Install the packaged archive with `./install.sh --standalone-only`, or
+install just the application from source after `scripts/standalone.sh`:
+
+```sh
+mkdir -p target/standalone-install
+cp target/bundled/ca72-standalone scripts/standalone/CA-72.desktop \
+  scripts/standalone/com.idlefoundry.ca72.png scripts/installer/install.sh \
+  THIRD-PARTY-NOTICES.txt target/standalone-install/
+cp LICENSE target/standalone-install/LICENSE.txt
+sh target/standalone-install/install.sh --standalone-only
+```
+
+This installs `~/.local/bin/ca72-standalone`, the launcher
+`com.idlefoundry.ca72.desktop` and its icon for your user. Open **CA-72** from your
+applications menu. Running a bare executable does not register those files. The Linux
+window uses X11, through XWayland in a Wayland session; its class is `CA-72`, matching
+the launcher's `StartupWMClass`. See the
+[Linux window identity checks](docs/issue-49-linux-icon.md) for the checks and evidence.
+
 To try the plug-in without a host, run it as an application of its own:
 
 ```sh
@@ -513,6 +583,11 @@ cargo run --release -p ca72-plugin --example standalone --features standalone
 
 On Linux this also needs the ALSA, JACK and OpenGL headers (Debian and Ubuntu:
 `libasound2-dev libjack-jackd2-dev libgl-dev`).
+
+The offline What's New highlights are compiled from `docs/releases/notes.toml`, condensed
+from the Markdown release notes beside it. Before changing the release version, follow
+[Updating the bundled notes](docs/whats-new.md). CI checks that this build and every maintained
+release from 0.2.0 onwards have entries before making its bundles.
 
 ## Testing
 

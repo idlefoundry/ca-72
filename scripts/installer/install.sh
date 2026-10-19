@@ -5,7 +5,10 @@
 #   ./install.sh --standalone-only install only the application
 #   ./install.sh --plugins-only    install only VST3 and CLAP
 #   ./install.sh --uninstall       remove selected components, keep presets/session
-#   ./install.sh --prefix PATH     use a chosen installation prefix
+#   ./install.sh --prefix PATH     standalone files in PATH (an existing absolute folder)
+# VST3 and CLAP stay in their standard user folders (--system uses /usr/lib).
+# The desktop menu entry, presets and settings stay in their usual locations.
+# Mount an external drive at the same path before running, updating or uninstalling.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
 vst3="$HOME/.vst3"
@@ -30,24 +33,27 @@ while [ "$#" -gt 0 ]; do
         install_prefix="$1"
         case "$install_prefix" in /*) ;; *) echo 'install.sh: --prefix must be absolute' >&2; exit 2;; esac
         ;;
-    -h|--help) sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,11s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "install.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
     esac
     shift
 done
 [ "$plugins$application" != 00 ] || { echo 'install.sh: choose at least one component' >&2; exit 2; }
 if [ "$system" = 1 ]; then
-    [ -z "$install_prefix" ] || { echo 'install.sh: choose --system or --prefix' >&2; exit 2; }
-    install_prefix=/usr
+    vst3=/usr/lib/vst3
+    clap=/usr/lib/clap
+    bin=/usr/bin
+    data=/usr/share
     if [ "$(id -u)" -ne 0 ]; then use_sudo=sudo; fi
 fi
-if [ -n "$install_prefix" ]; then
-    vst3="$install_prefix/lib/vst3"
-    clap="$install_prefix/lib/clap"
-    bin="$install_prefix/bin"
-    data="$install_prefix/share"
-fi
 app_data="$data/Idle Foundry/CA-72/Application"
+if [ -n "$install_prefix" ]; then
+    [ "$application" = 1 ] || { echo 'install.sh: --prefix applies to the standalone; omit --plugins-only' >&2; exit 2; }
+    # Do not create a replacement beneath an unmounted external drive's parent.
+    [ -d "$install_prefix" ] || { echo "install.sh: $install_prefix is unavailable; mount the drive and choose an existing folder" >&2; exit 1; }
+    bin="$install_prefix/bin"
+    app_data="$install_prefix/share/Idle Foundry/CA-72/Application"
+fi
 desktop="$data/applications/com.idlefoundry.ca72.desktop"
 icon="$data/icons/hicolor/512x512/apps/com.idlefoundry.ca72.png"
 
@@ -75,6 +81,19 @@ if [ "$application" = 1 ]; then
         [ -f "$here/$f" ] || { echo "install.sh: $here/$f is missing; unpack the whole archive" >&2; exit 1; }
     done
 fi
+# A read-only drive passes the folder check above, and set -e would stop at the first
+# write, after the plug-ins were replaced: write to each application destination first.
+writable() {
+    folder="$1"
+    while [ ! -d "$folder" ]; do folder="$(dirname "$folder")"; done
+    probe="$($use_sudo mktemp "$folder/.ca72-install.XXXXXX" 2> /dev/null)" || return 1
+    $use_sudo rm -f "$probe"
+}
+if [ "$application" = 1 ]; then
+    for folder in "$bin" "$(dirname "$desktop")" "$(dirname "$icon")" "$app_data"; do
+        writable "$folder" || { echo "install.sh: $folder is not writable; nothing was changed" >&2; exit 1; }
+    done
+fi
 if [ "$plugins" = 1 ]; then
     $use_sudo mkdir -p "$vst3" "$clap"
     $use_sudo rm -rf "$vst3/CA-72.vst3"
@@ -98,6 +117,10 @@ if [ "$application" = 1 ]; then
     launcher="$(desktop_arg 'exec "$1"')"
     { sed '/^Exec=/d' "$here/CA-72.desktop"; printf 'Exec=/bin/sh -c "%s" sh "%s"\n' "$launcher" "$escaped"; } | $use_sudo tee "$desktop" > /dev/null
     echo "Installed standalone app in $bin. Open CA-72 from your applications menu."
+    if [ -n "$install_prefix" ]; then
+        echo 'Plug-in folders, menu entry, presets and settings stay in their usual locations.'
+        echo 'Keep the drive mounted at this path to run, update or uninstall. Reuse --prefix when updating or uninstalling.'
+    fi
 fi
 if command -v ldd > /dev/null 2>&1; then
     check="$bin/ca72-standalone"

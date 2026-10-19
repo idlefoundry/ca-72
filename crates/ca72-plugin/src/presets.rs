@@ -566,6 +566,28 @@ impl Browser {
         self.rows(p);
     }
 
+    /// Start again from this build's fresh-instance sound. Use the parameters' own
+    /// defaults, with the same player/computer exclusions as a saved sound. This is an
+    /// action, not a library entry: it cannot replace a user's preset named Init.
+    fn init(&mut self, p: &Ca72Params, s: &ParamSetter<'_>) {
+        self.end_edit();
+        for (id, q) in sound_params(p) {
+            if !PLAYERS.contains(&id) {
+                let v = q.default_normalized();
+                if q.normalized() != v {
+                    q.set_once(s, v);
+                }
+            }
+        }
+        Self::set_current(p, "");
+        self.wanted = None;
+        self.last_row = None;
+        self.drawer.focus = Some(FieldId::Search);
+        self.drawer.hint = "Initial sound restored. SAVE AS keeps your new patch.".into();
+        self.rows(p);
+        self.tick(p);
+    }
+
     /// The next (`by` 1) or previous (-1) preset of the list, set.
     pub fn step(&mut self, by: i32, p: &Ca72Params, s: &ParamSetter<'_>) {
         if self.list.is_empty() {
@@ -782,7 +804,7 @@ impl Browser {
 
     /// A PRESET key: RENAME, TAGS, DELETE and REVERT for the preset the plug-in is set to
     /// (DELETE again, once it has asked, deletes it); SAVE AS (again, once begun, saves);
-    /// RESTORE; CLOSE. (MIDI LEARN is the editor's.)
+    /// INIT restores the fresh-instance sound; RESTORE; CLOSE. (MIDI LEARN is the editor's.)
     fn key_press(&mut self, k: PresetKey, p: &Ca72Params, s: &ParamSetter<'_>) {
         let current = Self::current(p);
         let entry = self
@@ -846,6 +868,7 @@ impl Browser {
                 }
                 self.reread(p);
             }
+            (PresetKey::Init, _) => self.init(p, s),
             (PresetKey::Close, _) => self.show(false, p),
             (PresetKey::MidiLearn, _) => {}
         }
@@ -964,6 +987,243 @@ impl Browser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nih_plug::context::process::TestProcessContext;
+    use std::sync::{Arc, Mutex, atomic::Ordering};
+
+    /// Applies editor gestures as the wrapper would, to test the resulting sound rather
+    /// than just the requested values. The context owns the parameters behind each pointer.
+    struct ApplyingHost {
+        process: Mutex<TestProcessContext<crate::Ca72>>,
+        gestures: Mutex<Vec<ParamPtr>>,
+    }
+
+    impl ApplyingHost {
+        fn new(p: Arc<Ca72Params>) -> Self {
+            Self {
+                process: Mutex::new(TestProcessContext::new(p, 48_000.0, ProcessMode::Realtime)),
+                gestures: Mutex::default(),
+            }
+        }
+
+        fn automate(&self, ptr: ParamPtr, value: f32) {
+            assert!(self.process.lock().unwrap().automate(ptr, value));
+        }
+    }
+
+    #[allow(unsafe_code)]
+    impl GuiContext for ApplyingHost {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Clap
+        }
+        fn request_resize(&self) -> bool {
+            true
+        }
+        unsafe fn raw_begin_set_parameter(&self, ptr: ParamPtr) {
+            self.gestures.lock().unwrap().push(ptr);
+        }
+        unsafe fn raw_set_parameter_normalized(&self, ptr: ParamPtr, value: f32) {
+            self.automate(ptr, value);
+        }
+        unsafe fn raw_end_set_parameter(&self, ptr: ParamPtr) {
+            assert_eq!(self.gestures.lock().unwrap().last(), Some(&ptr));
+        }
+        fn get_state(&self) -> PluginState {
+            panic!("Init uses parameter gestures, not project state")
+        }
+        fn set_state(&self, _: PluginState) {
+            panic!("Init must not replace project state")
+        }
+    }
+
+    #[test]
+    fn init_restores_every_sound_default_and_preserves_preferences() {
+        use crate::learn::{Cc, index};
+
+        let dir = tempfile::tempdir().unwrap();
+        let p = Arc::new(Ca72Params::default());
+        let host = ApplyingHost::new(p.clone());
+        let setter = ParamSetter::new(&host);
+        // Every hosted parameter is either a sound parameter or explicitly excluded.
+        // A newly added parameter cannot silently fall outside Init's coverage.
+        let sound = sound_params(&p);
+        for (id, ptr, _) in p.param_map() {
+            assert!(
+                sound.iter().any(|(i, _)| *i == id) || library::KEPT.contains(&id.as_str()),
+                "{id}"
+            );
+            // SAFETY: p owns every pointer in its parameter map throughout this test.
+            #[allow(unsafe_code)]
+            let default = unsafe { ptr.default_normalized_value() };
+            host.automate(ptr, if default < 0.5 { 1.0 } else { 0.0 });
+        }
+        // Even a value extremely close to the default must return exactly to it.
+        host.automate(p.tune.as_ptr(), p.tune.default_normalized_value() + 2e-7);
+        p.editor_width.store(860, Ordering::Relaxed);
+        p.editor_panel.store(false, Ordering::Relaxed);
+        p.editor_expanded.store(false, Ordering::Relaxed);
+        p.editor_panel_applied.store(false, Ordering::Relaxed);
+        p.editor_presets.store(true, Ordering::Relaxed);
+        p.freq_law.store(1, Ordering::Relaxed);
+        p.noise_seed.store(12345, Ordering::Relaxed);
+        p.midi_map
+            .assign(index("cutoff").unwrap(), Cc { channel: 2, cc: 74 });
+        let assignments = p.midi_map.saved();
+        let kept: Vec<_> = p
+            .param_map()
+            .into_iter()
+            .filter(|(id, _, _)| {
+                library::KEPT.contains(&id.as_str()) || PLAYERS.contains(&id.as_str())
+            })
+            .map(|(id, ptr, _)| {
+                // SAFETY: p keeps ptr alive throughout this test.
+                #[allow(unsafe_code)]
+                (id, unsafe { ptr.unmodulated_normalized_value() })
+            })
+            .collect();
+        let mut b = Browser::new(Library::at(dir.path()));
+        b.show(true, &p);
+        Browser::set_current(&p, "Felt Bass");
+        b.begin_save(&p);
+        b.drawer_press(DrawerTarget::Key(PresetKey::Init), 0.0, &p, &setter);
+        for (id, q) in sound_params(&p) {
+            if !PLAYERS.contains(&id) {
+                assert_eq!(q.normalized(), q.default_normalized(), "{id}");
+            }
+        }
+        for (id, value) in kept {
+            let (_, ptr, _) = p
+                .param_map()
+                .into_iter()
+                .find(|(i, _, _)| *i == id)
+                .unwrap();
+            // SAFETY: p owns ptr and is still alive.
+            #[allow(unsafe_code)]
+            let actual = unsafe { ptr.unmodulated_normalized_value() };
+            assert_eq!(actual, value, "{id}");
+        }
+        assert_eq!(p.midi_map.saved(), assignments);
+        assert_eq!(p.editor_width.load(Ordering::Relaxed), 860);
+        assert!(!p.editor_panel.load(Ordering::Relaxed));
+        assert!(p.editor_presets.load(Ordering::Relaxed));
+        assert!(!p.editor_expanded.load(Ordering::Relaxed));
+        assert!(!p.editor_panel_applied.load(Ordering::Relaxed));
+        assert_eq!(p.freq_law.load(Ordering::Relaxed), 1);
+        assert_eq!(p.seed(), 12345);
+        assert_eq!(Browser::current(&p), "");
+        assert_eq!(b.drawer.editing, None);
+        assert!(b.drawer.current.is_none());
+        assert!(!b.bar.found && !b.bar.changed);
+        let gestures = host.gestures.lock().unwrap().len();
+        b.drawer_press(DrawerTarget::Key(PresetKey::Init), 0.0, &p, &setter);
+        assert_eq!(
+            host.gestures.lock().unwrap().len(),
+            gestures,
+            "repeated Init has no extra gestures"
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "Init writes no presets or preferences"
+        );
+    }
+
+    #[test]
+    fn init_saved_and_reloaded_matches_a_fresh_instances_state_and_audio() {
+        use crate::engine::{Engine, Event};
+        use crate::params::QualityMode;
+
+        fn render(p: &Ca72Params, seed: u64) -> Vec<(u32, u32)> {
+            let mut engine = Engine::new();
+            engine.set(&p.controls());
+            engine.prepare(48_000.0, seed);
+            let mut out = Vec::new();
+            for key in [36, 60, 72] {
+                engine.event(Event::Note { key, on: true });
+                for _ in 0..4096 {
+                    let (l, r) = engine.tick_stereo(0.0);
+                    assert!(l.is_finite() && r.is_finite());
+                    out.push((l.to_bits(), r.to_bits()));
+                }
+                engine.event(Event::Note { key, on: false });
+                for _ in 0..1024 {
+                    let (l, r) = engine.tick_stereo(0.0);
+                    assert!(l.is_finite() && r.is_finite());
+                    out.push((l.to_bits(), r.to_bits()));
+                }
+            }
+            assert!(out.iter().any(|&(l, _)| f32::from_bits(l).abs() > 0.001));
+            out
+        }
+
+        for quality in [QualityMode::Lo, QualityMode::Hi, QualityMode::Ultra] {
+            let dir = tempfile::tempdir().unwrap();
+            let p = Arc::new(Ca72Params::default());
+            let host = ApplyingHost::new(p.clone());
+            let setter = ParamSetter::new(&host);
+            host.automate(p.quality.as_ptr(), p.quality.preview_normalized(quality));
+            let fresh_params = Arc::new(Ca72Params::default());
+            let fresh_host = ApplyingHost::new(fresh_params.clone());
+            fresh_host.automate(
+                fresh_params.quality.as_ptr(),
+                fresh_params.quality.preview_normalized(quality),
+            );
+            let fresh = fresh_params.controls();
+            let before = values_now(&fresh_params);
+            let expected = render(&fresh_params, 12345);
+            let mut b = Browser::new(Library::at(dir.path()));
+            b.show(true, &p);
+            let factory = b.library.entries().0;
+            let changed = b.library.find("Brass Choir").unwrap();
+            b.choose(&changed, &p, &setter);
+            assert_ne!(p.controls(), fresh);
+            b.drawer_press(DrawerTarget::Key(PresetKey::Init), 0.0, &p, &setter);
+            assert_eq!(values_now(&p), before);
+            assert_eq!(p.controls(), fresh);
+            assert_eq!(render(&p, 12345), expected, "Init audio at {quality:?}");
+            b.key_press(PresetKey::SaveAs, &p, &setter);
+            b.drawer.save_name = Field::new("From Init");
+            b.key_press(PresetKey::SaveAs, &p, &setter);
+            // Reopen the library so this checks the file, rather than the first browser's
+            // in-memory entry, and alter the saved patch before keeping it.
+            host.automate(p.cutoff.as_ptr(), 0.75);
+            let patch = p.controls();
+            let patch_values = values_now(&p);
+            let patch_audio = render(&p, 12345);
+            b.key_press(PresetKey::SaveAs, &p, &setter);
+            b.drawer.save_name = Field::new("Edited from Init");
+            b.key_press(PresetKey::SaveAs, &p, &setter);
+            drop(b);
+            let mut b = Browser::new(Library::at(dir.path()));
+            b.show(true, &p);
+            let saved = b.library.find("From Init").unwrap();
+            let edited = b.library.find("Edited from Init").unwrap();
+            b.choose(&changed, &p, &setter);
+            b.choose(&saved, &p, &setter);
+            assert_eq!(values_now(&p), before, "saved values at {quality:?}");
+            assert_eq!(p.controls(), fresh, "saved and reloaded at {quality:?}");
+            assert_eq!(
+                render(&p, 12345),
+                expected,
+                "audio at equivalent seed, phase and {quality:?}"
+            );
+            b.choose(&edited, &p, &setter);
+            assert_eq!(values_now(&p), patch_values);
+            assert_eq!(p.controls(), patch);
+            assert_eq!(render(&p, 12345), patch_audio);
+            // Init is an action even when a user's patch is named Init.
+            let named_init = b
+                .library
+                .save("Init", vec![("cutoff".into(), 4.0)], None)
+                .unwrap();
+            b.choose(&named_init, &p, &setter);
+            b.drawer_press(DrawerTarget::Key(PresetKey::Init), 0.0, &p, &setter);
+            assert_eq!(p.controls(), fresh);
+            assert_eq!(b.library.find("Init").unwrap(), named_init);
+            for entry in factory {
+                assert_eq!(b.library.find(&entry.sound.name).unwrap(), entry);
+            }
+        }
+    }
 
     /// A host that takes every change and keeps none.
     struct Host;
@@ -1269,6 +1529,24 @@ mod tests {
             )
         );
         assert_eq!(target(&on, "arp_gate"), Some(0.25));
+        // Saved plain, as a session is: OCTAVES 4 and RANDOM, saved before OCTAVES went to 5 and
+        // ORDER came, are OCTAVES 4 and RANDOM still (R-ARP).
+        let before = lib
+            .save(
+                "Four Up Random",
+                vec![
+                    ("arp_octaves".to_owned(), 4.0),
+                    ("arp_direction".to_owned(), 3.0),
+                ],
+                None,
+            )
+            .unwrap();
+        let set = |id: &str| target(&before, id).unwrap();
+        assert_eq!(p.arp_octaves.preview_plain(set("arp_octaves")), 4);
+        assert_eq!(
+            p.arp_direction.preview_plain(set("arp_direction")),
+            crate::params::ArpDirection::Random
+        );
     }
 
     #[test]
@@ -1345,7 +1623,7 @@ mod tests {
         );
         assert_eq!(
             target(&brass, "entropy"),
-            Some(p.entropy.preview_normalized(40.0))
+            Some(p.entropy.preview_normalized(43.0))
         );
         assert_eq!(
             target(&brass, "spread"),
@@ -1355,7 +1633,7 @@ mod tests {
         assert_eq!(target(&bass, "poly"), Some(0.0));
         assert_eq!(
             target(&bass, "entropy"),
-            Some(p.entropy.preview_normalized(0.0))
+            Some(p.entropy.preview_normalized(5.0))
         );
         // Every factory preset names all four.
         for e in lib.entries().0 {

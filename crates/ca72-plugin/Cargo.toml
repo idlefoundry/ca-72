@@ -36,6 +36,10 @@ required-features = ["standalone"]
 name = "softbuffer_copies"
 harness = false
 
+[[test]]
+name = "backing_scale"
+harness = false
+
 [dependencies]
 ca72.workspace = true
 ca72-fx = { workspace = true, optional = true }
@@ -57,6 +61,7 @@ raw-window-handle-06 = { package = "raw-window-handle", version = "0.6" }
 keyboard-types = { version = "0.6.1", default-features = false }
 # The presets' files (decisions.md R10: the format the DAW's instrument shares).
 toml = "0.7"
+semver = "1"
 # GitHub's answer to the update check (decisions.md R27): nih-plug's own, without the
 # workspace's features. The MIDI assignments in the plug-in's state (R34) as well, with serde
 # (nih-plug's too).

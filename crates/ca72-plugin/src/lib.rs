@@ -29,6 +29,7 @@ pub mod standalone_error;
 #[cfg(feature = "standalone-production")]
 pub mod standalone_settings;
 pub mod update;
+pub mod whats_new;
 
 use std::sync::Arc;
 
@@ -43,6 +44,14 @@ use crate::engine::{
 use crate::helper::{Helper, MEND, SERVE};
 use crate::learn::{Dezip, Incoming};
 use crate::params::Ca72Params;
+
+/// Names the standalone application before its first window opens: on Linux, the X11 class of
+/// every top-level window, the editor's and the error window's alike, whatever each one's
+/// title. The installed launcher's `StartupWMClass` matches it (decisions.md R-LINUX-ICON).
+#[cfg(feature = "standalone-production")]
+pub fn identify_standalone() {
+    baseview::set_application_class(Ca72::NAME);
+}
 
 pub struct Ca72 {
     params: Arc<Ca72Params>,
@@ -161,9 +170,11 @@ fn arp_clock(t: &Transport, rate: f64, tempo: f64) -> arp::Clock {
 /// The host's MIDI as the engine takes it (any channel), if it takes it.
 fn event_of(e: NoteEvent<()>) -> Option<Event> {
     Some(match e {
-        NoteEvent::NoteOn { note, velocity, .. } => Event::Note {
+        // Native CLAP (and VST3) permits a zero-velocity attack. MIDI's zero-velocity
+        // note-on has already become NoteOff in the wrapper's MIDI decoder.
+        NoteEvent::NoteOn { note, .. } => Event::Note {
             key: note,
-            on: velocity > 0.0,
+            on: true,
         },
         NoteEvent::NoteOff { note, .. } | NoteEvent::Choke { note, .. } => Event::Note {
             key: note,
@@ -465,6 +476,13 @@ impl Plugin for Ca72 {
             .unwrap_or_else(drive::unmeasured);
         if let Ok(t) = serde_json::to_string(&curve) {
             state.fields.insert(drive::STATE_KEY.to_owned(), t);
+        }
+        // The pre-0.2.7 ENTROPY range becomes 5..100 %, including an absent amount's
+        // old default (R-ENTROPY-FLOOR). Automation belongs to the host and is left to it.
+        if compat::before_entropy_floor(&state.version)
+            && let Some(ParamValue::F32(v)) = state.params.get_mut("entropy")
+        {
+            *v = compat::entropy_percent(f64::from(*v)) as f32;
         }
         state.params.remove("analog");
         if !state.params.contains_key("entropy") {
@@ -1088,15 +1106,13 @@ mod tests {
         block(&mut p, &mut c, 128);
         p.reset();
         assert_eq!(p.local_notes.held(), [0, 0]);
-        c.push_event(NoteEvent::NoteOn {
-            timing: 3,
-            voice_id: None,
-            channel: 0,
-            note: 60,
-            velocity: 0.0,
-        });
+        c.push_event(NoteEvent::from_midi(3, &[0x90, 60, 0]).expect("MIDI zero-velocity release"));
         block(&mut p, &mut c, 128);
-        assert_eq!(p.local_notes.held(), [0, 0], "velocity zero is a release");
+        assert_eq!(
+            p.local_notes.held(),
+            [0, 0],
+            "MIDI velocity zero is a release"
+        );
         // CA-72's reserved CC120/123 have always been global, irrespective of channel.
         // Keep that compatibility behavior and invalidate local attacks alongside the engine.
         for controller in [ALL_NOTES_OFF, ALL_SOUND_OFF] {
@@ -1227,11 +1243,65 @@ mod tests {
         };
         let mut old = state(&[("analog", 70.0), ("cutoff", 3.0)]);
         Ca72::filter_state(&mut old);
-        assert_eq!(entropy(&old), Some(0.0));
+        assert_eq!(entropy(&old), Some(5.0));
         assert!(!old.params.contains_key("analog"));
         let mut new = state(&[("entropy", 40.0)]);
         Ca72::filter_state(&mut new);
-        assert_eq!(entropy(&new), Some(40.0));
+        assert_eq!(entropy(&new), Some(43.0));
+    }
+
+    /// Both old and current project states pass through the real migration hook. A state
+    /// resaved by this version must not be shifted a second time.
+    #[test]
+    fn saved_states_migrate_entropy_by_their_writer_version() {
+        for (version, plain, want) in [
+            ("0.1.5", 0.0, 5.0),
+            ("0.2.6", 40.0, 43.0),
+            ("0.2.6", 100.0, 100.0),
+            (env!("CARGO_PKG_VERSION"), 0.0, 0.0),
+            (env!("CARGO_PKG_VERSION"), 43.0, 43.0),
+        ] {
+            let mut s = PluginState {
+                version: version.to_owned(),
+                params: [("entropy".to_owned(), ParamValue::F32(plain))]
+                    .into_iter()
+                    .collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            assert!(
+                matches!(s.params["entropy"], ParamValue::F32(v) if v == want),
+                "{version}: {plain}"
+            );
+            s.version = env!("CARGO_PKG_VERSION").to_owned();
+            Ca72::filter_state(&mut s);
+            assert!(matches!(s.params["entropy"], ParamValue::F32(v) if v == want));
+        }
+    }
+
+    /// Moving into a smaller f32 interval cannot retain every old f32. Bound the forward
+    /// rounding explicitly; this example's loss is reported in R-ENTROPY-FLOOR.
+    #[test]
+    fn fractional_entropy_state_migration_has_a_bounded_rounding_error() {
+        for old in [0.000001f32, 24.8161, 51.0091, 30.3158, 99.99999] {
+            let mut s = PluginState {
+                version: "0.2.6".to_owned(),
+                params: [("entropy".to_owned(), ParamValue::F32(old))]
+                    .into_iter()
+                    .collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            let ParamValue::F32(new) = s.params["entropy"] else {
+                panic!("a float")
+            };
+            let recovered = crate::engine::entropy_depth(f64::from(new) / 100.0) / 2.0 * 100.0;
+            assert!((recovered - f64::from(old)).abs() < 4.1e-6);
+            if old == 51.0091 {
+                assert_ne!(recovered, f64::from(old));
+                eprintln!("legacy {old:.17} %, new {new:.17} %, recovered {recovered:.17} %");
+            }
+        }
     }
 
     /// A session saved before NOTE PRIORITY and RETRIGGER opens with LOW (its index, as nih-plug
@@ -1360,6 +1430,11 @@ mod tests {
     /// 1000, realtime and offline. MONO with RETRIGGER, and POLY.
     #[test]
     fn arpeggiated_notes_play_through_the_engine_as_played_ones() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (poly, retrigger) in [(false, true), (true, false)] {
             for (len, mode) in [(256, ProcessMode::Realtime), (1000, ProcessMode::Offline)] {
                 let (mut a, mut b) = (initialised(poly), initialised(poly));
@@ -1389,7 +1464,8 @@ mod tests {
                         }
                     }
                 });
-                // The same as played: a key every 6000 samples, let go 3000 after.
+                // The same as played: a key every 6000 samples, let go 3168 after (GATE 50 % of
+                // what lies between the shortest note, 960, and the shortest gap, 624).
                 let played =
                     transport_render(&mut b, &mut cb, (blocks, len), (120.0, 0.0), |k, c| {
                         let (from, to) = (k * len, (k + 1) * len);
@@ -1397,7 +1473,7 @@ mod tests {
                         for s in 0..8usize {
                             let key = chord[s % 3];
                             evs.push((s * 6000, key, true));
-                            evs.push((s * 6000 + 3000, key, false));
+                            evs.push((s * 6000 + 3168, key, false));
                         }
                         evs.sort_by_key(|e| (e.0, e.2));
                         for (at, key, on) in evs {
@@ -1473,6 +1549,204 @@ mod tests {
         assert_eq!(p.engine.sounding_mask(), 0);
     }
 
+    /// HOLD with the arpeggiator off holds the keys as played (the owner's drone, 2026-10-19):
+    /// a chord pressed and let go, then a new chord, renders to the bit what the same keys held
+    /// by hand render, the first let go as the second is pressed; in MONO with RETRIGGER, MONO
+    /// with GLIDE and HIGH priority, POLY and UNISON, realtime and offline.
+    #[test]
+    fn a_held_drone_plays_through_the_engine_as_held_keys() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cases: [(&str, &[(&str, f32)]); 4] = [
+            ("mono retrigger", &[("retrigger", 1.0)]),
+            (
+                "mono glide high",
+                &[("glide_on", 1.0), ("note_priority", 1.0)],
+            ),
+            ("poly", &[("poly", 1.0)]),
+            ("unison", &[("unison", 1.0)]),
+        ];
+        for (name, set) in cases {
+            for (len, mode) in [(256, ProcessMode::Realtime), (1000, ProcessMode::Offline)] {
+                let (mut a, mut b) = (initialised(false), initialised(false));
+                for p in [&mut a, &mut b] {
+                    p.params
+                        .noise_seed
+                        .store(0xca72, std::sync::atomic::Ordering::Relaxed);
+                    p.engine.prepare(48_000.0, p.params.seed());
+                }
+                let params: Arc<dyn Params> = a.params.clone();
+                let mut ca = TestProcessContext::new(params, 48_000.0, mode);
+                let params: Arc<dyn Params> = b.params.clone();
+                let mut cb = TestProcessContext::new(params, 48_000.0, mode);
+                for (p, c) in [(&a, &ca), (&b, &cb)] {
+                    let map = p.params.param_map();
+                    for (id, v) in set {
+                        let ptr = map.iter().find(|(i, ..)| i == id).expect("a parameter").1;
+                        assert!(c.automate(ptr, *v));
+                    }
+                }
+                assert!(ca.automate(a.params.arp_latch.as_ptr(), 1.0));
+                // Held by HOLD: 60, 64, 67 pressed at 0 and let go at 3000; 62 and 65 at 24 000,
+                // let go at 25 000. By hand: held until 24 000, then 62 and 65 held on.
+                let events = |held: bool| {
+                    let mut e: Vec<(usize, u8, bool)> = vec![
+                        (0, 60, true),
+                        (0, 64, true),
+                        (0, 67, true),
+                        (24_000, 62, true),
+                        (24_000, 65, true),
+                    ];
+                    if held {
+                        e.extend([(3000, 60, false), (3000, 64, false), (3000, 67, false)]);
+                        e.extend([(25_000, 62, false), (25_000, 65, false)]);
+                    } else {
+                        e.extend([
+                            (24_000, 60, false),
+                            (24_000, 64, false),
+                            (24_000, 67, false),
+                        ]);
+                    }
+                    e.sort_by_key(|e| (e.0, e.2));
+                    e
+                };
+                let render = |p: &mut Ca72, c: &mut TestProcessContext<Ca72>, e: Vec<_>| {
+                    let mut out = Vec::new();
+                    for k in 0..48_000 / len {
+                        let (from, to) = (k * len, (k + 1) * len);
+                        for &(at, key, on) in &e {
+                            if (from..to).contains(&at) {
+                                c.push_event(note((at - from) as u32, 0, key, on));
+                            }
+                        }
+                        out.extend(block(p, c, len));
+                    }
+                    out
+                };
+                let drone = render(&mut a, &mut ca, events(true));
+                let held = render(&mut b, &mut cb, events(false));
+                assert!(
+                    drone[30_000..].iter().any(|v| v.abs() > 1e-3),
+                    "{name}: it sounds"
+                );
+                assert!(
+                    drone == held,
+                    "{name}, blocks of {len}: the first difference at {:?}",
+                    drone.iter().zip(&held).position(|(x, y)| x != y)
+                );
+            }
+        }
+    }
+
+    /// A drone (HOLD, the arpeggiator off) leaves no key down in the engine after HOLD off, All
+    /// Notes Off, PANIC, a preset turning HOLD off, a reset, or ON switched on and off while it
+    /// holds; the sustain pedal under it changes none of that.
+    #[test]
+    fn a_drone_leaves_nothing_stuck() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        let chord = |c: &mut TestProcessContext<Ca72>, keys: &[u8]| {
+            for &k in keys {
+                c.push_event(note(0, 0, k, true));
+            }
+            for &k in keys {
+                c.push_event(note(20, 0, k, false));
+            }
+        };
+        let run = |p: &mut Ca72, c: &mut TestProcessContext<Ca72>, n: usize| {
+            for _ in 0..n {
+                block(p, c, 256);
+            }
+        };
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        // HOLD off.
+        chord(&mut c, &[60, 64]);
+        run(&mut p, &mut c, 20);
+        assert_ne!(p.engine.sounding_mask(), 0, "held");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "HOLD off");
+        // All Notes Off, then a drone again.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[62]);
+        run(&mut p, &mut c, 10);
+        c.push_event(cc(3, 0, ALL_NOTES_OFF, 0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "All Notes Off");
+        chord(&mut c, &[63]);
+        run(&mut p, &mut c, 10);
+        assert_ne!(p.engine.sounding_mask(), 0, "playable after it");
+        // PANIC.
+        p.local_notes.panic();
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "PANIC");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "and HOLD off after it");
+        // A preset (every arpeggiator setting at its default: off, HOLD off).
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[65, 69]);
+        run(&mut p, &mut c, 10);
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        assert!(c.automate(p.params.arp_on.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "a preset");
+        // A reset.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[67]);
+        run(&mut p, &mut c, 10);
+        p.reset();
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "a reset");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0);
+        // ON on and off while it holds: arpeggiated, then held again, then let go by HOLD off.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[60, 67]);
+        run(&mut p, &mut c, 10);
+        assert!(c.automate(p.params.arp_on.as_ptr(), 1.0));
+        run(&mut p, &mut c, 40);
+        assert!(p.arp.due().is_some(), "arpeggiated");
+        assert!(c.automate(p.params.arp_on.as_ptr(), 0.0));
+        run(&mut p, &mut c, 10);
+        assert_eq!((p.arp.sounding(), p.arp.due()), (None, None));
+        assert_ne!(p.engine.sounding_mask(), 0, "held again");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "ON on and off");
+        // The pedal down under a drone, a chord let go under it, the pedal up, HOLD off.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        c.push_event(cc(0, 0, arp::SUSTAIN, 127));
+        chord(&mut c, &[60, 64]);
+        run(&mut p, &mut c, 4);
+        chord(&mut c, &[67]);
+        run(&mut p, &mut c, 4);
+        c.push_event(cc(0, 0, arp::SUSTAIN, 0));
+        run(&mut p, &mut c, 4);
+        assert_ne!(p.engine.sounding_mask(), 0, "held after the pedal");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "the pedal");
+        // In POLY: every voice let go (their release tails ended).
+        let mut q = initialised(true);
+        let mut c = hostless(&q);
+        assert!(c.automate(q.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[60, 64, 67]);
+        run(&mut q, &mut c, 20);
+        assert!(c.automate(q.params.arp_latch.as_ptr(), 0.0));
+        run(&mut q, &mut c, 400);
+        assert_eq!(q.engine.sounding_mask(), 0, "POLY");
+    }
+
     /// The sustain pedal (CC 64) holds the keys let go while the arpeggiator plays; learned by
     /// MIDI Learn, it is the learned parameter's alone.
     #[test]
@@ -1498,6 +1772,10 @@ mod tests {
         c.push_event(note(5, 0, 60, false));
         block(&mut p, &mut c, 256);
         assert_eq!(p.params.cutoff.value(), 5.0);
+        // (The note let go after its shortest, 20 ms: not held on by a pedal.)
+        for _ in 0..4 {
+            block(&mut p, &mut c, 256);
+        }
         assert_eq!((p.arp.sounding(), p.arp.due()), (None, None), "not a pedal");
     }
 
