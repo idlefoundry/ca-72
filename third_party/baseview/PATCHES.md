@@ -12,7 +12,7 @@ today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
 Six changes for Windows (1 to 3, 5, 6 and 9), in `src/win/window.rs`, `src/win/drop_target.rs`,
 `src/win/escape.rs`, `src/event.rs` and `src/window.rs` (the first three the CA-72's
-`docs/decisions.md` R26, R28 and R34), two for macOS (4 and 7), and one for Linux (8, below):
+`docs/decisions.md` R26, R28 and R34), three for macOS (4, 7 and 10), and one for Linux (8, below):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -174,6 +174,29 @@ R-WIN-STANDALONE, issue 64, 2026-10-18):
    (`third_party/nih-plug/Cargo.toml`), without the `opengl` feature, which neither window
    uses; it had taken upstream's `579130e` from git, whose X11 backend is this one's and whose
    Windows and macOS backends lack this copy's changes.
+
+10. **On macOS, the view's layer takes its window's scale** (in `src/macos/view.rs`, the CA-72's
+   `docs/decisions.md` R-TWO-SCREENS, its issue #48). As the window moves to a screen of another
+   scale (a Retina laptop's to a 1x monitor's), AppKit tells the view
+   (`viewDidChangeBackingProperties:`, whose handler sends `Resized` at the new scale) but leaves
+   the layer-backed view's layer at the scale it was made with; calling NSView's own implementation
+   first does not change that. A softbuffer surface lays its frame out at that layer's scale (its
+   sublayer follows the view's layer's `contentsScale`), so the editor's frame, drawn for the new
+   scale, showed at half its size in the window's top left corner on the 1x monitor, whatever the
+   host, until the editor was closed (the other way, by the same arithmetic, it would show at twice
+   its size, cut off; not seen). Now the handler sets the layer's `contentsScale` to the window's
+   `backingScaleFactor`, with no animation, before it sends `Resized`, whether or not the size in
+   pixels changed (a window opened on a 1x screen with its layer made at 2 sends none). And
+   `becomeFirstResponder` no longer messages a nil window: `viewWillMoveToWindow:` makes the view
+   its new window's first responder before the view is in it, and a debug build's check of null
+   pointers stopped the process there (the message to nil answered NO, as it still does).
+
+   The CA-72's test `crates/ca72-plugin/tests/backing_scale.rs` opens baseview's view in a window,
+   leaves the view's layer at the other scale as AppKit does, tells the view, and checks that the
+   layer and softbuffer's take the window's scale and that the frame then shown fills the view;
+   without the layer's scale set it fails ("the view's layer left at another scale"). Tried on
+   macOS 27 with a Retina screen and a 4K monitor switched to 1x: the standalone and Ableton Live
+   12.2.7 (VST3) drew at half size on the 1x monitor before, and whole after.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.

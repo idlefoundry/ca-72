@@ -748,7 +748,7 @@ impl Window<'_> {
 
             // A window of its own (an application's) has no frame to drag and no maximise
             // box: what it holds is sized by its handler alone, which a frame's size does not
-            // reach (CA-72 patch, change 8).
+            // reach (CA-72 patch, change 9).
             let flags = if parented {
                 WS_CHILD | WS_VISIBLE
             } else {

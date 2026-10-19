@@ -210,7 +210,7 @@ window opens at the same scale (`app_window::options`); before, baseview set the
 after its first window was open and scaled the window by the monitor's scale while the editor,
 told none, drew at 1, black beyond it at 125 % and more. A resize from outside (Windows scales a
 window whose monitor's scale changes) is undone at the next frame on Windows (`refits`, `fit`).
-The window is baseview's patched copy (`../baseview`, its change 8: no frame to drag and no
+The window is baseview's patched copy (`../baseview`, its change 9: no frame to drag and no
 maximise box), not upstream's from git; the `opengl` feature, and with it `gl_config`, is gone
 from both standalone adapters. macOS and Linux keep the system's scale policy, as before.
 

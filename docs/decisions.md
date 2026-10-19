@@ -8228,3 +8228,52 @@ compact view, no fault. Linux: the standalone built and opened (Hyprland 0.56 un
 opens on the primary display, at its scale). Linux under a tiling window manager shows the
 same black space when the manager tiles the window larger than the panel (Hyprland tiled it
 2536 by 1390); the X11 code is the same as before, so this change leaves it as it was.
+
+## R-TWO-SCREENS. The editor keeps its size on a screen of another scale (issue #48)
+
+**Agent decisions, 2026-10-18** (not separately approved; the issue was given to fix):
+- **The report.** Issue #48: on a MacBook Pro with an ultrawide monitor, the editor drew fine on
+  the laptop's screen, but on the ultrawide at half its size in the top left corner of its
+  window, the rest empty; in Cubase, Ableton Live and Kushview Element.
+- **Why.** Not the editor's size asked of the host in the wrong units: the window keeps its size,
+  the frame shrinks. The laptop's screen is Retina (2 pixels a point) and the monitor 1x. As the
+  window moves between them, AppKit tells baseview's view (its `viewDidChangeBackingProperties:`
+  handler sends `Resized` at the new scale, and the editor draws its frame for it, 1382 pixels
+  wide for a window of 1382 points) but leaves the view's layer at the scale it was made with, 2.
+  softbuffer's layer follows the view's layer's `contentsScale` and lays its tiles out at it
+  (R59), so the 1x frame filled 691 points. It never mended itself: a later frame (an octave
+  changed) still showed at half size, since nothing changed the layer's scale; only closing the
+  editor did. A trace of the standalone (the window's scale, the view's layer's, softbuffer's
+  tiles) showed, on the move to the 1x monitor, the window at 1, `Resized` at 1, the frame 1382
+  by 789, and both layers still at 2. Calling NSView's own `viewDidChangeBackingProperties:`
+  first (baseview's handler replaces it without calling it) changed nothing. The window opened
+  straight on the 1x monitor showed the same.
+- **The change.** baseview's change 8 (`third_party/baseview/PATCHES.md`): the handler sets the
+  view's layer's `contentsScale` to the window's `backingScaleFactor`, without animation, before
+  it sends `Resized`, and whether or not the size in pixels changed. softbuffer's observer
+  carries it to its layer, and the editor's next frame (shown whole after a resize) is tiled at
+  the new scale. Nothing in the editor, nor softbuffer, changes. And `becomeFirstResponder` no
+  longer messages a nil window (a debug build stopped there as the new test opened the window).
+- **Test.** `crates/ca72-plugin/tests/backing_scale.rs` (on the main thread, `harness = false`,
+  macOS): baseview's view opened in a window, its layer left at the other scale as AppKit leaves
+  it, the view told; the view's layer and softbuffer's must take the window's scale, and the
+  frame shown then must fill the view, its tiles at that scale. Without the change it fails
+  ("the view's layer left at another scale"). A test cannot move a window to another screen, so
+  it reproduces what AppKit leaves behind rather than the move itself.
+
+**Evidence (the Mac, macOS 27, M4 Pro; its Retina screen at 1728 by 1117 points and a 4K
+monitor, switched for the test from "looks like 1920 by 1080" HiDPI to 1920 by 1080 at 1x and
+restored after, 2026-10-18).** The standalone of `main` at `1a1dd6c`: whole on the Retina
+screen and on the 4K at HiDPI; at half size on the 4K at 1x, moved there or opened there, and
+still after a click that changed the panel. The released CA-72 in Live 12.2.7 (VST3): the same
+picture as the issue's. With the change, the standalone and a renamed VST3 build ("CA-72 I48",
+removed after) in Live: whole on the 1x monitor, and on the Retina screen before and after.
+Screenshots are kept with the night's records, not in the repository.
+
+**Seen, not changed (for the owner).** The standalone opened on the 1x monitor (the screen in use)
+drew its editor wider than its window, cut off on the right, before and after the change: its
+window was sized for the Retina screen (1382 points, 80 % of 1728) and the editor, measuring the
+screen again as it opened (R19's `opening`), took the monitor's (about 1472, read from the
+pictures). The editor's opening size comes from AppKit's "main" screen, the one in use, which may
+differ between the host's question and the window's opening. Not the issue's picture; not tried in
+a host.
