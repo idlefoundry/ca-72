@@ -908,8 +908,12 @@ impl Runner {
         self.frame += n as i64;
     }
 
-    /// Whether there are effects to run (a bypassed one counts).
-    pub fn is_empty(&self) -> bool {
+    /// Whether there are effects to run (a bypassed one counts), the chain's changes taken
+    /// first (audio thread: no allocation, no locks). The synth asks it before each block and
+    /// runs the chain only if not: the changes must be taken here, or an effect added to an
+    /// empty chain would wait for a block that never comes (decisions.md R-FX-MAC).
+    pub fn is_empty(&mut self) -> bool {
+        self.take_changes();
         self.stages.is_empty()
     }
 }

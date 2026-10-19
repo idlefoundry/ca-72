@@ -453,6 +453,56 @@ fn a_crash_a_hang_or_a_kill_leaves_the_synth_playing_and_is_reported() {
     }
 }
 
+/// The chain as the synth runs it (decisions.md R-FX-MAC): asked before each block whether it
+/// is empty, and run only if not; in real time, paced, at a device's block size, each block due
+/// by 0.9 of its period (the standalone's `fx::DEADLINE`). An effect added to the empty chain
+/// while it plays is heard from its first blocks on, and every block after: none comes out dry
+/// or is missed. (On the Mac the chain was asked before it had taken the effect, and never took
+/// it: every block came out dry, the effect shown running.)
+#[test]
+fn an_effect_added_while_the_synth_plays_is_heard_at_once() {
+    for p in plugins() {
+        let what = p.desc.format.clone();
+        let (c, mut r) = chain(true);
+        let period = Duration::from_secs_f64(BLOCK as f64 / RATE);
+        let mut blocks = Vec::new();
+        for k in 0..400 {
+            if k == 50 {
+                c.add(&p).unwrap();
+                c.set_param(0, P_GAIN, value(&c, 0, P_GAIN, 0.5)).unwrap();
+            }
+            let (input, input_r) = signal(k * BLOCK, BLOCK);
+            let (mut l, mut rr) = (input.clone(), input_r.clone());
+            let t = Instant::now();
+            if !r.is_empty() {
+                r.process(&mut l, &mut rr, Some(t + period.mul_f64(0.9)));
+            }
+            let wet = l.iter().zip(&input).all(|(a, b)| *a == b * 0.5);
+            let dry = l == input && rr == input_r;
+            assert!(wet || dry, "{what}: block {k} neither wet nor dry");
+            blocks.push(wet);
+            std::thread::sleep(period.saturating_sub(t.elapsed()));
+        }
+        assert!(
+            !blocks[..50].iter().any(|w| *w),
+            "{what}: dry before the effect"
+        );
+        let first = blocks.iter().position(|w| *w);
+        assert!(
+            first.is_some_and(|i| i <= 52),
+            "{what}: heard from the block it was added in: first wet {first:?}"
+        );
+        let dry_after = blocks[first.unwrap_or(0)..].iter().filter(|w| !**w).count();
+        let st = &c.status()[0];
+        assert_eq!(
+            (dry_after, st.misses),
+            (0, 0),
+            "{what}: every block after it wet, none missed"
+        );
+        c.shutdown().unwrap();
+    }
+}
+
 #[test]
 fn an_effect_that_keeps_crashing_is_given_up_on_and_passes_its_input() {
     let mut o = options(true);
@@ -488,11 +538,18 @@ fn the_editor_opens_in_its_helper() {
     for p in plugins() {
         let (c, _r) = chain(true);
         c.add(&p).unwrap();
-        let v = c.open_editor(0).unwrap();
-        assert_eq!(v["open"], true, "{}: {v}", p.desc.format);
-        std::thread::sleep(Duration::from_millis(500));
-        let v = c.close_editor(0).unwrap();
-        assert_eq!(v["open"], false, "{}: {v}", p.desc.format);
+        // Opened, closed and opened again; opened again while open (brought forward): on screen
+        // each time (decisions.md R-FX-MAC).
+        for (k, close) in [true, false, true].into_iter().enumerate() {
+            let v = c.open_editor(0).unwrap();
+            assert_eq!(v["open"], true, "{} {k}: {v}", p.desc.format);
+            assert_eq!(v["visible"], true, "{} {k}: {v}", p.desc.format);
+            std::thread::sleep(Duration::from_millis(300));
+            if close {
+                let v = c.close_editor(0).unwrap();
+                assert_eq!(v["open"], false, "{} {k}: {v}", p.desc.format);
+            }
+        }
     }
 }
 
@@ -591,6 +648,67 @@ fn the_chains_cost() {
             at(0.5),
             at(0.99),
             took[took.len() - 1]
+        );
+        c.shutdown().unwrap();
+    }
+}
+
+/// Third-party effects heard in real time (`CA72_FX_THIRD_PARTY`, as above; the rate and
+/// block `CA72_FX_RATE` and `CA72_FX_BLOCK`, else 48 kHz and 256): two seconds of noise,
+/// paced, each block's deadline 0.9 of its period as the standalone gives it; how many
+/// blocks came out dry and how many were missed. (Diagnostic, said and not failed.)
+#[test]
+fn third_party_effects_are_heard_in_real_time() {
+    let Some(paths) = std::env::var_os("CA72_FX_THIRD_PARTY") else {
+        eprintln!("skipped: set CA72_FX_THIRD_PARTY to effects to try");
+        return;
+    };
+    let env = |k: &str, d: f64| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
+    let (rate, block) = (
+        env("CA72_FX_RATE", RATE),
+        env("CA72_FX_BLOCK", BLOCK as f64) as usize,
+    );
+    let dirs: Vec<PathBuf> = std::env::split_paths(&paths).collect();
+    let cat = catalog::scan(&helper(), &dirs, None, Duration::from_secs(30));
+    let period = Duration::from_secs_f64(block as f64 / rate);
+    for f in cat.effects() {
+        let what = format!("{} ({})", f.desc.name, f.desc.format);
+        let (c, mut r) = Chain::new(ChainOptions::new(helper()));
+        r.prepare(rate, block);
+        if let Err(e) = c.add(f) {
+            eprintln!("{what}: not loaded: {e}");
+            continue;
+        }
+        let blocks = (2.0 * rate) as usize / block;
+        let (mut dry, mut sq_in, mut sq_diff) = (0, 0.0f64, 0.0f64);
+        let mut took = Duration::ZERO;
+        for k in 0..blocks {
+            let (input, input_r) = signal(k * block, block);
+            let (mut l, mut rr) = (input.clone(), input_r.clone());
+            let t = Instant::now();
+            r.process(&mut l, &mut rr, Some(t + period.mul_f64(0.9)));
+            took = took.max(t.elapsed());
+            if l == input && rr == input_r {
+                dry += 1;
+            }
+            for (a, b) in l.iter().zip(&input) {
+                sq_in += f64::from(*b).powi(2);
+                sq_diff += f64::from(a - b).powi(2);
+            }
+            std::thread::sleep(period.saturating_sub(t.elapsed()));
+        }
+        let st = &c.status()[0];
+        eprintln!(
+            "{what}: {dry} of {blocks} blocks dry, {} missed, worst {took:?}, \
+             difference {:.1} dB below the input, {:?}",
+            st.misses,
+            10.0 * (sq_in / sq_diff.max(1e-30)).log10(),
+            st.health
         );
         c.shutdown().unwrap();
     }
