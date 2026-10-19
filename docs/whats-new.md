@@ -9,6 +9,9 @@ for 0.2.0 to 0.2.2.
 For each release:
 
 1. Update its Markdown notes, including the current draft before publication.
+   A release not yet set as the workspace version keeps its draft in
+   `docs/releases/drafts/`, which the bundled-notes test does not read; move it up beside
+   the others, and add its `notes.toml` entry, when the version is set.
 2. Add or revise its entry in `notes.toml`. Keep three lists: `features`,
    `performance_improvements`, `bug_fixes`, in that order. An empty list is valid; an
    entirely empty release is not. Keep entries in increasing semantic-version order.
