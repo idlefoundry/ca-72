@@ -71,6 +71,8 @@ pub struct Scene {
     pub learning: Option<usize>,
     pub note: Option<Note>,
     pub menu: Option<Menu>,
+    /// An exact value being typed over a knob (R-KNOB-ENTRY).
+    pub entry: Option<crate::value_entry::Field>,
 }
 
 impl Default for Scene {
@@ -87,6 +89,7 @@ impl Default for Scene {
             learning: None,
             note: None,
             menu: None,
+            entry: None,
         }
     }
 }
@@ -467,6 +470,9 @@ impl Renderer {
         }
         if let Some(m) = &scene.menu {
             out.push(learn::menu(&self.fonts, m));
+        }
+        if let Some(entry) = &scene.entry {
+            out.push(entry.layer());
         }
         out
     }

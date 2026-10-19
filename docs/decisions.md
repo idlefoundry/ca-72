@@ -8560,3 +8560,89 @@ with default and all features. No installed plug-in, DAW window, audio device, r
 hardware, macOS, Windows or Audio Unit was exercised; those native host checks remain for
 acceptance. The menu arrangement and other open instances' refresh policy remain agent
 choices for the owner's review.
+
+
+## R-KNOB-ENTRY. Type a value at a panel knob or selector
+
+**Owner instruction, 2026-10-19 (#108, overnight job).** Approved a user's request for
+"the option to enter a value for each knob and a shortcut for it (cmd+clic to enter the
+value on a mac)". Use ⌘-click on macOS and Ctrl-click on Windows and Linux, include the
+selectors and strip knobs, and keep the existing gestures and MIDI Learn clicks.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **The field.** A small dark field at the control's centre, with amber dots from the preset
+  rename field's font, a steady underline caret and the unit beside the number. Its bounds,
+  including its border, stay inside the visible window in both looks, both lettering sizes
+  and the compact view. The initial value is selected; typing replaces it, Backspace and
+  Delete remove characters, and ⌘/Ctrl-A selects all. It captures every key through the same
+  window focus and VST3 host-key path as the strip readouts (R52, R53). Playing with the
+  computer keyboard yields to typing a value.
+- **Panel units.** Ordinary knobs use their printed 0 to 10 scale; TUNE spans -2.5 to +2.5
+  semitones and CUTOFF -5 to +5, including the unnumbered end marks. FREQUENCY spans the
+  printed -7.5 to +7.5 through the chosen law (R54): semitones in the default law, dial
+  numbers through the hardware law. Setting it uses the existing pot conversion and host
+  parameter, so changing the law does not reinterpret a saved parameter.
+- **Time units.** ATTACK and DECAY show milliseconds; an explicit `s` suffix also accepts
+  seconds, and `ms` is accepted. The labelled angles and milliseconds are shared with the
+  panel drawing. The reading interpolates straight between those marks, reaches zero at the
+  anticlockwise stop and continues the last segment's slope to the clockwise stop (about
+  15,122 ms). This is a reading of the printed dial, not a claim about the circuit's measured
+  contour duration. The interpolation and the end readings await the owner's confirmation.
+- **Selectors.** RANGE takes feet, choosing the nearest of 32, 16, 8, 4 and 2, with 0 or
+  below choosing LO; the field says `ft · 0 = LO`. Positive amounts outside 2 to 32 reach the
+  nearest printed numeric setting. WAVEFORM takes its clockwise position, 1 to 6, rounded
+  and clamped; the field names that unit. These selector conventions await confirmation.
+- **Strip units.** VOICES is a count, ENTROPY, WIDTH and INNER percentages, DETUNE cents,
+  DRIVE and LEVEL dB. The same `set_typed` parser and clamp as the readouts sets these values.
+  Inert VOICES and DETUNE still take no value. Initial text uses the unmodulated base value,
+  as the rendered knob does, rather than adding a host's modulation to the next edit.
+- **Commit and cancel.** Only an edited, finite number confirmed with Enter sets a parameter,
+  through one begin/set/end gesture. Enter without an edit simply closes the field, keeping
+  exact values which its initial display may round. Invalid text, Escape, a press elsewhere,
+  loss of focus and closing the editor set nothing. An outside left press only cancels;
+  a right press retains its usual menu action. The wheel cannot move controls while typing.
+  Input beyond 32 characters or containing unsupported characters becomes `Invalid value`,
+  rather than silently committing a valid prefix.
+- **Existing gestures.** There was no special Alt/Option-click or ⌘/Ctrl-click branch in
+  the old editor. Alt/Option-click keeps its ordinary control behaviour; double-click still
+  resets, Shift-drag is still fine control, and right-click still opens MIDI Learn. A MIDI
+  Learn menu or armed controller keeps its clicks ahead of the entry shortcut. No parameter
+  identifiers, saved sound format, smoothing or audio processing change.
+- **Release draft.** `docs/releases/0.2.8.md` follows 0.2.7's format and is explicitly marked
+  as unreleased. The bundled-notes test permits a future Markdown source only with that draft
+  marker; the installed version and 0.2.7's bundled highlights stay at 0.2.7.
+
+**Verification (Linux x86-64, Rust 1.97.1, 2026-10-19).** The touched crates' full test run
+(`cargo test -p ca72-panel -p ca72-plugin`) passed 392 tests, with 41 ignored. Ten new tests
+cover the dial types, printed time marks and inverses, selector positions, both FREQUENCY
+laws, strip units, one begin/set/end gesture, invalid input, cancellation, host keypad keys,
+keyboard ownership and fields composed and cleared in both looks, both lettering sizes,
+compact and full views at the smallest and default widths. Both approved panel images pass.
+Clippy for both crates, all targets, passes with default and all features; formatting passes.
+Twenty rendered examples and the logs are in `target/knob-entry-evidence/` of this worktree.
+Independent source review found the modulated initial-value issue above; it was corrected,
+and the final review found no further functional defects.
+
+The production Linux standalone was rebuilt and opened on workspace 10 with `--no-devices`,
+a fresh session and shared data under this worktree. Synthetic X11 pointer and keyboard
+input set TUNE, CUTOFF, ATTACK, RANGE, DRIVE and LEVEL; invalid input, Escape and a press
+elsewhere kept the expected values. It closed normally, and its saved session's parameter
+values were checked. No real audio or MIDI device was opened.
+
+The normal full-workspace run, with ngspice 47 required, reached 484 passes, one failure and
+42 ignored: the existing worker-lifetime test timed out after 10 seconds expecting a lone
+instance's workers. It passed alone in 1.24 seconds. That expectation shares the user's
+machine-wide seats unless `CA72_SEATS_DIR` is isolated. With a private seat directory, the
+plug-in and the workspace crates not yet reached were rerun: 341 passed, none failed,
+33 ignored. Together with the completed first portion this gives passing results for all
+workspace test binaries (541 distinct tests, 58 ignored); the remaining documentation checks
+also passed. The original full-workspace command did fail and is retained in the logs.
+An extra `--all-features` workspace attempt failed the allocation check: the diagnostic
+`ca72/count` feature allocates in its call-site hash map (`ulp::count::note`). The normal
+configuration's allocation checks pass. No worker or DSP source was changed for either case.
+
+Not tried: native macOS or Windows builds or editors, any native DAW (including Cubase's
+keyboard forwarding and real host automation recording/undo), or playback through a real
+audio device. The host gesture and VST3 key paths were exercised by the editor's recording
+host and host-key tests, not by a running DAW.

@@ -190,6 +190,18 @@ mod tests {
                 && version >= Version::new(0, 2, 0)
                 && version <= build
             {
+                // Future drafts are maintained before the release's version and bundled
+                // highlights move forward (R-KNOB-ENTRY).
+                if version > Version::parse(VERSION).expect("build version") {
+                    let source = std::fs::read_to_string(&path).expect("future release source");
+                    assert!(
+                        source
+                            .lines()
+                            .any(|line| line == "**Draft. Not released.**"),
+                        "future release {version} must be marked as a draft"
+                    );
+                    continue;
+                }
                 assert!(
                     versions.contains(&version),
                     "missing bundled highlights for {version}"
