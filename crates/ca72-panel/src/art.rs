@@ -1398,6 +1398,17 @@ pub struct Layer {
     /// (none in the drawn skin).
     pub wheel: Option<WheelArt>,
     pub paddle: Option<PaddleArt>,
+    /// A dot-matrix screen the renderer draws over the body (the standalone's TEMPO).
+    pub screen: Option<Screen>,
+}
+
+/// A dot-matrix screen in a layer: its window (left, top, width, height, from the layer's
+/// origin) in the rail's screen's bezel and glass, `text` lit in it, centred
+/// (`strip::pixel_screen`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Screen {
+    pub window: (f64, f64, f64, f64),
+    pub text: String,
 }
 
 /// A picture of a part drawn in a layer: `size` (drawing units) about `at` (from the layer's
@@ -1701,6 +1712,39 @@ pub fn plate_worn() -> Layer {
 
 /// The plate's lettering's paint: an off white, as the panel's print.
 const PLATE_PAINT: &str = "#e4ded0";
+
+/// The standalone's TEMPO screen (decisions.md R-ARP; the owner's option D, 2026-10-19): at the
+/// top strip's left end, mirroring the name plate at its right, its surround as wide and as tall
+/// as the plate and as far from the drawing's left edge as the plate is from its right; the
+/// window inside the surround, as the rail's screen's. Only the standalone's: in a plug-in the
+/// host gives the tempo, and the wood is bare.
+pub const TEMPO_SCREEN: (f64, f64, f64, f64) = (
+    W - PLATE_X - PLATE_W + crate::strip::NAME_SURROUND,
+    PLATE_Y + crate::strip::NAME_SURROUND,
+    PLATE_W - 2.0 * crate::strip::NAME_SURROUND,
+    PLATE_H - 2.0 * crate::strip::NAME_SURROUND,
+);
+
+/// Whether (`x`, `y`) is on the TEMPO screen, its surround included.
+pub fn tempo_hit(x: f64, y: f64) -> bool {
+    let (sx, sy, w, h) = TEMPO_SCREEN;
+    let o = crate::strip::NAME_SURROUND;
+    (sx - o..sx + w + o).contains(&x) && (sy - o..sy + h + o).contains(&y)
+}
+
+/// The TEMPO screen reading `text` (`120 BPM`).
+pub fn tempo_screen(text: &str) -> Layer {
+    let (x, y, w, h) = TEMPO_SCREEN;
+    Layer {
+        origin: (x, y),
+        bounds: [-16.0, -14.0, w + 16.0, h + 18.0],
+        screen: Some(Screen {
+            window: (0.0, 0.0, w, h),
+            text: text.to_owned(),
+        }),
+        ..Layer::default()
+    }
+}
 
 /// A selector's knob's body: as wide as the drawn one's fluted outline, less the pointer's
 /// reach (the picture's wedge reaches its edge, 64 units out, as the drawn fin about does).

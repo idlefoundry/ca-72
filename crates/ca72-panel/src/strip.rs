@@ -20,7 +20,7 @@ use crate::presets::{BarScene, BarTarget};
 use crate::svg::{N, Svg, colour, put};
 
 pub use worn::StripRenderer;
-pub(crate) use worn::pixel_screen;
+pub(crate) use worn::{pixel_screen, screen_still, screen_text};
 
 // ---- The layout.
 
@@ -84,7 +84,7 @@ pub const KEY_W: f64 = 86.0;
 /// the keys beside it (the owner, 2026-10-09: "Needs to be the same height as the buttons
 /// flanking it").
 pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2100.0, 50.0);
-const NAME_SURROUND: f64 = 6.0;
+pub(crate) const NAME_SURROUND: f64 = 6.0;
 /// The voices' display, across STEREO's last row from WIDTH's unit's left to DETUNE's right.
 pub const DISPLAY: (f64, f64, f64, f64) = (
     CW - UNIT_HALF,

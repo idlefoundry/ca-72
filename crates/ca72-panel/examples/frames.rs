@@ -115,6 +115,14 @@ fn measure(s: f64) {
         *ss = strip_scene(if i % 8 < 4 { 0b1111 } else { 0b0011 });
     });
     times("the drops settling", 0, &mut |_, _, _| {});
+    // The standalone's TEMPO screen (R-ARP): shown (its first frame the slowest), then set, a
+    // beat a minute a frame (dragged or scrolled).
+    times("TEMPO shown (standalone)", 0, &mut |_, sc, _| {
+        sc.tempo = Some("120 BPM".into());
+    });
+    times("TEMPO set (standalone)", 0, &mut |i, sc, _| {
+        sc.tempo = Some(format!("{} BPM", 121 + i));
+    });
     times("nothing changed", 100, &mut |_, _, _| {});
     arp(s, &mut panel);
 }
