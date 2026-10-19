@@ -16,6 +16,7 @@ pub mod opening;
 pub mod params;
 pub mod playing;
 pub mod pool;
+mod preset_actions;
 pub mod presets;
 mod resizing;
 pub mod seats;
@@ -67,6 +68,9 @@ pub struct Ca72 {
     dezip: Dezip,
     /// AUTO GAIN's curve's writes as the audio thread last read them (`drive.rs`).
     curve_seen: u64,
+    preset_actions: Arc<preset_actions::PresetActions>,
+    preset_held: [bool; 4096],
+    preset_notes: [bool; 2048],
 }
 
 impl std::fmt::Debug for Ca72 {
@@ -90,8 +94,13 @@ impl Ca72 {
     }
 
     fn with_params(params: Ca72Params) -> Ca72 {
+        let params = Arc::new(params);
+        let preset_actions = Arc::new(preset_actions::PresetActions::new(
+            params.clone(),
+            library::Library::shared(),
+        ));
         Ca72 {
-            params: Arc::new(params),
+            params,
             engine: Engine::new(),
             meters: Arc::new(Meters::default()),
             local_notes: Arc::new(local_notes::LocalNotes::default()),
@@ -103,6 +112,9 @@ impl Ca72 {
             helper: None,
             dezip: Dezip::default(),
             curve_seen: 0,
+            preset_actions,
+            preset_held: [false; 4096],
+            preset_notes: [false; 2048],
         }
     }
 }
@@ -160,6 +172,42 @@ impl Ca72 {
     /// as before (the reserved control changes the engine follows, CC 1, 120, 121 and 123, among
     /// them). Whether it set a parameter.
     fn midi(&mut self, e: NoteEvent<()>, context: &mut impl ProcessContext<Self>) -> bool {
+        if let NoteEvent::NoteOn { channel, note, .. }
+        | NoteEvent::NoteOff { channel, note, .. }
+        | NoteEvent::Choke { channel, note, .. } = e
+            && channel < 16
+            && note < 128
+        {
+            let on = matches!(e, NoteEvent::NoteOn { .. });
+            let slot = usize::from(channel) * 128 + usize::from(note);
+            let was = std::mem::replace(&mut self.preset_held[2048 + slot], on);
+            let incoming = self
+                .params
+                .midi_map
+                .incoming_note(channel, note, on && !was);
+            let used = match incoming {
+                Incoming::Caught => true,
+                Incoming::Assigned(i) => {
+                    if on && !was {
+                        self.step_preset(i);
+                    }
+                    true
+                }
+                Incoming::Unassigned => false,
+            };
+            let suppressed = self.preset_notes[slot];
+            self.preset_notes[slot] = on && (used || suppressed);
+            if used || suppressed {
+                // A note that was already sounding before it was assigned still gets its release.
+                if !on && self.note_sources.physical(channel, note, false) {
+                    self.engine.event(Event::Note {
+                        key: note,
+                        on: false,
+                    });
+                }
+                return false;
+            }
+        }
         if let NoteEvent::MidiCC {
             timing,
             channel,
@@ -168,7 +216,16 @@ impl Ca72 {
         } = e
         {
             if learn::reserved(cc).is_none() {
-                return match self.params.midi_map.incoming(channel, cc) {
+                let on = value.is_finite() && value >= 64.0 / 127.0;
+                let slot = usize::from(channel & 15) * 128 + usize::from(cc);
+                let was = std::mem::replace(&mut self.preset_held[slot], on);
+                return match self.params.midi_map.incoming_cc(channel, cc, on && !was) {
+                    Incoming::Assigned(i) if learn::action(i).is_some() => {
+                        if on && !was {
+                            self.step_preset(i);
+                        }
+                        false
+                    }
                     Incoming::Assigned(i) => self.learned(i, value, timing, context),
                     // Caught for the parameter being learned: the sound is not changed by it.
                     Incoming::Caught | Incoming::Unassigned => false,
@@ -198,11 +255,22 @@ impl Ca72 {
         false
     }
 
+    fn step_preset(&self, i: usize) {
+        if let Some(by) = learn::action(i) {
+            self.preset_actions.request(by);
+            if let Some(helper) = &self.helper {
+                helper.ask(helper::PRESETS);
+            }
+        }
+    }
+
     fn clear_note_sources(&mut self) {
         self.local_notes.release();
         self.deferred_local = None;
         self.local_generation = self.local_notes.generation();
         self.note_sources.clear();
+        self.preset_held[2048..].fill(false);
+        self.preset_notes.fill(false);
         self.local_notes.publish([0, 0]);
     }
 
@@ -486,10 +554,11 @@ impl Plugin for Ca72 {
         // (AUTO GAIN's measurements on the helper thread: decisions.md R45.)
         self.engine.calibrate_with(self.params.drive_curve.clone());
         if self.helper.is_none() {
-            self.helper = Helper::start(
+            self.helper = Helper::start_with_presets(
                 self.engine.spares(),
                 self.engine.crew(),
                 self.params.drive_curve.clone(),
+                Some(self.preset_actions.clone()),
             )
             .ok();
         }
@@ -510,8 +579,11 @@ impl Plugin for Ca72 {
     }
 
     fn reset(&mut self) {
+        self.preset_actions.cancel();
         self.clear_note_sources();
         self.dezip.clear();
+        self.preset_held.fill(false);
+        self.preset_notes.fill(false);
         self.engine.set(&self.params.controls());
         self.engine.release_all();
         self.engine.event(Event::ResetControllers);
@@ -525,6 +597,12 @@ impl Plugin for Ca72 {
     ) -> ProcessStatus {
         // (A knob whose parameter something else has set since a learned controller moved it
         // stops gliding: the host's automation, the editor and presets set the voices as ever.)
+        if self.preset_actions.apply(context) {
+            self.dezip.clear();
+            if let Some(helper) = &self.helper {
+                helper.ask(helper::PRESETS);
+            }
+        }
         self.dezip.follow(&self.params);
         if let Some(c) = self.params.drive_curve.read(&mut self.curve_seen) {
             self.engine.set_curve(c);
@@ -1306,6 +1384,181 @@ mod tests {
         learn::Cc { channel, cc }
     }
 
+    #[test]
+    fn preset_pads_trigger_only_on_fresh_presses_and_learning_is_silent() {
+        let mut p = Ca72::default();
+        let mut c = hostless(&p);
+        let map = p.params.midi_map.clone();
+        let next = learnable("next_preset");
+        map.arm(next);
+        p.midi(note(0, 2, 36, false), &mut c);
+        assert_eq!(map.armed(), Some(next));
+        p.midi(note(0, 2, 36, true), &mut c);
+        assert!(
+            p.preset_actions.requested().is_none(),
+            "learning press never triggers"
+        );
+        p.midi(note(0, 2, 36, true), &mut c);
+        assert_eq!(
+            p.note_sources.held(),
+            [0, 0],
+            "a repeated learning press stays silent before polling"
+        );
+        map.poll().unwrap();
+        for _ in 0..3 {
+            p.midi(note(0, 2, 36, true), &mut c);
+        }
+        assert!(p.preset_actions.requested().is_none(), "held learning note");
+        p.midi(note(0, 2, 36, false), &mut c);
+        assert!(p.preset_actions.requested().is_none(), "note off");
+        p.midi(note(0, 1, 36, true), &mut c);
+        assert!(p.preset_actions.requested().is_none(), "another channel");
+        p.midi(note(0, 2, 36, true), &mut c);
+        assert_eq!(p.preset_actions.requested(), Some(2));
+        p.midi(note(0, 2, 36, true), &mut c);
+        assert!(p.preset_actions.requested().is_none(), "repeated note on");
+        map.arm(learnable("previous_preset"));
+        p.midi(cc(0, 3, 20, 63), &mut c);
+        assert_eq!(map.armed(), Some(learnable("previous_preset")));
+        p.midi(cc(0, 3, 20, 64), &mut c);
+        map.poll().unwrap();
+        for value in [127, 100, 64] {
+            p.midi(cc(0, 3, 20, value), &mut c);
+        }
+        assert!(p.preset_actions.requested().is_none(), "held learning CC");
+        p.midi(cc(0, 3, 20, 0), &mut c);
+        assert!(p.preset_actions.requested().is_none(), "CC off");
+        p.midi(cc(0, 3, 20, 127), &mut c);
+        assert_eq!(p.preset_actions.requested(), Some(1));
+        p.midi(cc(0, 3, 20, 127), &mut c);
+        assert!(p.preset_actions.requested().is_none());
+        p.midi(cc(0, 3, 20, 63), &mut c);
+        p.midi(cc(0, 3, 20, 64), &mut c);
+        assert_eq!(p.preset_actions.requested(), Some(1), "a new crossing");
+        assert!(c.reported.is_empty(), "no parameter CCs were emitted");
+    }
+
+    #[test]
+    fn preset_actions_prepare_off_audio_and_apply_through_the_host_without_an_editor() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = Ca72::default();
+        let library = library::Library::at(dir.path());
+        let entries = library.entries().0;
+        p.preset_actions = Arc::new(preset_actions::PresetActions::new(
+            p.params.clone(),
+            library,
+        ));
+        let mut c = hostless(&p);
+        p.params
+            .midi_map
+            .assign(learnable("next_preset"), on(0, 20));
+        for expected in &entries[..2] {
+            p.midi(cc(0, 0, 20, 127), &mut c);
+            assert!(c.reported.is_empty());
+            p.preset_actions.prepare();
+            assert!(p.preset_actions.apply(&mut c));
+            p.preset_actions.prepare();
+            assert_eq!(*p.params.preset.read().unwrap(), expected.sound.name);
+            for (id, normalized) in presets::targets(&p.params, expected) {
+                let (_, ptr, _) = p
+                    .params
+                    .param_map()
+                    .into_iter()
+                    .find(|(key, _, _)| key == id)
+                    .unwrap();
+                assert!(
+                    c.reported
+                        .iter()
+                        .any(|(q, v, t)| *q == ptr && (*v - normalized).abs() < 1e-5 && *t == 0),
+                    "{id}"
+                );
+            }
+            assert!(!p.preset_actions.apply(&mut c), "consumed once");
+            c.reported.clear();
+            p.midi(cc(0, 0, 20, 0), &mut c);
+        }
+        p.params
+            .midi_map
+            .assign(learnable("previous_preset"), on(0, 21));
+        p.midi(cc(0, 0, 21, 127), &mut c);
+        p.preset_actions.prepare();
+        p.preset_actions.apply(&mut c);
+        p.preset_actions.prepare();
+        assert_eq!(*p.params.preset.read().unwrap(), entries[0].sound.name);
+        p.midi(cc(0, 0, 21, 0), &mut c);
+        p.midi(cc(0, 0, 21, 127), &mut c);
+        p.preset_actions.prepare();
+        p.preset_actions.apply(&mut c);
+        p.preset_actions.prepare();
+        assert_eq!(
+            *p.params.preset.read().unwrap(),
+            entries.last().unwrap().sound.name,
+            "wraps"
+        );
+    }
+
+    #[test]
+    fn queued_preset_presses_keep_the_rails_filtered_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Ca72::default();
+        let library = library::Library::at(dir.path());
+        let entries = library.entries().0;
+        let chosen = [entries[2].sound.name.clone(), entries[5].sound.name.clone()];
+        *p.params.midi_map.preset_list.lock().unwrap() = Some(chosen.to_vec());
+        let actions = preset_actions::PresetActions::new(p.params.clone(), library);
+        let mut c = hostless(&p);
+        actions.request(1);
+        actions.request(1);
+        actions.prepare();
+        actions.prepare();
+        assert!(
+            p.params.preset.read().unwrap().is_empty(),
+            "unapplied values keep their old name"
+        );
+        assert!(actions.apply(&mut c));
+        actions.prepare();
+        assert_eq!(*p.params.preset.read().unwrap(), chosen[0]);
+        assert!(actions.apply(&mut c));
+        actions.prepare();
+        assert_eq!(*p.params.preset.read().unwrap(), chosen[1]);
+        actions.request(1);
+        actions.prepare();
+        actions.apply(&mut c);
+        actions.prepare();
+        assert_eq!(
+            *p.params.preset.read().unwrap(),
+            chosen[0],
+            "wraps within the same filtered set"
+        );
+    }
+
+    #[test]
+    fn a_host_reset_discards_queued_and_prepared_preset_changes() {
+        let mut p = Ca72::default();
+        let mut c = hostless(&p);
+        p.preset_actions.request(1);
+        p.preset_actions.prepare();
+        assert!(
+            p.params.preset.read().unwrap().is_empty(),
+            "preparing alone cannot rename the sound"
+        );
+        p.reset();
+        p.preset_actions.apply(&mut c);
+        p.preset_actions.prepare();
+        assert!(
+            c.reported.is_empty(),
+            "a prepared patch from before reset is discarded"
+        );
+        assert!(p.params.preset.read().unwrap().is_empty());
+        p.preset_actions.request(1);
+        p.reset();
+        p.preset_actions.prepare();
+        assert!(
+            !p.preset_actions.apply(&mut c),
+            "an old queued press is discarded"
+        );
+    }
+
     /// A learned controller sets its parameter at its event's sample, through the host (the
     /// host told once, at that time; a value the parameter already has, not again), with no
     /// editor open; the parameter is at the new value at once.
@@ -1343,7 +1596,7 @@ mod tests {
         assert!(c.reported.is_empty());
         assert_eq!(
             map.poll().map(|a| (a.param, a.cc)),
-            Some((learnable("emphasis"), on(3, 20)))
+            Some((learnable("emphasis"), on(3, 20).into()))
         );
         c.push_event(cc(5, 3, 20, 127));
         block(&mut p, &mut c, 128);

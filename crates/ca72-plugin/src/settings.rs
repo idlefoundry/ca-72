@@ -209,6 +209,95 @@ fn table(path: &Path) -> Result<Option<toml::Table>, String> {
     }
 }
 
+/// Preset actions belong to this computer, across formats and projects. Each entry names a
+/// channel and exactly one input, with the same channel numbering the menus show.
+pub(crate) fn preset_actions(path: &Path) -> Vec<(usize, crate::learn::Binding)> {
+    use crate::learn::{Binding, Cc, action, index};
+    let Some(t) = table(path).ok().flatten() else {
+        return Vec::new();
+    };
+    let Some(actions) = t.get("preset_actions").and_then(toml::Value::as_table) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (id, v) in actions {
+        let Some(i) = index(id).filter(|&i| action(i).is_some()) else {
+            continue;
+        };
+        let Some(channel @ 1..=16) = v.get("channel").and_then(toml::Value::as_integer) else {
+            continue;
+        };
+        let input = match (
+            v.get("cc").and_then(toml::Value::as_integer),
+            v.get("note").and_then(toml::Value::as_integer),
+        ) {
+            (Some(cc @ 0..=127), None) if crate::learn::reserved(cc as u8).is_none() => {
+                Binding::Cc(Cc {
+                    channel: (channel - 1) as u8,
+                    cc: cc as u8,
+                })
+            }
+            (None, Some(note @ 0..=127)) => Binding::Note {
+                channel: (channel - 1) as u8,
+                note: note as u8,
+            },
+            _ => continue,
+        };
+        if !out.iter().any(|&(_, b)| b == input) {
+            out.push((i, input));
+        }
+    }
+    out
+}
+
+pub(crate) fn keep_preset_actions(
+    path: &Path,
+    bindings: &[Option<crate::learn::Binding>],
+    changed: &[usize],
+    released: Option<crate::learn::Binding>,
+) -> Result<(), String> {
+    use crate::learn::{Binding, LEARNABLE, action};
+    let _lock = lock(path)?;
+    let mut t = table(path)?.unwrap_or_default();
+    let mut actions = t
+        .get("preset_actions")
+        .and_then(toml::Value::as_table)
+        .cloned()
+        .unwrap_or_default();
+    let matches = |stored: &toml::Value, binding: Binding| {
+        let (channel, key, number) = match binding {
+            Binding::Cc(cc) => (cc.channel, "cc", cc.cc),
+            Binding::Note { channel, note } => (channel, "note", note),
+        };
+        stored.get("channel").and_then(toml::Value::as_integer) == Some(i64::from(channel) + 1)
+            && stored.get(key).and_then(toml::Value::as_integer) == Some(i64::from(number))
+    };
+    if let Some(input) = released {
+        actions.retain(|_, stored| !matches(stored, input));
+    }
+    for (i, binding) in bindings
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| action(*i).is_some() && changed.contains(i))
+    {
+        actions.remove(LEARNABLE[i].id);
+        let Some(binding) = binding else { continue };
+        let (channel, key, number) = match *binding {
+            Binding::Cc(cc) => (cc.channel, "cc", cc.cc),
+            Binding::Note { channel, note } => (channel, "note", note),
+        };
+        let mut v = toml::Table::new();
+        v.insert("channel".into(), (i64::from(channel) + 1).into());
+        v.insert(key.into(), i64::from(number).into());
+        // Another instance may have assigned this input since this one opened. The latest
+        // assignment owns it in the file too, while unrelated assignments are retained.
+        actions.retain(|_, stored| !matches(stored, *binding));
+        actions.insert(LEARNABLE[i].id.into(), v.into());
+    }
+    t.insert("preset_actions".into(), actions.into());
+    write(path, &t)
+}
+
 /// Claim this version for one visible editor across formats, hosts and processes. The
 /// last version shown is a high-water mark: a downgrade never erases it. A failed read or
 /// write shows nothing automatically; Settings can still open the bundled highlights.
@@ -231,6 +320,106 @@ pub(crate) fn claim_release_notes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preset_action_assignments_survive_restart_and_preserve_other_computer_settings() {
+        use crate::learn::{Binding, Cc, MidiMap, index};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "skin = 'classic'\nlast_version_shown = '0.2.7'\n").unwrap();
+        let (previous, next) = (
+            index("previous_preset").unwrap(),
+            index("next_preset").unwrap(),
+        );
+        let mut a = MidiMap::default();
+        a.settings_file = Some(path.clone());
+        a.assign(
+            previous,
+            Binding::Note {
+                channel: 15,
+                note: 127,
+            },
+        );
+        a.keep_actions(&[previous]).unwrap();
+        let mut b = MidiMap::default();
+        b.settings_file = Some(path.clone());
+        b.assign(next, Cc { channel: 0, cc: 20 });
+        b.keep_actions(&[next]).unwrap();
+        let loaded = preset_actions(&path);
+        assert_eq!(
+            loaded.len(),
+            2,
+            "another instance's previous assignment survives"
+        );
+        assert!(loaded.contains(&(
+            previous,
+            Binding::Note {
+                channel: 15,
+                note: 127
+            }
+        )));
+        assert!(loaded.contains(&(next, Cc { channel: 0, cc: 20 }.into())));
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("classic") && contents.contains("0.2.7"));
+        a.remove(previous);
+        a.keep_actions(&[previous]).unwrap();
+        assert_eq!(
+            preset_actions(&path),
+            vec![(next, Cc { channel: 0, cc: 20 }.into())]
+        );
+        a.assign(previous, Cc { channel: 0, cc: 20 });
+        a.keep_actions(&[previous]).unwrap();
+        assert_eq!(
+            preset_actions(&path),
+            vec![(previous, Cc { channel: 0, cc: 20 }.into())],
+            "latest assignment wins across instances"
+        );
+        std::fs::write(&path, "not valid TOML = [").unwrap();
+        assert!(a.keep_actions(&[previous]).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "not valid TOML = ["
+        );
+    }
+
+    #[test]
+    fn stale_displacement_preserves_another_instances_newer_input() {
+        use crate::learn::{Cc, MidiMap, index};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let (previous, next, cutoff) = (
+            index("previous_preset").unwrap(),
+            index("next_preset").unwrap(),
+            index("cutoff").unwrap(),
+        );
+        let old = Cc { channel: 0, cc: 20 };
+        let new = Cc { channel: 0, cc: 21 };
+        let mut a = MidiMap::default();
+        a.settings_file = Some(path.clone());
+        a.assign(previous, old);
+        a.keep_actions(&[previous]).unwrap();
+        let mut b = MidiMap::default();
+        b.settings_file = Some(path.clone());
+        b.assign(previous, new);
+        b.keep_actions(&[previous]).unwrap();
+        let assignment = a.assign(next, old).unwrap();
+        assert_eq!(assignment.displaced, Some(previous));
+        a.keep_assignment(&assignment).unwrap();
+        let saved = preset_actions(&path);
+        assert!(saved.contains(&(previous, new.into())));
+        assert!(saved.contains(&(next, old.into())));
+        // A parameter taking a stale action's input must preserve the newer binding too.
+        a.assign(previous, old);
+        a.keep_assignment(&a.assign(cutoff, old).unwrap()).unwrap();
+        assert!(preset_actions(&path).contains(&(previous, new.into())));
+        b.assign(previous, old);
+        b.keep_actions(&[previous]).unwrap();
+        b.keep_assignment(&b.assign(cutoff, old).unwrap()).unwrap();
+        assert!(
+            preset_actions(&path).is_empty(),
+            "a parameter still removes the input it actually displaced"
+        );
+    }
 
     #[test]
     fn release_notes_history_survives_restarts_settings_edits_and_downgrades() {

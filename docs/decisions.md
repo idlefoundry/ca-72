@@ -8079,3 +8079,95 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-PRESET-KEYS. Choose presets with the arrow keys or MIDI pads
+
+**Owner decision, 2026-10-19.** Build the sound-design teacher's requested keyboard and
+MIDI preset navigation: "to be able to change preset with the arrow keys (left/right or
+up/down)" and "assign two pads of a midi controller on next/previous preset".
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **Left and right only** (the owner, 2026-10-19: "I think the left/right arrow keys make
+  sense for stepping through the presets, considering the buttons on the panel for stepping
+  through presets are also left/right"): Up and Down never step presets.
+- **Keyboard priority.** Unmodified Left chooses the previous preset, Right the
+  next, through the rail's existing step operation, including its filters and wrapping.
+  Text entry, the open preset list and its caret, MIDI Learn, menus, What's New and the
+  standalone's AUDIO & MIDI dialog keep their existing routes. TYPING leaves the arrows
+  free: its notes use letters and its octave keys are Z/X. Modified arrows remain host
+  shortcuts. Key releases do not step; the computer's usual arrow-key repeat does.
+- **Hosts.** The editor acts only on events it receives. Its new VST3 forwarded-key path
+  accepts these arrows alone, without taking focus or claiming every host key. Existing
+  modal ownership remains. The platform paths were read: macOS forwards ignored events
+  through its responder chain; Windows keeps its existing dialog-key policy and gives
+  focus back when modal ownership ends; X11 retains its existing window event selection.
+  A host may reserve arrows before the editor receives them. No platform backend changes.
+- **Learning.** PREVIOUS PRESET and NEXT PRESET join MIDI ASSIGNMENTS. Right-clicking
+  either rail arrow opens the same learn/remove/list menu as a parameter control. Actions
+  learn a note on its channel, or an unreserved absolute CC crossing from below 64 to
+  64 or above. Parameters still learn CCs alone, at any value. The learning press assigns
+  without stepping or sounding a note. One input belongs to one target; relearning moves
+  it and reports the displacement. Held notes and CCs do not repeat, nor do their releases
+  step. Assigned notes are reserved for their action rather than also playing the sound.
+- **Persistence.** Parameter assignments retain R34's project format and behaviour. The
+  two actions belong to this computer instead, in `CA-72/settings.toml` under
+  `preset_actions`, by their stable IDs `previous_preset` and `next_preset`. Each stores
+  `channel` (1 to 16) and either `note` or `cc` (0 to 127). New instances read them; project
+  recall cannot replace them, and sound presets never include them. An action wins over
+  a project's parameter CC assignment on the same input. Writes hold the existing file
+  lock, change only the affected actions and preserve unrelated keys, including another
+  instance's other action. Displacement removes only a matching input from the file, so
+  another instance's newer binding of the displaced action survives. The latest saved
+  assignment owns an input across instances.
+  Already running instances retain their own maps; there is no live cross-instance reload.
+  An unreadable settings file is preserved and a failed save is reported in MIDI ASSIGNMENTS.
+- **Processing.** A bounded queue holds up to 64 presses; further presses are dropped if
+  full. The plug-in's own helper reads the library and prepares a patch. Audio applies its
+  values together at a later block's start through the existing host parameter path; only
+  then does the helper publish its name. No file access, allocation or lock is added to
+  processing. Queued presses keep their order and use the rail's filtered set, or the full
+  library before any editor has opened. Host reset invalidates queued and prepared changes.
+  The helper checks a request's generation after consuming it, so a wait across reset
+  cannot discard a fresh press. This works without an editor and does not use nih-plug's
+  shared background executor.
+- **Release record.** `0.2.8.md` is a draft in 0.2.7's format. Future Markdown drafts are
+  excluded from the bundled-highlights coverage check until their build version exists;
+  this build and its What's New highlights stay at 0.2.7.
+
+**Evidence (Linux x86-64, Rust 1.97.1, 2026-10-19).** Focused editor tests exercise the four
+arrows, host forwarding, modified and unused keys, TYPING and X's octave change, readout
+entry, search, rename, learning, menus and What's New. Both rail arrows learn and remove
+notes through their menus. Mapping and processing tests cover notes and CCs, channel
+isolation, silent learning, held/released inputs, reassignment, project exclusion, queued
+order, filtered wrapping and host reset. Settings tests restart the map, preserve unrelated
+keys and another instance's action, resolve competing inputs, remove an action and refuse
+to overwrite malformed TOML. A CLAP entry-point test runs in a fresh process with isolated
+settings, exercises raw MIDI and native CLAP notes without an editor, checks the changed
+parameter events and the project's exclusion of actions. The production standalone adapter
+also steps presets without a device or editor, counting zero allocations or frees in its
+callbacks, including the patch application. Final check results are recorded below.
+
+**Not tried:** native macOS or Windows hosts, Audio Unit execution, interactive host
+keyboard focus and a physical controller. No installed plug-in or real audio device was
+opened. The owner should confirm arrows during TYPING, the CC threshold and held-note
+policy, and the choice to load computer assignments at instance creation rather than
+synchronising already running instances.
+
+**Final verification (Linux x86-64, 2026-10-19).** `cargo fmt --all -- --check` and
+`cargo clippy -p ca72-plugin --all-targets -- -D warnings` pass, as does clippy with
+`--all-features`. With ngspice 47 required, `cargo test --workspace --features
+ca72-plugin/standalone-production -- --test-threads=4` passes 561 tests, 0 failed,
+58 ignored. Builds use this worktree's `target`, four build jobs and isolated
+`IDLE_FOUNDRY_SHARED` and `CA72_SEATS_DIR` folders. An earlier worker-budget test timed out
+while sharing the other jobs' seat folder; it passed with isolated seats, as did the final
+workspace run. No worker code was changed to accommodate it.
+
+Read-only review found two concurrency cases: stale displacement deleting another instance's
+newer binding, and a helper delayed across reset discarding a fresh request. Both have
+regressions proved to fail without their fixes and pass with them; the reviewer re-checked
+the fixes with no remaining findings. An incomplete workspace attempt was stopped before
+applying those fixes, then the full run above restarted on the final code. Four real-size
+renders of the rail arrows' menus and learning notices were inspected; they use the existing
+menu and notice presentation and fit the window. Logs and renders are under
+`target/preset-keys-evidence/` in this worktree.
