@@ -1,0 +1,104 @@
+//! Two voices' filters solved side by side (`Voice::before_filter`, `Voice::filter_pair`,
+//! `Voice::after_filter`; decisions.md R-HI-PAIRS) give each voice the same samples to the bit
+//! as `Voice::tick_jacks` alone: at HI, where the pair is solved together, with the voices
+//! set apart (notes, cutoffs, emphasis, FEEDBACK, the jacks, a waveform changed, the filter's
+//! mode switched), and where the pair is not (ULTRA, and the two at different qualities).
+
+use ca72::voice::{Jacks, Quality, Voice};
+
+/// Two voices, each played alone and played as a pair, `seconds` long: the same samples.
+fn pair_matches_alone(qa: Quality, qb: Quality, seconds: f64, one_emphasis: bool) {
+    let rate = 48_000.0;
+    let tau = 2.0 * core::f64::consts::PI;
+    let mut a = Voice::prototype(rate);
+    a.set_seed(3);
+    a.panel.quality = qa;
+    a.panel.cutoff = 0.35;
+    a.panel.emphasis = 0.6;
+    let mut b = Voice::prototype(rate);
+    b.set_seed(11);
+    b.panel.quality = qb;
+    b.panel.cutoff = 0.55;
+    // (One EMPHASIS, as POLY's voices and a twin share it: one circuit, so their loops are
+    // evaluated together too.)
+    b.panel.emphasis = if one_emphasis { 0.6 } else { 0.95 };
+    b.panel.osc[2].on = true;
+    let (mut a1, mut b1) = (a.clone(), b.clone());
+    let jacks = |t: f64, k: f64| Jacks {
+        ext: 0.0,
+        detune: [
+            3.0 * libm::sin(tau * 0.5 * t + k),
+            -2.0,
+            1.5 * libm::cos(tau * 0.7 * t),
+        ],
+        cutoff: 0.03 * libm::sin(tau * 0.3 * t + k),
+        ..Jacks::default()
+    };
+    let n = (seconds * rate) as usize;
+    let mut compared = 0usize;
+    for i in 0..n {
+        let t = i as f64 / rate;
+        // Notes and controls at moments of their own on each voice, the same on both copies.
+        let mut each = |f: &dyn Fn(&mut Voice)| {
+            f(&mut a);
+            f(&mut a1);
+        };
+        match i {
+            100 => each(&|v| v.note(45, true)),
+            9_000 => each(&|v| v.note(52, true)),
+            20_000 => each(&|v| v.panel.filter_hi = true),
+            30_000 => each(&|v| v.note(52, false)),
+            _ => {}
+        }
+        let mut each = |f: &dyn Fn(&mut Voice)| {
+            f(&mut b);
+            f(&mut b1);
+        };
+        match i {
+            2_500 => each(&|v| v.note(60, true)),
+            12_000 => each(&|v| v.feedback = 0.4),
+            24_000 if !one_emphasis => each(&|v| v.panel.emphasis = 0.2),
+            36_000 => each(&|v| v.note(60, false)),
+            48_000 => each(&|v| v.note(64, true)),
+            _ => {}
+        }
+        let (ja, jb) = (jacks(t, 0.0), jacks(t, 1.0));
+        let ya = a.tick_jacks(&ja);
+        let yb = b.tick_jacks(&jb);
+        let ha = a1.before_filter(&ja);
+        let hb = b1.before_filter(&jb);
+        let (fa, fb) = Voice::filter_pair(&mut a1, &ha, &mut b1, &hb);
+        let za = a1.after_filter(&ha, fa);
+        let zb = b1.after_filter(&hb, fb);
+        assert_eq!(
+            ya.to_bits(),
+            za.to_bits(),
+            "{qa:?}/{qb:?}: voice a at sample {i}: {ya} against {za}"
+        );
+        assert_eq!(
+            yb.to_bits(),
+            zb.to_bits(),
+            "{qa:?}/{qb:?}: voice b at sample {i}: {yb} against {zb}"
+        );
+        compared += 2;
+    }
+    assert!(
+        a.probe() == a1.probe() && b.probe() == b1.probe(),
+        "the voices' last state"
+    );
+    println!(
+        "{qa:?}/{qb:?} (one emphasis: {one_emphasis}): {compared} samples the same to the bit"
+    );
+}
+
+#[test]
+fn a_hi_pair_gives_each_voice_its_own_samples() {
+    pair_matches_alone(Quality::Potato, Quality::Potato, 1.25, false);
+    pair_matches_alone(Quality::Potato, Quality::Potato, 1.25, true);
+}
+
+#[test]
+fn ultra_and_mixed_pairs_play_each_voice_alone() {
+    pair_matches_alone(Quality::NoCompromises, Quality::NoCompromises, 0.2, true);
+    pair_matches_alone(Quality::Potato, Quality::NoCompromises, 0.2, true);
+}

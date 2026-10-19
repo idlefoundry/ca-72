@@ -1,0 +1,20 @@
+# 2026-10-17T00:41:22Z processes=1 load 2.55 1.04 0.71
+# ABORT: the round's timeout
+# canary worst 1 processes: 0.67 ms; watchdog: 0 messages
+scaling: quality=hi block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=10 seconds=8 mean=25.3 worst_instance_mean=25.3 p50=25.0 p99=35.0 p999=37.6 worst=38.7 late=0 blocks=1500 silent_runs=0 demotions=0 load=2.59 cores=16/16 canary_ms=0.56 promoted=1 demoted_blocks=0 process=1
+# 2026-10-17T00:42:51Z processes=1 load 1.97 1.26 0.82
+# canary worst 1 processes: 0.68 ms; watchdog: 0 messages
+scaling: quality=hi block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=10 seconds=8 mean=26.1 worst_instance_mean=26.1 p50=25.3 p99=36.0 p999=38.8 worst=39.6 late=0 blocks=1500 silent_runs=0 demotions=0 load=1.97 cores=16/16 canary_ms=0.10 promoted=1 demoted_blocks=0 process=1
+# 2026-10-17T00:43:03Z processes=2 load 2.64 1.43 0.88
+# canary worst 2 processes: 1.11 ms; watchdog: 0 messages
+scaling: quality=hi block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=10 seconds=8 mean=23.3 worst_instance_mean=23.3 p50=22.6 p99=32.5 p999=35.9 worst=37.6 late=0 blocks=1500 silent_runs=0 demotions=0 load=2.50 cores=16/16 canary_ms=1.22 promoted=1 demoted_blocks=0 process=1
+scaling: quality=hi block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=10 seconds=8 mean=22.3 worst_instance_mean=22.3 p50=21.5 p99=30.9 p999=33.5 worst=34.0 late=0 blocks=1500 silent_runs=0 demotions=0 load=2.50 cores=16/16 canary_ms=1.44 promoted=1 demoted_blocks=0 process=2
+# 2026-10-17T00:43:24Z processes=4 load 3.49 1.74 1.00
+# canary worst 4 processes: 4.26 ms; watchdog: 0 messages
+scaling: quality=hi block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=10 seconds=8 mean=29.2 worst_instance_mean=29.2 p50=28.9 p99=37.7 p999=41.0 worst=43.5 late=0 blocks=1500 silent_runs=0 demotions=0 load=3.49 cores=16/16 canary_ms=3.65 promoted=1 demoted_blocks=0 process=1
+scaling: quality=hi block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=10 seconds=8 mean=23.1 worst_instance_mean=23.1 p50=21.6 p99=36.4 p999=41.3 worst=47.5 late=0 blocks=1500 silent_runs=0 demotions=0 load=3.49 cores=16/16 canary_ms=3.90 promoted=1 demoted_blocks=0 process=2
+scaling: quality=hi block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=10 seconds=8 mean=26.6 worst_instance_mean=26.6 p50=23.6 p99=49.6 p999=52.1 worst=56.9 late=0 blocks=1500 silent_runs=0 demotions=0 load=3.49 cores=16/16 canary_ms=4.08 promoted=1 demoted_blocks=0 process=3
+scaling: quality=hi block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=10 seconds=8 mean=22.3 worst_instance_mean=22.3 p50=21.4 p99=32.2 p999=35.6 worst=41.0 late=0 blocks=1500 silent_runs=0 demotions=0 load=3.49 cores=16/16 canary_ms=3.98 promoted=1 demoted_blocks=0 process=4
+# 2026-10-17T00:48:27Z processes=8 load 2.46 2.92 1.84
+# ABORT by the real-time guard: rt guard: 126.43 ms
+# canary worst 8 processes: 126.43 ms; watchdog: 0 messages

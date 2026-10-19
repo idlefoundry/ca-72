@@ -102,3 +102,15 @@ play it in GarageBand or Logic, and record the tag, commit and hash here.
    directions, centre/reset, ranges 0, 2 and 7, note-off and panic, with MIDI bytes
    and MIDI 1/2 UMP input (the event-list API requires macOS 12). The adapter test
    also checks mixed MIDI/MPE dialects and the CLAP-only fallback.
+
+7. **AUv2 explicitly marks its backing-window occlusion as unreliable.** The private,
+   versioned presence-only host capability
+   `com.idlefoundry.native-window-occlusion-unreliable/1` is dispatched through each
+   `IHost` instance. The default advertises nothing; only `WrapAsAUV2` opts out. An AU
+   editor may be presented remotely while its local NSWindow is occluded, so that
+   window must not suppress presenting the editor. A static marker avoids frame-time
+   callbacks or borrowed-pointer lifetime requirements. Build the wrapper and embedded
+   CLAP together: the latter's vendored nih-plug passes this capability to its editor.
+   `native-occlusion-capability` checks dispatch, default policy, version rejection,
+   instance isolation and preservation of the standard GUI extension. Actual host
+   visible, hidden and reopen checks remain separate from this unit test.

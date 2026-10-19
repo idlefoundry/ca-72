@@ -5,7 +5,7 @@ default-members = ["crates/*"]
 exclude = ["third_party"]
 
 [workspace.package]
-version = "0.2.5"
+version = "0.2.6"
 edition = "2024"
 rust-version = "1.97"
 license = "GPL-3.0-or-later"
@@ -30,7 +30,7 @@ libm = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 tempfile = "3.27"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

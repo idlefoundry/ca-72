@@ -16,7 +16,9 @@ Hear it before you download: [the CA-72 on YouTube](https://youtu.be/QLfwGqYg4wU
 It is free software under the GNU General Public License, version 3 or later. Copyright ©
 2026 Idle Foundry Ltd.
 
-**Status:** 0.2.5: a new instance starts at QUALITY LO, the light voices (projects keep their
+**Status:** 0.2.6: same sound, lighter on your computer: output bit-identical to 0.2.5, HI up to
+17 % lighter on a Mac and 9 % on Windows and Linux, smoother with several instances, and a panel
+that rests while you can't see it. Includes 0.2.5: a new instance starts at QUALITY LO, the light voices (projects keep their
 own; 0.1's open at HI), and on macOS the pointer shows resize arrows over the grip. Includes
 0.2.4: LETTERING › LARGE in the settings menu prints the panel's lettering and
 the menus a size larger, and WINDOW › SIZE… sets the window's size; the resize grip can be
@@ -535,7 +537,9 @@ The service documents and datasheets the model was derived from are not included
 
 - At HI the circuit's model plays in its real-time quality (the model's own "Potato", not the
   plug-in's Potato mode); at ULTRA, in its most exact, No Compromises, which does not run in
-  real time on most computers ([docs/decisions.md](docs/decisions.md) R48). The model's
+  real time on most computers ([docs/decisions.md](docs/decisions.md) R48): one or two voices
+  split over six threads each come close on a machine of 6 or more fast cores, more voices do
+  not (R-THREADS). The model's
   High Fidelity quality remains in `crates/ca72` and the lab.
 - **Potato mode (QUALITY at LO) is close to the circuit, not the same**
   ([docs/decisions.md](docs/decisions.md) R47): a FEEDBACK loop can settle into another
@@ -559,13 +563,20 @@ The service documents and datasheets the model was derived from are not included
   about a fortieth of that then ([docs/decisions.md](docs/decisions.md) R67). Both costs
   increase with the 0.2.2 filter fixes; the R71 measurements cover one voice, not this full
   polyphony matrix.
-- POLY's voices are shared between the host's audio thread and up to four threads of the
-  plug-in's own (a third of the processors less two, and one on a machine of 3 or 4;
-  [docs/decisions.md](docs/decisions.md) R11, R39), shared by every instance in the
-  host. An instance holds them only while its POLY
-  is on, taking them a moment after POLY is switched on and giving them back when it is
-  switched off; one that finds them all taken plays its voices on the host's thread, and
-  asks again when its POLY is next switched on (R18, R21). The earlier measurement was
+- POLY's voices are shared between the host's audio thread and threads of the plug-in's own,
+  as many as the machine gives ([docs/decisions.md](docs/decisions.md) R-THREADS): every
+  instance in the host shares one budget of the machine's hardware threads less two and
+  less one for each instance playing, never fewer than before (a third of the processors
+  less two, at most four, and one on a machine of 3 or 4: R11, R39). The instances share it
+  evenly, and the shares follow them as instances come and go. An instance holds at most its
+  machine's fast cores less two (the performance cores on a processor with efficiency
+  cores): 8 on an Apple M4 Pro, 4 on an Intel i5-13600K. An instance holds its threads only
+  while its POLY is on, taking them a moment after POLY is switched on and giving them back
+  when it is switched off (R18, R21).
+- At ULTRA, on a machine of 6 or more fast cores, each sounding voice plays on six threads
+  (one voice where the machine has 6 to 9, two from 10), when every sounding voice can: the
+  same samples, in about half the time. The one instrument does too, so at ULTRA it holds
+  threads with POLY off (R-THREADS). The earlier measurement was
   5 to 10 % of an Apple M4 Pro core a voice (FEEDBACK's presets the most; R13), or half
   a core to a core for ten voices. It predates the 0.2.2 oversampling changes. How many play in real time
   depends on the machine, the host's block size and the host: on a machine of 1 or 2

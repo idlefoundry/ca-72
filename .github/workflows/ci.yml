@@ -153,6 +153,9 @@ jobs:
       - name: Typed persistent-field derive tests
         run: CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-derive" cargo test --manifest-path third_party/nih-plug/nih_plug_derive/Cargo.toml
 
+      - name: Native-window visibility capability tests
+        run: CARGO_TARGET_DIR="$RUNNER_TEMP/ca72-visibility" cargo test --manifest-path third_party/nih-plug/Cargo.toml --lib visibility_tests
+
       - name: Validators, cached
         uses: actions/cache@v5
         with:

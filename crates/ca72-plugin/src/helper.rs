@@ -107,8 +107,9 @@ fn help(s: &Shared, spares: &Spares, crew: &Crew, calibration: &Calibration) {
         if asks == 0 {
             if !measuring {
                 // (An ask or a sound asked for since leaves the unpark's token: this returns
-                // at once.)
-                std::thread::park();
+                // at once. Woken at least every look, to count the other processes' seats.)
+                std::thread::park_timeout(crate::pool::LOOK);
+                crate::pool::BUDGET.refresh();
             }
             continue;
         }

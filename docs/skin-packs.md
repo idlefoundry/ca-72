@@ -258,7 +258,7 @@ keyboard_art = "art/keyboard.svg" # optional: drawn over the keyboard view's cas
 keyboard_case = "face"       # optional: the keyboard view's case in "wood" (the default) or "face"
 drawer_art = "art/drawer.svg" # optional: drawn over the presets' drawer's face (see The strip)
 drawer_lettering = "type"    # optional: its displays in "dots" (the default) or the typeface
-drawer_legends = "caps"      # optional: its keys' legends "above" them (the default) or on them
+drawer_legends = "caps"      # optional, no longer used: its keys' legends are always on them
 drawer_titles = "centre"     # optional: its sections' titles at their "left" (the default) or centred
 
 [look.colours]               # optional: the strip's (see The strip), each "#rrggbb"
@@ -377,8 +377,8 @@ its dots the pack's `lamp`, its print the pack's typeface in `tab_print`'s colou
   dims it; text typed into a field in `display`, its caret lit. The stars, arrows and the current
   row's mark are drawn as shapes, not letters. A press in a field puts the caret where the
   typeface sets the characters.
-- `drawer_legends = "caps"`: the keys' legends printed on their caps, in `key_print`, rather than
-  above them.
+- `drawer_legends`: still read ("above" or "caps"), but the keys' legends are on their caps in
+  every look now, in `key_print` and the look's typeface (the keys grew to hold them).
 - `drawer_titles = "centre"`: FIND, PRESETS and PRESET centred over their sections and larger.
 
 ### Drawings: SVG's allowed subset

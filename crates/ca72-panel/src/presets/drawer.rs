@@ -114,18 +114,14 @@ const DISPLAYS: [Display; 4] = [SEARCH, TAGS, LIST, STATUS];
 
 /// The sections' titles, printed over their displays: their middles' height and size.
 const LABEL_Y: f64 = 31.0;
-const LABEL: f64 = 18.0;
-/// A section's title centred over it (`drawer_titles = "centre"`), and a key's legend on its
-/// cap (`drawer_legends = "caps"`).
+const LABEL: f64 = 26.0;
+/// A section's title centred over it (`drawer_titles = "centre"`).
 const CENTRED_LABEL: f64 = 27.0;
-const CAP_LEGEND: f64 = 18.5;
-/// The keys: their size, the middles of their columns and rows, their legends' size and
-/// height above their middles.
-const KEY: (f64, f64) = (136.0, 51.0);
+/// The keys: their size, the middles of their columns and rows, their legends' size.
+const KEY: (f64, f64) = (164.0, 61.0);
 const KEY_X: [f64; 4] = [2422.0, 2603.0, 2784.0, 2965.0];
 const KEY_Y: [f64; 2] = [99.0, 197.0];
-const KEY_LEGEND: f64 = 15.5;
-const LEGEND_RISE: f64 = 36.0;
+const KEY_LEGEND: f64 = 28.0;
 
 /// A line of characters is nine dots tall (two of them a descender's); lines this many apart.
 const LINE: usize = 9;
@@ -165,15 +161,21 @@ const UPDATE_LINE: usize = STATUS_LINES - 1;
 /// How bright a line is: the current preset's, a tab's or tag's chosen, a field's; one under
 /// the pointer; the list's; what is said aside; what is barely there.
 const BRIGHT: f32 = 1.0;
-const POINTED: f32 = 0.82;
-const NORMAL: f32 = 0.62;
-const DIM: f32 = 0.42;
-const FAINT: f32 = 0.3;
-/// The dots' colours (the rail's name's: the mock-up's orange, their glow a deeper red), and
-/// how faintly every dot shows unlit.
-const DOT_ON: (u8, u8, u8) = (255, 112, 40);
+const POINTED: f32 = 1.0;
+const NORMAL: f32 = 0.65;
+const DIM: f32 = 0.475;
+const FAINT: f32 = 0.4;
+/// Keep the preceding appearance within hovered, focused or chosen controls, including
+/// their quieter placeholders and action labels. Only unselected items get darker.
+const ACTIVE_NORMAL: f32 = 0.85;
+const ACTIVE_DIM: f32 = 0.7;
+const ACTIVE_FAINT: f32 = 0.6;
+/// Orange strokes close to the original display against quieter glass, with a little red glow.
+/// Unlit dots stay below the lettering's contrast even at the minimum window width.
+const DOT_ON: (u8, u8, u8) = (255, 140, 58);
+const DOT_SELECTED: (u8, u8, u8) = (255, 197, 110);
 const DOT_GLOW: (u8, u8, u8) = (255, 72, 10);
-const UNLIT: f32 = 0.055;
+const UNLIT: f32 = 0.025;
 
 /// The PRESET section's keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -260,15 +262,40 @@ pub fn tab_of(s: &DrawerScene) -> Tab {
 
 // ---- What the displays show.
 
-/// Characters on a display: from dot `col`, its top at dot `row`, `lv` bright; `field`: a
-/// field's text or caret (set in a typeface, the caret goes where the typeface puts the
-/// characters before it).
+/// The current preset alone uses gold; the rest of the display keeps its orange ink.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+enum Ink {
+    #[default]
+    Amber,
+    Selected,
+}
+
+impl Ink {
+    /// Its colour in the built-in look.
+    #[cfg(test)]
+    fn colour(self) -> (u8, u8, u8) {
+        self.in_dress(&Dress::default())
+    }
+
+    /// Its colour in `dress`: its lamps', or its current preset's.
+    fn in_dress(self, dress: &Dress) -> (u8, u8, u8) {
+        match self {
+            Ink::Amber => dress.dot,
+            Ink::Selected => dress.selected,
+        }
+    }
+}
+
+/// Characters on a display: from dot `col`, its top at dot `row`, `lv` bright, in `ink`;
+/// `field`: a field's text or caret (set in a typeface, the caret goes where the typeface puts
+/// the characters before it).
 #[derive(Clone, Debug, PartialEq)]
 struct Item {
     text: String,
     lv: f32,
     col: usize,
     row: usize,
+    ink: Ink,
     field: bool,
 }
 
@@ -279,6 +306,7 @@ fn item(text: &str, lv: f32, col: usize, row: usize) -> Item {
         lv,
         col,
         row,
+        ink: Ink::Amber,
         field: false,
     }
 }
@@ -286,6 +314,11 @@ fn item(text: &str, lv: f32, col: usize, row: usize) -> Item {
 /// The caret: a line of dots under the character it is before, as a character display's cursor
 /// (steady: it does not blink).
 const CARET: char = '\u{2581}';
+/// A selected tag's one-column bar, aligned at the left of its glyph cell. Two blank dot
+/// columns then separate it from the tag; a five-column arrow would overlap its first letter.
+const TAG_SELECTED: char = '\u{258f}';
+/// A filled arrow for the current preset, distinct from the hover row's outline arrow.
+const ROW_SELECTED: char = '\u{25b6}';
 
 /// A character's dots, nine rows of five (the last two below the line): the font's, the
 /// signs' and the caret's.
@@ -301,6 +334,8 @@ fn glyph(c: char) -> [u8; 9] {
         '\u{25b2}' => seven(&UP),
         '\u{25bc}' => seven(&DOWN),
         CARET => [0, 0, 0, 0, 0, 0, 0, 0, 0x1f],
+        TAG_SELECTED => seven(&[0x10; 7]),
+        ROW_SELECTED => seven(&[0x10, 0x18, 0x1c, 0x1f, 0x1c, 0x18, 0x10]),
         _ => font::glyph(c),
     }
 }
@@ -397,6 +432,10 @@ fn shown_from(f: &Field, chars: usize) -> usize {
     f.caret.saturating_sub(chars.saturating_sub(1))
 }
 
+fn field_active(s: &DrawerScene, id: FieldId) -> bool {
+    s.focus == Some(id) || s.hover == Some(DrawerTarget::Field(id))
+}
+
 /// A field's line: its text (else, empty, what it is for, faintly), and its caret when it has
 /// the keyboard.
 fn field_items(out: &mut Vec<Item>, s: &DrawerScene, id: FieldId, placeholder: &str) {
@@ -406,7 +445,12 @@ fn field_items(out: &mut Vec<Item>, s: &DrawerScene, id: FieldId, placeholder: &
     let f = field_of(s, id);
     let from = shown_from(f, chars);
     if f.text.is_empty() {
-        out.push(item(placeholder, FAINT, col, row));
+        let lv = if field_active(s, id) {
+            ACTIVE_FAINT
+        } else {
+            FAINT
+        };
+        out.push(item(placeholder, lv, col, row));
     } else {
         let shown: String = f.text.chars().skip(from).take(chars).collect();
         out.push(Item {
@@ -421,6 +465,7 @@ fn field_items(out: &mut Vec<Item>, s: &DrawerScene, id: FieldId, placeholder: &
             lv: BRIGHT,
             col: col + 6 * at,
             row,
+            ink: Ink::Amber,
             field: true,
         });
     }
@@ -471,6 +516,14 @@ fn tags_items(s: &DrawerScene) -> Vec<Item> {
             TAG_COL[i % 2],
             tag_row(line - s.tags_first),
         ));
+        if *on {
+            out.push(item(
+                &TAG_SELECTED.to_string(),
+                BRIGHT,
+                TAG_COL[i % 2] - 3,
+                tag_row(line - s.tags_first),
+            ));
+        }
     }
     let lines = s.chips.len().div_ceil(2);
     let sign = TAG_COL[0] + 6 * (n - 1);
@@ -497,11 +550,19 @@ fn list_items(s: &DrawerScene) -> Vec<Item> {
         let lv = if t == tab {
             BRIGHT
         } else if s.hover == Some(DrawerTarget::Tab(t)) {
-            NORMAL
+            ACTIVE_NORMAL
         } else {
             FAINT
         };
         out.push(item(w, lv, COL + 6 * tab_span(t).0, TAB_ROW));
+        if t == tab {
+            out.push(item(
+                &CARET.to_string().repeat(w.len()),
+                BRIGHT,
+                COL + 6 * tab_span(t).0,
+                TAB_ROW,
+            ));
+        }
     }
     if s.rows.is_empty() {
         out.push(item(
@@ -523,24 +584,32 @@ fn list_items(s: &DrawerScene) -> Vec<Item> {
             NORMAL
         };
         let star = if r.favorite { '\u{2605}' } else { '\u{2606}' };
+        let ink = if r.current { Ink::Selected } else { Ink::Amber };
+        let at = |text: &str, col: usize| Item {
+            ink,
+            ..item(text, lv, col, row)
+        };
         // (Its columns each from its own place, as one line cut to the list's width would
         // have them: a typeface sets them as it does, and they still line up.)
         if r.current {
-            out.push(item(">", lv, COL, row));
+            out.push(at(&ROW_SELECTED.to_string(), COL));
+        } else if pointed {
+            out.push(at(">", COL));
         }
-        out.push(item(&star.to_string(), lv, COL + 6 * STAR_AT, row));
-        out.push(item(&cut(&r.name, NAME_CHARS), lv, COL + 6 * NAME_AT, row));
+        out.push(at(&star.to_string(), COL + 6 * STAR_AT));
+        out.push(at(&cut(&r.name, NAME_CHARS), COL + 6 * NAME_AT));
         if let Some(o) = r.origin {
-            out.push(item(o, lv, COL + 6 * ORIGIN_AT, row));
+            out.push(at(o, COL + 6 * ORIGIN_AT));
         }
-        out.push(item(
+        out.push(at(
             &cut(&r.tags, (n - 2).saturating_sub(TAGS_AT)),
-            lv,
             COL + 6 * TAGS_AT,
-            row,
         ));
         if s.hover == Some(DrawerTarget::Star(i)) {
-            out.push(item(&star.to_string(), BRIGHT, COL + 6 * STAR_AT, row));
+            out.push(Item {
+                ink,
+                ..item(&star.to_string(), BRIGHT, COL + 6 * STAR_AT, row)
+            });
         }
     }
     more(&mut out, s.first, s.rows.len(), n);
@@ -620,7 +689,7 @@ fn midi_items(s: &DrawerScene, m: &MidiList) -> Vec<Item> {
         let (said, said_lv) = if r.waiting {
             ("MOVE A CONTROLLER NOW", BRIGHT)
         } else if r.assignment.is_empty() {
-            ("-", DIM)
+            ("-", if chosen || pointed { ACTIVE_DIM } else { DIM })
         } else {
             (r.assignment.as_str(), lv)
         };
@@ -633,6 +702,8 @@ fn midi_items(s: &DrawerScene, m: &MidiList) -> Vec<Item> {
         for (a, w, from, _) in acts {
             let lv = if s.hover == Some(DrawerTarget::MidiAction(i, a)) {
                 BRIGHT
+            } else if chosen || pointed {
+                ACTIVE_NORMAL
             } else {
                 NORMAL
             };
@@ -710,8 +781,13 @@ fn status_items(s: &DrawerScene) -> Vec<Item> {
         }
         (None, Some(Edit::Save)) => {
             line(&mut out, 0, "SAVE THE SOUND AS", BRIGHT);
-            line(&mut out, 2, "NAME", DIM);
-            line(&mut out, 3, "TAGS", DIM);
+            for (k, id, label) in [
+                (2, FieldId::SaveName, "NAME"),
+                (3, FieldId::SaveTags, "TAGS"),
+            ] {
+                let lv = if field_active(s, id) { ACTIVE_DIM } else { DIM };
+                line(&mut out, k, label, lv);
+            }
             field_items(&mut out, s, FieldId::SaveName, "");
             field_items(&mut out, s, FieldId::SaveTags, "bass, dark");
             hint(&mut out, 5, 2);
@@ -778,6 +854,7 @@ fn status_items(s: &DrawerScene) -> Vec<Item> {
 struct KeysShown {
     pointed: Option<PresetKey>,
     held: Vec<PresetKey>,
+    unavailable: Vec<PresetKey>,
 }
 
 fn keys_shown(s: &DrawerScene) -> KeysShown {
@@ -799,6 +876,17 @@ fn keys_shown(s: &DrawerScene) -> KeysShown {
             _ => None,
         },
         held,
+        unavailable: PresetKey::ALL
+            .into_iter()
+            .filter(|k| match k {
+                PresetKey::Rename | PresetKey::Tags | PresetKey::Delete => s.current.is_none(),
+                PresetKey::Revert => s
+                    .current
+                    .as_ref()
+                    .is_none_or(|c| c.origin != Some("EDITED")),
+                _ => false,
+            })
+            .collect(),
     }
 }
 
@@ -824,7 +912,8 @@ pub fn drawer_hit(s: &DrawerScene, x: f64, y: f64) -> Option<DrawerTarget> {
     }
     for k in PresetKey::ALL {
         let (kx, ky) = k.centre();
-        if (x - kx).abs() <= KEY.0 / 2.0 + 4.0 && (y - ky).abs() <= KEY.1 / 2.0 + 4.0 {
+        let (w, h) = KEY;
+        if (x - kx).abs() <= w / 2.0 + 4.0 && (y - ky).abs() <= h / 2.0 + 4.0 {
             return Some(DrawerTarget::Key(k));
         }
     }
@@ -1072,8 +1161,7 @@ type Warmed = (Arc<Pictures>, f64, u64, Arc<Pixmap>);
 /// What a look gives the drawer (decisions.md R-SKIN-PACKS): its face (as the panel's), its
 /// displays' glass, its keys' cap, its lamps' colour (the dots' and the lettering lit), its
 /// print's colours and typeface, a drawing over its face, and whether its displays are lettered
-/// in that typeface and its keys' legends printed on their caps; the built-in ones where it
-/// gives none. `key` tells one look's dressing from another's: 0, the built-in one (every
+/// in that typeface; the built-in ones where it gives none. `key` tells one look's dressing from another's: 0, the built-in one (every
 /// official look's).
 #[derive(Clone)]
 struct Dress {
@@ -1083,8 +1171,11 @@ struct Dress {
     button: Option<Pixmap>,
     dot: (u8, u8, u8),
     glow: (u8, u8, u8),
-    /// The sections' titles' and the legends' over the keys; the legends' on them; the
-    /// displays' lettering not lit.
+    /// The current preset's lettering: gold over the built-in lamps, the lamps' own colour
+    /// over a look's.
+    selected: (u8, u8, u8),
+    /// The sections' titles'; the keys' legends' on their caps; the displays' lettering not
+    /// lit.
     print: String,
     legend: String,
     unlit: String,
@@ -1093,7 +1184,6 @@ struct Dress {
     fonts: Option<(&'static [u8], &'static [u8])>,
     art: Option<Arc<usvg::Tree>>,
     typed: bool,
-    caps: bool,
     centred: bool,
 }
 
@@ -1106,6 +1196,7 @@ impl Default for Dress {
             button: None,
             dot: DOT_ON,
             glow: DOT_GLOW,
+            selected: DOT_SELECTED,
             print: colour::LEGEND.into(),
             legend: colour::LEGEND.into(),
             unlit: TYPED_UNLIT.into(),
@@ -1113,7 +1204,6 @@ impl Default for Dress {
             fonts: None,
             art: None,
             typed: false,
-            caps: false,
             centred: false,
         }
     }
@@ -1142,6 +1232,7 @@ impl Dress {
             button: pack("key"),
             dot: lamp.map_or(DOT_ON, |l| l.on),
             glow: lamp.map_or(DOT_GLOW, |l| l.glow),
+            selected: lamp.map_or(DOT_SELECTED, |l| l.on),
             print: c.tab_print.map_or(built_in.print, hex),
             legend: c.key_print.map_or(built_in.legend, hex),
             unlit: c.display.or(c.tab_print).map_or(built_in.unlit, hex),
@@ -1149,7 +1240,6 @@ impl Dress {
             fonts: look.fonts,
             art: look.drawer_art.clone(),
             typed: look.drawer_type,
-            caps: look.drawer_caps,
             centred: look.drawer_centred,
             key: 0,
         };
@@ -1159,7 +1249,6 @@ impl Dress {
             || d.fonts.is_some()
             || d.art.is_some()
             || d.typed
-            || d.caps
             || d.centred
             || c.lamp.is_some()
             || c.tab_print.is_some()
@@ -1309,17 +1398,18 @@ fn plate_svg() -> String {
     }
     for k in PresetKey::ALL {
         let (x, y) = k.centre();
+        let (w, h) = KEY;
         soft_shadow(
             &mut s,
-            (x - KEY.0 / 2.0 + 3.0, y - KEY.1 / 2.0 + 5.0, KEY.0, KEY.1),
+            (x - w / 2.0 + 3.0, y - h / 2.0 + 5.0, w, h),
             9.0,
             3.0,
             0.6,
             (
-                x - KEY.0 / 2.0 + 8.0,
-                y - KEY.1 / 2.0 + 8.0,
-                KEY.0 - 16.0,
-                KEY.1 - 16.0,
+                x - w / 2.0 + 8.0,
+                y - h / 2.0 + 8.0,
+                w - 16.0,
+                h - 16.0,
                 4.0,
             ),
         );
@@ -1488,7 +1578,7 @@ fn glass(frame: &mut Pixmap, p: &Pixmap, scale: f64, d: &Display) {
             .map(|&(a, b, t)| {
                 let (a, b) = (row[a], row[b]);
                 let mix = |u: u8, v: u8| {
-                    ((f32::from(u) + (f32::from(v) - f32::from(u)) * t) * 256.0) as u32
+                    ((f32::from(u) + (f32::from(v) - f32::from(u)) * t) * 0.6 * 256.0) as u32
                 };
                 [
                     mix(a.red(), b.red()),
@@ -1629,8 +1719,7 @@ fn grid(frame: &mut Pixmap, scale: f64, d: &Display, alpha: f32, (r, g, b): (u8,
     }
 }
 
-/// The print: the sections' titles over their displays, the keys' legends over them (or, in
-/// a look that prints them on the caps, none: [`legends_svg`]).
+/// The print: the sections' titles over their displays.
 fn print_svg(dress: &Dress) -> String {
     let mut s = Svg::default();
     for (d, t) in [(SEARCH, "FIND"), (LIST, "PRESETS"), (STATUS, "PRESET")] {
@@ -1641,37 +1730,35 @@ fn print_svg(dress: &Dress) -> String {
             legend(&mut s, (d.x, LABEL_Y), t, LABEL, "start", &dress.print);
         }
     }
-    if !dress.caps {
-        for k in PresetKey::ALL {
-            let (x, y) = k.centre();
-            legend(
-                &mut s,
-                (x, y - LEGEND_RISE),
-                k.legend(),
-                KEY_LEGEND,
-                "middle",
-                &dress.print,
-            );
-        }
+    s.0
+}
+
+/// Action names on their caps, in clear print rather than tiny worn captions above them (in
+/// every look: `drawer_legends` no longer changes where they are), in the look's `key_print`
+/// and typeface. Keep the longest one, MIDI LEARN, inside the cap with the same margin as the
+/// others.
+fn key_print_svg(fonts: &Fonts, dress: &Dress) -> String {
+    let mut s = Svg::default();
+    for k in PresetKey::ALL {
+        let (x, y) = k.centre();
+        let size = key_legend_size(fonts, k);
+        let baseline = fonts.baseline_for_centre(k.legend(), size, Weight::Bold, y);
+        put!(
+            s,
+            "<text x='{}' y='{}' font-family='{FAMILY}' font-size='{}' font-weight='700' text-anchor='middle' fill='{}'>{}</text>",
+            N(x),
+            N(baseline),
+            N(size),
+            dress.legend,
+            k.legend()
+        );
     }
     s.0
 }
 
-/// The keys' legends on their caps (`drawer_legends = "caps"`).
-fn legends_svg(dress: &Dress) -> String {
-    let mut s = Svg::default();
-    for k in PresetKey::ALL {
-        let (x, y) = k.centre();
-        legend(
-            &mut s,
-            (x, y + 0.5),
-            k.legend(),
-            CAP_LEGEND,
-            "middle",
-            &dress.legend,
-        );
-    }
-    s.0
+fn key_legend_size(fonts: &Fonts, k: PresetKey) -> f64 {
+    let advance = fonts.advance(k.legend(), KEY_LEGEND, Weight::Bold, 0.0);
+    KEY_LEGEND * ((KEY.0 - 16.0) / advance).min(1.0)
 }
 
 fn legend(s: &mut Svg, (x, y): (f64, f64), t: &str, size: f64, anchor: &str, fill: &str) {
@@ -1819,8 +1906,15 @@ impl DrawerRenderer {
             } else {
                 let lit = lit_dots(d, &items);
                 for band in bands {
-                    let dots = (self.dress.dot, self.dress.glow);
-                    redraw(&mut self.frame, &still, self.scale, d, &lit, dots, band);
+                    redraw(
+                        &mut self.frame,
+                        &still,
+                        self.scale,
+                        d,
+                        &lit,
+                        &self.dress,
+                        band,
+                    );
                 }
             }
             self.drawn[k] = Some(items);
@@ -1838,27 +1932,41 @@ impl DrawerRenderer {
             let mut o = Svg::default();
             for k in &keys.held {
                 let (x, y) = k.centre();
+                let (w, h) = KEY;
                 put!(
                     o,
                     "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#000' fill-opacity='0.34'/><rect x='{}' y='{}' width='{}' height='5' rx='2.5' fill='#000' fill-opacity='0.3'/>",
-                    N(x - KEY.0 / 2.0 + 2.0),
-                    N(y - KEY.1 / 2.0 + 2.0),
-                    N(KEY.0 - 4.0),
-                    N(KEY.1 - 4.0),
-                    N(x - KEY.0 / 2.0 + 6.0),
-                    N(y - KEY.1 / 2.0 + 3.0),
-                    N(KEY.0 - 12.0)
+                    N(x - w / 2.0 + 2.0),
+                    N(y - h / 2.0 + 2.0),
+                    N(w - 4.0),
+                    N(h - 4.0),
+                    N(x - w / 2.0 + 6.0),
+                    N(y - h / 2.0 + 3.0),
+                    N(w - 12.0)
+                );
+            }
+            for k in &keys.unavailable {
+                let (x, y) = k.centre();
+                let (w, h) = KEY;
+                put!(
+                    o,
+                    "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#000' fill-opacity='0.32'/>",
+                    N(x - w / 2.0),
+                    N(y - h / 2.0),
+                    N(w),
+                    N(h)
                 );
             }
             if let Some(k) = keys.pointed {
                 let (x, y) = k.centre();
+                let (w, h) = KEY;
                 put!(
                     o,
                     "<rect x='{}' y='{}' width='{}' height='{}' rx='8' fill='#fff' fill-opacity='0.07'/>",
-                    N(x - KEY.0 / 2.0 + 2.0),
-                    N(y - KEY.1 / 2.0 + 2.0),
-                    N(KEY.0 - 4.0),
-                    N(KEY.1 - 4.0)
+                    N(x - w / 2.0 + 2.0),
+                    N(y - h / 2.0 + 2.0),
+                    N(w - 4.0),
+                    N(h - 4.0)
                 );
             }
             if !o.0.is_empty() {
@@ -2030,19 +2138,24 @@ fn make_still(scale: f64, pictures: &Pictures, dress: &Dress) -> Pixmap {
     for k in PresetKey::ALL {
         sprite(&mut still, &cap, s, k.centre(), KEY);
     }
-    if dress.caps {
-        svg_over(&options, &mut still, s, &legends_svg(dress));
-    }
+    svg_over(&options, &mut still, s, &key_print_svg(&fonts, dress));
     still
 }
 
-/// The print's band across the drawer's top: the titles and the keys' legends are in it.
-const PRINT_H: f64 = 190.0;
+/// Only the titles are worn into the face; the action names are clear on the key caps.
+const PRINT_H: f64 = 50.0;
+
+#[derive(Clone, Copy, Debug, Default)]
+struct LitDot {
+    lv: f32,
+    ink: Ink,
+}
 
 /// Each dot of a display lit by `items`, as bright as the brightest over it (none: 0).
-fn lit_dots(d: &Display, items: &[Item]) -> Vec<f32> {
+/// Gold wins a tie, so hovering the selected star cannot turn it back to ordinary orange.
+fn lit_dots(d: &Display, items: &[Item]) -> Vec<LitDot> {
     let (cols, rows) = (d.cols(), d.rows());
-    let mut lit = vec![0.0f32; cols * rows];
+    let mut lit = vec![LitDot::default(); cols * rows];
     for it in items {
         for (n, ch) in it.text.chars().enumerate() {
             let g = glyph(ch);
@@ -2051,7 +2164,12 @@ fn lit_dots(d: &Display, items: &[Item]) -> Vec<f32> {
                     let (c, row) = (it.col + 6 * n + b, it.row + j);
                     if bits >> (4 - b) & 1 == 1 && c < cols && row < rows {
                         let v = &mut lit[row * cols + c];
-                        *v = v.max(it.lv);
+                        if it.lv > v.lv || (it.lv == v.lv && it.ink > v.ink) {
+                            *v = LitDot {
+                                lv: it.lv,
+                                ink: it.ink,
+                            };
+                        }
                     }
                 }
             }
@@ -2100,8 +2218,8 @@ fn redraw(
     still: &Pixmap,
     scale: f64,
     d: &Display,
-    lit: &[f32],
-    (on, glow): ((u8, u8, u8), (u8, u8, u8)),
+    lit: &[LitDot],
+    dress: &Dress,
     (from, to): (f64, f64),
 ) {
     let (_, oy) = d.origin();
@@ -2114,7 +2232,9 @@ fn redraw(
     if x0 >= x1 || y0 >= y1 {
         return;
     }
-    let r = (d.pitch * 0.36 * scale) as f32;
+    // Nearly joined at the minimum width: a lit stroke keeps its coverage when each dot is
+    // about a pixel across, instead of becoming a faint scatter of separate pinpoints.
+    let r = (d.pitch * 0.45 * scale) as f32;
     let margin = (2.1 * r).ceil() as i64 + 2;
     let (top, foot) = ((y0 - margin).max(0), (y1 + margin).min(fh));
     let (bw, bh) = ((x1 - x0) as usize, (foot - top) as usize);
@@ -2131,32 +2251,34 @@ fn redraw(
     let first = (from - 1.0).floor().max(0.0) as usize;
     let last = ((to + 1.0).ceil().max(0.0) as usize).min(rows);
     let (ox, _) = d.origin();
-    // By brightness (to a twentieth): the glows first, then the dots over them.
-    let mut by: BTreeMap<u8, Vec<Disc>> = BTreeMap::new();
+    // Half the preceding brightness step permits a midpoint without rounding ordinary
+    // text all the way back. Existing active levels still land on their exact old steps.
+    let mut by: BTreeMap<(Ink, u8), Vec<Disc>> = BTreeMap::new();
     for j in first..last {
         for c in 0..cols {
-            let v = lit[j * cols + c];
+            let LitDot { lv: v, ink } = lit[j * cols + c];
             if v > 0.0 {
                 let x = ((ox + c as f64 * d.pitch) * scale) as f32 - x0 as f32;
                 let y = ((oy + j as f64 * d.pitch) * scale) as f32 - top as f32;
-                by.entry((v * 20.0).round() as u8)
+                by.entry((ink, (v * 40.0).round() as u8))
                     .or_default()
                     .push((x, y, r));
             }
         }
     }
-    for (&q, ds) in &by {
+    for (&(_, q), ds) in &by {
         let glows: Vec<Disc> = ds.iter().map(|&(x, y, r)| (x, y, r * 2.1)).collect();
         discs(
             &mut band,
             &mut cover,
             &glows,
-            glow,
-            0.16 * f32::from(q) / 20.0,
+            dress.glow,
+            0.08 * f32::from(q) / 40.0,
         );
     }
-    for (&q, ds) in &by {
-        discs(&mut band, &mut cover, ds, on, f32::from(q) / 20.0);
+    for (&(ink, q), ds) in &by {
+        let on = ink.in_dress(dress);
+        discs(&mut band, &mut cover, ds, on, f32::from(q) / 40.0);
     }
     for y in y0..y1 {
         let (i, b) = (
@@ -2251,23 +2373,39 @@ fn retype(
 /// An item in a look's typeface: lit (as bright as the brightest) in its lamps' colour, else
 /// in its print's, fainter as the item is; its text set from its first character's place (a
 /// field's each character in its own), its signs drawn (the stars, the arrows, the current
-/// one's mark, the caret).
+/// one's mark and the one under the pointer, a chosen tag's bar, the caret, a chosen tab's
+/// underline).
 fn typed(s: &mut Svg, d: &Display, it: &Item, dress: &Dress, caret_x: Option<f64>) {
     let lit = it.lv >= BRIGHT;
     let hex = |(r, g, b): (u8, u8, u8)| format!("#{r:02x}{g:02x}{b:02x}");
+    // Lit: the lamps' colour, or the current preset's.
+    let lamp = hex(it.ink.in_dress(dress));
+    let p = d.pitch;
+    let at = |c: f64, r: f64| d.at(c, r);
+    // A chosen tab's underline: one line under its characters' cells.
+    if !it.field && !it.text.is_empty() && it.text.chars().all(|c| c == CARET) {
+        let (x, y) = at(it.col as f64 - 0.5, it.row as f64 + 8.0);
+        put!(
+            s,
+            "<rect x='{}' y='{}' width='{}' height='{}' fill='{lamp}'/>",
+            N(x),
+            N(y - 0.4 * p),
+            N((6 * it.text.chars().count()) as f64 * p - p),
+            N(0.8 * p)
+        );
+        return;
+    }
     // (What is typed in a field in the print's colour, fully; its caret lit.)
     let typing = it.field && caret_x.is_none();
     let (fill, alpha) = if typing && lit {
         (dress.unlit.clone(), 1.0)
     } else if lit {
-        (hex(dress.dot), 1.0)
+        (lamp.clone(), 1.0)
     } else {
         (dress.unlit.clone(), typed_alpha(it.lv))
     };
-    let p = d.pitch;
     // A place in dots (as `Display::at`): a character's cell from `col - 0.5` to `col + 5.5`,
     // its capitals from row 0 to 7, its line's foot at row 6.5.
-    let at = |c: f64, r: f64| d.at(c, r);
     let size = typed_size(d);
     let glow = if lit && !typing {
         format!(
@@ -2307,8 +2445,10 @@ fn typed(s: &mut Svg, d: &Display, it: &Item, dress: &Dress, caret_x: Option<f64
         run.clear();
     };
     for (k, &c) in chars.iter().enumerate() {
-        let sign = matches!(c, '\u{2605}' | '\u{2606}' | '\u{25b2}' | '\u{25bc}' | CARET)
-            || (c == '>' && chars.len() == 1);
+        let sign = matches!(
+            c,
+            '\u{2605}' | '\u{2606}' | '\u{25b2}' | '\u{25bc}' | CARET | ROW_SELECTED | TAG_SELECTED
+        ) || (c == '>' && chars.len() == 1);
         if !sign {
             if run.is_empty() {
                 run_at = k;
@@ -2330,9 +2470,8 @@ fn typed(s: &mut Svg, d: &Display, it: &Item, dress: &Dress, caret_x: Option<f64
                 if c == '\u{2605}' {
                     put!(
                         s,
-                        "<polygon points='{}' fill='{}' fill-opacity='{}'/>",
+                        "<polygon points='{}' fill='{lamp}' fill-opacity='{}'/>",
                         pts.join(" "),
-                        hex(dress.dot),
                         N(alpha.max(0.85))
                     );
                 } else {
@@ -2359,7 +2498,7 @@ fn typed(s: &mut Svg, d: &Display, it: &Item, dress: &Dress, caret_x: Option<f64
                     hex(dress.dot)
                 );
             }
-            '>' => {
+            ROW_SELECTED => {
                 // (Its line's band first, under what follows: in the look's `selection`
                 // colour, else faintly in the lamps' glow.)
                 let (_, top) = at(0.0, it.row as f64 - 1.2);
@@ -2386,7 +2525,34 @@ fn typed(s: &mut Svg, d: &Display, it: &Item, dress: &Dress, caret_x: Option<f64
                     N(y),
                     N(x - 0.3 * p),
                     N(y + 2.8 * p),
-                    hex(dress.dot)
+                    lamp
+                );
+            }
+            // The row under the pointer's: an arrow's outline.
+            '>' => {
+                let (x, y) = at(col(k), it.row as f64 + 3.0);
+                put!(
+                    s,
+                    "<path d='M{} {}L{} {}L{} {}Z' fill='none' stroke='{fill}' stroke-opacity='{}' stroke-width='{}' stroke-linejoin='round'/>",
+                    N(x),
+                    N(y - 2.5 * p),
+                    N(x + 3.5 * p),
+                    N(y),
+                    N(x),
+                    N(y + 2.5 * p),
+                    N(alpha),
+                    N(0.42 * p)
+                );
+            }
+            TAG_SELECTED => {
+                let (x, y) = at(col(k) - 0.4, it.row as f64 - 0.4);
+                put!(
+                    s,
+                    "<rect x='{}' y='{}' width='{}' height='{}' fill='{lamp}'/>",
+                    N(x),
+                    N(y),
+                    N(0.8 * p),
+                    N(6.8 * p)
                 );
             }
             CARET => {
@@ -2399,7 +2565,7 @@ fn typed(s: &mut Svg, d: &Display, it: &Item, dress: &Dress, caret_x: Option<f64
                     N(y - 0.6 * p),
                     N(0.4 * p),
                     N(8.8 * p),
-                    hex(dress.dot)
+                    lamp
                 );
             }
             _ => {}
@@ -2502,6 +2668,111 @@ mod tests {
         }
         assert_eq!(drawer_hit(&s, 10.0, DRAWER_H + 1.0), None);
         const { assert!(ROWS_SHOWN >= 15 && TAG_LINES >= 16) };
+    }
+
+    /// The enlarged captions stay inside their buttons; their hit regions stay separate at
+    /// the minimum supported width too. The existing actions keep their centres.
+    #[test]
+    fn readable_key_captions_fit_separate_buttons() {
+        let fonts = Fonts::new();
+        for (i, k) in PresetKey::ALL.into_iter().enumerate() {
+            let (x, y) = k.centre();
+            let (w, h) = KEY;
+            let size = key_legend_size(&fonts, k);
+            assert!(size >= 25.0, "{k:?}: {size}");
+            assert!(fonts.advance(k.legend(), size, Weight::Bold, 0.0) <= w - 15.9);
+            assert!(x - w / 2.0 > 0.0 && x + w / 2.0 < W);
+            assert!(y - h / 2.0 > 0.0 && y + h / 2.0 < STATUS.y);
+            for other in &PresetKey::ALL[i + 1..] {
+                let (ox, oy) = other.centre();
+                let (ow, oh) = KEY;
+                assert!(
+                    (x - ox).abs() > (w + ow) / 2.0 + 8.0 || (y - oy).abs() > (h + oh) / 2.0 + 8.0,
+                    "{k:?} overlaps {other:?}"
+                );
+            }
+        }
+    }
+
+    /// Each selected tag's marker leaves a clear gap before its caption in both columns;
+    /// even a full-length caption remains inside the display.
+    #[test]
+    fn selected_tag_markers_stay_clear_of_both_captions() {
+        let s = DrawerScene {
+            chips: vec![("abcdefghijklm".into(), true); 2],
+            ..DrawerScene::default()
+        };
+        let items = tags_items(&s);
+        for col in TAG_COL {
+            let caption = items.iter().find(|it| it.col == col).expect("tag caption");
+            let marker = items
+                .iter()
+                .find(|it| it.col == col - 3)
+                .expect("selected marker");
+            let occupied = |it: &Item| {
+                it.text
+                    .chars()
+                    .enumerate()
+                    .flat_map(|(n, ch)| {
+                        glyph(ch).into_iter().flat_map(move |bits| {
+                            (0..5)
+                                .filter(move |b| bits >> (4 - b) & 1 == 1)
+                                .map(move |b| it.col + 6 * n + b)
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(caption.text, "abcdefghijklm");
+            assert!(
+                occupied(marker).into_iter().all(|c| c + 1 < caption.col),
+                "marker overlaps the caption at column {col}"
+            );
+            assert!(
+                occupied(caption)
+                    .into_iter()
+                    .chain(occupied(marker))
+                    .all(|c| c < TAGS.cols())
+            );
+            assert!(caption.row + LINE <= TAGS.rows());
+        }
+    }
+
+    /// Every field, action and selection transition is the same when drawn in parts as in a
+    /// new frame, including the minimum width and the largest supported width.
+    #[test]
+    fn readable_states_redraw_as_a_whole_frame() {
+        for scale in [860.0 / W, 1380.0 / W, 1.0] {
+            let base = scene();
+            let states = [
+                base.clone(),
+                DrawerScene {
+                    focus: Some(FieldId::Search),
+                    search: Field::new("bass"),
+                    favourites: true,
+                    hover: Some(DrawerTarget::Key(PresetKey::SaveAs)),
+                    ..base.clone()
+                },
+                DrawerScene {
+                    editing: Some(Edit::Save),
+                    save_name: Field::new("New sound"),
+                    focus: Some(FieldId::SaveName),
+                    ..base.clone()
+                },
+                DrawerScene::default(),
+                base,
+            ];
+            let mut parts = DrawerRenderer::new(scale);
+            for state in states {
+                parts.render(&state);
+                let mut whole = DrawerRenderer::new(scale);
+                whole.render(&state);
+                assert_eq!(
+                    parts.frame().data(),
+                    whole.frame().data(),
+                    "changed parts differ at scale {scale}"
+                );
+            }
+        }
     }
 
     /// MIDI Learn's list in the list's place: its rows and their words found where drawn; the
@@ -2620,7 +2891,7 @@ mod tests {
         let chars =
             |t: &str, from: usize, n: usize| t.chars().skip(from).take(n).collect::<String>();
         let current = row(1);
-        assert_eq!(chars(&current, 0, 3), "> \u{2606}");
+        assert_eq!(chars(&current, 0, 3), "\u{25b6} \u{2606}");
         assert_eq!(chars(&current, NAME_AT, 9), "Preset 1 ");
         let edited = row(2);
         assert_eq!(
@@ -2630,6 +2901,188 @@ mod tests {
         assert_eq!(chars(&edited, NAME_AT + NAME_CHARS + 1, 6), "EDITED");
         assert_eq!(chars(&edited, NAME_AT + NAME_CHARS + 8, 9), "bass dark");
         assert_eq!(chars(&row(0), 2, 1), "\u{2605}");
+    }
+
+    /// Selection is gold with a filled marker; hover is brighter orange with an outline
+    /// marker; ordinary presets keep the user's darker orange and unmarked rows.
+    #[test]
+    fn selected_hovered_and_ordinary_presets_have_distinct_treatments() {
+        let mut s = scene();
+        s.hover = Some(DrawerTarget::Row(3));
+        let items = list_items(&s);
+        // A row's name, and its mark (none: unmarked).
+        let at = |i, col| {
+            items
+                .iter()
+                .find(|it| it.row == list_row(i) && it.col == col)
+        };
+        let row = |i| at(i, COL + 6 * NAME_AT).expect("preset row");
+        let mark = |i| at(i, COL).map(|it| it.text.clone());
+        let (selected, hovered, ordinary) = (row(1), row(3), row(7));
+        assert_eq!(selected.ink.colour(), (255, 197, 110));
+        assert_eq!(selected.lv, BRIGHT);
+        assert_eq!(mark(1), Some(ROW_SELECTED.to_string()));
+        assert_eq!(hovered.ink.colour(), (255, 140, 58));
+        assert_eq!(hovered.lv, POINTED);
+        assert_eq!(mark(3).as_deref(), Some(">"));
+        assert_eq!(ordinary.ink.colour(), (255, 140, 58));
+        assert_eq!(ordinary.lv, 0.65);
+        assert_eq!(mark(7), None);
+        assert!(hovered.lv > ordinary.lv);
+        // Hovering its star must not repaint part of the current row in orange.
+        s.hover = Some(DrawerTarget::Star(1));
+        assert!(
+            list_items(&s)
+                .iter()
+                .filter(|it| it.row == list_row(1))
+                .all(|it| it.ink == Ink::Selected)
+        );
+    }
+
+    /// Darkening unselected text must retain even the quieter parts of a hovered/focused
+    /// control, rather than changing placeholders, hovered tabs or chosen MIDI row actions.
+    #[test]
+    fn cursor_selected_items_keep_their_previous_brightness() {
+        for id in [FieldId::Search, FieldId::SaveName, FieldId::SaveTags] {
+            let mut s = DrawerScene {
+                editing: Some(Edit::Save),
+                ..scene()
+            };
+            let placeholder = |s: &DrawerScene| {
+                let mut items = Vec::new();
+                field_items(&mut items, s, id, "EMPTY");
+                items[0].lv
+            };
+            assert_eq!(placeholder(&s), 0.4);
+            s.focus = Some(id);
+            assert_eq!(placeholder(&s), 0.6);
+            s.focus = None;
+            s.hover = Some(DrawerTarget::Field(id));
+            assert_eq!(placeholder(&s), 0.6);
+            if id != FieldId::Search {
+                let label = if id == FieldId::SaveName {
+                    "NAME"
+                } else {
+                    "TAGS"
+                };
+                let level = |s: &DrawerScene| {
+                    status_items(s)
+                        .iter()
+                        .find(|it| it.text == label)
+                        .unwrap()
+                        .lv
+                };
+                assert_eq!(level(&s), 0.7);
+                s.hover = None;
+                s.focus = Some(id);
+                assert_eq!(level(&s), 0.7);
+                s.focus = None;
+                assert_eq!(level(&s), 0.475);
+            }
+        }
+        let mut s = scene();
+        s.hover = Some(DrawerTarget::Tab(Tab::Favourites));
+        let tab = |s: &DrawerScene| {
+            list_items(s)
+                .iter()
+                .find(|it| it.text == "FAVORITES")
+                .unwrap()
+                .lv
+        };
+        assert_eq!(tab(&s), 0.85);
+        s.hover = None;
+        assert_eq!(tab(&s), 0.4);
+        s.midi = Some(MidiList {
+            chosen: 0,
+            rows: (0..3)
+                .map(|i| MidiRow {
+                    name: format!("CONTROL {i}"),
+                    assignment: String::new(),
+                    waiting: false,
+                })
+                .collect(),
+            ..MidiList::default()
+        });
+        for hover in [
+            DrawerTarget::MidiRow(1),
+            DrawerTarget::MidiAction(1, MidiAction::Learn),
+        ] {
+            s.hover = Some(hover);
+            let items = list_items(&s);
+            for i in [0, 1] {
+                // (The chosen row's mark aside.)
+                let row: Vec<_> = items
+                    .iter()
+                    .filter(|it| it.row == list_row(i) && it.text != ">")
+                    .collect();
+                assert_eq!(row[0].lv, 1.0);
+                assert_eq!(row[1].text, "-");
+                assert_eq!(row[1].lv, 0.7);
+                let action_level = if hover == DrawerTarget::MidiAction(i, MidiAction::Learn) {
+                    1.0
+                } else {
+                    0.85
+                };
+                assert_eq!(row[2].lv, action_level);
+            }
+            let inactive: Vec<_> = items.iter().filter(|it| it.row == list_row(2)).collect();
+            assert_eq!(inactive[0].lv, 0.65);
+            assert_eq!(inactive[1].lv, 0.475);
+        }
+    }
+
+    /// Moving/clearing selection and moving hover independently clears the old gold and
+    /// both markers, matching a fresh frame each time. An uninvolved ordinary row stays
+    /// identical, so changing selection cannot recolour the rest of the list.
+    #[test]
+    fn moving_selection_and_hover_redraws_without_stale_gold() {
+        for scale in [860.0 / W, 1035.0 / W, 1.0] {
+            let mut s = scene();
+            s.hover = Some(DrawerTarget::Row(3));
+            let mut states = vec![s.clone()];
+            s.rows[1].current = false;
+            s.rows[2].current = true;
+            s.current.as_mut().unwrap().name = "Preset 2".into();
+            states.push(s.clone());
+            s.hover = Some(DrawerTarget::Row(4));
+            states.push(s.clone());
+            s.rows[2].current = false;
+            s.current = None;
+            states.push(s.clone());
+            s.hover = None;
+            states.push(s.clone());
+            s.rows[1].current = true;
+            s.current = scene().current;
+            s.hover = Some(DrawerTarget::Star(1));
+            states.push(s);
+
+            let (_, oy) = LIST.origin();
+            let top = ((oy + (list_row(7) as f64 - 1.5) * LIST.pitch) * scale).round();
+            let bottom = ((oy + (list_row(7) as f64 + 9.5) * LIST.pitch) * scale).round();
+            let ordinary_rect = IntRect::from_xywh(
+                (LIST.x * scale).round() as i32,
+                top as i32,
+                (LIST.w * scale).round() as u32,
+                (bottom - top) as u32,
+            )
+            .unwrap();
+            let mut parts = DrawerRenderer::new(scale);
+            let mut ordinary_before = None;
+            for state in states {
+                parts.render(&state);
+                let mut whole = DrawerRenderer::new(scale);
+                whole.render(&state);
+                assert!(
+                    parts.frame().data() == whole.frame().data(),
+                    "selection/hover left stale pixels at scale {scale}"
+                );
+                let ordinary = parts.frame().clone_rect(ordinary_rect).unwrap();
+                match &ordinary_before {
+                    Some(before) => assert_eq!(ordinary.data(), before),
+                    None => ordinary_before = Some(ordinary.data().to_vec()),
+                }
+            }
+        }
     }
 
     /// Drawn line by line as by the whole: a frame drawn again where a pointer moved from row

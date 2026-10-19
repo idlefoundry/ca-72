@@ -761,6 +761,8 @@ struct PanelWindow {
     logical: (u32, u32),
     /// When the frame was last shown on the window (none since it opened or resized).
     shown: Option<Instant>,
+    /// When the frame was last drawn while the window could not be seen ([`HIDDEN_DRAW`]).
+    hidden_drawn: Option<Instant>,
     editing: Editing,
     /// The keyboard the drawer took from another window (Windows), given back as it shuts.
     keys: Option<window::Keys>,
@@ -966,6 +968,7 @@ impl PanelWindow {
             physical,
             logical: (width, height),
             shown: None,
+            hidden_drawn: None,
             editing: Editing::new(
                 context,
                 params,
@@ -1399,33 +1402,20 @@ impl Editing {
     }
 
     /// ULTRA's note: what it is for (the owner: "only intended for offline renders, or small
-    /// projects on powerful PCs"), left of its lamp; a press anywhere closes it, read.
+    /// projects on powerful PCs") and what it costs, as this computer plays it (whether it
+    /// splits an ULTRA voice over six threads: `engine::split_voices`, decisions.md R-THREADS),
+    /// left of its lamp; a press anywhere closes it, read.
     fn ultra_note(&self) -> Note {
+        self.ultra_note_for(crate::engine::split_voices() > 0)
+    }
+
+    /// [`Editing::ultra_note`] for a computer that splits an ULTRA voice (`splits`) or not.
+    fn ultra_note_for(&self, splits: bool) -> Note {
         let size = self.renderer.text_size();
-        let lines = vec![
-            ("ULTRA · NO COMPROMISES".to_owned(), Tone::Accent),
-            (
-                "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SEVEN TIMES THE WORK OF HI:".to_owned(),
-                Tone::Plain,
-            ),
-            (
-                "ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER.".to_owned(),
-                Tone::Plain,
-            ),
-            (
-                "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL".to_owned(),
-                Tone::Plain,
-            ),
-            (
-                "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.".to_owned(),
-                Tone::Plain,
-            ),
-            (
-                "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.".to_owned(),
-                Tone::Dim,
-            ),
-            ("CLICK TO CLOSE".to_owned(), Tone::Dim),
-        ];
+        let lines = ultra_note_lines(splits)
+            .iter()
+            .map(|&(t, tone)| (t.to_owned(), tone))
+            .collect();
         let mut note = Note {
             x: 0.0,
             y: 0.0,
@@ -3169,6 +3159,18 @@ const REPAINT: Option<Duration> = if cfg!(target_os = "linux") {
     None
 };
 
+/// How often the frame is drawn while the window cannot be seen (covered by other windows,
+/// minimised, on another desktop, the host hidden): the scene kept up (the drawer, a resize, MIDI
+/// Learn) without drawing the shutter and the levels thirty times a second for nobody. Nothing is
+/// shown meanwhile; the window seen again is shown whole at once.
+const HIDDEN_DRAW: Duration = Duration::from_millis(250);
+
+/// The tests' counts of the frames drawn and shown by the editors' windows (R-EDITOR-CPU).
+#[cfg(test)]
+static DRAWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(test)]
+static SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Whether the frame must be shown again though nothing in it changed: not yet shown since
 /// the window opened or resized, or (Linux) shown longer ago than [`REPAINT`].
 fn repaint_due(shown: Option<Instant>, now: Instant) -> bool {
@@ -3202,6 +3204,26 @@ impl WindowHandler for PanelWindow {
         self.editing.grip();
         self.follow(window);
         let now = Instant::now();
+        // Unseen, drawn only now and then and not shown; seen again, shown whole.
+        // A remote AU view may be visible through its host's proxy while its native backing
+        // window is occluded. Keep presenting when that window cannot describe visibility.
+        let seen = (cfg!(target_os = "macos")
+            && !self.editing.context.native_window_occlusion_reliable())
+            || window::seen(window);
+        if !seen {
+            self.shown = None;
+            if self
+                .hidden_drawn
+                .is_some_and(|at| now.saturating_duration_since(at) < HIDDEN_DRAW)
+            {
+                self.keyboard(window);
+                self.editing.measure_when_done();
+                return;
+            }
+            self.hidden_drawn = Some(now);
+        }
+        #[cfg(test)]
+        DRAWN.fetch_add(1, Ordering::Relaxed);
         let changed = self.editing.draw();
         // A drawer that has just slid shut has asked the host for the shorter window: the
         // editor's view follows in the same frame, before anything is shown. A frame between
@@ -3213,7 +3235,9 @@ impl WindowHandler for PanelWindow {
         self.keyboard(window);
         // (Shown again whole when due: X11 may have dropped any of it.)
         let due = repaint_due(self.shown, now);
-        if changed || due {
+        if seen && (changed || due) {
+            #[cfg(test)]
+            SHOWN.fetch_add(1, Ordering::Relaxed);
             self.present(changed && !due);
             self.shown = Some(now);
         }
@@ -3647,6 +3671,56 @@ pub(crate) mod window {
         }
     }
 
+    /// Whether any of the editor's window can be seen: macOS's occlusion state of the window
+    /// holding it (covered whole, minimised, on another Space or its application hidden: not
+    /// seen); on Windows, its top window not minimised (not `IsWindowVisible`: in a session
+    /// without a desktop on the screen, as an agent's over SSH, every window says it is not
+    /// visible though it is drawn and shown, and the editor would show nothing). X11 says
+    /// nothing reliable without a compositor: always seen there.
+    // (objc 0.2's `msg_send!` asks after a `cargo-clippy` feature this crate does not have.)
+    #[cfg_attr(target_os = "macos", allow(unexpected_cfgs))]
+    pub fn seen(window: &baseview::Window<'_>) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use cocoa::appkit::{NSWindow, NSWindowOcclusionState};
+            use cocoa::base::{id, nil};
+            use objc::{msg_send, sel, sel_impl};
+            let RawWindowHandle::AppKit(h) = window.raw_window_handle() else {
+                return true;
+            };
+            let view = h.ns_view as id;
+            if view == nil {
+                return true;
+            }
+            // SAFETY: baseview's view, on the main thread that runs its frames; its window
+            // is nil until the host puts it in one.
+            let holder: id = unsafe { msg_send![view, window] };
+            if holder == nil {
+                return true;
+            }
+            // SAFETY: `holder` is an NSWindow.
+            let state = unsafe { holder.occlusionState() };
+            state.contains(NSWindowOcclusionState::NSWindowOcclusionStateVisible)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use winapi::um::winuser::{GA_ROOT, GetAncestor, IsIconic};
+            let Some(hwnd) = hwnd(window) else {
+                return true;
+            };
+            // SAFETY: the editor's window and its top window, on the thread that owns them.
+            unsafe {
+                let top = GetAncestor(hwnd, GA_ROOT);
+                top.is_null() || IsIconic(top) == 0
+            }
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let _ = window;
+            true
+        }
+    }
+
     /// Whether the editor's window has lost the pointer's capture (Windows: baseview
     /// captures it at a press and lets it go at the release, and ignores its loss, at Alt-Tab
     /// mid-drag, when no release comes). Elsewhere a release always comes.
@@ -3951,6 +4025,62 @@ pub(crate) mod window {
             }
         }
     }
+}
+
+/// ULTRA's note's lines (decisions.md R48; the owner approved this text on 2026-10-16,
+/// R-THREADS): ULTRA's cost against HI (3.7 to 6.4 times over the factory presets, more with
+/// FEEDBACK), and on a computer that splits an ULTRA voice over six threads (`splits`) that one
+/// voice plays live there; else what one voice takes.
+fn ultra_note_lines(splits: bool) -> Vec<(&'static str, Tone)> {
+    let mut lines = vec![
+        ("ULTRA · NO COMPROMISES", Tone::Accent),
+        (
+            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SIX TIMES THE WORK OF HI.",
+            Tone::Plain,
+        ),
+    ];
+    if splits {
+        lines.extend([
+            // (Wrapped so that no line is wider than the note's widest before.)
+            (
+                "ON THIS COMPUTER ONE VOICE IS SPREAD OVER SIX THREADS AND",
+                Tone::Plain,
+            ),
+            (
+                "CAN BE PLAYED LIVE. WITH MULTIPLE VOICES OR TOO SMALL OF A BUFFER,",
+                Tone::Plain,
+            ),
+            ("IT MAY DROP OUT.", Tone::Plain),
+            (
+                "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL",
+                Tone::Plain,
+            ),
+            ("PROJECTS ON POWERFUL COMPUTERS.", Tone::Plain),
+        ]);
+    } else {
+        lines.extend([
+            (
+                "ONE VOICE TAKES UP TO A WHOLE CORE OF A FAST COMPUTER.",
+                Tone::Plain,
+            ),
+            (
+                "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL",
+                Tone::Plain,
+            ),
+            (
+                "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.",
+                Tone::Plain,
+            ),
+        ]);
+    }
+    lines.extend([
+        (
+            "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.",
+            Tone::Dim,
+        ),
+        ("CLICK TO CLOSE", Tone::Dim),
+    ]);
+    lines
 }
 
 #[cfg(test)]
@@ -4391,7 +4521,8 @@ mod tests {
     /// alone, as on Windows and X11 (decisions.md R58), the screen so made the same as
     /// the whole frame's at every frame. Every other frame's QUALITY column and STEREO display
     /// kept, written to `$CA72_RUN`, the folder, as `frames.rgba` (`size.txt`: its width and
-    /// height), with the times in `times.txt` (`-- --ignored --nocapture`).
+    /// height), with the times in `times.txt` (`-- --ignored --nocapture`). With
+    /// `CA72_NO_FRAMES` set, the times alone (the frames are 2 GB, in memory and on disk).
     #[test]
     #[ignore = "plays the window for a while"]
     fn the_window_played() {
@@ -4399,6 +4530,7 @@ mod tests {
             return;
         };
         std::fs::create_dir_all(&out).unwrap();
+        let keep_frames = std::env::var_os("CA72_NO_FRAMES").is_none();
         let dir = tempfile::tempdir().unwrap();
         let host = Arc::new(Host::default());
         let params = Arc::new(Ca72Params::default());
@@ -4549,7 +4681,7 @@ mod tests {
             }
             whole.push(drawn + turned);
             places.push(drawn + in_places);
-            if k % 2 == 0 {
+            if keep_frames && k % 2 == 0 {
                 let f = e.composed.as_ref().unwrap_or_else(|| e.renderer.frame());
                 let mut img = vec![0u8; fw * fh * 4];
                 for (r, x0) in [(column, 0usize), (stereo, column.2 + 12)] {
@@ -4562,8 +4694,10 @@ mod tests {
                 frames.extend_from_slice(&img);
             }
         }
-        std::fs::write(out.join("frames.rgba"), &frames).unwrap();
-        std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
+        if keep_frames {
+            std::fs::write(out.join("frames.rgba"), &frames).unwrap();
+            std::fs::write(out.join("size.txt"), format!("{fw} {fh}")).unwrap();
+        }
         let said = |times: &[f64]| {
             let total: f64 = times.iter().sum();
             let mean = total / times.len() as f64;
@@ -7830,6 +7964,12 @@ mod tests {
         e.scene.note = Some(e.ultra_note());
         e.renderer.render(&e.scene);
         e.renderer.frame().save_png(out.join("note.png")).unwrap();
+        // Both of its texts: a computer that splits an ULTRA voice, and one that does not.
+        for (splits, name) in [(true, "note-split.png"), (false, "note-whole.png")] {
+            e.scene.note = Some(e.ultra_note_for(splits));
+            e.renderer.render(&e.scene);
+            e.renderer.frame().save_png(out.join(name)).unwrap();
+        }
         // QUALITY's menu, its toggle right-clicked.
         e.ultra_note = false;
         e.settings.ultra_note_read = true;
@@ -7841,6 +7981,88 @@ mod tests {
         e.scene.menu = e.learning.menu().cloned();
         e.renderer.render(&e.scene);
         e.renderer.frame().save_png(out.join("menu.png")).unwrap();
+    }
+
+    /// ULTRA's note as this computer plays it (decisions.md R-THREADS): where it splits an
+    /// ULTRA voice over six threads, that one voice plays live; where it does not, what one
+    /// voice takes. Either fits where the old one did, left of the lamp at the window's opening
+    /// size: no line wider than the old note's widest, its box within the panel.
+    #[test]
+    fn ultra_s_note_says_what_this_computer_plays() {
+        let (e, _host, _params) = editing();
+        let split = e.ultra_note_for(true);
+        let whole = e.ultra_note_for(false);
+        let text = |n: &Note| -> Vec<String> { n.lines.iter().map(|(t, _)| t.clone()).collect() };
+        assert_eq!(
+            text(&e.ultra_note()),
+            text(&e.ultra_note_for(crate::engine::split_voices() > 0)),
+            "not as this computer plays it"
+        );
+        for (n, says) in [
+            (
+                &split,
+                "ON THIS COMPUTER ONE VOICE IS SPREAD OVER SIX THREADS AND",
+            ),
+            (
+                &whole,
+                "ONE VOICE TAKES UP TO A WHOLE CORE OF A FAST COMPUTER.",
+            ),
+        ] {
+            assert_eq!(
+                n.lines[0],
+                ("ULTRA · NO COMPROMISES".to_owned(), Tone::Accent)
+            );
+            assert!(
+                text(n)
+                    .iter()
+                    .any(|t| t.contains("ABOUT SIX TIMES THE WORK OF HI"))
+            );
+            assert!(text(n).iter().any(|t| t == says), "{:?}", text(n));
+            let dim: Vec<_> = n.lines.iter().rev().take(2).collect();
+            assert_eq!(dim[0], &("CLICK TO CLOSE".to_owned(), Tone::Dim));
+            assert_eq!(
+                dim[1].0,
+                "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT."
+            );
+        }
+        assert!(
+            text(&split)
+                .join(" ")
+                .contains("WITH MULTIPLE VOICES OR TOO SMALL OF A BUFFER")
+        );
+        assert!(
+            text(&whole)
+                .iter()
+                .any(|t| t.ends_with("PLAYED LIVE, IT MAY DROP OUT."))
+        );
+        // The old note's widest line, as wide as any may be.
+        let fonts = e.renderer.fonts();
+        let wide = |t: &str| fonts.advance(t, split.size, Weight::Regular, 0.0);
+        let old = [
+            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SEVEN TIMES THE WORK OF HI:",
+            "ONE VOICE TAKES ABOUT A WHOLE CORE OF A FAST COMPUTER.",
+            "IT IS MEANT FOR OFFLINE RENDERS (EXPORT, BOUNCE, FREEZE) AND SMALL",
+            "PROJECTS ON POWERFUL COMPUTERS. PLAYED LIVE, IT MAY DROP OUT.",
+            "RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.",
+        ]
+        .map(wide)
+        .into_iter()
+        .fold(0.0, f64::max);
+        for n in [&split, &whole] {
+            for (t, _) in &n.lines {
+                assert!(wide(t) <= old + 1e-9, "{t}: {} against {old}", wide(t));
+            }
+            // Its box: left of the lamp's opening, within the panel (not pushed in by the
+            // panel's edge), its foot within the panel's height.
+            let (w, h) = n.extent(fonts);
+            let (left, right) = (n.x - w / 2.0, n.x + w / 2.0);
+            let top = n.y - n.size * 0.4 - h;
+            assert!(
+                left >= 0.0 && right < art::COL + 3023.0 - 53.6,
+                "{left}..{right}"
+            );
+            assert!(top >= 0.0 && n.y <= art::PANEL_H, "{top}..{}", n.y);
+        }
     }
 
     /// MIDI Learn drawn (decisions.md R34), for looking at: CUTOFF being learned (ringed, its
@@ -8675,6 +8897,78 @@ mod windows_window_tests {
         let apart = still.iter().zip(&whole).filter(|(a, b)| a != b).count();
         assert!(
             apart == 0,
+            "{apart} pixels shown otherwise than in the whole frame"
+        );
+        o.close();
+    }
+
+    /// An editor whose window cannot be seen (its host's window minimised) draws its frame a
+    /// few times a second instead of at the screen's rate, and shows none of it; seen again,
+    /// it shows its whole frame (decisions.md R-EDITOR-CPU).
+    #[test]
+    fn an_unseen_window_draws_seldom_and_is_whole_when_seen_again() {
+        use winapi::um::winuser::{SW_MINIMIZE, SW_RESTORE, ShowWindow};
+        let o = Opened::new(false, HostWindow::Dialog);
+        let play = |levels: f32, ms: u64| {
+            let until = Instant::now() + Duration::from_millis(ms);
+            let mut k = 0u32;
+            while Instant::now() < until {
+                let mut l = [0.0f32; LEVELS];
+                for (v, l) in l.iter_mut().enumerate().take(4) {
+                    *l = levels * (0.6 + 0.4 * ((k as usize + v) % 3) as f32 / 2.0);
+                }
+                o.meters.publish(0.0, (0.5, 0.0), 0b1111);
+                o.meters.publish_levels(&l, levels);
+                pump(Duration::from_millis(30));
+                k += 1;
+            }
+        };
+        let counts = || (DRAWN.load(Ordering::Relaxed), SHOWN.load(Ordering::Relaxed));
+        play(0.6, 800);
+        let (d0, s0) = counts();
+        play(0.6, 2000);
+        let (d1, s1) = counts();
+        // SAFETY: the test's own window.
+        unsafe { ShowWindow(o.parent, SW_MINIMIZE) };
+        play(0.6, 400);
+        let (d2, s2) = counts();
+        play(0.6, 2000);
+        let (d3, s3) = counts();
+        let (seen, unseen) = (d1 - d0, d3 - d2);
+        println!(
+            "2 s seen: {seen} frames drawn, {} shown; 2 s unseen: {unseen} drawn, {} shown",
+            s1 - s0,
+            s3 - s2
+        );
+        assert!(seen >= 40, "{seen} frames drawn in 2 s while seen");
+        assert!(unseen <= 12, "{unseen} frames drawn in 2 s while unseen");
+        assert_eq!(s3 - s2, 0, "frames shown while unseen");
+        // SAFETY: the test's own window.
+        unsafe { ShowWindow(o.parent, SW_RESTORE) };
+        play(0.0, 300);
+        // Still (as `the_window_shown_in_places_is_the_window_shown_whole` waits for it), then
+        // the window shown whole by Windows' own repaint: the same pixels.
+        let span = Duration::from_secs_f64(crate::opening::DOZE_AFTER + 1.0);
+        let until = Instant::now() + Duration::from_secs(20);
+        let mut still = every_pixel(&o);
+        let mut since = Instant::now();
+        while since.elapsed() < span {
+            pump(Duration::from_millis(400));
+            let now = every_pixel(&o);
+            if now != still {
+                assert!(Instant::now() < until, "the window never still");
+                (still, since) = (now, Instant::now());
+            }
+        }
+        assert!(colours(&still) >= 100, "the panel shown again");
+        let flags = RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN;
+        // SAFETY: the test's own windows.
+        unsafe { RedrawWindow(o.parent, null_mut(), null_mut(), flags) };
+        pump(Duration::from_millis(200));
+        let whole = every_pixel(&o);
+        let apart = still.iter().zip(&whole).filter(|(a, b)| a != b).count();
+        assert_eq!(
+            apart, 0,
             "{apart} pixels shown otherwise than in the whole frame"
         );
         o.close();

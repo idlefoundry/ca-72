@@ -701,6 +701,18 @@ pub struct Voice {
     fed_back: f64,
 }
 
+/// A voice's parts lent for a run ([`Voice::lend`]).
+pub(crate) struct Lent<'a> {
+    pub panel: &'a Panel,
+    pub keys: &'a mut Keys,
+    pub kbd: &'a mut KeyboardPart,
+    pub ctl: &'a mut ControlPart,
+    pub bias: &'a mut BiasPart,
+    pub pre: &'a mut PreampPart,
+    pub front: &'a mut FrontPart,
+    pub back: &'a mut BackPart,
+}
+
 /// The keys: which are held, and which released keys' pitch contacts are still closed.
 #[derive(Debug, Clone)]
 pub struct Keys {
@@ -919,6 +931,16 @@ pub struct FrontPart {
 
 /// What the front gives the back each sample: the mixer bus's Norton current (A) and
 /// conductance (S), and the filter's control current (A).
+/// A sample's voice up to its filter ([`Voice::before_filter`]): the panel it played, the
+/// front's output, the VCA's bias and the keyboard's voltage.
+#[derive(Debug, Clone, Copy)]
+pub struct Halfway {
+    p: Panel,
+    f: FrontOut,
+    d: VcaDrive,
+    v_kbd: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct FrontOut {
     pub i_bus: f64,
@@ -935,6 +957,13 @@ pub struct BackPart {
     a440: A440,
     /// EMPHASIS's law.
     emphasis: Memo<f64>,
+}
+
+impl BackPart {
+    /// [`Voice::set_drive`] for the back on a thread of its own ([`crate::threaded`]).
+    pub fn set_drive(&mut self, gain: f64) {
+        self.vcf.set_drive(gain);
+    }
 }
 
 /// The external input's scale: the jack's voltage for a sample of 1.0, the same as the
@@ -1328,6 +1357,40 @@ impl Voice {
         self.audio.take_overload_peak()
     }
 
+    /// Whether [`crate::threaded::Helpers`] play the voice: at No Compromises, with FEEDBACK
+    /// off, its pitch and contour paths following its panel.
+    pub fn splits(&self) -> bool {
+        self.panel.quality == Quality::NoCompromises
+            && self.feedback == 0.0
+            && self.control_quality.is_none()
+    }
+
+    /// The voice lent to [`crate::threaded::Helpers`] for a run: what its threads run (the
+    /// preamplifier set as [`Voice::tick_jacks`] sets it with FEEDBACK off), and what the
+    /// caller's does.
+    pub(crate) fn lend(&mut self) -> Lent<'_> {
+        self.audio.pre.accurate = false;
+        self.audio.pre.in_loop = self.in_loop;
+        Lent {
+            panel: &self.panel,
+            keys: &mut self.keys,
+            kbd: &mut self.kbd,
+            ctl: &mut self.ctl,
+            bias: &mut self.bias,
+            pre: &mut self.audio.pre,
+            front: &mut self.audio.front,
+            back: &mut self.audio.back,
+        }
+    }
+
+    /// After a run lent ([`Voice::lend`]): the last sample's contours, probes and output, as
+    /// [`Voice::tick_jacks`] keeps them.
+    pub(crate) fn lent_ran(&mut self, ctl: (f64, f64), probe: (f64, f64, f64), y: f64) {
+        self.last_ctl = ctl;
+        self.audio.last = probe;
+        self.fed_back = y;
+    }
+
     /// The voice's parts, for running them on threads of their own
     /// ([`crate::threaded`]).
     pub fn into_parts(self) -> (Panel, Keys, KeyboardPart, ControlPart, BiasPart, AudioPart) {
@@ -1360,6 +1423,65 @@ impl Voice {
         };
         self.fed_back = y;
         y
+    }
+
+    /// Whether [`Voice::filter_pair`] solves this voice's filter beside another's (HI).
+    pub fn pairs(&self) -> bool {
+        self.panel.quality == Quality::Potato
+    }
+
+    /// [`Voice::tick_jacks`] up to the filter (decisions.md R-HI-PAIRS): the keyboard, the
+    /// contours, the VCA's bias, the preamplifier and the front, the filter set up; then
+    /// [`Voice::filter_pair`] and [`Voice::after_filter`]. Together the same samples to the
+    /// bit as [`Voice::tick_jacks`].
+    pub fn before_filter(&mut self, j: &Jacks) -> Halfway {
+        self.audio.pre.accurate = self.feedback > 0.0;
+        self.audio.pre.in_loop = self.in_loop;
+        let j = if self.feedback > 0.0 {
+            Jacks {
+                ext: j.ext + self.feedback * self.fed_back,
+                ..*j
+            }
+        } else {
+            *j
+        };
+        let p = self.panel;
+        let mut c = self.keys.step(p.priority);
+        c.s_trig = j.s_trig;
+        let pc = match self.control_quality {
+            Some(quality) => Panel { quality, ..p },
+            None => p,
+        };
+        let v_kbd = self.kbd.tick(&pc, c);
+        let ctl = self.ctl.tick(&pc, c);
+        self.last_ctl = (ctl.env_f, ctl.env_l);
+        let d = self.bias.tick(ctl.env_l, j.loudness, p.quality);
+        let i_pre = self.audio.pre.tick(&p, j.ext);
+        let f = self.audio.front.tick(&p, &j, v_kbd, &ctl, i_pre);
+        self.audio.back.set_filter(&p);
+        Halfway { p, f, d, v_kbd }
+    }
+
+    /// Two voices' filters over the sample, from [`Voice::before_filter`]: solved side by
+    /// side where both play HI, else one after the other.
+    pub fn filter_pair(a: &mut Voice, ha: &Halfway, b: &mut Voice, hb: &Halfway) -> (f64, f64) {
+        let _fast = crate::ulp::FastScope::new(ha.p.quality != Quality::NoCompromises);
+        let x = |h: &Halfway| (h.f.i_bus, h.f.g_bus, h.f.i0);
+        if ha.p.quality != hb.p.quality {
+            let ya = a.audio.back.vcf.tick(ha.f.i_bus, ha.f.g_bus, ha.f.i0);
+            let _fast = crate::ulp::FastScope::new(hb.p.quality != Quality::NoCompromises);
+            let yb = b.audio.back.vcf.tick(hb.f.i_bus, hb.f.g_bus, hb.f.i0);
+            return (ya, yb);
+        }
+        Vcf::tick_pair(&mut a.audio.back.vcf, &mut b.audio.back.vcf, x(ha), x(hb))
+    }
+
+    /// [`Voice::tick_jacks`] from the filter's output `y` on: the VCA; the output sample.
+    pub fn after_filter(&mut self, h: &Halfway, y: f64) -> f64 {
+        let out = self.audio.back.after_filter(&h.p, y, &h.d);
+        self.audio.last = (h.v_kbd, h.f.i_bus, y);
+        self.fed_back = out;
+        out
     }
 
     fn tick_at(&mut self, j: &Jacks) -> f64 {
@@ -1403,6 +1525,11 @@ fn contour_panel(p: &Panel, s_trig: bool, pots: &mut [Memo<f64>; 4]) -> ContourP
 }
 
 impl Keys {
+    /// Whether the trigger contact was closed at the last step ([`Voice::trigger_closed`]).
+    pub(crate) fn gate(&self) -> bool {
+        self.gate
+    }
+
     /// A MIDI note (0 to 127) pressed or released: the 44 keys F to C (41 to 84) are the
     /// instrument's, the rest continue its key string ([`Keys::step`]). With `retrigger`, a key
     /// pressed waits until the trigger contact has been open [`RETRIGGER_GAP`], opening it
@@ -1744,6 +1871,11 @@ impl PreampPart {
         i
     }
 
+    /// The OVERLOAD lamp after the last sample, its brightest left for [`PreampPart::lamp`].
+    pub(crate) fn lamp_now(&self) -> f64 {
+        self.overload
+    }
+
     /// The OVERLOAD lamp after the last sample, and its brightest since the last call to
     /// this (for the threaded voice, which reads them from the preamplifier's thread).
     pub fn lamp(&mut self) -> (f64, f64) {
@@ -1943,5 +2075,23 @@ impl BackPart {
         let out = self.vca.signal(y, d);
         laps.lap(crate::prof::Part::Vca);
         (y, out / 5.0)
+    }
+
+    /// [`BackPart::tick`] up to the filter: the filter set up for the panel.
+    fn set_filter(&mut self, p: &Panel) {
+        let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
+        self.vcf.circuit.r14 = self.emphasis.get(p.emphasis, emphasis_r14);
+        self.vcf.set_oversample(oversampling(p.quality).1);
+        self.vcf.set_quality(p.quality);
+        self.vcf.high_pass = p.filter_hi;
+    }
+
+    /// [`BackPart::tick`] from the filter's output `y` on: the output sample.
+    fn after_filter(&mut self, p: &Panel, y: f64, d: &VcaDrive) -> f64 {
+        let _fast = crate::ulp::FastScope::new(p.quality != Quality::NoCompromises);
+        self.vca.a440 = self.a440.tick(p.a440);
+        self.vca.plain_signal = p.quality != Quality::NoCompromises;
+        let out = self.vca.signal(y, d);
+        out / 5.0
     }
 }
