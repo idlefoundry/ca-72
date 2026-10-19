@@ -1046,6 +1046,9 @@ mod tests {
         host.automate(p.tune.as_ptr(), p.tune.default_normalized_value() + 2e-7);
         p.editor_width.store(860, Ordering::Relaxed);
         p.editor_panel.store(false, Ordering::Relaxed);
+        p.editor_expanded.store(false, Ordering::Relaxed);
+        p.editor_panel_applied.store(false, Ordering::Relaxed);
+        p.editor_presets.store(true, Ordering::Relaxed);
         p.freq_law.store(1, Ordering::Relaxed);
         p.noise_seed.store(12345, Ordering::Relaxed);
         p.midi_map
@@ -1087,6 +1090,9 @@ mod tests {
         assert_eq!(p.midi_map.saved(), assignments);
         assert_eq!(p.editor_width.load(Ordering::Relaxed), 860);
         assert!(!p.editor_panel.load(Ordering::Relaxed));
+        assert!(p.editor_presets.load(Ordering::Relaxed));
+        assert!(!p.editor_expanded.load(Ordering::Relaxed));
+        assert!(!p.editor_panel_applied.load(Ordering::Relaxed));
         assert_eq!(p.freq_law.load(Ordering::Relaxed), 1);
         assert_eq!(p.seed(), 12345);
         assert_eq!(Browser::current(&p), "");
@@ -1141,29 +1147,55 @@ mod tests {
             let host = ApplyingHost::new(p.clone());
             let setter = ParamSetter::new(&host);
             host.automate(p.quality.as_ptr(), p.quality.preview_normalized(quality));
-            let fresh = p.controls();
-            let before = values_now(&p);
+            let fresh_params = Arc::new(Ca72Params::default());
+            let fresh_host = ApplyingHost::new(fresh_params.clone());
+            fresh_host.automate(
+                fresh_params.quality.as_ptr(),
+                fresh_params.quality.preview_normalized(quality),
+            );
+            let fresh = fresh_params.controls();
+            let before = values_now(&fresh_params);
+            let expected = render(&fresh_params, 12345);
             let mut b = Browser::new(Library::at(dir.path()));
             b.show(true, &p);
+            let factory = b.library.entries().0;
             let changed = b.library.find("Brass Choir").unwrap();
             b.choose(&changed, &p, &setter);
             assert_ne!(p.controls(), fresh);
             b.drawer_press(DrawerTarget::Key(PresetKey::Init), 0.0, &p, &setter);
             assert_eq!(values_now(&p), before);
             assert_eq!(p.controls(), fresh);
-            let expected = render(&p, 12345);
+            assert_eq!(render(&p, 12345), expected, "Init audio at {quality:?}");
             b.key_press(PresetKey::SaveAs, &p, &setter);
             b.drawer.save_name = Field::new("From Init");
             b.key_press(PresetKey::SaveAs, &p, &setter);
+            // Reopen the library so this checks the file, rather than the first browser's
+            // in-memory entry, and alter the saved patch before keeping it.
+            host.automate(p.cutoff.as_ptr(), 0.75);
+            let patch = p.controls();
+            let patch_values = values_now(&p);
+            let patch_audio = render(&p, 12345);
+            b.key_press(PresetKey::SaveAs, &p, &setter);
+            b.drawer.save_name = Field::new("Edited from Init");
+            b.key_press(PresetKey::SaveAs, &p, &setter);
+            drop(b);
+            let mut b = Browser::new(Library::at(dir.path()));
+            b.show(true, &p);
             let saved = b.library.find("From Init").unwrap();
+            let edited = b.library.find("Edited from Init").unwrap();
             b.choose(&changed, &p, &setter);
             b.choose(&saved, &p, &setter);
+            assert_eq!(values_now(&p), before, "saved values at {quality:?}");
             assert_eq!(p.controls(), fresh, "saved and reloaded at {quality:?}");
             assert_eq!(
                 render(&p, 12345),
                 expected,
                 "audio at equivalent seed, phase and {quality:?}"
             );
+            b.choose(&edited, &p, &setter);
+            assert_eq!(values_now(&p), patch_values);
+            assert_eq!(p.controls(), patch);
+            assert_eq!(render(&p, 12345), patch_audio);
             // Init is an action even when a user's patch is named Init.
             let named_init = b
                 .library
@@ -1173,6 +1205,9 @@ mod tests {
             b.drawer_press(DrawerTarget::Key(PresetKey::Init), 0.0, &p, &setter);
             assert_eq!(p.controls(), fresh);
             assert_eq!(b.library.find("Init").unwrap(), named_init);
+            for entry in factory {
+                assert_eq!(b.library.find(&entry.sound.name).unwrap(), entry);
+            }
         }
     }
 

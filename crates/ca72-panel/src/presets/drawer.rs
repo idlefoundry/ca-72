@@ -2202,6 +2202,10 @@ mod tests {
                     focus: Some(FieldId::Search),
                     search: Field::new("bass"),
                     favourites: true,
+                    hover: Some(DrawerTarget::Key(PresetKey::SaveAs)),
+                    ..base.clone()
+                },
+                DrawerScene {
                     hover: Some(DrawerTarget::Key(PresetKey::Init)),
                     ..base.clone()
                 },

@@ -7514,3 +7514,42 @@ uses the drawer action, saves and reloads the result, checks a user's preset nam
 untouched, and compares three notes' stereo renders at LO, HI and ULTRA with seed 12345:
 15,360 stereo samples at each quality match to the bit and are finite and non-silent.
 Both tests and plug-in library/test clippy pass. No host or audio device was opened for them.
+
+**Integration, 2026-10-18.** Rebased onto main `1a1dd6c` (0.2.6), retaining #85's
+caption sizes, selection colours, hit-region and redraw tests. The INIT cap uses those same
+caption measurements and remains separate from the existing keys. Its hover is checked in
+partial redraws and shown in the optional editing-state review render.
+
+The audio reference now comes from a separate fresh parameter instance and engine, with the
+same quality and seed, before the other instance loads a factory sound and INIT. After
+saving both INIT and a patch edited from it, a new browser reads the files back; their states
+and audio must match. The test also compares every factory library entry afterwards. The
+parameter test explicitly keeps the editor's transient visibility flags as well as its
+persisted preferences. Engine history is still not restarted by INIT.
+
+## R-SETTINGS-VERSION. Settings names the installed version
+
+**Owner authorisation, 2026-10-18.** Implement only issue 75's installed-version display in
+Settings. The changelog and What's New modal are outside this work.
+
+**Integration decision, 2026-10-18.** Keep `33cec21`'s Settings heading, derived from the
+existing `update::VERSION` (`CARGO_PKG_VERSION`), matching the plug-in's reported version.
+It remains visible independently of update status, including offline failure; opening the
+menu does not start an update check. The drawer still distinguishes a newer online version
+from the installed version.
+
+Compared with fidelity's `414eaa0` (R-VERSION), this keeps the change within issue 75's
+version-display scope and avoids its unrelated worker-seat test change. That alternative
+adds a build script, commit suffixes in the drawer and a VERSION menu group. Local builds
+with the same package version remain indistinguishable under the chosen approach. Whether
+to add commit identity separately remains for the owner; neither a new version policy nor
+approval of that alternative is inferred here. No version number is changed.
+
+**Integration evidence (Linux, Rust 1.97.1, 2026-10-18):**
+`cargo test -p ca72-panel -p ca72-plugin` passes, including both approved panel images,
+the Init parameter/state/audio checks and the Settings tests. Clippy for both crates, all
+targets, passes with default and all features and `-D warnings`; formatting and whitespace
+checks pass. A separate read-only source review found no product bugs or unrelated changes.
+All checks use this worktree's target, shared-data and worker-seat folders. No native host,
+installed plug-in or audio device was opened; host acceptance of the new action remains
+untested here.
