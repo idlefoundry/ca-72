@@ -8079,3 +8079,47 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-RELEASE-0.2.7. 0.2.7
+
+**Owner decisions, 2026-10-19.** The owner chose the release's contents from the overnight
+brief: #92 (Linux dock icon), #101 (CLAP velocity-zero notes), #102 and #103 (Mac second
+monitor), #97 (Windows standalone at every display scale), #95 (choose the install folder) and
+#106 (What's New), with #94 (Init, the version in Settings) and #93 (ENTROPY's new floor)
+already merged: "I've selected a bunch of your changes/bug fixes that I would like released as
+0.2.7 as soon as possible." What's New's look: "WN-A is my choice", and after trying the
+stand-in in a test build, "on standalone, i don't like that this What's New screen wasn't a
+modal." Version 0.2.7: "0.2.7 is fine." The coordinator chose #94's version display over
+`fidelity`'s and the merge order, as the owner left it: "your choice which one. Your choice on
+merge order as well." Publication: "is there any reason why we shouldn't? Otherwise, let's do it."
+
+**Publication evidence, 2026-10-19.** [CA-72 0.2.7](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.7)
+is public and Latest, also to an anonymous request (which the update check makes). The picks were
+merged into one branch, `release-0.2.7`, after the review bot's findings on #92, #95 and #106
+were fixed on their branches. The merge kept every decisions record. Baseview's patches are
+numbered 8 (#102), 9 (#97) and 10 (#92). #97's switch of the standalone onto the patched
+baseview on every platform replaced #92's Linux-only alias, and #92's checks follow it.
+- [PR #110](https://github.com/idlefoundry/ca-72/pull/110)'s CI
+  ([39262486786](https://github.com/idlefoundry/ca-72/actions/runs/39262486786)) passed on
+  Linux, Windows and macOS. Locally on Linux, the workspace tests with ngspice and the standalone
+  features passed (548), as did clippy (all features), fmt, notices, and the window-identity and
+  installer scripts. `main` is the merge `41646f12919b65d9c4c691d25bc53ff6b65d44dd`, which the
+  annotated `v0.2.7` tag names. The tag's CI
+  ([39266513280](https://github.com/idlefoundry/ca-72/actions/runs/39266513280)) passed in all
+  four jobs and drafted the release.
+- The macOS installer was built on the Mac from a clean checkout of the tag, as
+  `docs/macos-release.md` describes (0.2.6's was made from CI's bundles). It was signed with
+  Developer ID inside the owner's session, where the keychain is open, notarised (submission
+  `682f01b9-0812-40c7-94ae-237f8ae2991f`, Accepted) and stapled. `pkgutil`, Gatekeeper
+  ("Notarized Developer ID") and `codesign --verify --deep --strict` passed for every bundle,
+  and the Audio Unit carries the signed CLAP byte for byte.
+- `CA-72-0.2.7-macOS.pkg` sha256 `9f39b02ee9b5b9880f9e658c97134d7a09747281d67335af7da8091f424a5d78`,
+  91,703,952 bytes. After publication all six downloads were fetched again without a login and
+  checked against `SHA256SUMS.txt`: every one matched.
+- No host test of the installed 0.2.7 package was made before publication. The same code ran in
+  the owner's renamed test builds.
+- Issues #48, #49, #54, #64 and #75 closed with the release; #57 stays open (#101 fixed a real
+  defect, but the reporter's cause is unconfirmed). Known and not fixed in 0.2.7, as in earlier
+  releases: the standalone asks for microphone access at launch, and a device that doesn't answer
+  leaves AUDIO & MIDI empty (#112, for 0.2.8). The release's scripts and logs are in
+  `~/lab/artifacts/ca-72/0.2.7/` on the Mac.
