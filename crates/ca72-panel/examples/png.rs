@@ -2,6 +2,7 @@
 //! (pixels a panel unit, 0.5 by default); `CA72_SKIN=worn` in the worn skin; `CA72_MONO=1` the
 //! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places); `CA72_LETTERING=
 //! large` in the large lettering.
+//! `CA72_PRESETS=1` shows the preset drawer with deterministic review contents.
 //! `CA72_STANDALONE=1` shows the standalone keyboard's TYPING and PANIC controls.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
@@ -70,6 +71,18 @@ fn main() {
         let n = w.min(sf.width() as usize) * 4;
         let (from, to) = (y * sf.width() as usize * 4, (top + y) * w * 4);
         all.data_mut()[to..to + n].copy_from_slice(&sf.data()[from..from + n]);
+    }
+    if std::env::var("CA72_PRESETS").is_ok_and(|v| v == "1") {
+        let mut drawer = ca72_panel::presets::DrawerRenderer::new(scale);
+        drawer.render(&example_drawer());
+        all.draw_pixmap(
+            0,
+            (ca72_panel::presets::DRAWER_TOP * scale).round() as i32,
+            drawer.frame().as_ref(),
+            &resvg::tiny_skia::PixmapPaint::default(),
+            resvg::tiny_skia::Transform::identity(),
+            None,
+        );
     }
     if std::env::var("CA72_KEYBOARD_CROP").is_ok_and(|v| v == "1") {
         let [x0, y0, x1, y1] = [370.0, 925.0, 3080.0, 1750.0].map(|v| (v * scale).round() as u32);
@@ -160,5 +173,92 @@ fn example_strip(mono: bool) -> ca72_panel::strip::StripScene {
             ..Default::default()
         },
         ..StripScene::default()
+    }
+}
+
+/// Matched contents for before/after reviews; the status line is fixture data.
+fn example_drawer() -> ca72_panel::presets::DrawerScene {
+    use ca72_panel::presets::{
+        Current, DrawerScene, DrawerTarget, Field, FieldId, Row, Tone, UpdateScene,
+    };
+    let presets = [
+        ("Bass", "bass", None, false),
+        ("Lead", "lead glide", None, true),
+        ("Three Saw Slab", "bass fat prog", None, false),
+        ("Elastic Octaves", "bass funk glide", None, false),
+        ("Pulse Strut", "bass funk feedback", None, false),
+        ("Undertow Growl", "bass dark growl", Some("EDITED"), true),
+        ("Upright Pluck", "bass plucked", None, false),
+        ("Hollow Glider", "lead glide prog", None, false),
+        ("Cruising Whistle", "lead whistle", None, false),
+        ("Stacked Fifths", "lead chord prog", None, false),
+        ("Ringing Saw Line", "lead resonant", None, false),
+        ("Slow Horn Swell", "lead brass slow", None, false),
+        ("Brass Tutti", "brass", None, true),
+        ("Breath Flute", "woodwind flute", None, false),
+        ("Wooden Mallet", "percussive mallet", None, false),
+        ("Shoreline Wash", "fx noise", None, false),
+        ("Slow Bow", "strings slow", None, false),
+        ("Ladder Kick", "drums kick", None, false),
+        ("Sunday Bass", "bass", Some("YOURS"), false),
+        ("Glass Lead", "lead", Some("YOURS"), false),
+    ];
+    let chips = [
+        "bass",
+        "brass",
+        "chord",
+        "dark",
+        "drums",
+        "fat",
+        "feedback",
+        "flute",
+        "funk",
+        "glide",
+        "growl",
+        "kick",
+        "lead",
+        "mallet",
+        "noise",
+        "percussive",
+        "plucked",
+        "prog",
+        "resonant",
+        "slow",
+        "strings",
+        "whistle",
+        "woodwind",
+    ];
+    DrawerScene {
+        search: Field::default(),
+        focus: Some(FieldId::Search),
+        chips: chips
+            .iter()
+            .map(|t| ((*t).to_owned(), *t == "glide"))
+            .collect(),
+        rows: presets
+            .iter()
+            .map(|(n, t, o, f)| Row {
+                name: (*n).into(),
+                tags: (*t).into(),
+                origin: *o,
+                favorite: *f,
+                current: *n == "Brass Tutti",
+            })
+            .collect(),
+        first: 1,
+        current: Some(Current {
+            name: "Brass Tutti".into(),
+            origin: None,
+            tags: "brass".into(),
+            favorite: true,
+        }),
+        total: 26,
+        hover: Some(DrawerTarget::Row(7)),
+        update: UpdateScene {
+            text: "RENDER FIXTURE".into(),
+            tone: Tone::Dim,
+            button: "CHECK FOR UPDATES".into(),
+        },
+        ..DrawerScene::default()
     }
 }
