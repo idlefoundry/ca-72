@@ -273,7 +273,9 @@ impl Chain {
     }
 
     /// Loads an effect into a slot of its own and puts it at the end, or in place of the one
-    /// at `replace`; one that does not load is kept, missing, if `keep`, else an error.
+    /// at `replace`; one that does not load is kept, missing, if `keep`, else an error. The
+    /// chain is not held while the plug-in loads (seconds, for some): the drawer reads it
+    /// meanwhile, and its other effects can be bypassed (decisions.md R-FX-DRAWER).
     fn insert(
         &self,
         saved: SavedSlot,
@@ -282,40 +284,62 @@ impl Chain {
     ) -> Result<usize, String> {
         let shared = &self.shared;
         shared.drain_retired();
-        let mut core = lock(&shared.core);
-        if let Some(at) = replace {
-            if at >= core.slots.len() {
-                return Err(format!("there is no effect {}", at + 1));
+        let fits = |core: &Core| match replace {
+            Some(at) if at >= core.slots.len() => Err(format!("there is no effect {}", at + 1)),
+            None if core.slots.len() >= MAX_SLOTS => {
+                Err(format!("the chain holds {MAX_SLOTS} effects at most"))
             }
-        } else if core.slots.len() >= MAX_SLOTS {
-            return Err(format!("the chain holds {MAX_SLOTS} effects at most"));
-        }
-        let at = replace.unwrap_or(core.slots.len());
+            _ => Ok(()),
+        };
         let bypass = Arc::new(AtomicBool::new(saved.bypass));
         let state = match saved.state.as_deref().map(protocol::unhex).transpose() {
             Ok(s) => s,
             Err(e) => return Err(format!("{}'s saved state is damaged: {e}", saved.name)),
         };
         let label = saved.name.clone();
-        let loaded = shared.sandbox.load(
-            &label,
-            &saved.path,
-            &saved.plugin,
-            state.as_deref(),
-            &[],
-            core.rate,
-            MAX_BLOCK as u32,
-        );
-        let (inst, error) = match loaded {
-            Ok(i) => (Some(i), None),
-            Err(e) if !keep => return Err(e),
-            Err(e) => {
-                shared
-                    .sandbox
-                    .event(&label, "warning", format!("not loaded: {e}"));
-                (None, Some(e))
+        // Loaded at the rate the chain runs at, again if the device changed it meanwhile.
+        let (mut core, inst, error) = loop {
+            let rate = {
+                let core = lock(&shared.core);
+                fits(&core)?;
+                core.rate
+            };
+            let loaded = shared.sandbox.load(
+                &label,
+                &saved.path,
+                &saved.plugin,
+                state.as_deref(),
+                &[],
+                rate,
+                MAX_BLOCK as u32,
+            );
+            let core = lock(&shared.core);
+            let (inst, error) = match loaded {
+                Ok(i) => (Some(i), None),
+                Err(e) if !keep => return Err(e),
+                Err(e) => (None, Some(e)),
+            };
+            if let Err(e) = fits(&core) {
+                if let Some(i) = &inst {
+                    shared.sandbox.unload(i);
+                }
+                return Err(e);
             }
+            if core.rate != rate && inst.is_some() {
+                drop(core);
+                if let Some(i) = &inst {
+                    shared.sandbox.unload(i);
+                }
+                continue;
+            }
+            break (core, inst, error);
         };
+        if let Some(e) = &error {
+            shared
+                .sandbox
+                .event(&label, "warning", format!("not loaded: {e}"));
+        }
+        let at = replace.unwrap_or(core.slots.len());
         let stage = Stage {
             node: inst.as_ref().map(|i| Box::new(shared.node(i, core.block))),
             bypass: bypass.clone(),
@@ -486,7 +510,16 @@ impl Chain {
 
     /// Every slot, in order.
     pub fn status(&self) -> Vec<SlotStatus> {
-        let core = lock(&self.shared.core);
+        self.status_of(&lock(&self.shared.core))
+    }
+
+    /// Every slot, in order, unless the chain is busy (a device's sample rate being taken):
+    /// for the drawer, which never waits on it.
+    pub fn try_status(&self) -> Option<Vec<SlotStatus>> {
+        try_lock(&self.shared.core).map(|core| self.status_of(&core))
+    }
+
+    fn status_of(&self, core: &Core) -> Vec<SlotStatus> {
         let pipelined = self.shared.opts.mode == Mode::Pipelined;
         core.slots
             .iter()
@@ -546,12 +579,13 @@ impl Chain {
 
     /// Whether any effect is playing (loaded, not bypassed): the FX key's light.
     pub fn active(&self) -> bool {
-        lock(&self.shared.core).slots.iter().any(|s| {
-            !s.bypass.load(Ordering::Acquire)
-                && s.inst.as_ref().is_some_and(|i| {
-                    i.status() != sandbox::FAILED && i.status() != sandbox::RETIRED
-                })
-        })
+        active(&lock(&self.shared.core))
+    }
+
+    /// Whether any effect is playing, unless the chain is busy: for the drawer, which never
+    /// waits on it.
+    pub fn try_active(&self) -> Option<bool> {
+        try_lock(&self.shared.core).map(|core| active(&core))
     }
 
     /// The chain's latency now, in frames: the sum of its running effects' that are not
@@ -643,6 +677,25 @@ impl Chain {
         }
         saved
     }
+}
+
+/// `m` locked, unless another holds it (a poisoned lock taken as it is, as [`lock`] takes it).
+fn try_lock<T>(m: &Mutex<T>) -> Option<std::sync::MutexGuard<'_, T>> {
+    match m.try_lock() {
+        Ok(g) => Some(g),
+        Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
+}
+
+/// Whether any effect in `core` is playing (loaded, not bypassed, not given up on).
+fn active(core: &Core) -> bool {
+    core.slots.iter().any(|s| {
+        !s.bypass.load(Ordering::Acquire)
+            && s.inst
+                .as_ref()
+                .is_some_and(|i| i.status() != sandbox::FAILED && i.status() != sandbox::RETIRED)
+    })
 }
 
 /// A found effect as a new slot: an instrument refused.
