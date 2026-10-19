@@ -88,8 +88,8 @@ fn settings_menu_corner() -> (f64, f64) {
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// A mouse wheel's turns are one gesture until it rests this long.
 const SCROLL_REST: Duration = Duration::from_millis(400);
-/// A trackpad's travel that makes a notch, in pixels.
-const NOTCH: f64 = 40.0;
+/// A trackpad's logical travel equivalent to one wheel line (also its old notch threshold).
+const SCROLL_PIXELS_PER_LINE: f64 = 40.0;
 /// A control's menu's lettering, against the tip's.
 const MENU_TEXT: f64 = 1.15;
 
@@ -742,6 +742,7 @@ struct Scroll {
     control: usize,
     value: f64,
     last: Instant,
+    /// A discrete control's travel not yet a whole notch, in logical scroll pixels.
     travel: f64,
 }
 
@@ -2351,7 +2352,10 @@ impl Editing {
         if (pointer.0 - d.from.0).abs() + (pointer.1 - d.from.1).abs() > 3.0 {
             d.moved = true;
         }
-        if !d.moved {
+        let kind = CONTROLS[d.control].kind;
+        // The click threshold belongs to switches and selectors. A continuous control
+        // follows even a sub-pixel movement from the press, with no initial jump.
+        if !d.moved && !kind.is_continuous() {
             return;
         }
         if fine != d.fine {
@@ -2359,7 +2363,6 @@ impl Editing {
             d.at = pointer;
             d.fine = fine;
         }
-        let kind = CONTROLS[d.control].kind;
         if let Some(v) = interact::drag(
             &kind,
             d.base,
@@ -2515,31 +2518,13 @@ impl Editing {
         if !self.operable(i) {
             return;
         }
-        let (notches, travel) = match delta {
-            ScrollDelta::Lines { y, .. } => (
-                if y > 0.0 {
-                    1.0
-                } else if y < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                },
-                0.0,
-            ),
-            ScrollDelta::Pixels { y, .. } => {
-                let travel = self
-                    .scroll
-                    .as_ref()
-                    .filter(|s| s.control == i)
-                    .map_or(0.0, |s| s.travel)
-                    + f64::from(y);
-                if travel.abs() < NOTCH {
-                    (0.0, travel)
-                } else {
-                    (travel.signum(), 0.0)
-                }
-            }
+        let travel = match delta {
+            ScrollDelta::Lines { y, .. } => f64::from(y) * SCROLL_PIXELS_PER_LINE,
+            ScrollDelta::Pixels { y, .. } => f64::from(y),
         };
+        if !travel.is_finite() || travel == 0.0 {
+            return;
+        }
         if self.scroll.as_ref().is_some_and(|s| s.control != i) {
             self.end_scroll();
         }
@@ -2558,12 +2543,24 @@ impl Editing {
         let kind = CONTROLS[i].kind;
         let Some(s) = &mut self.scroll else { return };
         s.last = Instant::now();
-        s.travel = travel;
+        let notches = if kind.is_continuous() {
+            travel / SCROLL_PIXELS_PER_LINE
+        } else {
+            // Only discrete options wait for a whole notch. Keep excess travel, and start
+            // afresh when the direction changes so the old fraction cannot eat a step.
+            if travel * s.travel < 0.0 {
+                s.travel = 0.0;
+            }
+            s.travel += travel;
+            let whole = (s.travel / SCROLL_PIXELS_PER_LINE).trunc();
+            s.travel -= whole * SCROLL_PIXELS_PER_LINE;
+            whole
+        };
         if notches != 0.0 {
-            let v = interact::step(
+            let v = interact::scroll(
                 &kind,
                 s.value,
-                notches > 0.0,
+                notches,
                 modifiers.contains(Modifiers::SHIFT),
             );
             if v != s.value {
@@ -7413,6 +7410,7 @@ mod tests {
             host.take(),
             vec![
                 Call::Begin(cutoff),
+                Call::Set(cutoff, (0.5 + 2.0 / 240.0) as f32),
                 Call::Set(cutoff, 0.75),
                 Call::Set(cutoff, 1.0),
                 Call::End(cutoff)
@@ -7431,6 +7429,7 @@ mod tests {
             host.take(),
             vec![
                 Call::Begin(inner),
+                Call::Set(inner, (2.0 / 240.0) as f32),
                 Call::Set(inner, 0.25),
                 Call::Set(inner, 1.0),
                 Call::End(inner)
@@ -7552,6 +7551,246 @@ mod tests {
         }
         e.draw();
         assert_eq!(host.take(), vec![Call::End(emphasis)]);
+    }
+
+    /// Every input event reaches the host before a frame is drawn, including travel below
+    /// one logical pixel on a Retina display. The distance and Shift's rate stay the same.
+    #[test]
+    fn knob_resolution_keeps_every_subpixel_drag_value() {
+        let mut counts = Vec::new();
+        for (width, dpr) in [(860, 1.0), (1720, 1.0), (860, 2.0), (1720, 2.0)] {
+            for fine in [false, true] {
+                let (mut e, host, params) = editing();
+                e.fit(dpr, width, (f64::from(width) * dpr) as u32);
+                let p = at(&e, centre("cutoff"));
+                let modifiers = if fine {
+                    Modifiers::SHIFT
+                } else {
+                    Modifiers::empty()
+                };
+                go(&mut e, p);
+                e.mouse(MouseEvent::ButtonPressed {
+                    button: MouseButton::Left,
+                    modifiers,
+                });
+                for n in 1..=384 {
+                    e.mouse(MouseEvent::CursorMoved {
+                        position: below(p, -f64::from(n) / 16.0),
+                        modifiers,
+                    });
+                }
+                release(&mut e);
+                let calls = host.take();
+                well_formed(&calls);
+                let values: Vec<_> = calls
+                    .iter()
+                    .filter_map(|c| match *c {
+                        Call::Set(param, v) if param == params.cutoff.as_ptr() => Some(v),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(values.windows(2).all(|v| v[1] > v[0]));
+                let expected = 0.5 + if fine { 0.01 } else { 0.1 };
+                assert!((f64::from(*values.last().expect("drag values")) - expected).abs() < 1e-6);
+                println!(
+                    "drag: width {width}, scale {dpr}, fine {fine}: {}/384 distinct values",
+                    values.len()
+                );
+                counts.push(values.len());
+            }
+        }
+        assert_eq!(counts, vec![384; 8]);
+    }
+
+    #[test]
+    fn knob_resolution_keeps_every_pixel_scroll_value() {
+        let mut counts = Vec::new();
+        for fine in [false, true] {
+            for sign in [-1.0, 1.0] {
+                let (mut e, host, params) = editing();
+                let p = at(&e, centre("cutoff"));
+                go(&mut e, p);
+                for _ in 0..384 {
+                    e.mouse(MouseEvent::WheelScrolled {
+                        delta: ScrollDelta::Pixels {
+                            x: 0.0,
+                            y: sign * 0.25,
+                        },
+                        modifiers: if fine {
+                            Modifiers::SHIFT
+                        } else {
+                            Modifiers::empty()
+                        },
+                    });
+                }
+                e.end_scroll();
+                let calls = host.take();
+                well_formed(&calls);
+                let values: Vec<_> = calls
+                    .iter()
+                    .filter_map(|c| match *c {
+                        Call::Set(param, v) if param == params.cutoff.as_ptr() => Some(v),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(values.windows(2).all(|v| (v[1] - v[0]) * sign > 0.0));
+                println!(
+                    "pixel scroll: fine {fine}, direction {sign}: {}/384 distinct values, final {:?}",
+                    values.len(),
+                    values.last()
+                );
+                counts.push(values.len());
+                // The same sensitivity as a 40-point notch, with no discarded travel.
+                let expected = 0.5 + f64::from(sign) * 2.4 * if fine { 0.002 } else { 0.02 };
+                assert!(
+                    (f64::from(*values.last().expect("scroll values")) - expected).abs() < 1e-6
+                );
+            }
+        }
+        assert_eq!(counts, vec![384; 4]);
+    }
+
+    #[test]
+    fn knob_resolution_keeps_fractional_lines_excess_travel_and_direction() {
+        let (mut e, host, params) = editing();
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        for _ in 0..384 {
+            wheel(&mut e, 1.0 / 64.0);
+        }
+        let values: Vec<_> = host
+            .take()
+            .into_iter()
+            .filter_map(|c| match c {
+                Call::Set(_, v) => Some(v),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(values.len(), 384);
+        assert!(values.windows(2).all(|v| v[1] > v[0]));
+        assert!(
+            (values[383] - 0.62).abs() < 1e-6,
+            "six lines, not 384 notches"
+        );
+        // A large event accounts for its whole distance; reversal works even at a limit.
+        wheel(&mut e, 30.0);
+        wheel(&mut e, -0.125);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Set(params.cutoff.as_ptr(), 1.0),
+                Call::Set(params.cutoff.as_ptr(), 0.9975)
+            ]
+        );
+        e.end_scroll();
+        host.take();
+        // No vertical motion does not begin a gesture, including horizontal-only events.
+        e.scrolled(ScrollDelta::Pixels { x: 5.0, y: 0.0 }, Modifiers::empty());
+        assert!(host.take().is_empty());
+    }
+
+    #[test]
+    fn knob_resolution_leaves_discrete_controls_at_their_positions() {
+        let (mut e, host, _) = editing_poly();
+        for (id, positions) in [
+            ("voices", 8.0),
+            ("osc1_range", 5.0),
+            ("osc1_waveform", 5.0),
+            ("quality", 2.0),
+            ("osc1_on", 1.0),
+        ] {
+            let p = at(&e, centre(id));
+            go(&mut e, p);
+            // Tiny drags do not turn a selector into a continuous control.
+            press(&mut e);
+            for n in 1..=384 {
+                go(&mut e, below(p, -f64::from(n) / 4.0));
+            }
+            release(&mut e);
+            let drag_calls = host.take();
+            well_formed(&drag_calls);
+            for call in drag_calls {
+                if let Call::Set(_, v) = call {
+                    assert!(
+                        (v * positions - (v * positions).round()).abs() < 1e-6,
+                        "{id}: {v}"
+                    );
+                }
+            }
+            go(&mut e, p);
+            let places = f64::from(positions);
+            let mut position =
+                (e.value_of(ca72_panel::controls::index(id).expect("control")) * places).round();
+            for _ in 0..159 {
+                e.scrolled(ScrollDelta::Pixels { x: 0.0, y: 0.25 }, Modifiers::SHIFT);
+            }
+            let mut calls = host.take();
+            assert!(
+                calls.iter().all(|c| !matches!(c, Call::Set(..))),
+                "{id}: no partial step"
+            );
+            e.scrolled(ScrollDelta::Pixels { x: 0.0, y: 0.25 }, Modifiers::SHIFT);
+            position = (position + 1.0).min(places);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            // Multiple notches and their excess, then reverse a fraction left over.
+            e.scrolled(ScrollDelta::Pixels { x: 0.0, y: -90.0 }, Modifiers::empty());
+            position = (position - 2.0).max(0.0);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            e.scrolled(ScrollDelta::Pixels { x: 0.0, y: -30.0 }, Modifiers::empty());
+            position = (position - 1.0).max(0.0);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            wheel(&mut e, 0.75);
+            wheel(&mut e, -0.5);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            wheel(&mut e, -0.5);
+            position = (position - 1.0).max(0.0);
+            assert_eq!(e.scroll.as_ref().expect("scroll").value, position / places);
+            e.end_scroll();
+            calls.extend(host.take());
+            well_formed(&calls);
+            assert!(
+                calls.iter().any(|c| matches!(c, Call::Set(..))),
+                "{id}: whole steps move"
+            );
+            for call in calls {
+                if let Call::Set(_, v) = call {
+                    assert!(
+                        (v * positions - (v * positions).round()).abs() < 1e-6,
+                        "{id}: {v}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn knob_resolution_rebases_shift_during_a_drag_without_a_jump() {
+        let (mut e, host, params) = editing();
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -24.0));
+        for dy in [-24.0, -48.0] {
+            e.mouse(MouseEvent::CursorMoved {
+                position: below(p, dy),
+                modifiers: Modifiers::SHIFT,
+            });
+        }
+        for dy in [-48.0, -72.0] {
+            go(&mut e, below(p, dy));
+        }
+        release(&mut e);
+        let cutoff = params.cutoff.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(cutoff),
+                Call::Set(cutoff, 0.6),
+                Call::Set(cutoff, 0.61),
+                Call::Set(cutoff, 0.71),
+                Call::End(cutoff)
+            ]
+        );
     }
 
     /// A wheel's gesture waits for the wheel to rest, and a press ends it before beginning
