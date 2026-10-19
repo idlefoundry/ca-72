@@ -8677,3 +8677,55 @@ editor never waits.
 not compiled here; on Linux the X server's keyboard state is read, which XWayland knows only while
 one of its windows has the keyboard, so `--safe-start` is the sure way there); the Mac and
 Windows at all; third-party plug-ins that fail.
+
+## R-FX-DOCK. The effects' helper never shows in the Dock as a second CA-72 (issue 82)
+
+**The owner's report, 2026-10-19** (CA-72 TEST on the Mac): "When I launched the CA72 standalone
+app two apps launch, so I've got both called CA72 test, one is bouncing up and down in my dock and
+the other has the dot underneath it to indicate that's open."
+
+**Cause.** The effects' helper was a bare program in `CA-72.app/Contents/Helpers`. With the app
+opened from the Finder and its chain restored at start, `lsappinfo` listed the first effect's
+helper as a Foreground application with the app's own identifier, never activated: the bouncing
+icon (the app itself had the dot). It was seemingly taken for the application being opened: not
+seen with the app started from a shell, nor with an effect added later, when the helper was an
+agent without an identifier. DAW-v3's helper made itself an accessory application only as its
+first window opened.
+
+**Fix.**
+- The helper is an application bundle of its own, `Contents/Helpers/CA-72 Effects Host.app`
+  (`scripts/standalone.sh`): its own identifier (the app's with `.effects-host`), the app's icon,
+  its own name, and `LSUIElement`, so that it is an agent (no Dock icon or menu bar) to
+  LaunchServices from the start.
+- It makes itself an accessory application as it starts (`ca72-fx-helper/src/macos.rs`), before
+  any plug-in is loaded, so that it is one when run bare as well (tests, a development build).
+  Not a change to the vendored DAW-v3 code.
+- `locate::helper_for` finds it there (the first `.app` in `Contents/Helpers` holding
+  `Contents/MacOS/ca72-fx-helper`, so a renamed build's is found too), never loose in
+  `Contents/Helpers`. Windows and Linux are unchanged: the helper beside the program.
+- `scripts/package.sh` signs inside out: the helper's bundle first, hardened, with
+  `effects-host-entitlements.plist` (only `disable-library-validation`), then the app with its
+  own, never that one (docs/fx-host.md).
+- The effect's window still comes up in front when a slot's name is clicked
+  (R-FX-MAC), and a click on it makes the helper the active application, with the keyboard.
+
+**Evidence (Mac, macOS 27, 2026-10-19).**
+- `scripts/test-macos-effects-host.sh` (the app opened through LaunchServices with a throwaway
+  session, `lsappinfo` read). With the owner's chain (Faturator, ValhallaRoom) restored:
+  - the build installed before (helper loose in `Contents/Helpers`): two Foreground entries with
+    `com.idlefoundry.ca72-test.standalone`, the app and its first helper; the second helper
+    unlisted. Fails.
+  - this build: one, the app; both helpers `UIElement` with `...standalone.effects-host`. Passes,
+    three times; and with ValhallaRoom added from the console and its window opened.
+- `crates/ca72-fx-helper/tests/macos_dock.rs`: the helper run bare, and from its own bundle in an
+  app's layout, is an agent from its start (with the bundle's identifier). Both fail without the
+  start's accessory call (the helper never checks in).
+- `locate`'s `the_helper_is_found_beside_the_program_or_in_its_own_bundle`, on every platform.
+- The window, by clicks (cliclick, the screen's window order read, while the owner was away): the
+  CA-72's window clicked, then the effect asked for: in front, and the first time also active.
+  Covered by the CA-72's window and asked for again: in front, the CA-72 still active (the
+  keyboard stays with it, as in R-FX-MAC). Its title bar clicked: the helper active.
+
+**For the owner:** the effect's window takes the keyboard on the first open, not when asked for
+again; a click on it always does. Making that the same both ways (always, or never) is the
+owner's call.
