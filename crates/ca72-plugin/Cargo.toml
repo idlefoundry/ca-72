@@ -27,6 +27,11 @@ name = "ca72-standalone"
 path = "src/bin/standalone.rs"
 required-features = ["standalone-production"]
 
+# The bridge an AI agent's MCP client starts (crate::agent, docs/mcp.md).
+[[bin]]
+name = "ca72-mcp"
+path = "src/bin/mcp.rs"
+
 [[example]]
 name = "standalone"
 required-features = ["standalone"]

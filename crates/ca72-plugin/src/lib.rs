@@ -3,6 +3,7 @@
 //! (up to ten), placed across the stereo output by SPREAD.
 
 pub mod arp;
+pub mod agent;
 pub mod character;
 pub mod compat;
 pub mod drive;
