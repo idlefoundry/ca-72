@@ -6857,6 +6857,10 @@ made HI lighter after the measurement above, so ULTRA's cost against HI's rose: 
 Pro), `preset_cost` over the 19 factory presets, ten POLY voices, two interleaved rounds, gave
 ULTRA a median of 6.3 times HI (3.9 to 9.8 across the presets) on `cpu-release` at `2c0a584`.
 
+**With this work (R-BLEP's band-limiting and ULTRA's VCA at 4x), 2026-10-18 (the owner: "Sure,
+change that line"):** "SIX" became "SEVEN". The same measurement against the fidelity branch at
+`c112d08` gave ULTRA a median of 7.2 times HI (4.8 to 10.3 across the presets).
+
 **Built** (`editor.rs`, `ultra_note_lines`): the note follows what the engine decides for this
 computer, `engine::split_voices() > 0`. Each version's accent line, `ULTRA · NO COMPROMISES`, and
 its last two dim lines (`RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.`, `CLICK
@@ -7035,6 +7039,106 @@ held them at its end; for 4 and 8, the common start's, halfway.)
    no longer multiply the threads.
 6. **Afterwards,** put the backed-up released plug-ins back. Real-time throttling need not be
    turned on for this build (the owner's setting is left alone).
+
+### ULTRA's split measured again on the merge with R-BLEP and R-LATENCY (2026-10-17)
+
+**The owner, 2026-10-17** (relayed): "Yes", to re-running the ULTRA split measurements on the
+merge (`integrate/threads-band-limiting`, `2241e70`) before release, measurement only.
+
+**What changed under it:** R-BLEP's 32-tap sinc and BLAMP oscillators (and ULTRA's oscillator
+decimators with a 139-tap last halfband); R-LATENCY's one reported latency of 86; and ULTRA's VCA
+at 4x on the filter's own samples (about 10.6 % more of ULTRA's cost, on the back part, the
+thread the split voice waits on longest).
+
+**How:** on the branch `measure/ultra-split-2241e70`, made from `2241e70` (nothing committed on
+the merge itself). `scripts/ultra-recheck.sh` (`.ps1`) ran, 10 s a run, one machine at a time:
+- the prototype's split grid for one and two voices (`tests/ultra_split.rs`: whole on 4 or 12
+  threads, split on 6 or 12, DRIVE at 6 dB; the Mac's helpers without a work interval, as
+  before);
+- the built engine's checks (`tests/scaling_bench.rs`, `CA72_AUTO=1`): the one instrument and
+  two POLY voices at ULTRA, split by the machine's rule and whole (`CA72_SPLIT=0`), in turn,
+  twice;
+- at 256 and 128 frames.
+
+Raw lines: `docs/threads/recheck-2241e70-*.txt`. The figures before are `d82e9b2`'s
+(`docs/threads/split-*.txt`, `built-*.txt`); `011e99c` changed nothing on this path.
+`scripts/ultra-recheck-table.py` puts them side by side.
+- **First, the samples:** the split voice is still the whole voice to the bit on the merge
+  (`the_split_voice_with_drive_is_the_voice`, `split_voices_are_the_whole_voices_to_the_bit`,
+  `ca72/tests/helpers.rs`), on the Mac, Linux and Windows.
+- **Conditions:**
+  - the Mac: load average 3.6 to 4.9, Live closed, nothing heavy of another session's;
+  - Windows: about 2 % busy before;
+  - Linux: below.
+- **Cleanup:** the lab copies went to the Linux machine's Trash (`gio trash`, checked) and to
+  Windows' `C:\Users\idlewile\Code\tmp\holding`. No benchmark or real-time thread was left
+  running.
+
+**The built engine** (the mean / the worst block, % of the period, for the two repeats · late
+blocks · runs not heard; 1,875 blocks at 256 frames, 3,750 at 128):
+
+| Machine, frames | One instrument, split: before → now | One instrument, whole: before → now | Two POLY voices, split: before → now | Two POLY voices, whole: before → now |
+|---|---|---|---|---|
+| Mac, 256 | 38–39 / 72–90 · 0 → 49 / 74–75 · 0 | 56–57 / 130–132 · 40 → 64 / 133–134 · 43–44 | 50–51 / 103–122 · 2–3 · 10–14 → 57 / 104–122 · 1–2 · 8–9 | 60 / 185 · 41–42 · 61–79 → 67 / 191–192 · 53 · 103–116 |
+| Mac, 128 | 31 / 109–114 · 1 → 44 / 84 · 0 | 58 / 157–167 · 81–86 → 65–66 / 149–154 · 90–91 | 45 / 116–119 · 6–8 · 16–25 → 56 / 117–121 · 10 · 43–44 | 61 / 163–166 · 90 · 100–130 → 68 / 158–166 · 94–95 · 183–186 |
+| Windows, 256 | 31 / 84–92 · 0 → 34 / 76–79 · 0 | 69 / 189–217 · 107–108 → 77–78 / 187–274 · 134–135 | (one crew: whole) 69 / 223–224 · 73–75 → 77 / 234–237 · 103–113 | 69 / 221–223 · 73–85 → 77–78 / 232–234 · 108–110 |
+| Windows, 128 | 30–31 / 94–95 · 0 → 33 / 91–94 · 0 | 70 / 265–321 · 198–202 → 79–80 / 342–359 · 302 | (one crew: whole) 68 / 181–185 · 121–122 → 76 / 180–182 · 161–166 | 68–69 / 182–185 · 120–123 → 76–77 / 181–182 · 159–164 |
+
+**The prototype** (one run each, before → now): mean / worst · late.
+- **The Mac:**
+  - 256 frames: one voice whole 53 / 166 · 72 → 63 / 165 · 100; split on 6 threads 31 / 149 · 7
+    → 43 / 103 · 1; two voices whole 51 / 167 · 3 → 55 / 263 · 44, split 41 / 135 · 4 → 49 /
+    139 · 6.
+  - 128 frames: one voice split 47 / 212 · 42 → 55 / 172 · 51 (without the work interval the
+    built engine has); two split 34 / 119 · 3 → 52 / 167 · 18.
+- **Windows:**
+  - 256 frames: one voice whole 55 / 171 · 81 → 63 / 209 · 103; split 28 / 75 · 0 → 34 / 80 ·
+    0; two voices split 54 / 186 · 43 → 54 / 160 · 36.
+  - 128 frames: one voice split 27 / 112 · 1 → 34 / 93 · 0.
+
+**What it shows:**
+- **ULTRA costs more, as expected.** A voice played whole takes 12 to 16 % more of the period
+  (the Mac's one instrument 56–57 % → 64 %, Windows' 69 % → 77–78 %).
+- **Split, the voice's time grows by more than that** (the Mac's one instrument 38–39 % → 49 %
+  at 256 frames, 31 % → 44 % at 128). The VCA's new work is on the back part, which was already
+  the split voice's longest thread, so all of it lands on the path the block waits for.
+  Windows' grew less (31 % → 33–34 %).
+- **The split still plays ULTRA live where the rule splits.**
+  - **The one instrument:** no late block, on the Mac and on Windows, at 256 and 128 frames.
+    The worst blocks are 74 to 94 % of the period; the Mac's 99th percentile is 66 to 68 %.
+  - **Two POLY voices on the Mac:** 1 to 2 late blocks of 1,875 at 256 frames and 10 of 3,750
+    at 128, against 53 and 95 whole.
+- **The thresholds hold on the Mac and Windows** (Linux below).
+  - Windows (6 fast cores, S = 1): its split one voice is clean.
+  - The Mac (10 fast cores, S = 2): two split voices are far better than whole and about as
+    good as before.
+
+  The margin is smaller than it was: the split one instrument's mean is now about half the
+  period on the Mac at 256 frames.
+
+**Linux** (the 7800X3D), run once the owner had paused the 808 agents that were busy there: 10:38
+to 10:44, under the lab's exclusive timing lock (`flock -x ~/.cache/daw-timing.lock`); load
+average 1.2 to 2.6 before each run (logged per run), Bitwig open.
+
+| Frames | One instrument, split: before → now | One instrument, whole: before → now | Two POLY voices, split: before → now | Two POLY voices, whole: before → now |
+|---|---|---|---|---|
+| 256 | 37–38 / 112–115 · 2–4 → 38–40 / 97–113 · 0–4 | 80 / 186 · 154–157 → 86 / 188–189 · 171–202 | 41–42 / 160–170 · 17–18 · 21–25 → 44–45 / 156 · 14–17 · 21–28 | 88–94 / 304 · 352–540 → 87–88 / 263–269 · 194–195 |
+| 128 | 36–37 / 148–177 · 29–33 → 38–39 / 141–143 · 25–30 | 79–80 / 210–213 · 317–337 → 85–87 / 207–218 · 339–446 | 42 / 187–192 · 37–40 → 44–46 / 157–183 · 32–37 | 80 / 211–216 · 303–347 → 86–87 / 206–232 · 364–391 |
+
+**The prototype on Linux** (one run each, before → now: mean / worst · late):
+- 256 frames: one voice whole 65 / 198 · 130 → 73 / 183 · 162; split on 6 threads 34 / 111 · 5
+  → 40 / 100 · 1; two split 37 / 155 · 14 → 46 / 145 · 17.
+- 128 frames: one split 31 / 156 · 27 → 38 / 138 · 21.
+
+**What Linux shows:**
+- **The split holds as it was.** The one instrument has 0 to 4 late blocks of 1,875 at 256 frames
+  and 25 to 30 of 3,750 at 128; two POLY voices 14 to 17 and 32 to 37. Each is within its spread
+  before.
+- **The voices played whole are later than before:** the one instrument at 256 frames 171 to
+  202 late, against 154 to 157.
+- **The split one instrument's mean barely moved** (37–38 % → 38–40 %), unlike the Mac's (38–39 %
+  → 49 %). On this machine the back part's thread had room the Mac's did not.
+- **S's thresholds hold here too** (16 fast threads, S = 2), on the three machines measured.
 
 ## R-CPU-EXACT. CPU without changing a sample
 
@@ -7449,3 +7553,998 @@ Do not treat approval to include the correction as evidence that these checks pa
 
 **Owner's acceptance, 2026-10-18.** Told these checks remained, the owner did them by hand:
 "i did hands on checks. we're good".
+
+## R-BLEP. The oscillators band-limited by a 32-tap windowed sinc, corners and all
+
+The study came first (to "For the owner to decide"), then the owner's answers and the build.
+
+**Owner decisions, 2026-10-16** (passed on by the session that started this work). A tester
+showed that ULTRA is too heavy to play live, and users find HI heavy too. HI's default must
+not cost more CPU. Oversampling HI's oscillators would raise its cost, so the owner asked for
+better band-limiting to be explored instead: less aliasing at about the same CPU, prototyped
+in the lab, with the plug-in's sound and defaults unchanged, and the results reported for the
+owner to decide. (The circuit model has no cheaper settings worth having: R13's "Concessions,
+measured".)
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **How aliasing is measured.** `ca72-lab alias` renders oscillator 1 alone on 2', tuned the
+  1973 way (key 4 is A-440; keys 16, 28 and 40 are A5 to A7), steady after a quarter of a
+  second. It takes 2^17 samples through a seven-term Blackman-Harris window (side lobes about
+  180 dB down). Everything within eight bins of a harmonic belongs to the harmonic; the rest
+  from 20 Hz to 20 kHz is aliasing (the model is deterministic, so there is no noise floor to
+  mistake for it). Each figure is power against the fundamental's: the total, and the
+  loudest single component (its lobe's whole power). The fundamental is found from the
+  ramp's resets, and every candidate plays the same frequency (the tuning is made once a
+  rate, at 4x). The totals agree with the session's first measurement within 0.4 dB (the
+  saw at 1x and 48 kHz: -38.6 and -27.4 dB at A4 and A7, against -39 and -27; at 4x, -78.4
+  and -65.0, against -78 and -65). The loudest components read 4 to 6 dB louder than that
+  measurement's, because each is the component's whole power rather than its peak bin.
+- **What the top of the sound does.** Each render's harmonics below 20 kHz are compared with
+  the same oscillator's at 8x with today's polyBLEP (the light model's with its waveform's
+  own Fourier series): the mean difference from 10 to 20 kHz, and the largest anywhere below
+  20 kHz. Otherwise a kernel that cuts aliasing by dulling the top would look good.
+- **The candidates as kernels.** Each is one impulse made into three tables, 256 points a
+  sample, linearly interpolated: the band-limited impulse, step (BLEP) and ramp (BLAMP).
+  - The two-point polyBLEP is the plug-in's (the lab's table of it gives the same figures to
+    0.1 dB).
+  - The four-point polyBLEPs are the cubic B-spline's and cubic Lagrange interpolation's.
+  - The windowed sincs are Kaiser-windowed and linear phase; the minBLEPs are the same sincs
+    made minimum phase (the real cepstrum, folded).
+  - The sincs' windows were swept at 44.1 and 48 kHz for the least aliasing of the saw with
+    every harmonic below 20 kHz within about 1 dB of 8x's. The choice: 8 taps beta 1, and 16
+    taps beta 4, both cut off at the Nyquist frequency; 32 taps beta 8, cut off at 0.48 of
+    the rate.
+- **The circuit's events and reset areas are kept.** The prototype changes only how a step,
+  an impulse or a corner is spread over samples. `BlepLine::step` and `BlepLine::impulse`
+  (the reset's areas) are called as before, at the times the circuit model computes.
+- **Where the slope jumps (BLAMP).** There are three places, all corrected: the ramp's reset
+  (it stops falling and holds for 1.2 us), the hold's end (it falls again) and the triangle's
+  fold.
+  - The hold's two corners are what limit the saw once the steps are good: with 32 taps and
+    no BLAMP the saw is at -84 and -57 dB at A4 and A7; with BLAMP, -113 and -102.
+  - The fold is not a corner but a knee about 0.15 V of the buffer wide (the shaper's ngspice
+    table is sharp below its lowest point and rounded over 0.2 V above). Corrected as a sharp
+    corner, it helps at 1x and hurts at 8x (A7 -77 dB, against -88 without): where sampling
+    resolves the knee, a sharp corner's correction adds a kink of its own. So it is corrected
+    as a fillet: the corner's correction averaged over the knee's width in time (0.15 V of
+    the buffer, from a sweep of 0 to 0.3 V), and left alone when that is wider than 24
+    samples.
+- **Minimum phase does not suit the circuit's triangle.** A minimum-phase kernel delays what
+  it corrects by its group delay, while the samples between events are not delayed.
+  - A saw's or a rectangle's harmonics all come from its steps, so only their phase moves.
+  - The triangle's corrections and its sampled shape move apart, and the shark tooth mixes
+    the saw and triangle lines. With 16 taps the triangle's harmonics moved by up to 14 dB.
+  - An unpaired corner's correction never ends (a minimum-phase ramp lags the ramp forever).
+  - So minBLEP is measured for the saw and rectangles only; for the triangle it is not a
+    candidate.
+- **The light model corrects from its phase.** LO's oscillators are phase accumulators, so
+  every edge within the kernel's reach is known in advance. Any kernel is worked out sample
+  by sample from the phase, with no samples held back and no added latency. Its triangle and
+  shark tooth get BLAMP at their corners.
+- **The prototype** is on branch `lab/band-limiting`, not merged:
+  - `crates/ca72/src/blep.rs` holds the kernels and a corrected line.
+  - `BlepLine` and the light oscillator use a kernel only when the lab chooses one
+    (`ca72::blep::set`, or `CA72_BLEP`, read once, so that `preset_cost` can measure it).
+  - `CA72_HI_OSC_OS` runs HI's oscillators at 2x, for comparison.
+  - `ca72-lab blepcost` times one oscillator with each kernel. `CA72_BLEP_LINES` gives the
+    kernel to some outputs only, to estimate correcting only the outputs a voice uses.
+  - The full matrix is [band-limiting/aliasing.tsv](band-limiting/aliasing.tsv); the scripts
+    that made it and the tables (`matrix.sh`, `tables.py`, `cost.py`) are beside it on the
+    branch.
+  - With no kernel chosen, the code runs today's arithmetic: its renders are the same to
+    the byte as `main`'s (see Evidence).
+
+### Today's aliasing
+
+Total and loudest component, dB against the fundamental, 20 Hz to 20 kHz.
+
+**HI (circuit, 1x, two-point polyBLEP)**
+
+| Waveform | kHz | A4 | A5 | A6 | A7 |
+|---|---:|---:|---:|---:|---:|
+| saw | 44.1 | -36 / -44 | -33 / -39 | -29 / -33 | -25 / -27 |
+| saw | 48 | -39 / -47 | -35 / -41 | -32 / -35 | -27 / -29 |
+| saw | 96 | -60 / -69 | -57 / -64 | -54 / -58 | -50 / -52 |
+| tri | 44.1 | -61 / -71 | -53 / -60 | -44 / -51 | -32 / -35 |
+| tri | 48 | -64 / -74 | -55 / -62 | -45 / -53 | -36 / -40 |
+| tri | 96 | -82 / -99 | -72 / -86 | -62 / -72 | -51 / -56 |
+| square | 44.1 | -38 / -45 | -36 / -39 | -33 / -37 | -27 / -27 |
+| square | 48 | -42 / -48 | -38 / -41 | -35 / -38 | -33 / -35 |
+| square | 96 | -63 / -72 | -60 / -65 | -57 / -60 | -53 / -55 |
+| wide | 44.1 | -37 / -43 | -34 / -37 | -30 / -34 | -28 / -30 |
+| wide | 48 | -40 / -46 | -36 / -40 | -34 / -38 | -27 / -28 |
+| wide | 96 | -61 / -69 | -58 / -63 | -55 / -59 | -52 / -53 |
+| narrow | 44.1 | -34 / -41 | -31 / -36 | -26 / -28 | -22 / -24 |
+| narrow | 48 | -36 / -42 | -34 / -40 | -32 / -37 | -23 / -24 |
+| narrow | 96 | -57 / -65 | -55 / -60 | -54 / -59 | -52 / -55 |
+
+**ULTRA (circuit, 4x)**
+
+| Waveform | kHz | A4 | A5 | A6 | A7 |
+|---|---:|---:|---:|---:|---:|
+| saw | 44.1 | -67 / -68 | -69 / -72 | -64 / -66 | -59 / -60 |
+| saw | 48 | -78 / -89 | -75 / -83 | -70 / -77 | -65 / -70 |
+| saw | 96 | -96 / -108 | -92 / -102 | -86 / -95 | -80 / -88 |
+| tri | 44.1 | -92 / -95 | -85 / -98 | -75 / -86 | -64 / -72 |
+| tri | 48 | -97 / -114 | -87 / -102 | -77 / -89 | -66 / -73 |
+| tri | 96 | -110 / -124 | -104 / -118 | -97 / -110 | -88 / -98 |
+| square | 44.1 | -68 / -68 | -71 / -72 | -68 / -70 | -60 / -60 |
+| square | 48 | -82 / -92 | -79 / -86 | -75 / -78 | -73 / -77 |
+| square | 96 | -100 / -111 | -97 / -103 | -94 / -98 | -91 / -93 |
+| wide | 44.1 | -65 / -66 | -69 / -70 | -66 / -68 | -65 / -66 |
+| wide | 48 | -80 / -88 | -78 / -84 | -74 / -77 | -72 / -78 |
+| wide | 96 | -98 / -108 | -96 / -103 | -92 / -95 | -90 / -92 |
+| narrow | 44.1 | -69 / -71 | -71 / -78 | -60 / -60 | -56 / -57 |
+| narrow | 48 | -76 / -85 | -73 / -80 | -71 / -77 | -71 / -75 |
+| narrow | 96 | -95 / -104 | -92 / -98 | -88 / -92 | -88 / -93 |
+
+**LO (light model, 1x)**
+
+| Waveform | kHz | A4 | A5 | A6 | A7 |
+|---|---:|---:|---:|---:|---:|
+| saw | 44.1 | -36 / -44 | -33 / -39 | -29 / -33 | -25 / -27 |
+| saw | 48 | -39 / -47 | -35 / -41 | -32 / -35 | -28 / -29 |
+| saw | 96 | -60 / -69 | -57 / -64 | -54 / -59 | -51 / -53 |
+| tri | 44.1 | -60 / -70 | -51 / -61 | -42 / -48 | -31 / -34 |
+| tri | 48 | -62 / -72 | -53 / -63 | -44 / -50 | -35 / -38 |
+| tri | 96 | -76 / -90 | -67 / -81 | -58 / -66 | -49 / -56 |
+| shark | 44.1 | -49 / -57 | -45 / -52 | -42 / -46 | -33 / -36 |
+| shark | 48 | -53 / -61 | -46 / -53 | -44 / -49 | -36 / -41 |
+| shark | 96 | -73 / -83 | -65 / -74 | -57 / -63 | -50 / -55 |
+| square | 44.1 | -38 / -45 | -36 / -39 | -33 / -37 | -27 / -27 |
+| square | 48 | -42 / -48 | -38 / -41 | -35 / -38 | -32 / -35 |
+| square | 96 | -63 / -72 | -60 / -65 | -57 / -61 | -52 / -54 |
+| wide | 44.1 | -37 / -43 | -34 / -38 | -30 / -34 | -28 / -30 |
+| wide | 48 | -40 / -46 | -36 / -40 | -34 / -38 | -27 / -28 |
+| wide | 96 | -61 / -68 | -58 / -63 | -55 / -59 | -50 / -51 |
+| narrow | 44.1 | -34 / -41 | -31 / -37 | -26 / -28 | -22 / -24 |
+| narrow | 48 | -36 / -42 | -34 / -38 | -32 / -38 | -23 / -24 |
+| narrow | 96 | -58 / -65 | -54 / -59 | -54 / -61 | -53 / -59 |
+
+At 96 kHz everything is about 20 dB lower, because the band ends at a smaller share of the
+rate. LO's oscillators alias as HI's do (both use the two-point polyBLEP), and neither
+corrects its triangle's or shark tooth's corners. At 44.1 kHz, ULTRA's saw stays at -67 to
+-59 dB whatever its kernel. Its last halfband only stops from 0.583 of the Nyquist frequency
+(25.7 kHz), so what lies between 22 and 26 kHz at 4x folds into 18 to 22 kHz. That limit is
+its decimator's, not band-limiting's.
+
+Today's HI and LO are also duller than ULTRA. At 48 kHz their saw's harmonics from 10 to 20
+kHz are 2.5 to 3.0 dB under the 8x render's, 5.1 dB at the worst: the two-point polyBLEP
+puts a triangle's low-pass on every step. ULTRA's are within 0.3 dB.
+
+### The candidates
+
+Total aliasing, dB, at 48 kHz, and for the saw at A7 at 44.1 kHz. "Top" is the saw's
+harmonics from 10 to 20 kHz at A4 and 48 kHz against the 8x render's (mean, dB). "Largest" is
+the largest difference of a saw or rectangle harmonic below 20 kHz anywhere in the matrix
+(every rate and note). The full matrix, with the loudest components and 44.1 and 96 kHz, is
+[band-limiting/aliasing.tsv](band-limiting/aliasing.tsv).
+
+| Candidate | saw A4 | saw A7 | tri A4 | tri A7 | narrow A4 | narrow A7 | saw A7, 44.1 kHz | top, dB | largest, dB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| polyBLEP, 2 points (HI today) | -39 | -27 | -64 | -36 | -36 | -23 | -25 | -3.0 | -5.9 |
+| polyBLEP, 2 points, and BLAMP | -39 | -28 | -65 | -53 | -36 | -23 | -25 | -3.0 | -5.9 |
+| polyBLEP, 4 points, Lagrange, and BLAMP | -41 | -29 | -67 | -56 | -38 | -24 | -26 | -1.6 | -4.8 |
+| polyBLEP, 4 points, B-spline, and BLAMP | -52 | -40 | -74 | -62 | -49 | -35 | -36 | -6.0 | -12.1 |
+| sinc, 8 taps, and BLAMP | -52 | -45 | -74 | -60 | -50 | -41 | -35 | +0.5 | +1.1 |
+| sinc, 16 taps, and BLAMP | -76 | -69 | -76 | -63 | -74 | -65 | -41 | +0.1 | -0.6 |
+| sinc, 32 taps, and BLAMP | -113 | -102 | -76 | -63 | -110 | -98 | -93 | +0.0 | -1.0 |
+| minBLEP, 8 taps, and BLAMP | -52 | -44 | not usable | not usable | -50 | -41 | -35 | +0.5 | +1.1 |
+| minBLEP, 16 taps, and BLAMP | -76 | -64 | not usable | not usable | -74 | -65 | -41 | +0.1 | -0.6 |
+| minBLEP, 32 taps, and BLAMP | -98 | -70 | not usable | not usable | -110 | -99 | -70 | +0.1 | -1.0 |
+| polyBLEP at 2x | -60 | -50 | -82 | -51 | -57 | -52 | -48 | -0.7 | -1.4 |
+| polyBLEP at 2x, and BLAMP | -60 | -51 | -84 | -68 | -57 | -52 | -49 | -0.7 | -1.4 |
+| polyBLEP at 4x (ULTRA today) | -78 | -65 | -97 | -66 | -76 | -71 | -59 | -0.1 | -0.3 |
+| polyBLEP at 4x, and BLAMP | -79 | -69 | -98 | -74 | -76 | -71 | -60 | -0.1 | -0.3 |
+| sinc, 16 taps, at 4x, and BLAMP | -98 | -89 | -116 | -74 | -96 | -87 | -60 | +0.1 | +0.1 |
+| sinc, 32 taps, at 4x, and BLAMP | -126 | -116 | -122 | -74 | -124 | -113 | -60 | +0.0 | +0.1 |
+
+| Candidate | saw A4 | saw A7 | tri A4 | tri A7 | narrow A4 | narrow A7 | saw A7, 44.1 kHz | top, dB | largest, dB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| polyBLEP, 2 points (LO today) | -39 | -28 | -62 | -35 | -36 | -23 | -25 | -3.0 | -6.2 |
+| polyBLEP, 2 points (the lab's tables) | -39 | -28 | -62 | -35 | -36 | -23 | -25 | -3.0 | -6.2 |
+| polyBLEP, 2 points, and BLAMP | -39 | -28 | -78 | -52 | -36 | -23 | -25 | -3.0 | -6.2 |
+| polyBLEP, 4 points, Lagrange, and BLAMP | -41 | -29 | -80 | -55 | -38 | -24 | -26 | -1.7 | -5.1 |
+| polyBLEP, 4 points, B-spline, and BLAMP | -52 | -40 | -91 | -66 | -49 | -34 | -36 | -6.0 | -12.4 |
+| sinc, 8 taps, and BLAMP | -52 | -45 | -92 | -65 | -50 | -41 | -35 | +0.4 | -1.1 |
+| sinc, 16 taps, and BLAMP | -76 | -69 | -116 | -89 | -73 | -65 | -41 | +0.0 | -0.9 |
+| sinc, 32 taps, and BLAMP | -112 | -102 | -138 | -124 | -110 | -98 | -93 | -0.0 | -1.3 |
+
+The cost of each, and the latency each adds:
+- **One oscillator** (`ca72-lab blepcost`): ns a sample at 48 kHz, the least of 25 one-second
+  runs. The circuit's ticks all three outputs, as the voice does; the light model's is
+  measured on its sawtooth and triangle.
+- **Ten POLY voices** (`preset_cost`): the 19 factory presets in 256-frame blocks at 48 kHz on
+  one thread, the least of four interleaved two-second rounds. The mean share of a core, and
+  the candidate's change from today's (the median in brackets).
+- **Latency**: at 1x, in output samples (today's HI: 1; LO: none, because it corrects from
+  its phase).
+
+| Candidate | HI latency | Circuit oscillator, A4 / A7 | HI, 10 voices | Light saw, A4 / A7 | Light triangle, A4 / A7 | LO, 10 voices |
+|---|---:|---:|---:|---:|---:|---:|
+| Today | 1 | 27.7 / 37.6 | 104.9 % | 2.0 / 2.0 | 2.0 / 2.0 | 15.3 % |
+| polyBLEP, 2 points, and BLAMP | 1 | 30.0 / 44.8 | +1.8 % (+1.8) | 3.4 / 3.6 | 4.4 / 5.4 | +4.9 % (+6.0) |
+| polyBLEP, 4 points (either), and BLAMP | 2 | 30.1 / 47.3 | | 3.3 / 3.8 | 4.5 / 6.2 | |
+| sinc, 8 taps, and BLAMP | 4 | 30.8 / 54.0 | | 3.4 / 4.0 | 4.6 / 7.2 | |
+| sinc, 16 taps, and BLAMP | 8 | 32.3 / 67.5 | +6.6 % (+6.9) | 3.5 / 4.5 | 5.1 / 10.6 | +5.9 % (+6.8) |
+| sinc, 32 taps, and BLAMP | 16 | 35.3 / 90.9 | +6.7 % (+4.1) | 3.7 / 6.2 | 6.5 / 15.3 | +7.4 % (+8.7) |
+| minBLEP, 16 taps, and BLAMP | 0 | 33.4 / 72.8 | | | | |
+| polyBLEP at 2x | 20 | 92.5 / 104.1 | +5.9 % (+7.5) | | | |
+
+The whole presets' costs vary by about 3 % from round to round on the shared Mac, so they
+cannot separate 16 taps from 32; the oscillator's own times can. Three oscillators a voice at
+48 kHz make each nanosecond 0.014 % of a core a voice. So 32 taps add 0.11 % of a core a
+voice at A4 and 0.77 % with all three oscillators at A7, on a HI voice of about 10.5 %.
+Correcting only the outputs the voice uses would lower that. With the kernel on the saw
+alone, 32 taps cost +4 and +22 ns against +7.6 and +53. The triangle's line is the costly
+one (its step, impulse, two corners and the fold); the rectangle's is cheap. 2x costs most:
+its three full 79-tap decimators run at every sample, and they add 19 samples of latency.
+
+What the tables show:
+- **The 32-tap linear-phase sinc with BLAMP is better than ULTRA, at 1x.** The saw is at -113
+  and -102 dB at A4 and A7 at 48 kHz (ULTRA: -78 and -65), at -86 and -93 at 44.1 kHz (ULTRA:
+  -67 and -59) and at -123 and -114 at 96 kHz, and the rectangles likewise. Every harmonic
+  below 20 kHz is within 1.0 dB of 8x's (LO's 1.3), where today's HI is up to 6 dB down. LO
+  gains the same.
+- **16 taps** give -76 and -69 dB at 48 kHz, but only -53 and -41 at 44.1 kHz: the window is
+  too short for 44.1's narrow gap between 20 and 24.1 kHz. **8 taps** give -52 and -45 at 48
+  kHz, -47 and -35 at 44.1. Both keep the top flat.
+- **The four-point polyBLEPs are no answer.** The B-spline's cuts 13 dB of aliasing by
+  dulling the top a further 3 dB (6 more at the worst harmonic). Lagrange's brightens the top
+  by 1.4 dB and cuts aliasing by 2 dB.
+- **BLAMP alone** (today's polyBLEP and the corners) adds no latency and leaves the saw and
+  rectangles as they are. It takes the triangle at A7 from -36 to -53 dB in HI and from -35
+  to -52 in LO (LO's A4 triangle from -62 to -78).
+- **The circuit's triangle stops at about -63 dB at A7 with any kernel at 1x** (-76 at A4).
+  The fold's knee is not quite a fillet: its long rounded side and the shaper table's
+  interpolation alias on their own. 2x reaches -68 and 4x -74. A closer model of the knee
+  (its curvature as several fillets) would lower this at more cost a period; not tried.
+- **minBLEP** matches the linear-phase sinc for the rectangles. For the saw it nearly does
+  with 16 taps (-76 and -64) and does less well with 32 (-98 and -70, from its truncated
+  tail), with no latency, but it cannot carry the triangle or the shark tooth.
+- **polyBLEP at 2x** gives -60 and -50 dB for the saw at 48 kHz, and -57 and -48 at 44.1:
+  less than 16 taps at 48 kHz and more at 44.1. It is the dearest and the latest.
+
+### What the presets would hear
+
+With 32 taps and BLAMP, each factory preset was rendered with ten voices (`preset_render`)
+and compared with `main`'s render of the same mode:
+- **Level:** within 0.1 dB in all 19, in every mode.
+- **HI's and LO's top:** the 20 kHz third-octave band rises by up to 3.8 dB (HI) and 4.1 dB
+  (LO) in the bright presets, towards ULTRA. Elsewhere most bands move by less than 1.1 dB.
+- **ULTRA:** every band within 1.9 dB.
+- **FEEDBACK:** Feedback Funk's loop diverges from any small change (minBLEP moves it as
+  much); its level does not change.
+- **Attacks under HI's latency.** The oscillators sound 15 samples later while the contours
+  start on time, so fast attacks change: Driven Kick's 315 Hz band moved -2.5 dB. The change
+  grows with the latency: -0.35 dB with minBLEP (one sample earlier than today), +0.58 with
+  8 taps (3 later), -2.5 with 32 (15 later). Holding the contours' triggers back by the same
+  samples would restore the alignment; not built.
+- **LO adds no latency.** Its renders differ from today's by -23 to -68 dB (RMS against the
+  render; Feedback Funk's loop -6 dB), most of it at the top.
+
+### Recommendation
+
+For HI and LO: the 32-tap linear-phase sinc with BLAMP, the triangle's fold as a fillet.
+- It removes the oscillators' aliasing rather than reducing it. The saw and rectangles are
+  below ULTRA's at every rate and note (-84 to -116 dB at 44.1 and 48 kHz). The top octave
+  comes within about 1 dB of the 8x render's; today's HI and LO are 3 dB duller there.
+- In the prototype it costs about 7 % more of HI's presets' time (0.7 % of a core a voice) and
+  of LO's (0.1 % a voice). Built for the plug-in it should cost less: corrections only for the
+  outputs in use (the saw alone: +4 and +22 ns rather than +8 and +53), and LO's tables in
+  single precision. That is not "no more CPU"; whether it is "about the same" is the owner's
+  call.
+- It adds 15 samples of latency in HI (0.31 ms at 48 kHz, 0.34 at 44.1, 0.16 at 96) and none
+  in LO. The contours would wait the same 15 samples, so that attacks keep their shape.
+- The triangle improves to -63 to -76 dB at 48 kHz (today: -36 to -64).
+- 16 taps are not enough at 44.1 kHz (-41 dB at A7). If nothing may cost more or arrive
+  later, BLAMP alone mends the triangle and costs about 2 %.
+
+For ULTRA: no change. At 48 and 96 kHz its aliasing is already -65 dB or lower. At 44.1 kHz
+it is its decimator's, which a kernel does not touch (a longer last halfband would be another
+decision). A new kernel would change the renders the lab checks everything against, for
+differences below what can be heard.
+
+### For the owner to decide
+
+1. **HI's and LO's band-limiting:** (a) the 32-tap sinc with BLAMP, built with the contours
+   delayed to match and only the outputs in use corrected (recommended); (b) BLAMP alone: no
+   latency, the triangle only, about 2 %; (c) 16 taps: 7 samples' latency, weak at 44.1 kHz;
+   (d) as they are.
+2. **Its cost:** about 7 % more for HI's and LO's presets in the prototype, less once built
+   (to be measured again). Is that within "about the same CPU", or must it be zero
+   (then (b))?
+3. **ULTRA:** (a) unchanged (recommended); (b) the same kernel: its renders change (bands
+   within 1.9 dB, latency 3.75 samples more, 48 kHz aliasing -116 dB); (c) BLAMP alone.
+4. **HI's latency:** 15 samples more, unreported to hosts like today's 1 sample and ULTRA's
+   22.5. Acceptable? (Recommended: yes.)
+5. **The sound change:** HI's and LO's top 3 to 4 dB brighter at 20 kHz, towards ULTRA, and
+   every factory preset's render changed (level within 0.1 dB). Accept it without levelling
+   the presets again? (Recommended: yes.)
+
+**Evidence (the Mac, 2026-10-16; branch `lab/band-limiting`, commits `a16caea` and
+`4724718` on `bcb6c0b`):**
+- **Bit-identity.** `ca72-lab render` at 1x, 2x and 4x (A4 and A7) is the same to the byte as
+  a build of `main`. `preset_render` renders all 19 factory presets the same to the bit at
+  HI, LO and ULTRA (its QUALITY switch added on both sides for the check).
+- **Tests.** ca72's blep, vco, resample and light tests pass (18); clippy on ca72 and
+  ca72-lab, all targets, is clean.
+- **Machine.** The Mac was shared throughout with another session's scaling benchmark (up to
+  eight cores in bursts), a CA-74 calibration and Live. The aliasing runs went one at a time
+  at nice 19, and their figures are deterministic. A first full `preset_cost` run of ten
+  candidates was stopped as too noisy (today's HI read 129 % in its best round). The costs
+  above are the least of four rounds, with about 3 % noise.
+- **Not tried:** delaying the contours to match; the knee as several fillets; single-precision
+  or polyphase tables; oscillator 3's reverse sawtooth stage (it follows the saw); paced
+  worst blocks; Windows and Linux.
+
+### The owner's answers
+
+**Owner decisions, 2026-10-16** (passed on by the session that started this work), to the five
+questions above: "1. a 2. Yes. 3. If it's more accurate in it's renders, then we should do
+that, no? That is it's primary focus, is a render engine. 4. Yes. 5. Yes."
+1. HI and LO get the 32-tap sinc with BLAMP, the contours delayed to match, only the outputs in
+   use corrected.
+2. Its cost is accepted. **This relaxes the rule of the same morning** that HI's default must
+   not cost more CPU: about 7 % more, as the prototype measured, was acceptable (the build
+   costs less: below).
+3. ULTRA gets the same kernel, because accuracy comes first in a render engine; its renders,
+   and the lab's references for it, change. Its limit at 44.1 kHz, its last halfband, is
+   measured for the owner to decide (below), not built.
+4. HI's 15 samples of latency are accepted.
+5. The sound changes accepted, without levelling the factory presets again.
+
+### Built
+
+Branch `claude/lucid-fermi-67e20c`, from `main`, without the lab's switch (`lab/band-limiting`
+stays as the study's prototype).
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **One kernel in every mode.** `BlepLine` (`resample.rs`) spreads each step, impulse, corner
+  and rounded corner over the 16 samples either side of it from the kernel's tables (made
+  once a process with `libm`, so the same on every platform; 8,193 points each), and gives its
+  values 16 samples late. The two-point polyBLEP is gone. The circuit's oscillator corrects
+  the reset, the hold's end and the triangle's fold (a fillet 0.15 V of the buffer wide).
+- **Only the outputs in use.** The voice tells each oscillator which outputs its waveform
+  takes (`Vco::set_outputs`): the sawtooth, the triangle or the rectangle, the sawtooth and
+  triangle for the shark tooth of oscillators 1 and 2, and the sawtooth for oscillator 3's
+  reverse sawtooth stage. The others are still made but not corrected (their decimators at
+  4x still run). Taken up again, an output's corrections start with its next event.
+- **The contours wait as long as the oscillators' sound.** The filter's and loudness contours
+  reach the filter and the VCA late by what the kernel adds over the polyBLEP's one sample:
+  15 samples at HI, 3.75 at ULTRA (interpolated), none at LO. The keyboard's pitch is not
+  delayed. So an attack keeps the shape it had, and a whole note starts 0.31 ms later at HI
+  (48 kHz) and 0.08 ms later at ULTRA. Driven Kick's 315 Hz band, -2.5 dB without the delay,
+  is within 0.1 dB with it. The noise-only presets now start those samples later as a whole.
+  (**Since R-LATENCY**, each contour as late as the sound it shapes, in every mode.)
+- **LO in single precision.** The light oscillators read single-precision tables and work out
+  every edge and corner within reach from their phase: no latency, and no contour delay.
+- **The checks.** `ca72-lab alias` and `ca72-lab osccost` stay in the lab;
+  `tests/aliasing.rs` (ca72-lab) holds the aliasing of HI, ULTRA and LO (each waveform, A4 and
+  A7, 44.1, 48 and 96 kHz) about 3 dB under the levels below; `resample.rs` tests the
+  kernel's tables and a corrected step. `preset_render` takes `CA72_POTATO` and `CA72_ULTRA`.
+
+**What changed by design.** Every render of the oscillators changes in every mode. No stored
+golden render exists in the repository to record again: the lab's references are ngspice runs
+of the circuit (`circuits/boards/reference/`), which this does not touch, and the suite's
+comparisons with them hold budgets, which the new oscillators keep (`vco_realtime`'s
+waveforms against the circuit below 20 kHz, among them). What changed is the bit-exact
+comparison by hand: `preset_render` against `main`'s renders, all 19 factory presets, ten
+voices:
+
+| Mode | Level | Worst third-octave band | Difference's RMS against the render |
+|---|---:|---|---|
+| HI | within 0.09 dB | +3.8 dB at 20 kHz (bright presets); otherwise within 0.8 dB | -43 to +5 dB (the 15 samples' shift) |
+| LO | within 0.08 dB | +4.1 dB at 20 kHz; otherwise within 1.1 dB | -23 to -68 dB (Feedback Funk -6); 4 presets the same to the bit |
+| ULTRA | within 0.03 dB | within 0.5 dB (Feedback Funk's loop 1.4 dB) | -0.1 to -55 dB (3.75 samples' shift) |
+
+**Aliasing as built** (oscillator 1 alone, total against the fundamental, dB, before → after;
+the full matrix is [band-limiting/aliasing-built.tsv](band-limiting/aliasing-built.tsv)):
+
+| Mode, waveform | 44.1 kHz, A4 / A7 | 48 kHz, A4 / A7 | 96 kHz, A4 / A7 |
+|---|---|---|---|
+| HI saw | -36 → -86 / -25 → -93 | -39 → -113 / -27 → -102 | -60 → -123 / -50 → -114 |
+| HI triangle | -61 → -73 / -32 → -62 | -64 → -76 / -36 → -63 | -82 → -104 / -51 → -69 |
+| HI narrow rectangle | -34 → -89 / -22 → -90 | -36 → -110 / -23 → -98 | -57 → -120 / -52 → -115 |
+| ULTRA saw | -67 → -67 / -59 → -60 | -78 → -126 / -65 → -116 | -96 → -136 / -80 → -127 |
+| ULTRA triangle | -92 → -94 / -64 → -72 | -97 → -122 / -66 → -74 | -110 → -134 / -88 → -98 |
+| ULTRA narrow rectangle | -69 → -70 / -56 → -56 | -76 → -124 / -71 → -113 | -95 → -133 / -88 → -125 |
+| LO saw | -36 → -86 / -25 → -93 | -39 → -112 / -28 → -102 | -60 → -120 / -51 → -113 |
+| LO triangle | -60 → -135 / -31 → -110 | -62 → -137 / -35 → -118 | -76 → -140 / -49 → -125 |
+| LO narrow rectangle | -34 → -87 / -22 → -90 | -36 → -110 / -23 → -98 | -58 → -118 / -53 → -112 |
+
+The square, wide rectangle and shark tooth go the same way (the matrix). Every harmonic
+below 20 kHz is within 1.3 dB of the 8x render's.
+
+**Cost as built.** With only the outputs in use corrected, the build costs far less than the
+prototype did:
+- **Ten voices** (`preset_cost`): `main`'s build and this one interleaved, the least of four
+  two-second rounds (three one-second rounds at ULTRA), the 19 presets' mean.
+
+  | Mode | `main` | Built | Change (median; range) |
+  |---|---:|---:|---|
+  | HI | 103.7 % | 104.3 % | +0.6 % (+0.7; -0.3 to +1.7) |
+  | LO | 14.8 % | 15.3 % | +3.6 % (+4.3; -1.2 to +8.6) |
+  | ULTRA | 556.9 % | 559.8 % | +0.4 % (+0.2; -1.1 to +2.4) |
+
+- **One oscillator** (`ca72-lab osccost`, ns a sample at 48 kHz, A4 / A7, the least of 25
+  runs): at 1x `main` takes 27.3 / 37.5; the build 29.0 / 46.5 with the sawtooth in use, 30.3 /
+  56.8 the triangle, 28.4 / 41.3 the rectangle, 31.9 / 66.2 all three. At 4x `main` takes 170 /
+  181, the build 179 to 192 / 193 to 209 by output.
+
+**Latency.** HI's oscillators 16 samples (was 1), LO's none (as before), ULTRA's 26.25 (was
+22.5; its decimators' 22.25 and the kernel's 4; **since the longer last halfband, below,
+41.25**). The contours follow (above). The plug-in reports no latency to hosts, as before.
+
+### ULTRA's last halfband (measured, then built: below)
+
+At 44.1 kHz ULTRA's aliasing is its decimators': their last halfband (79 taps, Kaiser beta
+10.06) passes to 0.417 of the output rate and stops from 0.583 (25.7 kHz), so what lies
+between 22 and 26 kHz at 4x folds into 18 to 22 kHz. To keep 20 Hz to 20 kHz clean at 44.1
+kHz it must pass 20 kHz and stop from 24.1. Measured on branch `lab/ultra-halfband` (the
+oscillators' decimators only; `CA72_LAST_HALFBAND`; the matrix is
+[band-limiting/ultra-halfband.tsv](band-limiting/ultra-halfband.tsv)), with the built kernel:
+
+| Last halfband | 44.1 kHz: saw A4 / A7, worst saw or rectangle | 48 kHz worst | 96 kHz worst | Oscillator at 4x, A4 / A7 | Latency |
+|---|---|---:|---:|---|---:|
+| 79 taps (today) | -67 / -60, -56 | -113 | -125 | 178 / 216 ns | 22.25 |
+| 99 | -81 / -84, -79 | -113 | -125 | | 27.25 |
+| 119 | -102 / -118, -100 | -114 | -125 | 229 / 261 ns | 32.25 |
+| 139 | -117 / -118, -111 | -115 | -125 | 259 / 292 ns | 37.25 |
+| 159, 199 | as 139 | -116, -117 | -125 | | 42.25, 52.25 |
+
+(Latency: the decimators' delay in output samples, the kernel's 4 more.) 139 taps make ULTRA
+at 44.1 kHz as clean as at 48: -111 dB at the worst against -56. Its harmonics below 20 kHz
+move by 0.18 dB at most. It costs each oscillator about 80 ns a sample at 4x, three
+oscillators about 1.2 % of a core a voice (ULTRA's voice is about 56 % of a core), and adds
+15 samples of latency (the contours would wait for those too). The filter's decimator at 4x
+has the same last stage (measured below). Decimating only the outputs in use would pay for
+most of it: all three outputs' decimators run.
+
+**For the owner to decide:** ULTRA's last halfband at 139 taps (recommended: 44.1 kHz then
+as clean as 48 kHz, for about 1.2 % of a core a voice and 15 samples), with the filter's
+decimator to match or not; or as it is.
+
+**Owner decision, 2026-10-16** (passed on by the session that started this work): "Okay, do
+it for ultra". The oscillators' decimators get the 139-tap last stage; HI and LO are
+unchanged; the filter's decimator is measured, not built.
+
+**Built** (agent decisions, not separately approved):
+- **The oscillators' decimators only.** `Decimator::for_oscillators` ends in a 139-tap
+  halfband (`OSCILLATOR_LAST_HALFBAND`, Kaiser beta 10.06 as before); `Decimator::new` keeps
+  79 for the filter, the noise and the preamplifier, and LO's sparse ones are unchanged. Only
+  ULTRA's oscillators (and the lab's High Fidelity's) run at 4x; HI's at 1x have no
+  decimator, so HI's renders do not change.
+- **The contours wait for these 15 samples too:** 18.75 samples in ULTRA (`contour_delay`,
+  from `Decimator::delay_of`, which a test checks against the decimators made). (**Since
+  R-LATENCY**, as late as the whole sound: 84.75.)
+- **The aliasing test tightened:** `tests/aliasing.rs` holds ULTRA's sawtooth and rectangles
+  under -105 dB and its triangle under -70 at 44.1 kHz as at 48 and 96.
+
+**As built:** ULTRA's sawtooth and rectangles at 44.1 kHz -111 dB at the worst (was -56; the
+sawtooth -117 and -118 at A4 and A7), at 48 kHz -115, at 96 kHz -125; its triangle -73 at the
+worst. Its oscillators' latency is 41.25 samples (37.25 the decimators', 4 the kernel's).
+- **Cost** (`preset_cost`, ten voices, ULTRA, against the branch before it, the least of three
+  interleaved one-second rounds): 541.6 % of a core to 548.5 %, +1.2 % (median +1.5; -0.3 to
+  +2.5), 0.69 % of a core a voice.
+- **Renders** (`preset_render`, ULTRA at 48 kHz, against the branch before it): levels within
+  0.06 dB; every third-octave band within 0.6 dB but White Lotus's at 62 Hz (+1.3 dB) and
+  Feedback Funk's loop (1.4 dB); the difference's RMS mostly the 15 samples' shift.
+
+### The filter's last halfband in ULTRA (measured, not built)
+
+The filter's decimator at 4x has the same 79-tap last stage. Measured on branch
+`lab/ultra-filter-halfband` (`ca72-lab filteralias`): ULTRA's whole voice with a note held,
+the aliasing of its output and of the filter's own output (the voice's probe) from 20 Hz to
+20 kHz against the fundamental, for self-oscillation at full EMPHASIS (CUTOFF 0.55, 0.7, 0.85:
+1.6, 5.3 and 14.9 kHz), a bright sawtooth (A4 and A6, 8') open and at EMPHASIS 0.8, and DRIVE
+at +12 dB; the results are [band-limiting/ultra-filter-halfband.tsv](band-limiting/ultra-filter-halfband.tsv).
+- **The last stage makes no measurable difference.** At 44.1, 48 and 96 kHz every figure with
+  139 taps is within 0.1 dB of 79's (with 23 taps, within 0.7 dB). The filter run at 8x
+  instead of 4x changes them by 2.7 dB at most, either way.
+- **What aliases is after the filter, the VCA.** The open sawtooth at A4 at 44.1 kHz carries
+  -71.5 dB at the filter's output and -45.5 dB at the voice's; the loudest component, 19.9
+  kHz, is its 55th harmonic (24.19 kHz) folded (at 48 kHz its 64th, folded to 19.85 kHz). The
+  VCA's signal path runs at the output rate and is nonlinear (in High Fidelity's plain path
+  too: the same figures); DRIVE's open sawtooth reads -33 dB at the voice and -58 at the
+  filter. The resonant patches' figures are mostly the filter ringing at its own frequency
+  against the sawtooth's, not aliasing.
+- **Its cost:** the decimator's 40 ns an output sample would be 60 (0.09 % of a core a
+  voice), and 15 samples more, inside FEEDBACK's loop, whose length sets how it oscillates (the
+  light model's `FEEDBACK_DELAY` counts the circuit's loop in samples), and before the VCA,
+  whose loudness contour would have to wait for them.
+
+**For the owner to decide:** the filter's last halfband stays at 79 taps (recommended: no
+measurable gain, a longer FEEDBACK loop). The VCA's signal path at the output rate is what
+aliases in ULTRA at 44.1 and 48 kHz (-45 dB on an open sawtooth); running it oversampled
+is measured next (below).
+
+### ULTRA's VCA oversampled (measured, not built)
+
+ULTRA's VCA signal path (`Vca::signal`, from `BackPart::tick`) runs at the output rate and is
+nonlinear, and it is what aliases in ULTRA's voice (above). Prototyped on branch
+`lab/ultra-vca-os` (from this branch), behind `CA72_VCA_OS`, read once; unset, the voice
+runs today's code, and every factory preset's ULTRA render is the same to the bit as this
+branch's. ULTRA only; HI, LO and the defaults are unchanged.
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **Two ways to feed it.**
+  - `interp2` and `interp4` interpolate the filter's output again (`Interpolator::new`), run
+    the signal path at 2x or 4x and decimate it (`Decimator::new`, 79 taps last). The filter
+    keeps its own decimator. `interp8` is the reference the others converge to.
+  - `filter4` hands the VCA the filter's own samples at 4x, before its decimator
+    (`Vcf::tick_oversampled`), and decimates the VCA's output with a decimator of the same
+    design. The filter's decimator moves after the VCA, and nothing is resampled twice.
+  - `filter2` takes the filter's samples through its decimator's first stage (the 23-tap
+    halfband, 4x to 2x), runs the VCA at 2x and ends with the 79-tap stage: the filter's
+    decimator's two stages with the VCA between them.
+- **The bias stays at the output rate.** `Vca::control` (the tails, the chain, Q18's solve)
+  still runs once a sample, on its own copy of the VCA. Its drive (`VcaDrive`, twenty values)
+  is interpolated linearly across the sample's steps, up to the sample's own on the last.
+  Only the signal path's states (C6, C8, C2) step at the higher rate. The A-440 is held for a
+  sample.
+- **The lab's code.** `VcaOversampled` (`vca.rs`) does it. `ca72-lab filteralias` is ported
+  from `lab/ultra-filter-halfband`; it also prints each render's level and harmonics below
+  20 kHz, and times the signal path alone. `CA72_VCA_OS_PROBE` keeps the filter's own output
+  for the probe when its decimator has moved. `vca_realtime.rs` (ca72-lab) runs its tests
+  through the oversampled path under the same switch: its sources are taken at the path's own
+  rate, and the reference is shifted by the path's delay.
+
+**Aliasing** (`ca72-lab filteralias`, total against the fundamental, dB; the voice's output,
+and the filter's own output as today's build has it; the full matrix, with every render's
+harmonics, is [band-limiting/vca-oversampled.tsv](band-limiting/vca-oversampled.tsv)):
+
+| Rate, patch | Today | `interp2` | `interp4` | `interp8` | `filter2` | `filter4` | Filter's output |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 44.1 kHz, saw A4 open | -45.5 | -70.7 | -71.4 | -71.0 | -70.1 | -70.1 | -71.5 |
+| 44.1, saw A6 open | -40.5 | -66.6 | -66.6 | -66.3 | -64.2 | -64.2 | -67.1 |
+| 44.1, saw A4 open, DRIVE +12 dB | -33.1 | -64.5 | -65.0 | -65.1 | -53.9 | -59.3 | -58.2 |
+| 44.1, saw A4, EMPHASIS 0.8 | -34.4 | -41.4 | -41.4 | -41.4 | -41.4 | -41.4 | -41.5 |
+| 44.1, whistle CUTOFF 0.85 (14.9 kHz) | -39.4 | -51.5 | -51.5 | -51.5 | -51.5 | -51.5 | -51.4 |
+| 48 kHz, saw A4 open | -48.1 | -73.2 | -73.2 | -73.2 | -71.4 | -71.4 | -73.2 |
+| 48, saw A6 open | -42.4 | -68.7 | -68.7 | -68.7 | -66.4 | -66.4 | -68.4 |
+| 48, saw A4 open, DRIVE +12 dB | -35.2 | -62.5 | -62.6 | -62.6 | -56.1 | -60.0 | -58.8 |
+| 48, saw A4, EMPHASIS 0.8 | -35.5 | -42.5 | -42.5 | -42.5 | -42.5 | -42.5 | -42.6 |
+| 48, whistle CUTOFF 0.85 | -39.7 | -59.6 | -59.6 | -59.6 | -59.6 | -59.6 | -59.6 |
+| 96 kHz, saw A4 open | -74.0 | -76.8 | -76.8 | -76.8 | -76.9 | -76.9 | -76.5 |
+| 96, saw A4 open, DRIVE +12 dB | -57.7 | -66.2 | -66.2 | -66.2 | -65.5 | -65.5 | -64.4 |
+
+- **Oversampled at all, the voice is as clean as its filter.** Today the voice is 24 to 27 dB
+  above its filter's figure on the open sawtooths at 44.1 and 48 kHz. Every variant brings it
+  to within 3 dB of the filter's, but `filter2` with DRIVE (4.3 dB above). The whistle at
+  14.9 kHz goes from -39 dB to the filter's -51.5 (44.1 kHz) and -59.6 (48). At 96 kHz the
+  gain is 3 to 9 dB.
+- **2x is enough.** `interp2` is within 0.7 dB of `interp8` everywhere. What is left is the
+  filter's own aliasing, which its decimator does not change (measured above). The resonant
+  patches (EMPHASIS 0.8, the whistles) agree within 0.1 dB in every variant; their figures
+  are the filter's.
+- **Fed the filter's own samples, the VCA hears what the circuit's does.** The filter's
+  output at 4x carries its harmonics up to 88 kHz (at 44.1), which the circuit's VCA also
+  takes in. `interp` takes them off before the VCA, as today's build does. Compared over the
+  harmonics below 20 kHz within 60 dB of the fundamental:
+  - `interp` and `filter4` differ by up to 1.1 dB with DRIVE at +12 dB (0.3 dB on an open
+    sawtooth, 0.2 at EMPHASIS 0.8);
+  - `filter2` and `filter4` agree within 0.06 dB;
+  - today's build differs from `filter4` by up to 0.9 dB.
+- **The ultrasonic products fold in their turn.** `filter4` with DRIVE reads -59.3 dB at 44.1
+  kHz (the filter's own -58.2), `filter2` -53.9. Without DRIVE, `filter` reads 0.6 to 2.4 dB
+  above `interp`.
+- **Levels** are within 0.01 dB of today's in every render.
+
+**Cost** (`preset_cost`, ten voices, ULTRA, one-second rounds; the unchanged build
+`claude/lucid-fermi-67e20c` and the lab's interleaved, three rounds, the least of each
+preset's, the 19 presets' mean; load averages 4 to 6, the first round's first run 14; the
+raw figures are [band-limiting/vca-oversampled-presets.txt](band-limiting/vca-oversampled-presets.txt)):
+
+| | Of a core | Change (median; range) | A voice |
+|---|---:|---|---:|
+| Unchanged build | 528.1 % | | |
+| Lab, `CA72_VCA_OS` unset | 529.3 % | +0.2 % (+0.6; -1.2 to +1.8) | +0.1 % of a core |
+| `interp2` | 556.8 % | +5.4 % (+5.7; +1.9 to +8.4) | +2.9 % |
+| `interp4` | 597.8 % | +13.2 % (+12.9; +7.1 to +19.3) | +7.0 % |
+| `filter2` | 546.6 % | +3.5 % (+3.6; +0.9 to +5.7) | +1.9 % |
+| `filter4` | 582.2 % | +10.2 % (+11.3; +3.0 to +18.1) | +5.4 % |
+
+The signal path alone (`filteralias`: a 1 kHz sine at 0.5 V, the contour full, ns an output
+sample at 48 kHz, the least of four runs) takes 491 ns at the output rate, 1,042 (`interp2`),
+2,016 (`interp4`), 1,030 (`filter2`) and 2,012 (`filter4`). The step costs the same whatever
+feeds it. `filter` saves the second resampling (the filter's decimator, 38 ns, moves rather
+than doubles).
+
+**Latency** (output samples):
+
+| | The sound through the VCA | The VCA's response to the loudness contour | The gain ahead of the filter's sound (today 44.5) | FEEDBACK's loop (today 90) |
+|---|---:|---:|---:|---:|
+| `interp2` | +39 | +20 | 63.5 | 129 |
+| `interp4` | +44.5 | +23 | 66 | 134.5 |
+| `filter2` | 0 | +20 | 24.5 | 90 |
+| `filter4` | 0 | +23 | 21.5 | 90 |
+
+- **FEEDBACK's loop** in ULTRA is the cable's sample, the preamplifier's resamplers' 44.5 and
+  the filter's 44.5 (the light model's `FEEDBACK_DELAY` counts the circuit's as 88 at 44.1
+  and 48 kHz). `interp` lengthens it by 43 to 49 %, which changes how FEEDBACK oscillates.
+  `filter` leaves it as it is.
+- **The loudness contour.** The bias is worked out at the output rate and stepped across the
+  sample. So a change of it reaches the output through the decimator, 20 or 23 samples later
+  than today (0.4 or 0.5 ms at 48 kHz), and (factor - 1) / factor of a sample more, since the
+  decimator gives its output on the first of a sample's steps.
+- **Against the sound.** Today the gain meets the filter's output 44.5 samples (the filter's
+  resamplers) earlier than the circuit's would. `filter` does not delay the sound, so the gain
+  moves 20 or 23 samples later against it: nearer the circuit, where they meet at once.
+  `interp` delays the sound by 39 or 44.5 and the gain by 20 or 23, so the gain runs further
+  ahead. Keeping today's alignment would take a loudness delay of its own (`contour_delay`
+  also delays the filter's contour).
+
+**What the presets hear** (`preset_render`, ULTRA at 48 kHz, two seconds, against the lab
+with the switch unset; the full tables are in
+[band-limiting/vca-oversampled-presets.txt](band-limiting/vca-oversampled-presets.txt)):
+- **`filter4` and `filter2`:**
+  - Levels are within 0.01 dB, but Feedback Funk's (+0.03 and +0.04 dB). The difference's RMS is 24 to
+    63 dB below each render, and Feedback Funk's 3 to 4 dB below: a loop that sensitive
+    diverges, but its worst band moves by -1.1 dB (31 Hz).
+  - Every third-octave band is within 1.3 dB, but Driven Kick's 1.26 kHz (+3.6 dB; +3.1 at
+    2x) and Cycle of Fifths' 250 Hz (-2.1; -1.6).
+  - The bright presets' 20 kHz band falls by up to 0.6 dB (Horn Bloom), the aliasing taken
+    out.
+- **`interp`:**
+  - Every render is 39 or 44.5 samples later, so the difference's RMS is mostly about the
+    render's own (up to 3.5 dB above it).
+  - Feedback Funk's 630 Hz band rises by 14.5 dB (2x) and 13.0 (4x): the longer loop
+    oscillates otherwise.
+  - Driven Kick's 1.26 kHz band rises by 2.8 and 2.5 dB.
+- **Driven Kick's 1.26 kHz band** moves in every variant, so it is the preset most sensitive
+  to the VCA's rate and timing. R-BLEP's contour delay (above) moved its 315 Hz band by 2.5 dB.
+
+**Against ngspice** (`vca_realtime.rs`, release; today's path, then with `CA72_VCA_OS` at 2x
+and 4x): every test passes in all three, and the VCA's sound holds.
+- The gain over contour and over EXT. LOUDNESS (0.15 dB budget) and the driven VCA's
+  harmonics move by 0.01 dB at most. Those tests run at 192 kHz, where the path's rate is
+  already far above the tone's harmonics. The bias, the balance procedure and the static
+  transfer do not involve the signal path's rate.
+- The thump of a contour step (budget 3 % of its 123 mV peak) reads 1.40 to 1.43 mV at the
+  worst at 2x and 4x, against 1.39 to 1.40 today.
+- A tremolo at EXT. LOUDNESS (the one test of the signal path against an audio-rate bias, at
+  48 kHz) is within 0.1 dB up to 100 Hz. At 1 kHz the difference falls from 27.7 dB below the
+  output to 31.1 (2x) and 33.5 (4x), as `tremolo_step_budget` found the model's step converge
+  (31.4 and 33.8).
+- The first run at 2x and 4x failed the thump and the tremolo, by the output's alignment. The
+  bias reaches the output (factor - 1) / factor of a sample later than the decimator's delay.
+  `VcaOversampled::bias_latency` counts it, and the tests shift the reference by it.
+
+**Options for the owner:**
+1. **As it is.** ULTRA's voice aliases at -45 dB on an open sawtooth at 44.1 kHz (-48 at 48),
+   -33 with DRIVE: 24 to 27 dB above its filter.
+2. **`filter4`: the VCA at the filter's rate, the filter's decimator after it.**
+   - The voice is as clean as its filter, DRIVE included.
+   - The VCA takes in what the circuit's does.
+   - No latency is added to the sound or to FEEDBACK's loop, and the gain meets the sound 23
+     samples nearer the circuit's timing.
+   - +10.2 % on ULTRA (5.4 % of a core a voice).
+3. **`filter2`: the VCA at 2x between the filter's decimator's two stages.**
+   - As clean as `filter4` except with DRIVE (-54 dB at 44.1 kHz, 4.3 above the filter).
+   - The same latencies as `filter4`.
+   - +3.5 % (1.9 % of a core a voice).
+4. **`interp2`: the filter's output interpolated again, the VCA at 2x.**
+   - The cleanest figures (within 0.7 dB of 8x).
+   - The VCA no longer hears the filter's ultrasonic output.
+   - The sound and FEEDBACK's loop get 39 samples more (90 to 129), which changes Feedback
+     Funk, and the gain runs 19 samples further ahead of the sound.
+   - +5.4 % (2.9 % of a core a voice).
+
+**Recommendation: 2, `filter4`.** It is the only variant that ends the VCA's aliasing and also
+keeps the VCA as the circuit has it: fed the filter's whole output, with nothing added to the
+loop or the sound. ULTRA is the render engine (its whole voices cannot be played live anyway,
+R-THREADS), so accuracy is worth its 10 %. If ULTRA's cost must not grow by that much, take
+`filter2`: it is the same except for DRIVE, for a third of the cost. Not `interp`, which moves
+FEEDBACK. Built, it would be the voice's code (`VcaOversampled` in `BackPart`), with the bias
+interpolated as here.
+- **Two things to settle in a build:** the VCA's states when ULTRA is switched on during a
+  note (the lab copies the VCA once, when the voice is made); and whether the oversampled path
+  can take High Fidelity's plain solve (1e-9, one Newton step a sample) at the higher rate,
+  which might cost less. Neither was measured here.
+
+**For the owner to decide:** whether ULTRA's VCA runs oversampled, and which way (1 to 4
+above; recommended: 2).
+
+**Evidence (the Mac, 2026-10-16 and 17; branch `lab/ultra-vca-os`):**
+- **Suite.** `vca_realtime.rs` (release): 9 pass, 1 ignored, at 1x, 2x and 4x. ca72's unit
+  tests (debug): 76 pass. `cargo clippy -p ca72 -p ca72-lab --all-targets -- -D warnings`
+  passes; rustfmt on the changed files.
+- **Same to the bit.** The lab with `CA72_VCA_OS` unset renders every factory preset at ULTRA
+  the same to the bit as `claude/lucid-fermi-67e20c` (`preset_render`, two seconds).
+- **Machine.** Shared, load averages 4 to 14 while the cost rounds ran (interleaved); the
+  aliasing runs are deterministic.
+- **Not tried:** HI or LO; the threaded ULTRA split (R-THREADS, another branch); paced worst
+  blocks; Windows and Linux; hosts. Not pushed.
+
+### ULTRA's VCA at 4x (the owner's choice, built)
+
+**Owner decision, 2026-10-17** (passed on by the session that started this work): "4x", that
+is `filter4`: ULTRA's VCA fed the filter's own samples at 4x, the filter's decimator after it.
+Built on the merged branch (`integrate/threads-band-limiting`: the threads work, R-BLEP and
+R-LATENCY). Only ULTRA changes; HI and LO keep the VCA at the sample rate; FEEDBACK's loop
+stays as it is; the contours are lined up again so that the envelope meets its sound in
+ULTRA, and R-LATENCY's figures follow if they move.
+
+**Built** (branch `claude/ultra-vca-4x`, from `integrate/threads-band-limiting` at `6cc1e3c`;
+agent decisions, not separately approved):
+- **`OversampledVca`** (`vca.rs`) runs the signal path at the filter's rate on
+  `Vcf::tick_oversampled`'s samples and decimates its output (`Decimator::new(4)`). The bias
+  still comes from the bias part at the sample rate, interpolated linearly across the four
+  steps. The filter's own decimator still runs (about 40 ns a sample): it gives the filter's
+  output for the probe and keeps the sample-rate path ready for a switch.
+- **ULTRA and the lab's High Fidelity.** High Fidelity is ULTRA but for the VCA's plain solve,
+  so it runs the same 4x path with that solve; `quality.rs` still compares the two solves on
+  one path. HI (Potato) and LO keep the VCA at the sample rate.
+- **Switching QUALITY.** The other path takes over the signal path's states (C6, C8, C2 and
+  the warm starts; `Vca::take_signal_states`). Into ULTRA, its decimator is filled with the
+  last output, so that the output steps at the switch rather than dropping out for 23
+  samples.
+- **The loudness contour in ULTRA comes 23 samples earlier:** 61.75 samples late, not 84.75
+  (`vca_bias_latency`). The bias now reaches the output through the VCA's decimator: its
+  22.25 samples, and 0.75 more because the bias reaches the sample's own on the last of its
+  steps while the decimator gives its output on the first. So ULTRA's attack comes out where
+  it did and meets its sound as R-LATENCY has it. The VCA's thump alone starts in HI and
+  ULTRA within 0.08 sample of each other at 44.1, 48 and 96 kHz.
+- **The checks.**
+  - `vca_realtime.rs` checks the thump and the audio-rate tremolo against ngspice at 1x and
+    4x on every run (its `Rt`), and every test at 4x with `CA72_VCA_FACTOR=4`, by hand. The
+    tremolo's budget at 1 kHz is 32 dB at 4x (measured 33.5; 27.5 at 1x).
+  - `tests/latency.rs`'s `hi_s_attacks_come_out_with_ultra_s` now measures both attacks at
+    one level, a share of HI's peak, not each at a share of its own. ULTRA's VCA takes in
+    the filter's output above the band, which raises a sawtooth's peaks by 0.15 dB at 44.1
+    and 48 kHz (0.02 at 96) and moved ULTRA's 50 % point by 0.57 sample. At one level the
+    attacks are within 0.09 sample.
+  - `ca72-lab filteralias` (ported from the lab) measures the voice as built.
+
+**As built** (the figures are [band-limiting/vca-4x-built.txt](band-limiting/vca-4x-built.txt)):
+- **Aliasing** the same as the lab's `filter4` in every figure and harmonic. The open
+  sawtooth at A4 is at -70.1 dB at 44.1 kHz (was -45.5) and -71.4 at 48 (was -48.1); with
+  DRIVE at +12 dB, -59.3 and -60.0 (were -33.1 and -35.2); the whistle at 14.9 kHz is at
+  -51.5 and -59.6 (were -39.4 and -39.7).
+- **Cost** (`preset_cost`, ten voices, ULTRA, against `6cc1e3c`, interleaved, three
+  one-second rounds, the least of each; load averages 2.4 to 4.5): 511.1 % of a core to 565.5
+  %, +10.6 % (median +11.0; +5.5 to +17.6), 5.4 % of a core a voice. HI and LO are unchanged.
+- **Latency.**
+  - ULTRA's sound is unchanged: 85.75 samples of resampling and band-limiting, measured from
+    the oscillators' jumps as 87.13, 87.20 and 87.88 at 44.1, 48 and 96 kHz, as before.
+  - So the plug-in still reports 86, HI and LO are still held back 26 and 39 (`LINE_UP`),
+    and FEEDBACK's loop is still 90 samples.
+  - EXT. LOUDNESS's voltage and the A-440, which reach the VCA without a contour's delay, now
+    reach the output 23 samples later in ULTRA (in HI, held back, 26).
+- **Renders** (`preset_render`, ULTRA at 48 kHz, two seconds, against `6cc1e3c`):
+  - The difference's RMS is 44 to 77 dB below each render, Feedback Funk's 7 dB (its loop).
+  - Levels are within 0.01 dB, Feedback Funk's -0.06.
+  - Every third-octave band is within 0.56 dB; the largest is Horn Bloom's at 20 kHz (the
+    aliasing taken out).
+  - HI's and LO's renders are the same to the bit.
+- **Against ngspice:** every `vca_realtime.rs` test passes at 1x and at 4x. The gain and the
+  driven VCA's harmonics are within 0.01 dB of 1x's; the thump is within 1.43 mV of its
+  123 mV peak (1.40 at 1x); the tremolo at 1 kHz is 33.5 dB below (27.7 at 1x).
+
+**Evidence (the Mac, 2026-10-17; branch `claude/ultra-vca-4x`):**
+- **Suite.** `cargo test --workspace --features ca72-plugin/standalone-production` (debug):
+  507 pass, 57 ignored; the three failures are the known ngspice tests (`vco_electrical`'s
+  two, `vco_osc23`; "Timestep too small" on this Mac's ngspice-47).
+  - A first run also failed `the_workers_follow_poly_through_the_plug_ins_life` ("no workers
+    from the helper" after its 10 s). Three ULTRA renders of ten POLY voices each were then
+    holding the machine's workers. It passed alone six times in a row and in the second
+    whole run.
+- **ngspice.** `vca_realtime.rs` (release) passes, with and without `CA72_VCA_FACTOR=4`.
+- **Lints.** `cargo clippy --workspace --all-targets --all-features -- -D warnings` is clean
+  but for the vendored baseview's warnings, as before; rustfmt on the changed files.
+- **Disk and machine.** One target folder (the worktree's; 10 GB free at the end). The
+  machine was shared, load averages 2 to 5.
+- **Not tried:** hosts, Windows and Linux, paced worst blocks. ULTRA split across threads
+  (R-THREADS) is the same to the bit as before against the voice alone (`threaded.rs`), but
+  its late blocks were not measured again: the back part, the filter and now the heavier VCA,
+  runs on one thread. Not pushed.
+
+**For the merge.** The threads work (branch `claude/goofy-ellis-af3f5d`, unmerged, R-THREADS)
+also changes `voice.rs` (`BackPart::set_drive` and others) and `threaded.rs`. This build
+changes `voice.rs` in other places (`ControlPart`'s contour delay, the oscillators' outputs
+in use, `outputs_of`, `contour_delay`) and not `threaded.rs`: the two merge without a conflict
+in the code (`git merge-tree`); only this file conflicts, both records appended at its end.
+
+**Evidence (the Mac, 2026-10-16; commits on `claude/lucid-fermi-67e20c`, and
+`lab/ultra-halfband`, `lab/ultra-filter-halfband`):**
+- **Suite.** `cargo test --workspace --features ca72-plugin/standalone-production` (debug):
+  every test passes but three ngspice tests (`vco_electrical`'s two and `vco_osc23`), which fail
+  the same way on `main` on this Mac ("Timestep too small" at the hold node, ngspice-47 from
+  Homebrew with KLU): not this change's. The new tests pass (`tests/aliasing.rs`, the
+  kernel's two).
+- **Lints.** `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes (the
+  vendored baseview's warnings as before); rustfmt on the changed files.
+- **Machine.** Shared again: the cost rounds ran at a load average of about 24, `main` and the
+  build interleaved; the aliasing runs are deterministic.
+- **Not tried:** the longer halfband built; decimating only the outputs in use; paced worst
+  blocks; Windows and Linux; hosts. Not pushed.
+
+## R-LATENCY. One latency, ULTRA's, in every QUALITY mode; the contours meet their sound
+
+**Owner decisions, 2026-10-16** (passed on by the session that started this work). The
+plug-in reported no latency, though every QUALITY mode delays its sound, each by a different
+amount; reporting each mode's own would make a host compensate afresh at every switch (a
+CLAP host restarts the plug-in). Of the options put to them, the owner chose to report one
+fixed latency, ULTRA's, in every mode and to hold HI's and LO's output back to match: "B".
+The measurement then showed that the contours reach the VCA far earlier than the sound they
+shape (in ULTRA about 20 samples late against the sound's 86), so that reporting 86 alone
+would place every note's onset about 1.4 ms early. Of (a), the latency reported and HI and
+LO held back, and (b), that and each mode's contours delayed by the path of the sound they
+shape, the owner chose "b". EXTERNAL INPUT's remaining difference between the modes stays,
+recorded below.
+
+**Measured** (the Mac, 2026-10-16 and 17, `crates/ca72-plugin/tests/latency.rs`, by hand):
+- **The oscillators' sound**, a sawtooth (16', A3) through the filter wide open: each reset's
+  exact time (the oscillator's own account) against the output's steepest point. LO 48.07,
+  48.14 and 48.98 samples at 44.1, 48 and 96 kHz; HI 61.14, 61.20 and 61.88; ULTRA 87.12, 87.19
+  and 87.88. The resamplers' and band-limiting's delays account for 47.25, 60.5 and 85.75 of
+  them (LO: the filter's 8x resamplers, 23.625 each way; HI: the oscillators' 16 and the
+  filter's 4x resamplers, 22.25 each way; ULTRA: the oscillators' 41.25 and the same filter
+  resamplers); the rest is the filter's own phase, the circuit's (1.4 to 2.1 samples in
+  ULTRA, 0.6 to 1.4 in HI, 0.8 to 1.7 in LO).
+- **EXTERNAL INPUT**, an impulse, a key held: LO 48.1, HI 45.5, ULTRA 89.9 samples (ULTRA's
+  preamplifier, oversampled, about 44 more; HI's and LO's none).
+- **The contours** reached the VCA about 20 samples late in ULTRA (R-BLEP's 18.75 and the
+  contours' sub-rate's 1), 22 in HI (15 and 7) and none in LO: the VCA opened 66 samples
+  before the sound it shapes arrived in ULTRA, 38.5 in HI and 47 in LO.
+
+**Agent decisions, 2026-10-16 and 17** (not separately approved):
+- **The latency is the model's own delays,** the resamplers' and the band-limiting's, not the
+  circuit's (the filter's phase is the sound's). ULTRA's is 85.75 samples at any rate; the
+  plug-in reports 86 (`Engine::latency`; in host samples, with the engine's own resamplers
+  when it runs the voices faster than a host below 8 kHz), set in `initialize`, never while
+  it plays, the same whatever QUALITY is.
+- **HI and LO held back by what was measured,** 26 and 39 samples (`voice::LINE_UP`), not the
+  resamplers' 25.25 and 38.5: the cheaper filters have a little less phase of their own
+  (0.74 and 0.55 samples), and with these the oscillators' sound lines up with ULTRA's within
+  0.1 sample at 44.1, 48 and 96 kHz. The engine holds its output back in a ring of 64 samples
+  a channel made with it; FEEDBACK's loop is inside each voice, so it is not lengthened.
+  Switching QUALITY moves the output by up to 39 samples at the switch, where the voices
+  change anyway. A sample at a time (`Engine::tick_stereo`) is held back as a block is, so the
+  two stay the same to the bit; asleep, the engine still lets out what the ring holds.
+- **Each contour as late as the sound it shapes, less its own sub-rate's delay** (`every` - 1
+  samples: 7 in HI, 1 in ULTRA):
+  - the filter contour meets its sound at the filter's input, the oscillators' delayed by the
+    filter's input resampler: 31.25 samples in HI, 62.5 in ULTRA, 8.625 in LO (its ladder's
+    coefficients follow a 16-sample control step);
+  - the loudness contour reaches the VCA when ULTRA's does once the output is lined up:
+    84.75 samples in ULTRA (its whole path less one), 52.75 in HI (85.75 less 26 and 7), 46.75
+    in LO (less 39). So every mode's attack comes out with ULTRA's, and in each the envelope
+    meets its sound as in the circuit, 1.45 samples before it (the filter's phase).
+    **Since 2026-10-17, 61.75 in ULTRA:** its VCA runs at 4x and its bias reaches the output
+    23 samples later, through the VCA's decimator (R-BLEP, "ULTRA's VCA at 4x"). HI's and
+    LO's are unchanged, and so are the latency reported (86) and `LINE_UP`.
+  This replaces R-BLEP's contour delay, which kept attacks as they had been rather than as
+  the circuit has them.
+- **Left as they are:** EXTERNAL INPUT's sound, once lined up, comes out 18.4 samples earlier
+  in HI than in ULTRA and 2.8 in LO (ULTRA's preamplifier's delay; no one delay at the output
+  can line up both paths); the keyboard's voltage at the filter (KEYBOARD CONTROL) and
+  oscillator 3's modulation reach the filter without the oscillators' delay, as before; HI's
+  keyboard circuit and contours still read the keys every 8 samples, as before.
+
+**The checks** (`crates/ca72-plugin/tests/latency.rs` and the plug-in's own tests):
+- the oscillators' sound in HI and LO, held back, within half a sample of ULTRA's at 44.1, 48
+  and 96 kHz;
+- HI's attacks with its contours computed as ULTRA's (so only the delays differ), held back:
+  a sawtooth's 1, 10 and 50 % points and the VCA's thump's 1 and 10 % points within half a
+  sample of ULTRA's at the three rates (measured within 0.11 sample; the thump's later half,
+  half a second on, follows each VCA's own model). Since ULTRA's VCA runs at 4x both attacks
+  are measured at one level, a share of HI's peak (R-BLEP; within 0.09 sample);
+- the engine's latency 86 in every mode at the three rates, through switches; the engine's
+  output held back by 26 in HI and 0 in ULTRA against the voice's own;
+- `initialize` tells the host 86 once, whatever QUALITY is (`one_latency_is_reported_in_
+  every_quality_mode`);
+- nothing allocated on the audio thread: the rings are arrays made with the voices and the
+  engine, and `realtime.rs` switches ULTRA and LO while it plays.
+
+Two tests changed with the timing, by design: `sound.rs`'s comparison of the one voice with
+the engine (`poly_off_is_the_one_voice_as_before`) takes the voice 26 samples later, and All
+Sound Off's fade is over 26 samples later (`all_sound_off_silences_...`), HI's output being
+held back.
+
+**What the renders do** (`preset_render`, the 19 factory presets, ten voices, against the
+merged branch before this, each mode's holding back taken out): levels within 0.11 dB in
+every mode. Each attack starts later against its own sound by the contours' new delay: 66
+samples in ULTRA, about 38 in HI, about 46 in LO (a preset with a slow attack more, where its
+first 1 % falls in another cycle). Where an attack meets a fast sweep of pitch or cutoff the
+spectrum changes: Driven Kick's worst third-octave band +11 dB in ULTRA, +4.7 in HI, -17 in LO;
+Felt Bass -6.2 dB in ULTRA; Tenor Pluck -3.5 to -4.4 dB in every mode; Tight Hat +3.5 in HI;
+Cycle of Fifths -3.3 in LO; the others within 3 dB (Feedback Funk's loop, chaotic, moves
+whatever changes). Before, each envelope ran ahead of the sound it shaped by 0.8 ms (HI) to
+1.4 ms (ULTRA) at 48 kHz.
+
+**Evidence (the Mac, 2026-10-17; branch `latency-b` on the merged branch
+`integrate/threads-band-limiting` at `5752dfc`):** the workspace's suite
+(`--features ca72-plugin/standalone-production`, debug) passes but for the two ngspice tests of
+`vco_electrical` and `vco_osc23`, which fail the same way before this change ("Timestep too
+small" at the hold node, this Mac's ngspice-47); clippy (all targets, all features, `-D
+warnings`) clean; rustfmt on the changed files. Built in a target folder of its own: the
+threads work's, shared, took the merged branch's sources for this one's (one package to it),
+which the first render comparison caught. Not tried: hosts (the latency each reports and
+compensates), Windows and Linux, paced worst blocks.
+
+## R-VERSION. This build's version in the settings menu
+
+**The owner, 2026-10-17**, after a local build of the release candidate that also read 0.2.4
+had been taken for the release: "why don't we have versions shown in the plugin settings menu
+so there's no confusion?"
+
+**Built:**
+- **Which build this is** (`crates/ca72-plugin/build.rs`): a build of the release's tag
+  (`v<version>`, found by `git tag --points-at HEAD` or CI's `GITHUB_REF`) is its version
+  alone; any other build carries the commit it was made from (`update::BUILD`). A source tree
+  without git builds as the version alone. The build script runs again when the checkout
+  moves to another commit or the tags change.
+- **The settings menu** ends with VERSION and, under it, `0.2.4` for the release or
+  `0.2.4 · BUILD 602B298` for any other build; neither is to be chosen, and pressing them does
+  nothing.
+- **The presets drawer** (R27) shows the same: `CA-72 0.2.4`, or `CA-72 0.2.4 · 602B298`. The
+  update check still compares the version alone.
+- **The library's tests get a seats folder of their own** (`seats::user_dir`, `cfg!(test)`;
+  R-THREADS's shared budget). With Live and the standalone app holding the user's seats,
+  `the_workers_follow_poly_through_the_plug_ins_life` found no workers and failed every time;
+  a host playing on the computer no longer takes the tests' workers.
+
+**Evidence (the Mac, 2026-10-17, Live and the standalone app running the candidate):** the
+plug-in library's 250 tests pass, among them the new `a_build_other_than_the_release_names_its_commit`
+(the drawer's label fits beside its button with a long version and a commit) and
+`the_settings_menu_ends_with_this_build_s_version` (the menu within the window); the three tests
+that read the old label or the menu's heads updated. The workspace's suite (`--features
+ca72-plugin/standalone-production`) gives 509 passed, and 3 failed: the ngspice tests of
+`vco_electrical` and `vco_osc23` that fail the same way before this change on this Mac. Clippy
+(all targets, all features, `-D warnings`) clean; rustfmt on the changed files.
+
+## R-PAIRS-WITH-FIDELITY. 0.2.6's paired filters with ULTRA's 4x VCA and the contours' delays
+
+**Found on 2026-10-18**, merging 0.2.6 (R-HI-PAIRS) into this work: R-HI-PAIRS's
+`ultra_and_mixed_pairs_play_each_voice_alone` failed from the first sample. R-HI-PAIRS splits a
+voice's sample into `Voice::before_filter`, `Voice::filter_pair` and `Voice::after_filter`, and
+two parts of it no longer matched `Voice::tick_jacks`:
+- **ULTRA's VCA** (R-BLEP, at 4x) takes the filter's own samples before its decimator; the split
+  path ran ULTRA's filter decimated and its VCA at 1x.
+- **The contours' delays** (R-LATENCY) follow the audio path's quality (`ControlPart::tick_for`);
+  the split path took the contours' quality, which differs while a QUALITY switch is held
+  (`Voice::hold_control_quality`).
+
+**Fixed:** `filter_pair` solves a pair side by side only where both voices play HI, as before;
+any other voice's back runs whole (`BackPart::tick`), its output kept for `after_filter`.
+`before_filter` takes the contours with `tick_for` at the audio path's quality. The paired path's
+VCA takes over the 4x VCA's states at a switch from ULTRA and leaves its last output for the
+switch back, as `BackPart::tick` does. HI's pairs are unchanged: the same operations in the same
+order.
+
+**Evidence (the Mac, 2026-10-18):** `tests/pairs.rs`: R-HI-PAIRS's two tests pass (HI pairs,
+ULTRA and mixed pairs the same to the bit as alone), and a new one,
+`a_pair_switched_between_ultra_and_hi_plays_each_voice_alone` (both voices from ULTRA to HI, one
+back to ULTRA and again to HI, then both to ULTRA, under held notes), passes; with the
+hand-over taken out of the paired path it fails.
+
+## R-PREPARE-STACK. The voices built on a thread with a main thread's stack
+
+**Found on 2026-10-18** by CI on PR #87 (this work on 0.2.6): on macOS, pluginval stopped with
+"Illegal instruction" in the Audio Unit's audio processing test, at its first 48 kHz block after
+the 44.1 kHz ones. Reproduced on the Mac with the same pluginval (1.0.4) and run under lldb: a
+stack overflow (`EXC_BAD_ACCESS` at the stack's guard) in `Engine::prepare` → `made_voice` →
+`Voice::prototype` → `Voice::new` → the keyboard circuit's first solve, on pluginval's own
+thread. A macOS secondary thread has 512 KB of stack. CLAP and VST3 passed because pluginval
+prepares those on the main thread (8 MB).
+- **Why now:** a voice is 44 KB with this work (35 KB in 0.2.6: the oscillators' kernels, the
+  4x VCA, the contours' delay lines), and building voices in place keeps several on the stack.
+  In the crashing build, `Voice::prototype` took 220 KB, `Engine::prepare` 143 KB,
+  `Voice::new` 106 KB and `made_voice` 44 KB. A voice is first made for a rate (the keyboard's
+  calibration) only once per rate, which is why 44.1 kHz passed and 48 kHz did not.
+
+**Fixed:** `Engine::prepare` does its work (`prepare_here`) on a thread of its own, named
+`ca72-prepare`, with an 8 MB stack (`PREPARE_STACK`), joined before it returns. A panic there
+is the caller's, as before; if no thread can be had, the work runs in place, as before. Hosts
+prepare a plug-in apart from the audio thread, and the plug-in already starts its helper
+threads here.
+
+**Evidence (the Mac, 2026-10-18):** `prepare_fits_a_hosts_secondary_thread` prepares an engine
+at a rate no voice has been made at, from a thread with 512 KB of stack: it passes, and without
+the fix it overflows. pluginval 1.0.4, strictness 10, in process, its editor tests
+skipped (the Mac's screen in use), on the Audio Unit rebuilt from `d9d8a33` and put in
+`~/Library/Audio/Plug-Ins/Components` for the run (taken out after): SUCCESS, the audio
+processing test through 44.1, 48 and 96 kHz in every block size, where before the fix it stopped
+at 48 kHz.

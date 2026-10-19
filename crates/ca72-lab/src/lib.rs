@@ -10,6 +10,7 @@
 //! its device models; it says nothing by itself about agreement with a physical instrument
 //! (`docs/circuit/assumptions.md`, "Limits of validation").
 
+pub mod alias;
 pub mod bench;
 pub mod board3;
 pub mod board4ext;
