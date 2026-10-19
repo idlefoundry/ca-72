@@ -42,11 +42,21 @@ fn main() {
         }),
         device_access,
     };
-    if let Err(error) = nih_plug::wrapper::production::run_with_midi_reset_scope::<ca72_plugin::Ca72>(
+    // Until the window closes, however it is closed: its close button, the system's shortcuts
+    // and menus for quitting, logging out (decisions.md R-QUIT). The session is saved and the
+    // audio and MIDI stopped by then.
+    let result = nih_plug::wrapper::production::run_with_midi_reset_scope::<ca72_plugin::Ca72>(
         options,
         &["pitch_wheel", "mod_wheel"],
         plugin_kit_standalone::MidiResetScope::Global,
-    ) {
+    );
+    finish(result);
+}
+
+/// The app's one way out once its window has closed, whichever way it was closed (R-QUIT):
+/// whatever must end with the app ends here, and an error the app stopped with is shown.
+fn finish(result: Result<(), String>) {
+    if let Err(error) = result {
         eprintln!("CA-72: {error}");
         ca72_plugin::standalone_error::show(&error);
         std::process::exit(1);
