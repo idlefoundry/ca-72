@@ -28,6 +28,7 @@ pub use drawer::{
     midi_row_centre, row_centre, search_centre, star_centre, tab_centre, tab_of, update_centre,
     update_fits,
 };
+pub(crate) use drawer::{display_glass, smooth_glass};
 
 /// The selector's height, panel units: the strip's row it shares.
 pub const BAR_H: f64 = 96.0;
@@ -153,6 +154,12 @@ pub enum BarTarget {
     Settings,
     /// Swap the extension controls and the piano.
     Keyboard,
+    /// The arpeggiator's drawer, dropped down over the lower panel or put away (decisions.md
+    /// R-ARP); lit while the arpeggiator is on.
+    Arp,
+    /// The effects' drawer, the standalone application's alone (decisions.md R-FX-DRAWER); lit
+    /// while an effect plays.
+    Fx,
 }
 
 /// What a pointer finds in the drawer.
@@ -300,6 +307,10 @@ pub struct BarScene {
     /// The lower panel is expanded (the PANEL toggle's active finish).
     pub panel: bool,
     pub keyboard: bool,
+    /// The arpeggiator is on (its key lit).
+    pub arp: bool,
+    /// An effect plays (the standalone's FX key lit).
+    pub fx: bool,
 }
 
 // ---- The selector's layout (panel units across, the strip's units down).
@@ -546,9 +557,12 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         BarTarget::Prev => PREV_X + STEP_W / 2.0,
         BarTarget::Name => (NAME_X + NAME_END) / 2.0,
         BarTarget::Next => NEXT_X + STEP_W / 2.0,
-        BarTarget::Save | BarTarget::Settings | BarTarget::Panel | BarTarget::Keyboard => {
-            SAVE_X + SAVE_W / 2.0
-        }
+        BarTarget::Save
+        | BarTarget::Settings
+        | BarTarget::Panel
+        | BarTarget::Keyboard
+        | BarTarget::Arp
+        | BarTarget::Fx => SAVE_X + SAVE_W / 2.0,
     };
     (x, BAR_MID)
 }
@@ -768,6 +782,8 @@ mod png {
                         below: false,
                         hover: None,
                         panel: true,
+                        arp: false,
+                        fx: false,
                     },
                     ..crate::strip::StripScene::default()
                 },
@@ -1057,6 +1073,8 @@ mod png {
                     below: false,
                     hover: None,
                     panel: true,
+                    arp: false,
+                    fx: false,
                 },
                 ..crate::strip::StripScene::default()
             },

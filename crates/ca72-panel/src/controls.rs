@@ -23,6 +23,26 @@ pub enum Dial {
     Drive,
     /// LEVEL: -30 to +12 dB.
     Level,
+    /// The arpeggiator's (decisions.md R-ARP): RATE, its note values 2 (a half note) to 32, the
+    /// straight ones numbered, the dotted and triplet ones between them unnumbered ticks.
+    ArpRate,
+    /// OCTAVES, 1 to 5.
+    ArpOctaves,
+    /// GATE and SWING: 0 to 100 %.
+    Percent,
+}
+
+impl Dial {
+    /// How many steps its travel is in, for a knob of discrete positions (it goes from one to
+    /// the next, never between them: the owner, 2026-10-10); none for one that turns smoothly.
+    pub fn steps(self) -> Option<usize> {
+        match self {
+            Dial::Voices => Some(8),
+            Dial::ArpRate => Some(12),
+            Dial::ArpOctaves => Some(4),
+            _ => None,
+        }
+    }
 }
 
 /// The time dial's labelled marks: angle in degrees and milliseconds (R-KNOB-ENTRY).
@@ -102,9 +122,10 @@ pub enum Kind {
 
 impl Kind {
     /// Whether every fraction of a drag or scroll can change the value, rather than only
-    /// whole positions. VOICES has a knob's shape but discrete options.
+    /// whole positions. VOICES and the arpeggiator's RATE and OCTAVES have a knob's shape but
+    /// discrete options.
     pub fn is_continuous(&self) -> bool {
-        matches!(self, Self::Knob { dial, .. } if *dial != Dial::Voices)
+        matches!(self, Self::Knob { dial, .. } if dial.steps().is_none())
             || matches!(self, Self::Wheel { .. })
     }
 }
@@ -119,6 +140,9 @@ pub enum Place {
     Column,
     /// The strip's, its origin the drawing's.
     Strip,
+    /// The arpeggiator's drawer's (`strip::arp`), its origin the drawing's with the drawer
+    /// open: drawn by the drawer, found only while it is open.
+    Arp,
 }
 
 /// A control of the panel, operating the parameter of the same function.
@@ -141,7 +165,7 @@ impl Control {
         let (ox, oy) = match self.place {
             Place::Panel => (crate::art::COL, crate::art::TOP),
             Place::Column => crate::strip::LEFT_HAND,
-            Place::Strip => (0.0, 0.0),
+            Place::Strip | Place::Arp => (0.0, 0.0),
         };
         (ox + self.x, oy + self.y)
     }
@@ -154,6 +178,18 @@ const fn knob(param: &'static str, label: &'static str, x: f64, y: f64, dial: Di
         place: Place::Panel,
         x,
         y,
+        kind: Kind::Knob { dial, big: false },
+    }
+}
+
+/// A knob of the arpeggiator's drawer, the `at`th of its units (`strip::arp::UNITS`).
+const fn arp_knob(param: &'static str, label: &'static str, at: usize, dial: Dial) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Arp,
+        x: crate::strip::arp::UNITS[at] + crate::strip::UNIT_KNOB,
+        y: crate::strip::arp::ROW,
         kind: Kind::Knob { dial, big: false },
     }
 }
@@ -253,7 +289,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 55] = [
+pub const CONTROLS: [Control; 59] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -594,6 +630,12 @@ pub const CONTROLS: [Control; 55] = [
         Colour::Ivory,
         Orient::Right,
     ),
+    // The arpeggiator's drawer's knobs (decisions.md R-ARP), the plug-in's own, after every
+    // other, so that no control moves.
+    arp_knob("arp_rate", "RATE", 0, Dial::ArpRate),
+    arp_knob("arp_octaves", "OCTAVES", 1, Dial::ArpOctaves),
+    arp_knob("arp_gate", "GATE", 2, Dial::Percent),
+    arp_knob("arp_swing", "SWING", 3, Dial::Percent),
 ];
 
 /// The index of the control operating `param`.

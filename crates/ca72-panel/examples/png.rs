@@ -2,7 +2,18 @@
 //! (pixels a panel unit, 0.5 by default); `CA72_SKIN=worn` in the worn skin; `CA72_MONO=1` the
 //! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places); `CA72_LETTERING=
 //! large` in the large lettering.
-//! `CA72_STANDALONE=1` shows the standalone keyboard's TYPING and PANIC controls.
+//! `CA72_STANDALONE=1` shows the standalone keyboard's TYPING and PANIC controls and its TEMPO
+//! screen (`CA72_TEMPO=96` another tempo).
+//! `CA72_ARP=1` drops the arpeggiator's drawer over the lower page (decisions.md R-ARP): ON and
+//! UP lit, a sixteenth, two octaves, GATE 60 %, SWING 25 %, the ARP key lit; `CA72_ARP_HOLD=1`
+//! HOLD lit too, `CA72_ARP_DIRECTION=4` another DIRECTION (ORDER), `CA72_ARP_OCTAVES=5` other
+//! OCTAVES.
+//! `CA72_FX=1` the standalone's rail (its FX key, lit) and the effects' drawer over the lower
+//! page (decisions.md R-FX-DRAWER): three effects, the third bypassed, the fourth slot empty;
+//! `CA72_FX=list` with the effects' list dropped for the fourth; `CA72_FX=crashed` the second
+//! given up on; `CA72_FX=safety` a slot turned off after a crash, one after a hang, one
+//! loading; `CA72_FX=off` a safe start's slots (decisions.md R-FX-SAFETY); `CA72_FX=rail` the
+//! rail alone.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -20,6 +31,8 @@ fn main() {
         _ => ca72_panel::Lettering::Standard,
     };
     let mut r = Renderer::with_look(skin, lettering, scale, 1.0);
+    let arp = std::env::var("CA72_ARP").is_ok_and(|v| v == "1");
+    let fx = std::env::var("CA72_FX").ok();
     let built = t0.elapsed();
     let mut scene = Scene::default();
     // The plugin's defaults: as the mock-up was drawn; the strip's knobs at what its readouts
@@ -30,6 +43,10 @@ fn main() {
             all.unwrap_or_else(|| strip_knob(c.param).unwrap_or_else(|| default_of(c.param)));
     }
     let mono = std::env::var("CA72_MONO").is_ok_and(|v| v == "1");
+    if std::env::var("CA72_STANDALONE").is_ok_and(|v| v == "1") {
+        let bpm = std::env::var("CA72_TEMPO").unwrap_or_else(|_| "120".into());
+        scene.tempo = Some(format!("{bpm} BPM"));
+    }
     let t1 = std::time::Instant::now();
     r.render(&scene);
     let first = t1.elapsed();
@@ -59,6 +76,11 @@ fn main() {
         });
         scene.bar.keyboard = true;
     }
+    scene.bar.arp = arp;
+    if fx.is_some() {
+        strip.set_rail(ca72_panel::strip::Rail::Effects);
+        scene.bar.fx = true;
+    }
     strip.render(&scene, r.frame(), None);
     eprintln!("the strip {:?}", t3.elapsed());
     let mut all = r.frame().clone();
@@ -70,6 +92,12 @@ fn main() {
         let n = w.min(sf.width() as usize) * 4;
         let (from, to) = (y * sf.width() as usize * 4, (top + y) * w * 4);
         all.data_mut()[to..to + n].copy_from_slice(&sf.data()[from..from + n]);
+    }
+    if arp {
+        drop_arp(&mut all, &mut r, scale, skin, lettering);
+    }
+    if let Some(fx) = fx.filter(|v| v != "rail") {
+        drop_fx(&mut all, scale, skin, lettering, &fx);
     }
     if std::env::var("CA72_KEYBOARD_CROP").is_ok_and(|v| v == "1") {
         let [x0, y0, x1, y1] = [370.0, 925.0, 3080.0, 1750.0].map(|v| (v * scale).round() as u32);
@@ -160,5 +188,173 @@ fn example_strip(mono: bool) -> ca72_panel::strip::StripScene {
             ..Default::default()
         },
         ..StripScene::default()
+    }
+}
+
+/// The arpeggiator's drawer over `all` (the editor's `compose`): its plate from its top, its
+/// shadow laid over the page under its foot.
+fn drop_arp(
+    all: &mut ca72_panel::Pixmap,
+    r: &mut Renderer,
+    scale: f64,
+    skin: Skin,
+    lettering: ca72_panel::Lettering,
+) {
+    use ca72_panel::strip::arp::{self, ArpRenderer, ArpScene};
+    let t = std::time::Instant::now();
+    let mut drawer = ArpRenderer::new(scale, skin, lettering);
+    let r2 = |s: &str| (s.to_owned(), true);
+    let var = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok());
+    let octaves = var("CA72_ARP_OCTAVES").unwrap_or(2).clamp(1, 5);
+    drawer.render(
+        &ArpScene {
+            on: true,
+            latch: std::env::var("CA72_ARP_HOLD").is_ok_and(|v| v == "1"),
+            direction: var("CA72_ARP_DIRECTION").unwrap_or(0).min(4),
+            readouts: [r2("16"), r2(&octaves.to_string()), r2("60"), r2("25")],
+            knobs: [9.0 / 12.0, (octaves - 1) as f64 / 4.0, 0.6, 0.25],
+            hover: None,
+        },
+        r,
+    );
+    eprintln!("the arpeggiator's drawer {:?}", t.elapsed());
+    let (w, f) = (all.width() as usize, drawer.frame());
+    let top = arp::top_px(scale) as usize;
+    let (x0, x1) = (
+        (arp::LEFT * scale).round() as usize,
+        (arp::RIGHT * scale).round() as usize,
+    );
+    let depth = (arp::DEPTH * scale).round() as usize;
+    for y in 0..depth.min(f.height() as usize) {
+        let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
+        let n = (x1 - x0) * 4;
+        all.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+    }
+    if let Some(shadow) = drawer.shadow() {
+        all.draw_pixmap(
+            0,
+            (top + depth) as i32,
+            shadow.as_ref(),
+            &resvg::tiny_skia::PixmapPaint::default(),
+            resvg::tiny_skia::Transform::identity(),
+            None,
+        );
+    }
+}
+
+/// The effects' drawer over `all` (the editor's `compose`): its plate from its top, what hangs
+/// under its foot (its shadow, the list) laid over the page.
+fn drop_fx(
+    all: &mut ca72_panel::Pixmap,
+    scale: f64,
+    skin: Skin,
+    lettering: ca72_panel::Lettering,
+    how: &str,
+) {
+    use ca72_panel::strip::fx::{self, FxList, FxRenderer, FxRow, FxScene, FxSlot, FxWord};
+    let t = std::time::Instant::now();
+    let mut drawer = FxRenderer::new(scale, skin, lettering);
+    let slot = |text: &str, lit: bool| FxSlot {
+        text: text.into(),
+        dim: false,
+        lit,
+        word: None,
+    };
+    let mut scene = FxScene {
+        slots: [
+            slot("Chorus", true),
+            slot("Hall Reverb", true),
+            slot("Tape Delay", false),
+            slot("+ ADD EFFECT", false),
+        ],
+        ..FxScene::default()
+    };
+    if how == "crashed" {
+        scene.slots[1] = FxSlot {
+            text: "Hall Reverb".into(),
+            dim: true,
+            lit: false,
+            word: Some(FxWord::Crashed),
+        };
+    }
+    // The safety states (decisions.md R-FX-SAFETY): one off for a safe start, one turned off
+    // after it crashed, one after it stopped responding, one loading.
+    if how == "safety" || how == "off" {
+        let word = |text: &str, word: FxWord| FxSlot {
+            text: text.into(),
+            dim: true,
+            lit: false,
+            word: Some(word),
+        };
+        scene.slots = if how == "off" {
+            [
+                word("Chorus", FxWord::Off),
+                word("Hall Reverb", FxWord::Off),
+                word("Tape Delay", FxWord::Off),
+                slot("+ ADD EFFECT", false),
+            ]
+        } else {
+            [
+                slot("Chorus", true),
+                word("Hall Reverb", FxWord::Crashed),
+                word("Tape Delay", FxWord::NotResponding),
+                word("Shimmer", FxWord::Loading),
+            ]
+        };
+    }
+    if how == "list" {
+        let row = |name: &str, maker: &str, format: &str| FxRow {
+            name: name.into(),
+            maker: maker.into(),
+            format: format.into(),
+            action: false,
+        };
+        let mut rows = vec![
+            row("Dragonfly Early Reflections", "Michael Willis", "CLAP"),
+            row("Dragonfly Hall Reverb", "Michael Willis", "CLAP"),
+            row("Dragonfly Plate Reverb", "Michael Willis", "CLAP"),
+            row("Dragonfly Room Reverb", "Michael Willis", "CLAP"),
+            row("Dragonfly Early Reflections", "Michael Willis", "VST3"),
+            row("Dragonfly Hall Reverb", "Michael Willis", "VST3"),
+            row("Gain", "DAW-v3 tests", "CLAP"),
+            row("Gain", "DAW-v3 tests", "VST3"),
+        ];
+        rows.push(FxRow {
+            name: "SCAN AGAIN".into(),
+            action: true,
+            ..FxRow::default()
+        });
+        scene.list = Some(FxList {
+            slot: 3,
+            title: "ADD TO SLOT 4".into(),
+            note: "8 EFFECTS".into(),
+            rows,
+            first: 0,
+            hover: Some(1),
+        });
+    }
+    drawer.render(&scene);
+    eprintln!("the effects' drawer {:?}", t.elapsed());
+    let (w, f) = (all.width() as usize, drawer.frame());
+    let top = fx::top_px(scale) as usize;
+    let (x0, x1) = (
+        (fx::LEFT * scale).round() as usize,
+        (fx::RIGHT * scale).round() as usize,
+    );
+    let depth = (fx::DEPTH * scale).round() as usize;
+    for y in 0..depth.min(f.height() as usize) {
+        let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
+        let n = (x1 - x0) * 4;
+        all.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+    }
+    for (p, x, y) in drawer.under() {
+        all.draw_pixmap(
+            x,
+            top as i32 + y,
+            p.as_ref(),
+            &resvg::tiny_skia::PixmapPaint::default(),
+            resvg::tiny_skia::Transform::identity(),
+            None,
+        );
     }
 }

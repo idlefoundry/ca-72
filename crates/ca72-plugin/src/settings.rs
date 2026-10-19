@@ -1,7 +1,8 @@
 //! What the plug-in keeps for the computer, not for the session (decisions.md R48,
 //! R51, R54): QUALITY's indicator shown or not, whether ULTRA's note has been read,
-//! the look (the skin) the editor is drawn in, its lettering's size and how the FREQUENCY
-//! knobs' dials read, and the MOD wheel's MIDI source (R-MODWHEEL-SOURCE). In the shared
+//! the look (the skin) the editor is drawn in, its lettering's size, how the FREQUENCY
+//! knobs' dials read, the MOD wheel's MIDI source (R-MODWHEEL-SOURCE), the standalone's TEMPO
+//! (R-ARP), and whether agents may operate the standalone application (R-MCP). In the shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, and as one changes only that key written, the file read again under a lock
 //! every instance takes (`settings.toml.lock`), so that one editor's change never undoes
@@ -48,6 +49,13 @@ pub struct Settings {
     pub typing_root: u8,
     /// What moves the MOD wheel, on any channel; never a preset or project field.
     pub mod_wheel_source: Source,
+    /// The standalone's TEMPO, beats a minute (120 unless set; decisions.md R-ARP): the
+    /// arpeggiator's where no host gives one. Kept as `standalone_tempo`, 30 to 300.
+    pub tempo: u16,
+    /// Whether AI agents may operate the standalone application through MCP (`crate::agent`;
+    /// decisions.md R-MCP): off unless the player turns it on (SETTINGS: AGENTS). Kept as
+    /// `agents`, true or false.
+    pub agents: bool,
 }
 
 /// One setting changed, as an editor keeps it (`Settings::keep`).
@@ -62,6 +70,8 @@ pub enum Change {
     KeyboardRoot(u8),
     TypingRoot(u8),
     ModWheelSource(Source),
+    Tempo(u16),
+    Agents(bool),
 }
 
 impl Change {
@@ -91,6 +101,8 @@ impl Change {
                 }
                 .into(),
             ),
+            Change::Tempo(bpm) => ("standalone_tempo", i64::from(tempo_within(bpm)).into()),
+            Change::Agents(on) => ("agents", on.into()),
         };
         t.insert(key.into(), value);
     }
@@ -108,8 +120,16 @@ impl Default for Settings {
             keyboard_root: 41,
             typing_root: ca72_panel::keyboard::TYPE_ROOT,
             mod_wheel_source: Source::DEFAULT,
+            tempo: crate::params::DEFAULT_TEMPO as u16,
+            agents: false,
         }
     }
+}
+
+/// A TEMPO within its range (`params::TEMPO_RANGE`).
+pub fn tempo_within(bpm: u16) -> u16 {
+    let (lo, hi) = crate::params::TEMPO_RANGE;
+    bpm.clamp(lo as u16, hi as u16)
 }
 
 /// The settings' file on this computer.
@@ -132,6 +152,7 @@ impl Settings {
         Settings {
             shutter: flag("ultra_shutter", d.shutter),
             ultra_note_read: flag("ultra_note_read", d.ultra_note_read),
+            agents: flag("agents", d.agents),
             keyboard: match t.get("keyboard_view").and_then(toml::Value::as_str) {
                 Some("keyboard") => Some(true),
                 Some("controls") => Some(false),
@@ -149,6 +170,12 @@ impl Settings {
                 .filter(|n| (0..=120).contains(n) && n % 12 == 0)
                 .map(|n| n as u8)
                 .unwrap_or(d.typing_root),
+            tempo: t
+                .get("standalone_tempo")
+                .and_then(toml::Value::as_integer)
+                .and_then(|n| u16::try_from(n).ok())
+                .filter(|n| tempo_within(*n) == *n)
+                .unwrap_or(d.tempo),
             // (Anything but CLASSIC, the realistic look.)
             skin: match t.get("skin").and_then(toml::Value::as_str) {
                 Some("classic") => Skin::Drawn,
@@ -189,6 +216,8 @@ impl Settings {
             Change::KeyboardRoot(root) => self.keyboard_root = root.min(84),
             Change::TypingRoot(root) => self.typing_root = root.min(120) / 12 * 12,
             Change::ModWheelSource(source) => self.mod_wheel_source = source,
+            Change::Tempo(bpm) => self.tempo = tempo_within(bpm),
+            Change::Agents(on) => self.agents = on,
         }
     }
 
@@ -355,6 +384,23 @@ pub(crate) fn claim_release_notes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The standalone's TEMPO: 120 for a new computer, kept within 30 to 300, a value out of
+    /// its range or not a number read as 120.
+    #[test]
+    fn the_tempo_is_kept_within_its_range() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("settings.toml");
+        assert_eq!(Settings::read(&path).tempo, 120);
+        Settings::keep(&path, Change::Tempo(96)).expect("saved");
+        assert_eq!(Settings::read(&path).tempo, 96);
+        Settings::keep(&path, Change::Tempo(900)).expect("saved");
+        assert_eq!(Settings::read(&path).tempo, 300);
+        std::fs::write(&path, "standalone_tempo = 7\n").expect("settings");
+        assert_eq!(Settings::read(&path).tempo, 120);
+        std::fs::write(&path, "standalone_tempo = \"fast\"\n").expect("settings");
+        assert_eq!(Settings::read(&path).tempo, 120);
+    }
 
     #[test]
     fn preset_action_assignments_survive_restart_and_preserve_other_computer_settings() {
@@ -542,6 +588,50 @@ mod tests {
             std::fs::read_to_string(&path).expect("unchanged"),
             "not [ toml"
         );
+    }
+
+    /// Every feature's computer setting in one file (0.3.0): the MOD wheel's source
+    /// (R-MODWHEEL-SOURCE), the preset actions (R-PRESET-KEYS), the standalone's TEMPO (R-ARP)
+    /// and AGENTS (R-MCP). Each one's write leaves the others as they were.
+    #[test]
+    fn each_features_setting_survives_the_others_writes() {
+        use crate::learn::{Binding, MidiMap, index};
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("settings.toml");
+        let pad = Binding::Note {
+            channel: 9,
+            note: 36,
+        };
+        let check = |what: &str| {
+            let s = Settings::read(&path);
+            assert_eq!(s.mod_wheel_source, Source::Cc(11), "{what}");
+            assert_eq!(s.tempo, 96, "{what}");
+            assert!(s.agents, "{what}");
+            assert_eq!(
+                preset_actions(&path),
+                vec![(index("next_preset").unwrap(), pad)],
+                "{what}"
+            );
+        };
+        Settings::keep(&path, Change::ModWheelSource(Source::Cc(11))).unwrap();
+        Settings::keep(&path, Change::Tempo(96)).unwrap();
+        Settings::keep(&path, Change::Agents(true)).unwrap();
+        let mut map = MidiMap::default();
+        map.settings_file = Some(path.clone());
+        let next = index("next_preset").unwrap();
+        map.assign(next, pad).unwrap();
+        map.keep_actions(&[next]).unwrap();
+        check("all four written");
+        Settings::keep(&path, Change::Tempo(96)).unwrap();
+        check("TEMPO written again");
+        Settings::keep(&path, Change::Agents(true)).unwrap();
+        check("AGENTS written again");
+        Settings::keep(&path, Change::ModWheelSource(Source::Cc(11))).unwrap();
+        check("the wheel's source written again");
+        map.keep_actions(&[next]).unwrap();
+        check("the actions written again");
+        Settings::keep(&path, Change::Skin(Skin::Drawn)).unwrap();
+        check("the look written");
     }
 
     #[test]
@@ -758,6 +848,7 @@ mod tests {
             Change::Skin(Skin::Drawn),
             Change::Lettering(Lettering::Large),
             Change::Frequency(Law::Hardware),
+            Change::Agents(true),
         ] {
             Settings::keep(&path, c).expect("kept");
         }
@@ -771,8 +862,15 @@ mod tests {
             keyboard_root: 41,
             typing_root: ca72_panel::keyboard::TYPE_ROOT,
             mod_wheel_source: Source::DEFAULT,
+            tempo: 120,
+            agents: true,
         };
         assert_eq!(Settings::read(&path), s);
+        assert!(
+            std::fs::read_to_string(&path)
+                .expect("read")
+                .contains("agents = true")
+        );
         let text = std::fs::read_to_string(&path).expect("read") + "theirs = 3\n";
         std::fs::write(&path, &text).expect("written");
         Settings::keep(&path, Change::Skin(Skin::Worn)).expect("kept");
@@ -856,6 +954,8 @@ mod tests {
                 keyboard_root: 41,
                 typing_root: ca72_panel::keyboard::TYPE_ROOT,
                 mod_wheel_source: Source::DEFAULT,
+                tempo: 120,
+                agents: false,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))

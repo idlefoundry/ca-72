@@ -167,6 +167,25 @@ once. Open selectors update as devices arrive or disappear. Discovery errors kee
 the last good MIDI list and appear in settings; a successful empty inventory reports
 that no inputs are available. Refresh retries discovery.
 Input/output changes briefly stop playback and retain the sound and editor.
+**TEMPO**, the last row, is the arpeggiator's tempo in the standalone (which has no host to
+give one), the same as the screen at the top left of the panel shows: 120 BPM until you choose
+another from its list (or step it a beat at a time with the left and right arrow keys). It
+applies at once, needs no Apply, and is kept for this computer.
+
+**FX**, on the standalone's rail after ARP (from 0.3.0), drops a drawer of four slots for your
+own CLAP and VST3 effects, run after the synthesizer, left to right. **+ ADD EFFECT** lists the
+effects in your CLAP and VST3 folders (scanned the first time you open it, each plug-in loaded in
+a process of its own; **SCAN AGAIN** after installing more). Click an effect's name to open its
+window, its **ON** tab to bypass it, drag a name onto another slot to move it there, and
+right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while an effect plays. An
+effect that crashes is started again; after five crashes it is passed by and its slot says
+CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
+each effect's settings are saved in `effects.json` beside `session.json`. The standalone never
+waits for an effect: it opens and plays while they load. One that crashes or stops responding as
+it loads, or is passed by, stays off (CRASHED, NOT RESPONDING) at the next start until you click it
+to try again; if its saved settings crash it, its menu's **LOAD WITHOUT ITS SETTINGS** loads it
+fresh and keeps them. After a run that did not close properly, or with Shift (Option on macOS) held
+as it opens, or `--safe-start`, it starts with every effect OFF: click a slot to turn them back on.
 
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
 The development JACK launcher is kept separately (Building); direct ASIO and
@@ -266,6 +285,36 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   again. A sound set only by the host or a MIDI controller uses the factory presets' average
   until it is changed in the window.
 - **LEVEL** (-30 to +12 dB, 0 by default): the output's gain, after MAIN OUTPUT's.
+- **ARP**, the arpeggiator (from 0.3.0; off by default, and off in every preset and project
+  saved before it): the **ARP** key on the rail, after the keyboard's, drops its drawer down
+  over the lower controls or the keyboard, and puts it away; the key stays lit while the
+  arpeggiator is on. It plays the keys you hold one at a time, in turn, and its notes go
+  through the instrument exactly as played ones do (MONO, POLY, UNISON, NOTE PRIORITY,
+  RETRIGGER and GLIDE take them the same way). **ON** switches it on; **HOLD** keeps the chord
+  playing after you let go, until you play a new one with no keys held or switch HOLD off.
+  With ON off, HOLD holds the notes you play as you played them, a drone, until you play a new
+  chord or switch HOLD off. **DIRECTION**: UP and DOWN in pitch order, UP/DOWN up and back with
+  its ends played once, RANDOM never the same note twice running, ORDER in the order you
+  pressed the keys (a key added goes on the end). **RATE** is a note value on the host's tempo,
+  from a half note (2) to a thirty-second (32), the dotted and triplet values between them (the
+  readout shows `16.` for a dotted sixteenth, `16t` for a triplet). **OCTAVES** (1 to 5)
+  repeats the pattern an octave up each time; a note that would go past the top of MIDI's
+  range plays in the highest octave it has instead. **GATE** (0 to 100 %, 50 by default) is
+  each note's length, a share of what the instrument can play in a step: even 0 % is held long
+  enough (20 ms) for its contours to start, and each note is let go long enough (13 ms) before
+  the next for them to start again, but at 100 %, which ties each note into the next (legato).
+  **SWING** (0 to 100 %, 0 by default) delays every second step: 67 % is a triplet
+  shuffle, 100 % puts it three quarters of the way through the pair. While the host plays, the
+  steps lock to its bars and beats (a key pressed up to a quarter of a step late plays at
+  once); stopped, the arpeggiator runs at the host's tempo from the moment you press a key;
+  the standalone uses its own **TEMPO**, the screen at the panel's top left (drag it, scroll
+  it, or double-click it and type; 30 to 300 BPM, 120 by default; also in Audio & MIDI). In a
+  plug-in the host gives the tempo and there is no screen. The sustain pedal
+  (CC 64) holds the keys you let go while the arpeggiator runs, and under HOLD's drone keeps
+  the keys let go part of the chord (unless MIDI Learn has CC 64; played without either, the
+  instrument ignores the pedal, as before). Every setting
+  is a host parameter that can be automated or learned, and is saved with presets and
+  projects. It sends no MIDI out.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
   default). SETTINGS > MOD WHEEL SOURCE chooses what moves the MODULATION wheel: CC 1
   by default, another available CC, channel aftertouch, or the strongest polyphonic

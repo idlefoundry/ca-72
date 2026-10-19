@@ -13,7 +13,7 @@ use ca72_panel::learn::{Menu, Note, PANEL, Tone, above};
 use ca72_panel::presets::{
     BarTarget, MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone,
 };
-use ca72_panel::strip::{StripControl, span};
+use ca72_panel::strip::{Rail, StripControl, span};
 use ca72_panel::{Lettering, Skin, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 
@@ -79,12 +79,9 @@ pub fn learnable_at(p: Place) -> Option<usize> {
 }
 
 /// Where a note about a place's control goes: centred above it.
-fn note_point(p: Place) -> (f64, f64) {
+fn note_point(rail: Rail, p: Place) -> (f64, f64) {
     match p {
-        Place::Preset(t) => {
-            let (x, y) = ca72_panel::strip::centre(ca72_panel::strip::StripTarget::Bar(t));
-            (x, y)
-        }
+        Place::Preset(t) => ca72_panel::strip::centre(rail, ca72_panel::strip::StripTarget::Bar(t)),
         Place::Panel(c) => above(&CONTROLS[c]),
         Place::Strip(s) => {
             let (x0, y0, x1, _) = span(s);
@@ -121,6 +118,12 @@ pub enum Item {
     Size(u32),
     WheelMenu(Option<u8>),
     WheelSource(Source),
+    /// An effects' slot's (decisions.md R-FX-DRAWER, R-FX-SAFETY): another effect in its place,
+    /// none, the effect tried again...
+    Fx(crate::fx_view::FxAction),
+    /// The settings' AGENTS (the standalone's; decisions.md R-MCP): AI agents allowed to
+    /// operate it through MCP, or not.
+    Agents(bool),
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -158,6 +161,11 @@ pub enum Pressed {
     /// None: common sources; 128: CC ranges; otherwise the first CC in a range of sixteen.
     WheelMenu(Option<u8>),
     WheelSource(Source),
+    /// An effects' slot's menu: the list to replace its effect, its effect taken out, tried
+    /// again...
+    Fx(crate::fx_view::FxAction),
+    /// The settings' menu: agents allowed (true) or not.
+    Agents(bool),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -179,6 +187,9 @@ pub struct Learning {
     /// The window should take the keyboard (a menu opened, or learning begun: Escape is ours),
     /// asked once.
     pub take_keys: bool,
+    /// The rail the editor shows (the standalone's has FX, its arrows elsewhere): where a
+    /// note about PREVIOUS or NEXT PRESET goes.
+    pub rail: Rail,
 }
 
 /// A parameter's name.
@@ -365,14 +376,16 @@ impl Learning {
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
-    /// decisions.md R54). The title always names this build's version, independent of the
-    /// update check; opening this menu does not start a check.
+    /// decisions.md R54); under MOD WHEEL SOURCE, what moves the MOD wheel (`source`:
+    /// R-MODWHEEL-SOURCE); in the standalone, under AGENTS, whether AI agents may operate it
+    /// (`agents`, marked; none in a host: decisions.md R-MCP). The title always names this
+    /// build's version, independent of the update check; opening this menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, lettering, law, source): (Skin, Lettering, Law, Source),
+        (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<bool>),
     ) {
         #[allow(unused_mut)]
         let mut items = vec![
@@ -396,8 +409,16 @@ impl Learning {
             items.push((Item::Head, "STANDALONE"));
             items.push((Item::StandaloneSettings, "AUDIO & MIDI…"));
         }
+        if agents.is_some() {
+            items.push((Item::Head, "AGENTS"));
+            items.push((Item::Agents(true), "ALLOW"));
+            items.push((Item::Agents(false), "OFF"));
+        }
         let current = |it: &Item| {
-            *it == Item::Look(skin) || *it == Item::Lettering(lettering) || *it == Item::Dials(law)
+            *it == Item::Look(skin)
+                || *it == Item::Lettering(lettering)
+                || *it == Item::Dials(law)
+                || agents.is_some_and(|a| *it == Item::Agents(a))
         };
         let mut menu = Menu {
             x,
@@ -412,6 +433,7 @@ impl Learning {
                         Item::Look(_)
                             | Item::Lettering(_)
                             | Item::Dials(_)
+                            | Item::Agents(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
@@ -570,6 +592,45 @@ impl Learning {
         self.take_keys = true;
     }
 
+    /// An effects' slot's menu (decisions.md R-FX-DRAWER; the owner's FX-A: "right-click to
+    /// replace/remove"), opened at (`x`, `y`): its effect's name as its title, then `items`
+    /// (what the effect's state offers, R-FX-SAFETY, then REPLACE… and REMOVE).
+    pub fn open_fx_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        name: &str,
+        items: &[(crate::fx_view::FxAction, &str)],
+    ) {
+        let items: Vec<(Item, &str)> = items.iter().map(|(a, t)| (Item::Fx(*a), *t)).collect();
+        let menu = Menu {
+            x,
+            y,
+            size,
+            title: name.to_uppercase(),
+            items: items.iter().map(|(_, t)| ((*t).to_owned(), true)).collect(),
+            heads: Vec::new(),
+            marked: Vec::new(),
+            hover: None,
+        }
+        .placed(fonts, x, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: items.into_iter().map(|(it, _)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// Whether (`x`, `y`) is over the open menu (the keyboard under it does not answer the pointer
+    /// there).
+    pub fn over_menu(&self, fonts: &Fonts, (x, y): (f64, f64)) -> bool {
+        self.open
+            .as_ref()
+            .is_some_and(|o| o.menu.hit(fonts, x, y).is_some())
+    }
+
     /// The menu closed.
     pub fn close_menu(&mut self) {
         self.open = None;
@@ -612,6 +673,8 @@ impl Learning {
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
             (Some(Item::WheelMenu(range)), _) => return Pressed::WheelMenu(*range),
             (Some(Item::WheelSource(source)), _) => return Pressed::WheelSource(*source),
+            (Some(Item::Fx(a)), _) => return Pressed::Fx(*a),
+            (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
             _ => {}
         }
         Pressed::Done
@@ -747,7 +810,7 @@ impl Learning {
                         Tone::Dim,
                     ),
                 };
-                let (x, y) = note_point(p);
+                let (x, y) = note_point(self.rail, p);
                 Note {
                     x,
                     y,
@@ -764,7 +827,7 @@ impl Learning {
             }),
             None => self.notice.as_ref().and_then(|(lines, i, _)| {
                 place(*i).map(|p| {
-                    let (x, y) = note_point(p);
+                    let (x, y) = note_point(self.rail, p);
                     Note {
                         x,
                         y,
@@ -902,5 +965,30 @@ impl Learning {
     /// The parameter chosen in the list.
     pub fn chosen(&self) -> usize {
         self.chosen
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ca72_panel::strip::{StripTarget, centre};
+
+    /// PREVIOUS and NEXT PRESET's notes go over their arrows on the rail the editor shows: the
+    /// standalone's, with FX (R-FX-DRAWER), has NEXT a key further left (R-PRESET-KEYS).
+    #[test]
+    fn a_preset_actions_note_goes_over_its_arrow_on_either_rail() {
+        for rail in [Rail::Plugin, Rail::Effects] {
+            for t in [BarTarget::Prev, BarTarget::Next] {
+                assert_eq!(
+                    note_point(rail, Place::Preset(t)),
+                    centre(rail, StripTarget::Bar(t)),
+                    "{rail:?} {t:?}"
+                );
+            }
+        }
+        assert_ne!(
+            note_point(Rail::Plugin, Place::Preset(BarTarget::Next)),
+            note_point(Rail::Effects, Place::Preset(BarTarget::Next))
+        );
     }
 }

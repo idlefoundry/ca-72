@@ -2,11 +2,16 @@
 //! played by MIDI, its EXTERNAL INPUT the side chain; one voice, or with POLY one per note
 //! (up to ten), placed across the stereo output by SPREAD.
 
+pub mod agent;
+pub mod arp;
 pub mod character;
 pub mod compat;
 pub mod drive;
 pub mod editor;
 pub mod engine;
+#[cfg(feature = "fx-host")]
+pub mod fx;
+pub mod fx_view;
 pub mod helper;
 pub mod learn;
 pub mod learning;
@@ -34,6 +39,7 @@ use std::sync::Arc;
 use nih_plug::prelude::*;
 use nih_plug::wrapper::state::ParamValue;
 
+use crate::arp::Arp;
 use crate::editor::{Ca72Editor, Meters};
 use crate::engine::{
     ALL_NOTES_OFF, ALL_SOUND_OFF, Engine, Event, MODULATION_WHEEL, RESET_CONTROLLERS,
@@ -73,6 +79,14 @@ pub struct Ca72 {
     preset_held: [bool; 4096],
     preset_notes: [bool; 2048],
     wheel: mod_wheel::Wheel,
+    /// The standalone application's effects after the synth (`fx.rs`, docs/fx-host.md):
+    /// none in the plug-ins.
+    #[cfg(feature = "fx-host")]
+    fx: Option<ca72_fx::Runner>,
+    /// The arpeggiator (decisions.md R-ARP): every key the note sources pass goes through it, to
+    /// the engine as played while it is off; and the sample of the block the events are at.
+    arp: Arp,
+    now: usize,
 }
 
 impl std::fmt::Debug for Ca72 {
@@ -125,6 +139,10 @@ impl Ca72 {
             preset_held: [false; 4096],
             preset_notes: [false; 2048],
             wheel: mod_wheel::Wheel::default(),
+            #[cfg(feature = "fx-host")]
+            fx: crate::fx::take_runner(),
+            arp: Arp::default(),
+            now: 0,
         }
     }
 }
@@ -150,6 +168,26 @@ fn mono(channels: &[&mut [f32]], i: usize) -> f32 {
         .map(|c| c.get(i).copied().filter(|x| x.is_finite()).unwrap_or(0.0))
         .sum::<f32>()
         / channels.len() as f32
+}
+
+/// The host's transport as the arpeggiator reads it at a block's start, `tempo` (the standalone's
+/// TEMPO) where the host gives none.
+fn arp_clock(t: &Transport, rate: f64, tempo: f64) -> arp::Clock {
+    let bar = match (t.time_sig_numerator, t.time_sig_denominator) {
+        (Some(n), Some(d)) if n > 0 && d > 0 => Some(f64::from(n) * 4.0 / f64::from(d)),
+        _ => None,
+    };
+    arp::Clock {
+        tempo: t
+            .tempo
+            .filter(|t| t.is_finite() && *t > 0.0)
+            .unwrap_or(tempo),
+        playing: t.playing,
+        beats: t.pos_beats(),
+        bar_start: t.bar_start_pos_beats(),
+        bar,
+        rate,
+    }
 }
 
 /// The host's MIDI as the engine takes it (any channel), if it takes it.
@@ -213,10 +251,7 @@ impl Ca72 {
                     // A note that was already sounding before it was assigned still gets its
                     // release, and lets go of the wheel's polyphonic aftertouch.
                     if self.note_sources.physical(channel, note, false) {
-                        self.engine.event(Event::Note {
-                            key: note,
-                            on: false,
-                        });
+                        self.play(note, false);
                     }
                     if let Some(value) = self.wheel.event(e) {
                         self.engine.event(Event::Modulation(value));
@@ -255,6 +290,11 @@ impl Ca72 {
                 if self.wheel.source == mod_wheel::Source::Cc(cc) {
                     self.params.midi_map.refuse(cc);
                     self.engine.event(Event::Modulation(value));
+                } else if cc == arp::SUSTAIN {
+                    // The sustain pedal, unless MIDI Learn or the MOD wheel has it: the
+                    // arpeggiator's, the keys let go while it is down held (decisions.md R-ARP;
+                    // the instrument, as before, takes no notice of it).
+                    self.pedal(value >= 0.5);
                 }
                 return false;
             }
@@ -270,7 +310,7 @@ impl Ca72 {
                     _ => 0,
                 };
                 if self.note_sources.physical(channel, key, on) {
-                    self.engine.event(event);
+                    self.play(key, on);
                 }
             } else {
                 if matches!(event, Event::ResetControllers) {
@@ -278,6 +318,10 @@ impl Ca72 {
                 }
                 if matches!(event, Event::AllSoundOff | Event::AllNotesOff) {
                     self.clear_note_sources();
+                    self.arp.clear();
+                }
+                if event == Event::ResetControllers {
+                    self.pedal(false);
                 }
                 self.engine.event(event);
             }
@@ -302,6 +346,30 @@ impl Ca72 {
             self.wheel.reset_pressure();
             self.engine.event(Event::Modulation(0.0));
         }
+    }
+
+    /// A key pressed or let go, as the note sources pass it: through the arpeggiator, which
+    /// hands it on as played while it is off, to the engine.
+    fn play(&mut self, key: u8, on: bool) {
+        let engine = &mut self.engine;
+        self.arp.key(key, on, self.now, &mut |key, on| {
+            engine.event(Event::Note { key, on })
+        });
+    }
+
+    /// The sustain pedal (control change 64), down or up.
+    fn pedal(&mut self, down: bool) {
+        let engine = &mut self.engine;
+        self.arp.pedal(down, self.now, &mut |key, on| {
+            engine.event(Event::Note { key, on })
+        });
+    }
+
+    /// What the arpeggiator has due by the block's sample `at` played.
+    fn arp_until(&mut self, at: usize) {
+        let engine = &mut self.engine;
+        self.arp
+            .advance(at, &mut |key, on| engine.event(Event::Note { key, on }));
     }
 
     fn clear_note_sources(&mut self) {
@@ -344,6 +412,7 @@ impl Ca72 {
             self.wheel.release();
             self.local_generation = self.local_notes.generation();
             self.local_notes.publish([0, 0]);
+            self.arp.clear();
             self.engine.event(Event::AllSoundOff);
             self.engine.event(Event::ResetControllers);
             if !self.local_notes.standalone_panic_pending() {
@@ -358,9 +427,12 @@ impl Ca72 {
         let generation = self.local_notes.generation();
         if generation != self.local_generation {
             self.local_generation = generation;
-            let engine = &mut self.engine;
-            self.note_sources
-                .release_local(|key| engine.event(Event::Note { key, on: false }));
+            let (engine, arp, now) = (&mut self.engine, &mut self.arp, self.now);
+            self.note_sources.release_local(|key| {
+                arp.key(key, false, now, &mut |key, on| {
+                    engine.event(Event::Note { key, on })
+                })
+            });
         }
     }
 
@@ -384,10 +456,7 @@ impl Ca72 {
                 break;
             }
             if e.generation == self.local_generation && self.note_sources.local(e.note, e.on) {
-                self.engine.event(Event::Note {
-                    key: e.note,
-                    on: e.on,
-                });
+                self.play(e.note, e.on);
             }
         }
     }
@@ -548,6 +617,35 @@ impl Plugin for Ca72 {
                 ParamValue::I32(params::QualityMode::Hi.to_index() as i32),
             );
         }
+        // And before the arpeggiator: off, each of its settings at its default, whatever the
+        // instance had (decisions.md R-ARP).
+        let d = Ca72Params::default();
+        for (id, v) in [
+            ("arp_on", ParamValue::Bool(false)),
+            ("arp_latch", ParamValue::Bool(false)),
+            (
+                "arp_direction",
+                ParamValue::I32(d.arp_direction.default_plain_value().to_index() as i32),
+            ),
+            (
+                "arp_rate",
+                ParamValue::I32(d.arp_rate.default_plain_value().to_index() as i32),
+            ),
+            (
+                "arp_octaves",
+                ParamValue::I32(d.arp_octaves.default_plain_value()),
+            ),
+            (
+                "arp_gate",
+                ParamValue::F32(d.arp_gate.default_plain_value()),
+            ),
+            (
+                "arp_swing",
+                ParamValue::F32(d.arp_swing.default_plain_value()),
+            ),
+        ] {
+            state.params.entry(id.to_owned()).or_insert(v);
+        }
         // And before RETRIGGER: off, single triggering, the instrument's own.
         if !state.params.contains_key("retrigger") {
             state
@@ -584,17 +682,21 @@ impl Plugin for Ca72 {
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         // This computer's FREQUENCY dials and wheel source, with the editor open or not
-        // (decisions.md R54, R-MODWHEEL-SOURCE).
+        // (decisions.md R54, R-MODWHEEL-SOURCE), and the standalone's TEMPO, the arpeggiator's
+        // where the host gives none (R-ARP).
         if !cfg!(test) {
             let settings = crate::settings::Settings::load();
             self.params.set_freq_law(settings.frequency);
             self.params
                 .midi_map
                 .set_wheel_source(settings.mod_wheel_source);
+            self.params.set_tempo(f64::from(settings.tempo));
         }
         self.engine.set(&self.params.controls());
         self.engine
             .prepare(f64::from(config.sample_rate), self.params.seed());
+        // (RANDOM's from the session's seed, so that a render repeats.)
+        self.arp.seed(self.params.seed());
         let block = config.max_buffer_size.max(1) as usize;
         let rate = f64::from(config.sample_rate);
         self.rate = rate;
@@ -617,6 +719,11 @@ impl Plugin for Ca72 {
         // the audio thread waiting: running threads are kept then (R18).
         let period = std::time::Duration::from_secs_f64(block as f64 / rate);
         self.engine.start_workers(crate::engine::AUTO, Some(period));
+        // The effects at the device's rate and block (the audio thread is stopped here).
+        #[cfg(feature = "fx-host")]
+        if let Some(fx) = &mut self.fx {
+            fx.prepare(rate, block);
+        }
         true
     }
 
@@ -629,6 +736,7 @@ impl Plugin for Ca72 {
     fn reset(&mut self) {
         self.preset_actions.cancel();
         self.clear_note_sources();
+        self.arp.clear();
         self.dezip.clear();
         self.preset_held.fill(false);
         self.preset_notes.fill(false);
@@ -643,6 +751,8 @@ impl Plugin for Ca72 {
         aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        #[cfg(feature = "fx-host")]
+        let started = std::time::Instant::now();
         // (A knob whose parameter something else has set since a learned controller moved it
         // stops gliding: the host's automation, the editor and presets set the voices as ever.)
         if self.preset_actions.apply(context) {
@@ -663,10 +773,19 @@ impl Plugin for Ca72 {
         }
         self.engine.set(&self.controls());
         self.follow_wheel_source();
+        let len = buffer.samples();
+        // The arpeggiator's settings and the host's transport, as the block begins (ON or LATCH
+        // changed are taken at its first sample).
+        self.now = 0;
+        let clock = arp_clock(context.transport(), self.rate, self.params.tempo());
+        let engine = &mut self.engine;
+        self.arp
+            .begin(self.params.arp(), clock, len, &mut |key, on| {
+                engine.event(Event::Note { key, on })
+            });
         let panic_token = context.standalone_panic_token();
         let standalone_panic = context.take_standalone_panic();
         self.local_events(standalone_panic, panic_token);
-        let len = buffer.samples();
         // The voices' deadline: a share of the block's period from now (decisions.md R11);
         // none rendering offline, where every voice is waited for (R18).
         let period = len as f64 / self.rate;
@@ -682,12 +801,14 @@ impl Plugin for Ca72 {
         // POLY's voices one after another over a run: decisions.md R11), the side chain mixed
         // to mono. A learned MIDI controller sets its parameter at its event, and the voices take
         // it from there; while a knob it moved glides, a run is at most `DEZIP_STEP` samples
-        // (decisions.md R34).
+        // (decisions.md R34). The arpeggiator's notes are events too, at their samples, after the
+        // host's at the same one (R-ARP).
         const RUN: usize = 128;
         let (mut ext, mut l, mut r) = ([0.0f32; RUN], [0.0f32; RUN], [0.0f32; RUN]);
         let mut i = 0;
         let mut glided = false;
         while i < len {
+            self.now = i;
             let mut learned = false;
             while let Some(e) = next {
                 if e.timing() as usize > i {
@@ -696,6 +817,7 @@ impl Plugin for Ca72 {
                 learned |= self.midi(e, context);
                 next = context.next_event();
             }
+            self.arp_until(i);
             if learned || glided || self.dezip.moving() {
                 self.dezip.follow(&self.params);
                 self.engine.set(&self.controls());
@@ -706,6 +828,9 @@ impl Plugin for Ca72 {
                 .min(i + RUN);
             if self.dezip.moving() {
                 end = end.min(i + learn::DEZIP_STEP);
+            }
+            if let Some(due) = self.arp.due() {
+                end = end.min(due.max(i + 1));
             }
             let n = end - i;
             let ext = match side {
@@ -735,7 +860,8 @@ impl Plugin for Ca72 {
             i = end;
         }
         // (Past the block's end: a parameter set here reaches the voices at the next block's
-        // start.)
+        // start, a key the arpeggiator there.)
+        self.now = len;
         while let Some(e) = next {
             self.midi(e, context);
             next = context.next_event();
@@ -751,6 +877,18 @@ impl Plugin for Ca72 {
                 ch.iter().take(len).fold(m, |m, v| m.max(v.abs()))
             });
             self.meters.publish_levels(self.engine.levels(), peak);
+        }
+        // The standalone's effects, after the synth and its meters: each effect's block is
+        // waited for until a share of the period from the block's start, then the effect
+        // passes the sound on dry (docs/fx-host.md).
+        #[cfg(feature = "fx-host")]
+        if let Some(fx) = &mut self.fx
+            && !fx.is_empty()
+            && let [left, right, ..] = &mut out[..]
+        {
+            let deadline =
+                started + std::time::Duration::from_secs_f64(period * crate::fx::DEADLINE);
+            fx.process(&mut left[..len], &mut right[..len], Some(deadline));
         }
         self.ask_helper();
         ProcessStatus::KeepAlive
@@ -1363,6 +1501,510 @@ mod tests {
             filtered(vec![high]),
             Some(ParamValue::String(s)) if s == "high"
         ));
+    }
+
+    /// A session saved before the arpeggiator opens with it off and its settings at their
+    /// defaults, not at what the instance had (R-ARP); one saved since keeps its own.
+    #[test]
+    fn an_old_session_opens_with_the_arpeggiator_off() {
+        let filtered = |params: Vec<(String, ParamValue)>| {
+            let mut s = PluginState {
+                version: "0.2.6".to_owned(),
+                params: params.into_iter().collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            s.params
+        };
+        let old = filtered(vec![("cutoff".to_owned(), ParamValue::F32(3.0))]);
+        assert!(matches!(old.get("arp_on"), Some(ParamValue::Bool(false))));
+        assert!(matches!(
+            old.get("arp_latch"),
+            Some(ParamValue::Bool(false))
+        ));
+        assert!(matches!(old.get("arp_octaves"), Some(ParamValue::I32(1))));
+        assert!(matches!(old.get("arp_gate"), Some(ParamValue::F32(g)) if *g == 50.0));
+        let sixteenth = params::ArpRate::Sixteenth.to_index() as i32;
+        assert!(matches!(old.get("arp_rate"), Some(ParamValue::I32(i)) if *i == sixteenth));
+        let new = filtered(vec![
+            ("arp_on".to_owned(), ParamValue::Bool(true)),
+            ("arp_rate".to_owned(), ParamValue::String("1/8t".to_owned())),
+        ]);
+        assert!(matches!(new.get("arp_on"), Some(ParamValue::Bool(true))));
+        assert!(matches!(new.get("arp_rate"), Some(ParamValue::String(s)) if s == "1/8t"));
+    }
+
+    /// `n` blocks of `len` with the host's transport playing from beat `from` at `tempo` (4/4),
+    /// the events pushed for each block first (`events(block)`): every left sample.
+    fn transport_render(
+        p: &mut Ca72,
+        c: &mut TestProcessContext<Ca72>,
+        (n, len): (usize, usize),
+        (tempo, from): (f64, f64),
+        mut events: impl FnMut(usize, &mut TestProcessContext<Ca72>),
+    ) -> Vec<f32> {
+        let mut out = Vec::new();
+        for b in 0..n {
+            let beats = from + (b * len) as f64 * tempo / 60.0 / 48_000.0;
+            c.set_transport(true, Some(tempo), Some(beats), Some((4, 4)));
+            events(b, c);
+            out.extend(block(p, c, len));
+        }
+        out
+    }
+
+    /// The arpeggiator's notes go through the engine exactly as played ones: a chord held with it
+    /// on at 1/16, UP, GATE 50 %, the transport playing at 120, renders to the bit what the same
+    /// keys pressed and let go at its steps' samples render with it off; in blocks of 256 and
+    /// 1000, realtime and offline. MONO with RETRIGGER, and POLY.
+    #[test]
+    fn arpeggiated_notes_play_through_the_engine_as_played_ones() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (poly, retrigger) in [(false, true), (true, false)] {
+            for (len, mode) in [(256, ProcessMode::Realtime), (1000, ProcessMode::Offline)] {
+                let (mut a, mut b) = (initialised(poly), initialised(poly));
+                for p in [&mut a, &mut b] {
+                    p.params
+                        .noise_seed
+                        .store(0xca72, std::sync::atomic::Ordering::Relaxed);
+                    p.engine.prepare(48_000.0, p.params.seed());
+                }
+                let params: Arc<dyn Params> = a.params.clone();
+                let mut ca = TestProcessContext::new(params, 48_000.0, mode);
+                let params: Arc<dyn Params> = b.params.clone();
+                let mut cb = TestProcessContext::new(params, 48_000.0, mode);
+                for (p, c) in [(&a, &ca), (&b, &cb)] {
+                    assert!(
+                        c.automate(p.params.retrigger.as_ptr(), f32::from(u8::from(retrigger)))
+                    );
+                }
+                assert!(ca.automate(a.params.arp_on.as_ptr(), 1.0));
+                let blocks = 48_000 / len;
+                // The chord, pressed at sample 0 of the first block (beat 0, a bar's start).
+                let chord = [60u8, 64, 67];
+                let arp = transport_render(&mut a, &mut ca, (blocks, len), (120.0, 0.0), |k, c| {
+                    if k == 0 {
+                        for key in chord {
+                            c.push_event(note(0, 0, key, true));
+                        }
+                    }
+                });
+                // The same as played: a key every 6000 samples, let go 3168 after (GATE 50 % of
+                // what lies between the shortest note, 960, and the shortest gap, 624).
+                let played =
+                    transport_render(&mut b, &mut cb, (blocks, len), (120.0, 0.0), |k, c| {
+                        let (from, to) = (k * len, (k + 1) * len);
+                        let mut evs = Vec::new();
+                        for s in 0..8usize {
+                            let key = chord[s % 3];
+                            evs.push((s * 6000, key, true));
+                            evs.push((s * 6000 + 3168, key, false));
+                        }
+                        evs.sort_by_key(|e| (e.0, e.2));
+                        for (at, key, on) in evs {
+                            if (from..to).contains(&at) {
+                                c.push_event(note((at - from) as u32, 0, key, on));
+                            }
+                        }
+                    });
+                assert!(arp.iter().any(|v| v.abs() > 1e-3), "it sounds");
+                assert!(
+                    arp == played,
+                    "poly {poly} retrigger {retrigger}, blocks of {len}: the first difference at {:?}",
+                    arp.iter().zip(&played).position(|(x, y)| x != y)
+                );
+            }
+        }
+    }
+
+    /// With the arpeggiator on, All Notes Off, a reset and a preset turning it off while it plays
+    /// leave no key down in the engine; LATCH off lets the latched chord go.
+    #[test]
+    fn nothing_is_left_stuck_by_resets_latch_or_presets() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        assert!(c.automate(p.params.arp_on.as_ptr(), 1.0));
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        c.push_event(note(0, 0, 60, true));
+        c.push_event(note(10, 0, 64, true));
+        c.push_event(note(50, 0, 60, false));
+        c.push_event(note(50, 0, 64, false));
+        for _ in 0..40 {
+            block(&mut p, &mut c, 256);
+        }
+        assert!(
+            p.arp.sounding().is_some() || p.arp.due().is_some(),
+            "latched, it plays on"
+        );
+        // LATCH off: silent at the next block, nothing held.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.arp.sounding(), None);
+        assert_eq!(p.arp.due(), None);
+        assert_eq!(p.engine.sounding_mask(), 0, "no key down in the engine");
+        // A chord again, then All Notes Off.
+        c.push_event(note(0, 0, 62, true));
+        for _ in 0..10 {
+            block(&mut p, &mut c, 256);
+        }
+        c.push_event(cc(3, 0, ALL_NOTES_OFF, 0));
+        block(&mut p, &mut c, 256);
+        assert_eq!((p.arp.sounding(), p.arp.due()), (None, None));
+        assert_eq!(p.engine.sounding_mask(), 0);
+        // Held keys and a preset that turns it off: the keys sound as played, and once let go
+        // nothing is down.
+        c.push_event(note(0, 0, 65, true));
+        for _ in 0..10 {
+            block(&mut p, &mut c, 256);
+        }
+        assert!(c.automate(p.params.arp_on.as_ptr(), 0.0));
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.arp.sounding(), None);
+        assert_ne!(p.engine.sounding_mask(), 0, "the key held sounds as played");
+        c.push_event(note(0, 0, 65, false));
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.engine.sounding_mask(), 0);
+        // A reset with it on and a key held.
+        assert!(c.automate(p.params.arp_on.as_ptr(), 1.0));
+        c.push_event(note(0, 0, 70, true));
+        block(&mut p, &mut c, 256);
+        p.reset();
+        assert_eq!((p.arp.sounding(), p.arp.due()), (None, None));
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.engine.sounding_mask(), 0);
+    }
+
+    /// HOLD with the arpeggiator off holds the keys as played (the owner's drone, 2026-10-19):
+    /// a chord pressed and let go, then a new chord, renders to the bit what the same keys held
+    /// by hand render, the first let go as the second is pressed; in MONO with RETRIGGER, MONO
+    /// with GLIDE and HIGH priority, POLY and UNISON, realtime and offline.
+    #[test]
+    fn a_held_drone_plays_through_the_engine_as_held_keys() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cases: [(&str, &[(&str, f32)]); 4] = [
+            ("mono retrigger", &[("retrigger", 1.0)]),
+            (
+                "mono glide high",
+                &[("glide_on", 1.0), ("note_priority", 1.0)],
+            ),
+            ("poly", &[("poly", 1.0)]),
+            ("unison", &[("unison", 1.0)]),
+        ];
+        for (name, set) in cases {
+            for (len, mode) in [(256, ProcessMode::Realtime), (1000, ProcessMode::Offline)] {
+                let (mut a, mut b) = (initialised(false), initialised(false));
+                for p in [&mut a, &mut b] {
+                    p.params
+                        .noise_seed
+                        .store(0xca72, std::sync::atomic::Ordering::Relaxed);
+                    p.engine.prepare(48_000.0, p.params.seed());
+                }
+                let params: Arc<dyn Params> = a.params.clone();
+                let mut ca = TestProcessContext::new(params, 48_000.0, mode);
+                let params: Arc<dyn Params> = b.params.clone();
+                let mut cb = TestProcessContext::new(params, 48_000.0, mode);
+                for (p, c) in [(&a, &ca), (&b, &cb)] {
+                    let map = p.params.param_map();
+                    for (id, v) in set {
+                        let ptr = map.iter().find(|(i, ..)| i == id).expect("a parameter").1;
+                        assert!(c.automate(ptr, *v));
+                    }
+                }
+                assert!(ca.automate(a.params.arp_latch.as_ptr(), 1.0));
+                // Held by HOLD: 60, 64, 67 pressed at 0 and let go at 3000; 62 and 65 at 24 000,
+                // let go at 25 000. By hand: held until 24 000, then 62 and 65 held on.
+                let events = |held: bool| {
+                    let mut e: Vec<(usize, u8, bool)> = vec![
+                        (0, 60, true),
+                        (0, 64, true),
+                        (0, 67, true),
+                        (24_000, 62, true),
+                        (24_000, 65, true),
+                    ];
+                    if held {
+                        e.extend([(3000, 60, false), (3000, 64, false), (3000, 67, false)]);
+                        e.extend([(25_000, 62, false), (25_000, 65, false)]);
+                    } else {
+                        e.extend([
+                            (24_000, 60, false),
+                            (24_000, 64, false),
+                            (24_000, 67, false),
+                        ]);
+                    }
+                    e.sort_by_key(|e| (e.0, e.2));
+                    e
+                };
+                let render = |p: &mut Ca72, c: &mut TestProcessContext<Ca72>, e: Vec<_>| {
+                    let mut out = Vec::new();
+                    for k in 0..48_000 / len {
+                        let (from, to) = (k * len, (k + 1) * len);
+                        for &(at, key, on) in &e {
+                            if (from..to).contains(&at) {
+                                c.push_event(note((at - from) as u32, 0, key, on));
+                            }
+                        }
+                        out.extend(block(p, c, len));
+                    }
+                    out
+                };
+                let drone = render(&mut a, &mut ca, events(true));
+                let held = render(&mut b, &mut cb, events(false));
+                assert!(
+                    drone[30_000..].iter().any(|v| v.abs() > 1e-3),
+                    "{name}: it sounds"
+                );
+                assert!(
+                    drone == held,
+                    "{name}, blocks of {len}: the first difference at {:?}",
+                    drone.iter().zip(&held).position(|(x, y)| x != y)
+                );
+            }
+        }
+    }
+
+    /// A drone (HOLD, the arpeggiator off) leaves no key down in the engine after HOLD off, All
+    /// Notes Off, PANIC, a preset turning HOLD off, a reset, or ON switched on and off while it
+    /// holds; the sustain pedal under it changes none of that.
+    #[test]
+    fn a_drone_leaves_nothing_stuck() {
+        // (POLY's workers come from the process's budget: one at a time with the tests that
+        // count it.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        let chord = |c: &mut TestProcessContext<Ca72>, keys: &[u8]| {
+            for &k in keys {
+                c.push_event(note(0, 0, k, true));
+            }
+            for &k in keys {
+                c.push_event(note(20, 0, k, false));
+            }
+        };
+        let run = |p: &mut Ca72, c: &mut TestProcessContext<Ca72>, n: usize| {
+            for _ in 0..n {
+                block(p, c, 256);
+            }
+        };
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        // HOLD off.
+        chord(&mut c, &[60, 64]);
+        run(&mut p, &mut c, 20);
+        assert_ne!(p.engine.sounding_mask(), 0, "held");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "HOLD off");
+        // All Notes Off, then a drone again.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[62]);
+        run(&mut p, &mut c, 10);
+        c.push_event(cc(3, 0, ALL_NOTES_OFF, 0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "All Notes Off");
+        chord(&mut c, &[63]);
+        run(&mut p, &mut c, 10);
+        assert_ne!(p.engine.sounding_mask(), 0, "playable after it");
+        // PANIC.
+        p.local_notes.panic();
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "PANIC");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "and HOLD off after it");
+        // A preset (every arpeggiator setting at its default: off, HOLD off).
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[65, 69]);
+        run(&mut p, &mut c, 10);
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        assert!(c.automate(p.params.arp_on.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "a preset");
+        // A reset.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[67]);
+        run(&mut p, &mut c, 10);
+        p.reset();
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "a reset");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0);
+        // ON on and off while it holds: arpeggiated, then held again, then let go by HOLD off.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[60, 67]);
+        run(&mut p, &mut c, 10);
+        assert!(c.automate(p.params.arp_on.as_ptr(), 1.0));
+        run(&mut p, &mut c, 40);
+        assert!(p.arp.due().is_some(), "arpeggiated");
+        assert!(c.automate(p.params.arp_on.as_ptr(), 0.0));
+        run(&mut p, &mut c, 10);
+        assert_eq!((p.arp.sounding(), p.arp.due()), (None, None));
+        assert_ne!(p.engine.sounding_mask(), 0, "held again");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "ON on and off");
+        // The pedal down under a drone, a chord let go under it, the pedal up, HOLD off.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        c.push_event(cc(0, 0, arp::SUSTAIN, 127));
+        chord(&mut c, &[60, 64]);
+        run(&mut p, &mut c, 4);
+        chord(&mut c, &[67]);
+        run(&mut p, &mut c, 4);
+        c.push_event(cc(0, 0, arp::SUSTAIN, 0));
+        run(&mut p, &mut c, 4);
+        assert_ne!(p.engine.sounding_mask(), 0, "held after the pedal");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "the pedal");
+        // In POLY: every voice let go (their release tails ended).
+        let mut q = initialised(true);
+        let mut c = hostless(&q);
+        assert!(c.automate(q.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[60, 64, 67]);
+        run(&mut q, &mut c, 20);
+        assert!(c.automate(q.params.arp_latch.as_ptr(), 0.0));
+        run(&mut q, &mut c, 400);
+        assert_eq!(q.engine.sounding_mask(), 0, "POLY");
+    }
+
+    /// The sustain pedal (CC 64) holds the keys let go while the arpeggiator plays; learned by
+    /// MIDI Learn, it is the learned parameter's alone.
+    #[test]
+    fn the_sustain_pedal_reaches_the_arpeggiator_unless_learned() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        assert!(c.automate(p.params.arp_on.as_ptr(), 1.0));
+        c.push_event(cc(0, 0, arp::SUSTAIN, 127));
+        c.push_event(note(1, 0, 60, true));
+        c.push_event(note(5, 0, 60, false));
+        for _ in 0..40 {
+            block(&mut p, &mut c, 256);
+        }
+        assert!(p.arp.due().is_some(), "held by the pedal");
+        c.push_event(cc(0, 0, arp::SUSTAIN, 0));
+        block(&mut p, &mut c, 256);
+        assert_eq!((p.arp.sounding(), p.arp.due()), (None, None));
+        p.params
+            .midi_map
+            .assign(learnable("cutoff"), on(0, arp::SUSTAIN));
+        c.push_event(cc(0, 0, arp::SUSTAIN, 127));
+        c.push_event(note(1, 0, 60, true));
+        c.push_event(note(5, 0, 60, false));
+        block(&mut p, &mut c, 256);
+        assert_eq!(p.params.cutoff.value(), 5.0);
+        // (The note let go after its shortest, 20 ms: not held on by a pedal.)
+        for _ in 0..4 {
+            block(&mut p, &mut c, 256);
+        }
+        assert_eq!((p.arp.sounding(), p.arp.due()), (None, None), "not a pedal");
+    }
+
+    /// The sustain pedal is the arpeggiator's only while nothing else has CC 64: the MOD wheel's
+    /// source (R-MODWHEEL-SOURCE) and a preset action learned on it (R-PRESET-KEYS) come first.
+    #[test]
+    fn the_sustain_pedal_yields_to_the_wheel_source_and_a_preset_action() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        assert!(c.automate(p.params.arp_on.as_ptr(), 1.0));
+        p.params
+            .midi_map
+            .set_wheel_source(mod_wheel::Source::Cc(arp::SUSTAIN));
+        block(&mut p, &mut c, 64);
+        c.push_event(cc(0, 0, arp::SUSTAIN, 127));
+        c.push_event(note(1, 0, 60, true));
+        c.push_event(note(5, 0, 60, false));
+        block(&mut p, &mut c, 256);
+        assert_eq!(
+            p.engine.midi_wheels().1,
+            ca72::modulation::midi_wheel(1.0) as f32,
+            "the wheel's"
+        );
+        for _ in 0..4 {
+            block(&mut p, &mut c, 256);
+        }
+        assert_eq!(
+            (p.arp.sounding(), p.arp.due()),
+            (None, None),
+            "the wheel's, not a pedal"
+        );
+        p.params
+            .midi_map
+            .set_wheel_source(mod_wheel::Source::DEFAULT);
+        c.push_event(cc(0, 0, arp::SUSTAIN, 0));
+        block(&mut p, &mut c, 64);
+        p.params
+            .midi_map
+            .assign(learnable("next_preset"), on(0, arp::SUSTAIN));
+        p.midi(cc(0, 0, arp::SUSTAIN, 127), &mut c);
+        assert_eq!(p.preset_actions.requested(), Some(2), "NEXT PRESET's");
+        c.push_event(note(1, 0, 60, true));
+        c.push_event(note(5, 0, 60, false));
+        for _ in 0..5 {
+            block(&mut p, &mut c, 256);
+        }
+        assert_eq!(
+            (p.arp.sounding(), p.arp.due()),
+            (None, None),
+            "the action's, not a pedal"
+        );
+    }
+
+    /// A key the arpeggiator plays, its note then taken by a preset action (R-PRESET-KEYS), is
+    /// let go through the arpeggiator when released: nothing is left playing.
+    #[test]
+    fn a_note_taken_by_a_preset_action_is_let_go_through_the_arpeggiator() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        assert!(c.automate(p.params.arp_on.as_ptr(), 1.0));
+        c.push_event(note(0, 0, 60, true));
+        for _ in 0..8 {
+            block(&mut p, &mut c, 256);
+        }
+        assert!(p.arp.due().is_some(), "arpeggiated");
+        p.params.midi_map.assign(
+            learnable("next_preset"),
+            learn::Binding::Note {
+                channel: 0,
+                note: 60,
+            },
+        );
+        c.push_event(note(0, 0, 60, false));
+        for _ in 0..8 {
+            block(&mut p, &mut c, 256);
+        }
+        assert_eq!((p.arp.sounding(), p.arp.due()), (None, None));
+    }
+
+    /// A session's arpeggiator, saved and loaded, is as it was (its parameters are the host's).
+    #[test]
+    fn the_arpeggiators_settings_are_host_parameters() {
+        let p = Ca72::default();
+        let ids: Vec<String> = p
+            .params
+            .param_map()
+            .into_iter()
+            .map(|(id, ..)| id)
+            .collect();
+        for id in [
+            "arp_on",
+            "arp_latch",
+            "arp_direction",
+            "arp_rate",
+            "arp_octaves",
+            "arp_gate",
+            "arp_swing",
+        ] {
+            assert!(ids.iter().any(|i| i == id), "{id}");
+        }
     }
 
     /// A session saved with SCATTER's EDGES (no longer offered: R49), or with a placement

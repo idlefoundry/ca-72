@@ -9,7 +9,10 @@ follow. The crates are those Cargo.lock names, from crates.io; the sources of th
 takes from git repositories are in each release as well,
 CA-72-<version>-git-sources.tar.gz. The macOS Audio Unit wraps the CLAP plug-in
 in clap-wrapper, built with the CLAP headers and Apple's AudioUnitSDK, whose sources are
-in the CA-72's repository (third_party).
+in the CA-72's repository (third_party). The standalone application's effects run in
+its helper, ca72-fx-helper, built with the owner's DAW-v3's plug-in host (GPL-3.0 or
+later, third_party/daw-v3) and the VST3 bindings of the vst3 crate, generated from
+Steinberg's VST 3 SDK interfaces, whose notice follows the crates'.
 Written by scripts/notices.py from Cargo.lock: do not edit by hand.
 
 CRATES
@@ -37,8 +40,10 @@ CRATES
   cache-padded 1.3.0  (Apache-2.0 OR MIT, used under MIT)
   cfg-if 1.0.5  (MIT OR Apache-2.0, used under MIT)
   clap-sys 0.5.0  (MIT/Apache-2.0, used under MIT)
+  clap-sys 0.5.0  (MIT/Apache-2.0, used under MIT)
   cocoa 0.24.1  (MIT / Apache-2.0, used under MIT)
   cocoa-foundation 0.1.2  (MIT OR Apache-2.0, used under MIT)
+  com-scrape-types 0.1.1  (MIT OR Apache-2.0, used under MIT)
   core-foundation 0.9.4  (MIT OR Apache-2.0, used under MIT)
   core-foundation-sys 0.8.7  (MIT OR Apache-2.0, used under MIT)
   core-graphics 0.22.3  (MIT / Apache-2.0, used under MIT)
@@ -87,6 +92,7 @@ CRATES
   keyboard-types 0.6.2  (MIT/Apache-2.0, used under MIT)
   kurbo 0.11.3  (Apache-2.0 OR MIT, used under MIT)
   libc 0.2.189  (MIT OR Apache-2.0, used under MIT)
+  libloading 0.8.9  (ISC)
   libm 0.2.16  (MIT)
   linux-raw-sys 0.12.1  (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, used under MIT)
   linux-raw-sys 0.4.15  (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, used under MIT)
@@ -170,6 +176,7 @@ CRATES
   unicode-vo 0.1.0  (MIT/Apache-2.0, used under MIT)
   usvg 0.45.1  (Apache-2.0 OR MIT, used under MIT)
   uuid 0.8.2  (Apache-2.0 OR MIT, used under MIT)
+  vst3 0.3.0  (MIT OR Apache-2.0, used under MIT)
   vst3-com 0.1.0  (MIT)
   vst3-sys 0.1.0  (GPLv3)
   widestring 1.2.1  (MIT OR Apache-2.0, used under MIT)
@@ -199,6 +206,7 @@ CRATES
   zmij 1.0.23  (MIT)
 
   The Rust standard library, Rust 1.97.1  (MIT OR Apache-2.0, used under MIT)
+  The VST 3 SDK's interfaces, by Steinberg  (MIT; the effects' helper)
   URW Gothic  (AGPL-3.0 with a font exception)
   clap-wrapper 0.16.0  (MIT; the Audio Unit)
   CLAP 1.2.6  (MIT; the Audio Unit)
@@ -240,6 +248,7 @@ anyhow 1.0.104  https://github.com/dtolnay/anyhow
 baseview 0.1.0  https://github.com/RustAudio/baseview
 cache-padded 1.3.0  https://github.com/smol-rs/cache-padded
 clap-sys 0.5.0  https://github.com/micahrj/clap-sys.git at 25d7f53fdb63
+clap-sys 0.5.0  https://github.com/micahrj/clap-sys
 drm 0.14.1  https://github.com/Smithay/drm-rs
 drm-ffi 0.9.1  https://github.com/Smithay/drm-rs
 drm-sys 0.8.1  https://github.com/Smithay/drm-rs
@@ -258,6 +267,7 @@ semver 1.0.28  https://github.com/dtolnay/semver
 serde 1.0.229  https://github.com/serde-rs/serde
 serde_core 1.0.229  https://github.com/serde-rs/serde
 serde_json 1.0.151  https://github.com/serde-rs/json
+vst3 0.3.0  https://github.com/coupler-rs/vst3-rs
 x11 2.21.0  https://github.com/AltF02/x11-rs.git
 zmij 1.0.23  https://github.com/dtolnay/zmij
 ------------------------------------------------------------------------------
@@ -679,6 +689,27 @@ SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+==============================================================================
+com-scrape-types 0.1.1  https://github.com/coupler-rs/vst3-rs
+------------------------------------------------------------------------------
+Copyright (c) Micah Johnston
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this
+software and associated documentation files (the "Software"), to deal in the Software
+without restriction, including without limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
@@ -1827,6 +1858,22 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+==============================================================================
+libloading 0.8.9  https://github.com/nagisa/rust_libloading/
+------------------------------------------------------------------------------
+Copyright © 2015, Simonas Kazlauskas
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without
+fee is hereby granted, provided that the above copyright notice and this permission notice appear
+in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS
+SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
 
 ==============================================================================
 libm 0.2.16  https://github.com/rust-lang/compiler-builtins
@@ -3489,6 +3536,32 @@ PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS 
 FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+==============================================================================
+The VST 3 SDK's interfaces, by Steinberg (the vst3 crate's bindings; the effects' helper)
+  https://github.com/steinbergmedia/vst3_pluginterfaces
+------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026, Steinberg Media Technologies GmbH
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ==============================================================================
 URW Gothic, the panel's lettering, by (URW)++  https://github.com/ArtifexSoftware/urw-base35-fonts
