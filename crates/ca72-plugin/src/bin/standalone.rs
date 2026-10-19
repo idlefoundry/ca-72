@@ -6,6 +6,9 @@
 
 fn main() {
     ca72_plugin::identify_standalone();
+    // A safe start asked for (decisions.md R-FX-SAFETY): the keys read first, as near the
+    // opening as can be (after the name, which every window must have from the start).
+    let mut safe_start = ca72_plugin::fx::safe_start_keys_held();
     let mut device_access = true;
     let mut state_dir = None;
     let mut fx_console = false;
@@ -22,6 +25,7 @@ fn main() {
                 }
             },
             "--fx-console" => fx_console = true,
+            "--safe-start" => safe_start = true,
             "--fx-mode" => match arguments.next().map(|m| m.parse()) {
                 Some(Ok(m)) => fx_mode = m,
                 _ => {
@@ -31,7 +35,7 @@ fn main() {
             },
             "--help" | "-h" => {
                 println!(
-                    "CA-72 standalone\n\nAudio and MIDI settings are in the editor's settings menu.\n--no-devices     Open the editor without accessing audio or MIDI hardware\n--state-dir DIR  Keep this session in a separate directory\n\nEffects (the FX key's drawer; these for testing):\n--fx-console     Drive the effects chain with commands on standard input (help lists them)\n--fx-mode MODE   sync (no added latency, the default) or pipelined (one block late)\nCA72_FX_PATH     Folders searched for effects before the standard CLAP and VST3 folders\nCA72_FX_STANDARD_FOLDERS=0  Search only CA72_FX_PATH"
+                    "CA-72 standalone\n\nAudio and MIDI settings are in the editor's settings menu.\n--no-devices     Open the editor without accessing audio or MIDI hardware\n--state-dir DIR  Keep this session in a separate directory\n--safe-start     Start with the effects off, as holding Shift (or Option on macOS) as it opens does\n\nEffects (the FX key's drawer; these for testing):\n--fx-console     Drive the effects chain with commands on standard input (help lists them)\n--fx-mode MODE   sync (no added latency, the default) or pipelined (one block late)\nCA72_FX_PATH     Folders searched for effects before the standard CLAP and VST3 folders\nCA72_FX_STANDARD_FOLDERS=0  Search only CA72_FX_PATH"
                 );
                 return;
             }
@@ -46,7 +50,7 @@ fn main() {
             .join("CA-72")
             .join("Standalone")
     });
-    let effects = effects(&state_dir, fx_mode, fx_console);
+    let effects = effects(&state_dir, fx_mode, fx_console, safe_start);
     let options = plugin_kit_standalone::AppOptions {
         // This identifies saved sessions and MIDI clients, not a Wayland surface.
         // Linux's X11 windows take their class from identify_standalone, Ca72::NAME.
@@ -59,11 +63,13 @@ fn main() {
         &["pitch_wheel", "mod_wheel"],
         plugin_kit_standalone::MidiResetScope::Global,
     );
-    // The audio has stopped: the effects' states saved with the session, their helpers ended.
-    if let Some(chain) = effects
-        && let Err(e) = chain.shutdown()
-    {
-        eprintln!("CA-72 effects: {e}");
+    // The audio has stopped: the effects' states saved with the session, their helpers ended;
+    // and the run closed properly (its marker taken away: the next start is not a safe one).
+    if let Some((chain, launch)) = effects {
+        if let Err(e) = chain.shutdown() {
+            eprintln!("CA-72 effects: {e}");
+        }
+        launch.end();
     }
     if let Err(error) = result {
         eprintln!("CA-72: {error}");
@@ -73,12 +79,20 @@ fn main() {
 }
 
 /// The effects chain (docs/fx-host.md), restored from the session's `effects.json`, its
-/// audio side handed to the synth; none without the helper beside the application.
+/// audio side handed to the synth, and this run's marker; none without the helper beside the
+/// application, or while another instance uses the session folder.
+///
+/// Nothing here waits for an effect (decisions.md R-FX-SAFETY): the chain is put in place and
+/// each effect loads on a thread of its own while the window opens and the synth plays, dry
+/// until it joins. A start after a run that did not close, with effects to load, or asked for
+/// (`safe_start`: Shift held, `--safe-start`), loads none of them until the player turns them
+/// back on.
 fn effects(
     state_dir: &std::path::Path,
     mode: ca72_fx::Mode,
     console: bool,
-) -> Option<ca72_fx::Chain> {
+    safe_start: bool,
+) -> Option<(ca72_fx::Chain, ca72_fx::launch::Launch)> {
     let helper = match ca72_fx::locate::helper_path() {
         Ok(h) => h,
         Err(e) => {
@@ -86,12 +100,49 @@ fn effects(
             return None;
         }
     };
+    let (launch, last) = ca72_fx::launch::Launch::begin(state_dir);
+    if last == ca72_fx::launch::Last::Running {
+        eprintln!("CA-72 effects: none: another CA-72 is using this session folder");
+        return None;
+    }
+    let file = state_dir.join("effects.json");
+    let has_effects = ca72_fx::SavedChain::load(&file)
+        .ok()
+        .flatten()
+        .is_some_and(|c| c.has_effects());
+    let safe = ca72_fx::launch::safe_start(last, has_effects, safe_start);
     let mut opts = ca72_fx::ChainOptions::new(helper.clone());
     opts.mode = mode;
-    opts.file = Some(state_dir.join("effects.json"));
+    opts.file = Some(file);
     let (chain, runner) = ca72_fx::Chain::new(opts);
-    for e in chain.restore_file() {
+    let how = match safe {
+        Some(why) => {
+            eprintln!(
+                "CA-72 effects: a safe start ({}): the effects are off until they are turned back on in the FX drawer",
+                match why {
+                    ca72_fx::launch::SafeStart::DidNotClose => "the last run did not close",
+                    ca72_fx::launch::SafeStart::Asked => "asked for",
+                }
+            );
+            ca72_fx::Restore::Off
+        }
+        None => ca72_fx::Restore::Background,
+    };
+    let t = std::time::Instant::now();
+    for e in chain.restore_file_as(how) {
         eprintln!("CA-72 effects: {e}");
+    }
+    if !chain.is_empty() {
+        eprintln!(
+            "CA-72 effects: {} put back in {:.1} ms{}",
+            chain.len(),
+            t.elapsed().as_secs_f64() * 1000.0,
+            if how == ca72_fx::Restore::Off {
+                ""
+            } else {
+                "; loading"
+            }
+        );
     }
     ca72_plugin::fx::install(runner);
     // The editor's effects' drawer (decisions.md R-FX-DRAWER).
@@ -100,6 +151,7 @@ fn effects(
         helper.clone(),
         ca72_fx::locate::search_dirs(),
         Some(state_dir.join("effects-cache.json")),
+        safe,
     );
     if console {
         let mut console = ca72_fx::console::Console::new(
@@ -119,5 +171,5 @@ fn effects(
                 }
             });
     }
-    Some(chain)
+    Some((chain, launch))
 }

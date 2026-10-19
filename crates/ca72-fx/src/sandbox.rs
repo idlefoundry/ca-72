@@ -8,8 +8,14 @@
 //! effects: no notes, names for keys or modulation; one helper for each instance; and two
 //! additions, an instance unloaded (an effect taken out of the chain) and an instance
 //! loaded again at another sample rate in the same helper.
+//!
+//! Since decisions.md R-FX-SAFETY, a load says what went wrong ([`LoadError`]: refused,
+//! crashed or hung, and while doing what), its saved state given in a step of its own so that
+//! a state that crashes the plug-in is told from a plug-in that crashes; a state that crashes
+//! it while it is restored after a crash is not tried again (given up on at once), nor is an
+//! effect restored again and again that crashes each time within a second of it.
 
-use crate::helper::HelperProc;
+use crate::helper::{Failure, HelperProc};
 use daw_ipc::Transport;
 use daw_ipc::protocol::{self, Activated, Loaded, Op};
 use std::path::{Path, PathBuf};
@@ -32,6 +38,84 @@ pub const RETIRED: u8 = 3;
 
 /// No value set yet, in [`Instance::values`].
 const UNSET: u64 = u64::MAX;
+
+/// A crash this soon after the effect was (re)started counts as quick: an effect given up on
+/// after nothing but quick crashes is thought crashed by its settings (R-FX-SAFETY).
+const QUICK: Duration = Duration::from_secs(1);
+
+/// What went wrong when an effect was loaded (or listed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Fault {
+    /// The plug-in, or the helper, said no (not found, not an effect, an error of its own):
+    /// nothing crashed, and trying again next time costs nothing.
+    Refused,
+    /// Its helper died (the plug-in crashed it).
+    Crashed,
+    /// It did not answer within the load timeout; its helper was killed.
+    Hung,
+}
+
+/// What was being done when it went wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum During {
+    /// Its helper started, the plug-in made.
+    Loading,
+    /// Its saved state given to it.
+    Settings,
+    /// It was activated and its state read back.
+    Starting,
+}
+
+/// An effect that would not load: why, when, and in words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadError {
+    pub fault: Fault,
+    pub during: During,
+    pub message: String,
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl LoadError {
+    fn refused(message: String) -> LoadError {
+        LoadError {
+            fault: Fault::Refused,
+            during: During::Loading,
+            message,
+        }
+    }
+
+    fn from_failure(f: Failure, during: During, what: &str) -> LoadError {
+        let fault = match f {
+            Failure::Refused(_) => Fault::Refused,
+            Failure::Exited | Failure::NotRunning => Fault::Crashed,
+            Failure::TimedOut(_) => Fault::Hung,
+        };
+        let message = match &f {
+            Failure::Refused(e) => e.clone(),
+            Failure::Exited | Failure::NotRunning => format!("it crashed while {what}"),
+            Failure::TimedOut(t) => format!("it stopped responding while {what} ({t:?})"),
+        };
+        LoadError {
+            fault,
+            during,
+            message,
+        }
+    }
+}
+
+/// Why an effect was given up on: it kept crashing, hung, or crashed (it is thought) because
+/// of its saved state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GaveUp {
+    pub hung: bool,
+    pub settings: bool,
+}
 
 /// How the supervisor treats its helpers.
 #[derive(Debug, Clone)]
@@ -122,6 +206,12 @@ pub struct Instance {
     pub(crate) snapshot_at: Mutex<Instant>,
     /// Moves whenever the snapshot's bytes change.
     pub snapshot_rev: AtomicU64,
+    /// When it was last (re)started, in ms since the sandbox started; how many times in a row
+    /// it crashed soon after.
+    pub(crate) started_ms: AtomicU64,
+    pub(crate) quick: AtomicU32,
+    /// Why it was given up on (set before its status is [`FAILED`]).
+    pub(crate) gave_up: Mutex<Option<GaveUp>>,
     /// Signalled when the status or generation changes.
     pub(crate) changed: (Mutex<()>, Condvar),
     pub(crate) group: Weak<Group>,
@@ -162,6 +252,23 @@ impl Instance {
 
     pub fn status(&self) -> u8 {
         self.status.load(Ordering::Acquire)
+    }
+
+    /// Why it was given up on, once it has been.
+    pub fn gave_up(&self) -> Option<GaveUp> {
+        *lock(&self.gave_up)
+    }
+
+    fn now_ms(&self) -> u64 {
+        (self.epoch.elapsed().as_millis() as u64).max(1)
+    }
+
+    /// Given up on for `why` (its event already recorded): dry from now on.
+    fn give_up(&self, why: GaveUp) {
+        *lock(&self.gave_up) = Some(why);
+        self.status.store(FAILED, Ordering::Release);
+        self.transport.mark_dead();
+        self.notify();
     }
 
     /// Microseconds since the sandbox started (for `submitted_at`).
@@ -273,6 +380,9 @@ pub(crate) struct Group {
     next_instance: AtomicU32,
     /// Its instances are all unloaded: its helper is to quit, not to be started again.
     retired: AtomicBool,
+    /// Held while its helper's death is dealt with: the helper started in its place may die
+    /// too, and its own death waits for this one's to be done.
+    recovering: Mutex<()>,
 }
 
 #[derive(Debug)]
@@ -334,7 +444,8 @@ impl Sandbox {
     }
 
     /// Starts a helper and loads and activates an effect in it. `params` are (parameter ID,
-    /// plain value) pairs; `state` a state to restore first.
+    /// plain value) pairs; `state` a state to restore first. A helper that crashed or hung is
+    /// gone when this returns.
     #[allow(clippy::too_many_arguments)]
     pub fn load(
         &self,
@@ -345,17 +456,26 @@ impl Sandbox {
         params: &[(u32, f64)],
         sample_rate: f64,
         max_block: u32,
-    ) -> Result<Arc<Instance>, String> {
+    ) -> Result<Arc<Instance>, LoadError> {
+        if self.inner.closing.load(Ordering::Acquire) {
+            return Err(LoadError::refused("the application is closing".into()));
+        }
         let group = Arc::new(Group {
             proc: Mutex::new(None),
             instances: Mutex::new(Vec::new()),
             restarts: AtomicU32::new(0),
             next_instance: AtomicU32::new(0),
             retired: AtomicBool::new(false),
+            recovering: Mutex::new(()),
         });
-        let proc = spawn(&self.inner, &group)?;
+        let proc = spawn(&self.inner, &group).map_err(LoadError::refused)?;
         *lock(&group.proc) = Some(proc.clone());
         lock(&self.inner.groups).push(group.clone());
+        // (Closed meanwhile: `close` may have missed the group.)
+        if self.inner.closing.load(Ordering::Acquire) {
+            retire(&self.inner, &group);
+            return Err(LoadError::refused("the application is closing".into()));
+        }
         let loaded = self.load_in(
             &group,
             &proc,
@@ -367,7 +487,10 @@ impl Sandbox {
             sample_rate,
             max_block,
         );
-        if loaded.is_err() {
+        if let Err(e) = &loaded {
+            if e.fault != Fault::Refused {
+                proc.kill();
+            }
             retire(&self.inner, &group);
         }
         loaded
@@ -380,12 +503,15 @@ impl Sandbox {
         old: &Arc<Instance>,
         sample_rate: f64,
         max_block: u32,
-    ) -> Result<Arc<Instance>, String> {
+    ) -> Result<Arc<Instance>, LoadError> {
         let _ = old.take_snapshot();
-        let group = old.group.upgrade().ok_or("the effect's helper is gone")?;
+        let group = old
+            .group
+            .upgrade()
+            .ok_or_else(|| LoadError::refused("the effect's helper is gone".into()))?;
         let proc = lock(&group.proc)
             .clone()
-            .ok_or("the effect's helper is not running")?;
+            .ok_or_else(|| LoadError::refused("the effect's helper is not running".into()))?;
         let state = old.snapshot();
         let new = self.load_in(
             &group,
@@ -416,22 +542,28 @@ impl Sandbox {
         params: &[(u32, f64)],
         sample_rate: f64,
         max_block: u32,
-    ) -> Result<Arc<Instance>, String> {
+    ) -> Result<Arc<Instance>, LoadError> {
         let number = group.next_instance.fetch_add(1, Ordering::Relaxed);
-        let transport = Transport::create().map_err(|e| format!("shared memory: {e}"))?;
-        let loaded: Loaded = serde_json::from_value(proc.request(
-            Op::Load {
-                instance: number,
-                path: path.to_string_lossy().into_owned(),
-                plugin: plugin.to_owned(),
-                state: state.map(protocol::hex),
-            },
-            self.inner.opts.load_timeout,
-        )?)
-        .map_err(|e| e.to_string())?;
+        let transport =
+            Transport::create().map_err(|e| LoadError::refused(format!("shared memory: {e}")))?;
+        // The plug-in made with no state, then given its saved one: a state that crashes or
+        // hangs it is told from a plug-in that does (R-FX-SAFETY).
+        let reply = proc
+            .ask(
+                Op::Load {
+                    instance: number,
+                    path: path.to_string_lossy().into_owned(),
+                    plugin: plugin.to_owned(),
+                    state: None,
+                },
+                self.inner.opts.load_timeout,
+            )
+            .map_err(|f| LoadError::from_failure(f, During::Loading, "loading"))?;
+        let loaded: Loaded =
+            serde_json::from_value(reply).map_err(|e| LoadError::refused(e.to_string()))?;
         let unload = |why: String| {
             let _ = proc.request(Op::Unload { instance: number }, Duration::from_secs(5));
-            Err(why)
+            Err(LoadError::refused(why))
         };
         // An effect: audio in and out. An instrument is not hosted (the owner, 2026-10-18),
         // whatever the list said of it: one that says so, or has no audio input.
@@ -481,6 +613,9 @@ impl Sandbox {
             snapshot: Mutex::new(state.map(<[u8]>::to_vec)),
             snapshot_at: Mutex::new(Instant::now()),
             snapshot_rev: AtomicU64::new(0),
+            started_ms: AtomicU64::new(0),
+            quick: AtomicU32::new(0),
+            gave_up: Mutex::new(None),
             changed: (Mutex::new(()), Condvar::new()),
             group: Arc::downgrade(group),
             epoch: self.inner.epoch,
@@ -496,13 +631,49 @@ impl Sandbox {
                 ),
             }
         }
-        if let Err(e) = activate(&inst, proc, &self.inner.opts) {
-            return unload(e);
+        if let Some(state) = state {
+            match proc.ask(
+                Op::LoadState {
+                    instance: number,
+                    state: protocol::hex(state),
+                },
+                self.inner.opts.load_timeout,
+            ) {
+                Ok(_) => {}
+                Err(Failure::Refused(e)) => {
+                    return unload(format!("its saved settings were refused: {e}")).map_err(
+                        |mut e: LoadError| {
+                            e.during = During::Settings;
+                            e
+                        },
+                    );
+                }
+                Err(f) => {
+                    return Err(LoadError::from_failure(
+                        f,
+                        During::Settings,
+                        "its saved settings were restored",
+                    ));
+                }
+            }
+        }
+        match activate_why(&inst, proc, &self.inner.opts) {
+            Ok(()) => {}
+            Err(Failure::Refused(e)) => return unload(e),
+            Err(f) => return Err(LoadError::from_failure(f, During::Starting, "starting")),
         }
         if let Ok(s) = save_state(&inst, proc) {
             inst.keep_snapshot(s);
         }
+        if !proc.is_alive() {
+            return Err(LoadError::from_failure(
+                Failure::Exited,
+                During::Starting,
+                "starting",
+            ));
+        }
         inst.dirty_since.store(0, Ordering::Relaxed);
+        inst.started_ms.store(inst.now_ms(), Ordering::Relaxed);
         inst.status.store(RUNNING, Ordering::Release);
         lock(&group.instances).push(inst.clone());
         Ok(inst)
@@ -540,6 +711,25 @@ impl Sandbox {
         for g in groups {
             for inst in lock(&g.instances).clone() {
                 let _ = inst.take_snapshot();
+            }
+        }
+    }
+
+    /// Closing: every helper still running is stopped (killed after a moment, so that one
+    /// hung in a plug-in's load does not outlive the application), none started again, and no
+    /// effect loaded from now on.
+    pub fn close(&self) {
+        self.inner.closing.store(true, Ordering::Release);
+        let groups: Vec<Arc<Group>> = lock(&self.inner.groups).drain(..).collect();
+        for g in groups {
+            g.retired.store(true, Ordering::Release);
+            for inst in lock(&g.instances).iter() {
+                inst.status.store(RETIRED, Ordering::Release);
+                inst.transport.mark_dead();
+                inst.notify();
+            }
+            if let Some(p) = lock(&g.proc).take() {
+                p.shutdown(Duration::from_millis(500));
             }
         }
     }
@@ -607,14 +797,14 @@ fn spawn(inner: &Arc<Inner>, group: &Arc<Group>) -> Result<Arc<HelperProc>, Stri
     )
 }
 
-fn activate(inst: &Instance, proc: &HelperProc, opts: &SandboxOptions) -> Result<(), String> {
+fn activate_why(inst: &Instance, proc: &HelperProc, opts: &SandboxOptions) -> Result<(), Failure> {
     let start = inst.transport.request().word().load(Ordering::Acquire);
     // Nothing is outstanding for the new helper: `done` matches the last request, which
     // also clears the dead flag.
     inst.transport
         .done()
         .store(start & daw_ipc::layout::SEQ_MASK);
-    let a: Activated = serde_json::from_value(proc.request(
+    let a: Activated = serde_json::from_value(proc.ask(
         Op::Activate {
             instance: inst.number,
             sample_rate: inst.sample_rate,
@@ -626,7 +816,7 @@ fn activate(inst: &Instance, proc: &HelperProc, opts: &SandboxOptions) -> Result
         },
         opts.load_timeout,
     )?)
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| Failure::Refused(e.to_string()))?;
     inst.latency.store(a.latency, Ordering::Relaxed);
     inst.tail.store(a.tail, Ordering::Relaxed);
     Ok(())
@@ -647,25 +837,52 @@ fn save_state(inst: &Instance, proc: &HelperProc) -> Result<Vec<u8>, String> {
 }
 
 /// A helper's stdout closed: it exited, crashed or was killed. Its instances are marked
-/// down, another helper is started and they are restored.
+/// down, another helper is started and they are restored: made, given their last state in a
+/// step of its own, activated. One that crashes or hangs while that is done, or that has
+/// crashed too often, is given up on, and a helper left with nothing alive is stopped
+/// (decisions.md R-FX-SAFETY).
 fn on_exit(inner: &Arc<Inner>, group: &Arc<Group>, proc: &Arc<HelperProc>) {
-    if inner.closing.load(Ordering::Acquire) || group.retired.load(Ordering::Acquire) {
+    // One death at a time: the helper started here may die while it restores, and its own
+    // death is dealt with after this one (by then its instances are given up on, or running).
+    let _one = lock(&group.recovering);
+    let current = lock(&group.proc)
+        .as_ref()
+        .is_some_and(|p| Arc::ptr_eq(p, proc));
+    let instances: Vec<Arc<Instance>> = lock(&group.instances)
+        .iter()
+        .filter(|i| matches!(i.status(), RUNNING | DOWN))
+        .cloned()
+        .collect();
+    if inner.closing.load(Ordering::Acquire)
+        || group.retired.load(Ordering::Acquire)
+        || !current
+        || instances.is_empty()
+    {
         let _ = proc.reap();
         return;
     }
-    let instances: Vec<Arc<Instance>> = lock(&group.instances).clone();
     // Down at once, before the process is reaped: a crashed process can take a while to
     // end (its core written), and meanwhile its node would wait out every block's deadline.
+    let mut hung = false;
     for inst in &instances {
         inst.status.store(DOWN, Ordering::Release);
         inst.submitted_at.store(0, Ordering::Release);
         inst.transport.mark_dead();
         inst.crashes.fetch_add(1, Ordering::Relaxed);
+        let ran = inst
+            .now_ms()
+            .saturating_sub(inst.started_ms.load(Ordering::Relaxed));
+        if ran < QUICK.as_millis() as u64 {
+            inst.quick.fetch_add(1, Ordering::Relaxed);
+        } else {
+            inst.quick.store(0, Ordering::Relaxed);
+        }
         inst.notify();
     }
     let how = proc.reap();
     for inst in &instances {
         let mut detail = if inst.hung.swap(false, Ordering::AcqRel) {
+            hung = true;
             format!(
                 "its helper (pid {}) stopped returning blocks for {:?}; the watchdog killed it",
                 proc.pid(),
@@ -681,37 +898,84 @@ fn on_exit(inner: &Arc<Inner>, group: &Arc<Group>, proc: &Arc<HelperProc>) {
     }
     let restarts = group.restarts.fetch_add(1, Ordering::Relaxed) + 1;
     // The event first: whoever the status wakes finds it recorded.
-    let fail = |why: String| {
-        for inst in &instances {
-            inner.event(&inst.label, "failed", why.clone());
-            inst.status.store(FAILED, Ordering::Release);
-            inst.notify();
-        }
+    let fail = |inst: &Instance, why: String, gave: GaveUp| {
+        inner.event(&inst.label, "failed", why);
+        inst.give_up(gave);
     };
     if restarts > inner.opts.max_restarts {
-        fail(format!(
-            "gave up after {} restarts of its helper; it passes the sound through untouched from now on",
-            inner.opts.max_restarts
-        ));
+        for inst in &instances {
+            // Crashed every time within a second of being started with its state: its state
+            // is thought the cause (R-FX-SAFETY).
+            let settings = inst.quick.load(Ordering::Relaxed) >= restarts;
+            fail(
+                inst,
+                format!(
+                    "gave up after {} restarts of its helper{}; it passes the sound through untouched from now on",
+                    inner.opts.max_restarts,
+                    if settings {
+                        ", each crash within a second of its settings being restored"
+                    } else {
+                        ""
+                    }
+                ),
+                GaveUp { hung, settings },
+            );
+        }
+        *lock(&group.proc) = None;
         return;
     }
     let new = match spawn(inner, group) {
         Ok(p) => p,
-        Err(e) => return fail(e),
+        Err(e) => {
+            for inst in &instances {
+                fail(
+                    inst,
+                    e.clone(),
+                    GaveUp {
+                        hung,
+                        settings: false,
+                    },
+                );
+            }
+            *lock(&group.proc) = None;
+            return;
+        }
     };
     *lock(&group.proc) = Some(new.clone());
+    let timeout = inner.opts.load_timeout;
     for inst in &instances {
         let state = inst.snapshot();
-        let loaded = new.request(
-            Op::Load {
-                instance: inst.number,
-                path: inst.path.to_string_lossy().into_owned(),
-                plugin: inst.plugin.clone(),
-                state: state.as_deref().map(protocol::hex),
-            },
-            inner.opts.load_timeout,
-        );
-        match loaded.and_then(|_| activate(inst, &new, &inner.opts)) {
+        let made = new
+            .ask(
+                Op::Load {
+                    instance: inst.number,
+                    path: inst.path.to_string_lossy().into_owned(),
+                    plugin: inst.plugin.clone(),
+                    state: None,
+                },
+                timeout,
+            )
+            .map_err(|f| LoadError::from_failure(f, During::Loading, "loading"));
+        let restored = made.and_then(|_| match &state {
+            None => Ok(()),
+            Some(s) => new
+                .ask(
+                    Op::LoadState {
+                        instance: inst.number,
+                        state: protocol::hex(s),
+                    },
+                    timeout,
+                )
+                .map(|_| ())
+                .map_err(|f| {
+                    LoadError::from_failure(f, During::Settings, "its settings were restored")
+                }),
+        });
+        let started = restored.and_then(|()| {
+            activate_why(inst, &new, &inner.opts)
+                .map_err(|f| LoadError::from_failure(f, During::Starting, "starting"))
+        });
+        match started {
             Ok(()) => {
                 inner.event(
                     &inst.label,
@@ -726,16 +990,30 @@ fn on_exit(inner: &Arc<Inner>, group: &Arc<Group>, proc: &Arc<HelperProc>) {
                         },
                     ),
                 );
+                inst.started_ms.store(inst.now_ms(), Ordering::Relaxed);
                 inst.generation.fetch_add(1, Ordering::AcqRel);
                 inst.status.store(RUNNING, Ordering::Release);
                 inst.notify();
             }
             Err(e) => {
-                inner.event(&inst.label, "failed", format!("could not be restored: {e}"));
-                inst.status.store(FAILED, Ordering::Release);
-                inst.notify();
+                // Not tried again: a state that crashes it while restored would crash it each
+                // time, and one that hangs would hang each time.
+                let settings = e.during == During::Settings && e.fault != Fault::Refused;
+                fail(
+                    inst,
+                    format!("could not be restored: {e}"),
+                    GaveUp {
+                        hung: e.fault == Fault::Hung,
+                        settings,
+                    },
+                );
             }
         }
+    }
+    // A helper with nothing alive in it (hung, say) is stopped.
+    if !instances.iter().any(|i| i.status() == RUNNING) {
+        *lock(&group.proc) = None;
+        new.kill();
     }
 }
 

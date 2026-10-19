@@ -336,6 +336,8 @@ fn a_sample_rate_change_loads_the_effects_again_with_their_state() {
         let pid = c.status()[0].helper_pid;
         r.prepare(44_100.0, 512);
         assert_eq!(c.sample_rate(), 44_100.0);
+        // (Loaded again on a thread of its own: the device waits for none of it.)
+        assert!(c.wait_loaded(Duration::from_secs(20)));
         let st = &c.status()[0];
         assert_eq!(st.health, Health::Running);
         assert_eq!(st.helper_pid, pid, "{}: the same helper", p.desc.format);
@@ -519,10 +521,10 @@ fn an_effect_that_keeps_crashing_is_given_up_on_and_passes_its_input() {
             if k % 40 == 39 && c.status()[0].health == Health::Running {
                 let _ = c.kill(0);
             }
-            c.status()[0].health != Health::Failed || k < 300
+            c.status()[0].health != Health::Disabled || k < 300
         },
     );
-    assert_eq!(c.status()[0].health, Health::Failed);
+    assert_eq!(c.status()[0].health, Health::Disabled);
     assert!(kinds(&c).contains(&"failed".to_owned()));
     assert!(blocks.iter().rev().take(20).all(|b| !b.0), "dry at the end");
 }

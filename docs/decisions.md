@@ -8595,3 +8595,137 @@ open it up again, and it doesn't..."
 
 **Not done:** Windows and Linux windows (unchanged; a helper's window on Windows may meet the same
 rule, untried); a keyboard for the effect's window without a click.
+
+## R-FX-SAFETY. No effect can make the standalone dead or keep it from starting (issue 82)
+
+**The owner, 2026-10-19:** "I'm just wary of a situation in which a user loads up a VST [any
+plugin], and then that VST crashes on them. We don't want any situation where the synthesizer
+becomes either dead or in an even worse case where the synthesizer keeps trying to load up with a
+plugin that continually keeps crashing and effectively bricks the entire plugin." Four measures,
+approved by the owner before they were built:
+
+1. **The start never waits for an effect.** The chain saved in `effects.json` is put in place at
+   once (3 ms for four effects) and the synth plays through it dry; each effect loads in its
+   helper on a thread of its own and joins the sound when it has loaded, its slot reading LOADING
+   meanwhile. A new sample rate loads the effects again the same way. A load past its time (30 s)
+   is a failure (2), its helper killed. Nothing on the editor's thread or the audio thread waits
+   for a helper; closing the application kills helpers still loading.
+2. **Failures are remembered.** An effect that crashes as it loads, stops responding as it loads,
+   or is given up on as it plays (5 restarts) is turned off and saved so: `"disabled": {"why":
+   "crashed" | "hung" | "settings", "times", "at", "detail"}` in its slot. At the next start it is
+   not loaded: its name is dimmed over CRASHED or NOT RESPONDING, its state, place and bypass
+   kept; a click (or TRY AGAIN in its menu) tries it again (`times` counts the failures in a row;
+   the record goes once it loads). A plug-in that only says no (not installed, not an effect) is
+   not turned off: it reads MISSING and is tried again at every start, at no cost. The scan's
+   cache already kept a failed file's listing by path, size and time; it now says whether the file
+   crashed or hung its helper, and SCAN AGAIN tries such files again (unchanged ones are not
+   loaded otherwise). The list's note counts files not listed ("12 EFFECTS, 2 NOT LISTED").
+3. **A safe start.** A marker (`running.marker` in the session folder) is written as the
+   application starts and taken away as it closes properly. Found at a start, with effects to load,
+   or with Shift held as it opens (Option, or Shift, on macOS; `--safe-start` on any), the chain is
+   put in place and none of it loaded: each slot reads OFF, its tip says why ("Effects off: the
+   CA-72 did not close properly. Click to turn them on"), a click turns them all on, and the menu
+   offers TURN EFFECTS BACK ON and TURN THIS ONE ON. Nothing is saved differently: a crash with
+   another cause turns nothing off, and the next proper start loads everything. A session folder
+   another instance holds (its `instance.lock` locked) is left alone: no marker, no effects.
+4. **Settings that crash an effect.** A saved state is now given to an effect in a step of its
+   own, after it is made, so a crash or hang then is told from a plug-in that crashes. Such
+   settings are not given again (a restore after a crash that crashes in them gives up at once, and
+   one that crashes within a second of every restore is given up on as caused by its settings);
+   the slot reads CRASHED, its tip "its saved settings crash it", and its menu offers LOAD WITHOUT
+   ITS SETTINGS first. Loaded so, it starts as the plug-in starts; the settings are kept in the
+   file as `set_aside`, never given to it unless the player asks (TRY ITS OLD SETTINGS, which keeps
+   it playing as it is meanwhile and stays so, saying FAILED for 5 s, if they still crash it).
+
+**Decided here (the owner to confirm):** settings set aside are kept until the player removes or
+replaces the effect, or gives them back and they load; changing the effect does not drop them (the
+brief suggested that new settings replace them: keeping both loses nothing, and a later plug-in
+version may still take them). A load error that is not a crash or hang is not remembered. A crash
+soon after a restore counts as quick within 1 s. Words on screen: CRASHED, NOT RESPONDING, OFF,
+LOADING, FAILED; the tips say the rest in a line. Effects added from the list still load on the
+drawer's thread, which then waits (up to 30 s for a plug-in that hangs) before its next job; the
+editor never waits.
+
+**Evidence (2026-10-19, omarchy):**
+- Tests, `cargo test -p ca72-fx -p ca72-fx-helper` with DAW-v3's test plug-ins and the faults
+  patch 4 gives them (third_party/daw-v3/PATCHES.md: IDs that crash or hang as they are made, a
+  state pair that crashes or hangs them as it is given or as they first play, file names that
+  crash or hang them as they are listed), `tests/safety.rs`: a chain of a hang-at-load, two
+  crash-at-load (both formats) and a working effect restored in under 500 ms, played in real time
+  from its first block (dry, then wet once the working one joined while the hung one still loaded,
+  the worst block under 40 ms against a 30 ms deadline), the crashing ones off at once, the hung
+  one when its time was up, both saved so with their helpers gone; at the next start not loaded
+  (one helper only), tried again and off again (`times` 2), "mended" and tried, playing; one given
+  up on as it plays stays off; settings that crash or hang it (both formats) turn it off as
+  `settings`, it loads without them, they stay aside across a start, given back they fail and it
+  plays on; settings that crash it at its first block every time are found too; a safe start
+  loads nothing and saves the file unchanged, turned on it plays; listings that crash or hang are
+  remembered, SCAN AGAIN tries them, a changed file is listed again. `no_alloc.rs` now restores a
+  chain in the background while it plays: no allocation on the audio side. `launch.rs`: a run
+  not closed is found, a held session left alone. The editor's
+  `the_fx_drawer_says_why_an_effect_is_off_and_tries_it_again`.
+- The real standalone (release, `--state-dir` and `IDLE_FOUNDRY_SHARED` in the worktree, output to
+  a private PipeWire null sink, recorded): with a crash-at-load CLAP, a hang-at-load VST3 and a
+  working effect saved, the chain was put back in 3.4 ms, the window mapped at 0.81 s (0.83 s with
+  no effects), a note pressed at 1.65 s sounded at 1.74 s (an empty chain's: 1.73 s, 1.82 s), the
+  working effect playing while the hung one read LOADING; CRASHED at 0.22 s, NOT RESPONDING at
+  30.0 s. The next start loaded neither (one helper), a click tried one again; a SIGKILL left the
+  marker (and no helper behind), and the next start was a safe one, nothing loaded, one click
+  turned the effects on; LOAD WITHOUT ITS SETTINGS kept them aside; `--safe-start` too.
+
+**Not tried:** the Shift and Option keys as the application opens (macOS's and Windows's code is
+not compiled here; on Linux the X server's keyboard state is read, which XWayland knows only while
+one of its windows has the keyboard, so `--safe-start` is the sure way there); the Mac and
+Windows at all; third-party plug-ins that fail.
+
+## R-FX-DOCK. The effects' helper never shows in the Dock as a second CA-72 (issue 82)
+
+**The owner's report, 2026-10-19** (CA-72 TEST on the Mac): "When I launched the CA72 standalone
+app two apps launch, so I've got both called CA72 test, one is bouncing up and down in my dock and
+the other has the dot underneath it to indicate that's open."
+
+**Cause.** The effects' helper was a bare program in `CA-72.app/Contents/Helpers`. With the app
+opened from the Finder and its chain restored at start, `lsappinfo` listed the first effect's
+helper as a Foreground application with the app's own identifier, never activated: the bouncing
+icon (the app itself had the dot). It was seemingly taken for the application being opened: not
+seen with the app started from a shell, nor with an effect added later, when the helper was an
+agent without an identifier. DAW-v3's helper made itself an accessory application only as its
+first window opened.
+
+**Fix.**
+- The helper is an application bundle of its own, `Contents/Helpers/CA-72 Effects Host.app`
+  (`scripts/standalone.sh`): its own identifier (the app's with `.effects-host`), the app's icon,
+  its own name, and `LSUIElement`, so that it is an agent (no Dock icon or menu bar) to
+  LaunchServices from the start.
+- It makes itself an accessory application as it starts (`ca72-fx-helper/src/macos.rs`), before
+  any plug-in is loaded, so that it is one when run bare as well (tests, a development build).
+  Not a change to the vendored DAW-v3 code.
+- `locate::helper_for` finds it there (the first `.app` in `Contents/Helpers` holding
+  `Contents/MacOS/ca72-fx-helper`, so a renamed build's is found too), never loose in
+  `Contents/Helpers`. Windows and Linux are unchanged: the helper beside the program.
+- `scripts/package.sh` signs inside out: the helper's bundle first, hardened, with
+  `effects-host-entitlements.plist` (only `disable-library-validation`), then the app with its
+  own, never that one (docs/fx-host.md).
+- The effect's window still comes up in front when a slot's name is clicked
+  (R-FX-MAC), and a click on it makes the helper the active application, with the keyboard.
+
+**Evidence (Mac, macOS 27, 2026-10-19).**
+- `scripts/test-macos-effects-host.sh` (the app opened through LaunchServices with a throwaway
+  session, `lsappinfo` read). With the owner's chain (Faturator, ValhallaRoom) restored:
+  - the build installed before (helper loose in `Contents/Helpers`): two Foreground entries with
+    `com.idlefoundry.ca72-test.standalone`, the app and its first helper; the second helper
+    unlisted. Fails.
+  - this build: one, the app; both helpers `UIElement` with `...standalone.effects-host`. Passes,
+    three times; and with ValhallaRoom added from the console and its window opened.
+- `crates/ca72-fx-helper/tests/macos_dock.rs`: the helper run bare, and from its own bundle in an
+  app's layout, is an agent from its start (with the bundle's identifier). Both fail without the
+  start's accessory call (the helper never checks in).
+- `locate`'s `the_helper_is_found_beside_the_program_or_in_its_own_bundle`, on every platform.
+- The window, by clicks (cliclick, the screen's window order read, while the owner was away): the
+  CA-72's window clicked, then the effect asked for: in front, and the first time also active.
+  Covered by the CA-72's window and asked for again: in front, the CA-72 still active (the
+  keyboard stays with it, as in R-FX-MAC). Its title bar clicked: the helper active.
+
+**For the owner:** the effect's window takes the keyboard on the first open, not when asked for
+again; a click on it always does. Making that the same both ways (always, or never) is the
+owner's call.

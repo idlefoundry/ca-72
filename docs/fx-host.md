@@ -159,6 +159,47 @@ made in the instant of a crash may be lost).
 An editor window belongs to its helper and goes with it; it is not opened again after a
 restore (the player opens it again).
 
+Since R-FX-SAFETY a restore makes the plug-in, then gives it its state in a step of its own
+(`LoadState`), then activates it, and a load says what went wrong (`LoadError`: refused, crashed
+or hung; while loading, its settings or starting). A restore that crashes or hangs is not tried
+again (given up on at once), and a helper left with nothing alive is stopped. One death of a
+helper is dealt with at a time (a helper started in its place may die too). An effect given up
+on after crashing every time within a second of being started is thought crashed by its
+settings.
+
+## Nothing can stop the synth, nor keep it from starting (R-FX-SAFETY)
+
+The owner (2026-10-19): no effect may make the synthesizer dead, or make it keep trying to load
+a plug-in that keeps crashing. So:
+
+- **The start never waits.** `Chain::restore_file_as(Restore::Background)` puts the saved chain
+  in place at once (the audio side gets each stage with no node: dry) and loads each effect on a
+  thread of its own (`ca72-fx-load`); a loaded effect's node is handed to its stage by a message
+  (`Msg::Node`), no allocation on the audio side. A load that does not answer within
+  `load_timeout` (30 s) is a hang: its helper is killed. `Runner::prepare` at another sample rate
+  loads the effects again the same way (`ca72-fx-reload`), dry meanwhile. Closing kills helpers
+  still loading (`Sandbox::close`). `Restore::Wait` (tests, console) waits.
+- **Failures are remembered.** An effect that crashes or hangs as it loads, or is given up on as
+  it plays, is turned off: `disabled` in its slot of `effects.json`, and `Health::Disabled`. It
+  is not loaded at the next start until tried again (`Chain::retry`). A refusal (not installed,
+  not an effect) is `Missing` and tried at every start, as before.
+- **Settings set aside.** `Chain::load_without_settings` loads it with no state and keeps the
+  saved one as `set_aside`; `Chain::try_set_aside` gives it back (the effect plays on as it is
+  meanwhile, and stays so if they still crash it, `try_failed` set).
+- **A safe start.** `launch::Launch` writes `running.marker` in the session folder at start and
+  takes it away at a clean exit; a marker found (and effects to load), or Shift (Option on macOS)
+  held as the application opens, or `--safe-start`, restores with `Restore::Off`: the chain in
+  place, nothing loaded (`Health::Off`), the file unchanged, until `Chain::turn_on` (TURN EFFECTS
+  BACK ON) or `retry` of one. A session folder whose `instance.lock` another process holds is left
+  alone.
+- **The scan.** A file that crashed or hung its helper as it was listed is kept so in
+  `effects-cache.json` (`fault`) and not loaded again until it changes; `catalog::scan_as(...,
+  retry)` (the list's SCAN AGAIN) tries such files again.
+- **The drawer.** CRASHED and NOT RESPONDING (turned off), OFF (a safe start), LOADING, FAILED,
+  MISSING under the dimmed name; a click tries a turned-off effect again or turns the effects on;
+  the menu's TRY AGAIN, LOAD WITHOUT ITS SETTINGS, TRY ITS OLD SETTINGS, TURN EFFECTS BACK ON,
+  TURN THIS ONE ON; the tip says why in a line.
+
 ## Finding effects; the cache
 
 Folders searched: `$CA72_FX_PATH` (a path list; for tests, or effects kept elsewhere), then,
@@ -190,8 +231,14 @@ change to the chain, at most once a second when an effect's state changes, and a
 ```json
 { "format": 1,
   "slots": [ { "format": "clap", "path": "/…/Reverb.clap", "plugin": "com.example.reverb",
-               "name": "Reverb", "vendor": "Example", "bypass": false, "state": "<hex>" } ] }
+               "name": "Reverb", "vendor": "Example", "bypass": false, "state": "<hex>",
+               "disabled": { "why": "crashed", "times": 1, "at": 1792428661,
+                             "detail": "it crashed while loading" },
+               "set_aside": "<hex>" } ] }
 ```
+
+`disabled` and `set_aside` are there only when they apply (R-FX-SAFETY); older files read as
+before, and an older build reading a newer file ignores them (it would load the effect).
 
 Not in `session.json`'s plug-in state: that is the synth's nih-plug state, serialised as a
 JSON array of byte values inside an 8 MB limit, and effects' states can be large (an
@@ -236,7 +283,8 @@ and the Mac and Windows.
 The drawer (R-FX-DRAWER) is the player's interface. `--fx-console`, for testing: the
 standalone reads commands on standard input (`help`, `scan`, `add N`,
 `add-file PATH [ID]`, `replace S N`, `remove S`, `move S T`, `bypass S on|off`, `editor S
-[close]`, `param S ID VALUE`, `params S`, `chain`, `events`, `kill S`, `save`); `--fx-mode
+[close]`, `param S ID VALUE`, `params S`, `chain`, `events`, `kill S`, `save`, and since
+R-FX-SAFETY `retry S`, `fresh S`, `aside S`, `on`, `wait`); `--fx-mode
 sync|pipelined`; `CA72_FX_PATH`, `CA72_FX_STANDARD_FOLDERS`, `CA72_FX_HELPER`, `CA72_FX_LOG`
 (the helpers' stderr). It drives only `Chain`'s public calls, which the FX-A drawer will
 call (`add`, `replace`, `remove`, `move_to`, `set_bypass`, `open_editor`, `status`,
@@ -293,17 +341,39 @@ on Windows 11 (MSVC 1.97.1, over SSH, so without the editor test); clippy clean 
 The standalone itself was not built on either. What each needs:
 
 - **Both:** `scripts/standalone.sh` now builds `ca72-fx-helper` and puts it beside the app
-  (`target/bundled/ca72-fx-helper[.exe]`; macOS `CA-72.app/Contents/Helpers/`, where
-  `locate::helper_path` looks). Not done: `scripts/package.sh` (the ZIP, the Linux tarball,
-  the macOS `.pkg`) and the installers must take the helper, and
+  (`target/bundled/ca72-fx-helper[.exe]`; on macOS an application bundle of its own,
+  `CA-72.app/Contents/Helpers/CA-72 Effects Host.app`, where `locate::helper_path` looks:
+  below). Not done: `scripts/package.sh`'s ZIP and Linux tarball and the installers must
+  take the helper (the macOS `.pkg` has it inside the app, signed: below), and
   `scripts/test-standalone-install.py` check it. DAW-v3's transport and helper run on both
   in DAW-v3's CI (its D78: the window tests pass on the Mac and the Windows desktop), and the
   chain's tests will run in the CA-72's CI with the workspace.
-- **macOS:** the helper must be signed and notarised with the app, with the hardened runtime
-  and **`com.apple.security.cs.disable-library-validation`** (it loads other vendors'
-  libraries) and perhaps `allow-unsigned-executable-memory` for some plug-ins; the
-  application itself needs neither, which is the point of the helper. A helper with no Dock
-  icon: DAW-v3 makes it an accessory application. The transport's wait functions,
+- **macOS:** the helper is an application bundle of its own,
+  `CA-72.app/Contents/Helpers/CA-72 Effects Host.app` (decisions.md R-FX-DOCK): its own
+  identifier (the app's with `.effects-host`), the app's icon, and `LSUIElement`, so that it
+  is an agent (no Dock icon, no menu bar) and LaunchServices never takes it for the synth.
+  It also makes itself an accessory application as it starts, before any plug-in is loaded,
+  so that it is one when run bare too. Loose in `Contents/Helpers` (as first built), the
+  helper of the first effect restored at start, the app opened from the Finder, was listed
+  with the app's identifier as a second Foreground "CA-72" that was never activated: a second
+  icon bouncing in the Dock beside the real one (seemingly taken for the application being
+  opened; not seen with the app started from a shell, or with an effect added later).
+  `locate::helper_for` finds the helper beside the program, else in the first `.app` in
+  `Contents/Helpers` that holds `Contents/MacOS/ca72-fx-helper` (so a renamed build's
+  "CA-72 TEST Effects Host.app" is found as well); never loose there.
+  `scripts/test-macos-effects-host.sh APP EFFECT` opens a built app as the Finder does and
+  checks what LaunchServices lists; `crates/ca72-fx-helper/tests/macos_dock.rs` checks the
+  helper itself.
+
+  **Signing**, inside out (`scripts/package.sh`): the helper's bundle first, with the hardened
+  runtime and `scripts/standalone/effects-host-entitlements.plist`, which grants only
+  **`com.apple.security.cs.disable-library-validation`** (it loads other vendors'
+  libraries); then the application, with its own entitlements (audio input), never that
+  one, which is the point of the helper. Some plug-ins may also want
+  `allow-unsigned-executable-memory` (JIT): not granted until one is seen to need it. The
+  helper is notarised inside the app's package. Its window comes up in front when a slot's
+  name is clicked (patch 3); a click on it makes the helper the active application, so it
+  takes the keyboard. The transport's wait functions,
   `os_sync_wait_on_address` and its kin, are macOS 14.4's, and DAW-v3 linked them, so the
   application (minimum macOS 11.0) would not have started before 14.4 once it linked
   `daw-ipc`: found tonight (`nm -m` on the Mac) and fixed (PATCHES.md, 2: looked up at run
@@ -349,7 +419,8 @@ trademarks in the product). The test plug-ins are never shipped.
    chain is the instrument's rig, like the audio device.
 3. **The latency and the failures on screen.** Show the chain's latency in the drawer when
    not zero, and a slot's crash/failure on its name screen (e.g. "CRASHED" blinking, then
-   the name)? Recommendation: yes to both.
+   the name)? Recommendation: yes to both. (Failures since R-FX-DRAWER and R-FX-SAFETY: small
+   print under the dimmed name, steady, nothing blinking.)
 4. **Move `ca72-fx` to plugin-kit** so the CA-74, MC-79 and the 808 standalones get it?
    Recommendation: yes, after FX-A is built and 0.3.0 ships, as the standalone host did.
 5. **macOS older than 14.4** (the app supports 11.0): the transport now starts there with

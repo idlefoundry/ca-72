@@ -13,6 +13,11 @@
 //!   the controller reads it back (`setComponentState`).
 //! - The hidden `crash` and `hang` parameters abort the process or stop it responding when
 //!   they change during processing, and are never saved.
+//! - Faults at load, as the CLAP plugin's (the CA-72's R-FX-SAFETY, its patch 4): the
+//!   processor classes `CRASH_AT_LOAD_CID` and `HANG_AT_LOAD_CID` (not listed by the factory)
+//!   abort or hang as they are made; a state holding the pair (`FAULT_ID`, 1, 2 or 3) aborts
+//!   or hangs while the processor loads it, or (3) is loaded and saved again with it, and
+//!   aborts at the first block after.
 //! - An editor (`createView("editor")`): a view of one colour embedded in the host's window
 //!   (`gui`).
 //!
@@ -68,7 +73,7 @@ mod gui;
 
 use std::ffi::{c_char, c_void};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComRef, ComWrapper, uid};
@@ -171,6 +176,33 @@ const STATE_MAGIC: &[u8; 8] = b"DAWTP\0\0\x01";
 /// The pair's ID for its sample's level (D234), a state beyond its parameters: present
 /// only when not 1.
 const SAMPLE_ID: u32 = 0xFFFF_FF01;
+/// The pair's ID for a fault the state injects (R-FX-SAFETY): 1 aborts while the processor
+/// loads the state, 2 hangs then, 3 is kept (and saved again) and aborts at the first block.
+pub const FAULT_ID: u32 = 0xFFFF_FF02;
+/// Processor classes that fault as they are made (not listed by the factory).
+pub const CRASH_AT_LOAD_CID: TUID = uid(0x44415733, 0x54657374, 0x4761696E, 0x43525348);
+pub const HANG_AT_LOAD_CID: TUID = uid(0x44415733, 0x54657374, 0x4761696E, 0x48414E47);
+
+/// Stops responding, for good (a fault injected).
+fn hang() -> ! {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
+}
+
+/// The fault a state injects (its `FAULT_ID` pair's value; 0 none).
+fn fault_of(bytes: &[u8]) -> u32 {
+    let Some(rest) = bytes.strip_prefix(STATE_MAGIC.as_slice()) else {
+        return 0;
+    };
+    rest.chunks_exact(12)
+        .find(|c| c[..4] == FAULT_ID.to_le_bytes())
+        .map_or(0, |c| {
+            let mut v = [0u8; 8];
+            v.copy_from_slice(&c[4..12]);
+            f64::from_le_bytes(v) as u32
+        })
+}
 
 struct ParamDef {
     id: u32,
@@ -428,8 +460,8 @@ fn load(bytes: &[u8]) -> Option<Vec<(usize, f64)>> {
         let id = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
         let mut v = [0u8; 8];
         v.copy_from_slice(&c[4..12]);
-        if id == SAMPLE_ID {
-            // Not a parameter: its sample (`sample_of`).
+        if id == SAMPLE_ID || id == FAULT_ID {
+            // Not a parameter: its sample (`sample_of`), or a fault (`fault_of`).
             continue;
         }
         let i = PARAMS.iter().position(|p| p.id == id && p.saved)?;
@@ -514,6 +546,8 @@ struct Processor {
     stand_ins: [AtomicU64; 4],
     /// The instrument's `Level`, normalized, as f64 bits (D222).
     level: AtomicU64,
+    /// A fault its state injected and keeps (`FAULT_ID`: 3, or 0 for none).
+    fault: AtomicU32,
     dsp: Mutex<Dsp>,
     active: AtomicBool,
     /// The instrument: notes in, no audio in.
@@ -539,6 +573,7 @@ impl Processor {
             sample_rate: AtomicU64::new(48_000f64.to_bits()),
             voices: Mutex::new(Vec::with_capacity(64)),
             level: AtomicU64::new(0.5f64.to_bits()),
+            fault: AtomicU32::new(0),
             sample: AtomicU64::new(1.0f64.to_bits()),
             report_gain: AtomicBool::new(false),
             quiet_sample: AtomicU64::new(u64::MAX),
@@ -807,6 +842,11 @@ impl IComponentTrait for Processor {
         let Some(pairs) = load(&bytes) else {
             return kResultFalse;
         };
+        match fault_of(&bytes) {
+            1 => std::process::abort(),
+            2 => hang(),
+            f => self.fault.store(f, Ordering::Relaxed),
+        }
         for (i, v) in pairs {
             self.values[i].store(v.to_bits(), Ordering::Relaxed);
         }
@@ -818,8 +858,14 @@ impl IComponentTrait for Processor {
     unsafe fn getState(&self, state: *mut IBStream) -> tresult {
         let pending = self.quiet_sample.load(Ordering::Relaxed);
         let sample = f64::from_bits(self.sample.load(Ordering::Relaxed));
+        let mut bytes = save_with_sample(&self.snapshot(), sample);
+        let fault = self.fault.load(Ordering::Relaxed);
+        if fault != 0 {
+            bytes.extend_from_slice(&FAULT_ID.to_le_bytes());
+            bytes.extend_from_slice(&f64::from(fault).to_le_bytes());
+        }
         // SAFETY: `state` is the host's stream for this call.
-        let result = unsafe { write_all(state, &save_with_sample(&self.snapshot(), sample)) };
+        let result = unsafe { write_all(state, &bytes) };
         if result == kResultOk
             && pending != u64::MAX
             && self.quiet_sample.load(Ordering::Relaxed) == pending
@@ -909,6 +955,9 @@ impl IAudioProcessorTrait for Processor {
         let Some(data) = (unsafe { data.as_ref() }) else {
             return kInvalidArgument;
         };
+        if self.fault.load(Ordering::Relaxed) == 3 {
+            std::process::abort();
+        }
         let n = data.numSamples.max(0) as usize;
         // Parameter changes take effect from their sample offset, as CLAP events do: the
         // block is cut at each change.
@@ -1087,7 +1136,7 @@ struct Controller {
     edits: Mutex<[f64; EDIT_PARAMS.len()]>,
     /// The instrument's spares' values (the last `Level`'s), normalized.
     spares: Mutex<Vec<f64>>,
-    suffix: std::sync::atomic::AtomicU32,
+    suffix: AtomicU32,
     /// The host's handler, for the stand-ins' edits and words.
     handler: Mutex<Option<vst3::ComPtr<IComponentHandler>>>,
 }
@@ -1920,6 +1969,12 @@ impl IPluginFactoryTrait for Factory {
         }
         // SAFETY: `cid` is non-null (checked above) and points at a 16-byte class ID.
         let cid = unsafe { *(cid as *const TUID) };
+        if cid == CRASH_AT_LOAD_CID {
+            std::process::abort();
+        }
+        if cid == HANG_AT_LOAD_CID {
+            hang();
+        }
         let instance = if cid == PROCESSOR_CID {
             ComWrapper::new(Processor::new(false)).to_com_ptr::<FUnknown>()
         } else if cid == SINE_CID {
