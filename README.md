@@ -144,7 +144,12 @@ window, its **ON** tab to bypass it, drag a name onto another slot to move it th
 right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while an effect plays. An
 effect that crashes is started again; after five crashes it is passed by and its slot says
 CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
-each effect's settings are saved in `effects.json` beside `session.json`.
+each effect's settings are saved in `effects.json` beside `session.json`. The standalone never
+waits for an effect: it opens and plays while they load. One that crashes or stops responding as
+it loads, or is passed by, stays off (CRASHED, NOT RESPONDING) at the next start until you click it
+to try again; if its saved settings crash it, its menu's **LOAD WITHOUT ITS SETTINGS** loads it
+fresh and keeps them. After a run that did not close properly, or with Shift (Option on macOS) held
+as it opens, or `--safe-start`, it starts with every effect OFF: click a slot to turn them back on.
 
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
 The development JACK launcher is kept separately (Building); direct ASIO and
