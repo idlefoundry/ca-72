@@ -4,7 +4,9 @@
 //! large` in the large lettering.
 //! `CA72_STANDALONE=1` shows the standalone keyboard's TYPING and PANIC controls.
 //! `CA72_ARP=1` drops the arpeggiator's drawer over the lower page (decisions.md R-ARP): ON and
-//! UP lit, a sixteenth, two octaves, GATE 60 %, SWING 25 %, the ARP key lit.
+//! UP lit, a sixteenth, two octaves, GATE 60 %, SWING 25 %, the ARP key lit; `CA72_ARP_HOLD=1`
+//! HOLD lit too, `CA72_ARP_DIRECTION=4` another DIRECTION (ORDER), `CA72_ARP_OCTAVES=5` other
+//! OCTAVES.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -183,13 +185,15 @@ fn drop_arp(
     let t = std::time::Instant::now();
     let mut drawer = ArpRenderer::new(scale, skin, lettering);
     let r2 = |s: &str| (s.to_owned(), true);
+    let var = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok());
+    let octaves = var("CA72_ARP_OCTAVES").unwrap_or(2).clamp(1, 5);
     drawer.render(
         &ArpScene {
             on: true,
-            latch: false,
-            direction: 0,
-            readouts: [r2("16"), r2("2"), r2("60"), r2("25")],
-            knobs: [9.0 / 12.0, 1.0 / 3.0, 0.6, 0.25],
+            latch: std::env::var("CA72_ARP_HOLD").is_ok_and(|v| v == "1"),
+            direction: var("CA72_ARP_DIRECTION").unwrap_or(0).min(4),
+            readouts: [r2("16"), r2(&octaves.to_string()), r2("60"), r2("25")],
+            knobs: [9.0 / 12.0, (octaves - 1) as f64 / 4.0, 0.6, 0.25],
             hover: None,
         },
         r,

@@ -1,9 +1,9 @@
 //! The arpeggiator's drawer (decisions.md R-ARP; the owner's C1, 2026-10-18): one row dropped
 //! down from under the rail, inside the window, over the top of whichever lower page shows (the
 //! strip's controls or the keyboard), put away again by the rail's ARP key. Left to right: the
-//! ARP bank (ON | LATCH), the DIRECTION bank (UP | DOWN | UP/DOWN | RANDOM), a rule, then RATE,
-//! OCTAVES, GATE and SWING, each a knob and its readout, the strip's own parts (its lit tabs,
-//! its knobs, its seven-segment readouts, its legends).
+//! ARP bank (ON | HOLD), the DIRECTION bank (UP | DOWN | UP/DOWN | RANDOM | ORDER), a rule, then
+//! RATE, OCTAVES, GATE and SWING, each a knob and its readout, the strip's own parts (its lit
+//! tabs, narrower than the strip's, its knobs, its seven-segment readouts, its legends).
 //!
 //! The drawer is a plate of its own: the strip's face (the worn skin's picture, laid from
 //! another place so its grain does not run on from the face under it; the drawn skin's black),
@@ -23,7 +23,7 @@ use super::worn::{
     AMBER, AMBER_LIGHT, Reading, TAB_PRINT, copy, edge_eased, meets, readout_patch, svg_over,
     union, within,
 };
-use super::{READOUT, RECESS_PAD, SECTIONS, TAB, TAB_PITCH, UNIT_READOUT};
+use super::{READOUT, RECESS_PAD, SECTIONS, UNIT_READOUT};
 use crate::art::{self, Lettering, PANEL_H, W};
 use crate::fonts::{FAMILY, Fonts};
 use crate::render::Renderer;
@@ -43,11 +43,15 @@ pub const RIGHT: f64 = W - 28.0;
 /// Its row's middle, and how far above it the legends and the banks' titles are.
 pub const ROW: f64 = TOP + 142.0;
 const LEGEND_UP: f64 = 109.0;
+/// The drawer's tabs, narrower than the strip's (`super::TAB`) so that DIRECTION's five fit
+/// (the owner's ORDER, 2026-10-19: the mock-up's 140 units), and their pitch.
+pub const TAB: (f64, f64) = (140.0, super::TAB.1);
+pub const TAB_PITCH: f64 = TAB.0 + 6.0;
 /// The rule between the banks and the knobs, across.
-const DIVIDER: f64 = 1440.0;
+const DIVIDER: f64 = 1512.0;
 /// The units' middles: RATE's, OCTAVES', GATE's and SWING's (each a knob `UNIT_KNOB` left of it
-/// and its readout `UNIT_READOUT` right of it, as the strip's).
-pub const UNITS: [f64; 4] = [1644.0, 2046.0, 2448.0, 2850.0];
+/// and its readout `UNIT_READOUT` right of it, as the strip's), closer together for ORDER.
+pub const UNITS: [f64; 4] = [1716.0, 2099.0, 2482.0, 2865.0];
 /// How far below its foot its shadow reaches.
 pub const SHADOW: f64 = 16.0;
 /// The knobs' parameters, in the units' order.
@@ -57,9 +61,9 @@ const LEGENDS: [&str; 4] = ["RATE", "OCTAVES", "GATE", "SWING"];
 /// The drawer's two banks of tabs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArpBank {
-    /// ON | LATCH: each a switch of its own.
+    /// ON | HOLD: each a switch of its own.
     Arp,
-    /// UP | DOWN | UP/DOWN | RANDOM: one of them.
+    /// UP | DOWN | UP/DOWN | RANDOM | ORDER: one of them.
     Direction,
 }
 
@@ -68,8 +72,8 @@ impl ArpBank {
 
     pub fn words(self) -> &'static [&'static str] {
         match self {
-            ArpBank::Arp => &["ON", "LATCH"],
-            ArpBank::Direction => &["UP", "DOWN", "UP/DOWN", "RANDOM"],
+            ArpBank::Arp => &["ON", "HOLD"],
+            ArpBank::Direction => &["UP", "DOWN", "UP/DOWN", "RANDOM", "ORDER"],
         }
     }
 
@@ -83,8 +87,8 @@ impl ArpBank {
     /// Its middle across.
     pub fn x(self) -> f64 {
         match self {
-            ArpBank::Arp => 565.0,
-            ArpBank::Direction => 1091.0,
+            ArpBank::Arp => 555.0,
+            ArpBank::Direction => 1114.0,
         }
     }
 
@@ -449,7 +453,7 @@ impl ArpRenderer {
         out
     }
 
-    /// The tabs lit: ON and LATCH while they are on, DIRECTION's choice.
+    /// The tabs lit: ON and HOLD while they are on, DIRECTION's choice.
     fn lit(scene: &ArpScene) -> Vec<(f64, f64)> {
         let mut lit = Vec::new();
         if scene.on {
@@ -458,7 +462,8 @@ impl ArpRenderer {
         if scene.latch {
             lit.push(ArpBank::Arp.tab(1));
         }
-        lit.push(ArpBank::Direction.tab(scene.direction.min(3)));
+        let last = ArpBank::Direction.words().len() - 1;
+        lit.push(ArpBank::Direction.tab(scene.direction.min(last)));
         lit
     }
 
@@ -818,7 +823,8 @@ fn print_svg(oy: f64, lettering: Lettering) -> String {
         art::draw_dial(&mut s, x, ROW - oy, dial);
         if k >= 2 {
             let (rx, ry, rw, rh) = readout(k);
-            text(&mut s, rx + rw + 26.0, ry + rh / 2.0, "%", small);
+            // (Close to its readout: SWING's, so moved up for ORDER, within the trim.)
+            text(&mut s, rx + rw + 18.0, ry + rh / 2.0, "%", small);
         }
     }
     s.0
@@ -851,6 +857,9 @@ mod tests {
         }
         assert!(UNITS[0] - half > DIVIDER);
         assert!(UNITS[3] + half < RIGHT);
+        // SWING's % (some 16 units wide) inside the trim.
+        let (rx, _, rw, _) = readout(3);
+        assert!(rx + rw + 18.0 + 10.0 < RIGHT);
         assert!(!inside(LEFT - 1.0, ROW) && !inside(RIGHT + 1.0, ROW));
         assert!(!inside(1000.0, TOP + DEPTH + 1.0) && !inside(1000.0, TOP - 1.0));
         // The row and its legends inside the drawer, under the rail's shadow.
@@ -878,7 +887,7 @@ mod tests {
             assert!(r.render(&scene, &mut panel));
             let steps: [&dyn Fn(&mut ArpScene); 6] = [
                 &|s| s.on = true,
-                &|s| s.direction = 2,
+                &|s| s.direction = 4,
                 &|s| s.hover = Some(ArpTarget::Tab(ArpBank::Arp, 1)),
                 &|s| s.readouts[0] = ("16t".into(), true),
                 &|s| s.knobs[2] = 0.8,

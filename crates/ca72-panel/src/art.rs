@@ -399,8 +399,9 @@ fn marks(dial: Dial) -> DialMarks {
             &["2", "3", "4", "5", "6", "7", "8", "9", "10"],
         ),
         // The arpeggiator's (decisions.md R-ARP): RATE's thirteen note values 25 degrees apart,
-        // the straight ones (every third) numbered by their note value; OCTAVES's four a third
-        // of its travel apart; GATE's and SWING's every 12.5 %, every other numbered.
+        // the straight ones (every third) numbered by their note value; OCTAVES's five a quarter
+        // of its travel apart (the owner, 2026-10-19: five "will make the spacing around the
+        // knob look better"); GATE's and SWING's every 12.5 %, every other numbered.
         Dial::ArpRate => numbered(
             &(0..13)
                 .map(|k| (-150.0 + 25.0 * f64::from(k), (k % 3 == 0).then_some(k / 3)))
@@ -408,10 +409,10 @@ fn marks(dial: Dial) -> DialMarks {
             &["2", "4", "8", "16", "32"],
         ),
         Dial::ArpOctaves => numbered(
-            &(0..4)
-                .map(|k| (-150.0 + 100.0 * f64::from(k), Some(k)))
+            &(0..5)
+                .map(|k| (-150.0 + 75.0 * f64::from(k), Some(k)))
                 .collect::<Vec<_>>(),
-            &["1", "2", "3", "4"],
+            &["1", "2", "3", "4", "5"],
         ),
         Dial::Detune | Dial::Percent => numbered(
             &(0..9)
