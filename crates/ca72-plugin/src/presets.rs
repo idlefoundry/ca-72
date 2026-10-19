@@ -204,7 +204,7 @@ pub const PLAYERS: &[&str] = &["midi_bend_range"];
 /// default (but [`PLAYERS`]'s). POLY, VOICES, ENTROPY and SPREAD are part of a preset like
 /// any other (decisions.md R12; R10 had left POLY and VOICES as they were when a preset did not
 /// name them).
-fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
+pub(crate) fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
     let value = |id: &str| {
         e.sound
             .values
@@ -369,6 +369,9 @@ impl Browser {
             self.drawer.favourites,
             self.drawer.mine,
         );
+        if let Ok(mut names) = p.midi_map.preset_list.lock() {
+            *names = Some(self.list.iter().map(|e| e.sound.name.clone()).collect());
+        }
         let mut chips: Vec<(String, bool)> = library::tags_of(&self.all)
             .into_iter()
             .map(|t| {

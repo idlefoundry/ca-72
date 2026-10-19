@@ -528,3 +528,84 @@ fn callback_task_queues_exhaust_without_spinning_allocating_or_dropping_heap_pay
     }
     adapter.deactivate();
 }
+
+#[test]
+fn preset_pads_work_in_the_production_adapter_without_callback_allocation() {
+    use ca72_plugin::learn::{Binding, Cc, index};
+    use std::time::{Duration, Instant};
+    let wrapped = Ca72::default();
+    let params = wrapped.parameters().clone();
+    params.midi_map.assign(
+        index("next_preset").unwrap(),
+        Binding::Note {
+            channel: 15,
+            note: 127,
+        },
+    );
+    params.midi_map.assign(
+        index("previous_preset").unwrap(),
+        Cc {
+            channel: 14,
+            cc: 119,
+        },
+    );
+    let entries = ca72_plugin::library::Library::shared().entries().0;
+    let (mut adapter, _session) = Processor::new(wrapped, &["pitch_wheel", "mod_wheel"]).unwrap();
+    adapter
+        .prepare(ProcessConfig {
+            sample_rate: 48_000.0,
+            max_buffer_frames: 128,
+        })
+        .unwrap();
+    let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+    let mut callback = |messages: &[[u8; 3]]| {
+        let midi: Vec<_> = messages
+            .iter()
+            .map(|&data| MidiEvent {
+                source: 1,
+                data,
+                len: 3,
+            })
+            .collect();
+        OPERATIONS.with(|n| n.set(0));
+        TRACK.with(|t| t.set(true));
+        adapter.process(AudioBlock {
+            left: &mut left,
+            right: &mut right,
+            input_left: &[],
+            input_right: &[],
+            midi: &midi,
+            panic: false,
+        });
+        TRACK.with(|t| t.set(false));
+        assert_eq!(
+            OPERATIONS.with(Cell::get),
+            0,
+            "a preset press or application allocated in the callback"
+        );
+    };
+    let current = || params.preset.read().unwrap().clone();
+    callback(&[[0x9f, 127, 100]]);
+    let start = Instant::now();
+    while current() != entries[0].sound.name {
+        callback(&[]);
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for message in [[0x9f, 127, 100], [0x9f, 127, 100], [0x8f, 127, 0]] {
+        callback(&[message]);
+        assert_eq!(current(), entries[0].sound.name);
+    }
+    callback(&[[0xbe, 119, 127]]);
+    let start = Instant::now();
+    while current() != entries.last().unwrap().sound.name {
+        callback(&[]);
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for value in [127, 100, 64, 63, 0] {
+        callback(&[[0xbe, 119, value]]);
+        assert_eq!(current(), entries.last().unwrap().sound.name);
+    }
+    adapter.deactivate();
+}
