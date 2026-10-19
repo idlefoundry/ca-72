@@ -744,8 +744,10 @@ impl<V: Play> Pool<V> {
 
     /// Plays the voices at `list` (places among the voices, in the order they are summed)
     /// for `n` samples: offered to the workers and taken by this thread too, or, once
-    /// `deadline` has passed, played here. Returns which list places played by `deadline`
-    /// (None: every one waited for, as long as it takes).
+    /// `deadline` has passed, played here; two at a time where `pairs` (their filters solved
+    /// together: HI, DOUBLE off) and there are more voices than threads. Returns which list
+    /// places played by `deadline` (None: every one waited for, as long as it takes).
+    #[allow(clippy::too_many_arguments)]
     pub fn play(
         &mut self,
         list: &[usize],
@@ -753,6 +755,7 @@ impl<V: Play> Pool<V> {
         ext: &[f64; CHUNK],
         rate: f64,
         mix: &Mix,
+        pairs: bool,
         deadline: Option<Instant>,
     ) -> [bool; MAX] {
         let count = list.len().min(MAX);
@@ -771,7 +774,10 @@ impl<V: Play> Pool<V> {
         }
         // More voices than threads to play them: two at a time, their filters solved together
         // at HI (decisions.md R-HI-PAIRS); else one at a time, as many threads at work as can be.
-        let two = count > self.threads.len() + 1;
+        // Not where they cannot pair (DOUBLE's voices, each already played with its twin; LO;
+        // ULTRA): a thread would play two one after the other while another had none, ten
+        // doubled voices in five lots of four voices' work (R-POLY-CRACKLE).
+        let two = pairs && count > self.threads.len() + 1;
         self.board.pair.store(two, Ordering::Relaxed);
         let run = self.offer(&list[..count], n, ext, rate, mix);
         // (No more workers woken than the voices, or pairs, less this thread's one: the others
@@ -1369,10 +1375,12 @@ mod tests {
             const { std::cell::Cell::new(None) };
     }
 
-    /// A voice that counts its runs and keeps where and how it played the last.
+    /// A voice that counts its runs (and those played as one of a pair) and keeps where and
+    /// how it played the last.
     #[derive(Default)]
     struct Fake {
         runs: usize,
+        paired: usize,
         n: usize,
         thread: Option<ThreadId>,
         flush: u32,
@@ -1406,6 +1414,13 @@ mod tests {
             if self.slow_on.is_some() && self.slow_on == self.thread {
                 std::thread::sleep(Duration::from_millis(2));
             }
+        }
+
+        fn play_pair(a: &mut Self, b: &mut Self, n: usize, ext: &[f64; CHUNK], rate: f64, m: &Mix) {
+            a.paired += 1;
+            b.paired += 1;
+            a.play(n, ext, rate, m);
+            b.play(n, ext, rate, m);
         }
     }
 
@@ -1451,6 +1466,31 @@ mod tests {
         }
     }
 
+    /// More voices than threads: taken two at a time where they pair (HI without DOUBLE,
+    /// decisions.md R-HI-PAIRS), else one at a time, so that no thread plays two voices that
+    /// cannot pair, one after the other, while another has none (R-POLY-CRACKLE: ten doubled
+    /// voices on four threads had five lots of four voices' work).
+    #[test]
+    fn voices_that_cannot_pair_are_taken_one_at_a_time() {
+        for pairs in [false, true] {
+            let voices = fakes(6);
+            let mut pool = Pool::start(1, &voices, None).unwrap();
+            for _ in 0..20 {
+                let played =
+                    pool.play(&[0, 1, 2, 3, 4, 5], 32, &EXT, 48_000.0, &mix(), pairs, None);
+                assert!(played[..6].iter().all(|&p| p), "{played:?}");
+            }
+            let paired: usize = voices.iter().map(|v| v.lock().unwrap().paired).sum();
+            let runs: usize = voices.iter().map(|v| v.lock().unwrap().runs).sum();
+            assert_eq!(runs, 120);
+            if pairs {
+                assert_eq!(paired, runs, "voices that pair, played alone");
+            } else {
+                assert_eq!(paired, 0, "voices that cannot pair, taken two at a time");
+            }
+        }
+    }
+
     /// A worker held up between taking a voice and locking it, which locks it only after
     /// the run is over (the voice listed again meanwhile), leaves it alone: it neither plays
     /// it with the old run's samples and settings nor marks it.
@@ -1472,7 +1512,7 @@ mod tests {
         assert_eq!(voices[0].lock().unwrap().runs, 0, "played for a run over");
         assert_ne!(pool.board.done[0].load(Ordering::Acquire), u64::from(run));
         // The next run plays it as usual.
-        let played = pool.play(&[0, 1], 32, &EXT, 48_000.0, &mix(), None);
+        let played = pool.play(&[0, 1], 32, &EXT, 48_000.0, &mix(), true, None);
         assert_eq!(&played[..2], &[true, true]);
         let v = voices[0].lock().unwrap();
         assert_eq!((v.runs, v.n), (1, 32));
@@ -1506,7 +1546,7 @@ mod tests {
         // finishes it while this thread plays voice 2.
         let t = Instant::now();
         let deadline = Some(t + Duration::from_millis(500));
-        let played = pool.play(&[1, 2], 32, &EXT, 48_000.0, &mix(), deadline);
+        let played = pool.play(&[1, 2], 32, &EXT, 48_000.0, &mix(), true, deadline);
         assert_eq!(&played[..2], &[true, true]);
         assert!(
             t.elapsed() < Duration::from_millis(400),
@@ -1527,7 +1567,7 @@ mod tests {
         let mut pool = Pool::start(2, &voices, None).unwrap();
         let past = Instant::now();
         std::thread::sleep(Duration::from_millis(1));
-        let played = pool.play(&[0, 1, 2, 3], 64, &EXT, 48_000.0, &mix(), Some(past));
+        let played = pool.play(&[0, 1, 2, 3], 64, &EXT, 48_000.0, &mix(), true, Some(past));
         assert_eq!(&played[..4], &[true; 4]);
         let me = std::thread::current().id();
         for v in &voices {
@@ -1550,7 +1590,7 @@ mod tests {
             ca72_rt::set_flush_mode(mode);
             let mut elsewhere = 0;
             for _ in 0..50 {
-                let played = pool.play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), None);
+                let played = pool.play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), true, None);
                 assert_eq!(&played[..3], &[true; 3]);
                 for v in &voices {
                     let v = v.lock().unwrap();
@@ -1579,7 +1619,7 @@ mod tests {
         let mut c = Pool::start_from(&THREE, spec(2, &voices, period)).unwrap();
         assert_eq!((a.workers(), b.workers(), c.workers()), (2, 1, 0));
         assert_eq!(THREE.held(), 3);
-        let played = c.play(&[0, 1], 16, &EXT, 48_000.0, &mix(), None);
+        let played = c.play(&[0, 1], 16, &EXT, 48_000.0, &mix(), true, None);
         assert_eq!(&played[..2], &[true, true]);
         let ordinary = Pool::start_from(&THREE, spec(4, &voices, None)).unwrap();
         assert_eq!(ordinary.workers(), 4);
@@ -1633,10 +1673,10 @@ mod tests {
         assert_eq!(THREE.held(), 2);
         assert!(!crew.follow(POLY, plan, &mut pool, &mut ask));
         assert_eq!(pool.as_ref().map(Pool::workers), Some(2));
-        let played = pool
-            .as_mut()
-            .unwrap()
-            .play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), None);
+        let played =
+            pool.as_mut()
+                .unwrap()
+                .play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), true, None);
         assert_eq!(&played[..3], &[true; 3]);
         assert!(crew.follow(None, plan, &mut pool, &mut ask), "not let go");
         assert!(pool.is_none());

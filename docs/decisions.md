@@ -8079,3 +8079,75 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-POLY-CRACKLE. Crackles in POLY at HI: voices short of time; DOUBLE's voices taken one at a time
+
+**The report, 2026-10-19** (by email to the owner, from a sound-design teacher; an Intel
+MacBook Pro of 2018, 0.2.6, QUALITY at HI): "a lot of crackles with HI", the same in the
+standalone, the VST3 in Live and the CLAP in REAPER; "It doesn't seem to change CPU usage. Mono
+ok, polyphony crackles. BUT if I change the stereo settings with scatter at 0% width ... no
+crackles!", in Brass Choir and Horn Bloom. Issue #60 ("distortion between notes in Windows
+polyphonic patches") may be the same.
+
+**Agent findings, 2026-10-19** (placeholder id; not yet reviewed by the owner):
+- **What the cure changed.** SCATTER is DOUBLE's off (`doubled`): both presets play DOUBLE, on 8
+  and 10 voices, so 16 and 20 voices at HI. SCATTER halved the work; WIDTH changes neither the
+  work nor the samples' continuity.
+- **No fault in the sound itself.** Offline (no deadline), at HI, Brass Choir, Horn Bloom and a
+  POLY sawtooth, each as set, at WIDTH 0, with DOUBLE off and with both, at 44.1 and 48 kHz,
+  playing overlapping chords, a legato line over them and twelve notes on 8 or 10 voices
+  (voices taken while held; `tests/crackle.rs`, `offline`): every render the same to the bit in
+  blocks of 64, 128, 256, 512 and 1024 frames, with 0, 3, 5 and 9 workers; no voice went
+  non-finite; the loudest peak -6.8 dBFS. Where WIDTH is up its high-band bursts are low notes'
+  sawtooth edges (one each period of the notes), more with SCATTER than with DOUBLE. A voice's
+  gains glide to its place, which is the voice's own whatever note it takes:
+  `a_voice_taken_for_a_new_note_keeps_its_place` now holds, at LO and at HI, that a voice taken
+  free, let go or held, and its twin, are at their places to the bit at every run's end.
+- **The cause: time.** `preset_cost` (each preset as set, one thread, a Ryzen 7 7800X3D): Brass
+  Choir 234 % of a core, Horn Bloom 246 %; with DOUBLE off 128 and 149 %. A 2018 MacBook Pro's
+  core is about half as fast for one thread, slower with all of them busy, and it has 4 (13-inch)
+  or 6 (15-inch) cores: the doubled presets ask about as much as the whole computer, within three
+  quarters of each block. A voice a worker has not finished by then is silent for that run (R11,
+  R18): a gap of 128 samples or more in it, a click, while the plug-in returns in time, so the
+  host's meter shows no overload. The README says so; nothing on the panel does.
+- **Reproduced here** (`tests/crackle.rs`, `paced`: 256 frames at 48 kHz, each block at its time
+  with the plug-in's deadline, ordinary threads; fewer workers than this machine's 9 standing for
+  a slower computer): with 3 workers, voices' runs not heard in Horn Bloom as set 1,494, at
+  WIDTH 0 1,964, with SCATTER 0, with SCATTER at WIDTH 0 2; Brass Choir 42, 24, 0, 0. With 5
+  (a 13-inch 2018 MacBook Pro's: 8 hardware threads, R-THREADS's macOS rule) Horn Bloom 12 to 18,
+  with SCATTER 0. With this machine's 9, none.
+- **A fault found there.** With more voices than threads the pool hands them out two at a time
+  (R-HI-PAIRS), but DOUBLE's voices cannot pair: each already plays with its twin, so
+  `Playing::play_pair` plays the two one after the other (as at LO and ULTRA). Ten doubled voices
+  went to the threads in five lots of four voices' work: on four threads one played two lots,
+  eight voices, where one at a time the most is six.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- **`Pool::play` takes `pairs`**, and takes voices two at a time only where they pair: the engine
+  passes HI without DOUBLE (not LO, ULTRA or DOUBLE). Each voice is still played whole by one
+  thread and summed in order, so the samples do not change.
+- **Evidence:** `voices_that_cannot_pair_are_taken_one_at_a_time` (the pool's stand-in voices:
+  none taken in pairs where they cannot pair; every one where they can) fails with the rule as it
+  was. `preset_render`, every factory preset, ten voices, with 3 and 5 workers, with DOUBLE at
+  50 % and without, the same to the bit as on one thread; `tests/crackle.rs`, `offline`, the same
+  to the bit with 3, 5 and 9 workers. Paced, the builds before and after alternated (the same
+  phrase, voices' runs not heard): 3 workers, Horn Bloom 1,544 and 1,484 before, 111 and 38
+  after, its mean block 77 % of the period before, 64 to 66 % after; Brass Choir 50 and 18, 19
+  and 16. 5 workers: Brass Choir 30 and 38, 2 and 2; Horn Bloom 4 and 14, 2 and 0.
+- **What it does not do.** A computer with too little time for twenty voices at HI still drops
+  some: fewer, not none. Then LO, fewer VOICES, or SCATTER instead of DOUBLE.
+
+**Also measured, for the owner:**
+- **LO costs more than R-LO-DEFAULT says.** `preset_cost` at LO: 18 to 21 % of a core for ten
+  voices (R-LO-DEFAULT, from R47: 2.1 to 3.8 %; R71's filter at 8x since), Brass Choir and Horn
+  Bloom as set 29 and 37 %, all on the host's thread: LO never shares its voices with the workers
+  (R-POTATO, when a light voice cost less than waking a worker). Shared with 3 workers in a trial
+  (not kept), the host's thread took 8 to 14 % and 15 to 23 %. Recommended: let LO share its voices
+  once a paced measurement on the Mac and Windows confirms it, and correct the README's "about a
+  fortieth" of HI (now about a seventh).
+- **A sign of voices dropped.** The OVERLOAD lamp shows only the output's level; a lamp or note
+  when voices are not heard would tell a player why it crackles. For the owner to decide.
+
+**Not done:** an Intel Mac, macOS's scheduling of time-constraint workers, Windows, or a host.
+To ask the reporter: whether DOUBLE at WIDTH 0 crackles (expected: yes) and LO does not; which
+MacBook Pro and buffer size.
