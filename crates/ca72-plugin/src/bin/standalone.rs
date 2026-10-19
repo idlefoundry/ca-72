@@ -13,6 +13,8 @@ fn main() {
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--no-devices" => device_access = false,
+            // AI agents allowed for this session, whatever the settings say (docs/mcp.md).
+            "--agents" => ca72_plugin::agent::force(true),
             "--state-dir" => match arguments.next().filter(|path| !path.starts_with("--")) {
                 Some(path) => state_dir = Some(std::path::PathBuf::from(path)),
                 None => {
@@ -30,7 +32,7 @@ fn main() {
             },
             "--help" | "-h" => {
                 println!(
-                    "CA-72 standalone\n\nAudio and MIDI settings are in the editor's settings menu.\n--no-devices     Open the editor without accessing audio or MIDI hardware\n--state-dir DIR  Keep this session in a separate directory\n\nEffects (the FX key's drawer; these for testing):\n--fx-console     Drive the effects chain with commands on standard input (help lists them)\n--fx-mode MODE   sync (no added latency, the default) or pipelined (one block late)\nCA72_FX_PATH     Folders searched for effects before the standard CLAP and VST3 folders\nCA72_FX_STANDARD_FOLDERS=0  Search only CA72_FX_PATH"
+                    "CA-72 standalone\n\nAudio and MIDI settings are in the editor's settings menu.\n--no-devices     Open the editor without accessing audio or MIDI hardware\n--state-dir DIR  Keep this session in a separate directory\n--agents         Allow AI agents (MCP, through ca72-mcp) for this session\n\nEffects (the FX key's drawer; these for testing):\n--fx-console     Drive the effects chain with commands on standard input (help lists them)\n--fx-mode MODE   sync (no added latency, the default) or pipelined (one block late)\nCA72_FX_PATH     Folders searched for effects before the standard CLAP and VST3 folders\nCA72_FX_STANDARD_FOLDERS=0  Search only CA72_FX_PATH"
                 );
                 return;
             }
