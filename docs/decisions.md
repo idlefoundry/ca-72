@@ -7477,3 +7477,38 @@ Do not treat approval to include the correction as evidence that these checks pa
 
 **Owner's acceptance, 2026-10-18.** Told these checks remained, the owner did them by hand:
 "i did hands on checks. we're good".
+
+## R-FX-HOST. Effects in the standalone, hosted out of process with DAW-v3's sandbox (issue 82)
+
+**Owner decisions, 2026-10-18** (relayed by the coordinating agent): the standalone
+application only, for 0.3.0, never the DAW plug-ins; effects only, not instruments; VST3 and
+CLAP both ("the code we can reuse hosts both"), AU later; a chain of four with add, remove,
+reorder and bypass, each effect in its own editor window, the chain and each effect's state
+saved with the standalone's session. The view: "FX-A", an FX key on the walnut rail after
+ARP dropping a one-row drawer of four name screens with ON tabs (docs/fx-host.md); not
+built yet, to share the arpeggiator's drawer.
+
+**Agent decisions, 2026-10-18 (for the owner's review; docs/fx-host.md has the reasons and
+nine questions):**
+- DAW-v3's `daw-ipc`, `daw-helper` and test plug-ins vendored in `third_party/daw-v3`
+  (two patches: a run loop for VST3 editors on Linux; macOS's wait functions looked up
+  at run time); its `daw-sandbox` adapted into
+  `crates/ca72-fx`; the plug-ins loaded only in `ca72-fx-helper`, one process per effect.
+- Synchronous by default (no latency added), each effect's block waited for until 0.9 of the
+  period, then dry; pipelined as an option (`--fx-mode`).
+- A crash, a hang (2 s) or a kill: the effect dry meanwhile, its helper started again, the
+  effect restored from its last snapshot; given up on after 5 restarts.
+- The chain saved in `effects.json` beside `session.json`, not inside it (size, and the
+  plug-ins' state and presets kept free of it); a missing plug-in kept with its state.
+- The scan's listings cached in `effects-cache.json`, by file size and time.
+- Until the drawer exists, `--fx-console` drives the chain from standard input.
+- Notices: the helper's crates and Steinberg's MIT notice for the VST 3 interfaces.
+
+**Evidence (Linux, 2026-10-18):** `crates/ca72-fx-helper/tests/chain.rs` with the test
+plug-ins in both formats (exact output, bypass identical to the bit, latency, order, save
+and restore, a sample-rate change, crash, hang and kill in real time); the standalone with
+the default device; Dragonfly Reverb 3.2.10's eight effects loaded, played and restored, their
+editors drawn (the VST3 ones' knobs at zero, unsolved). The chain's tests pass on the Mac and on Windows too
+(the standalone not built there). A macOS blocker found and fixed: the transport linked
+`os_sync_wait_on_address` (macOS 14.4) into the application (minimum 11); now looked up at
+run time (third_party/daw-v3/PATCHES.md).
