@@ -2179,9 +2179,12 @@ impl Engine {
         let deadline = self.deadline;
         // (At QUALITY's LO a voice costs less than waking a worker for it: every voice here.)
         let share = share && !self.controls.potato;
+        // (Two voices' filters solved together only at HI without DOUBLE: decisions.md
+        // R-HI-PAIRS, R-POLY-CRACKLE.)
+        let pairs = !self.controls.ultra && !self.controls.potato && mix.double <= 0.0;
         let played = match &mut self.pool {
             Some(pool) if share && count > 1 && n >= SHARED_RUN => {
-                pool.play(&list[..count], n, ext, rate, mix, deadline)
+                pool.play(&list[..count], n, ext, rate, mix, pairs, deadline)
             }
             _ => {
                 // (Two at a time, their filters solved together at HI: decisions.md
@@ -3621,6 +3624,7 @@ mod tests {
             &[0.0; CHUNK],
             48_000.0,
             &mix,
+            true,
             Some(Instant::now() + Duration::from_secs(1)),
         );
         assert!(!stall.is_finished(), "waited for the held voice");
@@ -4562,6 +4566,63 @@ mod tests {
                 .zip(&shared)
                 .all(|(a, b)| a.to_bits() == b.to_bits())
         );
+    }
+
+    /// A voice taken for a new note, free, let go or still held (stolen), keeps its place, and
+    /// its twin its own: with WIDTH and DOUBLE unmoved, their gains at every run's end are their
+    /// places' to the bit, never a step (the crackles reported in POLY at HI, 2026-10-19,
+    /// cured by SCATTER at WIDTH 0: R-POLY-CRACKLE). At LO and at HI (its voices in pairs).
+    #[test]
+    fn a_voice_taken_for_a_new_note_keeps_its_place() {
+        for potato in [true, false] {
+            let c = Controls {
+                poly: true,
+                voices: 3,
+                double: 0.12,
+                spread: 1.0,
+                inner: 0.3,
+                potato,
+                ..Controls::default()
+            };
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            let (mut l, mut r) = ([0.0f32; 64], [0.0f32; 64]);
+            // (Eight keys on three voices, each pressed before the one four before it is let
+            // go: from the fourth on, a key takes a voice still held.)
+            let keys = [48u8, 52, 55, 59, 62, 64, 60, 57];
+            for (i, &key) in keys.iter().enumerate() {
+                e.event(Event::Note { key, on: true });
+                if i >= 4 {
+                    e.event(Event::Note {
+                        key: keys[i - 4],
+                        on: false,
+                    });
+                }
+                for _ in 0..6 {
+                    e.render(&[], &mut l, &mut r);
+                    e.end_block(64);
+                    let m = e.mix();
+                    for (k, s) in e.slots.iter().enumerate() {
+                        let p = s.play.lock().unwrap();
+                        let at = p.places(&m);
+                        assert!(
+                            p.pan.is_none_or(|g| g == at.voice),
+                            "LO {potato}, key {i}, voice {k}: {:?} for {:?}",
+                            p.pan,
+                            at.voice
+                        );
+                        assert!(
+                            p.twin.pan.is_none_or(|g| g == at.twin),
+                            "LO {potato}, key {i}, twin {k}: {:?} for {:?}",
+                            p.twin.pan,
+                            at.twin
+                        );
+                    }
+                }
+            }
+            assert!(l.iter().any(|x| x.abs() > 1e-4), "silence checked");
+        }
     }
 
     /// DOUBLE turned off lets the note go, and the twin plays its tail out on its side (INNER at

@@ -338,7 +338,7 @@ fn split_ultra_voices_in_real_time() {
                     }
                 }
             }
-            let played = pool.play(&list, end - at, &ext, RATE, &m, deadline);
+            let played = pool.play(&list, end - at, &ext, RATE, &m, false, deadline);
             for (k, v) in vs.iter().enumerate() {
                 if !played[k] {
                     silent += 1;
