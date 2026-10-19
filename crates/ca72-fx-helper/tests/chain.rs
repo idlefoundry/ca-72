@@ -523,7 +523,11 @@ fn third_party_effects_load_play_and_keep_their_state() {
             match c.open_editor(0) {
                 Ok(v) => {
                     eprintln!("{what}: editor {v}");
-                    std::thread::sleep(Duration::from_secs(1));
+                    let hold = std::env::var("CA72_FX_GUI_HOLD_MS")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1000);
+                    std::thread::sleep(Duration::from_millis(hold));
                     let _ = c.close_editor(0);
                 }
                 Err(e) => eprintln!("{what}: NO EDITOR: {e}"),

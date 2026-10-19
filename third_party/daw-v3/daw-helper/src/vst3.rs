@@ -565,13 +565,181 @@ impl IEventListTrait for Events {
 }
 
 /// What the host gives a plugin's view (`IPlugFrame`): its resize requests, applied on the
-/// main thread.
+/// main thread; on Linux also the host's run loop (`IRunLoop`), which most plug-ins' editors
+/// there need (their file descriptors and timers, served on the main thread).
 struct Frame {
     resize: Mutex<Option<(u32, u32)>>,
+    #[cfg(all(unix, not(target_os = "macos")))]
+    run_loop: run_loop::RunLoop,
 }
 
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 impl Class for Frame {
     type Interfaces = (IPlugFrame,);
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+impl Class for Frame {
+    type Interfaces = (IPlugFrame, Linux::IRunLoop);
+}
+
+/// The host's run loop on Linux (CA-72 patch, third_party/daw-v3/PATCHES.md): the editor's
+/// file descriptors, polled without waiting, and its timers, both served from
+/// `gui_service` on the helper's main thread, every 10 ms. A handler is called with no lock
+/// held: it may register or unregister handlers as it runs.
+#[cfg(all(unix, not(target_os = "macos")))]
+mod run_loop {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    use vst3::ComPtr;
+    use vst3::Steinberg::Linux::*;
+    use vst3::Steinberg::*;
+
+    #[derive(Default)]
+    pub(super) struct RunLoop {
+        fds: Mutex<Vec<(ComPtr<IEventHandler>, FileDescriptor)>>,
+        timers: Mutex<Vec<(ComPtr<ITimerHandler>, Duration, Instant)>>,
+    }
+
+    fn same<T: vst3::Interface>(a: &ComPtr<T>, b: *mut T) -> bool {
+        a.as_ptr() == b
+    }
+
+    impl RunLoop {
+        /// Serves the descriptors that are ready and the timers that are due.
+        pub(super) fn service(&self) {
+            let fds: Vec<_> = self.fds.lock().map(|f| f.clone()).unwrap_or_default();
+            if !fds.is_empty() {
+                let mut polled: Vec<libc::pollfd> = fds
+                    .iter()
+                    .map(|(_, fd)| libc::pollfd {
+                        fd: *fd,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    })
+                    .collect();
+                #[allow(unsafe_code)]
+                // SAFETY: `polled` is a live array of its length; a zero timeout never waits.
+                let n = unsafe { libc::poll(polled.as_mut_ptr(), polled.len() as libc::nfds_t, 0) };
+                if n > 0 {
+                    for ((h, fd), p) in fds.iter().zip(&polled) {
+                        if p.revents != 0 {
+                            #[allow(unsafe_code)]
+                            // SAFETY: the handler is alive (we hold a reference); the main thread.
+                            unsafe {
+                                h.onFDIsSet(*fd)
+                            };
+                        }
+                    }
+                }
+            }
+            let now = Instant::now();
+            let due: Vec<ComPtr<ITimerHandler>> = match self.timers.lock() {
+                Ok(mut t) => t
+                    .iter_mut()
+                    .filter(|(_, _, next)| *next <= now)
+                    .map(|(h, every, next)| {
+                        *next = now + *every;
+                        h.clone()
+                    })
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+            for h in due {
+                #[allow(unsafe_code)]
+                // SAFETY: as above.
+                unsafe {
+                    h.onTimer()
+                };
+            }
+        }
+
+        /// Drops every handler (the editor closed).
+        pub(super) fn clear(&self) {
+            let fds = self.fds.lock().map(|mut f| std::mem::take(&mut *f));
+            let timers = self.timers.lock().map(|mut t| std::mem::take(&mut *t));
+            drop((fds, timers));
+        }
+    }
+
+    #[allow(unsafe_code)]
+    impl IRunLoopTrait for super::Frame {
+        unsafe fn registerEventHandler(
+            &self,
+            handler: *mut IEventHandler,
+            fd: FileDescriptor,
+        ) -> tresult {
+            // SAFETY: the plugin passes a live handler, or null; we take a reference.
+            let Some(h) = (unsafe { vst3::ComRef::from_raw(handler) }).map(|r| r.to_com_ptr())
+            else {
+                return kInvalidArgument;
+            };
+            if let Ok(mut f) = self.run_loop.fds.lock() {
+                f.push((h, fd));
+            }
+            kResultOk
+        }
+
+        unsafe fn unregisterEventHandler(&self, handler: *mut IEventHandler) -> tresult {
+            let gone = self
+                .run_loop
+                .fds
+                .lock()
+                .map(|mut f| {
+                    let mut gone = Vec::new();
+                    f.retain(|(h, fd)| {
+                        let keep = !same(h, handler);
+                        if !keep {
+                            gone.push((h.clone(), *fd));
+                        }
+                        keep
+                    });
+                    gone
+                })
+                .unwrap_or_default();
+            // Released with no lock held.
+            drop(gone);
+            kResultOk
+        }
+
+        unsafe fn registerTimer(
+            &self,
+            handler: *mut ITimerHandler,
+            milliseconds: TimerInterval,
+        ) -> tresult {
+            // SAFETY: as for `registerEventHandler`.
+            let Some(h) = (unsafe { vst3::ComRef::from_raw(handler) }).map(|r| r.to_com_ptr())
+            else {
+                return kInvalidArgument;
+            };
+            let every = Duration::from_millis(milliseconds.max(1));
+            if let Ok(mut t) = self.run_loop.timers.lock() {
+                t.push((h, every, Instant::now() + every));
+            }
+            kResultOk
+        }
+
+        unsafe fn unregisterTimer(&self, handler: *mut ITimerHandler) -> tresult {
+            let gone = self
+                .run_loop
+                .timers
+                .lock()
+                .map(|mut t| {
+                    let mut gone = Vec::new();
+                    t.retain(|(h, _, _)| {
+                        let keep = !same(h, handler);
+                        if !keep {
+                            gone.push(h.clone());
+                        }
+                        keep
+                    });
+                    gone
+                })
+                .unwrap_or_default();
+            drop(gone);
+            kResultOk
+        }
+    }
 }
 
 impl IPlugFrameTrait for Frame {
@@ -1895,6 +2063,8 @@ impl Instance {
         let mut win = Window::create(title, w, h, at, resizable)?;
         let frame = ComWrapper::new(Frame {
             resize: Mutex::new(None),
+            #[cfg(all(unix, not(target_os = "macos")))]
+            run_loop: run_loop::RunLoop::default(),
         });
         if let Some(f) = frame.as_com_ref::<IPlugFrame>() {
             // SAFETY: handing the view our frame, which outlives it (the editor holds both).
@@ -1975,6 +2145,8 @@ impl Instance {
                 e.view.removed();
                 e.view.setFrame(std::ptr::null_mut());
             }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            e.frame.run_loop.clear();
             drop(e);
         }
     }
@@ -1985,6 +2157,8 @@ impl Instance {
         let Some(e) = &mut self.editor else {
             return false;
         };
+        #[cfg(all(unix, not(target_os = "macos")))]
+        e.frame.run_loop.service();
         if let Some((w, h)) = e.frame.resize.lock().ok().and_then(|mut r| r.take()) {
             e.window.set_size(w, h);
             let mut r = ViewRect {
