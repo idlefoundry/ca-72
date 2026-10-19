@@ -274,9 +274,188 @@ fn table(path: &Path) -> Result<Option<toml::Table>, String> {
     }
 }
 
+/// Claim this version for one visible editor across formats, hosts and processes. The
+/// last version shown is a high-water mark: a downgrade never erases it. A failed read or
+/// write shows nothing automatically; Settings can still open the bundled highlights.
+pub(crate) fn claim_release_notes(
+    path: &Path,
+    installed: &str,
+) -> Result<Option<crate::whats_new::Notes>, String> {
+    let _lock = lock(path)?;
+    let mut t = table(path)?.unwrap_or_default();
+    let previous = t.get("last_version_shown").and_then(toml::Value::as_str);
+    let Some(notes) = crate::whats_new::assemble(previous, installed) else {
+        return Ok(None);
+    };
+    t.insert("format".into(), 1.into());
+    t.insert("last_version_shown".into(), installed.into());
+    write(path, &t)?;
+    Ok(Some(notes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_notes_history_survives_restarts_settings_edits_and_downgrades() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        let first = claim_release_notes(&path, "0.2.3")
+            .expect("claimed")
+            .expect("first install");
+        assert!(first.previous.is_none());
+        assert_eq!(first.versions, ["0.2.3"]);
+        assert!(
+            claim_release_notes(&path, "0.2.3")
+                .expect("restart")
+                .is_none()
+        );
+        Settings::keep(&path, Change::Skin(Skin::Drawn)).expect("other editor's setting");
+        let notes = claim_release_notes(&path, "0.2.7")
+            .expect("claim")
+            .expect("skipped update");
+        assert_eq!(notes.previous.as_deref(), Some("0.2.3"));
+        assert_eq!(notes.versions, ["0.2.4", "0.2.5", "0.2.6", "0.2.7"]);
+        assert_eq!(Settings::read(&path).skin, Skin::Drawn);
+        let saved = std::fs::read(&path).expect("saved settings");
+        for version in ["0.2.7", "0.2.5", "0.2.7+other-build"] {
+            assert!(
+                claim_release_notes(&path, version)
+                    .expect("same or older")
+                    .is_none()
+            );
+            assert_eq!(std::fs::read(&path).expect("settings"), saved);
+        }
+        Settings::keep(&path, Change::Lettering(Lettering::Large)).expect("other setting");
+        assert_eq!(
+            table(&path).expect("table").expect("settings")["last_version_shown"].as_str(),
+            Some("0.2.7")
+        );
+    }
+
+    #[test]
+    fn unsafe_release_history_falls_back_and_unreadable_settings_are_left_alone() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("settings.toml");
+        for history in ["'unknown'", "'0.2'", "75", "false"] {
+            std::fs::write(
+                &path,
+                format!("last_version_shown = {history}\nother_app = 5\n"),
+            )
+            .expect("settings");
+            let notes = claim_release_notes(&path, "0.2.7")
+                .expect("claim")
+                .expect("highlights");
+            assert!(notes.previous.is_none());
+            assert_eq!(notes.versions, ["0.2.7"]);
+            assert_eq!(
+                table(&path).expect("table").expect("settings")["other_app"].as_integer(),
+                Some(5)
+            );
+        }
+        std::fs::write(&path, "not [ toml").expect("bad file");
+        assert!(claim_release_notes(&path, "0.2.7").is_err());
+        assert_eq!(std::fs::read_to_string(&path).expect("file"), "not [ toml");
+        let blocked = dir.path().join("is-a-directory.toml");
+        std::fs::create_dir(&blocked).expect("unwritable settings path");
+        assert!(claim_release_notes(&blocked, "0.2.7").is_err());
+    }
+
+    #[test]
+    fn only_one_concurrent_editor_claims_each_release() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("settings.toml");
+        for version in ["0.2.6", "0.2.7"] {
+            let barrier = std::sync::Barrier::new(12);
+            let shown = std::thread::scope(|scope| {
+                let claims: Vec<_> = (0..12)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            barrier.wait();
+                            claim_release_notes(&path, version)
+                                .expect("claim")
+                                .is_some()
+                        })
+                    })
+                    .collect();
+                claims
+                    .into_iter()
+                    .map(|claim| claim.join().expect("editor"))
+                    .filter(|shown| *shown)
+                    .count()
+            });
+            assert_eq!(shown, 1);
+        }
+    }
+
+    /// A separate host/format's claim, driven by the parent test with its own settings.
+    #[test]
+    #[ignore = "a child process of the concurrency test"]
+    fn claim_release_notes_in_another_process() {
+        let folder = std::env::var_os("CA72_NOTES_TEST_DIR").expect("test folder");
+        let folder = Path::new(&folder);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !folder.join("start").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "parent never started the claims"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        if claim_release_notes(&folder.join("settings.toml"), "0.2.7")
+            .expect("claim")
+            .is_some()
+        {
+            let id = std::env::var("CA72_NOTES_TEST_ID").expect("process id");
+            std::fs::write(folder.join(format!("shown-{id}")), "shown").expect("evidence");
+        }
+    }
+
+    #[test]
+    fn independent_host_processes_share_one_atomic_claim() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let children: Vec<_> = (0..8)
+            .map(|i| {
+                std::process::Command::new(std::env::current_exe().expect("test executable"))
+                    .args([
+                        "--exact",
+                        "settings::tests::claim_release_notes_in_another_process",
+                        "--ignored",
+                        "--nocapture",
+                    ])
+                    .env("CA72_NOTES_TEST_DIR", dir.path())
+                    .env("CA72_NOTES_TEST_ID", i.to_string())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("host process")
+            })
+            .collect();
+        std::fs::write(dir.path().join("start"), "start").expect("start claims");
+        for child in children {
+            let output = child.wait_with_output().expect("host finished");
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert_eq!(
+            std::fs::read_dir(dir.path())
+                .expect("files")
+                .filter_map(Result::ok)
+                .filter(|file| file.file_name().to_string_lossy().starts_with("shown-"))
+                .count(),
+            1
+        );
+        assert!(
+            claim_release_notes(&dir.path().join("settings.toml"), "0.2.7")
+                .expect("later restart")
+                .is_none()
+        );
+    }
 
     #[test]
     fn keyboard_preferences_roundtrip_without_rewriting_other_settings() {

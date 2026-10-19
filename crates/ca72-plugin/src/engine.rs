@@ -16,7 +16,7 @@
 //! melody goes round the voices. ENTROPY makes each voice its own parts, SPREAD puts the voices
 //! across the stereo field where the placement has them (`character.rs`); the one instrument
 //! (without DOUBLE) at the next of VOICES's places at each attack, a note played legato staying
-//! where its phrase began (decisions.md R62); both 0 by default, the circuit as drawn.
+//! where its phrase began (decisions.md R62); ENTROPY at 5 % and SPREAD at 0 by default (R-ENTROPY-FLOOR).
 
 use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
@@ -41,8 +41,17 @@ pub const ENTROPY_DEPTH: f64 = 2.0;
 /// The oscillators' own mismatch and drift with LOCK off, in the character's figures
 /// (decisions.md R9; the DAW's): a tuning spread of 3 cents and 2.25 of drift, so oscillators
 /// at one pitch never lock in phase (locked, three in unison sounded 3.3 dB louder, not
-/// better). ENTROPY adds to it.
+/// better). ENTROPY adds to it above 5 %; below that it falls to none (R-ENTROPY-FLOOR).
 pub const ENTROPY_FLOOR: f64 = 0.75;
+
+/// The previous minimum's place on ENTROPY's new travel (R-ENTROPY-FLOOR).
+pub const ENTROPY_KNEE: f64 = 0.05;
+
+/// The old ENTROPY above its minimum, in its original units. Below the knee only the
+/// oscillator floor changes; panel tolerances and cutoff movement remain absent.
+pub fn entropy_depth(amount: f64) -> f64 {
+    ((amount - ENTROPY_KNEE) / (1.0 - ENTROPY_KNEE)).clamp(0.0, 1.0) * ENTROPY_DEPTH
+}
 
 /// How much of the ideal gain of locking (`10 log10(coherent / incoherent)`) shows at the
 /// output, the mixer's overdrive and the filter taking the rest (fitted in the DAW).
@@ -155,7 +164,7 @@ impl Default for Controls {
             power: true,
             poly: false,
             voices: POLY_VOICES.1,
-            entropy: 0.0,
+            entropy: ENTROPY_KNEE,
             spread: 0.0,
             inner: 0.0,
             placement: Placement::Even,
@@ -2481,7 +2490,7 @@ impl Engine {
     /// A voice's panel `p` with its tolerances, FEEDBACK and its loop's preamplifier; its
     /// twin's with the twin's tolerances; and whether DOUBLE is on.
     fn voice_panel(&self, v: &mut Playing, p: &Panel) {
-        let entropy = self.controls.entropy * ENTROPY_DEPTH;
+        let entropy = entropy_depth(self.controls.entropy);
         let feedback = self.controls.feedback.clamp(0.0, 1.0);
         for (voice, character) in [
             (&mut v.voice, &v.character),
@@ -2945,9 +2954,13 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
     let many = c.poly || c.unison;
     // (The one instrument without DOUBLE scatters: its places are VOICES's, one an attack.)
     let scatter = !many && c.double <= 0.0;
-    let entropy = c.entropy * ENTROPY_DEPTH;
-    // The oscillators': their own floor and ENTROPY's, unless LOCK; the cutoff's, ENTROPY's.
-    let oscillators = if c.lock { 0.0 } else { ENTROPY_FLOOR + entropy };
+    let entropy = entropy_depth(c.entropy);
+    // Below 5 % the former floor falls to none; above it the old range, unless LOCK.
+    let oscillators = if c.lock {
+        0.0
+    } else {
+        ENTROPY_FLOOR * (c.entropy / ENTROPY_KNEE).clamp(0.0, 1.0) + entropy
+    };
     Mix {
         entropy,
         oscillators,
@@ -3008,7 +3021,7 @@ impl Probe {
             controls.double,
             controls.spread,
         ) = (true, false, 0.0, 0.0);
-        let entropy = controls.entropy * ENTROPY_DEPTH;
+        let entropy = entropy_depth(controls.entropy);
         let mut panel = c.panel;
         panel.quality = Quality::Potato;
         let voices = (0..KEYS.len())
@@ -3140,6 +3153,272 @@ mod tests {
     use super::*;
     use crate::pool::Budget;
     use ca72::voice::Priority;
+
+    #[test]
+    fn entropy_fades_the_old_floor_to_zero_below_five_percent() {
+        for amount in [0.0, 0.01, 0.025, 0.05] {
+            let m = mix_of(
+                &Controls {
+                    entropy: amount,
+                    ..Controls::default()
+                },
+                4,
+            );
+            assert_eq!(m.entropy, 0.0);
+            assert!((m.oscillators - ENTROPY_FLOOR * amount / 0.05).abs() < 1e-15);
+            let mut c = Character::new(7, 0, 3, ENTROPY_KNOBS);
+            for _ in 0..1024 {
+                let j = jacks(&mut c, 0.0, 48_000.0, &m);
+                assert_eq!(j.cutoff, 0.0);
+                if amount == 0.0 {
+                    assert_eq!(j.detune, [0.0; 3]);
+                }
+            }
+        }
+        for amount in [0.0, 0.05, 0.5, 1.0] {
+            let m = mix_of(
+                &Controls {
+                    entropy: amount,
+                    lock: true,
+                    ..Controls::default()
+                },
+                4,
+            );
+            let mut c = Character::new(9, 0, 3, ENTROPY_KNOBS);
+            for _ in 0..1024 {
+                assert_eq!(jacks(&mut c, 0.0, 48_000.0, &m).detune, [0.0; 3]);
+            }
+        }
+    }
+
+    /// Compare the engine's output with the old mix calculated independently, including
+    /// the panel's tolerances, RNG progression and both quality paths. Other voice controls
+    /// take their usual path; both engines render on the caller without a deadline.
+    #[test]
+    fn translated_entropy_renders_identically_to_the_legacy_mix() {
+        for potato in [false, true] {
+            for old in [0.0, 20.0, 40.0, 100.0] {
+                for lock in [false, true] {
+                    let c = Controls {
+                        entropy: crate::compat::entropy_percent(old) / 100.0,
+                        potato,
+                        lock,
+                        poly: true,
+                        voices: 4,
+                        spread: 0.5,
+                        ..Controls::default()
+                    };
+                    let mut actual = Engine::new();
+                    actual.set(&c);
+                    actual.prepare(48_000.0, 1);
+                    let mut reference = Engine::new();
+                    reference.set(&c);
+                    reference.prepare(48_000.0, 1);
+                    let depth = old / 100.0 * 2.0;
+                    let oscillators = if lock { 0.0 } else { 0.75 + depth };
+                    let mut legacy = reference.mix();
+                    legacy.entropy = depth;
+                    legacy.oscillators = oscillators;
+                    legacy.at = oscillators.max(depth);
+                    for slot in &reference.slots {
+                        let mut playing = slot.play.lock().unwrap();
+                        let panel = entropy_panel(&playing.character, reference.panel(), depth);
+                        playing.voice.panel = panel;
+                        playing.light.set_panel(&panel);
+                        let panel =
+                            entropy_panel(&playing.twin.character, reference.panel(), depth);
+                        playing.twin.voice.panel = panel;
+                        playing.twin.light.set_panel(&panel);
+                    }
+                    for key in [45, 52, 57, 64] {
+                        actual.event(Event::Note { key, on: true });
+                        reference.event(Event::Note { key, on: true });
+                    }
+                    let mut heard = false;
+                    for _ in 0..40 {
+                        let (mut l, mut r) = ([0.0f32; CHUNK], [0.0f32; CHUNK]);
+                        actual.render(&[], &mut l, &mut r);
+                        reference.settle();
+                        let (mut a, mut b) = ([0.0; CHUNK], [0.0; CHUNK]);
+                        reference.run(
+                            CHUNK,
+                            &[0.0; CHUNK],
+                            48_000.0,
+                            &legacy,
+                            true,
+                            &mut a,
+                            &mut b,
+                        );
+                        for i in 0..CHUNK {
+                            let (a, b) = reference.faded(a[i], b[i]);
+                            assert_eq!(
+                                (l[i].to_bits(), r[i].to_bits()),
+                                (a.to_bits(), b.to_bits()),
+                                "old {old}, LO {potato}, LOCK {lock}, sample {i}"
+                            );
+                            heard |= l[i] != 0.0 || r[i] != 0.0;
+                        }
+                        actual.end_block(CHUNK);
+                        reference.end_block(CHUNK);
+                    }
+                    assert!(heard);
+                }
+            }
+        }
+    }
+
+    /// Reset-to-reset frequency removes the sampling grid's apparent period jitter. With
+    /// modulation at rest there is no held-note pitch movement at 0 %, unlocked too.
+    #[test]
+    fn zero_entropy_has_steady_pitch_in_every_oscillator() {
+        for seed in [1, 7] {
+            let mut c = Controls {
+                entropy: 0.0,
+                ..Controls::default()
+            };
+            for osc in &mut c.panel.osc {
+                osc.on = true;
+            }
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, seed);
+            e.event(Event::Note { key: 69, on: true });
+            for _ in 0..24_000 {
+                e.tick(0.0);
+            }
+            let resets = |e: &Engine| {
+                let p = e.slots[0].play.lock().unwrap();
+                std::array::from_fn::<_, 3, _>(|n| p.voice.probe_resets(n))
+            };
+            let mut previous = resets(&e);
+            let mut first = [0.0; 3];
+            for window in 0..8 {
+                for _ in 0..12_000 {
+                    e.tick(0.0);
+                }
+                let now = resets(&e);
+                for n in 0..3 {
+                    let frequency =
+                        (now[n].1 - previous[n].1) as f64 / (now[n].0 - previous[n].0) * 48_000.0;
+                    assert!(frequency.is_finite() && frequency > 400.0);
+                    if window == 0 {
+                        first[n] = frequency;
+                    }
+                    let cents = 1200.0 * (frequency / first[n]).log2();
+                    assert!(
+                        cents.abs() < 0.01,
+                        "osc {}, seed {seed}, window {window}: {cents} cents",
+                        n + 1
+                    );
+                }
+                previous = now;
+            }
+        }
+    }
+
+    /// Issue 57: inspect both contours themselves, as well as the CLAP host's audio. A
+    /// separated key must start and hold every instrument's contours; overlapping keys keep
+    /// them held, whether RETRIGGER starts a fresh attack or ordinary legato carries on.
+    #[test]
+    fn separated_and_overlapping_keys_start_and_hold_both_contours() {
+        for (potato, ultra) in [(true, false), (false, false), (false, true)] {
+            for mode in 0..3 {
+                for priority in [Priority::Low, Priority::Last, Priority::High] {
+                    for retrigger in [false, true] {
+                        let mut c = Controls {
+                            potato,
+                            ultra,
+                            poly: mode == 1,
+                            unison: mode == 2,
+                            voices: 2,
+                            lock: true,
+                            ..Controls::default()
+                        };
+                        c.panel.priority = priority;
+                        c.panel.retrigger = retrigger;
+                        c.panel.decay = false;
+                        let mut e = Engine::new();
+                        e.set(&c);
+                        e.prepare(48_000.0, 51826);
+                        for key in [60, 64, 60] {
+                            e.event(Event::Note { key, on: true });
+                            for _ in 0..40 {
+                                let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
+                                e.render(&[], &mut l, &mut r);
+                                e.end_block(256);
+                            }
+                            let check = |e: &Engine, keys: &[u8]| {
+                                let mut count = 0;
+                                for (k, s) in e.slots.iter().enumerate() {
+                                    if !(k < e.instruments() || mode == 1 && s.gate) {
+                                        continue;
+                                    }
+                                    if mode == 1 {
+                                        assert!(
+                                            keys.contains(&s.note),
+                                            "unexpected POLY key {}",
+                                            s.note
+                                        );
+                                    }
+                                    let p = s.play.lock().unwrap();
+                                    let (f, l) = if potato {
+                                        p.light.contours()
+                                    } else {
+                                        let (f, l, _) = p.voice.envelopes();
+                                        (f, l)
+                                    };
+                                    assert!(
+                                        f > 0.3 && l > 0.3,
+                                        "LO {potato}, ULTRA {ultra}, mode {mode}, {priority:?}, retrigger {retrigger}, key {key}: {f}, {l} V"
+                                    );
+                                    count += 1;
+                                }
+                                let expected = if mode == 1 {
+                                    keys.len()
+                                } else {
+                                    e.instruments()
+                                };
+                                assert_eq!(count, expected, "mode {mode}: held voices");
+                            };
+                            check(&e, &[key]);
+                            e.event(Event::Note { key: 67, on: true });
+                            let (mut l, mut r) = ([0.0; 2048], [0.0; 2048]);
+                            e.render(&[], &mut l, &mut r);
+                            e.end_block(2048);
+                            check(&e, &[key, 67]);
+                            if key == 64 {
+                                e.event(Event::AllNotesOff);
+                            } else {
+                                e.event(Event::Note { key: 67, on: false });
+                                e.render(&[], &mut l, &mut r);
+                                e.end_block(2048);
+                                check(&e, &[key]);
+                                e.event(Event::Note { key, on: false });
+                            }
+                            for _ in 0..5 {
+                                e.render(&[], &mut l, &mut r);
+                                e.end_block(2048);
+                            }
+                            assert!(e.held.iter().all(|&held| !held));
+                            for s in &e.slots {
+                                let p = s.play.lock().unwrap();
+                                let (f, l) = if potato {
+                                    p.light.contours()
+                                } else {
+                                    let (f, l, _) = p.voice.envelopes();
+                                    (f, l)
+                                };
+                                assert!(
+                                    f < 0.3 && l < 0.3,
+                                    "contours did not release: {f}, {l} V, LO {potato}, ULTRA {ultra}, mode {mode}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     /// A voice's output's peak as the engine reports it, playing the panel as it opens and
     /// louder: printed, for the editor's level scale (`-- --ignored --nocapture`).

@@ -117,6 +117,11 @@ fn sound_of(t: &toml::Table) -> Result<Sound, String> {
             values.push((k.clone(), x));
         }
     }
+    if crate::compat::before_entropy_floor(
+        t.get("version").and_then(Value::as_str).unwrap_or_default(),
+    ) {
+        crate::compat::translate_entropy_preset(&mut values);
+    }
     Ok(Sound {
         name,
         description,
@@ -148,7 +153,13 @@ pub fn parse_factory(text: &str) -> Result<Vec<Sound>, String> {
             .map(|p| {
                 p.as_table()
                     .ok_or_else(|| "a preset is a table".to_owned())
-                    .and_then(sound_of)
+                    .and_then(|p| {
+                        let mut p = p.clone();
+                        if let Some(version) = t.get("version") {
+                            p.entry("version").or_insert_with(|| version.clone());
+                        }
+                        sound_of(&p)
+                    })
             })
             .collect(),
         Some(_) => Err("`preset` is a list".into()),
@@ -645,6 +656,10 @@ impl Library {
     ) -> Result<(), String> {
         let mut t = toml::Table::new();
         t.insert("format".into(), Value::Integer(FORMAT));
+        t.insert(
+            "version".into(),
+            Value::String(env!("CARGO_PKG_VERSION").into()),
+        );
         t.insert("name".into(), Value::String(sound.name.clone()));
         if !sound.description.is_empty() {
             t.insert(
@@ -1276,6 +1291,56 @@ mod tests {
         assert_eq!(t["presets"]["felt bass"]["tags"][0].as_str(), Some("round"));
         assert!(t["presets"].get("Felt Bass").is_none());
         assert_eq!(lib.find("Felt Bass").unwrap().sound.tags, ["round"]);
+    }
+
+    /// Legacy amounts are translated once, including an absent ENTROPY. Rewriting metadata
+    /// writes the migrated sound with its writer version, so reopening cannot shift it again.
+    #[test]
+    fn old_presets_move_to_the_new_entropy_scale_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Old.toml");
+        std::fs::write(
+            &file,
+            "format = 1\nname = \"Old\"\n[values]\nentropy = 40\ncutoff = 2\n",
+        )
+        .unwrap();
+        let lib = Library::at(dir.path());
+        let entropy = |s: &Sound| s.values.iter().find(|(k, _)| k == "entropy").unwrap().1;
+        let old = lib.find("Old").unwrap();
+        assert_eq!(entropy(&old.sound), 43.0);
+        assert_eq!(
+            old.sound
+                .values
+                .iter()
+                .find(|(k, _)| k == "cutoff")
+                .unwrap()
+                .1,
+            2.0
+        );
+        lib.favorite("Old", true).unwrap();
+        let written = std::fs::read_to_string(&file).unwrap();
+        let table: toml::Table = written.parse().unwrap();
+        assert_eq!(table["version"].as_str(), Some(env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            entropy(&Library::at(dir.path()).find("Old").unwrap().sound),
+            43.0
+        );
+        for (version, value, want) in [
+            ("", "", 5.0),
+            ("0.2.6", "entropy = 0", 5.0),
+            ("0.2.7", "entropy = 0", 0.0),
+        ] {
+            let version = if version.is_empty() {
+                String::new()
+            } else {
+                format!("version = {version:?}\n")
+            };
+            let text = format!(
+                "format = 1\n{version}[[preset]]\nname = \"Test\"\n[preset.values]\n{value}\n"
+            );
+            let sounds = parse_factory(&text).unwrap();
+            assert_eq!(entropy(&sounds[0]), want, "{text}");
+        }
     }
 
     fn toml_files(dir: &Path) -> Vec<String> {

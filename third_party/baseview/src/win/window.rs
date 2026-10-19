@@ -16,8 +16,7 @@ use winapi::um::winuser::{
     WM_MOUSEHWHEEL, WM_MOUSELEAVE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SHOWWINDOW, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN,
     WM_SYSKEYUP, WM_TIMER, WM_USER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION, WS_CHILD,
-    WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUPWINDOW, WS_SIZEBOX, WS_VISIBLE,
-    XBUTTON1, XBUTTON2,
+    WS_CLIPSIBLINGS, WS_MINIMIZEBOX, WS_POPUPWINDOW, WS_VISIBLE, XBUTTON1, XBUTTON2,
 };
 
 use std::cell::{Cell, Ref, RefCell};
@@ -747,16 +746,13 @@ impl Window<'_> {
                 bottom: window_info.physical_size().height as i32,
             };
 
+            // A window of its own (an application's) has no frame to drag and no maximise
+            // box: what it holds is sized by its handler alone, which a frame's size does not
+            // reach (CA-72 patch, change 9).
             let flags = if parented {
                 WS_CHILD | WS_VISIBLE
             } else {
-                WS_POPUPWINDOW
-                    | WS_CAPTION
-                    | WS_VISIBLE
-                    | WS_SIZEBOX
-                    | WS_MINIMIZEBOX
-                    | WS_MAXIMIZEBOX
-                    | WS_CLIPSIBLINGS
+                WS_POPUPWINDOW | WS_CAPTION | WS_VISIBLE | WS_MINIMIZEBOX | WS_CLIPSIBLINGS
             };
 
             if !parented {

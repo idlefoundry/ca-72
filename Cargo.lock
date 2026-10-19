@@ -222,23 +222,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "baseview"
-version = "0.1.0"
-source = "git+https://github.com/RustAudio/baseview.git?rev=579130ecb4f9f315ae52190af42f0ea46aeaa4a2#579130ecb4f9f315ae52190af42f0ea46aeaa4a2"
-dependencies = [
- "cocoa",
- "core-foundation",
- "keyboard-types",
- "nix 0.22.3",
- "objc",
- "raw-window-handle 0.5.2",
- "uuid",
- "winapi",
- "x11",
- "x11rb",
-]
-
-[[package]]
 name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,7 +300,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "ca72"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "ca72-rt",
  "libm",
@@ -325,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-analysis"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "libm",
  "serde",
@@ -333,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-lab"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "ca72",
  "ca72-analysis",
@@ -346,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-panel"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "plugin-kit-materials",
  "resvg",
@@ -359,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "ca72-plugin"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
- "baseview 0.1.0",
+ "baseview",
  "ca72",
  "ca72-analysis",
  "ca72-panel",
@@ -380,6 +363,7 @@ dependencies = [
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",
  "resvg",
+ "semver",
  "serde",
  "serde_json",
  "softbuffer",
@@ -392,7 +376,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-rt"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -400,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "ca72-spice"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "tempfile",
 ]
@@ -1547,7 +1531,7 @@ dependencies = [
  "atomic_float",
  "atomic_refcell",
  "backtrace",
- "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=579130ecb4f9f315ae52190af42f0ea46aeaa4a2)",
+ "baseview",
  "bitflags 1.3.2",
  "cfg-if",
  "clap",
@@ -2288,7 +2272,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "skin-pack"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "ed25519-dalek",
  "png",
@@ -3176,7 +3160,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "nih_plug_xtask",
 ]

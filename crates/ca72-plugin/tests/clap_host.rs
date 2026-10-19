@@ -20,13 +20,15 @@ use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_DONT_RECORD, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI,
-    CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_midi, clap_event_param_value,
-    clap_input_events, clap_output_events,
+    CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT,
+    CLAP_TRANSPORT_IS_PLAYING, clap_event_header, clap_event_midi, clap_event_note,
+    clap_event_param_value, clap_event_transport, clap_input_events, clap_output_events,
 };
 use clap_sys::ext::params::{
     CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
     clap_plugin_params,
 };
+use clap_sys::ext::render::{CLAP_EXT_RENDER, CLAP_RENDER_OFFLINE, clap_plugin_render};
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
 use clap_sys::host::clap_host;
@@ -85,6 +87,9 @@ enum In {
     /// The host's automation: time, parameter, value (CLAP's: normalized for a knob, the
     /// position for a selector).
     Param(u32, &'static str, f64),
+    Midi(u32, [u8; 3]),
+    Note(u32, u16, i32, i16, i16, f64),
+    Transport(u32, bool),
 }
 
 /// A parameter value the plug-in told the host: time, flags, parameter, value.
@@ -102,6 +107,8 @@ struct Events {
     headers: Vec<*const clap_event_header>,
     _midi: Vec<Box<clap_event_midi>>,
     _params: Vec<Box<clap_event_param_value>>,
+    _notes: Vec<Box<clap_event_note>>,
+    _transport: Vec<Box<clap_event_transport>>,
 }
 
 unsafe extern "C" fn in_size(list: *const clap_input_events) -> u32 {
@@ -170,10 +177,15 @@ struct Instance {
     _host: Box<clap_host>,
     /// How often the plug-in asked its host to rescan its parameters.
     rescans: Box<AtomicUsize>,
+    block: u32,
 }
 
 impl Instance {
     fn new() -> Instance {
+        Self::with_block(BLOCK)
+    }
+
+    fn with_block(block: u32) -> Instance {
         let rescans = Box::new(AtomicUsize::new(0));
         let host = Box::new(clap_host {
             clap_version: CLAP_VERSION,
@@ -200,12 +212,13 @@ impl Instance {
             );
             assert!(!plugin.is_null());
             assert!(((*plugin).init.unwrap())(plugin));
-            assert!(((*plugin).activate.unwrap())(plugin, RATE, 1, BLOCK));
+            assert!(((*plugin).activate.unwrap())(plugin, RATE, 1, block));
             assert!(((*plugin).start_processing.unwrap())(plugin));
             Instance {
                 plugin,
                 _host: host,
                 rescans,
+                block,
             }
         }
     }
@@ -221,14 +234,26 @@ impl Instance {
 
     /// One block with `events` in this order; what the plug-in told the host of parameters.
     fn process(&self, events: &[In]) -> Vec<Out> {
+        self.audio(self.block, events).0
+    }
+
+    fn audio(&self, frames: u32, events: &[In]) -> (Vec<Out>, Vec<f32>) {
+        assert!(frames <= self.block);
         let mut ev = Events {
             headers: Vec::new(),
             _midi: Vec::new(),
             _params: Vec::new(),
+            _notes: Vec::new(),
+            _transport: Vec::new(),
         };
         for &e in events {
             match e {
-                In::Cc(time, channel, cc, value) => {
+                In::Cc(..) | In::Midi(..) => {
+                    let (time, data) = match e {
+                        In::Cc(time, channel, cc, value) => (time, [0xb0 | channel, cc, value]),
+                        In::Midi(time, data) => (time, data),
+                        _ => unreachable!(),
+                    };
                     let m = Box::new(clap_event_midi {
                         header: clap_event_header {
                             size: size_of::<clap_event_midi>() as u32,
@@ -238,7 +263,7 @@ impl Instance {
                             flags: CLAP_EVENT_IS_LIVE,
                         },
                         port_index: 0,
-                        data: [0xb0 | channel, cc, value],
+                        data,
                     });
                     ev.headers.push(&raw const m.header);
                     ev._midi.push(m);
@@ -263,9 +288,46 @@ impl Instance {
                     ev.headers.push(&raw const p.header);
                     ev._params.push(p);
                 }
+                In::Note(time, type_, note_id, channel, key, velocity) => {
+                    let note = Box::new(clap_event_note {
+                        header: clap_event_header {
+                            size: size_of::<clap_event_note>() as u32,
+                            time,
+                            space_id: CLAP_CORE_EVENT_SPACE_ID,
+                            type_,
+                            flags: 0,
+                        },
+                        note_id,
+                        port_index: 0,
+                        channel,
+                        key,
+                        velocity,
+                    });
+                    ev.headers.push(&raw const note.header);
+                    ev._notes.push(note);
+                }
+                In::Transport(time, playing) => {
+                    // SAFETY: every field of the CLAP transport permits zero.
+                    let mut transport: Box<clap_event_transport> =
+                        Box::new(unsafe { std::mem::zeroed() });
+                    transport.header = clap_event_header {
+                        size: size_of::<clap_event_transport>() as u32,
+                        time,
+                        space_id: CLAP_CORE_EVENT_SPACE_ID,
+                        type_: CLAP_EVENT_TRANSPORT,
+                        flags: 0,
+                    };
+                    transport.flags = if playing {
+                        CLAP_TRANSPORT_IS_PLAYING
+                    } else {
+                        0
+                    };
+                    ev.headers.push(&raw const transport.header);
+                    ev._transport.push(transport);
+                }
             }
         }
-        let n = BLOCK as usize;
+        let n = frames as usize;
         let (mut out_l, mut out_r, mut in_l, mut in_r) = (
             vec![0.0f32; n],
             vec![0.0f32; n],
@@ -300,7 +362,7 @@ impl Instance {
         };
         let process = clap_process {
             steady_time: -1,
-            frames_count: BLOCK,
+            frames_count: frames,
             transport: null(),
             audio_inputs: &input,
             audio_outputs: &mut output,
@@ -313,7 +375,8 @@ impl Instance {
         unsafe {
             ((*self.plugin).process.unwrap())(self.plugin, &process);
         }
-        told
+        assert!(out_l.iter().chain(&out_r).all(|x| x.is_finite()));
+        (told, out_l)
     }
 
     /// A parameter's value as the host reads it (CLAP's: normalized for a knob, the position
@@ -374,6 +437,263 @@ fn bytes_of(v: &serde_json::Value) -> Vec<u8> {
     let mut out = (json.len() as u64).to_le_bytes().to_vec();
     out.extend(json);
     out
+}
+
+fn envelope_instance(block: u32, mode: u8, priority: u8, retrigger: bool) -> Instance {
+    let p = Instance::with_block(block);
+    // SAFETY: the instance is stopped while the host changes its rendering mode.
+    unsafe {
+        ((*p.plugin).stop_processing.unwrap())(p.plugin);
+        let render: &clap_plugin_render = p.extension(CLAP_EXT_RENDER);
+        assert!((render.set.unwrap())(p.plugin, CLAP_RENDER_OFFLINE));
+        assert!(((*p.plugin).start_processing.unwrap())(p.plugin));
+    }
+    let mut state = json_of(&p.save());
+    state["fields"]["noise_seed"] = "51826".into();
+    assert!(p.load(&bytes_of(&state)));
+    p.audio(
+        1,
+        &[
+            In::Param(0, "quality", 0.0),
+            In::Param(0, "poly", f64::from(mode == 1)),
+            In::Param(0, "unison", f64::from(mode == 2)),
+            In::Param(0, "voices", 2.0),
+            In::Param(0, "note_priority", f64::from(priority)),
+            In::Param(0, "retrigger", f64::from(retrigger)),
+            In::Param(0, "lock", 1.0),
+            In::Param(0, "decay_on", 0.0),
+            In::Param(0, "filter_attack", 0.0),
+            In::Param(0, "loudness_attack", 0.0),
+            In::Param(0, "filter_sustain", 0.5),
+            In::Param(0, "loudness_sustain", 0.5),
+        ],
+    );
+    // Every buffer size starts the sequence at the same circuit time.
+    // SAFETY: the host resets a stopped instance before rendering.
+    unsafe {
+        ((*p.plugin).stop_processing.unwrap())(p.plugin);
+        ((*p.plugin).reset.unwrap())(p.plugin);
+        assert!(((*p.plugin).start_processing.unwrap())(p.plugin));
+    }
+    p
+}
+
+fn at(e: In, timing: u32) -> In {
+    match e {
+        In::Cc(_, ch, cc, value) => In::Cc(timing, ch, cc, value),
+        In::Param(_, param, value) => In::Param(timing, param, value),
+        In::Midi(_, data) => In::Midi(timing, data),
+        In::Note(_, kind, id, ch, key, velocity) => In::Note(timing, kind, id, ch, key, velocity),
+        In::Transport(_, playing) => In::Transport(timing, playing),
+    }
+}
+
+fn render(p: &Instance, events: &[(u32, In)], length: u32) -> Vec<f32> {
+    let mut audio = Vec::new();
+    let mut event = 0;
+    let mut start = 0;
+    while start < length {
+        let frames = p.block.min(length - start);
+        let mut block = Vec::new();
+        while event < events.len() && events[event].0 < start + frames {
+            let (time, e) = events[event];
+            assert!(time >= start, "events must be ordered");
+            block.push(at(e, time - start));
+            event += 1;
+        }
+        audio.extend(p.audio(frames, &block).1);
+        start += frames;
+    }
+    assert_eq!(event, events.len());
+    audio
+}
+
+fn rms(audio: &[f32]) -> f64 {
+    (audio.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / audio.len() as f64).sqrt()
+}
+
+const SOUNDING: [usize; 14] = [
+    0, 9_600, 17_040, 26_400, 28_800, 38_400, 43_200, 48_000, 55_200, 60_000, 67_200, 76_800,
+    86_400, 93_600,
+];
+
+fn sounding(audio: &[f32], onset: usize) -> f64 {
+    // CC123 cuts the penultimate note short: inspect it before that release.
+    let (start, end) = if onset == 86_400 {
+        (1_100, 1_550)
+    } else {
+        (2_400, 4_000)
+    };
+    rms(&audio[onset + start..onset + end])
+}
+
+#[test]
+fn native_clap_zero_velocity_starts_and_sustains_but_midi_zero_velocity_releases() {
+    for mode in 0..3 {
+        for priority in 0..3 {
+            for retrigger in [false, true] {
+                let p = envelope_instance(256, mode, priority, retrigger);
+                let audio = render(
+                    &p,
+                    &[
+                        (0, In::Note(0, CLAP_EVENT_NOTE_ON, -1, 0, 60, 0.0)),
+                        (12_000, In::Midi(0, [0x90, 60, 0])),
+                    ],
+                    24_000,
+                );
+                let held = rms(&audio[4_800..12_000]);
+                let released = rms(&audio[19_200..24_000]);
+                assert!(
+                    held > 0.03,
+                    "mode {mode}, priority {priority}, retrigger {retrigger}: no sustain ({held})"
+                );
+                assert!(
+                    released < held * 0.2,
+                    "MIDI zero did not release: {released} against {held}"
+                );
+            }
+        }
+    }
+}
+
+/// Native notes and MIDI bytes go through different CLAP decoding paths. Apart from zero
+/// velocity they must play the same notes, including the source's order at equal times.
+#[test]
+fn envelope_sequences_match_in_both_clap_dialects_at_every_buffer_size() {
+    let notes = [
+        (0, 60, true),
+        (7_200, 60, false),
+        (9_600, 64, true),
+        (16_800, 64, false),
+        // Rapid repeats, then overlapping keys and a release in the following block.
+        (17_040, 64, true),
+        (24_000, 64, false),
+        (26_400, 60, true),
+        (28_800, 67, true),
+        (31_200, 60, false),
+        (36_000, 67, false),
+        // Note-off/on at one sample, both orders, different keys and the same key.
+        (38_400, 60, true),
+        (43_200, 60, false),
+        (43_200, 64, true),
+        (48_000, 67, true),
+        (48_000, 64, false),
+        (52_800, 67, false),
+        (55_200, 60, true),
+        (60_000, 60, false),
+        (60_000, 60, true),
+        (64_800, 60, true),
+        (64_800, 60, false),
+        (67_200, 64, true),
+        (72_000, 64, false),
+        (76_800, 60, true),
+        (81_600, 60, false),
+        (86_400, 67, true),
+        (91_200, 67, false),
+    ];
+    let mut midi: Vec<_> = notes
+        .iter()
+        .map(|&(t, k, on)| {
+            (
+                t,
+                In::Midi(
+                    0,
+                    [if on { 0x90 } else { 0x80 }, k, if on { 100 } else { 0 }],
+                ),
+            )
+        })
+        .collect();
+    // CC64 is currently unassigned, rather than a sustain-pedal implementation. Its events
+    // must not swallow later notes. Transport alone does not release a live keyboard.
+    midi.extend([
+        (66_000, In::Cc(0, 0, 64, 127)),
+        (73_000, In::Cc(0, 0, 64, 0)),
+        (74_000, In::Transport(0, true)),
+        (79_000, In::Transport(0, false)),
+        (80_000, In::Transport(0, true)),
+        (88_000, In::Cc(0, 0, 123, 0)),
+        (92_000, In::Cc(0, 0, 120, 0)),
+        (93_600, In::Midi(0, [0x90, 72, 100])),
+        (98_400, In::Midi(0, [0x80, 72, 0])),
+    ]);
+    midi.sort_by_key(|(t, _)| *t);
+    let native: Vec<_> = midi
+        .iter()
+        .map(|&(t, e)| {
+            (
+                t,
+                match e {
+                    In::Midi(_, [status, key, velocity]) => In::Note(
+                        0,
+                        if status == 0x90 {
+                            CLAP_EVENT_NOTE_ON
+                        } else {
+                            CLAP_EVENT_NOTE_OFF
+                        },
+                        -1,
+                        0,
+                        i16::from(key),
+                        f64::from(velocity) / 127.0,
+                    ),
+                    e => e,
+                },
+            )
+        })
+        .collect();
+    for mode in 0..3 {
+        for priority in 0..3 {
+            for retrigger in [false, true] {
+                let mut reference: Option<Vec<f32>> = None;
+                for block in [32, 64, 128, 256, 512, 1024, 2048] {
+                    let p = envelope_instance(block, mode, priority, retrigger);
+                    let state = p.save();
+                    let a = render(&p, &midi, 105_600);
+                    if let Some(reference) = &reference {
+                        // A released POLY voice is retired at a block boundary, so its next
+                        // oscillator phase can differ. Compare the note's level, not phase.
+                        for t in SOUNDING {
+                            let level = sounding(&a, t);
+                            let before = sounding(reference, t);
+                            let db = 20.0 * (level / before).log10();
+                            assert!(
+                                db.abs() < 3.0,
+                                "buffer size changes note {t} by {db} dB, mode {mode}, priority {priority}, retrigger {retrigger}, block {block}"
+                            );
+                        }
+                    } else {
+                        reference = Some(a.clone());
+                    }
+                    let q = envelope_instance(block, mode, priority, retrigger);
+                    assert!(q.load(&state));
+                    let b = render(&q, &native, 105_600);
+                    assert_eq!(
+                        a, b,
+                        "mode {mode}, priority {priority}, retrigger {retrigger}, block {block}"
+                    );
+                    for t in SOUNDING {
+                        assert!(
+                            sounding(&a, t) > 0.03,
+                            "silent note at {t}, mode {mode}, priority {priority}, retrigger {retrigger}, block {block}"
+                        );
+                    }
+                    // The equal-key on/off pair, CC123 and the final ordinary release must
+                    // actually lower the output, not merely agree between the dialects.
+                    for (start, end, held) in [
+                        (66_800, 67_150, 60_000),
+                        (90_400, 91_100, 86_400),
+                        (103_200, 105_600, 93_600),
+                    ] {
+                        let quiet = rms(&a[start..end]);
+                        let held_level = sounding(&a, held);
+                        assert!(
+                            quiet < held_level * 0.3,
+                            "note did not release at {start}: {quiet} against {held_level}, mode {mode}, priority {priority}, retrigger {retrigger}, block {block}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// `instance`'s state with its MIDI assignments' field set to `table` (removed: None).
@@ -505,4 +825,86 @@ fn instances_keep_their_own_assignments() {
     assert!(b.process(&[In::Cc(0, 0, 74, 127)]).is_empty());
     assert_eq!(b.value("cutoff"), 0.5);
     assert_eq!(a.process(&[In::Cc(0, 0, 74, 127)]).len(), 1);
+}
+
+/// The serialized state takes the same versioned migration as an actual host load, and
+/// a second save/load keeps its reading. Host automation still sets the new travel.
+#[test]
+fn entropy_saved_by_an_old_version_moves_once_and_automation_uses_the_new_range() {
+    let a = Instance::new();
+    assert!((a.value("entropy") - 0.05).abs() < 1e-7);
+    for (old, new) in [(0.0, 5.0), (40.0, 43.0), (100.0, 100.0)] {
+        let mut state = json_of(&a.save());
+        state["version"] = "0.2.6".into();
+        state["params"]["entropy"] = serde_json::json!({"f32": old});
+        assert!(a.load(&bytes_of(&state)));
+        assert!((a.value("entropy") - new / 100.0).abs() < 1e-7);
+        let saved = a.save();
+        assert_eq!(json_of(&saved)["version"], env!("CARGO_PKG_VERSION"));
+        let b = Instance::new();
+        assert!(b.load(&saved));
+        assert_eq!(a.value("entropy"), b.value("entropy"));
+    }
+    a.process(&[In::Param(0, "entropy", 0.0)]);
+    assert_eq!(a.value("entropy"), 0.0);
+    let b = Instance::new();
+    assert!(b.load(&a.save()));
+    assert_eq!(b.value("entropy"), 0.0);
+}
+
+/// Scanner-style construction, live processing and offline rendering all leave the
+/// shared What's New history alone when no editor opens. Child processes isolate the
+/// settings override from the other host tests.
+#[test]
+fn no_editor_means_no_release_notes_during_scanning_or_rendering() {
+    if std::env::var_os("CA72_NOTES_HEADLESS_CHILD").is_some() {
+        use clap_sys::ext::render::{CLAP_EXT_RENDER, CLAP_RENDER_OFFLINE, clap_plugin_render};
+        let path = ca72_plugin::settings::file();
+        let before = std::fs::read(&path).ok();
+        for _ in 0..3 {
+            let instance = Instance::new();
+            let state = instance.save();
+            instance.process(&[]);
+            let render: &clap_plugin_render = instance.extension(CLAP_EXT_RENDER);
+            // SAFETY: the live instance's CLAP render extension, on its main test thread.
+            assert!(unsafe { (render.set.unwrap())(instance.plugin, CLAP_RENDER_OFFLINE) });
+            instance.process(&[]);
+            assert_eq!(
+                instance.save(),
+                state,
+                "processing adds no release-note project state"
+            );
+        }
+        assert_eq!(std::fs::read(&path).ok(), before, "no editor, no claim");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("shared data folder");
+    for existing in [false, true] {
+        if existing {
+            let folder = dir.path().join("CA-72");
+            std::fs::create_dir_all(&folder).expect("settings folder");
+            std::fs::write(
+                folder.join("settings.toml"),
+                "last_version_shown = '0.2.3'\n",
+            )
+            .expect("previous version");
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "no_editor_means_no_release_notes_during_scanning_or_rendering",
+                "--nocapture",
+            ])
+            .env("CA72_NOTES_HEADLESS_CHILD", "1")
+            .env("IDLE_FOUNDRY_SHARED", dir.path())
+            .env("CA72_SEATS_DIR", dir.path().join("seats"))
+            .output()
+            .expect("headless host");
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
