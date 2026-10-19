@@ -429,6 +429,23 @@ impl<P: Plugin> TestProcessContext<P> {
         self.events.push_back(event);
     }
 
+    /// The transport the next `process()` calls see, as a host reports it at a block's start:
+    /// whether it plays, the tempo, the position in quarter notes and the time signature
+    /// (numerator, denominator), from which the bar's start is found.
+    pub fn set_transport(
+        &mut self,
+        playing: bool,
+        tempo: Option<f64>,
+        beats: Option<f64>,
+        time_sig: Option<(i32, i32)>,
+    ) {
+        self.transport.playing = playing;
+        self.transport.tempo = tempo;
+        self.transport.pos_beats = beats;
+        self.transport.time_sig_numerator = time_sig.map(|t| t.0);
+        self.transport.time_sig_denominator = time_sig.map(|t| t.1);
+    }
+
     /// Sets `param` to `normalized` as a host's automation is set: between `process()` calls, as
     /// a wrapper does at an automation point it has split the block at. Returns whether `param`
     /// is one of the plugin's.

@@ -75,6 +75,13 @@ const ROW_H: f64 = 90.0;
 const VALUE_X: f64 = X + 560.0;
 const NEXT_X: f64 = X + WIDTH - 100.0;
 const BUTTON_Y: f64 = Y + HEIGHT - 125.0;
+/// The rows: the devices' eight, then TEMPO (decisions.md R-ARP).
+const ROWS: usize = 9;
+/// The row of TEMPO: the arpeggiator's where no host gives one, applied at once (not a device
+/// setting: nothing to restart), kept for the computer by the editor.
+const TEMPO_ROW: usize = 8;
+/// TEMPO's choices in its list: every 5 from 40 to 240 (the arrow keys step it by 1).
+const TEMPO_LIST: (u16, u16, u16) = (40, 240, 5);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Choice {
@@ -87,6 +94,7 @@ enum Choice {
     MidiAuto,
     Midi(Option<String>),
     Channel(Option<u8>),
+    Tempo(u16),
 }
 #[derive(Debug)]
 struct SelectionMenu {
@@ -152,6 +160,9 @@ pub struct Dialog {
     next_poll: Instant,
     stamp: String,
     changed: bool,
+    /// TEMPO as shown, and whether it changed since the editor last took it.
+    tempo: u16,
+    tempo_changed: bool,
 }
 
 impl Dialog {
@@ -170,7 +181,20 @@ impl Dialog {
             next_poll: Instant::now(),
             stamp: String::new(),
             changed: true,
+            tempo: crate::params::DEFAULT_TEMPO as u16,
+            tempo_changed: false,
         }
+    }
+
+    /// TEMPO as this computer has it (the editor's, as it opens the dialog).
+    pub fn set_tempo(&mut self, bpm: u16) {
+        self.tempo = crate::settings::tempo_within(bpm);
+        self.changed = true;
+    }
+
+    /// TEMPO, if it was changed here since the last time it was asked.
+    pub fn take_tempo(&mut self) -> Option<u16> {
+        std::mem::take(&mut self.tempo_changed).then_some(self.tempo)
     }
 
     pub fn frame(&mut self) -> bool {
@@ -376,6 +400,18 @@ impl Dialog {
                     (1..=16).map(|channel| (channel.to_string(), Choice::Channel(Some(channel)))),
                 )
                 .collect(),
+            TEMPO_ROW => {
+                let (lo, hi, step) = TEMPO_LIST;
+                let mut tempos: Vec<u16> = (lo..=hi).step_by(usize::from(step)).collect();
+                if !tempos.contains(&self.tempo) {
+                    tempos.push(self.tempo);
+                    tempos.sort_unstable();
+                }
+                tempos
+                    .into_iter()
+                    .map(|bpm| (format!("{bpm} BPM"), Choice::Tempo(bpm)))
+                    .collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -391,6 +427,7 @@ impl Dialog {
             Choice::Midi(None) => !self.draft.auto_midi && self.draft.midi_inputs.is_empty(),
             Choice::Midi(Some(name)) => self.draft.midi_inputs.contains(name),
             Choice::Channel(channel) => self.draft.midi_channel == *channel,
+            Choice::Tempo(bpm) => self.tempo == *bpm,
         }
     }
     fn choose(&mut self, choice: Choice) {
@@ -441,6 +478,10 @@ impl Dialog {
                 }
             }
             Choice::Channel(channel) => self.draft.midi_channel = channel,
+            Choice::Tempo(bpm) => {
+                self.tempo = crate::settings::tempo_within(bpm);
+                self.tempo_changed = true;
+            }
         }
         self.record_edit(&previous);
         self.local_error = None;
@@ -516,6 +557,10 @@ impl Dialog {
                 self.draft.midi_channel = stepped(&channels, &self.draft.midi_channel, direction)
                     .copied()
                     .flatten();
+            }
+            TEMPO_ROW => {
+                let bpm = (i32::from(self.tempo) + direction).clamp(0, i32::from(u16::MAX));
+                self.choose(Choice::Tempo(bpm as u16));
             }
             _ => {}
         }
@@ -622,7 +667,7 @@ impl Dialog {
             }
             return false;
         }
-        if (ROW_Y..ROW_Y + ROW_H * 8.0).contains(&y) && (X..X + WIDTH).contains(&x) {
+        if (ROW_Y..ROW_Y + ROW_H * ROWS as f64).contains(&y) && (X..X + WIDTH).contains(&x) {
             let row = ((y - ROW_Y) / ROW_H) as usize;
             self.focus = row;
             if x >= VALUE_X - 30.0 {
@@ -680,30 +725,30 @@ impl Dialog {
             Key::Tab => {
                 self.focus = (self.focus
                     + if event.modifiers.contains(Modifiers::SHIFT) {
-                        10
+                        ROWS + 2
                     } else {
                         1
                     })
-                    % 11;
+                    % (ROWS + 3);
                 self.changed = true;
             }
             Key::ArrowDown => {
-                self.focus = (self.focus + 1) % 11;
+                self.focus = (self.focus + 1) % (ROWS + 3);
                 self.changed = true;
             }
             Key::ArrowUp => {
-                self.focus = (self.focus + 10) % 11;
+                self.focus = (self.focus + ROWS + 2) % (ROWS + 3);
                 self.changed = true;
             }
             Key::ArrowLeft => self.cycle(self.focus, -1),
             Key::ArrowRight => self.cycle(self.focus, 1),
             Key::Enter => match self.focus {
-                8 => {
+                f if f == ROWS => {
                     self.local_error = self.app.refresh().err();
                     self.changed = true;
                 }
-                9 => return true,
-                10 => return self.finish_or_apply(),
+                f if f == ROWS + 1 => return true,
+                f if f == ROWS + 2 => return self.finish_or_apply(),
                 _ => self.open_menu(self.focus),
             },
             Key::Character(ref text) if text == " " => self.open_menu(self.focus),
@@ -825,6 +870,10 @@ impl Dialog {
                     .midi_channel
                     .map_or_else(|| "ALL".to_owned(), |channel| channel.to_string()),
             ),
+            (
+                "TEMPO",
+                format!("{} BPM (the arpeggiator's; applied at once)", self.tempo),
+            ),
         ];
         for (row, (label, value)) in rows.iter().enumerate() {
             let y = ROW_Y + row as f64 * ROW_H;
@@ -856,7 +905,7 @@ impl Dialog {
                 y + 31.0
             );
         }
-        let status_y = ROW_Y + ROW_H * 8.0 + 50.0;
+        let status_y = ROW_Y + ROW_H * ROWS as f64 + 50.0;
         let phase = match self.snapshot.phase {
             Phase::Stopped => "STOPPED",
             Phase::Starting => "STARTING",
@@ -922,7 +971,7 @@ impl Dialog {
                 svg,
                 r##"<rect x="{x}" y="{BUTTON_Y}" width="{width}" height="75" rx="8" fill="{}" stroke="{}" stroke-width="3"/>"##,
                 if enabled { "#3a3022" } else { "#15171b" },
-                if self.focus == button + 8 {
+                if self.focus == button + ROWS {
                     "#f0a030"
                 } else {
                     "#4a4640"
@@ -1099,7 +1148,7 @@ mod tests {
         assert!(dialog.svg().contains(">DONE</text>"));
         assert!(!dialog.svg().contains(">APPLY</text>"));
         assert!(dialog.press(X + WIDTH - 200.0, BUTTON_Y + 30.0));
-        dialog.focus = 10;
+        dialog.focus = ROWS + 2;
         assert!(dialog.key(&KeyboardEvent {
             key: Key::Enter,
             ..Default::default()

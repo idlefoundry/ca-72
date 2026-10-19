@@ -35,7 +35,10 @@ use ca72_panel::presets::{
     BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, PresetKey, ROW_H, drawer_hit,
     in_tags,
 };
-use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
+use ca72_panel::strip::arp::{self as arp_ui, ArpBank, ArpRenderer, ArpScene, ArpTarget};
+use ca72_panel::strip::fx::{self as fx_ui, FxRenderer, FxScene};
+use ca72_panel::strip::lower as lower_ui;
+use ca72_panel::strip::{self, Bank, Field, Rail, Readout, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Lettering, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 use nih_plug::editor::HostKey;
@@ -43,10 +46,11 @@ use nih_plug::prelude::*;
 use plugin_kit_stereo::place;
 
 use crate::engine::LEVELS;
+use crate::fx_view::FxView;
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
 use crate::opening::{ANIMATE_S, Motion, level_of};
-use crate::params::{Ca72Params, QualityMode, Scatter};
+use crate::params::{ArpDirection, ArpRate, Ca72Params, QualityMode, Scatter};
 use crate::presets::Browser;
 use crate::settings::{Change, Settings};
 use crate::update::Update;
@@ -75,9 +79,9 @@ const SIZES: [(&str, f64); 5] = [
 const GRIP_TIP: &str = "DRAG TO RESIZE";
 
 /// Where the settings' menu and the SIZE menu open: their top right corner under the rail's
-/// settings key, at its right end.
+/// settings key, at its right end (in the same place on either rail).
 fn settings_menu_corner() -> (f64, f64) {
-    let (x, y) = strip::centre(StripTarget::Bar(BarTarget::Settings));
+    let (x, y) = strip::centre(Rail::Plugin, StripTarget::Bar(BarTarget::Settings));
     (x + strip::KEY_W / 2.0, y + strip::KEY_H / 2.0 + 6.0)
 }
 
@@ -332,8 +336,108 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "double" => &p.double,
         "drive" => &p.drive,
         "level" => &p.level,
+        // The arpeggiator's drawer's (decisions.md R-ARP).
+        "arp_rate" => &p.arp_rate,
+        "arp_octaves" => &p.arp_octaves,
+        "arp_gate" => &p.arp_gate,
+        "arp_swing" => &p.arp_swing,
         _ => return None,
     })
+}
+
+/// A readout a value is typed into (decisions.md R52): the strip's, or the arpeggiator's
+/// drawer's (RATE, OCTAVES, GATE, SWING; R-ARP).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Typed {
+    Strip(Readout),
+    Arp(usize),
+}
+
+/// The drawers dropped from the rail: the arpeggiator's (decisions.md R-ARP), and the
+/// standalone's effects' (R-FX-DRAWER).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Lower {
+    #[default]
+    Arp,
+    Fx,
+}
+
+impl Lower {
+    /// How deep it is.
+    fn depth(self) -> f64 {
+        match self {
+            Lower::Arp => arp_ui::DEPTH,
+            Lower::Fx => fx_ui::DEPTH,
+        }
+    }
+}
+
+/// The drawer dropped from the rail, one at a time: which, open or not, and its slide, as the
+/// presets' drawer's (`presets::SLIDE`).
+#[derive(Debug, Default)]
+struct Dropped {
+    which: Lower,
+    open: bool,
+    slide: Option<(Instant, bool)>,
+}
+
+impl Dropped {
+    /// `which` opened or put away, sliding there; another open put away for it at once (it
+    /// drops from the rail anew).
+    fn show(&mut self, which: Lower, on: bool) {
+        if !on {
+            if self.which == which && self.open {
+                self.open = false;
+                self.slide = Some((Instant::now(), false));
+            }
+            return;
+        }
+        if self.open && self.which == which {
+            return;
+        }
+        self.which = which;
+        self.open = true;
+        self.slide = Some((Instant::now(), true));
+    }
+
+    /// Whether `which` is open (or opening).
+    fn is_open(&self, which: Lower) -> bool {
+        self.open && self.which == which
+    }
+
+    /// Put away at once (the lower panel hidden).
+    fn shut(&mut self) {
+        self.open = false;
+        self.slide = None;
+    }
+
+    /// How far down it is, 0 to 1.
+    fn reveal(&self) -> f64 {
+        match self.slide {
+            Some((t0, opening)) => {
+                let k = (t0.elapsed().as_secs_f64() / crate::presets::SLIDE.as_secs_f64()).min(1.0);
+                let k = 1.0 - (1.0 - k) * (1.0 - k);
+                if opening { k } else { 1.0 - k }
+            }
+            None => f64::from(u8::from(self.open)),
+        }
+    }
+
+    fn sliding(&self) -> bool {
+        self.slide
+            .is_some_and(|(t0, _)| t0.elapsed() < crate::presets::SLIDE)
+    }
+
+    fn tick(&mut self) {
+        if self.slide.is_some() && !self.sliding() {
+            self.slide = None;
+        }
+    }
+
+    /// Open and still: its parts answer the pointer.
+    fn settled(&self) -> bool {
+        self.open && self.slide.is_none()
+    }
 }
 
 /// The editor, as the plug-in hands it to the host.
@@ -766,6 +870,21 @@ struct Editing {
     /// window's frame: the panel's, the strip's parts under its foot, the drawer over them.
     drawer: DrawerRenderer,
     pub(crate) browser: Browser,
+    /// The arpeggiator's drawer (decisions.md R-ARP): its renderer, what it shows. The drawer
+    /// dropped from the rail: which, whether it is open, and how far down it was in the last frame
+    /// composed (and which it was).
+    arp: ArpRenderer,
+    arp_scene: ArpScene,
+    lower: Dropped,
+    lower_shown: (f64, Lower),
+    last_arp_press: Option<(Instant, ArpTarget)>,
+    /// The standalone's effects' drawer (decisions.md R-FX-DRAWER): the chain as it shows it and
+    /// what a pointer does there, its renderer (none without a chain), what it shows; the rail's
+    /// keys (its FX key with a chain).
+    fx_view: FxView,
+    fx: Option<FxRenderer>,
+    fx_scene: FxScene,
+    rail: Rail,
     composed: Option<ca72_panel::Pixmap>,
     /// Where the window's frame changed in the last `draw` that changed it (pixels: left,
     /// top, right, bottom), or none when it may have changed anywhere (decisions.md R58).
@@ -823,7 +942,7 @@ struct Editing {
     /// A value being typed into a readout (decisions.md R52): which, and what so far; the
     /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
     /// a switch had before it), for a double click.
-    typing: Option<(Readout, String)>,
+    typing: Option<(Typed, String)>,
     typing_keys: bool,
     last_strip_press: Option<(Instant, StripTarget, f32)>,
     /// Oscillators 2 and 3's FREQUENCY knobs, through the computer's law.
@@ -1015,6 +1134,7 @@ impl Editing {
             Settings::load()
         };
         params.set_freq_law(settings.frequency);
+        params.set_tempo(f64::from(settings.tempo));
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
         playing.standalone = standalone;
@@ -1025,7 +1145,13 @@ impl Editing {
             params: Arc::clone(&params),
             pot,
         });
-        Editing {
+        // The standalone's effects (decisions.md R-FX-DRAWER): the plug-ins have none.
+        let effects = if standalone {
+            crate::fx_view::installed()
+        } else {
+            None
+        };
+        let mut editing = Editing {
             context,
             params,
             meters,
@@ -1044,6 +1170,19 @@ impl Editing {
             last: [0.5; 4],
             drawer: DrawerRenderer::new(f64::from(physical_width) / art::W),
             browser: Browser::new(library),
+            arp: ArpRenderer::new(
+                f64::from(physical_width) / art::W,
+                settings.skin,
+                settings.lettering,
+            ),
+            arp_scene: ArpScene::default(),
+            lower: Dropped::default(),
+            lower_shown: (0.0, Lower::Arp),
+            last_arp_press: None,
+            fx_view: FxView::new(None),
+            fx: None,
+            fx_scene: FxScene::default(),
+            rail: Rail::Plugin,
             composed: None,
             damage: None,
             resizing_window: false,
@@ -1076,8 +1215,29 @@ impl Editing {
             playing,
             #[cfg(feature = "standalone-production")]
             standalone_dialog: None,
-        }
-        .opened()
+        };
+        editing.use_effects(FxView::new(effects));
+        editing.opened()
+    }
+
+    /// The effects' drawer for `view`'s chain: with one, its renderer (its still parts begun on
+    /// their thread) and the rail's FX key; without, the plug-ins' rail.
+    fn use_effects(&mut self, view: FxView) {
+        self.rail = if view.available() {
+            Rail::Effects
+        } else {
+            Rail::Plugin
+        };
+        self.fx = view.available().then(|| {
+            FxRenderer::new(
+                self.renderer.scale(),
+                self.renderer.skin(),
+                self.renderer.lettering(),
+            )
+        });
+        self.fx_view = view;
+        self.strip.set_rail(self.rail);
+        self.composed = None;
     }
 
     /// As it opens: what QUALITY's setting shows up in its opening, not moving (the hamster
@@ -1097,6 +1257,10 @@ impl Editing {
         if self.renderer.skin() != skin {
             let lettering = self.renderer.lettering();
             self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
+            self.arp.set_look(skin, lettering);
+            if let Some(fx) = &mut self.fx {
+                fx.set_look(skin, lettering);
+            }
             self.composed = None;
         }
     }
@@ -1132,6 +1296,10 @@ impl Editing {
         if self.renderer.lettering() != lettering {
             let skin = self.renderer.skin();
             self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
+            self.arp.set_look(skin, lettering);
+            if let Some(fx) = &mut self.fx {
+                fx.set_look(skin, lettering);
+            }
             self.composed = None;
         }
     }
@@ -1274,6 +1442,10 @@ impl Editing {
         self.renderer.rescale(scale, dpr);
         self.strip.rescale(scale);
         self.drawer.rescale(scale);
+        self.arp.rescale(scale);
+        if let Some(fx) = &mut self.fx {
+            fx.rescale(scale);
+        }
         self.composed = None;
     }
 
@@ -1318,6 +1490,41 @@ impl Editing {
     fn in_drawer(&self, (x, y): (f64, f64)) -> Option<(f64, f64)> {
         let (top, from, to) = self.drawer_span()?;
         (y >= from && y < to).then_some((x, y - top))
+    }
+
+    /// The drawer dropped from the rail: its top now (drawing units), while it shows, dropping
+    /// down from under the rail, over the lower page.
+    fn lower_top(&self) -> Option<f64> {
+        let k = self.lower.reveal();
+        (k > 0.0 && self.expanded()).then_some(lower_ui::TOP - (1.0 - k) * self.lower.which.depth())
+    }
+
+    /// Whether the pointer (the drawing's units) is over the drawer dropped from the rail, as much
+    /// of it as shows, or the effects' list hanging from it (the presets' drawer, over it, apart).
+    fn in_lower(&self, (x, y): (f64, f64)) -> bool {
+        self.lower_top().is_some_and(|top| {
+            let plate = (lower_ui::LEFT..lower_ui::RIGHT).contains(&x)
+                && y >= DRAWER_TOP
+                && y < top + self.lower.which.depth();
+            let list = self.lower.which == Lower::Fx
+                && self.lower.settled()
+                && self
+                    .fx_scene
+                    .list
+                    .as_ref()
+                    .is_some_and(|l| fx_ui::list_hit(l, x, y).is_some());
+            plate || list
+        }) && self.in_drawer((x, y)).is_none()
+    }
+
+    /// Whether the pointer is over the arpeggiator's drawer.
+    fn in_arp(&self, at: (f64, f64)) -> bool {
+        self.lower.which == Lower::Arp && self.in_lower(at)
+    }
+
+    /// Whether the pointer is over the effects' drawer or its list.
+    fn in_fx(&self, at: (f64, f64)) -> bool {
+        self.lower.which == Lower::Fx && self.in_lower(at)
     }
 
     fn expanded(&self) -> bool {
@@ -1449,6 +1656,10 @@ impl Editing {
         self.params
             .editor_panel_applied
             .store(expanded, Ordering::Relaxed);
+        if !expanded {
+            self.lower.shut();
+            self.fx_view.close_list();
+        }
         self.typing = None;
         self.hover = None;
         self.strip_scene.hover = None;
@@ -1491,7 +1702,7 @@ impl Editing {
 
     /// The rail's part under the pointer (the drawing's units), if it is over one.
     fn on_rail(&self, (x, y): (f64, f64)) -> Option<BarTarget> {
-        match strip::hit(x, y) {
+        match strip::hit(self.rail, x, y) {
             Some(StripTarget::Bar(t)) => Some(t),
             _ => None,
         }
@@ -1530,7 +1741,15 @@ impl Editing {
         {
             return;
         }
-        self.typing = Some((r, String::new()));
+        self.typing = Some((Typed::Strip(r), String::new()));
+        self.typing_keys = true;
+    }
+
+    /// A value to be typed into the arpeggiator's drawer's readout `i` (RATE, OCTAVES, GATE,
+    /// SWING; decisions.md R-ARP).
+    fn start_arp_typing(&mut self, i: usize) {
+        self.playing.release();
+        self.typing = Some((Typed::Arp(i.min(3)), String::new()));
         self.typing_keys = true;
     }
 
@@ -1548,12 +1767,21 @@ impl Editing {
             Key::Character(c) => {
                 for ch in c.chars() {
                     let cells = text.chars().filter(|c| *c != '.').count();
-                    let fits = match ch {
-                        '0'..='9' => cells < 3,
-                        '.' => !text.contains('.') && cells < 3,
-                        '-' => text.is_empty() && matches!(r, Readout::Level),
+                    // (RATE's note value: dotted with a point after it, a triplet with a T;
+                    // OCTAVES one digit.)
+                    let ended = text.ends_with(['.', 't']);
+                    let fits = match (*r, ch) {
+                        (Typed::Arp(0), '0'..='9') => cells < 2 && !ended,
+                        (Typed::Arp(0), '.') => cells > 0 && !ended,
+                        (Typed::Arp(0), 't' | 'T') => cells > 0 && !ended,
+                        (Typed::Arp(1), '0'..='9') => cells < 1,
+                        (Typed::Arp(1), _) => false,
+                        (_, '0'..='9') => cells < 3,
+                        (_, '.') => !text.contains('.') && cells < 3,
+                        (Typed::Strip(r), '-') => text.is_empty() && matches!(r, Readout::Level),
                         _ => false,
                     };
+                    let ch = ch.to_ascii_lowercase();
                     if fits {
                         text.push(ch);
                     }
@@ -1565,7 +1793,10 @@ impl Editing {
             Key::Enter => {
                 let (r, text) = (*r, text.clone());
                 self.typing = None;
-                self.set_typed(r, &text);
+                match r {
+                    Typed::Strip(r) => self.set_typed(r, &text),
+                    Typed::Arp(i) => self.set_arp_typed(i, &text),
+                }
             }
             Key::Escape => self.typing = None,
             _ => {}
@@ -1605,6 +1836,99 @@ impl Editing {
         if let Some(i) = ca72_panel::controls::index(id) {
             self.set_once(i, f64::from(normalized.clamp(0.0, 1.0)));
         }
+    }
+
+    /// The value typed into the arpeggiator's drawer's readout `i` set, as it reads it: RATE a
+    /// note value (16, 16. dotted, 16t a triplet: one of its thirteen), OCTAVES 1 to 4, GATE and
+    /// SWING percent; nothing for what is not one.
+    fn set_arp_typed(&mut self, i: usize, text: &str) {
+        let p = &self.params;
+        let normalized = match i {
+            0 => {
+                let Some(k) = crate::arp::RATES.iter().position(|(t, _)| *t == text) else {
+                    return;
+                };
+                p.arp_rate.preview_normalized(ArpRate::from_index(k))
+            }
+            1 => {
+                let Ok(v) = text.parse::<i32>() else { return };
+                p.arp_octaves.preview_normalized(
+                    v.clamp(crate::params::ARP_OCTAVES.0, crate::params::ARP_OCTAVES.1),
+                )
+            }
+            _ => {
+                let Ok(v) = text.parse::<f32>() else { return };
+                if !v.is_finite() {
+                    return;
+                }
+                let q = if i == 2 { &p.arp_gate } else { &p.arp_swing };
+                q.preview_normalized(v.clamp(0.0, 100.0))
+            }
+        };
+        if let Some(c) = ca72_panel::controls::index(arp_ui::KNOB_PARAMS[i.min(3)]) {
+            self.set_once(c, f64::from(normalized.clamp(0.0, 1.0)));
+        }
+    }
+
+    /// A press on the arpeggiator's drawer's tabs and readouts (decisions.md R-ARP): ON and
+    /// LATCH each switched, DIRECTION's choice set, a readout double-clicked typed into.
+    fn arp_press(&mut self, t: ArpTarget) {
+        let now = Instant::now();
+        let double = self
+            .last_arp_press
+            .is_some_and(|(at, last)| last == t && now - at < DOUBLE_CLICK);
+        self.last_arp_press = Some((now, t));
+        let p = &self.params;
+        match t {
+            ArpTarget::Tab(ArpBank::Arp, 0) => self.set_switch(&p.arp_on, !p.arp_on.value()),
+            ArpTarget::Tab(ArpBank::Arp, _) => {
+                self.set_switch(&p.arp_latch, !p.arp_latch.value());
+            }
+            ArpTarget::Tab(ArpBank::Direction, i) => {
+                let q = &p.arp_direction;
+                let last = ArpDirection::variants().len() - 1;
+                let to = q.preview_normalized(ArpDirection::from_index(i.min(last)));
+                if q.unmodulated_normalized_value() != to {
+                    let s = self.setter();
+                    s.begin_set_parameter(q);
+                    s.set_parameter_normalized(q, to);
+                    s.end_set_parameter(q);
+                }
+            }
+            ArpTarget::Readout(i) => {
+                if double {
+                    self.last_arp_press = None;
+                    self.start_arp_typing(i);
+                }
+            }
+        }
+    }
+
+    /// The rail's ARP key, or the standalone's FX key: its drawer dropped down over the lower
+    /// page (the other's put away for it), or put away (the presets' drawer, if open, shut for it;
+    /// the lower panel shown if hidden).
+    fn toggle_lower(&mut self, which: Lower) {
+        if !self.expanded() {
+            self.toggle_panel();
+            if !self.expanded() {
+                return;
+            }
+            self.lower.show(which, true);
+        } else if self.browser.open {
+            self.browser.show(false, &self.params);
+            self.follow_drawer();
+            self.lower.show(which, true);
+        } else {
+            self.lower.show(which, !self.lower.is_open(which));
+        }
+        self.typing = None;
+        self.hover = None;
+        self.strip_scene.hover = None;
+        self.arp_scene.hover = None;
+        self.fx_view.hover = None;
+        self.fx_view.cancel_press();
+        self.fx_view.close_list();
+        self.composed = None;
     }
 
     fn set_power(&self, on: bool) {
@@ -1697,6 +2021,10 @@ impl Editing {
         self.last_strip_press = Some((now, t, before));
         match t {
             StripTarget::Bar(BarTarget::Panel) => self.toggle_panel(),
+            StripTarget::Bar(BarTarget::Arp) => self.toggle_lower(Lower::Arp),
+            StripTarget::Bar(BarTarget::Fx) if self.fx_view.available() => {
+                self.toggle_lower(Lower::Fx);
+            }
             StripTarget::Readout(_) => {}
             StripTarget::Switch(a) => {
                 let on = self.amount(a).0.unmodulated_normalized_value() <= 0.0;
@@ -1789,10 +2117,19 @@ impl Editing {
         }
         // A press on the readout a value is being typed into leaves it typed into; anywhere
         // else ends the typing, nothing set (decisions.md R52).
-        if let Some((r, _)) = self.typing
-            && matches!(strip::hit(x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
-        {
-            return;
+        if let Some((r, _)) = self.typing {
+            let on_it = match r {
+                Typed::Strip(r) => {
+                    !self.in_arp((x, y))
+                        && matches!(strip::hit(self.rail, x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
+                }
+                Typed::Arp(i) => {
+                    self.in_arp((x, y)) && arp_ui::hit(x, y) == Some(ArpTarget::Readout(i))
+                }
+            };
+            if on_it {
+                return;
+            }
         }
         // A wheel's gesture still waiting for its rest, or a drag whose release never came
         // (its window lost the pointer): ended before anything else begins.
@@ -1853,6 +2190,19 @@ impl Editing {
                 self.show_midi_list(chosen);
                 return;
             }
+            Pressed::FxReplace(slot) => {
+                self.fx_view.replace(slot);
+                return;
+            }
+            Pressed::FxRemove(slot) => {
+                self.fx_view.remove(slot);
+                return;
+            }
+        }
+        // The effects' list open: a press elsewhere puts it away, and is its own.
+        if self.fx_view.list_open() && !self.in_fx((x, y)) {
+            self.fx_view.close_list();
+            return;
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
             match drawer_hit(&self.browser.drawer, dx, dy) {
@@ -1875,6 +2225,26 @@ impl Editing {
                 }
             }
             self.follow_drawer();
+            return;
+        }
+        // The arpeggiator's drawer, over the lower page: its own parts only, and while it slides
+        // nothing.
+        if self.in_arp((x, y)) {
+            if !self.lower.settled() {
+                return;
+            }
+            if let Some(t) = arp_ui::hit(x, y) {
+                self.arp_press(t);
+            } else if let Some(target) = interact::hit_arp(x, y) {
+                self.press_target(target, modifiers);
+            }
+            return;
+        }
+        // The effects' drawer and its list (decisions.md R-FX-DRAWER).
+        if self.in_fx((x, y)) {
+            if self.lower.settled() {
+                self.fx_view.press(x, y);
+            }
             return;
         }
         if self.playing.visible
@@ -1912,13 +2282,19 @@ impl Editing {
             self.strip_scene.hover = None;
             return;
         }
-        if let Some(t) = strip::hit(x, y) {
+        if let Some(t) = strip::hit(self.rail, x, y) {
             self.strip_press(t);
             return;
         }
         let Some(target) = self.hit(x, y) else {
             return;
         };
+        self.press_target(target, modifiers);
+    }
+
+    /// A press on a control (the panel's, the strip's knobs, the arpeggiator's drawer's), on
+    /// POWER or the grip.
+    fn press_target(&mut self, target: Target, modifiers: Modifiers) {
         let now = Instant::now();
         let double = self
             .last_press
@@ -1975,7 +2351,8 @@ impl Editing {
         }
         let size = self.renderer.text_size() * MENU_TEXT;
         let map = &self.params.midi_map;
-        if self.playing.visible && keyboard::inside(x, y) {
+        // (A drawer dropped from the rail is over the keyboard's top: its own menus.)
+        if self.playing.visible && keyboard::inside(x, y) && !self.in_lower((x, y)) {
             self.learning.close_menu();
             return;
         }
@@ -1983,7 +2360,38 @@ impl Editing {
             self.learning.close_menu();
             return;
         }
-        if let Some(t) = strip::hit(x, y) {
+        // The arpeggiator's drawer: a knob's menu, as the panel's (its tabs are learned from the
+        // presets' drawer's MIDI list).
+        if self.in_arp((x, y)) {
+            match interact::hit_arp(x, y).filter(|_| self.lower.settled()) {
+                Some(target @ Target::Control(i)) => self.learning.open_menu(
+                    self.renderer.fonts(),
+                    map,
+                    Some(Place::Panel(i)),
+                    Some(target),
+                    (x, y),
+                    size,
+                ),
+                _ => self.learning.close_menu(),
+            }
+            return;
+        }
+        // An effects' slot: REPLACE… and REMOVE.
+        if self.in_fx((x, y)) {
+            match self
+                .fx_view
+                .menu_for(x, y)
+                .filter(|_| self.lower.settled() && !self.fx_view.list_open())
+            {
+                Some((slot, name)) => {
+                    self.learning
+                        .open_fx_menu(self.renderer.fonts(), (x, y), size, slot, &name);
+                }
+                None => self.learning.close_menu(),
+            }
+            return;
+        }
+        if let Some(t) = strip::hit(self.rail, x, y) {
             // A tab's menu (the strip's knobs' are the panel's), above it.
             match t.control() {
                 Some(c) => {
@@ -2045,12 +2453,17 @@ impl Editing {
             });
             return;
         }
-        self.playing.hover =
-            if self.expanded() && self.playing.visible && self.in_drawer((x, y)).is_none() {
-                keyboard::hit(self.playing.root, x, y, self.playing.standalone)
-            } else {
-                None
-            };
+        self.playing.hover = if self.expanded()
+            && self.playing.visible
+            && self.in_drawer((x, y)).is_none()
+            && !self.in_lower((x, y))
+            && !self.fx_view.pressing()
+            && !self.learning.over_menu(self.renderer.fonts(), (x, y))
+        {
+            keyboard::hit(self.playing.root, x, y, self.playing.standalone)
+        } else {
+            None
+        };
         if self.playing.hover.is_some() {
             self.hover = None;
             self.strip_scene.hover = None;
@@ -2079,10 +2492,30 @@ impl Editing {
             let over_drawer = self.in_drawer(at);
             self.browser.drawer.hover =
                 over_drawer.and_then(|(dx, dy)| drawer_hit(&self.browser.drawer, dx, dy));
+            if self.in_arp(at) {
+                let settled = self.lower.settled();
+                self.arp_scene.hover = arp_ui::hit(x, y).filter(|_| settled);
+                self.hover = interact::hit_arp(x, y).filter(|_| settled);
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                return;
+            }
+            self.arp_scene.hover = None;
+            // The effects' drawer: a slot carried, the part under the pointer.
+            if self.in_fx(at) || self.fx_view.pressing() {
+                if self.lower.settled() {
+                    self.fx_view.moved(x, y);
+                }
+                self.hover = None;
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                return;
+            }
+            self.fx_view.hover = None;
             let on_strip = if over_drawer.is_some() {
                 None
             } else {
-                strip::hit(x, y)
+                strip::hit(self.rail, x, y)
             };
             self.browser.bar.hover = match on_strip {
                 Some(StripTarget::Bar(t)) => Some(t),
@@ -2125,13 +2558,17 @@ impl Editing {
         }
     }
 
-    /// Whether a press is being held: a control or the grip dragged.
+    /// Whether a press is being held: a control, an effects' slot or the grip dragged.
     fn dragging(&self) -> bool {
-        self.drag.is_some() || self.resizing.is_some() || self.playing.dragging()
+        self.drag.is_some()
+            || self.resizing.is_some()
+            || self.playing.dragging()
+            || self.fx_view.pressing()
     }
 
     fn released(&mut self) {
         self.playing.release_pointer();
+        self.fx_view.released();
         if self.resizing.take().is_some() {
             return;
         }
@@ -2145,6 +2582,7 @@ impl Editing {
     /// pointer's capture. A gesture never begins inside another (decisions.md R18).
     fn end_gestures(&mut self) {
         self.playing.release_pointer();
+        self.fx_view.cancel_press();
         self.typing = None;
         self.end_scroll();
         self.resizing = None;
@@ -2198,7 +2636,7 @@ impl Editing {
             return;
         }
         let (x, y) = self.in_drawing(self.pointer);
-        if self.playing.visible && keyboard::inside(x, y) {
+        if self.playing.visible && keyboard::inside(x, y) && !self.in_lower((x, y)) {
             return;
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
@@ -2232,10 +2670,35 @@ impl Editing {
         if !self.expanded() && y >= DRAWER_TOP {
             return;
         }
-        if strip::hit(x, y).is_some() {
+        // The effects' list scrolls a row for each row's travel, as the presets' list does.
+        if self.in_fx((x, y)) {
+            if self.fx_view.list_open() {
+                let rows = match delta {
+                    ScrollDelta::Lines { y, .. } => f64::from(y),
+                    ScrollDelta::Pixels { y, .. } => {
+                        f64::from(y) * self.dpr / self.renderer.scale() / fx_ui::LINE
+                    }
+                };
+                if rows * self.list_travel < 0.0 {
+                    self.list_travel = 0.0;
+                }
+                self.list_travel += rows;
+                let whole = self.list_travel.trunc();
+                if whole != 0.0 {
+                    self.fx_view.scroll(-(whole as i32));
+                    self.list_travel -= whole;
+                }
+            }
             return;
         }
-        let Some(Target::Control(i) | Target::Legend(i, _)) = self.hit(x, y) else {
+        let over = if self.in_arp((x, y)) {
+            interact::hit_arp(x, y).filter(|_| self.lower.settled())
+        } else if strip::hit(self.rail, x, y).is_some() {
+            return;
+        } else {
+            self.hit(x, y)
+        };
+        let Some(Target::Control(i) | Target::Legend(i, _)) = over else {
             return;
         };
         if !self.operable(i) {
@@ -2382,23 +2845,52 @@ impl Editing {
         self.strip_scene.keyboard = self.playing.scene(self.renderer.skin());
         self.browser.bar.keyboard = self.playing.visible;
         self.browser.bar.panel = self.expanded();
+        self.browser.bar.arp = self.params.arp_on.value();
+        // The effects' (decisions.md R-FX-DRAWER): the chain read when it is free; the FX key lit
+        // while one plays.
+        self.fx_view.poll(Instant::now());
+        self.browser.bar.fx = self.fx_view.active();
+        self.fx_scene = self.fx_view.scene();
+        self.arp_scene = arp_scene(
+            &self.params,
+            &self.scene.values,
+            std::mem::take(&mut self.arp_scene),
+        );
         // A value being typed: what is typed so far, lit, the next digit's place marked while
         // there is room for one.
-        if let Some((r, text)) = &self.typing
-            && let Some(i) = Readout::ALL.iter().position(|x| x == r)
-        {
+        if let Some((r, text)) = &self.typing {
             let cells = text.chars().filter(|c| *c != '.').count();
-            let shown = if cells < 3 {
+            let room = match r {
+                Typed::Arp(0) => cells < 2 && !text.ends_with(['.', 't']),
+                Typed::Arp(1) => cells < 1,
+                _ => cells < 3,
+            };
+            let shown = if room {
                 format!("{text}_")
             } else {
                 text.clone()
             };
-            self.strip_scene.readouts[i] = (shown, true);
+            match r {
+                Typed::Strip(r) => {
+                    if let Some(i) = Readout::ALL.iter().position(|x| x == r) {
+                        self.strip_scene.readouts[i] = (shown, true);
+                    }
+                }
+                Typed::Arp(i) => self.arp_scene.readouts[(*i).min(3)] = (shown, true),
+            }
         }
     }
 
-    /// The tip: over the control operated, else over the one under the pointer.
+    /// The tip: over the control operated, else over the one under the pointer (an effects'
+    /// slot's: its effect's whole name and maker).
     fn tip(&self) -> Option<(String, f64, f64)> {
+        if self.lower.which == Lower::Fx
+            && self.lower.settled()
+            && self.drag.is_none()
+            && let Some(t) = self.fx_view.tip()
+        {
+            return Some(t);
+        }
         let operated = self
             .drag
             .as_ref()
@@ -2479,11 +2971,12 @@ impl Editing {
         }
         #[cfg(feature = "standalone-production")]
         {
-            if let Some(dialog) = crate::standalone_settings::take_requested()
+            if let Some(mut dialog) = crate::standalone_settings::take_requested()
                 && self.standalone_dialog.is_none()
             {
                 self.playing.release();
                 self.end_gestures();
+                dialog.set_tempo(self.settings.tempo);
                 self.standalone_dialog = Some(dialog);
                 self.playing.wants_keys = true;
                 self.composed = None;
@@ -2492,6 +2985,15 @@ impl Editing {
                 && dialog.frame()
             {
                 self.composed = None;
+            }
+            // TEMPO changed there: the arpeggiator's at once, and this computer's (R-ARP).
+            if let Some(bpm) = self
+                .standalone_dialog
+                .as_mut()
+                .and_then(crate::standalone_settings::Dialog::take_tempo)
+            {
+                self.keep_settings(Change::Tempo(bpm));
+                self.params.set_tempo(f64::from(bpm));
             }
         }
         let requested_height = self.params.editor_panel.load(Ordering::Relaxed)
@@ -2559,6 +3061,20 @@ impl Editing {
             under,
             self.motion_at.unwrap_or_else(Instant::now),
         );
+        // The drawer dropped from the rail over the lower page while it shows: the arpeggiator's
+        // (decisions.md R-ARP; its knobs drawn as the panel's renderer draws controls) or the
+        // effects' (R-FX-DRAWER).
+        self.lower.tick();
+        let which = self.lower.which;
+        let lower_k = self.lower_top().map_or(0.0, |_| self.lower.reveal());
+        let lower_moved = (lower_k, which) != self.lower_shown;
+        let lower = lower_k > 0.0
+            && (match (which, &mut self.fx) {
+                (Lower::Fx, Some(fx)) => fx.render(&self.fx_scene),
+                _ => self.arp.render(&self.arp_scene, &mut self.renderer),
+            } || self.lower.sliding()
+                || lower_moved);
+        let lower_shut = lower_k <= 0.0 && lower_moved;
         // The drawer over the strip, dropping down from under the rail, while it shows.
         let k = self.browser.reveal();
         // (Its place changed since the frame last shown is a change too: the slide's last frame
@@ -2567,10 +3083,11 @@ impl Editing {
         let drawer = k > 0.0
             && (self.drawer.render(&self.browser.drawer) || self.browser.sliding() || moved);
         let shut = k <= 0.0 && moved;
-        if !(panel || strip || drawer || shut || self.composed.is_none()) {
+        if !(panel || strip || drawer || shut || lower || lower_shut || self.composed.is_none()) {
             return false;
         }
         self.reveal_shown = k;
+        self.lower_shown = (lower_k, which);
         // The places that changed, the panel's and the strip's, put together again alone and
         // so shown (decisions.md R58); all of the frame while the drawer moves, something
         // floats over everything, or there is no frame of this size to change.
@@ -2579,12 +3096,25 @@ impl Editing {
             .composed
             .as_ref()
             .is_some_and(|c| (c.width(), c.height()) == (self.physical_width, height));
+        let lower_moving = lower_moved || lower_shut || self.lower.sliding();
         self.damage = (kept
-            && !(drawer || shut || self.renderer.floating() || self.standalone_dialog_open()))
+            && !(drawer
+                || shut
+                || lower_moving
+                || self.renderer.floating()
+                || self.standalone_dialog_open()))
         .then(|| {
             let mut places = self.renderer.damages().to_vec();
             if let Some([x0, y0, x1, y1]) = self.strip.damage() {
                 places.push([x0, foot + y0, x1, foot + y1]);
+            }
+            let lower_damage = match (which, &self.fx) {
+                (Lower::Fx, Some(fx)) => fx.damage(),
+                _ => self.arp.damage(),
+            };
+            if lower && let Some([x0, y0, x1, y1]) = lower_damage {
+                let top = lower_ui::top_px(self.renderer.scale());
+                places.push([x0, top + y0, x1, top + y1]);
             }
             if !self.expanded() {
                 let side = (30.0 * self.renderer.scale()).ceil() as i32;
@@ -2598,10 +3128,13 @@ impl Editing {
             places
         });
         let expanded = self.expanded();
+        let lower_top = self.lower_top();
+        let scale = self.renderer.scale();
         compose(
             &mut self.composed,
             &self.renderer,
             self.strip.frame(),
+            lower_top.map(|top| lower_frame(which, top, &self.arp, self.fx.as_ref(), scale)),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
             self.damage.as_deref(),
             expanded,
@@ -2654,15 +3187,19 @@ impl Editing {
 }
 
 /// The window's frame: the panel's renderer's (the whole drawing), the strip's parts over its
-/// strip (`strip`, from the panel's foot down), the drawer over that from `drawer`'s top
+/// strip (`strip`, from the panel's foot down), the arpeggiator's drawer over that from its top
+/// (drawing units, its plate alone, cut off at the rail's foot) with its shadow laid over what is
+/// under its foot, the presets' drawer over everything from `drawer`'s top
 /// (drawing units, cut off at the rail's foot), and over everything what floats (MIDI Learn's
 /// ring, a tip, a note, a menu); in the places `only` alone (pixels: left, top, right,
 /// bottom) when given. (The places, not the rows they span: QUALITY's opening at the panel's
 /// top and the strip's drops at its foot put together the whole frame between them.)
+#[allow(clippy::too_many_arguments)]
 fn compose(
     composed: &mut Option<ca72_panel::Pixmap>,
     renderer: &Renderer,
     strip: &ca72_panel::Pixmap,
+    lower: Option<LowerFrame<'_>>,
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
     only: Option<&[[i32; 4]]>,
     expanded: bool,
@@ -2684,9 +3221,32 @@ fn compose(
     let s = renderer.scale();
     let top = (art::PANEL_H * s).round() as i32;
     let rail = (DRAWER_TOP * s).round() as i32;
+    let (left, right) = (
+        (lower_ui::LEFT * s).round() as i32,
+        (lower_ui::RIGHT * s).round() as i32,
+    );
     for &[x0, y0, x1, y1] in places {
         paste(c, frame, 0, [x0, y0, x1, y1]);
         paste(c, strip, top, [x0, y0, x1, y1]);
+        if let Some(l) = &lower {
+            // (Its frame's rows the drawing's from `top_px` down, open; moved up as it slides.)
+            let at = lower_ui::top_px(s) - ((lower_ui::TOP - l.top) * s).round() as i32;
+            let place = [x0.max(left), y0.max(rail), x1.min(right), y1];
+            paste(
+                c,
+                l.frame,
+                at,
+                [
+                    place[0],
+                    place[1],
+                    place[2],
+                    place[3].min(at + (l.depth * s).round() as i32),
+                ],
+            );
+            for &(p, px, py) in &l.under {
+                shade(c, p, (px, at + py), place);
+            }
+        }
         if let Some((d, at)) = drawer {
             paste(c, d, (at * s).round() as i32, [x0, y0.max(rail), x1, y1]);
         }
@@ -2713,6 +3273,75 @@ fn compose(
     }
 }
 
+/// A drawer dropped from the rail as [`compose`] lays it: its frame (its plate alone shown,
+/// `lower::LEFT` to `RIGHT`), how deep it is, its top now (drawing units), and what hangs under
+/// it, each premultiplied with its top left corner in the frame's pixels (its shadow; the effects'
+/// list).
+struct LowerFrame<'a> {
+    frame: &'a ca72_panel::Pixmap,
+    depth: f64,
+    top: f64,
+    under: Vec<(&'a ca72_panel::Pixmap, i32, i32)>,
+}
+
+/// The drawer `which` as [`compose`] lays it, its top at `top` (drawing units).
+fn lower_frame<'a>(
+    which: Lower,
+    top: f64,
+    arp: &'a ArpRenderer,
+    fx: Option<&'a FxRenderer>,
+    scale: f64,
+) -> LowerFrame<'a> {
+    match (which, fx) {
+        (Lower::Fx, Some(fx)) => LowerFrame {
+            frame: fx.frame(),
+            depth: fx_ui::DEPTH,
+            top,
+            under: fx.under(),
+        },
+        _ => LowerFrame {
+            frame: arp.frame(),
+            depth: arp_ui::DEPTH,
+            top,
+            under: arp
+                .shadow()
+                .map(|p| (p, 0, (arp_ui::DEPTH * scale).round() as i32))
+                .into_iter()
+                .collect(),
+        },
+    }
+}
+
+/// `p` (premultiplied, partly clear) laid over the frame `c` with its top left corner at
+/// (`left`, `top`), inside `place` (left, top, right, bottom) only: what hangs under a drawer
+/// dropped from the rail.
+fn shade(
+    c: &mut ca72_panel::Pixmap,
+    p: &ca72_panel::Pixmap,
+    (left, top): (i32, i32),
+    place: [i32; 4],
+) {
+    let (w, h) = (c.width() as i32, c.height() as i32);
+    let (pw, ph) = (p.width() as i32, p.height() as i32);
+    let (x0, x1) = (place[0].max(0).max(left), place[2].min(w).min(left + pw));
+    let (y0, y1) = (place[1].max(top).max(0), place[3].min(top + ph).min(h));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    for y in y0..y1 {
+        let src = (((y - top) * pw + x0 - left) * 4) as usize;
+        let dst = ((y * w + x0) * 4) as usize;
+        let n = (x1 - x0) as usize * 4;
+        let (s, d) = (&p.data()[src..src + n], &mut c.data_mut()[dst..dst + n]);
+        for (d, s) in d.chunks_exact_mut(4).zip(s.chunks_exact(4)) {
+            let keep = 255 - u16::from(s[3]);
+            for j in 0..4 {
+                d[j] = (u16::from(s[j]) + (u16::from(d[j]) * keep + 127) / 255).min(255) as u8;
+            }
+        }
+    }
+}
+
 /// `p` put in the frame `c` with its top at row `top`, inside `place` (left, top, right,
 /// bottom) only.
 fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i32; 4]) {
@@ -2728,6 +3357,27 @@ fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i
         let src = (((y - top) * pw + x0) * 4) as usize;
         let dst = ((y * w + x0) * 4) as usize;
         c.data_mut()[dst..dst + n].copy_from_slice(&p.data()[src..src + n]);
+    }
+}
+
+/// What the arpeggiator's drawer shows (decisions.md R-ARP), from the parameters and the
+/// controls' values as the panel shows them (a knob dragged where the drag has it), and the scene
+/// before (its hover is set elsewhere).
+fn arp_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], was: ArpScene) -> ArpScene {
+    let knob = |id: &str| ca72_panel::controls::index(id).map_or(0.0, |i| values[i]);
+    let rate = crate::arp::RATES[p.arp_rate.value().to_index()].0;
+    ArpScene {
+        on: p.arp_on.value(),
+        latch: p.arp_latch.value(),
+        direction: p.arp_direction.value().to_index(),
+        readouts: [
+            (rate.to_owned(), true),
+            (p.arp_octaves.value().to_string(), true),
+            (format!("{:.0}", p.arp_gate.value()), true),
+            (format!("{:.0}", p.arp_swing.value()), true),
+        ],
+        knobs: arp_ui::KNOB_PARAMS.map(knob),
+        hover: was.hover,
     }
 }
 
@@ -2887,6 +3537,10 @@ impl Editing {
         let down = k.state == KeyState::Down && !modifier(&k.key);
         if down && k.key == Key::Escape && self.learning.menu_open() {
             self.learning.close_menu();
+            return true;
+        }
+        if down && k.key == Key::Escape && self.fx_view.list_open() {
+            self.fx_view.close_list();
             return true;
         }
         if self.browser.open && self.learning.list {
@@ -4825,7 +5479,7 @@ mod tests {
         let m = e.learning.menu().expect("a menu");
         let (w, h) = m.extent(e.renderer.fonts());
         assert!(m.x >= 0.0 && m.x + w <= art::W && m.y + h <= art::H);
-        assert!(m.y > strip::centre(StripTarget::Bar(BarTarget::Settings)).1);
+        assert!(m.y > strip::centre(Rail::Plugin, StripTarget::Bar(BarTarget::Settings)).1);
         menu_item(&mut e, "CLASSIC");
         assert_eq!(
             (e.settings.skin, e.renderer.skin()),
@@ -5273,6 +5927,7 @@ mod tests {
                 &mut whole,
                 &e.renderer,
                 e.strip.frame(),
+                lower_of(&e),
                 None,
                 None,
                 true,
@@ -5316,12 +5971,478 @@ mod tests {
             &mut whole,
             &e.renderer,
             e.strip.frame(),
+            None,
             Some((e.drawer.frame(), DRAWER_TOP)),
             None,
             true,
             (e.physical_width, e.physical_height()),
         );
         assert!(e.composed == whole, "the drawer where its slide ended");
+    }
+
+    /// The drawer dropped from the rail as the editor lays it.
+    fn lower_of(e: &Editing) -> Option<LowerFrame<'_>> {
+        e.lower_top().map(|top| {
+            lower_frame(
+                e.lower.which,
+                top,
+                &e.arp,
+                e.fx.as_ref(),
+                e.renderer.scale(),
+            )
+        })
+    }
+
+    /// The arpeggiator's drawer opened by the rail's ARP key and slid all the way down.
+    fn arp_open(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Arp)));
+        click(e, p);
+        assert!(e.lower.open);
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.lower.settled());
+    }
+
+    /// The rail's ARP key drops the arpeggiator's drawer over the lower page, inside the window
+    /// (its size kept), and puts it away; it is lit while the arpeggiator is on. Open, the
+    /// drawer is what the pointer finds there: the strip's tabs and knobs and the keyboard's
+    /// buttons under it do nothing; below it, the page answers as before. The frame shown is its
+    /// frame put together whole, the drawer's shadow over the page; and the presets' drawer, opened,
+    /// is over it.
+    #[test]
+    fn the_arp_key_drops_its_drawer_over_the_lower_page() {
+        let (mut e, host, _) = editing_standalone();
+        e.playing.visible = false;
+        let size = (e.width, e.window_height());
+        arp_open(&mut e);
+        assert_eq!((e.width, e.window_height()), size);
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        // Its plate in the frame, row for row.
+        let c = e.composed.as_ref().expect("a frame");
+        let s = e.renderer.scale();
+        let (x, y) = ((2000.0 * s) as usize, (arp_ui::TOP + 200.0) * s);
+        let y = y.round() as usize;
+        let row = arp_ui::top_px(s) as usize;
+        let px = |p: &ca72_panel::Pixmap, x: usize, y: usize| {
+            let i = (y * p.width() as usize + x) * 4;
+            p.data()[i..i + 4].to_vec()
+        };
+        assert_eq!(px(c, x, y), px(e.arp.frame(), x, y - row));
+        // The strip's controls under it do nothing: AUTO GAIN's tab, VOICES's knob's top.
+        for (x, y) in [
+            strip::Bank::Auto.tab(0),
+            (centre("voices").0, arp_ui::TOP + arp_ui::DEPTH - 20.0),
+        ] {
+            assert_eq!((arp_ui::hit(x, y), interact::hit_arp(x, y)), (None, None));
+            let p = at(&e, (x, y));
+            go(&mut e, p);
+            press(&mut e);
+            go(&mut e, below(p, -40.0));
+            release(&mut e);
+        }
+        assert!(host.take().is_empty(), "nothing under the drawer");
+        // The keyboard's header under it, the keyboard shown.
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.draw();
+        let p = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
+        click(&mut e, p);
+        assert!(!e.playing.typing, "TYPING under the drawer");
+        // A key below it plays.
+        let p = at(&e, (1000.0, art::H - 60.0));
+        go(&mut e, p);
+        press(&mut e);
+        assert!(e.playing.dragging(), "a key below the drawer");
+        release(&mut e);
+        // The ARP key lit while the arpeggiator is on.
+        e.update_scene();
+        assert!(!e.browser.bar.arp);
+        // The presets' drawer over it; ARP again puts the presets away and shows it.
+        e.strip_press(StripTarget::Bar(BarTarget::Name));
+        assert!(e.browser.open && e.lower.open);
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(!e.browser.open && e.lower.open);
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(!e.lower.open);
+        e.lower.slide = None;
+        e.draw();
+        assert_eq!(e.lower_top(), None);
+        // PANEL hiding the lower panel puts it away at once.
+        arp_open(&mut e);
+        e.toggle_panel();
+        assert!(!e.lower.open && e.lower_top().is_none());
+    }
+
+    /// The drawer's tabs and knobs operate the arpeggiator's parameters, each a gesture: ON and
+    /// LATCH switched, DIRECTION's choice set; RATE and OCTAVES dragged from position to
+    /// position, never between; GATE turned; a readout double-clicked takes a value typed (RATE
+    /// a note value, 8t a triplet, 16. dotted; OCTAVES a digit; GATE percent).
+    #[test]
+    fn the_arp_drawer_operates_its_parameters() {
+        let (mut e, host, params) = editing();
+        arp_open(&mut e);
+        host.take();
+        let tab = |e: &mut Editing, b: ArpBank, i: usize| {
+            let p = at(e, arp_ui::centre(ArpTarget::Tab(b, i)));
+            click(e, p);
+        };
+        let (on, latch, dir) = (
+            params.arp_on.as_ptr(),
+            params.arp_latch.as_ptr(),
+            params.arp_direction.as_ptr(),
+        );
+        tab(&mut e, ArpBank::Arp, 0);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(on), Call::Set(on, 1.0), Call::End(on)]
+        );
+        tab(&mut e, ArpBank::Arp, 1);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(latch), Call::Set(latch, 1.0), Call::End(latch)]
+        );
+        tab(&mut e, ArpBank::Direction, 3);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(dir), Call::Set(dir, 1.0), Call::End(dir)]
+        );
+        tab(&mut e, ArpBank::Direction, 0);
+        assert!(host.take().is_empty(), "UP already");
+        // RATE dragged: positions only.
+        let rate = params.arp_rate.as_ptr();
+        let p = at(&e, centre("arp_rate"));
+        go(&mut e, p);
+        press(&mut e);
+        for dy in 1..60 {
+            go(&mut e, below(p, -f64::from(dy)));
+        }
+        release(&mut e);
+        let calls = host.take();
+        well_formed(&calls);
+        assert!(calls.len() > 3);
+        for c in &calls {
+            if let Call::Set(q, v) = *c {
+                assert_eq!(q, rate);
+                assert!(
+                    (v * 12.0 - (v * 12.0).round()).abs() < 1e-5,
+                    "between at {v}"
+                );
+            }
+        }
+        e.update_scene();
+        assert!(
+            e.scene
+                .tip
+                .as_ref()
+                .is_some_and(|t| t.0.starts_with("RATE: "))
+        );
+        // Typed.
+        let double = |e: &mut Editing, i: usize| {
+            let p = at(e, arp_ui::centre(ArpTarget::Readout(i)));
+            click(e, p);
+            click(e, p);
+        };
+        let typed = |e: &mut Editing, text: &str| {
+            for c in text.chars() {
+                keyed(e, Key::Character(c.to_string()));
+            }
+            keyed(e, Key::Enter);
+        };
+        for (i, text, ptr, want) in [
+            (
+                0,
+                "8t",
+                rate,
+                params.arp_rate.preview_normalized(ArpRate::EighthTriplet),
+            ),
+            (
+                0,
+                "16.",
+                rate,
+                params.arp_rate.preview_normalized(ArpRate::SixteenthDotted),
+            ),
+            (
+                1,
+                "3",
+                params.arp_octaves.as_ptr(),
+                params.arp_octaves.preview_normalized(3),
+            ),
+            (
+                2,
+                "25",
+                params.arp_gate.as_ptr(),
+                params.arp_gate.preview_normalized(25.0),
+            ),
+        ] {
+            double(&mut e, i);
+            assert!(e.typing.is_some(), "{text}");
+            e.draw();
+            assert_eq!(e.arp_scene.readouts[i], ("_".to_owned(), true));
+            typed(&mut e, text);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(ptr), Call::Set(ptr, want), Call::End(ptr)],
+                "{text}"
+            );
+        }
+        // Not a note value: nothing.
+        double(&mut e, 0);
+        typed(&mut e, "5");
+        assert!(host.take().is_empty());
+        // A knob turned: the frame shown is the frame put together whole.
+        let p = at(&e, centre("arp_gate"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -30.0));
+        assert!(e.draw());
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "a knob turned in the drawer");
+        release(&mut e);
+    }
+
+    /// The standalone's editor with a chain for its effects' drawer (`fx_view::fake`): two
+    /// effects in it, three to be found.
+    fn editing_effects() -> (Editing, Arc<crate::fx_view::fake::Fake>) {
+        let (mut e, _, _) = editing_standalone();
+        let fake = crate::fx_view::fake::Fake::with(
+            &["Chorus", "Hall Reverb"],
+            &["Delay", "Plate", "Flanger"],
+        );
+        e.use_effects(FxView::new(Some(fake.clone())));
+        assert!(
+            e.playing.visible,
+            "the standalone's keyboard shown, under the drawer"
+        );
+        (e, fake)
+    }
+
+    /// What the chain was asked to do, once the drawer's threads have done it (`n` of them).
+    fn effects_done(e: &mut Editing, fake: &crate::fx_view::fake::Fake, n: usize) -> Vec<String> {
+        let t0 = Instant::now();
+        while fake.done.lock().map_or(0, |d| d.len()) < n && t0.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // (The chain read again at once: something done there has finished.)
+        std::thread::sleep(Duration::from_millis(5));
+        e.update_scene();
+        fake.take()
+    }
+
+    /// The drawer dropped from the rail opened by `key` and slid all the way down.
+    fn lower_open(e: &mut Editing, rail: Rail, key: BarTarget) {
+        e.draw();
+        let p = at(e, strip::centre(rail, StripTarget::Bar(key)));
+        click(e, p);
+        e.lower.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.lower.settled());
+    }
+
+    /// The standalone's rail has the FX key after ARP, the name's display a key shorter for it;
+    /// the plug-ins' has neither, and no effects' drawer. The FX key drops the effects' drawer
+    /// over the lower page inside the window (its size kept), and puts it away; ARP's drawer and
+    /// FX's are never open together, each key putting the other's away for its own. The key is lit
+    /// while an effect plays; the frame shown is its frame put together whole.
+    #[test]
+    fn the_fx_key_drops_its_drawer_one_drawer_at_a_time() {
+        let (plugin, _, _) = editing();
+        assert_eq!((plugin.rail, plugin.fx.is_none()), (Rail::Plugin, true));
+        let (standalone, _, _) = editing_standalone();
+        assert_eq!(standalone.rail, Rail::Plugin, "no chain: no FX key");
+        let (fx_key, arp_key) = (
+            strip::centre(Rail::Effects, StripTarget::Bar(BarTarget::Fx)),
+            strip::centre(Rail::Effects, StripTarget::Bar(BarTarget::Arp)),
+        );
+        assert_eq!(
+            strip::hit(Rail::Plugin, fx_key.0, fx_key.1),
+            Some(StripTarget::Bar(BarTarget::Arp)),
+            "the plug-ins' ARP where the standalone's FX is"
+        );
+        let (mut e, fake) = editing_effects();
+        assert_eq!(e.rail, Rail::Effects);
+        assert_eq!(
+            strip::hit(e.rail, fx_key.0, fx_key.1),
+            Some(StripTarget::Bar(BarTarget::Fx))
+        );
+        assert_eq!(
+            strip::hit(e.rail, arp_key.0, arp_key.1),
+            Some(StripTarget::Bar(BarTarget::Arp))
+        );
+        let size = (e.width, e.window_height());
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        assert!(e.lower.is_open(Lower::Fx));
+        assert_eq!((e.width, e.window_height()), size);
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        // ARP puts it away for its own; FX again puts that away for the effects'.
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(e.lower.is_open(Lower::Arp) && !e.lower.is_open(Lower::Fx));
+        e.strip_press(StripTarget::Bar(BarTarget::Fx));
+        assert!(e.lower.is_open(Lower::Fx) && !e.lower.is_open(Lower::Arp));
+        e.strip_press(StripTarget::Bar(BarTarget::Fx));
+        assert!(!e.lower.open);
+        // The key lit while an effect plays.
+        e.update_scene();
+        assert!(e.browser.bar.fx);
+        for s in fake.slots.lock().expect("slots").iter_mut() {
+            s.bypass = true;
+        }
+        e.fx_view.poll(Instant::now() + Duration::from_secs(1));
+        e.update_scene();
+        assert!(!e.browser.bar.fx, "nothing plays");
+        // PANEL hiding the lower panel puts it away at once.
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        e.toggle_panel();
+        assert!(!e.lower.open && e.lower_top().is_none());
+    }
+
+    /// The effects' drawer operates the chain: a name clicked opens its effect's window, a tab
+    /// bypasses its effect, a name dragged onto another slot moves it there (shown carried over
+    /// it meanwhile); "+ ADD EFFECT" drops the list of the effects found (and SCAN AGAIN), a row
+    /// chosen adds its effect; a right click offers REPLACE… (the list again, to put another in
+    /// its place) and REMOVE. Under the drawer the page does nothing; the frame shown with the list
+    /// open is the frame put together whole.
+    #[test]
+    fn the_fx_drawer_operates_the_chain() {
+        let (mut e, fake) = editing_effects();
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        let name = |e: &Editing, i: usize| at(e, fx_ui::centre(fx_ui::FxTarget::Name(i)));
+        // A name clicked: its effect's window.
+        let p = name(&e, 0);
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["window 0"]);
+        // A tab: its effect bypassed.
+        let p = at(&e, fx_ui::centre(fx_ui::FxTarget::Tab(1)));
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["bypass 1 true"]);
+        assert!(!e.fx_scene.slots[1].lit && e.fx_scene.slots[0].lit);
+        // A name dragged onto another's.
+        let (from, to) = (name(&e, 0), name(&e, 1));
+        go(&mut e, from);
+        press(&mut e);
+        for k in 1..=10 {
+            let t = f64::from(k) / 10.0;
+            go(
+                &mut e,
+                Point {
+                    x: from.x + (to.x - from.x) * t,
+                    y: from.y,
+                },
+            );
+        }
+        e.update_scene();
+        assert_eq!(e.fx_scene.drag, Some((0, Some(1))));
+        release(&mut e);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["move 0 1"]);
+        assert_eq!(e.fx_scene.slots[0].text, "Hall Reverb");
+        // "+ ADD EFFECT": the list; a row chosen.
+        assert_eq!(e.fx_scene.slots[2].text, "+ ADD EFFECT");
+        let p = name(&e, 2);
+        click(&mut e, p);
+        e.update_scene();
+        let list = e.fx_scene.list.clone().expect("the list");
+        let names: Vec<&str> = list.rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["Delay", "Plate", "Flanger", "SCAN AGAIN"]);
+        assert_eq!(list.title, "ADD TO SLOT 3");
+        e.draw();
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            lower_of(&e),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the list as put together whole");
+        // (The wheel over it scrolls it; three effects and SCAN AGAIN all show, so it stays.)
+        let p = at(&e, fx_ui::row_centre(&list, 1));
+        go(&mut e, p);
+        wheel(&mut e, -2.0);
+        e.update_scene();
+        assert_eq!(e.fx_scene.list.as_ref().map(|l| l.first), Some(0));
+        click(&mut e, p);
+        assert!(!e.fx_view.list_open());
+        assert_eq!(effects_done(&mut e, &fake, 1), ["add Plate"]);
+        assert_eq!(e.fx_scene.slots[2].text, "Plate");
+        assert_eq!(e.fx_scene.slots[3].text, "+ ADD EFFECT");
+        // A right click: REPLACE… and REMOVE.
+        let p = name(&e, 0);
+        right_click(&mut e, p);
+        assert_eq!(
+            menu_items(&e),
+            [
+                ("REPLACE\u{2026}".to_owned(), true),
+                ("REMOVE".into(), true)
+            ]
+        );
+        menu_item(&mut e, "REPLACE\u{2026}");
+        e.update_scene();
+        let list = e.fx_scene.list.clone().expect("the list");
+        assert_eq!(list.title, "REPLACE SLOT 1");
+        let p = at(&e, fx_ui::row_centre(&list, 2));
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["replace 0 Flanger"]);
+        let p = name(&e, 1);
+        right_click(&mut e, p);
+        menu_item(&mut e, "REMOVE");
+        assert_eq!(effects_done(&mut e, &fake, 1), ["remove 1"]);
+        assert_eq!(e.fx_scene.slots[1].text, "Plate");
+        // The list put away by a press elsewhere, which does nothing else.
+        let p = name(&e, 2);
+        click(&mut e, p);
+        e.update_scene();
+        assert!(e.fx_view.list_open());
+        let p = at(&e, (200.0, 300.0));
+        click(&mut e, p);
+        assert!(!e.fx_view.list_open());
+        // Under the drawer: AUTO GAIN's tab does nothing.
+        let (x, y) = strip::Bank::Auto.tab(0);
+        assert!(fx_ui::inside(x, y));
+        let before = e.params.auto_gain.value();
+        let p = at(&e, (x, y));
+        click(&mut e, p);
+        assert_eq!(
+            e.params.auto_gain.value(),
+            before,
+            "nothing under the drawer"
+        );
+        assert!(fake.take().is_empty());
     }
 
     /// Every gesture well formed: a parameter's begin only while it has none open, its
@@ -6185,8 +7306,12 @@ mod tests {
 
     /// Where a strip target is, found where the strip's hit test finds it.
     fn strip_at(target: StripTarget) -> (f64, f64) {
-        let p = strip::centre(target);
-        assert_eq!(strip::hit(p.0, p.1), Some(target), "{target:?} not found");
+        let p = strip::centre(Rail::Plugin, target);
+        assert_eq!(
+            strip::hit(Rail::Plugin, p.0, p.1),
+            Some(target),
+            "{target:?} not found"
+        );
         p
     }
 
@@ -6726,6 +7851,7 @@ mod tests {
                 &mut whole,
                 &e.renderer,
                 e.strip.frame(),
+                None,
                 None,
                 None,
                 false,
@@ -8218,7 +9344,7 @@ mod windows_window_tests {
         }
 
         fn click_bar(&self, target: BarTarget) {
-            let (x, y) = strip::centre(StripTarget::Bar(target));
+            let (x, y) = strip::centre(Rail::Plugin, StripTarget::Bar(target));
             self.drag(self.at((x, y)), 0.0);
         }
 
@@ -8576,7 +9702,10 @@ mod windows_window_tests {
     #[test]
     fn a_press_with_no_move_before_it_lands_where_it_is() {
         let o = Opened::new(false, HostWindow::OffScreen);
-        let (x, y) = o.at(strip::centre(StripTarget::Tab(strip::Bank::Mode, 1)));
+        let (x, y) = o.at(strip::centre(
+            Rail::Plugin,
+            StripTarget::Tab(strip::Bank::Mode, 1),
+        ));
         let at = (((y.round() as u32) << 16) | (x.round() as u32 & 0xFFFF)) as LPARAM;
         let w = o.window();
         // SAFETY: messages posted to the test's own window.
