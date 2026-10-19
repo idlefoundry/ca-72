@@ -2236,17 +2236,25 @@ impl Editing {
 
     fn scrolled(&mut self, delta: ScrollDelta, modifiers: Modifiers) {
         if let Some(notes) = &mut self.whats_new {
-            let rows = match delta {
+            // A line for each line's travel, the rest kept for the next event, as the
+            // drawer's list; a turn the other way starts again (PR #106's review: a
+            // trackpad's fraction left from one way had eaten the first of the other).
+            let lines = match delta {
                 ScrollDelta::Lines { y, .. } => f64::from(y),
                 ScrollDelta::Pixels { y, .. } => {
-                    f64::from(y) * self.dpr / self.renderer.scale() / 60.0
+                    f64::from(y) * self.dpr / self.renderer.scale() / notes.line_height()
                 }
             };
-            self.list_travel += rows;
+            if lines * self.list_travel < 0.0 {
+                self.list_travel = 0.0;
+            }
+            self.list_travel += lines;
             let whole = self.list_travel.trunc();
-            notes.scroll(-(whole as i32));
-            self.list_travel -= whole;
-            self.composed = None;
+            if whole != 0.0 {
+                notes.scroll(-(whole as i32));
+                self.list_travel -= whole;
+                self.composed = None;
+            }
             return;
         }
         if self.standalone_dialog_open() {
@@ -2679,7 +2687,7 @@ impl Editing {
         {
             dialog.draw(frame, self.renderer.scale());
         }
-        if let Some(notes) = &self.whats_new
+        if let Some(notes) = &mut self.whats_new
             && let Some(frame) = &mut self.composed
         {
             notes.draw(frame, self.renderer.scale(), self.renderer.fonts());
@@ -4203,6 +4211,167 @@ mod tests {
         assert!(keyed(&mut e, Key::Escape));
     }
 
+    /// What the notes cost a frame in a Retina window (3440 pixels across), full view: the
+    /// frame that opens them, a frame in which the panel behind them changes, a frame that
+    /// scrolls them, against a frame of the panel alone (`-- --ignored --nocapture`, in
+    /// release).
+    #[test]
+    #[ignore = "prints timings"]
+    fn release_notes_frame_timings() {
+        let (mut e, _, _) = editing();
+        e.params.editor_panel.store(true, Ordering::Relaxed);
+        e.set_panel_height(true);
+        e.fit(2.0, 1720, 3440);
+        e.draw();
+        let ms = |t: Instant, n: u32| t.elapsed().as_secs_f64() * 1000.0 / f64::from(n);
+        let n = 20;
+        let t = Instant::now();
+        for _ in 0..n {
+            e.composed = None;
+            e.draw();
+        }
+        println!("the panel alone, all of it: {:.2} ms a frame", ms(t, n));
+        let (mut opening, mut laid_out) = (Vec::new(), Vec::new());
+        for _ in 0..5 {
+            let t = Instant::now();
+            e.show_release_notes(
+                crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                    .expect("combined notes"),
+            );
+            laid_out.push(ms(t, 1));
+            e.draw();
+            opening.push(ms(t, 1));
+            assert!(keyed(&mut e, Key::Escape));
+            e.draw();
+        }
+        println!("opening the notes: {opening:.2?} ms (laid out in {laid_out:.2?} ms)");
+        e.show_release_notes(
+            crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                .expect("combined notes"),
+        );
+        e.draw();
+        let t = Instant::now();
+        for _ in 0..n {
+            e.composed = None;
+            e.draw();
+        }
+        println!("the panel changing behind them: {:.2} ms a frame", ms(t, n));
+        let t = Instant::now();
+        for i in 0..n {
+            keyed(
+                &mut e,
+                if i % 2 == 0 {
+                    Key::ArrowDown
+                } else {
+                    Key::ArrowUp
+                },
+            );
+            e.draw();
+        }
+        println!("a line scrolled: {:.2} ms a frame", ms(t, n));
+    }
+
+    /// The notes are a modal dialog in the standalone too (the owner, 2026-10-19, of the
+    /// stand-in: "on standalone, i don't like that this What's New screen wasn't a modal"):
+    /// at its default size and its smallest, compact and full, a box inset from the window's
+    /// edges over the editor dimmed, which takes no click, wheel or key meanwhile; GOT IT
+    /// closes it. With CA72_WHATS_NEW_PNG, a folder, the frames written there.
+    #[test]
+    fn release_notes_are_a_modal_dialog_in_the_standalone_at_every_size() {
+        for width in [DEFAULT_WIDTH, MIN_WIDTH] {
+            for expanded in [false, true] {
+                let (mut e, host, params) = editing_standalone();
+                e.params.editor_panel.store(expanded, Ordering::Relaxed);
+                e.set_panel_height(expanded);
+                e.fit(1.0, width, width);
+                e.show_release_notes(
+                    crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                        .expect("combined notes"),
+                );
+                e.draw();
+                let frame = e.composed.as_ref().expect("notes frame");
+                assert_eq!(frame.width(), width);
+                if let Some(out) = std::env::var_os("CA72_WHATS_NEW_PNG") {
+                    let out = std::path::Path::new(&out);
+                    std::fs::create_dir_all(out).expect("evidence folder");
+                    let view = if expanded { "full" } else { "compact" };
+                    frame
+                        .save_png(out.join(format!("standalone-{view}-{width}.png")))
+                        .expect("PNG");
+                }
+                // The window's edges show the editor, dimmed, round the dialog's box.
+                let (w, h) = (frame.width() - 1, frame.height() - 1);
+                for (x, y) in [(0, 0), (w, 0), (0, h), (w, h), (w / 2, 2), (w / 2, h - 2)] {
+                    let p = frame.pixel(x, y).expect("pixel");
+                    assert_ne!(
+                        [p.red(), p.green(), p.blue()],
+                        [0x1f, 0x22, 0x28],
+                        "({x}, {y}) is outside the box"
+                    );
+                }
+                let notes = e.whats_new.as_ref().expect("notes");
+                let [x, y, bw, bh] = notes.button();
+                let bottom = f64::from(e.physical_height()) / e.renderer.scale();
+                assert!(x + bw < art::W - 300.0 && y + bh < bottom - 40.0);
+                // Nothing behind it takes a press, a wheel or a key.
+                let controls = params.controls();
+                for place in [(230.0, 400.0), (1500.0, 600.0), (3000.0, bottom - 20.0)] {
+                    let p = at(&e, place);
+                    click(&mut e, p);
+                    e.scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 }, Modifiers::empty());
+                    e.context_menu();
+                }
+                e.playing.typing = true;
+                let key = KeyboardEvent {
+                    key: Key::Character("a".into()),
+                    ..Default::default()
+                };
+                assert!(e.keyed(&key), "the notes keep the keys");
+                assert!(e.playing.notes.pop().is_none(), "no note played");
+                assert!(e.whats_new.is_some() && e.learning.menu().is_none());
+                assert!(!e.browser.open);
+                assert_eq!(params.controls(), controls);
+                assert!(host.take().is_empty());
+                let close = at(&e, (x + bw / 2.0, y + bh / 2.0));
+                click(&mut e, close);
+                assert!(e.whats_new.is_none());
+            }
+        }
+    }
+
+    /// A trackpad's travel the other way starts afresh (PR #106's review): what was left of
+    /// a line from one way does not eat the first line of the other.
+    #[test]
+    fn release_notes_scroll_back_at_once_when_a_trackpad_turns() {
+        let (mut e, _, _) = editing();
+        e.show_release_notes(
+            crate::whats_new::assemble(Some("0.2.3"), crate::update::VERSION)
+                .expect("combined notes"),
+        );
+        e.draw();
+        let notes = e.whats_new.as_mut().expect("notes");
+        assert!(notes.scrolls());
+        notes.scroll(3);
+        let line = notes.line_height() * e.renderer.scale() / e.dpr;
+        let pixels = |lines: f64| ScrollDelta::Pixels {
+            x: 0.0,
+            y: (lines * line) as f32,
+        };
+        // Most of a line down, then a little up and most of one up: a line up.
+        e.scrolled(pixels(-0.9), Modifiers::empty());
+        assert_eq!(e.whats_new.as_ref().expect("notes").position(), 3);
+        e.scrolled(pixels(0.3), Modifiers::empty());
+        e.scrolled(pixels(0.8), Modifiers::empty());
+        assert_eq!(e.whats_new.as_ref().expect("notes").position(), 2);
+        // And the same way, fractions add up to whole lines.
+        for _ in 0..4 {
+            e.scrolled(pixels(-0.6), Modifiers::empty());
+        }
+        assert_eq!(e.whats_new.as_ref().expect("notes").position(), 4);
+        e.scrolled(ScrollDelta::Lines { x: 0.0, y: 2.0 }, Modifiers::empty());
+        assert_eq!(e.whats_new.as_ref().expect("notes").position(), 2);
+    }
+
     #[test]
     fn release_notes_fit_both_looks_lettering_sizes_and_compact_views() {
         for skin in [Skin::Drawn, Skin::Worn] {
@@ -4224,29 +4393,55 @@ mod tests {
                         e.composed.as_ref().expect("notes frame").height(),
                         e.physical_height()
                     );
+                    // (With CA72_WHATS_NEW_PNG, a folder: the frames written there, at the
+                    // smallest width and at the mock-up's, 1554 pixels.)
                     if let Some(out) = std::env::var_os("CA72_WHATS_NEW_PNG") {
                         let out = std::path::Path::new(&out);
                         std::fs::create_dir_all(out).expect("evidence folder");
-                        e.composed
-                            .as_ref()
-                            .expect("notes frame")
+                        let view = if expanded { "full" } else { "compact" };
+                        for width in [MIN_WIDTH, 1554] {
+                            e.fit(1.0, width, width);
+                            e.draw();
+                            e.composed
+                                .as_ref()
+                                .expect("notes frame")
+                                .save_png(out.join(format!(
+                                    "notes-{skin:?}-{lettering:?}-{view}-{width}.png"
+                                )))
+                                .expect("PNG");
+                        }
+                        // Scrolled to the end; and at the full view, an update from 0.2.5,
+                        // the mock-up's.
+                        keyed(&mut e, Key::End);
+                        e.draw();
+                        let frame = e.composed.as_ref().expect("notes frame");
+                        frame
                             .save_png(
-                                out.join(format!("notes-{skin:?}-{lettering:?}-{expanded}.png")),
+                                out.join(format!(
+                                    "notes-{skin:?}-{lettering:?}-{view}-1554-end.png"
+                                )),
                             )
                             .expect("PNG");
+                        if expanded {
+                            e.show_release_notes(
+                                crate::whats_new::assemble(Some("0.2.5"), crate::update::VERSION)
+                                    .expect("an update"),
+                            );
+                            e.draw();
+                            e.composed
+                                .as_ref()
+                                .expect("notes frame")
+                                .save_png(out.join(format!(
+                                    "notes-{skin:?}-{lettering:?}-since-0.2.5-1554.png"
+                                )))
+                                .expect("PNG");
+                        }
+                        e.fit(1.0, MIN_WIDTH, MIN_WIDTH);
+                        e.draw();
                     }
-                    let close = at(
-                        &e,
-                        (
-                            art::W - 300.0,
-                            f64::from(e.physical_height()) / e.renderer.scale()
-                                - if lettering == Lettering::Large {
-                                    52.5
-                                } else {
-                                    42.0
-                                },
-                        ),
-                    );
+                    let [x, y, w, h] = e.whats_new.as_ref().expect("notes").button();
+                    assert!(y + h < f64::from(e.physical_height()) / e.renderer.scale());
+                    let close = at(&e, (x + w / 2.0, y + h / 2.0));
                     click(&mut e, close);
                     assert!(e.whats_new.is_none(), "close button works in each view");
                     assert!(host.take().is_empty());

@@ -40,8 +40,13 @@ alone. There is no network request and no audio-thread work.
 
 SETTINGS > WHAT'S NEW always opens the current release's highlights. It neither claims nor
 rewrites history. Opening or dismissing notes changes no sound parameter, preset or saved
-project field. The temporary view is in `ca72-panel/src/whats_new.rs`; selection and history
-are in `ca72-plugin/src/whats_new.rs` and `settings.rs`. The view fits the actual viewport,
-including compact views, with scrolling, page buttons and keyboard navigation. Escape,
-Enter or CLOSE dismisses it. Its final appearance awaits the owner's choice between the
-AUDIO & MIDI style and a drawer on the panel's face (R-WHATS-NEW).
+project field. The dialog is in `ca72-panel/src/whats_new.rs`; selection and history are in
+`ca72-plugin/src/whats_new.rs` and `settings.rs`. It is WN-A, the owner's choice
+(R-WHATS-NEW): a modal dialog in the AUDIO & MIDI dialog's style over the dimmed editor, in
+the plug-ins and the standalone, inset from the window's edges in the compact and full
+views. The notes wrap and scroll (wheel, trackpad, arrows, Page Up and Down, Home and End,
+or a press on the scroll bar's track); GOT IT, Escape or Enter closes it. Nothing behind it
+takes a press or a key while it shows. Combined notes show each note's release before it.
+
+Keep each highlight short: one line of the dialog (about 110 characters) reads best, and
+longer ones wrap.

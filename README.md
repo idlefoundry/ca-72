@@ -84,8 +84,9 @@ close your host, then run it as above. The CA-72 checks only when you click, thr
 and sends nothing of yours.
 
 Settings also has **WHAT'S NEW…**, which opens this version's bundled highlights without
-an internet connection. The first visible editor after an install or update shows them
-automatically, once for your OS user on that computer. When an earlier shown version is
+an internet connection, in a dialog over the panel; **GOT IT** or Escape closes it. The first
+visible editor after an install or update shows them automatically, once for your OS user
+on that computer. When an earlier shown version is
 known, that automatic view includes the available intervening releases. Settings always
 reopens the current release's highlights.
 

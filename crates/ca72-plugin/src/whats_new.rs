@@ -1,11 +1,13 @@
 //! Offline release notes and their version ranges (decisions.md R-WHATS-NEW).
 //! Only the visible editor claims an automatic showing; this module never starts a check
-//! for updates or touches the sound. The temporary presentation lives in ca72-panel.
+//! for updates or touches the sound. The presentation (WN-A) lives in ca72-panel.
 
 use std::sync::OnceLock;
 
 use semver::Version;
 use serde::Deserialize;
+
+use ca72_panel::whats_new::Entry;
 
 use crate::update::VERSION;
 
@@ -40,17 +42,26 @@ pub struct Notes {
     pub previous: Option<String>,
     /// Exactly the releases included; older Markdown notes may be unavailable.
     pub versions: Vec<String>,
-    pub sections: [(String, Vec<String>); 3],
+    /// Combined notes name their release, so that an older claim is not read as the
+    /// installed build's.
+    pub sections: [(String, Vec<Entry>); 3],
 }
 
 impl Notes {
+    /// What the notes cover, under the dialog's title after the installed version: the
+    /// releases before the installed one that are included, by name.
     pub fn coverage(&self) -> String {
-        match &self.previous {
-            Some(previous) => format!(
-                "Since {previous}. Included releases: {}.",
-                self.versions.join(", ")
+        let Some(previous) = &self.previous else {
+            return "Highlights of this release".into();
+        };
+        let earlier = &self.versions[..self.versions.len().saturating_sub(1)];
+        match earlier {
+            [] => format!("Changes since {previous}"),
+            [one] => format!("Changes since {previous}, including {one}"),
+            [many @ .., last] => format!(
+                "Changes since {previous}, including {} and {last}",
+                many.join(", ")
             ),
-            None => format!("Highlights from {}.", self.installed),
         }
     }
 
@@ -111,12 +122,9 @@ pub fn assemble(previous: Option<&str>, installed: &str) -> Option<Notes> {
             &release.performance_improvements,
             &release.bug_fixes,
         ]) {
-            section.1.extend(entries.iter().map(|entry| {
-                if combined {
-                    format!("{}: {entry}", release.version)
-                } else {
-                    entry.clone()
-                }
+            section.1.extend(entries.iter().map(|entry| Entry {
+                release: combined.then(|| release.version.clone()),
+                text: entry.clone(),
             }));
         }
     }
@@ -201,7 +209,7 @@ mod tests {
             let notes = assemble(previous, "0.2.7").expect("highlights");
             assert!(notes.previous.is_none());
             assert_eq!(notes.versions, ["0.2.7"]);
-            assert_eq!(notes.coverage(), "Highlights from 0.2.7.");
+            assert_eq!(notes.coverage(), "Highlights of this release");
         }
     }
 
@@ -224,7 +232,10 @@ mod tests {
                         .sections[i]
                         .1
                         .iter()
-                        .map(|entry| format!("0.2.{v}: {entry}"))
+                        .map(|entry| Entry {
+                            release: Some(format!("0.2.{v}")),
+                            text: entry.text.clone(),
+                        })
                         .collect::<Vec<_>>()
                 })
                 .collect();
@@ -232,7 +243,21 @@ mod tests {
         }
         let old = assemble(Some("0.2.0"), "0.2.7").expect("available history");
         assert_eq!(old.versions, ["0.2.3", "0.2.4", "0.2.5", "0.2.6", "0.2.7"]);
-        assert!(old.coverage().contains("Included releases: 0.2.3, 0.2.4"));
+        assert_eq!(
+            old.coverage(),
+            "Changes since 0.2.0, including 0.2.3, 0.2.4, 0.2.5 and 0.2.6"
+        );
+        assert_eq!(ordinary.coverage(), "Changes since 0.2.6");
+        assert_eq!(
+            assemble(Some("0.2.5"), "0.2.7").expect("update").coverage(),
+            "Changes since 0.2.5, including 0.2.6"
+        );
+        assert!(
+            ordinary
+                .sections
+                .iter()
+                .all(|(_, entries)| entries.iter().all(|entry| entry.release.is_none()))
+        );
     }
 
     #[test]

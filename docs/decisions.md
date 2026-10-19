@@ -7686,7 +7686,7 @@ shows the installed build's version (R-VERSION).
   it inside the current viewport in either look and lettering size, including compact
   views. Page buttons, the wheel and keyboard navigation reach all entries; CLOSE,
   Escape and Enter dismiss it. It does not resize the saved window or become project
-  state. The final presentation still needs the owner's choice.
+  state. Replaced by WN-A below.
 
 **Verification (Linux x86, Rust 1.97.1, 2026-10-19).** The touched crates' tests pass,
 including release ranges, unknown history, downgrades, restart persistence, twelve
@@ -7700,9 +7700,9 @@ at multiple widths, both lettering sizes and compact/full heights; eight editor 
 cover both looks. Both approved panel images still pass. Clippy for the touched crates,
 all targets, passes with default and all features. `target/whats-new-evidence/` holds the
 logs and PNGs. No native host, installed plug-in or audio device was opened; macOS and
-Windows execution and the remote AU's visibility still need host acceptance. The final
-appearance, current-only manual view and claim-before-display policy await the owner's
-confirmation at review.
+Windows execution and the remote AU's visibility still need host acceptance. The
+current-only manual view and claim-before-display policy await the owner's confirmation at
+review; the appearance is WN-A, below.
 
 The full workspace run, including standalone support with ngspice 47 required, passed
 537 tests, 0 failed, 57 ignored at `56b9a1e`. Independent source review found one macOS
@@ -7713,3 +7713,58 @@ occlusion bit. The existing remote-view evidence above had `isVisible=true`, so 
 preserves that observed case while excluding an ordered-out backing window. A hidden
 host proxy whose backing window remains visible still needs native host acceptance.
 This final correction is macOS-only; Linux does not compile or execute those calls.
+
+**Owner's choice, 2026-10-19: WN-A.** Of the two mock-ups on the review page, the owner
+chose WN-A: the notes in a dialog in the style of the standalone's AUDIO & MIDI dialog,
+drawn over the dimmed editor, in every build (the plug-ins and the standalone). Its
+colours and sizes are that dialog's: the box #1f2228, edged #4a4640, corners of 20, over
+#08090b at .72; WHAT'S NEW at 52 in #f0a030; under it, at 31 in #a6a5a1, the version
+installed and the releases covered ("CA-72 0.2.7 is installed · Changes since 0.2.5,
+including 0.2.6"); FEATURES, PERFORMANCE IMPROVEMENTS and BUG FIXES at 30, letter-spaced;
+the notes at 33 in #ebe6d8 after a "·"; at 27 the footnote "Shown once after an update ·
+SETTINGS › WHAT'S NEW shows it again"; one button, GOT IT, at DONE's place and in its
+style. Told of the Mac test build's stand-in, which filled the window: "on standalone, i
+don't like that this What's New screen wasn't a modal." So the dialog is a bounded box,
+inset from the window's edges at every size, the editor visible behind it; nothing behind
+takes a press, wheel or key while it shows; GOT IT, Escape or Enter closes it. The stand-in's
+paging row (PREVIOUS, NEXT, the line count, CLOSE · ESC) is gone: scrolling is enough.
+
+**Agent decisions, building WN-A (2026-10-19):**
+
+- **Sizes.** The dialog keeps the AUDIO & MIDI dialog's place and width in the drawing, so
+  it shrinks with the window. Its height follows the view: the mock-up's margins (155 and
+  140 of 1775) in the full view; in the compact view, 60 and 55, with the footnote beside
+  GOT IT, to leave the notes room. LARGE lettering sets all of its text and spacing a
+  quarter larger, as the menus and tips (`Lettering::text`).
+- **The notes.** They wrap under their bullet (the following lines start where the text
+  does) and scroll a line at a time: the wheel or trackpad, the arrow keys, Page Up and
+  Down, Home and End. A slim scroll bar in the dialog's colours (#15171b, thumb #82715c)
+  shows only when they are longer than the dialog; a press on its track pages. A section's
+  title is never left alone at the foot. Combined releases keep naming each note's release
+  (above), set before it in the subtitle's grey rather than as "0.2.6:", which the mock-up,
+  showing no labels, did not settle. The owner should confirm the labels.
+- **Coverage wording.** "Highlights of this release" when no earlier shown version is
+  known; "Changes since 0.2.6" for one release; "Changes since 0.2.3, including 0.2.4,
+  0.2.5 and 0.2.6" for several, naming only releases with bundled notes.
+- **Speed.** The dialog's picture is made once for a scale and layout; the notes are drawn
+  into a strip a line at a time as each first shows; each frame dims the editor with a
+  table, copies the dialog's opaque rows and blends only its edges, then copies the lines
+  that show. Measured in a Retina window (3440 pixels across, full view, notes since 0.2.3,
+  release build, `release_notes_frame_timings`): opening 33 to 41 ms, the first the
+  slowest (the stand-in's 28 to 29 ms, measured the same way at 68b30ba); a frame with the
+  panel changing behind it 6.5 ms (stand-in 25 ms); a line scrolled 6.6 ms (stand-in
+  25 ms); the panel alone 1.1 ms. Opening still makes its pictures on the UI thread.
+- **Review fix (PR #106).** Trackpad travel left over from one direction is cleared when the
+  direction reverses, as in the drawer's list; the line pitch, not a fixed 60 units, sets
+  the travel. A regression test fails without the fix.
+
+**Verification of WN-A (Linux x86, 2026-10-19).** The panel module's tests wrap every line
+clear of the scroll bar, scroll to the last note and back, page from the track, close with
+GOT IT, keep the dialog inside the compact and full views at both lettering sizes and three
+widths, and show lines drawn as they come into view to be identical, to the bit, to lines
+drawn at once. Editor tests close the notes with GOT IT in both looks, both lettering sizes,
+compact and full; in the standalone at its default and smallest widths, compact and full,
+they find the window's edges dimmed outside the box and no control, menu, drawer, note or
+host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
+owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
+worktree. No macOS or Windows host has shown it yet.
