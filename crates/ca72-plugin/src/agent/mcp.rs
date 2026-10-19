@@ -25,7 +25,7 @@ pub trait Backend {
     fn client(&mut self, _name: &str) {}
 }
 
-const INSTRUCTIONS: &str = "Tools for the CA-72, a circuit-modelled Minimoog Model D synthesizer open on this computer (its standalone application, with SETTINGS > AGENTS allowed). Start with ca72_describe: every parameter's value in the units its panel prints (knobs in their dials' numbers, FREQUENCY in semitones, the strip in %, cents and dB), its range or choices. Change them with ca72_set (refused, not clamped, outside their range), choose and save presets with the ca72_preset tools, play notes with ca72_play or ca72_note_on/ca72_note_off. Every change goes through the panel's own paths and shows on it at once; the player sees what you do.";
+const INSTRUCTIONS: &str = "Tools for the CA-72, a synthesizer modelled from its circuit, open on this computer (its standalone application, with SETTINGS > AGENTS allowed). Start with ca72_describe: every parameter's value in the units its panel prints (knobs in their dials' numbers, FREQUENCY in semitones, the strip in %, cents and dB), its range or choices. Change them with ca72_set (refused, not clamped, outside their range), choose and save presets with the ca72_preset tools, play notes with ca72_play or ca72_note_on/ca72_note_off. Every change goes through the panel's own paths and shows on it at once; the player sees what you do.";
 
 fn reply(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
