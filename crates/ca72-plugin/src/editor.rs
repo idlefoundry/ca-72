@@ -35,6 +35,7 @@ use ca72_panel::presets::{
     BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, PresetKey, ROW_H, drawer_hit,
     in_tags,
 };
+use ca72_panel::strip::arp::{self as arp_ui, ArpBank, ArpRenderer, ArpScene, ArpTarget};
 use ca72_panel::strip::{self, Bank, Field, Readout, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Lettering, Renderer, Scene, Skin, Target, interact};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
@@ -46,7 +47,7 @@ use crate::engine::LEVELS;
 use crate::learning::{Learning, Place, Pressed};
 use crate::library::Library;
 use crate::opening::{ANIMATE_S, Motion, level_of};
-use crate::params::{Ca72Params, QualityMode, Scatter};
+use crate::params::{ArpDirection, ArpRate, Ca72Params, QualityMode, Scatter};
 use crate::presets::Browser;
 use crate::settings::{Change, Settings};
 use crate::update::Update;
@@ -332,8 +333,73 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "double" => &p.double,
         "drive" => &p.drive,
         "level" => &p.level,
+        // The arpeggiator's drawer's (decisions.md R-ARP).
+        "arp_rate" => &p.arp_rate,
+        "arp_octaves" => &p.arp_octaves,
+        "arp_gate" => &p.arp_gate,
+        "arp_swing" => &p.arp_swing,
         _ => return None,
     })
+}
+
+/// A readout a value is typed into (decisions.md R52): the strip's, or the arpeggiator's
+/// drawer's (RATE, OCTAVES, GATE, SWING; R-ARP).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Typed {
+    Strip(Readout),
+    Arp(usize),
+}
+
+/// The arpeggiator's drawer (decisions.md R-ARP): open or not, and its slide, as the presets'
+/// drawer's (`presets::SLIDE`).
+#[derive(Debug, Default)]
+struct ArpDrawer {
+    open: bool,
+    slide: Option<(Instant, bool)>,
+}
+
+impl ArpDrawer {
+    /// Opened or put away, sliding there.
+    fn show(&mut self, on: bool) {
+        if on != self.open {
+            self.open = on;
+            self.slide = Some((Instant::now(), on));
+        }
+    }
+
+    /// Put away at once (the lower panel hidden).
+    fn shut(&mut self) {
+        self.open = false;
+        self.slide = None;
+    }
+
+    /// How far down it is, 0 to 1.
+    fn reveal(&self) -> f64 {
+        match self.slide {
+            Some((t0, opening)) => {
+                let k = (t0.elapsed().as_secs_f64() / crate::presets::SLIDE.as_secs_f64()).min(1.0);
+                let k = 1.0 - (1.0 - k) * (1.0 - k);
+                if opening { k } else { 1.0 - k }
+            }
+            None => f64::from(u8::from(self.open)),
+        }
+    }
+
+    fn sliding(&self) -> bool {
+        self.slide
+            .is_some_and(|(t0, _)| t0.elapsed() < crate::presets::SLIDE)
+    }
+
+    fn tick(&mut self) {
+        if self.slide.is_some() && !self.sliding() {
+            self.slide = None;
+        }
+    }
+
+    /// Open and still: its parts answer the pointer.
+    fn settled(&self) -> bool {
+        self.open && self.slide.is_none()
+    }
 }
 
 /// The editor, as the plug-in hands it to the host.
@@ -766,6 +832,13 @@ struct Editing {
     /// window's frame: the panel's, the strip's parts under its foot, the drawer over them.
     drawer: DrawerRenderer,
     pub(crate) browser: Browser,
+    /// The arpeggiator's drawer (decisions.md R-ARP): its renderer, what it shows, whether it is
+    /// open, and how far down it was in the last frame composed.
+    arp: ArpRenderer,
+    arp_scene: ArpScene,
+    arp_drawer: ArpDrawer,
+    arp_shown: f64,
+    last_arp_press: Option<(Instant, ArpTarget)>,
     composed: Option<ca72_panel::Pixmap>,
     /// Where the window's frame changed in the last `draw` that changed it (pixels: left,
     /// top, right, bottom), or none when it may have changed anywhere (decisions.md R58).
@@ -823,7 +896,7 @@ struct Editing {
     /// A value being typed into a readout (decisions.md R52): which, and what so far; the
     /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
     /// a switch had before it), for a double click.
-    typing: Option<(Readout, String)>,
+    typing: Option<(Typed, String)>,
     typing_keys: bool,
     last_strip_press: Option<(Instant, StripTarget, f32)>,
     /// Oscillators 2 and 3's FREQUENCY knobs, through the computer's law.
@@ -1015,6 +1088,7 @@ impl Editing {
             Settings::load()
         };
         params.set_freq_law(settings.frequency);
+        params.set_tempo(f64::from(settings.tempo));
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
         playing.standalone = standalone;
@@ -1044,6 +1118,15 @@ impl Editing {
             last: [0.5; 4],
             drawer: DrawerRenderer::new(f64::from(physical_width) / art::W),
             browser: Browser::new(library),
+            arp: ArpRenderer::new(
+                f64::from(physical_width) / art::W,
+                settings.skin,
+                settings.lettering,
+            ),
+            arp_scene: ArpScene::default(),
+            arp_drawer: ArpDrawer::default(),
+            arp_shown: 0.0,
+            last_arp_press: None,
             composed: None,
             damage: None,
             resizing_window: false,
@@ -1097,6 +1180,7 @@ impl Editing {
         if self.renderer.skin() != skin {
             let lettering = self.renderer.lettering();
             self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
+            self.arp.set_look(skin, lettering);
             self.composed = None;
         }
     }
@@ -1132,6 +1216,7 @@ impl Editing {
         if self.renderer.lettering() != lettering {
             let skin = self.renderer.skin();
             self.renderer = Renderer::with_look(skin, lettering, self.renderer.scale(), self.dpr);
+            self.arp.set_look(skin, lettering);
             self.composed = None;
         }
     }
@@ -1274,6 +1359,7 @@ impl Editing {
         self.renderer.rescale(scale, dpr);
         self.strip.rescale(scale);
         self.drawer.rescale(scale);
+        self.arp.rescale(scale);
         self.composed = None;
     }
 
@@ -1318,6 +1404,21 @@ impl Editing {
     fn in_drawer(&self, (x, y): (f64, f64)) -> Option<(f64, f64)> {
         let (top, from, to) = self.drawer_span()?;
         (y >= from && y < to).then_some((x, y - top))
+    }
+
+    /// The arpeggiator's drawer's top now (drawing units), while it shows: dropping down from
+    /// under the rail, over the lower page.
+    fn arp_top(&self) -> Option<f64> {
+        let k = self.arp_drawer.reveal();
+        (k > 0.0 && self.expanded()).then_some(arp_ui::TOP - (1.0 - k) * arp_ui::DEPTH)
+    }
+
+    /// Whether the pointer (the drawing's units) is over the arpeggiator's drawer, as much of it
+    /// as shows (the presets' drawer, over it, apart).
+    fn in_arp(&self, (x, y): (f64, f64)) -> bool {
+        self.arp_top().is_some_and(|top| {
+            (arp_ui::LEFT..arp_ui::RIGHT).contains(&x) && y >= DRAWER_TOP && y < top + arp_ui::DEPTH
+        }) && self.in_drawer((x, y)).is_none()
     }
 
     fn expanded(&self) -> bool {
@@ -1449,6 +1550,9 @@ impl Editing {
         self.params
             .editor_panel_applied
             .store(expanded, Ordering::Relaxed);
+        if !expanded {
+            self.arp_drawer.shut();
+        }
         self.typing = None;
         self.hover = None;
         self.strip_scene.hover = None;
@@ -1530,7 +1634,15 @@ impl Editing {
         {
             return;
         }
-        self.typing = Some((r, String::new()));
+        self.typing = Some((Typed::Strip(r), String::new()));
+        self.typing_keys = true;
+    }
+
+    /// A value to be typed into the arpeggiator's drawer's readout `i` (RATE, OCTAVES, GATE,
+    /// SWING; decisions.md R-ARP).
+    fn start_arp_typing(&mut self, i: usize) {
+        self.playing.release();
+        self.typing = Some((Typed::Arp(i.min(3)), String::new()));
         self.typing_keys = true;
     }
 
@@ -1548,12 +1660,21 @@ impl Editing {
             Key::Character(c) => {
                 for ch in c.chars() {
                     let cells = text.chars().filter(|c| *c != '.').count();
-                    let fits = match ch {
-                        '0'..='9' => cells < 3,
-                        '.' => !text.contains('.') && cells < 3,
-                        '-' => text.is_empty() && matches!(r, Readout::Level),
+                    // (RATE's note value: dotted with a point after it, a triplet with a T;
+                    // OCTAVES one digit.)
+                    let ended = text.ends_with(['.', 't']);
+                    let fits = match (*r, ch) {
+                        (Typed::Arp(0), '0'..='9') => cells < 2 && !ended,
+                        (Typed::Arp(0), '.') => cells > 0 && !ended,
+                        (Typed::Arp(0), 't' | 'T') => cells > 0 && !ended,
+                        (Typed::Arp(1), '0'..='9') => cells < 1,
+                        (Typed::Arp(1), _) => false,
+                        (_, '0'..='9') => cells < 3,
+                        (_, '.') => !text.contains('.') && cells < 3,
+                        (Typed::Strip(r), '-') => text.is_empty() && matches!(r, Readout::Level),
                         _ => false,
                     };
+                    let ch = ch.to_ascii_lowercase();
                     if fits {
                         text.push(ch);
                     }
@@ -1565,7 +1686,10 @@ impl Editing {
             Key::Enter => {
                 let (r, text) = (*r, text.clone());
                 self.typing = None;
-                self.set_typed(r, &text);
+                match r {
+                    Typed::Strip(r) => self.set_typed(r, &text),
+                    Typed::Arp(i) => self.set_arp_typed(i, &text),
+                }
             }
             Key::Escape => self.typing = None,
             _ => {}
@@ -1605,6 +1729,95 @@ impl Editing {
         if let Some(i) = ca72_panel::controls::index(id) {
             self.set_once(i, f64::from(normalized.clamp(0.0, 1.0)));
         }
+    }
+
+    /// The value typed into the arpeggiator's drawer's readout `i` set, as it reads it: RATE a
+    /// note value (16, 16. dotted, 16t a triplet: one of its thirteen), OCTAVES 1 to 4, GATE and
+    /// SWING percent; nothing for what is not one.
+    fn set_arp_typed(&mut self, i: usize, text: &str) {
+        let p = &self.params;
+        let normalized = match i {
+            0 => {
+                let Some(k) = crate::arp::RATES.iter().position(|(t, _)| *t == text) else {
+                    return;
+                };
+                p.arp_rate.preview_normalized(ArpRate::from_index(k))
+            }
+            1 => {
+                let Ok(v) = text.parse::<i32>() else { return };
+                p.arp_octaves.preview_normalized(
+                    v.clamp(crate::params::ARP_OCTAVES.0, crate::params::ARP_OCTAVES.1),
+                )
+            }
+            _ => {
+                let Ok(v) = text.parse::<f32>() else { return };
+                if !v.is_finite() {
+                    return;
+                }
+                let q = if i == 2 { &p.arp_gate } else { &p.arp_swing };
+                q.preview_normalized(v.clamp(0.0, 100.0))
+            }
+        };
+        if let Some(c) = ca72_panel::controls::index(arp_ui::KNOB_PARAMS[i.min(3)]) {
+            self.set_once(c, f64::from(normalized.clamp(0.0, 1.0)));
+        }
+    }
+
+    /// A press on the arpeggiator's drawer's tabs and readouts (decisions.md R-ARP): ON and
+    /// LATCH each switched, DIRECTION's choice set, a readout double-clicked typed into.
+    fn arp_press(&mut self, t: ArpTarget) {
+        let now = Instant::now();
+        let double = self
+            .last_arp_press
+            .is_some_and(|(at, last)| last == t && now - at < DOUBLE_CLICK);
+        self.last_arp_press = Some((now, t));
+        let p = &self.params;
+        match t {
+            ArpTarget::Tab(ArpBank::Arp, 0) => self.set_switch(&p.arp_on, !p.arp_on.value()),
+            ArpTarget::Tab(ArpBank::Arp, _) => {
+                self.set_switch(&p.arp_latch, !p.arp_latch.value());
+            }
+            ArpTarget::Tab(ArpBank::Direction, i) => {
+                let q = &p.arp_direction;
+                let last = ArpDirection::variants().len() - 1;
+                let to = q.preview_normalized(ArpDirection::from_index(i.min(last)));
+                if q.unmodulated_normalized_value() != to {
+                    let s = self.setter();
+                    s.begin_set_parameter(q);
+                    s.set_parameter_normalized(q, to);
+                    s.end_set_parameter(q);
+                }
+            }
+            ArpTarget::Readout(i) => {
+                if double {
+                    self.last_arp_press = None;
+                    self.start_arp_typing(i);
+                }
+            }
+        }
+    }
+
+    /// The rail's ARP key: the arpeggiator's drawer dropped down over the lower page, or put
+    /// away (the presets' drawer, if open, shut for it; the lower panel shown if hidden).
+    fn toggle_arp(&mut self) {
+        if !self.expanded() {
+            self.toggle_panel();
+            if !self.expanded() {
+                return;
+            }
+            self.arp_drawer.show(true);
+        } else if self.browser.open {
+            self.browser.show(false, &self.params);
+            self.follow_drawer();
+            self.arp_drawer.show(true);
+        } else {
+            self.arp_drawer.show(!self.arp_drawer.open);
+        }
+        self.typing = None;
+        self.hover = None;
+        self.strip_scene.hover = None;
+        self.arp_scene.hover = None;
+        self.composed = None;
     }
 
     fn set_power(&self, on: bool) {
@@ -1697,6 +1910,7 @@ impl Editing {
         self.last_strip_press = Some((now, t, before));
         match t {
             StripTarget::Bar(BarTarget::Panel) => self.toggle_panel(),
+            StripTarget::Bar(BarTarget::Arp) => self.toggle_arp(),
             StripTarget::Readout(_) => {}
             StripTarget::Switch(a) => {
                 let on = self.amount(a).0.unmodulated_normalized_value() <= 0.0;
@@ -1789,10 +2003,19 @@ impl Editing {
         }
         // A press on the readout a value is being typed into leaves it typed into; anywhere
         // else ends the typing, nothing set (decisions.md R52).
-        if let Some((r, _)) = self.typing
-            && matches!(strip::hit(x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
-        {
-            return;
+        if let Some((r, _)) = self.typing {
+            let on_it = match r {
+                Typed::Strip(r) => {
+                    !self.in_arp((x, y))
+                        && matches!(strip::hit(x, y), Some(StripTarget::Switch(t) | StripTarget::Readout(t)) if t == r)
+                }
+                Typed::Arp(i) => {
+                    self.in_arp((x, y)) && arp_ui::hit(x, y) == Some(ArpTarget::Readout(i))
+                }
+            };
+            if on_it {
+                return;
+            }
         }
         // A wheel's gesture still waiting for its rest, or a drag whose release never came
         // (its window lost the pointer): ended before anything else begins.
@@ -1877,6 +2100,19 @@ impl Editing {
             self.follow_drawer();
             return;
         }
+        // The arpeggiator's drawer, over the lower page: its own parts only, and while it slides
+        // nothing.
+        if self.in_arp((x, y)) {
+            if !self.arp_drawer.settled() {
+                return;
+            }
+            if let Some(t) = arp_ui::hit(x, y) {
+                self.arp_press(t);
+            } else if let Some(target) = interact::hit_arp(x, y) {
+                self.press_target(target, modifiers);
+            }
+            return;
+        }
         if self.playing.visible
             && let Some(target) = keyboard::hit(self.playing.root, x, y, self.playing.standalone)
         {
@@ -1919,6 +2155,12 @@ impl Editing {
         let Some(target) = self.hit(x, y) else {
             return;
         };
+        self.press_target(target, modifiers);
+    }
+
+    /// A press on a control (the panel's, the strip's knobs, the arpeggiator's drawer's), on
+    /// POWER or the grip.
+    fn press_target(&mut self, target: Target, modifiers: Modifiers) {
         let now = Instant::now();
         let double = self
             .last_press
@@ -1983,6 +2225,22 @@ impl Editing {
             self.learning.close_menu();
             return;
         }
+        // The arpeggiator's drawer: a knob's menu, as the panel's (its tabs are learned from the
+        // presets' drawer's MIDI list).
+        if self.in_arp((x, y)) {
+            match interact::hit_arp(x, y).filter(|_| self.arp_drawer.settled()) {
+                Some(target @ Target::Control(i)) => self.learning.open_menu(
+                    self.renderer.fonts(),
+                    map,
+                    Some(Place::Panel(i)),
+                    Some(target),
+                    (x, y),
+                    size,
+                ),
+                _ => self.learning.close_menu(),
+            }
+            return;
+        }
         if let Some(t) = strip::hit(x, y) {
             // A tab's menu (the strip's knobs' are the panel's), above it.
             match t.control() {
@@ -2045,12 +2303,15 @@ impl Editing {
             });
             return;
         }
-        self.playing.hover =
-            if self.expanded() && self.playing.visible && self.in_drawer((x, y)).is_none() {
-                keyboard::hit(self.playing.root, x, y, self.playing.standalone)
-            } else {
-                None
-            };
+        self.playing.hover = if self.expanded()
+            && self.playing.visible
+            && self.in_drawer((x, y)).is_none()
+            && !self.in_arp((x, y))
+        {
+            keyboard::hit(self.playing.root, x, y, self.playing.standalone)
+        } else {
+            None
+        };
         if self.playing.hover.is_some() {
             self.hover = None;
             self.strip_scene.hover = None;
@@ -2079,6 +2340,15 @@ impl Editing {
             let over_drawer = self.in_drawer(at);
             self.browser.drawer.hover =
                 over_drawer.and_then(|(dx, dy)| drawer_hit(&self.browser.drawer, dx, dy));
+            if self.in_arp(at) {
+                let settled = self.arp_drawer.settled();
+                self.arp_scene.hover = arp_ui::hit(x, y).filter(|_| settled);
+                self.hover = interact::hit_arp(x, y).filter(|_| settled);
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                return;
+            }
+            self.arp_scene.hover = None;
             let on_strip = if over_drawer.is_some() {
                 None
             } else {
@@ -2232,10 +2502,14 @@ impl Editing {
         if !self.expanded() && y >= DRAWER_TOP {
             return;
         }
-        if strip::hit(x, y).is_some() {
+        let over = if self.in_arp((x, y)) {
+            interact::hit_arp(x, y).filter(|_| self.arp_drawer.settled())
+        } else if strip::hit(x, y).is_some() {
             return;
-        }
-        let Some(Target::Control(i) | Target::Legend(i, _)) = self.hit(x, y) else {
+        } else {
+            self.hit(x, y)
+        };
+        let Some(Target::Control(i) | Target::Legend(i, _)) = over else {
             return;
         };
         if !self.operable(i) {
@@ -2382,18 +2656,34 @@ impl Editing {
         self.strip_scene.keyboard = self.playing.scene(self.renderer.skin());
         self.browser.bar.keyboard = self.playing.visible;
         self.browser.bar.panel = self.expanded();
+        self.browser.bar.arp = self.params.arp_on.value();
+        self.arp_scene = arp_scene(
+            &self.params,
+            &self.scene.values,
+            std::mem::take(&mut self.arp_scene),
+        );
         // A value being typed: what is typed so far, lit, the next digit's place marked while
         // there is room for one.
-        if let Some((r, text)) = &self.typing
-            && let Some(i) = Readout::ALL.iter().position(|x| x == r)
-        {
+        if let Some((r, text)) = &self.typing {
             let cells = text.chars().filter(|c| *c != '.').count();
-            let shown = if cells < 3 {
+            let room = match r {
+                Typed::Arp(0) => cells < 2 && !text.ends_with(['.', 't']),
+                Typed::Arp(1) => cells < 1,
+                _ => cells < 3,
+            };
+            let shown = if room {
                 format!("{text}_")
             } else {
                 text.clone()
             };
-            self.strip_scene.readouts[i] = (shown, true);
+            match r {
+                Typed::Strip(r) => {
+                    if let Some(i) = Readout::ALL.iter().position(|x| x == r) {
+                        self.strip_scene.readouts[i] = (shown, true);
+                    }
+                }
+                Typed::Arp(i) => self.arp_scene.readouts[(*i).min(3)] = (shown, true),
+            }
         }
     }
 
@@ -2479,11 +2769,12 @@ impl Editing {
         }
         #[cfg(feature = "standalone-production")]
         {
-            if let Some(dialog) = crate::standalone_settings::take_requested()
+            if let Some(mut dialog) = crate::standalone_settings::take_requested()
                 && self.standalone_dialog.is_none()
             {
                 self.playing.release();
                 self.end_gestures();
+                dialog.set_tempo(self.settings.tempo);
                 self.standalone_dialog = Some(dialog);
                 self.playing.wants_keys = true;
                 self.composed = None;
@@ -2492,6 +2783,15 @@ impl Editing {
                 && dialog.frame()
             {
                 self.composed = None;
+            }
+            // TEMPO changed there: the arpeggiator's at once, and this computer's (R-ARP).
+            if let Some(bpm) = self
+                .standalone_dialog
+                .as_mut()
+                .and_then(crate::standalone_settings::Dialog::take_tempo)
+            {
+                self.keep_settings(Change::Tempo(bpm));
+                self.params.set_tempo(f64::from(bpm));
             }
         }
         let requested_height = self.params.editor_panel.load(Ordering::Relaxed)
@@ -2559,6 +2859,16 @@ impl Editing {
             under,
             self.motion_at.unwrap_or_else(Instant::now),
         );
+        // The arpeggiator's drawer over the lower page, dropping from under the rail, while it
+        // shows (decisions.md R-ARP); its knobs drawn as the panel's renderer draws controls.
+        self.arp_drawer.tick();
+        let arp_k = self.arp_top().map_or(0.0, |_| self.arp_drawer.reveal());
+        let arp_moved = arp_k != self.arp_shown;
+        let arp = arp_k > 0.0
+            && (self.arp.render(&self.arp_scene, &mut self.renderer)
+                || self.arp_drawer.sliding()
+                || arp_moved);
+        let arp_shut = arp_k <= 0.0 && arp_moved;
         // The drawer over the strip, dropping down from under the rail, while it shows.
         let k = self.browser.reveal();
         // (Its place changed since the frame last shown is a change too: the slide's last frame
@@ -2567,10 +2877,11 @@ impl Editing {
         let drawer = k > 0.0
             && (self.drawer.render(&self.browser.drawer) || self.browser.sliding() || moved);
         let shut = k <= 0.0 && moved;
-        if !(panel || strip || drawer || shut || self.composed.is_none()) {
+        if !(panel || strip || drawer || shut || arp || arp_shut || self.composed.is_none()) {
             return false;
         }
         self.reveal_shown = k;
+        self.arp_shown = arp_k;
         // The places that changed, the panel's and the strip's, put together again alone and
         // so shown (decisions.md R58); all of the frame while the drawer moves, something
         // floats over everything, or there is no frame of this size to change.
@@ -2579,12 +2890,21 @@ impl Editing {
             .composed
             .as_ref()
             .is_some_and(|c| (c.width(), c.height()) == (self.physical_width, height));
+        let arp_moving = arp_moved || arp_shut || self.arp_drawer.sliding();
         self.damage = (kept
-            && !(drawer || shut || self.renderer.floating() || self.standalone_dialog_open()))
+            && !(drawer
+                || shut
+                || arp_moving
+                || self.renderer.floating()
+                || self.standalone_dialog_open()))
         .then(|| {
             let mut places = self.renderer.damages().to_vec();
             if let Some([x0, y0, x1, y1]) = self.strip.damage() {
                 places.push([x0, foot + y0, x1, foot + y1]);
+            }
+            if arp && let Some([x0, y0, x1, y1]) = self.arp.damage() {
+                let top = arp_ui::top_px(self.renderer.scale());
+                places.push([x0, top + y0, x1, top + y1]);
             }
             if !self.expanded() {
                 let side = (30.0 * self.renderer.scale()).ceil() as i32;
@@ -2598,10 +2918,12 @@ impl Editing {
             places
         });
         let expanded = self.expanded();
+        let arp_top = self.arp_top();
         compose(
             &mut self.composed,
             &self.renderer,
             self.strip.frame(),
+            arp_top.map(|top| (self.arp.frame(), self.arp.shadow(), top)),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
             self.damage.as_deref(),
             expanded,
@@ -2654,15 +2976,19 @@ impl Editing {
 }
 
 /// The window's frame: the panel's renderer's (the whole drawing), the strip's parts over its
-/// strip (`strip`, from the panel's foot down), the drawer over that from `drawer`'s top
+/// strip (`strip`, from the panel's foot down), the arpeggiator's drawer over that from its top
+/// (drawing units, its plate alone, cut off at the rail's foot) with its shadow laid over what is
+/// under its foot, the presets' drawer over everything from `drawer`'s top
 /// (drawing units, cut off at the rail's foot), and over everything what floats (MIDI Learn's
 /// ring, a tip, a note, a menu); in the places `only` alone (pixels: left, top, right,
 /// bottom) when given. (The places, not the rows they span: QUALITY's opening at the panel's
 /// top and the strip's drops at its foot put together the whole frame between them.)
+#[allow(clippy::too_many_arguments)]
 fn compose(
     composed: &mut Option<ca72_panel::Pixmap>,
     renderer: &Renderer,
     strip: &ca72_panel::Pixmap,
+    arp: Option<(&ca72_panel::Pixmap, Option<&ca72_panel::Pixmap>, f64)>,
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
     only: Option<&[[i32; 4]]>,
     expanded: bool,
@@ -2684,9 +3010,32 @@ fn compose(
     let s = renderer.scale();
     let top = (art::PANEL_H * s).round() as i32;
     let rail = (DRAWER_TOP * s).round() as i32;
+    let (left, right) = (
+        (arp_ui::LEFT * s).round() as i32,
+        (arp_ui::RIGHT * s).round() as i32,
+    );
     for &[x0, y0, x1, y1] in places {
         paste(c, frame, 0, [x0, y0, x1, y1]);
         paste(c, strip, top, [x0, y0, x1, y1]);
+        if let Some((a, shadow, at)) = arp {
+            // (Its frame's rows the drawing's from `top_px` down, open; moved up as it slides.)
+            let at = arp_ui::top_px(s) - ((arp_ui::TOP - at) * s).round() as i32;
+            let place = [x0.max(left), y0.max(rail), x1.min(right), y1];
+            paste(
+                c,
+                a,
+                at,
+                [
+                    place[0],
+                    place[1],
+                    place[2],
+                    place[3].min(at + (arp_ui::DEPTH * s).round() as i32),
+                ],
+            );
+            if let Some(shadow) = shadow {
+                shade(c, shadow, at + (arp_ui::DEPTH * s).round() as i32, place);
+            }
+        }
         if let Some((d, at)) = drawer {
             paste(c, d, (at * s).round() as i32, [x0, y0.max(rail), x1, y1]);
         }
@@ -2713,6 +3062,30 @@ fn compose(
     }
 }
 
+/// `p` (premultiplied, partly clear) laid over the frame `c` with its top at row `top`, inside
+/// `place` (left, top, right, bottom) only: the arpeggiator's drawer's shadow.
+fn shade(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i32; 4]) {
+    let (w, h) = (c.width() as i32, c.height() as i32);
+    let (pw, ph) = (p.width() as i32, p.height() as i32);
+    let (x0, x1) = (place[0].max(0), place[2].min(w).min(pw));
+    let (y0, y1) = (place[1].max(top).max(0), place[3].min(top + ph).min(h));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    for y in y0..y1 {
+        let src = (((y - top) * pw + x0) * 4) as usize;
+        let dst = ((y * w + x0) * 4) as usize;
+        let n = (x1 - x0) as usize * 4;
+        let (s, d) = (&p.data()[src..src + n], &mut c.data_mut()[dst..dst + n]);
+        for (d, s) in d.chunks_exact_mut(4).zip(s.chunks_exact(4)) {
+            let keep = 255 - u16::from(s[3]);
+            for j in 0..4 {
+                d[j] = (u16::from(s[j]) + (u16::from(d[j]) * keep + 127) / 255).min(255) as u8;
+            }
+        }
+    }
+}
+
 /// `p` put in the frame `c` with its top at row `top`, inside `place` (left, top, right,
 /// bottom) only.
 fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i32; 4]) {
@@ -2728,6 +3101,27 @@ fn paste(c: &mut ca72_panel::Pixmap, p: &ca72_panel::Pixmap, top: i32, place: [i
         let src = (((y - top) * pw + x0) * 4) as usize;
         let dst = ((y * w + x0) * 4) as usize;
         c.data_mut()[dst..dst + n].copy_from_slice(&p.data()[src..src + n]);
+    }
+}
+
+/// What the arpeggiator's drawer shows (decisions.md R-ARP), from the parameters and the
+/// controls' values as the panel shows them (a knob dragged where the drag has it), and the scene
+/// before (its hover is set elsewhere).
+fn arp_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], was: ArpScene) -> ArpScene {
+    let knob = |id: &str| ca72_panel::controls::index(id).map_or(0.0, |i| values[i]);
+    let rate = crate::arp::RATES[p.arp_rate.value().to_index()].0;
+    ArpScene {
+        on: p.arp_on.value(),
+        latch: p.arp_latch.value(),
+        direction: p.arp_direction.value().to_index(),
+        readouts: [
+            (rate.to_owned(), true),
+            (p.arp_octaves.value().to_string(), true),
+            (format!("{:.0}", p.arp_gate.value()), true),
+            (format!("{:.0}", p.arp_swing.value()), true),
+        ],
+        knobs: arp_ui::KNOB_PARAMS.map(knob),
+        hover: was.hover,
     }
 }
 
@@ -5222,6 +5616,7 @@ mod tests {
                 &mut whole,
                 &e.renderer,
                 e.strip.frame(),
+                e.arp_top().map(|top| (e.arp.frame(), e.arp.shadow(), top)),
                 None,
                 None,
                 true,
@@ -5265,12 +5660,242 @@ mod tests {
             &mut whole,
             &e.renderer,
             e.strip.frame(),
+            None,
             Some((e.drawer.frame(), DRAWER_TOP)),
             None,
             true,
             (e.physical_width, e.physical_height()),
         );
         assert!(e.composed == whole, "the drawer where its slide ended");
+    }
+
+    /// The arpeggiator's drawer opened by the rail's ARP key and slid all the way down.
+    fn arp_open(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Arp)));
+        click(e, p);
+        assert!(e.arp_drawer.open);
+        e.arp_drawer.slide = Some((Instant::now() - crate::presets::SLIDE * 2, true));
+        e.draw();
+        e.draw();
+        assert!(e.arp_drawer.settled());
+    }
+
+    /// The rail's ARP key drops the arpeggiator's drawer over the lower page, inside the window
+    /// (its size kept), and puts it away; it is lit while the arpeggiator is on. Open, the
+    /// drawer is what the pointer finds there: the strip's tabs and knobs and the keyboard's
+    /// buttons under it do nothing; below it, the page answers as before. The frame shown is its
+    /// frame put together whole, the drawer's shadow over the page; and the presets' drawer, opened,
+    /// is over it.
+    #[test]
+    fn the_arp_key_drops_its_drawer_over_the_lower_page() {
+        let (mut e, host, _) = editing_standalone();
+        e.playing.visible = false;
+        let size = (e.width, e.window_height());
+        arp_open(&mut e);
+        assert_eq!((e.width, e.window_height()), size);
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            e.arp_top().map(|top| (e.arp.frame(), e.arp.shadow(), top)),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "the drawer as put together whole");
+        // Its plate in the frame, row for row.
+        let c = e.composed.as_ref().expect("a frame");
+        let s = e.renderer.scale();
+        let (x, y) = ((2000.0 * s) as usize, (arp_ui::TOP + 200.0) * s);
+        let y = y.round() as usize;
+        let row = arp_ui::top_px(s) as usize;
+        let px = |p: &ca72_panel::Pixmap, x: usize, y: usize| {
+            let i = (y * p.width() as usize + x) * 4;
+            p.data()[i..i + 4].to_vec()
+        };
+        assert_eq!(px(c, x, y), px(e.arp.frame(), x, y - row));
+        // The strip's controls under it do nothing: AUTO GAIN's tab, VOICES's knob's top.
+        for (x, y) in [
+            strip::Bank::Auto.tab(0),
+            (centre("voices").0, arp_ui::TOP + arp_ui::DEPTH - 20.0),
+        ] {
+            assert_eq!((arp_ui::hit(x, y), interact::hit_arp(x, y)), (None, None));
+            let p = at(&e, (x, y));
+            go(&mut e, p);
+            press(&mut e);
+            go(&mut e, below(p, -40.0));
+            release(&mut e);
+        }
+        assert!(host.take().is_empty(), "nothing under the drawer");
+        // The keyboard's header under it, the keyboard shown.
+        e.strip_press(StripTarget::Bar(BarTarget::Keyboard));
+        e.draw();
+        let p = at(&e, (keyboard::TYPING_X, keyboard::HEADER));
+        click(&mut e, p);
+        assert!(!e.playing.typing, "TYPING under the drawer");
+        // A key below it plays.
+        let p = at(&e, (1000.0, art::H - 60.0));
+        go(&mut e, p);
+        press(&mut e);
+        assert!(e.playing.dragging(), "a key below the drawer");
+        release(&mut e);
+        // The ARP key lit while the arpeggiator is on.
+        e.update_scene();
+        assert!(!e.browser.bar.arp);
+        // The presets' drawer over it; ARP again puts the presets away and shows it.
+        e.strip_press(StripTarget::Bar(BarTarget::Name));
+        assert!(e.browser.open && e.arp_drawer.open);
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(!e.browser.open && e.arp_drawer.open);
+        e.strip_press(StripTarget::Bar(BarTarget::Arp));
+        assert!(!e.arp_drawer.open);
+        e.arp_drawer.slide = None;
+        e.draw();
+        assert_eq!(e.arp_top(), None);
+        // PANEL hiding the lower panel puts it away at once.
+        arp_open(&mut e);
+        e.toggle_panel();
+        assert!(!e.arp_drawer.open && e.arp_top().is_none());
+    }
+
+    /// The drawer's tabs and knobs operate the arpeggiator's parameters, each a gesture: ON and
+    /// LATCH switched, DIRECTION's choice set; RATE and OCTAVES dragged from position to
+    /// position, never between; GATE turned; a readout double-clicked takes a value typed (RATE
+    /// a note value, 8t a triplet, 16. dotted; OCTAVES a digit; GATE percent).
+    #[test]
+    fn the_arp_drawer_operates_its_parameters() {
+        let (mut e, host, params) = editing();
+        arp_open(&mut e);
+        host.take();
+        let tab = |e: &mut Editing, b: ArpBank, i: usize| {
+            let p = at(e, arp_ui::centre(ArpTarget::Tab(b, i)));
+            click(e, p);
+        };
+        let (on, latch, dir) = (
+            params.arp_on.as_ptr(),
+            params.arp_latch.as_ptr(),
+            params.arp_direction.as_ptr(),
+        );
+        tab(&mut e, ArpBank::Arp, 0);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(on), Call::Set(on, 1.0), Call::End(on)]
+        );
+        tab(&mut e, ArpBank::Arp, 1);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(latch), Call::Set(latch, 1.0), Call::End(latch)]
+        );
+        tab(&mut e, ArpBank::Direction, 3);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(dir), Call::Set(dir, 1.0), Call::End(dir)]
+        );
+        tab(&mut e, ArpBank::Direction, 0);
+        assert!(host.take().is_empty(), "UP already");
+        // RATE dragged: positions only.
+        let rate = params.arp_rate.as_ptr();
+        let p = at(&e, centre("arp_rate"));
+        go(&mut e, p);
+        press(&mut e);
+        for dy in 1..60 {
+            go(&mut e, below(p, -f64::from(dy)));
+        }
+        release(&mut e);
+        let calls = host.take();
+        well_formed(&calls);
+        assert!(calls.len() > 3);
+        for c in &calls {
+            if let Call::Set(q, v) = *c {
+                assert_eq!(q, rate);
+                assert!(
+                    (v * 12.0 - (v * 12.0).round()).abs() < 1e-5,
+                    "between at {v}"
+                );
+            }
+        }
+        e.update_scene();
+        assert!(
+            e.scene
+                .tip
+                .as_ref()
+                .is_some_and(|t| t.0.starts_with("RATE: "))
+        );
+        // Typed.
+        let double = |e: &mut Editing, i: usize| {
+            let p = at(e, arp_ui::centre(ArpTarget::Readout(i)));
+            click(e, p);
+            click(e, p);
+        };
+        let typed = |e: &mut Editing, text: &str| {
+            for c in text.chars() {
+                keyed(e, Key::Character(c.to_string()));
+            }
+            keyed(e, Key::Enter);
+        };
+        for (i, text, ptr, want) in [
+            (
+                0,
+                "8t",
+                rate,
+                params.arp_rate.preview_normalized(ArpRate::EighthTriplet),
+            ),
+            (
+                0,
+                "16.",
+                rate,
+                params.arp_rate.preview_normalized(ArpRate::SixteenthDotted),
+            ),
+            (
+                1,
+                "3",
+                params.arp_octaves.as_ptr(),
+                params.arp_octaves.preview_normalized(3),
+            ),
+            (
+                2,
+                "25",
+                params.arp_gate.as_ptr(),
+                params.arp_gate.preview_normalized(25.0),
+            ),
+        ] {
+            double(&mut e, i);
+            assert!(e.typing.is_some(), "{text}");
+            e.draw();
+            assert_eq!(e.arp_scene.readouts[i], ("_".to_owned(), true));
+            typed(&mut e, text);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(ptr), Call::Set(ptr, want), Call::End(ptr)],
+                "{text}"
+            );
+        }
+        // Not a note value: nothing.
+        double(&mut e, 0);
+        typed(&mut e, "5");
+        assert!(host.take().is_empty());
+        // A knob turned: the frame shown is the frame put together whole.
+        let p = at(&e, centre("arp_gate"));
+        go(&mut e, p);
+        press(&mut e);
+        go(&mut e, below(p, -30.0));
+        assert!(e.draw());
+        let mut whole = None;
+        compose(
+            &mut whole,
+            &e.renderer,
+            e.strip.frame(),
+            e.arp_top().map(|top| (e.arp.frame(), e.arp.shadow(), top)),
+            None,
+            None,
+            true,
+            (e.physical_width, e.physical_height()),
+        );
+        assert!(e.composed == whole, "a knob turned in the drawer");
+        release(&mut e);
     }
 
     /// Every gesture well formed: a parameter's begin only while it has none open, its
@@ -6674,6 +7299,7 @@ mod tests {
                 &mut whole,
                 &e.renderer,
                 e.strip.frame(),
+                None,
                 None,
                 None,
                 false,

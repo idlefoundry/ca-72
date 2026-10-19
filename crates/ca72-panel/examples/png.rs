@@ -3,6 +3,8 @@
 //! strip in MONO without DOUBLE (the one voice lit at one of VOICES's places); `CA72_LETTERING=
 //! large` in the large lettering.
 //! `CA72_STANDALONE=1` shows the standalone keyboard's TYPING and PANIC controls.
+//! `CA72_ARP=1` drops the arpeggiator's drawer over the lower page (decisions.md R-ARP): ON and
+//! UP lit, a sixteenth, two octaves, GATE 60 %, SWING 25 %, the ARP key lit.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -20,6 +22,7 @@ fn main() {
         _ => ca72_panel::Lettering::Standard,
     };
     let mut r = Renderer::with_look(skin, lettering, scale, 1.0);
+    let arp = std::env::var("CA72_ARP").is_ok_and(|v| v == "1");
     let built = t0.elapsed();
     let mut scene = Scene::default();
     // The plugin's defaults: as the mock-up was drawn; the strip's knobs at what its readouts
@@ -59,6 +62,7 @@ fn main() {
         });
         scene.bar.keyboard = true;
     }
+    scene.bar.arp = arp;
     strip.render(&scene, r.frame(), None);
     eprintln!("the strip {:?}", t3.elapsed());
     let mut all = r.frame().clone();
@@ -70,6 +74,9 @@ fn main() {
         let n = w.min(sf.width() as usize) * 4;
         let (from, to) = (y * sf.width() as usize * 4, (top + y) * w * 4);
         all.data_mut()[to..to + n].copy_from_slice(&sf.data()[from..from + n]);
+    }
+    if arp {
+        drop_arp(&mut all, &mut r, scale, skin, lettering);
     }
     if std::env::var("CA72_KEYBOARD_CROP").is_ok_and(|v| v == "1") {
         let [x0, y0, x1, y1] = [370.0, 925.0, 3080.0, 1750.0].map(|v| (v * scale).round() as u32);
@@ -160,5 +167,54 @@ fn example_strip(mono: bool) -> ca72_panel::strip::StripScene {
             ..Default::default()
         },
         ..StripScene::default()
+    }
+}
+
+/// The arpeggiator's drawer over `all` (the editor's `compose`): its plate from its top, its
+/// shadow laid over the page under its foot.
+fn drop_arp(
+    all: &mut ca72_panel::Pixmap,
+    r: &mut Renderer,
+    scale: f64,
+    skin: Skin,
+    lettering: ca72_panel::Lettering,
+) {
+    use ca72_panel::strip::arp::{self, ArpRenderer, ArpScene};
+    let t = std::time::Instant::now();
+    let mut drawer = ArpRenderer::new(scale, skin, lettering);
+    let r2 = |s: &str| (s.to_owned(), true);
+    drawer.render(
+        &ArpScene {
+            on: true,
+            latch: false,
+            direction: 0,
+            readouts: [r2("16"), r2("2"), r2("60"), r2("25")],
+            knobs: [9.0 / 12.0, 1.0 / 3.0, 0.6, 0.25],
+            hover: None,
+        },
+        r,
+    );
+    eprintln!("the arpeggiator's drawer {:?}", t.elapsed());
+    let (w, f) = (all.width() as usize, drawer.frame());
+    let top = arp::top_px(scale) as usize;
+    let (x0, x1) = (
+        (arp::LEFT * scale).round() as usize,
+        (arp::RIGHT * scale).round() as usize,
+    );
+    let depth = (arp::DEPTH * scale).round() as usize;
+    for y in 0..depth.min(f.height() as usize) {
+        let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
+        let n = (x1 - x0) * 4;
+        all.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+    }
+    if let Some(shadow) = drawer.shadow() {
+        all.draw_pixmap(
+            0,
+            (top + depth) as i32,
+            shadow.as_ref(),
+            &resvg::tiny_skia::PixmapPaint::default(),
+            resvg::tiny_skia::Transform::identity(),
+            None,
+        );
     }
 }

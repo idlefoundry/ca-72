@@ -115,6 +115,9 @@ host, the editor and the saved state would not see:
     automation is set between runs. It touches only the parameters of the `Params` it is made
     with. (A plugin cannot set a parameter outside nih-plug otherwise: its setters are
     crate-private.)
+    Its `set_transport()` gives the next runs a host's transport (playing, tempo, position in
+    quarter notes, time signature), for a plugin that follows it (the CA-72's arpeggiator,
+    `docs/decisions.md` R-ARP; the transport's fields are crate-private too).
 
 One more came from a report: the CA-72's switches and buttons did nothing in Cubase 15 on
 Windows 11 (2026-10-07; the CA-72's `docs/decisions.md` R36):

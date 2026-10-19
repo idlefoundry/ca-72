@@ -10,6 +10,7 @@
 //! What the drawing does not draw is drawn here, over it, by [`StripRenderer`]: the tabs and
 //! their light, the readouts, the voices' display, the rail's keys and the preset's name.
 
+pub mod arp;
 mod worn;
 
 use resvg::tiny_skia::Pixmap;
@@ -41,16 +42,16 @@ pub const SECTIONS: [(f64, f64, &str); 4] = [
 pub const LEFT_HAND: (f64, f64) = (art::LH_X + 20.0, PANEL_H + 78.0);
 /// A tab's size, and a bank's pitch between its tabs.
 pub const TAB: (f64, f64) = (150.0, 60.0);
-const TAB_PITCH: f64 = TAB.0 + 6.0;
+pub const TAB_PITCH: f64 = TAB.0 + 6.0;
 /// A bank's recess beyond its tabs' pitches, across.
-const RECESS_PAD: f64 = 18.0;
+pub const RECESS_PAD: f64 = 18.0;
 /// A readout's size.
 pub const READOUT: (f64, f64) = (156.0, 84.0);
 /// The grid (the mock-up's A5 and A6): every amount a unit of its knob and its readout, the
 /// knob this far left of the unit's middle, the readout this far right, the unit this wide.
 pub const UNIT_KNOB: f64 = -84.0;
-const UNIT_READOUT: f64 = 106.0;
-const UNIT_HALF: f64 = 184.0;
+pub const UNIT_READOUT: f64 = 106.0;
+pub const UNIT_HALF: f64 = 184.0;
 /// Each section's units' middles: VOICES's, STEREO's three (WIDTH's, INNER's and DETUNE's,
 /// INNER's in the section's middle, the others this far either side of it), OUTPUT's.
 pub const CV: f64 = (SECTIONS[1].0 + SECTIONS[1].1) / 2.0;
@@ -63,14 +64,17 @@ const BANKS_GAP: f64 = 180.0;
 pub const CO: f64 = (SECTIONS[3].0 + SECTIONS[3].1) / 2.0;
 /// The keys on the rail: their middles across and their widths. The settings' key at the right
 /// end (the owner, 2026-10-10: "a settings button on the right hand side of the preview preset
-/// row"), the name's display a key shorter for it, the gaps between the keys as they were.
-const KEYS: [(f64, f64, BarTarget); 7] = [
+/// row"), the name's display a key shorter for it, the gaps between the keys as they were; and
+/// ARP after the keyboard's, the name a key shorter again for it (the owner's C1, 2026-10-18;
+/// decisions.md R-ARP).
+const KEYS: [(f64, f64, BarTarget); 8] = [
     (92.0, 86.0, BarTarget::Star),
     (192.0, 86.0, BarTarget::Prev),
-    (2526.0, 86.0, BarTarget::Next),
-    (2670.0, 170.0, BarTarget::Save),
-    (2812.0, 86.0, BarTarget::Panel),
-    (2912.0, 86.0, BarTarget::Keyboard),
+    (2426.0, 86.0, BarTarget::Next),
+    (2570.0, 170.0, BarTarget::Save),
+    (2712.0, 86.0, BarTarget::Panel),
+    (2812.0, 86.0, BarTarget::Keyboard),
+    (2912.0, 86.0, BarTarget::Arp),
     (3012.0, 86.0, BarTarget::Settings),
 ];
 pub const KEY_H: f64 = 62.0;
@@ -79,7 +83,7 @@ pub const KEY_W: f64 = 86.0;
 /// The name's display: its window (left, top, width, height), as tall with its surround as
 /// the keys beside it (the owner, 2026-10-09: "Needs to be the same height as the buttons
 /// flanking it").
-pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2200.0, 50.0);
+pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2100.0, 50.0);
 const NAME_SURROUND: f64 = 6.0;
 /// The voices' display, across STEREO's last row from WIDTH's unit's left to DETUNE's right.
 pub const DISPLAY: (f64, f64, f64, f64) = (
