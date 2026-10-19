@@ -55,6 +55,8 @@ use crate::presets::Browser;
 use crate::settings::{Change, Settings};
 use crate::update::Update;
 
+mod agent;
+
 /// The share of the usable screen the editor opens at until it is resized.
 const SCREEN_SHARE: f64 = 0.8;
 /// The editor's width at first where the screen's size is unknown, in logical pixels.
@@ -973,6 +975,9 @@ struct Editing {
     playing: Playing,
     #[cfg(feature = "standalone-production")]
     standalone_dialog: Option<crate::standalone_settings::Dialog>,
+    /// AI agents operating the editor through MCP, while allowed (`editor/agent.rs`;
+    /// decisions.md R-MCP).
+    agents: agent::Agents,
 }
 
 impl PanelWindow {
@@ -1241,9 +1246,10 @@ impl Editing {
             playing,
             #[cfg(feature = "standalone-production")]
             standalone_dialog: None,
+            agents: agent::Agents::default(),
         };
         editing.use_effects(FxView::new(effects));
-        editing.opened()
+        editing.opened().listening()
     }
 
     /// The effects' drawer for `view`'s chain: with one, its renderer (its still parts begun on
@@ -1264,6 +1270,24 @@ impl Editing {
         self.fx_view = view;
         self.strip.set_rail(self.rail);
         self.composed = None;
+    }
+
+    /// Listening for agents if they are allowed.
+    fn listening(mut self) -> Self {
+        self.sync_agents();
+        self
+    }
+
+    /// Agents allowed or not from now on (SETTINGS: AGENTS), on this computer; off, for this
+    /// session too (`--agents`).
+    fn set_agents(&mut self, on: bool) {
+        self.keep_settings(Change::Agents(on));
+        if !on {
+            crate::agent::force(false);
+        }
+        self.agents.stop = false;
+        self.agents.error = None;
+        self.sync_agents();
     }
 
     /// As it opens: what QUALITY's setting shows up in its opening, not moving (the hamster
@@ -2138,6 +2162,7 @@ impl Editing {
                         self.settings.skin,
                         self.settings.lettering,
                         self.settings.frequency,
+                        self.playing.standalone.then(|| self.agents_allowed()),
                     ),
                 );
             }
@@ -2234,6 +2259,10 @@ impl Editing {
                 self.set_lettering(lettering);
                 return;
             }
+            Pressed::Agents(on) => {
+                self.set_agents(on);
+                return;
+            }
             Pressed::SizeMenu => {
                 let size = self.renderer.text_size() * MENU_TEXT;
                 let sizes = self.sizes();
@@ -2326,21 +2355,7 @@ impl Editing {
                     self.playing.typing = !self.playing.typing;
                     self.playing.wants_keys = self.playing.typing;
                 }
-                keyboard::Target::Panic => {
-                    #[cfg(feature = "standalone-production")]
-                    if let Some(app) = plugin_kit_standalone::AppHandle::current() {
-                        let token = self.playing.panic_standalone();
-                        let accepted = app.panic_tagged(token);
-                        debug_assert!(
-                            accepted,
-                            "local panic tokens are nonzero and fit in 63 bits"
-                        );
-                    } else {
-                        self.playing.panic();
-                    }
-                    #[cfg(not(feature = "standalone-production"))]
-                    self.playing.panic();
-                }
+                keyboard::Target::Panic => self.panic(),
                 keyboard::Target::Back => {}
             }
             self.hover = None;
@@ -2400,6 +2415,24 @@ impl Editing {
                 self.resizing = Some((self.pointer.0, self.width));
             }
         }
+    }
+
+    /// PANIC: every note off, from every source, and the controllers reset (the keyboard's
+    /// button, and an agent's).
+    fn panic(&mut self) {
+        #[cfg(feature = "standalone-production")]
+        if let Some(app) = plugin_kit_standalone::AppHandle::current() {
+            let token = self.playing.panic_standalone();
+            let accepted = app.panic_tagged(token);
+            debug_assert!(
+                accepted,
+                "local panic tokens are nonzero and fit in 63 bits"
+            );
+        } else {
+            self.playing.panic();
+        }
+        #[cfg(not(feature = "standalone-production"))]
+        self.playing.panic();
     }
 
     /// A right click: the menu of the control under the pointer (MIDI Learn: decisions.md R34),
@@ -3748,6 +3781,11 @@ impl WindowHandler for PanelWindow {
         if self.editing.dragging() && window::lost_capture(window) {
             self.editing.end_gestures();
             self.editing.playing.release_pointer();
+        }
+        // What agents ask, carried out as the player's edits are, before the frame is drawn.
+        if self.editing.serve_agents() {
+            self.follow(window);
+            self.keyboard(window);
         }
         // The grip's width, asked of the host once a frame.
         self.editing.grip();
@@ -9632,6 +9670,57 @@ mod tests {
                 .save_png(out.join(format!("settings-{n}.png")))
                 .unwrap();
         }
+    }
+
+    /// SETTINGS offers AGENTS in the standalone alone (decisions.md R-MCP): ALLOW and OFF, the
+    /// one in force marked; off until chosen. `agents-<n>.png` in `$CA72_AGENTS_PNG`.
+    #[test]
+    fn agents_are_allowed_in_the_standalones_settings_menu() {
+        let out = std::env::var_os("CA72_AGENTS_PNG").map(std::path::PathBuf::from);
+        let (mut e, _host, _) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        assert!(
+            !menu_items(&e).iter().any(|(t, _)| t == "AGENTS"),
+            "not in a host"
+        );
+        e.learning.close_menu();
+        let (mut e, _host, _) = editing_standalone();
+        assert!(!e.settings.agents && !e.agents_allowed());
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let at = items
+            .iter()
+            .position(|(t, _)| t == "AGENTS")
+            .expect("AGENTS");
+        assert_eq!(
+            items[at + 1..at + 3],
+            [("ALLOW".to_owned(), true), ("OFF".to_owned(), false)]
+        );
+        if let Some(out) = &out {
+            window_frame(&mut e)
+                .save_png(out.join("agents-1.png"))
+                .unwrap();
+        }
+        menu_item(&mut e, "ALLOW");
+        assert!(e.settings.agents && e.agents_allowed());
+        click(&mut e, key);
+        let items = menu_items(&e);
+        let at = items
+            .iter()
+            .position(|(t, _)| t == "AGENTS")
+            .expect("AGENTS");
+        assert_eq!(
+            items[at + 1..at + 3],
+            [("ALLOW".to_owned(), false), ("OFF".to_owned(), true)]
+        );
+        if let Some(out) = &out {
+            window_frame(&mut e)
+                .save_png(out.join("agents-2.png"))
+                .unwrap();
+        }
+        menu_item(&mut e, "OFF");
+        assert!(!e.agents_allowed());
     }
 
     /// The drawer's update check (decisions.md R27): its button the editor's, not the

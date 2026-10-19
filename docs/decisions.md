@@ -8429,3 +8429,113 @@ open it up again, and it doesn't..."
 
 **Not done:** Windows and Linux windows (unchanged; a helper's window on Windows may meet the same
 rule, untried); a keyboard for the effect's window without a click.
+
+## R-MCP. Agents operate the standalone through MCP (#76)
+
+**Owner decisions, 2026-10-18.** Target 0.3.0. The first version controls the standalone
+application. Plug-in instances in a host come once the design has settled, so instance
+discovery and selection are designed in now. It covers "all user-facing controls and
+functions": presets (list, load, save, rename, favourites), the panel and strip, the settings
+menu, the drawers, notes (for #77), MIDI Learn and QUALITY. Reuse the DAW-v3 MCP server's
+patterns.
+
+**Agent proposal, 2026-10-18** (placeholder id; not yet reviewed by the owner). docs/mcp.md has
+the inventory, the design, the tools and what comes next.
+
+- **Two halves.** The bridge `ca72-mcp` speaks MCP on stdio and is what an agent's client
+  starts. The standalone listens on a Unix socket in the user's runtime folder while agents
+  are allowed. The bridge finds the CA-72s that are open from their records and passes each
+  call to the chosen one. The MCP layer takes DAW-v3's shape (`daw-api/src/mcp.rs`, DESIGN
+  7.6): revisions; `tools/list` with schemas generated from the API's methods (D165) and, for
+  `ca72_set`, from the parameters; a failed call returned with `isError`. The bridge connecting
+  to a long-running process copies `daw rpc`'s proxy to `daw serve`.
+- **The editor's own paths.** The socket's threads hand each request to an inbox. The editor
+  takes from it at each frame, on its thread, and carries the request out as its controls
+  would:
+  - parameters through `ParamSetter`, a gesture each;
+  - DETUNE and VOICES refused where they're dimmed;
+  - MODE as the strip's tabs;
+  - presets through `Browser` (SAVE AS and RENAME now share `save_sound` and `rename_preset`)
+    and the drawer's `Library`, with the drawer's hint;
+  - settings as the menu changes them;
+  - notes through `LocalNotes`, owned as the on-screen keyboard's (`Playing::agent`).
+
+  AUTO GAIN's curve is asked for after an agent's change, as after the player's. Nothing new
+  touches the audio thread.
+- **Values in the panel's units, range checked.** Knobs take their dial's numbers. FREQUENCY
+  takes semitones. The strip takes %, cents and dB. A selector takes its position by name, id
+  or index; a switch takes on or off. A value outside its range is refused, not clamped, with
+  the range given, and nothing in that call is set. The panel's typed values clamp; an agent
+  learns that it asked for too much.
+- **Access (owner's call).**
+  - Off by default: SETTINGS has a new AGENTS group, ALLOW and OFF (`agents` in
+    `settings.toml`), shown only in the standalone. `--agents` allows agents for one session.
+  - Until then no socket exists. The folder (700) and the socket (600) are the user's alone,
+    and there is no network port.
+  - An agent can turn agents off, never on.
+  - No per-connection prompt or token. Recommendation: the setting and the user-only socket
+    are enough for a local instrument.
+- **Lifetime.**
+  - A request the window hasn't taken within 10 s is answered as timed out and never carried
+    out. One whose client has gone before the window takes it is dropped. One already taken is
+    carried out, and its answer is discarded.
+  - At most eight clients connect at once, and the editor carries out at most 32 requests a
+    frame.
+  - With no instance chosen, the bridge reconnects to the one open after a restart.
+- **Left out.**
+  - Visual-only things and indicators.
+  - TYPING: `ca72_note_on` covers it.
+  - Opening the browser for a download.
+  - Changing AUDIO & MIDI's devices: read only for now, since a change can stop the sound
+    (**owner's call**: offer it after a confirmation design).
+  - Rendering and listening, which are #77's to design.
+- **Next, for plug-ins in a host** (docs/mcp.md):
+  - a server that works while the editor is closed, setting parameters through the
+    process context as MIDI Learn does;
+  - each instance identified by its host and track;
+  - a named pipe on Windows;
+  - `ca72-mcp` in the installers.
+
+**Evidence (omarchy, Linux x86-64, Rust 1.97, 2026-10-18).**
+
+- **The agent tests.** `cargo test -p ca72-plugin --lib agent` runs 23 tests, with and
+  without the standalone feature, and all pass.
+  - 17 test the protocol's parts: the MCP dispatcher, the tools' schemas, the values,
+    discovery, the server (order, errors, a client gone mid-request, eight clients, stopping)
+    and the bridge (none open, one, two, choosing, reconnecting).
+  - 5 test the editor's side. Four of them drive a real `Editing` behind a real socket,
+    through the bridge's code in MCP's text. The host applies the changes as the standalone's
+    does. They cover parameters, presets, notes, settings, the view, MIDI Learn, agents turned
+    off, and a client gone mid-request.
+  - 1 tests the settings menu.
+- **The built bridge.** `tests/mcp_bridge.rs` runs the built `ca72-mcp`, including its process
+  killed mid-request: the request was dropped, not carried out, and the next bridge was served.
+- **The whole crate.** The lib suite passes with the standalone feature (279). Without it, 269
+  pass, but `the_workers_follow_poly_through_the_plug_ins_life` timed out once at a load
+  average of 17 and passed alone.
+- **Clippy.** Clean with `-D warnings` for Linux, with and without the standalone feature, and
+  for `x86_64-pc-windows-gnu`.
+- **End to end.** The real `ca72-standalone --no-devices --agents`, its window on a hidden
+  Hyprland workspace, was driven through the built `ca72-mcp` by a JSON-RPC client. 21 checks
+  passed:
+  - the handshake, 28 tools, the instance found and `describe`'s 63 parameters;
+  - setting and an out-of-range value refused;
+  - a preset saved, marked changed, loaded back and deleted;
+  - notes played and let go, the look changed, the drawer opened, AUDIO & MIDI read;
+  - 20 round trips in 406 ms.
+
+  Ten raw clients that sent a request and closed at once, and a bridge killed mid-request,
+  left the application serving. Agents turned off removed the socket and its record, and the
+  next call was told that none listen.
+- **A real MCP client.** Claude Code (`claude -p --mcp-config <scratch file>
+  --strict-mcp-config`, no global configuration changed) read the version and MODE, set
+  CUTOFF and EMPHASIS, reported the out-of-range refusal word for word, played two notes and
+  read the values back.
+
+**Not tried.**
+
+- macOS (it should work, since it also uses Unix sockets), and Windows (not built).
+- A real audio device with notes heard.
+- The AGENTS menu in the running application. The menu itself was drawn in a test
+  (`CA72_AGENTS_PNG`); in the application it sits below STANDALONE's AUDIO & MIDI….
+- Hosts and plug-ins.

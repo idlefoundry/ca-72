@@ -358,6 +358,11 @@ impl Update {
         }
     }
 
+    /// Whether its button checks for updates now (rather than opening a page in the browser).
+    pub fn checks(&self) -> bool {
+        matches!(self.state, State::Idle | State::Latest)
+    }
+
     /// A press on its button: the check begun, the release's download or the releases'
     /// page opened.
     pub fn press(&mut self) {

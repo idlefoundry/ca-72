@@ -695,10 +695,8 @@ impl Browser {
                 return;
             }
         };
-        match self.library.save(&name, values_now(p), Some(tags)) {
+        match self.save_sound(&name, tags, p) {
             Ok(e) => {
-                Self::set_current(p, &e.sound.name);
-                self.wanted = Some((e.sound.name.clone(), targets(p, &e)));
                 self.drawer.hint = format!("Saved {}.", e.sound.name);
                 self.drawer.save_name = Field::default();
                 self.drawer.save_tags = Field::default();
@@ -714,6 +712,46 @@ impl Browser {
         self.reread(p);
     }
 
+    /// The current sound saved under `name` with `tags` (SAVE AS's, and an agent's:
+    /// `crate::agent`), the plug-in then that preset; the library read again.
+    pub fn save_sound(
+        &mut self,
+        name: &str,
+        tags: Vec<String>,
+        p: &Ca72Params,
+    ) -> Result<Entry, String> {
+        let r = self.library.save(name, values_now(p), Some(tags));
+        if let Ok(e) = &r {
+            Self::set_current(p, &e.sound.name);
+            self.wanted = Some((e.sound.name.clone(), targets(p, e)));
+        }
+        self.reread(p);
+        r
+    }
+
+    /// A preset renamed (RENAME's, and an agent's): the plug-in's preset is still it if it
+    /// was; the library read again.
+    pub fn rename_preset(&mut self, name: &str, to: &str, p: &Ca72Params) -> Result<Entry, String> {
+        let r = self.library.rename(name, to);
+        if let Ok(n) = &r
+            && same(&Self::current(p), name)
+        {
+            Self::set_current(p, &n.sound.name);
+        }
+        self.reread(p);
+        r
+    }
+
+    /// The preset the plug-in is set to, by name (empty when none).
+    pub fn current_name(p: &Ca72Params) -> String {
+        Self::current(p)
+    }
+
+    /// The presets as last read: every one, and the list as the drawer's filters have it.
+    pub fn presets(&self) -> (&[Entry], &[Entry]) {
+        (&self.all, &self.list)
+    }
+
     /// Commits the preset being renamed or tagged, wherever its row is now; none if it has
     /// gone.
     fn commit_edit(&mut self, p: &Ca72Params) {
@@ -726,10 +764,7 @@ impl Browser {
         let text = self.drawer.edit.text.clone();
         let mut shown = e.sound.name.clone();
         let r = match how {
-            Edit::Rename => self.library.rename(&e.sound.name, &text).map(|n| {
-                if same(&Self::current(p), &e.sound.name) {
-                    Self::set_current(p, &n.sound.name);
-                }
+            Edit::Rename => self.rename_preset(&e.sound.name, &text, p).map(|n| {
                 shown = n.sound.name;
             }),
             _ => library::parse_tags(&text).and_then(|t| self.library.tag(&e.sound.name, t)),
