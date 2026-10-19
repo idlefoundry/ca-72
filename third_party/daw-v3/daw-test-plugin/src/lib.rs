@@ -31,7 +31,14 @@
 //!   it marks its state dirty after a host loads one (on its main thread, a moment later);
 //! - the hidden `crash` and `hang` parameters abort the process or stop it responding
 //!   when they are set during processing. They are never saved, so restoring a snapshot
-//!   after an injected crash does not crash again.
+//!   after an injected crash does not crash again;
+//! - faults at load, for a host's recovery (the CA-72's R-FX-SAFETY, its patch 4): the
+//!   plugin IDs `PLUGIN_ID` + `.crash-at-load` or `.hang-at-load` (not listed by the factory)
+//!   abort or hang as they are made; a state holding the pair (`FAULT_ID`, 1, 2 or 3) aborts
+//!   or hangs while it is loaded, or (3) is loaded and saved again with it, and aborts at its
+//!   first block (a saved state that crashes it every time it is restored); and a library whose
+//!   file name holds `crash-at-scan` or `hang-at-scan` aborts or hangs in its entry's `init`,
+//!   so as it is listed (and loaded).
 //!
 //! All arithmetic is plain `f32` with no feedback, so output is bit-exact for a given input
 //! and the same events, whatever the block size.
@@ -151,6 +158,19 @@ const STATE_MAGIC: &[u8; 8] = b"DAWTP\0\0\x01";
 /// The pair's ID for its sample's level (D234): its state beyond its parameters, present
 /// only when not 1.
 const SAMPLE_ID: u32 = 0xFFFF_FF01;
+/// The pair's ID for a fault the state injects (R-FX-SAFETY): 1 aborts while the state is
+/// loaded, 2 hangs then, 3 is kept (and saved again) and aborts at the first block after.
+pub const FAULT_ID: u32 = 0xFFFF_FF02;
+/// The plugin IDs that fault as they are made (not listed by the factory).
+pub const CRASH_AT_LOAD_ID: &CStr = c"org.daw-v3.test-plugin.crash-at-load";
+pub const HANG_AT_LOAD_ID: &CStr = c"org.daw-v3.test-plugin.hang-at-load";
+
+/// Stops responding, for good (a fault injected).
+fn hang() -> ! {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
 
 struct ParamDef {
     id: clap_id,
@@ -406,6 +426,8 @@ struct TestPlugin {
     /// A negative count waits for a state save to capture the unchanged baseline.
     quiet_sample: AtomicU64,
     quiet_in: std::sync::atomic::AtomicI64,
+    /// A fault its state injected and keeps (`FAULT_ID`: 3, or 0 for none).
+    fault: AtomicU32,
     audio: UnsafeCell<Audio>,
     /// The GUI (main thread only).
     gui: std::sync::Mutex<gui::Gui>,
@@ -450,6 +472,11 @@ impl TestPlugin {
             out.extend_from_slice(&SAMPLE_ID.to_le_bytes());
             out.extend_from_slice(&sample.to_le_bytes());
         }
+        let fault = self.fault.load(Ordering::Relaxed);
+        if fault != 0 {
+            out.extend_from_slice(&FAULT_ID.to_le_bytes());
+            out.extend_from_slice(&f64::from(fault).to_le_bytes());
+        }
         out
     }
 
@@ -491,6 +518,7 @@ impl TestPlugin {
         }
         let mut parsed = Vec::new();
         let mut sample = 1.0;
+        let mut fault = 0;
         for chunk in rest.chunks_exact(12) {
             let mut id = [0u8; 4];
             let mut v = [0u8; 8];
@@ -500,6 +528,11 @@ impl TestPlugin {
             match index_of(id) {
                 Some(i) if PARAMS[i].saved => parsed.push((id, f64::from_le_bytes(v))),
                 _ if id == SAMPLE_ID => sample = f64::from_le_bytes(v),
+                _ if id == FAULT_ID => match f64::from_le_bytes(v) as u32 {
+                    1 => std::process::abort(),
+                    2 => hang(),
+                    f => fault = f,
+                },
                 _ => return false,
             }
         }
@@ -507,6 +540,7 @@ impl TestPlugin {
             self.set(id, v);
         }
         self.set_sample(sample);
+        self.fault.store(fault, Ordering::Relaxed);
         true
     }
 
@@ -791,13 +825,11 @@ impl TestPlugin {
 
     /// Acts on the crash and hang parameters.
     fn inject_faults(&self) {
-        if self.value(P_CRASH) >= 0.5 {
+        if self.value(P_CRASH) >= 0.5 || self.fault.load(Ordering::Relaxed) == 3 {
             std::process::abort();
         }
         if self.value(P_HANG) >= 0.5 {
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-            }
+            hang();
         }
     }
 }
@@ -1403,8 +1435,18 @@ unsafe extern "C" fn create(
     host: *const clap_host,
     id: *const c_char,
 ) -> *const clap_plugin {
+    if id.is_null() {
+        return std::ptr::null();
+    }
     // SAFETY: the host passes a NUL-terminated plugin ID.
-    if id.is_null() || unsafe { CStr::from_ptr(id) } != PLUGIN_ID {
+    let id = unsafe { CStr::from_ptr(id) };
+    if id == CRASH_AT_LOAD_ID {
+        std::process::abort();
+    }
+    if id == HANG_AT_LOAD_ID {
+        hang();
+    }
+    if id != PLUGIN_ID {
         return std::ptr::null();
     }
     let pl = Box::new(TestPlugin {
@@ -1434,6 +1476,7 @@ unsafe extern "C" fn create(
         sample: AtomicU64::new(1.0f64.to_bits()),
         quiet_sample: AtomicU64::new(NONE),
         quiet_in: std::sync::atomic::AtomicI64::new(0),
+        fault: AtomicU32::new(0),
         audio: UnsafeCell::new(Audio {
             ring: Vec::new(),
             pos: 0,
@@ -1456,7 +1499,18 @@ static FACTORY: clap_plugin_factory = clap_plugin_factory {
     create_plugin: Some(create),
 };
 
-unsafe extern "C" fn entry_init(_path: *const c_char) -> bool {
+unsafe extern "C" fn entry_init(path: *const c_char) -> bool {
+    if !path.is_null() {
+        // SAFETY: the host passes the library's path, NUL-terminated.
+        let path = unsafe { CStr::from_ptr(path) }.to_string_lossy();
+        let name = path.rsplit(['/', '\\']).next().unwrap_or("");
+        if name.contains("crash-at-scan") {
+            std::process::abort();
+        }
+        if name.contains("hang-at-scan") {
+            hang();
+        }
+    }
     true
 }
 
@@ -1514,6 +1568,7 @@ mod tests {
             sample: AtomicU64::new(1.0f64.to_bits()),
             quiet_sample: AtomicU64::new(NONE),
             quiet_in: std::sync::atomic::AtomicI64::new(0),
+            fault: AtomicU32::new(0),
             audio: UnsafeCell::new(Audio {
                 ring: Vec::new(),
                 pos: 0,
