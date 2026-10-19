@@ -7511,3 +7511,12 @@ checks with allowances limited to those categories pass. Details and remaining l
 `docs/issue-49-linux-icon.md`. No native Xorg session, other-platform builds or playback test;
 no full workspace repeat beside the other agents' runs. Independent source review found no
 remaining defects.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found the
+fatal-error window, titled `CA-72 — error`, would take that title as its X11 class and so miss
+`StartupWMClass`. The class now comes from the application: the standalone names itself first
+(`identify_standalone`, `Ca72::NAME`, through baseview's new `set_application_class`), and every
+top-level window takes that class whatever its title; without one, the title stays the class.
+A protocol test for a window titled `CA-72 — error` failed before the change (its class was the
+title) and passes after; a plug-in test checks the class against the launcher and that `main`
+names the application before anything else.

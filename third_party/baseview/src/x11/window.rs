@@ -245,7 +245,12 @@ impl<'a> Window<'a> {
             &xcb_connection.conn,
             window_id,
             &options.title,
-            parent.is_none(),
+            parent.is_none().then(|| {
+                crate::x11_window_identity::top_level_class(
+                    &options.title,
+                    crate::application_class(),
+                )
+            }),
         )?;
         xcb_connection.conn.flush()?;
 

@@ -1,4 +1,4 @@
-use super::set_identity_and_map;
+use super::{set_identity_and_map, top_level_class};
 use std::cell::RefCell;
 use std::convert::TryInto;
 use std::io::IoSlice;
@@ -114,7 +114,7 @@ fn assert_map(request: &[u8]) {
 #[test]
 fn standalone_identity_matches_the_launcher_before_mapping() {
     let conn = RecordingConnection::default();
-    set_identity_and_map(&conn, 42, "CA-72", true).unwrap();
+    set_identity_and_map(&conn, 42, "CA-72", Some("CA-72")).unwrap();
     let requests = conn.requests.borrow();
     assert_eq!(requests.len(), 3);
     assert_property(&requests[0], AtomEnum::WM_CLASS, b"CA-72\0CA-72\0");
@@ -127,7 +127,7 @@ fn standalone_identity_matches_the_launcher_before_mapping() {
 #[test]
 fn parented_editors_do_not_claim_a_standalone_identity() {
     let conn = RecordingConnection::default();
-    set_identity_and_map(&conn, 42, "CA-72", false).unwrap();
+    set_identity_and_map(&conn, 42, "CA-72", None).unwrap();
     let requests = conn.requests.borrow();
     assert_eq!(requests.len(), 2);
     assert_property(&requests[0], AtomEnum::WM_NAME, b"CA-72");
@@ -137,7 +137,8 @@ fn parented_editors_do_not_claim_a_standalone_identity() {
 #[test]
 fn the_initial_title_supplies_the_identity_without_a_product_specific_backend() {
     let conn = RecordingConnection::default();
-    set_identity_and_map(&conn, 42, "Other instrument", true).unwrap();
+    let class = top_level_class("Other instrument", None);
+    set_identity_and_map(&conn, 42, "Other instrument", Some(class)).unwrap();
     assert_property(
         &conn.requests.borrow()[0],
         AtomEnum::WM_CLASS,
@@ -146,10 +147,29 @@ fn the_initial_title_supplies_the_identity_without_a_product_specific_backend() 
 }
 
 #[test]
+fn a_window_titled_otherwise_keeps_the_applications_class() {
+    // The standalone's fatal-error window (CA-72 standalone_error.rs).
+    let conn = RecordingConnection::default();
+    let class = top_level_class("CA-72 — error", Some("CA-72"));
+    set_identity_and_map(&conn, 42, "CA-72 — error", Some(class)).unwrap();
+    let requests = conn.requests.borrow();
+    assert_property(&requests[0], AtomEnum::WM_CLASS, b"CA-72\0CA-72\0");
+    assert_property(&requests[1], AtomEnum::WM_NAME, "CA-72 — error".as_bytes());
+    assert_map(&requests[2]);
+}
+
+#[test]
+fn the_first_application_class_given_stays() {
+    crate::set_application_class("CA-72");
+    crate::set_application_class("Other instrument");
+    assert_eq!(crate::application_class(), Some("CA-72"));
+}
+
+#[test]
 fn failed_identity_requests_prevent_mapping() {
     for fail_after in 0..2 {
         let conn = RecordingConnection { fail_after: Some(fail_after), ..Default::default() };
-        assert!(set_identity_and_map(&conn, 42, "CA-72", true).is_err());
+        assert!(set_identity_and_map(&conn, 42, "CA-72", Some("CA-72")).is_err());
         assert!(conn.requests.borrow().iter().all(|request| request[0] != MAP_WINDOW_REQUEST));
     }
 }

@@ -23,8 +23,11 @@ sessions, so it stays as it is. A future native Wayland backend would need its s
 Both nih-plug standalone wrappers use `P::NAME` (`CA-72`) as the top-level window's initial
 title. Previously they used an upstream baseview that did not set `WM_CLASS`. On Linux both
 now use the local patched baseview, which sets the title as the instance and class before
-mapping the window (`CA-72\0CA-72\0`, `STRING/8`). Parented plug-in editors do not receive their
-own class. The title and close protocol are also set before mapping. Linux's shared backend
+mapping the window (`CA-72\0CA-72\0`, `STRING/8`). The production standalone also names
+itself first (`identify_standalone`, `Ca72::NAME`), and that application class, not the title,
+is every top-level window's class: the fatal-error window, titled `CA-72 — error`, keeps
+`CA-72` too. Without an application class the initial title stays the class. Parented plug-in
+editors do not receive their own class. The title and close protocol are also set before mapping. Linux's shared backend
 keeps OpenGL disabled, as the editor requires; macOS and Windows retain their existing
 standalone dependency and features.
 

@@ -147,14 +147,17 @@ And one for macOS, in `src/macos/view.rs` (the CA-72's `docs/decisions.md` R56, 
 
 8. **Linux standalone windows identify themselves before mapping** (CA-72 issue #49;
    `docs/issue-49-linux-icon.md`). The X11 backend mapped its window before setting `WM_NAME`
-   and never set `WM_CLASS`. It now sets the initial title as both the instance and class
-   (`STRING/8`, two NUL-terminated strings), then maps. Only top-level windows receive the
-   class; parented plug-in editors leave application identity to their host. Four portable
+   and never set `WM_CLASS`. It now sets the application's class (`set_application_class`, the
+   first name given) or, without one, the initial title as both the instance and class
+   (`STRING/8`, two NUL-terminated strings), then maps. A window titled otherwise, such as an
+   error window, so keeps the application's class. Only top-level windows receive the
+   class; parented plug-in editors leave application identity to their host. Six portable
    tests record the actual X11 requests, covering the payload, order, parented windows,
-   another instrument's title and failure before mapping. The standalone wrappers select
-   this backend on Linux; their macOS and Windows dependencies are unchanged. The helper's
-   tests use x11rb as a development dependency on every platform. Ubuntu dock behaviour
-   still needs a graphical check.
+   another instrument's title, a window titled apart from its application, the first class
+   staying, and failure before mapping. The standalone wrappers select this backend on Linux;
+   their macOS and Windows dependencies are unchanged. The helper's tests use x11rb as a
+   development dependency on every platform. Ubuntu dock behaviour still needs a graphical
+   check.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.
