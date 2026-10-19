@@ -8079,3 +8079,86 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-MODWHEEL-SOURCE. Choose what moves the MOD wheel
+
+**Owner authorisation, 2026-10-19.** Implement issue 109, including the player's request
+for an expression pedal in place of a modulation wheel: "just add an option in the pref
+to change the midi cc of the modwheel". The brief extends the choice to channel aftertouch
+and polyphonic aftertouch (the maximum of held notes), and asks for MIDI Learn on the
+panel's wheel. It is a computer setting in standalone and every plug-in format, never a
+sound preset or host-project field. CC 1 remains the default, with the same sound to the bit.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **The menu.** SETTINGS > MOD WHEEL SOURCE shows the current source and opens a short list:
+  CC 1, breath (CC 2), foot (CC 4), expression (CC 11), timbre / MPE Y (CC 74), channel
+  aftertouch and polyphonic aftertouch. OTHER… opens eight ranges of sixteen CCs. Reserved
+  numbers are shown but disabled, with their reasons. This uses the existing menus, in both
+  looks and lettering sizes; the wheel's own menu also opens the choices.
+- **The setting.** `mod_wheel_source` in the existing locked `CA-72/settings.toml` is `cc1`
+  by default, `cc<number>`, `channel_aftertouch` or `poly_aftertouch`. Missing, invalid and
+  reserved choices fall back to CC 1. Only that key is written, preserving other settings.
+  Instances read it at construction, before a host can restore MIDI assignments, and at
+  activation; editors read it when opened. Changing it updates that instance immediately.
+  Other running instances read
+  it on their next activation or editor opening, rather than polling the file in processing.
+- **The signal.** Any channel's chosen CC or channel pressure replaces CC 1 as the MIDI
+  contribution, through the same `Event::Modulation` path, including its circuit law,
+  smoothing and panel-wheel movement. Channel pressure takes the last received value on
+  any channel. Polyphonic aftertouch takes the maximum pressure of physically held MIDI
+  keys, distinguished by channel and key; pressure on a released key is ignored. Releasing
+  the strongest key falls to the next strongest, and releasing the last falls to zero.
+  This is one global wheel source, not full per-voice MPE modulation. CC 74 follows raw CCs.
+- **Resets.** Changing source clears the old MIDI contribution and stored pressures at the
+  next processing boundary, even if changed away and back between callbacks. Held keys stay
+  eligible for new pressure. CC 121 clears the wheel and stored pressures for every source;
+  All Notes Off, All Sound Off, panic and host reset discard held-key pressure. The wheel's
+  sound parameter keeps its existing role, including its preset value as a lower bound.
+- **Learning.** A right click on MOD offers MIDI LEARN; moving an allowed CC chooses its
+  number on all channels, persisted by the editor. Escape, CANCEL, rearming another control
+  and closing the editor follow R34, including keeping a CC already caught before closing.
+  The capture message itself does not move the wheel. No source choice is added to the sound
+  assignments or host parameters. The wheel's chosen CC is reserved on all channels, its
+  previous assignments removed; restoring a project cannot restore a conflicting assignment.
+  Once freed, CC 1 can be learned by a sound control, just like any other available CC.
+  Bank select, data entry, RPN/NRPN and channel mode messages remain reserved (R34).
+- **Real time.** The source and a change generation are atomic; note and pressure storage is
+  fixed. No settings access, allocation or mutex is added to processing. An independent review
+  found and corrected a capture race: reservation is checked against the same arming snapshot
+  used by the compare-and-swap, so rearming a normal control cannot silently consume its wait
+  with the wheel's reserved CC. The wheel's MIDI ASSIGNMENTS action leaves the list's selection
+  alone rather than clamping its separate learning target to LOCK.
+- **Release draft.** `docs/releases/0.2.8.md` follows 0.2.7's format and is marked unreleased.
+  The bundled-highlight check considers maintained versions through the installed build, so
+  a future draft does not require unreleased highlights in 0.2.7's binary.
+
+**Evidence (Linux x86-64, Rust 1.97.1, ngspice 47, 2026-10-19).**
+`cargo test -p ca72-plugin` passed 331 tests, 0 failed, 34 ignored. The final
+`CA72_REQUIRE_NGSPICE=1 cargo test --workspace --features ca72-plugin/standalone-production`
+passed 557 tests, 0 failed, 59 ignored, including both approved panel images. Builds use an
+individual target directory and four jobs; tests use four threads, an isolated shared-data
+folder and `CA72_SEATS_DIR` under the worktree. A first crate run without seat isolation
+failed the existing worker-lifecycle expectation while other test processes held seats;
+with isolation that test and the whole crate pass, without changing worker-budget code.
+
+`with_nothing_learned_the_sound_is_as_before` compares both channels against the old event
+routing for 184,320 stereo frames: LO, HI and ULTRA, POLY off and on, oscillator and filter
+modulation enabled, notes, pitch bend and controller resets, identical to the bit.
+`alternative_wheel_sources_render_identically_to_cc1_at_the_same_samples` compares the four
+common alternate CCs and both pressure sources, POLY off and on, with seed 42 and non-silent
+modulation, also identical to the bit. Every allowed CC is checked on all sixteen channels;
+pressure maxima, releases, controller resets, host reset, source changes and settings
+round trips have regression tests. The editor checks learning, cancellation, keeping a CC
+caught before closing, menus, and source absence from project fields.
+
+The production standalone adapter passes nine tests, including raw MIDI decoding of all
+source kinds without callback allocation or deallocation. Five fresh subprocesses verify
+settings before project restoration and after activation without opening an editor, retaining
+a newly legal CC 1 assignment. This regression failed before the construction-order fix and
+passed after it. Twelve menu renders cover both looks and lettering sizes, with representative
+images visually inspected (`target/modwheel-evidence/images/`). Clippy, all targets, passes
+with default and all features. No installed plug-in, DAW window, audio device, real MIDI
+hardware, macOS, Windows or Audio Unit was exercised; those native host checks remain for
+acceptance. The menu arrangement and other open instances' refresh policy remain agent
+choices for the owner's review.

@@ -12,6 +12,7 @@ pub mod learn;
 pub mod learning;
 pub mod library;
 pub mod local_notes;
+pub mod mod_wheel;
 pub mod opening;
 pub mod params;
 pub mod playing;
@@ -67,6 +68,7 @@ pub struct Ca72 {
     dezip: Dezip,
     /// AUTO GAIN's curve's writes as the audio thread last read them (`drive.rs`).
     curve_seen: u64,
+    wheel: mod_wheel::Wheel,
 }
 
 impl std::fmt::Debug for Ca72 {
@@ -90,6 +92,13 @@ impl Ca72 {
     }
 
     fn with_params(params: Ca72Params) -> Ca72 {
+        // A host may restore MIDI assignments before activation. Load the computer's source
+        // first, so a freed CC 1 assignment is not discarded against the temporary default.
+        if !cfg!(test) {
+            params
+                .midi_map
+                .set_wheel_source(settings::Settings::load().mod_wheel_source);
+        }
         Ca72 {
             params: Arc::new(params),
             engine: Engine::new(),
@@ -103,6 +112,7 @@ impl Ca72 {
             helper: None,
             dezip: Dezip::default(),
             curve_seen: 0,
+            wheel: mod_wheel::Wheel::default(),
         }
     }
 }
@@ -156,10 +166,14 @@ fn event_of(e: NoteEvent<()>) -> Option<Event> {
 }
 
 impl Ca72 {
-    /// A MIDI event: a learnable control change to MIDI Learn (decisions.md R34), anything else
-    /// as before (the reserved control changes the engine follows, CC 1, 120, 121 and 123, among
-    /// them). Whether it set a parameter.
+    /// A MIDI event: the chosen wheel source (R-MODWHEEL-SOURCE), a learnable control change
+    /// to MIDI Learn (R34), else the existing notes, bend and channel mode actions. Whether it
+    /// set a sound parameter.
     fn midi(&mut self, e: NoteEvent<()>, context: &mut impl ProcessContext<Self>) -> bool {
+        self.follow_wheel_source();
+        if let Some(value) = self.wheel.event(e) {
+            self.engine.event(Event::Modulation(value));
+        }
         if let NoteEvent::MidiCC {
             timing,
             channel,
@@ -168,11 +182,17 @@ impl Ca72 {
         } = e
         {
             if learn::reserved(cc).is_none() {
-                return match self.params.midi_map.incoming(channel, cc) {
-                    Incoming::Assigned(i) => self.learned(i, value, timing, context),
+                match self.params.midi_map.incoming(channel, cc) {
+                    Incoming::Assigned(i) => return self.learned(i, value, timing, context),
                     // Caught for the parameter being learned: the sound is not changed by it.
-                    Incoming::Caught | Incoming::Unassigned => false,
-                };
+                    Incoming::Caught => return false,
+                    Incoming::Unassigned => {}
+                }
+                if self.wheel.source == mod_wheel::Source::Cc(cc) {
+                    self.params.midi_map.refuse(cc);
+                    self.engine.event(Event::Modulation(value));
+                }
+                return false;
             }
             // (Said in the editor while it learns: this one is not learned.)
             self.params.midi_map.refuse(cc);
@@ -189,6 +209,9 @@ impl Ca72 {
                     self.engine.event(event);
                 }
             } else {
+                if matches!(event, Event::ResetControllers) {
+                    self.wheel.reset_pressure();
+                }
                 if matches!(event, Event::AllSoundOff | Event::AllNotesOff) {
                     self.clear_note_sources();
                 }
@@ -198,7 +221,21 @@ impl Ca72 {
         false
     }
 
+    fn follow_wheel_source(&mut self) {
+        let word = self.params.midi_map.wheel_word();
+        if word != self.wheel.seen {
+            self.wheel.seen = word;
+            self.wheel.source = mod_wheel::Source::of_code(word as u8);
+            self.wheel.reset_pressure();
+            self.engine.event(Event::Modulation(0.0));
+        }
+    }
+
     fn clear_note_sources(&mut self) {
+        self.wheel.release();
+        if self.wheel.source == mod_wheel::Source::PolyPressure {
+            self.engine.event(Event::Modulation(0.0));
+        }
         self.local_notes.release();
         self.deferred_local = None;
         self.local_generation = self.local_notes.generation();
@@ -229,6 +266,7 @@ impl Ca72 {
                 }
             }
             self.note_sources.clear();
+            self.wheel.release();
             self.local_generation = self.local_notes.generation();
             self.local_notes.publish([0, 0]);
             self.engine.event(Event::AllSoundOff);
@@ -470,11 +508,14 @@ impl Plugin for Ca72 {
         config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        // How this computer's FREQUENCY dials read: a learned controller turns the knob through
-        // it, the editor open or not (decisions.md R54).
+        // This computer's FREQUENCY dials and wheel source, with the editor open or not
+        // (decisions.md R54, R-MODWHEEL-SOURCE).
         if !cfg!(test) {
+            let settings = crate::settings::Settings::load();
+            self.params.set_freq_law(settings.frequency);
             self.params
-                .set_freq_law(crate::settings::Settings::load().frequency);
+                .midi_map
+                .set_wheel_source(settings.mod_wheel_source);
         }
         self.engine.set(&self.params.controls());
         self.engine
@@ -530,6 +571,7 @@ impl Plugin for Ca72 {
             self.engine.set_curve(c);
         }
         self.engine.set(&self.controls());
+        self.follow_wheel_source();
         let panic_token = context.standalone_panic_token();
         let standalone_panic = context.take_standalone_panic();
         self.local_events(standalone_panic, panic_token);
@@ -1269,6 +1311,15 @@ mod tests {
     /// `c` (stereo, no side chain): its left channel.
     #[allow(unsafe_code)]
     fn block(p: &mut Ca72, c: &mut TestProcessContext<Ca72>, len: usize) -> Vec<f32> {
+        stereo_block(p, c, len).0
+    }
+
+    #[allow(unsafe_code)]
+    fn stereo_block(
+        p: &mut Ca72,
+        c: &mut TestProcessContext<Ca72>,
+        len: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         let (mut l, mut r) = (vec![0.0f32; len], vec![0.0f32; len]);
         let mut buffer = Buffer::default();
         // SAFETY: both slices are `len` long and live until `process` has returned.
@@ -1285,7 +1336,7 @@ mod tests {
         };
         p.process(&mut buffer, &mut aux, c);
         drop(buffer);
-        l
+        (l, r)
     }
 
     /// A control change as a host gives it (channel 0 to 15, the 7-bit value as 0..1).
@@ -1304,6 +1355,198 @@ mod tests {
 
     fn on(channel: u8, cc: u8) -> learn::Cc {
         learn::Cc { channel, cc }
+    }
+
+    fn pressure(channel: u8, note: Option<u8>, value: f32) -> NoteEvent<()> {
+        match note {
+            Some(note) => NoteEvent::PolyPressure {
+                timing: 37,
+                voice_id: None,
+                channel,
+                note,
+                pressure: value,
+            },
+            None => NoteEvent::MidiChannelPressure {
+                timing: 37,
+                channel,
+                pressure: value,
+            },
+        }
+    }
+
+    fn wheel_note(channel: u8, note: u8, on: bool) -> NoteEvent<()> {
+        if on {
+            NoteEvent::NoteOn {
+                timing: 0,
+                voice_id: None,
+                channel,
+                note,
+                velocity: 1.0,
+            }
+        } else {
+            NoteEvent::NoteOff {
+                timing: 0,
+                voice_id: None,
+                channel,
+                note,
+                velocity: 0.0,
+            }
+        }
+    }
+
+    #[test]
+    fn every_allowed_cc_moves_the_wheel_on_every_channel_and_source_changes_clear_it() {
+        use mod_wheel::Source;
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        for cc_number in (0..128).filter(|&cc| Source::cc(cc).is_some()) {
+            p.params.midi_map.set_wheel_source(Source::Cc(cc_number));
+            block(&mut p, &mut c, 64);
+            assert_eq!(
+                p.engine.midi_wheels().1,
+                0.0,
+                "source changed to CC {cc_number}"
+            );
+            for channel in 0..16 {
+                c.push_event(cc(13, channel, cc_number, 93));
+                block(&mut p, &mut c, 64);
+                assert_eq!(
+                    p.engine.midi_wheels().1,
+                    ca72::modulation::midi_wheel(f64::from(93.0f32 / 127.0)) as f32
+                );
+                c.push_event(cc(0, channel, 121, 0));
+                block(&mut p, &mut c, 64);
+                assert_eq!(p.engine.midi_wheels().1, 0.0);
+            }
+        }
+        c.push_event(cc(0, 0, 119, 127));
+        block(&mut p, &mut c, 64);
+        p.params.midi_map.set_wheel_source(Source::ChannelPressure);
+        p.params.midi_map.set_wheel_source(Source::Cc(119));
+        block(&mut p, &mut c, 64);
+        assert_eq!(
+            p.engine.midi_wheels().1,
+            0.0,
+            "away and back between callbacks"
+        );
+        assert!(c.reported.is_empty(), "no host parameter changed");
+        p.params.midi_map.set_wheel_source(Source::ChannelPressure);
+        for channel in 0..16 {
+            c.push_event(pressure(channel, None, 1.0));
+            block(&mut p, &mut c, 64);
+            assert_eq!(p.engine.midi_wheels().1, 1.0);
+            c.push_event(cc(0, channel, 121, 0));
+            block(&mut p, &mut c, 64);
+            assert_eq!(p.engine.midi_wheels().1, 0.0);
+        }
+    }
+
+    #[test]
+    fn alternative_wheel_sources_render_identically_to_cc1_at_the_same_samples() {
+        use mod_wheel::Source;
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for poly in [false, true] {
+            for source in [
+                Source::Cc(2),
+                Source::Cc(4),
+                Source::Cc(11),
+                Source::Cc(74),
+                Source::ChannelPressure,
+                Source::PolyPressure,
+            ] {
+                let mut reference = initialised_with_seed(poly, Some(42));
+                let mut p = initialised_with_seed(poly, Some(42));
+                p.params.midi_map.set_wheel_source(source);
+                let (mut original, mut c) = (hostless(&reference), hostless(&p));
+                for (params, context) in [(&reference.params, &mut original), (&p.params, &mut c)] {
+                    context.automate(params.osc_mod.as_ptr(), 1.0);
+                    context.automate(params.filter_mod.as_ptr(), 1.0);
+                }
+                let mut heard = 0.0;
+                for b in 0..12 {
+                    if b == 0 {
+                        original.push_event(wheel_note(5, 60, true));
+                        c.push_event(wheel_note(5, 60, true));
+                    }
+                    let value = (b * 11 % 128) as u8;
+                    original.push_event(cc(37, 5, 1, value));
+                    c.push_event(match source {
+                        Source::Cc(number) => cc(37, 5, number, value),
+                        Source::ChannelPressure => pressure(5, None, f32::from(value) / 127.0),
+                        Source::PolyPressure => pressure(5, Some(60), f32::from(value) / 127.0),
+                    });
+                    // Unselected sources do nothing, including the old CC 1.
+                    if source != Source::ChannelPressure {
+                        c.push_event(pressure(1, None, 1.0));
+                    }
+                    c.push_event(cc(40, 1, 1, 127));
+                    let was = stereo_block(&mut reference, &mut original, 256);
+                    let now = stereo_block(&mut p, &mut c, 256);
+                    assert!(
+                        was.0
+                            .iter()
+                            .chain(&was.1)
+                            .zip(now.0.iter().chain(&now.1))
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "{source:?}, POLY {poly}, block {b}"
+                    );
+                    heard += was.0.iter().map(|x| f64::from(x.abs())).sum::<f64>();
+                    assert_eq!(p.engine.midi_wheels(), reference.engine.midi_wheels());
+                }
+                assert!(heard > 0.1, "non-silent comparison");
+                assert!(c.reported.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn poly_aftertouch_takes_the_maximum_of_held_keys_and_never_revives_released_pressure() {
+        use mod_wheel::Source;
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        p.params.midi_map.set_wheel_source(Source::PolyPressure);
+        let send = |p: &mut Ca72, c: &mut TestProcessContext<Ca72>, event| {
+            c.push_event(event);
+            block(p, c, 64);
+            p.engine.midi_wheels().1
+        };
+        assert_eq!(send(&mut p, &mut c, pressure(0, Some(60), 1.0)), 0.0);
+        send(&mut p, &mut c, wheel_note(0, 60, true));
+        send(&mut p, &mut c, wheel_note(1, 60, true));
+        let lower = send(&mut p, &mut c, pressure(0, Some(60), 0.4));
+        assert!(lower > 0.0 && lower < 1.0);
+        assert_eq!(send(&mut p, &mut c, pressure(1, Some(60), 1.0)), 1.0);
+        assert_eq!(send(&mut p, &mut c, wheel_note(1, 60, false)), lower);
+        assert_eq!(send(&mut p, &mut c, pressure(1, Some(60), 1.0)), lower);
+        assert_eq!(send(&mut p, &mut c, cc(0, 7, 121, 0)), 0.0);
+        let smaller = send(&mut p, &mut c, pressure(0, Some(60), 0.2));
+        assert!(
+            smaller > 0.0 && smaller < lower,
+            "reset discarded old pressures"
+        );
+        assert_eq!(send(&mut p, &mut c, wheel_note(0, 60, false)), 0.0);
+        for reset in [120, 123] {
+            send(&mut p, &mut c, wheel_note(2, 64, true));
+            send(&mut p, &mut c, pressure(2, Some(64), 1.0));
+            assert_eq!(send(&mut p, &mut c, cc(0, 4, reset, 0)), 0.0);
+            assert_eq!(send(&mut p, &mut c, pressure(2, Some(64), 1.0)), 0.0);
+        }
+        send(&mut p, &mut c, wheel_note(3, 67, true));
+        send(&mut p, &mut c, pressure(3, Some(67), 1.0));
+        p.params.midi_map.set_wheel_source(Source::ChannelPressure);
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.engine.midi_wheels().1, 0.0);
+        p.params.midi_map.set_wheel_source(Source::PolyPressure);
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.engine.midi_wheels().1, 0.0);
+        assert!(
+            send(&mut p, &mut c, pressure(3, Some(67), 0.2)) > 0.0,
+            "held notes remain eligible after changing source"
+        );
+        p.reset();
+        assert_eq!(send(&mut p, &mut c, pressure(3, Some(67), 1.0)), 0.0);
     }
 
     /// A learned controller sets its parameter at its event's sample, through the host (the
@@ -1599,12 +1842,18 @@ mod tests {
                     }
                 }
                 e.end_block(LEN);
-                l
+                (l, r)
             };
-        for poly in [false, true] {
+        for (poly, quality) in [false, true]
+            .into_iter()
+            .flat_map(|poly| [0.0, 0.5, 1.0].map(|q| (poly, q)))
+        {
             let mut p = initialised(poly);
             let params: Arc<dyn Params> = p.params.clone();
             let mut c = TestProcessContext::new(params, 48_000.0, ProcessMode::Offline);
+            c.automate(p.params.osc_mod.as_ptr(), 1.0);
+            c.automate(p.params.filter_mod.as_ptr(), 1.0);
+            c.automate(p.params.quality.as_ptr(), quality);
             let controls = p.params.controls();
             let mut e = Engine::new();
             e.set(&controls);
@@ -1653,14 +1902,16 @@ mod tests {
                 for ev in &events {
                     c.push_event(*ev);
                 }
-                let now = block(&mut p, &mut c, LEN);
+                let now = stereo_block(&mut p, &mut c, LEN);
                 let was = before(&mut e, &controls, &events);
-                heard += was.iter().map(|x| f64::from(x.abs())).sum::<f64>();
+                heard += was.0.iter().map(|x| f64::from(x.abs())).sum::<f64>();
                 assert!(
-                    now.iter()
-                        .zip(&was)
+                    now.0
+                        .iter()
+                        .chain(&now.1)
+                        .zip(was.0.iter().chain(&was.1))
                         .all(|(a, b)| a.to_bits() == b.to_bits()),
-                    "POLY {poly}, block {b}: not the same samples"
+                    "POLY {poly}, QUALITY {quality}, block {b}: not the same samples"
                 );
             }
             assert!(c.reported.is_empty());
@@ -1779,6 +2030,10 @@ mod tests {
 
     /// A plug-in, POLY as `poly`, initialised as a host does at 48 kHz in blocks of 256.
     fn initialised(poly: bool) -> Ca72 {
+        initialised_with_seed(poly, None)
+    }
+
+    fn initialised_with_seed(poly: bool, seed: Option<u64>) -> Ca72 {
         let config = BufferConfig {
             sample_rate: 48_000.0,
             min_buffer_size: None,
@@ -1789,6 +2044,11 @@ mod tests {
             poly: BoolParam::new("Poly", poly),
             ..Ca72Params::default()
         });
+        if let Some(seed) = seed {
+            p.params
+                .noise_seed
+                .store(seed, std::sync::atomic::Ordering::Relaxed);
+        }
         assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
         p
     }
