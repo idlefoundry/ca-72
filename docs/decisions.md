@@ -7716,10 +7716,51 @@ picture as the issue's. With the change, the standalone and a renamed VST3 build
 removed after) in Live: whole on the 1x monitor, and on the Retina screen before and after.
 Screenshots are kept with the night's records, not in the repository.
 
-**Seen, not changed (for the owner).** The standalone opened on the 1x monitor (the screen in use)
+**Seen as the change was tried (changed since, below).** The standalone opened on the 1x monitor (the screen in use)
 drew its editor wider than its window, cut off on the right, before and after the change: its
 window was sized for the Retina screen (1382 points, 80 % of 1728) and the editor, measuring the
 screen again as it opened (R19's `opening`), took the monitor's (about 1472, read from the
 pictures). The editor's opening size comes from AppKit's "main" screen, the one in use, which may
 differ between the host's question and the window's opening. Not the issue's picture; not tried in
 a host.
+
+**The window and its editor the same size wherever it opens. Agent decisions, 2026-10-18,
+later the same night** (not separately approved; the fix was asked for):
+- **Why, traced.** The standalone asks the editor's size before baseview makes its window
+  (nih-plug's wrapper), and the editor measured AppKit's main screen: with no window of the
+  application's yet, the Mac's main display, its Retina screen (1728 by 1084 points usable, so
+  1382 wide). macOS put the new window on the screen in use, the 1x monitor, and made it the key
+  window; the editor, opening (R19's `opening`), measured the main screen again, now the
+  monitor's, the key window's (1920 by 1050: 1471 wide), and drew a frame of 1471 by 840 points
+  in a window of 1382 by 789. A trace of each measurement and of the size opened showed the two,
+  in that order.
+- **The change.** The editor opens at the size the host was last told, the size of its window:
+  `opening` no longer measures the screen. The width is measured at the host's first question
+  (or as the editor opens, if it asked none) and kept until the editor closes, as R19 kept it
+  while open. A scale the host gives after asking (Windows, Linux, where the screen is measured
+  in its pixels) has it measured again at the next question. The SIZE menu's FIT TO SCREEN still
+  measures the screen in use.
+- **What it costs.** An editor opening on another screen than the one measured opens fitted to
+  the one measured: the standalone on the 1x monitor opens 1382 wide, not 1471. To fit it to the
+  screen it lands on, the window would be resized once open (a frame at one size, then the
+  next); not done.
+- **In a host.** Live 12.2.7 (VST3) asks the size first and opens the editor in its plug-in
+  window, already made that size; it puts that window on the screen of its own main window (a
+  window reopened after being moved to the monitor came back on the Retina screen). The trace
+  there showed one measurement, the Retina screen's, and the editor opened at it in a window that
+  size; moved to the monitor, it stayed whole. Live's main window could not be moved to the
+  monitor (neither by the accessibility interface nor by dragging), so an editor opened on the
+  monitor in Live was not seen.
+- **Test.** `the_editor_opens_at_the_size_the_host_was_told`: an editor measuring a screen of the
+  test's is told its size on a Retina screen's measure, and opens as the screen in use becomes the
+  monitor's; it must open at the size told, and measure the monitor once it has closed. Without
+  the change it fails (opened 1478 by 844, told 1382 by 789).
+  `the_screen_is_measured_where_the_host_has_not_asked_in_this_scale` covers a host that asks
+  nothing first and one that gives its scale after asking.
+
+**Evidence (the Mac, the 4K monitor at 1x again and restored after, 2026-10-18).** The
+standalone opened on the monitor (from a terminal there, the window placed by macOS): with
+`opening` measuring again as before, its window 1382 points wide and the editor 1471, cut off on
+the right and at the bottom; with the change, whole, and whole on the Retina screen. In Live, a
+renamed VST3 build ("CA-72 OPN", removed after): whole on the Retina screen and moved to the
+monitor.

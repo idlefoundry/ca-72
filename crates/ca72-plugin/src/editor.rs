@@ -346,6 +346,8 @@ pub struct Ca72Editor {
     open: Arc<AtomicBool>,
     /// The width fitted to the screen for this opening (0 not yet measured).
     fitted: Arc<AtomicU32>,
+    /// What measures the screen ([`screen::usable`]; a test's own screen).
+    screen: fn(Option<f64>) -> Option<(f64, f64)>,
     /// The keys the host gives the editor's view rather than its window (decisions.md R53).
     host_keys: Arc<HostKeys>,
 }
@@ -519,6 +521,7 @@ impl Ca72Editor {
             scale: AtomicU32::new(0),
             open: Arc::new(AtomicBool::new(false)),
             fitted: Arc::new(AtomicU32::new(0)),
+            screen: screen::usable,
             host_keys: Arc::new(HostKeys::default()),
         }
     }
@@ -528,10 +531,12 @@ impl Ca72Editor {
         (s > 0.0 && s.is_finite()).then_some(s)
     }
 
-    /// The editor opening: the drawer shut (the window does not open grown), the screen
-    /// measured again, its size.
+    /// The editor opening: the drawer shut (the window does not open grown), at the size the
+    /// host was last told, the size of its window. The screen is not measured again: the one
+    /// in use may have changed since the host asked (macOS's main screen is the one with the
+    /// key window; the standalone's own window, sized on the Retina screen, had become it on a
+    /// 1x monitor, and the editor was drawn wider than it; decisions.md R-TWO-SCREENS).
     fn opening(&self) -> (u32, u32) {
-        self.fitted.store(0, Ordering::Relaxed);
         self.params.editor_presets.store(false, Ordering::Relaxed);
         self.params.editor_panel_applied.store(
             self.params.editor_panel.load(Ordering::Relaxed),
@@ -544,14 +549,15 @@ impl Ca72Editor {
         self.size()
     }
 
-    /// The width fitted to the screen, measured once an opening and kept until the editor
-    /// closes. Measured afresh at each of the host's questions, it changed with the drawer
-    /// (on Linux it is the monitor under the pointer), and the panel was drawn again at
-    /// another scale as the drawer opened and shut (the owner, 2026-10-03; decisions.md R19).
+    /// The width fitted to the screen, measured once an opening (at the host's first question,
+    /// or as the editor opens if it asked none) and kept until the editor closes. Measured
+    /// afresh at each of the host's questions, it changed with the drawer (on Linux it is the
+    /// monitor under the pointer), and the panel was drawn again at another scale as the
+    /// drawer opened and shut (the owner, 2026-10-03; decisions.md R19).
     fn fitted(&self) -> u32 {
         match self.fitted.load(Ordering::Relaxed) {
             0 => {
-                let w = fitted_width(screen::usable(self.host_scale().map(f64::from)));
+                let w = fitted_width((self.screen)(self.host_scale().map(f64::from)));
                 self.fitted.store(w, Ordering::Relaxed);
                 w
             }
@@ -677,7 +683,10 @@ impl Editor for Ca72Editor {
         if self.open.load(Ordering::Acquire) {
             return false;
         }
-        self.scale.store(factor.to_bits(), Ordering::Relaxed);
+        // A width measured in the old scale's pixels (Windows, Linux) is measured again.
+        if self.scale.swap(factor.to_bits(), Ordering::Relaxed) != factor.to_bits() {
+            self.fitted.store(0, Ordering::Relaxed);
+        }
         true
     }
 
@@ -7226,8 +7235,8 @@ mod tests {
         );
     }
 
-    /// The editor's width, fitted to the screen as it opens, stays, and is measured again
-    /// when it next opens.
+    /// The editor's width, fitted to the screen, stays while it is open, and is measured again
+    /// for its next opening.
     #[test]
     fn the_width_stays_until_the_editor_opens_again() {
         let ed = Ca72Editor::new(Arc::new(Ca72Params::default()), Arc::new(Meters::default()));
@@ -7239,6 +7248,78 @@ mod tests {
             ed.fitted.load(Ordering::Relaxed),
             0,
             "measured again next time"
+        );
+    }
+
+    thread_local! {
+        /// The usable screen a test's editor measures, in physical pixels.
+        static SCREEN: std::cell::Cell<Option<(f64, f64)>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// A test's screen, in the window's units where the host gave a scale (as Windows'
+    /// [`screen::usable`]).
+    fn test_screen(scale: Option<f64>) -> Option<(f64, f64)> {
+        let k = scale.unwrap_or(1.0);
+        SCREEN.get().map(|(w, h)| (w / k, h / k))
+    }
+
+    /// An editor measuring [`SCREEN`].
+    fn on_test_screen() -> Ca72Editor {
+        let mut ed = Ca72Editor::new(Arc::new(Ca72Params::default()), Arc::new(Meters::default()));
+        ed.screen = test_screen;
+        ed
+    }
+
+    /// The editor opens at the size the host was told, whichever screen is in use by then: the
+    /// standalone was told its size on the Mac's Retina screen (the main screen then), its
+    /// window opened on a 1x monitor, and the editor, measuring that monitor as it opened, was
+    /// drawn wider than its window, cut off on the right (R-TWO-SCREENS).
+    #[test]
+    fn the_editor_opens_at_the_size_the_host_was_told() {
+        let (retina, monitor) = ((1728.0, 1084.0), (1920.0, 1055.0));
+        assert_ne!(
+            fitted_width(Some(retina)),
+            fitted_width(Some(monitor)),
+            "screens that fit different widths"
+        );
+        let ed = on_test_screen();
+        SCREEN.set(Some(retina));
+        let told = ed.size();
+        assert_eq!(told.0, fitted_width(Some(retina)));
+        SCREEN.set(Some(monitor));
+        assert_eq!(ed.opening(), told, "the window's size");
+        ed.open.store(true, Ordering::Release);
+        assert_eq!(ed.size(), told, "asked again while open");
+        drop(ed.closing());
+        assert_eq!(
+            ed.size().0,
+            fitted_width(Some(monitor)),
+            "the screen in use measured when it next opens"
+        );
+    }
+
+    /// A host that asks nothing before it opens the editor has it fitted to the screen in use
+    /// then; one that gives a scale after asking has the screen measured again in that scale's
+    /// pixels (Windows, Linux).
+    #[test]
+    fn the_screen_is_measured_where_the_host_has_not_asked_in_this_scale() {
+        let ed = on_test_screen();
+        SCREEN.set(Some((2560.0, 1400.0)));
+        assert_eq!(ed.opening().0, fitted_width(Some((2560.0, 1400.0))));
+        drop(ed.closing());
+
+        let ed = on_test_screen();
+        let told = ed.size();
+        assert!(ed.set_scale_factor(2.0));
+        let scaled = ed.size();
+        assert_eq!(scaled.0, fitted_width(Some((1280.0, 700.0))));
+        assert_ne!(scaled, told);
+        assert!(ed.set_scale_factor(2.0));
+        SCREEN.set(Some((1920.0, 1040.0)));
+        assert_eq!(
+            ed.opening(),
+            scaled,
+            "the same scale: the size the host was told"
         );
     }
 
