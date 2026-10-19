@@ -430,14 +430,13 @@ fn marks(dial: Dial) -> DialMarks {
             .iter()
             .map(|&a| (a, 58.0, if a == -90.0 { 78.0 } else { 71.0 }, 4.0))
             .collect(),
-            labels: vec![
-                (-120.0, "10", None),
-                (-90.0, "200", None),
-                (-30.0, "600", Some(80.0)),
-                (30.0, "1", Some(80.0)),
-                (67.0, "5", None),
-                (108.0, "10", None),
-            ],
+            labels: crate::controls::TIME_MARKS
+                .iter()
+                .zip(["10", "200", "600", "1", "5", "10"])
+                .map(|(&(angle, _), label)| {
+                    (angle, label, matches!(label, "600" | "1").then_some(80.0))
+                })
+                .collect(),
             r: 86.0,
             captions: vec![(-61.0, 75.0, "M-SEC."), (50.0, 75.0, "SEC.")],
         },

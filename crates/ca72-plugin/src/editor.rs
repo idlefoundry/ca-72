@@ -51,6 +51,9 @@ use crate::presets::Browser;
 use crate::settings::{Change, Settings};
 use crate::update::Update;
 
+mod entry;
+use entry::Entry;
+
 /// The share of the usable screen the editor opens at until it is resized.
 const SCREEN_SHARE: f64 = 0.8;
 /// The editor's width at first where the screen's size is unknown, in logical pixels.
@@ -847,6 +850,7 @@ struct Editing {
     /// keyboard wanted for it, asked once; the strip's last press (where, when, and the amount
     /// a switch had before it), for a double click.
     typing: Option<(Readout, String)>,
+    knob_entry: Option<Entry>,
     typing_keys: bool,
     last_strip_press: Option<(Instant, StripTarget, f32)>,
     /// Oscillators 2 and 3's FREQUENCY knobs, through the computer's law.
@@ -974,16 +978,7 @@ impl PanelWindow {
                 self.keys = had;
             }
         }
-        let learning = self
-            .editing
-            .learning
-            .holds_keys(&self.editing.params.midi_map);
-        let holding = self.editing.browser.open
-            || learning
-            || self.editing.typing.is_some()
-            || self.editing.note_typing_allowed()
-            || self.editing.standalone_dialog_open()
-            || self.editing.whats_new.is_some();
+        let holding = self.editing.holds_keys();
         // (And the keys the host gives the view: the editor's while it holds them.)
         self.host_keys.holding.store(holding, Ordering::Release);
         // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
@@ -1096,6 +1091,7 @@ impl Editing {
             whats_new: None,
             whats_new_checked: false,
             typing: None,
+            knob_entry: None,
             typing_keys: false,
             last_strip_press: None,
             freq_knobs,
@@ -1200,11 +1196,22 @@ impl Editing {
         }
     }
 
+    fn holds_keys(&self) -> bool {
+        self.browser.open
+            || self.learning.holds_keys(&self.params.midi_map)
+            || self.typing.is_some()
+            || self.knob_entry.is_some()
+            || self.note_typing_allowed()
+            || self.standalone_dialog_open()
+            || self.whats_new.is_some()
+    }
+
     fn note_typing_allowed(&self) -> bool {
         self.playing.holds_keys()
             && !self.browser.open
             && !self.browser.sliding()
             && self.typing.is_none()
+            && self.knob_entry.is_none()
             && !self.learning.holds_keys(&self.params.midi_map)
             && !self.standalone_dialog_open()
             && self.whats_new.is_none()
@@ -1434,6 +1441,7 @@ impl Editing {
             }
             self.playing.wants_keys = self.playing.holds_keys();
             self.typing = None;
+            self.knob_entry = None;
             self.hover = None;
             self.strip_scene.hover = None;
             self.learning.fit_menu(
@@ -1504,6 +1512,7 @@ impl Editing {
             .editor_panel_applied
             .store(expanded, Ordering::Relaxed);
         self.typing = None;
+        self.knob_entry = None;
         self.hover = None;
         self.strip_scene.hover = None;
         self.browser.show(false, &self.params);
@@ -1578,6 +1587,7 @@ impl Editing {
     /// ([`voices_inert`]), their knobs doing nothing either.
     fn start_typing(&mut self, r: Readout) {
         self.playing.release();
+        self.knob_entry = None;
         if !r.typed()
             || (r == Readout::Detune && !self.params.doubled.value())
             || (r == Readout::Voices && voices_inert(&self.params))
@@ -1631,7 +1641,7 @@ impl Editing {
     /// WIDTH and INNER percent, DETUNE cents, DRIVE and LEVEL dB), within its knob's travel, a
     /// gesture of its own; nothing for what is not a number.
     fn set_typed(&mut self, r: Readout, text: &str) {
-        let Ok(v) = text.parse::<f64>() else {
+        let Ok(v) = text.trim().parse::<f64>() else {
             return;
         };
         if !v.is_finite() {
@@ -1848,6 +1858,14 @@ impl Editing {
         if !self.expanded() && y >= DRAWER_TOP {
             return;
         }
+        // The field keeps a press inside it. Elsewhere cancels it, consuming that press.
+        if let Some(entry) = &self.knob_entry {
+            if !self.entry_field(entry).contains(x, y) {
+                self.knob_entry = None;
+                self.last_press = None;
+            }
+            return;
+        }
         // A press on the readout a value is being typed into leaves it typed into; anywhere
         // else ends the typing, nothing set (decisions.md R52).
         if let Some((r, _)) = self.typing
@@ -1984,6 +2002,13 @@ impl Editing {
         let Some(target) = self.hit(x, y) else {
             return;
         };
+        if entry::shortcut(modifiers)
+            && !self.learning.holds_keys(&self.params.midi_map)
+            && let Target::Control(i) | Target::Legend(i, _) = target
+            && self.start_knob_entry(i)
+        {
+            return;
+        }
         let now = Instant::now();
         let double = self
             .last_press
@@ -2211,6 +2236,7 @@ impl Editing {
     fn end_gestures(&mut self) {
         self.playing.release_pointer();
         self.typing = None;
+        self.knob_entry = None;
         self.end_scroll();
         self.resizing = None;
         if let Some(d) = self.drag.take() {
@@ -2278,7 +2304,7 @@ impl Editing {
             }
             return;
         }
-        if self.standalone_dialog_open() {
+        if self.standalone_dialog_open() || self.knob_entry.is_some() {
             return;
         }
         if self.drag.is_some() {
@@ -2433,6 +2459,7 @@ impl Editing {
             && !self.note_typing_allowed()
             && (self.browser.open
                 || self.typing.is_some()
+                || self.knob_entry.is_some()
                 || self.learning.holds_keys(&self.params.midi_map)
                 || self.standalone_dialog_open())
         {
@@ -2460,6 +2487,13 @@ impl Editing {
             Meters::load(&self.meters.modulation),
         );
         self.scene.tip = self.tip();
+        self.scene.entry = self
+            .knob_entry
+            .as_ref()
+            .map(|entry| self.entry_field(entry));
+        if self.scene.entry.is_some() {
+            self.scene.tip = None;
+        }
         self.strip_scene = strip_scene(
             &self.params,
             self.meters.voices.load(Ordering::Relaxed),
@@ -3001,6 +3035,9 @@ impl Editing {
         // list takes the keys it shows, and Escape cancels learning.
         if self.typing.is_some() {
             return self.type_key(k);
+        }
+        if self.knob_entry.is_some() {
+            return self.knob_key(k);
         }
         let map = std::sync::Arc::clone(&self.params.midi_map);
         let down = k.state == KeyState::Down && !modifier(&k.key);
@@ -5292,6 +5329,375 @@ mod tests {
         double(&mut e, StripTarget::Readout(Readout::Detune));
         assert!(e.typing.is_none());
         assert!(!Readout::Auto.typed());
+    }
+
+    fn entry_click(e: &mut Editing, id: &str) {
+        let p = at(e, centre(id));
+        go(e, p);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: if cfg!(target_os = "macos") {
+                Modifiers::META
+            } else {
+                Modifiers::CONTROL
+            },
+        });
+        release(e);
+    }
+
+    #[test]
+    fn knob_entry_opens_every_operable_knob_and_selector_without_a_gesture() {
+        let (mut e, host, _) = editing_poly();
+        for c in CONTROLS
+            .iter()
+            .filter(|c| matches!(c.kind, Kind::Knob { .. } | Kind::Selector(_)))
+        {
+            let i = ca72_panel::controls::index(c.param).expect("a control");
+            if !e.operable(i) {
+                continue;
+            }
+            entry_click(&mut e, c.param);
+            assert!(e.knob_entry.is_some(), "{} opens", c.param);
+            e.update_scene();
+            let field = e.scene.entry.as_ref().expect("shown");
+            assert!(!field.text.is_empty(), "{} shows its value", c.param);
+            assert!(field.selected);
+            assert!(e.typing_keys, "asks for the host's keyboard");
+            keyed(&mut e, Key::Enter);
+            assert!(e.knob_entry.is_none());
+        }
+        assert!(
+            host.take().is_empty(),
+            "opening and unchanged Enter set nothing"
+        );
+    }
+
+    #[test]
+    fn knob_entry_sets_one_host_gesture_and_reuses_the_strip_units() {
+        let (mut e, host, params) = editing_poly();
+        for (id, text, ptr, value) in [
+            ("cutoff", "-2.5", params.cutoff.as_ptr(), 0.25),
+            ("filter_attack", "1 s", params.filter_attack.as_ptr(), 0.6),
+            ("osc1_range", "4", params.osc1_range.as_ptr(), 0.8),
+            ("osc3_waveform", "6", params.osc3_waveform.as_ptr(), 1.0),
+            ("voices", "99", params.voices.as_ptr(), 1.0),
+            (
+                "entropy",
+                "25",
+                params.entropy.as_ptr(),
+                params.entropy.preview_normalized(25.0),
+            ),
+            ("spread", "-10", params.spread.as_ptr(), 0.0),
+            ("inner", "999", params.inner.as_ptr(), 1.0),
+            (
+                "drive",
+                "8.4",
+                params.drive.as_ptr(),
+                params.drive.preview_normalized(8.4),
+            ),
+            (
+                "level",
+                "-6",
+                params.level.as_ptr(),
+                params.level.preview_normalized(-6.0),
+            ),
+        ] {
+            entry_click(&mut e, id);
+            keyed(&mut e, Key::Character(text.into()));
+            assert!(host.take().is_empty(), "{id} waits for Enter");
+            keyed(&mut e, Key::Enter);
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(ptr), Call::Set(ptr, value), Call::End(ptr)],
+                "{id}"
+            );
+        }
+        // DETUNE is only operable in DOUBLE, still typed in cents rather than its percentage.
+        let p = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        assert!(p.automate(params.doubled.as_ptr(), 1.0));
+        entry_click(&mut e, "double");
+        keyed(&mut e, Key::Character("50".into()));
+        keyed(&mut e, Key::Enter);
+        let ptr = params.double.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(ptr),
+                Call::Set(
+                    ptr,
+                    params
+                        .double
+                        .preview_normalized((50.0 / crate::engine::DOUBLE_CENTS * 100.0) as f32)
+                ),
+                Call::End(ptr)
+            ]
+        );
+    }
+
+    #[test]
+    fn knob_entry_frequency_uses_the_chosen_law_through_the_host() {
+        let (mut e, host, params) = editing();
+        for law in [Law::Semitones, Law::Hardware] {
+            params.set_freq_law(law);
+            for (id, pot, ptr) in [
+                ("osc2_frequency", Pot::Two, params.osc2_frequency.as_ptr()),
+                ("osc3_frequency", Pot::Three, params.osc3_frequency.as_ptr()),
+            ] {
+                entry_click(&mut e, id);
+                keyed(&mut e, Key::Character("5".into()));
+                keyed(&mut e, Key::Enter);
+                let wiper = pot.wiper_at(law, (5.0 + 7.5) / 15.0) as f32;
+                assert_eq!(
+                    host.take(),
+                    vec![Call::Begin(ptr), Call::Set(ptr, wiper), Call::End(ptr)]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn knob_entry_cancels_without_changes_and_keeps_keys_from_the_host() {
+        let (mut e, host, _) = editing_standalone();
+        e.playing.typing = true;
+        for cancel in [Key::Escape, Key::Enter] {
+            entry_click(&mut e, "cutoff");
+            assert!(!e.note_typing_allowed());
+            for key in [
+                Key::ArrowUp,
+                Key::Tab,
+                Key::Character("a".into()),
+                Key::Character("2x".into()),
+            ] {
+                assert!(keyed(&mut e, key));
+            }
+            assert!(!e.playing.active(), "typing values plays no notes");
+            assert!(e.keyed(&KeyboardEvent {
+                key: Key::Character("2".into()),
+                state: KeyState::Up,
+                ..Default::default()
+            }));
+            keyed(&mut e, cancel);
+            assert!(e.knob_entry.is_none());
+            assert!(host.take().is_empty());
+        }
+        entry_click(&mut e, "cutoff");
+        keyed(&mut e, Key::Character("3".into()));
+        let p = at(&e, centre("volume"));
+        click(&mut e, p);
+        assert!(e.knob_entry.is_none());
+        assert!(
+            host.take().is_empty(),
+            "outside press cancels and does not operate another knob"
+        );
+        entry_click(&mut e, "cutoff");
+        let p = at(&e, centre("cutoff"));
+        click(&mut e, p);
+        assert!(e.knob_entry.is_some(), "inside press keeps typing");
+        e.end_gestures();
+        assert!(e.knob_entry.is_none(), "focus/capture loss cancels");
+        assert!(host.take().is_empty());
+    }
+
+    #[test]
+    fn knob_entry_preserves_reset_alt_click_and_midi_learning() {
+        let (mut e, host, params) = editing();
+        let p = at(&e, centre("cutoff"));
+        go(&mut e, p);
+        e.press(Modifiers::ALT);
+        release(&mut e);
+        assert!(e.knob_entry.is_none());
+        click(&mut e, p);
+        let calls = host.take();
+        assert_eq!(calls.last(), Some(&Call::End(params.cutoff.as_ptr())));
+        assert!(calls.contains(&Call::Set(
+            params.cutoff.as_ptr(),
+            params.cutoff.default_normalized_value()
+        )));
+        well_formed(&calls);
+        e.learning.learn(&params.midi_map, learnable("cutoff"));
+        entry_click(&mut e, "cutoff");
+        assert!(e.knob_entry.is_none(), "MIDI Learn keeps its click path");
+        assert_eq!(params.midi_map.armed(), Some(learnable("cutoff")));
+        e.end_gestures();
+        well_formed(&host.take());
+        e.learning.cancel(&params.midi_map);
+        entry_click(&mut e, "double");
+        assert!(e.knob_entry.is_none(), "inert DETUNE takes no value");
+    }
+
+    #[test]
+    fn knob_entry_editing_and_hosts_keypad_keys_set_only_valid_complete_numbers() {
+        let (mut e, host, params) = editing();
+        for text in [
+            "NaN",
+            "inf",
+            "2x",
+            "--2",
+            "1..2",
+            "2½",
+            "000000000000000000000000000000001x",
+        ] {
+            entry_click(&mut e, "cutoff");
+            keyed(&mut e, Key::Character(text.into()));
+            keyed(&mut e, Key::Enter);
+            assert!(host.take().is_empty(), "invalid {text}");
+        }
+        entry_click(&mut e, "cutoff");
+        keyed(&mut e, Key::Character("123".into()));
+        assert!(e.keyed(&KeyboardEvent {
+            key: Key::Character("a".into()),
+            modifiers: if cfg!(target_os = "macos") {
+                Modifiers::META
+            } else {
+                Modifiers::CONTROL
+            },
+            ..Default::default()
+        }));
+        keyed(&mut e, Key::Delete);
+        let keys = HostKeys::default();
+        keys.holding.store(e.holds_keys(), Ordering::Release);
+        for code in [37, 26, 38, 29, 19] {
+            // Keypad minus, 2, point, 5, Enter (VST3).
+            assert!(keys.offer(HostKey {
+                character: None,
+                key_code: code,
+                modifiers: 0,
+                down: true
+            }));
+        }
+        for k in keys.take() {
+            assert!(e.keyed(&k));
+        }
+        let p = params.cutoff.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(p), Call::Set(p, 0.25), Call::End(p)]
+        );
+        assert!(e.knob_entry.is_none());
+        keys.holding.store(e.holds_keys(), Ordering::Release);
+        assert!(
+            !keys.offer(HostKey {
+                character: Some('7'),
+                key_code: 0,
+                modifiers: 0,
+                down: true
+            }),
+            "the host gets keys back after Enter"
+        );
+    }
+
+    #[test]
+    fn knob_entry_initial_text_follows_host_automation() {
+        let (mut e, host, params) = editing();
+        let ptr = params.drive.as_ptr();
+        let context = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            Arc::clone(&params) as Arc<dyn Params>,
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        for value in [0.0, 0.25, 0.7532, 1.0] {
+            assert!(context.automate(ptr, value));
+            entry_click(&mut e, "drive");
+            e.update_scene();
+            let shown: f32 = e.scene.entry.as_ref().unwrap().text.parse().unwrap();
+            assert!((shown - params.drive.unmodulated_plain_value()).abs() < 0.0001);
+            keyed(&mut e, Key::Enter);
+        }
+        assert!(host.take().is_empty());
+    }
+
+    #[test]
+    fn knob_entry_fits_and_repaints_in_both_looks_sizes_and_lettering() {
+        let output = std::env::var_os("CA72_KNOB_ENTRY_PNG").map(std::path::PathBuf::from);
+        if let Some(out) = &output {
+            std::fs::create_dir_all(out).unwrap();
+        }
+        let (mut e, host, _) = editing_poly();
+        for skin in [Skin::Drawn, Skin::Worn] {
+            e.set_look(skin);
+            for lettering in [Lettering::Standard, Lettering::Large] {
+                e.set_lettering(lettering);
+                for width in [MIN_WIDTH, DEFAULT_WIDTH] {
+                    for expanded in [true, false] {
+                        e.params.editor_panel.store(expanded, Ordering::Relaxed);
+                        e.params
+                            .editor_panel_applied
+                            .store(expanded, Ordering::Relaxed);
+                        e.set_panel_height(expanded);
+                        e.fit(1.0, width, width);
+                        e.hover = None;
+                        e.draw();
+                        for id in ["tune", "filter_attack", "osc1_range", "volume", "level"] {
+                            if id == "level" && !expanded {
+                                continue;
+                            }
+                            entry_click(&mut e, id);
+                            assert!(e.draw());
+                            let field = e.scene.entry.as_ref().expect("drawn");
+                            let [x0, y0, x1, y1] = field.bounds;
+                            let height = f64::from(e.physical_height()) / e.renderer.scale();
+                            assert!(
+                                x0 >= 2.0 && y0 >= 2.0 && x1 <= art::W - 2.0 && y1 <= height - 2.0,
+                                "{id}: {:?}",
+                                field.bounds
+                            );
+                            let mut whole = None;
+                            compose(
+                                &mut whole,
+                                &e.renderer,
+                                e.strip.frame(),
+                                None,
+                                None,
+                                expanded,
+                                (e.physical_width, e.physical_height()),
+                            );
+                            assert!(
+                                e.composed == whole,
+                                "{skin:?} {lettering:?} {width} {expanded} {id}: composed whole with its field, actual expanded {}",
+                                e.expanded()
+                            );
+                            if let Some(out) = &output
+                                && width == DEFAULT_WIDTH
+                                && expanded
+                            {
+                                e.composed
+                                    .as_ref()
+                                    .unwrap()
+                                    .save_png(out.join(format!("{skin:?}-{lettering:?}-{id}.png")))
+                                    .unwrap();
+                            }
+                            keyed(
+                                &mut e,
+                                Key::Character("99999999999999999999999999999999".into()),
+                            );
+                            assert!(e.draw(), "edited text redraws");
+                            keyed(&mut e, Key::Escape);
+                            assert!(e.draw(), "cancel redraws");
+                            assert!(e.scene.entry.is_none());
+                            let mut whole = None;
+                            compose(
+                                &mut whole,
+                                &e.renderer,
+                                e.strip.frame(),
+                                None,
+                                None,
+                                expanded,
+                                (e.physical_width, e.physical_height()),
+                            );
+                            assert!(
+                                e.composed == whole,
+                                "{id}: no field left in a partial repaint"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(host.take().is_empty());
     }
 
     /// ENTROPY's new reading and OFF/recall use the entire travel, including below 5 %.
