@@ -2361,12 +2361,8 @@ impl Editing {
                 self.show_midi_list(chosen);
                 return;
             }
-            Pressed::FxReplace(slot) => {
-                self.fx_view.replace(slot);
-                return;
-            }
-            Pressed::FxRemove(slot) => {
-                self.fx_view.remove(slot);
+            Pressed::Fx(a) => {
+                self.fx_view.act(a);
                 return;
             }
         }
@@ -2556,16 +2552,16 @@ impl Editing {
             }
             return;
         }
-        // An effects' slot: REPLACE… and REMOVE.
+        // An effects' slot: what its state offers (R-FX-SAFETY), REPLACE… and REMOVE.
         if self.in_fx((x, y)) {
             match self
                 .fx_view
                 .menu_for(x, y)
                 .filter(|_| self.lower.settled() && !self.fx_view.list_open())
             {
-                Some((slot, name)) => {
+                Some((name, items)) => {
                     self.learning
-                        .open_fx_menu(self.renderer.fonts(), (x, y), size, slot, &name);
+                        .open_fx_menu(self.renderer.fonts(), (x, y), size, &name, &items);
                 }
                 None => self.learning.close_menu(),
             }
@@ -7240,6 +7236,128 @@ mod tests {
             // (The effect's window took the focus: the editor's lost it.)
             e.end_gestures();
         }
+    }
+
+    /// Effects turned off, and a safe start, in the drawer (decisions.md R-FX-SAFETY): a slot
+    /// turned off after it crashed or stopped responding reads CRASHED or NOT RESPONDING under its
+    /// dimmed name, the key unlit; its tip says why; its menu offers LOAD WITHOUT ITS SETTINGS
+    /// first when its settings are the cause, else TRY AGAIN first; a click tries it again. One
+    /// running without its settings offers TRY ITS OLD SETTINGS, and says FAILED, its name lit,
+    /// when they still crash it. After a safe start each reads OFF, its tip says why, its menu
+    /// offers TURN EFFECTS BACK ON and TURN THIS ONE ON, and a click turns them all on.
+    #[test]
+    fn the_fx_drawer_says_why_an_effect_is_off_and_tries_it_again() {
+        use crate::fx_view::{Health, SafeStart};
+        let (mut e, fake) = editing_effects();
+        {
+            let mut s = fake.slots.lock().expect("slots");
+            s[0].health = Health::Crashed;
+            s[0].by_settings = true;
+            s[1].health = Health::NotResponding;
+        }
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        e.fx_view.poll(Instant::now() + Duration::from_secs(1));
+        e.update_scene();
+        let words = |e: &Editing| {
+            e.fx_scene
+                .slots
+                .iter()
+                .map(|s| (s.word, s.dim))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            words(&e)[..2],
+            [
+                (Some(fx_ui::FxWord::Crashed), true),
+                (Some(fx_ui::FxWord::NotResponding), true)
+            ]
+        );
+        assert!(!e.browser.bar.fx, "nothing plays: the key unlit");
+        let name = |e: &Editing, i: usize| at(e, fx_ui::centre(fx_ui::FxTarget::Name(i)));
+        let p = name(&e, 0);
+        go(&mut e, p);
+        let tip = e.fx_view.tip().map(|t| t.0).unwrap_or_default();
+        assert!(tip.contains("saved settings crash it"), "{tip}");
+        let items = |e: &Editing| {
+            menu_items(e)
+                .into_iter()
+                .map(|(t, _)| t)
+                .collect::<Vec<_>>()
+        };
+        right_click(&mut e, p);
+        assert_eq!(
+            items(&e),
+            [
+                "LOAD WITHOUT ITS SETTINGS",
+                "TRY AGAIN",
+                "REPLACE\u{2026}",
+                "REMOVE"
+            ]
+        );
+        menu_item(&mut e, "LOAD WITHOUT ITS SETTINGS");
+        assert_eq!(effects_done(&mut e, &fake, 1), ["without settings 0"]);
+        let p = name(&e, 1);
+        right_click(&mut e, p);
+        assert_eq!(
+            items(&e),
+            [
+                "TRY AGAIN",
+                "LOAD WITHOUT ITS SETTINGS",
+                "REPLACE\u{2026}",
+                "REMOVE"
+            ]
+        );
+        e.learning.close_menu();
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["retry 1"]);
+        // Running without its settings: its old ones offered back; still crashing it, FAILED.
+        let p = name(&e, 0);
+        right_click(&mut e, p);
+        assert_eq!(
+            items(&e),
+            ["TRY ITS OLD SETTINGS", "REPLACE\u{2026}", "REMOVE"]
+        );
+        menu_item(&mut e, "TRY ITS OLD SETTINGS");
+        assert_eq!(effects_done(&mut e, &fake, 1), ["old settings 0"]);
+        assert_eq!(words(&e)[0], (Some(fx_ui::FxWord::Failed), false));
+        assert!(e.browser.bar.fx, "it plays on: the key lit");
+        // A safe start.
+        for s in fake.slots.lock().expect("slots").iter_mut() {
+            s.health = Health::Off;
+            s.try_failed = false;
+        }
+        *fake.safe.lock().expect("safe") = Some(SafeStart::DidNotClose);
+        e.fx_view.poll(Instant::now() + Duration::from_secs(2));
+        e.update_scene();
+        assert_eq!(
+            words(&e)[..2],
+            [
+                (Some(fx_ui::FxWord::Off), true),
+                (Some(fx_ui::FxWord::Off), true)
+            ]
+        );
+        assert!(!e.browser.bar.fx);
+        let p = name(&e, 1);
+        go(&mut e, p);
+        let tip = e.fx_view.tip().map(|t| t.0).unwrap_or_default();
+        assert!(tip.contains("did not close properly"), "{tip}");
+        right_click(&mut e, p);
+        assert_eq!(
+            items(&e),
+            [
+                "TURN EFFECTS BACK ON",
+                "TURN THIS ONE ON",
+                "REPLACE\u{2026}",
+                "REMOVE"
+            ]
+        );
+        menu_item(&mut e, "TURN THIS ONE ON");
+        assert_eq!(effects_done(&mut e, &fake, 1), ["retry 1"]);
+        let p = name(&e, 0);
+        click(&mut e, p);
+        assert_eq!(effects_done(&mut e, &fake, 1), ["turn on"]);
+        assert!(e.fx_scene.slots.iter().all(|s| s.word.is_none()));
+        assert!(e.browser.bar.fx, "they play: the key lit");
     }
 
     /// Every gesture well formed: a parameter's begin only while it has none open, its

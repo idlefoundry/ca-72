@@ -4,8 +4,9 @@
 //! whichever lower page shows. Four slots side by side, the chain's order left to right, each a
 //! SLOT legend over a dot screen of twelve places (the rail's name's dots, glass and bezel) and an
 //! ON tab beside it, lit while its effect plays. An empty slot reads "+ ADD EFFECT"; an effect
-//! that is not playing for a reason of its own (loading, restarting, given up on, not installed
-//! here) has its name dimmed and the reason in small print under it.
+//! that is not playing for a reason of its own (loading, restarting, turned off after it crashed
+//! or stopped responding, not installed here, off for a safe start) has its name dimmed and the
+//! reason in small print under it.
 //!
 //! The effects' list drops from under the drawer's foot below the slot it is for: a glass display
 //! of dots, as the presets' list is, on a plate of its own hanging from the drawer, each effect a
@@ -135,21 +136,29 @@ pub enum FxWord {
     Loading,
     /// Its helper died or hung; it is being started again.
     Restarting,
-    /// Given up on after crashing again and again: dry.
+    /// Turned off after it crashed (as it loaded, or again and again, or by its settings): dry,
+    /// and off at the next start until tried again (decisions.md R-FX-SAFETY).
     Crashed,
+    /// Turned off after it stopped responding (as it loaded, or again and again).
+    NotResponding,
     /// Its plug-in could not be loaded here (not installed, say): dry, its state kept.
     Missing,
-    /// Chosen from the list, it would not load (said for a few seconds where it was to go).
+    /// Chosen from the list, it would not load (said for a few seconds where it was to go); or
+    /// its settings set aside, given back, still crashed it.
     Failed,
+    /// Not loaded this time: a safe start (R-FX-SAFETY).
+    Off,
 }
 
 impl FxWord {
-    pub const ALL: [FxWord; 5] = [
+    pub const ALL: [FxWord; 7] = [
         FxWord::Loading,
         FxWord::Restarting,
         FxWord::Crashed,
+        FxWord::NotResponding,
         FxWord::Missing,
         FxWord::Failed,
+        FxWord::Off,
     ];
 
     pub fn text(self) -> &'static str {
@@ -157,8 +166,10 @@ impl FxWord {
             FxWord::Loading => "LOADING",
             FxWord::Restarting => "RESTARTING",
             FxWord::Crashed => "CRASHED",
+            FxWord::NotResponding => "NOT RESPONDING",
             FxWord::Missing => "MISSING",
             FxWord::Failed => "FAILED",
+            FxWord::Off => "OFF",
         }
     }
 }

@@ -4,6 +4,7 @@
 //! is new or has changed.
 
 use crate::locate;
+use crate::sandbox::Fault;
 use daw_ipc::protocol::PluginDesc;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -46,6 +47,8 @@ pub struct Found {
 pub struct Unlisted {
     pub path: PathBuf,
     pub reason: String,
+    /// Whether it crashed or hung its helper (else it refused, or is not a plug-in).
+    pub fault: Fault,
 }
 
 /// Everything found.
@@ -83,6 +86,14 @@ struct CachedFile {
     plugins: Vec<PluginDesc>,
     #[serde(default)]
     error: Option<String>,
+    /// It crashed or hung its helper when it was listed (R-FX-SAFETY): it is not listed again
+    /// until it changes, or a scan is asked to try such files again.
+    #[serde(default = "refused")]
+    fault: Fault,
+}
+
+fn refused() -> Fault {
+    Fault::Refused
 }
 
 /// The size and modification time that stand for a plug-in file: a bundle's newest file
@@ -125,6 +136,19 @@ fn stamp(path: &Path) -> (u64, u128) {
 /// file given `timeout`. With a `cache` file, files unchanged since they were listed are
 /// not loaded again, and the cache is written back with what was found.
 pub fn scan(helper: &Path, dirs: &[PathBuf], cache: Option<&Path>, timeout: Duration) -> Catalog {
+    scan_as(helper, dirs, cache, timeout, false)
+}
+
+/// As [`scan`]; with `retry`, files that crashed or hung their helper when last listed are
+/// listed again although unchanged (the list's SCAN AGAIN; decisions.md R-FX-SAFETY). Without
+/// it they are remembered as they were, by path, size and modification time, and not loaded.
+pub fn scan_as(
+    helper: &Path,
+    dirs: &[PathBuf],
+    cache: Option<&Path>,
+    timeout: Duration,
+    retry: bool,
+) -> Catalog {
     let old: Cache = cache
         .and_then(|c| std::fs::read(c).ok())
         .and_then(|b| serde_json::from_slice(&b).ok())
@@ -137,17 +161,18 @@ pub fn scan(helper: &Path, dirs: &[PathBuf], cache: Option<&Path>, timeout: Dura
     let mut catalog = Catalog::default();
     for path in locate::plugin_files(dirs) {
         let (len, modified) = stamp(&path);
-        let entry = match old
-            .files
-            .iter()
-            .find(|f| f.path == path && f.len == len && f.modified == modified)
-        {
+        let entry = match old.files.iter().find(|f| {
+            f.path == path
+                && f.len == len
+                && f.modified == modified
+                && !(retry && f.fault != Fault::Refused)
+        }) {
             Some(f) => f.clone(),
             None => {
                 catalog.scanned += 1;
-                let (plugins, error) = match locate::scan(helper, &path, timeout) {
-                    Ok(p) => (p, None),
-                    Err(e) => (Vec::new(), Some(e)),
+                let (plugins, error, fault) = match locate::scan_file(helper, &path, timeout) {
+                    Ok(p) => (p, None, Fault::Refused),
+                    Err((fault, e)) => (Vec::new(), Some(e), fault),
                 };
                 CachedFile {
                     path: path.clone(),
@@ -155,6 +180,7 @@ pub fn scan(helper: &Path, dirs: &[PathBuf], cache: Option<&Path>, timeout: Dura
                     modified,
                     plugins,
                     error,
+                    fault,
                 }
             }
         };
@@ -162,6 +188,7 @@ pub fn scan(helper: &Path, dirs: &[PathBuf], cache: Option<&Path>, timeout: Dura
             catalog.unlisted.push(Unlisted {
                 path: path.clone(),
                 reason: e.clone(),
+                fault: entry.fault,
             });
         }
         for desc in &entry.plugins {

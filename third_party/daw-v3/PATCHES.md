@@ -1,6 +1,6 @@
 # DAW-v3's plug-in hosting, patched
 
-The four crates as VENDORED.md says, with three changes, to be offered to DAW-v3 itself:
+The four crates as VENDORED.md says, with four changes, to be offered to DAW-v3 itself:
 
 1. **A VST3 editor on Linux gets the host's run loop (`IRunLoop`)** (`daw-helper/src/vst3.rs`;
    DAW-v3's D78 lists it as not yet done). DAW-v3's `Frame`, the
@@ -42,3 +42,19 @@ The four crates as VENDORED.md says, with three changes, to be offered to DAW-v3
    (macOS 27, 2026-10-19), clicks posted to the standalone: before, the window opened again was
    second in the screen's order, under the CA-72's; with it, first, both opened again and brought
    forward. The window still does not take the keyboard (the host keeps it).
+
+4. **The test plug-ins fault as they load, as a host restores them and as they are listed**
+   (`daw-test-plugin/src/lib.rs`, `daw-test-vst3/src/lib.rs`; decisions.md R-FX-SAFETY), for
+   the CA-72's tests that no effect can keep the standalone from starting or playing. Before,
+   they faulted only while processing (their hidden `crash` and `hang`). Now:
+   - plug-in IDs that abort or hang as they are made, which the factories do not list: CLAP
+     `org.daw-v3.test-plugin.crash-at-load` and `...hang-at-load`; VST3 processor classes
+     `44415733546573744761696E43525348` ("CRSH") and `...48414E47` ("HANG");
+   - a state pair, (`FAULT_ID` = `0xFFFF_FF02`, value), in the states both keep: 1 aborts
+     while the state is loaded, 2 hangs then, 3 is loaded, saved again with the state, and
+     aborts at the first block after (a saved state that crashes the plug-in each time it is
+     restored);
+   - the CLAP library aborts or hangs in its entry's `init` when its file name holds
+     `crash-at-scan` or `hang-at-scan`, so as a host lists it (and loads it).
+   States without the pair, the listed plug-ins and every other behaviour are as before; their
+   own tests pass, and clippy is clean.

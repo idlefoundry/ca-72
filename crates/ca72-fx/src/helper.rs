@@ -21,6 +21,30 @@ use std::time::Duration;
 /// Called on the reader thread when the helper's stdout closes.
 pub type OnExit = Box<dyn FnOnce(&Arc<HelperProc>) + Send>;
 
+/// Why a request had no answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Failure {
+    /// The helper answered no: the plug-in's or the helper's error.
+    Refused(String),
+    /// The helper exited (crashed, was killed) before it answered.
+    Exited,
+    /// It did not answer in time: it is hung (decisions.md R-FX-SAFETY).
+    TimedOut(Duration),
+    /// It was not running when asked.
+    NotRunning,
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Failure::Refused(e) => f.write_str(e),
+            Failure::Exited => f.write_str("the plugin helper exited"),
+            Failure::TimedOut(t) => write!(f, "the plugin helper did not answer within {t:?}"),
+            Failure::NotRunning => f.write_str("the plugin helper is not running"),
+        }
+    }
+}
+
 /// How many lines of the helper's stderr are kept for crash reports.
 const KEEP_LINES: usize = 20;
 
@@ -160,8 +184,13 @@ impl HelperProc {
 
     /// Sends a request and waits for its reply.
     pub fn request(&self, op: Op, timeout: Duration) -> Result<serde_json::Value, String> {
+        self.ask(op, timeout).map_err(|e| e.to_string())
+    }
+
+    /// Sends a request and waits for its reply; why there was none.
+    pub fn ask(&self, op: Op, timeout: Duration) -> Result<serde_json::Value, Failure> {
         if !self.is_alive() {
-            return Err("the plugin helper is not running".into());
+            return Err(Failure::NotRunning);
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = channel();
@@ -170,30 +199,32 @@ impl HelperProc {
         {
             let mut stdin = lock(&self.stdin);
             let Some(w) = stdin.as_mut() else {
-                return Err("the plugin helper's input is closed".into());
+                lock(&self.pending).remove(&id);
+                return Err(Failure::NotRunning);
             };
             if w.write_all(line.as_bytes())
                 .and_then(|()| w.flush())
                 .is_err()
             {
                 lock(&self.pending).remove(&id);
-                return Err("the plugin helper is not running".into());
+                return Err(Failure::Exited);
             }
         }
         match rx.recv_timeout(timeout) {
             Ok(r) if r.ok => Ok(r.result),
-            Ok(r) => Err(r
-                .error
-                .unwrap_or_else(|| "the plugin helper refused".into())),
+            Ok(r) => Err(Failure::Refused(
+                r.error
+                    .unwrap_or_else(|| "the plugin helper refused".into()),
+            )),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 lock(&self.pending).remove(&id);
-                Err(format!(
-                    "the plugin helper did not answer within {timeout:?}"
-                ))
+                if self.is_alive() {
+                    Err(Failure::TimedOut(timeout))
+                } else {
+                    Err(Failure::Exited)
+                }
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                Err("the plugin helper exited".into())
-            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(Failure::Exited),
         }
     }
 

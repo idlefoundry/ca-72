@@ -96,9 +96,9 @@ pub enum Item {
     SizeMenu,
     /// The SIZE menu's: the window this wide (logical pixels).
     Size(u32),
-    /// An effects' slot's (decisions.md R-FX-DRAWER): another effect in its place, or none.
-    FxReplace(usize),
-    FxRemove(usize),
+    /// An effects' slot's (decisions.md R-FX-DRAWER, R-FX-SAFETY): another effect in its place,
+    /// none, the effect tried again...
+    Fx(crate::fx_view::FxAction),
     /// The settings' AGENTS (the standalone's; decisions.md R-MCP): AI agents allowed to
     /// operate it through MCP, or not.
     Agents(bool),
@@ -136,9 +136,9 @@ pub enum Pressed {
     SizeMenu,
     /// The SIZE menu: the window this wide (logical pixels).
     Size(u32),
-    /// An effects' slot's menu: the list to replace its effect, or its effect taken out.
-    FxReplace(usize),
-    FxRemove(usize),
+    /// An effects' slot's menu: the list to replace its effect, its effect taken out, tried
+    /// again...
+    Fx(crate::fx_view::FxAction),
     /// The settings' menu: agents allowed (true) or not.
     Agents(bool),
 }
@@ -453,20 +453,17 @@ impl Learning {
     }
 
     /// An effects' slot's menu (decisions.md R-FX-DRAWER; the owner's FX-A: "right-click to
-    /// replace/remove"), opened at (`x`, `y`): its effect's name as its title, then REPLACE… and
-    /// REMOVE.
+    /// replace/remove"), opened at (`x`, `y`): its effect's name as its title, then `items`
+    /// (what the effect's state offers, R-FX-SAFETY, then REPLACE… and REMOVE).
     pub fn open_fx_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        slot: usize,
         name: &str,
+        items: &[(crate::fx_view::FxAction, &str)],
     ) {
-        let items = [
-            (Item::FxReplace(slot), "REPLACE\u{2026}"),
-            (Item::FxRemove(slot), "REMOVE"),
-        ];
+        let items: Vec<(Item, &str)> = items.iter().map(|(a, t)| (Item::Fx(*a), *t)).collect();
         let menu = Menu {
             x,
             y,
@@ -534,8 +531,7 @@ impl Learning {
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,
             (Some(Item::Size(w)), _) => return Pressed::Size(*w),
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
-            (Some(Item::FxReplace(i)), _) => return Pressed::FxReplace(*i),
-            (Some(Item::FxRemove(i)), _) => return Pressed::FxRemove(*i),
+            (Some(Item::Fx(a)), _) => return Pressed::Fx(*a),
             (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
             _ => {}
         }
