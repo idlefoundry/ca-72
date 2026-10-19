@@ -1,0 +1,33 @@
+{
+  "builds": {
+    "v0.2.5": "212967e3efe0945c60c44fa4272f51a854d5f3eb",
+    "main": "1a1dd6cd2c241f3f2fa94e79ab93cdd489e4a219",
+    "fidelity": "9b0f9e8e3bbe3f4a51567475311423f61ece5b55"
+  },
+  "renderer_sha256": "cc3cda90520198c62cde3801a40a65f72d29c310e84b75718bc934039e235754",
+  "samples": 131072,
+  "warm_seconds": 1,
+  "block": 256,
+  "seed": 1,
+  "platform": "Linux-7.2.5-3-omarchy-x86_64-with-glibc2.44",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "workers": 0,
+  "sample_format": "mono little-endian f64 (engine output is f32)",
+  "python": "3.14.7",
+  "analysis_versions": {
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2"
+  },
+  "executables_sha256": {
+    "v0.2.5": "7870bbdaddecbe8cc606807cad5f24b794fb4b558a107813490e1639f976f914",
+    "main": "896fea58b4233cbef82e2517bb1a180b033e18100b4d6badc53ad21081d0d206",
+    "fidelity": "1eca1a4a904a67f1ee2c0ea3a10f63439b80a43b7314aaeaf2c635c109be9ca4"
+  },
+  "cargo_lock_sha256": {
+    "v0.2.5": "046202863842ba3de5087ef79ddcfda03b7cbed7847674c16fb941d44dfbc1d6",
+    "main": "a5e8135e6d2df6938bd9d185355b3ae439754249c81e1d21db5e320834c13e70",
+    "fidelity": "a5e8135e6d2df6938bd9d185355b3ae439754249c81e1d21db5e320834c13e70"
+  },
+  "analyser_sha256": "4b49a63671c7702d0e693f21e146cc5998bf1cf8ed8fc34c440bd7b8966289b0"
+}

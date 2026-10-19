@@ -1,0 +1,10 @@
+{
+  "engine": {
+    "cases": 162,
+    "bit_identical": 162
+  },
+  "oscillator": {
+    "cases": 108,
+    "bit_identical": 108
+  }
+}
