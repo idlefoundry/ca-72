@@ -192,6 +192,14 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("doubled", &p.doubled),
         ("feedback", &p.feedback),
         ("lock", &p.lock),
+        // The arpeggiator (decisions.md R-ARP): a preset that does not name it plays without it.
+        ("arp_on", &p.arp_on),
+        ("arp_latch", &p.arp_latch),
+        ("arp_direction", &p.arp_direction),
+        ("arp_rate", &p.arp_rate),
+        ("arp_octaves", &p.arp_octaves),
+        ("arp_gate", &p.arp_gate),
+        ("arp_swing", &p.arp_swing),
     ]
 }
 
@@ -517,6 +525,7 @@ impl Browser {
             hover: self.bar.hover,
             keyboard: self.bar.keyboard,
             panel: self.bar.panel,
+            arp: self.bar.arp,
         };
     }
 
@@ -614,7 +623,7 @@ impl Browser {
             BarTarget::Name => self.show(!self.open, p),
             BarTarget::Prev => self.step(-1, p, s),
             // (The editor's: its menu.)
-            BarTarget::Settings | BarTarget::Panel | BarTarget::Keyboard => {}
+            BarTarget::Settings | BarTarget::Panel | BarTarget::Keyboard | BarTarget::Arp => {}
             BarTarget::Next => self.step(1, p, s),
             BarTarget::Star => {
                 let current = Self::current(p);
@@ -1463,6 +1472,78 @@ mod tests {
     /// NOTE PRIORITY and RETRIGGER are a preset's (the owner, 2026-10-10: "This item should be
     /// saved per patch"; R50): saved with the sound, set by a preset naming them (the factory's
     /// the owner made since), and LOW and off, the instrument's own, by one saved before them.
+    #[test]
+    fn the_arpeggiator_is_part_of_a_preset_and_off_in_one_that_does_not_name_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let p = Ca72Params::default();
+        let target = |e: &Entry, id: &str| {
+            targets(&p, e)
+                .into_iter()
+                .find(|(k, _)| *k == id)
+                .map(|(_, v)| v)
+        };
+        for id in [
+            "arp_on",
+            "arp_latch",
+            "arp_direction",
+            "arp_rate",
+            "arp_octaves",
+            "arp_gate",
+            "arp_swing",
+        ] {
+            assert!(values_now(&p).iter().any(|(k, _)| k == id), "{id}");
+        }
+        // Every factory preset: off, its settings their defaults.
+        for e in lib.entries().0 {
+            assert_eq!(target(&e, "arp_on"), Some(0.0), "{}", e.sound.name);
+            assert_eq!(
+                target(&e, "arp_rate"),
+                Some(p.arp_rate.default_normalized_value()),
+                "{}",
+                e.sound.name
+            );
+        }
+        let on = lib
+            .save(
+                "Arpeggio",
+                vec![
+                    ("arp_on".to_owned(), 1.0),
+                    ("arp_rate".to_owned(), 6.0),
+                    ("arp_gate".to_owned(), 25.0),
+                ],
+                None,
+            )
+            .unwrap();
+        assert_eq!(target(&on, "arp_on"), Some(1.0));
+        assert_eq!(
+            target(&on, "arp_rate"),
+            Some(
+                p.arp_rate
+                    .preview_normalized(crate::params::ArpRate::Eighth)
+            )
+        );
+        assert_eq!(target(&on, "arp_gate"), Some(0.25));
+        // Saved plain, as a session is: OCTAVES 4 and RANDOM, saved before OCTAVES went to 5 and
+        // ORDER came, are OCTAVES 4 and RANDOM still (R-ARP).
+        let before = lib
+            .save(
+                "Four Up Random",
+                vec![
+                    ("arp_octaves".to_owned(), 4.0),
+                    ("arp_direction".to_owned(), 3.0),
+                ],
+                None,
+            )
+            .unwrap();
+        let set = |id: &str| target(&before, id).unwrap();
+        assert_eq!(p.arp_octaves.preview_plain(set("arp_octaves")), 4);
+        assert_eq!(
+            p.arp_direction.preview_plain(set("arp_direction")),
+            crate::params::ArpDirection::Random
+        );
+    }
+
     #[test]
     fn note_priority_and_retrigger_are_part_of_a_preset() {
         let dir = tempfile::tempdir().unwrap();

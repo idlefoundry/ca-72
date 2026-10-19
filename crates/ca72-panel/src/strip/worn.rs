@@ -40,7 +40,7 @@ const SEG_OFF_OPACITY: f64 = 0.05;
 /// owner, 2026-10-10: "these orange buttons get too bright on the edges. looks unnatural": the
 /// cap's walls, which carry the light to its edge, and the bevel's catch light had gone a hot
 /// yellow-white round it, brighter than its face).
-const AMBER: Tint = Tint {
+pub(super) const AMBER: Tint = Tint {
     lit: |g| {
         let g = if g > TAB_KNEE {
             TAB_KNEE + (g - TAB_KNEE) * 0.25
@@ -67,7 +67,7 @@ const CORNER_FROM: f32 = 0.3;
 /// The lit cap with its outermost band darkened ([`EDGE_DARKER`]) and its corners more
 /// ([`CORNER_DARKER`]), in linear light, as far out as the kit's cap measures it (its rounded
 /// square, its middle drawn out across).
-fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Lighting {
+pub(super) fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Lighting {
     let lin = |v: u8| {
         let v = f32::from(v) / 255.0;
         if v <= 0.04045 {
@@ -116,12 +116,12 @@ fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Li
     }
     l
 }
-const AMBER_LIGHT: Underlight = Underlight {
+pub(super) const AMBER_LIGHT: Underlight = Underlight {
     rim: [0.6, 0.2, 0.04],
     light: [0.6, 0.17, 0.03],
 };
 /// The tabs' and the keys' print.
-const TAB_PRINT: &str = "#2a1006";
+pub(super) const TAB_PRINT: &str = "#2a1006";
 const KEY_PRINT: &str = "#d9d2c0";
 /// The drops move on at most this far apart, seconds (30 a second).
 const STEP_S: f64 = 1.0 / 30.0;
@@ -172,12 +172,12 @@ impl fmt::Debug for StripRenderer {
 }
 
 /// A readout drawn: what it reads, lit or dark, and the patch of the frame it covers.
-struct Reading {
-    text: String,
-    lit: bool,
-    left: i32,
-    top: i32,
-    patch: Pixmap,
+pub(super) struct Reading {
+    pub(super) text: String,
+    pub(super) lit: bool,
+    pub(super) left: i32,
+    pub(super) top: i32,
+    pub(super) patch: Pixmap,
 }
 
 impl StripRenderer {
@@ -634,6 +634,7 @@ impl StripRenderer {
             let active = match target {
                 BarTarget::Panel => scene.bar.panel,
                 BarTarget::Keyboard => scene.bar.keyboard,
+                BarTarget::Arp => scene.bar.arp,
                 _ => false,
             };
             if active && meets(self.key_part(target), r) {
@@ -783,7 +784,7 @@ impl Sparse {
 }
 
 /// `from`'s pixels inside `rect` (left, top, right, bottom) put in `to`, the same size.
-fn copy(to: &mut Pixmap, from: &Pixmap, rect: [i32; 4]) {
+pub(super) fn copy(to: &mut Pixmap, from: &Pixmap, rect: [i32; 4]) {
     let (w, h) = (to.width() as i32, to.height() as i32);
     if (from.width() as i32, from.height() as i32) != (w, h) {
         return;
@@ -799,7 +800,7 @@ fn copy(to: &mut Pixmap, from: &Pixmap, rect: [i32; 4]) {
 }
 
 /// `a` and `b` (left, top, right, bottom) together: the least rectangle holding both.
-fn union(a: Option<[i32; 4]>, b: [i32; 4]) -> [i32; 4] {
+pub(super) fn union(a: Option<[i32; 4]>, b: [i32; 4]) -> [i32; 4] {
     a.map_or(b, |a| {
         [
             a[0].min(b[0]),
@@ -811,12 +812,12 @@ fn union(a: Option<[i32; 4]>, b: [i32; 4]) -> [i32; 4] {
 }
 
 /// Whether `a` and `b` share a pixel.
-fn meets(a: [i32; 4], b: [i32; 4]) -> bool {
+pub(super) fn meets(a: [i32; 4], b: [i32; 4]) -> bool {
     a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
 }
 
 /// `r` cut to `bounds`; none if nothing of it is inside.
-fn within(r: [i32; 4], bounds: [i32; 4]) -> Option<[i32; 4]> {
+pub(super) fn within(r: [i32; 4], bounds: [i32; 4]) -> Option<[i32; 4]> {
     let c = [
         r[0].max(bounds[0]),
         r[1].max(bounds[1]),
@@ -843,7 +844,7 @@ fn lit_tabs(scene: &StripScene) -> Vec<(f64, f64)> {
 }
 
 /// An SVG body (the strip's units: the drawing's, from the strip's top) drawn over `frame`.
-fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f64, body: &str) {
+pub(super) fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f64, body: &str) {
     let (w, h) = (frame.width(), frame.height());
     let view = [0.0, 0.0, f64::from(w) / scale, f64::from(h) / scale];
     let doc = art::document(view, w, h, body);
@@ -871,15 +872,15 @@ fn key_marks(o: &mut Svg) {
                     N(y + 11.0)
                 );
             }
-            BarTarget::Save | BarTarget::Panel => put!(
+            BarTarget::Save | BarTarget::Panel | BarTarget::Arp => put!(
                 o,
                 "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{KEY_PRINT}'>{}</text>",
                 N(x),
                 N(y),
-                if t == BarTarget::Panel {
-                    "PANEL"
-                } else {
-                    "SAVE"
+                match t {
+                    BarTarget::Panel => "PANEL",
+                    BarTarget::Arp => "ARP",
+                    _ => "SAVE",
                 }
             ),
             BarTarget::Keyboard => put!(
@@ -1003,37 +1004,11 @@ fn ring(o: &mut Svg, c: StripControl) {
 fn reading(k: &mut StripRenderer, i: usize, r: Readout, text: &str, lit: bool) {
     let scale = k.scale;
     let (x, y, w, h) = r.window();
-    let y = y - PANEL_H;
-    let cells = 3;
     let Some(slot) = k.readouts.get_mut(i) else {
         return;
     };
     if slot.as_ref().is_none_or(|r| r.text != text || r.lit != lit) {
-        // (The patch is the window and a margin for the glow.)
-        let m = 10.0;
-        let left = ((x - m) * scale).floor();
-        let top = ((y - m) * scale).floor();
-        let right = ((x + w + m) * scale).ceil();
-        let bottom = ((y + h + m) * scale).ceil();
-        *slot = Pixmap::new((right - left) as u32, (bottom - top) as u32).map(|mut patch| {
-            let mut o = Svg::default();
-            put!(
-                o,
-                "<defs><filter id='segglow' x='-0.3' y='-0.6' width='1.6' height='2.2'><feGaussianBlur in='SourceGraphic' stdDeviation='6' result='far'/><feComponentTransfer in='far' result='farhalf'><feFuncA type='linear' slope='0.5'/></feComponentTransfer><feGaussianBlur in='SourceGraphic' stdDeviation='2' result='near'/><feMerge><feMergeNode in='farhalf'/><feMergeNode in='near'/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs><g transform='translate({},{})'>",
-                N(-left / scale),
-                N(-top / scale)
-            );
-            seven(&mut o, (x, y, w, h), cells, text, lit);
-            put!(o, "</g>");
-            svg_over(&k.options, &mut patch, scale, &o.0);
-            Reading {
-                text: text.to_owned(),
-                lit,
-                left: left as i32,
-                top: top as i32,
-                patch,
-            }
-        });
+        *slot = readout_patch(&k.options, scale, (x, y - PANEL_H, w, h), text, lit);
     }
     if let Some(r) = slot {
         k.frame.draw_pixmap(
@@ -1047,10 +1022,46 @@ fn reading(k: &mut StripRenderer, i: usize, r: Readout, text: &str, lit: bool) {
     }
 }
 
+/// A readout's window `(x, y, w, h)` (its frame's units) reading `text`, lit or dark: its three
+/// cells of seven segments and their glow, on a patch of its own a margin round it, and the patch's
+/// place in the frame's pixels.
+pub(super) fn readout_patch(
+    options: &usvg::Options<'_>,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+    text: &str,
+    lit: bool,
+) -> Option<Reading> {
+    // (The patch is the window and a margin for the glow.)
+    let m = 10.0;
+    let left = ((x - m) * scale).floor();
+    let top = ((y - m) * scale).floor();
+    let right = ((x + w + m) * scale).ceil();
+    let bottom = ((y + h + m) * scale).ceil();
+    let mut patch = Pixmap::new((right - left) as u32, (bottom - top) as u32)?;
+    let mut o = Svg::default();
+    put!(
+        o,
+        "<defs><filter id='segglow' x='-0.3' y='-0.6' width='1.6' height='2.2'><feGaussianBlur in='SourceGraphic' stdDeviation='6' result='far'/><feComponentTransfer in='far' result='farhalf'><feFuncA type='linear' slope='0.5'/></feComponentTransfer><feGaussianBlur in='SourceGraphic' stdDeviation='2' result='near'/><feMerge><feMergeNode in='farhalf'/><feMergeNode in='near'/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs><g transform='translate({},{})'>",
+        N(-left / scale),
+        N(-top / scale)
+    );
+    seven(&mut o, (x, y, w, h), 3, text, lit);
+    put!(o, "</g>");
+    svg_over(options, &mut patch, scale, &o.0);
+    Some(Reading {
+        text: text.to_owned(),
+        lit,
+        left: left as i32,
+        top: top as i32,
+        patch,
+    })
+}
+
 /// Seven-segment digits, `cells` of them, in the readout `(x, y, w, h)`, right-aligned, lit
 /// or dark (every segment as an unlit one shows faintly through the glass). The CA-74's.
 fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &str, lit: bool) {
-    const SEGS: [(char, &str); 17] = [
+    const SEGS: [(char, &str); 18] = [
         ('0', "abcdef"),
         ('1', "bc"),
         ('2', "abged"),
@@ -1066,6 +1077,8 @@ fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &s
         ('F', "aefg"),
         ('N', "abcef"),
         ('E', "adefg"),
+        // (A triplet's note value: RATE's "16t", decisions.md R-ARP.)
+        ('t', "defg"),
         (' ', ""),
         // (A value being typed: where the next digit goes.)
         ('_', "d"),
@@ -1287,13 +1300,34 @@ pub(crate) fn pixel_screen(
     frame: &mut Pixmap,
     picture: &Pixmap,
     scale: f64,
-    (x, y, w, h): (f64, f64, f64, f64),
+    window: (f64, f64, f64, f64),
     text: &str,
+) {
+    screen_still(options, frame, picture, scale, window);
+    screen_text(frame, scale, window, text);
+}
+
+/// A pixel screen's bezel and glass, which do not change with what it reads.
+pub(crate) fn screen_still(
+    options: &usvg::Options<'_>,
+    frame: &mut Pixmap,
+    picture: &Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
 ) {
     let mut bezel = Svg::default();
     super::screen_bezel(&mut bezel, (x, y, w, h));
     svg_over(options, frame, scale, &bezel.0);
     glass(frame, picture, scale, (x, y, w, h), 3.0);
+}
+
+/// A pixel screen's dots, `text` lit, centred, over its glass.
+pub(crate) fn screen_text(
+    frame: &mut Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+    text: &str,
+) {
     let mut places = ((w - 16.0) / (6.0 * DOT)).floor().max(1.0) as usize;
     let glyphs: Vec<_> = text.chars().take(places).map(font::glyph).collect();
     // Keep centred text on the same dot grid, including an even character count.

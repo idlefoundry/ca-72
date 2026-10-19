@@ -115,7 +115,96 @@ fn measure(s: f64) {
         *ss = strip_scene(if i % 8 < 4 { 0b1111 } else { 0b0011 });
     });
     times("the drops settling", 0, &mut |_, _, _| {});
+    // The standalone's TEMPO screen (R-ARP): shown (its first frame the slowest), then set, a
+    // beat a minute a frame (dragged or scrolled).
+    times("TEMPO shown (standalone)", 0, &mut |_, sc, _| {
+        sc.tempo = Some("120 BPM".into());
+    });
+    times("TEMPO set (standalone)", 0, &mut |i, sc, _| {
+        sc.tempo = Some(format!("{} BPM", 121 + i));
+    });
     times("nothing changed", 100, &mut |_, _, _| {});
+    arp(s, &mut panel);
+}
+
+/// The arpeggiator's drawer (decisions.md R-ARP): its first drop (made as the editor opens: on
+/// its thread, joined at once here, the worst case; and joined after the thread is done, as when
+/// the drawer is first opened a moment after the editor), a knob turned in it, a tab lit, and
+/// nothing changed; each its render and its plate put in the window's frame.
+fn arp(s: f64, panel: &mut Renderer) {
+    use ca72_panel::strip::arp::{self, ArpRenderer, ArpScene};
+    let r = |t: &str| (t.to_owned(), true);
+    let mut scene = ArpScene {
+        on: true,
+        readouts: [r("16"), r("2"), r("60"), r("25")],
+        knobs: [0.75, 1.0 / 3.0, 0.6, 0.25],
+        ..ArpScene::default()
+    };
+    let mut composed = panel.frame().clone();
+    let put = |d: &ArpRenderer, c: &mut Pixmap| {
+        let top = arp::top_px(s) as usize;
+        let f = d.frame();
+        let (x0, x1) = (
+            (arp::LEFT * s).round() as usize,
+            (arp::RIGHT * s).round() as usize,
+        );
+        let w = c.width() as usize;
+        for y in 0..f.height() as usize {
+            let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
+            let n = (x1 - x0) * 4;
+            c.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+        }
+    };
+    let t = Instant::now();
+    let mut d = ArpRenderer::new(s, Skin::Worn, ca72_panel::Lettering::Standard);
+    let made = t.elapsed();
+    d.render(&scene, panel);
+    put(&d, &mut composed);
+    println!(
+        "  {:<36} {:5.1} ms (its plate made on its thread, waited for)",
+        "the drawer's first drop, at once",
+        ms(t.elapsed())
+    );
+    println!(
+        "  {:<36} {:5.2} ms (on the editor's thread as it opens)",
+        "the drawer's renderer made",
+        ms(made)
+    );
+    let mut d = ArpRenderer::new(s, Skin::Worn, ca72_panel::Lettering::Standard);
+    std::thread::sleep(Duration::from_millis(1500));
+    let t = Instant::now();
+    d.render(&scene, panel);
+    put(&d, &mut composed);
+    println!(
+        "  {:<36} {:5.1} ms (its plate made already)",
+        "the drawer's first drop, later",
+        ms(t.elapsed())
+    );
+    let mut times = |name: &str, step: &mut dyn FnMut(usize, &mut ArpScene)| {
+        let mut v = Vec::new();
+        for i in 0..40 {
+            step(i, &mut scene);
+            let t = Instant::now();
+            if d.render(&scene, panel) {
+                put(&d, &mut composed);
+            }
+            v.push(t.elapsed());
+        }
+        v.sort();
+        println!(
+            "  {name:<36} median {:5.1} ms, slowest {:5.1} ms",
+            ms(v[v.len() / 2]),
+            ms(v[v.len() - 1])
+        );
+    };
+    times("a drawer knob turned (GATE)", &mut |i, sc| {
+        sc.knobs[2] = 0.3 + 0.01 * i as f64;
+        sc.readouts[2].0 = format!("{}", 30 + i);
+    });
+    times("a drawer tab pressed (DIRECTION)", &mut |i, sc| {
+        sc.direction = i % 4
+    });
+    times("the drawer open, nothing changed", &mut |_, _| {});
 }
 
 fn ms(d: Duration) -> f64 {

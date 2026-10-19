@@ -8079,3 +8079,324 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-ARP. An arpeggiator, in a drawer dropped from the rail's ARP key
+
+**Owner decisions, 2026-10-18** (issue #90, its comment of that day, and the night's brief). In
+every build (VST3, CLAP, AU and the standalone), for 0.3.0:
+- **Modes and range:** "up, down, up/down and random, with an octave range": DIRECTION is UP |
+  DOWN | UP/DOWN | RANDOM, OCTAVES 1 to 4 (ORDER and OCTAVES 5 added 2026-10-19, below).
+- **Rate:** "tempo-synced divisions only": 1/2, 1/4, 1/8, 1/16 and 1/32 with the triplet and
+  dotted values between them; the dial numbered 2, 4, 8, 16 and 32 at the straight values, the
+  others unnumbered ticks; the readout the value's number (16). It follows the host's tempo; "the
+  standalone needs its own tempo": a simple TEMPO setting where the standalone's other settings
+  are, 120 by default (its final look the owner's to design).
+- **Latch, gate, swing:** LATCH (hold; HOLD on the panel since 2026-10-19, below); GATE, the
+  note's length, 0 to 100 %; SWING, 0 to 100 %, 0 straight.
+- **Transport stopped:** "keeps running at the host tempo while keys are held, and locks to the bar
+  when the transport plays".
+- **Voicing:** "arpeggiated notes feed the existing engine exactly as played notes do, through
+  mono/poly/unison, NOTE PRIORITY, RETRIGGER and glide. The arpeggiator does not bypass or
+  duplicate voice allocation."
+- **Presets:** "arpeggiator settings are saved with the patch. Existing presets and saved projects
+  load with the arpeggiator off and sound unchanged."
+- **Automation:** "every arpeggiator setting is a host parameter (ON, LATCH, DIRECTION, RATE,
+  OCTAVES, GATE, SWING)". **MIDI:** no MIDI out.
+- **Placement, C1** (mock-ups drawn by the panel's renderer on a throwaway copy; the owner chose
+  the drawer, then "make it even slimmer", then C1; rejected: a page of its own, the rail's dot
+  screen, a two-row drawer, a drawer of readouts alone): an ARP key on the rail after the
+  keyboard's, the name's screen a key shorter (star, previous, name, next, SAVE, PANEL, keyboard,
+  ARP, settings); it drops a one-row drawer, 265 units deep, inside the window over the top of
+  whichever lower page shows, as the presets' drawer drops; ARP again puts it away; the key lit
+  while the arpeggiator runs. The row: the ARP bank (ON | LATCH), the DIRECTION bank, a rule, then
+  RATE, OCTAVES, GATE and SWING as knob-and-readout units of the strip's own parts. "The mock's
+  drawer lip and drop shadow were a quick composite": a real edge, as the presets' drawer has.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One path for every key.** Every key the note sources pass (the host's MIDI on any channel, the
+  standalone's keyboard and computer keys) goes through the arpeggiator (`arp.rs`) to the
+  engine's `Event::Note`; off, it hands each on at once, unchanged, so the sound without it is
+  the code's before to the bit. Its notes are the engine's events at their samples, the run
+  split there as at a host's event, after the host's events at the same sample. It plays one
+  key at a time (a monophonic arpeggiator): in POLY each step takes a voice, in UNISON all.
+- **The order.** UP and DOWN by pitch, the next above (below) the last played, from the other end
+  past the last; UP/DOWN bounces, its ends once (60 64 67 64 60 64…); a chord changed while it
+  plays carries on from the pitch it last played, and from silence it starts again from the
+  pattern's beginning. OCTAVES repeats the keys an octave up each time, none past 127; a pitch
+  two keys reach (C4 and C5 with two octaves) is played once. **RANDOM's rule:** a key chosen
+  evenly among the pattern's pitches but the last played, while there are two or more (one
+  alone repeats); its numbers from the session's noise seed, so a render repeats.
+- **RATE's thirteen values**, slow to fast as the dial turns, each straight value then its dotted
+  and its triplet (the dotted the longer): 2, 4., 2t, 4, 8., 4t, 8, 16., 8t, 16, 32., 16t, 32;
+  the dial a tick every 25 degrees, the straight ones numbered; the readout `16.` for a dotted
+  sixteenth (the segments' point) and `16t` for a triplet (a seven-segment t). Its host
+  parameter names them "1/16 dotted", "1/8 triplet". The default a sixteenth.
+- **The grid.** While the host plays and says where it is, the steps are counted from the start of
+  each bar (its bar start and time signature), the last of a bar cut short at the bar's end (a
+  dotted quarter in 4/4: 0, 1.5 and 3 beats, then the next bar's downbeat); without a bar,
+  from the song's start. A key pressed while silent waits for the next step, but one pressed
+  up to a quarter of a step after a step plays at once as that step's (a key a little late
+  is not held back a whole step). A jump of the host's position (a loop, a locate) finds the
+  grid again there, the step on a loop's start played at its first sample; the note sounding
+  keeps what was left of it. Stopped (or a host that gives no position), it runs at the host's
+  tempo (else TEMPO) from the moment a key is pressed; the transport stopping while it plays,
+  it goes on in time; starting, it finds the host's grid. A tempo change moves the steps on
+  at the new tempo from where they were (times are kept in beats).
+- **GATE** (superseded 2026-10-19, below: 5 ms was silent): each note let go at GATE's share of
+  its own step (a swung step's length), but never shorter than 5 ms (`arp::SHORTEST`), so 0 %
+  sounds a blip (the contours, DECAY on, then
+  release as from a quick tap); at 100 % tied: the next key pressed before the last is let go
+  (single triggering and GLIDE take it as legato), but for the same key again, which is let go
+  first. The default 50 %.
+- **SWING:** every second step of each bar late by SWING × half a step: 100 % puts it three
+  quarters of the way through the pair (a drum machine's 75 %), 67 % is the triplet shuffle.
+- **LATCH:** a key pressed with none held (none down, none held by the pedal) starts a new chord;
+  one pressed while others are held adds to it; the chord plays on after its keys are let go,
+  until a new one or LATCH off, which lets it go at once. ON switched off with keys held: its
+  note let go and the keys pressed again, as played; on: the engine's keys let go and played in
+  turn. A preset or session that switches it off while it plays does the same at the block's
+  first sample: nothing is left down.
+- **The sustain pedal** (CC 64, ≥ 64 down), which the instrument has never followed: the
+  arpeggiator's while it is on, the keys let go while it is down held as if they were still,
+  until it comes up (Reset All Controllers lifts it). Played without the arpeggiator the pedal
+  does nothing, as before (a project with pedal data keeps its sound). A controller MIDI Learn has
+  on CC 64 is that parameter's alone, as before. **All Notes Off, All Sound Off, a reset and
+  PANIC** forget the held, pedalled and latched keys (LATCH stays on).
+- **The parameters**, after every other (no id moves): `arp_on` ("Arp"), `arp_latch`,
+  `arp_direction` (`up`, `down`, `up_down`, `random`), `arp_rate` (`1/2`, `1/4d`, `1/2t`, … `1/32`),
+  `arp_octaves` (1 to 4), `arp_gate` (%), `arp_swing` (%). Sound parameters: saved with presets
+  (`presets::sound_params`; a preset that does not name them plays without it, every factory
+  preset so) and sessions; a session saved before them opens with them at their defaults, off,
+  whatever the instance had (`Ca72::filter_state`). Turning it on marks the preset changed. MIDI
+  Learn takes them all (65 learnable: ON and LATCH switches, DIRECTION, RATE and OCTAVES
+  selectors, GATE and SWING knobs); the knobs' right-click menus learn as the panel's.
+- **TEMPO** (the standalone, which has no host to give one; and any host that gives none; its
+  screen on the wood since 2026-10-19, below): the AUDIO & MIDI dialog's last row, "120 BPM (the arpeggiator's; applied at once)", a list every
+  5 from 40 to 240 and the arrow keys a beat, 30 to 300; applied at once, outside the devices'
+  APPLY (nothing to restart), and kept for the computer in `settings.toml` as
+  `standalone_tempo` (not in the session: the owner will design its final look and may move it).
+- **The drawer** (`ca72_panel::strip::arp`): x 372 (the left hand's rule stays seen) to the strip's
+  right trim, from under the rail 265 deep; the banks at x 565 and 1091, the rule at 1440, the
+  units at 1644, 2046, 2448 and 2850 (repacked for ORDER 2026-10-19, below), the row 142 under its top, the legends and the banks'
+  titles 109 above it, as the mock-up. Its face the strip's (the worn skin's picture laid from
+  another place, so its grain does not run on from the face under it, the lamp's light over
+  it; the drawn skin's black); the rail's shadow across its top as the presets' drawer has, its
+  left edge catching the lamp, its foot shaded to a dark line, and its shadow cast 16 units on
+  the page below (laid over the page, not a copy). It slides as the presets' drawer (140 ms).
+  Open, it is all the pointer finds there (the strip's tabs and knobs and the keyboard's header
+  under it do nothing); sliding, nothing. The presets' drawer opens over it; ARP while they show
+  puts them away and shows it; PANEL hiding the lower panel puts it away; ARP with the panel
+  hidden shows it. The key is lit while ON is on (taken as "while the arpeggiator is running":
+  the owner to confirm, whether it should light only while notes play).
+- **Its knobs are the panel's controls** (`controls::CONTROLS`, four appended, `Place::Arp`,
+  found by `interact::hit_arp` while the drawer is open): dragged, scrolled, double-clicked to
+  their defaults, tipped and learned as every knob; drawn by the drawer, through the panel's
+  renderer (`Renderer::paint_control`) in the skin it draws. RATE and OCTAVES go from position
+  to position while dragged (`Dial::steps`, as VOICES). Its readouts take a value typed, double
+  clicked as the strip's (R52): RATE `16`, `16.` or `16t` (one of the thirteen; any other
+  nothing), OCTAVES a digit, GATE and SWING percent.
+- **Allocation-free:** the keys bit sets, the times beats; `tests/realtime.rs`
+  `the_arpeggiator_neither_allocates_nor_frees` plays it through the plug-in's process with every
+  setting automated, the transport playing, looping and stopping, the pedal and All Notes Off.
+- **nih-plug change 11** gains `TestProcessContext::set_transport` (`PATCHES.md`), for the tests.
+
+**Evidence (omarchy, Linux, Rust 1.97.1, 2026-10-18; under other agents' builds, load 8 to 16):**
+- `arp.rs`'s 17 tests: the pattern orders, RANDOM's rule and its repeat, steps on their samples
+  whatever the block (1, 64, 1024, 4096) within a sample of the grid at 120/48 kHz, 97.3/44.1 kHz,
+  174/96 kHz and 60/22.05 kHz, the host's grid and a late key, a bar's cut, SWING, GATE's blip and
+  tie, latch, the pedal, ON handed over, clearing, the transport stopping, starting and looping,
+  a tempo change. The plug-in's: `arpeggiated_notes_play_through_the_engine_as_played_ones` (a
+  chord arpeggiated with the transport playing renders to the bit what the same keys played at
+  its steps' samples render without it: MONO with RETRIGGER and POLY, blocks of 256 realtime and
+  1000 offline), `nothing_is_left_stuck_by_resets_latch_or_presets`,
+  `the_sustain_pedal_reaches_the_arpeggiator_unless_learned`,
+  `an_old_session_opens_with_the_arpeggiator_off`,
+  `the_arpeggiator_is_part_of_a_preset_and_off_in_one_that_does_not_name_it`, the settings' and
+  the dialog's TEMPO; the editor's `the_arp_key_drops_its_drawer_over_the_lower_page` (the frame
+  put together whole, nothing under it answering, the presets' drawer over it, PANEL) and
+  `the_arp_drawer_operates_its_parameters`; the drawer's `drawn_in_parts_it_is_drawn_whole`
+  (both skins, two scales). `cargo test -p ca72-plugin` (default and `standalone-production`)
+  and `-p ca72-panel` pass; clippy `-D warnings` with all targets.
+- The standalone (release build, `IDLE_FOUNDRY_SHARED` in the worktree) on omarchy: the drawer
+  dropped over the keyboard and over the strip, ON lit with the ARP key, TEMPO chosen from its
+  list and kept (`standalone_tempo = 100`). The notes were not listened to.
+- Frame times (`cargo run --release -p ca72-panel --example frames`, the editor's drawing and
+  composing, the worn skin; the code before and after run in turn, the quieter pair): the
+  panel's and the strip's cases as before within the machine's noise (0.87 of the drawing:
+  CUTOFF 2.7 and 2.7 ms median, DRIVE 6.6 and 6.7, a tab 1.8 and 1.8; at 1.0: CUTOFF 3.7 and
+  4.6, DRIVE 5.6 and 7.6, a tab 2.4 and 2.4). The drawer's renderer made as the editor opens:
+  0.03 to 0.06 ms on its thread (its plate made on a thread of its own, about 65, 145 and 125 ms
+  at 0.44, 0.87 and 1.0); its first drop once that is done: 6, 18 to 25 and 16 to 24 ms (its four
+  knobs drawn the first time); at once after opening, waiting for the plate: 64 to 155 ms. A knob
+  turned in it: 1.2, 4.0 to 5.7 and 2.5 ms median; a tab pressed 0.1 to 0.5 ms; open and still,
+  nothing. While it slides the whole frame is put together, as for the presets' drawer.
+
+**Not done:** listening to it in a host or the standalone; the installed plug-ins in a DAW (the
+transport's bar start and loops as each host reports them, Logic's and Ableton's block splits);
+the Mac and Windows builds; the drawer's knobs dragged in the standalone (the editor's tests drag
+them; in the standalone its tabs were clicked by synthetic X events).
+
+### R-ARP, 2026-10-19: HOLD's drone, HOLD, ORDER, five OCTAVES, the TEMPO screen, GATE
+
+**Owner decisions, 2026-10-19** (issue #90's comments of that day, 6269120007 among them, after
+playing PR #96; and the owner's requests relayed with the night's brief):
+- **A drone is ARP off with LATCH on.** "LATCH with ON off holds the notes played. They keep
+  sounding after the keys are released, as played (no arpeggiation), until LATCH is turned off or
+  a new chord is played. 'A new chord' means the same rule as the arpeggiator's latch, so the two
+  behave alike." "Through the engine as played: held notes go through mono/poly/unison, NOTE
+  PRIORITY, RETRIGGER and glide." "With LATCH off, every sound stays bit-identical." "No stuck
+  notes after LATCH off, All Notes Off, PANIC, a preset change or a reset. Test the sustain
+  pedal with a held drone, and turning ON on and off while notes are held." A rate of zero was
+  considered and turned down ("most synths use a hold or latch that also works with the
+  arpeggiator off").
+- **LATCH becomes HOLD:** "Rename LATCH to HOLD on the panel, in the host parameter's display
+  name and in the docs. Keep the parameter ID so saved patches and projects still load."
+- **ORDER:** "notes play in the order they were pressed (Moog's ORDER, Ableton's Play Order,
+  Logic's As Played). It's a fifth button after RANDOM", "a key added while held goes on the end;
+  a key let go leaves the order"; the buttons 140 units, the banks at 555 and 1114, the rule at
+  1512, the units at 1716, 2099, 2482 and 2865, as rendered for the owner.
+- **OCTAVES 1 to 5:** "let's add 5 octaves as an option in the arp. I think it will make the
+  spacing around the knob look better." Past the top: "For high notes, I would repeat the highest
+  octave available of the selected note rather than go silent."
+- **The standalone's TEMPO, option D:** "a dot-matrix screen on the top wood band, mirroring the
+  CA-72 badge: the same size, height and distance from the edge. It's always in view, and the
+  rail and drawer are unchanged. Standalone only: in a plug-in the tempo comes from the host and
+  the wood stays bare. Setting it should work like the other readouts (drag, scroll,
+  double-click to type); the AUDIO & MIDI row can stay or go."
+- **GATE was silent at short settings:** "At 1/32 and 120 BPM with GATE at 12 %, nothing sounds",
+  the note let go before `TRIGGER_ON`'s 7.8 ms; GATE 0 % silent at every tempo; at GATE 90 % the
+  6 ms gap under `RETRIGGER_GAP` loses retriggers. The fix: "GATE stays a percentage, but of the
+  window the circuit can play. Each note is held at least about 20 ms and let go at least 13 ms
+  before the next, except at 100 %, which ties notes. Where a step is too short for both (1/32
+  above about 225 BPM), the note sounds and the gap shortens."
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- **The drone** (`Arp::drone`): with ON off and HOLD on each key is handed on as pressed; a key let
+  go is held on; a key pressed with none held (none down, none held by the pedal) lets the held
+  chord go first; one pressed while it holds is let go and pressed again (struck again, never
+  down twice). HOLD switched on while ON is off holds the keys down at that moment; off, it lets
+  go of what it holds but not of keys still down. **ON and the drone hand over:** ON switched on,
+  the drone's keys are let go and arpeggiated, HOLD's chord the arpeggiator's; off with HOLD on,
+  the chord (held and latched keys, and those the pedal holds) is pressed again as a drone. With
+  HOLD off the path is the old one, untouched: keys pass straight through.
+- **The sustain pedal under a drone** does not sound anything itself (the instrument still
+  ignores CC 64): it keeps the keys let go under it part of the chord, so that a key pressed
+  then adds to the drone rather than starting a new one, as under the arpeggiator's HOLD.
+- **ORDER** keeps the keys in the order they were last pressed (`Arp::order`, a list of 128, each
+  key once: pressed again, it moves to the end), passing over those no longer played. With
+  OCTAVES it plays the order, then the order an octave up, and so on (Ableton's and Logic's way);
+  a pitch two keys reach is played by each (UP, DOWN, UP/DOWN and RANDOM still play it once). A
+  key let go: the one now in its place plays next. ORDER is the enum's last value
+  (`arp_direction` `order`), so saved UP to RANDOM keep their values.
+- **Past 127** (`arp::audible`): the pattern is the one it would be with room above (pitches kept
+  to 255 in `Wide`), each note brought down by whole octaves into range as it is played: G7 (103)
+  with OCTAVES 5 plays G7 G8 G9 G9 G9 under UP, and its UP/DOWN turns at the pattern's top (G7 G8
+  G9 G9 G9 G9 G9 G8 G7), so every step sounds and the pattern keeps its length. RANDOM never
+  plays the note just heard while another may sound (judged by the note heard, so collapsed
+  repeats are passed over). At GATE 100 % a repeat of the same note is let go and pressed again.
+- **OCTAVES 5:** `arp_octaves` 1 to 5. Presets and sessions keep it plain (an `i32`; the
+  session's `arp_direction` an id), so a saved 1 to 4 loads as 1 to 4 and needs no translation.
+  A host's automation lane or a MIDI-learned controller holds normalized values and maps onto the
+  new range (4 positions became 5, DIRECTION's 4 became 5); no release has had the arpeggiator,
+  so only test builds' projects could hold such a lane. The dial: five numbered positions a
+  quarter of its travel apart (75 degrees).
+- **GATE** (`arp::SHORTEST` 20 ms, `arp::REARM` 13 ms): a note is held `SHORTEST + GATE × (step −
+  SHORTEST − REARM)`; a step shorter than both (1/32 above 225 BPM) holds the note `SHORTEST` (or
+  the whole step, past 750 BPM) and the gap is what is left. 100 % ties as before. GATE 50 % at
+  1/16 and 120 is now 66 ms, not 62.5.
+- **The TEMPO screen** (`art::TEMPO_SCREEN`, `art::tempo_screen`): the rail's screen's bezel and
+  glass and dot lettering (`strip::pixel_screen`), its surround the plate's 261 by 82 units at
+  x 269 to 530, y 24 to 106; a layer of the panel's renderer always (empty in a plug-in, so that
+  the layers' count stays), its bezel and glass made once a scale and kept, its dots drawn as it
+  changes. It reads "120 BPM". A drag sets a beat a minute every 2 logical pixels up or down
+  (SHIFT: every 8), a wheel's notch one, a trackpad's 8 pixels one; a double click types it (up
+  to three digits, `_` marking the next; Enter sets it within 30 to 300, Escape leaves it); kept
+  for this computer as before (written as a drag ends, not at each pixel). **The AUDIO & MIDI row
+  stays,** a second way in: it already reads and writes the same setting, and taking it away
+  would change the dialog the owner approved for nothing.
+- **The drawer's percent signs** sit 18 units from their readouts (26 before), so that SWING's,
+  moved right by ORDER's repacking, stays inside the trim (it was cut in half there, the mock-up's
+  too).
+- **The 0.3.0 draft notes** moved to `docs/releases/drafts/0.3.0.md`: R-WHATS-NEW's test wants a
+  bundled entry for every release file up to the workspace version, and 0.3.0 is not that yet.
+
+**Evidence, 2026-10-19 (omarchy, Linux):**
+- Unit tests in `arp.rs` (22): ORDER's order, a key added at the end, one let go, one pressed
+  again, ORDER with OCTAVES and HOLD; OCTAVES 5 past the top in all five directions (every step
+  sounding, none past 127, RANDOM's rule kept, G9 alone repeated, HOLD); the drone held, a new
+  chord, a key struck again, HOLD off with a key still down; the drone and the arpeggiator
+  handing over, the pedal, clearing; GATE's floors at every RATE, at 30 to 300 BPM and GATE 0 to
+  99 % (the note at least 20 ms, the gap at least 13 ms where the step allows, the note kept where
+  it does not), and the owner's case (1/32, 120, 12 %: 23.5 ms). The plug-in's:
+  `a_held_drone_plays_through_the_engine_as_held_keys` (a drone, a new chord, renders to the bit
+  what the keys held by hand render: MONO with RETRIGGER, MONO with GLIDE and HIGH priority, POLY,
+  UNISON; blocks of 256 realtime and 1000 offline), `a_drone_leaves_nothing_stuck` (HOLD off, All
+  Notes Off, PANIC, a preset, a reset, ON on and off, the pedal, POLY: no key down in the engine
+  after each), the presets' plain values for OCTAVES 4 and RANDOM, the editor's
+  `the_standalone_s_tempo_screen_sets_the_tempo` (drag, wheel, typing, the limits, Escape; none in
+  a plug-in) and `the_arp_drawer_operates_its_parameters` (ORDER, OCTAVES 5 typed), the panel's
+  `the_tempo_screen_mirrors_the_name_plate` and its part-and-whole test with the screen shown,
+  set and gone; `the_arpeggiator_neither_allocates_nor_frees` with ORDER, OCTAVES 5, a key at 124
+  and the drone among its automation.
+- **Renders, measured, not listened to** (`tests/arp_renders.rs`, ignored, run by hand through
+  the plug-in's process as the standalone runs it; the WAVs in the night's `arp2-out/wav` and
+  `wav-before`): 1/32 at 120 with GATE 12 %: 0 of 32 steps sounding before (-240 dBFS), 32 of 32
+  after. GATE 0 %: 0 steps sounding at any of the 13 RATEs before, every step at every RATE after,
+  and 40 of 40 at 1/32 and 300 BPM. GATE 90 % at 1/32 and 120, with a plucked contour so that
+  each attack is its own: MONO 1 attack in 32 before (7 steps sounding, the rest decayed away),
+  32 of 32 after, for a chord and for one key; MONO with RETRIGGER and POLY 32 of 32 before and
+  after. (Calibrated by hand-played notes: a 6 ms gap gives 1 attack in 16, 13 ms 16 in 16.) The
+  drone: RMS -18 dBFS (MONO) 1 to 2.5 s after the keys are let go, the same after a new chord,
+  -170 dBFS or less 2 s after HOLD off; POLY and UNISON alike; ON on and off under it, held,
+  arpeggiated, held again. ORDER: G C E pressed in that order, A added: G C E, G C E an octave up,
+  G C E A …, measured from each step's zero crossings. OCTAVES 5 from G7: 103 115 127 127 127,
+  every step sounding. TEMPO 96 set as the screen sets it, stopped: 16 of 16 attacks, onsets
+  155.7 ms apart on average (156.25). With HOLD off and the arpeggiator off, three phrases (MONO,
+  POLY, MONO with GLIDE and RETRIGGER) render the same samples on the build before and after
+  (the WAVs compared byte for byte).
+- **The Linux standalone** (release, `--no-devices`, `IDLE_FOUNDRY_SHARED` in the worktree, on a
+  hidden Hyprland workspace, events sent by XSendEvent to baseview's child window, pictures by
+  XGetImage): the TEMPO screen scrolled (123), dragged 40 pixels (143), typed (96, its `_` shown)
+  and each kept in `settings.toml`; the drawer's ON, HOLD and ORDER pressed, OCTAVES typed 5 and
+  dragged to 4, the session saving `arp_octaves` 4 (plain) and `arp_direction` `order`.
+- **Frame times** (`frames`, the build before and after run in turn twice, the worn skin): every
+  case as before (0.44 and 0.87: CUTOFF 0.7 and 2.8 ms median, DRIVE 1.8 and 6.3, a tab 0.5 and
+  1.9, a drawer knob 1.1 and 3.9, the drawer's first drop 5.3 to 5.8 and 16.2 to 17.9 ms). The
+  TEMPO screen set: 1.1 and 3.0 ms median (3.4 and 5.7 before its bezel was kept); its first frame
+  9 to 12 ms, inside the editor's first. It is a fixed layer, so nothing floats and only its
+  place is put together again (counting it as floating had made every frame whole; the editor's
+  part-and-whole test caught it).
+
+**Owner rule, 2026-10-19 (later):** "the gate in the arp should NEVER go below the minimum gate
+length to trigger a sound in the device." `SHORTEST` (20 ms) was a floor only where the step
+allowed it (a step shorter than 20 ms held the note the step's length); it is now absolute:
+- **Agent decisions:** every note is held at least `SHORTEST`, whatever GATE, RATE, SWING or
+  tempo. A step shorter than that (SWING's short steps at the fastest RATEs, a host's tempo past
+  375 at 1/32, a bar's last step cut short) presses the next note while the last is still held,
+  and lets the last go at its 20 ms: up to eight notes may sound at once (`arp::OVERLAP`; a ninth
+  lets the oldest go early, which takes steps under 2.5 ms). Overlapping notes are the engine's
+  as any held keys: POLY gives each a voice, MONO and UNISON play them by NOTE PRIORITY (the
+  later sounds legato, or once the earlier is let go), RETRIGGER waits its gap. **The same key
+  again** while it is still under its `SHORTEST` cannot be pressed twice: the step is tied into
+  the note, which is held on to that step's release (never re-struck short); once it has had
+  its `SHORTEST`, the same key is let go and pressed again, as before. The gap floor (`REARM`)
+  stays wherever the step has room for both. Letting the keys go, and HOLD off, let a note go at
+  once only when it has had its `SHORTEST` (else at it); switching ON off, All Notes Off, PANIC
+  and a reset let everything go at once, as the engine does.
+- **Evidence:** `no_note_is_shorter_than_the_shortest` (`arp.rs`): all 13 RATEs, at 30, 60, 97,
+  120, 180, 225, 240 and 300 BPM and a host's 1000, GATE 0, 12, 50, 90, 99 and 100 %, SWING 0
+  and 100 %, for one key, a chord, ORDER with C4 and C5 (a pitch two keys reach) and notes folded
+  down from past 127 (UP/DOWN from G8 over four octaves): every note, pressed to let go, held at
+  least 960 samples at 48 kHz (the keys let go at the end included), a key down at every step,
+  nothing stuck, no key down twice; over 45 000 notes. Renders (`arp_renders` `shortest_floor`,
+  `wav/floor-*`): 1/32 at 300 BPM, SWING 0 and 100 % (25 and 12.5 ms steps), GATE 0 and 100 %,
+  in MONO with LOW and HIGH priority, MONO with RETRIGGER, POLY and UNISON: every step's window
+  sounding (-17.8 to -21.0 dBFS at the quietest) with the default contour. With a contour of
+  sustain 0, MONO (single triggering) and UNISON fade at 1/32 and 300 BPM without SWING (18 and
+  21 of 48 steps sounding): the 5 ms gap is under the circuit's re-arm time (11.5 to 12 ms), so
+  the contours cannot start again; RETRIGGER and POLY sound every step. No gate can change that
+  short of a longer step, a slower tempo, RETRIGGER or POLY.
+
+**Not done:** listening, in the standalone or a host (renders measured instead); the installed
+plug-ins in a DAW; the Mac and Windows builds; the standalone with an audio device (it ran with
+`--no-devices`; its process is the one the renders ran).

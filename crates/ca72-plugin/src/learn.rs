@@ -4,8 +4,8 @@
 //!
 //! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches, the
 //!   strip's POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD), INNER, SCATTER's placement, DETUNE
-//!   (DOUBLE), DRIVE, LEVEL and AUTO GAIN, and LOCK (a host parameter without a control: the
-//!   drawer's list learns it). Not the wheels (MIDI pitch bend and the modulation wheel, CC 1,
+//!   (DOUBLE), DRIVE, LEVEL and AUTO GAIN, LOCK (a host parameter without a control: the
+//!   drawer's list learns it), and the arpeggiator's seven (decisions.md R-ARP). Not the wheels (MIDI pitch bend and the modulation wheel, CC 1,
 //!   move them already), POWER (the host's bypass), MIDI BEND RANGE (the player's), nor anything
 //!   but a sound parameter.
 //! - **What is not learned** ([`reserved`]): bank select (CC 0, 32), the modulation wheel (CC 1),
@@ -85,8 +85,9 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 }
 
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
-/// then LOCK. Its order is the drawer's list; the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 58] = [
+/// then LOCK, then the arpeggiator's. Its order is the drawer's list; the table is saved by id,
+/// so it may change.
+pub const LEARNABLE: [Learnable; 65] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -153,6 +154,14 @@ pub const LEARNABLE: [Learnable; 58] = [
     knob("level", "LEVEL"),
     switch("auto_gain", "AUTO GAIN"),
     switch("lock", "LOCK (oscillators identical)"),
+    // The arpeggiator (R-ARP).
+    switch("arp_on", "ARP ON"),
+    switch("arp_latch", "ARP HOLD"),
+    stepped("arp_direction", "ARP DIRECTION"),
+    stepped("arp_rate", "ARP RATE"),
+    stepped("arp_octaves", "ARP OCTAVES"),
+    knob("arp_gate", "ARP GATE"),
+    knob("arp_swing", "ARP SWING"),
 ];
 
 /// The learnable parameter of this id.
@@ -717,6 +726,13 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "drive" => &p.drive,
         "level" => &p.level,
         "auto_gain" => &p.auto_gain,
+        "arp_on" => &p.arp_on,
+        "arp_latch" => &p.arp_latch,
+        "arp_direction" => &p.arp_direction,
+        "arp_rate" => &p.arp_rate,
+        "arp_octaves" => &p.arp_octaves,
+        "arp_gate" => &p.arp_gate,
+        "arp_swing" => &p.arp_swing,
         _ => return None,
     })
 }
@@ -764,6 +780,8 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "double" => &p.double,
         "drive" => &p.drive,
         "level" => &p.level,
+        "arp_gate" => &p.arp_gate,
+        "arp_swing" => &p.arp_swing,
         _ => return None,
     })
 }
@@ -951,7 +969,9 @@ mod tests {
                 counts(Kind::Stepped),
                 counts(Kind::Switch)
             ),
-            (27, 8, 23)
+            // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
+            // ON and HOLD switches.)
+            (29, 11, 25)
         );
     }
 
