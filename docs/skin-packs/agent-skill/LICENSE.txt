@@ -1,0 +1,13 @@
+CC0 1.0 Universal
+
+The CA-72 skin pack agent skill (this folder: README.md, this file, and ca72-skin-pack/ with
+SKILL.md and its reference files) is dedicated to the public domain. To the extent possible
+under law, Idle Foundry Ltd. has waived all copyright and related or neighboring rights to it.
+You may copy, change, distribute and sell it, and work made with it, under any licence you
+choose, without asking.
+
+The full legal code: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+This dedication covers the skill's own files only. It does not cover the CA-72 plug-in, its
+code, its official panel's layout or its artwork, which are under the GNU General Public
+License, version 3 or later.

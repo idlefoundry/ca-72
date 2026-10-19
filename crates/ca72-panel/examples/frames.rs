@@ -8,7 +8,7 @@
 use std::time::{Duration, Instant};
 
 use ca72_panel::strip::{Field, StripRenderer, StripScene};
-use ca72_panel::{CONTROLS, Pixmap, Renderer, Scene, Skin, art};
+use ca72_panel::{CONTROLS, Pixmap, Renderer, Scene, Skin};
 
 fn main() {
     let scales: Vec<f64> = std::env::args()
@@ -47,12 +47,12 @@ fn measure(s: f64) {
         if !(p || q) {
             return;
         }
-        let top = (art::PANEL_H * s).round() as usize;
+        let top = panel.strip_row() as usize;
         match (&mut composed, strip.damage()) {
             (Some(c), Some([_, y0, _, y1])) if !p => {
                 rows(c, strip.frame(), top, top + y0 as usize, top + y1 as usize);
             }
-            _ => compose(&mut composed, panel, strip.frame(), s),
+            _ => compose(&mut composed, panel, strip.frame()),
         }
         if let Some(c) = &composed {
             present(&mut window, c);
@@ -124,11 +124,11 @@ fn ms(d: Duration) -> f64 {
 
 /// The editor's composing (`ca72-plugin`'s `compose`, the drawer shut): the panel's frame, the
 /// strip's over its foot.
-fn compose(composed: &mut Option<Pixmap>, panel: &Renderer, strip: &Pixmap, s: f64) {
+fn compose(composed: &mut Option<Pixmap>, panel: &Renderer, strip: &Pixmap) {
     let frame = panel.frame();
     let c = composed.get_or_insert_with(|| frame.clone());
     c.data_mut().copy_from_slice(frame.data());
-    let top = (art::PANEL_H * s).round() as usize;
+    let top = panel.strip_row() as usize;
     let h = c.height() as usize;
     rows(c, strip, top, top, h);
 }

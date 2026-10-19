@@ -87,6 +87,9 @@ pub enum Item {
     /// size (R-LETTERING), and how the FREQUENCY knobs' dials read (R54), each under its
     /// group's head (which does nothing).
     Look(Skin),
+    /// An installed skin pack's look, by its place in the editor's list (decisions.md
+    /// R-SKIN-PACKS).
+    Pack(usize),
     Lettering(Lettering),
     Dials(Law),
     Head,
@@ -120,6 +123,8 @@ pub enum Pressed {
     Indicator(bool),
     /// The settings' menu: the editor drawn in this look.
     Look(Skin),
+    /// The settings' menu: the editor drawn in this installed pack's look.
+    Pack(usize),
     /// The settings' menu: the editor's lettering printed at this size.
     Lettering(Lettering),
     /// The settings' menu: the FREQUENCY knobs read through this law.
@@ -315,20 +320,38 @@ impl Learning {
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
-    /// decisions.md R54). The title always names this build's version, independent of the
-    /// update check; opening this menu does not start a check.
+    /// decisions.md R54). Under LOOK, after the built-in two, each installed skin pack (`packs`:
+    /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any). The
+    /// title always names this build's version, independent of the update check; opening this
+    /// menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
         (skin, lettering, law): (Skin, Lettering, Law),
+        (packs, pack): (&[(String, bool)], Option<usize>),
     ) {
-        #[allow(unused_mut)]
-        let mut items = vec![
-            (Item::Head, "LOOK"),
-            (Item::Look(Skin::Worn), "REALISTIC"),
-            (Item::Look(Skin::Drawn), "CLASSIC"),
+        let mut items: Vec<(Item, String)> = vec![
+            (Item::Head, "LOOK".into()),
+            (Item::Look(Skin::Worn), "REALISTIC".into()),
+            (Item::Look(Skin::Drawn), "CLASSIC".into()),
+        ];
+        let mut unusable = Vec::new();
+        for (i, (name, usable)) in packs.iter().enumerate() {
+            if !usable {
+                unusable.push(items.len());
+            }
+            items.push((
+                Item::Pack(i),
+                if *usable {
+                    name.clone()
+                } else {
+                    format!("{name} (CANNOT BE USED)")
+                },
+            ));
+        }
+        let rest: Vec<(Item, &str)> = vec![
             (Item::Head, "LETTERING"),
             (Item::Lettering(Lettering::Standard), "STANDARD"),
             (Item::Lettering(Lettering::Large), "LARGE"),
@@ -339,13 +362,18 @@ impl Learning {
             (Item::SizeMenu, "SIZE\u{2026}"),
             (Item::WhatsNew, "WHAT'S NEW…"),
         ];
+        items.extend(rest.into_iter().map(|(it, t)| (it, t.to_owned())));
         #[cfg(feature = "standalone-production")]
         if crate::standalone_settings::available() {
-            items.push((Item::Head, "STANDALONE"));
-            items.push((Item::StandaloneSettings, "AUDIO & MIDI…"));
+            items.push((Item::Head, "STANDALONE".into()));
+            items.push((Item::StandaloneSettings, "AUDIO & MIDI…".into()));
         }
         let current = |it: &Item| {
-            *it == Item::Look(skin) || *it == Item::Lettering(lettering) || *it == Item::Dials(law)
+            let look = match pack {
+                Some(p) => *it == Item::Pack(p),
+                None => *it == Item::Look(skin),
+            };
+            look || *it == Item::Lettering(lettering) || *it == Item::Dials(law)
         };
         let mut menu = Menu {
             x,
@@ -354,17 +382,20 @@ impl Learning {
             title: format!("SETTINGS · CA-72 {}", crate::update::VERSION),
             items: items
                 .iter()
-                .map(|(it, t)| {
+                .enumerate()
+                .map(|(i, (it, t))| {
                     let choosable = matches!(
                         it,
                         Item::Look(_)
+                            | Item::Pack(_)
                             | Item::Lettering(_)
                             | Item::Dials(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
-                    ) && !current(it);
-                    ((*t).to_owned(), choosable)
+                    ) && !current(it)
+                        && !unusable.contains(&i);
+                    (t.clone(), choosable)
                 })
                 .collect(),
             heads: items
@@ -467,6 +498,7 @@ impl Learning {
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
             (Some(Item::WhatsNew), _) => return Pressed::WhatsNew,
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
+            (Some(Item::Pack(i)), _) => return Pressed::Pack(*i),
             (Some(Item::Lettering(l)), _) => return Pressed::Lettering(*l),
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,
             (Some(Item::Size(w)), _) => return Pressed::Size(*w),

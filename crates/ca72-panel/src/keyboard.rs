@@ -11,6 +11,10 @@ use crate::{
     fonts::{FAMILY, Fonts, Weight},
 };
 
+/// The keys' sprites (`assets/keyboard/README.md`).
+pub(crate) static WHITE_KEY: &[u8] = include_bytes!("../assets/keyboard/white-key-v4.png");
+pub(crate) static BLACK_KEY: &[u8] = include_bytes!("../assets/keyboard/black-key-v4.png");
+
 pub const AREA: [f64; 4] = [
     370.0,
     art::PANEL_H + crate::strip::RAIL,
@@ -274,6 +278,22 @@ pub struct Renderer {
     white_pressed: Option<Pixmap>,
     black_pressed: Option<Pixmap>,
     base: Option<(Scene, Pixmap)>,
+    /// A look's dressing for it (decisions.md R-SKIN-PACKS), where it has one.
+    dressing: Dressing,
+}
+
+/// What a look gives the keyboard view: its case's wood, its keys, its header keys' cap, its
+/// glass, its lamps' colour and a drawing over its case (the built-in ones where it gives none).
+#[derive(Clone, Default)]
+struct Dressing {
+    wood: Option<Pixmap>,
+    /// The case in the face's picture (tiled as the strip's face) rather than wood's.
+    face: Option<Pixmap>,
+    white: Option<Pixmap>,
+    black: Option<Pixmap>,
+    button: Option<Pixmap>,
+    lamp: Option<crate::strip::Lamp>,
+    art: Option<std::sync::Arc<usvg::Tree>>,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -304,7 +324,47 @@ impl Renderer {
             white_pressed: None,
             black_pressed: None,
             base: None,
+            dressing: Dressing::default(),
         }
+    }
+
+    /// Drawn in `look`'s pictures, typeface, drawing and lamp colour (`lamp`) for it, where it
+    /// has them.
+    pub(crate) fn set_look(&mut self, look: &crate::look::Look, lamp: crate::strip::Lamp) {
+        let pack = |name: &str| {
+            let size = crate::skin::slot_size(name).unwrap_or((1, 1));
+            look.pictures.get(name).and_then(|p| p.picture(size))
+        };
+        self.dressing = Dressing {
+            wood: pack("walnut"),
+            face: look.keyboard_face.then(|| {
+                let face = pack("face").unwrap_or_else(crate::skin::face_picture);
+                match (look.pictures.contains_key("face"), look.face_tint) {
+                    (true, Some(t)) => crate::skin::tinted(&face, t),
+                    _ => face,
+                }
+            }),
+            white: pack("white-key"),
+            black: pack("black-key"),
+            button: pack("key"),
+            lamp: Some(lamp),
+            art: look.keyboard_art.clone(),
+        };
+        self.glass = pack("glass").unwrap_or_else(|| {
+            Pixmap::decode_png(crate::skin::GLASS).expect("preset display glass")
+        });
+        self.fonts = look
+            .fonts
+            .and_then(|(regular, bold)| Fonts::with(regular, bold).ok())
+            .unwrap_or_default();
+        self.options = usvg::Options {
+            fontdb: self.fonts.database(),
+            font_family: FAMILY.into(),
+            ..Default::default()
+        };
+        (self.materials, self.white, self.black) = (None, None, None);
+        (self.white_pressed, self.black_pressed) = (None, None);
+        (self.base, self.shown) = (None, None);
     }
 
     pub fn rescale(&mut self, scale: f64) {
@@ -322,7 +382,10 @@ impl Renderer {
 
     pub fn over(&mut self, destination: &mut Pixmap, scene: &Scene, clip: [i32; 4]) {
         if scene.skin == Skin::Worn && self.white.is_none() {
-            let materials = self.materials.get_or_insert_with(Materials::new);
+            let dressing = &self.dressing;
+            let materials = self
+                .materials
+                .get_or_insert_with(|| Materials::with(dressing));
             self.white = Some(key_size(&materials.white, self.scale, false));
             self.black = Some(key_size(&materials.black, self.scale, true));
             self.white_pressed = self.white.as_ref().map(pressed_key);
@@ -339,6 +402,29 @@ impl Renderer {
                         .as_ref()
                         .expect("worn materials loaded")
                         .draw(&mut self.frame, self.scale, scene.standalone);
+                    // A look's drawing over the case, under the key bed and the print.
+                    if let Some(art) = &self.dressing.art {
+                        let (w, h) = (self.frame.width(), self.frame.height());
+                        let size = art.size();
+                        if let Some(mut layer) = Pixmap::new(w, h) {
+                            resvg::render(
+                                art,
+                                Transform::from_scale(
+                                    w as f32 / size.width(),
+                                    h as f32 / size.height(),
+                                ),
+                                &mut layer.as_mut(),
+                            );
+                            self.frame.draw_pixmap(
+                                0,
+                                0,
+                                layer.as_ref(),
+                                &resvg::tiny_skia::PixmapPaint::default(),
+                                Transform::identity(),
+                                None,
+                            );
+                        }
+                    }
                 }
                 let body = drawing(&still, &self.fonts);
                 let document = art::document(
@@ -446,6 +532,7 @@ impl Renderer {
                 label(scene.root),
                 label(scene.root.saturating_add(43).min(127))
             ),
+            &self.dressing.lamp.unwrap_or(crate::strip::Lamp::ORANGE),
         );
     }
     fn draw_keys(&mut self, scene: &Scene, dirty: [f64; 4]) {
@@ -646,24 +733,33 @@ fn drawing(scene: &Scene, fonts: &Fonts) -> String {
 
 struct Materials {
     wood: Pixmap,
+    face: Option<Pixmap>,
     white: Pixmap,
     black: Pixmap,
     button: Pixmap,
 }
 impl Materials {
-    fn new() -> Self {
+    /// The built-in ones, a look's `dressing` where it has its own.
+    fn with(dressing: &Dressing) -> Self {
         let decode = |b: &[u8]| Pixmap::decode_png(b).expect("built-in keyboard material");
         Self {
-            wood: decode(crate::skin::WALNUT),
-            white: crop(
-                &decode(include_bytes!("../assets/keyboard/white-key-v4.png")),
-                [427, 81, 598, 1466],
-            ),
-            black: crop(
-                &decode(include_bytes!("../assets/keyboard/black-key-v4.png")),
-                [497, 49, 678, 1281],
-            ),
-            button: decode(crate::skin::BUTTON),
+            wood: dressing
+                .wood
+                .clone()
+                .unwrap_or_else(|| decode(crate::skin::WALNUT)),
+            face: dressing.face.clone(),
+            white: dressing
+                .white
+                .clone()
+                .unwrap_or_else(|| crop(&decode(WHITE_KEY), [427, 81, 598, 1466])),
+            black: dressing
+                .black
+                .clone()
+                .unwrap_or_else(|| crop(&decode(BLACK_KEY), [497, 49, 678, 1281])),
+            button: dressing
+                .button
+                .clone()
+                .unwrap_or_else(|| decode(crate::skin::BUTTON)),
         }
     }
     fn draw(&self, frame: &mut Pixmap, s: f64, standalone: bool) {
@@ -671,18 +767,28 @@ impl Materials {
         let across = along / 2.2;
         // One continuous wooden case surrounds the recessed key bed. Separate
         // rails over a metal face left a stepped material seam down the side.
-        crate::render::fill(
-            frame,
-            &self.wood,
-            (
-                AREA[0] * s,
-                (AREA[1] - art::PANEL_H) * s,
-                (AREA[2] - AREA[0]) * s,
-                (AREA[3] - AREA[1]) * s,
-            ),
-            None,
-            Transform::from_row(along, 0.0, 0.0, across, 0.0, -260.0 * across),
+        let area = (
+            AREA[0] * s,
+            (AREA[1] - art::PANEL_H) * s,
+            (AREA[2] - AREA[0]) * s,
+            (AREA[3] - AREA[1]) * s,
         );
+        match &self.face {
+            // The face's picture, 640 units a tile, as the strip's face under it is laid.
+            Some(face) => {
+                let k = (640.0 * s) as f32 / face.width() as f32;
+                let at = Transform::from_scale(k, k)
+                    .post_translate((320.0 * s) as f32, (crate::strip::RAIL * s) as f32);
+                crate::render::fill(frame, face, area, None, at);
+            }
+            None => crate::render::fill(
+                frame,
+                &self.wood,
+                area,
+                None,
+                Transform::from_row(along, 0.0, 0.0, across, 0.0, -260.0 * across),
+            ),
+        }
         for (x, w, _, _) in buttons(standalone) {
             let cap = plugin_kit_materials::widened(&self.button, w / BUTTON_H);
             plugin_kit_materials::sprite(frame, &cap, s, (x, HEADER - art::PANEL_H), (w, BUTTON_H));
