@@ -7787,6 +7787,24 @@ loop. The 32 golden frames and 36 png renders (the official looks in both skins 
 `standalone-production`), clippy, fmt, `notices.py --check`. Not yet: a host with a pack, the Mac
 and Windows.
 
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found the
+scan took a pattern element's first `fill` or `stroke` declaration, where CSS applies the last:
+with `style='fill:red; fill:inherit'` under a group filled `url(#p)`, it saw red and missed the
+pattern. The scan now reads an element's declarations with usvg's own tokenizer (`simplecss`,
+already in the build through usvg) and decides which wins both as usvg 0.45 does (the style's
+after the attribute, each replacing the last unless that was `!important`, so the first
+`!important` stays; `inherit` copying the ancestor's value and importance) and as CSS does
+(`!important`, then the style over the attribute, then the later); a pattern inherited under
+either counts. Each element's declarations are now read once, top down, not once for each
+descendant. The new unit test failed before the change on the review's case and passes after,
+with a stroke, the style over the attribute, usvg's kept `!important` and CSS's `!important`
+refused, and four drawings where red wins accepted. Checked in a child process, usvg 0.45.1
+itself did not overflow on any of these declared cases: an `inherit` becomes an explicit copy,
+which its own pass turns to `none` inside the pattern; only a fill set by no declaration
+overflowed it. So this keeps the scan's count and refusals right, and guards a future usvg,
+rather than closing a crash in this one. `skin-pack`'s tests (78), clippy, fmt and
+`notices.py --check` pass.
+
 ## R-EDITOR-CPU. The editor's cost while sound plays
 
 **Owner decisions, 2026-10-17.** CPU use is the users' first complaint. Told where it goes (a

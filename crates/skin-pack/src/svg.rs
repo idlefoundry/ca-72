@@ -211,8 +211,16 @@ fn scan(text: &str, limits: &Limits) -> Result<(), String> {
         }
     }
     // What the references repeat: each element counted as many times as it is drawn or used.
+    let inherited = inherited_patterns(root, &ids);
     let mut memo = HashMap::new();
-    let (total, _) = expanded(root, &ids, &mut memo, &mut Vec::new(), limits.svg_nodes)?;
+    let (total, _) = expanded(
+        root,
+        &ids,
+        &inherited,
+        &mut memo,
+        &mut Vec::new(),
+        limits.svg_nodes,
+    )?;
     if total > limits.svg_nodes {
         return Err(format!(
             "{total} elements drawn (each reference, a `use` or a `url(#...)`, counted as what it \
@@ -304,56 +312,148 @@ fn references<'a>(node: roxmltree::Node<'a, '_>) -> Vec<&'a str> {
     out
 }
 
-/// The patterns a shape or a `use` paints with that it inherits (a `fill` or `stroke` set by an
-/// ancestor, not by itself): a pattern's own elements inherit from the pattern's ancestors, so a
-/// pattern inside a group filled with it fills its own elements with itself, and usvg's reading
-/// recurses until its stack overflows (found by the fuzzer: the root's `fill='url(#p)'`).
-fn inherited_patterns<'a, 'i>(
-    node: roxmltree::Node<'a, 'i>,
-    ids: &HashMap<&str, roxmltree::Node<'a, 'i>>,
-) -> Vec<&'a str> {
+/// A `fill` or `stroke` as usvg resolves it on one element.
+#[derive(Clone, Copy)]
+struct Paint<'a> {
+    value: &'a str,
+    important: bool,
+    /// An ancestor's, by `inherit`.
+    inherited: bool,
+}
+
+/// One property's declarations on an element, in order: its attribute, then its style's (read
+/// by usvg's own tokenizer), each with whether it is `!important`.
+fn declarations<'a>(node: roxmltree::Node<'a, '_>, property: &str) -> Vec<(&'a str, bool)> {
+    let mut out: Vec<_> = node
+        .attribute(property)
+        .map(|v| (v, false))
+        .into_iter()
+        .collect();
+    if let Some(style) = node.attribute("style") {
+        out.extend(
+            simplecss::DeclarationTokenizer::from(style)
+                .filter(|d| d.name == property)
+                .map(|d| (d.value, d.important)),
+        );
+    }
+    out
+}
+
+/// The declaration that wins as usvg 0.45 resolves them: each replaces the one before unless
+/// that one is `!important` (so the first `!important` stays); `inherit` copies the nearest
+/// ancestor's value with that ancestor's importance, and sets nothing when none has one.
+fn usvg_paint<'a>(declared: &[(&'a str, bool)], above: Option<Paint<'a>>) -> Option<Paint<'a>> {
+    let mut paint: Option<Paint<'a>> = None;
+    for &(value, important) in declared {
+        let new = if value.trim() == "inherit" {
+            let Some(above) = above else { continue };
+            Paint {
+                inherited: true,
+                ..above
+            }
+        } else {
+            Paint {
+                value,
+                important,
+                inherited: false,
+            }
+        };
+        if !paint.is_some_and(|p| p.important) {
+            paint = Some(new);
+        }
+    }
+    paint
+}
+
+/// The value that wins as CSS cascades them: `!important` over the rest, then the style over the
+/// attribute, then the later; `inherit` takes the parent's. With whether it is the parent's.
+fn css_paint<'a>(declared: &[(&'a str, bool)], above: Option<&'a str>) -> Option<(&'a str, bool)> {
+    let (_, &(value, _)) = declared
+        .iter()
+        .enumerate()
+        .max_by_key(|&(i, &(_, important))| (important, i))?;
+    if value.trim() == "inherit" {
+        above.map(|v| (v, true))
+    } else {
+        Some((value, false))
+    }
+}
+
+/// The pattern a paint's value names, if it names one.
+fn pattern_named<'a>(
+    value: &'a str,
+    ids: &HashMap<&str, roxmltree::Node<'_, '_>>,
+) -> Option<&'a str> {
+    let id = value
+        .trim()
+        .strip_prefix("url(")
+        .map(|v| v.trim_start().trim_start_matches(['\'', '"']))
+        .and_then(|v| v.strip_prefix('#'))?;
+    let id = &id[..id
+        .find(|c: char| c == ')' || c == '\'' || c == '"' || c.is_whitespace())
+        .unwrap_or(id.len())];
+    ids.get(id)
+        .is_some_and(|t| t.tag_name().name() == "pattern")
+        .then_some(id)
+}
+
+/// For each shape or `use`, the patterns it paints with that it inherits (a `fill` or `stroke`
+/// that an ancestor sets and it does not, or that it takes by `inherit`): a pattern's own
+/// elements inherit from the pattern's ancestors, so a pattern inside a group filled with it
+/// fills its own elements with itself, and usvg's reading recurses until its stack overflows
+/// (found by the fuzzer: the root's `fill='url(#p)'`). Which of an element's declarations wins
+/// is decided as usvg decides it and as CSS does, and a pattern either inherits counts (a
+/// review: `fill:red; fill:inherit` is `inherit`). Each element's declarations are read once.
+fn inherited_patterns<'a>(
+    root: roxmltree::Node<'a, '_>,
+    ids: &HashMap<&str, roxmltree::Node<'_, '_>>,
+) -> HashMap<roxmltree::NodeId, Vec<&'a str>> {
     const PAINTS: &[&str] = &[
         "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use",
     ];
-    if !PAINTS.contains(&node.tag_name().name()) {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for property in ["fill", "stroke"] {
-        // The nearest element that sets it, as an attribute or in its style.
-        let set = |n: roxmltree::Node<'a, 'i>| -> Option<&'a str> {
-            let style = n.attribute("style").and_then(|style| {
-                style.split(';').find_map(|d| {
-                    let (k, v) = d.split_once(':')?;
-                    (k.trim() == property).then_some(v)
-                })
-            });
-            // (`inherit` sets nothing: the value is an ancestor's.)
-            style
-                .or_else(|| n.attribute(property))
-                .filter(|v| v.trim() != "inherit")
-        };
-        if set(node).is_some() {
-            continue;
-        }
-        let Some(value) = node.ancestors().skip(1).find_map(set) else {
-            continue;
-        };
-        if let Some(id) = value
-            .trim()
-            .strip_prefix("url(")
-            .map(|v| v.trim_start().trim_start_matches(['\'', '"']))
-            .and_then(|v| v.strip_prefix('#'))
-        {
-            let id = &id[..id
-                .find(|c: char| c == ')' || c == '\'' || c == '"' || c.is_whitespace())
-                .unwrap_or(id.len())];
-            if ids
-                .get(id)
-                .is_some_and(|t| t.tag_name().name() == "pattern")
-            {
-                out.push(id);
+    // What each element passes down: for a fill and a stroke, usvg's value and CSS's.
+    type Down<'a> = [(Option<Paint<'a>>, Option<&'a str>); 2];
+    let mut down: HashMap<roxmltree::NodeId, Down<'a>> = HashMap::new();
+    let mut out = HashMap::new();
+    // (Descendants in document order: each parent before its children.)
+    for node in root.descendants().filter(roxmltree::Node::is_element) {
+        let above = node
+            .parent_element()
+            .and_then(|p| down.get(&p.id()))
+            .copied()
+            .unwrap_or_default();
+        let mut passed = above;
+        let mut patterns = Vec::new();
+        for (i, property) in ["fill", "stroke"].into_iter().enumerate() {
+            let declared = declarations(node, property);
+            let (usvg_above, css_above) = above[i];
+            let usvg = usvg_paint(&declared, usvg_above);
+            let css = css_paint(&declared, css_above);
+            if PAINTS.contains(&node.tag_name().name()) {
+                // An ancestor's value, where that is what it paints with.
+                let usvg_inherits = match usvg {
+                    Some(p) => p.inherited.then_some(p.value),
+                    None => usvg_above.map(|p| p.value),
+                };
+                let css_inherits = match css {
+                    Some((v, inherited)) => inherited.then_some(v),
+                    None => css_above,
+                };
+                for id in [usvg_inherits, css_inherits]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| pattern_named(v, ids))
+                {
+                    if !patterns.contains(&id) {
+                        patterns.push(id);
+                    }
+                }
             }
+            passed[i] = (usvg.or(usvg_above), css.map(|(v, _)| v).or(css_above));
+        }
+        down.insert(node.id(), passed);
+        if !patterns.is_empty() {
+            out.insert(node.id(), patterns);
         }
     }
     out
@@ -364,6 +464,7 @@ fn inherited_patterns<'a, 'i>(
 fn expanded<'a, 'i>(
     node: roxmltree::Node<'a, 'i>,
     ids: &HashMap<&str, roxmltree::Node<'a, 'i>>,
+    inherited: &HashMap<roxmltree::NodeId, Vec<&'a str>>,
     memo: &mut HashMap<roxmltree::NodeId, (usize, usize)>,
     path: &mut Vec<roxmltree::NodeId>,
     most: usize,
@@ -388,7 +489,7 @@ fn expanded<'a, 'i>(
     let mut n = 1usize;
     let mut depth = 1usize;
     for child in node.children().filter(roxmltree::Node::is_element) {
-        let (count, height) = expanded(child, ids, memo, path, most)?;
+        let (count, height) = expanded(child, ids, inherited, memo, path, most)?;
         n = n.saturating_add(count);
         depth = depth.max(height + 1);
         if n > most {
@@ -397,13 +498,13 @@ fn expanded<'a, 'i>(
     }
     for id in references(node)
         .into_iter()
-        .chain(inherited_patterns(node, ids))
+        .chain(inherited.get(&node.id()).into_iter().flatten().copied())
     {
         if n > most {
             break;
         }
         if let Some(target) = ids.get(id) {
-            let (count, height) = expanded(*target, ids, memo, path, most)?;
+            let (count, height) = expanded(*target, ids, inherited, memo, path, most)?;
             n = n.saturating_add(count);
             depth = depth.max(height + 1);
         }
@@ -1192,6 +1293,47 @@ mod tests {
                 "<g fill='red'>{pattern}<rect width='5' height='5'/></pattern></g>\
                  <rect width='10' height='10' fill='url(#p)'/>"
             )),
+        ] {
+            parse(drawing.as_bytes(), &Limits::default()).expect("a pattern filled red");
+        }
+    }
+
+    #[test]
+    fn an_inherited_pattern_is_found_whichever_declaration_wins() {
+        // A pattern's rectangle whose own declarations end in `inherit`: the declaration that
+        // wins as usvg resolves them, and as CSS cascades them (a review of R-SKIN-PACKS).
+        let pattern = "<pattern id='p' width='10' height='10' patternUnits='userSpaceOnUse'>";
+        let inside = |above: &str, rect: &str| {
+            svg(&format!(
+                "<g {above}>{pattern}<rect width='5' height='5' {rect}/></pattern></g>\
+                 <rect width='10' height='10' fill='url(#p)'/>"
+            ))
+        };
+        let fill = "fill='url(#p)'";
+        for drawing in [
+            // The later declaration wins (the review's case), for a stroke too.
+            inside(fill, "style='fill:red; fill:inherit'"),
+            inside("stroke='url(#p)'", "style='stroke: red ; stroke: inherit'"),
+            // The style over the attribute.
+            inside(fill, "fill='red' style='fill:inherit'"),
+            // usvg: an inherited value keeps its ancestor's `!important`, and the first
+            // `!important` stays over a later declaration.
+            inside(
+                "style='fill:url(#p) !important'",
+                "style='fill:inherit; fill:red'",
+            ),
+            // CSS: `!important` over a later declaration.
+            inside(fill, "style='fill:inherit !important; fill:red'"),
+        ] {
+            let why = scan(&drawing, &Limits::default()).unwrap_err();
+            assert!(why.contains("repeats itself"), "{drawing}: {why}");
+        }
+        // Red wins in both.
+        for drawing in [
+            inside(fill, "style='fill:inherit; fill:red'"),
+            inside(fill, "fill='inherit' style='fill:red'"),
+            inside(fill, "style='fill:red !important; fill:inherit'"),
+            inside(fill, "style='fill:red; /* fill:inherit */'"),
         ] {
             parse(drawing.as_bytes(), &Limits::default()).expect("a pattern filled red");
         }

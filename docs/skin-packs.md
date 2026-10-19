@@ -403,7 +403,8 @@ its dots the pack's `lamp`, its print the pack's typeface in `tab_print`'s colou
 - any reference outside the drawing: an `href` other than `#name`, a `url(...)` other than
   `url(#name)`, or an `<image>` other than embedded PNG data (`data:image/png;base64,...`);
 - a pattern filled with another pattern, or whose own elements are filled or stroked with it
-  (by an element around the pattern, which they inherit from);
+  (by an element around the pattern, which they inherit from, also through `inherit`, whichever
+  of their own declarations wins);
 - an `id` given to two elements, or to anything that is not SVG's or is inside `<metadata>`.
 
 **Limits:** 20,000 elements drawn, each reference (a `use`, a `href`, a `url(#name)`) counted
