@@ -8543,5 +8543,8 @@ threads here.
 
 **Evidence (the Mac, 2026-10-18):** `prepare_fits_a_hosts_secondary_thread` prepares an engine
 at a rate no voice has been made at, from a thread with 512 KB of stack: it passes, and without
-the fix it overflows. pluginval 1.0.4, strictness 10, in process, on the rebuilt Audio Unit:
-see below.
+the fix it overflows. pluginval 1.0.4, strictness 10, in process, its editor tests
+skipped (the Mac's screen in use), on the Audio Unit rebuilt from `d9d8a33` and put in
+`~/Library/Audio/Plug-Ins/Components` for the run (taken out after): SUCCESS, the audio
+processing test through 44.1, 48 and 96 kHz in every block size, where before the fix it stopped
+at 48 kHz.
