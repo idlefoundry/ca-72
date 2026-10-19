@@ -449,6 +449,10 @@ struct Board<V> {
     flush: AtomicU32,
     /// Whether the run's voices are taken two at a time ([`take_some`]).
     pair: AtomicBool,
+    /// The host's block is over ([`Pool::rest`]): a worker done parks at once instead of
+    /// spinning for a next run, which comes only with the next block (decisions.md
+    /// R-LO-WORKERS). Cleared by each run offered.
+    rest: AtomicBool,
     quit: AtomicBool,
     voices: Vec<Shared<V>>,
     /// The host's blocks so far, and the work interval the workers join, the first of them
@@ -639,6 +643,7 @@ impl<V: Play> Pool<V> {
             ext: std::array::from_fn(|_| AtomicU64::new(0)),
             flush: AtomicU32::new(0),
             pair: AtomicBool::new(false),
+            rest: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             voices: voices.to_vec(),
             block: AtomicU64::new(0),
@@ -742,10 +747,19 @@ impl<V: Play> Pool<V> {
         self.split_block.fetch_add(1, Ordering::Release);
     }
 
+    /// The host's block is over, its runs played: the workers park as they finish, rather
+    /// than spin [`SPIN`] for a run that comes only with the next block. That spin was most of
+    /// a worker's time beside LO's light voices (decisions.md R-LO-WORKERS).
+    pub fn rest(&self) {
+        self.board.rest.store(true, Ordering::Release);
+    }
+
     /// Plays the voices at `list` (places among the voices, in the order they are summed)
     /// for `n` samples: offered to the workers and taken by this thread too, or, once
     /// `deadline` has passed, played here; two at a time where `pairs` (their filters solved
-    /// together: HI, DOUBLE off) and there are more voices than threads. Returns which list
+    /// together: HI, DOUBLE off) and there are more voices than threads; no more workers woken
+    /// than `threads` less this one ([`MAX`]: as many as there are voices to take, less this
+    /// thread's one; LO's light voices fewer, decisions.md R-LO-WORKERS). Returns which list
     /// places played by `deadline` (None: every one waited for, as long as it takes).
     #[allow(clippy::too_many_arguments)]
     pub fn play(
@@ -756,6 +770,7 @@ impl<V: Play> Pool<V> {
         rate: f64,
         mix: &Mix,
         pairs: bool,
+        threads: usize,
         deadline: Option<Instant>,
     ) -> [bool; MAX] {
         let count = list.len().min(MAX);
@@ -783,7 +798,7 @@ impl<V: Play> Pool<V> {
         // (No more workers woken than the voices, or pairs, less this thread's one: the others
         // would only spin, beside a split voice's helpers among them.)
         let units = if two { count.div_ceil(2) } else { count };
-        self.wake(units.saturating_sub(1));
+        self.wake(units.min(threads).saturating_sub(1));
         let b = &*self.board;
         // This thread's share: whatever no worker has taken.
         let mut here = [false; MAX];
@@ -854,6 +869,7 @@ impl<V: Play> Pool<V> {
             e.store(v.to_bits(), Ordering::Relaxed);
         }
         b.flush.store(ca72_rt::flush_mode(), Ordering::Relaxed);
+        b.rest.store(false, Ordering::Relaxed);
         b.claim
             .store(word(self.run, list.len(), 0), Ordering::Release);
         self.run
@@ -1250,7 +1266,9 @@ fn work<V: Play>(b: &Board<V>, period: Option<Duration>, driver: bool) {
                 break run;
             }
             spins = spins.wrapping_add(1);
-            if !spins.is_multiple_of(64) || since.elapsed() < SPIN {
+            // (Once the block is over, no spin: its next run is the next block's.)
+            let rest = b.rest.load(Ordering::Acquire);
+            if !rest && (!spins.is_multiple_of(64) || since.elapsed() < SPIN) {
                 std::hint::spin_loop();
             } else {
                 if let Some((i, _)) = interval
@@ -1476,8 +1494,16 @@ mod tests {
             let voices = fakes(6);
             let mut pool = Pool::start(1, &voices, None).unwrap();
             for _ in 0..20 {
-                let played =
-                    pool.play(&[0, 1, 2, 3, 4, 5], 32, &EXT, 48_000.0, &mix(), pairs, None);
+                let played = pool.play(
+                    &[0, 1, 2, 3, 4, 5],
+                    32,
+                    &EXT,
+                    48_000.0,
+                    &mix(),
+                    pairs,
+                    MAX,
+                    None,
+                );
                 assert!(played[..6].iter().all(|&p| p), "{played:?}");
             }
             let paired: usize = voices.iter().map(|v| v.lock().unwrap().paired).sum();
@@ -1489,6 +1515,39 @@ mod tests {
                 assert_eq!(paired, 0, "voices that cannot pair, taken two at a time");
             }
         }
+    }
+
+    /// The workers park at a block's end ([`Pool::rest`]) and are woken for the next block's
+    /// first run: every run after a rest is shared still, none of its voices waited for in
+    /// vain (decisions.md R-LO-WORKERS).
+    #[test]
+    fn a_pool_at_rest_shares_the_next_blocks_run() {
+        let voices = fakes(3);
+        let me = std::thread::current().id();
+        for v in &voices {
+            v.lock().unwrap().slow_on = Some(me);
+        }
+        let mut pool = Pool::start(2, &voices, None).unwrap();
+        for _ in 0..20 {
+            pool.block();
+            let played = pool.play(&[0, 1, 2], 64, &EXT, 48_000.0, &mix(), false, MAX, None);
+            assert_eq!(&played[..3], &[true; 3]);
+            let elsewhere = voices
+                .iter()
+                .filter(|v| v.lock().unwrap().thread != Some(me))
+                .count();
+            assert!(
+                elsewhere > 0,
+                "a run after a rest played on this thread alone"
+            );
+            pool.rest();
+            assert!(pool.board.rest.load(Ordering::Acquire));
+            // (Long enough for the workers to park.)
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        // A run offered is no longer at rest.
+        pool.play(&[0], 64, &EXT, 48_000.0, &mix(), false, MAX, None);
+        assert!(!pool.board.rest.load(Ordering::Acquire));
     }
 
     /// A worker held up between taking a voice and locking it, which locks it only after
@@ -1512,7 +1571,7 @@ mod tests {
         assert_eq!(voices[0].lock().unwrap().runs, 0, "played for a run over");
         assert_ne!(pool.board.done[0].load(Ordering::Acquire), u64::from(run));
         // The next run plays it as usual.
-        let played = pool.play(&[0, 1], 32, &EXT, 48_000.0, &mix(), true, None);
+        let played = pool.play(&[0, 1], 32, &EXT, 48_000.0, &mix(), true, MAX, None);
         assert_eq!(&played[..2], &[true, true]);
         let v = voices[0].lock().unwrap();
         assert_eq!((v.runs, v.n), (1, 32));
@@ -1546,7 +1605,7 @@ mod tests {
         // finishes it while this thread plays voice 2.
         let t = Instant::now();
         let deadline = Some(t + Duration::from_millis(500));
-        let played = pool.play(&[1, 2], 32, &EXT, 48_000.0, &mix(), true, deadline);
+        let played = pool.play(&[1, 2], 32, &EXT, 48_000.0, &mix(), true, MAX, deadline);
         assert_eq!(&played[..2], &[true, true]);
         assert!(
             t.elapsed() < Duration::from_millis(400),
@@ -1567,7 +1626,16 @@ mod tests {
         let mut pool = Pool::start(2, &voices, None).unwrap();
         let past = Instant::now();
         std::thread::sleep(Duration::from_millis(1));
-        let played = pool.play(&[0, 1, 2, 3], 64, &EXT, 48_000.0, &mix(), true, Some(past));
+        let played = pool.play(
+            &[0, 1, 2, 3],
+            64,
+            &EXT,
+            48_000.0,
+            &mix(),
+            true,
+            MAX,
+            Some(past),
+        );
         assert_eq!(&played[..4], &[true; 4]);
         let me = std::thread::current().id();
         for v in &voices {
@@ -1590,7 +1658,7 @@ mod tests {
             ca72_rt::set_flush_mode(mode);
             let mut elsewhere = 0;
             for _ in 0..50 {
-                let played = pool.play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), true, None);
+                let played = pool.play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), true, MAX, None);
                 assert_eq!(&played[..3], &[true; 3]);
                 for v in &voices {
                     let v = v.lock().unwrap();
@@ -1619,7 +1687,7 @@ mod tests {
         let mut c = Pool::start_from(&THREE, spec(2, &voices, period)).unwrap();
         assert_eq!((a.workers(), b.workers(), c.workers()), (2, 1, 0));
         assert_eq!(THREE.held(), 3);
-        let played = c.play(&[0, 1], 16, &EXT, 48_000.0, &mix(), true, None);
+        let played = c.play(&[0, 1], 16, &EXT, 48_000.0, &mix(), true, MAX, None);
         assert_eq!(&played[..2], &[true, true]);
         let ordinary = Pool::start_from(&THREE, spec(4, &voices, None)).unwrap();
         assert_eq!(ordinary.workers(), 4);
@@ -1676,7 +1744,7 @@ mod tests {
         let played =
             pool.as_mut()
                 .unwrap()
-                .play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), true, None);
+                .play(&[0, 1, 2], 16, &EXT, 48_000.0, &mix(), true, MAX, None);
         assert_eq!(&played[..3], &[true; 3]);
         assert!(crew.follow(None, plan, &mut pool, &mut ask), "not let go");
         assert!(pool.is_none());

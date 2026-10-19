@@ -98,7 +98,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 
 # The editor's pixels read and its window captured, in the tests in a real window.
 [target.'cfg(target_os = "windows")'.dev-dependencies]
-winapi = { version = "0.3.9", features = ["winuser", "windef", "wingdi"] }
+winapi = { version = "0.3.9", features = ["winuser", "windef", "wingdi", "processthreadsapi", "realtimeapiset"] }
 
 [lints]
 workspace = true

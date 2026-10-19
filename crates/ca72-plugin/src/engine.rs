@@ -2164,14 +2164,19 @@ impl Engine {
             }
         }
         let deadline = self.deadline;
-        // (At QUALITY's LO a voice costs less than waking a worker for it: every voice here.)
-        let share = share && !self.controls.potato;
+        // (At QUALITY's LO only as many threads as the run's light voices repay waking:
+        // decisions.md R-LO-WORKERS.)
+        let threads = if self.controls.potato {
+            lo_threads(count)
+        } else {
+            MAX
+        };
         // (Two voices' filters solved together only at HI without DOUBLE: decisions.md
         // R-HI-PAIRS, R-POLY-CRACKLE.)
         let pairs = !self.controls.ultra && !self.controls.potato && mix.double <= 0.0;
         let played = match &mut self.pool {
-            Some(pool) if share && count > 1 && n >= SHARED_RUN => {
-                pool.play(&list[..count], n, ext, rate, mix, pairs, deadline)
+            Some(pool) if share && threads > 1 && count > 1 && n >= SHARED_RUN => {
+                pool.play(&list[..count], n, ext, rate, mix, pairs, threads, deadline)
             }
             _ => {
                 // (Two at a time, their filters solved together at HI: decisions.md
@@ -2338,6 +2343,10 @@ impl Engine {
     /// and falling with a time constant of [`LAMP_FALL`]; POLY's voices let go and fallen
     /// silent over the block freed.
     pub fn end_block(&mut self, len: usize) -> f32 {
+        // (The block's runs are played: the workers may park as they finish.)
+        if let Some(p) = &self.pool {
+            p.rest();
+        }
         if !self.many() && !self.rest.asleep {
             let state = self
                 .slots
@@ -2642,6 +2651,38 @@ pub fn workers_for(n: usize) -> usize {
         0
     } else {
         (n.saturating_sub(2) / 3).clamp(1, 4)
+    }
+}
+
+/// LO's sharing for a measurement (`usize::MAX`: [`lo_threads`]'s rule; else at most this many
+/// threads, the host's among them, for any run of two voices or more: 1, every voice on the
+/// host's thread, as before R-LO-WORKERS).
+static LO_THREADS_OVERRIDE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+/// Sets how many threads LO's voices are played on, for a measurement (None: back to
+/// [`lo_threads`]'s rule). Not for the plug-in.
+#[doc(hidden)]
+pub fn set_lo_threads_for_measurement(threads: Option<usize>) {
+    LO_THREADS_OVERRIDE.store(
+        threads.unwrap_or(usize::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The most threads, the host's among them, a run of `count` of LO's light voices is played
+/// on (decisions.md R-LO-WORKERS): a thread a voice up to four, then a thread for each two.
+/// Each thread then takes from the host's thread at least what it costs the computer (the
+/// host's time falling by at least half the workers' processor time), by the measurements on
+/// the Ryzen 7 7800X3D; a thread a voice past four fell by less than a third of it. The host's
+/// thread waits for the longest of the threads' shares, so no more threads than make it
+/// shorter. 1, the host's alone, for one voice; as many workers as the pool holds at most (the
+/// machine's, as at HI). DOUBLE's twins, played with their voices, change neither.
+pub fn lo_threads(count: usize) -> usize {
+    match LO_THREADS_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        usize::MAX if count <= 4 => count.max(1),
+        usize::MAX => count.div_ceil(2),
+        k => k,
     }
 }
 
@@ -3534,6 +3575,14 @@ mod tests {
         assert_eq!((split_voices_for(9), split_voices_for(64)), (1, 2));
     }
 
+    /// LO's voices on as many threads as repay waking (decisions.md R-LO-WORKERS): one a voice
+    /// up to four, then one for each two; the host's alone for one.
+    #[test]
+    fn lo_s_threads_follow_its_voices() {
+        let t: Vec<usize> = (0..=10).map(lo_threads).collect();
+        assert_eq!(t, [1, 1, 2, 3, 4, 3, 3, 4, 4, 5, 5]);
+    }
+
     /// A voice that a worker late from an earlier run still holds sits the next runs out:
     /// the block is not held up for it (it is still held when the block is done), the other
     /// voices play, and it plays again once let go. (Bounded by what happens, not by time: on
@@ -3590,6 +3639,7 @@ mod tests {
             48_000.0,
             &mix,
             true,
+            MAX,
             Some(Instant::now() + Duration::from_secs(1)),
         );
         assert!(!stall.is_finished(), "waited for the held voice");
