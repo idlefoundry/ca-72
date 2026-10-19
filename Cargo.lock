@@ -317,6 +317,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "ca72-fx"
+version = "0.2.6"
+dependencies = [
+ "daw-ipc",
+ "rtrb",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ca72-fx-helper"
+version = "0.2.6"
+dependencies = [
+ "ca72-fx",
+ "daw-helper",
+ "daw-ipc",
+ "daw-test-plugin",
+ "daw-test-vst3",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "ca72-lab"
 version = "0.2.6"
 dependencies = [
