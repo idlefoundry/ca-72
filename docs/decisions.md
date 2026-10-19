@@ -7211,6 +7211,34 @@ installers are unchanged. Release notes are in `releases/0.2.6.md`. Before publi
 release commit must pass all three CI jobs; the macOS installer must be Developer ID signed,
 notarised, stapled and accepted by Gatekeeper; every uploaded asset downloaded again and checked
 against the manifest.
+**Also in 0.2.6 (the owner, 2026-10-18):** #84 (R-RENDER-SETTINGS) and #85
+(R-PRESET-READABILITY), "Include #84 (test tooling) and #85 (preset-browser readability) in 0.2.6";
+#88 (R-AU-REMOTE-VISIBILITY), "Yes, I meant #88. Merge it into cpu-release for 0.2.6", with the
+owner's hands-on checks; and the AU render test's fixed seed state. Each was merged into
+`cpu-release`, not `main`. Publication: "okay, push to production then please!", and for `main`,
+"Yes, push c0e325e to main yourself (fast-forward), then upload the Mac installer, verify every
+asset, publish, and record it."
+
+**Publication evidence, 2026-10-18.** [CA-72 0.2.6](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.6)
+is public and Latest (also to an anonymous request, which the update check makes). `main` was
+fast-forwarded to PR #50's exact tested commit `c0e325e8c1f88b2f335cc9161a7b6d41d2fc95ed`, which
+the annotated `v0.2.6` tag names; GitHub marked #50, #84 and #85 merged with it (#88 already was,
+into `cpu-release`). Besides the owner's checks of #88, no host test of the installed 0.2.6 was
+made before publication.
+- [PR CI 39177243882](https://github.com/idlefoundry/ca-72/actions/runs/39177243882) and
+  [tag CI 39179031325](https://github.com/idlefoundry/ca-72/actions/runs/39179031325) passed on
+  Linux, Windows and macOS; the tag's drafted the release.
+- The macOS installer was made from the PR run's unsigned universal bundles (artifact digest
+  `sha256:8e3b4b31…`, checked), signed with Developer ID, notarised (submission
+  `5eef65a2-5cdd-4a59-b908-77c31844094b`, Accepted), stapled and accepted by Gatekeeper, on the
+  Mac from the agent's own session.
+- `CA-72-0.2.6-macOS.pkg` sha256 `e9028155d57e209bc1ece50c0a25116228f05da1becfbc34faff5b6a1cfb5b38`,
+  91,307,471 bytes. All nine assets, the Windows ZIP and its checksum among them, were downloaded
+  again and checked against `SHA256SUMS.txt` and GitHub's digests; the published installer,
+  downloaded once more with the quarantine flag set, passed `pkgutil`, `stapler validate` and
+  Gatekeeper ("Notarized Developer ID").
+- Issues #63 and #69 were closed with the release. The scripts and logs are in
+  `~/lab/artifacts/ca-72/0.2.6/`.
 
 ## R-STILL-LONGER. The Windows window test waits out the hamster's pause
 
