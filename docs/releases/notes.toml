@@ -1,0 +1,63 @@
+# The bundled highlights, condensed from the matching Markdown files in this folder.
+# On-screen text uses American spelling. Keep all three lists, even when empty.
+# See docs/whats-new.md when preparing a release.
+
+[[release]]
+version = "0.2.3"
+features = [
+  "Play without a DAW in the standalone application. Open AUDIO & MIDI in Settings to choose your audio and MIDI devices.",
+  "The keyboard button switches the lower panel to playable keys. In standalone, TYPING plays from your computer keyboard, with Z/X choosing its octave.",
+  "The standalone application remembers your sound, MIDI Learn and device choices between sessions.",
+]
+performance_improvements = []
+bug_fixes = [
+  "Audio and MIDI selectors follow device changes and keep the last good MIDI list if discovery fails.",
+]
+
+[[release]]
+version = "0.2.4"
+features = [
+  "Choose LETTERING > LARGE in Settings for larger panel lettering, menus and tips in either look.",
+  "Choose WINDOW > SIZE in Settings to set the window size or fit it to your screen.",
+]
+performance_improvements = []
+bug_fixes = [
+  "The resize grip is visible in both looks, with a DRAG TO RESIZE tip and resize arrows on Windows and Linux.",
+  "Menus fit inside small windows.",
+]
+
+[[release]]
+version = "0.2.5"
+features = []
+performance_improvements = [
+  "New instances start at LO, 30 to 45 times lighter than HI. Existing projects keep their QUALITY setting; presets don't change it.",
+]
+bug_fixes = [
+  "The pitch wheel now works in the Audio Unit, bending by MIDI BEND RANGE as the other formats do.",
+  "The resize grip shows resize arrows on macOS too.",
+]
+
+[[release]]
+version = "0.2.6"
+features = [
+  "The preset browser is easier to read, with clearer lettering, stronger contrast and the current preset marked in gold.",
+]
+performance_improvements = [
+  "Same sound, lighter on your computer. Every preset and project renders bit-identical to 0.2.5.",
+  "HI uses up to 17 % less CPU on a Mac and up to 9 % less on Windows and Linux when you play several voices.",
+  "The panel does less work when you can't see it, saving CPU while your track plays. Audio Units keep drawing as before.",
+  "An instance playing HI voices uses about a fifth of a core less on Mac while it waits for work.",
+  "With six or more fast cores, ULTRA spreads each voice across several cores. It's still best for offline renders.",
+]
+bug_fixes = [
+  "Several CA-72 instances play smoothly together, without the later ones stuttering, and computers with more cores put them to use.",
+]
+
+[[release]]
+version = "0.2.7"
+features = [
+  "ENTROPY reaches steady oscillator pitch at 0 %. From 0 to 5 % it brings back the small tuning mismatch, slow drift and waver. New instances start at 5 %, the old minimum.",
+  "Old presets and saved projects move to the new ENTROPY scale automatically. Existing automation uses the new scale: move old values to 5 + 0.95 times the old amount to keep their previous amounts.",
+]
+performance_improvements = []
+bug_fixes = []
