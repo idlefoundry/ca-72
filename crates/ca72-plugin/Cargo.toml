@@ -37,6 +37,10 @@ harness = false
 name = "backing_scale"
 harness = false
 
+[[test]]
+name = "mac_quit"
+harness = false
+
 [dependencies]
 ca72.workspace = true
 # The workers' real-time scheduling (decisions.md R11).

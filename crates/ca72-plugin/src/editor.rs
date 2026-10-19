@@ -1200,6 +1200,18 @@ impl Editing {
         }
     }
 
+    /// Whether `k` quits the standalone (R-QUIT): the system's shortcut, in the standalone only
+    /// (a host's shortcuts are its own).
+    fn quits(&self, k: &KeyboardEvent) -> bool {
+        #[cfg(feature = "standalone-production")]
+        return self.playing.standalone && nih_plug::wrapper::production::app_window::quits(k);
+        #[cfg(not(feature = "standalone-production"))]
+        {
+            let _ = k;
+            false
+        }
+    }
+
     fn note_typing_allowed(&self) -> bool {
         self.playing.holds_keys()
             && !self.browser.open
@@ -2960,6 +2972,14 @@ fn strip_scene(
 impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
+        // The system's shortcut for quitting the standalone (Ctrl+Q on Linux; decisions.md
+        // R-QUIT) before anything else here has it: TYPING, a value or a name being typed, MIDI
+        // Learn, the notes. The app's window closes, as its close button closes it.
+        if self.quits(k) {
+            #[cfg(feature = "standalone-production")]
+            nih_plug::wrapper::production::app_window::request_quit();
+            return true;
+        }
         self.reconcile_resize();
         if let Some(notes) = &mut self.whats_new {
             if k.state == KeyState::Up {
@@ -4678,6 +4698,105 @@ mod tests {
             Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
             PluginApi::Standalone,
         )
+    }
+
+    /// The systems' shortcuts for quitting an application, where the standalone's windows act on
+    /// them (R-QUIT): Ctrl+Q on Linux; macOS's ⌘Q is its main menu's and Windows' Alt+F4 the
+    /// system's, so neither is the windows'.
+    #[cfg(feature = "standalone-production")]
+    #[test]
+    fn ctrl_q_quits_on_linux_and_no_other_key_does() {
+        use nih_plug::wrapper::production::app_window::quits_on;
+        let key = |key: Key, modifiers: Modifiers, state: KeyState| KeyboardEvent {
+            key,
+            modifiers,
+            state,
+            ..Default::default()
+        };
+        let q = |m| key(Key::Character("q".into()), m, KeyState::Down);
+        assert!(quits_on("linux", &q(Modifiers::CONTROL)));
+        assert!(quits_on(
+            "linux",
+            &key(
+                Key::Character("Q".into()),
+                Modifiers::CONTROL | Modifiers::SHIFT,
+                KeyState::Down
+            )
+        ));
+        for (what, k) in [
+            ("q alone", q(Modifiers::empty())),
+            ("Ctrl+Alt+Q", q(Modifiers::CONTROL | Modifiers::ALT)),
+            ("Ctrl+Super+Q", q(Modifiers::CONTROL | Modifiers::SUPER)),
+            (
+                "Ctrl+W",
+                key(
+                    Key::Character("w".into()),
+                    Modifiers::CONTROL,
+                    KeyState::Down,
+                ),
+            ),
+            (
+                "Ctrl+Q's release",
+                key(Key::Character("q".into()), Modifiers::CONTROL, KeyState::Up),
+            ),
+        ] {
+            assert!(!quits_on("linux", &k), "{what}");
+        }
+        for os in ["macos", "windows"] {
+            assert!(!quits_on(os, &q(Modifiers::CONTROL)), "{os}: Ctrl+Q");
+            assert!(!quits_on(os, &q(Modifiers::META)), "{os}: the menu's ⌘Q");
+            let alt_f4 = key(Key::F4, Modifiers::ALT, KeyState::Down);
+            assert!(!quits_on(os, &alt_f4), "{os}: the system's Alt+F4");
+        }
+    }
+
+    /// Ctrl+Q in the standalone on Linux asks its window to close before TYPING, a value being
+    /// typed or anything else in the editor has it: no note, nothing typed (R-QUIT). A plug-in's
+    /// editor leaves the key to its host.
+    #[cfg(all(target_os = "linux", feature = "standalone-production"))]
+    #[test]
+    fn ctrl_q_quits_the_standalone_before_typing_or_a_value_has_it() {
+        use nih_plug::wrapper::production::app_window::quit_requested;
+        let ctrl_q = KeyboardEvent {
+            key: Key::Character("q".into()),
+            code: keyboard_types::Code::KeyQ,
+            modifiers: Modifiers::CONTROL,
+            ..Default::default()
+        };
+        let release = KeyboardEvent {
+            state: KeyState::Up,
+            ..ctrl_q.clone()
+        };
+        let _ = quit_requested();
+
+        let (mut e, _, _) = editing_standalone();
+        e.playing.visible = true;
+        e.playing.typing = true;
+        assert!(e.note_typing_allowed());
+        assert!(e.keyed(&ctrl_q), "TYPING: the key the editor's");
+        assert!(quit_requested(), "TYPING: quitting asked for");
+        e.keyed(&release);
+        assert!(e.playing.notes.pop().is_none(), "TYPING: no note");
+
+        e.start_typing(Readout::Drive);
+        assert!(e.typing.is_some());
+        assert!(e.keyed(&ctrl_q), "a value: the key the editor's");
+        assert!(quit_requested(), "a value: quitting asked for");
+        assert_eq!(
+            e.typing.as_ref().map(|(_, text)| text.as_str()),
+            Some(""),
+            "a value: nothing typed"
+        );
+
+        for api in [PluginApi::Clap, PluginApi::Vst3] {
+            let (mut e, _, _) = editing_for_api(
+                Ca72Params::default(),
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+                api,
+            );
+            e.keyed(&ctrl_q);
+            assert!(!quit_requested(), "{api}: the host's key");
+        }
     }
 
     #[test]
