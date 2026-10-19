@@ -5,41 +5,33 @@
 //! OCTAVES, GATE and SWING, each a knob and its readout, the strip's own parts (its lit tabs,
 //! its knobs, its seven-segment readouts, its legends).
 //!
-//! The drawer is a plate of its own: the strip's face (the worn skin's picture, laid from
-//! another place so its grain does not run on from the face under it; the drawn skin's black),
-//! the rail's shadow across its top as the presets' drawer has, its left edge catching the lamp,
-//! its foot in shade with its shadow cast on the page below. What does not change is drawn once
-//! a scale on a thread of its own, begun as the editor opens; then only what changed.
+//! The drawer is a plate of its own, as the effects' drawer is (`lower`: the face, its edges, the
+//! shadow it casts, its lit tabs). What does not change is drawn once a scale on a thread of its
+//! own, begun as the editor opens; then only what changed.
 
 use std::fmt;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use plugin_kit_materials::{Glow, Lighting, glass, place, sprite};
-use resvg::tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
+use plugin_kit_materials::{Lighting, glass, sprite};
+use resvg::tiny_skia::Pixmap;
 use resvg::usvg;
 
-use super::worn::{
-    AMBER, AMBER_LIGHT, Reading, TAB_PRINT, copy, edge_eased, meets, readout_patch, svg_over,
-    union, within,
-};
-use super::{READOUT, RECESS_PAD, SECTIONS, TAB, TAB_PITCH, UNIT_READOUT};
-use crate::art::{self, Lettering, PANEL_H, W};
-use crate::fonts::{FAMILY, Fonts};
+use super::lower::{self, LitTabs, Look};
+pub use super::lower::{LEFT, RIGHT, SHADOW, TOP, top_px};
+use super::worn::{Reading, copy, meets, readout_patch, svg_over, union, within};
+use super::{READOUT, RECESS_PAD, TAB, TAB_PITCH, UNIT_READOUT};
+use crate::art::{self, Lettering};
+use crate::fonts::FAMILY;
 use crate::render::Renderer;
 use crate::skin::Skin;
 use crate::svg::{N, Svg, colour, put};
 
 // ---- The layout (the drawing's units, the drawer open).
 
-/// Its top, under the rail, and how deep it is (the owner, of the slimmer drawer: "make it
-/// even slimmer"; 265 units, the mock-up's).
-pub const TOP: f64 = PANEL_H + super::RAIL;
+/// How deep it is, from its top under the rail (`lower::TOP`; the owner, of the slimmer drawer:
+/// "make it even slimmer"; 265 units, the mock-up's).
 pub const DEPTH: f64 = 265.0;
-/// Its ends: the left hand's section's rule at its left (the rule stays seen), the strip's trim
-/// at its right.
-pub const LEFT: f64 = SECTIONS[1].0 + 2.0;
-pub const RIGHT: f64 = W - 28.0;
 /// Its row's middle, and how far above it the legends and the banks' titles are.
 pub const ROW: f64 = TOP + 142.0;
 const LEGEND_UP: f64 = 109.0;
@@ -48,8 +40,6 @@ const DIVIDER: f64 = 1440.0;
 /// The units' middles: RATE's, OCTAVES', GATE's and SWING's (each a knob `UNIT_KNOB` left of it
 /// and its readout `UNIT_READOUT` right of it, as the strip's).
 pub const UNITS: [f64; 4] = [1644.0, 2046.0, 2448.0, 2850.0];
-/// How far below its foot its shadow reaches.
-pub const SHADOW: f64 = 16.0;
 /// The knobs' parameters, in the units' order.
 pub const KNOB_PARAMS: [&str; 4] = ["arp_rate", "arp_octaves", "arp_gate", "arp_swing"];
 const LEGENDS: [&str; 4] = ["RATE", "OCTAVES", "GATE", "SWING"];
@@ -186,24 +176,6 @@ impl Default for ArpScene {
 
 // ---- Drawing.
 
-/// The drawer's frame's top row in the window's (and the drawing's) pixels, open: the drawer's
-/// units are the drawing's from `top_px / scale` down, so that a knob drawn on the drawing's grid
-/// lands on the frame's pixels exactly.
-pub fn top_px(scale: f64) -> i32 {
-    (TOP * scale).round() as i32
-}
-
-/// The drawer's frame's size at `scale`: the drawing's width, its depth.
-fn size_at(scale: f64) -> (u32, u32) {
-    (
-        (W * scale).ceil().max(1.0) as u32,
-        (DEPTH * scale).ceil().max(1.0) as u32,
-    )
-}
-
-/// What a still is made for: the scale, the skin and the lettering.
-type Look = (u64, Skin, Lettering);
-
 /// What does not change at a scale: the plate, and over it the print, the bezels, the glass
 /// and the unlit tabs; the tabs' words apart (laid over the lit ones); the shadow it casts.
 struct Still {
@@ -223,8 +195,7 @@ pub struct ArpRenderer {
     warming: Option<JoinHandle<Still>>,
     still: Option<Arc<Still>>,
     frame: Pixmap,
-    lit_tab: Option<Pixmap>,
-    glows: Vec<((f64, f64), Glow)>,
+    lit: LitTabs,
     readouts: [Option<Reading>; 4],
     /// Each knob as drawn: its value, and its pixels at their place in the frame.
     knobs: [Option<(f64, i32, i32, Pixmap)>; 4],
@@ -254,8 +225,7 @@ impl ArpRenderer {
             warming: None,
             still: None,
             frame: Pixmap::new(1, 1).expect("a pixel"),
-            lit_tab: None,
-            glows: Vec::new(),
+            lit: LitTabs::default(),
             readouts: Default::default(),
             knobs: Default::default(),
             shown: None,
@@ -295,8 +265,7 @@ impl ArpRenderer {
 
     fn forget(&mut self) {
         self.still = None;
-        self.lit_tab = None;
-        self.glows.clear();
+        self.lit.clear();
         self.readouts = Default::default();
         self.knobs = Default::default();
         self.shown = None;
@@ -504,29 +473,9 @@ impl ArpRenderer {
         let oy = f64::from(top_px(s)) / s;
         copy(&mut self.frame, &still.plate, r);
         // The lit tabs: their light on the face round them, then the lit cap over the unlit.
-        if self.lit_tab.is_none() {
-            let px = |v: f64| (v * s).round().max(1.0) as u32;
-            self.lit_tab = Some(plugin_kit_materials::resample(
-                &still.lighting.lit,
-                px(TAB.0),
-                px(TAB.1),
-            ));
-        }
         for at in Self::lit(scene) {
-            if !meets(self.tab_part(at), r) {
-                continue;
-            }
-            let local = (at.0, at.1 - oy);
-            if !self.glows.iter().any(|(g, _)| *g == at)
-                && let Some(g) = Glow::new(s, local, TAB, AMBER_LIGHT)
-            {
-                self.glows.push((at, g));
-            }
-            if let Some((_, g)) = self.glows.iter().find(|(g, _)| *g == at) {
-                g.light(&mut self.frame);
-            }
-            if let Some(cap) = &self.lit_tab {
-                place(&mut self.frame, cap, s, local, &PixmapPaint::default());
+            if meets(self.tab_part(at), r) {
+                self.lit.light(&mut self.frame, &still.lighting, s, at, oy);
             }
         }
         // The tabs' words over their caps; the pointer's tab lightened.
@@ -584,122 +533,28 @@ impl ArpRenderer {
 fn make_still((scale, skin, lettering): Look) -> Still {
     let s = f64::from_bits(scale);
     let png = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
-    let fonts = Fonts::new();
-    let options = usvg::Options {
-        fontdb: fonts.database(),
-        font_family: FAMILY.into(),
-        ..usvg::Options::default()
-    };
-    let (w, h) = size_at(s);
-    let mut plate = Pixmap::new(w, h).expect("a frame of at least a pixel");
-    let top = top_px(s);
-    let oy = f64::from(top) / s;
-    let (x0, x1) = ((LEFT * s).round(), (RIGHT * s).round());
-    // The face: the worn skin's picture, 640 units across, mirrored tile to tile, from another
-    // place than the strip's under it; the drawn skin's black.
-    if skin == Skin::Worn {
-        let face = crate::skin::face_picture();
-        let k = (640.0 * s) as f32 / face.width() as f32;
-        crate::render::fill(
-            &mut plate,
-            &face,
-            (x0, 0.0, x1 - x0, f64::from(h)),
-            None,
-            Transform::from_scale(k, k).post_translate((520.0 * s) as f32, (-90.0 * s) as f32),
-        );
-    } else {
-        let mut o = Svg::default();
-        put!(
-            o,
-            "<rect x='{}' y='0' width='{}' height='{}' fill='{}'/>",
-            N(LEFT),
-            N(RIGHT - LEFT),
-            N(DEPTH + 2.0),
-            colour::PANEL
-        );
-        svg_over(&options, &mut plate, s, &o.0);
-    }
+    let options = lower::lettered();
+    let oy = f64::from(top_px(s)) / s;
+    let mut plate = lower::plate(s, skin, DEPTH, &options);
     svg_over(&options, &mut plate, s, &surfaces(oy, skin));
-    // The print, worn into the face (the worn skin's), as the panel's is.
-    if let (Some(mut print), Some(under)) = (
-        Pixmap::new(w, h),
-        IntRect::from_xywh(0, 0, w, h).and_then(|r| plate.clone_rect(r)),
-    ) {
-        svg_over(&options, &mut print, s, &print_svg(oy, lettering));
-        if skin == Skin::Worn {
-            crate::render::worn_into(&mut print, &under);
-        }
-        plate.draw_pixmap(
-            0,
-            0,
-            print.as_ref(),
-            &PixmapPaint {
-                opacity: if skin == Skin::Worn { 0.94 } else { 1.0 },
-                ..PixmapPaint::default()
-            },
-            Transform::identity(),
-            None,
-        );
-    }
+    lower::print(&mut plate, s, skin, &options, &print_svg(oy, lettering));
     let glass_picture = png(crate::skin::GLASS);
     for i in 0..4 {
         let (x, y, rw, rh) = readout(i);
         glass(&mut plate, &glass_picture, s, (x, y - oy, rw, rh), 5.0);
     }
-    let button = png(crate::skin::BUTTON);
-    let lighting = edge_eased(plugin_kit_materials::lighting(
-        &button,
-        TAB.0 / TAB.1,
-        AMBER,
-    ));
-    for b in ArpBank::ALL {
-        for i in 0..b.words().len() {
-            let (x, y) = b.tab(i);
-            sprite(&mut plate, &lighting.unlit, s, (x, y - oy), TAB);
-        }
-    }
-    // The lamp's light over the plate, as over the panel (the worn skin's).
-    if skin == Skin::Worn {
-        crate::render::lamp_at(&mut plate, s, (0, top));
-    }
-    // The tabs' words, each on a patch of its own round its tab.
-    let mut words = Vec::new();
+    let lighting = lower::tab_lighting();
+    let mut tabs = Vec::new();
     for b in ArpBank::ALL {
         for (i, word) in b.words().iter().enumerate() {
-            let (x, y) = b.tab(i);
-            let (left, ptop) = (
-                ((x - TAB.0 / 2.0) * s).floor(),
-                ((y - oy - TAB.1 / 2.0) * s).floor(),
-            );
-            let (pw, ph) = ((TAB.0 * s).ceil() as u32 + 2, (TAB.1 * s).ceil() as u32 + 2);
-            if let Some(mut p) = Pixmap::new(pw, ph) {
-                let mut o = Svg::default();
-                put!(
-                    o,
-                    "<text x='{}' y='{}' font-size='17' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{TAB_PRINT}' fill-opacity='0.85'>{word}</text>",
-                    N(x - left / s),
-                    N(y - oy - ptop / s)
-                );
-                svg_over(&options, &mut p, s, &o.0);
-                words.push((left as i32, ptop as i32, p));
-            }
+            let at = b.tab(i);
+            sprite(&mut plate, &lighting.unlit, s, (at.0, at.1 - oy), TAB);
+            tabs.push((at, *word));
         }
     }
-    // The shadow it casts on the page under its foot, softest furthest from it.
-    let shadow = {
-        let (sw, sh) = (w, (SHADOW * s).ceil().max(1.0) as u32);
-        let mut p = Pixmap::new(sw, sh).expect("a shadow of at least a pixel");
-        let mut o = Svg::default();
-        put!(
-            o,
-            "<defs><linearGradient id='cast' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0.55'/><stop offset='0.35' stop-color='#000' stop-opacity='0.28'/><stop offset='1' stop-color='#000' stop-opacity='0'/></linearGradient></defs><rect x='{}' y='0' width='{}' height='{}' fill='url(#cast)'/>",
-            N(LEFT + 4.0),
-            N(RIGHT - LEFT - 4.0),
-            N(SHADOW)
-        );
-        svg_over(&options, &mut p, s, &o.0);
-        p
-    };
+    lower::lamp(&mut plate, s, skin, (0, top_px(s)));
+    let words = lower::tab_words(&options, s, oy, &tabs);
+    let shadow = lower::cast(s, &options);
     Still {
         look: (scale, skin, lettering),
         plate,
@@ -709,31 +564,15 @@ fn make_still((scale, skin, lettering): Look) -> Still {
     }
 }
 
-/// The plate's surfaces (the frame's units, `oy` its top in the drawing's): the rail's shadow
-/// across its top, its left edge lit, its foot in shade; the banks' recesses and the readouts'
-/// bezels, as the strip's; the knobs' shadows (the worn skin's, as the panel's).
+/// The plate's surfaces (the frame's units, `oy` its top in the drawing's; its edges are the
+/// plate's, `lower::plate`): the banks' recesses and the readouts' bezels, as the strip's; the
+/// knobs' shadows (the worn skin's, as the panel's).
 fn surfaces(oy: f64, skin: Skin) -> String {
     let mut s = Svg::default();
     let y = |v: f64| N(v - oy);
     put!(
         s,
-        "<defs><linearGradient id='rail-shade' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0.6'/><stop offset='1' stop-color='#000' stop-opacity='0'/></linearGradient><linearGradient id='foot-shade' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#000' stop-opacity='0'/><stop offset='1' stop-color='#000' stop-opacity='0.5'/></linearGradient><linearGradient id='left-lit' x1='0' y1='0' x2='1' y2='0'><stop offset='0' stop-color='#ffe6c8' stop-opacity='0.14'/><stop offset='1' stop-color='#ffe6c8' stop-opacity='0'/></linearGradient><filter id='long' x='-0.6' y='-0.6' width='2.2' height='2.2'><feGaussianBlur stdDeviation='7'/></filter><filter id='softer' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='2'/></filter></defs>"
-    );
-    put!(
-        s,
-        "<rect x='{}' y='{}' width='{}' height='14' fill='url(#rail-shade)'/><rect x='{}' y='{}' width='6' height='{}' fill='url(#left-lit)'/><rect x='{}' y='{}' width='{}' height='9' fill='url(#foot-shade)'/><rect x='{}' y='{}' width='{}' height='1.5' fill='#000' fill-opacity='0.55'/>",
-        N(LEFT),
-        y(TOP),
-        N(RIGHT - LEFT),
-        N(LEFT),
-        y(TOP + 10.0),
-        N(DEPTH - 10.0),
-        N(LEFT),
-        y(TOP + DEPTH - 9.0),
-        N(RIGHT - LEFT),
-        N(LEFT),
-        y(TOP + DEPTH - 1.5),
-        N(RIGHT - LEFT)
+        "<defs><filter id='long' x='-0.6' y='-0.6' width='2.2' height='2.2'><feGaussianBlur stdDeviation='7'/></filter><filter id='softer' x='-0.5' y='-0.5' width='2' height='2'><feGaussianBlur stdDeviation='2'/></filter></defs>"
     );
     for b in ArpBank::ALL {
         let (x, ry, w, h) = b.recess();

@@ -10,6 +10,7 @@ pub mod editor;
 pub mod engine;
 #[cfg(feature = "fx-host")]
 pub mod fx;
+pub mod fx_view;
 pub mod helper;
 pub mod learn;
 pub mod learning;

@@ -5,6 +5,10 @@
 //! `CA72_STANDALONE=1` shows the standalone keyboard's TYPING and PANIC controls.
 //! `CA72_ARP=1` drops the arpeggiator's drawer over the lower page (decisions.md R-ARP): ON and
 //! UP lit, a sixteenth, two octaves, GATE 60 %, SWING 25 %, the ARP key lit.
+//! `CA72_FX=1` the standalone's rail (its FX key, lit) and the effects' drawer over the lower
+//! page (decisions.md R-FX-DRAWER): three effects, the third bypassed, the fourth slot empty;
+//! `CA72_FX=list` with the effects' list dropped for the fourth; `CA72_FX=crashed` the second
+//! given up on; `CA72_FX=rail` the rail alone.
 
 use ca72_panel::{CONTROLS, Renderer, Scene, Skin};
 
@@ -23,6 +27,7 @@ fn main() {
     };
     let mut r = Renderer::with_look(skin, lettering, scale, 1.0);
     let arp = std::env::var("CA72_ARP").is_ok_and(|v| v == "1");
+    let fx = std::env::var("CA72_FX").ok();
     let built = t0.elapsed();
     let mut scene = Scene::default();
     // The plugin's defaults: as the mock-up was drawn; the strip's knobs at what its readouts
@@ -63,6 +68,10 @@ fn main() {
         scene.bar.keyboard = true;
     }
     scene.bar.arp = arp;
+    if fx.is_some() {
+        strip.set_rail(ca72_panel::strip::Rail::Effects);
+        scene.bar.fx = true;
+    }
     strip.render(&scene, r.frame(), None);
     eprintln!("the strip {:?}", t3.elapsed());
     let mut all = r.frame().clone();
@@ -77,6 +86,9 @@ fn main() {
     }
     if arp {
         drop_arp(&mut all, &mut r, scale, skin, lettering);
+    }
+    if let Some(fx) = fx.filter(|v| v != "rail") {
+        drop_fx(&mut all, scale, skin, lettering, &fx);
     }
     if std::env::var("CA72_KEYBOARD_CROP").is_ok_and(|v| v == "1") {
         let [x0, y0, x1, y1] = [370.0, 925.0, 3080.0, 1750.0].map(|v| (v * scale).round() as u32);
@@ -212,6 +224,98 @@ fn drop_arp(
             0,
             (top + depth) as i32,
             shadow.as_ref(),
+            &resvg::tiny_skia::PixmapPaint::default(),
+            resvg::tiny_skia::Transform::identity(),
+            None,
+        );
+    }
+}
+
+/// The effects' drawer over `all` (the editor's `compose`): its plate from its top, what hangs
+/// under its foot (its shadow, the list) laid over the page.
+fn drop_fx(
+    all: &mut ca72_panel::Pixmap,
+    scale: f64,
+    skin: Skin,
+    lettering: ca72_panel::Lettering,
+    how: &str,
+) {
+    use ca72_panel::strip::fx::{self, FxList, FxRenderer, FxRow, FxScene, FxSlot, FxWord};
+    let t = std::time::Instant::now();
+    let mut drawer = FxRenderer::new(scale, skin, lettering);
+    let slot = |text: &str, lit: bool| FxSlot {
+        text: text.into(),
+        dim: false,
+        lit,
+        word: None,
+    };
+    let mut scene = FxScene {
+        slots: [
+            slot("Chorus", true),
+            slot("Hall Reverb", true),
+            slot("Tape Delay", false),
+            slot("+ ADD EFFECT", false),
+        ],
+        ..FxScene::default()
+    };
+    if how == "crashed" {
+        scene.slots[1] = FxSlot {
+            text: "Hall Reverb".into(),
+            dim: true,
+            lit: false,
+            word: Some(FxWord::Crashed),
+        };
+    }
+    if how == "list" {
+        let row = |name: &str, maker: &str, format: &str| FxRow {
+            name: name.into(),
+            maker: maker.into(),
+            format: format.into(),
+            action: false,
+        };
+        let mut rows = vec![
+            row("Dragonfly Early Reflections", "Michael Willis", "CLAP"),
+            row("Dragonfly Hall Reverb", "Michael Willis", "CLAP"),
+            row("Dragonfly Plate Reverb", "Michael Willis", "CLAP"),
+            row("Dragonfly Room Reverb", "Michael Willis", "CLAP"),
+            row("Dragonfly Early Reflections", "Michael Willis", "VST3"),
+            row("Dragonfly Hall Reverb", "Michael Willis", "VST3"),
+            row("Gain", "DAW-v3 tests", "CLAP"),
+            row("Gain", "DAW-v3 tests", "VST3"),
+        ];
+        rows.push(FxRow {
+            name: "SCAN AGAIN".into(),
+            action: true,
+            ..FxRow::default()
+        });
+        scene.list = Some(FxList {
+            slot: 3,
+            title: "ADD TO SLOT 4".into(),
+            note: "8 EFFECTS".into(),
+            rows,
+            first: 0,
+            hover: Some(1),
+        });
+    }
+    drawer.render(&scene);
+    eprintln!("the effects' drawer {:?}", t.elapsed());
+    let (w, f) = (all.width() as usize, drawer.frame());
+    let top = fx::top_px(scale) as usize;
+    let (x0, x1) = (
+        (fx::LEFT * scale).round() as usize,
+        (fx::RIGHT * scale).round() as usize,
+    );
+    let depth = (fx::DEPTH * scale).round() as usize;
+    for y in 0..depth.min(f.height() as usize) {
+        let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
+        let n = (x1 - x0) * 4;
+        all.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+    }
+    for (p, x, y) in drawer.under() {
+        all.draw_pixmap(
+            x,
+            top as i32 + y,
+            p.as_ref(),
             &resvg::tiny_skia::PixmapPaint::default(),
             resvg::tiny_skia::Transform::identity(),
             None,

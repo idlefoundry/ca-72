@@ -1350,7 +1350,7 @@ fn tile_reflected(frame: &mut Pixmap, tile: &Pixmap, (tx, ty): (i64, i64)) {
 /// (Drawn out over a display many times its size, the picture's faint lines had been hard
 /// bands across the list: the owner, 2026-10-10, "there's several harsh horizontal lines,
 /// please get rid of them". The dots behind it are the displays' texture.)
-fn smooth_glass(p: &Pixmap) -> Pixmap {
+pub(crate) fn smooth_glass(p: &Pixmap) -> Pixmap {
     let (w, h) = (p.width() as usize, p.height() as usize);
     let mut px: Vec<[f32; 3]> = p
         .pixels()
@@ -1395,6 +1395,28 @@ fn smooth_glass(p: &Pixmap) -> Pixmap {
     }
     // The mesh: the picture at a sixth of its size (drawn out smoothly again over a display).
     resample(&out, (p.width() / 6).max(1), (p.height() / 6).max(1))
+}
+
+/// A large display's glass (the smoothed picture: [`smooth_glass`]) filling the window `(x, y, w,
+/// h)` (the frame's units): the effects' list's (decisions.md R-FX-DRAWER), as the drawer's.
+pub(crate) fn display_glass(
+    frame: &mut Pixmap,
+    p: &Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+) {
+    glass(
+        frame,
+        p,
+        scale,
+        &Display {
+            x,
+            y,
+            w,
+            h,
+            pitch: 1.0,
+        },
+    );
 }
 
 /// A display's glass filling its window, covering it about its middle (as the kit's `glass`),

@@ -526,6 +526,7 @@ impl Browser {
             keyboard: self.bar.keyboard,
             panel: self.bar.panel,
             arp: self.bar.arp,
+            fx: self.bar.fx,
         };
     }
 
@@ -601,7 +602,11 @@ impl Browser {
             BarTarget::Name => self.show(!self.open, p),
             BarTarget::Prev => self.step(-1, p, s),
             // (The editor's: its menu.)
-            BarTarget::Settings | BarTarget::Panel | BarTarget::Keyboard | BarTarget::Arp => {}
+            BarTarget::Settings
+            | BarTarget::Panel
+            | BarTarget::Keyboard
+            | BarTarget::Arp
+            | BarTarget::Fx => {}
             BarTarget::Next => self.step(1, p, s),
             BarTarget::Star => {
                 let current = Self::current(p);

@@ -11,6 +11,8 @@
 //! their light, the readouts, the voices' display, the rail's keys and the preset's name.
 
 pub mod arp;
+pub mod fx;
+pub mod lower;
 mod worn;
 
 use resvg::tiny_skia::Pixmap;
@@ -77,6 +79,20 @@ const KEYS: [(f64, f64, BarTarget); 8] = [
     (2912.0, 86.0, BarTarget::Arp),
     (3012.0, 86.0, BarTarget::Settings),
 ];
+/// The standalone application's (the owner's FX-A, 2026-10-18; decisions.md R-FX-DRAWER): FX
+/// after ARP, the name a key shorter again for it, the gaps between the keys as they were. The
+/// plug-ins keep theirs.
+const KEYS_FX: [(f64, f64, BarTarget); 9] = [
+    (92.0, 86.0, BarTarget::Star),
+    (192.0, 86.0, BarTarget::Prev),
+    (2326.0, 86.0, BarTarget::Next),
+    (2470.0, 170.0, BarTarget::Save),
+    (2612.0, 86.0, BarTarget::Panel),
+    (2712.0, 86.0, BarTarget::Keyboard),
+    (2812.0, 86.0, BarTarget::Arp),
+    (2912.0, 86.0, BarTarget::Fx),
+    (3012.0, 86.0, BarTarget::Settings),
+];
 pub const KEY_H: f64 = 62.0;
 /// The settings' key's width (and the star's and the arrows').
 pub const KEY_W: f64 = 86.0;
@@ -84,6 +100,34 @@ pub const KEY_W: f64 = 86.0;
 /// the keys beside it (the owner, 2026-10-09: "Needs to be the same height as the buttons
 /// flanking it").
 pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2100.0, 50.0);
+const NAME_FX: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2000.0, 50.0);
+
+/// The rail's keys: the plug-ins', or the standalone application's with its effects' key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Rail {
+    #[default]
+    Plugin,
+    /// FX after ARP (decisions.md R-FX-DRAWER).
+    Effects,
+}
+
+impl Rail {
+    /// Its keys: each key's middle, width and target.
+    pub fn keys(self) -> &'static [(f64, f64, BarTarget)] {
+        match self {
+            Rail::Plugin => &KEYS,
+            Rail::Effects => &KEYS_FX,
+        }
+    }
+
+    /// The name's display: its window (left, top, width, height).
+    pub fn name(self) -> (f64, f64, f64, f64) {
+        match self {
+            Rail::Plugin => NAME,
+            Rail::Effects => NAME_FX,
+        }
+    }
+}
 const NAME_SURROUND: f64 = 6.0;
 /// The voices' display, across STEREO's last row from WIDTH's unit's left to DETUNE's right.
 pub const DISPLAY: (f64, f64, f64, f64) = (
@@ -293,18 +337,18 @@ impl StripTarget {
     }
 }
 
-/// What a pointer at (`x`, `y`) (the drawing's units) finds on the strip.
-pub fn hit(x: f64, y: f64) -> Option<StripTarget> {
+/// What a pointer at (`x`, `y`) (the drawing's units) finds on the strip, its rail `rail`.
+pub fn hit(rail: Rail, x: f64, y: f64) -> Option<StripTarget> {
     if y < PANEL_H {
         return None;
     }
     if (y - RAIL_Y).abs() <= KEY_H / 2.0 + 6.0 {
-        for (kx, w, t) in KEYS {
+        for &(kx, w, t) in rail.keys() {
             if (x - kx).abs() <= w / 2.0 + 4.0 {
                 return Some(StripTarget::Bar(t));
             }
         }
-        let (nx, _, nw, _) = NAME;
+        let (nx, _, nw, _) = rail.name();
         if (nx..nx + nw).contains(&x) {
             return Some(StripTarget::Bar(BarTarget::Name));
         }
@@ -337,14 +381,20 @@ pub fn hit(x: f64, y: f64) -> Option<StripTarget> {
     ((dx..dx + dw).contains(&x) && (dy..dy + dh).contains(&y)).then_some(StripTarget::Display)
 }
 
-/// A target's middle (the tests', and a menu's place).
-pub fn centre(t: StripTarget) -> (f64, f64) {
+/// A target's middle (the tests', and a menu's place), the rail `rail`.
+pub fn centre(rail: Rail, t: StripTarget) -> (f64, f64) {
     match t {
         StripTarget::Tab(b, i) => b.tab(i),
         StripTarget::Switch(r) | StripTarget::Readout(r) => r.at(),
         StripTarget::Display => (DISPLAY.0 + DISPLAY.2 / 2.0, DISPLAY.1 + DISPLAY.3 / 2.0),
-        StripTarget::Bar(BarTarget::Name) => (NAME.0 + NAME.2 / 2.0, RAIL_Y),
-        StripTarget::Bar(b) => (KEYS.iter().find(|k| k.2 == b).map_or(0.0, |k| k.0), RAIL_Y),
+        StripTarget::Bar(BarTarget::Name) => {
+            let (x, _, w, _) = rail.name();
+            (x + w / 2.0, RAIL_Y)
+        }
+        StripTarget::Bar(b) => (
+            rail.keys().iter().find(|k| k.2 == b).map_or(0.0, |k| k.0),
+            RAIL_Y,
+        ),
     }
 }
 
@@ -438,7 +488,8 @@ impl Default for StripScene {
 // ---- What the drawing draws for it (`art`): its surfaces and its print.
 
 /// The strip's surfaces that do not move, for either skin: the banks' recesses, the readouts'
-/// and the display's bezels, the name's surround on the rail.
+/// and the display's bezels. (The name's surround on the rail is the strip's renderer's, as long
+/// as its rail's name is: decisions.md R-FX-DRAWER.)
 pub(crate) fn surfaces(s: &mut Svg) {
     let bezel = |s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), r: f64| {
         put!(
@@ -475,7 +526,6 @@ pub(crate) fn surfaces(s: &mut Svg) {
         bezel(s, r.window(), 5.0);
     }
     bezel(s, DISPLAY, 5.0);
-    name_bezel(s, 0.0);
 }
 
 /// The name's display set into the rail's wood (the owner: "we need some sort of border or edge
@@ -484,8 +534,8 @@ pub(crate) fn surfaces(s: &mut Svg) {
 /// bottom in shade, a black lip down into the glass, its lower inner edge catching the light.
 /// Within the surround: as tall as the keys beside it. `dy` down (the worn strip draws in its
 /// own frame, from the rail's top).
-pub(crate) fn name_bezel(s: &mut Svg, dy: f64) {
-    let (x, y, w, h) = NAME;
+pub(crate) fn name_bezel(s: &mut Svg, rail: Rail, dy: f64) {
+    let (x, y, w, h) = rail.name();
     screen_bezel(s, (x, y + dy, w, h));
 }
 
@@ -593,12 +643,6 @@ pub(crate) fn print(s: &mut Svg, fonts_family: &str) {
     );
 }
 
-/// The strip's keys and tabs, as the tests and the renderer find them: each key's middle,
-/// width and target.
-pub(crate) fn keys() -> impl Iterator<Item = (f64, f64, BarTarget)> {
-    KEYS.into_iter()
-}
-
 pub(crate) const KEY_HEIGHT: f64 = KEY_H;
 
 /// An empty frame the strip's size at `scale`.
@@ -672,7 +716,7 @@ mod tests {
         for i in 0..2 {
             let t = StripTarget::Tab(b, i);
             let (tx, ty) = b.tab(i);
-            assert_eq!(hit(tx, ty), Some(t));
+            assert_eq!(hit(Rail::Plugin, tx, ty), Some(t));
             assert_eq!(t.control(), Some(StripControl::Placement));
             assert!(
                 tx - TAB.0 / 2.0 > x && tx + TAB.0 / 2.0 < x + w,
@@ -681,12 +725,20 @@ mod tests {
         }
         assert_eq!(span(StripControl::Placement), (x, y, x + w, y + h));
         for beyond in [b.tab(0).0 - TAB_PITCH, b.tab(1).0 + TAB_PITCH] {
-            assert_eq!(hit(beyond, ROWS[0]), None, "a tab at {beyond}");
+            assert_eq!(
+                hit(Rail::Plugin, beyond, ROWS[0]),
+                None,
+                "a tab at {beyond}"
+            );
         }
         for b in Bank::ALL {
             for i in 0..b.words().len() {
                 let (tx, ty) = b.tab(i);
-                assert_eq!(hit(tx, ty), Some(StripTarget::Tab(b, i)), "{b:?} {i}");
+                assert_eq!(
+                    hit(Rail::Plugin, tx, ty),
+                    Some(StripTarget::Tab(b, i)),
+                    "{b:?} {i}"
+                );
             }
         }
     }

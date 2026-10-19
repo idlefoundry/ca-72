@@ -28,6 +28,7 @@ pub use drawer::{
     midi_row_centre, row_centre, search_centre, star_centre, tab_centre, tab_of, update_centre,
     update_fits,
 };
+pub(crate) use drawer::{display_glass, smooth_glass};
 
 /// The selector's height, panel units: the strip's row it shares.
 pub const BAR_H: f64 = 96.0;
@@ -156,6 +157,9 @@ pub enum BarTarget {
     /// The arpeggiator's drawer, dropped down over the lower panel or put away (decisions.md
     /// R-ARP); lit while the arpeggiator is on.
     Arp,
+    /// The effects' drawer, the standalone application's alone (decisions.md R-FX-DRAWER); lit
+    /// while an effect plays.
+    Fx,
 }
 
 /// What a pointer finds in the drawer.
@@ -305,6 +309,8 @@ pub struct BarScene {
     pub keyboard: bool,
     /// The arpeggiator is on (its key lit).
     pub arp: bool,
+    /// An effect plays (the standalone's FX key lit).
+    pub fx: bool,
 }
 
 // ---- The selector's layout (panel units across, the strip's units down).
@@ -555,7 +561,8 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         | BarTarget::Settings
         | BarTarget::Panel
         | BarTarget::Keyboard
-        | BarTarget::Arp => SAVE_X + SAVE_W / 2.0,
+        | BarTarget::Arp
+        | BarTarget::Fx => SAVE_X + SAVE_W / 2.0,
     };
     (x, BAR_MID)
 }
@@ -776,6 +783,7 @@ mod png {
                         hover: None,
                         panel: true,
                         arp: false,
+                        fx: false,
                     },
                     ..crate::strip::StripScene::default()
                 },
@@ -1066,6 +1074,7 @@ mod png {
                     hover: None,
                     panel: true,
                     arp: false,
+                    fx: false,
                 },
                 ..crate::strip::StripScene::default()
             },

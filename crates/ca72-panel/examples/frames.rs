@@ -3,7 +3,9 @@
 //! default, the window on a 1920 by 1080 screen, and the same on a Retina one). Each is the
 //! panel's renderer, the strip's over its foot, the editor's composing of the two
 //! (`ca72-plugin`'s `draw` and `compose`) and the frame's conversion to the window's pixels (its
-//! `present`, softbuffer's 0RGB), timed together: the median and the slowest of 40.
+//! `present`, softbuffer's 0RGB), timed together: the median and the slowest of 40. Then the
+//! arpeggiator's drawer (decisions.md R-ARP) and the standalone's effects' drawer (R-FX-DRAWER);
+//! `CA72_RAIL=effects` the strip with the standalone's rail (its FX key).
 
 use std::time::{Duration, Instant};
 
@@ -29,6 +31,9 @@ fn measure(s: f64) {
     let t = Instant::now();
     let mut panel = Renderer::with_skin(Skin::Worn, s, 1.0);
     let mut strip = StripRenderer::new(s);
+    if std::env::var("CA72_RAIL").is_ok_and(|v| v == "effects") {
+        strip.set_rail(ca72_panel::strip::Rail::Effects);
+    }
     let mut scene = Scene::default();
     for v in &mut scene.values {
         *v = 0.5;
@@ -117,6 +122,138 @@ fn measure(s: f64) {
     times("the drops settling", 0, &mut |_, _, _| {});
     times("nothing changed", 100, &mut |_, _, _| {});
     arp(s, &mut panel);
+    fx(s, &panel);
+}
+
+/// The effects' drawer (decisions.md R-FX-DRAWER): its first drop (made as the editor opens, on
+/// its thread: joined at once, the worst case, and later), a tab let go, the pointer over a name,
+/// a slot carried over another, its list dropped, pointed at and scrolled, and nothing changed;
+/// each its render and its plate and what hangs under it put in the window's frame.
+fn fx(s: f64, panel: &Renderer) {
+    use ca72_panel::strip::fx::{self, FxList, FxRenderer, FxRow, FxScene, FxSlot, FxTarget};
+    let slot = |t: &str, lit: bool| FxSlot {
+        text: t.into(),
+        dim: false,
+        lit,
+        word: None,
+    };
+    let mut scene = FxScene {
+        slots: [
+            slot("Chorus", true),
+            slot("Hall Reverb", true),
+            slot("Tape Delay", true),
+            slot("+ ADD EFFECT", false),
+        ],
+        ..FxScene::default()
+    };
+    let mut composed = panel.frame().clone();
+    let put = |d: &FxRenderer, c: &mut Pixmap| {
+        let top = fx::top_px(s) as usize;
+        let f = d.frame();
+        let (x0, x1) = (
+            (fx::LEFT * s).round() as usize,
+            (fx::RIGHT * s).round() as usize,
+        );
+        let w = c.width() as usize;
+        for y in 0..f.height() as usize {
+            let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
+            let n = (x1 - x0) * 4;
+            c.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+        }
+        for (p, x, y) in d.under() {
+            c.draw_pixmap(
+                x,
+                top as i32 + y,
+                p.as_ref(),
+                &resvg::tiny_skia::PixmapPaint::default(),
+                resvg::tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    };
+    let t = Instant::now();
+    let mut d = FxRenderer::new(s, Skin::Worn, ca72_panel::Lettering::Standard);
+    let made = t.elapsed();
+    d.render(&scene);
+    put(&d, &mut composed);
+    println!(
+        "  {:<36} {:5.1} ms (its plate made on its thread, waited for)",
+        "the effects' first drop, at once",
+        ms(t.elapsed())
+    );
+    println!(
+        "  {:<36} {:5.2} ms (on the editor's thread as it opens)",
+        "the effects' renderer made",
+        ms(made)
+    );
+    let mut d = FxRenderer::new(s, Skin::Worn, ca72_panel::Lettering::Standard);
+    std::thread::sleep(Duration::from_millis(1500));
+    let t = Instant::now();
+    d.render(&scene);
+    put(&d, &mut composed);
+    println!(
+        "  {:<36} {:5.1} ms (its plate made already)",
+        "the effects' first drop, later",
+        ms(t.elapsed())
+    );
+    let mut times = |name: &str, step: &mut dyn FnMut(usize, &mut FxScene)| {
+        let mut v = Vec::new();
+        for i in 0..40 {
+            step(i, &mut scene);
+            let t = Instant::now();
+            if d.render(&scene) {
+                put(&d, &mut composed);
+            }
+            v.push(t.elapsed());
+        }
+        v.sort();
+        println!(
+            "  {name:<36} median {:5.1} ms, slowest {:5.1} ms",
+            ms(v[v.len() / 2]),
+            ms(v[v.len() - 1])
+        );
+    };
+    times("an effects' tab pressed", &mut |i, sc| {
+        sc.slots[1].lit = i % 2 == 0;
+    });
+    times("the pointer over an effect's name", &mut |i, sc| {
+        sc.hover = Some(FxTarget::Name(i % 3));
+    });
+    times("an effect carried over another", &mut |i, sc| {
+        sc.hover = None;
+        sc.drag = Some((0, Some(1 + i % 2)));
+    });
+    let rows: Vec<FxRow> = (0..30)
+        .map(|i| FxRow {
+            name: format!("Effect number {i}"),
+            maker: "A Maker".into(),
+            format: if i % 2 == 0 { "CLAP" } else { "VST3" }.into(),
+            action: false,
+        })
+        .collect();
+    let list = FxList {
+        slot: 3,
+        title: "ADD TO SLOT 4".into(),
+        note: "30 EFFECTS".into(),
+        rows,
+        first: 0,
+        hover: None,
+    };
+    times("the effects' list dropped", &mut |i, sc| {
+        sc.drag = None;
+        sc.list = (i % 2 == 0).then(|| list.clone());
+    });
+    times("the effects' list pointed at", &mut |i, sc| {
+        let mut l = list.clone();
+        l.hover = Some(i % 11);
+        sc.list = Some(l);
+    });
+    times("the effects' list scrolled", &mut |i, sc| {
+        let mut l = list.clone();
+        l.first = i % 19;
+        sc.list = Some(l);
+    });
+    times("the effects open, nothing changed", &mut |_, _| {});
 }
 
 /// The arpeggiator's drawer (decisions.md R-ARP): its first drop (made as the editor opens: on
