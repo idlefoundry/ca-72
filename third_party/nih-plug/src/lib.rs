@@ -88,12 +88,6 @@
 // Sync`. Creating type aliases for all of these callbacks probably won't make things easier to read.
 #![allow(clippy::type_complexity)]
 
-#[cfg(all(
-    target_os = "linux",
-    any(feature = "standalone", feature = "standalone-production")
-))]
-extern crate baseview_x11 as baseview;
-
 // These macros are also in the crate root and in the prelude, but having the module itself be pub
 // as well makes it easy to import _just_ the macros without using `#[macro_use] extern crate nih_plug;`
 #[macro_use]

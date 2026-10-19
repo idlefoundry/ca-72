@@ -22,8 +22,8 @@ assert_process_allocs = ["dep:assert_no_alloc"]
 # Enables an export target for standalone binaries through the
 # `nih_export_standalone()` function. Disabled by default as this requires
 # building additional dependencies for audio and MIDI handling.
-standalone = ["dep:baseview", "dep:baseview_x11", "dep:clap", "dep:cpal", "dep:jack", "dep:midir", "dep:rtrb"]
-standalone-production = ["dep:baseview", "dep:baseview_x11", "dep:plugin-kit-standalone", "dep:rtrb"]
+standalone = ["dep:baseview", "dep:clap", "dep:cpal", "dep:jack", "dep:midir", "dep:rtrb"]
+standalone-production = ["dep:baseview", "dep:plugin-kit-standalone", "dep:rtrb"]
 # Enables the `nih_export_vst3!()` macro. Enabled by default. This feature
 # exists mostly for GPL-compliance reasons, since even if you don't use the VST3
 # wrapper you might otherwise still include a couple (unused) symbols from the
@@ -67,6 +67,12 @@ widestring = "1.0.0-beta.1"
 assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"], optional = true }
 
 # Used for the `standalone` feature
+# NOTE: OpenGL support is not needed here, but rust-analyzer gets confused when
+#       some crates do use it and others don't
+# The CA-72's patched copy (`../baseview/PATCHES.md`), the one its editor opens in, so that the
+# standalone's window has its changes too (change 9 in this build: no frame to drag; the CA-72's
+# R-WIN-STANDALONE). Without OpenGL, which neither window uses.
+baseview = { path = "../baseview", optional = true }
 # All the claps!
 clap = { version = "4.1.8", features = ["derive", "wrap_help"], optional = true }
 cpal = { version = "0.15", optional = true }
@@ -99,6 +105,7 @@ features = [
   "Win32_UI_WindowsAndMessaging",
   "Win32_System_LibraryLoader",
   "Win32_System_Performance",
+  "Win32_UI_HiDpi",
 ]
 
 
@@ -107,13 +114,3 @@ features = [
 [lints.rust]
 unexpected_cfgs = "allow"
 unused_imports = "allow"
-
-# Linux standalone windows need the same patched X11 identity as the editor's
-# backend. Keep the existing standalone dependency on the other platforms.
-# Linux shares the editor's backend without OpenGL; its window options omit the
-# feature-gated gl_config field. The other platforms retain upstream's features.
-[target.'cfg(target_os = "linux")'.dependencies]
-baseview_x11 = { package = "baseview", path = "../baseview", optional = true }
-
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "579130ecb4f9f315ae52190af42f0ea46aeaa4a2", features = ["opengl"], optional = true }

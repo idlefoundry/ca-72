@@ -8157,3 +8157,74 @@ checks with allowances limited to those categories pass. Details and remaining l
 `docs/issue-49-linux-icon.md`. No native Xorg session, other-platform builds or playback test;
 no full workspace repeat beside the other agents' runs. Independent source review found no
 remaining defects.
+
+## R-WIN-STANDALONE. The Windows standalone's window is its panel's, at any display scale
+
+**The report (issue 64).** A Windows 11 user of the standalone: "opens up with a large
+background window with extra black space in it", the VST3 fine (KVR forum, 2026-10-16).
+
+**Agent decisions, 2026-10-18** (not separately approved; the owner is asked to confirm the
+second):
+- **The cause, reproduced.** With 0.2.6's released `CA-72.exe` and with `main` (`1a1dd6c`) on
+  Windows 11 at 125 %, 150 % and 175 % (the lab's 1920 by 1080 display; Windows offers no more
+  there), the window's client was the panel's size times the display's scale, and the panel
+  itself was drawn at 1: 1429 by 816 pixels around a panel of 1143 by 653 at 125 %, 1412 by 806
+  around 941 by 537 at 150 %, 1505 by 859 around 860 by 491 at 175 %, black to its right and
+  below. nih-plug's standalone opened its window at the system's scale (baseview's
+  `SystemScaleFactor`), which baseview measures only after the window is open, having made the
+  process aware of each monitor's scale only then; the editor, told no scale (as in Ableton
+  Live, R18), measured the screen first and drew at 1. At 100 % the two agreed, which is why it
+  went unseen. And at any scale the window's frame could be dragged or the window maximised,
+  which the editor does not follow: black beyond the panel, or the panel cut off (the grip with
+  it). A window open while the display's scale changes was scaled by Windows, the panel left as
+  it was.
+- **The window and the panel share one scale.** On Windows the standalone makes the process
+  aware of each monitor's scale before anything is measured, takes the primary monitor's scale
+  (where the window opens), tells the editor that scale before asking its size, and opens its
+  window at the same scale (nih-plug's `production::app_window`, `third_party/nih-plug/PATCHES.md`).
+  The panel opens at the same share of the screen as before (80 %, R6), sharp, and the SIZE
+  menu's sizes (R-SIZE) are logical pixels as in a host that gives a scale. The saved width is
+  logical, so a session restored at another scale opens at the same share of the panel's size.
+- **No frame to drag and no maximise box** (for the owner to confirm). The standalone's
+  window is sized by the panel alone, with the grip and WINDOW › SIZE, as on macOS, whose
+  window was never resizable: baseview's change 8 (`third_party/baseview/PATCHES.md`). The
+  alternative, the panel following a dragged frame, needs the editor to take a size from
+  outside (with its proportions, a maximised window would still show bars), which the hosts'
+  edge resize (R-SIZE, "Not done") would need too; left for that change.
+- **A resize from outside is undone** (Windows): a window scaled by Windows as its display's
+  scale changes, or maximised by another program, is fitted to the panel again at its next
+  frame (`app_window::refits`). The panel keeps the scale it opened at until the window is
+  opened again, as an editor in a host does (R19). Not on Linux or macOS, where a window
+  manager may hold a window at a size of its own.
+- **One baseview.** nih-plug's standalone took upstream's baseview at `579130e` from git, a
+  second copy beside the editor's patched one (`third_party/baseview`); it now opens its window
+  with the patched copy, without the `opengl` feature neither window uses (the release's
+  `CA-72.exe` linked `OPENGL32.dll` for nothing; this build does not). Its X11 backend is the same code; the macOS
+  backend's differences are upstream's later fixes and the CA-72's changes 4 and 7, which the
+  editor already runs on.
+
+**Evidence (Windows 11 `DESKTOP-KHN6H8K`, 1920 by 1080, in the desktop session; 2026-10-18).**
+The display's scale was changed live (`SystemParametersInfo`'s logical DPI override) to 125,
+150 and 175 % and put back to 100 %, its registry key as before. The fixed build
+(`ca72-standalone`, `--release`, `--no-devices`, its own `IDLE_FOUNDRY_SHARED`): the window's
+client equal to the panel's window at each scale (1446 by 826 at 100 %, 1429 by 816 at 125 %,
+1412 by 806 at 150 %, 1505 by 859 at 175 %); PANEL off and on (1505 by 504 and back); SIZE
+75 % at 125 % (1294 by 739), closed and opened again at that size; the frame's corner dragged
+by the pointer, a double click on the title and Win+Up: no change; 125 % to 150 % and to 100 %
+while open: the window kept to the panel; minimised and restored. The new test
+`the_standalone_s_window_is_its_editor_s_at_every_scale` (`crates/ca72-plugin/src/editor.rs`,
+Windows, `standalone-production`) opens the window as the app does at 1, 1.25, 1.5, 1.75 and 2
+whatever the display's scale, clicks PANEL off and on, and scales the window from outside:
+the window's client is the panel's window, pixel for pixel, each time, and its style has no
+thick frame and no maximise box. It fails without each part: the scale not told the editor
+("at 1.25, opened: the editor's window", 860 by 491 for 1075 by 614), the old styles ("at 1: a
+frame to drag") and no refit ("at 1, scaled by Windows", 1016 by 550 for 860 by 491). All 14
+`windows_window_tests` pass (MSVC, 1.97.1). The VST3 of this tree in REAPER 7.82: presets'
+drawer opened, shut and reopened, a row chosen, the arrows, PANEL off and the drawer over the
+compact view, no fault. Linux: the standalone built and opened (Hyprland 0.56 under XWayland).
+
+**Not tried:** macOS (the app window now opens through the patched baseview; CI builds it),
+200 % and more (not offered on this display), two displays at different scales (the window
+opens on the primary display, at its scale). Linux under a tiling window manager shows the
+same black space when the manager tiles the window larger than the panel (Hyprland tiled it
+2536 by 1390); the X11 code is the same as before, so this change leaves it as it was.

@@ -704,11 +704,13 @@ fn scale_policy(host: Option<f32>) -> WindowScalePolicy {
     }
 }
 
-impl Editor for Ca72Editor {
-    fn spawn(
+impl Ca72Editor {
+    /// The editor's window opened in `parent`, its presets from `library` (the tests' own).
+    fn spawn_with(
         &self,
         parent: ParentWindowHandle,
         context: Arc<dyn GuiContext>,
+        library: Library,
     ) -> Box<dyn Any + Send> {
         let (width, height) = self.opening();
         let scale = self.host_scale();
@@ -737,7 +739,7 @@ impl Editor for Ca72Editor {
                     meters,
                     width,
                     f64::from(scale.unwrap_or(1.0)),
-                    Library::shared(),
+                    library,
                     host_keys,
                 );
                 panel.editing.playing.notes = local_notes;
@@ -747,6 +749,16 @@ impl Editor for Ca72Editor {
         );
         self.open.store(true, Ordering::Release);
         Box::new(window::Handle::new(Some(window), self.closing()))
+    }
+}
+
+impl Editor for Ca72Editor {
+    fn spawn(
+        &self,
+        parent: ParentWindowHandle,
+        context: Arc<dyn GuiContext>,
+    ) -> Box<dyn Any + Send> {
+        self.spawn_with(parent, context, Library::shared())
     }
 
     fn size(&self) -> (u32, u32) {
@@ -10385,5 +10397,238 @@ mod windows_window_tests {
         o.drag(o.at((art::W / 2.0, 20.0)), 0.0);
         assert!(!asks(), "the menu shut");
         o.close();
+    }
+
+    /// The standalone's window and its editor at a scale (decisions.md R-WIN-STANDALONE, issue
+    /// 64): the window's client the editor's window, pixel for pixel, as it opens, as the editor
+    /// resizes it and once Windows has scaled the window for its monitor's new scale; and no
+    /// frame to drag and no maximise box. The window as the app opens it (nih-plug's
+    /// `production::app_window::options`, baseview's window of its own), the editor in it as it
+    /// opens there, and a handler that fits the window as the app's does (`app_window::fit`
+    /// and `refits`). Before, the editor
+    /// drew at 1 in a window at the monitor's scale (at 125 %, 1143 by 653 pixels in a client of
+    /// 1429 by 816, black beyond it), and the frame could be dragged and maximised with the
+    /// editor left as it was.
+    #[cfg(feature = "standalone-production")]
+    #[test]
+    fn the_standalone_s_window_is_its_editor_s_at_every_scale() {
+        use nih_plug::wrapper::production::app_window;
+        use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+        use winapi::um::winuser::{GWL_STYLE, GetWindowLongPtrW, WS_MAXIMIZEBOX, WS_THICKFRAME};
+
+        /// As the app's context: a resize asked is made at the window's next frame.
+        struct App {
+            resize: AtomicBool,
+        }
+        impl GuiContext for App {
+            fn plugin_api(&self) -> PluginApi {
+                PluginApi::Standalone
+            }
+            fn request_resize(&self) -> bool {
+                self.resize.store(true, Ordering::Release);
+                true
+            }
+            unsafe fn raw_begin_set_parameter(&self, _param: ParamPtr) {}
+            unsafe fn raw_set_parameter_normalized(&self, _param: ParamPtr, _normalized: f32) {}
+            unsafe fn raw_end_set_parameter(&self, _param: ParamPtr) {}
+            fn get_state(&self) -> PluginState {
+                panic!("the editor does not read the state")
+            }
+            fn set_state(&self, _state: PluginState) {}
+        }
+
+        /// What was seen at a step: the window's client, the editor's, what the editor asks.
+        type Seen = ((u32, u32), (u32, u32), (u32, u32));
+
+        /// The app's window's handler: at its frames the steps (a look, then a click on PANEL
+        /// or the window scaled from outside), then it closes.
+        struct Frames {
+            editor: Arc<Ca72Editor>,
+            app: Arc<App>,
+            _handle: Box<dyn Any + Send>,
+            window: HWND,
+            frames: u32,
+            seen: Arc<Mutex<Vec<Seen>>>,
+            style: Arc<AtomicU32>,
+        }
+        impl Frames {
+            fn client(w: HWND) -> (u32, u32) {
+                let mut r = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                // SAFETY: the test's own window and a rectangle of this function's.
+                unsafe { GetClientRect(w, &mut r) };
+                ((r.right - r.left) as u32, (r.bottom - r.top) as u32)
+            }
+            fn look(&self) {
+                // SAFETY: the test's own window.
+                let child = unsafe { GetWindow(self.window, GW_CHILD) };
+                let seen = (
+                    Self::client(self.window),
+                    Self::client(child),
+                    self.editor.size(),
+                );
+                self.seen.lock().expect("seen").push(seen);
+            }
+            fn click_panel(&self) {
+                // SAFETY: the test's own window.
+                let child = unsafe { GetWindow(self.window, GW_CHILD) };
+                let k = f64::from(Self::client(child).0) / art::W;
+                let (x, y) = strip::centre(StripTarget::Bar(BarTarget::Panel));
+                let at = ((((y * k).round() as u32) << 16) | ((x * k).round() as u32 & 0xFFFF))
+                    as LPARAM;
+                // SAFETY: messages posted to the test's own window.
+                unsafe {
+                    PostMessageW(child, WM_MOUSEMOVE, 0, at);
+                    PostMessageW(child, WM_LBUTTONDOWN, MK_LBUTTON as WPARAM, at);
+                    PostMessageW(child, WM_LBUTTONUP, 0, at);
+                }
+            }
+        }
+        impl baseview::WindowHandler for Frames {
+            fn on_frame(&mut self, window: &mut Window<'_>) {
+                if self.app.resize.swap(false, Ordering::AcqRel) {
+                    app_window::fit(window, self.editor.size());
+                }
+                self.frames += 1;
+                match self.frames {
+                    20 => {
+                        // SAFETY: the test's own window.
+                        let style = unsafe { GetWindowLongPtrW(self.window, GWL_STYLE) };
+                        self.style.store(style as u32, Ordering::Relaxed);
+                        self.look();
+                        self.click_panel();
+                    }
+                    50 => {
+                        self.look();
+                        self.click_panel();
+                    }
+                    80 => {
+                        self.look();
+                        // The window scaled by Windows, as when its monitor's scale changes
+                        // (from 125 % to 150 %, the window's client 1.2 times larger).
+                        let (w, h) = Self::client(self.window);
+                        let (w, h) = (w as i32 * 6 / 5, h as i32 * 6 / 5);
+                        // SAFETY: the test's own window, on its thread.
+                        unsafe {
+                            SetWindowPos(
+                                self.window,
+                                null_mut(),
+                                0,
+                                0,
+                                w,
+                                h,
+                                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                            )
+                        };
+                    }
+                    110 => {
+                        self.look();
+                        window.close();
+                    }
+                    _ => {}
+                }
+            }
+            fn on_event(&mut self, _window: &mut Window<'_>, event: Event) -> EventStatus {
+                if app_window::refits(&event) {
+                    self.app.resize.store(true, Ordering::Release);
+                }
+                EventStatus::Ignored
+            }
+        }
+
+        let _desktop = DESKTOP
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // The windows in pixels whatever the screen's scale, as `app_window::scale` makes the
+        // app's process (the scale here is the test's, not the monitor's).
+        // SAFETY: this thread's own setting.
+        unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
+            let presets = tempfile::tempdir().expect("a temporary folder");
+            let params = Arc::new(Ca72Params::default());
+            params.editor_width.store(MIN_WIDTH, Ordering::Relaxed);
+            let editor = Arc::new(Ca72Editor::new(
+                Arc::clone(&params),
+                Arc::new(Meters::default()),
+            ));
+            let options = app_window::options("CA-72".into(), editor.as_ref(), Some(scale));
+            let app = Arc::new(App {
+                resize: AtomicBool::new(false),
+            });
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let style = Arc::new(AtomicU32::new(0));
+            let (handler_editor, handler_app, handler_seen, handler_style) = (
+                Arc::clone(&editor),
+                Arc::clone(&app),
+                Arc::clone(&seen),
+                Arc::clone(&style),
+            );
+            let library = presets.path().to_path_buf();
+            Window::open_blocking(options, move |window: &mut Window<'_>| {
+                let RawWindowHandle::Win32(h) = window.raw_window_handle() else {
+                    panic!("a Win32 window");
+                };
+                let hwnd: HWND = h.hwnd.cast();
+                // Off the screen, not brought to the front.
+                // SAFETY: the window being made, on this thread.
+                unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        null_mut(),
+                        -20000,
+                        -20000,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    )
+                };
+                let context: Arc<dyn GuiContext> = handler_app.clone();
+                let handle = handler_editor.spawn_with(
+                    ParentWindowHandle::Win32Hwnd(h.hwnd),
+                    context,
+                    Library::at(library),
+                );
+                Frames {
+                    editor: handler_editor,
+                    app: handler_app,
+                    _handle: handle,
+                    window: hwnd,
+                    frames: 0,
+                    seen: handler_seen,
+                    style: handler_style,
+                }
+            });
+            let at = |(w, h): (u32, u32)| {
+                let k = f64::from(scale);
+                (
+                    (f64::from(w) * k).round() as u32,
+                    (f64::from(h) * k).round() as u32,
+                )
+            };
+            let seen = seen.lock().expect("seen").clone();
+            assert_eq!(seen.len(), 4, "at {scale}: the window closed early");
+            let full = (MIN_WIDTH, height_for_panel(MIN_WIDTH, true));
+            let compact = (MIN_WIDTH, height_for_panel(MIN_WIDTH, false));
+            for ((window, child, asked), (step, want)) in seen.iter().zip([
+                ("opened", full),
+                ("PANEL off", compact),
+                ("PANEL on", full),
+                ("scaled by Windows", full),
+            ]) {
+                assert_eq!(*asked, want, "at {scale}, {step}: the editor's size");
+                assert_eq!(*child, at(want), "at {scale}, {step}: the editor's window");
+                assert_eq!(
+                    window, child,
+                    "at {scale}, {step}: the app's window's client"
+                );
+            }
+            let style = style.load(Ordering::Relaxed);
+            assert_eq!(style & WS_THICKFRAME, 0, "at {scale}: a frame to drag");
+            assert_eq!(style & WS_MAXIMIZEBOX, 0, "at {scale}: a maximise box");
+        }
     }
 }
