@@ -10,9 +10,9 @@ compiler warnings (`non_snake_case` in `src/win/drop_target.rs`, and
 `mismatched_lifetime_syntaxes`). `src/macos/window.rs` has one `use` list in the order
 today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
-Six changes for Windows (1 to 3, 5, 6 and 8), in `src/win/window.rs`, `src/win/drop_target.rs`,
+Six changes for Windows (1 to 3, 5, 6 and 9), in `src/win/window.rs`, `src/win/drop_target.rs`,
 `src/win/escape.rs`, `src/event.rs` and `src/window.rs` (the first three the CA-72's
-`docs/decisions.md` R26, R28 and R34), three for macOS (4, 7 and 8) and one for Linux (10, below):
+`docs/decisions.md` R26, R28 and R34), four for macOS (4, 7, 8 and 11) and one for Linux (10, below):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -202,6 +202,40 @@ And one more for Linux, in `src/x11/` (issue 49, 2026-10-18):
    on every platform (change 9). The helper's tests use x11rb as a
    development dependency on every platform. Ubuntu dock behaviour still needs a graphical
    check.
+
+And one more for macOS, in `src/macos/application.rs` and `src/macos/window.rs` (the CA-72's
+`docs/decisions.md` R-QUIT, 2026-10-19):
+
+11. **A window of its own is an application's: its menus, and quitting it closes its window.**
+   `open_blocking` gave the application no main menu, so no Quit item and no ⌘Q: the key went
+   to the view, whose handler had no use for it, and the CA-72's standalone could be closed
+   only by its window's close button or the Dock's Quit. And AppKit's own quitting
+   (`terminate:`, which the Dock's Quit and logging out reach through the quit Apple event)
+   ends the process within AppKit, so nothing after `open_blocking` would run. Now the
+   application gets, once a process, the menus every macOS application has (its own: About,
+   Hide ⌘H, Hide Others ⌥⌘H, Show All, Quit ⌘Q; and a Window menu: Minimize ⌘M, Close ⌘W),
+   named with the window's title, and a delegate. `applicationShouldTerminate:` (the Quit item,
+   ⌘Q) and the quit Apple event, whose handler the delegate installs in place of AppKit's in
+   `applicationWillFinishLaunching:` (the Dock's Quit, AppleScript's `quit`, logging out,
+   restarting, shutting down), each close baseview's windows as their close buttons do (the
+   view, each window's delegate, asked `windowShouldClose:`), so that `open_blocking` returns
+   as it does then. The first answers `NSTerminateCancel`, leaving the process to end of
+   itself; the Apple event is answered with no error, where AppKit's cancelled `terminate:`
+   would answer `userCanceledErr` and cancel a logout. AppKit takes a key with Command for the
+   main menu before any view, so ⌘Q quits whatever the handler does with the keys. Two fixes
+   that closing the window from these needs: `close()` posts an event after `stop:`, which
+   `run` notices only as an event ends (a close from an Apple event or a timer left it waiting
+   for one); and the frame timer holds a reference to the window's state for the frame, as
+   the view's other callbacks do (`from_view`), so that a handler that closes a window of its
+   own in `on_frame` no longer frees the state under the frame. A parented window (a plug-in's
+   editor in a host) is unchanged: none of this runs for it.
+
+   The CA-72's test `crates/ca72-plugin/tests/mac_quit.rs` (macOS, the main thread) opens a
+   window of its own, posts ⌘Q as the keyboard gives it, and checks that the window closed,
+   `open_blocking` returned and the view never had the key; checks the menus' titles, keys,
+   modifiers and actions; and sends the quit Apple event from another process, as the Dock
+   does, awaiting its answer: the window closed, answered with no error. With the delegate's
+   Apple event handler left out, it fails ("0 -128" for "0 none").
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.
