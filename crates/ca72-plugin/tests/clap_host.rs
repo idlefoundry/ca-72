@@ -908,3 +908,96 @@ fn no_editor_means_no_release_notes_during_scanning_or_rendering() {
         );
     }
 }
+
+/// Run in a fresh process so each instance really reads its computer assignments at birth,
+/// without changing this test runner's environment or any installed settings.
+#[test]
+fn midi_preset_actions_work_through_clap_with_no_editor() {
+    use std::time::{Duration, Instant};
+    if std::env::var_os("CA72_PRESET_ACTION_CHILD").is_none() {
+        let target = std::env::var_os("CARGO_TARGET_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap().join("target"));
+        std::fs::create_dir_all(&target).unwrap();
+        let dir = tempfile::tempdir_in(target).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "midi_preset_actions_work_through_clap_with_no_editor",
+                "--nocapture",
+            ])
+            .env("CA72_PRESET_ACTION_CHILD", "1")
+            .env("IDLE_FOUNDRY_SHARED", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let shared = std::path::PathBuf::from(std::env::var_os("IDLE_FOUNDRY_SHARED").unwrap());
+    std::fs::create_dir_all(shared.join("CA-72")).unwrap();
+    std::fs::write(shared.join("CA-72/settings.toml"), "[preset_actions.next_preset]\nchannel = 16\nnote = 127\n[preset_actions.previous_preset]\nchannel = 15\ncc = 119\n").unwrap();
+    let entries = ca72_plugin::library::Library::at(shared.join("CA-72/Presets"))
+        .entries()
+        .0;
+    let p = Instance::new();
+    let name = || {
+        let state = json_of(&p.save());
+        serde_json::from_str::<String>(state["fields"]["preset"].as_str().unwrap()).unwrap()
+    };
+    let wait = |expected: &str| {
+        let start = Instant::now();
+        let mut applied = false;
+        loop {
+            let told = p.process(&[]);
+            if !told.is_empty() {
+                assert!(
+                    told.iter()
+                        .all(|event| event.time == 0 && event.flags & CLAP_EVENT_DONT_RECORD != 0)
+                );
+                applied = true;
+            }
+            if name() == expected && applied {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "preset {expected} not applied: {}",
+                name()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    p.process(&[In::Midi(0, [0x9f, 127, 127])]);
+    wait(&entries[0].sound.name);
+    for _ in 0..3 {
+        assert!(p.process(&[In::Midi(0, [0x9f, 127, 127])]).is_empty());
+        assert_eq!(name(), entries[0].sound.name);
+    }
+    assert!(p.process(&[In::Midi(0, [0x8f, 127, 0])]).is_empty());
+    p.process(&[In::Note(0, CLAP_EVENT_NOTE_ON, 4, 15, 127, 1.0)]);
+    wait(&entries[1].sound.name);
+    assert!(
+        p.process(&[In::Note(0, CLAP_EVENT_NOTE_OFF, 4, 15, 127, 0.0)])
+            .is_empty()
+    );
+    p.process(&[In::Cc(0, 14, 119, 127)]);
+    wait(&entries[0].sound.name);
+    for v in [127, 100, 64, 63, 0] {
+        assert!(p.process(&[In::Cc(0, 14, 119, v)]).is_empty());
+        assert_eq!(name(), entries[0].sound.name);
+    }
+    p.process(&[In::Cc(0, 14, 119, 64)]);
+    wait(&entries.last().unwrap().sound.name);
+    let state = json_of(&p.save());
+    assert!(
+        !state["fields"]["midi_map"]
+            .as_str()
+            .unwrap()
+            .contains("preset")
+    );
+}

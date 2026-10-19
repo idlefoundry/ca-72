@@ -572,7 +572,11 @@ impl Default for Ca72Params {
             editor_presets: Arc::new(AtomicBool::new(false)),
             editor_resizing: Arc::default(),
             preset: Arc::new(RwLock::new(String::new())),
-            midi_map: Arc::new(MidiMap::default()),
+            midi_map: Arc::new(if cfg!(test) {
+                MidiMap::default()
+            } else {
+                MidiMap::for_computer()
+            }),
             freq_law: Arc::new(AtomicU8::new(0)),
             drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),

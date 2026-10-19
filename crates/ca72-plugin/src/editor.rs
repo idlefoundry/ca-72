@@ -359,6 +359,7 @@ pub struct Ca72Editor {
 #[derive(Debug, Default)]
 pub struct HostKeys {
     holding: AtomicBool,
+    navigation: AtomicBool,
     queue: Mutex<Vec<KeyboardEvent>>,
     overflow: AtomicBool,
 }
@@ -367,10 +368,13 @@ impl HostKeys {
     /// A key the host gave: taken while the editor holds the keyboard (every key then, so that
     /// none is the host's key command meanwhile), else the host's.
     pub fn offer(&self, k: HostKey) -> bool {
-        if !self.holding.load(Ordering::Acquire) {
+        let event = host_key_event(k);
+        let navigation = self.navigation.load(Ordering::Acquire)
+            && event.as_ref().is_some_and(|e| preset_arrow(e).is_some());
+        if !self.holding.load(Ordering::Acquire) && !navigation {
             return false;
         }
-        if let Some(e) = host_key_event(k)
+        if let Some(e) = event
             && let Ok(mut q) = self.queue.lock()
         {
             if q.len() < 64 {
@@ -1069,6 +1073,9 @@ impl PanelWindow {
             || self.editing.whats_new.is_some();
         // (And the keys the host gives the view: the editor's while it holds them.)
         self.host_keys.holding.store(holding, Ordering::Release);
+        self.host_keys
+            .navigation
+            .store(self.editing.preset_keys_allowed(), Ordering::Release);
         // Every key while it holds them, those a host's dialog keeps for itself too (Windows:
         // in REAPER's FX window an arrow moved REAPER's focus to one of its own buttons); the
         // host's again once it lets them go (decisions.md R34).
@@ -1294,6 +1301,15 @@ impl Editing {
             let _ = k;
             false
         }
+    }
+
+    fn preset_keys_allowed(&self) -> bool {
+        self.playing.focused
+            && !self.browser.open
+            && self.typing.is_none()
+            && !self.learning.holds_keys(&self.params.midi_map)
+            && !self.standalone_dialog_open()
+            && self.whats_new.is_none()
     }
 
     fn note_typing_allowed(&self) -> bool {
@@ -2147,6 +2163,17 @@ impl Editing {
         let map = &self.params.midi_map;
         if self.playing.visible && keyboard::inside(x, y) {
             self.learning.close_menu();
+            return;
+        }
+        if let Some(t @ (BarTarget::Prev | BarTarget::Next)) = self.on_rail((x, y)) {
+            self.learning.open_menu(
+                self.renderer.fonts(),
+                map,
+                Some(Place::Preset(t)),
+                None,
+                (x, y),
+                size,
+            );
             return;
         }
         if self.in_drawer((x, y)).is_some() || self.on_rail((x, y)).is_some() {
@@ -3062,6 +3089,23 @@ fn strip_scene(
     }
 }
 
+/// Modified arrows remain host shortcuts. TYPE uses letters and Z/X, so leaves these free.
+fn preset_arrow(k: &KeyboardEvent) -> Option<i32> {
+    if k.modifiers
+        .intersects(Modifiers::SHIFT | Modifiers::CONTROL | Modifiers::ALT | Modifiers::META)
+        || k.is_composing
+    {
+        return None;
+    }
+    match k.key {
+        // Left and right only, as the rail's ‹ › keys (the owner, 2026-10-19); up and down
+        // stay free.
+        Key::ArrowLeft => Some(-1),
+        Key::ArrowRight => Some(1),
+        _ => None,
+    }
+}
+
 impl Editing {
     /// A key: whether the drawer took it (else it is the host's).
     fn keyed(&mut self, k: &KeyboardEvent) -> bool {
@@ -3132,6 +3176,19 @@ impl Editing {
         }
         if down && k.key == Key::Escape && map.armed().is_some() {
             self.learning.cancel(&map);
+            return true;
+        }
+        if self.learning.holds_keys(&map) {
+            return false;
+        }
+        if self.preset_keys_allowed()
+            && let Some(by) = preset_arrow(k)
+        {
+            if down {
+                self.end_gestures();
+                let setter = ParamSetter::new(self.context.as_ref());
+                self.browser.step(by, &self.params, &setter);
+            }
             return true;
         }
         // A key the drawer acts on may set the parameters (the arrows choose presets): no
@@ -6276,6 +6333,156 @@ mod tests {
         })
     }
 
+    #[test]
+    fn preset_arrows_respect_keyboard_takeovers_and_typing_octaves() {
+        let (mut e, _, params) = editing_standalone();
+        e.draw();
+        let current = || params.preset.read().unwrap().clone();
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowRight));
+        assert_ne!(current(), before);
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowLeft));
+        assert_ne!(current(), before);
+        // Up and down never step presets (the owner: left and right, as the rail's keys).
+        for arrow in [Key::ArrowUp, Key::ArrowDown] {
+            let before = current();
+            let name = format!("{arrow:?}");
+            assert!(!keyed(&mut e, arrow), "{name} left free");
+            assert_eq!(current(), before);
+        }
+        e.playing.typing = true;
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowRight));
+        assert_ne!(current(), before, "TYPE leaves arrows free");
+        let root = e.playing.typing_root;
+        let before = current();
+        assert!(keyed(&mut e, Key::Character("x".into())));
+        assert_eq!(e.playing.typing_root, root + 12);
+        assert_eq!(current(), before);
+        for modifiers in [
+            Modifiers::SHIFT,
+            Modifiers::ALT,
+            Modifiers::CONTROL,
+            Modifiers::META,
+        ] {
+            assert!(!e.keyed(&KeyboardEvent {
+                key: Key::ArrowRight,
+                modifiers,
+                ..KeyboardEvent::default()
+            }));
+            assert_eq!(current(), before);
+        }
+        assert!(
+            !keyed(&mut e, Key::Character("v".into())),
+            "unused key stays the host's"
+        );
+        assert!(e.keyed(&KeyboardEvent {
+            key: Key::ArrowRight,
+            state: KeyState::Up,
+            ..KeyboardEvent::default()
+        }));
+        assert_eq!(current(), before, "key release");
+        e.playing.focused = false;
+        assert!(!keyed(&mut e, Key::ArrowRight));
+        assert_eq!(current(), before, "unfocused");
+        e.playing.focused = true;
+        e.start_typing(Readout::Drive);
+        keyed(&mut e, Key::ArrowRight);
+        assert_eq!(current(), before, "typed readout");
+        keyed(&mut e, Key::Escape);
+        params.midi_map.arm(learnable("cutoff"));
+        assert!(!keyed(&mut e, Key::ArrowRight));
+        assert_eq!(current(), before, "learning");
+        params.midi_map.cancel();
+        let point = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Next)));
+        right_click(&mut e, point);
+        assert!(e.learning.menu_open());
+        assert!(!keyed(&mut e, Key::ArrowRight));
+        assert_eq!(current(), before, "menu");
+        keyed(&mut e, Key::Escape);
+        e.browser.show(true, &params);
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowLeft));
+        assert_eq!(current(), before, "search moves its caret");
+        assert!(keyed(&mut e, Key::ArrowDown));
+        assert_ne!(current(), before, "the open preset list keeps its arrows");
+        let before = current();
+        e.browser.drawer.editing = Some(ca72_panel::presets::Edit::Rename);
+        e.browser.drawer.focus = Some(ca72_panel::presets::FieldId::Edit);
+        keyed(&mut e, Key::ArrowDown);
+        assert_eq!(current(), before, "rename field");
+        e.browser.show(false, &params);
+        e.show_release_notes(crate::whats_new::current());
+        keyed(&mut e, Key::ArrowDown);
+        assert_eq!(current(), before, "What's New scrolls");
+    }
+
+    #[test]
+    fn both_preset_keys_open_the_existing_learn_and_remove_menu() {
+        let (mut e, _, params) = editing();
+        for (target, id) in [
+            (BarTarget::Prev, "previous_preset"),
+            (BarTarget::Next, "next_preset"),
+        ] {
+            let point = on_strip(&e, strip_at(StripTarget::Bar(target)));
+            let before = params.preset.read().unwrap().clone();
+            right_click(&mut e, point);
+            assert!(
+                menu_items(&e)
+                    .iter()
+                    .any(|(label, _)| label == "MIDI LEARN")
+            );
+            menu_item(&mut e, "MIDI LEARN");
+            assert_eq!(params.midi_map.armed(), Some(learnable(id)));
+            assert_eq!(
+                params.midi_map.incoming_note(2, 44, true),
+                crate::learn::Incoming::Caught
+            );
+            e.draw();
+            assert_eq!(
+                params.midi_map.binding(learnable(id)),
+                Some(crate::learn::Binding::Note {
+                    channel: 2,
+                    note: 44
+                })
+            );
+            assert_eq!(
+                *params.preset.read().unwrap(),
+                before,
+                "learning never steps"
+            );
+            right_click(&mut e, point);
+            menu_item(&mut e, "REMOVE MIDI ASSIGNMENT");
+            assert_eq!(params.midi_map.binding(learnable(id)), None);
+        }
+    }
+
+    #[test]
+    fn forwarded_preset_arrows_leave_unused_and_modified_keys_with_the_host() {
+        let keys = HostKeys::default();
+        keys.navigation.store(true, Ordering::Release);
+        let key = HostKey {
+            character: None,
+            key_code: 13,
+            modifiers: 0,
+            down: true,
+        };
+        assert!(keys.offer(key));
+        assert_eq!(keys.take()[0].key, Key::ArrowRight);
+        assert!(!keys.offer(HostKey {
+            character: Some('q'),
+            key_code: 0,
+            ..key
+        }));
+        assert!(!keys.offer(HostKey {
+            modifiers: 2,
+            ..key
+        }));
+        keys.navigation.store(false, Ordering::Release);
+        assert!(!keys.offer(key));
+    }
+
     fn learnable(id: &str) -> usize {
         crate::learn::index(id).expect("learnable")
     }
@@ -8749,6 +8956,14 @@ mod tests {
         let p = at(&e, centre("inner"));
         right_click(&mut e, p);
         shot(&mut e, "learn-3.png");
+        for (target, name) in [(BarTarget::Prev, "previous"), (BarTarget::Next, "next")] {
+            e.learning.cancel(&params.midi_map);
+            let point = on_strip(&e, strip_at(StripTarget::Bar(target)));
+            right_click(&mut e, point);
+            shot(&mut e, &format!("preset-{name}-menu.png"));
+            menu_item(&mut e, "MIDI LEARN");
+            shot(&mut e, &format!("preset-{name}-learning.png"));
+        }
     }
 
     /// The settings key's menu with FREQUENCY DIALS (decisions.md R54), and oscillator 2's

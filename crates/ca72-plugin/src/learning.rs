@@ -10,12 +10,14 @@ use ca72::freq_dial::Law;
 use ca72_panel::controls::{CONTROLS, index as control_index};
 use ca72_panel::fonts::Fonts;
 use ca72_panel::learn::{Menu, Note, PANEL, Tone, above};
-use ca72_panel::presets::{MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone};
+use ca72_panel::presets::{
+    BarTarget, MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone,
+};
 use ca72_panel::strip::{StripControl, span};
 use ca72_panel::{Lettering, Skin, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 
-use crate::learn::{Assigned, Cc, LEARNABLE, MidiMap, RESERVED_TEXT, index, reserved};
+use crate::learn::{Assigned, Binding, LEARNABLE, MidiMap, RESERVED_TEXT, index, reserved};
 
 /// How long what was done stays said over its control.
 const NOTICE: Duration = Duration::from_secs(4);
@@ -30,12 +32,15 @@ pub const KEYS_TEXT: &str = "UP, DOWN: CHOOSE · ENTER: LEARN · DELETE: REMOVE 
 pub enum Place {
     Panel(usize),
     Strip(StripControl),
+    Preset(BarTarget),
 }
 
 /// Where learnable parameter `i`'s control is.
 pub fn place(i: usize) -> Option<Place> {
     let id = LEARNABLE.get(i)?.id;
     Some(match id {
+        "previous_preset" => Place::Preset(BarTarget::Prev),
+        "next_preset" => Place::Preset(BarTarget::Next),
         "poly" => Place::Strip(StripControl::Poly),
         "unison" => Place::Strip(StripControl::Unison),
         "doubled" => Place::Strip(StripControl::Double),
@@ -48,6 +53,9 @@ pub fn place(i: usize) -> Option<Place> {
 /// The learnable parameter a place's control operates.
 pub fn learnable_at(p: Place) -> Option<usize> {
     match p {
+        Place::Preset(BarTarget::Prev) => index("previous_preset"),
+        Place::Preset(BarTarget::Next) => index("next_preset"),
+        Place::Preset(_) => None,
         Place::Panel(c) => index(CONTROLS.get(c)?.param),
         Place::Strip(s) => index(match s {
             StripControl::Poly => "poly",
@@ -62,6 +70,10 @@ pub fn learnable_at(p: Place) -> Option<usize> {
 /// Where a note about a place's control goes: centred above it.
 fn note_point(p: Place) -> (f64, f64) {
     match p {
+        Place::Preset(t) => {
+            let (x, y) = ca72_panel::strip::centre(ca72_panel::strip::StripTarget::Bar(t));
+            (x, y)
+        }
         Place::Panel(c) => above(&CONTROLS[c]),
         Place::Strip(s) => {
             let (x0, y0, x1, _) = span(s);
@@ -158,6 +170,14 @@ fn label(i: usize) -> &'static str {
     LEARNABLE.get(i).map_or("", |l| l.label)
 }
 
+fn instruction(i: usize) -> &'static str {
+    if crate::learn::action(i).is_some() {
+        "PRESS A NOTE OR CC PAD ON YOUR MIDI DEVICE"
+    } else {
+        "MOVE A CONTROLLER ON YOUR MIDI DEVICE"
+    }
+}
+
 /// What a control that cannot be learned says in its menu.
 fn not_learnable(t: Target) -> Option<String> {
     Some(match t {
@@ -215,8 +235,8 @@ impl Learning {
         let (title, items) = match learnable {
             Some(i) => {
                 let cc = map
-                    .assignment(i)
-                    .map_or("NO MIDI CONTROLLER".to_owned(), Cc::text);
+                    .binding(i)
+                    .map_or("NO MIDI CONTROLLER".to_owned(), Binding::text);
                 let learn = if map.armed() == Some(i) {
                     (Item::Cancel, "CANCEL MIDI LEARN")
                 } else {
@@ -245,7 +265,7 @@ impl Learning {
                 }
             },
         };
-        let assigned = learnable.is_some_and(|i| map.assignment(i).is_some());
+        let assigned = learnable.is_some_and(|i| map.binding(i).is_some());
         let menu = Menu {
             x,
             y,
@@ -483,7 +503,7 @@ impl Learning {
         self.notice = None;
         self.chosen = i;
         self.say(
-            format!("{}: MOVE A CONTROLLER ON YOUR MIDI DEVICE.", label(i)),
+            format!("{}: {}", label(i), instruction(i)),
             DrawerTone::News,
         );
         self.take_keys = true;
@@ -506,6 +526,12 @@ impl Learning {
             let line = format!("{}: {} REMOVED", label(i), cc.text());
             self.say(format!("{line}."), DrawerTone::Dim);
             self.notice = Some((vec![(line, Tone::Plain)], i, Instant::now()));
+            if let Err(error) = map.keep_actions(&[i]) {
+                self.say(
+                    format!("MIDI ASSIGNMENT NOT SAVED: {error}"),
+                    DrawerTone::Trouble,
+                );
+            }
         }
     }
 
@@ -539,6 +565,12 @@ impl Learning {
         }
         self.say(format!("{status}."), DrawerTone::News);
         self.notice = Some((lines, a.param, Instant::now()));
+        if let Err(error) = map.keep_assignment(&a) {
+            self.say(
+                format!("MIDI ASSIGNMENT NOT SAVED: {error}"),
+                DrawerTone::Trouble,
+            );
+        }
         Some(a)
     }
 
@@ -566,7 +598,7 @@ impl Learning {
         let (panel, strip) = match ring {
             Some(Place::Panel(c)) => (Some(c), None),
             Some(Place::Strip(s)) => (None, Some(s)),
-            None => (None, None),
+            Some(Place::Preset(_)) | None => (None, None),
         };
         let note = match armed {
             Some(i) => place(i).map(|p| {
@@ -588,7 +620,7 @@ impl Learning {
                     lines: vec![
                         (format!("MIDI LEARN: {}", label(i)), Tone::Accent),
                         (
-                            "MOVE A CONTROLLER ON YOUR MIDI DEVICE · ESC OR CANCEL STOPS".into(),
+                            format!("{} · ESC OR CANCEL STOPS", instruction(i)),
                             Tone::Plain,
                         ),
                         third,
@@ -617,14 +649,14 @@ impl Learning {
 
     /// The drawer's MIDI list as it is now.
     pub fn list_scene(&mut self, map: &MidiMap) -> MidiList {
-        let assigned = map.assignments();
+        let assigned = map.bindings();
         let armed = map.armed();
         let rows: Vec<MidiRow> = LEARNABLE
             .iter()
             .enumerate()
             .map(|(i, l)| MidiRow {
                 name: l.label.to_owned(),
-                assignment: assigned[i].map(Cc::text).unwrap_or_default(),
+                assignment: assigned[i].map(Binding::text).unwrap_or_default(),
                 waiting: armed == Some(i),
             })
             .collect();
