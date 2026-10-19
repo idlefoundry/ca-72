@@ -341,17 +341,39 @@ on Windows 11 (MSVC 1.97.1, over SSH, so without the editor test); clippy clean 
 The standalone itself was not built on either. What each needs:
 
 - **Both:** `scripts/standalone.sh` now builds `ca72-fx-helper` and puts it beside the app
-  (`target/bundled/ca72-fx-helper[.exe]`; macOS `CA-72.app/Contents/Helpers/`, where
-  `locate::helper_path` looks). Not done: `scripts/package.sh` (the ZIP, the Linux tarball,
-  the macOS `.pkg`) and the installers must take the helper, and
+  (`target/bundled/ca72-fx-helper[.exe]`; on macOS an application bundle of its own,
+  `CA-72.app/Contents/Helpers/CA-72 Effects Host.app`, where `locate::helper_path` looks:
+  below). Not done: `scripts/package.sh`'s ZIP and Linux tarball and the installers must
+  take the helper (the macOS `.pkg` has it inside the app, signed: below), and
   `scripts/test-standalone-install.py` check it. DAW-v3's transport and helper run on both
   in DAW-v3's CI (its D78: the window tests pass on the Mac and the Windows desktop), and the
   chain's tests will run in the CA-72's CI with the workspace.
-- **macOS:** the helper must be signed and notarised with the app, with the hardened runtime
-  and **`com.apple.security.cs.disable-library-validation`** (it loads other vendors'
-  libraries) and perhaps `allow-unsigned-executable-memory` for some plug-ins; the
-  application itself needs neither, which is the point of the helper. A helper with no Dock
-  icon: DAW-v3 makes it an accessory application. The transport's wait functions,
+- **macOS:** the helper is an application bundle of its own,
+  `CA-72.app/Contents/Helpers/CA-72 Effects Host.app` (decisions.md R-FX-DOCK): its own
+  identifier (the app's with `.effects-host`), the app's icon, and `LSUIElement`, so that it
+  is an agent (no Dock icon, no menu bar) and LaunchServices never takes it for the synth.
+  It also makes itself an accessory application as it starts, before any plug-in is loaded,
+  so that it is one when run bare too. Loose in `Contents/Helpers` (as first built), the
+  helper of the first effect restored at start, the app opened from the Finder, was listed
+  with the app's identifier as a second Foreground "CA-72" that was never activated: a second
+  icon bouncing in the Dock beside the real one (seemingly taken for the application being
+  opened; not seen with the app started from a shell, or with an effect added later).
+  `locate::helper_for` finds the helper beside the program, else in the first `.app` in
+  `Contents/Helpers` that holds `Contents/MacOS/ca72-fx-helper` (so a renamed build's
+  "CA-72 TEST Effects Host.app" is found as well); never loose there.
+  `scripts/test-macos-effects-host.sh APP EFFECT` opens a built app as the Finder does and
+  checks what LaunchServices lists; `crates/ca72-fx-helper/tests/macos_dock.rs` checks the
+  helper itself.
+
+  **Signing**, inside out (`scripts/package.sh`): the helper's bundle first, with the hardened
+  runtime and `scripts/standalone/effects-host-entitlements.plist`, which grants only
+  **`com.apple.security.cs.disable-library-validation`** (it loads other vendors'
+  libraries); then the application, with its own entitlements (audio input), never that
+  one, which is the point of the helper. Some plug-ins may also want
+  `allow-unsigned-executable-memory` (JIT): not granted until one is seen to need it. The
+  helper is notarised inside the app's package. Its window comes up in front when a slot's
+  name is clicked (patch 3); a click on it makes the helper the active application, so it
+  takes the keyboard. The transport's wait functions,
   `os_sync_wait_on_address` and its kin, are macOS 14.4's, and DAW-v3 linked them, so the
   application (minimum macOS 11.0) would not have started before 14.4 once it linked
   `daw-ipc`: found tonight (`nm -m` on the Mac) and fixed (PATCHES.md, 2: looked up at run
