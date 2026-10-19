@@ -8088,7 +8088,10 @@ up/down)" and "assign two pads of a midi controller on next/previous preset".
 
 **Agent decisions, 2026-10-19** (not separately approved):
 
-- **Keyboard priority.** Unmodified Left/Up chooses the previous preset, Right/Down the
+- **Left and right only** (the owner, 2026-10-19: "I think the left/right arrow keys make
+  sense for stepping through the presets, considering the buttons on the panel for stepping
+  through presets are also left/right"): Up and Down never step presets.
+- **Keyboard priority.** Unmodified Left chooses the previous preset, Right the
   next, through the rail's existing step operation, including its filters and wrapping.
   Text entry, the open preset list and its caret, MIDI Learn, menus, What's New and the
   standalone's AUDIO & MIDI dialog keep their existing routes. TYPING leaves the arrows

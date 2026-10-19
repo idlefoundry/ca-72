@@ -2993,8 +2993,10 @@ fn preset_arrow(k: &KeyboardEvent) -> Option<i32> {
         return None;
     }
     match k.key {
-        Key::ArrowLeft | Key::ArrowUp => Some(-1),
-        Key::ArrowRight | Key::ArrowDown => Some(1),
+        // Left and right only, as the rail's ‹ › keys (the owner, 2026-10-19); up and down
+        // stay free.
+        Key::ArrowLeft => Some(-1),
+        Key::ArrowRight => Some(1),
         _ => None,
     }
 }
@@ -6049,15 +6051,18 @@ mod tests {
         let (mut e, _, params) = editing_standalone();
         e.draw();
         let current = || params.preset.read().unwrap().clone();
-        for arrow in [Key::ArrowRight, Key::ArrowDown] {
-            let before = current();
-            assert!(keyed(&mut e, arrow));
-            assert_ne!(current(), before);
-        }
+        let before = current();
+        assert!(keyed(&mut e, Key::ArrowRight));
+        assert_ne!(current(), before);
         let before = current();
         assert!(keyed(&mut e, Key::ArrowLeft));
         assert_ne!(current(), before);
-        assert!(keyed(&mut e, Key::ArrowUp));
+        // Up and down never step presets (the owner: left and right, as the rail's keys).
+        for arrow in [Key::ArrowUp, Key::ArrowDown] {
+            let before = current();
+            assert!(!keyed(&mut e, arrow), "{arrow:?} left free");
+            assert_eq!(current(), before);
+        }
         e.playing.typing = true;
         let before = current();
         assert!(keyed(&mut e, Key::ArrowRight));
