@@ -151,7 +151,7 @@ impl std::fmt::Debug for Entry<'_> {
 }
 
 /// Every parameter, in the panel's order (its sections left to right), then the left hand's,
-/// the strip's, and those the editor has no control for.
+/// the strip's, the arpeggiator's drawer's, and those the editor has no control for.
 pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
     use Units::*;
     fn e<'a>(
@@ -178,6 +178,7 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
     const SV: &str = "STRIP: VOICES";
     const SS: &str = "STRIP: STEREO";
     const SO: &str = "STRIP: OUTPUT";
+    const A: &str = "ARPEGGIATOR";
     const H: &str = "NOT ON THE PANEL";
     vec![
         e("bypass", "POWER", OUT, &p.bypass, Plain),
@@ -367,6 +368,13 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
         e("drive", "DRIVE", SO, &p.drive, Plain),
         e("auto_gain", "AUTO GAIN", SO, &p.auto_gain, Plain),
         e("level", "LEVEL", SO, &p.level, Plain),
+        e("arp_on", "ARP ON", A, &p.arp_on, Plain),
+        e("arp_latch", "ARP HOLD", A, &p.arp_latch, Plain),
+        e("arp_direction", "ARP DIRECTION", A, &p.arp_direction, Plain),
+        e("arp_rate", "ARP RATE", A, &p.arp_rate, Plain),
+        e("arp_octaves", "ARP OCTAVES", A, &p.arp_octaves, Plain),
+        e("arp_gate", "ARP GATE", A, &p.arp_gate, Plain),
+        e("arp_swing", "ARP SWING", A, &p.arp_swing, Plain),
         e("lock", "LOCK (oscillators identical)", H, &p.lock, Plain),
         e(
             "midi_bend_range",
