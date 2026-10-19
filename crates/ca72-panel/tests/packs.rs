@@ -1014,3 +1014,57 @@ fn an_installed_pack_is_read_again_only_when_it_changes() {
     .expect("written");
     assert_eq!(names(), vec!["STARTER, EDITED".to_owned()]);
 }
+
+/// The pack made by hand whose check once aborted the process (its drawing's pattern's tile
+/// asked for some 17 TB; an allocation that fails is not a panic) in a Skins folder beside the
+/// starter: in a child process, so that a regression fails this test, not the run, the plug-in
+/// reads the folder, refuses that pack and loads the starter.
+#[test]
+fn a_pack_whose_check_once_aborted_is_refused_and_the_next_loads() {
+    let vast = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../skin-pack/tests/fixtures/vast-pattern"
+    ));
+    let skins = tempfile::tempdir().expect("a folder");
+    for (from, name) in [(vast, "a-vast"), (starter(), "b-starter")] {
+        let to = skins.path().join(name);
+        std::fs::create_dir_all(&to).expect("a folder");
+        copy(from, &to);
+    }
+    let out = std::process::Command::new(std::env::current_exe().expect("this test"))
+        .args([
+            "--exact",
+            "the_skins_folder_named_by_the_parent_is_read",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD_SKINS, skins.path())
+        .output()
+        .expect("a child process");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "the Skins folder's reading ended {}:\n{said}\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(said.contains("refused a-vast"), "{said}");
+    assert!(said.contains("a pattern's tile"), "{said}");
+    assert!(said.contains("loaded STARTER"), "{said}");
+}
+
+/// The Skins folder a parent test names, read as the plug-in reads it, in this process.
+const CHILD_SKINS: &str = "CA72_PANEL_TEST_CHILD_SKINS";
+
+#[test]
+fn the_skins_folder_named_by_the_parent_is_read() {
+    let Some(dir) = std::env::var_os(CHILD_SKINS) else {
+        return;
+    };
+    for found in ca72_panel::look::discover_with(Path::new(&dir), &[]) {
+        match found {
+            Ok(look) => println!("loaded {}", look.name),
+            Err((name, report)) => println!("refused {name}:\n{report}"),
+        }
+    }
+}

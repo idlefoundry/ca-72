@@ -29,11 +29,14 @@ fn draw_pack_art(frame: &mut Pixmap, scale: f64, foot: i32, drawing: &usvg::Tree
         return;
     };
     let size = drawing.size();
-    resvg::render(
+    // (Not drawn if it cannot be within its buffers' limits at this size.)
+    if !skin_pack::svg::render(
         drawing,
         Transform::from_scale(pw as f32 / size.width(), ph as f32 / size.height()),
         &mut layer.as_mut(),
-    );
+    ) {
+        return;
+    }
     frame.draw_pixmap(
         0,
         0,
@@ -55,11 +58,14 @@ fn draw_strip_art(frame: &mut Pixmap, scale: f64, foot: i32, drawing: &usvg::Tre
         return;
     };
     let size = drawing.size();
-    resvg::render(
+    // (Not drawn if it cannot be within its buffers' limits at this size.)
+    if !skin_pack::svg::render(
         drawing,
         Transform::from_scale(pw as f32 / size.width(), ph as f32 / size.height()),
         &mut layer.as_mut(),
-    );
+    ) {
+        return;
+    }
     frame.draw_pixmap(
         0,
         foot,
