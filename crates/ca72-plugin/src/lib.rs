@@ -679,7 +679,7 @@ impl Plugin for Ca72 {
         &mut self,
         _layout: &AudioIOLayout,
         config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
         // This computer's FREQUENCY dials and wheel source, with the editor open or not
         // (decisions.md R54, R-MODWHEEL-SOURCE), and the standalone's TEMPO, the arpeggiator's
@@ -697,6 +697,9 @@ impl Plugin for Ca72 {
             .prepare(f64::from(config.sample_rate), self.params.seed());
         // (RANDOM's from the session's seed, so that a render repeats.)
         self.arp.seed(self.params.seed());
+        // One latency in every QUALITY mode, ULTRA's (HI and LO held back to match), so a
+        // host never compensates afresh when it switches (decisions.md R-LATENCY).
+        context.set_latency_samples(self.engine.latency());
         let block = config.max_buffer_size.max(1) as usize;
         let rate = f64::from(config.sample_rate);
         self.rate = rate;
@@ -2988,6 +2991,44 @@ mod tests {
         }
         assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
         p
+    }
+
+    /// The plug-in tells its host one latency, ULTRA's (86 samples at 48 kHz), whatever QUALITY
+    /// is when it is initialised, and only then (decisions.md R-LATENCY).
+    #[test]
+    fn one_latency_is_reported_in_every_quality_mode() {
+        struct Told(std::cell::Cell<Vec<u32>>);
+        impl InitContext<Ca72> for Told {
+            fn plugin_api(&self) -> PluginApi {
+                PluginApi::Clap
+            }
+            fn execute(&self, _: ()) {}
+            fn set_latency_samples(&self, samples: u32) {
+                let mut told = self.0.take();
+                told.push(samples);
+                self.0.set(told);
+            }
+            fn set_current_voice_capacity(&self, _: u32) {}
+        }
+        let config = BufferConfig {
+            sample_rate: 48_000.0,
+            min_buffer_size: None,
+            max_buffer_size: 256,
+            process_mode: ProcessMode::Realtime,
+        };
+        for mode in [
+            crate::params::QualityMode::Lo,
+            crate::params::QualityMode::Hi,
+            crate::params::QualityMode::Ultra,
+        ] {
+            let mut p = Ca72::with_params(Ca72Params {
+                quality: EnumParam::new("Quality", mode),
+                ..Ca72Params::default()
+            });
+            let mut told = Told(std::cell::Cell::new(Vec::new()));
+            assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut told));
+            assert_eq!(told.0.take(), vec![86]);
+        }
     }
 
     /// Waits up to 10 s for `f` (bounded by what happens, not by time: it fails only if the

@@ -387,7 +387,6 @@ impl Learning {
         size: f64,
         (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<bool>),
     ) {
-        #[allow(unused_mut)]
         let mut items = vec![
             (Item::Head, "LOOK"),
             (Item::Look(Skin::Worn), "REALISTIC"),

@@ -5069,7 +5069,7 @@ fn ultra_note_lines(splits: bool) -> Vec<(&'static str, Tone)> {
     let mut lines = vec![
         ("ULTRA · NO COMPROMISES", Tone::Accent),
         (
-            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SIX TIMES THE WORK OF HI.",
+            "THE CIRCUIT'S MODEL EXACTLY, AT ABOUT SEVEN TIMES THE WORK OF HI.",
             Tone::Plain,
         ),
     ];
@@ -11275,7 +11275,7 @@ mod tests {
             assert!(
                 text(n)
                     .iter()
-                    .any(|t| t.contains("ABOUT SIX TIMES THE WORK OF HI"))
+                    .any(|t| t.contains("ABOUT SEVEN TIMES THE WORK OF HI"))
             );
             assert!(text(n).iter().any(|t| t == says), "{:?}", text(n));
             let dim: Vec<_> = n.lines.iter().rev().take(2).collect();
@@ -11452,7 +11452,7 @@ mod tests {
     /// touched and the drawer stays open.
     #[test]
     fn the_drawer_checks_for_updates() {
-        use crate::update::{RELEASES, VERSION, fake};
+        use crate::update::{RELEASES, fake, shown};
         let dir = tempfile::tempdir().unwrap();
         let (mut e, host, _params) = editing_with(Library::at(dir.path()));
         e.update = Update::with(fake::no_curl, fake::browser);
@@ -11461,7 +11461,7 @@ mod tests {
         let s = &e.browser.drawer.update;
         assert_eq!(
             (s.text.as_str(), s.button.as_str()),
-            (format!("CA-72 {VERSION}").as_str(), "CHECK FOR UPDATES")
+            (format!("CA-72 {}", shown()).as_str(), "CHECK FOR UPDATES")
         );
         let button = in_drawer(&e, presets_ui::update_centre());
         go(&mut e, button);

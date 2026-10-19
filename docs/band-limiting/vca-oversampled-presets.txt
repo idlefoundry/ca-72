@@ -1,0 +1,125 @@
+# R-BLEP, ULTRA's VCA oversampled (branch lab/ultra-vca-os), 2026-10-16/17, the Mac
+
+## preset_cost: CA72_ULTRA=1 CA72_SECONDS=1, ten POLY voices, % of a core; the unchanged build (claude/lucid-fermi-67e20c, 'base'), this branch with CA72_VCA_OS unset ('off') and set; interleaved, three rounds, the least of each preset's; load averages at each run's start below
+loads at start: {'base': ['14.21', '5.66', '4.81'], 'off': ['6.15', '5.88', '4.61'], 'interp2': ['4.78', '4.70', '5.54'], 'interp4': ['5.33', '4.96', '5.25'], 'filter2': ['4.46', '4.75', '5.41'], 'filter4': ['5.47', '4.84', '4.06']}
+base     rounds=3 mean   528.1 % vs base   528.1 %: +0.0 % (median +0.0; +0.0 to +0.0)  per voice +0.00 % of a core
+off      rounds=3 mean   529.3 % vs base   528.1 %: +0.2 % (median +0.6; -1.2 to +1.8)  per voice +0.12 % of a core
+    Feedback Funk (POLY 10) 1065.7 vs 1076.3
+interp2  rounds=3 mean   556.8 % vs base   528.1 %: +5.4 % (median +5.7; +1.9 to +8.4)  per voice +2.87 % of a core
+    Feedback Funk (POLY 10) 1097.1 vs 1076.3
+interp4  rounds=3 mean   597.8 % vs base   528.1 %: +13.2 % (median +12.9; +7.1 to +19.3)  per voice +6.97 % of a core
+    Feedback Funk (POLY 10) 1152.3 vs 1076.3
+filter2  rounds=3 mean   546.6 % vs base   528.1 %: +3.5 % (median +3.6; +0.9 to +5.7)  per voice +1.85 % of a core
+    Feedback Funk (POLY 10) 1086.5 vs 1076.3
+filter4  rounds=3 mean   582.2 % vs base   528.1 %: +10.2 % (median +11.3; +3.0 to +18.1)  per voice +5.41 % of a core
+    Feedback Funk (POLY 10) 1108.9 vs 1076.3
+
+## preset_render: CA72_ULTRA=1 CA72_SECONDS=2; 'off' against 'base'
+Felt Bass          the same to the bit
+Saw Monolith       the same to the bit
+Feedback Funk      the same to the bit
+Tenor Pluck        the same to the bit
+Singing Drift      the same to the bit
+Horn Bloom         the same to the bit
+Brass Choir        the same to the bit
+Smoke Flute        the same to the bit
+Bright Xylo        the same to the bit
+Wide Bow           the same to the bit
+Driven Kick        the same to the bit
+Split Snare        the same to the bit
+Tight Hat          the same to the bit
+Loose Hat          the same to the bit
+Wide Crash         the same to the bit
+Swarm Riser        the same to the bit
+Warp Field         the same to the bit
+White Lotus        the same to the bit
+Cycle of Fifths    the same to the bit
+every preset the same to the bit
+
+## preset_render: CA72_VCA_OS=interp2 against 'off'
+preset               diff RMS  diff peak     level  worst band
+Felt Bass              2.2 dB     2.5 dB  -0.00 dB +0.23 dB @ 10079 Hz
+Saw Monolith           1.4 dB     3.3 dB  +0.00 dB -0.07 dB @ 20159 Hz
+Feedback Funk          2.7 dB     1.7 dB  +0.05 dB +14.50 dB @ 630 Hz
+Tenor Pluck           -0.5 dB    -0.1 dB  +0.00 dB -1.05 dB @ 31 Hz
+Singing Drift          2.8 dB     2.8 dB  +0.00 dB +0.34 dB @ 25 Hz
+Horn Bloom             3.4 dB     3.0 dB  -0.00 dB -0.40 dB @ 20159 Hz
+Brass Choir            3.0 dB     4.0 dB  -0.00 dB +0.07 dB @ 25 Hz
+Smoke Flute            3.1 dB     2.9 dB  -0.00 dB +0.04 dB @ 1000 Hz
+Bright Xylo            2.1 dB     3.5 dB  -0.00 dB +0.26 dB @ 99 Hz
+Wide Bow               0.8 dB     0.8 dB  -0.00 dB -0.07 dB @ 20159 Hz
+Driven Kick           -6.6 dB    -1.1 dB  -0.01 dB +2.83 dB @ 1260 Hz
+Split Snare            0.8 dB     2.5 dB  -0.00 dB -0.43 dB @ 31 Hz
+Tight Hat             -0.4 dB     2.6 dB  -0.01 dB +0.41 dB @ 31 Hz
+Loose Hat              0.2 dB     1.8 dB  -0.01 dB +0.34 dB @ 39 Hz
+Wide Crash             2.4 dB     1.2 dB  -0.02 dB -0.14 dB @ 20159 Hz
+Swarm Riser          -19.8 dB   -10.0 dB  -0.00 dB -0.34 dB @ 6350 Hz
+Warp Field             3.4 dB     4.5 dB  -0.00 dB +0.10 dB @ 62 Hz
+White Lotus            3.3 dB     2.8 dB  +0.00 dB +0.23 dB @ 20 Hz
+Cycle of Fifths        2.6 dB     2.8 dB  -0.00 dB +0.20 dB @ 500 Hz
+
+## preset_render: CA72_VCA_OS=interp4 against 'off'
+preset               diff RMS  diff peak     level  worst band
+Felt Bass              2.5 dB     2.5 dB  -0.00 dB +0.25 dB @ 10079 Hz
+Saw Monolith           1.7 dB     2.5 dB  +0.00 dB -0.07 dB @ 20159 Hz
+Feedback Funk          2.7 dB     2.4 dB  -0.09 dB +12.98 dB @ 630 Hz
+Tenor Pluck            0.2 dB     0.0 dB  +0.00 dB -1.24 dB @ 31 Hz
+Singing Drift          2.7 dB     2.7 dB  +0.00 dB +0.38 dB @ 25 Hz
+Horn Bloom             3.4 dB     2.8 dB  -0.00 dB -0.40 dB @ 20159 Hz
+Brass Choir            3.0 dB     3.9 dB  -0.00 dB +0.09 dB @ 25 Hz
+Smoke Flute            3.5 dB     5.7 dB  -0.00 dB +0.04 dB @ 1000 Hz
+Bright Xylo            2.3 dB     2.5 dB  -0.00 dB +0.29 dB @ 99 Hz
+Wide Bow               1.1 dB     0.4 dB  -0.00 dB -0.07 dB @ 20159 Hz
+Driven Kick           -5.6 dB    -0.2 dB  -0.01 dB +2.50 dB @ 1260 Hz
+Split Snare            0.8 dB     2.4 dB  -0.00 dB +0.52 dB @ 50 Hz
+Tight Hat             -0.4 dB     1.7 dB  -0.01 dB +0.42 dB @ 31 Hz
+Loose Hat              0.2 dB     2.9 dB  -0.01 dB +0.34 dB @ 39 Hz
+Wide Crash             2.3 dB     1.3 dB  -0.02 dB -0.15 dB @ 20159 Hz
+Swarm Riser          -18.7 dB    -8.9 dB  -0.00 dB -0.42 dB @ 6350 Hz
+Warp Field             3.4 dB     3.9 dB  -0.00 dB +0.12 dB @ 62 Hz
+White Lotus            3.1 dB     2.8 dB  +0.00 dB +0.26 dB @ 20 Hz
+Cycle of Fifths        2.1 dB     2.8 dB  -0.00 dB -0.51 dB @ 198 Hz
+
+## preset_render: CA72_VCA_OS=filter2 against 'off'
+preset               diff RMS  diff peak     level  worst band
+Felt Bass            -37.8 dB   -17.5 dB  -0.00 dB -0.28 dB @ 25 Hz
+Saw Monolith         -32.2 dB   -10.9 dB  -0.01 dB -0.06 dB @ 20159 Hz
+Feedback Funk         -3.9 dB    -2.7 dB  +0.04 dB -1.07 dB @ 31 Hz
+Tenor Pluck          -28.1 dB    -7.4 dB  -0.01 dB -1.15 dB @ 6350 Hz
+Singing Drift        -34.2 dB   -10.7 dB  -0.01 dB +0.27 dB @ 31 Hz
+Horn Bloom           -56.7 dB   -45.5 dB  -0.00 dB -0.56 dB @ 20159 Hz
+Brass Choir          -57.8 dB   -47.5 dB  -0.00 dB +0.09 dB @ 50 Hz
+Smoke Flute          -54.2 dB   -48.9 dB  +0.00 dB +0.02 dB @ 157 Hz
+Bright Xylo          -45.4 dB   -36.4 dB  -0.00 dB -0.20 dB @ 99 Hz
+Wide Bow             -43.3 dB   -34.5 dB  -0.00 dB -0.05 dB @ 20 Hz
+Driven Kick          -33.5 dB   -15.0 dB  +0.00 dB +3.06 dB @ 1260 Hz
+Split Snare          -28.6 dB   -11.2 dB  -0.01 dB -1.06 dB @ 50 Hz
+Tight Hat            -25.5 dB    -8.7 dB  +0.00 dB -0.38 dB @ 39 Hz
+Loose Hat            -29.2 dB   -10.1 dB  +0.00 dB -0.38 dB @ 39 Hz
+Wide Crash           -32.9 dB   -10.6 dB  -0.00 dB +0.08 dB @ 125 Hz
+Swarm Riser          -40.5 dB   -31.2 dB  -0.00 dB +0.89 dB @ 630 Hz
+Warp Field           -63.4 dB   -54.9 dB  -0.00 dB +0.01 dB @ 31 Hz
+White Lotus          -49.5 dB   -34.2 dB  -0.00 dB -0.17 dB @ 62 Hz
+Cycle of Fifths      -39.0 dB   -14.6 dB  -0.00 dB -1.62 dB @ 250 Hz
+
+## preset_render: CA72_VCA_OS=filter4 against 'off'
+preset               diff RMS  diff peak     level  worst band
+Felt Bass            -36.5 dB   -16.1 dB  -0.00 dB -0.34 dB @ 25 Hz
+Saw Monolith         -31.4 dB   -10.4 dB  -0.01 dB -0.06 dB @ 20159 Hz
+Feedback Funk         -3.4 dB    -1.8 dB  +0.03 dB -1.06 dB @ 31 Hz
+Tenor Pluck          -27.2 dB    -6.3 dB  -0.01 dB +1.24 dB @ 4000 Hz
+Singing Drift        -32.8 dB    -9.3 dB  -0.01 dB +0.31 dB @ 31 Hz
+Horn Bloom           -56.5 dB   -45.4 dB  -0.00 dB -0.56 dB @ 20159 Hz
+Brass Choir          -56.5 dB   -46.3 dB  -0.00 dB +0.10 dB @ 50 Hz
+Smoke Flute          -53.0 dB   -47.7 dB  -0.00 dB +0.02 dB @ 157 Hz
+Bright Xylo          -44.2 dB   -35.2 dB  -0.00 dB -0.23 dB @ 99 Hz
+Wide Bow             -42.1 dB   -33.3 dB  -0.00 dB -0.06 dB @ 20 Hz
+Driven Kick          -32.4 dB   -14.1 dB  +0.00 dB +3.59 dB @ 1260 Hz
+Split Snare          -27.6 dB   -10.0 dB  -0.01 dB -1.28 dB @ 39 Hz
+Tight Hat            -24.5 dB    -8.3 dB  +0.00 dB -0.41 dB @ 39 Hz
+Loose Hat            -28.3 dB    -9.0 dB  +0.00 dB -0.40 dB @ 39 Hz
+Wide Crash           -32.3 dB   -10.6 dB  -0.00 dB +0.09 dB @ 125 Hz
+Swarm Riser          -39.3 dB   -30.0 dB  -0.00 dB +1.01 dB @ 630 Hz
+Warp Field           -62.1 dB   -53.8 dB  -0.00 dB +0.01 dB @ 31 Hz
+White Lotus          -48.3 dB   -33.0 dB  -0.00 dB -0.21 dB @ 62 Hz
+Cycle of Fifths      -38.2 dB   -14.2 dB  -0.00 dB -2.12 dB @ 250 Hz
