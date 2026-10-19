@@ -7630,5 +7630,5 @@ every build (VST3, CLAP, AU and the standalone), for 0.3.0:
 
 **Not done:** listening to it in a host or the standalone; the installed plug-ins in a DAW (the
 transport's bar start and loops as each host reports them, Logic's and Ableton's block splits);
-the Mac and Windows builds; a drag of the drawer's knobs by a real pointer (synthetic X events
-only).
+the Mac and Windows builds; the drawer's knobs dragged in the standalone (the editor's tests drag
+them; in the standalone its tabs were clicked by synthetic X events).
