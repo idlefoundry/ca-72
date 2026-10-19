@@ -486,3 +486,63 @@ fn the_editor_opens_in_its_helper() {
         assert_eq!(v["open"], false, "{}: {v}", p.desc.format);
     }
 }
+
+/// Third-party effects where they are (`CA72_FX_THIRD_PARTY`: folders or plug-in files, the
+/// platform's path list): each listed, loaded, played a second of noise with a finite
+/// output that is not the input, and restored from its state into a chain of its own; its
+/// editor opened too with `CA72_FX_GUI_TEST=1`.
+#[test]
+fn third_party_effects_load_play_and_keep_their_state() {
+    let Some(paths) = std::env::var_os("CA72_FX_THIRD_PARTY") else {
+        eprintln!("skipped: set CA72_FX_THIRD_PARTY to effects to try");
+        return;
+    };
+    let dirs: Vec<PathBuf> = std::env::split_paths(&paths).collect();
+    let cat = catalog::scan(&helper(), &dirs, None, Duration::from_secs(30));
+    assert!(cat.unlisted.is_empty(), "{:?}", cat.unlisted);
+    let effects: Vec<_> = cat.effects().cloned().collect();
+    assert!(!effects.is_empty(), "no effects in {dirs:?}");
+    for f in &effects {
+        let what = format!("{} ({}, {})", f.desc.name, f.desc.format, f.path.display());
+        let (c, mut r) = chain(false);
+        c.add(f).unwrap_or_else(|e| panic!("{what}: {e}"));
+        let st = &c.status()[0];
+        eprintln!(
+            "{what}: {} parameters, latency {}, helper {:?}",
+            st.params.len(),
+            st.latency,
+            st.helper_pid
+        );
+        let blocks = RATE as usize / BLOCK;
+        let (input, l, rr) = play(&mut r, 0, blocks);
+        assert!(l.iter().chain(&rr).all(|x| x.is_finite()), "{what}: finite");
+        assert!(l != input, "{what}: the effect changed the sound");
+        if std::env::var_os("CA72_FX_GUI_TEST").is_some() {
+            // Said, not failed: a VST3 editor that needs the host's run loop on Linux
+            // (`IRunLoop`, which DAW-v3's helper does not give yet) does not attach.
+            match c.open_editor(0) {
+                Ok(v) => {
+                    eprintln!("{what}: editor {v}");
+                    std::thread::sleep(Duration::from_secs(1));
+                    let _ = c.close_editor(0);
+                }
+                Err(e) => eprintln!("{what}: NO EDITOR: {e}"),
+            }
+        }
+        c.save_now().unwrap();
+        let saved = c.saved();
+        assert!(saved.slots[0].state.is_some(), "{what}: a state");
+        let (c2, mut r2) = chain(false);
+        assert!(c2.restore(&saved).is_empty(), "{what}: restored");
+        let (_, l2, _) = play(&mut r2, 0, blocks);
+        assert!(l2.iter().all(|x| x.is_finite()));
+        c2.save_now().unwrap();
+        assert_eq!(
+            c2.saved().slots[0].state,
+            saved.slots[0].state,
+            "{what}: the same state back"
+        );
+        c.shutdown().unwrap();
+        c2.shutdown().unwrap();
+    }
+}
