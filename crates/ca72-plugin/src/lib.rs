@@ -1431,7 +1431,8 @@ mod tests {
                         }
                     }
                 });
-                // The same as played: a key every 6000 samples, let go 3000 after.
+                // The same as played: a key every 6000 samples, let go 3168 after (GATE 50 % of
+                // what lies between the shortest note, 960, and the shortest gap, 624).
                 let played =
                     transport_render(&mut b, &mut cb, (blocks, len), (120.0, 0.0), |k, c| {
                         let (from, to) = (k * len, (k + 1) * len);
@@ -1439,7 +1440,7 @@ mod tests {
                         for s in 0..8usize {
                             let key = chord[s % 3];
                             evs.push((s * 6000, key, true));
-                            evs.push((s * 6000 + 3000, key, false));
+                            evs.push((s * 6000 + 3168, key, false));
                         }
                         evs.sort_by_key(|e| (e.0, e.2));
                         for (at, key, on) in evs {
@@ -1513,6 +1514,194 @@ mod tests {
         assert_eq!((p.arp.sounding(), p.arp.due()), (None, None));
         block(&mut p, &mut c, 256);
         assert_eq!(p.engine.sounding_mask(), 0);
+    }
+
+    /// HOLD with the arpeggiator off holds the keys as played (the owner's drone, 2026-10-19):
+    /// a chord pressed and let go, then a new chord, renders to the bit what the same keys held
+    /// by hand render, the first let go as the second is pressed; in MONO with RETRIGGER, MONO
+    /// with GLIDE and HIGH priority, POLY and UNISON, realtime and offline.
+    #[test]
+    fn a_held_drone_plays_through_the_engine_as_held_keys() {
+        let cases: [(&str, &[(&str, f32)]); 4] = [
+            ("mono retrigger", &[("retrigger", 1.0)]),
+            (
+                "mono glide high",
+                &[("glide_on", 1.0), ("note_priority", 1.0)],
+            ),
+            ("poly", &[("poly", 1.0)]),
+            ("unison", &[("unison", 1.0)]),
+        ];
+        for (name, set) in cases {
+            for (len, mode) in [(256, ProcessMode::Realtime), (1000, ProcessMode::Offline)] {
+                let (mut a, mut b) = (initialised(false), initialised(false));
+                for p in [&mut a, &mut b] {
+                    p.params
+                        .noise_seed
+                        .store(0xca72, std::sync::atomic::Ordering::Relaxed);
+                    p.engine.prepare(48_000.0, p.params.seed());
+                }
+                let params: Arc<dyn Params> = a.params.clone();
+                let mut ca = TestProcessContext::new(params, 48_000.0, mode);
+                let params: Arc<dyn Params> = b.params.clone();
+                let mut cb = TestProcessContext::new(params, 48_000.0, mode);
+                for (p, c) in [(&a, &ca), (&b, &cb)] {
+                    let map = p.params.param_map();
+                    for (id, v) in set {
+                        let ptr = map.iter().find(|(i, ..)| i == id).expect("a parameter").1;
+                        assert!(c.automate(ptr, *v));
+                    }
+                }
+                assert!(ca.automate(a.params.arp_latch.as_ptr(), 1.0));
+                // Held by HOLD: 60, 64, 67 pressed at 0 and let go at 3000; 62 and 65 at 24 000,
+                // let go at 25 000. By hand: held until 24 000, then 62 and 65 held on.
+                let events = |held: bool| {
+                    let mut e: Vec<(usize, u8, bool)> = vec![
+                        (0, 60, true),
+                        (0, 64, true),
+                        (0, 67, true),
+                        (24_000, 62, true),
+                        (24_000, 65, true),
+                    ];
+                    if held {
+                        e.extend([(3000, 60, false), (3000, 64, false), (3000, 67, false)]);
+                        e.extend([(25_000, 62, false), (25_000, 65, false)]);
+                    } else {
+                        e.extend([
+                            (24_000, 60, false),
+                            (24_000, 64, false),
+                            (24_000, 67, false),
+                        ]);
+                    }
+                    e.sort_by_key(|e| (e.0, e.2));
+                    e
+                };
+                let render = |p: &mut Ca72, c: &mut TestProcessContext<Ca72>, e: Vec<_>| {
+                    let mut out = Vec::new();
+                    for k in 0..48_000 / len {
+                        let (from, to) = (k * len, (k + 1) * len);
+                        for &(at, key, on) in &e {
+                            if (from..to).contains(&at) {
+                                c.push_event(note((at - from) as u32, 0, key, on));
+                            }
+                        }
+                        out.extend(block(p, c, len));
+                    }
+                    out
+                };
+                let drone = render(&mut a, &mut ca, events(true));
+                let held = render(&mut b, &mut cb, events(false));
+                assert!(
+                    drone[30_000..].iter().any(|v| v.abs() > 1e-3),
+                    "{name}: it sounds"
+                );
+                assert!(
+                    drone == held,
+                    "{name}, blocks of {len}: the first difference at {:?}",
+                    drone.iter().zip(&held).position(|(x, y)| x != y)
+                );
+            }
+        }
+    }
+
+    /// A drone (HOLD, the arpeggiator off) leaves no key down in the engine after HOLD off, All
+    /// Notes Off, PANIC, a preset turning HOLD off, a reset, or ON switched on and off while it
+    /// holds; the sustain pedal under it changes none of that.
+    #[test]
+    fn a_drone_leaves_nothing_stuck() {
+        let mut p = initialised(false);
+        let mut c = hostless(&p);
+        let chord = |c: &mut TestProcessContext<Ca72>, keys: &[u8]| {
+            for &k in keys {
+                c.push_event(note(0, 0, k, true));
+            }
+            for &k in keys {
+                c.push_event(note(20, 0, k, false));
+            }
+        };
+        let run = |p: &mut Ca72, c: &mut TestProcessContext<Ca72>, n: usize| {
+            for _ in 0..n {
+                block(p, c, 256);
+            }
+        };
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        // HOLD off.
+        chord(&mut c, &[60, 64]);
+        run(&mut p, &mut c, 20);
+        assert_ne!(p.engine.sounding_mask(), 0, "held");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "HOLD off");
+        // All Notes Off, then a drone again.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[62]);
+        run(&mut p, &mut c, 10);
+        c.push_event(cc(3, 0, ALL_NOTES_OFF, 0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "All Notes Off");
+        chord(&mut c, &[63]);
+        run(&mut p, &mut c, 10);
+        assert_ne!(p.engine.sounding_mask(), 0, "playable after it");
+        // PANIC.
+        p.local_notes.panic();
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "PANIC");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "and HOLD off after it");
+        // A preset (every arpeggiator setting at its default: off, HOLD off).
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[65, 69]);
+        run(&mut p, &mut c, 10);
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        assert!(c.automate(p.params.arp_on.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "a preset");
+        // A reset.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[67]);
+        run(&mut p, &mut c, 10);
+        p.reset();
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "a reset");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0);
+        // ON on and off while it holds: arpeggiated, then held again, then let go by HOLD off.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[60, 67]);
+        run(&mut p, &mut c, 10);
+        assert!(c.automate(p.params.arp_on.as_ptr(), 1.0));
+        run(&mut p, &mut c, 40);
+        assert!(p.arp.due().is_some(), "arpeggiated");
+        assert!(c.automate(p.params.arp_on.as_ptr(), 0.0));
+        run(&mut p, &mut c, 10);
+        assert_eq!((p.arp.sounding(), p.arp.due()), (None, None));
+        assert_ne!(p.engine.sounding_mask(), 0, "held again");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "ON on and off");
+        // The pedal down under a drone, a chord let go under it, the pedal up, HOLD off.
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 1.0));
+        c.push_event(cc(0, 0, arp::SUSTAIN, 127));
+        chord(&mut c, &[60, 64]);
+        run(&mut p, &mut c, 4);
+        chord(&mut c, &[67]);
+        run(&mut p, &mut c, 4);
+        c.push_event(cc(0, 0, arp::SUSTAIN, 0));
+        run(&mut p, &mut c, 4);
+        assert_ne!(p.engine.sounding_mask(), 0, "held after the pedal");
+        assert!(c.automate(p.params.arp_latch.as_ptr(), 0.0));
+        run(&mut p, &mut c, 1);
+        assert_eq!(p.engine.sounding_mask(), 0, "the pedal");
+        // In POLY: every voice let go (their release tails ended).
+        let mut q = initialised(true);
+        let mut c = hostless(&q);
+        assert!(c.automate(q.params.arp_latch.as_ptr(), 1.0));
+        chord(&mut c, &[60, 64, 67]);
+        run(&mut q, &mut c, 20);
+        assert!(c.automate(q.params.arp_latch.as_ptr(), 0.0));
+        run(&mut q, &mut c, 400);
+        assert_eq!(q.engine.sounding_mask(), 0, "POLY");
     }
 
     /// The sustain pedal (CC 64) holds the keys let go while the arpeggiator plays; learned by

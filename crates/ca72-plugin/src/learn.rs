@@ -156,7 +156,7 @@ pub const LEARNABLE: [Learnable; 65] = [
     switch("lock", "LOCK (oscillators identical)"),
     // The arpeggiator (R-ARP).
     switch("arp_on", "ARP ON"),
-    switch("arp_latch", "ARP LATCH"),
+    switch("arp_latch", "ARP HOLD"),
     stepped("arp_direction", "ARP DIRECTION"),
     stepped("arp_rate", "ARP RATE"),
     stepped("arp_octaves", "ARP OCTAVES"),
@@ -970,7 +970,7 @@ mod tests {
                 counts(Kind::Switch)
             ),
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
-            // ON and LATCH switches.)
+            // ON and HOLD switches.)
             (29, 11, 25)
         );
     }

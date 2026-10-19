@@ -1786,7 +1786,7 @@ impl Editing {
     }
 
     /// The value typed into the arpeggiator's drawer's readout `i` set, as it reads it: RATE a
-    /// note value (16, 16. dotted, 16t a triplet: one of its thirteen), OCTAVES 1 to 4, GATE and
+    /// note value (16, 16. dotted, 16t a triplet: one of its thirteen), OCTAVES 1 to 5, GATE and
     /// SWING percent; nothing for what is not one.
     fn set_arp_typed(&mut self, i: usize, text: &str) {
         let p = &self.params;
@@ -1818,7 +1818,7 @@ impl Editing {
     }
 
     /// A press on the arpeggiator's drawer's tabs and readouts (decisions.md R-ARP): ON and
-    /// LATCH each switched, DIRECTION's choice set, a readout double-clicked typed into.
+    /// HOLD each switched, DIRECTION's choice set, a readout double-clicked typed into.
     fn arp_press(&mut self, t: ArpTarget) {
         let now = Instant::now();
         let double = self
@@ -6306,9 +6306,11 @@ mod tests {
             p.data()[i..i + 4].to_vec()
         };
         assert_eq!(px(c, x, y), px(e.arp.frame(), x, y - row));
-        // The strip's controls under it do nothing: AUTO GAIN's tab, VOICES's knob's top.
+        // The strip's controls under it do nothing: AUTO GAIN's tab (its top, clear of GATE's
+        // readout over the rest of it), VOICES's knob's top.
+        let auto = strip::Bank::Auto.tab(0);
         for (x, y) in [
-            strip::Bank::Auto.tab(0),
+            (auto.0, auto.1 - 26.0),
             (centre("voices").0, arp_ui::TOP + arp_ui::DEPTH - 20.0),
         ] {
             assert_eq!((arp_ui::hit(x, y), interact::hit_arp(x, y)), (None, None));
@@ -6351,7 +6353,7 @@ mod tests {
     }
 
     /// The drawer's tabs and knobs operate the arpeggiator's parameters, each a gesture: ON and
-    /// LATCH switched, DIRECTION's choice set; RATE and OCTAVES dragged from position to
+    /// HOLD switched, DIRECTION's choice set; RATE and OCTAVES dragged from position to
     /// position, never between; GATE turned; a readout double-clicked takes a value typed (RATE
     /// a note value, 8t a triplet, 16. dotted; OCTAVES a digit; GATE percent).
     #[test]
@@ -6379,6 +6381,11 @@ mod tests {
             vec![Call::Begin(latch), Call::Set(latch, 1.0), Call::End(latch)]
         );
         tab(&mut e, ArpBank::Direction, 3);
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(dir), Call::Set(dir, 0.75), Call::End(dir)]
+        );
+        tab(&mut e, ArpBank::Direction, 4);
         assert_eq!(
             host.take(),
             vec![Call::Begin(dir), Call::Set(dir, 1.0), Call::End(dir)]
@@ -6443,6 +6450,12 @@ mod tests {
                 "3",
                 params.arp_octaves.as_ptr(),
                 params.arp_octaves.preview_normalized(3),
+            ),
+            (
+                1,
+                "5",
+                params.arp_octaves.as_ptr(),
+                params.arp_octaves.preview_normalized(5),
             ),
             (
                 2,

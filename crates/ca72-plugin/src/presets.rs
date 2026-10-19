@@ -1524,6 +1524,24 @@ mod tests {
             )
         );
         assert_eq!(target(&on, "arp_gate"), Some(0.25));
+        // Saved plain, as a session is: OCTAVES 4 and RANDOM, saved before OCTAVES went to 5 and
+        // ORDER came, are OCTAVES 4 and RANDOM still (R-ARP).
+        let before = lib
+            .save(
+                "Four Up Random",
+                vec![
+                    ("arp_octaves".to_owned(), 4.0),
+                    ("arp_direction".to_owned(), 3.0),
+                ],
+                None,
+            )
+            .unwrap();
+        let set = |id: &str| target(&before, id).unwrap();
+        assert_eq!(p.arp_octaves.preview_plain(set("arp_octaves")), 4);
+        assert_eq!(
+            p.arp_direction.preview_plain(set("arp_direction")),
+            crate::params::ArpDirection::Random
+        );
     }
 
     #[test]

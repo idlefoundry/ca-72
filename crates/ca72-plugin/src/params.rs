@@ -208,8 +208,8 @@ impl From<NotePriority> for Priority {
     }
 }
 
-/// The arpeggiator's DIRECTION (decisions.md R-ARP): UP, DOWN, UP/DOWN or RANDOM, the
-/// drawer's tabs left to right.
+/// The arpeggiator's DIRECTION (decisions.md R-ARP): UP, DOWN, UP/DOWN, RANDOM or ORDER, the
+/// drawer's tabs left to right (ORDER the last, so that the others keep their saved values).
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArpDirection {
     #[id = "up"]
@@ -224,6 +224,9 @@ pub enum ArpDirection {
     #[id = "random"]
     #[name = "RANDOM"]
     Random,
+    #[id = "order"]
+    #[name = "ORDER"]
+    Order,
 }
 
 impl From<ArpDirection> for crate::arp::Direction {
@@ -233,6 +236,7 @@ impl From<ArpDirection> for crate::arp::Direction {
             ArpDirection::Down => crate::arp::Direction::Down,
             ArpDirection::UpDown => crate::arp::Direction::UpDown,
             ArpDirection::Random => crate::arp::Direction::Random,
+            ArpDirection::Order => crate::arp::Direction::Order,
         }
     }
 }
@@ -283,8 +287,9 @@ pub enum ArpRate {
     ThirtySecond,
 }
 
-/// The arpeggiator's OCTAVES: 1 to 4.
-pub const ARP_OCTAVES: (i32, i32) = (1, 4);
+/// The arpeggiator's OCTAVES: 1 to 5 (the owner, 2026-10-19: "let's add 5 octaves as an
+/// option"; a value saved as 1 to 4 is the same octaves still, saved plain).
+pub const ARP_OCTAVES: (i32, i32) = (1, crate::arp::MOST_OCTAVES as i32);
 
 #[derive(Params)]
 pub struct Ca72Params {
@@ -546,7 +551,8 @@ pub struct Ca72Params {
     pub arp_rate: EnumParam<ArpRate>,
     #[id = "arp_octaves"]
     pub arp_octaves: IntParam,
-    /// GATE: each note's length, a share of its step (0 %: [`crate::arp::SHORTEST`]).
+    /// GATE: each note's length, a share of what its step leaves between the shortest note and
+    /// the shortest gap ([`crate::arp::SHORTEST`], [`crate::arp::REARM`]).
     #[id = "arp_gate"]
     pub arp_gate: FloatParam,
     /// SWING: every second step late, up to three quarters of the way through the pair.
@@ -804,7 +810,9 @@ impl Default for Ca72Params {
             note_priority: EnumParam::new("Note Priority", NotePriority::Low),
             retrigger: BoolParam::new("Retrigger", false),
             arp_on: BoolParam::new("Arp", false),
-            arp_latch: BoolParam::new("Arp Latch", false),
+            // (HOLD, once LATCH: the owner, 2026-10-19; its id kept, so that what was saved
+            // loads.)
+            arp_latch: BoolParam::new("Arp Hold", false),
             arp_direction: EnumParam::new("Arp Direction", ArpDirection::Up),
             arp_rate: EnumParam::new("Arp Rate", ArpRate::Sixteenth),
             arp_octaves: IntParam::new(
@@ -1098,8 +1106,10 @@ mod tests {
         assert_eq!(ArpRate::variants()[2], "1/2 triplet");
         assert_eq!(
             ArpDirection::variants(),
-            ["UP", "DOWN", "UP/DOWN", "RANDOM"]
+            ["UP", "DOWN", "UP/DOWN", "RANDOM", "ORDER"]
         );
+        assert_eq!(p.arp_latch.name(), "Arp Hold");
+        assert_eq!(ARP_OCTAVES, (1, 5));
         assert_eq!(p.tempo(), DEFAULT_TEMPO);
         p.set_tempo(1000.0);
         assert_eq!(p.tempo(), TEMPO_RANGE.1);

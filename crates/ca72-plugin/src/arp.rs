@@ -1,16 +1,24 @@
 //! The arpeggiator (decisions.md R-ARP): the keys held played one at a time, in turn, on a grid
 //! of the host's tempo, through the same path a key played takes (the engine's `Event::Note`),
 //! so that MONO, POLY, UNISON, NOTE PRIORITY, RETRIGGER and GLIDE take its notes as they take
-//! the player's. Off, every key goes straight through, as it always has.
+//! the player's. Off, every key goes straight through, as it always has; but with HOLD on
+//! (the parameter `arp_latch`, once LATCH), the keys played are held as played, a drone, until
+//! HOLD goes off or a new chord is played (the owner, 2026-10-19).
 //!
 //! - **The keys it plays**: those held (and, with the sustain pedal down, those let go since it
-//!   went down), or with LATCH the chord last played, kept after its keys are let go until a
-//!   key is pressed again with none held (a new chord) or LATCH goes off. OCTAVES repeats them
-//!   an octave up each time (none past MIDI's 127); a pitch two keys reach is played once.
+//!   went down), or with HOLD the chord last played, kept after its keys are let go until a
+//!   key is pressed again with none held (a new chord) or HOLD goes off. OCTAVES repeats them
+//!   an octave up each time; a pitch two keys reach is played once (but in ORDER). A note an
+//!   octave would put past MIDI's 127 plays in the highest octave it has instead (the owner:
+//!   "repeat the highest octave available of the selected note rather than go silent"): the
+//!   pattern is the one it would be with room above, each of its notes brought down by whole
+//!   octaves into range as it is played.
 //! - **The order**: UP, the next higher pitch than the last played (from the lowest again past
 //!   the highest); DOWN, the next lower; UP/DOWN, up to the highest and down to the lowest, the
-//!   ends played once each; RANDOM, any of them, but never the last again while there are two
-//!   or more. A chord changed while it plays carries on from the pitch it last played; started
+//!   ends played once each; RANDOM, any of them, but never the note last played again while
+//!   there is another; ORDER, the keys in the order they were pressed (one pressed while others
+//!   are held goes on the end, one let go leaves it), then again an octave up for each of
+//!   OCTAVES. A chord changed while it plays carries on from the note it last played; started
 //!   again from silence, it starts from the pattern's beginning.
 //! - **The grid**: a step every RATE (a note value in quarter notes; dotted and triplet ones
 //!   between), every second one late by SWING (at 100 % three quarters of the way through the
@@ -19,19 +27,31 @@
 //!   to a quarter step late plays at once, as that step's. Stopped (and in the standalone), it
 //!   runs at the host's tempo (the standalone's TEMPO) from the moment a key is pressed.
 //!   A jump of the host's position (a loop, a locate) finds the grid again there.
-//! - **GATE**: each note let go at GATE's share of its step, but never shorter than
-//!   [`SHORTEST`] (so 0 % still sounds a blip); at 100 % tied, the next note pressed before the
-//!   last is let go (legato: single triggering and GLIDE take it so), but for the same key
-//!   again, which is let go first.
+//! - **GATE**: a share of what the circuit can play in a step (the owner, 2026-10-19): each note
+//!   held at least [`SHORTEST`], so that its contours start (the trigger closes 7.8 ms after a
+//!   key goes down), and let go at least [`REARM`] before the next, so that they start again
+//!   (the trigger re-arms once the keys have been up about 12 ms); GATE sets where between the
+//!   two the note is let go. A step too short for both keeps the note's and shortens the gap. At
+//!   100 % tied, the next note pressed before the last is let go (legato: single triggering and
+//!   GLIDE take it so), but for the same key again, which is let go first.
 //!
-//! Nothing here allocates: the keys are bit sets, the times beats (quarter notes) turned into
-//! the block's samples as each block begins.
+//! Nothing here allocates: the keys are bit sets and a list of 128, the times beats (quarter
+//! notes) turned into the block's samples as each block begins.
 
 /// The sustain pedal's control change.
 pub const SUSTAIN: u8 = 64;
 
-/// The shortest note it plays, seconds (GATE at 0 %).
-pub const SHORTEST: f64 = 0.005;
+/// The shortest note it plays, seconds (GATE at 0 %): the trigger's 7.8 ms from a key down to
+/// the contours' start (`ca72::light::laws::TRIGGER_ON`, the circuit's) and room for them to be
+/// heard.
+pub const SHORTEST: f64 = 0.020;
+
+/// The shortest gap it leaves before the next note but at GATE 100 %, seconds: the keys up long
+/// enough for the trigger to start the contours again (`ca72::voice::RETRIGGER_GAP`).
+pub const REARM: f64 = 0.013;
+
+/// OCTAVES' most.
+pub const MOST_OCTAVES: u8 = 5;
 
 /// A key pressed this share of a step after its time plays at once, as that step's.
 const GRACE: f64 = 0.25;
@@ -47,6 +67,8 @@ pub enum Direction {
     Down,
     UpDown,
     Random,
+    /// As the keys were pressed.
+    Order,
 }
 
 /// RATE's note values, slow to fast, as the dial has them: each straight value, then its dotted
@@ -76,7 +98,7 @@ pub struct Settings {
     pub direction: Direction,
     /// A step, quarter notes.
     pub step: f64,
-    /// 1 to 4.
+    /// 1 to [`MOST_OCTAVES`].
     pub octaves: u8,
     /// 0 to 1.
     pub gate: f64,
@@ -135,16 +157,122 @@ struct Step {
     beat: f64,
 }
 
+/// The notes of a pattern, a bit a pitch, from 0 to 255: those OCTAVES puts past MIDI's 127
+/// kept as they would be, to be brought down into range as each is played ([`audible`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Wide([u128; 2]);
+
+impl Wide {
+    /// `keys` raised `by` semitones (under 128).
+    fn raised(keys: u128, by: u32) -> Wide {
+        match by {
+            0 => Wide([keys, 0]),
+            b => Wide([keys << b, keys >> (128 - b)]),
+        }
+    }
+
+    /// Pitch `p` alone.
+    fn one(p: u8) -> Wide {
+        let mut w = Wide::default();
+        w.0[usize::from(p >> 7)] = 1u128 << (p & 127);
+        w
+    }
+
+    fn or(self, o: Wide) -> Wide {
+        Wide([self.0[0] | o.0[0], self.0[1] | o.0[1]])
+    }
+
+    fn is_empty(self) -> bool {
+        self.0 == [0, 0]
+    }
+
+    fn has(self, p: u8) -> bool {
+        self.0[usize::from(p >> 7)] >> (p & 127) & 1 == 1
+    }
+
+    fn count(self) -> u32 {
+        self.0[0].count_ones() + self.0[1].count_ones()
+    }
+
+    fn lowest(self) -> Option<u8> {
+        match self.0 {
+            [0, 0] => None,
+            [0, h] => Some(128 + h.trailing_zeros() as u8),
+            [l, _] => Some(l.trailing_zeros() as u8),
+        }
+    }
+
+    fn highest(self) -> Option<u8> {
+        match self.0 {
+            [0, 0] => None,
+            [l, 0] => Some(127 - l.leading_zeros() as u8),
+            [_, h] => Some(255 - h.leading_zeros() as u8),
+        }
+    }
+
+    /// Those below `p`.
+    fn below(self, p: u8) -> Wide {
+        let under = |w: u128, p: u8| w & ((1u128 << p) - 1);
+        if p < 128 {
+            Wide([under(self.0[0], p), 0])
+        } else {
+            Wide([self.0[0], under(self.0[1], p - 128)])
+        }
+    }
+
+    /// Those above `p`.
+    fn above(self, p: u8) -> Wide {
+        let over = |w: u128, p: u8| if p >= 127 { 0 } else { w & !((2u128 << p) - 1) };
+        if p < 128 {
+            Wide([over(self.0[0], p), self.0[1]])
+        } else {
+            Wide([0, over(self.0[1], p - 128)])
+        }
+    }
+
+    /// The pitches, low to high.
+    fn pitches(self) -> impl Iterator<Item = u8> {
+        keys(self.0[0]).chain(keys(self.0[1]).map(|k| k + 128))
+    }
+
+    /// The `i`th (from 0, low to high).
+    fn nth(self, i: u32) -> Option<u8> {
+        let low = self.0[0].count_ones();
+        if i < low {
+            Some(nth(self.0[0], i))
+        } else if i - low < self.0[1].count_ones() {
+            Some(128 + nth(self.0[1], i - low))
+        } else {
+            None
+        }
+    }
+}
+
+/// A pattern's note as it is played: brought down by whole octaves into MIDI's range, the
+/// highest octave it has there.
+pub fn audible(p: u8) -> u8 {
+    if p <= 127 {
+        p
+    } else {
+        p - 12 * (p - 127).div_ceil(12)
+    }
+}
+
 /// The arpeggiator. Every key the note sources pass goes through it ([`Arp::key`]); what it
 /// plays it hands `out` (key, on), the engine's `Event::Note`.
 #[derive(Debug)]
 pub struct Arp {
     s: Settings,
-    /// The keys held, a bit a key; those let go with the pedal down; the latched chord.
+    /// The keys held, a bit a key; those let go with the pedal down; the chord HOLD holds
+    /// (while ON is off, the drone).
     held: u128,
     sustained: u128,
     latched: u128,
     pedal: bool,
+    /// The keys in the order they were last pressed, each once (ORDER's; those no longer
+    /// played passed over).
+    order: [u8; 128],
+    pressed: usize,
     /// The block: where it begins (beats), beats a sample and a second.
     pos: f64,
     per: f64,
@@ -162,9 +290,11 @@ pub struct Arp {
     /// soonest it may be (beats).
     sounding: Option<u8>,
     off: Option<f64>,
-    /// The pitch last played, and UP/DOWN's way (up).
+    /// The note last played (as the pattern has it, past 127 too), UP/DOWN's way (up), and
+    /// ORDER's place: the octave, the key and its place in the order.
     last: Option<u8>,
     rising: bool,
+    place: Option<(u8, u8, usize)>,
     rng: u64,
 }
 
@@ -183,6 +313,8 @@ impl Arp {
             sustained: 0,
             latched: 0,
             pedal: false,
+            order: [0; 128],
+            pressed: 0,
             pos: 0.0,
             per: 0.0,
             bps: 2.0,
@@ -195,6 +327,7 @@ impl Arp {
             off: None,
             last: None,
             rising: true,
+            place: None,
             rng: seed | 1,
         }
     }
@@ -215,9 +348,10 @@ impl Arp {
     }
 
     /// A block begins: `s` its settings, `clock` the host's transport, `len` samples long.
-    /// ON or LATCH changed are taken here, at its first sample: switched on, the keys held go
-    /// from the engine to the arpeggiator; off, its note is let go and the keys held pressed
-    /// again, as played.
+    /// ON or HOLD changed are taken here, at its first sample: switched on, the keys sounding
+    /// (held, or held by HOLD) go from the engine to the arpeggiator, HOLD's chord its own; off,
+    /// its note is let go and the keys held pressed again, as played, with HOLD its chord too.
+    /// HOLD switched off while ON is off lets go of what it held.
     pub fn begin(&mut self, s: Settings, clock: Clock, len: usize, out: &mut impl FnMut(u8, bool)) {
         let tempo = if clock.tempo.is_finite() && clock.tempo > 0.0 {
             clock.tempo.clamp(1.0, 1000.0)
@@ -243,7 +377,7 @@ impl Arp {
             } else {
                 0.25
             },
-            octaves: s.octaves.clamp(1, 4),
+            octaves: s.octaves.clamp(1, MOST_OCTAVES),
             gate: s.gate.clamp(0.0, 1.0),
             swing: s.swing.clamp(0.0, 1.0),
             ..s
@@ -259,10 +393,28 @@ impl Arp {
             self.locked = false;
             if was.on {
                 self.silence(out);
-                self.latched = 0;
-                self.sustained = 0;
-                for k in keys(self.held) {
+                let played = if s.latch {
+                    let kept = if was.latch { self.latched } else { 0 };
+                    kept | self.held | self.sustained
+                } else {
+                    self.held
+                };
+                if s.latch {
+                    self.latched = played;
+                } else {
+                    (self.latched, self.sustained) = (0, 0);
+                }
+                for k in keys(played) {
                     out(k, true);
+                }
+            } else if s.latch != was.latch {
+                if s.latch {
+                    self.latched = self.held;
+                } else {
+                    for k in keys(self.latched & !self.held) {
+                        out(k, false);
+                    }
+                    (self.latched, self.sustained) = (0, 0);
                 }
             }
             return;
@@ -295,13 +447,14 @@ impl Arp {
             None => self.locked = false,
         }
         if !was.on {
-            for k in keys(self.held) {
+            let sounding = self.held | if was.latch { self.latched } else { 0 };
+            for k in keys(sounding) {
                 out(k, false);
             }
-            self.latched = if s.latch { self.held } else { 0 };
+            self.latched = if s.latch { sounding } else { 0 };
             self.sustained = 0;
             self.silence(out);
-            if self.notes() != 0 {
+            if !self.notes().is_empty() {
                 self.start(self.pos);
             }
             return;
@@ -312,7 +465,7 @@ impl Arp {
             } else {
                 0
             };
-            if self.notes() == 0 {
+            if self.notes().is_empty() {
                 self.silence(out);
             }
         }
@@ -328,7 +481,14 @@ impl Arp {
             return;
         }
         let bit = 1u128 << key;
+        if on {
+            self.ordered(key);
+        }
         if !self.s.on {
+            if self.s.latch {
+                self.drone(key, on, out);
+                return;
+            }
             self.held = if on {
                 self.held | bit
             } else {
@@ -356,6 +516,43 @@ impl Arp {
         self.follow(before, at, out);
     }
 
+    /// A key pressed or let go with ON off and HOLD on: pressed, as played, the chord held let go
+    /// first if it is a new one (none held), the key let go first if HOLD holds it; let go,
+    /// held on.
+    fn drone(&mut self, key: u8, on: bool, out: &mut impl FnMut(u8, bool)) {
+        let bit = 1u128 << key;
+        if on {
+            if self.held | self.sustained == 0 {
+                for k in keys(self.latched) {
+                    out(k, false);
+                }
+                self.latched = 0;
+            } else if self.latched & bit != 0 {
+                out(key, false);
+            }
+            self.held |= bit;
+            self.latched |= bit;
+            out(key, true);
+        } else {
+            self.held &= !bit;
+            if self.pedal {
+                self.sustained |= bit;
+            }
+        }
+    }
+
+    /// `key` pressed: at the end of the order.
+    fn ordered(&mut self, key: u8) {
+        let n = self.pressed;
+        if let Some(i) = self.order[..n].iter().position(|&k| k == key) {
+            self.order.copy_within(i + 1..n, i);
+            self.order[n - 1] = key;
+        } else if n < self.order.len() {
+            self.order[n] = key;
+            self.pressed += 1;
+        }
+    }
+
     /// The sustain pedal down or up `at` samples into the block: the keys let go while it is
     /// down held as if they were still.
     pub fn pedal(&mut self, down: bool, at: usize, out: &mut impl FnMut(u8, bool)) {
@@ -379,10 +576,12 @@ impl Arp {
         self.sustained = 0;
         self.latched = 0;
         self.pedal = false;
+        self.pressed = 0;
         self.next = None;
         self.sounding = None;
         self.off = None;
         self.last = None;
+        self.place = None;
     }
 
     /// The pedal up and what it held let go (Reset All Controllers).
@@ -442,22 +641,28 @@ impl Arp {
         self.pos + at as f64 * self.per
     }
 
-    /// The keys it plays, the octaves over them.
-    fn notes(&self) -> u128 {
-        let base = if self.s.latch {
+    /// The keys it plays.
+    fn base(&self) -> u128 {
+        if self.s.latch {
             self.latched | self.held | self.sustained
         } else {
             self.held | self.sustained
-        };
-        (0..u32::from(self.s.octaves)).fold(0, |m, o| m | base.checked_shl(12 * o).unwrap_or(0))
+        }
+    }
+
+    /// The keys it plays, the octaves over them.
+    fn notes(&self) -> Wide {
+        let base = self.base();
+        (0..u32::from(self.s.octaves))
+            .fold(Wide::default(), |m, o| m.or(Wide::raised(base, 12 * o)))
     }
 
     /// The keys changed `at` samples into the block, `before` what it played: started from
     /// silence, or silent now.
-    fn follow(&mut self, before: u128, at: usize, out: &mut impl FnMut(u8, bool)) {
+    fn follow(&mut self, before: Wide, at: usize, out: &mut impl FnMut(u8, bool)) {
         let now = self.notes();
-        if now == 0 {
-            if before != 0 || self.sounding.is_some() {
+        if now.is_empty() {
+            if !before.is_empty() || self.sounding.is_some() {
                 self.silence(out);
             }
         } else if self.next.is_none() {
@@ -474,6 +679,7 @@ impl Arp {
         self.next = None;
         self.last = None;
         self.rising = true;
+        self.place = None;
     }
 
     /// Started from silence at beat `t`: on the host's grid, the step a key pressed now
@@ -481,6 +687,7 @@ impl Arp {
     fn start(&mut self, t: f64) {
         self.last = None;
         self.rising = true;
+        self.place = None;
         if self.locked {
             let first = self.at_or_after(t - GRACE * self.s.step);
             self.next = Some(if first.beat < t {
@@ -557,10 +764,11 @@ impl Arp {
     fn play(&mut self, n: Step, out: &mut impl FnMut(u8, bool)) {
         let next = self.after(n);
         self.next = Some(next);
-        let Some(k) = self.pick() else {
+        let Some(p) = self.pick() else {
             self.silence(out);
             return;
         };
+        let k = audible(p);
         match self.sounding {
             // Tied (GATE 100 %): the next pressed first, as legato, unless it is the same key.
             Some(was) if was != k => {
@@ -574,10 +782,21 @@ impl Arp {
             None => out(k, true),
         }
         self.sounding = Some(k);
-        self.last = Some(k);
+        self.last = Some(p);
         let length = next.beat - n.beat;
-        self.off = (self.s.gate < 1.0)
-            .then(|| n.beat + (self.s.gate * length).max(SHORTEST * self.bps).min(length));
+        self.off = (self.s.gate < 1.0).then(|| n.beat + self.held_for(length));
+    }
+
+    /// How long a note is held in a step `length` beats long: GATE's share of what lies between
+    /// the shortest note and the shortest gap; in a step too short for both, the note's.
+    fn held_for(&self, length: f64) -> f64 {
+        let (on, gap) = (SHORTEST * self.bps, REARM * self.bps);
+        let room = length - on - gap;
+        if room >= 0.0 {
+            on + self.s.gate * room
+        } else {
+            on.min(length)
+        }
     }
 
     /// The note sounding let go at its time.
@@ -588,26 +807,15 @@ impl Arp {
         self.off = None;
     }
 
-    /// The next key to play, as the direction has it.
+    /// The next note to play, as the direction has it (past 127 as the pattern has it).
     fn pick(&mut self) -> Option<u8> {
-        let notes = self.notes();
-        if notes == 0 {
-            return None;
+        if self.s.direction == Direction::Order {
+            return self.in_order();
         }
-        let lowest = notes.trailing_zeros() as u8;
-        let highest = 127 - notes.leading_zeros() as u8;
-        let above = |k: u8| {
-            let m = if k >= 127 {
-                0
-            } else {
-                notes & !((2u128 << k) - 1)
-            };
-            (m != 0).then(|| m.trailing_zeros() as u8)
-        };
-        let below = |k: u8| {
-            let m = notes & ((1u128 << k) - 1);
-            (m != 0).then(|| 127 - m.leading_zeros() as u8)
-        };
+        let notes = self.notes();
+        let (lowest, highest) = (notes.lowest()?, notes.highest()?);
+        let above = |k: u8| notes.above(k).lowest();
+        let below = |k: u8| notes.below(k).highest();
         Some(match (self.s.direction, self.last) {
             (Direction::Up, Some(l)) => above(l).unwrap_or(lowest),
             (Direction::Down, Some(l)) => below(l).unwrap_or(highest),
@@ -626,7 +834,7 @@ impl Arp {
                         k
                     }
                     // (Alone, or the last gone from a chord: from the end it is going to.)
-                    (None, None) if notes & (1u128 << l) != 0 => l,
+                    (None, None) if notes.has(l) => l,
                     (None, None) => {
                         if self.rising {
                             lowest
@@ -636,13 +844,50 @@ impl Arp {
                     }
                 }
             }
-            (Direction::Random, last) => {
-                let skip = last.filter(|&l| notes & (1u128 << l) != 0 && notes.count_ones() > 1);
-                let choices = notes & !skip.map_or(0, |l| 1u128 << l);
-                let i = (self.random() % u64::from(choices.count_ones())) as u32;
-                nth(choices, i)
+            // Never the note last heard again while another may be: those that sound as it
+            // does passed over (several of the pattern's may, past 127).
+            (Direction::Random | Direction::Order, last) => {
+                let heard = last.map(audible);
+                let others = notes
+                    .pitches()
+                    .filter(|&p| Some(audible(p)) != heard)
+                    .fold(Wide::default(), |m, p| m.or(Wide::one(p)));
+                let choices = if others.is_empty() { notes } else { others };
+                let i = (self.random() % u64::from(choices.count())) as u32;
+                choices.nth(i)?
             }
         })
+    }
+
+    /// ORDER's next note: the key after the last played in the order, past the last the first an
+    /// octave higher, past the top octave the first again; the last let go, the one now in its
+    /// place.
+    fn in_order(&mut self) -> Option<u8> {
+        let base = self.base();
+        let order = self.order[..self.pressed]
+            .iter()
+            .copied()
+            .filter(move |&k| base >> k & 1 == 1);
+        let n = order.clone().count();
+        if n == 0 {
+            return None;
+        }
+        let (mut octave, mut i) = match self.place {
+            None => (0, 0),
+            Some((o, key, at)) => match order.clone().position(|k| k == key) {
+                Some(j) => (o, j + 1),
+                None => (o, at),
+            },
+        };
+        if i >= n {
+            (octave, i) = (octave + 1, 0);
+        }
+        if octave >= self.s.octaves {
+            octave = 0;
+        }
+        let key = order.clone().nth(i)?;
+        self.place = Some((octave, key, i));
+        Some(key + 12 * octave)
     }
 
     /// The next of RANDOM's numbers (xorshift64*).
@@ -840,7 +1085,8 @@ mod tests {
     }
 
     /// Stopped, 1/16 at 120 beats a minute is a step every 6000 samples at 48 kHz, the first at
-    /// the key's press; UP plays the chord low to high and again; GATE 50 % lets each go half way.
+    /// the key's press; UP plays the chord low to high and again; GATE 50 % lets each go half way
+    /// between the shortest note (960 samples) and the shortest gap's start (624 before the next).
     #[test]
     fn up_plays_the_keys_held_in_pitch_order_from_the_press() {
         let events = [(1000, 67, true), (1000, 60, true), (1000, 64, true)];
@@ -854,7 +1100,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         let offs: Vec<usize> = p.iter().filter(|e| !e.2).map(|e| e.0).collect();
-        assert_eq!(offs[0], 1000 + 3000);
+        assert_eq!(offs[0], 1000 + 960 + (6000 - 960 - 624) / 2);
     }
 
     /// DOWN high to low; UP/DOWN up and down, its ends once; OCTAVES 2 the chord again an octave
@@ -1000,8 +1246,8 @@ mod tests {
         assert_eq!(&at[..4], [0, 8000, 12_000, 20_000], "the triplet's shuffle");
     }
 
-    /// GATE: 0 % a blip of `SHORTEST`; 100 % tied, the next key pressed before the last is let
-    /// go (the same key let go first).
+    /// GATE: 0 % the shortest note; 100 % tied, the next key pressed before the last is let go
+    /// (the same key let go first).
     #[test]
     fn gate_sets_each_notes_length() {
         let s = Settings {
@@ -1009,7 +1255,7 @@ mod tests {
             ..arp(Direction::Up)
         };
         let p = played(s, 128, 12_000, &[(0, 60, true)]);
-        assert_eq!(&p[..2], [(0, 60, true), (240, 60, false)]);
+        assert_eq!(&p[..2], [(0, 60, true), (960, 60, false)]);
         let s = Settings {
             gate: 1.0,
             ..arp(Direction::Up)
@@ -1027,6 +1273,56 @@ mod tests {
         );
         let p = played(s, 128, 6001, &[(0, 60, true)]);
         assert_eq!(p, [(0, 60, true), (6000, 60, false), (6000, 60, true)]);
+    }
+
+    /// GATE is a share of what the circuit can play (the owner, 2026-10-19): at every RATE, at
+    /// tempos from 30 to 300 and GATE from 0 to 99 %, each note is held at least `SHORTEST` and
+    /// let go at least `REARM` before the next; in a step too short for both (1/32 above 225
+    /// beats a minute) the note keeps its length and the gap is shorter. Longer as GATE grows.
+    #[test]
+    fn gate_leaves_the_circuit_room_to_start_and_start_again() {
+        let (on, gap) = (SHORTEST * RATE, REARM * RATE);
+        for (_, step) in RATES {
+            for tempo in [30.0, 120.0, 180.0, 225.0, 240.0, 300.0] {
+                let length = step * 60.0 / tempo * RATE;
+                let mut was = 0;
+                for g in [0.0, 0.12, 0.5, 0.9, 0.99] {
+                    let s = Settings {
+                        gate: g,
+                        step,
+                        ..arp(Direction::Up)
+                    };
+                    let p =
+                        played_with(s, 256, length.ceil() as usize + 1, &[(0, 60, true)], |r| {
+                            r.tempo = tempo;
+                        });
+                    let off = p.iter().find(|e| !e.2).expect("let go").0;
+                    let next = p.iter().filter(|e| e.2).nth(1).expect("the next").0;
+                    assert!(
+                        off as f64 >= on.min(length) - 1.0,
+                        "{step} {tempo} {g}: {p:?}"
+                    );
+                    if length >= on + gap {
+                        assert!(
+                            (next - off) as f64 >= gap - 1.0,
+                            "{step} {tempo} {g}: {p:?}"
+                        );
+                    } else {
+                        assert!((off as f64 - on).abs() <= 1.0, "{step} {tempo} {g}: {p:?}");
+                    }
+                    assert!(off >= was, "{step} {tempo} {g}");
+                    was = off;
+                }
+            }
+        }
+        // 1/32 at 120 with GATE 12 %, the owner's silent case: 23.5 ms now, not 7.5.
+        let s = Settings {
+            gate: 0.12,
+            step: 0.125,
+            ..arp(Direction::Up)
+        };
+        let p = played(s, 64, 3001, &[(0, 60, true)]);
+        assert_eq!(p[1], (1130, 60, false));
     }
 
     /// The keys let go: silent at once (the note let go there); pressed again, from the start.
@@ -1209,5 +1505,229 @@ mod tests {
     fn rates_run_slow_to_fast() {
         assert!(RATES.windows(2).all(|w| w[0].1 > w[1].1));
         assert_eq!(RATES[9], ("16", 0.25));
+    }
+
+    /// ORDER plays the keys as they were pressed, whatever their pitch; a key pressed while the
+    /// others are held goes on the end; one let go leaves the order, the one after it next.
+    /// OCTAVES plays the order again an octave up for each, a pitch two keys reach played by
+    /// each (the order is its keys'); and with HOLD it holds the order as pressed.
+    #[test]
+    fn order_plays_the_keys_as_they_were_pressed() {
+        let o = arp(Direction::Order);
+        let chord = [(0, 67, true), (10, 60, true), (20, 64, true)];
+        let p = played(o, 128, 6000 * 6, &chord);
+        assert_eq!(on_keys(&p), [67, 60, 64, 67, 60, 64]);
+        // 62 added while the chord is held, at the end; then 60 let go: 64, 62, 67 ...
+        let mut events = chord.to_vec();
+        events.extend([(6500, 62, true), (19_000, 60, false)]);
+        let p = played(o, 128, 6000 * 9, &events);
+        assert_eq!(on_keys(&p), [67, 60, 64, 62, 67, 64, 62, 67, 64]);
+        // Pressed again (let go and pressed), a key goes to the end: 60, 67, 64 from then.
+        let p = played(
+            o,
+            128,
+            6000 * 6,
+            &[
+                (0, 60, true),
+                (0, 64, true),
+                (0, 67, true),
+                (100, 64, false),
+                (200, 64, true),
+            ],
+        );
+        assert_eq!(on_keys(&p), [60, 67, 64, 60, 67, 64]);
+        let s = Settings { octaves: 2, ..o };
+        let p = played(s, 128, 6000 * 8, &[(0, 72, true), (10, 60, true)]);
+        assert_eq!(on_keys(&p), [72, 60, 84, 72, 72, 60, 84, 72]);
+        let s = Settings { latch: true, ..o };
+        let mut events = chord.to_vec();
+        events.extend([(100, 67, false), (100, 60, false), (100, 64, false)]);
+        let p = played(s, 128, 6000 * 6, &events);
+        assert_eq!(on_keys(&p), [67, 60, 64, 67, 60, 64]);
+        balanced(&played(
+            o,
+            128,
+            40_000,
+            &[
+                (0, 60, true),
+                (10, 64, true),
+                (30_000, 60, false),
+                (30_000, 64, false),
+            ],
+        ));
+    }
+
+    /// OCTAVES 5 over a high key: a note past MIDI's 127 plays in the highest octave it has (the
+    /// owner, 2026-10-19: "repeat the highest octave available of the selected note rather than
+    /// go silent"), every step sounding, in each DIRECTION; RANDOM never repeats a note while
+    /// there is another, and plays the top one's repeats; UP/DOWN turns at the pattern's ends.
+    #[test]
+    fn notes_past_the_top_play_in_the_highest_octave_they_have() {
+        assert_eq!(
+            (audible(127), audible(128), audible(139), audible(151)),
+            (127, 116, 127, 127)
+        );
+        assert_eq!(audible(175), 127);
+        let five = |d: Direction| Settings {
+            octaves: 5,
+            ..arp(d)
+        };
+        // G8 (115): G8, G9 and G9 again three times (the octaves above G9).
+        let g = [(0, 115, true)];
+        let p = played(five(Direction::Up), 128, 6000 * 10, &g);
+        assert_eq!(
+            on_keys(&p),
+            [115, 127, 127, 127, 127, 115, 127, 127, 127, 127]
+        );
+        let p = played(five(Direction::Down), 128, 6000 * 5, &g);
+        assert_eq!(on_keys(&p), [127, 127, 127, 127, 115]);
+        let p = played(five(Direction::UpDown), 128, 6000 * 9, &g);
+        assert_eq!(on_keys(&p), [115, 127, 127, 127, 127, 127, 127, 127, 115]);
+        let p = played(five(Direction::Order), 128, 6000 * 5, &g);
+        assert_eq!(on_keys(&p), [115, 127, 127, 127, 127]);
+        let p = played(five(Direction::Random), 128, 6000 * 40, &g);
+        let k = on_keys(&p);
+        assert!(k.windows(2).all(|w| w[0] != w[1]), "{k:?}");
+        assert!(k.contains(&115) && k.contains(&127));
+        // G9 alone: every step G9, none silent.
+        for d in [
+            Direction::Up,
+            Direction::Down,
+            Direction::UpDown,
+            Direction::Random,
+            Direction::Order,
+        ] {
+            let p = played(five(d), 128, 6000 * 10, &[(0, 127, true)]);
+            assert_eq!(on_keys(&p), [127; 10], "{d:?}");
+            balanced(&played(
+                five(d),
+                128,
+                6000 * 10,
+                &[(0, 127, true), (59_000, 127, false)],
+            ));
+            // A chord near the top: as many steps as with room, none past 127.
+            let chord = [(0, 100, true), (0, 104, true), (0, 107, true)];
+            let p = played(five(d), 128, 6000 * 30, &chord);
+            assert_eq!(on_keys(&p).len(), 30, "{d:?}");
+            assert!(on_keys(&p).iter().all(|&k| k <= 127));
+            if d == Direction::Random {
+                let k = on_keys(&p);
+                assert!(k.windows(2).all(|w| w[0] != w[1]), "{k:?}");
+            }
+        }
+        // With HOLD, the same: the chord let go, the pattern plays on.
+        let s = Settings {
+            latch: true,
+            ..five(Direction::Up)
+        };
+        let p = played(s, 128, 6000 * 5, &[(0, 115, true), (10, 115, false)]);
+        assert_eq!(on_keys(&p), [115, 127, 127, 127, 127]);
+    }
+
+    /// HOLD with ON off, a drone (the owner, 2026-10-19): the keys pass as played, held after
+    /// they are let go; a key pressed while others are held is added; one pressed with none held
+    /// starts a new chord, the old one let go first; HOLD off lets go of what it held (not of
+    /// what is still held); nothing stuck, nothing let go twice.
+    #[test]
+    fn hold_with_the_arpeggiator_off_holds_the_chord_as_played() {
+        let hold = Settings {
+            latch: true,
+            ..Settings::default()
+        };
+        let mut r = Exact::new(hold, 128);
+        r.run(
+            2000,
+            &[
+                (0, 60, true),
+                (5, 64, true),
+                (100, 60, false),
+                (100, 64, false),
+            ],
+        );
+        assert_eq!(r.played, [(0, 60, true), (5, 64, true)], "held as played");
+        // A new chord: 60 and 64 let go as 62 is pressed; 65 added while 62 is held; 62 pressed
+        // again (it is held by HOLD) let go and pressed.
+        r.run(
+            4000,
+            &[
+                (2000, 62, true),
+                (2100, 65, true),
+                (2200, 62, false),
+                (2300, 62, true),
+                (2400, 62, false),
+            ],
+        );
+        assert_eq!(
+            r.played[2..],
+            [
+                (2000, 60, false),
+                (2000, 64, false),
+                (2000, 62, true),
+                (2100, 65, true),
+                (2300, 62, false),
+                (2300, 62, true),
+            ]
+        );
+        // HOLD off with 65 still held: 62 let go, 65 sounds on as played.
+        r.run(4500, &[]);
+        r.s.latch = false;
+        r.run(5000, &[]);
+        assert_eq!(r.played.last(), Some(&(4500, 62, false)));
+        assert!(!r.played[r.played.len() - 3..].contains(&(4500, 65, false)));
+        r.run(6000, &[(5500, 65, false)]);
+        balanced(&r.played);
+    }
+
+    /// HOLD's drone and the arpeggiator hand the chord over: ON on, the drone's keys let go and
+    /// arpeggiated; ON off again, the chord held as played again; the sustain pedal keeps a chord
+    /// let go under it one chord; cleared, nothing more. Nothing stuck at any point.
+    #[test]
+    fn the_drone_and_the_arpeggiator_hand_the_chord_over() {
+        let hold = Settings {
+            latch: true,
+            ..Settings::default()
+        };
+        let mut r = Exact::new(hold, 128);
+        r.run(
+            1000,
+            &[
+                (0, 60, true),
+                (0, 64, true),
+                (10, 60, false),
+                (10, 64, false),
+            ],
+        );
+        r.s.on = true;
+        r.run(13_000, &[]);
+        assert_eq!(&r.played[2..4], [(1000, 60, false), (1000, 64, false)]);
+        assert_eq!(&ons(&r.played)[2..4], [(1000, 60), (7000, 64)]);
+        r.s.on = false;
+        r.run(14_000, &[]);
+        assert!(r.played.contains(&(13_000, 60, true)) && r.played.contains(&(13_000, 64, true)));
+        // The pedal: down, a chord let go under it and another key pressed is one chord.
+        let mut out = |_: u8, _: bool| {};
+        r.arp.pedal(true, 0, &mut out);
+        r.run(
+            16_000,
+            &[(14_100, 67, true), (14_200, 67, false), (14_300, 69, true)],
+        );
+        assert!(r.played.contains(&(14_100, 60, false)), "a new chord");
+        assert!(
+            !r.played.contains(&(14_300, 67, false)),
+            "one chord under the pedal"
+        );
+        r.arp.pedal(false, 0, &mut out);
+        r.run(17_000, &[(16_500, 69, false)]);
+        r.s.latch = false;
+        r.run(18_000, &[]);
+        balanced(&r.played);
+        // Cleared while it holds: nothing let go after (the engine let go itself).
+        r.s.latch = true;
+        r.run(19_000, &[(18_100, 60, true), (18_200, 60, false)]);
+        r.arp.clear();
+        let n = r.played.len();
+        r.s.latch = false;
+        r.run(20_000, &[]);
+        assert_eq!(r.played.len(), n);
     }
 }
