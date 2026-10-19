@@ -7211,6 +7211,34 @@ installers are unchanged. Release notes are in `releases/0.2.6.md`. Before publi
 release commit must pass all three CI jobs; the macOS installer must be Developer ID signed,
 notarised, stapled and accepted by Gatekeeper; every uploaded asset downloaded again and checked
 against the manifest.
+**Also in 0.2.6 (the owner, 2026-10-18):** #84 (R-RENDER-SETTINGS) and #85
+(R-PRESET-READABILITY), "Include #84 (test tooling) and #85 (preset-browser readability) in 0.2.6";
+#88 (R-AU-REMOTE-VISIBILITY), "Yes, I meant #88. Merge it into cpu-release for 0.2.6", with the
+owner's hands-on checks; and the AU render test's fixed seed state. Each was merged into
+`cpu-release`, not `main`. Publication: "okay, push to production then please!", and for `main`,
+"Yes, push c0e325e to main yourself (fast-forward), then upload the Mac installer, verify every
+asset, publish, and record it."
+
+**Publication evidence, 2026-10-18.** [CA-72 0.2.6](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.6)
+is public and Latest (also to an anonymous request, which the update check makes). `main` was
+fast-forwarded to PR #50's exact tested commit `c0e325e8c1f88b2f335cc9161a7b6d41d2fc95ed`, which
+the annotated `v0.2.6` tag names; GitHub marked #50, #84 and #85 merged with it (#88 already was,
+into `cpu-release`). Besides the owner's checks of #88, no host test of the installed 0.2.6 was
+made before publication.
+- [PR CI 39177243882](https://github.com/idlefoundry/ca-72/actions/runs/39177243882) and
+  [tag CI 39179031325](https://github.com/idlefoundry/ca-72/actions/runs/39179031325) passed on
+  Linux, Windows and macOS; the tag's drafted the release.
+- The macOS installer was made from the PR run's unsigned universal bundles (artifact digest
+  `sha256:8e3b4b31…`, checked), signed with Developer ID, notarised (submission
+  `5eef65a2-5cdd-4a59-b908-77c31844094b`, Accepted), stapled and accepted by Gatekeeper, on the
+  Mac from the agent's own session.
+- `CA-72-0.2.6-macOS.pkg` sha256 `e9028155d57e209bc1ece50c0a25116228f05da1becfbc34faff5b6a1cfb5b38`,
+  91,307,471 bytes. All nine assets, the Windows ZIP and its checksum among them, were downloaded
+  again and checked against `SHA256SUMS.txt` and GitHub's digests; the published installer,
+  downloaded once more with the quarantine flag set, passed `pkgutil`, `stapler validate` and
+  Gatekeeper ("Notarized Developer ID").
+- Issues #63 and #69 were closed with the release. The scripts and logs are in
+  `~/lab/artifacts/ca-72/0.2.6/`.
 
 ## R-STILL-LONGER. The Windows window test waits out the hamster's pause
 
@@ -7923,3 +7951,79 @@ Do not treat approval to include the correction as evidence that these checks pa
 
 **Owner's acceptance, 2026-10-18.** Told these checks remained, the owner did them by hand:
 "i did hands on checks. we're good".
+
+## R-INIT. Start a patch from the instrument's fresh-instance sound
+
+**Owner decision, 2026-10-18.** Implement issue 55 as a clearly visible INIT action in the
+presets' menu. Recall the existing fresh-instance sound, not zeroed knobs, and preserve player
+and computer preferences. The owner will try a separate test build before production release.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- INIT is a dedicated key beside PRESET, available without choosing a preset first. It uses
+  `Ca72Params`' parameter defaults directly, through normal host parameter gestures; it does
+  not create or replace a library entry, including a user's preset named Init. The current
+  preset is cleared, as on a fresh instance, and SAVE AS can keep the new patch.
+- The starting patch on main `5e7abe9` is oscillator 1 alone, sawtooth at 8', its mixer at 8;
+  oscillators 2 and 3 off, also sawtooth at 8', FREQUENCY centred, mixer levels 8; noise off,
+  white, level 8; external input off, level 5. TUNE and GLIDE are 0, modulation mix and wheel
+  0, oscillator modulation off, oscillator 3 keyboard control on. Filter mode LO, modulation
+  off, first keyboard-control switch on and second off; CUTOFF centred, EMPHASIS 0, CONTOUR
+  AMOUNT 5. The filter's ATTACK/DECAY/SUSTAIN are 0/4/5; loudness 0/4/8. MAIN OUTPUT is on at
+  10; A-440 off; GLIDE switch off; DECAY switch on; NOTE PRIORITY LOW; RETRIGGER off.
+  POLY and UNISON are off, VOICES 4, ENTROPY/WIDTH/INNER/DETUNE/FEEDBACK/DRIVE/LEVEL 0,
+  placement EVEN, DOUBLE and LOCK off, AUTO GAIN on.
+- The existing sound-preset exclusions stay: PITCH wheel, bypass, QUALITY and MIDI BEND RANGE.
+  MIDI assignments, the instance's random seed, editor dimensions and visibility, look,
+  lettering, frequency-dial law, keyboard and audio-device preferences are not reset.
+  The engine's running oscillators and envelopes are not restarted; audio equivalence is
+  checked with equivalent seed, phase and initial engine state, as for a new instance.
+- No factory preset, parameter ID, preset format or saved-project migration changes.
+
+**Evidence (the Mac, Rust 1.97.1, 2026-10-18):**
+`init_restores_every_sound_default_and_preserves_preferences` changes every hosted parameter,
+including one only 0.0000002 from its normalised default, then checks all sound defaults and
+the exclusions; a second INIT adds no gestures and no file is written.
+`init_saved_and_reloaded_matches_a_fresh_instances_state_and_audio` starts from Brass Choir,
+uses the drawer action, saves and reloads the result, checks a user's preset named Init is
+untouched, and compares three notes' stereo renders at LO, HI and ULTRA with seed 12345:
+15,360 stereo samples at each quality match to the bit and are finite and non-silent.
+Both tests and plug-in library/test clippy pass. No host or audio device was opened for them.
+
+**Integration, 2026-10-18.** Rebased onto main `1a1dd6c` (0.2.6), retaining #85's
+caption sizes, selection colours, hit-region and redraw tests. The INIT cap uses those same
+caption measurements and remains separate from the existing keys. Its hover is checked in
+partial redraws and shown in the optional editing-state review render.
+
+The audio reference now comes from a separate fresh parameter instance and engine, with the
+same quality and seed, before the other instance loads a factory sound and INIT. After
+saving both INIT and a patch edited from it, a new browser reads the files back; their states
+and audio must match. The test also compares every factory library entry afterwards. The
+parameter test explicitly keeps the editor's transient visibility flags as well as its
+persisted preferences. Engine history is still not restarted by INIT.
+
+## R-SETTINGS-VERSION. Settings names the installed version
+
+**Owner authorisation, 2026-10-18.** Implement only issue 75's installed-version display in
+Settings. The changelog and What's New modal are outside this work.
+
+**Integration decision, 2026-10-18.** Keep `33cec21`'s Settings heading, derived from the
+existing `update::VERSION` (`CARGO_PKG_VERSION`), matching the plug-in's reported version.
+It remains visible independently of update status, including offline failure; opening the
+menu does not start an update check. The drawer still distinguishes a newer online version
+from the installed version.
+
+Compared with fidelity's `414eaa0` (R-VERSION), this keeps the change within issue 75's
+version-display scope and avoids its unrelated worker-seat test change. That alternative
+adds a build script, commit suffixes in the drawer and a VERSION menu group. Local builds
+with the same package version remain indistinguishable under the chosen approach. Whether
+to add commit identity separately remains for the owner; neither a new version policy nor
+approval of that alternative is inferred here. No version number is changed.
+
+**Integration evidence (Linux, Rust 1.97.1, 2026-10-18):**
+`cargo test -p ca72-panel -p ca72-plugin` passes, including both approved panel images,
+the Init parameter/state/audio checks and the Settings tests. Clippy for both crates, all
+targets, passes with default and all features and `-D warnings`; formatting and whitespace
+checks pass. A separate read-only source review found no product bugs or unrelated changes.
+All checks use this worktree's target, shared-data and worker-seat folders. No native host,
+installed plug-in or audio device was opened; host acceptance of the new action remains
+untested here.
