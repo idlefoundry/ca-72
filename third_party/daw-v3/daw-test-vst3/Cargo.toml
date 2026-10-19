@@ -1,0 +1,27 @@
+[package]
+name = "daw-test-vst3"
+description = "The shipped VST3 test plugin: deterministic gain and a sine instrument, state, crash and hang injection"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vst3.workspace = true
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+libloading.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[lints]
+workspace = true
