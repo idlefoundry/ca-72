@@ -7477,3 +7477,36 @@ Do not treat approval to include the correction as evidence that these checks pa
 
 **Owner's acceptance, 2026-10-18.** Told these checks remained, the owner did them by hand:
 "i did hands on checks. we're good".
+
+## R-ALIAS-MEASURE. High-note aliasing measured across 0.2.5, 0.2.6 and fidelity
+
+**Agent measurements, 2026-10-18** (issue #67; no synthesis change and no release decision):
+- **A controlled reproduction.** C6, C7 and C8, oscillator 1 alone, six waveforms, fully open
+  filter, LOCK on, no modulation, at 44.1, 48 and 96 kHz in LO, HI and ULTRA. The same offline
+  renderer was built in separate detached worktrees at v0.2.5 (`212967e`), GitHub main/0.2.6
+  (`1a1dd6c`) and fidelity/PR #87 (`9b0f9e8`), with isolated targets and settings.
+- **The multicore release is unchanged here.** All 162 engine renders and 108 separate
+  oscillator diagnostics in main match v0.2.5 to the byte. The worst 44.1 kHz engine cases
+  have inharmonic/harmonic ratios of -30.5 dB (LO), -28.2 (HI) and -32.1 (ULTRA), with discrete
+  lines matching folded harmonics inside 20 Hz to 20 kHz. Some are also well below 10 kHz.
+- **Band-limiting helps, with residuals.** Fidelity improves all 108 oscillator diagnostics
+  and 155 of 162 complete-voice cases. The isolated HI C8 saw at 44.1 kHz improves from -25.6
+  to -101.4 dB; the complete saw voice from -28.2 to -44.6. The candidate's pulse outputs
+  still have substantial residuals; seven ULTRA pulse cases at 96 kHz increase their ratio
+  by 0.07 to 1.27 dB. The complete PR also changes ULTRA's VCA, so the output changes cannot
+  all be assigned to oscillator BLEP alone.
+- **Evidence, with limits.** [The report](measurements/aliasing-2026-10.md) gives the patch,
+  window, harmonic masks, noise and attribution limits, every case's results, five spectra
+  and fifteen RMS-matched float WAVs, with committed rerun scripts. Audible-band components
+  are confirmed; no human listening or blind test was performed, and no perceptual cure is
+  claimed. The remaining rectangles warrant measurements at the mixer, filter and VCA.
+
+**Verification (Linux, Ryzen 7 7800X3D, Rust 1.97.1):** all three release builds and 810
+renders completed; the analyser's synthetic harmonic/foldback and invalid-input checks pass.
+The plug-in's tests give 291 passed, zero failed, 31 ignored, including split/unsplit ULTRA
+voice equivalence. Plug-in/all-target clippy with `-D warnings` and workspace formatting pass.
+One full default-feature workspace test run with four test threads and ngspice 47 gives 494
+passed, zero failed, 56 ignored. The owner's real settings, installed plug-ins and audio
+devices were not used. Not tried:
+hosts, Windows/macOS, the reviewer's unknown settings, modulation or polyphonic patches.
+Whether and when to release #87's sound changes remains the owner's decision.

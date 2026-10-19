@@ -1,0 +1,92 @@
+[
+  {
+    "file": "engine-LO-44100-108-saw-v0.2.5.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.03920067970985,
+    "gain_db": 0.04300219531144505
+  },
+  {
+    "file": "engine-LO-44100-108-saw-main.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.03920067970985,
+    "gain_db": 0.04300219531144505
+  },
+  {
+    "file": "engine-LO-44100-108-saw-fidelity.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.039030566055036,
+    "gain_db": -0.4140438856421996
+  },
+  {
+    "file": "engine-HI-44100-108-saw-v0.2.5.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.039035194466248,
+    "gain_db": -0.16323534798352637
+  },
+  {
+    "file": "engine-HI-44100-108-saw-main.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.039035194466248,
+    "gain_db": -0.16323534798352637
+  },
+  {
+    "file": "engine-HI-44100-108-saw-fidelity.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.039054307169604,
+    "gain_db": -0.678269059893144
+  },
+  {
+    "file": "engine-ULTRA-44100-108-narrow-v0.2.5.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.03915868893212,
+    "gain_db": -2.5552548315563577
+  },
+  {
+    "file": "engine-ULTRA-44100-108-narrow-main.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.03915868893212,
+    "gain_db": -2.5552548315563577
+  },
+  {
+    "file": "engine-ULTRA-44100-108-narrow-fidelity.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.038977885877983,
+    "gain_db": -2.5839893236552367
+  },
+  {
+    "file": "engine-LO-96000-108-narrow-v0.2.5.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.085497074722316,
+    "gain_db": -1.3171430428770576
+  },
+  {
+    "file": "engine-LO-96000-108-narrow-main.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.085497074722316,
+    "gain_db": -1.3171430428770576
+  },
+  {
+    "file": "engine-LO-96000-108-narrow-fidelity.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.08548189691128,
+    "gain_db": -1.3686017747974997
+  },
+  {
+    "file": "oscillator-HI-44100-108-saw-v0.2.5.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.03916519969413,
+    "gain_db": -18.626790923588825
+  },
+  {
+    "file": "oscillator-HI-44100-108-saw-main.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.03916519969413,
+    "gain_db": -18.626790923588825
+  },
+  {
+    "file": "oscillator-HI-44100-108-saw-fidelity.wav",
+    "rms_target_dbfs": -18.0,
+    "rms_after_fades_dbfs": -18.03910495062582,
+    "gain_db": -19.267241668174336
+  }
+]
