@@ -220,9 +220,12 @@ On the audio thread (`Runner::process` and the nodes):
 - no waiting past the deadline, ever; a late, dead or missing effect is dry at once.
 
 The helpers' audio threads ask for real-time scheduling (DAW-v3's `rt::promote`); the
-synth's own threads are as before. Not measured yet: the chain's cost per block on the
-slow-machine matrix (the CPU rule in the circuit-plugin playbook), and an allocation-counting
-test of `Runner::process` (DAW-v3 has one for its engine; one should be added here).
+synth's own threads are as before. `crates/ca72-fx-helper/tests/no_alloc.rs` counts every allocation and free on the playing
+thread (a counting global allocator) over 400 paced blocks through two effects while the
+chain is changed under them (a parameter, a bypass, a move, a helper killed and restored, an
+effect taken out): none (and 800 when one small `Vec` a block is slipped in, to prove the
+count). Not measured yet: the chain's cost per block on the slow-machine matrix (the CPU
+rule in the circuit-plugin playbook).
 
 ## The temporary interface
 
