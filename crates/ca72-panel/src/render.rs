@@ -11,7 +11,7 @@ use resvg::tiny_skia::{
 use resvg::usvg;
 
 use crate::art::{self, Blend, H, Layer, Layout, Lettering, W};
-use crate::controls::{CONTROLS, Kind, Mark, feedback_silent};
+use crate::controls::{CONTROLS, Kind, Mark, Place, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
 use crate::skin::{Part, Pictures, Skin};
@@ -412,6 +412,10 @@ impl Renderer {
             .iter()
             .zip(scene.values)
             .map(|(c, v)| {
+                // (The arpeggiator's drawer draws its own knobs: `Renderer::paint_control`.)
+                if c.place == Place::Arp {
+                    return Layer::default();
+                }
                 let midi = match c.kind {
                     Kind::Wheel { detent: true, .. } => scene.midi.0,
                     Kind::Wheel { .. } => scene.midi.1,
@@ -475,6 +479,19 @@ impl Renderer {
     /// this scale).
     pub fn text_size(&self) -> f64 {
         TIP_TEXT * self.layout.lettering().text() * self.ui / self.scale
+    }
+
+    /// Control `i` at `v` (normalized) as this skin draws it, alone, for a frame drawn apart (the
+    /// arpeggiator's drawer, `crate::strip::arp`): its pixels and where their top left corner
+    /// is in this frame's pixels (the drawing's).
+    pub fn paint_control(&mut self, i: usize, v: f64) -> Option<(i32, i32, Pixmap)> {
+        let c = CONTROLS.get(i)?;
+        let layer = if self.skin == Skin::Worn {
+            art::control_worn(c, v, 0.0)
+        } else {
+            art::control(c, v, 0.0)
+        };
+        self.render_layer(&layer)
     }
 
     /// A layer's pixels, aligned to the frame's: their place and their image (its body, its
@@ -857,17 +874,23 @@ const FIXED: usize = 6;
 /// corner. Each pixel's light multiplied (`LAMP`: at the lamp, far from it, and how far its
 /// light reaches across and down, as shares of the drawing).
 fn lamp(frame: &mut Pixmap, s: f64) {
+    lamp_at(frame, s, (0, 0));
+}
+
+/// The lamp's light over `frame`, a part of the drawing whose top left pixel is the drawing's
+/// pixel `at` (the arpeggiator's drawer's plate: `crate::strip::arp`).
+pub(crate) fn lamp_at(frame: &mut Pixmap, s: f64, at: (i32, i32)) {
     const LAMP: (f64, f64, f64, f64) = (1.26, 0.84, 0.55, 0.9);
     let (w, h) = (frame.width() as usize, frame.height() as usize);
     let across: Vec<f64> = (0..w)
         .map(|x| {
-            let u = (x as f64 + 0.5) / s / art::W;
+            let u = (x as f64 + f64::from(at.0) + 0.5) / s / art::W;
             (-((u - 0.2) / LAMP.2).powi(2)).exp()
         })
         .collect();
     let down: Vec<f64> = (0..h)
         .map(|y| {
-            let v = (y as f64 + 0.5) / s / art::H;
+            let v = (y as f64 + f64::from(at.1) + 0.5) / s / art::H;
             (-(v / LAMP.3).powi(2)).exp()
         })
         .collect();

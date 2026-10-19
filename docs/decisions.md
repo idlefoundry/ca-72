@@ -8079,3 +8079,353 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-ARP. An arpeggiator, in a drawer dropped from the rail's ARP key
+
+**Owner decisions, 2026-10-18** (issue #90, its comment of that day, and the night's brief). In
+every build (VST3, CLAP, AU and the standalone), for 0.3.0:
+- **Modes and range:** "up, down, up/down and random, with an octave range": DIRECTION is UP |
+  DOWN | UP/DOWN | RANDOM, OCTAVES 1 to 4.
+- **Rate:** "tempo-synced divisions only": 1/2, 1/4, 1/8, 1/16 and 1/32 with the triplet and
+  dotted values between them; the dial numbered 2, 4, 8, 16 and 32 at the straight values, the
+  others unnumbered ticks; the readout the value's number (16). It follows the host's tempo; "the
+  standalone needs its own tempo": a simple TEMPO setting where the standalone's other settings
+  are, 120 by default (its final look the owner's to design).
+- **Latch, gate, swing:** LATCH (hold); GATE, the note's length, 0 to 100 %; SWING, 0 to 100 %, 0
+  straight.
+- **Transport stopped:** "keeps running at the host tempo while keys are held, and locks to the bar
+  when the transport plays".
+- **Voicing:** "arpeggiated notes feed the existing engine exactly as played notes do, through
+  mono/poly/unison, NOTE PRIORITY, RETRIGGER and glide. The arpeggiator does not bypass or
+  duplicate voice allocation."
+- **Presets:** "arpeggiator settings are saved with the patch. Existing presets and saved projects
+  load with the arpeggiator off and sound unchanged."
+- **Automation:** "every arpeggiator setting is a host parameter (ON, LATCH, DIRECTION, RATE,
+  OCTAVES, GATE, SWING)". **MIDI:** no MIDI out.
+- **Placement, C1** (mock-ups drawn by the panel's renderer on a throwaway copy; the owner chose
+  the drawer, then "make it even slimmer", then C1; rejected: a page of its own, the rail's dot
+  screen, a two-row drawer, a drawer of readouts alone): an ARP key on the rail after the
+  keyboard's, the name's screen a key shorter (star, previous, name, next, SAVE, PANEL, keyboard,
+  ARP, settings); it drops a one-row drawer, 265 units deep, inside the window over the top of
+  whichever lower page shows, as the presets' drawer drops; ARP again puts it away; the key lit
+  while the arpeggiator runs. The row: the ARP bank (ON | LATCH), the DIRECTION bank, a rule, then
+  RATE, OCTAVES, GATE and SWING as knob-and-readout units of the strip's own parts. "The mock's
+  drawer lip and drop shadow were a quick composite": a real edge, as the presets' drawer has.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One path for every key.** Every key the note sources pass (the host's MIDI on any channel, the
+  standalone's keyboard and computer keys) goes through the arpeggiator (`arp.rs`) to the
+  engine's `Event::Note`; off, it hands each on at once, unchanged, so the sound without it is
+  the code's before to the bit. Its notes are the engine's events at their samples, the run
+  split there as at a host's event, after the host's events at the same sample. It plays one
+  key at a time (a monophonic arpeggiator): in POLY each step takes a voice, in UNISON all.
+- **The order.** UP and DOWN by pitch, the next above (below) the last played, from the other end
+  past the last; UP/DOWN bounces, its ends once (60 64 67 64 60 64…); a chord changed while it
+  plays carries on from the pitch it last played, and from silence it starts again from the
+  pattern's beginning. OCTAVES repeats the keys an octave up each time, none past 127; a pitch
+  two keys reach (C4 and C5 with two octaves) is played once. **RANDOM's rule:** a key chosen
+  evenly among the pattern's pitches but the last played, while there are two or more (one
+  alone repeats); its numbers from the session's noise seed, so a render repeats.
+- **RATE's thirteen values**, slow to fast as the dial turns, each straight value then its dotted
+  and its triplet (the dotted the longer): 2, 4., 2t, 4, 8., 4t, 8, 16., 8t, 16, 32., 16t, 32;
+  the dial a tick every 25 degrees, the straight ones numbered; the readout `16.` for a dotted
+  sixteenth (the segments' point) and `16t` for a triplet (a seven-segment t). Its host
+  parameter names them "1/16 dotted", "1/8 triplet". The default a sixteenth.
+- **The grid.** While the host plays and says where it is, the steps are counted from the start of
+  each bar (its bar start and time signature), the last of a bar cut short at the bar's end (a
+  dotted quarter in 4/4: 0, 1.5 and 3 beats, then the next bar's downbeat); without a bar,
+  from the song's start. A key pressed while silent waits for the next step, but one pressed
+  up to a quarter of a step after a step plays at once as that step's (a key a little late
+  is not held back a whole step). A jump of the host's position (a loop, a locate) finds the
+  grid again there, the step on a loop's start played at its first sample; the note sounding
+  keeps what was left of it. Stopped (or a host that gives no position), it runs at the host's
+  tempo (else TEMPO) from the moment a key is pressed; the transport stopping while it plays,
+  it goes on in time; starting, it finds the host's grid. A tempo change moves the steps on
+  at the new tempo from where they were (times are kept in beats).
+- **GATE:** each note let go at GATE's share of its own step (a swung step's length), but never
+  shorter than 5 ms (`arp::SHORTEST`), so 0 % sounds a blip (the contours, DECAY on, then
+  release as from a quick tap); at 100 % tied: the next key pressed before the last is let go
+  (single triggering and GLIDE take it as legato), but for the same key again, which is let go
+  first. The default 50 %.
+- **SWING:** every second step of each bar late by SWING × half a step: 100 % puts it three
+  quarters of the way through the pair (a drum machine's 75 %), 67 % is the triplet shuffle.
+- **LATCH:** a key pressed with none held (none down, none held by the pedal) starts a new chord;
+  one pressed while others are held adds to it; the chord plays on after its keys are let go,
+  until a new one or LATCH off, which lets it go at once. ON switched off with keys held: its
+  note let go and the keys pressed again, as played; on: the engine's keys let go and played in
+  turn. A preset or session that switches it off while it plays does the same at the block's
+  first sample: nothing is left down.
+- **The sustain pedal** (CC 64, ≥ 64 down), which the instrument has never followed: the
+  arpeggiator's while it is on, the keys let go while it is down held as if they were still,
+  until it comes up (Reset All Controllers lifts it). Played without the arpeggiator the pedal
+  does nothing, as before (a project with pedal data keeps its sound). A controller MIDI Learn has
+  on CC 64 is that parameter's alone, as before. **All Notes Off, All Sound Off, a reset and
+  PANIC** forget the held, pedalled and latched keys (LATCH stays on).
+- **The parameters**, after every other (no id moves): `arp_on` ("Arp"), `arp_latch`,
+  `arp_direction` (`up`, `down`, `up_down`, `random`), `arp_rate` (`1/2`, `1/4d`, `1/2t`, … `1/32`),
+  `arp_octaves` (1 to 4), `arp_gate` (%), `arp_swing` (%). Sound parameters: saved with presets
+  (`presets::sound_params`; a preset that does not name them plays without it, every factory
+  preset so) and sessions; a session saved before them opens with them at their defaults, off,
+  whatever the instance had (`Ca72::filter_state`). Turning it on marks the preset changed. MIDI
+  Learn takes them all (65 learnable: ON and LATCH switches, DIRECTION, RATE and OCTAVES
+  selectors, GATE and SWING knobs); the knobs' right-click menus learn as the panel's.
+- **TEMPO** (the standalone, which has no host to give one; and any host that gives none): the
+  AUDIO & MIDI dialog's last row, "120 BPM (the arpeggiator's; applied at once)", a list every
+  5 from 40 to 240 and the arrow keys a beat, 30 to 300; applied at once, outside the devices'
+  APPLY (nothing to restart), and kept for the computer in `settings.toml` as
+  `standalone_tempo` (not in the session: the owner will design its final look and may move it).
+- **The drawer** (`ca72_panel::strip::arp`): x 372 (the left hand's rule stays seen) to the strip's
+  right trim, from under the rail 265 deep; the banks at x 565 and 1091, the rule at 1440, the
+  units at 1644, 2046, 2448 and 2850, the row 142 under its top, the legends and the banks'
+  titles 109 above it, as the mock-up. Its face the strip's (the worn skin's picture laid from
+  another place, so its grain does not run on from the face under it, the lamp's light over
+  it; the drawn skin's black); the rail's shadow across its top as the presets' drawer has, its
+  left edge catching the lamp, its foot shaded to a dark line, and its shadow cast 16 units on
+  the page below (laid over the page, not a copy). It slides as the presets' drawer (140 ms).
+  Open, it is all the pointer finds there (the strip's tabs and knobs and the keyboard's header
+  under it do nothing); sliding, nothing. The presets' drawer opens over it; ARP while they show
+  puts them away and shows it; PANEL hiding the lower panel puts it away; ARP with the panel
+  hidden shows it. The key is lit while ON is on (taken as "while the arpeggiator is running":
+  the owner to confirm, whether it should light only while notes play).
+- **Its knobs are the panel's controls** (`controls::CONTROLS`, four appended, `Place::Arp`,
+  found by `interact::hit_arp` while the drawer is open): dragged, scrolled, double-clicked to
+  their defaults, tipped and learned as every knob; drawn by the drawer, through the panel's
+  renderer (`Renderer::paint_control`) in the skin it draws. RATE and OCTAVES go from position
+  to position while dragged (`Dial::steps`, as VOICES). Its readouts take a value typed, double
+  clicked as the strip's (R52): RATE `16`, `16.` or `16t` (one of the thirteen; any other
+  nothing), OCTAVES a digit, GATE and SWING percent.
+- **Allocation-free:** the keys bit sets, the times beats; `tests/realtime.rs`
+  `the_arpeggiator_neither_allocates_nor_frees` plays it through the plug-in's process with every
+  setting automated, the transport playing, looping and stopping, the pedal and All Notes Off.
+- **nih-plug change 11** gains `TestProcessContext::set_transport` (`PATCHES.md`), for the tests.
+
+**Evidence (omarchy, Linux, Rust 1.97.1, 2026-10-18; under other agents' builds, load 8 to 16):**
+- `arp.rs`'s 17 tests: the pattern orders, RANDOM's rule and its repeat, steps on their samples
+  whatever the block (1, 64, 1024, 4096) within a sample of the grid at 120/48 kHz, 97.3/44.1 kHz,
+  174/96 kHz and 60/22.05 kHz, the host's grid and a late key, a bar's cut, SWING, GATE's blip and
+  tie, latch, the pedal, ON handed over, clearing, the transport stopping, starting and looping,
+  a tempo change. The plug-in's: `arpeggiated_notes_play_through_the_engine_as_played_ones` (a
+  chord arpeggiated with the transport playing renders to the bit what the same keys played at
+  its steps' samples render without it: MONO with RETRIGGER and POLY, blocks of 256 realtime and
+  1000 offline), `nothing_is_left_stuck_by_resets_latch_or_presets`,
+  `the_sustain_pedal_reaches_the_arpeggiator_unless_learned`,
+  `an_old_session_opens_with_the_arpeggiator_off`,
+  `the_arpeggiator_is_part_of_a_preset_and_off_in_one_that_does_not_name_it`, the settings' and
+  the dialog's TEMPO; the editor's `the_arp_key_drops_its_drawer_over_the_lower_page` (the frame
+  put together whole, nothing under it answering, the presets' drawer over it, PANEL) and
+  `the_arp_drawer_operates_its_parameters`; the drawer's `drawn_in_parts_it_is_drawn_whole`
+  (both skins, two scales). `cargo test -p ca72-plugin` (default and `standalone-production`)
+  and `-p ca72-panel` pass; clippy `-D warnings` with all targets.
+- The standalone (release build, `IDLE_FOUNDRY_SHARED` in the worktree) on omarchy: the drawer
+  dropped over the keyboard and over the strip, ON lit with the ARP key, TEMPO chosen from its
+  list and kept (`standalone_tempo = 100`). The notes were not listened to.
+- Frame times (`cargo run --release -p ca72-panel --example frames`, the editor's drawing and
+  composing, the worn skin; the code before and after run in turn, the quieter pair): the
+  panel's and the strip's cases as before within the machine's noise (0.87 of the drawing:
+  CUTOFF 2.7 and 2.7 ms median, DRIVE 6.6 and 6.7, a tab 1.8 and 1.8; at 1.0: CUTOFF 3.7 and
+  4.6, DRIVE 5.6 and 7.6, a tab 2.4 and 2.4). The drawer's renderer made as the editor opens:
+  0.03 to 0.06 ms on its thread (its plate made on a thread of its own, about 65, 145 and 125 ms
+  at 0.44, 0.87 and 1.0); its first drop once that is done: 6, 18 to 25 and 16 to 24 ms (its four
+  knobs drawn the first time); at once after opening, waiting for the plate: 64 to 155 ms. A knob
+  turned in it: 1.2, 4.0 to 5.7 and 2.5 ms median; a tab pressed 0.1 to 0.5 ms; open and still,
+  nothing. While it slides the whole frame is put together, as for the presets' drawer.
+
+**Not done:** listening to it in a host or the standalone; the installed plug-ins in a DAW (the
+transport's bar start and loops as each host reports them, Logic's and Ableton's block splits);
+the Mac and Windows builds; the drawer's knobs dragged in the standalone (the editor's tests drag
+them; in the standalone its tabs were clicked by synthetic X events).
+
+## R-FX-HOST. Effects in the standalone, hosted out of process with DAW-v3's sandbox (issue 82)
+
+**Owner decisions, 2026-10-18** (relayed by the coordinating agent): the standalone
+application only, for 0.3.0, never the DAW plug-ins; effects only, not instruments; VST3 and
+CLAP both ("the code we can reuse hosts both"), AU later; a chain of four with add, remove,
+reorder and bypass, each effect in its own editor window, the chain and each effect's state
+saved with the standalone's session. The view: "FX-A", an FX key on the walnut rail after
+ARP dropping a one-row drawer of four name screens with ON tabs (docs/fx-host.md); not
+built yet, to share the arpeggiator's drawer.
+
+**Agent decisions, 2026-10-18 (for the owner's review; docs/fx-host.md has the reasons and
+nine questions):**
+- DAW-v3's `daw-ipc`, `daw-helper` and test plug-ins vendored in `third_party/daw-v3`
+  (two patches: a run loop for VST3 editors on Linux; macOS's wait functions looked up
+  at run time); its `daw-sandbox` adapted into
+  `crates/ca72-fx`; the plug-ins loaded only in `ca72-fx-helper`, one process per effect.
+- Synchronous by default (no latency added), each effect's block waited for until 0.9 of the
+  period, then dry; pipelined as an option (`--fx-mode`).
+- A crash, a hang (2 s) or a kill: the effect dry meanwhile, its helper started again, the
+  effect restored from its last snapshot; given up on after 5 restarts.
+- The chain saved in `effects.json` beside `session.json`, not inside it (size, and the
+  plug-ins' state and presets kept free of it); a missing plug-in kept with its state.
+- The scan's listings cached in `effects-cache.json`, by file size and time.
+- Until the drawer exists, `--fx-console` drives the chain from standard input.
+- Notices: the helper's crates and Steinberg's MIT notice for the VST 3 interfaces.
+
+**Evidence (Linux, 2026-10-18):** `crates/ca72-fx-helper/tests/chain.rs` with the test
+plug-ins in both formats (exact output, bypass identical to the bit, latency, order, save
+and restore, a sample-rate change, crash, hang and kill in real time); the standalone with
+the default device; Dragonfly Reverb 3.2.10's eight effects loaded, played and restored, their
+editors drawn (the VST3 ones' knobs at zero, unsolved). The chain's tests pass on the Mac and on Windows too
+(the standalone not built there). A macOS blocker found and fixed: the transport linked
+`os_sync_wait_on_address` (macOS 14.4) into the application (minimum 11); now looked up at
+run time (third_party/daw-v3/PATCHES.md).
+
+## R-FX-DRAWER. The effects' drawer: an FX key on the standalone's rail (issue 82)
+
+**Owner decisions, 2026-10-18** (FX-A, chosen from the coordinator's mock-ups over an AUDIO &
+MIDI-style dialog and slots in the left column; relayed with the night's brief): in the
+standalone application only, the DAW plug-ins keeping their rail as it is, an **FX** key on the
+walnut rail after **ARP**, the preset's name's screen a key shorter again for it. Pressed, it drops
+a one-row drawer inside the window, about 170 units deep, over the top of whichever lower page
+shows, "the same mechanics and edge as the arpeggiator's drawer (share code; don't duplicate it;
+only one drawer is open at a time)". Four slots side by side, each with a SLOT legend, a dot screen
+(the rail's, about 400 units wide, twelve characters) and an ON tab beside it (bypass), lit while
+its effect plays. A click on a name opens the effect's own window; a slot dragged onto another
+moves it there; a right click offers replace and remove "in the editor's existing menu style"; an
+empty slot reads "+ ADD EFFECT" and opens the effects' list, "a dropdown list in the presets
+list's style, listing found effects by name and maker", its scan off the editor's thread with a
+visible SCANNING. The FX key lit while any effect is active. A failed or given-up effect shown
+plainly on its slot, "its name dimmed and a short word ... keep it subtle". The mock's lip and
+shadow were a composite: the arpeggiator's drawer's real edge instead.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One drawer from the rail, its plate shared.** `strip/lower.rs` is what the arpeggiator's
+  drawer and the effects' share: the plate (the strip's face from another place, the rail's
+  shadow across its top, its left edge lit, its foot in shade), the print worn into it, the lamp,
+  the shadow it casts, the lit tabs and their words. `strip/arp.rs` draws its plate with it now
+  (the same look; its edges drawn before its recesses rather than in one pass with them). In the
+  editor one `Dropped` holds which drawer is down: ARP with the effects' drawer open puts it away
+  and drops its own from the rail anew, and FX the same; PANEL hiding the lower page puts either
+  away at once. `compose` lays either the same way, with what hangs under it (its shadow; the
+  effects' list).
+- **The rail's keys by build.** `strip::Rail`: the plug-ins' (as before, to the pixel) or the
+  standalone's, FX at 2912 and the keys left of it a key's pitch (100 units) to the left, the
+  name 2000 units wide; chosen as the editor opens, the standalone's rail only when the
+  application has a chain (its helper found). The name's surround is the strip's renderer's
+  alone now (the drawn skin had it twice, once in the drawing: it would have shown past the
+  shorter name).
+- **The slots.** Equal quarters of the drawer, each a screen 400 by 50 units in the rail's bezel
+  and glass, twelve places of the rail's dots, the name centred and cut with an ellipsis; a 20-unit
+  gap, then the 150-unit tab of the strip's amber caps reading ON; the legend over the pair. Every
+  tab has room (tested: none touches its screen or the next slot's light). An effect's whole name
+  and maker are the tip over its screen. Only the first empty slot reads "+ ADD EFFECT" (an
+  effect is always added at the chain's end); the others are dark. A bypassed effect keeps its name
+  lit, its tab dark. The small print under a screen, in the legends' colour at 72 %: LOADING while
+  it loads, RESTARTING while its helper is started again, CRASHED once given up on (dry), MISSING
+  when its plug-in is not on this computer, FAILED for five seconds where a chosen effect would not
+  load; its name dimmed with it.
+- **Clicks and drags.** A press on a name and a move of more than 12 units carries the slot: its
+  name dimmed, the slot under the pointer ringed in MIDI Learn's accent; let go there, the chain's
+  `move_to` (the others keep their order). A press let go without moving opens its window. The
+  tab bypasses (shown at once). Right click: the effect's name as the menu's title, REPLACE… and
+  REMOVE. While something loads, the slots wait (no drag, no menu).
+- **The list.** It drops from under the drawer's foot below its slot (clamped within the
+  drawer's ends), a plate of the drawer's face with its own edges and shadow, and a display of the
+  presets' list's dots and smoothed glass (the rail's glass drawn out over it showed bands; R44):
+  a title (ADD TO SLOT n or REPLACE SLOT n) with SCANNING… or the number found at its right, then
+  eleven rows a view of name, maker and format (CLAP, VST3: the owner's question 7 in
+  docs/fx-host.md is still open; small and dimmer), and SCAN AGAIN last. Sorted by name, maker,
+  format. Always eleven rows deep, as the presets' list is, so that its plate is made once, on
+  the drawer's thread as the editor opens (first made each drop it cost 105 to 215 ms; now 3 to 10).
+  A press elsewhere puts it away and does nothing else; Escape too; the wheel scrolls it.
+- **Never waiting on the chain.** The drawer reads the chain with `try_status` and `try_active`
+  (new in `ca72-fx`: none while the chain is busy, the last reading kept), every tenth of a second
+  or as soon as something done there finishes. What loads or opens a window runs on a thread of
+  the drawer's, in order; a bypass on another, so a tab answers while an effect loads. And
+  `Chain::insert` no longer holds the chain while the plug-in loads (seconds for some): it checks
+  the place, loads, then checks again (and loads again if the device changed the rate meanwhile).
+  The scan runs on a thread of its own the first time the list opens, its results kept for the
+  application's life; again only from SCAN AGAIN. The `fx_view::Effects` trait is the drawer's
+  reach into the chain (the standalone's `fx::Host`; the tests' own), so the editor's tests run
+  without helpers.
+- **Two fixes found in the real standalone.** With the keyboard page showing, a right click or
+  the wheel on a drawer from the rail (either) went to the keyboard under it; and a menu over the
+  keyboard did not light the item under the pointer. Both answer the drawer and the menu now.
+- `Chain::params` (the effects' parameter lists) is not used: FX-A shows no effect's parameters.
+
+**Evidence (Linux, omarchy, 2026-10-18):**
+- Panel: `strip::fx`'s `the_drawer_finds_each_part_where_it_is_drawn` (screens, tabs, list rows,
+  room for each tab, within the drawer and the window), `drawn_in_parts_it_is_drawn_whole` (a tab,
+  a crash, the pointer, a carry, the list opened, scrolled, pointed at and put away; both skins,
+  0.44 and 0.87) and the arpeggiator's tests as before. Editor:
+  `the_fx_key_drops_its_drawer_one_drawer_at_a_time` (the rails, FX and ARP each putting the
+  other away, the frame put together whole, the key's light, PANEL) and
+  `the_fx_drawer_operates_the_chain` (window, bypass, a drag that moves, the list and a row
+  added, REPLACE… and REMOVE, the wheel, a press elsewhere, nothing under the drawer; the keyboard
+  shown); `fx_view`'s tests of the slots' states and the list. `cargo test -p ca72-panel`,
+  `-p ca72-plugin --features standalone-production --lib`, `-p ca72-fx`, workspace clippy
+  `-D warnings` with all targets.
+- The real standalone (release, `--no-devices`, `IDLE_FOUNDRY_SHARED` and `--state-dir` in the
+  worktree, `CA72_FX_PATH` the DAW-v3 test plug-ins and Dragonfly Reverb 3.2.10's CLAP and VST3,
+  `CA72_FX_STANDARD_FOLDERS=0`), driven by synthetic X events: the key, SCANNING then ten
+  effects, three added, a bypass, a carry and a move, two effects' windows opened (a CLAP and a
+  VST3), REMOVE, REPLACE…, a helper killed six times (CRASHED), closed and opened again with the
+  chain as it was (bypass, order, states) and with a plug-in moved away (MISSING); ARP and FX
+  putting each other away.
+- Frame times (`cargo run --release -p ca72-panel --example frames`, before (the merge) and after
+  in turn, each from its own target; full log on the branch's summary): the panel's, the strip's
+  and the arpeggiator's cases as before within the noise, with either rail (0.87 of the drawing:
+  CUTOFF 2.7 and 2.7 ms median, DRIVE 6.3 and 6.2, a tab 1.8 and 1.9; the frames example's opening
+  372, 915 and 769 ms before, 372, 904 and 782 after, at 0.44, 0.87 and 1.0). The effects' drawer
+  at 0.44, 0.87 and 1.0: its renderer made as the editor opens 0.02 ms (its still parts, the
+  list's plate among them, on its thread: 83, 128 and 144 ms); its first drop once they are made
+  2.2, 5.1 and 6.2 ms; a tab 0.1, 0.3 and 0.5 ms; a carry 0.3, 0.7 and 0.8; the list dropped 2.8,
+  7.9 and 10.3 ms, pointed at 2.1, 5.2 and 6.6, scrolled 2.2, 5.3 and 6.7; open and still,
+  nothing.
+
+**Not done:** an audio device (the standalone ran with `--no-devices`, so no effect was heard
+and the chain's audio path was not run from the drawer; the engine's own tests and runs cover
+it, R-FX-HOST); LOADING and RESTARTING seen on screen (the test effects loaded and restarted
+within the screenshots' tenth of a second; both in the tests); the Mac and Windows; a scan of
+the standard folders on a computer with many plug-ins; Escape with the list open in the real
+window (the keyboard is not asked for while the list shows).
+
+## R-FX-MAC. Effects heard, and their windows opened again, on the Mac (issue 82)
+
+**The owner's report, 2026-10-19** (the CA-72 TEST standalone on the Mac, 47 effects found):
+"the plugins themselves will load, which is good. I can click add an effect. I can scan, I can
+search through my plugins on my computer, which is fantastic. And I can load up the plugin. The
+plugin window pops up and I can change things. However, there is no audible effect. So something
+is wrong, even when it's clearly on... The sound still goes through, but it's like it's in bypass
+mode. And then the other issue is once I've closed the plugin window, clicking on the slot should
+open it up again, and it doesn't..."
+
+**Causes and fixes:**
+- **No effect heard.** The synth runs the chain only if `Runner::is_empty` says it has effects,
+  and the runner learnt of the chain's changes (an effect added, removed, moved) only inside
+  `Runner::process`. An effect added to an empty chain therefore waited on its queue for a block
+  that never came: it loaded, its window opened and it read as running, with no misses, while
+  every block went out as the synth made it. A chain restored at start was heard (`prepare`
+  takes the changes), which is how the Linux runs played. Not the deadline nor macOS's waits:
+  the third-party effects played paced at 48 kHz in 256-frame blocks with a deadline of 0.9 of
+  the period, none missed. `is_empty` now takes the changes first (no allocation, no locks).
+- **A window not opened again.** The click reached the drawer and the helper each time, and the
+  helper opened a new window, but behind the CA-72's: the click had just made the CA-72 the
+  active application, and the helper, an accessory application that was not active, ordered its
+  window front with `makeKeyAndOrderFront:`, which leaves an inactive application's window behind
+  the active one's. The same for an open window asked for again. The helper now also sends
+  `orderFrontRegardless` (third_party/daw-v3/PATCHES.md, change 3). The window comes up in front
+  without taking the keyboard: the player's first click on it gives it the keyboard.
+
+**Evidence (2026-10-19):**
+- omarchy: `ca72-fx-helper`'s new `an_effect_added_while_the_synth_plays_is_heard_at_once` (the
+  chain run as the synth runs it, real time at 48 kHz and 256 frames, each block due by 0.9 of
+  its period, an effect added while it plays; both formats): fails without the fix (never wet),
+  passes with it (wet from the block it was added in, none dry or missed after). The editor's
+  `a_slots_name_clicked_again_opens_its_window_again`; the helper's GUI test opens, closes and
+  opens again, and asks again for an open window (`CA72_FX_GUI_TEST=1`).
+- Mac (macOS 27, the owner's ValhallaRoom, kHs Distortion and kHs Gain VST3): the new
+  `third_party_effects_are_heard_in_real_time` (`CA72_FX_THIRD_PARTY`) played each paced at
+  48 kHz, 256 frames: none missed, worst block 0.7 to 1.9 ms (kHs Gain at 0 dB comes out as it
+  went in). The real standalone, a build of this branch with a diagnostic measure of its output
+  in the audio callback, on a virtual output device at 44.1 kHz and 256 frames (the Mac's own
+  device and rate untouched), a note from a virtual MIDI source, ValhallaRoom added from the
+  console while it played: before the fix the output was the synth's to the bit (the effect at
+  frame 0, never given a block); after it, the output differed from the synth by -26 to -35 dBFS
+  (the synth at -30.4 dBFS), every block through the chain, none missed, and equal to it again
+  with the effect bypassed. The window, with clicks posted to the standalone and the screen's
+  window order read: opened, closed with its close button, opened again (behind the CA-72's
+  before the fix, in front after it); covered by the CA-72's and asked for again (in front).
+
+**Not done:** Windows and Linux windows (unchanged; a helper's window on Windows may meet the same
+rule, untried); a keyboard for the effect's window without a click.

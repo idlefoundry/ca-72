@@ -747,3 +747,132 @@ fn midi_learn_neither_allocates_nor_frees() {
     );
     assert!(c.reported.len() > 1000, "{} changes told", c.reported.len());
 }
+
+/// The arpeggiator (decisions.md R-ARP) neither allocates nor frees while it plays: the keys
+/// held and let go, LATCH, the sustain pedal, its every setting automated, the transport
+/// playing, jumping back (a loop) and stopping, ON switched off and on with keys held, All Notes
+/// Off, a block at a time, in the plug-in's own process.
+#[test]
+fn the_arpeggiator_neither_allocates_nor_frees() {
+    use ca72_plugin::Ca72;
+    use nih_plug::context::process::TestProcessContext;
+    use nih_plug::prelude::*;
+
+    struct Init;
+    impl InitContext<Ca72> for Init {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Clap
+        }
+        fn execute(&self, _: ()) {}
+        fn set_latency_samples(&self, _: u32) {}
+        fn set_current_voice_capacity(&self, _: u32) {}
+    }
+
+    let _serial = start();
+    let mut p = Ca72::default();
+    let config = BufferConfig {
+        sample_rate: RATE as f32,
+        min_buffer_size: None,
+        max_buffer_size: BLOCK as u32,
+        process_mode: ProcessMode::Realtime,
+    };
+    assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
+    let params = p.params();
+    let a = p.parameters().clone();
+    let mut c = TestProcessContext::<Ca72>::new(params, RATE as f32, ProcessMode::Realtime);
+    assert!(c.automate(a.arp_on.as_ptr(), 1.0));
+    let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
+    let mut buffer = Buffer::default();
+    // SAFETY: both slices are `BLOCK` long and live as long as the buffer.
+    unsafe {
+        buffer.set_slices(BLOCK, |s| {
+            s.clear();
+            s.push(&mut l);
+            s.push(&mut r);
+        });
+    }
+    let mut aux = AuxiliaryBuffers {
+        inputs: &mut [],
+        outputs: &mut [],
+    };
+    let key = |timing: u32, note: u8, on: bool| {
+        if on {
+            NoteEvent::NoteOn {
+                timing,
+                voice_id: None,
+                channel: 0,
+                note,
+                velocity: 1.0,
+            }
+        } else {
+            NoteEvent::NoteOff {
+                timing,
+                voice_id: None,
+                channel: 0,
+                note,
+                velocity: 0.0,
+            }
+        }
+    };
+    let cc = |timing: u32, cc: u8, value: f32| NoteEvent::MidiCC {
+        timing,
+        channel: 0,
+        cc,
+        value,
+    };
+    HERE.with(|h| h.set(true));
+    let mut beats = 0.0;
+    for b in 0..1200usize {
+        // (The host's queue filled and its automation set off the count.)
+        ARMED.store(false, Ordering::SeqCst);
+        if b % 300 == 250 {
+            beats = 4.0;
+        }
+        let playing = b % 400 < 330;
+        c.set_transport(
+            playing,
+            Some(100.0 + (b % 3) as f64 * 20.0),
+            Some(beats),
+            Some((4, 4)),
+        );
+        beats += BLOCK as f64 * 2.0 / RATE;
+        if b % 40 == 0 {
+            for (i, k) in [48u8, 55, 60, 64].iter().enumerate() {
+                c.push_event(key(i as u32 * 7, *k + (b / 40 % 5) as u8, true));
+            }
+        }
+        if b % 40 == 30 {
+            for k in [48u8, 55, 60, 64] {
+                c.push_event(key(64, k + (b / 40 % 5) as u8, false));
+            }
+        }
+        if b % 50 == 5 {
+            c.push_event(cc(3, 64, if b % 100 < 50 { 1.0 } else { 0.0 }));
+        }
+        if b % 97 == 40 {
+            c.push_event(cc(9, 123, 0.0));
+        }
+        let k = (b / 23) as f32;
+        c.automate(a.arp_latch.as_ptr(), if b % 160 < 80 { 0.0 } else { 1.0 });
+        c.automate(a.arp_direction.as_ptr(), (k % 4.0) / 3.0);
+        c.automate(a.arp_rate.as_ptr(), (k % 13.0) / 12.0);
+        c.automate(a.arp_octaves.as_ptr(), (k % 4.0) / 3.0);
+        c.automate(a.arp_gate.as_ptr(), (k * 0.37) % 1.0);
+        c.automate(a.arp_swing.as_ptr(), (k * 0.61) % 1.0);
+        c.automate(a.arp_on.as_ptr(), if b % 210 < 200 { 1.0 } else { 0.0 });
+        ARMED.store(true, Ordering::SeqCst);
+        p.process(&mut buffer, &mut aux, &mut c);
+    }
+    ARMED.store(false, Ordering::SeqCst);
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "the arpeggiator allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+    );
+}

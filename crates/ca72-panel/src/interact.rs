@@ -9,7 +9,7 @@
 //! settling into its centre detent when let go near it (it has no spring).
 
 use crate::art::{self, BIG, GRIP, Layout, POWER, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
-use crate::controls::{CONTROLS, Dial, Kind};
+use crate::controls::{CONTROLS, Kind, Place};
 
 /// What is under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,9 +28,12 @@ fn in_rect(x: f64, y: f64, r: [f64; 4]) -> bool {
     x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]
 }
 
-/// What is at (x, y) in the drawing.
+/// What is at (x, y) in the drawing (the arpeggiator's drawer's knobs apart: [`hit_arp`]).
 pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
     for (i, c) in CONTROLS.iter().enumerate() {
+        if c.place == Place::Arp {
+            continue;
+        }
         let (cx, cy) = c.centre();
         let (dx, dy) = (x - cx, y - cy);
         let found = match c.kind {
@@ -70,6 +73,16 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
     None
 }
 
+/// The arpeggiator's drawer's knob at (x, y) in the drawing, the drawer open (decisions.md
+/// R-ARP).
+pub fn hit_arp(x: f64, y: f64) -> Option<Target> {
+    CONTROLS.iter().enumerate().find_map(|(i, c)| {
+        let (cx, cy) = c.centre();
+        (c.place == Place::Arp && (x - cx).hypot(y - cy) <= STD.skirt + 8.0)
+            .then_some(Target::Control(i))
+    })
+}
+
 /// Where a drag takes a control from `start`, the pointer moved by (dx, dy) logical pixels;
 /// `None` for a switch, which a drag does not move. A knob of steps (VOICES) goes from step to
 /// step, never between them (the owner, 2026-10-10: knobs with discrete options "shouldn't move
@@ -77,11 +90,14 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
 pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64> {
     let rate = if fine { 0.1 } else { 1.0 };
     Some(match kind {
-        // VOICES, 2 to 10: a voice a step.
-        Kind::Knob {
-            dial: Dial::Voices, ..
-        } => ((start - dy / 240.0 * rate).clamp(0.0, 1.0) * 8.0).round() / 8.0,
-        Kind::Knob { .. } => (start - dy / 240.0 * rate).clamp(0.0, 1.0),
+        // VOICES, 2 to 10, a voice a step; the arpeggiator's RATE and OCTAVES a position a step.
+        Kind::Knob { dial, .. } => {
+            let v = (start - dy / 240.0 * rate).clamp(0.0, 1.0);
+            match dial.steps() {
+                Some(n) => (v * n as f64).round() / n as f64,
+                None => v,
+            }
+        }
         Kind::Selector(_) => {
             let steps = ((dx - dy) / if fine { 60.0 } else { 30.0 }).round();
             (art::position(start) as f64 + steps).clamp(0.0, 5.0) / 5.0
@@ -95,11 +111,14 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
 pub fn step(kind: &Kind, v: f64, up: bool, fine: bool) -> f64 {
     let sign = if up { 1.0 } else { -1.0 };
     match kind {
-        // VOICES, 2 to 10: a voice a notch.
-        Kind::Knob {
-            dial: Dial::Voices, ..
-        } => ((v * 8.0).round() + sign).clamp(0.0, 8.0) / 8.0,
-        Kind::Knob { .. } => (v + sign * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
+        // VOICES, 2 to 10, a voice a notch; RATE and OCTAVES a position.
+        Kind::Knob { dial, .. } => match dial.steps() {
+            Some(n) => {
+                let n = n as f64;
+                ((v * n).round() + sign).clamp(0.0, n) / n
+            }
+            None => (v + sign * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
+        },
         Kind::Selector(_) => (art::position(v) as f64 + sign).clamp(0.0, 5.0) / 5.0,
         Kind::Wheel { .. } => (v + sign * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
         Kind::Rocker { .. } => {
@@ -180,7 +199,12 @@ mod tests {
         let l = layout();
         for (i, c) in CONTROLS.iter().enumerate() {
             let (x, y) = c.centre();
-            assert_eq!(hit(&l, x, y), Some(Target::Control(i)), "{}", c.param);
+            let found = if c.place == Place::Arp {
+                hit_arp(x, y)
+            } else {
+                hit(&l, x, y)
+            };
+            assert_eq!(found, Some(Target::Control(i)), "{}", c.param);
         }
         assert_eq!(
             hit(&l, art::COL + POWER.0, art::TOP + POWER.1),
@@ -226,6 +250,20 @@ mod tests {
             let v = drag(voices, 0.25, 0.0, -f64::from(dy), false).expect("a knob");
             assert_eq!(v * 8.0, (v * 8.0).round(), "between voices at {dy}");
         }
+        // The arpeggiator's RATE (13 note values) and OCTAVES (4) the same: never between two.
+        for (param, n) in [("arp_rate", 12.0), ("arp_octaves", 3.0)] {
+            let k = &CONTROLS[index(param).expect("a control")].kind;
+            for dy in 0..300 {
+                let v = drag(k, 0.0, 0.0, -f64::from(dy), false).expect("a knob");
+                assert_eq!(v * n, (v * n).round(), "{param} between at {dy}");
+            }
+            assert_eq!(step(k, 0.0, true, false), 1.0 / n);
+            assert_eq!(step(k, 1.0, true, true), 1.0);
+        }
+        let gate = &CONTROLS[index("arp_gate").expect("a control")].kind;
+        assert!(
+            (drag(gate, 0.5, 0.0, -1.0, false).unwrap_or(0.0) - (0.5 + 1.0 / 240.0)).abs() < 1e-12
+        );
         let rocker = &CONTROLS[index("osc1_on").expect("a control")].kind;
         assert_eq!(drag(rocker, 1.0, 0.0, 50.0, false), None);
         assert_eq!(click(rocker, 1.0, 0.0, 0.0), Some(0.0));

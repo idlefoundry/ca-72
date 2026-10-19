@@ -398,7 +398,22 @@ fn marks(dial: Dial) -> DialMarks {
                 .collect::<Vec<_>>(),
             &["2", "3", "4", "5", "6", "7", "8", "9", "10"],
         ),
-        Dial::Detune => numbered(
+        // The arpeggiator's (decisions.md R-ARP): RATE's thirteen note values 25 degrees apart,
+        // the straight ones (every third) numbered by their note value; OCTAVES's four a third
+        // of its travel apart; GATE's and SWING's every 12.5 %, every other numbered.
+        Dial::ArpRate => numbered(
+            &(0..13)
+                .map(|k| (-150.0 + 25.0 * f64::from(k), (k % 3 == 0).then_some(k / 3)))
+                .collect::<Vec<_>>(),
+            &["2", "4", "8", "16", "32"],
+        ),
+        Dial::ArpOctaves => numbered(
+            &(0..4)
+                .map(|k| (-150.0 + 100.0 * f64::from(k), Some(k)))
+                .collect::<Vec<_>>(),
+            &["1", "2", "3", "4"],
+        ),
+        Dial::Detune | Dial::Percent => numbered(
             &(0..9)
                 .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
                 .collect::<Vec<_>>(),
@@ -444,7 +459,7 @@ fn marks(dial: Dial) -> DialMarks {
     }
 }
 
-fn draw_dial(s: &mut Svg, cx: f64, cy: f64, dial: Dial) {
+pub(crate) fn draw_dial(s: &mut Svg, cx: f64, cy: f64, dial: Dial) {
     let d = marks(dial);
     let num = s.1.number();
     put!(s, "<g transform='translate({} {})'>", N(cx), N(cy));
@@ -2042,8 +2057,8 @@ pub fn worn_overlay() -> String {
     put!(s, "<g transform='translate(0 {})'>", N(PANEL_H + rail));
     strip_trims(&mut s);
     s.0.push_str("</g>");
-    // The moving parts' shadows.
-    for c in CONTROLS.iter() {
+    // The moving parts' shadows (the arpeggiator's drawer's knobs cast theirs on the drawer).
+    for c in CONTROLS.iter().filter(|c| c.place != Place::Arp) {
         let (x, y) = c.centre();
         match c.kind {
             // A tall knob casts a long soft shadow away from the lamp, and a dark one where it
