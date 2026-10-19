@@ -1,6 +1,6 @@
 # DAW-v3's plug-in hosting, patched
 
-The four crates as VENDORED.md says, with two changes, to be offered to DAW-v3 itself:
+The four crates as VENDORED.md says, with three changes, to be offered to DAW-v3 itself:
 
 1. **A VST3 editor on Linux gets the host's run loop (`IRunLoop`)** (`daw-helper/src/vst3.rs`;
    DAW-v3's D78 lists it as not yet done). DAW-v3's `Frame`, the
@@ -31,3 +31,14 @@ The four crates as VENDORED.md says, with two changes, to be offered to DAW-v3 i
    (macOS 27, 2026-10-18), built for macOS 11: no `os_sync` symbol referred to, clippy
    clean, `daw-ipc`'s tests (with one new for the polled wait) and the chain's pass. Not
    tried on a system before 14.4.
+
+3. **macOS: an editor's window is shown in front of every application's windows**
+   (`daw-helper/src/window/cocoa.rs`, `Window::show`: `orderFrontRegardless` after
+   `makeKeyAndOrderFront:`). The helper is an accessory application that is not active when the
+   host asks for a window: the player has just clicked the host's window, which made the host the
+   active application. An inactive application's `makeKeyAndOrderFront:` left the window behind
+   the host's: a window opened again after the player closed it (a new one), or an open one
+   asked for again, was there but hidden behind the CA-72's (decisions.md R-FX-MAC). On the Mac
+   (macOS 27, 2026-10-19), clicks posted to the standalone: before, the window opened again was
+   second in the screen's order, under the CA-72's; with it, first, both opened again and brought
+   forward. The window still does not take the keyboard (the host keeps it).

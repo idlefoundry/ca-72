@@ -6394,6 +6394,22 @@ mod tests {
         assert!(fake.take().is_empty());
     }
 
+    /// A slot's name clicked again opens its effect's window again (decisions.md R-FX-MAC): after
+    /// the window it opened took the focus and was closed, and while it is still open (brought
+    /// forward). Each click is a job of its own; the helper shows the window in front.
+    #[test]
+    fn a_slots_name_clicked_again_opens_its_window_again() {
+        let (mut e, fake) = editing_effects();
+        lower_open(&mut e, Rail::Effects, BarTarget::Fx);
+        let p = at(&e, fx_ui::centre(fx_ui::FxTarget::Name(0)));
+        for _ in 0..3 {
+            click(&mut e, p);
+            assert_eq!(effects_done(&mut e, &fake, 1), ["window 0"]);
+            // (The effect's window took the focus: the editor's lost it.)
+            e.end_gestures();
+        }
+    }
+
     /// Every gesture well formed: a parameter's begin only while it has none open, its
     /// changes and end only inside one, and none left open.
     fn well_formed(calls: &[Call]) {

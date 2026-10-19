@@ -4,8 +4,9 @@ The standalone application's effects (docs/fx-host.md) are hosted out of process
 plug-in sandbox of the owner's DAW, DAW-v3 (`git@github.com:Idlewile/DAW-v3.git`, private,
 GPL-3.0-or-later, as the CA-72), at commit `cb15558711ea1b3a1c2ce8b27fa7aadb8ef17a63`
 (the four crates' files last changed in `356bdb76dd848bef463d8f563556413c07c0185e`,
-2026-10-12). Taken as `git archive` gives them, with two patches (PATCHES.md: a run loop for
-VST3 editors on Linux; macOS's wait functions looked up at run time):
+2026-10-12). Taken as `git archive` gives them, with three patches (PATCHES.md: a run loop for
+VST3 editors on Linux; macOS's wait functions looked up at run time; macOS's editor windows
+shown in front):
 
 - `daw-ipc`: the transport the standalone and its helper share: named shared memory,
   cross-process wake-ups, the block layout and the line protocol (DAW-v3 D19);
