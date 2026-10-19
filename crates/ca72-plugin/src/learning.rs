@@ -17,7 +17,8 @@ use ca72_panel::strip::{StripControl, span};
 use ca72_panel::{Lettering, Skin, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 
-use crate::learn::{Assigned, Binding, LEARNABLE, MidiMap, RESERVED_TEXT, index, reserved};
+use crate::learn::{Assigned, Binding, LEARNABLE, MOD_WHEEL, MidiMap, index};
+use crate::mod_wheel::Source;
 
 /// How long what was done stays said over its control.
 const NOTICE: Duration = Duration::from_secs(4);
@@ -37,6 +38,9 @@ pub enum Place {
 
 /// Where learnable parameter `i`'s control is.
 pub fn place(i: usize) -> Option<Place> {
+    if i == MOD_WHEEL {
+        return Some(Place::Panel(control_index("mod_wheel")?));
+    }
     let id = LEARNABLE.get(i)?.id;
     Some(match id {
         "previous_preset" => Place::Preset(BarTarget::Prev),
@@ -56,7 +60,14 @@ pub fn learnable_at(p: Place) -> Option<usize> {
         Place::Preset(BarTarget::Prev) => index("previous_preset"),
         Place::Preset(BarTarget::Next) => index("next_preset"),
         Place::Preset(_) => None,
-        Place::Panel(c) => index(CONTROLS.get(c)?.param),
+        Place::Panel(c) => {
+            let id = CONTROLS.get(c)?.param;
+            if id == "mod_wheel" {
+                Some(MOD_WHEEL)
+            } else {
+                index(id)
+            }
+        }
         Place::Strip(s) => index(match s {
             StripControl::Poly => "poly",
             StripControl::Unison => "unison",
@@ -108,6 +119,8 @@ pub enum Item {
     SizeMenu,
     /// The SIZE menu's: the window this wide (logical pixels).
     Size(u32),
+    WheelMenu(Option<u8>),
+    WheelSource(Source),
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -142,6 +155,9 @@ pub enum Pressed {
     SizeMenu,
     /// The SIZE menu: the window this wide (logical pixels).
     Size(u32),
+    /// None: common sources; 128: CC ranges; otherwise the first CC in a range of sixteen.
+    WheelMenu(Option<u8>),
+    WheelSource(Source),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -167,6 +183,9 @@ pub struct Learning {
 
 /// A parameter's name.
 fn label(i: usize) -> &'static str {
+    if i == MOD_WHEEL {
+        return "MOD WHEEL SOURCE";
+    }
     LEARNABLE.get(i).map_or("", |l| l.label)
 }
 
@@ -183,7 +202,6 @@ fn not_learnable(t: Target) -> Option<String> {
     Some(match t {
         Target::Control(i) | Target::Legend(i, _) => match CONTROLS.get(i)?.param {
             "pitch_wheel" => "PITCH: MIDI PITCH BEND MOVES IT".into(),
-            "mod_wheel" => "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT".into(),
             "quality" => "QUALITY: SET PER PLUGIN INSTANCE".into(),
             _ => return None,
         },
@@ -233,6 +251,18 @@ impl Learning {
     ) {
         let learnable = place.and_then(learnable_at);
         let (title, items) = match learnable {
+            Some(MOD_WHEEL) => (
+                format!("MOD WHEEL SOURCE · {}", map.wheel_source().text()),
+                vec![
+                    if map.armed() == Some(MOD_WHEEL) {
+                        (Item::Cancel, "CANCEL MIDI LEARN")
+                    } else {
+                        (Item::Learn, "MIDI LEARN")
+                    },
+                    (Item::WheelMenu(None), "MOD WHEEL SOURCE…"),
+                    (Item::List, "MIDI ASSIGNMENTS…"),
+                ],
+            ),
             Some(i) => {
                 let cc = map
                     .binding(i)
@@ -342,7 +372,7 @@ impl Learning {
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, lettering, law): (Skin, Lettering, Law),
+        (skin, lettering, law, source): (Skin, Lettering, Law, Source),
     ) {
         #[allow(unused_mut)]
         let mut items = vec![
@@ -358,6 +388,8 @@ impl Learning {
             (Item::Head, "WINDOW"),
             (Item::SizeMenu, "SIZE\u{2026}"),
             (Item::WhatsNew, "WHAT'S NEW…"),
+            (Item::Head, "MOD WHEEL SOURCE"),
+            (Item::WheelMenu(None), "CHOOSE SOURCE…"),
         ];
         #[cfg(feature = "standalone-production")]
         if crate::standalone_settings::available() {
@@ -384,7 +416,13 @@ impl Learning {
                             | Item::SizeMenu
                             | Item::WhatsNew
                     ) && !current(it);
-                    ((*t).to_owned(), choosable)
+                    let choosable = choosable || matches!(it, Item::WheelMenu(_));
+                    let text = if matches!(it, Item::WheelMenu(_)) {
+                        format!("{}…", source.text())
+                    } else {
+                        (*t).to_owned()
+                    };
+                    (text, choosable)
                 })
                 .collect(),
             heads: items
@@ -406,6 +444,87 @@ impl Learning {
         self.open = Some(Open {
             learnable: None,
             items: items.into_iter().map(|(it, _)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// A short list first; OTHER… opens eight ranges, each at most sixteen controllers.
+    pub fn open_wheel_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        source: Source,
+        range: Option<u8>,
+    ) {
+        let items: Vec<(Item, String, bool)> = match range {
+            None => {
+                let mut items: Vec<_> = [
+                    (Source::Cc(1), "CC 1 · MODULATION WHEEL"),
+                    (Source::Cc(2), "CC 2 · BREATH"),
+                    (Source::Cc(4), "CC 4 · FOOT"),
+                    (Source::Cc(11), "CC 11 · EXPRESSION"),
+                    (Source::Cc(74), "CC 74 · TIMBRE / MPE Y"),
+                    (Source::ChannelPressure, "CHANNEL AFTERTOUCH"),
+                    (Source::PolyPressure, "POLYPHONIC AFTERTOUCH · MAX HELD"),
+                ]
+                .into_iter()
+                .map(|(s, t)| (Item::WheelSource(s), t.into(), s != source))
+                .collect();
+                if matches!(source, Source::Cc(cc) if ![1, 2, 4, 11, 74].contains(&cc)) {
+                    items.push((Item::WheelSource(source), source.text(), false));
+                }
+                items.push((Item::WheelMenu(Some(128)), "OTHER…".into(), true));
+                items
+            }
+            Some(128) => (0..128)
+                .step_by(16)
+                .map(|cc| {
+                    (
+                        Item::WheelMenu(Some(cc)),
+                        format!("CC {cc}–{}…", cc + 15),
+                        true,
+                    )
+                })
+                .collect(),
+            Some(first) => (first..=first.saturating_add(15).min(127))
+                .map(|cc| {
+                    let allowed = Source::cc(cc).is_some();
+                    let text = match crate::learn::reserved(cc) {
+                        Some(why) => format!("CC {cc} · {}", why.to_uppercase()),
+                        None => format!("CC {cc}"),
+                    };
+                    (
+                        Item::WheelSource(Source::Cc(cc)),
+                        text,
+                        allowed && source != Source::Cc(cc),
+                    )
+                })
+                .collect(),
+        };
+        let mut menu = Menu {
+            x,
+            y,
+            size,
+            title: "MOD WHEEL SOURCE · ALL CHANNELS".into(),
+            items: items
+                .iter()
+                .map(|(_, text, on)| (text.clone(), *on))
+                .collect(),
+            heads: Vec::new(),
+            marked: items
+                .iter()
+                .enumerate()
+                .filter_map(|(i, (item, _, _))| (*item == Item::WheelSource(source)).then_some(i))
+                .collect(),
+            hover: None,
+        };
+        let (w, _) = menu.extent(fonts);
+        menu = menu.placed(fonts, x - w, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: items.into_iter().map(|(item, _, _)| item).collect(),
             menu,
         });
         self.take_keys = true;
@@ -481,7 +600,7 @@ impl Learning {
             (Some(Item::Learn), Some(i)) => self.learn(map, i),
             (Some(Item::Cancel), _) => self.cancel(map),
             (Some(Item::Remove), Some(i)) => self.remove(map, i),
-            (Some(Item::List), l) => return Pressed::List(l),
+            (Some(Item::List), l) => return Pressed::List(l.filter(|&i| i != MOD_WHEEL)),
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
@@ -491,6 +610,8 @@ impl Learning {
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,
             (Some(Item::Size(w)), _) => return Pressed::Size(*w),
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
+            (Some(Item::WheelMenu(range)), _) => return Pressed::WheelMenu(*range),
+            (Some(Item::WheelSource(source)), _) => return Pressed::WheelSource(*source),
             _ => {}
         }
         Pressed::Done
@@ -501,7 +622,9 @@ impl Learning {
     pub fn learn(&mut self, map: &MidiMap, i: usize) {
         map.arm(i);
         self.notice = None;
-        self.chosen = i;
+        if i < LEARNABLE.len() {
+            self.chosen = i;
+        }
         self.say(
             format!("{}: {}", label(i), instruction(i)),
             DrawerTone::News,
@@ -541,16 +664,21 @@ impl Learning {
 
     /// The editor closing: a controller the audio thread has already caught is assigned (the
     /// message that came is the assignment), then learning ends.
-    pub fn close(&mut self, map: &MidiMap) {
-        self.poll(map);
+    pub fn close(&mut self, map: &MidiMap) -> Option<Assigned> {
+        let caught = self.poll(map);
         map.cancel();
         self.open = None;
+        caught
     }
 
     /// What the audio thread caught for the parameter being learned, assigned, and said.
     pub fn poll(&mut self, map: &MidiMap) -> Option<Assigned> {
         let a = map.poll()?;
-        let head = format!("{}: {}", label(a.param), a.cc.text());
+        let controller = match a.cc {
+            Binding::Cc(c) if a.param == MOD_WHEEL => format!("CC {} · ALL CHANNELS", c.cc),
+            input => input.text(),
+        };
+        let head = format!("{}: {}", label(a.param), controller);
         let mut lines = vec![(head.clone(), Tone::Accent)];
         let mut status = head;
         if let Some(d) = a.displaced {
@@ -606,11 +734,18 @@ impl Learning {
                     Some(cc) => (
                         format!(
                             "CC {cc} IS {}: NOT LEARNED. MOVE ANOTHER CONTROLLER.",
-                            reserved(cc).unwrap_or("reserved").to_uppercase()
+                            map.reserved(cc).unwrap_or("reserved").to_uppercase()
                         ),
                         Tone::Warn,
                     ),
-                    None => (RESERVED_TEXT.to_owned(), Tone::Dim),
+                    None => (
+                        if i == MOD_WHEEL {
+                            "SETS THIS COMPUTER'S SOURCE · ALL CHANNELS".into()
+                        } else {
+                            map.reserved_text()
+                        },
+                        Tone::Dim,
+                    ),
                 };
                 let (x, y) = note_point(p);
                 Note {
@@ -665,7 +800,7 @@ impl Learning {
             (
                 format!(
                     "CC {cc} IS {}: NOT LEARNED. MOVE ANOTHER CONTROLLER.",
-                    reserved(cc).unwrap_or("reserved").to_uppercase()
+                    map.reserved(cc).unwrap_or("reserved").to_uppercase()
                 ),
                 DrawerTone::Trouble,
             )
@@ -676,7 +811,7 @@ impl Learning {
             first: self.first,
             chosen: self.chosen,
             keys: KEYS_TEXT.into(),
-            reserved: RESERVED_TEXT.into(),
+            reserved: map.reserved_text(),
             status,
             tone,
         }

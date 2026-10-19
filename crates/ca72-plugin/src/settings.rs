@@ -1,8 +1,7 @@
 //! What the plug-in keeps for the computer, not for the session (decisions.md R48,
 //! R51, R54): QUALITY's indicator shown or not, whether ULTRA's note has been read,
 //! the look (the skin) the editor is drawn in, its lettering's size and how the FREQUENCY
-//! knobs' dials read. In the
-//! shared
+//! knobs' dials read, and the MOD wheel's MIDI source (R-MODWHEEL-SOURCE). In the shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, and as one changes only that key written, the file read again under a lock
 //! every instance takes (`settings.toml.lock`), so that one editor's change never undoes
@@ -15,6 +14,7 @@ use ca72::freq_dial::Law;
 use ca72_panel::{Lettering, Skin};
 
 use crate::library::{shared_dir, write};
+use crate::mod_wheel::Source;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -46,6 +46,8 @@ pub struct Settings {
     pub keyboard_root: u8,
     /// TYPE's C-based octave, independent of the visible range and sound controls.
     pub typing_root: u8,
+    /// What moves the MOD wheel, on any channel; never a preset or project field.
+    pub mod_wheel_source: Source,
 }
 
 /// One setting changed, as an editor keeps it (`Settings::keep`).
@@ -59,6 +61,7 @@ pub enum Change {
     Keyboard(bool),
     KeyboardRoot(u8),
     TypingRoot(u8),
+    ModWheelSource(Source),
 }
 
 impl Change {
@@ -79,6 +82,15 @@ impl Change {
             ),
             Change::KeyboardRoot(root) => ("keyboard_root", i64::from(root.min(84)).into()),
             Change::TypingRoot(root) => ("typing_root", i64::from(root.min(120) / 12 * 12).into()),
+            Change::ModWheelSource(source) => (
+                "mod_wheel_source",
+                match source {
+                    Source::Cc(cc) => format!("cc{cc}"),
+                    Source::ChannelPressure => "channel_aftertouch".into(),
+                    Source::PolyPressure => "poly_aftertouch".into(),
+                }
+                .into(),
+            ),
         };
         t.insert(key.into(), value);
     }
@@ -95,6 +107,7 @@ impl Default for Settings {
             keyboard: None,
             keyboard_root: 41,
             typing_root: ca72_panel::keyboard::TYPE_ROOT,
+            mod_wheel_source: Source::DEFAULT,
         }
     }
 }
@@ -151,6 +164,16 @@ impl Settings {
                 Some("hardware") => Law::Hardware,
                 _ => d.frequency,
             },
+            mod_wheel_source: match t.get("mod_wheel_source").and_then(toml::Value::as_str) {
+                Some("channel_aftertouch") => Source::ChannelPressure,
+                Some("poly_aftertouch") => Source::PolyPressure,
+                Some(cc) => cc
+                    .strip_prefix("cc")
+                    .and_then(|cc| cc.parse::<u8>().ok())
+                    .and_then(Source::cc)
+                    .unwrap_or(Source::DEFAULT),
+                None => Source::DEFAULT,
+            },
         }
     }
 
@@ -165,6 +188,7 @@ impl Settings {
             Change::Keyboard(shown) => self.keyboard = Some(shown),
             Change::KeyboardRoot(root) => self.keyboard_root = root.min(84),
             Change::TypingRoot(root) => self.typing_root = root.min(120) / 12 * 12,
+            Change::ModWheelSource(source) => self.mod_wheel_source = source,
         }
     }
 
@@ -176,6 +200,17 @@ impl Settings {
         let mut t = table(path)?.unwrap_or_default();
         t.insert("format".into(), 1.into());
         change.put(&mut t);
+        // The wheel's CC is reserved on every channel: a preset action learned on it is let
+        // go in the same write, so it cannot return when the wheel later moves elsewhere.
+        if let Change::ModWheelSource(Source::Cc(cc)) = change
+            && let Some(actions) = t
+                .get_mut("preset_actions")
+                .and_then(toml::Value::as_table_mut)
+        {
+            actions.retain(|_, v| {
+                v.get("cc").and_then(toml::Value::as_integer) != Some(i64::from(cc))
+            });
+        }
         write(path, &t)
     }
 }
@@ -421,6 +456,94 @@ mod tests {
         );
     }
 
+    /// The two computer settings MIDI shares (R-PRESET-KEYS, R-MODWHEEL-SOURCE): neither's
+    /// write drops the other's, the wheel's CC lets go of a preset action on it on every
+    /// channel, and a CC the wheel has freed keeps its action in a new instance.
+    #[test]
+    fn preset_actions_and_the_wheel_source_share_the_file() {
+        use crate::learn::{Binding, Cc, MidiMap, index};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let (previous, next) = (
+            index("previous_preset").unwrap(),
+            index("next_preset").unwrap(),
+        );
+        let pad = Binding::Note {
+            channel: 9,
+            note: 36,
+        };
+        Settings::keep(&path, Change::ModWheelSource(Source::ChannelPressure)).unwrap();
+        let a = MidiMap::for_settings(path.clone());
+        assert_eq!(a.wheel_source(), Source::ChannelPressure);
+        a.assign(previous, Cc { channel: 0, cc: 1 })
+            .expect("CC 1 freed");
+        a.assign(next, pad).unwrap();
+        a.keep_actions(&[previous, next]).unwrap();
+        assert_eq!(
+            Settings::read(&path).mod_wheel_source,
+            Source::ChannelPressure
+        );
+        let b = MidiMap::for_settings(path.clone());
+        assert_eq!(b.binding(previous), Some(Cc { channel: 0, cc: 1 }.into()));
+        assert_eq!(b.binding(next), Some(pad));
+        // The wheel takes CC 1 back: the action on it goes, the pad stays.
+        b.set_wheel_source(Source::Cc(1));
+        Settings::keep(&path, Change::ModWheelSource(Source::Cc(1))).unwrap();
+        assert_eq!(b.binding(previous), None);
+        assert_eq!(preset_actions(&path), vec![(next, pad)]);
+        // Another CC on another channel goes too: the wheel follows it on all of them.
+        a.assign(previous, Cc { channel: 5, cc: 11 }).unwrap();
+        a.keep_actions(&[previous]).unwrap();
+        Settings::keep(&path, Change::ModWheelSource(Source::Cc(11))).unwrap();
+        assert_eq!(preset_actions(&path), vec![(next, pad)]);
+        Settings::keep(&path, Change::ModWheelSource(Source::DEFAULT)).unwrap();
+        let c = MidiMap::for_settings(path.clone());
+        assert_eq!(c.binding(previous), None, "does not return");
+        assert_eq!(c.binding(next), Some(pad));
+        assert_eq!(c.wheel_source(), Source::DEFAULT);
+    }
+
+    #[test]
+    fn mod_wheel_sources_roundtrip_and_invalid_or_missing_sources_use_cc1() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        assert_eq!(Settings::read(&path).mod_wheel_source, Source::Cc(1));
+        Settings::keep(&path, Change::Skin(Skin::Drawn)).expect("other preference");
+        let sources = (0..128)
+            .filter_map(Source::cc)
+            .chain([Source::ChannelPressure, Source::PolyPressure]);
+        for source in sources {
+            Settings::keep(&path, Change::ModWheelSource(source)).expect("source saved");
+            let read = Settings::read(&path);
+            assert_eq!(read.mod_wheel_source, source);
+            assert_eq!(read.skin, Skin::Drawn);
+        }
+        for value in [
+            "'unknown'",
+            "'cc0'",
+            "'cc32'",
+            "'cc120'",
+            "'cc128'",
+            "'cc255'",
+            "'cc-1'",
+            "4",
+            "false",
+        ] {
+            std::fs::write(&path, format!("mod_wheel_source = {value}\n")).expect("file");
+            assert_eq!(
+                Settings::read(&path).mod_wheel_source,
+                Source::Cc(1),
+                "{value}"
+            );
+        }
+        std::fs::write(&path, "not [ toml").expect("bad file");
+        assert!(Settings::keep(&path, Change::ModWheelSource(Source::Cc(11))).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("unchanged"),
+            "not [ toml"
+        );
+    }
+
     #[test]
     fn release_notes_history_survives_restarts_settings_edits_and_downgrades() {
         let dir = tempfile::tempdir().expect("settings folder");
@@ -647,6 +770,7 @@ mod tests {
             keyboard: None,
             keyboard_root: 41,
             typing_root: ca72_panel::keyboard::TYPE_ROOT,
+            mod_wheel_source: Source::DEFAULT,
         };
         assert_eq!(Settings::read(&path), s);
         let text = std::fs::read_to_string(&path).expect("read") + "theirs = 3\n";
@@ -731,6 +855,7 @@ mod tests {
                 keyboard: None,
                 keyboard_root: 41,
                 typing_root: ca72_panel::keyboard::TYPE_ROOT,
+                mod_wheel_source: Source::DEFAULT,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))

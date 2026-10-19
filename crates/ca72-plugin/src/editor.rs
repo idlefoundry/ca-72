@@ -1129,6 +1129,7 @@ impl Editing {
             Settings::load()
         };
         params.set_freq_law(settings.frequency);
+        params.midi_map.set_wheel_source(settings.mod_wheel_source);
         let standalone = context.plugin_api() == PluginApi::Standalone;
         let mut playing = Playing::default();
         playing.standalone = standalone;
@@ -1336,6 +1337,16 @@ impl Editing {
         self.settings.apply(change);
         if let Some(path) = &self.settings_file {
             let _ = Settings::keep(path, change);
+        }
+    }
+
+    fn poll_midi_learn(&mut self) {
+        if self
+            .learning
+            .poll(&self.params.midi_map)
+            .is_some_and(|a| a.param == crate::learn::MOD_WHEEL)
+        {
+            self.keep_settings(Change::ModWheelSource(self.params.midi_map.wheel_source()));
         }
     }
 
@@ -1931,6 +1942,7 @@ impl Editing {
                         self.settings.skin,
                         self.settings.lettering,
                         self.settings.frequency,
+                        self.params.midi_map.wheel_source(),
                     ),
                 );
             }
@@ -2008,6 +2020,22 @@ impl Editing {
             }
             Pressed::Dials(law) => {
                 self.set_frequency_dials(law);
+                return;
+            }
+            Pressed::WheelMenu(range) => {
+                self.learning.open_wheel_menu(
+                    self.renderer.fonts(),
+                    settings_menu_corner(),
+                    self.renderer.text_size() * MENU_TEXT,
+                    self.params.midi_map.wheel_source(),
+                    range,
+                );
+                return;
+            }
+            Pressed::WheelSource(source) => {
+                self.params.midi_map.cancel();
+                self.params.midi_map.set_wheel_source(source);
+                self.keep_settings(Change::ModWheelSource(source));
                 return;
             }
             Pressed::Look(skin) => {
@@ -2733,8 +2761,8 @@ impl Editing {
         // MIDI Learn: what the audio thread caught assigned; the ring, the note and the menu;
         // the drawer's list (the presets again once the drawer has shut). A tip gives way to a
         // note or a menu.
+        self.poll_midi_learn();
         let map = &self.params.midi_map;
-        self.learning.poll(map);
         let bottom = if self.expanded() { art::H } else { DRAWER_TOP };
         self.learning
             .fit_menu(self.renderer.fonts(), [0.0, 0.0, art::W, bottom]);
@@ -3209,7 +3237,13 @@ impl Drop for Editing {
     // else nothing is (decisions.md R34). It no longer watches the levels (the audio thread
     // stops measuring them when no editor does).
     fn drop(&mut self) {
-        self.learning.close(&self.params.midi_map);
+        if self
+            .learning
+            .close(&self.params.midi_map)
+            .is_some_and(|a| a.param == crate::learn::MOD_WHEEL)
+        {
+            self.keep_settings(Change::ModWheelSource(self.params.midi_map.wheel_source()));
+        }
         self.end_gestures();
         self.meters.watchers.fetch_sub(1, Ordering::Relaxed);
     }
@@ -5836,7 +5870,7 @@ mod tests {
             e.learning
                 .menu()
                 .map(|m| (m.heads.clone(), m.marked.clone())),
-            Some((vec![0, 3, 6, 9], vec![1, 4, 7]))
+            Some((vec![0, 3, 6, 9, 12], vec![1, 4, 7]))
         );
         // Oscillator 2 at +5 semitones, oscillator 3's pot at its clockwise end (+8.22).
         let ps: Arc<dyn Params> = params.clone();
@@ -6630,8 +6664,147 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_mod_wheel_learns_and_keeps_its_computer_source_without_parameter_gestures() {
+        use crate::mod_wheel::Source;
+        let dir = tempfile::tempdir().expect("computer settings");
+        let path = dir.path().join("CA-72/settings.toml");
+        let (mut e, host, params) = editing();
+        e.settings_file = Some(path.clone());
+        let fields = params.serialize_fields();
+        let map = Arc::clone(&params.midi_map);
+        let p = at(&e, centre("mod_wheel"));
+        right_click(&mut e, p);
+        assert_eq!(
+            e.learning.menu().expect("wheel menu").title,
+            "MOD WHEEL SOURCE · CC 1"
+        );
+        menu_item(&mut e, "MIDI LEARN");
+        e.draw();
+        assert_eq!(e.scene.learning, ca72_panel::controls::index("mod_wheel"));
+        assert!(keyed(&mut e, Key::Escape));
+        assert_eq!(map.armed(), None);
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        assert_eq!(map.incoming(7, 11), crate::learn::Incoming::Caught);
+        e.draw();
+        assert_eq!(map.wheel_source(), Source::Cc(11));
+        assert_eq!(Settings::read(&path).mod_wheel_source, Source::Cc(11));
+        assert_eq!(note_lines(&e), ["MOD WHEEL SOURCE: CC 11 · ALL CHANNELS"]);
+        assert_eq!(
+            params.serialize_fields(),
+            fields,
+            "source never enters project fields"
+        );
+        assert!(
+            e.learning
+                .list_scene(&map)
+                .reserved
+                .contains("CC 11 (MOD WHEEL SOURCE")
+        );
+        right_click(&mut e, p);
+        menu_item(&mut e, "MIDI LEARN");
+        map.incoming(2, 74);
+        drop(e);
+        assert_eq!(
+            Settings::read(&path).mod_wheel_source,
+            Source::Cc(74),
+            "caught before closing"
+        );
+        assert_eq!(map.armed(), None);
+        assert!(host.take().is_empty(), "source is not a sound parameter");
+    }
+
+    #[test]
+    fn settings_and_the_wheel_offer_common_sources_and_every_other_allowed_cc() {
+        use crate::mod_wheel::Source;
+        let (mut e, host, params) = editing();
+        let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+        click(&mut e, key);
+        menu_item(&mut e, "CC 1…");
+        let m = e.learning.menu().expect("source menu");
+        assert_eq!(m.marked, [0]);
+        for label in [
+            "CC 2 · BREATH",
+            "CC 4 · FOOT",
+            "CC 11 · EXPRESSION",
+            "CC 74 · TIMBRE / MPE Y",
+            "CHANNEL AFTERTOUCH",
+            "POLYPHONIC AFTERTOUCH · MAX HELD",
+        ] {
+            assert!(
+                m.items.iter().any(|(text, on)| text == label && *on),
+                "{label}"
+            );
+        }
+        menu_item(&mut e, "CC 11 · EXPRESSION");
+        assert_eq!(params.midi_map.wheel_source(), Source::Cc(11));
+        assert_eq!(e.settings.mod_wheel_source, Source::Cc(11));
+        for label in ["CHANNEL AFTERTOUCH", "POLYPHONIC AFTERTOUCH · MAX HELD"] {
+            let p = at(&e, centre("mod_wheel"));
+            right_click(&mut e, p);
+            menu_item(&mut e, "MOD WHEEL SOURCE…");
+            menu_item(&mut e, label);
+        }
+        assert_eq!(params.midi_map.wheel_source(), Source::PolyPressure);
+        let p = at(&e, centre("mod_wheel"));
+        right_click(&mut e, p);
+        menu_item(&mut e, "MOD WHEEL SOURCE…");
+        menu_item(&mut e, "OTHER…");
+        menu_item(&mut e, "CC 16–31…");
+        menu_item(&mut e, "CC 23");
+        assert_eq!(params.midi_map.wheel_source(), Source::Cc(23));
+        for first in (0..128).step_by(16) {
+            e.learning.open_wheel_menu(
+                e.renderer.fonts(),
+                settings_menu_corner(),
+                e.renderer.text_size() * MENU_TEXT,
+                Source::Cc(23),
+                Some(first),
+            );
+            let m = e.learning.menu().expect("range");
+            for (i, (_, enabled)) in m.items.iter().enumerate() {
+                let cc = first + i as u8;
+                assert_eq!(*enabled, Source::cc(cc).is_some() && cc != 23, "CC {cc}");
+            }
+        }
+        assert!(host.take().is_empty());
+    }
+
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_mod_wheel_source_pngs() {
+        let out = std::env::var_os("CA72_MODWHEEL_PNG").expect("image folder");
+        let out = std::path::PathBuf::from(out);
+        std::fs::create_dir_all(&out).expect("image folder");
+        for (skin_name, skin) in [("realistic", Skin::Worn), ("classic", Skin::Drawn)] {
+            for (text_name, lettering) in [
+                ("standard", Lettering::Standard),
+                ("large", Lettering::Large),
+            ] {
+                let (mut e, _, _) = editing();
+                e.set_look(skin);
+                e.set_lettering(lettering);
+                let key = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Settings)));
+                click(&mut e, key);
+                window_frame(&mut e)
+                    .save_png(out.join(format!("settings-{skin_name}-{text_name}.png")))
+                    .expect("settings image");
+                menu_item(&mut e, "CC 1…");
+                window_frame(&mut e)
+                    .save_png(out.join(format!("sources-{skin_name}-{text_name}.png")))
+                    .expect("source image");
+                menu_item(&mut e, "OTHER…");
+                menu_item(&mut e, "CC 0–15…");
+                window_frame(&mut e)
+                    .save_png(out.join(format!("range-{skin_name}-{text_name}.png")))
+                    .expect("CC range image");
+            }
+        }
+    }
+
     /// The strip's controls have the menu too (a tab's above it, the control ringed on the
-    /// strip; a knob's as the panel's knobs'); a wheel and POWER say why they are not learned,
+    /// strip; a knob's as the panel's knobs'); PITCH and POWER say why they are not learned,
     /// MIDI LEARN not offered.
     #[test]
     fn the_strips_controls_learn_and_the_wheels_and_power_say_why_not() {
@@ -6681,10 +6854,6 @@ mod tests {
         assert_eq!(map.armed(), None);
         for (param, title) in [
             ("pitch_wheel", "PITCH: MIDI PITCH BEND MOVES IT"),
-            (
-                "mod_wheel",
-                "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT",
-            ),
             ("quality", "QUALITY: SET PER PLUGIN INSTANCE"),
         ] {
             let p = at(&e, centre(param));
