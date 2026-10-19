@@ -8079,3 +8079,63 @@ they find the window's edges dimmed outside the box and no control, menu, drawer
 host gesture reached by presses, wheel, right clicks or keys behind it. Renders for the
 owner, with a comparison with the mock-up, are in `target/wna-evidence/` of the job's
 worktree. No macOS or Windows host has shown it yet.
+
+## R-DEVICE-LISTING. The standalone lists devices without opening them (issue #112)
+
+**What happened, 2026-10-19.** On the owner's Mac the released 0.2.7 standalone and a test
+build opened with no audio devices and no MIDI ports in AUDIO & MIDI, and no error. plugin-kit's
+runtime listed devices with cpal on its control thread; for every device cpal's CoreAudio probe
+made a HAL AudioUnit and set its device, which creates an IO proc, just to read the buffer frame
+size range. For five virtual drivers (Immersed, Steam Streaming Microphone and Speakers, Virtual
+Desktop Mic and Speakers) that call never returned, so nothing was published and MIDI was never
+polled. After a reboot cleared the drivers the owner found the other face of the same probe:
+"The one thing that jumps out to me is having to request access for the microphone. Why is that
+a thing? We're not even allowing input at the moment from what I saw in the standalone app. So
+why are we requesting access for the microphone? And I don't think we should be requesting
+access for that unless the user specified that they were wanting to use the microphone input."
+The input probe's AudioUnit had input enabled; enabling input is what asks.
+
+**Fix (plugin-kit `ba59f24`, its K-DEVICE-LISTING; PR idlefoundry/plugin-kit#10).**
+
+- cpal's probes read the range as a device property (its `third_party/cpal` change 3). Listing is
+  CoreAudio property reads only: name, stream configuration per scope, nominal and available
+  sample rates, buffer frame size range, default device. Only opening a stream makes an
+  AudioUnit, and an input is opened only when an external input is chosen.
+- Audio devices are listed by a worker with a 1.5-second limit per device, MIDI ports by a
+  worker of their own; the control loop reads their results without waiting. A device past the
+  limit is left out and named in the dialog's status ("Steam Streaming Speakers isn't
+  responding."), and later rounds skip it while its call is blocked. Opening the chosen device
+  describes only devices of its name.
+- On macOS the MIDI worker runs its run loop for an instant before each poll. CoreMIDI announces
+  new endpoints there; without it (as on 0.2.7's control thread) a controller plugged in after
+  launch was never listed. Found while checking this fix.
+
+**Evidence (2026-10-19).** plugin-kit's standalone tests pass on Linux, Windows (MSVC) and the
+owner's Mac (macOS 27): fake hosts whose devices block (one; five; one whose name never
+answers), MIDI that stalls and recovers, and the control loop with a blocked device (MIDI
+published before the audio list, commands handled, the list published naming the device,
+the queued apply answered, shutdown under two seconds). On the Mac,
+`listing_mac_devices_makes_no_audio_unit` listed all ten devices, the five drivers that had
+hung included, in 79 ms with no AudioUnit made. The CA-72's standalone tests pass on Linux.
+
+A renamed build, "CA-72 DEV" (bundle id `com.idlefoundry.ca72-dev.standalone`, its own
+session), was installed in `~/Applications` on the owner's Mac, its microphone permission reset
+with `tccutil reset Microphone` for that id only, and launched with `open`:
+
+- External input disabled: AUDIO & MIDI's inventory (read from the runtime's snapshot) held the
+  ten devices, default output MacBook Pro Speakers, RUNNING at the device's own 44.1 kHz and 256
+  frames, no error. TCC's log for the process shows only preflight status checks (no request,
+  no prompt). A virtual MIDI source published before launch was listed and chosen
+  automatically; one published while it ran appeared within two seconds, and its removal gave
+  the usual "No MIDI inputs available (previously 1)" notice.
+- External input MacBook Pro Microphone (chosen in the saved session, as Apply would save it):
+  TCC logged a microphone request (`preflight=no`) and `AUTHREQ_PROMPTING` for the app's bundle
+  id the moment the input was opened. The prompt was left unanswered and the app closed; no
+  decision was recorded, and the permission was reset again afterwards.
+
+**Not settled, for the owner.** While macOS's microphone prompt is waiting for an answer,
+opening the input waits too (the same CoreAudio call that hung, `CreateIOProcID`): sound stops
+and the dialog reads STARTING until the user answers. Asking for access first (AVFoundation's
+request, which doesn't wait) and starting the output alone meanwhile would avoid that; it is not
+done here. Allow and Don't Allow were not clicked, so what follows each was not seen. The
+dialog itself was not looked at on screen; its inventory was read from the runtime.
