@@ -14,24 +14,43 @@ pub const HELPER: &str = if cfg!(windows) {
     "ca72-fx-helper"
 };
 
-/// The helper: `$CA72_FX_HELPER`, or `ca72-fx-helper` beside the running program (on macOS
-/// also in the application bundle's `Contents/Helpers`).
+/// The helper: `$CA72_FX_HELPER`, or [`helper_for`] the running program.
 pub fn helper_path() -> Result<PathBuf, String> {
     if let Some(p) = std::env::var_os("CA72_FX_HELPER") {
         return Ok(PathBuf::from(p));
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let dir = exe.parent().ok_or("the program has no directory")?;
-    let mut candidates = vec![dir.join(HELPER)];
-    if let Some(contents) = dir.parent() {
-        candidates.push(contents.join("Helpers").join(HELPER));
-    }
-    candidates.into_iter().find(|p| p.is_file()).ok_or_else(|| {
+    helper_for(&exe).ok_or_else(|| {
         format!(
             "the effects' helper `{HELPER}` was not found beside {}; set CA72_FX_HELPER to its path",
             exe.display()
         )
     })
+}
+
+/// The helper of the program `exe`: `ca72-fx-helper` beside it (Linux, Windows, a development
+/// build), else, in a macOS application (`exe` in `X.app/Contents/MacOS`), the helper's own
+/// application bundle in `X.app/Contents/Helpers` (`<name> Effects Host.app`, whose
+/// `Contents/MacOS` holds it), the first by name if there were several. The helper is never
+/// looked for loose in `Contents/Helpers`: there it took the synth's bundle identifier and
+/// showed in the Dock as a second application (decisions.md R-FX-DOCK).
+pub fn helper_for(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    let beside = dir.join(HELPER);
+    if beside.is_file() {
+        return Some(beside);
+    }
+    let helpers = dir.parent()?.join("Helpers");
+    let mut bundles: Vec<PathBuf> = std::fs::read_dir(&helpers)
+        .ok()?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "app"))
+        .collect();
+    bundles.sort();
+    bundles
+        .into_iter()
+        .map(|b| b.join("Contents/MacOS").join(HELPER))
+        .find(|p| p.is_file())
 }
 
 /// Whether the system's standard plug-in folders are searched: yes, unless
@@ -202,4 +221,54 @@ pub fn scan(helper: &Path, file: &Path, timeout: Duration) -> Result<Vec<PluginD
         .find(|l| l.starts_with('['))
         .unwrap_or("");
     serde_json::from_str(line).map_err(|e| format!("its listing could not be read: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file(p: &Path) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"").unwrap();
+    }
+
+    /// The helper beside the program (Linux, Windows, a development build), or in its own
+    /// bundle inside a macOS application's `Contents/Helpers`, never loose there.
+    #[test]
+    fn the_helper_is_found_beside_the_program_or_in_its_own_bundle() {
+        let root = tempfile::tempdir().unwrap();
+
+        let bin = root.path().join("bin");
+        file(&bin.join("ca72-standalone"));
+        assert_eq!(helper_for(&bin.join("ca72-standalone")), None);
+        file(&bin.join(HELPER));
+        assert_eq!(
+            helper_for(&bin.join("ca72-standalone")),
+            Some(bin.join(HELPER))
+        );
+
+        let app = root.path().join("CA-72.app/Contents");
+        let exe = app.join("MacOS/ca72-standalone");
+        file(&exe);
+        file(&app.join("Helpers").join(HELPER));
+        assert_eq!(
+            helper_for(&exe),
+            None,
+            "loose in Contents/Helpers: not used"
+        );
+        file(&app.join("Helpers/Notes.txt"));
+        let host = app.join("Helpers/CA-72 Effects Host.app/Contents/MacOS");
+        std::fs::create_dir_all(&host).unwrap();
+        assert_eq!(helper_for(&exe), None, "a bundle without the helper");
+        file(&host.join(HELPER));
+        assert_eq!(helper_for(&exe), Some(host.join(HELPER)));
+        // A renamed build's (CA-72 TEST's) bundle, beside nothing else, is found as well.
+        let renamed = app.join("Helpers/CA-72 TEST Effects Host.app/Contents/MacOS");
+        file(&renamed.join(HELPER));
+        std::fs::remove_dir_all(app.join("Helpers/CA-72 Effects Host.app")).unwrap();
+        assert_eq!(helper_for(&exe), Some(renamed.join(HELPER)));
+        // Beside the program first.
+        file(&app.join("MacOS").join(HELPER));
+        assert_eq!(helper_for(&exe), Some(app.join("MacOS").join(HELPER)));
+    }
 }
