@@ -26,6 +26,7 @@ pub mod standalone_error;
 #[cfg(feature = "standalone-production")]
 pub mod standalone_settings;
 pub mod update;
+pub mod whats_new;
 
 use std::sync::Arc;
 
@@ -40,6 +41,14 @@ use crate::engine::{
 use crate::helper::{Helper, MEND, SERVE};
 use crate::learn::{Dezip, Incoming};
 use crate::params::Ca72Params;
+
+/// Names the standalone application before its first window opens: on Linux, the X11 class of
+/// every top-level window, the editor's and the error window's alike, whatever each one's
+/// title. The installed launcher's `StartupWMClass` matches it (decisions.md R-LINUX-ICON).
+#[cfg(feature = "standalone-production")]
+pub fn identify_standalone() {
+    baseview::set_application_class(Ca72::NAME);
+}
 
 pub struct Ca72 {
     params: Arc<Ca72Params>,
@@ -152,9 +161,11 @@ fn arp_clock(t: &Transport, rate: f64, tempo: f64) -> arp::Clock {
 /// The host's MIDI as the engine takes it (any channel), if it takes it.
 fn event_of(e: NoteEvent<()>) -> Option<Event> {
     Some(match e {
-        NoteEvent::NoteOn { note, velocity, .. } => Event::Note {
+        // Native CLAP (and VST3) permits a zero-velocity attack. MIDI's zero-velocity
+        // note-on has already become NoteOff in the wrapper's MIDI decoder.
+        NoteEvent::NoteOn { note, .. } => Event::Note {
             key: note,
-            on: velocity > 0.0,
+            on: true,
         },
         NoteEvent::NoteOff { note, .. } | NoteEvent::Choke { note, .. } => Event::Note {
             key: note,
@@ -456,6 +467,13 @@ impl Plugin for Ca72 {
             .unwrap_or_else(drive::unmeasured);
         if let Ok(t) = serde_json::to_string(&curve) {
             state.fields.insert(drive::STATE_KEY.to_owned(), t);
+        }
+        // The pre-0.2.7 ENTROPY range becomes 5..100 %, including an absent amount's
+        // old default (R-ENTROPY-FLOOR). Automation belongs to the host and is left to it.
+        if compat::before_entropy_floor(&state.version)
+            && let Some(ParamValue::F32(v)) = state.params.get_mut("entropy")
+        {
+            *v = compat::entropy_percent(f64::from(*v)) as f32;
         }
         state.params.remove("analog");
         if !state.params.contains_key("entropy") {
@@ -1060,15 +1078,13 @@ mod tests {
         block(&mut p, &mut c, 128);
         p.reset();
         assert_eq!(p.local_notes.held(), [0, 0]);
-        c.push_event(NoteEvent::NoteOn {
-            timing: 3,
-            voice_id: None,
-            channel: 0,
-            note: 60,
-            velocity: 0.0,
-        });
+        c.push_event(NoteEvent::from_midi(3, &[0x90, 60, 0]).expect("MIDI zero-velocity release"));
         block(&mut p, &mut c, 128);
-        assert_eq!(p.local_notes.held(), [0, 0], "velocity zero is a release");
+        assert_eq!(
+            p.local_notes.held(),
+            [0, 0],
+            "MIDI velocity zero is a release"
+        );
         // CA-72's reserved CC120/123 have always been global, irrespective of channel.
         // Keep that compatibility behavior and invalidate local attacks alongside the engine.
         for controller in [ALL_NOTES_OFF, ALL_SOUND_OFF] {
@@ -1199,11 +1215,65 @@ mod tests {
         };
         let mut old = state(&[("analog", 70.0), ("cutoff", 3.0)]);
         Ca72::filter_state(&mut old);
-        assert_eq!(entropy(&old), Some(0.0));
+        assert_eq!(entropy(&old), Some(5.0));
         assert!(!old.params.contains_key("analog"));
         let mut new = state(&[("entropy", 40.0)]);
         Ca72::filter_state(&mut new);
-        assert_eq!(entropy(&new), Some(40.0));
+        assert_eq!(entropy(&new), Some(43.0));
+    }
+
+    /// Both old and current project states pass through the real migration hook. A state
+    /// resaved by this version must not be shifted a second time.
+    #[test]
+    fn saved_states_migrate_entropy_by_their_writer_version() {
+        for (version, plain, want) in [
+            ("0.1.5", 0.0, 5.0),
+            ("0.2.6", 40.0, 43.0),
+            ("0.2.6", 100.0, 100.0),
+            (env!("CARGO_PKG_VERSION"), 0.0, 0.0),
+            (env!("CARGO_PKG_VERSION"), 43.0, 43.0),
+        ] {
+            let mut s = PluginState {
+                version: version.to_owned(),
+                params: [("entropy".to_owned(), ParamValue::F32(plain))]
+                    .into_iter()
+                    .collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            assert!(
+                matches!(s.params["entropy"], ParamValue::F32(v) if v == want),
+                "{version}: {plain}"
+            );
+            s.version = env!("CARGO_PKG_VERSION").to_owned();
+            Ca72::filter_state(&mut s);
+            assert!(matches!(s.params["entropy"], ParamValue::F32(v) if v == want));
+        }
+    }
+
+    /// Moving into a smaller f32 interval cannot retain every old f32. Bound the forward
+    /// rounding explicitly; this example's loss is reported in R-ENTROPY-FLOOR.
+    #[test]
+    fn fractional_entropy_state_migration_has_a_bounded_rounding_error() {
+        for old in [0.000001f32, 24.8161, 51.0091, 30.3158, 99.99999] {
+            let mut s = PluginState {
+                version: "0.2.6".to_owned(),
+                params: [("entropy".to_owned(), ParamValue::F32(old))]
+                    .into_iter()
+                    .collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            let ParamValue::F32(new) = s.params["entropy"] else {
+                panic!("a float")
+            };
+            let recovered = crate::engine::entropy_depth(f64::from(new) / 100.0) / 2.0 * 100.0;
+            assert!((recovered - f64::from(old)).abs() < 4.1e-6);
+            if old == 51.0091 {
+                assert_ne!(recovered, f64::from(old));
+                eprintln!("legacy {old:.17} %, new {new:.17} %, recovered {recovered:.17} %");
+            }
+        }
     }
 
     /// A session saved before NOTE PRIORITY and RETRIGGER opens with LOW (its index, as nih-plug

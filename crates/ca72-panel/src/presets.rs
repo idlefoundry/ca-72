@@ -934,7 +934,7 @@ mod png {
                         save_name: Field::new("An intentionally long name to exercise scrolling"),
                         save_tags: Field::new("bass, dark"),
                         focus: Some(FieldId::SaveTags),
-                        hover: Some(DrawerTarget::Key(PresetKey::SaveAs)),
+                        hover: Some(DrawerTarget::Key(PresetKey::Init)),
                         ..found.clone()
                     },
                 ),

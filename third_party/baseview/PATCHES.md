@@ -3,15 +3,16 @@
 The `baseview` crate from [RustAudio/baseview](https://github.com/RustAudio/baseview) at
 commit `9a0b42c09d712777b2edb4c5e0cb6baf21e988f0` (MIT OR Apache-2.0, `LICENSE-MIT`,
 `LICENSE-APACHE`), the revision the editor took from git until 0.1.0. The examples, the CI
-and the manifest's `[workspace]`, `[[example]]` and `[dev-dependencies]` tables are left
-out; the manifest names the repository, for the notices, and allows two of upstream's own
+and the manifest's `[[example]]` table are left out; the workspace contains only the resolver
+setting needed for the portable tests, and their dev-dependencies are listed below. The
+manifest names the repository, for the notices, and allows two of upstream's own
 compiler warnings (`non_snake_case` in `src/win/drop_target.rs`, and
 `mismatched_lifetime_syntaxes`). `src/macos/window.rs` has one `use` list in the order
 today's rustfmt gives it, so that `cargo fmt --all` leaves the tree as it is.
 
-Five changes for Windows (1 to 3, 5 and 6), in `src/win/window.rs`, `src/win/drop_target.rs`,
+Six changes for Windows (1 to 3, 5, 6 and 8), in `src/win/window.rs`, `src/win/drop_target.rs`,
 `src/win/escape.rs`, `src/event.rs` and `src/window.rs` (the first three the CA-72's
-`docs/decisions.md` R26, R28 and R34), and two for macOS (4 and 7, below):
+`docs/decisions.md` R26, R28 and R34), three for macOS (4, 7 and 8) and one for Linux (10, below):
 
 1. **The window procedure never calls the handler while it is busy.** baseview keeps the
    window's handler in a `RefCell` and borrows it for each event. A message can be sent to
@@ -143,6 +144,64 @@ And one for macOS, in `src/macos/view.rs` (the CA-72's `docs/decisions.md` R56, 
    it; `src/macos/view.rs` shows it again on each `mouseMoved:` (a host's window may have set
    its own) and in a new `cursorUpdate:` (the tracking area already asked for it). Windows and
    Linux are unchanged.
+
+8. **On macOS, the view's layer takes its window's scale** (in `src/macos/view.rs`, the CA-72's
+   `docs/decisions.md` R-TWO-SCREENS, its issue #48). As the window moves to a screen of another
+   scale (a Retina laptop's to a 1x monitor's), AppKit tells the view
+   (`viewDidChangeBackingProperties:`, whose handler sends `Resized` at the new scale) but leaves
+   the layer-backed view's layer at the scale it was made with; calling NSView's own implementation
+   first does not change that. A softbuffer surface lays its frame out at that layer's scale (its
+   sublayer follows the view's layer's `contentsScale`), so the editor's frame, drawn for the new
+   scale, showed at half its size in the window's top left corner on the 1x monitor, whatever the
+   host, until the editor was closed (the other way, by the same arithmetic, it would show at twice
+   its size, cut off; not seen). Now the handler sets the layer's `contentsScale` to the window's
+   `backingScaleFactor`, with no animation, before it sends `Resized`, whether or not the size in
+   pixels changed (a window opened on a 1x screen with its layer made at 2 sends none). And
+   `becomeFirstResponder` no longer messages a nil window: `viewWillMoveToWindow:` makes the view
+   its new window's first responder before the view is in it, and a debug build's check of null
+   pointers stopped the process there (the message to nil answered NO, as it still does).
+
+   The CA-72's test `crates/ca72-plugin/tests/backing_scale.rs` opens baseview's view in a window,
+   leaves the view's layer at the other scale as AppKit does, tells the view, and checks that the
+   layer and softbuffer's take the window's scale and that the frame then shown fills the view;
+   without the layer's scale set it fails ("the view's layer left at another scale"). Tried on
+   macOS 27 with a Retina screen and a 4K monitor switched to 1x: the standalone and Ableton Live
+   12.2.7 (VST3) drew at half size on the 1x monitor before, and whole after.
+
+And one more for Windows, in `src/win/window.rs` (the CA-72's `docs/decisions.md`
+R-WIN-STANDALONE, issue 64, 2026-10-18):
+
+9. **A window of its own has no frame to drag and no maximise box.** A window baseview opens
+   with no parent (an application's, as the CA-72's standalone opens through nih-plug's
+   `production.rs`) had `WS_SIZEBOX` and `WS_MAXIMIZEBOX`. Its handler sizes what it holds and
+   is told nothing it can follow when the frame is dragged or the window maximised: the
+   CA-72's editor stayed as it was, in the window's top left corner, black beyond it (or cut
+   off, the window made smaller). Now such a window has neither; its handler sizes it
+   (`Window::resize`), as on macOS, whose window baseview never made resizable. A parented
+   window (a plug-in's editor in a host) is unchanged. The CA-72's test
+   `the_standalone_s_window_is_its_editor_s_at_every_scale` (`crates/ca72-plugin/src/editor.rs`,
+   Windows) fails with the two styles put back ("a frame to drag").
+
+   This copy is also the one nih-plug's standalone opens its window with since that change
+   (`third_party/nih-plug/Cargo.toml`), without the `opengl` feature, which neither window
+   uses; it had taken upstream's `579130e` from git, whose X11 backend is this one's and whose
+   Windows and macOS backends lack this copy's changes.
+
+And one more for Linux, in `src/x11/` (issue 49, 2026-10-18):
+
+10. **Linux standalone windows identify themselves before mapping** (CA-72 issue #49;
+   `docs/issue-49-linux-icon.md`). The X11 backend mapped its window before setting `WM_NAME`
+   and never set `WM_CLASS`. It now sets the application's class (`set_application_class`, the
+   first name given) or, without one, the initial title as both the instance and class
+   (`STRING/8`, two NUL-terminated strings), then maps. A window titled otherwise, such as an
+   error window, so keeps the application's class. Only top-level windows receive the
+   class; parented plug-in editors leave application identity to their host. Six portable
+   tests record the actual X11 requests, covering the payload, order, parented windows,
+   another instrument's title, a window titled apart from its application, the first class
+   staying, and failure before mapping. The standalone wrappers open their window with this copy
+   on every platform (change 9). The helper's tests use x11rb as a
+   development dependency on every platform. Ubuntu dock behaviour still needs a graphical
+   check.
 
 Upstream's master has since rewritten the Windows backend and the handler's interface; to
 move to it, the editor must be ported, and the tests above show whether it still needs this.

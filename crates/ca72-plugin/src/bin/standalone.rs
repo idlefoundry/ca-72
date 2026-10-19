@@ -5,6 +5,7 @@
 )]
 
 fn main() {
+    ca72_plugin::identify_standalone();
     let mut device_access = true;
     let mut state_dir = None;
     let mut arguments = std::env::args().skip(1);
@@ -31,6 +32,8 @@ fn main() {
         }
     }
     let options = plugin_kit_standalone::AppOptions {
+        // This identifies saved sessions and MIDI clients, not a Wayland surface.
+        // Linux's X11 windows take their class from identify_standalone, Ca72::NAME.
         app_id: "com.idlefoundry.ca-72".into(),
         state_dir: state_dir.unwrap_or_else(|| {
             ca72_plugin::library::shared_dir()

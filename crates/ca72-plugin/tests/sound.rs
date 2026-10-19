@@ -472,3 +472,57 @@ fn a_seed_loaded_into_a_running_instance_plays_as_one_opened_with_it() {
     assert!(peak(&a) > 0.05);
     assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()));
 }
+
+/// At the new minimum the actual audio output holds its pitch, in every quality and with
+/// each oscillator alone. Compare voiced-frame medians after the attack has settled;
+/// the frequency estimate itself moves slightly with the sampling grid and waveform.
+#[test]
+fn zero_entropy_has_steady_audio_pitch_in_every_quality() {
+    for (quality, potato, ultra) in [
+        ("LO", true, false),
+        ("HI", false, false),
+        ("ULTRA", false, true),
+    ] {
+        for oscillator in 0..3 {
+            let mut c = Controls {
+                entropy: 0.0,
+                potato,
+                ultra,
+                ..Controls::default()
+            };
+            for (n, osc) in c.panel.osc.iter_mut().enumerate() {
+                osc.on = n == oscillator;
+            }
+            c.panel.cutoff = 1.0;
+            c.panel.emphasis = 0.0;
+            c.panel.contour_amount = 0.0;
+            c.panel.loudness_contour.sustain = 1.0;
+            let mut e = ready(&c);
+            e.event(Event::Note { key: 69, on: true });
+            run(&mut e, 0.5, |_| 0.0);
+            let mut frequencies = Vec::new();
+            for _ in 0..4 {
+                let y = run(&mut e, 0.25, |_| 0.0);
+                let hz = pitch(&y, RATE as u32).median_hz.expect("held pitch");
+                assert!(
+                    (400.0..480.0).contains(&hz),
+                    "{quality}, osc {}: {hz} Hz",
+                    oscillator + 1
+                );
+                frequencies.push(hz);
+            }
+            let low = frequencies.iter().copied().fold(f64::INFINITY, f64::min);
+            let high = frequencies.iter().copied().fold(0.0, f64::max);
+            let movement = cents(high, low);
+            eprintln!(
+                "{quality}, oscillator {}: {movement:.6} cents peak to peak",
+                oscillator + 1
+            );
+            assert!(
+                movement < 0.05,
+                "{quality}, osc {}: {movement} cents",
+                oscillator + 1
+            );
+        }
+    }
+}
