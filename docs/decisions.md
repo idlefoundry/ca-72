@@ -7720,6 +7720,73 @@ the current preset is gold over the built-in lamps and in the lamps' own colour 
 pointer has an outlined arrow, a chosen tag its bar and the chosen tab its underline.
 **Agent decision** (not separately approved), in resolving the merge.
 
+**What a pack's drawing may allocate, and a test drawing that panics, 2026-10-18 (night).** The
+review of the pull request (2026-10-18) found two faults that block 0.3.0, fixed on
+`skin-pack-guards`:
+- **A pack could end the host.** A drawing whose `<pattern>` tile is vast (10 by 1e9 units; the
+  fuzzer's, at 50,000 cases, 10 by 1e14) passed every check; resvg then allocated the tile at
+  that size as the pack was checked, and an allocation that fails aborts the process, whichever
+  thread it is on. The parsed tree's buffers are now counted before anything is drawn, at the
+  size the drawing is used, each as resvg sizes it (`svg/memory.rs`, read against resvg 0.45's
+  `render_group`, `render_pattern_pixmap`, `clip::apply`, `mask::apply` and the filters): a
+  group's layer cut to five times the target each way; a pattern's tile; a filter's whole
+  region, eight buffers a primitive for its result, inputs, copies and scratch; a clip's two and
+  a mask's three copies of the layer, again for each that cuts them; an embedded picture decoded.
+  At most **16 million pixels a buffer** (as the pictures' pixels) **and 256 MB together**,
+  counted as if nothing were freed, or the drawing is refused (`svg.refused`); `svg_work` already
+  keeps a legitimate drawing's layers to some 10 million pixels. Coordinates, filter offsets and
+  blurs past the renderer's integer range are refused too.
+- **A test drawing that panicked switched the backstop off** for the rest of the process: its
+  thread died without answering, the wait took that for a drawing past its deadline ("not drawn
+  ... within 4001 ms", in 0 ms) and set `RUNAWAY`, which nothing then cleared. The drawing now
+  runs under `catch_unwind` and always answers; a panic refuses its pack (`svg.panicked`); the
+  drawings still running late are counted, each taken off as it ends.
+
+The longer fuzzing found three more ways to end the process, all in reading, before any drawing:
+2000 nested groups and a pattern whose own rectangle inherits `fill='url(#p)'` from the root
+(usvg's reading recursed until the stack overflowed), and a vast embedded PNG's header (usvg
+panicked placing it). Elements may now be nested, references followed, at most 64 deep, counted
+before the XML reader sees them; a fill or stroke a shape or `use` inherits is followed as a
+reference when it names a pattern, so that such a loop is refused; an embedded PNG's header is
+read within the picture limits first, and any panic in usvg's reading refuses the drawing.
+
+**Agent decisions** (not separately approved):
+- The bound is checked where the drawing is read (`svg::parse_at`, at the size the plug-in uses
+  it: the panel's 3000 pixels across, a slot's own size) and again wherever it is drawn: the
+  plug-in draws a pack's drawings through `skin_pack::svg::render`, which counts the buffers at
+  that transform and size against four times the limits (`svg::DRAWN_MARGIN`: a large window on
+  a high-resolution screen, a drawing stretched to a part's proportions) and catches a panic;
+  past them, the drawing is not drawn (a slot falls back to the built-in picture). So nothing a
+  pack holds reaches an allocation the check has not bounded, whatever size it is drawn at.
+- The sum is a bound, not a measure: resvg frees a layer once it is composed, so a drawing holds
+  less. It could refuse a drawing within `svg_work` that clips and masks large layers many
+  times over; the official looks, the starter and the stress packs pass as before. HEAVY, the
+  heaviest drawing the tests hold, counts 125 MB at 3000 pixels; the starter's 11 MB.
+- A thread that cannot be started for the test drawing skips the test with a note (as an earlier
+  runaway does), rather than refusing the pack: that is the machine's state, not the pack's.
+- The 64-deep limit: a drawing nested to it reads and draws on a 1 MB stack (Windows' default
+  for a thread) in a debug build with half of it to spare.
+
+**Evidence (omarchy, 2026-10-18):** the pack made by hand
+(`crates/skin-pack/tests/fixtures/vast-pattern`: its tile asks for some 17 TB) and the fuzzer's
+cases are read in a child process by `skin-pack`
+(`packs_that_once_aborted_their_check_are_refused_in_a_child_process`) and by the panel beside the
+starter (`a_pack_whose_check_once_aborted_is_refused_and_the_next_loads`): on `skin-system`
+(f073a5d) each child aborted (SIGABRT: "memory allocation of 17179869180000 bytes failed", or a
+stack overflow) or panicked; now each pack is refused, and the starter loads.
+`a_test_drawing_that_panics_refuses_its_pack_and_the_next_is_tested`,
+`a_drawing_that_panics_after_its_deadline_releases_the_backstop`,
+`two_drawings_past_their_deadline_both_hold_the_backstop`. The fuzzer (release, 8 GB of address
+space a run, so that a large allocation fails too): before, case 17237 at 50,000 cases a reader
+aborted ("memory allocation of 257698037700 bytes failed"); now 2,000,000 cases a reader for each
+of eight seeds (`SKIN_PACK_FUZZ_SEED` 0, 1, 2, 3, 77, 144, 2026, 4242), six readers, 96 million
+cases (32 million drawings), none failing; the first such run is what found the inherited pattern's
+loop. The 32 golden frames and 36 png renders (the official looks in both skins at scales 0.5 and
+1, with the keyboard, the drawer and large lettering, and the starter pack) byte-identical to
+`skin-system`'s; `skin-pack` and `ca72-panel` tests (173), the plug-in's (309,
+`standalone-production`), clippy, fmt, `notices.py --check`. Not yet: a host with a pack, the Mac
+and Windows.
+
 ## R-EDITOR-CPU. The editor's cost while sound plays
 
 **Owner decisions, 2026-10-17.** CPU use is the users' first complaint. Told where it goes (a
