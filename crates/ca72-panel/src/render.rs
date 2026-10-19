@@ -71,6 +71,8 @@ pub struct Scene {
     pub learning: Option<usize>,
     pub note: Option<Note>,
     pub menu: Option<Menu>,
+    /// The standalone's TEMPO screen's text (`120 BPM`; decisions.md R-ARP), none in a plug-in.
+    pub tempo: Option<String>,
 }
 
 impl Default for Scene {
@@ -87,6 +89,7 @@ impl Default for Scene {
             learning: None,
             note: None,
             menu: None,
+            tempo: None,
         }
     }
 }
@@ -131,6 +134,9 @@ pub struct Renderer {
     /// past [`PLACED_BYTES`] (decisions.md R59); and the count of the renders, their clock.
     placed: Vec<Placed>,
     renders: u64,
+    /// The TEMPO screen's bezel and glass at this scale, in its layer's place (left, top,
+    /// width, height: pixels), once it is drawn.
+    screens: Option<([i32; 4], Pixmap)>,
 }
 
 /// How much the pictures placed in layers may keep: some dozens of layers' pictures.
@@ -218,6 +224,7 @@ impl Renderer {
             overlays: Vec::new(),
             placed: Vec::new(),
             renders: 0,
+            screens: None,
         };
         r.draw_background();
         r
@@ -251,6 +258,7 @@ impl Renderer {
         self.lights.clear();
         self.overlays.clear();
         self.placed.clear();
+        self.screens = None;
         self.draw_background();
     }
 
@@ -460,6 +468,14 @@ impl Renderer {
         } else {
             art::plate()
         });
+        // (Always a layer, none in a plug-in, so that the count stays.)
+        out.push(
+            scene
+                .tempo
+                .as_deref()
+                .map(art::tempo_screen)
+                .unwrap_or_default(),
+        );
         if let Some(c) = scene.learning.and_then(|i| CONTROLS.get(i)) {
             out.push(learn::ring(c));
         }
@@ -515,6 +531,22 @@ impl Renderer {
             let doc = art::document(view, w, h, &body);
             let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
             resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+        }
+        // A screen: its bezel and glass made once in the layer's place and kept, its dots drawn.
+        if let Some(screen) = &layer.screen {
+            let (wx, wy, ww, wh) = screen.window;
+            let window = (ox + wx - x0 / s, oy + wy - y0 / s, ww, wh);
+            let place = [x0 as i32, y0 as i32, w as i32, h as i32];
+            if self.screens.as_ref().is_none_or(|(at, _)| *at != place) {
+                let glass = Pixmap::decode_png(crate::skin::GLASS).expect("the glass decodes");
+                let mut still = Pixmap::new(w, h)?;
+                crate::strip::screen_still(&self.options, &mut still, &glass, s, window);
+                self.screens = Some((place, still));
+            }
+            if let Some((_, still)) = &self.screens {
+                put(&mut pixmap, still, (0, 0), 1.0);
+            }
+            crate::strip::screen_text(&mut pixmap, s, window, &screen.text);
         }
         // Each picture placed (resampled once; kept if it is placed so again), then put with
         // its opacity: drawn so whether it was kept or not.
@@ -802,8 +834,8 @@ impl Renderer {
     /// drawn again over `onto`, a frame the drawing's size at this scale: the editor's, over the
     /// strip's own parts (`crate::strip`), which are drawn over this frame's strip.
     pub fn draw_floating(&self, onto: &mut Pixmap) {
-        // (The controls', then POWER's, its lamp's, OVERLOAD's, QUALITY's opening's two and the
-        // name plate's: fixed.)
+        // (The controls', then POWER's, its lamp's, OVERLOAD's, QUALITY's opening's two, the
+        // name plate's and the TEMPO screen's: fixed.)
         let fixed = CONTROLS.len() + FIXED;
         for slot in self.slots.iter().skip(fixed) {
             if let Some((x, y, p)) = &slot.pixels {
@@ -866,8 +898,8 @@ fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
 }
 
 /// The layers drawn after the controls whatever the scene: POWER, its lamp, OVERLOAD, QUALITY's
-/// opening (its back and its front) and the name plate.
-const FIXED: usize = 6;
+/// opening (its back and its front), the name plate and the TEMPO screen (empty in a plug-in).
+const FIXED: usize = 7;
 
 /// The panel's lamp, up and to the left, over the whole drawing at `s` pixels a unit: brighter
 /// near it (the face's sheen, catching the specks of its texture), falling off towards the far
@@ -1492,6 +1524,25 @@ mod tests {
         }
     }
 
+    /// The standalone's TEMPO screen mirrors the name plate (the owner's option D): its surround
+    /// as wide and tall, at the same height, as far from the left edge as the plate is from the
+    /// right; found where it is drawn, and only there.
+    #[test]
+    fn the_tempo_screen_mirrors_the_name_plate() {
+        let (x, y, w, h) = art::TEMPO_SCREEN;
+        let o = crate::strip::NAME_SURROUND;
+        assert_eq!(
+            (x - o, y - o),
+            (art::W - art::PLATE_X - art::PLATE_W, art::PLATE_Y)
+        );
+        assert_eq!((w + 2.0 * o, h + 2.0 * o), (art::PLATE_W, art::PLATE_H));
+        assert!(
+            art::tempo_hit(x + w / 2.0, y + h / 2.0) && art::tempo_hit(x - o + 0.5, y - o + 0.5)
+        );
+        assert!(!art::tempo_hit(x - o - 1.0, y) && !art::tempo_hit(x, y + h + o + 1.0));
+        assert!(y + h + o < art::TOP, "on the wood");
+    }
+
     #[test]
     fn a_frame_put_together_in_part_is_the_frame_put_together_whole() {
         let s = 0.25;
@@ -1502,14 +1553,21 @@ mod tests {
         };
         r.render(&scene);
         let at = |p: &str| index(p).expect(p);
-        for i in 0..12 {
-            match i % 6 {
+        for i in 0..14 {
+            match i % 7 {
                 0 => scene.values[at("cutoff")] = 0.1 * f64::from(i),
                 1 => scene.values[at("drive")] = 0.08 * f64::from(i),
                 2 => scene.values[at("pitch_wheel")] = 0.05 * f64::from(i),
-                3 => scene.values[at("osc1_on")] = f64::from(i / 6 % 2),
+                3 => scene.values[at("osc1_on")] = f64::from(i / 7 % 2),
                 4 => scene.tip = Some(("CUTOFF: 1.2 kHz".into(), 2100.0, 300.0)),
-                _ => scene.tip = None,
+                // The standalone's TEMPO screen shown, set, and gone (R-ARP).
+                5 => scene.tempo = Some(format!("{} BPM", 100 + i)),
+                _ => {
+                    scene.tip = None;
+                    if i > 7 {
+                        scene.tempo = None;
+                    }
+                }
             }
             assert!(r.render(&scene));
             let mut whole = Renderer::new(s, 1.0);

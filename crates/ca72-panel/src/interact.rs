@@ -250,8 +250,8 @@ mod tests {
             let v = drag(voices, 0.25, 0.0, -f64::from(dy), false).expect("a knob");
             assert_eq!(v * 8.0, (v * 8.0).round(), "between voices at {dy}");
         }
-        // The arpeggiator's RATE (13 note values) and OCTAVES (4) the same: never between two.
-        for (param, n) in [("arp_rate", 12.0), ("arp_octaves", 3.0)] {
+        // The arpeggiator's RATE (13 note values) and OCTAVES (5) the same: never between two.
+        for (param, n) in [("arp_rate", 12.0), ("arp_octaves", 4.0)] {
             let k = &CONTROLS[index(param).expect("a control")].kind;
             for dy in 0..300 {
                 let v = drag(k, 0.0, 0.0, -f64::from(dy), false).expect("a knob");

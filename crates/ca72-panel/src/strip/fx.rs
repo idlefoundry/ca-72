@@ -345,7 +345,7 @@ impl FxRenderer {
             still: None,
             frame: Pixmap::new(1, 1).expect("a pixel"),
             cover: Vec::new(),
-            lit: LitTabs::default(),
+            lit: LitTabs::new(TAB),
             list: None,
             shown: None,
             damage: None,
@@ -849,14 +849,14 @@ fn make_still((scale, skin, lettering): Look) -> Still {
         let (left, top) = screen_grid((x, y - oy, w, h));
         unlit_dots(&mut plate, &mut cover, s, (left, top, DOT), PLACES, &[0.0]);
     }
-    let lighting = lower::tab_lighting();
+    let lighting = lower::tab_lighting(TAB);
     for i in 0..SLOTS {
         let (x, y) = tab(i);
         sprite(&mut plate, &lighting.unlit, s, (x, y - oy), TAB);
     }
     lower::lamp(&mut plate, s, skin, (0, top_px(s)));
     let tabs: Vec<((f64, f64), &str)> = (0..SLOTS).map(|i| (tab(i), "ON")).collect();
-    let words = lower::tab_words(&options, s, oy, &tabs);
+    let words = lower::tab_words(&options, s, oy, TAB, &tabs);
     // The small print under each screen, each word on a patch of its own.
     let small = (0..SLOTS)
         .map(|i| {

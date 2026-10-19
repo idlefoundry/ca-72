@@ -8,6 +8,7 @@ fn main() {
     // A safe start asked for (decisions.md R-FX-SAFETY): the keys read first, as near the
     // opening as can be.
     let mut safe_start = ca72_plugin::fx::safe_start_keys_held();
+    ca72_plugin::identify_standalone();
     let mut device_access = true;
     let mut state_dir = None;
     let mut fx_console = false;
@@ -51,6 +52,8 @@ fn main() {
     });
     let effects = effects(&state_dir, fx_mode, fx_console, safe_start);
     let options = plugin_kit_standalone::AppOptions {
+        // This identifies saved sessions and MIDI clients, not a Wayland surface.
+        // Linux's X11 windows take their class from identify_standalone, Ca72::NAME.
         app_id: "com.idlefoundry.ca-72".into(),
         state_dir,
         device_access,

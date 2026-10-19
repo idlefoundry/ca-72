@@ -5,14 +5,15 @@
 //! does not run on from the face under it; the drawn skin's black), the rail's shadow across its
 //! top as the presets' drawer has, its left edge catching the lamp, its foot in shade, and its
 //! shadow cast on the page below. Its lit tabs are the strip's (`worn`), their words on patches
-//! of their own laid over the caps.
+//! of their own laid over the caps; each drawer gives their size (the arpeggiator's are narrower
+//! than the strip's, for DIRECTION's five).
 
 use plugin_kit_materials::{Glow, Lighting, place};
 use resvg::tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
 use resvg::usvg;
 
+use super::SECTIONS;
 use super::worn::{AMBER, AMBER_LIGHT, TAB_PRINT, edge_eased, svg_over};
-use super::{SECTIONS, TAB};
 use crate::art::{Lettering, PANEL_H, W};
 use crate::fonts::{FAMILY, Fonts};
 use crate::skin::Skin;
@@ -166,32 +167,33 @@ pub(super) fn cast(s: f64, options: &usvg::Options<'_>) -> Pixmap {
     p
 }
 
-/// The tabs' caps lit from inside and unlit, as the strip's.
-pub(super) fn tab_lighting() -> Lighting {
+/// The tabs' caps, `tab` in size, lit from inside and unlit, as the strip's.
+pub(super) fn tab_lighting(tab: (f64, f64)) -> Lighting {
     let button = Pixmap::decode_png(crate::skin::BUTTON).expect("a built-in picture decodes");
     edge_eased(plugin_kit_materials::lighting(
         &button,
-        TAB.0 / TAB.1,
+        tab.0 / tab.1,
         AMBER,
     ))
 }
 
 /// Each tab's word (its middle in the drawing's units, the frame's top `oy` in them), on a patch
-/// of its own round its tab, to lay over its cap lit or not: its pixels and their top left corner
-/// in the frame's.
+/// of its own round its tab (`tab` in size), to lay over its cap lit or not: its pixels and their
+/// top left corner in the frame's.
 pub(super) fn tab_words(
     options: &usvg::Options<'_>,
     s: f64,
     oy: f64,
+    tab: (f64, f64),
     tabs: &[((f64, f64), &str)],
 ) -> Vec<(i32, i32, Pixmap)> {
     let mut words = Vec::new();
     for &((x, y), word) in tabs {
         let (left, ptop) = (
-            ((x - TAB.0 / 2.0) * s).floor(),
-            ((y - oy - TAB.1 / 2.0) * s).floor(),
+            ((x - tab.0 / 2.0) * s).floor(),
+            ((y - oy - tab.1 / 2.0) * s).floor(),
         );
-        let (pw, ph) = ((TAB.0 * s).ceil() as u32 + 2, (TAB.1 * s).ceil() as u32 + 2);
+        let (pw, ph) = ((tab.0 * s).ceil() as u32 + 2, (tab.1 * s).ceil() as u32 + 2);
         if let Some(mut p) = Pixmap::new(pw, ph) {
             let mut o = Svg::default();
             put!(
@@ -209,13 +211,23 @@ pub(super) fn tab_words(
 
 /// The lit tabs' caps and light, kept for a scale: the lit cap resampled once, each tab's light
 /// on the face round it made once where the tab is.
-#[derive(Default)]
 pub(super) struct LitTabs {
+    /// The tabs' size, in the drawing's units.
+    tab: (f64, f64),
     cap: Option<Pixmap>,
     glows: Vec<((f64, f64), Glow)>,
 }
 
 impl LitTabs {
+    /// For tabs `tab` in size.
+    pub(super) fn new(tab: (f64, f64)) -> Self {
+        Self {
+            tab,
+            cap: None,
+            glows: Vec::new(),
+        }
+    }
+
     /// Forgotten (another scale or look).
     pub(super) fn clear(&mut self) {
         self.cap = None;
@@ -236,13 +248,13 @@ impl LitTabs {
             let px = |v: f64| (v * s).round().max(1.0) as u32;
             self.cap = Some(plugin_kit_materials::resample(
                 &lighting.lit,
-                px(TAB.0),
-                px(TAB.1),
+                px(self.tab.0),
+                px(self.tab.1),
             ));
         }
         let local = (at.0, at.1 - oy);
         if !self.glows.iter().any(|(g, _)| *g == at)
-            && let Some(g) = Glow::new(s, local, TAB, AMBER_LIGHT)
+            && let Some(g) = Glow::new(s, local, self.tab, AMBER_LIGHT)
         {
             self.glows.push((at, g));
         }
