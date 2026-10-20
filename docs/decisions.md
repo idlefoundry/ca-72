@@ -11786,12 +11786,17 @@ whole life fits 256 KB.
   transport starting, a locate, a loop) is acceptable; stopped, and in the standalone, it runs at
   the tempo's exact rate, without ENTROPY's drift; offline as in real time.
 
-**Not decided yet (the owner's):** the button's look and whether it is there at every RANGE. The
-mock-ups (drawn by the panel's renderer on a throwaway copy, the worn skin, at the opening size and
-at 1.0; not in this repository: the night's folder `osc3-timed-mockups`) show A, the key only at
-LO, and B, the key always there, dimmed and inert away from LO as VOICES is (R64), each at two
-places: under OSC. 3 CONTROL (P1, recommended) or above it (P3). Until the owner chooses, TIMED
-and DIVISION are host parameters (and MIDI Learn's, and the agents'), not on the panel.
+**Its place (the owner, 2026-10-20),** after seeing it under OSC. 3 CONTROL ("It just looks
+crowded sitting there. Right beside the vertical line."): "what I meant was beneath the octave
+selector. Switch." The key directly beneath oscillator 3's RANGE, its legend TIMED beside it, not
+over it.
+
+**Not decided yet (the owner's):** whether the key is there at every RANGE. The mock-ups (drawn by
+the panel's renderer on a throwaway copy, the worn skin, at the opening size and at 1.0; not in
+this repository: the night's folder `osc3-timed-mockups`) show it beneath RANGE with the legend
+beside, over and under it, and both rules: A, the key only at LO; B (recommended), always there,
+dimmed and inert away from LO as VOICES is (R64). Until the owner chooses, TIMED and DIVISION are
+host parameters (and MIDI Learn's, and the agents'), not on the panel.
 
 **Agent decisions, 2026-10-20** (not separately approved):
 - **Two parameters of its own**, after the arpeggiator's so that none before them moves:
