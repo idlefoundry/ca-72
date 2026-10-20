@@ -13349,4 +13349,45 @@ source), so colour is never the only cue. Round 2's purple and pink stay in the 
   moves under MIDI Learn's items. A macro's colour palette has eight: the six defaults and round
   2's purple and pink.
 
-**Evidence:** EVIDENCE
+**Evidence** (omarchy, 2026-10-20, branch `macros` from `lfo-ui` 1374b0f):
+- **Bit-identity:** `preset_render` (19 presets, 10 voices, 2 s) against references rendered from
+  393588a, at HI, LO and ULTRA: every preset the same to the bit, for the engine's commit
+  (93bf927) and the final head (35eefbf).
+- **Tests:** `cargo test -p ca72-plugin -p ca72-panel -p ca72`: 802 passed, 0 failed, 86 ignored,
+  but `tests/clap_host.rs` aborted: `an_instance_lives_on_a_host_thread_of_256_kb` (debug) no
+  longer fitted, making an instance needing 256 to 260 KB. Its deepest point was
+  `Box<Expressions>::default` building the 45 KB record on the stack; with its five per-key
+  tables made on the heap (35eefbf) the whole life fits 224 KB again (208 does not). Then
+  `cargo test -p ca72-plugin -p ca72-panel`: 709 passed, 0 failed, 74 ignored (`ca72` is
+  untouched). New: the macros' names kept and saved, a macro moving its knobs one way (engine);
+  the cells where round 2 measured them and found where drawn, the area drawn in parts drawn
+  whole in both skins (panel); the MACRO key flipping the left area and its three lights, a
+  macro assigned from its jack and its rings, a name typed and a colour chosen with the menus,
+  the window with the macros put together in parts put together whole (editor); the agents
+  naming and assigning the macros (MCP); `the_lfos_neither_allocate_nor_free` with the six
+  macros on eight knobs each, one turned every block and renamed between blocks.
+- clippy (`--workspace --all-targets --all-features -D warnings`), `cargo fmt --check` and
+  `scripts/notices.py --check`: clean.
+- **Golden:** `examples/golden` against 1374b0f: 32 frames of the panel compared, none differs
+  (the renderer's frame has no rail; the area is laid over it by the editor). `approved.png` and
+  `approved-large.png` unchanged and passing. No image re-approved.
+- **Frame times** (`the_macros_frame_times`, release, the editor's draw, omarchy at load 1 to 3),
+  at 0.44 / 0.88: the first showing 7.8 / 15.2 ms with the still ready (made on its thread as
+  the editor opened), 36 / 100 ms if pressed before it is (the macros remembered shown at the
+  editor's opening); a macro turned, its knob and its rings on the panel, 0.4 to 1.1 / 1.2 to
+  2.3 ms (median 0.5 / 1.4); a name typed 0.4 / 0.5; the wheels again 1.0 / 3.3; the macros again
+  1.5 / 3.7; nothing changed 0.01.
+- **The Mac's "CA-72 V0.3"** built from 35eefbf in `~/Code/ca72-v03-build` (git archive, rsync
+  over `ca-72` with its target kept, `rename-v03.sh`, `build-20oct.sh`: `build12.log` ALL OK, the
+  AU's ctest 3 of 3), installed at 19:08 with the same ids, the previous build and its ca72-mcp
+  in `old-1908`. The installed standalone (throwaway state, no devices) served MCP 0.3.0 with 31
+  tools, `macro1` to `macro6` in `ca72_describe`; `ca72_modulation_set` named macro 1 BRIGHT and
+  assigned it to CUTOFF at +60 by that name, and `ca72_modulations` read it back. A quick render
+  (Brass Choir, 2 s): HI -6.2 / -19.4 dBFS, LO -7.6 / -19.2, finite, as the build before. The
+  installed CA-72 0.2.8, its settings, the audio device and CA-72 PWM were not touched.
+- **Pictures:** `mac:~/Downloads/CA-72-V0.3-macros/`, the editor's own composed frames from its
+  test `the_macro_pngs` (the wheels, the six, beside the keyboard and the LFO page, a drag, the
+  hover pop-up, the menus, a name typed, the drawn skin) and the area alone at 0.44 and 1.0.
+- **Not tried:** the live editor by hand on any system (no clicks in a real window), real hosts,
+  Windows, hearing a macro move a knob, a skin pack's face under the area (only the base looks
+  were drawn), the LARGE lettering's dials in the area.
