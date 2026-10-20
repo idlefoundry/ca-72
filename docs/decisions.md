@@ -12812,3 +12812,186 @@ nothing in the engine differs.
   `a_continuous_switch_turns_and_its_key_flips_mod_and_its_way`;
   `mods_orb_shows_where_the_voices_have_the_shape`. Parameters:
   `continuous_waveforms_are_off_by_default_and_their_travel_the_engines`.
+
+## R-LFO. Four LFOs on a page of their own, each modulating up to eight knobs: the engine
+
+**The owner, 2026-10-20** (after two rounds of mock-ups, the night's `lfo-mockups/`):
+- **The request:** "I have one other idea I want to put into 0.3.0, which is an LFOs panel. ... at
+  least 4 LFOs in a LFO panel, so where the keyboard would go ... the same options that we have
+  for waveforms now ... I would like the user to see ... the resultant waveform above. So kind of
+  like an old school oscilloscope screen above to fit the 1970s theme ... we can still make them
+  an option between continuous and [stepped]."
+- **Their cost:** "if there is a cheaper way to do these oscillators so that we don't have to
+  simulate an entire circuit for each of them, this is fine because this is no longer on the
+  audio path and this is no longer doing the full emulation."
+- **Round 1:** per-LFO targets with bipolar amounts; a free rate in Hz with the timed key; global,
+  with an optional retrigger.
+- **PHASE, not INVERT:** "I think we should be able to adjust the phase of the waveform, which
+  maybe would remove the need for the ability to invert it" (a negative depth inverts exactly).
+- **Many targets:** "there's not going to be single destinations for these. I think we should
+  support adding them to multiple destinations", then "Drag to knob."
+- **From Serum:** "Rise ... free, retrig and envelope, and there's a mono mode as well": yes.
+- **The look:** "I like the amber scope with the little amber orb as well."
+- **Round 2's answers:** the rings only with the LFO page, a drag or hover ("option 2"); drag from
+  the jack; Alt-drag edits the last-touched LFO, with Pigments' hover pop-up ("Okay"); depth a
+  share of the knob's travel, clamped ("Ya"); a new note follows the RETRIGGER switch ("Okay"); a
+  per-voice LFO on a shared control takes the shared copy ("C"); EDGES SOFT by default ("Okay");
+  depths are patch state ("Patch state only"); up to 8 assignments an LFO ("Sure"); LFO to LFO
+  later ("Sure"); RATE 0.01 to 50 Hz; the rail's keys glow while their page affects the sound
+  ("yes. I was thinking we put some sort of illumination or little light on buttons whose panels
+  affect sound, so that if something is actively affecting what the user is hearing, they
+  know.").
+- **Colours:** "perhaps the LFOs should be different colors? or the user could have the ability
+  to change their colors? Seems like it'd be easier to track that way." Distinct, changeable.
+
+This record is the engine's half (`crates/ca72-plugin/src/lfo.rs`, the engine, presets, sessions,
+MIDI Learn, the agents). The page, the rings and the drag are the panel's and the editor's, built
+beside it on their own branch; docs/lfo.md is the interface between the two.
+
+**The generators** (`lfo::wave`, `lfo::Gen`): phase accumulators through the WAVEFORM legends'
+exact shapes, bipolar from -1 to 1: TRIANGLE from its foot to its top at half way; the shark
+tooth up to its top at 14/22 of the cycle, down to the middle and on to its foot (the legend's
+picture); SAWTOOTH rising; SQUARE, WIDE and NARROW high first. STEPPED takes the six; CONTINUOUS
+R-CONTINUOUS-WAVE's travel: each place blended into the next, past SQUARE a rectangle whose duty
+narrows straight in the width bias through the circuit's 30 % (WIDE) and 17.9 % (NARROW) to the
+floor (about 6.4 %). PHASE is added to the phase. Not circuits: the owner's words above.
+
+**Timing and MODE.**
+- RATE 0.01 to 50 Hz, 2 Hz for a new patch (its travel skewed, about 1.6 Hz at half way).
+- Timed: a DIVISION (the timed oscillators' 18, R-OSC-TIMED) on the arpeggiator's clock, the
+  engine's `Position` as the timed oscillators take it. FREE and timed, the phase is the host's
+  place every block (`Position::cycle`, plus the samples since the block began): it never drifts.
+  RETRIG and ENV timed run at the clock's rate from their note.
+- FREE runs on. RETRIG starts again at PHASE at a new note. ENV starts at PHASE at a new note,
+  runs one cycle (timed, one note value long), and holds the cycle's last value; before any note
+  it holds there too.
+- **A new note** follows RETRIGGER (the owner, "Okay"): off, a key pressed with no key held; on,
+  every key. That starts the shared LFOs, and the one instrument's and UNISON's own; a POLY voice's
+  own LFOs start with each note the voice takes.
+- RISE (0 to 10 s, a cube-root travel) fades the output in from a new note; before any note an
+  LFO with RISE is at nothing.
+- EDGES: SOFT (the default) slews the output, a jump going from 10 to 90 % of its way in 2 ms (a
+  one-pole, its time constant 2 ms / ln 9); SHARP does not. The patch's, not a parameter.
+
+**MONO, and option C.** MONO on (the default): one LFO every voice shares. Off: one an LFO a
+voice (POLY's ten, UNISON's), each its own phase, ENV and RISE, for the knobs each voice has of
+its own (the voice's panel: TUNE, GLIDE, MODULATION MIX, the FREQUENCYs, the mixer's VOLUMEs,
+the filter's and contours' knobs, the CONTINUOUS shapes; and FEEDBACK, each voice's own loop).
+The knobs the voices share (MAIN OUTPUT VOLUME, the strip's ENTROPY, WIDTH, INNER, DETUNE and
+DRIVE) take the LFO's shared copy (the owner: "C"). The scope shows the latest voice's.
+
+**The modulation** (`lfo::Lfos`, `Engine::modulate`). The plug-in gives the engine its controls as
+ever, now with each assigned knob's travel after its glide (R-KNOB-GLIDE: the glided value's,
+never the parameter's) and the assignments. While any assignment has a depth other than 0, the
+engine renders in steps of 32 samples (the glide's step): at each, each LFO's value now; each
+assigned knob's travel plus the sum of depth × value of every source on it, clamped to 0..1,
+through the knob's own law (`Target::write`: the parameter's range and `controls_with`'s
+conversion; a FREQUENCY knob's travel through the computer's FREQUENCY DIALS law, as its
+pointer reads); the controls so made are what the engine plays by (the output's gain, AUTO
+GAIN, the voices' panel); and each voice whose own LFOs move a knob of its own gets its panel
+with them (`Lfos::voice`), as it is next played (`bring_up`). Voices not playing are not
+touched. The knob's pointer stays where the knob is (the ring shows the movement).
+
+**Nothing runs when nothing is assigned.** Without an assignment of a depth other than 0 the
+engine renders as before, the same code path (`render_part`), not a step more; the LFOs'
+settings alone change nothing (`nothing_assigned_plays_as_before_to_the_bit`). An LFO never
+wakes the sleeping instrument (R68), nor keeps it awake: asleep, the generators run on and
+nothing is given to the voices; a note wakes it with its knobs where the LFOs have them
+(`an_lfo_neither_keeps_nor_wakes_the_sleeping_instrument`).
+
+**Modulation sources, for the macros** (the coordinator, 2026-10-20: macros will follow, knobs of
+the patch's own using the same assignments, depths and rings). The patch and the engine's
+modulation are by source (`lfo::Source`: `Lfo(n)` now, `Macro(n)` reserved, `MACROS` 0), every
+array sized by `SOURCES`; presets save `<source>_to_<target>`, sessions each source by its id.
+Adding macros sets the constant and gives each its value (`lfo::source_values`), without
+reshaping either.
+
+**Saved.**
+- The 40 parameters (`lfo1_waveform` to `lfo4_mono`, nested after every other parameter, so none
+  before them moves) are a preset's and a session's like any sound parameter; one saved before
+  reads each at its default.
+- The assignments and EDGES are patch state (the owner: "Patch state only"): the session's `lfo`
+  field (`lfo::Saved`), and a preset's values `lfo1_to_cutoff = 40` (the depth in %) and
+  `lfo2_edges = 1` (SHARP), so the presets' files stay format 1 and the library shared with the
+  DAW reads them as it reads any value it does not know. A session or a preset saved before has
+  none (`Ca72::filter_state`; `Patch::load_values`); Init clears them; a preset a MIDI pad
+  chooses carries them, staged off the audio thread and copied on it without allocating.
+- Each LFO's colour is the computer's (`settings.toml`'s `lfo_colors`), not the patch's.
+
+**Control.** The 40 are host parameters and in MIDI Learn's list (`learn::LEARNABLE`: each LFO's
+SHAPE, RATE, PHASE and RISE knobs, WAVEFORM, DIVISION and MODE selectors, STEPPED or CONTINUOUS,
+TIMED and MONO switches). The LFOs' knobs do not glide (none is on the audio path; EDGES smooths
+what they step). The agents: the 40 in the parameters' table, and `ca72_modulations`,
+`ca72_modulation_set` and `ca72_modulation_remove` (docs/mcp.md), which refuse what the panel's
+drag cannot do (a switch, a STEPPED WAVEFORM, a timed FREQUENCY, a ninth knob, a depth past
+±100 %).
+
+**Agent decisions, 2026-10-20** (not separately approved):
+- **The shapes are the legends'**, the shark tooth as its picture draws it (not the circuit's mix
+  of its triangle and sawtooth), so that the scope shows what the switch names.
+- **SQUARE is exactly half**: the circuit's 48.4 % is its comparator's offset, which an LFO's
+  square has no reason to keep (a timed square's halves are equal). WIDE and NARROW are the
+  circuit's 30 and 17.9 %.
+- **EDGES SOFT is a one-pole** of 10 to 90 % in 2 ms, applied to every jump alike (a shape's
+  edges, a RETRIG's restart, a timed LFO's relocation, a depth's change through the knob). It
+  lags a 50 Hz LFO by about 16 degrees and a 5 Hz one by under 2.
+- **The modulation steps every 32 samples** (1.5 kHz at 48 kHz), as R-LFO's plan proposed; a fast
+  LFO on pitch or CUTOFF that zippers would be made per sample for those two later, which has to
+  be listened for.
+- **RISE is at nothing before any note**, and an ENV LFO rests where its cycle ends until one.
+- **FEEDBACK is each voice's own** with MONO off (each voice's loop is its own); ENTROPY a shared
+  knob (its amount reaches every voice's tolerances alike).
+- **DETUNE is modulated only while DOUBLE is on** (with SCATTER it does nothing, R45).
+- **An assignment stays where its knob cannot take one now** (a WAVEFORM made STEPPED again, a
+  FREQUENCY timed), doing nothing until it can again, as a learned controller stays on a dimmed
+  control; the agents' list marks it `inert`.
+- **The colours** (`lfo::Phosphor`): amber #FFB020, green #3DF288, blue #58A8FF, red #FF3388,
+  with violet and white for the palette. The owner's green and red were moved (the green towards
+  blue a little, the red to a rose) because, simulated (Machado 2009, full severity), pure green
+  and red were within ΔE 23 for deuteranopia and the first choice within 16; these four are at
+  least ΔE 27 apart for protanopia, deuteranopia and tritanopia (green and red 29.7 for
+  deuteranopia).
+- **The rail key's glow** reads `Scope::any_moving` (an LFO assigned, running, not an ENV that has
+  finished).
+
+**Evidence (omarchy, Linux x86-64, 2026-10-20, on `test-v03-20oct-b` 393588a):**
+- `preset_render`, the 19 factory presets with POLY's ten voices, 4 s, against renders of
+  393588a from a worktree of its own: every preset the same to the bit at HI, at LO and at ULTRA.
+- The engine (`engine_lfo_tests.rs`): `nothing_assigned_plays_as_before_to_the_bit` (the one
+  instrument and POLY: every LFO's settings changed, and an assignment of depth 0);
+  `a_shared_lfo_moves_its_knob_within_its_travel` (CUTOFF at 0.5 by 0.4 swings 0.1 to 0.9; at
+  0.9 by 0.5 it stops at 1, every step); `a_knob_is_moved_through_its_own_law` (FREQUENCY's
+  wiper through the law, FEEDBACK's taper); `retrig_and_rise_start_again_with_a_new_note_as_retrigger_says`
+  (RETRIGGER off and on, the one instrument and POLY: a legato key restarts RETRIG and RISE
+  only with RETRIGGER on, a key from silence always); `env_runs_one_cycle_and_holds` (from PHASE
+  0.25, held at its last value, still before a note); `a_timed_env_runs_one_note_value` (an
+  eighth at 120 BPM, 0.25 s); `each_voice_has_its_own_lfo_with_mono_off` (two POLY voices a
+  quarter cycle apart, each CUTOFF its own LFO's plus a shared one's);
+  `a_shared_target_takes_the_shared_copy` (VOLUME, option C);
+  `a_timed_lfo_keeps_the_hosts_place_for_ten_minutes` (123.7 BPM, an eighth triplet from a
+  quarter cycle on, 512-sample blocks: within 1e-6 of a cycle throughout);
+  `an_lfo_neither_keeps_nor_wakes_the_sleeping_instrument`.
+- `lfo.rs`: the legends' shapes, the duty cycles and the blend (`the_shapes_are_the_legends`);
+  every target's law the parameter's under both FREQUENCY laws, travel and value each other's
+  inverse (`every_targets_law_is_the_parameters`); the base the glided value's
+  (`the_base_is_the_knobs_glided_place`); the patch (at most eight, by source, saved and read
+  back, preset values and back).
+- Saved: `a_preset_keeps_what_the_lfos_modulate` (saved to a preset's file, chosen back, none
+  from a preset without, none after Init, the parameters' defaults from an old preset);
+  `a_session_keeps_what_the_lfos_modulate_and_an_old_one_none`.
+- MIDI Learn's list and the knobs' glide test with the 40 (52 knobs, 28 selectors, 45 switches);
+  the agents' `agents_assign_and_remove_as_the_page_does`.
+- `tests/realtime.rs`, `the_lfos_neither_allocate_nor_free`: four LFOs on eight knobs each, MONO
+  off on ten POLY voices, MODE, RATE, TIMED, RISE and MONO automated, QUALITY LO, HI and ULTRA,
+  the transport playing and stopping, the patch changed between blocks: no allocation, no free.
+- Cost (`lfo_cost`, release, one thread, no workers, best of three, this machine at a load of 7
+  to 12): ten POLY voices held, every LFO MONO off on eight knobs each voice has (32 knobs a
+  voice) against none: LO 191.2 to 218.5 ms a second of audio (+14 %), HI 891.6 to 973.2 (+9 %).
+  The voices' panels worked out again each step cost more than the generators: as a knob held
+  moving does (R-KNOB-GLIDE), here on every knob at once. A shared LFO on one knob costs what one
+  gliding knob does.
+- `cargo test -p ca72-plugin -p ca72-panel -p ca72`: 779 passed, 0 failed, 83 ignored;
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo fmt --check`
+  clean; `scripts/notices.py --check` passes.
+- **Not tried:** a real host, the Mac and Windows; listening (a fast LFO on pitch or CUTOFF for
+  zipper at the 32-sample step); the page itself (the UI's branch).

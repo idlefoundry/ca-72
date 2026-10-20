@@ -1207,3 +1207,134 @@ fn the_oscillators_timed_neither_allocate_nor_free() {
         "the oscillators timed allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
     );
 }
+
+/// The LFOs (decisions.md R-LFO) modulating eight knobs each, MONO off on POLY's ten voices,
+/// their settings automated (MODE, MONO, RATE, timed), QUALITY LO, HI and ULTRA, and the patch
+/// changed between blocks as the editor changes it: no allocation, no free.
+#[test]
+fn the_lfos_neither_allocate_nor_free() {
+    use ca72_plugin::Ca72;
+    use ca72_plugin::lfo::{Source, Target};
+    use nih_plug::context::process::TestProcessContext;
+    use nih_plug::prelude::*;
+
+    struct Init;
+    impl InitContext<Ca72> for Init {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Clap
+        }
+        fn execute(&self, _: ()) {}
+        fn set_latency_samples(&self, _: u32) {}
+        fn set_current_voice_capacity(&self, _: u32) {}
+    }
+
+    let _serial = start();
+    let mut p = Ca72::default();
+    let config = BufferConfig {
+        sample_rate: RATE as f32,
+        min_buffer_size: None,
+        max_buffer_size: BLOCK as u32,
+        process_mode: ProcessMode::Realtime,
+    };
+    assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
+    let params = p.params();
+    let a = p.parameters().clone();
+    let mut c = TestProcessContext::<Ca72>::new(params, RATE as f32, ProcessMode::Realtime);
+    for (q, v) in [
+        (a.poly.as_ptr(), 1.0),
+        (a.voices.as_ptr(), 1.0),
+        (a.osc2_on.as_ptr(), 1.0),
+    ] {
+        assert!(c.automate(q, v));
+    }
+    let targets = [
+        Target::Cutoff,
+        Target::Emphasis,
+        Target::Osc2Frequency,
+        Target::Osc1Volume,
+        Target::Volume,
+        Target::Feedback,
+        Target::Tune,
+        Target::Spread,
+    ];
+    for n in 0..4 {
+        for (k, t) in targets.iter().enumerate() {
+            a.lfo_patch
+                .assign(Source::Lfo(n), *t, 0.05 * (k as f32 - 3.5))
+                .expect("room");
+        }
+        assert!(c.automate(a.lfo(n).mono.as_ptr(), 0.0));
+    }
+    let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
+    let mut buffer = Buffer::default();
+    // SAFETY: both slices are `BLOCK` long and live as long as the buffer.
+    unsafe {
+        buffer.set_slices(BLOCK, |s| {
+            s.clear();
+            s.push(&mut l);
+            s.push(&mut r);
+        });
+    }
+    let mut aux = AuxiliaryBuffers {
+        inputs: &mut [],
+        outputs: &mut [],
+    };
+    let key = |timing: u32, note: u8, on: bool| {
+        if on {
+            NoteEvent::NoteOn {
+                timing,
+                voice_id: None,
+                channel: 0,
+                note,
+                velocity: 1.0,
+            }
+        } else {
+            NoteEvent::NoteOff {
+                timing,
+                voice_id: None,
+                channel: 0,
+                note,
+                velocity: 0.0,
+            }
+        }
+    };
+    HERE.with(|h| h.set(true));
+    let mut beats = 0.0;
+    for b in 0..900usize {
+        ARMED.store(false, Ordering::SeqCst);
+        c.set_transport(b % 400 < 330, Some(120.0), Some(beats), Some((4, 4)));
+        beats += BLOCK as f64 * 2.0 / RATE;
+        if b % 20 == 0 {
+            c.push_event(key(3, 48 + (b / 20 % 12) as u8, true));
+        }
+        if b % 20 == 15 && b > 200 {
+            c.push_event(key(9, 48 + (b / 20 % 12) as u8, false));
+        }
+        let n = b % 4;
+        let q = a.lfo(n);
+        c.automate(q.mode.as_ptr(), (b / 37 % 3) as f32 / 2.0);
+        c.automate(q.rate.as_ptr(), (b % 50) as f32 / 49.0);
+        c.automate(q.timed.as_ptr(), if b % 90 < 45 { 1.0 } else { 0.0 });
+        c.automate(q.rise.as_ptr(), (b % 7) as f32 / 6.0);
+        c.automate(q.mono.as_ptr(), if b % 130 < 100 { 0.0 } else { 1.0 });
+        c.automate(a.quality.as_ptr(), (b / 300) as f32 / 2.0);
+        ARMED.store(true, Ordering::SeqCst);
+        // (The patch as the editor changes it, between blocks; its atomics alone.)
+        if b % 50 == 25 {
+            a.lfo_patch.set_depth(Source::Lfo(n), Target::Cutoff, -0.3);
+        }
+        p.process(&mut buffer, &mut aux, &mut c);
+    }
+    ARMED.store(false, Ordering::SeqCst);
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "the LFOs allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+    );
+}

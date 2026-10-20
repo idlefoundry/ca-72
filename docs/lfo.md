@@ -26,24 +26,49 @@ the IDs are `lfo::PARAM_IDS[n]`.
 They are a preset's and a session's like any sound parameter; a preset or session saved before
 reads each at its default. They do not glide (they are not knobs on the audio path).
 
+## Modulation sources: the LFOs now, the macros later
+
+Everything that moves a knob by a depth is a **source** (`lfo::Source`): `Source::Lfo(0..4)` now,
+`Source::Macro(n)` when the macros are built. A source has a value; each knob assigned to it
+moves by depth × value from its own travel (after its glide), clamped, through its law; the
+rings, the hover dials, the tip and the menu show every source on a knob alike.
+
+- `lfo::SOURCES` = `LFOS + MACROS`; `MACROS` is 0 until the macros come. Every array of the
+  patch and of the engine's `Lfos` is sized by `SOURCES` and indexed by `Source::index()`
+  (the LFOs first), so adding macros changes the constant, not the shapes.
+- `Source::id()`: `lfo1` to `lfo4`, then `macro1` on: what presets (`<source>_to_<target>`) and
+  sessions (`SavedSource { source, to, sharp }`) save.
+- `Lfos::own(i)`: whether a source has a value of each voice's own (an LFO with MONO off). A
+  macro never: it is shared, as a knob.
+- **The macros, as planned** (the owner's mock-ups are in progress): knobs of the patch, 0 to
+  100 %, host-automatable and MIDI-learnable (parameters `macro1` and so on), each with a typed
+  label saved with the patch (patch state, beside the assignments). Their value reaches the
+  engine as a source's (`lfo::source_values` fills the macros' places from their knobs; a
+  unipolar 0..1 or bipolar about 50 % is the mock-ups' question), and they take the same
+  assignments, depths and rings. EDGES is an LFO's only.
+
 ## Patch state: assignments, depths and EDGES (not host parameters)
 
 `params.lfo_patch: Arc<lfo::Patch>`, persisted in the session under `lfo`, and in presets as
-values `lfoN_to_<target id>` (the depth in percent) and `lfoN_edges` (1 where SHARP).
+values `<source>_to_<target id>` (the depth in percent: `lfo1_to_cutoff = 40`) and
+`lfoN_edges` (1 where SHARP).
 
-- `Patch::assignments(lfo) -> [Option<Assignment>; MOST]`: in the order made, `MOST` = 8.
+- `Patch::assignments(source) -> [Option<Assignment>; MOST]`: in the order made, `MOST` = 8.
   `Assignment { target: Target, depth: f32 }`, depth -1..1, a share of the knob's travel.
-- `Patch::assign(lfo, target, depth) -> Result<(), Refused>`: adds, or sets the depth if
-  already there; `Refused::Full` past 8. A drop on a knob uses `lfo::DEFAULT_DEPTH` (0.25).
-- `Patch::set_depth(lfo, target, depth) -> bool`, `Patch::remove(lfo, target) -> bool`,
+- `Patch::assign(source, target, depth) -> Result<(), Refused>`: adds, or sets the depth if
+  already there; `Refused::Full` past 8, `Refused::NoSource`. A drop on a knob uses
+  `lfo::DEFAULT_DEPTH` (0.25).
+- `Patch::set_depth(source, target, depth) -> bool`, `Patch::remove(source, target) -> bool`,
   `Patch::clear()`.
-- `Patch::depth(lfo, target)`, `Patch::on_knob(target) -> [Option<f32>; 4]` (the rings, the
-  hover pop-up's dials, the tip, the menu's heads), `Patch::count(lfo)` (MODULATES' screen).
-- `Patch::edges(lfo) -> Edges`, `Patch::set_edges(lfo, Edges::Soft | Edges::Sharp)`.
+- `Patch::depth(source, target)`, `Patch::on_knob(target) -> [Option<f32>; SOURCES]` (the
+  rings, the hover pop-up's dials, the tip, the menu's heads), `Patch::count(source)`
+  (MODULATES' screen).
+- `Patch::edges(lfo) -> Edges`, `Patch::set_edges(lfo, Edges::Soft | Edges::Sharp)` (an LFO's,
+  by its number 0 to 3).
 - `Patch::changes() -> u32`: bumped on every change (redraw when it moves).
 
 Setting these from the editor needs no host gesture (they are not parameters). Init clears
-them; choosing a preset loads its own (none where it names none).
+them; choosing a preset loads its own (none where it names none); a MIDI pad's preset too.
 
 ## Targets: which controls can take an LFO
 
@@ -88,6 +113,11 @@ RISE's fade, before EDGES), `Settings::hz_at(tempo)`, `lfo::wave(at, phase)` (th
 white) is the scope's right-click palette, `Phosphor::rgb()` its glow, `Phosphor::name()` its
 menu word. The green leans to blue and the red to rose, so the four defaults stay apart for
 deuteranopia and protanopia (R-LFO has the check).
+
+## MCP
+
+`ca72_modulations`, `ca72_modulation_set` and `ca72_modulation_remove` (docs/mcp.md), carried
+out by `agent::modulation` on the patch; the LFOs' 40 parameters are in `ca72_describe`'s table.
 
 ## The engine, in short
 
