@@ -419,8 +419,10 @@ impl Source {
     pub fn index(self) -> usize {
         match self {
             Source::Lfo(n) if n < LFOS => n,
-            Source::Macro(n) if n < MACROS => LFOS + n,
-            _ => usize::MAX,
+            Source::Macro(n) => Some(LFOS + n)
+                .filter(|i| *i < SOURCES)
+                .unwrap_or(usize::MAX),
+            Source::Lfo(_) => usize::MAX,
         }
     }
 
@@ -754,6 +756,26 @@ impl Patch {
         self.load(&saved);
     }
 
+    /// Whether these are what a preset's values (`values`, its [`Patch::values`]) give: the
+    /// same assignments, in any order, their depths within a hundredth of a percent, and the same
+    /// EDGES (the presets' bar marks a preset changed where not).
+    pub fn same_as_values(&self, values: &[(String, f64)]) -> bool {
+        let theirs = Patch::default();
+        theirs.load_values(values);
+        let sorted = |p: &Patch, s: Source| {
+            let mut a: Vec<Assignment> = p.assignments(s).into_iter().flatten().collect();
+            a.sort_by_key(|a| a.target);
+            a
+        };
+        Source::all().all(|s| {
+            let (a, b) = (sorted(self, s), sorted(&theirs, s));
+            a.len() == b.len()
+                && a.iter()
+                    .zip(&b)
+                    .all(|(x, y)| x.target == y.target && (x.depth - y.depth).abs() < 1e-4)
+        }) && (0..LFOS).all(|l| self.edges(l) == theirs.edges(l))
+    }
+
     /// `other`'s assignments and EDGES in place of these, without allocating (a preset a MIDI
     /// pad chose, prepared off the audio thread and applied on it).
     pub fn copy_from(&self, other: &Patch) {
@@ -912,9 +934,9 @@ impl Phosphor {
     pub fn rgb(self) -> [u8; 3] {
         match self {
             Phosphor::Amber => [0xff, 0xb0, 0x20],
-            Phosphor::Green => [0x3c, 0xe8, 0xa0],
+            Phosphor::Green => [0x3d, 0xf2, 0x88],
             Phosphor::Blue => [0x58, 0xa8, 0xff],
-            Phosphor::Red => [0xff, 0x50, 0x78],
+            Phosphor::Red => [0xff, 0x33, 0x88],
             Phosphor::Violet => [0xc0, 0x80, 0xff],
             Phosphor::White => [0xe4, 0xec, 0xf4],
         }
@@ -1350,11 +1372,12 @@ impl Bank {
     /// Every LFO's value now (`clock`, each timed FREE one's place on the host's clock, in
     /// cycles), its slew moved on by `dt` s; voices' own only for the LFOs with MONO off.
     pub fn step(&mut self, l: &Lfos, clock: &[Option<f64>; LFOS], dt: f64, voices: usize) {
-        for k in 0..LFOS {
-            self.shared_values[k] = self.shared[k].value(&l.lfo[k], clock[k], dt);
-            if !l.lfo[k].mono {
-                for v in 0..voices.min(VOICES) {
-                    self.voice_values[v][k] = self.voices[v][k].value(&l.lfo[k], clock[k], dt);
+        let n = voices.min(VOICES);
+        for (k, (s, &c)) in l.lfo.iter().zip(clock).enumerate() {
+            self.shared_values[k] = self.shared[k].value(s, c, dt);
+            if !s.mono {
+                for (values, gens) in self.voice_values[..n].iter_mut().zip(&mut self.voices[..n]) {
+                    values[k] = gens[k].value(s, c, dt);
                 }
             }
         }
@@ -1363,11 +1386,12 @@ impl Bank {
     /// Moved on by `n` samples at `rate` Hz, each LFO at `per[k]` cycles a sample.
     pub fn advance(&mut self, l: &Lfos, per: &[f64; LFOS], n: usize, rate: f64, voices: usize) {
         let dt = 1.0 / rate;
-        for k in 0..LFOS {
-            self.shared[k].advance(&l.lfo[k], per[k], n, dt);
-            if !l.lfo[k].mono {
-                for v in 0..voices.min(VOICES) {
-                    self.voices[v][k].advance(&l.lfo[k], per[k], n, dt);
+        let m = voices.min(VOICES);
+        for (k, (s, &p)) in l.lfo.iter().zip(per).enumerate() {
+            self.shared[k].advance(s, p, n, dt);
+            if !s.mono {
+                for gens in &mut self.voices[..m] {
+                    gens[k].advance(s, p, n, dt);
                 }
             }
         }

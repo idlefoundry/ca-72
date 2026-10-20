@@ -311,6 +311,9 @@ pub struct Browser {
     all: Vec<Entry>,
     /// The current preset's values as set (normalized), to mark it changed.
     wanted: Option<(String, Vec<(&'static str, f32)>)>,
+    /// Whether what the LFOs modulate is the current preset's: its name, the patch's change
+    /// count it was worked out at, and the answer (decisions.md R-LFO).
+    lfo_seen: Option<(String, u32, bool)>,
     read: Option<Instant>,
     /// The window should take the keyboard (a field took the caret).
     pub wants_keys: bool,
@@ -345,6 +348,7 @@ impl Browser {
             list: Vec::new(),
             all: Vec::new(),
             wanted: None,
+            lfo_seen: None,
             read: None,
             wants_keys: false,
             below: true,
@@ -555,6 +559,20 @@ impl Browser {
                     .is_some_and(|(_, q)| (q.normalized() - v).abs() > 1e-4)
             })
         });
+        // (What the LFOs modulate, as the preset has it: worked out again only when the patch
+        // or the preset changes.)
+        let changed = changed
+            || entry.is_some_and(|e| {
+                let at = p.lfo_patch.changes();
+                match &self.lfo_seen {
+                    Some((n, g, d)) if same(n, &current) && *g == at => *d,
+                    _ => {
+                        let d = !p.lfo_patch.same_as_values(&e.sound.values);
+                        self.lfo_seen = Some((current.clone(), at, d));
+                        d
+                    }
+                }
+            });
         self.bar = BarScene {
             name: entry.map_or(current.clone(), |e| e.sound.name.clone()),
             found: entry.is_some(),
@@ -1490,6 +1508,14 @@ mod tests {
         b.choose(&lib.find("Wobble").unwrap(), &p, &s);
         assert_eq!(sorted(&p), before, "read back from its file");
         assert_eq!(patch.edges(1), Edges::Sharp);
+        b.tick(&p);
+        assert!(!b.bar.changed, "as the preset has it");
+        patch.set_depth(Source::Lfo(3), Target::Volume, -0.4);
+        b.tick(&p);
+        assert!(b.bar.changed, "a depth changed marks the preset");
+        patch.set_depth(Source::Lfo(3), Target::Volume, -0.5);
+        b.tick(&p);
+        assert!(!b.bar.changed, "and back");
         b.init(&p, &s);
         assert!(Source::all().all(|x| patch.count(x) == 0), "Init");
         let felt = lib.find("Felt Bass").unwrap();

@@ -210,7 +210,7 @@ fn retrig_and_rise_start_again_with_a_new_note_as_retrigger_says() {
             let r = e.lfo_readings()[0];
             let since = if retrigger { 0.1 } else { 0.4 };
             assert!((r.since - since).abs() < 0.002, "{poly} {retrigger} {r:?}");
-            assert!((r.phase - since as f32).abs() < 0.002);
+            assert!((r.phase - since).abs() < 0.002);
             key(&mut e, 60, false);
             key(&mut e, 64, false);
             run(&mut e, secs(0.1));
@@ -248,6 +248,24 @@ fn env_runs_one_cycle_and_holds() {
     assert!((held.value - lfo::wave(2.0, 0.25 - 1e-9) as f32).abs() < 1e-6);
     run(&mut e, secs(0.2));
     assert_eq!(e.lfo_readings()[0].value, held.value);
+}
+
+/// Timed, ENV's one cycle is one note value long at the tempo: an eighth at 120 BPM, 0.25 s.
+#[test]
+fn a_timed_env_runs_one_note_value() {
+    let s = Settings {
+        timed: Some(Length::Beats(0.5)),
+        ..sharp(Mode::Env, 2.0, 1.0)
+    };
+    let c = with(controls(), 0, s, Target::Cutoff, 0.5, 0.5);
+    let mut e = engine(&c);
+    e.set_position(Position::start(120.0, RATE));
+    key(&mut e, 60, true);
+    run(&mut e, secs(0.2));
+    let r = e.lfo_readings()[0];
+    assert!(r.moving && (r.phase - 0.8).abs() < 0.01, "{r:?}");
+    run(&mut e, secs(0.1));
+    assert!(!e.lfo_readings()[0].moving);
 }
 
 /// MONO off in POLY: each voice's LFO starts with its own note, and moves its own CUTOFF; a

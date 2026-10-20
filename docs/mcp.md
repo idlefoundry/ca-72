@@ -207,6 +207,9 @@ agent to use the bridge that came with that instance.
 | `ca72_midi_learn` | Learns, cancels, or assigns outright | `control?, cancel?, channel?, cc?, note?` (`note` for PREVIOUS and NEXT PRESET only) |
 | `ca72_midi_assignments` | Lists MIDI Learn's assignments | none |
 | `ca72_midi_forget` | REMOVE MIDI ASSIGNMENT | `control` |
+| `ca72_modulations` | Lists what each modulation source (LFO 1 to 4) modulates: each knob, its depth in %, `shared` (an LFO with MONO off on a knob every voice shares) and `inert`; each LFO's EDGES and MONO; the knobs that can take one now (decisions.md R-LFO) | none |
+| `ca72_modulation_set` | Assigns a source to a knob, as a drag from its OUT jack (25 % if no depth), or changes its depth; sets an LFO's EDGES | `source` (lfo1 to lfo4, "LFO 1", 1 to 4), `target?`, `depth?` (-100 to 100), `edges?` (SOFT, SHARP) |
+| `ca72_modulation_remove` | REMOVE, for one knob or all of a source's | `source`, `target?` |
 | `ca72_audio` | Reads AUDIO & MIDI (read only) | none |
 | `ca72_version` | Returns the version and the update check | `check?` |
 
@@ -298,6 +301,27 @@ the parameter's id in `ca72_set`/`ca72_get`, unless it says otherwise.
 | | MIDI BEND RANGE | host parameter | 0 to 8.07 semitones (2) | `midi_bend_range` |
 | | OSC. 2 and 3 TIMED (decisions.md R-OSC-TIMED) | host parameters, switches | on/off (off); each at its own oscillator's RANGE LO only, its cycle a note value of the host's tempo; in the MIDI list | `osc2_timed`, `osc3_timed` |
 | | OSC. 2 and 3 DIVISION | host parameters, 18 steps | 4 bars, 2 bars, 1 bar, 1/2 dotted, 1/1 triplet, 1/2, 1/4 dotted, 1/2 triplet, 1/4, 1/8 dotted, 1/4 triplet, 1/8, 1/16 dotted, 1/8 triplet, 1/16, 1/32 dotted, 1/16 triplet, 1/32 (1/4) | `osc2_division`, `osc3_division` |
+
+### The LFO page (decisions.md R-LFO)
+
+Each LFO's controls are parameters (`ca72_set`, `ca72_get`); what it modulates is the patch's,
+set with the `modulation` tools (saved with presets and sessions, not a host parameter).
+
+| Control | Kind | Values (as printed) | MCP |
+|---|---|---|---|
+| WAVEFORM | selector | Triangle, Shark Tooth, Sawtooth, Square, Wide Rectangle, Narrow Rectangle (Triangle) | `lfo1_waveform` to `lfo4_waveform` |
+| WAVEFORM's menu: STEPPED or CONTINUOUS | menu | Stepped, Continuous (Stepped) | `lfoN_shape_mode` |
+| WAVEFORM while CONTINUOUS | the switch | 0 (Triangle) to 1 (the narrowest pulse) (0) | `lfoN_shape` |
+| RATE | knob | 0.01 to 50 Hz (2 Hz) | `lfoN_rate` |
+| RATE's timed key, the note value | key, dial | on/off (off); 4 bars to 1/32, as the timed oscillators' (1/4) | `lfoN_timed`, `lfoN_division` |
+| PHASE | knob | 0 to 360 degrees (0) | `lfoN_phase` |
+| RISE | knob | 0 to 10 s (0) | `lfoN_rise` |
+| MODE | toggle | Free, Retrig, Env (Free) | `lfoN_mode` |
+| MONO | key | on/off (on) | `lfoN_mono` |
+| EDGES (the LFO's menu) | menu | SOFT, SHARP (SOFT) | `ca72_modulation_set {source, edges}` |
+| OUT jack: a drag to a knob | | a knob and a depth, -100 to 100 % (25) | `ca72_modulation_set {source, target, depth}` |
+| A knob's menu: DEPTH…, REMOVE | | | `ca72_modulation_set`, `ca72_modulation_remove` |
+| MODULATES | screen | | `ca72_modulations` |
 
 ### The rail, the presets' drawer and the update check
 
