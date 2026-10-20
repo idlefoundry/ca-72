@@ -458,8 +458,11 @@ fn a_crash_a_hang_or_a_kill_leaves_the_synth_playing_and_is_reported() {
                 first_wet.is_some_and(|i| i < 40),
                 "{what}: wet before the fault"
             );
-            let dry_after: usize = blocks[41..].iter().filter(|b| !b.0).count();
-            // (A killed helper can be back before the next block is due.)
+            // (From the block the fault is in: a parameter is the effect's from the next block,
+            // so a crash or a hang comes in block 40, which is dry; a crashed helper can be back
+            // before block 41 on a fast computer, as macOS's CI found. A killed helper can be back
+            // before the next block is due.)
+            let dry_after: usize = blocks[40..].iter().filter(|b| !b.0).count();
             assert!(
                 dry_after > 0 || fault == "kill",
                 "{what}: dry while it was down"
