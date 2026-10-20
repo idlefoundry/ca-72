@@ -12180,9 +12180,15 @@ rise come together at the reset), against none on oscillators 1 and 2: not silen
 did not want "a period of silence"); told the owner.
 
 **The switch.** One position along the whole travel (`interact::continuous_*`): a step each 30
-pixels as the switch's, a tenth of a step a wheel's notch; a slight catch at each of the six
-places (within 0.06 of a step, let go there, that place exactly); a legend clicked, its place
-exactly; a click on the knob, the next place that side. WAVEFORM follows the shape to the
+pixels as the switch's, a tenth of a step a wheel's notch, in one smooth motion; a legend
+clicked, its place exactly; a click on the knob, the next place that side. (It was first built
+with a slight catch at each place; the owner, trying it, 2026-10-20: "I don't like the snapping
+effect moving from across the different waveforms ... That's fine, but only if the user clicks
+on the waveform itself on the selector, not for continuous scrolling, like if somebody grabs it
+with a mouse. It sucks when it feels like it's being grabbed like that. It should just be one
+continuous smooth motion." Dragging and turning hold at no place now:
+`a_slow_drag_across_the_places_neither_jumps_nor_dwells`,
+`a_continuous_switch_dragged_slowly_moves_smoothly_through_its_places`.) WAVEFORM follows the shape to the
 nearest of the switch's own positions (oscillator 3's reverse shark tooth and reverse sawtooth
 its REVERSE SAWTOOTH), so that STEPPED again plays the nearest. Made CONTINUOUS from the menu,
 the shape is put at the switch's own position first (oscillator 3's sawtooth at its reverse
@@ -12190,8 +12196,10 @@ sawtooth's place). The arc runs from TRIANGLE's tick round to the floor's; the t
 shape ("Sawtooth", "Sawtooth to Square 40 %", "Wide Rectangle 30 %"). The parameters
 (`oscN_shape_mode`, `oscN_shape`, `oscN_shape_mod`, `oscN_shape_mod_dir`) replace VARIABLE's
 before any release; the shape begins at SAWTOOTH, as WAVEFORM does; within a thousandth of a
-step of one of the switch's six places it is that place exactly (`shape_snapped`: a preset's four
-decimals of the travel move it up to three ten-thousandths of a step).
+step of one of the switch's six places the engine plays that place exactly (`shape_snapped`: a
+preset's four decimals of the travel move it up to three ten-thousandths of a step). The
+parameter and the knob are left where they are; a drag passes through it as through anywhere
+(a thousandth of a step is a thirtieth of a pixel).
 
 **MOD (the owner):** "it won't just affect the square wave area. It will be variable through all
 the waveforms throughout"; its key's word: "Sure, mod works for me." MOD moves the shape along
@@ -12236,9 +12244,12 @@ nothing in the engine differs.
 - The panel: `a_continuous_switchs_arc_key_and_orb_are_drawn_and_undrawn_in_place` (both skins:
   the arc, oscillator 3's legends, the keys in all three ways, the orb coming, moving and going;
   each frame drawn in parts the frame drawn whole; STEPPED again the frame before, to the pixel);
-  `the_arcs_print_and_the_timed_dials_print_do_not_meet`; `a_continuous_switch_turns_and_is_caught_at_its_places`;
+  `the_arcs_print_and_the_timed_dials_print_do_not_meet`;
+  `a_continuous_switch_turns_smoothly_and_lands_on_a_legend_clicked`;
+  `a_slow_drag_across_the_places_neither_jumps_nor_dwells`;
   `a_layout_made_before_the_mod_keys_gets_them`.
 - The editor: `a_waveform_switchs_menu_makes_its_waveform_continuous`;
+  `a_continuous_switch_dragged_slowly_moves_smoothly_through_its_places`;
   `a_continuous_switch_turns_and_its_key_flips_mod_and_its_way`;
   `mods_orb_shows_where_the_voices_have_the_shape`. Parameters:
   `continuous_waveforms_are_off_by_default_and_their_travel_the_engines`.

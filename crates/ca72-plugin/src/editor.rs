@@ -11028,6 +11028,65 @@ mod tests {
         assert!(host.take().is_empty(), "the hidden key took a press");
     }
 
+    /// A CONTINUOUS switch dragged slowly across its places (the owner, 2026-10-20: "It should
+    /// just be one continuous smooth motion"): each half pixel moves the shape the host is given
+    /// the same small way, through SAWTOOTH and SQUARE as between them.
+    #[test]
+    fn a_continuous_switch_dragged_slowly_moves_smoothly_through_its_places() {
+        use crate::params::WaveMode;
+        let places = interact::CONTINUOUS_PLACES;
+        let (mut e, host, params) = editing_of(
+            Ca72Params {
+                osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Continuous),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.draw();
+        host.take();
+        let p = at(&e, centre("osc1_waveform"));
+        go(&mut e, p);
+        press(&mut e);
+        // (Past the click's threshold first, then half a pixel at a time across two places.)
+        go(
+            &mut e,
+            Point {
+                x: p.x + 4.0,
+                y: p.y,
+            },
+        );
+        for k in 1..=80 {
+            go(
+                &mut e,
+                Point {
+                    x: p.x + 4.0 + 0.5 * f64::from(k),
+                    y: p.y,
+                },
+            );
+        }
+        release(&mut e);
+        let shape = params.osc1_shape.as_ptr();
+        let set: Vec<f64> = host
+            .take()
+            .iter()
+            .filter_map(|c| match c {
+                Call::Set(p, v) if *p == shape => Some(f64::from(*v) * places),
+                _ => None,
+            })
+            .collect();
+        assert!(set.len() > 60, "{set:?}");
+        assert!(set[0] < 2.2 && set[set.len() - 1] > 3.4, "{set:?}");
+        let each = 0.5 / 30.0;
+        for w in set.windows(2).skip(1) {
+            let moved = w[1] - w[0];
+            assert!(
+                (moved - each).abs() < 1e-5,
+                "at {:.4}: moved {moved:.6}",
+                w[0]
+            );
+        }
+    }
+
     /// MOD's orb (decisions.md R-CONTINUOUS-WAVE): where the voices have a CONTINUOUS shape while
     /// its MOD is on, none while it is off or STEPPED.
     #[test]

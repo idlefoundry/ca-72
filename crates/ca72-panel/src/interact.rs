@@ -117,44 +117,24 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
 /// to the floor, without steps.
 pub const CONTINUOUS_PLACES: f64 = art::SHAPE_PLACES;
 
-/// The switch's places a CONTINUOUS switch stops at when clicked or picked: its six legends',
-/// and the floor's.
+/// The switch's places a CONTINUOUS switch stops at when a legend or the knob is clicked: its
+/// six legends', and the floor's.
 const CONTINUOUS_STOPS: [f64; 7] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, CONTINUOUS_PLACES];
 
-/// How near one of its six places a dragged CONTINUOUS switch is caught on it, in its steps (a
-/// slight detent: let go there, the place's shape exactly, the switch's own).
-pub const CATCH: f64 = 0.06;
-
-/// A position on a CONTINUOUS switch's travel (its steps) as it settles: on one of its six
-/// places within [`CATCH`] of it, else where it is.
-fn continuous_settled(at: f64) -> f64 {
-    let at = at.clamp(0.0, CONTINUOUS_PLACES);
-    let near = at.round();
-    if near <= 5.0 && (at - near).abs() <= CATCH {
-        near
-    } else {
-        at
-    }
-}
-
 /// A CONTINUOUS switch dragged from `start` (0..1 of its travel) by (`dx`, `dy`): a step each 30
-/// pixels as the switch's (60 with `fine`), right or up turning it on, caught at its places.
+/// pixels as the switch's (60 with `fine`), right or up turning it on, in one smooth motion: no
+/// place of the switch's holds it (the owner, 2026-10-20: "It should just be one continuous smooth
+/// motion").
 pub fn continuous_drag(start: f64, dx: f64, dy: f64, fine: bool) -> f64 {
     let at = start * CONTINUOUS_PLACES + (dx - dy) / if fine { 60.0 } else { 30.0 };
-    continuous_settled(at) / CONTINUOUS_PLACES
+    at.clamp(0.0, CONTINUOUS_PLACES) / CONTINUOUS_PLACES
 }
 
 /// A CONTINUOUS switch turned `notches` (whole) by the mouse wheel or an arrow key: a tenth of a
-/// step a notch (a fiftieth with `fine`), landing on a place it comes to.
+/// step a notch (a fiftieth with `fine`), as smoothly through its places as between them.
 pub fn continuous_scroll(v: f64, notches: f64, fine: bool) -> f64 {
-    let at = v * CONTINUOUS_PLACES;
-    let to = at + notches * if fine { 0.02 } else { 0.1 };
-    // (A place passed on the way: there.)
-    let passed = CONTINUOUS_STOPS[..6]
-        .iter()
-        .copied()
-        .find(|&p| (at < p - 1e-9 && to >= p) || (at > p + 1e-9 && to <= p));
-    passed.unwrap_or(to).clamp(0.0, CONTINUOUS_PLACES) / CONTINUOUS_PLACES
+    let at = v * CONTINUOUS_PLACES + notches * if fine { 0.02 } else { 0.1 };
+    at.clamp(0.0, CONTINUOUS_PLACES) / CONTINUOUS_PLACES
 }
 
 /// A click on a CONTINUOUS switch's knob, `dx` from its centre: to its next stop that side (a
@@ -281,39 +261,58 @@ pub fn release(kind: &Kind, v: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// A CONTINUOUS switch (decisions.md R-CONTINUOUS-WAVE): without steps from TRIANGLE to the
-    /// floor, caught at its six places; its legends and clicks its stops exactly.
+    /// A CONTINUOUS switch (decisions.md R-CONTINUOUS-WAVE): dragged or turned, one smooth motion
+    /// from TRIANGLE to the floor, held at none of its places; its legends and clicks its stops
+    /// exactly.
     #[test]
-    fn a_continuous_switch_turns_and_is_caught_at_its_places() {
+    fn a_continuous_switch_turns_smoothly_and_lands_on_a_legend_clicked() {
         let p = CONTINUOUS_PLACES;
         let at = |v: f64| v * p;
-        // From SAWTOOTH, half a step on is half way to SQUARE; nearly a step on, SQUARE.
         assert!((at(continuous_drag(2.0 / p, 15.0, 0.0, false)) - 2.5).abs() < 1e-12);
-        assert_eq!(at(continuous_drag(2.0 / p, 29.0, 0.0, false)), 3.0);
-        assert!((at(continuous_drag(0.0, 10.0, 0.0, false)) - 1.0 / 3.0).abs() < 1e-12);
-        assert!((at(continuous_drag(3.0 / p, 45.0, 0.0, false)) - 4.5).abs() < 1e-12);
+        assert!(
+            (at(continuous_drag(2.0 / p, 29.0, 0.0, false)) - (2.0 + 29.0 / 30.0)).abs() < 1e-12
+        );
         assert!((at(continuous_drag(3.0 / p, 45.0, 0.0, true)) - 3.75).abs() < 1e-12);
         assert_eq!(continuous_drag(3.0 / p, 1e4, 0.0, false), 1.0);
         assert_eq!(continuous_drag(3.0 / p, -1e4, 0.0, false), 0.0);
         // Up is on, as the switch's.
-        assert_eq!(at(continuous_drag(3.0 / p, 0.0, -30.0, false)), 4.0);
-        // The legends: their places exactly; the floor beyond NARROW's.
+        assert!((at(continuous_drag(3.0 / p, 0.0, -30.0, false)) - 4.0).abs() < 1e-12);
+        // The legends: their places exactly; clicks, the next stop that side.
         for k in 0..6 {
             assert_eq!(at(continuous_legend(k)), k as f64);
         }
-        // Clicks: to the next stop that side.
         assert_eq!(at(continuous_click(4.5 / p, 1.0)), 5.0);
         assert_eq!(at(continuous_click(4.5 / p, -1.0)), 4.0);
         assert_eq!(continuous_click(5.0 / p, 1.0), 1.0);
-        assert_eq!(continuous_click(1.0, 1.0), 1.0);
         assert_eq!(at(continuous_click(0.5 / p, -1.0)), 0.0);
-        // The wheel: a tenth of a step a notch, landing on a place it comes to.
-        assert!((at(continuous_scroll(2.0 / p, 1.0, false)) - 2.1).abs() < 1e-12);
+        // The wheel: a tenth of a step a notch, through a place as anywhere.
+        assert!((at(continuous_scroll(2.95 / p, 1.0, false)) - 3.05).abs() < 1e-12);
+        assert!((at(continuous_scroll(3.05 / p, -1.0, false)) - 2.95).abs() < 1e-12);
         assert!((at(continuous_scroll(2.0 / p, 1.0, true)) - 2.02).abs() < 1e-12);
-        assert_eq!(at(continuous_scroll(2.95 / p, 1.0, false)), 3.0);
-        assert_eq!(at(continuous_scroll(3.05 / p, -1.0, false)), 3.0);
         assert_eq!(continuous_scroll(1.0, 5.0, false), 1.0);
         assert_eq!(continuous_scroll(0.0, -5.0, false), 0.0);
+    }
+
+    /// The owner, 2026-10-20: "I don't like the snapping effect moving from across the different
+    /// waveforms ... It should just be one continuous smooth motion." A slow drag across every
+    /// place, half a pixel at a time, moves the switch the same small way each time: no jump
+    /// onto a place, no dwell on one.
+    #[test]
+    fn a_slow_drag_across_the_places_neither_jumps_nor_dwells() {
+        let p = CONTINUOUS_PLACES;
+        let start = 0.2 / p;
+        let mut last = continuous_drag(start, 0.0, 0.0, false) * p;
+        let each = 0.5 / 30.0;
+        for k in 1..=340 {
+            let now = continuous_drag(start, 0.5 * f64::from(k), 0.0, false) * p;
+            let moved = now - last;
+            assert!(
+                (moved - each).abs() < 1e-9,
+                "at {last:.4}: moved {moved:.6}, not {each:.6}"
+            );
+            last = now;
+        }
+        assert!(last > 5.8, "crossed every place: {last}");
     }
     use crate::art::POWER;
     use crate::controls::index;
