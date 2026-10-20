@@ -2735,18 +2735,20 @@ pub enum LoSharing {
 /// A measurement's own [`LoSharing`] (0: this system's).
 static LO_SHARING_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// How LO shares its voices on this system (decisions.md R-LO-WORKERS): always on Linux,
-/// where waking a worker costs little; by load on Windows, where the workers' short runs cost
-/// two to four times the voices' own processor time and the host's thread gained little while
-/// it was not busy; by load on macOS (R-LO-WORKERS, the Mac's measurements). A measurement's
-/// own, if it has set one.
+/// How LO shares its voices on this system (decisions.md R-LO-WORKERS, the owner's decision
+/// of 2026-10-19): by load on Windows, where the workers' short runs cost two to four times the
+/// voices' own processor time and the host's thread gained little while it was not busy;
+/// always elsewhere: on Linux and macOS waking a worker costs little (on an M4 Pro the
+/// process's processor time rose 0 to 12 points of a core, the host's thread's fell to a third
+/// or less, and a host's thread playing every voice itself was at times slowed past its
+/// period). A measurement's own, if it has set one.
 pub fn lo_sharing() -> LoSharing {
     match LO_SHARING_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
         1 => LoSharing::Never,
         2 => LoSharing::Always,
         3 => LoSharing::Load,
-        _ if cfg!(target_os = "linux") => LoSharing::Always,
-        _ => LoSharing::Load,
+        _ if cfg!(windows) => LoSharing::Load,
+        _ => LoSharing::Always,
     }
 }
 
@@ -2797,8 +2799,11 @@ impl Default for Busy {
 impl Busy {
     /// The smoothed load above which LO shares: half the block's period.
     pub const ON: f64 = 0.5;
-    /// The smoothed load below which it stops, after the hold.
-    pub const OFF: f64 = 0.25;
+    /// The smoothed load below which it stops, after the hold: well below [`Busy::ON`], and
+    /// above the 24 to 28 % a light load's sharing left on Windows, where it hardly lowers the
+    /// host's thread's time (so that a light load that went busy for one late block returns to
+    /// the host's thread).
+    pub const OFF: f64 = 0.3;
     /// The smoothing's time constant.
     pub const SMOOTH: f64 = 0.2;
     /// The first hold, the most, and how soon being busy again doubles it.
@@ -3772,8 +3777,8 @@ mod tests {
 
     /// The host's thread's load (decisions.md R-LO-WORKERS): a light load leaves LO on the
     /// host's thread; half the period, smoothed, or a late block or a run not heard, shares;
-    /// sharing stops only once the load has stayed below a quarter for the hold, which grows
-    /// when it would flap.
+    /// sharing stops only once the load has stayed below 30 % for the hold, which grows when it
+    /// would flap.
     #[test]
     fn lo_shares_while_the_host_s_thread_is_busy() {
         let p = 256.0 / 48_000.0;
@@ -3787,8 +3792,8 @@ mod tests {
         assert!(!b.on(), "busy at 45 %");
         run(&mut b, 0.6, 1.0);
         assert!(b.on(), "not busy at 60 %");
-        // Shared, the load falls: busy still between a quarter and a half, however long.
-        run(&mut b, 0.3, 10.0);
+        // Shared, the load falls: busy still between the two, however long.
+        run(&mut b, 0.35, 10.0);
         assert!(b.on());
         // Below a quarter: busy for the hold, then not.
         run(&mut b, 0.1, 1.9);
