@@ -1624,6 +1624,12 @@ pub struct Engine {
     base: Controls,
     bank: Box<crate::lfo::Bank>,
     lfo_dt: f64,
+    /// The output's gain on its way, a sample at a time, across a modulation's step from where
+    /// it was to `gain` (decisions.md R-LFO-STRESS): where it is, its change a sample and the
+    /// samples left. None left, `gain` itself.
+    gain_now: f64,
+    gain_ramp: f64,
+    gain_left: usize,
 }
 
 impl Default for Engine {
@@ -1657,6 +1663,9 @@ impl Engine {
             base: controls,
             bank: Box::default(),
             lfo_dt: 0.0,
+            gain_now: 0.0,
+            gain_ramp: 0.0,
+            gain_left: 0,
             controls,
             held: [false; 128],
             counter: 0,
@@ -2091,6 +2100,8 @@ impl Engine {
                 * level_gain(c.level);
             self.follow_auto(auto_trim(c, &self.curve), false);
             if eager {
+                // (The controls set from outside: the gain at once, as ever.)
+                self.gain_left = 0;
                 self.apply();
             } else {
                 // (Each voice takes it as it next plays: those not playing, never.)
@@ -2117,7 +2128,17 @@ impl Engine {
         let values = crate::lfo::source_values(&self.bank.shared_values);
         let m = l.modulated(&self.base, &values);
         if m != self.controls {
+            let (was, sharp) = (self.gain_at(), l.sharp_on(crate::lfo::Target::Volume));
             self.take(&m, false);
+            // (A step of the output's gain made a ramp across the step's samples: EDGES SOFT's
+            // 2 ms slew on VOLUME is then smooth, not a few clicks; SHARP's alone stay steps,
+            // R-LFO-STRESS.)
+            if self.gain != was && n > 1 && !sharp {
+                (self.gain_now, self.gain_left) = (was, n);
+                self.gain_ramp = (self.gain - was) / n as f64;
+            } else {
+                self.gain_left = 0;
+            }
         } else if l.per_voice() {
             self.panel_gen = self.panel_gen.wrapping_add(1);
         }
@@ -2958,9 +2979,20 @@ impl Engine {
         // (As the one voice was: the gain, then the fade; AUTO GAIN's correction, gliding,
         // between them, 1 without DRIVE.)
         self.auto_now += (self.auto - self.auto_now) * self.auto_glide;
+        let gain = if self.gain_left > 0 {
+            self.gain_left -= 1;
+            self.gain_now += self.gain_ramp;
+            if self.gain_left == 0 {
+                self.gain
+            } else {
+                self.gain_now
+            }
+        } else {
+            self.gain
+        };
         let (l, r) = (
-            (l * self.gain * self.auto_now * self.fade) as f32,
-            (r * self.gain * self.auto_now * self.fade) as f32,
+            (l * gain * self.auto_now * self.fade) as f32,
+            (r * gain * self.auto_now * self.fade) as f32,
         );
         if l.is_finite() && r.is_finite() {
             return (l, r);
@@ -2970,6 +3002,16 @@ impl Engine {
             o.down.iter_mut().for_each(Decimator::reset);
         }
         (0.0, 0.0)
+    }
+
+    /// The output's gain at the next sample: on its way across a step ([`Engine::faded`]), else
+    /// `gain`.
+    fn gain_at(&self) -> f64 {
+        if self.gain_left > 0 {
+            self.gain_now
+        } else {
+            self.gain
+        }
     }
 
     /// The output's gain under POWER and All Sound Off a sample after `fade`: rising while

@@ -494,3 +494,50 @@ fn a_pitch_or_cutoff_steps_finer_at_hi_and_ultra() {
         );
     }
 }
+
+/// VOLUME moved by an LFO reaches the output a sample at a time across each step, in a straight
+/// line from where the gain was to where the step puts it (decisions.md R-LFO-STRESS): EDGES
+/// SOFT's slew is then smooth, not a few clicks. Moved by SHARP LFOs alone, or not moved (an LFO
+/// on CUTOFF), the gain is the step's at once, as before.
+#[test]
+fn volume_moved_by_an_lfo_ramps_a_sample_at_a_time() {
+    for (target, edges, ramps) in [
+        (Target::Volume, Edges::Soft, true),
+        (Target::Volume, Edges::Sharp, false),
+        (Target::Cutoff, Edges::Soft, false),
+    ] {
+        let s = Settings {
+            edges,
+            ..sharp(Mode::Free, 3.0, 6.0)
+        };
+        let c = with(controls(), 0, s, target, -0.3, 0.4);
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        e.fade = 1.0;
+        // (A step first: SOFT's slew has had no time at the first, SHARP's none to take.)
+        e.modulate(lfo::STEP);
+        for _ in 0..lfo::STEP {
+            e.faded(1.0, 1.0);
+        }
+        let was = e.gain;
+        e.modulate(lfo::STEP);
+        let now = e.gain;
+        let out: Vec<f64> = (0..lfo::STEP)
+            .map(|_| f64::from(e.faded(1.0, 1.0).0))
+            .collect();
+        let name = format!("{target:?} {edges:?}");
+        if !ramps {
+            assert!(out.iter().all(|g| *g == f64::from(now as f32)), "{name}");
+            continue;
+        }
+        assert!(now < was, "the SQUARE's first half turns VOLUME down");
+        let per = (now - was) / lfo::STEP as f64;
+        for (k, g) in out.iter().enumerate() {
+            let want = was + per * (k + 1) as f64;
+            assert!((g - want).abs() < 1e-6, "sample {k}: {g} against {want}");
+        }
+        assert_eq!(*out.last().unwrap(), f64::from(now as f32));
+        // (The next step's samples: the gain where the step left it.)
+        assert_eq!(f64::from(e.faded(1.0, 1.0).0), f64::from(now as f32));
+    }
+}

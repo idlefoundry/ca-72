@@ -1268,6 +1268,20 @@ impl Lfos {
             .any(|a| a.depth != 0.0 && a.target.fast())
     }
 
+    /// Whether every source moving `t` is an LFO with EDGES SHARP (none moving it: false).
+    pub fn sharp_on(&self, t: Target) -> bool {
+        let mut any = false;
+        for (i, to) in self.to.iter().enumerate() {
+            if to.iter().flatten().any(|a| a.depth != 0.0 && a.target == t) {
+                match Source::of_index(i) {
+                    Some(Source::Lfo(n)) if self.lfo[n].edges == Edges::Sharp => any = true,
+                    _ => return false,
+                }
+            }
+        }
+        any
+    }
+
     /// Whether any source modulates anything (an assignment of a depth other than 0).
     pub fn active(&self) -> bool {
         self.to.iter().flatten().flatten().any(|a| a.depth != 0.0)
