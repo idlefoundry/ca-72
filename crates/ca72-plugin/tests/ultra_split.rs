@@ -29,7 +29,7 @@ mod common;
 use ca72::threaded::Threaded;
 use ca72::voice::{Jacks, Panel, Quality, Voice};
 use ca72_plugin::engine::{CHUNK, DEADLINE, MIX_LEN, Mix, set_budget_for_measurement};
-use ca72_plugin::pool::{MAX, Play, Pool, Shared};
+use ca72_plugin::pool::{EVERY, Play, Pool, Shared};
 use common::env;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -318,7 +318,7 @@ fn split_ultra_voices_in_real_time() {
         }
         let t = Instant::now();
         let deadline = Some(t + period.mul_f64(DEADLINE));
-        pool.block();
+        pool.block(block);
         if let Some(h) = &driving {
             driver.begun.store(b as u64 + 1, Ordering::Release);
             h.thread().unpark();
@@ -338,7 +338,7 @@ fn split_ultra_voices_in_real_time() {
                     }
                 }
             }
-            let played = pool.play(&list, end - at, &ext, RATE, &m, false, MAX, deadline);
+            let played = pool.play(&list, end - at, &ext, RATE, &m, false, EVERY, deadline);
             for (k, v) in vs.iter().enumerate() {
                 if !played[k] {
                     silent += 1;
