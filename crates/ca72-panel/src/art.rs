@@ -606,6 +606,13 @@ fn marks(dial: Dial) -> DialMarks {
                 captions: vec![(0.0, 82.0, "Hz")],
             }
         }
+        // A macro's: the ten's ticks, its ends alone numbered (its top is its name's).
+        Dial::Macro => DialMarks {
+            ticks: eleven(58.0, 71.0),
+            labels: vec![(-150.0, "0", None), (150.0, "10", None)],
+            r: 86.0,
+            captions: vec![],
+        },
         // PHASE: every 45 degrees, every other numbered.
         Dial::LfoPhase => numbered(
             &(0..9)

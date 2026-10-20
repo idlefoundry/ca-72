@@ -3,10 +3,13 @@
 //! (`compose`), apart from the panel's renderer:
 //!
 //! - **The rings** on a modulated knob, nested (the first source outermost), each in its source's
-//!   colour, bipolar about the knob's setting: the whole swing faint, the half its positive peak
-//!   reaches brighter with its end ticked, and a bright point where the source has the knob now.
-//!   The editor shows them only while the LFO page shows, while an assignment is dragged, or on
-//!   the knob under the pointer (the owner's "option 2").
+//!   colour, an LFO's bipolar about the knob's setting: the whole swing faint, the half its
+//!   positive peak reaches brighter with its end ticked, and a bright point where the source has
+//!   the knob now. A macro's are one way (decisions.md R-MACROS): faint from the knob's setting to
+//!   where the macro at 100 % takes it, the end ticked, bright as far as the macro is turned now,
+//!   with its point there. The editor shows an LFO's only while the LFO page shows, while an
+//!   assignment is dragged, or on the knob under the pointer (the owner's "option 2"); every
+//!   macro's while the macros show too.
 //! - **While an assignment is dragged** from a source's jack: a dotted ring round every knob that
 //!   can take it, a bright one round the knob under the plug, and the cord from the jack to the
 //!   plug.
@@ -26,12 +29,14 @@ use crate::glow::{self, Coverage, Phosphor, hex};
 use crate::svg::{N, Svg, colour, put};
 
 /// One source's ring on a knob: its colour, its depth (-1..1, a share of the knob's travel
-/// either way), and where it has the knob now (its travel, 0..1), if shown.
+/// either way), where it has the knob now (its travel, 0..1), if shown, and whether it moves the
+/// knob one way only (a macro's: unipolar).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ring {
     pub colour: [u8; 3],
     pub depth: f64,
     pub point: Option<f64>,
+    pub one_way: bool,
 }
 
 /// A knob's rings: the control's index (`controls::CONTROLS`), its centre and its skirt's radius
@@ -373,12 +378,26 @@ impl ModRenderer {
             );
             let end = (base + reach).clamp(-150.0, 150.0);
             let arc = |a0: f64, a1: f64| arc_path(k.at, r, a0, a1, &local);
-            // The whole swing, faint.
+            // The whole swing, faint (one way: to where 100 % takes the knob).
+            let (lo, hi) = if ring.one_way { (base, end) } else { (lo, hi) };
             if let Some(path) = arc(lo, hi) {
-                stroke(&mut p, &path, line, 0.38, 2.2 * s, None);
+                stroke(
+                    &mut p,
+                    &path,
+                    line,
+                    if ring.one_way { 0.4 } else { 0.38 },
+                    2.2 * s,
+                    None,
+                );
             }
-            // The half its positive peak reaches, glowing, its end ticked.
-            if let Some(path) = arc(base, end) {
+            // The half its positive peak reaches, glowing, its end ticked; one way, as far as
+            // the source has it now.
+            let bright = match (ring.one_way, ring.point) {
+                (true, Some(t)) => Some(angle(t)),
+                (true, None) => None,
+                (false, _) => Some(end),
+            };
+            if let Some(path) = bright.and_then(|b| arc(base, b)) {
                 let mut g = Coverage::new(w, h);
                 g.stroke(&path, (5.0 * s) as f32, 0.55);
                 g.blur((2.2 * s) as f32);
@@ -736,11 +755,13 @@ mod tests {
                     colour: [0xff, 0xb0, 0x20],
                     depth: 0.4,
                     point: Some(0.6),
+                    one_way: false,
                 },
                 Ring {
                     colour: [0x3c, 0xe8, 0xa0],
                     depth: -0.25,
                     point: None,
+                    one_way: true,
                 },
             ],
         }

@@ -43,6 +43,9 @@ pub enum Dial {
     LfoPhase,
     /// An LFO's RISE: 0 to 10 s on a cube-root travel, so that short fades have room.
     LfoRise,
+    /// A macro's (decisions.md R-MACROS): 0 to 10, eleven ticks, only its ends numbered, its
+    /// name's screen over its top.
+    Macro,
 }
 
 impl Dial {
@@ -169,6 +172,9 @@ pub enum Place {
     /// The LFO page's (`strip::lfo`; decisions.md R-LFO), its origin the drawing's: drawn by
     /// the page, found only while it shows.
     Lfo,
+    /// The macros' (`strip::macros`; decisions.md R-MACROS), in the left hand's area in its
+    /// place, its origin the drawing's: drawn by their renderer, found only while they show.
+    Macro,
 }
 
 impl Place {
@@ -181,7 +187,7 @@ impl Place {
     /// Whether its controls are drawn apart from the panel's renderer and found only while
     /// their part shows: a drawer's, or the LFO page's.
     pub fn drawn_apart(self) -> bool {
-        self.is_drawer() || self == Place::Lfo
+        self.is_drawer() || self == Place::Lfo || self == Place::Macro
     }
 }
 
@@ -205,7 +211,7 @@ impl Control {
         let (ox, oy) = match self.place {
             Place::Panel => (crate::art::COL, crate::art::TOP),
             Place::Column => crate::strip::LEFT_HAND,
-            Place::Strip | Place::Arp | Place::Mpe | Place::Lfo => (0.0, 0.0),
+            Place::Strip | Place::Arp | Place::Mpe | Place::Lfo | Place::Macro => (0.0, 0.0),
         };
         (ox + self.x, oy + self.y)
     }
@@ -489,6 +495,25 @@ const LFO_COLUMNS: [[Control; 7]; 4] = [
     ),
 ];
 
+/// Macro `n`'s (0 to 5) knob.
+const fn macro_knob(param: &'static str, label: &'static str, n: usize) -> Control {
+    let (x, y) = crate::strip::macros::knob_at(n);
+    Control {
+        param,
+        label,
+        place: Place::Macro,
+        x,
+        y,
+        kind: Kind::Knob {
+            dial: Dial::Macro,
+            big: false,
+        },
+    }
+}
+
+/// Where the macros' knobs begin in [`CONTROLS`] (macro `n`'s is `MACRO_FIRST + n`).
+pub const MACRO_FIRST: usize = 96;
+
 /// The index in [`CONTROLS`] of LFO `n`'s (0 to 3) part `k` ([`LFO_PARTS`]' order).
 pub const fn lfo_index(n: usize, k: usize) -> usize {
     LFO_FIRST + 7 * n + k
@@ -505,7 +530,7 @@ pub const KEY_BELOW_RANGE: f64 = 84.0;
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 96] = [
+pub const CONTROLS: [Control; 102] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -923,6 +948,14 @@ pub const CONTROLS: [Control; 96] = [
     LFO_COLUMNS[3][4],
     LFO_COLUMNS[3][5],
     LFO_COLUMNS[3][6],
+    // The macros' (decisions.md R-MACROS), the plug-in's own, after every other, so that no
+    // control moves: two across, three down, in the left hand's area while they show.
+    macro_knob("macro1", "MACRO 1", 0),
+    macro_knob("macro2", "MACRO 2", 1),
+    macro_knob("macro3", "MACRO 3", 2),
+    macro_knob("macro4", "MACRO 4", 3),
+    macro_knob("macro5", "MACRO 5", 4),
+    macro_knob("macro6", "MACRO 6", 5),
 ];
 
 /// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made
@@ -943,13 +976,14 @@ pub struct ControlSet {
     pub kind_changed: &'static [(&'static str, u32)],
 }
 
-/// This build's panel controls: the fourth revision; oscillators 2's and 3's TIMED keys added in
+/// This build's panel controls: the fifth revision; oscillators 2's and 3's TIMED keys added in
 /// the second (decisions.md R-OSC-TIMED), each oscillator's MOD key in the third
 /// (R-CONTINUOUS-WAVE), the LFO page's in the fourth (R-LFO: the plug-in's own, on its lower
-/// page, which a layout does not place, as the strip's). Never edit an entry once released: add
-/// to it (and raise `revision`) as controls come, go, or change.
+/// page, which a layout does not place, as the strip's), the six macros in the fifth (R-MACROS:
+/// in the left hand's area, which a layout does not place either). Never edit an entry once
+/// released: add to it (and raise `revision`) as controls come, go, or change.
 pub const CONTROL_SET: ControlSet = ControlSet {
-    revision: 4,
+    revision: 5,
     added: &[
         ("osc2_timed", 2),
         ("osc3_timed", 2),
@@ -984,6 +1018,12 @@ pub const CONTROL_SET: ControlSet = ControlSet {
         ("lfo4_rise", 4),
         ("lfo4_mode", 4),
         ("lfo4_mono", 4),
+        ("macro1", 5),
+        ("macro2", 5),
+        ("macro3", 5),
+        ("macro4", 5),
+        ("macro5", 5),
+        ("macro6", 5),
     ],
     renamed: &[],
     retired: &[],

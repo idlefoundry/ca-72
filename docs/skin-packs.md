@@ -643,6 +643,12 @@ layout made for revisions 1 to 3 loads as it did. The page is drawn in the pack'
 (WORN or CLASSIC), as the drawers are; the rings an LFO puts on a knob follow the knob to the
 layout's place and size.
 
+Revision 5 of the controls (0.3.0) adds the six macros' knobs (`macro1` to `macro6`). They are
+the plug-in's own, in the strip's left area in the wheels' place while the rail's MACRO key shows
+them, and a layout does not place them either: a layout naming one is refused, and a layout made
+for revisions 1 to 4 loads as it did. Their area is drawn on the strip's bare face in the pack's
+base look; a macro's rings on a knob follow the knob to the layout's place and size, as an LFO's.
+
 ## Compatibility: packs keep working as the CA-72 changes
 
 A pack made today must keep working on later CA-72s, and a pack made for a later one should do

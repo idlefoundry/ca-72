@@ -349,4 +349,40 @@ mod tests {
         remove(&p, &json!({"source": "lfo1"})).unwrap();
         assert_eq!(p.lfo_patch.count(Source::Lfo(0)), 0);
     }
+
+    /// The macros as the agents name them: by id, label or typed name; a name set (capitals, at
+    /// most seven) and listed with the macro's value; a macro's knob, an LFO's own knob or a
+    /// macro not a target; `edges` an LFO's and `name` a macro's alone.
+    #[test]
+    fn agents_name_and_assign_the_macros() {
+        let p = Ca72Params::default();
+        let r = set(&p, &json!({"source": "MACRO 2", "name": "growl!!!"})).unwrap();
+        assert_eq!(p.lfo_patch.name(1), "GROWL!!");
+        let m = &r["sources"][lfo::LFOS + 1];
+        assert_eq!(m["source"], json!("macro2"));
+        assert_eq!(m["name"], json!("GROWL!!"));
+        assert_eq!(m["value"], json!(0.0));
+        set(
+            &p,
+            &json!({"source": "growl!!", "target": "drive", "depth": 50}),
+        )
+        .unwrap();
+        assert_eq!(
+            p.lfo_patch.depth(Source::Macro(1), Target::Drive),
+            Some(0.5)
+        );
+        for bad in ["macro3", "lfo1_rate"] {
+            assert!(
+                set(&p, &json!({"source": "macro1", "target": bad})).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(set(&p, &json!({"source": "macro1", "edges": "SHARP"})).is_err());
+        assert!(set(&p, &json!({"source": "lfo1", "name": "X"})).is_err());
+        assert!(set(&p, &json!({"source": "macro7", "name": "X"})).is_err());
+        set(&p, &json!({"source": "macro2", "name": ""})).unwrap();
+        assert_eq!(p.lfo_patch.name(1), "");
+        remove(&p, &json!({"source": "macro2"})).unwrap();
+        assert_eq!(p.lfo_patch.count(Source::Macro(1)), 0);
+    }
 }

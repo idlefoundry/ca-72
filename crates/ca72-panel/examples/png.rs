@@ -922,6 +922,7 @@ fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &
                         point: page.columns[n]
                             .orb
                             .map(|(_, v)| (travel + depth * v).clamp(0.0, 1.0)),
+                        one_way: false,
                     })
                     .collect(),
             });

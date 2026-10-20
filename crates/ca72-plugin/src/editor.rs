@@ -40,6 +40,7 @@ use ca72_panel::strip::arp::{self as arp_ui, ArpBank, ArpRenderer, ArpScene, Arp
 use ca72_panel::strip::fx::{self as fx_ui, FxRenderer, FxScene};
 use ca72_panel::strip::lfo::{self as lfo_ui, LfoRenderer, LfoScene};
 use ca72_panel::strip::lower as lower_ui;
+use ca72_panel::strip::macros::{self as macro_ui, MacroRenderer, MacroScene};
 use ca72_panel::strip::mpe::{self as mpe_ui, MpeRenderer, MpeScene, MpeTarget};
 use ca72_panel::strip::{self, Bank, Field, Rail, Readout, StripRenderer, StripScene, StripTarget};
 use ca72_panel::{CONTROLS, Kind, Lettering, Look, Renderer, Scene, Skin, Target, interact};
@@ -61,6 +62,7 @@ use crate::update::Update;
 mod agent;
 mod entry;
 mod lfo_page;
+mod macros;
 use entry::Entry;
 
 /// The share of the usable screen the editor opens at until it is resized.
@@ -591,6 +593,10 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
+        // The macros' (decisions.md R-MACROS).
+        id if crate::lfo::macro_of_id(id).is_some() => {
+            p.macro_param(crate::lfo::macro_of_id(id).unwrap_or(0))
+        }
         // The LFO page's (decisions.md R-LFO; its RATE and WAVEFORM operated through
         // `lfo_page::LfoRate` and `LfoWave`).
         id => {
@@ -1446,6 +1452,11 @@ struct Editing {
     modulating: lfo_page::Modulating,
     lfo_rates: [lfo_page::LfoRate; 4],
     lfo_waves: [lfo_page::LfoWave; 4],
+    /// The macros (decisions.md R-MACROS): the left area's renderer, what it shows, and the
+    /// editor's state of them (a name typed, the part under the pointer).
+    macros: MacroRenderer,
+    macro_scene: MacroScene,
+    macro_view: macros::MacroView,
     playing: Playing,
     #[cfg(feature = "standalone-production")]
     standalone_dialog: Option<crate::standalone_settings::Dialog>,
@@ -1787,6 +1798,9 @@ impl Editing {
             modulating: lfo_page::Modulating::default(),
             lfo_rates,
             lfo_waves,
+            macros: MacroRenderer::new(),
+            macro_scene: MacroScene::default(),
+            macro_view: macros::MacroView::default(),
             playing,
             #[cfg(feature = "standalone-production")]
             standalone_dialog: None,
@@ -2026,6 +2040,7 @@ impl Editing {
         self.playing.focused
             && !self.browser.open
             && self.typing.is_none()
+            && self.macro_view.typing.is_none()
             && self.knob_entry.is_none()
             && !self.learning.holds_keys(&self.params.midi_map)
             && !self.fx_view.list_open()
@@ -2037,6 +2052,7 @@ impl Editing {
         self.browser.open
             || self.learning.holds_keys(&self.params.midi_map)
             || self.typing.is_some()
+            || self.macro_view.typing.is_some()
             || self.knob_entry.is_some()
             || self.fx_view.list_open()
             || self.note_typing_allowed()
@@ -2049,6 +2065,7 @@ impl Editing {
             && !self.browser.open
             && !self.browser.sliding()
             && self.typing.is_none()
+            && self.macro_view.typing.is_none()
             && self.knob_entry.is_none()
             && !self.learning.holds_keys(&self.params.midi_map)
             && !self.fx_view.list_open()
@@ -2252,6 +2269,12 @@ impl Editing {
                 return None;
             }
         }
+        // (The macros' knobs while they show, in the wheels' place: decisions.md R-MACROS.)
+        if self.macros_show()
+            && let Some(t) = interact::hit_macro(x, y)
+        {
+            return Some(t);
+        }
         // (A control off the panel is not there to find.)
         interact::hit(self.renderer.layout(), self.renderer.arrangement(), x, y)
             .filter(|t| !matches!(t, Target::Control(i) if self.off_panel(*i)))
@@ -2267,6 +2290,10 @@ impl Editing {
             let at = |keys: &[&str]| keys.iter().position(|k| *k == c.param);
             // (The LFO page's while it does not show: R-LFO.)
             (c.place == DrawerPlace::Lfo && !self.page_shows())
+                // (The wheels and their switches while the macros show in their place, and the
+                // macros while they do not: R-MACROS.)
+                || (c.place == DrawerPlace::Column && self.macros_show())
+                || (c.place == DrawerPlace::Macro && !self.macros_show())
                 || at(&ca72_panel::render::TIMED_KEYS)
                     .is_some_and(|k| timed_inert(&self.params, k + 1))
                 || at(&ca72_panel::render::MOD_KEYS).is_some_and(|n| !self.params.continuous(n))
@@ -3097,6 +3124,7 @@ impl Editing {
             }
             // The settings' key: its menu, dropping down from under it to its left.
             StripTarget::Bar(BarTarget::Lfo) => self.toggle_lfo_page(),
+            StripTarget::Bar(BarTarget::Macro) => self.toggle_macros(),
             StripTarget::Bar(BarTarget::Keyboard) => {
                 self.playing.release_pointer();
                 // (From the LFO page: the keyboard in its place, shown.)
@@ -3398,9 +3426,18 @@ impl Editing {
             }
             return;
         }
+        // A name typed is kept as a press goes elsewhere (decisions.md R-MACROS).
+        let on_macros = self.macros_show() && macro_ui::inside(x, y);
+        if !on_macros {
+            self.end_rename(true);
+        }
         // Modulation over the panel: a pop-up's dial, a ring's end, Alt/Option on a knob
         // (decisions.md R-LFO).
         if self.mod_press((x, y), modifiers) {
+            return;
+        }
+        // The macros, in the left area (R-MACROS).
+        if on_macros && self.macro_press((x, y), modifiers) {
             return;
         }
         // The LFO page, in the lower page's place.
@@ -3605,6 +3642,13 @@ impl Editing {
             }
             return;
         }
+        // The macros': a knob's, else its macro's colour and RENAME… (decisions.md R-MACROS).
+        if self.macros_show() && macro_ui::inside(x, y) {
+            if !self.macro_menu((x, y)) {
+                self.learning.close_menu();
+            }
+            return;
+        }
         // The LFO page's: a control's, else its LFO's colour and EDGES (decisions.md R-LFO).
         if self.page_shows() && lfo_ui::inside(x, y) {
             self.page_menu((x, y));
@@ -3772,6 +3816,12 @@ impl Editing {
                 return;
             }
             self.fx_view.hover = None;
+            // The macros: their knobs, else their names and jacks (decisions.md R-MACROS).
+            if self.macros_show() && macro_ui::inside(x, y) && over_drawer.is_none() {
+                self.macro_hover((x, y));
+                return;
+            }
+            self.macro_view.hover = None;
             // The LFO page: its controls, else its parts (decisions.md R-LFO).
             if self.page_shows() && lfo_ui::inside(x, y) && over_drawer.is_none() {
                 self.hover = interact::hit_lfo(self.renderer.layout(), x, y);
@@ -4150,6 +4200,7 @@ impl Editing {
             && !self.note_typing_allowed()
             && (self.browser.open
                 || self.typing.is_some()
+                || self.macro_view.typing.is_some()
                 || self.knob_entry.is_some()
                 || self.learning.holds_keys(&self.params.midi_map)
                 || self.fx_view.list_open()
@@ -4264,6 +4315,10 @@ impl Editing {
         // moving its knob).
         self.browser.bar.lfo = self.params.lfo_scope.any_moving();
         self.browser.bar.lfo_page = self.page_shows();
+        // The MACRO key's (decisions.md R-MACROS): lit while the macros show, glowing while the
+        // wheels do and an assigned macro is above 0.
+        self.browser.bar.macros = self.macros_show();
+        self.browser.bar.macro_glow = self.macro_glow();
         self.browser.bar.page =
             (self.lower.open && self.expanded()).then_some(match self.lower.which {
                 Lower::Arp => BarTarget::Arp,
@@ -4277,6 +4332,9 @@ impl Editing {
             self.lfo_scene = self.lfo_scene_now();
         }
         self.mod_scene = self.mod_scene_now();
+        if self.macros_show() {
+            self.macro_scene = self.macro_scene_now();
+        }
         let now = Instant::now();
         let counts = self.params.heard.counts();
         let (was, per_note, channel) = self.heard;
@@ -4334,6 +4392,11 @@ impl Editing {
     /// slot's: its effect's whole name and maker).
     fn tip(&self) -> Option<(String, f64, f64)> {
         if self.drag.is_none()
+            && let Some(t) = self.macro_tip()
+        {
+            return Some(t);
+        }
+        if self.drag.is_none()
             && let Some(t) = self.page_tip()
         {
             return Some(t);
@@ -4362,8 +4425,11 @@ impl Editing {
                 let p = self.operated(i)?;
                 let (x, y) = c.centre();
                 let top = art::bounds(&c.kind)[1];
+                let named = macros::macro_of_control(i).map(|n| self.macro_title(n));
                 let label = if c.param == "feedback" && feedback_silent(&self.scene.values) {
                     FEEDBACK_SILENT
+                } else if let Some(name) = &named {
+                    name
                 } else {
                     timed_label(&self.params, c.param)
                         .or_else(|| mod_label(&self.params, c.param))
@@ -4545,6 +4611,12 @@ impl Editing {
         // the panel.
         let page_shown = self.page_shows();
         let page = page_shown && self.lfo.render(&self.lfo_scene, &mut self.renderer);
+        // The macros in the left area while they show (decisions.md R-MACROS), on the strip's
+        // bare face there, their knobs and jacks drawn as the panel's renderer draws them.
+        // (Their still made on a thread of their own as the editor opens or its look changes.)
+        self.macros.prepare(&self.renderer);
+        let macros_shown = self.macros_show();
+        let macros = macros_shown && self.macros.render(&self.macro_scene, &mut self.renderer);
         self.modulation
             .rescale(self.renderer.scale(), self.renderer.top_px());
         let mods = self.modulation.render(&self.mod_scene);
@@ -4578,6 +4650,7 @@ impl Editing {
             || lower
             || lower_shut
             || page
+            || macros
             || mods
             || self.composed.is_none())
         {
@@ -4618,6 +4691,13 @@ impl Editing {
                     places.push([x0, top + y0, x1, top + y1]);
                 }
             }
+            if macros {
+                // (Its pixels the frame's from the area's top left corner.)
+                let r = self.renderer.left_rect();
+                for &[x0, y0, x1, y1] in self.macros.damages() {
+                    places.push([x0 + r[0], y0 + r[1], x1 + r[0], y1 + r[1]]);
+                }
+            }
             if mods {
                 places.extend_from_slice(self.modulation.damages());
             }
@@ -4648,7 +4728,11 @@ impl Editing {
                 lower_frame(which, top, (&self.arp, &self.mpe), self.fx.as_ref(), scale)
             }),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
-            (page_shown.then(|| self.lfo.frame()), &self.modulation),
+            (
+                page_shown.then(|| self.lfo.frame()),
+                macros_shown.then(|| (self.macros.frame(), self.renderer.left_rect())),
+                &self.modulation,
+            ),
             self.damage.as_deref(),
             expanded,
             (self.physical_width, height),
@@ -4719,7 +4803,11 @@ fn compose(
     strip: &ca72_panel::Pixmap,
     lower: Option<LowerFrame<'_>>,
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
-    (page, mods): (Option<&ca72_panel::Pixmap>, &ModRenderer),
+    (page, macros, mods): (
+        Option<&ca72_panel::Pixmap>,
+        Option<(&ca72_panel::Pixmap, [i32; 4])>,
+        &ModRenderer,
+    ),
     only: Option<&[[i32; 4]]>,
     expanded: bool,
     (width, height): (u32, u32),
@@ -4749,6 +4837,15 @@ fn compose(
     for &[x0, y0, x1, y1] in places {
         paste(c, frame, 0, [x0, y0, x1, y1]);
         paste(c, strip, top, [x0, y0, x1, y1]);
+        // The macros in the left area, over the wheels (decisions.md R-MACROS).
+        if let Some((m, r)) = macros {
+            paste_at(
+                c,
+                m,
+                (r[0], r[1]),
+                [x0.max(r[0]), y0.max(r[1]), x1.min(r[2]), y1.min(r[3])],
+            );
+        }
         // The LFO page in the lower page's place (decisions.md R-LFO), and the knobs' rings.
         if let Some(p) = page {
             let at = lfo_ui::top_px(s) - origin;
@@ -4883,6 +4980,29 @@ fn shade(
                 d[j] = (u16::from(s[j]) + (u16::from(d[j]) * keep + 127) / 255).min(255) as u8;
             }
         }
+    }
+}
+
+/// `p` put in the frame `c` with its top left corner at (`left`, `top`), inside `place` (left,
+/// top, right, bottom) only.
+fn paste_at(
+    c: &mut ca72_panel::Pixmap,
+    p: &ca72_panel::Pixmap,
+    (left, top): (i32, i32),
+    place: [i32; 4],
+) {
+    let (w, h) = (c.width() as i32, c.height() as i32);
+    let (pw, ph) = (p.width() as i32, p.height() as i32);
+    let (x0, x1) = (place[0].max(left).max(0), place[2].min(left + pw).min(w));
+    let (y0, y1) = (place[1].max(top).max(0), place[3].min(top + ph).min(h));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let n = (x1 - x0) as usize * 4;
+    for y in y0..y1 {
+        let src = (((y - top) * pw + x0 - left) * 4) as usize;
+        let dst = ((y * w + x0) * 4) as usize;
+        c.data_mut()[dst..dst + n].copy_from_slice(&p.data()[src..src + n]);
     }
 }
 
@@ -5235,6 +5355,9 @@ impl Editing {
         }
         // MIDI Learn first (decisions.md R34): Escape closes a control's menu, the drawer's MIDI
         // list takes the keys it shows, and Escape cancels learning.
+        if self.macro_view.typing.is_some() {
+            return self.rename_key(k);
+        }
         if self.typing.is_some() {
             return self.type_key(k);
         }
@@ -8159,7 +8282,12 @@ mod tests {
                                 e.strip.frame(),
                                 None,
                                 None,
-                                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+                                (
+                                    e.page_shows().then(|| e.lfo.frame()),
+                                    e.macros_show()
+                                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                                    &e.modulation,
+                                ),
                                 None,
                                 expanded,
                                 (e.physical_width, e.physical_height()),
@@ -8194,7 +8322,12 @@ mod tests {
                                 e.strip.frame(),
                                 None,
                                 None,
-                                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+                                (
+                                    e.page_shows().then(|| e.lfo.frame()),
+                                    e.macros_show()
+                                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                                    &e.modulation,
+                                ),
                                 None,
                                 expanded,
                                 (e.physical_width, e.physical_height()),
@@ -8816,7 +8949,12 @@ mod tests {
                 e.strip.frame(),
                 lower_of(&e),
                 None,
-                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
                 None,
                 true,
                 (e.physical_width, e.physical_height()),
@@ -8861,7 +8999,12 @@ mod tests {
             e.strip.frame(),
             None,
             Some((e.drawer.frame(), DRAWER_TOP)),
-            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -8936,7 +9079,12 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
-            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9000,7 +9148,12 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
-            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9255,7 +9408,12 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
-            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9294,7 +9452,12 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
-            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9477,7 +9640,12 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
-            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9642,7 +9810,12 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
-            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9726,7 +9899,12 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
-            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+            (
+                e.page_shows().then(|| e.lfo.frame()),
+                e.macros_show()
+                    .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                &e.modulation,
+            ),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -12596,7 +12774,12 @@ mod tests {
                 e.strip.frame(),
                 None,
                 None,
-                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
                 None,
                 false,
                 (e.physical_width, e.physical_height()),
@@ -14430,6 +14613,442 @@ mod tests {
         assert!(e.browser.bar.lfo_page);
     }
 
+    // ---- The macros (decisions.md R-MACROS).
+
+    /// The rail's MACRO key.
+    fn macro_key(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Macro)));
+        click(e, p);
+        e.draw();
+    }
+
+    /// Macro `n`'s value set as the host would have it (the test's host applies nothing).
+    fn turn_macro(params: &Arc<Ca72Params>, n: usize, normalized: f32) {
+        use nih_plug::context::process::TestProcessContext;
+        let c =
+            TestProcessContext::<crate::Ca72>::new(params.clone(), 48_000.0, ProcessMode::Realtime);
+        assert!(c.automate(params.macro_param(n).as_ptr(), normalized));
+    }
+
+    /// The rail's MACRO key (the owner: "the far left edge ... just a button that says macro")
+    /// flips the left area: the macros in the wheels' place, their knobs found and the wheels
+    /// and switches not; pressed again, the wheels. Its light: lit while the macros show, a
+    /// faint glow while the wheels do and an assigned macro is above 0, else unlit. The flip is
+    /// the computer's (`Settings::macros_shown`).
+    #[test]
+    fn the_macro_key_flips_the_left_area() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        let knob = ca72_panel::controls::MACRO_FIRST;
+        let wheel = ca72_panel::controls::index("mod_wheel").expect("the wheel");
+        e.draw();
+        assert!(!e.macros_show() && !e.browser.bar.macros && !e.browser.bar.macro_glow);
+        assert!(e.off_panel(knob) && !e.off_panel(wheel));
+        let (kx, ky) = CONTROLS[knob].centre();
+        assert_ne!(e.hit(kx, ky), Some(Target::Control(knob)));
+        macro_key(&mut e);
+        assert!(e.macros_show() && e.settings.macros_shown && e.browser.bar.macros);
+        assert!(!e.off_panel(knob) && e.off_panel(wheel));
+        assert_eq!(e.hit(kx, ky), Some(Target::Control(knob)));
+        let (wx, wy) = CONTROLS[wheel].centre();
+        assert_ne!(
+            e.hit(wx, wy),
+            Some(Target::Control(wheel)),
+            "the wheel hidden"
+        );
+        assert_eq!(e.macro_scene.cells[0].name, "MACRO 1");
+        assert!(e.macro_scene.cells[0].dim);
+        macro_key(&mut e);
+        assert!(!e.macros_show() && !e.browser.bar.macros);
+        // The glow: assigned and above 0.
+        params
+            .lfo_patch
+            .assign(Source::Macro(2), T::Cutoff, 0.5)
+            .expect("room");
+        e.draw();
+        assert!(!e.browser.bar.macro_glow, "at 0");
+        turn_macro(&params, 2, 0.4);
+        e.draw();
+        assert!(e.browser.bar.macro_glow && !e.browser.bar.macros, "glowing");
+        macro_key(&mut e);
+        assert!(e.browser.bar.macros, "lit");
+        // The key's light as the rail draws it.
+        let light = |bar: &ca72_panel::presets::BarScene| {
+            ca72_panel::strip::key_light_of(bar, BarTarget::Macro)
+        };
+        assert_eq!(light(&e.browser.bar), 2);
+        macro_key(&mut e);
+        assert_eq!(light(&e.browser.bar), 1);
+        turn_macro(&params, 2, 0.0);
+        e.draw();
+        assert_eq!(light(&e.browser.bar), 0);
+    }
+
+    /// An assignment dragged from a macro's jack lands on a knob at +25 %, as an LFO's; while
+    /// the macros show, every macro's rings show on the panel's knobs, one way from the knob's
+    /// setting, an LFO's only on the knob under the pointer; a macro's knob takes none.
+    #[test]
+    fn a_macro_is_assigned_from_its_jack_and_its_rings_show() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, host, params) = editing();
+        e.playing.visible = false;
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .expect("room");
+        macro_key(&mut e);
+        host.take();
+        let jack = at(&e, ca72_panel::strip::macros::jack_at(1));
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert_eq!(cord.from, ca72_panel::strip::macros::jack_at(1));
+        assert_eq!(cord.colour, crate::lfo::MacroColor::Rose.rgb());
+        release(&mut e);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Macro(1), T::Cutoff),
+            Some(0.25)
+        );
+        assert!(host.take().is_empty(), "patch state: no host gesture");
+        // Away from CUTOFF: its macro's ring alone, one way, its point where the macro has it.
+        turn_macro(&params, 1, 0.5);
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "cutoff")
+            .expect("its rings while the macros show");
+        assert_eq!(k.rings.len(), 1);
+        assert!(k.rings[0].one_way);
+        assert_eq!(k.rings[0].point, Some((k.travel + 0.125).clamp(0.0, 1.0)));
+        // Under the pointer: every source's, the LFO's too, and the pop-up names the macro.
+        go(&mut e, cutoff);
+        e.draw();
+        let k = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "cutoff");
+        assert_eq!(k.map(|k| k.rings.len()), Some(2));
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert_eq!(popup.dials[1].label, "MACRO 2");
+        // A macro's knob takes no source.
+        let m3 = at(&e, CONTROLS[ca72_panel::controls::MACRO_FIRST + 2].centre());
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        go(&mut e, m3);
+        release(&mut e);
+        assert_eq!(params.lfo_patch.count(Source::Macro(1)), 1);
+        // The wheels again: no rings while nothing else shows them.
+        macro_key(&mut e);
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        e.draw();
+        assert!(e.mod_scene.knobs.is_empty());
+    }
+
+    /// A macro's name is typed on its screen, double-clicked (or RENAME… from its menu):
+    /// capitals, seven at most, Enter keeping it, Escape leaving it as it was, a press elsewhere
+    /// keeping it; it then names the macro in its screen, the pop-up, the tips and the menus.
+    /// Its name's menu sets its colour, the computer's.
+    #[test]
+    fn a_macros_name_is_typed_and_its_colour_chosen() {
+        use crate::lfo::{MacroColor, Source, Target as T};
+        let (mut e, host, params) = editing();
+        macro_key(&mut e);
+        host.take();
+        let (x, y, w, h) = ca72_panel::strip::macros::name_at(0);
+        let name = at(&e, (x + w / 2.0, y + h / 2.0));
+        click(&mut e, name);
+        click(&mut e, name);
+        assert_eq!(e.macro_view.typing, Some((0, String::new())));
+        for c in ["b", "r", "i", "g", "h", "t", "e", "r"] {
+            keyed(&mut e, Key::Character(c.into()));
+        }
+        e.draw();
+        assert_eq!(e.macro_scene.cells[0].typing.as_deref(), Some("BRIGHTE"));
+        keyed(&mut e, Key::Backspace);
+        keyed(&mut e, Key::Enter);
+        assert_eq!(params.lfo_patch.name(0), "BRIGHT");
+        assert!(host.take().is_empty(), "patch state");
+        e.draw();
+        assert_eq!(e.macro_scene.cells[0].name, "BRIGHT");
+        // Escape leaves it.
+        e.start_rename(0);
+        keyed(&mut e, Key::Character("x".into()));
+        keyed(&mut e, Key::Escape);
+        assert_eq!(params.lfo_patch.name(0), "BRIGHT");
+        // A press elsewhere keeps what is typed.
+        e.start_rename(0);
+        keyed(&mut e, Key::Backspace);
+        let away = at(&e, centre("cutoff"));
+        click(&mut e, away);
+        assert_eq!(params.lfo_patch.name(0), "BRIGH");
+        // Its colour from its name's menu.
+        right_click(&mut e, name);
+        assert!(e.learning.menu_open());
+        e.mod_item(crate::learning::ModItem::MacroColor(0, MacroColor::Purple));
+        assert_eq!(e.settings.macro_colors[0], MacroColor::Purple);
+        e.learning.close_menu();
+        e.draw();
+        assert_eq!(e.macro_scene.cells[0].colour, MacroColor::Purple.rgb());
+        // Its knob's menu: RENAME…, REMOVE ALL ASSIGNMENTS, a head for each knob it modulates.
+        params
+            .lfo_patch
+            .assign(Source::Macro(0), T::Cutoff, 0.6)
+            .expect("room");
+        let rows = e.knob_rows(ca72_panel::controls::MACRO_FIRST);
+        assert!(
+            matches!(&rows[0], crate::learning::Row::Item(_, t, true, _) if t == "RENAME\u{2026}")
+        );
+        assert!(rows.iter().any(|r| matches!(r, crate::learning::Row::Head(h) if h.starts_with("CUTOFF FREQUENCY \u{b7} +60"))));
+        e.mod_item(crate::learning::ModItem::RemoveAll(Source::Macro(0)));
+        assert_eq!(params.lfo_patch.count(Source::Macro(0)), 0);
+        // The knob's tip names the macro.
+        let knob = at(&e, CONTROLS[ca72_panel::controls::MACRO_FIRST].centre());
+        go(&mut e, knob);
+        e.draw();
+        let tip = e.scene.tip.clone().expect("a tip").0;
+        assert!(tip.starts_with("MACRO 1 \u{b7} BRIGH: 0"), "{tip}");
+        // A strip knob's menu offers the macros as the LFOs.
+        let i = ca72_panel::controls::index("drive").expect("DRIVE");
+        let rows = e.knob_rows(i);
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, crate::learning::Row::Head(h) if h == "MACRO"))
+        );
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, crate::learning::Row::Item(_, t, _, _) if t == "BRIGH"))
+        );
+    }
+
+    /// The window's frame with the macros showing, a macro turned and renamed and its rings on
+    /// the panel, is the frame put together whole, each time.
+    #[test]
+    fn the_macros_put_together_in_parts_are_put_together_whole() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        params
+            .lfo_patch
+            .assign(Source::Macro(0), T::Cutoff, 0.4)
+            .expect("room");
+        macro_key(&mut e);
+        for i in 0..5 {
+            turn_macro(&params, 0, i as f32 / 5.0);
+            if i == 2 {
+                params.lfo_patch.set_name(3, "SPACE");
+            }
+            if i == 3 {
+                e.start_rename(4);
+                keyed(&mut e, Key::Character("s".into()));
+            }
+            e.draw();
+            let mut whole = None;
+            compose(
+                &mut whole,
+                &e.renderer,
+                e.strip.frame(),
+                lower_of(&e),
+                None,
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
+                None,
+                true,
+                (e.physical_width, e.physical_height()),
+            );
+            assert!(e.composed == whole, "frame {i}: not as put together whole");
+        }
+    }
+
+    /// How long the editor takes to draw the macros' frames (decisions.md R-MACROS; the owner:
+    /// "Just make sure performance is tight"), at the opening size (0.44) and at twice it: the
+    /// first showing, a macro turned (its knob and its rings on the panel), a name typed, the
+    /// wheels again, and nothing changed. Printed, not asserted (the machine's load decides).
+    #[test]
+    #[ignore = "measures frame times"]
+    fn the_macros_frame_times() {
+        use crate::lfo::{Source, Target as T};
+        use std::time::Instant;
+        for k in [1.0, 2.0] {
+            let (mut e, _, params) = editing();
+            let width = (art::W * 0.44 * k) as u32;
+            e.fit(k, (art::W * 0.44) as u32, width);
+            for (n, to) in [
+                (0, T::Cutoff),
+                (0, T::Emphasis),
+                (1, T::Drive),
+                (2, T::Spread),
+            ] {
+                params.lfo_patch.assign(Source::Macro(n), to, 0.5).unwrap();
+            }
+            e.playing.visible = false;
+            e.draw();
+            e.draw();
+            let time = |e: &mut Editing, f: &mut dyn FnMut(&mut Editing)| {
+                f(e);
+                let t = Instant::now();
+                e.draw();
+                t.elapsed().as_secs_f64() * 1e3
+            };
+            let first = time(&mut e, &mut |e| {
+                let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Macro)));
+                click(e, p);
+            });
+            // (Again in another editor, its still made on its thread meanwhile, as when the key
+            // is pressed some time after the editor opened.)
+            let ready = {
+                let (mut f, _, _) = editing();
+                f.fit(k, (art::W * 0.44) as u32, width);
+                f.playing.visible = false;
+                f.draw();
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                f.draw();
+                time(&mut f, &mut |f| {
+                    let p = on_strip(f, strip_at(StripTarget::Bar(BarTarget::Macro)));
+                    click(f, p);
+                })
+            };
+            let mut turned = Vec::new();
+            for i in 1..8 {
+                turned.push(time(&mut e, &mut |_| {
+                    turn_macro(&params, 0, i as f32 / 8.0);
+                }));
+            }
+            let typed = time(&mut e, &mut |e| {
+                e.start_rename(3);
+                keyed(e, Key::Character("w".into()));
+            });
+            let still = time(&mut e, &mut |_| {});
+            let back = time(&mut e, &mut |e| {
+                e.end_rename(true);
+                let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Macro)));
+                click(e, p);
+            });
+            let again = time(&mut e, &mut |e| {
+                let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Macro)));
+                click(e, p);
+            });
+            turned.sort_by(f64::total_cmp);
+            println!(
+                "scale {:.2}: first showing {first:.1} ms (still waited for), {ready:.1} ms (still ready); a macro turned {:.1}-{:.1} ms (median {:.1}); a name typed {typed:.1} ms; nothing changed {still:.2} ms; the wheels again {back:.1} ms; the macros again {again:.1} ms",
+                0.44 * k,
+                turned[0],
+                turned[turned.len() - 1],
+                turned[turned.len() / 2]
+            );
+        }
+    }
+
+    /// The macros as the editor shows them, for looking at, written to `$CA72_MACRO_PNG`, the
+    /// folder: `wheels.png` (the wheels, the MACRO key glowing), `macros.png` (the six, round
+    /// 2's example, their rings on the panel), `keyboard.png` and `lfo.png` (the six beside the
+    /// keyboard and the LFO page), `drag.png` (an assignment dragged from GROWL's jack),
+    /// `hover.png` (CUTOFF's rings and pop-up with LFOs and a macro), `menu.png` (BRIGHT's knob's
+    /// menu), `name-menu.png` (its name's), `rename.png` (a name typed), `drawn.png` (the drawn
+    /// skin).
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_macro_pngs() {
+        use crate::lfo::{Source, Target as T};
+        let Some(out) = std::env::var_os("CA72_MACRO_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let (mut e, _, params) = editing();
+        let patch = Arc::clone(&params.lfo_patch);
+        // Round 2's example.
+        for (n, name, value, to) in [
+            (
+                0,
+                "BRIGHT",
+                0.55,
+                vec![(T::Cutoff, 0.60), (T::Emphasis, -0.20)],
+            ),
+            (
+                1,
+                "GROWL",
+                0.30,
+                vec![(T::ContourAmount, 0.40), (T::Drive, 0.50)],
+            ),
+            (2, "SPACE", 0.0, vec![(T::Spread, 0.70), (T::Inner, 0.40)]),
+            (3, "WOBBLE", 0.20, vec![(T::Osc2Frequency, 0.08)]),
+            (4, "SWELL", 0.70, vec![(T::LoudnessAttack, 0.50)]),
+        ] {
+            patch.set_name(n, name);
+            turn_macro(&params, n, value);
+            for (t, d) in to {
+                patch.assign(Source::Macro(n), t, d).unwrap();
+            }
+        }
+        patch.assign(Source::Lfo(0), T::Cutoff, 0.4).unwrap();
+        patch.assign(Source::Lfo(1), T::Cutoff, -0.25).unwrap();
+        let save = |e: &mut Editing, name: &str| {
+            window_frame(e).save_png(out.join(name)).unwrap();
+        };
+        e.playing.visible = false;
+        e.draw();
+        save(&mut e, "wheels.png");
+        macro_key(&mut e);
+        save(&mut e, "macros.png");
+        let k = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Keyboard)));
+        click(&mut e, k);
+        save(&mut e, "keyboard.png");
+        lfo_open(&mut e);
+        save(&mut e, "lfo.png");
+        let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
+        click(&mut e, l);
+        let k = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Keyboard)));
+        click(&mut e, k);
+        e.draw();
+        let jack = at(&e, ca72_panel::strip::macros::jack_at(1));
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let to = at(&e, centre("mod_mix"));
+        go(&mut e, to);
+        save(&mut e, "drag.png");
+        e.end_gestures();
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        save(&mut e, "hover.png");
+        let knob = at(&e, CONTROLS[ca72_panel::controls::MACRO_FIRST].centre());
+        right_click(&mut e, knob);
+        save(&mut e, "menu.png");
+        e.learning.close_menu();
+        let (x, y, w, h) = ca72_panel::strip::macros::name_at(0);
+        let name = at(&e, (x + w / 2.0, y + h / 2.0));
+        right_click(&mut e, name);
+        save(&mut e, "name-menu.png");
+        e.learning.close_menu();
+        e.start_rename(5);
+        for c in ["s", "u", "b"] {
+            keyed(&mut e, Key::Character(c.into()));
+        }
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        save(&mut e, "rename.png");
+        e.end_rename(false);
+        e.set_look(Skin::Drawn);
+        save(&mut e, "drawn.png");
+    }
+
     /// The window's frame with the LFO page, its orbs moving, a knob on it turned and rings on
     /// the panel is the frame put together whole, each time.
     #[test]
@@ -14464,7 +15083,12 @@ mod tests {
                 e.strip.frame(),
                 lower_of(&e),
                 None,
-                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+                (
+                    e.page_shows().then(|| e.lfo.frame()),
+                    e.macros_show()
+                        .then(|| (e.macros.frame(), e.renderer.left_rect())),
+                    &e.modulation,
+                ),
                 None,
                 true,
                 (e.physical_width, e.physical_height()),

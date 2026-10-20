@@ -116,6 +116,9 @@ fn the_starter_pack_moves_the_controls_and_what_a_click_finds() {
         } else if c.place == ca72_panel::controls::Place::Lfo {
             // (The LFO page's, found while it shows: decisions.md R-LFO.)
             interact::hit_lfo(r.layout(), x, y)
+        } else if c.place == ca72_panel::controls::Place::Macro {
+            // (The macros', found while they show: decisions.md R-MACROS.)
+            interact::hit_macro(x, y)
         } else {
             interact::hit(r.layout(), &a, x, y)
         };

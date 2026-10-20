@@ -1,4 +1,4 @@
-# The LFO page: the engine's interface (decisions.md R-LFO)
+# The LFO page and the macros: the engine's interface (decisions.md R-LFO, R-MACROS)
 
 The owner's decisions are in decisions.md, R-LFO. This note is the interface the panel and the
 editor build on: what is a parameter, what is patch state, what the editor calls, and what the
@@ -26,32 +26,38 @@ the IDs are `lfo::PARAM_IDS[n]`.
 They are a preset's and a session's like any sound parameter; a preset or session saved before
 reads each at its default. They do not glide (they are not knobs on the audio path).
 
-## Modulation sources: the LFOs now, the macros later
+## Modulation sources: the LFOs and the macros
 
-Everything that moves a knob by a depth is a **source** (`lfo::Source`): `Source::Lfo(0..4)` now,
-`Source::Macro(n)` when the macros are built. A source has a value; each knob assigned to it
+Everything that moves a knob by a depth is a **source** (`lfo::Source`): `Source::Lfo(0..4)` and
+`Source::Macro(0..6)`. A source has a value; each knob assigned to it
 moves by depth × value from its own travel (after its glide), clamped, through its law; the
 rings, the hover dials, the tip and the menu show every source on a knob alike.
 
-- `lfo::SOURCES` = `LFOS + MACROS`; `MACROS` is 0 until the macros come. Every array of the
-  patch and of the engine's `Lfos` is sized by `SOURCES` and indexed by `Source::index()`
-  (the LFOs first), so adding macros changes the constant, not the shapes.
+- `lfo::SOURCES` = `LFOS + MACROS` (4 + 6). Every array of the patch and of the engine's `Lfos`
+  is sized by `SOURCES` and indexed by `Source::index()` (the LFOs first).
 - `Source::id()`: `lfo1` to `lfo4`, then `macro1` on: what presets (`<source>_to_<target>`) and
   sessions (`SavedSource { source, to, sharp }`) save.
 - `Lfos::own(i)`: whether a source has a value of each voice's own (an LFO with MONO off). A
   macro never: it is shared, as a knob.
-- **The macros, as planned** (the owner's mock-ups are in progress): knobs of the patch, 0 to
-  100 %, host-automatable and MIDI-learnable (parameters `macro1` and so on), each with a typed
-  label saved with the patch (patch state, beside the assignments). Their value reaches the
-  engine as a source's (`lfo::source_values` fills the macros' places from their knobs; a
-  unipolar 0..1 or bipolar about 50 % is the mock-ups' question), and they take the same
-  assignments, depths and rings. EDGES is an LFO's only.
+- **The macros** (R-MACROS): host parameters `macro1` to `macro6` (`lfo::MACRO_IDS`, host names
+  `MACRO 1` to `MACRO 6` whatever their typed names; `params.macro_param(n)`), 0 to 100 %, 0 in a
+  new patch, gliding as the panel's knobs (`smooth::KNOBS`), MIDI-learnable, a preset's sound
+  parameters (one saved before has each at 0) and in an old session at 0 (`Ca72::filter_state`).
+  A macro's value is **unipolar**: `Lfos::macros[n]`, its knob's glided value 0..1, filled by
+  `lfo::controls` only where the macro has an assignment of a depth other than 0 (so that one
+  turned with nothing to move leaves the controls, and the sleeping instrument, as they are).
+  `Lfos::source_values(lfos)` gives every source's value: the LFOs' from the bank, the macros'
+  from `Lfos::macros`. A knob a macro moves is at its travel + depth × value, clamped: one way.
+  Each macro has a typed **name** (`Patch::name`, `set_name`, `names`; 7 printable characters,
+  capitals: `lfo::name_within`), patch state as the assignments are. EDGES is an LFO's only.
 
 ## Patch state: assignments, depths and EDGES (not host parameters)
 
-`params.lfo_patch: Arc<lfo::Patch>`, persisted in the session under `lfo`, and in presets as
-values `<source>_to_<target id>` (the depth in percent: `lfo1_to_cutoff = 40`) and
-`lfoN_edges` (1 where SHARP).
+`params.lfo_patch: Arc<lfo::Patch>`, persisted in the session under `lfo` (`Saved { sources,
+names }`, `names` left out while none is typed), and in presets as values `<source>_to_<target
+id>` (the depth in percent: `lfo1_to_cutoff = 40`, `macro2_to_drive = 50`) and `lfoN_edges` (1
+where SHARP), the macros' names a list of their own, `macro_names` (`library::Sound`), written
+only where one is typed.
 
 - `Patch::assignments(source) -> [Option<Assignment>; MOST]`: in the order made, `MOST` = 8.
   `Assignment { target: Target, depth: f32 }`, depth -1..1, a share of the knob's travel.
@@ -65,6 +71,9 @@ values `<source>_to_<target id>` (the depth in percent: `lfo1_to_cutoff = 40`) a
   (MODULATES' screen).
 - `Patch::edges(lfo) -> Edges`, `Patch::set_edges(lfo, Edges::Soft | Edges::Sharp)` (an LFO's,
   by its number 0 to 3).
+- `Patch::name(n)`, `Patch::set_name(n, name)`, `Patch::names()`, `Patch::load_names(&[String])`
+  (a preset's), `Patch::same_names(&[String])` (the presets' bar marks a preset changed where its
+  names differ).
 - `Patch::changes() -> u32`: bumped on every change (redraw when it moves).
 
 Setting these from the editor needs no host gesture (they are not parameters). Init clears
@@ -72,7 +81,8 @@ them; choosing a preset loads its own (none where it names none); a MIDI pad's p
 
 ## Targets: which controls can take an LFO
 
-`lfo::Target` (29): the panel's continuous knobs and the strip's (26), and each oscillator's
+`lfo::Target` (29), the same for every source (the macros' knobs, and the LFOs' own, are not
+targets): the panel's continuous knobs and the strip's (26), and each oscillator's
 CONTINUOUS shape. `Target::id()` is the parameter's ID, `Target::of_id`, `Target::short()` a
 name for MODULATES' ten-character screen, `Target::per_voice()` (false for VOLUME and the
 strip's ENTROPY, WIDTH, INNER, DETUNE and DRIVE: those always take the shared copy, option C,
@@ -105,7 +115,7 @@ For the still trace: `lfo::settings(params, n, edges) -> Settings`, and
 `Settings::output_after(t, tempo)` (the output `t` s after a note, from PHASE, ENV's hold and
 RISE's fade, before EDGES), `Settings::hz_at(tempo)`, `lfo::wave(at, phase)` (the shapes).
 
-## Colours: the computer's
+## Colours: the computer's (the macros' too)
 
 `settings::Settings::lfo_colors: [lfo::Phosphor; 4]`, kept in `settings.toml` as `lfo_colors`
 (four words); `settings::Change::LfoColor(lfo, Phosphor)` sets one. Defaults
@@ -114,10 +124,18 @@ white) is the scope's right-click palette, `Phosphor::rgb()` its glow, `Phosphor
 menu word. The green leans to blue and the red to rose, so the four defaults stay apart for
 deuteranopia and protanopia (R-LFO has the check).
 
+The macros' are `settings::Settings::macro_colors: [lfo::MacroColor; 6]`, kept as `macro_colors`,
+set with `Change::MacroColor` (a right click on a macro's name or jack). Defaults
+`lfo::MACRO_COLORS` = teal, rose, lemon, sage, lavender, white; `MacroColor::ALL` adds round 2's
+purple and pink. Which the left area shows, the wheels or the macros, is the computer's too:
+`Settings::macros_shown`, kept as `left_area` ("wheels", "macros"), `Change::Macros`.
+
 ## MCP
 
 `ca72_modulations`, `ca72_modulation_set` and `ca72_modulation_remove` (docs/mcp.md), carried
-out by `agent::modulation` on the patch; the LFOs' 40 parameters are in `ca72_describe`'s table.
+out by `agent::modulation` on the patch, for the LFOs and the macros (a macro also by its typed
+name; `name` sets one); the LFOs' 40 parameters and the macros' six are in `ca72_describe`'s
+table.
 
 ## The engine, in short
 
@@ -151,21 +169,23 @@ out by `agent::modulation` on the patch; the LFOs' 40 parameters are in `ca72_de
   dragged assignment's cord and targets, the hover pop-up. Nothing in it names an LFO: a ring, a
   dial and a cord each take a colour and (the pop-up's) a label.
 
-## Adding the macros: what the panel and editor need
+## The macros in the editor (R-MACROS)
 
-The assignment UI is over **sources**, as the engine is. To give a macro (`Source::Macro(n)`)
-the same cord, rings, pop-up, menus and tips:
-
-1. In `editor/lfo_page.rs`, give `colour()` and `label()` the macro's colour (a setting of the
-   computer's, as `lfo_colors`) and name (`MACRO 1`, or its typed name). Every ring, pop-up dial,
-   menu head and tip takes them from there; `sources_on`, `knob_rows`, `mod_press` and
-   `mod_released` already iterate `Source::all()` and use `Patch` by source.
-2. Give each macro a handle that starts a drag: set `Modulating::patching` to `Some(Patching {
-   source: Source::Macro(n), at })` on its press (the LFOs' is the OUT jack); `mod_moved` and
-   `mod_released` then follow and drop it. `mod_scene_now` draws the cord from `lfo_ui::places(n)
-   .jack` for an LFO; give `Cord::from` the macro's handle there.
-3. Give the rings' points their values: `reading_of(source)` returns a source's present output
-   (-1..1) and whether it moves; a macro's is its knob's value (unipolar as the owner asked, so
-   its ring's swing is one-sided: draw `Ring::depth` from the knob's setting the one way).
-4. Strip knobs offer LFO 1 to 4 under an LFO head (`knob_rows`); add a MACRO head the same way.
-
+- **The area** is `ca72_panel::strip::macros` (`MacroRenderer`, `MacroScene`): the lower page's
+  left area (`AREA`, the strip's left trim to the left hand's rule, the rail's foot to the strip's
+  foot), laid on the strip's bare face there (`Renderer::left_face`, kept as the background is
+  made, before the left hand's shadows, print and parts) so that it lies without a seam. Six
+  cells two by three (`knob_at`, `name_at`, `jack_at`: round 2's budget); the knobs are
+  `CONTROLS`' `Place::Macro` (`controls::MACRO_FIRST` + n, CONTROL_SET revision 5), found by
+  `interact::hit_macro` while the macros show; the names and jacks by `strip::macros::hit`. Its
+  still (face, shadows, the dials' print, the screens' glass, the lamp) is made on a thread of its
+  own as the editor opens (`MacroRenderer::prepare`); each name, collar with its jack, and knob is
+  a patch drawn again only when it changes.
+- **The editor's side** is `editor/macros.rs` (`MacroView`): the rail's MACRO key
+  (`BarTarget::Macro`, at the far left; `BarScene::macros` lit, `macro_glow` the faint glow),
+  `Editing::macros_show`; while they show the left hand's controls (`Place::Column`) are off the
+  panel (not drawn over, not found) and go on working. A press on a jack starts
+  `Modulating::patching` with `Source::Macro(n)`; the cord, the drop, the pop-up, the ring ends,
+  Alt-drag and the menus' heads are `lfo_page`'s, over sources (`colour`, `label` with the typed
+  name). A macro's ring is one way (`modulation::Ring::one_way`) and shows on every knob it moves
+  whenever the macros show, its point where the macro has it.

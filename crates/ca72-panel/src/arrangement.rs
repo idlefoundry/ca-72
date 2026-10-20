@@ -1238,7 +1238,9 @@ mod tests {
     /// passed over, with notes.
     #[test]
     fn a_layout_for_a_later_ca72_loads_what_this_one_knows() {
-        let text = OFFICIAL.replacen("controls = 3", "controls = 5", 1)
+        // (A revision past this build's.)
+        let later = format!("controls = {}", crate::controls::CONTROL_SET.revision + 1);
+        let text = OFFICIAL.replacen("controls = 3", &later, 1)
             + "\n[[control]]\nparam = \"future_knob\"\nat = [10, 10]\nglow = true\n\n\
                [[sticker]]\nat = [5, 5]\n";
         let mut report = Report::default();

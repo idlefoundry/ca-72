@@ -14,6 +14,7 @@ pub mod arp;
 pub mod fx;
 pub mod lfo;
 pub mod lower;
+pub mod macros;
 pub mod mpe;
 mod worn;
 
@@ -74,10 +75,13 @@ pub const CO: f64 = (SECTIONS[3].0 + SECTIONS[3].1) / 2.0;
 /// ARP after the keyboard's, the name a key shorter again for it (the owner's C1, 2026-10-18;
 /// decisions.md R-ARP); and MPE after ARP, the name a key shorter again (the owner's A,
 /// 2026-10-20; R-MPE); and LFO directly after the keyboard's, the name a key shorter again (the
-/// owner, 2026-10-20; R-LFO).
-const KEYS: [(f64, f64, BarTarget); 10] = [
-    (92.0, 86.0, BarTarget::Star),
-    (192.0, 86.0, BarTarget::Prev),
+/// owner, 2026-10-20; R-LFO); and MACRO at the far left, over the left area it flips, the star and
+/// the previous key a key right, the name a key shorter again (the owner, 2026-10-20: "in the
+/// same bar as the presets ... the far left edge"; R-MACROS).
+const KEYS: [(f64, f64, BarTarget); 11] = [
+    (92.0, 86.0, BarTarget::Macro),
+    (192.0, 86.0, BarTarget::Star),
+    (292.0, 86.0, BarTarget::Prev),
     (2226.0, 86.0, BarTarget::Next),
     (2370.0, 170.0, BarTarget::Save),
     (2512.0, 86.0, BarTarget::Panel),
@@ -90,10 +94,11 @@ const KEYS: [(f64, f64, BarTarget); 10] = [
 /// The standalone application's (the owner's FX-A, 2026-10-18; decisions.md R-FX-DRAWER): FX
 /// after ARP, the name a key shorter again for it, the gaps between the keys as they were; MPE
 /// after FX, in the plug-ins' place beside the settings' key (R-MPE); LFO after the keyboard's
-/// (R-LFO).
-const KEYS_FX: [(f64, f64, BarTarget); 11] = [
-    (92.0, 86.0, BarTarget::Star),
-    (192.0, 86.0, BarTarget::Prev),
+/// (R-LFO); MACRO at the far left (R-MACROS).
+const KEYS_FX: [(f64, f64, BarTarget); 12] = [
+    (92.0, 86.0, BarTarget::Macro),
+    (192.0, 86.0, BarTarget::Star),
+    (292.0, 86.0, BarTarget::Prev),
     (2126.0, 86.0, BarTarget::Next),
     (2270.0, 170.0, BarTarget::Save),
     (2412.0, 86.0, BarTarget::Panel),
@@ -110,8 +115,18 @@ pub const KEY_W: f64 = 86.0;
 /// The name's display: its window (left, top, width, height), as tall with its surround as
 /// the keys beside it (the owner, 2026-10-09: "Needs to be the same height as the buttons
 /// flanking it").
-pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 1900.0, 50.0);
-const NAME_FX: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 1800.0, 50.0);
+pub const NAME: (f64, f64, f64, f64) = (362.0, RAIL_Y - 25.0, 1800.0, 50.0);
+const NAME_FX: (f64, f64, f64, f64) = (362.0, RAIL_Y - 25.0, 1700.0, 50.0);
+
+/// Key `t`'s light on the rail (decisions.md R-LFO-PAGE's rule): 0 unlit, 1 a faint glow (its
+/// page or drawer closed but affecting the sound), 2 lit.
+pub fn key_light_of(bar: &BarScene, t: BarTarget) -> u8 {
+    match worn::key_light(bar, t) {
+        worn::KeyLight::Off => 0,
+        worn::KeyLight::Glow => 1,
+        worn::KeyLight::Lit => 2,
+    }
+}
 
 /// The rail's keys: the plug-ins', or the standalone application's with its effects' key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -606,6 +606,8 @@ impl Browser {
             lfo: self.bar.lfo,
             page: self.bar.page,
             lfo_page: self.bar.lfo_page,
+            macros: self.bar.macros,
+            macro_glow: self.bar.macro_glow,
         };
     }
 
@@ -728,7 +730,8 @@ impl Browser {
             | BarTarget::Arp
             | BarTarget::Fx
             | BarTarget::Mpe
-            | BarTarget::Lfo => {}
+            | BarTarget::Lfo
+            | BarTarget::Macro => {}
             BarTarget::Next => self.step(1, p, s),
             BarTarget::Star => {
                 let current = Self::current(p);

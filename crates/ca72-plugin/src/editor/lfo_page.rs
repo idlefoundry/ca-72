@@ -34,22 +34,28 @@ const NO_DEPTH: f32 = 0.005;
 /// Logical pixels a depth's drag up or down takes for a whole knob's travel (100 %), as a knob's
 /// drag takes for its own.
 const DEPTH_DRAG: f64 = 240.0;
-/// The macros' colour until they have their own (none yet: `lfo::MACROS` is 0).
-const MACRO_COLOUR: [u8; 3] = [0xe4, 0xec, 0xf4];
-
-/// A source's colour: an LFO's the computer's phosphor for it.
+/// A source's colour: an LFO's the computer's phosphor for it, a macro's the computer's colour
+/// for it (decisions.md R-MACROS).
 pub(super) fn colour(settings: &Settings, s: Source) -> [u8; 3] {
     match s {
         Source::Lfo(n) => settings.lfo_colors[n.min(LFOS - 1)].rgb(),
-        Source::Macro(_) => MACRO_COLOUR,
+        Source::Macro(n) => settings.macro_colors[n.min(lfo::MACROS - 1)].rgb(),
     }
 }
 
-/// A source's label, as the pop-up, the tip and the menus name it.
-pub(super) fn label(s: Source) -> String {
+/// A source's label, as the pop-up, the tip and the menus name it: a macro's typed name where it
+/// has one (BRIGHT), else MACRO n.
+pub(super) fn label(patch: &lfo::Patch, s: Source) -> String {
     match s {
         Source::Lfo(n) => format!("LFO {}", n + 1),
-        Source::Macro(n) => format!("MACRO {}", n + 1),
+        Source::Macro(n) => {
+            let name = patch.name(n);
+            if name.is_empty() {
+                format!("MACRO {}", n + 1)
+            } else {
+                name
+            }
+        }
     }
 }
 
@@ -341,14 +347,16 @@ impl Editing {
         }
     }
 
-    /// A source's present output (-1..1) and whether it moves.
+    /// A source's present output (-1..1; a macro's 0..1, its knob's) and whether it moves (a
+    /// macro's point always shows).
     fn reading_of(&self, s: Source) -> (f64, bool) {
-        match s.lfo() {
-            Some(n) => {
+        match s {
+            Source::Lfo(n) if n < LFOS => {
                 let r = self.modulating.readings[n];
                 (f64::from(r.value), r.moving)
             }
-            None => (0.0, false),
+            Source::Macro(n) if n < lfo::MACROS => (self.macro_value(n), true),
+            _ => (0.0, false),
         }
     }
 
@@ -430,10 +438,12 @@ impl Editing {
     }
 
     /// The modulation overlay's scene: the rings on the knobs in view (all while the LFO page
-    /// shows or an assignment is dragged, else only the one under the pointer's), a dragged
-    /// assignment's cord and targets, the hover pop-up.
+    /// shows or an assignment is dragged, else only the one under the pointer's; every macro's
+    /// while the macros show: decisions.md R-MACROS), a dragged assignment's cord and targets,
+    /// the hover pop-up.
     pub(super) fn mod_scene_now(&self) -> ModScene {
         let page = self.page_shows();
+        let macros = self.macros_show();
         let patching = self.modulating.patching.as_ref();
         let hovered = match self.hover {
             Some(Target::Control(i) | Target::Legend(i, _)) => Some(i),
@@ -473,11 +483,15 @@ impl Editing {
                 || hovered == Some(i)
                 || self.modulating.popup == Some(i)
                 || dragged == Some(i);
-            if !shown {
+            if !shown && !macros {
                 continue;
             }
             let travel = self.travel_of(i);
             let mut on = self.sources_on(t);
+            // (The macros showing: their rings alone where nothing else shows them.)
+            if !shown {
+                on.retain(|(s, _)| s.macro_n().is_some());
+            }
             // (A drop's preview: the depth it would be given.)
             if let Some(p) = patching
                 && under == Some(i)
@@ -494,11 +508,13 @@ impl Editing {
                 .iter()
                 .map(|&(s, d)| {
                     let (value, moving) = self.reading_of(s);
+                    let one_way = s.macro_n().is_some();
                     Ring {
                         colour: colour(&self.settings, s),
                         depth: f64::from(d),
-                        point: (page && moving)
+                        point: ((page || one_way) && moving)
                             .then(|| (travel + f64::from(d) * value).clamp(0.0, 1.0)),
+                        one_way,
                     }
                 })
                 .collect();
@@ -511,9 +527,13 @@ impl Editing {
             });
         }
         let cord = patching.and_then(|p| {
-            let n = p.source.lfo()?;
+            let from = match p.source {
+                Source::Lfo(n) if n < LFOS => lfo_ui::places(n).jack,
+                Source::Macro(n) if n < lfo::MACROS => ca72_panel::strip::macros::jack_at(n),
+                _ => return None,
+            };
             Some(Cord {
-                from: lfo_ui::places(n).jack,
+                from,
                 to: p.at,
                 colour: colour(&self.settings, p.source),
                 targets,
@@ -537,7 +557,7 @@ impl Editing {
                         .iter()
                         .map(|&(s, d)| PopDial {
                             colour: colour(&self.settings, s),
-                            label: label(s),
+                            label: label(&self.params.lfo_patch, s),
                             depth: f64::from(d),
                             shared: !t.per_voice()
                                 && s.lfo().is_some_and(|n| !self.params.lfo(n).mono.value()),
@@ -558,7 +578,13 @@ impl Editing {
         };
         self.sources_on(t)
             .iter()
-            .map(|&(s, d)| format!(" \u{b7} {} {}", label(s), mods::percent(f64::from(d))))
+            .map(|&(s, d)| {
+                format!(
+                    " \u{b7} {} {}",
+                    label(&self.params.lfo_patch, s),
+                    mods::percent(f64::from(d))
+                )
+            })
             .collect()
     }
 
@@ -791,6 +817,10 @@ impl Editing {
     /// REMOVE; a strip knob's LFO head (nothing can be dragged to it under the page); an LFO's
     /// WAVEFORM's modes.
     pub(super) fn knob_rows(&self, i: usize) -> Vec<Row> {
+        // (A macro's own knob: RENAME… and what it modulates, decisions.md R-MACROS.)
+        if let Some(n) = super::macros::macro_of_control(i) {
+            return self.macro_rows(n);
+        }
         let mut rows = Vec::new();
         if let Some((n, "waveform")) = lfo_part(CONTROLS[i].param) {
             let continuous = self.params.lfo(n).shape_mode.value() == WaveMode::Continuous;
@@ -815,7 +845,7 @@ impl Editing {
         for (s, d) in self.sources_on(t) {
             rows.push(Row::Head(format!(
                 "{} \u{b7} {}",
-                label(s),
+                label(&self.params.lfo_patch, s),
                 mods::percent(f64::from(d))
             )));
             rows.push(Row::Item(
@@ -832,11 +862,18 @@ impl Editing {
             ));
         }
         if CONTROLS[i].place == ControlPlace::Strip {
-            rows.push(Row::Head("LFO".into()));
-            for s in Source::all().filter(|s| s.lfo().is_some()) {
-                let free = self.params.lfo_patch.depth(s, t).is_none()
-                    && self.params.lfo_patch.count(s) < lfo::MOST;
-                rows.push(Row::Item(ModItem::Assign(s, t), label(s), free, false));
+            for (head, macros) in [("LFO", false), ("MACRO", true)] {
+                rows.push(Row::Head(head.into()));
+                for s in Source::all().filter(|s| s.macro_n().is_some() == macros) {
+                    let free = self.params.lfo_patch.depth(s, t).is_none()
+                        && self.params.lfo_patch.count(s) < lfo::MOST;
+                    rows.push(Row::Item(
+                        ModItem::Assign(s, t),
+                        label(&self.params.lfo_patch, s),
+                        free,
+                        false,
+                    ));
+                }
             }
         }
         rows
@@ -955,6 +992,13 @@ impl Editing {
             ModItem::Color(n, p) => self.keep_settings(Change::LfoColor(n, p)),
             ModItem::Edges(n, e) => patch.set_edges(n, e),
             ModItem::Wave(n, continuous) => self.set_lfo_wave_mode(n, continuous),
+            ModItem::MacroColor(n, c) => self.keep_settings(Change::MacroColor(n, c)),
+            ModItem::Rename(n) => self.start_rename(n),
+            ModItem::RemoveAll(s) => {
+                for a in patch.assignments(s).into_iter().flatten() {
+                    patch.remove(s, a.target);
+                }
+            }
         }
     }
 

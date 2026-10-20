@@ -672,6 +672,7 @@ fn lfo(s: f64, panel: &mut Renderer) {
                         colour: colours[n],
                         depth: 0.3,
                         point: Some(0.5 + 0.3 * (k + n as f64).sin()),
+                        one_way: false,
                     }],
                 }
             })

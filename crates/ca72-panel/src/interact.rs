@@ -92,6 +92,11 @@ pub fn hit_lfo(layout: &Layout, x: f64, y: f64) -> Option<Target> {
         .find_map(|(i, c)| hit_control(layout, i, c, x, y))
 }
 
+/// A macro's knob at (x, y) in the drawing, the macros showing (decisions.md R-MACROS).
+pub fn hit_macro(x: f64, y: f64) -> Option<Target> {
+    hit_drawer(Place::Macro, x, y)
+}
+
 /// The arpeggiator's drawer's knob at (x, y) in the drawing, the drawer open (decisions.md
 /// R-ARP).
 pub fn hit_arp(x: f64, y: f64) -> Option<Target> {
@@ -356,6 +361,8 @@ mod tests {
                 hit_drawer(c.place, x, y)
             } else if c.place == Place::Lfo {
                 hit_lfo(&l, x, y)
+            } else if c.place == Place::Macro {
+                hit_macro(x, y)
             } else {
                 hit(&l, x, y)
             };

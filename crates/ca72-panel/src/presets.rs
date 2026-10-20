@@ -165,6 +165,8 @@ pub enum BarTarget {
     Mpe,
     /// The LFO page (decisions.md R-LFO), a lower page of its own in the keyboard's place.
     Lfo,
+    /// The left area's macros or wheels (decisions.md R-MACROS), at the rail's far left, over it.
+    Macro,
 }
 
 /// What a pointer finds in the drawer.
@@ -328,6 +330,10 @@ pub struct BarScene {
     pub page: Option<BarTarget>,
     /// The LFO page shows (its key lit; a drawer may show over it, its key lit too).
     pub lfo_page: bool,
+    /// The left area shows the macros (the MACRO key lit; decisions.md R-MACROS).
+    pub macros: bool,
+    /// An assigned macro is above 0 (the MACRO key glowing while the wheels show).
+    pub macro_glow: bool,
 }
 
 // ---- The selector's layout (panel units across, the strip's units down).
@@ -581,7 +587,8 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         | BarTarget::Arp
         | BarTarget::Fx
         | BarTarget::Mpe
-        | BarTarget::Lfo => SAVE_X + SAVE_W / 2.0,
+        | BarTarget::Lfo
+        | BarTarget::Macro => SAVE_X + SAVE_W / 2.0,
     };
     (x, BAR_MID)
 }
@@ -807,6 +814,8 @@ mod png {
                         lfo: false,
                         page: None,
                         lfo_page: false,
+                        macros: false,
+                        macro_glow: false,
                     },
                     ..crate::strip::StripScene::default()
                 },
@@ -1102,6 +1111,8 @@ mod png {
                     lfo: false,
                     page: None,
                     lfo_page: false,
+                    macros: false,
+                    macro_glow: false,
                 },
                 ..crate::strip::StripScene::default()
             },

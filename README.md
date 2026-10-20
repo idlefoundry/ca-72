@@ -390,6 +390,33 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   with presets and projects but are not host parameters; every other LFO control is a host
   parameter that can be automated or MIDI-learned. The LFO key is lit while its page shows and
   glows faintly while an LFO is assigned and moving a knob with it put away.
+- **Macros** (from 0.3.0; none assigned in any preset or project saved before it, which sound as
+  they did, each macro at 0): the rail's **MACRO** key, at its far left, flips the lower page's
+  left area from the PITCH and MOD wheels and their switches to six macro knobs, two across and
+  three down, on every lower page (the strip's controls, the keyboard, the LFO page, beside the
+  drawers); pressed again, the wheels. Which one shows is kept on this computer. The wheels and
+  switches go on working from MIDI and automation while the macros show. Each macro has:
+  - its **name**, seven characters on a dot screen in its colour (MACRO 1 to MACRO 6 until you
+    name it): double-click it, or choose RENAME… from its menu, type, and press Enter (Escape
+    leaves it as it was). Names are saved with presets and projects;
+  - its **knob**, 0 to 10 (0 to 100 % in the host), a host parameter named MACRO 1 to MACRO 6
+    that can be automated or MIDI-learned, saved with presets and projects; a new patch has
+    each at 0;
+  - its **jack**, with a collar in the macro's colour (teal, rose, lemon, sage, lavender and
+    white at first; right-click the name or the jack for its **COLOR** and RENAME…, kept on this
+    computer, not in the patch).
+
+  **To have a macro move a knob, drag a cord from its jack to it**, as from an LFO's OUT: it
+  starts at 25 %, up to eight knobs a macro, the same knobs an LFO can take (not the LFOs' own
+  knobs, nor another macro). A macro moves its knobs one way: at 0 a knob is where you set it, at
+  100 % it is moved by the depth (-100 to 100 % of its travel; negative turns it down). Its ring
+  on a knob runs from the knob's setting toward where 100 % takes it, ticked there, bright as far
+  as the macro is turned now. While the macros show, every macro's rings show on the panel's
+  knobs; the pop-up, a ring's end, Alt/Option-drag (for the macro you touched last) and the
+  knob's right-click menu set the depth, as an LFO's. A macro knob's own right-click menu has
+  MIDI Learn, RENAME…, REMOVE ALL ASSIGNMENTS and each knob it moves, with DEPTH… and REMOVE.
+  The strip's knobs take a macro from their menu, as an LFO. The MACRO key is lit while the
+  macros show and glows faintly while the wheels show and an assigned macro is above 0.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
 - **Output:** stereo, the same on both channels unless SPREAD places the voices or DOUBLE's

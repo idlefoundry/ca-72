@@ -1051,9 +1051,13 @@ pub(crate) fn key_light(bar: &BarScene, t: BarTarget) -> KeyLight {
         BarTarget::Fx => bar.fx,
         BarTarget::Mpe => bar.mpe,
         BarTarget::Lfo => bar.lfo,
+        BarTarget::Macro => bar.macro_glow,
         _ => return KeyLight::Off,
     };
-    if bar.page == Some(t) || (t == BarTarget::Lfo && bar.lfo_page) {
+    if bar.page == Some(t)
+        || (t == BarTarget::Lfo && bar.lfo_page)
+        || (t == BarTarget::Macro && bar.macros)
+    {
         KeyLight::Lit
     } else if affecting {
         KeyLight::Glow
@@ -1096,7 +1100,8 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
             | BarTarget::Arp
             | BarTarget::Fx
             | BarTarget::Mpe
-            | BarTarget::Lfo => put!(
+            | BarTarget::Lfo
+            | BarTarget::Macro => put!(
                 o,
                 "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>{}</text>",
                 N(x),
@@ -1107,6 +1112,7 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                     BarTarget::Fx => "FX",
                     BarTarget::Mpe => "MPE",
                     BarTarget::Lfo => "LFO",
+                    BarTarget::Macro => "MACRO",
                     _ => "SAVE",
                 }
             ),

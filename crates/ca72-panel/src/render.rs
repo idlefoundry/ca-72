@@ -298,6 +298,11 @@ pub struct Renderer {
     glide_background: Option<Pixmap>,
     glide_rect: [i32; 4],
     glide_surface: Option<Pixmap>,
+    /// The strip's bare face under the left area, as the background had it before anything was
+    /// drawn on it (decisions.md R-MACROS: the macros' plate is laid on it, the wheels left
+    /// out), and its place in the frame.
+    left_face: Option<Pixmap>,
+    left_rect: [i32; 4],
 }
 
 /// How much the pictures placed in layers may keep: some dozens of layers' pictures.
@@ -418,6 +423,8 @@ impl Renderer {
             arc_rects: [[0; 4]; 3],
             arc_surfaces: None,
             glide_background: None,
+            left_face: None,
+            left_rect: [0; 4],
             glide_rect: [0; 4],
             glide_surface: None,
         };
@@ -526,6 +533,38 @@ impl Renderer {
         ]
     }
 
+    /// The left area's place in the frame (`strip::macros::AREA`), its pixels whole.
+    pub fn left_rect(&self) -> [i32; 4] {
+        let (s, top) = (self.scale, self.top_px());
+        let (x0, y0, x1, y1) = crate::strip::macros::AREA;
+        [
+            (x0 * s).ceil() as i32,
+            (y0 * s).ceil() as i32 - top,
+            (x1 * s).floor() as i32,
+            (y1 * s).floor() as i32 - top,
+        ]
+    }
+
+    /// The strip's bare face under the left area (`left_rect`), as the background had it before
+    /// anything was drawn on it: the worn skin's textured black (under its lamp: `lamp_over`),
+    /// the drawn skin's black.
+    pub fn left_face(&self) -> Option<&Pixmap> {
+        self.left_face.as_ref()
+    }
+
+    /// The lamp's light over `p`, its top left the frame's pixel `at`, as over the background
+    /// (the worn skin's; the drawn skin has none).
+    pub fn lamp_over(&self, p: &mut Pixmap, at: (i32, i32)) {
+        if self.skin == Skin::Worn {
+            lamp_in(p, self.scale, at, self.drawing_h());
+        }
+    }
+
+    /// The drawing's height from the panel's top (the lamp's falloff is over it).
+    pub fn drawing_h(&self) -> f64 {
+        self.arrangement.panel.drawing_h()
+    }
+
     fn dial_rects(&self) -> [[i32; 4]; 2] {
         let (s, top) = (self.scale, self.top_px());
         std::array::from_fn(|n| {
@@ -608,9 +647,30 @@ impl Renderer {
         self.arc_background = None;
         self.glide_rect = self.glide_long_rect();
         self.glide_background = None;
+        self.left_rect = self.left_rect();
+        self.left_face = None;
         if self.skin == Skin::Worn {
             self.draw_worn_background();
             return;
+        }
+        // (The drawn skin's strip face: its black, as `art::strip_face` has it.)
+        let r = self.left_rect;
+        if let Some(mut face) =
+            Pixmap::new((r[2] - r[0]).max(1) as u32, (r[3] - r[1]).max(1) as u32)
+        {
+            let doc = art::document(
+                [0.0, 0.0, f64::from(face.width()), f64::from(face.height())],
+                face.width(),
+                face.height(),
+                &format!(
+                    "<rect width='100%' height='100%' fill='{}'/>",
+                    crate::svg::colour::PANEL
+                ),
+            );
+            if let Ok(tree) = usvg::Tree::from_str(&doc, &self.options) {
+                resvg::render(&tree, Transform::identity(), &mut face.as_mut());
+            }
+            self.left_face = Some(face);
         }
         let (w, h) = (self.background.width(), self.background.height());
         let view = [
@@ -761,6 +821,8 @@ impl Renderer {
             );
         });
         let bg = &mut self.background;
+        // (The left area's bare face, before the left hand's shadows, print and parts.)
+        self.left_face = Some(crop(bg, self.left_rect));
         if let Some(overlay) = tree(&art::worn_overlay(arrangement)) {
             render_parts(&overlay, bg);
         }
@@ -1772,7 +1834,7 @@ pub(crate) fn lamp_at(frame: &mut Pixmap, s: f64, at: (i32, i32)) {
 ///
 /// Here over `frame`, its top left pixel `at` from the top left of a drawing `height` tall (a
 /// skin pack's panel may be taller than the official one).
-fn lamp_in(frame: &mut Pixmap, s: f64, at: (i32, i32), height: f64) {
+pub(crate) fn lamp_in(frame: &mut Pixmap, s: f64, at: (i32, i32), height: f64) {
     const LAMP: (f64, f64, f64, f64) = (1.26, 0.84, 0.55, 0.9);
     let (w, h) = (frame.width() as usize, frame.height() as usize);
     let across: Vec<f64> = (0..w)

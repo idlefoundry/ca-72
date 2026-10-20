@@ -13221,3 +13221,132 @@ MIDI-learnable switch, saved with presets and sessions; one saved before it open
 
 Not tried: external DAWs, macOS or Windows, native installers or audio devices. The exact
 position of the sign is an agent decision for the owner's visual review.
+
+## R-MACROS. Six macro knobs in the left area, flipped by the rail's MACRO key
+
+**The owner, 2026-10-20:** "I think we should add 4-8 macro knobs depending on how it looks in the
+UI. I'm thinking that the left panel that currently has the pitch/mod controls could flip into a
+macro knob panel." On the count, "Let the mock-up decide", then, of round 1's four and eight: "I
+don't know why you didn't attempt 6. I would like to see that", and of round 2: "Yes, 2x3 as
+recommended." On the key: "the macros button shouldn't be on the panel itself. It should be in the
+same bar as the presets, and it should be at the ... far left edge ... because that's kind of
+above where it appears. And yeah, just a button that says macro there, I think should do for
+now." Names typed with the patch: "Yes"; factory presets with macros: "Leave for later". Rings:
+"show every macro's rings whenever the macros are shown." Colours: "Colors should be changeable by
+the user. Changeable per computer." The name's display shorter: "that's fine." And to the four
+small questions (the switches hiding with the wheels, the host's names, no macros on the LFOs'
+own knobs yet, +25 % and eight a macro, a new patch's macros at 0): "A for all". The mock-ups are
+`~/Code/ca72-night/macro-mockups/` (round 2 is the approved look: its README, `budget2.txt` and
+`colours2.txt`; the artifact https://claude.ai/artifact/QeWxhwz8nsZgrE3qQ1k1Le). Built on the LFO
+page's modulation (R-LFO, R-LFO-PAGE), which was made over sources for this.
+
+**The engine** (`lfo.rs`, docs/lfo.md).
+- `lfo::MACROS` is 6: `Source::Macro(0..6)` take the sources' places after the LFOs', in the
+  patch, the engine's `Lfos`, presets (`macroN_to_<target>`) and sessions alike.
+- **MACRO 1 to MACRO 6** are host parameters (`macro1` to `macro6`, after every other: no
+  parameter moves), 0 to 100 %, 0 in a new patch, their host names fixed whatever their typed
+  names (the owner's 5c). They glide as the panel's knobs (`smooth::KNOBS`, R-KNOB-GLIDE), are
+  MIDI-learnable (`learn::LEARNABLE`, 58 knobs now), are a preset's sound parameters (one saved
+  before has each at 0) and open at 0 in a session saved before them (`Ca72::filter_state`).
+- **A macro is unipolar** (the round-2 spec): each assignment moves its knob by depth × the
+  macro's value (0..1), from the knob's travel after its glide, clamped, through the knob's law,
+  as an LFO's do. A macro's value reaches the engine only where it has an assignment of a depth
+  other than 0 (`Lfos::macros`), so that one turned with nothing to move changes nothing: no
+  controls change, the sleeping instrument (R68) is not woken.
+- **Names** (seven characters, printable, capitals; `lfo::name_within`) are patch state in
+  `lfo::Patch` (one atomic word each, read by nothing on the audio thread), saved in the session's
+  `lfo` state (`names`, left out while none is typed, so an old state's form is kept) and in
+  presets as a list of their own (`macro_names`, written only where one is typed). A preset or
+  session saved before has none; Init clears them. The presets' bar marks a preset changed where
+  the names differ, as where its assignments do.
+- Not targets: the LFOs' own knobs and the macros' (the owner's 5d); the targets are the LFOs'
+  29 (`lfo::target_of`).
+- **MCP** (docs/mcp.md): the six parameters in `ca72_describe`'s table (section MACROS);
+  `ca72_modulations` lists each macro with its `name` and `value`; `ca72_modulation_set` takes a
+  macro by id, label or typed name and sets its `name`; `ca72_modulation_remove` as for an LFO.
+
+**The panel and the editor** (`ca72_panel::strip::macros`, `editor/macros.rs`).
+- **The key:** MACRO, the rail's own key (86 by 62), at its far left (centre 92), over the area it
+  flips; the star and the previous key a key right (192 and 292); the name's display starts at
+  362, 1800 units in the plug-ins and 1700 in the standalone (LFO's and MACRO's keys both
+  added). Lit while the macros show; a faint glow while the wheels show and an assigned macro is
+  above 0 (R-LFO-PAGE's rail lights); off otherwise. Pressed with the window's lower part away,
+  it shows it with the macros. Which shows is the computer's (`settings.toml`'s `left_area`).
+- **The area:** the lower page's left area (the strip's left trim to the left hand's rule, the
+  rail's foot to the strip's foot), on every lower page (the strip's, the keyboard's, the LFO
+  page's, beside the drawers). Six cells two across and three down at round 2's places
+  (`budget2.txt`): the name's dot screen (148 by 28, seven characters in the macro's colour,
+  dimmed while it moves nothing; MACRO n until named), the panel's standard knob with a full 0 to
+  10 dial (eleven ticks, the ends numbered), the jack (radius 14) in the dial's open foot with a
+  collar in the macro's colour. The area is a plate laid on the strip's bare face, kept by the
+  panel's renderer as its background is made (`Renderer::left_face`), so it lies without a seam
+  in either skin; its still is made on a thread of its own as the editor opens; each name, collar
+  and knob is drawn again only when it changes.
+- **The wheels and switches** (NOTE PRIORITY, RETRIGGER, GLIDE, DECAY, PITCH, MOD.) hide with the
+  wheels' view (the owner's 5a): not drawn over the macros, not found by the pointer, ringed by
+  nothing; they keep working from MIDI and the host meanwhile.
+- **Assigning is the LFOs'** (R-LFO-PAGE), over sources: a cord in the macro's colour dragged from
+  its jack, every knob that can take it ringed, let go at +25 %; eight a macro. Its depth set by
+  the knob's pop-up (a dial per source, the macro by its name), a ring's end, Alt/Option-drag (the
+  macro last touched: its knob or jack), and the knob's right-click menu (a head per source with
+  DEPTH… and REMOVE). A strip knob's menu gains a MACRO head as it has an LFO one.
+- **Rings** are one way: faint from the knob's setting to where the macro at 100 % takes it, the
+  end ticked, bright as far as the macro is turned now with its point there. Every macro's show
+  on every knob it moves whenever the macros show (the owner's choice), as well as while dragging
+  and on the hovered knob, where every source's show. With the wheels showing, a macro's rings
+  show as an LFO's do (on the hovered knob, while dragging, with the LFO page).
+- **Menus:** a macro knob's right-click has MIDI Learn's items, then RENAME…, REMOVE ALL
+  ASSIGNMENTS, and a head for each knob it moves with DEPTH… and REMOVE. Its name's or jack's
+  right-click: RENAME… and COLOR. **Renaming:** double-click the name (or RENAME…): typed on the
+  screen with an amber outline and a caret, capitals, seven at most; Enter or a press elsewhere
+  keeps it, Escape leaves it. The knob's tip names the macro (`MACRO 1 · BRIGHT: 55 %`), a name's
+  tip lists what it moves.
+- **Both skins and skin packs:** CONTROL_SET revision 5 records the six knobs (`added`), the
+  plug-in's own, which a layout does not place (refused, as the strip's; a layout of revisions 1
+  to 4 loads as it did, docs/skin-packs.md). Under a pack the area is laid on the pack's face, its
+  knobs and jacks in the pack's base look.
+
+**The colours, checked again.** Round 2 chose its six (purple, pink, lemon, sage, lavender, white)
+against the LFOs' colours of the time. Checked again (`tools/colours.py`, CIEDE2000 between every
+two of the ten, normal vision and simulated protanopia, deuteranopia and tritanopia, Machado et
+al. 2009 at full severity) against the LFO page's final four (amber FFB020, green 26FFB7, blue
+4C8CFF, red E63948), round 2's purple was all but the new blue for a deuteranope (1.5) and 6.3
+for a protanope. The LFOs' own worst pair is 19.1 (protanopia, amber and green), and no six
+colours reach it: the tool's search, under round 2's rules (lit enough to glow, coloured but one
+white, at least 20 apart in normal vision), finds 11.2 at best. Moving the purple alone reaches
+6.8 at most, and turns it magenta. So the six are that search's best, kept to round 2's roles:
+
+| Macro | Round 2 | Now |
+|---|---|---|
+| 1 | purple BF58FD | **teal 14BBC2** |
+| 2 | pink FF8CC8 | **rose B87E99** |
+| 3 | lemon FBFC30 | lemon F9FB70 (paler) |
+| 4 | sage 65A281 | sage 8AB181 (lighter) |
+| 5 | lavender D2BFF8 | lavender C9C2FC |
+| 6 | white E1F8EB | white DCF8FA |
+
+| Least dE00 of any pair | normal | protanopia | deuteranopia | tritanopia |
+|---|---|---|---|---|
+| round 2's six with the final LFOs | 19.2 | 6.3 | 1.5 | 8.8 |
+| the six taken, with the final LFOs | 21.2 | 12.2 | 11.2 | 11.5 |
+| the LFOs among themselves | 42.3 | 19.1 | 19.9 | 21.5 |
+
+The names carry each macro's identity too (each in its colour, and the pop-up names every
+source), so colour is never the only cue. Round 2's purple and pink stay in the palette
+(`lfo::MacroColor::ALL`: TEAL, ROSE, LEMON, SAGE, LAVENDER, WHITE, PURPLE, PINK).
+
+**Agent decisions, 2026-10-20** (not separately approved):
+- **The colours** above: two of round 2's six replaced (purple by teal, pink by rose), the rest
+  nudged, since the LFOs' new blue took the purple's place for colour-blind sight. In normal
+  vision the teal is nearest LFO 2's green (over 21 apart, but both blue-green).
+- **A macro's value reaches the engine only where it is assigned**, so that turning an unassigned
+  macro changes no sound and wakes no sleeping instrument.
+- **Names are capitals** (the panel's lettering), printable ASCII only, trimmed; an empty name is
+  none (MACRO n shown).
+- **A press elsewhere keeps a name being typed** (as a click away from a field commits), Escape
+  alone leaves it.
+- **The name's and jack's menu** holds COLOR and RENAME…; the knob's holds RENAME… and what it
+  moves under MIDI Learn's items. A macro's colour palette has eight: the six defaults and round
+  2's purple and pink.
+
+**Evidence:** EVIDENCE

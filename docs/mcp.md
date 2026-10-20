@@ -207,8 +207,8 @@ agent to use the bridge that came with that instance.
 | `ca72_midi_learn` | Learns, cancels, or assigns outright | `control?, cancel?, channel?, cc?, note?` (`note` for PREVIOUS and NEXT PRESET only) |
 | `ca72_midi_assignments` | Lists MIDI Learn's assignments | none |
 | `ca72_midi_forget` | REMOVE MIDI ASSIGNMENT | `control` |
-| `ca72_modulations` | Lists what each modulation source (LFO 1 to 4) modulates: each knob, its depth in %, `shared` (an LFO with MONO off on a knob every voice shares) and `inert`; each LFO's EDGES and MONO; the knobs that can take one now (decisions.md R-LFO) | none |
-| `ca72_modulation_set` | Assigns a source to a knob, as a drag from its OUT jack (25 % if no depth), or changes its depth; sets an LFO's EDGES | `source` (lfo1 to lfo4, "LFO 1", 1 to 4), `target?`, `depth?` (-100 to 100), `edges?` (SOFT, SHARP) |
+| `ca72_modulations` | Lists what each modulation source (LFO 1 to 4, MACRO 1 to 6) modulates: each knob, its depth in %, `shared` (an LFO with MONO off on a knob every voice shares) and `inert`; each LFO's EDGES and MONO; each macro's `name` ("" for none) and its knob's `value` in %; the knobs that can take one now (decisions.md R-LFO, R-MACROS) | none |
+| `ca72_modulation_set` | Assigns a source to a knob, as a drag from its OUT jack or a macro's jack (25 % if no depth), or changes its depth; sets an LFO's EDGES; names a macro | `source` (lfo1 to lfo4, "LFO 1", 1 to 4; macro1 to macro6, "MACRO 1" or a macro's name), `target?`, `depth?` (-100 to 100), `edges?` (SOFT, SHARP), `name?` (a macro's, 7 characters, "" for none) |
 | `ca72_modulation_remove` | REMOVE, for one knob or all of a source's | `source`, `target?` |
 | `ca72_audio` | Reads AUDIO & MIDI (read only) | none |
 | `ca72_version` | Returns the version and the update check | `check?` |
@@ -323,6 +323,20 @@ set with the `modulation` tools (saved with presets and sessions, not a host par
 | OUT jack: a drag to a knob | | a knob and a depth, -100 to 100 % (25) | `ca72_modulation_set {source, target, depth}` |
 | A knob's menu: DEPTH…, REMOVE | | | `ca72_modulation_set`, `ca72_modulation_remove` |
 | MODULATES | screen | | `ca72_modulations` |
+
+### The macros (decisions.md R-MACROS)
+
+The six macros' knobs are parameters; their names and what they move are the patch's, set with
+the `modulation` tools (saved with presets and sessions, not host parameters). Which the left
+area shows, the wheels or the macros, is the computer's (the rail's MACRO key), not exposed.
+
+| Control | Kind | Values (as printed) | MCP |
+|---|---|---|---|
+| MACRO 1 to MACRO 6 | knob, 0 to 10 | 0 to 100 % (0) | `macro1` to `macro6` |
+| The name's screen: RENAME… | screen | up to 7 characters, capitals ("" for MACRO n) | `ca72_modulation_set {source, name}` |
+| The jack: a drag to a knob | | a knob and a depth, -100 to 100 % (25), one way: depth × the macro's value | `ca72_modulation_set {source, target, depth}` |
+| A knob's menu: DEPTH…, REMOVE; the macro's REMOVE ALL ASSIGNMENTS | | | `ca72_modulation_set`, `ca72_modulation_remove` |
+| COLOR (the name's menu) | menu | the computer's, not exposed | |
 
 ### The rail, the presets' drawer and the update check
 

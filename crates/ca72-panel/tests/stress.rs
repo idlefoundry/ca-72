@@ -102,6 +102,9 @@ fn edge_finds_every_control_where_it_is_drawn() {
             } else if c.place == ca72_panel::controls::Place::Lfo {
                 // (The LFO page's, found while it shows: decisions.md R-LFO.)
                 interact::hit_lfo(r.layout(), x, y)
+            } else if c.place == ca72_panel::controls::Place::Macro {
+                // (The macros', found while they show: decisions.md R-MACROS.)
+                interact::hit_macro(x, y)
             } else {
                 interact::hit(r.layout(), &a, x, y)
             };
