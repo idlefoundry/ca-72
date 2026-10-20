@@ -181,8 +181,14 @@ fn clamp_width(width: u32) -> u32 {
 /// The width the editor opens at before it is resized: its share of the usable screen
 /// (logical pixels), its height kept within the same share.
 fn fitted_width(screen: Option<(f64, f64)>) -> u32 {
+    fitted_width_in(screen, chosen_panel())
+}
+
+/// [`fitted_width`] for the panel `panel` (the chosen look's is the process's, which an editor
+/// opening another look changes).
+fn fitted_width_in(screen: Option<(f64, f64)>, panel: art::Panel) -> u32 {
     screen.map_or(DEFAULT_WIDTH, |(w, h)| {
-        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / chosen_panel().drawing_h());
+        let w = (w * SCREEN_SHARE).min(h * SCREEN_SHARE * art::W / panel.drawing_h());
         clamp_width(w.round() as u32)
     })
 }
@@ -10059,6 +10065,8 @@ mod tests {
 
     #[test]
     fn it_opens_at_four_fifths_of_the_screen_until_resized() {
+        // (The official panel's: the process's chosen look is another test's to change.)
+        let fitted_width = |screen| fitted_width_in(screen, art::Panel::OFFICIAL);
         // A 14-inch MacBook Pro's screen less the menu bar; a 34-inch ultrawide's.
         assert_eq!(fitted_width(Some((1512.0, 949.0))), 1210);
         // The height's share sets it on a wide screen (the panel and the strip under it).
@@ -10079,6 +10087,7 @@ mod tests {
     fn on_x11_it_opens_to_fit_the_monitor_it_is_on() {
         use screen::{Rect, monitor_area};
         let r = |x, y, w, h| Rect { x, y, w, h };
+        let fitted_width = |screen| fitted_width_in(screen, art::Panel::OFFICIAL);
         let whole = r(0, 0, 5120, 1440);
         let (left, right) = (r(0, 0, 2560, 1440), r(2560, 0, 2560, 1440));
         let monitors = [(left, true), (right, false)];
