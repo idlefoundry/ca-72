@@ -11726,3 +11726,45 @@ audio at rest, 68.3 with CUTOFF moving; with LO's sharing off (R-LO-WORKERS' `Ne
 215.9. A moving knob adds the same 21 to 22 ms a second to LO either way (a larger share of
 LO's smaller cost once it shares its voices); HI 247 to 300, moving or not, within this
 machine's noise.
+
+
+## R-HOST-STACK. An instance's whole life fits a host's thread of 256 KB
+
+**Found on 2026-10-19** while trying to reproduce issue #58 (a crash in FL Studio on Windows 11
+"when messing with glide", 0.2.4; not reproduced as such). GLIDE was moved as hard as a host can
+move it through the plug-in's own CLAP entry point in this process (`tests/clap_host.rs`,
+`glide_stress`): its knob set many times a block, at its ends, by a denormal's breadth, out of
+range and not a number; its switch flipped; keys legato and detached, the bend moving; NOTE
+PRIORITY, RETRIGGER, POLY, UNISON, VOICES and QUALITY changed; a saved state loaded while it
+glides; 44.1 to 192 kHz in blocks of 32 to 1024. In a debug build and a release build: no panic,
+no debug assertion, no sample not finite, the output's peak at most 2.04. With every call made on
+a thread of a given stack (`CA72_STACK`), though:
+- **Making an instance took 576 to 640 KB of the host's thread's stack** in a release build (over
+  1 MB in a debug build). `Engine::new` built `Spares`, the ten places' spare voices inline (a
+  voice is 43,960 bytes: `Spares` was 439,840 bytes), and `Arc::new` built it on the stack of
+  whatever thread made the engine: the host's, making the instance. The crew's plan held a voice
+  inline too (`Crew` 44,352 bytes), moved about the stack again when the workers are started
+  (`initialize`, a state loaded) and stopped (`deactivate`): 150 KB in one frame of `Crew::start`.
+- So a host that makes or starts an instance on a thread with less stack than that crashes at
+  once. The spares have been built so since 0.1.0, needing less while a voice was smaller (35 KB in
+  0.2.6; 44 KB with fidelity, R-PREPARE-STACK). A macOS secondary thread has 512 KB
+  (R-PREPARE-STACK too), and a Windows host may give its own threads less than a main thread's 1 MB.
+  Whether FL Studio does is not known; nothing ties the report to it.
+- Playing alone needs less than 128 KB.
+
+**Fixed:** each spare voice boxed, as its twin already was, and the crew's plan holding its voice
+boxed: `Spares` is 320 bytes and `Crew` 400. A spare is still put in place by swapping it, on the
+audio thread, without allocating. No sample changes.
+
+**Evidence (omarchy, 2026-10-19):**
+- `an_instance_lives_on_a_host_thread_of_256_kb` (debug): an instance made, activated, played at
+  each QUALITY in POLY with GLIDE moving, its state loaded, deactivated and destroyed on a thread
+  of 256 KB. It overflows the stack without the fix and passes with it.
+- `glide_stress` with `CA72_STACK`, release: the whole life fits 128 KB (it needed 576 to 640 KB);
+  debug: 256 KB (over 1 MB).
+
+**Evidence (Windows 11, MSVC, the same day):** the test fails as a host would, the process ended
+by `STATUS_STACK_OVERFLOW` (0xc00000fd: what Windows reports for a crash to the desktop of this
+kind), and passes with the fix. In a release build making an instance needed 640 to 768 KB of
+the thread's stack (a Windows thread has 1 MB unless its maker asks otherwise); with the fix the
+whole life fits 256 KB.
