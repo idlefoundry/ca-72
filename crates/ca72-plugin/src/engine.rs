@@ -3036,6 +3036,29 @@ impl Engine {
         &self.levels
     }
 
+    /// Each oscillator's CONTINUOUS shape where the newest sounding voice had it at its last
+    /// sample (MOD's orbs: decisions.md R-CONTINUOUS-WAVE), its switch's steps; none while no
+    /// voice sounds, for a STEPPED oscillator, or while a worker holds the voice (the last
+    /// block's kept by the editor then).
+    pub fn shapes(&self) -> Option<[Option<f64>; 3]> {
+        if self.sounding_mask() == 0 {
+            return Some([None; 3]);
+        }
+        let k = if self.many() {
+            (0..self.slots.len())
+                .filter(|&k| self.slots[k].active)
+                .max_by_key(|&k| self.slots[k].age)?
+        } else {
+            0
+        };
+        let play = self.slots.get(k)?.play.try_lock().ok()?;
+        Some(if play.potato {
+            play.light.probe_shapes()
+        } else {
+            play.voice.probe_shapes()
+        })
+    }
+
     /// Which voices sound now, a bit a voice (the editor's display of where they sound, A6):
     /// POLY's and UNISON's sounding, the one instrument while a key is held (scattering, the
     /// bit of the place its last attack took).

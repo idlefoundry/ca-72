@@ -106,15 +106,15 @@ param = "osc3_timed"
 at = [617, 660]
 
 [[control]]
-param = "osc1_pwm"
+param = "osc1_shape_mod"
 at = [1021, 247]
 
 [[control]]
-param = "osc2_pwm"
+param = "osc2_shape_mod"
 at = [1021, 454]
 
 [[control]]
-param = "osc3_pwm"
+param = "osc3_shape_mod"
 at = [1021, 660]
 
 # MIXER.

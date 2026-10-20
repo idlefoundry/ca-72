@@ -208,6 +208,9 @@ pub struct Meters {
     levels: [AtomicU32; LEVELS],
     output: AtomicU32,
     watchers: AtomicU32,
+    /// Each oscillator's CONTINUOUS shape where the newest sounding voice has it (MOD's orbs:
+    /// decisions.md R-CONTINUOUS-WAVE), its switch's steps; NaN for none.
+    shapes: [AtomicU32; 3],
 }
 
 impl Default for Meters {
@@ -220,6 +223,7 @@ impl Default for Meters {
             levels: std::array::from_fn(|_| AtomicU32::new(0)),
             output: AtomicU32::new(0),
             watchers: AtomicU32::new(0),
+            shapes: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
         }
     }
 }
@@ -233,6 +237,25 @@ impl Meters {
         self.modulation
             .store(modulation.to_bits(), Ordering::Relaxed);
         self.voices.store(voices, Ordering::Relaxed);
+    }
+
+    /// Each oscillator's CONTINUOUS shape where the newest sounding voice has it (the audio
+    /// thread's, a block's).
+    pub fn publish_shapes(&self, shapes: [Option<f64>; 3]) {
+        for (a, at) in self.shapes.iter().zip(shapes) {
+            a.store(
+                at.map_or(f32::NAN, |at| at as f32).to_bits(),
+                Ordering::Relaxed,
+            );
+        }
+    }
+
+    /// Each oscillator's CONTINUOUS shape where the voices have it, if any.
+    fn shapes(&self) -> [Option<f64>; 3] {
+        self.shapes.each_ref().map(|a| {
+            let at = f64::from(f32::from_bits(a.load(Ordering::Relaxed)));
+            at.is_finite().then_some(at)
+        })
     }
 
     /// Whether an editor watches the levels (the audio thread measures the output's then).
@@ -387,11 +410,11 @@ impl Operated for FreqKnob {
     }
 }
 
-/// An oscillator's WAVEFORM switch (decisions.md R-VARIABLE-RECT): its WAVEFORM parameter while
-/// its rectangle is STEPPED; VARIABLE, one position along the switch's whole travel
-/// ([`interact::VARIABLE_PLACES`]), its first three places WAVEFORM's, then SQUARE and on to the
-/// floor its WIDTH, the rectangle WAVEFORM names the nearest of the switch's three (what STEPPED
-/// plays if it is switched back).
+/// An oscillator's WAVEFORM switch (decisions.md R-CONTINUOUS-WAVE): its WAVEFORM parameter
+/// while it is STEPPED; CONTINUOUS, its SHAPE (one position along the switch's whole travel,
+/// [`interact::CONTINUOUS_PLACES`] of its steps), WAVEFORM following it to the nearest of the
+/// switch's own positions (what STEPPED plays if it is switched back; oscillator 3's reverse
+/// shark tooth and reverse sawtooth its REVERSE SAWTOOTH).
 struct WaveformSwitch {
     params: Arc<Ca72Params>,
     /// Its oscillator, 0 to 2.
@@ -407,12 +430,12 @@ impl WaveformSwitch {
         }
     }
 
-    fn width(&self) -> &FloatParam {
-        self.params.rect_params(self.n).1
+    fn shape(&self) -> &FloatParam {
+        self.params.shape_params(self.n).1
     }
 
-    fn variable(&self) -> bool {
-        self.params.rect_params(self.n).0.value() == crate::params::RectMode::Variable
+    fn continuous(&self) -> bool {
+        self.params.continuous(self.n)
     }
 
     /// WAVEFORM's place (0..5) at its normalized value.
@@ -420,87 +443,56 @@ impl WaveformSwitch {
         ca72_panel::art::position(f64::from(normalized))
     }
 
-    /// Where the switch is along a VARIABLE switch's travel, in its steps.
-    fn at(&self) -> f64 {
-        let k = Self::place(self.waveform().value());
-        if k < 3 {
-            k as f64
+    /// WAVEFORM's position nearest a CONTINUOUS shape `at` (the switch's steps).
+    fn nearest(&self, at: f64) -> usize {
+        let k = (at.round().max(0.0) as usize).min(5);
+        if self.n == 2 && (k == 1 || k == 2) {
+            // (Its reverse shark tooth and reverse sawtooth: REVERSE SAWTOOTH.)
+            1
         } else {
-            3.0 + f64::from(self.width().unmodulated_normalized_value())
-                * ca72_panel::art::RECT_STEPS
+            k
         }
-    }
-
-    /// What the tip says it is at: WAVEFORM's name below SQUARE; past it the rectangle's duty
-    /// cycle, named at the switch's own three ("Wide Rectangle 30 %", else "Rectangle 24 %").
-    fn variable_text(&self) -> String {
-        let k = Self::place(self.waveform().value());
-        if k < 3 {
-            return self.waveform().text(self.waveform().value());
-        }
-        let t = f64::from(self.width().unmodulated_normalized_value());
-        let duty = (100.0 * crate::params::rect_duty_at(t)).round();
-        let past = t * ca72_panel::art::RECT_STEPS;
-        let name = [
-            (0.0, "Square"),
-            (1.0, "Wide Rectangle"),
-            (2.0, "Narrow Rectangle"),
-        ]
-        .iter()
-        .find(|(at, _)| (past - at).abs() < 1e-4)
-        .map_or("Rectangle", |(_, n)| *n);
-        format!("{name} {duty:.0} %")
     }
 }
 
 impl Operated for WaveformSwitch {
     fn value(&self) -> f32 {
-        if !self.variable() {
+        if !self.continuous() {
             return self.waveform().value();
         }
-        (self.at() / interact::VARIABLE_PLACES) as f32
+        self.shape().unmodulated_normalized_value()
     }
     fn default(&self) -> f32 {
-        let d = self.waveform().default();
-        if !self.variable() {
-            return d;
+        if !self.continuous() {
+            return self.waveform().default();
         }
-        (Self::place(d).min(3) as f64 / interact::VARIABLE_PLACES) as f32
+        self.shape().default_normalized_value()
     }
     fn text(&self, normalized: f32) -> String {
-        if !self.variable() {
+        if !self.continuous() {
             return self.waveform().text(normalized);
         }
-        self.variable_text()
+        crate::params::shape_text(self.n, f64::from(normalized))
     }
     fn begin(&self, s: &ParamSetter<'_>) {
         self.waveform().begin(s);
-        if self.variable() {
-            s.begin_set_parameter(self.width());
+        if self.continuous() {
+            s.begin_set_parameter(self.shape());
         }
     }
     fn set(&self, s: &ParamSetter<'_>, normalized: f32) {
-        if !self.variable() {
+        if !self.continuous() {
             self.waveform().set(s, normalized);
             return;
         }
-        let at = f64::from(normalized) * interact::VARIABLE_PLACES;
-        let place = if at < 3.0 {
-            at.round() as usize
-        } else {
-            // (The rectangle WAVEFORM names: the switch's nearest.)
-            3 + ((at - 3.0).round() as usize).min(2)
-        };
-        self.waveform().set(s, place as f32 / 5.0);
-        if at >= 3.0 {
-            let t = ((at - 3.0) / ca72_panel::art::RECT_STEPS).clamp(0.0, 1.0);
-            s.set_parameter_normalized(self.width(), t as f32);
-        }
+        let at = f64::from(normalized) * interact::CONTINUOUS_PLACES;
+        self.waveform().set(s, self.nearest(at) as f32 / 5.0);
+        s.set_parameter_normalized(self.shape(), normalized);
     }
     fn end(&self, s: &ParamSetter<'_>) {
         self.waveform().end(s);
-        if self.variable() {
-            s.end_set_parameter(self.width());
+        if self.continuous() {
+            s.end_set_parameter(self.shape());
         }
     }
 }
@@ -557,10 +549,10 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         // Oscillators 2's and 3's TIMED keys (decisions.md R-OSC-TIMED).
         "osc2_timed" => &p.osc2_timed,
         "osc3_timed" => &p.osc3_timed,
-        // Each oscillator's PWM key (decisions.md R-VARIABLE-RECT).
-        "osc1_pwm" => &p.osc1_pwm,
-        "osc2_pwm" => &p.osc2_pwm,
-        "osc3_pwm" => &p.osc3_pwm,
+        // Each oscillator's MOD key (decisions.md R-CONTINUOUS-WAVE).
+        "osc1_shape_mod" => &p.osc1_shape_mod,
+        "osc2_shape_mod" => &p.osc2_shape_mod,
+        "osc3_shape_mod" => &p.osc3_shape_mod,
         "pitch_wheel" => &p.pitch_wheel,
         "mod_wheel" => &p.mod_wheel,
         // The strip's knobs (A6).
@@ -2206,14 +2198,14 @@ impl Editing {
                 return None;
             }
         }
-        // (A PWM key off the panel, its oscillator's rectangle STEPPED, is not there to find:
-        // R-VARIABLE-RECT.)
+        // (A MOD key off the panel, its oscillator's waveform STEPPED, is not there to find:
+        // R-CONTINUOUS-WAVE.)
         interact::hit(self.renderer.layout(), self.renderer.arrangement(), x, y).filter(|t| {
             !matches!(t, Target::Control(i) if CONTROLS.get(*i).is_some_and(|c| {
-                ca72_panel::render::PWM_KEYS
+                ca72_panel::render::MOD_KEYS
                     .iter()
                     .position(|k| *k == c.param)
-                    .is_some_and(|n| !self.params.variable(n))
+                    .is_some_and(|n| !self.params.continuous(n))
             }))
         })
     }
@@ -2870,41 +2862,63 @@ impl Editing {
     /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
     /// knob unresponsive unless the user is in double mode") and VOICES where it does nothing
     /// ([`voices_inert`]), each drawn dimmed then.
-    /// Oscillator `n`'s rectangle made STEPPED or VARIABLE (its WAVEFORM switch's menu,
-    /// decisions.md R-VARIABLE-RECT), one gesture: made VARIABLE on one of the switch's three
-    /// rectangles, its width put at that rectangle's exactly, so that the sound does not move;
-    /// made STEPPED, the switch's rectangle nearest the width (WAVEFORM's, kept so as it turned).
-    fn set_rect_mode(&self, n: usize, variable: bool) {
-        let (mode, width, _) = self.params.rect_params(n);
-        let to = if variable {
-            crate::params::RectMode::Variable
+    /// Oscillator `n`'s waveform made STEPPED or CONTINUOUS (its WAVEFORM switch's menu,
+    /// decisions.md R-CONTINUOUS-WAVE), one gesture: made CONTINUOUS, its shape put at the switch's
+    /// own position exactly first, so that the sound does not move (oscillator 3's sawtooth at
+    /// its reverse sawtooth's place, CONTINUOUS's third); made STEPPED, WAVEFORM as it followed
+    /// the shape, the switch's position nearest.
+    fn set_wave_mode(&self, n: usize, continuous: bool) {
+        let (mode, shape, ..) = self.params.shape_params(n);
+        let to = if continuous {
+            crate::params::WaveMode::Continuous
         } else {
-            crate::params::RectMode::Stepped
+            crate::params::WaveMode::Stepped
         };
         if mode.value() == to {
             return;
         }
         let s = self.setter();
-        let k = WaveformSwitch::place(self.waveforms[n].waveform().value());
-        if variable && k >= 3 {
-            let t = (k - 3) as f64 / ca72_panel::art::RECT_STEPS;
-            s.begin_set_parameter(width);
-            s.set_parameter_normalized(width, t as f32);
-            s.end_set_parameter(width);
+        if continuous {
+            let k = WaveformSwitch::place(self.waveforms[n].waveform().value());
+            let at = match (n, k) {
+                // (Oscillator 3's reverse sawtooth and sawtooth: its reverse sawtooth's place.)
+                (2, 1 | 2) => 2,
+                _ => k,
+            };
+            let t = at as f64 / interact::CONTINUOUS_PLACES;
+            s.begin_set_parameter(shape);
+            s.set_parameter_normalized(shape, t as f32);
+            s.end_set_parameter(shape);
         }
         s.begin_set_parameter(mode);
         s.set_parameter(mode, to);
         s.end_set_parameter(mode);
     }
 
-    /// Whether control `i` is a WAVEFORM switch whose rectangle is VARIABLE (decisions.md
-    /// R-VARIABLE-RECT): operated along its whole travel ([`WaveformSwitch`]).
-    fn variable_switch(&self, i: usize) -> bool {
+    /// Oscillator `n`'s MOD turned to its next way (its key Command-clicked: clockwise,
+    /// anticlockwise, both ways, round again), a gesture of its own.
+    fn next_mod_way(&self, n: usize) {
+        use crate::params::ShapeModDirection as D;
+        let p = self.params.shape_params(n).3;
+        let next = match p.value() {
+            D::Clockwise => D::Anticlockwise,
+            D::Anticlockwise => D::Both,
+            D::Both => D::Clockwise,
+        };
+        let s = self.setter();
+        s.begin_set_parameter(p);
+        s.set_parameter(p, next);
+        s.end_set_parameter(p);
+    }
+
+    /// Whether control `i` is a WAVEFORM switch whose waveform is CONTINUOUS (decisions.md
+    /// R-CONTINUOUS-WAVE): operated along its whole travel ([`WaveformSwitch`]).
+    fn continuous_switch(&self, i: usize) -> bool {
         CONTROLS.get(i).is_some_and(|c| {
             ca72_panel::render::WAVEFORMS
                 .iter()
                 .position(|w| *w == c.param)
-                .is_some_and(|n| self.params.variable(n))
+                .is_some_and(|n| self.params.continuous(n))
         })
     }
 
@@ -2915,11 +2929,11 @@ impl Editing {
             // A TIMED key away from its RANGE's LO (R-OSC-TIMED).
             "osc2_timed" => !timed_inert(&self.params, 1),
             "osc3_timed" => !timed_inert(&self.params, 2),
-            // A PWM key while its oscillator's rectangle is STEPPED: not on the panel
-            // (R-VARIABLE-RECT).
-            "osc1_pwm" => self.params.variable(0),
-            "osc2_pwm" => self.params.variable(1),
-            "osc3_pwm" => self.params.variable(2),
+            // A MOD key while its oscillator's waveform is STEPPED: not on the panel
+            // (R-CONTINUOUS-WAVE).
+            "osc1_shape_mod" => self.params.continuous(0),
+            "osc2_shape_mod" => self.params.continuous(1),
+            "osc3_shape_mod" => self.params.continuous(2),
             _ => true,
         })
     }
@@ -3176,7 +3190,7 @@ impl Editing {
                 return;
             }
             Pressed::Rect(n, variable) => {
-                self.set_rect_mode(n, variable);
+                self.set_wave_mode(n, variable);
                 return;
             }
             Pressed::Look(skin) => {
@@ -3336,6 +3350,17 @@ impl Editing {
             } else if let Some(r) = mpe_readout(i) {
                 // (The expression drawer's the same, R-MPE.)
                 self.start_mpe_typing(r);
+                return;
+            } else if let Some(n) = CONTROLS.get(i).and_then(|c| {
+                ca72_panel::render::MOD_KEYS
+                    .iter()
+                    .position(|k| *k == c.param)
+            }) {
+                // A MOD key: its next way (R-CONTINUOUS-WAVE; the owner: "the ability to command
+                // click on that, so that they could reverse the direction").
+                if self.operable(i) {
+                    self.next_mod_way(n);
+                }
                 return;
             } else if self.start_knob_entry(i) {
                 return;
@@ -3574,7 +3599,7 @@ impl Editing {
         let dragged_variable = self
             .drag
             .as_ref()
-            .is_some_and(|d| self.variable_switch(d.control));
+            .is_some_and(|d| self.continuous_switch(d.control));
         let Some(d) = &mut self.drag else {
             let at = self.in_drawing(pointer);
             let (x, y) = at;
@@ -3651,7 +3676,7 @@ impl Editing {
         }
         let (dx, dy) = (pointer.0 - d.at.0, pointer.1 - d.at.1);
         let moved_to = if dragged_variable {
-            Some(interact::variable_drag(d.base, dx, dy, d.fine))
+            Some(interact::continuous_drag(d.base, dx, dy, d.fine))
         } else {
             interact::drag(&kind, d.base, dx, dy, d.fine)
         };
@@ -3710,15 +3735,15 @@ impl Editing {
         let kind = self.kind_of(d.control);
         let mut v = d.value;
         if released && !d.moved {
-            let variable = self.variable_switch(d.control);
+            let variable = self.continuous_switch(d.control);
             let picked = match d.pressed {
-                Target::Legend(_, k) if variable => Some(interact::variable_legend(k)),
+                Target::Legend(_, k) if variable => Some(interact::continuous_legend(k)),
                 Target::Legend(_, k) => Some(k as f64 / 5.0),
                 _ => {
                     let (cx, cy) = placed.centre();
                     let (x, y) = self.in_drawing(d.from);
                     if variable {
-                        Some(interact::variable_click(v, x - cx))
+                        Some(interact::continuous_click(v, x - cx))
                     } else {
                         interact::click(&kind, v, x - cx, y - cy)
                     }
@@ -3901,12 +3926,12 @@ impl Editing {
             s.travel -= whole * SCROLL_PIXELS_PER_LINE;
             whole
         };
-        let variable = self.variable_switch(i);
+        let variable = self.continuous_switch(i);
         let Some(s) = &mut self.scroll else { return };
         if notches != 0.0 {
             let fine = modifiers.contains(Modifiers::SHIFT);
             let v = if variable {
-                interact::variable_scroll(s.value, notches, fine)
+                interact::continuous_scroll(s.value, notches, fine)
             } else {
                 interact::scroll(&kind, s.value, notches, fine)
             };
@@ -3972,9 +3997,9 @@ impl Editing {
             self.playing.release();
         }
         for (i, c) in CONTROLS.iter().enumerate() {
-            // A WAVEFORM switch VARIABLE: where its WAVEFORM is, its pointer past SQUARE where
-            // its width is (`scene.rect`), the parameters following a drag as it goes.
-            if self.variable_switch(i)
+            // A WAVEFORM switch CONTINUOUS: where its WAVEFORM is (its pointer where its shape is,
+            // `scene.shape`), the parameters following a drag as it goes.
+            if self.continuous_switch(i)
                 && let Some(n) = ca72_panel::render::WAVEFORMS
                     .iter()
                     .position(|w| *w == c.param)
@@ -4001,14 +4026,26 @@ impl Editing {
         self.scene.voices_off = voices_inert(&self.params);
         // Oscillators 2's and 3's timed keys and dials (decisions.md R-OSC-TIMED).
         self.scene.timed = timed_scene(&self.params);
-        // Each oscillator's rectangle: its arc, its PWM key, its switch past SQUARE
-        // (decisions.md R-VARIABLE-RECT).
-        self.scene.rect = std::array::from_fn(|n| ca72_panel::render::Rectangle {
-            variable: self.params.variable(n),
-            past_square: f64::from(self.params.rect_params(n).1.unmodulated_normalized_value())
-                * ca72_panel::art::RECT_STEPS,
+        // Each oscillator's waveform: CONTINUOUS's arc, its MOD key in its way's colour, its
+        // switch where its shape is, MOD's orb where the voices have the shape (decisions.md
+        // R-CONTINUOUS-WAVE).
+        let orbs = self.meters.shapes();
+        self.scene.shape = std::array::from_fn(|n| {
+            use crate::params::ShapeModDirection as D;
+            let (_, shape, modulated, direction) = self.params.shape_params(n);
+            let continuous = self.params.continuous(n);
+            ca72_panel::render::Shaped {
+                continuous,
+                at: f64::from(shape.unmodulated_normalized_value()) * interact::CONTINUOUS_PLACES,
+                way: match direction.value() {
+                    D::Clockwise => ca72_panel::art::ModWay::Clockwise,
+                    D::Anticlockwise => ca72_panel::art::ModWay::Anticlockwise,
+                    D::Both => ca72_panel::art::ModWay::Both,
+                },
+                orb: orbs[n].filter(|_| continuous && modulated.value()),
+            }
         });
-        self.learning.variable = std::array::from_fn(|n| self.params.variable(n));
+        self.learning.variable = std::array::from_fn(|n| self.params.continuous(n));
         self.learning.timed = [self.params.timed_now(1), self.params.timed_now(2)];
         self.scene.overload = Meters::load(&self.meters.overload);
         self.move_opening(Instant::now(), self.params.quality.value());
@@ -4132,13 +4169,17 @@ impl Editing {
                 let label = if c.param == "feedback" && feedback_silent(&self.scene.values) {
                     FEEDBACK_SILENT
                 } else {
-                    timed_label(&self.params, c.param).unwrap_or(c.label)
+                    timed_label(&self.params, c.param)
+                        .or_else(|| mod_label(&self.params, c.param))
+                        .unwrap_or(c.label)
                 };
-                Some((
-                    format!("{label}: {}", p.text(self.scene.values[i] as f32)),
-                    x,
-                    y + top,
-                ))
+                // (A CONTINUOUS switch's shape, which its scene's value, WAVEFORM's, is not.)
+                let v = if self.continuous_switch(i) {
+                    p.value()
+                } else {
+                    self.scene.values[i] as f32
+                };
+                Some((format!("{label}: {}", p.text(v)), x, y + top))
             }
             Target::Power => {
                 let state = if self.params.bypass.value() {
@@ -4722,6 +4763,38 @@ fn timed_label(p: &Ca72Params, param: &str) -> Option<&'static str> {
         "osc3_timed" if timed_inert(p, 2) => "OSCILLATOR-3 TIMED (at RANGE LO)",
         _ => return None,
     })
+}
+
+/// A tip's name for a MOD key (R-CONTINUOUS-WAVE): its way with it.
+fn mod_label(p: &Ca72Params, param: &str) -> Option<&'static str> {
+    use crate::params::ShapeModDirection as D;
+    let n = ca72_panel::render::MOD_KEYS
+        .iter()
+        .position(|k| *k == param)?;
+    let names = [
+        [
+            "OSCILLATOR-1 MOD, CLOCKWISE",
+            "OSCILLATOR-1 MOD, ANTICLOCKWISE",
+            "OSCILLATOR-1 MOD, BOTH WAYS",
+        ],
+        [
+            "OSCILLATOR-2 MOD, CLOCKWISE",
+            "OSCILLATOR-2 MOD, ANTICLOCKWISE",
+            "OSCILLATOR-2 MOD, BOTH WAYS",
+        ],
+        [
+            "OSCILLATOR-3 MOD, CLOCKWISE",
+            "OSCILLATOR-3 MOD, ANTICLOCKWISE",
+            "OSCILLATOR-3 MOD, BOTH WAYS",
+        ],
+    ];
+    Some(
+        names[n][match p.shape_params(n).3.value() {
+            D::Clockwise => 0,
+            D::Anticlockwise => 1,
+            D::Both => 2,
+        }],
+    )
 }
 
 fn voices_inert(p: &Ca72Params) -> bool {
@@ -11380,15 +11453,17 @@ mod tests {
         assert!(e.typing.is_some());
     }
 
-    /// A WAVEFORM switch's menu (decisions.md R-VARIABLE-RECT): a RECTANGLE head, STEPPED (the
-    /// mode it is in, marked, not chosen again) and VARIABLE; VARIABLE chosen on WIDE puts the
-    /// width at WIDE's exactly first, so the sound does not move, then the mode, each a gesture.
+    /// A WAVEFORM switch's menu (decisions.md R-CONTINUOUS-WAVE): a WAVEFORM head, STEPPED (the
+    /// mode it is in, marked, not chosen again) and CONTINUOUS; CONTINUOUS chosen on WIDE puts the
+    /// shape at WIDE's place exactly first, so the sound does not move, then the mode, each a
+    /// gesture; oscillator 3's sawtooth goes to its reverse sawtooth's place.
     #[test]
-    fn a_waveform_switchs_menu_makes_its_rectangle_variable() {
-        use crate::params::Wave;
+    fn a_waveform_switchs_menu_makes_its_waveform_continuous() {
+        use crate::params::{Wave, Wave3};
         let (mut e, host, params) = editing_of(
             Ca72Params {
                 osc1_waveform: EnumParam::new("Osc 1 Waveform", Wave::WideRectangle),
+                osc3_waveform: EnumParam::new("Osc 3 Waveform", Wave3::Sawtooth),
                 ..Ca72Params::default()
             },
             Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
@@ -11401,50 +11476,62 @@ mod tests {
         assert_eq!(
             tail,
             [
-                ("RECTANGLE".to_owned(), false),
+                ("WAVEFORM".to_owned(), false),
                 ("STEPPED".to_owned(), false),
-                ("VARIABLE".to_owned(), true)
+                ("CONTINUOUS".to_owned(), true)
             ]
         );
         let m = e.learning.menu().expect("a menu").clone();
         assert_eq!(m.heads, vec![items.len() - 3]);
         assert_eq!(m.marked, vec![items.len() - 2]);
         host.take();
-        menu_item(&mut e, "VARIABLE");
-        let (width, mode) = (params.osc1_width.as_ptr(), params.osc1_rect.as_ptr());
+        menu_item(&mut e, "CONTINUOUS");
+        let places = interact::CONTINUOUS_PLACES;
+        let (shape, mode) = (params.osc1_shape.as_ptr(), params.osc1_shape_mode.as_ptr());
         assert_eq!(
             host.take(),
             vec![
-                Call::Begin(width),
-                Call::Set(width, (1.0 / ca72_panel::art::RECT_STEPS) as f32),
-                Call::End(width),
+                Call::Begin(shape),
+                Call::Set(shape, (4.0 / places) as f32),
+                Call::End(shape),
                 Call::Begin(mode),
                 Call::Set(mode, 1.0),
                 Call::End(mode),
             ]
         );
-        // (The engine takes that width as WIDE's bias exactly.)
-        assert_eq!(
-            ca72::voice::rect_travel_bias(f64::from((1.0 / ca72_panel::art::RECT_STEPS) as f32)),
-            -1.5
-        );
-        // Another oscillator's switch has no such group named for oscillator 1.
-        let p = at(&e, centre("osc2_waveform"));
+        // (The engine takes that place as WIDE's exactly.)
+        let s = ca72::voice::Shape {
+            continuous: true,
+            at: f64::from((4.0 / places) as f32) * places,
+            modulated: false,
+            direction: ca72::voice::ModDirection::Onward,
+        };
+        assert_eq!(ca72::voice::shape_at(s, Default::default()), 4.0);
+        // Oscillator 3 on SAWTOOTH: its reverse sawtooth's place, CONTINUOUS's third.
+        let p = at(&e, centre("osc3_waveform"));
         right_click(&mut e, p);
-        assert!(menu_items(&e).iter().any(|(t, on)| t == "VARIABLE" && *on));
+        menu_item(&mut e, "CONTINUOUS");
+        let shape3 = params.osc3_shape.as_ptr();
+        assert!(
+            host.take()
+                .contains(&Call::Set(shape3, (2.0 / places) as f32)),
+            "oscillator 3's place"
+        );
     }
 
-    /// A VARIABLE switch (decisions.md R-VARIABLE-RECT): its arc and PWM key on the panel, the
-    /// others' not; dragged from SQUARE it turns without steps, WAVEFORM naming the nearest of
-    /// the switch's rectangles; a legend clicked lands on the switch's own width exactly; its tip
-    /// says the duty cycle; its PWM key flips PWM, a STEPPED oscillator's is not there at all.
+    /// A CONTINUOUS switch (decisions.md R-CONTINUOUS-WAVE): its arc and MOD key on the panel, the
+    /// others' not; dragged, it turns without steps, WAVEFORM naming the nearest position; a
+    /// legend clicked lands on its place exactly; its tip says the shape; its MOD key flips MOD,
+    /// Command-clicked turns MOD's way round (its colour following), a STEPPED oscillator's is
+    /// not there at all.
     #[test]
-    fn a_variable_switch_turns_past_square_and_its_key_flips_pwm() {
-        use crate::params::{RectMode, Wave};
+    fn a_continuous_switch_turns_and_its_key_flips_mod_and_its_way() {
+        use crate::params::{ShapeModDirection, Wave, WaveMode};
+        let places = interact::CONTINUOUS_PLACES;
         let (mut e, host, params) = editing_of(
             Ca72Params {
                 osc1_waveform: EnumParam::new("Osc 1 Waveform", Wave::Square),
-                osc1_rect: EnumParam::new("Osc 1 Rectangle", RectMode::Variable),
+                osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Continuous),
                 ..Ca72Params::default()
             },
             Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
@@ -11452,25 +11539,22 @@ mod tests {
         e.draw();
         let index = |p: &str| ca72_panel::controls::index(p).expect("a control");
         assert_eq!(e.scene.arcs(), [true, false, false]);
-        assert_eq!(e.scene.rect[0].past_square, 0.0);
-        let (key1, key2) = (index("osc1_pwm"), index("osc2_pwm"));
+        // (A new shape at SAWTOOTH, as WAVEFORM begins.)
+        assert!((e.scene.shape[0].at - 2.0).abs() < 1e-6);
+        let (key1, key2) = (index("osc1_shape_mod"), index("osc2_shape_mod"));
         assert!(e.operable(key1) && !e.operable(key2));
-        let (x, y) = centre("osc2_pwm");
+        let (x, y) = centre("osc2_shape_mod");
         assert_ne!(
             e.hit(x, y),
             Some(Target::Control(key2)),
             "a hidden key found"
         );
-        let (x, y) = centre("osc1_pwm");
+        let (x, y) = centre("osc1_shape_mod");
         assert_eq!(e.hit(x, y), Some(Target::Control(key1)));
-        // The tip at SQUARE: its name and duty cycle.
         let wave1 = index("osc1_waveform");
         e.hover = Some(Target::Control(wave1));
-        assert_eq!(
-            e.tip().expect("a tip").0,
-            "OSCILLATOR-1 WAVEFORM: Square 48 %"
-        );
-        // Dragged a step and a half (45 pixels right): the width there, WAVEFORM the nearest.
+        assert_eq!(e.tip().expect("a tip").0, "OSCILLATOR-1 WAVEFORM: Sawtooth");
+        // Dragged 12 pixels (0.4 of a step) from SAWTOOTH: there, WAVEFORM still SAWTOOTH.
         host.take();
         let p = at(&e, centre("osc1_waveform"));
         go(&mut e, p);
@@ -11478,14 +11562,14 @@ mod tests {
         go(
             &mut e,
             Point {
-                x: p.x + 45.0,
+                x: p.x + 12.0,
                 y: p.y,
             },
         );
         release(&mut e);
         let calls = host.take();
-        let (wave, width) = (params.osc1_waveform.as_ptr(), params.osc1_width.as_ptr());
-        let last = |q| {
+        let (wave, shape) = (params.osc1_waveform.as_ptr(), params.osc1_shape.as_ptr());
+        let last = |calls: &[Call], q| {
             calls
                 .iter()
                 .rev()
@@ -11496,37 +11580,87 @@ mod tests {
                 .unwrap_or_else(|| panic!("not set: {calls:?}"))
         };
         assert!(
-            (f64::from(last(width)) - 1.5 / ca72_panel::art::RECT_STEPS).abs() < 1e-5,
+            (f64::from(last(&calls, shape)) * places - 2.4).abs() < 1e-5,
             "{calls:?}"
         );
-        assert_eq!(last(wave), 1.0, "WAVEFORM the nearest rectangle: {calls:?}");
-        // NARROW's legend clicked: NARROW's width exactly.
+        assert_eq!(
+            last(&calls, wave),
+            2.0 / 5.0,
+            "WAVEFORM the nearest: {calls:?}"
+        );
+        // NARROW's legend clicked: NARROW's place exactly.
         let set = ca72_panel::controls::Legends::Waves12;
         let (lx, ly) = e.renderer.layout().legend_at(set, 5);
         let (cx, cy) = centre("osc1_waveform");
         let p = at(&e, (cx + lx, cy + ly));
         click(&mut e, p);
         let calls = host.take();
-        let narrow = calls
-            .iter()
-            .find_map(|c| match c {
-                Call::Set(p, v) if *p == width => Some(*v),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("not set: {calls:?}"));
-        assert_eq!(ca72::voice::rect_travel_bias(f64::from(narrow)), -2.5);
-        // The key: PWM on, a gesture of its own.
-        let p = at(&e, centre("osc1_pwm"));
+        assert_eq!(last(&calls, shape), (5.0 / places) as f32);
+        // The key: MOD on, a gesture of its own; Command-clicked, its next way.
+        let p = at(&e, centre("osc1_shape_mod"));
         click(&mut e, p);
-        let pwm = params.osc1_pwm.as_ptr();
+        let m = params.osc1_shape_mod.as_ptr();
         assert_eq!(
             host.take(),
-            vec![Call::Begin(pwm), Call::Set(pwm, 1.0), Call::End(pwm)]
+            vec![Call::Begin(m), Call::Set(m, 1.0), Call::End(m)]
+        );
+        let shortcut = if cfg!(target_os = "macos") {
+            Modifiers::META
+        } else {
+            Modifiers::CONTROL
+        };
+        go(&mut e, p);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: shortcut,
+        });
+        e.mouse(MouseEvent::ButtonReleased {
+            button: MouseButton::Left,
+            modifiers: shortcut,
+        });
+        let dir = params.osc1_shape_mod_dir.as_ptr();
+        assert_eq!(
+            host.take(),
+            vec![Call::Begin(dir), Call::Set(dir, 0.5), Call::End(dir)]
+        );
+        assert_eq!(
+            params.osc1_shape_mod_dir.value(),
+            ShapeModDirection::Clockwise,
+            "(the test's host keeps no value)"
+        );
+        e.hover = Some(Target::Control(key1));
+        assert_eq!(
+            e.tip().expect("a tip").0,
+            "OSCILLATOR-1 MOD, CLOCKWISE: Off"
         );
         // Oscillator 2's place under its switch takes nothing.
-        let p = at(&e, centre("osc2_pwm"));
+        let p = at(&e, centre("osc2_shape_mod"));
         click(&mut e, p);
         assert!(host.take().is_empty(), "the hidden key took a press");
+    }
+
+    /// MOD's orb (decisions.md R-CONTINUOUS-WAVE): where the voices have a CONTINUOUS shape while
+    /// its MOD is on, none while it is off or STEPPED.
+    #[test]
+    fn mods_orb_shows_where_the_voices_have_the_shape() {
+        use crate::params::WaveMode;
+        let (mut e, _host, _params) = editing_of(
+            Ca72Params {
+                osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Continuous),
+                osc1_shape_mod: BoolParam::new("Osc 1 Shape Mod", true),
+                osc2_shape_mode: EnumParam::new("Osc 2 Waveform Mode", WaveMode::Continuous),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.meters.publish_shapes([Some(3.4), Some(1.0), Some(2.0)]);
+        e.draw();
+        assert_eq!(e.scene.shape[0].orb, Some(f64::from(3.4f32)));
+        assert_eq!(e.scene.shape[1].orb, None, "MOD off");
+        assert_eq!(e.scene.shape[2].orb, None, "STEPPED");
+        e.meters.publish_shapes([None; 3]);
+        e.draw();
+        assert_eq!(e.scene.shape[0].orb, None, "no voice");
     }
 
     /// Oscillators 2's and 3's timed mode on the panel (decisions.md R-OSC-TIMED): at LO with its

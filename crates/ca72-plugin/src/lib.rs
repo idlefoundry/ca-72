@@ -679,14 +679,24 @@ impl Plugin for Ca72 {
                 .entry(format!("osc{n}_division"))
                 .or_insert(ParamValue::I32(quarter));
         }
-        // And before VARIABLE's rectangles: each oscillator STEPPED, the instrument's switch,
-        // its width at the square and its PWM off (decisions.md R-VARIABLE-RECT).
+        // And before CONTINUOUS's waveforms: each oscillator STEPPED, the instrument's switch,
+        // its shape at SAWTOOTH, its MOD off and clockwise (decisions.md R-CONTINUOUS-WAVE).
         for n in 1..=3 {
-            let stepped = d.osc1_rect.default_plain_value().to_index() as i32;
+            let (mode, shape, _, direction) = d.shape_params(n - 1);
             for (id, v) in [
-                (format!("osc{n}_rect"), ParamValue::I32(stepped)),
-                (format!("osc{n}_width"), ParamValue::F32(0.0)),
-                (format!("osc{n}_pwm"), ParamValue::Bool(false)),
+                (
+                    format!("osc{n}_shape_mode"),
+                    ParamValue::I32(mode.default_plain_value().to_index() as i32),
+                ),
+                (
+                    format!("osc{n}_shape"),
+                    ParamValue::F32(shape.default_plain_value()),
+                ),
+                (format!("osc{n}_shape_mod"), ParamValue::Bool(false)),
+                (
+                    format!("osc{n}_shape_mod_dir"),
+                    ParamValue::I32(direction.default_plain_value().to_index() as i32),
+                ),
             ] {
                 state.params.entry(id).or_insert(v);
             }
@@ -956,6 +966,10 @@ impl Plugin for Ca72 {
                 ch.iter().take(len).fold(m, |m, v| m.max(v.abs()))
             });
             self.meters.publish_levels(self.engine.levels(), peak);
+            // MOD's orbs (decisions.md R-CONTINUOUS-WAVE): where the newest voice's shapes are.
+            if let Some(shapes) = self.engine.shapes() {
+                self.meters.publish_shapes(shapes);
+            }
         }
         // The standalone's effects, after the synth and its meters: each effect's block is
         // waited for until a share of the period from the block's start, then the effect

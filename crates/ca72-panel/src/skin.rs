@@ -258,6 +258,12 @@ pub enum Part {
     /// key's proportions.
     Key,
     KeyLit,
+    /// A MOD key's cap in its other two ways' colours (decisions.md R-CONTINUOUS-WAVE): the same
+    /// tab tinted the panel's blue and red, unlit and lit.
+    KeyBlue,
+    KeyBlueLit,
+    KeyRed,
+    KeyRedLit,
 }
 
 /// How much of a knob's picture its skirt fills (the picture squared about the cap's axis;
@@ -298,8 +304,10 @@ pub struct Pictures {
     wheel: Pixmap,
     asleep: Pixmap,
     plate: Pixmap,
-    /// The TIMED keys' caps, unlit and lit.
+    /// The TIMED keys' caps, unlit and lit; a MOD key's blue and red ones.
     key: [Pixmap; 2],
+    key_blue: [Pixmap; 2],
+    key_red: [Pixmap; 2],
     scaled: Vec<((Part, u32, u32), Pixmap)>,
 }
 
@@ -403,7 +411,8 @@ impl Pictures {
         };
         // The TIMED keys' caps: the strip's tabs', at the keys' proportions.
         let aspect = crate::art::KEY.0 / crate::art::KEY.1;
-        let key = match (pack("tab"), pack("tab-lit")) {
+        let tab = pack("tab");
+        let key = match (tab.clone(), pack("tab-lit")) {
             (Some(unlit), Some(lit)) => [
                 plugin_kit_materials::widened(&unlit, aspect),
                 plugin_kit_materials::widened(&lit, aspect),
@@ -413,6 +422,13 @@ impl Pictures {
                 [l.unlit, l.lit]
             }
         };
+        // (A pack's tab tinted so too: its pack gives amber alone.)
+        let cap = tab.unwrap_or_else(|| decode(BUTTON));
+        let tinted = |tint| {
+            let l = crate::strip::tinted_caps(&cap, aspect, tint);
+            [l.unlit, l.lit]
+        };
+        let (key_blue, key_red) = (tinted(crate::strip::BLUE), tinted(crate::strip::RED));
         Pictures {
             walnut: png("walnut"),
             face,
@@ -448,6 +464,8 @@ impl Pictures {
             asleep: png("hamster-asleep"),
             plate: png("plate"),
             key,
+            key_blue,
+            key_red,
             scaled: Vec::new(),
         }
     }
@@ -489,6 +507,10 @@ impl Pictures {
             Part::Plate => &self.plate,
             Part::Key => &self.key[0],
             Part::KeyLit => &self.key[1],
+            Part::KeyBlue => &self.key_blue[0],
+            Part::KeyBlueLit => &self.key_blue[1],
+            Part::KeyRed => &self.key_red[0],
+            Part::KeyRedLit => &self.key_red[1],
         }
     }
 

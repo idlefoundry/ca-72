@@ -283,8 +283,8 @@ impl Modulation {
 
     /// How much of a change in the amplifier's output reaches the line (while Q7 sources, as
     /// [`Modulation::line`]): the divider R57 and the output resistance make against the
-    /// MODULATION wheel and the loads. PWM's depth is this against its value with the wheel
-    /// fully forward (decisions.md R-VARIABLE-RECT).
+    /// MODULATION wheel and the loads. MOD's depth is this against its value with the wheel
+    /// fully forward (decisions.md R-CONTINUOUS-WAVE).
     pub fn line_gain(r_out: f64, wheel_r: f64, loads: &LineLoads) -> f64 {
         let mut g_l = 1.0 / wheel_r.max(0.1);
         if loads.osc_mod {

@@ -584,10 +584,18 @@ impl Held {
 struct Osc {
     phase: f32,
     wave: Waveform,
-    /// The rectangle's duty cycle and level ([`rect_law`]): its switch's, or VARIABLE's
-    /// width (decisions.md R-VARIABLE-RECT).
+    /// The rectangle's duty cycle and level ([`rect_law`]): its switch's, or CONTINUOUS's
+    /// width (decisions.md R-CONTINUOUS-WAVE).
     duty: f32,
     level: f32,
+    /// CONTINUOUS between two of the switch's places, or moved by MOD: where its shape is
+    /// (the switch's steps), its places' levels against the sawtooth's through the mixer
+    /// (each place's source resistance), and whether it is oscillator 3 (its second and third
+    /// places a reverse shark tooth and its reverse sawtooth). `None`: a place of the switch's,
+    /// played as the switch's own position (`wave`).
+    shape: Option<f32>,
+    ratios: [f32; 4],
+    third: bool,
     /// The band-limiting kernel's tables.
     tables: &'static BlepTables,
 }
@@ -613,34 +621,64 @@ impl Osc {
             // (Centred: the rectangle's mean taken out, as the coupling does.)
             naive + 2.0 * (step(0.0) - step(d)) - (2.0 * d - 1.0)
         };
-        match self.wave {
-            // (The triangle at its top as the sawtooth resets, as the circuit's is.)
-            Waveform::Triangle => {
-                const B: f32 = laws::TRIANGLE_BOTTOM;
-                let t = if p < B {
-                    1.0 - p * (2.0 / B)
-                } else {
-                    (p - B) * (2.0 / (1.0 - B)) - 1.0
-                };
-                // Its corners: at the top as the sawtooth resets, at the bottom at B.
-                let g = 2.0 / B + 2.0 / (1.0 - B);
-                laws::TRIANGLE * (t + corner(0.0, -g) + corner(B, g))
+        // (The triangle at its top as the sawtooth resets, as the circuit's is.)
+        let triangle = || {
+            const B: f32 = laws::TRIANGLE_BOTTOM;
+            let t = if p < B {
+                1.0 - p * (2.0 / B)
+            } else {
+                (p - B) * (2.0 / (1.0 - B)) - 1.0
+            };
+            // Its corners: at the top as the sawtooth resets, at the bottom at B.
+            let g = 2.0 / B + 2.0 / (1.0 - B);
+            laws::TRIANGLE * (t + corner(0.0, -g) + corner(B, g))
+        };
+        // The shark tooth's triangle: its corners, its bottom at q = 1/2, its top at q = 0.
+        let shark_triangle = || {
+            let q = p + laws::SHARK_AHEAD;
+            let q = if q >= 1.0 { q - 1.0 } else { q };
+            4.0 * (q - 0.5).abs() - 1.0
+                + corner(0.5 - laws::SHARK_AHEAD, 8.0)
+                + corner(1.0 - laws::SHARK_AHEAD, -8.0)
+        };
+        let shark = || laws::SHARK_TRIANGLE * shark_triangle() + laws::SHARK_SAWTOOTH * fall();
+        let sawtooth = || laws::SAWTOOTH * fall();
+        let reverse = || -laws::REVERSE_SAWTOOTH * fall();
+        let rectangle = || self.level * rect(self.duty);
+        let Some(at) = self.shape else {
+            return match self.wave {
+                Waveform::Triangle => triangle(),
+                Waveform::SharkTooth => shark(),
+                Waveform::Sawtooth => sawtooth(),
+                Waveform::ReverseSawtooth => reverse(),
+                Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle => {
+                    rectangle()
+                }
+            };
+        };
+        // CONTINUOUS (decisions.md R-CONTINUOUS-WAVE): oscillator 3's reverse shark tooth its
+        // shark tooth's triangle with the reverse sawtooth where the sawtooth was, at the
+        // reverse sawtooth's level.
+        let place = |k: usize| match (k, self.third) {
+            (0, _) => triangle(),
+            (1, false) => shark(),
+            (1, true) => {
+                laws::SHARK_TRIANGLE * shark_triangle()
+                    + laws::SHARK_SAWTOOTH * (laws::REVERSE_SAWTOOTH / laws::SAWTOOTH) * -fall()
             }
-            Waveform::SharkTooth => {
-                let q = p + laws::SHARK_AHEAD;
-                let q = if q >= 1.0 { q - 1.0 } else { q };
-                // The triangle's corners: its bottom at q = 1/2, its top at q = 0.
-                let tri = 4.0 * (q - 0.5).abs() - 1.0
-                    + corner(0.5 - laws::SHARK_AHEAD, 8.0)
-                    + corner(1.0 - laws::SHARK_AHEAD, -8.0);
-                laws::SHARK_TRIANGLE * tri + laws::SHARK_SAWTOOTH * fall()
-            }
-            Waveform::Sawtooth => laws::SAWTOOTH * fall(),
-            Waveform::ReverseSawtooth => -laws::REVERSE_SAWTOOTH * fall(),
-            Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle => {
-                self.level * rect(self.duty)
-            }
+            (2, false) => sawtooth(),
+            (2, true) => reverse(),
+            _ => rectangle(),
+        };
+        if at >= 3.0 {
+            return self.ratios[3] * place(3);
         }
+        let k = at as usize;
+        let w = at - k as f32;
+        if w == 0.0 {
+            return self.ratios[k] * place(k);
+        }
+        (1.0 - w) * self.ratios[k] * place(k) + w * self.ratios[k + 1] * place(k + 1)
     }
 
     /// Its waveform's level at its peak (oscillator 3's swing as a modulation source).
@@ -662,15 +700,54 @@ impl Osc {
             wave,
             duty,
             level,
+            shape: None,
+            ratios: [1.0; 4],
+            third: false,
             tables: crate::resample::blep_tables(),
         }
+    }
+}
+
+/// The modulation's depth at the MODULATION wheel's `wheel` (the wheel as the drawing's would
+/// set its resistance, through `laws::WHEEL`).
+fn light_depth(wheel: f64) -> f64 {
+    let r = crate::modulation::mod_wheel_r(wheel);
+    let w = 3.0 * (1.0 + r / 1.2e3 * (81f64.powf(1.0 / 3.0) - 1.0)).ln() / 81f64.ln();
+    let w = w.clamp(0.0, 1.0);
+    let [a, b, c] = laws::WHEEL;
+    w * (a + w * (b + w * c))
+}
+
+/// Oscillator `o`'s waveform as the light voice plays it at the panel (decisions.md
+/// R-CONTINUOUS-WAVE): the switch's own position (STEPPED, or CONTINUOUS at one of the
+/// switch's places or past SQUARE, the rectangle at its width), with no blend; else, between
+/// two places or moved by MOD with the wheel forward (`depth` above 0), where its shape is,
+/// the waveform the nearest place is named for its swing as a modulation source.
+fn light_shape(o: usize, p: &Panel, depth: f64) -> (Waveform, Option<f32>) {
+    use crate::voice::{ModSwing, shape_at, shape_place};
+    let s = p.shape[o];
+    if !s.continuous {
+        return (p.osc[o].waveform, None);
+    }
+    let at = shape_at(s, ModSwing::default());
+    let nearest =
+        |at: f64| shape_place(o, (at.round() as usize).min(3)).unwrap_or(Waveform::ReverseSawtooth);
+    if s.modulated && depth > 0.0 {
+        return (nearest(at), Some(at as f32));
+    }
+    if at >= 3.0 {
+        return (Waveform::Square, None);
+    }
+    match shape_place(o, at as usize) {
+        Some(w) if at.fract() == 0.0 => (w, None),
+        _ => (nearest(at), Some(at as f32)),
     }
 }
 
 /// The rectangle's duty cycle and level at a width bias (V): the switch's three as fitted
 /// ([`laws::DUTY`], [`laws::SQUARE`], [`laws::WIDE`], [`laws::NARROW`]) at its 0, -1.5 and
 /// -2.5 V, exactly; straight between them, and on past the narrow one as from the wide one
-/// to it, to VARIABLE's floor (decisions.md R-VARIABLE-RECT; the circuit's duty is straight
+/// to it, to CONTINUOUS's floor (decisions.md R-CONTINUOUS-WAVE; the circuit's duty is straight
 /// in the bias: the comparator's threshold moves 0.998 V a volt along a straight ramp).
 pub(crate) fn rect_law(bias: f64) -> (f32, f32) {
     let knots = [
@@ -933,15 +1010,15 @@ struct Setting {
     /// source: its sample to its waveform's -1..1 (times `swing`, plus `swing_bias`: the
     /// rectangles' levels before their coupling), and that to semitones.
     depth: f64,
-    /// The depth with the wheel fully forward (PWM's measure).
+    /// The depth with the wheel fully forward (MOD's measure).
     depth_full: f32,
     offset_depth: f64,
     mix: f32,
     osc_mod: bool,
     filter_mod: bool,
-    /// Which oscillators' widths follow the modulation (VARIABLE with PWM: decisions.md
-    /// R-VARIABLE-RECT).
-    pwm: [bool; 3],
+    /// Which oscillators' shapes follow the modulation (CONTINUOUS with MOD: decisions.md
+    /// R-CONTINUOUS-WAVE).
+    shape_mod: [bool; 3],
     swing: f32,
     swing_bias: f32,
     mod_swing: f32,
@@ -958,8 +1035,10 @@ struct Setting {
 #[derive(Debug, Clone)]
 pub struct Light {
     rate: f64,
-    /// PWM's share of VARIABLE's travel, the last sample's ([`Light::probe_pwm`]).
-    pwm_u: f32,
+    /// MOD's share of CONTINUOUS's travel (onward), the last sample's ([`Light::probe_shape_mod`]).
+    mod_u: f32,
+    /// Each oscillator's CONTINUOUS shape where it was, the last sample's ([`Light::probe_shapes`]).
+    shape_now: [Option<f64>; 3],
     /// The panel, and whether `set` is worked out from it.
     panel: Panel,
     set_for_panel: bool,
@@ -1082,7 +1161,8 @@ impl Light {
             rate,
             panel: Panel::default(),
             set_for_panel: false,
-            pwm_u: 0.0,
+            mod_u: 0.0,
+            shape_now: [None; 3],
             set: Setting::default(),
             held: Held::default(),
             pressed: [0; 128],
@@ -1276,9 +1356,15 @@ impl Light {
         self.noise.state = if s == 0 { 0x4D6F_6F67 } else { s };
     }
 
-    /// The last sample's PWM share of VARIABLE's travel, 0..1 (decisions.md R-VARIABLE-RECT).
-    pub fn probe_pwm(&self) -> f64 {
-        f64::from(self.pwm_u)
+    /// The last sample's MOD share of CONTINUOUS's travel (onward), 0..1 (decisions.md R-CONTINUOUS-WAVE).
+    pub fn probe_shape_mod(&self) -> f64 {
+        f64::from(self.mod_u)
+    }
+
+    /// Each oscillator's CONTINUOUS shape where the last sample had it (its switch's steps), MOD
+    /// and all; `None` for a STEPPED one.
+    pub fn probe_shapes(&self) -> [Option<f64>; 3] {
+        self.shape_now
     }
 
     /// The panel: what it sets is worked out again if it changed (some microseconds: not for
@@ -1290,6 +1376,8 @@ impl Light {
         self.set_for_panel = true;
         self.panel = *p;
         let cubic = |c: [f64; 4], x: f64| c[0] + x * (c[1] + x * (c[2] + x * c[3]));
+        // (MOD moves a CONTINUOUS shape only with the wheel forward: R-CONTINUOUS-WAVE.)
+        let depth = light_depth(p.mod_wheel);
         for o in 0..3 {
             let range = (2.0 - p.osc[o].range.octaves_below_2()) * 12.0;
             let x = p.osc[o].freq.clamp(0.0, 1.0);
@@ -1314,24 +1402,57 @@ impl Light {
                     (at(x) - at(FREQ_CENTRE)) / 100.0
                 }
             };
-            self.osc[o].wave = p.osc[o].waveform;
-            (self.osc[o].duty, self.osc[o].level) =
-                rect_law(crate::voice::rect_bias(p.osc[o].waveform, p.rect[o], 0.0));
+            let (wave, shape) = light_shape(o, p, depth);
+            self.shape_now[o] = p.shape[o]
+                .continuous
+                .then(|| crate::voice::shape_at(p.shape[o], crate::voice::ModSwing::default()));
+            self.osc[o].wave = wave;
+            self.osc[o].shape = shape;
+            self.osc[o].third = o == 2;
+            let bias = match (p.shape[o].continuous, shape) {
+                (false, _) => wave.width(),
+                (true, _) => crate::voice::shape_bias(crate::voice::shape_at(
+                    p.shape[o],
+                    crate::voice::ModSwing::default(),
+                )),
+            };
+            (self.osc[o].duty, self.osc[o].level) = rect_law(bias);
             let tune = if free {
                 0.0
             } else {
                 p.tune * laws::TUNE_CENTS / 100.0
             };
             self.set.offset[o] = range + freq + tune;
-            let source = match p.osc[o].waveform {
+            let source = match wave {
                 Waveform::Triangle => laws::SOURCE_OHMS[0],
                 Waveform::Sawtooth | Waveform::ReverseSawtooth => laws::SOURCE_OHMS[1],
                 Waveform::SharkTooth => laws::SOURCE_OHMS[3],
                 _ => laws::SOURCE_OHMS[2],
             };
             let level = if o == 2 { laws::OSC3_LEVEL } else { 1.0 };
+            let volume = volume_track(p.osc[o].volume);
+            // (Blending, each place's level through the mixer against the sawtooth's, the
+            // gain the sawtooth's: CONTINUOUS's places' sources, R-CONTINUOUS-WAVE.)
+            let (source, ratios) = match shape {
+                None => (source, [1.0; 4]),
+                Some(_) => {
+                    let at = |ohms: f64| {
+                        channel(volume, ohms, 33e3) / channel(volume, laws::SOURCE_OHMS[1], 33e3)
+                    };
+                    (
+                        laws::SOURCE_OHMS[1],
+                        [
+                            at(laws::SOURCE_OHMS[0]),
+                            at(laws::SOURCE_OHMS[3]),
+                            1.0,
+                            at(laws::SOURCE_OHMS[2]),
+                        ],
+                    )
+                }
+            };
+            self.osc[o].ratios = ratios;
             self.set.gain[o] = if p.osc[o].on {
-                channel(volume_track(p.osc[o].volume), source, 33e3) * level
+                channel(volume, source, 33e3) * level
             } else {
                 0.0
             };
@@ -1404,21 +1525,14 @@ impl Light {
                 };
         }
         // (The wheel as the drawing's would set its resistance.)
-        let depth_at = |wheel: f64| {
-            let r = crate::modulation::mod_wheel_r(wheel);
-            let w = 3.0 * (1.0 + r / 1.2e3 * (81f64.powf(1.0 / 3.0) - 1.0)).ln() / 81f64.ln();
-            let w = w.clamp(0.0, 1.0);
-            let [a, b, c] = laws::WHEEL;
-            w * (a + w * (b + w * c))
-        };
         let r = crate::modulation::mod_wheel_r(p.mod_wheel);
-        self.set.depth = depth_at(p.mod_wheel);
-        self.set.depth_full = depth_at(1.0) as f32;
+        self.set.depth = depth;
+        self.set.depth_full = light_depth(1.0) as f32;
         self.set.offset_depth = laws::OFFSET.0 * r / (r + laws::OFFSET.1);
         self.set.mix = p.mod_mix.clamp(0.0, 1.0) as f32;
         self.set.osc_mod = p.osc_mod;
         self.set.filter_mod = p.filter_mod;
-        let w3 = p.osc[2].waveform;
+        let w3 = self.osc[2].wave;
         self.set.swing = 1.0 / self.osc[2].peak();
         let (kind, duty) = match w3 {
             Waveform::Triangle => (0, None),
@@ -1428,7 +1542,7 @@ impl Light {
                 (3, Some(self.osc[2].duty))
             }
         };
-        self.set.pwm = std::array::from_fn(|o| p.pwm_on(o));
+        self.set.shape_mod = std::array::from_fn(|o| p.shape_mod_on(o));
         self.set.swing_bias = duty.map_or(0.0, |d| 2.0 * d - 1.0);
         self.set.mod_swing = laws::MOD_SWING[kind] as f32;
         self.set.mod_centre = laws::MOD_CENTRE[kind] as f32;
@@ -1751,8 +1865,8 @@ impl Light {
         let (swing, swing_bias, mod_swing, mod_centre) =
             (s.swing, s.swing_bias, s.mod_swing, s.mod_centre);
         let (osc_mod, filter_mod, follows3) = (s.osc_mod, s.filter_mod, s.follows[2]);
-        let pwm = s.pwm;
-        let any_pwm = pwm[0] || pwm[1] || pwm[2];
+        let moved = s.shape_mod;
+        let any_mod = moved[0] || moved[1] || moved[2];
         for o in 0..3 {
             self.dt[o] += self.dt_step[o];
         }
@@ -1761,15 +1875,15 @@ impl Light {
         let mut g = self.g + self.g_step;
         self.g = g;
         let mut k = self.k;
-        let modulating = depth > 0.0 && (osc_mod || filter_mod || any_pwm);
+        let modulating = depth > 0.0 && (osc_mod || filter_mod || any_mod);
         let needs_noise = noise_gain != 0.0 || (modulating && mix_k > 0.0);
         let (white, pink, red) = if needs_noise {
             self.noise.tick(&self.noise_c)
         } else {
             (0.0, 0.0, 0.0)
         };
-        if !(modulating && any_pwm) {
-            self.pwm_u = 0.0;
+        if !(modulating && any_mod) {
+            self.mod_u = 0.0;
         }
         if modulating {
             // Oscillator 3 (its swing to ±1) and the noise (its RMS to 1) as MODULATION MIX
@@ -1796,22 +1910,30 @@ impl Light {
                     inv[o] *= ri;
                 }
             }
-            if any_pwm {
-                // PWM (decisions.md R-VARIABLE-RECT): the line's swing at the wheel fully
-                // forward against oscillator 3's triangle's, a share of the width's travel as
-                // deep as the wheel is forward (the full voice's `pwm_u`).
+            if any_mod {
+                // MOD (decisions.md R-CONTINUOUS-WAVE): the line's swing at the wheel fully
+                // forward against oscillator 3's triangle's, as deep as the wheel is forward
+                // (the full voice's `ModSwing`).
                 let swing =
                     (1.0 - mix_k) * o + mix_k * n * (laws::NOISE_SEMITONES_RMS / rms) as f32;
-                let s = swing / -(laws::MOD_SWING[0] as f32);
-                let u = (0.5 * depth / self.set.depth_full * (1.0 + s)).clamp(0.0, 1.0);
-                self.pwm_u = u;
+                let m = crate::voice::ModSwing {
+                    depth: f64::from(depth / self.set.depth_full),
+                    swing: f64::from(swing / -(laws::MOD_SWING[0] as f32)),
+                };
+                self.mod_u = m.share(crate::voice::ModDirection::Onward) as f32;
                 let p = &self.panel;
-                for ((osc, on), (panel, rect)) in
-                    self.osc.iter_mut().zip(pwm).zip(p.osc.iter().zip(p.rect))
+                for (((osc, on), shape), now) in self
+                    .osc
+                    .iter_mut()
+                    .zip(moved)
+                    .zip(p.shape)
+                    .zip(self.shape_now.iter_mut())
                 {
                     if on {
-                        (osc.duty, osc.level) =
-                            rect_law(crate::voice::rect_bias(panel.waveform, rect, f64::from(u)));
+                        let at = crate::voice::shape_at(shape, m);
+                        osc.shape = Some(at as f32);
+                        *now = Some(at);
+                        (osc.duty, osc.level) = rect_law(crate::voice::shape_bias(at));
                     }
                 }
             }

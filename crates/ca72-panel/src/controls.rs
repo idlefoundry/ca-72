@@ -321,8 +321,8 @@ const fn switch(
     )
 }
 
-/// An oscillator's TIMED key (R-OSC-TIMED), centred under its RANGE, or its PWM key
-/// (R-VARIABLE-RECT), centred under its WAVEFORM.
+/// An oscillator's TIMED key (R-OSC-TIMED), centred under its RANGE, or its MOD key
+/// (R-CONTINUOUS-WAVE), centred under its WAVEFORM.
 const fn key(param: &'static str, label: &'static str, x: f64, y: f64) -> Control {
     Control {
         param,
@@ -335,7 +335,7 @@ const fn key(param: &'static str, label: &'static str, x: f64, y: f64) -> Contro
 }
 
 /// How far under its RANGE's centre an oscillator's TIMED key is (the mock-ups', the owner's
-/// "under the oscillator range selector", 2026-10-20), and its PWM key under its WAVEFORM's.
+/// "under the oscillator range selector", 2026-10-20), and its MOD key under its WAVEFORM's.
 pub const KEY_BELOW_RANGE: f64 = 84.0;
 
 /// The MIXER's rows.
@@ -709,24 +709,24 @@ pub const CONTROLS: [Control; 68] = [
         617.0,
         576.0 + KEY_BELOW_RANGE,
     ),
-    // Each oscillator's PWM key (decisions.md R-VARIABLE-RECT), centred under its own
+    // Each oscillator's MOD key (decisions.md R-CONTINUOUS-WAVE), centred under its own
     // WAVEFORM, after every other, so that no control moves: on the panel only while its
-    // oscillator's rectangle is VARIABLE.
+    // oscillator's waveform is CONTINUOUS.
     key(
-        "osc1_pwm",
-        "OSCILLATOR-1 PWM",
+        "osc1_shape_mod",
+        "OSCILLATOR-1 MOD",
         1021.0,
         163.0 + KEY_BELOW_RANGE,
     ),
     key(
-        "osc2_pwm",
-        "OSCILLATOR-2 PWM",
+        "osc2_shape_mod",
+        "OSCILLATOR-2 MOD",
         1021.0,
         370.0 + KEY_BELOW_RANGE,
     ),
     key(
-        "osc3_pwm",
-        "OSCILLATOR-3 PWM",
+        "osc3_shape_mod",
+        "OSCILLATOR-3 MOD",
         1021.0,
         576.0 + KEY_BELOW_RANGE,
     ),
@@ -751,17 +751,17 @@ pub struct ControlSet {
 }
 
 /// This build's panel controls: the third revision; oscillators 2's and 3's TIMED keys added in
-/// the second (decisions.md R-OSC-TIMED), each oscillator's PWM key in the third
-/// (R-VARIABLE-RECT). Never edit an entry once released: add to it (and raise `revision`) as
+/// the second (decisions.md R-OSC-TIMED), each oscillator's MOD key in the third
+/// (R-CONTINUOUS-WAVE). Never edit an entry once released: add to it (and raise `revision`) as
 /// controls come, go, or change.
 pub const CONTROL_SET: ControlSet = ControlSet {
     revision: 3,
     added: &[
         ("osc2_timed", 2),
         ("osc3_timed", 2),
-        ("osc1_pwm", 3),
-        ("osc2_pwm", 3),
-        ("osc3_pwm", 3),
+        ("osc1_shape_mod", 3),
+        ("osc2_shape_mod", 3),
+        ("osc3_shape_mod", 3),
     ],
     renamed: &[],
     retired: &[],

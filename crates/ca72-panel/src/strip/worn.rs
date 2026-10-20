@@ -161,8 +161,41 @@ pub(super) fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_ma
 /// A cap made the tabs' translucent amber, unlit and lit, drawn out to `aspect` (width over
 /// height): an oscillator's TIMED key's (decisions.md R-OSC-TIMED), as the tabs are.
 pub(crate) fn amber_caps(cap: &Pixmap, aspect: f64) -> Lighting {
-    edge_eased(plugin_kit_materials::lighting(cap, aspect, AMBER))
+    tinted_caps(cap, aspect, AMBER)
 }
+
+/// The tabs' caps in another tint (a MOD key's blue and red: decisions.md R-CONTINUOUS-WAVE).
+pub(crate) fn tinted_caps(cap: &Pixmap, aspect: f64, tint: Tint) -> Lighting {
+    edge_eased(plugin_kit_materials::lighting(cap, aspect, tint))
+}
+
+/// The panel's blue (its blue rockers', `colour::BLUE` to `BLUE_LIGHT`) as translucent plastic
+/// lit from inside, the amber's way: hot towards white over its middle; unlit, a deep blue.
+pub(crate) const BLUE: Tint = Tint {
+    lit: |g| {
+        let g = if g > TAB_KNEE {
+            TAB_KNEE + (g - TAB_KNEE) * 0.25
+        } else {
+            g
+        };
+        [0.12 * g * g * g, 0.42 * g.powf(1.4), 1.2 * g]
+    },
+    unlit: |k| [0.01 * k, 0.05 * k, 0.2 * k],
+};
+
+/// The panel's red (its red rockers', `colour::RED`) likewise: hot towards orange over its
+/// middle; unlit, a deep red.
+pub(crate) const RED: Tint = Tint {
+    lit: |g| {
+        let g = if g > TAB_KNEE {
+            TAB_KNEE + (g - TAB_KNEE) * 0.25
+        } else {
+            g
+        };
+        [1.3 * g, 0.2 * g.powf(1.8), 0.06 * g * g * g]
+    },
+    unlit: |k| [0.25 * k, 0.03 * k, 0.008 * k],
+};
 
 pub(super) const AMBER_LIGHT: Underlight = Underlight {
     rim: [0.6, 0.2, 0.04],

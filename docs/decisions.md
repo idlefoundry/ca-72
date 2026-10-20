@@ -12573,7 +12573,14 @@ or a session saved before reads every TIMED off and every DIVISION a quarter not
   crews draw on the process's workers, without the budget lock the other such tests take. They
   take it now; the full run passed twice under load.
 
-## R-VARIABLE-RECT. A variable rectangle, and PWM, beside the switch's three
+## R-CONTINUOUS-WAVE. A continuous waveform and its MOD, beside the switch's six
+
+This began as a variable rectangle with PWM (VARIABLE, the first part below) and became one
+continuous waveform the same day (CONTINUOUS, after it); the variable rectangle's travel, arc
+and key are CONTINUOUS's last stretch, arc and key.
+
+### The variable rectangle (VARIABLE)
+
 
 **Owner, 2026-10-20:** "How hard would it be to add a proper pulse width modulation to this Moog
 circuit? So instead of having three different square and rectangle wave selections, what if it
@@ -12662,28 +12669,98 @@ voice's (correlation 0.98 over two seconds of oscillator 3's triangle).
 With every oscillator STEPPED nothing in the engine differs: the factory presets render the same
 to the bit.
 
+### One continuous waveform (CONTINUOUS)
+
+**The owner, 2026-10-20:** "how hard is it to do just like a variables oscillator shape between
+all of the shapes, sort of like the Moog little fatty does? Like, could we have one continuous
+shape?" Then, of keeping VARIABLE beside a third mode: "I don't understand the point of ...
+having it be stepped, variable, and continuous. I don't know why we wouldn't just have one
+continuous setting for this that blends between all of the waveforms. Because a person can get
+the same effect from by putting the waveform in the square wave section." VARIABLE is replaced:
+the menu is STEPPED or CONTINUOUS (under a WAVEFORM head), and CONTINUOUS turns the switch
+without steps from TRIANGLE to the floor.
+
+**The blend.** The oscillator makes its sawtooth, triangle and rectangle from one ramp, in phase,
+and the shark tooth is already two of them mixed (the sawtooth through R030 47K, the triangle
+through R031 10K). Between two of the switch's places CONTINUOUS mixes their Thevenin sources in
+turn, as a pot between them would (`voice::shape_source`); at a place it is that place's source,
+exactly the switch's own position's. Past SQUARE it is the rectangle, its width bias straight
+between the switch's three and on to the floor (VARIABLE's). In a blend both places' outputs
+are band-limited in full (`shape_outputs`), all three while MOD may move the shape. The light
+voice blends its own shapes the same way, each at its level through the mixer against the
+sawtooth's (its places' source resistances), and plays a place as the switch's own position.
+
+**Oscillator 3 (the owner):** "in position 3 of the wave selector, normally we have the sawtooth.
+I want it to be the reverse sawtooth there. And then position 2 will be a reverse shark tooth"
+("I find the sharp descent LFO setting to be much more useful than the opposite"). Its path is
+triangle, a reverse shark tooth (its triangle and its reverse sawtooth through the shark tooth's
+resistors: Q37's output where oscillators 1 and 2 take the sawtooth), its reverse sawtooth, then
+the square and pulses; the plain sawtooth is STEPPED's. Its legends are printed so while it is
+CONTINUOUS: a shark tooth glyph turned back, then the reverse sawtooth's. Its reverse sawtooth
+blending into the square dips about 6 dB half way (the reverse sawtooth's drop and the square's
+rise come together at the reset), against none on oscillators 1 and 2: not silence (the owner
+did not want "a period of silence"); told the owner.
+
+**The switch.** One position along the whole travel (`interact::continuous_*`): a step each 30
+pixels as the switch's, a tenth of a step a wheel's notch; a slight catch at each of the six
+places (within 0.06 of a step, let go there, that place exactly); a legend clicked, its place
+exactly; a click on the knob, the next place that side. WAVEFORM follows the shape to the
+nearest of the switch's own positions (oscillator 3's reverse shark tooth and reverse sawtooth
+its REVERSE SAWTOOTH), so that STEPPED again plays the nearest. Made CONTINUOUS from the menu,
+the shape is put at the switch's own position first (oscillator 3's sawtooth at its reverse
+sawtooth's place). The arc runs from TRIANGLE's tick round to the floor's; the tip names the
+shape ("Sawtooth", "Sawtooth to Square 40 %", "Wide Rectangle 30 %"). The parameters
+(`oscN_shape_mode`, `oscN_shape`, `oscN_shape_mod`, `oscN_shape_mod_dir`) replace VARIABLE's
+before any release; the shape begins at SAWTOOTH, as WAVEFORM does; within a thousandth of a
+step of one of the switch's six places it is that place exactly (`shape_snapped`: a preset's four
+decimals of the travel move it up to three ten-thousandths of a step).
+
+**MOD (the owner):** "it won't just affect the square wave area. It will be variable through all
+the waveforms throughout"; its key's word: "Sure, mod works for me." MOD moves the shape along
+the whole travel from where the switch is, by the modulation line's share (the line's depth
+against the wheel fully forward, its swing against oscillator 3's triangle: VARIABLE's PWM
+measure), the whole travel with oscillator 3's triangle and the wheel forward, held to it.
+
+**Its way (the owner):** "the ability to command click on that, so that they could reverse the
+direction that the modulation moves things ... And then perhaps we could even have a third mode
+where it travels to the left and to the right of it. So that it is centered around where the
+waveform knob is set." The key Command-clicked (Ctrl-clicked on Windows and Linux) turns MOD's
+way round: clockwise (on from the switch), anticlockwise (back from it), both ways (half the
+travel either way about it at the most). **Colours (the owner):** "these three modes ... should
+each have a different color", "let's use the same red that we have on some of the buttons and
+the same blue that we have on some of the buttons for the two other modes": clockwise the
+timed keys' amber, anticlockwise blue, both ways red, the key's cap tinted from the strip's tab
+as the amber is (`strip::BLUE`, `strip::RED`) and its light round it.
+
+**The orb (the owner):** "a little glowing amber orb that showed the position of where the
+effective waveform sits due to the modulation that's happening. So the knob stays put, but that
+little amber orb shows where it is on that circumference." While an oscillator's MOD is on, a
+small glowing light on its switch's ring where the newest sounding voice has its shape, in its
+way's colour ("would change its color according to the mode"). The voices keep their shapes'
+places each sample (`Voice::probe_shapes`, `Light::probe_shapes`); the engine takes the newest
+sounding voice's after a block, without waiting for a worker that holds it
+(`Engine::shapes`), only while an editor is open, and the editor draws it at its frame rate.
+
+**Compatibility.** A session or preset saved before plays STEPPED; with every oscillator STEPPED
+nothing in the engine differs.
+
 **Checks.**
-- `tests/variable_rect.rs` (the engine): the travel gives the switch's three widths exactly (and
-  through a host's f32 or a preset's rounding); at them VARIABLE is the switch to the bit at HI,
-  ULTRA (No Compromises) and LO's full voice, and in the light voice, PWM on with the wheel back
-  too; PWM's share sweeps 0 to 1 with oscillator 3's triangle and the wheel forward, none with it
-  back, about a fifth of the travel with it half way (the wheel's law), the light voice's the
-  full voice's way (correlation 0.98); the pulse comes once a cycle at 0, -1.5, -2.5 V and the
-  floor from 55 Hz to 4 kHz, its duty within 1.5 % of `rect_duty` (3 % above 1 kHz, where the
-  edges' delays add a little); a width moved past the ramp switches the comparator at once with
-  VARIABLE, at the next cycle without.
-- The panel (`ca72-panel`): `a_variable_switchs_arc_and_key_are_drawn_and_undrawn_in_place`
-  (both skins: VARIABLE on and off, the switch turned, a key lit; each frame drawn in parts the
-  frame drawn whole; STEPPED again the frame before, to the pixel); `a_variable_switch_steps_then_turns`;
-  `a_layout_made_before_the_pwm_keys_gets_them`.
-- The editor: `a_waveform_switchs_menu_makes_its_rectangle_variable` (RECTANGLE's head, STEPPED
-  marked, VARIABLE on WIDE putting the width at WIDE's first, each a gesture);
-  `a_variable_switch_turns_past_square_and_its_key_flips_pwm` (the arc and key on the panel, a
-  hidden key not found; dragged a step and a half, the width there and WAVEFORM the nearest
-  rectangle; NARROW's legend NARROW's bias exactly; the tip "Square 48 %"; the key a gesture).
-- Parameters: `variable_rectangles_are_off_by_default_and_their_travel_the_engines`; MIDI Learn's
-  kinds; sessions before open STEPPED.
-- Off, the sound is the code's before to the bit: `preset_render`, the 19 factory presets with
-  POLY's ten voices, at HI, LO and ULTRA against b96e2a6: "every preset the same to the bit".
-- The whole suite and clippy on the branch, and merged with `test-v03-20oct-b` (MPE and the
-  timed oscillators): 121 suites pass.
+- `tests/continuous_wave.rs` (the engine): the travel gives the switch's widths exactly, a
+  host's f32 or a preset's rounding landing on a place; at each of the switch's positions
+  (oscillators 1 and 3: oscillator 3's reverse sawtooth at its third place) CONTINUOUS is the
+  switch to the bit at HI, ULTRA (No Compromises) and LO's full voice, and in the light voice,
+  with MOD on and the wheel back too; between places no silence (no level under a quarter of the
+  highest across TRIANGLE to SQUARE) and each blend neither of its places; MOD's share sweeps the
+  whole travel with oscillator 3's triangle and the wheel forward, none with it back, about a
+  fifth with it half way, on never below the switch, back never above it, both ways about it, in
+  both voices alike (correlation 0.98); the pulse comes once a cycle at the floor from 55 Hz to
+  4 kHz; a width moved past the ramp switches the comparator at once in CONTINUOUS.
+- The panel: `a_continuous_switchs_arc_key_and_orb_are_drawn_and_undrawn_in_place` (both skins:
+  the arc, oscillator 3's legends, the keys in all three ways, the orb coming, moving and going;
+  each frame drawn in parts the frame drawn whole; STEPPED again the frame before, to the pixel);
+  `the_arcs_print_and_the_timed_dials_print_do_not_meet`; `a_continuous_switch_turns_and_is_caught_at_its_places`;
+  `a_layout_made_before_the_mod_keys_gets_them`.
+- The editor: `a_waveform_switchs_menu_makes_its_waveform_continuous`;
+  `a_continuous_switch_turns_and_its_key_flips_mod_and_its_way`;
+  `mods_orb_shows_where_the_voices_have_the_shape`. Parameters:
+  `continuous_waveforms_are_off_by_default_and_their_travel_the_engines`.
