@@ -5,12 +5,15 @@
 //!   plug-in's deadline, with `CA72_WORKERS_LIST` workers (1,2,3,4,9; fewer than this
 //!   machine's standing for a smaller computer) in blocks of `CA72_BLOCKS` frames
 //!   (64,128,256,512), each way of `CA72_MODES`: `host` (every voice on the host's thread, as
-//!   before R-LO-WORKERS), `rule` (the plug-in's `lo_threads`), or a number, at most that
-//!   many threads (the host's among them) for every run of two voices or more. Prints, per
-//!   case, the host's thread's time in the plug-in as a share of the block's period (the mean,
-//!   the 99th percentile and the most: what a host's meter shows), the blocks late, the
-//!   voices' runs not heard, and the processor time of the host's thread and of the workers
-//!   (Linux and Windows) as shares of a core.
+//!   before R-LO-WORKERS), `always` (shared by `lo_threads` whenever it can be), `load` (shared
+//!   while the host's thread is busy), `rule` (this system's way, `lo_sharing`), or a number,
+//!   at most that many threads (the host's among them) for every run of two voices or more.
+//!   Prints, per case, the host's thread's time in the plug-in as a share of the block's
+//!   period (the mean, the 99th percentile and the most: what a host's meter shows), the
+//!   blocks late, the voices' runs not heard, the processor time of the host's thread and of
+//!   the workers as shares of a core, the share of the blocks LO shared, and the runs of
+//!   samples that differ from the same chords on the host's thread alone (none unless a run
+//!   went unheard).
 //!
 //!   The material (`CA72_MATERIAL`, a part of a name): `idle` (POLY's ten voices, no note),
 //!   `chords-N` (the measurements' changing chords on N voices of Brass Choir's sound
@@ -20,9 +23,12 @@
 //!
 //!   `CA72_RT`, set: the workers made audio threads (Linux: `SCHED_FIFO`, as the plug-in's
 //!   are) and the measuring thread too, as a host's audio thread is; else ordinary threads.
-//!   `CA72_SECONDS` (4) each.
-//! - `same`: the renders at LO with 3, 5 and 9 workers sharing the voices by the rule, and on
-//!   4 and 10 threads whatever the rule, the same to the bit as on the host's thread alone in
+//!   `CA72_SECONDS` (4) each. `CA72_EXTRA`, a share of the period (0): the measuring thread
+//!   kept busy that long at each block's start, counted in the plug-in's block (a slower
+//!   computer standing in, for the load-responsive sharing).
+//! - `same`: the renders at LO with 3, 5 and 9 workers sharing the voices by the rule, on 4
+//!   and 10 threads whatever the rule, and with the sharing switched on and off every 37
+//!   blocks (as the load would switch it), the same to the bit as on the host's thread alone in
 //!   blocks of the same size (64 to 512 frames), every material played whole (no deadline);
 //!   the workers' processor time shown, so that they are seen to play.
 //!
@@ -33,7 +39,8 @@
 mod common;
 
 use ca72_plugin::engine::{
-    Controls, DEADLINE, Engine, Event, set_budget_for_measurement, set_lo_threads_for_measurement,
+    CHUNK, Controls, DEADLINE, Engine, Event, LoSharing, lo_sharing, set_budget_for_measurement,
+    set_lo_sharing_for_measurement, set_lo_threads_for_measurement,
 };
 use common::{Chords, controls_of, env, play_block, played_as, preset};
 use std::time::{Duration, Instant};
@@ -142,7 +149,34 @@ fn cpu(workers: bool) -> u64 {
     (cycles as f64 / rate) as u64
 }
 
-#[cfg(not(any(target_os = "linux", all(windows, target_arch = "x86_64"))))]
+/// As on Linux: the measuring thread's time (`CLOCK_THREAD_CPUTIME_ID`), or the process's less
+/// it (`getrusage`: the workers', and the little else the process does meanwhile).
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn cpu(workers: bool) -> u64 {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: a timespec of this frame.
+    unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    let thread = t.tv_sec as u64 * 1_000_000_000 + t.tv_nsec as u64;
+    if !workers {
+        return thread;
+    }
+    // SAFETY: a zeroed rusage is a valid one, written by the call.
+    let mut u: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: as above.
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut u) };
+    let tv = |v: libc::timeval| v.tv_sec as u64 * 1_000_000_000 + v.tv_usec as u64 * 1000;
+    (tv(u.ru_utime) + tv(u.ru_stime)).saturating_sub(thread)
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "macos",
+    all(windows, target_arch = "x86_64")
+)))]
 fn cpu(_workers: bool) -> u64 {
     0
 }
@@ -158,6 +192,11 @@ struct Figures {
     host_cpu: f64,
     workers_cpu: f64,
     workers: usize,
+    /// The share of the measured blocks at whose end LO shared, and the runs of [`CHUNK`]
+    /// samples that differ from the render on the host's thread alone (none unless a voice's
+    /// run went unheard).
+    shared: f64,
+    differ: usize,
 }
 
 /// `c`'s chords of `notes` notes played in real time for `seconds`, `block` frames at a time,
@@ -171,18 +210,20 @@ fn paced_run(
     seconds: f64,
 ) -> Figures {
     let period = Duration::from_secs_f64(block as f64 / RATE);
+    let extra: f64 = env("CA72_EXTRA", 0.0);
     let mut e = Engine::new();
     e.set(c);
     e.prepare(RATE, 1);
     let started = e.start_workers(workers, rt.then_some(period));
     let mut chords = Chords::new(notes, RATE);
     let blocks = (seconds * RATE / block as f64) as usize;
-    let (mut l, mut r) = (vec![0.0f32; block], vec![0.0f32; block]);
-    let mut events = Vec::with_capacity(64);
     // (A second first, unmeasured: the workers asked for and started, the caches warm.)
     let warm = (RATE / block as f64) as usize;
+    let len = (warm + blocks) * block;
+    let (mut l, mut r) = (vec![0.0f32; len], vec![0.0f32; len]);
+    let mut events = Vec::with_capacity(64);
     let mut took = Vec::with_capacity(blocks);
-    let (mut late, mut silent0, mut host0, mut work0) = (0, 0, 0, 0);
+    let (mut late, mut silent0, mut host0, mut work0, mut shared) = (0, 0, 0, 0, 0);
     let start = Instant::now();
     for i in 0..warm + blocks {
         let due = start + period * i as u32;
@@ -200,7 +241,14 @@ fn paced_run(
             e.set_deadline(Some(Instant::now() + period.mul_f64(DEADLINE)));
         }
         let t = Instant::now();
-        play_block(&mut e, &mut chords, i * block, &mut l, &mut r, &mut events);
+        // (A slower computer's time, standing in: the host's thread kept busy for `extra` of
+        // the period within the plug-in's block, which the plug-in counts as its own.)
+        while t.elapsed() < period.mul_f64(extra) {
+            std::hint::spin_loop();
+        }
+        let at = i * block;
+        let (bl, br) = (&mut l[at..at + block], &mut r[at..at + block]);
+        play_block(&mut e, &mut chords, at, bl, br, &mut events);
         let d = t.elapsed();
         if e.take_mending() {
             e.spares().mend();
@@ -208,6 +256,7 @@ fn paced_run(
         if i >= warm {
             took.push(d.as_secs_f64() / period.as_secs_f64());
             late += usize::from(d > period);
+            shared += usize::from(e.lo_shares());
         }
     }
     let wall = (blocks as f64) * period.as_secs_f64() * 1e9;
@@ -216,6 +265,20 @@ fn paced_run(
     let silent = e.silent_runs() - silent0;
     let running = e.workers().max(started);
     drop(e);
+    // (The same chords on the host's thread alone, every voice waited for.)
+    let sharing = lo_sharing();
+    set_lo_sharing_for_measurement(Some(LoSharing::Never));
+    let (l0, r0, ..) = whole(c, notes, block, 0, len, None);
+    set_lo_sharing_for_measurement(Some(sharing));
+    let differ = l
+        .chunks(CHUNK)
+        .zip(r.chunks(CHUNK))
+        .zip(l0.chunks(CHUNK).zip(r0.chunks(CHUNK)))
+        .filter(|((a, b), (a0, b0))| {
+            a.iter().zip(*a0).any(|(x, y)| x.to_bits() != y.to_bits())
+                || b.iter().zip(*b0).any(|(x, y)| x.to_bits() != y.to_bits())
+        })
+        .count();
     took.sort_by(f64::total_cmp);
     let mean = took.iter().sum::<f64>() / took.len() as f64;
     let p99 = took[(took.len() * 99 / 100).min(took.len() - 1)];
@@ -229,6 +292,8 @@ fn paced_run(
         host_cpu,
         workers_cpu,
         workers: running,
+        shared: shared as f64 / blocks as f64,
+        differ,
     }
 }
 
@@ -257,15 +322,18 @@ fn paced() {
             set_budget_for_measurement(workers.max(1));
             for &block in &list("CA72_BLOCKS", &[64, 128, 256, 512]) {
                 for mode in &modes {
-                    let threads = match mode.as_str() {
-                        "host" => Some(1),
-                        "rule" => None,
-                        k => Some(k.parse().unwrap()),
+                    let (sharing, threads) = match mode.as_str() {
+                        "host" => (Some(LoSharing::Never), None),
+                        "always" => (Some(LoSharing::Always), None),
+                        "load" => (Some(LoSharing::Load), None),
+                        "rule" => (None, None),
+                        k => (Some(LoSharing::Always), Some(k.parse().unwrap())),
                     };
+                    set_lo_sharing_for_measurement(sharing);
                     set_lo_threads_for_measurement(threads);
                     let f = paced_run(&c, notes, block, workers, rt, seconds);
                     eprintln!(
-                        "{name:>18} w{workers} ({} running) b{block:>3} {mode:>4}: mean {:5.1} % p99 {:5.1} % most {:6.1} % late {:3} unheard {:4} cpu host {:5.1} % workers {:5.1} %",
+                        "{name:>18} w{workers} ({} running) b{block:>3} {mode:>6}: mean {:5.1} % p99 {:5.1} % most {:6.1} % late {:3} unheard {:4} cpu host {:5.1} % workers {:5.1} % shared {:3.0} % differ {}",
                         f.workers,
                         100.0 * f.mean,
                         100.0 * f.p99,
@@ -274,37 +342,48 @@ fn paced() {
                         f.silent,
                         100.0 * f.host_cpu,
                         100.0 * f.workers_cpu,
+                        100.0 * f.shared,
+                        f.differ,
                     );
                 }
             }
         }
     }
     set_lo_threads_for_measurement(None);
+    set_lo_sharing_for_measurement(None);
     set_budget_for_measurement(0);
     if rt {
         ca72_rt::demote();
     }
 }
 
-/// `c`'s chords of `notes` notes for `seconds`, `block` frames at a time, with `workers`
-/// workers, every voice waited for: left and right, and the workers' processor time, ns.
+/// `c`'s chords of `notes` notes for `n` samples, `block` frames at a time, with `workers`
+/// workers, every voice waited for, LO's sharing switched on and off every `flip` blocks if
+/// asked (from on): left and right, the runs not heard, and the workers' processor time, ns.
 fn whole(
     c: &Controls,
     notes: usize,
     block: usize,
     workers: usize,
-    seconds: f64,
+    n: usize,
+    flip: Option<usize>,
 ) -> (Vec<f32>, Vec<f32>, u64, u64) {
     let mut e = Engine::new();
     e.set(c);
     e.prepare(RATE, 1);
     e.start_workers(workers, None);
     let mut chords = Chords::new(notes, RATE);
-    // (A whole number of the largest blocks, so that every render is as long.)
-    let n = (seconds * RATE) as usize / 1024 * 1024;
     let (mut l, mut r) = (vec![0.0f32; n], vec![0.0f32; n]);
     let mut events: Vec<(usize, Event)> = Vec::with_capacity(64);
     for b in (0..n).step_by(block) {
+        if let Some(k) = flip {
+            let on = (b / block / k).is_multiple_of(2);
+            set_lo_sharing_for_measurement(Some(if on {
+                LoSharing::Always
+            } else {
+                LoSharing::Never
+            }));
+        }
         e.set_deadline(None);
         let (bl, br) = (&mut l[b..b + block], &mut r[b..b + block]);
         play_block(&mut e, &mut chords, b, bl, br, &mut events);
@@ -317,6 +396,8 @@ fn whole(
 #[ignore = "a measurement, run by hand"]
 fn same() {
     let seconds: f64 = env("CA72_SECONDS", 3.0);
+    // (A whole number of the largest blocks, so that every render is as long.)
+    let n = (seconds * RATE) as usize / 1024 * 1024;
     let same = |(l, r): (&[f32], &[f32]), (l0, r0): (&[f32], &[f32])| {
         l.len() == l0.len()
             && l.iter().zip(l0).all(|(a, b)| a.to_bits() == b.to_bits())
@@ -329,17 +410,31 @@ fn same() {
         }
         for block in [64, 128, 256, 512] {
             // (Every voice on the host's thread, as before R-LO-WORKERS: the reference.)
-            set_lo_threads_for_measurement(Some(1));
-            let (l0, r0, ..) = whole(&c, notes, block, 0, seconds);
-            for (workers, threads) in [(3, None), (5, None), (9, None), (3, Some(4)), (9, Some(10))]
-            {
+            set_lo_sharing_for_measurement(Some(LoSharing::Never));
+            set_lo_threads_for_measurement(None);
+            let (l0, r0, ..) = whole(&c, notes, block, 0, n, None);
+            // (By the rule, on 4 and 10 threads whatever it, and switched on and off every 37
+            // blocks, as by load.)
+            for (workers, threads, flip) in [
+                (3, None, None),
+                (5, None, None),
+                (9, None, None),
+                (3, Some(4), None),
+                (9, Some(10), None),
+                (5, None, Some(37)),
+            ] {
+                set_lo_sharing_for_measurement(Some(LoSharing::Always));
                 set_lo_threads_for_measurement(threads);
-                let (l, r, silent, ns) = whole(&c, notes, block, workers, seconds);
+                let (l, r, silent, ns) = whole(&c, notes, block, workers, n, flip);
                 let ok = same((&l, &r), (&l0, &r0));
                 differ += usize::from(!ok || silent > 0);
                 eprintln!(
-                    "{name:>18} w{workers} {:>5} b{block:>3}: {} ({silent} runs not heard; the workers' time {:.1} ms)",
-                    threads.map_or("rule".to_string(), |t| format!("t{t}")),
+                    "{name:>18} w{workers} {:>8} b{block:>3}: {} ({silent} runs not heard; the workers' time {:.1} ms)",
+                    match (threads, flip) {
+                        (_, Some(k)) => format!("flip{k}"),
+                        (Some(t), _) => format!("t{t}"),
+                        _ => "rule".to_string(),
+                    },
                     if ok { "same" } else { "DIFFERS" },
                     ns as f64 / 1e6,
                 );
@@ -347,6 +442,7 @@ fn same() {
         }
     }
     set_lo_threads_for_measurement(None);
+    set_lo_sharing_for_measurement(None);
     assert_eq!(
         differ, 0,
         "a render differed from the host's thread's alone"
