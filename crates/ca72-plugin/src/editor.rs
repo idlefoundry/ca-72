@@ -3511,6 +3511,8 @@ impl Editing {
         }
         self.playing.release();
         self.end_gestures();
+        // (A knob's pop-up gives way to its menu.)
+        self.modulating.popup = None;
         let (x, y) = self.in_drawing(self.pointer);
         if !self.expanded() && y >= DRAWER_TOP {
             return;
@@ -13863,6 +13865,70 @@ mod tests {
         );
         go(&mut e, pt);
         window_frame(&mut e).save_png(out).unwrap();
+    }
+
+    /// The LFO page and modulation as the editor shows them, for looking at, written to
+    /// `$CA72_LFO_PNG`, the folder: `page.png` (the page, two LFOs on CUTOFF and one on VOLUME,
+    /// the orbs moving), `drag.png` (an assignment dragged from LFO 1's jack over EMPHASIS),
+    /// `hover.png` (the strip's page, CUTOFF under the pointer: its rings, pop-up and tip),
+    /// `menu.png` (CUTOFF's menu), `lfo-menu.png` (LFO 2's own), `glow.png` (the page away, an
+    /// LFO moving: its key glowing).
+    #[test]
+    #[ignore = "writes images for a look"]
+    fn the_lfo_pngs() {
+        use crate::lfo::{Reading, Source, Target as T};
+        let Some(out) = std::env::var_os("CA72_LFO_PNG").map(std::path::PathBuf::from) else {
+            return;
+        };
+        std::fs::create_dir_all(&out).unwrap();
+        let (mut e, _, params) = editing();
+        let patch = Arc::clone(&params.lfo_patch);
+        patch.assign(Source::Lfo(0), T::Cutoff, 0.4).unwrap();
+        patch.assign(Source::Lfo(1), T::Cutoff, -0.25).unwrap();
+        patch.assign(Source::Lfo(0), T::Osc2Frequency, -0.1).unwrap();
+        patch.assign(Source::Lfo(2), T::Volume, -0.5).unwrap();
+        let moving = |k: f32| Reading {
+            value: (k * 2.3).sin(),
+            phase: (k * 0.37) % 1.0,
+            since: 0.4 + k,
+            rise: 1.0,
+            moving: true,
+        };
+        params
+            .lfo_scope
+            .publish(&[moving(0.1), moving(0.7), moving(1.3), Reading::default()]);
+        e.playing.visible = false;
+        lfo_open(&mut e);
+        e.modulating.due = None;
+        let save = |e: &mut Editing, name: &str| {
+            window_frame(e).save_png(out.join(name)).unwrap();
+        };
+        save(&mut e, "page.png");
+        let jack = at(&e, ca72_panel::strip::lfo::places(0).jack);
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let emphasis = at(&e, centre("emphasis"));
+        go(&mut e, emphasis);
+        save(&mut e, "drag.png");
+        e.end_gestures();
+        let (x, y, w, h) = ca72_panel::strip::lfo::places(1).scope;
+        let scope = at(&e, (x + w / 2.0, y + h / 2.0));
+        right_click(&mut e, scope);
+        save(&mut e, "lfo-menu.png");
+        e.learning.close_menu();
+        let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
+        click(&mut e, l);
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        save(&mut e, "hover.png");
+        right_click(&mut e, cutoff);
+        save(&mut e, "menu.png");
+        e.learning.close_menu();
+        go(&mut e, Point { x: 5.0, y: 5.0 });
+        save(&mut e, "glow.png");
     }
 
     // ---- The LFO page and modulation (decisions.md R-LFO).

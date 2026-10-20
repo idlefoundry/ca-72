@@ -529,7 +529,7 @@ impl ModRenderer {
         let mut o = Svg::default();
         put!(
             o,
-            "<defs><filter id='ps' x='-0.2' y='-0.2' width='1.4' height='1.4'><feGaussianBlur stdDeviation='3'/></filter></defs><rect x='{}' y='{}' width='{}' height='{}' rx='{}' fill='#000' fill-opacity='0.45' filter='url(#ps)'/><rect x='{}' y='{}' width='{}' height='{}' rx='{}' fill='#1f2228' fill-opacity='0.96' stroke='#4a4640' stroke-width='{}'/>",
+            "<rect x='{}' y='{}' width='{}' height='{}' rx='{}' fill='#000' fill-opacity='0.3'/><rect x='{}' y='{}' width='{}' height='{}' rx='{}' fill='#1f2228' fill-opacity='0.96' stroke='#4a4640' stroke-width='{}'/>",
             N(x - ox + 2.0),
             N(y - oy + 4.0),
             N(w),

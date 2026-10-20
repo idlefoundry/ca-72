@@ -1033,32 +1033,80 @@ fn make_tube(
         "<path d='{t}' stroke='{bloom}' stroke-opacity='0.26' stroke-width='1.1' fill='none'/></g>"
     );
     let base = draw(&b.0, size, view);
-    let mut o = Svg::default();
-    put!(
-        o,
-        "<defs><clipPath id='gl'><rect width='{}' height='{}' rx='{GLASS_RX}'/></clipPath><filter id='vig' x='-0.2' y='-0.2' width='1.4' height='1.4'><feGaussianBlur stdDeviation='9'/></filter><linearGradient id='refl' x1='0' y1='0' x2='0.55' y2='1'><stop offset='0' stop-color='#fff' stop-opacity='0.085'/><stop offset='0.45' stop-color='#fff' stop-opacity='0.015'/><stop offset='1' stop-color='#fff' stop-opacity='0'/></linearGradient></defs><g clip-path='url(#gl)'><rect width='{}' height='{}' rx='{GLASS_RX}' fill='none' stroke='#000' stroke-opacity='0.75' stroke-width='16' filter='url(#vig)'/><rect width='{}' height='{}' rx='{GLASS_RX}' fill='url(#refl)'/></g>",
-        N(gw),
-        N(gh),
-        N(gw),
-        N(gh),
-        N(gw),
-        N(gh)
-    );
-    let over = draw(&o.0, size, view);
-    let (halo, bl) = (hex(ph.halo), hex(ph.bloom));
-    let mut b = Svg::default();
-    put!(
-        b,
-        "<defs><filter id='h' x='-1' y='-1' width='3' height='3'><feGaussianBlur stdDeviation='6.5'/></filter><filter id='b' x='-1' y='-1' width='3' height='3'><feGaussianBlur stdDeviation='1.8'/></filter></defs><circle cx='{ORB_R}' cy='{ORB_R}' r='15' fill='{halo}' fill-opacity='0.8' filter='url(#h)'/><circle cx='{ORB_R}' cy='{ORB_R}' r='6.5' fill='{bl}' filter='url(#b)'/><circle cx='{ORB_R}' cy='{ORB_R}' r='3.6' fill='#fffaf0'/>"
-    );
+    let mut over = glass_over(s, size, (gw, gh));
+    // (Inside the glass's rounded corners only, as the face is.)
+    for (o, b) in over.data_mut().chunks_exact_mut(4).zip(base.data().chunks_exact(4)) {
+        if b[3] < 255 {
+            for c in o.iter_mut() {
+                *c = (u16::from(*c) * u16::from(b[3]) / 255) as u8;
+            }
+        }
+    }
+    // The orb: its halo and bloom blurred, its white-hot middle.
     let side = ((2.0 * ORB_R * s).round() as u32).max(2);
-    let orb = draw(&b.0, (side, side), [0.0, 0.0, 2.0 * ORB_R, 2.0 * ORB_R]);
+    let mut orb = Pixmap::new(side, side).expect("an orb's size");
+    let c = (side as f32 / 2.0, side as f32 / 2.0);
+    let k = s as f32;
+    let mut halo = Coverage::new(side, side);
+    halo.disc(c, 15.0 * k, 0.8);
+    halo.blur(6.5 * k);
+    halo.tint(&mut orb, ph.halo, 1.0, (0, 0));
+    let mut bloom = Coverage::new(side, side);
+    bloom.disc(c, 6.5 * k, 1.0);
+    bloom.blur(1.8 * k);
+    bloom.tint(&mut orb, ph.bloom, 1.0, (0, 0));
+    let mut core = Coverage::new(side, side);
+    core.disc(c, (3.6 * k).max(0.8), 1.0);
+    core.tint(&mut orb, [0xff, 0xfa, 0xf0], 1.0, (0, 0));
     Tube {
         colour,
         base,
         over,
         orb,
     }
+}
+
+/// What lies over a scope's trace, whatever its colour, `size` pixels for a glass `glass` units
+/// in size: the tube's dark rim (a blurred stroke round its edge, by code), the glass's
+/// reflection; inside the glass's rounded corners only.
+fn glass_over(s: f64, size: (u32, u32), (gw, gh): (f64, f64)) -> Pixmap {
+    let (w, h) = (size.0.max(1), size.1.max(1));
+    let (kx, ky) = (f64::from(w) / gw, f64::from(h) / gh);
+    let mut p = Pixmap::new(w, h).expect("a tube's size");
+    let mut o = Svg::default();
+    put!(
+        o,
+        "<defs><linearGradient id='refl' x1='0' y1='0' x2='0.55' y2='1'><stop offset='0' stop-color='#fff' stop-opacity='0.085'/><stop offset='0.45' stop-color='#fff' stop-opacity='0.015'/><stop offset='1' stop-color='#fff' stop-opacity='0'/></linearGradient></defs><rect width='{}' height='{}' rx='{GLASS_RX}' fill='url(#refl)'/>",
+        N(gw),
+        N(gh)
+    );
+    let mut refl = Pixmap::new(w, h).expect("a tube's size");
+    let doc = art::document([0.0, 0.0, gw, gh], w, h, &o.0);
+    if let Ok(tree) = usvg::Tree::from_str(&doc, &usvg::Options::default()) {
+        resvg::render(&tree, Transform::identity(), &mut refl.as_mut());
+    }
+    // The rim: the glass's edge stroked 16 wide, blurred.
+    let r = (GLASS_RX * kx.min(ky)) as f32;
+    let (fw, fh) = (w as f32, h as f32);
+    let mut pb = PathBuilder::new();
+    pb.move_to(r, 0.0);
+    pb.line_to(fw - r, 0.0);
+    pb.quad_to(fw, 0.0, fw, r);
+    pb.line_to(fw, fh - r);
+    pb.quad_to(fw, fh, fw - r, fh);
+    pb.line_to(r, fh);
+    pb.quad_to(0.0, fh, 0.0, fh - r);
+    pb.line_to(0.0, r);
+    pb.quad_to(0.0, 0.0, r, 0.0);
+    pb.close();
+    if let Some(edge) = pb.finish() {
+        let mut rim = Coverage::new(w, h);
+        rim.stroke(&edge, (16.0 * s) as f32, 0.75);
+        rim.blur((9.0 * s) as f32);
+        rim.tint(&mut p, [0, 0, 0], 1.0, (0, 0));
+    }
+    lay(&mut p, &refl, (0, 0), [0, 0, w as i32, h as i32]);
+    p
 }
 
 /// What never changes for `look`.
