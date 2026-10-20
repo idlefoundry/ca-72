@@ -200,6 +200,12 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("arp_octaves", &p.arp_octaves),
         ("arp_gate", &p.arp_gate),
         ("arp_swing", &p.arp_swing),
+        // The oscillators timed (decisions.md R-OSC-TIMED): a preset that does not name them
+        // plays them free.
+        ("osc2_timed", &p.osc2_timed),
+        ("osc2_division", &p.osc2_division),
+        ("osc3_timed", &p.osc3_timed),
+        ("osc3_division", &p.osc3_division),
     ]
 }
 
@@ -1570,6 +1576,63 @@ mod tests {
         assert!(b.drawer.chips.iter().any(|(t, _)| t == "zed"));
         b.reread(&p);
         assert!(rows(&b).is_empty());
+    }
+
+    /// The oscillators timed (R-OSC-TIMED) are part of a preset: saved with the sound, set by a
+    /// preset naming them, and off (DIVISION a quarter note) in one that does not, every
+    /// factory preset among them; FREQUENCY keeps its own place whichever.
+    #[test]
+    fn oscillator_3_timed_is_part_of_a_preset_and_off_in_one_that_does_not_name_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let p = Ca72Params::default();
+        let target = |e: &Entry, id: &str| {
+            targets(&p, e)
+                .into_iter()
+                .find(|(k, _)| *k == id)
+                .map(|(_, v)| v)
+        };
+        for n in 2..=3 {
+            for id in [format!("osc{n}_timed"), format!("osc{n}_division")] {
+                assert!(values_now(&p).iter().any(|(k, _)| *k == id), "{id}");
+            }
+        }
+        for e in lib.entries().0 {
+            for n in 2..=3 {
+                let (on, division) = (format!("osc{n}_timed"), format!("osc{n}_division"));
+                assert_eq!(target(&e, &on), Some(0.0), "{}", e.sound.name);
+                assert_eq!(
+                    target(&e, &division),
+                    Some(p.osc3_division.default_normalized_value()),
+                    "{}",
+                    e.sound.name
+                );
+            }
+        }
+        let on = lib
+            .save(
+                "Timed Wobble",
+                vec![
+                    ("osc3_range".to_owned(), 0.0),
+                    ("osc3_frequency".to_owned(), 2.5),
+                    ("osc3_timed".to_owned(), 1.0),
+                    ("osc3_division".to_owned(), 13.0),
+                ],
+                None,
+            )
+            .unwrap();
+        assert_eq!(target(&on, "osc3_timed"), Some(1.0));
+        assert_eq!(
+            target(&on, "osc3_division"),
+            Some(
+                p.osc3_division
+                    .preview_normalized(crate::params::Division::EighthTriplet)
+            )
+        );
+        assert_eq!(
+            target(&on, "osc3_frequency"),
+            Some(p.osc3_frequency.preview_normalized(2.5))
+        );
     }
 
     /// NOTE PRIORITY and RETRIGGER are a preset's (the owner, 2026-10-10: "This item should be

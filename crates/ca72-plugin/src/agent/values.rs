@@ -225,6 +225,24 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
             Plain,
         ),
         e("osc3_control", "OSC. 3 CONTROL", O, &p.osc3_control, Plain),
+        // (The oscillators timed, R-OSC-TIMED: host parameters until their keys are on the
+        // panel.)
+        e("osc2_timed", "OSC. 2 TIMED", H, &p.osc2_timed, Plain),
+        e(
+            "osc2_division",
+            "OSC. 2 DIVISION",
+            H,
+            &p.osc2_division,
+            Plain,
+        ),
+        e("osc3_timed", "OSC. 3 TIMED", H, &p.osc3_timed, Plain),
+        e(
+            "osc3_division",
+            "OSC. 3 DIVISION",
+            H,
+            &p.osc3_division,
+            Plain,
+        ),
         e(
             "osc1_volume",
             "OSCILLATOR-1 VOLUME",

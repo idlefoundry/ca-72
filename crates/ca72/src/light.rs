@@ -19,6 +19,7 @@
 
 use crate::resample::{BlepTables, Decimator, Interpolator};
 use crate::tuning::FREQ_CENTRE;
+use crate::vco::Timed;
 #[cfg(test)]
 use crate::voice::OscPanel;
 use crate::voice::{
@@ -1001,6 +1002,11 @@ pub struct Light {
     /// ENTROPY's offsets: each oscillator's cents and the cutoff's octaves.
     detune: [f64; 3],
     cutoff_offset: f64,
+    /// Each oscillator timed: where its cycle stands on the host's clock (decisions.md
+    /// R-OSC-TIMED), for the samples that follow; its latest reset while timed, in samples as
+    /// [`Light::probe_resets`] counts them, and how many there have been.
+    timed: [Option<Timed>; 3],
+    timed_resets: [(f64, u64); 3],
     /// Oscillator 3's last sample (the modulation's source).
     osc3: f32,
     /// A-440's phase and its step a sample.
@@ -1126,6 +1132,8 @@ impl Light {
             count: 0,
             detune: [0.0; 3],
             cutoff_offset: 0.0,
+            timed: [None; 3],
+            timed_resets: [(0.0, 0); 3],
             osc3: 0.0,
             a440: (0.0, (440.0 / rate) as f32),
             feedback: 0.0,
@@ -1183,6 +1191,15 @@ impl Light {
         self.filter_volts = f0.0 + (f1.0 - f0.0) * part;
         let (l0, l1, part) = at(self.late.1);
         l0.1 + (l1.1 - l0.1) * part
+    }
+
+    /// Oscillator `n`'s latest reset while timed (decisions.md R-OSC-TIMED), how long before
+    /// the latest sample, exact, and how many there have been (a probe).
+    pub fn probe_timed_reset(&self, n: usize) -> (f64, u64) {
+        (
+            self.samples as f64 - 1.0 - self.timed_resets[n].0,
+            self.timed_resets[n].1,
+        )
     }
 
     /// Oscillator 1's latest reset (its phase's wrap) in samples since the voice was made,
@@ -1382,6 +1399,51 @@ impl Light {
     pub fn set_offsets(&mut self, detune: [f64; 3], cutoff: f64) {
         self.detune = detune;
         self.cutoff_offset = cutoff;
+    }
+
+    /// The oscillators timed, for the samples that follow (decisions.md R-OSC-TIMED): where
+    /// each one's cycle stands on the host's clock, its RANGE at LO; none, its own.
+    pub fn set_timed(&mut self, timed: [Option<Timed>; 3]) {
+        self.timed = timed;
+    }
+
+    /// Oscillator `n` timed for one sample (decisions.md R-OSC-TIMED): the step, worked out in
+    /// double precision, that puts it where the host's clock has it (its own phase single),
+    /// none of the pitch's inputs in it; further off than the tolerance (the clock jumped), put
+    /// there at once.
+    fn timed_tick(&mut self, n: usize, t: Timed) -> f32 {
+        let per = if t.per.is_finite() {
+            t.per.clamp(1e-12, 0.25)
+        } else {
+            1e-12
+        };
+        let now = if t.phase.is_finite() {
+            t.phase.rem_euclid(1.0)
+        } else {
+            0.0
+        };
+        let osc = &mut self.osc[n];
+        let mut step = now - f64::from(osc.phase);
+        step -= step.round();
+        if (step - per).abs() > crate::vco::TIMED_TOLERANCE {
+            // (Where the clock was a sample before; a whole cycle there is its start, just past
+            // its wrap.)
+            let before = (now - per).rem_euclid(1.0);
+            osc.phase = if before < 1.0 {
+                (before as f32).min(1.0 - f32::EPSILON / 2.0)
+            } else {
+                0.0
+            };
+            step = per;
+        }
+        let step = step.clamp(per * 1e-3, 0.45) as f32;
+        let before = osc.phase;
+        let w = osc.tick(step, 1.0 / step);
+        if osc.phase < before {
+            let at = (self.samples - 1) as f64 - f64::from(osc.phase / step);
+            self.timed_resets[n] = (at, self.timed_resets[n].1 + 1);
+        }
+        w
     }
 
     /// A MIDI note pressed or released.
@@ -1694,7 +1756,12 @@ impl Light {
         // (Each oscillator's increment's reciprocal the control step's: its edges' places in
         // samples exact at a steady pitch, off by the step's change while it moves.)
         self.samples += 1;
-        let w0 = if gain[0] != 0.0 {
+        let (timed0, timed1, timed2) = (self.timed[0], self.timed[1], self.timed[2]);
+        let w0 = if gain[0] != 0.0
+            && let Some(t) = timed0
+        {
+            self.timed_tick(0, t)
+        } else if gain[0] != 0.0 {
             let before = self.osc[0].phase;
             let w = self.osc[0].tick(dt[0], inv[0]);
             if self.osc[0].phase < before {
@@ -1707,14 +1774,20 @@ impl Light {
             0.0
         };
         let w1 = if gain[1] != 0.0 {
-            self.osc[1].tick(dt[1], inv[1])
+            match timed1 {
+                Some(t) => self.timed_tick(1, t),
+                None => self.osc[1].tick(dt[1], inv[1]),
+            }
         } else {
             0.0
         };
         // (Oscillator 3 also as the modulation's source; neither heard nor modulating, its
         // phase rests, as an unheard free-running oscillator's may.)
         let w2 = if gain[2] != 0.0 || modulating {
-            self.osc[2].tick(dt[2], inv[2])
+            match timed2 {
+                Some(t) => self.timed_tick(2, t),
+                None => self.osc[2].tick(dt[2], inv[2]),
+            }
         } else {
             0.0
         };

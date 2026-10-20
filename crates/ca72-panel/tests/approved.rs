@@ -12,8 +12,13 @@
 //! The large lettering (R-LETTERING, a setting) is compared with `approved-large.png`: the
 //! same mock-up, but where the large lettering changes the drawing, the renderer's pixels, as
 //! the owner approved them on 2026-10-15 (as the switch column has the renderer's).
+//!
+//! Oscillators 2's and 3's TIMED keys (decisions.md R-OSC-TIMED) came after the mock-up and were
+//! approved in their own; away from LO, as at 8' here, they are off the panel, so both pictures
+//! are the mock-up's own there again (as before 2026-10-20's keys).
 
 use ca72_panel::art::{COL, PANEL_H, PH, PLATE_H, PLATE_X, PLATE_Y, TOP, W};
+use ca72_panel::render::Timed;
 use ca72_panel::{CONTROLS, Lettering, Renderer, Scene, Skin};
 use resvg::tiny_skia::Pixmap;
 
@@ -50,8 +55,13 @@ fn drawn_as_approved(lettering: Lettering, file: &str) {
     let approved = Pixmap::load_png(format!("{}/tests/{file}", env!("CARGO_MANIFEST_DIR")))
         .expect("the approved panel");
     let mut r = Renderer::with_look(Skin::Drawn, lettering, 1.0, 1.0);
+    // (Every RANGE at half its travel is at 8': the TIMED keys are off the panel there.)
     r.render(&Scene {
         values: [0.5; CONTROLS.len()],
+        timed: [Timed {
+            division: 8,
+            inert: true,
+        }; 2],
         ..Scene::default()
     });
     let drawn = r.frame();

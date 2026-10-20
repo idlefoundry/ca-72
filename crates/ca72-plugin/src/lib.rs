@@ -32,6 +32,7 @@ pub mod smooth;
 pub mod standalone_error;
 #[cfg(feature = "standalone-production")]
 pub mod standalone_settings;
+pub mod timed;
 pub mod update;
 pub mod whats_new;
 
@@ -88,6 +89,8 @@ pub struct Ca72 {
     /// The arpeggiator (decisions.md R-ARP): every key the note sources pass goes through it, to
     /// the engine as played while it is off; and the sample of the block the events are at.
     arp: Arp,
+    /// Oscillator 3 timed's bars between blocks (decisions.md R-OSC-TIMED).
+    timed_clock: crate::timed::Clock,
     now: usize,
 }
 
@@ -144,6 +147,7 @@ impl Ca72 {
             #[cfg(feature = "fx-host")]
             fx: crate::fx::take_runner(),
             arp: Arp::default(),
+            timed_clock: crate::timed::Clock::default(),
             now: 0,
         }
     }
@@ -646,6 +650,19 @@ impl Plugin for Ca72 {
         ] {
             state.params.entry(id.to_owned()).or_insert(v);
         }
+        // And before the oscillators timed: each off, its DIVISION at its default, whatever the
+        // instance had (decisions.md R-OSC-TIMED).
+        let quarter = d.osc3_division.default_plain_value().to_index() as i32;
+        for n in 2..=3 {
+            state
+                .params
+                .entry(format!("osc{n}_timed"))
+                .or_insert(ParamValue::Bool(false));
+            state
+                .params
+                .entry(format!("osc{n}_division"))
+                .or_insert(ParamValue::I32(quarter));
+        }
         // And before RETRIGGER: off, single triggering, the instrument's own.
         if !state.params.contains_key("retrigger") {
             state
@@ -741,6 +758,7 @@ impl Plugin for Ca72 {
         self.preset_actions.cancel();
         self.clear_note_sources();
         self.arp.clear();
+        self.timed_clock.clear();
         self.smooth.land(&self.params);
         self.preset_held.fill(false);
         self.preset_notes.fill(false);
@@ -789,6 +807,12 @@ impl Plugin for Ca72 {
             .begin(self.params.arp(), clock, len, &mut |key, on| {
                 engine.event(Event::Note { key, on })
             });
+        // Oscillator 3 timed keeps the arpeggiator's clock, so that the two agree: the host's
+        // place every block while it plays, else run on at the tempo (decisions.md
+        // R-OSC-TIMED).
+        let (beats, per) = self.arp.position();
+        let at = self.timed_clock.begin(context.transport(), beats, per, len);
+        self.engine.set_position(at);
         let panic_token = context.standalone_panic_token();
         let standalone_panic = context.take_standalone_panic();
         self.local_events(standalone_panic, panic_token);
@@ -1538,6 +1562,52 @@ mod tests {
         ]);
         assert!(matches!(new.get("arp_on"), Some(ParamValue::Bool(true))));
         assert!(matches!(new.get("arp_rate"), Some(ParamValue::String(s)) if s == "1/8t"));
+    }
+
+    /// A session saved before the oscillators timed opens with each off and its DIVISION at a
+    /// quarter note, not as the instance had them (R-OSC-TIMED); one saved since keeps its own.
+    #[test]
+    fn an_old_session_opens_with_the_oscillators_free() {
+        let filtered = |params: Vec<(String, ParamValue)>| {
+            let mut s = PluginState {
+                version: "0.2.8".to_owned(),
+                params: params.into_iter().collect(),
+                fields: Default::default(),
+            };
+            Ca72::filter_state(&mut s);
+            s.params
+        };
+        let old = filtered(vec![(
+            "osc3_range".to_owned(),
+            ParamValue::String("lo".into()),
+        )]);
+        let quarter = params::Division::Quarter.to_index() as i32;
+        for n in 2..=3 {
+            let timed = old.get(&format!("osc{n}_timed"));
+            assert!(matches!(timed, Some(ParamValue::Bool(false))), "{n}");
+            let division = old.get(&format!("osc{n}_division"));
+            assert!(
+                matches!(division, Some(ParamValue::I32(i)) if *i == quarter),
+                "{n}"
+            );
+        }
+        let new = filtered(vec![
+            ("osc2_timed".to_owned(), ParamValue::Bool(true)),
+            (
+                "osc2_division".to_owned(),
+                ParamValue::String("1/16t".to_owned()),
+            ),
+        ]);
+        assert!(matches!(
+            new.get("osc2_timed"),
+            Some(ParamValue::Bool(true))
+        ));
+        assert!(matches!(new.get("osc2_division"), Some(ParamValue::String(s)) if s == "1/16t"));
+        assert!(matches!(
+            new.get("osc3_timed"),
+            Some(ParamValue::Bool(false))
+        ));
+        assert!(!new.contains_key("osc1_timed"));
     }
 
     /// `n` blocks of `len` with the host's transport playing from beat `from` at `tempo` (4/4),
@@ -3012,8 +3082,9 @@ mod tests {
         assert!(b.params.midi_map.assignments().iter().all(Option::is_none));
     }
 
-    /// The plug-in tests that use the process's budget of workers, one at a time.
-    static BUDGET_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// The plug-in tests that use the process's budget of workers, one at a time (POLY's, and
+    /// ULTRA's split crews': the timed oscillators' at ULTRA too, `crate::timed`).
+    pub(crate) static BUDGET_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct Init;
     impl InitContext<Ca72> for Init {
@@ -3023,6 +3094,20 @@ mod tests {
         fn execute(&self, _: ()) {}
         fn set_latency_samples(&self, _: u32) {}
         fn set_current_voice_capacity(&self, _: u32) {}
+    }
+
+    /// A plug-in with `params`, initialised as a host does at `rate` in blocks of 256 (`mode`
+    /// as it says).
+    pub(crate) fn initialised_with(params: Ca72Params, rate: f32, mode: ProcessMode) -> Ca72 {
+        let config = BufferConfig {
+            sample_rate: rate,
+            min_buffer_size: None,
+            max_buffer_size: 256,
+            process_mode: mode,
+        };
+        let mut p = Ca72::with_params(params);
+        assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
+        p
     }
 
     /// A plug-in, POLY as `poly`, initialised as a host does at 48 kHz in blocks of 256.

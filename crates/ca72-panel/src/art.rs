@@ -373,6 +373,31 @@ fn numbered(ticks: &[(f64, Option<i32>)], labels: &[&'static str]) -> DialMarks 
     }
 }
 
+/// The timed dial's numbered values: by their place among its eighteen (R-OSC-TIMED).
+const TIMED_NUMBERS: [(usize, &str); 8] = [
+    (0, "4×"),
+    (1, "2×"),
+    (2, "1"),
+    (5, "2"),
+    (8, "4"),
+    (11, "8"),
+    (14, "16"),
+    (17, "32"),
+];
+/// The timed dial's numbers' radius; how far above and below its centre their middles go at
+/// most (the semitone dial's ±1 and ±7: 98 out at 20 and 140 degrees, the 7s a little further
+/// for their width); and how far out across an end's number is hung, there.
+const TIMED_R: f64 = 92.0;
+const TIMED_TOP: f64 = 92.0;
+const TIMED_FOOT: f64 = 77.0;
+const TIMED_HUNG: f64 = 7.0;
+
+/// Whether the timed dial prints BARS beside its 4× and 2× (`CA72_TIMED_BARS=1`, the mock-ups'
+/// comparison; without it, none: the × says they are bars).
+fn timed_bars_caption() -> bool {
+    std::env::var("CA72_TIMED_BARS").is_ok_and(|v| v == "1")
+}
+
 fn marks(dial: Dial) -> DialMarks {
     let ten = || DialMarks {
         ticks: eleven(58.0, 71.0),
@@ -491,6 +516,51 @@ fn marks(dial: Dial) -> DialMarks {
             ticks.push((150.0, None));
             numbered(&ticks, &["–30", "–20", "–10", "0", "+10"])
         }
+        // An oscillator's FREQUENCY timed (decisions.md R-OSC-TIMED): its eighteen note values
+        // over the knob's travel, the straight ones numbered as one count (4× and 2× the bars,
+        // then 1 a bar, 2 a half note, to 32), the dotted and triplet ones between them shorter
+        // unnumbered ticks, as the arpeggiator's RATE has them. The numbers sit no higher at the
+        // top, and no lower at the foot, than the semitone dial's (the owner, 2026-10-20: "the
+        // number four runs into the word oscillator at the top"), clear of the legend above it
+        // and, under oscillator 2's, of oscillator 3's.
+        Dial::Timed => {
+            let at = |k: usize| -150.0 + 300.0 * k as f64 / crate::controls::TIMED_STEPS as f64;
+            DialMarks {
+                ticks: (0..=crate::controls::TIMED_STEPS)
+                    .map(|k| {
+                        if TIMED_NUMBERS.iter().any(|(n, _)| *n == k) {
+                            (at(k), 72.0, 80.0, 4.0)
+                        } else {
+                            (at(k), 72.0, 77.0, 3.0)
+                        }
+                    })
+                    .collect(),
+                labels: TIMED_NUMBERS
+                    .iter()
+                    .map(|&(k, t)| {
+                        let a = at(k);
+                        let (x, y) = polar(TIMED_R, a);
+                        // (No higher than the semitone dial's ±1; at the ends, no lower than its
+                        // ±7, hung out beside their ticks.)
+                        let (x, y) = if y < -TIMED_TOP {
+                            let r = TIMED_TOP / -rad(a).cos();
+                            polar(r, a)
+                        } else if y > TIMED_FOOT {
+                            (x + x.signum() * TIMED_HUNG, TIMED_FOOT)
+                        } else {
+                            (x, y)
+                        };
+                        (x.atan2(-y).to_degrees(), t, Some(x.hypot(y)))
+                    })
+                    .collect(),
+                r: TIMED_R,
+                captions: if timed_bars_caption() {
+                    vec![(-128.0, 30.0, "BARS")]
+                } else {
+                    vec![]
+                },
+            }
+        }
         // Marked in time, not evenly (as printed); the 200 ms mark is printed long ("200—").
         Dial::Time => DialMarks {
             ticks: [
@@ -513,24 +583,34 @@ fn marks(dial: Dial) -> DialMarks {
     }
 }
 
+/// Where a dial's number is printed about its centre: at its own radius if it has one, else at
+/// the dial's, wider numbers a little further out at the sides.
+fn label_at(d: &DialMarks, a: f64, t: &str, at: Option<f64>, num: f64) -> (f64, f64) {
+    let r = at.unwrap_or(
+        d.r + 0.3 * num * STRETCH * (t.chars().count() as f64 - 1.0) * rad(a).sin().abs(),
+    );
+    polar(r, a)
+}
+
 pub(crate) fn draw_dial(s: &mut Svg, cx: f64, cy: f64, dial: Dial) {
+    draw_dial_in(s, cx, cy, dial, "×");
+}
+
+/// The same, `times` the multiplication sign as the typeface prints it ([`Layout::times`]).
+fn draw_dial_in(s: &mut Svg, cx: f64, cy: f64, dial: Dial, times: &str) {
     let d = marks(dial);
     let num = s.1.number();
     put!(s, "<g transform='translate({} {})'>", N(cx), N(cy));
-    for (a, r0, r1, w) in d.ticks {
+    for &(a, r0, r1, w) in &d.ticks {
         let (x0, y0) = polar(r0, a);
         let (x1, y1) = polar(r1, a);
         line(s, x0, y0, x1, y1, w);
     }
-    for (a, t, at) in d.labels {
-        // Wider numbers sit a little further out at the sides.
-        let r = at.unwrap_or(
-            d.r + 0.3 * num * STRETCH * (t.chars().count() as f64 - 1.0) * rad(a).sin().abs(),
-        );
-        let (x, y) = polar(r, a);
-        lettered(s, x, y, t, num);
+    for &(a, t, at) in &d.labels {
+        let (x, y) = label_at(&d, a, t, at, num);
+        lettered(s, x, y, &t.replace('×', times), num);
     }
-    for (x, y, t) in d.captions {
+    for &(x, y, t) in &d.captions {
         lettered(s, x, y, t, num - 1.0);
     }
     s.0.push_str("</g>");
@@ -562,6 +642,9 @@ pub struct Layout {
     titles: Vec<Option<f64>>,
     /// The lettering's size.
     lettering: Lettering,
+    /// Whether the typeface prints the multiplication sign (the timed dial's and signs' 4× and
+    /// 2×, R-OSC-TIMED): a skin pack's may not, which prints an x instead.
+    times: bool,
 }
 
 /// The extent of a pictogram's path (its commands are absolute M, L, H and V).
@@ -665,7 +748,13 @@ impl Layout {
             legend_r,
             titles,
             lettering,
+            times: fonts.covers("×"),
         }
+    }
+
+    /// The multiplication sign, or an x where the typeface has none.
+    pub fn times(&self) -> &'static str {
+        if self.times { "×" } else { "x" }
     }
 
     /// The lettering's size.
@@ -732,6 +821,37 @@ pub fn background_surfaces(layout: &Layout, arrangement: &Arrangement) -> String
 }
 
 /// The panel's print alone: its rules, titles, dials' marks and legends.
+/// The panel's surfaces alone (the wood and the face, without the strip's): what a part of the
+/// panel's background is painted on (`Renderer::timed_part`, R-OSC-TIMED).
+pub fn panel_surfaces(layout: &Layout, arrangement: &Arrangement) -> String {
+    let mut s = Svg(String::new(), layout.lettering);
+    wood(&mut s, arrangement);
+    panel(&mut s, layout, arrangement, Ink::Surface);
+    s.0
+}
+
+/// Oscillators 2's and 3's FREQUENCY dials' print alone, as `arrangement` has their dials (the
+/// semitone dial, or the timed one: R-OSC-TIMED), where the panel's print puts them.
+pub fn dials_print(layout: &Layout, arrangement: &Arrangement) -> String {
+    let mut s = Svg(String::new(), layout.lettering);
+    put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
+    for c in arrangement
+        .controls
+        .iter()
+        .filter(|c| c.place == Place::Panel)
+    {
+        if let Kind::Knob {
+            dial: dial @ (Dial::Freq | Dial::Timed),
+            ..
+        } = c.kind
+        {
+            draw_dial_in(&mut s, c.x, c.y, dial, layout.times());
+        }
+    }
+    s.0.push_str("</g>");
+    s.0
+}
+
 pub fn panel_print(layout: &Layout, arrangement: &Arrangement) -> String {
     let mut s = Svg(String::new(), layout.lettering);
     panel(&mut s, layout, arrangement, Ink::Print);
@@ -1024,7 +1144,7 @@ fn print(s: &mut Svg, layout: &Layout, arrangement: &Arrangement) {
         .filter(|c| c.place == Place::Panel)
     {
         match c.kind {
-            Kind::Knob { dial, .. } => draw_dial(s, c.x, c.y, dial),
+            Kind::Knob { dial, .. } => draw_dial_in(s, c.x, c.y, dial, layout.times()),
             Kind::Selector(set) => selector_marks(s, c, set, layout),
             _ => {}
         }
@@ -1487,9 +1607,26 @@ pub enum Blend {
     Multiply,
 }
 
+/// An oscillator's TIMED key's cap (decisions.md R-OSC-TIMED): the strip's amber tab at 0.4 of
+/// its size (the mock-ups' composite, approved), and where its note value's sign begins, right
+/// of its centre (the mock-ups' eighth note's place).
+pub const KEY: (f64, f64) = (60.0, 24.0);
+pub const KEY_SIGN: f64 = 39.0;
+/// How far above and below the key's middle its sign may reach: half a thirty-second note's
+/// height in the large lettering, a triplet's 3 above it, and a little over.
+pub const KEY_SIGN_TOP: f64 = 26.0;
+
 /// A control's extent about its centre (left, top, right, bottom), its shadow included.
 pub fn bounds(kind: &Kind) -> [f64; 4] {
     match *kind {
+        // (The cap and its light round it, and the sign printed to its right: a note centred on
+        // it, its stem and flags at their natural length above and below.)
+        Kind::Key => [
+            -KEY.0 / 2.0 - 8.0,
+            -KEY_SIGN_TOP,
+            KEY_SIGN + 40.0,
+            KEY_SIGN_TOP,
+        ],
         Kind::Knob { big, .. } => {
             let r = if big { BIG.skirt } else { STD.skirt };
             [-(r + 3.0), -(r + 3.0), r + 6.0, r + 8.0]
@@ -1513,40 +1650,57 @@ pub fn bounds(kind: &Kind) -> [f64; 4] {
 /// leave room for at the panel's edges. A switch's and a toggle's legends are the layout's own.
 pub fn print_extent(kind: &Kind) -> [f64; 4] {
     let num = Lettering::Large.number();
-    // A text's half width at `size` (a capital about 0.62 of it, stretched as legends are).
-    let half = |t: &str, size: f64| t.chars().count() as f64 * size * 0.62 * STRETCH / 2.0;
     match *kind {
-        Kind::Knob { dial, .. } => {
-            let d = marks(dial);
-            // The numbers round the dial: each where it is printed, its box about it.
-            let mut b = [0.0f64; 4];
-            let mut grow = |x: f64, y: f64, hw: f64, hh: f64| {
-                b = [
-                    b[0].min(x - hw),
-                    b[1].min(y - hh),
-                    b[2].max(x + hw),
-                    b[3].max(y + hh),
-                ];
-            };
-            for (_, r0, r1, _) in &d.ticks {
-                grow(0.0, 0.0, r0.max(*r1), r0.max(*r1));
-            }
-            for (a, t, at) in &d.labels {
-                let (x, y) = polar(at.unwrap_or(d.r), *a);
-                grow(x, y, half(t, num) + 2.0, num * 0.6);
-            }
-            for (x, y, t) in &d.captions {
-                grow(*x, *y, half(t, num - 1.0) + 2.0, num * 0.6);
-            }
-            b
+        // (An oscillator's FREQUENCY prints note values while it is timed: either dial's.)
+        Kind::Knob {
+            dial: Dial::Freq, ..
+        } => {
+            let (one, two) = (dial_extent(Dial::Freq, num), dial_extent(Dial::Timed, num));
+            [
+                one[0].min(two[0]),
+                one[1].min(two[1]),
+                one[2].max(two[2]),
+                one[3].max(two[3]),
+            ]
         }
+        Kind::Knob { dial, .. } => dial_extent(dial, num),
         Kind::Selector(_) => {
             let r = SIX_LEGEND + 20.0;
             let x = r * rad(SIX[5]).sin().abs() + 20.0;
             [-x, -(r + num), x, 64.0]
         }
+        // A TIMED key's sign, beside it (R-OSC-TIMED).
+        Kind::Key => bounds(kind),
         _ => [0.0; 4],
     }
+}
+
+/// The box a dial's print takes about its centre, its numbers `num` in size.
+fn dial_extent(dial: Dial, num: f64) -> [f64; 4] {
+    // A text's half width at `size` (a capital about 0.62 of it, stretched as legends are).
+    let half = |t: &str, size: f64| t.chars().count() as f64 * size * 0.62 * STRETCH / 2.0;
+    let d = marks(dial);
+    // The numbers round the dial: each where it is printed, its box about it.
+    let mut b = [0.0f64; 4];
+    let mut grow = |x: f64, y: f64, hw: f64, hh: f64| {
+        b = [
+            b[0].min(x - hw),
+            b[1].min(y - hh),
+            b[2].max(x + hw),
+            b[3].max(y + hh),
+        ];
+    };
+    for (_, r0, r1, _) in &d.ticks {
+        grow(0.0, 0.0, r0.max(*r1), r0.max(*r1));
+    }
+    for &(a, t, at) in &d.labels {
+        let (x, y) = label_at(&d, a, t, at, num);
+        grow(x, y, half(t, num) + 2.0, num * 0.6);
+    }
+    for (x, y, t) in &d.captions {
+        grow(*x, *y, half(t, num - 1.0) + 2.0, num * 0.6);
+    }
+    b
 }
 
 /// Where a wheel is drawn: its parameter `v`, moved on by a MIDI keyboard's wheel `midi`
@@ -1596,6 +1750,19 @@ pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
         }
         Kind::Wheel { mark, detent, span } => {
             wheel(&mut s, mark, span, wheel_shown(detent, v, midi))
+        }
+        // (Its sign is its division's, which the renderer knows: `key`.)
+        Kind::Key => {
+            return key(
+                c,
+                Keyed {
+                    on: v >= 0.5,
+                    ..Keyed::default()
+                },
+                Lettering::Standard,
+                "×",
+                false,
+            );
         }
     }
     Layer {
@@ -2028,6 +2195,251 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                 ..Layer::default()
             }
         }
+        Kind::Key => key(
+            c,
+            Keyed {
+                on: v >= 0.5,
+                ..Keyed::default()
+            },
+            Lettering::Standard,
+            "×",
+            true,
+        ),
+    }
+}
+
+/// How an oscillator's TIMED key is shown (decisions.md R-OSC-TIMED): on or off, inert (dimmed,
+/// unlit whatever it holds, as VOICES is where it does nothing), and its oscillator's division,
+/// by its place among the eighteen (`params::Division`'s order); `hidden` away from LO.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Keyed {
+    pub on: bool,
+    pub inert: bool,
+    pub division: usize,
+    /// A word printed beside it instead of a note value: a PWM key's (decisions.md
+    /// R-VARIABLE-RECT).
+    pub word: Option<&'static str>,
+    /// Not on the panel at all: a PWM key while its oscillator's rectangle is STEPPED.
+    pub hidden: bool,
+}
+
+impl Default for Keyed {
+    fn default() -> Self {
+        // (A quarter note: the division a new patch has.)
+        Self {
+            on: false,
+            inert: false,
+            division: 8,
+            word: None,
+            hidden: false,
+        }
+    }
+}
+
+/// Whether a key comes and goes from the panel, rather than always standing on it: its cap's
+/// shadow is then its own, not the background's. Every key does: a TIMED key is on the panel
+/// only at its RANGE's LO (decisions.md R-OSC-TIMED), as a PWM key only while its rectangle is
+/// VARIABLE (R-VARIABLE-RECT).
+pub fn comes_and_goes(c: &Control) -> bool {
+    c.kind == Kind::Key
+}
+
+/// An oscillator's TIMED key (decisions.md R-OSC-TIMED), in either skin the strip's amber tab
+/// (its pictures, a skin pack's where it has them), lit from inside while on, and the note
+/// value its oscillator is timed at printed beside it in the panel's ink (the owner,
+/// 2026-10-20: "it dynamically shows whatever is selected on the oscillator"); dimmed where it
+/// does nothing, its sign with it; nothing at all where it is hidden (away from LO).
+/// (`times`: the multiplication sign as the typeface prints it, [`Layout::times`].)
+pub fn key(c: &Control, k: Keyed, lettering: Lettering, times: &str, worn: bool) -> Layer {
+    if k.hidden {
+        return Layer {
+            origin: c.centre(),
+            bounds: bounds(&Kind::Key),
+            ..Layer::default()
+        };
+    }
+    let lit = k.on && !k.inert;
+    let (w, h) = KEY;
+    let mut s = Svg::default();
+    if comes_and_goes(c) {
+        // Its cap's shadow, which the background has for a key always on the panel.
+        put!(
+            s,
+            "<defs><filter id='key-shadow' x='-0.5' y='-1' width='2' height='3'><feGaussianBlur stdDeviation='1.6'/></filter></defs><rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.35' filter='url(#key-shadow)'/>",
+            N(-w / 2.0 + 1.0),
+            N(-h / 2.0 + 2.0),
+            N(w + 2.0),
+            N(h + 2.0)
+        );
+    }
+    if lit {
+        // Its light on the face round it: a soft amber, faint (the owner is sensitive to
+        // brightness; the strip's tabs' light, at this size).
+        put!(
+            s,
+            "<defs><filter id='key-light' x='-0.5' y='-1' width='2' height='3'><feGaussianBlur stdDeviation='4.5'/></filter></defs><rect x='{}' y='{}' width='{}' height='{}' rx='5' fill='{KEY_LIGHT}' fill-opacity='0.34' filter='url(#key-light)'/>",
+            N(-w / 2.0 - 1.0),
+            N(-h / 2.0 - 1.0),
+            N(w + 2.0),
+            N(h + 2.0)
+        );
+    }
+    // The sign, printed (worn into the face in the worn skin, as the print is).
+    let opacity = match (k.inert, worn) {
+        (true, _) => 0.5,
+        (false, true) => 0.94,
+        (false, false) => 1.0,
+    };
+    put!(
+        s,
+        "<g transform='translate({} 0)' opacity='{}'>",
+        N(KEY_SIGN),
+        N(opacity)
+    );
+    match k.word {
+        // (Its capitals' middle on the key's, as the panel's legends beside a control.)
+        Some(word) => text(
+            &mut s,
+            0.0,
+            0.0,
+            word,
+            lettering.legend(),
+            Style::Legend,
+            true,
+            "",
+        ),
+        None => note_sign(
+            &mut s,
+            k.division,
+            sign_head(lettering),
+            lettering.number(),
+            times,
+        ),
+    }
+    s.0.push_str("</g>");
+    let over = if k.inert {
+        format!(
+            "<rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.5'/>",
+            N(-w / 2.0),
+            N(-h / 2.0),
+            N(w),
+            N(h)
+        )
+    } else {
+        String::new()
+    };
+    Layer {
+        origin: c.centre(),
+        bounds: bounds(&Kind::Key),
+        body: s.0,
+        sprites: vec![sprite(
+            if lit { Part::KeyLit } else { Part::Key },
+            KEY,
+            0.0,
+            (false, false),
+        )],
+        over,
+        ..Layer::default()
+    }
+}
+
+/// The lit key's light round it.
+const KEY_LIGHT: &str = "#ff8a2e";
+
+/// A note sign's notehead's height (decisions.md R-OSC-TIMED): about the panel's lettering's
+/// lower case, the note standing at its natural height above it (taller than the key: the owner,
+/// 2026-10-20, "I would rather that than have these stumpy-looking notes").
+pub fn sign_head(lettering: Lettering) -> f64 {
+    lettering.legend() * 7.0 / 19.0
+}
+
+/// Whether a two-bar sign is a double whole note (`CA72_TIMED_BREVE=1`, the mock-ups'
+/// comparison) rather than a whole note marked 2×.
+fn breve_for_two_bars() -> bool {
+    std::env::var("CA72_TIMED_BREVE").is_ok_and(|v| v == "1")
+}
+
+/// A note value's sign (decisions.md R-OSC-TIMED), its left edge at x 0 and the note centred on
+/// y 0 from its notehead to its stem's or flag's tip (the owner, 2026-10-20: "can you center
+/// everything?"; its dot and its triplet's 3 hang off it, outside the centring), its notehead
+/// `head` tall, in the panel's ink: engraved notes (`crate::notes`, GNU
+/// FreeSerif's), 4 and 2 bars a whole note marked 4× and 2× (the dial's numbers), 1 bar a whole
+/// note, then a half note to a thirty-second, a dotted value with its dot and a triplet with a
+/// small 3. `division` is its place among the eighteen; `num` the dials' numbers' size.
+pub fn note_sign(s: &mut Svg, division: usize, head: f64, num: f64, times: &str) {
+    use crate::notes::{Note, glyph};
+    // (Its value: 0 whole, 1 half, 2 quarter, 3 eighth, 4 sixteenth, 5 thirty-second; and its
+    // mark.)
+    enum Mark {
+        None,
+        Dot,
+        Triplet,
+        Times(&'static str),
+    }
+    let (value, mark) = match division {
+        0 => (0, Mark::Times("4×")),
+        1 => (0, Mark::Times("2×")),
+        2 => (0, Mark::None),
+        d => {
+            let (j, r) = ((d - 3) / 3, (d - 3) % 3);
+            match r {
+                0 => (j + 1, Mark::Dot),
+                1 => (j, Mark::Triplet),
+                _ => (j + 1, Mark::None),
+            }
+        }
+    };
+    let note = if division == 1 && breve_for_two_bars() {
+        Note::DoubleWhole
+    } else {
+        Note::Value(value.min(5) as u8)
+    };
+    let g = glyph(note);
+    let k = head / crate::notes::HEAD;
+    let dy = -(g.bounds[1] + g.bounds[3]) / 2.0 * k;
+    // (Thickened a little, as the legends are, to stand with the lettering.)
+    put!(
+        s,
+        "<g transform='translate(0 {}) scale({})' fill='{LEGEND}' stroke='{LEGEND}' stroke-width='{}' stroke-linejoin='round'>{}",
+        N(dy),
+        N(k),
+        N(0.45 / k),
+        g.path
+    );
+    let width = g.bounds[2];
+    if matches!(mark, Mark::Dot) {
+        let d = glyph(Note::Dot);
+        put!(
+            s,
+            "<g transform='translate({} 0)'>{}</g>",
+            N(width + 50.0),
+            d.path
+        );
+    }
+    s.0.push_str("</g>");
+    let (width, top) = (width * k, g.bounds[1] * k + dy);
+    match mark {
+        Mark::None | Mark::Dot => {}
+        Mark::Triplet => text(
+            s,
+            width + 1.4,
+            if value == 0 { top - 1.0 } else { top + 3.6 },
+            "3",
+            num * 0.7,
+            Style::Legend,
+            true,
+            "",
+        ),
+        Mark::Times(t) => text(
+            s,
+            width + 2.6,
+            dy,
+            &t.replace('×', times),
+            num * 0.85,
+            Style::Legend,
+            true,
+            "",
+        ),
     }
 }
 
@@ -2246,6 +2658,8 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
                 N(w + 3.0),
                 N(h + 3.0)
             ),
+            // A key's cap's is its own: it comes and goes ([`comes_and_goes`]).
+            Kind::Key => {}
             Kind::Wheel { .. } => {}
         }
     }

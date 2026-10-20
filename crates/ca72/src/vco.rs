@@ -212,6 +212,28 @@ pub struct VcoOut {
     pub rect: f64,
 }
 
+/// Where a timed oscillator's cycle stands (decisions.md R-OSC-TIMED): its phase at the
+/// sample (as the sample is given, the end of the time it covers), 0 where its ramp resets and
+/// 1 at the next reset, and the cycles a sample takes. The
+/// host's clock gives both, so that its resets fall on the clock's grid whatever the circuit
+/// would have made of them.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Timed {
+    pub phase: f64,
+    pub per: f64,
+}
+
+/// The timing current's slope against the ramp's voltage, a share of the current a volt: the
+/// converter's Early effect, R42's feedback amplifying it, at oscillator 3's LO currents, where
+/// it is the same from 1e-11 to 1e-5 A (`the_timed_ramp_bends_as_the_converter_does`). A timed
+/// ramp is bent by it as the circuit's is.
+pub const TIMED_EARLY: f64 = 0.014493;
+
+/// How far a timed oscillator may stand from its clock, cycles, and be brought back within its
+/// cycle (its ramp's slope chosen so that it resets on time); further (the host's place jumped:
+/// a locate, a loop, the transport started), it is put where the clock is at once.
+pub const TIMED_TOLERANCE: f64 = 0.02;
+
 /// An oscillator of board 1.
 #[derive(Debug, Clone)]
 pub struct Vco {
@@ -258,6 +280,8 @@ pub struct Vco {
     /// a steady drive, whose solves settle into a fixed point or a two-cycle, is not solved
     /// again (exactly; performance).
     solved: [Option<Solved>; 2],
+    /// The comparator's delay at a timed ramp's last slope, s ([`Vco::tick_timed`]).
+    timed_delay: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -317,6 +341,7 @@ impl Vco {
             resets: 0,
             sub: 0,
             solved: [None; 2],
+            timed_delay: CoreParams::default().delay[0],
         }
     }
 
@@ -360,6 +385,14 @@ impl Vco {
     /// the output's latency), and how many resets there have been.
     pub fn last_reset(&self) -> (f64, u64) {
         (self.last_reset, self.resets)
+    }
+
+    /// How long before the latest output sample the latest ramp reset was, output samples
+    /// (exact, before the output's latency), and how many resets there have been.
+    pub fn reset_ago(&self) -> (f64, u64) {
+        // (The latest sample's end, as `last_reset` counts time.)
+        let end = self.ticks as f64 - 1.0 / self.oversample as f64;
+        (end - self.last_reset, self.resets)
     }
 
     /// The outputs' delay through band-limiting and decimation, in output samples.
@@ -485,7 +518,114 @@ impl Vco {
     /// One output sample for a timing current given directly: `i0` at a ramp of 0 V and its
     /// slope `b` per volt (the Early effect). [`Vco::tick`] computes them from the inputs.
     pub fn tick_current(&mut self, i0: f64, b: f64, width: f64) -> VcoOut {
-        let a = i0 - self.core.i_leak;
+        self.tick_net(i0 - self.core.i_leak, b, width)
+    }
+
+    /// One output sample of the oscillator held to a clock (decisions.md R-OSC-TIMED): its
+    /// ramp's slope chosen each sample so that it reaches the threshold, and resets after the
+    /// comparator's delay, as the clock's next cycle starts (`t.phase` reaching 1); the slope
+    /// bent by the converter's Early effect as the circuit's is ([`TIMED_EARLY`]). The
+    /// converter, the pitch inputs and ENTROPY's drift have no part in it. An oscillator
+    /// further from its clock than [`TIMED_TOLERANCE`] is put where the clock is at once, its
+    /// outputs stepped, band-limited, as a reset steps them.
+    pub fn tick_timed(&mut self, t: Timed, width: f64) -> VcoOut {
+        let sample = self.dt * self.oversample as f64;
+        let per = if t.per.is_finite() {
+            t.per.clamp(1e-12, 0.25)
+        } else {
+            1e-12
+        };
+        let period = sample / per;
+        // (Where the clock was as the sample's time began.)
+        let phase = if t.phase.is_finite() {
+            (t.phase - per).rem_euclid(1.0)
+        } else {
+            0.0
+        };
+        // Where its own cycle stands (at its start while the ramp is held at its top or about
+        // to reset), and how far ahead of the clock that is.
+        let at_top = self.reset_in.is_some() || self.hold_left > 0.0;
+        let mut own = if at_top { 0.0 } else { self.ramp_phase(self.v) };
+        let mut ahead = own - phase;
+        ahead -= ahead.round();
+        if ahead.abs() > TIMED_TOLERANCE {
+            self.jump_to(phase, width);
+            own = self.ramp_phase(self.v);
+            ahead = own - phase;
+            ahead -= ahead.round();
+        }
+        // The time left in its cycle, and before its ramp falls again: then the slope that
+        // takes it to the threshold the comparator's delay before the cycle's end.
+        let end = (1.0 - own + ahead) * period;
+        let (from, wait) = match self.reset_in {
+            Some(r) => (self.core.v_top0, r + self.core.t_hold),
+            None => (self.v, self.hold_left),
+        };
+        // (Late, the ramp is sent down at once: the current the converter gives at most.)
+        let run = (end - wait - self.timed_delay).max(1e-6 * sample);
+        let c = self.core.c1 + self.core.c_par;
+        let fall = self.ramp_log(self.core.v_threshold) - self.ramp_log(from);
+        let a = (c * fall / (TIMED_EARLY * run)).clamp(1e-15, TIMING_MAX);
+        let b = TIMED_EARLY * a;
+        self.guess = Some(a + self.core.i_leak);
+        self.timed_delay = self.core.delay_at((a + b * self.core.v_threshold) / c);
+        self.tick_net(a, b, width)
+    }
+
+    /// How far down its ramp the voltage `v` is in a timed ramp's time from the top: the log
+    /// of its distance from the ramp's asymptote under [`TIMED_EARLY`] (the time is this over
+    /// the slope's share of the capacitance).
+    fn ramp_log(&self, v: f64) -> f64 {
+        let k = 1.0 / TIMED_EARLY;
+        crate::ulp::log((self.core.v_top0 + k) / (v + k))
+    }
+
+    /// The share of a timed ramp's time from its top to the threshold that has passed at `v`.
+    fn ramp_phase(&self, v: f64) -> f64 {
+        (self.ramp_log(v) / self.ramp_log(self.core.v_threshold)).clamp(0.0, 1.0)
+    }
+
+    /// Puts the ramp `phase` of the way along a timed ramp's time, at once (a timed
+    /// oscillator's clock jumped): its outputs stepped there, band-limited, the rectangle low
+    /// if the ramp is past its falling edge's threshold; no reset, hold or edge pending.
+    fn jump_to(&mut self, phase: f64, width: f64) {
+        let k = 1.0 / TIMED_EARLY;
+        // (At a cycle's very end, its next start: the ramp at its top.)
+        let f = if phase < 0.999 { phase.max(0.0) } else { 0.0 };
+        let v =
+            (self.core.v_top0 + k) * crate::ulp::exp(-f * self.ramp_log(self.core.v_threshold)) - k;
+        let sh = self.shaper;
+        let (buf0, buf1) = (
+            sh.buf_gain * self.v + sh.buf_offset,
+            sh.buf_gain * v + sh.buf_offset,
+        );
+        if self.outputs[0] {
+            self.saw.step(sh.saw_ratio * (buf1 - buf0), 1.0);
+        }
+        if self.outputs[1] {
+            self.tri.step(triangle(buf1) - triangle(buf0), 1.0);
+        }
+        let fall_buf = sh.rect_fall0 + sh.rect_per_width * width;
+        let low = v <= (fall_buf - sh.buf_offset) / sh.buf_gain;
+        if low != self.rect_is_low && self.outputs[2] {
+            let (from, to) = if low {
+                (sh.rect_high, sh.rect_low)
+            } else {
+                (sh.rect_low, sh.rect_high)
+            };
+            self.rect.step(to - from, 1.0);
+        }
+        self.rect_is_low = low;
+        self.v = v;
+        self.hold_left = 0.0;
+        self.reset_in = None;
+        self.rise_in = None;
+        self.fall_in = None;
+    }
+
+    /// One output sample for the ramp's net current `a` at 0 V (the timing current less the
+    /// leakage) and its slope `b` a volt.
+    fn tick_net(&mut self, a: f64, b: f64, width: f64) -> VcoOut {
         let c = self.core.c1 + self.core.c_par;
         let sh = self.shaper;
         let fall_buf = sh.rect_fall0 + sh.rect_per_width * width;

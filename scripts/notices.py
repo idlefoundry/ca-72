@@ -32,6 +32,9 @@ PLATFORMS = [
 ]
 FONT = "third_party/urw-gothic"
 FONT_COPYRIGHT = "Copyright 2014 by (URW)++ Design & Development"
+# The TIMED keys' notes (decisions.md R-OSC-TIMED): a subset of GNU FreeFont's FreeSerif.
+NOTES = "third_party/gnu-freefont"
+NOTES_COPYRIGHT = "Copyright 2002, 2003, 2005, 2008, 2009, 2010, 2012 GNU Freefont contributors"
 # The Audio Unit's wrapper and what it is built with, vendored (VENDORED.md, PATCHES.md): the
 # name, where it is from, its licence, and the files whose text is its notice.
 AUV2 = [
@@ -249,6 +252,7 @@ def render():
     out.append(f"  The Rust standard library, Rust {toolchain()}  (MIT OR Apache-2.0, used under MIT)")
     out.append(f"  The VST 3 SDK's interfaces, by Steinberg  (MIT; the effects' helper)")
     out.append(f"  URW Gothic  (AGPL-3.0 with a font exception)")
+    out.append(f"  GNU FreeFont's FreeSerif, its notes  (GPL-3.0-or-later with a font exception)")
     for name, _, expr, _ in AUV2:
         out.append(f"  {name}  ({expr}; the Audio Unit)")
     out.append("")
@@ -281,6 +285,19 @@ def render():
     font = os.path.join(ROOT, FONT)
     out.append(text(os.path.join(font, "LICENSE")))
     out.append(text(os.path.join(font, "COPYING")))
+    out.append("=" * 78)
+    out.append("GNU FreeFont's FreeSerif, the TIMED keys' notes (a subset)  https://www.gnu.org/software/freefont/")
+    out.append(NOTES_COPYRIGHT)
+    out.append("-" * 78)
+    out.append(
+        "Built into the plug-ins under the GNU General Public License, version 3 or later, as the\n"
+        "plug-ins are. Its licensing statement and font exception, from its README:\n"
+    )
+    readme = text(os.path.join(ROOT, NOTES, "README"))
+    start = readme.index("Free UCS scalable fonts is free software")
+    end = readme.index("Files and their suffixes")
+    out.append(readme[start:end].rstrip() + "\n")
+    out.append("Its licence is the GNU General Public License, version 3, the plug-ins' own (LICENSE).\n")
     for name, url, _, files in AUV2:
         out.append("=" * 78)
         out.append(f"{name}  {url}")
