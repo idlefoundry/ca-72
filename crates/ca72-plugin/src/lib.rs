@@ -16,6 +16,7 @@ pub mod fx_view;
 pub mod helper;
 pub mod learn;
 pub mod learning;
+pub mod lfo;
 pub mod library;
 pub mod local_notes;
 pub mod mod_wheel;
@@ -605,6 +606,16 @@ impl Plugin for Ca72 {
             .unwrap_or_else(drive::unmeasured);
         if let Ok(t) = serde_json::to_string(&curve) {
             state.fields.insert(drive::STATE_KEY.to_owned(), t);
+        }
+        // A state without the LFOs' assignments (saved before them), or with ones not
+        // understood, opens with none, whatever the instance had (decisions.md R-LFO).
+        let lfo = state
+            .fields
+            .get(lfo::STATE_KEY)
+            .and_then(|t| serde_json::from_str::<lfo::Saved>(t).ok())
+            .unwrap_or_default();
+        if let Ok(t) = serde_json::to_string(&lfo) {
+            state.fields.insert(lfo::STATE_KEY.to_owned(), t);
         }
         // The pre-0.2.7 ENTROPY range becomes 5..100 %, including an absent amount's
         // old default (R-ENTROPY-FLOOR). Automation belongs to the host and is left to it.

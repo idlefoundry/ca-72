@@ -131,7 +131,7 @@ impl<T: Enum + PartialEq + 'static> SoundParam for EnumParam<T> {
 
 /// Every parameter a preset sets, by its ID (all but the PITCH wheel and the bypass).
 pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
-    vec![
+    let mut all: Vec<(&'static str, &dyn SoundParam)> = vec![
         ("tune", &p.tune),
         ("glide", &p.glide),
         ("mod_mix", &p.mod_mix),
@@ -226,7 +226,15 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("osc3_shape", &p.osc3_shape),
         ("osc3_shape_mod", &p.osc3_shape_mod),
         ("osc3_shape_mod_dir", &p.osc3_shape_mod_dir),
-    ]
+    ];
+    // The LFOs (decisions.md R-LFO): a preset that does not name them has each at its default;
+    // what they modulate is the preset's too (`lfo::Patch::values`), none where it names none.
+    for (n, ids) in crate::lfo::PARAM_IDS.iter().enumerate() {
+        for (id, (_, q)) in ids.iter().zip(p.lfo(n).sound_params()) {
+            all.push((id, q));
+        }
+    }
+    all
 }
 
 /// The player's parameters, not the sound's: MIDI BEND RANGE suits the keyboard played. A
@@ -266,11 +274,14 @@ pub(crate) fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
 
 /// The current sound as a preset's values (plain, four decimals): not [`PLAYERS`]'s.
 pub fn values_now(p: &Ca72Params) -> Vec<(String, f64)> {
-    sound_params(p)
+    let mut values: Vec<(String, f64)> = sound_params(p)
         .into_iter()
         .filter(|(id, _)| !PLAYERS.contains(id))
         .map(|(id, q)| (id.to_owned(), (q.plain() * 1e4).round() / 1e4))
-        .collect()
+        .collect();
+    // (What the LFOs modulate, and their EDGES: decisions.md R-LFO.)
+    values.extend(p.lfo_patch.values());
+    values
 }
 
 /// Where a preset is from, as a row says it: `EDITED` (the user's version of a factory
@@ -594,6 +605,8 @@ impl Browser {
                 q.set_once(s, v);
             }
         }
+        // What its LFOs modulate: none where it names none (decisions.md R-LFO).
+        p.lfo_patch.load_values(&e.sound.values);
         // Its AUTO GAIN curve in force at once, nothing measured (decisions.md
         // R-AUTO-GAIN-DRIVE); a preset saved before curves keeps the one in force.
         if let Some(db) = e.sound.curve(p.quality.value() == QualityMode::Lo) {
@@ -620,6 +633,8 @@ impl Browser {
                 }
             }
         }
+        // (No LFO assigned, as a fresh instance: decisions.md R-LFO.)
+        p.lfo_patch.clear();
         // (AUTO GAIN's curve a fresh instance's too: the presets' average.)
         p.drive_curve.load(&crate::drive::unmeasured());
         Self::set_current(p, "");

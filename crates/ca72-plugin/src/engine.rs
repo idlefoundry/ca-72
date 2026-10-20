@@ -166,6 +166,9 @@ pub struct Controls {
     /// clock ([`Engine::set_position`]) while its RANGE is at LO; none, or at any other RANGE,
     /// its own.
     pub timed: [Option<Length>; 3],
+    /// The LFOs (decisions.md R-LFO): their settings, assignments and the assigned knobs'
+    /// travel; none assigned, nothing more runs.
+    pub lfo: crate::lfo::Lfos,
 }
 
 /// How far a voice's note's pressure (0..1) and timbre (-1..1, 0 at rest) move it (decisions.md
@@ -230,6 +233,7 @@ impl Default for Controls {
             ultra: false,
             reach: Reach::default(),
             timed: [None; 3],
+            lfo: crate::lfo::Lfos::default(),
         }
     }
 }

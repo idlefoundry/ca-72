@@ -69,6 +69,9 @@ pub struct Settings {
     /// R-MPE): its centre unless set. Kept as `timbre_rest`, "centre", "zero" (0..1 from
     /// 0, as the CA-72 first had it) or "start" (each note's from where it began).
     pub timbre_rest: crate::expression::TimbreRest,
+    /// Each LFO's colour (decisions.md R-LFO), its scope right-clicked: amber, green, blue and
+    /// red unless set. Kept as `lfo_colors`, a list of four of `crate::lfo::Phosphor`'s words.
+    pub lfo_colors: [crate::lfo::Phosphor; crate::lfo::LFOS],
 }
 
 /// A skin pack's id, as its manifest gives it (lower-case letters, digits, `-` and `.`, at
@@ -126,6 +129,8 @@ pub enum Change {
     Agents(bool),
     Mpe(crate::expression::Mode),
     TimbreRest(crate::expression::TimbreRest),
+    /// LFO `.0`'s (0 to 3) colour.
+    LfoColor(usize, crate::lfo::Phosphor),
 }
 
 impl Change {
@@ -169,6 +174,14 @@ impl Change {
             Change::Agents(on) => ("agents", on.into()),
             Change::Mpe(mode) => ("mpe", mode.word().into()),
             Change::TimbreRest(rest) => ("timbre_rest", rest.word().into()),
+            Change::LfoColor(lfo, color) => {
+                let mut colors = lfo_colors(t);
+                if let Some(c) = colors.get_mut(lfo) {
+                    *c = color;
+                }
+                let words = colors.iter().map(|c| toml::Value::from(c.word()));
+                ("lfo_colors", toml::Value::Array(words.collect()))
+            }
         };
         t.insert(key.into(), value);
     }
@@ -191,8 +204,23 @@ impl Default for Settings {
             agents: false,
             mpe: crate::expression::Mode::Auto,
             timbre_rest: crate::expression::TimbreRest::Centred,
+            lfo_colors: crate::lfo::COLORS,
         }
     }
+}
+
+/// The LFOs' colours a settings' file names (`lfo_colors`): each word it has that is a colour's,
+/// the default for the rest.
+fn lfo_colors(t: &toml::Table) -> [crate::lfo::Phosphor; crate::lfo::LFOS] {
+    let mut colors = crate::lfo::COLORS;
+    if let Some(a) = t.get("lfo_colors").and_then(toml::Value::as_array) {
+        for (c, w) in colors.iter_mut().zip(a) {
+            if let Some(p) = w.as_str().and_then(crate::lfo::Phosphor::of_word) {
+                *c = p;
+            }
+        }
+    }
+    colors
 }
 
 /// A TEMPO within its range (`params::TEMPO_RANGE`).
@@ -275,6 +303,7 @@ impl Settings {
                 .and_then(toml::Value::as_str)
                 .and_then(crate::expression::TimbreRest::of_word)
                 .unwrap_or(d.timbre_rest),
+            lfo_colors: lfo_colors(&t),
             mod_wheel_source: match t.get("mod_wheel_source").and_then(toml::Value::as_str) {
                 Some("channel_aftertouch") => Source::ChannelPressure,
                 Some("poly_aftertouch") => Source::PolyPressure,
@@ -311,6 +340,11 @@ impl Settings {
             Change::Agents(on) => self.agents = on,
             Change::Mpe(mode) => self.mpe = mode,
             Change::TimbreRest(rest) => self.timbre_rest = rest,
+            Change::LfoColor(lfo, color) => {
+                if let Some(c) = self.lfo_colors.get_mut(lfo) {
+                    *c = color;
+                }
+            }
         }
     }
 
@@ -1057,6 +1091,7 @@ mod tests {
             agents: true,
             mpe: crate::expression::Mode::Auto,
             timbre_rest: crate::expression::TimbreRest::Centred,
+            lfo_colors: crate::lfo::COLORS,
         };
         assert_eq!(Settings::read(&path), s);
         assert!(
@@ -1152,6 +1187,7 @@ mod tests {
                 agents: false,
                 mpe: crate::expression::Mode::Auto,
                 timbre_rest: crate::expression::TimbreRest::Centred,
+                lfo_colors: crate::lfo::COLORS,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))

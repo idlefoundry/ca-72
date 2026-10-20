@@ -21,6 +21,8 @@ pub(crate) struct PresetActions {
     prepared_generation: AtomicU64,
     name: Mutex<Option<(String, String)>>,
     values: Vec<(String, ParamPtr, AtomicU32)>,
+    /// The prepared preset's LFO assignments and EDGES (decisions.md R-LFO).
+    lfo: crate::lfo::Patch,
 }
 
 impl PresetActions {
@@ -39,6 +41,7 @@ impl PresetActions {
             prepared_generation: AtomicU64::new(0),
             name: Mutex::new(None),
             values,
+            lfo: crate::lfo::Patch::default(),
         }
     }
 
@@ -130,6 +133,8 @@ impl PresetActions {
                 Ordering::Relaxed,
             );
         }
+        // (What its LFOs modulate, staged here and taken at `apply`: decisions.md R-LFO.)
+        self.lfo.load_values(&entry.sound.values);
         if let Ok(mut pending) = self.name.lock() {
             *pending = Some((current, entry.sound.name.clone()));
         }
@@ -153,6 +158,7 @@ impl PresetActions {
                     context.set_parameter_normalized(*ptr, v, 0);
                 }
             }
+            self.params.lfo_patch.copy_from(&self.lfo);
         }
         self.stage.store(2, Ordering::Release);
         true

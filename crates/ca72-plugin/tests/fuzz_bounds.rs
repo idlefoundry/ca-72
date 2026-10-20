@@ -111,6 +111,8 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
                 }
             })
         }),
+        // (No LFO: the fuzz's sequence as it was; `lfos_at_the_ends` adds them.)
+        lfo: Default::default(),
     }
 }
 

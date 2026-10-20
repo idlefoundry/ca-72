@@ -541,6 +541,15 @@ pub struct Ca72Params {
     /// instead of gliding there (`crate::smooth`; decisions.md R-KNOB-GLIDE). Not the session's.
     pub lands: crate::smooth::Lands,
 
+    /// The LFOs' assignments and EDGES (decisions.md R-LFO): the patch's, saved with the session
+    /// and with presets (`lfoN_to_<target>`, `lfoN_edges`), not host parameters. A session or
+    /// a preset saved before has none (`Ca72::filter_state`, `presets::targets`).
+    #[persist = "lfo"]
+    pub lfo_patch: Arc<crate::lfo::Patch>,
+    /// Each LFO's present value and phase from the audio thread, for the editor (R-LFO). Not
+    /// the session's.
+    pub lfo_scope: Arc<crate::lfo::Scope>,
+
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
     pub bypass: BoolParam,
@@ -831,6 +840,18 @@ pub struct Ca72Params {
     pub osc3_shape_mod: BoolParam,
     #[id = "osc3_shape_mod_dir"]
     pub osc3_shape_mod_dir: EnumParam<ShapeModDirection>,
+    // The four LFOs (decisions.md R-LFO), the plug-in's own, after everything else, so that no
+    // parameter before them moves: `lfo1_waveform` to `lfo4_mono`. A preset's, as any sound
+    // parameter; a preset or a session saved before reads each at its default, none
+    // assigned, so none of them does anything.
+    #[nested(id_prefix = "lfo1", group = "LFO 1")]
+    pub lfo1: crate::lfo::LfoParams,
+    #[nested(id_prefix = "lfo2", group = "LFO 2")]
+    pub lfo2: crate::lfo::LfoParams,
+    #[nested(id_prefix = "lfo3", group = "LFO 3")]
+    pub lfo3: crate::lfo::LfoParams,
+    #[nested(id_prefix = "lfo4", group = "LFO 4")]
+    pub lfo4: crate::lfo::LfoParams,
 }
 
 /// How far PRESSURE and TIMBRE move a voice's cutoff at most, either way, octaves.
@@ -997,6 +1018,8 @@ impl Default for Ca72Params {
             heard: Arc::default(),
 
             lands: crate::smooth::Lands::default(),
+            lfo_patch: Arc::default(),
+            lfo_scope: Arc::default(),
             drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
@@ -1176,6 +1199,10 @@ impl Default for Ca72Params {
                 "Osc 3 Shape Mod Direction",
                 ShapeModDirection::Clockwise,
             ),
+            lfo1: crate::lfo::LfoParams::new(1),
+            lfo2: crate::lfo::LfoParams::new(2),
+            lfo3: crate::lfo::LfoParams::new(3),
+            lfo4: crate::lfo::LfoParams::new(4),
         }
     }
 }
@@ -1328,6 +1355,16 @@ impl Ca72Params {
         }
     }
 
+    /// LFO `n`'s (0 to 3; past 3, the fourth) parameters (decisions.md R-LFO).
+    pub fn lfo(&self, n: usize) -> &crate::lfo::LfoParams {
+        match n {
+            0 => &self.lfo1,
+            1 => &self.lfo2,
+            2 => &self.lfo3,
+            _ => &self.lfo4,
+        }
+    }
+
     /// Whether oscillator `n`'s waveform is CONTINUOUS.
     pub fn continuous(&self, n: usize) -> bool {
         self.shape_params(n).0.value() == WaveMode::Continuous
@@ -1448,6 +1485,7 @@ impl Ca72Params {
                 timbre_filter: value(&self.timbre_filter),
             },
             timed: self.timed(),
+            lfo: crate::lfo::controls(self, knob),
         }
     }
 }
