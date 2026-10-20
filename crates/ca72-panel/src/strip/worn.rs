@@ -17,8 +17,8 @@ use resvg::tiny_skia::{PathBuilder, Pixmap, PixmapPaint, Transform};
 use resvg::usvg;
 
 use super::{
-    Bank, DISPLAY, Field, KEY_HEIGHT, NAME, Readout, StripControl, StripScene, StripTarget, TAB,
-    blank, keys, span,
+    Bank, DISPLAY, Field, KEY_HEIGHT, Rail, Readout, StripControl, StripScene, StripTarget, TAB,
+    blank, span,
 };
 use crate::art::{self, PANEL_H};
 use crate::fonts::{FAMILY, Fonts};
@@ -28,11 +28,53 @@ use crate::svg::{N, Svg, put};
 
 /// The panel's neon orange (the mock-up's): lit segments, dots and drops; the glow round a
 /// lit dot (the mock-up's); the drops' light (the mock-up's, added in).
-const ORANGE: (u8, u8, u8) = (255, 112, 40);
-const ORANGE_GLOW: (u8, u8, u8) = (255, 72, 10);
+pub(super) const ORANGE: (u8, u8, u8) = (255, 112, 40);
+pub(super) const ORANGE_GLOW: (u8, u8, u8) = (255, 72, 10);
 const DROP_LIGHT: (f64, f64, f64) = (172.0, 80.0, 30.0);
-const SEG_ON: &str = "#ff7028";
 const SEG_OFF_OPACITY: f64 = 0.05;
+
+/// What the strip lights its readouts, displays and drops with: the panel's neon orange, or a
+/// look's colour (decisions.md R-SKIN-PACKS), its glow and the drops' light made from it as the
+/// orange's are.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Lamp {
+    pub(crate) on: (u8, u8, u8),
+    pub(crate) glow: (u8, u8, u8),
+    drop: (f64, f64, f64),
+}
+
+impl Lamp {
+    pub(crate) const ORANGE: Lamp = Lamp {
+        on: ORANGE,
+        glow: ORANGE_GLOW,
+        drop: DROP_LIGHT,
+    };
+
+    /// A look's lamp of colour `c`.
+    pub(crate) fn of((r, g, b): (u8, u8, u8)) -> Lamp {
+        let k = |v: u8, a: f64, o: f64| f64::from(v) * a / o;
+        let glow =
+            |v: u8, a: u8, o: u8| (k(v, f64::from(a), f64::from(o))).round().min(255.0) as u8;
+        Lamp {
+            on: (r, g, b),
+            glow: (
+                glow(r, ORANGE_GLOW.0, ORANGE.0),
+                glow(g, ORANGE_GLOW.1, ORANGE.1),
+                glow(b, ORANGE_GLOW.2, ORANGE.2),
+            ),
+            drop: (
+                k(r, DROP_LIGHT.0, f64::from(ORANGE.0)),
+                k(g, DROP_LIGHT.1, f64::from(ORANGE.1)),
+                k(b, DROP_LIGHT.2, f64::from(ORANGE.2)),
+            ),
+        }
+    }
+
+    /// Its lit segments' colour, `#rrggbb`.
+    fn seg(&self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.on.0, self.on.1, self.on.2)
+    }
+}
 /// The tabs: translucent amber plastic lit from inside (the CA-74's amber, tried there: lit
 /// `[1.25, 0.55 g^1.6, 0.08 g^3]` of the glow `g`, unlit `[0.26, 0.062, 0.003]` of the shade),
 /// and their light on the face round them. The glow over `TAB_KNEE` pressed down to a quarter
@@ -40,7 +82,7 @@ const SEG_OFF_OPACITY: f64 = 0.05;
 /// owner, 2026-10-10: "these orange buttons get too bright on the edges. looks unnatural": the
 /// cap's walls, which carry the light to its edge, and the bevel's catch light had gone a hot
 /// yellow-white round it, brighter than its face).
-const AMBER: Tint = Tint {
+pub(super) const AMBER: Tint = Tint {
     lit: |g| {
         let g = if g > TAB_KNEE {
             TAB_KNEE + (g - TAB_KNEE) * 0.25
@@ -67,7 +109,7 @@ const CORNER_FROM: f32 = 0.3;
 /// The lit cap with its outermost band darkened ([`EDGE_DARKER`]) and its corners more
 /// ([`CORNER_DARKER`]), in linear light, as far out as the kit's cap measures it (its rounded
 /// square, its middle drawn out across).
-fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Lighting {
+pub(super) fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Lighting {
     let lin = |v: u8| {
         let v = f32::from(v) / 255.0;
         if v <= 0.04045 {
@@ -116,24 +158,24 @@ fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_materials::Li
     }
     l
 }
-const AMBER_LIGHT: Underlight = Underlight {
+pub(super) const AMBER_LIGHT: Underlight = Underlight {
     rim: [0.6, 0.2, 0.04],
     light: [0.6, 0.17, 0.03],
 };
 /// The tabs' and the keys' print.
-const TAB_PRINT: &str = "#2a1006";
+pub(super) const TAB_PRINT: &str = "#2a1006";
 const KEY_PRINT: &str = "#d9d2c0";
 /// The drops move on at most this far apart, seconds (30 a second).
 const STEP_S: f64 = 1.0 / 30.0;
 /// The name's dots' pitch, and the drops' sizes (a sounding voice's, an idle one's: the
 /// mock-up's, the owner, 2026-10-10: "I want it to go back to the red pictured here"), units.
-const DOT: f64 = 5.0;
+pub(super) const DOT: f64 = 5.0;
 const DROP: f64 = 25.0;
 const IDLE_DROP: f64 = 15.0;
 /// Where a capital's middle is, above the name's window's middle: a capital stands in the
 /// window's middle, as near as the descenders below it leave room for (the owner: "the preset
 /// text needs to be vertically centered").
-const CAP_LIFT: f64 = 2.0;
+pub(super) const CAP_LIFT: f64 = 2.0;
 
 /// The strip's parts at a scale: its frame, what never changes, the caps and light resampled,
 /// the readouts as last drawn, the drops.
@@ -161,6 +203,17 @@ pub struct StripRenderer {
     /// Every frame drawn whole (the tests' reference for one drawn in parts).
     whole: bool,
     keyboard: crate::keyboard::Renderer,
+    /// The drawing's row the frame it is drawn over begins at (the panel renderer's
+    /// `top_px`: 0 for the official panel, less for a taller one).
+    under_top: i32,
+    /// What it lights with, and its tabs' and keys' print (a look's, else the built-in).
+    lamp: Lamp,
+    tab_print: String,
+    key_print: String,
+    /// The tabs lit from a look's own picture of them lit: no light spilt round them.
+    own_lit: bool,
+    /// The rail's keys: the plug-ins', or the standalone's with FX (decisions.md R-FX-DRAWER).
+    rail: Rail,
 }
 
 impl fmt::Debug for StripRenderer {
@@ -172,12 +225,12 @@ impl fmt::Debug for StripRenderer {
 }
 
 /// A readout drawn: what it reads, lit or dark, and the patch of the frame it covers.
-struct Reading {
-    text: String,
-    lit: bool,
-    left: i32,
-    top: i32,
-    patch: Pixmap,
+pub(super) struct Reading {
+    pub(super) text: String,
+    pub(super) lit: bool,
+    pub(super) left: i32,
+    pub(super) top: i32,
+    pub(super) patch: Pixmap,
 }
 
 impl StripRenderer {
@@ -214,7 +267,89 @@ impl StripRenderer {
             shown: None,
             damage: None,
             whole: false,
+            under_top: 0,
+            lamp: Lamp::ORANGE,
+            tab_print: TAB_PRINT.to_owned(),
+            key_print: KEY_PRINT.to_owned(),
+            own_lit: false,
+            rail: Rail::Plugin,
         }
+    }
+
+    /// Drawn in `look`'s pictures, colours and typeface for the strip, where it has them
+    /// (decisions.md R-SKIN-PACKS): the tabs' caps unlit and lit, the rail's keys' cap, the
+    /// glass, the lamps' colour, the tabs' and keys' print.
+    pub fn set_look(&mut self, look: &crate::look::Look) {
+        let png = |b: &[u8]| Pixmap::decode_png(b).expect("a built-in picture decodes");
+        let size = |name: &str| crate::skin::slot_size(name).unwrap_or((1, 1));
+        let pack = |name: &str| look.pictures.get(name).and_then(|p| p.picture(size(name)));
+        let button = png(BUTTON);
+        self.lighting = match (pack("tab"), pack("tab-lit")) {
+            // (A square cap, as the built-in one: widened to the tab's proportions.)
+            (Some(unlit), Some(lit)) => plugin_kit_materials::Lighting {
+                unlit: widened(&unlit, TAB.0 / TAB.1),
+                lit: widened(&lit, TAB.0 / TAB.1),
+            },
+            (tab, _) => edge_eased(plugin_kit_materials::lighting(
+                tab.as_ref().unwrap_or(&button),
+                TAB.0 / TAB.1,
+                AMBER,
+            )),
+        };
+        self.own_lit = pack("tab-lit").is_some();
+        self.button = pack("key").unwrap_or(button);
+        self.glass = pack("glass").unwrap_or_else(|| png(GLASS));
+        let hex = |(r, g, b): (u8, u8, u8)| format!("#{r:02x}{g:02x}{b:02x}");
+        let c = look.colours;
+        self.lamp = c.lamp.map_or(Lamp::ORANGE, Lamp::of);
+        if let Some((r, g, b)) = c.drops {
+            self.lamp.drop = (f64::from(r), f64::from(g), f64::from(b));
+        }
+        self.tab_print = c.tab_print.map_or(TAB_PRINT.to_owned(), hex);
+        self.key_print = c.key_print.map_or(KEY_PRINT.to_owned(), hex);
+        let fonts = look
+            .fonts
+            .and_then(|(regular, bold)| Fonts::with(regular, bold).ok())
+            .unwrap_or_default();
+        self.options = usvg::Options {
+            fontdb: fonts.database(),
+            font_family: FAMILY.into(),
+            ..usvg::Options::default()
+        };
+        (self.still, self.print, self.lit_tab) = (None, None, None);
+        self.base = None;
+        self.glows.clear();
+        self.readouts.clear();
+        self.shown = None;
+        self.keyboard.set_look(look, self.lamp);
+    }
+
+    /// Drawn over a panel renderer's frame beginning at the drawing's row `top` (its
+    /// `top_px`): the strip is the same, its place in that frame not.
+    pub fn set_under_top(&mut self, top: i32) {
+        if top != self.under_top {
+            self.under_top = top;
+            self.base = None;
+            self.shown = None;
+        }
+    }
+
+    /// The rail's keys `rail`'s from now on (its still parts drawn again for them).
+    pub fn set_rail(&mut self, rail: Rail) {
+        if rail != self.rail {
+            self.rail = rail;
+            (self.still, self.print, self.base) = (None, None, None);
+            self.shown = None;
+        }
+    }
+
+    pub fn rail(&self) -> Rail {
+        self.rail
+    }
+
+    /// Each key of the rail: its middle, width and target.
+    fn keys(&self) -> impl Iterator<Item = (f64, f64, BarTarget)> + use<> {
+        self.rail.keys().iter().copied()
     }
 
     pub fn scale(&self) -> f64 {
@@ -306,7 +441,7 @@ impl StripRenderer {
         // differently, the drops' window while they move. (The drawing's change cut to the
         // strip first: a change above it, QUALITY's opening's, made the strip from the top of
         // its window over, almost all of it, at every tick.)
-        let top = (PANEL_H * self.scale).round() as i32;
+        let top = (PANEL_H * self.scale).round() as i32 - self.under_top;
         let mut dirty = None;
         if self.whole || self.base.is_none() {
             self.make_base(under, all);
@@ -362,6 +497,7 @@ impl StripRenderer {
             (dw / 2.0 - 40.0) * s,
             s,
             detune,
+            self.lamp.drop,
         );
     }
 
@@ -376,7 +512,7 @@ impl StripRenderer {
             return;
         };
         let (fw, fh) = (base.width() as i32, base.height() as i32);
-        let top = (PANEL_H * s).round() as i32;
+        let top = (PANEL_H * s).round() as i32 - self.under_top;
         let (uw, uh) = (under.width() as i32, under.height() as i32);
         let Some([x0, y0, x1, y1]) = within(rect, [0, 0, fw.min(uw), fh.min((uh - top).max(0))])
         else {
@@ -426,7 +562,7 @@ impl StripRenderer {
 
     /// Where the name's dots draw.
     fn name_part(&self) -> [i32; 4] {
-        let (x, y, w, h) = NAME;
+        let (x, y, w, h) = self.rail.name();
         self.pixels((x - 8.0, y - 8.0, x + w + 8.0, y + h + 8.0))
     }
 
@@ -445,7 +581,8 @@ impl StripRenderer {
 
     /// Where a key of the rail draws.
     fn key_part(&self, t: BarTarget) -> [i32; 4] {
-        let (x, w) = keys()
+        let (x, w) = self
+            .keys()
             .find(|k| k.2 == t)
             .map_or((0.0, 0.0), |(x, w, _)| (x, w));
         let y = super::RAIL_Y;
@@ -505,7 +642,7 @@ impl StripRenderer {
         }
         if was.bar != now.bar {
             out.push(self.name_part());
-            out.extend(keys().map(|k| self.key_part(k.2)));
+            out.extend(self.keys().map(|k| self.key_part(k.2)));
         }
         if was.hover != now.hover {
             out.extend(self.hover_part(was.hover));
@@ -584,7 +721,7 @@ impl StripRenderer {
                     }
                 }
             };
-            if let Some(g) = glow {
+            if let Some(g) = glow.filter(|_| !self.own_lit) {
                 g.light(&mut self.frame);
             }
             if let Some(cap) = &self.lit_tab {
@@ -615,25 +752,27 @@ impl StripRenderer {
         // The preset's name, its star and arrow (dots); MIDI Learn's ring round the control it
         // waits for; the favourite's key; the pointer's part.
         if meets(self.name_part(), r) {
-            name(&mut self.frame, s, &scene.bar);
+            name(&mut self.frame, s, self.rail, &scene.bar, &self.lamp);
         }
         if meets(self.signs_part(scene), r) {
             let mut o = Svg::default();
             if let Some(c) = scene.learning.filter(|_| scene.keyboard.is_none()) {
                 ring(&mut o, c);
             }
-            star_key(&mut o, scene.bar.favorite);
-            hovered(&mut o, scene.hover);
+            star_key(&mut o, self.rail, scene.bar.favorite, &self.key_print);
+            hovered(&mut o, self.rail, scene.hover);
             svg_over(&self.options, &mut self.frame, s, &o.0);
         }
         // The print over the caps.
         if let Some(p) = &self.print {
             p.over(&mut self.frame, r);
         }
-        for (x, width, target) in keys() {
+        for (x, width, target) in self.keys() {
             let active = match target {
                 BarTarget::Panel => scene.bar.panel,
                 BarTarget::Keyboard => scene.bar.keyboard,
+                BarTarget::Arp => scene.bar.arp,
+                BarTarget::Fx => scene.bar.fx,
                 _ => false,
             };
             if active && meets(self.key_part(target), r) {
@@ -670,7 +809,7 @@ impl StripRenderer {
             }
         }
         // The keys: the charcoal cap, drawn out wider for SAVE.
-        for (x, w, _) in keys() {
+        for (x, w, _) in self.keys() {
             let cap = widened(&self.button, w / KEY_HEIGHT);
             sprite(&mut still, &cap, s, at((x, super::RAIL_Y)), (w, KEY_HEIGHT));
         }
@@ -683,15 +822,17 @@ impl StripRenderer {
         glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 5.0);
         // The name's: its bezel on the rail's wood, then its glass.
         let mut bezel = Svg::default();
-        super::name_bezel(&mut bezel, -PANEL_H);
+        super::name_bezel(&mut bezel, self.rail, -PANEL_H);
         svg_over(&self.options, &mut still, s, &bezel.0);
-        let (x, y, w, h) = NAME;
+        let (x, y, w, h) = self.rail.name();
         glass(&mut still, &self.glass, s, (x, y - PANEL_H, w, h), 3.0);
         // The name's dots, every one faintly there.
         let r = DOT * 0.36 * s;
         let mut unlit = PathBuilder::new();
-        name_dots(s, |_, _, _, (px, py)| unlit.push_circle(px, py, r as f32));
-        fill(&mut still, unlit, ORANGE, 0.06);
+        name_dots(s, self.rail, |_, _, _, (px, py)| {
+            unlit.push_circle(px, py, r as f32);
+        });
+        fill(&mut still, unlit, self.lamp.on, 0.06);
         self.still = Some(Sparse::new(still));
         // The print: the tabs' words and the keys' marks.
         if let Some(mut print) = blank(s) {
@@ -701,13 +842,14 @@ impl StripRenderer {
                     let (x, y) = b.tab(i);
                     put!(
                         o,
-                        "<text x='{}' y='{}' font-size='17' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{TAB_PRINT}' fill-opacity='0.85'>{w}</text>",
+                        "<text x='{}' y='{}' font-size='17' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{}' fill-opacity='0.85'>{w}</text>",
                         N(x),
-                        N(y - PANEL_H)
+                        N(y - PANEL_H),
+                        self.tab_print
                     );
                 }
             }
-            key_marks(&mut o);
+            key_marks(&mut o, self.rail, &self.key_print);
             svg_over(&self.options, &mut print, s, &o.0);
             self.print = Some(Sparse::new(print));
         }
@@ -783,7 +925,7 @@ impl Sparse {
 }
 
 /// `from`'s pixels inside `rect` (left, top, right, bottom) put in `to`, the same size.
-fn copy(to: &mut Pixmap, from: &Pixmap, rect: [i32; 4]) {
+pub(super) fn copy(to: &mut Pixmap, from: &Pixmap, rect: [i32; 4]) {
     let (w, h) = (to.width() as i32, to.height() as i32);
     if (from.width() as i32, from.height() as i32) != (w, h) {
         return;
@@ -799,7 +941,7 @@ fn copy(to: &mut Pixmap, from: &Pixmap, rect: [i32; 4]) {
 }
 
 /// `a` and `b` (left, top, right, bottom) together: the least rectangle holding both.
-fn union(a: Option<[i32; 4]>, b: [i32; 4]) -> [i32; 4] {
+pub(super) fn union(a: Option<[i32; 4]>, b: [i32; 4]) -> [i32; 4] {
     a.map_or(b, |a| {
         [
             a[0].min(b[0]),
@@ -811,12 +953,12 @@ fn union(a: Option<[i32; 4]>, b: [i32; 4]) -> [i32; 4] {
 }
 
 /// Whether `a` and `b` share a pixel.
-fn meets(a: [i32; 4], b: [i32; 4]) -> bool {
+pub(super) fn meets(a: [i32; 4], b: [i32; 4]) -> bool {
     a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
 }
 
 /// `r` cut to `bounds`; none if nothing of it is inside.
-fn within(r: [i32; 4], bounds: [i32; 4]) -> Option<[i32; 4]> {
+pub(super) fn within(r: [i32; 4], bounds: [i32; 4]) -> Option<[i32; 4]> {
     let c = [
         r[0].max(bounds[0]),
         r[1].max(bounds[1]),
@@ -843,7 +985,7 @@ fn lit_tabs(scene: &StripScene) -> Vec<(f64, f64)> {
 }
 
 /// An SVG body (the strip's units: the drawing's, from the strip's top) drawn over `frame`.
-fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f64, body: &str) {
+pub(super) fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f64, body: &str) {
     let (w, h) = (frame.width(), frame.height());
     let view = [0.0, 0.0, f64::from(w) / scale, f64::from(h) / scale];
     let doc = art::document(view, w, h, body);
@@ -854,15 +996,15 @@ fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f64, body: &
 
 /// The keys' marks: the previous and next arrows, SAVE, the settings' gear (the star is drawn
 /// as the preset is).
-fn key_marks(o: &mut Svg) {
+fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
     let y = super::RAIL_Y - PANEL_H;
-    for (x, _, t) in keys() {
+    for &(x, _, t) in rail.keys() {
         match t {
             BarTarget::Prev | BarTarget::Next => {
                 let d = if t == BarTarget::Prev { -1.0 } else { 1.0 };
                 put!(
                     o,
-                    "<path d='M {} {} L {} {} L {} {}' fill='none' stroke='{KEY_PRINT}' stroke-width='4' stroke-linejoin='round' stroke-linecap='round'/>",
+                    "<path d='M {} {} L {} {} L {} {}' fill='none' stroke='{print}' stroke-width='4' stroke-linejoin='round' stroke-linecap='round'/>",
                     N(x - 6.0 * d),
                     N(y - 11.0),
                     N(x + 7.0 * d),
@@ -871,20 +1013,21 @@ fn key_marks(o: &mut Svg) {
                     N(y + 11.0)
                 );
             }
-            BarTarget::Save | BarTarget::Panel => put!(
+            BarTarget::Save | BarTarget::Panel | BarTarget::Arp | BarTarget::Fx => put!(
                 o,
-                "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{KEY_PRINT}'>{}</text>",
+                "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>{}</text>",
                 N(x),
                 N(y),
-                if t == BarTarget::Panel {
-                    "PANEL"
-                } else {
-                    "SAVE"
+                match t {
+                    BarTarget::Panel => "PANEL",
+                    BarTarget::Arp => "ARP",
+                    BarTarget::Fx => "FX",
+                    _ => "SAVE",
                 }
             ),
             BarTarget::Keyboard => put!(
                 o,
-                "<path d='M {} {} H {} V {} H {} Z M {} {} V {} M {} {} V {}' fill='none' stroke='{KEY_PRINT}' stroke-width='2'/><path d='M {} {} h 5 v 14 h -5 Z M {} {} h 5 v 14 h -5 Z' fill='{KEY_PRINT}'/>",
+                "<path d='M {} {} H {} V {} H {} Z M {} {} V {} M {} {} V {}' fill='none' stroke='{print}' stroke-width='2'/><path d='M {} {} h 5 v 14 h -5 Z M {} {} h 5 v 14 h -5 Z' fill='{print}'/>",
                 N(x - 15.0),
                 N(y - 13.0),
                 N(x + 15.0),
@@ -903,7 +1046,7 @@ fn key_marks(o: &mut Svg) {
             ),
             BarTarget::Settings => put!(
                 o,
-                "<path d='{}' fill='{KEY_PRINT}' fill-rule='evenodd'/>",
+                "<path d='{}' fill='{print}' fill-rule='evenodd'/>",
                 gear_path(x, y, 15.0)
             ),
             _ => {}
@@ -942,28 +1085,30 @@ fn gear_path(cx: f64, cy: f64, r: f64) -> String {
 }
 
 /// The favourite's key: its star, filled for a favourite.
-fn star_key(o: &mut Svg, favorite: bool) {
+fn star_key(o: &mut Svg, rail: Rail, favorite: bool, print: &str) {
     let y = super::RAIL_Y - PANEL_H;
-    let Some((x, _, _)) = keys().find(|k| k.2 == BarTarget::Star) else {
+    let Some(&(x, _, _)) = rail.keys().iter().find(|k| k.2 == BarTarget::Star) else {
         return;
     };
     let d = plugin_kit_materials::star_path(x, y, 14.0);
     if favorite {
-        put!(o, "<path d='{d}' fill='{KEY_PRINT}'/>");
+        put!(o, "<path d='{d}' fill='{print}'/>");
     } else {
         put!(
             o,
-            "<path d='{d}' fill='none' stroke='{KEY_PRINT}' stroke-width='2.5' stroke-linejoin='round'/>"
+            "<path d='{d}' fill='none' stroke='{print}' stroke-width='2.5' stroke-linejoin='round'/>"
         );
     }
 }
 
 /// The pointer's part, lightened a little.
-fn hovered(o: &mut Svg, t: Option<StripTarget>) {
+fn hovered(o: &mut Svg, rail: Rail, t: Option<StripTarget>) {
     let rect = match t {
-        Some(StripTarget::Bar(b)) if b != BarTarget::Name => keys()
+        Some(StripTarget::Bar(b)) if b != BarTarget::Name => rail
+            .keys()
+            .iter()
             .find(|k| k.2 == b)
-            .map(|(x, w, _)| (x - w / 2.0, super::RAIL_Y - KEY_HEIGHT / 2.0, w, KEY_HEIGHT)),
+            .map(|&(x, w, _)| (x - w / 2.0, super::RAIL_Y - KEY_HEIGHT / 2.0, w, KEY_HEIGHT)),
         Some(StripTarget::Tab(b, i)) => {
             let (x, y) = b.tab(i);
             Some((x - TAB.0 / 2.0, y - TAB.1 / 2.0, TAB.0, TAB.1))
@@ -1003,37 +1148,18 @@ fn ring(o: &mut Svg, c: StripControl) {
 fn reading(k: &mut StripRenderer, i: usize, r: Readout, text: &str, lit: bool) {
     let scale = k.scale;
     let (x, y, w, h) = r.window();
-    let y = y - PANEL_H;
-    let cells = 3;
     let Some(slot) = k.readouts.get_mut(i) else {
         return;
     };
     if slot.as_ref().is_none_or(|r| r.text != text || r.lit != lit) {
-        // (The patch is the window and a margin for the glow.)
-        let m = 10.0;
-        let left = ((x - m) * scale).floor();
-        let top = ((y - m) * scale).floor();
-        let right = ((x + w + m) * scale).ceil();
-        let bottom = ((y + h + m) * scale).ceil();
-        *slot = Pixmap::new((right - left) as u32, (bottom - top) as u32).map(|mut patch| {
-            let mut o = Svg::default();
-            put!(
-                o,
-                "<defs><filter id='segglow' x='-0.3' y='-0.6' width='1.6' height='2.2'><feGaussianBlur in='SourceGraphic' stdDeviation='6' result='far'/><feComponentTransfer in='far' result='farhalf'><feFuncA type='linear' slope='0.5'/></feComponentTransfer><feGaussianBlur in='SourceGraphic' stdDeviation='2' result='near'/><feMerge><feMergeNode in='farhalf'/><feMergeNode in='near'/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs><g transform='translate({},{})'>",
-                N(-left / scale),
-                N(-top / scale)
-            );
-            seven(&mut o, (x, y, w, h), cells, text, lit);
-            put!(o, "</g>");
-            svg_over(&k.options, &mut patch, scale, &o.0);
-            Reading {
-                text: text.to_owned(),
-                lit,
-                left: left as i32,
-                top: top as i32,
-                patch,
-            }
-        });
+        *slot = readout_patch(
+            &k.options,
+            scale,
+            (x, y - PANEL_H, w, h),
+            text,
+            lit,
+            &k.lamp,
+        );
     }
     if let Some(r) = slot {
         k.frame.draw_pixmap(
@@ -1047,10 +1173,55 @@ fn reading(k: &mut StripRenderer, i: usize, r: Readout, text: &str, lit: bool) {
     }
 }
 
+/// A readout's window `(x, y, w, h)` (its frame's units) reading `text`, lit or dark, in `lamp`'s
+/// colour: its three
+/// cells of seven segments and their glow, on a patch of its own a margin round it, and the patch's
+/// place in the frame's pixels.
+pub(super) fn readout_patch(
+    options: &usvg::Options<'_>,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+    text: &str,
+    lit: bool,
+    lamp: &Lamp,
+) -> Option<Reading> {
+    // (The patch is the window and a margin for the glow.)
+    let m = 10.0;
+    let left = ((x - m) * scale).floor();
+    let top = ((y - m) * scale).floor();
+    let right = ((x + w + m) * scale).ceil();
+    let bottom = ((y + h + m) * scale).ceil();
+    let mut patch = Pixmap::new((right - left) as u32, (bottom - top) as u32)?;
+    let mut o = Svg::default();
+    put!(
+        o,
+        "<defs><filter id='segglow' x='-0.3' y='-0.6' width='1.6' height='2.2'><feGaussianBlur in='SourceGraphic' stdDeviation='6' result='far'/><feComponentTransfer in='far' result='farhalf'><feFuncA type='linear' slope='0.5'/></feComponentTransfer><feGaussianBlur in='SourceGraphic' stdDeviation='2' result='near'/><feMerge><feMergeNode in='farhalf'/><feMergeNode in='near'/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs><g transform='translate({},{})'>",
+        N(-left / scale),
+        N(-top / scale)
+    );
+    seven(&mut o, (x, y, w, h), 3, text, lit, &lamp.seg());
+    put!(o, "</g>");
+    svg_over(options, &mut patch, scale, &o.0);
+    Some(Reading {
+        text: text.to_owned(),
+        lit,
+        left: left as i32,
+        top: top as i32,
+        patch,
+    })
+}
+
 /// Seven-segment digits, `cells` of them, in the readout `(x, y, w, h)`, right-aligned, lit
 /// or dark (every segment as an unlit one shows faintly through the glass). The CA-74's.
-fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &str, lit: bool) {
-    const SEGS: [(char, &str); 17] = [
+fn seven(
+    s: &mut Svg,
+    (x, y, w, h): (f64, f64, f64, f64),
+    cells: usize,
+    text: &str,
+    lit: bool,
+    seg: &str,
+) {
+    const SEGS: [(char, &str); 18] = [
         ('0', "abcdef"),
         ('1', "bc"),
         ('2', "abged"),
@@ -1066,6 +1237,8 @@ fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &s
         ('F', "aefg"),
         ('N', "abcef"),
         ('E', "adefg"),
+        // (A triplet's note value: RATE's "16t", decisions.md R-ARP.)
+        ('t', "defg"),
         (' ', ""),
         // (A value being typed: where the next digit goes.)
         ('_', "d"),
@@ -1141,10 +1314,10 @@ fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &s
     }
     put!(
         s,
-        "<g fill='{SEG_ON}' fill-opacity='{SEG_OFF_OPACITY}'>{off}</g>"
+        "<g fill='{seg}' fill-opacity='{SEG_OFF_OPACITY}'>{off}</g>"
     );
     if !on.is_empty() {
-        put!(s, "<g fill='{SEG_ON}' filter='url(#segglow)'>{on}</g>");
+        put!(s, "<g fill='{seg}' filter='url(#segglow)'>{on}</g>");
     }
 }
 
@@ -1152,8 +1325,8 @@ fn seven(s: &mut Svg, (x, y, w, h): (f64, f64, f64, f64), cells: usize, text: &s
 
 /// Where the name's characters go: the first's left, how many fit, the star's and the
 /// arrow's places.
-fn name_places() -> (f64, usize, f64, f64) {
-    let (x, _, w, _) = NAME;
+fn name_places(rail: Rail) -> (f64, usize, f64, f64) {
+    let (x, _, w, _) = rail.name();
     let (star_x, arrow_x) = (x + 28.0, x + w - 32.0);
     let left = star_x + 26.0;
     let places = ((arrow_x - 30.0 - left) / (6.0 * DOT)).floor().max(1.0) as usize;
@@ -1170,8 +1343,8 @@ fn name_level(b: &BarScene) -> f64 {
 }
 
 /// The preset's name in dots ([`font::glyph`]), lit over the unlit dots (the still's).
-fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
-    let (_, places, ..) = name_places();
+fn name(frame: &mut Pixmap, scale: f64, rail: Rail, b: &BarScene, lamp: &Lamp) {
+    let (_, places, ..) = name_places(rail);
     let level = name_level(b);
     let text: String = if b.name.is_empty() {
         "NO PRESET".to_owned()
@@ -1190,7 +1363,7 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
     let r = DOT * 0.36 * scale;
     let mut glow = PathBuilder::new();
     let mut core = PathBuilder::new();
-    name_dots(scale, |i, j, col, (px, py)| {
+    name_dots(scale, rail, |i, j, col, (px, py)| {
         if glyphs.get(i).is_some_and(|g| g[j] >> (4 - col) & 1 == 1) {
             glow.push_circle(px, py, (r * 2.1) as f32);
             core.push_circle(px, py, r as f32);
@@ -1201,7 +1374,7 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
     // the right side of the preset dropdown is also dots"): the star lit for a favourite, else
     // as faint as the unlit dots; the arrow up while the list is down, brighter under the
     // pointer.
-    let (_, _, star_x, arrow_x) = name_places();
+    let (_, _, star_x, arrow_x) = name_places(rail);
     let mut star = PathBuilder::new();
     let mut star_glow = PathBuilder::new();
     sign_dots(scale, &STAR, star_x, |(px, py)| {
@@ -1226,21 +1399,21 @@ fn name(frame: &mut Pixmap, scale: f64, b: &BarScene) {
         let d = |v: u8| (f64::from(v) * level + 20.0 * (1.0 - level)) as u8;
         (d(c.0), d(c.1), d(c.2))
     };
-    fill(frame, glow, ORANGE_GLOW, 0.16 * level);
-    fill(frame, core, dim(ORANGE), 0.55 + 0.45 * level);
+    fill(frame, glow, lamp.glow, 0.16 * level);
+    fill(frame, core, dim(lamp.on), 0.55 + 0.45 * level);
     if b.favorite {
-        fill(frame, star_glow, ORANGE_GLOW, 0.16 * level);
-        fill(frame, star, dim(ORANGE), 0.55 + 0.45 * level);
+        fill(frame, star_glow, lamp.glow, 0.16 * level);
+        fill(frame, star, dim(lamp.on), 0.55 + 0.45 * level);
     } else {
-        fill(frame, star, ORANGE, 0.06);
+        fill(frame, star, lamp.on, 0.06);
     }
-    fill(frame, arrow_glow, ORANGE_GLOW, 0.16 * level * pointed);
-    fill(frame, arrow, dim(ORANGE), (0.55 + 0.45 * level) * pointed);
+    fill(frame, arrow_glow, lamp.glow, 0.16 * level * pointed);
+    fill(frame, arrow, dim(lamp.on), (0.55 + 0.45 * level) * pointed);
 }
 
 /// A sign's dots, in pixels at `scale`, about `x` (units) on the name's rows.
 fn sign_dots(scale: f64, sign: &[u8; 7], x: f64, mut each: impl FnMut((f32, f32))) {
-    let (_, y, _, h) = NAME;
+    let (_, y, _, h) = super::NAME;
     let top = y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * DOT;
     for (j, row) in sign.iter().enumerate() {
         for col in 0..5 {
@@ -1256,9 +1429,9 @@ fn sign_dots(scale: f64, sign: &[u8; 7], x: f64, mut each: impl FnMut((f32, f32)
 /// Each dot of the name's display, in pixels at `scale` (the strip's frame): its character's
 /// place, its row, its column. (Seven rows for a capital, its middle [`CAP_LIFT`] above the
 /// window's; two below for a descender, its last dots inside the window.)
-fn name_dots(scale: f64, mut each: impl FnMut(usize, usize, usize, (f32, f32))) {
-    let (_, y, _, h) = NAME;
-    let (left, places, ..) = name_places();
+fn name_dots(scale: f64, rail: Rail, mut each: impl FnMut(usize, usize, usize, (f32, f32))) {
+    let (_, y, _, h) = rail.name();
+    let (left, places, ..) = name_places(rail);
     let top = y - PANEL_H + h / 2.0 - CAP_LIFT - 3.0 * DOT;
     screen_dots(scale, left, top, places, &mut each);
 }
@@ -1282,18 +1455,42 @@ fn screen_dots(
 }
 
 /// A centred readout made from the preset display's bezel, glass and pixel lettering.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn pixel_screen(
     options: &usvg::Options<'_>,
     frame: &mut Pixmap,
     picture: &Pixmap,
     scale: f64,
-    (x, y, w, h): (f64, f64, f64, f64),
+    window: (f64, f64, f64, f64),
     text: &str,
+    lamp: &Lamp,
+) {
+    screen_still(options, frame, picture, scale, window);
+    screen_text(frame, scale, window, text, lamp);
+}
+
+/// A pixel screen's bezel and glass, which do not change with what it reads.
+pub(crate) fn screen_still(
+    options: &usvg::Options<'_>,
+    frame: &mut Pixmap,
+    picture: &Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
 ) {
     let mut bezel = Svg::default();
     super::screen_bezel(&mut bezel, (x, y, w, h));
     svg_over(options, frame, scale, &bezel.0);
     glass(frame, picture, scale, (x, y, w, h), 3.0);
+}
+
+/// A pixel screen's dots, `text` lit in `lamp`'s colour, centred, over its glass.
+pub(crate) fn screen_text(
+    frame: &mut Pixmap,
+    scale: f64,
+    (x, y, w, h): (f64, f64, f64, f64),
+    text: &str,
+    lamp: &Lamp,
+) {
     let mut places = ((w - 16.0) / (6.0 * DOT)).floor().max(1.0) as usize;
     let glyphs: Vec<_> = text.chars().take(places).map(font::glyph).collect();
     // Keep centred text on the same dot grid, including an even character count.
@@ -1318,9 +1515,9 @@ pub(crate) fn pixel_screen(
             core.push_circle(px, py, r as f32);
         }
     });
-    fill(frame, unlit, ORANGE, 0.06);
-    fill(frame, glow, ORANGE_GLOW, 0.16);
-    fill(frame, core, ORANGE, 1.0);
+    fill(frame, unlit, lamp.on, 0.06);
+    fill(frame, glow, lamp.glow, 0.16);
+    fill(frame, core, lamp.on, 1.0);
 }
 
 // ---- The voices' display: drops of light (the CA-74's LIQUID, its R36).
@@ -1505,6 +1702,7 @@ impl Liquid {
     /// level with a halo, an idle voice's fainter. (Each drop adds its field only near it, and
     /// only where there is any is it lit: a few drops in a wide display cost a few drops'
     /// worth, not the display's; only the part of the display they reach is looked at again.)
+    #[allow(clippy::too_many_arguments)]
     fn draw(
         &mut self,
         frame: &mut Pixmap,
@@ -1513,6 +1711,7 @@ impl Liquid {
         half: f64,
         scale: f64,
         detune: f64,
+        drop: (f64, f64, f64),
     ) {
         let (fw, fh) = (frame.width() as i32, frame.height() as i32);
         let [x0, y0, x1, y1] = [
@@ -1601,11 +1800,7 @@ impl Liquid {
                 if a <= 0.002 {
                     continue;
                 }
-                let light = [
-                    DROP_LIGHT.0 as f32,
-                    DROP_LIGHT.1 as f32,
-                    DROP_LIGHT.2 as f32,
-                ];
+                let light = [drop.0 as f32, drop.1 as f32, drop.2 as f32];
                 let i = ((y * fw + x) * 4) as usize;
                 for (c, v) in light.iter().enumerate() {
                     data[i + c] = (f32::from(data[i + c]) + v * a).min(255.0) as u8;

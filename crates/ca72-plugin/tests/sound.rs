@@ -199,6 +199,9 @@ fn poly_off_is_the_one_voice_as_before() {
         (30_000, 57, false),
     ];
     let mut k = 0;
+    // (The engine's output held back to come out with ULTRA's: decisions.md R-LATENCY.)
+    let held = ca72::voice::LINE_UP.0;
+    let mut voice = Vec::new();
     for i in 0..40_000 {
         while k < keys.len() && keys[k].0 == i {
             let (_, key, on) = keys[k];
@@ -207,7 +210,8 @@ fn poly_off_is_the_one_voice_as_before() {
             k += 1;
         }
         let got = e.tick(0.0);
-        let want = (v.tick_in(0.0) * gain * 1.0) as f32;
+        voice.push((v.tick_in(0.0) * gain * 1.0) as f32);
+        let want = if i >= held { voice[i - held] } else { 0.0 };
         assert_eq!(
             got.to_bits(),
             want.to_bits(),
@@ -386,7 +390,8 @@ fn all_sound_off_silences_at_once_and_all_notes_off_lets_the_tail_ring() {
     c.panel.decay = true;
     c.panel.filter_contour.decay = 1.0;
     c.panel.loudness_contour.decay = 1.0;
-    let gone = (HUSH_FADE * RATE) as usize + 2;
+    // (The output held back to come out with ULTRA's: decisions.md R-LATENCY.)
+    let gone = (HUSH_FADE * RATE) as usize + 2 + ca72::voice::LINE_UP.0;
     for (poly, blocks) in [(false, false), (false, true), (true, false), (true, true)] {
         c.poly = poly;
         let case = format!("POLY {poly}, blocks {blocks}");

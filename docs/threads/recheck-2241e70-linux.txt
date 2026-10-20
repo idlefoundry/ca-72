@@ -1,0 +1,54 @@
+# 2026-10-17T14:38:03Z Linux 7.2.5-3-omarchy x86_64 cpus=16 copy load 1.30, 2.84, 3.84
+# load 1.30, 2.84, 3.84
+split: block=256 voices=1 split=0 budget=4 threads=5 workers=4 helpers=0 drive=6 mean=73.3 p50=65.0 p99=159.5 p999=177.8 worst=182.6 late=162 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# load 1.16, 2.74, 3.79
+split: block=256 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=39.6 p50=38.4 p99=76.9 p999=96.7 worst=100.3 late=1 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# load 1.47, 2.73, 3.77
+split: block=256 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=41.5 p50=40.6 p99=81.1 p999=103.9 worst=108.6 late=3 blocks=1875 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# load 1.41, 2.67, 3.74
+split: block=256 voices=2 split=0 budget=12 threads=13 workers=12 helpers=0 drive=6 mean=76.3 p50=68.0 p99=213.7 p999=257.9 worst=261.0 late=158 blocks=1875 silent_runs=243 demotions=0 rt=true helper_wg=false intervals=0
+# load 1.61, 2.66, 3.72
+split: block=256 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=45.5 p50=44.3 p99=95.3 p999=138.1 worst=144.7 late=17 blocks=1875 silent_runs=17 demotions=0 rt=true helper_wg=false intervals=0
+# load 2.36, 2.77, 3.74
+scaling: quality=ultra block=256 instances=1 workers=4 share=auto poly=false got=0 held=0w1s split_runs=4536 voices=1 seconds=10 mean=39.8 worst_instance_mean=39.8 p50=37.6 p99=77.7 p999=92.3 worst=97.4 late=0 blocks=1875 silent_runs=0 demotions=0 load=2.36 cores=16/16 canary_ms=0.06 promoted=1 demoted_blocks=0 seated=1 mid=0w/1,0w/1 args=CA72_POLY=0,CA72_VOICES=1 rep=1
+# load 2.24, 2.72, 3.71
+scaling: quality=ultra block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w2s split_runs=9070 voices=2 seconds=10 mean=45.1 worst_instance_mean=45.1 p50=43.4 p99=95.7 p999=149.7 worst=156.1 late=17 blocks=1875 silent_runs=21 demotions=0 load=2.24 cores=16/16 canary_ms=0.93 promoted=1 demoted_blocks=0 seated=1 mid=9w/1,9w/1 args=CA72_VOICES=2 rep=1
+# load 1.97, 2.65, 3.67
+scaling: quality=ultra block=256 instances=1 workers=4 share=auto poly=false got=0 held=0w0s split_runs=0 voices=1 seconds=10 mean=85.5 worst_instance_mean=85.5 p50=80.2 p99=165.1 p999=184.6 worst=188.4 late=171 blocks=1875 silent_runs=0 demotions=0 load=1.97 cores=16/16 canary_ms=0.10 promoted=1 demoted_blocks=0 seated=0 mid=0w/0,0w/0 args=CA72_POLY=0,CA72_VOICES=1,CA72_SPLIT=0 rep=1
+# load 2.12, 2.65, 3.66
+scaling: quality=ultra block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=2 seconds=10 mean=88.3 worst_instance_mean=88.3 p50=82.1 p99=205.7 p999=245.9 worst=263.1 late=194 blocks=1875 silent_runs=1369 demotions=0 load=2.12 cores=16/16 canary_ms=0.21 promoted=1 demoted_blocks=0 seated=1 mid=9w/1,9w/1 args=CA72_VOICES=2,CA72_SPLIT=0 rep=1
+# load 2.24, 2.65, 3.64
+scaling: quality=ultra block=256 instances=1 workers=4 share=auto poly=false got=0 held=0w1s split_runs=4536 voices=1 seconds=10 mean=38.3 worst_instance_mean=38.3 p50=36.9 p99=78.8 p999=104.2 worst=112.8 late=4 blocks=1875 silent_runs=0 demotions=0 load=2.24 cores=16/16 canary_ms=0.12 promoted=1 demoted_blocks=0 seated=1 mid=0w/1,0w/1 args=CA72_POLY=0,CA72_VOICES=1 rep=2
+# load 1.97, 2.57, 3.60
+scaling: quality=ultra block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w2s split_runs=9066 voices=2 seconds=10 mean=44.2 worst_instance_mean=44.2 p50=42.4 p99=93.5 p999=151.1 worst=155.9 late=14 blocks=1875 silent_runs=28 demotions=0 load=1.97 cores=16/16 canary_ms=0.67 promoted=1 demoted_blocks=0 seated=1 mid=9w/1,9w/1 args=CA72_VOICES=2 rep=2
+# load 2.39, 2.63, 3.61
+scaling: quality=ultra block=256 instances=1 workers=4 share=auto poly=false got=0 held=0w0s split_runs=0 voices=1 seconds=10 mean=86.5 worst_instance_mean=86.5 p50=81.5 p99=164.0 p999=188.2 worst=189.0 late=202 blocks=1875 silent_runs=0 demotions=0 load=2.27 cores=16/16 canary_ms=0.10 promoted=1 demoted_blocks=0 seated=0 mid=0w/0,0w/0 args=CA72_POLY=0,CA72_VOICES=1,CA72_SPLIT=0 rep=2
+# load 2.15, 2.57, 3.57
+scaling: quality=ultra block=256 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=2 seconds=10 mean=87.1 worst_instance_mean=87.1 p50=80.7 p99=205.2 p999=260.8 worst=268.8 late=195 blocks=1875 silent_runs=1224 demotions=0 load=2.15 cores=16/16 canary_ms=0.07 promoted=1 demoted_blocks=0 seated=1 mid=9w/1,9w/1 args=CA72_VOICES=2,CA72_SPLIT=0 rep=2
+# load 2.33, 2.59, 3.56
+split: block=128 voices=1 split=0 budget=4 threads=5 workers=4 helpers=0 drive=6 mean=73.0 p50=65.9 p99=171.6 p999=207.7 worst=228.9 late=325 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# load 2.04, 2.51, 3.52
+split: block=128 voices=1 split=1 budget=6 threads=7 workers=1 helpers=5 drive=6 mean=38.4 p50=36.9 p99=83.2 p999=115.4 worst=137.9 late=21 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# load 2.19, 2.52, 3.50
+split: block=128 voices=1 split=1 budget=12 threads=13 workers=7 helpers=5 drive=6 mean=40.5 p50=39.2 p99=91.1 p999=144.8 worst=173.6 late=32 blocks=3750 silent_runs=0 demotions=0 rt=true helper_wg=false intervals=0
+# load 2.38, 2.55, 3.50
+split: block=128 voices=2 split=0 budget=12 threads=13 workers=12 helpers=0 drive=6 mean=74.8 p50=68.8 p99=172.2 p999=205.5 worst=214.0 late=305 blocks=3750 silent_runs=468 demotions=0 rt=true helper_wg=false intervals=0
+# load 2.52, 2.57, 3.49
+split: block=128 voices=2 split=2 budget=12 threads=13 workers=2 helpers=10 drive=6 mean=45.3 p50=43.7 p99=100.9 p999=168.1 worst=185.0 late=42 blocks=3750 silent_runs=43 demotions=0 rt=true helper_wg=false intervals=0
+# load 2.61, 2.59, 3.49
+scaling: quality=ultra block=128 instances=1 workers=4 share=auto poly=false got=0 held=0w1s split_runs=4536 voices=1 seconds=10 mean=39.3 worst_instance_mean=39.3 p50=38.1 p99=82.4 p999=113.6 worst=140.9 late=30 blocks=3750 silent_runs=0 demotions=0 load=2.61 cores=16/16 canary_ms=0.09 promoted=1 demoted_blocks=0 seated=1 mid=0w/1,0w/1 args=CA72_POLY=0,CA72_VOICES=1 rep=1
+# load 2.52, 2.57, 3.47
+scaling: quality=ultra block=128 instances=1 workers=4 share=auto poly=true got=9 held=9w2s split_runs=9070 voices=2 seconds=10 mean=45.5 worst_instance_mean=45.5 p50=44.1 p99=94.3 p999=138.2 worst=156.8 late=32 blocks=3750 silent_runs=47 demotions=0 load=2.40 cores=16/16 canary_ms=0.17 promoted=1 demoted_blocks=0 seated=1 mid=9w/1,9w/1 args=CA72_VOICES=2 rep=1
+# load 2.18, 2.50, 3.43
+scaling: quality=ultra block=128 instances=1 workers=4 share=auto poly=false got=0 held=0w0s split_runs=0 voices=1 seconds=10 mean=84.9 worst_instance_mean=84.9 p50=79.4 p99=177.8 p999=202.5 worst=206.9 late=339 blocks=3750 silent_runs=0 demotions=0 load=2.18 cores=16/16 canary_ms=0.18 promoted=1 demoted_blocks=0 seated=0 mid=0w/0,0w/0 args=CA72_POLY=0,CA72_VOICES=1,CA72_SPLIT=0 rep=1
+# load 2.15, 2.47, 3.41
+scaling: quality=ultra block=128 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=2 seconds=10 mean=86.2 worst_instance_mean=86.2 p50=81.9 p99=177.2 p999=200.7 worst=206.0 late=364 blocks=3750 silent_runs=2408 demotions=0 load=2.15 cores=16/16 canary_ms=0.23 promoted=1 demoted_blocks=0 seated=1 mid=9w/1,9w/1 args=CA72_VOICES=2,CA72_SPLIT=0 rep=1
+# load 2.11, 2.45, 3.38
+scaling: quality=ultra block=128 instances=1 workers=4 share=auto poly=false got=0 held=0w1s split_runs=4536 voices=1 seconds=10 mean=38.1 worst_instance_mean=38.1 p50=37.1 p99=84.9 p999=126.2 worst=143.0 late=25 blocks=3750 silent_runs=0 demotions=0 load=2.11 cores=16/16 canary_ms=0.07 promoted=1 demoted_blocks=0 seated=1 mid=0w/1,0w/1 args=CA72_POLY=0,CA72_VOICES=1 rep=2
+# load 1.86, 2.38, 3.35
+scaling: quality=ultra block=128 instances=1 workers=4 share=auto poly=true got=9 held=9w2s split_runs=9070 voices=2 seconds=10 mean=44.5 worst_instance_mean=44.5 p50=43.1 p99=99.9 p999=139.6 worst=183.1 late=37 blocks=3750 silent_runs=34 demotions=0 load=1.79 cores=16/16 canary_ms=0.39 promoted=1 demoted_blocks=0 seated=1 mid=9w/1,9w/1 args=CA72_VOICES=2 rep=2
+# load 1.68, 2.31, 3.31
+scaling: quality=ultra block=128 instances=1 workers=4 share=auto poly=false got=0 held=0w0s split_runs=0 voices=1 seconds=10 mean=86.6 worst_instance_mean=86.6 p50=80.7 p99=177.4 p999=205.1 worst=218.1 late=446 blocks=3750 silent_runs=0 demotions=0 load=1.68 cores=16/16 canary_ms=0.44 promoted=1 demoted_blocks=0 seated=0 mid=0w/0,0w/0 args=CA72_POLY=0,CA72_VOICES=1,CA72_SPLIT=0 rep=2
+# load 2.05, 2.36, 3.31
+scaling: quality=ultra block=128 instances=1 workers=4 share=auto poly=true got=9 held=9w0s split_runs=0 voices=2 seconds=10 mean=86.8 worst_instance_mean=86.8 p50=82.2 p99=180.2 p999=204.3 worst=232.2 late=391 blocks=3750 silent_runs=1937 demotions=0 load=2.05 cores=16/16 canary_ms=0.08 promoted=1 demoted_blocks=0 seated=1 mid=9w/1,9w/1 args=CA72_VOICES=2,CA72_SPLIT=0 rep=2
+# after: load 2.03 2.35 3.29

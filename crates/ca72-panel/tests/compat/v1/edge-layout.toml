@@ -1,0 +1,3101 @@
+# EDGE: the layout at its limits (a stress pack, made by code).
+format = 1
+
+[fixtures]
+power = [26, 731]
+lamp = [100, 770]
+overload = [170, 761]
+ultra = [1554, 560]
+plate = [2847, 713]
+phones = [2700, 640, 60]
+screws = [[20, -100, 7], [90, -100, 7], [160, -100, 7], [230, -100, 7], [300, -100, 7], [370, -100, 7], [440, -100, 7], [510, -100, 7], [580, -100, 7], [650, -100, 7], [720, -100, 7], [790, -100, 7], [860, -100, 7], [930, -100, 7], [1000, -100, 7], [1070, -100, 7], [1140, -100, 7], [1210, -100, 7], [1280, -100, 7], [1350, -100, 7], [1420, -100, 7], [1490, -100, 7], [1560, -100, 7], [1630, -100, 7], [1700, -100, 7], [1770, -100, 7], [1840, -100, 7], [1910, -100, 7], [1980, -100, 7], [2050, -100, 7], [2120, -100, 7], [2190, -100, 7]]
+
+[[control]]
+param = "osc1_range"
+at = [3048, -70]
+
+[[control]]
+param = "osc2_range"
+at = [2928, -70]
+
+[[control]]
+param = "osc3_range"
+at = [2808, -70]
+
+[[control]]
+param = "osc1_waveform"
+at = [2688, -70]
+
+[[control]]
+param = "osc2_waveform"
+at = [2568, -70]
+
+[[control]]
+param = "osc3_waveform"
+at = [2448, -70]
+
+[[control]]
+param = "tune"
+at = [73, 73]
+big = true
+[[control]]
+param = "glide"
+at = [219, 73]
+big = true
+[[control]]
+param = "mod_mix"
+at = [365, 73]
+big = true
+[[control]]
+param = "osc2_frequency"
+at = [511, 73]
+big = true
+[[control]]
+param = "osc3_frequency"
+at = [657, 73]
+big = true
+[[control]]
+param = "osc1_volume"
+at = [803, 73]
+big = true
+[[control]]
+param = "ext_volume"
+at = [949, 73]
+big = true
+[[control]]
+param = "osc2_volume"
+at = [1095, 73]
+big = true
+[[control]]
+param = "noise_volume"
+at = [1241, 73]
+big = true
+[[control]]
+param = "osc3_volume"
+at = [1387, 73]
+big = true
+[[control]]
+param = "cutoff"
+at = [1533, 73]
+big = true
+[[control]]
+param = "emphasis"
+at = [1679, 73]
+big = true
+[[control]]
+param = "contour_amount"
+at = [1825, 73]
+big = true
+[[control]]
+param = "filter_attack"
+at = [1971, 73]
+big = true
+[[control]]
+param = "filter_decay"
+at = [2117, 73]
+big = true
+[[control]]
+param = "filter_sustain"
+at = [2263, 73]
+big = true
+[[control]]
+param = "loudness_attack"
+at = [2409, 73]
+big = true
+[[control]]
+param = "loudness_decay"
+at = [2555, 73]
+big = true
+[[control]]
+param = "loudness_sustain"
+at = [2701, 73]
+big = true
+[[control]]
+param = "volume"
+at = [2847, 73]
+big = true
+[[control]]
+param = "feedback"
+at = [2993, 73]
+big = true
+[[control]]
+param = "osc_mod"
+at = [12, 158]
+size = [16, 16]
+colour = "blue"
+on = "right"
+[[control]]
+param = "osc3_control"
+at = [148, 174]
+size = [240, 48]
+colour = "red"
+on = "top"
+[[control]]
+param = "osc1_on"
+at = [300, 270]
+size = [48, 240]
+colour = "black"
+on = "bottom"
+[[control]]
+param = "ext_on"
+at = [386, 175]
+size = [108, 50]
+colour = "ivory"
+on = "right"
+[[control]]
+param = "osc2_on"
+at = [456, 270]
+size = [16, 240]
+colour = "blue"
+on = "top"
+[[control]]
+param = "noise_on"
+at = [592, 158]
+size = [240, 16]
+colour = "red"
+on = "bottom"
+[[control]]
+param = "osc3_on"
+at = [750, 210]
+size = [60, 120]
+colour = "black"
+on = "right"
+[[control]]
+param = "noise_type"
+at = [848, 180]
+size = [120, 60]
+colour = "ivory"
+on = "top"
+[[control]]
+param = "filter_mode"
+at = [1016, 250]
+size = [200, 200]
+colour = "blue"
+on = "bottom"
+[[control]]
+param = "filter_mod"
+at = [1132, 158]
+size = [16, 16]
+colour = "red"
+on = "right"
+[[control]]
+param = "keyboard_control_1"
+at = [1203, 174]
+size = [110, 48]
+colour = "black"
+on = "top"
+[[control]]
+param = "keyboard_control_2"
+at = [1293.5, 205.5]
+size = [55, 111]
+colour = "ivory"
+on = "bottom"
+[[control]]
+param = "main_output"
+at = [1351, 207]
+size = [44, 114]
+colour = "blue"
+on = "right"
+[[control]]
+param = "a440"
+at = [1501, 270]
+size = [240, 240]
+colour = "red"
+on = "top"
+[[control]]
+param = "quality"
+at = [124, 428]
+size = [240, 60]
+across = true
+[[line]]
+from = [300.0, 480.0]
+to = [3000.0, 480.0]
+width = 0.50
+
+[[line]]
+from = [300.0, 480.0]
+to = [300.0, 700.0]
+width = 20.00
+
+[[line]]
+from = [320.0, 481.4]
+to = [3000.0, 481.4]
+width = 0.50
+
+[[line]]
+from = [318.0, 480.0]
+to = [318.0, 700.0]
+width = 3.13
+
+[[line]]
+from = [340.0, 482.8]
+to = [3000.0, 482.8]
+width = 5.03
+
+[[line]]
+from = [336.0, 480.0]
+to = [336.0, 700.0]
+width = 3.33
+
+[[line]]
+from = [360.0, 484.2]
+to = [3000.0, 484.2]
+width = 3.26
+
+[[line]]
+from = [354.0, 480.0]
+to = [354.0, 700.0]
+width = 4.77
+
+[[line]]
+from = [310.0, 485.6]
+to = [3000.0, 485.6]
+width = 2.20
+
+[[line]]
+from = [372.0, 480.0]
+to = [372.0, 700.0]
+width = 4.36
+
+[[line]]
+from = [330.0, 487.0]
+to = [3000.0, 487.0]
+width = 5.56
+
+[[line]]
+from = [390.0, 480.0]
+to = [390.0, 700.0]
+width = 2.34
+
+[[line]]
+from = [350.0, 488.4]
+to = [3000.0, 488.4]
+width = 6.25
+
+[[line]]
+from = [408.0, 480.0]
+to = [408.0, 700.0]
+width = 5.31
+
+[[line]]
+from = [300.0, 489.8]
+to = [3000.0, 489.8]
+width = 4.53
+
+[[line]]
+from = [426.0, 480.0]
+to = [426.0, 700.0]
+width = 6.28
+
+[[line]]
+from = [320.0, 491.2]
+to = [3000.0, 491.2]
+width = 3.46
+
+[[line]]
+from = [444.0, 480.0]
+to = [444.0, 700.0]
+width = 4.11
+
+[[line]]
+from = [340.0, 492.6]
+to = [3000.0, 492.6]
+width = 2.08
+
+[[line]]
+from = [462.0, 480.0]
+to = [462.0, 700.0]
+width = 6.21
+
+[[line]]
+from = [360.0, 494.0]
+to = [3000.0, 494.0]
+width = 3.77
+
+[[line]]
+from = [480.0, 480.0]
+to = [480.0, 700.0]
+width = 4.62
+
+[[line]]
+from = [310.0, 495.4]
+to = [3000.0, 495.4]
+width = 3.70
+
+[[line]]
+from = [498.0, 480.0]
+to = [498.0, 700.0]
+width = 5.54
+
+[[line]]
+from = [330.0, 496.8]
+to = [3000.0, 496.8]
+width = 6.13
+
+[[line]]
+from = [516.0, 480.0]
+to = [516.0, 700.0]
+width = 2.01
+
+[[line]]
+from = [350.0, 498.2]
+to = [3000.0, 498.2]
+width = 3.97
+
+[[line]]
+from = [534.0, 480.0]
+to = [534.0, 700.0]
+width = 4.91
+
+[[line]]
+from = [300.0, 499.6]
+to = [3000.0, 499.6]
+width = 4.92
+
+[[line]]
+from = [552.0, 480.0]
+to = [552.0, 700.0]
+width = 5.57
+
+[[line]]
+from = [320.0, 501.0]
+to = [3000.0, 501.0]
+width = 6.39
+
+[[line]]
+from = [570.0, 480.0]
+to = [570.0, 700.0]
+width = 3.85
+
+[[line]]
+from = [340.0, 502.4]
+to = [3000.0, 502.4]
+width = 2.97
+
+[[line]]
+from = [588.0, 480.0]
+to = [588.0, 700.0]
+width = 5.70
+
+[[line]]
+from = [360.0, 503.8]
+to = [3000.0, 503.8]
+width = 1.03
+
+[[line]]
+from = [606.0, 480.0]
+to = [606.0, 700.0]
+width = 4.06
+
+[[line]]
+from = [310.0, 505.2]
+to = [3000.0, 505.2]
+width = 6.46
+
+[[line]]
+from = [624.0, 480.0]
+to = [624.0, 700.0]
+width = 1.43
+
+[[line]]
+from = [330.0, 506.6]
+to = [3000.0, 506.6]
+width = 5.55
+
+[[line]]
+from = [642.0, 480.0]
+to = [642.0, 700.0]
+width = 3.41
+
+[[line]]
+from = [350.0, 508.0]
+to = [3000.0, 508.0]
+width = 5.57
+
+[[line]]
+from = [660.0, 480.0]
+to = [660.0, 700.0]
+width = 4.66
+
+[[line]]
+from = [300.0, 509.4]
+to = [3000.0, 509.4]
+width = 5.97
+
+[[line]]
+from = [678.0, 480.0]
+to = [678.0, 700.0]
+width = 1.83
+
+[[line]]
+from = [320.0, 510.8]
+to = [3000.0, 510.8]
+width = 0.65
+
+[[line]]
+from = [696.0, 480.0]
+to = [696.0, 700.0]
+width = 4.73
+
+[[line]]
+from = [340.0, 512.2]
+to = [3000.0, 512.2]
+width = 2.15
+
+[[line]]
+from = [714.0, 480.0]
+to = [714.0, 700.0]
+width = 3.67
+
+[[line]]
+from = [360.0, 513.6]
+to = [3000.0, 513.6]
+width = 0.55
+
+[[line]]
+from = [732.0, 480.0]
+to = [732.0, 700.0]
+width = 2.00
+
+[[line]]
+from = [310.0, 515.0]
+to = [3000.0, 515.0]
+width = 6.05
+
+[[line]]
+from = [750.0, 480.0]
+to = [750.0, 700.0]
+width = 3.82
+
+[[line]]
+from = [330.0, 516.4]
+to = [3000.0, 516.4]
+width = 5.62
+
+[[line]]
+from = [768.0, 480.0]
+to = [768.0, 700.0]
+width = 2.92
+
+[[line]]
+from = [350.0, 517.8]
+to = [3000.0, 517.8]
+width = 0.96
+
+[[line]]
+from = [786.0, 480.0]
+to = [786.0, 700.0]
+width = 4.05
+
+[[line]]
+from = [300.0, 519.2]
+to = [3000.0, 519.2]
+width = 0.57
+
+[[line]]
+from = [804.0, 480.0]
+to = [804.0, 700.0]
+width = 5.44
+
+[[line]]
+from = [320.0, 520.6]
+to = [3000.0, 520.6]
+width = 4.13
+
+[[line]]
+from = [822.0, 480.0]
+to = [822.0, 700.0]
+width = 3.03
+
+[[line]]
+from = [340.0, 522.0]
+to = [3000.0, 522.0]
+width = 3.33
+
+[[line]]
+from = [840.0, 480.0]
+to = [840.0, 700.0]
+width = 0.63
+
+[[line]]
+from = [360.0, 523.4]
+to = [3000.0, 523.4]
+width = 1.83
+
+[[line]]
+from = [858.0, 480.0]
+to = [858.0, 700.0]
+width = 5.87
+
+[[line]]
+from = [310.0, 524.8]
+to = [3000.0, 524.8]
+width = 1.41
+
+[[line]]
+from = [876.0, 480.0]
+to = [876.0, 700.0]
+width = 2.32
+
+[[line]]
+from = [330.0, 526.2]
+to = [3000.0, 526.2]
+width = 4.97
+
+[[line]]
+from = [894.0, 480.0]
+to = [894.0, 700.0]
+width = 3.75
+
+[[line]]
+from = [350.0, 527.6]
+to = [3000.0, 527.6]
+width = 5.86
+
+[[line]]
+from = [912.0, 480.0]
+to = [912.0, 700.0]
+width = 1.65
+
+[[line]]
+from = [300.0, 529.0]
+to = [3000.0, 529.0]
+width = 1.92
+
+[[line]]
+from = [930.0, 480.0]
+to = [930.0, 700.0]
+width = 2.96
+
+[[line]]
+from = [320.0, 530.4]
+to = [3000.0, 530.4]
+width = 0.94
+
+[[line]]
+from = [948.0, 480.0]
+to = [948.0, 700.0]
+width = 0.75
+
+[[line]]
+from = [340.0, 531.8]
+to = [3000.0, 531.8]
+width = 4.17
+
+[[line]]
+from = [966.0, 480.0]
+to = [966.0, 700.0]
+width = 4.91
+
+[[line]]
+from = [360.0, 533.2]
+to = [3000.0, 533.2]
+width = 1.38
+
+[[line]]
+from = [984.0, 480.0]
+to = [984.0, 700.0]
+width = 4.05
+
+[[line]]
+from = [310.0, 534.6]
+to = [3000.0, 534.6]
+width = 3.85
+
+[[line]]
+from = [1002.0, 480.0]
+to = [1002.0, 700.0]
+width = 4.88
+
+[[line]]
+from = [330.0, 536.0]
+to = [3000.0, 536.0]
+width = 6.36
+
+[[line]]
+from = [1020.0, 480.0]
+to = [1020.0, 700.0]
+width = 6.38
+
+[[line]]
+from = [350.0, 537.4]
+to = [3000.0, 537.4]
+width = 4.03
+
+[[line]]
+from = [1038.0, 480.0]
+to = [1038.0, 700.0]
+width = 5.55
+
+[[line]]
+from = [300.0, 538.8]
+to = [3000.0, 538.8]
+width = 5.81
+
+[[line]]
+from = [1056.0, 480.0]
+to = [1056.0, 700.0]
+width = 5.48
+
+[[line]]
+from = [320.0, 540.2]
+to = [3000.0, 540.2]
+width = 0.77
+
+[[line]]
+from = [1074.0, 480.0]
+to = [1074.0, 700.0]
+width = 2.86
+
+[[line]]
+from = [340.0, 541.6]
+to = [3000.0, 541.6]
+width = 4.78
+
+[[line]]
+from = [1092.0, 480.0]
+to = [1092.0, 700.0]
+width = 6.33
+
+[[line]]
+from = [360.0, 543.0]
+to = [3000.0, 543.0]
+width = 0.81
+
+[[line]]
+from = [1110.0, 480.0]
+to = [1110.0, 700.0]
+width = 0.83
+
+[[line]]
+from = [310.0, 544.4]
+to = [3000.0, 544.4]
+width = 3.52
+
+[[line]]
+from = [1128.0, 480.0]
+to = [1128.0, 700.0]
+width = 1.56
+
+[[line]]
+from = [330.0, 545.8]
+to = [3000.0, 545.8]
+width = 0.57
+
+[[line]]
+from = [1146.0, 480.0]
+to = [1146.0, 700.0]
+width = 6.21
+
+[[line]]
+from = [350.0, 547.2]
+to = [3000.0, 547.2]
+width = 3.86
+
+[[line]]
+from = [1164.0, 480.0]
+to = [1164.0, 700.0]
+width = 2.24
+
+[[line]]
+from = [300.0, 548.6]
+to = [3000.0, 548.6]
+width = 4.37
+
+[[line]]
+from = [1182.0, 480.0]
+to = [1182.0, 700.0]
+width = 2.20
+
+[[line]]
+from = [320.0, 550.0]
+to = [3000.0, 550.0]
+width = 5.82
+
+[[line]]
+from = [1200.0, 480.0]
+to = [1200.0, 700.0]
+width = 1.28
+
+[[line]]
+from = [340.0, 551.4]
+to = [3000.0, 551.4]
+width = 4.43
+
+[[line]]
+from = [1218.0, 480.0]
+to = [1218.0, 700.0]
+width = 6.13
+
+[[line]]
+from = [360.0, 552.8]
+to = [3000.0, 552.8]
+width = 1.23
+
+[[line]]
+from = [1236.0, 480.0]
+to = [1236.0, 700.0]
+width = 4.67
+
+[[line]]
+from = [310.0, 554.2]
+to = [3000.0, 554.2]
+width = 1.25
+
+[[line]]
+from = [1254.0, 480.0]
+to = [1254.0, 700.0]
+width = 1.79
+
+[[line]]
+from = [330.0, 555.6]
+to = [3000.0, 555.6]
+width = 2.58
+
+[[line]]
+from = [1272.0, 480.0]
+to = [1272.0, 700.0]
+width = 1.46
+
+[[line]]
+from = [350.0, 557.0]
+to = [3000.0, 557.0]
+width = 3.49
+
+[[line]]
+from = [1290.0, 480.0]
+to = [1290.0, 700.0]
+width = 1.95
+
+[[line]]
+from = [300.0, 558.4]
+to = [3000.0, 558.4]
+width = 4.44
+
+[[line]]
+from = [1308.0, 480.0]
+to = [1308.0, 700.0]
+width = 1.76
+
+[[line]]
+from = [320.0, 559.8]
+to = [3000.0, 559.8]
+width = 2.45
+
+[[line]]
+from = [1326.0, 480.0]
+to = [1326.0, 700.0]
+width = 3.61
+
+[[line]]
+from = [340.0, 561.2]
+to = [3000.0, 561.2]
+width = 0.69
+
+[[line]]
+from = [1344.0, 480.0]
+to = [1344.0, 700.0]
+width = 5.51
+
+[[line]]
+from = [360.0, 562.6]
+to = [3000.0, 562.6]
+width = 6.01
+
+[[line]]
+from = [1362.0, 480.0]
+to = [1362.0, 700.0]
+width = 1.14
+
+[[line]]
+from = [310.0, 564.0]
+to = [3000.0, 564.0]
+width = 5.61
+
+[[line]]
+from = [1380.0, 480.0]
+to = [1380.0, 700.0]
+width = 3.60
+
+[[line]]
+from = [330.0, 565.4]
+to = [3000.0, 565.4]
+width = 5.03
+
+[[line]]
+from = [1398.0, 480.0]
+to = [1398.0, 700.0]
+width = 0.57
+
+[[line]]
+from = [350.0, 566.8]
+to = [3000.0, 566.8]
+width = 3.26
+
+[[line]]
+from = [1416.0, 480.0]
+to = [1416.0, 700.0]
+width = 3.21
+
+[[line]]
+from = [300.0, 568.2]
+to = [3000.0, 568.2]
+width = 3.81
+
+[[line]]
+from = [1434.0, 480.0]
+to = [1434.0, 700.0]
+width = 4.12
+
+[[line]]
+from = [320.0, 569.6]
+to = [3000.0, 569.6]
+width = 4.39
+
+[[line]]
+from = [1452.0, 480.0]
+to = [1452.0, 700.0]
+width = 4.83
+
+[[line]]
+from = [340.0, 571.0]
+to = [3000.0, 571.0]
+width = 3.51
+
+[[line]]
+from = [1470.0, 480.0]
+to = [1470.0, 700.0]
+width = 6.36
+
+[[line]]
+from = [360.0, 572.4]
+to = [3000.0, 572.4]
+width = 4.74
+
+[[line]]
+from = [1488.0, 480.0]
+to = [1488.0, 700.0]
+width = 3.99
+
+[[line]]
+from = [310.0, 573.8]
+to = [3000.0, 573.8]
+width = 3.74
+
+[[line]]
+from = [1506.0, 480.0]
+to = [1506.0, 700.0]
+width = 1.76
+
+[[line]]
+from = [330.0, 575.2]
+to = [3000.0, 575.2]
+width = 5.82
+
+[[line]]
+from = [1524.0, 480.0]
+to = [1524.0, 700.0]
+width = 0.54
+
+[[line]]
+from = [350.0, 576.6]
+to = [3000.0, 576.6]
+width = 5.20
+
+[[line]]
+from = [1542.0, 480.0]
+to = [1542.0, 700.0]
+width = 3.06
+
+[[line]]
+from = [300.0, 578.0]
+to = [3000.0, 578.0]
+width = 5.26
+
+[[line]]
+from = [1560.0, 480.0]
+to = [1560.0, 700.0]
+width = 3.87
+
+[[line]]
+from = [320.0, 579.4]
+to = [3000.0, 579.4]
+width = 5.71
+
+[[line]]
+from = [1578.0, 480.0]
+to = [1578.0, 700.0]
+width = 2.13
+
+[[line]]
+from = [340.0, 580.8]
+to = [3000.0, 580.8]
+width = 5.74
+
+[[line]]
+from = [1596.0, 480.0]
+to = [1596.0, 700.0]
+width = 1.50
+
+[[line]]
+from = [360.0, 582.2]
+to = [3000.0, 582.2]
+width = 1.49
+
+[[line]]
+from = [1614.0, 480.0]
+to = [1614.0, 700.0]
+width = 3.96
+
+[[line]]
+from = [310.0, 583.6]
+to = [3000.0, 583.6]
+width = 0.54
+
+[[line]]
+from = [1632.0, 480.0]
+to = [1632.0, 700.0]
+width = 1.09
+
+[[line]]
+from = [330.0, 585.0]
+to = [3000.0, 585.0]
+width = 6.47
+
+[[line]]
+from = [1650.0, 480.0]
+to = [1650.0, 700.0]
+width = 2.55
+
+[[line]]
+from = [350.0, 586.4]
+to = [3000.0, 586.4]
+width = 1.27
+
+[[line]]
+from = [1668.0, 480.0]
+to = [1668.0, 700.0]
+width = 5.82
+
+[[line]]
+from = [300.0, 587.8]
+to = [3000.0, 587.8]
+width = 1.82
+
+[[line]]
+from = [1686.0, 480.0]
+to = [1686.0, 700.0]
+width = 3.63
+
+[[line]]
+from = [320.0, 589.2]
+to = [3000.0, 589.2]
+width = 1.21
+
+[[line]]
+from = [1704.0, 480.0]
+to = [1704.0, 700.0]
+width = 2.50
+
+[[line]]
+from = [340.0, 590.6]
+to = [3000.0, 590.6]
+width = 5.30
+
+[[line]]
+from = [1722.0, 480.0]
+to = [1722.0, 700.0]
+width = 2.13
+
+[[line]]
+from = [360.0, 592.0]
+to = [3000.0, 592.0]
+width = 3.85
+
+[[line]]
+from = [1740.0, 480.0]
+to = [1740.0, 700.0]
+width = 0.86
+
+[[line]]
+from = [310.0, 593.4]
+to = [3000.0, 593.4]
+width = 0.54
+
+[[line]]
+from = [1758.0, 480.0]
+to = [1758.0, 700.0]
+width = 5.03
+
+[[line]]
+from = [330.0, 594.8]
+to = [3000.0, 594.8]
+width = 4.56
+
+[[line]]
+from = [1776.0, 480.0]
+to = [1776.0, 700.0]
+width = 1.25
+
+[[line]]
+from = [350.0, 596.2]
+to = [3000.0, 596.2]
+width = 5.29
+
+[[line]]
+from = [1794.0, 480.0]
+to = [1794.0, 700.0]
+width = 1.07
+
+[[line]]
+from = [300.0, 597.6]
+to = [3000.0, 597.6]
+width = 1.77
+
+[[line]]
+from = [1812.0, 480.0]
+to = [1812.0, 700.0]
+width = 4.13
+
+[[line]]
+from = [320.0, 599.0]
+to = [3000.0, 599.0]
+width = 6.04
+
+[[line]]
+from = [1830.0, 480.0]
+to = [1830.0, 700.0]
+width = 0.93
+
+[[line]]
+from = [340.0, 600.4]
+to = [3000.0, 600.4]
+width = 3.74
+
+[[line]]
+from = [1848.0, 480.0]
+to = [1848.0, 700.0]
+width = 1.76
+
+[[line]]
+from = [360.0, 601.8]
+to = [3000.0, 601.8]
+width = 4.79
+
+[[line]]
+from = [1866.0, 480.0]
+to = [1866.0, 700.0]
+width = 1.97
+
+[[line]]
+from = [310.0, 603.2]
+to = [3000.0, 603.2]
+width = 1.38
+
+[[line]]
+from = [1884.0, 480.0]
+to = [1884.0, 700.0]
+width = 1.34
+
+[[line]]
+from = [330.0, 604.6]
+to = [3000.0, 604.6]
+width = 5.52
+
+[[line]]
+from = [1902.0, 480.0]
+to = [1902.0, 700.0]
+width = 4.56
+
+[[line]]
+from = [350.0, 606.0]
+to = [3000.0, 606.0]
+width = 6.49
+
+[[line]]
+from = [1920.0, 480.0]
+to = [1920.0, 700.0]
+width = 1.23
+
+[[line]]
+from = [300.0, 607.4]
+to = [3000.0, 607.4]
+width = 3.46
+
+[[line]]
+from = [1938.0, 480.0]
+to = [1938.0, 700.0]
+width = 3.76
+
+[[line]]
+from = [320.0, 608.8]
+to = [3000.0, 608.8]
+width = 1.04
+
+[[line]]
+from = [1956.0, 480.0]
+to = [1956.0, 700.0]
+width = 4.99
+
+[[line]]
+from = [340.0, 610.2]
+to = [3000.0, 610.2]
+width = 4.78
+
+[[line]]
+from = [1974.0, 480.0]
+to = [1974.0, 700.0]
+width = 6.22
+
+[[line]]
+from = [360.0, 611.6]
+to = [3000.0, 611.6]
+width = 0.72
+
+[[line]]
+from = [1992.0, 480.0]
+to = [1992.0, 700.0]
+width = 4.93
+
+[[line]]
+from = [310.0, 613.0]
+to = [3000.0, 613.0]
+width = 1.93
+
+[[line]]
+from = [2010.0, 480.0]
+to = [2010.0, 700.0]
+width = 4.65
+
+[[line]]
+from = [330.0, 614.4]
+to = [3000.0, 614.4]
+width = 6.41
+
+[[line]]
+from = [2028.0, 480.0]
+to = [2028.0, 700.0]
+width = 4.58
+
+[[line]]
+from = [350.0, 615.8]
+to = [3000.0, 615.8]
+width = 1.42
+
+[[line]]
+from = [2046.0, 480.0]
+to = [2046.0, 700.0]
+width = 3.12
+
+[[line]]
+from = [300.0, 617.2]
+to = [3000.0, 617.2]
+width = 1.83
+
+[[line]]
+from = [2064.0, 480.0]
+to = [2064.0, 700.0]
+width = 2.12
+
+[[line]]
+from = [320.0, 618.6]
+to = [3000.0, 618.6]
+width = 6.42
+
+[[line]]
+from = [2082.0, 480.0]
+to = [2082.0, 700.0]
+width = 1.05
+
+[[line]]
+from = [340.0, 620.0]
+to = [3000.0, 620.0]
+width = 5.08
+
+[[line]]
+from = [2100.0, 480.0]
+to = [2100.0, 700.0]
+width = 6.30
+
+[[line]]
+from = [360.0, 621.4]
+to = [3000.0, 621.4]
+width = 5.30
+
+[[line]]
+from = [2118.0, 480.0]
+to = [2118.0, 700.0]
+width = 5.19
+
+[[line]]
+from = [310.0, 622.8]
+to = [3000.0, 622.8]
+width = 5.06
+
+[[line]]
+from = [2136.0, 480.0]
+to = [2136.0, 700.0]
+width = 1.86
+
+[[line]]
+from = [330.0, 624.2]
+to = [3000.0, 624.2]
+width = 2.82
+
+[[line]]
+from = [2154.0, 480.0]
+to = [2154.0, 700.0]
+width = 1.21
+
+[[line]]
+from = [350.0, 625.6]
+to = [3000.0, 625.6]
+width = 4.16
+
+[[line]]
+from = [2172.0, 480.0]
+to = [2172.0, 700.0]
+width = 3.75
+
+[[line]]
+from = [300.0, 627.0]
+to = [3000.0, 627.0]
+width = 5.25
+
+[[line]]
+from = [2190.0, 480.0]
+to = [2190.0, 700.0]
+width = 1.75
+
+[[line]]
+from = [320.0, 628.4]
+to = [3000.0, 628.4]
+width = 6.03
+
+[[line]]
+from = [2208.0, 480.0]
+to = [2208.0, 700.0]
+width = 5.15
+
+[[line]]
+from = [340.0, 629.8]
+to = [3000.0, 629.8]
+width = 1.87
+
+[[line]]
+from = [2226.0, 480.0]
+to = [2226.0, 700.0]
+width = 2.41
+
+[[line]]
+from = [360.0, 631.2]
+to = [3000.0, 631.2]
+width = 6.23
+
+[[line]]
+from = [2244.0, 480.0]
+to = [2244.0, 700.0]
+width = 6.19
+
+[[line]]
+from = [310.0, 632.6]
+to = [3000.0, 632.6]
+width = 0.70
+
+[[line]]
+from = [2262.0, 480.0]
+to = [2262.0, 700.0]
+width = 5.45
+
+[[line]]
+from = [330.0, 634.0]
+to = [3000.0, 634.0]
+width = 3.28
+
+[[line]]
+from = [2280.0, 480.0]
+to = [2280.0, 700.0]
+width = 2.22
+
+[[line]]
+from = [350.0, 635.4]
+to = [3000.0, 635.4]
+width = 5.21
+
+[[line]]
+from = [2298.0, 480.0]
+to = [2298.0, 700.0]
+width = 2.10
+
+[[line]]
+from = [300.0, 636.8]
+to = [3000.0, 636.8]
+width = 5.87
+
+[[line]]
+from = [2316.0, 480.0]
+to = [2316.0, 700.0]
+width = 3.93
+
+[[line]]
+from = [320.0, 638.2]
+to = [3000.0, 638.2]
+width = 3.93
+
+[[line]]
+from = [2334.0, 480.0]
+to = [2334.0, 700.0]
+width = 4.82
+
+[[line]]
+from = [340.0, 639.6]
+to = [3000.0, 639.6]
+width = 3.29
+
+[[line]]
+from = [2352.0, 480.0]
+to = [2352.0, 700.0]
+width = 1.10
+
+[[line]]
+from = [360.0, 641.0]
+to = [3000.0, 641.0]
+width = 3.03
+
+[[line]]
+from = [2370.0, 480.0]
+to = [2370.0, 700.0]
+width = 6.46
+
+[[line]]
+from = [310.0, 642.4]
+to = [3000.0, 642.4]
+width = 2.57
+
+[[line]]
+from = [2388.0, 480.0]
+to = [2388.0, 700.0]
+width = 3.97
+
+[[line]]
+from = [330.0, 643.8]
+to = [3000.0, 643.8]
+width = 2.59
+
+[[line]]
+from = [2406.0, 480.0]
+to = [2406.0, 700.0]
+width = 5.53
+
+[[line]]
+from = [350.0, 645.2]
+to = [3000.0, 645.2]
+width = 1.46
+
+[[line]]
+from = [2424.0, 480.0]
+to = [2424.0, 700.0]
+width = 4.16
+
+[[line]]
+from = [300.0, 646.6]
+to = [3000.0, 646.6]
+width = 5.94
+
+[[line]]
+from = [2442.0, 480.0]
+to = [2442.0, 700.0]
+width = 6.09
+
+[[line]]
+from = [320.0, 648.0]
+to = [3000.0, 648.0]
+width = 2.95
+
+[[line]]
+from = [2460.0, 480.0]
+to = [2460.0, 700.0]
+width = 5.48
+
+[[line]]
+from = [340.0, 649.4]
+to = [3000.0, 649.4]
+width = 5.23
+
+[[line]]
+from = [2478.0, 480.0]
+to = [2478.0, 700.0]
+width = 6.13
+
+[[line]]
+from = [360.0, 650.8]
+to = [3000.0, 650.8]
+width = 0.72
+
+[[line]]
+from = [2496.0, 480.0]
+to = [2496.0, 700.0]
+width = 6.35
+
+[[line]]
+from = [310.0, 652.2]
+to = [3000.0, 652.2]
+width = 3.96
+
+[[line]]
+from = [2514.0, 480.0]
+to = [2514.0, 700.0]
+width = 2.86
+
+[[line]]
+from = [330.0, 653.6]
+to = [3000.0, 653.6]
+width = 3.58
+
+[[line]]
+from = [2532.0, 480.0]
+to = [2532.0, 700.0]
+width = 5.47
+
+[[line]]
+from = [350.0, 655.0]
+to = [3000.0, 655.0]
+width = 2.91
+
+[[line]]
+from = [2550.0, 480.0]
+to = [2550.0, 700.0]
+width = 2.15
+
+[[line]]
+from = [300.0, 656.4]
+to = [3000.0, 656.4]
+width = 1.64
+
+[[line]]
+from = [2568.0, 480.0]
+to = [2568.0, 700.0]
+width = 3.66
+
+[[line]]
+from = [320.0, 657.8]
+to = [3000.0, 657.8]
+width = 4.54
+
+[[line]]
+from = [2586.0, 480.0]
+to = [2586.0, 700.0]
+width = 3.90
+
+[[line]]
+from = [340.0, 659.2]
+to = [3000.0, 659.2]
+width = 5.23
+
+[[line]]
+from = [2604.0, 480.0]
+to = [2604.0, 700.0]
+width = 3.70
+
+[[line]]
+from = [360.0, 660.6]
+to = [3000.0, 660.6]
+width = 2.55
+
+[[line]]
+from = [2622.0, 480.0]
+to = [2622.0, 700.0]
+width = 1.99
+
+[[line]]
+from = [310.0, 662.0]
+to = [3000.0, 662.0]
+width = 1.09
+
+[[line]]
+from = [2640.0, 480.0]
+to = [2640.0, 700.0]
+width = 3.02
+
+[[line]]
+from = [330.0, 663.4]
+to = [3000.0, 663.4]
+width = 1.27
+
+[[line]]
+from = [2658.0, 480.0]
+to = [2658.0, 700.0]
+width = 5.70
+
+[[line]]
+from = [350.0, 664.8]
+to = [3000.0, 664.8]
+width = 0.57
+
+[[line]]
+from = [2676.0, 480.0]
+to = [2676.0, 700.0]
+width = 0.88
+
+[[line]]
+from = [300.0, 666.2]
+to = [3000.0, 666.2]
+width = 0.70
+
+[[line]]
+from = [2694.0, 480.0]
+to = [2694.0, 700.0]
+width = 3.72
+
+[[line]]
+from = [320.0, 667.6]
+to = [3000.0, 667.6]
+width = 4.01
+
+[[line]]
+from = [2712.0, 480.0]
+to = [2712.0, 700.0]
+width = 3.29
+
+[[line]]
+from = [340.0, 669.0]
+to = [3000.0, 669.0]
+width = 3.62
+
+[[line]]
+from = [2730.0, 480.0]
+to = [2730.0, 700.0]
+width = 3.55
+
+[[line]]
+from = [360.0, 670.4]
+to = [3000.0, 670.4]
+width = 6.48
+
+[[line]]
+from = [2748.0, 480.0]
+to = [2748.0, 700.0]
+width = 1.75
+
+[[line]]
+from = [310.0, 671.8]
+to = [3000.0, 671.8]
+width = 0.65
+
+[[line]]
+from = [2766.0, 480.0]
+to = [2766.0, 700.0]
+width = 6.16
+
+[[line]]
+from = [330.0, 673.2]
+to = [3000.0, 673.2]
+width = 1.20
+
+[[line]]
+from = [2784.0, 480.0]
+to = [2784.0, 700.0]
+width = 3.26
+
+[[line]]
+from = [350.0, 674.6]
+to = [3000.0, 674.6]
+width = 6.32
+
+[[line]]
+from = [2802.0, 480.0]
+to = [2802.0, 700.0]
+width = 3.31
+
+[[line]]
+from = [300.0, 676.0]
+to = [3000.0, 676.0]
+width = 3.62
+
+[[line]]
+from = [2820.0, 480.0]
+to = [2820.0, 700.0]
+width = 2.94
+
+[[line]]
+from = [320.0, 677.4]
+to = [3000.0, 677.4]
+width = 5.60
+
+[[line]]
+from = [2838.0, 480.0]
+to = [2838.0, 700.0]
+width = 3.37
+
+[[line]]
+from = [340.0, 678.8]
+to = [3000.0, 678.8]
+width = 4.02
+
+[[line]]
+from = [2856.0, 480.0]
+to = [2856.0, 700.0]
+width = 4.74
+
+[[line]]
+from = [360.0, 680.2]
+to = [3000.0, 680.2]
+width = 1.53
+
+[[line]]
+from = [2874.0, 480.0]
+to = [2874.0, 700.0]
+width = 4.00
+
+[[line]]
+from = [310.0, 681.6]
+to = [3000.0, 681.6]
+width = 2.60
+
+[[line]]
+from = [2892.0, 480.0]
+to = [2892.0, 700.0]
+width = 2.20
+
+[[line]]
+from = [330.0, 683.0]
+to = [3000.0, 683.0]
+width = 4.05
+
+[[line]]
+from = [2910.0, 480.0]
+to = [2910.0, 700.0]
+width = 4.33
+
+[[line]]
+from = [350.0, 684.4]
+to = [3000.0, 684.4]
+width = 3.19
+
+[[line]]
+from = [2928.0, 480.0]
+to = [2928.0, 700.0]
+width = 0.63
+
+[[line]]
+from = [300.0, 685.8]
+to = [3000.0, 685.8]
+width = 3.72
+
+[[line]]
+from = [2946.0, 480.0]
+to = [2946.0, 700.0]
+width = 1.45
+
+[[line]]
+from = [320.0, 687.2]
+to = [3000.0, 687.2]
+width = 4.15
+
+[[line]]
+from = [2964.0, 480.0]
+to = [2964.0, 700.0]
+width = 6.25
+
+[[line]]
+from = [340.0, 688.6]
+to = [3000.0, 688.6]
+width = 1.17
+
+[[line]]
+from = [2982.0, 480.0]
+to = [2982.0, 700.0]
+width = 2.82
+
+[[title]]
+text = "TITLE 00"
+span = [300, 460]
+baseline = 792
+
+[[title]]
+text = "TITLE 01"
+span = [470, 630]
+baseline = 792
+
+[[title]]
+text = "TITLE 02"
+span = [640, 800]
+baseline = 792
+
+[[title]]
+text = "TITLE 03"
+span = [810, 970]
+baseline = 792
+
+[[title]]
+text = "TITLE 04"
+span = [980, 1140]
+baseline = 792
+
+[[title]]
+text = "TITLE 05"
+span = [1150, 1310]
+baseline = 792
+
+[[title]]
+text = "TITLE 06"
+span = [1320, 1480]
+baseline = 792
+
+[[title]]
+text = "TITLE 07"
+span = [1490, 1650]
+baseline = 792
+
+[[title]]
+text = "TITLE 08"
+span = [1660, 1820]
+baseline = 792
+
+[[title]]
+text = "TITLE 09"
+span = [1830, 1990]
+baseline = 792
+
+[[title]]
+text = "TITLE 10"
+span = [2000, 2160]
+baseline = 792
+
+[[title]]
+text = "TITLE 11"
+span = [2170, 2330]
+baseline = 792
+
+[[title]]
+text = "TITLE 12"
+span = [2340, 2500]
+baseline = 792
+
+[[title]]
+text = "TITLE 13"
+span = [2510, 2670]
+baseline = 792
+
+[[title]]
+text = "TITLE 14"
+span = [2680, 2840]
+baseline = 792
+
+[[title]]
+text = "TITLE 15"
+span = [2850, 3010]
+baseline = 792
+
+[[text]]
+text = "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"
+at = [1554, 470]
+large = [1558, 466]
+
+[[text]]
+text = "THE LONGEST LEGEND A LAYOUT MAY PRINT, 48 CHARS"
+at = [1554, 440]
+
+[[text]]
+text = "L002"
+at = [0, 300]
+
+[[text]]
+text = "L003"
+at = [3108, 300]
+large = [3112, 296]
+
+[[text]]
+text = "L004"
+at = [1554, -130]
+
+[[text]]
+text = "L005"
+at = [1554, 795]
+
+[[text]]
+text = "L006"
+at = [320, 500]
+large = [324, 496]
+
+[[text]]
+text = "L007"
+at = [416, 500]
+size = 6
+
+[[text]]
+text = "L008"
+at = [512, 500]
+size = 80
+
+[[text]]
+text = "L009"
+at = [608, 500]
+large = [612, 496]
+
+[[text]]
+text = "L010"
+at = [704, 500]
+
+[[text]]
+text = "L011"
+at = [800, 500]
+
+[[text]]
+text = "L012"
+at = [896, 500]
+large = [900, 496]
+
+[[text]]
+text = "L013"
+at = [992, 500]
+
+[[text]]
+text = "L014"
+at = [1088, 500]
+
+[[text]]
+text = "L015"
+at = [1184, 500]
+large = [1188, 496]
+
+[[text]]
+text = "L016"
+at = [1280, 500]
+
+[[text]]
+text = "L017"
+at = [1376, 500]
+
+[[text]]
+text = "L018"
+at = [1472, 500]
+large = [1476, 496]
+
+[[text]]
+text = "L019"
+at = [1568, 500]
+
+[[text]]
+text = "L020"
+at = [1664, 500]
+
+[[text]]
+text = "L021"
+at = [1760, 500]
+large = [1764, 496]
+
+[[text]]
+text = "L022"
+at = [1856, 500]
+
+[[text]]
+text = "L023"
+at = [1952, 500]
+
+[[text]]
+text = "L024"
+at = [2048, 500]
+large = [2052, 496]
+
+[[text]]
+text = "L025"
+at = [2144, 500]
+
+[[text]]
+text = "L026"
+at = [2240, 500]
+
+[[text]]
+text = "L027"
+at = [2336, 500]
+large = [2340, 496]
+
+[[text]]
+text = "L028"
+at = [2432, 500]
+
+[[text]]
+text = "L029"
+at = [2528, 500]
+
+[[text]]
+text = "L030"
+at = [2624, 500]
+large = [2628, 496]
+
+[[text]]
+text = "L031"
+at = [2720, 500]
+
+[[text]]
+text = "L032"
+at = [2816, 500]
+
+[[text]]
+text = "L033"
+at = [2912, 500]
+large = [2916, 496]
+
+[[text]]
+text = "L034"
+at = [320, 519]
+
+[[text]]
+text = "L035"
+at = [416, 519]
+
+[[text]]
+text = "L036"
+at = [512, 519]
+large = [516, 515]
+
+[[text]]
+text = "L037"
+at = [608, 519]
+
+[[text]]
+text = "L038"
+at = [704, 519]
+
+[[text]]
+text = "L039"
+at = [800, 519]
+large = [804, 515]
+
+[[text]]
+text = "L040"
+at = [896, 519]
+
+[[text]]
+text = "L041"
+at = [992, 519]
+
+[[text]]
+text = "L042"
+at = [1088, 519]
+large = [1092, 515]
+
+[[text]]
+text = "L043"
+at = [1184, 519]
+
+[[text]]
+text = "L044"
+at = [1280, 519]
+
+[[text]]
+text = "L045"
+at = [1376, 519]
+large = [1380, 515]
+
+[[text]]
+text = "L046"
+at = [1472, 519]
+
+[[text]]
+text = "L047"
+at = [1568, 519]
+
+[[text]]
+text = "L048"
+at = [1664, 519]
+large = [1668, 515]
+
+[[text]]
+text = "L049"
+at = [1760, 519]
+
+[[text]]
+text = "L050"
+at = [1856, 519]
+
+[[text]]
+text = "L051"
+at = [1952, 519]
+large = [1956, 515]
+
+[[text]]
+text = "L052"
+at = [2048, 519]
+
+[[text]]
+text = "L053"
+at = [2144, 519]
+
+[[text]]
+text = "L054"
+at = [2240, 519]
+large = [2244, 515]
+
+[[text]]
+text = "L055"
+at = [2336, 519]
+
+[[text]]
+text = "L056"
+at = [2432, 519]
+
+[[text]]
+text = "L057"
+at = [2528, 519]
+size = 6
+large = [2532, 515]
+
+[[text]]
+text = "L058"
+at = [2624, 519]
+size = 80
+
+[[text]]
+text = "L059"
+at = [2720, 519]
+
+[[text]]
+text = "L060"
+at = [2816, 519]
+large = [2820, 515]
+
+[[text]]
+text = "L061"
+at = [2912, 519]
+
+[[text]]
+text = "L062"
+at = [320, 538]
+
+[[text]]
+text = "L063"
+at = [416, 538]
+large = [420, 534]
+
+[[text]]
+text = "L064"
+at = [512, 538]
+
+[[text]]
+text = "L065"
+at = [608, 538]
+
+[[text]]
+text = "L066"
+at = [704, 538]
+large = [708, 534]
+
+[[text]]
+text = "L067"
+at = [800, 538]
+
+[[text]]
+text = "L068"
+at = [896, 538]
+
+[[text]]
+text = "L069"
+at = [992, 538]
+large = [996, 534]
+
+[[text]]
+text = "L070"
+at = [1088, 538]
+
+[[text]]
+text = "L071"
+at = [1184, 538]
+
+[[text]]
+text = "L072"
+at = [1280, 538]
+large = [1284, 534]
+
+[[text]]
+text = "L073"
+at = [1376, 538]
+
+[[text]]
+text = "L074"
+at = [1472, 538]
+
+[[text]]
+text = "L075"
+at = [1568, 538]
+large = [1572, 534]
+
+[[text]]
+text = "L076"
+at = [1664, 538]
+
+[[text]]
+text = "L077"
+at = [1760, 538]
+
+[[text]]
+text = "L078"
+at = [1856, 538]
+large = [1860, 534]
+
+[[text]]
+text = "L079"
+at = [1952, 538]
+
+[[text]]
+text = "L080"
+at = [2048, 538]
+
+[[text]]
+text = "L081"
+at = [2144, 538]
+large = [2148, 534]
+
+[[text]]
+text = "L082"
+at = [2240, 538]
+
+[[text]]
+text = "L083"
+at = [2336, 538]
+
+[[text]]
+text = "L084"
+at = [2432, 538]
+large = [2436, 534]
+
+[[text]]
+text = "L085"
+at = [2528, 538]
+
+[[text]]
+text = "L086"
+at = [2624, 538]
+
+[[text]]
+text = "L087"
+at = [2720, 538]
+large = [2724, 534]
+
+[[text]]
+text = "L088"
+at = [2816, 538]
+
+[[text]]
+text = "L089"
+at = [2912, 538]
+
+[[text]]
+text = "L090"
+at = [320, 557]
+large = [324, 553]
+
+[[text]]
+text = "L091"
+at = [416, 557]
+
+[[text]]
+text = "L092"
+at = [512, 557]
+
+[[text]]
+text = "L093"
+at = [608, 557]
+large = [612, 553]
+
+[[text]]
+text = "L094"
+at = [704, 557]
+
+[[text]]
+text = "L095"
+at = [800, 557]
+
+[[text]]
+text = "L096"
+at = [896, 557]
+large = [900, 553]
+
+[[text]]
+text = "L097"
+at = [992, 557]
+
+[[text]]
+text = "L098"
+at = [1088, 557]
+
+[[text]]
+text = "L099"
+at = [1184, 557]
+large = [1188, 553]
+
+[[text]]
+text = "L100"
+at = [1280, 557]
+
+[[text]]
+text = "L101"
+at = [1376, 557]
+
+[[text]]
+text = "L102"
+at = [1472, 557]
+large = [1476, 553]
+
+[[text]]
+text = "L103"
+at = [1568, 557]
+
+[[text]]
+text = "L104"
+at = [1664, 557]
+
+[[text]]
+text = "L105"
+at = [1760, 557]
+large = [1764, 553]
+
+[[text]]
+text = "L106"
+at = [1856, 557]
+
+[[text]]
+text = "L107"
+at = [1952, 557]
+size = 6
+
+[[text]]
+text = "L108"
+at = [2048, 557]
+size = 80
+large = [2052, 553]
+
+[[text]]
+text = "L109"
+at = [2144, 557]
+
+[[text]]
+text = "L110"
+at = [2240, 557]
+
+[[text]]
+text = "L111"
+at = [2336, 557]
+large = [2340, 553]
+
+[[text]]
+text = "L112"
+at = [2432, 557]
+
+[[text]]
+text = "L113"
+at = [2528, 557]
+
+[[text]]
+text = "L114"
+at = [2624, 557]
+large = [2628, 553]
+
+[[text]]
+text = "L115"
+at = [2720, 557]
+
+[[text]]
+text = "L116"
+at = [2816, 557]
+
+[[text]]
+text = "L117"
+at = [2912, 557]
+large = [2916, 553]
+
+[[text]]
+text = "L118"
+at = [320, 576]
+
+[[text]]
+text = "L119"
+at = [416, 576]
+
+[[text]]
+text = "L120"
+at = [512, 576]
+large = [516, 572]
+
+[[text]]
+text = "L121"
+at = [608, 576]
+
+[[text]]
+text = "L122"
+at = [704, 576]
+
+[[text]]
+text = "L123"
+at = [800, 576]
+large = [804, 572]
+
+[[text]]
+text = "L124"
+at = [896, 576]
+
+[[text]]
+text = "L125"
+at = [992, 576]
+
+[[text]]
+text = "L126"
+at = [1088, 576]
+large = [1092, 572]
+
+[[text]]
+text = "L127"
+at = [1184, 576]
+
+[[text]]
+text = "L128"
+at = [1280, 576]
+
+[[text]]
+text = "L129"
+at = [1376, 576]
+large = [1380, 572]
+
+[[text]]
+text = "L130"
+at = [1472, 576]
+
+[[text]]
+text = "L131"
+at = [1568, 576]
+
+[[text]]
+text = "L132"
+at = [1664, 576]
+large = [1668, 572]
+
+[[text]]
+text = "L133"
+at = [1760, 576]
+
+[[text]]
+text = "L134"
+at = [1856, 576]
+
+[[text]]
+text = "L135"
+at = [1952, 576]
+large = [1956, 572]
+
+[[text]]
+text = "L136"
+at = [2048, 576]
+
+[[text]]
+text = "L137"
+at = [2144, 576]
+
+[[text]]
+text = "L138"
+at = [2240, 576]
+large = [2244, 572]
+
+[[text]]
+text = "L139"
+at = [2336, 576]
+
+[[text]]
+text = "L140"
+at = [2432, 576]
+
+[[text]]
+text = "L141"
+at = [2528, 576]
+large = [2532, 572]
+
+[[text]]
+text = "L142"
+at = [2624, 576]
+
+[[text]]
+text = "L143"
+at = [2720, 576]
+
+[[text]]
+text = "L144"
+at = [2816, 576]
+large = [2820, 572]
+
+[[text]]
+text = "L145"
+at = [2912, 576]
+
+[[text]]
+text = "L146"
+at = [320, 595]
+
+[[text]]
+text = "L147"
+at = [416, 595]
+large = [420, 591]
+
+[[text]]
+text = "L148"
+at = [512, 595]
+
+[[text]]
+text = "L149"
+at = [608, 595]
+
+[[text]]
+text = "L150"
+at = [704, 595]
+large = [708, 591]
+
+[[text]]
+text = "L151"
+at = [800, 595]
+
+[[text]]
+text = "L152"
+at = [896, 595]
+
+[[text]]
+text = "L153"
+at = [992, 595]
+large = [996, 591]
+
+[[text]]
+text = "L154"
+at = [1088, 595]
+
+[[text]]
+text = "L155"
+at = [1184, 595]
+
+[[text]]
+text = "L156"
+at = [1280, 595]
+large = [1284, 591]
+
+[[text]]
+text = "L157"
+at = [1376, 595]
+size = 6
+
+[[text]]
+text = "L158"
+at = [1472, 595]
+size = 80
+
+[[text]]
+text = "L159"
+at = [1568, 595]
+large = [1572, 591]
+
+[[text]]
+text = "L160"
+at = [1664, 595]
+
+[[text]]
+text = "L161"
+at = [1760, 595]
+
+[[text]]
+text = "L162"
+at = [1856, 595]
+large = [1860, 591]
+
+[[text]]
+text = "L163"
+at = [1952, 595]
+
+[[text]]
+text = "L164"
+at = [2048, 595]
+
+[[text]]
+text = "L165"
+at = [2144, 595]
+large = [2148, 591]
+
+[[text]]
+text = "L166"
+at = [2240, 595]
+
+[[text]]
+text = "L167"
+at = [2336, 595]
+
+[[text]]
+text = "L168"
+at = [2432, 595]
+large = [2436, 591]
+
+[[text]]
+text = "L169"
+at = [2528, 595]
+
+[[text]]
+text = "L170"
+at = [2624, 595]
+
+[[text]]
+text = "L171"
+at = [2720, 595]
+large = [2724, 591]
+
+[[text]]
+text = "L172"
+at = [2816, 595]
+
+[[text]]
+text = "L173"
+at = [2912, 595]
+
+[[text]]
+text = "L174"
+at = [320, 614]
+large = [324, 610]
+
+[[text]]
+text = "L175"
+at = [416, 614]
+
+[[text]]
+text = "L176"
+at = [512, 614]
+
+[[text]]
+text = "L177"
+at = [608, 614]
+large = [612, 610]
+
+[[text]]
+text = "L178"
+at = [704, 614]
+
+[[text]]
+text = "L179"
+at = [800, 614]
+
+[[text]]
+text = "L180"
+at = [896, 614]
+large = [900, 610]
+
+[[text]]
+text = "L181"
+at = [992, 614]
+
+[[text]]
+text = "L182"
+at = [1088, 614]
+
+[[text]]
+text = "L183"
+at = [1184, 614]
+large = [1188, 610]
+
+[[text]]
+text = "L184"
+at = [1280, 614]
+
+[[text]]
+text = "L185"
+at = [1376, 614]
+
+[[text]]
+text = "L186"
+at = [1472, 614]
+large = [1476, 610]
+
+[[text]]
+text = "L187"
+at = [1568, 614]
+
+[[text]]
+text = "L188"
+at = [1664, 614]
+
+[[text]]
+text = "L189"
+at = [1760, 614]
+large = [1764, 610]
+
+[[text]]
+text = "L190"
+at = [1856, 614]
+
+[[text]]
+text = "L191"
+at = [1952, 614]
+
+[[text]]
+text = "L192"
+at = [2048, 614]
+large = [2052, 610]
+
+[[text]]
+text = "L193"
+at = [2144, 614]
+
+[[text]]
+text = "L194"
+at = [2240, 614]
+
+[[text]]
+text = "L195"
+at = [2336, 614]
+large = [2340, 610]
+
+[[text]]
+text = "L196"
+at = [2432, 614]
+
+[[text]]
+text = "L197"
+at = [2528, 614]
+
+[[text]]
+text = "L198"
+at = [2624, 614]
+large = [2628, 610]
+
+[[text]]
+text = "L199"
+at = [2720, 614]
+
+[[text]]
+text = "L200"
+at = [2816, 614]
+
+[[text]]
+text = "L201"
+at = [2912, 614]
+large = [2916, 610]
+
+[[text]]
+text = "L202"
+at = [320, 633]
+
+[[text]]
+text = "L203"
+at = [416, 633]
+
+[[text]]
+text = "L204"
+at = [512, 633]
+large = [516, 629]
+
+[[text]]
+text = "L205"
+at = [608, 633]
+
+[[text]]
+text = "L206"
+at = [704, 633]
+
+[[text]]
+text = "L207"
+at = [800, 633]
+size = 6
+large = [804, 629]
+
+[[text]]
+text = "L208"
+at = [896, 633]
+size = 80
+
+[[text]]
+text = "L209"
+at = [992, 633]
+
+[[text]]
+text = "L210"
+at = [1088, 633]
+large = [1092, 629]
+
+[[text]]
+text = "L211"
+at = [1184, 633]
+
+[[text]]
+text = "L212"
+at = [1280, 633]
+
+[[text]]
+text = "L213"
+at = [1376, 633]
+large = [1380, 629]
+
+[[text]]
+text = "L214"
+at = [1472, 633]
+
+[[text]]
+text = "L215"
+at = [1568, 633]
+
+[[text]]
+text = "L216"
+at = [1664, 633]
+large = [1668, 629]
+
+[[text]]
+text = "L217"
+at = [1760, 633]
+
+[[text]]
+text = "L218"
+at = [1856, 633]
+
+[[text]]
+text = "L219"
+at = [1952, 633]
+large = [1956, 629]
+
+[[text]]
+text = "L220"
+at = [2048, 633]
+
+[[text]]
+text = "L221"
+at = [2144, 633]
+
+[[text]]
+text = "L222"
+at = [2240, 633]
+large = [2244, 629]
+
+[[text]]
+text = "L223"
+at = [2336, 633]
+
+[[text]]
+text = "L224"
+at = [2432, 633]
+
+[[text]]
+text = "L225"
+at = [2528, 633]
+large = [2532, 629]
+
+[[text]]
+text = "L226"
+at = [2624, 633]
+
+[[text]]
+text = "L227"
+at = [2720, 633]
+
+[[text]]
+text = "L228"
+at = [2816, 633]
+large = [2820, 629]
+
+[[text]]
+text = "L229"
+at = [2912, 633]
+
+[[text]]
+text = "L230"
+at = [320, 652]
+
+[[text]]
+text = "L231"
+at = [416, 652]
+large = [420, 648]
+
+[[text]]
+text = "L232"
+at = [512, 652]
+
+[[text]]
+text = "L233"
+at = [608, 652]
+
+[[text]]
+text = "L234"
+at = [704, 652]
+large = [708, 648]
+
+[[text]]
+text = "L235"
+at = [800, 652]
+
+[[text]]
+text = "L236"
+at = [896, 652]
+
+[[text]]
+text = "L237"
+at = [992, 652]
+large = [996, 648]
+
+[[text]]
+text = "L238"
+at = [1088, 652]
+
+[[text]]
+text = "L239"
+at = [1184, 652]
+
+[[text]]
+text = "L240"
+at = [1280, 652]
+large = [1284, 648]
+
+[[text]]
+text = "L241"
+at = [1376, 652]
+
+[[text]]
+text = "L242"
+at = [1472, 652]
+
+[[text]]
+text = "L243"
+at = [1568, 652]
+large = [1572, 648]
+
+[[text]]
+text = "L244"
+at = [1664, 652]
+
+[[text]]
+text = "L245"
+at = [1760, 652]
+
+[[text]]
+text = "L246"
+at = [1856, 652]
+large = [1860, 648]
+
+[[text]]
+text = "L247"
+at = [1952, 652]
+
+[[text]]
+text = "L248"
+at = [2048, 652]
+
+[[text]]
+text = "L249"
+at = [2144, 652]
+large = [2148, 648]
+
+[[text]]
+text = "L250"
+at = [2240, 652]
+
+[[text]]
+text = "L251"
+at = [2336, 652]
+
+[[text]]
+text = "L252"
+at = [2432, 652]
+large = [2436, 648]
+
+[[text]]
+text = "L253"
+at = [2528, 652]
+
+[[text]]
+text = "L254"
+at = [2624, 652]
+
+[[text]]
+text = "L255"
+at = [2720, 652]
+large = [2724, 648]
+
+[[text]]
+text = "L256"
+at = [2816, 652]
+
+[[text]]
+text = "L257"
+at = [2912, 652]
+size = 6
+
+[[text]]
+text = "L258"
+at = [320, 671]
+size = 80
+large = [324, 667]
+
+[[text]]
+text = "L259"
+at = [416, 671]
+
+[[text]]
+text = "L260"
+at = [512, 671]
+
+[[text]]
+text = "L261"
+at = [608, 671]
+large = [612, 667]
+
+[[text]]
+text = "L262"
+at = [704, 671]
+
+[[text]]
+text = "L263"
+at = [800, 671]
+
+[[text]]
+text = "L264"
+at = [896, 671]
+large = [900, 667]
+
+[[text]]
+text = "L265"
+at = [992, 671]
+
+[[text]]
+text = "L266"
+at = [1088, 671]
+
+[[text]]
+text = "L267"
+at = [1184, 671]
+large = [1188, 667]
+
+[[text]]
+text = "L268"
+at = [1280, 671]
+
+[[text]]
+text = "L269"
+at = [1376, 671]
+
+[[text]]
+text = "L270"
+at = [1472, 671]
+large = [1476, 667]
+
+[[text]]
+text = "L271"
+at = [1568, 671]
+
+[[text]]
+text = "L272"
+at = [1664, 671]
+
+[[text]]
+text = "L273"
+at = [1760, 671]
+large = [1764, 667]
+
+[[text]]
+text = "L274"
+at = [1856, 671]
+
+[[text]]
+text = "L275"
+at = [1952, 671]
+
+[[text]]
+text = "L276"
+at = [2048, 671]
+large = [2052, 667]
+
+[[text]]
+text = "L277"
+at = [2144, 671]
+
+[[text]]
+text = "L278"
+at = [2240, 671]
+
+[[text]]
+text = "L279"
+at = [2336, 671]
+large = [2340, 667]
+
+[[text]]
+text = "L280"
+at = [2432, 671]
+
+[[text]]
+text = "L281"
+at = [2528, 671]
+
+[[text]]
+text = "L282"
+at = [2624, 671]
+large = [2628, 667]
+
+[[text]]
+text = "L283"
+at = [2720, 671]
+
+[[text]]
+text = "L284"
+at = [2816, 671]
+
+[[text]]
+text = "L285"
+at = [2912, 671]
+large = [2916, 667]
+
+[[text]]
+text = "L286"
+at = [320, 690]
+
+[[text]]
+text = "L287"
+at = [416, 690]
+
+[[text]]
+text = "L288"
+at = [512, 690]
+large = [516, 686]
+
+[[text]]
+text = "L289"
+at = [608, 690]
+
+[[text]]
+text = "L290"
+at = [704, 690]
+
+[[text]]
+text = "L291"
+at = [800, 690]
+large = [804, 686]
+
+[[text]]
+text = "L292"
+at = [896, 690]
+
+[[text]]
+text = "L293"
+at = [992, 690]
+
+[[text]]
+text = "L294"
+at = [1088, 690]
+large = [1092, 686]
+
+[[text]]
+text = "L295"
+at = [1184, 690]
+
+[[text]]
+text = "L296"
+at = [1280, 690]
+
+[[text]]
+text = "L297"
+at = [1376, 690]
+large = [1380, 686]
+
+[[text]]
+text = "L298"
+at = [1472, 690]
+
+[[text]]
+text = "L299"
+at = [1568, 690]
+

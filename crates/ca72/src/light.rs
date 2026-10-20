@@ -1,7 +1,7 @@
 //! Potato mode's voice (decisions.md R31): the instrument's panel played by a model far
 //! cheaper than the circuit's, for computers the circuit is too heavy for. Not derived from
 //! the circuit but fitted to the circuit model's measured behaviour ([`laws`]; the plug-in's
-//! `tests/potato_reference.rs` measures both): band-limited oscillators (polyBLEP) at the
+//! `tests/potato_reference.rs` measures both): band-limited oscillators (BLEP and BLAMP) at the
 //! circuit's levels and shapes, the mixer's channels through their loaded pots, the input
 //! pair's compression, one ladder of four one-pole stages solved without delay around the
 //! loop (its gain the emphasis, its own limiter setting how loud it rings), FILTER MODE HI
@@ -17,7 +17,7 @@
 //! contact has been open 11.5 ms; GLIDE moves the pitch as the circuit's hold does. Nothing here
 //! allocates once made.
 
-use crate::resample::{Decimator, Interpolator};
+use crate::resample::{BlepTables, Decimator, Interpolator};
 use crate::tuning::FREQ_CENTRE;
 #[cfg(test)]
 use crate::voice::OscPanel;
@@ -28,6 +28,9 @@ use crate::voice::{
 
 /// Samples between the control laws' updates.
 pub const CONTROL_EVERY: usize = 16;
+
+/// The contours' past outputs kept, samples (more than [`Light`]'s filter's delay).
+const LATE_PAST: usize = 64;
 
 /// Keep the nonlinear ladder's ultrasonic harmonics out of the output band.
 const FILTER_OVERSAMPLE: usize = 8;
@@ -461,18 +464,54 @@ fn exp2(x: f32) -> f32 {
     f32::from_bits((p.to_bits() as i32 + ((i as i32) << 23)) as u32)
 }
 
-/// The two-sample polyBLEP at phase `t` (0..1) for an increment `dt` and its reciprocal.
+/// The band-limiting corrections around phase `p` (0..1) for an increment `dt` a sample's
+/// reciprocal `inv`: from every edge at phase `at` (each cycle) within the kernel's reach
+/// ([`crate::resample::blep_tables`], [`crate::resample::BLEP_DELAY`] samples either side),
+/// a step of one (`corner` false) or a corner where the slope grows by one a sample (`corner`
+/// true). The phase tells where each edge is, before it comes as after, so nothing is held
+/// back (decisions.md R-BLEP).
 #[inline(always)]
-fn blep(t: f32, dt: f32, inv: f32) -> f32 {
-    if t < dt {
-        let x = t * inv;
-        x + x - x * x - 1.0
-    } else if t > 1.0 - dt {
-        let x = (t - 1.0) * inv;
-        x * x + x + x + 1.0
-    } else {
-        0.0
+fn around(t: &BlepTables, p: f32, at: f32, inv: f32, corner: bool) -> f32 {
+    const REACH: f32 = crate::resample::BLEP_DELAY as f32;
+    let table = if corner { &t.ramp32 } else { &t.step32 };
+    let value = |x: f32| {
+        let u = (x + REACH) * crate::resample::BLEP_POINTS as f32;
+        let i = (u as usize).min(table.len() - 2);
+        let f = u - i as f32;
+        let v = table[i] + (table[i + 1] - table[i]) * f;
+        if corner {
+            v - x.max(0.0)
+        } else if x >= 0.0 {
+            v - 1.0
+        } else {
+            v
+        }
+    };
+    let mut q = p - at;
+    if q < 0.0 {
+        q += 1.0;
     }
+    let mut sum = 0.0;
+    // The edges passed (x >= 0), then those to come.
+    let mut k = 0.0;
+    loop {
+        let x = (q + k) * inv;
+        if x >= REACH {
+            break;
+        }
+        sum += value(x);
+        k += 1.0;
+    }
+    let mut k = -1.0;
+    loop {
+        let x = (q + k) * inv;
+        if x <= -REACH {
+            break;
+        }
+        sum += value(x);
+        k -= 1.0;
+    }
+    sum
 }
 
 /// A table's value at `x`, its points at `xs` (rising); continued flat beyond its ends.
@@ -544,6 +583,8 @@ impl Held {
 struct Osc {
     phase: f32,
     wave: Waveform,
+    /// The band-limiting kernel's tables.
+    tables: &'static BlepTables,
 }
 
 impl Osc {
@@ -556,12 +597,16 @@ impl Osc {
         }
         self.phase = p;
         // The sawtooth falls and jumps up at its reset; the reverse sawtooth rises.
-        let fall = || 1.0 - 2.0 * p + blep(p, dt, inv);
+        let t = self.tables;
+        // A step at phase `at`, and a corner there where the slope (a unit of phase) grows
+        // by `g`.
+        let step = |at: f32| around(t, p, at, inv, false);
+        let corner = |at: f32, g: f32| g * dt * around(t, p, at, inv, true);
+        let fall = || 1.0 - 2.0 * p + 2.0 * step(0.0);
         let rect = |d: f32| {
-            let q = if p >= d { p - d } else { p - d + 1.0 };
             let naive = if p < d { 1.0 } else { -1.0 };
             // (Centred: the rectangle's mean taken out, as the coupling does.)
-            naive + blep(p, dt, inv) - blep(q, dt, inv) - (2.0 * d - 1.0)
+            naive + 2.0 * (step(0.0) - step(d)) - (2.0 * d - 1.0)
         };
         match self.wave {
             // (The triangle at its top as the sawtooth resets, as the circuit's is.)
@@ -572,12 +617,18 @@ impl Osc {
                 } else {
                     (p - B) * (2.0 / (1.0 - B)) - 1.0
                 };
-                laws::TRIANGLE * t
+                // Its corners: at the top as the sawtooth resets, at the bottom at B.
+                let g = 2.0 / B + 2.0 / (1.0 - B);
+                laws::TRIANGLE * (t + corner(0.0, -g) + corner(B, g))
             }
             Waveform::SharkTooth => {
                 let q = p + laws::SHARK_AHEAD;
                 let q = if q >= 1.0 { q - 1.0 } else { q };
-                laws::SHARK_TRIANGLE * (4.0 * (q - 0.5).abs() - 1.0) + laws::SHARK_SAWTOOTH * fall()
+                // The triangle's corners: its bottom at q = 1/2, its top at q = 0.
+                let tri = 4.0 * (q - 0.5).abs() - 1.0
+                    + corner(0.5 - laws::SHARK_AHEAD, 8.0)
+                    + corner(1.0 - laws::SHARK_AHEAD, -8.0);
+                laws::SHARK_TRIANGLE * tri + laws::SHARK_SAWTOOTH * fall()
             }
             Waveform::Sawtooth => laws::SAWTOOTH * fall(),
             Waveform::ReverseSawtooth => -laws::REVERSE_SAWTOOTH * fall(),
@@ -934,6 +985,18 @@ pub struct Light {
     g_step: f32,
     k: f32,
     contours: [Contour; 2],
+    /// The contours' volts of the last samples (filter, loudness), the newest at `late_at`:
+    /// each reaches what it shapes as late as the sound does ([`Light::late_contours`];
+    /// decisions.md R-LATENCY), these samples late (filter, loudness).
+    late_past: [(f64, f64); LATE_PAST],
+    late_at: usize,
+    late: (f64, f64),
+    /// The filter contour as it reaches the ladder, V.
+    filter_volts: f64,
+    /// Oscillator 1's resets (its phase's wraps), a probe: the latest's time in samples and
+    /// how many, and the samples played.
+    resets: (f64, u64),
+    samples: u64,
     count: usize,
     /// ENTROPY's offsets: each oscillator's cents and the cutoff's octaves.
     detune: [f64; 3],
@@ -966,7 +1029,8 @@ impl Light {
         let filter_rate = rate * FILTER_OVERSAMPLE as f64;
         let filter_up = Interpolator::sparse(FILTER_OVERSAMPLE);
         let filter_down = Decimator::sparse(FILTER_OVERSAMPLE);
-        let filter_delay = filter_up.delay() + filter_down.delay();
+        let to_ladder = filter_up.delay();
+        let filter_delay = to_ladder + filter_down.delay();
         let at = |s: f64| (s * rate).round() as u32;
         let law = ContourLaw::new(Panel::default().filter_contour, true, 0, rate);
         let mut l = Light {
@@ -996,6 +1060,7 @@ impl Light {
             osc: [Osc {
                 phase: 0.0,
                 wave: Waveform::Sawtooth,
+                tables: crate::resample::blep_tables(),
             }; 3],
             dt: [0.0; 3],
             dt_step: [0.0; 3],
@@ -1043,6 +1108,21 @@ impl Light {
             g_step: 0.0,
             k: 0.0,
             contours: [Contour::at_rest(&law); 2],
+            late_past: [(0.0, 0.0); LATE_PAST],
+            late_at: 0,
+            // The filter contour as late as its sound at the ladder's input (the input
+            // resampler's delay, less the control step's: the ladder's coefficients follow it
+            // a step late); the loudness contour reaching the VCA when ULTRA's does once the
+            // output is lined up (`voice::LINE_UP`): 46.75 samples.
+            late: (
+                (to_ladder - (CONTROL_EVERY - 1) as f64).max(0.0),
+                (crate::voice::latency(crate::voice::Quality::NoCompromises)
+                    - crate::voice::LINE_UP.1 as f64)
+                    .max(0.0),
+            ),
+            filter_volts: 0.0,
+            resets: (0.0, 0),
+            samples: 0,
             count: 0,
             detune: [0.0; 3],
             cutoff_offset: 0.0,
@@ -1075,7 +1155,40 @@ impl Light {
             Contour::at_rest(&l.set.contours[0]),
             Contour::at_rest(&l.set.contours[1]),
         ];
+        l.settle_late();
         l
+    }
+
+    /// The contours' past as they are now (at rest).
+    fn settle_late(&mut self) {
+        let now = (self.contours[0].volts, self.contours[1].volts);
+        self.late_past = [now; LATE_PAST];
+        self.filter_volts = now.0;
+    }
+
+    /// The contours' outputs this sample (filter, loudness) kept; the filter contour as it
+    /// reaches the ladder ([`Light::filter_volts`]) and the loudness contour as it reaches the
+    /// VCA, each [`Light::late`] late (interpolated between samples): as late as the sound
+    /// each shapes, as the circuit has them (decisions.md R-LATENCY).
+    #[inline(always)]
+    fn late_contours(&mut self, filter: f64, loud: f64) -> f64 {
+        self.late_at = (self.late_at + 1) % LATE_PAST;
+        self.late_past[self.late_at] = (filter, loud);
+        let at = |late: f64| {
+            let (whole, part) = (late as usize, late.fract());
+            let k = |k: usize| self.late_past[(self.late_at + LATE_PAST - k) % LATE_PAST];
+            (k(whole), k(whole + 1), part)
+        };
+        let (f0, f1, part) = at(self.late.0);
+        self.filter_volts = f0.0 + (f1.0 - f0.0) * part;
+        let (l0, l1, part) = at(self.late.1);
+        l0.1 + (l1.1 - l0.1) * part
+    }
+
+    /// Oscillator 1's latest reset (its phase's wrap) in samples since the voice was made,
+    /// exact, and how many there have been (a probe: decisions.md R-LATENCY).
+    pub fn probe_resets(&self) -> (f64, u64) {
+        self.resets
     }
 
     pub fn rate(&self) -> f64 {
@@ -1354,6 +1467,7 @@ impl Light {
             Contour::at_rest(&self.set.contours[0]),
             Contour::at_rest(&self.set.contours[1]),
         ];
+        self.settle_late();
         self.ladder = Ladder::default();
         self.filter_up.reset();
         self.filter_down.reset();
@@ -1417,7 +1531,7 @@ impl Light {
         self.k = k;
         let log2 = self.set.cutoff
             + self.set.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
-            + self.set.contour * (self.contours[0].volts - self.set.contours[0].rest)
+            + self.set.contour * (self.filter_volts - self.set.contours[0].rest)
             + self.cutoff_offset;
         // The passband at this cutoff.
         let pass = interpolate(&laws::PASS_AT_LOG2, &laws::PASS_DB, log2);
@@ -1440,7 +1554,7 @@ impl Light {
     #[inline(always)]
     fn coefficients(&self, extra: f64) -> (f32, f32) {
         let s = &self.set;
-        let rise = self.contours[0].volts - s.contours[0].rest;
+        let rise = self.filter_volts - s.contours[0].rest;
         let log2 = s.cutoff
             + s.tracking * (self.pitch + self.beyond - laws::TRACKING_FROM) / 12.0
             + s.contour * rise
@@ -1515,8 +1629,9 @@ impl Light {
             }
         }
         let trigger = self.trigger;
-        self.contours[0].tick(trigger, &self.set.contours[0]);
+        let filter = self.contours[0].tick(trigger, &self.set.contours[0]);
         let loud = self.contours[1].tick(trigger, &self.set.contours[1]);
+        let loud = self.late_contours(filter, loud);
 
         // (What the panel sets, read as needed: not the whole of it copied each sample.)
         let s = &self.set;
@@ -1576,10 +1691,18 @@ impl Light {
             }
         }
         // The oscillators.
-        // (Each oscillator's increment's reciprocal the control step's: close enough for its
-        // polyBLEP's two samples.)
+        // (Each oscillator's increment's reciprocal the control step's: its edges' places in
+        // samples exact at a steady pitch, off by the step's change while it moves.)
+        self.samples += 1;
         let w0 = if gain[0] != 0.0 {
-            self.osc[0].tick(dt[0], inv[0])
+            let before = self.osc[0].phase;
+            let w = self.osc[0].tick(dt[0], inv[0]);
+            if self.osc[0].phase < before {
+                // (It wrapped this sample, its phase now so many increments past.)
+                let at = (self.samples - 1) as f64 - f64::from(self.osc[0].phase / dt[0]);
+                self.resets = (at, self.resets.1 + 1);
+            }
+            w
         } else {
             0.0
         };
@@ -1710,6 +1833,18 @@ impl Light {
         self.fed_at = (self.fed_at + 1) & 127;
         out
     }
+}
+
+/// `n` samples of one oscillator alone at `rate`, `hz`, its waveform at its level (the lab's
+/// aliasing measurement, `ca72-lab alias`; decisions.md R-BLEP).
+pub fn oscillator_alone(rate: f64, hz: f64, wave: Waveform, n: usize) -> Vec<f32> {
+    let mut o = Osc {
+        phase: 0.0,
+        wave,
+        tables: crate::resample::blep_tables(),
+    };
+    let dt = (hz / rate) as f32;
+    (0..n).map(|_| o.tick(dt, 1.0 / dt)).collect()
 }
 
 #[cfg(test)]

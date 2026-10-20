@@ -1,8 +1,8 @@
 //! What the plug-in keeps for the computer, not for the session (decisions.md R48,
 //! R51, R54): QUALITY's indicator shown or not, whether ULTRA's note has been read,
-//! the look (the skin) the editor is drawn in, its lettering's size and how the FREQUENCY
-//! knobs' dials read. In the
-//! shared
+//! the look (the skin) the editor is drawn in, its lettering's size, how the FREQUENCY
+//! knobs' dials read, the MOD wheel's MIDI source (R-MODWHEEL-SOURCE), the standalone's TEMPO
+//! (R-ARP), and whether agents may operate the standalone application (R-MCP). In the shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, and as one changes only that key written, the file read again under a lock
 //! every instance takes (`settings.toml.lock`), so that one editor's change never undoes
@@ -15,6 +15,7 @@ use ca72::freq_dial::Law;
 use ca72_panel::{Lettering, Skin};
 
 use crate::library::{shared_dir, write};
+use crate::mod_wheel::Source;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -29,6 +30,10 @@ pub struct Settings {
     /// one (`Skin::Worn`) unless CLASSIC (`Skin::Drawn`) is chosen (the owner, 2026-10-10: "all
     /// future versions default to the new skin"). Kept as `skin`, "realistic" or "classic".
     pub skin: Skin,
+    /// A skin pack's look chosen instead (decisions.md R-SKIN-PACKS), by its id: kept as
+    /// `skin_pack`, with `skin` its base look (what an older CA-72, or this one without the
+    /// pack, draws instead).
+    pub pack: Option<PackId>,
     /// How large the editor's lettering is printed, chosen with the same key: as the panel
     /// has it unless LARGE is chosen (the owner, 2026-10-15: "this is just SOME people, so I
     /// want it as an option, not as a general change"; decisions.md R-LETTERING). Kept as
@@ -46,6 +51,51 @@ pub struct Settings {
     pub keyboard_root: u8,
     /// TYPE's C-based octave, independent of the visible range and sound controls.
     pub typing_root: u8,
+    /// What moves the MOD wheel, on any channel; never a preset or project field.
+    pub mod_wheel_source: Source,
+    /// The standalone's TEMPO, beats a minute (120 unless set; decisions.md R-ARP): the
+    /// arpeggiator's where no host gives one. Kept as `standalone_tempo`, 30 to 300.
+    pub tempo: u16,
+    /// Whether AI agents may operate the standalone application through MCP (`crate::agent`;
+    /// decisions.md R-MCP): off unless the player turns it on (SETTINGS: AGENTS). Kept as
+    /// `agents`, true or false.
+    pub agents: bool,
+}
+
+/// A skin pack's id, as its manifest gives it (lower-case letters, digits, `-` and `.`, at
+/// most 64 bytes), kept without allocating.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct PackId {
+    bytes: [u8; 64],
+    len: u8,
+}
+
+impl PackId {
+    pub fn new(id: &str) -> Option<PackId> {
+        let ok = !id.is_empty()
+            && id.len() <= 64
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.');
+        ok.then(|| {
+            let mut bytes = [0; 64];
+            bytes[..id.len()].copy_from_slice(id.as_bytes());
+            PackId {
+                bytes,
+                len: id.len() as u8,
+            }
+        })
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("")
+    }
+}
+
+impl std::fmt::Debug for PackId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PackId({})", self.as_str())
+    }
 }
 
 /// One setting changed, as an editor keeps it (`Settings::keep`).
@@ -53,22 +103,38 @@ pub struct Settings {
 pub enum Change {
     Shutter(bool),
     NoteRead,
+    /// A built-in look (a pack's no longer chosen).
     Skin(Skin),
+    /// A skin pack's look, and its base look.
+    Pack(PackId, Skin),
     Lettering(Lettering),
     Frequency(Law),
     Keyboard(bool),
     KeyboardRoot(u8),
     TypingRoot(u8),
+    ModWheelSource(Source),
+    Tempo(u16),
+    Agents(bool),
 }
 
 impl Change {
     /// Its key and value in the file.
     fn put(self, t: &mut toml::Table) {
+        let name = |skin| match skin {
+            Skin::Worn => "realistic",
+            Skin::Drawn => "classic",
+        };
         let (key, value): (&str, toml::Value) = match self {
             Change::Shutter(shown) => ("ultra_shutter", shown.into()),
             Change::NoteRead => ("ultra_note_read", true.into()),
-            Change::Skin(Skin::Worn) => ("skin", "realistic".into()),
-            Change::Skin(Skin::Drawn) => ("skin", "classic".into()),
+            Change::Skin(skin) => {
+                t.remove("skin_pack");
+                ("skin", name(skin).into())
+            }
+            Change::Pack(id, base) => {
+                t.insert("skin_pack".into(), id.as_str().into());
+                ("skin", name(base).into())
+            }
             Change::Lettering(Lettering::Standard) => ("lettering", "standard".into()),
             Change::Lettering(Lettering::Large) => ("lettering", "large".into()),
             Change::Frequency(Law::Semitones) => ("frequency_dials", "semitones".into()),
@@ -79,6 +145,17 @@ impl Change {
             ),
             Change::KeyboardRoot(root) => ("keyboard_root", i64::from(root.min(84)).into()),
             Change::TypingRoot(root) => ("typing_root", i64::from(root.min(120) / 12 * 12).into()),
+            Change::ModWheelSource(source) => (
+                "mod_wheel_source",
+                match source {
+                    Source::Cc(cc) => format!("cc{cc}"),
+                    Source::ChannelPressure => "channel_aftertouch".into(),
+                    Source::PolyPressure => "poly_aftertouch".into(),
+                }
+                .into(),
+            ),
+            Change::Tempo(bpm) => ("standalone_tempo", i64::from(tempo_within(bpm)).into()),
+            Change::Agents(on) => ("agents", on.into()),
         };
         t.insert(key.into(), value);
     }
@@ -90,13 +167,23 @@ impl Default for Settings {
             shutter: true,
             ultra_note_read: false,
             skin: Skin::Worn,
+            pack: None,
             lettering: Lettering::Standard,
             frequency: Law::Semitones,
             keyboard: None,
             keyboard_root: 41,
             typing_root: ca72_panel::keyboard::TYPE_ROOT,
+            mod_wheel_source: Source::DEFAULT,
+            tempo: crate::params::DEFAULT_TEMPO as u16,
+            agents: false,
         }
     }
+}
+
+/// A TEMPO within its range (`params::TEMPO_RANGE`).
+pub fn tempo_within(bpm: u16) -> u16 {
+    let (lo, hi) = crate::params::TEMPO_RANGE;
+    bpm.clamp(lo as u16, hi as u16)
 }
 
 /// The settings' file on this computer.
@@ -119,6 +206,7 @@ impl Settings {
         Settings {
             shutter: flag("ultra_shutter", d.shutter),
             ultra_note_read: flag("ultra_note_read", d.ultra_note_read),
+            agents: flag("agents", d.agents),
             keyboard: match t.get("keyboard_view").and_then(toml::Value::as_str) {
                 Some("keyboard") => Some(true),
                 Some("controls") => Some(false),
@@ -136,11 +224,21 @@ impl Settings {
                 .filter(|n| (0..=120).contains(n) && n % 12 == 0)
                 .map(|n| n as u8)
                 .unwrap_or(d.typing_root),
+            tempo: t
+                .get("standalone_tempo")
+                .and_then(toml::Value::as_integer)
+                .and_then(|n| u16::try_from(n).ok())
+                .filter(|n| tempo_within(*n) == *n)
+                .unwrap_or(d.tempo),
             // (Anything but CLASSIC, the realistic look.)
             skin: match t.get("skin").and_then(toml::Value::as_str) {
                 Some("classic") => Skin::Drawn,
                 _ => d.skin,
             },
+            pack: t
+                .get("skin_pack")
+                .and_then(toml::Value::as_str)
+                .and_then(PackId::new),
             // (Anything but LARGE, the standard lettering.)
             lettering: match t.get("lettering").and_then(toml::Value::as_str) {
                 Some("large") => Lettering::Large,
@@ -151,6 +249,16 @@ impl Settings {
                 Some("hardware") => Law::Hardware,
                 _ => d.frequency,
             },
+            mod_wheel_source: match t.get("mod_wheel_source").and_then(toml::Value::as_str) {
+                Some("channel_aftertouch") => Source::ChannelPressure,
+                Some("poly_aftertouch") => Source::PolyPressure,
+                Some(cc) => cc
+                    .strip_prefix("cc")
+                    .and_then(|cc| cc.parse::<u8>().ok())
+                    .and_then(Source::cc)
+                    .unwrap_or(Source::DEFAULT),
+                None => Source::DEFAULT,
+            },
         }
     }
 
@@ -159,12 +267,22 @@ impl Settings {
         match change {
             Change::Shutter(shown) => self.shutter = shown,
             Change::NoteRead => self.ultra_note_read = true,
-            Change::Skin(skin) => self.skin = skin,
+            Change::Skin(skin) => {
+                self.skin = skin;
+                self.pack = None;
+            }
+            Change::Pack(id, base) => {
+                self.skin = base;
+                self.pack = Some(id);
+            }
             Change::Lettering(lettering) => self.lettering = lettering,
             Change::Frequency(law) => self.frequency = law,
             Change::Keyboard(shown) => self.keyboard = Some(shown),
             Change::KeyboardRoot(root) => self.keyboard_root = root.min(84),
             Change::TypingRoot(root) => self.typing_root = root.min(120) / 12 * 12,
+            Change::ModWheelSource(source) => self.mod_wheel_source = source,
+            Change::Tempo(bpm) => self.tempo = tempo_within(bpm),
+            Change::Agents(on) => self.agents = on,
         }
     }
 
@@ -176,6 +294,17 @@ impl Settings {
         let mut t = table(path)?.unwrap_or_default();
         t.insert("format".into(), 1.into());
         change.put(&mut t);
+        // The wheel's CC is reserved on every channel: a preset action learned on it is let
+        // go in the same write, so it cannot return when the wheel later moves elsewhere.
+        if let Change::ModWheelSource(Source::Cc(cc)) = change
+            && let Some(actions) = t
+                .get_mut("preset_actions")
+                .and_then(toml::Value::as_table_mut)
+        {
+            actions.retain(|_, v| {
+                v.get("cc").and_then(toml::Value::as_integer) != Some(i64::from(cc))
+            });
+        }
         write(path, &t)
     }
 }
@@ -209,6 +338,95 @@ fn table(path: &Path) -> Result<Option<toml::Table>, String> {
     }
 }
 
+/// Preset actions belong to this computer, across formats and projects. Each entry names a
+/// channel and exactly one input, with the same channel numbering the menus show.
+pub(crate) fn preset_actions(path: &Path) -> Vec<(usize, crate::learn::Binding)> {
+    use crate::learn::{Binding, Cc, action, index};
+    let Some(t) = table(path).ok().flatten() else {
+        return Vec::new();
+    };
+    let Some(actions) = t.get("preset_actions").and_then(toml::Value::as_table) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (id, v) in actions {
+        let Some(i) = index(id).filter(|&i| action(i).is_some()) else {
+            continue;
+        };
+        let Some(channel @ 1..=16) = v.get("channel").and_then(toml::Value::as_integer) else {
+            continue;
+        };
+        let input = match (
+            v.get("cc").and_then(toml::Value::as_integer),
+            v.get("note").and_then(toml::Value::as_integer),
+        ) {
+            (Some(cc @ 0..=127), None) if crate::learn::reserved(cc as u8).is_none() => {
+                Binding::Cc(Cc {
+                    channel: (channel - 1) as u8,
+                    cc: cc as u8,
+                })
+            }
+            (None, Some(note @ 0..=127)) => Binding::Note {
+                channel: (channel - 1) as u8,
+                note: note as u8,
+            },
+            _ => continue,
+        };
+        if !out.iter().any(|&(_, b)| b == input) {
+            out.push((i, input));
+        }
+    }
+    out
+}
+
+pub(crate) fn keep_preset_actions(
+    path: &Path,
+    bindings: &[Option<crate::learn::Binding>],
+    changed: &[usize],
+    released: Option<crate::learn::Binding>,
+) -> Result<(), String> {
+    use crate::learn::{Binding, LEARNABLE, action};
+    let _lock = lock(path)?;
+    let mut t = table(path)?.unwrap_or_default();
+    let mut actions = t
+        .get("preset_actions")
+        .and_then(toml::Value::as_table)
+        .cloned()
+        .unwrap_or_default();
+    let matches = |stored: &toml::Value, binding: Binding| {
+        let (channel, key, number) = match binding {
+            Binding::Cc(cc) => (cc.channel, "cc", cc.cc),
+            Binding::Note { channel, note } => (channel, "note", note),
+        };
+        stored.get("channel").and_then(toml::Value::as_integer) == Some(i64::from(channel) + 1)
+            && stored.get(key).and_then(toml::Value::as_integer) == Some(i64::from(number))
+    };
+    if let Some(input) = released {
+        actions.retain(|_, stored| !matches(stored, input));
+    }
+    for (i, binding) in bindings
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| action(*i).is_some() && changed.contains(i))
+    {
+        actions.remove(LEARNABLE[i].id);
+        let Some(binding) = binding else { continue };
+        let (channel, key, number) = match *binding {
+            Binding::Cc(cc) => (cc.channel, "cc", cc.cc),
+            Binding::Note { channel, note } => (channel, "note", note),
+        };
+        let mut v = toml::Table::new();
+        v.insert("channel".into(), (i64::from(channel) + 1).into());
+        v.insert(key.into(), i64::from(number).into());
+        // Another instance may have assigned this input since this one opened. The latest
+        // assignment owns it in the file too, while unrelated assignments are retained.
+        actions.retain(|_, stored| !matches(stored, *binding));
+        actions.insert(LEARNABLE[i].id.into(), v.into());
+    }
+    t.insert("preset_actions".into(), actions.into());
+    write(path, &t)
+}
+
 /// Claim this version for one visible editor across formats, hosts and processes. The
 /// last version shown is a high-water mark: a downgrade never erases it. A failed read or
 /// write shows nothing automatically; Settings can still open the bundled highlights.
@@ -231,6 +449,255 @@ pub(crate) fn claim_release_notes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The standalone's TEMPO: 120 for a new computer, kept within 30 to 300, a value out of
+    /// its range or not a number read as 120.
+    #[test]
+    fn the_tempo_is_kept_within_its_range() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("settings.toml");
+        assert_eq!(Settings::read(&path).tempo, 120);
+        Settings::keep(&path, Change::Tempo(96)).expect("saved");
+        assert_eq!(Settings::read(&path).tempo, 96);
+        Settings::keep(&path, Change::Tempo(900)).expect("saved");
+        assert_eq!(Settings::read(&path).tempo, 300);
+        std::fs::write(&path, "standalone_tempo = 7\n").expect("settings");
+        assert_eq!(Settings::read(&path).tempo, 120);
+        std::fs::write(&path, "standalone_tempo = \"fast\"\n").expect("settings");
+        assert_eq!(Settings::read(&path).tempo, 120);
+    }
+
+    #[test]
+    fn preset_action_assignments_survive_restart_and_preserve_other_computer_settings() {
+        use crate::learn::{Binding, Cc, MidiMap, index};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "skin = 'classic'\nlast_version_shown = '0.2.7'\n").unwrap();
+        let (previous, next) = (
+            index("previous_preset").unwrap(),
+            index("next_preset").unwrap(),
+        );
+        let mut a = MidiMap::default();
+        a.settings_file = Some(path.clone());
+        a.assign(
+            previous,
+            Binding::Note {
+                channel: 15,
+                note: 127,
+            },
+        );
+        a.keep_actions(&[previous]).unwrap();
+        let mut b = MidiMap::default();
+        b.settings_file = Some(path.clone());
+        b.assign(next, Cc { channel: 0, cc: 20 });
+        b.keep_actions(&[next]).unwrap();
+        let loaded = preset_actions(&path);
+        assert_eq!(
+            loaded.len(),
+            2,
+            "another instance's previous assignment survives"
+        );
+        assert!(loaded.contains(&(
+            previous,
+            Binding::Note {
+                channel: 15,
+                note: 127
+            }
+        )));
+        assert!(loaded.contains(&(next, Cc { channel: 0, cc: 20 }.into())));
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("classic") && contents.contains("0.2.7"));
+        a.remove(previous);
+        a.keep_actions(&[previous]).unwrap();
+        assert_eq!(
+            preset_actions(&path),
+            vec![(next, Cc { channel: 0, cc: 20 }.into())]
+        );
+        a.assign(previous, Cc { channel: 0, cc: 20 });
+        a.keep_actions(&[previous]).unwrap();
+        assert_eq!(
+            preset_actions(&path),
+            vec![(previous, Cc { channel: 0, cc: 20 }.into())],
+            "latest assignment wins across instances"
+        );
+        std::fs::write(&path, "not valid TOML = [").unwrap();
+        assert!(a.keep_actions(&[previous]).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "not valid TOML = ["
+        );
+    }
+
+    #[test]
+    fn stale_displacement_preserves_another_instances_newer_input() {
+        use crate::learn::{Cc, MidiMap, index};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let (previous, next, cutoff) = (
+            index("previous_preset").unwrap(),
+            index("next_preset").unwrap(),
+            index("cutoff").unwrap(),
+        );
+        let old = Cc { channel: 0, cc: 20 };
+        let new = Cc { channel: 0, cc: 21 };
+        let mut a = MidiMap::default();
+        a.settings_file = Some(path.clone());
+        a.assign(previous, old);
+        a.keep_actions(&[previous]).unwrap();
+        let mut b = MidiMap::default();
+        b.settings_file = Some(path.clone());
+        b.assign(previous, new);
+        b.keep_actions(&[previous]).unwrap();
+        let assignment = a.assign(next, old).unwrap();
+        assert_eq!(assignment.displaced, Some(previous));
+        a.keep_assignment(&assignment).unwrap();
+        let saved = preset_actions(&path);
+        assert!(saved.contains(&(previous, new.into())));
+        assert!(saved.contains(&(next, old.into())));
+        // A parameter taking a stale action's input must preserve the newer binding too.
+        a.assign(previous, old);
+        a.keep_assignment(&a.assign(cutoff, old).unwrap()).unwrap();
+        assert!(preset_actions(&path).contains(&(previous, new.into())));
+        b.assign(previous, old);
+        b.keep_actions(&[previous]).unwrap();
+        b.keep_assignment(&b.assign(cutoff, old).unwrap()).unwrap();
+        assert!(
+            preset_actions(&path).is_empty(),
+            "a parameter still removes the input it actually displaced"
+        );
+    }
+
+    /// The two computer settings MIDI shares (R-PRESET-KEYS, R-MODWHEEL-SOURCE): neither's
+    /// write drops the other's, the wheel's CC lets go of a preset action on it on every
+    /// channel, and a CC the wheel has freed keeps its action in a new instance.
+    #[test]
+    fn preset_actions_and_the_wheel_source_share_the_file() {
+        use crate::learn::{Binding, Cc, MidiMap, index};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let (previous, next) = (
+            index("previous_preset").unwrap(),
+            index("next_preset").unwrap(),
+        );
+        let pad = Binding::Note {
+            channel: 9,
+            note: 36,
+        };
+        Settings::keep(&path, Change::ModWheelSource(Source::ChannelPressure)).unwrap();
+        let a = MidiMap::for_settings(path.clone());
+        assert_eq!(a.wheel_source(), Source::ChannelPressure);
+        a.assign(previous, Cc { channel: 0, cc: 1 })
+            .expect("CC 1 freed");
+        a.assign(next, pad).unwrap();
+        a.keep_actions(&[previous, next]).unwrap();
+        assert_eq!(
+            Settings::read(&path).mod_wheel_source,
+            Source::ChannelPressure
+        );
+        let b = MidiMap::for_settings(path.clone());
+        assert_eq!(b.binding(previous), Some(Cc { channel: 0, cc: 1 }.into()));
+        assert_eq!(b.binding(next), Some(pad));
+        // The wheel takes CC 1 back: the action on it goes, the pad stays.
+        b.set_wheel_source(Source::Cc(1));
+        Settings::keep(&path, Change::ModWheelSource(Source::Cc(1))).unwrap();
+        assert_eq!(b.binding(previous), None);
+        assert_eq!(preset_actions(&path), vec![(next, pad)]);
+        // Another CC on another channel goes too: the wheel follows it on all of them.
+        a.assign(previous, Cc { channel: 5, cc: 11 }).unwrap();
+        a.keep_actions(&[previous]).unwrap();
+        Settings::keep(&path, Change::ModWheelSource(Source::Cc(11))).unwrap();
+        assert_eq!(preset_actions(&path), vec![(next, pad)]);
+        Settings::keep(&path, Change::ModWheelSource(Source::DEFAULT)).unwrap();
+        let c = MidiMap::for_settings(path.clone());
+        assert_eq!(c.binding(previous), None, "does not return");
+        assert_eq!(c.binding(next), Some(pad));
+        assert_eq!(c.wheel_source(), Source::DEFAULT);
+    }
+
+    #[test]
+    fn mod_wheel_sources_roundtrip_and_invalid_or_missing_sources_use_cc1() {
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        assert_eq!(Settings::read(&path).mod_wheel_source, Source::Cc(1));
+        Settings::keep(&path, Change::Skin(Skin::Drawn)).expect("other preference");
+        let sources = (0..128)
+            .filter_map(Source::cc)
+            .chain([Source::ChannelPressure, Source::PolyPressure]);
+        for source in sources {
+            Settings::keep(&path, Change::ModWheelSource(source)).expect("source saved");
+            let read = Settings::read(&path);
+            assert_eq!(read.mod_wheel_source, source);
+            assert_eq!(read.skin, Skin::Drawn);
+        }
+        for value in [
+            "'unknown'",
+            "'cc0'",
+            "'cc32'",
+            "'cc120'",
+            "'cc128'",
+            "'cc255'",
+            "'cc-1'",
+            "4",
+            "false",
+        ] {
+            std::fs::write(&path, format!("mod_wheel_source = {value}\n")).expect("file");
+            assert_eq!(
+                Settings::read(&path).mod_wheel_source,
+                Source::Cc(1),
+                "{value}"
+            );
+        }
+        std::fs::write(&path, "not [ toml").expect("bad file");
+        assert!(Settings::keep(&path, Change::ModWheelSource(Source::Cc(11))).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("unchanged"),
+            "not [ toml"
+        );
+    }
+
+    /// Every feature's computer setting in one file (0.3.0): the MOD wheel's source
+    /// (R-MODWHEEL-SOURCE), the preset actions (R-PRESET-KEYS), the standalone's TEMPO (R-ARP)
+    /// and AGENTS (R-MCP). Each one's write leaves the others as they were.
+    #[test]
+    fn each_features_setting_survives_the_others_writes() {
+        use crate::learn::{Binding, MidiMap, index};
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("settings.toml");
+        let pad = Binding::Note {
+            channel: 9,
+            note: 36,
+        };
+        let check = |what: &str| {
+            let s = Settings::read(&path);
+            assert_eq!(s.mod_wheel_source, Source::Cc(11), "{what}");
+            assert_eq!(s.tempo, 96, "{what}");
+            assert!(s.agents, "{what}");
+            assert_eq!(
+                preset_actions(&path),
+                vec![(index("next_preset").unwrap(), pad)],
+                "{what}"
+            );
+        };
+        Settings::keep(&path, Change::ModWheelSource(Source::Cc(11))).unwrap();
+        Settings::keep(&path, Change::Tempo(96)).unwrap();
+        Settings::keep(&path, Change::Agents(true)).unwrap();
+        let mut map = MidiMap::default();
+        map.settings_file = Some(path.clone());
+        let next = index("next_preset").unwrap();
+        map.assign(next, pad).unwrap();
+        map.keep_actions(&[next]).unwrap();
+        check("all four written");
+        Settings::keep(&path, Change::Tempo(96)).unwrap();
+        check("TEMPO written again");
+        Settings::keep(&path, Change::Agents(true)).unwrap();
+        check("AGENTS written again");
+        Settings::keep(&path, Change::ModWheelSource(Source::Cc(11))).unwrap();
+        check("the wheel's source written again");
+        map.keep_actions(&[next]).unwrap();
+        check("the actions written again");
+        Settings::keep(&path, Change::Skin(Skin::Drawn)).unwrap();
+        check("the look written");
+    }
 
     #[test]
     fn release_notes_history_survives_restarts_settings_edits_and_downgrades() {
@@ -433,6 +900,30 @@ mod tests {
         }
     }
 
+    /// A pack's look is kept with its base, which an older CA-72 reads; a built-in one chosen
+    /// again forgets the pack (decisions.md R-SKIN-PACKS).
+    #[test]
+    fn a_packs_look_is_kept_with_its_base() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let path = dir.path().join("settings.toml");
+        let id = PackId::new("org.example.night-panel").expect("an id");
+        Settings::keep(&path, Change::Pack(id, Skin::Drawn)).expect("kept");
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(text.contains("skin = \"classic\""), "{text}");
+        assert!(
+            text.contains("skin_pack = \"org.example.night-panel\""),
+            "{text}"
+        );
+        let read = Settings::read(&path);
+        assert_eq!((read.skin, read.pack), (Skin::Drawn, Some(id)));
+        Settings::keep(&path, Change::Skin(Skin::Worn)).expect("kept");
+        let read = Settings::read(&path);
+        assert_eq!((read.skin, read.pack), (Skin::Worn, None));
+        // An id a pack could not have is not read as one.
+        std::fs::write(&path, "skin_pack = \"../../evil\"\n").expect("written");
+        assert_eq!(Settings::read(&path).pack, None);
+    }
+
     /// Written and read again; keys it does not know kept; a file it cannot read left alone.
     #[test]
     fn the_settings_are_kept_and_a_bad_file_left_alone() {
@@ -446,6 +937,7 @@ mod tests {
             Change::Skin(Skin::Drawn),
             Change::Lettering(Lettering::Large),
             Change::Frequency(Law::Hardware),
+            Change::Agents(true),
         ] {
             Settings::keep(&path, c).expect("kept");
         }
@@ -453,13 +945,22 @@ mod tests {
             shutter: false,
             ultra_note_read: true,
             skin: Skin::Drawn,
+            pack: None,
             lettering: Lettering::Large,
             frequency: Law::Hardware,
             keyboard: None,
             keyboard_root: 41,
             typing_root: ca72_panel::keyboard::TYPE_ROOT,
+            mod_wheel_source: Source::DEFAULT,
+            tempo: 120,
+            agents: true,
         };
         assert_eq!(Settings::read(&path), s);
+        assert!(
+            std::fs::read_to_string(&path)
+                .expect("read")
+                .contains("agents = true")
+        );
         let text = std::fs::read_to_string(&path).expect("read") + "theirs = 3\n";
         std::fs::write(&path, &text).expect("written");
         Settings::keep(&path, Change::Skin(Skin::Worn)).expect("kept");
@@ -537,11 +1038,15 @@ mod tests {
                 shutter: true,
                 ultra_note_read: true,
                 skin: Skin::Drawn,
+                pack: None,
                 lettering: Lettering::Large,
                 frequency: Law::Hardware,
                 keyboard: None,
                 keyboard_root: 41,
                 typing_root: ca72_panel::keyboard::TYPE_ROOT,
+                mod_wheel_source: Source::DEFAULT,
+                tempo: 120,
+                agents: false,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))

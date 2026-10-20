@@ -59,6 +59,192 @@ impl InitContext<Ca72> for Initial {
     fn set_current_voice_capacity(&self, _capacity: u32) {}
 }
 
+/// Fresh host processes read their own computer settings before restoring MIDI assignments.
+#[test]
+fn computer_wheel_source_survives_restart_and_precedes_project_restore() {
+    use ca72_plugin::{
+        learn::{Cc, index},
+        mod_wheel::Source,
+        settings::{Change, Settings},
+    };
+    const CHILD: &str = "CA72_WHEEL_SOURCE_CHILD";
+    if let Ok(code) = std::env::var(CHILD) {
+        let source = Source::of_code(code.parse().expect("source code"));
+        let plugin = Ca72::default();
+        let params = plugin.parameters().clone();
+        assert_eq!(
+            params.midi_map.wheel_source(),
+            source,
+            "before project restoration"
+        );
+        let control = index("cutoff").expect("cutoff");
+        let cc = Cc {
+            channel: 3,
+            cc: if source == Source::DEFAULT { 11 } else { 1 },
+        };
+        params
+            .midi_map
+            .assign(control, cc)
+            .expect("freed CC assigned");
+        let (_original_processor, session) =
+            Processor::new(plugin, &["pitch_wheel", "mod_wheel"]).expect("session");
+        let saved = session.save().expect("project");
+        let state: PluginState = serde_json::from_slice(&saved).expect("project state");
+        assert!(!state.fields.contains_key("mod_wheel_source"));
+        assert!(!state.params.contains_key("mod_wheel_source"));
+        let restarted = Ca72::default();
+        let restored = restarted.parameters().clone();
+        let (mut processor, session) =
+            Processor::new(restarted, &["pitch_wheel", "mod_wheel"]).expect("restarted host");
+        session
+            .restore(&saved)
+            .expect("project restored before activation");
+        assert_eq!(restored.midi_map.assignment(control), Some(cc));
+        processor
+            .prepare(ProcessConfig {
+                sample_rate: 48_000.0,
+                max_buffer_frames: 256,
+            })
+            .expect("activation");
+        assert_eq!(
+            restored.midi_map.wheel_source(),
+            source,
+            "editor never opened"
+        );
+        assert_eq!(
+            restored.midi_map.assignment(control),
+            Some(cc),
+            "freed CC survives restore"
+        );
+        processor.deactivate();
+        return;
+    }
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().expect("worktree").join("target"));
+    std::fs::create_dir_all(&target).expect("target folder");
+    let dir = tempfile::tempdir_in(target).expect("isolated computer");
+    for source in [
+        Source::DEFAULT,
+        Source::Cc(11),
+        Source::Cc(23),
+        Source::ChannelPressure,
+        Source::PolyPressure,
+    ] {
+        Settings::keep(
+            &dir.path().join("CA-72/settings.toml"),
+            Change::ModWheelSource(source),
+        )
+        .expect("computer setting");
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "computer_wheel_source_survives_restart_and_precedes_project_restore",
+                "--nocapture",
+            ])
+            .env(CHILD, source.code().to_string())
+            .env("IDLE_FOUNDRY_SHARED", dir.path())
+            .env("CA72_SEATS_DIR", dir.path().join("seats"))
+            .output()
+            .expect("fresh host process");
+        assert!(
+            output.status.success(),
+            "{source:?}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn standalone_decodes_every_wheel_source_without_callback_allocation() {
+    use ca72_plugin::mod_wheel::Source;
+    for source in [
+        Source::Cc(1),
+        Source::Cc(2),
+        Source::Cc(4),
+        Source::Cc(11),
+        Source::Cc(74),
+        Source::Cc(23),
+        Source::ChannelPressure,
+        Source::PolyPressure,
+    ] {
+        let reference = Ca72::default();
+        let changed = Ca72::default();
+        let original = reference.parameters().clone();
+        let params = changed.parameters().clone();
+        for p in [&original, &params] {
+            p.noise_seed.store(42, Ordering::Relaxed);
+        }
+        let (mut before, original_session) =
+            Processor::new(reference, &["pitch_wheel", "mod_wheel"]).expect("reference");
+        let (mut after, session) =
+            Processor::new(changed, &["pitch_wheel", "mod_wheel"]).expect("source");
+        original_session.set_parameter(original.osc_mod.as_ptr(), 1.0);
+        session.set_parameter(params.osc_mod.as_ptr(), 1.0);
+        for processor in [&mut before, &mut after] {
+            processor
+                .prepare(ProcessConfig {
+                    sample_rate: 48_000.0,
+                    max_buffer_frames: 256,
+                })
+                .expect("prepared");
+        }
+        original.midi_map.set_wheel_source(Source::DEFAULT);
+        params.midi_map.set_wheel_source(source);
+        let mut heard = false;
+        for b in 0..12 {
+            let value = (b * 11 % 128) as u8;
+            let message = if b == 0 {
+                [0x95, 60, 100]
+            } else {
+                [0xb5, 1, value]
+            };
+            let changed = if b == 0 {
+                message
+            } else {
+                match source {
+                    Source::Cc(cc) => [0xb5, cc, value],
+                    Source::ChannelPressure => [0xd5, value, 0],
+                    Source::PolyPressure => [0xa5, 60, value],
+                }
+            };
+            let run = |processor: &mut Processor<Ca72>, message: [u8; 3]| {
+                let (mut left, mut right) = ([0.0; 256], [0.0; 256]);
+                let midi = [MidiEvent {
+                    source: 1,
+                    data: message,
+                    len: if message[0] & 0xf0 == 0xd0 { 2 } else { 3 },
+                }];
+                OPERATIONS.with(|n| n.set(0));
+                TRACK.with(|track| track.set(true));
+                processor.process(AudioBlock {
+                    left: &mut left,
+                    right: &mut right,
+                    input_left: &[],
+                    input_right: &[],
+                    midi: &midi,
+                    panic: false,
+                });
+                TRACK.with(|track| track.set(false));
+                assert_eq!(
+                    OPERATIONS.with(Cell::get),
+                    0,
+                    "{source:?} allocated or freed"
+                );
+                (left, right)
+            };
+            let was = run(&mut before, message);
+            let now = run(&mut after, changed);
+            assert_eq!(now, was, "{source:?}, block {b}");
+            heard |= now.0.iter().any(|sample| sample.abs() > 0.0001);
+        }
+        assert!(heard);
+        before.deactivate();
+        after.deactivate();
+    }
+}
+
 #[test]
 fn direct_plugin_and_adapter_are_sample_identical_without_callback_allocation() {
     let mut direct = Ca72::default();
@@ -525,6 +711,87 @@ fn callback_task_queues_exhaust_without_spinning_allocating_or_dropping_heap_pay
             accepted += 1;
         }
         assert_eq!(accepted, 256);
+    }
+    adapter.deactivate();
+}
+
+#[test]
+fn preset_pads_work_in_the_production_adapter_without_callback_allocation() {
+    use ca72_plugin::learn::{Binding, Cc, index};
+    use std::time::{Duration, Instant};
+    let wrapped = Ca72::default();
+    let params = wrapped.parameters().clone();
+    params.midi_map.assign(
+        index("next_preset").unwrap(),
+        Binding::Note {
+            channel: 15,
+            note: 127,
+        },
+    );
+    params.midi_map.assign(
+        index("previous_preset").unwrap(),
+        Cc {
+            channel: 14,
+            cc: 119,
+        },
+    );
+    let entries = ca72_plugin::library::Library::shared().entries().0;
+    let (mut adapter, _session) = Processor::new(wrapped, &["pitch_wheel", "mod_wheel"]).unwrap();
+    adapter
+        .prepare(ProcessConfig {
+            sample_rate: 48_000.0,
+            max_buffer_frames: 128,
+        })
+        .unwrap();
+    let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+    let mut callback = |messages: &[[u8; 3]]| {
+        let midi: Vec<_> = messages
+            .iter()
+            .map(|&data| MidiEvent {
+                source: 1,
+                data,
+                len: 3,
+            })
+            .collect();
+        OPERATIONS.with(|n| n.set(0));
+        TRACK.with(|t| t.set(true));
+        adapter.process(AudioBlock {
+            left: &mut left,
+            right: &mut right,
+            input_left: &[],
+            input_right: &[],
+            midi: &midi,
+            panic: false,
+        });
+        TRACK.with(|t| t.set(false));
+        assert_eq!(
+            OPERATIONS.with(Cell::get),
+            0,
+            "a preset press or application allocated in the callback"
+        );
+    };
+    let current = || params.preset.read().unwrap().clone();
+    callback(&[[0x9f, 127, 100]]);
+    let start = Instant::now();
+    while current() != entries[0].sound.name {
+        callback(&[]);
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for message in [[0x9f, 127, 100], [0x9f, 127, 100], [0x8f, 127, 0]] {
+        callback(&[message]);
+        assert_eq!(current(), entries[0].sound.name);
+    }
+    callback(&[[0xbe, 119, 127]]);
+    let start = Instant::now();
+    while current() != entries.last().unwrap().sound.name {
+        callback(&[]);
+        assert!(start.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for value in [127, 100, 64, 63, 0] {
+        callback(&[[0xbe, 119, value]]);
+        assert_eq!(current(), entries.last().unwrap().sound.name);
     }
     adapter.deactivate();
 }

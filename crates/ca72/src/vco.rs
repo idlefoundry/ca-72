@@ -17,10 +17,13 @@
 //!   triangle is the DC transfer of Q2/Q1 tabulated from ngspice ([`crate::tables::TRI`]);
 //!   the rectangle is Q11/Q12's comparator with its hysteresis, thresholds from ngspice's
 //!   DC sweeps.
-//! - **Band-limiting**: the core runs at `oversample` times the output rate; the jumps at
-//!   the reset and the rectangle's edges get band-limited steps at their exact times; a
-//!   halfband decimator brings each output down. The triangle's fold is sampled at the
-//!   oversampled rate without correction.
+//! - **Band-limiting** (decisions.md R-BLEP): the core runs at `oversample` times the output
+//!   rate; the jumps at the reset and the rectangle's edges get band-limited steps at their
+//!   exact times, the reset's areas band-limited impulses, and the slope's jumps (the reset,
+//!   the hold's end, the triangle's fold as a rounded corner) band-limited ramps, all from one
+//!   windowed sinc ([`crate::resample::BlepLine`]); a halfband decimator brings each output
+//!   down, its last stage long enough to keep 20 Hz to 20 kHz clean at 44.1 kHz
+//!   ([`Decimator::for_oscillators`]). Only the outputs in use are corrected ([`Vco::set_outputs`]).
 //!
 //! Outputs are the board's open-circuit voltages (unloaded): the mixer's loading belongs
 //! to the mixer's model. The reset's sub-microsecond shape is represented by what it does
@@ -30,7 +33,7 @@
 //! and noise.
 
 use crate::expo::ExpoCircuit;
-use crate::resample::{BlepLine, Decimator};
+use crate::resample::{BLEP_DELAY, BlepLine, Decimator};
 use crate::tables;
 
 /// The core's reset constants (oscillator 1, 25 C).
@@ -162,6 +165,36 @@ pub fn triangle(buf: f64) -> f64 {
         * (p2 - p0 + f * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + f * (3.0 * (p1 - p2) + p3 - p0)))
 }
 
+/// The triangle shaper's slope against the buffer.
+fn triangle_slope(buf: f64) -> f64 {
+    const H: f64 = 1e-4;
+    (triangle(buf + H) - triangle(buf - H)) / (2.0 * H)
+}
+
+/// The triangle's fold (Q2's, [`crate::tables::TRI`]) as a rounded corner (decisions.md
+/// R-BLEP): not a sharp corner but a knee, sharp below its lowest point and rounded over
+/// about 0.2 V above. The tangents 0.16 V below its lowest point and 0.19 V above meet at
+/// its centre; it is taken as turning evenly over 0.15 V of the buffer about there (the
+/// lab's sweep of 0 to 0.3 V: as a sharp corner its correction adds a kink where sampling
+/// resolves the knee). Gives the ramp's voltage where it starts (the ramp falling), how
+/// much the slope against the buffer grows across it, and its width.
+fn fold_corner(sh: &ShaperParams) -> (f64, f64, f64) {
+    const WIDTH: f64 = 0.15;
+    let lowest = (0..tables::TRI.len())
+        .min_by(|&i, &j| tables::TRI[i].total_cmp(&tables::TRI[j]))
+        .map_or(0.0, |i| tables::TRI_MIN + i as f64 * tables::TRI_STEP);
+    let (xl, xr) = (lowest - 0.16, lowest + 0.19);
+    let (sl, sr) = (triangle_slope(xl), triangle_slope(xr));
+    let (yl, yr) = (triangle(xl), triangle(xr));
+    // Where yl + sl (x - xl) = yr + sr (x - xr).
+    let x = (yr - yl + sl * xl - sr * xr) / (sl - sr);
+    (
+        (x + 0.5 * WIDTH - sh.buf_offset) / sh.buf_gain,
+        sr - sl,
+        WIDTH,
+    )
+}
+
 /// The most timing current the converter's model gives, A: twice MIDI 127's at the panel's
 /// centre (2.47 mA), an octave above the top key the plug-in plays, far past the audio band
 /// on any range. Up to it the solve converges; above about 1e-2 A it runs away.
@@ -207,6 +240,12 @@ pub struct Vco {
     saw: BlepLine,
     tri: BlepLine,
     rect: BlepLine,
+    /// Which outputs are corrected (sawtooth, triangle, rectangle; [`Vco::set_outputs`]).
+    outputs: [bool; 3],
+    /// The triangle's fold as a rounded corner ([`fold_corner`]): the ramp's voltage where it
+    /// starts, how much the triangle's slope against the buffer grows across it, and its
+    /// width in the buffer's volts.
+    fold: (f64, f64, f64),
     dec: [Decimator; 3],
     /// Output samples since the last `reset`, and the time of the latest ramp reset in
     /// output samples (fractional), with how many there have been.
@@ -252,9 +291,9 @@ impl Vco {
             table: None,
             table_on: false,
             dec_other: [
-                Decimator::new(oversample),
-                Decimator::new(oversample),
-                Decimator::new(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
             ],
             v: CoreParams::default().v_top0,
             hold_left: 0.0,
@@ -266,10 +305,12 @@ impl Vco {
             saw: BlepLine::default(),
             tri: BlepLine::default(),
             rect: BlepLine::default(),
+            outputs: [true; 3],
+            fold: fold_corner(&ShaperParams::default()),
             dec: [
-                Decimator::new(oversample),
-                Decimator::new(oversample),
-                Decimator::new(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
+                Decimator::for_oscillators(oversample),
             ],
             ticks: 0,
             last_reset: 0.0,
@@ -283,7 +324,7 @@ impl Vco {
     /// plays ([`Vco::set_oversample`]) and the converter's table for its trims as they are
     /// ([`crate::expo::ConverterTable`]; not on the audio thread: both are made here).
     pub fn prepare(&mut self, oversample: usize) {
-        let d = || Decimator::new(oversample);
+        let d = || Decimator::for_oscillators(oversample);
         self.dec_other = [d(), d(), d()];
         self.other = oversample;
         // (One a process for each converter's circuit and temperature.)
@@ -309,9 +350,9 @@ impl Vco {
         self.oversample = oversample;
         self.dt = rate_dt / oversample as f64;
         self.dec.iter_mut().for_each(Decimator::reset);
-        self.saw = BlepLine::default();
-        self.tri = BlepLine::default();
-        self.rect = BlepLine::default();
+        self.saw.clear();
+        self.tri.clear();
+        self.rect.clear();
         self.sub = 0;
     }
 
@@ -323,7 +364,15 @@ impl Vco {
 
     /// The outputs' delay through band-limiting and decimation, in output samples.
     pub fn latency(&self) -> f64 {
-        self.dec[0].delay() + 1.0 / self.oversample as f64
+        self.dec[0].delay() + BLEP_DELAY as f64 / self.oversample as f64
+    }
+
+    /// Which outputs (sawtooth, triangle, rectangle) to correct from now on: the voice's
+    /// selected waveform's ([`crate::voice`]); all of them unless set. An output left out is
+    /// still made, uncorrected (it aliases): taken up again, its corrections start with the
+    /// next event (performance; decisions.md R-BLEP).
+    pub fn set_outputs(&mut self, outputs: [bool; 3]) {
+        self.outputs = outputs;
     }
 
     /// Starts again `at` (0 at the ramp's top after a reset, towards 1 at the threshold where
@@ -346,9 +395,9 @@ impl Vco {
         self.fall_in = None;
         self.rect_is_low = false;
         self.guess = None;
-        self.saw = BlepLine::default();
-        self.tri = BlepLine::default();
-        self.rect = BlepLine::default();
+        self.saw.clear();
+        self.tri.clear();
+        self.rect.clear();
         self.dec.iter_mut().for_each(Decimator::reset);
         self.ticks = 0;
         self.last_reset = 0.0;
@@ -520,6 +569,10 @@ impl Vco {
             {
                 take(cross(self.v, v_fall).clamp(0.0, left), 6);
             }
+            let v_fold = self.fold.0;
+            if !holding && self.v > v_fold && v_end <= v_fold {
+                take(cross(self.v, v_fold).clamp(0.0, left), 7);
+            }
             // Move everything to it.
             if !holding {
                 self.v = advance(self.v, next);
@@ -535,6 +588,26 @@ impl Vco {
             let frac = (t / dt).clamp(1e-9, 1.0);
             let sh = self.shaper;
             match which {
+                1 => {
+                    // The hold's end: the ramp falls again, at -s1 a sample in the buffer.
+                    let s1 = (a + b * self.v) / c * dt * sh.buf_gain;
+                    let buf = sh.buf_gain * self.v + sh.buf_offset;
+                    if self.outputs[0] {
+                        self.saw.ramp(-sh.saw_ratio * s1, frac);
+                    }
+                    if self.outputs[1] {
+                        self.tri.ramp(-triangle_slope(buf) * s1, frac);
+                    }
+                }
+                7 => {
+                    // The triangle's fold: its slope against the buffer turns there, over
+                    // its width.
+                    self.v = v_fold;
+                    if self.outputs[1] {
+                        let s = (a + b * self.v) / c * dt * sh.buf_gain;
+                        self.tri.fillet(self.fold.1 * s, frac, self.fold.2 / s);
+                    }
+                }
                 2 => {
                     self.reset_in = None;
                     self.do_reset(a, b, c, frac, rise_buf);
@@ -543,14 +616,18 @@ impl Vco {
                     self.rise_in = None;
                     if self.rect_is_low {
                         self.rect_is_low = false;
-                        self.rect.step(sh.rect_high - sh.rect_low, frac);
+                        if self.outputs[2] {
+                            self.rect.step(sh.rect_high - sh.rect_low, frac);
+                        }
                     }
                 }
                 4 => {
                     self.fall_in = None;
                     if !self.rect_is_low {
                         self.rect_is_low = true;
-                        self.rect.step(sh.rect_low - sh.rect_high, frac);
+                        if self.outputs[2] {
+                            self.rect.step(sh.rect_low - sh.rect_high, frac);
+                        }
                     }
                 }
                 5 => {
@@ -576,10 +653,18 @@ impl Vco {
         let v_top = self.core.v_top0 - self.core.top_per_slope * slope;
         let buf0 = sh.buf_gain * self.v + sh.buf_offset;
         let buf1 = sh.buf_gain * v_top + sh.buf_offset;
-        self.saw.step(sh.saw_ratio * (buf1 - buf0), frac);
-        self.saw.impulse(sh.saw_ratio * sh.buf_lag / self.dt, frac);
-        self.tri.step(triangle(buf1) - triangle(buf0), frac);
-        self.tri.impulse(sh.tri_glitch / self.dt, frac);
+        // The ramp stops falling and holds: the buffer's slope (a sample) goes from -s0 to 0.
+        let s0 = slope * self.dt * sh.buf_gain;
+        if self.outputs[0] {
+            self.saw.ramp(sh.saw_ratio * s0, frac);
+            self.saw.step(sh.saw_ratio * (buf1 - buf0), frac);
+            self.saw.impulse(sh.saw_ratio * sh.buf_lag / self.dt, frac);
+        }
+        if self.outputs[1] {
+            self.tri.ramp(triangle_slope(buf0) * s0, frac);
+            self.tri.step(triangle(buf1) - triangle(buf0), frac);
+            self.tri.impulse(sh.tri_glitch / self.dt, frac);
+        }
         if self.rect_is_low && buf1 >= rise_buf {
             self.rise_in = Some(sh.rect_rise_delay);
         }

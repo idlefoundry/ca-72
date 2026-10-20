@@ -23,6 +23,8 @@ use std::thread::JoinHandle;
 pub const MEND: u32 = 1;
 /// POLY's workers started or stopped as the audio thread asked.
 pub const SERVE: u32 = 2;
+/// A queued preset press or its audio acknowledgement is ready.
+pub const PRESETS: u32 = 4;
 
 /// What the helper and the plug-in share: what is asked, and whether to stop.
 #[derive(Debug, Default)]
@@ -55,12 +57,21 @@ impl Helper {
         crew: Arc<Crew>,
         calibration: Calibration,
     ) -> std::io::Result<Helper> {
+        Self::start_with_presets(spares, crew, calibration, None)
+    }
+
+    pub(crate) fn start_with_presets(
+        spares: Arc<Spares>,
+        crew: Arc<Crew>,
+        calibration: Calibration,
+        presets: Option<Arc<crate::preset_actions::PresetActions>>,
+    ) -> std::io::Result<Helper> {
         let shared = Arc::new(Shared::default());
         let s = shared.clone();
         let c = calibration.clone();
         let thread = std::thread::Builder::new()
             .name("ca72-helper".to_owned())
-            .spawn(move || help(&s, &spares, &crew, &c))?;
+            .spawn(move || help(&s, &spares, &crew, &c, presets.as_deref()))?;
         calibration.set_helper(Some(thread.thread().clone()));
         Ok(Helper {
             shared,
@@ -69,7 +80,7 @@ impl Helper {
         })
     }
 
-    /// `asks` ([`MEND`], [`SERVE`]) done as soon as the helper can. On the audio thread:
+    /// `asks` ([`MEND`], [`SERVE`], [`PRESETS`]) done as soon as the helper can. On the audio thread:
     /// allocates nothing and does not wait.
     pub fn ask(&self, asks: u32) {
         if asks == 0 {
@@ -98,11 +109,20 @@ impl Drop for Helper {
 /// The helper: parked until asked, then the asks done, until told to stop. A measurement for
 /// AUTO GAIN goes a render at a time (some tenths of a second's work in all), the asks seen to
 /// between its renders.
-fn help(s: &Shared, spares: &Spares, crew: &Crew, calibration: &Calibration) {
+fn help(
+    s: &Shared,
+    spares: &Spares,
+    crew: &Crew,
+    calibration: &Calibration,
+    presets: Option<&crate::preset_actions::PresetActions>,
+) {
     let quit = || s.quit.load(Ordering::Acquire);
     let mut job = None;
     while !quit() {
         let asks = s.asks.swap(0, Ordering::AcqRel);
+        if let Some(presets) = presets {
+            presets.prepare();
+        }
         let measuring = calibration.step(&mut job);
         if asks == 0 {
             if !measuring {

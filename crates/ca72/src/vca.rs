@@ -1211,6 +1211,102 @@ impl Vca {
     pub fn bias(&self) -> VcaBias {
         self.bias
     }
+
+    /// The signal path's states (C6, C8, C2 and the pairs' warm starts) taken from `from`, a
+    /// VCA of the same circuit at another rate ([`OversampledVca`] switching).
+    pub fn take_signal_states(&mut self, from: &Vca) {
+        (self.q6, self.q8, self.q2) = (from.q6, from.q8, from.q2);
+        self.warm.set(from.warm.get());
+        self.out_warm.set(from.out_warm.get());
+    }
+}
+
+/// ULTRA's VCA (decisions.md R-BLEP, ULTRA's VCA at 4x): the signal path ([`Vca::signal`]) at
+/// the filter's rate, fed the filter's own samples before its decimator, and its output
+/// decimated by a [`Decimator::new`] of the same design: so it takes in the filter's whole
+/// output, as the circuit's VCA does, and its aliasing is the filter's own. The bias
+/// ([`Vca::control`]'s) is worked out at the sample rate and interpolated linearly across the
+/// sample's steps, reaching the sample's own on the last.
+///
+/// [`Decimator::new`]: crate::resample::Decimator::new
+#[derive(Debug, Clone)]
+pub struct OversampledVca {
+    vca: Vca,
+    factor: usize,
+    down: crate::resample::Decimator,
+    last: Option<[f64; VcaDrive::LEN]>,
+}
+
+impl OversampledVca {
+    /// The signal path of `vca` (at its rate) at `factor` (2, 4 or 8) times it, at rest.
+    pub fn new(vca: &Vca, factor: usize) -> OversampledVca {
+        let mut v = vca.clone();
+        v.h /= factor as f64;
+        v.plain_signal = false;
+        OversampledVca {
+            vca: v,
+            factor,
+            down: crate::resample::Decimator::new(factor),
+            last: None,
+        }
+    }
+
+    /// High Fidelity's plain solve ([`Vca::plain_signal`]) or the full one.
+    pub fn set_plain(&mut self, plain: bool) {
+        self.vca.plain_signal = plain;
+    }
+
+    /// The A-440's output at C8's far side (see [`Vca::a440`]).
+    pub fn set_a440(&mut self, v: f64) {
+        self.vca.a440 = v;
+    }
+
+    /// How much later than at the sample rate a change of its bias reaches the output,
+    /// output samples: its decimator's delay, and (factor - 1) / factor more, since the bias
+    /// reaches the sample's own on its last step and the decimator gives its output on the
+    /// first (23 at 4x).
+    pub fn bias_latency(factor: usize) -> f64 {
+        crate::resample::Decimator::delay_of(factor, crate::resample::LAST_HALFBAND)
+            + (factor - 1) as f64 / factor as f64
+    }
+
+    /// One output sample from `xs`, the filter's output at this rate (`factor` samples, from
+    /// its rest), on the bias `d`.
+    pub fn signal(&mut self, xs: &[f64], d: &VcaDrive) -> f64 {
+        let to = d.to_array();
+        let from = self.last.unwrap_or(to);
+        self.last = Some(to);
+        let m = self.factor as f64;
+        let mut out = 0.0;
+        for (k, &x) in xs[..self.factor].iter().enumerate() {
+            let t = (k + 1) as f64 / m;
+            let dk =
+                VcaDrive::from_array(&std::array::from_fn(|i| from[i] + t * (to[i] - from[i])));
+            let y = self.vca.signal(x, &dk);
+            if let Some(o) = self.down.push(y) {
+                out = o;
+            }
+        }
+        out
+    }
+
+    /// Takes over from the VCA at the sample rate `at` (switching into ULTRA): its states,
+    /// and its decimator filled with `out`, its last output, so that the output steps rather
+    /// than drops out.
+    pub fn take_over(&mut self, at: &Vca, out: f64) {
+        self.vca.take_signal_states(at);
+        self.last = None;
+        self.down.reset();
+        for _ in 0..self.factor * 128 {
+            self.down.push(out);
+        }
+    }
+
+    /// Its signal path's states handed to the VCA at the sample rate `to` (switching out of
+    /// ULTRA).
+    pub fn hand_over(&self, to: &mut Vca) {
+        to.take_signal_states(&self.vca);
+    }
 }
 
 #[cfg(test)]

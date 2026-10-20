@@ -97,6 +97,71 @@ fn a_hi_pair_gives_each_voice_its_own_samples() {
     pair_matches_alone(Quality::Potato, Quality::Potato, 1.25, true);
 }
 
+/// QUALITY switched under held notes, ULTRA to HI and back, the pair solved together only
+/// while both play HI: each voice the same to the bit as alone. (The paired path takes over the
+/// 4x VCA's states at the switch to HI and leaves its last output for the switch back, as
+/// `Voice::tick_jacks` does; decisions.md R-BLEP, ULTRA's VCA at 4x.)
+#[test]
+fn a_pair_switched_between_ultra_and_hi_plays_each_voice_alone() {
+    let rate = 48_000.0;
+    let mut a = Voice::prototype(rate);
+    a.set_seed(5);
+    a.panel.quality = Quality::NoCompromises;
+    a.panel.cutoff = 0.4;
+    a.panel.emphasis = 0.7;
+    let mut b = Voice::prototype(rate);
+    b.set_seed(9);
+    b.panel.quality = Quality::NoCompromises;
+    b.panel.cutoff = 0.6;
+    b.panel.emphasis = 0.7;
+    let (mut a1, mut b1) = (a.clone(), b.clone());
+    let jacks = Jacks::default();
+    for i in 0..(0.3 * rate) as usize {
+        // Both voices to HI, then voice a alone to ULTRA and back (a mixed pair, played one
+        // after the other), then both to ULTRA.
+        let (both, a_only) = match i {
+            4_000 => (Some(Quality::Potato), None),
+            9_000 => (None, Some(Quality::NoCompromises)),
+            11_000 => (None, Some(Quality::Potato)),
+            12_000 => (Some(Quality::NoCompromises), None),
+            _ => (None, None),
+        };
+        for v in [&mut a, &mut a1, &mut b, &mut b1] {
+            if i == 50 {
+                v.note(48, true);
+            }
+            if let Some(q) = both {
+                v.panel.quality = q;
+            }
+        }
+        if let Some(q) = a_only {
+            a.panel.quality = q;
+            a1.panel.quality = q;
+        }
+        let ya = a.tick_jacks(&jacks);
+        let yb = b.tick_jacks(&jacks);
+        let ha = a1.before_filter(&jacks);
+        let hb = b1.before_filter(&jacks);
+        let (fa, fb) = Voice::filter_pair(&mut a1, &ha, &mut b1, &hb);
+        let za = a1.after_filter(&ha, fa);
+        let zb = b1.after_filter(&hb, fb);
+        assert_eq!(
+            ya.to_bits(),
+            za.to_bits(),
+            "voice a at sample {i}: {ya} against {za}"
+        );
+        assert_eq!(
+            yb.to_bits(),
+            zb.to_bits(),
+            "voice b at sample {i}: {yb} against {zb}"
+        );
+    }
+    assert!(
+        a.probe() == a1.probe() && b.probe() == b1.probe(),
+        "the voices' last state"
+    );
+}
+
 #[test]
 fn ultra_and_mixed_pairs_play_each_voice_alone() {
     pair_matches_alone(Quality::NoCompromises, Quality::NoCompromises, 0.2, true);

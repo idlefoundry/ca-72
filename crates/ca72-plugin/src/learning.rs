@@ -10,12 +10,15 @@ use ca72::freq_dial::Law;
 use ca72_panel::controls::{CONTROLS, index as control_index};
 use ca72_panel::fonts::Fonts;
 use ca72_panel::learn::{Menu, Note, PANEL, Tone, above};
-use ca72_panel::presets::{MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone};
-use ca72_panel::strip::{StripControl, span};
+use ca72_panel::presets::{
+    BarTarget, MidiAction, MidiList, MidiRow, ROWS_SHOWN, Tone as DrawerTone,
+};
+use ca72_panel::strip::{Rail, StripControl, span};
 use ca72_panel::{Lettering, Skin, Target};
 use keyboard_types::{Key, KeyState, KeyboardEvent, Modifiers};
 
-use crate::learn::{Assigned, Cc, LEARNABLE, MidiMap, RESERVED_TEXT, index, reserved};
+use crate::learn::{Assigned, Binding, LEARNABLE, MOD_WHEEL, MidiMap, index};
+use crate::mod_wheel::Source;
 
 /// How long what was done stays said over its control.
 const NOTICE: Duration = Duration::from_secs(4);
@@ -30,12 +33,18 @@ pub const KEYS_TEXT: &str = "UP, DOWN: CHOOSE · ENTER: LEARN · DELETE: REMOVE 
 pub enum Place {
     Panel(usize),
     Strip(StripControl),
+    Preset(BarTarget),
 }
 
 /// Where learnable parameter `i`'s control is.
 pub fn place(i: usize) -> Option<Place> {
+    if i == MOD_WHEEL {
+        return Some(Place::Panel(control_index("mod_wheel")?));
+    }
     let id = LEARNABLE.get(i)?.id;
     Some(match id {
+        "previous_preset" => Place::Preset(BarTarget::Prev),
+        "next_preset" => Place::Preset(BarTarget::Next),
         "poly" => Place::Strip(StripControl::Poly),
         "unison" => Place::Strip(StripControl::Unison),
         "doubled" => Place::Strip(StripControl::Double),
@@ -48,7 +57,17 @@ pub fn place(i: usize) -> Option<Place> {
 /// The learnable parameter a place's control operates.
 pub fn learnable_at(p: Place) -> Option<usize> {
     match p {
-        Place::Panel(c) => index(CONTROLS.get(c)?.param),
+        Place::Preset(BarTarget::Prev) => index("previous_preset"),
+        Place::Preset(BarTarget::Next) => index("next_preset"),
+        Place::Preset(_) => None,
+        Place::Panel(c) => {
+            let id = CONTROLS.get(c)?.param;
+            if id == "mod_wheel" {
+                Some(MOD_WHEEL)
+            } else {
+                index(id)
+            }
+        }
         Place::Strip(s) => index(match s {
             StripControl::Poly => "poly",
             StripControl::Unison => "unison",
@@ -60,8 +79,9 @@ pub fn learnable_at(p: Place) -> Option<usize> {
 }
 
 /// Where a note about a place's control goes: centred above it.
-fn note_point(p: Place) -> (f64, f64) {
+fn note_point(rail: Rail, p: Place) -> (f64, f64) {
     match p {
+        Place::Preset(t) => ca72_panel::strip::centre(rail, ca72_panel::strip::StripTarget::Bar(t)),
         Place::Panel(c) => above(&CONTROLS[c]),
         Place::Strip(s) => {
             let (x0, y0, x1, _) = span(s);
@@ -87,6 +107,9 @@ pub enum Item {
     /// size (R-LETTERING), and how the FREQUENCY knobs' dials read (R54), each under its
     /// group's head (which does nothing).
     Look(Skin),
+    /// An installed skin pack's look, by its place in the editor's list (decisions.md
+    /// R-SKIN-PACKS).
+    Pack(usize),
     Lettering(Lettering),
     Dials(Law),
     Head,
@@ -96,6 +119,14 @@ pub enum Item {
     SizeMenu,
     /// The SIZE menu's: the window this wide (logical pixels).
     Size(u32),
+    WheelMenu(Option<u8>),
+    WheelSource(Source),
+    /// An effects' slot's (decisions.md R-FX-DRAWER, R-FX-SAFETY): another effect in its place,
+    /// none, the effect tried again...
+    Fx(crate::fx_view::FxAction),
+    /// The settings' AGENTS (the standalone's; decisions.md R-MCP): AI agents allowed to
+    /// operate it through MCP, or not.
+    Agents(bool),
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -120,6 +151,8 @@ pub enum Pressed {
     Indicator(bool),
     /// The settings' menu: the editor drawn in this look.
     Look(Skin),
+    /// The settings' menu: the editor drawn in this installed pack's look.
+    Pack(usize),
     /// The settings' menu: the editor's lettering printed at this size.
     Lettering(Lettering),
     /// The settings' menu: the FREQUENCY knobs read through this law.
@@ -130,6 +163,14 @@ pub enum Pressed {
     SizeMenu,
     /// The SIZE menu: the window this wide (logical pixels).
     Size(u32),
+    /// None: common sources; 128: CC ranges; otherwise the first CC in a range of sixteen.
+    WheelMenu(Option<u8>),
+    WheelSource(Source),
+    /// An effects' slot's menu: the list to replace its effect, its effect taken out, tried
+    /// again...
+    Fx(crate::fx_view::FxAction),
+    /// The settings' menu: agents allowed (true) or not.
+    Agents(bool),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -151,11 +192,25 @@ pub struct Learning {
     /// The window should take the keyboard (a menu opened, or learning begun: Escape is ours),
     /// asked once.
     pub take_keys: bool,
+    /// The rail the editor shows (the standalone's has FX, its arrows elsewhere): where a
+    /// note about PREVIOUS or NEXT PRESET goes.
+    pub rail: Rail,
 }
 
 /// A parameter's name.
 fn label(i: usize) -> &'static str {
+    if i == MOD_WHEEL {
+        return "MOD WHEEL SOURCE";
+    }
     LEARNABLE.get(i).map_or("", |l| l.label)
+}
+
+fn instruction(i: usize) -> &'static str {
+    if crate::learn::action(i).is_some() {
+        "PRESS A NOTE OR CC PAD ON YOUR MIDI DEVICE"
+    } else {
+        "MOVE A CONTROLLER ON YOUR MIDI DEVICE"
+    }
 }
 
 /// What a control that cannot be learned says in its menu.
@@ -163,7 +218,6 @@ fn not_learnable(t: Target) -> Option<String> {
     Some(match t {
         Target::Control(i) | Target::Legend(i, _) => match CONTROLS.get(i)?.param {
             "pitch_wheel" => "PITCH: MIDI PITCH BEND MOVES IT".into(),
-            "mod_wheel" => "MODULATION: THE MODULATION WHEEL (CC 1) MOVES IT".into(),
             "quality" => "QUALITY: SET PER PLUGIN INSTANCE".into(),
             _ => return None,
         },
@@ -213,10 +267,22 @@ impl Learning {
     ) {
         let learnable = place.and_then(learnable_at);
         let (title, items) = match learnable {
+            Some(MOD_WHEEL) => (
+                format!("MOD WHEEL SOURCE · {}", map.wheel_source().text()),
+                vec![
+                    if map.armed() == Some(MOD_WHEEL) {
+                        (Item::Cancel, "CANCEL MIDI LEARN")
+                    } else {
+                        (Item::Learn, "MIDI LEARN")
+                    },
+                    (Item::WheelMenu(None), "MOD WHEEL SOURCE…"),
+                    (Item::List, "MIDI ASSIGNMENTS…"),
+                ],
+            ),
             Some(i) => {
                 let cc = map
-                    .assignment(i)
-                    .map_or("NO MIDI CONTROLLER".to_owned(), Cc::text);
+                    .binding(i)
+                    .map_or("NO MIDI CONTROLLER".to_owned(), Binding::text);
                 let learn = if map.armed() == Some(i) {
                     (Item::Cancel, "CANCEL MIDI LEARN")
                 } else {
@@ -245,7 +311,7 @@ impl Learning {
                 }
             },
         };
-        let assigned = learnable.is_some_and(|i| map.assignment(i).is_some());
+        let assigned = learnable.is_some_and(|i| map.binding(i).is_some());
         let menu = Menu {
             x,
             y,
@@ -315,20 +381,40 @@ impl Learning {
     /// LOOK, the looks the editor can be drawn in on this computer (`skin`: the one it is,
     /// marked); under LETTERING, its lettering's sizes (`lettering`, marked: R-LETTERING); under
     /// FREQUENCY DIALS, how oscillators 2 and 3's FREQUENCY knobs read (`law`, marked:
-    /// decisions.md R54). The title always names this build's version, independent of the
+    /// decisions.md R54). Under LOOK, after the built-in two, each installed skin pack (`packs`:
+    /// its name, and whether it can be used; `pack` the one the editor is drawn in, if any); under
+    /// MOD WHEEL SOURCE, what moves the MOD wheel (`source`: R-MODWHEEL-SOURCE); in the
+    /// standalone, under AGENTS, whether AI agents may operate it (`agents`, marked; none in a
+    /// host: decisions.md R-MCP). The title always names this build's version, independent of the
     /// update check; opening this menu does not start a check.
     pub fn open_settings_menu(
         &mut self,
         fonts: &Fonts,
         (x, y): (f64, f64),
         size: f64,
-        (skin, lettering, law): (Skin, Lettering, Law),
+        (skin, lettering, law, source, agents): (Skin, Lettering, Law, Source, Option<bool>),
+        (packs, pack): (&[(String, bool)], Option<usize>),
     ) {
-        #[allow(unused_mut)]
-        let mut items = vec![
-            (Item::Head, "LOOK"),
-            (Item::Look(Skin::Worn), "REALISTIC"),
-            (Item::Look(Skin::Drawn), "CLASSIC"),
+        let mut items: Vec<(Item, String)> = vec![
+            (Item::Head, "LOOK".into()),
+            (Item::Look(Skin::Worn), "REALISTIC".into()),
+            (Item::Look(Skin::Drawn), "CLASSIC".into()),
+        ];
+        let mut unusable = Vec::new();
+        for (i, (name, usable)) in packs.iter().enumerate() {
+            if !usable {
+                unusable.push(items.len());
+            }
+            items.push((
+                Item::Pack(i),
+                if *usable {
+                    name.clone()
+                } else {
+                    format!("{name} (CANNOT BE USED)")
+                },
+            ));
+        }
+        let rest: Vec<(Item, &str)> = vec![
             (Item::Head, "LETTERING"),
             (Item::Lettering(Lettering::Standard), "STANDARD"),
             (Item::Lettering(Lettering::Large), "LARGE"),
@@ -338,14 +424,28 @@ impl Learning {
             (Item::Head, "WINDOW"),
             (Item::SizeMenu, "SIZE\u{2026}"),
             (Item::WhatsNew, "WHAT'S NEW…"),
+            (Item::Head, "MOD WHEEL SOURCE"),
+            (Item::WheelMenu(None), "CHOOSE SOURCE…"),
         ];
+        items.extend(rest.into_iter().map(|(it, t)| (it, t.to_owned())));
         #[cfg(feature = "standalone-production")]
         if crate::standalone_settings::available() {
-            items.push((Item::Head, "STANDALONE"));
-            items.push((Item::StandaloneSettings, "AUDIO & MIDI…"));
+            items.push((Item::Head, "STANDALONE".into()));
+            items.push((Item::StandaloneSettings, "AUDIO & MIDI…".into()));
+        }
+        if agents.is_some() {
+            items.push((Item::Head, "AGENTS".into()));
+            items.push((Item::Agents(true), "ALLOW".into()));
+            items.push((Item::Agents(false), "OFF".into()));
         }
         let current = |it: &Item| {
-            *it == Item::Look(skin) || *it == Item::Lettering(lettering) || *it == Item::Dials(law)
+            let look = match pack {
+                Some(p) => *it == Item::Pack(p),
+                None => *it == Item::Look(skin),
+            };
+            look || *it == Item::Lettering(lettering)
+                || *it == Item::Dials(law)
+                || agents.is_some_and(|a| *it == Item::Agents(a))
         };
         let mut menu = Menu {
             x,
@@ -354,17 +454,27 @@ impl Learning {
             title: format!("SETTINGS · CA-72 {}", crate::update::VERSION),
             items: items
                 .iter()
-                .map(|(it, t)| {
+                .enumerate()
+                .map(|(i, (it, t))| {
                     let choosable = matches!(
                         it,
                         Item::Look(_)
+                            | Item::Pack(_)
                             | Item::Lettering(_)
                             | Item::Dials(_)
+                            | Item::Agents(_)
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
-                    ) && !current(it);
-                    ((*t).to_owned(), choosable)
+                    ) && !current(it)
+                        && !unusable.contains(&i);
+                    let choosable = choosable || matches!(it, Item::WheelMenu(_));
+                    let text = if matches!(it, Item::WheelMenu(_)) {
+                        format!("{}…", source.text())
+                    } else {
+                        t.clone()
+                    };
+                    (text, choosable)
                 })
                 .collect(),
             heads: items
@@ -386,6 +496,87 @@ impl Learning {
         self.open = Some(Open {
             learnable: None,
             items: items.into_iter().map(|(it, _)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// A short list first; OTHER… opens eight ranges, each at most sixteen controllers.
+    pub fn open_wheel_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        source: Source,
+        range: Option<u8>,
+    ) {
+        let items: Vec<(Item, String, bool)> = match range {
+            None => {
+                let mut items: Vec<_> = [
+                    (Source::Cc(1), "CC 1 · MODULATION WHEEL"),
+                    (Source::Cc(2), "CC 2 · BREATH"),
+                    (Source::Cc(4), "CC 4 · FOOT"),
+                    (Source::Cc(11), "CC 11 · EXPRESSION"),
+                    (Source::Cc(74), "CC 74 · TIMBRE / MPE Y"),
+                    (Source::ChannelPressure, "CHANNEL AFTERTOUCH"),
+                    (Source::PolyPressure, "POLYPHONIC AFTERTOUCH · MAX HELD"),
+                ]
+                .into_iter()
+                .map(|(s, t)| (Item::WheelSource(s), t.into(), s != source))
+                .collect();
+                if matches!(source, Source::Cc(cc) if ![1, 2, 4, 11, 74].contains(&cc)) {
+                    items.push((Item::WheelSource(source), source.text(), false));
+                }
+                items.push((Item::WheelMenu(Some(128)), "OTHER…".into(), true));
+                items
+            }
+            Some(128) => (0..128)
+                .step_by(16)
+                .map(|cc| {
+                    (
+                        Item::WheelMenu(Some(cc)),
+                        format!("CC {cc}–{}…", cc + 15),
+                        true,
+                    )
+                })
+                .collect(),
+            Some(first) => (first..=first.saturating_add(15).min(127))
+                .map(|cc| {
+                    let allowed = Source::cc(cc).is_some();
+                    let text = match crate::learn::reserved(cc) {
+                        Some(why) => format!("CC {cc} · {}", why.to_uppercase()),
+                        None => format!("CC {cc}"),
+                    };
+                    (
+                        Item::WheelSource(Source::Cc(cc)),
+                        text,
+                        allowed && source != Source::Cc(cc),
+                    )
+                })
+                .collect(),
+        };
+        let mut menu = Menu {
+            x,
+            y,
+            size,
+            title: "MOD WHEEL SOURCE · ALL CHANNELS".into(),
+            items: items
+                .iter()
+                .map(|(_, text, on)| (text.clone(), *on))
+                .collect(),
+            heads: Vec::new(),
+            marked: items
+                .iter()
+                .enumerate()
+                .filter_map(|(i, (item, _, _))| (*item == Item::WheelSource(source)).then_some(i))
+                .collect(),
+            hover: None,
+        };
+        let (w, _) = menu.extent(fonts);
+        menu = menu.placed(fonts, x - w, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: items.into_iter().map(|(item, _, _)| item).collect(),
             menu,
         });
         self.take_keys = true;
@@ -431,6 +622,45 @@ impl Learning {
         self.take_keys = true;
     }
 
+    /// An effects' slot's menu (decisions.md R-FX-DRAWER; the owner's FX-A: "right-click to
+    /// replace/remove"), opened at (`x`, `y`): its effect's name as its title, then `items`
+    /// (what the effect's state offers, R-FX-SAFETY, then REPLACE… and REMOVE).
+    pub fn open_fx_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        name: &str,
+        items: &[(crate::fx_view::FxAction, &str)],
+    ) {
+        let items: Vec<(Item, &str)> = items.iter().map(|(a, t)| (Item::Fx(*a), *t)).collect();
+        let menu = Menu {
+            x,
+            y,
+            size,
+            title: name.to_uppercase(),
+            items: items.iter().map(|(_, t)| ((*t).to_owned(), true)).collect(),
+            heads: Vec::new(),
+            marked: Vec::new(),
+            hover: None,
+        }
+        .placed(fonts, x, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: items.into_iter().map(|(it, _)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// Whether (`x`, `y`) is over the open menu (the keyboard under it does not answer the pointer
+    /// there).
+    pub fn over_menu(&self, fonts: &Fonts, (x, y): (f64, f64)) -> bool {
+        self.open
+            .as_ref()
+            .is_some_and(|o| o.menu.hit(fonts, x, y).is_some())
+    }
+
     /// The menu closed.
     pub fn close_menu(&mut self) {
         self.open = None;
@@ -461,16 +691,21 @@ impl Learning {
             (Some(Item::Learn), Some(i)) => self.learn(map, i),
             (Some(Item::Cancel), _) => self.cancel(map),
             (Some(Item::Remove), Some(i)) => self.remove(map, i),
-            (Some(Item::List), l) => return Pressed::List(l),
+            (Some(Item::List), l) => return Pressed::List(l.filter(|&i| i != MOD_WHEEL)),
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,
             (Some(Item::WhatsNew), _) => return Pressed::WhatsNew,
             (Some(Item::Look(s)), _) => return Pressed::Look(*s),
+            (Some(Item::Pack(i)), _) => return Pressed::Pack(*i),
             (Some(Item::Lettering(l)), _) => return Pressed::Lettering(*l),
             (Some(Item::SizeMenu), _) => return Pressed::SizeMenu,
             (Some(Item::Size(w)), _) => return Pressed::Size(*w),
             (Some(Item::Dials(l)), _) => return Pressed::Dials(*l),
+            (Some(Item::WheelMenu(range)), _) => return Pressed::WheelMenu(*range),
+            (Some(Item::WheelSource(source)), _) => return Pressed::WheelSource(*source),
+            (Some(Item::Fx(a)), _) => return Pressed::Fx(*a),
+            (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
             _ => {}
         }
         Pressed::Done
@@ -481,9 +716,11 @@ impl Learning {
     pub fn learn(&mut self, map: &MidiMap, i: usize) {
         map.arm(i);
         self.notice = None;
-        self.chosen = i;
+        if i < LEARNABLE.len() {
+            self.chosen = i;
+        }
         self.say(
-            format!("{}: MOVE A CONTROLLER ON YOUR MIDI DEVICE.", label(i)),
+            format!("{}: {}", label(i), instruction(i)),
             DrawerTone::News,
         );
         self.take_keys = true;
@@ -506,6 +743,12 @@ impl Learning {
             let line = format!("{}: {} REMOVED", label(i), cc.text());
             self.say(format!("{line}."), DrawerTone::Dim);
             self.notice = Some((vec![(line, Tone::Plain)], i, Instant::now()));
+            if let Err(error) = map.keep_actions(&[i]) {
+                self.say(
+                    format!("MIDI ASSIGNMENT NOT SAVED: {error}"),
+                    DrawerTone::Trouble,
+                );
+            }
         }
     }
 
@@ -515,16 +758,21 @@ impl Learning {
 
     /// The editor closing: a controller the audio thread has already caught is assigned (the
     /// message that came is the assignment), then learning ends.
-    pub fn close(&mut self, map: &MidiMap) {
-        self.poll(map);
+    pub fn close(&mut self, map: &MidiMap) -> Option<Assigned> {
+        let caught = self.poll(map);
         map.cancel();
         self.open = None;
+        caught
     }
 
     /// What the audio thread caught for the parameter being learned, assigned, and said.
     pub fn poll(&mut self, map: &MidiMap) -> Option<Assigned> {
         let a = map.poll()?;
-        let head = format!("{}: {}", label(a.param), a.cc.text());
+        let controller = match a.cc {
+            Binding::Cc(c) if a.param == MOD_WHEEL => format!("CC {} · ALL CHANNELS", c.cc),
+            input => input.text(),
+        };
+        let head = format!("{}: {}", label(a.param), controller);
         let mut lines = vec![(head.clone(), Tone::Accent)];
         let mut status = head;
         if let Some(d) = a.displaced {
@@ -539,6 +787,12 @@ impl Learning {
         }
         self.say(format!("{status}."), DrawerTone::News);
         self.notice = Some((lines, a.param, Instant::now()));
+        if let Err(error) = map.keep_assignment(&a) {
+            self.say(
+                format!("MIDI ASSIGNMENT NOT SAVED: {error}"),
+                DrawerTone::Trouble,
+            );
+        }
         Some(a)
     }
 
@@ -566,7 +820,7 @@ impl Learning {
         let (panel, strip) = match ring {
             Some(Place::Panel(c)) => (Some(c), None),
             Some(Place::Strip(s)) => (None, Some(s)),
-            None => (None, None),
+            Some(Place::Preset(_)) | None => (None, None),
         };
         let note = match armed {
             Some(i) => place(i).map(|p| {
@@ -574,13 +828,20 @@ impl Learning {
                     Some(cc) => (
                         format!(
                             "CC {cc} IS {}: NOT LEARNED. MOVE ANOTHER CONTROLLER.",
-                            reserved(cc).unwrap_or("reserved").to_uppercase()
+                            map.reserved(cc).unwrap_or("reserved").to_uppercase()
                         ),
                         Tone::Warn,
                     ),
-                    None => (RESERVED_TEXT.to_owned(), Tone::Dim),
+                    None => (
+                        if i == MOD_WHEEL {
+                            "SETS THIS COMPUTER'S SOURCE · ALL CHANNELS".into()
+                        } else {
+                            map.reserved_text()
+                        },
+                        Tone::Dim,
+                    ),
                 };
-                let (x, y) = note_point(p);
+                let (x, y) = note_point(self.rail, p);
                 Note {
                     x,
                     y,
@@ -588,7 +849,7 @@ impl Learning {
                     lines: vec![
                         (format!("MIDI LEARN: {}", label(i)), Tone::Accent),
                         (
-                            "MOVE A CONTROLLER ON YOUR MIDI DEVICE · ESC OR CANCEL STOPS".into(),
+                            format!("{} · ESC OR CANCEL STOPS", instruction(i)),
                             Tone::Plain,
                         ),
                         third,
@@ -597,7 +858,7 @@ impl Learning {
             }),
             None => self.notice.as_ref().and_then(|(lines, i, _)| {
                 place(*i).map(|p| {
-                    let (x, y) = note_point(p);
+                    let (x, y) = note_point(self.rail, p);
                     Note {
                         x,
                         y,
@@ -617,14 +878,14 @@ impl Learning {
 
     /// The drawer's MIDI list as it is now.
     pub fn list_scene(&mut self, map: &MidiMap) -> MidiList {
-        let assigned = map.assignments();
+        let assigned = map.bindings();
         let armed = map.armed();
         let rows: Vec<MidiRow> = LEARNABLE
             .iter()
             .enumerate()
             .map(|(i, l)| MidiRow {
                 name: l.label.to_owned(),
-                assignment: assigned[i].map(Cc::text).unwrap_or_default(),
+                assignment: assigned[i].map(Binding::text).unwrap_or_default(),
                 waiting: armed == Some(i),
             })
             .collect();
@@ -633,7 +894,7 @@ impl Learning {
             (
                 format!(
                     "CC {cc} IS {}: NOT LEARNED. MOVE ANOTHER CONTROLLER.",
-                    reserved(cc).unwrap_or("reserved").to_uppercase()
+                    map.reserved(cc).unwrap_or("reserved").to_uppercase()
                 ),
                 DrawerTone::Trouble,
             )
@@ -644,7 +905,7 @@ impl Learning {
             first: self.first,
             chosen: self.chosen,
             keys: KEYS_TEXT.into(),
-            reserved: RESERVED_TEXT.into(),
+            reserved: map.reserved_text(),
             status,
             tone,
         }
@@ -735,5 +996,30 @@ impl Learning {
     /// The parameter chosen in the list.
     pub fn chosen(&self) -> usize {
         self.chosen
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ca72_panel::strip::{StripTarget, centre};
+
+    /// PREVIOUS and NEXT PRESET's notes go over their arrows on the rail the editor shows: the
+    /// standalone's, with FX (R-FX-DRAWER), has NEXT a key further left (R-PRESET-KEYS).
+    #[test]
+    fn a_preset_actions_note_goes_over_its_arrow_on_either_rail() {
+        for rail in [Rail::Plugin, Rail::Effects] {
+            for t in [BarTarget::Prev, BarTarget::Next] {
+                assert_eq!(
+                    note_point(rail, Place::Preset(t)),
+                    centre(rail, StripTarget::Bar(t)),
+                    "{rail:?} {t:?}"
+                );
+            }
+        }
+        assert_ne!(
+            note_point(Rail::Plugin, Place::Preset(BarTarget::Next)),
+            note_point(Rail::Effects, Place::Preset(BarTarget::Next))
+        );
     }
 }

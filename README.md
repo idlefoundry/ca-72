@@ -167,6 +167,25 @@ once. Open selectors update as devices arrive or disappear. Discovery errors kee
 the last good MIDI list and appear in settings; a successful empty inventory reports
 that no inputs are available. Refresh retries discovery.
 Input/output changes briefly stop playback and retain the sound and editor.
+**TEMPO**, the last row, is the arpeggiator's tempo in the standalone (which has no host to
+give one), the same as the screen at the top left of the panel shows: 120 BPM until you choose
+another from its list (or step it a beat at a time with the left and right arrow keys). It
+applies at once, needs no Apply, and is kept for this computer.
+
+**FX**, on the standalone's rail after ARP (from 0.3.0), drops a drawer of four slots for your
+own CLAP and VST3 effects, run after the synthesizer, left to right. **+ ADD EFFECT** lists the
+effects in your CLAP and VST3 folders (scanned the first time you open it, each plug-in loaded in
+a process of its own; **SCAN AGAIN** after installing more). Click an effect's name to open its
+window, its **ON** tab to bypass it, drag a name onto another slot to move it there, and
+right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while an effect plays. An
+effect that crashes is started again; after five crashes it is passed by and its slot says
+CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
+each effect's settings are saved in `effects.json` beside `session.json`. The standalone never
+waits for an effect: it opens and plays while they load. One that crashes or stops responding as
+it loads, or is passed by, stays off (CRASHED, NOT RESPONDING) at the next start until you click it
+to try again; if its saved settings crash it, its menu's **LOAD WITHOUT ITS SETTINGS** loads it
+fresh and keeps them. After a run that did not close properly, or with Shift (Option on macOS) held
+as it opens, or `--safe-start`, it starts with every effect OFF: click a slot to turn them back on.
 
 CoreAudio (macOS), WASAPI (Windows) and ALSA (Linux) are the native backends.
 The development JACK launcher is kept separately (Building); direct ASIO and
@@ -266,8 +285,43 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   again. A sound set only by the host or a MIDI controller uses the factory presets' average
   until it is changed in the window.
 - **LEVEL** (-30 to +12 dB, 0 by default): the output's gain, after MAIN OUTPUT's.
+- **ARP**, the arpeggiator (from 0.3.0; off by default, and off in every preset and project
+  saved before it): the **ARP** key on the rail, after the keyboard's, drops its drawer down
+  over the lower controls or the keyboard, and puts it away; the key stays lit while the
+  arpeggiator is on. It plays the keys you hold one at a time, in turn, and its notes go
+  through the instrument exactly as played ones do (MONO, POLY, UNISON, NOTE PRIORITY,
+  RETRIGGER and GLIDE take them the same way). **ON** switches it on; **HOLD** keeps the chord
+  playing after you let go, until you play a new one with no keys held or switch HOLD off.
+  With ON off, HOLD holds the notes you play as you played them, a drone, until you play a new
+  chord or switch HOLD off. **DIRECTION**: UP and DOWN in pitch order, UP/DOWN up and back with
+  its ends played once, RANDOM never the same note twice running, ORDER in the order you
+  pressed the keys (a key added goes on the end). **RATE** is a note value on the host's tempo,
+  from a half note (2) to a thirty-second (32), the dotted and triplet values between them (the
+  readout shows `16.` for a dotted sixteenth, `16t` for a triplet). **OCTAVES** (1 to 5)
+  repeats the pattern an octave up each time; a note that would go past the top of MIDI's
+  range plays in the highest octave it has instead. **GATE** (0 to 100 %, 50 by default) is
+  each note's length, a share of what the instrument can play in a step: even 0 % is held long
+  enough (20 ms) for its contours to start, and each note is let go long enough (13 ms) before
+  the next for them to start again, but at 100 %, which ties each note into the next (legato).
+  **SWING** (0 to 100 %, 0 by default) delays every second step: 67 % is a triplet
+  shuffle, 100 % puts it three quarters of the way through the pair. While the host plays, the
+  steps lock to its bars and beats (a key pressed up to a quarter of a step late plays at
+  once); stopped, the arpeggiator runs at the host's tempo from the moment you press a key;
+  the standalone uses its own **TEMPO**, the screen at the panel's top left (drag it, scroll
+  it, or double-click it and type; 30 to 300 BPM, 120 by default; also in Audio & MIDI). In a
+  plug-in the host gives the tempo and there is no screen. The sustain pedal
+  (CC 64) holds the keys you let go while the arpeggiator runs, and under HOLD's drone keeps
+  the keys let go part of the chord (unless MIDI Learn has CC 64; played without either, the
+  instrument ignores the pedal, as before). Every setting
+  is a host parameter that can be automated or learned, and is saved with presets and
+  projects. It sends no MIDI out.
 - **Wheels:** MIDI pitch bend moves the pitch by MIDI BEND RANGE semitones (2 by
-  default), and the modulation wheel (CC 1) moves the MODULATION wheel. All sound off,
+  default). SETTINGS > MOD WHEEL SOURCE chooses what moves the MODULATION wheel: CC 1
+  by default, another available CC, channel aftertouch, or the strongest polyphonic
+  aftertouch of the notes held. The common choices include breath (CC 2), foot (CC 4),
+  expression (CC 11) and timbre (CC 74); OTHER… reaches the other available numbers.
+  The source follows any MIDI channel and stays on this computer, outside presets and
+  projects. Changing it clears the old MIDI value. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
@@ -298,16 +352,22 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   too heavy for. It follows the same panel, the plug-in's own controls with it, its laws
   fitted to the circuit's (pitch, levels, the filter's cutoff, emphasis and rings, the
   contours, GLIDE, the VCA, DRIVE and FILTER MODE), and sounds close to it but simpler: ten
-  voices were a thirtieth to a fortieth of HI's cost in the 0.2.0 measurements. The 0.2.2
-  filter fixes increase both LO and HI's cost; those earlier ratios no longer describe this
-  release. Switching it stops the notes
+  voices cost a quarter to a seventh of HI's on one thread (about a fifth of a core of a fast
+  computer, a Ryzen 7 7800X3D, against four fifths of a core to one and a half at HI;
+  [docs/decisions.md](docs/decisions.md) R-LO-WORKERS). In 0.2.0 it was a thirtieth to a
+  fortieth; 0.2.2's filter fixes made LO's filter costlier. Like HI's, LO's voices are shared
+  with the plug-in's own threads where the machine has them and enough voices sound to repay it
+  (on Windows only while the host's thread is busy; see below). Switching it stops the notes
   sounding (switching between HI and ULTRA does not). It is saved with the session, not with
   presets: it suits the computer, not the sound.
 
 The editor works like the panel:
 
-- **Knobs:** drag up or down, or use the mouse wheel. Hold Shift to turn finely, and
-  double-click to return a control to its default.
+- **Knobs:** drag up or down, or scroll: a mouse wheel turns a knob a notch at a time, a
+  trackpad or a Magic Mouse as far as you move (on Linux, a trackpad also a notch at a time).
+  Hold Shift to turn finely, and double-click to return a control to its default. What you
+  hear follows a knob over 30 ms, so it moves smoothly however it is turned, by the editor or
+  by your host's automation; a preset you choose sounds at once.
 - **RANGE and WAVEFORM:** drag or scroll, click either side to step, or click a printed
   position to go straight to it.
 - **Switches:** click.
@@ -420,14 +480,19 @@ learn **LOCK**, which has no control on the panel.
 
 **What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches, the left
 hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD),
-INNER, SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Not
-the PITCH and MODULATION wheels (MIDI pitch bend and the modulation wheel, CC 1, move them
-already), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
+INNER, SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Right-click the
+MODULATION wheel and choose MIDI LEARN to set this computer's wheel source to a CC,
+on every channel. Its menu also opens the source choices in Settings. Not learned:
+PITCH (MIDI pitch bend moves it), POWER (your host's bypass), MIDI BEND RANGE, nor the presets.
 
-**Controllers that are not learned:** CC 0 and 32 (bank select), CC 1 (the modulation
-wheel), CC 6, 38 and 96–101 (data entry, RPN and NRPN), and CC 120–127 (the channel mode
-messages). Moving one while a control waits says so, and it waits on. CC 1, 120 (all sound
-off), 121 (reset all controllers) and 123 (all notes off) do what they always did.
+**Controllers that are not learned by sound controls:** the wheel's chosen CC on every
+channel, CC 0 and 32 (bank select), CC 6, 38 and 96–101 (data entry, RPN and NRPN), and
+CC 120–127 (the channel mode messages). The last groups cannot be wheel sources either.
+Choosing a CC for the wheel removes that CC's other assignments; choosing another source
+frees it again. The MIDI list names the wheel's source. Moving a reserved CC while a
+sound control waits says so, and it waits on. CC 120 (all sound off), 121 (reset all
+controllers) and 123 (all notes off) keep their actions; CC 121 resets the wheel's MIDI
+value for every source.
 
 **How a controller moves a control:** its value, 0 to 127, sets a knob to that share of its
 travel (127 is the top); RANGE and WAVEFORM to one of their six positions, each an equal
@@ -633,8 +698,10 @@ The service documents and datasheets the model was derived from are not included
   computer (a Ryzen 7 7800X3D) with every voice sounding, twice what 0.1's POLY presets did,
   and on a computer of four processors or a slower one they can overload. QUALITY LO took
   about a fortieth of that then ([docs/decisions.md](docs/decisions.md) R67). Both costs
-  increase with the 0.2.2 filter fixes; the R71 measurements cover one voice, not this full
-  polyphony matrix.
+  increased with the 0.2.2 filter fixes: at LO, Horn Bloom now takes about a third of a core
+  and Brass Choir and Warp Field a little less, on one thread (R-LO-WORKERS): a seventh to an
+  eighth of Horn Bloom's and Brass Choir's at HI (R-POLY-CRACKLE), shared with the plug-in's
+  threads as HI's are.
 - POLY's voices are shared between the host's audio thread and threads of the plug-in's own,
   as many as the machine gives ([docs/decisions.md](docs/decisions.md) R-THREADS): every
   instance in the host shares one budget of the machine's hardware threads less two and
@@ -644,7 +711,13 @@ The service documents and datasheets the model was derived from are not included
   machine's fast cores less two (the performance cores on a processor with efficiency
   cores): 8 on an Apple M4 Pro, 4 on an Intel i5-13600K. An instance holds its threads only
   while its POLY is on, taking them a moment after POLY is switched on and giving them back
-  when it is switched off (R18, R21).
+  when it is switched off (R18, R21). At QUALITY LO, whose voices are light, a run of voices is
+  shared only on as many threads as repay waking them: a thread a voice up to four, then one
+  for each two, so ten voices use five threads at most (R-LO-WORKERS). With one worker (a
+  computer of 3 or 4 processors) LO's voices are split between it and the host's thread. On
+  Linux and macOS LO always shares; on Windows, where a worker's short runs cost more, it
+  shares only while the host's thread is busy (above half the block, smoothed, or after a late
+  block) and returns to the host's thread when the load has stayed below 30 % for a while.
 - At ULTRA, on a machine of 6 or more fast cores, each sounding voice plays on six threads
   (one voice where the machine has 6 to 9, two from 10), when every sounding voice can: the
   same samples, in about half the time. The one instrument does too, so at ULTRA it holds

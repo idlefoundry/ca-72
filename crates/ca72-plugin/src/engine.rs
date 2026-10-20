@@ -21,7 +21,7 @@
 use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
-use ca72::voice::{Jacks, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
+use ca72::voice::{Jacks, LINE_UP, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
@@ -222,6 +222,43 @@ const LAMP_FALL: f32 = 0.05;
 /// factory calibration fails at much lower rates (it gives NaN at 1.2 kHz).
 pub const MIN_VOICE_RATE: f64 = 8_000.0;
 
+/// The most samples [`OutputDelay`] holds back.
+const LINE_UP_MOST: usize = 64;
+
+/// The output held back so that every QUALITY mode's sound comes out together, ULTRA's
+/// the latest ([`LINE_UP`]): a ring of each channel's last samples, made with the engine
+/// (nothing allocated on the audio thread).
+#[derive(Debug, Clone)]
+struct OutputDelay {
+    ring: [[f32; LINE_UP_MOST]; 2],
+    at: usize,
+}
+
+impl OutputDelay {
+    fn new() -> OutputDelay {
+        OutputDelay {
+            ring: [[0.0; LINE_UP_MOST]; 2],
+            at: 0,
+        }
+    }
+
+    /// `left` and `right` held back `late` samples (less than [`LINE_UP_MOST`]).
+    fn hold(&mut self, late: usize, left: &mut [f32], right: &mut [f32]) {
+        let late = late.min(LINE_UP_MOST - 1);
+        for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+            self.ring[0][self.at] = *l;
+            self.ring[1][self.at] = *r;
+            let k = (self.at + LINE_UP_MOST - late) % LINE_UP_MOST;
+            (*l, *r) = (self.ring[0][k], self.ring[1][k]);
+            self.at = (self.at + 1) % LINE_UP_MOST;
+        }
+    }
+
+    fn clear(&mut self) {
+        *self = OutputDelay::new();
+    }
+}
+
 /// How long POWER takes to fade the output out or in, s (switched at once, it clicks).
 const POWER_FADE: f64 = 0.01;
 
@@ -247,6 +284,10 @@ const QUIET: usize = 256;
 /// [`SETTLED`] over this, s; the next note then starts where it would have (decisions.md
 /// R68, the development line's R30).
 const SLEEP_WINDOW: f64 = 0.05;
+
+/// The stack [`Engine::prepare`] builds the voices on, bytes: a main thread's on macOS
+/// (decisions.md R-PREPARE-STACK; it needed more than 512 KB in October 2026).
+const PREPARE_STACK: usize = 8 << 20;
 
 /// How little the slow state may move over [`SLEEP_WINDOW`] for the instrument to sleep, V: a
 /// contour falling with a time constant of 10 s is then within 0.2 mV of where it settles.
@@ -1194,11 +1235,13 @@ pub struct Spares {
     places: [Mutex<Spare>; POLY_VOICES.2],
 }
 
-/// A place's spare voice and twin (DOUBLE's): clean, or the ones they replaced. (The twin
-/// boxed, as [`made_twin`]'s: the places are made together.)
+/// A place's spare voice and twin (DOUBLE's): clean, or the ones they replaced. (Each boxed,
+/// as [`made_twin`]'s twin is: ten voices inline made [`Spares`] some 440 KB, which `Arc::new`
+/// built on the stack of whatever thread made the engine, a host's making an instance:
+/// decisions.md R-HOST-STACK.)
 #[derive(Debug, Default)]
 struct Spare {
-    voice: Option<Voice>,
+    voice: Option<Box<Voice>>,
     twin: Option<Box<Voice>>,
     clean: bool,
 }
@@ -1222,10 +1265,10 @@ impl Spares {
                 .lock()
                 .ok()
                 .filter(|s| !s.clean)
-                .and_then(|s| s.voice.as_ref().map(Voice::rate));
+                .and_then(|s| s.voice.as_ref().map(|v| v.rate()));
             if let Some(rate) = used {
                 fill(place, rate, |s| {
-                    !s.clean && s.voice.as_ref().map(Voice::rate) == Some(rate)
+                    !s.clean && s.voice.as_ref().map(|v| v.rate()) == Some(rate)
                 });
             }
         }
@@ -1235,7 +1278,7 @@ impl Spares {
     fn make(&self, rate: f64) {
         for place in &self.places {
             fill(place, rate, |s| {
-                !(s.clean && s.voice.as_ref().map(Voice::rate) == Some(rate))
+                !(s.clean && s.voice.as_ref().map(|v| v.rate()) == Some(rate))
             });
         }
     }
@@ -1248,7 +1291,7 @@ fn fill(place: &Mutex<Spare>, rate: f64, wanted: impl Fn(&Spare) -> bool) {
         return;
     }
     let (mut voice, mut twin) = (
-        Some(Voice::prototype(rate)),
+        Some(Box::new(Voice::prototype(rate))),
         Some(Box::new(Voice::prototype(rate))),
     );
     if let Ok(mut s) = place.lock()
@@ -1271,6 +1314,8 @@ pub struct Engine {
     /// The one instrument asleep, or how near it is (decisions.md R68).
     rest: Rest,
     over: Option<Oversampled>,
+    /// HI's and LO's output held back to come out with ULTRA's ([`LINE_UP`]).
+    line_up: OutputDelay,
     rate: f64,
     seed: u64,
     controls: Controls,
@@ -1329,6 +1374,12 @@ pub struct Engine {
     /// Voices' runs not heard (a worker past the deadline, or the voice still held by one), for
     /// the measurements ([`Engine::silent_runs`]).
     silent_runs: u64,
+    /// The host's thread's load, block by block, and whether LO shares its voices for it where
+    /// this system shares them by load ([`LoSharing::Load`], decisions.md R-LO-WORKERS); when
+    /// the present block began, and the runs not heard by then.
+    busy: Busy,
+    block_start: Option<Instant>,
+    block_silent: u64,
     /// Where POLY's workers are started and stopped off the audio thread, the plan they are
     /// started for there (0: none), this thread's ask for them and whether the helper
     /// thread is to serve it (decisions.md R21, R23).
@@ -1362,6 +1413,7 @@ impl Engine {
             levels: [0.0; LEVELS],
             rest: Rest::default(),
             over: None,
+            line_up: OutputDelay::new(),
             rate: 0.0,
             seed: 0,
             gain: output_gain(controls.volume, controls.main_output),
@@ -1395,6 +1447,9 @@ impl Engine {
             workers: (0, None),
             deadline: None,
             silent_runs: 0,
+            busy: Busy::default(),
+            block_start: None,
+            block_silent: 0,
             crew: Arc::new(Crew::new()),
             plan: 0,
             ask: Ask::Not,
@@ -1413,6 +1468,38 @@ impl Engine {
     /// them (decisions.md R18). New voices stop the workers, here ([`Engine::start_workers`]
     /// plans them again).
     pub fn prepare(&mut self, rate: f64, seed: u64) {
+        // On a thread of its own with a main thread's stack (decisions.md R-PREPARE-STACK):
+        // a voice made for a rate the first time solves the keyboard circuit, and with the
+        // slots' voices, twins and spares built in place that took more than 512 KB, all a
+        // macOS host's secondary thread has (pluginval initialising the Audio Unit on its own
+        // thread overflowed it). Not the audio thread: hosts prepare a plug-in apart from it.
+        let mut once = Some((&mut *self, rate, seed));
+        let ran = std::thread::scope(|s| {
+            std::thread::Builder::new()
+                .name("ca72-prepare".to_owned())
+                .stack_size(PREPARE_STACK)
+                .spawn_scoped(s, || {
+                    if let Some((e, rate, seed)) = once.take() {
+                        e.prepare_here(rate, seed);
+                    }
+                })
+                .map(|h| h.join())
+        });
+        match ran {
+            Ok(Ok(())) => {}
+            // A panic in it is the caller's, as it would have been here.
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            // No thread to be had: here, as before.
+            Err(_) => {
+                if let Some((e, rate, seed)) = once.take() {
+                    e.prepare_here(rate, seed);
+                }
+            }
+        }
+    }
+
+    /// [`Engine::prepare`]'s work, on whichever thread runs it.
+    fn prepare_here(&mut self, rate: f64, seed: u64) {
         self.rest.wake();
         self.rest.window = (SLEEP_WINDOW * rate).ceil() as usize;
         let reseeded = seed != self.seed;
@@ -1445,6 +1532,7 @@ impl Engine {
         }
         self.stop_workers();
         self.rate = rate;
+        self.line_up.clear();
         self.fade_step = (1.0 / (POWER_FADE * rate)).min(1.0);
         self.hush_step = (1.0 / (HUSH_FADE * rate)).min(1.0);
         self.hush = false;
@@ -1550,7 +1638,11 @@ impl Engine {
         }
         let voices: Vec<Shared> = self.slots.iter().map(|s| s.play.clone()).collect();
         // (ULTRA's split crews made from a voice's parts, spare between runs.)
-        let template = self.slots[0].play.lock().ok().map(|p| p.voice.clone());
+        let template = self.slots[0]
+            .play
+            .lock()
+            .ok()
+            .map(|p| Box::new(p.voice.clone()));
         self.plan = self.crew.plan(&voices, workers, period, template);
         if let Some(need) = self.need() {
             self.pool = self.crew.start(self.plan, need);
@@ -1636,6 +1728,9 @@ impl Engine {
     /// each block's start, when POLY's workers also follow POLY ([`Engine::follow_poly`]).
     pub fn set_deadline(&mut self, deadline: Option<Instant>) {
         self.deadline = deadline;
+        // (The host's thread's time in the plug-in is counted from here to the block's end.)
+        self.block_start = Some(Instant::now());
+        self.block_silent = self.silent_runs;
         self.follow_poly();
         if let Some(p) = &self.pool {
             p.block();
@@ -1685,6 +1780,16 @@ impl Engine {
             if self.controls.unison && on {
                 s.active = true;
             }
+        }
+    }
+
+    /// Whether LO shares its voices with the workers now (decisions.md R-LO-WORKERS): always,
+    /// never, or while the host's thread is busy, as this system has it ([`lo_sharing`]).
+    pub fn lo_shares(&self) -> bool {
+        match lo_sharing() {
+            LoSharing::Never => false,
+            LoSharing::Always => true,
+            LoSharing::Load => self.busy.on,
         }
     }
 
@@ -1871,7 +1976,7 @@ impl Engine {
         let Some(clean) = spare.voice.as_mut().filter(|v| v.rate() == rate) else {
             return false;
         };
-        std::mem::swap(&mut p.voice, clean);
+        std::mem::swap(&mut p.voice, &mut **clean);
         if let Some(twin) = spare.twin.as_mut().filter(|v| v.rate() == rate) {
             std::mem::swap(&mut p.twin.voice, &mut **twin);
         }
@@ -1966,8 +2071,18 @@ impl Engine {
 
     /// One output sample, left and right, with `ext` at EXTERNAL INPUT (a sample that is not
     /// finite taken as 0: decisions.md R18); silence before [`Engine::prepare`]. With POWER
-    /// off, once faded out, the voices rest (the MIDI input still reaches them).
+    /// off, once faded out, the voices rest (the MIDI input still reaches them). Held back as
+    /// [`Engine::render`] holds it ([`LINE_UP`]).
     pub fn tick_stereo(&mut self, ext: f32) -> (f32, f32) {
+        let (l, r) = self.voices_stereo(ext);
+        let (mut l, mut r) = ([l], [r]);
+        let late = self.lined_up();
+        self.line_up.hold(late, &mut l, &mut r);
+        (l[0], r[0])
+    }
+
+    /// [`Engine::tick_stereo`]'s sample before it is held back.
+    fn voices_stereo(&mut self, ext: f32) -> (f32, f32) {
         if self.rest.asleep {
             if self.dormant(&[ext]) {
                 return (0.0, 0.0);
@@ -2020,14 +2135,47 @@ impl Engine {
             if self.dormant(&ext[..ext.len().min(len)]) {
                 left[..len].fill(0.0);
                 right[..len].fill(0.0);
+                // (What the output still holds back comes out, as with the voices playing.)
+                let late = self.lined_up();
+                self.line_up.hold(late, &mut left[..len], &mut right[..len]);
                 return;
             }
             self.rest.wake();
         }
         self.render_voices(ext, &mut left[..len], &mut right[..len]);
+        let late = self.lined_up();
+        self.line_up.hold(late, &mut left[..len], &mut right[..len]);
         if !self.many() {
             self.rest.heard(&left[..len], &right[..len]);
         }
+    }
+
+    /// The plug-in's latency, host samples (decisions.md R-LATENCY): how late ULTRA's sound
+    /// comes out, the voices' ([`ca72::voice::latency`]) and, below [`MIN_VOICE_RATE`], the
+    /// engine's resamplers'; rounded. The same in every QUALITY mode (HI's and LO's sound
+    /// held back to come out with ULTRA's: [`LINE_UP`]), so a host's compensation never
+    /// changes with it.
+    pub fn latency(&self) -> u32 {
+        let voices = ca72::voice::latency(Quality::NoCompromises);
+        let late = match &self.over {
+            Some(o) => voices / o.factor as f64 + o.up.delay() + o.down[0].delay(),
+            None => voices,
+        };
+        late.round() as u32
+    }
+
+    /// How many host samples the output is held back in the QUALITY mode playing
+    /// ([`LINE_UP`]).
+    fn lined_up(&self) -> usize {
+        let at_voices = if self.controls.ultra {
+            0
+        } else if self.controls.potato {
+            LINE_UP.1
+        } else {
+            LINE_UP.0
+        };
+        let factor = self.over.as_ref().map_or(1, |o| o.factor);
+        (at_voices as f64 / factor as f64).round() as usize
     }
 
     /// Whether the one instrument, asleep, stays so for samples with `ext` at EXTERNAL INPUT:
@@ -2052,7 +2200,7 @@ impl Engine {
         let runs = self.many() || self.controls.potato || !self.crews().is_empty();
         if !runs || self.over.is_some() || self.slots.is_empty() {
             for i in 0..len {
-                (left[i], right[i]) = self.tick_stereo(at(i));
+                (left[i], right[i]) = self.voices_stereo(at(i));
             }
             return;
         }
@@ -2177,11 +2325,21 @@ impl Engine {
             }
         }
         let deadline = self.deadline;
-        // (At QUALITY's LO a voice costs less than waking a worker for it: every voice here.)
-        let share = share && !self.controls.potato;
+        // (At QUALITY's LO only as many threads as the run's light voices repay waking:
+        // decisions.md R-LO-WORKERS.)
+        let threads = if !self.controls.potato {
+            MAX
+        } else if self.lo_shares() {
+            lo_threads(count)
+        } else {
+            1
+        };
+        // (Two voices' filters solved together only at HI without DOUBLE: decisions.md
+        // R-HI-PAIRS, R-POLY-CRACKLE.)
+        let pairs = !self.controls.ultra && !self.controls.potato && mix.double <= 0.0;
         let played = match &mut self.pool {
-            Some(pool) if share && count > 1 && n >= SHARED_RUN => {
-                pool.play(&list[..count], n, ext, rate, mix, deadline)
+            Some(pool) if share && threads > 1 && count > 1 && n >= SHARED_RUN => {
+                pool.play(&list[..count], n, ext, rate, mix, pairs, threads, deadline)
             }
             _ => {
                 // (Two at a time, their filters solved together at HI: decisions.md
@@ -2370,6 +2528,18 @@ impl Engine {
     /// and falling with a time constant of [`LAMP_FALL`]; POLY's voices let go and fallen
     /// silent over the block freed.
     pub fn end_block(&mut self, len: usize) -> f32 {
+        // (The block's runs are played: the workers may park as they finish.)
+        if let Some(p) = &self.pool {
+            p.rest();
+        }
+        if let Some(t) = self.block_start.take()
+            && self.rate > 0.0
+            && len > 0
+        {
+            let period = len as f64 / self.rate;
+            let unheard = self.silent_runs > self.block_silent;
+            self.busy.tally(t.elapsed().as_secs_f64(), period, unheard);
+        }
         if !self.many() && !self.rest.asleep {
             let state = self
                 .slots
@@ -2674,6 +2844,171 @@ pub fn workers_for(n: usize) -> usize {
         0
     } else {
         (n.saturating_sub(2) / 3).clamp(1, 4)
+    }
+}
+
+/// How LO shares its voices with the workers on a system (decisions.md R-LO-WORKERS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoSharing {
+    /// Every voice on the host's thread, as before R-LO-WORKERS (0.2.8).
+    Never,
+    /// Whenever [`lo_threads`] gives more than one thread.
+    Always,
+    /// Only while the host's thread is busy ([`Busy`]): below that, as [`LoSharing::Never`].
+    Load,
+}
+
+/// A measurement's own [`LoSharing`] (0: this system's).
+static LO_SHARING_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How LO shares its voices on this system (decisions.md R-LO-WORKERS, the owner's decision
+/// of 2026-10-19): by load on Windows, where the workers' short runs cost two to four times the
+/// voices' own processor time and the host's thread gained little while it was not busy;
+/// always elsewhere: on Linux and macOS waking a worker costs little (on an M4 Pro the
+/// process's processor time rose 0 to 12 points of a core, the host's thread's fell to a third
+/// or less, and a host's thread playing every voice itself was at times slowed past its
+/// period). A measurement's own, if it has set one.
+pub fn lo_sharing() -> LoSharing {
+    match LO_SHARING_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => LoSharing::Never,
+        2 => LoSharing::Always,
+        3 => LoSharing::Load,
+        _ if cfg!(windows) => LoSharing::Load,
+        _ => LoSharing::Always,
+    }
+}
+
+/// Sets how LO shares its voices, for a measurement or a test (None: back to this system's,
+/// [`lo_sharing`]). Not for the plug-in.
+#[doc(hidden)]
+pub fn set_lo_sharing_for_measurement(sharing: Option<LoSharing>) {
+    let v = match sharing {
+        None => 0,
+        Some(LoSharing::Never) => 1,
+        Some(LoSharing::Always) => 2,
+        Some(LoSharing::Load) => 3,
+    };
+    LO_SHARING_OVERRIDE.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The host's thread's load, its time in the plug-in a block against the block's period,
+/// smoothed, and whether it is busy enough for LO to share its voices ([`LoSharing::Load`],
+/// decisions.md R-LO-WORKERS): busy from a smoothed load above [`Busy::ON`], or at once after a
+/// block late or one with a voice's run not heard; no longer once the load has stayed below
+/// [`Busy::OFF`] for the hold, which starts at [`Busy::HOLD`] and doubles (to [`Busy::MOST`])
+/// each time it is busy again within [`Busy::AGAIN`] of ceasing, so that it does not flap (the
+/// load falls when the voices are shared); back to [`Busy::HOLD`] after [`Busy::AGAIN`] not
+/// busy. Seconds throughout; plain arithmetic, for the audio thread.
+#[derive(Debug, Clone, Copy)]
+pub struct Busy {
+    load: f64,
+    on: bool,
+    /// How long the load has been below [`Busy::OFF`] while busy, the hold now, and how long
+    /// since it was last busy.
+    quiet: f64,
+    hold: f64,
+    since: f64,
+}
+
+impl Default for Busy {
+    fn default() -> Self {
+        Busy {
+            load: 0.0,
+            on: false,
+            quiet: 0.0,
+            hold: Busy::HOLD,
+            since: f64::INFINITY,
+        }
+    }
+}
+
+impl Busy {
+    /// The smoothed load above which LO shares: half the block's period.
+    pub const ON: f64 = 0.5;
+    /// The smoothed load below which it stops, after the hold: well below [`Busy::ON`], and
+    /// above the 24 to 28 % a light load's sharing left on Windows, where it hardly lowers the
+    /// host's thread's time (so that a light load that went busy for one late block returns to
+    /// the host's thread).
+    pub const OFF: f64 = 0.3;
+    /// The smoothing's time constant.
+    pub const SMOOTH: f64 = 0.2;
+    /// The first hold, the most, and how soon being busy again doubles it.
+    pub const HOLD: f64 = 2.0;
+    pub const MOST: f64 = 30.0;
+    pub const AGAIN: f64 = 10.0;
+
+    /// A block of `period` seconds that took the host's thread `took`, with or without a
+    /// voice's run not heard.
+    pub fn tally(&mut self, took: f64, period: f64, unheard: bool) {
+        if !(took.is_finite() && period > 0.0) {
+            return;
+        }
+        let share = took / period;
+        self.load += (period / Busy::SMOOTH).min(1.0) * (share - self.load);
+        if share > 1.0 || unheard || self.load > Busy::ON {
+            if !self.on {
+                self.hold = if self.since < Busy::AGAIN {
+                    (2.0 * self.hold).min(Busy::MOST)
+                } else {
+                    Busy::HOLD
+                };
+                self.on = true;
+            }
+            self.quiet = 0.0;
+        } else if self.on {
+            if self.load < Busy::OFF {
+                self.quiet += period;
+                if self.quiet >= self.hold {
+                    (self.on, self.quiet, self.since) = (false, 0.0, 0.0);
+                }
+            } else {
+                self.quiet = 0.0;
+            }
+        } else {
+            self.since += period;
+        }
+    }
+
+    /// Whether it is busy.
+    pub fn on(&self) -> bool {
+        self.on
+    }
+
+    /// The smoothed load.
+    pub fn load(&self) -> f64 {
+        self.load
+    }
+}
+
+/// LO's sharing for a measurement (`usize::MAX`: [`lo_threads`]'s rule; else at most this many
+/// threads, the host's among them, for any run of two voices or more: 1, every voice on the
+/// host's thread, as before R-LO-WORKERS).
+static LO_THREADS_OVERRIDE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+/// Sets how many threads LO's voices are played on, for a measurement (None: back to
+/// [`lo_threads`]'s rule). Not for the plug-in.
+#[doc(hidden)]
+pub fn set_lo_threads_for_measurement(threads: Option<usize>) {
+    LO_THREADS_OVERRIDE.store(
+        threads.unwrap_or(usize::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The most threads, the host's among them, a run of `count` of LO's light voices is played
+/// on (decisions.md R-LO-WORKERS): a thread a voice up to four, then a thread for each two.
+/// Each thread then takes from the host's thread at least what it costs the computer (the
+/// host's time falling by at least half the workers' processor time), by the measurements on
+/// the Ryzen 7 7800X3D; a thread a voice past four fell by less than a third of it. The host's
+/// thread waits for the longest of the threads' shares, so no more threads than make it
+/// shorter. 1, the host's alone, for one voice; as many workers as the pool holds at most (the
+/// machine's, as at HI). DOUBLE's twins, played with their voices, change neither.
+pub fn lo_threads(count: usize) -> usize {
+    match LO_THREADS_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        usize::MAX if count <= 4 => count.max(1),
+        usize::MAX => count.div_ceil(2),
+        k => k,
     }
 }
 
@@ -3284,8 +3619,16 @@ mod tests {
                             &mut a,
                             &mut b,
                         );
+                        // (The legacy mix's output held back as the engine's is, to come
+                        // out with ULTRA's: decisions.md R-LATENCY.)
+                        let (mut fa, mut fb) = ([0.0f32; CHUNK], [0.0f32; CHUNK]);
                         for i in 0..CHUNK {
-                            let (a, b) = reference.faded(a[i], b[i]);
+                            (fa[i], fb[i]) = reference.faded(a[i], b[i]);
+                        }
+                        let late = reference.lined_up();
+                        reference.line_up.hold(late, &mut fa, &mut fb);
+                        for i in 0..CHUNK {
+                            let (a, b) = (fa[i], fb[i]);
                             assert_eq!(
                                 (l[i].to_bits(), r[i].to_bits()),
                                 (a.to_bits(), b.to_bits()),
@@ -3566,6 +3909,64 @@ mod tests {
         assert_eq!((split_voices_for(9), split_voices_for(64)), (1, 2));
     }
 
+    /// The host's thread's load (decisions.md R-LO-WORKERS): a light load leaves LO on the
+    /// host's thread; half the period, smoothed, or a late block or a run not heard, shares;
+    /// sharing stops only once the load has stayed below 30 % for the hold, which grows when it
+    /// would flap.
+    #[test]
+    fn lo_shares_while_the_host_s_thread_is_busy() {
+        let p = 256.0 / 48_000.0;
+        let run = |b: &mut Busy, share: f64, seconds: f64| {
+            for _ in 0..(seconds / p) as usize {
+                b.tally(share * p, p, false);
+            }
+        };
+        let mut b = Busy::default();
+        run(&mut b, 0.45, 5.0);
+        assert!(!b.on(), "busy at 45 %");
+        run(&mut b, 0.6, 1.0);
+        assert!(b.on(), "not busy at 60 %");
+        // Shared, the load falls: busy still between the two, however long.
+        run(&mut b, 0.35, 10.0);
+        assert!(b.on());
+        // Below a quarter: busy for the hold, then not.
+        run(&mut b, 0.1, 1.9);
+        assert!(b.on(), "stopped before the hold");
+        run(&mut b, 0.1, 0.3);
+        assert!(!b.on(), "busy after the hold");
+        // A late block, or a run not heard: busy at once.
+        let mut late = Busy::default();
+        late.tally(1.1 * p, p, false);
+        assert!(late.on());
+        let mut unheard = Busy::default();
+        unheard.tally(0.1 * p, p, true);
+        assert!(unheard.on());
+        // Busy again soon: the hold doubles, so it does not flap; it is back to 2 s after a while.
+        run(&mut b, 0.6, 1.0);
+        assert!(b.on());
+        run(&mut b, 0.1, 3.0);
+        assert!(b.on(), "the hold did not grow");
+        run(&mut b, 0.1, 1.5);
+        assert!(!b.on());
+        run(&mut b, 0.1, 11.0);
+        run(&mut b, 0.6, 1.0);
+        run(&mut b, 0.1, 2.3);
+        assert!(!b.on(), "the hold did not come back to 2 s");
+        // A block that cannot be timed is left out.
+        let before = b.load();
+        b.tally(f64::NAN, p, false);
+        b.tally(0.5, 0.0, false);
+        assert_eq!(b.load().to_bits(), before.to_bits());
+    }
+
+    /// LO's voices on as many threads as repay waking (decisions.md R-LO-WORKERS): one a voice
+    /// up to four, then one for each two; the host's alone for one.
+    #[test]
+    fn lo_s_threads_follow_its_voices() {
+        let t: Vec<usize> = (0..=10).map(lo_threads).collect();
+        assert_eq!(t, [1, 1, 2, 3, 4, 3, 3, 4, 4, 5, 5]);
+    }
+
     /// A voice that a worker late from an earlier run still holds sits the next runs out:
     /// the block is not held up for it (it is still held when the block is done), the other
     /// voices play, and it plays again once let go. (Bounded by what happens, not by time: on
@@ -3621,6 +4022,8 @@ mod tests {
             &[0.0; CHUNK],
             48_000.0,
             &mix,
+            true,
+            MAX,
             Some(Instant::now() + Duration::from_secs(1)),
         );
         assert!(!stall.is_finished(), "waited for the held voice");
@@ -4564,6 +4967,63 @@ mod tests {
         );
     }
 
+    /// A voice taken for a new note, free, let go or still held (stolen), keeps its place, and
+    /// its twin its own: with WIDTH and DOUBLE unmoved, their gains at every run's end are their
+    /// places' to the bit, never a step (the crackles reported in POLY at HI, 2026-10-19,
+    /// cured by SCATTER at WIDTH 0: R-POLY-CRACKLE). At LO and at HI (its voices in pairs).
+    #[test]
+    fn a_voice_taken_for_a_new_note_keeps_its_place() {
+        for potato in [true, false] {
+            let c = Controls {
+                poly: true,
+                voices: 3,
+                double: 0.12,
+                spread: 1.0,
+                inner: 0.3,
+                potato,
+                ..Controls::default()
+            };
+            let mut e = Engine::new();
+            e.set(&c);
+            e.prepare(48_000.0, 9);
+            let (mut l, mut r) = ([0.0f32; 64], [0.0f32; 64]);
+            // (Eight keys on three voices, each pressed before the one four before it is let
+            // go: from the fourth on, a key takes a voice still held.)
+            let keys = [48u8, 52, 55, 59, 62, 64, 60, 57];
+            for (i, &key) in keys.iter().enumerate() {
+                e.event(Event::Note { key, on: true });
+                if i >= 4 {
+                    e.event(Event::Note {
+                        key: keys[i - 4],
+                        on: false,
+                    });
+                }
+                for _ in 0..6 {
+                    e.render(&[], &mut l, &mut r);
+                    e.end_block(64);
+                    let m = e.mix();
+                    for (k, s) in e.slots.iter().enumerate() {
+                        let p = s.play.lock().unwrap();
+                        let at = p.places(&m);
+                        assert!(
+                            p.pan.is_none_or(|g| g == at.voice),
+                            "LO {potato}, key {i}, voice {k}: {:?} for {:?}",
+                            p.pan,
+                            at.voice
+                        );
+                        assert!(
+                            p.twin.pan.is_none_or(|g| g == at.twin),
+                            "LO {potato}, key {i}, twin {k}: {:?} for {:?}",
+                            p.twin.pan,
+                            at.twin
+                        );
+                    }
+                }
+            }
+            assert!(l.iter().any(|x| x.abs() > 1e-4), "silence checked");
+        }
+    }
+
     /// DOUBLE turned off lets the note go, and the twin plays its tail out on its side (INNER at
     /// 100 %: every pair at the edges, as EDGES had them), then falls silent and stops; a key
     /// pressed after reaches the voice alone (POLY off, at its first place: it scatters now).
@@ -4913,6 +5373,27 @@ mod tests {
         // (Two seconds: the VCA's thump dies away over about one, as the circuit's does.)
         loudest(&mut e, 2.0);
         assert_eq!(e.sounding(), 0, "POLY's light voices not freed");
+    }
+
+    /// The voices built on a thread of their own (decisions.md R-PREPARE-STACK): an engine
+    /// prepared, at a rate no voice has been made at yet, from a thread with no more stack than
+    /// a macOS host's secondary thread has (512 KB), as pluginval initialises an Audio Unit.
+    #[test]
+    fn prepare_fits_a_hosts_secondary_thread() {
+        // (The engine made here, on the test's thread: in a debug build its construction alone
+        // takes more than 512 KB, which a release build does not; `prepare` is what a host
+        // calls on its own thread.)
+        let mut e = Box::new(Engine::new());
+        let made = std::thread::Builder::new()
+            .stack_size(512 << 10)
+            .spawn(move || {
+                e.prepare(47_250.0, 1);
+                e.slots.len()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(made, POLY_VOICES.2);
     }
 
     /// QUALITY at ULTRA (decisions.md R48): the circuit's voices play with no compromises,

@@ -23,7 +23,37 @@ pub enum Dial {
     Drive,
     /// LEVEL: -30 to +12 dB.
     Level,
+    /// The arpeggiator's (decisions.md R-ARP): RATE, its note values 2 (a half note) to 32, the
+    /// straight ones numbered, the dotted and triplet ones between them unnumbered ticks.
+    ArpRate,
+    /// OCTAVES, 1 to 5.
+    ArpOctaves,
+    /// GATE and SWING: 0 to 100 %.
+    Percent,
 }
+
+impl Dial {
+    /// How many steps its travel is in, for a knob of discrete positions (it goes from one to
+    /// the next, never between them: the owner, 2026-10-10); none for one that turns smoothly.
+    pub fn steps(self) -> Option<usize> {
+        match self {
+            Dial::Voices => Some(8),
+            Dial::ArpRate => Some(12),
+            Dial::ArpOctaves => Some(4),
+            _ => None,
+        }
+    }
+}
+
+/// The time dial's labelled marks: angle in degrees and milliseconds (R-KNOB-ENTRY).
+pub const TIME_MARKS: [(f64, f64); 6] = [
+    (-120.0, 10.0),
+    (-90.0, 200.0),
+    (-30.0, 600.0),
+    (30.0, 1000.0),
+    (67.0, 5000.0),
+    (108.0, 10000.0),
+];
 
 /// A selector's legends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +120,16 @@ pub enum Kind {
     },
 }
 
+impl Kind {
+    /// Whether every fraction of a drag or scroll can change the value, rather than only
+    /// whole positions. VOICES and the arpeggiator's RATE and OCTAVES have a knob's shape but
+    /// discrete options.
+    pub fn is_continuous(&self) -> bool {
+        matches!(self, Self::Knob { dial, .. } if dial.steps().is_none())
+            || matches!(self, Self::Wheel { .. })
+    }
+}
+
 /// The part of the drawing a control's position is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
@@ -100,6 +140,9 @@ pub enum Place {
     Column,
     /// The strip's, its origin the drawing's.
     Strip,
+    /// The arpeggiator's drawer's (`strip::arp`), its origin the drawing's with the drawer
+    /// open: drawn by the drawer, found only while it is open.
+    Arp,
 }
 
 /// A control of the panel, operating the parameter of the same function.
@@ -122,7 +165,7 @@ impl Control {
         let (ox, oy) = match self.place {
             Place::Panel => (crate::art::COL, crate::art::TOP),
             Place::Column => crate::strip::LEFT_HAND,
-            Place::Strip => (0.0, 0.0),
+            Place::Strip | Place::Arp => (0.0, 0.0),
         };
         (ox + self.x, oy + self.y)
     }
@@ -135,6 +178,18 @@ const fn knob(param: &'static str, label: &'static str, x: f64, y: f64, dial: Di
         place: Place::Panel,
         x,
         y,
+        kind: Kind::Knob { dial, big: false },
+    }
+}
+
+/// A knob of the arpeggiator's drawer, the `at`th of its units (`strip::arp::UNITS`).
+const fn arp_knob(param: &'static str, label: &'static str, at: usize, dial: Dial) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Arp,
+        x: crate::strip::arp::UNITS[at] + crate::strip::UNIT_KNOB,
+        y: crate::strip::arp::ROW,
         kind: Kind::Knob { dial, big: false },
     }
 }
@@ -234,7 +289,7 @@ const fn switch(
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 55] = [
+pub const CONTROLS: [Control; 59] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -575,7 +630,81 @@ pub const CONTROLS: [Control; 55] = [
         Colour::Ivory,
         Orient::Right,
     ),
+    // The arpeggiator's drawer's knobs (decisions.md R-ARP), the plug-in's own, after every
+    // other, so that no control moves.
+    arp_knob("arp_rate", "RATE", 0, Dial::ArpRate),
+    arp_knob("arp_octaves", "OCTAVES", 1, Dial::ArpOctaves),
+    arp_knob("arp_gate", "GATE", 2, Dial::Percent),
+    arp_knob("arp_swing", "SWING", 3, Dial::Percent),
 ];
+
+/// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made
+/// for one CA-72 works on later ones: the revision of the panel's controls this build has, and
+/// each change since the first. A layout says which revision it was made for (`controls`):
+/// a control added since is placed by the plug-in, a renamed one found by its old name, a
+/// retired one passed over, and a control whose kind changed drawn in its own kind's look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ControlSet {
+    pub revision: u32,
+    /// Controls added after the first revision: each with the revision it came in.
+    pub added: &'static [(&'static str, u32)],
+    /// Controls renamed: the old name, the new, and the revision of the change.
+    pub renamed: &'static [(&'static str, &'static str, u32)],
+    /// Controls removed: the name, and the revision it went in.
+    pub retired: &'static [(&'static str, u32)],
+    /// Controls whose kind changed (a switch become a toggle): the name, and the revision.
+    pub kind_changed: &'static [(&'static str, u32)],
+}
+
+/// This build's panel controls: the first revision, nothing changed yet. Never edit an entry
+/// once released: add to it (and raise `revision`) as controls come, go, or change.
+pub const CONTROL_SET: ControlSet = ControlSet {
+    revision: 1,
+    added: &[],
+    renamed: &[],
+    retired: &[],
+    kind_changed: &[],
+};
+
+impl ControlSet {
+    /// The revision a control came in (1 for the first's).
+    pub fn since(&self, param: &str) -> u32 {
+        self.added
+            .iter()
+            .find(|(p, _)| *p == param)
+            .map_or(1, |(_, r)| *r)
+    }
+
+    /// A name a layout of revision `made_for` uses, as this build knows it: renamed since
+    /// (`Some(new)`), or the same.
+    pub fn current<'a>(&self, name: &'a str, made_for: u32) -> &'a str
+    where
+        'static: 'a,
+    {
+        let mut name = name;
+        // (A chain of renames followed in order.)
+        for (old, new, at) in self.renamed {
+            if *old == name && *at > made_for {
+                name = new;
+            }
+        }
+        name
+    }
+
+    /// Whether `param` was retired after revision `made_for`.
+    pub fn retired_since(&self, param: &str, made_for: u32) -> bool {
+        self.retired
+            .iter()
+            .any(|(p, at)| *p == param && *at > made_for)
+    }
+
+    /// Whether `param`'s kind changed after revision `made_for`.
+    pub fn kind_changed_since(&self, param: &str, made_for: u32) -> bool {
+        self.kind_changed
+            .iter()
+            .any(|(p, at)| *p == param && *at > made_for)
+    }
+}
 
 /// The index of the control operating `param`.
 pub fn index(param: &str) -> Option<usize> {

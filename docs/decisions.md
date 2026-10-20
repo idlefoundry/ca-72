@@ -1991,6 +1991,10 @@ to controllers, Omni.
   host's automation, the editor and presets reach the voices as they always have: anything
   setting a gliding knob's parameter ends its glide there. nih-plug's smoothers are not used:
   none of the parameters has one, and giving them one would change automation's sound too.
+  **Since R-KNOB-GLIDE (2026-10-19):** every continuous knob glides, whatever sets it
+  (`smooth.rs`); a learned controller's value still over 10 ms; the host's automation or the
+  editor setting a gliding knob glides on from where it is instead of ending the glide.
+  `Dezip` and `DEZIP_STEP` became `smooth::Smooth` and `smooth::STEP`.
 - Nothing allocated or freed (`tests/realtime.rs`, the plug-in's own `process` with every kind
   of learned control, a capture, reserved controllers and automation ending a glide).
 
@@ -5985,7 +5989,11 @@ tested, and this follows it.
 - **What changes.** QUALITY's default is LO (Potato mode, R47), not HI, so a new instance
   (and the standalone's first session) plays the light voices: 2.1 to 3.8 % of a core for ten
   POLY voices against 78 to 107 % at HI (R47's measurement, three presets), so a first try
-  works on a slower computer. "New users" is taken as new instances: a parameter's default cannot tell a
+  works on a slower computer. (Corrected 2026-10-19, R-LO-WORKERS: since R71's filter, ten LO
+  voices cost 17.8 to 21.4 % of a Ryzen 7 7800X3D core on one thread, every factory preset's
+  sound, against 83 to 146 % at HI: a quarter to a seventh, not a thirtieth. LO's voices are
+  now shared with the workers: on the Ryzen under Linux that takes about half of it off the
+  host's thread with one worker and three quarters with four or more; on Windows less.) "New users" is taken as new instances: a parameter's default cannot tell a
   new user from an existing one, and the choice per computer that could (like LOOK) would hide
   the default from a host's own reset.
 - **What does not.** A project keeps the QUALITY it was saved with (every 0.2 session saves
@@ -6857,6 +6865,10 @@ made HI lighter after the measurement above, so ULTRA's cost against HI's rose: 
 Pro), `preset_cost` over the 19 factory presets, ten POLY voices, two interleaved rounds, gave
 ULTRA a median of 6.3 times HI (3.9 to 9.8 across the presets) on `cpu-release` at `2c0a584`.
 
+**With this work (R-BLEP's band-limiting and ULTRA's VCA at 4x), 2026-10-18 (the owner: "Sure,
+change that line"):** "SIX" became "SEVEN". The same measurement against the fidelity branch at
+`c112d08` gave ULTRA a median of 7.2 times HI (4.8 to 10.3 across the presets).
+
 **Built** (`editor.rs`, `ultra_note_lines`): the note follows what the engine decides for this
 computer, `engine::split_voices() > 0`. Each version's accent line, `ULTRA · NO COMPROMISES`, and
 its last two dim lines (`RIGHT-CLICK QUALITY'S SWITCH TO HIDE ITS INDICATOR, OR SHOW IT.`, `CLICK
@@ -7035,6 +7047,106 @@ held them at its end; for 4 and 8, the common start's, halfway.)
    no longer multiply the threads.
 6. **Afterwards,** put the backed-up released plug-ins back. Real-time throttling need not be
    turned on for this build (the owner's setting is left alone).
+
+### ULTRA's split measured again on the merge with R-BLEP and R-LATENCY (2026-10-17)
+
+**The owner, 2026-10-17** (relayed): "Yes", to re-running the ULTRA split measurements on the
+merge (`integrate/threads-band-limiting`, `2241e70`) before release, measurement only.
+
+**What changed under it:** R-BLEP's 32-tap sinc and BLAMP oscillators (and ULTRA's oscillator
+decimators with a 139-tap last halfband); R-LATENCY's one reported latency of 86; and ULTRA's VCA
+at 4x on the filter's own samples (about 10.6 % more of ULTRA's cost, on the back part, the
+thread the split voice waits on longest).
+
+**How:** on the branch `measure/ultra-split-2241e70`, made from `2241e70` (nothing committed on
+the merge itself). `scripts/ultra-recheck.sh` (`.ps1`) ran, 10 s a run, one machine at a time:
+- the prototype's split grid for one and two voices (`tests/ultra_split.rs`: whole on 4 or 12
+  threads, split on 6 or 12, DRIVE at 6 dB; the Mac's helpers without a work interval, as
+  before);
+- the built engine's checks (`tests/scaling_bench.rs`, `CA72_AUTO=1`): the one instrument and
+  two POLY voices at ULTRA, split by the machine's rule and whole (`CA72_SPLIT=0`), in turn,
+  twice;
+- at 256 and 128 frames.
+
+Raw lines: `docs/threads/recheck-2241e70-*.txt`. The figures before are `d82e9b2`'s
+(`docs/threads/split-*.txt`, `built-*.txt`); `011e99c` changed nothing on this path.
+`scripts/ultra-recheck-table.py` puts them side by side.
+- **First, the samples:** the split voice is still the whole voice to the bit on the merge
+  (`the_split_voice_with_drive_is_the_voice`, `split_voices_are_the_whole_voices_to_the_bit`,
+  `ca72/tests/helpers.rs`), on the Mac, Linux and Windows.
+- **Conditions:**
+  - the Mac: load average 3.6 to 4.9, Live closed, nothing heavy of another session's;
+  - Windows: about 2 % busy before;
+  - Linux: below.
+- **Cleanup:** the lab copies went to the Linux machine's Trash (`gio trash`, checked) and to
+  Windows' `C:\Users\idlewile\Code\tmp\holding`. No benchmark or real-time thread was left
+  running.
+
+**The built engine** (the mean / the worst block, % of the period, for the two repeats · late
+blocks · runs not heard; 1,875 blocks at 256 frames, 3,750 at 128):
+
+| Machine, frames | One instrument, split: before → now | One instrument, whole: before → now | Two POLY voices, split: before → now | Two POLY voices, whole: before → now |
+|---|---|---|---|---|
+| Mac, 256 | 38–39 / 72–90 · 0 → 49 / 74–75 · 0 | 56–57 / 130–132 · 40 → 64 / 133–134 · 43–44 | 50–51 / 103–122 · 2–3 · 10–14 → 57 / 104–122 · 1–2 · 8–9 | 60 / 185 · 41–42 · 61–79 → 67 / 191–192 · 53 · 103–116 |
+| Mac, 128 | 31 / 109–114 · 1 → 44 / 84 · 0 | 58 / 157–167 · 81–86 → 65–66 / 149–154 · 90–91 | 45 / 116–119 · 6–8 · 16–25 → 56 / 117–121 · 10 · 43–44 | 61 / 163–166 · 90 · 100–130 → 68 / 158–166 · 94–95 · 183–186 |
+| Windows, 256 | 31 / 84–92 · 0 → 34 / 76–79 · 0 | 69 / 189–217 · 107–108 → 77–78 / 187–274 · 134–135 | (one crew: whole) 69 / 223–224 · 73–75 → 77 / 234–237 · 103–113 | 69 / 221–223 · 73–85 → 77–78 / 232–234 · 108–110 |
+| Windows, 128 | 30–31 / 94–95 · 0 → 33 / 91–94 · 0 | 70 / 265–321 · 198–202 → 79–80 / 342–359 · 302 | (one crew: whole) 68 / 181–185 · 121–122 → 76 / 180–182 · 161–166 | 68–69 / 182–185 · 120–123 → 76–77 / 181–182 · 159–164 |
+
+**The prototype** (one run each, before → now): mean / worst · late.
+- **The Mac:**
+  - 256 frames: one voice whole 53 / 166 · 72 → 63 / 165 · 100; split on 6 threads 31 / 149 · 7
+    → 43 / 103 · 1; two voices whole 51 / 167 · 3 → 55 / 263 · 44, split 41 / 135 · 4 → 49 /
+    139 · 6.
+  - 128 frames: one voice split 47 / 212 · 42 → 55 / 172 · 51 (without the work interval the
+    built engine has); two split 34 / 119 · 3 → 52 / 167 · 18.
+- **Windows:**
+  - 256 frames: one voice whole 55 / 171 · 81 → 63 / 209 · 103; split 28 / 75 · 0 → 34 / 80 ·
+    0; two voices split 54 / 186 · 43 → 54 / 160 · 36.
+  - 128 frames: one voice split 27 / 112 · 1 → 34 / 93 · 0.
+
+**What it shows:**
+- **ULTRA costs more, as expected.** A voice played whole takes 12 to 16 % more of the period
+  (the Mac's one instrument 56–57 % → 64 %, Windows' 69 % → 77–78 %).
+- **Split, the voice's time grows by more than that** (the Mac's one instrument 38–39 % → 49 %
+  at 256 frames, 31 % → 44 % at 128). The VCA's new work is on the back part, which was already
+  the split voice's longest thread, so all of it lands on the path the block waits for.
+  Windows' grew less (31 % → 33–34 %).
+- **The split still plays ULTRA live where the rule splits.**
+  - **The one instrument:** no late block, on the Mac and on Windows, at 256 and 128 frames.
+    The worst blocks are 74 to 94 % of the period; the Mac's 99th percentile is 66 to 68 %.
+  - **Two POLY voices on the Mac:** 1 to 2 late blocks of 1,875 at 256 frames and 10 of 3,750
+    at 128, against 53 and 95 whole.
+- **The thresholds hold on the Mac and Windows** (Linux below).
+  - Windows (6 fast cores, S = 1): its split one voice is clean.
+  - The Mac (10 fast cores, S = 2): two split voices are far better than whole and about as
+    good as before.
+
+  The margin is smaller than it was: the split one instrument's mean is now about half the
+  period on the Mac at 256 frames.
+
+**Linux** (the 7800X3D), run once the owner had paused the 808 agents that were busy there: 10:38
+to 10:44, under the lab's exclusive timing lock (`flock -x ~/.cache/daw-timing.lock`); load
+average 1.2 to 2.6 before each run (logged per run), Bitwig open.
+
+| Frames | One instrument, split: before → now | One instrument, whole: before → now | Two POLY voices, split: before → now | Two POLY voices, whole: before → now |
+|---|---|---|---|---|
+| 256 | 37–38 / 112–115 · 2–4 → 38–40 / 97–113 · 0–4 | 80 / 186 · 154–157 → 86 / 188–189 · 171–202 | 41–42 / 160–170 · 17–18 · 21–25 → 44–45 / 156 · 14–17 · 21–28 | 88–94 / 304 · 352–540 → 87–88 / 263–269 · 194–195 |
+| 128 | 36–37 / 148–177 · 29–33 → 38–39 / 141–143 · 25–30 | 79–80 / 210–213 · 317–337 → 85–87 / 207–218 · 339–446 | 42 / 187–192 · 37–40 → 44–46 / 157–183 · 32–37 | 80 / 211–216 · 303–347 → 86–87 / 206–232 · 364–391 |
+
+**The prototype on Linux** (one run each, before → now: mean / worst · late):
+- 256 frames: one voice whole 65 / 198 · 130 → 73 / 183 · 162; split on 6 threads 34 / 111 · 5
+  → 40 / 100 · 1; two split 37 / 155 · 14 → 46 / 145 · 17.
+- 128 frames: one split 31 / 156 · 27 → 38 / 138 · 21.
+
+**What Linux shows:**
+- **The split holds as it was.** The one instrument has 0 to 4 late blocks of 1,875 at 256 frames
+  and 25 to 30 of 3,750 at 128; two POLY voices 14 to 17 and 32 to 37. Each is within its spread
+  before.
+- **The voices played whole are later than before:** the one instrument at 256 frames 171 to
+  202 late, against 154 to 157.
+- **The split one instrument's mean barely moved** (37–38 % → 38–40 %), unlike the Mac's (38–39 %
+  → 49 %). On this machine the back part's thread had room the Mac's did not.
+- **S's thresholds hold here too** (16 fast threads, S = 2), on the three machines measured.
 
 ## R-CPU-EXACT. CPU without changing a sample
 
@@ -7273,6 +7385,581 @@ after. With the new rule: 0 pixels apart, and 0 changed 4 s after, in 3 runs wit
 diagnostic and 5 without. Then `cargo test --workspace --features
 ca72-plugin/standalone-production` as CI runs it; and the editor's tests and clippy on the Mac
 (see the PR).
+
+## R-SKIN-PACKS. Skin packs: the looks as artwork and data, in one open format
+
+**The owner's request, 2026-10-16** (a written brief). A skin system for Idle Foundry's
+plug-ins: the functionality, the renderer and the code that loads skins open source under the
+existing licences, and all released artwork free and included. New artwork may carry its
+creator's licence, open or proprietary and paid, with price and licence independent. Skins
+are non-executable artwork and declarative appearance data; behaviour, DSP and control logic
+stay in the open-source application; scripts, custom widget code or copied GPL material are
+flagged for separate review. Each pack's assets, licence, credits and third-party notices are
+identifiable; the repository's GPL is not applied to a pack, nor a pack's terms to the plug-in.
+No GPL artwork copied into a proprietary pack without additional permission; no fonts, stock
+assets or third-party branding unless their licences permit it. One open, documented format
+for official and community skins; no store login or network check to use an installed skin.
+Packs validated as untrusted input; a missing or incompatible pack falls back safely without
+affecting sound, presets, automation or session recall. Licence and provenance fields for a
+future marketplace's review; seller declarations cover the right to distribute and authorize
+customer licensing, and are not clearance. A local prototype and tests only: no release, no
+checkout, no seller agreement, no licence changed; choices affecting the separation of code
+and artwork reported first.
+
+**Owner decisions, 2026-10-16**, of the agent's questions:
+1. A pack may change the **layout and the legends**, not only the pictures ("This allows
+   people to be creative. We will publish this ability along with agent skills so people can
+   use Claude Code or ChatGPT to create new layouts"), within limits.
+2. **SVG allowed**, as a strict subset, its cost checked ("Is there a check we could run around
+   this?": counted, then drawn as a test against a time limit).
+3. **Fonts allowed**, sorted by a scan of what each says of its licence (pass, reject or
+   review), never cleared by it.
+4. The **format's documentation and a starter are CC0**; the loader and the checks stay GPL.
+5. The **official looks become packs** in the same format, built in, under the GPL.
+6. A **crate in this repository** first, with nothing particular to the CA-72 in it, to move to
+   plugin-kit once agreed; packs are **folders** (no archive to unpack).
+7. The agents' **starting point is a CC0 starter** with a layout of its own; the official
+   layout stays GPL.
+8. The **official panel converted to layout data** now: "We're not going to release it without
+   thorough testing, so it is effectively c. Be sure to benchmark it so that we know if there are
+   performance costs in doing so."
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **`crates/skin-pack`** reads a pack's folder within limits (no link followed, no path out of
+  it, only `.toml`, `.txt`, `.md`, `.png`, `.svg`, `.otf`, `.ttf`, code and archives refused by
+  their first bytes whatever their names), its manifest (`skin.toml`: id, version, plug-in,
+  licence as SPDX or `LicenseRef-`, licence texts, creators, each asset's provenance with an
+  optional SHA-256, notices, a seller's declarations), PNG decoded whole within its size, SVG
+  read strictly (no DTD, an element allowlist, references inside the drawing only, `use`
+  counted as all it repeats, a test drawing timed) and fonts (one face a file, embedding
+  permission, the licence its tables name). Its findings are rejected, review or note; nothing
+  is ever reported as cleared. A price in a manifest is rejected: it is the store's.
+- **The layout's data, `packs/official/layout.toml`.** The panel's controls (place, a knob's
+  size, a switch's size, colour and "on" end, a toggle's orientation), rules, titles, legends
+  (with their places in the large lettering), the fixtures' places (POWER, the lamps, QUALITY's
+  opening, the plate, PHONES, the strip's screws). `art::panel`, the worn overlay, the screws,
+  the jacks, hit-testing, the editor's drags and tips and the fixtures' layers all take places
+  from it (`crate::arrangement`). What a control is and does, its dial's and its legends' values,
+  and the left hand's and the strip's controls stay the plug-in's: they state real values or
+  are its own. `CONTROLS` keeps the official places too; a test holds the two equal.
+- **The renderer takes a `Look`** (`crate::look`): the base (classic or realistic), the layout,
+  pictures by slot (the 27 worn pictures, PNG or SVG drawn at the built-in size), a drawing over
+  the panel's surfaces and under its print, a typeface (used only if it prints and fits every
+  legend; else URW Gothic and review), the face's tint (`face_tint`, which the official
+  REALISTIC sets: it had been in code). A pack's fonts are kept for the process's life (their
+  faces borrow them), each distinct font once.
+- **The editor** lists packs installed in the shared folder's `Skins` under LOOK; a pack that
+  cannot be used is listed so, its reasons in the log. The choice is the computer's
+  (`settings.toml`'s `skin_pack`, with `skin` its base, which an older CA-72 reads); a pack
+  missing or refused draws its base and keeps the setting. Nothing a look does reaches a
+  parameter, a preset or the session.
+- **Not in this version:** the strip's and keyboard's pictures and layout, the classic look's
+  colours (but by a drawing), animation, archives, packs shared between plug-ins, checking a
+  pack off the editor's thread (packs are checked as the editor opens with one chosen, and as
+  the settings' menu opens).
+
+**What bears on the separation of code and artwork** (each for the owner's attention; none
+changes a licence):
+- The official layout's data is GPL and built into the plug-in, as the drawing code it replaced
+  was. A pack made from it is under the GPL; the starter (CC0) has its own.
+- The repository now holds CC0 files (`docs/skin-packs.md`, `docs/skin-packs/starter/`), each
+  saying so. `CONTRIBUTING.md` still says every contribution is GPL: a contribution to those
+  files would need its own terms there. Left for the owner.
+- Packs are loaded at run time from the user's folder and are never in the installers; the
+  plug-in and a pack are separate works, each under its own terms. Counsel should confirm this
+  reading before any pack is sold.
+- The official pictures were made with an image generator. The checks put generated assets to
+  review (whether they are protected, and so licensable, differs between countries); the
+  official REALISTIC pack's 27 reviews are exactly these.
+- URW Gothic's embedding permission is "preview and print": the scan puts it to review in a
+  pack. The plug-in's own use of it (its AGPL with the font exception, built in) is unchanged.
+
+**Evidence (the Mac, an M4 Pro, 2026-10-16; nothing committed, pushed or released):**
+- **The converted panel is the panel.** Before any change, `examples/golden.rs` wrote 32 frames
+  from `main` (both looks, both letterings, 0.44 and 1.0 pixels a unit, four scenes drawn in
+  turn so that partial redraws are compared too; written twice, identical). After the conversion
+  every one is identical to the pixel. `the_official_packs_draw_as_the_built_in_looks`: CLASSIC
+  and REALISTIC, read back as packs through the checks, draw byte for byte as the built-in looks.
+- **Its cost.** `examples/look_bench.rs` and `examples/frames.rs`, `main`'s build and this one
+  run in turn, three rounds each, at `nice 19` (the owner's host was open), medians of medians:
+  every built-in look's opening, first frame, knob, switch and POWER within 2 % of `main`'s, and
+  no frame of `frames` slower (CUTOFF 0.30 and 1.20 ms, DRIVE 1.10 and 3.70 to 3.80 ms, at 0.44
+  and 0.87). The layout costs nothing measurable: it is read once a process.
+- **A pack's cost.** Reading and checking a pack: the starter 12 ms (its drawing drawn as a test
+  at 3000 pixels), the official REALISTIC as a folder 59 ms (its 27 pictures decoded). Opening the
+  starter's look: 30 ms at 0.44 and 41 ms at 0.87 (CLASSIC's 29 and 31: its drawing, 10 ms at
+  the larger size); its frames as CLASSIC's. REALISTIC as a pack opens in 134 and 458 ms (the
+  built-in's 165 and 489: its pictures were decoded when it was read).
+- **Tests.** `cargo test -p skin-pack -p ca72-panel -p ca72-plugin --features
+  ca72-plugin/standalone-production --no-fail-fast`: 392 passed, none failed (the pack crate's
+  38: paths out of the pack, links, code by its first bytes, sizes, names differing in case,
+  SVG's code, animation, text, outside references, DTD and entities, `use` bombs, costs and the
+  timed test, PNG headers and truncation, fonts, licences, price, declarations, provenance,
+  hashes, the official artwork copied; the panel's: the official layout, layouts refused, the
+  official packs, the starter's places found by clicks, pictures by slot, a typeface that
+  cannot print a legend; the plug-in's: the settings' key, a pack chosen, no parameter set, the
+  fallback, `settings.toml`'s keys). Clippy with `-D warnings` on the three crates; `cargo fmt`;
+  `scripts/notices.py` regenerated (sha2 and six RustCrypto crates, MIT or Apache-2.0) and
+  `--check` passes.
+- **Not run:** the whole workspace's suite to its end. `ca72-lab`'s `vco_electrical` fails two
+  tests on this Mac (ngspice 47 from Homebrew: "Timestep too small ... node hold") on `main`
+  as on this branch, and its circuit tests wrote 5.5 GB into `target/ca72-lab`, which filled the
+  disk; they were deleted, and the crates this work does not touch were not run again. CI
+  (Linux with ngspice, Windows) has not run this branch. Not tried in a host.
+
+**Owner decisions on the marketplace, 2026-10-16.** Regular users and Idle Foundry both make
+skins and sell them on a marketplace Idle Foundry hosts. Bundles (one purchase, packs for
+several plug-ins) are the marketplace's, not the format's: a pack stays for one plug-in.
+Idle Foundry is the seller of record: sellers license Idle Foundry, which licenses buyers (the
+declarations' "authorizes customer licensing"). A buyer gets a pack's updates.
+
+**Pack files and signatures, 2026-10-16.** The owner, of the agent's recommendations for the
+marketplace (a single-file format, offline signatures, no copy protection): "Yes: build the
+single-file pack format and offline signature checking next, locally, with tests."
+
+**Agent decisions** (not separately approved):
+- **A pack file is a ZIP** (`skin_pack::archive`): the folder's files at its top, or in one
+  folder at its top; read in memory within the folder's limits; only stored and deflated
+  entries; encrypted entries and links refused; each entry read no further than its limit,
+  whatever its header says; too many entries refused before any is read. `zip` 8 with its
+  deflate alone (MIT; `flate2`, already built in). Its extension, `.ifskin`, the owner's
+  (kept: below).
+- **Signatures** (`skin_pack::signature`): Ed25519 (`ed25519-dalek` 2, BSD-3-Clause, with its
+  RustCrypto crates). `signature.toml` signs its key's id, the pack's id and version, the
+  publisher (`marketplace` or `first-party`), the date, and a digest of every other file (each
+  path with its SHA-256). Checked offline against `look::TRUSTED_KEYS`, which is empty: there is
+  no marketplace, and its keys are its owner's to make (`pack_keygen`), the secret never in a
+  repository. Unsigned packs load; a key not known counts as no signature (an older plug-in, a
+  newer key); a signature that does not match refuses the pack. Only a first-party signature
+  allows the `com.idlefoundry.*` prefix; the built-in looks' ids are never an installed pack's.
+- **Updates**: of the same id installed more than once, a signed pack before an unsigned one,
+  then the newer version. An update is added beside its pack; the setting names the id and
+  follows it. The plug-in never asks the network whether there is one.
+- **Not copy protection.** A signature proves provenance and integrity; a pack works however it
+  was obtained (the plug-in is GPL: such a check could lawfully be removed from it).
+- Tools: `pack_keygen`, `pack_sign`, `pack_archive` (`skin-pack`'s examples); `check_pack`
+  reads pack files and takes `--trust <id>:<key>`.
+
+**Evidence (the Mac, 2026-10-16):** `skin-pack`'s tests (archive: a pack file read as its
+folder and written the same, paths out of the pack, a ZIP bomb stopped at its limit, too many
+entries, not a ZIP; signatures: a signed pack known by its publisher, a changed file, version
+or claimed publisher refused, another key not trusted, an unknown key as unsigned) and
+`ca72-panel`'s (a signed pack file loads as published, and as unsigned without its key; a pack
+changed after signing refused; the makers' prefix only with a first-party signature, the
+built-in ids never; an update replaces its pack and an unsigned copy never does). The tools run
+once end to end in a scratch folder (a key made, its secret file `-rw-------`, the starter
+signed, written as a pack file and checked with and without the key), the test key deleted.
+The archive's own test found a bug as it was written: an archive whose every entry began `../`
+(or `/`) had that taken as its one folder and stripped, and its names passed; only a folder a
+pack could hold is stripped now. Also the earlier review's last finding: an id in a namespace
+(`xml:id`) is refused, as usvg reads only the plain `id`.
+
+**Owner decisions, 2026-10-16, later.** The pack file's extension stays `.ifskin`.
+`CONTRIBUTING.md` says that contributions to the skin packs' format and examples
+(`docs/skin-packs.md`, `docs/skin-packs/`) are CC0, as those files are, and the rest GPL. Packs
+ship before the marketplace: a CA-72 release may carry the format with community packs, unsigned
+and installed by hand, while the marketplace is designed.
+
+**Stress packs, 2026-10-16.** The owner agreed to test the system with packs that each push one
+part of the format to its limits, the showcase pack after: "Let's make the stress testing packs
+first. And then once we've ironed out all the issues, if there are any, we'll make the showcase
+pack after that." And to the fonts BABEL needed: "you have my okay to download whatever you need
+for this test."
+
+**What was made** (`crates/ca72-panel/packs/stress.rs`, made by code, CC0; `tests/stress.rs`
+holds each to its outcome; `examples/stress_packs.rs` writes them out, checks and measures them):
+EDGE (every control moved, click areas touching, sizes at their bounds, fixtures moved, 300
+rules, 300 legends, 16 titles), HEAVY (a drawing at SVG's limits, pictures at the pixel cap),
+EVERY PICTURE (the 27 pictures as drawings, some at other proportions, some see-through),
+MINIMAL (a manifest alone; a layout with no print; realistic with no pictures), LIFECYCLE (one
+pack as versions, folder and pack file, signed and not, cut short, changed after signing) and
+BABEL (a wide typeface; Greek, Arabic, Chinese and an emoji in the built-in one; right-to-left
+legends in a typeface that has them; a typeface lacking a legend's glyphs). BABEL carries two
+OFL fonts from Google Fonts' repository (`tests/fonts`, test files only, never in the plug-in).
+HOSTILE: more malicious pack files (a link entry, names differing in case) and fuzzing
+(`skin-pack/tests/fuzz.rs`, `ca72-panel/tests/fuzz_layout.rs`): pack files mutated as bytes and
+inside, drawings, manifests, licences, fonts and layouts; 50,000 cases a reader, none panicked
+or hung.
+
+**What they found, and what changed** (agent decisions, not separately approved):
+- **A drawing's counts did not bound its cost.** HEAVY, within every count, took 9.8 s to draw
+  (340 long paths crossing the panel); the timed test refused it, but the abandoned draw kept a
+  core busy, and while it ran other packs' drawings were refused. The check now estimates the
+  work, in pixel-equivalents at the size the drawing is used (an edge's pixel row 100, a painted
+  pixel 1, a layer's 6, a filter primitive's region 10: measured on synthetic drawings, about
+  1.6 ms a million on the M4 Pro) and refuses past 60 million (about 100 ms here, half a second
+  on a machine five times slower). The panel's drawing is costed 3000 pixels across, a picture at
+  its slot's size. The timed test is a backstop; another drawing's runaway no longer refuses a
+  pack (its test is skipped, with a note). Pattern tiles' elements are counted too.
+- **Memory.** HEAVY's look held its 27 pictures decoded (200 MB) and the renderer a second copy,
+  and the editor keeps every installed pack's look for its menu. A look now keeps its pictures
+  as the pack holds them (PNG bytes, drawings), decoded by a renderer as it first needs them;
+  the pixel cap is 16 million (it was 48: about three times the official set now), and pictures
+  embedded in drawings count with them (they had escaped it). HEAVY: 400 MB to 63 MB.
+- **POWER could not be near an edge:** it was checked as a circle 64 across; now by its switch.
+- **A drawing given as a picture at other proportions was stretched without a note** (a PNG's
+  was noted): now noted.
+- **Print cut off at the panel's edges was not seen**: a control's printed dial or legends
+  (`layout.print-outside`) and a legend running off the panel in the typeface used
+  (`look.fit`) go to review. A typeface that does not fit a legend is now still used (one long
+  legend had discarded a pack's typeface); only one that cannot print a character is not.
+- **Glyphs.** A pack's typeface must print what the plug-in prints too (printable ASCII, "–",
+  "…"), not only the layout's legends; and legends the built-in typeface cannot print (it has
+  Latin, Greek and Cyrillic) go to review (`look.glyphs`): they would have printed as nothing.
+- Tools: `skin-pack`'s `svg_cost` (what a drawing costs, part by part) and `font_info` (what a
+  font says of itself, and what it lacks).
+
+**Evidence (the Mac, 2026-10-16, the owner's host and other sessions running, load about 10):**
+`stress_packs`, medians of one run: the built-in REALISTIC opens in 183 ms at 0.44 and 531 ms at
+0.87 (39 and 84 MB); HEAVY 215 and 659 ms (63 and 125 MB); EDGE 229 and 688 ms (21 and 48 MB);
+the rest as their base look. A knob's frame 0.2 to 1.4 ms in every pack. Not yet: the slow x86
+machine, and the stress packs installed in hosts on each OS.
+
+**Compatibility over time, 2026-10-16.** The agent named the format's cost: it is now a promise,
+and a CA-72 that adds a control would have refused every existing pack (a layout had to place
+every control). The owner chose, of the agent's options, to place a control added later at its
+official place if free, else the nearest free spot, else to use the official layout for that pack
+("option A"); and to make layouts and `[look]` tolerant of fields they don't know, with notes,
+the manifest strict, and a `requires` for packs that need a later CA-72 ("option A").
+
+**Agent decisions** (not separately approved):
+- `controls::ControlSet` (`CONTROL_SET`, revision 1): the panel controls' history, each control's
+  revision, renames, retirements and changes of kind; never edited once released, only added
+  to. A layout's `controls` (1 if absent) is the revision it was made for. The reader takes the
+  set as a value, so tests simulate a later CA-72 against today's layouts.
+- Placing a control added later (`arrangement::free_spot`): its click area and printed dial on
+  the panel and over nothing of the layout's (controls, POWER, the lamps, QUALITY's opening, the
+  plate, PHONES), at its official place or the nearest free one, searched outward in rings 8
+  units apart. A panel with no room: the official layout (`layout.full`, a review).
+- Unknown fields in a layout or `[look]`: read into the rest of each table and noted
+  (`layout.unknown`, `look.unknown`); a name a later revision has, in a layout made for it:
+  passed over (`layout.newer`). The manifest keeps `deny_unknown_fields`; `requires =
+  "<plug-in> >= major.minor.patch"` is checked against the plug-in's version (none in the
+  marketplace's tools).
+- `tests/compat/v1/`: the starter as it was (without a `controls` key), the official layout, EDGE's
+  layout and a pack file signed with the stress key, frozen; `tests/compat.rs` loads each with
+  every control where it was put, and the signature verifiable. Never edited; each later
+  revision adds a folder.
+
+**Evidence (the Mac, 2026-10-16):** the compatibility tests; a later revision simulated (A-440
+added: at its official place when free, the nearest free place, found by a click, when FEEDBACK
+took it; refused on this revision; a renamed, a retired and a changed control followed; a layout
+for a later CA-72 with unknown names and fields loaded with notes, the same names refused when
+made for this revision; a full panel has no free place); `requires` checked; a later `[look]`
+field noted. The stress packs and the official looks' 32 frames as before.
+
+**The first showcase pack, SIGNAL BASIN, 2026-10-16** (`docs/skin-packs/signal-basin`, CC0, its
+typeface Barlow Condensed under the OFL; not published yet: see "Held back" at this record's
+end). The owner chose it from Codex's twelve concept pictures (with Cutoff Court, Courtyard
+Current and Residual Service to follow, one at a time), its art made by the image generator
+("1a"), it free under CC0 and Residual Service later proprietary ("a mix"). The first
+attempt, its parts generated from words, "looked nothing like"
+the concept; the owner asked for each part to be cropped from the concept and recreated by Codex
+on a transparent ground, and then for the result to be improved "till it passes a critic agent":
+a separate reviewing agent compared the render with the concept round by round (fail, fail,
+pass, pass, pass), and its wear was added at the owner's word. Its scripts, outside the pack (a
+pack holds no code), are in `docs/skin-packs/tools/signal-basin`; the generated originals, the
+concept's crops and the prompts on the lab's share (`ca-72/look/signal-basin`).
+
+**Agent decisions** (not separately approved):
+- `[look] knob_caps = "turn"` (default `"still"`): the concept's knobs have a line from their
+  middle, which the plug-in's still cap (made for a spun aluminium cap's sheen) would have held
+  still. With it, the knobs', big knobs' and pointer knobs' caps are left in their pictures and
+  turn, and the plug-in's lamp and cap lights over them (made for black plastic and aluminium,
+  a brass-looking ring on cream) are left off (`Layer::round`). An earlier CA-72 passes the
+  field over (`look.unknown`) and draws the caps still.
+- Found, not fixed: a drawing's embedded PNG pictures, which the format allows and counts, are
+  never drawn (resvg is built without `raster-images`). SIGNAL BASIN draws its screws as
+  vectors instead. The fix (resvg's feature, which adds three image decoders, or drawing them in
+  the plug-in's code, or refusing them) is the owner's to choose; it is proposed as its own
+  task.
+- A rocker's lamp lies in its picture's flat half, so that it shows at the switch's "on" end;
+  its lamp stays lit when off (one picture, mirrored). POWER stays a rocker: its slot is too
+  narrow for the concept's toggle.
+
+**Evidence (the Mac, 2026-10-16):** `check_pack` loads it with no layout, legend or drawing
+finding (its drawing's counted cost about 39 million of 60), in its own typeface, both
+letterings; `a_packs_knob_caps_turn_with_them_when_it_says_so`; the panel's, the packs' and the
+plug-in's tests; the official looks' frames unchanged. Not yet: hosts, the slow machine.
+
+**SIGNAL BASIN's layout, made to follow the concept, 2026-10-16.** The owner asked why the
+layout did not follow the concept's: the agent had kept the official order of the oscillators'
+selectors, routed the signal its own way (a bottom "basin"), added a band of titles, and briefed
+the reviewer to judge the look only. At the owner's word the layout was rebuilt to the
+concept's arrangement and the reviewer's brief widened to the arrangement: the oscillators'
+rows in its order (RANGE, WAVEFORM, FREQUENCY, VOLUME, ON), their lines through grommets into a
+copper bus in a channel of its own, the bus into the FILTER (titled on a cartouche) and the two
+contours, a framed teal central bay, the plate over the right-hand bays. The concept's fourth row
+(the external input and noise) does not fit (the face holds three rows of dials, about 200
+units each, and a title): they have a column beside the oscillators, their lines run in the gaps
+between the rows to the bus. Reviewed: fail (round 6), pass (7), confirmed (8).
+
+**A pack's panel's size, 2026-10-16.** The owner, on why SIGNAL BASIN could not have the
+concept's four rows: "we need to make it so that our UI system allows the UX designer to change
+panel dimensions." Of the agent's options the owner chose: a layout may change its face's height
+and its wooden strip's, the width staying 3108 ("1a"); the face 700 to 1200 units, the wood 60
+to 200 or none ("2"); and the window keeping its width and changing its height to follow the
+look ("3a").
+
+**Agent decisions** (not separately approved):
+- `[panel] face, wood` in the layout (`arrangement.rs`, `art::Panel`). The face's foot stays at
+  the drawing's `PANEL_H` (925), where the plug-in's strip begins, so the strip, its drawer, the
+  keyboard and the editor's own logic keep their coordinates: a taller panel reaches above the
+  drawing's 0. A layout's places are moved as it is read so that they are the official panel's
+  (its face's foot at 795), so the code that draws and finds the controls is unchanged; only the
+  wood, the face, its trims and shadows, the pack's drawing and the lamp's falloff are drawn at
+  the panel's size. The renderer's frame begins at the panel's top (`top_px`, `strip_row`), the
+  strip renderer is told where (`set_under_top`), and the editor's pointer, composing, menus and
+  window height follow it.
+- The window: its width kept, its height from the look's panel; asked of the host when a look
+  of another size is chosen, and as an editor opens if the look read then differs from the one
+  last chosen in this process (`CHOSEN_PANEL`). A host refusing at once keeps the look shown
+  (the owner's 3a had offered drawing the panel scaled to fit the window instead; the agent
+  kept the look, which needs no second way of composing the frame). A refusal that comes later,
+  after the look has changed, is not handled: the window and the look disagree until the next
+  resize.
+- An older CA-72 passes `[panel]` over and reads the layout at the official size (a taller one's
+  controls then fall outside its panel: refused, its base look drawn). `requires` names the
+  first version with `[panel]` once it is numbered.
+- Fixed: a pack's drawing is stretched to end exactly at the strip's first row (rounded on its
+  own, it spilled a row into the strip on a tall panel).
+
+**Evidence (the Mac, 2026-10-16):** the official looks' 32 golden frames identical to the commit
+before the change; `a_pack_chooses_its_panels_size` (a 1000-unit face: places moved, the frame's
+size, a control drawn and found where its layout put it, the strip under it the same as under
+the official size, sizes outside the limits and a plate without wood refused); every panel,
+pack and plug-in test; SIGNAL BASIN rebuilt with the concept's four rows on a 1030-unit face and
+passed by the reviewing agent (rounds 9 and 10, its last notes taken). Not yet: hosts (the
+window resized by a look), the slow machine.
+
+**The strip in a pack's look, 2026-10-16.** The owner: "you need to work with codex to
+re-imagine the lower panel as well. Including the keyboard and preset panels. Everything needs
+to be in the same theme." Codex made three concept pictures (the strip, the keyboard view, the
+presets' drawer, in SIGNAL BASIN's theme) and a written proposal. Of the agent's options the
+owner chose: packs restyle these parts with their layout fixed ("1a"); the drawer's lettering
+the pack's choice of the dot-matrix or its typeface, the tags kept as text ("2a"); the work in
+three steps, the strip first, each shown and reviewed against its concept before the next ("3").
+
+**Agent decisions, the strip** (not separately approved):
+- `[look] strip_art`: a drawing of the strip (3108 by 850, y from the rail's top), drawn by the
+  panel renderer over the strip's wood and face and under its print (in the drawn skin the
+  strip's print laid again over it), its cost counted as the panel's drawing's.
+- Picture slots for the strip (`skin::STRIP_SLOTS`): `tab` and `tab-lit` (a square cap, the
+  strip widening it as the built-in one; given both, the tabs' two states are the pack's
+  pictures and no light is spilt round them), `key`, `glass`, and `rocker-ivory` (otherwise
+  made from `rocker-blue` as before).
+- `[look.colours]`: `lamp` (the readouts' segments, the displays' dots; their glow and the drops'
+  light made from it as the orange's are), `drops`, `tab_print`, `key_print`. The strip renderer
+  takes the look (`StripRenderer::set_look`) and its typeface for the tabs' and keys' print.
+- `strip_places` (an example) prints the strip's places for drawing round them.
+- Not reachable yet: the strip's printed section dividers (they print over a drawing), the
+  readouts' glow and unlit segments, the star key's colour (the keys' print), the wheels.
+
+**Evidence (the Mac, 2026-10-16):** the official looks' 32 golden frames identical to the commit
+before; `a_packs_strip_is_its_own` (the strip given an official look draws exactly as without
+one, in both skins; a pack's tabs, keys, lamp and print colours and its drawing change it; a
+colour not `#rrggbb` refused); every panel, pack and plug-in test, clippy, fmt. SIGNAL BASIN's
+strip passed by the reviewing agent (round 2, its last notes taken). Not yet: the keyboard and
+the drawer, hosts.
+
+**Switches and wheels, 2026-10-17.** The owner: the pitch and mod wheels unlike the concept's,
+and its on/off switches "look much better. Ours have a weird curve in the middle" (the rocker
+picture's hump with the plug-in's paddle light over it).
+
+**Agent decisions** (not separately approved):
+- `rocker-blue-on`, `rocker-orange-on`, `rocker-ivory-on`: a rocker's picture ON. Given, the
+  rocker shows its plain picture off and this one on, neither mirrored, and the plug-in neither
+  lights nor shadows a paddle over it (`render.rs`, the layer rewritten when the look has it).
+- `[look.colours] wheel`: the PITCH and MOD wheels' colour, as sRGB (made linear for their
+  shading). Their shape and shading stay the plug-in's.
+
+**Evidence (the Mac, 2026-10-17):** `a_packs_switches_show_their_state_and_its_wheels_their_colour`;
+the official looks untouched (their rockers have no picture on); every test, clippy, fmt.
+SIGNAL BASIN's switches, remade from a crop of the concept's, and wheels passed by the reviewing
+agent (rounds 3 and 4).
+
+**The keyboard view in a pack's look, 2026-10-17** (the owner's step 2, "start step 2: the
+keyboard view"). **Agent decisions** (not separately approved):
+- The keyboard renderer takes the look (`keyboard::Renderer::set_look`, from the strip's): its
+  walnut, the rail key's cap for its header keys, its glass, lamp colour and typeface.
+- Picture slots `white-key` and `black-key` (one key each, from above; the plug-in cuts the
+  notches); `skin::slot_size` gives each strip slot its size.
+- `[look] keyboard_art` (a drawing over the case, under the key bed, keys and print, in the
+  strip's units; the realistic look only) and `keyboard_case` ("wood", the default, or "face":
+  the case in the face's picture, laid as the strip's face is).
+
+**Evidence (the Mac, 2026-10-17):** `a_packs_keyboard_is_its_own` (an official look draws the
+keyboard as before; a pack's keys and drawing change it); every test, clippy, fmt. SIGNAL BASIN's
+keyboard view passed by the reviewing agent, its last notes taken. Not yet: the presets' drawer.
+
+**The presets' drawer in a pack's look, 2026-10-17** (the owner's step 3, "start step 3: the
+presets drawer"; their decisions 1a, the drawer restyled with its layout fixed, and 2a, its
+displays lettered in dots or the pack's typeface, the tags kept as text). **Agent decisions**
+(not separately approved):
+- The drawer renderer takes the look (`DrawerRenderer::set_look`, called wherever the editor
+  dresses the strip): its face (as the panel's, tinted), the strip's `glass` and `key`, its lamp
+  colour for the dots, its typeface and `tab_print` for the print. The still it shares between
+  instances is keyed by scale and by the look's dressing (0 for every official look, which
+  draws the built-in drawer: no extra work, no change).
+- `[look]` `drawer_art` (a drawing over the face, under the print, glass and keys, in the
+  drawer's units, 3108 by 734), `drawer_lettering` ("dots" or "type"), `drawer_legends`
+  ("above" or "caps") and `drawer_titles` ("left" or "centre"); `[look.colours]` `display`
+  (lettering not lit) and `selection` (the current row's band).
+- In type lettering: what is lit in the lamp colour, the rest in `display` at four strengths
+  from the plug-in's levels; the stars, arrows and the current row's mark drawn as shapes; a
+  field's text set in the typeface, its caret where the typeface puts the characters before it,
+  and a press in a field turned into the dots' place of the nearest character gap
+  (`DrawerRenderer::press_x`) before the presets' browser places the caret, so the browser stays
+  counted in characters.
+- The list's rows and MIDI Learn's are made of an item per column (mark, star, name, origin,
+  tags) rather than one padded line, so that a typeface keeps the columns; the dots drawn are
+  the same.
+
+**Evidence (the Mac, 2026-10-17):** the official looks' drawer byte-identical to the commit
+before (the png example, both skins, scales 0.5 and 1); `a_packs_drawer_is_its_own` (the
+official looks draw the built-in drawer; a pack's drawing and options change it; a press after a
+field's fifth character, set in the typeface, lands nearer than five dot characters; unknown
+values refused); every panel test, the plug-in's unit tests, clippy, fmt. The plug-in's other
+test binaries were not linked: the Mac's disk was full. SIGNAL BASIN's drawer passed by the
+reviewing agent against the concept (round 2: its secondary lettering warmed to cream, the current
+row's band teal, the arrows lit). Format limits left: the drawer's full width without the left
+hand's bay, the tags and tabs as text rather than lamp keys, no scrollbar or column header, the
+plug-in's dim level for a pressed key's legend and for the count, the 8-unit lip (the displays
+reach near the drawer's foot).
+
+**The owner, 2026-10-18,** on the drawer's renders (browsing, typing, MIDI Learn): "ya, this looks
+good to me."
+
+**Held back, 2026-10-18.** The owner, asking for the pull request: "I don't want this demo skin
+pack included yet. I just want to make sure that the UI from now onward uses this new system."
+The system, its format, the official looks as packs, the CC0 starter and the agent's skill are
+merged; SIGNAL BASIN (its pack and its scripts, the paths above) stays on the maintainer's own
+branch until the owner releases it, and the change is one commit so that the pack is not in the
+public history either. Everything the format gained for it (the panel's size, the strip's,
+keyboard's and drawer's dressing, the switches' states, the wheels' colour) is tested here with
+packs of the tests' own. `CONTRIBUTING.md` now asks that the editor's look go through the
+system.
+
+**The pull request's review and CI, 2026-10-18.** Codex's review found three faults, fixed: a
+pack file's root found after macOS's `__MACOSX/` is left out; a look's pictures counted by slot
+as well as by file (`look.pixels`), one large picture named by every slot being that many
+decoded; an installed pack read once while unchanged, so that SETTINGS does not check every pack
+each time it opens (the first check is still on the editor's thread: a follow-up). CI then
+refused the starter's own drawing on its runners (`svg.slow`, 330 to 458 ms against 250), as a
+busy desktop had: the timed test, a backstop to the drawing's counted cost (`svg_work`, about
+half a second on a machine five times slower than an M4 Pro), now allows 2 s, so that a drawing
+within its cost is never refused for the machine's speed or load. **Agent decision** (not
+separately approved).
+
+**With R-PRESET-READABILITY (merged from main, 2026-10-18).** Main put every key's legend on its
+cap, larger and fitted to it, and made the current preset gold. In a look: the legends are on the
+caps in every look, in its `key_print` colour and its typeface (`drawer_legends` is still read, so
+a pack that sets it loads, but no longer moves them: "above" would not fit over the larger keys);
+the current preset is gold over the built-in lamps and in the lamps' own colour over a look's
+`lamp`; lettered in a typeface, the current row keeps its band and filled arrow, the row under the
+pointer has an outlined arrow, a chosen tag its bar and the chosen tab its underline.
+**Agent decision** (not separately approved), in resolving the merge.
+
+**What a pack's drawing may allocate, and a test drawing that panics, 2026-10-18 (night).** The
+review of the pull request (2026-10-18) found two faults that block 0.3.0, fixed on
+`skin-pack-guards`:
+- **A pack could end the host.** A drawing whose `<pattern>` tile is vast (10 by 1e9 units; the
+  fuzzer's, at 50,000 cases, 10 by 1e14) passed every check; resvg then allocated the tile at
+  that size as the pack was checked, and an allocation that fails aborts the process, whichever
+  thread it is on. The parsed tree's buffers are now counted before anything is drawn, at the
+  size the drawing is used, each as resvg sizes it (`svg/memory.rs`, read against resvg 0.45's
+  `render_group`, `render_pattern_pixmap`, `clip::apply`, `mask::apply` and the filters): a
+  group's layer cut to five times the target each way; a pattern's tile; a filter's whole
+  region, eight buffers a primitive for its result, inputs, copies and scratch; a clip's two and
+  a mask's three copies of the layer, again for each that cuts them; an embedded picture decoded.
+  At most **16 million pixels a buffer** (as the pictures' pixels) **and 256 MB together**,
+  counted as if nothing were freed, or the drawing is refused (`svg.refused`); `svg_work` already
+  keeps a legitimate drawing's layers to some 10 million pixels. Coordinates, filter offsets and
+  blurs past the renderer's integer range are refused too.
+- **A test drawing that panicked switched the backstop off** for the rest of the process: its
+  thread died without answering, the wait took that for a drawing past its deadline ("not drawn
+  ... within 4001 ms", in 0 ms) and set `RUNAWAY`, which nothing then cleared. The drawing now
+  runs under `catch_unwind` and always answers; a panic refuses its pack (`svg.panicked`); the
+  drawings still running late are counted, each taken off as it ends.
+
+The longer fuzzing found three more ways to end the process, all in reading, before any drawing:
+2000 nested groups and a pattern whose own rectangle inherits `fill='url(#p)'` from the root
+(usvg's reading recursed until the stack overflowed), and a vast embedded PNG's header (usvg
+panicked placing it). Elements may now be nested, references followed, at most 64 deep, counted
+before the XML reader sees them; a fill or stroke a shape or `use` inherits is followed as a
+reference when it names a pattern, so that such a loop is refused; an embedded PNG's header is
+read within the picture limits first, and any panic in usvg's reading refuses the drawing.
+
+**Agent decisions** (not separately approved):
+- The bound is checked where the drawing is read (`svg::parse_at`, at the size the plug-in uses
+  it: the panel's 3000 pixels across, a slot's own size) and again wherever it is drawn: the
+  plug-in draws a pack's drawings through `skin_pack::svg::render`, which counts the buffers at
+  that transform and size against four times the limits (`svg::DRAWN_MARGIN`: a large window on
+  a high-resolution screen, a drawing stretched to a part's proportions) and catches a panic;
+  past them, the drawing is not drawn (a slot falls back to the built-in picture). So nothing a
+  pack holds reaches an allocation the check has not bounded, whatever size it is drawn at.
+- The sum is a bound, not a measure: resvg frees a layer once it is composed, so a drawing holds
+  less. It could refuse a drawing within `svg_work` that clips and masks large layers many
+  times over; the official looks, the starter and the stress packs pass as before. HEAVY, the
+  heaviest drawing the tests hold, counts 125 MB at 3000 pixels; the starter's 11 MB.
+- A thread that cannot be started for the test drawing skips the test with a note (as an earlier
+  runaway does), rather than refusing the pack: that is the machine's state, not the pack's.
+- The 64-deep limit: a drawing nested to it reads and draws on a 1 MB stack (Windows' default
+  for a thread) in a debug build with half of it to spare.
+
+**Evidence (omarchy, 2026-10-18):** the pack made by hand
+(`crates/skin-pack/tests/fixtures/vast-pattern`: its tile asks for some 17 TB) and the fuzzer's
+cases are read in a child process by `skin-pack`
+(`packs_that_once_aborted_their_check_are_refused_in_a_child_process`) and by the panel beside the
+starter (`a_pack_whose_check_once_aborted_is_refused_and_the_next_loads`): on `skin-system`
+(f073a5d) each child aborted (SIGABRT: "memory allocation of 17179869180000 bytes failed", or a
+stack overflow) or panicked; now each pack is refused, and the starter loads.
+`a_test_drawing_that_panics_refuses_its_pack_and_the_next_is_tested`,
+`a_drawing_that_panics_after_its_deadline_releases_the_backstop`,
+`two_drawings_past_their_deadline_both_hold_the_backstop`. The fuzzer (release, 8 GB of address
+space a run, so that a large allocation fails too): before, case 17237 at 50,000 cases a reader
+aborted ("memory allocation of 257698037700 bytes failed"); now 2,000,000 cases a reader for each
+of eight seeds (`SKIN_PACK_FUZZ_SEED` 0, 1, 2, 3, 77, 144, 2026, 4242), six readers, 96 million
+cases (32 million drawings), none failing; the first such run is what found the inherited pattern's
+loop. The 32 golden frames and 36 png renders (the official looks in both skins at scales 0.5 and
+1, with the keyboard, the drawer and large lettering, and the starter pack) byte-identical to
+`skin-system`'s; `skin-pack` and `ca72-panel` tests (173), the plug-in's (309,
+`standalone-production`), clippy, fmt, `notices.py --check`. Not yet: a host with a pack, the Mac
+and Windows.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found the
+scan took a pattern element's first `fill` or `stroke` declaration, where CSS applies the last:
+with `style='fill:red; fill:inherit'` under a group filled `url(#p)`, it saw red and missed the
+pattern. The scan now reads an element's declarations with usvg's own tokenizer (`simplecss`,
+already in the build through usvg) and decides which wins both as usvg 0.45 does (the style's
+after the attribute, each replacing the last unless that was `!important`, so the first
+`!important` stays; `inherit` copying the ancestor's value and importance) and as CSS does
+(`!important`, then the style over the attribute, then the later); a pattern inherited under
+either counts. Each element's declarations are now read once, top down, not once for each
+descendant. The new unit test failed before the change on the review's case and passes after,
+with a stroke, the style over the attribute, usvg's kept `!important` and CSS's `!important`
+refused, and four drawings where red wins accepted. Checked in a child process, usvg 0.45.1
+itself did not overflow on any of these declared cases: an `inherit` becomes an explicit copy,
+which its own pass turns to `none` inside the pattern; only a fill set by no declaration
+overflowed it. So this keeps the scan's count and refusals right, and guards a future usvg,
+rather than closing a crash in this one. `skin-pack`'s tests (78), clippy, fmt and
+`notices.py --check` pass.
+
+**With R-ARP, R-FX-DRAWER and R-MCP (merged for 0.3.0, 2026-10-19).** The arpeggiator's and the
+effects' drawers, their rail keys and the standalone's TEMPO screen came after the format, which
+has no slots for them. In a pack's look: the rail's ARP and FX keys are the rail's keys (the
+pack's `key` cap and `key_print`, its typeface), and the standalone's rail, a key shorter for FX,
+is the strip renderer's as before (`strip_places` prints both rails, for a `strip_art` drawn round
+them); the drawers draw the look's base skin's built-in artwork (face, glass, amber tabs, orange
+lamp), their knobs the panel's (the pack's knob pictures and caps, through the panel's renderer),
+and the TEMPO screen its built-in glass and lamp, mirroring the pack's name plate (its layout's
+`plate`), so that on a taller panel it stays on the wood. A pack that wants the drawers in its
+own theme would need slots or a drawing for them (a later revision of the format; not added
+here). The drawers' arpeggiator knobs are the plug-in's own (`Place::Arp`): a layout cannot place
+them, and `CONTROL_SET` (the panel's controls) is unchanged. On a taller panel the drawers are
+laid, damaged and found in the drawing's rows from the panel's top (`top_px`), as the presets'
+drawer is; their lamp's falloff is the official panel's. **Agent decisions** (not separately
+approved), in resolving the merge.
 
 ## R-EDITOR-CPU. The editor's cost while sound plays
 
@@ -8385,3 +9072,2699 @@ The renders and numbers of the investigation are outside the repository (the nig
 `volumedrop-out`). Untested here: a native host or the standalone on macOS or Windows, and a
 listening check by the owner. plugin-kit's own module text still describes measuring on any
 change of the sound; the kit's code is unchanged.
+
+## R-PRESET-KEYS. Choose presets with the arrow keys or MIDI pads
+
+**Owner decision, 2026-10-19.** Build the sound-design teacher's requested keyboard and
+MIDI preset navigation: "to be able to change preset with the arrow keys (left/right or
+up/down)" and "assign two pads of a midi controller on next/previous preset".
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **Left and right only** (the owner, 2026-10-19: "I think the left/right arrow keys make
+  sense for stepping through the presets, considering the buttons on the panel for stepping
+  through presets are also left/right"): Up and Down never step presets.
+- **Keyboard priority.** Unmodified Left chooses the previous preset, Right the
+  next, through the rail's existing step operation, including its filters and wrapping.
+  Text entry, the open preset list and its caret, MIDI Learn, menus, What's New and the
+  standalone's AUDIO & MIDI dialog keep their existing routes. TYPING leaves the arrows
+  free: its notes use letters and its octave keys are Z/X. Modified arrows remain host
+  shortcuts. Key releases do not step; the computer's usual arrow-key repeat does.
+- **Hosts.** The editor acts only on events it receives. Its new VST3 forwarded-key path
+  accepts these arrows alone, without taking focus or claiming every host key. Existing
+  modal ownership remains. The platform paths were read: macOS forwards ignored events
+  through its responder chain; Windows keeps its existing dialog-key policy and gives
+  focus back when modal ownership ends; X11 retains its existing window event selection.
+  A host may reserve arrows before the editor receives them. No platform backend changes.
+- **Learning.** PREVIOUS PRESET and NEXT PRESET join MIDI ASSIGNMENTS. Right-clicking
+  either rail arrow opens the same learn/remove/list menu as a parameter control. Actions
+  learn a note on its channel, or an unreserved absolute CC crossing from below 64 to
+  64 or above. Parameters still learn CCs alone, at any value. The learning press assigns
+  without stepping or sounding a note. One input belongs to one target; relearning moves
+  it and reports the displacement. Held notes and CCs do not repeat, nor do their releases
+  step. Assigned notes are reserved for their action rather than also playing the sound.
+- **Persistence.** Parameter assignments retain R34's project format and behaviour. The
+  two actions belong to this computer instead, in `CA-72/settings.toml` under
+  `preset_actions`, by their stable IDs `previous_preset` and `next_preset`. Each stores
+  `channel` (1 to 16) and either `note` or `cc` (0 to 127). New instances read them; project
+  recall cannot replace them, and sound presets never include them. An action wins over
+  a project's parameter CC assignment on the same input. Writes hold the existing file
+  lock, change only the affected actions and preserve unrelated keys, including another
+  instance's other action. Displacement removes only a matching input from the file, so
+  another instance's newer binding of the displaced action survives. The latest saved
+  assignment owns an input across instances.
+  Already running instances retain their own maps; there is no live cross-instance reload.
+  An unreadable settings file is preserved and a failed save is reported in MIDI ASSIGNMENTS.
+- **Processing.** A bounded queue holds up to 64 presses; further presses are dropped if
+  full. The plug-in's own helper reads the library and prepares a patch. Audio applies its
+  values together at a later block's start through the existing host parameter path; only
+  then does the helper publish its name. No file access, allocation or lock is added to
+  processing. Queued presses keep their order and use the rail's filtered set, or the full
+  library before any editor has opened. Host reset invalidates queued and prepared changes.
+  The helper checks a request's generation after consuming it, so a wait across reset
+  cannot discard a fresh press. This works without an editor and does not use nih-plug's
+  shared background executor.
+- **Release record.** `0.2.8.md` is a draft in 0.2.7's format. Future Markdown drafts are
+  excluded from the bundled-highlights coverage check until their build version exists;
+  this build and its What's New highlights stay at 0.2.7.
+
+**Evidence (Linux x86-64, Rust 1.97.1, 2026-10-19).** Focused editor tests exercise the four
+arrows, host forwarding, modified and unused keys, TYPING and X's octave change, readout
+entry, search, rename, learning, menus and What's New. Both rail arrows learn and remove
+notes through their menus. Mapping and processing tests cover notes and CCs, channel
+isolation, silent learning, held/released inputs, reassignment, project exclusion, queued
+order, filtered wrapping and host reset. Settings tests restart the map, preserve unrelated
+keys and another instance's action, resolve competing inputs, remove an action and refuse
+to overwrite malformed TOML. A CLAP entry-point test runs in a fresh process with isolated
+settings, exercises raw MIDI and native CLAP notes without an editor, checks the changed
+parameter events and the project's exclusion of actions. The production standalone adapter
+also steps presets without a device or editor, counting zero allocations or frees in its
+callbacks, including the patch application. Final check results are recorded below.
+
+**Not tried:** native macOS or Windows hosts, Audio Unit execution, interactive host
+keyboard focus and a physical controller. No installed plug-in or real audio device was
+opened. The owner should confirm arrows during TYPING, the CC threshold and held-note
+policy, and the choice to load computer assignments at instance creation rather than
+synchronising already running instances.
+
+**Final verification (Linux x86-64, 2026-10-19).** `cargo fmt --all -- --check` and
+`cargo clippy -p ca72-plugin --all-targets -- -D warnings` pass, as does clippy with
+`--all-features`. With ngspice 47 required, `cargo test --workspace --features
+ca72-plugin/standalone-production -- --test-threads=4` passes 561 tests, 0 failed,
+58 ignored. Builds use this worktree's `target`, four build jobs and isolated
+`IDLE_FOUNDRY_SHARED` and `CA72_SEATS_DIR` folders. An earlier worker-budget test timed out
+while sharing the other jobs' seat folder; it passed with isolated seats, as did the final
+workspace run. No worker code was changed to accommodate it.
+
+Read-only review found two concurrency cases: stale displacement deleting another instance's
+newer binding, and a helper delayed across reset discarding a fresh request. Both have
+regressions proved to fail without their fixes and pass with them; the reviewer re-checked
+the fixes with no remaining findings. An incomplete workspace attempt was stopped before
+applying those fixes, then the full run above restarted on the final code. Four real-size
+renders of the rail arrows' menus and learning notices were inspected; they use the existing
+menu and notice presentation and fit the window. Logs and renders are under
+`target/preset-keys-evidence/` in this worktree.
+
+## R-MODWHEEL-SOURCE. Choose what moves the MOD wheel
+
+**Owner authorisation, 2026-10-19.** Implement issue 109, including the player's request
+for an expression pedal in place of a modulation wheel: "just add an option in the pref
+to change the midi cc of the modwheel". The brief extends the choice to channel aftertouch
+and polyphonic aftertouch (the maximum of held notes), and asks for MIDI Learn on the
+panel's wheel. It is a computer setting in standalone and every plug-in format, never a
+sound preset or host-project field. CC 1 remains the default, with the same sound to the bit.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **The menu.** SETTINGS > MOD WHEEL SOURCE shows the current source and opens a short list:
+  CC 1, breath (CC 2), foot (CC 4), expression (CC 11), timbre / MPE Y (CC 74), channel
+  aftertouch and polyphonic aftertouch. OTHER… opens eight ranges of sixteen CCs. Reserved
+  numbers are shown but disabled, with their reasons. This uses the existing menus, in both
+  looks and lettering sizes; the wheel's own menu also opens the choices.
+- **The setting.** `mod_wheel_source` in the existing locked `CA-72/settings.toml` is `cc1`
+  by default, `cc<number>`, `channel_aftertouch` or `poly_aftertouch`. Missing, invalid and
+  reserved choices fall back to CC 1. Only that key is written, preserving other settings.
+  Instances read it at construction, before a host can restore MIDI assignments, and at
+  activation; editors read it when opened. Changing it updates that instance immediately.
+  Other running instances read
+  it on their next activation or editor opening, rather than polling the file in processing.
+- **The signal.** Any channel's chosen CC or channel pressure replaces CC 1 as the MIDI
+  contribution, through the same `Event::Modulation` path, including its circuit law,
+  smoothing and panel-wheel movement. Channel pressure takes the last received value on
+  any channel. Polyphonic aftertouch takes the maximum pressure of physically held MIDI
+  keys, distinguished by channel and key; pressure on a released key is ignored. Releasing
+  the strongest key falls to the next strongest, and releasing the last falls to zero.
+  This is one global wheel source, not full per-voice MPE modulation. CC 74 follows raw CCs.
+- **Resets.** Changing source clears the old MIDI contribution and stored pressures at the
+  next processing boundary, even if changed away and back between callbacks. Held keys stay
+  eligible for new pressure. CC 121 clears the wheel and stored pressures for every source;
+  All Notes Off, All Sound Off, panic and host reset discard held-key pressure. The wheel's
+  sound parameter keeps its existing role, including its preset value as a lower bound.
+- **Learning.** A right click on MOD offers MIDI LEARN; moving an allowed CC chooses its
+  number on all channels, persisted by the editor. Escape, CANCEL, rearming another control
+  and closing the editor follow R34, including keeping a CC already caught before closing.
+  The capture message itself does not move the wheel. No source choice is added to the sound
+  assignments or host parameters. The wheel's chosen CC is reserved on all channels, its
+  previous assignments removed; restoring a project cannot restore a conflicting assignment.
+  Once freed, CC 1 can be learned by a sound control, just like any other available CC.
+  Bank select, data entry, RPN/NRPN and channel mode messages remain reserved (R34).
+- **Real time.** The source and a change generation are atomic; note and pressure storage is
+  fixed. No settings access, allocation or mutex is added to processing. An independent review
+  found and corrected a capture race: reservation is checked against the same arming snapshot
+  used by the compare-and-swap, so rearming a normal control cannot silently consume its wait
+  with the wheel's reserved CC. The wheel's MIDI ASSIGNMENTS action leaves the list's selection
+  alone rather than clamping its separate learning target to LOCK.
+- **Release draft.** `docs/releases/0.2.8.md` follows 0.2.7's format and is marked unreleased.
+  The bundled-highlight check considers maintained versions through the installed build, so
+  a future draft does not require unreleased highlights in 0.2.7's binary.
+
+**Evidence (Linux x86-64, Rust 1.97.1, ngspice 47, 2026-10-19).**
+`cargo test -p ca72-plugin` passed 331 tests, 0 failed, 34 ignored. The final
+`CA72_REQUIRE_NGSPICE=1 cargo test --workspace --features ca72-plugin/standalone-production`
+passed 557 tests, 0 failed, 59 ignored, including both approved panel images. Builds use an
+individual target directory and four jobs; tests use four threads, an isolated shared-data
+folder and `CA72_SEATS_DIR` under the worktree. A first crate run without seat isolation
+failed the existing worker-lifecycle expectation while other test processes held seats;
+with isolation that test and the whole crate pass, without changing worker-budget code.
+
+`with_nothing_learned_the_sound_is_as_before` compares both channels against the old event
+routing for 184,320 stereo frames: LO, HI and ULTRA, POLY off and on, oscillator and filter
+modulation enabled, notes, pitch bend and controller resets, identical to the bit.
+`alternative_wheel_sources_render_identically_to_cc1_at_the_same_samples` compares the four
+common alternate CCs and both pressure sources, POLY off and on, with seed 42 and non-silent
+modulation, also identical to the bit. Every allowed CC is checked on all sixteen channels;
+pressure maxima, releases, controller resets, host reset, source changes and settings
+round trips have regression tests. The editor checks learning, cancellation, keeping a CC
+caught before closing, menus, and source absence from project fields.
+
+The production standalone adapter passes nine tests, including raw MIDI decoding of all
+source kinds without callback allocation or deallocation. Five fresh subprocesses verify
+settings before project restoration and after activation without opening an editor, retaining
+a newly legal CC 1 assignment. This regression failed before the construction-order fix and
+passed after it. Twelve menu renders cover both looks and lettering sizes, with representative
+images visually inspected (`target/modwheel-evidence/images/`). Clippy, all targets, passes
+with default and all features. No installed plug-in, DAW window, audio device, real MIDI
+hardware, macOS, Windows or Audio Unit was exercised; those native host checks remain for
+acceptance. The menu arrangement and other open instances' refresh policy remain agent
+choices for the owner's review.
+
+
+## R-KNOB-ENTRY. Type a value at a panel knob or selector
+
+**Owner instruction, 2026-10-19 (#108, overnight job).** Approved a user's request for
+"the option to enter a value for each knob and a shortcut for it (cmd+clic to enter the
+value on a mac)". Use ⌘-click on macOS and Ctrl-click on Windows and Linux, include the
+selectors and strip knobs, and keep the existing gestures and MIDI Learn clicks.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **The field.** A small dark field at the control's centre, with amber dots from the preset
+  rename field's font, a steady underline caret and the unit beside the number. Its bounds,
+  including its border, stay inside the visible window in both looks, both lettering sizes
+  and the compact view. The initial value is selected; typing replaces it, Backspace and
+  Delete remove characters, and ⌘/Ctrl-A selects all. It captures every key through the same
+  window focus and VST3 host-key path as the strip readouts (R52, R53). Playing with the
+  computer keyboard yields to typing a value.
+- **Panel units.** Ordinary knobs use their printed 0 to 10 scale; TUNE spans -2.5 to +2.5
+  semitones and CUTOFF -5 to +5, including the unnumbered end marks. FREQUENCY spans the
+  printed -7.5 to +7.5 through the chosen law (R54): semitones in the default law, dial
+  numbers through the hardware law. Setting it uses the existing pot conversion and host
+  parameter, so changing the law does not reinterpret a saved parameter.
+- **Time units.** ATTACK and DECAY show milliseconds; an explicit `s` suffix also accepts
+  seconds, and `ms` is accepted. The labelled angles and milliseconds are shared with the
+  panel drawing. The reading interpolates straight between those marks, reaches zero at the
+  anticlockwise stop and continues the last segment's slope to the clockwise stop (about
+  15,122 ms). This is a reading of the printed dial, not a claim about the circuit's measured
+  contour duration. The interpolation and the end readings await the owner's confirmation.
+- **Selectors.** RANGE takes feet, choosing the nearest of 32, 16, 8, 4 and 2, with 0 or
+  below choosing LO; the field says `ft · 0 = LO`. Positive amounts outside 2 to 32 reach the
+  nearest printed numeric setting. WAVEFORM takes its clockwise position, 1 to 6, rounded
+  and clamped; the field names that unit. These selector conventions await confirmation.
+- **Strip units.** VOICES is a count, ENTROPY, WIDTH and INNER percentages, DETUNE cents,
+  DRIVE and LEVEL dB. The same `set_typed` parser and clamp as the readouts sets these values.
+  Inert VOICES and DETUNE still take no value. Initial text uses the unmodulated base value,
+  as the rendered knob does, rather than adding a host's modulation to the next edit.
+- **Commit and cancel.** Only an edited, finite number confirmed with Enter sets a parameter,
+  through one begin/set/end gesture. Enter without an edit simply closes the field, keeping
+  exact values which its initial display may round. Invalid text, Escape, a press elsewhere,
+  loss of focus and closing the editor set nothing. An outside left press only cancels;
+  a right press retains its usual menu action. The wheel cannot move controls while typing.
+  Input beyond 32 characters or containing unsupported characters becomes `Invalid value`,
+  rather than silently committing a valid prefix.
+- **Existing gestures.** There was no special Alt/Option-click or ⌘/Ctrl-click branch in
+  the old editor. Alt/Option-click keeps its ordinary control behaviour; double-click still
+  resets, Shift-drag is still fine control, and right-click still opens MIDI Learn. A MIDI
+  Learn menu or armed controller keeps its clicks ahead of the entry shortcut. No parameter
+  identifiers, saved sound format, smoothing or audio processing change.
+- **Release draft.** `docs/releases/0.2.8.md` follows 0.2.7's format and is explicitly marked
+  as unreleased. The bundled-notes test permits a future Markdown source only with that draft
+  marker; the installed version and 0.2.7's bundled highlights stay at 0.2.7.
+
+**Verification (Linux x86-64, Rust 1.97.1, 2026-10-19).** The touched crates' full test run
+(`cargo test -p ca72-panel -p ca72-plugin`) passed 392 tests, with 41 ignored. Ten new tests
+cover the dial types, printed time marks and inverses, selector positions, both FREQUENCY
+laws, strip units, one begin/set/end gesture, invalid input, cancellation, host keypad keys,
+keyboard ownership and fields composed and cleared in both looks, both lettering sizes,
+compact and full views at the smallest and default widths. Both approved panel images pass.
+Clippy for both crates, all targets, passes with default and all features; formatting passes.
+Twenty rendered examples and the logs are in `target/knob-entry-evidence/` of this worktree.
+Independent source review found the modulated initial-value issue above; it was corrected,
+and the final review found no further functional defects.
+
+The production Linux standalone was rebuilt and opened on workspace 10 with `--no-devices`,
+a fresh session and shared data under this worktree. Synthetic X11 pointer and keyboard
+input set TUNE, CUTOFF, ATTACK, RANGE, DRIVE and LEVEL; invalid input, Escape and a press
+elsewhere kept the expected values. It closed normally, and its saved session's parameter
+values were checked. No real audio or MIDI device was opened.
+
+The normal full-workspace run, with ngspice 47 required, reached 484 passes, one failure and
+42 ignored: the existing worker-lifetime test timed out after 10 seconds expecting a lone
+instance's workers. It passed alone in 1.24 seconds. That expectation shares the user's
+machine-wide seats unless `CA72_SEATS_DIR` is isolated. With a private seat directory, the
+plug-in and the workspace crates not yet reached were rerun: 341 passed, none failed,
+33 ignored. Together with the completed first portion this gives passing results for all
+workspace test binaries (541 distinct tests, 58 ignored); the remaining documentation checks
+also passed. The original full-workspace command did fail and is retained in the logs.
+An extra `--all-features` workspace attempt failed the allocation check: the diagnostic
+`ca72/count` feature allocates in its call-site hash map (`ulp::count::note`). The normal
+configuration's allocation checks pass. No worker or DSP source was changed for either case.
+
+Not tried: native macOS or Windows builds or editors, any native DAW (including Cubase's
+keyboard forwarding and real host automation recording/undo), or playback through a real
+audio device. The host gesture and VST3 key paths were exercised by the editor's recording
+host and host-key tests, not by a running DAW.
+
+
+## R-KNOB-RESOLUTION. Knobs follow fractional pointer and scroll travel
+
+**Owner instruction, 2026-10-19 (issue #107, editor half).** Remove the editor's
+quantisation so continuous knobs take the input's full resolution, including precise macOS
+scroll deltas and HiDPI sub-pixel positions: "Keep the existing drag sensitivity and
+Shift-fine behaviour feel the same in distance travelled." Discrete controls must still
+step. "Do NOT add audio-side parameter smoothing in the DSP"; that assessment is separate.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+
+- **Continuous input reaches the host at each event.** A drag already retained its floating
+  point coordinates, but discarded movements until three logical pixels had passed. That
+  click threshold now applies only to discrete controls. A continuous knob still travels
+  its full range in 240 logical pixels, a wheel in 160, with Shift at a tenth of the rate
+  and the existing rebase when Shift changes during a drag. No frame batches these values.
+- **Proportional scroll.** Precise scroll used to wait for 40 logical points, move one
+  notch, and discard all excess. Wheel lines used only the event's sign. Continuous
+  controls now use the complete signed delta, including fractions and multiple lines:
+  40 scroll points still equal one line, a knob's 2 % (0.2 % fine), a wheel's 5 % (0.5 %
+  fine). Ordinary one-line wheel notches keep their increment. Values clamp at the ends
+  without storing travel past the end, so a reversal takes effect at once.
+- **Discrete options keep their positions.** RANGE, WAVEFORM, VOICES, toggles and switches
+  accumulate fractional scroll until a whole notch is ready, keep excess for the next
+  event, and discard an old fraction when the direction changes. The accumulator keeps
+  logical scroll pixels: dividing each quarter-point event into lines first rounded a
+  40-point sum just below one notch, which the new test caught. Shift keeps their existing
+  step size. A common control-kind query distinguishes continuous knobs and wheels from
+  discrete options; no parameter ranges, saved IDs, presets or sound code change.
+- **A future release may have draft notes.** `docs/releases/0.2.8.md` follows 0.2.7's
+  format and explicitly marks its downloads as planned. The existing release-catalog
+  coverage test checks Markdown versions through the installed build, so a future draft
+  does not have to ship in 0.2.7's What's New. The current bundled notes and version stay
+  at 0.2.7.
+
+**Evidence (the Linux reference machine, Rust 1.97.1, 2026-10-19):** the same editor tests
+before and after the change record values passed to the host, with no frame drawn between
+events. Each simulated drag is 384 moves of 1/16 logical pixel over 24 pixels: 336 distinct
+values before, 384 after, at widths 860 and 1720, display scales 1 and 2, normal and Shift.
+Each pixel scroll is 384 quarter-point events: 2 distinct values before, 384 after, both
+directions and rates; the normal final values are 0.452 and 0.548 from 0.5, the fine ones
+0.4952 and 0.5048. All are strictly monotonic. Fractional-line input gives 384 distinct
+values over six lines. Five editor regression tests also cover distance, rebase, limits,
+zero vertical travel, discrete positions, whole thresholds, excess and reversal. A panel
+test checks every continuous control's fractional scroll against its existing notch rate.
+
+`cargo test -p ca72-panel`: 59 passed, 8 ignored; `cargo test -p ca72-plugin`: 329 passed,
+33 ignored. Clippy for both crates, all targets, with default and all features, and
+formatting pass. All 19 factory presets' short HI renders (48 kHz, two voices, 0.25 s)
+are bit-identical to the baseline. An independent source review found no actionable issues.
+
+The full workspace run, ngspice 47 required, stopped at the unchanged
+`the_workers_follow_poly_through_the_plug_ins_life`: 480 passed, one failed, 42 ignored.
+Another test process held a seat in the shared runtime folder; this test expects a lone
+instance's worker share. Its isolated rerun passed with `CA72_SEATS_DIR` under this
+worktree. Continuing all remaining crates there passed 336 tests, 33 ignored; the earlier
+crates' documentation checks also pass. The failure and both continuations are retained
+in `target/knob-resolution-evidence/`. No worker or sound code was changed.
+
+Not tried: physical trackpads or a Magic Mouse, native macOS or Windows events, or audible
+sweeps in a host. No claim is made that the editor change alone resolves the audible zipper
+noise reported in #107. The reporting user's 2018 MacBook Pro still needs acceptance.
+
+## R-SKIN-KEYS. The first-party skin key ships before any signed packs
+
+**Owner decision, 2026-10-18** (issue #83's distribution/signing choice): "manual,
+unsigned packs stay the main route, PLUS Idle Foundry's own first-party public key built into
+0.3.0, so signed first-party packs can come later without waiting for an update." The owner
+will make the pair on a machine of their choice before the 0.3.0 release candidate:
+"you must NOT generate the real key, and no secret key may ever be committed or written inside a
+repository."
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One public slot.** `skin_pack::keys::IDLE_FOUNDRY_KEY` stays `None` until the owner fills it.
+  The editor and signing tool share `TRUSTED_KEYS`. A public release's builds refuse an empty
+  slot at compile time: the gate is on when the release sets `CA72_PUBLIC_RELEASE=1` (or the
+  Mac's `CA72_REQUIRE_NOTARIZATION=1`). It is not tied to Cargo's `release` or `bundle`
+  profile, because CI builds and packages every change with those profiles and would fail
+  until the key exists (changed by the coordinating agent, 2026-10-18). `package.sh` also runs
+  `check_release_key` under either variable, which checks the key's id, first-party role,
+  presence in the list and Ed25519 public half.
+  No real key was generated.
+- **A key's authority is explicit.** A first-party key can attest to Idle Foundry's packs; a
+  future marketplace key cannot claim that publisher. Rotation adds a second id, such as
+  `idlefoundry-2`, before use and keeps the old key for existing packs. Revocation needs a
+  plug-in update, as before.
+- **Offline tools.** `pack_keygen` refuses destinations in Git work trees, including linked
+  worktrees and links, and bare repositories; it creates a new owner-only file and prints the
+  public constant with backup advice. `pack_sign` reads the secret from a file or stdin, signs
+  a folder or `.ifskin`, and checks the signed result against the built-in keys before an
+  atomic replacement. It checks the format; `check_pack` supplies the CA-72's full look checks.
+- **Small labels.** The settings menu marks verified packs `(IDLE FOUNDRY)` or `(MARKETPLACE)`;
+  an unknown key is `(UNKNOWN SIGNING KEY)` and counts as unsigned. Unsigned packs are
+  `(UNSIGNED)` and keep their loading behaviour. Every name gets a status, so a pack's own name
+  cannot impersonate the trusted label. Invalid known-key signatures refuse the pack with advice
+  to get an unchanged copy from its publisher. Unknown keys cannot be verified, as before.
+
+**Evidence (Linux, 2026-10-18; Rust 1.97.1, ngspice 47):** `cargo test -p skin-pack -p
+ca72-panel -p ca72-plugin`: 454 passed, 39 ignored. The final `cargo test -p skin-pack`: 66
+passed, including both tools' examples. `CA72_REQUIRE_NGSPICE=1 cargo test --workspace`: 603
+passed, 56 ignored, none failed. Clippy for the three touched crates, all targets, with and
+without all features: passed with warnings denied. The skin crate's all-target Windows GNU
+cross-clippy also passed. Formatting, the diff's whitespace and `package.sh`'s shell syntax
+passed. Tests used `TMPDIR=/var/tmp`: a pre-existing `/tmp/.git` marker correctly made the
+key tool refuse that temporary directory in the initial run.
+
+The release diagnostic refused the missing public key, and a build with
+`CA72_PUBLIC_RELEASE=1` failed at the compile-time gate; release and bundle builds without it
+build as before. The
+key-making CLI refused a path under this worktree's `target` without creating a file. Fixed
+throwaway keys cover trusted, unknown, unsigned, tampered and wrong-id signatures, marketplace
+keys claiming first-party authority, and the release check. An independent read-only review
+was completed and its findings corrected. No owner settings or installed plug-ins were used.
+No real key was generated, and no test key was added to the built-in list.
+
+**Not tried:** native Windows ACL tests or native macOS key creation, a live host's menu, or a
+release with the real first-party key. The owner must make and back up that key and insert only
+its public half before the release candidate; the empty slot deliberately blocks it meanwhile.
+
+**Review correction, 2026-10-19** (agent decision, not separately approved). A review found CI's
+tagged release built the bundles and ran `package.sh` without either variable, so a tag could
+have put installers without the key into the draft release. CI now sets
+`CA72_PUBLIC_RELEASE` at the workflow level to `1` exactly when it runs for a `v*` tag (the
+release job's own condition) and `0` otherwise, so the bundles, installers, clippy and tests of
+a tag carry the gate and pull requests and branches do not. `scripts/test-release-gate.py`,
+run in CI's Linux job, failed before the change (the variable was absent) and passes after:
+on for `refs/tags/v0.2.7`, off for a pull request, `main` and `skin-system`, the same prefix as
+the release job, and no job or step overriding it. With `CA72_PUBLIC_RELEASE=1`, `package.sh`
+stopped at the gate (exit 101); with `0` it went on. Not run on GitHub: no tag was pushed.
+
+## R-ARP. An arpeggiator, in a drawer dropped from the rail's ARP key
+
+**Owner decisions, 2026-10-18** (issue #90, its comment of that day, and the night's brief). In
+every build (VST3, CLAP, AU and the standalone), for 0.3.0:
+- **Modes and range:** "up, down, up/down and random, with an octave range": DIRECTION is UP |
+  DOWN | UP/DOWN | RANDOM, OCTAVES 1 to 4 (ORDER and OCTAVES 5 added 2026-10-19, below).
+- **Rate:** "tempo-synced divisions only": 1/2, 1/4, 1/8, 1/16 and 1/32 with the triplet and
+  dotted values between them; the dial numbered 2, 4, 8, 16 and 32 at the straight values, the
+  others unnumbered ticks; the readout the value's number (16). It follows the host's tempo; "the
+  standalone needs its own tempo": a simple TEMPO setting where the standalone's other settings
+  are, 120 by default (its final look the owner's to design).
+- **Latch, gate, swing:** LATCH (hold; HOLD on the panel since 2026-10-19, below); GATE, the
+  note's length, 0 to 100 %; SWING, 0 to 100 %, 0 straight.
+- **Transport stopped:** "keeps running at the host tempo while keys are held, and locks to the bar
+  when the transport plays".
+- **Voicing:** "arpeggiated notes feed the existing engine exactly as played notes do, through
+  mono/poly/unison, NOTE PRIORITY, RETRIGGER and glide. The arpeggiator does not bypass or
+  duplicate voice allocation."
+- **Presets:** "arpeggiator settings are saved with the patch. Existing presets and saved projects
+  load with the arpeggiator off and sound unchanged."
+- **Automation:** "every arpeggiator setting is a host parameter (ON, LATCH, DIRECTION, RATE,
+  OCTAVES, GATE, SWING)". **MIDI:** no MIDI out.
+- **Placement, C1** (mock-ups drawn by the panel's renderer on a throwaway copy; the owner chose
+  the drawer, then "make it even slimmer", then C1; rejected: a page of its own, the rail's dot
+  screen, a two-row drawer, a drawer of readouts alone): an ARP key on the rail after the
+  keyboard's, the name's screen a key shorter (star, previous, name, next, SAVE, PANEL, keyboard,
+  ARP, settings); it drops a one-row drawer, 265 units deep, inside the window over the top of
+  whichever lower page shows, as the presets' drawer drops; ARP again puts it away; the key lit
+  while the arpeggiator runs. The row: the ARP bank (ON | LATCH), the DIRECTION bank, a rule, then
+  RATE, OCTAVES, GATE and SWING as knob-and-readout units of the strip's own parts. "The mock's
+  drawer lip and drop shadow were a quick composite": a real edge, as the presets' drawer has.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One path for every key.** Every key the note sources pass (the host's MIDI on any channel, the
+  standalone's keyboard and computer keys) goes through the arpeggiator (`arp.rs`) to the
+  engine's `Event::Note`; off, it hands each on at once, unchanged, so the sound without it is
+  the code's before to the bit. Its notes are the engine's events at their samples, the run
+  split there as at a host's event, after the host's events at the same sample. It plays one
+  key at a time (a monophonic arpeggiator): in POLY each step takes a voice, in UNISON all.
+- **The order.** UP and DOWN by pitch, the next above (below) the last played, from the other end
+  past the last; UP/DOWN bounces, its ends once (60 64 67 64 60 64…); a chord changed while it
+  plays carries on from the pitch it last played, and from silence it starts again from the
+  pattern's beginning. OCTAVES repeats the keys an octave up each time, none past 127; a pitch
+  two keys reach (C4 and C5 with two octaves) is played once. **RANDOM's rule:** a key chosen
+  evenly among the pattern's pitches but the last played, while there are two or more (one
+  alone repeats); its numbers from the session's noise seed, so a render repeats.
+- **RATE's thirteen values**, slow to fast as the dial turns, each straight value then its dotted
+  and its triplet (the dotted the longer): 2, 4., 2t, 4, 8., 4t, 8, 16., 8t, 16, 32., 16t, 32;
+  the dial a tick every 25 degrees, the straight ones numbered; the readout `16.` for a dotted
+  sixteenth (the segments' point) and `16t` for a triplet (a seven-segment t). Its host
+  parameter names them "1/16 dotted", "1/8 triplet". The default a sixteenth.
+- **The grid.** While the host plays and says where it is, the steps are counted from the start of
+  each bar (its bar start and time signature), the last of a bar cut short at the bar's end (a
+  dotted quarter in 4/4: 0, 1.5 and 3 beats, then the next bar's downbeat); without a bar,
+  from the song's start. A key pressed while silent waits for the next step, but one pressed
+  up to a quarter of a step after a step plays at once as that step's (a key a little late
+  is not held back a whole step). A jump of the host's position (a loop, a locate) finds the
+  grid again there, the step on a loop's start played at its first sample; the note sounding
+  keeps what was left of it. Stopped (or a host that gives no position), it runs at the host's
+  tempo (else TEMPO) from the moment a key is pressed; the transport stopping while it plays,
+  it goes on in time; starting, it finds the host's grid. A tempo change moves the steps on
+  at the new tempo from where they were (times are kept in beats).
+- **GATE** (superseded 2026-10-19, below: 5 ms was silent): each note let go at GATE's share of
+  its own step (a swung step's length), but never shorter than 5 ms (`arp::SHORTEST`), so 0 %
+  sounds a blip (the contours, DECAY on, then
+  release as from a quick tap); at 100 % tied: the next key pressed before the last is let go
+  (single triggering and GLIDE take it as legato), but for the same key again, which is let go
+  first. The default 50 %.
+- **SWING:** every second step of each bar late by SWING × half a step: 100 % puts it three
+  quarters of the way through the pair (a drum machine's 75 %), 67 % is the triplet shuffle.
+- **LATCH:** a key pressed with none held (none down, none held by the pedal) starts a new chord;
+  one pressed while others are held adds to it; the chord plays on after its keys are let go,
+  until a new one or LATCH off, which lets it go at once. ON switched off with keys held: its
+  note let go and the keys pressed again, as played; on: the engine's keys let go and played in
+  turn. A preset or session that switches it off while it plays does the same at the block's
+  first sample: nothing is left down.
+- **The sustain pedal** (CC 64, ≥ 64 down), which the instrument has never followed: the
+  arpeggiator's while it is on, the keys let go while it is down held as if they were still,
+  until it comes up (Reset All Controllers lifts it). Played without the arpeggiator the pedal
+  does nothing, as before (a project with pedal data keeps its sound). A controller MIDI Learn has
+  on CC 64 is that parameter's alone, as before. **All Notes Off, All Sound Off, a reset and
+  PANIC** forget the held, pedalled and latched keys (LATCH stays on).
+- **The parameters**, after every other (no id moves): `arp_on` ("Arp"), `arp_latch`,
+  `arp_direction` (`up`, `down`, `up_down`, `random`), `arp_rate` (`1/2`, `1/4d`, `1/2t`, … `1/32`),
+  `arp_octaves` (1 to 4), `arp_gate` (%), `arp_swing` (%). Sound parameters: saved with presets
+  (`presets::sound_params`; a preset that does not name them plays without it, every factory
+  preset so) and sessions; a session saved before them opens with them at their defaults, off,
+  whatever the instance had (`Ca72::filter_state`). Turning it on marks the preset changed. MIDI
+  Learn takes them all (65 learnable: ON and LATCH switches, DIRECTION, RATE and OCTAVES
+  selectors, GATE and SWING knobs); the knobs' right-click menus learn as the panel's.
+- **TEMPO** (the standalone, which has no host to give one; and any host that gives none; its
+  screen on the wood since 2026-10-19, below): the AUDIO & MIDI dialog's last row, "120 BPM (the arpeggiator's; applied at once)", a list every
+  5 from 40 to 240 and the arrow keys a beat, 30 to 300; applied at once, outside the devices'
+  APPLY (nothing to restart), and kept for the computer in `settings.toml` as
+  `standalone_tempo` (not in the session: the owner will design its final look and may move it).
+- **The drawer** (`ca72_panel::strip::arp`): x 372 (the left hand's rule stays seen) to the strip's
+  right trim, from under the rail 265 deep; the banks at x 565 and 1091, the rule at 1440, the
+  units at 1644, 2046, 2448 and 2850 (repacked for ORDER 2026-10-19, below), the row 142 under its top, the legends and the banks'
+  titles 109 above it, as the mock-up. Its face the strip's (the worn skin's picture laid from
+  another place, so its grain does not run on from the face under it, the lamp's light over
+  it; the drawn skin's black); the rail's shadow across its top as the presets' drawer has, its
+  left edge catching the lamp, its foot shaded to a dark line, and its shadow cast 16 units on
+  the page below (laid over the page, not a copy). It slides as the presets' drawer (140 ms).
+  Open, it is all the pointer finds there (the strip's tabs and knobs and the keyboard's header
+  under it do nothing); sliding, nothing. The presets' drawer opens over it; ARP while they show
+  puts them away and shows it; PANEL hiding the lower panel puts it away; ARP with the panel
+  hidden shows it. The key is lit while ON is on (taken as "while the arpeggiator is running":
+  the owner to confirm, whether it should light only while notes play).
+- **Its knobs are the panel's controls** (`controls::CONTROLS`, four appended, `Place::Arp`,
+  found by `interact::hit_arp` while the drawer is open): dragged, scrolled, double-clicked to
+  their defaults, tipped and learned as every knob; drawn by the drawer, through the panel's
+  renderer (`Renderer::paint_control`) in the skin it draws. RATE and OCTAVES go from position
+  to position while dragged (`Dial::steps`, as VOICES). Its readouts take a value typed, double
+  clicked as the strip's (R52): RATE `16`, `16.` or `16t` (one of the thirteen; any other
+  nothing), OCTAVES a digit, GATE and SWING percent.
+- **Allocation-free:** the keys bit sets, the times beats; `tests/realtime.rs`
+  `the_arpeggiator_neither_allocates_nor_frees` plays it through the plug-in's process with every
+  setting automated, the transport playing, looping and stopping, the pedal and All Notes Off.
+- **nih-plug change 11** gains `TestProcessContext::set_transport` (`PATCHES.md`), for the tests.
+
+**Evidence (omarchy, Linux, Rust 1.97.1, 2026-10-18; under other agents' builds, load 8 to 16):**
+- `arp.rs`'s 17 tests: the pattern orders, RANDOM's rule and its repeat, steps on their samples
+  whatever the block (1, 64, 1024, 4096) within a sample of the grid at 120/48 kHz, 97.3/44.1 kHz,
+  174/96 kHz and 60/22.05 kHz, the host's grid and a late key, a bar's cut, SWING, GATE's blip and
+  tie, latch, the pedal, ON handed over, clearing, the transport stopping, starting and looping,
+  a tempo change. The plug-in's: `arpeggiated_notes_play_through_the_engine_as_played_ones` (a
+  chord arpeggiated with the transport playing renders to the bit what the same keys played at
+  its steps' samples render without it: MONO with RETRIGGER and POLY, blocks of 256 realtime and
+  1000 offline), `nothing_is_left_stuck_by_resets_latch_or_presets`,
+  `the_sustain_pedal_reaches_the_arpeggiator_unless_learned`,
+  `an_old_session_opens_with_the_arpeggiator_off`,
+  `the_arpeggiator_is_part_of_a_preset_and_off_in_one_that_does_not_name_it`, the settings' and
+  the dialog's TEMPO; the editor's `the_arp_key_drops_its_drawer_over_the_lower_page` (the frame
+  put together whole, nothing under it answering, the presets' drawer over it, PANEL) and
+  `the_arp_drawer_operates_its_parameters`; the drawer's `drawn_in_parts_it_is_drawn_whole`
+  (both skins, two scales). `cargo test -p ca72-plugin` (default and `standalone-production`)
+  and `-p ca72-panel` pass; clippy `-D warnings` with all targets.
+- The standalone (release build, `IDLE_FOUNDRY_SHARED` in the worktree) on omarchy: the drawer
+  dropped over the keyboard and over the strip, ON lit with the ARP key, TEMPO chosen from its
+  list and kept (`standalone_tempo = 100`). The notes were not listened to.
+- Frame times (`cargo run --release -p ca72-panel --example frames`, the editor's drawing and
+  composing, the worn skin; the code before and after run in turn, the quieter pair): the
+  panel's and the strip's cases as before within the machine's noise (0.87 of the drawing:
+  CUTOFF 2.7 and 2.7 ms median, DRIVE 6.6 and 6.7, a tab 1.8 and 1.8; at 1.0: CUTOFF 3.7 and
+  4.6, DRIVE 5.6 and 7.6, a tab 2.4 and 2.4). The drawer's renderer made as the editor opens:
+  0.03 to 0.06 ms on its thread (its plate made on a thread of its own, about 65, 145 and 125 ms
+  at 0.44, 0.87 and 1.0); its first drop once that is done: 6, 18 to 25 and 16 to 24 ms (its four
+  knobs drawn the first time); at once after opening, waiting for the plate: 64 to 155 ms. A knob
+  turned in it: 1.2, 4.0 to 5.7 and 2.5 ms median; a tab pressed 0.1 to 0.5 ms; open and still,
+  nothing. While it slides the whole frame is put together, as for the presets' drawer.
+
+**Not done:** listening to it in a host or the standalone; the installed plug-ins in a DAW (the
+transport's bar start and loops as each host reports them, Logic's and Ableton's block splits);
+the Mac and Windows builds; the drawer's knobs dragged in the standalone (the editor's tests drag
+them; in the standalone its tabs were clicked by synthetic X events).
+
+### R-ARP, 2026-10-19: HOLD's drone, HOLD, ORDER, five OCTAVES, the TEMPO screen, GATE
+
+**Owner decisions, 2026-10-19** (issue #90's comments of that day, 6269120007 among them, after
+playing PR #96; and the owner's requests relayed with the night's brief):
+- **A drone is ARP off with LATCH on.** "LATCH with ON off holds the notes played. They keep
+  sounding after the keys are released, as played (no arpeggiation), until LATCH is turned off or
+  a new chord is played. 'A new chord' means the same rule as the arpeggiator's latch, so the two
+  behave alike." "Through the engine as played: held notes go through mono/poly/unison, NOTE
+  PRIORITY, RETRIGGER and glide." "With LATCH off, every sound stays bit-identical." "No stuck
+  notes after LATCH off, All Notes Off, PANIC, a preset change or a reset. Test the sustain
+  pedal with a held drone, and turning ON on and off while notes are held." A rate of zero was
+  considered and turned down ("most synths use a hold or latch that also works with the
+  arpeggiator off").
+- **LATCH becomes HOLD:** "Rename LATCH to HOLD on the panel, in the host parameter's display
+  name and in the docs. Keep the parameter ID so saved patches and projects still load."
+- **ORDER:** "notes play in the order they were pressed (Moog's ORDER, Ableton's Play Order,
+  Logic's As Played). It's a fifth button after RANDOM", "a key added while held goes on the end;
+  a key let go leaves the order"; the buttons 140 units, the banks at 555 and 1114, the rule at
+  1512, the units at 1716, 2099, 2482 and 2865, as rendered for the owner.
+- **OCTAVES 1 to 5:** "let's add 5 octaves as an option in the arp. I think it will make the
+  spacing around the knob look better." Past the top: "For high notes, I would repeat the highest
+  octave available of the selected note rather than go silent."
+- **The standalone's TEMPO, option D:** "a dot-matrix screen on the top wood band, mirroring the
+  CA-72 badge: the same size, height and distance from the edge. It's always in view, and the
+  rail and drawer are unchanged. Standalone only: in a plug-in the tempo comes from the host and
+  the wood stays bare. Setting it should work like the other readouts (drag, scroll,
+  double-click to type); the AUDIO & MIDI row can stay or go."
+- **GATE was silent at short settings:** "At 1/32 and 120 BPM with GATE at 12 %, nothing sounds",
+  the note let go before `TRIGGER_ON`'s 7.8 ms; GATE 0 % silent at every tempo; at GATE 90 % the
+  6 ms gap under `RETRIGGER_GAP` loses retriggers. The fix: "GATE stays a percentage, but of the
+  window the circuit can play. Each note is held at least about 20 ms and let go at least 13 ms
+  before the next, except at 100 %, which ties notes. Where a step is too short for both (1/32
+  above about 225 BPM), the note sounds and the gap shortens."
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- **The drone** (`Arp::drone`): with ON off and HOLD on each key is handed on as pressed; a key let
+  go is held on; a key pressed with none held (none down, none held by the pedal) lets the held
+  chord go first; one pressed while it holds is let go and pressed again (struck again, never
+  down twice). HOLD switched on while ON is off holds the keys down at that moment; off, it lets
+  go of what it holds but not of keys still down. **ON and the drone hand over:** ON switched on,
+  the drone's keys are let go and arpeggiated, HOLD's chord the arpeggiator's; off with HOLD on,
+  the chord (held and latched keys, and those the pedal holds) is pressed again as a drone. With
+  HOLD off the path is the old one, untouched: keys pass straight through.
+- **The sustain pedal under a drone** does not sound anything itself (the instrument still
+  ignores CC 64): it keeps the keys let go under it part of the chord, so that a key pressed
+  then adds to the drone rather than starting a new one, as under the arpeggiator's HOLD.
+- **ORDER** keeps the keys in the order they were last pressed (`Arp::order`, a list of 128, each
+  key once: pressed again, it moves to the end), passing over those no longer played. With
+  OCTAVES it plays the order, then the order an octave up, and so on (Ableton's and Logic's way);
+  a pitch two keys reach is played by each (UP, DOWN, UP/DOWN and RANDOM still play it once). A
+  key let go: the one now in its place plays next. ORDER is the enum's last value
+  (`arp_direction` `order`), so saved UP to RANDOM keep their values.
+- **Past 127** (`arp::audible`): the pattern is the one it would be with room above (pitches kept
+  to 255 in `Wide`), each note brought down by whole octaves into range as it is played: G7 (103)
+  with OCTAVES 5 plays G7 G8 G9 G9 G9 under UP, and its UP/DOWN turns at the pattern's top (G7 G8
+  G9 G9 G9 G9 G9 G8 G7), so every step sounds and the pattern keeps its length. RANDOM never
+  plays the note just heard while another may sound (judged by the note heard, so collapsed
+  repeats are passed over). At GATE 100 % a repeat of the same note is let go and pressed again.
+- **OCTAVES 5:** `arp_octaves` 1 to 5. Presets and sessions keep it plain (an `i32`; the
+  session's `arp_direction` an id), so a saved 1 to 4 loads as 1 to 4 and needs no translation.
+  A host's automation lane or a MIDI-learned controller holds normalized values and maps onto the
+  new range (4 positions became 5, DIRECTION's 4 became 5); no release has had the arpeggiator,
+  so only test builds' projects could hold such a lane. The dial: five numbered positions a
+  quarter of its travel apart (75 degrees).
+- **GATE** (`arp::SHORTEST` 20 ms, `arp::REARM` 13 ms): a note is held `SHORTEST + GATE × (step −
+  SHORTEST − REARM)`; a step shorter than both (1/32 above 225 BPM) holds the note `SHORTEST` (or
+  the whole step, past 750 BPM) and the gap is what is left. 100 % ties as before. GATE 50 % at
+  1/16 and 120 is now 66 ms, not 62.5.
+- **The TEMPO screen** (`art::TEMPO_SCREEN`, `art::tempo_screen`): the rail's screen's bezel and
+  glass and dot lettering (`strip::pixel_screen`), its surround the plate's 261 by 82 units at
+  x 269 to 530, y 24 to 106; a layer of the panel's renderer always (empty in a plug-in, so that
+  the layers' count stays), its bezel and glass made once a scale and kept, its dots drawn as it
+  changes. It reads "120 BPM". A drag sets a beat a minute every 2 logical pixels up or down
+  (SHIFT: every 8), a wheel's notch one, a trackpad's 8 pixels one; a double click types it (up
+  to three digits, `_` marking the next; Enter sets it within 30 to 300, Escape leaves it); kept
+  for this computer as before (written as a drag ends, not at each pixel). **The AUDIO & MIDI row
+  stays,** a second way in: it already reads and writes the same setting, and taking it away
+  would change the dialog the owner approved for nothing.
+- **The drawer's percent signs** sit 18 units from their readouts (26 before), so that SWING's,
+  moved right by ORDER's repacking, stays inside the trim (it was cut in half there, the mock-up's
+  too).
+- **The 0.3.0 draft notes** moved to `docs/releases/drafts/0.3.0.md`: R-WHATS-NEW's test wants a
+  bundled entry for every release file up to the workspace version, and 0.3.0 is not that yet.
+
+**Evidence, 2026-10-19 (omarchy, Linux):**
+- Unit tests in `arp.rs` (22): ORDER's order, a key added at the end, one let go, one pressed
+  again, ORDER with OCTAVES and HOLD; OCTAVES 5 past the top in all five directions (every step
+  sounding, none past 127, RANDOM's rule kept, G9 alone repeated, HOLD); the drone held, a new
+  chord, a key struck again, HOLD off with a key still down; the drone and the arpeggiator
+  handing over, the pedal, clearing; GATE's floors at every RATE, at 30 to 300 BPM and GATE 0 to
+  99 % (the note at least 20 ms, the gap at least 13 ms where the step allows, the note kept where
+  it does not), and the owner's case (1/32, 120, 12 %: 23.5 ms). The plug-in's:
+  `a_held_drone_plays_through_the_engine_as_held_keys` (a drone, a new chord, renders to the bit
+  what the keys held by hand render: MONO with RETRIGGER, MONO with GLIDE and HIGH priority, POLY,
+  UNISON; blocks of 256 realtime and 1000 offline), `a_drone_leaves_nothing_stuck` (HOLD off, All
+  Notes Off, PANIC, a preset, a reset, ON on and off, the pedal, POLY: no key down in the engine
+  after each), the presets' plain values for OCTAVES 4 and RANDOM, the editor's
+  `the_standalone_s_tempo_screen_sets_the_tempo` (drag, wheel, typing, the limits, Escape; none in
+  a plug-in) and `the_arp_drawer_operates_its_parameters` (ORDER, OCTAVES 5 typed), the panel's
+  `the_tempo_screen_mirrors_the_name_plate` and its part-and-whole test with the screen shown,
+  set and gone; `the_arpeggiator_neither_allocates_nor_frees` with ORDER, OCTAVES 5, a key at 124
+  and the drone among its automation.
+- **Renders, measured, not listened to** (`tests/arp_renders.rs`, ignored, run by hand through
+  the plug-in's process as the standalone runs it; the WAVs in the night's `arp2-out/wav` and
+  `wav-before`): 1/32 at 120 with GATE 12 %: 0 of 32 steps sounding before (-240 dBFS), 32 of 32
+  after. GATE 0 %: 0 steps sounding at any of the 13 RATEs before, every step at every RATE after,
+  and 40 of 40 at 1/32 and 300 BPM. GATE 90 % at 1/32 and 120, with a plucked contour so that
+  each attack is its own: MONO 1 attack in 32 before (7 steps sounding, the rest decayed away),
+  32 of 32 after, for a chord and for one key; MONO with RETRIGGER and POLY 32 of 32 before and
+  after. (Calibrated by hand-played notes: a 6 ms gap gives 1 attack in 16, 13 ms 16 in 16.) The
+  drone: RMS -18 dBFS (MONO) 1 to 2.5 s after the keys are let go, the same after a new chord,
+  -170 dBFS or less 2 s after HOLD off; POLY and UNISON alike; ON on and off under it, held,
+  arpeggiated, held again. ORDER: G C E pressed in that order, A added: G C E, G C E an octave up,
+  G C E A …, measured from each step's zero crossings. OCTAVES 5 from G7: 103 115 127 127 127,
+  every step sounding. TEMPO 96 set as the screen sets it, stopped: 16 of 16 attacks, onsets
+  155.7 ms apart on average (156.25). With HOLD off and the arpeggiator off, three phrases (MONO,
+  POLY, MONO with GLIDE and RETRIGGER) render the same samples on the build before and after
+  (the WAVs compared byte for byte).
+- **The Linux standalone** (release, `--no-devices`, `IDLE_FOUNDRY_SHARED` in the worktree, on a
+  hidden Hyprland workspace, events sent by XSendEvent to baseview's child window, pictures by
+  XGetImage): the TEMPO screen scrolled (123), dragged 40 pixels (143), typed (96, its `_` shown)
+  and each kept in `settings.toml`; the drawer's ON, HOLD and ORDER pressed, OCTAVES typed 5 and
+  dragged to 4, the session saving `arp_octaves` 4 (plain) and `arp_direction` `order`.
+- **Frame times** (`frames`, the build before and after run in turn twice, the worn skin): every
+  case as before (0.44 and 0.87: CUTOFF 0.7 and 2.8 ms median, DRIVE 1.8 and 6.3, a tab 0.5 and
+  1.9, a drawer knob 1.1 and 3.9, the drawer's first drop 5.3 to 5.8 and 16.2 to 17.9 ms). The
+  TEMPO screen set: 1.1 and 3.0 ms median (3.4 and 5.7 before its bezel was kept); its first frame
+  9 to 12 ms, inside the editor's first. It is a fixed layer, so nothing floats and only its
+  place is put together again (counting it as floating had made every frame whole; the editor's
+  part-and-whole test caught it).
+
+**Owner rule, 2026-10-19 (later):** "the gate in the arp should NEVER go below the minimum gate
+length to trigger a sound in the device." `SHORTEST` (20 ms) was a floor only where the step
+allowed it (a step shorter than 20 ms held the note the step's length); it is now absolute:
+- **Agent decisions:** every note is held at least `SHORTEST`, whatever GATE, RATE, SWING or
+  tempo. A step shorter than that (SWING's short steps at the fastest RATEs, a host's tempo past
+  375 at 1/32, a bar's last step cut short) presses the next note while the last is still held,
+  and lets the last go at its 20 ms: up to eight notes may sound at once (`arp::OVERLAP`; a ninth
+  lets the oldest go early, which takes steps under 2.5 ms). Overlapping notes are the engine's
+  as any held keys: POLY gives each a voice, MONO and UNISON play them by NOTE PRIORITY (the
+  later sounds legato, or once the earlier is let go), RETRIGGER waits its gap. **The same key
+  again** while it is still under its `SHORTEST` cannot be pressed twice: the step is tied into
+  the note, which is held on to that step's release (never re-struck short); once it has had
+  its `SHORTEST`, the same key is let go and pressed again, as before. The gap floor (`REARM`)
+  stays wherever the step has room for both. Letting the keys go, and HOLD off, let a note go at
+  once only when it has had its `SHORTEST` (else at it); switching ON off, All Notes Off, PANIC
+  and a reset let everything go at once, as the engine does.
+- **Evidence:** `no_note_is_shorter_than_the_shortest` (`arp.rs`): all 13 RATEs, at 30, 60, 97,
+  120, 180, 225, 240 and 300 BPM and a host's 1000, GATE 0, 12, 50, 90, 99 and 100 %, SWING 0
+  and 100 %, for one key, a chord, ORDER with C4 and C5 (a pitch two keys reach) and notes folded
+  down from past 127 (UP/DOWN from G8 over four octaves): every note, pressed to let go, held at
+  least 960 samples at 48 kHz (the keys let go at the end included), a key down at every step,
+  nothing stuck, no key down twice; over 45 000 notes. Renders (`arp_renders` `shortest_floor`,
+  `wav/floor-*`): 1/32 at 300 BPM, SWING 0 and 100 % (25 and 12.5 ms steps), GATE 0 and 100 %,
+  in MONO with LOW and HIGH priority, MONO with RETRIGGER, POLY and UNISON: every step's window
+  sounding (-17.8 to -21.0 dBFS at the quietest) with the default contour. With a contour of
+  sustain 0, MONO (single triggering) and UNISON fade at 1/32 and 300 BPM without SWING (18 and
+  21 of 48 steps sounding): the 5 ms gap is under the circuit's re-arm time (11.5 to 12 ms), so
+  the contours cannot start again; RETRIGGER and POLY sound every step. No gate can change that
+  short of a longer step, a slower tempo, RETRIGGER or POLY.
+
+**Not done:** listening, in the standalone or a host (renders measured instead); the installed
+plug-ins in a DAW; the Mac and Windows builds; the standalone with an audio device (it ran with
+`--no-devices`; its process is the one the renders ran).
+
+## R-FX-HOST. Effects in the standalone, hosted out of process with DAW-v3's sandbox (issue 82)
+
+**Owner decisions, 2026-10-18** (relayed by the coordinating agent): the standalone
+application only, for 0.3.0, never the DAW plug-ins; effects only, not instruments; VST3 and
+CLAP both ("the code we can reuse hosts both"), AU later; a chain of four with add, remove,
+reorder and bypass, each effect in its own editor window, the chain and each effect's state
+saved with the standalone's session. The view: "FX-A", an FX key on the walnut rail after
+ARP dropping a one-row drawer of four name screens with ON tabs (docs/fx-host.md); not
+built yet, to share the arpeggiator's drawer.
+
+**Agent decisions, 2026-10-18 (for the owner's review; docs/fx-host.md has the reasons and
+nine questions):**
+- DAW-v3's `daw-ipc`, `daw-helper` and test plug-ins vendored in `third_party/daw-v3`
+  (two patches: a run loop for VST3 editors on Linux; macOS's wait functions looked up
+  at run time); its `daw-sandbox` adapted into
+  `crates/ca72-fx`; the plug-ins loaded only in `ca72-fx-helper`, one process per effect.
+- Synchronous by default (no latency added), each effect's block waited for until 0.9 of the
+  period, then dry; pipelined as an option (`--fx-mode`).
+- A crash, a hang (2 s) or a kill: the effect dry meanwhile, its helper started again, the
+  effect restored from its last snapshot; given up on after 5 restarts.
+- The chain saved in `effects.json` beside `session.json`, not inside it (size, and the
+  plug-ins' state and presets kept free of it); a missing plug-in kept with its state.
+- The scan's listings cached in `effects-cache.json`, by file size and time.
+- Until the drawer exists, `--fx-console` drives the chain from standard input.
+- Notices: the helper's crates and Steinberg's MIT notice for the VST 3 interfaces.
+
+**Evidence (Linux, 2026-10-18):** `crates/ca72-fx-helper/tests/chain.rs` with the test
+plug-ins in both formats (exact output, bypass identical to the bit, latency, order, save
+and restore, a sample-rate change, crash, hang and kill in real time); the standalone with
+the default device; Dragonfly Reverb 3.2.10's eight effects loaded, played and restored, their
+editors drawn (the VST3 ones' knobs at zero, unsolved). The chain's tests pass on the Mac and on Windows too
+(the standalone not built there). A macOS blocker found and fixed: the transport linked
+`os_sync_wait_on_address` (macOS 14.4) into the application (minimum 11); now looked up at
+run time (third_party/daw-v3/PATCHES.md).
+
+## R-FX-DRAWER. The effects' drawer: an FX key on the standalone's rail (issue 82)
+
+**Owner decisions, 2026-10-18** (FX-A, chosen from the coordinator's mock-ups over an AUDIO &
+MIDI-style dialog and slots in the left column; relayed with the night's brief): in the
+standalone application only, the DAW plug-ins keeping their rail as it is, an **FX** key on the
+walnut rail after **ARP**, the preset's name's screen a key shorter again for it. Pressed, it drops
+a one-row drawer inside the window, about 170 units deep, over the top of whichever lower page
+shows, "the same mechanics and edge as the arpeggiator's drawer (share code; don't duplicate it;
+only one drawer is open at a time)". Four slots side by side, each with a SLOT legend, a dot screen
+(the rail's, about 400 units wide, twelve characters) and an ON tab beside it (bypass), lit while
+its effect plays. A click on a name opens the effect's own window; a slot dragged onto another
+moves it there; a right click offers replace and remove "in the editor's existing menu style"; an
+empty slot reads "+ ADD EFFECT" and opens the effects' list, "a dropdown list in the presets
+list's style, listing found effects by name and maker", its scan off the editor's thread with a
+visible SCANNING. The FX key lit while any effect is active. A failed or given-up effect shown
+plainly on its slot, "its name dimmed and a short word ... keep it subtle". The mock's lip and
+shadow were a composite: the arpeggiator's drawer's real edge instead.
+
+**Agent decisions, 2026-10-18** (not separately approved):
+- **One drawer from the rail, its plate shared.** `strip/lower.rs` is what the arpeggiator's
+  drawer and the effects' share: the plate (the strip's face from another place, the rail's
+  shadow across its top, its left edge lit, its foot in shade), the print worn into it, the lamp,
+  the shadow it casts, the lit tabs and their words. `strip/arp.rs` draws its plate with it now
+  (the same look; its edges drawn before its recesses rather than in one pass with them). In the
+  editor one `Dropped` holds which drawer is down: ARP with the effects' drawer open puts it away
+  and drops its own from the rail anew, and FX the same; PANEL hiding the lower page puts either
+  away at once. `compose` lays either the same way, with what hangs under it (its shadow; the
+  effects' list).
+- **The rail's keys by build.** `strip::Rail`: the plug-ins' (as before, to the pixel) or the
+  standalone's, FX at 2912 and the keys left of it a key's pitch (100 units) to the left, the
+  name 2000 units wide; chosen as the editor opens, the standalone's rail only when the
+  application has a chain (its helper found). The name's surround is the strip's renderer's
+  alone now (the drawn skin had it twice, once in the drawing: it would have shown past the
+  shorter name).
+- **The slots.** Equal quarters of the drawer, each a screen 400 by 50 units in the rail's bezel
+  and glass, twelve places of the rail's dots, the name centred and cut with an ellipsis; a 20-unit
+  gap, then the 150-unit tab of the strip's amber caps reading ON; the legend over the pair. Every
+  tab has room (tested: none touches its screen or the next slot's light). An effect's whole name
+  and maker are the tip over its screen. Only the first empty slot reads "+ ADD EFFECT" (an
+  effect is always added at the chain's end); the others are dark. A bypassed effect keeps its name
+  lit, its tab dark. The small print under a screen, in the legends' colour at 72 %: LOADING while
+  it loads, RESTARTING while its helper is started again, CRASHED once given up on (dry), MISSING
+  when its plug-in is not on this computer, FAILED for five seconds where a chosen effect would not
+  load; its name dimmed with it.
+- **Clicks and drags.** A press on a name and a move of more than 12 units carries the slot: its
+  name dimmed, the slot under the pointer ringed in MIDI Learn's accent; let go there, the chain's
+  `move_to` (the others keep their order). A press let go without moving opens its window. The
+  tab bypasses (shown at once). Right click: the effect's name as the menu's title, REPLACE… and
+  REMOVE. While something loads, the slots wait (no drag, no menu).
+- **The list.** It drops from under the drawer's foot below its slot (clamped within the
+  drawer's ends), a plate of the drawer's face with its own edges and shadow, and a display of the
+  presets' list's dots and smoothed glass (the rail's glass drawn out over it showed bands; R44):
+  a title (ADD TO SLOT n or REPLACE SLOT n) with SCANNING… or the number found at its right, then
+  eleven rows a view of name, maker and format (CLAP, VST3: the owner's question 7 in
+  docs/fx-host.md is still open; small and dimmer), and SCAN AGAIN last. Sorted by name, maker,
+  format. Always eleven rows deep, as the presets' list is, so that its plate is made once, on
+  the drawer's thread as the editor opens (first made each drop it cost 105 to 215 ms; now 3 to 10).
+  A press elsewhere puts it away and does nothing else; Escape too; the wheel scrolls it.
+- **Never waiting on the chain.** The drawer reads the chain with `try_status` and `try_active`
+  (new in `ca72-fx`: none while the chain is busy, the last reading kept), every tenth of a second
+  or as soon as something done there finishes. What loads or opens a window runs on a thread of
+  the drawer's, in order; a bypass on another, so a tab answers while an effect loads. And
+  `Chain::insert` no longer holds the chain while the plug-in loads (seconds for some): it checks
+  the place, loads, then checks again (and loads again if the device changed the rate meanwhile).
+  The scan runs on a thread of its own the first time the list opens, its results kept for the
+  application's life; again only from SCAN AGAIN. The `fx_view::Effects` trait is the drawer's
+  reach into the chain (the standalone's `fx::Host`; the tests' own), so the editor's tests run
+  without helpers.
+- **Two fixes found in the real standalone.** With the keyboard page showing, a right click or
+  the wheel on a drawer from the rail (either) went to the keyboard under it; and a menu over the
+  keyboard did not light the item under the pointer. Both answer the drawer and the menu now.
+- `Chain::params` (the effects' parameter lists) is not used: FX-A shows no effect's parameters.
+
+**Evidence (Linux, omarchy, 2026-10-18):**
+- Panel: `strip::fx`'s `the_drawer_finds_each_part_where_it_is_drawn` (screens, tabs, list rows,
+  room for each tab, within the drawer and the window), `drawn_in_parts_it_is_drawn_whole` (a tab,
+  a crash, the pointer, a carry, the list opened, scrolled, pointed at and put away; both skins,
+  0.44 and 0.87) and the arpeggiator's tests as before. Editor:
+  `the_fx_key_drops_its_drawer_one_drawer_at_a_time` (the rails, FX and ARP each putting the
+  other away, the frame put together whole, the key's light, PANEL) and
+  `the_fx_drawer_operates_the_chain` (window, bypass, a drag that moves, the list and a row
+  added, REPLACE… and REMOVE, the wheel, a press elsewhere, nothing under the drawer; the keyboard
+  shown); `fx_view`'s tests of the slots' states and the list. `cargo test -p ca72-panel`,
+  `-p ca72-plugin --features standalone-production --lib`, `-p ca72-fx`, workspace clippy
+  `-D warnings` with all targets.
+- The real standalone (release, `--no-devices`, `IDLE_FOUNDRY_SHARED` and `--state-dir` in the
+  worktree, `CA72_FX_PATH` the DAW-v3 test plug-ins and Dragonfly Reverb 3.2.10's CLAP and VST3,
+  `CA72_FX_STANDARD_FOLDERS=0`), driven by synthetic X events: the key, SCANNING then ten
+  effects, three added, a bypass, a carry and a move, two effects' windows opened (a CLAP and a
+  VST3), REMOVE, REPLACE…, a helper killed six times (CRASHED), closed and opened again with the
+  chain as it was (bypass, order, states) and with a plug-in moved away (MISSING); ARP and FX
+  putting each other away.
+- Frame times (`cargo run --release -p ca72-panel --example frames`, before (the merge) and after
+  in turn, each from its own target; full log on the branch's summary): the panel's, the strip's
+  and the arpeggiator's cases as before within the noise, with either rail (0.87 of the drawing:
+  CUTOFF 2.7 and 2.7 ms median, DRIVE 6.3 and 6.2, a tab 1.8 and 1.9; the frames example's opening
+  372, 915 and 769 ms before, 372, 904 and 782 after, at 0.44, 0.87 and 1.0). The effects' drawer
+  at 0.44, 0.87 and 1.0: its renderer made as the editor opens 0.02 ms (its still parts, the
+  list's plate among them, on its thread: 83, 128 and 144 ms); its first drop once they are made
+  2.2, 5.1 and 6.2 ms; a tab 0.1, 0.3 and 0.5 ms; a carry 0.3, 0.7 and 0.8; the list dropped 2.8,
+  7.9 and 10.3 ms, pointed at 2.1, 5.2 and 6.6, scrolled 2.2, 5.3 and 6.7; open and still,
+  nothing.
+
+**Not done:** an audio device (the standalone ran with `--no-devices`, so no effect was heard
+and the chain's audio path was not run from the drawer; the engine's own tests and runs cover
+it, R-FX-HOST); LOADING and RESTARTING seen on screen (the test effects loaded and restarted
+within the screenshots' tenth of a second; both in the tests); the Mac and Windows; a scan of
+the standard folders on a computer with many plug-ins; Escape with the list open in the real
+window (the keyboard is not asked for while the list shows).
+
+## R-FX-MAC. Effects heard, and their windows opened again, on the Mac (issue 82)
+
+**The owner's report, 2026-10-19** (the CA-72 TEST standalone on the Mac, 47 effects found):
+"the plugins themselves will load, which is good. I can click add an effect. I can scan, I can
+search through my plugins on my computer, which is fantastic. And I can load up the plugin. The
+plugin window pops up and I can change things. However, there is no audible effect. So something
+is wrong, even when it's clearly on... The sound still goes through, but it's like it's in bypass
+mode. And then the other issue is once I've closed the plugin window, clicking on the slot should
+open it up again, and it doesn't..."
+
+**Causes and fixes:**
+- **No effect heard.** The synth runs the chain only if `Runner::is_empty` says it has effects,
+  and the runner learnt of the chain's changes (an effect added, removed, moved) only inside
+  `Runner::process`. An effect added to an empty chain therefore waited on its queue for a block
+  that never came: it loaded, its window opened and it read as running, with no misses, while
+  every block went out as the synth made it. A chain restored at start was heard (`prepare`
+  takes the changes), which is how the Linux runs played. Not the deadline nor macOS's waits:
+  the third-party effects played paced at 48 kHz in 256-frame blocks with a deadline of 0.9 of
+  the period, none missed. `is_empty` now takes the changes first (no allocation, no locks).
+- **A window not opened again.** The click reached the drawer and the helper each time, and the
+  helper opened a new window, but behind the CA-72's: the click had just made the CA-72 the
+  active application, and the helper, an accessory application that was not active, ordered its
+  window front with `makeKeyAndOrderFront:`, which leaves an inactive application's window behind
+  the active one's. The same for an open window asked for again. The helper now also sends
+  `orderFrontRegardless` (third_party/daw-v3/PATCHES.md, change 3). The window comes up in front
+  without taking the keyboard: the player's first click on it gives it the keyboard.
+
+**Evidence (2026-10-19):**
+- omarchy: `ca72-fx-helper`'s new `an_effect_added_while_the_synth_plays_is_heard_at_once` (the
+  chain run as the synth runs it, real time at 48 kHz and 256 frames, each block due by 0.9 of
+  its period, an effect added while it plays; both formats): fails without the fix (never wet),
+  passes with it (wet from the block it was added in, none dry or missed after). The editor's
+  `a_slots_name_clicked_again_opens_its_window_again`; the helper's GUI test opens, closes and
+  opens again, and asks again for an open window (`CA72_FX_GUI_TEST=1`).
+- Mac (macOS 27, the owner's ValhallaRoom, kHs Distortion and kHs Gain VST3): the new
+  `third_party_effects_are_heard_in_real_time` (`CA72_FX_THIRD_PARTY`) played each paced at
+  48 kHz, 256 frames: none missed, worst block 0.7 to 1.9 ms (kHs Gain at 0 dB comes out as it
+  went in). The real standalone, a build of this branch with a diagnostic measure of its output
+  in the audio callback, on a virtual output device at 44.1 kHz and 256 frames (the Mac's own
+  device and rate untouched), a note from a virtual MIDI source, ValhallaRoom added from the
+  console while it played: before the fix the output was the synth's to the bit (the effect at
+  frame 0, never given a block); after it, the output differed from the synth by -26 to -35 dBFS
+  (the synth at -30.4 dBFS), every block through the chain, none missed, and equal to it again
+  with the effect bypassed. The window, with clicks posted to the standalone and the screen's
+  window order read: opened, closed with its close button, opened again (behind the CA-72's
+  before the fix, in front after it); covered by the CA-72's and asked for again (in front).
+
+**Not done:** Windows and Linux windows (unchanged; a helper's window on Windows may meet the same
+rule, untried); a keyboard for the effect's window without a click.
+
+## R-MCP. Agents operate the standalone through MCP (#76)
+
+**Owner decisions, 2026-10-18.** Target 0.3.0. The first version controls the standalone
+application. Plug-in instances in a host come once the design has settled, so instance
+discovery and selection are designed in now. It covers "all user-facing controls and
+functions": presets (list, load, save, rename, favourites), the panel and strip, the settings
+menu, the drawers, notes (for #77), MIDI Learn and QUALITY. Reuse the DAW-v3 MCP server's
+patterns.
+
+**Agent proposal, 2026-10-18** (placeholder id; not yet reviewed by the owner). docs/mcp.md has
+the inventory, the design, the tools and what comes next.
+
+- **Two halves.** The bridge `ca72-mcp` speaks MCP on stdio and is what an agent's client
+  starts. The standalone listens on a Unix socket in the user's runtime folder while agents
+  are allowed. The bridge finds the CA-72s that are open from their records and passes each
+  call to the chosen one. The MCP layer takes DAW-v3's shape (`daw-api/src/mcp.rs`, DESIGN
+  7.6): revisions; `tools/list` with schemas generated from the API's methods (D165) and, for
+  `ca72_set`, from the parameters; a failed call returned with `isError`. The bridge connecting
+  to a long-running process copies `daw rpc`'s proxy to `daw serve`.
+- **The editor's own paths.** The socket's threads hand each request to an inbox. The editor
+  takes from it at each frame, on its thread, and carries the request out as its controls
+  would:
+  - parameters through `ParamSetter`, a gesture each;
+  - DETUNE and VOICES refused where they're dimmed;
+  - MODE as the strip's tabs;
+  - presets through `Browser` (SAVE AS and RENAME now share `save_sound` and `rename_preset`)
+    and the drawer's `Library`, with the drawer's hint;
+  - settings as the menu changes them;
+  - notes through `LocalNotes`, owned as the on-screen keyboard's (`Playing::agent`).
+
+  AUTO GAIN's curve is asked for after an agent's change, as after the player's. Nothing new
+  touches the audio thread.
+- **Values in the panel's units, range checked.** Knobs take their dial's numbers. FREQUENCY
+  takes semitones. The strip takes %, cents and dB. A selector takes its position by name, id
+  or index; a switch takes on or off. A value outside its range is refused, not clamped, with
+  the range given, and nothing in that call is set. The panel's typed values clamp; an agent
+  learns that it asked for too much.
+- **Access (owner's call).**
+  - Off by default: SETTINGS has a new AGENTS group, ALLOW and OFF (`agents` in
+    `settings.toml`), shown only in the standalone. `--agents` allows agents for one session.
+  - Until then no socket exists. The folder (700) and the socket (600) are the user's alone,
+    and there is no network port.
+  - An agent can turn agents off, never on.
+  - No per-connection prompt or token. Recommendation: the setting and the user-only socket
+    are enough for a local instrument.
+- **Lifetime.**
+  - A request the window hasn't taken within 10 s is answered as timed out and never carried
+    out. One whose client has gone before the window takes it is dropped. One already taken is
+    carried out, and its answer is discarded.
+  - At most eight clients connect at once, and the editor carries out at most 32 requests a
+    frame.
+  - With no instance chosen, the bridge reconnects to the one open after a restart.
+- **Left out.**
+  - Visual-only things and indicators.
+  - TYPING: `ca72_note_on` covers it.
+  - Opening the browser for a download.
+  - Changing AUDIO & MIDI's devices: read only for now, since a change can stop the sound
+    (**owner's call**: offer it after a confirmation design).
+  - Rendering and listening, which are #77's to design.
+- **Next, for plug-ins in a host** (docs/mcp.md):
+  - a server that works while the editor is closed, setting parameters through the
+    process context as MIDI Learn does;
+  - each instance identified by its host and track;
+  - a named pipe on Windows;
+  - `ca72-mcp` in the installers.
+
+**Evidence (omarchy, Linux x86-64, Rust 1.97, 2026-10-18).**
+
+- **The agent tests.** `cargo test -p ca72-plugin --lib agent` runs 23 tests, with and
+  without the standalone feature, and all pass.
+  - 17 test the protocol's parts: the MCP dispatcher, the tools' schemas, the values,
+    discovery, the server (order, errors, a client gone mid-request, eight clients, stopping)
+    and the bridge (none open, one, two, choosing, reconnecting).
+  - 5 test the editor's side. Four of them drive a real `Editing` behind a real socket,
+    through the bridge's code in MCP's text. The host applies the changes as the standalone's
+    does. They cover parameters, presets, notes, settings, the view, MIDI Learn, agents turned
+    off, and a client gone mid-request.
+  - 1 tests the settings menu.
+- **The built bridge.** `tests/mcp_bridge.rs` runs the built `ca72-mcp`, including its process
+  killed mid-request: the request was dropped, not carried out, and the next bridge was served.
+- **The whole crate.** The lib suite passes with the standalone feature (279). Without it, 269
+  pass, but `the_workers_follow_poly_through_the_plug_ins_life` timed out once at a load
+  average of 17 and passed alone.
+- **Clippy.** Clean with `-D warnings` for Linux, with and without the standalone feature, and
+  for `x86_64-pc-windows-gnu`.
+- **End to end.** The real `ca72-standalone --no-devices --agents`, its window on a hidden
+  Hyprland workspace, was driven through the built `ca72-mcp` by a JSON-RPC client. 21 checks
+  passed:
+  - the handshake, 28 tools, the instance found and `describe`'s 63 parameters;
+  - setting and an out-of-range value refused;
+  - a preset saved, marked changed, loaded back and deleted;
+  - notes played and let go, the look changed, the drawer opened, AUDIO & MIDI read;
+  - 20 round trips in 406 ms.
+
+  Ten raw clients that sent a request and closed at once, and a bridge killed mid-request,
+  left the application serving. Agents turned off removed the socket and its record, and the
+  next call was told that none listen.
+- **A real MCP client.** Claude Code (`claude -p --mcp-config <scratch file>
+  --strict-mcp-config`, no global configuration changed) read the version and MODE, set
+  CUTOFF and EMPHASIS, reported the out-of-range refusal word for word, played two notes and
+  read the values back.
+
+**Not tried.**
+
+- macOS (it should work, since it also uses Unix sockets), and Windows (not built).
+- A real audio device with notes heard.
+- The AGENTS menu in the running application. The menu itself was drawn in a test
+  (`CA72_AGENTS_PNG`); in the application it sits below STANDALONE's AUDIO & MIDI….
+- Hosts and plug-ins.
+
+## R-FX-SAFETY. No effect can make the standalone dead or keep it from starting (issue 82)
+
+**The owner, 2026-10-19:** "I'm just wary of a situation in which a user loads up a VST [any
+plugin], and then that VST crashes on them. We don't want any situation where the synthesizer
+becomes either dead or in an even worse case where the synthesizer keeps trying to load up with a
+plugin that continually keeps crashing and effectively bricks the entire plugin." Four measures,
+approved by the owner before they were built:
+
+1. **The start never waits for an effect.** The chain saved in `effects.json` is put in place at
+   once (3 ms for four effects) and the synth plays through it dry; each effect loads in its
+   helper on a thread of its own and joins the sound when it has loaded, its slot reading LOADING
+   meanwhile. A new sample rate loads the effects again the same way. A load past its time (30 s)
+   is a failure (2), its helper killed. Nothing on the editor's thread or the audio thread waits
+   for a helper; closing the application kills helpers still loading.
+2. **Failures are remembered.** An effect that crashes as it loads, stops responding as it loads,
+   or is given up on as it plays (5 restarts) is turned off and saved so: `"disabled": {"why":
+   "crashed" | "hung" | "settings", "times", "at", "detail"}` in its slot. At the next start it is
+   not loaded: its name is dimmed over CRASHED or NOT RESPONDING, its state, place and bypass
+   kept; a click (or TRY AGAIN in its menu) tries it again (`times` counts the failures in a row;
+   the record goes once it loads). A plug-in that only says no (not installed, not an effect) is
+   not turned off: it reads MISSING and is tried again at every start, at no cost. The scan's
+   cache already kept a failed file's listing by path, size and time; it now says whether the file
+   crashed or hung its helper, and SCAN AGAIN tries such files again (unchanged ones are not
+   loaded otherwise). The list's note counts files not listed ("12 EFFECTS, 2 NOT LISTED").
+3. **A safe start.** A marker (`running.marker` in the session folder) is written as the
+   application starts and taken away as it closes properly. Found at a start, with effects to load,
+   or with Shift held as it opens (Option, or Shift, on macOS; `--safe-start` on any), the chain is
+   put in place and none of it loaded: each slot reads OFF, its tip says why ("Effects off: the
+   CA-72 did not close properly. Click to turn them on"), a click turns them all on, and the menu
+   offers TURN EFFECTS BACK ON and TURN THIS ONE ON. Nothing is saved differently: a crash with
+   another cause turns nothing off, and the next proper start loads everything. A session folder
+   another instance holds (its `instance.lock` locked) is left alone: no marker, no effects.
+4. **Settings that crash an effect.** A saved state is now given to an effect in a step of its
+   own, after it is made, so a crash or hang then is told from a plug-in that crashes. Such
+   settings are not given again (a restore after a crash that crashes in them gives up at once, and
+   one that crashes within a second of every restore is given up on as caused by its settings);
+   the slot reads CRASHED, its tip "its saved settings crash it", and its menu offers LOAD WITHOUT
+   ITS SETTINGS first. Loaded so, it starts as the plug-in starts; the settings are kept in the
+   file as `set_aside`, never given to it unless the player asks (TRY ITS OLD SETTINGS, which keeps
+   it playing as it is meanwhile and stays so, saying FAILED for 5 s, if they still crash it).
+
+**Decided here (the owner to confirm):** settings set aside are kept until the player removes or
+replaces the effect, or gives them back and they load; changing the effect does not drop them (the
+brief suggested that new settings replace them: keeping both loses nothing, and a later plug-in
+version may still take them). A load error that is not a crash or hang is not remembered. A crash
+soon after a restore counts as quick within 1 s. Words on screen: CRASHED, NOT RESPONDING, OFF,
+LOADING, FAILED; the tips say the rest in a line. Effects added from the list still load on the
+drawer's thread, which then waits (up to 30 s for a plug-in that hangs) before its next job; the
+editor never waits.
+
+**Evidence (2026-10-19, omarchy):**
+- Tests, `cargo test -p ca72-fx -p ca72-fx-helper` with DAW-v3's test plug-ins and the faults
+  patch 4 gives them (third_party/daw-v3/PATCHES.md: IDs that crash or hang as they are made, a
+  state pair that crashes or hangs them as it is given or as they first play, file names that
+  crash or hang them as they are listed), `tests/safety.rs`: a chain of a hang-at-load, two
+  crash-at-load (both formats) and a working effect restored in under 500 ms, played in real time
+  from its first block (dry, then wet once the working one joined while the hung one still loaded,
+  the worst block under 40 ms against a 30 ms deadline), the crashing ones off at once, the hung
+  one when its time was up, both saved so with their helpers gone; at the next start not loaded
+  (one helper only), tried again and off again (`times` 2), "mended" and tried, playing; one given
+  up on as it plays stays off; settings that crash or hang it (both formats) turn it off as
+  `settings`, it loads without them, they stay aside across a start, given back they fail and it
+  plays on; settings that crash it at its first block every time are found too; a safe start
+  loads nothing and saves the file unchanged, turned on it plays; listings that crash or hang are
+  remembered, SCAN AGAIN tries them, a changed file is listed again. `no_alloc.rs` now restores a
+  chain in the background while it plays: no allocation on the audio side. `launch.rs`: a run
+  not closed is found, a held session left alone. The editor's
+  `the_fx_drawer_says_why_an_effect_is_off_and_tries_it_again`.
+- The real standalone (release, `--state-dir` and `IDLE_FOUNDRY_SHARED` in the worktree, output to
+  a private PipeWire null sink, recorded): with a crash-at-load CLAP, a hang-at-load VST3 and a
+  working effect saved, the chain was put back in 3.4 ms, the window mapped at 0.81 s (0.83 s with
+  no effects), a note pressed at 1.65 s sounded at 1.74 s (an empty chain's: 1.73 s, 1.82 s), the
+  working effect playing while the hung one read LOADING; CRASHED at 0.22 s, NOT RESPONDING at
+  30.0 s. The next start loaded neither (one helper), a click tried one again; a SIGKILL left the
+  marker (and no helper behind), and the next start was a safe one, nothing loaded, one click
+  turned the effects on; LOAD WITHOUT ITS SETTINGS kept them aside; `--safe-start` too.
+
+**Not tried:** the Shift and Option keys as the application opens (macOS's and Windows's code is
+not compiled here; on Linux the X server's keyboard state is read, which XWayland knows only while
+one of its windows has the keyboard, so `--safe-start` is the sure way there); the Mac and
+Windows at all; third-party plug-ins that fail.
+
+## R-FX-DOCK. The effects' helper never shows in the Dock as a second CA-72 (issue 82)
+
+**The owner's report, 2026-10-19** (CA-72 TEST on the Mac): "When I launched the CA72 standalone
+app two apps launch, so I've got both called CA72 test, one is bouncing up and down in my dock and
+the other has the dot underneath it to indicate that's open."
+
+**Cause.** The effects' helper was a bare program in `CA-72.app/Contents/Helpers`. With the app
+opened from the Finder and its chain restored at start, `lsappinfo` listed the first effect's
+helper as a Foreground application with the app's own identifier, never activated: the bouncing
+icon (the app itself had the dot). It was seemingly taken for the application being opened: not
+seen with the app started from a shell, nor with an effect added later, when the helper was an
+agent without an identifier. DAW-v3's helper made itself an accessory application only as its
+first window opened.
+
+**Fix.**
+- The helper is an application bundle of its own, `Contents/Helpers/CA-72 Effects Host.app`
+  (`scripts/standalone.sh`): its own identifier (the app's with `.effects-host`), the app's icon,
+  its own name, and `LSUIElement`, so that it is an agent (no Dock icon or menu bar) to
+  LaunchServices from the start.
+- It makes itself an accessory application as it starts (`ca72-fx-helper/src/macos.rs`), before
+  any plug-in is loaded, so that it is one when run bare as well (tests, a development build).
+  Not a change to the vendored DAW-v3 code.
+- `locate::helper_for` finds it there (the first `.app` in `Contents/Helpers` holding
+  `Contents/MacOS/ca72-fx-helper`, so a renamed build's is found too), never loose in
+  `Contents/Helpers`. Windows and Linux are unchanged: the helper beside the program.
+- `scripts/package.sh` signs inside out: the helper's bundle first, hardened, with
+  `effects-host-entitlements.plist` (only `disable-library-validation`), then the app with its
+  own, never that one (docs/fx-host.md).
+- The effect's window still comes up in front when a slot's name is clicked
+  (R-FX-MAC), and a click on it makes the helper the active application, with the keyboard.
+
+**Evidence (Mac, macOS 27, 2026-10-19).**
+- `scripts/test-macos-effects-host.sh` (the app opened through LaunchServices with a throwaway
+  session, `lsappinfo` read). With the owner's chain (Faturator, ValhallaRoom) restored:
+  - the build installed before (helper loose in `Contents/Helpers`): two Foreground entries with
+    `com.idlefoundry.ca72-test.standalone`, the app and its first helper; the second helper
+    unlisted. Fails.
+  - this build: one, the app; both helpers `UIElement` with `...standalone.effects-host`. Passes,
+    three times; and with ValhallaRoom added from the console and its window opened.
+- `crates/ca72-fx-helper/tests/macos_dock.rs`: the helper run bare, and from its own bundle in an
+  app's layout, is an agent from its start (with the bundle's identifier). Both fail without the
+  start's accessory call (the helper never checks in).
+- `locate`'s `the_helper_is_found_beside_the_program_or_in_its_own_bundle`, on every platform.
+- The window, by clicks (cliclick, the screen's window order read, while the owner was away): the
+  CA-72's window clicked, then the effect asked for: in front, and the first time also active.
+  Covered by the CA-72's window and asked for again: in front, the CA-72 still active (the
+  keyboard stays with it, as in R-FX-MAC). Its title bar clicked: the helper active.
+
+**For the owner:** the effect's window takes the keyboard on the first open, not when asked for
+again; a click on it always does. Making that the same both ways (always, or never) is the
+owner's call.
+
+## R-BLEP. The oscillators band-limited by a 32-tap windowed sinc, corners and all
+
+The study came first (to "For the owner to decide"), then the owner's answers and the build.
+
+**Owner decisions, 2026-10-16** (passed on by the session that started this work). A tester
+showed that ULTRA is too heavy to play live, and users find HI heavy too. HI's default must
+not cost more CPU. Oversampling HI's oscillators would raise its cost, so the owner asked for
+better band-limiting to be explored instead: less aliasing at about the same CPU, prototyped
+in the lab, with the plug-in's sound and defaults unchanged, and the results reported for the
+owner to decide. (The circuit model has no cheaper settings worth having: R13's "Concessions,
+measured".)
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **How aliasing is measured.** `ca72-lab alias` renders oscillator 1 alone on 2', tuned the
+  1973 way (key 4 is A-440; keys 16, 28 and 40 are A5 to A7), steady after a quarter of a
+  second. It takes 2^17 samples through a seven-term Blackman-Harris window (side lobes about
+  180 dB down). Everything within eight bins of a harmonic belongs to the harmonic; the rest
+  from 20 Hz to 20 kHz is aliasing (the model is deterministic, so there is no noise floor to
+  mistake for it). Each figure is power against the fundamental's: the total, and the
+  loudest single component (its lobe's whole power). The fundamental is found from the
+  ramp's resets, and every candidate plays the same frequency (the tuning is made once a
+  rate, at 4x). The totals agree with the session's first measurement within 0.4 dB (the
+  saw at 1x and 48 kHz: -38.6 and -27.4 dB at A4 and A7, against -39 and -27; at 4x, -78.4
+  and -65.0, against -78 and -65). The loudest components read 4 to 6 dB louder than that
+  measurement's, because each is the component's whole power rather than its peak bin.
+- **What the top of the sound does.** Each render's harmonics below 20 kHz are compared with
+  the same oscillator's at 8x with today's polyBLEP (the light model's with its waveform's
+  own Fourier series): the mean difference from 10 to 20 kHz, and the largest anywhere below
+  20 kHz. Otherwise a kernel that cuts aliasing by dulling the top would look good.
+- **The candidates as kernels.** Each is one impulse made into three tables, 256 points a
+  sample, linearly interpolated: the band-limited impulse, step (BLEP) and ramp (BLAMP).
+  - The two-point polyBLEP is the plug-in's (the lab's table of it gives the same figures to
+    0.1 dB).
+  - The four-point polyBLEPs are the cubic B-spline's and cubic Lagrange interpolation's.
+  - The windowed sincs are Kaiser-windowed and linear phase; the minBLEPs are the same sincs
+    made minimum phase (the real cepstrum, folded).
+  - The sincs' windows were swept at 44.1 and 48 kHz for the least aliasing of the saw with
+    every harmonic below 20 kHz within about 1 dB of 8x's. The choice: 8 taps beta 1, and 16
+    taps beta 4, both cut off at the Nyquist frequency; 32 taps beta 8, cut off at 0.48 of
+    the rate.
+- **The circuit's events and reset areas are kept.** The prototype changes only how a step,
+  an impulse or a corner is spread over samples. `BlepLine::step` and `BlepLine::impulse`
+  (the reset's areas) are called as before, at the times the circuit model computes.
+- **Where the slope jumps (BLAMP).** There are three places, all corrected: the ramp's reset
+  (it stops falling and holds for 1.2 us), the hold's end (it falls again) and the triangle's
+  fold.
+  - The hold's two corners are what limit the saw once the steps are good: with 32 taps and
+    no BLAMP the saw is at -84 and -57 dB at A4 and A7; with BLAMP, -113 and -102.
+  - The fold is not a corner but a knee about 0.15 V of the buffer wide (the shaper's ngspice
+    table is sharp below its lowest point and rounded over 0.2 V above). Corrected as a sharp
+    corner, it helps at 1x and hurts at 8x (A7 -77 dB, against -88 without): where sampling
+    resolves the knee, a sharp corner's correction adds a kink of its own. So it is corrected
+    as a fillet: the corner's correction averaged over the knee's width in time (0.15 V of
+    the buffer, from a sweep of 0 to 0.3 V), and left alone when that is wider than 24
+    samples.
+- **Minimum phase does not suit the circuit's triangle.** A minimum-phase kernel delays what
+  it corrects by its group delay, while the samples between events are not delayed.
+  - A saw's or a rectangle's harmonics all come from its steps, so only their phase moves.
+  - The triangle's corrections and its sampled shape move apart, and the shark tooth mixes
+    the saw and triangle lines. With 16 taps the triangle's harmonics moved by up to 14 dB.
+  - An unpaired corner's correction never ends (a minimum-phase ramp lags the ramp forever).
+  - So minBLEP is measured for the saw and rectangles only; for the triangle it is not a
+    candidate.
+- **The light model corrects from its phase.** LO's oscillators are phase accumulators, so
+  every edge within the kernel's reach is known in advance. Any kernel is worked out sample
+  by sample from the phase, with no samples held back and no added latency. Its triangle and
+  shark tooth get BLAMP at their corners.
+- **The prototype** is on branch `lab/band-limiting`, not merged:
+  - `crates/ca72/src/blep.rs` holds the kernels and a corrected line.
+  - `BlepLine` and the light oscillator use a kernel only when the lab chooses one
+    (`ca72::blep::set`, or `CA72_BLEP`, read once, so that `preset_cost` can measure it).
+  - `CA72_HI_OSC_OS` runs HI's oscillators at 2x, for comparison.
+  - `ca72-lab blepcost` times one oscillator with each kernel. `CA72_BLEP_LINES` gives the
+    kernel to some outputs only, to estimate correcting only the outputs a voice uses.
+  - The full matrix is [band-limiting/aliasing.tsv](band-limiting/aliasing.tsv); the scripts
+    that made it and the tables (`matrix.sh`, `tables.py`, `cost.py`) are beside it on the
+    branch.
+  - With no kernel chosen, the code runs today's arithmetic: its renders are the same to
+    the byte as `main`'s (see Evidence).
+
+### Today's aliasing
+
+Total and loudest component, dB against the fundamental, 20 Hz to 20 kHz.
+
+**HI (circuit, 1x, two-point polyBLEP)**
+
+| Waveform | kHz | A4 | A5 | A6 | A7 |
+|---|---:|---:|---:|---:|---:|
+| saw | 44.1 | -36 / -44 | -33 / -39 | -29 / -33 | -25 / -27 |
+| saw | 48 | -39 / -47 | -35 / -41 | -32 / -35 | -27 / -29 |
+| saw | 96 | -60 / -69 | -57 / -64 | -54 / -58 | -50 / -52 |
+| tri | 44.1 | -61 / -71 | -53 / -60 | -44 / -51 | -32 / -35 |
+| tri | 48 | -64 / -74 | -55 / -62 | -45 / -53 | -36 / -40 |
+| tri | 96 | -82 / -99 | -72 / -86 | -62 / -72 | -51 / -56 |
+| square | 44.1 | -38 / -45 | -36 / -39 | -33 / -37 | -27 / -27 |
+| square | 48 | -42 / -48 | -38 / -41 | -35 / -38 | -33 / -35 |
+| square | 96 | -63 / -72 | -60 / -65 | -57 / -60 | -53 / -55 |
+| wide | 44.1 | -37 / -43 | -34 / -37 | -30 / -34 | -28 / -30 |
+| wide | 48 | -40 / -46 | -36 / -40 | -34 / -38 | -27 / -28 |
+| wide | 96 | -61 / -69 | -58 / -63 | -55 / -59 | -52 / -53 |
+| narrow | 44.1 | -34 / -41 | -31 / -36 | -26 / -28 | -22 / -24 |
+| narrow | 48 | -36 / -42 | -34 / -40 | -32 / -37 | -23 / -24 |
+| narrow | 96 | -57 / -65 | -55 / -60 | -54 / -59 | -52 / -55 |
+
+**ULTRA (circuit, 4x)**
+
+| Waveform | kHz | A4 | A5 | A6 | A7 |
+|---|---:|---:|---:|---:|---:|
+| saw | 44.1 | -67 / -68 | -69 / -72 | -64 / -66 | -59 / -60 |
+| saw | 48 | -78 / -89 | -75 / -83 | -70 / -77 | -65 / -70 |
+| saw | 96 | -96 / -108 | -92 / -102 | -86 / -95 | -80 / -88 |
+| tri | 44.1 | -92 / -95 | -85 / -98 | -75 / -86 | -64 / -72 |
+| tri | 48 | -97 / -114 | -87 / -102 | -77 / -89 | -66 / -73 |
+| tri | 96 | -110 / -124 | -104 / -118 | -97 / -110 | -88 / -98 |
+| square | 44.1 | -68 / -68 | -71 / -72 | -68 / -70 | -60 / -60 |
+| square | 48 | -82 / -92 | -79 / -86 | -75 / -78 | -73 / -77 |
+| square | 96 | -100 / -111 | -97 / -103 | -94 / -98 | -91 / -93 |
+| wide | 44.1 | -65 / -66 | -69 / -70 | -66 / -68 | -65 / -66 |
+| wide | 48 | -80 / -88 | -78 / -84 | -74 / -77 | -72 / -78 |
+| wide | 96 | -98 / -108 | -96 / -103 | -92 / -95 | -90 / -92 |
+| narrow | 44.1 | -69 / -71 | -71 / -78 | -60 / -60 | -56 / -57 |
+| narrow | 48 | -76 / -85 | -73 / -80 | -71 / -77 | -71 / -75 |
+| narrow | 96 | -95 / -104 | -92 / -98 | -88 / -92 | -88 / -93 |
+
+**LO (light model, 1x)**
+
+| Waveform | kHz | A4 | A5 | A6 | A7 |
+|---|---:|---:|---:|---:|---:|
+| saw | 44.1 | -36 / -44 | -33 / -39 | -29 / -33 | -25 / -27 |
+| saw | 48 | -39 / -47 | -35 / -41 | -32 / -35 | -28 / -29 |
+| saw | 96 | -60 / -69 | -57 / -64 | -54 / -59 | -51 / -53 |
+| tri | 44.1 | -60 / -70 | -51 / -61 | -42 / -48 | -31 / -34 |
+| tri | 48 | -62 / -72 | -53 / -63 | -44 / -50 | -35 / -38 |
+| tri | 96 | -76 / -90 | -67 / -81 | -58 / -66 | -49 / -56 |
+| shark | 44.1 | -49 / -57 | -45 / -52 | -42 / -46 | -33 / -36 |
+| shark | 48 | -53 / -61 | -46 / -53 | -44 / -49 | -36 / -41 |
+| shark | 96 | -73 / -83 | -65 / -74 | -57 / -63 | -50 / -55 |
+| square | 44.1 | -38 / -45 | -36 / -39 | -33 / -37 | -27 / -27 |
+| square | 48 | -42 / -48 | -38 / -41 | -35 / -38 | -32 / -35 |
+| square | 96 | -63 / -72 | -60 / -65 | -57 / -61 | -52 / -54 |
+| wide | 44.1 | -37 / -43 | -34 / -38 | -30 / -34 | -28 / -30 |
+| wide | 48 | -40 / -46 | -36 / -40 | -34 / -38 | -27 / -28 |
+| wide | 96 | -61 / -68 | -58 / -63 | -55 / -59 | -50 / -51 |
+| narrow | 44.1 | -34 / -41 | -31 / -37 | -26 / -28 | -22 / -24 |
+| narrow | 48 | -36 / -42 | -34 / -38 | -32 / -38 | -23 / -24 |
+| narrow | 96 | -58 / -65 | -54 / -59 | -54 / -61 | -53 / -59 |
+
+At 96 kHz everything is about 20 dB lower, because the band ends at a smaller share of the
+rate. LO's oscillators alias as HI's do (both use the two-point polyBLEP), and neither
+corrects its triangle's or shark tooth's corners. At 44.1 kHz, ULTRA's saw stays at -67 to
+-59 dB whatever its kernel. Its last halfband only stops from 0.583 of the Nyquist frequency
+(25.7 kHz), so what lies between 22 and 26 kHz at 4x folds into 18 to 22 kHz. That limit is
+its decimator's, not band-limiting's.
+
+Today's HI and LO are also duller than ULTRA. At 48 kHz their saw's harmonics from 10 to 20
+kHz are 2.5 to 3.0 dB under the 8x render's, 5.1 dB at the worst: the two-point polyBLEP
+puts a triangle's low-pass on every step. ULTRA's are within 0.3 dB.
+
+### The candidates
+
+Total aliasing, dB, at 48 kHz, and for the saw at A7 at 44.1 kHz. "Top" is the saw's
+harmonics from 10 to 20 kHz at A4 and 48 kHz against the 8x render's (mean, dB). "Largest" is
+the largest difference of a saw or rectangle harmonic below 20 kHz anywhere in the matrix
+(every rate and note). The full matrix, with the loudest components and 44.1 and 96 kHz, is
+[band-limiting/aliasing.tsv](band-limiting/aliasing.tsv).
+
+| Candidate | saw A4 | saw A7 | tri A4 | tri A7 | narrow A4 | narrow A7 | saw A7, 44.1 kHz | top, dB | largest, dB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| polyBLEP, 2 points (HI today) | -39 | -27 | -64 | -36 | -36 | -23 | -25 | -3.0 | -5.9 |
+| polyBLEP, 2 points, and BLAMP | -39 | -28 | -65 | -53 | -36 | -23 | -25 | -3.0 | -5.9 |
+| polyBLEP, 4 points, Lagrange, and BLAMP | -41 | -29 | -67 | -56 | -38 | -24 | -26 | -1.6 | -4.8 |
+| polyBLEP, 4 points, B-spline, and BLAMP | -52 | -40 | -74 | -62 | -49 | -35 | -36 | -6.0 | -12.1 |
+| sinc, 8 taps, and BLAMP | -52 | -45 | -74 | -60 | -50 | -41 | -35 | +0.5 | +1.1 |
+| sinc, 16 taps, and BLAMP | -76 | -69 | -76 | -63 | -74 | -65 | -41 | +0.1 | -0.6 |
+| sinc, 32 taps, and BLAMP | -113 | -102 | -76 | -63 | -110 | -98 | -93 | +0.0 | -1.0 |
+| minBLEP, 8 taps, and BLAMP | -52 | -44 | not usable | not usable | -50 | -41 | -35 | +0.5 | +1.1 |
+| minBLEP, 16 taps, and BLAMP | -76 | -64 | not usable | not usable | -74 | -65 | -41 | +0.1 | -0.6 |
+| minBLEP, 32 taps, and BLAMP | -98 | -70 | not usable | not usable | -110 | -99 | -70 | +0.1 | -1.0 |
+| polyBLEP at 2x | -60 | -50 | -82 | -51 | -57 | -52 | -48 | -0.7 | -1.4 |
+| polyBLEP at 2x, and BLAMP | -60 | -51 | -84 | -68 | -57 | -52 | -49 | -0.7 | -1.4 |
+| polyBLEP at 4x (ULTRA today) | -78 | -65 | -97 | -66 | -76 | -71 | -59 | -0.1 | -0.3 |
+| polyBLEP at 4x, and BLAMP | -79 | -69 | -98 | -74 | -76 | -71 | -60 | -0.1 | -0.3 |
+| sinc, 16 taps, at 4x, and BLAMP | -98 | -89 | -116 | -74 | -96 | -87 | -60 | +0.1 | +0.1 |
+| sinc, 32 taps, at 4x, and BLAMP | -126 | -116 | -122 | -74 | -124 | -113 | -60 | +0.0 | +0.1 |
+
+| Candidate | saw A4 | saw A7 | tri A4 | tri A7 | narrow A4 | narrow A7 | saw A7, 44.1 kHz | top, dB | largest, dB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| polyBLEP, 2 points (LO today) | -39 | -28 | -62 | -35 | -36 | -23 | -25 | -3.0 | -6.2 |
+| polyBLEP, 2 points (the lab's tables) | -39 | -28 | -62 | -35 | -36 | -23 | -25 | -3.0 | -6.2 |
+| polyBLEP, 2 points, and BLAMP | -39 | -28 | -78 | -52 | -36 | -23 | -25 | -3.0 | -6.2 |
+| polyBLEP, 4 points, Lagrange, and BLAMP | -41 | -29 | -80 | -55 | -38 | -24 | -26 | -1.7 | -5.1 |
+| polyBLEP, 4 points, B-spline, and BLAMP | -52 | -40 | -91 | -66 | -49 | -34 | -36 | -6.0 | -12.4 |
+| sinc, 8 taps, and BLAMP | -52 | -45 | -92 | -65 | -50 | -41 | -35 | +0.4 | -1.1 |
+| sinc, 16 taps, and BLAMP | -76 | -69 | -116 | -89 | -73 | -65 | -41 | +0.0 | -0.9 |
+| sinc, 32 taps, and BLAMP | -112 | -102 | -138 | -124 | -110 | -98 | -93 | -0.0 | -1.3 |
+
+The cost of each, and the latency each adds:
+- **One oscillator** (`ca72-lab blepcost`): ns a sample at 48 kHz, the least of 25 one-second
+  runs. The circuit's ticks all three outputs, as the voice does; the light model's is
+  measured on its sawtooth and triangle.
+- **Ten POLY voices** (`preset_cost`): the 19 factory presets in 256-frame blocks at 48 kHz on
+  one thread, the least of four interleaved two-second rounds. The mean share of a core, and
+  the candidate's change from today's (the median in brackets).
+- **Latency**: at 1x, in output samples (today's HI: 1; LO: none, because it corrects from
+  its phase).
+
+| Candidate | HI latency | Circuit oscillator, A4 / A7 | HI, 10 voices | Light saw, A4 / A7 | Light triangle, A4 / A7 | LO, 10 voices |
+|---|---:|---:|---:|---:|---:|---:|
+| Today | 1 | 27.7 / 37.6 | 104.9 % | 2.0 / 2.0 | 2.0 / 2.0 | 15.3 % |
+| polyBLEP, 2 points, and BLAMP | 1 | 30.0 / 44.8 | +1.8 % (+1.8) | 3.4 / 3.6 | 4.4 / 5.4 | +4.9 % (+6.0) |
+| polyBLEP, 4 points (either), and BLAMP | 2 | 30.1 / 47.3 | | 3.3 / 3.8 | 4.5 / 6.2 | |
+| sinc, 8 taps, and BLAMP | 4 | 30.8 / 54.0 | | 3.4 / 4.0 | 4.6 / 7.2 | |
+| sinc, 16 taps, and BLAMP | 8 | 32.3 / 67.5 | +6.6 % (+6.9) | 3.5 / 4.5 | 5.1 / 10.6 | +5.9 % (+6.8) |
+| sinc, 32 taps, and BLAMP | 16 | 35.3 / 90.9 | +6.7 % (+4.1) | 3.7 / 6.2 | 6.5 / 15.3 | +7.4 % (+8.7) |
+| minBLEP, 16 taps, and BLAMP | 0 | 33.4 / 72.8 | | | | |
+| polyBLEP at 2x | 20 | 92.5 / 104.1 | +5.9 % (+7.5) | | | |
+
+The whole presets' costs vary by about 3 % from round to round on the shared Mac, so they
+cannot separate 16 taps from 32; the oscillator's own times can. Three oscillators a voice at
+48 kHz make each nanosecond 0.014 % of a core a voice. So 32 taps add 0.11 % of a core a
+voice at A4 and 0.77 % with all three oscillators at A7, on a HI voice of about 10.5 %.
+Correcting only the outputs the voice uses would lower that. With the kernel on the saw
+alone, 32 taps cost +4 and +22 ns against +7.6 and +53. The triangle's line is the costly
+one (its step, impulse, two corners and the fold); the rectangle's is cheap. 2x costs most:
+its three full 79-tap decimators run at every sample, and they add 19 samples of latency.
+
+What the tables show:
+- **The 32-tap linear-phase sinc with BLAMP is better than ULTRA, at 1x.** The saw is at -113
+  and -102 dB at A4 and A7 at 48 kHz (ULTRA: -78 and -65), at -86 and -93 at 44.1 kHz (ULTRA:
+  -67 and -59) and at -123 and -114 at 96 kHz, and the rectangles likewise. Every harmonic
+  below 20 kHz is within 1.0 dB of 8x's (LO's 1.3), where today's HI is up to 6 dB down. LO
+  gains the same.
+- **16 taps** give -76 and -69 dB at 48 kHz, but only -53 and -41 at 44.1 kHz: the window is
+  too short for 44.1's narrow gap between 20 and 24.1 kHz. **8 taps** give -52 and -45 at 48
+  kHz, -47 and -35 at 44.1. Both keep the top flat.
+- **The four-point polyBLEPs are no answer.** The B-spline's cuts 13 dB of aliasing by
+  dulling the top a further 3 dB (6 more at the worst harmonic). Lagrange's brightens the top
+  by 1.4 dB and cuts aliasing by 2 dB.
+- **BLAMP alone** (today's polyBLEP and the corners) adds no latency and leaves the saw and
+  rectangles as they are. It takes the triangle at A7 from -36 to -53 dB in HI and from -35
+  to -52 in LO (LO's A4 triangle from -62 to -78).
+- **The circuit's triangle stops at about -63 dB at A7 with any kernel at 1x** (-76 at A4).
+  The fold's knee is not quite a fillet: its long rounded side and the shaper table's
+  interpolation alias on their own. 2x reaches -68 and 4x -74. A closer model of the knee
+  (its curvature as several fillets) would lower this at more cost a period; not tried.
+- **minBLEP** matches the linear-phase sinc for the rectangles. For the saw it nearly does
+  with 16 taps (-76 and -64) and does less well with 32 (-98 and -70, from its truncated
+  tail), with no latency, but it cannot carry the triangle or the shark tooth.
+- **polyBLEP at 2x** gives -60 and -50 dB for the saw at 48 kHz, and -57 and -48 at 44.1:
+  less than 16 taps at 48 kHz and more at 44.1. It is the dearest and the latest.
+
+### What the presets would hear
+
+With 32 taps and BLAMP, each factory preset was rendered with ten voices (`preset_render`)
+and compared with `main`'s render of the same mode:
+- **Level:** within 0.1 dB in all 19, in every mode.
+- **HI's and LO's top:** the 20 kHz third-octave band rises by up to 3.8 dB (HI) and 4.1 dB
+  (LO) in the bright presets, towards ULTRA. Elsewhere most bands move by less than 1.1 dB.
+- **ULTRA:** every band within 1.9 dB.
+- **FEEDBACK:** Feedback Funk's loop diverges from any small change (minBLEP moves it as
+  much); its level does not change.
+- **Attacks under HI's latency.** The oscillators sound 15 samples later while the contours
+  start on time, so fast attacks change: Driven Kick's 315 Hz band moved -2.5 dB. The change
+  grows with the latency: -0.35 dB with minBLEP (one sample earlier than today), +0.58 with
+  8 taps (3 later), -2.5 with 32 (15 later). Holding the contours' triggers back by the same
+  samples would restore the alignment; not built.
+- **LO adds no latency.** Its renders differ from today's by -23 to -68 dB (RMS against the
+  render; Feedback Funk's loop -6 dB), most of it at the top.
+
+### Recommendation
+
+For HI and LO: the 32-tap linear-phase sinc with BLAMP, the triangle's fold as a fillet.
+- It removes the oscillators' aliasing rather than reducing it. The saw and rectangles are
+  below ULTRA's at every rate and note (-84 to -116 dB at 44.1 and 48 kHz). The top octave
+  comes within about 1 dB of the 8x render's; today's HI and LO are 3 dB duller there.
+- In the prototype it costs about 7 % more of HI's presets' time (0.7 % of a core a voice) and
+  of LO's (0.1 % a voice). Built for the plug-in it should cost less: corrections only for the
+  outputs in use (the saw alone: +4 and +22 ns rather than +8 and +53), and LO's tables in
+  single precision. That is not "no more CPU"; whether it is "about the same" is the owner's
+  call.
+- It adds 15 samples of latency in HI (0.31 ms at 48 kHz, 0.34 at 44.1, 0.16 at 96) and none
+  in LO. The contours would wait the same 15 samples, so that attacks keep their shape.
+- The triangle improves to -63 to -76 dB at 48 kHz (today: -36 to -64).
+- 16 taps are not enough at 44.1 kHz (-41 dB at A7). If nothing may cost more or arrive
+  later, BLAMP alone mends the triangle and costs about 2 %.
+
+For ULTRA: no change. At 48 and 96 kHz its aliasing is already -65 dB or lower. At 44.1 kHz
+it is its decimator's, which a kernel does not touch (a longer last halfband would be another
+decision). A new kernel would change the renders the lab checks everything against, for
+differences below what can be heard.
+
+### For the owner to decide
+
+1. **HI's and LO's band-limiting:** (a) the 32-tap sinc with BLAMP, built with the contours
+   delayed to match and only the outputs in use corrected (recommended); (b) BLAMP alone: no
+   latency, the triangle only, about 2 %; (c) 16 taps: 7 samples' latency, weak at 44.1 kHz;
+   (d) as they are.
+2. **Its cost:** about 7 % more for HI's and LO's presets in the prototype, less once built
+   (to be measured again). Is that within "about the same CPU", or must it be zero
+   (then (b))?
+3. **ULTRA:** (a) unchanged (recommended); (b) the same kernel: its renders change (bands
+   within 1.9 dB, latency 3.75 samples more, 48 kHz aliasing -116 dB); (c) BLAMP alone.
+4. **HI's latency:** 15 samples more, unreported to hosts like today's 1 sample and ULTRA's
+   22.5. Acceptable? (Recommended: yes.)
+5. **The sound change:** HI's and LO's top 3 to 4 dB brighter at 20 kHz, towards ULTRA, and
+   every factory preset's render changed (level within 0.1 dB). Accept it without levelling
+   the presets again? (Recommended: yes.)
+
+**Evidence (the Mac, 2026-10-16; branch `lab/band-limiting`, commits `a16caea` and
+`4724718` on `bcb6c0b`):**
+- **Bit-identity.** `ca72-lab render` at 1x, 2x and 4x (A4 and A7) is the same to the byte as
+  a build of `main`. `preset_render` renders all 19 factory presets the same to the bit at
+  HI, LO and ULTRA (its QUALITY switch added on both sides for the check).
+- **Tests.** ca72's blep, vco, resample and light tests pass (18); clippy on ca72 and
+  ca72-lab, all targets, is clean.
+- **Machine.** The Mac was shared throughout with another session's scaling benchmark (up to
+  eight cores in bursts), a CA-74 calibration and Live. The aliasing runs went one at a time
+  at nice 19, and their figures are deterministic. A first full `preset_cost` run of ten
+  candidates was stopped as too noisy (today's HI read 129 % in its best round). The costs
+  above are the least of four rounds, with about 3 % noise.
+- **Not tried:** delaying the contours to match; the knee as several fillets; single-precision
+  or polyphase tables; oscillator 3's reverse sawtooth stage (it follows the saw); paced
+  worst blocks; Windows and Linux.
+
+### The owner's answers
+
+**Owner decisions, 2026-10-16** (passed on by the session that started this work), to the five
+questions above: "1. a 2. Yes. 3. If it's more accurate in it's renders, then we should do
+that, no? That is it's primary focus, is a render engine. 4. Yes. 5. Yes."
+1. HI and LO get the 32-tap sinc with BLAMP, the contours delayed to match, only the outputs in
+   use corrected.
+2. Its cost is accepted. **This relaxes the rule of the same morning** that HI's default must
+   not cost more CPU: about 7 % more, as the prototype measured, was acceptable (the build
+   costs less: below).
+3. ULTRA gets the same kernel, because accuracy comes first in a render engine; its renders,
+   and the lab's references for it, change. Its limit at 44.1 kHz, its last halfband, is
+   measured for the owner to decide (below), not built.
+4. HI's 15 samples of latency are accepted.
+5. The sound changes accepted, without levelling the factory presets again.
+
+### Built
+
+Branch `claude/lucid-fermi-67e20c`, from `main`, without the lab's switch (`lab/band-limiting`
+stays as the study's prototype).
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **One kernel in every mode.** `BlepLine` (`resample.rs`) spreads each step, impulse, corner
+  and rounded corner over the 16 samples either side of it from the kernel's tables (made
+  once a process with `libm`, so the same on every platform; 8,193 points each), and gives its
+  values 16 samples late. The two-point polyBLEP is gone. The circuit's oscillator corrects
+  the reset, the hold's end and the triangle's fold (a fillet 0.15 V of the buffer wide).
+- **Only the outputs in use.** The voice tells each oscillator which outputs its waveform
+  takes (`Vco::set_outputs`): the sawtooth, the triangle or the rectangle, the sawtooth and
+  triangle for the shark tooth of oscillators 1 and 2, and the sawtooth for oscillator 3's
+  reverse sawtooth stage. The others are still made but not corrected (their decimators at
+  4x still run). Taken up again, an output's corrections start with its next event.
+- **The contours wait as long as the oscillators' sound.** The filter's and loudness contours
+  reach the filter and the VCA late by what the kernel adds over the polyBLEP's one sample:
+  15 samples at HI, 3.75 at ULTRA (interpolated), none at LO. The keyboard's pitch is not
+  delayed. So an attack keeps the shape it had, and a whole note starts 0.31 ms later at HI
+  (48 kHz) and 0.08 ms later at ULTRA. Driven Kick's 315 Hz band, -2.5 dB without the delay,
+  is within 0.1 dB with it. The noise-only presets now start those samples later as a whole.
+  (**Since R-LATENCY**, each contour as late as the sound it shapes, in every mode.)
+- **LO in single precision.** The light oscillators read single-precision tables and work out
+  every edge and corner within reach from their phase: no latency, and no contour delay.
+- **The checks.** `ca72-lab alias` and `ca72-lab osccost` stay in the lab;
+  `tests/aliasing.rs` (ca72-lab) holds the aliasing of HI, ULTRA and LO (each waveform, A4 and
+  A7, 44.1, 48 and 96 kHz) about 3 dB under the levels below; `resample.rs` tests the
+  kernel's tables and a corrected step. `preset_render` takes `CA72_POTATO` and `CA72_ULTRA`.
+
+**What changed by design.** Every render of the oscillators changes in every mode. No stored
+golden render exists in the repository to record again: the lab's references are ngspice runs
+of the circuit (`circuits/boards/reference/`), which this does not touch, and the suite's
+comparisons with them hold budgets, which the new oscillators keep (`vco_realtime`'s
+waveforms against the circuit below 20 kHz, among them). What changed is the bit-exact
+comparison by hand: `preset_render` against `main`'s renders, all 19 factory presets, ten
+voices:
+
+| Mode | Level | Worst third-octave band | Difference's RMS against the render |
+|---|---:|---|---|
+| HI | within 0.09 dB | +3.8 dB at 20 kHz (bright presets); otherwise within 0.8 dB | -43 to +5 dB (the 15 samples' shift) |
+| LO | within 0.08 dB | +4.1 dB at 20 kHz; otherwise within 1.1 dB | -23 to -68 dB (Feedback Funk -6); 4 presets the same to the bit |
+| ULTRA | within 0.03 dB | within 0.5 dB (Feedback Funk's loop 1.4 dB) | -0.1 to -55 dB (3.75 samples' shift) |
+
+**Aliasing as built** (oscillator 1 alone, total against the fundamental, dB, before → after;
+the full matrix is [band-limiting/aliasing-built.tsv](band-limiting/aliasing-built.tsv)):
+
+| Mode, waveform | 44.1 kHz, A4 / A7 | 48 kHz, A4 / A7 | 96 kHz, A4 / A7 |
+|---|---|---|---|
+| HI saw | -36 → -86 / -25 → -93 | -39 → -113 / -27 → -102 | -60 → -123 / -50 → -114 |
+| HI triangle | -61 → -73 / -32 → -62 | -64 → -76 / -36 → -63 | -82 → -104 / -51 → -69 |
+| HI narrow rectangle | -34 → -89 / -22 → -90 | -36 → -110 / -23 → -98 | -57 → -120 / -52 → -115 |
+| ULTRA saw | -67 → -67 / -59 → -60 | -78 → -126 / -65 → -116 | -96 → -136 / -80 → -127 |
+| ULTRA triangle | -92 → -94 / -64 → -72 | -97 → -122 / -66 → -74 | -110 → -134 / -88 → -98 |
+| ULTRA narrow rectangle | -69 → -70 / -56 → -56 | -76 → -124 / -71 → -113 | -95 → -133 / -88 → -125 |
+| LO saw | -36 → -86 / -25 → -93 | -39 → -112 / -28 → -102 | -60 → -120 / -51 → -113 |
+| LO triangle | -60 → -135 / -31 → -110 | -62 → -137 / -35 → -118 | -76 → -140 / -49 → -125 |
+| LO narrow rectangle | -34 → -87 / -22 → -90 | -36 → -110 / -23 → -98 | -58 → -118 / -53 → -112 |
+
+The square, wide rectangle and shark tooth go the same way (the matrix). Every harmonic
+below 20 kHz is within 1.3 dB of the 8x render's.
+
+**Cost as built.** With only the outputs in use corrected, the build costs far less than the
+prototype did:
+- **Ten voices** (`preset_cost`): `main`'s build and this one interleaved, the least of four
+  two-second rounds (three one-second rounds at ULTRA), the 19 presets' mean.
+
+  | Mode | `main` | Built | Change (median; range) |
+  |---|---:|---:|---|
+  | HI | 103.7 % | 104.3 % | +0.6 % (+0.7; -0.3 to +1.7) |
+  | LO | 14.8 % | 15.3 % | +3.6 % (+4.3; -1.2 to +8.6) |
+  | ULTRA | 556.9 % | 559.8 % | +0.4 % (+0.2; -1.1 to +2.4) |
+
+- **One oscillator** (`ca72-lab osccost`, ns a sample at 48 kHz, A4 / A7, the least of 25
+  runs): at 1x `main` takes 27.3 / 37.5; the build 29.0 / 46.5 with the sawtooth in use, 30.3 /
+  56.8 the triangle, 28.4 / 41.3 the rectangle, 31.9 / 66.2 all three. At 4x `main` takes 170 /
+  181, the build 179 to 192 / 193 to 209 by output.
+
+**Latency.** HI's oscillators 16 samples (was 1), LO's none (as before), ULTRA's 26.25 (was
+22.5; its decimators' 22.25 and the kernel's 4; **since the longer last halfband, below,
+41.25**). The contours follow (above). The plug-in reports no latency to hosts, as before.
+
+### ULTRA's last halfband (measured, then built: below)
+
+At 44.1 kHz ULTRA's aliasing is its decimators': their last halfband (79 taps, Kaiser beta
+10.06) passes to 0.417 of the output rate and stops from 0.583 (25.7 kHz), so what lies
+between 22 and 26 kHz at 4x folds into 18 to 22 kHz. To keep 20 Hz to 20 kHz clean at 44.1
+kHz it must pass 20 kHz and stop from 24.1. Measured on branch `lab/ultra-halfband` (the
+oscillators' decimators only; `CA72_LAST_HALFBAND`; the matrix is
+[band-limiting/ultra-halfband.tsv](band-limiting/ultra-halfband.tsv)), with the built kernel:
+
+| Last halfband | 44.1 kHz: saw A4 / A7, worst saw or rectangle | 48 kHz worst | 96 kHz worst | Oscillator at 4x, A4 / A7 | Latency |
+|---|---|---:|---:|---|---:|
+| 79 taps (today) | -67 / -60, -56 | -113 | -125 | 178 / 216 ns | 22.25 |
+| 99 | -81 / -84, -79 | -113 | -125 | | 27.25 |
+| 119 | -102 / -118, -100 | -114 | -125 | 229 / 261 ns | 32.25 |
+| 139 | -117 / -118, -111 | -115 | -125 | 259 / 292 ns | 37.25 |
+| 159, 199 | as 139 | -116, -117 | -125 | | 42.25, 52.25 |
+
+(Latency: the decimators' delay in output samples, the kernel's 4 more.) 139 taps make ULTRA
+at 44.1 kHz as clean as at 48: -111 dB at the worst against -56. Its harmonics below 20 kHz
+move by 0.18 dB at most. It costs each oscillator about 80 ns a sample at 4x, three
+oscillators about 1.2 % of a core a voice (ULTRA's voice is about 56 % of a core), and adds
+15 samples of latency (the contours would wait for those too). The filter's decimator at 4x
+has the same last stage (measured below). Decimating only the outputs in use would pay for
+most of it: all three outputs' decimators run.
+
+**For the owner to decide:** ULTRA's last halfband at 139 taps (recommended: 44.1 kHz then
+as clean as 48 kHz, for about 1.2 % of a core a voice and 15 samples), with the filter's
+decimator to match or not; or as it is.
+
+**Owner decision, 2026-10-16** (passed on by the session that started this work): "Okay, do
+it for ultra". The oscillators' decimators get the 139-tap last stage; HI and LO are
+unchanged; the filter's decimator is measured, not built.
+
+**Built** (agent decisions, not separately approved):
+- **The oscillators' decimators only.** `Decimator::for_oscillators` ends in a 139-tap
+  halfband (`OSCILLATOR_LAST_HALFBAND`, Kaiser beta 10.06 as before); `Decimator::new` keeps
+  79 for the filter, the noise and the preamplifier, and LO's sparse ones are unchanged. Only
+  ULTRA's oscillators (and the lab's High Fidelity's) run at 4x; HI's at 1x have no
+  decimator, so HI's renders do not change.
+- **The contours wait for these 15 samples too:** 18.75 samples in ULTRA (`contour_delay`,
+  from `Decimator::delay_of`, which a test checks against the decimators made). (**Since
+  R-LATENCY**, as late as the whole sound: 84.75.)
+- **The aliasing test tightened:** `tests/aliasing.rs` holds ULTRA's sawtooth and rectangles
+  under -105 dB and its triangle under -70 at 44.1 kHz as at 48 and 96.
+
+**As built:** ULTRA's sawtooth and rectangles at 44.1 kHz -111 dB at the worst (was -56; the
+sawtooth -117 and -118 at A4 and A7), at 48 kHz -115, at 96 kHz -125; its triangle -73 at the
+worst. Its oscillators' latency is 41.25 samples (37.25 the decimators', 4 the kernel's).
+- **Cost** (`preset_cost`, ten voices, ULTRA, against the branch before it, the least of three
+  interleaved one-second rounds): 541.6 % of a core to 548.5 %, +1.2 % (median +1.5; -0.3 to
+  +2.5), 0.69 % of a core a voice.
+- **Renders** (`preset_render`, ULTRA at 48 kHz, against the branch before it): levels within
+  0.06 dB; every third-octave band within 0.6 dB but White Lotus's at 62 Hz (+1.3 dB) and
+  Feedback Funk's loop (1.4 dB); the difference's RMS mostly the 15 samples' shift.
+
+### The filter's last halfband in ULTRA (measured, not built)
+
+The filter's decimator at 4x has the same 79-tap last stage. Measured on branch
+`lab/ultra-filter-halfband` (`ca72-lab filteralias`): ULTRA's whole voice with a note held,
+the aliasing of its output and of the filter's own output (the voice's probe) from 20 Hz to
+20 kHz against the fundamental, for self-oscillation at full EMPHASIS (CUTOFF 0.55, 0.7, 0.85:
+1.6, 5.3 and 14.9 kHz), a bright sawtooth (A4 and A6, 8') open and at EMPHASIS 0.8, and DRIVE
+at +12 dB; the results are [band-limiting/ultra-filter-halfband.tsv](band-limiting/ultra-filter-halfband.tsv).
+- **The last stage makes no measurable difference.** At 44.1, 48 and 96 kHz every figure with
+  139 taps is within 0.1 dB of 79's (with 23 taps, within 0.7 dB). The filter run at 8x
+  instead of 4x changes them by 2.7 dB at most, either way.
+- **What aliases is after the filter, the VCA.** The open sawtooth at A4 at 44.1 kHz carries
+  -71.5 dB at the filter's output and -45.5 dB at the voice's; the loudest component, 19.9
+  kHz, is its 55th harmonic (24.19 kHz) folded (at 48 kHz its 64th, folded to 19.85 kHz). The
+  VCA's signal path runs at the output rate and is nonlinear (in High Fidelity's plain path
+  too: the same figures); DRIVE's open sawtooth reads -33 dB at the voice and -58 at the
+  filter. The resonant patches' figures are mostly the filter ringing at its own frequency
+  against the sawtooth's, not aliasing.
+- **Its cost:** the decimator's 40 ns an output sample would be 60 (0.09 % of a core a
+  voice), and 15 samples more, inside FEEDBACK's loop, whose length sets how it oscillates (the
+  light model's `FEEDBACK_DELAY` counts the circuit's loop in samples), and before the VCA,
+  whose loudness contour would have to wait for them.
+
+**For the owner to decide:** the filter's last halfband stays at 79 taps (recommended: no
+measurable gain, a longer FEEDBACK loop). The VCA's signal path at the output rate is what
+aliases in ULTRA at 44.1 and 48 kHz (-45 dB on an open sawtooth); running it oversampled
+is measured next (below).
+
+### ULTRA's VCA oversampled (measured, not built)
+
+ULTRA's VCA signal path (`Vca::signal`, from `BackPart::tick`) runs at the output rate and is
+nonlinear, and it is what aliases in ULTRA's voice (above). Prototyped on branch
+`lab/ultra-vca-os` (from this branch), behind `CA72_VCA_OS`, read once; unset, the voice
+runs today's code, and every factory preset's ULTRA render is the same to the bit as this
+branch's. ULTRA only; HI, LO and the defaults are unchanged.
+
+**Agent decisions, 2026-10-16** (not separately approved):
+- **Two ways to feed it.**
+  - `interp2` and `interp4` interpolate the filter's output again (`Interpolator::new`), run
+    the signal path at 2x or 4x and decimate it (`Decimator::new`, 79 taps last). The filter
+    keeps its own decimator. `interp8` is the reference the others converge to.
+  - `filter4` hands the VCA the filter's own samples at 4x, before its decimator
+    (`Vcf::tick_oversampled`), and decimates the VCA's output with a decimator of the same
+    design. The filter's decimator moves after the VCA, and nothing is resampled twice.
+  - `filter2` takes the filter's samples through its decimator's first stage (the 23-tap
+    halfband, 4x to 2x), runs the VCA at 2x and ends with the 79-tap stage: the filter's
+    decimator's two stages with the VCA between them.
+- **The bias stays at the output rate.** `Vca::control` (the tails, the chain, Q18's solve)
+  still runs once a sample, on its own copy of the VCA. Its drive (`VcaDrive`, twenty values)
+  is interpolated linearly across the sample's steps, up to the sample's own on the last.
+  Only the signal path's states (C6, C8, C2) step at the higher rate. The A-440 is held for a
+  sample.
+- **The lab's code.** `VcaOversampled` (`vca.rs`) does it. `ca72-lab filteralias` is ported
+  from `lab/ultra-filter-halfband`; it also prints each render's level and harmonics below
+  20 kHz, and times the signal path alone. `CA72_VCA_OS_PROBE` keeps the filter's own output
+  for the probe when its decimator has moved. `vca_realtime.rs` (ca72-lab) runs its tests
+  through the oversampled path under the same switch: its sources are taken at the path's own
+  rate, and the reference is shifted by the path's delay.
+
+**Aliasing** (`ca72-lab filteralias`, total against the fundamental, dB; the voice's output,
+and the filter's own output as today's build has it; the full matrix, with every render's
+harmonics, is [band-limiting/vca-oversampled.tsv](band-limiting/vca-oversampled.tsv)):
+
+| Rate, patch | Today | `interp2` | `interp4` | `interp8` | `filter2` | `filter4` | Filter's output |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 44.1 kHz, saw A4 open | -45.5 | -70.7 | -71.4 | -71.0 | -70.1 | -70.1 | -71.5 |
+| 44.1, saw A6 open | -40.5 | -66.6 | -66.6 | -66.3 | -64.2 | -64.2 | -67.1 |
+| 44.1, saw A4 open, DRIVE +12 dB | -33.1 | -64.5 | -65.0 | -65.1 | -53.9 | -59.3 | -58.2 |
+| 44.1, saw A4, EMPHASIS 0.8 | -34.4 | -41.4 | -41.4 | -41.4 | -41.4 | -41.4 | -41.5 |
+| 44.1, whistle CUTOFF 0.85 (14.9 kHz) | -39.4 | -51.5 | -51.5 | -51.5 | -51.5 | -51.5 | -51.4 |
+| 48 kHz, saw A4 open | -48.1 | -73.2 | -73.2 | -73.2 | -71.4 | -71.4 | -73.2 |
+| 48, saw A6 open | -42.4 | -68.7 | -68.7 | -68.7 | -66.4 | -66.4 | -68.4 |
+| 48, saw A4 open, DRIVE +12 dB | -35.2 | -62.5 | -62.6 | -62.6 | -56.1 | -60.0 | -58.8 |
+| 48, saw A4, EMPHASIS 0.8 | -35.5 | -42.5 | -42.5 | -42.5 | -42.5 | -42.5 | -42.6 |
+| 48, whistle CUTOFF 0.85 | -39.7 | -59.6 | -59.6 | -59.6 | -59.6 | -59.6 | -59.6 |
+| 96 kHz, saw A4 open | -74.0 | -76.8 | -76.8 | -76.8 | -76.9 | -76.9 | -76.5 |
+| 96, saw A4 open, DRIVE +12 dB | -57.7 | -66.2 | -66.2 | -66.2 | -65.5 | -65.5 | -64.4 |
+
+- **Oversampled at all, the voice is as clean as its filter.** Today the voice is 24 to 27 dB
+  above its filter's figure on the open sawtooths at 44.1 and 48 kHz. Every variant brings it
+  to within 3 dB of the filter's, but `filter2` with DRIVE (4.3 dB above). The whistle at
+  14.9 kHz goes from -39 dB to the filter's -51.5 (44.1 kHz) and -59.6 (48). At 96 kHz the
+  gain is 3 to 9 dB.
+- **2x is enough.** `interp2` is within 0.7 dB of `interp8` everywhere. What is left is the
+  filter's own aliasing, which its decimator does not change (measured above). The resonant
+  patches (EMPHASIS 0.8, the whistles) agree within 0.1 dB in every variant; their figures
+  are the filter's.
+- **Fed the filter's own samples, the VCA hears what the circuit's does.** The filter's
+  output at 4x carries its harmonics up to 88 kHz (at 44.1), which the circuit's VCA also
+  takes in. `interp` takes them off before the VCA, as today's build does. Compared over the
+  harmonics below 20 kHz within 60 dB of the fundamental:
+  - `interp` and `filter4` differ by up to 1.1 dB with DRIVE at +12 dB (0.3 dB on an open
+    sawtooth, 0.2 at EMPHASIS 0.8);
+  - `filter2` and `filter4` agree within 0.06 dB;
+  - today's build differs from `filter4` by up to 0.9 dB.
+- **The ultrasonic products fold in their turn.** `filter4` with DRIVE reads -59.3 dB at 44.1
+  kHz (the filter's own -58.2), `filter2` -53.9. Without DRIVE, `filter` reads 0.6 to 2.4 dB
+  above `interp`.
+- **Levels** are within 0.01 dB of today's in every render.
+
+**Cost** (`preset_cost`, ten voices, ULTRA, one-second rounds; the unchanged build
+`claude/lucid-fermi-67e20c` and the lab's interleaved, three rounds, the least of each
+preset's, the 19 presets' mean; load averages 4 to 6, the first round's first run 14; the
+raw figures are [band-limiting/vca-oversampled-presets.txt](band-limiting/vca-oversampled-presets.txt)):
+
+| | Of a core | Change (median; range) | A voice |
+|---|---:|---|---:|
+| Unchanged build | 528.1 % | | |
+| Lab, `CA72_VCA_OS` unset | 529.3 % | +0.2 % (+0.6; -1.2 to +1.8) | +0.1 % of a core |
+| `interp2` | 556.8 % | +5.4 % (+5.7; +1.9 to +8.4) | +2.9 % |
+| `interp4` | 597.8 % | +13.2 % (+12.9; +7.1 to +19.3) | +7.0 % |
+| `filter2` | 546.6 % | +3.5 % (+3.6; +0.9 to +5.7) | +1.9 % |
+| `filter4` | 582.2 % | +10.2 % (+11.3; +3.0 to +18.1) | +5.4 % |
+
+The signal path alone (`filteralias`: a 1 kHz sine at 0.5 V, the contour full, ns an output
+sample at 48 kHz, the least of four runs) takes 491 ns at the output rate, 1,042 (`interp2`),
+2,016 (`interp4`), 1,030 (`filter2`) and 2,012 (`filter4`). The step costs the same whatever
+feeds it. `filter` saves the second resampling (the filter's decimator, 38 ns, moves rather
+than doubles).
+
+**Latency** (output samples):
+
+| | The sound through the VCA | The VCA's response to the loudness contour | The gain ahead of the filter's sound (today 44.5) | FEEDBACK's loop (today 90) |
+|---|---:|---:|---:|---:|
+| `interp2` | +39 | +20 | 63.5 | 129 |
+| `interp4` | +44.5 | +23 | 66 | 134.5 |
+| `filter2` | 0 | +20 | 24.5 | 90 |
+| `filter4` | 0 | +23 | 21.5 | 90 |
+
+- **FEEDBACK's loop** in ULTRA is the cable's sample, the preamplifier's resamplers' 44.5 and
+  the filter's 44.5 (the light model's `FEEDBACK_DELAY` counts the circuit's as 88 at 44.1
+  and 48 kHz). `interp` lengthens it by 43 to 49 %, which changes how FEEDBACK oscillates.
+  `filter` leaves it as it is.
+- **The loudness contour.** The bias is worked out at the output rate and stepped across the
+  sample. So a change of it reaches the output through the decimator, 20 or 23 samples later
+  than today (0.4 or 0.5 ms at 48 kHz), and (factor - 1) / factor of a sample more, since the
+  decimator gives its output on the first of a sample's steps.
+- **Against the sound.** Today the gain meets the filter's output 44.5 samples (the filter's
+  resamplers) earlier than the circuit's would. `filter` does not delay the sound, so the gain
+  moves 20 or 23 samples later against it: nearer the circuit, where they meet at once.
+  `interp` delays the sound by 39 or 44.5 and the gain by 20 or 23, so the gain runs further
+  ahead. Keeping today's alignment would take a loudness delay of its own (`contour_delay`
+  also delays the filter's contour).
+
+**What the presets hear** (`preset_render`, ULTRA at 48 kHz, two seconds, against the lab
+with the switch unset; the full tables are in
+[band-limiting/vca-oversampled-presets.txt](band-limiting/vca-oversampled-presets.txt)):
+- **`filter4` and `filter2`:**
+  - Levels are within 0.01 dB, but Feedback Funk's (+0.03 and +0.04 dB). The difference's RMS is 24 to
+    63 dB below each render, and Feedback Funk's 3 to 4 dB below: a loop that sensitive
+    diverges, but its worst band moves by -1.1 dB (31 Hz).
+  - Every third-octave band is within 1.3 dB, but Driven Kick's 1.26 kHz (+3.6 dB; +3.1 at
+    2x) and Cycle of Fifths' 250 Hz (-2.1; -1.6).
+  - The bright presets' 20 kHz band falls by up to 0.6 dB (Horn Bloom), the aliasing taken
+    out.
+- **`interp`:**
+  - Every render is 39 or 44.5 samples later, so the difference's RMS is mostly about the
+    render's own (up to 3.5 dB above it).
+  - Feedback Funk's 630 Hz band rises by 14.5 dB (2x) and 13.0 (4x): the longer loop
+    oscillates otherwise.
+  - Driven Kick's 1.26 kHz band rises by 2.8 and 2.5 dB.
+- **Driven Kick's 1.26 kHz band** moves in every variant, so it is the preset most sensitive
+  to the VCA's rate and timing. R-BLEP's contour delay (above) moved its 315 Hz band by 2.5 dB.
+
+**Against ngspice** (`vca_realtime.rs`, release; today's path, then with `CA72_VCA_OS` at 2x
+and 4x): every test passes in all three, and the VCA's sound holds.
+- The gain over contour and over EXT. LOUDNESS (0.15 dB budget) and the driven VCA's
+  harmonics move by 0.01 dB at most. Those tests run at 192 kHz, where the path's rate is
+  already far above the tone's harmonics. The bias, the balance procedure and the static
+  transfer do not involve the signal path's rate.
+- The thump of a contour step (budget 3 % of its 123 mV peak) reads 1.40 to 1.43 mV at the
+  worst at 2x and 4x, against 1.39 to 1.40 today.
+- A tremolo at EXT. LOUDNESS (the one test of the signal path against an audio-rate bias, at
+  48 kHz) is within 0.1 dB up to 100 Hz. At 1 kHz the difference falls from 27.7 dB below the
+  output to 31.1 (2x) and 33.5 (4x), as `tremolo_step_budget` found the model's step converge
+  (31.4 and 33.8).
+- The first run at 2x and 4x failed the thump and the tremolo, by the output's alignment. The
+  bias reaches the output (factor - 1) / factor of a sample later than the decimator's delay.
+  `VcaOversampled::bias_latency` counts it, and the tests shift the reference by it.
+
+**Options for the owner:**
+1. **As it is.** ULTRA's voice aliases at -45 dB on an open sawtooth at 44.1 kHz (-48 at 48),
+   -33 with DRIVE: 24 to 27 dB above its filter.
+2. **`filter4`: the VCA at the filter's rate, the filter's decimator after it.**
+   - The voice is as clean as its filter, DRIVE included.
+   - The VCA takes in what the circuit's does.
+   - No latency is added to the sound or to FEEDBACK's loop, and the gain meets the sound 23
+     samples nearer the circuit's timing.
+   - +10.2 % on ULTRA (5.4 % of a core a voice).
+3. **`filter2`: the VCA at 2x between the filter's decimator's two stages.**
+   - As clean as `filter4` except with DRIVE (-54 dB at 44.1 kHz, 4.3 above the filter).
+   - The same latencies as `filter4`.
+   - +3.5 % (1.9 % of a core a voice).
+4. **`interp2`: the filter's output interpolated again, the VCA at 2x.**
+   - The cleanest figures (within 0.7 dB of 8x).
+   - The VCA no longer hears the filter's ultrasonic output.
+   - The sound and FEEDBACK's loop get 39 samples more (90 to 129), which changes Feedback
+     Funk, and the gain runs 19 samples further ahead of the sound.
+   - +5.4 % (2.9 % of a core a voice).
+
+**Recommendation: 2, `filter4`.** It is the only variant that ends the VCA's aliasing and also
+keeps the VCA as the circuit has it: fed the filter's whole output, with nothing added to the
+loop or the sound. ULTRA is the render engine (its whole voices cannot be played live anyway,
+R-THREADS), so accuracy is worth its 10 %. If ULTRA's cost must not grow by that much, take
+`filter2`: it is the same except for DRIVE, for a third of the cost. Not `interp`, which moves
+FEEDBACK. Built, it would be the voice's code (`VcaOversampled` in `BackPart`), with the bias
+interpolated as here.
+- **Two things to settle in a build:** the VCA's states when ULTRA is switched on during a
+  note (the lab copies the VCA once, when the voice is made); and whether the oversampled path
+  can take High Fidelity's plain solve (1e-9, one Newton step a sample) at the higher rate,
+  which might cost less. Neither was measured here.
+
+**For the owner to decide:** whether ULTRA's VCA runs oversampled, and which way (1 to 4
+above; recommended: 2).
+
+**Evidence (the Mac, 2026-10-16 and 17; branch `lab/ultra-vca-os`):**
+- **Suite.** `vca_realtime.rs` (release): 9 pass, 1 ignored, at 1x, 2x and 4x. ca72's unit
+  tests (debug): 76 pass. `cargo clippy -p ca72 -p ca72-lab --all-targets -- -D warnings`
+  passes; rustfmt on the changed files.
+- **Same to the bit.** The lab with `CA72_VCA_OS` unset renders every factory preset at ULTRA
+  the same to the bit as `claude/lucid-fermi-67e20c` (`preset_render`, two seconds).
+- **Machine.** Shared, load averages 4 to 14 while the cost rounds ran (interleaved); the
+  aliasing runs are deterministic.
+- **Not tried:** HI or LO; the threaded ULTRA split (R-THREADS, another branch); paced worst
+  blocks; Windows and Linux; hosts. Not pushed.
+
+### ULTRA's VCA at 4x (the owner's choice, built)
+
+**Owner decision, 2026-10-17** (passed on by the session that started this work): "4x", that
+is `filter4`: ULTRA's VCA fed the filter's own samples at 4x, the filter's decimator after it.
+Built on the merged branch (`integrate/threads-band-limiting`: the threads work, R-BLEP and
+R-LATENCY). Only ULTRA changes; HI and LO keep the VCA at the sample rate; FEEDBACK's loop
+stays as it is; the contours are lined up again so that the envelope meets its sound in
+ULTRA, and R-LATENCY's figures follow if they move.
+
+**Built** (branch `claude/ultra-vca-4x`, from `integrate/threads-band-limiting` at `6cc1e3c`;
+agent decisions, not separately approved):
+- **`OversampledVca`** (`vca.rs`) runs the signal path at the filter's rate on
+  `Vcf::tick_oversampled`'s samples and decimates its output (`Decimator::new(4)`). The bias
+  still comes from the bias part at the sample rate, interpolated linearly across the four
+  steps. The filter's own decimator still runs (about 40 ns a sample): it gives the filter's
+  output for the probe and keeps the sample-rate path ready for a switch.
+- **ULTRA and the lab's High Fidelity.** High Fidelity is ULTRA but for the VCA's plain solve,
+  so it runs the same 4x path with that solve; `quality.rs` still compares the two solves on
+  one path. HI (Potato) and LO keep the VCA at the sample rate.
+- **Switching QUALITY.** The other path takes over the signal path's states (C6, C8, C2 and
+  the warm starts; `Vca::take_signal_states`). Into ULTRA, its decimator is filled with the
+  last output, so that the output steps at the switch rather than dropping out for 23
+  samples.
+- **The loudness contour in ULTRA comes 23 samples earlier:** 61.75 samples late, not 84.75
+  (`vca_bias_latency`). The bias now reaches the output through the VCA's decimator: its
+  22.25 samples, and 0.75 more because the bias reaches the sample's own on the last of its
+  steps while the decimator gives its output on the first. So ULTRA's attack comes out where
+  it did and meets its sound as R-LATENCY has it. The VCA's thump alone starts in HI and
+  ULTRA within 0.08 sample of each other at 44.1, 48 and 96 kHz.
+- **The checks.**
+  - `vca_realtime.rs` checks the thump and the audio-rate tremolo against ngspice at 1x and
+    4x on every run (its `Rt`), and every test at 4x with `CA72_VCA_FACTOR=4`, by hand. The
+    tremolo's budget at 1 kHz is 32 dB at 4x (measured 33.5; 27.5 at 1x).
+  - `tests/latency.rs`'s `hi_s_attacks_come_out_with_ultra_s` now measures both attacks at
+    one level, a share of HI's peak, not each at a share of its own. ULTRA's VCA takes in
+    the filter's output above the band, which raises a sawtooth's peaks by 0.15 dB at 44.1
+    and 48 kHz (0.02 at 96) and moved ULTRA's 50 % point by 0.57 sample. At one level the
+    attacks are within 0.09 sample.
+  - `ca72-lab filteralias` (ported from the lab) measures the voice as built.
+
+**As built** (the figures are [band-limiting/vca-4x-built.txt](band-limiting/vca-4x-built.txt)):
+- **Aliasing** the same as the lab's `filter4` in every figure and harmonic. The open
+  sawtooth at A4 is at -70.1 dB at 44.1 kHz (was -45.5) and -71.4 at 48 (was -48.1); with
+  DRIVE at +12 dB, -59.3 and -60.0 (were -33.1 and -35.2); the whistle at 14.9 kHz is at
+  -51.5 and -59.6 (were -39.4 and -39.7).
+- **Cost** (`preset_cost`, ten voices, ULTRA, against `6cc1e3c`, interleaved, three
+  one-second rounds, the least of each; load averages 2.4 to 4.5): 511.1 % of a core to 565.5
+  %, +10.6 % (median +11.0; +5.5 to +17.6), 5.4 % of a core a voice. HI and LO are unchanged.
+- **Latency.**
+  - ULTRA's sound is unchanged: 85.75 samples of resampling and band-limiting, measured from
+    the oscillators' jumps as 87.13, 87.20 and 87.88 at 44.1, 48 and 96 kHz, as before.
+  - So the plug-in still reports 86, HI and LO are still held back 26 and 39 (`LINE_UP`),
+    and FEEDBACK's loop is still 90 samples.
+  - EXT. LOUDNESS's voltage and the A-440, which reach the VCA without a contour's delay, now
+    reach the output 23 samples later in ULTRA (in HI, held back, 26).
+- **Renders** (`preset_render`, ULTRA at 48 kHz, two seconds, against `6cc1e3c`):
+  - The difference's RMS is 44 to 77 dB below each render, Feedback Funk's 7 dB (its loop).
+  - Levels are within 0.01 dB, Feedback Funk's -0.06.
+  - Every third-octave band is within 0.56 dB; the largest is Horn Bloom's at 20 kHz (the
+    aliasing taken out).
+  - HI's and LO's renders are the same to the bit.
+- **Against ngspice:** every `vca_realtime.rs` test passes at 1x and at 4x. The gain and the
+  driven VCA's harmonics are within 0.01 dB of 1x's; the thump is within 1.43 mV of its
+  123 mV peak (1.40 at 1x); the tremolo at 1 kHz is 33.5 dB below (27.7 at 1x).
+
+**Evidence (the Mac, 2026-10-17; branch `claude/ultra-vca-4x`):**
+- **Suite.** `cargo test --workspace --features ca72-plugin/standalone-production` (debug):
+  507 pass, 57 ignored; the three failures are the known ngspice tests (`vco_electrical`'s
+  two, `vco_osc23`; "Timestep too small" on this Mac's ngspice-47).
+  - A first run also failed `the_workers_follow_poly_through_the_plug_ins_life` ("no workers
+    from the helper" after its 10 s). Three ULTRA renders of ten POLY voices each were then
+    holding the machine's workers. It passed alone six times in a row and in the second
+    whole run.
+- **ngspice.** `vca_realtime.rs` (release) passes, with and without `CA72_VCA_FACTOR=4`.
+- **Lints.** `cargo clippy --workspace --all-targets --all-features -- -D warnings` is clean
+  but for the vendored baseview's warnings, as before; rustfmt on the changed files.
+- **Disk and machine.** One target folder (the worktree's; 10 GB free at the end). The
+  machine was shared, load averages 2 to 5.
+- **Not tried:** hosts, Windows and Linux, paced worst blocks. ULTRA split across threads
+  (R-THREADS) is the same to the bit as before against the voice alone (`threaded.rs`), but
+  its late blocks were not measured again: the back part, the filter and now the heavier VCA,
+  runs on one thread. Not pushed.
+
+**For the merge.** The threads work (branch `claude/goofy-ellis-af3f5d`, unmerged, R-THREADS)
+also changes `voice.rs` (`BackPart::set_drive` and others) and `threaded.rs`. This build
+changes `voice.rs` in other places (`ControlPart`'s contour delay, the oscillators' outputs
+in use, `outputs_of`, `contour_delay`) and not `threaded.rs`: the two merge without a conflict
+in the code (`git merge-tree`); only this file conflicts, both records appended at its end.
+
+**Evidence (the Mac, 2026-10-16; commits on `claude/lucid-fermi-67e20c`, and
+`lab/ultra-halfband`, `lab/ultra-filter-halfband`):**
+- **Suite.** `cargo test --workspace --features ca72-plugin/standalone-production` (debug):
+  every test passes but three ngspice tests (`vco_electrical`'s two and `vco_osc23`), which fail
+  the same way on `main` on this Mac ("Timestep too small" at the hold node, ngspice-47 from
+  Homebrew with KLU): not this change's. The new tests pass (`tests/aliasing.rs`, the
+  kernel's two).
+- **Lints.** `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes (the
+  vendored baseview's warnings as before); rustfmt on the changed files.
+- **Machine.** Shared again: the cost rounds ran at a load average of about 24, `main` and the
+  build interleaved; the aliasing runs are deterministic.
+- **Not tried:** the longer halfband built; decimating only the outputs in use; paced worst
+  blocks; Windows and Linux; hosts. Not pushed.
+
+## R-LATENCY. One latency, ULTRA's, in every QUALITY mode; the contours meet their sound
+
+**Owner decisions, 2026-10-16** (passed on by the session that started this work). The
+plug-in reported no latency, though every QUALITY mode delays its sound, each by a different
+amount; reporting each mode's own would make a host compensate afresh at every switch (a
+CLAP host restarts the plug-in). Of the options put to them, the owner chose to report one
+fixed latency, ULTRA's, in every mode and to hold HI's and LO's output back to match: "B".
+The measurement then showed that the contours reach the VCA far earlier than the sound they
+shape (in ULTRA about 20 samples late against the sound's 86), so that reporting 86 alone
+would place every note's onset about 1.4 ms early. Of (a), the latency reported and HI and
+LO held back, and (b), that and each mode's contours delayed by the path of the sound they
+shape, the owner chose "b". EXTERNAL INPUT's remaining difference between the modes stays,
+recorded below.
+
+**Measured** (the Mac, 2026-10-16 and 17, `crates/ca72-plugin/tests/latency.rs`, by hand):
+- **The oscillators' sound**, a sawtooth (16', A3) through the filter wide open: each reset's
+  exact time (the oscillator's own account) against the output's steepest point. LO 48.07,
+  48.14 and 48.98 samples at 44.1, 48 and 96 kHz; HI 61.14, 61.20 and 61.88; ULTRA 87.12, 87.19
+  and 87.88. The resamplers' and band-limiting's delays account for 47.25, 60.5 and 85.75 of
+  them (LO: the filter's 8x resamplers, 23.625 each way; HI: the oscillators' 16 and the
+  filter's 4x resamplers, 22.25 each way; ULTRA: the oscillators' 41.25 and the same filter
+  resamplers); the rest is the filter's own phase, the circuit's (1.4 to 2.1 samples in
+  ULTRA, 0.6 to 1.4 in HI, 0.8 to 1.7 in LO).
+- **EXTERNAL INPUT**, an impulse, a key held: LO 48.1, HI 45.5, ULTRA 89.9 samples (ULTRA's
+  preamplifier, oversampled, about 44 more; HI's and LO's none).
+- **The contours** reached the VCA about 20 samples late in ULTRA (R-BLEP's 18.75 and the
+  contours' sub-rate's 1), 22 in HI (15 and 7) and none in LO: the VCA opened 66 samples
+  before the sound it shapes arrived in ULTRA, 38.5 in HI and 47 in LO.
+
+**Agent decisions, 2026-10-16 and 17** (not separately approved):
+- **The latency is the model's own delays,** the resamplers' and the band-limiting's, not the
+  circuit's (the filter's phase is the sound's). ULTRA's is 85.75 samples at any rate; the
+  plug-in reports 86 (`Engine::latency`; in host samples, with the engine's own resamplers
+  when it runs the voices faster than a host below 8 kHz), set in `initialize`, never while
+  it plays, the same whatever QUALITY is.
+- **HI and LO held back by what was measured,** 26 and 39 samples (`voice::LINE_UP`), not the
+  resamplers' 25.25 and 38.5: the cheaper filters have a little less phase of their own
+  (0.74 and 0.55 samples), and with these the oscillators' sound lines up with ULTRA's within
+  0.1 sample at 44.1, 48 and 96 kHz. The engine holds its output back in a ring of 64 samples
+  a channel made with it; FEEDBACK's loop is inside each voice, so it is not lengthened.
+  Switching QUALITY moves the output by up to 39 samples at the switch, where the voices
+  change anyway. A sample at a time (`Engine::tick_stereo`) is held back as a block is, so the
+  two stay the same to the bit; asleep, the engine still lets out what the ring holds.
+- **Each contour as late as the sound it shapes, less its own sub-rate's delay** (`every` - 1
+  samples: 7 in HI, 1 in ULTRA):
+  - the filter contour meets its sound at the filter's input, the oscillators' delayed by the
+    filter's input resampler: 31.25 samples in HI, 62.5 in ULTRA, 8.625 in LO (its ladder's
+    coefficients follow a 16-sample control step);
+  - the loudness contour reaches the VCA when ULTRA's does once the output is lined up:
+    84.75 samples in ULTRA (its whole path less one), 52.75 in HI (85.75 less 26 and 7), 46.75
+    in LO (less 39). So every mode's attack comes out with ULTRA's, and in each the envelope
+    meets its sound as in the circuit, 1.45 samples before it (the filter's phase).
+    **Since 2026-10-17, 61.75 in ULTRA:** its VCA runs at 4x and its bias reaches the output
+    23 samples later, through the VCA's decimator (R-BLEP, "ULTRA's VCA at 4x"). HI's and
+    LO's are unchanged, and so are the latency reported (86) and `LINE_UP`.
+  This replaces R-BLEP's contour delay, which kept attacks as they had been rather than as
+  the circuit has them.
+- **Left as they are:** EXTERNAL INPUT's sound, once lined up, comes out 18.4 samples earlier
+  in HI than in ULTRA and 2.8 in LO (ULTRA's preamplifier's delay; no one delay at the output
+  can line up both paths); the keyboard's voltage at the filter (KEYBOARD CONTROL) and
+  oscillator 3's modulation reach the filter without the oscillators' delay, as before; HI's
+  keyboard circuit and contours still read the keys every 8 samples, as before.
+
+**The checks** (`crates/ca72-plugin/tests/latency.rs` and the plug-in's own tests):
+- the oscillators' sound in HI and LO, held back, within half a sample of ULTRA's at 44.1, 48
+  and 96 kHz;
+- HI's attacks with its contours computed as ULTRA's (so only the delays differ), held back:
+  a sawtooth's 1, 10 and 50 % points and the VCA's thump's 1 and 10 % points within half a
+  sample of ULTRA's at the three rates (measured within 0.11 sample; the thump's later half,
+  half a second on, follows each VCA's own model). Since ULTRA's VCA runs at 4x both attacks
+  are measured at one level, a share of HI's peak (R-BLEP; within 0.09 sample);
+- the engine's latency 86 in every mode at the three rates, through switches; the engine's
+  output held back by 26 in HI and 0 in ULTRA against the voice's own;
+- `initialize` tells the host 86 once, whatever QUALITY is (`one_latency_is_reported_in_
+  every_quality_mode`);
+- nothing allocated on the audio thread: the rings are arrays made with the voices and the
+  engine, and `realtime.rs` switches ULTRA and LO while it plays.
+
+Two tests changed with the timing, by design: `sound.rs`'s comparison of the one voice with
+the engine (`poly_off_is_the_one_voice_as_before`) takes the voice 26 samples later, and All
+Sound Off's fade is over 26 samples later (`all_sound_off_silences_...`), HI's output being
+held back.
+
+**What the renders do** (`preset_render`, the 19 factory presets, ten voices, against the
+merged branch before this, each mode's holding back taken out): levels within 0.11 dB in
+every mode. Each attack starts later against its own sound by the contours' new delay: 66
+samples in ULTRA, about 38 in HI, about 46 in LO (a preset with a slow attack more, where its
+first 1 % falls in another cycle). Where an attack meets a fast sweep of pitch or cutoff the
+spectrum changes: Driven Kick's worst third-octave band +11 dB in ULTRA, +4.7 in HI, -17 in LO;
+Felt Bass -6.2 dB in ULTRA; Tenor Pluck -3.5 to -4.4 dB in every mode; Tight Hat +3.5 in HI;
+Cycle of Fifths -3.3 in LO; the others within 3 dB (Feedback Funk's loop, chaotic, moves
+whatever changes). Before, each envelope ran ahead of the sound it shaped by 0.8 ms (HI) to
+1.4 ms (ULTRA) at 48 kHz.
+
+**Evidence (the Mac, 2026-10-17; branch `latency-b` on the merged branch
+`integrate/threads-band-limiting` at `5752dfc`):** the workspace's suite
+(`--features ca72-plugin/standalone-production`, debug) passes but for the two ngspice tests of
+`vco_electrical` and `vco_osc23`, which fail the same way before this change ("Timestep too
+small" at the hold node, this Mac's ngspice-47); clippy (all targets, all features, `-D
+warnings`) clean; rustfmt on the changed files. Built in a target folder of its own: the
+threads work's, shared, took the merged branch's sources for this one's (one package to it),
+which the first render comparison caught. Not tried: hosts (the latency each reports and
+compensates), Windows and Linux, paced worst blocks.
+
+## R-VERSION. This build's version in the settings menu
+
+**The owner, 2026-10-17**, after a local build of the release candidate that also read 0.2.4
+had been taken for the release: "why don't we have versions shown in the plugin settings menu
+so there's no confusion?"
+
+**Built:**
+- **Which build this is** (`crates/ca72-plugin/build.rs`): a build of the release's tag
+  (`v<version>`, found by `git tag --points-at HEAD` or CI's `GITHUB_REF`) is its version
+  alone; any other build carries the commit it was made from (`update::BUILD`). A source tree
+  without git builds as the version alone. The build script runs again when the checkout
+  moves to another commit or the tags change.
+- **The settings menu** ends with VERSION and, under it, `0.2.4` for the release or
+  `0.2.4 · BUILD 602B298` for any other build; neither is to be chosen, and pressing them does
+  nothing.
+- **The presets drawer** (R27) shows the same: `CA-72 0.2.4`, or `CA-72 0.2.4 · 602B298`. The
+  update check still compares the version alone.
+- **The library's tests get a seats folder of their own** (`seats::user_dir`, `cfg!(test)`;
+  R-THREADS's shared budget). With Live and the standalone app holding the user's seats,
+  `the_workers_follow_poly_through_the_plug_ins_life` found no workers and failed every time;
+  a host playing on the computer no longer takes the tests' workers.
+
+**Evidence (the Mac, 2026-10-17, Live and the standalone app running the candidate):** the
+plug-in library's 250 tests pass, among them the new `a_build_other_than_the_release_names_its_commit`
+(the drawer's label fits beside its button with a long version and a commit) and
+`the_settings_menu_ends_with_this_build_s_version` (the menu within the window); the three tests
+that read the old label or the menu's heads updated. The workspace's suite (`--features
+ca72-plugin/standalone-production`) gives 509 passed, and 3 failed: the ngspice tests of
+`vco_electrical` and `vco_osc23` that fail the same way before this change on this Mac. Clippy
+(all targets, all features, `-D warnings`) clean; rustfmt on the changed files.
+
+## R-PAIRS-WITH-FIDELITY. 0.2.6's paired filters with ULTRA's 4x VCA and the contours' delays
+
+**Found on 2026-10-18**, merging 0.2.6 (R-HI-PAIRS) into this work: R-HI-PAIRS's
+`ultra_and_mixed_pairs_play_each_voice_alone` failed from the first sample. R-HI-PAIRS splits a
+voice's sample into `Voice::before_filter`, `Voice::filter_pair` and `Voice::after_filter`, and
+two parts of it no longer matched `Voice::tick_jacks`:
+- **ULTRA's VCA** (R-BLEP, at 4x) takes the filter's own samples before its decimator; the split
+  path ran ULTRA's filter decimated and its VCA at 1x.
+- **The contours' delays** (R-LATENCY) follow the audio path's quality (`ControlPart::tick_for`);
+  the split path took the contours' quality, which differs while a QUALITY switch is held
+  (`Voice::hold_control_quality`).
+
+**Fixed:** `filter_pair` solves a pair side by side only where both voices play HI, as before;
+any other voice's back runs whole (`BackPart::tick`), its output kept for `after_filter`.
+`before_filter` takes the contours with `tick_for` at the audio path's quality. The paired path's
+VCA takes over the 4x VCA's states at a switch from ULTRA and leaves its last output for the
+switch back, as `BackPart::tick` does. HI's pairs are unchanged: the same operations in the same
+order.
+
+**Evidence (the Mac, 2026-10-18):** `tests/pairs.rs`: R-HI-PAIRS's two tests pass (HI pairs,
+ULTRA and mixed pairs the same to the bit as alone), and a new one,
+`a_pair_switched_between_ultra_and_hi_plays_each_voice_alone` (both voices from ULTRA to HI, one
+back to ULTRA and again to HI, then both to ULTRA, under held notes), passes; with the
+hand-over taken out of the paired path it fails.
+
+## R-PREPARE-STACK. The voices built on a thread with a main thread's stack
+
+**Found on 2026-10-18** by CI on PR #87 (this work on 0.2.6): on macOS, pluginval stopped with
+"Illegal instruction" in the Audio Unit's audio processing test, at its first 48 kHz block after
+the 44.1 kHz ones. Reproduced on the Mac with the same pluginval (1.0.4) and run under lldb: a
+stack overflow (`EXC_BAD_ACCESS` at the stack's guard) in `Engine::prepare` → `made_voice` →
+`Voice::prototype` → `Voice::new` → the keyboard circuit's first solve, on pluginval's own
+thread. A macOS secondary thread has 512 KB of stack. CLAP and VST3 passed because pluginval
+prepares those on the main thread (8 MB).
+- **Why now:** a voice is 44 KB with this work (35 KB in 0.2.6: the oscillators' kernels, the
+  4x VCA, the contours' delay lines), and building voices in place keeps several on the stack.
+  In the crashing build, `Voice::prototype` took 220 KB, `Engine::prepare` 143 KB,
+  `Voice::new` 106 KB and `made_voice` 44 KB. A voice is first made for a rate (the keyboard's
+  calibration) only once per rate, which is why 44.1 kHz passed and 48 kHz did not.
+
+**Fixed:** `Engine::prepare` does its work (`prepare_here`) on a thread of its own, named
+`ca72-prepare`, with an 8 MB stack (`PREPARE_STACK`), joined before it returns. A panic there
+is the caller's, as before; if no thread can be had, the work runs in place, as before. Hosts
+prepare a plug-in apart from the audio thread, and the plug-in already starts its helper
+threads here.
+
+**Evidence (the Mac, 2026-10-18):** `prepare_fits_a_hosts_secondary_thread` prepares an engine
+at a rate no voice has been made at, from a thread with 512 KB of stack: it passes, and without
+the fix it overflows. pluginval 1.0.4, strictness 10, in process, its editor tests
+skipped (the Mac's screen in use), on the Audio Unit rebuilt from `d9d8a33` and put in
+`~/Library/Audio/Plug-Ins/Components` for the run (taken out after): SUCCESS, the audio
+processing test through 44.1, 48 and 96 kHz in every block size, where before the fix it stopped
+at 48 kHz.
+
+## R-POLY-CRACKLE. Crackles in POLY at HI: voices short of time; DOUBLE's voices taken one at a time
+
+**The report, 2026-10-19** (by email to the owner, from a sound-design teacher; an Intel
+MacBook Pro of 2018, 0.2.6, QUALITY at HI): "a lot of crackles with HI", the same in the
+standalone, the VST3 in Live and the CLAP in REAPER; "It doesn't seem to change CPU usage. Mono
+ok, polyphony crackles. BUT if I change the stereo settings with scatter at 0% width ... no
+crackles!", in Brass Choir and Horn Bloom. Issue #60 ("distortion between notes in Windows
+polyphonic patches") may be the same.
+
+**Agent findings, 2026-10-19** (placeholder id; not yet reviewed by the owner):
+- **What the cure changed.** SCATTER is DOUBLE's off (`doubled`): both presets play DOUBLE, on 8
+  and 10 voices, so 16 and 20 voices at HI. SCATTER halved the work; WIDTH changes neither the
+  work nor the samples' continuity.
+- **No fault in the sound itself.** Offline (no deadline), at HI, Brass Choir, Horn Bloom and a
+  POLY sawtooth, each as set, at WIDTH 0, with DOUBLE off and with both, at 44.1 and 48 kHz,
+  playing overlapping chords, a legato line over them and twelve notes on 8 or 10 voices
+  (voices taken while held; `tests/crackle.rs`, `offline`): every render the same to the bit in
+  blocks of 64, 128, 256, 512 and 1024 frames, with 0, 3, 5 and 9 workers; no voice went
+  non-finite; the loudest peak -6.8 dBFS. Where WIDTH is up its high-band bursts are low notes'
+  sawtooth edges (one each period of the notes), more with SCATTER than with DOUBLE. A voice's
+  gains glide to its place, which is the voice's own whatever note it takes:
+  `a_voice_taken_for_a_new_note_keeps_its_place` now holds, at LO and at HI, that a voice taken
+  free, let go or held, and its twin, are at their places to the bit at every run's end.
+- **The cause: time.** `preset_cost` (each preset as set, one thread, a Ryzen 7 7800X3D): Brass
+  Choir 234 % of a core, Horn Bloom 246 %; with DOUBLE off 128 and 149 %. A 2018 MacBook Pro's
+  core is about half as fast for one thread, slower with all of them busy, and it has 4 (13-inch)
+  or 6 (15-inch) cores: the doubled presets ask about as much as the whole computer, within three
+  quarters of each block. A voice a worker has not finished by then is silent for that run (R11,
+  R18): a gap of 128 samples or more in it, a click, while the plug-in returns in time, so the
+  host's meter shows no overload. The README says so; nothing on the panel does.
+- **Reproduced here** (`tests/crackle.rs`, `paced`: 256 frames at 48 kHz, each block at its time
+  with the plug-in's deadline, ordinary threads; fewer workers than this machine's 9 standing for
+  a slower computer): with 3 workers, voices' runs not heard in Horn Bloom as set 1,494, at
+  WIDTH 0 1,964, with SCATTER 0, with SCATTER at WIDTH 0 2; Brass Choir 42, 24, 0, 0. With 5
+  (a 13-inch 2018 MacBook Pro's: 8 hardware threads, R-THREADS's macOS rule) Horn Bloom 12 to 18,
+  with SCATTER 0. With this machine's 9, none.
+- **A fault found there.** With more voices than threads the pool hands them out two at a time
+  (R-HI-PAIRS), but DOUBLE's voices cannot pair: each already plays with its twin, so
+  `Playing::play_pair` plays the two one after the other (as at LO and ULTRA). Ten doubled voices
+  went to the threads in five lots of four voices' work: on four threads one played two lots,
+  eight voices, where one at a time the most is six.
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- **`Pool::play` takes `pairs`**, and takes voices two at a time only where they pair: the engine
+  passes HI without DOUBLE (not LO, ULTRA or DOUBLE). Each voice is still played whole by one
+  thread and summed in order, so the samples do not change.
+- **Evidence:** `voices_that_cannot_pair_are_taken_one_at_a_time` (the pool's stand-in voices:
+  none taken in pairs where they cannot pair; every one where they can) fails with the rule as it
+  was. `preset_render`, every factory preset, ten voices, with 3 and 5 workers, with DOUBLE at
+  50 % and without, the same to the bit as on one thread; `tests/crackle.rs`, `offline`, the same
+  to the bit with 3, 5 and 9 workers. Paced, the builds before and after alternated (the same
+  phrase, voices' runs not heard): 3 workers, Horn Bloom 1,544 and 1,484 before, 111 and 38
+  after, its mean block 77 % of the period before, 64 to 66 % after; Brass Choir 50 and 18, 19
+  and 16. 5 workers: Brass Choir 30 and 38, 2 and 2; Horn Bloom 4 and 14, 2 and 0.
+- **What it does not do.** A computer with too little time for twenty voices at HI still drops
+  some: fewer, not none. Then LO, fewer VOICES, or SCATTER instead of DOUBLE.
+
+**Also measured, for the owner:**
+- **LO costs more than R-LO-DEFAULT says.** `preset_cost` at LO: 18 to 21 % of a core for ten
+  voices (R-LO-DEFAULT, from R47: 2.1 to 3.8 %; R71's filter at 8x since), Brass Choir and Horn
+  Bloom as set 29 and 37 %, all on the host's thread: LO never shares its voices with the workers
+  (R-POTATO, when a light voice cost less than waking a worker). Shared with 3 workers in a trial
+  (not kept), the host's thread took 8 to 14 % and 15 to 23 %. Recommended: let LO share its voices
+  once a paced measurement on the Mac and Windows confirms it, and correct the README's "about a
+  fortieth" of HI (now about a seventh).
+- **A sign of voices dropped.** The OVERLOAD lamp shows only the output's level; a lamp or note
+  when voices are not heard would tell a player why it crackles. For the owner to decide.
+
+**Not done:** an Intel Mac, macOS's scheduling of time-constraint workers, Windows, or a host.
+To ask the reporter: whether DOUBLE at WIDTH 0 crackles (expected: yes) and LO does not; which
+MacBook Pro and buffer size.
+
+## R-FX-SAVE-ORDER. The effects' file follows the chain in step
+
+**Found on 2026-10-19** by CI on PR #125 (`release-0.3.0`, 17f1b5f): on Windows,
+`tests/safety.rs`'s `effects_that_crash_or_hang_as_they_load_never_hold_the_start_and_stay_off`
+read `effects.json` as soon as the effect hung at load read NOT RESPONDING, and found it not yet
+turned off there. Reproduced on the lab's Windows 11 computer (MSVC, as CI): 9 failures in 10
+runs. Traced, the hung effect's record was written 1.4 ms after the test had read the file: the
+chain showed the effect turned off as soon as its lock was let go, and saved it after, and on
+Windows a write with its flush takes 1 to 3 ms. The log's "the effects could not be saved ... The
+system cannot find the file specified" came after the failure: that late save, cut short by the
+test's folder being removed as it failed.
+- **A second fault of the same kind:** a save took the chain, then waited its turn to write, so
+  two saves at once (two effects failing together, a state saved as an effect is turned off) could
+  land out of order, an older chain written over a newer one. On Windows, a new test that changes
+  the chain from four threads at once found the file unlike the chain in 2 runs of 10.
+
+**Fixed:** a save takes the chain and writes it while holding the chain's lock (`Shared::save_in`),
+and an effect turned off (failing as it loads, as it is loaded again at a new rate, or given up on
+as it plays) is saved before the lock is let go. What anyone sees of the chain is on disk, and
+saves land in the order their chains were taken. Nothing on the audio thread takes this lock, and
+the drawer only tries it (`try_status`), so a write's milliseconds hold nothing the player hears or
+sees.
+- **The other files written this way** (`ca72_fx::write_atomically`'s temporary file and rename):
+  the scan's cache and the running marker are written whole from one thread's values, with no
+  chain to fall behind; `settings.toml` is changed under its lock file (R57), with a
+  temporary name for each write; a preset and an agent's record (`agent/discovery.rs`) have one
+  writer each. None needed the change.
+
+**Evidence (2026-10-19):** on Windows, the safety tests 20 runs in 20 (all six tests), where
+the same test had failed 9 in 10; `chain.rs`'s new
+`changes_made_at_once_are_saved_as_the_chain_shows` 10 in 10, with the rest of `chain.rs` (2
+failures in 10 before). On Linux both pass, before and after (a write to a temporary folder
+there is too quick to fall behind).
+
+
+## R-RELEASE-0.2.8. 0.2.8
+
+**Owner decisions, 2026-10-19.** After a level drop the owner first heard on 0.2.7 (and then on
+0.2.6 too), the owner set AUTO GAIN's rule and asked for a release: "This should only be
+remeasured when drive changes. I recommend, yes, all three of your recommendations, absolutely.
+Let's do it, and let's get it shipped out in 0.2.8 immediately." The release's contents, chosen by
+the owner: the AUTO GAIN fix (R-AUTO-GAIN-DRIVE), the device listing and microphone request
+(R-DEVICE-LISTING, #113 with plugin-kit #10) and the quit shortcuts (R-QUIT, #115). The
+coordinator was allowed to take it as far as a draft release, merging plugin-kit #10 as well. The
+owner tested the signed installer on their Mac, then: "okay, 0.2.8 seems good. Put it into
+production!"
+
+**Publication evidence, 2026-10-19.** [CA-72 0.2.8](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.8)
+is public and Latest, also to an anonymous request (which the update check makes). The picks were
+merged into one branch, `release-0.2.8`, with #114 (0.2.7's record). The merge kept every decisions
+record. `third_party/nih-plug/Cargo.toml` keeps #115's `keyboard-types` dependency and #113's kit
+pin, `bcc4d8f7706043dccdecfe8b115ba129f84ec39c`.
+- [PR #121](https://github.com/idlefoundry/ca-72/pull/121)'s first CI run failed on Linux in one
+  test. The What's New test used 0.2.8 as its example of a version with no catalogue entry, and
+  0.2.8 now has one; it uses 99.0.0 now. CI then
+  passed on Linux, Windows and macOS. Locally on Linux, the workspace tests with ngspice and the
+  standalone features passed (555, then the corrected What's New tests), as did clippy (all
+  features), fmt, notices, and the notices, window-identity and installer scripts. `main` is the
+  merge `7b8f0ee756f576377c273beabe46bc11f5a7f856`, which the annotated `v0.2.8` tag names. The
+  tag's CI ([39317221552](https://github.com/idlefoundry/ca-72/actions/runs/39317221552)) passed
+  in all four jobs and drafted the release.
+- The macOS installer was built on the Mac from a clean checkout of the tag, signed with Developer
+  ID inside the owner's session, notarised (submission `40fdec70-f2ad-4ace-8851-997e911dc27e`,
+  Accepted) and stapled. `pkgutil`, Gatekeeper ("Notarized Developer ID") and
+  `codesign --verify --deep --strict` passed for every bundle, every bundle is 0.2.8 and universal,
+  and the Audio Unit carries the signed CLAP byte for byte.
+- `CA-72-0.2.8-macOS.pkg` sha256 `0ab425fe29cb5dc8fdc7707053ac9cbd41a2315ee56b62bc792f86b958815dc1`,
+  91,845,384 bytes. After publication all six downloads were fetched again without a login and
+  checked against `SHA256SUMS.txt`: every one matched.
+- The owner installed the signed package on their Mac and tested it before publication. No other
+  host test of the installed package was made.
+- Issue #112 closed with the release. The release's scripts and logs are in
+  `~/lab/artifacts/ca-72/0.2.8/` on the Mac.
+
+## R-LO-WORKERS. LO's voices shared with the workers where that lightens the host's thread
+
+**Owner decision, 2026-10-19.** On R-POLY-CRACKLE's finding that LO plays every voice on the
+host's thread: "Low should use extra processor threads if that makes a positive difference to
+the amount of usage that it takes. It shouldn't require that. I would hope that we can keep it
+dynamic... We need to keep this working on older, like 4-core computers for sure. But if
+somebody has, you know, an 8 or a 16-core computer and we can make use of more threads, then
+let's do so."
+
+**Agent decisions, 2026-10-19** (placeholder id; not yet reviewed by the owner):
+- **LO shares its voices with POLY's workers** (and UNISON's), which an instance already holds at
+  LO (R21: the pool follows POLY and UNISON, not QUALITY), so the budget, the seats and each
+  machine's count of workers are as at HI: one worker on a computer of 3 or 4 hardware threads,
+  five on 4 cores with 8 threads, nine on the Ryzen. Nothing is required: with no workers, or
+  one voice, every voice plays on the host's thread as before.
+- **As many threads as pay** (`engine::lo_threads`): a thread a voice up to four voices, then a
+  thread for each two (five threads for ten voices), never more than the pool's workers and the
+  host's thread. "Pays" here: each thread added takes from the host's thread at least half the
+  processor time the workers spend for it, so the host's time falls by more than the computer's
+  total rises. The host's thread waits for the longest of the threads' shares, so the count is
+  the fewest threads for that share (four voices on three threads would be no shorter than on
+  two). DOUBLE's twins, played with their voices, do not change the count: measured, doubled
+  voices wanted the same. `Pool::play` takes the most threads to wake (`threads`; HI and ULTRA
+  pass `MAX`, as before).
+- **Workers park at the block's end** (`Pool::rest`, from `Engine::end_block`): they spun 50 us
+  (R-SPIN) after the block's last run for a run that comes only with the next block. Beside LO's
+  light voices (about 50 us a voice a run of 128 samples) that spin was most of a worker's time:
+  with all nine woken for ten voices, the workers took 42 % of a core for 19 % of voices' work.
+  With the rest, 30 %. A run offered clears it, so the spin between a block's runs is kept. It
+  applies at HI and ULTRA too, where it can only save the same spin.
+- **The break-even** (the Ryzen 7 7800X3D, ordinary threads, paced, 64 to 512 frames): with the
+  rest, sharing pays from two voices, the fewest that can be shared (two voices at 128 frames:
+  the host's thread 4.3 to 2.7 % of a core, the workers 2.5 %); without it, two voices were below
+  it (the workers 4.3 % for 1.8 saved). Past four voices a thread a voice does not pay: ten voices
+  from five threads to ten took 2.2 more points off the host's thread for 7.3 of the workers'
+  (doubled, 3.4 for 18.6).
+- **The samples do not change**: each voice is still played whole by one thread and summed in
+  order.
+
+**Evidence (2026-10-19):**
+- **The same to the bit** (`tests/lo_workers.rs`, `same`): 21 materials (changing chords on 1 to
+  10 voices, with and without DOUBLE, and Horn Bloom, Brass Choir, Warp Field, Cycle of Fifths and
+  Swarm Riser as set), 3 seconds each, against the host's thread alone in blocks of the same
+  size, with 3, 5 and 9 workers by the rule and on 4 and 10 threads whatever it: all 420 renders
+  the same to the bit, none of a voice's runs unheard, the workers' processor time 46 to 380 ms a
+  render. (Swarm Riser's render on the host's thread alone differs between block sizes, as it did
+  before this change: its host-only path is unchanged.) `preset_render`, every factory preset at
+  LO, ten voices, with DOUBLE at 0 and 50 %: with 3, 5 and 9 workers the same to the bit as with
+  none (the 9 workers' run took 4.5 s against 15.5 s, 17.4 s of processor time), and with none the
+  same to the bit as `poly-crackle` (the code before this change, built apart).
+- **The host's thread at LO, paced** (`tests/lo_workers.rs`, `paced`: 48 kHz, each block at its
+  time with the plug-in's deadline, 3 seconds after one unmeasured; fewer workers than the
+  machine's standing for smaller computers; the before is every voice on the host's thread, as
+  `poly-crackle` plays). The figures are the host's thread's time in the plug-in as a share of the
+  period, its mean (and 99th percentile), and the process's processor time in shares of a core.
+  - **Linux, Ryzen 7 7800X3D** (ordinary threads, as R-POLY-CRACKLE measured; two rounds, the
+    order swapped, averaged; 128 frames; the other block sizes alike within a few points):
+
+    | Sound | 1 worker | 2 | 3 | 4 | 9 (the machine's) |
+    |---|---|---|---|---|---|
+    | Ten voices | 22 → 12 (p99 26 → 14) | 22 → 9 | 22 → 7 | 22 → 5 | 21 → 6 (p99 25 → 7) |
+    | Horn Bloom as set | 42 → 23 (p99 51 → 30) | 42 → 17 | 43 → 14 | 43 → 10 | 43 → 10 (p99 51 → 13) |
+    | Brass Choir as set | 34 → 18 | 32 → 14 | 32 → 10 | 32 → 10 | 32 → 10 |
+    | Warp Field as set | 34 → 19 | 34 → 14 | 34 → 10 | 34 → 10 | 34 → 10 |
+    | Cycle of Fifths as set | 19 → 11 | 19 → 9 | 19 → 6 | 19 → 6 | 20 → 6 |
+    | Swarm Riser as set | 17 → 10 | 17 → 9 | 17 → 5 | 17 → 5 | 17 → 5 |
+
+    The process's processor time rose 1 to 14 points (ten voices 22 → 23 with one worker, 22 →
+    26 to 27 with more; Horn Bloom 42 → 46 and 50). Of 320 cases each way, the host's thread
+    alone had no block late and no voice's run unheard; shared, 2 blocks late and 3 runs unheard
+    (ordinary threads, which the system may preempt; the plug-in's workers are audio threads).
+  - **Windows 11, i5-13600K** (the Balanced power plan, as it is set; the measuring thread and
+    the workers in MMCSS's Pro Audio, as a host's and the plug-in's are; processor time from the
+    threads' cycle counts; 128 frames; 4 workers is the plug-in's own count there): ten voices 26
+    → 25 with one worker (p99 50 → 31), 28 → 24 with two, 27 → 20 with four (p99 49 → 27); Horn
+    Bloom 32 → 26, 33 → 26, 34 → 24 (p99 53 → 31). Of 96 cases each way, the host's thread alone
+    had 78 blocks late, shared none (4 runs unheard). But the process's processor time rose from
+    25 to 34 % to 48 to 57 % with one worker and 73 to 131 % with four. There a voice's run costs
+    about half again as much paced as flat out (`preset_cost` on Windows: ten voices 15 to 21 %,
+    as on the Ryzen; paced on the host's thread alone, 26 %): a core busy for a few hundred
+    microseconds a block is not brought up to speed, the more so the thinner the voices are
+    spread. Restricting the process to the performance cores changed nothing.
+  - **Idle** (POLY's ten voices, no note): the same before and after on both (the host's thread
+    0.0 to 0.1 % on Linux, 0.2 to 0.3 % on Windows; no run is offered with no voice sounding).
+- **LO's cost now** (`preset_cost`, one thread, ten POLY voices, each factory preset's sound
+  without DOUBLE, the Ryzen): 17.8 to 21.4 % of a core, against HI's 83 to 146 %: a quarter to a
+  seventh of HI's (about a sixth on average). Each preset as set: Horn Bloom 36 %, Brass Choir
+  28 %, Warp Field 30 %, Swarm Riser 15 %, Cycle of Fifths 17 %.
+- **Tests:** `lo_s_threads_follow_its_voices`; `a_pool_at_rest_shares_the_next_blocks_run` (a run
+  after the workers have parked at a block's end is shared still); the no-allocation test with
+  workers (`poly_with_workers_neither_allocates_nor_frees_while_it_plays`) now switches QUALITY to
+  LO for part of its run.
+
+**For the owner:** on Windows LO shared lightens the host's thread a little on average and
+much at its peaks, and costs the computer more processor time (two to four times the voices'
+own). Whether that is wanted there, and the Mac's figures, are open.
+
+**Not done:** the Mac (another session was signing a release on it): macOS's time-constraint
+workers and work intervals at LO are unmeasured, as is an Intel Mac. No host was tried. The
+Linux measurements used ordinary threads (real-time threads there were demoted by the
+plug-in's own watch, `ca72_rt::watch`, partway through a run on this busy desktop, so those
+figures were set aside).
+
+**Owner decision, 2026-10-19 (later).** Told the Windows trade and offered load-responsive
+sharing there: "okay, sounds like we should definitely do this on linux, and do the windows fix
+as you have suggested. Were there no gains to be had on Mac?" The suggestion: "make the sharing
+respond to load. LO stays on one thread while the audio thread has plenty of headroom, and
+spreads out only when it gets busy (above about half the block, or after a late block)."
+
+**Agent decisions, 2026-10-19 (later)** (not separately approved):
+- **Each system its way** (`engine::lo_sharing`, `LoSharing`): Linux always, as built; Windows
+  by load; macOS always, by the Mac's measurements below. Where sharing is by load and the load
+  is light, LO plays every voice on the host's thread, as 0.2.8 does.
+- **By load** (`engine::Busy`): the host's thread's time in the plug-in each block, from the
+  block's start (`set_deadline`) to its end (`end_block`), against the block's period,
+  smoothed with a time constant of 0.2 s. LO shares from a smoothed load of half the period,
+  and at once after a block late (longer than its period) or one with a voice's run not heard.
+  It stops once the load has stayed below 30 % for the hold: 2 s at first, doubled (to 30 s) each
+  time it is busy again within 10 s of stopping, back to 2 s after 10 s not busy. 30 % is well
+  below the half, and above the 24 to 28 % that a light load's sharing left on Windows, where it
+  hardly lowers the host's thread's time, so a light load made busy by one late block returns to
+  the host's thread. Two readings of the clock a block and plain arithmetic: nothing allocates
+  or waits. The samples are the same whichever way it goes.
+- **Evidence:** `lo_shares_while_the_host_s_thread_is_busy` (below half stays off, above shares,
+  a late block or a run not heard shares at once, the hold, its doubling and its return);
+  `tests/lo_workers.rs` `same`: 504 renders the same to the bit on Linux, 84 of them with the
+  sharing switched on and off every 37 blocks, and 72 on the Mac; in every paced run on the three
+  systems the render was the same to the bit as the host's thread's alone wherever no voice's run
+  went unheard (a voice that sits a run out is a run behind from then on).
+
+**The Mac** (M4 Pro, 10 performance and 4 efficiency cores; its own count is 8 workers; the
+workers on the plug-in's own path, time-constraint threads in their work interval, `ps -M`
+showing them at priority 97R; the measuring thread made one too, in a work interval of its own
+opened at each block's start and closed at its end, as a host's thread is in its device's
+workgroup; 48 kHz, 3 s a case, the Mac's background load as it was). The host's thread's mean /
+99th percentile in % of the period; CPU, the process's processor time in % of a core:
+
+| Sound | Workers | Block | host | always | load |
+|---|---|---|---|---|---|
+| Ten voices | 2 | 128 | 17 / 23; CPU 18; late 0, unheard 0 | 7 / 10; CPU 22; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 2 | 256 | 24 / 28; CPU 25; late 0, unheard 0 | 6 / 11; CPU 18; late 0, unheard 0 | 20 / 27; CPU 20; late 0, unheard 0, shared 0 % |
+| Ten voices | 3 | 128 | 17 / 22; CPU 17; late 0, unheard 0 | 6 / 9; CPU 24; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 3 | 256 | 14 / 24; CPU 14; late 0, unheard 0 | 7 / 9; CPU 28; late 0, unheard 0 | 23 / 28; CPU 24; late 0, unheard 0, shared 0 % |
+| Ten voices, DOUBLE | 2 | 128 | 28 / 36; CPU 29; late 0, unheard 0 | 16 / 65; CPU 42; late 4, unheard 0 | 16 / 42; CPU 42; late 2, unheard 2, shared 97 % |
+| Ten voices, DOUBLE | 2 | 256 | 107 / 172; CPU 85; late 323, unheard 0 | 15 / 48; CPU 39; late 0, unheard 0 | 21 / 56; CPU 53; late 0, unheard 0, shared 99 % |
+| Ten voices, DOUBLE | 3 | 128 | 112 / 240; CPU 94; late 542, unheard 0 | 12 / 20; CPU 42; late 1, unheard 0 | 13 / 42; CPU 43; late 4, unheard 0, shared 98 % |
+| Ten voices, DOUBLE | 3 | 256 | 120 / 180; CPU 104; late 431, unheard 0 | 9 / 16; CPU 34; late 0, unheard 0 | 23 / 42; CPU 33; late 0, unheard 0, shared 33 % |
+| Horn Bloom | 2 | 128 | 105 / 226; CPU 85; late 443, unheard 0 | 16 / 32; CPU 42; late 3, unheard 0 | 22 / 39; CPU 38; late 0, unheard 0, shared 59 % |
+| Horn Bloom | 2 | 256 | 107 / 181; CPU 85; late 309, unheard 0 | 15 / 32; CPU 40; late 0, unheard 0 | 21 / 57; CPU 53; late 0, unheard 0, shared 100 % |
+| Horn Bloom | 3 | 128 | 106 / 231; CPU 84; late 432, unheard 0 | 12 / 25; CPU 41; late 4, unheard 0 | 15 / 72; CPU 42; late 3, unheard 0, shared 88 % |
+| Horn Bloom | 3 | 256 | 115 / 204; CPU 99; late 369, unheard 0 | 10 / 19; CPU 38; late 0, unheard 0 | 11 / 56; CPU 37; late 1, unheard 0, shared 100 % |
+| Brass Choir | 2 | 128 | 47 / 191; CPU 42; late 99, unheard 0 | 11 / 14; CPU 32; late 0, unheard 0 | 26 / 35; CPU 27; late 0, unheard 0, shared 0 % |
+| Brass Choir | 2 | 256 | 22 / 37; CPU 22; late 0, unheard 0 | 9 / 16; CPU 27; late 0, unheard 0 | 31 / 38; CPU 31; late 0, unheard 0, shared 0 % |
+| Brass Choir | 3 | 128 | 26 / 35; CPU 27; late 0, unheard 0 | 8 / 10; CPU 30; late 0, unheard 0 | 27 / 35; CPU 28; late 0, unheard 0, shared 0 % |
+| Brass Choir | 3 | 256 | 22 / 37; CPU 22; late 0, unheard 0 | 10 / 12; CPU 40; late 0, unheard 0 | 27 / 37; CPU 27; late 0, unheard 0, shared 0 % |
+| Ten voices | 4 | 128 | 17 / 23; CPU 17; late 0, unheard 0 | 5 / 7; CPU 23; late 0, unheard 0 | 17 / 23; CPU 18; late 0, unheard 0, shared 0 % |
+| Ten voices | 4 | 256 | 23 / 28; CPU 23; late 0, unheard 0 | 4 / 6; CPU 20; late 0, unheard 0 | 15 / 27; CPU 15; late 0, unheard 0, shared 0 % |
+| Ten voices | 8 | 128 | 17 / 23; CPU 18; late 0, unheard 0 | 4 / 4; CPU 18; late 0, unheard 0 | 17 / 23; CPU 17; late 0, unheard 0, shared 0 % |
+| Ten voices | 8 | 256 | 14 / 18; CPU 14; late 0, unheard 0 | 5 / 6; CPU 26; late 0, unheard 0 | 14 / 26; CPU 14; late 0, unheard 0, shared 0 % |
+| Ten voices, DOUBLE | 4 | 128 | 30 / 39; CPU 31; late 0, unheard 0 | 11 / 40; CPU 44; late 3, unheard 0 | 24 / 33; CPU 36; late 0, unheard 0, shared 33 % |
+| Ten voices, DOUBLE | 4 | 256 | 106 / 181; CPU 92; late 314, unheard 0 | 9 / 25; CPU 40; late 0, unheard 0 | 23 / 35; CPU 38; late 0, unheard 0, shared 33 % |
+| Ten voices, DOUBLE | 8 | 128 | 51 / 155; CPU 49; late 107, unheard 0 | 9 / 25; CPU 38; late 0, unheard 0 | 17 / 36; CPU 37; late 0, unheard 0, shared 64 % |
+| Ten voices, DOUBLE | 8 | 256 | 104 / 163; CPU 90; late 305, unheard 0 | 9 / 11; CPU 43; late 0, unheard 0 | 24 / 32; CPU 38; late 0, unheard 0, shared 33 % |
+| Horn Bloom | 4 | 128 | 51 / 171; CPU 47; late 162, unheard 0 | 10 / 30; CPU 43; late 0, unheard 0 | 10 / 32; CPU 38; late 1, unheard 0, shared 95 % |
+| Horn Bloom | 4 | 256 | 108 / 184; CPU 95; late 321, unheard 0 | 7 / 9; CPU 33; late 0, unheard 0 | 16 / 42; CPU 53; late 0, unheard 1, shared 86 % |
+| Horn Bloom | 8 | 128 | 127 / 223; CPU 116; late 798, unheard 0 | 9 / 12; CPU 44; late 0, unheard 0 | 26 / 39; CPU 38; late 0, unheard 0, shared 34 % |
+| Horn Bloom | 8 | 256 | 105 / 175; CPU 89; late 292, unheard 0 | 10 / 29; CPU 42; late 0, unheard 0 | 19 / 35; CPU 50; late 1, unheard 0, shared 84 % |
+| Brass Choir | 4 | 128 | 45 / 149; CPU 42; late 85, unheard 0 | 8 / 10; CPU 31; late 0, unheard 0 | 25 / 34; CPU 25; late 0, unheard 0, shared 0 % |
+| Brass Choir | 4 | 256 | 24 / 34; CPU 24; late 0, unheard 0 | 9 / 11; CPU 36; late 0, unheard 0 | 23 / 29; CPU 23; late 0, unheard 0, shared 0 % |
+| Brass Choir | 8 | 128 | 25 / 32; CPU 26; late 0, unheard 0 | 7 / 10; CPU 30; late 0, unheard 0 | 25 / 34; CPU 26; late 0, unheard 0, shared 0 % |
+| Brass Choir | 8 | 256 | 34 / 38; CPU 34; late 0, unheard 0 | 6 / 11; CPU 25; late 0, unheard 0 | 36 / 42; CPU 36; late 0, unheard 0, shared 0 % |
+
+- Every voice on the host's thread, a heavy load ran away: the measuring thread, once past its
+  period, ran at a fraction of its speed (Horn Bloom's third of a core became 85 to 116 %), 5,332
+  blocks late in 32 cases; at 128 frames Horn Bloom was at times fine (28 %) and at times not.
+  A host's own thread, in its device's workgroup, may fare better; the light cases (ten voices,
+  Brass Choir, at 14 to 34 %) are the fair comparison.
+- Shared always: the host's thread at 4 to 16 % (a half to a sixth of its time alone), 15 blocks
+  late in 32 cases; where the host's thread alone kept up, the processor time from 9 points less
+  to 18 more (4 to 7 more in most cases). Shared by load: light loads stay on the host's thread as in 0.2.8, but heavy ones flapped
+  (shared 33 to 64 % of the blocks in seven cases), 12 blocks late and 3 runs not heard.
+- **So macOS shares always**: as on Linux, a worker costs little, and the host's thread alone is
+  the more fragile.
+
+**Windows again, by load** (the i5-13600K as before; light: 6 s a case; heavy: the measuring
+thread kept busy 40 % of each period first, `CA72_EXTRA`, a slower computer standing in):
+- Light: idle and ten voices (26 to 29 %) never shared, their processor time 0.2.8's. Horn
+  Bloom, Brass Choir and ten voices doubled (about a third of the period) have a few late blocks
+  every few seconds on this computer even alone (43 in 30 cases): each brought the sharing on
+  for a while (0 to 97 % of the blocks), the processor time 3 to 35 points more, late blocks 19.
+- Heavy (the host's thread alone at 56 to 73 %): shared throughout, the host's thread at 45 to
+  57 %; 108 blocks late alone against 1 (and 2 runs not heard); the processor time 1 to 10 points
+  more.
+
+**Not done (later):** a host on any system; an Intel Mac.
+
+
+## R-KNOB-GLIDE. Knob changes glide in the voices, from the editor, a trackpad and the host's automation (issue #107)
+
+**The owner, 2026-10-19.** Issue #107 records a user's report (macOS, 0.2.6): turning a knob
+by a drag or a two-finger trackpad scroll changes the sound in audible steps, plain with
+CUTOFF opened at strong EMPHASIS ("like an aliasing"); a hardware knob mapped with MIDI Learn
+is smooth. Told the measurement (below) and three choices with a recommendation for each, the
+owner: "I'm happy to follow your recommendations above regarding the 3 choices". So: a linear
+glide of about 30 ms, or the host's block if longer, starting again from where it is at each
+new value (10 ms is too short for a mouse's 17 ms between values and for 1024-frame blocks; a
+one-pole glide does not smooth the corners enough); offline renders of automation glide too (a
+bounce must sound like playback); choosing a preset, Init, or loading a session's or a
+project's state does not glide but lands at once, while the host's automation and the editor's
+moves glide. Selectors and switches stay stepped; only continuous knobs glide. With no knob
+moving nothing more runs and the renders stay the same to the bit; presets and automation land
+on the same final values.
+
+**The cause (measured 2026-10-19).** The editor's and the host's values reached the voices once
+a host block (the voices read the panel every sample, so CUTOFF stepped once a block); only a
+learned controller's knob glided (R34, 10 ms). A trackpad's points gathered to 40 before the knob
+moved a whole 2 % notch (`NOTCH`). At EMPHASIS 9 and 10 the resonance's pitch follows CUTOFF, in
+those steps. The figure below is how strongly the high band's loudness pulses at the rate new
+values come, against the voices told the sweep every sample (`tests/cutoff_steps.rs`'s figure,
+on the `poly-crackle` branch, here through the plug-in's own `process`).
+
+**What changed.**
+- **Every continuous knob glides in the voices** (`smooth.rs`: `Smooth`, R34's `Dezip`
+  generalised, in `process`): the 27 learnable knobs (`learn::knob_param`'s) and the panel's PITCH
+  and MODULATION wheels, whatever set them (a drag, a scroll, a double click, a typed value, the
+  host's automation in real time or offline, a learned controller). At each block's start, after
+  a learned controller's event and every 32 samples while one moves, each knob's parameter is
+  compared with the value the voices were last given; a new one glides there in a straight line
+  from where the voices have it, the voices' controls set every 32 samples (`smooth::STEP`); a
+  new value mid-glide starts again from there, and the glide ends on the parameter's value
+  exactly. At rest a block costs 29 comparisons and the voices have the parameters as before.
+  The parameters themselves (the host's, the editor's, the state's) are at their new values at
+  once, as before. The engine and the circuit model are unchanged.
+- **How long: 30 ms (`GLIDE`), or the time since the knob's previous value when that is longer
+  but no longer than the host's largest block, never past 0.2 s (`LONGEST`);** a value after a
+  longer rest (a typed value, a double click) 30 ms. Agent decision: "the host's block" taken as
+  the time between the knob's values, bounded by the largest block the host declares. The
+  wrappers split a block at each automation point (sample-accurate automation), so `process`
+  sees parts of the host's block, not the block; for automation that reaches the plug-in once a
+  block the time between values is the block (2048 frames at 48 kHz, 43 ms), and a slow drag's
+  longer gaps glide over the gap too. A host declaring very large blocks (8192 frames at 44.1 kHz,
+  186 ms) is covered up to `LONGEST`; beyond it the glide is 0.2 s and then holds.
+- **Presets, Init and sessions land at once.** The audio thread cannot tell a preset's
+  parameter changes from automation: both come through the host. So the presets' drawer marks
+  each knob value it is about to set (`Lands` on `Ca72Params`: a generation a preset, the plain
+  value's bits), and the audio thread lands a knob whose new value is the current generation's
+  mark, taking the mark (agent decision). Marks wait 0.5 s of processed audio after the audio
+  thread first sees the preset's generation (a host takes the editor's values at its next
+  block); a value of an earlier preset, or arriving later, glides. On a weakly ordered processor
+  the value can be seen before its mark: the glide begun then lands at the next 32-sample step.
+  Init marks its values alike. A session's or a project's state comes through `initialize` and
+  `reset` (nih-plug calls both after loading a state into a running instance), which land every
+  knob, as does the host's reset.
+- **A learned controller keeps R34's 10 ms** (agent decision). Its values come from a hand on
+  hardware at the controller's own rate, in 1/127 steps that R34 measured smooth at 10 ms, and
+  the reporter finds it smooth; 30 ms would only add lag between the hand and the sound. It now
+  goes through the same glides (`Smooth::learned`).
+- **The PITCH and MODULATION wheels glide too** (agent decision): continuous controls dragged by
+  the same mouse, whose steps a pitch takes as plainly as CUTOFF's. MIDI pitch bend and
+  modulation (the engine's own, from a keyboard's wheels) are unchanged, and MIDI BEND RANGE (a
+  setting) stays stepped, as do the selectors, the switches, VOICES, QUALITY and NOTE PRIORITY.
+- **A trackpad turns a knob as far as it travels** (`interact::turn`, `editor.rs`
+  `scroll_notches`). As baseview reports them: macOS gives a precise device's scroll (a
+  trackpad, a Magic Mouse) in points, a wheel's in lines; Windows gives lines, a wheel's notches
+  whole and a precision touchpad's (or a free-spinning wheel's) fractions of one; X11 gives only
+  whole lines (buttons 4 to 7). Points turn a continuous knob or a wheel in proportion, at the
+  old rate (40 points a notch of 2 %; a twentieth with SHIFT), and on Windows a fraction of a line
+  that fraction of a notch. A whole line is a notch, whatever its count, as before, and so is a
+  fraction of a line on macOS (a wheel turned slowly). A stepped control (VOICES, a selector, a
+  switch, a toggle) steps once a notch's travel has gathered. A Linux touchpad stays notched:
+  baseview's X11 has no smooth scrolling.
+- R34's own measurement (`a_controllers_steps`) keeps its unglided reference by preparing
+  one-sample glides.
+
+**Evidence (Linux x86, Rust 1.97.1, 2026-10-19).** `tests/knob_glide.rs`, by hand, the same
+file on v0.2.8 (7b8f0ee, before) and on this branch (after). `cutoff_sweep_through_process`:
+CUTOFF 25 to 75 % in 2 s, Brass Choir at HI, one voice, oscillator 1 alone, no contour, through
+`process` at 48 kHz; the high band's loudness at the values' rate and its harmonics against the
+continuous sweep's:
+
+| How CUTOFF's values arrive | EMPHASIS 9 before | after | EMPHASIS 10 before | after |
+|---|---|---|---|---|
+| A drag, 60 values a second at 256-frame blocks | +24.7 dB | -4.4 dB | +27.6 dB | +0.7 dB |
+| A trackpad: 0.2.8's 2 % notches; now 60 values a second in proportion | +37.8 dB | -4.4 dB | +37.1 dB | +0.7 dB |
+| Automation once a block of 32 frames | +4.5 dB | +0.8 dB | +2.1 dB | -0.6 dB |
+| 256 frames | +11.8 dB | -1.5 dB | +10.0 dB | -1.9 dB |
+| 512 frames | +20.2 dB | -3.7 dB | +23.7 dB | +2.4 dB |
+| 1024 frames | +31.6 dB | +2.4 dB | +32.5 dB | +1.2 dB |
+| 1024 frames, offline | +31.6 dB | +2.4 dB | +32.5 dB | +1.2 dB |
+| 2048 frames, offline | +37.1 dB | -2.3 dB | +37.7 dB | -1.7 dB |
+
+Every way's held tail (the last half second) within 0.002 dB of the others, before and after.
+`presets_through_process`: every factory preset played two seconds, the next chosen in the
+presets' drawer and played a second more, offline, the same to the bit as v0.2.8 (19 of 19).
+`preset_render` against v0.2.8: every factory preset the same to the bit. `glide_cost` (ten
+voices of Felt Bass, POLY, offline, the best of three; this machine shared with other work):
+at rest LO 179.0 and HI 149.8 ms a second of audio (v0.2.8: 176.8 and 148.3); CUTOFF gliding
+the whole time LO 197.9, HI 154.7 (v0.2.8 stepping: 180.9, 152.1): a moving knob costs about
+3 % at HI and 10 % at LO, whose light voices work their laws out again at each 32-sample step
+(as a learned knob's glide already did). New tests: `smooth.rs`' five (30 ms and the gap,
+presets' marks, the learned 10 ms, the knobs' list),
+`a_chosen_preset_lands_in_the_voices_at_once_and_a_turned_knob_glides` (the drawer's presets
+and Init through `process`), `a_trackpad_turns_a_knob_in_proportion_and_voices_by_steps`,
+`scrolls_read_as_notches_or_travel_as_each_system_reports_them`,
+`a_trackpad_turns_continuous_controls_in_proportion`; the learned-controller tests changed
+where automation now glides. Listening files outside the repository (the night's
+`smooth-out`). Untested here: macOS with a trackpad and a Magic Mouse, Windows with a precision
+touchpad and a wheel, automation in a host of each format, and the owner's listening.
+
+### In 0.3.0, with R-KNOB-RESOLUTION, the arpeggiator, the MIDI pads and agents (2026-10-19)
+
+**The owner, 2026-10-19:** "All into 0.3.0" (no 0.2.9). R-KNOB-RESOLUTION (#120) was already in
+0.3.0 and also made a trackpad turn knobs in proportion; the two are one mechanism now, with
+both records' behaviour on screen.
+- **Scrolling, R-KNOB-RESOLUTION's way:** `interact::scroll` and `Kind::is_continuous` (which
+  know the arpeggiator's RATE and OCTAVES are stepped, as VOICES is), a stepped control's travel
+  kept past a step and started afresh when the turn reverses. `interact::turn`,
+  `interact::continuous` and `scroll_notches` above are gone. Its drag (every fraction of a
+  pixel, no dead zone) is unchanged; R-KNOB-GLIDE did not touch drags.
+- **Lines, R-KNOB-GLIDE's reading by system** (`editor.rs` `scroll_travel`, `PRECISE_LINES`):
+  points as they come (40 to a notch); on Windows lines as far as they go; elsewhere a line event
+  a notch whatever its size. Agent decisions, for the owner to confirm: R-KNOB-RESOLUTION had
+  taken fractions of a line in proportion on every system, which would make a Mac's wheel turned
+  slowly (a fraction of a line an event) a tenth as fast as 0.2.8, so outside Windows a line is a
+  notch, as R-KNOB-GLIDE has it; on Windows several lines in one event (a fast wheel) count as
+  that many notches, as R-KNOB-RESOLUTION has it, where R-KNOB-GLIDE had taken them as one.
+  R-KNOB-RESOLUTION's tests of fractional lines read lines as Windows does
+  (`Editing::precise_lines`).
+- **The arpeggiator's GATE and SWING do not glide** (`smooth::TIMING`; agent decision, for the
+  owner to confirm). They are continuous knobs, but the arpeggiator takes them as a block begins
+  and each note as it is played: they set when notes start and stop, with no level to step, and a
+  glide would only make them late. Its RATE and OCTAVES stay stepped. The knobs' test now checks
+  every continuous control the editor turns glides but these two. The effects' drawer adds no
+  knob of the CA-72's (an effect's own controls are in its window, in its helper).
+- **Typed values (R-KNOB-ENTRY) and an agent's (R-MCP's `ca72_set`) glide** as a turn does:
+  both set the parameter through the editor's setter, unmarked. An agent's `ca72_preset_load`
+  and `ca72_preset_step` choose as the drawer does (`Browser::choose`), so their knobs land.
+- **A preset a MIDI pad or an arrow key chooses (R-PRESET-KEYS) lands at once.** Its values are
+  set on the audio thread (`PresetActions::apply`), where R34's glide used to be stopped; now
+  every knob lands there (`Smooth::land`).
+- **Presets with the arpeggiator's settings** land with them: its switches and selectors are
+  stepped and GATE and SWING never glide. A preset holds no effects chain in 0.3.0 (the chain is
+  the standalone's own, `effects.json`), so there is nothing of it to mark.
+
+**Evidence (omarchy, 2026-10-19, on the merge of #123, #127 and #124 into `release-0.3.0`):**
+`typed_and_agents_values_glide_and_an_agents_preset_lands` (an editor over a plug-in's
+parameters: a typed value and an agent's glide over 30 ms, an agent's preset with the
+arpeggiator on lands), `a_preset_a_pad_chooses_lands_at_once` (fails without `Smooth::land`),
+the knobs' test with `TIMING`, `scrolls_read_as_notches_or_travel_as_each_system_reports_them`
+(rewritten for `scroll_travel`, with a Mac's slow wheel a notch an event); R-KNOB-RESOLUTION's
+and this record's other tests pass. `preset_render` of the 19 factory presets against
+`release-0.3.0` before these merges (17f1b5f): the same to the bit at HI, at LO and with DOUBLE
+at 50 %. The factory AUTO GAIN curves measured again: each the same to the bit as the presets
+carry. `knob_glide.rs`'s sweep on 0.3.0's sound, at EMPHASIS 9 (the figure as above): a drag
++0.5 dB, a trackpad's values +0.5 dB (0.2.8's notches +31.9), automation every 32 to 2048 frames
+-0.9 to -4.6 dB, offline as in real time; every held tail within 0.001 dB. `glide_cost` (ten
+voices of Felt Bass, POLY, offline, best of three, this machine shared): LO 46.8 ms a second of
+audio at rest, 68.3 with CUTOFF moving; with LO's sharing off (R-LO-WORKERS' `Never`) 193.8 and
+215.9. A moving knob adds the same 21 to 22 ms a second to LO either way (a larger share of
+LO's smaller cost once it shares its voices); HI 247 to 300, moving or not, within this
+machine's noise.
+
+
+## R-HOST-STACK. An instance's whole life fits a host's thread of 256 KB
+
+**Found on 2026-10-19** while trying to reproduce issue #58 (a crash in FL Studio on Windows 11
+"when messing with glide", 0.2.4; not reproduced as such). GLIDE was moved as hard as a host can
+move it through the plug-in's own CLAP entry point in this process (`tests/clap_host.rs`,
+`glide_stress`): its knob set many times a block, at its ends, by a denormal's breadth, out of
+range and not a number; its switch flipped; keys legato and detached, the bend moving; NOTE
+PRIORITY, RETRIGGER, POLY, UNISON, VOICES and QUALITY changed; a saved state loaded while it
+glides; 44.1 to 192 kHz in blocks of 32 to 1024. In a debug build and a release build: no panic,
+no debug assertion, no sample not finite, the output's peak at most 2.04. With every call made on
+a thread of a given stack (`CA72_STACK`), though:
+- **Making an instance took 576 to 640 KB of the host's thread's stack** in a release build (over
+  1 MB in a debug build). `Engine::new` built `Spares`, the ten places' spare voices inline (a
+  voice is 43,960 bytes: `Spares` was 439,840 bytes), and `Arc::new` built it on the stack of
+  whatever thread made the engine: the host's, making the instance. The crew's plan held a voice
+  inline too (`Crew` 44,352 bytes), moved about the stack again when the workers are started
+  (`initialize`, a state loaded) and stopped (`deactivate`): 150 KB in one frame of `Crew::start`.
+- So a host that makes or starts an instance on a thread with less stack than that crashes at
+  once. The spares have been built so since 0.1.0, needing less while a voice was smaller (35 KB in
+  0.2.6; 44 KB with fidelity, R-PREPARE-STACK). A macOS secondary thread has 512 KB
+  (R-PREPARE-STACK too), and a Windows host may give its own threads less than a main thread's 1 MB.
+  Whether FL Studio does is not known; nothing ties the report to it.
+- Playing alone needs less than 128 KB.
+
+**Fixed:** each spare voice boxed, as its twin already was, and the crew's plan holding its voice
+boxed: `Spares` is 320 bytes and `Crew` 400. A spare is still put in place by swapping it, on the
+audio thread, without allocating. No sample changes.
+
+**Evidence (omarchy, 2026-10-19):**
+- `an_instance_lives_on_a_host_thread_of_256_kb` (debug): an instance made, activated, played at
+  each QUALITY in POLY with GLIDE moving, its state loaded, deactivated and destroyed on a thread
+  of 256 KB. It overflows the stack without the fix and passes with it.
+- `glide_stress` with `CA72_STACK`, release: the whole life fits 128 KB (it needed 576 to 640 KB);
+  debug: 256 KB (over 1 MB).
+
+**Evidence (Windows 11, MSVC, the same day):** the test fails as a host would, the process ended
+by `STATUS_STACK_OVERFLOW` (0xc00000fd: what Windows reports for a crash to the desktop of this
+kind), and passes with the fix. In a release build making an instance needed 640 to 768 KB of
+the thread's stack (a Windows thread has 1 MB unless its maker asks otherwise); with the fix the
+whole life fits 256 KB.

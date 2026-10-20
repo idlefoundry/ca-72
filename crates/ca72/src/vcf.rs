@@ -1463,6 +1463,22 @@ impl Vcf {
     /// push into it, and their total conductance `g_bus`) and the ladder current `i0`; with
     /// [`Vcf::high_pass`], FILTER MODE's HI instead.
     pub fn tick(&mut self, i_bus: f64, g_bus: f64, i0: f64) -> f64 {
+        self.tick_into(i_bus, g_bus, i0, None)
+    }
+
+    /// [`Vcf::tick`], its samples at the loop's rate (as many as its oversampling) also
+    /// written to `xs`, before its decimator: for ULTRA's VCA, which runs at the filter's rate
+    /// (decisions.md R-BLEP, ULTRA's VCA at 4x).
+    pub fn tick_oversampled(&mut self, i_bus: f64, g_bus: f64, i0: f64, xs: &mut [f64; 8]) -> f64 {
+        self.tick_into(i_bus, g_bus, i0, Some(xs))
+    }
+
+    /// The filter's oversampling.
+    pub fn oversample(&self) -> usize {
+        self.oversample
+    }
+
+    fn tick_into(&mut self, i_bus: f64, g_bus: f64, i0: f64, mut xs: Option<&mut [f64; 8]>) -> f64 {
         let mut laps = crate::prof::Laps::start();
         let mut ns = [0.0f64; 8];
         let mut gs = [0.0f64; 8];
@@ -1485,6 +1501,9 @@ impl Vcf {
         for k in 0..self.oversample {
             let v = self.step(ns[k], gs[k].max(0.0), i0, &mut iters, &mut laps);
             let v = self.filter_mode(ns[k], v);
+            if let Some(xs) = xs.as_deref_mut() {
+                xs[k] = v;
+            }
             if let Some(o) = self.down.push(v) {
                 out = o;
             }

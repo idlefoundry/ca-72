@@ -1,20 +1,22 @@
 //! What a pointer at a point of the drawing finds there, and what operating each kind of
 //! control does to its value (normalized, 0..1).
 //!
-//! A knob turns with a vertical drag (fine: a tenth as fast), the mouse wheel nudges it and
-//! a double click restores its default; RANGE and WAVEFORM step between their positions (a
+//! A knob turns with a vertical drag (fine: a tenth as fast), the mouse wheel nudges it a
+//! notch at a time, a trackpad turns it as far as it travels, and a double click restores its
+//! default; RANGE and WAVEFORM step between their positions (a
 //! click on a legend picks it, a click on the knob steps toward the side clicked); a switch
 //! flips at a click anywhere on it; QUALITY's toggle goes to the position clicked (its lever's
 //! three places, or their legends); the wheels stay where they are left, the PITCH wheel
 //! settling into its centre detent when let go near it (it has no spring).
 
-use crate::art::{self, BIG, GRIP, Layout, POWER, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
-use crate::controls::{CONTROLS, Dial, Kind};
+use crate::arrangement::Arrangement;
+use crate::art::{self, BIG, GRIP, Layout, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
+use crate::controls::{CONTROLS, Kind, Place};
 
 /// What is under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
-    /// A control, by its index in [`CONTROLS`].
+    /// A control, by its index in [`crate::CONTROLS`].
     Control(usize),
     /// A selector's legend: the selector's index and the legend's position.
     Legend(usize, usize),
@@ -28,9 +30,13 @@ fn in_rect(x: f64, y: f64, r: [f64; 4]) -> bool {
     x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]
 }
 
-/// What is at (x, y) in the drawing.
-pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
-    for (i, c) in CONTROLS.iter().enumerate() {
+/// What is at (x, y) in the drawing, the panel laid out as `arrangement` has it (the
+/// arpeggiator's drawer's knobs apart: [`hit_arp`]).
+pub fn hit(layout: &Layout, arrangement: &Arrangement, x: f64, y: f64) -> Option<Target> {
+    for (i, c) in arrangement.controls.iter().enumerate() {
+        if c.place == Place::Arp {
+            continue;
+        }
         let (cx, cy) = c.centre();
         let (dx, dy) = (x - cx, y - cy);
         let found = match c.kind {
@@ -60,7 +66,7 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
             return Some(Target::Control(i));
         }
     }
-    let (px, py) = (art::COL + POWER.0, art::TOP + POWER.1);
+    let (px, py) = arrangement.power_at();
     if in_rect(x - px, y - py, POWER_BOUNDS) {
         return Some(Target::Power);
     }
@@ -70,6 +76,16 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
     None
 }
 
+/// The arpeggiator's drawer's knob at (x, y) in the drawing, the drawer open (decisions.md
+/// R-ARP).
+pub fn hit_arp(x: f64, y: f64) -> Option<Target> {
+    CONTROLS.iter().enumerate().find_map(|(i, c)| {
+        let (cx, cy) = c.centre();
+        (c.place == Place::Arp && (x - cx).hypot(y - cy) <= STD.skirt + 8.0)
+            .then_some(Target::Control(i))
+    })
+}
+
 /// Where a drag takes a control from `start`, the pointer moved by (dx, dy) logical pixels;
 /// `None` for a switch, which a drag does not move. A knob of steps (VOICES) goes from step to
 /// step, never between them (the owner, 2026-10-10: knobs with discrete options "shouldn't move
@@ -77,11 +93,14 @@ pub fn hit(layout: &Layout, x: f64, y: f64) -> Option<Target> {
 pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64> {
     let rate = if fine { 0.1 } else { 1.0 };
     Some(match kind {
-        // VOICES, 2 to 10: a voice a step.
-        Kind::Knob {
-            dial: Dial::Voices, ..
-        } => ((start - dy / 240.0 * rate).clamp(0.0, 1.0) * 8.0).round() / 8.0,
-        Kind::Knob { .. } => (start - dy / 240.0 * rate).clamp(0.0, 1.0),
+        // VOICES, 2 to 10, a voice a step; the arpeggiator's RATE and OCTAVES a position a step.
+        Kind::Knob { dial, .. } => {
+            let v = (start - dy / 240.0 * rate).clamp(0.0, 1.0);
+            match dial.steps() {
+                Some(n) => (v * n as f64).round() / n as f64,
+                None => v,
+            }
+        }
         Kind::Selector(_) => {
             let steps = ((dx - dy) / if fine { 60.0 } else { 30.0 }).round();
             (art::position(start) as f64 + steps).clamp(0.0, 5.0) / 5.0
@@ -93,23 +112,39 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
 
 /// One notch of the mouse wheel or an arrow key, `up` or down.
 pub fn step(kind: &Kind, v: f64, up: bool, fine: bool) -> f64 {
-    let sign = if up { 1.0 } else { -1.0 };
+    scroll(kind, v, if up { 1.0 } else { -1.0 }, fine)
+}
+
+/// A wheel's signed travel in notches: fractional for continuous controls, whole for
+/// discrete ones (the editor keeps their remainder until the next event).
+pub fn scroll(kind: &Kind, v: f64, notches: f64, fine: bool) -> f64 {
+    let notches = if kind.is_continuous() {
+        notches
+    } else {
+        notches.trunc()
+    };
+    if notches == 0.0 {
+        return v;
+    }
     match kind {
-        // VOICES, 2 to 10: a voice a notch.
-        Kind::Knob {
-            dial: Dial::Voices, ..
-        } => ((v * 8.0).round() + sign).clamp(0.0, 8.0) / 8.0,
-        Kind::Knob { .. } => (v + sign * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
-        Kind::Selector(_) => (art::position(v) as f64 + sign).clamp(0.0, 5.0) / 5.0,
-        Kind::Wheel { .. } => (v + sign * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
+        // VOICES, 2 to 10, a voice a notch; RATE and OCTAVES a position.
+        Kind::Knob { dial, .. } => match dial.steps() {
+            Some(n) => {
+                let n = n as f64;
+                ((v * n).round() + notches).clamp(0.0, n) / n
+            }
+            None => (v + notches * if fine { 0.002 } else { 0.02 }).clamp(0.0, 1.0),
+        },
+        Kind::Selector(_) => (art::position(v) as f64 + notches).clamp(0.0, 5.0) / 5.0,
+        Kind::Wheel { .. } => (v + notches * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
         Kind::Rocker { .. } => {
-            if up {
+            if notches > 0.0 {
                 1.0
             } else {
                 0.0
             }
         }
-        Kind::Toggle { .. } => (toggle_position(v) as f64 + sign).clamp(0.0, 2.0) / 2.0,
+        Kind::Toggle { .. } => (toggle_position(v) as f64 + notches).clamp(0.0, 2.0) / 2.0,
     }
 }
 
@@ -168,8 +203,13 @@ pub fn release(kind: &Kind, v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::art::POWER;
     use crate::controls::index;
     use crate::fonts::Fonts;
+
+    fn hit(l: &Layout, x: f64, y: f64) -> Option<Target> {
+        super::hit(l, &Arrangement::official(), x, y)
+    }
 
     fn layout() -> Layout {
         Layout::measure(&Fonts::new())
@@ -180,7 +220,12 @@ mod tests {
         let l = layout();
         for (i, c) in CONTROLS.iter().enumerate() {
             let (x, y) = c.centre();
-            assert_eq!(hit(&l, x, y), Some(Target::Control(i)), "{}", c.param);
+            let found = if c.place == Place::Arp {
+                hit_arp(x, y)
+            } else {
+                hit(&l, x, y)
+            };
+            assert_eq!(found, Some(Target::Control(i)), "{}", c.param);
         }
         assert_eq!(
             hit(&l, art::COL + POWER.0, art::TOP + POWER.1),
@@ -226,6 +271,20 @@ mod tests {
             let v = drag(voices, 0.25, 0.0, -f64::from(dy), false).expect("a knob");
             assert_eq!(v * 8.0, (v * 8.0).round(), "between voices at {dy}");
         }
+        // The arpeggiator's RATE (13 note values) and OCTAVES (5) the same: never between two.
+        for (param, n) in [("arp_rate", 12.0), ("arp_octaves", 4.0)] {
+            let k = &CONTROLS[index(param).expect("a control")].kind;
+            for dy in 0..300 {
+                let v = drag(k, 0.0, 0.0, -f64::from(dy), false).expect("a knob");
+                assert_eq!(v * n, (v * n).round(), "{param} between at {dy}");
+            }
+            assert_eq!(step(k, 0.0, true, false), 1.0 / n);
+            assert_eq!(step(k, 1.0, true, true), 1.0);
+        }
+        let gate = &CONTROLS[index("arp_gate").expect("a control")].kind;
+        assert!(
+            (drag(gate, 0.5, 0.0, -1.0, false).unwrap_or(0.0) - (0.5 + 1.0 / 240.0)).abs() < 1e-12
+        );
         let rocker = &CONTROLS[index("osc1_on").expect("a control")].kind;
         assert_eq!(drag(rocker, 1.0, 0.0, 50.0, false), None);
         assert_eq!(click(rocker, 1.0, 0.0, 0.0), Some(0.0));
@@ -247,5 +306,90 @@ mod tests {
         let pitch = &CONTROLS[index("pitch_wheel").expect("a control")].kind;
         assert_eq!(release(pitch, 0.53), 0.5);
         assert_eq!(release(pitch, 0.55), 0.55);
+    }
+
+    #[test]
+    fn fractional_scroll_preserves_each_continuous_controls_sensitivity() {
+        for c in CONTROLS.iter().filter(|c| c.kind.is_continuous()) {
+            for fine in [false, true] {
+                let mut v = 0.5;
+                let mut values = Vec::new();
+                for _ in 0..160 {
+                    v = scroll(&c.kind, v, 1.0 / 160.0, fine);
+                    values.push(v);
+                }
+                assert!(values.windows(2).all(|v| v[1] > v[0]), "{}", c.param);
+                assert!(
+                    (v - step(&c.kind, 0.5, true, fine)).abs() < 1e-12,
+                    "{}",
+                    c.param
+                );
+                assert_eq!(scroll(&c.kind, v, 0.0, fine), v);
+                assert_eq!(scroll(&c.kind, 1.0, 0.25, fine), 1.0);
+                assert_eq!(scroll(&c.kind, 0.0, -0.25, fine), 0.0);
+            }
+        }
+        for id in [
+            "voices",
+            "arp_rate",
+            "arp_octaves",
+            "osc1_range",
+            "osc1_waveform",
+            "quality",
+            "osc1_on",
+        ] {
+            let kind = &CONTROLS[index(id).expect("control")].kind;
+            assert!(!kind.is_continuous());
+            assert_eq!(scroll(kind, 0.0, 0.75, false), 0.0);
+        }
+    }
+
+    /// A trackpad turns a continuous knob or a wheel as far as it travels, a fraction of a notch
+    /// a fraction of a notch's move (issue #107, R-KNOB-GLIDE's cases on R-KNOB-RESOLUTION's
+    /// `scroll`); a whole notch is the wheel's step; a selector, a switch, a toggle and the
+    /// knobs of steps go only a whole step at a time.
+    #[test]
+    fn a_trackpad_turns_continuous_controls_in_proportion() {
+        let knob = &CONTROLS[index("cutoff").expect("a control")].kind;
+        assert!(knob.is_continuous());
+        for (notches, fine, want) in [
+            (0.25, false, 0.505),
+            (-0.1, false, 0.498),
+            (1.0, false, 0.52),
+            (3.5, false, 0.57),
+            (0.5, true, 0.501),
+        ] {
+            let v = scroll(knob, 0.5, notches, fine);
+            assert!((v - want).abs() < 1e-12, "{notches} {fine}: {v}");
+        }
+        assert_eq!(scroll(knob, 0.5, 1.0, false), step(knob, 0.5, true, false));
+        assert_eq!(scroll(knob, 0.5, -1.0, true), step(knob, 0.5, false, true));
+        assert_eq!(scroll(knob, 0.99, 2.0, false), 1.0);
+        assert_eq!(scroll(knob, 0.001, -0.5, false), 0.0);
+        // Forty small moves of a quarter notch go as far as ten notches.
+        let mut v = 0.2;
+        for _ in 0..40 {
+            v = scroll(knob, v, 0.25, false);
+        }
+        assert!((v - 0.4).abs() < 1e-12, "{v}");
+        let wheel = &CONTROLS[index("mod_wheel").expect("a control")].kind;
+        assert!(wheel.is_continuous());
+        assert!((scroll(wheel, 0.5, 0.5, false) - 0.525).abs() < 1e-12);
+        assert_eq!(
+            scroll(wheel, 0.5, 1.0, false),
+            step(wheel, 0.5, true, false)
+        );
+        for id in [
+            "voices",
+            "arp_rate",
+            "arp_octaves",
+            "osc1_range",
+            "osc1_on",
+            "quality",
+            "note_priority",
+        ] {
+            let k = &CONTROLS[index(id).expect("a control")].kind;
+            assert!(!k.is_continuous(), "{id}");
+        }
     }
 }

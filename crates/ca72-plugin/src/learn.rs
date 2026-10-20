@@ -1,16 +1,19 @@
 //! MIDI Learn (decisions.md R34): a hardware controller's absolute 7-bit control change, on its
 //! own MIDI channel, assigned to one of the plug-in's sound parameters; each instance its own
-//! table, saved with the host's project, not with the sound presets.
+//! table, saved with the host's project, not with the sound presets. PREVIOUS PRESET and NEXT
+//! PRESET also learn notes and are kept on this computer instead (R-PRESET-KEYS).
 //!
 //! - **What may be learned** ([`LEARNABLE`]): the panel's knobs, selectors and switches, the
 //!   strip's POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD), INNER, SCATTER's placement, DETUNE
-//!   (DOUBLE), DRIVE, LEVEL and AUTO GAIN, and LOCK (a host parameter without a control: the
-//!   drawer's list learns it). Not the wheels (MIDI pitch bend and the modulation wheel, CC 1,
-//!   move them already), POWER (the host's bypass), MIDI BEND RANGE (the player's), nor anything
-//!   but a sound parameter.
-//! - **What is not learned** ([`reserved`]): bank select (CC 0, 32), the modulation wheel (CC 1),
+//!   (DOUBLE), DRIVE, LEVEL and AUTO GAIN, LOCK (a host parameter without a control: the
+//!   drawer's list learns it), the arpeggiator's seven (decisions.md R-ARP), and PREVIOUS
+//!   PRESET and NEXT PRESET. The MOD wheel learns its computer setting separately
+//!   (R-MODWHEEL-SOURCE). Not PITCH (MIDI pitch bend), POWER (the host's bypass), MIDI BEND
+//!   RANGE (the player's), nor anything else.
+//! - **What is not learned** ([`reserved`], [`MidiMap::reserved`]): bank select (CC 0, 32),
+//!   the wheel's chosen CC,
 //!   data entry and RPN/NRPN (CC 6, 38, 96–101) and the channel mode messages (CC 120–127). The
-//!   ones the plug-in follows (CC 1, 120, 121, 123) keep doing what they did.
+//!   channel mode actions (CC 120, 121, 123) keep doing what they did.
 //! - **One controller a parameter, one parameter a controller**: learning a parameter replaces its
 //!   controller; learning a controller another parameter had moves it ([`MidiMap::assign`] says
 //!   which). Removing one leaves the sound as it is.
@@ -23,7 +26,7 @@
 //!   (`ProcessContext::set_parameter_normalized`, `third_party/nih-plug/PATCHES.md` change 10):
 //!   a knob to value / 127 of its travel, a selector (or VOICES) to the position its share of
 //!   0–127 falls in, a switch off at 0–63 and on at 64–127. The value jumps there ("jump"
-//!   takeover); a knob's voices follow it over [`DEZIP`] ([`Dezip`]).
+//!   takeover); a knob's voices follow it over [`DEZIP`] (`crate::smooth::Smooth::learned`).
 //!
 //! The audio thread reads the table and arms nothing: it only ever loads [`MidiMap`]'s atomics,
 //! takes an arming with a compare-and-swap and posts what it caught in an atomic word. Every
@@ -36,6 +39,7 @@ use nih_plug::prelude::*;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
+use crate::mod_wheel::Source;
 use ca72::freq_dial::Pot;
 
 use crate::params::Ca72Params;
@@ -49,6 +53,8 @@ pub enum Kind {
     Stepped,
     /// A switch: off at 0–63, on at 64–127.
     Switch,
+    /// A preset action: one press, rather than a parameter value.
+    Action,
 }
 
 /// A parameter MIDI Learn may assign a controller to: its id (as saved), its name as the editor
@@ -85,8 +91,9 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 }
 
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
-/// then LOCK. Its order is the drawer's list; the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 58] = [
+/// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
+/// the table is saved by id, so it may change.
+pub const LEARNABLE: [Learnable; 67] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -153,18 +160,46 @@ pub const LEARNABLE: [Learnable; 58] = [
     knob("level", "LEVEL"),
     switch("auto_gain", "AUTO GAIN"),
     switch("lock", "LOCK (oscillators identical)"),
+    // The arpeggiator (R-ARP).
+    switch("arp_on", "ARP ON"),
+    switch("arp_latch", "ARP HOLD"),
+    stepped("arp_direction", "ARP DIRECTION"),
+    stepped("arp_rate", "ARP RATE"),
+    stepped("arp_octaves", "ARP OCTAVES"),
+    knob("arp_gate", "ARP GATE"),
+    knob("arp_swing", "ARP SWING"),
+    Learnable {
+        id: "previous_preset",
+        label: "PREVIOUS PRESET",
+        kind: Kind::Action,
+    },
+    Learnable {
+        id: "next_preset",
+        label: "NEXT PRESET",
+        kind: Kind::Action,
+    },
 ];
+
+pub fn action(i: usize) -> Option<i32> {
+    match LEARNABLE.get(i)?.id {
+        "previous_preset" => Some(-1),
+        "next_preset" => Some(1),
+        _ => None,
+    }
+}
 
 /// The learnable parameter of this id.
 pub fn index(id: &str) -> Option<usize> {
     LEARNABLE.iter().position(|l| l.id == id)
 }
 
+/// A learning target outside the sound assignments: it changes the computer's wheel source.
+pub const MOD_WHEEL: usize = LEARNABLE.len();
+
 /// Why a control change is not learned, if it is not: what it is.
 pub fn reserved(cc: u8) -> Option<&'static str> {
     Some(match cc {
         0 | 32 => "bank select",
-        1 => "the modulation wheel",
         6 | 38 => "data entry",
         96 | 97 => "data increment and decrement",
         98..=101 => "an RPN or NRPN number",
@@ -179,7 +214,7 @@ pub fn reserved(cc: u8) -> Option<&'static str> {
 }
 
 /// The reserved controllers, as the editor lists them.
-pub const RESERVED_TEXT: &str = "NOT LEARNED: CC 0 AND 32 (BANK), 1 (MODULATION WHEEL), 6, 38 AND \
+pub const RESERVED_TEXT: &str = "NOT LEARNED: CC 0 AND 32 (BANK), 6, 38 AND \
                                  96-101 (DATA ENTRY, RPN, NRPN), 120-127 (CHANNEL MODE)";
 
 /// A controller: a MIDI channel (0 to 15; shown 1 to 16) and a control change (0 to 127).
@@ -211,6 +246,56 @@ impl Cc {
     }
 }
 
+/// A learned input. Notes are available for actions alone; parameter assignments keep their
+/// existing CC format in projects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Binding {
+    Cc(Cc),
+    Note { channel: u8, note: u8 },
+}
+
+impl From<Cc> for Binding {
+    fn from(cc: Cc) -> Self {
+        Self::Cc(cc)
+    }
+}
+
+impl Binding {
+    pub fn text(self) -> String {
+        match self {
+            Self::Cc(cc) => cc.text(),
+            Self::Note { channel, note } => format!("CH {} · NOTE {note}", u32::from(channel) + 1),
+        }
+    }
+
+    fn slot(self) -> usize {
+        match self {
+            Self::Cc(cc) => cc.slot(),
+            Self::Note { channel, note } => {
+                2048 + usize::from(channel & 15) * 128 + usize::from(note & 127)
+            }
+        }
+    }
+
+    fn of_slot(slot: usize) -> Self {
+        if slot < 2048 {
+            Self::Cc(Cc::of_slot(slot))
+        } else {
+            Self::Note {
+                channel: ((slot - 2048) / 128) as u8,
+                note: (slot % 128) as u8,
+            }
+        }
+    }
+
+    fn learnable(self) -> bool {
+        match self {
+            Self::Cc(cc) => cc.learnable(),
+            Self::Note { channel, note } => channel < 16 && note < 128,
+        }
+    }
+}
+
 /// What the audio thread does with a learnable control change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Incoming {
@@ -227,9 +312,9 @@ pub enum Incoming {
 pub struct Assigned {
     /// The parameter and its controller now.
     pub param: usize,
-    pub cc: Cc,
+    pub cc: Binding,
     /// The controller it had before (replaced), if another.
-    pub replaced: Option<Cc>,
+    pub replaced: Option<Binding>,
     /// The parameter the controller was taken from, if another had it.
     pub displaced: Option<usize>,
 }
@@ -249,9 +334,13 @@ const CAUGHT: u64 = 1 << 63;
 pub struct MidiMap {
     /// By channel and controller (channel × 128 + CC): the learnable parameter it sets, its
     /// index plus one ([`NONE`] none). The audio thread only loads these; every change is made
-    /// under `writer`, which keeps at most one controller a parameter.
-    routes: [AtomicU8; 16 * 128],
+    /// under `writer`, which keeps at most one controller a target. The second half is notes,
+    /// by the same channel × 128 + note indexing, for preset actions alone.
+    routes: [AtomicU8; 2 * 16 * 128],
+    /// Computer assignments are written only by the editor, never by processing or state recall.
+    pub(crate) settings_file: Option<std::path::PathBuf>,
     writer: Mutex<()>,
+    pub(crate) preset_list: Mutex<Option<Vec<String>>>,
     /// The parameter being learned and the arming's number ([`TARGET_BITS`]).
     armed: AtomicU32,
     /// What the audio thread caught for the arming ([`CAUGHT`]), for [`MidiMap::poll`].
@@ -261,17 +350,23 @@ pub struct MidiMap {
     refused: AtomicU32,
     /// Counts every change of the assignments (the editor's lists follow it).
     version: AtomicU32,
+    /// The computer's wheel source, with a generation above its low byte. No file access or
+    /// lock on the audio thread; switching away and back between callbacks still clears it.
+    wheel_source: AtomicU64,
 }
 
 impl Default for MidiMap {
     fn default() -> Self {
         MidiMap {
             routes: std::array::from_fn(|_| AtomicU8::new(NONE)),
+            settings_file: None,
             writer: Mutex::new(()),
+            preset_list: Mutex::new(None),
             armed: AtomicU32::new(0),
             caught: AtomicU64::new(0),
             refused: AtomicU32::new(0),
             version: AtomicU32::new(0),
+            wheel_source: AtomicU64::new(u64::from(Source::DEFAULT.code())),
         }
     }
 }
@@ -286,12 +381,113 @@ impl std::fmt::Debug for MidiMap {
 }
 
 impl MidiMap {
+    /// A new instance takes the computer's preset actions. Project recall replaces only
+    /// parameter assignments, so it cannot undo these.
+    pub fn for_computer() -> Self {
+        Self::for_settings(crate::settings::file())
+    }
+
+    /// [`MidiMap::for_computer`], from the settings file at `path`.
+    pub(crate) fn for_settings(path: std::path::PathBuf) -> Self {
+        let mut map = Self::default();
+        // The computer's wheel source first: an action learned on a CC the wheel has freed
+        // (CC 1 among them) is kept, and one on the wheel's CC is not taken.
+        map.set_wheel_source(crate::settings::Settings::read(&path).mod_wheel_source);
+        for (i, binding) in crate::settings::preset_actions(&path) {
+            map.assign(i, binding);
+        }
+        map.settings_file = Some(path);
+        map
+    }
+
+    pub fn keep_actions(&self, changed: &[usize]) -> Result<(), String> {
+        if !changed.iter().any(|&i| action(i).is_some()) {
+            return Ok(());
+        }
+        if let Some(path) = &self.settings_file {
+            crate::settings::keep_preset_actions(path, &self.bindings(), changed, None)?;
+        }
+        Ok(())
+    }
+
+    /// Persist the explicit target and release a displaced input only if the file still has
+    /// that input. Another instance may have moved the displaced action since we read it.
+    pub fn keep_assignment(&self, assigned: &Assigned) -> Result<(), String> {
+        let released = assigned
+            .displaced
+            .filter(|&i| action(i).is_some())
+            .map(|_| assigned.cc);
+        if action(assigned.param).is_none() && released.is_none() {
+            return Ok(());
+        }
+        if let Some(path) = &self.settings_file {
+            crate::settings::keep_preset_actions(
+                path,
+                &self.bindings(),
+                &[assigned.param],
+                released,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn wheel_source(&self) -> Source {
+        Source::of_code(self.wheel_word() as u8)
+    }
+
+    pub fn wheel_word(&self) -> u64 {
+        self.wheel_source.load(Ordering::Acquire)
+    }
+
+    /// Chosen in Settings or learned from the wheel. Every assignment of that CC, on every
+    /// channel, is removed: the wheel follows it on any channel. Never saved in `midi_map`.
+    pub fn set_wheel_source(&self, source: Source) {
+        let _w = self.lock();
+        let source = Source::of_code(source.code());
+        if source == self.wheel_source() {
+            return;
+        }
+        if let Source::Cc(cc) = source {
+            for channel in 0..16 {
+                self.routes[channel * 128 + usize::from(cc)].store(NONE, Ordering::Release);
+            }
+        }
+        let word = self.wheel_word();
+        self.wheel_source.store(
+            (word.wrapping_add(256) & !255) | u64::from(source.code()),
+            Ordering::Release,
+        );
+        self.version.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub fn reserved(&self, cc: u8) -> Option<&'static str> {
+        if self.wheel_source() == Source::Cc(cc) {
+            Some("the modulation wheel source")
+        } else {
+            reserved(cc)
+        }
+    }
+
+    pub fn reserved_text(&self) -> String {
+        match self.wheel_source() {
+            Source::Cc(cc) => format!("{RESERVED_TEXT} · CC {cc} (MOD WHEEL SOURCE, ALL CHANNELS)"),
+            source => format!("{RESERVED_TEXT} · MOD WHEEL SOURCE: {}", source.text()),
+        }
+    }
+
     // ---- The audio thread's: loads, a compare-and-swap and stores, nothing else.
 
     /// A learnable control change `cc` on `channel` (0 to 15), on the audio thread: caught for
     /// the parameter being learned (once), else its assignment.
     pub fn incoming(&self, channel: u8, cc: u8) -> Incoming {
-        let c = Cc { channel, cc };
+        self.input(Binding::Cc(Cc { channel, cc }), true)
+    }
+
+    pub fn incoming_note(&self, channel: u8, note: u8, on: bool) -> Incoming {
+        self.input(Binding::Note { channel, note }, on)
+    }
+
+    fn input(&self, c: Binding, capture: bool) -> Incoming {
         if !c.learnable() {
             return Incoming::Unassigned;
         }
@@ -299,8 +495,16 @@ impl MidiMap {
         for _ in 0..2 {
             let a = self.armed.load(Ordering::Acquire);
             let target = a & ((1 << TARGET_BITS) - 1);
-            if target == 0 {
+            if target == 0
+                || !capture
+                || (matches!(c, Binding::Note { .. }) && action(target as usize - 1).is_none())
+            {
                 break;
+            }
+            // Use this arming's target: the editor may have moved learning from the wheel
+            // to a sound control since the event arrived. A reserved CC leaves it waiting.
+            if target as usize - 1 != MOD_WHEEL && self.reserved_input(c) {
+                return Incoming::Unassigned;
             }
             let disarmed = a & !((1 << TARGET_BITS) - 1);
             if self
@@ -311,16 +515,29 @@ impl MidiMap {
                 let word = CAUGHT
                     | (u64::from(a >> TARGET_BITS) << 24)
                     | (u64::from(target - 1) << 16)
-                    | (u64::from(channel) << 8)
-                    | u64::from(cc);
+                    | c.slot() as u64;
                 self.caught.store(word, Ordering::Release);
                 return Incoming::Caught;
             }
+        }
+        if self.reserved_input(c) {
+            return Incoming::Unassigned;
         }
         match self.routes[c.slot()].load(Ordering::Acquire) {
             NONE => Incoming::Unassigned,
             k => Incoming::Assigned(usize::from(k) - 1),
         }
+    }
+
+    /// A reserved control change (the wheel's chosen CC among them); a note never is.
+    fn reserved_input(&self, input: Binding) -> bool {
+        matches!(input, Binding::Cc(c) if self.reserved(c.cc).is_some())
+    }
+
+    /// Actions learn a CC's on value; a parameter may learn any value as before.
+    pub fn incoming_cc(&self, channel: u8, cc: u8, on: bool) -> Incoming {
+        let capture = self.armed().is_none_or(|i| action(i).is_none()) || on;
+        self.input(Binding::Cc(Cc { channel, cc }), capture)
     }
 
     /// A reserved control change seen, on the audio thread: while learning, kept for the editor
@@ -337,19 +554,23 @@ impl MidiMap {
 
     /// The learnable parameter set by this controller, if any.
     pub fn target(&self, cc: Cc) -> Option<usize> {
-        match self.routes[cc.slot()].load(Ordering::Acquire) {
+        self.binding_target(cc.into())
+    }
+
+    pub fn binding_target(&self, input: Binding) -> Option<usize> {
+        match self.routes[input.slot()].load(Ordering::Acquire) {
             NONE => None,
             k => Some(usize::from(k) - 1),
         }
     }
 
     /// Every learnable parameter's controller, by its index.
-    pub fn assignments(&self) -> [Option<Cc>; LEARNABLE.len()] {
+    pub fn bindings(&self) -> [Option<Binding>; LEARNABLE.len()] {
         let mut out = [None; LEARNABLE.len()];
         for (slot, r) in self.routes.iter().enumerate() {
             let k = r.load(Ordering::Acquire);
             if let Some(o) = usize::from(k).checked_sub(1).and_then(|i| out.get_mut(i)) {
-                *o = Some(Cc::of_slot(slot));
+                *o = Some(Binding::of_slot(slot));
             }
         }
         out
@@ -357,7 +578,23 @@ impl MidiMap {
 
     /// The controller assigned to learnable parameter `param`, if any.
     pub fn assignment(&self, param: usize) -> Option<Cc> {
-        self.assignments().get(param).copied().flatten()
+        self.binding(param).and_then(|b| match b {
+            Binding::Cc(cc) => Some(cc),
+            _ => None,
+        })
+    }
+
+    pub fn assignments(&self) -> [Option<Cc>; LEARNABLE.len()] {
+        self.bindings().map(|b| {
+            b.and_then(|b| match b {
+                Binding::Cc(cc) => Some(cc),
+                _ => None,
+            })
+        })
+    }
+
+    pub fn binding(&self, param: usize) -> Option<Binding> {
+        self.bindings().get(param).copied().flatten()
     }
 
     /// How often the assignments have changed (the editor follows it).
@@ -382,11 +619,32 @@ impl MidiMap {
     /// `cc` assigned to learnable parameter `param`: its controller before is let go (relearning
     /// replaces it), and a parameter that had `cc` loses it (it moves). None if either is not
     /// learnable.
-    pub fn assign(&self, param: usize, cc: Cc) -> Option<Assigned> {
-        if param >= LEARNABLE.len() || !cc.learnable() {
+    pub fn assign(&self, param: usize, cc: impl Into<Binding>) -> Option<Assigned> {
+        let cc = cc.into();
+        if !cc.learnable() {
+            return None;
+        }
+        if param == MOD_WHEEL {
+            let Binding::Cc(c) = cc else {
+                return None;
+            };
+            self.set_wheel_source(Source::Cc(c.cc));
+            return Some(Assigned {
+                param,
+                cc,
+                replaced: None,
+                displaced: None,
+            });
+        }
+        if param >= LEARNABLE.len()
+            || (matches!(cc, Binding::Note { .. }) && action(param).is_none())
+        {
             return None;
         }
         let _w = self.lock();
+        if matches!(cc, Binding::Cc(c) if self.reserved(c.cc).is_some()) {
+            return None;
+        }
         let before = self.slot_of(param);
         if let Some(s) = before {
             self.routes[s].store(NONE, Ordering::Release);
@@ -396,18 +654,18 @@ impl MidiMap {
         Some(Assigned {
             param,
             cc,
-            replaced: before.map(Cc::of_slot).filter(|b| *b != cc),
+            replaced: before.map(Binding::of_slot).filter(|b| *b != cc),
             displaced: usize::from(had).checked_sub(1).filter(|&d| d != param),
         })
     }
 
     /// Learnable parameter `param`'s controller removed: which it was.
-    pub fn remove(&self, param: usize) -> Option<Cc> {
+    pub fn remove(&self, param: usize) -> Option<Binding> {
         let _w = self.lock();
         let s = self.slot_of(param)?;
         self.routes[s].store(NONE, Ordering::Release);
         self.version.fetch_add(1, Ordering::AcqRel);
-        Some(Cc::of_slot(s))
+        Some(Binding::of_slot(s))
     }
 
     /// The assignments as saved: by learnable index, in its order.
@@ -417,6 +675,7 @@ impl MidiMap {
             self.assignments()
                 .iter()
                 .enumerate()
+                .filter(|(i, _)| action(*i).is_none())
                 .filter_map(|(i, c)| c.map(|c| (i, c)))
                 .collect(),
         )
@@ -426,10 +685,18 @@ impl MidiMap {
     pub fn load(&self, saved: &Saved) {
         let _w = self.lock();
         for r in &self.routes {
-            r.store(NONE, Ordering::Release);
+            let target = r.load(Ordering::Acquire);
+            if target != NONE && action(usize::from(target) - 1).is_none() {
+                r.store(NONE, Ordering::Release);
+            }
         }
         for &(i, c) in &saved.0 {
-            if i < LEARNABLE.len() && c.learnable() {
+            if i < LEARNABLE.len()
+                && action(i).is_none()
+                && c.learnable()
+                && self.reserved(c.cc).is_none()
+                && self.binding_target(c.into()).is_none()
+            {
                 self.routes[c.slot()].store(i as u8 + 1, Ordering::Release);
             }
         }
@@ -439,7 +706,7 @@ impl MidiMap {
     /// Learnable parameter `param` armed: the next learnable control change is its controller.
     /// Another armed before is no longer (arming another moves the learning).
     pub fn arm(&self, param: usize) {
-        if param >= LEARNABLE.len() {
+        if param > MOD_WHEEL {
             return;
         }
         self.rearm(param as u32 + 1);
@@ -478,10 +745,7 @@ impl MidiMap {
             return None;
         }
         let param = ((word >> 16) & 0xff) as usize;
-        let cc = Cc {
-            channel: ((word >> 8) & 0xff) as u8,
-            cc: (word & 0xff) as u8,
-        };
+        let cc = Binding::of_slot((word & 0xfff) as usize);
         self.assign(param, cc)
     }
 
@@ -531,7 +795,10 @@ impl Saved {
                 channel: (channel - 1) as u8,
                 cc: cc as u8,
             };
-            if c.learnable() && !out.iter().any(|&(p, o)| p == param || o == c) {
+            if action(param).is_none()
+                && c.learnable()
+                && !out.iter().any(|&(p, o)| p == param || o == c)
+            {
                 out.push((param, c));
             }
         }
@@ -717,6 +984,13 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "drive" => &p.drive,
         "level" => &p.level,
         "auto_gain" => &p.auto_gain,
+        "arp_on" => &p.arp_on,
+        "arp_latch" => &p.arp_latch,
+        "arp_direction" => &p.arp_direction,
+        "arp_rate" => &p.arp_rate,
+        "arp_octaves" => &p.arp_octaves,
+        "arp_gate" => &p.arp_gate,
+        "arp_swing" => &p.arp_swing,
         _ => return None,
     })
 }
@@ -734,7 +1008,7 @@ pub fn normalized_for(p: &Ca72Params, i: usize, target: &dyn Target, value: u8) 
     }
 }
 
-/// The knob of learnable index `i`, if it is one (the ones [`Dezip`] moves).
+/// The knob of learnable index `i`, if it is one (each glides: `crate::smooth::KNOBS`).
 pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
     Some(match LEARNABLE.get(i)?.id {
         "tune" => &p.tune,
@@ -764,6 +1038,8 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "double" => &p.double,
         "drive" => &p.drive,
         "level" => &p.level,
+        "arp_gate" => &p.arp_gate,
+        "arp_swing" => &p.arp_swing,
         _ => return None,
     })
 }
@@ -771,127 +1047,9 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
 /// How long the voices take to follow a knob a learned controller moves, s: a 7-bit controller
 /// moves a knob in steps of 1/127 of its travel, which the voices would otherwise take as steps
 /// (MAIN OUTPUT VOLUME's click: decisions.md R34 measures them). The parameter itself (the
-/// host's, the editor's, the state's) is at the new value at once.
+/// host's, the editor's, the state's) is at the new value at once. Every other change of a
+/// knob glides over `smooth::GLIDE` (decisions.md R-KNOB-GLIDE).
 pub const DEZIP: f64 = 0.010;
-
-/// While a knob glides, the voices' controls are set again every this many samples.
-pub const DEZIP_STEP: usize = 32;
-
-/// A knob gliding to where a learned controller put it: the knob (its parameter's address, to
-/// know it by), from and to (its plain values), and the samples gone and in all.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Glide {
-    knob: usize,
-    from: f32,
-    to: f32,
-    done: u32,
-    len: u32,
-}
-
-impl Glide {
-    fn now(&self) -> f32 {
-        if self.done >= self.len {
-            self.to
-        } else {
-            self.from + (self.to - self.from) * (self.done as f32 / self.len as f32)
-        }
-    }
-}
-
-/// The knobs that learned controllers move, gliding over [`DEZIP`] to their parameters' values
-/// (the voices only: the parameters are at the new values at once). Only these knobs glide, and
-/// only after a learned change: the host's automation, the editor and presets set the voices as
-/// they always have. A glide ends early where anything else sets the parameter meanwhile.
-#[derive(Clone, Debug)]
-pub struct Dezip {
-    glides: [Option<Glide>; LEARNABLE.len()],
-    moving: usize,
-    len: u32,
-}
-
-impl Default for Dezip {
-    fn default() -> Self {
-        Dezip {
-            glides: [None; LEARNABLE.len()],
-            moving: 0,
-            len: 1,
-        }
-    }
-}
-
-impl Dezip {
-    /// The glides' length at `rate` Hz.
-    pub fn prepare(&mut self, rate: f64) {
-        self.len = (DEZIP * rate).round().max(1.0) as u32;
-        self.clear();
-    }
-
-    /// No glide.
-    pub fn clear(&mut self) {
-        self.glides = [None; LEARNABLE.len()];
-        self.moving = 0;
-    }
-
-    /// Whether a knob glides.
-    pub fn moving(&self) -> bool {
-        self.moving > 0
-    }
-
-    /// Learnable knob `i`, `knob`, set from `from` (where the voices had it) to `to`: it glides
-    /// there, from where it is if it was gliding.
-    pub fn start(&mut self, i: usize, knob: &FloatParam, from: f32, to: f32) {
-        let Some(slot) = self.glides.get_mut(i) else {
-            return;
-        };
-        let from = slot.map_or(from, |g| g.now());
-        if slot.is_none() {
-            self.moving += 1;
-        }
-        *slot = Some(Glide {
-            knob: std::ptr::from_ref(knob) as usize,
-            from,
-            to,
-            done: 0,
-            len: self.len.max(1),
-        });
-    }
-
-    /// `n` samples on; a glide whose knob's parameter has been set elsewhere meanwhile (not at its
-    /// end) ends.
-    pub fn advance(&mut self, n: usize, p: &Ca72Params) {
-        if self.moving == 0 {
-            return;
-        }
-        for (i, slot) in self.glides.iter_mut().enumerate() {
-            let Some(g) = slot else { continue };
-            g.done = g.done.saturating_add(n as u32);
-            let set_elsewhere = knob_param(p, i).is_none_or(|k| k.value() != g.to);
-            if g.done >= g.len || set_elsewhere {
-                *slot = None;
-                self.moving -= 1;
-            }
-        }
-    }
-
-    /// The glides ended where anything other than a learned controller set their knobs: at a
-    /// run's start, before the voices' controls are taken.
-    pub fn follow(&mut self, p: &Ca72Params) {
-        self.advance(0, p);
-    }
-
-    /// Where the voices have `knob` now: its glide's place, else its value.
-    pub fn value(&self, knob: &FloatParam) -> f32 {
-        if self.moving > 0 {
-            let at = std::ptr::from_ref(knob) as usize;
-            for g in self.glides.iter().flatten() {
-                if g.knob == at {
-                    return g.now();
-                }
-            }
-        }
-        knob.value()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -905,6 +1063,47 @@ mod tests {
         index(id).expect("learnable")
     }
 
+    #[test]
+    fn actions_learn_notes_and_cc_presses_but_parameters_keep_their_cc_contract() {
+        let m = MidiMap::default();
+        let next = at("next_preset");
+        m.arm(next);
+        assert_eq!(m.incoming_note(1, 36, false), Incoming::Unassigned);
+        assert_eq!(m.armed(), Some(next));
+        assert_eq!(m.incoming_note(1, 36, true), Incoming::Caught);
+        let assigned = m.poll().expect("note assigned");
+        assert_eq!(
+            assigned.cc,
+            Binding::Note {
+                channel: 1,
+                note: 36
+            }
+        );
+        assert_eq!(m.incoming_note(0, 36, true), Incoming::Unassigned);
+        assert_eq!(m.incoming_note(1, 36, false), Incoming::Assigned(next));
+        assert!(m.saved().0.is_empty(), "actions never enter a project");
+        m.load(&Saved::default());
+        assert_eq!(
+            m.binding(next),
+            Some(assigned.cc),
+            "state recall keeps computer actions"
+        );
+        m.arm(at("cutoff"));
+        assert_eq!(m.incoming_note(1, 37, true), Incoming::Unassigned);
+        assert_eq!(m.armed(), Some(at("cutoff")));
+        assert!(m.assign(at("cutoff"), assigned.cc).is_none());
+        m.arm(at("previous_preset"));
+        assert_eq!(m.incoming_cc(3, 20, false), Incoming::Unassigned);
+        assert_eq!(m.incoming_cc(3, 20, true), Incoming::Caught);
+        assert_eq!(m.poll().unwrap().cc, cc(3, 20).into());
+        let a = m.assign(at("cutoff"), cc(3, 20)).unwrap();
+        assert_eq!(
+            a.displaced,
+            Some(at("previous_preset")),
+            "one input, one target"
+        );
+    }
+
     /// The list is explicit and whole: every sound parameter a preset sets is learnable but the
     /// MODULATION wheel and MIDI BEND RANGE (the PITCH wheel and POWER are no preset's either),
     /// each id once, each resolving to its parameter, its kind its parameter's steps, the knobs
@@ -912,10 +1111,14 @@ mod tests {
     #[test]
     fn every_sound_parameter_but_the_wheels_bypass_and_bend_range_is_learnable() {
         let p = Ca72Params::default();
-        let mut ids: Vec<&str> = LEARNABLE.iter().map(|l| l.id).collect();
+        let mut ids: Vec<&str> = LEARNABLE
+            .iter()
+            .filter(|l| l.kind != Kind::Action)
+            .map(|l| l.id)
+            .collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), LEARNABLE.len(), "an id twice");
+        assert_eq!(ids.len() + 2, LEARNABLE.len(), "an id twice");
         let mut sound: Vec<&str> = crate::presets::sound_params(&p)
             .into_iter()
             .map(|(id, _)| id)
@@ -927,6 +1130,10 @@ mod tests {
             assert_eq!(index(id), None, "{id} is not learnable");
         }
         for (i, l) in LEARNABLE.iter().enumerate() {
+            if l.kind == Kind::Action {
+                assert!(target(&p, i).is_none());
+                continue;
+            }
             let t = target(&p, i).expect(l.id);
             let kind = match t.positions() {
                 None => Kind::Continuous,
@@ -951,7 +1158,9 @@ mod tests {
                 counts(Kind::Stepped),
                 counts(Kind::Switch)
             ),
-            (27, 8, 23)
+            // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
+            // ON and HOLD switches.)
+            (29, 11, 25)
         );
     }
 
@@ -959,11 +1168,11 @@ mod tests {
     /// are not learned; every other control change is.
     #[test]
     fn the_reserved_controllers_are_not_learned() {
-        let reserved_ccs: Vec<u8> = (0..=127).filter(|&c| reserved(c).is_some()).collect();
+        let m = MidiMap::default();
+        let reserved_ccs: Vec<u8> = (0..=127).filter(|&c| m.reserved(c).is_some()).collect();
         let mut want = vec![0, 1, 6, 32, 38, 96, 97, 98, 99, 100, 101];
         want.extend(120..=127);
         assert_eq!(reserved_ccs, want);
-        let m = MidiMap::default();
         for &c in &want {
             assert_eq!(m.assign(0, cc(0, c)), None, "CC {c}");
         }
@@ -977,6 +1186,88 @@ mod tests {
         m.cancel();
         m.refuse(7);
         assert_eq!(m.refused(), None, "nothing said while not learning");
+    }
+
+    /// The wheel's CC is reserved from the preset actions too; their notes are not CCs.
+    #[test]
+    fn the_wheel_source_takes_its_cc_from_preset_actions_but_not_their_notes() {
+        let m = MidiMap::default();
+        let (previous, next) = (at("previous_preset"), at("next_preset"));
+        assert!(
+            m.assign(previous, cc(0, 1)).is_none(),
+            "CC 1 is the wheel's"
+        );
+        m.assign(previous, cc(4, 20)).unwrap();
+        let pad = Binding::Note {
+            channel: 4,
+            note: 20,
+        };
+        m.assign(next, pad).unwrap();
+        m.arm(MOD_WHEEL);
+        assert_eq!(m.incoming_cc(0, 20, true), Incoming::Caught);
+        assert_eq!(m.poll().map(|a| a.param), Some(MOD_WHEEL));
+        assert_eq!(m.binding(previous), None, "the wheel's CC on every channel");
+        assert_eq!(m.binding(next), Some(pad));
+        assert_eq!(m.incoming_cc(4, 20, true), Incoming::Unassigned);
+        m.arm(previous);
+        assert_eq!(m.incoming_cc(4, 20, true), Incoming::Unassigned);
+        assert_eq!(m.armed(), Some(previous), "still waiting");
+        assert_eq!(m.incoming_note(4, 20, true), Incoming::Caught);
+        assert_eq!(m.poll().map(|a| a.cc), Some(pad));
+        assert_eq!(m.binding(next), None, "the pad moved");
+        m.set_wheel_source(Source::PolyPressure);
+        assert!(m.assign(next, cc(4, 20)).is_some(), "freed again");
+    }
+
+    #[test]
+    fn the_wheel_learns_a_computer_source_and_reserves_it_on_all_channels() {
+        let m = MidiMap::default();
+        m.assign(at("cutoff"), cc(0, 11));
+        m.assign(at("emphasis"), cc(15, 11));
+        m.arm(MOD_WHEEL);
+        assert_eq!(m.incoming(3, 0), Incoming::Unassigned);
+        assert_eq!(m.armed(), Some(MOD_WHEEL), "bank select refused");
+        assert_eq!(m.incoming(3, 11), Incoming::Caught);
+        assert_eq!(m.poll().map(|a| a.param), Some(MOD_WHEEL));
+        assert_eq!(m.wheel_source(), Source::Cc(11));
+        assert!(
+            m.saved().0.is_empty(),
+            "wheel source is never project state"
+        );
+        assert!(
+            m.reserved_text()
+                .contains("CC 11 (MOD WHEEL SOURCE, ALL CHANNELS)")
+        );
+        for channel in 0..16 {
+            assert_eq!(m.assign(at("cutoff"), cc(channel, 11)), None);
+            m.arm(at("cutoff"));
+            assert_eq!(m.incoming(channel, 11), Incoming::Unassigned);
+            assert_eq!(m.armed(), Some(at("cutoff")));
+        }
+        m.cancel();
+        assert!(m.assign(at("glide"), cc(0, 1)).is_some(), "CC 1 freed");
+        let saved = m.saved();
+        assert_eq!(
+            Saved::from_text(&serde_json::to_string(&saved).expect("JSON")),
+            saved
+        );
+        m.set_wheel_source(Source::ChannelPressure);
+        assert!(m.assign(at("cutoff"), cc(0, 11)).is_some());
+        m.set_wheel_source(Source::DEFAULT);
+        assert!(m.assignment(at("glide")).is_none(), "new wheel CC removed");
+        m.load(&saved);
+        assert!(
+            m.saved().0.is_empty(),
+            "state cannot restore a conflicting assignment"
+        );
+        m.arm(MOD_WHEEL);
+        assert_eq!(
+            m.incoming(15, 1),
+            Incoming::Caught,
+            "wheel can learn its current CC"
+        );
+        assert!(m.poll().is_some());
+        assert_eq!(m.wheel_source(), Source::Cc(1));
     }
 
     /// A FREQUENCY knob turned to value / 127 of its travel through the computer's law
@@ -1063,7 +1354,7 @@ mod tests {
             a,
             Assigned {
                 param: cutoff,
-                cc: cc(1, 74),
+                cc: cc(1, 74).into(),
                 replaced: None,
                 displaced: None
             }
@@ -1118,7 +1409,7 @@ mod tests {
         let (cutoff, emphasis) = (at("cutoff"), at("emphasis"));
         m.assign(cutoff, cc(0, 74));
         let a = m.assign(cutoff, cc(0, 75)).expect("assigned");
-        assert_eq!((a.replaced, a.displaced), (Some(cc(0, 74)), None));
+        assert_eq!((a.replaced, a.displaced), (Some(cc(0, 74).into()), None));
         assert_eq!(m.target(cc(0, 74)), None);
         let b = m.assign(emphasis, cc(0, 75)).expect("assigned");
         assert_eq!((b.replaced, b.displaced), (None, Some(cutoff)));
@@ -1129,7 +1420,7 @@ mod tests {
                 .map(|a| (a.replaced, a.displaced)),
             Some((None, None))
         );
-        assert_eq!(m.remove(emphasis), Some(cc(0, 75)));
+        assert_eq!(m.remove(emphasis), Some(cc(0, 75).into()));
         assert_eq!(m.remove(emphasis), None);
         assert_eq!(m.incoming(0, 75), Incoming::Unassigned);
     }
@@ -1201,7 +1492,7 @@ mod tests {
             {"param":"glide","channel":1,"cc":128},
             {"param":"glide","channel":1,"cc":-1},
             {"param":"glide","channel":"1","cc":14},
-            {"param":"glide","channel":1,"cc":1},
+            {"param":"glide","channel":1,"cc":0},
             {"param":"glide","channel":1,"cc":120},
             {"param":"glide","channel":1},
             "nonsense",
@@ -1257,39 +1548,5 @@ mod tests {
             fields.get(STATE_KEY).map(String::as_str),
             Some(r#"{"version":1,"assignments":[{"param":"cutoff","channel":1,"cc":74}]}"#)
         );
-    }
-
-    /// A knob glides over `DEZIP` to the value a learned controller set, from where the voices
-    /// had it (from where it was gliding, if it was), and stops gliding when anything else sets
-    /// its parameter.
-    #[test]
-    fn a_knob_glides_to_a_learned_value_and_stops_where_set_elsewhere() {
-        let p = Ca72Params::default();
-        let i = at("cutoff");
-        let k = knob_param(&p, i).expect("a knob");
-        let mut d = Dezip::default();
-        d.prepare(48_000.0);
-        assert_eq!(d.value(k), 0.0);
-        // (The parameter itself stays at its default here: as if set elsewhere unless `to`
-        // is its value.)
-        d.start(i, k, 4.0, 0.0);
-        assert!(d.moving());
-        assert_eq!(d.value(k), 4.0);
-        d.advance(240, &p);
-        assert!((d.value(k) - 2.0).abs() < 1e-5, "{}", d.value(k));
-        d.advance(240, &p);
-        assert!(!d.moving());
-        assert_eq!(d.value(k), 0.0);
-        // Set elsewhere meanwhile (its value is not the glide's end): the glide ends.
-        d.start(i, k, 0.0, 3.0);
-        d.follow(&p);
-        assert!(!d.moving());
-        assert_eq!(d.value(k), k.value());
-        // A second change mid-glide glides on from where it was.
-        d.start(i, k, 4.0, 0.0);
-        d.advance(120, &p);
-        let mid = d.value(k);
-        d.start(i, k, 99.0, 0.0);
-        assert_eq!(d.value(k), mid);
     }
 }

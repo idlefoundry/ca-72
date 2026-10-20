@@ -192,6 +192,14 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("doubled", &p.doubled),
         ("feedback", &p.feedback),
         ("lock", &p.lock),
+        // The arpeggiator (decisions.md R-ARP): a preset that does not name it plays without it.
+        ("arp_on", &p.arp_on),
+        ("arp_latch", &p.arp_latch),
+        ("arp_direction", &p.arp_direction),
+        ("arp_rate", &p.arp_rate),
+        ("arp_octaves", &p.arp_octaves),
+        ("arp_gate", &p.arp_gate),
+        ("arp_swing", &p.arp_swing),
     ]
 }
 
@@ -204,7 +212,7 @@ pub const PLAYERS: &[&str] = &["midi_bend_range"];
 /// default (but [`PLAYERS`]'s). POLY, VOICES, ENTROPY and SPREAD are part of a preset like
 /// any other (decisions.md R12; R10 had left POLY and VOICES as they were when a preset did not
 /// name them).
-fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
+pub(crate) fn targets(p: &Ca72Params, e: &Entry) -> Vec<(&'static str, f32)> {
     let value = |id: &str| {
         e.sound
             .values
@@ -369,6 +377,9 @@ impl Browser {
             self.drawer.favourites,
             self.drawer.mine,
         );
+        if let Ok(mut names) = p.midi_map.preset_list.lock() {
+            *names = Some(self.list.iter().map(|e| e.sound.name.clone()).collect());
+        }
         let mut chips: Vec<(String, bool)> = library::tags_of(&self.all)
             .into_iter()
             .map(|t| {
@@ -517,6 +528,8 @@ impl Browser {
             hover: self.bar.hover,
             keyboard: self.bar.keyboard,
             panel: self.bar.panel,
+            arp: self.bar.arp,
+            fx: self.bar.fx,
         };
     }
 
@@ -544,10 +557,13 @@ impl Browser {
         self.end_edit();
         self.drawer.hint.clear();
         let params = sound_params(p);
+        // (Its knobs land at once in the voices, not gliding: decisions.md R-KNOB-GLIDE.)
+        let landing = p.lands.begin();
         for (id, v) in targets(p, e) {
             if let Some((_, q)) = params.iter().find(|(i, _)| *i == id)
                 && (q.normalized() - v).abs() > 1e-6
             {
+                p.lands.mark(landing, p, id, v);
                 q.set_once(s, v);
             }
         }
@@ -566,10 +582,13 @@ impl Browser {
     /// action, not a library entry: it cannot replace a user's preset named Init.
     fn init(&mut self, p: &Ca72Params, s: &ParamSetter<'_>) {
         self.end_edit();
+        // (Its knobs land at once, as a preset's: decisions.md R-KNOB-GLIDE.)
+        let landing = p.lands.begin();
         for (id, q) in sound_params(p) {
             if !PLAYERS.contains(&id) {
                 let v = q.default_normalized();
                 if q.normalized() != v {
+                    p.lands.mark(landing, p, id, v);
                     q.set_once(s, v);
                 }
             }
@@ -621,7 +640,11 @@ impl Browser {
             BarTarget::Name => self.show(!self.open, p),
             BarTarget::Prev => self.step(-1, p, s),
             // (The editor's: its menu.)
-            BarTarget::Settings | BarTarget::Panel | BarTarget::Keyboard => {}
+            BarTarget::Settings
+            | BarTarget::Panel
+            | BarTarget::Keyboard
+            | BarTarget::Arp
+            | BarTarget::Fx => {}
             BarTarget::Next => self.step(1, p, s),
             BarTarget::Star => {
                 let current = Self::current(p);
@@ -688,18 +711,8 @@ impl Browser {
                 return;
             }
         };
-        // (With AUTO GAIN's curve as it is heard: the preset plays at this level again.)
-        let curve = (
-            p.quality.value() == QualityMode::Lo,
-            p.drive_curve.saved().db,
-        );
-        match self
-            .library
-            .save_with_curve(&name, values_now(p), Some(tags), Some(curve))
-        {
+        match self.save_sound(&name, tags, p) {
             Ok(e) => {
-                Self::set_current(p, &e.sound.name);
-                self.wanted = Some((e.sound.name.clone(), targets(p, &e)));
                 self.drawer.hint = format!("Saved {}.", e.sound.name);
                 self.drawer.save_name = Field::default();
                 self.drawer.save_tags = Field::default();
@@ -715,6 +728,53 @@ impl Browser {
         self.reread(p);
     }
 
+    /// The current sound saved under `name` with `tags` (SAVE AS's, and an agent's:
+    /// `crate::agent`), the plug-in then that preset; the library read again.
+    pub fn save_sound(
+        &mut self,
+        name: &str,
+        tags: Vec<String>,
+        p: &Ca72Params,
+    ) -> Result<Entry, String> {
+        // (With AUTO GAIN's curve as it is heard: the preset plays at this level again.)
+        let curve = (
+            p.quality.value() == QualityMode::Lo,
+            p.drive_curve.saved().db,
+        );
+        let r = self
+            .library
+            .save_with_curve(name, values_now(p), Some(tags), Some(curve));
+        if let Ok(e) = &r {
+            Self::set_current(p, &e.sound.name);
+            self.wanted = Some((e.sound.name.clone(), targets(p, e)));
+        }
+        self.reread(p);
+        r
+    }
+
+    /// A preset renamed (RENAME's, and an agent's): the plug-in's preset is still it if it
+    /// was; the library read again.
+    pub fn rename_preset(&mut self, name: &str, to: &str, p: &Ca72Params) -> Result<Entry, String> {
+        let r = self.library.rename(name, to);
+        if let Ok(n) = &r
+            && same(&Self::current(p), name)
+        {
+            Self::set_current(p, &n.sound.name);
+        }
+        self.reread(p);
+        r
+    }
+
+    /// The preset the plug-in is set to, by name (empty when none).
+    pub fn current_name(p: &Ca72Params) -> String {
+        Self::current(p)
+    }
+
+    /// The presets as last read: every one, and the list as the drawer's filters have it.
+    pub fn presets(&self) -> (&[Entry], &[Entry]) {
+        (&self.all, &self.list)
+    }
+
     /// Commits the preset being renamed or tagged, wherever its row is now; none if it has
     /// gone.
     fn commit_edit(&mut self, p: &Ca72Params) {
@@ -727,10 +787,7 @@ impl Browser {
         let text = self.drawer.edit.text.clone();
         let mut shown = e.sound.name.clone();
         let r = match how {
-            Edit::Rename => self.library.rename(&e.sound.name, &text).map(|n| {
-                if same(&Self::current(p), &e.sound.name) {
-                    Self::set_current(p, &n.sound.name);
-                }
+            Edit::Rename => self.rename_preset(&e.sound.name, &text, p).map(|n| {
                 shown = n.sound.name;
             }),
             _ => library::parse_tags(&text).and_then(|t| self.library.tag(&e.sound.name, t)),
@@ -1034,6 +1091,46 @@ mod tests {
         fn set_state(&self, _: PluginState) {
             panic!("Init must not replace project state")
         }
+    }
+
+    /// A preset chosen, and Init, set the voices to their knobs at the plug-in's next block, not
+    /// gliding; a knob turned in the editor glides there over 30 ms and lands on its value
+    /// (decisions.md R-KNOB-GLIDE).
+    #[test]
+    fn a_chosen_preset_lands_in_the_voices_at_once_and_a_turned_knob_glides() {
+        let mut plugin = crate::tests::initialised(false);
+        let mut c = crate::tests::hostless(&plugin);
+        let p = plugin.parameters().clone();
+        let host = ApplyingHost::new(p.clone());
+        let setter = ParamSetter::new(&host);
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = Browser::new(Library::at(dir.path()));
+        b.show(true, &p);
+        crate::tests::block(&mut plugin, &mut c, 256);
+        let landed = |plugin: &crate::Ca72, what: &str| {
+            assert!(!plugin.smooth.moving(), "{what}");
+            assert_eq!(plugin.controls(), p.controls(), "{what}");
+        };
+        for name in ["Brass Choir", "Felt Bass", "Brass Choir"] {
+            let e = b.library.find(name).unwrap();
+            b.choose(&e, &p, &setter);
+            crate::tests::block(&mut plugin, &mut c, 64);
+            landed(&plugin, name);
+        }
+        b.drawer_press(DrawerTarget::Key(PresetKey::Init), 0.0, &p, &setter);
+        crate::tests::block(&mut plugin, &mut c, 64);
+        landed(&plugin, "Init");
+        // The editor's turn glides.
+        p.cutoff.set_once(&setter, 0.9);
+        crate::tests::block(&mut plugin, &mut c, 64);
+        assert!(plugin.smooth.moving());
+        let voices = plugin.controls().panel.cutoff;
+        assert!(voices > 0.5 && voices < 0.9, "{voices}");
+        for _ in 0..22 {
+            crate::tests::block(&mut plugin, &mut c, 64);
+        }
+        landed(&plugin, "the turned knob, 30 ms on");
+        assert_eq!(plugin.controls().panel.cutoff.to_bits(), 0.9f64.to_bits());
     }
 
     #[test]
@@ -1478,6 +1575,104 @@ mod tests {
     /// NOTE PRIORITY and RETRIGGER are a preset's (the owner, 2026-10-10: "This item should be
     /// saved per patch"; R50): saved with the sound, set by a preset naming them (the factory's
     /// the owner made since), and LOW and off, the instrument's own, by one saved before them.
+    #[test]
+    fn the_arpeggiator_is_part_of_a_preset_and_off_in_one_that_does_not_name_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let p = Ca72Params::default();
+        let target = |e: &Entry, id: &str| {
+            targets(&p, e)
+                .into_iter()
+                .find(|(k, _)| *k == id)
+                .map(|(_, v)| v)
+        };
+        for id in [
+            "arp_on",
+            "arp_latch",
+            "arp_direction",
+            "arp_rate",
+            "arp_octaves",
+            "arp_gate",
+            "arp_swing",
+        ] {
+            assert!(values_now(&p).iter().any(|(k, _)| k == id), "{id}");
+        }
+        // Every factory preset: off, its settings their defaults.
+        for e in lib.entries().0 {
+            assert_eq!(target(&e, "arp_on"), Some(0.0), "{}", e.sound.name);
+            assert_eq!(
+                target(&e, "arp_rate"),
+                Some(p.arp_rate.default_normalized_value()),
+                "{}",
+                e.sound.name
+            );
+        }
+        let on = lib
+            .save(
+                "Arpeggio",
+                vec![
+                    ("arp_on".to_owned(), 1.0),
+                    ("arp_rate".to_owned(), 6.0),
+                    ("arp_gate".to_owned(), 25.0),
+                ],
+                None,
+            )
+            .unwrap();
+        assert_eq!(target(&on, "arp_on"), Some(1.0));
+        assert_eq!(
+            target(&on, "arp_rate"),
+            Some(
+                p.arp_rate
+                    .preview_normalized(crate::params::ArpRate::Eighth)
+            )
+        );
+        assert_eq!(target(&on, "arp_gate"), Some(0.25));
+        // Saved plain, as a session is: OCTAVES 4 and RANDOM, saved before OCTAVES went to 5 and
+        // ORDER came, are OCTAVES 4 and RANDOM still (R-ARP).
+        let before = lib
+            .save(
+                "Four Up Random",
+                vec![
+                    ("arp_octaves".to_owned(), 4.0),
+                    ("arp_direction".to_owned(), 3.0),
+                ],
+                None,
+            )
+            .unwrap();
+        let set = |id: &str| target(&before, id).unwrap();
+        assert_eq!(p.arp_octaves.preview_plain(set("arp_octaves")), 4);
+        assert_eq!(
+            p.arp_direction.preview_plain(set("arp_direction")),
+            crate::params::ArpDirection::Random
+        );
+    }
+
+    /// SAVE AS (and an agent's save: `save_sound`) keeps the arpeggiator's settings (R-ARP) and
+    /// AUTO GAIN's curve in force (R-AUTO-GAIN-DRIVE) together: read back, each as saved.
+    #[test]
+    fn a_saved_sound_keeps_its_arpeggiator_and_auto_gains_curve() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Ca72Params {
+            arp_on: nih_plug::prelude::BoolParam::new("Arpeggiator", true),
+            ..Ca72Params::default()
+        };
+        let db = [-5.0_f32, -9.0, -12.0, -14.0];
+        p.drive_curve.load_preset(db);
+        let lo = p.quality.value() == QualityMode::Lo;
+        let mut b = Browser::new(Library::at(dir.path()));
+        let e = b.save_sound("Arp And Curve", Vec::new(), &p).unwrap();
+        assert_eq!(e.sound.curve(lo), Some(db));
+        let read = Library::at(dir.path()).find("Arp And Curve").unwrap();
+        assert_eq!(read.sound.curve(lo), Some(db));
+        assert_eq!(
+            targets(&p, &read)
+                .into_iter()
+                .find(|(k, _)| *k == "arp_on")
+                .map(|(_, v)| v),
+            Some(1.0)
+        );
+    }
+
     #[test]
     fn note_priority_and_retrigger_are_part_of_a_preset() {
         let dir = tempfile::tempdir().unwrap();
