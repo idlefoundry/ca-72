@@ -480,12 +480,14 @@ fn offline() {
                             x.mended
                         );
                         eprintln!("{line}");
-                        // (Back at LO, its light voices take up from where they rested, their
-                        // oscillators at other phases than the reference's: HI then LO, without
-                        // ULTRA, differs by as much, up to 2.2 dB and 5.4 dB in a detuned
-                        // swarm such as Swarm Riser's.)
+                        // (A move through LO: the voices the other model plays rest meanwhile
+                        // and take up from where they rested, their oscillators at other phases
+                        // than the reference's. HI then LO, without ULTRA, differs by as much: up
+                        // to 2.2 dB and 5.4 dB in a detuned swarm such as Swarm Riser's.)
+                        let through_lo =
+                            m.start == Q::Lo || m.switches.iter().any(|&(_, q)| q == Q::Lo);
                         let (most_loud, most_high) =
-                            if end == Q::Lo { (3.0, 6.0) } else { (1.5, 3.0) };
+                            if through_lo { (3.0, 6.0) } else { (1.5, 3.0) };
                         if x.non_finite > 0
                             || x.mended > 0
                             || burst > 1.0

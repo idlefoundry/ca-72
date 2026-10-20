@@ -12,9 +12,9 @@
 //!   wiser), the voices' runs not heard, the block's time as a share of its period (mean, 99th
 //!   percentile, most), and the runs of samples that differ from the offline render.
 //! - `offline`: the same phrase whole, against other block sizes and the workers (shown);
-//!   every sample finite, the voices put back clean none, the output's mean (DC) in the silence after the
-//!   notes, and the loudest sample-to-sample step at each note's start and end against the
-//!   loudest step anywhere else (a click as a voice is taken or let go).
+//!   every sample finite, the voices put back clean none, and the loudest sample-to-sample
+//!   step at each note's start and end against the loudest step anywhere else (a click as a
+//!   voice is taken or let go).
 //!
 //! `CA72_ONLY`, a part of a sound's name. By hand:
 //! `cargo test --release -p ca72-plugin --test note_to_note -- --ignored --nocapture`.
@@ -298,10 +298,6 @@ fn offline() {
             }
             let same = differing.is_empty();
             let finite = base.l.iter().chain(&base.r).all(|v| v.is_finite());
-            // (The silence after the last notes: 7.95 s on, their releases run out.)
-            let tail = (7.95 * RATE) as usize;
-            let dc = base.l[tail..].iter().map(|&v| f64::from(v)).sum::<f64>()
-                / (base.l.len() - tail).max(1) as f64;
             // The loudest step within 2 ms of a note's start or end, and elsewhere.
             let near = |i: usize| edges.iter().any(|&e| i + 96 >= e && i <= e + 96);
             let (mut at_notes, mut elsewhere) = (0.0f32, 0.0f32);
@@ -324,7 +320,7 @@ fn offline() {
                 eprintln!("  {q} {name}: differs from 256 frames without workers at {d}");
             }
             eprintln!(
-                "{q} {name}: blocks and workers the same to the bit {same}, finite {finite}, mended {}, peak {:.1} dBFS, DC after the notes {dc:.2e}; loudest step at a note's start or end {:.4}, elsewhere {:.4}",
+                "{q} {name}: blocks and workers the same to the bit {same}, finite {finite}, mended {}, peak {:.1} dBFS; loudest step at a note's start or end {:.4}, elsewhere {:.4}",
                 base.mended,
                 20.0 * f64::from(peak).log10(),
                 at_notes,
