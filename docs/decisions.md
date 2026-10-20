@@ -12945,7 +12945,8 @@ drag cannot do (a switch, a STEPPED WAVEFORM, a timed FREQUENCY, a ninth knob, a
 - **An assignment stays where its knob cannot take one now** (a WAVEFORM made STEPPED again, a
   FREQUENCY timed), doing nothing until it can again, as a learned controller stays on a dimmed
   control; the agents' list marks it `inert`.
-- **The colours** (`lfo::Phosphor`): amber #FFB020, green #3DF288, blue #58A8FF, red #FF3388,
+- **The colours** (`lfo::Phosphor`; changed since by R-LFO-PAGE's check, which see): amber
+  #FFB020, green #3DF288, blue #58A8FF, red #FF3388,
   with violet and white for the palette. The owner's green and red were moved (the green towards
   blue a little, the red to a rose) because, simulated (Machado 2009, full severity), pure green
   and red were within ΔE 23 for deuteranopia and the first choice within 16; these four are at
@@ -13112,11 +13113,16 @@ simulated (Machado et al., 2009, full severity):
 
 | | normal | protanopia | deuteranopia | tritanopia |
 |---|---|---|---|---|
-| the night's first (amber FFB020, green 3CE8A0, blue 58A8FF, red FF5078) | 44.5 | 15.7 | 11.7 | 14.1 |
-| proposed (amber FFB020, green 26FFB7, blue 4C8CFF, red E63948) | 42.3 | 19.1 | 19.9 | 21.5 |
+| the engine's first (amber FFB020, green 3CE8A0, blue 58A8FF, red FF5078) | 44.5 | 15.7 | 11.7 | 14.1 |
+| the engine's R-LFO (amber FFB020, green 3DF288, blue 58A8FF, red FF3388) | 44.6 | 12.5 | 12.2 | 16.1 |
+| taken (amber FFB020, green 26FFB7, blue 4C8CFF, red E63948) | 42.3 | 19.1 | 19.9 | 21.5 |
 
-(the nearest pair under each). The colours are the engine's (`lfo::Phosphor::rgb`); the editor
-draws whatever they are.
+(the nearest pair under each). R-LFO's "at least ΔE 27" is CIE76, the plain distance in Lab,
+which overstates how far apart saturated colours look: in CIE76 too the taken four are farther
+apart (38.1 at their nearest, against 27.2). Amber is kept as the owner approved it; the green
+is brighter and leans further to teal, the blue deeper, the red a true red rather than a rose.
+The colours are the engine's (`lfo::Phosphor::rgb`, changed by its own commit); the editor draws
+whatever they are.
 
 **Evidence** (omarchy, load 11 to 12 from other agents' builds, so ± a third):
 - `examples/frames`, worn skin, at 0.44 / 0.87: the page's renderer made 0.02 ms; its first

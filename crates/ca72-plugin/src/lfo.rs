@@ -929,14 +929,16 @@ impl Phosphor {
         Phosphor::White,
     ];
 
-    /// Its glow, sRGB. The green leans to blue and the red to rose, so that the four
-    /// defaults stay apart for the commonest colour blindness (decisions.md R-LFO).
+    /// Its glow, sRGB. The four defaults stay apart under simulated protanopia, deuteranopia
+    /// and tritanopia (Machado et al., 2009): no pair nearer than 19 in CIEDE2000 under any of
+    /// them (the green bright and leaning to teal, the blue deep, the red a true red;
+    /// decisions.md R-LFO-PAGE has the table).
     pub fn rgb(self) -> [u8; 3] {
         match self {
             Phosphor::Amber => [0xff, 0xb0, 0x20],
-            Phosphor::Green => [0x3d, 0xf2, 0x88],
-            Phosphor::Blue => [0x58, 0xa8, 0xff],
-            Phosphor::Red => [0xff, 0x33, 0x88],
+            Phosphor::Green => [0x26, 0xff, 0xb7],
+            Phosphor::Blue => [0x4c, 0x8c, 0xff],
+            Phosphor::Red => [0xe6, 0x39, 0x48],
             Phosphor::Violet => [0xc0, 0x80, 0xff],
             Phosphor::White => [0xe4, 0xec, 0xf4],
         }
