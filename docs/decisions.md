@@ -11334,7 +11334,8 @@ assignment goes. The panel's controls wait for the owner's choice of mock-up
   bend every sample.
 - **Off is the instrument as before, to the bit.** With no expression, or every reach at 0 and
   no bend, the jacks and the wheel are not touched at all. The reaches are a preset's (saved
-  with the sound; a preset or a session saved before reads them 0) and in the MCP's table.
+  with the sound; a preset or a session saved before reads them 0), learnable knobs in MIDI
+  Learn's list (R34), and in the MCP's table.
 - **A per-computer setting, `mpe` in `settings.toml`**: `auto` (the default: the controller's
   configuration message), `lower` (a lower zone of fifteen always, for hosts that do not pass
   the message on) or `off`. Not yet in the settings menu.
@@ -11362,3 +11363,16 @@ and brightness note expressions through nih-plug's controller (change 16 tested 
 crate); raw MPE only where a host passes channel messages through VST3's MIDI mapping. AU: the
 clap-wrapper's MIDI, so raw MPE. Standalone: raw MPE from the MIDI input
 (`tests/standalone_adapter.rs`). None was tried in a real host or with a controller.
+
+**Evidence (Linux x86-64, ngspice 47, 2026-10-20).** `preset_render`, every factory preset, ten
+voices, against renders of `17f1b5f` from a worktree of its own: the same to the bit at HI, LO
+and ULTRA. Tests: each voice's samples with another note's expression the same to the bit as
+without (LO, HI, ULTRA); no expression or no reach, the output to the bit (the engine, and the
+plug-in given channel pressure, CC 74 and polyphonic aftertouch); CLAP's note expressions and MPE
+MIDI through the real CLAP entry the same samples, the one instrument and POLY; raw MPE into the
+standalone's production adapter the same as a host's note expressions, nothing allocated in its
+callbacks; `mpe_expression_neither_allocates_nor_frees` (`tests/realtime.rs`); the fuzz with
+every reach and expression at its ends. `CA72_REQUIRE_NGSPICE=1 cargo test --workspace
+--no-fail-fast --features ca72-plugin/standalone-production`: 924 passed, 1 failed, 74 ignored;
+the one, `ca72-fx-helper`'s `effects_that_crash_or_hang_as_they_load_never_hold_the_start_and_stay_off`,
+fails the same at `17f1b5f`.
