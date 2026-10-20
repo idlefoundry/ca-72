@@ -56,7 +56,11 @@ fn the_travel_gives_the_switchs_three_widths_exactly() {
         // (Within a ten-thousandth of a step, as a host's or a preset's rounding leaves it.)
         let nudged = t + 0.5e-4 / ca72::voice::RECT_STEPS;
         assert_eq!(rect_travel_bias(nudged), bias, "{bias} V nudged");
-        assert_eq!(rect_travel_bias(f64::from(t as f32)), bias, "{bias} V as f32");
+        assert_eq!(
+            rect_travel_bias(f64::from(t as f32)),
+            bias,
+            "{bias} V as f32"
+        );
     }
     assert_eq!(rect_travel_bias(1.0), RECT_FLOOR);
     assert_eq!(rect_travel_bias(2.0), RECT_FLOOR);
@@ -72,7 +76,10 @@ fn the_travel_gives_the_switchs_three_widths_exactly() {
         .map(|k| rect_duty(rect_travel_bias(f64::from(k) / 20.0)))
         .collect();
     assert!(d.windows(2).all(|w| w[1] < w[0]), "{d:?}");
-    assert!((d[0] - 0.484).abs() < 1e-6 && d[20] > 0.05 && d[20] < 0.08, "{d:?}");
+    assert!(
+        (d[0] - 0.484).abs() < 1e-6 && d[20] > 0.05 && d[20] < 0.08,
+        "{d:?}"
+    );
 }
 
 #[test]
@@ -185,7 +192,10 @@ fn pwm_sweeps_the_whole_travel_with_the_wheel_forward_and_none_with_it_back() {
         // Halfway, a smaller sweep about the travel's first half.
         let (lo, hi, _) = pwm_span(q, 0.5, light_voice, 3.0);
         eprintln!("{q:?} light {light_voice}: wheel half {lo:.3}..{hi:.3}");
-        assert!(hi - lo > 0.05 && hi - lo < 0.7 && hi < 0.75, "{q:?} half: {lo}..{hi}");
+        assert!(
+            hi - lo > 0.05 && hi - lo < 0.7 && hi < 0.75,
+            "{q:?} half: {lo}..{hi}"
+        );
     }
 }
 
@@ -246,7 +256,10 @@ fn the_pulse_still_comes_at_the_floor_across_the_keyboard() {
                 "{hz} Hz, {bias} V: duty {duty:.3} (law {:.3}), {falls:.2} falls a cycle",
                 rect_duty(bias)
             );
-            assert!((falls - 1.0).abs() < 0.1, "{hz} Hz {bias} V: {falls} falls a cycle");
+            assert!(
+                (falls - 1.0).abs() < 0.1,
+                "{hz} Hz {bias} V: {falls} falls a cycle"
+            );
             // (The edges' fixed delays add a little at the top of the keyboard.)
             let tol = if hz > 1_000.0 { 0.03 } else { 0.015 };
             assert!(

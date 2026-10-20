@@ -821,7 +821,13 @@ impl Renderer {
     /// on it as the whole background's is (worn into the face, the lamp over it), and the
     /// background's own pixels wherever the two prints' ink is the same, so that it lies
     /// without a seam.
-    fn print_part(&self, r: [i32; 4], surface: &Pixmap, plain: &str, printed: &str) -> Option<Pixmap> {
+    fn print_part(
+        &self,
+        r: [i32; 4],
+        surface: &Pixmap,
+        plain: &str,
+        printed: &str,
+    ) -> Option<Pixmap> {
         let mut part = surface.clone();
         let (w, h) = (part.width(), part.height());
         let s = self.scale;

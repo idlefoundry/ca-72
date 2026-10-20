@@ -1800,17 +1800,18 @@ impl Light {
                 // PWM (decisions.md R-VARIABLE-RECT): the line's swing at the wheel fully
                 // forward against oscillator 3's triangle's, a share of the width's travel as
                 // deep as the wheel is forward (the full voice's `pwm_u`).
-                let swing = (1.0 - mix_k) * o
-                    + mix_k * n * (laws::NOISE_SEMITONES_RMS / rms) as f32;
+                let swing =
+                    (1.0 - mix_k) * o + mix_k * n * (laws::NOISE_SEMITONES_RMS / rms) as f32;
                 let s = swing / -(laws::MOD_SWING[0] as f32);
                 let u = (0.5 * depth / self.set.depth_full * (1.0 + s)).clamp(0.0, 1.0);
                 self.pwm_u = u;
-                for o in 0..3 {
-                    if pwm[o] {
-                        let p = &self.panel;
-                        (self.osc[o].duty, self.osc[o].level) = rect_law(
-                            crate::voice::rect_bias(p.osc[o].waveform, p.rect[o], f64::from(u)),
-                        );
+                let p = &self.panel;
+                for ((osc, on), (panel, rect)) in
+                    self.osc.iter_mut().zip(pwm).zip(p.osc.iter().zip(p.rect))
+                {
+                    if on {
+                        (osc.duty, osc.level) =
+                            rect_law(crate::voice::rect_bias(panel.waveform, rect, f64::from(u)));
                     }
                 }
             }

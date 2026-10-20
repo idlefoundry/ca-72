@@ -425,7 +425,8 @@ impl WaveformSwitch {
         if k < 3 {
             k as f64
         } else {
-            3.0 + f64::from(self.width().unmodulated_normalized_value()) * ca72_panel::art::RECT_STEPS
+            3.0 + f64::from(self.width().unmodulated_normalized_value())
+                * ca72_panel::art::RECT_STEPS
         }
     }
 
@@ -439,10 +440,14 @@ impl WaveformSwitch {
         let t = f64::from(self.width().unmodulated_normalized_value());
         let duty = (100.0 * crate::params::rect_duty_at(t)).round();
         let past = t * ca72_panel::art::RECT_STEPS;
-        let name = [(0.0, "Square"), (1.0, "Wide Rectangle"), (2.0, "Narrow Rectangle")]
-            .iter()
-            .find(|(at, _)| (past - at).abs() < 1e-4)
-            .map_or("Rectangle", |(_, n)| *n);
+        let name = [
+            (0.0, "Square"),
+            (1.0, "Wide Rectangle"),
+            (2.0, "Narrow Rectangle"),
+        ]
+        .iter()
+        .find(|(at, _)| (past - at).abs() < 1e-4)
+        .map_or("Rectangle", |(_, n)| *n);
         format!("{name} {duty:.0} %")
     }
 }
@@ -3776,7 +3781,9 @@ impl Editing {
             // A WAVEFORM switch VARIABLE: where its WAVEFORM is, its pointer past SQUARE where
             // its width is (`scene.rect`), the parameters following a drag as it goes.
             if self.variable_switch(i)
-                && let Some(n) = ca72_panel::render::WAVEFORMS.iter().position(|w| *w == c.param)
+                && let Some(n) = ca72_panel::render::WAVEFORMS
+                    .iter()
+                    .position(|w| *w == c.param)
             {
                 self.scene.values[i] = f64::from(self.waveforms[n].waveform().value());
                 continue;
@@ -10838,7 +10845,11 @@ mod tests {
         let (key1, key2) = (index("osc1_pwm"), index("osc2_pwm"));
         assert!(e.operable(key1) && !e.operable(key2));
         let (x, y) = centre("osc2_pwm");
-        assert_ne!(e.hit(x, y), Some(Target::Control(key2)), "a hidden key found");
+        assert_ne!(
+            e.hit(x, y),
+            Some(Target::Control(key2)),
+            "a hidden key found"
+        );
         let (x, y) = centre("osc1_pwm");
         assert_eq!(e.hit(x, y), Some(Target::Control(key1)));
         // The tip at SQUARE: its name and duty cycle.
@@ -10853,7 +10864,13 @@ mod tests {
         let p = at(&e, centre("osc1_waveform"));
         go(&mut e, p);
         press(&mut e);
-        go(&mut e, Point { x: p.x + 45.0, y: p.y });
+        go(
+            &mut e,
+            Point {
+                x: p.x + 45.0,
+                y: p.y,
+            },
+        );
         release(&mut e);
         let calls = host.take();
         let (wave, width) = (params.osc1_waveform.as_ptr(), params.osc1_width.as_ptr());

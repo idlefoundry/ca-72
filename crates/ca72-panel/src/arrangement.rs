@@ -1089,7 +1089,13 @@ mod tests {
     #[test]
     fn a_layout_made_before_the_timed_keys_gets_them() {
         let mut text = OFFICIAL.replacen("controls = 3", "controls = 1", 1);
-        for key in ["osc2_timed", "osc3_timed", "osc1_pwm", "osc2_pwm", "osc3_pwm"] {
+        for key in [
+            "osc2_timed",
+            "osc3_timed",
+            "osc1_pwm",
+            "osc2_pwm",
+            "osc3_pwm",
+        ] {
             let start = text.find(&format!("param = \"{key}\"")).expect("there");
             let block = text[..start].rfind("[[control]]").expect("its block");
             let end = start + text[start..].find("\n\n").expect("its end");
@@ -1097,7 +1103,13 @@ mod tests {
         }
         let mut report = Report::default();
         let a = Arrangement::read(&text, &mut report).unwrap_or_else(|| panic!("{report}"));
-        for key in ["osc2_timed", "osc3_timed", "osc1_pwm", "osc2_pwm", "osc3_pwm"] {
+        for key in [
+            "osc2_timed",
+            "osc3_timed",
+            "osc1_pwm",
+            "osc2_pwm",
+            "osc3_pwm",
+        ] {
             let i = crate::controls::index(key).expect("a control");
             assert_eq!(
                 (a.controls[i].x, a.controls[i].y),
