@@ -333,6 +333,7 @@ dependencies = [
  "clap-sys",
  "cocoa",
  "keyboard-types",
+ "libc",
  "libm",
  "nih_plug",
  "objc",
