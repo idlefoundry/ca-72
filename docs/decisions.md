@@ -12572,3 +12572,92 @@ or a session saved before reads every TIMED off and every DIVISION a quarter not
   failed in full runs on a loaded machine: two timed tests ran instances at ULTRA, whose split
   crews draw on the process's workers, without the budget lock the other such tests take. They
   take it now; the full run passed twice under load.
+
+## R-VARIABLE-RECT. A variable rectangle, and PWM, beside the switch's three
+
+**Owner, 2026-10-20:** "How hard would it be to add a proper pulse width modulation to this Moog
+circuit? So instead of having three different square and rectangle wave selections, what if it
+was just a continuous selection ... this would be an alternative mode. So the user would be able
+to switch between this discrete selector and also have the option of doing the variable square
+wave continuous option. It would be like you right click on the knob and then you can switch the
+mode. And of course, as always, the circuit needs to be unaffected for the original mode and
+needs to deliver the exact same audio."
+
+**The circuit already turns its width by a voltage.** The WAVEFORM switch's second pole sets the
+rectangle's width bias from a divider between ground and -10 V (R034, R033, R032): 0, -1.5 and
+-2.5 V into Q11's comparator through R40/R1 (board1.md, item 9). The model takes that bias as a
+number (`Vco::tick`'s `width`): VARIABLE gives it any value between the square's 0 V and a floor,
+a pot in place of the divider's three taps.
+
+**Narrower only, to a floor short of silence (the owner):** "What if we didn't do the positive
+bias? What if we just did 50% down to 10%" (no bias the divider cannot give; a 90 % pulse is a
+10 % pulse inverted, the same harmonics), then "I could see us going down to -3.5 volts then. I
+don't like it when the pulse goes to basically zero in terms of audibility. But keeping around
+-3.5 and 5% width roughly is still an audible signal." The floor, [`RECT_FLOOR`], is -3.45 V
+(about 6.4 %): the pulse stops coming where the reset no longer lifts the buffer past the
+comparator's rising threshold, about -3.57 V in the model; [ngspice sweep result here]. Knob and
+PWM together never pass it.
+
+**The switch (the owner):** "The drawings can look the exact same. It would just be the first
+waveforms would all be discrete and click into place. But then once you enter into the square
+territory, it would just allow the user to sweep anywhere in that range and go beyond." In
+VARIABLE the triangle, shark tooth (reverse sawtooth) and sawtooth step as ever; from SQUARE the
+switch turns without steps through WIDE and NARROW and on past NARROW to the floor, about 30
+degrees beyond NARROW's 3 o'clock. Each stretch between the switch's ticks is straight in the
+bias, so the ticks are the switch's three widths exactly (the owner: "I like your idea of them
+being able to click on the waveform and end up at the exact place. That the original circuit had
+the pulse wave at"): a legend clicked lands there, and there VARIABLE is the switch to the bit
+(`tests/variable_rect.rs`). Its travel, a parameter of its own per oscillator (`oscN_width`, 0 at
+the square to 1 at the floor, shown as the duty cycle), snaps to a tick within a ten-thousandth
+of a step, so a host's or a preset's rounding still lands on it.
+
+**Which mode it is in: the hairline arc (the owner, choosing among three mock-ups, nothing on the
+panel, an arc, the width in the hover tip):** "I love the arc. I think it's very elegant and I
+like that users just have to right click on it and be able to switch from steps to variable."
+A thin line in the legends' ink (2.4 units) through the ticks' ring from the SQUARE tick round
+through WIDE and NARROW to a short tick at the floor, printed only while that switch is VARIABLE:
+the switch's place printed again with it, worn into the face as the print is, and laid over the
+background while it is VARIABLE (R-OSC-TIMED's timed dials' way, `Renderer::print_part`). The hover tip shows the width in
+VARIABLE ("OSCILLATOR-1 WAVEFORM: Rectangle 24 %"); the switch's menu has a RECTANGLE group,
+STEPPED and VARIABLE.
+
+**PWM (the owner):** "pulse width modulation is really important thing in synthesis in general,
+so I think we should absolutely include that." Its source and depth are the Moog's own: the
+modulation line, MODULATION MIX's blend of oscillator 3 and the noise through the MODULATION
+wheel, taken through a buffer (it loads nothing: OSCILLATOR and FILTER MODULATION stay as they
+were). It narrows the pulse only, from where the switch is: the switch is the sweep's widest
+point; oscillator 3's triangle with the wheel fully forward sweeps the whole travel, square to
+floor; nothing with the wheel back. The depth is the line's gain against its gain with the wheel
+fully forward, with the same loads; the swing is measured against oscillator 3's triangle at its
+switch's output through MODULATION MIX at oscillator 3. Only an oscillator in VARIABLE with its
+PWM on follows it.
+
+**Its key (the owner, choosing among four mock-ups: a third modulation switch above OSCILLATOR
+MODULATION, OSCILLATOR MODULATION's menu choosing what it modulates, a round button by each
+switch, and the timed keys' key under each switch):** of the round button, "I would write "PWM"
+beside that button"; then of the key: "So far, I think option D is the best. And I think it
+should only appear when the oscillators are in this variable mode." Each oscillator's PWM key is
+R-OSC-TIMED's key, the strip's amber tab, directly beneath its WAVEFORM switch, PWM printed to
+its right where the timed key prints its note; it is on the panel only while its oscillator is
+VARIABLE (not drawn, not found by the pointer, its shadow its own rather than the background's).
+The panel's controls' revision 3 (`CONTROL_SET`): a layout made before is given the keys at their
+official places. The first choice, a third switch above OSCILLATOR MODULATION ("let's just try and add
+it as another switch"), was set aside for it.
+
+**The comparator against a moving width.** A fixed width meets the ramp only as the ramp crosses
+its thresholds and at the reset; a moving one can pass the ramp. With VARIABLE, a width that has
+just moved past the falling ramp while the rectangle is high makes it fall (after its delay), and
+a rising threshold moved under the buffer while it is low makes it rise, as the circuit's
+comparator does (`Vco::follow_width`). It acts only when the width changed from the last sample,
+so a still width is the switch's to the bit.
+
+**The light voice (LO).** Its rectangles' duty cycles and levels (`laws::DUTY`, `SQUARE`, `WIDE`,
+`NARROW`, fitted to the full voice) are kept exactly at the switch's three and drawn straight
+between them in the bias, and on past NARROW at the slope from WIDE to it (`light::rect_law`):
+within about a percent of the full voice's duty from 55 Hz to 4 kHz. Its PWM follows the same
+measure from its own modulation (oscillator 3's swing, the noise's) and agrees with the full
+voice's (correlation 0.98 over two seconds of oscillator 3's triangle).
+
+**Compatibility.** A session or preset saved before plays STEPPED, width at the square, PWM off.
+With every oscillator STEPPED nothing in the engine differs: the factory presets render the same
+to the bit.

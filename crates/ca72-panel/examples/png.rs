@@ -121,6 +121,31 @@ fn main() {
     if std::env::var("CA72_TIP").is_ok_and(|v| v == "1") {
         scene.tip = Some(("CUTOFF FREQUENCY: 1.2 kHz".into(), 2081.0, 300.0));
     }
+    // `CA72_VARIABLE=1:1.3,3:2.8`: oscillators 1 and 3 VARIABLE, turned 1.3 and 2.8 steps past
+    // SQUARE (R-VARIABLE-RECT); `CA72_PWM=1`: oscillator 1's PWM key on.
+    for kv in std::env::var("CA72_VARIABLE")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+    {
+        let (n, past) = kv.split_once(':').expect("oscillator:steps");
+        let n: usize = n.parse::<usize>().expect("1 to 3") - 1;
+        scene.rect[n] = ca72_panel::render::Rectangle {
+            variable: true,
+            past_square: past.parse().expect("steps"),
+        };
+        let i = ca72_panel::controls::index(ca72_panel::render::WAVEFORMS[n]).expect("there");
+        scene.values[i] = 0.6;
+    }
+    for n in std::env::var("CA72_PWM")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+    {
+        let n: usize = n.parse::<usize>().expect("1 to 3") - 1;
+        let i = ca72_panel::controls::index(ca72_panel::render::PWM_KEYS[n]).expect("there");
+        scene.values[i] = 1.0;
+    }
     let t1 = std::time::Instant::now();
     r.render(&scene);
     let first = t1.elapsed();

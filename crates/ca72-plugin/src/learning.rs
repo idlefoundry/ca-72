@@ -124,6 +124,9 @@ pub enum Item {
     Lettering(Lettering),
     Dials(Law),
     Head,
+    /// A WAVEFORM switch's (decisions.md R-VARIABLE-RECT): its oscillator's rectangle STEPPED
+    /// (false) or VARIABLE.
+    Rect(usize, bool),
     StandaloneSettings,
     WhatsNew,
     /// The settings' WINDOW: SIZE…, the SIZE menu wanted (R-SIZE).
@@ -165,6 +168,8 @@ pub enum Pressed {
     List(Option<usize>),
     /// QUALITY's menu: its indicator shown (true), or hidden.
     Indicator(bool),
+    /// A WAVEFORM switch's menu: its oscillator's rectangle STEPPED (false) or VARIABLE.
+    Rect(usize, bool),
     /// The settings' menu: the editor drawn in this look.
     Look(Skin),
     /// The settings' menu: the editor drawn in this installed pack's look.
@@ -219,6 +224,9 @@ pub struct Learning {
     /// Which of oscillators 2's and 3's FREQUENCY knobs turn their DIVISION now (decisions.md
     /// R-OSC-TIMED): what a menu opened on one learns.
     pub timed: [bool; 2],
+    /// Which oscillators' rectangles are VARIABLE (decisions.md R-VARIABLE-RECT): the one its
+    /// WAVEFORM switch's menu marks.
+    pub variable: [bool; 3],
 }
 
 /// A parameter's name.
@@ -312,14 +320,25 @@ impl Learning {
                 } else {
                     (Item::Learn, "MIDI LEARN")
                 };
-                (
-                    format!("{} · {cc}", label(i)),
-                    vec![
-                        learn,
-                        (Item::Remove, "REMOVE MIDI ASSIGNMENT"),
-                        (Item::List, "MIDI ASSIGNMENTS…"),
-                    ],
-                )
+                let mut items = vec![
+                    learn,
+                    (Item::Remove, "REMOVE MIDI ASSIGNMENT"),
+                    (Item::List, "MIDI ASSIGNMENTS…"),
+                ];
+                // A WAVEFORM switch's: its rectangle STEPPED or VARIABLE, under their head
+                // (decisions.md R-VARIABLE-RECT; the owner: "you right click on the knob and then
+                // you can switch the mode").
+                if let Some(n) = ["osc1_waveform", "osc2_waveform", "osc3_waveform"]
+                    .iter()
+                    .position(|w| LEARNABLE.get(i).is_some_and(|l| l.id == *w))
+                {
+                    items.extend([
+                        (Item::Head, "RECTANGLE"),
+                        (Item::Rect(n, false), "STEPPED"),
+                        (Item::Rect(n, true), "VARIABLE"),
+                    ]);
+                }
+                (format!("{} · {cc}", label(i)), items)
             }
             None => match not.and_then(not_learnable) {
                 Some(t) => (
@@ -346,14 +365,26 @@ impl Learning {
                 .map(|(it, t)| {
                     let enabled = match it {
                         Item::Remove => assigned,
-                        Item::Not => false,
+                        Item::Not | Item::Head => false,
+                        // (The mode it is in marked, not chosen again.)
+                        Item::Rect(n, v) => self.variable[*n] != *v,
                         _ => true,
                     };
                     ((*t).to_owned(), enabled)
                 })
                 .collect(),
-            heads: Vec::new(),
-            marked: Vec::new(),
+            heads: items
+                .iter()
+                .enumerate()
+                .filter(|(_, (it, _))| *it == Item::Head)
+                .map(|(k, _)| k)
+                .collect(),
+            marked: items
+                .iter()
+                .enumerate()
+                .filter(|(_, (it, _))| matches!(it, Item::Rect(n, v) if self.variable[*n] == *v))
+                .map(|(k, _)| k)
+                .collect(),
             hover: None,
         }
         .placed(fonts, x, y, PANEL);
@@ -780,6 +811,7 @@ impl Learning {
             (Some(Item::Cancel), _) => self.cancel(map),
             (Some(Item::Remove), Some(i)) => self.remove(map, i),
             (Some(Item::List), l) => return Pressed::List(l.filter(|&i| i != MOD_WHEEL)),
+            (Some(Item::Rect(n, variable)), _) => return Pressed::Rect(*n, *variable),
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,

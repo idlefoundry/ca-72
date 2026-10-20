@@ -860,6 +860,64 @@ pub fn dials_print(layout: &Layout, arrangement: &Arrangement) -> String {
     s.0
 }
 
+/// Where a WAVEFORM switch's arc is about its centre (decisions.md R-VARIABLE-RECT): from
+/// SQUARE's tick round to the floor's, over the ticks' ring and the floor's tick, a little over
+/// for the print's stroke and its blur into the face.
+pub const ARC_EXTENT: [f64; 4] = [12.0, -76.0, 80.0, 40.0];
+
+/// Oscillator `n`'s WAVEFORM switch's print alone (its ticks and legends), as `arrangement`
+/// places it, and its arc with `arc` (decisions.md R-VARIABLE-RECT): the switch's place
+/// printed VARIABLE or STEPPED (`Renderer::arc_part`).
+pub fn waveform_print(layout: &Layout, arrangement: &Arrangement, n: usize, arc: bool) -> String {
+    let mut s = Svg(String::new(), layout.lettering);
+    put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
+    let param = ["osc1_waveform", "osc2_waveform", "osc3_waveform"][n];
+    if let Some(c) = arrangement
+        .controls
+        .iter()
+        .find(|c| c.param == param && c.place == Place::Panel)
+        && let Kind::Selector(set) = c.kind
+    {
+        selector_marks(&mut s, c, set, layout);
+        if arc {
+            rect_arc(&mut s, c.x, c.y);
+        }
+    }
+    s.0.push_str("</g>");
+    s.0
+}
+
+/// VARIABLE's arc about a WAVEFORM switch at (x, y) (the owner, 2026-10-20: "I love the arc. I
+/// think it's very elegant"): a hairline in the legends' ink through the ticks' ring from
+/// SQUARE's tick round through WIDE's and NARROW's to a short tick at the floor.
+fn rect_arc(s: &mut Svg, x: f64, y: f64) {
+    let r = (SIX_TICK.0 + SIX_TICK.1) / 2.0;
+    let end = rect_angle(RECT_STEPS);
+    let (x0, y0) = polar(r, SIX[3]);
+    let (x1, y1) = polar(r, end);
+    let (a0, b0) = polar(SIX_TICK.0 + 2.5, end);
+    let (a1, b1) = polar(SIX_TICK.1 - 2.5, end);
+    put!(
+        s,
+        "<g transform='translate({} {})'><path d='M {} {} A {} {} 0 0 1 {} {}' fill='none' stroke='{LEGEND}' stroke-width='{ARC_W}'/><line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{LEGEND}' stroke-width='{ARC_W}'/></g>",
+        N(x),
+        N(y),
+        N(x0),
+        N(y0),
+        N(r),
+        N(r),
+        N(x1),
+        N(y1),
+        N(a0),
+        N(b0),
+        N(a1),
+        N(b1)
+    );
+}
+
+/// The arc's stroke, units (the approved mock-up's: about a pixel at the opening size).
+const ARC_W: f64 = 2.4;
+
 pub fn panel_print(layout: &Layout, arrangement: &Arrangement) -> String {
     let mut s = Svg(String::new(), layout.lettering);
     panel(&mut s, layout, arrangement, Ink::Print);
@@ -1405,9 +1463,9 @@ fn toggle_body(s: &mut Svg, i: usize) {
     }
 }
 
-fn selector_body(s: &mut Svg, i: usize) {
+fn selector_body(s: &mut Svg, angle: f64) {
     shadow(s, 3.0, 5.0, 57.0);
-    put!(s, "<g transform='rotate({})'>", N(SIX[i]));
+    put!(s, "<g transform='rotate({})'>", N(angle));
     fluted(s, 56.0);
     put!(
         s,
@@ -1625,11 +1683,11 @@ pub const KEY_SIGN_TOP: f64 = 26.0;
 pub fn bounds(kind: &Kind) -> [f64; 4] {
     match *kind {
         // (The cap and its light round it, and the sign printed to its right: a note centred on
-        // it, its stem and flags at their natural length above and below.)
+        // it, its stem and flags at their natural length above and below; or a PWM key's word.)
         Kind::Key => [
             -KEY.0 / 2.0 - 8.0,
             -KEY_SIGN_TOP,
-            KEY_SIGN + 40.0,
+            KEY_SIGN + 56.0,
             KEY_SIGN_TOP,
         ],
         Kind::Knob { big, .. } => {
@@ -1718,6 +1776,46 @@ pub fn wheel_shown(detent: bool, v: f64, midi: f64) -> f64 {
     }
 }
 
+/// The selector `c` with its pointer at `angle` (degrees from twelve o'clock), in the worn skin
+/// or the drawn: at one of its six places ([`SIX`]), or anywhere VARIABLE's rectangle turns it
+/// past SQUARE (decisions.md R-VARIABLE-RECT).
+pub fn selector_turned(c: &Control, angle: f64, worn: bool) -> Layer {
+    use crate::skin::{POINTER_BODY, POINTER_CAP};
+    let (origin, bounds) = (c.centre(), bounds(&c.kind));
+    if worn {
+        let d = 2.0 * SELECTOR_R / POINTER_BODY;
+        return Layer {
+            origin,
+            bounds,
+            sprites: vec![
+                sprite(Part::Pointer, (d, d), angle, (false, false)),
+                sprite(Part::PointerCap, (d, d), CAP_TURN, (false, false)),
+            ],
+            overlays: round_lights(SELECTOR_R, d / 2.0 * POINTER_CAP),
+            round: true,
+            ..Layer::default()
+        };
+    }
+    let mut s = Svg::default();
+    selector_body(&mut s, angle);
+    Layer {
+        origin,
+        bounds,
+        body: s.0,
+        ..Layer::default()
+    }
+}
+
+/// VARIABLE's travel past SQUARE in the switch's steps (decisions.md R-VARIABLE-RECT): to WIDE
+/// and NARROW one each, then on to the floor at NARROW's volts a step (the engine's
+/// `voice::RECT_STEPS`, which the plug-in's tests hold this to).
+pub const RECT_STEPS: f64 = 2.95;
+
+/// The angle of a WAVEFORM switch `past` steps beyond SQUARE (VARIABLE's travel).
+pub fn rect_angle(past: f64) -> f64 {
+    SIX[3] + past.clamp(0.0, RECT_STEPS) * (SIX[1] - SIX[0])
+}
+
 /// A control at its normalized value `v` (a wheel moved on by `midi`).
 pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
     let mut s = Svg::default();
@@ -1726,7 +1824,7 @@ pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
         Kind::Knob { big, .. } => {
             knob_body(&mut s, if big { BIG } else { STD }, -150.0 + 300.0 * v)
         }
-        Kind::Selector(_) => selector_body(&mut s, position(v)),
+        Kind::Selector(_) => selector_body(&mut s, SIX[position(v)]),
         Kind::Toggle { across, .. } => {
             let at = crate::interact::toggle_position(v);
             if across {
@@ -2082,7 +2180,7 @@ fn sprite(part: Part, size: (f64, f64), deg: f64, flip: (bool, bool)) -> Sprite 
 /// as the drawn one is (the light on its spun cap and the lamp's over it not turned), a
 /// rocker's picture pressed at its end; the wheels as drawn.
 pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
-    use crate::skin::{BIG_CAP, BIG_SKIRT, KNOB_CAP, KNOB_SKIRT, POINTER_BODY, POINTER_CAP};
+    use crate::skin::{BIG_CAP, BIG_SKIRT, KNOB_CAP, KNOB_SKIRT};
     let v = v.clamp(0.0, 1.0);
     let (origin, bounds) = (c.centre(), bounds(&c.kind));
     match c.kind {
@@ -2105,20 +2203,7 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
                 ..Layer::default()
             }
         }
-        Kind::Selector(_) => {
-            let d = 2.0 * SELECTOR_R / POINTER_BODY;
-            Layer {
-                origin,
-                bounds,
-                sprites: vec![
-                    sprite(Part::Pointer, (d, d), SIX[position(v)], (false, false)),
-                    sprite(Part::PointerCap, (d, d), CAP_TURN, (false, false)),
-                ],
-                overlays: round_lights(SELECTOR_R, d / 2.0 * POINTER_CAP),
-                round: true,
-                ..Layer::default()
-            }
-        }
+        Kind::Selector(_) => selector_turned(c, SIX[position(v)], true),
         // QUALITY's chrome toggle: its picture for the lever's place. NOTE PRIORITY's on its
         // side: the picture mirrored about its diagonal (flipped, then turned a quarter), so
         // that its light still comes from the upper left; its lever up to the left.
@@ -2221,6 +2306,11 @@ pub struct Keyed {
     pub on: bool,
     pub inert: bool,
     pub division: usize,
+    /// A word printed beside it instead of a note value: a PWM key's (decisions.md
+    /// R-VARIABLE-RECT).
+    pub word: Option<&'static str>,
+    /// Not on the panel at all: a PWM key while its oscillator's rectangle is STEPPED.
+    pub hidden: bool,
 }
 
 impl Default for Keyed {
@@ -2230,8 +2320,16 @@ impl Default for Keyed {
             on: false,
             inert: false,
             division: 8,
+            word: None,
+            hidden: false,
         }
     }
+}
+
+/// Whether a key comes and goes from the panel (each oscillator's PWM key, R-VARIABLE-RECT),
+/// rather than always standing on it: its cap's shadow is then its own, not the background's.
+pub fn comes_and_goes(c: &Control) -> bool {
+    c.kind == Kind::Key && c.param.ends_with("_pwm")
 }
 
 /// An oscillator's TIMED key (decisions.md R-OSC-TIMED), in either skin the strip's amber tab
@@ -2241,9 +2339,27 @@ impl Default for Keyed {
 /// does nothing, its sign with it.
 /// (`times`: the multiplication sign as the typeface prints it, [`Layout::times`].)
 pub fn key(c: &Control, k: Keyed, lettering: Lettering, times: &str, worn: bool) -> Layer {
+    if k.hidden {
+        return Layer {
+            origin: c.centre(),
+            bounds: bounds(&Kind::Key),
+            ..Layer::default()
+        };
+    }
     let lit = k.on && !k.inert;
     let (w, h) = KEY;
     let mut s = Svg::default();
+    if comes_and_goes(c) {
+        // Its cap's shadow, which the background has for a key always on the panel.
+        put!(
+            s,
+            "<defs><filter id='key-shadow' x='-0.5' y='-1' width='2' height='3'><feGaussianBlur stdDeviation='1.6'/></filter></defs><rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.35' filter='url(#key-shadow)'/>",
+            N(-w / 2.0 + 1.0),
+            N(-h / 2.0 + 2.0),
+            N(w + 2.0),
+            N(h + 2.0)
+        );
+    }
     if lit {
         // Its light on the face round it: a soft amber, faint (the owner is sensitive to
         // brightness; the strip's tabs' light, at this size).
@@ -2268,13 +2384,26 @@ pub fn key(c: &Control, k: Keyed, lettering: Lettering, times: &str, worn: bool)
         N(KEY_SIGN),
         N(opacity)
     );
-    note_sign(
-        &mut s,
-        k.division,
-        sign_head(lettering),
-        lettering.number(),
-        times,
-    );
+    match k.word {
+        // (Its capitals' middle on the key's, as the panel's legends beside a control.)
+        Some(word) => text(
+            &mut s,
+            0.0,
+            0.0,
+            word,
+            lettering.legend(),
+            Style::Legend,
+            true,
+            "",
+        ),
+        None => note_sign(
+            &mut s,
+            k.division,
+            sign_head(lettering),
+            lettering.number(),
+            times,
+        ),
+    }
     s.0.push_str("</g>");
     let over = if k.inert {
         format!(
@@ -2613,7 +2742,9 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
                 N(w + 3.0),
                 N(h + 3.0)
             ),
-            // A TIMED key's cap's, a small one: it stands on the face.
+            // A TIMED key's cap's, a small one: it stands on the face. (A PWM key's is its own:
+            // it comes and goes.)
+            Kind::Key if comes_and_goes(c) => {}
             Kind::Key => put!(
                 s,
                 "<rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.35' filter='url(#softer)'/>",

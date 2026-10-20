@@ -679,6 +679,18 @@ impl Plugin for Ca72 {
                 .entry(format!("osc{n}_division"))
                 .or_insert(ParamValue::I32(quarter));
         }
+        // And before VARIABLE's rectangles: each oscillator STEPPED, the instrument's switch,
+        // its width at the square and its PWM off (decisions.md R-VARIABLE-RECT).
+        for n in 1..=3 {
+            let stepped = d.osc1_rect.default_plain_value().to_index() as i32;
+            for (id, v) in [
+                (format!("osc{n}_rect"), ParamValue::I32(stepped)),
+                (format!("osc{n}_width"), ParamValue::F32(0.0)),
+                (format!("osc{n}_pwm"), ParamValue::Bool(false)),
+            ] {
+                state.params.entry(id).or_insert(v);
+            }
+        }
         // And before RETRIGGER: off, single triggering, the instrument's own.
         if !state.params.contains_key("retrigger") {
             state

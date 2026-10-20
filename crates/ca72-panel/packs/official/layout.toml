@@ -13,7 +13,7 @@
 
 format = 1
 # The revision of the CA-72's panel controls this layout was made for.
-controls = 2
+controls = 3
 
 [fixtures]
 # POWER's switch, its lamp and OVERLOAD's lamp: centres.
@@ -104,6 +104,18 @@ at = [617, 454]
 [[control]]
 param = "osc3_timed"
 at = [617, 660]
+
+[[control]]
+param = "osc1_pwm"
+at = [1021, 247]
+
+[[control]]
+param = "osc2_pwm"
+at = [1021, 454]
+
+[[control]]
+param = "osc3_pwm"
+at = [1021, 660]
 
 # MIXER.
 [[control]]

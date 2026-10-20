@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 75] = [
+pub const LEARNABLE: [Learnable; 84] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -178,6 +178,16 @@ pub const LEARNABLE: [Learnable; 75] = [
     knob("pressure_filter", "PRESSURE TO FILTER"),
     knob("timbre_mod", "TIMBRE TO MODULATION"),
     knob("timbre_filter", "TIMBRE TO FILTER"),
+    // Each oscillator's rectangle (R-VARIABLE-RECT).
+    switch("osc1_rect", "OSCILLATOR-1 RECTANGLE (STEPPED or VARIABLE)"),
+    knob("osc1_width", "OSCILLATOR-1 WIDTH"),
+    switch("osc1_pwm", "OSCILLATOR-1 PWM"),
+    switch("osc2_rect", "OSCILLATOR-2 RECTANGLE (STEPPED or VARIABLE)"),
+    knob("osc2_width", "OSCILLATOR-2 WIDTH"),
+    switch("osc2_pwm", "OSCILLATOR-2 PWM"),
+    switch("osc3_rect", "OSCILLATOR-3 RECTANGLE (STEPPED or VARIABLE)"),
+    knob("osc3_width", "OSCILLATOR-3 WIDTH"),
+    switch("osc3_pwm", "OSCILLATOR-3 PWM"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -1009,6 +1019,15 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
+        "osc1_rect" => &p.osc1_rect,
+        "osc1_width" => &p.osc1_width,
+        "osc1_pwm" => &p.osc1_pwm,
+        "osc2_rect" => &p.osc2_rect,
+        "osc2_width" => &p.osc2_width,
+        "osc2_pwm" => &p.osc2_pwm,
+        "osc3_rect" => &p.osc3_rect,
+        "osc3_width" => &p.osc3_width,
+        "osc3_pwm" => &p.osc3_pwm,
         _ => return None,
     })
 }
@@ -1062,6 +1081,9 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
+        "osc1_width" => &p.osc1_width,
+        "osc2_width" => &p.osc2_width,
+        "osc3_width" => &p.osc3_width,
         _ => return None,
     })
 }
@@ -1182,8 +1204,9 @@ mod tests {
             ),
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
             // ON and HOLD switches; the expression's four reaches, knobs: R-MPE; oscillators
-            // 2's and 3's timed DIVISION and TIMED.)
-            (33, 13, 27)
+            // 2's and 3's timed DIVISION and TIMED; each oscillator's rectangle: its WIDTH knob,
+            // its STEPPED or VARIABLE and its PWM switches.)
+            (36, 13, 33)
         );
     }
 
