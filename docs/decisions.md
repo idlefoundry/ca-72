@@ -11923,4 +11923,5 @@ or a session saved before reads every TIMED off and every DIVISION a quarter not
   `an_old_session_opens_with_the_oscillators_free`. MIDI Learn: OSC. 1, 2 and 3 TIMED switches,
   their DIVISION stepped. The agents: `osc1_timed` to `osc3_division` (docs/mcp.md).
 - Off, the sound is the code's before to the bit: `preset_render`, the 19 factory presets with
-  POLY's ten voices, at HI, LO and ULTRA against 47a987f.
+  POLY's ten voices, at HI, LO and ULTRA against 47a987f ("every preset the same to the bit"), for
+  oscillator 3 alone and again with all three oscillators' keys off.
