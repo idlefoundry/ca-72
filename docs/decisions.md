@@ -12332,6 +12332,18 @@ that it stands as tall as their capitals), beside the key; the mock-ups show it 
 choose. Option B." Each key is on the panel at every RANGE; away from LO it is dimmed and does
 not answer the pointer, as VOICES where it does nothing (R64), and is unlit whatever it holds.
 
+**Then only at LO (the owner, the same day, reversing that to option A):** "I think they should
+disappear if they're not, if it's not on low mode. Otherwise, it's just kind of cluttering the
+interface. And we're doing the exact same thing on the mod feature. Like when the dial is not in
+continuous mode, we do not have the mod button showing." (The mod feature is the PWM key of
+R-VARIABLE-RECT, on the panel only while its oscillator's rectangle is VARIABLE.) Away from LO a
+key and its note are off the panel: not drawn, their place the plain panel (no cap's shadow left
+in the background), and not found by the pointer (no press, wheel, tip or MIDI Learn menu, and no
+learning ring there while it is learned from the MIDI list). At LO they are there and work as
+before. TIMED and DIVISION keep their values throughout; the host, MIDI and agents still set them.
+(Built with the PWM keys' own means, `art::Keyed::hidden` and `art::comes_and_goes`, so that the
+two kinds of key come and go alike; `Editing::off_panel`.)
+
 **OSC. 3 CONTROL inert while oscillator 3 is timed (the owner, 2026-10-20).** Timed, oscillator 3
 follows its clock, never the keys, so OSC. 3 CONTROL does nothing then. The owner first asked
 whether it should be switched off automatically (his question, paraphrased: his words were not
@@ -12377,11 +12389,12 @@ mock-ups he saw: the night's folder `osc3-timed-mockups`, its sheets `v4` to `v6
   centred under its RANGE, 84 units below the selector's centre (x 617, y 454 and 660): the
   strip's amber tab at 0.4 of its size (60 by 24), its translucent amber lit from inside while on
   and its oscillator at LO, with a faint amber light on the face round it; unlit while off; at
-  any other RANGE dimmed (shaded) and unlit. A click flips it, as a switch; a double click does
-  nothing more. Its tip: OSCILLATOR-2 TIMED, and "(at RANGE LO)" while it is inert. Last in
-  `CONTROLS`, so that no control moves.
-- **The sign beside each key** is its oscillator's DIVISION, at every RANGE (dimmed with the key
-  where it is inert): a whole note for 1 bar, a half note to a thirty-second, a dotted value
+  any other RANGE off the panel (above). A click flips it, as a switch; a double click does
+  nothing more. Its tip: OSCILLATOR-2 TIMED. Its cap's shadow is its own (it comes and goes; the
+  worn background no longer has one under it), so the drawn skin has it too, as the PWM keys do.
+  Last in `CONTROLS`, so that no control moves.
+- **The sign beside each key** is its oscillator's DIVISION, wherever the key is on the panel: a
+  whole note for 1 bar, a half note to a thirty-second, a dotted value
   with its augmentation dot, a triplet with a small 3 in the panel's lettering (its numbers' size
   less a third), 2 and 4 bars a whole note with 2× and 4× after it, as the dial numbers them.
   The double whole note was compared for 2 bars (sheet `v4`); at the panel's size it read as
@@ -12449,9 +12462,9 @@ mock-ups he saw: the night's folder `osc3-timed-mockups`, its sheets `v4` to `v6
   what a pack's typeface must print, so no pack made before loses its typeface).
 
 **The approved images:** `approved.png` and `approved-large.png` (the drawn panel at half travel,
-where RANGE is 8' and the keys are inert) take the renderer's pixels round each key: its dimmed
-cap and its quarter note. Nothing else in them changed; the mean difference is as before (1.443
-and 0.964 against 1.444 and 0.965).
+where RANGE is 8') first took the renderer's pixels round each key, its dimmed cap and its quarter
+note. With the keys off the panel away from LO they are the mock-up's own there again (restored
+from before the keys, 4d88b39): the mean difference is 1.444 and 0.965, as before the keys.
 
 **Agent decisions, 2026-10-20** (not separately approved):
 - **Two parameters an oscillator**, after the arpeggiator's so that none before them moves:
@@ -12569,7 +12582,7 @@ or a session saved before reads every TIMED off and every DIVISION a quarter not
   oscillator 3 alone, again with all three oscillators' keys off, and again with oscillator 1's
   taken out (4d88b39).
 - The panel (`ca72-panel`): `a_timed_dial_and_its_key_are_drawn_and_undrawn_in_place` (both
-  skins: a key pressed at LO, its sign following its division, another RANGE dimming it; each
+  skins: a key pressed at LO, its sign following its division, another RANGE hiding it; each
   frame drawn in parts the frame drawn whole; off again the frame before, to the pixel);
   `a_timed_dials_part_of_the_background_is_laid_without_a_seam` and
   `a_timed_dials_part_is_the_whole_timed_backgrounds` (at most 3 of a dial's pixels over 2 levels,
@@ -12577,7 +12590,11 @@ or a session saved before reads every TIMED off and every DIVISION a quarter not
   (`notes::tests`); the approved images; the compatibility packs (revision 1) loading with notes.
 - The editor (`ca72-plugin`): `a_timed_oscillators_dial_and_key_operate_its_timed_mode` (the scene,
   a notch of the wheel one DIVISION step and nothing of FREQUENCY's, the tip, a note value typed,
-  MIDI Learn's targets, the key's press, the inert key taking none);
+  MIDI Learn's targets, the key's press, the hidden key taking none);
+  `a_timed_key_away_from_lo_is_off_the_panel` (at 32', 8' and 2': not found, no press, wheel,
+  tip, menu or ring, its values kept; the key at LO found and flipping); the panel's
+  `a_timed_key_away_from_lo_leaves_the_plain_panel` (both skins, on or off, any division: the
+  frame the same to the pixel as the panel drawn with the keys placed off it);
   `a_timed_dial_takes_its_note_values` (every division's text and the host's names back).
 - Frame times (`frames`, worn skin, median and slowest of 40; at 0.44 and 0.87): the key pressed
   1.1 and 2.9 ms, its first press at a scale (the dials' places printed again) 4.5 and 7.6 ms;

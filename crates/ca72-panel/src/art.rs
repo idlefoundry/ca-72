@@ -2213,14 +2213,19 @@ pub fn control_worn(c: &Control, v: f64, midi: f64) -> Layer {
     }
 }
 
-/// How an oscillator's TIMED key is shown (decisions.md R-OSC-TIMED): on or off, inert (its
-/// RANGE not at LO: dimmed, unlit whatever it holds, as VOICES is where it does nothing), and
-/// its oscillator's division, by its place among the eighteen (`params::Division`'s order).
+/// How an oscillator's TIMED key is shown (decisions.md R-OSC-TIMED): on or off, inert (dimmed,
+/// unlit whatever it holds, as VOICES is where it does nothing), and its oscillator's division,
+/// by its place among the eighteen (`params::Division`'s order); `hidden` away from LO.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Keyed {
     pub on: bool,
     pub inert: bool,
     pub division: usize,
+    /// A word printed beside it instead of a note value: a PWM key's (decisions.md
+    /// R-VARIABLE-RECT).
+    pub word: Option<&'static str>,
+    /// Not on the panel at all: a PWM key while its oscillator's rectangle is STEPPED.
+    pub hidden: bool,
 }
 
 impl Default for Keyed {
@@ -2230,20 +2235,48 @@ impl Default for Keyed {
             on: false,
             inert: false,
             division: 8,
+            word: None,
+            hidden: false,
         }
     }
+}
+
+/// Whether a key comes and goes from the panel, rather than always standing on it: its cap's
+/// shadow is then its own, not the background's. Every key does: a TIMED key is on the panel
+/// only at its RANGE's LO (decisions.md R-OSC-TIMED), as a PWM key only while its rectangle is
+/// VARIABLE (R-VARIABLE-RECT).
+pub fn comes_and_goes(c: &Control) -> bool {
+    c.kind == Kind::Key
 }
 
 /// An oscillator's TIMED key (decisions.md R-OSC-TIMED), in either skin the strip's amber tab
 /// (its pictures, a skin pack's where it has them), lit from inside while on, and the note
 /// value its oscillator is timed at printed beside it in the panel's ink (the owner,
 /// 2026-10-20: "it dynamically shows whatever is selected on the oscillator"); dimmed where it
-/// does nothing, its sign with it.
+/// does nothing, its sign with it; nothing at all where it is hidden (away from LO).
 /// (`times`: the multiplication sign as the typeface prints it, [`Layout::times`].)
 pub fn key(c: &Control, k: Keyed, lettering: Lettering, times: &str, worn: bool) -> Layer {
+    if k.hidden {
+        return Layer {
+            origin: c.centre(),
+            bounds: bounds(&Kind::Key),
+            ..Layer::default()
+        };
+    }
     let lit = k.on && !k.inert;
     let (w, h) = KEY;
     let mut s = Svg::default();
+    if comes_and_goes(c) {
+        // Its cap's shadow, which the background has for a key always on the panel.
+        put!(
+            s,
+            "<defs><filter id='key-shadow' x='-0.5' y='-1' width='2' height='3'><feGaussianBlur stdDeviation='1.6'/></filter></defs><rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.35' filter='url(#key-shadow)'/>",
+            N(-w / 2.0 + 1.0),
+            N(-h / 2.0 + 2.0),
+            N(w + 2.0),
+            N(h + 2.0)
+        );
+    }
     if lit {
         // Its light on the face round it: a soft amber, faint (the owner is sensitive to
         // brightness; the strip's tabs' light, at this size).
@@ -2268,13 +2301,26 @@ pub fn key(c: &Control, k: Keyed, lettering: Lettering, times: &str, worn: bool)
         N(KEY_SIGN),
         N(opacity)
     );
-    note_sign(
-        &mut s,
-        k.division,
-        sign_head(lettering),
-        lettering.number(),
-        times,
-    );
+    match k.word {
+        // (Its capitals' middle on the key's, as the panel's legends beside a control.)
+        Some(word) => text(
+            &mut s,
+            0.0,
+            0.0,
+            word,
+            lettering.legend(),
+            Style::Legend,
+            true,
+            "",
+        ),
+        None => note_sign(
+            &mut s,
+            k.division,
+            sign_head(lettering),
+            lettering.number(),
+            times,
+        ),
+    }
     s.0.push_str("</g>");
     let over = if k.inert {
         format!(
@@ -2613,15 +2659,8 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
                 N(w + 3.0),
                 N(h + 3.0)
             ),
-            // A TIMED key's cap's, a small one: it stands on the face.
-            Kind::Key => put!(
-                s,
-                "<rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.35' filter='url(#softer)'/>",
-                N(x - KEY.0 / 2.0 + 1.0),
-                N(y - KEY.1 / 2.0 + 2.0),
-                N(KEY.0 + 2.0),
-                N(KEY.1 + 2.0)
-            ),
+            // A key's cap's is its own: it comes and goes ([`comes_and_goes`]).
+            Kind::Key => {}
             Kind::Wheel { .. } => {}
         }
     }

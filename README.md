@@ -421,11 +421,11 @@ note to a thirty-second), with the dotted and triplet values on the short ticks 
 knob steps from value to value, its tip names the value (OSCILLATOR-3 DIVISION: 1/8 dotted), and
 you can type one at it (`8.` dotted, `8t` triplet, `4x` four bars). The note beside the key
 shows the value chosen. FREQUENCY keeps its own place for when the key is off. At any other
-RANGE the key is dimmed and does nothing, and the dial reads semitones. While timed, the
-oscillator ignores the keyboard, the PITCH wheel and GLIDE; in the standalone and with the host
-stopped it runs on at the tempo (the standalone's TEMPO). So while oscillator 3 is timed, OSC. 3
-CONTROL is dimmed and does nothing; it keeps its setting for when the key is off or RANGE leaves
-LO. Oscillator 3 timed at LO makes a
+RANGE the key and its note leave the panel (the key keeps its setting), and the dial reads
+semitones. While timed, the oscillator ignores the keyboard, the PITCH wheel and GLIDE; in the
+standalone and with the host stopped it runs on at the tempo (the standalone's TEMPO). So while
+oscillator 3 is timed, OSC. 3 CONTROL is dimmed and does nothing; it keeps its setting for when
+the key is off or RANGE leaves LO. Oscillator 3 timed at LO makes a
 tempo-synced modulation source through MODULATION MIX.
 
 **Lettering.** If the panel's print is hard to read at the size the editor opens, choose

@@ -138,8 +138,8 @@ pub struct Scene {
     /// The standalone's TEMPO screen's text (`120 BPM`; decisions.md R-ARP), none in a plug-in.
     pub tempo: Option<String>,
     /// Oscillators 2's and 3's timed mode (decisions.md R-OSC-TIMED): each key's sign's
-    /// division and whether it is inert (its RANGE away from LO). A key on and not inert
-    /// lights, and its oscillator's FREQUENCY dial is printed in note values (the knob drawn
+    /// division and whether it is inert (its RANGE away from LO: off the panel). A key on and
+    /// not inert lights, and its oscillator's FREQUENCY dial is printed in note values (the knob drawn
     /// at its DIVISION, `values` holding that).
     pub timed: [Timed; 2],
 }
@@ -149,7 +149,7 @@ pub struct Scene {
 pub struct Timed {
     /// Its division, by its place among the eighteen (`params::Division`'s order).
     pub division: usize,
-    /// Its RANGE away from LO: its key dimmed and unlit, its dial in semitones.
+    /// Its RANGE away from LO: its key and sign not on the panel, its dial in semitones.
     pub inert: bool,
 }
 
@@ -832,6 +832,8 @@ impl Renderer {
                             on: v >= 0.5,
                             inert: t.inert,
                             division: t.division,
+                            word: None,
+                            hidden: t.inert,
                         },
                         self.layout.lettering(),
                         self.layout.times(),
@@ -2387,6 +2389,58 @@ mod tests {
             }
             r.render(&scene);
             assert!(r.frame() == &before, "{skin:?}: not the frame before");
+        }
+    }
+
+    /// A TIMED key away from its RANGE's LO (decisions.md R-OSC-TIMED) in either skin: neither
+    /// it, nor its sign, nor its cap's shadow on the panel, on or off, whatever its division: its
+    /// place is the plain panel, the frame the same to the pixel as the panel drawn with the keys
+    /// placed off it. At LO, on or off, it is drawn.
+    #[test]
+    fn a_timed_key_away_from_lo_leaves_the_plain_panel() {
+        let s = 0.25;
+        for skin in [Skin::Drawn, Skin::Worn] {
+            let mut scene = Scene {
+                values: [0.5; CONTROLS.len()],
+                ..Scene::default()
+            };
+            for key in TIMED_KEYS {
+                scene.values[index(key).expect(key)] = 0.0;
+            }
+            // The panel with the keys placed above the frame, there (off) but out of sight.
+            let mut look = Look::of(skin);
+            let mut away = (*look.arrangement).clone();
+            for key in TIMED_KEYS {
+                away.controls[index(key).expect(key)].y = -2000.0;
+            }
+            look.arrangement = Arc::new(away);
+            let mut plain = Renderer::with_pack(look, Lettering::Standard, s, 1.0);
+            plain.render(&scene);
+            let mut r = Renderer::with_skin(skin, s, 1.0);
+            r.render(&scene);
+            assert!(r.frame() != plain.frame(), "{skin:?}: no key at LO");
+            for (on, division) in [(0.0, 8), (1.0, 2), (1.0, 16), (0.0, 13)] {
+                for key in TIMED_KEYS {
+                    scene.values[index(key).expect(key)] = on;
+                }
+                scene.timed = [Timed {
+                    division,
+                    inert: true,
+                }; 2];
+                assert!(!scene.timed_dials().contains(&true));
+                r.render(&scene);
+                assert!(
+                    r.frame() == plain.frame(),
+                    "{skin:?} {on} {division}: not the plain panel"
+                );
+                let mut whole = Renderer::with_skin(skin, s, 1.0);
+                whole.render(&scene);
+                assert!(whole.frame() == plain.frame(), "{skin:?} {on} {division}");
+            }
+            // Back at LO, on: drawn again, lit.
+            scene.timed = [Timed::default(); 2];
+            r.render(&scene);
+            assert!(r.frame() != plain.frame(), "{skin:?}: not drawn again");
         }
     }
 
