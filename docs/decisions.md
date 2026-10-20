@@ -11673,3 +11673,56 @@ and Init through `process`), `a_trackpad_turns_a_knob_in_proportion_and_voices_b
 where automation now glides. Listening files outside the repository (the night's
 `smooth-out`). Untested here: macOS with a trackpad and a Magic Mouse, Windows with a precision
 touchpad and a wheel, automation in a host of each format, and the owner's listening.
+
+### In 0.3.0, with R-KNOB-RESOLUTION, the arpeggiator, the MIDI pads and agents (2026-10-19)
+
+**The owner, 2026-10-19:** "All into 0.3.0" (no 0.2.9). R-KNOB-RESOLUTION (#120) was already in
+0.3.0 and also made a trackpad turn knobs in proportion; the two are one mechanism now, with
+both records' behaviour on screen.
+- **Scrolling, R-KNOB-RESOLUTION's way:** `interact::scroll` and `Kind::is_continuous` (which
+  know the arpeggiator's RATE and OCTAVES are stepped, as VOICES is), a stepped control's travel
+  kept past a step and started afresh when the turn reverses. `interact::turn`,
+  `interact::continuous` and `scroll_notches` above are gone. Its drag (every fraction of a
+  pixel, no dead zone) is unchanged; R-KNOB-GLIDE did not touch drags.
+- **Lines, R-KNOB-GLIDE's reading by system** (`editor.rs` `scroll_travel`, `PRECISE_LINES`):
+  points as they come (40 to a notch); on Windows lines as far as they go; elsewhere a line event
+  a notch whatever its size. Agent decisions, for the owner to confirm: R-KNOB-RESOLUTION had
+  taken fractions of a line in proportion on every system, which would make a Mac's wheel turned
+  slowly (a fraction of a line an event) a tenth as fast as 0.2.8, so outside Windows a line is a
+  notch, as R-KNOB-GLIDE has it; on Windows several lines in one event (a fast wheel) count as
+  that many notches, as R-KNOB-RESOLUTION has it, where R-KNOB-GLIDE had taken them as one.
+  R-KNOB-RESOLUTION's tests of fractional lines read lines as Windows does
+  (`Editing::precise_lines`).
+- **The arpeggiator's GATE and SWING do not glide** (`smooth::TIMING`; agent decision, for the
+  owner to confirm). They are continuous knobs, but the arpeggiator takes them as a block begins
+  and each note as it is played: they set when notes start and stop, with no level to step, and a
+  glide would only make them late. Its RATE and OCTAVES stay stepped. The knobs' test now checks
+  every continuous control the editor turns glides but these two. The effects' drawer adds no
+  knob of the CA-72's (an effect's own controls are in its window, in its helper).
+- **Typed values (R-KNOB-ENTRY) and an agent's (R-MCP's `ca72_set`) glide** as a turn does:
+  both set the parameter through the editor's setter, unmarked. An agent's `ca72_preset_load`
+  and `ca72_preset_step` choose as the drawer does (`Browser::choose`), so their knobs land.
+- **A preset a MIDI pad or an arrow key chooses (R-PRESET-KEYS) lands at once.** Its values are
+  set on the audio thread (`PresetActions::apply`), where R34's glide used to be stopped; now
+  every knob lands there (`Smooth::land`).
+- **Presets with the arpeggiator's settings** land with them: its switches and selectors are
+  stepped and GATE and SWING never glide. A preset holds no effects chain in 0.3.0 (the chain is
+  the standalone's own, `effects.json`), so there is nothing of it to mark.
+
+**Evidence (omarchy, 2026-10-19, on the merge of #123, #127 and #124 into `release-0.3.0`):**
+`typed_and_agents_values_glide_and_an_agents_preset_lands` (an editor over a plug-in's
+parameters: a typed value and an agent's glide over 30 ms, an agent's preset with the
+arpeggiator on lands), `a_preset_a_pad_chooses_lands_at_once` (fails without `Smooth::land`),
+the knobs' test with `TIMING`, `scrolls_read_as_notches_or_travel_as_each_system_reports_them`
+(rewritten for `scroll_travel`, with a Mac's slow wheel a notch an event); R-KNOB-RESOLUTION's
+and this record's other tests pass. `preset_render` of the 19 factory presets against
+`release-0.3.0` before these merges (17f1b5f): the same to the bit at HI, at LO and with DOUBLE
+at 50 %. The factory AUTO GAIN curves measured again: each the same to the bit as the presets
+carry. `knob_glide.rs`'s sweep on 0.3.0's sound, at EMPHASIS 9 (the figure as above): a drag
++0.5 dB, a trackpad's values +0.5 dB (0.2.8's notches +31.9), automation every 32 to 2048 frames
+-0.9 to -4.6 dB, offline as in real time; every held tail within 0.001 dB. `glide_cost` (ten
+voices of Felt Bass, POLY, offline, best of three, this machine shared): LO 46.8 ms a second of
+audio at rest, 68.3 with CUTOFF moving; with LO's sharing off (R-LO-WORKERS' `Never`) 193.8 and
+215.9. A moving knob adds the same 21 to 22 ms a second to LO either way (a larger share of
+LO's smaller cost once it shares its voices); HI 247 to 300, moving or not, within this
+machine's noise.
