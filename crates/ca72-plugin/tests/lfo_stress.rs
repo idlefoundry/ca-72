@@ -67,8 +67,7 @@ const BLOCK: usize = 256;
 const SECONDS: f64 = 8.0;
 /// The part measured: the notes held, past their start.
 const MEASURED: (f64, f64) = (0.6, 7.3);
-/// The step the plug-in is built with (`lfo::STEP`), and the samples it holds a value late on
-/// average.
+/// The LFOs' step (`lfo::STEP`): 1.5 kHz at 48 kHz, the rate the pulse is measured at.
 const STEP: usize = ca72_plugin::lfo::STEP;
 const SEED: u64 = 42;
 /// The WAVs' loudest peak, dBFS.
@@ -642,6 +641,27 @@ fn moves_a_pitch(s: &Sound) -> bool {
     })
 }
 
+/// The step a render of preset `s` at QUALITY `q` moves its knobs by: `tried` where it is not 0,
+/// else as built (`lfo::FAST_STEP` where a pitch or CUTOFF is moved at HI or ULTRA, else
+/// `lfo::STEP`).
+fn step_of(s: &Sound, q: &str, tried: usize) -> usize {
+    if tried != 0 {
+        return tried;
+    }
+    let fast = s.values.iter().any(|(k, v)| {
+        *v != 0.0
+            && k.starts_with("lfo")
+            && k.split_once("_to_")
+                .and_then(|(_, t)| ca72_plugin::lfo::Target::of_id(t))
+                .is_some_and(|t| t.fast())
+    });
+    if fast && q != "LO" {
+        ca72_plugin::lfo::FAST_STEP
+    } else {
+        STEP
+    }
+}
+
 #[test]
 #[ignore = "a measurement, run by hand (--features lfo-lab)"]
 fn zipper() {
@@ -666,17 +686,19 @@ fn zipper() {
         "jump/ref",
         "CPU s/s"
     );
-    // The step tried (`CA72_LFO_STEP`, 0: as built), and half of it: the second render's
-    // first block that long moves the steps' grid by it.
+    // The step tried (`CA72_LFO_STEP`, 0: as built).
     let tried: usize = env("CA72_LFO_STEP", 0);
-    let half = (if tried == 0 { STEP } else { tried } / 2).max(1);
     for q in qualities() {
         for (n, s) in presets() {
+            // (Half the render's step: the second render's first block that long moves the
+            // steps' grid by it. The aligned reference is late by the steps' average delay.)
+            let step = step_of(&s, &q, tried);
+            let half = (step / 2).max(1);
             let built = render(n, &s, &q, tried, BLOCK);
             let moved = render(n, &s, &q, tried, half);
             let set = render(n, &s, &q, 1, BLOCK);
             let set_moved = render(n, &s, &q, 1, half);
-            let aligned = render(n, &delayed(&s, (STEP as f64 - 1.0) / 2.0), &q, 1, BLOCK);
+            let aligned = render(n, &delayed(&s, (step as f64 - 1.0) / 2.0), &q, 1, BLOCK);
             let (mb, mm, ms, msm, ma) = (
                 mono(&built),
                 mono(&moved),

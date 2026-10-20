@@ -2637,11 +2637,13 @@ impl Engine {
         if !self.base.lfo.active() {
             return self.render_part(ext, left, right);
         }
-        // (The LFOs modulating: a step every `lfo::STEP` samples, decisions.md R-LFO.)
+        // (The LFOs modulating: a step every `lfo::STEP` samples, decisions.md R-LFO; every
+        // `lfo::FAST_STEP` while one moves a pitch or CUTOFF at HI or ULTRA, R-LFO-STRESS.)
         let len = left.len().min(right.len());
+        let step = modulation_step(self.base.lfo.fast() && !self.controls.potato);
         let mut i = 0;
         while i < len {
-            let n = (len - i).min(modulation_step());
+            let n = (len - i).min(step);
             self.modulate(n);
             let x = &ext[i.min(ext.len())..(i + n).min(ext.len())];
             self.render_part(x, &mut left[i..i + n], &mut right[i..i + n]);
@@ -3303,20 +3305,27 @@ impl Engine {
     }
 }
 
-/// How often the LFOs move their knobs, samples: [`crate::lfo::STEP`] (decisions.md R-LFO).
+/// How often the LFOs move their knobs, samples: [`crate::lfo::STEP`] (decisions.md R-LFO), or
+/// [`crate::lfo::FAST_STEP`] where `fast` (a pitch or CUTOFF moved at HI or ULTRA,
+/// R-LFO-STRESS).
 #[cfg(not(feature = "lfo-lab"))]
 #[inline(always)]
-const fn modulation_step() -> usize {
-    crate::lfo::STEP
+const fn modulation_step(fast: bool) -> usize {
+    if fast {
+        crate::lfo::FAST_STEP
+    } else {
+        crate::lfo::STEP
+    }
 }
 
-/// A measurement's own step for the LFOs (feature `lfo-lab` only; 0: [`crate::lfo::STEP`]).
+/// A measurement's own step for the LFOs (feature `lfo-lab` only; 0: as built).
 #[cfg(feature = "lfo-lab")]
 static MODULATION_STEP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(feature = "lfo-lab")]
-fn modulation_step() -> usize {
+fn modulation_step(fast: bool) -> usize {
     match MODULATION_STEP.load(std::sync::atomic::Ordering::Relaxed) {
+        0 if fast => crate::lfo::FAST_STEP,
         0 => crate::lfo::STEP,
         n => n,
     }
@@ -3324,7 +3333,7 @@ fn modulation_step() -> usize {
 
 /// The LFOs moving their knobs every `samples` (a sample: the reference the 32-sample step is
 /// measured against, decisions.md R-LFO-STRESS), every instance in the process; 0 puts back
-/// [`crate::lfo::STEP`]. A measurement's only: the feature `lfo-lab`.
+/// the built steps. A measurement's only: the feature `lfo-lab`.
 #[cfg(feature = "lfo-lab")]
 pub fn set_modulation_step_for_measurement(samples: usize) {
     MODULATION_STEP.store(samples, std::sync::atomic::Ordering::Relaxed);

@@ -63,6 +63,10 @@ pub const RISE_MOST: f32 = 10.0;
 pub const SOFT_EDGE: f64 = 0.002;
 /// How often the modulation reaches the voices, samples: the knobs' glide's step.
 pub const STEP: usize = crate::smooth::STEP;
+/// How often while a source moves a pitch or CUTOFF ([`Target::fast`]) at QUALITY HI or ULTRA,
+/// samples (decisions.md R-LFO-STRESS): at [`STEP`] a fast LFO there is heard as a fizz 1.5 kHz
+/// from the sound, its steps' rate; at 8 that is gone, moved to 6 kHz and a quarter as strong.
+pub const FAST_STEP: usize = 8;
 /// The voices that can each have their own LFOs (POLY's most).
 pub const VOICES: usize = POLY_VOICES.2;
 
@@ -219,6 +223,15 @@ impl Target {
             Target::Osc2Shape => "OSC 2 WAVE",
             Target::Osc3Shape => "OSC 3 WAVE",
         }
+    }
+
+    /// Whether its steps are heard at [`STEP`] (decisions.md R-LFO-STRESS): a pitch (TUNE, the
+    /// FREQUENCYs) or CUTOFF, moved by [`FAST_STEP`]s instead at HI and ULTRA.
+    pub fn fast(self) -> bool {
+        matches!(
+            self,
+            Target::Tune | Target::Osc2Frequency | Target::Osc3Frequency | Target::Cutoff
+        )
     }
 
     /// Whether each voice has its own (it is on the voice's panel, or FEEDBACK, each voice's
@@ -1246,6 +1259,15 @@ pub fn source_values(lfos: &[f64; LFOS]) -> [f64; SOURCES] {
 }
 
 impl Lfos {
+    /// Whether any source moves a knob whose steps are heard ([`Target::fast`]).
+    pub fn fast(&self) -> bool {
+        self.to
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|a| a.depth != 0.0 && a.target.fast())
+    }
+
     /// Whether any source modulates anything (an assignment of a depth other than 0).
     pub fn active(&self) -> bool {
         self.to.iter().flatten().flatten().any(|a| a.depth != 0.0)

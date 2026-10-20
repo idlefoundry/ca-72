@@ -451,3 +451,46 @@ fn lfo_cost() {
         );
     }
 }
+
+/// A pitch or CUTOFF moved at HI or ULTRA steps every `lfo::FAST_STEP` samples; at LO, and any
+/// other knob anywhere, every `lfo::STEP` (decisions.md R-LFO-STRESS): after 32 samples from a
+/// SAWTOOTH's start, the knob is where the LFO was at the last step's first sample.
+#[test]
+fn a_pitch_or_cutoff_steps_finer_at_hi_and_ultra() {
+    const HZ: f64 = 40.0;
+    for (potato, ultra, target, last) in [
+        (false, false, Target::Cutoff, 24),
+        (false, true, Target::Cutoff, 24),
+        (false, false, Target::Tune, 24),
+        (false, false, Target::Osc2Frequency, 24),
+        (true, false, Target::Cutoff, 0),
+        (false, false, Target::Volume, 0),
+        (false, false, Target::Emphasis, 0),
+    ] {
+        let c = with(
+            Controls {
+                potato,
+                ultra,
+                ..controls()
+            },
+            0,
+            sharp(Mode::Free, 2.0, HZ),
+            target,
+            0.4,
+            0.5,
+        );
+        let mut e = engine(&c);
+        key(&mut e, 60, true);
+        let (mut l, mut r) = ([0.0f32; 32], [0.0f32; 32]);
+        e.render(&[], &mut l, &mut r);
+        let value = lfo::wave(2.0, f64::from(last) * HZ / RATE);
+        let want = c
+            .lfo
+            .modulated(&c, &lfo::source_values(&[value, 0.0, 0.0, 0.0]));
+        assert_eq!(
+            (e.controls.panel, e.controls.volume),
+            (want.panel, want.volume),
+            "{target:?}, potato {potato}, ultra {ultra}"
+        );
+    }
+}
