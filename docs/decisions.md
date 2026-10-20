@@ -13143,6 +13143,20 @@ whatever they are.
   the page put together in parts is put together whole.
 - No approved image changed: `tests/approved.png` and `approved-large.png` are the panel without
   the rail.
+- `examples/golden` against the engine's 06d57bb: 32 frames of the panel compared (both skins,
+  both letterings, 0.44 and 1.0), none differs.
+- After the final engine (59ee1a5) and GLIDE's LONG range (R-GLIDE-LONG, fd61947) were merged
+  (`lfo-ui` 0b4b63c): `cargo test -p ca72-plugin -p ca72-panel -p ca72` 806 passed, 0 failed,
+  84 ignored; clippy (`--workspace --all-targets --all-features -D warnings`), `cargo fmt
+  --check` and `scripts/notices.py --check` clean; `preset_render` against 393588a at HI, LO
+  and ULTRA (2 s), every preset (19) the same to the bit.
+- The Mac's "CA-72 V0.3" built from 0b4b63c (`build11.log`, ALL OK; the AU's ctest 3 of 3) and
+  installed at 17:56, the previous in `~/Code/ca72-v03-build/old-1756`; the standalone launched
+  and served MCP 0.3.0 with 31 tools (`ca72_modulations`, `ca72_modulation_set` and
+  `ca72_modulation_remove` among them), its parameters `lfo1_waveform` to `lfo4_mono`; a quick
+  render (Brass Choir, 2 s) HI -6.2 / -19.4 dBFS, LO -7.6 / -19.2, as the build before.
+- **Not tried:** the live editor on the Mac or Windows by hand (the pictures are the editor's
+  own frames from its tests, `the_lfo_pngs`), a real host, Linux's live window; listening.
 
 ## R-GLIDE-LONG. GLIDE with a second range, five times as long
 
