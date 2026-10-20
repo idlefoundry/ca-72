@@ -4805,7 +4805,7 @@ fn compose(
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
     (page, macros, mods): (
         Option<&ca72_panel::Pixmap>,
-        Option<(&ca72_panel::Pixmap, [i32; 4])>,
+        Option<Placed<'_>>,
         &ModRenderer,
     ),
     only: Option<&[[i32; 4]]>,
@@ -4903,6 +4903,10 @@ fn compose(
         renderer.draw_floating(c);
     }
 }
+
+/// A frame laid at a place of the window's (its top left corner, its right and bottom, in the
+/// window's pixels): the macros' area (decisions.md R-MACROS).
+type Placed<'a> = (&'a ca72_panel::Pixmap, [i32; 4]);
 
 /// A drawer dropped from the rail as [`compose`] lays it: its frame (its plate alone shown,
 /// `lower::LEFT` to `RIGHT`), how deep it is, its top now (drawing units), and what hangs under

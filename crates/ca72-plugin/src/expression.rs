@@ -201,6 +201,26 @@ impl Heard {
     }
 }
 
+/// Each channel's each key's value: kept on the heap, so that the record is never built whole on
+/// a host's thread's stack (decisions.md R-HOST-STACK: a debug build's making an instance had
+/// 45 KB of it there, at its deepest).
+type Keys = Box<[[f32; 128]; 16]>;
+
+/// A [`Keys`] of `v` throughout, made on the heap.
+fn keys(v: f32) -> Keys {
+    vec![[v; 128]; 16]
+        .into_boxed_slice()
+        .try_into()
+        .expect("sixteen channels")
+}
+
+/// Every key of `k` set to `v`, in place (nothing allocated).
+fn fill(k: &mut Keys, v: f32) {
+    for c in k.iter_mut() {
+        c.fill(v);
+    }
+}
+
 /// The record (fixed storage: some 42 KB, nothing allocated after it is made).
 #[derive(Debug)]
 pub struct Expressions {
@@ -223,14 +243,14 @@ pub struct Expressions {
     /// arrives) and tuning (semitones), as a host's note expressions or polyphonic aftertouch
     /// give them.
     held: [u128; 16],
-    key_pressure: [[f32; 128]; 16],
-    key_timbre: [[f32; 128]; 16],
-    key_tuning: [[f32; 128]; 16],
+    key_pressure: Keys,
+    key_timbre: Keys,
+    key_tuning: Keys,
     /// Where each note's timbre began (TimbreRest::NoteStart's; [`UNHEARD`], not yet): its own
     /// (a host's brightness), its first after the note; its member channel's, the channel's as
     /// the note began, or its first after.
-    key_start: [[f32; 128]; 16],
-    member_start: [[f32; 128]; 16],
+    key_start: Keys,
+    member_start: Keys,
     /// The pressure and timbre every voice shares, as last received outside a zone (the timbre
     /// [`UNHEARD`] until one arrives), and the timbre as the phrase began, or its first after.
     shared: [f32; 2],
@@ -253,11 +273,11 @@ impl Default for Expressions {
             pressure: [0.0; 16],
             timbre: [UNHEARD; 16],
             held: [0; 16],
-            key_pressure: [[0.0; 128]; 16],
-            key_timbre: [[UNHEARD; 128]; 16],
-            key_tuning: [[0.0; 128]; 16],
-            key_start: [[UNHEARD; 128]; 16],
-            member_start: [[UNHEARD; 128]; 16],
+            key_pressure: keys(0.0),
+            key_timbre: keys(UNHEARD),
+            key_tuning: keys(0.0),
+            key_start: keys(UNHEARD),
+            member_start: keys(UNHEARD),
             shared: [0.0, UNHEARD],
             shared_start: UNHEARD,
             sent: [Expression::NONE; 128],
@@ -549,8 +569,8 @@ impl Expressions {
     pub fn reset_controllers(&mut self) {
         self.bend = [0.0; 16];
         self.pressure = [0.0; 16];
-        self.key_pressure = [[0.0; 128]; 16];
-        self.key_tuning = [[0.0; 128]; 16];
+        fill(&mut self.key_pressure, 0.0);
+        fill(&mut self.key_tuning, 0.0);
         self.shared[0] = 0.0;
         self.sent_shared[0] = 0.0;
         for e in &mut self.sent {
@@ -562,10 +582,10 @@ impl Expressions {
     /// expression left (the voices letting go keep theirs).
     pub fn release(&mut self) {
         self.held = [0; 16];
-        self.key_pressure = [[0.0; 128]; 16];
-        self.key_timbre = [[UNHEARD; 128]; 16];
-        self.key_tuning = [[0.0; 128]; 16];
-        self.key_start = [[UNHEARD; 128]; 16];
+        fill(&mut self.key_pressure, 0.0);
+        fill(&mut self.key_timbre, UNHEARD);
+        fill(&mut self.key_tuning, 0.0);
+        fill(&mut self.key_start, UNHEARD);
     }
 
     /// The engine told the note `key` on `channel`'s expression, if it changed.

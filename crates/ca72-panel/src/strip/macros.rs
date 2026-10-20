@@ -53,7 +53,11 @@ const DOT: f64 = 3.25;
 
 /// Macro `n`'s (0 to 5) knob's centre: two across, three down.
 pub const fn knob_at(n: usize) -> (f64, f64) {
-    let x = if n % 2 == 0 { CX - COL_DX } else { CX + COL_DX };
+    let x = if n.is_multiple_of(2) {
+        CX - COL_DX
+    } else {
+        CX + COL_DX
+    };
     (x, ROWS[(n / 2) % 3])
 }
 
@@ -189,6 +193,9 @@ impl StillOf {
     }
 }
 
+/// What a collar and its jack were drawn for: the macro's colour, and whether dimmed.
+type JackKey = ([u8; 3], bool);
+
 /// The area's renderer at the panel's scale.
 pub struct MacroRenderer {
     look: Option<Look>,
@@ -198,7 +205,7 @@ pub struct MacroRenderer {
     still: Option<Pixmap>,
     frame: Pixmap,
     names: [Option<(Cell, Patch)>; MACROS],
-    jacks: [Option<(([u8; 3], bool), Patch)>; MACROS],
+    jacks: [Option<(JackKey, Patch)>; MACROS],
     knobs: [Option<(u64, Patch)>; MACROS],
     shown: Option<MacroScene>,
     damages: Vec<[i32; 4]>,
