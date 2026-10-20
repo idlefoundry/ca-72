@@ -3061,6 +3061,10 @@ mod tests {
     /// voice's; the zone gone, every channel is ordinary again.
     #[test]
     fn a_configured_zone_makes_each_member_channels_messages_its_notes_own() {
+        // (POLY's workers: one such test at a time, R21.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
         p.params.midi_map.assign(learnable("cutoff"), on(1, 74));
@@ -3121,6 +3125,10 @@ mod tests {
     /// without the message, or none whatever the controller says.
     #[test]
     fn zones_share_the_channels_and_the_setting_overrides_the_message() {
+        // (POLY's workers: one such test at a time, R21.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
         rpn(&mut p, &mut c, 15, 6, 5);
@@ -3150,6 +3158,10 @@ mod tests {
     /// and brightness) their own note's only, from its attack; a new note starts from none.
     #[test]
     fn ordinary_midi_and_host_note_expressions() {
+        // (POLY's workers: one such test at a time, R21.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
         send(
@@ -3203,6 +3215,10 @@ mod tests {
     #[test]
     fn the_wheels_aftertouch_and_each_voices_pressure_share_one_record() {
         use mod_wheel::Source;
+        // (POLY's workers: one such test at a time, R21.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
         p.params.midi_map.set_wheel_source(Source::ChannelPressure);
@@ -3250,6 +3266,10 @@ mod tests {
     #[test]
     fn channel_aftertouch_on_the_wheel_and_pressures_reach_add() {
         use mod_wheel::Source;
+        // (POLY's workers: one such test at a time, R21.)
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
         p.params.midi_map.set_wheel_source(Source::ChannelPressure);

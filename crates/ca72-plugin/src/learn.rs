@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 67] = [
+pub const LEARNABLE: [Learnable; 71] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -168,6 +168,11 @@ pub const LEARNABLE: [Learnable; 67] = [
     stepped("arp_octaves", "ARP OCTAVES"),
     knob("arp_gate", "ARP GATE"),
     knob("arp_swing", "ARP SWING"),
+    // Each note's own expression's reach (R-MPE).
+    knob("pressure_mod", "PRESSURE TO MODULATION"),
+    knob("pressure_filter", "PRESSURE TO FILTER"),
+    knob("timbre_mod", "TIMBRE TO MODULATION"),
+    knob("timbre_filter", "TIMBRE TO FILTER"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -991,6 +996,10 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "arp_octaves" => &p.arp_octaves,
         "arp_gate" => &p.arp_gate,
         "arp_swing" => &p.arp_swing,
+        "pressure_mod" => &p.pressure_mod,
+        "pressure_filter" => &p.pressure_filter,
+        "timbre_mod" => &p.timbre_mod,
+        "timbre_filter" => &p.timbre_filter,
         _ => return None,
     })
 }
@@ -1040,6 +1049,10 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "level" => &p.level,
         "arp_gate" => &p.arp_gate,
         "arp_swing" => &p.arp_swing,
+        "pressure_mod" => &p.pressure_mod,
+        "pressure_filter" => &p.pressure_filter,
+        "timbre_mod" => &p.timbre_mod,
+        "timbre_filter" => &p.timbre_filter,
         _ => return None,
     })
 }
@@ -1277,8 +1290,8 @@ mod tests {
                 counts(Kind::Switch)
             ),
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
-            // ON and HOLD switches.)
-            (29, 11, 25)
+            // ON and HOLD switches; the expression's four reaches, knobs: R-MPE.)
+            (33, 11, 25)
         );
     }
 
