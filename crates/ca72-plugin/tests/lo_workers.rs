@@ -215,6 +215,19 @@ fn paced_run(
     e.set(c);
     e.prepare(RATE, 1);
     let started = e.start_workers(workers, rt.then_some(period));
+    // (Made an audio thread for this period, and on macOS in a work interval of its own, opened
+    // at each block's start and closed at its end, as a host's audio thread is in its device's
+    // workgroup: without one, macOS ran a thread busy part of each period about half as fast,
+    // decisions.md R11.)
+    let host = if rt {
+        if let Err(e) = ca72_rt::promote(period, period / 2) {
+            eprintln!("(the measuring thread not promoted: {e})");
+        }
+        ca72_rt::WorkInterval::new("CA-72 measurement host")
+    } else {
+        None
+    };
+    let token = host.as_ref().and_then(ca72_rt::WorkInterval::join);
     let mut chords = Chords::new(notes, RATE);
     let blocks = (seconds * RATE / block as f64) as usize;
     // (A second first, unmeasured: the workers asked for and started, the caches warm.)
@@ -233,6 +246,11 @@ fn paced_run(
         if i == warm {
             (silent0, host0, work0) = (e.silent_runs(), cpu(false), cpu(true));
         }
+        if token.is_some()
+            && let Some(h) = &host
+        {
+            h.start(period);
+        }
         let t = Instant::now();
         e.set_deadline(Some(t + period.mul_f64(DEADLINE)));
         if e.take_serving() {
@@ -250,6 +268,11 @@ fn paced_run(
         let (bl, br) = (&mut l[at..at + block], &mut r[at..at + block]);
         play_block(&mut e, &mut chords, at, bl, br, &mut events);
         let d = t.elapsed();
+        if token.is_some()
+            && let Some(h) = &host
+        {
+            h.finish();
+        }
         if e.take_mending() {
             e.spares().mend();
         }
@@ -265,6 +288,9 @@ fn paced_run(
     let silent = e.silent_runs() - silent0;
     let running = e.workers().max(started);
     drop(e);
+    if let (Some(h), Some(t)) = (&host, token) {
+        h.leave(t);
+    }
     // (The same chords on the host's thread alone, every voice waited for.)
     let sharing = lo_sharing();
     set_lo_sharing_for_measurement(Some(LoSharing::Never));
