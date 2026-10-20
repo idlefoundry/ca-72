@@ -2717,9 +2717,6 @@ impl Editing {
         s.end_set_parameter(p);
     }
 
-    /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
-    /// knob unresponsive unless the user is in double mode") and VOICES where it does nothing
-    /// ([`voices_inert`]), each drawn dimmed then.
     /// Oscillator `n`'s waveform made STEPPED or CONTINUOUS (its WAVEFORM switch's menu,
     /// decisions.md R-CONTINUOUS-WAVE), one gesture: made CONTINUOUS, its shape put at the switch's
     /// own position exactly first, so that the sound does not move (oscillator 3's sawtooth at
@@ -2780,6 +2777,9 @@ impl Editing {
         })
     }
 
+    /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
+    /// knob unresponsive unless the user is in double mode") and VOICES where it does nothing
+    /// ([`voices_inert`]), each drawn dimmed then.
     fn operable(&self, i: usize) -> bool {
         CONTROLS.get(i).is_none_or(|c| match c.param {
             "double" => self.params.doubled.value(),
