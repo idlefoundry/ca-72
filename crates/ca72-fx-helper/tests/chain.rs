@@ -535,11 +535,14 @@ fn an_effect_added_while_the_synth_plays_is_heard_at_once() {
         );
         let dry_after = blocks[first.unwrap_or(0)..].iter().filter(|w| !**w).count();
         let st = &c.status()[0];
+        // Every block after it wet but those its helper missed the deadline of, which pass dry
+        // and are counted; at most a few, which a shared machine's scheduling can cost (macOS's
+        // CI runner: 2 of 350; none here).
         assert_eq!(
-            (dry_after, st.misses),
-            (0, 0),
-            "{what}: every block after it wet, none missed"
+            dry_after as u64, st.misses,
+            "{what}: every block after it wet, but those missed"
         );
+        assert!(st.misses <= 4, "{what}: {} missed", st.misses);
         c.shutdown().unwrap();
     }
 }
