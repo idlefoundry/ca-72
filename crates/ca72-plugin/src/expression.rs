@@ -16,10 +16,18 @@
 //! note itself, and whenever it changes while the note is held; the shared pressure and timbre
 //! as [`Event::ChannelPressure`] and [`Event::Timbre`]. Each is sent only when it changes, so
 //! that MIDI without them sends nothing new.
+//!
+//! The timbre goes to the engine measured from its rest point, the computer's TIMBRE REST
+//! ([`TimbreRest`], decisions.md R-TIMBRE-REST): -1..1 and 0 at rest, a note or channel that
+//! never sent one at rest whatever the point. What arrives, per note and on ordinary channels,
+//! is counted for the editor's INPUT screen ([`Heard`]).
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use nih_plug::prelude::NoteEvent;
 
-use crate::engine::{BEND_MOST, Event, Expression};
+use crate::engine::{BEND_MOST, Event, Expression, farther};
 
 /// A member channel's bend range until RPN 0 says otherwise, semitones (MPE's default).
 pub const MEMBER_BEND: f32 = 48.0;
@@ -78,27 +86,155 @@ impl Mode {
     }
 }
 
-/// The record (fixed storage: some 26 KB, nothing allocated after it is made).
+/// Where a timbre rests, a setting of the computer's (`settings.rs`, `timbre_rest`; decisions.md
+/// R-TIMBRE-REST). The engine is given each timbre measured from it, -1..1 and 0 at rest
+/// ([`TimbreRest::measured`]):
+/// - `Centred` (the default, "centre"): control change 74 at 64 and a host's brightness at 0.5
+///   rest; 0 is -1, 127 (1.0) is 1. Many MPE controllers rest near 64.
+/// - `Zero` ("zero"): 0..1 from 0, as the CA-72 first had it (R-MPE), to the bit.
+/// - `NoteStart` ("start"): each note's timbre from where it was as the note began, a fresh
+///   touch always at rest (now less then, -1..1). Where a note begins is
+///   [`Expressions`]'s to keep: a member channel's last value before the note, else its first
+///   after; a host's brightness's first value; ordinary MIDI's shared value as the phrase
+///   began (the first key pressed with none held), else its first after.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TimbreRest {
+    #[default]
+    Centred,
+    Zero,
+    NoteStart,
+}
+
+/// No timbre received (a note's, a channel's or the shared one): at rest whatever the rest point.
+pub const UNHEARD: f32 = -1.0;
+
+impl TimbreRest {
+    pub const ALL: [TimbreRest; 3] = [TimbreRest::Centred, TimbreRest::Zero, TimbreRest::NoteStart];
+
+    /// As an atomic keeps it (`Ca72Params::timbre_rest`): 0, 1, 2 in [`TimbreRest::ALL`]'s order.
+    pub fn index(self) -> u8 {
+        match self {
+            TimbreRest::Centred => 0,
+            TimbreRest::Zero => 1,
+            TimbreRest::NoteStart => 2,
+        }
+    }
+
+    /// Anything but 1 or 2, the default.
+    pub fn from_index(index: u8) -> TimbreRest {
+        match index {
+            1 => TimbreRest::Zero,
+            2 => TimbreRest::NoteStart,
+            _ => TimbreRest::Centred,
+        }
+    }
+
+    /// As `settings.toml` names it.
+    pub fn word(self) -> &'static str {
+        match self {
+            TimbreRest::Centred => "centre",
+            TimbreRest::Zero => "zero",
+            TimbreRest::NoteStart => "start",
+        }
+    }
+
+    pub fn of_word(word: &str) -> Option<TimbreRest> {
+        TimbreRest::ALL.into_iter().find(|r| r.word() == word)
+    }
+
+    /// A timbre `now` (0..1 as received, or [`UNHEARD`]) measured from this rest, where it was
+    /// as its note began being `start` (NoteStart's): -1..1, 0 at rest, and 0 for none heard.
+    pub fn measured(self, now: f32, start: f32) -> f32 {
+        if now < 0.0 {
+            return 0.0;
+        }
+        match self {
+            TimbreRest::Zero => now,
+            TimbreRest::Centred => centred(now),
+            TimbreRest::NoteStart if start < 0.0 => 0.0,
+            TimbreRest::NoteStart => (now - start).clamp(-1.0, 1.0),
+        }
+    }
+}
+
+/// A timbre 0..1 about its centre, -1..1: control change 74's 64 (64/127) and a host's
+/// brightness's 0.5 are both at rest (the half-step between them too, so that CC 74's value and
+/// the brightness a host makes of it, v/127, measure the same), 0 is -1, 1.0 (127) is 1; below
+/// the centre each step of a brightness's, above each of CC 74's 63.
+fn centred(x: f32) -> f32 {
+    const MIDDLE: f32 = 64.0 / 127.0;
+    if x < 0.5 {
+        x * 2.0 - 1.0
+    } else if x <= MIDDLE {
+        0.0
+    } else {
+        ((x * 127.0 - 64.0) / 63.0).min(1.0)
+    }
+}
+
+/// What expression has arrived, counted for the editor's INPUT screen (decisions.md
+/// R-TIMBRE-REST): each count goes up (wrapping) on the audio thread as a message arrives, and
+/// the editor times how recently each changed. `per_note`: a note's own pressure, timbre or
+/// bend (an MPE member channel's, polyphonic aftertouch, a host's note expressions);
+/// `channel`: ordinary channel pressure or control change 74 (outside a zone's members).
+#[derive(Debug, Default)]
+pub struct Heard {
+    per_note: AtomicU32,
+    channel: AtomicU32,
+}
+
+impl Heard {
+    /// (per_note, channel), as counted so far.
+    pub fn counts(&self) -> (u32, u32) {
+        (
+            self.per_note.load(Ordering::Relaxed),
+            self.channel.load(Ordering::Relaxed),
+        )
+    }
+
+    fn note(&self) {
+        self.per_note.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn channel(&self) {
+        self.channel.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// The record (fixed storage: some 42 KB, nothing allocated after it is made).
 #[derive(Debug)]
 pub struct Expressions {
     pub mode: Mode,
+    /// Where a timbre rests (the computer's setting).
+    pub rest: TimbreRest,
+    /// What has arrived, for the editor (`Ca72Params::heard`).
+    heard: Arc<Heard>,
     /// The member channels each zone's MCM gave (lower, upper; 0, none) and each zone's
     /// members' bend range, semitones.
     mcm: [u8; 2],
     range: [f32; 2],
-    /// Each channel's RPN chosen, and its pitch bend (-1..1), pressure and timbre (0..1).
+    /// Each channel's RPN chosen, and its pitch bend (-1..1), pressure and timbre (0..1; the
+    /// timbre [`UNHEARD`] until one arrives).
     rpn: [u16; 16],
     bend: [f32; 16],
     pressure: [f32; 16],
     timbre: [f32; 16],
-    /// The keys held, by channel; each note's own pressure, timbre (0..1) and tuning
-    /// (semitones), as a host's note expressions or polyphonic aftertouch give them.
+    /// The keys held, by channel; each note's own pressure, timbre (0..1, [`UNHEARD`] until one
+    /// arrives) and tuning (semitones), as a host's note expressions or polyphonic aftertouch
+    /// give them.
     held: [u128; 16],
     key_pressure: [[f32; 128]; 16],
     key_timbre: [[f32; 128]; 16],
     key_tuning: [[f32; 128]; 16],
-    /// The pressure and timbre every voice shares, as last received outside a zone.
+    /// Where each note's timbre began (TimbreRest::NoteStart's; [`UNHEARD`], not yet): its own
+    /// (a host's brightness), its first after the note; its member channel's, the channel's as
+    /// the note began, or its first after.
+    key_start: [[f32; 128]; 16],
+    member_start: [[f32; 128]; 16],
+    /// The pressure and timbre every voice shares, as last received outside a zone (the timbre
+    /// [`UNHEARD`] until one arrives), and the timbre as the phrase began, or its first after.
     shared: [f32; 2],
+    shared_start: f32,
     /// What the engine was last told: each key's expression, and the shared pressure and timbre.
     sent: [Expression; 128],
     sent_shared: [f32; 2],
@@ -108,17 +244,22 @@ impl Default for Expressions {
     fn default() -> Self {
         Expressions {
             mode: Mode::Auto,
+            rest: TimbreRest::default(),
+            heard: Arc::default(),
             mcm: [0; 2],
             range: [MEMBER_BEND; 2],
             rpn: [NULL; 16],
             bend: [0.0; 16],
             pressure: [0.0; 16],
-            timbre: [0.0; 16],
+            timbre: [UNHEARD; 16],
             held: [0; 16],
             key_pressure: [[0.0; 128]; 16],
-            key_timbre: [[0.0; 128]; 16],
+            key_timbre: [[UNHEARD; 128]; 16],
             key_tuning: [[0.0; 128]; 16],
-            shared: [0.0; 2],
+            key_start: [[UNHEARD; 128]; 16],
+            member_start: [[UNHEARD; 128]; 16],
+            shared: [0.0, UNHEARD],
+            shared_start: UNHEARD,
             sent: [Expression::NONE; 128],
             sent_shared: [0.0; 2],
         }
@@ -135,6 +276,13 @@ fn unit(v: f32) -> f32 {
 }
 
 impl Expressions {
+    /// A record counting what arrives in `heard` (the editor's, `Ca72Params::heard`).
+    pub fn counting(heard: Arc<Heard>) -> Box<Expressions> {
+        let mut x = Box::<Expressions>::default();
+        x.heard = heard;
+        x
+    }
+
     /// The member channels of the lower and upper zones (0, no zone), as the mode has them.
     pub fn zones(&self) -> [u8; 2] {
         match self.mode {
@@ -179,14 +327,17 @@ impl Expressions {
     /// The note `key` on `channel`'s own expression (the shared pressure and timbre apart).
     pub fn of(&self, channel: u8, key: u8) -> Expression {
         let (c, k) = (usize::from(channel), usize::from(key));
+        let rest = self.rest;
         let mut e = Expression {
             pressure: self.key_pressure[c][k],
-            timbre: self.key_timbre[c][k],
+            timbre: rest.measured(self.key_timbre[c][k], self.key_start[c][k]),
             bend: self.key_tuning[c][k],
         };
         if let Some(zone) = self.zone_of(channel) {
             e.pressure = e.pressure.max(self.pressure[c]);
-            e.timbre = e.timbre.max(self.timbre[c]);
+            // (Its own and its channel's, the one farther from rest: R-TIMBRE-REST.)
+            let member = rest.measured(self.timbre[c], self.member_start[c][k]);
+            e.timbre = farther(e.timbre, member);
             e.bend += self.bend[c] * self.range[zone];
         }
         e.bend = e.bend.clamp(-BEND_MOST, BEND_MOST);
@@ -220,12 +371,20 @@ impl Expressions {
         match e {
             NoteEvent::NoteOn { channel, note, .. } if channel < 16 && note < 128 => {
                 let (c, k) = (usize::from(channel), usize::from(note));
+                // (A key pressed with none held begins a phrase: the shared timbre from here,
+                // TimbreRest::NoteStart's.)
+                if self.held.iter().all(|&h| h == 0) {
+                    self.shared_start = self.shared[1];
+                    self.tell_shared(out);
+                }
                 self.held[c] |= 1 << note;
                 // (A new note's own expression starts from nothing; its member channel's, as
-                // MPE sends it before the note, stays.)
+                // MPE sends it before the note, stays, and is where its timbre began.)
                 self.key_pressure[c][k] = 0.0;
-                self.key_timbre[c][k] = 0.0;
+                self.key_timbre[c][k] = UNHEARD;
                 self.key_tuning[c][k] = 0.0;
+                self.key_start[c][k] = UNHEARD;
+                self.member_start[c][k] = self.timbre[c];
                 self.tell(channel, note, out);
                 false
             }
@@ -243,6 +402,7 @@ impl Expressions {
                 pressure,
                 ..
             } => {
+                self.heard.note();
                 if self.held(channel, note) {
                     self.key_pressure[usize::from(channel)][usize::from(note)] = unit(pressure);
                     self.tell(channel, note, out);
@@ -255,8 +415,16 @@ impl Expressions {
                 brightness,
                 ..
             } => {
+                self.heard.note();
                 if self.held(channel, note) {
-                    self.key_timbre[usize::from(channel)][usize::from(note)] = unit(brightness);
+                    let (c, k) = (usize::from(channel), usize::from(note));
+                    let v = unit(brightness);
+                    self.key_timbre[c][k] = v;
+                    // (Its first since the note began, where it began: often at the note's own
+                    // time, just after it.)
+                    if self.key_start[c][k] < 0.0 {
+                        self.key_start[c][k] = v;
+                    }
                     self.tell(channel, note, out);
                 }
                 false
@@ -267,6 +435,7 @@ impl Expressions {
                 tuning,
                 ..
             } => {
+                self.heard.note();
                 if self.held(channel, note) {
                     let t = if tuning.is_finite() { tuning } else { 0.0 };
                     self.key_tuning[usize::from(channel)][usize::from(note)] = t;
@@ -278,10 +447,12 @@ impl Expressions {
                 channel, pressure, ..
             } if channel < 16 => {
                 if self.is_member(channel) {
+                    self.heard.note();
                     self.pressure[usize::from(channel)] = unit(pressure);
                     self.tell_channel(channel, out);
                     true
                 } else {
+                    self.heard.channel();
                     self.shared[0] = unit(pressure);
                     self.tell_shared(out);
                     false
@@ -291,6 +462,7 @@ impl Expressions {
                 if !self.is_member(channel) {
                     return false;
                 }
+                self.heard.note();
                 let b = if value.is_finite() {
                     (value * 2.0 - 1.0).clamp(-1.0, 1.0)
                 } else {
@@ -317,12 +489,27 @@ impl Expressions {
             98 | 99 => self.rpn[c] = NULL,
             6 => self.data_entry(channel, seven as u8, out),
             TIMBRE_CC => {
+                let v = unit(value);
                 if self.is_member(channel) {
-                    self.timbre[c] = unit(value);
+                    self.heard.note();
+                    self.timbre[c] = v;
+                    // (The channel's first for a note begun with none: where it began.)
+                    let mut keys = self.held[c];
+                    while keys != 0 {
+                        let k = keys.trailing_zeros() as usize;
+                        keys &= keys - 1;
+                        if self.member_start[c][k] < 0.0 {
+                            self.member_start[c][k] = v;
+                        }
+                    }
                     self.tell_channel(channel, out);
                     return true;
                 }
-                self.shared[1] = unit(value);
+                self.heard.channel();
+                self.shared[1] = v;
+                if self.shared_start < 0.0 {
+                    self.shared_start = v;
+                }
                 self.tell_shared(out);
             }
             121 => self.reset_controllers(),
@@ -376,8 +563,9 @@ impl Expressions {
     pub fn release(&mut self) {
         self.held = [0; 16];
         self.key_pressure = [[0.0; 128]; 16];
-        self.key_timbre = [[0.0; 128]; 16];
+        self.key_timbre = [[UNHEARD; 128]; 16];
         self.key_tuning = [[0.0; 128]; 16];
+        self.key_start = [[UNHEARD; 128]; 16];
     }
 
     /// The engine told the note `key` on `channel`'s expression, if it changed.
@@ -411,9 +599,10 @@ impl Expressions {
             self.sent_shared[0] = self.shared[0];
             out(Event::ChannelPressure(self.shared[0]));
         }
-        if self.shared[1] != self.sent_shared[1] {
-            self.sent_shared[1] = self.shared[1];
-            out(Event::Timbre(self.shared[1]));
+        let timbre = self.rest.measured(self.shared[1], self.shared_start);
+        if timbre != self.sent_shared[1] {
+            self.sent_shared[1] = timbre;
+            out(Event::Timbre(timbre));
         }
     }
 
@@ -422,6 +611,16 @@ impl Expressions {
         if mode != self.mode {
             self.mode = mode;
             self.retell(out);
+        }
+    }
+
+    /// Where a timbre rests, as the computer's setting chose (`settings.rs`); held notes and the
+    /// shared timbre told what it changes.
+    pub fn set_rest(&mut self, rest: TimbreRest, out: &mut impl FnMut(Event)) {
+        if rest != self.rest {
+            self.rest = rest;
+            self.retell(out);
+            self.tell_shared(out);
         }
     }
 }
@@ -527,5 +726,75 @@ mod tests {
             assert_eq!(Mode::of_word(m.word()), Some(m));
         }
         assert_eq!(Mode::of_code(9), Mode::Auto);
+    }
+
+    /// TIMBRE REST's words and indexes go both ways, anything else the centre (R-TIMBRE-REST).
+    #[test]
+    fn the_timbre_rests_words_and_indexes_go_both_ways() {
+        for (i, r) in TimbreRest::ALL.into_iter().enumerate() {
+            assert_eq!(usize::from(r.index()), i);
+            assert_eq!(TimbreRest::from_index(r.index()), r);
+            assert_eq!(TimbreRest::of_word(r.word()), Some(r));
+        }
+        assert_eq!(TimbreRest::from_index(9), TimbreRest::Centred);
+        assert_eq!(TimbreRest::of_word("center"), None);
+        assert_eq!(TimbreRest::default(), TimbreRest::Centred);
+    }
+
+    /// The centre's law (R-TIMBRE-REST): CC 74's 0, 64 and 127 (as a host gives them, v/127) are
+    /// -1, 0 exactly and 1, and a host's brightness 0, 0.5 and 1 the same; it never falls as
+    /// either rises; none heard is at rest at every rest point, and ZERO is what was received.
+    #[test]
+    fn the_centres_law_rests_at_64_and_at_half() {
+        let c = |x: f32| TimbreRest::Centred.measured(x, UNHEARD);
+        let seven = |v: u8| f32::from(v) / 127.0;
+        assert_eq!((c(seven(0)), c(seven(64)), c(seven(127))), (-1.0, 0.0, 1.0));
+        assert_eq!((c(0.0), c(0.5), c(1.0)), (-1.0, 0.0, 1.0));
+        for v in 1..128u8 {
+            assert!(c(seven(v)) >= c(seven(v - 1)), "{v}");
+            assert!(c(seven(v)) > c(seven(v - 1)) || v == 64, "{v}");
+        }
+        for k in 1..=1000 {
+            let x = k as f32 / 1000.0;
+            assert!(c(x) >= c(x - 0.001) && (-1.0..=1.0).contains(&c(x)), "{x}");
+        }
+        for r in TimbreRest::ALL {
+            assert_eq!(r.measured(UNHEARD, UNHEARD), 0.0);
+            assert_eq!(r.measured(UNHEARD, 0.5), 0.0);
+        }
+        assert_eq!(TimbreRest::Zero.measured(seven(64), 0.25), seven(64));
+        assert_eq!(TimbreRest::NoteStart.measured(0.75, 0.25), 0.5);
+        assert_eq!(TimbreRest::NoteStart.measured(0.75, UNHEARD), 0.0);
+    }
+
+    /// Of a member channel's CC 74 and its note's own brightness (both in one note, which MPE
+    /// and a host would rarely both send), the one farther from rest; at ZERO the larger, as
+    /// R-MPE had it (R-TIMBRE-REST).
+    #[test]
+    fn a_notes_own_timbre_and_its_channels_take_the_one_farther_from_rest() {
+        let mut x = Expressions::default();
+        run(&mut x, &[cc(0, 101, 0), cc(0, 100, 6), cc(0, 6, 15)]);
+        let on = NoteEvent::NoteOn {
+            timing: 0,
+            voice_id: None,
+            channel: 1,
+            note: 60,
+            velocity: 1.0,
+        };
+        let bright = |b: f32| NoteEvent::PolyBrightness {
+            timing: 0,
+            voice_id: None,
+            channel: 1,
+            note: 60,
+            brightness: b,
+        };
+        run(&mut x, &[cc(1, 74, 32), on, bright(0.6)]);
+        assert_eq!(x.of(1, 60).timbre, 32.0 / 127.0 * 2.0 - 1.0);
+        run(&mut x, &[bright(0.0)]);
+        assert_eq!(x.of(1, 60).timbre, -1.0);
+        x.rest = TimbreRest::Zero;
+        assert_eq!(x.of(1, 60).timbre, 32.0 / 127.0);
+        run(&mut x, &[bright(0.75)]);
+        assert_eq!(x.of(1, 60).timbre, 0.75);
     }
 }

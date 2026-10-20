@@ -123,6 +123,7 @@ impl Ca72 {
                 .set_wheel_source(settings::Settings::load().mod_wheel_source);
         }
         let params = Arc::new(params);
+        let expressions = expression::Expressions::counting(params.heard.clone());
         let preset_actions = Arc::new(preset_actions::PresetActions::new(
             params.clone(),
             library::Library::shared(),
@@ -144,7 +145,7 @@ impl Ca72 {
             preset_held: [false; 4096],
             preset_notes: [false; 2048],
             wheel: mod_wheel::Wheel::default(),
-            expressions: Box::default(),
+            expressions,
             #[cfg(feature = "fx-host")]
             fx: crate::fx::take_runner(),
             arp: Arp::default(),
@@ -719,6 +720,7 @@ impl Plugin for Ca72 {
                 .midi_map
                 .set_wheel_source(settings.mod_wheel_source);
             self.params.set_mpe_mode(settings.mpe);
+            self.params.set_timbre_rest(settings.timbre_rest);
             self.params.set_tempo(f64::from(settings.tempo));
         }
         self.engine.set(&self.params.controls());
@@ -812,6 +814,8 @@ impl Plugin for Ca72 {
         let engine = &mut self.engine;
         self.expressions
             .set_mode(self.params.mpe_mode(), &mut |x| engine.event(x));
+        self.expressions
+            .set_rest(self.params.timbre_rest(), &mut |x| engine.event(x));
         let len = buffer.samples();
         // The arpeggiator's settings and the host's transport, as the block begins (ON or LATCH
         // changed are taken at its first sample).
@@ -3124,6 +3128,8 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
+        // (Timbres 0..1 from 0, as R-MPE first had them: R-TIMBRE-REST's ZERO.)
+        p.params.set_timbre_rest(expression::TimbreRest::Zero);
         p.params.midi_map.assign(learnable("cutoff"), on(1, 74));
         let cutoff = p.params.cutoff.value();
         rpn(&mut p, &mut c, 0, 6, 15);
@@ -3188,6 +3194,8 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
+        // (Timbres 0..1 from 0, as R-MPE first had them: R-TIMBRE-REST's ZERO.)
+        p.params.set_timbre_rest(expression::TimbreRest::Zero);
         rpn(&mut p, &mut c, 15, 6, 5);
         assert_eq!(p.expressions.zones(), [0, 5]);
         assert!((10..=14).all(|ch| p.expressions.is_member(ch)));
@@ -3221,6 +3229,8 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
+        // (Timbres 0..1 from 0, as R-MPE first had them: R-TIMBRE-REST's ZERO.)
+        p.params.set_timbre_rest(expression::TimbreRest::Zero);
         send(
             &mut p,
             &mut c,
@@ -3384,6 +3394,241 @@ mod tests {
             }
             assert!(heard > 0.1);
         }
+    }
+
+    fn brightness(channel: u8, note: u8, brightness: f32) -> NoteEvent<()> {
+        NoteEvent::PolyBrightness {
+            timing: 0,
+            voice_id: None,
+            channel,
+            note,
+            brightness,
+        }
+    }
+
+    /// TIMBRE REST at its default, the centre (decisions.md R-TIMBRE-REST): ordinary CC 74 at 64
+    /// and a host's brightness at 0.5 are at rest, the output with TIMBRE TO FILTER turned up
+    /// the same to the bit as with no timbre at all, the one instrument and POLY; 0 and 127
+    /// (brightness 0 and 1) reach -1 and 1, a member channel's CC 74 alike.
+    #[test]
+    fn a_centred_timbre_rests_at_64_and_half_brightness() {
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for poly in [false, true] {
+            let mut was = initialised_with_seed(poly, Some(74));
+            let mut now = initialised_with_seed(poly, Some(74));
+            assert_eq!(now.params.timbre_rest(), expression::TimbreRest::Centred);
+            let (mut cw, mut cn) = (hostless(&was), hostless(&now));
+            for (c, p) in [(&cw, &was), (&cn, &now)] {
+                assert!(c.automate(p.params.timbre_filter.as_ptr(), 0.9));
+                assert!(c.automate(p.params.timbre_mod.as_ptr(), 1.0));
+            }
+            let mut heard = 0.0;
+            for b in 0..10u32 {
+                if b == 0 {
+                    for c in [&mut cw, &mut cn] {
+                        c.push_event(note(0, 0, 57, true));
+                        c.push_event(note(0, 0, 64, true));
+                    }
+                }
+                cn.push_event(cc(b * 20, 0, 74, 64));
+                cn.push_event(brightness(0, 57, 0.5));
+                let a = stereo_block(&mut was, &mut cw, 256);
+                let n = stereo_block(&mut now, &mut cn, 256);
+                assert!(
+                    a.0.iter()
+                        .chain(&a.1)
+                        .zip(n.0.iter().chain(&n.1))
+                        .all(|(x, y)| x.to_bits() == y.to_bits()),
+                    "POLY {poly}, block {b}"
+                );
+                heard += a.0.iter().map(|x| f64::from(x.abs())).sum::<f64>();
+            }
+            assert!(heard > 0.1);
+            assert_eq!(now.engine.shared_expression().1, 0.0);
+            assert_eq!(now.engine.key_expression(57).timbre, 0.0);
+            let mut c = cn;
+            send(&mut now, &mut c, &[cc(0, 3, 74, 0), brightness(0, 57, 0.0)]);
+            assert_eq!(now.engine.shared_expression().1, -1.0);
+            assert_eq!(now.engine.key_expression(57).timbre, -1.0);
+            send(
+                &mut now,
+                &mut c,
+                &[cc(0, 3, 74, 127), brightness(0, 57, 1.0)],
+            );
+            assert_eq!(now.engine.shared_expression().1, 1.0);
+            assert_eq!(now.engine.key_expression(57).timbre, 1.0);
+            // (Either side of 64 by a step: a step of 64 below, of 63 above.)
+            send(&mut now, &mut c, &[cc(0, 3, 74, 63)]);
+            assert_eq!(now.engine.shared_expression().1, 63.0 / 127.0 * 2.0 - 1.0);
+            send(&mut now, &mut c, &[cc(0, 3, 74, 65)]);
+            assert!((now.engine.shared_expression().1 - 1.0 / 63.0).abs() < 1e-6);
+            // A member channel's CC 74, its note's alike; a member channel that sent none, at rest.
+            rpn(&mut now, &mut c, 0, 6, 15);
+            send(
+                &mut now,
+                &mut c,
+                &[cc(0, 1, 74, 64), note(0, 1, 60, true), note(0, 2, 62, true)],
+            );
+            assert_eq!(now.engine.key_expression(60).timbre, 0.0);
+            assert_eq!(now.engine.key_expression(62).timbre, 0.0);
+            send(&mut now, &mut c, &[cc(0, 1, 74, 0)]);
+            assert_eq!(now.engine.key_expression(60).timbre, -1.0);
+        }
+    }
+
+    /// TIMBRE REST at START (decisions.md R-TIMBRE-REST): every note's timbre is measured from
+    /// where it began, a fresh touch at rest whatever its CC 74. An MPE member channel's begins
+    /// at the channel's last value before the note, else its first after; a host's brightness
+    /// at its first value; ordinary MIDI's shared CC 74 at its value as the phrase began (the
+    /// first key with none held), else its first after, until every key is let go.
+    #[test]
+    fn a_timbre_from_its_notes_start_begins_at_rest() {
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut p = initialised(true);
+        let mut c = hostless(&p);
+        p.params.set_timbre_rest(expression::TimbreRest::NoteStart);
+        let step = |n: i32| n as f32 / 127.0;
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-6;
+        // MPE: the channel's CC 74 before its note, where the note begins.
+        rpn(&mut p, &mut c, 0, 6, 15);
+        send(&mut p, &mut c, &[cc(0, 1, 74, 100), note(0, 1, 60, true)]);
+        assert_eq!(p.engine.key_expression(60).timbre, 0.0, "a fresh touch");
+        send(&mut p, &mut c, &[cc(0, 1, 74, 110)]);
+        assert!(near(p.engine.key_expression(60).timbre, step(10)));
+        send(&mut p, &mut c, &[cc(0, 1, 74, 20)]);
+        assert!(near(p.engine.key_expression(60).timbre, step(-80)));
+        // A channel that sent none before its note: its first after is where it began.
+        send(&mut p, &mut c, &[note(0, 2, 62, true)]);
+        assert_eq!(p.engine.key_expression(62).timbre, 0.0);
+        send(&mut p, &mut c, &[cc(0, 2, 74, 30)]);
+        assert_eq!(p.engine.key_expression(62).timbre, 0.0);
+        send(&mut p, &mut c, &[cc(0, 2, 74, 40)]);
+        assert!(near(p.engine.key_expression(62).timbre, step(10)));
+        // The next note on channel 1 begins at the channel's value now.
+        send(
+            &mut p,
+            &mut c,
+            &[note(0, 1, 60, false), note(0, 1, 64, true)],
+        );
+        assert_eq!(p.engine.key_expression(64).timbre, 0.0);
+        send(
+            &mut p,
+            &mut c,
+            &[note(0, 1, 64, false), note(0, 2, 62, false)],
+        );
+        // A host's brightness: its first value, at the note's own time, where it began.
+        send(
+            &mut p,
+            &mut c,
+            &[note(0, 5, 67, true), brightness(5, 67, 0.8)],
+        );
+        assert_eq!(p.engine.key_expression(67).timbre, 0.0);
+        send(&mut p, &mut c, &[brightness(5, 67, 0.5)]);
+        assert!(near(p.engine.key_expression(67).timbre, 0.5 - 0.8));
+        send(&mut p, &mut c, &[note(0, 5, 67, false)]);
+        // Ordinary CC 74: the phrase's start.
+        rpn(&mut p, &mut c, 0, 6, 0);
+        send(&mut p, &mut c, &[cc(0, 0, 74, 90)]);
+        assert_eq!(p.engine.shared_expression().1, 0.0);
+        send(&mut p, &mut c, &[note(0, 0, 48, true), cc(0, 0, 74, 100)]);
+        assert!(near(p.engine.shared_expression().1, step(10)));
+        send(&mut p, &mut c, &[note(0, 0, 52, true)]);
+        assert!(
+            near(p.engine.shared_expression().1, step(10)),
+            "a key under the phrase begins nothing"
+        );
+        send(
+            &mut p,
+            &mut c,
+            &[note(0, 0, 48, false), note(0, 0, 52, false)],
+        );
+        send(&mut p, &mut c, &[note(0, 0, 55, true)]);
+        assert_eq!(p.engine.shared_expression().1, 0.0, "a new phrase at rest");
+        send(&mut p, &mut c, &[cc(0, 0, 74, 80)]);
+        assert!(near(p.engine.shared_expression().1, step(-20)));
+        // Turned to ZERO while held, the same notes measured from 0 at once.
+        p.params.set_timbre_rest(expression::TimbreRest::Zero);
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.engine.shared_expression().1, step(80));
+    }
+
+    /// TIMBRE REST changed while a note is held (decisions.md R-TIMBRE-REST): the note's and the
+    /// shared timbre measured afresh at once; at ZERO, CC 74 is 0..1 from 0 as R-MPE had it.
+    #[test]
+    fn the_timbre_rest_changed_while_playing_measures_afresh() {
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut p = initialised(true);
+        let mut c = hostless(&p);
+        p.params.set_timbre_rest(expression::TimbreRest::Zero);
+        rpn(&mut p, &mut c, 0, 6, 15);
+        send(
+            &mut p,
+            &mut c,
+            &[cc(0, 1, 74, 100), note(0, 1, 60, true), cc(0, 0, 74, 32)],
+        );
+        assert_eq!(p.engine.key_expression(60).timbre, 100.0 / 127.0);
+        assert_eq!(p.engine.shared_expression().1, 32.0 / 127.0);
+        p.params.set_timbre_rest(expression::TimbreRest::Centred);
+        block(&mut p, &mut c, 64);
+        assert!((p.engine.key_expression(60).timbre - 36.0 / 63.0).abs() < 1e-6);
+        assert_eq!(p.engine.shared_expression().1, 32.0 / 127.0 * 2.0 - 1.0);
+        p.params.set_timbre_rest(expression::TimbreRest::NoteStart);
+        block(&mut p, &mut c, 64);
+        assert_eq!(p.engine.key_expression(60).timbre, 0.0);
+    }
+
+    /// The INPUT screen's counts (decisions.md R-TIMBRE-REST): each note's own pressure, timbre
+    /// and bend (a member channel's, polyphonic aftertouch, a host's note expressions) counted
+    /// per note; ordinary channel pressure and CC 74 (the master channel's included) as the
+    /// channel's; anything else neither.
+    #[test]
+    fn what_arrives_is_counted_for_the_input_screen() {
+        let _one = BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut p = initialised(true);
+        let mut c = hostless(&p);
+        let heard = p.params.heard.clone();
+        send(&mut p, &mut c, &[note(0, 0, 60, true), cc(0, 0, 7, 100)]);
+        assert_eq!(heard.counts(), (0, 0));
+        send(&mut p, &mut c, &[pressure(0, None, 0.5), cc(0, 4, 74, 9)]);
+        assert_eq!(heard.counts(), (0, 2));
+        let tuning = NoteEvent::PolyTuning {
+            timing: 0,
+            voice_id: None,
+            channel: 0,
+            note: 60,
+            tuning: 1.0,
+        };
+        send(
+            &mut p,
+            &mut c,
+            &[pressure(0, Some(60), 0.5), brightness(0, 60, 0.7), tuning],
+        );
+        assert_eq!(heard.counts(), (3, 2));
+        // MPE: a member's bend, pressure and CC 74 its note's; the master's, the channel's.
+        rpn(&mut p, &mut c, 0, 6, 15);
+        let (n, ch) = heard.counts();
+        send(
+            &mut p,
+            &mut c,
+            &[
+                bend(0, 1, 0.75),
+                pressure(1, None, 0.5),
+                cc(0, 1, 74, 3),
+                note(0, 1, 62, true),
+                pressure(0, None, 0.25),
+                cc(0, 0, 74, 3),
+                bend(0, 0, 0.75),
+            ],
+        );
+        assert_eq!(heard.counts(), (n + 3, ch + 2));
     }
 
     pub(crate) fn initialised(poly: bool) -> Ca72 {
