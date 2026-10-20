@@ -104,5 +104,6 @@ performance_improvements = [
 bug_fixes = [
   "Knobs move smoothly from the mouse, a trackpad and automation, in offline renders too; choosing a preset still changes the sound at once.",
   "Fewer dropouts in POLY with DOUBLE at QUALITY HI on a busy computer.",
+  "Hosts that load the CA-72 on a smaller thread no longer crash.",
   "The Audio Unit no longer crashes when a host prepares it on a thread with a small stack.",
 ]
