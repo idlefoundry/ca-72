@@ -326,6 +326,42 @@ fn the_chain_is_ordered_saved_to_its_file_and_restored() {
     assert_eq!(std::fs::read(&file).unwrap(), b"{damaged");
 }
 
+/// Changes made at once on several threads are saved as they were made: once they are
+/// done, the file is the chain as it shows. Each save takes the chain and writes it while
+/// holding it, so an older chain is never written over a newer one (a save's chain was once
+/// taken before its turn to write; on Windows, where a write and its flush take milliseconds,
+/// the file lagged what the chain showed).
+#[test]
+fn changes_made_at_once_are_saved_as_the_chain_shows() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("effects.json");
+    let mut o = options(false);
+    o.file = Some(file.clone());
+    let (c, mut r) = Chain::new(o);
+    r.prepare(RATE, BLOCK);
+    let [clap, vst3] = plugins();
+    for p in [&clap, &vst3, &clap, &vst3] {
+        c.add(p).unwrap();
+    }
+    for round in 0..40 {
+        std::thread::scope(|s| {
+            for at in 0..4 {
+                let c = &c;
+                s.spawn(move || {
+                    for k in 0..6 {
+                        c.set_bypass(at, (round + k * at) % 3 == 0).unwrap();
+                    }
+                });
+            }
+        });
+        let saved = SavedChain::load(&file).unwrap().unwrap();
+        let shown: Vec<bool> = c.status().iter().map(|s| s.bypass).collect();
+        let on_disk: Vec<bool> = saved.slots.iter().map(|s| s.bypass).collect();
+        assert_eq!(on_disk, shown, "round {round}");
+    }
+    c.shutdown().unwrap();
+}
+
 #[test]
 fn a_sample_rate_change_loads_the_effects_again_with_their_state() {
     for p in plugins() {
@@ -422,8 +458,11 @@ fn a_crash_a_hang_or_a_kill_leaves_the_synth_playing_and_is_reported() {
                 first_wet.is_some_and(|i| i < 40),
                 "{what}: wet before the fault"
             );
-            let dry_after: usize = blocks[41..].iter().filter(|b| !b.0).count();
-            // (A killed helper can be back before the next block is due.)
+            // (From the block the fault is in: a parameter is the effect's from the next block,
+            // so a crash or a hang comes in block 40, which is dry; a crashed helper can be back
+            // before block 41 on a fast computer, as macOS's CI found. A killed helper can be back
+            // before the next block is due.)
+            let dry_after: usize = blocks[40..].iter().filter(|b| !b.0).count();
             assert!(
                 dry_after > 0 || fault == "kill",
                 "{what}: dry while it was down"
@@ -496,11 +535,14 @@ fn an_effect_added_while_the_synth_plays_is_heard_at_once() {
         );
         let dry_after = blocks[first.unwrap_or(0)..].iter().filter(|w| !**w).count();
         let st = &c.status()[0];
+        // Every block after it wet but those its helper missed the deadline of, which pass dry
+        // and are counted; at most a few, which a shared machine's scheduling can cost (macOS's
+        // CI runner: 2 of 350; none here).
         assert_eq!(
-            (dry_after, st.misses),
-            (0, 0),
-            "{what}: every block after it wet, none missed"
+            dry_after as u64, st.misses,
+            "{what}: every block after it wet, but those missed"
         );
+        assert!(st.misses <= 4, "{what}: {} missed", st.misses);
         c.shutdown().unwrap();
     }
 }

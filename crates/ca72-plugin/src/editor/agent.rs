@@ -1201,7 +1201,11 @@ mod tests {
     }
 
     fn editing(library: Library) -> (Editing, Arc<Ca72Params>) {
-        let params = Arc::new(Ca72Params::default());
+        editing_over(Arc::new(Ca72Params::default()), library)
+    }
+
+    /// An editor over `params` (a plug-in's, to hear what it sets), its host applying them.
+    fn editing_over(params: Arc<Ca72Params>, library: Library) -> (Editing, Arc<Ca72Params>) {
         let shared: Arc<dyn Params> = params.clone();
         let host: Arc<dyn GuiContext> = Arc::new(Applying {
             api: PluginApi::Standalone,
@@ -1322,6 +1326,93 @@ mod tests {
             Some(Server::start_in(&dir, "standalone", "standalone-test").expect("server"));
         let agent = Agent::new(Bridge::at(dir));
         (t, e, params, agent)
+    }
+
+    /// R-KNOB-GLIDE by the editor's other ways in: a value typed at a knob (R-KNOB-ENTRY) and
+    /// an agent's `ca72_set` reach the voices by a glide, as a turn of the knob does; a preset an
+    /// agent loads lands at once, as the drawer's does, its arpeggiator's settings with it.
+    #[test]
+    fn typed_and_agents_values_glide_and_an_agents_preset_lands() {
+        let mut plugin = crate::tests::initialised(false);
+        let params = plugin.params.clone();
+        let mut c = crate::tests::hostless(&plugin);
+        let t = tempfile::tempdir().expect("tempdir");
+        let (mut e, _) = editing_over(params.clone(), Library::at(t.path().join("presets")));
+        let dir = t.path().join("agents");
+        e.agents.server =
+            Some(Server::start_in(&dir, "standalone", "standalone-test").expect("server"));
+        let mut a = Agent::new(Bridge::at(dir));
+        let mut block = |plugin: &mut Ca72| {
+            crate::tests::block(plugin, &mut c, 64);
+        };
+        block(&mut plugin);
+        let at_rest = |plugin: &Ca72, what: &str| {
+            assert!(!plugin.smooth.moving(), "{what}");
+            assert_eq!(plugin.controls(), plugin.params.controls(), "{what}");
+        };
+        at_rest(&plugin, "at first");
+        let glides = |plugin: &mut Ca72, block: &mut dyn FnMut(&mut Ca72), to: f64, what: &str| {
+            let from = plugin.controls().panel.cutoff;
+            block(plugin);
+            assert!(plugin.smooth.moving(), "{what}");
+            let between = plugin.controls().panel.cutoff;
+            assert!(
+                (between - from) * (to - from) > 0.0 && (to - between) * (to - from) > 0.0,
+                "{what}: {from} {between} {to}"
+            );
+            for _ in 0..22 {
+                block(plugin);
+            }
+            assert_eq!(plugin.controls().panel.cutoff, to, "{what}, 30 ms on");
+        };
+        // A value typed at CUTOFF.
+        let cutoff = crate::editor::CONTROLS
+            .iter()
+            .position(|c| c.param == "cutoff")
+            .expect("CUTOFF");
+        assert!(e.start_knob_entry(cutoff));
+        for k in ["2", ".", "5"] {
+            e.knob_key(&crate::editor::KeyboardEvent {
+                state: crate::editor::KeyState::Down,
+                key: crate::editor::Key::Character(k.into()),
+                ..Default::default()
+            });
+        }
+        e.knob_key(&crate::editor::KeyboardEvent {
+            state: crate::editor::KeyState::Down,
+            key: crate::editor::Key::Enter,
+            ..Default::default()
+        });
+        assert_eq!(params.cutoff.value(), 2.5);
+        let typed = params.controls().panel.cutoff;
+        glides(&mut plugin, &mut block, typed, "typed");
+        at_rest(&plugin, "typed, at rest");
+        // An agent's value.
+        ok(&a.tool(&mut e, "ca72_set", json!({"values": {"cutoff": -2}})));
+        let set = params.controls().panel.cutoff;
+        glides(&mut plugin, &mut block, set, "an agent's");
+        // An agent's preset, with the arpeggiator on, lands at once.
+        ok(&a.tool(
+            &mut e,
+            "ca72_set",
+            json!({"values": {"cutoff": 4, "arp_on": true, "arp_gate": 25}}),
+        ));
+        ok(&a.tool(&mut e, "ca72_preset_save", json!({"name": "Glide Test"})));
+        ok(&a.tool(
+            &mut e,
+            "ca72_set",
+            json!({"values": {"cutoff": -4, "arp_on": false, "arp_gate": 80}}),
+        ));
+        for _ in 0..30 {
+            block(&mut plugin);
+        }
+        at_rest(&plugin, "before the preset");
+        ok(&a.tool(&mut e, "ca72_preset_load", json!({"name": "Glide Test"})));
+        assert_eq!(params.cutoff.value(), 4.0);
+        assert!(params.arp_on.value());
+        block(&mut plugin);
+        at_rest(&plugin, "the agent's preset");
+        assert_eq!(plugin.params.arp().gate, 0.25);
     }
 
     /// An agent through the bridge and the socket to the editor reads the CA-72 and sets its

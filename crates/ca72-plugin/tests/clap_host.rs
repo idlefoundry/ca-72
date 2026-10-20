@@ -186,6 +186,10 @@ impl Instance {
     }
 
     fn with_block(block: u32) -> Instance {
+        Instance::with_rate_block(RATE, block)
+    }
+
+    fn with_rate_block(rate: f64, block: u32) -> Instance {
         let rescans = Box::new(AtomicUsize::new(0));
         let host = Box::new(clap_host {
             clap_version: CLAP_VERSION,
@@ -212,7 +216,7 @@ impl Instance {
             );
             assert!(!plugin.is_null());
             assert!(((*plugin).init.unwrap())(plugin));
-            assert!(((*plugin).activate.unwrap())(plugin, RATE, 1, block));
+            assert!(((*plugin).activate.unwrap())(plugin, rate, 1, block));
             assert!(((*plugin).start_processing.unwrap())(plugin));
             Instance {
                 plugin,
@@ -1000,4 +1004,218 @@ fn midi_preset_actions_work_through_clap_with_no_editor() {
             .unwrap()
             .contains("preset")
     );
+}
+
+/// A host may make, start and play an instance on a thread of its own, with less stack than a
+/// main thread's (a macOS secondary thread has 512 KB; a host's own threads may have less): the
+/// instance's whole life, made, activated, played at each QUALITY in POLY with GLIDE moving,
+/// its state loaded, deactivated and destroyed, fits in 256 KB (decisions.md R-HOST-STACK:
+/// making one took 576 to 640 KB in a release build and over 1 MB in a debug build, its ten
+/// spare voices built on the stack).
+#[test]
+fn an_instance_lives_on_a_host_thread_of_256_kb() {
+    std::thread::Builder::new()
+        .stack_size(256 << 10)
+        .spawn(|| {
+            let p = Instance::with_rate_block(RATE, BLOCK);
+            let state = p.save();
+            for quality in [0.0, 1.0, 2.0] {
+                p.audio(
+                    BLOCK,
+                    &[
+                        In::Param(0, "quality", quality),
+                        In::Param(0, "poly", 1.0),
+                        In::Param(0, "glide_on", 1.0),
+                        In::Note(0, CLAP_EVENT_NOTE_ON, -1, 0, 48, 1.0),
+                        In::Note(0, CLAP_EVENT_NOTE_ON, -1, 0, 55, 1.0),
+                    ],
+                );
+                for k in 0..4u32 {
+                    p.audio(
+                        BLOCK,
+                        &[
+                            In::Param(0, "glide", f64::from(k) / 4.0),
+                            In::Param(BLOCK / 2, "glide", f64::from(k + 1) / 4.0),
+                            In::Note(BLOCK / 2, CLAP_EVENT_NOTE_ON, -1, 0, 60 + k as i16, 1.0),
+                        ],
+                    );
+                }
+                assert!(p.load(&state));
+                p.audio(BLOCK, &[]);
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// GLIDE moved as hard as a host can move it (issue #58: a crash in FL Studio on Windows 11
+/// "when messing with glide"): its knob set at many points of every block, at its ends, by a
+/// denormal's breadth and, with `CA72_HOSTILE` set, out of its range and not a number; its switch
+/// flipped; keys played legato and detached, the bend moving; NOTE PRIORITY, RETRIGGER, POLY,
+/// UNISON, VOICES and QUALITY changed; and a saved state (a host's preset) loaded while it
+/// glides. `CA72_RATES` (44100,48000,96000,192000), `CA72_BLOCKS` (32,256,1024),
+/// `CA72_SECONDS` (2; ULTRA a tenth of it), `CA72_STACK` (the thread's stack, bytes; 8 MB).
+/// Every sample must be finite and within ±16.
+///
+/// By hand, in a debug build (overflow checks and debug assertions):
+/// `cargo test -p ca72-plugin --test clap_host -- --ignored --nocapture glide_stress`.
+#[test]
+#[ignore = "a stress test, run by hand"]
+fn glide_stress() {
+    // (On a thread of `CA72_STACK` bytes, as a host's own thread may be smaller than a main
+    // thread's: the plug-in's every call is made there.)
+    let stack: usize = std::env::var("CA72_STACK").map_or(8 << 20, |s| s.parse().unwrap());
+    std::thread::Builder::new()
+        .stack_size(stack)
+        .spawn(glide_stress_here)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn glide_stress_here() {
+    fn list<T: std::str::FromStr + Clone>(name: &str, default: &[T]) -> Vec<T> {
+        std::env::var(name).map_or_else(
+            |_| default.to_vec(),
+            |s| {
+                s.split(',')
+                    .map(|v| v.trim().parse().ok().unwrap())
+                    .collect()
+            },
+        )
+    }
+    let rates: Vec<f64> = list("CA72_RATES", &[44_100.0, 48_000.0, 96_000.0, 192_000.0]);
+    let blocks: Vec<u32> = list("CA72_BLOCKS", &[32, 256, 1024]);
+    let seconds: f64 = list("CA72_SECONDS", &[2.0])[0];
+    let hostile = std::env::var_os("CA72_HOSTILE").is_some();
+    let mut seed = 0x5EED_u64;
+    let mut rand = move || {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 33) as f64 / f64::from(1u32 << 31)
+    };
+    for &rate in &rates {
+        for &block in &blocks {
+            for quality in [0.0, 1.0, 2.0] {
+                for mode in 0..3 {
+                    // (Made on a thread of a main thread's stack where `CA72_MADE_BIG` is set,
+                    // so that `CA72_STACK` measures what the rest needs.)
+                    let p = if std::env::var_os("CA72_MADE_BIG").is_some() {
+                        struct Made(Instance);
+                        // SAFETY: the instance is made there and only used here after.
+                        unsafe impl Send for Made {}
+                        std::thread::Builder::new()
+                            .stack_size(8 << 20)
+                            .spawn(move || Made(Instance::with_rate_block(rate, block)))
+                            .unwrap()
+                            .join()
+                            .unwrap()
+                            .0
+                    } else {
+                        Instance::with_rate_block(rate, block)
+                    };
+                    p.audio(
+                        1,
+                        &[
+                            In::Param(0, "quality", quality),
+                            In::Param(0, "poly", f64::from(mode == 1)),
+                            In::Param(0, "unison", f64::from(mode == 2)),
+                            In::Param(0, "voices", 4.0),
+                            In::Param(0, "glide_on", 1.0),
+                            In::Param(0, "glide", 0.6),
+                            In::Param(0, "emphasis", 0.8),
+                        ],
+                    );
+                    let preset = p.save();
+                    let length = if quality == 2.0 {
+                        seconds / 10.0
+                    } else {
+                        seconds
+                    };
+                    let total = (length * rate) as u32;
+                    let (mut start, mut held, mut peak) = (0u32, Vec::<i16>::new(), 0.0f32);
+                    while start < total {
+                        let frames = block.min(total - start);
+                        let mut ev: Vec<In> = Vec::new();
+                        let mut times: Vec<u32> = (0..(rand() * 9.0) as u32)
+                            .map(|_| (rand() * f64::from(frames)) as u32)
+                            .collect();
+                        times.sort_unstable();
+                        for t in times {
+                            let r = rand();
+                            let v = if r < 0.1 {
+                                0.0
+                            } else if r < 0.2 {
+                                1.0
+                            } else if r < 0.25 {
+                                1e-40
+                            } else if hostile && r < 0.3 {
+                                [f64::NAN, -0.5, 1.5, f64::INFINITY, -1e300]
+                                    [(rand() * 5.0) as usize]
+                            } else {
+                                rand()
+                            };
+                            ev.push(In::Param(t, "glide", v));
+                            let r = rand();
+                            if r < 0.05 {
+                                ev.push(In::Param(t, "glide_on", f64::from(rand() < 0.7)));
+                            } else if r < 0.25 {
+                                // A key, legato over those held or alone.
+                                let key = 24 + (rand() * 84.0) as i16;
+                                if !held.contains(&key) {
+                                    ev.push(In::Note(t, CLAP_EVENT_NOTE_ON, -1, 0, key, 1.0));
+                                    held.push(key);
+                                }
+                            } else if r < 0.4 && !held.is_empty() {
+                                let key = held.remove((rand() * held.len() as f64) as usize);
+                                ev.push(In::Note(t, CLAP_EVENT_NOTE_OFF, -1, 0, key, 0.0));
+                            } else if r < 0.45 {
+                                let bend = (rand() * 16_383.0) as u16;
+                                ev.push(In::Midi(
+                                    t,
+                                    [0xe0, (bend & 0x7f) as u8, (bend >> 7) as u8],
+                                ));
+                            }
+                        }
+                        let r = rand();
+                        if r < 0.03 {
+                            ev.push(In::Param(0, "note_priority", (rand() * 3.0).floor()));
+                        } else if r < 0.06 {
+                            ev.push(In::Param(0, "retrigger", f64::from(rand() < 0.5)));
+                        } else if r < 0.07 {
+                            ev.push(In::Param(0, "voices", 2.0 + (rand() * 9.0).floor()));
+                        } else if r < 0.075 {
+                            ev.push(In::Param(0, "poly", f64::from(rand() < 0.5)));
+                        } else if r < 0.08 {
+                            ev.push(In::Param(0, "unison", f64::from(rand() < 0.5)));
+                        } else if r < 0.083 && quality < 2.0 {
+                            ev.push(In::Param(0, "quality", (rand() * 2.0).floor()));
+                        }
+                        // (Sorted by time, as a host gives them.)
+                        let time = |e: &In| match *e {
+                            In::Param(t, ..) | In::Note(t, ..) | In::Midi(t, ..) => t,
+                            In::Cc(t, ..) | In::Transport(t, ..) => t,
+                        };
+                        ev.sort_by_key(time);
+                        if rand() < 0.01 && std::env::var_os("CA72_NO_LOAD").is_none() {
+                            // A host's preset loaded while the keys are held and GLIDE glides.
+                            assert!(p.load(&preset));
+                        }
+                        let (_, out) = p.audio(frames, &ev);
+                        for x in &out {
+                            assert!(x.is_finite());
+                            peak = peak.max(x.abs());
+                        }
+                        start += frames;
+                    }
+                    eprintln!(
+                        "{rate} Hz, {block} frames, QUALITY {quality}, mode {mode}: peak {peak:.3}"
+                    );
+                    assert!(peak < 16.0, "the output ran away: {peak}");
+                }
+            }
+        }
+    }
 }

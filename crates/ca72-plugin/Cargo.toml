@@ -106,12 +106,14 @@ clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6
 # The Objective-C classes of other copies of softbuffer, and the test's own view
 # (tests/softbuffer_copies.rs): the versions softbuffer takes.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
+# The measurements' processor time (`tests/lo_workers.rs`).
+libc.workspace = true
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"] }
 
 # The editor's pixels read and its window captured, in the tests in a real window.
 [target.'cfg(target_os = "windows")'.dev-dependencies]
-winapi = { version = "0.3.9", features = ["winuser", "windef", "wingdi"] }
+winapi = { version = "0.3.9", features = ["winuser", "windef", "wingdi", "processthreadsapi", "realtimeapiset"] }
 
 [lints]
 workspace = true

@@ -333,6 +333,9 @@ pub struct Ca72Params {
     /// R54): 0 a semitone a mark, 1 the hardware's. Not the session's: a learned
     /// controller turns the knob through it ([`Ca72Params::freq_law`]).
     pub freq_law: Arc<AtomicU8>,
+    /// The knobs' values a preset or Init is setting, marked so the voices take them at once
+    /// instead of gliding there (`crate::smooth`; decisions.md R-KNOB-GLIDE). Not the session's.
+    pub lands: crate::smooth::Lands,
 
     /// POWER off: the host's bypass, the output faded out.
     #[id = "bypass"]
@@ -688,6 +691,7 @@ impl Default for Ca72Params {
                 MidiMap::for_computer()
             }),
             freq_law: Arc::new(AtomicU8::new(0)),
+            lands: crate::smooth::Lands::default(),
             drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             tune: dial("Tune", -2.5, 2.5, 0.0),
@@ -915,9 +919,8 @@ impl Ca72Params {
     }
 
     /// The engine's controls with each knob where `knob` has it (its dial's units): the
-    /// parameter's value, or for one a learned MIDI controller has just moved, where its glide
-    /// has it (`crate::learn::Dezip`; decisions.md R34). Every other conversion is
-    /// [`Ca72Params::controls`]'.
+    /// parameter's value, or where the voices have it while it glides (`crate::smooth::Smooth`;
+    /// decisions.md R34, R-KNOB-GLIDE). Every other conversion is [`Ca72Params::controls`]'.
     pub fn controls_with(&self, knob: &dyn Fn(&FloatParam) -> f32) -> Controls {
         let value = |p: &FloatParam| f64::from(knob(p));
         let ten = |p: &FloatParam| value(p) / 10.0;

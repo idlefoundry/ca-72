@@ -343,7 +343,7 @@ fn quality_lo_neither_allocates_nor_frees_while_it_plays() {
 
 /// POLY's voices shared with workers (decisions.md R11), played between the events as the
 /// plug-in plays its host's blocks, each block given its deadline, the side chain driven,
-/// chords of ten taking held voices, VOICES changed and POLY switched while it plays, its
+/// chords of ten taking held voices, VOICES changed and POLY and QUALITY's LO switched while it plays, its
 /// workers let go and asked for again as it is (R21): no allocation, no free on the audio
 /// thread.
 #[test]
@@ -408,6 +408,9 @@ fn poly_with_workers_neither_allocates_nor_frees_while_it_plays() {
         c.voices = [10, 6, 3][b / 100 % 3];
         c.feedback = if b % 60 < 30 { 0.0 } else { 0.4 };
         c.panel.cutoff = 0.5 + 0.3 * (at as f64 * 1e-4).sin();
+        // (QUALITY's LO, whose voices the workers share too when there is work enough:
+        // decisions.md R-LO-WORKERS.)
+        c.potato = b / 120 % 2 == 1;
         e.set(&c);
         // (The block in two runs, a pitch bend between them.)
         e.render(&ext[..BLOCK / 2], &mut l[..BLOCK / 2], &mut r[..BLOCK / 2]);
@@ -634,7 +637,7 @@ fn asking_the_helper_neither_allocates_nor_frees() {
 /// MIDI Learn on the audio thread (decisions.md R34), through the plug-in's own `process`: learned
 /// controllers setting knobs (gliding in the voices), switches, a selector and VOICES through the
 /// host, a controller caught while learning, the reserved ones refused, the host's automation
-/// ending a glide: no allocation, no free. (The stand-in host's record of the changes is reserved
+/// gliding on from a learned glide (R-KNOB-GLIDE): no allocation, no free. (The stand-in host's record of the changes is reserved
 /// first, as the wrappers reserve theirs; its events are pushed off the count.)
 #[test]
 fn midi_learn_neither_allocates_nor_frees() {

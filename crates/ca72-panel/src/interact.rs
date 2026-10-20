@@ -1,8 +1,9 @@
 //! What a pointer at a point of the drawing finds there, and what operating each kind of
 //! control does to its value (normalized, 0..1).
 //!
-//! A knob turns with a vertical drag (fine: a tenth as fast), the mouse wheel nudges it and
-//! a double click restores its default; RANGE and WAVEFORM step between their positions (a
+//! A knob turns with a vertical drag (fine: a tenth as fast), the mouse wheel nudges it a
+//! notch at a time, a trackpad turns it as far as it travels, and a double click restores its
+//! default; RANGE and WAVEFORM step between their positions (a
 //! click on a legend picks it, a click on the knob steps toward the side clicked); a switch
 //! flips at a click anywhere on it; QUALITY's toggle goes to the position clicked (its lever's
 //! three places, or their legends); the wheels stay where they are left, the PITCH wheel
@@ -340,6 +341,55 @@ mod tests {
             let kind = &CONTROLS[index(id).expect("control")].kind;
             assert!(!kind.is_continuous());
             assert_eq!(scroll(kind, 0.0, 0.75, false), 0.0);
+        }
+    }
+
+    /// A trackpad turns a continuous knob or a wheel as far as it travels, a fraction of a notch
+    /// a fraction of a notch's move (issue #107, R-KNOB-GLIDE's cases on R-KNOB-RESOLUTION's
+    /// `scroll`); a whole notch is the wheel's step; a selector, a switch, a toggle and the
+    /// knobs of steps go only a whole step at a time.
+    #[test]
+    fn a_trackpad_turns_continuous_controls_in_proportion() {
+        let knob = &CONTROLS[index("cutoff").expect("a control")].kind;
+        assert!(knob.is_continuous());
+        for (notches, fine, want) in [
+            (0.25, false, 0.505),
+            (-0.1, false, 0.498),
+            (1.0, false, 0.52),
+            (3.5, false, 0.57),
+            (0.5, true, 0.501),
+        ] {
+            let v = scroll(knob, 0.5, notches, fine);
+            assert!((v - want).abs() < 1e-12, "{notches} {fine}: {v}");
+        }
+        assert_eq!(scroll(knob, 0.5, 1.0, false), step(knob, 0.5, true, false));
+        assert_eq!(scroll(knob, 0.5, -1.0, true), step(knob, 0.5, false, true));
+        assert_eq!(scroll(knob, 0.99, 2.0, false), 1.0);
+        assert_eq!(scroll(knob, 0.001, -0.5, false), 0.0);
+        // Forty small moves of a quarter notch go as far as ten notches.
+        let mut v = 0.2;
+        for _ in 0..40 {
+            v = scroll(knob, v, 0.25, false);
+        }
+        assert!((v - 0.4).abs() < 1e-12, "{v}");
+        let wheel = &CONTROLS[index("mod_wheel").expect("a control")].kind;
+        assert!(wheel.is_continuous());
+        assert!((scroll(wheel, 0.5, 0.5, false) - 0.525).abs() < 1e-12);
+        assert_eq!(
+            scroll(wheel, 0.5, 1.0, false),
+            step(wheel, 0.5, true, false)
+        );
+        for id in [
+            "voices",
+            "arp_rate",
+            "arp_octaves",
+            "osc1_range",
+            "osc1_on",
+            "quality",
+            "note_priority",
+        ] {
+            let k = &CONTROLS[index(id).expect("a control")].kind;
+            assert!(!k.is_continuous(), "{id}");
         }
     }
 }
