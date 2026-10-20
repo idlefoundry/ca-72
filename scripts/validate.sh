@@ -125,8 +125,7 @@ if [ "$os" = linux ] && [ "${CA72_SKIP_GUI_TESTS:-0}" != 1 ]; then
     echo "== Linux native panel resize"
     ${display[@]+"${display[@]}"} cargo test --manifest-path "$root/Cargo.toml" \
         -p ca72-plugin --lib --features standalone-production \
-        editor::linux_resize_tests::panel_resize_presents_before_the_next_frame_callback \
-        -- --ignored --nocapture
+        editor::linux_resize_tests -- --ignored --nocapture --test-threads=1
 fi
 
 echo "== clap-validator $CLAP_VALIDATOR"
