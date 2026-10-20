@@ -17,6 +17,11 @@
 //! `CA72_MPE=1` drops the expression drawer over the lower page (decisions.md R-MPE): PRESSURE
 //! 50 % and 1.0 OCT, TIMBRE -30 % and 2.5 OCT (the mock-up's), INPUT reading MPE, the MPE key
 //! lit; `CA72_MPE_INPUT=channel` or `none` INPUT so.
+//! `CA72_LFO=1` the LFO page over the lower page (decisions.md R-LFO), the round-2 mock-ups'
+//! four LFOs, the LFO key lit; `CA72_LFO_COLORS=amber,green,blue,red` other phosphors;
+//! `CA72_LFO_RINGS=1` the mock-ups' rings on CUTOFF, OSCILLATOR-2 FREQUENCY and VOLUME (each
+//! LFO's point on them), `CA72_LFO_CORD=<param>` an assignment from LFO 1's jack dragged over
+//! that knob, `CA72_LFO_POPUP=1` CUTOFF's hover pop-up.
 //! `CA72_SET=param=value,...` controls at other values; `CA72_TIMED=2:1:9,3:0:13` oscillator 2's
 //! or 3's TIMED on or off and its division (decisions.md R-OSC-TIMED).
 //! `CA72_PACK=<folder>` in a skin pack's look (decisions.md R-SKIN-PACKS), what its checks
@@ -167,6 +172,7 @@ fn main() {
     // The strip's own parts over the drawing's strip (A6), as the editor shows them.
     let mut strip = ca72_panel::strip::StripRenderer::new(scale);
     let t3 = std::time::Instant::now();
+    let scene_values = scene.values.to_vec();
     let mut scene = example_strip(mono);
     if std::env::var("CA72_KEYBOARD").is_ok_and(|v| v == "1") {
         let held = if std::env::var("CA72_KEYS_PLAYED").is_ok_and(|v| v == "1") {
@@ -187,6 +193,16 @@ fn main() {
     strip.set_under_top(r.top_px());
     scene.bar.arp = arp;
     scene.bar.mpe = mpe;
+    if std::env::var("CA72_LFO").is_ok_and(|v| v == "1") {
+        scene.lfo = true;
+        scene.bar.lfo = true;
+        scene.bar.lfo_page = true;
+    }
+    if arp {
+        scene.bar.page = Some(ca72_panel::presets::BarTarget::Arp);
+    } else if mpe {
+        scene.bar.page = Some(ca72_panel::presets::BarTarget::Mpe);
+    }
     if fx.is_some() {
         strip.set_rail(ca72_panel::strip::Rail::Effects);
         scene.bar.fx = true;
@@ -203,6 +219,10 @@ fn main() {
         let (from, to) = (y * sf.width() as usize * 4, (top + y) * w * 4);
         all.data_mut()[to..to + n].copy_from_slice(&sf.data()[from..from + n]);
     }
+    if std::env::var("CA72_LFO").is_ok_and(|v| v == "1") {
+        lfo_page(&mut all, &mut r, scale, skin, lettering);
+    }
+    lfo_overlay(&mut all, &r, scale, &scene_values);
     if arp {
         drop_arp(&mut all, &mut r, scale, skin, lettering);
     }
@@ -688,4 +708,290 @@ fn drop_fx(
             None,
         );
     }
+}
+
+/// The round-2 mock-ups' four LFOs, as the editor shows them: their states and traces.
+pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
+    use ca72_panel::strip::lfo::{Column, LfoScene, TRACE_POINTS};
+    // (wave place, continuous, rate Hz, timed division, phase deg, mode, mono, rise s, screen, orb)
+    #[allow(clippy::type_complexity)]
+    let lfos: [(
+        f64,
+        bool,
+        f64,
+        Option<usize>,
+        f64,
+        f64,
+        bool,
+        f64,
+        &str,
+        f64,
+    ); 4] = [
+        (0.0, false, 2.4, None, 0.0, 0.0, true, 0.0, "2 KNOBS", 0.16),
+        (
+            2.0,
+            false,
+            0.35,
+            None,
+            180.0,
+            0.5,
+            false,
+            1.2,
+            "CUTOFF -25",
+            0.62,
+        ),
+        (
+            3.0,
+            false,
+            1.0,
+            Some(9),
+            90.0,
+            1.0,
+            true,
+            0.0,
+            "VOLUME -50",
+            0.28,
+        ),
+        (
+            2.4,
+            true,
+            6.5,
+            None,
+            0.0,
+            0.0,
+            true,
+            0.5,
+            "NOT IN USE",
+            0.80,
+        ),
+    ];
+    let colours =
+        std::env::var("CA72_LFO_COLORS").unwrap_or_else(|_| "amber,green,blue,red".into());
+    let rgb = |w: &str| match w {
+        "green" => [0x26, 0xff, 0xb7],
+        "blue" => [0x4c, 0x8c, 0xff],
+        "red" => [0xe6, 0x39, 0x48],
+        "violet" => [0xc0, 0x80, 0xff],
+        "white" => [0xe4, 0xec, 0xf4],
+        _ => [0xff, 0xb0, 0x20],
+    };
+    let words: Vec<&str> = colours.split(',').collect();
+    let mut scene = LfoScene::default();
+    for (n, (c, l)) in scene.columns.iter_mut().zip(lfos).enumerate() {
+        let (at, continuous, hz, timed, phase, mode, mono, rise, screen, orb) = l;
+        // (A dotted eighth at 120 BPM: 0.75 of a beat.)
+        let hz = if timed.is_some() { 2.0 / 0.75 } else { hz };
+        let cycles = 2.0;
+        let span = cycles / hz;
+        let shape = |at: f64, p: f64| -> f64 {
+            let p = p.rem_euclid(1.0);
+            let place = |k: usize| match k {
+                0 => {
+                    if p < 0.5 {
+                        -1.0 + 4.0 * p
+                    } else {
+                        3.0 - 4.0 * p
+                    }
+                }
+                1 => {
+                    let peak = 14.0 / 22.0;
+                    if p < peak {
+                        -1.0 + 2.0 * p / peak
+                    } else {
+                        -(p - peak) / (1.0 - peak)
+                    }
+                }
+                2 => 2.0 * p - 1.0,
+                _ => {
+                    if p < 0.5 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }
+            };
+            if at >= 3.0 {
+                return place(3);
+            }
+            let k = at.floor() as usize;
+            let f = at - k as f64;
+            (1.0 - f) * place(k) + f * place(k + 1)
+        };
+        let out = |t: f64| {
+            let cyc = t * hz;
+            let cyc = if mode == 1.0 {
+                cyc.min(1.0 - 1e-9)
+            } else {
+                cyc
+            };
+            let g = if rise > 0.0 { (t / rise).min(1.0) } else { 1.0 };
+            shape(at, phase / 360.0 + cyc) * g
+        };
+        c.trace = (0..TRACE_POINTS)
+            .map(|i| out(span * i as f64 / (TRACE_POINTS - 1) as f64) as f32)
+            .collect();
+        c.orb = Some((orb, out(orb * span)));
+        c.colour = rgb(words.get(n).copied().unwrap_or("amber"));
+        c.continuous = continuous;
+        c.shape_at = at;
+        c.wave = at.round() / 5.0;
+        c.rate = ((hz - 0.01) / 49.99).powf(0.2);
+        if let Some(d) = timed {
+            c.timed = true;
+            c.division = d;
+            c.rate = d as f64 / 17.0;
+        }
+        c.phase = phase / 360.0;
+        c.rise = (rise / 10.0).cbrt();
+        c.mode = mode;
+        c.mono = mono;
+        c.screen = screen.into();
+        c.in_use = screen != "NOT IN USE";
+        let _ = Column::default;
+    }
+    scene
+}
+
+/// The LFO page over the lower page (the editor's `compose`).
+fn lfo_page(
+    all: &mut ca72_panel::Pixmap,
+    r: &mut Renderer,
+    scale: f64,
+    skin: Skin,
+    lettering: ca72_panel::Lettering,
+) {
+    use ca72_panel::strip::lfo::{self, LfoRenderer};
+    let t = std::time::Instant::now();
+    let mut page = LfoRenderer::new(scale, skin, lettering);
+    page.render(&lfo_example(), r);
+    eprintln!("the LFO page {:?}", t.elapsed());
+    let (w, f) = (all.width() as usize, page.frame());
+    let top = (lfo::top_px(scale) - r.top_px()) as usize;
+    let (x0, x1) = (
+        (lfo::LEFT * scale).round() as usize,
+        (lfo::RIGHT * scale).round() as usize,
+    );
+    let rows = (f.height() as usize).min(all.height() as usize - top);
+    for y in 0..rows {
+        let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
+        let n = (x1 - x0) * 4;
+        all.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+    }
+}
+
+/// The rings, a dragged assignment and the hover pop-up over `all`, as the editor lays them.
+fn lfo_overlay(all: &mut ca72_panel::Pixmap, r: &Renderer, scale: f64, values: &[f64]) {
+    use ca72_panel::modulation::{Cord, KnobRings, ModRenderer, ModScene, PopDial, Popup, Ring};
+    let var = |k: &str| std::env::var(k).ok();
+    let page = lfo_example();
+    let colour = |n: usize| page.columns[n].colour;
+    let knob = |param: &str| {
+        let i = CONTROLS.iter().position(|c| c.param == param)?;
+        let c = r.arrangement().control(i);
+        let skirt = match c.kind {
+            ca72_panel::Kind::Knob { big: true, .. } => ca72_panel::art::BIG.skirt,
+            _ => ca72_panel::art::STD.skirt,
+        };
+        Some((i, c.centre(), skirt, values[i]))
+    };
+    let assigned: [(&str, &[(usize, f64)]); 3] = [
+        ("cutoff", &[(0, 0.40), (1, -0.25)]),
+        ("osc2_frequency", &[(0, -0.10)]),
+        ("volume", &[(2, -0.50)]),
+    ];
+    let mut scene = ModScene::default();
+    if var("CA72_LFO_RINGS").as_deref() == Some("1") {
+        for (param, mods) in assigned {
+            let Some((control, at, skirt, travel)) = knob(param) else {
+                continue;
+            };
+            scene.knobs.push(KnobRings {
+                control,
+                at,
+                skirt,
+                travel,
+                rings: mods
+                    .iter()
+                    .map(|&(n, depth)| Ring {
+                        colour: colour(n),
+                        depth,
+                        point: page.columns[n]
+                            .orb
+                            .map(|(_, v)| (travel + depth * v).clamp(0.0, 1.0)),
+                    })
+                    .collect(),
+            });
+        }
+    }
+    if let Some(to) = var("CA72_LFO_CORD") {
+        let targets = [
+            "tune",
+            "glide",
+            "mod_mix",
+            "osc2_frequency",
+            "osc3_frequency",
+            "osc1_volume",
+            "ext_volume",
+            "osc2_volume",
+            "noise_volume",
+            "osc3_volume",
+            "cutoff",
+            "emphasis",
+            "contour_amount",
+            "filter_attack",
+            "filter_decay",
+            "filter_sustain",
+            "loudness_attack",
+            "loudness_decay",
+            "loudness_sustain",
+            "volume",
+            "feedback",
+        ];
+        let over = knob(&to).map(|(_, at, skirt, _)| (at, skirt));
+        scene.cord = Some(Cord {
+            from: ca72_panel::strip::lfo::places(0).jack,
+            to: over.map_or((2281.0, 170.0), |(at, _)| at),
+            colour: colour(0),
+            targets: targets
+                .iter()
+                .filter(|p| **p != to)
+                .filter_map(|p| knob(p).map(|(_, at, skirt, _)| (at, skirt)))
+                .collect(),
+            over,
+        });
+    }
+    if var("CA72_LFO_POPUP").as_deref() == Some("1")
+        && let Some((_, at, skirt, _)) = knob("cutoff")
+    {
+        scene.popup = Some(Popup {
+            knob: (at, skirt),
+            dials: vec![
+                PopDial {
+                    colour: colour(0),
+                    label: "LFO 1".into(),
+                    depth: 0.4,
+                    shared: false,
+                },
+                PopDial {
+                    colour: colour(1),
+                    label: "LFO 2".into(),
+                    depth: -0.25,
+                    shared: true,
+                },
+            ],
+            hover: Some(0),
+            size: r.text_size(),
+        });
+    }
+    if scene == ModScene::default() {
+        return;
+    }
+    let mut m = ModRenderer::new(scale);
+    m.rescale(scale, r.top_px());
+    let t = std::time::Instant::now();
+    m.render(&scene);
+    eprintln!("the modulation overlay {:?}", t.elapsed());
+    let place = [0, 0, all.width() as i32, all.height() as i32];
+    m.lay_rings(all, place);
+    m.lay_over(all, place);
 }

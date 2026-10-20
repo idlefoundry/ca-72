@@ -31,12 +31,14 @@ use ca72_panel::controls::{FEEDBACK_SILENT, Place as DrawerPlace, feedback_silen
 use ca72_panel::fonts::Weight;
 use ca72_panel::keyboard;
 use ca72_panel::learn::{Note, Tone};
+use ca72_panel::modulation::{ModRenderer, ModScene};
 use ca72_panel::presets::{
     BarTarget, DRAWER_H, DRAWER_TOP, DrawerRenderer, DrawerTarget, PresetKey, ROW_H, drawer_hit,
     in_tags,
 };
 use ca72_panel::strip::arp::{self as arp_ui, ArpBank, ArpRenderer, ArpScene, ArpTarget};
 use ca72_panel::strip::fx::{self as fx_ui, FxRenderer, FxScene};
+use ca72_panel::strip::lfo::{self as lfo_ui, LfoRenderer, LfoScene};
 use ca72_panel::strip::lower as lower_ui;
 use ca72_panel::strip::mpe::{self as mpe_ui, MpeRenderer, MpeScene, MpeTarget};
 use ca72_panel::strip::{self, Bank, Field, Rail, Readout, StripRenderer, StripScene, StripTarget};
@@ -58,6 +60,7 @@ use crate::update::Update;
 
 mod agent;
 mod entry;
+mod lfo_page;
 use entry::Entry;
 
 /// The share of the usable screen the editor opens at until it is resized.
@@ -573,7 +576,12 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
-        _ => return None,
+        // The LFO page's (decisions.md R-LFO; its RATE and WAVEFORM operated through
+        // `lfo_page::LfoRate` and `LfoWave`).
+        id => {
+            let (n, part) = lfo_page::lfo_part(id)?;
+            return lfo_page::lfo_param(p, n, part);
+        }
     })
 }
 
@@ -1413,6 +1421,16 @@ struct Editing {
     /// Oscillators 2 and 3's FREQUENCY knobs, through the computer's law.
     freq_knobs: [FreqKnob; 2],
     waveforms: [WaveformSwitch; 3],
+    /// The LFO page (decisions.md R-LFO): its renderer and what it shows; the knobs' rings, a
+    /// dragged assignment and the hover pop-up over the panel, and what they show; the editor's
+    /// modulation state; each LFO's RATE (Hz or timed) and WAVEFORM as operated.
+    lfo: LfoRenderer,
+    lfo_scene: LfoScene,
+    modulation: ModRenderer,
+    mod_scene: ModScene,
+    modulating: lfo_page::Modulating,
+    lfo_rates: [lfo_page::LfoRate; 4],
+    lfo_waves: [lfo_page::LfoWave; 4],
     playing: Playing,
     #[cfg(feature = "standalone-production")]
     standalone_dialog: Option<crate::standalone_settings::Dialog>,
@@ -1649,6 +1667,14 @@ impl Editing {
             params: Arc::clone(&params),
             n,
         });
+        let lfo_rates = [0, 1, 2, 3].map(|n| lfo_page::LfoRate {
+            params: Arc::clone(&params),
+            n,
+        });
+        let lfo_waves = [0, 1, 2, 3].map(|n| lfo_page::LfoWave {
+            params: Arc::clone(&params),
+            n,
+        });
         let watched = Watched::new(Arc::clone(&context), &params);
         // The standalone's effects (decisions.md R-FX-DRAWER): the plug-ins have none.
         let effects = if standalone {
@@ -1735,6 +1761,17 @@ impl Editing {
             last_strip_press: None,
             freq_knobs,
             waveforms,
+            lfo: LfoRenderer::new(
+                f64::from(physical_width) / art::W,
+                settings.skin,
+                settings.lettering,
+            ),
+            lfo_scene: LfoScene::default(),
+            modulation: ModRenderer::new(f64::from(physical_width) / art::W),
+            mod_scene: ModScene::default(),
+            modulating: lfo_page::Modulating::default(),
+            lfo_rates,
+            lfo_waves,
             playing,
             #[cfg(feature = "standalone-production")]
             standalone_dialog: None,
@@ -1884,6 +1921,7 @@ impl Editing {
         let (skin, lettering) = (self.renderer.skin(), self.renderer.lettering());
         self.arp.set_look(skin, lettering);
         self.mpe.set_look(skin, lettering);
+        self.lfo.set_look(skin, lettering);
         if let Some(fx) = &mut self.fx {
             fx.set_look(skin, lettering);
         }
@@ -2167,6 +2205,7 @@ impl Editing {
         self.drawer.rescale(scale);
         self.arp.rescale(scale);
         self.mpe.rescale(scale);
+        self.lfo.rescale(scale);
         if let Some(fx) = &mut self.fx {
             fx.rescale(scale);
         }
@@ -2211,7 +2250,10 @@ impl Editing {
     fn off_panel(&self, i: usize) -> bool {
         CONTROLS.get(i).is_some_and(|c| {
             let at = |keys: &[&str]| keys.iter().position(|k| *k == c.param);
-            at(&ca72_panel::render::TIMED_KEYS).is_some_and(|k| timed_inert(&self.params, k + 1))
+            // (The LFO page's while it does not show: R-LFO.)
+            (c.place == DrawerPlace::Lfo && !self.page_shows())
+                || at(&ca72_panel::render::TIMED_KEYS)
+                    .is_some_and(|k| timed_inert(&self.params, k + 1))
                 || at(&ca72_panel::render::MOD_KEYS).is_some_and(|n| !self.params.continuous(n))
         })
     }
@@ -2480,7 +2522,7 @@ impl Editing {
             "osc2_frequency" => self.params.timed_now(1),
             "osc3_frequency" => self.params.timed_now(2),
             _ => false,
-        })
+        }) || self.lfo_timed(i)
     }
 
     fn operated(&self, control: usize) -> Option<&dyn Operated> {
@@ -2490,7 +2532,14 @@ impl Editing {
             "osc1_waveform" => Some(&self.waveforms[0]),
             "osc2_waveform" => Some(&self.waveforms[1]),
             "osc3_waveform" => Some(&self.waveforms[2]),
-            id => param(&self.params, id),
+            // An LFO's (decisions.md R-LFO): its RATE in Hz or timed, its WAVEFORM STEPPED or
+            // CONTINUOUS, its others its parameters.
+            id => match lfo_page::lfo_part(id) {
+                Some((n, "rate")) => Some(&self.lfo_rates[n]),
+                Some((n, "waveform")) => Some(&self.lfo_waves[n]),
+                Some((n, part)) => lfo_page::lfo_param(&self.params, n, part),
+                None => param(&self.params, id),
+            },
         }
     }
 
@@ -2922,7 +2971,7 @@ impl Editing {
                 .iter()
                 .position(|w| *w == c.param)
                 .is_some_and(|n| self.params.continuous(n))
-        })
+        }) || self.lfo_continuous(i)
     }
 
     /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
@@ -3032,9 +3081,12 @@ impl Editing {
                 self.set_switch(&self.params.auto_gain, on);
             }
             // The settings' key: its menu, dropping down from under it to its left.
+            StripTarget::Bar(BarTarget::Lfo) => self.toggle_lfo_page(),
             StripTarget::Bar(BarTarget::Keyboard) => {
                 self.playing.release_pointer();
-                self.playing.visible = !self.playing.visible;
+                // (From the LFO page: the keyboard in its place, shown.)
+                self.playing.visible = !self.keyboard_shown();
+                self.modulating.open = false;
                 self.keep_settings(Change::Keyboard(self.playing.visible));
                 self.playing.wants_keys = self.playing.holds_keys();
                 self.hover = None;
@@ -3244,6 +3296,10 @@ impl Editing {
                 self.fx_view.act(a);
                 return;
             }
+            Pressed::Mod(m) => {
+                self.mod_item(m);
+                return;
+            }
         }
         // The effects' list open: a press elsewhere puts it away, and is its own.
         if self.fx_view.list_open() && !self.in_fx((x, y)) {
@@ -3312,7 +3368,17 @@ impl Editing {
             }
             return;
         }
-        if self.playing.visible
+        // Modulation over the panel: a pop-up's dial, a ring's end, Alt/Option on a knob
+        // (decisions.md R-LFO).
+        if self.mod_press((x, y), modifiers) {
+            return;
+        }
+        // The LFO page, in the lower page's place.
+        if self.page_shows() && lfo_ui::inside(x, y) {
+            self.page_press((x, y), modifiers);
+            return;
+        }
+        if self.keyboard_shown()
             && let Some(target) = keyboard::hit(self.playing.root, x, y, self.playing.standalone)
         {
             match target {
@@ -3452,7 +3518,7 @@ impl Editing {
         let size = self.renderer.text_size() * MENU_TEXT;
         let map = &self.params.midi_map;
         // (A drawer dropped from the rail is over the keyboard's top: its own menus.)
-        if self.playing.visible && keyboard::inside(x, y) && !self.in_lower((x, y)) {
+        if self.keyboard_shown() && keyboard::inside(x, y) && !self.in_lower((x, y)) {
             self.learning.close_menu();
             return;
         }
@@ -3507,6 +3573,11 @@ impl Editing {
             }
             return;
         }
+        // The LFO page's: a control's, else its LFO's colour and EDGES (decisions.md R-LFO).
+        if self.page_shows() && lfo_ui::inside(x, y) {
+            self.page_menu((x, y));
+            return;
+        }
         if let Some(t) = strip::hit(self.rail, x, y) {
             // A tab's menu (the strip's knobs' are the panel's), above it.
             match t.control() {
@@ -3542,8 +3613,21 @@ impl Editing {
             Some(Target::Control(i) | Target::Legend(i, _)) => Some(Place::Panel(i)),
             _ => None,
         };
-        self.learning
-            .open_menu(self.renderer.fonts(), map, place, target, (x, y), size);
+        // (Each source on a knob a head with DEPTH… and REMOVE; a strip knob's LFO head:
+        // decisions.md R-LFO.)
+        let rows = match target {
+            Some(Target::Control(i) | Target::Legend(i, _)) => self.knob_rows(i),
+            _ => Vec::new(),
+        };
+        self.learning.open_menu_with(
+            self.renderer.fonts(),
+            &self.params.midi_map,
+            place,
+            target,
+            (x, y),
+            size,
+            rows,
+        );
     }
 
     /// The drawer opened on its MIDI list, `chosen` in view.
@@ -3580,8 +3664,12 @@ impl Editing {
             });
             return;
         }
+        // An assignment or a depth dragged (decisions.md R-LFO).
+        if self.mod_moved((x, y)) {
+            return;
+        }
         self.playing.hover = if self.expanded()
-            && self.playing.visible
+            && self.keyboard_shown()
             && self.in_drawer((x, y)).is_none()
             && !self.in_lower((x, y))
             && !self.fx_view.pressing()
@@ -3652,6 +3740,20 @@ impl Editing {
                 return;
             }
             self.fx_view.hover = None;
+            // The LFO page: its controls, else its parts (decisions.md R-LFO).
+            if self.page_shows() && lfo_ui::inside(x, y) && over_drawer.is_none() {
+                self.hover = interact::hit_lfo(self.renderer.layout(), x, y);
+                self.modulating.hover = if self.hover.is_none() {
+                    lfo_ui::hit(x, y)
+                } else {
+                    None
+                };
+                self.strip_scene.hover = None;
+                self.browser.bar.hover = None;
+                self.modulating.popup = None;
+                return;
+            }
+            self.modulating.hover = None;
             let on_strip = if over_drawer.is_some() {
                 None
             } else {
@@ -3668,6 +3770,8 @@ impl Editing {
             } else {
                 (self.hit(x, y), None)
             };
+            // A modulated knob's pop-up, kept while the pointer is over it.
+            self.follow_popup(at);
             return;
         };
         if (pointer.0 - d.from.0).abs() + (pointer.1 - d.from.1).abs() > 3.0 {
@@ -3714,6 +3818,9 @@ impl Editing {
         self.playing.release_pointer();
         self.fx_view.released();
         self.tempo_let_go();
+        if self.mod_released() {
+            return;
+        }
         if self.resizing.take().is_some() {
             return;
         }
@@ -3733,6 +3840,9 @@ impl Editing {
         self.knob_entry = None;
         self.end_scroll();
         self.resizing = None;
+        // (An assignment dragged is dropped nowhere; a depth's drag ends where it is.)
+        self.modulating.patching = None;
+        self.mod_released();
         if let Some(d) = self.drag.take() {
             self.let_go(d, false);
         }
@@ -3831,7 +3941,7 @@ impl Editing {
             }
             return;
         }
-        if self.playing.visible && keyboard::inside(x, y) && !self.in_lower((x, y)) {
+        if self.keyboard_shown() && keyboard::inside(x, y) && !self.in_lower((x, y)) {
             return;
         }
         if let Some((dx, dy)) = self.in_drawer((x, y)) {
@@ -3890,6 +4000,15 @@ impl Editing {
             interact::hit_arp(x, y).filter(|_| self.lower.settled())
         } else if self.in_mpe((x, y)) {
             interact::hit_drawer(DrawerPlace::Mpe, x, y).filter(|_| self.lower.settled())
+        } else if self.page_shows() && lfo_ui::inside(x, y) {
+            // The LFO page's (decisions.md R-LFO), its column's LFO the last touched.
+            let t = interact::hit_lfo(self.renderer.layout(), x, y);
+            if let Some(Target::Control(i) | Target::Legend(i, _)) = t
+                && let Some((n, _)) = lfo_page::lfo_part(CONTROLS[i].param)
+            {
+                self.modulating.last = Some(crate::lfo::Source::Lfo(n));
+            }
+            t
         } else if strip::hit(self.rail, x, y).is_some() {
             return;
         } else {
@@ -4082,8 +4201,14 @@ impl Editing {
             (&self.levels, self.output),
             std::mem::take(&mut self.strip_scene),
         );
-        self.strip_scene.keyboard = self.playing.scene(self.renderer.skin());
-        self.browser.bar.keyboard = self.playing.visible;
+        // (The LFO page in the keyboard's place while it shows: decisions.md R-LFO.)
+        self.strip_scene.keyboard = if self.modulating.open {
+            None
+        } else {
+            self.playing.scene(self.renderer.skin())
+        };
+        self.strip_scene.lfo = self.modulating.open;
+        self.browser.bar.keyboard = self.keyboard_shown();
         self.browser.bar.panel = self.expanded();
         self.browser.bar.arp = self.params.arp_on.value();
         // The effects' (decisions.md R-FX-DRAWER): the chain read when it is free; the FX key lit
@@ -4099,6 +4224,24 @@ impl Editing {
         // Each note's own expression's (decisions.md R-MPE): the MPE key lit while an amount is
         // not 0; INPUT reading what the audio thread heard in the last few seconds.
         self.browser.bar.mpe = reaching(&self.params);
+        // The rail's page keys (decisions.md R-LFO): a page's or a drawer's lit while it shows,
+        // the others glowing faintly while what they open affects the sound (an LFO assigned and
+        // moving its knob).
+        self.browser.bar.lfo = self.params.lfo_scope.any_moving();
+        self.browser.bar.lfo_page = self.page_shows();
+        self.browser.bar.page =
+            (self.lower.open && self.expanded()).then_some(match self.lower.which {
+                Lower::Arp => BarTarget::Arp,
+                Lower::Mpe => BarTarget::Mpe,
+                Lower::Fx => BarTarget::Fx,
+            });
+        // The LFO page's (its orbs at most 30 times a second) and the knobs' rings, cord and
+        // pop-up.
+        self.read_lfos(Instant::now());
+        if self.page_shows() {
+            self.lfo_scene = self.lfo_scene_now();
+        }
+        self.mod_scene = self.mod_scene_now();
         let now = Instant::now();
         let counts = self.params.heard.counts();
         let (was, per_note, channel) = self.heard;
@@ -4155,6 +4298,11 @@ impl Editing {
     /// The tip: over the control operated, else over the one under the pointer (an effects'
     /// slot's: its effect's whole name and maker).
     fn tip(&self) -> Option<(String, f64, f64)> {
+        if self.drag.is_none()
+            && let Some(t) = self.page_tip()
+        {
+            return Some(t);
+        }
         if self.lower.which == Lower::Fx
             && self.lower.settled()
             && self.drag.is_none()
@@ -4192,7 +4340,12 @@ impl Editing {
                 } else {
                     self.scene.values[i] as f32
                 };
-                Some((format!("{label}: {}", p.text(v)), x, y + top))
+                // (The sources on it and their depths: decisions.md R-LFO.)
+                Some((
+                    format!("{label}: {}{}", p.text(v), self.depths_tip(i)),
+                    x,
+                    y + top,
+                ))
             }
             Target::Power => {
                 let state = if self.params.bypass.value() {
@@ -4306,7 +4459,7 @@ impl Editing {
         let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
         let ring = ring.filter(|&i| !self.off_panel(i));
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
-        self.strip_scene.learning = strip_ring.filter(|_| !self.playing.visible);
+        self.strip_scene.learning = strip_ring.filter(|_| self.strip_scene.extension());
         if self.scene.note.is_some() || self.scene.menu.is_some() {
             self.scene.tip = None;
         }
@@ -4347,6 +4500,14 @@ impl Editing {
             under,
             self.motion_at.unwrap_or_else(Instant::now),
         );
+        // The LFO page over the lower page while it shows (decisions.md R-LFO; its controls drawn
+        // as the panel's renderer draws controls), and modulation's rings, cord and pop-up over
+        // the panel.
+        let page_shown = self.page_shows();
+        let page = page_shown && self.lfo.render(&self.lfo_scene, &mut self.renderer);
+        self.modulation
+            .rescale(self.renderer.scale(), self.renderer.top_px());
+        let mods = self.modulation.render(&self.mod_scene);
         // The drawer dropped from the rail over the lower page while it shows: the arpeggiator's
         // (decisions.md R-ARP; its knobs drawn as the panel's renderer draws controls) or the
         // effects' (R-FX-DRAWER).
@@ -4370,7 +4531,16 @@ impl Editing {
         let drawer = k > 0.0
             && (self.drawer.render(&self.browser.drawer) || self.browser.sliding() || moved);
         let shut = k <= 0.0 && moved;
-        if !(panel || strip || drawer || shut || lower || lower_shut || self.composed.is_none()) {
+        if !(panel
+            || strip
+            || drawer
+            || shut
+            || lower
+            || lower_shut
+            || page
+            || mods
+            || self.composed.is_none())
+        {
             return false;
         }
         self.reveal_shown = k;
@@ -4401,6 +4571,16 @@ impl Editing {
                 (Lower::Mpe, _) => self.mpe.damage(),
                 _ => self.arp.damage(),
             };
+            if page {
+                // (Its rows the drawing's from its top; the frame's begin at the panel's top.)
+                let top = lfo_ui::top_px(self.renderer.scale()) - self.renderer.top_px();
+                for &[x0, y0, x1, y1] in self.lfo.damages() {
+                    places.push([x0, top + y0, x1, top + y1]);
+                }
+            }
+            if mods {
+                places.extend_from_slice(self.modulation.damages());
+            }
             if lower && let Some([x0, y0, x1, y1]) = lower_damage {
                 // (Its rows the drawing's; the frame's begin at the panel's top.)
                 let top = lower_ui::top_px(self.renderer.scale()) - self.renderer.top_px();
@@ -4428,6 +4608,7 @@ impl Editing {
                 lower_frame(which, top, (&self.arp, &self.mpe), self.fx.as_ref(), scale)
             }),
             (k > 0.0).then(|| (self.drawer.frame(), DRAWER_TOP - (1.0 - k) * DRAWER_H)),
+            (page_shown.then(|| self.lfo.frame()), &self.modulation),
             self.damage.as_deref(),
             expanded,
             (self.physical_width, height),
@@ -4498,6 +4679,7 @@ fn compose(
     strip: &ca72_panel::Pixmap,
     lower: Option<LowerFrame<'_>>,
     drawer: Option<(&ca72_panel::Pixmap, f64)>,
+    (page, mods): (Option<&ca72_panel::Pixmap>, &ModRenderer),
     only: Option<&[[i32; 4]]>,
     expanded: bool,
     (width, height): (u32, u32),
@@ -4527,6 +4709,12 @@ fn compose(
     for &[x0, y0, x1, y1] in places {
         paste(c, frame, 0, [x0, y0, x1, y1]);
         paste(c, strip, top, [x0, y0, x1, y1]);
+        // The LFO page in the lower page's place (decisions.md R-LFO), and the knobs' rings.
+        if let Some(p) = page {
+            let at = lfo_ui::top_px(s) - origin;
+            paste(c, p, at, [x0.max(left), y0.max(rail), x1.min(right), y1]);
+        }
+        mods.lay_rings(c, [x0, y0, x1, y1]);
         if let Some(l) = &lower {
             // (Its frame's rows the drawing's from `top_px` down, open; moved up as it slides.)
             let at = lower_ui::top_px(s) - ((lower_ui::TOP - l.top) * s).round() as i32 - origin;
@@ -4554,6 +4742,8 @@ fn compose(
                 [x0, y0.max(rail), x1, y1],
             );
         }
+        // A dragged assignment's cord and the hover pop-up over everything but what floats.
+        mods.lay_over(c, [x0, y0, x1, y1]);
     }
     // Logical height is rounded before the host applies DPI scaling. If that adds a row
     // beyond the artwork, extend its last row rather than leave an unpainted viewport edge.
@@ -7627,7 +7817,7 @@ mod tests {
         // (The drawers' knobs take theirs in their readouts:
         // `the_arp_drawer_takes_knob_entry_in_its_readouts`, `the_mpe_drawer_operates_its_parameters`.)
         for c in CONTROLS.iter().filter(|c| {
-            matches!(c.kind, Kind::Knob { .. } | Kind::Selector(_)) && !c.place.is_drawer()
+            matches!(c.kind, Kind::Knob { .. } | Kind::Selector(_)) && !c.place.drawn_apart()
         }) {
             let i = ca72_panel::controls::index(c.param).expect("a control");
             if !e.operable(i) {
@@ -7929,6 +8119,7 @@ mod tests {
                                 e.strip.frame(),
                                 None,
                                 None,
+                                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
                                 None,
                                 expanded,
                                 (e.physical_width, e.physical_height()),
@@ -7963,6 +8154,7 @@ mod tests {
                                 e.strip.frame(),
                                 None,
                                 None,
+                                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
                                 None,
                                 expanded,
                                 (e.physical_width, e.physical_height()),
@@ -8584,6 +8776,7 @@ mod tests {
                 e.strip.frame(),
                 lower_of(&e),
                 None,
+                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
                 None,
                 true,
                 (e.physical_width, e.physical_height()),
@@ -8628,6 +8821,7 @@ mod tests {
             e.strip.frame(),
             None,
             Some((e.drawer.frame(), DRAWER_TOP)),
+            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -8702,6 +8896,7 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
+            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -8765,6 +8960,7 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
+            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9019,6 +9215,7 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
+            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9057,6 +9254,7 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
+            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9239,6 +9437,7 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
+            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9403,6 +9602,7 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
+            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -9486,6 +9686,7 @@ mod tests {
             e.strip.frame(),
             lower_of(&e),
             None,
+            (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
             None,
             true,
             (e.physical_width, e.physical_height()),
@@ -12282,6 +12483,7 @@ mod tests {
                 e.strip.frame(),
                 None,
                 None,
+                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
                 None,
                 false,
                 (e.physical_width, e.physical_height()),
@@ -13661,6 +13863,407 @@ mod tests {
         );
         go(&mut e, pt);
         window_frame(&mut e).save_png(out).unwrap();
+    }
+
+    // ---- The LFO page and modulation (decisions.md R-LFO).
+
+    /// The LFO page opened by the rail's LFO key (`lfo_page::Modulating::open`).
+    fn lfo_open(e: &mut Editing) {
+        e.draw();
+        let p = on_strip(e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
+        click(e, p);
+        assert!(e.page_shows());
+        e.draw();
+    }
+
+    fn lfo_centre(n: usize, k: usize) -> (f64, f64) {
+        CONTROLS[ca72_panel::controls::lfo_index(n, k)].centre()
+    }
+
+    /// The rail's LFO key (the owner, 2026-10-20: "the LFO rail key after the keyboard key")
+    /// shows the page in the keyboard's place, its key lit, the strip's own parts not drawn under
+    /// it; pressed lit, it puts it away. The keyboard's key shows the keyboard in its place; the
+    /// page's controls answer only while it shows.
+    #[test]
+    fn the_lfo_key_shows_its_page_in_the_keyboards_place() {
+        let (mut e, _, _) = editing();
+        e.playing.visible = false;
+        e.draw();
+        assert!(!e.browser.bar.lfo_page);
+        let rate = ca72_panel::controls::lfo_index(0, 1);
+        assert!(e.off_panel(rate), "not found while the page is away");
+        lfo_open(&mut e);
+        assert!(e.browser.bar.lfo_page && e.strip_scene.lfo && !e.strip_scene.extension());
+        assert!(!e.off_panel(rate));
+        let p = at(&e, lfo_centre(0, 1));
+        go(&mut e, p);
+        assert_eq!(e.hover, Some(Target::Control(rate)));
+        // The keyboard's key: the keyboard there instead.
+        let k = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Keyboard)));
+        click(&mut e, k);
+        e.draw();
+        assert!(!e.page_shows() && e.keyboard_shown() && e.strip_scene.keyboard.is_some());
+        assert!(e.browser.bar.keyboard && !e.browser.bar.lfo_page);
+        lfo_open(&mut e);
+        assert!(e.strip_scene.keyboard.is_none() && !e.browser.bar.keyboard);
+        let l = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Lfo)));
+        click(&mut e, l);
+        assert!(!e.page_shows());
+        e.draw();
+        assert!(
+            e.strip_scene.keyboard.is_some(),
+            "the keyboard back, as it was"
+        );
+    }
+
+    /// The page's controls operate their LFO's parameters as the panel's do: a knob dragged in
+    /// one gesture, MONO and the timed key flipped by a click, MODE's toggle to the place
+    /// clicked; RATE timed turns its DIVISION, stepped.
+    #[test]
+    fn the_lfo_pages_controls_operate_their_parameters() {
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let q = params.lfo(1);
+        let p = at(&e, lfo_centre(1, 3));
+        go(&mut e, p);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        go(
+            &mut e,
+            Point {
+                x: p.x,
+                y: p.y - 30.0,
+            },
+        );
+        release(&mut e);
+        let calls = host.take();
+        assert_eq!(calls.first(), Some(&Call::Begin(q.phase.as_ptr())));
+        assert_eq!(calls.last(), Some(&Call::End(q.phase.as_ptr())));
+        well_formed(&calls);
+        let mono = at(&e, lfo_centre(1, 6));
+        click(&mut e, mono);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(q.mono.as_ptr()),
+                Call::Set(q.mono.as_ptr(), 0.0),
+                Call::End(q.mono.as_ptr())
+            ]
+        );
+        // MODE: its toggle on its side, ENV at its right end.
+        let (mx, my) = lfo_centre(1, 5);
+        let env = at(&e, (mx + 40.0, my));
+        click(&mut e, env);
+        assert!(host.take().contains(&Call::Set(q.mode.as_ptr(), 1.0)));
+        // RATE timed: its DIVISION turned, a step at a time.
+        let p3 = params.lfo(3);
+        let timed = Ca72Params::default();
+        let _ = timed;
+        let i = ca72_panel::controls::lfo_index(3, 1);
+        assert!(!e.timed_dial(i));
+        assert!(matches!(
+            e.kind_of(i),
+            Kind::Knob {
+                dial: ca72_panel::controls::Dial::LfoRate,
+                ..
+            }
+        ));
+        assert_eq!(
+            e.operated(i).map(|o| o.text(o.default())),
+            Some(
+                p3.rate
+                    .normalized_value_to_string(p3.rate.default_normalized_value(), true)
+            )
+        );
+        // The last touched LFO is the column's.
+        assert_eq!(e.modulating.last, Some(crate::lfo::Source::Lfo(1)));
+    }
+
+    /// An assignment dragged from an OUT jack (the owner's "Drag to knob"): while held, the cord
+    /// and the knobs that can take it ringed, the one under the plug brightly with its preview
+    /// ring at 25 %; let go there, the LFO modulates it at +25 % (Pigments' convention), its
+    /// MODULATES screen saying so. Not on a switch, nor on the LFOs' own knobs.
+    #[test]
+    fn an_assignment_dragged_from_out_lands_on_a_knob_at_a_quarter() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let jack = at(&e, ca72_panel::strip::lfo::places(1).jack);
+        go(&mut e, jack);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        let cord = e.mod_scene.cord.clone().expect("a cord");
+        assert!(cord.over.is_some(), "CUTOFF under the plug");
+        assert!(
+            cord.targets.len() >= 20,
+            "{} knobs ringed",
+            cord.targets.len()
+        );
+        let ringed = e
+            .mod_scene
+            .knobs
+            .iter()
+            .find(|k| CONTROLS[k.control].param == "cutoff")
+            .expect("its preview");
+        assert_eq!(ringed.rings[0].depth, f64::from(crate::lfo::DEFAULT_DEPTH));
+        release(&mut e);
+        assert_eq!(
+            params.lfo_patch.depth(Source::Lfo(1), T::Cutoff),
+            Some(0.25)
+        );
+        assert!(host.take().is_empty(), "patch state: no host gesture");
+        assert!(e.modulating.patching.is_none());
+        e.draw();
+        assert!(e.mod_scene.cord.is_none());
+        assert_eq!(e.lfo_scene.columns[1].screen, "CUTOFF +25");
+        assert!(e.lfo_scene.columns[1].in_use);
+        // Dropped on a switch, or on another LFO's knob: nothing.
+        for p in [at(&e, centre("osc_mod")), at(&e, lfo_centre(2, 3))] {
+            go(&mut e, jack);
+            e.mouse(MouseEvent::ButtonPressed {
+                button: MouseButton::Left,
+                modifiers: Modifiers::empty(),
+            });
+            go(&mut e, p);
+            release(&mut e);
+        }
+        assert_eq!(params.lfo_patch.count(Source::Lfo(1)), 1);
+    }
+
+    /// The rings show only while the LFO page shows, an assignment is dragged, or on the knob
+    /// under the pointer (the owner's "option 2"); there its pop-up shows a dial per source in its
+    /// colour, dragged up for more depth; a ring's end dragged round sets it; Alt/Option-drag on
+    /// the knob sets the last touched LFO's; the tip lists the depths; the knob's menu has a head
+    /// per source with DEPTH… (typed) and REMOVE.
+    #[test]
+    fn depths_are_set_by_the_pop_up_the_ring_alt_drag_and_the_menu() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, host, params) = editing();
+        let patch = Arc::clone(&params.lfo_patch);
+        patch.assign(Source::Lfo(0), T::Cutoff, 0.4).expect("room");
+        patch
+            .assign(Source::Lfo(1), T::Cutoff, -0.25)
+            .expect("room");
+        e.playing.visible = false;
+        e.draw();
+        assert!(e.mod_scene.knobs.is_empty(), "the panel as it was");
+        let cutoff = at(&e, centre("cutoff"));
+        go(&mut e, cutoff);
+        e.draw();
+        assert_eq!(e.mod_scene.knobs.len(), 1, "its own rings");
+        let tip = e.scene.tip.clone().expect("a tip").0;
+        assert!(
+            tip.ends_with("\u{b7} LFO 1 +40 % \u{b7} LFO 2 \u{2013}25 %"),
+            "{tip}"
+        );
+        let popup = e.mod_scene.popup.clone().expect("its pop-up");
+        assert_eq!(popup.dials.len(), 2);
+        // The pop-up's second dial dragged up 24 pixels: 10 % more.
+        let (_, dials) = ca72_panel::modulation::popup_layout(&popup);
+        let d = at(&e, dials[1].0);
+        go(&mut e, d);
+        e.draw();
+        assert!(e.mod_scene.popup.is_some(), "kept over itself");
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        go(
+            &mut e,
+            Point {
+                x: d.x,
+                y: d.y - 24.0,
+            },
+        );
+        release(&mut e);
+        assert!((patch.depth(Source::Lfo(1), T::Cutoff).unwrap() + 0.15).abs() < 1e-4);
+        // The first ring's end dragged round to the knob's pointer: taken away.
+        go(&mut e, cutoff);
+        e.draw();
+        let k = e.mod_scene.knobs[0].clone();
+        let end = at(&e, ca72_panel::modulation::ring_end(&k, 0));
+        go(&mut e, end);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::empty(),
+        });
+        let (px, py) = art::polar(k.skirt - 4.0, ca72_panel::modulation::angle(k.travel));
+        let to = at(&e, (k.at.0 + px, k.at.1 + py));
+        go(&mut e, to);
+        release(&mut e);
+        assert_eq!(
+            patch.depth(Source::Lfo(0), T::Cutoff),
+            None,
+            "at 0: removed"
+        );
+        // Alt-drag on EMPHASIS: the last touched LFO's depth (LFO 3's, its column pressed).
+        e.modulating.last = Some(Source::Lfo(2));
+        let emphasis = at(&e, centre("emphasis"));
+        go(&mut e, emphasis);
+        e.mouse(MouseEvent::ButtonPressed {
+            button: MouseButton::Left,
+            modifiers: Modifiers::ALT,
+        });
+        go(
+            &mut e,
+            Point {
+                x: emphasis.x,
+                y: emphasis.y - 48.0,
+            },
+        );
+        release(&mut e);
+        assert!((patch.depth(Source::Lfo(2), T::Emphasis).unwrap() - 0.2).abs() < 1e-4);
+        assert!(host.take().is_empty(), "EMPHASIS itself untouched");
+        // CUTOFF's menu: LFO 2's head, its DEPTH… typed, its REMOVE.
+        right_click(&mut e, cutoff);
+        let items = menu_items(&e);
+        assert!(
+            items.iter().any(|(t, _)| t == "LFO 2 \u{b7} \u{2013}15 %"),
+            "{items:?}"
+        );
+        menu_item(&mut e, "DEPTH\u{2026}");
+        assert!(e.knob_entry.is_some());
+        keyed(&mut e, Key::Character("-60".into()));
+        keyed(&mut e, Key::Enter);
+        assert!((patch.depth(Source::Lfo(1), T::Cutoff).unwrap() + 0.6).abs() < 1e-6);
+        right_click(&mut e, cutoff);
+        menu_item(&mut e, "REMOVE");
+        assert_eq!(patch.depth(Source::Lfo(1), T::Cutoff), None);
+    }
+
+    /// The strip's knobs lie under the LFO page, so they take an LFO from their right-click menu:
+    /// a head, LFO 1 to LFO 4; one it already has, not again.
+    #[test]
+    fn a_strip_knob_takes_an_lfo_from_its_menu() {
+        use crate::lfo::{Source, Target as T};
+        let (mut e, _, params) = editing();
+        e.playing.visible = false;
+        e.draw();
+        let drive = at(&e, centre("drive"));
+        right_click(&mut e, drive);
+        menu_item(&mut e, "LFO 3");
+        assert_eq!(params.lfo_patch.depth(Source::Lfo(2), T::Drive), Some(0.25));
+        right_click(&mut e, drive);
+        let items = menu_items(&e);
+        assert!(items.contains(&("LFO 3".to_owned(), false)), "{items:?}");
+        assert!(items.contains(&("LFO 1".to_owned(), true)));
+        assert!(items.iter().any(|(t, _)| t == "LFO 3 \u{b7} +25 %"));
+    }
+
+    /// An LFO's own menu (a right click on its scope): its colour from the phosphors, kept on the
+    /// computer; its EDGES, the patch's; the choice it is marked.
+    #[test]
+    fn an_lfos_menu_sets_its_colour_and_edges() {
+        use crate::lfo::{Edges, Phosphor};
+        let (mut e, _, params) = editing();
+        lfo_open(&mut e);
+        let (x, y, w, h) = ca72_panel::strip::lfo::places(2).scope;
+        let scope = at(&e, (x + w / 2.0, y + h / 2.0));
+        right_click(&mut e, scope);
+        assert_eq!(
+            e.learning.menu().map(|m| m.title.clone()),
+            Some("LFO 3".into())
+        );
+        menu_item(&mut e, "VIOLET");
+        assert_eq!(e.settings.lfo_colors[2], Phosphor::Violet);
+        e.draw();
+        assert_eq!(e.lfo_scene.columns[2].colour, Phosphor::Violet.rgb());
+        right_click(&mut e, scope);
+        menu_item(&mut e, "SHARP");
+        assert_eq!(params.lfo_patch.edges(2), Edges::Sharp);
+        right_click(&mut e, scope);
+        let m = e.learning.menu().expect("a menu").clone();
+        let sharp = m
+            .items
+            .iter()
+            .position(|(t, _)| t == "SHARP")
+            .expect("SHARP");
+        assert!(m.marked.contains(&sharp) && !m.items[sharp].1);
+    }
+
+    /// The rail's page keys: lit while their page or drawer shows, a faint glow while what they
+    /// open affects the sound (an LFO assigned and moving), else unlit.
+    #[test]
+    fn the_lfo_key_glows_while_an_lfo_moves_a_knob() {
+        use crate::lfo::Reading;
+        let (mut e, _, params) = editing();
+        e.draw();
+        assert!(!e.browser.bar.lfo);
+        let moving = Reading {
+            moving: true,
+            ..Reading::default()
+        };
+        params.lfo_scope.publish(&[
+            moving,
+            Reading::default(),
+            Reading::default(),
+            Reading::default(),
+        ]);
+        e.draw();
+        assert!(e.browser.bar.lfo && !e.browser.bar.lfo_page, "glowing");
+        lfo_open(&mut e);
+        assert!(e.browser.bar.lfo_page, "lit");
+        let p = on_strip(&e, strip_at(StripTarget::Bar(BarTarget::Arp)));
+        click(&mut e, p);
+        e.draw();
+        assert_eq!(
+            e.browser.bar.page,
+            Some(BarTarget::Arp),
+            "a drawer over the page, lit too"
+        );
+        assert!(e.browser.bar.lfo_page);
+    }
+
+    /// The window's frame with the LFO page, its orbs moving, a knob on it turned and rings on
+    /// the panel is the frame put together whole, each time.
+    #[test]
+    fn the_lfo_page_put_together_in_parts_is_put_together_whole() {
+        use crate::lfo::{Reading, Source, Target as T};
+        let (mut e, _, params) = editing();
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .expect("room");
+        lfo_open(&mut e);
+        e.draw();
+        for i in 0..6 {
+            let r = Reading {
+                value: (i as f32 * 0.3).sin(),
+                phase: (i as f32 * 0.1) % 1.0,
+                since: i as f32 * 0.05,
+                rise: 1.0,
+                moving: true,
+            };
+            params.lfo_scope.publish(&[r; 4]);
+            e.modulating.due = None;
+            if i == 3 {
+                let p = at(&e, lfo_centre(2, 4));
+                go(&mut e, p);
+            }
+            e.draw();
+            let mut whole = None;
+            compose(
+                &mut whole,
+                &e.renderer,
+                e.strip.frame(),
+                lower_of(&e),
+                None,
+                (e.page_shows().then(|| e.lfo.frame()), &e.modulation),
+                None,
+                true,
+                (e.physical_width, e.physical_height()),
+            );
+            assert!(e.composed == whole, "frame {i}: not as put together whole");
+        }
     }
 }
 

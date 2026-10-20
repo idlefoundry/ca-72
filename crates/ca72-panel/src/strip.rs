@@ -12,6 +12,7 @@
 
 pub mod arp;
 pub mod fx;
+pub mod lfo;
 pub mod lower;
 pub mod mpe;
 mod worn;
@@ -72,28 +73,32 @@ pub const CO: f64 = (SECTIONS[3].0 + SECTIONS[3].1) / 2.0;
 /// row"), the name's display a key shorter for it, the gaps between the keys as they were; and
 /// ARP after the keyboard's, the name a key shorter again for it (the owner's C1, 2026-10-18;
 /// decisions.md R-ARP); and MPE after ARP, the name a key shorter again (the owner's A,
-/// 2026-10-20; R-MPE).
-const KEYS: [(f64, f64, BarTarget); 9] = [
-    (92.0, 86.0, BarTarget::Star),
-    (192.0, 86.0, BarTarget::Prev),
-    (2326.0, 86.0, BarTarget::Next),
-    (2470.0, 170.0, BarTarget::Save),
-    (2612.0, 86.0, BarTarget::Panel),
-    (2712.0, 86.0, BarTarget::Keyboard),
-    (2812.0, 86.0, BarTarget::Arp),
-    (2912.0, 86.0, BarTarget::Mpe),
-    (3012.0, 86.0, BarTarget::Settings),
-];
-/// The standalone application's (the owner's FX-A, 2026-10-18; decisions.md R-FX-DRAWER): FX
-/// after ARP, the name a key shorter again for it, the gaps between the keys as they were; MPE
-/// after FX, in the plug-ins' place beside the settings' key (R-MPE).
-const KEYS_FX: [(f64, f64, BarTarget); 10] = [
+/// 2026-10-20; R-MPE); and LFO directly after the keyboard's, the name a key shorter again (the
+/// owner, 2026-10-20; R-LFO).
+const KEYS: [(f64, f64, BarTarget); 10] = [
     (92.0, 86.0, BarTarget::Star),
     (192.0, 86.0, BarTarget::Prev),
     (2226.0, 86.0, BarTarget::Next),
     (2370.0, 170.0, BarTarget::Save),
     (2512.0, 86.0, BarTarget::Panel),
     (2612.0, 86.0, BarTarget::Keyboard),
+    (2712.0, 86.0, BarTarget::Lfo),
+    (2812.0, 86.0, BarTarget::Arp),
+    (2912.0, 86.0, BarTarget::Mpe),
+    (3012.0, 86.0, BarTarget::Settings),
+];
+/// The standalone application's (the owner's FX-A, 2026-10-18; decisions.md R-FX-DRAWER): FX
+/// after ARP, the name a key shorter again for it, the gaps between the keys as they were; MPE
+/// after FX, in the plug-ins' place beside the settings' key (R-MPE); LFO after the keyboard's
+/// (R-LFO).
+const KEYS_FX: [(f64, f64, BarTarget); 11] = [
+    (92.0, 86.0, BarTarget::Star),
+    (192.0, 86.0, BarTarget::Prev),
+    (2126.0, 86.0, BarTarget::Next),
+    (2270.0, 170.0, BarTarget::Save),
+    (2412.0, 86.0, BarTarget::Panel),
+    (2512.0, 86.0, BarTarget::Keyboard),
+    (2612.0, 86.0, BarTarget::Lfo),
     (2712.0, 86.0, BarTarget::Arp),
     (2812.0, 86.0, BarTarget::Fx),
     (2912.0, 86.0, BarTarget::Mpe),
@@ -105,8 +110,8 @@ pub const KEY_W: f64 = 86.0;
 /// The name's display: its window (left, top, width, height), as tall with its surround as
 /// the keys beside it (the owner, 2026-10-09: "Needs to be the same height as the buttons
 /// flanking it").
-pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 2000.0, 50.0);
-const NAME_FX: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 1900.0, 50.0);
+pub const NAME: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 1900.0, 50.0);
+const NAME_FX: (f64, f64, f64, f64) = (262.0, RAIL_Y - 25.0, 1800.0, 50.0);
 
 /// The rail's keys: the plug-ins', or the standalone application's with its effects' key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -470,6 +475,16 @@ pub struct StripScene {
     pub learning: Option<StripControl>,
     /// None shows the extension controls; Some replaces them with the keyboard.
     pub keyboard: Option<crate::keyboard::Scene>,
+    /// The LFO page shows over the extension controls (decisions.md R-LFO; drawn apart:
+    /// `lfo`), so they are neither drawn nor moved under it.
+    pub lfo: bool,
+}
+
+impl StripScene {
+    /// Whether the extension controls show: neither the keyboard nor the LFO page over them.
+    pub fn extension(&self) -> bool {
+        self.keyboard.is_none() && !self.lfo
+    }
 }
 
 impl Default for StripScene {
@@ -487,6 +502,7 @@ impl Default for StripScene {
             hover: None,
             learning: None,
             keyboard: None,
+            lfo: false,
         }
     }
 }

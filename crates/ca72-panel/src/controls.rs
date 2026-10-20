@@ -36,6 +36,13 @@ pub enum Dial {
     /// eighteen note values, 4 and 2 bars (4×, 2×) and 1 bar to a thirty-second (1 to 32), the
     /// dotted and triplet ones between them unnumbered ticks.
     Timed,
+    /// An LFO's RATE (decisions.md R-LFO): 0.01 to 50 Hz on its parameter's skewed travel
+    /// (about 1.6 Hz at its middle), Hz below.
+    LfoRate,
+    /// An LFO's PHASE: 0 to 360 degrees.
+    LfoPhase,
+    /// An LFO's RISE: 0 to 10 s on a cube-root travel, so that short fades have room.
+    LfoRise,
 }
 
 impl Dial {
@@ -159,6 +166,9 @@ pub enum Place {
     Arp,
     /// The expression drawer's (`strip::mpe`; decisions.md R-MPE), as the arpeggiator's.
     Mpe,
+    /// The LFO page's (`strip::lfo`; decisions.md R-LFO), its origin the drawing's: drawn by
+    /// the page, found only while it shows.
+    Lfo,
 }
 
 impl Place {
@@ -166,6 +176,12 @@ impl Place {
     /// is open.
     pub fn is_drawer(self) -> bool {
         matches!(self, Place::Arp | Place::Mpe)
+    }
+
+    /// Whether its controls are drawn apart from the panel's renderer and found only while
+    /// their part shows: a drawer's, or the LFO page's.
+    pub fn drawn_apart(self) -> bool {
+        self.is_drawer() || self == Place::Lfo
     }
 }
 
@@ -189,7 +205,7 @@ impl Control {
         let (ox, oy) = match self.place {
             Place::Panel => (crate::art::COL, crate::art::TOP),
             Place::Column => crate::strip::LEFT_HAND,
-            Place::Strip | Place::Arp | Place::Mpe => (0.0, 0.0),
+            Place::Strip | Place::Arp | Place::Mpe | Place::Lfo => (0.0, 0.0),
         };
         (ox + self.x, oy + self.y)
     }
@@ -334,6 +350,153 @@ const fn key(param: &'static str, label: &'static str, x: f64, y: f64) -> Contro
     }
 }
 
+/// One of the LFO page's controls (decisions.md R-LFO), at its place in its column
+/// (`strip::lfo::places`).
+const fn lfo(param: &'static str, label: &'static str, at: (f64, f64), kind: Kind) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Lfo,
+        x: at.0,
+        y: at.1,
+        kind,
+    }
+}
+
+const fn lfo_knob(dial: Dial) -> Kind {
+    Kind::Knob { dial, big: false }
+}
+
+/// LFO `n`'s (0 to 3) seven controls, in the order [`LFO_PARTS`] names them.
+const fn lfo_column(
+    n: usize,
+    params: [&'static str; 7],
+    labels: [&'static str; 7],
+) -> [Control; 7] {
+    let p = crate::strip::lfo::places(n);
+    [
+        lfo(
+            params[0],
+            labels[0],
+            p.wave,
+            Kind::Selector(Legends::Waves12),
+        ),
+        lfo(params[1], labels[1], p.rate, lfo_knob(Dial::LfoRate)),
+        lfo(params[2], labels[2], p.timed, Kind::Key),
+        lfo(params[3], labels[3], p.phase, lfo_knob(Dial::LfoPhase)),
+        lfo(params[4], labels[4], p.rise, lfo_knob(Dial::LfoRise)),
+        lfo(
+            params[5],
+            labels[5],
+            p.mode,
+            Kind::Toggle {
+                w: crate::art::TOGGLE.1,
+                h: crate::art::TOGGLE.0,
+                across: true,
+            },
+        ),
+        lfo(params[6], labels[6], p.mono, Kind::Key),
+    ]
+}
+
+/// The parts of an LFO's column that are controls, their parameters' IDs' last parts.
+pub const LFO_PARTS: [&str; 7] = ["waveform", "rate", "timed", "phase", "rise", "mode", "mono"];
+
+const LFO_COLUMNS: [[Control; 7]; 4] = [
+    lfo_column(
+        0,
+        [
+            "lfo1_waveform",
+            "lfo1_rate",
+            "lfo1_timed",
+            "lfo1_phase",
+            "lfo1_rise",
+            "lfo1_mode",
+            "lfo1_mono",
+        ],
+        [
+            "LFO 1 WAVEFORM",
+            "LFO 1 RATE",
+            "LFO 1 TIMED",
+            "LFO 1 PHASE",
+            "LFO 1 RISE",
+            "LFO 1 MODE (FREE, RETRIG or ENV)",
+            "LFO 1 MONO",
+        ],
+    ),
+    lfo_column(
+        1,
+        [
+            "lfo2_waveform",
+            "lfo2_rate",
+            "lfo2_timed",
+            "lfo2_phase",
+            "lfo2_rise",
+            "lfo2_mode",
+            "lfo2_mono",
+        ],
+        [
+            "LFO 2 WAVEFORM",
+            "LFO 2 RATE",
+            "LFO 2 TIMED",
+            "LFO 2 PHASE",
+            "LFO 2 RISE",
+            "LFO 2 MODE (FREE, RETRIG or ENV)",
+            "LFO 2 MONO",
+        ],
+    ),
+    lfo_column(
+        2,
+        [
+            "lfo3_waveform",
+            "lfo3_rate",
+            "lfo3_timed",
+            "lfo3_phase",
+            "lfo3_rise",
+            "lfo3_mode",
+            "lfo3_mono",
+        ],
+        [
+            "LFO 3 WAVEFORM",
+            "LFO 3 RATE",
+            "LFO 3 TIMED",
+            "LFO 3 PHASE",
+            "LFO 3 RISE",
+            "LFO 3 MODE (FREE, RETRIG or ENV)",
+            "LFO 3 MONO",
+        ],
+    ),
+    lfo_column(
+        3,
+        [
+            "lfo4_waveform",
+            "lfo4_rate",
+            "lfo4_timed",
+            "lfo4_phase",
+            "lfo4_rise",
+            "lfo4_mode",
+            "lfo4_mono",
+        ],
+        [
+            "LFO 4 WAVEFORM",
+            "LFO 4 RATE",
+            "LFO 4 TIMED",
+            "LFO 4 PHASE",
+            "LFO 4 RISE",
+            "LFO 4 MODE (FREE, RETRIG or ENV)",
+            "LFO 4 MONO",
+        ],
+    ),
+];
+
+/// The index in [`CONTROLS`] of LFO `n`'s (0 to 3) part `k` ([`LFO_PARTS`]' order).
+pub const fn lfo_index(n: usize, k: usize) -> usize {
+    LFO_FIRST + 7 * n + k
+}
+
+/// Where the LFO page's controls begin in [`CONTROLS`].
+pub const LFO_FIRST: usize = 68;
+
 /// How far under its RANGE's centre an oscillator's TIMED key is (the mock-ups', the owner's
 /// "under the oscillator range selector", 2026-10-20), and its MOD key under its WAVEFORM's.
 pub const KEY_BELOW_RANGE: f64 = 84.0;
@@ -342,7 +505,7 @@ pub const KEY_BELOW_RANGE: f64 = 84.0;
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 68] = [
+pub const CONTROLS: [Control; 96] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -730,6 +893,36 @@ pub const CONTROLS: [Control; 68] = [
         1021.0,
         576.0 + KEY_BELOW_RANGE,
     ),
+    // The LFO page's (decisions.md R-LFO), the plug-in's own, after every other, so that no
+    // control moves: each LFO's WAVEFORM, RATE, its TIMED key, PHASE, RISE, MODE and MONO.
+    LFO_COLUMNS[0][0],
+    LFO_COLUMNS[0][1],
+    LFO_COLUMNS[0][2],
+    LFO_COLUMNS[0][3],
+    LFO_COLUMNS[0][4],
+    LFO_COLUMNS[0][5],
+    LFO_COLUMNS[0][6],
+    LFO_COLUMNS[1][0],
+    LFO_COLUMNS[1][1],
+    LFO_COLUMNS[1][2],
+    LFO_COLUMNS[1][3],
+    LFO_COLUMNS[1][4],
+    LFO_COLUMNS[1][5],
+    LFO_COLUMNS[1][6],
+    LFO_COLUMNS[2][0],
+    LFO_COLUMNS[2][1],
+    LFO_COLUMNS[2][2],
+    LFO_COLUMNS[2][3],
+    LFO_COLUMNS[2][4],
+    LFO_COLUMNS[2][5],
+    LFO_COLUMNS[2][6],
+    LFO_COLUMNS[3][0],
+    LFO_COLUMNS[3][1],
+    LFO_COLUMNS[3][2],
+    LFO_COLUMNS[3][3],
+    LFO_COLUMNS[3][4],
+    LFO_COLUMNS[3][5],
+    LFO_COLUMNS[3][6],
 ];
 
 /// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made
@@ -750,18 +943,47 @@ pub struct ControlSet {
     pub kind_changed: &'static [(&'static str, u32)],
 }
 
-/// This build's panel controls: the third revision; oscillators 2's and 3's TIMED keys added in
+/// This build's panel controls: the fourth revision; oscillators 2's and 3's TIMED keys added in
 /// the second (decisions.md R-OSC-TIMED), each oscillator's MOD key in the third
-/// (R-CONTINUOUS-WAVE). Never edit an entry once released: add to it (and raise `revision`) as
-/// controls come, go, or change.
+/// (R-CONTINUOUS-WAVE), the LFO page's in the fourth (R-LFO: the plug-in's own, on its lower
+/// page, which a layout does not place, as the strip's). Never edit an entry once released: add
+/// to it (and raise `revision`) as controls come, go, or change.
 pub const CONTROL_SET: ControlSet = ControlSet {
-    revision: 3,
+    revision: 4,
     added: &[
         ("osc2_timed", 2),
         ("osc3_timed", 2),
         ("osc1_shape_mod", 3),
         ("osc2_shape_mod", 3),
         ("osc3_shape_mod", 3),
+        ("lfo1_waveform", 4),
+        ("lfo1_rate", 4),
+        ("lfo1_timed", 4),
+        ("lfo1_phase", 4),
+        ("lfo1_rise", 4),
+        ("lfo1_mode", 4),
+        ("lfo1_mono", 4),
+        ("lfo2_waveform", 4),
+        ("lfo2_rate", 4),
+        ("lfo2_timed", 4),
+        ("lfo2_phase", 4),
+        ("lfo2_rise", 4),
+        ("lfo2_mode", 4),
+        ("lfo2_mono", 4),
+        ("lfo3_waveform", 4),
+        ("lfo3_rate", 4),
+        ("lfo3_timed", 4),
+        ("lfo3_phase", 4),
+        ("lfo3_rise", 4),
+        ("lfo3_mode", 4),
+        ("lfo3_mono", 4),
+        ("lfo4_waveform", 4),
+        ("lfo4_rate", 4),
+        ("lfo4_timed", 4),
+        ("lfo4_phase", 4),
+        ("lfo4_rise", 4),
+        ("lfo4_mode", 4),
+        ("lfo4_mono", 4),
     ],
     renamed: &[],
     retired: &[],

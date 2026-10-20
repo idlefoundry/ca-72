@@ -163,6 +163,8 @@ pub enum BarTarget {
     /// The drawer of each note's own expression (decisions.md R-MPE), dropped down over the lower
     /// panel or put away; lit while any of its amounts is not 0.
     Mpe,
+    /// The LFO page (decisions.md R-LFO), a lower page of its own in the keyboard's place.
+    Lfo,
 }
 
 /// What a pointer finds in the drawer.
@@ -316,6 +318,16 @@ pub struct BarScene {
     pub fx: bool,
     /// An amount of each note's own expression is not 0 (the MPE key lit).
     pub mpe: bool,
+    /// An LFO is assigned and moves a knob (decisions.md R-LFO).
+    pub lfo: bool,
+    /// The key whose page or drawer shows (ARP, MPE, FX, LFO): lit; the others among them glow
+    /// faintly while what they open affects the sound (`arp`, `mpe`, `fx`, `lfo`), else unlit
+    /// (the owner, 2026-10-20: "some sort of illumination or little light on buttons whose
+    /// panels affect sound, so that if something is actively affecting what the user is
+    /// hearing, they know").
+    pub page: Option<BarTarget>,
+    /// The LFO page shows (its key lit; a drawer may show over it, its key lit too).
+    pub lfo_page: bool,
 }
 
 // ---- The selector's layout (panel units across, the strip's units down).
@@ -568,7 +580,8 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         | BarTarget::Keyboard
         | BarTarget::Arp
         | BarTarget::Fx
-        | BarTarget::Mpe => SAVE_X + SAVE_W / 2.0,
+        | BarTarget::Mpe
+        | BarTarget::Lfo => SAVE_X + SAVE_W / 2.0,
     };
     (x, BAR_MID)
 }
@@ -791,6 +804,9 @@ mod png {
                         arp: false,
                         fx: false,
                         mpe: false,
+                        lfo: false,
+                        page: None,
+                        lfo_page: false,
                     },
                     ..crate::strip::StripScene::default()
                 },
@@ -1083,6 +1099,9 @@ mod png {
                     arp: false,
                     fx: false,
                     mpe: false,
+                    lfo: false,
+                    page: None,
+                    lfo_page: false,
                 },
                 ..crate::strip::StripScene::default()
             },

@@ -11,7 +11,7 @@
 
 use crate::arrangement::Arrangement;
 use crate::art::{self, BIG, GRIP, Layout, POWER_BOUNDS, SIX, STD, WHEEL_SCALE};
-use crate::controls::{CONTROLS, Kind, Place};
+use crate::controls::{CONTROLS, Control, Kind, Place};
 
 /// What is under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,40 +31,14 @@ fn in_rect(x: f64, y: f64, r: [f64; 4]) -> bool {
 }
 
 /// What is at (x, y) in the drawing, the panel laid out as `arrangement` has it (the drawers'
-/// knobs apart: [`hit_drawer`]).
+/// knobs and the LFO page's controls apart: [`hit_drawer`], [`hit_lfo`]).
 pub fn hit(layout: &Layout, arrangement: &Arrangement, x: f64, y: f64) -> Option<Target> {
     for (i, c) in arrangement.controls.iter().enumerate() {
-        if c.place.is_drawer() {
+        if c.place.drawn_apart() {
             continue;
         }
-        let (cx, cy) = c.centre();
-        let (dx, dy) = (x - cx, y - cy);
-        let found = match c.kind {
-            Kind::Knob { big, .. } => dx.hypot(dy) <= if big { BIG.skirt } else { STD.skirt } + 8.0,
-            Kind::Selector(set) => {
-                for k in 0..SIX.len() {
-                    let (lx, ly) = layout.legend_at(set, k);
-                    if in_rect(dx - lx, dy - ly, [-18.0, -14.0, 18.0, 14.0]) {
-                        return Some(Target::Legend(i, k));
-                    }
-                }
-                dx.hypot(dy) <= 60.0
-            }
-            Kind::Rocker { w, h, .. } => in_rect(
-                dx,
-                dy,
-                [-w / 2.0 - 4.0, -h / 2.0 - 4.0, w / 2.0 + 4.0, h / 2.0 + 4.0],
-            ),
-            Kind::Wheel { .. } => {
-                let (hx, hy) = (36.0 * WHEEL_SCALE, 79.0 * WHEEL_SCALE);
-                in_rect(dx, dy, [-hx, -hy, hx, hy])
-            }
-            Kind::Key => in_rect(dx, dy, KEY_HIT),
-            Kind::Toggle { across: false, .. } => in_rect(dx, dy, TOGGLE_HIT),
-            Kind::Toggle { across: true, .. } => in_rect(dx, dy, TOGGLE_HIT_ACROSS),
-        };
-        if found {
-            return Some(Target::Control(i));
+        if let Some(t) = hit_control(layout, i, c, x, y) {
+            return Some(t);
         }
     }
     let (px, py) = arrangement.power_at();
@@ -75,6 +49,47 @@ pub fn hit(layout: &Layout, arrangement: &Arrangement, x: f64, y: f64) -> Option
         return Some(Target::Grip);
     }
     None
+}
+
+/// Control `i` (`c`) or one of its legends, if (x, y) in the drawing is on it.
+fn hit_control(layout: &Layout, i: usize, c: &Control, x: f64, y: f64) -> Option<Target> {
+    let (cx, cy) = c.centre();
+    let (dx, dy) = (x - cx, y - cy);
+    let found = match c.kind {
+        Kind::Knob { big, .. } => dx.hypot(dy) <= if big { BIG.skirt } else { STD.skirt } + 8.0,
+        Kind::Selector(set) => {
+            for k in 0..SIX.len() {
+                let (lx, ly) = layout.legend_at(set, k);
+                if in_rect(dx - lx, dy - ly, [-18.0, -14.0, 18.0, 14.0]) {
+                    return Some(Target::Legend(i, k));
+                }
+            }
+            dx.hypot(dy) <= 60.0
+        }
+        Kind::Rocker { w, h, .. } => in_rect(
+            dx,
+            dy,
+            [-w / 2.0 - 4.0, -h / 2.0 - 4.0, w / 2.0 + 4.0, h / 2.0 + 4.0],
+        ),
+        Kind::Wheel { .. } => {
+            let (hx, hy) = (36.0 * WHEEL_SCALE, 79.0 * WHEEL_SCALE);
+            in_rect(dx, dy, [-hx, -hy, hx, hy])
+        }
+        Kind::Key => in_rect(dx, dy, KEY_HIT),
+        Kind::Toggle { across: false, .. } => in_rect(dx, dy, TOGGLE_HIT),
+        Kind::Toggle { across: true, .. } => in_rect(dx, dy, TOGGLE_HIT_ACROSS),
+    };
+    found.then_some(Target::Control(i))
+}
+
+/// The LFO page's control (or WAVEFORM's legend) at (x, y) in the drawing, the page showing
+/// (decisions.md R-LFO).
+pub fn hit_lfo(layout: &Layout, x: f64, y: f64) -> Option<Target> {
+    CONTROLS
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.place == Place::Lfo)
+        .find_map(|(i, c)| hit_control(layout, i, c, x, y))
 }
 
 /// The arpeggiator's drawer's knob at (x, y) in the drawing, the drawer open (decisions.md
@@ -339,6 +354,8 @@ mod tests {
             let (x, y) = c.centre();
             let found = if c.place.is_drawer() {
                 hit_drawer(c.place, x, y)
+            } else if c.place == Place::Lfo {
+                hit_lfo(&l, x, y)
             } else {
                 hit(&l, x, y)
             };

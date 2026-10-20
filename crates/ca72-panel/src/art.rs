@@ -574,6 +574,68 @@ fn marks(dial: Dial) -> DialMarks {
                 },
             }
         }
+        // An LFO's RATE (decisions.md R-LFO): its parameter's skewed travel from 0.01 to 50 Hz
+        // (a share `t` of the travel is 0.01 + 49.99 t^5 Hz), ticked at 1, 2 and 5 of each
+        // decade, the main ones numbered and longer, Hz at its foot.
+        Dial::LfoRate => {
+            let ticks = [
+                0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0,
+            ];
+            let labels = [
+                (0.01, ".01"),
+                (0.1, ".1"),
+                (0.5, ".5"),
+                (1.0, "1"),
+                (2.0, "2"),
+                (5.0, "5"),
+                (10.0, "10"),
+                (50.0, "50"),
+            ];
+            DialMarks {
+                ticks: ticks
+                    .iter()
+                    .map(|&f| {
+                        let long = labels.iter().any(|l| l.0 == f);
+                        (lfo_rate_angle(f), 58.0, if long { 71.0 } else { 66.0 }, 4.0)
+                    })
+                    .collect(),
+                labels: labels
+                    .iter()
+                    .map(|&(f, t)| (lfo_rate_angle(f), t, None))
+                    .collect(),
+                r: 86.0,
+                captions: vec![(0.0, 82.0, "Hz")],
+            }
+        }
+        // PHASE: every 45 degrees, every other numbered.
+        Dial::LfoPhase => numbered(
+            &(0..9)
+                .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
+                .collect::<Vec<_>>(),
+            &["0", "90", "180", "270", "360"],
+        ),
+        // RISE: its parameter's cube-root travel (a share `t` is 10 t^3 s), SEC. at its foot.
+        Dial::LfoRise => {
+            let at = |s: f64| -150.0 + 300.0 * (s / 10.0).cbrt();
+            let labels = [
+                (0.0, "0"),
+                (0.1, ".1"),
+                (0.5, ".5"),
+                (1.0, "1"),
+                (2.0, "2"),
+                (5.0, "5"),
+                (10.0, "10"),
+            ];
+            DialMarks {
+                ticks: labels
+                    .iter()
+                    .map(|&(s, _)| (at(s), 58.0, 71.0, 4.0))
+                    .collect(),
+                labels: labels.iter().map(|&(s, t)| (at(s), t, None)).collect(),
+                r: 86.0,
+                captions: vec![(0.0, 82.0, "SEC.")],
+            }
+        }
         // Marked in time, not evenly (as printed); the 200 ms mark is printed long ("200—").
         Dial::Time => DialMarks {
             ticks: [
@@ -594,6 +656,12 @@ fn marks(dial: Dial) -> DialMarks {
             captions: vec![(-61.0, 75.0, "M-SEC."), (50.0, 75.0, "SEC.")],
         },
     }
+}
+
+/// Where an LFO's RATE dial points at `hz` (degrees from twelve o'clock): its parameter's
+/// skewed travel, 0.01 to 50 Hz, the travel's share the fifth root of the range's.
+pub fn lfo_rate_angle(hz: f64) -> f64 {
+    -150.0 + 300.0 * ((hz - 0.01) / 49.99).clamp(0.0, 1.0).powf(0.2)
 }
 
 /// Where a dial's number is printed about its centre: at its own radius if it has one, else at
@@ -2196,7 +2264,7 @@ pub fn tempo_screen(text: &str, arrangement: &Arrangement) -> Layer {
 
 /// A selector's knob's body: as wide as the drawn one's fluted outline, less the pointer's
 /// reach (the picture's wedge reaches its edge, 64 units out, as the drawn fin about does).
-const SELECTOR_R: f64 = 50.0;
+pub(crate) const SELECTOR_R: f64 = 50.0;
 
 /// How the panel's lamp lights a round part's near side, up and to the left (a colour dodge to
 /// 1 / (1 - `LAMP_NEAR`) of its light at the edge), and darkens its far side (multiplied by
@@ -2810,8 +2878,13 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
     put!(s, "<g transform='translate(0 {})'>", N(PANEL_H + rail));
     strip_trims(&mut s);
     s.0.push_str("</g>");
-    // The moving parts' shadows (the drawers' knobs cast theirs on their drawers).
-    for c in arrangement.controls.iter().filter(|c| !c.place.is_drawer()) {
+    // The moving parts' shadows (the drawers' knobs cast theirs on their drawers, the LFO
+    // page's on its page).
+    for c in arrangement
+        .controls
+        .iter()
+        .filter(|c| !c.place.drawn_apart())
+    {
         let (x, y) = c.centre();
         match c.kind {
             // A tall knob casts a long soft shadow away from the lamp, and a dark one where it
@@ -2915,5 +2988,68 @@ pub fn tip(fonts: &Fonts, x: f64, y: f64, t: &str, size: f64) -> Layer {
         bounds: [x0 - m, y0 - m, -x0 + m, m],
         body: s.0,
         ..Layer::default()
+    }
+}
+
+// ---- The LFO page's (decisions.md R-LFO; `strip::lfo`): its print and its jacks, drawn with the
+// panel's own parts.
+
+/// A dial's print at (`x`, `y`), the multiplication sign `times`.
+pub(crate) fn dial_print(s: &mut Svg, x: f64, y: f64, dial: Dial, times: &str) {
+    draw_dial_in(s, x, y, dial, times);
+}
+
+/// A WAVEFORM switch's ticks and legends (oscillators 1 and 2's) at (`x`, `y`), and CONTINUOUS's
+/// arc where it is (`continuous`).
+pub(crate) fn waveform_marks(s: &mut Svg, x: f64, y: f64, layout: &Layout, continuous: bool) {
+    let c = Control {
+        param: "",
+        label: "",
+        place: Place::Lfo,
+        x,
+        y,
+        kind: Kind::Selector(Legends::Waves12),
+    };
+    selector_marks_with(s, &c, Legends::Waves12, layout, None);
+    if continuous {
+        shape_arc(s, x, y);
+    }
+}
+
+/// One of the panel's screws, `r` in radius.
+pub(crate) fn screw_at(s: &mut Svg, x: f64, y: f64, r: f64) {
+    screw(s, x, y, r);
+}
+
+/// A jack at (`x`, `y`), `r` its ring's radius, with its nut, as the left hand's are: the worn
+/// skin's picture, or the drawn one.
+pub(crate) fn jack_layer(x: f64, y: f64, r: f64, worn: bool) -> Layer {
+    let d = 2.0 * (r + 6.0);
+    if worn {
+        return Layer {
+            origin: (x, y),
+            bounds: [-d, -d, d, d],
+            sprites: vec![sprite(Part::Jack, (d, d), 20.0, (false, false))],
+            ..Layer::default()
+        };
+    }
+    let mut s = Svg::default();
+    jack(&mut s, r, true);
+    Layer {
+        origin: (x, y),
+        bounds: [-d, -d, d, d],
+        body: s.0,
+        ..Layer::default()
+    }
+}
+
+/// The radius a control's rings go round (decisions.md R-LFO): a knob's skirt, a selector's
+/// pointer and a little more; none for a control that takes none.
+pub fn skirt(kind: &Kind) -> f64 {
+    match *kind {
+        Kind::Knob { big: true, .. } => BIG.skirt,
+        Kind::Knob { .. } => STD.skirt,
+        Kind::Selector(_) => SELECTOR_R + 2.0,
+        _ => 0.0,
     }
 }

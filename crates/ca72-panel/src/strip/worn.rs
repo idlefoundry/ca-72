@@ -461,7 +461,7 @@ impl StripRenderer {
         let dt = self
             .last
             .map_or(0.0, |t| now.saturating_duration_since(t).as_secs_f64());
-        let moved = if scene.keyboard.is_some() {
+        let moved = if !scene.extension() {
             self.last = Some(now);
             false
         } else if self.last.is_none() || dt > 0.0 {
@@ -662,7 +662,7 @@ impl StripRenderer {
         for r in crate::keyboard::damage(was.keyboard.as_ref(), now.keyboard.as_ref()) {
             out.push(self.pixels((r[0], r[1], r[2], r[3])));
         }
-        if now.keyboard.is_none() {
+        if now.extension() {
             for (b, x, y) in [
                 (Bank::Mode, was.mode, now.mode),
                 (Bank::Stereo, was.stereo, now.stereo),
@@ -678,6 +678,10 @@ impl StripRenderer {
                     out.push(self.readout_part(r));
                 }
             }
+        }
+        // (The LFO page put away: the extension controls drawn again under where it was.)
+        if was.lfo != now.lfo {
+            out.push(self.pixels((super::SECTIONS[1].0, PANEL_H + super::RAIL, art::W, art::H)));
         }
         if was.bar != now.bar {
             out.push(self.name_part());
@@ -701,7 +705,7 @@ impl StripRenderer {
             .into_iter()
             .map(|at| self.tab_part(at))
             .collect();
-        if scene.keyboard.is_none() {
+        if scene.extension() {
             parts.extend(Readout::ALL.into_iter().map(|rd| self.readout_part(rd)));
             parts.push(self.window());
         } else {
@@ -732,7 +736,7 @@ impl StripRenderer {
             copy(&mut self.frame, b, r);
         }
         // The lit tabs: their light on the face round them, then the lit cap over the unlit.
-        let lit = if scene.keyboard.is_some() {
+        let lit = if !scene.extension() {
             Vec::new()
         } else {
             lit_tabs(scene)
@@ -778,14 +782,14 @@ impl StripRenderer {
             self.readouts = (0..Readout::ALL.len()).map(|_| None).collect();
         }
         for (i, rd) in Readout::ALL.into_iter().enumerate() {
-            if scene.keyboard.is_none() && meets(self.readout_part(rd), r) {
+            if scene.extension() && meets(self.readout_part(rd), r) {
                 let (text, on) = &scene.readouts[i];
                 reading(self, i, rd, text, *on);
             }
         }
         // The voices' drops, behind the display's glass.
         let window = self.window();
-        if scene.keyboard.is_none() && meets(window, r) {
+        if scene.extension() && meets(window, r) {
             self.drops(window, scene.detune);
         }
         // The preset's name, its star and arrow (dots); MIDI Learn's ring round the control it
@@ -795,7 +799,7 @@ impl StripRenderer {
         }
         if meets(self.signs_part(scene), r) {
             let mut o = Svg::default();
-            if let Some(c) = scene.learning.filter(|_| scene.keyboard.is_none()) {
+            if let Some(c) = scene.learning.filter(|_| scene.extension()) {
                 ring(&mut o, c);
             }
             star_key(&mut o, self.rail, scene.bar.favorite, &self.key_print);
@@ -807,23 +811,23 @@ impl StripRenderer {
             p.over(&mut self.frame, r);
         }
         for (x, width, target) in self.keys() {
-            let active = match target {
-                BarTarget::Panel => scene.bar.panel,
-                BarTarget::Keyboard => scene.bar.keyboard,
-                BarTarget::Arp => scene.bar.arp,
-                BarTarget::Fx => scene.bar.fx,
-                BarTarget::Mpe => scene.bar.mpe,
-                _ => false,
+            // (A page's or a drawer's key lit while it shows, a faint glow while it affects the
+            // sound: decisions.md R-LFO.)
+            let light = match key_light(&scene.bar, target) {
+                KeyLight::Lit => 0.28,
+                KeyLight::Glow => GLOW,
+                KeyLight::Off => 0.0,
             };
-            if active && meets(self.key_part(target), r) {
+            if light > 0.0 && meets(self.key_part(target), r) {
                 let mut o = Svg::default();
                 put!(
                     o,
-                    "<rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='#b0702b' opacity='.28'/>",
+                    "<rect x='{}' y='{}' width='{}' height='{}' rx='7' fill='#b0702b' opacity='{}'/>",
                     N(x - width / 2.0),
                     N(super::RAIL_Y - PANEL_H - super::KEY_H / 2.0),
                     N(width),
-                    N(super::KEY_H)
+                    N(super::KEY_H),
+                    N(light)
                 );
                 svg_over(&self.options, &mut self.frame, s, &o.0);
             }
@@ -1024,6 +1028,40 @@ fn lit_tabs(scene: &StripScene) -> Vec<(f64, f64)> {
     lit
 }
 
+/// How brightly a rail key is lit (decisions.md R-LFO).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KeyLight {
+    Off,
+    /// Its page or drawer closed but affecting the sound: a faint glow.
+    Glow,
+    Lit,
+}
+
+/// A glowing key's light: about two fifths of a lit one's (the owner is sensitive to brightness).
+const GLOW: f64 = 0.11;
+
+/// Key `t`'s light: PANEL's and the keyboard's lit while they show; a page's or a drawer's lit
+/// while it shows, else glowing while what it opens affects the sound.
+pub(crate) fn key_light(bar: &BarScene, t: BarTarget) -> KeyLight {
+    let lit = |on: bool| if on { KeyLight::Lit } else { KeyLight::Off };
+    let affecting = match t {
+        BarTarget::Panel => return lit(bar.panel),
+        BarTarget::Keyboard => return lit(bar.keyboard),
+        BarTarget::Arp => bar.arp,
+        BarTarget::Fx => bar.fx,
+        BarTarget::Mpe => bar.mpe,
+        BarTarget::Lfo => bar.lfo,
+        _ => return KeyLight::Off,
+    };
+    if bar.page == Some(t) || (t == BarTarget::Lfo && bar.lfo_page) {
+        KeyLight::Lit
+    } else if affecting {
+        KeyLight::Glow
+    } else {
+        KeyLight::Off
+    }
+}
+
 /// An SVG body (the strip's units: the drawing's, from the strip's top) drawn over `frame`.
 pub(super) fn svg_over(options: &usvg::Options<'_>, frame: &mut Pixmap, scale: f64, body: &str) {
     let (w, h) = (frame.width(), frame.height());
@@ -1057,7 +1095,8 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
             | BarTarget::Panel
             | BarTarget::Arp
             | BarTarget::Fx
-            | BarTarget::Mpe => put!(
+            | BarTarget::Mpe
+            | BarTarget::Lfo => put!(
                 o,
                 "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>{}</text>",
                 N(x),
@@ -1067,6 +1106,7 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                     BarTarget::Arp => "ARP",
                     BarTarget::Fx => "FX",
                     BarTarget::Mpe => "MPE",
+                    BarTarget::Lfo => "LFO",
                     _ => "SAVE",
                 }
             ),

@@ -12,6 +12,9 @@ pub(super) struct Entry {
     text: String,
     selected: bool,
     edited: bool,
+    /// A modulation source's depth on the knob, typed in percent (DEPTH…, decisions.md R-LFO),
+    /// rather than the knob's own value.
+    depth: Option<(crate::lfo::Source, crate::lfo::Target)>,
 }
 
 impl Entry {
@@ -100,6 +103,19 @@ fn unit(control: usize) -> &'static str {
         Kind::Knob {
             dial: Dial::Freq, ..
         } => "dial",
+        // An LFO's (decisions.md R-LFO).
+        Kind::Knob {
+            dial: Dial::LfoRate,
+            ..
+        } => "Hz",
+        Kind::Knob {
+            dial: Dial::LfoPhase,
+            ..
+        } => "degrees",
+        Kind::Knob {
+            dial: Dial::LfoRise,
+            ..
+        } => "s",
         Kind::Selector(Legends::Ranges) => "ft · 0 = LO",
         Kind::Selector(_) => "position 1–6",
         _ => "dial",
@@ -113,6 +129,10 @@ fn plain(control: usize, knob: f64) -> f64 {
             Dial::Cutoff => knob * 10.0 - 5.0,
             Dial::Freq => knob * 15.0 - 7.5,
             Dial::Time => time_at(knob),
+            // An LFO's, through its parameter's travel (decisions.md R-LFO).
+            Dial::LfoRate => 0.01 + 49.99 * knob.powi(5),
+            Dial::LfoPhase => knob * 360.0,
+            Dial::LfoRise => 10.0 * knob.powi(3),
             _ => knob * 10.0,
         },
         Kind::Selector(Legends::Ranges) => FOOTAGES[(knob * 5.0).round() as usize],
@@ -141,6 +161,18 @@ fn normalized(control: usize, text: &str) -> Option<f64> {
     } else {
         (text, 1.0)
     };
+    let lfo_dial = match CONTROLS[control].kind {
+        Kind::Knob { dial, .. } => matches!(dial, Dial::LfoRate | Dial::LfoPhase | Dial::LfoRise),
+        _ => false,
+    };
+    let text = if lfo_dial {
+        text.trim_end_matches(['s', '\u{b0}'])
+            .trim_end_matches("Hz")
+            .trim_end_matches("hz")
+            .trim()
+    } else {
+        text
+    };
     let v = text.parse::<f64>().ok()?;
     if !v.is_finite() {
         return None;
@@ -152,6 +184,9 @@ fn normalized(control: usize, text: &str) -> Option<f64> {
                 Dial::Cutoff => (v + 5.0) / 10.0,
                 Dial::Freq => (v + 7.5) / 15.0,
                 Dial::Time => time_knob(v * scale),
+                Dial::LfoRate => ((v - 0.01) / 49.99).clamp(0.0, 1.0).powf(0.2),
+                Dial::LfoPhase => v / 360.0,
+                Dial::LfoRise => (v / 10.0).clamp(0.0, 1.0).cbrt(),
                 _ => v / 10.0,
             },
             Kind::Selector(Legends::Ranges) => {
@@ -280,9 +315,32 @@ impl Editing {
             text,
             selected: true,
             edited: false,
+            depth: None,
         });
         self.typing_keys = true;
         true
+    }
+
+    /// Source `s`'s depth on knob `control` (target `t`) to be typed, in percent of its travel,
+    /// in the knob's entry field (DEPTH…, decisions.md R-LFO).
+    pub(super) fn start_depth_entry(
+        &mut self,
+        control: usize,
+        s: crate::lfo::Source,
+        t: crate::lfo::Target,
+    ) {
+        let depth = self.params.lfo_patch.depth(s, t).unwrap_or(0.0);
+        self.playing.release();
+        self.last_press = None;
+        self.last_strip_press = None;
+        self.knob_entry = Some(Entry {
+            control,
+            text: format!("{:.0}", f64::from(depth) * 100.0),
+            selected: true,
+            edited: false,
+            depth: Some((s, t)),
+        });
+        self.typing_keys = true;
     }
 
     pub(super) fn entry_field(&self, entry: &Entry) -> Field {
@@ -290,7 +348,9 @@ impl Editing {
             bounds: [0.0; 4],
             size: self.renderer.text_size() * 1.15,
             text: entry.text.clone(),
-            unit: if self.timed_dial(entry.control) {
+            unit: if entry.depth.is_some() {
+                "% of its travel, \u{2013}100 to 100"
+            } else if self.timed_dial(entry.control) {
                 "note · . dotted · t triplet"
             } else if CONTROLS[entry.control].param.ends_with("_frequency")
                 && self.params.freq_law() == ca72::freq_dial::Law::Semitones
@@ -323,6 +383,27 @@ impl Editing {
         match &k.key {
             Key::Enter => {
                 let entry = self.knob_entry.take().expect("an entry");
+                // A source's depth (decisions.md R-LFO): within -100 to 100 %, none at 0.
+                if let Some((s, t)) = entry.depth {
+                    let v = entry
+                        .text
+                        .trim()
+                        .trim_end_matches('%')
+                        .trim()
+                        .replace('\u{2013}', "-");
+                    if entry.edited
+                        && let Ok(v) = v.parse::<f64>()
+                        && v.is_finite()
+                    {
+                        let d = (v / 100.0).clamp(-1.0, 1.0) as f32;
+                        if d == 0.0 {
+                            self.params.lfo_patch.remove(s, t);
+                        } else {
+                            let _ = self.params.lfo_patch.assign(s, t, d);
+                        }
+                    }
+                    return true;
+                }
                 if !entry.edited || !self.operable(entry.control) {
                     return true;
                 }

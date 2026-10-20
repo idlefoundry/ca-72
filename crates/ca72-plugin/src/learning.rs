@@ -146,6 +146,33 @@ pub enum Item {
     MpeMenu,
     MpeInput(crate::expression::Mode),
     TimbreRest(crate::expression::TimbreRest),
+    /// Modulation's (decisions.md R-LFO): a source's depth on a knob typed, taken away, a
+    /// source given to a knob; an LFO's colour, its EDGES, its waveform STEPPED or CONTINUOUS.
+    Mod(ModItem),
+}
+
+/// What a modulation item of a menu does (decisions.md R-LFO).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModItem {
+    /// Source's depth on the knob (its control's index) typed, in its knob's entry field.
+    Depth(crate::lfo::Source, crate::lfo::Target, usize),
+    Remove(crate::lfo::Source, crate::lfo::Target),
+    /// The source given to the knob at the default depth (a strip knob's: they lie under the
+    /// LFO page, so nothing can be dragged to them).
+    Assign(crate::lfo::Source, crate::lfo::Target),
+    /// LFO `n`'s phosphor.
+    Color(usize, crate::lfo::Phosphor),
+    Edges(usize, crate::lfo::Edges),
+    /// LFO `n`'s waveform STEPPED (false) or CONTINUOUS.
+    Wave(usize, bool),
+}
+
+/// A row a menu gains: a head, or an item (its text, whether it can be chosen, whether it is
+/// marked: the choice it is).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Row {
+    Head(String),
+    Item(ModItem, String, bool, bool),
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -197,6 +224,8 @@ pub enum Pressed {
     MpeMenu,
     MpeInput(crate::expression::Mode),
     TimbreRest(crate::expression::TimbreRest),
+    /// Modulation's (decisions.md R-LFO).
+    Mod(ModItem),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -297,6 +326,23 @@ impl Learning {
         (x, y): (f64, f64),
         size: f64,
     ) {
+        self.open_menu_with(fonts, map, place, not, (x, y), size, Vec::new());
+    }
+
+    /// The same, `rows` under its MIDI Learn's (decisions.md R-LFO: each source on the knob a
+    /// head with DEPTH… and REMOVE; a strip knob's LFO head; an LFO WAVEFORM's modes). A control
+    /// that cannot be learned has its rows alone, under its name.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_menu_with(
+        &mut self,
+        fonts: &Fonts,
+        map: &MidiMap,
+        place: Option<Place>,
+        not: Option<Target>,
+        (x, y): (f64, f64),
+        size: f64,
+        rows: Vec<Row>,
+    ) {
         let learnable = place.and_then(|p| learnable_at(p, self.timed));
         let (title, items) = match learnable {
             Some(MOD_WHEEL) => (
@@ -355,6 +401,27 @@ impl Learning {
             },
         };
         let assigned = learnable.is_some_and(|i| map.binding(i).is_some());
+        let mut items: Vec<(Item, String)> = items
+            .into_iter()
+            .map(|(it, t)| (it, t.to_owned()))
+            .collect();
+        let mut extra_enabled: Vec<bool> = Vec::new();
+        let mut extra_marked: Vec<bool> = Vec::new();
+        let first_extra = items.len();
+        for r in rows {
+            match r {
+                Row::Head(t) => {
+                    items.push((Item::Head, t));
+                    extra_enabled.push(false);
+                    extra_marked.push(false);
+                }
+                Row::Item(m, t, on, mark) => {
+                    items.push((Item::Mod(m), t));
+                    extra_enabled.push(on);
+                    extra_marked.push(mark);
+                }
+            }
+        }
         let menu = Menu {
             x,
             y,
@@ -362,15 +429,17 @@ impl Learning {
             title,
             items: items
                 .iter()
-                .map(|(it, t)| {
+                .enumerate()
+                .map(|(k, (it, t))| {
                     let enabled = match it {
+                        _ if k >= first_extra => extra_enabled[k - first_extra],
                         Item::Remove => assigned,
                         Item::Not | Item::Head => false,
                         // (The mode it is in marked, not chosen again.)
                         Item::Rect(n, v) => self.variable[*n] != *v,
                         _ => true,
                     };
-                    ((*t).to_owned(), enabled)
+                    (t.clone(), enabled)
                 })
                 .collect(),
             heads: items
@@ -382,7 +451,10 @@ impl Learning {
             marked: items
                 .iter()
                 .enumerate()
-                .filter(|(_, (it, _))| matches!(it, Item::Rect(n, v) if self.variable[*n] == *v))
+                .filter(|(k, (it, _))| {
+                    matches!(it, Item::Rect(n, v) if self.variable[*n] == *v)
+                        || (*k >= first_extra && extra_marked[*k - first_extra])
+                })
                 .map(|(k, _)| k)
                 .collect(),
             hover: None,
@@ -391,6 +463,54 @@ impl Learning {
         self.open = Some(Open {
             learnable,
             items: items.into_iter().map(|(it, _)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// A menu of `rows` alone under `title` (decisions.md R-LFO: an LFO's colour and EDGES, what
+    /// it modulates), opened at (`x`, `y`).
+    pub fn open_rows_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        title: String,
+        rows: Vec<Row>,
+    ) {
+        let mut items = Vec::new();
+        let mut shown = Vec::new();
+        let (mut heads, mut marked) = (Vec::new(), Vec::new());
+        for (k, r) in rows.into_iter().enumerate() {
+            match r {
+                Row::Head(t) => {
+                    heads.push(k);
+                    items.push(Item::Head);
+                    shown.push((t, false));
+                }
+                Row::Item(m, t, on, mark) => {
+                    if mark {
+                        marked.push(k);
+                    }
+                    items.push(Item::Mod(m));
+                    shown.push((t, on));
+                }
+            }
+        }
+        let menu = Menu {
+            x,
+            y,
+            size,
+            title,
+            items: shown,
+            heads,
+            marked,
+            hover: None,
+        }
+        .placed(fonts, x, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items,
             menu,
         });
         self.take_keys = true;
@@ -829,6 +949,7 @@ impl Learning {
             (Some(Item::MpeMenu), _) => return Pressed::MpeMenu,
             (Some(Item::MpeInput(m)), _) => return Pressed::MpeInput(*m),
             (Some(Item::TimbreRest(r)), _) => return Pressed::TimbreRest(*r),
+            (Some(Item::Mod(m)), _) => return Pressed::Mod(*m),
             _ => {}
         }
         Pressed::Done

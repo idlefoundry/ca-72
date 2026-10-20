@@ -99,6 +99,9 @@ fn edge_finds_every_control_where_it_is_drawn() {
             // (The drawers' knobs, the plug-in's own, are found while their drawer is open.)
             let found = if c.place.is_drawer() {
                 interact::hit_drawer(c.place, x, y)
+            } else if c.place == ca72_panel::controls::Place::Lfo {
+                // (The LFO page's, found while it shows: decisions.md R-LFO.)
+                interact::hit_lfo(r.layout(), x, y)
             } else {
                 interact::hit(r.layout(), &a, x, y)
             };

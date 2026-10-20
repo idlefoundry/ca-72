@@ -4,8 +4,8 @@
 //! panel's renderer, the strip's over its foot, the editor's composing of the two
 //! (`ca72-plugin`'s `draw` and `compose`) and the frame's conversion to the window's pixels (its
 //! `present`, softbuffer's 0RGB), timed together: the median and the slowest of 40. Then the
-//! arpeggiator's drawer (decisions.md R-ARP), the expression drawer (R-MPE) and the standalone's
-//! effects' drawer (R-FX-DRAWER);
+//! arpeggiator's drawer (decisions.md R-ARP), the expression drawer (R-MPE), the standalone's
+//! effects' drawer (R-FX-DRAWER), the LFO page and modulation's rings, cord and pop-up (R-LFO);
 //! `CA72_RAIL=effects` the strip with the standalone's rail (its FX key).
 
 use std::time::{Duration, Instant};
@@ -163,6 +163,7 @@ fn measure(s: f64) {
     arp(s, &mut panel);
     mpe(s, &mut panel);
     fx(s, &panel);
+    lfo(s, &mut panel);
 }
 
 /// The effects' drawer (decisions.md R-FX-DRAWER): its first drop (made as the editor opens, on
@@ -530,4 +531,239 @@ fn strip_scene(sounding: u32) -> StripScene {
         },
         ..StripScene::default()
     }
+}
+
+/// The LFO page (decisions.md R-LFO): its renderer made and its first showing (its plate made on
+/// its thread: waited for at once, the worst case, and later); its orbs moving (the page's
+/// changed places only); a RATE turned (its scope's trace drawn again); then modulation's
+/// overlay: three knobs' ring points moving, an assignment's cord following the pointer, the
+/// hover pop-up shown and gone. Each its render, its changed places put in the window's frame
+/// (the editor's `compose`), and the frame's conversion to the window's pixels.
+fn lfo(s: f64, panel: &mut Renderer) {
+    use ca72_panel::modulation::{Cord, KnobRings, ModRenderer, ModScene, PopDial, Popup, Ring};
+    use ca72_panel::strip::lfo::{self, LfoRenderer, LfoScene, TRACE_POINTS};
+    let colours = [
+        [0xff, 0xb0, 0x20],
+        [0x26, 0xff, 0xb7],
+        [0x4c, 0x8c, 0xff],
+        [0xe6, 0x39, 0x48],
+    ];
+    let mut scene = LfoScene::default();
+    for (n, c) in scene.columns.iter_mut().enumerate() {
+        c.colour = colours[n];
+        c.trace = (0..TRACE_POINTS)
+            .map(|i| {
+                ((i as f64 / TRACE_POINTS as f64 * 4.0 * std::f64::consts::PI) + n as f64).sin()
+                    as f32
+            })
+            .collect();
+        c.orb = Some((0.1, 0.0));
+        c.screen = "CUTOFF +25".into();
+        c.in_use = true;
+    }
+    let mut composed = panel.frame().clone();
+    let mut window: Vec<u32> = Vec::new();
+    let top = lfo::top_px(s) - panel.top_px();
+    let put_page = |d: &LfoRenderer, c: &mut Pixmap, all: bool| {
+        let f = d.frame();
+        let w = c.width() as i32;
+        let rects: Vec<[i32; 4]> = if all {
+            vec![[
+                (lfo::LEFT * s) as i32,
+                0,
+                (lfo::RIGHT * s) as i32,
+                f.height() as i32,
+            ]]
+        } else {
+            d.damages().to_vec()
+        };
+        for [x0, y0, x1, y1] in rects {
+            for y in y0.max(0)..y1.min(f.height() as i32) {
+                let n = ((x1.min(w) - x0.max(0)).max(0) * 4) as usize;
+                let from = ((y * f.width() as i32 + x0.max(0)) * 4) as usize;
+                let to = (((top + y) * w + x0.max(0)) * 4) as usize;
+                if to + n <= c.data().len() {
+                    c.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+                }
+            }
+        }
+    };
+    let t = Instant::now();
+    let mut d = LfoRenderer::new(s, Skin::Worn, ca72_panel::Lettering::Standard);
+    let made = t.elapsed();
+    d.render(&scene, panel);
+    put_page(&d, &mut composed, true);
+    present(&mut window, &composed);
+    println!(
+        "  {:<36} {:5.1} ms (its plate made on its thread, waited for)",
+        "LFO: the page's first showing, at once",
+        ms(t.elapsed())
+    );
+    println!(
+        "  {:<36} {:5.2} ms (on the editor's thread as it opens)",
+        "LFO: the page's renderer made",
+        ms(made)
+    );
+    let mut d = LfoRenderer::new(s, Skin::Worn, ca72_panel::Lettering::Standard);
+    std::thread::sleep(Duration::from_millis(2500));
+    let t = Instant::now();
+    d.render(&scene, panel);
+    put_page(&d, &mut composed, true);
+    present(&mut window, &composed);
+    println!(
+        "  {:<36} {:5.1} ms (its plate made already)",
+        "LFO: the page's first showing, later",
+        ms(t.elapsed())
+    );
+    let mut times = |name: &str, step: &mut dyn FnMut(usize, &mut LfoScene)| {
+        let mut v = Vec::new();
+        for i in 0..40 {
+            step(i, &mut scene);
+            let t = Instant::now();
+            if d.render(&scene, panel) {
+                put_page(&d, &mut composed, false);
+                present(&mut window, &composed);
+            }
+            v.push(t.elapsed());
+        }
+        v.sort();
+        println!(
+            "  {name:<36} median {:5.1} ms, slowest {:5.1} ms",
+            ms(v[v.len() / 2]),
+            ms(v[v.len() - 1])
+        );
+    };
+    times("LFO: one orb moving", &mut |i, sc| {
+        let x = (i as f64 * 0.013) % 1.0;
+        sc.columns[0].orb = Some((x, (x * 12.0).sin()));
+    });
+    times("LFO: four orbs moving", &mut |i, sc| {
+        for (n, c) in sc.columns.iter_mut().enumerate() {
+            let x = (i as f64 * 0.013 + n as f64 * 0.2) % 1.0;
+            c.orb = Some((x, (x * 12.0).sin()));
+        }
+    });
+    times("LFO: RATE turned (its trace again)", &mut |i, sc| {
+        sc.columns[1].rate = 0.4 + 0.005 * i as f64;
+        let k = 2.0 + 0.05 * i as f64;
+        sc.columns[1].trace = (0..TRACE_POINTS)
+            .map(|j| ((j as f64 / TRACE_POINTS as f64 * k * std::f64::consts::PI).sin()) as f32)
+            .collect();
+    });
+    times("LFO: the page open, nothing changed", &mut |_, _| {});
+    // Modulation's overlay over the panel.
+    let knob = |p: &str| {
+        let i = CONTROLS.iter().position(|c| c.param == p).expect(p);
+        let c = &CONTROLS[i];
+        (i, c.centre(), ca72_panel::art::skirt(&c.kind))
+    };
+    let rings = |k: f64| -> Vec<KnobRings> {
+        ["cutoff", "osc2_frequency", "volume"]
+            .iter()
+            .enumerate()
+            .map(|(n, p)| {
+                let (control, at, skirt) = knob(p);
+                KnobRings {
+                    control,
+                    at,
+                    skirt,
+                    travel: 0.5,
+                    rings: vec![Ring {
+                        colour: colours[n],
+                        depth: 0.3,
+                        point: Some(0.5 + 0.3 * (k + n as f64).sin()),
+                    }],
+                }
+            })
+            .collect()
+    };
+    let mut m = ModRenderer::new(s);
+    m.rescale(s, panel.top_px());
+    let mut ms_scene = ModScene {
+        knobs: rings(0.0),
+        ..ModScene::default()
+    };
+    m.render(&ms_scene);
+    let mut mtimes = |name: &str, step: &mut dyn FnMut(usize, &mut ModScene)| {
+        let mut v = Vec::new();
+        for i in 0..40 {
+            step(i, &mut ms_scene);
+            let t = Instant::now();
+            if m.render(&ms_scene) {
+                // (Each changed place put together again: the panel's frame there, then the
+                // overlay over it.)
+                for &[x0, y0, x1, y1] in m.damages() {
+                    let f = panel.frame();
+                    let w = f.width() as i32;
+                    for y in y0.max(0)..y1.min(f.height() as i32) {
+                        let a = ((y * w + x0.max(0)) * 4) as usize;
+                        let b = ((y * w + x1.min(w)) * 4) as usize;
+                        if a < b {
+                            composed.data_mut()[a..b].copy_from_slice(&f.data()[a..b]);
+                        }
+                    }
+                    m.lay_rings(&mut composed, [x0, y0, x1, y1]);
+                    m.lay_over(&mut composed, [x0, y0, x1, y1]);
+                }
+                present(&mut window, &composed);
+            }
+            v.push(t.elapsed());
+        }
+        v.sort();
+        println!(
+            "  {name:<36} median {:5.1} ms, slowest {:5.1} ms",
+            ms(v[v.len() / 2]),
+            ms(v[v.len() - 1])
+        );
+    };
+    mtimes("rings: three knobs' points moving", &mut |i, sc| {
+        sc.knobs = rings(0.1 * i as f64);
+    });
+    let targets: Vec<((f64, f64), f64)> = [
+        "tune",
+        "glide",
+        "mod_mix",
+        "emphasis",
+        "contour_amount",
+        "volume",
+        "feedback",
+    ]
+    .iter()
+    .map(|p| {
+        let (_, at, r) = knob(p);
+        (at, r)
+    })
+    .collect();
+    mtimes("drag: the cord following the pointer", &mut |i, sc| {
+        sc.cord = Some(Cord {
+            from: lfo::places(0).jack,
+            to: (1800.0 + 10.0 * i as f64, 300.0 + 4.0 * i as f64),
+            colour: colours[0],
+            targets: targets.clone(),
+            over: None,
+        });
+    });
+    mtimes("pop-up shown and gone", &mut |i, sc| {
+        sc.cord = None;
+        let (_, at, r) = knob("cutoff");
+        sc.popup = (i % 2 == 0).then(|| Popup {
+            knob: (at, r),
+            dials: vec![
+                PopDial {
+                    colour: colours[0],
+                    label: "LFO 1".into(),
+                    depth: 0.4,
+                    shared: false,
+                },
+                PopDial {
+                    colour: colours[1],
+                    label: "LFO 2".into(),
+                    depth: -0.25,
+                    shared: false,
+                },
+            ],
+            hover: None,
+            size: panel.text_size(),
+        });
+    });
 }

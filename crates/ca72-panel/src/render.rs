@@ -911,8 +911,8 @@ impl Renderer {
             .iter()
             .zip(scene.values)
             .map(|(c, v)| {
-                // (The drawers draw their own knobs: `Renderer::paint_control`.)
-                if c.place.is_drawer() {
+                // (The drawers and the LFO page draw their own: `Renderer::paint_control`.)
+                if c.place.drawn_apart() {
                     return Layer::default();
                 }
                 let midi = match c.kind {
@@ -1099,6 +1099,14 @@ impl Renderer {
         };
         let top = self.top_px();
         self.render_layer(&layer).map(|(x, y, p)| (x, y + top, p))
+    }
+
+    /// Any layer as this look draws it, alone, for a frame drawn apart (the LFO page's keys,
+    /// switches and jack: decisions.md R-LFO), as [`Renderer::paint_control`] paints a
+    /// control.
+    pub(crate) fn paint_layer(&mut self, layer: &Layer) -> Option<(i32, i32, Pixmap)> {
+        let top = self.top_px();
+        self.render_layer(layer).map(|(x, y, p)| (x, y + top, p))
     }
 
     /// A layer's pixels, aligned to the frame's: their place and their image (its body, its
@@ -1760,7 +1768,7 @@ fn level(r: u8, g: u8, b: u8) -> f64 {
 }
 
 /// The face's mean level, as [`worn_into`] measures it.
-fn face_mean(face: &Pixmap) -> f64 {
+pub(crate) fn face_mean(face: &Pixmap) -> f64 {
     let (sum, n) = face
         .pixels()
         .iter()
@@ -1773,7 +1781,7 @@ fn face_mean(face: &Pixmap) -> f64 {
 
 /// The same, the face's mean given: a part of a frame's print worn as the whole frame's is
 /// (`Renderer::timed_part`).
-fn worn_into_by(ink: &mut Pixmap, face: &Pixmap, mean: f64) {
+pub(crate) fn worn_into_by(ink: &mut Pixmap, face: &Pixmap, mean: f64) {
     for (p, f) in ink.pixels_mut().iter_mut().zip(face.pixels()) {
         if p.alpha() == 0 {
             continue;
