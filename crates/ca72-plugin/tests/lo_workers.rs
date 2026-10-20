@@ -196,7 +196,7 @@ struct Figures {
     /// samples that differ from the render on the host's thread alone (none unless a voice's
     /// run went unheard).
     shared: f64,
-    differ: usize,
+    differ: (usize, u64),
 }
 
 /// `c`'s chords of `notes` notes played in real time for `seconds`, `block` frames at a time,
@@ -220,7 +220,8 @@ fn paced_run(
     // workgroup: without one, macOS ran a thread busy part of each period about half as fast,
     // decisions.md R11.)
     let host = if rt {
-        if let Err(e) = ca72_rt::promote(period, period / 2) {
+        let compute: f64 = env("CA72_COMPUTE", 0.5);
+        if let Err(e) = ca72_rt::promote(period, period.mul_f64(compute)) {
             eprintln!("(the measuring thread not promoted: {e})");
         }
         ca72_rt::WorkInterval::new("CA-72 measurement host")
@@ -286,6 +287,9 @@ fn paced_run(
     let host_cpu = (cpu(false) - host0) as f64 / wall;
     let workers_cpu = cpu(true).saturating_sub(work0) as f64 / wall;
     let silent = e.silent_runs() - silent0;
+    // (Any run not heard, the unmeasured second's too: a voice that sat a run out is a run
+    // behind from then on, and its samples differ.)
+    let silent_all = e.silent_runs();
     let running = e.workers().max(started);
     drop(e);
     if let (Some(h), Some(t)) = (&host, token) {
@@ -305,6 +309,8 @@ fn paced_run(
                 || b.iter().zip(*b0).any(|(x, y)| x.to_bits() != y.to_bits())
         })
         .count();
+    // (Reported with the whole render's runs not heard: differences with none are a fault.)
+    let differ = (differ, silent_all);
     took.sort_by(f64::total_cmp);
     let mean = took.iter().sum::<f64>() / took.len() as f64;
     let p99 = took[(took.len() * 99 / 100).min(took.len() - 1)];
@@ -359,7 +365,7 @@ fn paced() {
                     set_lo_threads_for_measurement(threads);
                     let f = paced_run(&c, notes, block, workers, rt, seconds);
                     eprintln!(
-                        "{name:>18} w{workers} ({} running) b{block:>3} {mode:>6}: mean {:5.1} % p99 {:5.1} % most {:6.1} % late {:3} unheard {:4} cpu host {:5.1} % workers {:5.1} % shared {:3.0} % differ {}",
+                        "{name:>18} w{workers} ({} running) b{block:>3} {mode:>6}: mean {:5.1} % p99 {:5.1} % most {:6.1} % late {:3} unheard {:4} cpu host {:5.1} % workers {:5.1} % shared {:3.0} % differ {} (unheard in all {})",
                         f.workers,
                         100.0 * f.mean,
                         100.0 * f.p99,
@@ -369,7 +375,8 @@ fn paced() {
                         100.0 * f.host_cpu,
                         100.0 * f.workers_cpu,
                         100.0 * f.shared,
-                        f.differ,
+                        f.differ.0,
+                        f.differ.1,
                     );
                 }
             }
