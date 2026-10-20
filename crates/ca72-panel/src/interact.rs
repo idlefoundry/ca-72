@@ -111,6 +111,68 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
     })
 }
 
+/// A WAVEFORM switch VARIABLE (decisions.md R-VARIABLE-RECT), as the editor operates it: one
+/// position along its whole travel, 0 to 1 over [`VARIABLE_PLACES`] of the switch's steps:
+/// TRIANGLE, the second and SAWTOOTH stepped (0, 1, 2), then SQUARE (3) and on without steps
+/// through WIDE (4) and NARROW (5) to the floor.
+pub const VARIABLE_PLACES: f64 = 3.0 + art::RECT_STEPS;
+
+/// The switch's places a VARIABLE switch stops at when clicked or picked: its six legends',
+/// and the floor's.
+const VARIABLE_STOPS: [f64; 7] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, VARIABLE_PLACES];
+
+/// A position on a VARIABLE switch's travel (its steps) as it settles: stepped below SQUARE
+/// (half way to SQUARE is SQUARE), anywhere from SQUARE to the floor.
+fn variable_settled(at: f64) -> f64 {
+    if at < 3.0 {
+        at.round().max(0.0)
+    } else {
+        at.min(VARIABLE_PLACES)
+    }
+}
+
+/// A VARIABLE switch dragged from `start` (0..1 of its travel) by (`dx`, `dy`): a step each 30
+/// pixels as the switch's (60 with `fine`), right or up turning it on; stepped through its
+/// first three places, then without steps from SQUARE.
+pub fn variable_drag(start: f64, dx: f64, dy: f64, fine: bool) -> f64 {
+    let at = start * VARIABLE_PLACES + (dx - dy) / if fine { 60.0 } else { 30.0 };
+    variable_settled(at) / VARIABLE_PLACES
+}
+
+/// A VARIABLE switch turned `notches` (whole) by the mouse wheel or an arrow key: a place a
+/// notch below SQUARE; past it a tenth of a step a notch (a fiftieth with `fine`), SQUARE
+/// itself the way back down into the stepped places.
+pub fn variable_scroll(v: f64, notches: f64, fine: bool) -> f64 {
+    let at = v * VARIABLE_PLACES;
+    let at = if at < 3.0 || (at <= 3.0 && notches < 0.0) {
+        (at.round() + notches).clamp(0.0, 3.0)
+    } else {
+        (at + notches * if fine { 0.02 } else { 0.1 }).clamp(3.0, VARIABLE_PLACES)
+    };
+    variable_settled(at) / VARIABLE_PLACES
+}
+
+/// A click on a VARIABLE switch's knob, `dx` from its centre: to its next stop that side (a
+/// legend's place, or the floor).
+pub fn variable_click(v: f64, dx: f64) -> f64 {
+    let at = v * VARIABLE_PLACES;
+    let next = if dx < 0.0 {
+        VARIABLE_STOPS
+            .iter()
+            .rev()
+            .find(|&&p| p < at - 1e-9)
+            .copied()
+    } else {
+        VARIABLE_STOPS.iter().find(|&&p| p > at + 1e-9).copied()
+    };
+    next.unwrap_or(at) / VARIABLE_PLACES
+}
+
+/// A VARIABLE switch's legend `k` (0..5) picked: exactly its place.
+pub fn variable_legend(k: usize) -> f64 {
+    VARIABLE_STOPS[k.min(5)] / VARIABLE_PLACES
+}
+
 /// One notch of the mouse wheel or an arrow key, `up` or down.
 pub fn step(kind: &Kind, v: f64, up: bool, fine: bool) -> f64 {
     scroll(kind, v, if up { 1.0 } else { -1.0 }, fine)
@@ -213,6 +275,41 @@ pub fn release(kind: &Kind, v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A VARIABLE switch (decisions.md R-VARIABLE-RECT): stepped below SQUARE, without steps
+    /// from it to the floor; its legends and clicks its stops exactly.
+    #[test]
+    fn a_variable_switch_steps_then_turns() {
+        let p = VARIABLE_PLACES;
+        let at = |v: f64| v * p;
+        // From SAWTOOTH, half a step on is SQUARE; a step and a half on, between WIDE and NARROW
+        // ... from SQUARE.
+        assert_eq!(at(variable_drag(2.0 / p, 15.0, 0.0, false)), 3.0);
+        assert_eq!(at(variable_drag(2.0 / p, 10.0, 0.0, false)), 2.0);
+        assert!((at(variable_drag(3.0 / p, 45.0, 0.0, false)) - 4.5).abs() < 1e-12);
+        assert!((at(variable_drag(3.0 / p, 45.0, 0.0, true)) - 3.75).abs() < 1e-12);
+        assert_eq!(variable_drag(3.0 / p, 1e4, 0.0, false), 1.0);
+        assert_eq!(variable_drag(3.0 / p, -1e4, 0.0, false), 0.0);
+        // Up is on, as the switch's.
+        assert!((at(variable_drag(3.0 / p, 0.0, -30.0, false)) - 4.0).abs() < 1e-12);
+        // The legends: their places exactly; the floor beyond NARROW's.
+        for k in 0..6 {
+            assert_eq!(at(variable_legend(k)), k as f64);
+        }
+        // Clicks: to the next stop that side.
+        assert_eq!(at(variable_click(4.5 / p, 1.0)), 5.0);
+        assert_eq!(at(variable_click(4.5 / p, -1.0)), 4.0);
+        assert_eq!(variable_click(5.0 / p, 1.0), 1.0);
+        assert_eq!(variable_click(1.0, 1.0), 1.0);
+        assert_eq!(at(variable_click(3.0 / p, -1.0)), 2.0);
+        // The wheel: a place a notch below SQUARE, a tenth of a step past it.
+        assert_eq!(at(variable_scroll(2.0 / p, 1.0, false)), 3.0);
+        assert!((at(variable_scroll(3.0 / p, 1.0, false)) - 3.1).abs() < 1e-12);
+        assert!((at(variable_scroll(3.0 / p, 1.0, true)) - 3.02).abs() < 1e-12);
+        assert_eq!(at(variable_scroll(3.0 / p, -1.0, false)), 2.0);
+        assert_eq!(at(variable_scroll(3.05 / p, -1.0, false)), 3.0);
+        assert_eq!(variable_scroll(1.0, 5.0, false), 1.0);
+    }
     use crate::art::POWER;
     use crate::controls::index;
     use crate::fonts::Fonts;

@@ -90,6 +90,7 @@ features = [
   "An arpeggiator: press ARP on the rail for ON, HOLD, DIRECTION, RATE, OCTAVES, GATE and SWING, in time with your host.",
   "HOLD with the arpeggiator off keeps your notes sounding as a drone until you play a new chord.",
   "Oscillators 2 and 3 at LO can be timed: a key under RANGE locks the cycle to a note value of your host's tempo.",
+  "Right-click a WAVEFORM switch and choose VARIABLE to turn the pulse to any width, with a PWM key for pulse width modulation.",
   "Standalone: press FX for four slots of your own CLAP and VST3 effects; one that crashes never stops the synth.",
   "Standalone: SETTINGS > AGENTS > ALLOW lets an AI agent play and set up the CA-72 through MCP, on this computer only.",
   "The Left and Right arrow keys, or MIDI pads you assign, choose the previous and next preset.",

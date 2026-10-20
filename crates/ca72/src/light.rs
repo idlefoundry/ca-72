@@ -584,6 +584,10 @@ impl Held {
 struct Osc {
     phase: f32,
     wave: Waveform,
+    /// The rectangle's duty cycle and level ([`rect_law`]): its switch's, or VARIABLE's
+    /// width (decisions.md R-VARIABLE-RECT).
+    duty: f32,
+    level: f32,
     /// The band-limiting kernel's tables.
     tables: &'static BlepTables,
 }
@@ -633,24 +637,52 @@ impl Osc {
             }
             Waveform::Sawtooth => laws::SAWTOOTH * fall(),
             Waveform::ReverseSawtooth => -laws::REVERSE_SAWTOOTH * fall(),
-            Waveform::Square => laws::SQUARE * rect(laws::DUTY[0]),
-            Waveform::WideRectangle => laws::WIDE * rect(laws::DUTY[1]),
-            Waveform::NarrowRectangle => laws::NARROW * rect(laws::DUTY[2]),
+            Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle => {
+                self.level * rect(self.duty)
+            }
         }
     }
 
     /// Its waveform's level at its peak (oscillator 3's swing as a modulation source).
-    fn peak(wave: Waveform) -> f32 {
-        match wave {
+    fn peak(&self) -> f32 {
+        match self.wave {
             Waveform::Triangle => laws::TRIANGLE,
             Waveform::SharkTooth => laws::SHARK_TRIANGLE + laws::SHARK_SAWTOOTH,
             Waveform::Sawtooth => laws::SAWTOOTH,
             Waveform::ReverseSawtooth => laws::REVERSE_SAWTOOTH,
-            Waveform::Square => laws::SQUARE,
-            Waveform::WideRectangle => laws::WIDE,
-            Waveform::NarrowRectangle => laws::NARROW,
+            Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle => self.level,
         }
     }
+
+    /// An oscillator on `wave` at phase 0, its rectangle the switch's.
+    fn new(wave: Waveform) -> Self {
+        let (duty, level) = rect_law(wave.width());
+        Osc {
+            phase: 0.0,
+            wave,
+            duty,
+            level,
+            tables: crate::resample::blep_tables(),
+        }
+    }
+}
+
+/// The rectangle's duty cycle and level at a width bias (V): the switch's three as fitted
+/// ([`laws::DUTY`], [`laws::SQUARE`], [`laws::WIDE`], [`laws::NARROW`]) at its 0, -1.5 and
+/// -2.5 V, exactly; straight between them, and on past the narrow one as from the wide one
+/// to it, to VARIABLE's floor (decisions.md R-VARIABLE-RECT; the circuit's duty is straight
+/// in the bias: the comparator's threshold moves 0.998 V a volt along a straight ramp).
+pub(crate) fn rect_law(bias: f64) -> (f32, f32) {
+    let knots = [
+        (0.0, laws::DUTY[0], laws::SQUARE),
+        (-1.5, laws::DUTY[1], laws::WIDE),
+        (-2.5, laws::DUTY[2], laws::NARROW),
+    ];
+    let k = if bias >= -1.5 { 0 } else { 1 };
+    let ((b0, d0, l0), (b1, d1, l1)) = (knots[k], knots[k + 1]);
+    let t = (bias - b0) / (b1 - b0);
+    let at = |a: f32, b: f32| ((1.0 - t) * f64::from(a) + t * f64::from(b)) as f32;
+    (at(d0, d1), at(l0, l1))
 }
 
 /// White noise (xorshift), and pink and red from it (filtered), with the white's band.
@@ -901,10 +933,15 @@ struct Setting {
     /// source: its sample to its waveform's -1..1 (times `swing`, plus `swing_bias`: the
     /// rectangles' levels before their coupling), and that to semitones.
     depth: f64,
+    /// The depth with the wheel fully forward (PWM's measure).
+    depth_full: f32,
     offset_depth: f64,
     mix: f32,
     osc_mod: bool,
     filter_mod: bool,
+    /// Which oscillators' widths follow the modulation (VARIABLE with PWM: decisions.md
+    /// R-VARIABLE-RECT).
+    pwm: [bool; 3],
     swing: f32,
     swing_bias: f32,
     mod_swing: f32,
@@ -921,6 +958,8 @@ struct Setting {
 #[derive(Debug, Clone)]
 pub struct Light {
     rate: f64,
+    /// PWM's share of VARIABLE's travel, the last sample's ([`Light::probe_pwm`]).
+    pwm_u: f32,
     /// The panel, and whether `set` is worked out from it.
     panel: Panel,
     set_for_panel: bool,
@@ -1043,6 +1082,7 @@ impl Light {
             rate,
             panel: Panel::default(),
             set_for_panel: false,
+            pwm_u: 0.0,
             set: Setting::default(),
             held: Held::default(),
             pressed: [0; 128],
@@ -1063,11 +1103,7 @@ impl Light {
             rearm: at(laws::REARM),
             trigger_on: at(laws::TRIGGER_ON),
             trigger_off: at(laws::TRIGGER_OFF),
-            osc: [Osc {
-                phase: 0.0,
-                wave: Waveform::Sawtooth,
-                tables: crate::resample::blep_tables(),
-            }; 3],
+            osc: [Osc::new(Waveform::Sawtooth); 3],
             dt: [0.0; 3],
             dt_step: [0.0; 3],
             inv: [0.0; 3],
@@ -1240,6 +1276,11 @@ impl Light {
         self.noise.state = if s == 0 { 0x4D6F_6F67 } else { s };
     }
 
+    /// The last sample's PWM share of VARIABLE's travel, 0..1 (decisions.md R-VARIABLE-RECT).
+    pub fn probe_pwm(&self) -> f64 {
+        f64::from(self.pwm_u)
+    }
+
     /// The panel: what it sets is worked out again if it changed (some microseconds: not for
     /// every sample).
     pub fn set_panel(&mut self, p: &Panel) {
@@ -1274,6 +1315,8 @@ impl Light {
                 }
             };
             self.osc[o].wave = p.osc[o].waveform;
+            (self.osc[o].duty, self.osc[o].level) =
+                rect_law(crate::voice::rect_bias(p.osc[o].waveform, p.rect[o], 0.0));
             let tune = if free {
                 0.0
             } else {
@@ -1361,25 +1404,31 @@ impl Light {
                 };
         }
         // (The wheel as the drawing's would set its resistance.)
+        let depth_at = |wheel: f64| {
+            let r = crate::modulation::mod_wheel_r(wheel);
+            let w = 3.0 * (1.0 + r / 1.2e3 * (81f64.powf(1.0 / 3.0) - 1.0)).ln() / 81f64.ln();
+            let w = w.clamp(0.0, 1.0);
+            let [a, b, c] = laws::WHEEL;
+            w * (a + w * (b + w * c))
+        };
         let r = crate::modulation::mod_wheel_r(p.mod_wheel);
-        let w = 3.0 * (1.0 + r / 1.2e3 * (81f64.powf(1.0 / 3.0) - 1.0)).ln() / 81f64.ln();
-        let w = w.clamp(0.0, 1.0);
-        let [a, b, c] = laws::WHEEL;
-        self.set.depth = w * (a + w * (b + w * c));
+        self.set.depth = depth_at(p.mod_wheel);
+        self.set.depth_full = depth_at(1.0) as f32;
         self.set.offset_depth = laws::OFFSET.0 * r / (r + laws::OFFSET.1);
         self.set.mix = p.mod_mix.clamp(0.0, 1.0) as f32;
         self.set.osc_mod = p.osc_mod;
         self.set.filter_mod = p.filter_mod;
         let w3 = p.osc[2].waveform;
-        self.set.swing = 1.0 / Osc::peak(w3);
+        self.set.swing = 1.0 / self.osc[2].peak();
         let (kind, duty) = match w3 {
             Waveform::Triangle => (0, None),
             Waveform::ReverseSawtooth | Waveform::SharkTooth => (1, None),
             Waveform::Sawtooth => (2, None),
-            Waveform::Square => (3, Some(laws::DUTY[0])),
-            Waveform::WideRectangle => (3, Some(laws::DUTY[1])),
-            Waveform::NarrowRectangle => (3, Some(laws::DUTY[2])),
+            Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle => {
+                (3, Some(self.osc[2].duty))
+            }
         };
+        self.set.pwm = std::array::from_fn(|o| p.pwm_on(o));
         self.set.swing_bias = duty.map_or(0.0, |d| 2.0 * d - 1.0);
         self.set.mod_swing = laws::MOD_SWING[kind] as f32;
         self.set.mod_centre = laws::MOD_CENTRE[kind] as f32;
@@ -1702,6 +1751,8 @@ impl Light {
         let (swing, swing_bias, mod_swing, mod_centre) =
             (s.swing, s.swing_bias, s.mod_swing, s.mod_centre);
         let (osc_mod, filter_mod, follows3) = (s.osc_mod, s.filter_mod, s.follows[2]);
+        let pwm = s.pwm;
+        let any_pwm = pwm[0] || pwm[1] || pwm[2];
         for o in 0..3 {
             self.dt[o] += self.dt_step[o];
         }
@@ -1710,13 +1761,16 @@ impl Light {
         let mut g = self.g + self.g_step;
         self.g = g;
         let mut k = self.k;
-        let modulating = depth > 0.0 && (osc_mod || filter_mod);
+        let modulating = depth > 0.0 && (osc_mod || filter_mod || any_pwm);
         let needs_noise = noise_gain != 0.0 || (modulating && mix_k > 0.0);
         let (white, pink, red) = if needs_noise {
             self.noise.tick(&self.noise_c)
         } else {
             (0.0, 0.0, 0.0)
         };
+        if !(modulating && any_pwm) {
+            self.pwm_u = 0.0;
+        }
         if modulating {
             // Oscillator 3 (its swing to ±1) and the noise (its RMS to 1) as MODULATION MIX
             // blends them, and the line's offset, through the wheel.
@@ -1740,6 +1794,25 @@ impl Light {
                 for o in 0..if follows3 { 3 } else { 2 } {
                     dt[o] = (dt[o] * r).min(0.45);
                     inv[o] *= ri;
+                }
+            }
+            if any_pwm {
+                // PWM (decisions.md R-VARIABLE-RECT): the line's swing at the wheel fully
+                // forward against oscillator 3's triangle's, a share of the width's travel as
+                // deep as the wheel is forward (the full voice's `pwm_u`).
+                let swing =
+                    (1.0 - mix_k) * o + mix_k * n * (laws::NOISE_SEMITONES_RMS / rms) as f32;
+                let s = swing / -(laws::MOD_SWING[0] as f32);
+                let u = (0.5 * depth / self.set.depth_full * (1.0 + s)).clamp(0.0, 1.0);
+                self.pwm_u = u;
+                let p = &self.panel;
+                for ((osc, on), (panel, rect)) in
+                    self.osc.iter_mut().zip(pwm).zip(p.osc.iter().zip(p.rect))
+                {
+                    if on {
+                        (osc.duty, osc.level) =
+                            rect_law(crate::voice::rect_bias(panel.waveform, rect, f64::from(u)));
+                    }
                 }
             }
             if filter_mod {
@@ -1911,11 +1984,7 @@ impl Light {
 /// `n` samples of one oscillator alone at `rate`, `hz`, its waveform at its level (the lab's
 /// aliasing measurement, `ca72-lab alias`; decisions.md R-BLEP).
 pub fn oscillator_alone(rate: f64, hz: f64, wave: Waveform, n: usize) -> Vec<f32> {
-    let mut o = Osc {
-        phase: 0.0,
-        wave,
-        tables: crate::resample::blep_tables(),
-    };
+    let mut o = Osc::new(wave);
     let dt = (hz / rate) as f32;
     (0..n).map(|_| o.tick(dt, 1.0 / dt)).collect()
 }

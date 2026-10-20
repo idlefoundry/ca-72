@@ -264,6 +264,10 @@ pub struct Vco {
     rect: BlepLine,
     /// Which outputs are corrected (sawtooth, triangle, rectangle; [`Vco::set_outputs`]).
     outputs: [bool; 3],
+    /// Whether the width may move ([`Vco::set_width_moves`]), and the last sample's (NaN
+    /// before the first and after a reset).
+    width_moves: bool,
+    last_width: f64,
     /// The triangle's fold as a rounded corner ([`fold_corner`]): the ramp's voltage where it
     /// starts, how much the triangle's slope against the buffer grows across it, and its
     /// width in the buffer's volts.
@@ -330,6 +334,8 @@ impl Vco {
             tri: BlepLine::default(),
             rect: BlepLine::default(),
             outputs: [true; 3],
+            width_moves: false,
+            last_width: f64::NAN,
             fold: fold_corner(&ShaperParams::default()),
             dec: [
                 Decimator::for_oscillators(oversample),
@@ -427,6 +433,7 @@ impl Vco {
         self.rise_in = None;
         self.fall_in = None;
         self.rect_is_low = false;
+        self.last_width = f64::NAN;
         self.guess = None;
         self.saw.clear();
         self.tri.clear();
@@ -513,6 +520,14 @@ impl Vco {
     /// which the oscillator's frequency follows (a probe of the pitch path).
     pub fn timing_current(&self) -> f64 {
         self.guess.unwrap_or(0.0)
+    }
+
+    /// Whether the width may move from sample to sample (the plug-in's VARIABLE rectangle,
+    /// decisions.md R-VARIABLE-RECT): then a new width the ramp has already passed switches
+    /// the comparator at once, as the circuit's does ([`Vco::follow_width`]). Off (the
+    /// instrument's switch, which gives three fixed widths), nothing changes.
+    pub fn set_width_moves(&mut self, on: bool) {
+        self.width_moves = on;
     }
 
     /// One output sample for a timing current given directly: `i0` at a ramp of 0 V and its
@@ -631,6 +646,10 @@ impl Vco {
         let fall_buf = sh.rect_fall0 + sh.rect_per_width * width;
         let rise_buf = sh.rect_rise0 + sh.rect_per_width * width;
         let v_fall = (fall_buf - sh.buf_offset) / sh.buf_gain - sh.rect_fall_overdrive;
+        if self.width_moves && width != self.last_width && !self.last_width.is_nan() {
+            self.follow_width(v_fall, rise_buf);
+        }
+        self.last_width = width;
         let mut out = VcoOut::default();
         for k in 0..self.oversample {
             self.sub = k;
@@ -784,6 +803,28 @@ impl Vco {
             if which == 0 {
                 break;
             }
+        }
+    }
+
+    /// The comparator against a width that has just moved: the falling ramp already past the
+    /// new falling threshold while the rectangle is high, it falls (after its delay, as from
+    /// a crossing); the buffer above the new rising threshold while it is low, it rises. The
+    /// thresholds otherwise only meet the ramp as it crosses them ([`Vco::step`]) and the
+    /// reset ([`Vco::do_reset`]), which a fixed width needs alone.
+    fn follow_width(&mut self, v_fall: f64, rise_buf: f64) {
+        if self.hold_left > 0.0 {
+            return;
+        }
+        let sh = self.shaper;
+        let buf = sh.buf_gain * self.v + sh.buf_offset;
+        if !self.rect_is_low
+            && self.fall_in.is_none()
+            && self.reset_in.is_none()
+            && self.v <= v_fall
+        {
+            self.fall_in = Some(sh.rect_fall_delay);
+        } else if self.rect_is_low && self.rise_in.is_none() && buf >= rise_buf {
+            self.rise_in = Some(sh.rect_rise_delay);
         }
     }
 
