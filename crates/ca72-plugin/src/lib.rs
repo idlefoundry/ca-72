@@ -3082,8 +3082,9 @@ mod tests {
         assert!(b.params.midi_map.assignments().iter().all(Option::is_none));
     }
 
-    /// The plug-in tests that use the process's budget of workers, one at a time.
-    static BUDGET_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// The plug-in tests that use the process's budget of workers, one at a time (POLY's, and
+    /// ULTRA's split crews': the timed oscillators' at ULTRA too, `crate::timed`).
+    pub(crate) static BUDGET_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct Init;
     impl InitContext<Ca72> for Init {

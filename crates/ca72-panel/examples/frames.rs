@@ -38,6 +38,11 @@ fn measure(s: f64) {
     for v in &mut scene.values {
         *v = 0.5;
     }
+    // (The TIMED keys off, their RANGEs at 8': inert, as a new patch has them.)
+    for (n, key) in ca72_panel::render::TIMED_KEYS.iter().enumerate() {
+        scene.values[CONTROLS.iter().position(|c| c.param == *key).expect(key)] = 0.0;
+        scene.timed[n].inert = true;
+    }
     let mut ss = strip_scene(0);
     let mut now = Instant::now();
     let mut composed: Option<Pixmap> = None;
@@ -127,6 +132,31 @@ fn measure(s: f64) {
     });
     times("TEMPO set (standalone)", 0, &mut |i, sc, _| {
         sc.tempo = Some(format!("{} BPM", 121 + i));
+    });
+    // Oscillator 3 timed (decisions.md R-OSC-TIMED): its RANGE to LO, then its key pressed and let
+    // go in turn (the dial's print swapped; the first press the slowest, the timed dials'
+    // background drawn then, once at a scale), and the timed dial turned a note value a frame.
+    let (range3, key3, freq3) = (
+        index("osc3_range"),
+        index("osc3_timed"),
+        index("osc3_frequency"),
+    );
+    times("oscillator 3's RANGE to LO", 0, &mut |i, sc, _| {
+        sc.values[range3] = if i % 2 == 0 { 0.0 } else { 0.2 };
+        sc.timed[1].inert = i % 2 == 1;
+    });
+    times("TIMED pressed (slowest: the first)", 0, &mut |i, sc, _| {
+        let on = i % 2 == 0;
+        sc.values[range3] = 0.0;
+        sc.timed[1].inert = false;
+        sc.values[key3] = if on { 1.0 } else { 0.0 };
+        sc.values[freq3] = if on { 8.0 / 17.0 } else { 0.5 };
+    });
+    times("the timed dial turned", 0, &mut |i, sc, _| {
+        let d = i % 18;
+        sc.values[key3] = 1.0;
+        sc.values[freq3] = d as f64 / 17.0;
+        sc.timed[1].division = d;
     });
     times("nothing changed", 100, &mut |_, _, _| {});
     arp(s, &mut panel);

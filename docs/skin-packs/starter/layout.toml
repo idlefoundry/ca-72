@@ -4,7 +4,7 @@
 
 format = 1
 # The revision of the CA-72's panel controls this layout was made for.
-controls = 1
+controls = 2
 
 [fixtures]
 power = [3040, -65]
@@ -73,6 +73,16 @@ at = [2775, 120]
 size = [108, 50]
 colour = "red"
 on = "right"
+
+# Oscillators 2's and 3's TIMED keys (the controls' revision 2), each under its RANGE's legend;
+# the note value beside each is the plug-in's print.
+[[control]]
+param = "osc2_timed"
+at = [1221, 256]
+
+[[control]]
+param = "osc3_timed"
+at = [1443, 256]
 
 [[control]]
 param = "quality"

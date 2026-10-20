@@ -134,6 +134,44 @@ pub struct Scene {
     pub entry: Option<crate::value_entry::Field>,
     /// The standalone's TEMPO screen's text (`120 BPM`; decisions.md R-ARP), none in a plug-in.
     pub tempo: Option<String>,
+    /// Oscillators 2's and 3's timed mode (decisions.md R-OSC-TIMED): each key's sign's
+    /// division and whether it is inert (its RANGE away from LO). A key on and not inert
+    /// lights, and its oscillator's FREQUENCY dial is printed in note values (the knob drawn
+    /// at its DIVISION, `values` holding that).
+    pub timed: [Timed; 2],
+}
+
+/// An oscillator's timed mode as the panel shows it (decisions.md R-OSC-TIMED).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Timed {
+    /// Its division, by its place among the eighteen (`params::Division`'s order).
+    pub division: usize,
+    /// Its RANGE away from LO: its key dimmed and unlit, its dial in semitones.
+    pub inert: bool,
+}
+
+impl Default for Timed {
+    fn default() -> Self {
+        Self {
+            division: 8,
+            inert: false,
+        }
+    }
+}
+
+/// The TIMED keys' and the FREQUENCY knobs' parameters, oscillator 2's then 3's.
+pub const TIMED_KEYS: [&str; 2] = ["osc2_timed", "osc3_timed"];
+pub const TIMED_DIALS: [&str; 2] = ["osc2_frequency", "osc3_frequency"];
+
+impl Scene {
+    /// Which oscillators' FREQUENCY dials are printed in note values: oscillator 2's and 3's,
+    /// each while its key is on and its RANGE at LO.
+    pub fn timed_dials(&self) -> [bool; 2] {
+        std::array::from_fn(|n| {
+            crate::controls::index(TIMED_KEYS[n]).is_some_and(|i| self.values[i] >= 0.5)
+                && !self.timed[n].inert
+        })
+    }
 }
 
 impl Default for Scene {
@@ -152,6 +190,7 @@ impl Default for Scene {
             menu: None,
             entry: None,
             tempo: None,
+            timed: [Timed::default(); 2],
         }
     }
 }
@@ -203,6 +242,18 @@ pub struct Renderer {
     /// The TEMPO screen's bezel and glass at this scale, in its layer's place (left, top,
     /// width, height: pixels), once it is drawn.
     screens: Option<([i32; 4], Pixmap)>,
+    /// The background again where oscillators 2's and 3's FREQUENCY dials are, printed in note
+    /// values (decisions.md R-OSC-TIMED), drawn the first time one is shown at this scale; and
+    /// where each dial's print is in the frame (pixels: left, top, right, bottom, clamped to
+    /// it), laid over the background there while that dial is timed.
+    timed_background: Option<[Pixmap; 2]>,
+    timed_rects: [[i32; 4]; 2],
+    /// The worn skin's face's mean level under its print, as the whole background measured it:
+    /// a part's print is worn by it.
+    face_mean: Option<f64>,
+    /// The timed dials' places in the background under its print (its surfaces), kept as it is
+    /// painted.
+    dial_surfaces: Option<[Pixmap; 2]>,
 }
 
 /// How much the pictures placed in layers may keep: some dozens of layers' pictures.
@@ -315,6 +366,10 @@ impl Renderer {
             placed: Vec::new(),
             renders: 0,
             screens: None,
+            timed_background: None,
+            timed_rects: [[0; 4]; 2],
+            face_mean: None,
+            dial_surfaces: None,
         };
         r.draw_background();
         r
@@ -350,6 +405,51 @@ impl Renderer {
         self.placed.clear();
         self.screens = None;
         self.draw_background();
+    }
+
+    /// The arrangement with oscillators 2's and 3's FREQUENCY dials in note values.
+    fn timed_arrangement(&self) -> Arrangement {
+        let mut a = (*self.arrangement).clone();
+        for c in a.controls.iter_mut() {
+            if TIMED_DIALS.contains(&c.param)
+                && let Kind::Knob { big, .. } = c.kind
+            {
+                c.kind = Kind::Knob {
+                    dial: crate::controls::Dial::Timed,
+                    big,
+                };
+            }
+        }
+        a
+    }
+
+    /// Where each of oscillators 2's and 3's FREQUENCY dials' print is in the frame, either
+    /// dial's (pixels: left, top, right, bottom).
+    fn dial_rects(&self) -> [[i32; 4]; 2] {
+        let (s, top) = (self.scale, self.top_px());
+        std::array::from_fn(|n| {
+            let Some(c) = self
+                .arrangement
+                .controls
+                .iter()
+                .find(|c| c.param == TIMED_DIALS[n])
+            else {
+                return [0; 4];
+            };
+            let (x, y) = c.centre();
+            let e = art::print_extent(&c.kind);
+            let (fw, fh) = (
+                self.background.width() as i32,
+                self.background.height() as i32,
+            );
+            // (A little over, for the print's stroke and its blur into the face.)
+            [
+                (((x + e[0] - 4.0) * s).floor() as i32).clamp(0, fw),
+                (((y + e[1] - 4.0) * s).floor() as i32 - top).clamp(0, fh),
+                (((x + e[2] + 4.0) * s).ceil() as i32).clamp(0, fw),
+                (((y + e[3] + 4.0) * s).ceil() as i32 - top).clamp(0, fh),
+            ]
+        })
     }
 
     pub fn scale(&self) -> f64 {
@@ -400,6 +500,9 @@ impl Renderer {
     }
 
     fn draw_background(&mut self) {
+        // (The timed dials' places, whose surfaces are kept as they are painted: R-OSC-TIMED.)
+        self.timed_rects = self.dial_rects();
+        self.timed_background = None;
         if self.skin == Skin::Worn {
             self.draw_worn_background();
             return;
@@ -420,11 +523,20 @@ impl Renderer {
             }
         };
         match (self.look.art.clone(), self.look.strip_art.clone()) {
-            (None, None) => svg(
-                &mut self.background,
-                &art::background(&self.layout, &self.arrangement),
-                &self.options,
-            ),
+            // (The surfaces, then the panel's print over them: the timed dials' places kept between.)
+            (None, None) => {
+                svg(
+                    &mut self.background,
+                    &art::background_surfaces(&self.layout, &self.arrangement),
+                    &self.options,
+                );
+                self.keep_dial_surfaces();
+                svg(
+                    &mut self.background,
+                    &art::panel_print(&self.layout, &self.arrangement),
+                    &self.options,
+                );
+            }
             // A pack's drawings between the panel's and the strip's surfaces and their print
             // (the strip's print laid again over its drawing).
             (panel, strip) => {
@@ -440,6 +552,7 @@ impl Renderer {
                 if let Some(drawing) = &strip {
                     draw_strip_art(&mut self.background, self.scale, foot, drawing);
                 }
+                self.keep_dial_surfaces();
                 svg(
                     &mut self.background,
                     &art::panel_print(&self.layout, &self.arrangement),
@@ -477,7 +590,9 @@ impl Renderer {
         let pictures = self
             .pictures
             .get_or_insert_with(|| Pictures::load_with(overrides, tint, turn));
-        let bg = &mut self.background;
+        let mut background =
+            std::mem::replace(&mut self.background, Pixmap::new(1, 1).expect("a pixel"));
+        let bg = &mut background;
         // The wood: its grain along the top strip and the strip's rail; each board its own band
         // of the picture, drawn out along the grain.
         let wood = &pictures.walnut;
@@ -551,10 +666,16 @@ impl Renderer {
         if let Some(drawing) = &self.look.strip_art {
             draw_strip_art(bg, s, foot, drawing);
         }
+        // The timed dials' places as they are under the print (R-OSC-TIMED), and the face's mean
+        // level, which the print is worn by.
+        let rects = self.timed_rects;
+        self.dial_surfaces = Some(rects.map(|r| crop(bg, r)));
+        let mean = face_mean(bg);
+        self.face_mean = Some(mean);
         // The print, worn into the face: its texture showing through it a little.
         if let Some(mut print) = Pixmap::new(w, h) {
             svg_over(&mut print, &art::printed(&self.layout, &self.arrangement));
-            worn_into(&mut print, bg);
+            worn_into_by(&mut print, bg, mean);
             bg.draw_pixmap(
                 0,
                 0,
@@ -595,7 +716,81 @@ impl Renderer {
         }
         // The lamp's light over all of it.
         lamp(bg, s, panel.drawing_h());
+        self.background = background;
         self.frame = self.background.clone();
+    }
+
+    /// The timed dials' places in the background as it is now (its surfaces, before the print).
+    fn keep_dial_surfaces(&mut self) {
+        let bg = &self.background;
+        self.dial_surfaces = Some(self.timed_rects.map(|r| crop(bg, r)));
+    }
+
+    /// The timed dial `n`'s place (oscillator 2's or 3's) printed as `timed` has the dials
+    /// (decisions.md R-OSC-TIMED): its surfaces as they were kept under the print, the dials'
+    /// ink printed on them as the whole background's is (worn into the face, the lamp over it),
+    /// its pixels that and the background's own wherever the two dials' ink is the same (their
+    /// edges, and whatever else is printed there), so it is laid without a seam. A few
+    /// milliseconds: the dials' ink alone is drawn again.
+    fn timed_part(&self, n: usize, timed: &Arrangement) -> Option<Pixmap> {
+        let r = self.timed_rects[n];
+        let mut part = self.dial_surfaces.as_ref()?[n].clone();
+        let (w, h) = (part.width(), part.height());
+        let s = self.scale;
+        let view = [
+            f64::from(r[0]) / s,
+            self.top() + f64::from(r[1]) / s,
+            f64::from(w) / s,
+            f64::from(h) / s,
+        ];
+        let ink = |a: &Arrangement| {
+            let mut p = Pixmap::new(w, h)?;
+            let doc = art::document(view, w, h, &art::dials_print(&self.layout, a));
+            let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
+            resvg::render(&tree, Transform::identity(), &mut p.as_mut());
+            Some(p)
+        };
+        let (plain, printed) = (ink(&self.arrangement)?, ink(timed)?);
+        let mut worn = printed.clone();
+        let opacity = if self.skin == Skin::Worn {
+            worn_into_by(&mut worn, &part, self.face_mean.unwrap_or(1.0));
+            0.94
+        } else {
+            1.0
+        };
+        part.draw_pixmap(
+            0,
+            0,
+            worn.as_ref(),
+            &PixmapPaint {
+                opacity,
+                ..PixmapPaint::default()
+            },
+            Transform::identity(),
+            None,
+        );
+        if self.skin == Skin::Worn {
+            lamp_in(
+                &mut part,
+                s,
+                (r[0], r[1]),
+                self.arrangement.panel.drawing_h(),
+            );
+        }
+        // (Where the two dials' ink is the same, the background's own pixels.)
+        let fw = self.background.width() as usize;
+        let bg = self.background.data();
+        let (a, b, out) = (plain.data(), printed.data(), part.data_mut());
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = (y * w as usize + x) * 4;
+                if a[i..i + 4] == b[i..i + 4] {
+                    let j = ((y + r[1] as usize) * fw + x + r[0] as usize) * 4;
+                    out[i..i + 4].copy_from_slice(&bg[j..j + 4]);
+                }
+            }
+        }
+        Some(part)
     }
 
     /// The layers showing `scene`, in the order they are drawn.
@@ -622,6 +817,22 @@ impl Renderer {
                     Kind::Wheel { .. } => scene.midi.1,
                     _ => 0.0,
                 };
+                // An oscillator's TIMED key, its sign its division's (R-OSC-TIMED).
+                if c.kind == Kind::Key {
+                    let n = usize::from(c.param == TIMED_KEYS[1]);
+                    let t = scene.timed[n];
+                    return art::key(
+                        c,
+                        art::Keyed {
+                            on: v >= 0.5,
+                            inert: t.inert,
+                            division: t.division,
+                        },
+                        self.layout.lettering(),
+                        self.layout.times(),
+                        worn,
+                    );
+                }
                 let mut layer = control(c, v, midi);
                 // A pack's rocker drawn in its two states: its picture on or off, neither
                 // mirrored, no paddle lit or shadowed by the plug-in.
@@ -978,11 +1189,27 @@ impl Renderer {
             return false;
         }
         let first = self.shown.is_none();
+        let dials_were = self.shown.as_ref().map(Scene::timed_dials);
         self.shown = Some(scene.clone());
+        let dials = scene.timed_dials();
+        if dials.contains(&true) && self.timed_background.is_none() {
+            let a = self.timed_arrangement();
+            self.timed_background = match (self.timed_part(0, &a), self.timed_part(1, &a)) {
+                (Some(two), Some(three)) => Some([two, three]),
+                _ => None,
+            };
+        }
         let layers = self.layers(scene);
         let mut changed = self.slots.len() != layers.len();
-        // Where the layers changed, as they were and as they are.
+        // Where the layers changed, as they were and as they are; and a dial's print that
+        // changed.
         let mut rects: Vec<[i32; 4]> = Vec::new();
+        for n in 0..2 {
+            if dials_were.is_some_and(|d| d[n] != dials[n]) {
+                rects.push(self.timed_rects[n]);
+                changed = true;
+            }
+        }
         let mut add = |pixels: &Option<(i32, i32, Pixmap)>| {
             if let Some((x, y, p)) = pixels {
                 rects.push([*x, *y, x + p.width() as i32, y + p.height() as i32]);
@@ -1045,6 +1272,27 @@ impl Renderer {
             }
             p
         };
+        // A FREQUENCY dial timed: its print from the background drawn so (R-OSC-TIMED).
+        if let (Some(timed), Some(scene)) = (&self.timed_background, &self.shown) {
+            let dials = scene.timed_dials();
+            for (n, r) in self.timed_rects.iter().enumerate() {
+                let [a0, b0, a1, b1] = [r[0].max(x0), r[1].max(y0), r[2].min(x1), r[3].min(y1)];
+                if !dials[n] || a1 <= a0 || b1 <= b0 {
+                    continue;
+                }
+                let part = &timed[n];
+                let (pw, tw, n4) = (
+                    patch.width() as usize,
+                    part.width() as usize,
+                    (a1 - a0) as usize * 4,
+                );
+                for y in b0..b1 {
+                    let from = ((y - r[1]) as usize * tw + (a0 - r[0]) as usize) * 4;
+                    let to = ((y - y0) as usize * pw + (a0 - x0) as usize) * 4;
+                    patch.data_mut()[to..to + n4].copy_from_slice(&part.data()[from..from + n4]);
+                }
+            }
+        }
         for slot in &self.slots {
             if let Some((x, y, p)) = &slot.pixels {
                 let (r, b) = (x + p.width() as i32, y + p.height() as i32);
@@ -1194,8 +1442,31 @@ fn lamp_in(frame: &mut Pixmap, s: f64, at: (i32, i32), height: f64) {
 /// The print as worn into the face under it: each pixel of ink a little darker where the face's
 /// texture is darker than its mean, so the texture shows through it, and faded a shade.
 pub(crate) fn worn_into(ink: &mut Pixmap, face: &Pixmap) {
-    let level =
-        |r: u8, g: u8, b: u8| 0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b);
+    worn_into_by(ink, face, face_mean(face));
+}
+
+/// The pixels of `p` inside `r` (left, top, right, bottom), a pixmap of their own.
+fn crop(p: &Pixmap, r: [i32; 4]) -> Pixmap {
+    let (w, h) = ((r[2] - r[0]).max(1) as usize, (r[3] - r[1]).max(1) as usize);
+    let mut out = Pixmap::new(w as u32, h as u32).expect("a part of at least a pixel");
+    let pw = p.width() as usize;
+    for y in 0..h {
+        let from = ((y + r[1] as usize) * pw + r[0] as usize) * 4;
+        if from + w * 4 <= p.data().len() {
+            out.data_mut()[y * w * 4..(y + 1) * w * 4]
+                .copy_from_slice(&p.data()[from..from + w * 4]);
+        }
+    }
+    out
+}
+
+/// A pixel's level (luma) as the print is worn by it.
+fn level(r: u8, g: u8, b: u8) -> f64 {
+    0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b)
+}
+
+/// The face's mean level, as [`worn_into`] measures it.
+fn face_mean(face: &Pixmap) -> f64 {
     let (sum, n) = face
         .pixels()
         .iter()
@@ -1203,7 +1474,12 @@ pub(crate) fn worn_into(ink: &mut Pixmap, face: &Pixmap) {
         .fold((0.0, 0.0), |(s, n), p| {
             (s + level(p.red(), p.green(), p.blue()), n + 1.0)
         });
-    let mean = (sum / n).max(1.0);
+    (sum / n).max(1.0)
+}
+
+/// The same, the face's mean given: a part of a frame's print worn as the whole frame's is
+/// (`Renderer::timed_part`).
+fn worn_into_by(ink: &mut Pixmap, face: &Pixmap, mean: f64) {
     for (p, f) in ink.pixels_mut().iter_mut().zip(face.pixels()) {
         if p.alpha() == 0 {
             continue;
@@ -1837,6 +2113,153 @@ mod tests {
                 r.frame() == whole.frame(),
                 "step {i}: not as put together whole"
             );
+        }
+    }
+
+    /// A timed dial's part of the background (R-OSC-TIMED), in either skin: the background's own
+    /// pixels but for the dial's marks, its edges and what both prints share (a legend reaching
+    /// into it) to the bit, so no seam where it is laid; the panel's own print painted so is the
+    /// background itself; and the dial's marks do change.
+    #[test]
+    fn a_timed_dials_part_of_the_background_is_laid_without_a_seam() {
+        for skin in [Skin::Drawn, Skin::Worn] {
+            for s in [0.37, 0.44, 0.87] {
+                let r = Renderer::with_skin(skin, s, 1.0);
+                let (panel, timed) = (Arc::clone(&r.arrangement), r.timed_arrangement());
+                let whole = r.background.clone();
+                for (n, rect) in r.timed_rects.into_iter().enumerate() {
+                    let (w, h) = (rect[2] - rect[0], rect[3] - rect[1]);
+                    let at = |p: &Pixmap, x: i32, y: i32| {
+                        let c = p.pixel(x as u32, y as u32).expect("in it");
+                        [c.red(), c.green(), c.blue(), c.alpha()]
+                    };
+                    let (plain, part) = (
+                        r.timed_part(n, &panel).expect("a part"),
+                        r.timed_part(n, &timed).expect("a part"),
+                    );
+                    let mut changed = 0usize;
+                    for y in 0..h {
+                        for x in 0..w {
+                            let bg = at(&whole, x + rect[0], y + rect[1]);
+                            assert_eq!(at(&plain, x, y), bg, "{skin:?} at {s}: the panel's own");
+                            let edge = x.min(w - 1 - x).min(y).min(h - 1 - y) == 0;
+                            if edge {
+                                assert_eq!(at(&part, x, y), bg, "{skin:?} at {s}: its edge");
+                            }
+                            changed += usize::from(at(&part, x, y) != bg);
+                        }
+                    }
+                    assert!(changed > 0, "{skin:?} at {s}: the dial's marks changed");
+                }
+            }
+        }
+    }
+
+    /// A timed dial's part (R-OSC-TIMED) is what the whole background printed with the timed
+    /// dials has there, in either skin, but for the anti-aliasing of a few of the dial's pixels
+    /// (its ink drawn at another origin).
+    #[test]
+    fn a_timed_dials_part_is_the_whole_timed_backgrounds() {
+        for skin in [Skin::Drawn, Skin::Worn] {
+            for s in [0.37, 0.87] {
+                let r = Renderer::with_skin(skin, s, 1.0);
+                let timed = r.timed_arrangement();
+                let mut look = Look::of(skin);
+                look.arrangement = Arc::new(timed.clone());
+                let whole = Renderer::with_pack(look, Lettering::Standard, s, 1.0);
+                for (n, rect) in r.timed_rects.into_iter().enumerate() {
+                    let part = r.timed_part(n, &timed).expect("a part");
+                    let (mut worst, mut off, mut count) = (0u8, 0usize, 0usize);
+                    for y in rect[1]..rect[3] {
+                        for x in rect[0]..rect[2] {
+                            let p = part
+                                .pixel((x - rect[0]) as u32, (y - rect[1]) as u32)
+                                .expect("in it");
+                            let q = whole.background.pixel(x as u32, y as u32).expect("in it");
+                            let d = [
+                                p.red().abs_diff(q.red()),
+                                p.green().abs_diff(q.green()),
+                                p.blue().abs_diff(q.blue()),
+                            ]
+                            .into_iter()
+                            .max()
+                            .unwrap_or(0);
+                            worst = worst.max(d);
+                            off += usize::from(d > 2);
+                            count += 1;
+                        }
+                    }
+                    println!(
+                        "{skin:?} at {s}, dial {n}: {off} of {count} pixels over 2 levels, at most {worst}"
+                    );
+                    assert!(off * 200 < count, "{skin:?} at {s}: {off} of {count} apart");
+                }
+            }
+        }
+    }
+
+    /// Oscillators 2's and 3's timed mode (decisions.md R-OSC-TIMED) in either skin: a key
+    /// pressed at LO lights it and prints its FREQUENCY dial in note values; its sign follows its
+    /// division; at another RANGE the key is dimmed and the dial is the semitone dial; each frame
+    /// put together in part is the frame put together whole, and off again is the frame before,
+    /// to the pixel. Only the key and the dial's print change.
+    #[test]
+    fn a_timed_dial_and_its_key_are_drawn_and_undrawn_in_place() {
+        let s = 0.2;
+        for skin in [Skin::Drawn, Skin::Worn] {
+            let at = |p: &str| index(p).expect(p);
+            let mut scene = Scene {
+                values: [0.5; CONTROLS.len()],
+                ..Scene::default()
+            };
+            for range in ["osc2_range", "osc3_range"] {
+                scene.values[at(range)] = 0.0;
+            }
+            for key in TIMED_KEYS {
+                scene.values[at(key)] = 0.0;
+            }
+            let mut r = Renderer::with_skin(skin, s, 1.0);
+            // (The built-in typeface prints 4× and 2× with the multiplication sign.)
+            assert_eq!(r.layout().times(), "×");
+            r.render(&scene);
+            let before = r.frame().clone();
+            let steps: [(usize, f64, usize, bool); 5] = [
+                // (Oscillator, its key, its division, its RANGE away from LO.)
+                (1, 1.0, 9, false),
+                (0, 1.0, 2, false),
+                (1, 1.0, 16, false),
+                (0, 1.0, 2, true),
+                (1, 0.0, 16, false),
+            ];
+            for (step, &(n, key, division, away)) in steps.iter().enumerate() {
+                scene.values[at(TIMED_KEYS[n])] = key;
+                scene.timed[n] = Timed {
+                    division,
+                    inert: away,
+                };
+                let ranges = ["osc2_range", "osc3_range"];
+                scene.values[at(ranges[n])] = if away { 0.6 } else { 0.0 };
+                if scene.timed_dials()[n] {
+                    scene.values[at(TIMED_DIALS[n])] = division as f64 / 17.0;
+                }
+                assert!(r.render(&scene), "{skin:?} step {step}");
+                let mut whole = Renderer::with_skin(skin, s, 1.0);
+                whole.render(&scene);
+                assert!(
+                    r.frame() == whole.frame(),
+                    "{skin:?} step {step}: not as put together whole"
+                );
+            }
+            assert_eq!(scene.timed_dials(), [false, false]);
+            // Everything back as it was: the same frame as before, to the pixel.
+            scene.values[at(TIMED_KEYS[0])] = 0.0;
+            scene.values[at("osc2_range")] = 0.0;
+            scene.timed = [Timed::default(); 2];
+            for d in TIMED_DIALS {
+                scene.values[at(d)] = 0.5;
+            }
+            r.render(&scene);
+            assert!(r.frame() == &before, "{skin:?}: not the frame before");
         }
     }
 

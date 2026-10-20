@@ -388,6 +388,19 @@ wider than a semitone near the centre and narrower towards the stops, which reac
 semitones. The choice is the computer's, not the sound's: a session or preset keeps its pitch
 whichever is chosen; only where the knob points changes.
 
+**Timed oscillators (oscillators 2 and 3).** Under each of their RANGE selectors is a small
+amber key. With RANGE at **LO**, press it (it lights) and the oscillator's cycle becomes a note
+value of your host's tempo, locked to the song position so it never drifts: its FREQUENCY dial
+turns into note values, **4× 2×** (four and two bars), **1** (a bar) and **2 4 8 16 32** (a half
+note to a thirty-second), with the dotted and triplet values on the short ticks between. The
+knob steps from value to value, its tip names the value (OSCILLATOR-3 DIVISION: 1/8 dotted), and
+you can type one at it (`8.` dotted, `8t` triplet, `4x` four bars). The note beside the key
+shows the value chosen. FREQUENCY keeps its own place for when the key is off. At any other
+RANGE the key is dimmed and does nothing, and the dial reads semitones. While timed, the
+oscillator ignores the keyboard, the PITCH wheel and GLIDE; in the standalone and with the host
+stopped it runs on at the tempo (the standalone's TEMPO). Oscillator 3 timed at LO makes a
+tempo-synced modulation source through MODULATION MIX.
+
 **Lettering.** If the panel's print is hard to read at the size the editor opens, choose
 **LETTERING › LARGE** from the settings key. It prints the panel's and the strip's legends and
 numbers a size larger, and the menus and tips a quarter larger, in either look. **STANDARD**,
@@ -478,7 +491,8 @@ to the next one beginning with it), Enter learns it or stops waiting, Delete or 
 removes its controller, Escape stops waiting and then closes the drawer. It is the only way to
 learn **LOCK**, which has no control on the panel.
 
-**What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches, the left
+**What can be learned:** the panel's knobs, RANGE and WAVEFORM, and its switches and TIMED
+keys (a timed FREQUENCY knob learns its note value), the left
 hand controller's GLIDE and DECAY switches, and POLY, UNISON, VOICES, ENTROPY, WIDTH (SPREAD),
 INNER, SCATTER, DETUNE (DOUBLE), DRIVE, AUTO GAIN, LEVEL and LOCK. Right-click the
 MODULATION wheel and choose MIDI LEARN to set this computer's wheel source to a CC,
@@ -783,6 +797,9 @@ The service documents and datasheets the model was derived from are not included
   anew; the photograph is not included.
 - The panel's lettering is URW Gothic, by (URW)++, one of the URW base 35 fonts, under the
   GNU Affero General Public License 3.0 with a font exception (`third_party/urw-gothic/`).
+- The note values beside the TIMED keys are GNU FreeFont's FreeSerif (its musical symbols, a
+  subset), by the GNU FreeFont contributors, under the GNU General Public License 3.0 or later
+  with a font exception (`third_party/gnu-freefont/`).
 - The plug-in is built with [nih-plug](https://github.com/robbert-vdh/nih-plug), by Robbert
   van der Helm (ISC; its VST3 bindings GPL-3.0), patched as
   `third_party/nih-plug/PATCHES.md` describes. The editor uses

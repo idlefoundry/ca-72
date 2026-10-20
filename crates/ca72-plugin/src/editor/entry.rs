@@ -14,6 +14,14 @@ pub(super) struct Entry {
     edited: bool,
 }
 
+impl Entry {
+    /// What it holds now.
+    #[cfg(test)]
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
+}
+
 pub(super) fn shortcut(modifiers: Modifiers) -> bool {
     modifiers.contains(if cfg!(target_os = "macos") {
         Modifiers::META
@@ -165,6 +173,70 @@ fn normalized(control: usize, text: &str) -> Option<f64> {
     )
 }
 
+/// A division as the timed dial prints it (decisions.md R-OSC-TIMED), by its place among the
+/// eighteen: `4x` and `2x` the bars, `1` a bar, then a note value, `.` dotted and `t` triplet
+/// (as the arpeggiator's RATE is typed).
+fn note_text(division: usize) -> String {
+    match division {
+        0 => "4x".into(),
+        1 => "2x".into(),
+        d => {
+            // (From 1 bar on, threes: dotted, triplet, straight; `params::Division`'s order.)
+            let (j, r) = ((d - 2) / 3, (d - 2) % 3);
+            match r {
+                0 => format!("{}", 1u32 << j),
+                1 => format!("{}.", 2u32 << j),
+                _ => format!("{}t", 1u32 << j),
+            }
+        }
+    }
+}
+
+/// The division typed: a note value as the dial prints it (`8`, `8.`, `8t`, `4x`, `2x`), or as
+/// the host names it (`1/8`, `1/8 dotted`, `1/8d`, `1/4 triplet`, `4 bars`, `1 bar`); none for
+/// anything else (a dotted whole note, a value off the dial).
+fn note_index(text: &str) -> Option<usize> {
+    let t: String = text
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let t = t.strip_prefix("1/").unwrap_or(&t);
+    let bars = |n: &str| match n {
+        "4" => Some(0),
+        "2" => Some(1),
+        "1" => Some(2),
+        _ => None,
+    };
+    for s in ["bars", "bar", "x"] {
+        if let Some(n) = t.strip_suffix(s) {
+            return bars(n);
+        }
+    }
+    let (n, mark) = if let Some(n) = t.strip_suffix("dotted").or(t.strip_suffix('.')) {
+        (n, 0)
+    } else if let Some(n) = t.strip_suffix("d") {
+        (n, 0)
+    } else if let Some(n) = t.strip_suffix("triplet").or(t.strip_suffix('t')) {
+        (n, 1)
+    } else {
+        (t, 2)
+    };
+    let m = [1, 2, 4, 8, 16, 32]
+        .iter()
+        .position(|v| n == v.to_string())?;
+    let i = match mark {
+        // Dotted: a half to a thirty-second.
+        0 if m >= 1 => 3 * m,
+        // Triplet: a whole to a sixteenth.
+        1 if m <= 4 => 4 + 3 * m,
+        2 => 2 + 3 * m,
+        _ => return None,
+    };
+    (i <= ca72_panel::controls::TIMED_STEPS).then_some(i)
+}
+
 impl Editing {
     pub(super) fn start_knob_entry(&mut self, control: usize) -> bool {
         if !self.operable(control)
@@ -186,13 +258,20 @@ impl Editing {
             }
             Some(Readout::Drive) => f64::from(p.drive.unmodulated_plain_value()),
             Some(Readout::Level) => f64::from(p.level.unmodulated_plain_value()),
+            _ if self.timed_dial(control) => 0.0,
             _ => plain(control, self.value_of(control)),
         };
         let value = if value.abs() < 0.00005 { 0.0 } else { value };
-        let text = format!("{value:.4}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_owned();
+        let text = if self.timed_dial(control) {
+            // (A timed FREQUENCY: its division, as the dial prints it.)
+            let steps = ca72_panel::controls::TIMED_STEPS as f64;
+            note_text((self.value_of(control) * steps).round() as usize)
+        } else {
+            format!("{value:.4}")
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_owned()
+        };
         self.playing.release();
         self.last_press = None;
         self.last_strip_press = None;
@@ -211,7 +290,9 @@ impl Editing {
             bounds: [0.0; 4],
             size: self.renderer.text_size() * 1.15,
             text: entry.text.clone(),
-            unit: if CONTROLS[entry.control].param.ends_with("_frequency")
+            unit: if self.timed_dial(entry.control) {
+                "note · . dotted · t triplet"
+            } else if CONTROLS[entry.control].param.ends_with("_frequency")
                 && self.params.freq_law() == ca72::freq_dial::Law::Semitones
             {
                 "semitones"
@@ -247,6 +328,12 @@ impl Editing {
                 }
                 if let Some(r) = readout(entry.control) {
                     self.set_typed(r, &entry.text);
+                } else if self.timed_dial(entry.control) {
+                    // A timed FREQUENCY takes a note value, its DIVISION's (R-OSC-TIMED).
+                    if let Some(d) = note_index(&entry.text) {
+                        let steps = ca72_panel::controls::TIMED_STEPS as f64;
+                        self.set_once(entry.control, d as f64 / steps);
+                    }
                 } else if let Some(v) = normalized(entry.control, &entry.text) {
                     self.set_once(entry.control, v);
                 }
@@ -336,6 +423,36 @@ mod tests {
             for text in ["", "x", "2x", "--1", "1..2", "NaN", "inf", "-inf", "1e999"] {
                 assert_eq!(normalized(control(id), text), None, "{id} {text}");
             }
+        }
+    }
+
+    /// A timed FREQUENCY's typed note values (decisions.md R-OSC-TIMED): each division's text
+    /// as the dial prints it comes back as that division, and the host's names do too.
+    #[test]
+    fn a_timed_dial_takes_its_note_values() {
+        for d in 0..=ca72_panel::controls::TIMED_STEPS {
+            assert_eq!(note_index(&note_text(d)), Some(d), "{d}: {}", note_text(d));
+            let name = crate::timed::DIVISIONS[d].0;
+            assert_eq!(note_index(name), Some(d), "{name}");
+        }
+        assert_eq!(note_text(0), "4x");
+        assert_eq!(note_text(2), "1");
+        assert_eq!(note_text(9), "8.");
+        assert_eq!(note_text(16), "16t");
+        assert_eq!(note_text(17), "32");
+        for (text, d) in [
+            ("4×", None),
+            ("4 X", Some(0)),
+            ("1/8d", Some(9)),
+            ("1/8 dotted", Some(9)),
+            (" 8T ", Some(13)),
+            ("1 bar", Some(2)),
+            ("1x", Some(2)),
+        ] {
+            assert_eq!(note_index(text), d, "{text}");
+        }
+        for text in ["", "3", "1.", "32t", "64", "8x", "1/3", "x", "..", "8.t"] {
+            assert_eq!(note_index(text), None, "{text}");
         }
     }
 

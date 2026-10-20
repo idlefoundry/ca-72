@@ -558,7 +558,7 @@ give such a pack `requires` (see Compatibility).
 
 ```toml
 format = 1
-controls = 1              # the revision of the CA-72's controls it was made for (see Compatibility)
+controls = 2              # the revision of the CA-72's controls it was made for (see Compatibility)
 
 [fixtures]
 power = [3023, 580]       # POWER's switch (centre)
@@ -569,7 +569,7 @@ plate = [2578, -106]      # the name plate's top left corner (261 by 82)
 phones = [2855, 581, 34]  # optional: the PHONES jack, centre and radius
 screws = [[155.4, -22, 7]] # optional: the wooden strip's screws
 
-[[control]]               # one for each of the panel's 42 controls, no more
+[[control]]               # one for each of the panel's 44 controls, no more
 param = "osc_mod"
 at = [444, 269]           # its centre
 size = [108, 50]          # a switch's or toggle's width and height, 16 to 240
@@ -623,15 +623,24 @@ The controls' parameters:
 > `noise_volume`, `noise_on`, `osc3_volume`, `osc3_on`, `noise_type`, `filter_mode`,
 > `filter_mod`, `keyboard_control_1`, `keyboard_control_2`, `cutoff`, `emphasis`,
 > `contour_amount`, `filter_attack`, `filter_decay`, `filter_sustain`, `loudness_attack`,
-> `loudness_decay`, `loudness_sustain`, `volume`, `main_output`, `a440`, `feedback`, `quality`.
+> `loudness_decay`, `loudness_sustain`, `volume`, `main_output`, `a440`, `feedback`, `quality`,
+> `osc2_timed`, `osc3_timed`.
+
+`osc2_timed` and `osc3_timed` are oscillators 2's and 3's TIMED keys (revision 2 of the
+controls): small amber keys, taking no field but `at`, dressed by the `tab` and `tab-lit`
+pictures as the strip's tabs are. Each prints its oscillator's note value to its right (the
+plug-in's print, its stem rising up to 38 units above the key's centre), and while one is on at
+its RANGE's LO its oscillator's FREQUENCY dial prints note values. A layout made for revision 1
+gets them from the plug-in, at their official places under oscillators 2's and 3's RANGE when
+nothing of the layout's is there.
 
 ## Compatibility: packs keep working as the CA-72 changes
 
 A pack made today must keep working on later CA-72s, and a pack made for a later one should do
 its best on an earlier one.
 
-- **Each layout says which revision of the CA-72's controls it was made for** (`controls = 1`;
-  a layout without it is made for the first). The plug-in keeps a record of its controls over
+- **Each layout says which revision of the CA-72's controls it was made for** (`controls = 2`
+  today; a layout without it is made for the first). The plug-in keeps a record of its controls over
   time: when each arrived, and any rename, retirement or change of kind since.
 - **A control added after the pack was made** is placed by the plug-in: at its official place if
   nothing of the pack's is there, else at the nearest free spot on the panel (`layout.added`, a

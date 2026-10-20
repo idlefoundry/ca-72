@@ -11,6 +11,7 @@ pub mod interact;
 pub mod keyboard;
 pub mod learn;
 pub mod look;
+pub mod notes;
 pub mod presets;
 pub mod render;
 pub mod skin;

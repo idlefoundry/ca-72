@@ -454,6 +454,10 @@ mod played {
     /// at all.
     #[test]
     fn its_resets_are_on_the_hosts_grid_at_every_quality() {
+        // (ULTRA's split crews draw on the process's workers: one such test at a time.)
+        let _one = crate::tests::BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (n, quality) in (1..3)
             .flat_map(|n| [QualityMode::Lo, QualityMode::Hi, QualityMode::Ultra].map(|q| (n, q)))
         {
@@ -650,6 +654,10 @@ mod played {
     /// standalone's TEMPO then, 120 BPM by default) and the extremes of tempo: on the grid.
     #[test]
     fn rates_offline_no_tempo_and_extreme_tempos() {
+        // (ULTRA's split crews draw on the process's workers: one such test at a time.)
+        let _one = crate::tests::BUDGET_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // At 96 and 44.1 kHz, the host's place in its own samples.
         for rate in [96_000.0f32, 44_100.0] {
             let mut p = initialised_with(

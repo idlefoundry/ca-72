@@ -7,7 +7,7 @@ is the authority.*
 
 ```toml
 format = 1
-controls = 1    # the revision of the CA-72's controls this layout was made for
+controls = 2    # the revision of the CA-72's controls this layout was made for
 ```
 
 Keep `controls` as the starter has it. A later CA-72 uses it to place controls added since
@@ -38,7 +38,7 @@ with a reason instead of rejecting its layout.
 The drawing (`art/panel.svg`) uses the same x but **y + wood** (130): see
 [drawing.md](drawing.md).
 
-## The 42 controls, by kind
+## The 44 controls, by kind
 
 Every one must appear exactly once as a `[[control]]` with its `param` and `at` (its centre).
 Others are rejected (the left-hand column and the lower strip are the plug-in's own).
@@ -49,13 +49,16 @@ Others are rejected (the left-hand column and the lower strip are the plug-in's 
 | Selector (6) | `osc1_range`, `osc2_range`, `osc3_range`, `osc1_waveform`, `osc2_waveform`, `osc3_waveform` | none |
 | Rocker (14) | `osc_mod`, `osc3_control`, `osc1_on`, `osc2_on`, `osc3_on`, `ext_on`, `noise_on`, `noise_type`, `filter_mode`, `filter_mod`, `keyboard_control_1`, `keyboard_control_2`, `main_output`, `a440` | `size = [w, h]` (16 to 240 each), `colour` (`blue`, `red`, `black`, `ivory`), `on` (`right`, `top`, `bottom`) |
 | Toggle (1) | `quality` | `size = [w, h]` (16 to 240; default 50 by 81), `across = true` |
+| Key (2) | `osc2_timed`, `osc3_timed` (oscillators 2's and 3's TIMED, added in revision 2) | none |
 
 A field that doesn't apply to a control's kind is rejected (`layout.control`). A rocker that
 is on at `top` or `bottom` reads best taller than wide (`size = [55, 111]`); one on at `right`
 wider than tall (`size = [108, 50]`).
 
 The plug-in prints each knob's dial numbers and each selector's legends itself, round the
-control: they are not in the layout and can't be changed. Leave room for them, including at
+control (oscillators 2's and 3's FREQUENCY dials print note values while they are timed, and a
+TIMED key prints its note value to its right, its stem rising up to 38 units above the key's
+centre): they are not in the layout and can't be changed. Leave room for them, including at
 the panel's edges: a control whose own dial or legends would be cut off by the edge goes to
 review (`layout.print-outside`), though its click area fits.
 
@@ -70,6 +73,7 @@ outside the panel (`layout.outside`). Click areas, from the centre:
 | Big knob | ±73 | about 220 across, 190 down |
 | Selector | ±60 | about 200 across, 170 down |
 | Rocker, toggle | ±(w/2 + 4), ±(h/2 + 4) | its size plus a legend |
+| Key | 36 left, 69 right (its note value), ±18 down | 120 across, 38 above and 20 below its centre |
 | POWER | ±26 across, ±64 down | |
 
 The starter spaces its columns 222 apart and its rows 240 apart, with legends 100 below each
