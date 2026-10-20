@@ -2641,7 +2641,7 @@ impl Engine {
         let len = left.len().min(right.len());
         let mut i = 0;
         while i < len {
-            let n = (len - i).min(crate::lfo::STEP);
+            let n = (len - i).min(modulation_step());
             self.modulate(n);
             let x = &ext[i.min(ext.len())..(i + n).min(ext.len())];
             self.render_part(x, &mut left[i..i + n], &mut right[i..i + n]);
@@ -3301,6 +3301,33 @@ impl Engine {
         (v.expressed.wheel, v.expressed.midi) =
             (self.controls.panel.mod_wheel, f64::from(self.modulation));
     }
+}
+
+/// How often the LFOs move their knobs, samples: [`crate::lfo::STEP`] (decisions.md R-LFO).
+#[cfg(not(feature = "lfo-lab"))]
+#[inline(always)]
+const fn modulation_step() -> usize {
+    crate::lfo::STEP
+}
+
+/// A measurement's own step for the LFOs (feature `lfo-lab` only; 0: [`crate::lfo::STEP`]).
+#[cfg(feature = "lfo-lab")]
+static MODULATION_STEP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(feature = "lfo-lab")]
+fn modulation_step() -> usize {
+    match MODULATION_STEP.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => crate::lfo::STEP,
+        n => n,
+    }
+}
+
+/// The LFOs moving their knobs every `samples` (a sample: the reference the 32-sample step is
+/// measured against, decisions.md R-LFO-STRESS), every instance in the process; 0 puts back
+/// [`crate::lfo::STEP`]. A measurement's only: the feature `lfo-lab`.
+#[cfg(feature = "lfo-lab")]
+pub fn set_modulation_step_for_measurement(samples: usize) {
+    MODULATION_STEP.store(samples, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Today's count, the least the process's budget holds (decisions.md R11, R39, R-THREADS):
