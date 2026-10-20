@@ -139,6 +139,10 @@ impl Editing {
             "midi.learn" => self.midi_learn(args),
             "midi.list" => Ok(self.midi_list()),
             "midi.remove" => self.midi_remove(args),
+            // (What the LFOs modulate: the patch's, decisions.md R-LFO.)
+            "modulation.list" => Ok(crate::agent::modulation::list(&self.params)),
+            "modulation.set" => crate::agent::modulation::set(&self.params, args),
+            "modulation.remove" => crate::agent::modulation::remove(&self.params, args),
             "audio.get" => Ok(audio_state()),
             "version" => self.version(args),
             other => Err(ApiError::new(
@@ -156,6 +160,7 @@ impl Editing {
                     | "parameters.get"
                     | "settings.get"
                     | "midi.list"
+                    | "modulation.list"
                     | "audio.get"
                     | "presets.list"
             )
