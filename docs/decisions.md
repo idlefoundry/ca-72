@@ -11282,3 +11282,37 @@ polyphonic patches") may be the same.
 **Not done:** an Intel Mac, macOS's scheduling of time-constraint workers, Windows, or a host.
 To ask the reporter: whether DOUBLE at WIDTH 0 crackles (expected: yes) and LO does not; which
 MacBook Pro and buffer size.
+
+## R-FX-SAVE-ORDER. The effects' file follows the chain in step
+
+**Found on 2026-10-19** by CI on PR #125 (`release-0.3.0`, 17f1b5f): on Windows,
+`tests/safety.rs`'s `effects_that_crash_or_hang_as_they_load_never_hold_the_start_and_stay_off`
+read `effects.json` as soon as the effect hung at load read NOT RESPONDING, and found it not yet
+turned off there. Reproduced on the lab's Windows 11 computer (MSVC, as CI): 9 failures in 10
+runs. Traced, the hung effect's record was written 1.4 ms after the test had read the file: the
+chain showed the effect turned off as soon as its lock was let go, and saved it after, and on
+Windows a write with its flush takes 1 to 3 ms. The log's "the effects could not be saved ... The
+system cannot find the file specified" came after the failure: that late save, cut short by the
+test's folder being removed as it failed.
+- **A second fault of the same kind:** a save took the chain, then waited its turn to write, so
+  two saves at once (two effects failing together, a state saved as an effect is turned off) could
+  land out of order, an older chain written over a newer one. On Windows, a new test that changes
+  the chain from four threads at once found the file unlike the chain in 2 runs of 10.
+
+**Fixed:** a save takes the chain and writes it while holding the chain's lock (`Shared::save_in`),
+and an effect turned off (failing as it loads, as it is loaded again at a new rate, or given up on
+as it plays) is saved before the lock is let go. What anyone sees of the chain is on disk, and
+saves land in the order their chains were taken. Nothing on the audio thread takes this lock, and
+the drawer only tries it (`try_status`), so a write's milliseconds hold nothing the player hears or
+sees.
+- **The other files written this way** (`ca72_fx::write_atomically`'s temporary file and rename):
+  the scan's cache and the running marker are written whole from one thread's values, with no
+  chain to fall behind; `settings.toml` is changed under its lock file (R57), with a
+  temporary name for each write; a preset and an agent's record (`agent/discovery.rs`) have one
+  writer each. None needed the change.
+
+**Evidence (2026-10-19):** on Windows, the safety tests 20 runs in 20 (all six tests), where
+the same test had failed 9 in 10; `chain.rs`'s new
+`changes_made_at_once_are_saved_as_the_chain_shows` 10 in 10, with the rest of `chain.rs` (2
+failures in 10 before). On Linux both pass, before and after (a write to a temporary folder
+there is too quick to fall behind).
