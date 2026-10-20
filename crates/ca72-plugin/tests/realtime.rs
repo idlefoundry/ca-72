@@ -637,7 +637,7 @@ fn asking_the_helper_neither_allocates_nor_frees() {
 /// MIDI Learn on the audio thread (decisions.md R34), through the plug-in's own `process`: learned
 /// controllers setting knobs (gliding in the voices), switches, a selector and VOICES through the
 /// host, a controller caught while learning, the reserved ones refused, the host's automation
-/// ending a glide: no allocation, no free. (The stand-in host's record of the changes is reserved
+/// gliding on from a learned glide (R-KNOB-GLIDE): no allocation, no free. (The stand-in host's record of the changes is reserved
 /// first, as the wrappers reserve theirs; its events are pushed off the count.)
 #[test]
 fn midi_learn_neither_allocates_nor_frees() {

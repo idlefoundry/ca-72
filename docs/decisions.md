@@ -1991,6 +1991,10 @@ to controllers, Omni.
   host's automation, the editor and presets reach the voices as they always have: anything
   setting a gliding knob's parameter ends its glide there. nih-plug's smoothers are not used:
   none of the parameters has one, and giving them one would change automation's sound too.
+  **Since R-KNOB-GLIDE (2026-10-19):** every continuous knob glides, whatever sets it
+  (`smooth.rs`); a learned controller's value still over 10 ms; the host's automation or the
+  editor setting a gliding knob glides on from where it is instead of ending the glide.
+  `Dezip` and `DEZIP_STEP` became `smooth::Smooth` and `smooth::STEP`.
 - Nothing allocated or freed (`tests/realtime.rs`, the plug-in's own `process` with every kind
   of learned control, a capture, reserved controllers and automation ending a glide).
 
@@ -11556,3 +11560,116 @@ thread kept busy 40 % of each period first, `CA72_EXTRA`, a slower computer stan
   more.
 
 **Not done (later):** a host on any system; an Intel Mac.
+
+
+## R-KNOB-GLIDE. Knob changes glide in the voices, from the editor, a trackpad and the host's automation (issue #107)
+
+**The owner, 2026-10-19.** Issue #107 records a user's report (macOS, 0.2.6): turning a knob
+by a drag or a two-finger trackpad scroll changes the sound in audible steps, plain with
+CUTOFF opened at strong EMPHASIS ("like an aliasing"); a hardware knob mapped with MIDI Learn
+is smooth. Told the measurement (below) and three choices with a recommendation for each, the
+owner: "I'm happy to follow your recommendations above regarding the 3 choices". So: a linear
+glide of about 30 ms, or the host's block if longer, starting again from where it is at each
+new value (10 ms is too short for a mouse's 17 ms between values and for 1024-frame blocks; a
+one-pole glide does not smooth the corners enough); offline renders of automation glide too (a
+bounce must sound like playback); choosing a preset, Init, or loading a session's or a
+project's state does not glide but lands at once, while the host's automation and the editor's
+moves glide. Selectors and switches stay stepped; only continuous knobs glide. With no knob
+moving nothing more runs and the renders stay the same to the bit; presets and automation land
+on the same final values.
+
+**The cause (measured 2026-10-19).** The editor's and the host's values reached the voices once
+a host block (the voices read the panel every sample, so CUTOFF stepped once a block); only a
+learned controller's knob glided (R34, 10 ms). A trackpad's points gathered to 40 before the knob
+moved a whole 2 % notch (`NOTCH`). At EMPHASIS 9 and 10 the resonance's pitch follows CUTOFF, in
+those steps. The figure below is how strongly the high band's loudness pulses at the rate new
+values come, against the voices told the sweep every sample (`tests/cutoff_steps.rs`'s figure,
+on the `poly-crackle` branch, here through the plug-in's own `process`).
+
+**What changed.**
+- **Every continuous knob glides in the voices** (`smooth.rs`: `Smooth`, R34's `Dezip`
+  generalised, in `process`): the 27 learnable knobs (`learn::knob_param`'s) and the panel's PITCH
+  and MODULATION wheels, whatever set them (a drag, a scroll, a double click, a typed value, the
+  host's automation in real time or offline, a learned controller). At each block's start, after
+  a learned controller's event and every 32 samples while one moves, each knob's parameter is
+  compared with the value the voices were last given; a new one glides there in a straight line
+  from where the voices have it, the voices' controls set every 32 samples (`smooth::STEP`); a
+  new value mid-glide starts again from there, and the glide ends on the parameter's value
+  exactly. At rest a block costs 29 comparisons and the voices have the parameters as before.
+  The parameters themselves (the host's, the editor's, the state's) are at their new values at
+  once, as before. The engine and the circuit model are unchanged.
+- **How long: 30 ms (`GLIDE`), or the time since the knob's previous value when that is longer
+  but no longer than the host's largest block, never past 0.2 s (`LONGEST`);** a value after a
+  longer rest (a typed value, a double click) 30 ms. Agent decision: "the host's block" taken as
+  the time between the knob's values, bounded by the largest block the host declares. The
+  wrappers split a block at each automation point (sample-accurate automation), so `process`
+  sees parts of the host's block, not the block; for automation that reaches the plug-in once a
+  block the time between values is the block (2048 frames at 48 kHz, 43 ms), and a slow drag's
+  longer gaps glide over the gap too. A host declaring very large blocks (8192 frames at 44.1 kHz,
+  186 ms) is covered up to `LONGEST`; beyond it the glide is 0.2 s and then holds.
+- **Presets, Init and sessions land at once.** The audio thread cannot tell a preset's
+  parameter changes from automation: both come through the host. So the presets' drawer marks
+  each knob value it is about to set (`Lands` on `Ca72Params`: a generation a preset, the plain
+  value's bits), and the audio thread lands a knob whose new value is the current generation's
+  mark, taking the mark (agent decision). Marks wait 0.5 s of processed audio after the audio
+  thread first sees the preset's generation (a host takes the editor's values at its next
+  block); a value of an earlier preset, or arriving later, glides. On a weakly ordered processor
+  the value can be seen before its mark: the glide begun then lands at the next 32-sample step.
+  Init marks its values alike. A session's or a project's state comes through `initialize` and
+  `reset` (nih-plug calls both after loading a state into a running instance), which land every
+  knob, as does the host's reset.
+- **A learned controller keeps R34's 10 ms** (agent decision). Its values come from a hand on
+  hardware at the controller's own rate, in 1/127 steps that R34 measured smooth at 10 ms, and
+  the reporter finds it smooth; 30 ms would only add lag between the hand and the sound. It now
+  goes through the same glides (`Smooth::learned`).
+- **The PITCH and MODULATION wheels glide too** (agent decision): continuous controls dragged by
+  the same mouse, whose steps a pitch takes as plainly as CUTOFF's. MIDI pitch bend and
+  modulation (the engine's own, from a keyboard's wheels) are unchanged, and MIDI BEND RANGE (a
+  setting) stays stepped, as do the selectors, the switches, VOICES, QUALITY and NOTE PRIORITY.
+- **A trackpad turns a knob as far as it travels** (`interact::turn`, `editor.rs`
+  `scroll_notches`). As baseview reports them: macOS gives a precise device's scroll (a
+  trackpad, a Magic Mouse) in points, a wheel's in lines; Windows gives lines, a wheel's notches
+  whole and a precision touchpad's (or a free-spinning wheel's) fractions of one; X11 gives only
+  whole lines (buttons 4 to 7). Points turn a continuous knob or a wheel in proportion, at the
+  old rate (40 points a notch of 2 %; a twentieth with SHIFT), and on Windows a fraction of a line
+  that fraction of a notch. A whole line is a notch, whatever its count, as before, and so is a
+  fraction of a line on macOS (a wheel turned slowly). A stepped control (VOICES, a selector, a
+  switch, a toggle) steps once a notch's travel has gathered. A Linux touchpad stays notched:
+  baseview's X11 has no smooth scrolling.
+- R34's own measurement (`a_controllers_steps`) keeps its unglided reference by preparing
+  one-sample glides.
+
+**Evidence (Linux x86, Rust 1.97.1, 2026-10-19).** `tests/knob_glide.rs`, by hand, the same
+file on v0.2.8 (7b8f0ee, before) and on this branch (after). `cutoff_sweep_through_process`:
+CUTOFF 25 to 75 % in 2 s, Brass Choir at HI, one voice, oscillator 1 alone, no contour, through
+`process` at 48 kHz; the high band's loudness at the values' rate and its harmonics against the
+continuous sweep's:
+
+| How CUTOFF's values arrive | EMPHASIS 9 before | after | EMPHASIS 10 before | after |
+|---|---|---|---|---|
+| A drag, 60 values a second at 256-frame blocks | +24.7 dB | -4.4 dB | +27.6 dB | +0.7 dB |
+| A trackpad: 0.2.8's 2 % notches; now 60 values a second in proportion | +37.8 dB | -4.4 dB | +37.1 dB | +0.7 dB |
+| Automation once a block of 32 frames | +4.5 dB | +0.8 dB | +2.1 dB | -0.6 dB |
+| 256 frames | +11.8 dB | -1.5 dB | +10.0 dB | -1.9 dB |
+| 512 frames | +20.2 dB | -3.7 dB | +23.7 dB | +2.4 dB |
+| 1024 frames | +31.6 dB | +2.4 dB | +32.5 dB | +1.2 dB |
+| 1024 frames, offline | +31.6 dB | +2.4 dB | +32.5 dB | +1.2 dB |
+| 2048 frames, offline | +37.1 dB | -2.3 dB | +37.7 dB | -1.7 dB |
+
+Every way's held tail (the last half second) within 0.002 dB of the others, before and after.
+`presets_through_process`: every factory preset played two seconds, the next chosen in the
+presets' drawer and played a second more, offline, the same to the bit as v0.2.8 (19 of 19).
+`preset_render` against v0.2.8: every factory preset the same to the bit. `glide_cost` (ten
+voices of Felt Bass, POLY, offline, the best of three; this machine shared with other work):
+at rest LO 179.0 and HI 149.8 ms a second of audio (v0.2.8: 176.8 and 148.3); CUTOFF gliding
+the whole time LO 197.9, HI 154.7 (v0.2.8 stepping: 180.9, 152.1): a moving knob costs about
+3 % at HI and 10 % at LO, whose light voices work their laws out again at each 32-sample step
+(as a learned knob's glide already did). New tests: `smooth.rs`' five (30 ms and the gap,
+presets' marks, the learned 10 ms, the knobs' list),
+`a_chosen_preset_lands_in_the_voices_at_once_and_a_turned_knob_glides` (the drawer's presets
+and Init through `process`), `a_trackpad_turns_a_knob_in_proportion_and_voices_by_steps`,
+`scrolls_read_as_notches_or_travel_as_each_system_reports_them`,
+`a_trackpad_turns_continuous_controls_in_proportion`; the learned-controller tests changed
+where automation now glides. Listening files outside the repository (the night's
+`smooth-out`). Untested here: macOS with a trackpad and a Magic Mouse, Windows with a precision
+touchpad and a wheel, automation in a host of each format, and the owner's listening.
