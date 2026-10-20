@@ -30,7 +30,7 @@ use crate::a440::A440;
 use crate::contour::{ContourCircuit, Contours, Controls, Panel as ContourPanel};
 use crate::expo::Input;
 use crate::keyboard::{Keyboard, KeyboardCircuit, Load};
-use crate::modulation::{LineLoads, Modulation, mod_wheel_r, pitch_wheel_volts};
+use crate::modulation::{LineLoads, MOD_WHEEL_FULL, Modulation, mod_wheel_r, pitch_wheel_volts};
 use crate::noise::{Gauss, Noise, NoiseCircuit, NoiseLoads, NoiseOut};
 use crate::preamp::{InLoop, Preamp, PreampCircuit};
 use crate::revsaw::{RevSaw, RevSawCircuit, RevSawOut};
@@ -61,13 +61,159 @@ pub enum Waveform {
 impl Waveform {
     /// The width bias the switch's second pole sets (R034, R033, R032 from ground to
     /// -10 V), V.
-    fn width(self) -> f64 {
+    pub fn width(self) -> f64 {
         match self {
             Waveform::WideRectangle => -1.5,
             Waveform::NarrowRectangle => -2.5,
             _ => 0.0,
         }
     }
+}
+
+/// Whether a waveform is one of the rectangle's three positions.
+pub fn is_rectangle(w: Waveform) -> bool {
+    matches!(
+        w,
+        Waveform::Square | Waveform::WideRectangle | Waveform::NarrowRectangle
+    )
+}
+
+/// The width bias at which CONTINUOUS's travel ends (decisions.md R-CONTINUOUS-WAVE): the
+/// narrowest rectangle it gives, a little short of where the pulse stops coming (the reset
+/// no longer lifts the ramp past the comparator's rising threshold), V.
+pub const RECT_FLOOR: f64 = -3.45;
+
+/// The rectangle's stretch of the travel past SQUARE in the switch's steps: square to wide,
+/// wide to narrow, then on past narrow to the floor at the same volts a step as from wide to
+/// narrow (1 V).
+pub const RECT_STEPS: f64 = 2.0 + (-RECT_FLOOR - 2.5);
+
+/// CONTINUOUS's whole travel in the switch's steps: TRIANGLE (0), the second place (1),
+/// SAWTOOTH (2), SQUARE (3), WIDE (4), NARROW (5), then on to the floor.
+pub const SHAPE_PLACES: f64 = 3.0 + RECT_STEPS;
+
+/// An oscillator's waveform in the plug-in's CONTINUOUS mode, which the instrument does not have
+/// (decisions.md R-CONTINUOUS-WAVE): its WAVEFORM switch turned without steps through the
+/// whole travel, each shape blending into the next ([`shape_source`]) and past SQUARE the
+/// rectangle's width bias anywhere down to [`RECT_FLOOR`] (the switch's second pole's three
+/// taps a pot); with MOD, the place also moves on with the modulation line (taken through a
+/// buffer: it loads nothing). STEPPED is the instrument's switch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shape {
+    pub continuous: bool,
+    /// Where the switch is, in its steps: 0 to [`SHAPE_PLACES`].
+    pub at: f64,
+    pub modulated: bool,
+    pub direction: ModDirection,
+}
+
+impl Shape {
+    pub const STEPPED: Shape = Shape {
+        continuous: false,
+        at: 2.0,
+        modulated: false,
+        direction: ModDirection::Onward,
+    };
+}
+
+/// Which way MOD moves a CONTINUOUS shape from where its switch is (the owner, 2026-10-20: "a
+/// command click ... to reverse the direction ... and then perhaps we could even have a third
+/// mode where it travels to the left and to the right of it"): on (clockwise), back
+/// (anticlockwise), or either way about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModDirection {
+    #[default]
+    Onward,
+    Back,
+    Both,
+}
+
+/// The modulation line as MOD takes it, a sample's: its depth (the line's gain against its
+/// gain with the wheel fully forward, 0..1) and its swing (-1..1 over oscillator 3's
+/// triangle at MODULATION MIX's oscillator 3; the noise's beyond, now and then).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ModSwing {
+    pub depth: f64,
+    pub swing: f64,
+}
+
+impl ModSwing {
+    /// The share of the whole travel it moves a shape, signed (on is up): onward or back, as
+    /// deep as the wheel is forward, from none at the swing's bottom to the depth at its top;
+    /// either way, half that about none.
+    pub fn share(self, direction: ModDirection) -> f64 {
+        let one_way = (0.5 * self.depth * (1.0 + self.swing)).clamp(0.0, 1.0);
+        match direction {
+            ModDirection::Onward => one_way,
+            ModDirection::Back => -one_way,
+            ModDirection::Both => (0.5 * self.depth * self.swing).clamp(-0.5, 0.5),
+        }
+    }
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Self::STEPPED
+    }
+}
+
+/// Where a CONTINUOUS switch's shape is: its place, and with MOD moved its way by the
+/// modulation's share of the whole travel, held to the travel, [`shape_snapped`].
+pub fn shape_at(s: Shape, m: ModSwing) -> f64 {
+    let at = if s.modulated {
+        s.at + m.share(s.direction) * SHAPE_PLACES
+    } else {
+        s.at
+    };
+    shape_snapped(at.clamp(0.0, SHAPE_PLACES))
+}
+
+/// A place along CONTINUOUS's travel (its steps) within a thousandth of a step of one of the
+/// switch's six places, that place exactly (a host's f32, or a preset's four decimals of the
+/// travel: three ten-thousandths of a step at most); else where it is.
+pub fn shape_snapped(at: f64) -> f64 {
+    let near = at.round();
+    if (at - near).abs() < 1e-3 && (0.0..=5.0).contains(&near) {
+        near
+    } else {
+        at
+    }
+}
+
+/// The rectangle's width bias with the switch `at` (its steps): past SQUARE, straight between
+/// the switch's own three (which it gives exactly) and on to the floor; the square's below.
+pub fn shape_bias(at: f64) -> f64 {
+    let x = (at - 3.0).clamp(0.0, RECT_STEPS);
+    if x <= 1.0 { -1.5 * x } else { -1.5 - (x - 1.0) }
+}
+
+/// Where along the travel (its steps) the rectangle has width bias `bias`: [`shape_bias`]'s
+/// inverse past SQUARE.
+pub fn bias_at(bias: f64) -> f64 {
+    let b = bias.clamp(RECT_FLOOR, 0.0);
+    3.0 + if b >= -1.5 { -b / 1.5 } else { 1.0 - 1.5 - b }
+}
+
+/// The rectangle's duty cycle (its share of a cycle high) at a width bias, as the light voice
+/// plays it (the full voice's within about a percent: decisions.md R-CONTINUOUS-WAVE).
+pub fn rect_duty(bias: f64) -> f64 {
+    f64::from(crate::light::rect_law(bias).0)
+}
+
+/// The waveform the switch's place `k` (0 to 3) is on oscillator `n` in CONTINUOUS, as its own
+/// switch names it, for what the place is made from; oscillator 3's second place, its reverse
+/// shark tooth, which the switch does not have, `None` (the owner: "position two on oscillator
+/// three would become position three and then position two would then turn into a reverse
+/// Sharktooth").
+pub fn shape_place(n: usize, k: usize) -> Option<Waveform> {
+    Some(match (k, n == 2) {
+        (0, _) => Waveform::Triangle,
+        (1, false) => Waveform::SharkTooth,
+        (1, true) => return None,
+        (2, false) => Waveform::Sawtooth,
+        (2, true) => Waveform::ReverseSawtooth,
+        _ => Waveform::Square,
+    })
 }
 
 /// A contour generator's three knobs, 0..1 (the panel's 0..10).
@@ -170,6 +316,22 @@ pub struct Panel {
     /// trigger contact for [`RETRIGGER_GAP`] before it comes down, so that the contours start
     /// again even with other keys held (off: single triggering, the instrument's).
     pub retrigger: bool,
+    /// Each oscillator's waveform STEPPED (the instrument's switch) or CONTINUOUS, with or
+    /// without MOD (not the instrument's: decisions.md R-CONTINUOUS-WAVE).
+    pub shape: [Shape; 3],
+}
+
+impl Panel {
+    /// Whether oscillator `n`'s shape follows the modulation line: CONTINUOUS, its MOD on.
+    pub fn shape_mod_on(&self, n: usize) -> bool {
+        let s = self.shape[n];
+        s.continuous && s.modulated
+    }
+
+    /// Whether any oscillator's shape follows the modulation line.
+    pub fn any_shape_mod(&self) -> bool {
+        (0..3).any(|n| self.shape_mod_on(n))
+    }
 }
 
 /// TUNE's wiper voltage over half its travel: R1 spans 10 V less R22's 5.05 V.
@@ -222,6 +384,7 @@ impl Default for Panel {
             quality: Quality::NoCompromises,
             priority: Priority::Low,
             retrigger: false,
+            shape: [Shape::STEPPED; 3],
         }
     }
 }
@@ -339,6 +502,36 @@ fn channel_load(volume: f64, r_series: f64) -> f64 {
     let p = volume_track(volume);
     let bottom = 25e3 * p;
     25e3 * (1.0 - p) + bottom * r_series / (bottom + r_series)
+}
+
+/// MOD's measure (decisions.md R-CONTINUOUS-WAVE): the modulation amplifier's output at the
+/// middle of oscillator 3's triangle and half its swing, MODULATION MIX at oscillator 3, the
+/// triangle at its switch's output under the mixer's channel (VOLUME at 8) and the mix's
+/// pot: the triangle's extremes over the ramp's travel, the buffer's top to the reset's
+/// threshold.
+fn mod_reference(modulation: &Modulation) -> (f64, f64) {
+    let (core, sh) = (
+        crate::vco::CoreParams::default(),
+        crate::vco::ShaperParams::default(),
+    );
+    let (top, bottom) = (
+        sh.buf_gain * core.v_top0 + sh.buf_offset,
+        sh.buf_gain * core.v_threshold + sh.buf_offset,
+    );
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for k in 0..=2000 {
+        let t = crate::vco::triangle(bottom + (top - bottom) * k as f64 / 2000.0);
+        lo = lo.min(t);
+        hi = hi.max(t);
+    }
+    let r_tri = 750.0 * 8200.0 / 8950.0;
+    let z_ch = channel_load(0.8, 33e3);
+    let (_, z_mix) = Modulation::source_loads(0.0);
+    let z = z_ch * z_mix / (z_ch + z_mix);
+    let m = modulation.mix(0.0);
+    let amp = |t: f64| m.offset + m.gain_osc3 * t * z / (r_tri + z);
+    let (a, b) = (amp(lo), amp(hi));
+    (0.5 * (a + b), 0.5 * (a - b).abs())
 }
 
 /// The noise generator's loads for the panel: the mixer's channel and the modulation mix on
@@ -608,6 +801,58 @@ fn waveform_source(w: Waveform, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f6
         }
         _ => rect,
     }
+}
+
+/// The outputs (sawtooth, triangle, rectangle) a CONTINUOUS shape `at` takes from oscillator
+/// `n`: a place's as the switch's own position's ([`outputs_of`]), a blend's both places'; all
+/// of them while MOD may move it anywhere.
+fn shape_outputs(n: usize, at: f64, modulated: bool) -> [bool; 3] {
+    if modulated {
+        return [true; 3];
+    }
+    let place = |k: usize| match shape_place(n, k) {
+        Some(w) => outputs_of(w, n),
+        // (The reverse shark tooth: the triangle, and the sawtooth the reverse stage takes.)
+        None => [true, true, false],
+    };
+    if at >= 3.0 {
+        return place(3);
+    }
+    let k = at.floor() as usize;
+    if at == k as f64 {
+        return place(k);
+    }
+    let (a, b) = (place(k), place(k + 1));
+    [a[0] || b[0], a[1] || b[1], a[2] || b[2]]
+}
+
+/// A CONTINUOUS shape `at` (the switch's steps) as a Thevenin source: at a place, that place's
+/// source exactly (the switch's own position's, [`waveform_source`]); between two, the two
+/// mixed in turn, as a pot between them would (decisions.md R-CONTINUOUS-WAVE); past SQUARE
+/// the rectangle. Oscillator 3's second place is a reverse shark tooth, its triangle and its
+/// reverse sawtooth through the shark tooth's resistors (R031 10K and R030 47K), and its third
+/// its reverse sawtooth: `rev`, which CONTINUOUS runs while it is needed.
+fn shape_source(n: usize, at: f64, o: &VcoOut, rev: Option<&RevSawOut>) -> (f64, f64) {
+    let place = |k: usize| match shape_place(n, k) {
+        Some(Waveform::ReverseSawtooth) => waveform_source(Waveform::ReverseSawtooth, o, rev),
+        Some(w) => waveform_source(w, o, None),
+        None => {
+            let tri = waveform_source(Waveform::Triangle, o, None);
+            let back = rev.map_or((0.0, 1e6), |r| (r.rev, r.r_rev));
+            let (ga, gb) = (1.0 / (back.1 + 47e3), 1.0 / (tri.1 + 10e3));
+            ((back.0 * ga + tri.0 * gb) / (ga + gb), 1.0 / (ga + gb))
+        }
+    };
+    if at >= 3.0 {
+        return place(3);
+    }
+    let k = at.floor() as usize;
+    let w = at - k as f64;
+    if w == 0.0 {
+        return place(k);
+    }
+    let (a, b) = (place(k), place(k + 1));
+    ((1.0 - w) * a.0 + w * b.0, (1.0 - w) * a.1 + w * b.1)
 }
 
 /// GLIDE's resistance in circuit: the 5M pot (a rheostat), shorted by the GLIDE switch
@@ -949,6 +1194,14 @@ pub struct FrontPart {
     last_i: [f64; 3],
     /// The MODULATION wheel's law.
     wheel: Memo<f64>,
+    /// The modulation amplifier's output at the middle of oscillator 3's triangle and half
+    /// its swing (MODULATION MIX at oscillator 3): what MOD's whole travel is measured
+    /// against (decisions.md R-CONTINUOUS-WAVE); and the line as MOD took it, the last sample's.
+    mod_ref: (f64, f64),
+    mod_u: ModSwing,
+    /// Each oscillator's CONTINUOUS shape where it was, the last sample's (MOD's orb on the
+    /// panel: decisions.md R-CONTINUOUS-WAVE).
+    shape_now: [Option<f64>; 3],
 }
 
 /// What the front gives the back each sample: the mixer bus's Norton current (A) and
@@ -1182,13 +1435,16 @@ impl Voice {
                     revsaw,
                     expo: crate::filter_cal::CALIBRATED.expo(),
                     table: ExpoTable::shared(crate::filter_cal::CALIBRATED.expo(), 25.0),
-                    modulation,
+                    modulation: modulation.clone(),
                     filter_node: 0.0,
                     i0: 0.0,
                     line: 0.0,
                     last_osc3: 0.0,
                     last_i: [0.0; 3],
                     wheel: Memo::NEW,
+                    mod_ref: mod_reference(&modulation),
+                    mod_u: ModSwing::default(),
+                    shape_now: [None; 3],
                 },
                 back: BackPart {
                     vcf: {
@@ -1320,6 +1576,18 @@ impl Voice {
     /// made (a probe of its frequency at any pitch: the resets' spacing).
     pub fn probe_resets(&self, n: usize) -> (f64, u64) {
         self.audio.front.vcos[n].last_reset()
+    }
+
+    /// The last sample's MOD share of CONTINUOUS's travel, 0..1 (decisions.md
+    /// R-CONTINUOUS-WAVE): 0 with no oscillator's MOD on.
+    pub fn probe_shape_mod(&self) -> f64 {
+        self.audio.front.mod_u.share(ModDirection::Onward)
+    }
+
+    /// Each oscillator's CONTINUOUS shape where the last sample had it (its switch's steps), MOD
+    /// and all; `None` for a STEPPED one or one not computed.
+    pub fn probe_shapes(&self) -> [Option<f64>; 3] {
+        self.audio.front.shape_now
     }
 
     /// The last sample's contours (filter, loudness), V.
@@ -1918,7 +2186,7 @@ impl ControlPart {
         // its last outputs, which reach nothing: the channel switched off adds no current,
         // and nothing times them in the modulation mix is zero.
         let heard = p.noise_on
-            || ((p.osc_mod || p.filter_mod)
+            || ((p.osc_mod || p.filter_mod || p.any_shape_mod())
                 && self
                     .noise_gain
                     .get(p.mod_mix, |m| self.mix.mix(m).gain_noise)
@@ -2083,6 +2351,21 @@ impl FrontPart {
             // The oscillators' external control input (its jack's source holds the bus).
             ext: j.osc.unwrap_or(OPEN_BUS),
         };
+        // MOD (the plug-in's, decisions.md R-CONTINUOUS-WAVE): a share of the shape's travel,
+        // 0..1, from the line's swing about oscillator 3's triangle's middle, as deep as the
+        // line's gain against its gain with the wheel fully forward: oscillator 3's triangle,
+        // the wheel forward, sweeps the whole travel; nothing with the wheel back.
+        // (The wheel fully back shorts the line: none at all.)
+        self.mod_u = if p.any_shape_mod() && r_wheel > 0.1 {
+            let g = Modulation::line_gain(mix.r_out, r_wheel, &line_loads);
+            let g_full = Modulation::line_gain(mix.r_out, MOD_WHEEL_FULL, &line_loads);
+            ModSwing {
+                depth: g / g_full,
+                swing: (amp - self.mod_ref.0) / self.mod_ref.1,
+            }
+        } else {
+            ModSwing::default()
+        };
         // The oscillators and the mixer: each channel a Norton source onto the bus, the
         // external input switched off loads it. Oscillator 3's switch output also feeds the
         // modulation mix through R23: its node is loaded by both.
@@ -2101,17 +2384,26 @@ impl FrontPart {
             // channel's 33K then only loads the bus) and, for oscillator 3, not feeding a
             // modulation switch that is on. It resumes where it stopped (a free-running
             // oscillator's phase is arbitrary; performance).
-            if !(op.on || (n == 2 && (p.osc_mod || p.filter_mod))) {
+            if !(op.on || (n == 2 && (p.osc_mod || p.filter_mod || p.any_shape_mod()))) {
                 g_bus += 1.0 / 33e3;
                 continue;
             }
             self.vcos[n].set_oversample(oversampling(p.quality).0);
             self.vcos[n].table_on = p.quality == Quality::Potato;
-            self.vcos[n].set_outputs(outputs_of(op.waveform, n));
+            // CONTINUOUS (decisions.md R-CONTINUOUS-WAVE): where its shape is now.
+            let shape = p.shape[n];
+            let at = shape.continuous.then(|| shape_at(shape, self.mod_u));
+            self.shape_now[n] = at;
+            self.vcos[n].set_outputs(match at {
+                None => outputs_of(op.waveform, n),
+                Some(at) => shape_outputs(n, at, shape.modulated),
+            });
+            self.vcos[n].set_width_moves(shape.continuous);
+            let width = at.map_or(op.waveform.width(), shape_bias);
             let o = match j.timed[n] {
                 // An oscillator timed at LO (the plug-in's: decisions.md R-OSC-TIMED): its
                 // resets on the host's clock, none of its pitch inputs or ENTROPY in it.
-                Some(t) if op.range == Range::Lo => self.vcos[n].tick_timed(t, op.waveform.width()),
+                Some(t) if op.range == Range::Lo => self.vcos[n].tick_timed(t, width),
                 _ => {
                     let osc = match n {
                         0 => Osc::One,
@@ -2131,23 +2423,30 @@ impl FrontPart {
                         d.inputs[5].v += j.detune[n] / 1200.0 * tuning.octave_step;
                     }
                     let i_in = d.apply(&mut self.vcos[n].expo);
-                    self.vcos[n].tick(i_in, op.waveform.width())
+                    self.vcos[n].tick(i_in, width)
                 }
             };
             self.last_i[n] = self.vcos[n].timing_current();
             // Oscillator 3's reverse sawtooth stage runs while its sawtooth or reverse
             // sawtooth is selected (R171 loads the sawtooth).
-            let second = matches!(
-                op.waveform,
-                Waveform::Sawtooth | Waveform::SharkTooth | Waveform::ReverseSawtooth
-            );
+            // In CONTINUOUS, while its shape takes in the reverse sawtooth: always with MOD.
+            let second = match at {
+                None => matches!(
+                    op.waveform,
+                    Waveform::Sawtooth | Waveform::SharkTooth | Waveform::ReverseSawtooth
+                ),
+                Some(at) => shape.modulated || (at > 0.0 && at < 3.0),
+            };
             let rev = if n == 2 && second {
                 self.revsaw.set_quality(p.quality);
                 Some(self.revsaw.tick(o.saw))
             } else {
                 None
             };
-            let (v_src, r_src) = waveform_source(op.waveform, &o, rev.as_ref());
+            let (v_src, r_src) = match at {
+                None => waveform_source(op.waveform, &o, rev.as_ref()),
+                Some(at) => shape_source(n, at, &o, rev.as_ref()),
+            };
             let (i, g) = if n == 2 {
                 // The switch's output node under its two loads.
                 let z_ch = channel_load(op.volume, 33e3);

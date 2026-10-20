@@ -117,6 +117,73 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
     })
 }
 
+/// A WAVEFORM switch CONTINUOUS (decisions.md R-CONTINUOUS-WAVE), as the editor operates it: one
+/// position along its whole travel, 0 to 1 over [`CONTINUOUS_PLACES`] of the switch's steps:
+/// TRIANGLE (0), the second place (1), SAWTOOTH (2), SQUARE (3), WIDE (4), NARROW (5), then on
+/// to the floor, without steps.
+pub const CONTINUOUS_PLACES: f64 = art::SHAPE_PLACES;
+
+/// The switch's places a CONTINUOUS switch stops at when clicked or picked: its six legends',
+/// and the floor's.
+const CONTINUOUS_STOPS: [f64; 7] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, CONTINUOUS_PLACES];
+
+/// How near one of its six places a dragged CONTINUOUS switch is caught on it, in its steps (a
+/// slight detent: let go there, the place's shape exactly, the switch's own).
+pub const CATCH: f64 = 0.06;
+
+/// A position on a CONTINUOUS switch's travel (its steps) as it settles: on one of its six
+/// places within [`CATCH`] of it, else where it is.
+fn continuous_settled(at: f64) -> f64 {
+    let at = at.clamp(0.0, CONTINUOUS_PLACES);
+    let near = at.round();
+    if near <= 5.0 && (at - near).abs() <= CATCH {
+        near
+    } else {
+        at
+    }
+}
+
+/// A CONTINUOUS switch dragged from `start` (0..1 of its travel) by (`dx`, `dy`): a step each 30
+/// pixels as the switch's (60 with `fine`), right or up turning it on, caught at its places.
+pub fn continuous_drag(start: f64, dx: f64, dy: f64, fine: bool) -> f64 {
+    let at = start * CONTINUOUS_PLACES + (dx - dy) / if fine { 60.0 } else { 30.0 };
+    continuous_settled(at) / CONTINUOUS_PLACES
+}
+
+/// A CONTINUOUS switch turned `notches` (whole) by the mouse wheel or an arrow key: a tenth of a
+/// step a notch (a fiftieth with `fine`), landing on a place it comes to.
+pub fn continuous_scroll(v: f64, notches: f64, fine: bool) -> f64 {
+    let at = v * CONTINUOUS_PLACES;
+    let to = at + notches * if fine { 0.02 } else { 0.1 };
+    // (A place passed on the way: there.)
+    let passed = CONTINUOUS_STOPS[..6]
+        .iter()
+        .copied()
+        .find(|&p| (at < p - 1e-9 && to >= p) || (at > p + 1e-9 && to <= p));
+    passed.unwrap_or(to).clamp(0.0, CONTINUOUS_PLACES) / CONTINUOUS_PLACES
+}
+
+/// A click on a CONTINUOUS switch's knob, `dx` from its centre: to its next stop that side (a
+/// legend's place, or the floor).
+pub fn continuous_click(v: f64, dx: f64) -> f64 {
+    let at = v * CONTINUOUS_PLACES;
+    let next = if dx < 0.0 {
+        CONTINUOUS_STOPS
+            .iter()
+            .rev()
+            .find(|&&p| p < at - 1e-9)
+            .copied()
+    } else {
+        CONTINUOUS_STOPS.iter().find(|&&p| p > at + 1e-9).copied()
+    };
+    next.unwrap_or(at) / CONTINUOUS_PLACES
+}
+
+/// A CONTINUOUS switch's legend `k` (0..5) picked: exactly its place.
+pub fn continuous_legend(k: usize) -> f64 {
+    CONTINUOUS_STOPS[k.min(5)] / CONTINUOUS_PLACES
+}
+
 /// One notch of the mouse wheel or an arrow key, `up` or down.
 pub fn step(kind: &Kind, v: f64, up: bool, fine: bool) -> f64 {
     scroll(kind, v, if up { 1.0 } else { -1.0 }, fine)
@@ -219,6 +286,41 @@ pub fn release(kind: &Kind, v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A CONTINUOUS switch (decisions.md R-CONTINUOUS-WAVE): without steps from TRIANGLE to the
+    /// floor, caught at its six places; its legends and clicks its stops exactly.
+    #[test]
+    fn a_continuous_switch_turns_and_is_caught_at_its_places() {
+        let p = CONTINUOUS_PLACES;
+        let at = |v: f64| v * p;
+        // From SAWTOOTH, half a step on is half way to SQUARE; nearly a step on, SQUARE.
+        assert!((at(continuous_drag(2.0 / p, 15.0, 0.0, false)) - 2.5).abs() < 1e-12);
+        assert_eq!(at(continuous_drag(2.0 / p, 29.0, 0.0, false)), 3.0);
+        assert!((at(continuous_drag(0.0, 10.0, 0.0, false)) - 1.0 / 3.0).abs() < 1e-12);
+        assert!((at(continuous_drag(3.0 / p, 45.0, 0.0, false)) - 4.5).abs() < 1e-12);
+        assert!((at(continuous_drag(3.0 / p, 45.0, 0.0, true)) - 3.75).abs() < 1e-12);
+        assert_eq!(continuous_drag(3.0 / p, 1e4, 0.0, false), 1.0);
+        assert_eq!(continuous_drag(3.0 / p, -1e4, 0.0, false), 0.0);
+        // Up is on, as the switch's.
+        assert_eq!(at(continuous_drag(3.0 / p, 0.0, -30.0, false)), 4.0);
+        // The legends: their places exactly; the floor beyond NARROW's.
+        for k in 0..6 {
+            assert_eq!(at(continuous_legend(k)), k as f64);
+        }
+        // Clicks: to the next stop that side.
+        assert_eq!(at(continuous_click(4.5 / p, 1.0)), 5.0);
+        assert_eq!(at(continuous_click(4.5 / p, -1.0)), 4.0);
+        assert_eq!(continuous_click(5.0 / p, 1.0), 1.0);
+        assert_eq!(continuous_click(1.0, 1.0), 1.0);
+        assert_eq!(at(continuous_click(0.5 / p, -1.0)), 0.0);
+        // The wheel: a tenth of a step a notch, landing on a place it comes to.
+        assert!((at(continuous_scroll(2.0 / p, 1.0, false)) - 2.1).abs() < 1e-12);
+        assert!((at(continuous_scroll(2.0 / p, 1.0, true)) - 2.02).abs() < 1e-12);
+        assert_eq!(at(continuous_scroll(2.95 / p, 1.0, false)), 3.0);
+        assert_eq!(at(continuous_scroll(3.05 / p, -1.0, false)), 3.0);
+        assert_eq!(continuous_scroll(1.0, 5.0, false), 1.0);
+        assert_eq!(continuous_scroll(0.0, -5.0, false), 0.0);
+    }
     use crate::art::POWER;
     use crate::controls::index;
     use crate::fonts::Fonts;

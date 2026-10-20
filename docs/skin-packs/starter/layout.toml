@@ -4,7 +4,7 @@
 
 format = 1
 # The revision of the CA-72's panel controls this layout was made for.
-controls = 2
+controls = 3
 
 [fixtures]
 power = [3040, -65]
@@ -83,6 +83,20 @@ at = [1221, 256]
 [[control]]
 param = "osc3_timed"
 at = [1443, 256]
+
+# Each oscillator's MOD key (the controls' revision 3), under its WAVEFORM's legend: on the
+# panel only while that oscillator's waveform is CONTINUOUS; MOD beside it is the plug-in's print.
+[[control]]
+param = "osc1_shape_mod"
+at = [2109, 256]
+
+[[control]]
+param = "osc2_shape_mod"
+at = [2331, 256]
+
+[[control]]
+param = "osc3_shape_mod"
+at = [2553, 256]
 
 [[control]]
 param = "quality"

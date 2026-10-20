@@ -212,6 +212,20 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("osc2_division", &p.osc2_division),
         ("osc3_timed", &p.osc3_timed),
         ("osc3_division", &p.osc3_division),
+        // Each oscillator's waveform (decisions.md R-CONTINUOUS-WAVE): a preset that does not
+        // name it plays the instrument's switch.
+        ("osc1_shape_mode", &p.osc1_shape_mode),
+        ("osc1_shape", &p.osc1_shape),
+        ("osc1_shape_mod", &p.osc1_shape_mod),
+        ("osc1_shape_mod_dir", &p.osc1_shape_mod_dir),
+        ("osc2_shape_mode", &p.osc2_shape_mode),
+        ("osc2_shape", &p.osc2_shape),
+        ("osc2_shape_mod", &p.osc2_shape_mod),
+        ("osc2_shape_mod_dir", &p.osc2_shape_mod_dir),
+        ("osc3_shape_mode", &p.osc3_shape_mode),
+        ("osc3_shape", &p.osc3_shape),
+        ("osc3_shape_mod", &p.osc3_shape_mod),
+        ("osc3_shape_mod_dir", &p.osc3_shape_mod_dir),
     ]
 }
 

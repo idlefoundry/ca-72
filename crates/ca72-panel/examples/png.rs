@@ -121,6 +121,39 @@ fn main() {
     if std::env::var("CA72_TIP").is_ok_and(|v| v == "1") {
         scene.tip = Some(("CUTOFF FREQUENCY: 1.2 kHz".into(), 2081.0, 300.0));
     }
+    // `CA72_CONTINUOUS=1:2.4,3:5.2`: oscillators 1 and 3 CONTINUOUS, their switches 2.4 and 5.2
+    // steps from TRIANGLE (R-CONTINUOUS-WAVE); `CA72_MOD=1:a:3.1` oscillator 1's MOD key on, its
+    // way a (amber, clockwise), b (blue) or r (red), its orb at 3.1 (or `-`, none).
+    for kv in std::env::var("CA72_CONTINUOUS")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+    {
+        let (n, at) = kv.split_once(':').expect("oscillator:steps");
+        let n: usize = n.parse::<usize>().expect("1 to 3") - 1;
+        scene.shape[n].continuous = true;
+        scene.shape[n].at = at.parse().expect("steps");
+    }
+    for kv in std::env::var("CA72_MOD")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+    {
+        let mut f = kv.split(':');
+        let n: usize = f
+            .next()
+            .and_then(|n| n.parse::<usize>().ok())
+            .expect("1 to 3")
+            - 1;
+        scene.shape[n].way = match f.next() {
+            Some("b") => ca72_panel::art::ModWay::Anticlockwise,
+            Some("r") => ca72_panel::art::ModWay::Both,
+            _ => ca72_panel::art::ModWay::Clockwise,
+        };
+        scene.shape[n].orb = f.next().and_then(|o| o.parse().ok());
+        let i = ca72_panel::controls::index(ca72_panel::render::MOD_KEYS[n]).expect("there");
+        scene.values[i] = 1.0;
+    }
     let t1 = std::time::Instant::now();
     r.render(&scene);
     let first = t1.elapsed();

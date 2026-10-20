@@ -142,7 +142,27 @@ pub struct Scene {
     /// not inert lights, and its oscillator's FREQUENCY dial is printed in note values (the knob drawn
     /// at its DIVISION, `values` holding that).
     pub timed: [Timed; 2],
+    /// Each oscillator's waveform (decisions.md R-CONTINUOUS-WAVE): CONTINUOUS (its WAVEFORM's
+    /// arc printed, its MOD key on the panel, its switch where its shape is) or STEPPED, MOD's
+    /// way and its orb.
+    pub shape: [Shaped; 3],
 }
+
+/// An oscillator's waveform as the panel shows it (decisions.md R-CONTINUOUS-WAVE).
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct Shaped {
+    pub continuous: bool,
+    /// Where its switch is, in its steps from TRIANGLE (0 to [`art::SHAPE_PLACES`]).
+    pub at: f64,
+    /// Which way MOD moves it (its key's colour), and where MOD has it now (its orb), if MOD
+    /// is moving it.
+    pub way: art::ModWay,
+    pub orb: Option<f64>,
+}
+
+/// Each oscillator's WAVEFORM and MOD key, oscillator 1's to 3's.
+pub const WAVEFORMS: [&str; 3] = ["osc1_waveform", "osc2_waveform", "osc3_waveform"];
+pub const MOD_KEYS: [&str; 3] = ["osc1_shape_mod", "osc2_shape_mod", "osc3_shape_mod"];
 
 /// An oscillator's timed mode as the panel shows it (decisions.md R-OSC-TIMED).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,6 +187,12 @@ pub const TIMED_KEYS: [&str; 2] = ["osc2_timed", "osc3_timed"];
 pub const TIMED_DIALS: [&str; 2] = ["osc2_frequency", "osc3_frequency"];
 
 impl Scene {
+    /// Which oscillators' WAVEFORM switches are printed CONTINUOUS (their arc; oscillator 3's
+    /// legends): each while its waveform is (decisions.md R-CONTINUOUS-WAVE).
+    pub fn arcs(&self) -> [bool; 3] {
+        self.shape.map(|s| s.continuous)
+    }
+
     /// Which oscillators' FREQUENCY dials are printed in note values: oscillator 2's and 3's,
     /// each while its key is on and its RANGE at LO.
     pub fn timed_dials(&self) -> [bool; 2] {
@@ -195,6 +221,7 @@ impl Default for Scene {
             entry: None,
             tempo: None,
             timed: [Timed::default(); 2],
+            shape: [Shaped::default(); 3],
         }
     }
 }
@@ -258,6 +285,12 @@ pub struct Renderer {
     /// The timed dials' places in the background under its print (its surfaces), kept as it is
     /// painted.
     dial_surfaces: Option<[Pixmap; 2]>,
+    /// The same for each oscillator's WAVEFORM switch's arc (decisions.md R-CONTINUOUS-WAVE): its
+    /// place printed with the arc, drawn the first time one is CONTINUOUS at this scale, laid
+    /// over the background while it is; the place in the frame; its surfaces under the print.
+    arc_background: Option<[Pixmap; 3]>,
+    arc_rects: [[i32; 4]; 3],
+    arc_surfaces: Option<[Pixmap; 3]>,
 }
 
 /// How much the pictures placed in layers may keep: some dozens of layers' pictures.
@@ -374,6 +407,9 @@ impl Renderer {
             timed_rects: [[0; 4]; 2],
             face_mean: None,
             dial_surfaces: None,
+            arc_background: None,
+            arc_rects: [[0; 4]; 3],
+            arc_surfaces: None,
         };
         r.draw_background();
         r
@@ -429,6 +465,33 @@ impl Renderer {
 
     /// Where each of oscillators 2's and 3's FREQUENCY dials' print is in the frame, either
     /// dial's (pixels: left, top, right, bottom).
+    /// Where each WAVEFORM switch's arc is in the frame (pixels: left, top, right, bottom).
+    fn waveform_arc_rects(&self) -> [[i32; 4]; 3] {
+        let (s, top) = (self.scale, self.top_px());
+        let (fw, fh) = (
+            self.background.width() as i32,
+            self.background.height() as i32,
+        );
+        std::array::from_fn(|n| {
+            let Some(c) = self
+                .arrangement
+                .controls
+                .iter()
+                .find(|c| c.param == WAVEFORMS[n] && c.place == crate::controls::Place::Panel)
+            else {
+                return [0; 4];
+            };
+            let (x, y) = c.centre();
+            let e = art::ARC_EXTENT;
+            [
+                (((x + e[0]) * s).floor() as i32).clamp(0, fw),
+                (((y + e[1]) * s).floor() as i32 - top).clamp(0, fh),
+                (((x + e[2]) * s).ceil() as i32).clamp(0, fw),
+                (((y + e[3]) * s).ceil() as i32 - top).clamp(0, fh),
+            ]
+        })
+    }
+
     fn dial_rects(&self) -> [[i32; 4]; 2] {
         let (s, top) = (self.scale, self.top_px());
         std::array::from_fn(|n| {
@@ -507,6 +570,8 @@ impl Renderer {
         // (The timed dials' places, whose surfaces are kept as they are painted: R-OSC-TIMED.)
         self.timed_rects = self.dial_rects();
         self.timed_background = None;
+        self.arc_rects = self.waveform_arc_rects();
+        self.arc_background = None;
         if self.skin == Skin::Worn {
             self.draw_worn_background();
             return;
@@ -674,6 +739,8 @@ impl Renderer {
         // level, which the print is worn by.
         let rects = self.timed_rects;
         self.dial_surfaces = Some(rects.map(|r| crop(bg, r)));
+        let rects = self.arc_rects;
+        self.arc_surfaces = Some(rects.map(|r| crop(bg, r)));
         let mean = face_mean(bg);
         self.face_mean = Some(mean);
         // The print, worn into the face: its texture showing through it a little.
@@ -729,6 +796,7 @@ impl Renderer {
     fn keep_dial_surfaces(&mut self) {
         let bg = &self.background;
         self.dial_surfaces = Some(self.timed_rects.map(|r| crop(bg, r)));
+        self.arc_surfaces = Some(self.arc_rects.map(|r| crop(bg, r)));
     }
 
     /// The timed dial `n`'s place (oscillator 2's or 3's) printed as `timed` has the dials
@@ -738,8 +806,38 @@ impl Renderer {
     /// edges, and whatever else is printed there), so it is laid without a seam. A few
     /// milliseconds: the dials' ink alone is drawn again.
     fn timed_part(&self, n: usize, timed: &Arrangement) -> Option<Pixmap> {
-        let r = self.timed_rects[n];
-        let mut part = self.dial_surfaces.as_ref()?[n].clone();
+        self.print_part(
+            self.timed_rects[n],
+            &self.dial_surfaces.as_ref()?[n],
+            &art::dials_print(&self.layout, &self.arrangement),
+            &art::dials_print(&self.layout, timed),
+        )
+    }
+
+    /// Oscillator `n`'s WAVEFORM switch's place printed with its arc (decisions.md
+    /// R-CONTINUOUS-WAVE), as [`Renderer::timed_part`] prints a timed dial's.
+    fn arc_part(&self, n: usize) -> Option<Pixmap> {
+        self.print_part(
+            self.arc_rects[n],
+            &self.arc_surfaces.as_ref()?[n],
+            &art::waveform_print(&self.layout, &self.arrangement, n, false),
+            &art::waveform_print(&self.layout, &self.arrangement, n, true),
+        )
+    }
+
+    /// The background's place `r` printed with `printed` instead of `plain` (each the place's
+    /// print alone, as the panel's SVG): `surface`, the place under the print, the ink printed
+    /// on it as the whole background's is (worn into the face, the lamp over it), and the
+    /// background's own pixels wherever the two prints' ink is the same, so that it lies
+    /// without a seam.
+    fn print_part(
+        &self,
+        r: [i32; 4],
+        surface: &Pixmap,
+        plain: &str,
+        printed: &str,
+    ) -> Option<Pixmap> {
+        let mut part = surface.clone();
         let (w, h) = (part.width(), part.height());
         let s = self.scale;
         let view = [
@@ -748,14 +846,14 @@ impl Renderer {
             f64::from(w) / s,
             f64::from(h) / s,
         ];
-        let ink = |a: &Arrangement| {
+        let ink = |body: &str| {
             let mut p = Pixmap::new(w, h)?;
-            let doc = art::document(view, w, h, &art::dials_print(&self.layout, a));
+            let doc = art::document(view, w, h, body);
             let tree = usvg::Tree::from_str(&doc, &self.options).ok()?;
             resvg::render(&tree, Transform::identity(), &mut p.as_mut());
             Some(p)
         };
-        let (plain, printed) = (ink(&self.arrangement)?, ink(timed)?);
+        let (plain, printed) = (ink(plain)?, ink(printed)?);
         let mut worn = printed.clone();
         let opacity = if self.skin == Skin::Worn {
             worn_into_by(&mut worn, &part, self.face_mean.unwrap_or(1.0));
@@ -822,6 +920,23 @@ impl Renderer {
                     Kind::Wheel { .. } => scene.midi.1,
                     _ => 0.0,
                 };
+                // An oscillator's MOD key, on the panel while its waveform is CONTINUOUS, in its
+                // way's colour (R-CONTINUOUS-WAVE).
+                if let Some(n) = MOD_KEYS.iter().position(|k| *k == c.param) {
+                    return art::key(
+                        c,
+                        art::Keyed {
+                            on: v >= 0.5,
+                            word: Some("MOD"),
+                            hidden: !scene.shape[n].continuous,
+                            way: scene.shape[n].way,
+                            ..art::Keyed::default()
+                        },
+                        self.layout.lettering(),
+                        self.layout.times(),
+                        worn,
+                    );
+                }
                 // An oscillator's TIMED key, its sign its division's (R-OSC-TIMED).
                 if c.kind == Kind::Key {
                     let n = usize::from(c.param == TIMED_KEYS[1]);
@@ -832,13 +947,19 @@ impl Renderer {
                             on: v >= 0.5,
                             inert: t.inert,
                             division: t.division,
-                            word: None,
                             hidden: t.inert,
+                            ..art::Keyed::default()
                         },
                         self.layout.lettering(),
                         self.layout.times(),
                         worn,
                     );
+                }
+                // A WAVEFORM switch CONTINUOUS: turned where its shape is (R-CONTINUOUS-WAVE).
+                if let Some(n) = WAVEFORMS.iter().position(|w| *w == c.param)
+                    && scene.shape[n].continuous
+                {
+                    return art::selector_turned(c, art::shape_angle(scene.shape[n].at), worn);
                 }
                 let mut layer = control(c, v, midi);
                 // A pack's rocker drawn in its two states: its picture on or off, neither
@@ -892,6 +1013,20 @@ impl Renderer {
                 layer
             })
             .collect();
+        // MOD's orbs, where each CONTINUOUS shape is now (decisions.md R-CONTINUOUS-WAVE): over
+        // the switches, one a layer, there or not.
+        for (n, wave) in WAVEFORMS.iter().enumerate() {
+            let shape = scene.shape[n];
+            out.push(
+                match (
+                    shape.orb.filter(|_| shape.continuous),
+                    a.controls.iter().find(|c| c.param == *wave),
+                ) {
+                    (Some(at), Some(c)) => art::shape_orb(c, at, shape.way),
+                    _ => Layer::default(),
+                },
+            );
+        }
         // The fixtures, each drawn about the official layout's place and moved to this one's.
         let at = |(x, y): (f64, f64)| (art::COL + x, art::TOP + y);
         let moved = |mut l: Layer, to: (f64, f64)| {
@@ -1210,12 +1345,20 @@ impl Renderer {
         }
         let first = self.shown.is_none();
         let dials_were = self.shown.as_ref().map(Scene::timed_dials);
+        let arcs_were = self.shown.as_ref().map(Scene::arcs);
         self.shown = Some(scene.clone());
         let dials = scene.timed_dials();
         if dials.contains(&true) && self.timed_background.is_none() {
             let a = self.timed_arrangement();
             self.timed_background = match (self.timed_part(0, &a), self.timed_part(1, &a)) {
                 (Some(two), Some(three)) => Some([two, three]),
+                _ => None,
+            };
+        }
+        let arcs = scene.arcs();
+        if arcs.contains(&true) && self.arc_background.is_none() {
+            self.arc_background = match (self.arc_part(0), self.arc_part(1), self.arc_part(2)) {
+                (Some(a), Some(b), Some(c)) => Some([a, b, c]),
                 _ => None,
             };
         }
@@ -1227,6 +1370,12 @@ impl Renderer {
         for n in 0..2 {
             if dials_were.is_some_and(|d| d[n] != dials[n]) {
                 rects.push(self.timed_rects[n]);
+                changed = true;
+            }
+        }
+        for n in 0..3 {
+            if arcs_were.is_some_and(|a| a[n] != arcs[n]) {
+                rects.push(self.arc_rects[n]);
                 changed = true;
             }
         }
@@ -1292,15 +1441,30 @@ impl Renderer {
             }
             p
         };
-        // A FREQUENCY dial timed: its print from the background drawn so (R-OSC-TIMED).
-        if let (Some(timed), Some(scene)) = (&self.timed_background, &self.shown) {
+        // A FREQUENCY dial timed: its print from the background drawn so (R-OSC-TIMED); a
+        // WAVEFORM switch CONTINUOUS: its place printed with its arc (R-CONTINUOUS-WAVE).
+        if let Some(scene) = &self.shown {
             let dials = scene.timed_dials();
-            for (n, r) in self.timed_rects.iter().enumerate() {
+            let arcs = scene.arcs();
+            let timed = self.timed_background.iter().flat_map(|t| {
+                t.iter()
+                    .zip(self.timed_rects)
+                    .zip(dials)
+                    .filter(|(_, on)| *on)
+                    .map(|(part, _)| part)
+            });
+            let arced = self.arc_background.iter().flat_map(|a| {
+                a.iter()
+                    .zip(self.arc_rects)
+                    .zip(arcs)
+                    .filter(|(_, on)| *on)
+                    .map(|(part, _)| part)
+            });
+            for (part, r) in timed.chain(arced) {
                 let [a0, b0, a1, b1] = [r[0].max(x0), r[1].max(y0), r[2].min(x1), r[3].min(y1)];
-                if !dials[n] || a1 <= a0 || b1 <= b0 {
+                if a1 <= a0 || b1 <= b0 {
                     continue;
                 }
-                let part = &timed[n];
                 let (pw, tw, n4) = (
                     patch.width() as usize,
                     part.width() as usize,
@@ -1412,9 +1576,10 @@ fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
     rects
 }
 
-/// The layers drawn after the controls whatever the scene: POWER, its lamp, OVERLOAD, QUALITY's
-/// opening (its back and its front), the name plate and the TEMPO screen (empty in a plug-in).
-const FIXED: usize = 7;
+/// The layers drawn after the controls whatever the scene: MOD's three orbs (each empty while
+/// it does not show), POWER, its lamp, OVERLOAD, QUALITY's opening (its back and its front), the
+/// name plate and the TEMPO screen (empty in a plug-in).
+const FIXED: usize = 10;
 
 /// The most bands [`in_bands`] draws side by side.
 const BANDS: usize = 8;
@@ -2392,6 +2557,79 @@ mod tests {
         }
     }
 
+    /// Each oscillator's waveform (decisions.md R-CONTINUOUS-WAVE) in either skin: CONTINUOUS
+    /// prints its WAVEFORM's arc (oscillator 3's legends too), puts its MOD key on the panel in its
+    /// way's colour and turns its switch anywhere; MOD's orb comes, moves and goes; each frame put
+    /// together in part is the frame put together whole, and STEPPED again is the frame before,
+    /// to the pixel. Only the switch, its print, its key and the orb change.
+    #[test]
+    fn a_continuous_switchs_arc_key_and_orb_are_drawn_and_undrawn_in_place() {
+        use crate::art::ModWay;
+        let s = 0.2;
+        for skin in [Skin::Drawn, Skin::Worn] {
+            let at = |p: &str| index(p).expect(p);
+            let mut scene = Scene {
+                values: [0.5; CONTROLS.len()],
+                ..Scene::default()
+            };
+            for key in MOD_KEYS {
+                scene.values[at(key)] = 0.0;
+            }
+            let mut r = Renderer::with_skin(skin, s, 1.0);
+            r.render(&scene);
+            let before = r.frame().clone();
+            let steps: [(usize, bool, f64, ModWay, Option<f64>, f64); 7] = [
+                // (Oscillator, CONTINUOUS, its place, MOD's way, its orb, its MOD key.)
+                (0, true, 1.4, ModWay::Clockwise, None, 0.0),
+                (2, true, 5.95, ModWay::Anticlockwise, Some(4.2), 1.0),
+                (0, true, 0.3, ModWay::Both, Some(0.9), 1.0),
+                (0, true, 0.3, ModWay::Both, Some(2.6), 1.0),
+                (2, false, 5.95, ModWay::Anticlockwise, None, 1.0),
+                (1, true, 2.0, ModWay::Clockwise, Some(2.0), 1.0),
+                (1, true, 2.0, ModWay::Clockwise, None, 0.0),
+            ];
+            for (step, &(n, continuous, place, way, orb, key)) in steps.iter().enumerate() {
+                scene.shape[n] = Shaped {
+                    continuous,
+                    at: place,
+                    way,
+                    orb,
+                };
+                scene.values[at(MOD_KEYS[n])] = key;
+                assert!(r.render(&scene), "{skin:?} step {step}");
+                let mut whole = Renderer::with_skin(skin, s, 1.0);
+                whole.render(&scene);
+                assert!(
+                    r.frame() == whole.frame(),
+                    "{skin:?} step {step}: not as put together whole"
+                );
+            }
+            assert_eq!(scene.arcs(), [true, true, false]);
+            // Everything back as it was: the same frame as before, to the pixel.
+            scene.shape = [Shaped::default(); 3];
+            for key in MOD_KEYS {
+                scene.values[at(key)] = 0.0;
+            }
+            r.render(&scene);
+            assert!(r.frame() == &before, "{skin:?}: not the frame before");
+        }
+    }
+
+    /// A WAVEFORM switch's CONTINUOUS print keeps clear of the FREQUENCY dials' (each laid over
+    /// the background alone: R-CONTINUOUS-WAVE, R-OSC-TIMED).
+    #[test]
+    fn the_arcs_print_and_the_timed_dials_print_do_not_meet() {
+        for skin in [Skin::Drawn, Skin::Worn] {
+            let r = Renderer::with_skin(skin, 0.37, 1.0);
+            for a in r.arc_rects {
+                for d in r.timed_rects {
+                    let apart = a[2] <= d[0] || d[2] <= a[0] || a[3] <= d[1] || d[3] <= a[1];
+                    assert!(apart, "{skin:?}: {a:?} meets {d:?}");
+                }
+            }
+        }
+    }
+
     /// A TIMED key away from its RANGE's LO (decisions.md R-OSC-TIMED) in either skin: neither
     /// it, nor its sign, nor its cap's shadow on the panel, on or off, whatever its division: its
     /// place is the plain panel, the frame the same to the pixel as the panel drawn with the keys
@@ -2447,18 +2685,30 @@ mod tests {
     /// OSC. 3 CONTROL while oscillator 3 is timed (decisions.md R-OSC-TIMED) in either skin, on
     /// or off: dimmed in place (the frame put together in part the frame put together whole),
     /// only about the rocker (shaded darker in the worn skin), and live again the frame before,
-    /// to the pixel.
+    /// to the pixel; the same with oscillator 3's waveform CONTINUOUS, its MOD key on the panel
+    /// and on (R-CONTINUOUS-WAVE).
     #[test]
     fn osc3_control_is_dimmed_and_undimmed_in_place() {
         let s = 0.2;
         let at = index("osc3_control").expect("a control");
         for skin in [Skin::Drawn, Skin::Worn] {
-            for on in [0.0, 1.0] {
+            for (on, continuous) in [(0.0, false), (1.0, false), (1.0, true)] {
                 let mut scene = Scene {
                     values: [0.5; CONTROLS.len()],
                     ..Scene::default()
                 };
                 scene.values[at] = on;
+                for key in MOD_KEYS {
+                    scene.values[index(key).expect(key)] = 0.0;
+                }
+                if continuous {
+                    scene.shape[2] = Shaped {
+                        continuous,
+                        at: 4.0,
+                        ..Shaped::default()
+                    };
+                    scene.values[index(MOD_KEYS[2]).expect("a key")] = 1.0;
+                }
                 let mut r = Renderer::with_skin(skin, s, 1.0);
                 r.render(&scene);
                 let before = r.frame().clone();

@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 75] = [
+pub const LEARNABLE: [Learnable; 87] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -178,6 +178,28 @@ pub const LEARNABLE: [Learnable; 75] = [
     knob("pressure_filter", "PRESSURE TO FILTER"),
     knob("timbre_mod", "TIMBRE TO MODULATION"),
     knob("timbre_filter", "TIMBRE TO FILTER"),
+    // Each oscillator's waveform (R-CONTINUOUS-WAVE).
+    switch(
+        "osc1_shape_mode",
+        "OSCILLATOR-1 WAVEFORM (STEPPED or CONTINUOUS)",
+    ),
+    knob("osc1_shape", "OSCILLATOR-1 SHAPE"),
+    switch("osc1_shape_mod", "OSCILLATOR-1 MOD"),
+    stepped("osc1_shape_mod_dir", "OSCILLATOR-1 MOD DIRECTION"),
+    switch(
+        "osc2_shape_mode",
+        "OSCILLATOR-2 WAVEFORM (STEPPED or CONTINUOUS)",
+    ),
+    knob("osc2_shape", "OSCILLATOR-2 SHAPE"),
+    switch("osc2_shape_mod", "OSCILLATOR-2 MOD"),
+    stepped("osc2_shape_mod_dir", "OSCILLATOR-2 MOD DIRECTION"),
+    switch(
+        "osc3_shape_mode",
+        "OSCILLATOR-3 WAVEFORM (STEPPED or CONTINUOUS)",
+    ),
+    knob("osc3_shape", "OSCILLATOR-3 SHAPE"),
+    switch("osc3_shape_mod", "OSCILLATOR-3 MOD"),
+    stepped("osc3_shape_mod_dir", "OSCILLATOR-3 MOD DIRECTION"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -1009,6 +1031,18 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
+        "osc1_shape_mode" => &p.osc1_shape_mode,
+        "osc1_shape" => &p.osc1_shape,
+        "osc1_shape_mod" => &p.osc1_shape_mod,
+        "osc1_shape_mod_dir" => &p.osc1_shape_mod_dir,
+        "osc2_shape_mode" => &p.osc2_shape_mode,
+        "osc2_shape" => &p.osc2_shape,
+        "osc2_shape_mod" => &p.osc2_shape_mod,
+        "osc2_shape_mod_dir" => &p.osc2_shape_mod_dir,
+        "osc3_shape_mode" => &p.osc3_shape_mode,
+        "osc3_shape" => &p.osc3_shape,
+        "osc3_shape_mod" => &p.osc3_shape_mod,
+        "osc3_shape_mod_dir" => &p.osc3_shape_mod_dir,
         _ => return None,
     })
 }
@@ -1062,6 +1096,9 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "pressure_filter" => &p.pressure_filter,
         "timbre_mod" => &p.timbre_mod,
         "timbre_filter" => &p.timbre_filter,
+        "osc1_shape" => &p.osc1_shape,
+        "osc2_shape" => &p.osc2_shape,
+        "osc3_shape" => &p.osc3_shape,
         _ => return None,
     })
 }
@@ -1182,8 +1219,9 @@ mod tests {
             ),
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
             // ON and HOLD switches; the expression's four reaches, knobs: R-MPE; oscillators
-            // 2's and 3's timed DIVISION and TIMED.)
-            (33, 13, 27)
+            // 2's and 3's timed DIVISION and TIMED; each oscillator's waveform: its SHAPE knob,
+            // its STEPPED or CONTINUOUS and its MOD switches, its MOD DIRECTION stepped.)
+            (36, 16, 33)
         );
     }
 

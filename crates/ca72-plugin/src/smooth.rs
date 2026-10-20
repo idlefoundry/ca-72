@@ -42,9 +42,10 @@ pub const LAND_WAIT: f64 = 0.5;
 
 /// The knobs that glide, by their parameters' IDs: every continuous control of the panel and
 /// the strip (the learnable knobs, `learn::knob_param`'s), and the panel's PITCH and
-/// MODULATION wheels, and the per-note expression's four reaches (decisions.md R-MPE). Not the
-/// arpeggiator's GATE and SWING ([`TIMING`]).
-pub const KNOBS: [&str; 33] = [
+/// MODULATION wheels, the per-note expression's four reaches (decisions.md R-MPE), and each
+/// oscillator's CONTINUOUS shape (R-CONTINUOUS-WAVE). Not the arpeggiator's GATE and SWING
+/// ([`TIMING`]).
+pub const KNOBS: [&str; 36] = [
     "tune",
     "glide",
     "mod_mix",
@@ -78,6 +79,9 @@ pub const KNOBS: [&str; 33] = [
     "pressure_filter",
     "timbre_mod",
     "timbre_filter",
+    "osc1_shape",
+    "osc2_shape",
+    "osc3_shape",
 ];
 
 /// The continuous knobs that do not glide: the arpeggiator's GATE and SWING, which set when its
@@ -121,6 +125,9 @@ pub fn param(p: &Ca72Params, k: usize) -> Option<&FloatParam> {
         30 => &p.pressure_filter,
         31 => &p.timbre_mod,
         32 => &p.timbre_filter,
+        33 => &p.osc1_shape,
+        34 => &p.osc2_shape,
+        35 => &p.osc3_shape,
         _ => return None,
     })
 }
