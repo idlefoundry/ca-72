@@ -100,6 +100,14 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         lock: r.end(),
         potato: r.end(),
         ultra: r.end(),
+        // (Oscillator 3 timed at its slowest and fastest divisions, or not.)
+        osc3_timed: r.end().then(|| {
+            if r.end() {
+                ca72_plugin::timed::Length::Bars(4.0)
+            } else {
+                ca72_plugin::timed::Length::Beats(0.125)
+            }
+        }),
     }
 }
 

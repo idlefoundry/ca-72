@@ -880,3 +880,118 @@ fn the_arpeggiator_neither_allocates_nor_frees() {
         "the arpeggiator allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
     );
 }
+
+/// Oscillator 3 timed (decisions.md R-OSC3-TIMED) neither allocates nor frees while it plays:
+/// TIMED switched, RANGE moved to and from LO, DIVISION and QUALITY automated (LO, HI, ULTRA),
+/// oscillator 3 heard and on the modulation, the transport playing, jumping back (a loop),
+/// changing tempo and stopping, keys pressed and let go, in the plug-in's own process.
+#[test]
+fn oscillator_3_timed_neither_allocates_nor_frees() {
+    use ca72_plugin::Ca72;
+    use nih_plug::context::process::TestProcessContext;
+    use nih_plug::prelude::*;
+
+    struct Init;
+    impl InitContext<Ca72> for Init {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Clap
+        }
+        fn execute(&self, _: ()) {}
+        fn set_latency_samples(&self, _: u32) {}
+        fn set_current_voice_capacity(&self, _: u32) {}
+    }
+
+    let _serial = start();
+    let mut p = Ca72::default();
+    let config = BufferConfig {
+        sample_rate: RATE as f32,
+        min_buffer_size: None,
+        max_buffer_size: BLOCK as u32,
+        process_mode: ProcessMode::Realtime,
+    };
+    assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
+    let params = p.params();
+    let a = p.parameters().clone();
+    let mut c = TestProcessContext::<Ca72>::new(params, RATE as f32, ProcessMode::Realtime);
+    for (q, v) in [
+        (a.osc3_timed.as_ptr(), 1.0),
+        (a.osc3_range.as_ptr(), 0.0),
+        (a.osc3_on.as_ptr(), 1.0),
+        (a.osc_mod.as_ptr(), 1.0),
+        (a.filter_mod.as_ptr(), 1.0),
+        (a.mod_wheel.as_ptr(), 0.5),
+    ] {
+        assert!(c.automate(q, v));
+    }
+    let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
+    let mut buffer = Buffer::default();
+    // SAFETY: both slices are `BLOCK` long and live as long as the buffer.
+    unsafe {
+        buffer.set_slices(BLOCK, |s| {
+            s.clear();
+            s.push(&mut l);
+            s.push(&mut r);
+        });
+    }
+    let mut aux = AuxiliaryBuffers {
+        inputs: &mut [],
+        outputs: &mut [],
+    };
+    let key = |timing: u32, note: u8, on: bool| {
+        if on {
+            NoteEvent::NoteOn {
+                timing,
+                voice_id: None,
+                channel: 0,
+                note,
+                velocity: 1.0,
+            }
+        } else {
+            NoteEvent::NoteOff {
+                timing,
+                voice_id: None,
+                channel: 0,
+                note,
+                velocity: 0.0,
+            }
+        }
+    };
+    HERE.with(|h| h.set(true));
+    let mut beats = 0.0;
+    for b in 0..900usize {
+        // (The host's queue filled and its automation set off the count.)
+        ARMED.store(false, Ordering::SeqCst);
+        if b % 300 == 250 {
+            beats = 4.0;
+        }
+        let playing = b % 400 < 330;
+        let tempo = 90.0 + (b % 5) as f64 * 17.3;
+        c.set_transport(playing, Some(tempo), Some(beats), Some((4, 4)));
+        beats += BLOCK as f64 * tempo / 60.0 / RATE;
+        if b % 60 == 0 {
+            c.push_event(key(3, 48 + (b / 60 % 7) as u8, true));
+        }
+        if b % 60 == 45 {
+            c.push_event(key(9, 48 + (b / 60 % 7) as u8, false));
+        }
+        let k = (b / 19) as f32;
+        c.automate(a.osc3_division.as_ptr(), (k % 18.0) / 17.0);
+        c.automate(a.osc3_timed.as_ptr(), if b % 170 < 150 { 1.0 } else { 0.0 });
+        c.automate(a.osc3_range.as_ptr(), if b % 130 < 100 { 0.0 } else { 0.6 });
+        c.automate(a.quality.as_ptr(), (b / 300) as f32 / 2.0);
+        ARMED.store(true, Ordering::SeqCst);
+        p.process(&mut buffer, &mut aux, &mut c);
+    }
+    ARMED.store(false, Ordering::SeqCst);
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "oscillator 3 timed allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+    );
+}

@@ -44,6 +44,7 @@ fn threads_give_the_same_samples_as_one() {
             } else {
                 0.0
             },
+            timed: None,
         }
     };
     let (mut at, mut block, mut compared) = (0usize, 0usize, 0usize);

@@ -40,7 +40,7 @@ use crate::tuning::{
 };
 use crate::vca::{OversampledVca, Vca, VcaCircuit, VcaDrive};
 use crate::vcf::{ExpoTable, FilterExpo, Vcf};
-use crate::vco::{Vco, VcoOut};
+use crate::vco::{Timed, Vco, VcoOut};
 
 #[cfg(test)]
 mod loop_lab;
@@ -771,7 +771,9 @@ pub struct Contacts {
 ///
 /// With them, the plug-in's ENTROPY (decisions.md; not the instrument's): each oscillator off its
 /// calibration by `detune` cents and the filter's cutoff off its by `cutoff` octaves, both
-/// 0 for the circuit as drawn (the samples then the same to the bit).
+/// 0 for the circuit as drawn (the samples then the same to the bit). And oscillator 3 timed
+/// (decisions.md R-OSC3-TIMED; the plug-in's too): where its cycle stands on the host's clock,
+/// at RANGE's LO; none, the circuit's own.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Jacks {
     pub ext: f64,
@@ -781,6 +783,7 @@ pub struct Jacks {
     pub s_trig: bool,
     pub detune: [f64; 3],
     pub cutoff: f64,
+    pub timed: Option<Timed>,
 }
 
 /// The volts an octave at a 100K input to the filter's control node, as R51 (the FILTER
@@ -1305,6 +1308,12 @@ impl Voice {
     /// timing current, A.
     pub fn probe_pitch(&self) -> (f64, [f64; 3]) {
         (self.audio.last.0, self.audio.front.last_i)
+    }
+
+    /// Oscillator 3's latest reset: how long before the latest sample, exact, and how many it
+    /// has made (a probe of oscillator 3 timed: decisions.md R-OSC3-TIMED).
+    pub fn probe_osc3_reset(&self) -> (f64, u64) {
+        self.audio.front.vcos[2].reset_ago()
     }
 
     /// Oscillator `n`'s (0, 1, 2) latest reset: its time in samples and how many it has
@@ -2096,27 +2105,37 @@ impl FrontPart {
                 g_bus += 1.0 / 33e3;
                 continue;
             }
-            let osc = match n {
-                0 => Osc::One,
-                1 => Osc::Two { freq: op.freq },
-                _ => Osc::Three {
-                    freq: op.freq,
-                    control: p.osc3_control,
-                },
-            };
-            let mut tuning = self.tunings[n];
-            tuning.tune += p.tune.clamp(-1.0, 1.0) * TUNE_HALF_SPAN;
-            let mut d = osc_drive_with(osc, &tuning, v_kbd, &buses, op.range);
-            if j.detune[n] != 0.0 {
-                // ENTROPY (the plug-in's): the oscillator off its calibration, as an offset at
-                // its range tap (R43), which the octave trimmer set to an octave a step.
-                d.inputs[5].v += j.detune[n] / 1200.0 * tuning.octave_step;
-            }
-            let i_in = d.apply(&mut self.vcos[n].expo);
             self.vcos[n].set_oversample(oversampling(p.quality).0);
             self.vcos[n].table_on = p.quality == Quality::Potato;
             self.vcos[n].set_outputs(outputs_of(op.waveform, n));
-            let o = self.vcos[n].tick(i_in, op.waveform.width());
+            let o = match j.timed {
+                // Oscillator 3 timed at LO (the plug-in's: decisions.md R-OSC3-TIMED): its
+                // resets on the host's clock, none of its pitch inputs or ENTROPY in it.
+                Some(t) if n == 2 && op.range == Range::Lo => {
+                    self.vcos[n].tick_timed(t, op.waveform.width())
+                }
+                _ => {
+                    let osc = match n {
+                        0 => Osc::One,
+                        1 => Osc::Two { freq: op.freq },
+                        _ => Osc::Three {
+                            freq: op.freq,
+                            control: p.osc3_control,
+                        },
+                    };
+                    let mut tuning = self.tunings[n];
+                    tuning.tune += p.tune.clamp(-1.0, 1.0) * TUNE_HALF_SPAN;
+                    let mut d = osc_drive_with(osc, &tuning, v_kbd, &buses, op.range);
+                    if j.detune[n] != 0.0 {
+                        // ENTROPY (the plug-in's): the oscillator off its calibration, as an
+                        // offset at its range tap (R43), which the octave trimmer set to an
+                        // octave a step.
+                        d.inputs[5].v += j.detune[n] / 1200.0 * tuning.octave_step;
+                    }
+                    let i_in = d.apply(&mut self.vcos[n].expo);
+                    self.vcos[n].tick(i_in, op.waveform.width())
+                }
+            };
             self.last_i[n] = self.vcos[n].timing_current();
             // Oscillator 3's reverse sawtooth stage runs while its sawtooth or reverse
             // sawtooth is selected (R171 loads the sawtooth).

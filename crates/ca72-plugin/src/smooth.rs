@@ -436,6 +436,8 @@ mod tests {
             "arp_octaves",
             "arp_gate",
             "arp_swing",
+            "osc3_timed",
+            "osc3_division",
         ] {
             assert_eq!(index(id), None, "{id} does not glide");
         }

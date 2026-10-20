@@ -292,6 +292,8 @@ the parameter's id in `ca72_set`/`ca72_get`, unless it says otherwise.
 | | WHERE THE VOICES SOUND | display | | not exposed (see below) |
 | Not on the panel | LOCK (oscillators identical) | switch | on/off (off); in the MIDI list only | `lock` |
 | | MIDI BEND RANGE | host parameter | 0 to 8.07 semitones (2) | `midi_bend_range` |
+| | OSC. 3 TIMED (decisions.md R-OSC3-TIMED) | host parameter, switch | on/off (off); at oscillator 3's RANGE LO only, its cycle a note value of the host's tempo; in the MIDI list. Its key on the panel waits for the owner's choice of mock-up | `osc3_timed` |
+| | OSC. 3 DIVISION | host parameter, 18 steps | 4 bars, 2 bars, 1 bar, 1/2 dotted, 1/1 triplet, 1/2, 1/4 dotted, 1/2 triplet, 1/4, 1/8 dotted, 1/4 triplet, 1/8, 1/16 dotted, 1/8 triplet, 1/16, 1/32 dotted, 1/16 triplet, 1/32 (1/4) | `osc3_division` |
 
 ### The rail, the presets' drawer and the update check
 

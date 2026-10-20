@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 67] = [
+pub const LEARNABLE: [Learnable; 69] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -109,6 +109,9 @@ pub const LEARNABLE: [Learnable; 67] = [
     stepped("osc2_waveform", "OSCILLATOR-2 WAVEFORM"),
     stepped("osc3_waveform", "OSCILLATOR-3 WAVEFORM"),
     switch("osc3_control", "OSC. 3 CONTROL"),
+    // Oscillator 3 timed (R-OSC3-TIMED): DIVISION's steps as RATE's.
+    switch("osc3_timed", "OSC. 3 TIMED"),
+    stepped("osc3_division", "OSC. 3 DIVISION"),
     // MIXER.
     knob("osc1_volume", "OSCILLATOR-1 VOLUME"),
     switch("osc1_on", "OSCILLATOR-1 ON"),
@@ -939,6 +942,8 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "osc2_waveform" => &p.osc2_waveform,
         "osc3_waveform" => &p.osc3_waveform,
         "osc3_control" => &p.osc3_control,
+        "osc3_timed" => &p.osc3_timed,
+        "osc3_division" => &p.osc3_division,
         "osc1_volume" => &p.osc1_volume,
         "osc1_on" => &p.osc1_on,
         "ext_volume" => &p.ext_volume,
@@ -1159,8 +1164,8 @@ mod tests {
                 counts(Kind::Switch)
             ),
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
-            // ON and HOLD switches.)
-            (29, 11, 25)
+            // ON and HOLD switches; oscillator 3 timed's DIVISION and TIMED.)
+            (29, 12, 26)
         );
     }
 

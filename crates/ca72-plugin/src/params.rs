@@ -287,6 +287,68 @@ pub enum ArpRate {
     ThirtySecond,
 }
 
+/// Oscillator 3's DIVISION, timed (decisions.md R-OSC3-TIMED): its cycle a note value, slow to
+/// fast as its dial turns, 4, 2 and 1 bars, then each straight value's dotted and triplet ones
+/// between it and the next (`crate::timed::DIVISIONS`, in the same order); its ids the
+/// arpeggiator's RATE's form.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Osc3Division {
+    #[id = "4bars"]
+    #[name = "4 bars"]
+    FourBars,
+    #[id = "2bars"]
+    #[name = "2 bars"]
+    TwoBars,
+    #[id = "1bar"]
+    #[name = "1 bar"]
+    Bar,
+    #[id = "1/2d"]
+    #[name = "1/2 dotted"]
+    HalfDotted,
+    #[id = "1/1t"]
+    #[name = "1/1 triplet"]
+    WholeTriplet,
+    #[id = "1/2"]
+    #[name = "1/2"]
+    Half,
+    #[id = "1/4d"]
+    #[name = "1/4 dotted"]
+    QuarterDotted,
+    #[id = "1/2t"]
+    #[name = "1/2 triplet"]
+    HalfTriplet,
+    #[id = "1/4"]
+    #[name = "1/4"]
+    Quarter,
+    #[id = "1/8d"]
+    #[name = "1/8 dotted"]
+    EighthDotted,
+    #[id = "1/4t"]
+    #[name = "1/4 triplet"]
+    QuarterTriplet,
+    #[id = "1/8"]
+    #[name = "1/8"]
+    Eighth,
+    #[id = "1/16d"]
+    #[name = "1/16 dotted"]
+    SixteenthDotted,
+    #[id = "1/8t"]
+    #[name = "1/8 triplet"]
+    EighthTriplet,
+    #[id = "1/16"]
+    #[name = "1/16"]
+    Sixteenth,
+    #[id = "1/32d"]
+    #[name = "1/32 dotted"]
+    ThirtySecondDotted,
+    #[id = "1/16t"]
+    #[name = "1/16 triplet"]
+    SixteenthTriplet,
+    #[id = "1/32"]
+    #[name = "1/32"]
+    ThirtySecond,
+}
+
 /// The arpeggiator's OCTAVES: 1 to 5 (the owner, 2026-10-19: "let's add 5 octaves as an
 /// option"; a value saved as 1 to 4 is the same octaves still, saved plain).
 pub const ARP_OCTAVES: (i32, i32) = (1, crate::arp::MOST_OCTAVES as i32);
@@ -561,6 +623,21 @@ pub struct Ca72Params {
     /// SWING: every second step late, up to three quarters of the way through the pair.
     #[id = "arp_swing"]
     pub arp_swing: FloatParam,
+
+    // Oscillator 3 timed (decisions.md R-OSC3-TIMED), the plug-in's own, after the
+    // arpeggiator's, so that no parameter before them moves. A preset's, as any sound
+    // parameter: a preset or a session saved before reads it off (`Ca72::filter_state`,
+    // `presets::targets`).
+    /// TIMED: at RANGE's LO, oscillator 3's cycle DIVISION of the host's tempo, its resets on
+    /// the host's beats and bars, FREQUENCY's own place kept for when it is off; at any other
+    /// RANGE, nothing.
+    #[id = "osc3_timed"]
+    pub osc3_timed: BoolParam,
+    /// DIVISION: the cycle's note value, a parameter of its own (not FREQUENCY's knob read
+    /// otherwise): stepped, so that automation and presets name a value, never a place
+    /// between two.
+    #[id = "osc3_division"]
+    pub osc3_division: EnumParam<Osc3Division>,
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -842,6 +919,8 @@ impl Default for Ca72Params {
             .with_unit(" %")
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
             arp_swing: percent("Arp Swing"),
+            osc3_timed: BoolParam::new("Osc 3 Timed", false),
+            osc3_division: EnumParam::new("Osc 3 Division", Osc3Division::Quarter),
         }
     }
 }
@@ -891,6 +970,20 @@ impl Ca72Params {
             gate: f64::from(self.arp_gate.value()) / 100.0,
             swing: f64::from(self.arp_swing.value()) / 100.0,
         }
+    }
+
+    /// Oscillator 3 timed's cycle (decisions.md R-OSC3-TIMED), if TIMED is on (whatever
+    /// RANGE is: the engine applies it at LO only).
+    pub fn osc3_timed(&self) -> Option<crate::timed::Length> {
+        self.osc3_timed
+            .value()
+            .then(|| crate::timed::DIVISIONS[self.osc3_division.value().to_index()].1)
+    }
+
+    /// Whether oscillator 3 is timed now: TIMED on and RANGE at LO (at any other RANGE it does
+    /// nothing).
+    pub fn osc3_timed_now(&self) -> bool {
+        self.osc3_timed.value() && self.osc3_range.value() == Footage::Lo
     }
 
     /// How the FREQUENCY knobs' dials read on this computer.
@@ -1012,6 +1105,7 @@ impl Ca72Params {
             lock: self.lock.value(),
             potato: self.quality.value() == QualityMode::Lo,
             ultra: self.quality.value() == QualityMode::Ultra,
+            osc3_timed: self.osc3_timed(),
         }
     }
 }

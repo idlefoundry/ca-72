@@ -511,6 +511,14 @@ impl Arp {
         }
     }
 
+    /// The clock it plays by, as the last block began: where that was, quarter notes (the
+    /// host's place while it plays and says, else run on at the tempo from where it was), and
+    /// quarter notes a sample. Oscillator 3 timed keeps time by it too (decisions.md
+    /// R-OSC3-TIMED), so that the two agree.
+    pub fn position(&self) -> (f64, f64) {
+        (self.pos, self.per)
+    }
+
     /// A key pressed or let go `at` samples into the block.
     pub fn key(&mut self, key: u8, on: bool, at: usize, out: &mut impl FnMut(u8, bool)) {
         if key > 127 {

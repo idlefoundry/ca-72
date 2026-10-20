@@ -19,6 +19,7 @@
 
 use crate::resample::{BlepTables, Decimator, Interpolator};
 use crate::tuning::FREQ_CENTRE;
+use crate::vco::Timed;
 #[cfg(test)]
 use crate::voice::OscPanel;
 use crate::voice::{
@@ -1001,6 +1002,11 @@ pub struct Light {
     /// ENTROPY's offsets: each oscillator's cents and the cutoff's octaves.
     detune: [f64; 3],
     cutoff_offset: f64,
+    /// Oscillator 3 timed: where its cycle stands on the host's clock (decisions.md
+    /// R-OSC3-TIMED), for the samples that follow; its latest reset while timed, in samples
+    /// as [`Light::probe_resets`] counts them, and how many there have been.
+    timed: Option<Timed>,
+    osc3_resets: (f64, u64),
     /// Oscillator 3's last sample (the modulation's source).
     osc3: f32,
     /// A-440's phase and its step a sample.
@@ -1126,6 +1132,8 @@ impl Light {
             count: 0,
             detune: [0.0; 3],
             cutoff_offset: 0.0,
+            timed: None,
+            osc3_resets: (0.0, 0),
             osc3: 0.0,
             a440: (0.0, (440.0 / rate) as f32),
             feedback: 0.0,
@@ -1183,6 +1191,15 @@ impl Light {
         self.filter_volts = f0.0 + (f1.0 - f0.0) * part;
         let (l0, l1, part) = at(self.late.1);
         l0.1 + (l1.1 - l0.1) * part
+    }
+
+    /// Oscillator 3's latest reset while timed (decisions.md R-OSC3-TIMED), how long before the
+    /// latest sample, exact, and how many there have been (a probe).
+    pub fn probe_osc3_reset(&self) -> (f64, u64) {
+        (
+            self.samples as f64 - 1.0 - self.osc3_resets.0,
+            self.osc3_resets.1,
+        )
     }
 
     /// Oscillator 1's latest reset (its phase's wrap) in samples since the voice was made,
@@ -1382,6 +1399,12 @@ impl Light {
     pub fn set_offsets(&mut self, detune: [f64; 3], cutoff: f64) {
         self.detune = detune;
         self.cutoff_offset = cutoff;
+    }
+
+    /// Oscillator 3 timed, for the samples that follow (decisions.md R-OSC3-TIMED): where its
+    /// cycle stands on the host's clock, the panel's RANGE at LO; none, its own.
+    pub fn set_timed(&mut self, timed: Option<Timed>) {
+        self.timed = timed;
     }
 
     /// A MIDI note pressed or released.
@@ -1714,7 +1737,46 @@ impl Light {
         // (Oscillator 3 also as the modulation's source; neither heard nor modulating, its
         // phase rests, as an unheard free-running oscillator's may.)
         let w2 = if gain[2] != 0.0 || modulating {
-            self.osc[2].tick(dt[2], inv[2])
+            match self.timed {
+                // Timed (decisions.md R-OSC3-TIMED): each sample the step that puts it where
+                // the host's clock has it (worked out in double precision, its own phase
+                // single), none of the pitch's inputs in it; further off than the tolerance
+                // (the clock jumped), put there at once.
+                Some(t) => {
+                    let per = if t.per.is_finite() {
+                        t.per.clamp(1e-12, 0.25)
+                    } else {
+                        1e-12
+                    };
+                    let now = if t.phase.is_finite() {
+                        t.phase.rem_euclid(1.0)
+                    } else {
+                        0.0
+                    };
+                    let mut step = now - f64::from(self.osc[2].phase);
+                    step -= step.round();
+                    if (step - per).abs() > crate::vco::TIMED_TOLERANCE {
+                        // (Where the clock was a sample before; a whole cycle there is its
+                        // start, just past its wrap.)
+                        let before = (now - per).rem_euclid(1.0);
+                        self.osc[2].phase = if before < 1.0 {
+                            (before as f32).min(1.0 - f32::EPSILON / 2.0)
+                        } else {
+                            0.0
+                        };
+                        step = per;
+                    }
+                    let step = step.clamp(per * 1e-3, 0.45) as f32;
+                    let before = self.osc[2].phase;
+                    let w = self.osc[2].tick(step, 1.0 / step);
+                    if self.osc[2].phase < before {
+                        let at = (self.samples - 1) as f64 - f64::from(self.osc[2].phase / step);
+                        self.osc3_resets = (at, self.osc3_resets.1 + 1);
+                    }
+                    w
+                }
+                None => self.osc[2].tick(dt[2], inv[2]),
+            }
         } else {
             0.0
         };

@@ -18,9 +18,11 @@
 //! (without DOUBLE) at the next of VOICES's places at each attack, a note played legato staying
 //! where its phrase began (decisions.md R62); ENTROPY at 5 % and SPREAD at 0 by default (R-ENTROPY-FLOOR).
 
+use crate::timed::{Length, Position};
 use ca72::light::Light;
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::resample::{Decimator, Interpolator};
+use ca72::vco::Timed;
 use ca72::voice::{Jacks, LINE_UP, Panel, Quality, RETRIGGER_GAP, Voice, audio_taper};
 
 use crate::character::{Character, Placement};
@@ -157,6 +159,9 @@ pub struct Controls {
     /// QUALITY at ULTRA: the circuit's model with no compromises (`Quality::NoCompromises`),
     /// not at its real-time setting (decisions.md R48). Switched while it plays.
     pub ultra: bool,
+    /// Oscillator 3 timed (decisions.md R-OSC3-TIMED): its cycle's length on the host's clock
+    /// ([`Engine::set_position`]) while RANGE is at LO; none, or at any other RANGE, its own.
+    pub osc3_timed: Option<Length>,
 }
 
 impl Default for Controls {
@@ -182,6 +187,7 @@ impl Default for Controls {
             lock: false,
             potato: false,
             ultra: false,
+            osc3_timed: None,
         }
     }
 }
@@ -709,7 +715,7 @@ impl Playing {
                 // filter, the pair, and each on from it.
                 let voice = &mut self.voice;
                 self.key.step(gate, note, |k, on| voice.note(k, on));
-                let mut j = jacks(&mut self.character, x, rate, m);
+                let mut j = jacks(&mut self.character, x, rate, m, k);
                 if p.doubled {
                     j.detune = j.detune.map(|d| d - p.half);
                 }
@@ -717,7 +723,7 @@ impl Playing {
                 let twin = &mut t.voice;
                 t.key
                     .step(gate && p.doubled, note, |k, on| twin.note(k, on));
-                let mut jt = jacks(&mut t.character, x, rate, m);
+                let mut jt = jacks(&mut t.character, x, rate, m, k);
                 if p.doubled {
                     jt.detune = jt.detune.map(|d| d + p.half);
                 }
@@ -747,7 +753,7 @@ impl Playing {
             }
             let voice = &mut self.voice;
             self.key.step(gate, note, |k, on| voice.note(k, on));
-            let mut j = jacks(&mut self.character, x, rate, m);
+            let mut j = jacks(&mut self.character, x, rate, m, k);
             if p.doubled {
                 j.detune = j.detune.map(|d| d - p.half);
             }
@@ -764,7 +770,7 @@ impl Playing {
                 let voice = &mut t.voice;
                 t.key
                     .step(gate && p.doubled, note, |k, on| voice.note(k, on));
-                let mut j = jacks(&mut t.character, x, rate, m);
+                let mut j = jacks(&mut t.character, x, rate, m, k);
                 if p.doubled {
                     j.detune = j.detune.map(|d| d + p.half);
                 }
@@ -883,7 +889,7 @@ impl Playing {
         }
         let voice = &mut self.voice;
         self.key.step(gate, l.note, |k, on| voice.note(k, on));
-        let mut j = jacks(&mut self.character, x, rate, m);
+        let mut j = jacks(&mut self.character, x, rate, m, k);
         if l.p.doubled {
             j.detune = j.detune.map(|d| d - l.p.half);
         }
@@ -955,7 +961,7 @@ impl Playing {
                     *count += 1;
                 }
             });
-            let mut j = jacks(&mut self.character, x, rate, m);
+            let mut j = jacks(&mut self.character, x, rate, m, k);
             if p.doubled {
                 j.detune = j.detune.map(|d| d - p.half);
             }
@@ -969,7 +975,7 @@ impl Playing {
                         *count += 1;
                     }
                 });
-                let mut j = jacks(&mut t.character, x, rate, m);
+                let mut j = jacks(&mut t.character, x, rate, m, k);
                 if p.doubled {
                     j.detune = j.detune.map(|d| d + p.half);
                 }
@@ -1089,13 +1095,14 @@ impl Playing {
             }
             let light = &mut self.light;
             self.key.step(gate, note, |k, on| light.note(k, on));
-            let j = jacks(&mut self.character, x, rate, m);
+            let j = jacks(&mut self.character, x, rate, m, k);
             let detune = if p.doubled {
                 j.detune.map(|d| d - p.half)
             } else {
                 j.detune
             };
             self.light.set_offsets(detune, j.cutoff);
+            self.light.set_timed(j.timed);
             let mut y = self.light.tick(x);
             if !y.is_finite() {
                 self.broken = true;
@@ -1108,13 +1115,14 @@ impl Playing {
                 let light = &mut t.light;
                 t.key
                     .step(gate && p.doubled, note, |k, on| light.note(k, on));
-                let j = jacks(&mut t.character, x, rate, m);
+                let j = jacks(&mut t.character, x, rate, m, k);
                 let detune = if p.doubled {
                     j.detune.map(|d| d + p.half)
                 } else {
                     j.detune
                 };
                 t.light.set_offsets(detune, j.cutoff);
+                t.light.set_timed(j.timed);
                 let mut z = t.light.tick(x);
                 if !z.is_finite() {
                     self.broken = true;
@@ -1390,6 +1398,12 @@ pub struct Engine {
     /// How often the workers were started (for the tests).
     #[cfg(test)]
     pool_starts: u64,
+    /// The clock oscillator 3 timed keeps (decisions.md R-OSC3-TIMED): where the music was as
+    /// the block began ([`Engine::set_position`]; until told, 120 BPM from the start), the host
+    /// samples played since, and the host sample the voices are at now, from it.
+    position: Position,
+    since: f64,
+    cursor: f64,
 }
 
 impl Default for Engine {
@@ -1415,6 +1429,9 @@ impl Engine {
             over: None,
             line_up: OutputDelay::new(),
             rate: 0.0,
+            position: Position::start(crate::timed::FALLBACK_TEMPO, 48_000.0),
+            since: 0.0,
+            cursor: 0.0,
             seed: 0,
             gain: output_gain(controls.volume, controls.main_output),
             controls,
@@ -1500,6 +1517,10 @@ impl Engine {
 
     /// [`Engine::prepare`]'s work, on whichever thread runs it.
     fn prepare_here(&mut self, rate: f64, seed: u64) {
+        if rate != self.rate {
+            self.position = Position::start(crate::timed::FALLBACK_TEMPO, rate);
+            (self.since, self.cursor) = (0.0, 0.0);
+        }
         // (The machine's cores, which ULTRA's split crews are sized by, read here, off the
         // audio thread: an instance made at LO read them at ULTRA's first block, a file read
         // and memory taken on the audio thread, once a process.)
@@ -1730,6 +1751,49 @@ impl Engine {
     /// When the present block's voices must be done by: a voice a worker has not finished
     /// then is silent for the run, not waited for (None: waited for). The plug-in sets it at
     /// each block's start, when POLY's workers also follow POLY ([`Engine::follow_poly`]).
+    /// Where the music is as a block begins, for oscillator 3 timed (decisions.md
+    /// R-OSC3-TIMED): its samples' places on the clock are counted from here, each from this,
+    /// never added up from the blocks before.
+    pub fn set_position(&mut self, p: Position) {
+        self.position = p;
+        (self.since, self.cursor) = (0.0, 0.0);
+    }
+
+    /// Oscillator 3's place on the clock `at` host samples after the block's start, and its
+    /// cycles a voice's sample, if it is timed and RANGE is at LO (at any other RANGE timed
+    /// mode does nothing).
+    fn timed_at(&self, at: f64) -> Option<Timed> {
+        let length = self.controls.osc3_timed?;
+        if self.controls.panel.osc[2].range != ca72::tuning::Range::Lo {
+            return None;
+        }
+        let (phase, per) = self.position.cycle(length);
+        let factor = self.over.as_ref().map_or(1, |o| o.factor) as f64;
+        let now = phase + at * per;
+        Some(Timed {
+            phase: now - now.floor(),
+            per: per / factor,
+        })
+    }
+
+    /// [`Engine::timed_at`], for the tests.
+    #[cfg(test)]
+    pub(crate) fn timed_probe(&self, at: f64) -> Option<Timed> {
+        self.timed_at(at)
+    }
+
+    /// The one instrument's oscillator 3's latest reset, how long before its latest sample and
+    /// how many it has made (the model QUALITY plays), for the tests.
+    #[cfg(test)]
+    pub(crate) fn osc3_reset(&self) -> Option<(f64, u64)> {
+        let p = self.slots.first()?.play.try_lock().ok()?;
+        Some(if p.potato {
+            p.light.probe_osc3_reset()
+        } else {
+            p.voice.probe_osc3_reset()
+        })
+    }
+
     pub fn set_deadline(&mut self, deadline: Option<Instant>) {
         self.deadline = deadline;
         // (The host's thread's time in the plug-in is counted from here to the block's end.)
@@ -2078,6 +2142,8 @@ impl Engine {
     /// off, once faded out, the voices rest (the MIDI input still reaches them). Held back as
     /// [`Engine::render`] holds it ([`LINE_UP`]).
     pub fn tick_stereo(&mut self, ext: f32) -> (f32, f32) {
+        self.cursor = self.since;
+        self.since += 1.0;
         let (l, r) = self.voices_stereo(ext);
         let (mut l, mut r) = ([l], [r]);
         let late = self.lined_up();
@@ -2106,7 +2172,10 @@ impl Engine {
                 let mut ins = [0.0; 8];
                 o.up.push(f64::from(ext), &mut ins[..o.factor]);
                 let (mut l, mut r) = (0.0, 0.0);
-                for x in &ins[..o.factor] {
+                let at = self.cursor;
+                for (j, x) in ins[..o.factor].iter().enumerate() {
+                    // (Each of the voices' samples at its own place on the clock.)
+                    self.cursor = at + j as f64 / o.factor as f64;
                     let (a, b) = self.sample(*x, rate);
                     if let Some(d) = o.down[0].push(a) {
                         l = d;
@@ -2115,6 +2184,7 @@ impl Engine {
                         r = d;
                     }
                 }
+                self.cursor = at;
                 self.over = Some(o);
                 (l, r)
             }
@@ -2135,6 +2205,8 @@ impl Engine {
     /// silence, as as many samples would give, without them (decisions.md R68).
     pub fn render(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
         let len = left.len().min(right.len());
+        let from = self.since;
+        self.since += len as f64;
         if self.rest.asleep {
             if self.dormant(&ext[..ext.len().min(len)]) {
                 left[..len].fill(0.0);
@@ -2146,7 +2218,7 @@ impl Engine {
             }
             self.rest.wake();
         }
-        self.render_voices(ext, &mut left[..len], &mut right[..len]);
+        self.render_voices(ext, &mut left[..len], &mut right[..len], from);
         let late = self.lined_up();
         self.line_up.hold(late, &mut left[..len], &mut right[..len]);
         if !self.many() {
@@ -2194,8 +2266,9 @@ impl Engine {
                 .all(|x| !x.is_finite() || f64::from(x.abs()) < SILENT)
     }
 
-    /// [`Engine::render`]'s samples, played.
-    fn render_voices(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32]) {
+    /// [`Engine::render`]'s samples, played, the first `from` host samples after the block's
+    /// start.
+    fn render_voices(&mut self, ext: &[f32], left: &mut [f32], right: &mut [f32], from: f64) {
         let len = left.len().min(right.len());
         let at = |i: usize| ext.get(i).copied().filter(|x| x.is_finite()).unwrap_or(0.0);
         // (At QUALITY's LO the one instrument too plays a run at a time: its light voice costs
@@ -2204,15 +2277,18 @@ impl Engine {
         let runs = self.many() || self.controls.potato || !self.crews().is_empty();
         if !runs || self.over.is_some() || self.slots.is_empty() {
             for i in 0..len {
+                self.cursor = from + i as f64;
                 (left[i], right[i]) = self.voices_stereo(at(i));
             }
             return;
         }
         let rate = self.voice_rate();
-        let mix = self.mix();
+        let mut mix = self.mix();
         let mut start = 0;
         while start < len {
             self.settle();
+            // (Oscillator 3 timed: the run's first sample's place on the clock.)
+            mix.timed = self.timed_at(from + start as f64);
             let mut n = (len - start).min(CHUNK);
             // The samples the voices play: all of them, unless POWER is off, when they rest
             // from the sample the fade reaches 0. All Sound Off's run ends at that sample, its
@@ -2454,9 +2530,13 @@ impl Engine {
         }
     }
 
-    /// How ENTROPY, SPREAD, DOUBLE and DRIVE stand for the voices' samples.
+    /// How ENTROPY, SPREAD, DOUBLE and DRIVE stand for the voices' samples, and oscillator 3
+    /// timed at the sample the voices are at.
     fn mix(&self) -> Mix {
-        mix_of(&self.controls, self.voices())
+        Mix {
+            timed: self.timed_at(self.cursor),
+            ..mix_of(&self.controls, self.voices())
+        }
     }
 
     /// AUTO GAIN's curve for the sound (`drive.rs`), the correction following it: a preset's
@@ -3047,10 +3127,13 @@ pub struct Mix {
     double: f64,
     drive: f64,
     scatter: bool,
+    /// Oscillator 3 timed (decisions.md R-OSC3-TIMED): where its cycle stands at the run's
+    /// first sample, and its cycles a sample (the voices'); none unless it is timed at LO.
+    timed: Option<Timed>,
 }
 
 /// [`Mix`]'s values, as the workers are handed them.
-pub const MIX_LEN: usize = 10;
+pub const MIX_LEN: usize = 12;
 
 impl Mix {
     pub fn to_array(self) -> [f64; MIX_LEN] {
@@ -3065,6 +3148,8 @@ impl Mix {
             self.double,
             self.drive,
             f64::from(u8::from(self.scatter)),
+            self.timed.map_or(-1.0, |t| t.phase),
+            self.timed.map_or(0.0, |t| t.per),
         ]
     }
 
@@ -3080,6 +3165,8 @@ impl Mix {
             double,
             drive,
             scatter,
+            phase,
+            per,
         ]: [f64; MIX_LEN],
     ) -> Mix {
         Mix {
@@ -3093,15 +3180,23 @@ impl Mix {
             double,
             drive,
             scatter: scatter > 0.0,
+            timed: (phase >= 0.0).then_some(Timed { phase, per }),
         }
     }
 }
 
-/// A voice's jacks for its next sample: `ext` at EXTERNAL INPUT, and its character's offsets
-/// (a sample on).
-fn jacks(c: &mut Character, ext: f64, rate: f64, m: &Mix) -> Jacks {
+/// A voice's jacks for its next sample, the run's `k`th: `ext` at EXTERNAL INPUT, its
+/// character's offsets (a sample on), and oscillator 3's place on the clock if it is timed.
+fn jacks(c: &mut Character, ext: f64, rate: f64, m: &Mix, k: usize) -> Jacks {
     let mut j = Jacks {
         ext,
+        timed: m.timed.map(|t| {
+            let at = t.phase + k as f64 * t.per;
+            Timed {
+                phase: at - at.floor(),
+                per: t.per,
+            }
+        }),
         ..Jacks::default()
     };
     if m.at > 0.0 {
@@ -3356,6 +3451,7 @@ fn mix_of(c: &Controls, voices: usize) -> Mix {
             1.0
         },
         scatter,
+        timed: None,
     }
 }
 
@@ -3528,6 +3624,19 @@ mod tests {
     use crate::pool::Budget;
     use ca72::voice::Priority;
 
+    /// The workers are handed oscillator 3 timed's place with the run's other values
+    /// (decisions.md R-OSC3-TIMED), and none where it is not timed.
+    #[test]
+    fn the_workers_mix_carries_oscillator_3_timed() {
+        let mut m = mix_of(&Controls::default(), 4);
+        assert_eq!(Mix::from_array(m.to_array()).timed, None);
+        m.timed = Some(Timed {
+            phase: 0.123,
+            per: 1e-4,
+        });
+        assert_eq!(Mix::from_array(m.to_array()).timed, m.timed);
+    }
+
     #[test]
     fn entropy_fades_the_old_floor_to_zero_below_five_percent() {
         for amount in [0.0, 0.01, 0.025, 0.05] {
@@ -3542,7 +3651,7 @@ mod tests {
             assert!((m.oscillators - ENTROPY_FLOOR * amount / 0.05).abs() < 1e-15);
             let mut c = Character::new(7, 0, 3, ENTROPY_KNOBS);
             for _ in 0..1024 {
-                let j = jacks(&mut c, 0.0, 48_000.0, &m);
+                let j = jacks(&mut c, 0.0, 48_000.0, &m, 0);
                 assert_eq!(j.cutoff, 0.0);
                 if amount == 0.0 {
                     assert_eq!(j.detune, [0.0; 3]);
@@ -3560,7 +3669,7 @@ mod tests {
             );
             let mut c = Character::new(9, 0, 3, ENTROPY_KNOBS);
             for _ in 0..1024 {
-                assert_eq!(jacks(&mut c, 0.0, 48_000.0, &m).detune, [0.0; 3]);
+                assert_eq!(jacks(&mut c, 0.0, 48_000.0, &m, 0).detune, [0.0; 3]);
             }
         }
     }
