@@ -169,6 +169,17 @@ pub enum WaveMode {
     Continuous,
 }
 
+/// GLIDE's range (decisions.md R-GLIDE-LONG): the circuit's hold capacitor, or five times it.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlideRange {
+    #[id = "normal"]
+    #[name = "Normal"]
+    Normal,
+    #[id = "long"]
+    #[name = "Long (×5)"]
+    Long,
+}
+
 /// Which way MOD moves a CONTINUOUS shape from its switch (its key Command-clicked).
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShapeModDirection {
@@ -840,6 +851,8 @@ pub struct Ca72Params {
     pub osc3_shape_mod: BoolParam,
     #[id = "osc3_shape_mod_dir"]
     pub osc3_shape_mod_dir: EnumParam<ShapeModDirection>,
+    #[id = "glide_range"]
+    pub glide_range: EnumParam<GlideRange>,
     // The four LFOs (decisions.md R-LFO), the plug-in's own, after everything else, so that no
     // parameter before them moves: `lfo1_waveform` to `lfo4_mono`. A preset's, as any sound
     // parameter; a preset or a session saved before reads each at its default, none
@@ -1199,6 +1212,7 @@ impl Default for Ca72Params {
                 "Osc 3 Shape Mod Direction",
                 ShapeModDirection::Clockwise,
             ),
+            glide_range: EnumParam::new("Glide Range", GlideRange::Normal),
             lfo1: crate::lfo::LfoParams::new(1),
             lfo2: crate::lfo::LfoParams::new(2),
             lfo3: crate::lfo::LfoParams::new(3),
@@ -1425,6 +1439,7 @@ impl Ca72Params {
             },
             glide: ten(&self.glide),
             glide_on: self.glide_on.value(),
+            glide_long: self.glide_range.value() == GlideRange::Long,
             decay: self.decay_on.value(),
             noise_on: self.noise_on.value(),
             noise_volume: ten(&self.noise_volume),

@@ -187,6 +187,7 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
         e("tune", "TUNE", C, &p.tune, Plain),
         e("osc_mod", "OSCILLATOR MODULATION", C, &p.osc_mod, Plain),
         e("glide", "GLIDE", C, &p.glide, Plain),
+        e("glide_range", "GLIDE RANGE", C, &p.glide_range, Plain),
         e("mod_mix", "MODULATION MIX", C, &p.mod_mix, Plain),
         e("osc1_range", "OSCILLATOR-1 RANGE", O, &p.osc1_range, Plain),
         e("osc2_range", "OSCILLATOR-2 RANGE", O, &p.osc2_range, Plain),

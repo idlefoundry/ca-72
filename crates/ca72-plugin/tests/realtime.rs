@@ -162,6 +162,7 @@ fn the_engine_neither_allocates_nor_frees_while_it_plays() {
         c.panel.ext_volume = 1.0;
         c.panel.glide_on = b % 40 < 20;
         c.panel.glide = 0.4;
+        c.panel.glide_long = b % 24 < 12;
         c.panel.keyboard_control_1 = b % 30 < 15;
         c.panel.osc[1].on = true;
         c.panel.osc[1].range = [Range::R16, Range::R8, Range::R4][b % 3];
@@ -1191,6 +1192,7 @@ fn the_oscillators_timed_neither_allocate_nor_free() {
         c.automate(a.osc1_range.as_ptr(), if b % 110 < 70 { 0.0 } else { 0.6 });
         c.automate(a.osc2_range.as_ptr(), if b % 150 < 90 { 0.0 } else { 0.2 });
         c.automate(a.quality.as_ptr(), (b / 300) as f32 / 2.0);
+        c.automate(a.glide_range.as_ptr(), if b % 80 < 40 { 1.0 } else { 0.0 });
         ARMED.store(true, Ordering::SeqCst);
         p.process(&mut buffer, &mut aux, &mut c);
     }

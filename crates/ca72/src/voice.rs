@@ -280,6 +280,8 @@ pub struct Panel {
     /// GLIDE (5M, a rheostat) and the left hand controller's GLIDE and DECAY switches.
     pub glide: f64,
     pub glide_on: bool,
+    /// LONG: the hold capacitor C6 five times larger (decisions.md R-GLIDE-LONG).
+    pub glide_long: bool,
     pub decay: bool,
     /// The noise's mixer switch and VOLUME, and the NOISE switch (SW14): WHITE (false) sends
     /// white noise to the mixer and pink to the modulation, PINK (true) pink to the mixer
@@ -367,6 +369,7 @@ impl Default for Panel {
             },
             glide: 0.0,
             glide_on: false,
+            glide_long: false,
             decay: true,
             noise_on: false,
             noise_volume: 0.8,
@@ -1977,6 +1980,7 @@ impl KeyboardPart {
                 self.keyboard.set_rate(self.rate / every as f64);
             }
             self.keyboard.set_quality(p.quality);
+            self.keyboard.set_glide_long(p.glide_long);
             self.keyboard.set_glide(glide_r(p.glide, p.glide_on));
             self.keyboard.set_load(keyboard_load(p));
             self.from = self.to;
@@ -2006,7 +2010,8 @@ impl KeyboardPart {
         let target = self.step * f64::from(c.foot);
         if c.gate {
             let k = &self.keyboard.circuit;
-            let tau = (k.r61 + glide_r(p.glide, p.glide_on)) * k.c6;
+            let farads = if p.glide_long { k.c6 * 5.0 } else { k.c6 };
+            let tau = (k.r61 + glide_r(p.glide, p.glide_on)) * farads;
             let h = self.every as f64 / self.rate;
             let a = crate::ulp::exp(-h / tau);
             self.beyond = target + (self.beyond - target) * a;

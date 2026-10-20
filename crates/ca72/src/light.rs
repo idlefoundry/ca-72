@@ -1548,9 +1548,19 @@ impl Light {
         self.set.mod_centre = laws::MOD_CENTRE[kind] as f32;
         // (GLIDE off, the hold's own 330 ohm: at once.)
         let ohms = glide_r(p.glide, p.glide_on) + 330.0;
-        let step = laws::GLIDE_RATE / ohms * CONTROL_EVERY as f64 / self.rate;
+        let rate = if p.glide_long {
+            laws::GLIDE_RATE / 5.0
+        } else {
+            laws::GLIDE_RATE
+        };
+        let farads = if p.glide_long {
+            laws::GLIDE_FARADS * 5.0
+        } else {
+            laws::GLIDE_FARADS
+        };
+        let step = rate / ohms * CONTROL_EVERY as f64 / self.rate;
         self.set.glide = (step, step * laws::GLIDE_FALLING);
-        self.set.beyond = (-(CONTROL_EVERY as f64 / self.rate) / (ohms * laws::GLIDE_FARADS)).exp();
+        self.set.beyond = (-(CONTROL_EVERY as f64 / self.rate) / (ohms * farads)).exp();
         self.set.contours = [
             ContourLaw::new(p.filter_contour, p.decay, 0, self.rate),
             ContourLaw::new(p.loudness_contour, p.decay, 1, self.rate),
@@ -2389,6 +2399,74 @@ mod tests {
         assert!(at < 70.0, "the slide over by then: {at}");
         run(&mut l, 24_000);
         assert!((l.pitch + l.beyond - at).abs() < 1e-9, "slid on from {at}");
+    }
+
+    /// LONG divides the measured slide's rate by five, rising and falling, and multiplies
+    /// the beyond-the-keys RC by five. The middle of the travel excludes the contacts' lead.
+    #[test]
+    fn long_glide_takes_five_times_as_long_in_the_light_voice() {
+        let middle = |setting: f64, long: bool, falling: bool, beyond: bool| {
+            let mut l = Light::new(48_000.0);
+            let p = Panel {
+                glide_on: true,
+                glide: setting,
+                glide_long: long,
+                ..measuring()
+            };
+            l.set_panel(&p);
+            let (from, to): (f64, f64) = if beyond { (96.0, 108.0) } else { (48.0, 60.0) };
+            let (from, to) = if falling { (to, from) } else { (from, to) };
+            l.note(to as i32, true);
+            l.pitch = from.clamp(41.0, 84.0);
+            l.beyond = from - l.pitch;
+            let mut at = [None; 2];
+            let mut before = 0.0;
+            for i in 0..400_000 {
+                l.control();
+                let progress = (l.pitch + l.beyond - from) / (to - from);
+                for (k, threshold) in [0.2, 0.8].into_iter().enumerate() {
+                    if at[k].is_none() && progress >= threshold {
+                        at[k] = Some(i as f64 + (threshold - before) / (progress - before));
+                    }
+                }
+                if let [Some(a), Some(b)] = at {
+                    return b - a;
+                }
+                before = progress;
+            }
+            panic!("no glide: {at:?}");
+        };
+        for setting in [0.0, 0.3, 0.5, 0.8, 1.0] {
+            let mut normal = Light::new(48_000.0);
+            let mut long = Light::new(48_000.0);
+            let p = Panel {
+                glide_on: true,
+                glide: setting,
+                ..measuring()
+            };
+            normal.set_panel(&p);
+            long.set_panel(&Panel {
+                glide_long: true,
+                ..p
+            });
+            assert!((normal.set.glide.0 / long.set.glide.0 - 5.0).abs() < 1e-12);
+            assert!((normal.set.glide.1 / long.set.glide.1 - 5.0).abs() < 1e-12);
+            assert!((normal.set.beyond.ln() / long.set.beyond.ln() - 5.0).abs() < 1e-9);
+            // The in-range slide at 0 finishes within one control tick.
+            if setting == 0.0 {
+                continue;
+            }
+            for falling in [false, true] {
+                for beyond in [false, true] {
+                    let ratio = middle(setting, true, falling, beyond)
+                        / middle(setting, false, falling, beyond);
+                    assert!(
+                        (ratio - 5.0).abs() < 0.003,
+                        "GLIDE {setting}, falling {falling}, beyond {beyond}: {ratio}"
+                    );
+                }
+            }
+        }
     }
 
     /// The contours start 7.8 ms after the key; SUSTAIN at 10 holds the loudness contour at

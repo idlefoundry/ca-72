@@ -245,6 +245,7 @@ the parameter's id in `ca72_set`/`ca72_get`, unless it says otherwise.
 | CONTROLLERS | TUNE | knob | -2.5 to +2.5 (dial -2..+2; 0) | `tune` |
 | | OSCILLATOR MODULATION | rocker | on/off (off) | `osc_mod` |
 | | GLIDE | knob | 0 to 10 (0) | `glide` |
+| | GLIDE RANGE | switch | Normal / Long (×5) (Normal); saved with the sound | `glide_range` |
 | | MODULATION MIX | knob | 0 (OSC. 3) to 10 (NOISE) (0) | `mod_mix` |
 | OSCILLATOR BANK | OSCILLATOR-1/2/3 RANGE | selector | LO, 32', 16', 8', 4', 2' (8') | `osc1_range`, `osc2_range`, `osc3_range` |
 | | OSCILLATOR-2/3 FREQUENCY | big knob | semitones from the centre: oscillator 2 -8.56 to +8.24, oscillator 3 -8.63 to +8.22 (0). Printed "+7.00 semitones" or "+3.4 cents"; the dial reads in SETTINGS › FREQUENCY DIALS' law | `osc2_frequency`, `osc3_frequency` |

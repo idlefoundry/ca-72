@@ -24,6 +24,7 @@
 //! that knob, `CA72_LFO_POPUP=1` CUTOFF's hover pop-up.
 //! `CA72_SET=param=value,...` controls at other values; `CA72_TIMED=2:1:9,3:0:13` oscillator 2's
 //! or 3's TIMED on or off and its division (decisions.md R-OSC-TIMED).
+//! `CA72_GLIDE_LONG=1` prints LONG's ×5 beside GLIDE (decisions.md R-GLIDE-LONG).
 //! `CA72_PACK=<folder>` in a skin pack's look (decisions.md R-SKIN-PACKS), what its checks
 //! found printed.
 //! `CA72_TIP=1` adds CUTOFF's hover tip; `CA72_MENU=settings` the built-in standalone
@@ -80,7 +81,10 @@ fn main() {
         )
         .expect("the print's SVG written");
     }
-    let mut scene = Scene::default();
+    let mut scene = Scene {
+        glide_long: std::env::var("CA72_GLIDE_LONG").is_ok_and(|v| v == "1"),
+        ..Scene::default()
+    };
     // The plugin's defaults: as the mock-up was drawn; the strip's knobs at what its readouts
     // read. `CA72_ALL=0.5`: every control at one value instead.
     let all: Option<f64> = std::env::var("CA72_ALL").ok().and_then(|s| s.parse().ok());

@@ -903,6 +903,17 @@ impl Circuit {
         }
     }
 
+    /// Changes a capacitor's value, keeping its voltage: the new charge starts there, without
+    /// an impulse from the old capacitance (GLIDE RANGE, decisions.md R-GLIDE-LONG).
+    pub fn set_capacitance(&mut self, part: usize, c: f64) {
+        if let Part::Capacitor { a, b, c: x } = &mut self.parts[part] {
+            *x = c;
+            self.q[part] = c * (self.v[*a] - self.v[*b]);
+            self.i_prev[part] = 0.0;
+            self.prev_h = 0.0;
+        }
+    }
+
     fn free(&self, n: Node) -> Option<usize> {
         (n >= self.held).then(|| n - self.held)
     }
@@ -1715,6 +1726,40 @@ impl Circuit {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// GLIDE's range changes a capacitor's value while it holds a voltage: it starts its new
+    /// time constant there, without an impulse from the old charge, in either direction.
+    #[test]
+    fn changing_a_capacitors_value_keeps_its_voltage() {
+        let mut c = Circuit::new(3, 2);
+        c.add(Part::Resistor {
+            a: 1,
+            b: 2,
+            r: 1000.0,
+        });
+        let cap = c.add(Part::Capacitor {
+            a: 2,
+            b: GND,
+            c: 1e-6,
+        });
+        c.dc().expect("the circuit at rest");
+        c.set(1, 1.0);
+        for _ in 0..10 {
+            c.step(1e-4).expect("the charge");
+        }
+        for farads in [5e-6, 1e-6, 5e-6] {
+            let before = c.v(2);
+            c.set_capacitance(cap, farads);
+            assert_eq!(c.v(2).to_bits(), before.to_bits());
+            c.step(1e-12)
+                .expect("the first step at the new capacitance");
+            assert!((c.v(2) - before).abs() < 1e-8, "the range made an impulse");
+            let before = c.v(2);
+            c.step(1e-4).expect("the new time constant");
+            let expected = (before + 1e-4 / (1000.0 * farads)) / (1.0 + 1e-4 / (1000.0 * farads));
+            assert!((c.v(2) - expected).abs() < 1e-8);
+        }
+    }
 
     /// Times a circuit's load and linear solve apart, at its present point (a diagnostic for
     /// the solver's performance; `cargo test --release -p ca72 -- --ignored

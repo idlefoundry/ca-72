@@ -227,6 +227,7 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   lowest note held priority and triggers once while keys are held. Far above the keys
   (with RANGE, FREQUENCY and the PITCH wheel high as well) an oscillator stops rising, far
   past the audio band.
+- **GLIDE** goes five times longer: right-click it and choose **LONG**; **×5** prints beside the dial.
 - **POLY** (under the panel, not the instrument's): off, the one instrument as above. On,
   each note plays a whole instrument of its own, with its own keyboard circuit, contours
   and glide, up to VOICES of them (2 to 10). A new note takes the voice that last played
