@@ -1950,6 +1950,10 @@ mod tests {
         p.params
             .midi_map
             .assign(learnable("next_preset"), on(0, arp::SUSTAIN));
+        // (The plug-in's helper, woken by the press, would take it off the queue to prepare the
+        // preset, racing the look at the queue below; it failed in the full suite. The press's
+        // way, not the preset, is what is tested here.)
+        p.helper = None;
         p.midi(cc(0, 0, arp::SUSTAIN, 127), &mut c);
         assert_eq!(p.preset_actions.requested(), Some(2), "NEXT PRESET's");
         c.push_event(note(1, 0, 60, true));
