@@ -213,6 +213,11 @@ const TRIANGLE: &str = "M -11 7 L 0 -7 L 11 7";
 const SHARK: &str = "M -11 7 L 3 -7 L 3 0 L 11 7";
 const REVERSE: &str = "M -10 7 V -7 L 10 7";
 const SAWTOOTH: &str = "M -10 7 L 10 -7 V 7";
+/// Oscillator 3's second place in CONTINUOUS (decisions.md R-CONTINUOUS-WAVE): the shark tooth
+/// turned back, as its reverse sawtooth is the sawtooth turned back.
+const REVERSE_SHARK: &str = "M -11 7 L -3 0 L -3 -7 L 11 7";
+/// Oscillator 3's legends in CONTINUOUS: its reverse shark tooth, then its reverse sawtooth.
+const WAVES3_CONTINUOUS: [&str; 6] = [TRIANGLE, REVERSE_SHARK, REVERSE, SQUARE, WIDE, NARROW];
 const SQUARE: &str = "M -12 7 V -7 H 0 V 7 H 12";
 const WIDE: &str = "M -12 7 V -7 H -3 V 7 H 12";
 const NARROW: &str = "M -12 7 V -7 H -7 V 7 H 12";
@@ -852,15 +857,21 @@ pub fn dials_print(layout: &Layout, arrangement: &Arrangement) -> String {
     s.0
 }
 
-/// Where a WAVEFORM switch's arc is about its centre (decisions.md R-VARIABLE-RECT): from
-/// SQUARE's tick round to the floor's, over the ticks' ring and the floor's tick, a little over
-/// for the print's stroke and its blur into the face.
-pub const ARC_EXTENT: [f64; 4] = [12.0, -76.0, 80.0, 40.0];
+/// Where a WAVEFORM switch's place printed CONTINUOUS differs about its centre (decisions.md
+/// R-CONTINUOUS-WAVE): its arc from TRIANGLE's tick round to the floor's, over the ticks' ring,
+/// and oscillator 3's second and third legends, a little over for the print's stroke and its
+/// blur into the face. (Clear of the FREQUENCY dials' print on its left: `Renderer`'s test.)
+pub const ARC_EXTENT: [f64; 4] = [-82.0, -106.0, 80.0, 40.0];
 
 /// Oscillator `n`'s WAVEFORM switch's print alone (its ticks and legends), as `arrangement`
-/// places it, and its arc with `arc` (decisions.md R-VARIABLE-RECT): the switch's place
-/// printed VARIABLE or STEPPED (`Renderer::arc_part`).
-pub fn waveform_print(layout: &Layout, arrangement: &Arrangement, n: usize, arc: bool) -> String {
+/// places it, CONTINUOUS's with `continuous`: its arc, and oscillator 3's legends its
+/// reverse shark tooth and reverse sawtooth (`Renderer::arc_part`).
+pub fn waveform_print(
+    layout: &Layout,
+    arrangement: &Arrangement,
+    n: usize,
+    continuous: bool,
+) -> String {
     let mut s = Svg(String::new(), layout.lettering);
     put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
     let param = ["osc1_waveform", "osc2_waveform", "osc3_waveform"][n];
@@ -870,28 +881,30 @@ pub fn waveform_print(layout: &Layout, arrangement: &Arrangement, n: usize, arc:
         .find(|c| c.param == param && c.place == Place::Panel)
         && let Kind::Selector(set) = c.kind
     {
-        selector_marks(&mut s, c, set, layout);
-        if arc {
-            rect_arc(&mut s, c.x, c.y);
+        let texts = (continuous && set == Legends::Waves3).then_some(&WAVES3_CONTINUOUS);
+        selector_marks_with(&mut s, c, set, layout, texts);
+        if continuous {
+            shape_arc(&mut s, c.x, c.y);
         }
     }
     s.0.push_str("</g>");
     s.0
 }
 
-/// VARIABLE's arc about a WAVEFORM switch at (x, y) (the owner, 2026-10-20: "I love the arc. I
-/// think it's very elegant"): a hairline in the legends' ink through the ticks' ring from
-/// SQUARE's tick round through WIDE's and NARROW's to a short tick at the floor.
-fn rect_arc(s: &mut Svg, x: f64, y: f64) {
+/// CONTINUOUS's arc about a WAVEFORM switch at (x, y) (the owner, 2026-10-20: "I love the arc.
+/// I think it's very elegant"): a hairline in the legends' ink through the ticks' ring from
+/// TRIANGLE's tick round through every place to a short tick at the floor.
+fn shape_arc(s: &mut Svg, x: f64, y: f64) {
     let r = (SIX_TICK.0 + SIX_TICK.1) / 2.0;
-    let end = rect_angle(RECT_STEPS);
-    let (x0, y0) = polar(r, SIX[3]);
+    let end = shape_angle(SHAPE_PLACES);
+    let (x0, y0) = polar(r, SIX[0]);
     let (x1, y1) = polar(r, end);
     let (a0, b0) = polar(SIX_TICK.0 + 2.5, end);
     let (a1, b1) = polar(SIX_TICK.1 - 2.5, end);
+    let large = u8::from(end - SIX[0] > 180.0);
     put!(
         s,
-        "<g transform='translate({} {})'><path d='M {} {} A {} {} 0 0 1 {} {}' fill='none' stroke='{LEGEND}' stroke-width='{ARC_W}'/><line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{LEGEND}' stroke-width='{ARC_W}'/></g>",
+        "<g transform='translate({} {})'><path d='M {} {} A {} {} 0 {large} 1 {} {}' fill='none' stroke='{LEGEND}' stroke-width='{ARC_W}'/><line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{LEGEND}' stroke-width='{ARC_W}'/></g>",
         N(x),
         N(y),
         N(x0),
@@ -1239,6 +1252,17 @@ pub(crate) fn trims(s: &mut Svg, face: f64) {
 }
 
 fn selector_marks(s: &mut Svg, c: &Control, set: Legends, layout: &Layout) {
+    selector_marks_with(s, c, set, layout, None);
+}
+
+/// A selector's ticks and legends, its legends `texts` where given (its set's places).
+fn selector_marks_with(
+    s: &mut Svg,
+    c: &Control,
+    set: Legends,
+    layout: &Layout,
+    texts: Option<&[&str; 6]>,
+) {
     put!(s, "<g transform='translate({} {})'>", N(c.x), N(c.y));
     for a in SIX {
         let (x0, y0) = polar(SIX_TICK.0, a);
@@ -1252,8 +1276,8 @@ fn selector_marks(s: &mut Svg, c: &Control, set: Legends, layout: &Layout) {
             N(y1)
         );
     }
-    let (texts, glyphs) = legends(set);
-    for (i, t) in texts.iter().enumerate() {
+    let (own, glyphs) = legends(set);
+    for (i, t) in texts.unwrap_or(own).iter().enumerate() {
         let (x, y) = layout.legend_at(set, i);
         put!(s, "<g transform='translate({} {})'>", N(x), N(y));
         if glyphs {
@@ -1678,7 +1702,7 @@ pub const KEY_SIGN_TOP: f64 = 26.0;
 pub fn bounds(kind: &Kind) -> [f64; 4] {
     match *kind {
         // (The cap and its light round it, and the sign printed to its right: a note centred on
-        // it, its stem and flags at their natural length above and below; or a PWM key's word.)
+        // it, its stem and flags at their natural length above and below; or a MOD key's word.)
         Kind::Key => [
             -KEY.0 / 2.0 - 8.0,
             -KEY_SIGN_TOP,
@@ -1772,8 +1796,8 @@ pub fn wheel_shown(detent: bool, v: f64, midi: f64) -> f64 {
 }
 
 /// The selector `c` with its pointer at `angle` (degrees from twelve o'clock), in the worn skin
-/// or the drawn: at one of its six places ([`SIX`]), or anywhere VARIABLE's rectangle turns it
-/// past SQUARE (decisions.md R-VARIABLE-RECT).
+/// or the drawn: at one of its six places ([`SIX`]), or anywhere CONTINUOUS turns it along its
+/// travel (decisions.md R-CONTINUOUS-WAVE).
 pub fn selector_turned(c: &Control, angle: f64, worn: bool) -> Layer {
     use crate::skin::{POINTER_BODY, POINTER_CAP};
     let (origin, bounds) = (c.centre(), bounds(&c.kind));
@@ -1801,15 +1825,86 @@ pub fn selector_turned(c: &Control, angle: f64, worn: bool) -> Layer {
     }
 }
 
-/// VARIABLE's travel past SQUARE in the switch's steps (decisions.md R-VARIABLE-RECT): to WIDE
-/// and NARROW one each, then on to the floor at NARROW's volts a step (the engine's
-/// `voice::RECT_STEPS`, which the plug-in's tests hold this to).
+/// CONTINUOUS's travel past SQUARE in the switch's steps (decisions.md R-CONTINUOUS-WAVE): to
+/// WIDE and NARROW one each, then on to the floor at NARROW's volts a step (the engine's
+/// `voice::RECT_STEPS`, which the plug-in's tests hold this to); and its whole travel, from
+/// TRIANGLE.
 pub const RECT_STEPS: f64 = 2.95;
+pub const SHAPE_PLACES: f64 = 3.0 + RECT_STEPS;
 
-/// The angle of a WAVEFORM switch `past` steps beyond SQUARE (VARIABLE's travel).
-pub fn rect_angle(past: f64) -> f64 {
-    SIX[3] + past.clamp(0.0, RECT_STEPS) * (SIX[1] - SIX[0])
+/// The angle of a WAVEFORM switch `at` its steps from TRIANGLE (CONTINUOUS's travel).
+pub fn shape_angle(at: f64) -> f64 {
+    SIX[0] + at.clamp(0.0, SHAPE_PLACES) * (SIX[1] - SIX[0])
 }
+
+/// Which way MOD moves a CONTINUOUS shape, and its colour (the owner, 2026-10-20: "the same red
+/// that we have on some of the buttons and the same blue ... amber, orange, or red, I guess, and
+/// blue"): clockwise amber, anticlockwise blue, both ways red.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ModWay {
+    #[default]
+    Clockwise,
+    Anticlockwise,
+    Both,
+}
+
+impl ModWay {
+    /// Its light's colour round its key and its orb's.
+    pub fn light(self) -> &'static str {
+        match self {
+            ModWay::Clockwise => KEY_LIGHT,
+            ModWay::Anticlockwise => "#3f8fe8",
+            ModWay::Both => "#ff4422",
+        }
+    }
+
+    /// Its orb's hot middle.
+    fn core(self) -> &'static str {
+        match self {
+            ModWay::Clockwise => "#ffd9a0",
+            ModWay::Anticlockwise => "#cfe6ff",
+            ModWay::Both => "#ffc0a8",
+        }
+    }
+}
+
+/// MOD's orb (the owner, 2026-10-20: "a little glowing amber orb that showed the position of
+/// where the effective waveform sits due to the modulation ... the knob stays put"): a small
+/// glowing light on the switch's ring at `at` (its steps), in its way's colour.
+pub fn shape_orb(c: &Control, at: f64, way: ModWay) -> Layer {
+    let r = (SIX_TICK.0 + SIX_TICK.1) / 2.0;
+    let (x, y) = polar(r, shape_angle(at));
+    let mut s = Svg::default();
+    put!(
+        s,
+        "<defs><radialGradient id='orb' fx='0.42' fy='0.4'><stop offset='0' stop-color='{}'/><stop offset='0.55' stop-color='{}'/><stop offset='1' stop-color='{}' stop-opacity='0.6'/></radialGradient><filter id='orb-glow' x='-2' y='-2' width='5' height='5'><feGaussianBlur stdDeviation='{}'/></filter></defs><circle cx='{}' cy='{}' r='{}' fill='{}' fill-opacity='0.5' filter='url(#orb-glow)'/><circle cx='{}' cy='{}' r='{}' fill='url(#orb)'/>",
+        way.core(),
+        way.light(),
+        way.light(),
+        N(ORB_R * 0.9),
+        N(x),
+        N(y),
+        N(ORB_R * 1.5),
+        way.light(),
+        N(x),
+        N(y),
+        N(ORB_R)
+    );
+    Layer {
+        origin: c.centre(),
+        bounds: [
+            x - 4.0 * ORB_R,
+            y - 4.0 * ORB_R,
+            x + 4.0 * ORB_R,
+            y + 4.0 * ORB_R,
+        ],
+        body: s.0,
+        ..Layer::default()
+    }
+}
+
+/// The orb's radius, units.
+const ORB_R: f64 = 5.0;
 
 /// A control at its normalized value `v` (a wheel moved on by `midi`).
 pub fn control(c: &Control, v: f64, midi: f64) -> Layer {
@@ -2301,11 +2396,13 @@ pub struct Keyed {
     pub on: bool,
     pub inert: bool,
     pub division: usize,
-    /// A word printed beside it instead of a note value: a PWM key's (decisions.md
-    /// R-VARIABLE-RECT).
+    /// A word printed beside it instead of a note value: a MOD key's (decisions.md
+    /// R-CONTINUOUS-WAVE).
     pub word: Option<&'static str>,
-    /// Not on the panel at all: a PWM key while its oscillator's rectangle is STEPPED.
+    /// Not on the panel at all: a MOD key while its oscillator's waveform is STEPPED.
     pub hidden: bool,
+    /// Its colour: a MOD key's its way's (decisions.md R-CONTINUOUS-WAVE); a TIMED key amber.
+    pub way: ModWay,
 }
 
 impl Default for Keyed {
@@ -2317,14 +2414,15 @@ impl Default for Keyed {
             division: 8,
             word: None,
             hidden: false,
+            way: ModWay::Clockwise,
         }
     }
 }
 
-/// Whether a key comes and goes from the panel (each oscillator's PWM key, R-VARIABLE-RECT),
+/// Whether a key comes and goes from the panel (each oscillator's MOD key, R-CONTINUOUS-WAVE),
 /// rather than always standing on it: its cap's shadow is then its own, not the background's.
 pub fn comes_and_goes(c: &Control) -> bool {
-    c.kind == Kind::Key && c.param.ends_with("_pwm")
+    c.kind == Kind::Key && c.param.ends_with("_shape_mod")
 }
 
 /// An oscillator's TIMED key (decisions.md R-OSC-TIMED), in either skin the strip's amber tab
@@ -2360,11 +2458,12 @@ pub fn key(c: &Control, k: Keyed, lettering: Lettering, times: &str, worn: bool)
         // brightness; the strip's tabs' light, at this size).
         put!(
             s,
-            "<defs><filter id='key-light' x='-0.5' y='-1' width='2' height='3'><feGaussianBlur stdDeviation='4.5'/></filter></defs><rect x='{}' y='{}' width='{}' height='{}' rx='5' fill='{KEY_LIGHT}' fill-opacity='0.34' filter='url(#key-light)'/>",
+            "<defs><filter id='key-light' x='-0.5' y='-1' width='2' height='3'><feGaussianBlur stdDeviation='4.5'/></filter></defs><rect x='{}' y='{}' width='{}' height='{}' rx='5' fill='{}' fill-opacity='0.34' filter='url(#key-light)'/>",
             N(-w / 2.0 - 1.0),
             N(-h / 2.0 - 1.0),
             N(w + 2.0),
-            N(h + 2.0)
+            N(h + 2.0),
+            k.way.light()
         );
     }
     // The sign, printed (worn into the face in the worn skin, as the print is).
@@ -2416,7 +2515,14 @@ pub fn key(c: &Control, k: Keyed, lettering: Lettering, times: &str, worn: bool)
         bounds: bounds(&Kind::Key),
         body: s.0,
         sprites: vec![sprite(
-            if lit { Part::KeyLit } else { Part::Key },
+            match (lit, k.way) {
+                (false, ModWay::Clockwise) => Part::Key,
+                (true, ModWay::Clockwise) => Part::KeyLit,
+                (false, ModWay::Anticlockwise) => Part::KeyBlue,
+                (true, ModWay::Anticlockwise) => Part::KeyBlueLit,
+                (false, ModWay::Both) => Part::KeyRed,
+                (true, ModWay::Both) => Part::KeyRedLit,
+            },
             KEY,
             0.0,
             (false, false),
@@ -2741,7 +2847,7 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
                 N(w + 3.0),
                 N(h + 3.0)
             ),
-            // A TIMED key's cap's, a small one: it stands on the face. (A PWM key's is its own:
+            // A TIMED key's cap's, a small one: it stands on the face. (A MOD key's is its own:
             // it comes and goes.)
             Kind::Key if comes_and_goes(c) => {}
             Kind::Key => put!(

@@ -9,7 +9,9 @@ use std::sync::{Arc, RwLock};
 use ca72::freq_dial::{DIAL_END, Law, Pot};
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::tuning::Range;
-use ca72::voice::{ContourKnobs, OscPanel, Panel, Priority, Quality, RectWidth, Waveform};
+use ca72::voice::{
+    ContourKnobs, ModDirection, OscPanel, Panel, Priority, Quality, Shape, Waveform,
+};
 use nih_plug::prelude::*;
 
 use crate::character::Placement;
@@ -153,51 +155,133 @@ pub enum NoiseColor {
     Pink,
 }
 
-/// An oscillator's rectangle (decisions.md R-VARIABLE-RECT): STEPPED, the WAVEFORM switch's
-/// three as the instrument has them; VARIABLE, which the original does not have, one width
-/// turned anywhere from the square to the narrowest, with PWM.
+/// An oscillator's waveform (decisions.md R-CONTINUOUS-WAVE): STEPPED, the WAVEFORM switch as
+/// the instrument has it; CONTINUOUS, which the original does not have, the switch turned
+/// without steps through every shape, each blending into the next, and on to the narrowest
+/// pulse, with MOD.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RectMode {
+pub enum WaveMode {
     #[id = "stepped"]
     #[name = "Stepped"]
     Stepped,
-    #[id = "variable"]
-    #[name = "Variable"]
-    Variable,
+    #[id = "continuous"]
+    #[name = "Continuous"]
+    Continuous,
 }
 
-/// VARIABLE's width: its travel, 0 (the square) to 1 (the narrowest), shown as the
-/// rectangle's duty cycle ("24 %").
-fn rect_width(name: &str) -> FloatParam {
-    FloatParam::new(name, 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-        .with_unit(" %")
-        .with_value_to_string(std::sync::Arc::new(|t| {
-            format!("{:.0}", 100.0 * rect_duty_at(f64::from(t)))
-        }))
-        .with_string_to_value(std::sync::Arc::new(|s| {
-            let pct: f64 = s.trim().trim_end_matches('%').trim().parse().ok()?;
-            Some(travel_at_duty(pct / 100.0) as f32)
-        }))
+/// Which way MOD moves a CONTINUOUS shape from its switch (its key Command-clicked).
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapeModDirection {
+    #[id = "clockwise"]
+    #[name = "Clockwise"]
+    Clockwise,
+    #[id = "anticlockwise"]
+    #[name = "Anticlockwise"]
+    Anticlockwise,
+    #[id = "both"]
+    #[name = "Both Ways"]
+    Both,
 }
 
-/// The rectangle's duty cycle at `t` of VARIABLE's travel.
-pub fn rect_duty_at(t: f64) -> f64 {
-    ca72::voice::rect_duty(ca72::voice::rect_travel_bias(t))
+impl From<ShapeModDirection> for ModDirection {
+    fn from(d: ShapeModDirection) -> ModDirection {
+        match d {
+            ShapeModDirection::Clockwise => ModDirection::Onward,
+            ShapeModDirection::Anticlockwise => ModDirection::Back,
+            ShapeModDirection::Both => ModDirection::Both,
+        }
+    }
 }
 
-/// The travel at which the rectangle's duty cycle is `d` (held to the travel's ends).
+/// The names of oscillator `n`'s (0 to 2) four places before the rectangle's stretch:
+/// oscillator 3's second and third its reverse shark tooth and reverse sawtooth in CONTINUOUS.
+pub fn shape_names(n: usize) -> [&'static str; 4] {
+    if n == 2 {
+        [
+            "Triangle",
+            "Reverse Shark Tooth",
+            "Reverse Sawtooth",
+            "Square",
+        ]
+    } else {
+        ["Triangle", "Shark Tooth", "Sawtooth", "Square"]
+    }
+}
+
+/// Oscillator `n`'s CONTINUOUS shape at `t` of its travel, as the host and the panel's tip show
+/// it: a place's name ("Sawtooth"); between two, both and how far ("Sawtooth to Square 40 %");
+/// past SQUARE the rectangle's duty cycle, named at the switch's own three ("Wide Rectangle
+/// 30 %", "Rectangle 24 %").
+pub fn shape_text(n: usize, t: f64) -> String {
+    use ca72::voice::{SHAPE_PLACES, shape_at, shape_bias};
+    let at = shape_at(
+        Shape {
+            continuous: true,
+            at: t.clamp(0.0, 1.0) * SHAPE_PLACES,
+            modulated: false,
+            direction: ModDirection::Onward,
+        },
+        Default::default(),
+    );
+    let names = shape_names(n);
+    if at >= 3.0 {
+        let duty = (100.0 * ca72::voice::rect_duty(shape_bias(at))).round();
+        let name = [
+            (3.0, "Square"),
+            (4.0, "Wide Rectangle"),
+            (5.0, "Narrow Rectangle"),
+        ]
+        .iter()
+        .find(|(place, _)| *place == at)
+        .map_or("Rectangle", |(_, name)| *name);
+        return format!("{name} {duty:.0} %");
+    }
+    let k = at.floor() as usize;
+    if at == k as f64 {
+        return names[k].to_owned();
+    }
+    let share = (100.0 * (at - k as f64)).round();
+    format!("{} to {} {share:.0} %", names[k], names[k + 1])
+}
+
+/// The travel at which the rectangle's duty cycle is `d` (held to the rectangle's stretch).
 pub fn travel_at_duty(d: f64) -> f64 {
+    use ca72::voice::{SHAPE_PLACES, rect_duty, shape_bias};
     // (The duty falls as the travel goes on: a bisection.)
-    let (mut lo, mut hi) = (0.0, 1.0);
+    let (mut lo, mut hi) = (3.0, SHAPE_PLACES);
     for _ in 0..40 {
         let mid = 0.5 * (lo + hi);
-        if rect_duty_at(mid) > d {
+        if rect_duty(shape_bias(mid)) > d {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    0.5 * (lo + hi)
+    0.5 * (lo + hi) / SHAPE_PLACES
+}
+
+/// Oscillator `n`'s CONTINUOUS shape: its travel, 0 (TRIANGLE) to 1 (the narrowest pulse), at
+/// SAWTOOTH to begin with, as WAVEFORM is; shown by [`shape_text`]; a place's name, or a duty
+/// cycle ("30 %"), typed.
+fn shape_param(name: &str, n: usize) -> FloatParam {
+    let places = ca72::voice::SHAPE_PLACES;
+    FloatParam::new(
+        name,
+        (2.0 / places) as f32,
+        FloatRange::Linear { min: 0.0, max: 1.0 },
+    )
+    .with_value_to_string(std::sync::Arc::new(move |t| shape_text(n, f64::from(t))))
+    .with_string_to_value(std::sync::Arc::new(move |s| {
+        let s = s.trim();
+        if let Some(k) = shape_names(n)
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(s))
+        {
+            return Some((k as f64 / places) as f32);
+        }
+        let pct: f64 = s.trim_end_matches('%').trim().parse().ok()?;
+        Some(travel_at_duty(pct / 100.0) as f32)
+    }))
 }
 
 /// FILTER MODE, which the original does not have (decisions.md R46): LO, the filter as
@@ -689,28 +773,35 @@ pub struct Ca72Params {
     pub osc3_timed: BoolParam,
     #[id = "osc3_division"]
     pub osc3_division: EnumParam<Division>,
-    // Each oscillator's rectangle (decisions.md R-VARIABLE-RECT), the plug-in's own, after
-    // everything else, so that no parameter before it moves: STEPPED or VARIABLE (WAVEFORM's
-    // menu), VARIABLE's width (the switch turned past SQUARE), and its PWM key. A preset's,
-    // as any sound parameter; a preset or a session saved before reads STEPPED.
-    #[id = "osc1_rect"]
-    pub osc1_rect: EnumParam<RectMode>,
-    #[id = "osc1_width"]
-    pub osc1_width: FloatParam,
-    #[id = "osc1_pwm"]
-    pub osc1_pwm: BoolParam,
-    #[id = "osc2_rect"]
-    pub osc2_rect: EnumParam<RectMode>,
-    #[id = "osc2_width"]
-    pub osc2_width: FloatParam,
-    #[id = "osc2_pwm"]
-    pub osc2_pwm: BoolParam,
-    #[id = "osc3_rect"]
-    pub osc3_rect: EnumParam<RectMode>,
-    #[id = "osc3_width"]
-    pub osc3_width: FloatParam,
-    #[id = "osc3_pwm"]
-    pub osc3_pwm: BoolParam,
+    // Each oscillator's waveform (decisions.md R-CONTINUOUS-WAVE), the plug-in's own, after
+    // everything else, so that no parameter before it moves: STEPPED or CONTINUOUS (WAVEFORM's
+    // menu), CONTINUOUS's shape (the switch turned), its MOD key and MOD's direction (the key
+    // Command-clicked). A preset's, as any sound parameter; a preset or a session saved before
+    // reads STEPPED.
+    #[id = "osc1_shape_mode"]
+    pub osc1_shape_mode: EnumParam<WaveMode>,
+    #[id = "osc1_shape"]
+    pub osc1_shape: FloatParam,
+    #[id = "osc1_shape_mod"]
+    pub osc1_shape_mod: BoolParam,
+    #[id = "osc1_shape_mod_dir"]
+    pub osc1_shape_mod_dir: EnumParam<ShapeModDirection>,
+    #[id = "osc2_shape_mode"]
+    pub osc2_shape_mode: EnumParam<WaveMode>,
+    #[id = "osc2_shape"]
+    pub osc2_shape: FloatParam,
+    #[id = "osc2_shape_mod"]
+    pub osc2_shape_mod: BoolParam,
+    #[id = "osc2_shape_mod_dir"]
+    pub osc2_shape_mod_dir: EnumParam<ShapeModDirection>,
+    #[id = "osc3_shape_mode"]
+    pub osc3_shape_mode: EnumParam<WaveMode>,
+    #[id = "osc3_shape"]
+    pub osc3_shape: FloatParam,
+    #[id = "osc3_shape_mod"]
+    pub osc3_shape_mod: BoolParam,
+    #[id = "osc3_shape_mod_dir"]
+    pub osc3_shape_mod_dir: EnumParam<ShapeModDirection>,
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -996,15 +1087,27 @@ impl Default for Ca72Params {
             osc2_division: EnumParam::new("Osc 2 Division", Division::Quarter),
             osc3_timed: BoolParam::new("Osc 3 Timed", false),
             osc3_division: EnumParam::new("Osc 3 Division", Division::Quarter),
-            osc1_rect: EnumParam::new("Osc 1 Rectangle", RectMode::Stepped),
-            osc1_width: rect_width("Osc 1 Width"),
-            osc1_pwm: BoolParam::new("Osc 1 PWM", false),
-            osc2_rect: EnumParam::new("Osc 2 Rectangle", RectMode::Stepped),
-            osc2_width: rect_width("Osc 2 Width"),
-            osc2_pwm: BoolParam::new("Osc 2 PWM", false),
-            osc3_rect: EnumParam::new("Osc 3 Rectangle", RectMode::Stepped),
-            osc3_width: rect_width("Osc 3 Width"),
-            osc3_pwm: BoolParam::new("Osc 3 PWM", false),
+            osc1_shape_mode: EnumParam::new("Osc 1 Waveform Mode", WaveMode::Stepped),
+            osc1_shape: shape_param("Osc 1 Shape", 0),
+            osc1_shape_mod: BoolParam::new("Osc 1 Shape Mod", false),
+            osc1_shape_mod_dir: EnumParam::new(
+                "Osc 1 Shape Mod Direction",
+                ShapeModDirection::Clockwise,
+            ),
+            osc2_shape_mode: EnumParam::new("Osc 2 Waveform Mode", WaveMode::Stepped),
+            osc2_shape: shape_param("Osc 2 Shape", 1),
+            osc2_shape_mod: BoolParam::new("Osc 2 Shape Mod", false),
+            osc2_shape_mod_dir: EnumParam::new(
+                "Osc 2 Shape Mod Direction",
+                ShapeModDirection::Clockwise,
+            ),
+            osc3_shape_mode: EnumParam::new("Osc 3 Waveform Mode", WaveMode::Stepped),
+            osc3_shape: shape_param("Osc 3 Shape", 2),
+            osc3_shape_mod: BoolParam::new("Osc 3 Shape Mod", false),
+            osc3_shape_mod_dir: EnumParam::new(
+                "Osc 3 Shape Mod Direction",
+                ShapeModDirection::Clockwise,
+            ),
         }
     }
 }
@@ -1106,19 +1209,42 @@ impl Ca72Params {
         self.noise_seed.load(Ordering::Relaxed)
     }
 
-    /// Oscillator `n`'s (0 to 2) rectangle's parameters: STEPPED or VARIABLE, its width and its
-    /// PWM (decisions.md R-VARIABLE-RECT).
-    pub fn rect_params(&self, n: usize) -> (&EnumParam<RectMode>, &FloatParam, &BoolParam) {
+    /// Oscillator `n`'s (0 to 2) waveform's parameters: STEPPED or CONTINUOUS, its shape, its
+    /// MOD and MOD's direction (decisions.md R-CONTINUOUS-WAVE).
+    pub fn shape_params(
+        &self,
+        n: usize,
+    ) -> (
+        &EnumParam<WaveMode>,
+        &FloatParam,
+        &BoolParam,
+        &EnumParam<ShapeModDirection>,
+    ) {
         match n {
-            0 => (&self.osc1_rect, &self.osc1_width, &self.osc1_pwm),
-            1 => (&self.osc2_rect, &self.osc2_width, &self.osc2_pwm),
-            _ => (&self.osc3_rect, &self.osc3_width, &self.osc3_pwm),
+            0 => (
+                &self.osc1_shape_mode,
+                &self.osc1_shape,
+                &self.osc1_shape_mod,
+                &self.osc1_shape_mod_dir,
+            ),
+            1 => (
+                &self.osc2_shape_mode,
+                &self.osc2_shape,
+                &self.osc2_shape_mod,
+                &self.osc2_shape_mod_dir,
+            ),
+            _ => (
+                &self.osc3_shape_mode,
+                &self.osc3_shape,
+                &self.osc3_shape_mod,
+                &self.osc3_shape_mod_dir,
+            ),
         }
     }
 
-    /// Whether oscillator `n`'s rectangle is VARIABLE.
-    pub fn variable(&self, n: usize) -> bool {
-        self.rect_params(n).0.value() == RectMode::Variable
+    /// Whether oscillator `n`'s waveform is CONTINUOUS.
+    pub fn continuous(&self, n: usize) -> bool {
+        self.shape_params(n).0.value() == WaveMode::Continuous
     }
 
     /// The engine's controls from the parameters (dial units in, the voice's 0..1 out).
@@ -1193,15 +1319,14 @@ impl Ca72Params {
             quality: Quality::default(),
             priority: self.note_priority.value().into(),
             retrigger: self.retrigger.value(),
-            rect: [
-                (&self.osc1_rect, &self.osc1_width, &self.osc1_pwm),
-                (&self.osc2_rect, &self.osc2_width, &self.osc2_pwm),
-                (&self.osc3_rect, &self.osc3_width, &self.osc3_pwm),
-            ]
-            .map(|(mode, width, pwm)| RectWidth {
-                variable: mode.value() == RectMode::Variable,
-                width: ca72::voice::rect_travel_bias(value(width)),
-                pwm: pwm.value(),
+            shape: std::array::from_fn(|n| {
+                let (mode, shape, modulated, direction) = self.shape_params(n);
+                Shape {
+                    continuous: mode.value() == WaveMode::Continuous,
+                    at: ca72::voice::shape_snapped(value(shape) * ca72::voice::SHAPE_PLACES),
+                    modulated: modulated.value(),
+                    direction: direction.value().into(),
+                }
             }),
         };
         Controls {
@@ -1306,27 +1431,51 @@ mod tests {
 
     /// The arpeggiator's parameters (R-ARP): their ids after every other, off by default at a
     /// sixteenth, UP, an octave, GATE 50 % and no SWING; RATE's choices are the scheduler's
-    /// VARIABLE's travel as the panel draws it is the engine's (decisions.md R-VARIABLE-RECT); its
-    /// width shows the duty cycle and takes one typed; a new instance is STEPPED, PWM off.
+    /// CONTINUOUS's travel as the panel draws it is the engine's (decisions.md R-CONTINUOUS-WAVE);
+    /// its shape shows its places' names, blends and duty cycles, and takes either typed; a new
+    /// instance is STEPPED, at SAWTOOTH, MOD off and clockwise.
     #[test]
-    fn variable_rectangles_are_off_by_default_and_their_travel_the_engines() {
+    fn continuous_waveforms_are_off_by_default_and_their_travel_the_engines() {
+        use ca72::voice::SHAPE_PLACES;
         assert_eq!(ca72_panel::art::RECT_STEPS, ca72::voice::RECT_STEPS);
         let p = Ca72Params::default();
         for n in 0..3 {
-            let (mode, width, pwm) = p.rect_params(n);
-            assert_eq!(mode.value(), RectMode::Stepped);
-            assert_eq!(width.value(), 0.0);
-            assert!(!pwm.value());
-            assert!(!p.variable(n));
+            let (mode, shape, modulated, direction) = p.shape_params(n);
+            assert_eq!(mode.value(), WaveMode::Stepped);
+            assert!((f64::from(shape.value()) * SHAPE_PLACES - 2.0).abs() < 1e-6);
+            assert!(!modulated.value());
+            assert_eq!(direction.value(), ShapeModDirection::Clockwise);
+            assert!(!p.continuous(n));
         }
-        assert_eq!(p.controls().panel.rect, [RectWidth::STEPPED; 3]);
-        let w = &p.osc1_width;
-        assert_eq!(w.normalized_value_to_string(0.0, true), "48 %");
-        let t = w.string_to_normalized_value("30 %").expect("a duty cycle");
-        assert!(
-            (f64::from(t) - 1.0 / ca72::voice::RECT_STEPS).abs() < 2e-3,
-            "{t}"
+        assert!(p.controls().panel.shape.iter().all(|s| !s.continuous));
+        let at = |k: f64| (k / SHAPE_PLACES) as f32;
+        let (one, three) = (&p.osc1_shape, &p.osc3_shape);
+        assert_eq!(one.normalized_value_to_string(at(2.0), true), "Sawtooth");
+        assert_eq!(
+            three.normalized_value_to_string(at(2.0), true),
+            "Reverse Sawtooth"
         );
+        assert_eq!(
+            three.normalized_value_to_string(at(1.0), true),
+            "Reverse Shark Tooth"
+        );
+        assert_eq!(
+            one.normalized_value_to_string(at(2.4), true),
+            "Sawtooth to Square 40 %"
+        );
+        assert_eq!(one.normalized_value_to_string(at(3.0), true), "Square 48 %");
+        assert_eq!(
+            one.normalized_value_to_string(at(4.0), true),
+            "Wide Rectangle 30 %"
+        );
+        let t = one
+            .string_to_normalized_value("30 %")
+            .expect("a duty cycle");
+        assert!((f64::from(t) * SHAPE_PLACES - 4.0).abs() < 2e-2, "{t}");
+        let t = three
+            .string_to_normalized_value("reverse sawtooth")
+            .expect("a name");
+        assert_eq!(t, at(2.0));
     }
 
     /// note values in order, its names a host shows.

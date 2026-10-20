@@ -1004,15 +1004,15 @@ mod tests {
 
     /// A later revision than this build's (3): A-440 added in revision 4, OSC MOD once called
     /// `oscillator_modulation` (renamed in 4), an `old_knob` retired in 4, TUNE's kind changed
-    /// in 4; the TIMED keys added in 2 and the PWM keys in 3, as they were.
+    /// in 4; the TIMED keys added in 2 and the MOD keys in 3, as they were.
     const LATER: ControlSet = ControlSet {
         revision: 4,
         added: &[
             ("osc2_timed", 2),
             ("osc3_timed", 2),
-            ("osc1_pwm", 3),
-            ("osc2_pwm", 3),
-            ("osc3_pwm", 3),
+            ("osc1_shape_mod", 3),
+            ("osc2_shape_mod", 3),
+            ("osc3_shape_mod", 3),
             ("a440", 4),
         ],
         renamed: &[("oscillator_modulation", "osc_mod", 4)],
@@ -1092,9 +1092,9 @@ mod tests {
         for key in [
             "osc2_timed",
             "osc3_timed",
-            "osc1_pwm",
-            "osc2_pwm",
-            "osc3_pwm",
+            "osc1_shape_mod",
+            "osc2_shape_mod",
+            "osc3_shape_mod",
         ] {
             let start = text.find(&format!("param = \"{key}\"")).expect("there");
             let block = text[..start].rfind("[[control]]").expect("its block");
@@ -1106,9 +1106,9 @@ mod tests {
         for key in [
             "osc2_timed",
             "osc3_timed",
-            "osc1_pwm",
-            "osc2_pwm",
-            "osc3_pwm",
+            "osc1_shape_mod",
+            "osc2_shape_mod",
+            "osc3_shape_mod",
         ] {
             let i = crate::controls::index(key).expect("a control");
             assert_eq!(
@@ -1131,13 +1131,13 @@ mod tests {
         assert!(report.has("layout.control"), "{report}");
     }
 
-    /// A layout made before the PWM keys (decisions.md R-VARIABLE-RECT; revision 2, with the
+    /// A layout made before the MOD keys (decisions.md R-CONTINUOUS-WAVE; revision 2, with the
     /// TIMED keys) loads on this build: each placed by the plug-in under its WAVEFORM, its
     /// official place.
     #[test]
-    fn a_layout_made_before_the_pwm_keys_gets_them() {
+    fn a_layout_made_before_the_mod_keys_gets_them() {
         let mut text = OFFICIAL.replacen("controls = 3", "controls = 2", 1);
-        for key in ["osc1_pwm", "osc2_pwm", "osc3_pwm"] {
+        for key in ["osc1_shape_mod", "osc2_shape_mod", "osc3_shape_mod"] {
             let start = text.find(&format!("param = \"{key}\"")).expect("there");
             let block = text[..start].rfind("[[control]]").expect("its block");
             let end = start + text[start..].find("\n\n").expect("its end");
@@ -1145,7 +1145,7 @@ mod tests {
         }
         let mut report = Report::default();
         let a = Arrangement::read(&text, &mut report).unwrap_or_else(|| panic!("{report}"));
-        for key in ["osc1_pwm", "osc2_pwm", "osc3_pwm"] {
+        for key in ["osc1_shape_mod", "osc2_shape_mod", "osc3_shape_mod"] {
             let i = crate::controls::index(key).expect("a control");
             assert_eq!(
                 (a.controls[i].x, a.controls[i].y),

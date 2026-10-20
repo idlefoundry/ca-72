@@ -247,9 +247,10 @@ the parameter's id in `ca72_set`/`ca72_get`, unless it says otherwise.
 | | OSCILLATOR-2/3 FREQUENCY | big knob | semitones from the centre: oscillator 2 -8.56 to +8.24, oscillator 3 -8.63 to +8.22 (0). Printed "+7.00 semitones" or "+3.4 cents"; the dial reads in SETTINGS › FREQUENCY DIALS' law | `osc2_frequency`, `osc3_frequency` |
 | | OSCILLATOR-1/2 WAVEFORM | selector | Triangle, Shark Tooth, Sawtooth, Square, Wide Rectangle, Narrow Rectangle (Sawtooth) | `osc1_waveform`, `osc2_waveform` |
 | | OSCILLATOR-3 WAVEFORM | selector | Triangle, Reverse Sawtooth, Sawtooth, Square, Wide Rectangle, Narrow Rectangle (Sawtooth) | `osc3_waveform` |
-| | OSCILLATOR-1/2/3 RECTANGLE (decisions.md R-VARIABLE-RECT) | the WAVEFORM switch's menu | Stepped, Variable (Stepped) | `osc1_rect`, `osc2_rect`, `osc3_rect` |
-| | OSCILLATOR-1/2/3 WIDTH | the WAVEFORM switch past SQUARE while VARIABLE | 0 to 1 of the travel, shown as the duty cycle, 48 % to 6 % (0) | `osc1_width`, `osc2_width`, `osc3_width` |
-| | OSCILLATOR-1/2/3 PWM | key under the WAVEFORM switch, there while VARIABLE | on/off (off); the width follows the modulation line | `osc1_pwm`, `osc2_pwm`, `osc3_pwm` |
+| | OSCILLATOR-1/2/3 WAVEFORM MODE (decisions.md R-CONTINUOUS-WAVE) | the WAVEFORM switch's menu | Stepped, Continuous (Stepped) | `osc1_shape_mode`, `osc2_shape_mode`, `osc3_shape_mode` |
+| | OSCILLATOR-1/2/3 SHAPE | the WAVEFORM switch while CONTINUOUS | 0 (Triangle) to 1 (the narrowest pulse), shown as the shape ("Sawtooth to Square 40 %", "Rectangle 24 %"); Sawtooth's place to begin with | `osc1_shape`, `osc2_shape`, `osc3_shape` |
+| | OSCILLATOR-1/2/3 MOD | key under the WAVEFORM switch, there while CONTINUOUS | on/off (off); the shape follows the modulation line | `osc1_shape_mod`, `osc2_shape_mod`, `osc3_shape_mod` |
+| | OSCILLATOR-1/2/3 MOD DIRECTION | the MOD key Command-clicked | Clockwise, Anticlockwise, Both Ways (Clockwise) | `osc1_shape_mod_dir`, `osc2_shape_mod_dir`, `osc3_shape_mod_dir` |
 | | OSC. 3 CONTROL | rocker | on/off (on) | `osc3_control` |
 | MIXER | OSCILLATOR-1/2/3 VOLUME, EXTERNAL INPUT VOLUME, NOISE VOLUME | knobs | 0 to 10 (8; EXTERNAL INPUT 5) | `osc1_volume`, `osc2_volume`, `osc3_volume`, `ext_volume`, `noise_volume` |
 | | each one's ON | rockers | on/off (oscillator 1 on, the rest off) | `osc1_on`, `osc2_on`, `osc3_on`, `ext_on`, `noise_on` |

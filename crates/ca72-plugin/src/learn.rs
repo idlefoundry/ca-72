@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 80] = [
+pub const LEARNABLE: [Learnable; 83] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -173,16 +173,28 @@ pub const LEARNABLE: [Learnable; 80] = [
     stepped("arp_octaves", "ARP OCTAVES"),
     knob("arp_gate", "ARP GATE"),
     knob("arp_swing", "ARP SWING"),
-    // Each oscillator's rectangle (R-VARIABLE-RECT).
-    switch("osc1_rect", "OSCILLATOR-1 RECTANGLE (STEPPED or VARIABLE)"),
-    knob("osc1_width", "OSCILLATOR-1 WIDTH"),
-    switch("osc1_pwm", "OSCILLATOR-1 PWM"),
-    switch("osc2_rect", "OSCILLATOR-2 RECTANGLE (STEPPED or VARIABLE)"),
-    knob("osc2_width", "OSCILLATOR-2 WIDTH"),
-    switch("osc2_pwm", "OSCILLATOR-2 PWM"),
-    switch("osc3_rect", "OSCILLATOR-3 RECTANGLE (STEPPED or VARIABLE)"),
-    knob("osc3_width", "OSCILLATOR-3 WIDTH"),
-    switch("osc3_pwm", "OSCILLATOR-3 PWM"),
+    // Each oscillator's waveform (R-CONTINUOUS-WAVE).
+    switch(
+        "osc1_shape_mode",
+        "OSCILLATOR-1 WAVEFORM (STEPPED or CONTINUOUS)",
+    ),
+    knob("osc1_shape", "OSCILLATOR-1 SHAPE"),
+    switch("osc1_shape_mod", "OSCILLATOR-1 MOD"),
+    stepped("osc1_shape_mod_dir", "OSCILLATOR-1 MOD DIRECTION"),
+    switch(
+        "osc2_shape_mode",
+        "OSCILLATOR-2 WAVEFORM (STEPPED or CONTINUOUS)",
+    ),
+    knob("osc2_shape", "OSCILLATOR-2 SHAPE"),
+    switch("osc2_shape_mod", "OSCILLATOR-2 MOD"),
+    stepped("osc2_shape_mod_dir", "OSCILLATOR-2 MOD DIRECTION"),
+    switch(
+        "osc3_shape_mode",
+        "OSCILLATOR-3 WAVEFORM (STEPPED or CONTINUOUS)",
+    ),
+    knob("osc3_shape", "OSCILLATOR-3 SHAPE"),
+    switch("osc3_shape_mod", "OSCILLATOR-3 MOD"),
+    stepped("osc3_shape_mod_dir", "OSCILLATOR-3 MOD DIRECTION"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -1010,15 +1022,18 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "arp_octaves" => &p.arp_octaves,
         "arp_gate" => &p.arp_gate,
         "arp_swing" => &p.arp_swing,
-        "osc1_rect" => &p.osc1_rect,
-        "osc1_width" => &p.osc1_width,
-        "osc1_pwm" => &p.osc1_pwm,
-        "osc2_rect" => &p.osc2_rect,
-        "osc2_width" => &p.osc2_width,
-        "osc2_pwm" => &p.osc2_pwm,
-        "osc3_rect" => &p.osc3_rect,
-        "osc3_width" => &p.osc3_width,
-        "osc3_pwm" => &p.osc3_pwm,
+        "osc1_shape_mode" => &p.osc1_shape_mode,
+        "osc1_shape" => &p.osc1_shape,
+        "osc1_shape_mod" => &p.osc1_shape_mod,
+        "osc1_shape_mod_dir" => &p.osc1_shape_mod_dir,
+        "osc2_shape_mode" => &p.osc2_shape_mode,
+        "osc2_shape" => &p.osc2_shape,
+        "osc2_shape_mod" => &p.osc2_shape_mod,
+        "osc2_shape_mod_dir" => &p.osc2_shape_mod_dir,
+        "osc3_shape_mode" => &p.osc3_shape_mode,
+        "osc3_shape" => &p.osc3_shape,
+        "osc3_shape_mod" => &p.osc3_shape_mod,
+        "osc3_shape_mod_dir" => &p.osc3_shape_mod_dir,
         _ => return None,
     })
 }
@@ -1068,9 +1083,9 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "level" => &p.level,
         "arp_gate" => &p.arp_gate,
         "arp_swing" => &p.arp_swing,
-        "osc1_width" => &p.osc1_width,
-        "osc2_width" => &p.osc2_width,
-        "osc3_width" => &p.osc3_width,
+        "osc1_shape" => &p.osc1_shape,
+        "osc2_shape" => &p.osc2_shape,
+        "osc3_shape" => &p.osc3_shape,
         _ => return None,
     })
 }
@@ -1191,9 +1206,9 @@ mod tests {
             ),
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
             // ON and HOLD switches; oscillators 2's and 3's timed DIVISION and TIMED; each
-            // oscillator's rectangle: its WIDTH knob, its STEPPED or VARIABLE and its PWM
-            // switches.)
-            (32, 13, 33)
+            // oscillator's waveform: its SHAPE knob, its STEPPED or CONTINUOUS and its MOD
+            // switches, its MOD DIRECTION stepped.)
+            (32, 16, 33)
         );
     }
 

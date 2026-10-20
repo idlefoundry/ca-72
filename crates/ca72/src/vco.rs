@@ -522,8 +522,8 @@ impl Vco {
         self.guess.unwrap_or(0.0)
     }
 
-    /// Whether the width may move from sample to sample (the plug-in's VARIABLE rectangle,
-    /// decisions.md R-VARIABLE-RECT): then a new width the ramp has already passed switches
+    /// Whether the width may move from sample to sample (the plug-in's CONTINUOUS waveform,
+    /// decisions.md R-CONTINUOUS-WAVE): then a new width the ramp has already passed switches
     /// the comparator at once, as the circuit's does ([`Vco::follow_width`]). Off (the
     /// instrument's switch, which gives three fixed widths), nothing changes.
     pub fn set_width_moves(&mut self, on: bool) {

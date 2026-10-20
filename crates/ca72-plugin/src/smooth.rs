@@ -73,9 +73,9 @@ pub const KNOBS: [&str; 32] = [
     "level",
     "pitch_wheel",
     "mod_wheel",
-    "osc1_width",
-    "osc2_width",
-    "osc3_width",
+    "osc1_shape",
+    "osc2_shape",
+    "osc3_shape",
 ];
 
 /// The continuous knobs that do not glide: the arpeggiator's GATE and SWING, which set when its
@@ -115,9 +115,9 @@ pub fn param(p: &Ca72Params, k: usize) -> Option<&FloatParam> {
         26 => &p.level,
         27 => &p.pitch_wheel,
         28 => &p.mod_wheel,
-        29 => &p.osc1_width,
-        30 => &p.osc2_width,
-        31 => &p.osc3_width,
+        29 => &p.osc1_shape,
+        30 => &p.osc2_shape,
+        31 => &p.osc3_shape,
         _ => return None,
     })
 }
