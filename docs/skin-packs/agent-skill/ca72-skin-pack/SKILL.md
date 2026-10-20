@@ -114,7 +114,7 @@ For a new pack, in `$PACK/skin.toml`:
 - Leave out `requires`. Add `requires = "ca-72 >= x.y.z"` only if the pack truly needs a
   later CA-72 than the one it is checked with: an earlier one will refuse it.
 
-In `$PACK/layout.toml`, keep `controls = 2` as the starter has it. It names the revision of the
+In `$PACK/layout.toml`, keep `controls = 3` as the starter has it. It names the revision of the
 CA-72's controls the layout was made for, so that a later CA-72 can place controls added since.
 
 ### 3. Run the first check

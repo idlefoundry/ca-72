@@ -1106,6 +1106,21 @@ impl Ca72Params {
         self.noise_seed.load(Ordering::Relaxed)
     }
 
+    /// Oscillator `n`'s (0 to 2) rectangle's parameters: STEPPED or VARIABLE, its width and its
+    /// PWM (decisions.md R-VARIABLE-RECT).
+    pub fn rect_params(&self, n: usize) -> (&EnumParam<RectMode>, &FloatParam, &BoolParam) {
+        match n {
+            0 => (&self.osc1_rect, &self.osc1_width, &self.osc1_pwm),
+            1 => (&self.osc2_rect, &self.osc2_width, &self.osc2_pwm),
+            _ => (&self.osc3_rect, &self.osc3_width, &self.osc3_pwm),
+        }
+    }
+
+    /// Whether oscillator `n`'s rectangle is VARIABLE.
+    pub fn variable(&self, n: usize) -> bool {
+        self.rect_params(n).0.value() == RectMode::Variable
+    }
+
     /// The engine's controls from the parameters (dial units in, the voice's 0..1 out).
     pub fn controls(&self) -> Controls {
         self.controls_with(&|p: &FloatParam| p.value())
@@ -1291,6 +1306,26 @@ mod tests {
 
     /// The arpeggiator's parameters (R-ARP): their ids after every other, off by default at a
     /// sixteenth, UP, an octave, GATE 50 % and no SWING; RATE's choices are the scheduler's
+    /// VARIABLE's travel as the panel draws it is the engine's (decisions.md R-VARIABLE-RECT); its
+    /// width shows the duty cycle and takes one typed; a new instance is STEPPED, PWM off.
+    #[test]
+    fn variable_rectangles_are_off_by_default_and_their_travel_the_engines() {
+        assert_eq!(ca72_panel::art::RECT_STEPS, ca72::voice::RECT_STEPS);
+        let p = Ca72Params::default();
+        for n in 0..3 {
+            let (mode, width, pwm) = p.rect_params(n);
+            assert_eq!(mode.value(), RectMode::Stepped);
+            assert_eq!(width.value(), 0.0);
+            assert!(!pwm.value());
+            assert!(!p.variable(n));
+        }
+        assert_eq!(p.controls().panel.rect, [RectWidth::STEPPED; 3]);
+        let w = &p.osc1_width;
+        assert_eq!(w.normalized_value_to_string(0.0, true), "48 %");
+        let t = w.string_to_normalized_value("30 %").expect("a duty cycle");
+        assert!((f64::from(t) - 1.0 / ca72::voice::RECT_STEPS).abs() < 2e-3, "{t}");
+    }
+
     /// note values in order, its names a host shows.
     #[test]
     fn the_arpeggiator_is_off_by_default_its_ids_last() {
