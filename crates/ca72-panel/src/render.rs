@@ -6,8 +6,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use resvg::tiny_skia::{
-    BlendMode, Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint,
-    Point, Rect, SpreadMode, Transform,
+    BlendMode, Color, FillRule, FilterQuality, IntSize, Paint, PathBuilder, Pattern, Pixmap,
+    PixmapPaint, Point, Rect, SpreadMode, Transform,
 };
 use resvg::usvg;
 
@@ -466,9 +466,6 @@ impl Renderer {
         let top = self.top();
         let panel = self.arrangement.panel;
         let foot = self.strip_row();
-        let view = [0.0, top, f64::from(w) / s, f64::from(h) / s];
-        self.background
-            .fill(Color::from_rgba8(0x1d, 0x1b, 0x1a, 0xff));
         let (overrides, tint, turn) = (
             &self.look.pictures,
             self.look.face_tint,
@@ -477,73 +474,78 @@ impl Renderer {
         let pictures = self
             .pictures
             .get_or_insert_with(|| Pictures::load_with(overrides, tint, turn));
-        let bg = &mut self.background;
-        // The wood: its grain along the top strip and the strip's rail; each board its own band
-        // of the picture, drawn out along the grain.
-        let wood = &pictures.walnut;
-        let along = (art::W * s) as f32 / wood.width() as f32;
-        let across = along / 2.2;
-        for (y, hh, band) in [
-            (panel.top(), panel.wood, 40.0),
-            (art::PANEL_H, crate::strip::RAIL, 260.0),
-        ] {
-            if hh <= 0.0 {
-                continue;
+        let (arrangement, options) = (&*self.arrangement, &self.options);
+        let view = [0.0, top, f64::from(w) / s, f64::from(h) / s];
+        let tree =
+            |body: &str| usvg::Tree::from_str(&art::document(view, w, h, body), options).ok();
+        // The wood and the faces, their rows drawn in bands side by side, and the shadows, the
+        // trims' and the moving parts', each drawn side by side with the others: at a new scale
+        // they were most of the time the editor's window waited (decisions.md R-LINUX-RESIZE).
+        let (wood, face) = (&pictures.walnut, &pictures.face);
+        in_bands(&mut self.background, |bg, row| {
+            let top = top + f64::from(row) / s;
+            bg.fill(Color::from_rgba8(0x1d, 0x1b, 0x1a, 0xff));
+            // The wood: its grain along the top strip and the strip's rail; each board its own
+            // band of the picture, drawn out along the grain.
+            let along = (art::W * s) as f32 / wood.width() as f32;
+            let across = along / 2.2;
+            for (y, hh, band) in [
+                (panel.top(), panel.wood, 40.0),
+                (art::PANEL_H, crate::strip::RAIL, 260.0),
+            ] {
+                if hh <= 0.0 {
+                    continue;
+                }
+                fill(
+                    bg,
+                    wood,
+                    (0.0, (y - top) * s, art::W * s, hh * s),
+                    None,
+                    Transform::from_row(
+                        along,
+                        0.0,
+                        0.0,
+                        across,
+                        0.0,
+                        ((y - top) * s) as f32 - band * across,
+                    ),
+                );
             }
+            // The faces: the picture 640 units across, mirrored tile to tile.
+            let k = (640.0 * s) as f32 / face.width() as f32;
+            let at = |x: f64, y: f64| {
+                Transform::from_scale(k, k).post_translate((x * s) as f32, ((y - top) * s) as f32)
+            };
             fill(
                 bg,
-                wood,
-                (0.0, (y - top) * s, art::W * s, hh * s),
-                None,
-                Transform::from_row(
-                    along,
-                    0.0,
-                    0.0,
-                    across,
-                    0.0,
-                    ((y - top) * s) as f32 - band * across,
+                face,
+                (
+                    art::COL * s,
+                    (panel.face_top() - top) * s,
+                    art::PW * s,
+                    panel.face * s,
                 ),
+                None,
+                at(art::COL, panel.face_top()),
             );
+            let strip_top = art::PANEL_H + crate::strip::RAIL;
+            fill(
+                bg,
+                face,
+                (
+                    0.0,
+                    (strip_top - top) * s,
+                    art::W * s,
+                    (art::H - strip_top) * s,
+                ),
+                None,
+                at(320.0, strip_top),
+            );
+        });
+        let bg = &mut self.background;
+        if let Some(overlay) = tree(&art::worn_overlay(arrangement)) {
+            render_parts(&overlay, bg);
         }
-        // The faces: the picture 640 units across, mirrored tile to tile.
-        let face = &pictures.face;
-        let k = (640.0 * s) as f32 / face.width() as f32;
-        let at = |x: f64, y: f64| {
-            Transform::from_scale(k, k).post_translate((x * s) as f32, ((y - top) * s) as f32)
-        };
-        fill(
-            bg,
-            face,
-            (
-                art::COL * s,
-                (panel.face_top() - top) * s,
-                art::PW * s,
-                panel.face * s,
-            ),
-            None,
-            at(art::COL, panel.face_top()),
-        );
-        let strip_top = art::PANEL_H + crate::strip::RAIL;
-        fill(
-            bg,
-            face,
-            (
-                0.0,
-                (strip_top - top) * s,
-                art::W * s,
-                (art::H - strip_top) * s,
-            ),
-            None,
-            at(320.0, strip_top),
-        );
-        let options = &self.options;
-        let svg_over = |frame: &mut Pixmap, body: &str| {
-            let doc = art::document(view, w, h, body);
-            if let Ok(tree) = usvg::Tree::from_str(&doc, options) {
-                resvg::render(&tree, Transform::identity(), &mut frame.as_mut());
-            }
-        };
-        svg_over(bg, &art::worn_overlay(&self.arrangement));
         // A skin pack's drawing, over the surfaces and under the print.
         if let Some(drawing) = &self.look.art {
             draw_pack_art(bg, s, foot, drawing);
@@ -553,7 +555,9 @@ impl Renderer {
         }
         // The print, worn into the face: its texture showing through it a little.
         if let Some(mut print) = Pixmap::new(w, h) {
-            svg_over(&mut print, &art::printed(&self.layout, &self.arrangement));
+            if let Some(tree) = tree(&art::printed(&self.layout, arrangement)) {
+                resvg::render(&tree, Transform::identity(), &mut print.as_mut());
+            }
             worn_into(&mut print, bg);
             bg.draw_pixmap(
                 0,
@@ -568,7 +572,7 @@ impl Renderer {
             );
         }
         // The screws, each turned as it was last tightened, and the jacks.
-        for (i, (x, y, r)) in art::screws(&self.arrangement).into_iter().enumerate() {
+        for (i, (x, y, r)) in art::screws(arrangement).into_iter().enumerate() {
             let d = (2.0 * r * s).round().max(1.0) as u32;
             let deg = (i as f32 * 47.0) % 180.0;
             put_picture(
@@ -580,7 +584,7 @@ impl Renderer {
                 (1.0, 1.0),
             );
         }
-        for (x, y, r, nut) in art::jacks(&self.arrangement) {
+        for (x, y, r, nut) in art::jacks(arrangement) {
             let d = (2.0 * if nut { r + 6.0 } else { r * 1.12 } * s)
                 .round()
                 .max(1.0) as u32;
@@ -594,7 +598,8 @@ impl Renderer {
             );
         }
         // The lamp's light over all of it.
-        lamp(bg, s, panel.drawing_h());
+        let height = panel.drawing_h();
+        in_bands(bg, |bg, row| lamp_in(bg, s, (0, row), height));
         self.frame = self.background.clone();
     }
 
@@ -1148,12 +1153,116 @@ fn merged(mut rects: Vec<[i32; 4]>) -> Vec<[i32; 4]> {
 /// opening (its back and its front), the name plate and the TEMPO screen (empty in a plug-in).
 const FIXED: usize = 7;
 
-/// The panel's lamp, up and to the left, over the whole drawing at `s` pixels a unit: brighter
-/// near it (the face's sheen, catching the specks of its texture), falling off towards the far
-/// corner. Each pixel's light multiplied (`LAMP`: at the lamp, far from it, and how far its
-/// light reaches across and down, as shares of the drawing).
-fn lamp(frame: &mut Pixmap, s: f64, height: f64) {
-    lamp_in(frame, s, (0, 0), height);
+/// The most bands [`in_bands`] draws side by side.
+const BANDS: usize = 8;
+
+#[cfg(test)]
+thread_local! {
+    /// The bands a test has [`in_bands`] draw, instead of a band a processor.
+    static TEST_BANDS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// `draw` over `frame` in bands of its rows, side by side on threads of their own (a band a
+/// processor, at most [`BANDS`], none under 64 rows): each band a copy of its rows, copied back
+/// once drawn. `draw` is given the band and the frame's row at the band's top, and draws only
+/// what falls on it, each pixel as over the whole frame.
+fn in_bands(frame: &mut Pixmap, draw: impl Fn(&mut Pixmap, i32) + Sync) {
+    let (w, h) = (frame.width(), frame.height());
+    let n = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    #[cfg(test)]
+    let n = TEST_BANDS.with(std::cell::Cell::get).unwrap_or(n);
+    let n = n.clamp(1, BANDS).min((h / 64).max(1) as usize) as u32;
+    if n == 1 {
+        draw(frame, 0);
+        return;
+    }
+    let rows = h.div_ceil(n);
+    let stride = w as usize * 4;
+    let draw = &draw;
+    std::thread::scope(|scope| {
+        for (i, band) in frame
+            .data_mut()
+            .chunks_mut(rows as usize * stride)
+            .enumerate()
+        {
+            scope.spawn(move || {
+                let size = IntSize::from_wh(w, (band.len() / stride) as u32)
+                    .expect("a band of at least a row");
+                let mut pixmap = Pixmap::from_vec(band.to_vec(), size).expect("the band's rows");
+                draw(&mut pixmap, (i as u32 * rows) as i32);
+                band.copy_from_slice(pixmap.data());
+            });
+        }
+    });
+}
+
+/// `tree` (an SVG drawing over the whole of `frame`) drawn over it, its parts drawn side by side
+/// on threads of their own (a part a time each, as many threads as [`in_bands`] has bands): each
+/// part over a pixmap of its own, its box's, and these laid over the frame in the drawing's order.
+/// So resvg draws a part with a filter (a shadow's blur) over the canvas, from the pixmap it
+/// filtered it in; a part without, each pixel within a level of light of it drawn directly.
+fn render_parts(tree: &usvg::Tree, frame: &mut Pixmap) {
+    let mut parts = Vec::new();
+    parts_of(tree.root(), Transform::identity(), &mut parts);
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    #[cfg(test)]
+    let threads = TEST_BANDS.with(std::cell::Cell::get).unwrap_or(threads);
+    let threads = threads.clamp(1, BANDS).min(parts.len().max(1));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let drawn: Vec<std::sync::Mutex<Option<(i32, i32, Pixmap)>>> =
+        parts.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&(part, ts)) = parts.get(i) else {
+                        break;
+                    };
+                    let Some(b) = part.abs_layer_bounding_box() else {
+                        continue;
+                    };
+                    // (Whole pixels, two more either side for a smoothed edge.)
+                    let (x0, y0) = (b.x().floor() as i32 - 2, b.y().floor() as i32 - 2);
+                    let (x1, y1) = (b.right().ceil() as i32 + 2, b.bottom().ceil() as i32 + 2);
+                    let Some(mut layer) = Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32) else {
+                        continue;
+                    };
+                    // (resvg draws a part at its box's corner: put back, at the layer's.)
+                    let at = Transform::from_translate(-x0 as f32, -y0 as f32)
+                        .pre_concat(ts)
+                        .pre_translate(b.x(), b.y());
+                    resvg::render_node(part, at, &mut layer.as_mut());
+                    *drawn[i].lock().expect("a part's layer") = Some((x0, y0, layer));
+                }
+            });
+        }
+    });
+    for layer in drawn {
+        if let Some((x, y, layer)) = layer.into_inner().expect("a part's layer") {
+            frame.draw_pixmap(
+                x,
+                y,
+                layer.as_ref(),
+                &PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
+        }
+    }
+}
+
+/// The parts of `group` drawn each on its own (with what it is drawn through, `ts`): its
+/// children, and those of the groups in it that only move theirs.
+fn parts_of<'a>(group: &'a usvg::Group, ts: Transform, out: &mut Vec<(&'a usvg::Node, Transform)>) {
+    for node in group.children() {
+        match node {
+            usvg::Node::Group(g) if !g.should_isolate() => {
+                parts_of(g, ts.pre_concat(g.transform()), out);
+            }
+            _ => out.push((node, ts)),
+        }
+    }
 }
 
 /// The lamp's light over `frame`, a part of the official panel's drawing whose top left pixel is
@@ -1162,8 +1271,13 @@ pub(crate) fn lamp_at(frame: &mut Pixmap, s: f64, at: (i32, i32)) {
     lamp_in(frame, s, at, art::H);
 }
 
-/// The lamp's light over `frame`, its top left pixel `at` from the top left of a drawing
-/// `height` tall (a skin pack's panel may be taller than the official one).
+/// The panel's lamp, up and to the left, over the whole drawing at `s` pixels a unit: brighter
+/// near it (the face's sheen, catching the specks of its texture), falling off towards the far
+/// corner. Each pixel's light multiplied (`LAMP`: at the lamp, far from it, and how far its
+/// light reaches across and down, as shares of the drawing).
+///
+/// Here over `frame`, its top left pixel `at` from the top left of a drawing `height` tall (a
+/// skin pack's panel may be taller than the official one).
 fn lamp_in(frame: &mut Pixmap, s: f64, at: (i32, i32), height: f64) {
     const LAMP: (f64, f64, f64, f64) = (1.26, 0.84, 0.55, 0.9);
     let (w, h) = (frame.width() as usize, frame.height() as usize);
@@ -2077,5 +2191,57 @@ mod tests {
         }
         assert!(inside > 500, "{inside} of the knob's pixels dimmed");
         assert_eq!(outside, 0, "{outside} pixels elsewhere changed");
+    }
+
+    /// The worn skin's background drawn side by side on threads of their own (decisions.md
+    /// R-LINUX-RESIZE: the wood and faces in bands of rows, the shadows a part a thread) is the
+    /// background drawn on one, within two levels of light (smoothing rounded once more as each
+    /// thread's part is laid over the frame): at the smallest window, the window's opening size
+    /// and a Retina screen's. And the shadows laid over a frame part by part are those drawn over
+    /// it at once (resvg's own way), within three. (Against 0.3.0's, which drew all of it at once
+    /// on one thread, the background was within three levels at these sizes when this was made.)
+    #[test]
+    fn the_worn_background_drawn_side_by_side_is_the_background_drawn_at_once() {
+        let drawn = |bands: usize, scale: f64| {
+            TEST_BANDS.with(|b| b.set(Some(bands)));
+            let started = Instant::now();
+            let r = Renderer::with_skin(Skin::Worn, scale, 1.0);
+            let took = started.elapsed();
+            TEST_BANDS.with(|b| b.set(None));
+            (r, took)
+        };
+        let most = |a: &Pixmap, b: &Pixmap| {
+            assert_eq!(a.data().len(), b.data().len());
+            a.data()
+                .iter()
+                .zip(b.data())
+                .map(|(x, y)| x.abs_diff(*y))
+                .max()
+                .unwrap_or(0)
+        };
+        for width in [860.0, 1720.0, 3440.0] {
+            let scale = width / W;
+            let (whole, alone) = drawn(1, scale);
+            let (banded, side_by_side) = drawn(BANDS, scale);
+            let off = most(&whole.background, &banded.background);
+            eprintln!(
+                "{width}: {off} levels at most; on one thread {alone:?}, on {BANDS} {side_by_side:?}"
+            );
+            assert!(off <= 2, "{width}: {off} levels off");
+            // The shadows over the faces, part by part and at once.
+            let (w, h) = (whole.background.width(), whole.background.height());
+            let view = [0.0, whole.top(), f64::from(w) / scale, f64::from(h) / scale];
+            let doc = art::document(view, w, h, &art::worn_overlay(&whole.arrangement));
+            let tree = usvg::Tree::from_str(&doc, &whole.options).expect("the shadows");
+            let mut parts = Pixmap::new(w, h).expect("a frame");
+            parts.fill(Color::from_rgba8(0x50, 0x48, 0x40, 0xff));
+            let faces = parts.clone();
+            let mut at_once = parts.clone();
+            render_parts(&tree, &mut parts);
+            resvg::render(&tree, Transform::identity(), &mut at_once.as_mut());
+            let off = most(&parts, &at_once);
+            assert!(off <= 3, "{width}: the shadows {off} levels off");
+            assert!(most(&faces, &at_once) > 100, "shadows drawn");
+        }
     }
 }
