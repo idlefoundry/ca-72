@@ -11768,3 +11768,184 @@ by `STATUS_STACK_OVERFLOW` (0xc00000fd: what Windows reports for a crash to the 
 kind), and passes with the fix. In a release build making an instance needed 640 to 768 KB of
 the thread's stack (a Windows thread has 1 MB unless its maker asks otherwise); with the fix the
 whole life fits 256 KB.
+
+
+## R-MAC-512. macOS: the workers' runs due within a run's time, and no more threads woken than shorten a run
+
+**The owner, 2026-10-20**, on the night's measurement of 0.3.0 against 0.2.8 (issue #62), which
+found two regressions on the Mac only, at 512-frame blocks: "yes" (to finding and fixing them).
+- **LO took two to two and a half times 0.2.8's processor time** (the Mac M4 Pro, 48 kHz, 512
+  frames: Brass Choir 36 to 92 % of a core, Horn Bloom 37 to 88 %, ten POLY voices 33 to 63 %),
+  though the host's thread was lighter (36 to 23 %); at 128 frames, and on Linux at 512, LO
+  shared (R-LO-WORKERS) cost a fifth to a third more.
+- **HI with DOUBLE missed runs** (Horn Bloom 26+10 to 112+117 voices' runs unheard in two runs
+  of 20 s, the process 175 to 277 % of a core, the host's thread's 99th percentile 52 to 75 % of
+  the period); Brass Choir at HI and Horn Bloom at 128 frames were as 0.2.8.
+
+**The causes (measured on the Mac, 2026-10-20).** Both are the workers' work interval (R11),
+which tells the system's performance controller when their work is due.
+- **The interval was due by the whole block.** The first worker opened it at a block's first run
+  with the period of the host's largest block as its deadline. In a block of 512 frames the
+  voices play four runs of 128 samples, together in well under 3 ms of a 10.7 ms period; told
+  10.7 ms, the system ran the workers slowly enough to fill it. A switch for the measurement
+  showed it: Brass Choir at LO took 96 % of a core with the interval as it was, 94 % with none,
+  94 % with it held open over the whole block and with the workers spinning 2 ms between runs
+  (so neither the interval's closing nor parking), 93 % with the time-constraint policy's
+  computation an eighth of the period instead of a half; with the deadline a quarter of the
+  period, 51 %. At 128 frames one run is the block, and its period was the run's own time.
+- **Once the first worker parked between a block's runs, the rest of the block played outside
+  any interval.** It closed the interval as it parked and opened one again only at the next
+  block. With DOUBLE at HI each voice is taken alone since R-POLY-CRACKLE, so on the Mac's nine
+  threads eight played one doubled voice of Horn Bloom's ten and one played two: the others
+  waited longer than the spin (R-SPIN) and parked, the first among them, at 2,995 of the 4,152
+  runs it took in 10 s. 0.2.8 took those voices two at a time, five threads each playing two
+  (R-POLY-CRACKLE's "pairs"), so its first worker stayed busy. Ten doubled voices take two turns
+  either way: the four threads more only waited.
+
+**Fixed (agent decisions, for the owner to confirm):**
+- **An interval for each run, due within its share of 128 samples' time** (`Pool::block(len)`,
+  `due_share`, `run_due` in `pool.rs`; the engine tells the pool the block's length from its
+  deadline). In a block of 128 frames or fewer each run is due within its own time, as a block of
+  that size was before. In a longer block the block's runs together are due within one run of
+  128 samples' time (2.7 ms at 48 kHz), each run its share: a 512-frame block's four runs a
+  quarter of their own time each, a knob's glide's runs of 32 samples (R-KNOB-GLIDE) their share
+  alike. Never later than the host's largest block. The first worker closes a run's interval at
+  the next run or when it parks, as before. Why 128 samples' time rather than the whole block: at
+  128 frames LO's sharing costs a fifth to a third more than 0.2.8, as on Linux, and that is what
+  the voices' work is measured to cost at the speed the system gives a deadline that close (the per-run deadline
+  measured at a whole run's time, three quarters, a half, a quarter and a tenth of it at 512:
+  62, 59, 56, 46 and 47 % of a core for Horn Bloom at LO; a quarter is where it stops falling,
+  and it is the 128-frame block's).
+- **On macOS, no more threads woken than share the voices out in as few turns** (`fewest`,
+  `pool::EVEN`): ten voices on nine threads take two turns, as on five, so five are woken (four
+  workers and the host's thread), as 0.2.8's pairs had; eight voices on nine threads, eight. LO's
+  own count (`lo_threads`) is taken first, and this never wakes more than before.
+  R-POLY-CRACKLE's gain is kept where there are fewer threads than voices: ten doubled voices on
+  four threads still take three turns rather than four. The trade: it is as quick only when the
+  run is done by its deadline; past it, the more threads started at once, the more voices are
+  heard. So ULTRA, whose heavy voices often run past the deadline, still wakes every thread
+  (`pool::EVERY`; with the threads evened at ULTRA too, single runs on the Mac left 37,414 of ten
+  voices' runs unheard at 128 frames against 29,475 without, and Horn Bloom's blocks at 512 took
+  18 times their period against 6, all overloaded as every version is there). And Linux and Windows wake every thread as before: there a thread woken only
+  to wait costs next to nothing (Linux's Horn Bloom at HI cost the same in 0.2.8 and 0.3.0), and
+  evening saved nothing measurable on Windows (Brass Choir at HI, eight voices on its five threads
+  woken as four: 188 against 184 % of a core at 128 frames), so the risk past the deadline is not
+  worth taking there. (Its unheard runs near overload did not tell either way: 128 and 264 in two
+  runs of 20 s with every thread, 195 and 199 evened, and 122 and 132 against 173 and 147 for the
+  same code twice.)
+- **So nothing changes on Linux or Windows**: they have no work interval, and wake as before.
+- **Kept:** macOS shares at LO always (R-LO-WORKERS). With the fix it pays at 512 frames as at
+  128, so no rule by block length was needed.
+- **The samples do not change**: which thread plays which voice, and when the system is told
+  it is due, is all that changes.
+
+**Where the workers' time went** (the Mac, Brass Choir as set at LO, 512 frames, 14 s under
+`xctrace`'s Time Profiler, which samples running threads only): with 0.3.0 the three workers at
+work took 8.7 s, 99.5 % of it on the efficiency cores; with the fix 3.0 s, all of it on the
+performance cores, in the same voices' code (`Halfband::sum`, `Light::tick`, `Interpolator::push`
+at the top in both). Opening and closing each run's interval (`__work_interval_ctl`) took 98 ms of
+the 14 s. The harness's own host thread, in a work interval of its own due by the period as a
+CoreAudio thread is, ran mostly on the efficiency cores in both, which is why its time at 512
+frames is longer than at 128 even in 0.2.8.
+
+**Evidence (2026-10-20):** `tests/cpu_compare.rs` (the `cpu-compare` branch), the plug-in through
+its own `process` paced at 48 kHz on a promoted host thread (time-constraint in a work interval on
+macOS, `SCHED_FIFO` on Linux, MMCSS on Windows), its workers its own; two runs of 20 s a cell
+unless one is shown, the versions' order rotated. The host's thread's time in `process` as a share
+of the period, mean / 99th percentile; the process's processor time in shares of a core; voices'
+runs unheard, run by run. The Mac: the M4 Pro, 8 workers, its usual background (2 to 5 cores of
+other processes, macOS's media analysis among them for part of it); runs during another agent's
+build were left out and run again.
+
+The Mac, 512 frames:
+
+| Sound | QUALITY | Host's thread, 0.2.8 | 0.3.0 | fixed | Processor, 0.2.8 | 0.3.0 | fixed | Unheard, 0.2.8 → 0.3.0 → fixed |
+|---|---|---|---|---|---|---|---|---|
+| Brass Choir as set | LO | 33.7 / 40.3 % | 23.9 / 28.8 % | 13.9 / 22.2 % | 34 % | 95 % | 42 % | 0+0 → 0+0 → 0+0 |
+| Horn Bloom as set | LO | 36.7 / 40.5 % | 25.2 / 32.5 % | 14.2 / 20.8 % | 37 % | 90 % | 51 % | 0+0 → 0+0 → 0+0 |
+| Ten POLY voices | LO | 32.5 / 36.5 % | 18.7 / 28.9 % | 8.6 / 11.7 % | 33 % | 67 % | 34 % | 0+0 → 0+0 → 0+0 |
+| Swarm Riser (UNISON) | LO | 29.7 / 32.5 % | 11.5 / 15.4 % | 11.7 / 14.1 % | 30 % | 46 % | 31 % | 0+0 → 0+0 → 0+0 |
+| Ten voices, CUTOFF moving | LO | 28.7 / 37.0 % | 25.3 / 32.4 % | 13.8 / 19.4 % | 29 % | 91 % | 59 % | 0+0 → 0+0 → 0+0 |
+| Horn Bloom as set | HI | 35.1 / 51.6 % | 41.4 / 73.7 % | 35.4 / 51.7 % | 175 % | 262 % | 176 % | 4+26 → 144+44 → 0+0 |
+| Brass Choir as set | HI | 41.9 / 71.6 % | 40.4 / 72.3 % | 21.6 / 31.0 % | 234 % | 234 % | 166 % | 5+57 → 55+43 → 0+0 |
+| Ten POLY voices | HI | 29.0 / 41.8 % | 30.3 / 47.2 % | 21.2 / 30.5 % | 145 % | 150 % | 105 % | 4+0 → 4+0 → 0+0 |
+| Swarm Riser (UNISON) | HI (one run) | 26.4 / 41.2 % | 26.1 / 41.7 % | 13.8 / 21.3 % | 105 % | 104 % | 55 % | 0 → 2 → 0 |
+
+The Mac, 128 frames (each run due within its own time, as the block was, a knob's gliding runs
+of 32 samples apart; the threads evened):
+
+| Sound | QUALITY | Host's thread, 0.2.8 | 0.3.0 | fixed | Processor, 0.2.8 | 0.3.0 | fixed | Unheard |
+|---|---|---|---|---|---|---|---|---|
+| Brass Choir as set | LO | 30.5 / 34.1 % | 9.3 / 10.9 % | 9.9 / 11.1 % | 31 % | 37 % | 40 % | none |
+| Horn Bloom as set | LO | 37.0 / 41.2 % | 9.7 / 11.3 % | 9.7 / 11.3 % | 38 % | 48 % | 48 % | none |
+| Ten POLY voices | LO | 20.2 / 22.6 % | 5.2 / 6.7 % | 5.3 / 6.8 % | 21 % | 26 % | 26 % | none |
+| Horn Bloom as set | HI | 37.3 / 55.7 % | 38.1 / 54.8 % | 37.2 / 55.0 % (one run) | 189 % | 245 % | 185 % | 2+0 → 0+0 → 0 |
+| Brass Choir as set | HI | 28.3 / 45.2 % | 29.8 / 48.0 % | 28.4 / 36.0 % | 227 % | 232 % | 222 % | 0+0 → 0+0 → 1+0 |
+
+- **LO at 512 frames** now costs what LO shared costs at 128 (Linux's ratio at 512 was +29 to +33 %
+  over 0.2.8: here +3 to +38 %), the host's thread at a quarter to two fifths of 0.2.8's.
+- **HI at 512** is back to 0.2.8's processor time with DOUBLE, and below it elsewhere (the
+  workers' runs are due as a 128-frame block's, where 0.2.8's were due by the whole period too), no
+  voice's run unheard in any case.
+- **CUTOFF moving at LO** still costs twice 0.2.8's, as on Linux (21 to 41 %): a knob's glide plays
+  runs of 32 samples (R-KNOB-GLIDE), each shared. That is not the Mac's and is left as it is.
+- **ULTRA** (overloaded on every version, all blocks late; 10 s and 4 s runs): ten voices at 512
+  frames 213 / 624 % of the period, 313 % of a core and 9,631 runs unheard on 0.3.0, 211 / 631 %,
+  313 % and 9,631 fixed; Horn Bloom 633 / 1297 %, 191 %, 4,675 against 624 / 1316 %, 189 %, 4,485.
+
+**Linux** (the Ryzen 7 7800X3D, 9 workers; each run waited for the machine's load to fall below
+2.5, other agents' work around it): 0.3.0 against the fix, the same within a few points in every
+case, as it must be with no work interval and ten threads.
+
+| Sound | QUALITY | Block | Host's thread, 0.3.0 | fixed | Processor, 0.3.0 | fixed |
+|---|---|---|---|---|---|---|
+| Brass Choir as set | LO | 512 | 10.9 / 13.2 % | 10.6 / 13.3 % | 42 % | 41 % |
+| Horn Bloom as set | LO | 512 | 10.5 / 13.0 % | 11.0 / 13.6 % | 51 % | 53 % |
+| Ten POLY voices | LO | 512 | 5.3 / 6.8 % | 5.7 / 7.1 % | 26 % | 28 % |
+| Horn Bloom as set | HI | 512 | 37.6 / 51.8 % | 37.5 / 52.0 % | 325 % | 326 % |
+| Brass Choir as set | HI | 512 | 39.0 / 55.9 % | 37.7 / 55.5 % | 258 % | 260 % |
+| Brass Choir as set | LO | 128 | 11.0 / 14.0 % | 11.5 / 14.4 % | 42 % | 44 % |
+| Horn Bloom as set | LO | 128 | 11.3 / 14.0 % | 11.6 / 14.5 % | 54 % | 55 % |
+| Horn Bloom as set | HI | 128 | 39.6 / 56.9 % | 39.7 / 57.7 % | 334 % | 339 % |
+| Brass Choir as set | HI | 128 | 42.0 / 63.2 % | 39.9 / 61.5 % | 282 % | 274 % |
+
+No run late; Brass Choir at HI at 128 frames 17+19 runs unheard on 0.3.0, 11+28 fixed, the others
+none.
+
+**Windows** (the i5-13600K, 4 workers, the Balanced plan): the final code is 0.3.0's there. Its
+first version evened the threads on Windows too; both are shown against 0.3.0:
+
+| Sound | QUALITY | Block | Host's thread, 0.3.0 | evened | final | Processor, 0.3.0 | evened | final |
+|---|---|---|---|---|---|---|---|---|
+| Brass Choir as set | HI | 512 | 45.6 / 67.9 % | 47.5 / 69.8 % | 44.9 / 66.9 % | 188 % | 187 % | 185 % |
+| Horn Bloom as set | HI | 512 | 42.1 / 61.8 % | 41.2 / 60.3 % | — | 206 % | 202 % | — |
+| Horn Bloom as set | LO | 512 | 34.9 / 59.2 % | 34.6 / 70.6 % | 35.8 / 57.5 % | 41 % | 40 % | 36 % |
+| Brass Choir as set | HI | 128 | 46.3 / 77.1 % | 47.0 / 75.2 % | 46.3 / 75.1 % | 188 % | 184 % | 188 % |
+| Horn Bloom as set | HI | 128 | 42.8 / 64.7 % | 42.8 / 64.5 % | 42.9 / 66.5 % | 207 % | 207 % | 208 % |
+| Horn Bloom as set | LO | 128 | 27.6 / 44.5 % | 30.8 / 50.2 % | 28.0 / 42.4 % | 84 % | 60 % | 81 % |
+
+LO's processor time on Windows moves 30 points and more from run to run, in either version, as the
+load-responsive sharing switches on after a late block (R-LO-WORKERS). Brass Choir at HI at 128
+frames had 128+264 runs unheard on 0.3.0, 195+199 evened, 173+147 final against 122+132 for 0.3.0
+in the same batch.
+
+**The same to the bit** (the fix's own build against 0.3.0's, or with workers against none):
+- Linux: `preset_render`, the 19 factory presets at LO and HI, DOUBLE at 0 and 50 %, with 0, 3, 5
+  and 9 workers, each against 0.3.0 with none (16 runs, 304 renders); `lo_workers same` (504
+  renders, sharing switched every 37 blocks among them); `crackle offline` (HI, every variant in
+  blocks of 64 to 1024 frames, 0, 3, 5 and 9 workers).
+- The Mac (where the threads are evened): `preset_render`, the 19 presets at LO and HI, DOUBLE at
+  0 and 50 %, 8 workers against none; `lo_workers same` (504 renders); `lo_workers paced` with the
+  plug-in's time-constraint workers in their work intervals (`CA72_RT`), Horn Bloom, Brass Choir
+  and ten doubled voices at 128 and 512 frames, each paced render the same as the offline one, no
+  run unheard.
+- Tests: `a_long_blocks_runs_are_due_within_one_runs_time`,
+  `as_few_threads_are_woken_as_take_as_many_turns`.
+
+**Not done:** an Intel Mac or an older Apple silicon one; a host on any system (a host's own audio
+thread, in its device's workgroup, sets how fast the host's thread runs, which this harness only
+stands in for); the energy each way (the workers now run on the performance cores, finished sooner:
+`powermetrics` needs root); ULTRA's split crews, which open an interval of their own due by the
+block's period and may be slowed the same way at 512 frames (ULTRA with one voice cost the same in
+0.2.8 and 0.3.0, so it is not a regression); the knob's glide at LO costing twice 0.2.8's on every
+system.
