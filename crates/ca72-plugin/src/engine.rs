@@ -25,7 +25,7 @@ use ca72::voice::{Jacks, LINE_UP, Panel, Quality, RETRIGGER_GAP, Voice, audio_ta
 
 use crate::character::{Character, Placement};
 use crate::drive::{AVERAGE, Calibration, Curve, HEARD, HELD, KEYS, KWeighted, STEPS};
-use crate::pool::{Ask, Crew, MAX, Need, Pool, Shared, Split};
+use crate::pool::{Ask, Crew, EVERY, MAX, Need, Pool, Shared, Split};
 use ca72::threaded::Helpers;
 use plugin_kit_stereo::place::{
     ALONE, DOUBLE_TRIM, glide_share, pair_gains, unison_trim, voice_gains,
@@ -1729,11 +1729,18 @@ impl Engine {
     pub fn set_deadline(&mut self, deadline: Option<Instant>) {
         self.deadline = deadline;
         // (The host's thread's time in the plug-in is counted from here to the block's end.)
-        self.block_start = Some(Instant::now());
+        let now = Instant::now();
+        self.block_start = Some(now);
         self.block_silent = self.silent_runs;
         self.follow_poly();
         if let Some(p) = &self.pool {
-            p.block();
+            // (The block's samples, from its deadline, a share of its period from now: what
+            // the workers' runs are due within on macOS, decisions.md R-MAC-512. 0 offline.)
+            let len = deadline.map_or(0, |d| {
+                (d.saturating_duration_since(now).as_secs_f64() / DEADLINE * self.rate).round()
+                    as usize
+            });
+            p.block(len);
         }
     }
 
@@ -2326,8 +2333,11 @@ impl Engine {
         }
         let deadline = self.deadline;
         // (At QUALITY's LO only as many threads as the run's light voices repay waking:
-        // decisions.md R-LO-WORKERS.)
-        let threads = if !self.controls.potato {
+        // decisions.md R-LO-WORKERS. On macOS no more than take as many turns; at ULTRA every one,
+        // its voices often past the deadline: R-MAC-512.)
+        let threads = if self.controls.ultra {
+            EVERY
+        } else if !self.controls.potato {
             MAX
         } else if self.lo_shares() {
             lo_threads(count)
