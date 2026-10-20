@@ -1500,6 +1500,10 @@ impl Engine {
 
     /// [`Engine::prepare`]'s work, on whichever thread runs it.
     fn prepare_here(&mut self, rate: f64, seed: u64) {
+        // (The machine's cores, which ULTRA's split crews are sized by, read here, off the
+        // audio thread: an instance made at LO read them at ULTRA's first block, a file read
+        // and memory taken on the audio thread, once a process.)
+        let _ = split_voices();
         self.rest.wake();
         self.rest.window = (SLEEP_WINDOW * rate).ceil() as usize;
         let reseeded = seed != self.seed;
