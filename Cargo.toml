@@ -9,6 +9,7 @@ exclude = [
     "third_party/baseview",
     "third_party/clap",
     "third_party/clap-wrapper",
+    "third_party/gnu-freefont",
     "third_party/nih-plug",
     "third_party/softbuffer",
     "third_party/urw-gothic",

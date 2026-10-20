@@ -247,6 +247,8 @@ pub fn hit_bounds(kind: &Kind) -> [f64; 4] {
             [-r, -r, r, r]
         }
         Kind::Selector(_) => [-60.0, -60.0, 60.0, 60.0],
+        // (Its cap and its sign's row: not its note's stem above it.)
+        Kind::Key => crate::interact::KEY_HIT,
         _ => art::bounds(kind),
     }
 }
@@ -912,6 +914,14 @@ fn look_of(official: Kind, e: &ControlEntry) -> Result<Kind, String> {
                 across: e.across.unwrap_or(across),
             }
         }
+        Kind::Key => {
+            none("big", e.big.is_some())?;
+            none("size", e.size.is_some())?;
+            none("colour", e.colour.is_some())?;
+            none("on", e.on.is_some())?;
+            none("across", e.across.is_some())?;
+            Kind::Key
+        }
         Kind::Wheel { .. } => return Err("a wheel is the plug-in's own".into()),
     })
 }
@@ -1030,17 +1040,18 @@ mod tests {
 
     // ---- A later CA-72, simulated: the panel's controls as they might change.
 
-    /// A later revision: A-440 added in revision 2, OSC MOD once called `oscillator_modulation`
-    /// (renamed in 2), an `old_knob` retired in 2, TUNE's kind changed in 2.
+    /// A later revision than this build's (2): A-440 added in revision 3, OSC MOD once called
+    /// `oscillator_modulation` (renamed in 3), an `old_knob` retired in 3, TUNE's kind changed
+    /// in 3; the TIMED keys added in 2, as they were.
     const LATER: ControlSet = ControlSet {
-        revision: 2,
-        added: &[("a440", 2)],
-        renamed: &[("oscillator_modulation", "osc_mod", 2)],
-        retired: &[("old_knob", 2)],
-        kind_changed: &[("tune", 2)],
+        revision: 3,
+        added: &[("osc2_timed", 2), ("osc3_timed", 2), ("a440", 3)],
+        renamed: &[("oscillator_modulation", "osc_mod", 3)],
+        retired: &[("old_knob", 3)],
+        kind_changed: &[("tune", 3)],
     };
 
-    /// The official layout as a revision-1 layout without A-440.
+    /// The official layout as a revision-2 layout without A-440.
     fn without_a440() -> String {
         let start = OFFICIAL.find("param = \"a440\"").expect("there");
         let block = OFFICIAL[..start].rfind("[[control]]").expect("its block");
@@ -1103,6 +1114,42 @@ mod tests {
         assert!(note.message.contains("nearest"), "{note}");
     }
 
+    /// A layout made before the TIMED keys (decisions.md R-OSC-TIMED; revision 1, without them)
+    /// loads on this build: each key placed by the plug-in at its official place, with a note,
+    /// nothing refused or put to review.
+    #[test]
+    fn a_layout_made_before_the_timed_keys_gets_them() {
+        let mut text = OFFICIAL.replacen("controls = 2", "controls = 1", 1);
+        for key in ["osc2_timed", "osc3_timed"] {
+            let start = text.find(&format!("param = \"{key}\"")).expect("there");
+            let block = text[..start].rfind("[[control]]").expect("its block");
+            let end = start + text[start..].find("\n\n").expect("its end");
+            text = format!("{}{}", &text[..block], &text[end + 2..]);
+        }
+        let mut report = Report::default();
+        let a = Arrangement::read(&text, &mut report).unwrap_or_else(|| panic!("{report}"));
+        for key in ["osc2_timed", "osc3_timed"] {
+            let i = crate::controls::index(key).expect("a control");
+            assert_eq!(
+                (a.controls[i].x, a.controls[i].y),
+                (CONTROLS[i].x, CONTROLS[i].y)
+            );
+        }
+        assert!(report.has("layout.added"), "{report}");
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|f| f.severity == skin_pack::Severity::Note),
+            "{report}"
+        );
+        // Made for revision 2, the same layout should have placed them: refused.
+        let mut report = Report::default();
+        let two = text.replacen("controls = 1", "controls = 2", 1);
+        assert!(Arrangement::read(&two, &mut report).is_none());
+        assert!(report.has("layout.control"), "{report}");
+    }
+
     #[test]
     fn a_full_panel_has_no_free_place() {
         let i = crate::controls::index("a440").expect("a control");
@@ -1141,7 +1188,7 @@ mod tests {
     /// passed over, with notes.
     #[test]
     fn a_layout_for_a_later_ca72_loads_what_this_one_knows() {
-        let text = OFFICIAL.replacen("controls = 1", "controls = 3", 1)
+        let text = OFFICIAL.replacen("controls = 2", "controls = 4", 1)
             + "\n[[control]]\nparam = \"future_knob\"\nat = [10, 10]\nglow = true\n\n\
                [[sticker]]\nat = [5, 5]\n";
         let mut report = Report::default();

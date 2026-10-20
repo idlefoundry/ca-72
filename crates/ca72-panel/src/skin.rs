@@ -253,6 +253,11 @@ pub enum Part {
     HamsterAsleep,
     /// The name plate, blank (its lettering is printed on it: `art::plate_worn`).
     Plate,
+    /// An oscillator's TIMED key's cap (decisions.md R-OSC-TIMED), unlit and lit: the strip's
+    /// tab (its translucent amber, a pack's `tab` and `tab-lit` where it has them), drawn to the
+    /// key's proportions.
+    Key,
+    KeyLit,
 }
 
 /// How much of a knob's picture its skirt fills (the picture squared about the cap's axis;
@@ -293,6 +298,8 @@ pub struct Pictures {
     wheel: Pixmap,
     asleep: Pixmap,
     plate: Pixmap,
+    /// The TIMED keys' caps, unlit and lit.
+    key: [Pixmap; 2],
     scaled: Vec<((Part, u32, u32), Pixmap)>,
 }
 
@@ -307,7 +314,7 @@ impl std::fmt::Debug for Pictures {
 /// The most parts kept at their sizes (a scale's: the knobs, three pointer and jewel sizes,
 /// six rockers', the jacks', the screws', QUALITY's toggle, and what QUALITY's opening holds:
 /// two lamps, the hamster and his wheel).
-const KEPT: usize = 72;
+const KEPT: usize = 76;
 
 /// The face's picture, its grey coloured: a black a touch warm.
 pub(crate) fn face_picture() -> Pixmap {
@@ -394,6 +401,18 @@ impl Pictures {
                 capped(&pointer, POINTER_CAP),
             ]
         };
+        // The TIMED keys' caps: the strip's tabs', at the keys' proportions.
+        let aspect = crate::art::KEY.0 / crate::art::KEY.1;
+        let key = match (pack("tab"), pack("tab-lit")) {
+            (Some(unlit), Some(lit)) => [
+                plugin_kit_materials::widened(&unlit, aspect),
+                plugin_kit_materials::widened(&lit, aspect),
+            ],
+            (tab, _) => {
+                let l = crate::strip::amber_caps(&tab.unwrap_or_else(|| decode(BUTTON)), aspect);
+                [l.unlit, l.lit]
+            }
+        };
         Pictures {
             walnut: png("walnut"),
             face,
@@ -428,6 +447,7 @@ impl Pictures {
             wheel: png("hamster-wheel"),
             asleep: png("hamster-asleep"),
             plate: png("plate"),
+            key,
             scaled: Vec::new(),
         }
     }
@@ -467,6 +487,8 @@ impl Pictures {
             Part::Hamster(k) => &self.hamster[usize::from(k) % STRIDE],
             Part::HamsterAsleep => &self.asleep,
             Part::Plate => &self.plate,
+            Part::Key => &self.key[0],
+            Part::KeyLit => &self.key[1],
         }
     }
 

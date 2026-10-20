@@ -14,7 +14,7 @@ delivering it as a pack file (`.ifskin`). It leaves signing to the marketplace.
 ```
 ca72-skin-pack/
   SKILL.md                  the steps and the rules (read first)
-  reference/layout.md       coordinates, the 42 controls, click areas, fixtures, print
+  reference/layout.md       coordinates, the 44 controls, click areas, fixtures, print
   reference/drawing.md      the SVG subset, the drawing's offset, picture slots, fonts
   reference/provenance.md   the manifest, licences, provenance, ids and updates, signatures,
                             pack files, declarations, what never goes in

@@ -318,6 +318,25 @@ impl FreqKnob {
         }
     }
 
+    /// Its oscillator's index (1, 2).
+    fn oscillator(&self) -> usize {
+        match self.pot {
+            Pot::Two => 1,
+            Pot::Three => 2,
+        }
+    }
+
+    /// Its oscillator's DIVISION while it is timed (its TIMED on, its RANGE at LO): what the
+    /// knob turns then, a value of its own, so that FREQUENCY's place is kept for when it is off
+    /// (decisions.md R-OSC-TIMED).
+    fn division(&self) -> Option<&EnumParam<crate::params::Division>> {
+        let n = self.oscillator();
+        if !self.params.timed_now(n) {
+            return None;
+        }
+        self.params.timed_params(n).map(|(_, d, _)| d)
+    }
+
     /// The knob at `knob` of its travel: its pot's position.
     fn wiper(&self, knob: f32) -> f32 {
         self.pot.wiper_at(self.params.freq_law(), f64::from(knob)) as f32
@@ -330,23 +349,41 @@ impl FreqKnob {
 
 impl Operated for FreqKnob {
     fn value(&self) -> f32 {
+        if let Some(d) = self.division() {
+            return d.unmodulated_normalized_value();
+        }
         self.knob(self.param().unmodulated_normalized_value())
     }
     fn default(&self) -> f32 {
+        if let Some(d) = self.division() {
+            return d.default_normalized_value();
+        }
         self.knob(self.param().default_normalized_value())
     }
     fn text(&self, knob: f32) -> String {
+        if let Some(d) = self.division() {
+            return d.normalized_value_to_string(knob, true);
+        }
         self.param()
             .normalized_value_to_string(self.wiper(knob), true)
     }
     fn begin(&self, s: &ParamSetter<'_>) {
-        s.begin_set_parameter(self.param());
+        match self.division() {
+            Some(d) => s.begin_set_parameter(d),
+            None => s.begin_set_parameter(self.param()),
+        }
     }
     fn set(&self, s: &ParamSetter<'_>, knob: f32) {
-        s.set_parameter_normalized(self.param(), self.wiper(knob));
+        match self.division() {
+            Some(d) => s.set_parameter_normalized(d, knob),
+            None => s.set_parameter_normalized(self.param(), self.wiper(knob)),
+        }
     }
     fn end(&self, s: &ParamSetter<'_>) {
-        s.end_set_parameter(self.param());
+        match self.division() {
+            Some(d) => s.end_set_parameter(d),
+            None => s.end_set_parameter(self.param()),
+        }
     }
 }
 
@@ -399,6 +436,9 @@ fn param<'a>(p: &'a Ca72Params, id: &str) -> Option<&'a dyn Operated> {
         "decay_on" => &p.decay_on,
         "note_priority" => &p.note_priority,
         "retrigger" => &p.retrigger,
+        // Oscillators 2's and 3's TIMED keys (decisions.md R-OSC-TIMED).
+        "osc2_timed" => &p.osc2_timed,
+        "osc3_timed" => &p.osc3_timed,
         "pitch_wheel" => &p.pitch_wheel,
         "mod_wheel" => &p.mod_wheel,
         // The strip's knobs (A6).
@@ -2285,6 +2325,29 @@ impl Editing {
         }
     }
 
+    /// Control `i`'s kind as it is operated now: as the panel's layout places it, an
+    /// oscillator's FREQUENCY stepped through its DIVISION's note values while it is timed
+    /// (decisions.md R-OSC-TIMED).
+    fn kind_of(&self, i: usize) -> Kind {
+        let kind = self.renderer.arrangement().control(i).kind;
+        match (kind, self.timed_dial(i)) {
+            (Kind::Knob { big, .. }, true) => Kind::Knob {
+                dial: ca72_panel::controls::Dial::Timed,
+                big,
+            },
+            _ => kind,
+        }
+    }
+
+    /// Whether control `i` is oscillator 2's or 3's FREQUENCY knob, timed now.
+    fn timed_dial(&self, i: usize) -> bool {
+        CONTROLS.get(i).is_some_and(|c| match c.param {
+            "osc2_frequency" => self.params.timed_now(1),
+            "osc3_frequency" => self.params.timed_now(2),
+            _ => false,
+        })
+    }
+
     fn operated(&self, control: usize) -> Option<&dyn Operated> {
         match CONTROLS.get(control)?.param {
             "osc2_frequency" => Some(&self.freq_knobs[0]),
@@ -2671,6 +2734,9 @@ impl Editing {
         CONTROLS.get(i).is_none_or(|c| match c.param {
             "double" => self.params.doubled.value(),
             "voices" => !voices_inert(&self.params),
+            // A TIMED key away from its RANGE's LO (R-OSC-TIMED).
+            "osc2_timed" => !timed_inert(&self.params, 1),
+            "osc3_timed" => !timed_inert(&self.params, 2),
             _ => true,
         })
     }
@@ -3098,8 +3164,9 @@ impl Editing {
                 if !self.operable(i) {
                     return;
                 }
-                let kind = self.renderer.arrangement().control(i).kind;
-                if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
+                let kind = self.kind_of(i);
+                if double && !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key)
+                {
                     if let Some(p) = self.operated(i) {
                         self.set_once(i, f64::from(p.default()));
                     }
@@ -3107,7 +3174,7 @@ impl Editing {
                     return;
                 }
                 let value = self.value_of(i);
-                if !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. })
+                if !matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key)
                     && let Some(p) = self.operated(i)
                 {
                     p.begin(&self.setter());
@@ -3315,6 +3382,8 @@ impl Editing {
         }
         let fine = modifiers.contains(Modifiers::SHIFT);
         let pointer = self.pointer;
+        // (The control dragged's kind as it is operated now: a timed FREQUENCY steps.)
+        let dragged_kind = self.drag.as_ref().map(|d| self.kind_of(d.control));
         let Some(d) = &mut self.drag else {
             let at = self.in_drawing(pointer);
             let (x, y) = at;
@@ -3378,7 +3447,7 @@ impl Editing {
         if (pointer.0 - d.from.0).abs() + (pointer.1 - d.from.1).abs() > 3.0 {
             d.moved = true;
         }
-        let kind = self.renderer.arrangement().control(d.control).kind;
+        let Some(kind) = dragged_kind else { return };
         // The click threshold belongs to switches and selectors. A continuous control
         // follows even a sub-pixel movement from the press, with no initial jump.
         if !d.moved && !kind.is_continuous() {
@@ -3446,7 +3515,7 @@ impl Editing {
     /// then picks what it pressed), else cut short.
     fn let_go(&mut self, d: Drag, released: bool) {
         let placed = *self.renderer.arrangement().control(d.control);
-        let kind = placed.kind;
+        let kind = self.kind_of(d.control);
         let mut v = d.value;
         if released && !d.moved {
             let picked = match d.pressed {
@@ -3466,7 +3535,7 @@ impl Editing {
             return;
         };
         let s = self.setter();
-        if matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. }) {
+        if matches!(kind, Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key) {
             if v != d.value {
                 p.begin(&s);
                 p.set(&s, v as f32);
@@ -3618,7 +3687,7 @@ impl Editing {
                 travel: 0.0,
             });
         }
-        let kind = self.renderer.arrangement().control(i).kind;
+        let kind = self.kind_of(i);
         let Some(s) = &mut self.scroll else { return };
         s.last = Instant::now();
         let notches = if kind.is_continuous() {
@@ -3652,7 +3721,7 @@ impl Editing {
 
     fn end_scroll(&mut self) {
         let Some(s) = self.scroll.take() else { return };
-        let kind = self.renderer.arrangement().control(s.control).kind;
+        let kind = self.kind_of(s.control);
         let v = interact::release(&kind, s.value);
         if let Some(p) = self.operated(s.control) {
             let setter = self.setter();
@@ -3706,7 +3775,10 @@ impl Editing {
             self.scene.values[i] = match (&self.drag, &self.scroll) {
                 (Some(d), _)
                     if d.control == i
-                        && !matches!(c.kind, Kind::Rocker { .. } | Kind::Toggle { .. }) =>
+                        && !matches!(
+                            c.kind,
+                            Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key
+                        ) =>
                 {
                     d.value
                 }
@@ -3717,6 +3789,9 @@ impl Editing {
         self.scene.power = !self.params.bypass.value();
         self.scene.detune_off = !self.params.doubled.value();
         self.scene.voices_off = voices_inert(&self.params);
+        // Oscillators 2's and 3's timed keys and dials (decisions.md R-OSC-TIMED).
+        self.scene.timed = timed_scene(&self.params);
+        self.learning.timed = [self.params.timed_now(1), self.params.timed_now(2)];
         self.scene.overload = Meters::load(&self.meters.overload);
         self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
@@ -3839,7 +3914,7 @@ impl Editing {
                 let label = if c.param == "feedback" && feedback_silent(&self.scene.values) {
                     FEEDBACK_SILENT
                 } else {
-                    c.label
+                    timed_label(&self.params, c.param).unwrap_or(c.label)
                 };
                 Some((
                     format!("{label}: {}", p.text(self.scene.values[i] as f32)),
@@ -4395,6 +4470,42 @@ fn mpe_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], input: mpe_ui::Inpu
 /// every one of VOICES's places is the centre (R62). Then its knob is dimmed and not operable,
 /// and its readout not lit nor typed into, as DETUNE's in SCATTER; its value stays for when it
 /// counts again.
+/// Whether oscillator `n`'s (1, 2) TIMED key does nothing: its RANGE away from LO (decisions.md
+/// R-OSC-TIMED). It is drawn dimmed and unlit then, whatever it holds, and does not answer the
+/// pointer, as VOICES where it does nothing.
+fn timed_inert(p: &Ca72Params, n: usize) -> bool {
+    p.timed_params(n)
+        .is_some_and(|(_, _, range)| range.value() != crate::params::Footage::Lo)
+}
+
+/// Oscillators 2's and 3's timed keys as the panel shows them: each one's division (its sign) and
+/// whether it is inert.
+fn timed_scene(p: &Ca72Params) -> [ca72_panel::render::Timed; 2] {
+    std::array::from_fn(|k| {
+        let n = k + 1;
+        ca72_panel::render::Timed {
+            division: p
+                .timed_params(n)
+                .map_or(crate::timed::DEFAULT_DIVISION, |(_, d, _)| {
+                    d.value().to_index()
+                }),
+            inert: timed_inert(p, n),
+        }
+    })
+}
+
+/// A tip's name for a control in timed mode (R-OSC-TIMED): a FREQUENCY knob turning its
+/// DIVISION, or a TIMED key that does nothing at its RANGE.
+fn timed_label(p: &Ca72Params, param: &str) -> Option<&'static str> {
+    Some(match param {
+        "osc2_frequency" if p.timed_now(1) => "OSCILLATOR-2 DIVISION",
+        "osc3_frequency" if p.timed_now(2) => "OSCILLATOR-3 DIVISION",
+        "osc2_timed" if timed_inert(p, 1) => "OSCILLATOR-2 TIMED (at RANGE LO)",
+        "osc3_timed" if timed_inert(p, 2) => "OSCILLATOR-3 TIMED (at RANGE LO)",
+        _ => return None,
+    })
+}
+
 fn voices_inert(p: &Ca72Params) -> bool {
     let c = p.controls();
     !c.poly && !c.unison && (p.doubled.value() || c.spread <= 0.0)
@@ -11049,6 +11160,136 @@ mod tests {
         assert!(e.typing.is_none());
         e.start_typing(Readout::Drive);
         assert!(e.typing.is_some());
+    }
+
+    /// Oscillators 2's and 3's timed mode on the panel (decisions.md R-OSC-TIMED): at LO with its
+    /// key on, oscillator 3's FREQUENCY turns its DIVISION a step at a time (FREQUENCY's own
+    /// place untouched), its tip names the value, it takes a note value typed, and a menu on it
+    /// learns DIVISION; its key flips TIMED and is learnable; oscillator 2's key, at 8', is
+    /// dimmed and takes nothing, and its FREQUENCY is FREQUENCY.
+    #[test]
+    fn a_timed_oscillators_dial_and_key_operate_its_timed_mode() {
+        use crate::params::{Division, Footage};
+        let (mut e, host, params) = editing_of(
+            Ca72Params {
+                osc3_range: EnumParam::new("Osc 3 Range", Footage::Lo),
+                osc3_timed: BoolParam::new("Osc 3 Timed", true),
+                osc3_division: EnumParam::new("Osc 3 Division", Division::EighthDotted),
+                osc2_timed: BoolParam::new("Osc 2 Timed", true),
+                ..Ca72Params::default()
+            },
+            Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+        );
+        e.draw();
+        let index = |p: &str| ca72_panel::controls::index(p).expect("a control");
+        let (freq2, freq3) = (index("osc2_frequency"), index("osc3_frequency"));
+        assert_eq!(
+            e.scene.timed,
+            [
+                ca72_panel::render::Timed {
+                    division: 8,
+                    inert: true
+                },
+                ca72_panel::render::Timed {
+                    division: 9,
+                    inert: false
+                }
+            ]
+        );
+        assert_eq!(e.scene.timed_dials(), [false, true]);
+        assert!((e.scene.values[freq3] - 9.0 / 17.0).abs() < 1e-6);
+        assert!(matches!(
+            e.kind_of(freq3),
+            Kind::Knob {
+                dial: ca72_panel::controls::Dial::Timed,
+                ..
+            }
+        ));
+        assert!(matches!(
+            e.kind_of(freq2),
+            Kind::Knob {
+                dial: ca72_panel::controls::Dial::Freq,
+                ..
+            }
+        ));
+        // A notch of the wheel: one note value, DIVISION's, nothing of FREQUENCY's.
+        host.take();
+        let pt = at(&e, centre("osc3_frequency"));
+        go(&mut e, pt);
+        wheel(&mut e, 1.0);
+        e.draw();
+        let tip = e.scene.tip.clone().expect("a tip").0;
+        assert!(tip.starts_with("OSCILLATOR-3 DIVISION: 1/"), "{tip}");
+        e.end_gestures();
+        let calls = host.take();
+        let division = params.osc3_division.as_ptr();
+        let frequency = params.osc3_frequency.as_ptr();
+        let set: Vec<f32> = calls
+            .iter()
+            .filter_map(|c| match c {
+                Call::Set(p, v) if *p == division => Some(*v),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(set.len(), 1, "{calls:?}");
+        let step = (set[0] * 17.0 - 9.0).abs();
+        assert!((step - 1.0).abs() < 1e-4, "one step: {set:?}");
+        assert!(
+            !calls
+                .iter()
+                .any(|c| matches!(c, Call::Begin(p) | Call::Set(p, _) if *p == frequency)),
+            "FREQUENCY touched: {calls:?}"
+        );
+        // A note value typed at the knob: its division's text first, then the one typed.
+        assert!(e.start_knob_entry(freq3));
+        assert_eq!(e.knob_entry.as_ref().map(|k| k.text()), Some("8."));
+        for c in "16t".chars() {
+            keyed(&mut e, Key::Character(c.to_string()));
+        }
+        keyed(&mut e, Key::Enter);
+        assert!(
+            host.take().contains(&Call::Set(division, 16.0 / 17.0)),
+            "1/16 triplet typed"
+        );
+        // MIDI Learn on the timed knob learns DIVISION; on a key, its TIMED.
+        assert_eq!(e.learning.timed, [false, true]);
+        for (place, id) in [
+            (freq3, "osc3_division"),
+            (freq2, "osc2_frequency"),
+            (index("osc3_timed"), "osc3_timed"),
+            (index("osc2_timed"), "osc2_timed"),
+        ] {
+            assert_eq!(
+                crate::learning::learnable_at(Place::Panel(place), e.learning.timed),
+                crate::learn::index(id),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            crate::learning::place(crate::learn::index("osc3_division").expect("learnable")),
+            Some(Place::Panel(freq3))
+        );
+        // Oscillator 3's key flips TIMED; oscillator 2's, at 8', is inert.
+        let (key2, key3) = (index("osc2_timed"), index("osc3_timed"));
+        assert!(e.operable(key3) && !e.operable(key2));
+        host.take();
+        let pt = at(&e, centre("osc3_timed"));
+        click(&mut e, pt);
+        assert_eq!(
+            host.take(),
+            vec![
+                Call::Begin(params.osc3_timed.as_ptr()),
+                Call::Set(params.osc3_timed.as_ptr(), 0.0),
+                Call::End(params.osc3_timed.as_ptr())
+            ]
+        );
+        let pt = at(&e, centre("osc2_timed"));
+        click(&mut e, pt);
+        assert!(host.take().is_empty(), "the inert key took a press");
+        e.draw();
+        e.hover = Some(Target::Control(key2));
+        let tip = e.tip().expect("a tip").0;
+        assert_eq!(tip, "OSCILLATOR-2 TIMED (at RANGE LO): On");
     }
 
     #[test]

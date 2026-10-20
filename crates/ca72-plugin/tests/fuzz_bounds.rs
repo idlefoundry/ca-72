@@ -101,6 +101,16 @@ fn at_the_ends(r: &mut Lcg) -> Controls {
         potato: r.end(),
         ultra: r.end(),
         reach: Reach::default(),
+        // (Oscillators 2 and 3 timed at their slowest and fastest divisions, or not; 1 never.)
+        timed: std::array::from_fn(|n| {
+            (n > 0 && r.end()).then(|| {
+                if r.end() {
+                    ca72_plugin::timed::Length::Bars(4.0)
+                } else {
+                    ca72_plugin::timed::Length::Beats(0.125)
+                }
+            })
+        }),
     }
 }
 

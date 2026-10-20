@@ -59,6 +59,7 @@ pub fn hit(layout: &Layout, arrangement: &Arrangement, x: f64, y: f64) -> Option
                 let (hx, hy) = (36.0 * WHEEL_SCALE, 79.0 * WHEEL_SCALE);
                 in_rect(dx, dy, [-hx, -hy, hx, hy])
             }
+            Kind::Key => in_rect(dx, dy, KEY_HIT),
             Kind::Toggle { across: false, .. } => in_rect(dx, dy, TOGGLE_HIT),
             Kind::Toggle { across: true, .. } => in_rect(dx, dy, TOGGLE_HIT_ACROSS),
         };
@@ -112,7 +113,7 @@ pub fn drag(kind: &Kind, start: f64, dx: f64, dy: f64, fine: bool) -> Option<f64
             (art::position(start) as f64 + steps).clamp(0.0, 5.0) / 5.0
         }
         Kind::Wheel { .. } => (start - dy / 160.0 * rate).clamp(0.0, 1.0),
-        Kind::Rocker { .. } | Kind::Toggle { .. } => return None,
+        Kind::Rocker { .. } | Kind::Toggle { .. } | Kind::Key => return None,
     })
 }
 
@@ -143,7 +144,7 @@ pub fn scroll(kind: &Kind, v: f64, notches: f64, fine: bool) -> f64 {
         },
         Kind::Selector(_) => (art::position(v) as f64 + notches).clamp(0.0, 5.0) / 5.0,
         Kind::Wheel { .. } => (v + notches * if fine { 0.005 } else { 0.05 }).clamp(0.0, 1.0),
-        Kind::Rocker { .. } => {
+        Kind::Rocker { .. } | Kind::Key => {
             if notches > 0.0 {
                 1.0
             } else {
@@ -153,6 +154,15 @@ pub fn scroll(kind: &Kind, v: f64, notches: f64, fine: bool) -> f64 {
         Kind::Toggle { .. } => (toggle_position(v) as f64 + notches).clamp(0.0, 2.0) / 2.0,
     }
 }
+
+/// Where an oscillator's TIMED key answers a pointer, about its centre: its cap and a little
+/// round it, and the note value printed beside it (decisions.md R-OSC-TIMED).
+pub const KEY_HIT: [f64; 4] = [
+    -art::KEY.0 / 2.0 - 6.0,
+    -art::KEY.1 / 2.0 - 6.0,
+    art::KEY_SIGN + 30.0,
+    art::KEY.1 / 2.0 + 6.0,
+];
 
 /// Half the height of the toggle's nut: a click within it is HI's.
 const TOGGLE_NUT: f64 = 16.0;
@@ -176,7 +186,7 @@ pub fn toggle_position(v: f64) -> usize {
 /// on its side (left of its nut left, right of it right, on it or on LAST's legend above out).
 pub fn click(kind: &Kind, v: f64, dx: f64, dy: f64) -> Option<f64> {
     match kind {
-        Kind::Rocker { .. } => Some(if v >= 0.5 { 0.0 } else { 1.0 }),
+        Kind::Rocker { .. } | Kind::Key => Some(if v >= 0.5 { 0.0 } else { 1.0 }),
         Kind::Toggle { across: true, .. } => Some(if dx < -TOGGLE_NUT {
             0.0
         } else if dx > TOGGLE_NUT {

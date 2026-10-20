@@ -24,7 +24,7 @@ these first and check again: later problems may only show once earlier ones are 
 | `licence.text` | A `LicenseRef-` licence without its text, or a `license_files` entry not in the pack | Add the text file and name it |
 | `asset.missing`, `asset.duplicate`, `asset.licence`, `asset.hash` | An `[[assets]]` path that isn't there, given twice, a bad licence, or a `sha256` that no longer matches | Fix the entry; drop `sha256` while still editing |
 | `look.missing`, `look.base`, `look.file`, `look.picture`, `look.art`, `look.face-tint` | No `[look]`; base not `classic`/`realistic`; a named file missing; an unknown picture slot or unreadable picture; art not SVG; a tint outside 0 to 2 | Correct `[look]` |
-| `layout.control` | A control missing, unknown, placed twice, one of the strip's, or a field its kind doesn't take | Every one of the 42, once, with its kind's fields ([layout.md](layout.md)) |
+| `layout.control` | A control missing, unknown, placed twice, one of the strip's, or a field its kind doesn't take | Every one of the 44, once, with its kind's fields ([layout.md](layout.md)) |
 | `layout.overlap` | Two click areas overlap, or one overlaps POWER | Move them apart: knobs need 124 between centres (big 146, selectors 120) plus room for their print |
 | `layout.outside` | A control, fixture, plate, screw or PHONES reaches past x 0 to 3108, y -130 to 795 | Move it in, allowing for its click area or radius |
 | `layout.line`, `layout.text`, `layout.title`, `layout.count`, `layout.number`, `layout.format` | A rule outside or of width beyond 0.5 to 20; a legend empty, over 48 characters or sized beyond 6 to 80; a title's span reversed or its top outside; too many; not a number; `format` not 1 | Correct the entry |

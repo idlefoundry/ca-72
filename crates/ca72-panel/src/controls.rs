@@ -32,6 +32,10 @@ pub enum Dial {
     Percent,
     /// The expression drawer's MODULATION (decisions.md R-MPE): –100 to 100 %.
     Reach,
+    /// An oscillator's FREQUENCY while it is timed (decisions.md R-OSC-TIMED): its DIVISION's
+    /// eighteen note values, 4 and 2 bars (4×, 2×) and 1 bar to a thirty-second (1 to 32), the
+    /// dotted and triplet ones between them unnumbered ticks.
+    Timed,
 }
 
 impl Dial {
@@ -42,10 +46,14 @@ impl Dial {
             Dial::Voices => Some(8),
             Dial::ArpRate => Some(12),
             Dial::ArpOctaves => Some(4),
+            Dial::Timed => Some(TIMED_STEPS),
             _ => None,
         }
     }
 }
+
+/// The timed dial's steps: its eighteen note values' seventeen intervals (R-OSC-TIMED).
+pub const TIMED_STEPS: usize = 17;
 
 /// The time dial's labelled marks: angle in degrees and milliseconds (R-KNOB-ENTRY).
 pub const TIME_MARKS: [(f64, f64); 6] = [
@@ -120,6 +128,10 @@ pub enum Kind {
         detent: bool,
         span: f64,
     },
+    /// A small amber key lit from inside while on (`art::KEY` in size), the note value its
+    /// oscillator is timed at printed beside it: an oscillator's TIMED (decisions.md
+    /// R-OSC-TIMED). It flips at a click, as a switch.
+    Key,
 }
 
 impl Kind {
@@ -309,11 +321,27 @@ const fn switch(
     )
 }
 
+/// An oscillator's TIMED key (R-OSC-TIMED), centred under its RANGE.
+const fn key(param: &'static str, label: &'static str, x: f64, y: f64) -> Control {
+    Control {
+        param,
+        label,
+        place: Place::Panel,
+        x,
+        y,
+        kind: Kind::Key,
+    }
+}
+
+/// How far under its RANGE's centre an oscillator's TIMED key is (the mock-ups', the owner's
+/// "under the oscillator range selector", 2026-10-20).
+pub const KEY_BELOW_RANGE: f64 = 84.0;
+
 /// The MIXER's rows.
 const ROWS: [f64; 5] = [170.0, 274.0, 377.0, 481.0, 583.0];
 
 /// Every control, in the order they are drawn.
-pub const CONTROLS: [Control; 63] = [
+pub const CONTROLS: [Control; 65] = [
     // CONTROLLERS.
     knob("tune", "TUNE", 229.0, 273.0, Dial::Tune),
     switch(
@@ -665,6 +693,21 @@ pub const CONTROLS: [Control; 63] = [
     mpe_knob("pressure_filter", "PRESSURE CUTOFF", 1, Dial::Cutoff),
     mpe_knob("timbre_mod", "TIMBRE MODULATION", 2, Dial::Reach),
     mpe_knob("timbre_filter", "TIMBRE CUTOFF", 3, Dial::Cutoff),
+    // Oscillators 2's and 3's TIMED keys (decisions.md R-OSC-TIMED), each centred under its
+    // own RANGE, after every other, so that no control moves. Oscillator 1 has none: it has no
+    // FREQUENCY to turn into note values.
+    key(
+        "osc2_timed",
+        "OSCILLATOR-2 TIMED",
+        617.0,
+        370.0 + KEY_BELOW_RANGE,
+    ),
+    key(
+        "osc3_timed",
+        "OSCILLATOR-3 TIMED",
+        617.0,
+        576.0 + KEY_BELOW_RANGE,
+    ),
 ];
 
 /// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made
@@ -685,11 +728,12 @@ pub struct ControlSet {
     pub kind_changed: &'static [(&'static str, u32)],
 }
 
-/// This build's panel controls: the first revision, nothing changed yet. Never edit an entry
-/// once released: add to it (and raise `revision`) as controls come, go, or change.
+/// This build's panel controls: the second revision, oscillators 2's and 3's TIMED keys added
+/// (decisions.md R-OSC-TIMED). Never edit an entry once released: add to it (and raise
+/// `revision`) as controls come, go, or change.
 pub const CONTROL_SET: ControlSet = ControlSet {
-    revision: 1,
-    added: &[],
+    revision: 2,
+    added: &[("osc2_timed", 2), ("osc3_timed", 2)],
     renamed: &[],
     retired: &[],
     kind_changed: &[],

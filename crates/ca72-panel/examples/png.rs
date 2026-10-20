@@ -17,6 +17,8 @@
 //! `CA72_MPE=1` drops the expression drawer over the lower page (decisions.md R-MPE): PRESSURE
 //! 50 % and 1.0 OCT, TIMBRE -30 % and 2.5 OCT (the mock-up's), INPUT reading MPE, the MPE key
 //! lit; `CA72_MPE_INPUT=channel` or `none` INPUT so.
+//! `CA72_SET=param=value,...` controls at other values; `CA72_TIMED=2:1:9,3:0:13` oscillator 2's
+//! or 3's TIMED on or off and its division (decisions.md R-OSC-TIMED).
 //! `CA72_PACK=<folder>` in a skin pack's look (decisions.md R-SKIN-PACKS), what its checks
 //! found printed.
 //! `CA72_TIP=1` adds CUTOFF's hover tip; `CA72_MENU=settings` the built-in standalone
@@ -80,6 +82,36 @@ fn main() {
     for (i, c) in CONTROLS.iter().enumerate() {
         scene.values[i] =
             all.unwrap_or_else(|| strip_knob(c.param).unwrap_or_else(|| default_of(c.param)));
+    }
+    // `CA72_SET=param=value,...`: controls at other normalized values (RANGE's LO is 0).
+    if let Ok(set) = std::env::var("CA72_SET") {
+        for kv in set.split(',').filter(|kv| !kv.is_empty()) {
+            let (k, v) = kv.split_once('=').expect("param=value");
+            let i = ca72_panel::controls::index(k).expect("a control");
+            scene.values[i] = v.parse().expect("a number");
+        }
+    }
+    // `CA72_TIMED=2:1:9,3:0:13`: oscillator 2's or 3's TIMED on (1) or off (0) and its
+    // division (0 to 17, `params::Division`'s order; decisions.md R-OSC-TIMED). Each key is
+    // inert where its RANGE is not at LO, and its dial, timed, shows its division.
+    if let Ok(timed) = std::env::var("CA72_TIMED") {
+        for spec in timed.split(',').filter(|s| !s.is_empty()) {
+            let parts: Vec<&str> = spec.split(':').collect();
+            let n = usize::from(parts[0] == "3");
+            let at = |p: &str| ca72_panel::controls::index(p).expect("a control");
+            let key = at(ca72_panel::render::TIMED_KEYS[n]);
+            scene.values[key] = if parts[1] == "1" { 1.0 } else { 0.0 };
+            let division: usize = parts[2].parse().expect("a division");
+            let range = at(if n == 0 { "osc2_range" } else { "osc3_range" });
+            scene.timed[n] = ca72_panel::render::Timed {
+                division,
+                inert: ca72_panel::art::position(scene.values[range]) != 0,
+            };
+            if scene.timed_dials()[n] {
+                scene.values[at(ca72_panel::render::TIMED_DIALS[n])] =
+                    division as f64 / ca72_panel::controls::TIMED_STEPS as f64;
+            }
+        }
     }
     let mono = std::env::var("CA72_MONO").is_ok_and(|v| v == "1");
     if std::env::var("CA72_STANDALONE").is_ok_and(|v| v == "1") {

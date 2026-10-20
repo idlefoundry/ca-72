@@ -158,6 +158,12 @@ pub(super) fn edge_eased(mut l: plugin_kit_materials::Lighting) -> plugin_kit_ma
     }
     l
 }
+/// A cap made the tabs' translucent amber, unlit and lit, drawn out to `aspect` (width over
+/// height): an oscillator's TIMED key's (decisions.md R-OSC-TIMED), as the tabs are.
+pub(crate) fn amber_caps(cap: &Pixmap, aspect: f64) -> Lighting {
+    edge_eased(plugin_kit_materials::lighting(cap, aspect, AMBER))
+}
+
 pub(super) const AMBER_LIGHT: Underlight = Underlight {
     rim: [0.6, 0.2, 0.04],
     light: [0.6, 0.17, 0.03],

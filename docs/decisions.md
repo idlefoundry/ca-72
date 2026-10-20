@@ -12290,3 +12290,285 @@ stands in for); the energy each way (the workers now run on the performance core
 block's period and may be slowed the same way at 512 frames (ULTRA with one voice cost the same in
 0.2.8 and 0.3.0, so it is not a regression); the knob's glide at LO costing twice 0.2.8's on every
 system.
+
+## R-OSC-TIMED. The oscillators timed: at LO, each one's cycle a note value of the host's tempo
+
+**Owner, 2026-10-20** (the brief for the night of 20 October):
+- **What:** "when the user puts oscillator 3 into low mode, then a small button appears. And it's
+  just a toggle that lights up when it's on. And when it's on, that UI switches over to the timed
+  UI with the various note values shown. I think that would be the best way to keep it simple.
+  And when it's off of low mode, then there'd be no real difference. No difference at all, I
+  should say. Or maybe the button should be there always. I don't know. We can mock it up and
+  decide. ... a button beside the third oscillator that allows for that timed mode to be put into
+  effect when it's in low mode only. Whether or not the button is visible in the other
+  oscillator positions is yet to be determined."
+- **Phase:** "And yes, it can't drift. It has to stay synced to the host." While the host's
+  transport plays, oscillator 3's phase comes from the host's song position every block, never a
+  loop that corrects towards it; a jump of the modulation where playback itself jumps (the
+  transport starting, a locate, a loop) is acceptable; stopped, and in the standalone, it runs at
+  the tempo's exact rate, without ENTROPY's drift; offline as in real time.
+
+**Its place (the owner, 2026-10-20),** after seeing it under OSC. 3 CONTROL ("It just looks
+crowded sitting there. Right beside the vertical line."): "what I meant was beneath the octave
+selector. Switch." Then: "But I like it under the oscillator range selector the best. So I
+think we'll leave it there." The key directly beneath the RANGE selector, final.
+
+**All three oscillators, then two (the owner, the same day):** "and since all 3 oscillators
+offer a "LO" option, we might as well put it below all 3." (This record was R-OSC3-TIMED until
+then.) Then: "I just realized we can't offer timing on the first oscillator since there's no
+frequency control! Just do oscillators 2 & 3." Oscillators 2 and 3 each have their own key
+beneath their own RANGE, their own TIMED and DIVISION, applying only while that oscillator's
+RANGE is at LO. Nothing about oscillator 1 changes.
+
+**A note, not a word (the owner, the same day):** "maybe instead of saying timed, what if we just
+put a musical note there to keep that the text very minimal? I just don't want a word there. I
+think people will understand what it means. With just like a note, so I would choose an eighth
+note and let's see how that looks." The legend is an eighth note (U+266A, which the panel's
+typeface, URW Gothic Demi, has: set as the panel's legends are, at about 1.4 times their size so
+that it stands as tall as their capitals), beside the key; the mock-ups show it on the cap too.
+(Then the sign was made to follow the division: below.)
+
+**Always there (the owner, the same day):** "I want the always there option to be the one we
+choose. Option B." Each key is on the panel at every RANGE; away from LO it is dimmed and does
+not answer the pointer, as VOICES where it does nothing (R64), and is unlit whatever it holds.
+
+**The note follows the division (the owner, the same day):** "What if we made it so that
+instead of always having the eighth note beside the button, it dynamically shows whatever is
+selected on the oscillator? So if the user has a one bar LFO selected, it'll show a whole note,
+and then, you know, it can show a half note at two, quarter note at four, et cetera, et cetera."
+And of the dial: "I find that our current UI for this has a couple problems. One being that the
+number four runs into the word oscillator at the top. The other being that just going 4, 2, 1
+and then having it climb back to 2, 4, 8, 16, 32 makes it a little bit confusing. So, you know,
+maybe we could put 4x, 2x, and then 1, 2, 4. 16, 32, 8, 16, 32. Something that makes it a little
+clearer what we're getting at." Of the first drawn notes: "your notes seem a little stunted
+because I guess you're trying to fit them into the same height as what the button has. But
+there's no need for that. You can extend the note height to regular note height. I would rather
+that than have these stumpy-looking notes." And: "is there no open source note font that you
+could just use for this instead of making your own ... Just see if there's a better option. If
+not, this is fine." Shown the fonts compared: "use the free serif version ... the free serif
+version looks great." And of the notes placed by their noteheads: "can you center everything?
+So like the whole note looks great, but then as soon as we get the long tail, the stem on the
+notes, it starts to look a bit weird ... You're better at design than I am, so why don't you
+tell me what you think? I could be wrong." (The coordinator's recommendation, which the owner
+deferred to: each note centred as a whole, its dot and triplet's 3 left out of the centring, its
+left edge fixed.)
+
+**The panel, as built (agent decisions, 2026-10-20, from the owner's words above and the
+mock-ups he saw: the night's folder `osc3-timed-mockups`, its sheets `v4` to `v6`):**
+- **The keys:** `osc2_timed` and `osc3_timed`, a new kind of panel control (`Kind::Key`), each
+  centred under its RANGE, 84 units below the selector's centre (x 617, y 454 and 660): the
+  strip's amber tab at 0.4 of its size (60 by 24), its translucent amber lit from inside while on
+  and its oscillator at LO, with a faint amber light on the face round it; unlit while off; at
+  any other RANGE dimmed (shaded) and unlit. A click flips it, as a switch; a double click does
+  nothing more. Its tip: OSCILLATOR-2 TIMED, and "(at RANGE LO)" while it is inert. Last in
+  `CONTROLS`, so that no control moves.
+- **The sign beside each key** is its oscillator's DIVISION, at every RANGE (dimmed with the key
+  where it is inert): a whole note for 1 bar, a half note to a thirty-second, a dotted value
+  with its augmentation dot, a triplet with a small 3 in the panel's lettering (its numbers' size
+  less a third), 2 and 4 bars a whole note with 2× and 4× after it, as the dial numbers them.
+  The double whole note was compared for 2 bars (sheet `v4`); at the panel's size it read as
+  clutter and 4 bars has none, so 2× is built.
+- **The notes are GNU FreeSerif's** (its Western Musical Symbols, U+1D15D to U+1D162 and the
+  augmentation dot U+1D16D), at their engraved proportions: the notehead 7 units tall (the
+  legends' lower case), the stem three and a half to four noteheads above it, flags and dot in
+  proportion, so the sign stands taller than the key (a thirty-second 32 units tall). Each note
+  is centred on the key's middle line as a whole, from its notehead to its stem's or flag's tip
+  (the whole note on its own middle); its augmentation dot and a triplet's 3 hang off it, left
+  out of the centring, so a dotted value sits where the plain one does. Its left edge is the
+  same for every value, 9 units right of the key. (Each notehead on the key's line was built
+  first, sheet `v5`; the owner asked for this, sheet `v6`.)
+  Thickened by 0.45 units, as the legends are, to stand with the lettering. The font is
+  vendored as a 5 KB subset of those glyphs (`third_party/gnu-freefont`), its outlines read once
+  (`ca72_panel::notes`, ttf-parser through rustybuzz); it is GPL-3.0 or later with the font
+  exception, so it may be built in as URW Gothic is (R22). Compared (sheet `fonts/compare`):
+  LilyPond's Emmentaler (dual GPL with the font exception and OFL; its engraving flags and stems
+  too thin to survive the opening size; it has no stems of its own, LilyPond draws them, so its
+  row there is our assembly of its heads and flags, not LilyPond's output, and the extra lines
+  the owner saw on it are that assembly's), FreeSerif, Bravura and Leland (SMuFL's metronome notes,
+  as good as FreeSerif) and Noto Music. Bravura, Leland and Noto Music are under the SIL Open
+  Font License alone, which the plug-in keeps out of its binaries (R22; R-SKIN-PACKS: OFL fonts
+  are test files only), so FreeSerif is the best that may be used. The hand-drawn notes before
+  them (vector shapes at the capitals' height) are replaced.
+- **The timed dial:** at LO with the key on, FREQUENCY's dial is printed in note values
+  (`Dial::Timed`): eighteen positions over the knob's travel, the straight values numbered as one
+  count, 4× 2× 1 2 4 8 16 32, the dotted and triplet values on shorter unnumbered ticks between
+  them. No BARS caption: the × says they are bars, and a caption crowded RANGE's 2' (compared,
+  sheet `v4`). The numbers sit no higher at the top, and no lower at the foot, than the semitone
+  dial's (its ±1 and ±7), the end ones hung out beside their ticks, so the top 4 clears the
+  OSCILLATOR legend above and oscillator 2's 4× and 32 clear OSCILLATOR –3's as the -7 and 7 did;
+  the ticks are shorter than the semitone dial's (72 to 80 units, 77 between) to leave the numbers
+  room. Away from LO, or with the key off, the dial is the semitone dial.
+- **The knob while timed** turns DIVISION, not FREQUENCY (`FreqKnob` turns to it while its
+  oscillator is timed): a step a value as it is dragged or scrolled, never between two (it does
+  not glide, R-KNOB-GLIDE: DIVISION is stepped); a double click gives a quarter note; its tip is
+  OSCILLATOR-3 DIVISION: 1/8 dotted (the parameter's own name for the value); FREQUENCY's place
+  is untouched and comes back when timed is off. A value typed at it (R52, R-KNOB-ENTRY) is a note
+  value as the dial prints it (4x, 2x, 1, 2 to 32, with . dotted and t triplet, as RATE takes
+  them) or as the host names it (1/8 dotted, 1/8d, 1/4 triplet, 4 bars); it opens with its
+  division's text.
+- **MIDI Learn:** a key's menu learns its TIMED; the timed knob's menu learns its DIVISION (the
+  learned ring shown on the knob), FREQUENCY's otherwise.
+- **The print swapped in place:** the dials' print is the background's, drawn once a scale. As
+  the background is painted, each timed dial's place is kept as it is under the print (its
+  surfaces); the first time a dial is timed at a scale, its place is printed again from that with
+  the dials' ink alone, as the whole background's print is (worn into the face by the whole
+  face's mean level, the lamp over it), its pixels that wherever the semitone and the timed dials'
+  ink differ and the background's own elsewhere, so its edges and what else is printed there are
+  the background's to the bit. Laid over the background while its dial is timed. It is what the
+  whole background printed with the timed dials has there but for the anti-aliasing of at most 3
+  of a dial's pixels (tested in both skins at 0.37 and 0.87). The dials' print extent now places
+  their numbers exactly as they are printed (wider numbers further out at the sides), so the
+  place holds the whole of either dial. (Painting the place again whole, its shadows blurred, cost
+  a third of a second at 0.87; this costs milliseconds.)
+- **Both skins and skin packs:** the keys are drawn the same way in the worn skin and the drawn
+  (the strip's tabs are the same in both); a pack's `tab` and `tab-lit` pictures dress them as
+  they dress the strip's tabs. The panel's controls are revision 2 (`CONTROL_SET`): the keys
+  added; a pack's layout made for revision 1 gets them placed by the plug-in at their official
+  places (or the nearest free ones), with a note, nothing refused; the official layout and the
+  starter's (under its RANGE legends) place them. The sign is the plug-in's print, as a dial's
+  numbers are. The notes are FreeSerif's in every look; 4×, 2× and the triplet's 3 are printed in
+  the look's typeface, with an x where a pack's has no multiplication sign (it is not added to
+  what a pack's typeface must print, so no pack made before loses its typeface).
+
+**The approved images:** `approved.png` and `approved-large.png` (the drawn panel at half travel,
+where RANGE is 8' and the keys are inert) take the renderer's pixels round each key: its dimmed
+cap and its quarter note. Nothing else in them changed; the mean difference is as before (1.443
+and 0.964 against 1.444 and 0.965).
+
+**Agent decisions, 2026-10-20** (not separately approved):
+- **Two parameters an oscillator**, after the arpeggiator's so that none before them moves:
+  `osc2_timed`, `osc3_timed` (TIMED, off) and `osc2_division`, `osc3_division` (DIVISION, a
+  quarter note; one list, `params::Division`); oscillator 3's ids as they were first. The engine
+  keeps a place for each of the three oscillators, oscillator 1's always empty. DIVISION is not
+  FREQUENCY's knob read another way: oscillators 2's and 3's FREQUENCY keep their own places, so
+  TIMED off (or RANGE away from LO) gives them back as they were; a host's automation and a
+  preset name a division, never a place between two, whatever the dials' law (R54); and
+  FREQUENCY's knob glides (R-KNOB-GLIDE) where a division must step. DIVISION does not glide
+  (stepped, as RATE).
+- **The divisions**, slow to fast, as RATE's order (R-ARP): 4 bars, 2 bars, 1 bar, then each
+  straight value with its dotted and its triplet between it and the next, the dotted the longer:
+  1/2 dotted, 1/1 triplet, 1/2, 1/4 dotted, 1/2 triplet, 1/4, 1/8 dotted, 1/4 triplet, 1/8,
+  1/16 dotted, 1/8 triplet, 1/16, 1/32 dotted, 1/16 triplet, 1/32 (18). At 120 BPM, 0.125 to
+  16 Hz. LO's own travel with OSC. 3 CONTROL off is 0.21 Hz (FREQUENCY at -7.5) to 11.4 Hz (+7.5),
+  1.89 Hz at its centre: the list brackets it with a little under an octave each way, and the
+  default, a quarter note, is LO's centre at 120 BPM. No dotted or triplet values among the bars
+  (rarely asked for; the dial's left side kept for 4× and 2×).
+- **Where it applies:** an oscillator's TIMED on and its RANGE at LO. At any other RANGE it does
+  nothing at all: the samples are those with it off, to the bit (tested for each oscillator at
+  HI and LO). The oscillator's own pitch inputs have no part in it while it is timed: the
+  keyboard (oscillator 2 always follows it; 3 with OSC. 3 CONTROL on), the PITCH wheel,
+  GLIDE, TUNE, OSCILLATOR MODULATION, the converter, and ENTROPY's drift and mismatch on its rate;
+  DOUBLE's detune too, so a note's two voices play a timed oscillator in step. It overrides the
+  timed oscillator alone: the others play as ever. The circuit has no oscillator sync, so there is
+  none to meet. Its waveform, VOLUME and switches, and what it feeds, are as ever. Oscillator 2
+  at LO reaches the mixer only (slow pulses, rhythmic clicks); oscillator 3 also feeds the
+  modulation (MODULATION MIX). Each can be heard as a source at the tempo's rate (up to 133 Hz, a
+  thirty-second at 1000 BPM).
+- **The clock** is the arpeggiator's (`Arp::position`), so the two always agree: while the host
+  plays and says where it is, its place in quarter notes as each block begins, taken afresh every
+  block, and the block's samples counted from it at its tempo (the place a sample is at is worked
+  out from the block's start, never added up from block to block). A note value counts quarter
+  notes from the song's start; a bar value counts the host's bars (its bar number and its bar's
+  start, at its time signature: one bar in 3/4 is three quarter notes), else four quarter notes a
+  bar from the start. The phase is the count's fraction, 0 where oscillator 3's ramp resets, so a
+  cycle starts on the beat or bar the count names. Stopped, and in the standalone, the clock runs
+  on from where it was at the tempo (the standalone's TEMPO there, R-ARP), and bars with it.
+- **No tempo given** (a plug-in host that says none): the standalone's TEMPO setting, as the
+  arpeggiator takes it, which is 120 BPM unless the computer's standalone was set otherwise; where
+  that is not a tempo either, 120 BPM. Tempos are clamped to 1 to 1000 BPM, as the arpeggiator's.
+- **Exact, the circuit's oscillator (HI and ULTRA).** The model's sawtooth core integrates a
+  current, so a rate set through the converter would drift from the host's grid by whatever the
+  converter, the comparator's delay and rounding make of it. Timed, the converter is left out:
+  each sample, the ramp's current is chosen so that the ramp reaches its threshold, and the reset
+  follows after the comparator's delay, exactly at the clock's next cycle start
+  (`Vco::tick_timed`). The ramp keeps the circuit's curve: its current falls with the ramp's
+  voltage by the converter's Early effect, which at LO's currents is a constant 0.014493 of the
+  current a volt (`TIMED_EARLY`, checked against the converter's solve from 1e-10 to 1e-5 A). The
+  shapers, the rectangle's comparator, the reverse sawtooth and the band-limiting are the
+  circuit's as ever. Each reset lands within a thousandth of a sample of the host's cycle start,
+  at every tempo tried (30 to 1000 BPM) and at 44.1, 48 and 96 kHz.
+- **Exact, the light voice (LO).** Its phase is single precision: each sample it takes the step,
+  worked out in double precision, that puts it where the clock is; its resets land within a tenth
+  of a sample (2 µs). Set straight from the clock, it could wrap a sample early by rounding and
+  then wrap again: the step keeps it on one wrap a cycle.
+- **A jump** (the transport starting, a locate, a loop): an oscillator more than 0.02 of a cycle
+  from its clock is put where the clock is at once. The circuit's ramp is moved there, its
+  outputs stepped there band-limited, as a reset steps them (the rectangle too, if the ramp passed
+  its edge's threshold); the light voice's phase is set there (its step not band-limited, at LO).
+  Within 0.02 (a tempo ramp's straight line within a block, rounding) it is brought back within
+  its cycle, its next reset on time. The modulation therefore jumps where the host's place jumps
+  (the owner: acceptable); in the audio path the step is a band-limited one, of the kind each of
+  its resets is at LO's rates, so nothing else is added. A voice that starts, or oscillator 3
+  heard again after it was not computed, takes its place on the clock so at its first sample.
+- **Tempo changes:** at a block's start the clock is the host's place and tempo; a host's tempo
+  ramp is a straight line within each block, up to 0.09 samples from the ramp's own curve at the
+  block's end at 60 BPM in five seconds, then the host's place again.
+- **Latency:** oscillator 3's own sound reaches the output with the plug-in's latency (R-LATENCY),
+  so its resets are heard on the host's grid. As a modulation source its effect comes the
+  oscillator's band-limiting later, 41.25 samples at HI and ULTRA (0.86 ms at 48 kHz) and none at
+  LO; it could be led by that much if the owner wants (not done).
+- **Restarting with each note** (a later option, not built): the phase taken from each voice's
+  attack instead of the clock, in `timed.rs`'s `Position::cycle` or in the voice's jacks.
+- **The engine:** the voices' jacks carry each oscillator's place on the clock (`Jacks::timed`),
+  as do the workers' runs (`Mix`) and ULTRA's split crews; the light voice steps each of its
+  three oscillators onto its clock (`Light::timed_tick`).
+- **Not covered:** AUTO GAIN's measurement of a sound with DRIVE (R45, `drive.rs`) plays the
+  oscillators free; their levels as sources are the same, so the curve is.
+- **Found on the way, fixed apart:** an instance made at LO first read the machine's cores (which
+  ULTRA's split crews are sized by) at ULTRA's first block, on the audio thread, a file read and
+  memory taken there once a process; they are read as the voices are built now
+  (`Engine::prepare`). The timed oscillators' no-allocation test, which switches QUALITY to
+  ULTRA, found it.
+
+**Saved:** each TIMED and DIVISION is a preset's and a session's, as any sound parameter; a preset
+or a session saved before reads every TIMED off and every DIVISION a quarter note
+(`Ca72::filter_state`, `presets::targets`). Preset files stay format 1.
+
+**Evidence (omarchy, 2026-10-20):**
+- `crates/ca72/tests/timed.rs`: the Early ratio against the converter; resets on the clock at 30,
+  97.3, 123.7, 180, 240, 300 and 1000 BPM, a thirty-second to four bars, 44.1 to 96 kHz (circuit
+  within 1e-3 samples, light within 0.1, none skipped or doubled); tempo changes mid-cycle and a
+  block-by-block ramp; a jump back of 0.62 of a cycle taken at once, the outputs within the
+  circuit's swing; the light voice's oscillators 1 and 2 on their clocks.
+- `crates/ca72-plugin/src/timed.rs` (the plug-in as a host plays it): ten minutes at 123.7 BPM, an
+  eighth triplet, two bars and a dotted quarter, the clock the host's within 1e-9 of a cycle at
+  every block's first and last sample to the end; ten minutes stopped, on the tempo's count within
+  1e-6; every division counted from an odd place in 3/4; each oscillator's resets on the host's
+  grid at LO, HI and ULTRA with ENTROPY at its default; the transport playing, stopped (running
+  on), started elsewhere and looped; a tempo change while a note plays; each oscillator's RANGE at
+  32', 8' and 2' the same to the bit as its TIMED off; the key (36 to 84), OSC. 3 CONTROL and the
+  PITCH wheel moving no oscillator's reset; 96 and 44.1 kHz; offline the same samples as in real
+  time; no tempo (120 BPM); 1000 BPM and 1 BPM.
+- `tests/realtime.rs`, `the_oscillators_timed_neither_allocate_nor_free`: each TIMED, RANGE and
+  DIVISION, and QUALITY (LO, HI, ULTRA), automated, the transport playing, looping, changing tempo
+  and stopping, in the plug-in's process: no allocation, no free.
+- Presets and sessions:
+  `oscillator_3_timed_is_part_of_a_preset_and_off_in_one_that_does_not_name_it` (all three),
+  `an_old_session_opens_with_the_oscillators_free`. MIDI Learn: OSC. 2 and 3 TIMED switches,
+  their DIVISION stepped. The agents: `osc2_timed` to `osc3_division` (docs/mcp.md).
+- Off, the sound is the code's before to the bit: `preset_render`, the 19 factory presets with
+  POLY's ten voices, at HI, LO and ULTRA against 47a987f ("every preset the same to the bit"), for
+  oscillator 3 alone, again with all three oscillators' keys off, and again with oscillator 1's
+  taken out (4d88b39).
+- The panel (`ca72-panel`): `a_timed_dial_and_its_key_are_drawn_and_undrawn_in_place` (both
+  skins: a key pressed at LO, its sign following its division, another RANGE dimming it; each
+  frame drawn in parts the frame drawn whole; off again the frame before, to the pixel);
+  `a_timed_dials_part_of_the_background_is_laid_without_a_seam` and
+  `a_timed_dials_part_is_the_whole_timed_backgrounds` (at most 3 of a dial's pixels over 2 levels,
+  0.37 and 0.87); `a_layout_made_before_the_timed_keys_gets_them`; the notes' proportions
+  (`notes::tests`); the approved images; the compatibility packs (revision 1) loading with notes.
+- The editor (`ca72-plugin`): `a_timed_oscillators_dial_and_key_operate_its_timed_mode` (the scene,
+  a notch of the wheel one DIVISION step and nothing of FREQUENCY's, the tip, a note value typed,
+  MIDI Learn's targets, the key's press, the inert key taking none);
+  `a_timed_dial_takes_its_note_values` (every division's text and the host's names back).
+- Frame times (`frames`, worn skin, median and slowest of 40; at 0.44 and 0.87): the key pressed
+  1.1 and 2.9 ms, its first press at a scale (the dials' places printed again) 4.5 and 7.6 ms;
+  the timed dial turned 1.2 and 3.0 ms; RANGE to LO 0.8 and 2.5 ms; CUTOFF turned 0.7 and 2.8 ms
+  as before; the editor opened in 371 and 914 ms (376 and 915 before).
+- `cargo test -p ca72-plugin -p ca72-panel`: 597 passed, 0 failed; `-p ca72`: 96 passed, 0 failed;
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo fmt --check`
+  clean; `scripts/notices.py --check` passes (FreeFont's entry added).
+- **Found on the way:** the POLY workers' test (`the_workers_follow_poly_through_the_plug_ins_life`)
+  failed in full runs on a loaded machine: two timed tests ran instances at ULTRA, whose split
+  crews draw on the process's workers, without the budget lock the other such tests take. They
+  take it now; the full run passed twice under load.

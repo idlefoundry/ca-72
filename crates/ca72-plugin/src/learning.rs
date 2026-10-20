@@ -50,13 +50,24 @@ pub fn place(i: usize) -> Option<Place> {
         "doubled" => Place::Strip(StripControl::Double),
         "placement" => Place::Strip(StripControl::Placement),
         "auto_gain" => Place::Strip(StripControl::AutoGain),
+        // A DIVISION's control is its oscillator's FREQUENCY knob, which turns it while it is
+        // timed (decisions.md R-OSC-TIMED).
+        "osc2_division" => Place::Panel(control_index("osc2_frequency")?),
+        "osc3_division" => Place::Panel(control_index("osc3_frequency")?),
         _ => Place::Panel(control_index(id)?),
     })
 }
 
-/// The learnable parameter a place's control operates.
-pub fn learnable_at(p: Place) -> Option<usize> {
+/// The learnable parameter a place's control operates, `timed` saying which of oscillators 2's
+/// and 3's FREQUENCY knobs turn their DIVISION now (R-OSC-TIMED).
+pub fn learnable_at(p: Place, timed: [bool; 2]) -> Option<usize> {
     match p {
+        Place::Panel(c) if timed[0] && CONTROLS.get(c)?.param == "osc2_frequency" => {
+            index("osc2_division")
+        }
+        Place::Panel(c) if timed[1] && CONTROLS.get(c)?.param == "osc3_frequency" => {
+            index("osc3_division")
+        }
         Place::Preset(BarTarget::Prev) => index("previous_preset"),
         Place::Preset(BarTarget::Next) => index("next_preset"),
         Place::Preset(_) => None,
@@ -205,6 +216,9 @@ pub struct Learning {
     /// The rail the editor shows (the standalone's has FX, its arrows elsewhere): where a
     /// note about PREVIOUS or NEXT PRESET goes.
     pub rail: Rail,
+    /// Which of oscillators 2's and 3's FREQUENCY knobs turn their DIVISION now (decisions.md
+    /// R-OSC-TIMED): what a menu opened on one learns.
+    pub timed: [bool; 2],
 }
 
 /// A parameter's name.
@@ -275,7 +289,7 @@ impl Learning {
         (x, y): (f64, f64),
         size: f64,
     ) {
-        let learnable = place.and_then(learnable_at);
+        let learnable = place.and_then(|p| learnable_at(p, self.timed));
         let (title, items) = match learnable {
             Some(MOD_WHEEL) => (
                 format!("MOD WHEEL SOURCE · {}", map.wheel_source().text()),
