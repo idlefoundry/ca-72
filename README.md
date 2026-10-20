@@ -301,8 +301,9 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   voices cost a quarter to a seventh of HI's on one thread (about a fifth of a core of a fast
   computer, a Ryzen 7 7800X3D, against four fifths of a core to one and a half at HI;
   [docs/decisions.md](docs/decisions.md) R-LO-WORKERS). In 0.2.0 it was a thirtieth to a
-  fortieth; 0.2.2's filter fixes made LO's filter costlier. Like HI's, LO's voices are shared with the plug-in's own threads where the
-  machine has them and enough voices sound to repay it. Switching it stops the notes
+  fortieth; 0.2.2's filter fixes made LO's filter costlier. Like HI's, LO's voices are shared
+  with the plug-in's own threads where the machine has them and enough voices sound to repay it
+  (on Windows only while the host's thread is busy; see below). Switching it stops the notes
   sounding (switching between HI and ULTRA does not). It is saved with the session, not with
   presets: it suits the computer, not the sound.
 
@@ -651,7 +652,10 @@ The service documents and datasheets the model was derived from are not included
   when it is switched off (R18, R21). At QUALITY LO, whose voices are light, a run of voices is
   shared only on as many threads as repay waking them: a thread a voice up to four, then one
   for each two, so ten voices use five threads at most (R-LO-WORKERS). With one worker (a
-  computer of 3 or 4 processors) LO's voices are split between it and the host's thread.
+  computer of 3 or 4 processors) LO's voices are split between it and the host's thread. On
+  Linux and macOS LO always shares; on Windows, where a worker's short runs cost more, it
+  shares only while the host's thread is busy (above half the block, smoothed, or after a late
+  block) and returns to the host's thread when the load has stayed below 30 % for a while.
 - At ULTRA, on a machine of 6 or more fast cores, each sounding voice plays on six threads
   (one voice where the machine has 6 to 9, two from 10), when every sounding voice can: the
   same samples, in about half the time. The one instrument does too, so at ULTRA it holds
