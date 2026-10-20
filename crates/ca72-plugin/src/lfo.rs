@@ -390,10 +390,13 @@ pub fn is_lfo_target(p: &Ca72Params, param_id: &str) -> bool {
 
 // ---- Modulation sources.
 
-/// The macros (knobs of the patch's own, 0 to 100 %, sources like the LFOs; not built yet: the
-/// owner's mock-ups are in progress). [`Source::Macro`] and the sources' arrays take them when
-/// this is more than 0, without reshaping the patch, its saved forms or the engine.
-pub const MACROS: usize = 0;
+/// The macros (decisions.md R-MACROS; the owner, "Yes, 2x3 as recommended"): six knobs of the
+/// patch's own, host parameters `macro1` to `macro6` (0 to 100 %, gliding as the panel's knobs),
+/// each a source as an LFO is, unipolar (its value 0..1, so an assignment moves its knob one way,
+/// by depth × value), with a typed name of [`NAME_MOST`] characters saved with the patch.
+pub const MACROS: usize = 6;
+/// The most characters a macro's name has (its dot screen's seven).
+pub const NAME_MOST: usize = 7;
 /// Every modulation source: the LFOs, then the macros.
 pub const SOURCES: usize = LFOS + MACROS;
 
@@ -405,7 +408,7 @@ pub const SOURCES: usize = LFOS + MACROS;
 pub enum Source {
     /// LFO `n` (0 to 3).
     Lfo(usize),
-    /// Macro `n` (0 to [`MACROS`] less 1; none yet).
+    /// Macro `n` (0 to [`MACROS`] less 1).
     Macro(usize),
 }
 
@@ -455,6 +458,47 @@ impl Source {
             _ => None,
         }
     }
+
+    /// The macro it is, if it is one.
+    pub fn macro_n(self) -> Option<usize> {
+        match self {
+            Source::Macro(n) if n < MACROS => Some(n),
+            _ => None,
+        }
+    }
+}
+
+/// A macro's name as it is kept: printable ASCII in capitals (the panel's lettering; anything
+/// else left out), the ends' spaces trimmed, at most [`NAME_MOST`] characters. Empty: none (the
+/// panel shows MACRO n).
+pub fn name_within(text: &str) -> String {
+    let kept: String = text
+        .chars()
+        .map(|c| c.to_ascii_uppercase())
+        .filter(|c| (' '..='~').contains(c))
+        .collect();
+    kept.trim()
+        .chars()
+        .take(NAME_MOST)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
+}
+
+/// A name as one word: its characters' bytes, the first lowest (none: 0).
+fn name_word(name: &str) -> u64 {
+    name_within(name)
+        .bytes()
+        .enumerate()
+        .fold(0, |w, (i, b)| w | (u64::from(b) << (8 * i)))
+}
+
+fn of_name_word(w: u64) -> String {
+    (0..NAME_MOST)
+        .map(|i| ((w >> (8 * i)) & 0xff) as u8)
+        .take_while(|b| *b != 0)
+        .map(char::from)
+        .collect()
 }
 
 // ---- The patch's part: assignments and EDGES.
@@ -492,6 +536,8 @@ pub enum Refused {
 pub struct Patch {
     slots: [[AtomicU64; MOST]; SOURCES],
     sharp: [AtomicBool; LFOS],
+    /// Each macro's typed name, its characters in one word (decisions.md R-MACROS).
+    names: [AtomicU64; MACROS],
     changes: AtomicU32,
 }
 
@@ -500,6 +546,7 @@ impl Default for Patch {
         Patch {
             slots: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU64::new(0))),
             sharp: std::array::from_fn(|_| AtomicBool::new(false)),
+            names: std::array::from_fn(|_| AtomicU64::new(0)),
             changes: AtomicU32::new(0),
         }
     }
@@ -615,8 +662,8 @@ impl Patch {
         gone
     }
 
-    /// Every source's every assignment taken away, every EDGES SOFT again (Init; a preset or
-    /// session saved before LFOs).
+    /// Every source's every assignment taken away, every EDGES SOFT again, every macro's name
+    /// none (Init; a preset or session saved before LFOs).
     pub fn clear(&self) {
         for s in self.slots.iter().flatten() {
             s.store(0, Ordering::Release);
@@ -624,7 +671,44 @@ impl Patch {
         for e in &self.sharp {
             e.store(false, Ordering::Release);
         }
+        for n in &self.names {
+            n.store(0, Ordering::Release);
+        }
         self.changed();
+    }
+
+    /// Macro `n`'s (0 to 5) typed name; empty where it has none (the panel shows MACRO n).
+    pub fn name(&self, n: usize) -> String {
+        self.names
+            .get(n)
+            .map_or_else(String::new, |w| of_name_word(w.load(Ordering::Acquire)))
+    }
+
+    /// Macro `n`'s name set ([`name_within`]: an empty one, none).
+    pub fn set_name(&self, n: usize, name: &str) {
+        if let Some(w) = self.names.get(n) {
+            w.store(name_word(name), Ordering::Release);
+            self.changed();
+        }
+    }
+
+    /// Every macro's name, as a preset keeps them ([`Patch::name`]'s, empty for none).
+    pub fn names(&self) -> [String; MACROS] {
+        std::array::from_fn(|n| self.name(n))
+    }
+
+    /// A preset's names in place of these (one that names none: none; past six left out).
+    pub fn load_names(&self, names: &[String]) {
+        for (k, w) in self.names.iter().enumerate() {
+            w.store(names.get(k).map_or(0, |n| name_word(n)), Ordering::Release);
+        }
+        self.changed();
+    }
+
+    /// Whether these names are a preset's (`names`, as [`Patch::load_names`] reads them).
+    pub fn same_names(&self, names: &[String]) -> bool {
+        (0..MACROS)
+            .all(|k| self.name(k) == names.get(k).map_or_else(String::new, |n| name_within(n)))
     }
 
     /// LFO `lfo`'s (0 to 3) EDGES.
@@ -667,6 +751,14 @@ impl Patch {
                 })
                 .filter(|s| !s.to.is_empty() || s.sharp)
                 .collect(),
+            names: {
+                let names = self.names();
+                if names.iter().all(String::is_empty) {
+                    Vec::new()
+                } else {
+                    names.to_vec()
+                }
+            },
         }
     }
 
@@ -710,6 +802,12 @@ impl Patch {
         for (s, v) in self.sharp.iter().zip(sharp) {
             s.store(v, Ordering::Release);
         }
+        for (k, w) in self.names.iter().enumerate() {
+            w.store(
+                saved.names.get(k).map_or(0, |n| name_word(n)),
+                Ordering::Release,
+            );
+        }
         self.changed();
     }
 
@@ -730,7 +828,8 @@ impl Patch {
     }
 
     /// A preset's assignments and EDGES (its [`Patch::values`]) in place of what it had: a
-    /// preset that names none, nothing assigned and every EDGES SOFT. In the targets' order.
+    /// preset that names none, nothing assigned and every EDGES SOFT. In the targets' order. Its
+    /// macros' names are not values: [`Patch::load_names`] (none until then).
     pub fn load_values(&self, values: &[(String, f64)]) {
         let mut saved = Saved::default();
         for s in Source::all() {
@@ -790,6 +889,9 @@ impl Patch {
         for (a, b) in self.sharp.iter().zip(&other.sharp) {
             a.store(b.load(Ordering::Acquire), Ordering::Release);
         }
+        for (a, b) in self.names.iter().zip(&other.names) {
+            a.store(b.load(Ordering::Acquire), Ordering::Release);
+        }
         self.changed();
     }
 
@@ -805,10 +907,13 @@ impl Patch {
     }
 }
 
-/// The sources' assignments as a session keeps them (JSON under the state's `lfo` key).
+/// The sources' assignments as a session keeps them (JSON under the state's `lfo` key), and the
+/// macros' names (none in a session saved before them, or with none typed).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Saved {
     pub sources: Vec<SavedSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
 }
 
 /// A source's, by its ID (`lfo1`): each knob it modulates by its parameter's ID and its depth
@@ -971,6 +1076,124 @@ impl Phosphor {
             Phosphor::White => "WHITE",
         }
     }
+}
+
+// ---- Each macro's colour: the computer's.
+
+/// A macro's colour, for its name's dots, its jack's collar, its rings, its cord and its pop-up
+/// dial; changed by right-clicking its name; a setting of the computer's, not the patch's
+/// (decisions.md R-MACROS).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MacroColor {
+    Teal,
+    Rose,
+    Lemon,
+    Sage,
+    Lavender,
+    White,
+    Purple,
+    Pink,
+}
+
+/// The macros' colours where the computer has none set. Round 2's six (purple, pink, lemon, sage,
+/// lavender, white) moved apart from the LFOs' final four under simulated colour blindness:
+/// round 2's purple was all but the LFOs' blue for a deuteranope (CIEDE2000 1.5), so it is a teal
+/// and the pink a rose (decisions.md R-MACROS has the check). Round 2's purple and pink stay in
+/// the palette.
+pub const MACRO_COLORS: [MacroColor; MACROS] = [
+    MacroColor::Teal,
+    MacroColor::Rose,
+    MacroColor::Lemon,
+    MacroColor::Sage,
+    MacroColor::Lavender,
+    MacroColor::White,
+];
+
+impl MacroColor {
+    pub const ALL: [MacroColor; 8] = [
+        MacroColor::Teal,
+        MacroColor::Rose,
+        MacroColor::Lemon,
+        MacroColor::Sage,
+        MacroColor::Lavender,
+        MacroColor::White,
+        MacroColor::Purple,
+        MacroColor::Pink,
+    ];
+
+    /// Its glow, sRGB (`tools/colours.py`'s search, lit on the black face).
+    pub fn rgb(self) -> [u8; 3] {
+        match self {
+            MacroColor::Teal => [0x14, 0xbb, 0xc2],
+            MacroColor::Rose => [0xb8, 0x7e, 0x99],
+            MacroColor::Lemon => [0xf9, 0xfb, 0x70],
+            MacroColor::Sage => [0x8a, 0xb1, 0x81],
+            MacroColor::Lavender => [0xc9, 0xc2, 0xfc],
+            MacroColor::White => [0xdc, 0xf8, 0xfa],
+            MacroColor::Purple => [0xbf, 0x58, 0xfd],
+            MacroColor::Pink => [0xff, 0x8c, 0xc8],
+        }
+    }
+
+    /// As the settings' file keeps it.
+    pub fn word(self) -> &'static str {
+        match self {
+            MacroColor::Teal => "teal",
+            MacroColor::Rose => "rose",
+            MacroColor::Lemon => "lemon",
+            MacroColor::Sage => "sage",
+            MacroColor::Lavender => "lavender",
+            MacroColor::White => "white",
+            MacroColor::Purple => "purple",
+            MacroColor::Pink => "pink",
+        }
+    }
+
+    pub fn of_word(w: &str) -> Option<MacroColor> {
+        MacroColor::ALL.into_iter().find(|p| p.word() == w)
+    }
+
+    /// As a menu names it.
+    pub fn name(self) -> &'static str {
+        match self {
+            MacroColor::Teal => "TEAL",
+            MacroColor::Rose => "ROSE",
+            MacroColor::Lemon => "LEMON",
+            MacroColor::Sage => "SAGE",
+            MacroColor::Lavender => "LAVENDER",
+            MacroColor::White => "WHITE",
+            MacroColor::Purple => "PURPLE",
+            MacroColor::Pink => "PINK",
+        }
+    }
+}
+
+// ---- The macros' parameters.
+
+/// The macros' parameters' IDs (host names "MACRO 1" to "MACRO 6", fixed: the owner's 5c).
+pub const MACRO_IDS: [&str; MACROS] = ["macro1", "macro2", "macro3", "macro4", "macro5", "macro6"];
+/// Their labels, as the host, the agents and MIDI Learn name them.
+pub const MACRO_LABELS: [&str; MACROS] = [
+    "MACRO 1", "MACRO 2", "MACRO 3", "MACRO 4", "MACRO 5", "MACRO 6",
+];
+
+/// Macro `n`'s (1 to 6) parameter: 0 to 100 %, 0 in a new patch.
+pub fn macro_param(n: usize) -> FloatParam {
+    FloatParam::new(
+        format!("MACRO {n}"),
+        0.0,
+        FloatRange::Linear {
+            min: 0.0,
+            max: 100.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_rounded(0))
+}
+
+/// The macro of parameter `id`, if it is one (0 to 5).
+pub fn macro_of_id(id: &str) -> Option<usize> {
+    MACRO_IDS.iter().position(|m| *m == id)
 }
 
 // ---- The generators.
@@ -1209,6 +1432,8 @@ pub struct Lfos {
     /// Each target's travel (0..1), [`Target::ALL`]'s order: the assigned ones'; 0 the rest.
     pub base: [f32; TARGETS],
     pub law: FreqLaw,
+    /// Each macro's value (0..1), where its knob's glide has it.
+    pub macros: [f32; MACROS],
 }
 
 /// The computer's FREQUENCY law, as a value the controls can compare.
@@ -1237,15 +1462,16 @@ impl From<Law> for FreqLaw {
     }
 }
 
-/// The sources' values with the LFOs' at `lfos` (the macros', when there are any, their knobs').
-pub fn source_values(lfos: &[f64; LFOS]) -> [f64; SOURCES] {
-    std::array::from_fn(|i| match Source::of_index(i) {
-        Some(Source::Lfo(n)) => lfos[n],
-        _ => 0.0,
-    })
-}
-
 impl Lfos {
+    /// The sources' values with the LFOs' at `lfos`, the macros' their knobs' (0..1, unipolar).
+    pub fn source_values(&self, lfos: &[f64; LFOS]) -> [f64; SOURCES] {
+        std::array::from_fn(|i| match Source::of_index(i) {
+            Some(Source::Lfo(n)) => lfos[n],
+            Some(Source::Macro(n)) => f64::from(self.macros[n]),
+            None => 0.0,
+        })
+    }
+
     /// Whether any source modulates anything (an assignment of a depth other than 0).
     pub fn active(&self) -> bool {
         self.to.iter().flatten().flatten().any(|a| a.depth != 0.0)
@@ -1482,6 +1708,17 @@ pub fn controls(p: &Ca72Params, knob: &dyn Fn(&FloatParam) -> f32) -> Lfos {
         for a in l.to[i].iter().flatten() {
             let t = a.target;
             l.base[t.index()] = t.travel(p, knob(t.param(p)), law);
+        }
+    }
+    // (A macro's value only where it is assigned, so that one turned with nothing to move
+    // leaves the controls as they are.)
+    for n in 0..MACROS {
+        if l.to[Source::Macro(n).index()]
+            .iter()
+            .flatten()
+            .any(|a| a.depth != 0.0)
+        {
+            l.macros[n] = (knob(p.macro_param(n)) / 100.0).clamp(0.0, 1.0);
         }
     }
     l
@@ -1856,7 +2093,7 @@ mod tests {
             Err(Refused::NoSource)
         );
         assert_eq!(
-            p.assign(Source::Macro(0), Target::Drive, 0.1),
+            p.assign(Source::Macro(MACROS), Target::Drive, 0.1),
             Err(Refused::NoSource)
         );
         assert!(p.remove(l0, Target::Cutoff));
@@ -1898,6 +2135,113 @@ mod tests {
         assert!(!Patch::is_value_id("lfo2_rate") && !Patch::is_value_id("lfo5_edges"));
         assert_eq!(Source::of_id("lfo3"), Some(l2));
         assert_eq!(Source::all().count(), SOURCES);
+    }
+
+    /// A macro's name: capitals, printable, seven at most, trimmed; kept with the patch, a
+    /// session's and a preset's read back, one saved before macros with none (decisions.md
+    /// R-MACROS).
+    #[test]
+    fn a_macros_name_is_kept_and_saved() {
+        assert_eq!(name_within("  bright!  "), "BRIGHT!");
+        assert_eq!(name_within("wobble wobble"), "WOBBLE");
+        assert_eq!(name_within("é\u{7f}ab"), "AB");
+        assert_eq!(name_within("   "), "");
+        let p = Patch::default();
+        assert_eq!(p.name(0), "");
+        p.set_name(0, "Bright");
+        p.set_name(4, "swell");
+        p.set_name(MACROS, "none");
+        assert_eq!(p.names()[..], ["BRIGHT", "", "", "", "SWELL", ""]);
+        p.assign(Source::Macro(0), Target::Cutoff, 0.6)
+            .expect("room");
+        let q = Patch::default();
+        q.load(&p.saved());
+        assert_eq!(q.saved(), p.saved());
+        assert_eq!(q.name(4), "SWELL");
+        assert_eq!(q.depth(Source::Macro(0), Target::Cutoff), Some(0.6));
+        assert!(Patch::is_value_id("macro1_to_cutoff"));
+        assert!(!Patch::is_value_id("macro1_edges"));
+        // A session saved before macros: no names; one with none typed keeps its old form.
+        let old: Saved = serde_json::from_str(r#"{"sources":[]}"#).expect("old form");
+        q.load(&old);
+        assert!(q.names().iter().all(String::is_empty));
+        assert_eq!(
+            serde_json::to_string(&Patch::default().saved()).expect("json"),
+            r#"{"sources":[]}"#
+        );
+        // A preset's.
+        let r = Patch::default();
+        r.load_values(&p.values());
+        r.load_names(&p.names());
+        assert!(r.same_as_values(&p.values()) && r.same_names(&p.names()));
+        r.load_names(&[]);
+        assert!(!r.same_names(&p.names()) && r.same_names(&[]));
+        r.copy_from(&p);
+        assert_eq!(r.name(0), "BRIGHT");
+        r.clear();
+        assert_eq!(r.name(0), "");
+    }
+
+    /// A macro moves its knobs one way: by depth × its value (0..1), from where the knob's glide
+    /// has it, clamped to the travel; its value only where it is assigned, so that one turned
+    /// with nothing to move leaves the controls as they are (and the instrument asleep).
+    #[test]
+    fn a_macro_moves_its_knobs_one_way() {
+        let p = Ca72Params::default();
+        let plain = |q: &FloatParam, v: f32| q.preview_plain(q.preview_normalized(v));
+        let at = |k: &FloatParam| k.value();
+        let unassigned = controls(&p, &|k: &FloatParam| {
+            if std::ptr::eq(k, p.macro_param(2)) {
+                plain(k, 80.0)
+            } else {
+                at(k)
+            }
+        });
+        assert_eq!(
+            unassigned,
+            Lfos {
+                law: p.freq_law().into(),
+                ..Lfos::default()
+            }
+        );
+        p.lfo_patch
+            .assign(Source::Macro(2), Target::Cutoff, 0.6)
+            .expect("room");
+        p.lfo_patch
+            .assign(Source::Macro(2), Target::Emphasis, -0.2)
+            .expect("room");
+        let turned = |v: f32| {
+            controls(&p, &|k: &FloatParam| {
+                if std::ptr::eq(k, p.macro_param(2)) {
+                    v
+                } else {
+                    at(k)
+                }
+            })
+        };
+        let l = turned(50.0);
+        assert!((l.macros[2] - 0.5).abs() < 1e-6);
+        let c = p.controls();
+        let values = l.source_values(&[0.0; LFOS]);
+        assert_eq!(values[Source::Macro(2).index()], 0.5);
+        let m = l.modulated(&c, &values);
+        assert!(
+            (m.panel.cutoff - (c.panel.cutoff + 0.3)).abs() < 1e-6,
+            "{}",
+            m.panel.cutoff
+        );
+        assert!((m.panel.emphasis - (c.panel.emphasis - 0.1).max(0.0)).abs() < 1e-6);
+        // Clamped at the knob's end; at 0 the knob's own place.
+        let l = turned(100.0);
+        let m = l.modulated(&c, &l.source_values(&[0.0; LFOS]));
+        assert!(
+            m.panel.cutoff <= 1.0
+                && (m.panel.cutoff - (c.panel.cutoff + 0.6).min(1.0)).abs() < 1e-6
+        );
+        let l = turned(0.0);
+        let m = l.modulated(&c, &l.source_values(&[0.0; LFOS]));
+        assert!((m.panel.cutoff - c.panel.cutoff).abs() < 1e-6);
+        assert!(!l.own(Source::Macro(2).index()));
     }
 
     /// The control a target sets, as the engine has it.

@@ -62,6 +62,9 @@ pub struct Sound {
     /// (decisions.md R-AUTO-GAIN-DRIVE). None in a preset saved before.
     pub drive_curve: Option<[f32; STEPS]>,
     pub drive_curve_lo: Option<[f32; STEPS]>,
+    /// Its macros' typed names, in their order (`macro_names`, a list; empty for one without a
+    /// name; decisions.md R-MACROS). None in a preset saved before them, or naming none.
+    pub macro_names: Vec<String>,
 }
 
 impl Sound {
@@ -173,6 +176,16 @@ fn sound_of(t: &toml::Table) -> Result<Sound, String> {
         values,
         drive_curve: curve_of(t.get("drive_curve")),
         drive_curve_lo: curve_of(t.get("drive_curve_lo")),
+        // (A list of text, else none: one not understood is left out, as a curve is.)
+        macro_names: t
+            .get("macro_names")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .map(|v| v.as_str().unwrap_or_default().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
 }
 
@@ -733,6 +746,9 @@ impl Library {
         if let Some(db) = &sound.drive_curve_lo {
             t.insert("drive_curve_lo".into(), curve_value(db));
         }
+        if sound.macro_names.iter().any(|n| !n.is_empty()) {
+            t.insert("macro_names".into(), strings(&sound.macro_names));
+        }
         t.insert("values".into(), Value::Table(values));
         self.put(file, &t)
     }
@@ -758,6 +774,18 @@ impl Library {
         tags: Option<Vec<String>>,
         curve: Option<(bool, [f32; STEPS])>,
     ) -> Result<Entry, String> {
+        self.save_with(name, values, tags, curve, Vec::new())
+    }
+
+    /// [`Library::save_with_curve`], with the macros' names (decisions.md R-MACROS).
+    pub fn save_with(
+        &self,
+        name: &str,
+        values: Vec<(String, f64)>,
+        tags: Option<Vec<String>>,
+        curve: Option<(bool, [f32; STEPS])>,
+        macro_names: Vec<String>,
+    ) -> Result<Entry, String> {
         let name = name.trim();
         check_name(name)?;
         let existing = self.find(name);
@@ -782,6 +810,7 @@ impl Library {
             values,
             drive_curve: curve.and_then(|(lo, db)| (!lo).then_some(db)),
             drive_curve_lo: curve.and_then(|(lo, db)| lo.then_some(db)),
+            macro_names,
         };
         let file = self.place(name, own.as_deref())?;
         self.write_user(&file, &sound, favorite, replaces.as_deref())?;
@@ -1085,6 +1114,7 @@ mod tests {
             values: vec![("cutoff".into(), cutoff), ("osc1_range".into(), 3.0)],
             drive_curve: None,
             drive_curve_lo: None,
+            macro_names: Vec::new(),
         };
         let pack = [sound("Old Pluck", -3.0), sound("Old Pad", 0.25)];
         assert_eq!(write_pack(dir.path(), &pack).unwrap().len(), 2);

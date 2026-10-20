@@ -72,6 +72,14 @@ pub struct Settings {
     /// Each LFO's colour (decisions.md R-LFO), its scope right-clicked: amber, green, blue and
     /// red unless set. Kept as `lfo_colors`, a list of four of `crate::lfo::Phosphor`'s words.
     pub lfo_colors: [crate::lfo::Phosphor; crate::lfo::LFOS],
+    /// Each macro's colour (decisions.md R-MACROS), its name right-clicked: teal, rose, lemon,
+    /// sage, lavender and white unless set. Kept as `macro_colors`, a list of six of
+    /// `crate::lfo::MacroColor`'s words.
+    pub macro_colors: [crate::lfo::MacroColor; crate::lfo::MACROS],
+    /// Whether the lower page's left area shows the six macros rather than the wheels and their
+    /// switches (the rail's MACRO key; R-MACROS): the wheels unless set. Kept as `left_area`,
+    /// "macros" or "wheels".
+    pub macros_shown: bool,
 }
 
 /// A skin pack's id, as its manifest gives it (lower-case letters, digits, `-` and `.`, at
@@ -131,6 +139,10 @@ pub enum Change {
     TimbreRest(crate::expression::TimbreRest),
     /// LFO `.0`'s (0 to 3) colour.
     LfoColor(usize, crate::lfo::Phosphor),
+    /// Macro `.0`'s (0 to 5) colour.
+    MacroColor(usize, crate::lfo::MacroColor),
+    /// The left area's macros shown (else the wheels).
+    Macros(bool),
 }
 
 impl Change {
@@ -182,6 +194,15 @@ impl Change {
                 let words = colors.iter().map(|c| toml::Value::from(c.word()));
                 ("lfo_colors", toml::Value::Array(words.collect()))
             }
+            Change::MacroColor(n, color) => {
+                let mut colors = macro_colors(t);
+                if let Some(c) = colors.get_mut(n) {
+                    *c = color;
+                }
+                let words = colors.iter().map(|c| toml::Value::from(c.word()));
+                ("macro_colors", toml::Value::Array(words.collect()))
+            }
+            Change::Macros(shown) => ("left_area", if shown { "macros" } else { "wheels" }.into()),
         };
         t.insert(key.into(), value);
     }
@@ -205,8 +226,23 @@ impl Default for Settings {
             mpe: crate::expression::Mode::Auto,
             timbre_rest: crate::expression::TimbreRest::Centred,
             lfo_colors: crate::lfo::COLORS,
+            macro_colors: crate::lfo::MACRO_COLORS,
+            macros_shown: false,
         }
     }
+}
+
+/// The macros' colours a settings' file names (`macro_colors`), as [`lfo_colors`].
+fn macro_colors(t: &toml::Table) -> [crate::lfo::MacroColor; crate::lfo::MACROS] {
+    let mut colors = crate::lfo::MACRO_COLORS;
+    if let Some(a) = t.get("macro_colors").and_then(toml::Value::as_array) {
+        for (c, w) in colors.iter_mut().zip(a) {
+            if let Some(p) = w.as_str().and_then(crate::lfo::MacroColor::of_word) {
+                *c = p;
+            }
+        }
+    }
+    colors
 }
 
 /// The LFOs' colours a settings' file names (`lfo_colors`): each word it has that is a colour's,
@@ -304,6 +340,8 @@ impl Settings {
                 .and_then(crate::expression::TimbreRest::of_word)
                 .unwrap_or(d.timbre_rest),
             lfo_colors: lfo_colors(&t),
+            macro_colors: macro_colors(&t),
+            macros_shown: t.get("left_area").and_then(toml::Value::as_str) == Some("macros"),
             mod_wheel_source: match t.get("mod_wheel_source").and_then(toml::Value::as_str) {
                 Some("channel_aftertouch") => Source::ChannelPressure,
                 Some("poly_aftertouch") => Source::PolyPressure,
@@ -345,6 +383,12 @@ impl Settings {
                     *c = color;
                 }
             }
+            Change::MacroColor(n, color) => {
+                if let Some(c) = self.macro_colors.get_mut(n) {
+                    *c = color;
+                }
+            }
+            Change::Macros(shown) => self.macros_shown = shown,
         }
     }
 
@@ -1092,6 +1136,8 @@ mod tests {
             mpe: crate::expression::Mode::Auto,
             timbre_rest: crate::expression::TimbreRest::Centred,
             lfo_colors: crate::lfo::COLORS,
+            macro_colors: crate::lfo::MACRO_COLORS,
+            macros_shown: false,
         };
         assert_eq!(Settings::read(&path), s);
         assert!(
@@ -1188,6 +1234,8 @@ mod tests {
                 mpe: crate::expression::Mode::Auto,
                 timbre_rest: crate::expression::TimbreRest::Centred,
                 lfo_colors: crate::lfo::COLORS,
+                macro_colors: crate::lfo::MACRO_COLORS,
+                macros_shown: false,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))

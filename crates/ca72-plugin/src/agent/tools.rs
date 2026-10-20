@@ -361,7 +361,7 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_modulations",
             "modulation.list",
-            "What each modulation source (LFO 1 to LFO 4, `lfo1` to `lfo4`) modulates: each knob by its id and label with its depth in % of the knob's travel (-100 to 100; negative inverts), `shared` where an LFO with MONO off still moves it with one copy (a knob every voice shares: MAIN OUTPUT VOLUME, the strip's), `inert` where it does nothing now; each LFO's EDGES and MONO; the most a source takes (8); and the knobs that can take one now. The LFOs' own controls are parameters (`lfo1_rate` and the others: ca72_describe).",
+            "What each modulation source (LFO 1 to LFO 4, `lfo1` to `lfo4`; MACRO 1 to MACRO 6, `macro1` to `macro6`) modulates: each knob by its id and label with its depth in % of the knob's travel (-100 to 100; negative inverts), `shared` where an LFO with MONO off still moves it with one copy (a knob every voice shares: MAIN OUTPUT VOLUME, the strip's), `inert` where it does nothing now; each LFO's EDGES and MONO; each macro's typed `name` (\"\" for none) and its knob's `value` in %; the most a source takes (8); and the knobs that can take one now. A macro moves its knobs one way, by depth × its value. The LFOs' own controls and the macros' knobs are parameters (`lfo1_rate`, `macro1`: ca72_describe).",
             none,
             true,
             false,
@@ -370,14 +370,15 @@ pub fn tools() -> Vec<Tool> {
         t(
             "ca72_modulation_set",
             "modulation.set",
-            "Make a source modulate a knob, as dragging from an LFO's OUT jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; not a switch, selector, wheel, VOICES or a timed dial) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets the LFO's EDGES. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
+            "Make a source modulate a knob, as dragging from an LFO's OUT jack or a macro's jack does, or change its depth: `source` (lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name), `target` (a continuous knob of the panel or the strip by id or label; an oscillator's WAVEFORM only while CONTINUOUS; not a switch, selector, wheel, VOICES, a timed dial, an LFO's own knob or a macro) and `depth` in % of the knob's travel, -100 to 100 (25 if a new one is given none). `edges` (SOFT or SHARP) sets an LFO's EDGES; `name` (at most 7 characters, capitals; \"\" for none) a macro's name. A source takes at most 8 knobs. Patch state, saved with presets and sessions. Returns what every source modulates.",
             |p| {
                 obj(
                     json!({
-                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4."},
+                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name."},
                         "target": param_key(p),
                         "depth": {"type": "number", "minimum": -100, "maximum": 100},
                         "edges": {"type": "string", "enum": ["SOFT", "SHARP"]},
+                        "name": {"type": "string", "maxLength": 7, "description": "A macro's name (\"\" for none)."},
                     }),
                     &["source"],
                 )
@@ -393,7 +394,7 @@ pub fn tools() -> Vec<Tool> {
             |p| {
                 obj(
                     json!({
-                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4."},
+                        "source": {"type": ["string", "integer"], "description": "lfo1 to lfo4, \"LFO 1\" or 1 to 4; macro1 to macro6, \"MACRO 1\" or a macro's name."},
                         "target": param_key(p),
                     }),
                     &["source"],

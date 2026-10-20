@@ -524,6 +524,17 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
             ));
         }
     }
+    // The macros' (decisions.md R-MACROS): their names and what they modulate are
+    // `modulation.*`'s.
+    for n in 0..crate::lfo::MACROS {
+        all.push(e(
+            crate::lfo::MACRO_IDS[n],
+            crate::lfo::MACRO_LABELS[n],
+            "MACROS",
+            p.macro_param(n),
+            Plain,
+        ));
+    }
     all
 }
 

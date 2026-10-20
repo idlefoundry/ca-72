@@ -865,6 +865,21 @@ pub struct Ca72Params {
     pub lfo3: crate::lfo::LfoParams,
     #[nested(id_prefix = "lfo4", group = "LFO 4")]
     pub lfo4: crate::lfo::LfoParams,
+    // The six macros (decisions.md R-MACROS), after the LFOs, so that no parameter before them
+    // moves: 0 to 100 %, named MACRO 1 to MACRO 6 in the host whatever their typed names. A
+    // preset or a session saved before has each at 0, none assigned.
+    #[id = "macro1"]
+    pub macro1: FloatParam,
+    #[id = "macro2"]
+    pub macro2: FloatParam,
+    #[id = "macro3"]
+    pub macro3: FloatParam,
+    #[id = "macro4"]
+    pub macro4: FloatParam,
+    #[id = "macro5"]
+    pub macro5: FloatParam,
+    #[id = "macro6"]
+    pub macro6: FloatParam,
 }
 
 /// How far PRESSURE and TIMBRE move a voice's cutoff at most, either way, octaves.
@@ -1217,6 +1232,12 @@ impl Default for Ca72Params {
             lfo2: crate::lfo::LfoParams::new(2),
             lfo3: crate::lfo::LfoParams::new(3),
             lfo4: crate::lfo::LfoParams::new(4),
+            macro1: crate::lfo::macro_param(1),
+            macro2: crate::lfo::macro_param(2),
+            macro3: crate::lfo::macro_param(3),
+            macro4: crate::lfo::macro_param(4),
+            macro5: crate::lfo::macro_param(5),
+            macro6: crate::lfo::macro_param(6),
         }
     }
 }
@@ -1376,6 +1397,18 @@ impl Ca72Params {
             1 => &self.lfo2,
             2 => &self.lfo3,
             _ => &self.lfo4,
+        }
+    }
+
+    /// Macro `n`'s (0 to 5; past 5, the sixth) parameter (decisions.md R-MACROS).
+    pub fn macro_param(&self, n: usize) -> &FloatParam {
+        match n {
+            0 => &self.macro1,
+            1 => &self.macro2,
+            2 => &self.macro3,
+            3 => &self.macro4,
+            4 => &self.macro5,
+            _ => &self.macro6,
         }
     }
 

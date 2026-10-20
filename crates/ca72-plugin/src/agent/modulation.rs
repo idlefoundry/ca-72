@@ -1,8 +1,9 @@
-//! What the modulation sources (the four LFOs; the macros when they come) modulate, for the
-//! agents (decisions.md R-LFO, docs/mcp.md): `modulation.list`, `modulation.set` and
-//! `modulation.remove`, carried out on the patch as the LFO page's drag and menus are
-//! (`lfo::Patch`, patch state: no host gesture). The LFOs' own controls are parameters
-//! (`lfoN_rate` and the others), set with `parameters.set`.
+//! What the modulation sources (the four LFOs and the six macros) modulate, for the agents
+//! (decisions.md R-LFO, R-MACROS, docs/mcp.md): `modulation.list`, `modulation.set` and
+//! `modulation.remove`, carried out on the patch as the LFO page's and the macros' drag and
+//! menus are (`lfo::Patch`, patch state: no host gesture), and the macros' typed names. The LFOs'
+//! own controls and the macros' knobs are parameters (`lfoN_rate`, `macroN`), set with
+//! `parameters.set`.
 
 use serde_json::{Value, json};
 
@@ -10,12 +11,15 @@ use super::{ApiError, Reply, arg, values};
 use crate::lfo::{self, Edges, Refused, Source, Target};
 use crate::params::Ca72Params;
 
-/// A source as an agent names it: its id (`lfo1`), its label (`LFO 1`), or its number (1 to 4,
-/// an LFO's).
-pub fn source_of(v: Option<&Value>) -> Result<Source, ApiError> {
+/// A source as an agent names it: its id (`lfo1`, `macro1`), its label (`LFO 1`, `MACRO 1`), a
+/// macro's typed name, or its number (1 to 4, an LFO's).
+pub fn source_of(p: &Ca72Params, v: Option<&Value>) -> Result<Source, ApiError> {
     let bad = || {
-        ApiError::params("`source` must be an LFO: lfo1 to lfo4, \"LFO 1\" or 1 to 4")
-            .with_data(json!({"sources": Source::all().map(|s| s.id()).collect::<Vec<_>>()}))
+        ApiError::params(
+            "`source` must be an LFO (lfo1 to lfo4, \"LFO 1\" or 1 to 4) or a macro (macro1 to \
+             macro6, \"MACRO 1\" or its name)",
+        )
+        .with_data(json!({"sources": Source::all().map(|s| s.id()).collect::<Vec<_>>()}))
     };
     match v {
         Some(Value::Number(n)) => {
@@ -27,7 +31,13 @@ pub fn source_of(v: Option<&Value>) -> Result<Source, ApiError> {
         }
         Some(Value::String(s)) => {
             let t = s.trim().to_lowercase().replace(' ', "");
+            let named = lfo::name_within(s);
             Source::of_id(&t)
+                .or_else(|| {
+                    (0..lfo::MACROS)
+                        .find(|&n| !named.is_empty() && p.lfo_patch.name(n) == named)
+                        .map(Source::Macro)
+                })
                 .or_else(|| {
                     t.parse::<usize>()
                         .ok()
@@ -44,6 +54,14 @@ fn label(s: Source) -> String {
     match s {
         Source::Lfo(n) => format!("LFO {}", n + 1),
         Source::Macro(n) => format!("MACRO {}", n + 1),
+    }
+}
+
+/// A source's label with a macro's typed name: `MACRO 1 (BRIGHT)`.
+fn named(p: &Ca72Params, s: Source) -> String {
+    match s.macro_n().map(|n| p.lfo_patch.name(n)) {
+        Some(name) if !name.is_empty() => format!("{} ({name})", label(s)),
+        _ => label(s),
     }
 }
 
@@ -134,6 +152,10 @@ pub fn list(p: &Ca72Params) -> Value {
                 });
                 v["mono"] = json!(p.lfo(n).mono.value());
             }
+            if let Some(n) = s.macro_n() {
+                v["name"] = json!(p.lfo_patch.name(n));
+                v["value"] = json!(f64::from(p.macro_param(n).value()).round());
+            }
             v
         })
         .collect();
@@ -141,9 +163,16 @@ pub fn list(p: &Ca72Params) -> Value {
 }
 
 /// `modulation.set`: `source` modulating `target` by `depth` (-100 to 100 % of the knob's
-/// travel; added, or its depth changed), and/or an LFO's `edges` (SOFT or SHARP).
+/// travel; added, or its depth changed), and/or an LFO's `edges` (SOFT or SHARP), and/or a
+/// macro's `name` (seven characters; "" for none).
 pub fn set(p: &Ca72Params, args: &Value) -> Reply {
-    let source = source_of(arg(args, "source"))?;
+    let source = source_of(p, arg(args, "source"))?;
+    let name = match arg(args, "name") {
+        None => None,
+        Some(Value::String(n)) if source.macro_n().is_some() => Some(lfo::name_within(n)),
+        Some(Value::String(_)) => return Err(ApiError::params("`name` is a macro's")),
+        Some(_) => return Err(ApiError::params("`name` must be text")),
+    };
     let edges = match arg(args, "edges") {
         None => None,
         Some(Value::String(e)) if e.eq_ignore_ascii_case("soft") => Some(Edges::Soft),
@@ -151,8 +180,10 @@ pub fn set(p: &Ca72Params, args: &Value) -> Reply {
         Some(_) => return Err(ApiError::params("`edges` must be SOFT or SHARP")),
     };
     let target = arg(args, "target");
-    if target.is_none() && edges.is_none() {
-        return Err(ApiError::params("give `target` and `depth`, or `edges`"));
+    if target.is_none() && edges.is_none() && name.is_none() {
+        return Err(ApiError::params(
+            "give `target` and `depth`, or an LFO's `edges`, or a macro's `name`",
+        ));
     }
     // (Everything checked before anything is changed.)
     let assignment = match target {
@@ -184,7 +215,7 @@ pub fn set(p: &Ca72Params, args: &Value) -> Reply {
             Err(Refused::Full) => {
                 return Err(ApiError::refused(format!(
                     "{} already modulates {} knobs: remove one first",
-                    label(source),
+                    named(p, source),
                     lfo::MOST
                 )));
             }
@@ -197,12 +228,15 @@ pub fn set(p: &Ca72Params, args: &Value) -> Reply {
         };
         p.lfo_patch.set_edges(n, e);
     }
+    if let (Some(name), Some(n)) = (name, source.macro_n()) {
+        p.lfo_patch.set_name(n, &name);
+    }
     Ok(list(p))
 }
 
 /// `modulation.remove`: `source` no longer modulating `target`, or anything (no `target`).
 pub fn remove(p: &Ca72Params, args: &Value) -> Reply {
-    let source = source_of(arg(args, "source"))?;
+    let source = source_of(p, arg(args, "source"))?;
     match arg(args, "target") {
         None => {
             for a in p.lfo_patch.assignments(source).into_iter().flatten() {
@@ -221,7 +255,7 @@ pub fn remove(p: &Ca72Params, args: &Value) -> Reply {
             if !t.is_some_and(|t| p.lfo_patch.remove(source, t)) {
                 return Err(ApiError::refused(format!(
                     "{} does not modulate {key}",
-                    label(source)
+                    named(p, source)
                 )));
             }
         }

@@ -235,6 +235,11 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
             all.push((id, q));
         }
     }
+    // The macros (decisions.md R-MACROS): a preset that does not name them has each at 0; their
+    // names are the preset's too (`macro_names`), none where it names none.
+    for (n, id) in crate::lfo::MACRO_IDS.iter().enumerate() {
+        all.push((id, p.macro_param(n)));
+    }
     all
 }
 
@@ -283,6 +288,16 @@ pub fn values_now(p: &Ca72Params) -> Vec<(String, f64)> {
     // (What the LFOs modulate, and their EDGES: decisions.md R-LFO.)
     values.extend(p.lfo_patch.values());
     values
+}
+
+/// The macros' names as a preset keeps them: none where none is typed (decisions.md R-MACROS).
+pub fn names_now(p: &Ca72Params) -> Vec<String> {
+    let names = p.lfo_patch.names();
+    if names.iter().all(String::is_empty) {
+        Vec::new()
+    } else {
+        names.to_vec()
+    }
 }
 
 /// Where a preset is from, as a row says it: `EDITED` (the user's version of a factory
@@ -568,7 +583,8 @@ impl Browser {
                 match &self.lfo_seen {
                     Some((n, g, d)) if same(n, &current) && *g == at => *d,
                     _ => {
-                        let d = !p.lfo_patch.same_as_values(&e.sound.values);
+                        let d = !p.lfo_patch.same_as_values(&e.sound.values)
+                            || !p.lfo_patch.same_names(&e.sound.macro_names);
                         self.lfo_seen = Some((current.clone(), at, d));
                         d
                     }
@@ -627,8 +643,10 @@ impl Browser {
                 q.set_once(s, v);
             }
         }
-        // What its LFOs modulate: none where it names none (decisions.md R-LFO).
+        // What its LFOs and macros modulate, and its macros' names: none where it names none
+        // (decisions.md R-LFO, R-MACROS).
         p.lfo_patch.load_values(&e.sound.values);
+        p.lfo_patch.load_names(&e.sound.macro_names);
         // Its AUTO GAIN curve in force at once, nothing measured (decisions.md
         // R-AUTO-GAIN-DRIVE); a preset saved before curves keeps the one in force.
         if let Some(db) = e.sound.curve(p.quality.value() == QualityMode::Lo) {
@@ -809,7 +827,7 @@ impl Browser {
         );
         let r = self
             .library
-            .save_with_curve(name, values_now(p), Some(tags), Some(curve));
+            .save_with(name, values_now(p), Some(tags), Some(curve), names_now(p));
         if let Ok(e) = &r {
             Self::set_current(p, &e.sound.name);
             self.wanted = Some((e.sound.name.clone(), targets(p, e)));

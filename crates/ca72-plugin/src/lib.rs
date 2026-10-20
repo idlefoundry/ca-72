@@ -717,6 +717,13 @@ impl Plugin for Ca72 {
             .params
             .entry("glide_range".to_owned())
             .or_insert(ParamValue::I32(0));
+        // And before the macros: each at 0, whatever the instance had (decisions.md R-MACROS).
+        for id in crate::lfo::MACRO_IDS {
+            state
+                .params
+                .entry(id.to_owned())
+                .or_insert(ParamValue::F32(0.0));
+        }
         // And before RETRIGGER: off, single triggering, the instrument's own.
         if !state.params.contains_key("retrigger") {
             state

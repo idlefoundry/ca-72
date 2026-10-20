@@ -93,7 +93,7 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 128] = [
+pub const LEARNABLE: [Learnable; 134] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
@@ -242,6 +242,13 @@ pub const LEARNABLE: [Learnable; 128] = [
     knob("lfo4_rise", "LFO 4 RISE"),
     stepped("lfo4_mode", "LFO 4 MODE"),
     switch("lfo4_mono", "LFO 4 MONO"),
+    // The macros (decisions.md R-MACROS).
+    knob("macro1", "MACRO 1"),
+    knob("macro2", "MACRO 2"),
+    knob("macro3", "MACRO 3"),
+    knob("macro4", "MACRO 4"),
+    knob("macro5", "MACRO 5"),
+    knob("macro6", "MACRO 6"),
     Learnable {
         id: "previous_preset",
         label: "PREVIOUS PRESET",
@@ -1086,6 +1093,9 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "osc3_shape" => &p.osc3_shape,
         "osc3_shape_mod" => &p.osc3_shape_mod,
         "osc3_shape_mod_dir" => &p.osc3_shape_mod_dir,
+        id if crate::lfo::macro_of_id(id).is_some() => {
+            p.macro_param(crate::lfo::macro_of_id(id).unwrap_or(0))
+        }
         id => return crate::lfo::learn_target(p, id),
     })
 }
@@ -1142,7 +1152,10 @@ pub fn knob_param(p: &Ca72Params, i: usize) -> Option<&FloatParam> {
         "osc1_shape" => &p.osc1_shape,
         "osc2_shape" => &p.osc2_shape,
         "osc3_shape" => &p.osc3_shape,
-        id => return crate::lfo::knob(p, id),
+        id => match crate::lfo::macro_of_id(id) {
+            Some(n) => p.macro_param(n),
+            None => return crate::lfo::knob(p, id),
+        },
     })
 }
 
@@ -1265,8 +1278,9 @@ mod tests {
             // 2's and 3's timed DIVISION and TIMED; each oscillator's waveform: its SHAPE knob,
             // its STEPPED or CONTINUOUS and its MOD switches, its MOD DIRECTION stepped;
             // GLIDE RANGE, a switch; each LFO's SHAPE, RATE, PHASE and RISE knobs, WAVEFORM,
-            // DIVISION and MODE selectors, STEPPED or CONTINUOUS, TIMED and MONO switches: R-LFO.)
-            (52, 28, 46)
+            // DIVISION and MODE selectors, STEPPED or CONTINUOUS, TIMED and MONO switches: R-LFO;
+            // the six macros, knobs: R-MACROS.)
+            (58, 28, 46)
         );
     }
 

@@ -1267,6 +1267,14 @@ fn the_lfos_neither_allocate_nor_free() {
         }
         assert!(c.automate(a.lfo(n).mono.as_ptr(), 0.0));
     }
+    // (The six macros on the same knobs, one way each: decisions.md R-MACROS.)
+    for n in 0..ca72_plugin::lfo::MACROS {
+        for (k, t) in targets.iter().enumerate() {
+            a.lfo_patch
+                .assign(Source::Macro(n), *t, 0.04 * (k as f32 - 3.5))
+                .expect("room");
+        }
+    }
     let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
     let mut buffer = Buffer::default();
     // SAFETY: both slices are `BLOCK` long and live as long as the buffer.
@@ -1320,6 +1328,11 @@ fn the_lfos_neither_allocate_nor_free() {
         c.automate(q.rise.as_ptr(), (b % 7) as f32 / 6.0);
         c.automate(q.mono.as_ptr(), if b % 130 < 100 { 0.0 } else { 1.0 });
         c.automate(a.quality.as_ptr(), (b / 300) as f32 / 2.0);
+        // (A macro turned, gliding there; one renamed, between blocks, by the editor.)
+        c.automate(a.macro_param(b % 6).as_ptr(), (b % 33) as f32 / 32.0);
+        if b % 50 == 10 {
+            a.lfo_patch.set_name(b % 6, "GROWL");
+        }
         ARMED.store(true, Ordering::SeqCst);
         // (The patch as the editor changes it, between blocks; its atomics alone.)
         if b % 50 == 25 {

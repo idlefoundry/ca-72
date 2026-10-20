@@ -2056,7 +2056,7 @@ impl Engine {
             // (The knobs where the LFOs have them now: decisions.md R-LFO. None assigned, the
             // controls as given.)
             let m = if c.lfo.active() {
-                let values = crate::lfo::source_values(&self.bank.shared_values);
+                let values = c.lfo.source_values(&self.bank.shared_values);
                 c.lfo.modulated(c, &values)
             } else {
                 *c
@@ -2114,7 +2114,7 @@ impl Engine {
         if self.rest.asleep {
             return;
         }
-        let values = crate::lfo::source_values(&self.bank.shared_values);
+        let values = l.source_values(&self.bank.shared_values);
         let m = l.modulated(&self.base, &values);
         if m != self.controls {
             self.take(&m, false);
@@ -3263,8 +3263,8 @@ impl Engine {
             self.base.lfo.voice(
                 &mut q,
                 &mut feedback,
-                &crate::lfo::source_values(&self.bank.shared_values),
-                &crate::lfo::source_values(&self.bank.voice_values[k]),
+                &self.base.lfo.source_values(&self.bank.shared_values),
+                &self.base.lfo.source_values(&self.bank.voice_values[k]),
             );
             own = q;
             &own

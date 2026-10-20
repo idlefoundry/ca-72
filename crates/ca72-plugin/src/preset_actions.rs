@@ -135,6 +135,7 @@ impl PresetActions {
         }
         // (What its LFOs modulate, staged here and taken at `apply`: decisions.md R-LFO.)
         self.lfo.load_values(&entry.sound.values);
+        self.lfo.load_names(&entry.sound.macro_names);
         if let Ok(mut pending) = self.name.lock() {
             *pending = Some((current, entry.sound.name.clone()));
         }
