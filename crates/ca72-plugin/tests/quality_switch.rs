@@ -12,9 +12,11 @@
 //!   (64,100,256,1024), `CA72_ONLY` (a part of a preset's name), `CA72_WORKERS` (0 and the
 //!   plug-in's own count by default, or one count).
 //! - `paced`: the same in real time at the plug-in's deadline (`CA72_BLOCK` frames, 256, at 48
-//!   kHz; `CA72_WORKERS`, the plug-in's own count by default), on a computer that cannot play
+//!   kHz; `CA72_WORKERS`, the plug-in's own count by default; the workers and the measuring
+//!   thread audio threads as a host's are, unless `CA72_PLAIN` is set), on a computer that cannot play
 //!   ULTRA live: the voices' runs not heard while it plays, the peak against the offline render's,
-//!   and whether the sound after QUALITY is back at HI is HI's again.
+//!   and whether the sound after QUALITY is back at HI is HI's again. `CA72_SPLIT`: ULTRA's
+//!   split voices (this machine's by default).
 //!
 //! Each render's thread flushes denormals to zero as nih-plug's process call has it (the
 //! workers follow it), unless `CA72_NO_FTZ` is set.
@@ -188,6 +190,9 @@ struct Render {
     mended: usize,
     silent: u64,
     late: usize,
+    /// The runs not heard and the blocks late in each phase: before the first switch, between
+    /// each switch and the next, and after the last.
+    phases: Vec<(u64, usize)>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -207,8 +212,21 @@ fn render(
     let mut e = Engine::new();
     e.set(&at_quality(c, start));
     e.prepare(rate, 1);
-    e.start_workers(workers, None);
     let period = Duration::from_secs_f64(block as f64 / rate);
+    // (Paced, the workers and this thread made audio threads as a host's is, this one in a work
+    // interval on macOS, unless `CA72_PLAIN` is set: ordinary threads busy part of each period
+    // run slowly on macOS, and HI's voices then miss their deadline whatever QUALITY did.)
+    let rt = paced && std::env::var_os("CA72_PLAIN").is_none();
+    e.start_workers(workers, rt.then_some(period));
+    let host = if rt {
+        if let Err(e) = ca72_rt::promote(period, period.mul_f64(0.5)) {
+            eprintln!("(the measuring thread not promoted: {e})");
+        }
+        ca72_rt::WorkInterval::new("CA-72 measurement host")
+    } else {
+        None
+    };
+    let token = host.as_ref().and_then(ca72_rt::WorkInterval::join);
     let n = (SECONDS * rate) as usize;
     let mut events: Vec<(usize, Event)> = notes(c.poly || c.unison)
         .into_iter()
@@ -222,6 +240,8 @@ fn render(
         .peekable();
     let (mut l, mut r) = (vec![0.0f32; n], vec![0.0f32; n]);
     let (mut mended, mut late) = (0, 0);
+    let mut phases = vec![(0u64, 0usize)];
+    let mut since = 0u64;
     let t0 = Instant::now();
     let mut b = 0;
     let mut i = 0u32;
@@ -234,15 +254,25 @@ fn render(
         }
         if let Some(q) = q {
             e.set(&at_quality(c, q));
+            let now = e.silent_runs();
+            phases.last_mut().unwrap().0 = now - since;
+            since = now;
+            phases.push((0, 0));
         }
         if paced {
             let due = t0 + period * i;
             if let Some(w) = due.checked_duration_since(Instant::now()) {
                 std::thread::sleep(w);
             }
+            if token.is_some()
+                && let Some(h) = &host
+            {
+                h.start(period);
+            }
             e.set_deadline(Some(Instant::now() + period.mul_f64(DEADLINE)));
             if e.take_serving() {
                 e.crew().serve();
+                e.set_deadline(Some(Instant::now() + period.mul_f64(DEADLINE)));
             }
         }
         let t = Instant::now();
@@ -258,8 +288,14 @@ fn render(
             k = stop;
         }
         e.end_block(len);
+        if token.is_some()
+            && let Some(h) = &host
+        {
+            h.finish();
+        }
         if paced && t.elapsed() > period {
             late += 1;
+            phases.last_mut().unwrap().1 += 1;
         }
         if e.take_mending() {
             mended += 1;
@@ -271,6 +307,14 @@ fn render(
         b += len;
         i += 1;
     }
+    let silent = e.silent_runs();
+    drop(e);
+    if let (Some(h), Some(t)) = (&host, token) {
+        h.leave(t);
+    }
+    if rt {
+        ca72_rt::demote();
+    }
     ca72_rt::set_flush_mode(was);
     let non_finite = l.iter().chain(&r).filter(|v| !v.is_finite()).count();
     Render {
@@ -278,7 +322,11 @@ fn render(
         r,
         non_finite,
         mended,
-        silent: e.silent_runs(),
+        silent,
+        phases: {
+            phases.last_mut().unwrap().0 = silent - since;
+            phases
+        },
         late,
     }
 }
@@ -483,6 +531,10 @@ fn paced() {
     let block: usize = env("CA72_BLOCK", 256);
     let workers: usize = env("CA72_WORKERS", AUTO);
     let rate: f64 = env("CA72_RATE", 48_000.0);
+    // (ULTRA's split voices as another machine has them: two on a Mac of ten fast cores.)
+    if let Ok(s) = std::env::var("CA72_SPLIT") {
+        ca72_plugin::engine::set_split_for_measurement(Some(s.parse().unwrap()));
+    }
     let out = std::env::var_os("CA72_SWITCH_OUT").map(PathBuf::from);
     for (name, c) in sounds() {
         // ULTRA chosen mid-note and held, then HI again (where a state left broken would last).
@@ -506,6 +558,10 @@ fn paced() {
             live.non_finite,
             live.mended
         );
+        eprintln!(
+            "  runs not heard and blocks late: before ULTRA {:?}, at ULTRA {:?}, back at HI {:?}",
+            live.phases[0], live.phases[1], live.phases[2]
+        );
         if let Some(d) = &out {
             std::fs::create_dir_all(d).unwrap();
             write_wav(
@@ -513,6 +569,12 @@ fn paced() {
                 rate,
                 &live.l,
                 &live.r,
+            );
+            write_wav(
+                &d.join(format!("{}-offline-{block}.wav", file_name(&name))),
+                rate,
+                &offline.l,
+                &offline.r,
             );
         }
     }

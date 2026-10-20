@@ -11317,3 +11317,9 @@ audio thread, without allocating. No sample changes.
   of 256 KB. It overflows the stack without the fix and passes with it.
 - `glide_stress` with `CA72_STACK`, release: the whole life fits 128 KB (it needed 576 to 640 KB);
   debug: 256 KB (over 1 MB).
+
+**Evidence (Windows 11, MSVC, the same day):** the test fails as a host would, the process ended
+by `STATUS_STACK_OVERFLOW` (0xc00000fd: what Windows reports for a crash to the desktop of this
+kind), and passes with the fix. In a release build making an instance needed 640 to 768 KB of
+the thread's stack (a Windows thread has 1 MB unless its maker asks otherwise); with the fix the
+whole life fits 256 KB.
