@@ -464,6 +464,7 @@ mod tests {
             "osc2_timed",
             "osc2_division",
             "osc3_timed",
+            "glide_range",
             "osc3_division",
         ] {
             assert_eq!(index(id), None, "{id} does not glide");

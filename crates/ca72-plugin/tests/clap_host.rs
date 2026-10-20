@@ -1420,3 +1420,42 @@ fn glide_stress_here() {
         }
     }
 }
+
+/// GLIDE RANGE goes through the host's automation and state, including its stable enum ids;
+/// a state from before it replaces LONG with NORMAL. A learned CC steps at the switch's
+/// threshold, without turning GLIDE's knob (decisions.md R-GLIDE-LONG).
+#[test]
+fn glide_range_is_automated_learned_and_saved_with_the_session() {
+    let a = Instance::new();
+    assert_eq!(a.value("glide_range"), 0.0);
+    a.process(&[In::Param(0, "glide_range", 1.0)]);
+    assert_eq!(a.value("glide_range"), 1.0);
+    let saved = a.save();
+    assert_eq!(
+        json_of(&saved)["params"]["glide_range"],
+        serde_json::json!({"string": "long"})
+    );
+    let b = Instance::new();
+    assert!(b.load(&saved));
+    assert_eq!(b.value("glide_range"), 1.0);
+    assert_eq!(
+        json_of(&b.save())["params"]["glide_range"],
+        serde_json::json!({"string": "long"})
+    );
+    let mut old = json_of(&saved);
+    old["params"].as_object_mut().unwrap().remove("glide_range");
+    assert!(b.load(&bytes_of(&old)));
+    assert_eq!(b.value("glide_range"), 0.0);
+    assert_eq!(
+        json_of(&b.save())["params"]["glide_range"],
+        serde_json::json!({"string": "normal"})
+    );
+    let table = r#"{"version":1,"assignments":[{"param":"glide_range","channel":1,"cc":20}]}"#;
+    assert!(b.load(&with_table(&b, Some(table))));
+    let knob = b.value("glide");
+    for (cc, range) in [(127, 1.0), (63, 0.0), (64, 1.0), (0, 0.0)] {
+        b.process(&[In::Cc(0, 0, 20, cc)]);
+        assert_eq!(b.value("glide_range"), range);
+        assert_eq!(b.value("glide"), knob);
+    }
+}

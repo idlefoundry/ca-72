@@ -237,6 +237,8 @@ pub struct Keyboard {
     r_hi: usize,
     r_trig: usize,
     r_glide: usize,
+    c_hold: usize,
+    glide_long: bool,
     r_load: usize,
     /// The inputs in force: the lowest and highest keys held, the trigger contact, GLIDE's
     /// resistance in circuit (0 with the switch off), the load.
@@ -477,7 +479,7 @@ impl Keyboard {
             r: k.r61,
         });
         // The hold capacitor and the follower.
-        c.add(Part::Capacitor {
+        let c_hold = c.add(Part::Capacitor {
             a: C6,
             b: GND,
             c: k.c6,
@@ -520,6 +522,8 @@ impl Keyboard {
             r_hi,
             r_trig,
             r_glide,
+            c_hold,
+            glide_long: false,
             r_load,
             keys: None,
             trig: false,
@@ -606,6 +610,19 @@ impl Keyboard {
             self.glide = r;
             self.net
                 .set_resistance(self.r_glide, self.circuit.r61 + r.max(0.0));
+            self.quiet = 0;
+            self.since_change = 0;
+        }
+    }
+
+    /// LONG's hold capacitor, C6 five times larger, keeping its voltage as the range changes.
+    pub fn set_glide_long(&mut self, long: bool) {
+        if long != self.glide_long {
+            self.flush();
+            self.glide_long = long;
+            let c = self.circuit.c6;
+            self.net
+                .set_capacitance(self.c_hold, if long { c * 5.0 } else { c });
             self.quiet = 0;
             self.since_change = 0;
         }

@@ -701,6 +701,11 @@ impl Plugin for Ca72 {
                 state.params.entry(id).or_insert(v);
             }
         }
+        // And before GLIDE's LONG range: NORMAL, the instrument's capacitor (R-GLIDE-LONG).
+        state
+            .params
+            .entry("glide_range".to_owned())
+            .or_insert(ParamValue::I32(0));
         // And before RETRIGGER: off, single triggering, the instrument's own.
         if !state.params.contains_key("retrigger") {
             state
@@ -1696,6 +1701,36 @@ mod tests {
         assert!(
             matches!(s.params.get("osc3_division"), Some(ParamValue::String(v)) if v == "1/8d")
         );
+    }
+
+    /// GLIDE RANGE survives a session's serialisation, while a session from before it opens
+    /// NORMAL, whatever the instance's range was (R-GLIDE-LONG).
+    #[test]
+    fn a_session_keeps_glide_range_and_an_old_one_opens_normal() {
+        for range in [None, Some("normal"), Some("long")] {
+            let s = PluginState {
+                version: "0.3.0".to_owned(),
+                params: range
+                    .into_iter()
+                    .map(|v| ("glide_range".to_owned(), ParamValue::String(v.to_owned())))
+                    .collect(),
+                fields: Default::default(),
+            };
+            let mut s: PluginState =
+                serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+            Ca72::filter_state(&mut s);
+            match (range, s.params.get("glide_range")) {
+                (None, Some(ParamValue::I32(0))) => {}
+                (Some(want), Some(ParamValue::String(got))) => assert_eq!(want, got),
+                other => panic!("range was not restored: {other:?}"),
+            }
+        }
+        let p = Ca72Params::default();
+        assert_eq!(p.glide_range.value(), params::GlideRange::Normal);
+        assert!(!p.controls().panel.glide_long);
+        assert!(p.param_map().iter().any(|(id, _, _)| id == "glide_range"));
+        let i = learn::index("glide_range").expect("learnable");
+        assert_eq!(learn::LEARNABLE[i].kind, learn::Kind::Switch);
     }
 
     /// A session saved before the oscillators timed opens with each off and its DIVISION at a

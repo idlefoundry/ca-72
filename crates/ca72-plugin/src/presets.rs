@@ -226,6 +226,7 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("osc3_shape", &p.osc3_shape),
         ("osc3_shape_mod", &p.osc3_shape_mod),
         ("osc3_shape_mod_dir", &p.osc3_shape_mod_dir),
+        ("glide_range", &p.glide_range),
     ]
 }
 
@@ -1598,6 +1599,43 @@ mod tests {
         assert!(b.drawer.chips.iter().any(|(t, _)| t == "zed"));
         b.reread(&p);
         assert!(rows(&b).is_empty());
+    }
+
+    /// GLIDE RANGE is saved with the sound; every older preset chooses NORMAL, even if the
+    /// instance was in LONG. The preset format stays the same.
+    #[test]
+    fn glide_range_is_a_presets_and_normal_where_it_does_not_name_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let p = std::sync::Arc::new(Ca72Params::default());
+        let context = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+            p.clone(),
+            48_000.0,
+            ProcessMode::Realtime,
+        );
+        assert!(context.automate(p.glide_range.as_ptr(), 1.0));
+        let value = |e: &Entry| {
+            targets(&p, e)
+                .into_iter()
+                .find(|(id, _)| *id == "glide_range")
+                .map(|(_, v)| v)
+        };
+        assert!(values_now(&p).contains(&("glide_range".to_owned(), 1.0)));
+        for e in lib.entries().0 {
+            assert_eq!(value(&e), Some(0.0), "{}", e.sound.name);
+        }
+        for (name, range) in [("Long Slide", 1.0), ("Normal Slide", 0.0)] {
+            lib.save(name, vec![("glide_range".to_owned(), range)], None)
+                .unwrap();
+            let reopened = Library::at(dir.path());
+            let saved = reopened
+                .entries()
+                .0
+                .into_iter()
+                .find(|e| e.sound.name == name)
+                .expect("the saved preset");
+            assert_eq!(value(&saved), Some(range as f32));
+        }
     }
 
     /// The oscillators timed (R-OSC-TIMED) are part of a preset: saved with the sound, set by a

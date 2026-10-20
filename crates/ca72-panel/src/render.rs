@@ -146,6 +146,8 @@ pub struct Scene {
     /// arc printed, its MOD key on the panel, its switch where its shape is) or STEPPED, MOD's
     /// way and its orb.
     pub shape: [Shaped; 3],
+    /// GLIDE in LONG: ×5 printed beside its dial (decisions.md R-GLIDE-LONG).
+    pub glide_long: bool,
 }
 
 /// An oscillator's waveform as the panel shows it (decisions.md R-CONTINUOUS-WAVE).
@@ -222,6 +224,7 @@ impl Default for Scene {
             tempo: None,
             timed: [Timed::default(); 2],
             shape: [Shaped::default(); 3],
+            glide_long: false,
         }
     }
 }
@@ -291,6 +294,10 @@ pub struct Renderer {
     arc_background: Option<[Pixmap; 3]>,
     arc_rects: [[i32; 4]; 3],
     arc_surfaces: Option<[Pixmap; 3]>,
+    /// GLIDE's LONG sign, printed and kept as the arcs are, laid only while LONG is on.
+    glide_background: Option<Pixmap>,
+    glide_rect: [i32; 4],
+    glide_surface: Option<Pixmap>,
 }
 
 /// How much the pictures placed in layers may keep: some dozens of layers' pictures.
@@ -410,6 +417,9 @@ impl Renderer {
             arc_background: None,
             arc_rects: [[0; 4]; 3],
             arc_surfaces: None,
+            glide_background: None,
+            glide_rect: [0; 4],
+            glide_surface: None,
         };
         r.draw_background();
         r
@@ -492,6 +502,30 @@ impl Renderer {
         })
     }
 
+    fn glide_long_rect(&self) -> [i32; 4] {
+        let Some(c) = self
+            .arrangement
+            .controls
+            .iter()
+            .find(|c| c.param == "glide" && c.place == crate::controls::Place::Panel)
+        else {
+            return [0; 4];
+        };
+        let (x, y) = c.centre();
+        let (s, top) = (self.scale, self.top_px());
+        let (w, h) = (
+            self.background.width() as i32,
+            self.background.height() as i32,
+        );
+        let e = art::GLIDE_LONG_EXTENT;
+        [
+            (((x + e[0]) * s).floor() as i32).clamp(0, w),
+            (((y + e[1]) * s).floor() as i32 - top).clamp(0, h),
+            (((x + e[2]) * s).ceil() as i32).clamp(0, w),
+            (((y + e[3]) * s).ceil() as i32 - top).clamp(0, h),
+        ]
+    }
+
     fn dial_rects(&self) -> [[i32; 4]; 2] {
         let (s, top) = (self.scale, self.top_px());
         std::array::from_fn(|n| {
@@ -572,6 +606,8 @@ impl Renderer {
         self.timed_background = None;
         self.arc_rects = self.waveform_arc_rects();
         self.arc_background = None;
+        self.glide_rect = self.glide_long_rect();
+        self.glide_background = None;
         if self.skin == Skin::Worn {
             self.draw_worn_background();
             return;
@@ -741,6 +777,7 @@ impl Renderer {
         self.dial_surfaces = Some(rects.map(|r| crop(bg, r)));
         let rects = self.arc_rects;
         self.arc_surfaces = Some(rects.map(|r| crop(bg, r)));
+        self.glide_surface = Some(crop(bg, self.glide_rect));
         let mean = face_mean(bg);
         self.face_mean = Some(mean);
         // The print, worn into the face: its texture showing through it a little.
@@ -797,6 +834,7 @@ impl Renderer {
         let bg = &self.background;
         self.dial_surfaces = Some(self.timed_rects.map(|r| crop(bg, r)));
         self.arc_surfaces = Some(self.arc_rects.map(|r| crop(bg, r)));
+        self.glide_surface = Some(crop(bg, self.glide_rect));
     }
 
     /// The timed dial `n`'s place (oscillator 2's or 3's) printed as `timed` has the dials
@@ -1346,6 +1384,7 @@ impl Renderer {
         let first = self.shown.is_none();
         let dials_were = self.shown.as_ref().map(Scene::timed_dials);
         let arcs_were = self.shown.as_ref().map(Scene::arcs);
+        let glide_was = self.shown.as_ref().map(|s| s.glide_long);
         self.shown = Some(scene.clone());
         let dials = scene.timed_dials();
         if dials.contains(&true) && self.timed_background.is_none() {
@@ -1362,11 +1401,25 @@ impl Renderer {
                 _ => None,
             };
         }
+        if scene.glide_long && self.glide_background.is_none() {
+            self.glide_background = self.glide_surface.as_ref().and_then(|surface| {
+                self.print_part(
+                    self.glide_rect,
+                    surface,
+                    "",
+                    &art::glide_long_print(&self.layout, &self.arrangement),
+                )
+            });
+        }
         let layers = self.layers(scene);
         let mut changed = self.slots.len() != layers.len();
         // Where the layers changed, as they were and as they are; and a dial's print that
         // changed.
         let mut rects: Vec<[i32; 4]> = Vec::new();
+        if glide_was.is_some_and(|on| on != scene.glide_long) {
+            rects.push(self.glide_rect);
+            changed = true;
+        }
         for n in 0..2 {
             if dials_were.is_some_and(|d| d[n] != dials[n]) {
                 rects.push(self.timed_rects[n]);
@@ -1460,7 +1513,12 @@ impl Renderer {
                     .filter(|(_, on)| *on)
                     .map(|(part, _)| part)
             });
-            for (part, r) in timed.chain(arced) {
+            let glide = self
+                .glide_background
+                .iter()
+                .filter(|_| scene.glide_long)
+                .map(|p| (p, self.glide_rect));
+            for (part, r) in timed.chain(arced).chain(glide) {
                 let [a0, b0, a1, b1] = [r[0].max(x0), r[1].max(y0), r[2].min(x1), r[3].min(y1)];
                 if a1 <= a0 || b1 <= b0 {
                     continue;
@@ -2612,6 +2670,91 @@ mod tests {
             }
             r.render(&scene);
             assert!(r.frame() == &before, "{skin:?}: not the frame before");
+        }
+    }
+
+    /// LONG's print appears and disappears in place in both skins and lettering sizes; a
+    /// partial redraw is the same frame as one drawn whole, and returning NORMAL is exact.
+    #[test]
+    fn long_glides_print_is_drawn_and_undrawn_in_place() {
+        for skin in [Skin::Drawn, Skin::Worn] {
+            for lettering in [Lettering::Standard, Lettering::Large] {
+                let s = 0.44;
+                let mut r = Renderer::with_look(skin, lettering, s, 1.0);
+                let mut scene = Scene::default();
+                r.render(&scene);
+                let before = r.frame().clone();
+                scene.glide_long = true;
+                assert!(r.render(&scene));
+                assert!(r.frame() != &before, "{skin:?}: no print");
+                for y in 0..before.height() {
+                    for x in 0..before.width() {
+                        let [x0, y0, x1, y1] = r.glide_rect;
+                        if (x as i32) < x0
+                            || (x as i32) >= x1
+                            || (y as i32) < y0
+                            || (y as i32) >= y1
+                        {
+                            let i = (y as usize * before.width() as usize + x as usize) * 4;
+                            assert_eq!(&before.data()[i..i + 4], &r.frame().data()[i..i + 4]);
+                        }
+                    }
+                }
+                for v in [0.0, 0.75, 1.0] {
+                    scene.values[index("glide").expect("GLIDE")] = v;
+                    r.render(&scene);
+                    let mut whole = Renderer::with_look(skin, lettering, s, 1.0);
+                    whole.render(&scene);
+                    assert!(r.frame() == whole.frame());
+                }
+                scene = Scene::default();
+                r.render(&scene);
+                assert!(r.frame() == &before, "NORMAL is the frame before");
+            }
+        }
+    }
+
+    /// The LONG sign's overlay meets neither another replaceable print nor any of the
+    /// background's print, including GLIDE's own numbers, in either lettering size.
+    #[test]
+    fn long_glides_print_meets_no_other_print() {
+        let starter = Look::open(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/skin-packs/starter"
+        )))
+        .expect("the starter pack");
+        for look in [Look::of(Skin::Drawn), starter] {
+            for lettering in [Lettering::Standard, Lettering::Large] {
+                let r = Renderer::with_pack(look.clone(), lettering, 1.0, 1.0);
+                let g = r.glide_rect;
+                for other in r.arc_rects.into_iter().chain(r.timed_rects) {
+                    assert!(
+                        g[2] <= other[0]
+                            || other[2] <= g[0]
+                            || g[3] <= other[1]
+                            || other[3] <= g[1]
+                    );
+                }
+                let doc = art::document(
+                    [
+                        g[0] as f64,
+                        g[1] as f64,
+                        (g[2] - g[0]) as f64,
+                        (g[3] - g[1]) as f64,
+                    ],
+                    (g[2] - g[0]) as u32,
+                    (g[3] - g[1]) as u32,
+                    &art::panel_print(&r.layout, &r.arrangement),
+                );
+                let tree = usvg::Tree::from_str(&doc, &r.options).expect("the panel's print");
+                let mut print =
+                    Pixmap::new((g[2] - g[0]) as u32, (g[3] - g[1]) as u32).expect("a print");
+                resvg::render(&tree, Transform::identity(), &mut print.as_mut());
+                assert!(
+                    print.pixels().iter().all(|p| p.alpha() == 0),
+                    "{lettering:?}: another print in LONG's place"
+                );
+            }
         }
     }
 

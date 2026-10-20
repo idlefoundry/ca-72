@@ -127,6 +127,7 @@ pub enum Item {
     /// A WAVEFORM switch's (decisions.md R-CONTINUOUS-WAVE): its oscillator's waveform STEPPED
     /// (false) or CONTINUOUS.
     Rect(usize, bool),
+    GlideRange(bool),
     StandaloneSettings,
     WhatsNew,
     /// The settings' WINDOW: SIZE…, the SIZE menu wanted (R-SIZE).
@@ -170,6 +171,8 @@ pub enum Pressed {
     Indicator(bool),
     /// A WAVEFORM switch's menu: its oscillator's waveform STEPPED (false) or CONTINUOUS.
     Rect(usize, bool),
+    /// GLIDE's menu: NORMAL (false) or LONG (true).
+    GlideRange(bool),
     /// The settings' menu: the editor drawn in this look.
     Look(Skin),
     /// The settings' menu: the editor drawn in this installed pack's look.
@@ -227,6 +230,8 @@ pub struct Learning {
     /// Which oscillators' waveforms are CONTINUOUS (decisions.md R-CONTINUOUS-WAVE): the one its
     /// WAVEFORM switch's menu marks.
     pub variable: [bool; 3],
+    /// Which of GLIDE's ranges its knob's menu marks (decisions.md R-GLIDE-LONG).
+    pub glide_long: bool,
 }
 
 /// A parameter's name.
@@ -338,6 +343,20 @@ impl Learning {
                         (Item::Rect(n, true), "CONTINUOUS"),
                     ]);
                 }
+                if LEARNABLE[i].id == "glide" {
+                    items.extend([
+                        (Item::Head, "GLIDE RANGE"),
+                        (Item::GlideRange(false), "NORMAL"),
+                        (
+                            Item::GlideRange(true),
+                            if fonts.covers("×") {
+                                "LONG (×5)"
+                            } else {
+                                "LONG (x5)"
+                            },
+                        ),
+                    ]);
+                }
                 (format!("{} · {cc}", label(i)), items)
             }
             None => match not.and_then(not_learnable) {
@@ -368,6 +387,7 @@ impl Learning {
                         Item::Not | Item::Head => false,
                         // (The mode it is in marked, not chosen again.)
                         Item::Rect(n, v) => self.variable[*n] != *v,
+                        Item::GlideRange(v) => self.glide_long != *v,
                         _ => true,
                     };
                     ((*t).to_owned(), enabled)
@@ -382,7 +402,10 @@ impl Learning {
             marked: items
                 .iter()
                 .enumerate()
-                .filter(|(_, (it, _))| matches!(it, Item::Rect(n, v) if self.variable[*n] == *v))
+                .filter(|(_, (it, _))| {
+                    matches!(it, Item::Rect(n, v) if self.variable[*n] == *v)
+                        || matches!(it, Item::GlideRange(v) if self.glide_long == *v)
+                })
                 .map(|(k, _)| k)
                 .collect(),
             hover: None,
@@ -812,6 +835,7 @@ impl Learning {
             (Some(Item::Remove), Some(i)) => self.remove(map, i),
             (Some(Item::List), l) => return Pressed::List(l.filter(|&i| i != MOD_WHEEL)),
             (Some(Item::Rect(n, variable)), _) => return Pressed::Rect(*n, *variable),
+            (Some(Item::GlideRange(long)), _) => return Pressed::GlideRange(*long),
             (Some(Item::Show), _) => return Pressed::Indicator(true),
             (Some(Item::Hide), _) => return Pressed::Indicator(false),
             (Some(Item::StandaloneSettings), _) => return Pressed::StandaloneSettings,

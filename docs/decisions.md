@@ -12812,3 +12812,67 @@ nothing in the engine differs.
   `a_continuous_switch_turns_and_its_key_flips_mod_and_its_way`;
   `mods_orb_shows_where_the_voices_have_the_shape`. Parameters:
   `continuous_waveforms_are_off_by_default_and_their_travel_the_engines`.
+
+## R-GLIDE-LONG. GLIDE with a second range, five times as long
+
+**Owner, 2026-10-20:** "it would be interesting to offer a longer option for the glide, which
+we could do one of two ways. We can either add a little extra to the end, so effectively making
+it go up to 11, or we just add a secondary mode that extends that glide time." The secondary
+mode was chosen. The factor: "5x". Asked whether it applies wherever GLIDE acts, every voice,
+the circuit voice and the light LO voice: "Yes."
+
+**Presentation (the owner):** a right-click menu on GLIDE, NORMAL or LONG (×5); while LONG is
+on, a small ×5 printed beside the dial in the panel's legend ink (option A): "Go with A."
+
+LONG is the glide circuit with its hold capacitor C6 five times larger: the pot's 5 MΩ at
+10 and its fitted taper stay as they were. In the light voice its slide rate is divided by
+five and its beyond-the-keys RC's capacitor multiplied by five. NORMAL is the circuit as
+before, to the bit. GLIDE RANGE (`glide_range`, NORMAL by default) is a host parameter and a
+MIDI-learnable switch, saved with presets and sessions; one saved before it opens NORMAL. It steps, as switches do (R-KNOB-GLIDE).
+
+**Agent decisions, 2026-10-20** (not separately approved):
+- The sign is centred 78 drawing units right and 100 below GLIDE's centre, following its
+  position in a skin pack. Its print rectangle is `[48, 88, 108, 117]` about the dial: clear of
+  its large 10 and the starter pack's row rule. The panel's legend size, ink and typeface;
+  x5 where the typeface has no multiplication sign. The menu uses the same fallback.
+- Changing the range keeps C6's voltage and starts its new charge there, avoiding a pitch
+  impulse when the range changes while a note plays. The circuit's other parts stay as drawn.
+
+**Evidence (Linux reference machine, Rust 1.97.1, 2026-10-20):**
+- `tests/glide_long.rs`: GLIDE at 3, 5, 8 and 10, rising and falling, within and beyond the
+  original keyboard's keys. The circuit's middle 20 to 80 % of the travel takes five times
+  as long (ratios within 0.003 % of 5), clear of the contacts' fixed lead. The light voice's
+  matching test measures both directions and both parts of the scale; its rates divide by
+  five and its RC multiplies by five, including GLIDE at 0.
+- `changing_a_capacitors_value_keeps_its_voltage`: changing C6's value in either direction
+  keeps its voltage, without a charge impulse, and follows the new RC's time constant.
+- `preset_render` against 393588a: all 19 factory presets, POLY's ten voices, four seconds
+  each at 48 kHz in 256-frame blocks, at HI, LO and ULTRA. All 57 renders (21,888,000
+  interleaved f32 samples) compared byte for byte: every one identical, NORMAL throughout.
+- `glide_range_is_a_presets_and_normal_where_it_does_not_name_it` and the session's migration
+  test; the CLAP harness's `glide_range_is_automated_learned_and_saved_with_the_session`:
+  automation, stable saved ids `normal` and `long`, an old state loaded over LONG returning
+  NORMAL, and a learned CC stepping at 63/64 without moving GLIDE's knob. The MIDI table and
+  the agents' parameter table include the range; it is outside the smoothing table.
+- `the_glide_menu_sets_its_range_and_the_panel_and_tip_follow`: both menu choices, the head,
+  marks and gestures, the scene following the host and the LONG tip. The panel tests draw and
+  undraw the sign in both skins and lettering sizes, partial frames the whole frames and
+  NORMAL again the original to the pixel; the starter pack in either base skin follows its
+  own GLIDE. The sign's print rectangle meets no other print in the official and starter
+  layouts. Its typeface's multiplication sign, and the x fallback, checked. PNGs inspected
+  at 0.44 in both skins and the starter pack. Independent source review found no remaining
+  defects.
+- The engine's allocation test changes the range while it plays; the plug-in's allocation
+  test automates it at LO, HI and ULTRA: no allocation, no free.
+- `cargo test -p ca72 -p ca72-plugin -p ca72-panel --no-fail-fast` passes. Clippy with
+  `--all-targets -- -D warnings` passes for the three crates, and for the workspace both
+  with and without `--all-features`. `cargo fmt --all -- --check` and
+  `python3 scripts/notices.py --check` pass.
+- `CA72_REQUIRE_NGSPICE=1 cargo test --workspace --no-fail-fast` (ngspice 47): all targets
+  passed except `skin-pack --example pack_keygen`, whose two failures were its guard refusing
+  the temporary directory inside this worktree. Rerun with TMPDIR outside Git and /tmp:
+  three passed, none failed, no source change. All other workspace targets passed in the
+  full run. Manual benchmarks and ignored tests were not run.
+
+Not tried: external DAWs, macOS or Windows, native installers or audio devices. The exact
+position of the sign is an agent decision for the owner's visual review.

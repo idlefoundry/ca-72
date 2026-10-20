@@ -3199,6 +3199,21 @@ impl Editing {
                 self.set_timbre_rest(rest);
                 return;
             }
+            Pressed::GlideRange(long) => {
+                let p = &self.params.glide_range;
+                let s = self.setter();
+                s.begin_set_parameter(p);
+                s.set_parameter(
+                    p,
+                    if long {
+                        crate::params::GlideRange::Long
+                    } else {
+                        crate::params::GlideRange::Normal
+                    },
+                );
+                s.end_set_parameter(p);
+                return;
+            }
             Pressed::Rect(n, variable) => {
                 self.set_wave_mode(n, variable);
                 return;
@@ -4037,6 +4052,8 @@ impl Editing {
         self.scene.osc3_control_off = osc3_control_inert(&self.params);
         // Oscillators 2's and 3's timed keys and dials (decisions.md R-OSC-TIMED).
         self.scene.timed = timed_scene(&self.params);
+        self.scene.glide_long = self.params.glide_range.value() == crate::params::GlideRange::Long;
+        self.learning.glide_long = self.scene.glide_long;
         // Each oscillator's waveform: CONTINUOUS's arc, its MOD key in its way's colour, its
         // switch where its shape is, MOD's orb where the voices have the shape (decisions.md
         // R-CONTINUOUS-WAVE).
@@ -4192,7 +4209,12 @@ impl Editing {
                 } else {
                     self.scene.values[i] as f32
                 };
-                Some((format!("{label}: {}", p.text(v)), x, y + top))
+                let range = if c.param == "glide" && self.scene.glide_long {
+                    " · LONG"
+                } else {
+                    ""
+                };
+                Some((format!("{label}: {}{range}", p.text(v)), x, y + top))
             }
             Target::Power => {
                 let state = if self.params.bypass.value() {
@@ -11472,6 +11494,79 @@ mod tests {
         assert!(e.typing.is_none());
         e.start_typing(Readout::Drive);
         assert!(e.typing.is_some());
+    }
+
+    /// GLIDE's menu selects a range in one host gesture, with its current choice marked. LONG
+    /// reaches the scene and the tip; selecting NORMAL again removes the print and the suffix.
+    #[test]
+    fn the_glide_menu_sets_its_range_and_the_panel_and_tip_follow() {
+        use crate::params::GlideRange;
+        for range in [GlideRange::Normal, GlideRange::Long] {
+            let (mut e, host, params) = editing_of(
+                Ca72Params {
+                    glide: FloatParam::new(
+                        "Glide",
+                        7.5,
+                        FloatRange::Linear {
+                            min: 0.0,
+                            max: 10.0,
+                        },
+                    ),
+                    glide_range: EnumParam::new("Glide Range", range),
+                    ..Ca72Params::default()
+                },
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            );
+            e.draw();
+            let long = range == GlideRange::Long;
+            assert_eq!(e.scene.glide_long, long);
+            let point = at(&e, centre("glide"));
+            e.hover = Some(Target::Control(
+                ca72_panel::controls::index("glide").expect("GLIDE"),
+            ));
+            assert_eq!(
+                e.tip().expect("a tip").0,
+                if long {
+                    "GLIDE: 7.5 · LONG"
+                } else {
+                    "GLIDE: 7.5"
+                }
+            );
+            right_click(&mut e, point);
+            let items = menu_items(&e);
+            assert_eq!(
+                &items[items.len() - 3..],
+                &[
+                    ("GLIDE RANGE".to_owned(), false),
+                    ("NORMAL".to_owned(), long),
+                    ("LONG (×5)".to_owned(), !long),
+                ]
+            );
+            let m = e.learning.menu().expect("a menu");
+            assert_eq!(m.heads, vec![items.len() - 3]);
+            assert_eq!(m.marked, vec![items.len() - if long { 1 } else { 2 }]);
+            host.take();
+            menu_item(&mut e, if long { "NORMAL" } else { "LONG (×5)" });
+            let p = params.glide_range.as_ptr();
+            assert_eq!(
+                host.take(),
+                vec![
+                    Call::Begin(p),
+                    Call::Set(p, if long { 0.0 } else { 1.0 }),
+                    Call::End(p)
+                ]
+            );
+            // The test host records gestures; apply its automation as the real host does.
+            let context = nih_plug::context::process::TestProcessContext::<crate::Ca72>::new(
+                params.clone(),
+                48_000.0,
+                ProcessMode::Realtime,
+            );
+            assert!(context.automate(p, if long { 0.0 } else { 1.0 }));
+            e.draw();
+            assert_eq!(e.scene.glide_long, !long);
+            assert_eq!(params.controls().panel.glide_long, !long);
+        }
     }
 
     /// A WAVEFORM switch's menu (decisions.md R-CONTINUOUS-WAVE): a WAVEFORM head, STEPPED (the

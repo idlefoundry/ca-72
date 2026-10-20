@@ -655,8 +655,8 @@ pub struct Layout {
     titles: Vec<Option<f64>>,
     /// The lettering's size.
     lettering: Lettering,
-    /// Whether the typeface prints the multiplication sign (the timed dial's and signs' 4× and
-    /// 2×, R-OSC-TIMED): a skin pack's may not, which prints an x instead.
+    /// Whether the typeface prints the multiplication sign (the timed dials' 4× and 2×,
+    /// GLIDE's ×5): a skin pack's may not, which prints an x instead.
     times: bool,
 }
 
@@ -862,6 +862,30 @@ pub fn dials_print(layout: &Layout, arrangement: &Arrangement) -> String {
         }
     }
     s.0.push_str("</g>");
+    s.0
+}
+
+/// LONG's ×5 beside GLIDE, below and to the right of its numbers (R-GLIDE-LONG): its print's
+/// box about the knob's centre, with room for LARGE and the ink's blur into the face.
+pub const GLIDE_LONG_EXTENT: [f64; 4] = [48.0, 88.0, 108.0, 117.0];
+
+/// GLIDE's LONG sign alone, in the legends' ink, size and typeface. A pack without × prints x.
+pub fn glide_long_print(layout: &Layout, arrangement: &Arrangement) -> String {
+    let mut s = Svg(String::new(), layout.lettering);
+    if let Some(c) = arrangement
+        .controls
+        .iter()
+        .find(|c| c.param == "glide" && c.place == Place::Panel)
+    {
+        put!(s, "<g transform='translate({} {})'>", N(COL), N(TOP));
+        legend(
+            &mut s,
+            c.x + 78.0,
+            c.y + 100.0,
+            &format!("{}5", layout.times()),
+        );
+        s.0.push_str("</g>");
+    }
     s.0
 }
 
@@ -1760,6 +1784,21 @@ pub fn print_extent(kind: &Kind) -> [f64; 4] {
         Kind::Key => bounds(kind),
         _ => [0.0; 4],
     }
+}
+
+/// A control's print, including GLIDE's optional LONG sign, which a layout leaves room for.
+pub fn control_print_extent(c: &Control) -> [f64; 4] {
+    let e = print_extent(&c.kind);
+    if c.param != "glide" {
+        return e;
+    }
+    let g = GLIDE_LONG_EXTENT;
+    [
+        e[0].min(g[0]),
+        e[1].min(g[1]),
+        e[2].max(g[2]),
+        e[3].max(g[3]),
+    ]
 }
 
 /// The box a dial's print takes about its centre, its numbers `num` in size.
@@ -2915,5 +2954,20 @@ pub fn tip(fonts: &Fonts, x: f64, y: f64, t: &str, size: f64) -> Layer {
         bounds: [x0 - m, y0 - m, -x0 + m, m],
         body: s.0,
         ..Layer::default()
+    }
+}
+
+#[cfg(test)]
+mod glide_tests {
+    use super::*;
+
+    #[test]
+    fn long_glides_sign_uses_the_typefaces_multiplication_sign_or_x() {
+        let fonts = Fonts::new();
+        let a = Arrangement::official();
+        let mut layout = Layout::measure(&fonts);
+        assert!(glide_long_print(&layout, &a).contains(">×5</text>"));
+        layout.times = false;
+        assert!(glide_long_print(&layout, &a).contains(">x5</text>"));
     }
 }

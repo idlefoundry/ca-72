@@ -1086,3 +1086,65 @@ fn the_skins_folder_named_by_the_parent_is_read() {
         }
     }
 }
+
+/// LONG's sign follows a pack's GLIDE rather than the official layout's, in its own typeface
+/// and in either base skin. Turning LONG off restores the pack's frame to the pixel.
+#[test]
+fn long_glides_print_follows_a_skin_packs_dial() {
+    for base in ["classic", "realistic"] {
+        let dir = edited(|d| {
+            if base == "realistic" {
+                replace(
+                    &d.join("skin.toml"),
+                    "base = \"classic\"",
+                    "base = \"realistic\"",
+                );
+            }
+        });
+        let look = Look::open(dir.path()).expect("the starter pack");
+        for lettering in [Lettering::Standard, Lettering::Large] {
+            let mut r = Renderer::with_pack(look.clone(), lettering, 0.37, 1.0);
+            let mut scene = Scene::default();
+            r.render(&scene);
+            let before = r.frame().clone();
+            scene.glide_long = true;
+            r.render(&scene);
+            assert!(r.frame() != &before, "{base}: no sign");
+            let c = r
+                .arrangement()
+                .controls
+                .iter()
+                .find(|c| c.param == "glide")
+                .expect("GLIDE");
+            let (x, y) = c.centre();
+            let e = ca72_panel::art::GLIDE_LONG_EXTENT;
+            let mut changed = 0;
+            for py in 0..before.height() {
+                for px in 0..before.width() {
+                    let i = (py as usize * before.width() as usize + px as usize) * 4;
+                    if before.data()[i..i + 4] != r.frame().data()[i..i + 4] {
+                        let (px, py) = (
+                            f64::from(px) / 0.37,
+                            f64::from(py) / 0.37 + r.arrangement().panel.top(),
+                        );
+                        assert!(
+                            px >= x + e[0] - 3.0
+                                && px <= x + e[2] + 3.0
+                                && py >= y + e[1] - 3.0
+                                && py <= y + e[3] + 3.0,
+                            "{base}: print away from GLIDE"
+                        );
+                        changed += 1;
+                    }
+                }
+            }
+            assert!(changed > 10, "{base}: sign too small");
+            scene.glide_long = false;
+            r.render(&scene);
+            assert!(
+                r.frame() == &before,
+                "{base}: NORMAL did not restore the frame"
+            );
+        }
+    }
+}

@@ -93,11 +93,12 @@ const fn switch(id: &'static str, label: &'static str) -> Learnable {
 /// Every parameter MIDI Learn may assign a controller to, in the panel's order, then the strip's,
 /// then LOCK, then the arpeggiator's, then the preset actions. Its order is the drawer's list;
 /// the table is saved by id, so it may change.
-pub const LEARNABLE: [Learnable; 87] = [
+pub const LEARNABLE: [Learnable; 88] = [
     // CONTROLLERS.
     knob("tune", "TUNE"),
     switch("osc_mod", "OSCILLATOR MODULATION"),
     knob("glide", "GLIDE"),
+    switch("glide_range", "GLIDE RANGE"),
     knob("mod_mix", "MODULATION MIX"),
     // OSCILLATOR BANK.
     stepped("osc1_range", "OSCILLATOR-1 RANGE"),
@@ -961,6 +962,7 @@ pub fn target(p: &Ca72Params, i: usize) -> Option<&dyn Target> {
         "tune" => &p.tune,
         "osc_mod" => &p.osc_mod,
         "glide" => &p.glide,
+        "glide_range" => &p.glide_range,
         "mod_mix" => &p.mod_mix,
         "osc1_range" => &p.osc1_range,
         "osc2_range" => &p.osc2_range,
@@ -1220,8 +1222,9 @@ mod tests {
             // (The arpeggiator's: GATE and SWING knobs, DIRECTION, RATE and OCTAVES selectors,
             // ON and HOLD switches; the expression's four reaches, knobs: R-MPE; oscillators
             // 2's and 3's timed DIVISION and TIMED; each oscillator's waveform: its SHAPE knob,
-            // its STEPPED or CONTINUOUS and its MOD switches, its MOD DIRECTION stepped.)
-            (36, 16, 33)
+            // its STEPPED or CONTINUOUS and its MOD switches, its MOD DIRECTION stepped;
+            // GLIDE RANGE, a switch.)
+            (36, 16, 34)
         );
     }
 

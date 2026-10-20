@@ -517,7 +517,7 @@ impl Arrangement {
             .enumerate()
             .filter(|(i, c)| c.place == Place::Panel && placed[*i])
             .filter(|(_, c)| {
-                let e = art::print_extent(&c.kind);
+                let e = art::control_print_extent(c);
                 e != [0.0; 4] && !inside([c.x + e[0], c.y + e[1], c.x + e[2], c.y + e[3]])
             })
             .map(|(_, c)| c.param)
@@ -797,7 +797,7 @@ impl Arrangement {
 /// `None` if the panel has none.
 pub fn free_spot(c: &Control, occupied: &[[f64; 4]], canvas: [f64; 4]) -> Option<(f64, f64)> {
     let b = hit_bounds(&c.kind);
-    let e = art::print_extent(&c.kind);
+    let e = art::control_print_extent(c);
     let inside = |r: [f64; 4]| inside_of(canvas, r);
     let fits = |(x, y): (f64, f64)| {
         let hit = [x + b[0], y + b[1], x + b[2], y + b[3]];
