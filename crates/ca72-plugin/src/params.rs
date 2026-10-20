@@ -1415,7 +1415,10 @@ mod tests {
         let w = &p.osc1_width;
         assert_eq!(w.normalized_value_to_string(0.0, true), "48 %");
         let t = w.string_to_normalized_value("30 %").expect("a duty cycle");
-        assert!((f64::from(t) - 1.0 / ca72::voice::RECT_STEPS).abs() < 2e-3, "{t}");
+        assert!(
+            (f64::from(t) - 1.0 / ca72::voice::RECT_STEPS).abs() < 2e-3,
+            "{t}"
+        );
     }
 
     /// note values in order, its names a host shows.

@@ -163,7 +163,11 @@ pub fn variable_scroll(v: f64, notches: f64, fine: bool) -> f64 {
 pub fn variable_click(v: f64, dx: f64) -> f64 {
     let at = v * VARIABLE_PLACES;
     let next = if dx < 0.0 {
-        VARIABLE_STOPS.iter().rev().find(|&&p| p < at - 1e-9).copied()
+        VARIABLE_STOPS
+            .iter()
+            .rev()
+            .find(|&&p| p < at - 1e-9)
+            .copied()
     } else {
         VARIABLE_STOPS.iter().find(|&&p| p > at + 1e-9).copied()
     };

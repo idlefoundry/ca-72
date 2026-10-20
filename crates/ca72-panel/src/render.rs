@@ -822,7 +822,13 @@ impl Renderer {
     /// on it as the whole background's is (worn into the face, the lamp over it), and the
     /// background's own pixels wherever the two prints' ink is the same, so that it lies
     /// without a seam.
-    fn print_part(&self, r: [i32; 4], surface: &Pixmap, plain: &str, printed: &str) -> Option<Pixmap> {
+    fn print_part(
+        &self,
+        r: [i32; 4],
+        surface: &Pixmap,
+        plain: &str,
+        printed: &str,
+    ) -> Option<Pixmap> {
         let mut part = surface.clone();
         let (w, h) = (part.width(), part.height());
         let s = self.scale;
@@ -2513,6 +2519,61 @@ mod tests {
             scene.timed = [Timed::default(); 2];
             for d in TIMED_DIALS {
                 scene.values[at(d)] = 0.5;
+            }
+            r.render(&scene);
+            assert!(r.frame() == &before, "{skin:?}: not the frame before");
+        }
+    }
+
+    /// Each oscillator's rectangle (decisions.md R-VARIABLE-RECT) in either skin: VARIABLE
+    /// prints its WAVEFORM's arc, puts its PWM key on the panel and turns its switch past SQUARE;
+    /// each frame put together in part is the frame put together whole, and STEPPED again is the
+    /// frame before, to the pixel. Only the switch, its arc and its key change.
+    #[test]
+    fn a_variable_switchs_arc_and_key_are_drawn_and_undrawn_in_place() {
+        let s = 0.2;
+        for skin in [Skin::Drawn, Skin::Worn] {
+            let at = |p: &str| index(p).expect(p);
+            let mut scene = Scene {
+                values: [0.5; CONTROLS.len()],
+                ..Scene::default()
+            };
+            for key in PWM_KEYS {
+                scene.values[at(key)] = 0.0;
+            }
+            let mut r = Renderer::with_skin(skin, s, 1.0);
+            r.render(&scene);
+            let before = r.frame().clone();
+            let steps: [(usize, bool, f64, f64, f64); 6] = [
+                // (Oscillator, VARIABLE, its WAVEFORM, how far past SQUARE, its PWM key.)
+                (0, true, 0.6, 1.4, 0.0),
+                (2, true, 0.6, 2.95, 1.0),
+                (0, true, 0.6, 0.3, 1.0),
+                (0, true, 0.2, 0.3, 1.0),
+                (2, false, 0.6, 2.95, 1.0),
+                (1, true, 1.0, 2.0, 0.0),
+            ];
+            for (step, &(n, variable, wave, past, key)) in steps.iter().enumerate() {
+                scene.rect[n] = Rectangle {
+                    variable,
+                    past_square: past,
+                };
+                scene.values[at(WAVEFORMS[n])] = wave;
+                scene.values[at(PWM_KEYS[n])] = key;
+                assert!(r.render(&scene), "{skin:?} step {step}");
+                let mut whole = Renderer::with_skin(skin, s, 1.0);
+                whole.render(&scene);
+                assert!(
+                    r.frame() == whole.frame(),
+                    "{skin:?} step {step}: not as put together whole"
+                );
+            }
+            assert_eq!(scene.arcs(), [true, true, false]);
+            // Everything back as it was: the same frame as before, to the pixel.
+            scene.rect = [Rectangle::default(); 3];
+            for n in 0..3 {
+                scene.values[at(WAVEFORMS[n])] = 0.5;
+                scene.values[at(PWM_KEYS[n])] = 0.0;
             }
             r.render(&scene);
             assert!(r.frame() == &before, "{skin:?}: not the frame before");

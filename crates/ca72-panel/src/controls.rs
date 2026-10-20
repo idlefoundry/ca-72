@@ -712,9 +712,24 @@ pub const CONTROLS: [Control; 68] = [
     // Each oscillator's PWM key (decisions.md R-VARIABLE-RECT), centred under its own
     // WAVEFORM, after every other, so that no control moves: on the panel only while its
     // oscillator's rectangle is VARIABLE.
-    key("osc1_pwm", "OSCILLATOR-1 PWM", 1021.0, 163.0 + KEY_BELOW_RANGE),
-    key("osc2_pwm", "OSCILLATOR-2 PWM", 1021.0, 370.0 + KEY_BELOW_RANGE),
-    key("osc3_pwm", "OSCILLATOR-3 PWM", 1021.0, 576.0 + KEY_BELOW_RANGE),
+    key(
+        "osc1_pwm",
+        "OSCILLATOR-1 PWM",
+        1021.0,
+        163.0 + KEY_BELOW_RANGE,
+    ),
+    key(
+        "osc2_pwm",
+        "OSCILLATOR-2 PWM",
+        1021.0,
+        370.0 + KEY_BELOW_RANGE,
+    ),
+    key(
+        "osc3_pwm",
+        "OSCILLATOR-3 PWM",
+        1021.0,
+        576.0 + KEY_BELOW_RANGE,
+    ),
 ];
 
 /// The panel's controls' history (decisions.md R-SKIN-PACKS), so that a skin pack's layout made

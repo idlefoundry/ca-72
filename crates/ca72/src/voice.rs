@@ -125,11 +125,7 @@ pub fn rect_travel_bias(t: f64) -> f64 {
     } else {
         x
     };
-    if x <= 1.0 {
-        -1.5 * x
-    } else {
-        -1.5 - (x - 1.0)
-    }
+    if x <= 1.0 { -1.5 * x } else { -1.5 - (x - 1.0) }
 }
 
 /// Where in VARIABLE's travel (0..1) a width bias is: [`rect_travel_bias`]'s inverse.
@@ -152,7 +148,11 @@ pub fn rect_bias(w: Waveform, r: RectWidth, u: f64) -> f64 {
     if !(r.variable && is_rectangle(w)) {
         return w.width();
     }
-    let b = if r.pwm { r.width + RECT_FLOOR * u } else { r.width };
+    let b = if r.pwm {
+        r.width + RECT_FLOOR * u
+    } else {
+        r.width
+    };
     b.clamp(RECT_FLOOR, 0.0)
 }
 
