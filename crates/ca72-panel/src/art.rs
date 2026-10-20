@@ -3001,13 +3001,25 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
     s.0
 }
 
+/// A hover tip's box (its border's stroke included) about the point it is centred above: left,
+/// top, right, foot (panel units).
+pub fn tip_bounds(fonts: &Fonts, t: &str, size: f64) -> [f64; 4] {
+    let (w, h, gap) = tip_box(fonts, t, size);
+    let m = size / 6.0;
+    [-w / 2.0 - m, -h - gap - m, w / 2.0 + m, m]
+}
+
+/// A tip's box's width and height, and its gap above the point it names.
+fn tip_box(fonts: &Fonts, t: &str, size: f64) -> (f64, f64, f64) {
+    let pad = size * 0.4;
+    let w = fonts.advance(t, size, Weight::Regular, 0.0) + 2.0 * pad;
+    (w, size * 1.5, size * 0.3)
+}
+
 /// A hover tip: `text` in a box of the tip's colours (`TIP`, `TIP_BORDER`), `size` its
 /// lettering's height in panel units, centred above (x, y).
 pub fn tip(fonts: &Fonts, x: f64, y: f64, t: &str, size: f64) -> Layer {
-    let pad = size * 0.4;
-    let w = fonts.advance(t, size, Weight::Regular, 0.0) + 2.0 * pad;
-    let h = size * 1.5;
-    let gap = size * 0.3;
+    let (w, h, gap) = tip_box(fonts, t, size);
     let (x0, y0) = (-w / 2.0, -h - gap);
     let mut s = Svg::default();
     put!(
@@ -3027,10 +3039,9 @@ pub fn tip(fonts: &Fonts, x: f64, y: f64, t: &str, size: f64) -> Layer {
         N(size),
         escape(t)
     );
-    let m = size / 6.0;
     Layer {
         origin: (x, y),
-        bounds: [x0 - m, y0 - m, -x0 + m, m],
+        bounds: tip_bounds(fonts, t, size),
         body: s.0,
         ..Layer::default()
     }

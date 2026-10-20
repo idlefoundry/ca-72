@@ -553,7 +553,7 @@ fn lfo(s: f64, panel: &mut Renderer) {
         c.colour = colours[n];
         c.trace = (0..TRACE_POINTS)
             .map(|i| {
-                ((i as f64 / TRACE_POINTS as f64 * 4.0 * std::f64::consts::PI) + n as f64).sin()
+                ((i as f64 / TRACE_POINTS as f64 * 2.0 * std::f64::consts::PI) + n as f64).sin()
                     as f32
             })
             .collect();
@@ -643,11 +643,13 @@ fn lfo(s: f64, panel: &mut Renderer) {
             c.orb = Some((x, (x * 12.0).sin()));
         }
     });
-    times("LFO: RATE turned (its trace again)", &mut |i, sc| {
-        sc.columns[1].rate = 0.4 + 0.005 * i as f64;
-        let k = 2.0 + 0.05 * i as f64;
+    times("LFO: PHASE turned (its trace again)", &mut |i, sc| {
+        sc.columns[1].phase = 0.4 + 0.005 * i as f64;
+        let k = 0.05 * i as f64;
         sc.columns[1].trace = (0..TRACE_POINTS)
-            .map(|j| ((j as f64 / TRACE_POINTS as f64 * k * std::f64::consts::PI).sin()) as f32)
+            .map(|j| {
+                ((j as f64 / TRACE_POINTS as f64 * 2.0 * std::f64::consts::PI + k).sin()) as f32
+            })
             .collect();
     });
     times("LFO: the page open, nothing changed", &mut |_, _| {});

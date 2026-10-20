@@ -1307,7 +1307,8 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Its cycles a second at `tempo` (BPM, 4/4 for bars), as a scope's time base needs.
+    /// Its cycles a second at `tempo` (BPM, 4/4 for bars): how far the scope's ENV orb is through
+    /// its one cycle.
     pub fn hz_at(&self, tempo: f64) -> f64 {
         match self.timed {
             None => self.hz,
@@ -1316,17 +1317,11 @@ impl Settings {
         }
     }
 
-    /// Its output `t` s after a note started it, before EDGES (the scope's trace: from PHASE,
-    /// one cycle then held in ENV, faded in over RISE; FREE drawn as if it were at PHASE at
-    /// the note).
-    pub fn output_after(&self, t: f64, tempo: f64) -> f64 {
-        let cycles = t.max(0.0) * self.hz_at(tempo);
-        let c = if self.mode == Mode::Env {
-            cycles.min(ENV_END)
-        } else {
-            cycles
-        };
-        wave(self.at, self.phase + c) * self.rise_gain(t)
+    /// Its waveform `x` of the way (0..1) through one cycle from PHASE, before RISE and EDGES:
+    /// the scope's trace, one cycle across its width whatever the rate (timed, one note value).
+    /// At 1 it is the cycle's last value, just short of the next one's start, as ENV holds.
+    pub fn cycle_at(&self, x: f64) -> f64 {
+        wave(self.at, self.phase + x.clamp(0.0, 1.0) * ENV_END)
     }
 
     fn rise_gain(&self, since: f64) -> f64 {

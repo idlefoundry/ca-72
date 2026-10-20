@@ -785,8 +785,6 @@ pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
         let (at, continuous, hz, timed, phase, mode, mono, rise, screen, orb) = l;
         // (A dotted eighth at 120 BPM: 0.75 of a beat.)
         let hz = if timed.is_some() { 2.0 / 0.75 } else { hz };
-        let cycles = 2.0;
-        let span = cycles / hz;
         let shape = |at: f64, p: f64| -> f64 {
             let p = p.rem_euclid(1.0);
             let place = |k: usize| match k {
@@ -821,20 +819,16 @@ pub fn lfo_example() -> ca72_panel::strip::lfo::LfoScene {
             let f = at - k as f64;
             (1.0 - f) * place(k) + f * place(k + 1)
         };
-        let out = |t: f64| {
-            let cyc = t * hz;
-            let cyc = if mode == 1.0 {
-                cyc.min(1.0 - 1e-9)
-            } else {
-                cyc
-            };
-            let g = if rise > 0.0 { (t / rise).min(1.0) } else { 1.0 };
-            shape(at, phase / 360.0 + cyc) * g
-        };
+        // (One cycle from PHASE, as the editor's: its end just short of the next one's start.)
+        let out = |x: f64| shape(at, phase / 360.0 + x * (1.0 - 1e-9));
         c.trace = (0..TRACE_POINTS)
-            .map(|i| out(span * i as f64 / (TRACE_POINTS - 1) as f64) as f32)
+            .map(|i| out(i as f64 / (TRACE_POINTS - 1) as f64) as f32)
             .collect();
-        c.orb = Some((orb, out(orb * span)));
+        // (ENV's orb held at its cycle's end; one RISE is fading in, a little way into it.)
+        let orb = if mode == 1.0 { 1.0 } else { orb };
+        let gain = if rise > 0.0 { 0.6 } else { 1.0 };
+        c.orb = Some((orb, out(orb) * gain));
+        c.orb_rise = gain;
         c.colour = rgb(words.get(n).copied().unwrap_or("amber"));
         c.continuous = continuous;
         c.shape_at = at;

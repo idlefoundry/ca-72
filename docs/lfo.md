@@ -106,14 +106,15 @@ which the hover pop-up marks "shared").
 - `value`: the output, -1..1, after RISE and EDGES (the latest voice's where MONO is off): a
   knob's present point is `travel + depth × value`, clamped.
 - `phase`: where in its cycle (0..1, PHASE included).
-- `since`: seconds since the note that last started it (the scope's time base starts there).
+- `since`: seconds since the note that last started it (how far an ENV is through its cycle).
 - `rise`: RISE's gain now (0..1).
 - `moving`: assigned, running and not an ENV whose cycle is over (the orb's frame runs only
   while some LFO moves). `Scope::any_moving()`: the rail key's faint glow.
 
 For the still trace: `lfo::settings(params, n, edges) -> Settings`, and
-`Settings::output_after(t, tempo)` (the output `t` s after a note, from PHASE, ENV's hold and
-RISE's fade, before EDGES), `Settings::hz_at(tempo)`, `lfo::wave(at, phase)` (the shapes).
+`Settings::cycle_at(x)` (the waveform `x` of the way through one cycle from PHASE, before RISE
+and EDGES; at 1 the cycle's last value), `Settings::hz_at(tempo)`, `lfo::wave(at, phase)` (the
+shapes).
 
 ## Colours: the computer's (the macros' too)
 
@@ -160,10 +161,11 @@ table.
   (`controls::lfo_index(n, k)`, `LFO_PARTS`), found by `interact::hit_lfo` while it shows. The
   editor's state and glue are `crates/ca72-plugin/src/editor/lfo_page.rs` (`Modulating`).
 - **The scene** each frame: the controls' values as the panel's scene has them; each scope's
-  trace from `lfo::settings(..).output_after(t, tempo)`, two cycles of `hz_at(tempo)`; the orb from
-  the last `Scope::read` (read at most 30 times a second, only while the page shows): along the
-  trace at `since × hz` in its first two cycles (ENV held at the end of its one), then by `phase`
-  in the second; at `value`, or on the trace while it does not move. MODULATES from
+  trace one cycle from PHASE, `lfo::settings(..).cycle_at(x)` (R-LFO's corrections: the owner,
+  2026-10-20, "it should be 1"); the orb from the last `Scope::read` (read at most 30 times a
+  second, only while the page shows) along that cycle by `phase` less PHASE (`lfo_page::orb_at`;
+  an ENV at the cycle's end once over); at `value`, its wake at `rise`'s gain (RISE shows as the
+  orb under the trace), or on the trace while it does not move. MODULATES from
   `Patch::assignments(Source::Lfo(n))`.
 - **The overlay** is `ca72_panel::modulation` (`ModRenderer`, `ModScene`): knobs' rings, a
   dragged assignment's cord and targets, the hover pop-up. Nothing in it names an LFO: a ring, a

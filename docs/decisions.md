@@ -13001,6 +13001,47 @@ drag cannot do (a switch, a STEPPED WAVEFORM, a timed FREQUENCY, a ninth knob, a
 - **Not tried:** a real host, the Mac and Windows; listening (a fast LFO on pitch or CUTOFF for
   zipper at the 32-sample step); the page itself (the UI's branch).
 
+### The V0.3 test build's corrections (the owner, 2026-10-20)
+
+**One cycle on the scope.** The owner, at the test build's LFO page: "why does every waveform
+show two cycles? it should be 1." R-LFO-PAGE drew two cycles from a note's start, so that RISE's
+fade and ENV's hold showed on the trace. Now:
+- **The trace** is one cycle of the LFO's waveform across the screen's width, from PHASE
+  (`Settings::cycle_at`, which takes `output_after`'s place): PHASE turned slides the picture
+  along. Stepped and CONTINUOUS alike. Timed, the cycle is one note value, so the trace is the
+  same whatever the tempo and division. RATE, RISE, MODE and the tempo no longer change it, so
+  turning RATE no longer draws the screen again.
+- **The orb** is where the LFO is in that cycle, by its reading's `phase` (PHASE taken off). It is
+  at the LFO's output, as before. A FREE LFO's orb runs round and round; a RETRIG one's starts at
+  the left with each new note.
+- **RISE** (an agent's choice): shown by the orb alone. The orb rides at the output, so while
+  RISE fades the LFO in, the orb and its short wake run nearer the centre line than the trace, by
+  RISE's gain, and grow onto it as the fade ends. The trace itself stays the whole shape it fades
+  to. A RISE of seconds could not be drawn on one cycle anyway.
+- **ENV** (an agent's choice): the orb runs along the cycle once and stops at its right end,
+  where ENV holds. It also rests there before any note, as the engine holds it there.
+- **Still orbs:** an LFO not assigned has no output of its own to show; its orb sits on the
+  trace where its generator is (FREE, RETRIG), or at the end (ENV).
+- Nothing changed in the engine's sound: `cycle_at` is the editor's alone.
+
+**The page's tips clear of the scopes** (an agent's choice). MODE's tip ("LFO 1 MODE (FREE,
+RETRIG or ENV): FREE"), centred above the toggle as every tip on the panel is, was wider than
+the gap beside the scope: it lay over its own scope's top right corner and the next scope's top
+left. MONO's did the same. LFO 4's MODE's ran past the window's right edge too. Now a tip of the
+page's is placed as the panel's are, centred above what it names, except where it would cover a
+scope: then its foot is lifted to just above the scopes' tops (4 units), still centred over the
+control. A tip that would run past the window's side is moved in (as the grip's is, R-SIZE).
+The tips of the panel's own controls are as they were.
+
+**Evidence:** the editor's tests `each_scope_shows_one_cycle_from_its_phase` (four LFOs: a
+stepped sawtooth's one fall a quarter on at PHASE 90, none at 0; ENV with RISE and timed the
+same trace as FREE; the orb at the reading's phase and output, ENV's held at the end on the
+trace, the wake at RISE's gain), `an_orb_is_where_its_lfo_is_in_its_cycle` (from PHASE, a
+cycle's start at 0 in f32, ENV's end however f32 rounds it) and
+`no_tip_on_the_lfo_page_covers_a_scope` (every control's, jack's and screen's tip, in every
+column, FREE, RETRIG and ENV, timed and not: none over a scope, none past the window's side).
+The panel's `strip::lfo::tests::drawn_in_parts_it_is_drawn_whole` takes the wake's gain as a step.
+
 ## R-LFO-PAGE. The LFO page and drag-to-knob modulation: the panel and the editor
 
 The page, the rings and the drag of R-LFO (whose record has the owner's decisions of 2026-10-20,
@@ -13031,11 +13072,12 @@ are the spec; where this departs from them is listed under the agent's decisions
   likewise), its right-click menu's WAVEFORM head choosing.
 - **The scopes:** a CRT in the LFO's phosphor: the unlit face tinted by it, the graticule, the
   trace's halo, bloom and white-hot core, its jumps (a square's edges) faint, the tube's dark rim
-  and the glass's reflection over it. The trace is two cycles from a note's start, from the
+  and the glass's reflection over it. The trace was two cycles from a note's start, from the
   engine's `Settings::output_after` at the host's tempo, so PHASE, RISE's fade and ENV's hold
-  show. The orb is the LFO's present value from `Scope::read`: along the trace by the time since
-  its note in its first two cycles, then by its phase in the second, at the value it has (on the
-  trace while it does not move).
+  showed; the orb was the LFO's present value from `Scope::read`, along the trace by the time
+  since its note in its first two cycles, then by its phase in the second. **Changed by the
+  owner, 2026-10-20** (R-LFO's corrections, which see): one cycle from PHASE, the orb by its
+  phase.
 - **Cheap, as the mock-ups' budget asked:** the plate, its print, the bezels, the screens' glass
   and the knobs' shadows made once a scale on a thread begun as the editor opens; a scope's still
   screen drawn again only when its trace or colour changes, by code (`glow.rs`: coverage masks

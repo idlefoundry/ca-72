@@ -2,9 +2,9 @@
 //! of its own where the keyboard's is, opened by the rail's LFO key, the left hand's controls
 //! kept beside it. Four columns, one an LFO, each top to bottom:
 //!
-//! - its scope (a CRT in the LFO's phosphor colour: graticule, the glowing trace of two cycles
-//!   from a note's start, so that PHASE, RISE and ENV show, and an orb at the LFO's present
-//!   value), MODE (the panel's three-position toggle: FREE, RETRIG, ENV) and MONO beside it;
+//! - its scope (a CRT in the LFO's phosphor colour: graticule, the glowing trace of one cycle
+//!   of its waveform from PHASE, and an orb along it where the LFO is in its cycle, at its
+//!   output: under the trace while RISE fades it in, stopped at the cycle's end in ENV), MODE (the panel's three-position toggle: FREE, RETRIG, ENV) and MONO beside it;
 //! - WAVEFORM (the oscillators' switch, STEPPED or CONTINUOUS), RATE (Hz, or its note values
 //!   while its timed key is on), PHASE;
 //! - RISE, the OUT jack its assignments are dragged from, and the MODULATES screen.
@@ -65,7 +65,7 @@ const MONO_AT: (f64, f64) = (176.0, 1214.0);
 const JACK_AT: (f64, f64) = (-66.0, ROW2);
 pub const JACK_R: f64 = 20.0;
 const SCREEN: (f64, f64, f64, f64) = (-20.0, ROW2 - 25.0, 332.0, 50.0);
-/// The samples a scope's trace is drawn through, across its two cycles.
+/// The samples a scope's trace is drawn through, across its one cycle.
 pub const TRACE_POINTS: usize = 480;
 /// The trace's margin from the glass's ends and its height's from top and foot.
 const TRACE_PAD: f64 = 12.0;
@@ -208,11 +208,14 @@ pub struct Column {
     pub timed: bool,
     pub division: usize,
     pub mono: bool,
-    /// The trace: the output (-1..1) at [`TRACE_POINTS`] even steps over two cycles from a
-    /// note's start.
+    /// The trace: the waveform (-1..1) at [`TRACE_POINTS`] even steps over one cycle from
+    /// PHASE.
     pub trace: Vec<f32>,
     /// The orb: how far along the trace (0..1), and the output there (-1..1); none, no orb.
     pub orb: Option<(f64, f64)>,
+    /// RISE's gain at the orb (0..1): its wake drawn at so much of the trace's height, as the
+    /// orb rides at the output.
+    pub orb_rise: f64,
     /// What MODULATES reads, and whether lit (dim: NOT IN USE).
     pub screen: String,
     pub in_use: bool,
@@ -234,6 +237,7 @@ impl Default for Column {
             mono: true,
             trace: vec![0.0; TRACE_POINTS],
             orb: None,
+            orb_rise: 1.0,
             screen: "NOT IN USE".into(),
             in_use: false,
         }
@@ -538,7 +542,7 @@ impl LfoRenderer {
     fn orb_for(&mut self, n: usize, col: &Column) -> Vec<[i32; 4]> {
         // (Its screen drawn again: its patch cut from the new one.)
         let key: Key = match col.orb {
-            Some((x, v)) => vec![1, word(x), word(v), self.generations[n]],
+            Some((x, v)) => vec![1, word(x), word(v), word(col.orb_rise), self.generations[n]],
             None => vec![0],
         };
         if self.orbs[n].as_ref().is_some_and(|(k, _)| *k == key) {
@@ -577,7 +581,12 @@ impl LfoRenderer {
         let (ox, oy) = at(i, v);
         let i0 = i.saturating_sub(k / 9);
         let wake: Vec<(f32, f32)> = (i0..=i)
-            .map(|j| at(j, f64::from(col.trace[j.min(col.trace.len() - 1)])))
+            .map(|j| {
+                at(
+                    j,
+                    f64::from(col.trace[j.min(col.trace.len() - 1)]) * col.orb_rise,
+                )
+            })
             .collect();
         let r = (ORB_R * s) as f32;
         let mut b = [ox - r, oy - r, ox + r, oy + r];
@@ -1524,9 +1533,10 @@ mod tests {
             let mut r = LfoRenderer::new(scale, skin, Lettering::Standard);
             let mut sc = scene();
             assert!(r.render(&sc, &mut panel));
-            let steps: [&dyn Fn(&mut LfoScene); 8] = [
+            let steps: [&dyn Fn(&mut LfoScene); 9] = [
                 &|s| s.columns[0].phase = 0.7,
                 &|s| s.columns[2].orb = Some((0.8, -0.5)),
+                &|s| s.columns[2].orb_rise = 0.4,
                 &|s| s.columns[1].trace[100] = 0.9,
                 &|s| {
                     s.columns[3].timed = true;

@@ -31,6 +31,9 @@ const ORB_FRAME: Duration = Duration::from_millis(33);
 /// A depth this near 0 when its drag ends takes the assignment away (as a ring's end dragged
 /// to the knob's pointer does).
 const NO_DEPTH: f32 = 0.005;
+/// How far a tip moved clear of the scopes keeps above their bezels' tops, and in from the
+/// window's sides (panel units).
+const SCOPE_CLEAR: f64 = 4.0;
 /// Logical pixels a depth's drag up or down takes for a whole knob's travel (100 %), as a knob's
 /// drag takes for its own.
 const DEPTH_DRAG: f64 = 240.0;
@@ -57,6 +60,28 @@ pub(super) fn label(patch: &lfo::Patch, s: Source) -> String {
             }
         }
     }
+}
+
+/// Where a scope's orb is along its one cycle (0..1 from PHASE; decisions.md R-LFO): where the
+/// LFO is in its cycle, its reading's `phase`. An ENV holds at its cycle's end: there once its
+/// cycle is over (`assigned`, no longer moving) or never begun; one not assigned, as far
+/// through it as its time since the note has it.
+pub(super) fn orb_at(set: &lfo::Settings, r: &Reading, tempo: f64, assigned: bool) -> f64 {
+    let through = f64::from(r.since) * set.hz_at(tempo);
+    // (PHASE in f32 as the reading's phase is, so that a cycle's start reads 0, not just short
+    // of 1.)
+    let x = (f64::from(r.phase) - f64::from(set.phase as f32)).rem_euclid(1.0);
+    if set.mode == lfo::Mode::Env {
+        return if r.moving {
+            // (Its last instant in f32 can read as the next cycle's start.)
+            if x < 0.25 && through > 0.75 { 1.0 } else { x }
+        } else if assigned || r.since <= 0.0 {
+            1.0
+        } else {
+            through.min(1.0)
+        };
+    }
+    if x > 1.0 - 1e-6 { 0.0 } else { x }
 }
 
 /// An assignment being dragged from a source's jack: the pointer's place (the drawing's).
@@ -384,26 +409,20 @@ impl Editing {
         for (n, col) in s.columns.iter_mut().enumerate() {
             let q = self.params.lfo(n);
             let set = lfo::settings(&self.params, n, self.params.lfo_patch.edges(n));
-            let hz = set.hz_at(tempo).max(1e-6);
-            let span = 2.0 / hz;
+            // (One cycle across the scope from PHASE: the owner, 2026-10-20, "it should be 1".)
             let trace: Vec<f32> = (0..TRACE_POINTS)
-                .map(|i| {
-                    set.output_after(span * i as f64 / (TRACE_POINTS - 1) as f64, tempo) as f32
-                })
+                .map(|i| set.cycle_at(i as f64 / (TRACE_POINTS - 1) as f64) as f32)
                 .collect();
             let r = self.modulating.readings[n];
-            let c = f64::from(r.since) * hz;
-            let x = match set.mode {
-                lfo::Mode::Env => c.min(1.0) / 2.0,
-                _ if c < 2.0 => c / 2.0,
-                _ => (1.0 + (f64::from(r.phase) - set.phase).rem_euclid(1.0)) / 2.0,
-            }
-            .clamp(0.0, 1.0);
-            let at = ((x * (TRACE_POINTS - 1) as f64).round() as usize).min(TRACE_POINTS - 1);
-            let y = if r.moving {
-                f64::from(r.value)
+            let assigned = (self.params.lfo_patch.assignments(Source::Lfo(n)).iter())
+                .flatten()
+                .any(|a| a.depth != 0.0);
+            let x = orb_at(&set, &r, tempo, assigned);
+            // (Moving, at its output, RISE's fade and EDGES in it; still, on the trace.)
+            let (y, gain) = if r.moving {
+                (f64::from(r.value), f64::from(r.rise).clamp(0.0, 1.0))
             } else {
-                f64::from(trace[at])
+                (set.cycle_at(x), 1.0)
             };
             let v = |k: usize| self.scene.values[lfo_index(n, k)];
             let continuous = q.shape_mode.value() == WaveMode::Continuous;
@@ -430,6 +449,7 @@ impl Editing {
                 mono: q.mono.value(),
                 trace,
                 orb: Some((x, y)),
+                orb_rise: gain,
                 screen,
                 in_use,
             };
@@ -621,6 +641,26 @@ impl Editing {
             _ => return None,
         };
         Some((text, x, y - 30.0))
+    }
+
+    /// A tip of the page's (a control's, its jack's, its screen's) where the panel's tips are,
+    /// centred above what it names; but where it would cover a scope (MODE's, longer than its
+    /// toggle is wide, lay over its own scope's corner and the next one's: the owner,
+    /// 2026-10-20), its foot lifted to just above the scopes' tops; and moved in where it would
+    /// run past the window's side (as the grip's is: R-SIZE), LFO 4's MODE's.
+    pub(super) fn clear_of_scopes(&self, (t, x, y): (String, f64, f64)) -> (String, f64, f64) {
+        let b = art::tip_bounds(self.renderer.fonts(), &t, self.renderer.text_size());
+        let x = x.min(art::W - SCOPE_CLEAR - b[2]).max(SCOPE_CLEAR - b[0]);
+        let (x0, y0, x1, y1) = (x + b[0], y + b[1], x + b[2], y + b[3]);
+        let covers = (0..LFOS).any(|m| {
+            let (sx, sy, sw, sh) = lfo_ui::places(m).scope;
+            x1 > sx && x0 < sx + sw && y1 > sy && y0 < sy + sh
+        });
+        if !covers {
+            return (t, x, y);
+        }
+        let top = lfo_ui::places(0).scope.1;
+        (t, x, y.min(top - b[3] - SCOPE_CLEAR))
     }
 
     /// A press on the LFO page (it showing, the pointer over it): its controls as the panel's,

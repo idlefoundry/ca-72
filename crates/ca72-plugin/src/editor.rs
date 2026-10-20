@@ -4399,7 +4399,7 @@ impl Editing {
         if self.drag.is_none()
             && let Some(t) = self.page_tip()
         {
-            return Some(t);
+            return Some(self.clear_of_scopes(t));
         }
         if self.lower.which == Lower::Fx
             && self.lower.settled()
@@ -4447,11 +4447,16 @@ impl Editing {
                     ""
                 };
                 // (The sources on it and their depths: decisions.md R-LFO.)
-                Some((
+                let tip = (
                     format!("{label}: {}{range}{}", p.text(v), self.depths_tip(i)),
                     x,
                     y + top,
-                ))
+                );
+                Some(if c.place == DrawerPlace::Lfo {
+                    self.clear_of_scopes(tip)
+                } else {
+                    tip
+                })
             }
             Target::Power => {
                 let state = if self.params.bypass.value() {
@@ -14170,7 +14175,7 @@ mod tests {
     /// the orbs moving), `drag.png` (an assignment dragged from LFO 1's jack over EMPHASIS),
     /// `hover.png` (the strip's page, CUTOFF under the pointer: its rings, pop-up and tip),
     /// `menu.png` (CUTOFF's menu), `lfo-menu.png` (LFO 2's own), `glow.png` (the page away, an
-    /// LFO moving: its key glowing).
+    /// LFO moving: its key glowing), `mode-tip.png` and `mode-tip-4.png` (MODE's tips).
     #[test]
     #[ignore = "writes images for a look"]
     fn the_lfo_pngs() {
@@ -14204,6 +14209,12 @@ mod tests {
             window_frame(e).save_png(out.join(name)).unwrap();
         };
         save(&mut e, "page.png");
+        // (MODE's tips, LFO 1's and LFO 4's: clear of the scopes, inside the window.)
+        for (n, name) in [(0, "mode-tip.png"), (3, "mode-tip-4.png")] {
+            let mode = at(&e, lfo_centre(n, 5));
+            go(&mut e, mode);
+            save(&mut e, name);
+        }
         let jack = at(&e, ca72_panel::strip::lfo::places(0).jack);
         go(&mut e, jack);
         e.mouse(MouseEvent::ButtonPressed {
@@ -14272,6 +14283,248 @@ mod tests {
 
     fn lfo_centre(n: usize, k: usize) -> (f64, f64) {
         CONTROLS[ca72_panel::controls::lfo_index(n, k)].centre()
+    }
+
+    /// Each scope shows one cycle of its LFO's waveform across its width, from PHASE (the owner,
+    /// 2026-10-20: "why does every waveform show two cycles? it should be 1"), stepped and
+    /// CONTINUOUS alike, and timed the same cycle (one note value) whatever the tempo; RATE,
+    /// RISE and MODE leave it as it is. The orb is where the LFO is in that cycle, at its
+    /// output, its wake at RISE's gain.
+    #[test]
+    fn each_scope_shows_one_cycle_from_its_phase() {
+        use crate::lfo::{LfoMode, LfoParams, Reading, Source, Target as T, wave};
+        use crate::params::{Wave, WaveMode};
+        use ca72_panel::strip::lfo::TRACE_POINTS;
+        let k = TRACE_POINTS - 1;
+        let traces = |phase: f32, timed: bool| {
+            let lfo = |n: usize| LfoParams {
+                waveform: EnumParam::new(format!("LFO {n} Waveform"), Wave::Sawtooth),
+                shape_mode: EnumParam::new(
+                    format!("LFO {n} Waveform Mode"),
+                    if n == 4 {
+                        WaveMode::Continuous
+                    } else {
+                        WaveMode::Stepped
+                    },
+                ),
+                shape: FloatParam::new(
+                    format!("LFO {n} Shape"),
+                    0.5,
+                    FloatRange::Linear { min: 0.0, max: 1.0 },
+                ),
+                phase: FloatParam::new(
+                    format!("LFO {n} Phase"),
+                    phase,
+                    FloatRange::Linear {
+                        min: 0.0,
+                        max: 360.0,
+                    },
+                ),
+                timed: BoolParam::new(format!("LFO {n} Timed"), timed && n == 3),
+                rise: FloatParam::new(
+                    format!("LFO {n} Rise"),
+                    if n == 2 { 2.0 } else { 0.0 },
+                    FloatRange::Linear {
+                        min: 0.0,
+                        max: 10.0,
+                    },
+                ),
+                mode: EnumParam::new(
+                    format!("LFO {n} Mode"),
+                    if n == 2 { LfoMode::Env } else { LfoMode::Free },
+                ),
+                ..LfoParams::new(n)
+            };
+            let (mut e, _, params) = editing_of(
+                Ca72Params {
+                    lfo1: lfo(1),
+                    lfo2: lfo(2),
+                    lfo3: lfo(3),
+                    lfo4: lfo(4),
+                    ..Ca72Params::default()
+                },
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            );
+            lfo_open(&mut e);
+            (e.lfo_scene_now(), e, params)
+        };
+        let (at0, _, _) = traces(0.0, false);
+        let (at90, mut e, params) = traces(90.0, true);
+        for n in 0..4 {
+            let set = crate::lfo::settings(&params, n, crate::lfo::Edges::Soft);
+            let (t0, t90) = (&at0.columns[n].trace, &at90.columns[n].trace);
+            assert_eq!(t90.len(), TRACE_POINTS);
+            for i in 0..=k {
+                let x = i as f64 / k as f64 * (1.0 - 1e-9);
+                assert_eq!(t0[i], wave(set.at, x) as f32, "LFO {}: {i}", n + 1);
+                assert_eq!(t90[i], wave(set.at, 0.25 + x) as f32, "LFO {}: {i}", n + 1);
+            }
+            // (A sawtooth's one fall: one cycle, its start at PHASE; LFO 4's is CONTINUOUS.)
+            if n < 3 {
+                let falls = |t: &[f32]| t.windows(2).filter(|w| w[1] < w[0] - 0.5).count();
+                assert_eq!(falls(t0), 0, "LFO {}: from its start to its end", n + 1);
+                assert_eq!(falls(t90), 1, "LFO {}: a quarter on", n + 1);
+            }
+        }
+        // (ENV with RISE, LFO 2's, and timed, LFO 3's: the same cycle as LFO 1's.)
+        assert_eq!(at90.columns[1].trace, at90.columns[0].trace);
+        assert_eq!(at90.columns[2].trace, at90.columns[0].trace);
+        assert_ne!(at90.columns[3].trace, at90.columns[0].trace);
+        // The orb: where the reading has the LFO in its cycle, at its output.
+        params
+            .lfo_patch
+            .assign(Source::Lfo(0), T::Cutoff, 0.4)
+            .unwrap();
+        params
+            .lfo_patch
+            .assign(Source::Lfo(1), T::Cutoff, 0.4)
+            .unwrap();
+        let r = |phase: f32, value: f32, rise: f32, moving: bool| Reading {
+            value,
+            phase,
+            since: 0.3,
+            rise,
+            moving,
+        };
+        params.lfo_scope.publish(&[
+            r(0.75, 0.3, 1.0, true),
+            r(0.25, -0.5, 0.4, false),
+            r(0.5, 0.1, 0.5, true),
+            Reading::default(),
+        ]);
+        e.modulating.due = None;
+        e.read_lfos(Instant::now());
+        let s = e.lfo_scene_now();
+        let set = |n| crate::lfo::settings(&params, n, crate::lfo::Edges::Soft);
+        assert_eq!(s.columns[0].orb, Some((0.5, f64::from(0.3f32))));
+        assert_eq!(s.columns[0].orb_rise, 1.0);
+        // (ENV assigned, its cycle over: held at the cycle's end, on the trace.)
+        assert_eq!(s.columns[1].orb, Some((1.0, set(1).cycle_at(1.0))));
+        assert_eq!(s.columns[1].orb_rise, 1.0);
+        assert_eq!(s.columns[2].orb, Some((0.25, f64::from(0.1f32))));
+        assert_eq!(
+            s.columns[2].orb_rise, 0.5,
+            "RISE fading in: its wake so high"
+        );
+    }
+
+    /// Where an orb is along its one cycle: from PHASE, a cycle's start at 0 exactly; ENV at its
+    /// cycle's end once over, never begun, or in f32 its last instant.
+    #[test]
+    fn an_orb_is_where_its_lfo_is_in_its_cycle() {
+        use crate::lfo::{Mode, Reading, Settings};
+        use lfo_page::orb_at;
+        let set = |phase: f64, mode: Mode| Settings {
+            phase,
+            hz: 2.0,
+            mode,
+            ..Settings::default()
+        };
+        let r = |phase: f32, since: f32, moving: bool| Reading {
+            phase,
+            since,
+            moving,
+            ..Reading::default()
+        };
+        for mode in [Mode::Free, Mode::Retrig] {
+            let s = set(0.25, mode);
+            assert_eq!(orb_at(&s, &r(0.25, 0.1, true), 120.0, true), 0.0);
+            assert_eq!(orb_at(&s, &r(0.75, 0.1, true), 120.0, true), 0.5);
+            assert!((orb_at(&s, &r(0.1, 0.1, true), 120.0, true) - 0.85).abs() < 1e-6);
+            // (PHASE in f32 as the reading's: its start not read as just short of the end.)
+            let third = set(1.0 / 3.0, mode);
+            let start = r((1.0f64 / 3.0) as f32, 0.0, true);
+            assert_eq!(orb_at(&third, &start, 120.0, true), 0.0);
+        }
+        let env = set(0.5, Mode::Env);
+        assert!((orb_at(&env, &r(0.8, 0.15, true), 120.0, true) - 0.3).abs() < 1e-6);
+        assert_eq!(orb_at(&env, &r(0.5, 2.0, false), 120.0, true), 1.0, "over");
+        assert_eq!(
+            orb_at(&env, &r(0.5, 0.0, false), 120.0, false),
+            1.0,
+            "never begun"
+        );
+        assert_eq!(
+            orb_at(&env, &r(0.5, 0.25, false), 120.0, false),
+            0.5,
+            "not assigned"
+        );
+        let at0 = set(0.0, Mode::Env);
+        assert_eq!(
+            orb_at(&at0, &r(0.0, 0.499, true), 120.0, true),
+            1.0,
+            "its last instant"
+        );
+        assert_eq!(
+            orb_at(&at0, &r(0.0, 0.0, true), 120.0, true),
+            0.0,
+            "its first"
+        );
+    }
+
+    /// No tip on the LFO page covers a scope (the owner, 2026-10-20, saw MODE's over its
+    /// scope's corner): each control's, the jack's and the screen's, in every column, MODE at
+    /// each of its places, with the timed key on and off.
+    #[test]
+    fn no_tip_on_the_lfo_page_covers_a_scope() {
+        use crate::lfo::{LfoMode, LfoParams};
+        use ca72_panel::controls::LFO_PARTS;
+        use ca72_panel::strip::lfo::{LfoTarget, places, target_centre};
+        for timed in [false, true] {
+            for mode in [LfoMode::Free, LfoMode::Retrig, LfoMode::Env] {
+                let lfo = |n: usize| LfoParams {
+                    timed: BoolParam::new(format!("LFO {n} Timed"), timed),
+                    mode: EnumParam::new(format!("LFO {n} Mode"), mode),
+                    ..LfoParams::new(n)
+                };
+                let (mut e, _, _) = editing_of(
+                    Ca72Params {
+                        lfo1: lfo(1),
+                        lfo2: lfo(2),
+                        lfo3: lfo(3),
+                        lfo4: lfo(4),
+                        ..Ca72Params::default()
+                    },
+                    Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+                );
+                lfo_open(&mut e);
+                let size = e.renderer.text_size();
+                let hovered = |e: &mut Editing, p: (f64, f64), what: &str| {
+                    go(e, Point { x: 5.0, y: 5.0 });
+                    let p = at(e, p);
+                    go(e, p);
+                    e.draw();
+                    let (t, x, y) = e
+                        .scene
+                        .tip
+                        .clone()
+                        .unwrap_or_else(|| panic!("{what}: a tip"));
+                    let l = art::tip(e.renderer.fonts(), x, y, &t, size);
+                    let (x0, y0) = (l.origin.0 + l.bounds[0], l.origin.1 + l.bounds[1]);
+                    let (x1, y1) = (l.origin.0 + l.bounds[2], l.origin.1 + l.bounds[3]);
+                    assert!(
+                        x0 >= 0.0 && x1 <= art::W,
+                        "{what}: its tip {t:?} ({x0:.0}–{x1:.0}) leaves the window"
+                    );
+                    for m in 0..4 {
+                        let (sx, sy, sw, sh) = places(m).scope;
+                        assert!(
+                            x1 <= sx || x0 >= sx + sw || y1 <= sy || y0 >= sy + sh,
+                            "{what} ({timed}, {mode:?}): its tip {t:?} \
+                             ({x0:.0}, {y0:.0})–({x1:.0}, {y1:.0}) covers scope {m}"
+                        );
+                    }
+                };
+                for n in 0..4 {
+                    for (k, part) in LFO_PARTS.iter().enumerate() {
+                        hovered(&mut e, lfo_centre(n, k), &format!("LFO {} {part}", n + 1));
+                    }
+                    for t in [LfoTarget::Jack(n), LfoTarget::Screen(n)] {
+                        hovered(&mut e, target_centre(t), &format!("{t:?}"));
+                    }
+                }
+            }
+        }
     }
 
     /// The rail's LFO key (the owner, 2026-10-20: "the LFO rail key after the keyboard key")
