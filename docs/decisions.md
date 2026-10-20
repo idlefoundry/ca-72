@@ -11316,3 +11316,43 @@ the same test had failed 9 in 10; `chain.rs`'s new
 `changes_made_at_once_are_saved_as_the_chain_shows` 10 in 10, with the rest of `chain.rs` (2
 failures in 10 before). On Linux both pass, before and after (a write to a temporary folder
 there is too quick to fall behind).
+
+
+## R-RELEASE-0.2.8. 0.2.8
+
+**Owner decisions, 2026-10-19.** After a level drop the owner first heard on 0.2.7 (and then on
+0.2.6 too), the owner set AUTO GAIN's rule and asked for a release: "This should only be
+remeasured when drive changes. I recommend, yes, all three of your recommendations, absolutely.
+Let's do it, and let's get it shipped out in 0.2.8 immediately." The release's contents, chosen by
+the owner: the AUTO GAIN fix (R-AUTO-GAIN-DRIVE), the device listing and microphone request
+(R-DEVICE-LISTING, #113 with plugin-kit #10) and the quit shortcuts (R-QUIT, #115). The
+coordinator was allowed to take it as far as a draft release, merging plugin-kit #10 as well. The
+owner tested the signed installer on their Mac, then: "okay, 0.2.8 seems good. Put it into
+production!"
+
+**Publication evidence, 2026-10-19.** [CA-72 0.2.8](https://github.com/idlefoundry/ca-72/releases/tag/v0.2.8)
+is public and Latest, also to an anonymous request (which the update check makes). The picks were
+merged into one branch, `release-0.2.8`, with #114 (0.2.7's record). The merge kept every decisions
+record. `third_party/nih-plug/Cargo.toml` keeps #115's `keyboard-types` dependency and #113's kit
+pin, `bcc4d8f7706043dccdecfe8b115ba129f84ec39c`.
+- [PR #121](https://github.com/idlefoundry/ca-72/pull/121)'s first CI run failed on Linux in one
+  test. The What's New test used 0.2.8 as its example of a version with no catalogue entry, and
+  0.2.8 now has one; it uses 99.0.0 now. CI then
+  passed on Linux, Windows and macOS. Locally on Linux, the workspace tests with ngspice and the
+  standalone features passed (555, then the corrected What's New tests), as did clippy (all
+  features), fmt, notices, and the notices, window-identity and installer scripts. `main` is the
+  merge `7b8f0ee756f576377c273beabe46bc11f5a7f856`, which the annotated `v0.2.8` tag names. The
+  tag's CI ([39317221552](https://github.com/idlefoundry/ca-72/actions/runs/39317221552)) passed
+  in all four jobs and drafted the release.
+- The macOS installer was built on the Mac from a clean checkout of the tag, signed with Developer
+  ID inside the owner's session, notarised (submission `40fdec70-f2ad-4ace-8851-997e911dc27e`,
+  Accepted) and stapled. `pkgutil`, Gatekeeper ("Notarized Developer ID") and
+  `codesign --verify --deep --strict` passed for every bundle, every bundle is 0.2.8 and universal,
+  and the Audio Unit carries the signed CLAP byte for byte.
+- `CA-72-0.2.8-macOS.pkg` sha256 `0ab425fe29cb5dc8fdc7707053ac9cbd41a2315ee56b62bc792f86b958815dc1`,
+  91,845,384 bytes. After publication all six downloads were fetched again without a login and
+  checked against `SHA256SUMS.txt`: every one matched.
+- The owner installed the signed package on their Mac and tested it before publication. No other
+  host test of the installed package was made.
+- Issue #112 closed with the release. The release's scripts and logs are in
+  `~/lab/artifacts/ca-72/0.2.8/` on the Mac.
