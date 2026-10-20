@@ -1228,6 +1228,7 @@ impl Shared {
             if again.is_some() {
                 slot.phase = Phase::Loading;
             }
+            self.save_in(&core);
             drop(core);
             if let Some(old) = retired {
                 self.sandbox.unload(&old);
@@ -1235,7 +1236,6 @@ impl Shared {
             if let Some(old) = again {
                 self.spawn_reload(id, old);
             }
-            self.save();
             return;
         }
     }
@@ -1284,6 +1284,7 @@ impl Shared {
             let block = core.block;
             let slot = &mut core.slots[at];
             slot.phase = Phase::Ready;
+            let mut failed = false;
             match result {
                 Ok(inst) => {
                     let stage = Stage {
@@ -1305,18 +1306,21 @@ impl Shared {
                     }
                     slot.error = Some(e.message);
                     slot.inst = None;
-                    drop(core);
-                    self.sandbox.unload(&old);
+                    failed = true;
                 }
             }
-            self.save();
+            self.save_in(&core);
+            drop(core);
+            if failed {
+                self.sandbox.unload(&old);
+            }
             return;
         }
     }
 
     /// Effects given up on (crashed again and again, or in their restore) turned off: their
-    /// latest state kept, the record saved, their nodes let go of; whether any was.
-    fn turn_off_given_up(&self) -> bool {
+    /// latest state kept, the record saved, their nodes let go of.
+    fn turn_off_given_up(&self) {
         let mut gone = Vec::new();
         {
             let mut core = lock(&self.core);
@@ -1359,15 +1363,21 @@ impl Shared {
                 });
                 gone.extend(slot.inst.take());
             }
+            drop(q);
+            if !gone.is_empty() {
+                self.save_in(&core);
+            }
         }
         for i in &gone {
             self.sandbox.unload(i);
         }
-        !gone.is_empty()
     }
 
     fn saved(&self) -> SavedChain {
-        let core = lock(&self.core);
+        self.saved_of(&lock(&self.core))
+    }
+
+    fn saved_of(&self, core: &Core) -> SavedChain {
         SavedChain {
             format: FORMAT,
             slots: core
@@ -1390,15 +1400,29 @@ impl Shared {
     /// Saves the chain, unless it is quiet, keeps an unread file or has none; a failure is
     /// logged.
     fn save(&self) {
+        self.save_in(&lock(&self.core));
+    }
+
+    /// Saves the chain `core` holds, as [`Shared::save`], with the lock still held: the file
+    /// follows the chain in step. What anyone sees of the chain (an effect turned off, above
+    /// all) is on disk before the lock is let go, and saves land in the order their chains
+    /// were taken, an older one never written over a newer (on Windows, where a write and its
+    /// flush take milliseconds, an effect was shown turned off before its record was
+    /// written). Nothing on the audio thread takes the lock.
+    fn save_in(&self, core: &Core) {
         if self.quiet.load(Ordering::Acquire) || self.keep_file.load(Ordering::Acquire) {
             return;
         }
-        if let Err(e) = self.write() {
+        if let Err(e) = self.write_in(core) {
             eprintln!("CA-72 effects: {e}");
         }
     }
 
     fn write(&self) -> Result<(), String> {
+        self.write_in(&lock(&self.core))
+    }
+
+    fn write_in(&self, core: &Core) -> Result<(), String> {
         let Some(path) = &self.opts.file else {
             return Ok(());
         };
@@ -1409,7 +1433,7 @@ impl Shared {
             ));
         }
         let rev = self.sandbox.state_rev();
-        let bytes = serde_json::to_vec_pretty(&self.saved()).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec_pretty(&self.saved_of(core)).map_err(|e| e.to_string())?;
         crate::write_atomically(path, &bytes)
             .map_err(|e| format!("the effects could not be saved in {}: {e}", path.display()))?;
         self.saved_rev.store(rev, Ordering::Release);
@@ -1425,8 +1449,8 @@ fn housekeeping(shared: &Weak<Shared>) {
         std::thread::sleep(Duration::from_millis(100));
         let Some(s) = shared.upgrade() else { return };
         s.drain_retired();
-        if !s.closing.load(Ordering::Acquire) && s.turn_off_given_up() {
-            s.save();
+        if !s.closing.load(Ordering::Acquire) {
+            s.turn_off_given_up();
         }
         let from = *lock(&s.logged);
         let (events, n) = s.sandbox.events_from(from);

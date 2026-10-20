@@ -1,11 +1,12 @@
 //! CUTOFF swept at strong EMPHASIS, the voices told its value every sample (the knob's own
-//! continuous turn, the reference) or in steps: every 32 samples (a learned controller's glide,
-//! `learn::DEZIP_STEP`), once a host block of 64 to 1024 frames (the editor's and automation's
-//! changes reach the voices at a block's start), and as a mouse moves it, a new value 60 times
-//! a second taken at the next 256-frame block (issue #107). Prints each stepped render's
-//! difference from the reference (its level against the reference's, and the share of it above
-//! 2 kHz), and the same for a 10 ms linear glide to each new value in 32-sample steps (as
-//! `learn::Dezip` glides a learned knob), for comparison.
+//! continuous turn, the reference) or in steps: every 32 samples (a glide's step,
+//! `smooth::STEP`), once a host block of 64 to 1024 frames (how the editor's and automation's
+//! changes reached the voices before R-KNOB-GLIDE, at a block's start), and as a mouse moves it,
+//! a new value 60 times a second taken at the next 256-frame block (issue #107). Prints each
+//! stepped render's difference from the reference (its level against the reference's, and the
+//! share of it above 2 kHz), and the same for a 10 ms linear glide to each new value in
+//! 32-sample steps (as `smooth::Smooth` glides a learned knob, R34), for comparison.
+//! `tests/knob_glide.rs` measures the glides as built.
 //!
 //! By hand: `cargo test --release -p ca72-plugin --test cutoff_steps -- --ignored --nocapture`
 //! (`CA72_CRACKLE_OUT=<dir>` writes the renders there as WAVs; `CA72_EMPHASIS`, 0 to 10, 9).

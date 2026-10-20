@@ -377,6 +377,7 @@ dependencies = [
  "clap-sys 0.5.0 (git+https://github.com/micahrj/clap-sys.git?rev=25d7f53fdb6363ad63fbd80049cb7a42a97ac156)",
  "cocoa",
  "keyboard-types",
+ "libc",
  "libm",
  "nih_plug",
  "objc",

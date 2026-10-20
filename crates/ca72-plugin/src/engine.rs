@@ -1420,11 +1420,13 @@ pub struct Spares {
     places: [Mutex<Spare>; POLY_VOICES.2],
 }
 
-/// A place's spare voice and twin (DOUBLE's): clean, or the ones they replaced. (The twin
-/// boxed, as [`made_twin`]'s: the places are made together.)
+/// A place's spare voice and twin (DOUBLE's): clean, or the ones they replaced. (Each boxed,
+/// as [`made_twin`]'s twin is: ten voices inline made [`Spares`] some 440 KB, which `Arc::new`
+/// built on the stack of whatever thread made the engine, a host's making an instance:
+/// decisions.md R-HOST-STACK.)
 #[derive(Debug, Default)]
 struct Spare {
-    voice: Option<Voice>,
+    voice: Option<Box<Voice>>,
     twin: Option<Box<Voice>>,
     clean: bool,
 }
@@ -1448,10 +1450,10 @@ impl Spares {
                 .lock()
                 .ok()
                 .filter(|s| !s.clean)
-                .and_then(|s| s.voice.as_ref().map(Voice::rate));
+                .and_then(|s| s.voice.as_ref().map(|v| v.rate()));
             if let Some(rate) = used {
                 fill(place, rate, |s| {
-                    !s.clean && s.voice.as_ref().map(Voice::rate) == Some(rate)
+                    !s.clean && s.voice.as_ref().map(|v| v.rate()) == Some(rate)
                 });
             }
         }
@@ -1461,7 +1463,7 @@ impl Spares {
     fn make(&self, rate: f64) {
         for place in &self.places {
             fill(place, rate, |s| {
-                !(s.clean && s.voice.as_ref().map(Voice::rate) == Some(rate))
+                !(s.clean && s.voice.as_ref().map(|v| v.rate()) == Some(rate))
             });
         }
     }
@@ -1474,7 +1476,7 @@ fn fill(place: &Mutex<Spare>, rate: f64, wanted: impl Fn(&Spare) -> bool) {
         return;
     }
     let (mut voice, mut twin) = (
-        Some(Voice::prototype(rate)),
+        Some(Box::new(Voice::prototype(rate))),
         Some(Box::new(Voice::prototype(rate))),
     );
     if let Ok(mut s) = place.lock()
@@ -1566,6 +1568,12 @@ pub struct Engine {
     /// Voices' runs not heard (a worker past the deadline, or the voice still held by one), for
     /// the measurements ([`Engine::silent_runs`]).
     silent_runs: u64,
+    /// The host's thread's load, block by block, and whether LO shares its voices for it where
+    /// this system shares them by load ([`LoSharing::Load`], decisions.md R-LO-WORKERS); when
+    /// the present block began, and the runs not heard by then.
+    busy: Busy,
+    block_start: Option<Instant>,
+    block_silent: u64,
     /// Where POLY's workers are started and stopped off the audio thread, the plan they are
     /// started for there (0: none), this thread's ask for them and whether the helper
     /// thread is to serve it (decisions.md R21, R23).
@@ -1639,6 +1647,9 @@ impl Engine {
             workers: (0, None),
             deadline: None,
             silent_runs: 0,
+            busy: Busy::default(),
+            block_start: None,
+            block_silent: 0,
             crew: Arc::new(Crew::new()),
             plan: 0,
             ask: Ask::Not,
@@ -1830,7 +1841,11 @@ impl Engine {
         }
         let voices: Vec<Shared> = self.slots.iter().map(|s| s.play.clone()).collect();
         // (ULTRA's split crews made from a voice's parts, spare between runs.)
-        let template = self.slots[0].play.lock().ok().map(|p| p.voice.clone());
+        let template = self.slots[0]
+            .play
+            .lock()
+            .ok()
+            .map(|p| Box::new(p.voice.clone()));
         self.plan = self.crew.plan(&voices, workers, period, template);
         if let Some(need) = self.need() {
             self.pool = self.crew.start(self.plan, need);
@@ -1916,6 +1931,9 @@ impl Engine {
     /// each block's start, when POLY's workers also follow POLY ([`Engine::follow_poly`]).
     pub fn set_deadline(&mut self, deadline: Option<Instant>) {
         self.deadline = deadline;
+        // (The host's thread's time in the plug-in is counted from here to the block's end.)
+        self.block_start = Some(Instant::now());
+        self.block_silent = self.silent_runs;
         self.follow_poly();
         if let Some(p) = &self.pool {
             p.block();
@@ -1965,6 +1983,16 @@ impl Engine {
             if self.controls.unison && on {
                 s.active = true;
             }
+        }
+    }
+
+    /// Whether LO shares its voices with the workers now (decisions.md R-LO-WORKERS): always,
+    /// never, or while the host's thread is busy, as this system has it ([`lo_sharing`]).
+    pub fn lo_shares(&self) -> bool {
+        match lo_sharing() {
+            LoSharing::Never => false,
+            LoSharing::Always => true,
+            LoSharing::Load => self.busy.on,
         }
     }
 
@@ -2273,7 +2301,7 @@ impl Engine {
         let Some(clean) = spare.voice.as_mut().filter(|v| v.rate() == rate) else {
             return false;
         };
-        std::mem::swap(&mut p.voice, clean);
+        std::mem::swap(&mut p.voice, &mut **clean);
         if let Some(twin) = spare.twin.as_mut().filter(|v| v.rate() == rate) {
             std::mem::swap(&mut p.twin.voice, &mut **twin);
         }
@@ -2624,14 +2652,21 @@ impl Engine {
             }
         }
         let deadline = self.deadline;
-        // (At QUALITY's LO a voice costs less than waking a worker for it: every voice here.)
-        let share = share && !self.controls.potato;
+        // (At QUALITY's LO only as many threads as the run's light voices repay waking:
+        // decisions.md R-LO-WORKERS.)
+        let threads = if !self.controls.potato {
+            MAX
+        } else if self.lo_shares() {
+            lo_threads(count)
+        } else {
+            1
+        };
         // (Two voices' filters solved together only at HI without DOUBLE: decisions.md
         // R-HI-PAIRS, R-POLY-CRACKLE.)
         let pairs = !self.controls.ultra && !self.controls.potato && mix.double <= 0.0;
         let played = match &mut self.pool {
-            Some(pool) if share && count > 1 && n >= SHARED_RUN => {
-                pool.play(&list[..count], n, ext, rate, mix, pairs, deadline)
+            Some(pool) if share && threads > 1 && count > 1 && n >= SHARED_RUN => {
+                pool.play(&list[..count], n, ext, rate, mix, pairs, threads, deadline)
             }
             _ => {
                 // (Two at a time, their filters solved together at HI: decisions.md
@@ -2822,6 +2857,18 @@ impl Engine {
     /// and falling with a time constant of [`LAMP_FALL`]; POLY's voices let go and fallen
     /// silent over the block freed.
     pub fn end_block(&mut self, len: usize) -> f32 {
+        // (The block's runs are played: the workers may park as they finish.)
+        if let Some(p) = &self.pool {
+            p.rest();
+        }
+        if let Some(t) = self.block_start.take()
+            && self.rate > 0.0
+            && len > 0
+        {
+            let period = len as f64 / self.rate;
+            let unheard = self.silent_runs > self.block_silent;
+            self.busy.tally(t.elapsed().as_secs_f64(), period, unheard);
+        }
         if !self.many() && !self.rest.asleep {
             let state = self
                 .slots
@@ -3128,6 +3175,171 @@ pub fn workers_for(n: usize) -> usize {
         0
     } else {
         (n.saturating_sub(2) / 3).clamp(1, 4)
+    }
+}
+
+/// How LO shares its voices with the workers on a system (decisions.md R-LO-WORKERS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoSharing {
+    /// Every voice on the host's thread, as before R-LO-WORKERS (0.2.8).
+    Never,
+    /// Whenever [`lo_threads`] gives more than one thread.
+    Always,
+    /// Only while the host's thread is busy ([`Busy`]): below that, as [`LoSharing::Never`].
+    Load,
+}
+
+/// A measurement's own [`LoSharing`] (0: this system's).
+static LO_SHARING_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How LO shares its voices on this system (decisions.md R-LO-WORKERS, the owner's decision
+/// of 2026-10-19): by load on Windows, where the workers' short runs cost two to four times the
+/// voices' own processor time and the host's thread gained little while it was not busy;
+/// always elsewhere: on Linux and macOS waking a worker costs little (on an M4 Pro the
+/// process's processor time rose 0 to 12 points of a core, the host's thread's fell to a third
+/// or less, and a host's thread playing every voice itself was at times slowed past its
+/// period). A measurement's own, if it has set one.
+pub fn lo_sharing() -> LoSharing {
+    match LO_SHARING_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => LoSharing::Never,
+        2 => LoSharing::Always,
+        3 => LoSharing::Load,
+        _ if cfg!(windows) => LoSharing::Load,
+        _ => LoSharing::Always,
+    }
+}
+
+/// Sets how LO shares its voices, for a measurement or a test (None: back to this system's,
+/// [`lo_sharing`]). Not for the plug-in.
+#[doc(hidden)]
+pub fn set_lo_sharing_for_measurement(sharing: Option<LoSharing>) {
+    let v = match sharing {
+        None => 0,
+        Some(LoSharing::Never) => 1,
+        Some(LoSharing::Always) => 2,
+        Some(LoSharing::Load) => 3,
+    };
+    LO_SHARING_OVERRIDE.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The host's thread's load, its time in the plug-in a block against the block's period,
+/// smoothed, and whether it is busy enough for LO to share its voices ([`LoSharing::Load`],
+/// decisions.md R-LO-WORKERS): busy from a smoothed load above [`Busy::ON`], or at once after a
+/// block late or one with a voice's run not heard; no longer once the load has stayed below
+/// [`Busy::OFF`] for the hold, which starts at [`Busy::HOLD`] and doubles (to [`Busy::MOST`])
+/// each time it is busy again within [`Busy::AGAIN`] of ceasing, so that it does not flap (the
+/// load falls when the voices are shared); back to [`Busy::HOLD`] after [`Busy::AGAIN`] not
+/// busy. Seconds throughout; plain arithmetic, for the audio thread.
+#[derive(Debug, Clone, Copy)]
+pub struct Busy {
+    load: f64,
+    on: bool,
+    /// How long the load has been below [`Busy::OFF`] while busy, the hold now, and how long
+    /// since it was last busy.
+    quiet: f64,
+    hold: f64,
+    since: f64,
+}
+
+impl Default for Busy {
+    fn default() -> Self {
+        Busy {
+            load: 0.0,
+            on: false,
+            quiet: 0.0,
+            hold: Busy::HOLD,
+            since: f64::INFINITY,
+        }
+    }
+}
+
+impl Busy {
+    /// The smoothed load above which LO shares: half the block's period.
+    pub const ON: f64 = 0.5;
+    /// The smoothed load below which it stops, after the hold: well below [`Busy::ON`], and
+    /// above the 24 to 28 % a light load's sharing left on Windows, where it hardly lowers the
+    /// host's thread's time (so that a light load that went busy for one late block returns to
+    /// the host's thread).
+    pub const OFF: f64 = 0.3;
+    /// The smoothing's time constant.
+    pub const SMOOTH: f64 = 0.2;
+    /// The first hold, the most, and how soon being busy again doubles it.
+    pub const HOLD: f64 = 2.0;
+    pub const MOST: f64 = 30.0;
+    pub const AGAIN: f64 = 10.0;
+
+    /// A block of `period` seconds that took the host's thread `took`, with or without a
+    /// voice's run not heard.
+    pub fn tally(&mut self, took: f64, period: f64, unheard: bool) {
+        if !(took.is_finite() && period > 0.0) {
+            return;
+        }
+        let share = took / period;
+        self.load += (period / Busy::SMOOTH).min(1.0) * (share - self.load);
+        if share > 1.0 || unheard || self.load > Busy::ON {
+            if !self.on {
+                self.hold = if self.since < Busy::AGAIN {
+                    (2.0 * self.hold).min(Busy::MOST)
+                } else {
+                    Busy::HOLD
+                };
+                self.on = true;
+            }
+            self.quiet = 0.0;
+        } else if self.on {
+            if self.load < Busy::OFF {
+                self.quiet += period;
+                if self.quiet >= self.hold {
+                    (self.on, self.quiet, self.since) = (false, 0.0, 0.0);
+                }
+            } else {
+                self.quiet = 0.0;
+            }
+        } else {
+            self.since += period;
+        }
+    }
+
+    /// Whether it is busy.
+    pub fn on(&self) -> bool {
+        self.on
+    }
+
+    /// The smoothed load.
+    pub fn load(&self) -> f64 {
+        self.load
+    }
+}
+
+/// LO's sharing for a measurement (`usize::MAX`: [`lo_threads`]'s rule; else at most this many
+/// threads, the host's among them, for any run of two voices or more: 1, every voice on the
+/// host's thread, as before R-LO-WORKERS).
+static LO_THREADS_OVERRIDE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+/// Sets how many threads LO's voices are played on, for a measurement (None: back to
+/// [`lo_threads`]'s rule). Not for the plug-in.
+#[doc(hidden)]
+pub fn set_lo_threads_for_measurement(threads: Option<usize>) {
+    LO_THREADS_OVERRIDE.store(
+        threads.unwrap_or(usize::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The most threads, the host's among them, a run of `count` of LO's light voices is played
+/// on (decisions.md R-LO-WORKERS): a thread a voice up to four, then a thread for each two.
+/// Each thread then takes from the host's thread at least what it costs the computer (the
+/// host's time falling by at least half the workers' processor time), by the measurements on
+/// the Ryzen 7 7800X3D; a thread a voice past four fell by less than a third of it. The host's
+/// thread waits for the longest of the threads' shares, so no more threads than make it
+/// shorter. 1, the host's alone, for one voice; as many workers as the pool holds at most (the
+/// machine's, as at HI). DOUBLE's twins, played with their voices, change neither.
+pub fn lo_threads(count: usize) -> usize {
+    match LO_THREADS_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        usize::MAX if count <= 4 => count.max(1),
+        usize::MAX => count.div_ceil(2),
+        k => k,
     }
 }
 
@@ -4046,6 +4258,64 @@ mod tests {
         assert_eq!((split_voices_for(9), split_voices_for(64)), (1, 2));
     }
 
+    /// The host's thread's load (decisions.md R-LO-WORKERS): a light load leaves LO on the
+    /// host's thread; half the period, smoothed, or a late block or a run not heard, shares;
+    /// sharing stops only once the load has stayed below 30 % for the hold, which grows when it
+    /// would flap.
+    #[test]
+    fn lo_shares_while_the_host_s_thread_is_busy() {
+        let p = 256.0 / 48_000.0;
+        let run = |b: &mut Busy, share: f64, seconds: f64| {
+            for _ in 0..(seconds / p) as usize {
+                b.tally(share * p, p, false);
+            }
+        };
+        let mut b = Busy::default();
+        run(&mut b, 0.45, 5.0);
+        assert!(!b.on(), "busy at 45 %");
+        run(&mut b, 0.6, 1.0);
+        assert!(b.on(), "not busy at 60 %");
+        // Shared, the load falls: busy still between the two, however long.
+        run(&mut b, 0.35, 10.0);
+        assert!(b.on());
+        // Below a quarter: busy for the hold, then not.
+        run(&mut b, 0.1, 1.9);
+        assert!(b.on(), "stopped before the hold");
+        run(&mut b, 0.1, 0.3);
+        assert!(!b.on(), "busy after the hold");
+        // A late block, or a run not heard: busy at once.
+        let mut late = Busy::default();
+        late.tally(1.1 * p, p, false);
+        assert!(late.on());
+        let mut unheard = Busy::default();
+        unheard.tally(0.1 * p, p, true);
+        assert!(unheard.on());
+        // Busy again soon: the hold doubles, so it does not flap; it is back to 2 s after a while.
+        run(&mut b, 0.6, 1.0);
+        assert!(b.on());
+        run(&mut b, 0.1, 3.0);
+        assert!(b.on(), "the hold did not grow");
+        run(&mut b, 0.1, 1.5);
+        assert!(!b.on());
+        run(&mut b, 0.1, 11.0);
+        run(&mut b, 0.6, 1.0);
+        run(&mut b, 0.1, 2.3);
+        assert!(!b.on(), "the hold did not come back to 2 s");
+        // A block that cannot be timed is left out.
+        let before = b.load();
+        b.tally(f64::NAN, p, false);
+        b.tally(0.5, 0.0, false);
+        assert_eq!(b.load().to_bits(), before.to_bits());
+    }
+
+    /// LO's voices on as many threads as repay waking (decisions.md R-LO-WORKERS): one a voice
+    /// up to four, then one for each two; the host's alone for one.
+    #[test]
+    fn lo_s_threads_follow_its_voices() {
+        let t: Vec<usize> = (0..=10).map(lo_threads).collect();
+        assert_eq!(t, [1, 1, 2, 3, 4, 3, 3, 4, 4, 5, 5]);
+    }
+
     /// A voice that a worker late from an earlier run still holds sits the next runs out:
     /// the block is not held up for it (it is still held when the block is done), the other
     /// voices play, and it plays again once let go. (Bounded by what happens, not by time: on
@@ -4102,6 +4372,7 @@ mod tests {
             48_000.0,
             &mix,
             true,
+            MAX,
             Some(Instant::now() + Duration::from_secs(1)),
         );
         assert!(!stall.is_finished(), "waited for the held voice");
