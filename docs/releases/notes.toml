@@ -90,6 +90,7 @@ features = [
   "An arpeggiator: press ARP on the rail for ON, HOLD, DIRECTION, RATE, OCTAVES, GATE and SWING, in time with your host.",
   "HOLD with the arpeggiator off keeps your notes sounding as a drone until you play a new chord.",
   "MPE: each note's pressure, timbre and bend move its own voice; press MPE on the rail to set how far.",
+  "Four LFOs: press LFO on the rail, then drag from an LFO's OUT jack to a knob to modulate it.",
   "Oscillators 2 and 3 at LO can be timed: a key under RANGE locks the cycle to a note value of your host's tempo.",
   "Right-click a WAVEFORM switch and choose CONTINUOUS to sweep smoothly through every waveform to a narrow pulse, with a MOD key to modulate the shape.",
   "Standalone: press FX for four slots of your own CLAP and VST3 effects; one that crashes never stops the synth.",

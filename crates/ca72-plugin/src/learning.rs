@@ -54,6 +54,10 @@ pub fn place(i: usize) -> Option<Place> {
         // timed (decisions.md R-OSC-TIMED).
         "osc2_division" => Place::Panel(control_index("osc2_frequency")?),
         "osc3_division" => Place::Panel(control_index("osc3_frequency")?),
+        // An LFO's DIVISION's is its RATE knob (decisions.md R-LFO-PAGE).
+        id if id.starts_with("lfo") && id.ends_with("_division") => {
+            Place::Panel(control_index(&id.replace("_division", "_rate"))?)
+        }
         _ => Place::Panel(control_index(id)?),
     })
 }
@@ -256,6 +260,8 @@ pub struct Learning {
     /// Which oscillators' waveforms are CONTINUOUS (decisions.md R-CONTINUOUS-WAVE): the one its
     /// WAVEFORM switch's menu marks.
     pub variable: [bool; 3],
+    /// Which LFOs' RATE knobs turn their DIVISION now (decisions.md R-LFO-PAGE).
+    pub lfo_timed: [bool; 4],
 }
 
 /// A parameter's name.
@@ -344,6 +350,19 @@ impl Learning {
         rows: Vec<Row>,
     ) {
         let learnable = place.and_then(|p| learnable_at(p, self.timed));
+        // (An LFO's RATE while timed turns its DIVISION, as a timed oscillator's FREQUENCY:
+        // decisions.md R-LFO-PAGE.)
+        let learnable = match place {
+            Some(Place::Panel(c)) => CONTROLS
+                .get(c)
+                .and_then(|c| c.param.strip_prefix("lfo"))
+                .and_then(|r| r.strip_suffix("_rate"))
+                .and_then(|n| n.parse::<usize>().ok())
+                .filter(|n| (1..=4).contains(n) && self.lfo_timed[n - 1])
+                .and_then(|n| index(&format!("lfo{n}_division")))
+                .or(learnable),
+            _ => learnable,
+        };
         let (title, items) = match learnable {
             Some(MOD_WHEEL) => (
                 format!("MOD WHEEL SOURCE · {}", map.wheel_source().text()),

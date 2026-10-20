@@ -12812,3 +12812,141 @@ nothing in the engine differs.
   `a_continuous_switch_turns_and_its_key_flips_mod_and_its_way`;
   `mods_orb_shows_where_the_voices_have_the_shape`. Parameters:
   `continuous_waveforms_are_off_by_default_and_their_travel_the_engines`.
+
+## R-LFO-PAGE. The LFO page and drag-to-knob modulation: the panel and the editor
+
+The page, the rings and the drag of R-LFO (whose record has the owner's decisions of 2026-10-20,
+quoted, and the engine's half), built in the panel crate and the editor on their own branch,
+`lfo-ui`, over the engine's interface (docs/lfo.md). The round-2 mock-ups
+(`~/Code/ca72-night/lfo-mockups/`, the artifact https://claude.ai/artifact/W3sR8oNoLc3rwCS4ZAUwEK)
+are the spec; where this departs from them is listed under the agent's decisions.
+
+**The page** (`ca72_panel::strip::lfo`).
+- A lower page in the keyboard's place ("where the keyboard would go"), the left hand's controls
+  kept at its left. The rail's **LFO** key, directly after the keyboard's, shows it; pressed lit,
+  it puts it away (the page under it shows again: the strip's or the keyboard). The keyboard's key
+  shows the keyboard in its place. The name's display is a key shorter (1900 units in the
+  plug-ins, 1800 in the standalone). The drawers drop over the page as over the others.
+- Layout A of round 2: four columns 677.5 wide between the left hand's rule and the strip's
+  trim, the strip's rules between them, each LFO's title at its foot. Top to bottom: the scope's
+  bezel (440 by 176) with MODE's toggle (FREE, RETRIG over the lever, ENV) and MONO's key beside
+  it; WAVEFORM, RATE (its timed key and note under it) and PHASE, 212 apart; RISE, the OUT jack
+  and the MODULATES screen. Every control the panel's own at the panel's size, in `CONTROLS` as
+  `Place::Lfo` (28, after every other: no control moves), found only while the page shows
+  (`interact::hit_lfo`).
+- **The dials:** RATE numbered .01, .1, 1, 2, 5, 10, 50 on its parameter's skewed travel
+  (0.01 + 49.99 t⁵ Hz; .02, .05, .2, .5 and 20 ticked), Hz at its foot; while timed, the timed
+  oscillators' dial (4× 2× 1 2 4 8 16 32), its print swapped in as the panel's timed dials' are
+  (a part made with the plate, laid where its ink differs; within 3 pixels of 2 levels of the
+  page printed so whole). PHASE 0, 90, 180, 270, 360. RISE 0, .1, .5, 1, 2, 5, 10 and SEC. on its
+  cube-root travel. WAVEFORM the oscillators' switch, STEPPED or CONTINUOUS (its arc swapped in
+  likewise), its right-click menu's WAVEFORM head choosing.
+- **The scopes:** a CRT in the LFO's phosphor: the unlit face tinted by it, the graticule, the
+  trace's halo, bloom and white-hot core, its jumps (a square's edges) faint, the tube's dark rim
+  and the glass's reflection over it. The trace is two cycles from a note's start, from the
+  engine's `Settings::output_after` at the host's tempo, so PHASE, RISE's fade and ENV's hold
+  show. The orb is the LFO's present value from `Scope::read`: along the trace by the time since
+  its note in its first two cycles, then by its phase in the second, at the value it has (on the
+  trace while it does not move).
+- **Cheap, as the mock-ups' budget asked:** the plate, its print, the bezels, the screens' glass
+  and the knobs' shadows made once a scale on a thread begun as the editor opens; a scope's still
+  screen drawn again only when its trace or colour changes, by code (`glow.rs`: coverage masks
+  blurred in three box passes, not resvg's filters); each frame an orb moves, only its patch
+  (cut from the still screen, its wake, the orb, the glass over them). The orbs and the rings'
+  points are read at most 30 times a second, only while the page shows; with nothing moving the
+  editor draws nothing.
+- **MODULATES** reads the one knob and its depth (`CUTOFF -25`; the knob's short name alone where
+  both do not fit ten characters), the count (`2 KNOBS`), or NOT IN USE, dimmed. Its tip lists
+  every knob and depth; a click drops the same list with DEPTH… and REMOVE for each.
+
+**The drag, the rings, the pop-up** (`ca72_panel::modulation`; `editor/lfo_page.rs`).
+- **Drag from OUT** to a knob: while held, the cord sags from the jack to a plug a little below
+  the pointer, every knob that can take the LFO (`lfo::target_of`; the panel's in view, and only
+  while the LFO has room or already has the knob) has a dotted ring in its colour, the one under
+  the plug a bright ring and a preview of its ring at 25 %. Let go there: assigned at
+  `lfo::DEFAULT_DEPTH` (+25 %). Let go elsewhere, on a switch, on another LFO's knob: nothing. No
+  cord remains.
+- **The rings:** nested on the knob's skirt, the first source outermost, 6.5 apart (closer when
+  more than four share a knob), each in its source's colour: the whole swing faint, the half its
+  positive peak reaches glowing with its end ticked, and while the page shows a point where the
+  LFO has the knob now. Shown only while the page shows, while dragging, or on the knob under the
+  pointer (the owner's "option 2"): with the strip's or the keyboard's page showing and nothing
+  hovered, the panel is as it was. A skin pack's knobs carry them at the layout's places and
+  sizes.
+- **Depths** (patch state: no host gesture): the **pop-up** under a modulated knob, a small dial
+  per source in its colour with its label, its depth and SHARED where every voice takes the
+  shared copy (MONO off on VOLUME or the strip's), dragged up or down (240 logical pixels the
+  knob's travel, as a knob's drag), a double click taking it away; a **ring's end** dragged round
+  the knob (to the knob's pointer takes it away); **Alt/Option-drag** on the knob for the last
+  touched LFO (its column pressed or scrolled; LFO 1 before any), adding it at 0 if it was not
+  there; the knob's **right-click menu**, a head per source (`LFO 1 · +40 %`) with DEPTH… (typed in
+  the knob-entry field, -100 to 100 %; 0 takes it away) and REMOVE, under MIDI Learn's items. The
+  **tip** lists them: `CUTOFF FREQUENCY: 0.00 · LFO 1 +40 % · LFO 2 –25 %`.
+- **The strip's knobs** (under the page) take an LFO from their right-click menu: an LFO head,
+  LFO 1 to LFO 4, one already there or one full not to be chosen.
+- **An LFO's own menu** (a right click on its scope, its jack, its screen or its column): COLOR,
+  the phosphors (amber, green, blue, red, violet, white; the one it is marked), kept on the
+  computer (`Change::LfoColor`), and EDGES, SOFT or SHARP (the patch's).
+
+**The rail's page keys** (the owner: "some sort of illumination or little light on buttons whose
+panels affect sound"): ARP, MPE, LFO and the standalone's FX are lit as before while their page
+or drawer shows; shut, a faint glow (two fifths of the lit key's light) while what they open
+affects the sound: ARP running, an MPE amount not 0, an LFO assigned and moving
+(`Scope::any_moving`), an effect playing. Otherwise unlit. PANEL's and the keyboard's keys are
+lit while they show, as before. A drawer dropped over the LFO page lights its key and the LFO's
+alike.
+
+**Sources, for the macros next.** Nothing in the overlay names an LFO: a ring, a pop-up dial and
+a cord each take a colour and a label, and the editor's side works over `lfo::Source`
+(`colour`, `label`, `sources_on`, `knob_rows`, the drags). docs/lfo.md says what a macro needs.
+
+**Skin packs.** CONTROL_SET revision 4 records the 28 (`added`), which a layout does not place, as
+the strip's: a layout naming one is refused, one made for revisions 1 to 3 loads as it did
+(docs/skin-packs.md). The page is drawn in the look's base skin and lettering, as the drawers.
+
+**Agent decisions, 2026-10-20** (not separately approved):
+- **RATE's numbers** are .01 .1 1 2 5 10 50 (the mock-ups' were .05 to 50 for a 0.05 floor; the
+  owner chose 0.01); .5 is a tick, as numbered it crowded 1 and 2.
+- **The pop-up sits under its knob** (over whatever is there), so that the tip above stays read,
+  and is kept while the pointer is over it; it gives way to the knob's menu.
+- **An assignment's preview while hovering is visual only** (its ring at 25 %); the sound does not
+  change until the drop (the spec's "optionally").
+- **Dragging a depth to 0 takes the assignment away** (the pop-up's, the ring's, Alt's, a typed 0),
+  as the mock-ups' README said of the ring.
+- **Alt/Option-drag adds** the last touched LFO to a knob it was not on, from 0; an Alt press that
+  does not move is a plain click (R-KNOB-ENTRY's double click still resets).
+- **The page is not remembered** when the editor closes (the keyboard's choice is, as before).
+- **The orb before any note** sits at the trace's start; a FREE LFO's orb after its first two
+  cycles stays in the second, by its phase.
+- **The colours:** see the frame below.
+
+**The colours, checked for colour-blind sight.** Each pair of the four defaults in CIEDE2000,
+simulated (Machado et al., 2009, full severity):
+
+| | normal | protanopia | deuteranopia | tritanopia |
+|---|---|---|---|---|
+| the night's first (amber FFB020, green 3CE8A0, blue 58A8FF, red FF5078) | 44.5 | 15.7 | 11.7 | 14.1 |
+| proposed (amber FFB020, green 26FFB7, blue 4C8CFF, red E63948) | 42.3 | 19.1 | 19.9 | 21.5 |
+
+(the nearest pair under each). The colours are the engine's (`lfo::Phosphor::rgb`); the editor
+draws whatever they are.
+
+**Evidence** (omarchy, load 11 to 12 from other agents' builds, so ± a third):
+- `examples/frames`, worn skin, at 0.44 / 0.87: the page's renderer made 0.02 ms; its first
+  showing with its plate ready 30 / 70 ms (waited for at once, 135 / 520); one orb moving 0.8 to
+  1.0 / 3.0 to 3.5 ms; four 1.1 to 1.4 / 2.2 to 4.1; a RATE turned (its trace again) 1.3 to 2.1 /
+  4.3 to 7.3; three knobs' ring points moving 0.9 to 1.5 / 3.0; the cord following the pointer
+  2.3 / 4.4 to 7.4; the pop-up shown and gone 7.8 to 8.8 / 3.9; nothing changed 0.0. (Each its
+  render, its places put in the frame, and the whole frame converted for the window.) For
+  comparison in the same runs: CUTOFF 0.7 / 2.6, DRIVE 2.5 / 6.3, the MPE drawer's knob 1.4 / 3.5.
+- Tests: the page finds each part where it is drawn; drawn in parts it is drawn whole (in both
+  skins, a knob, a trace, an orb, the timed and CONTINUOUS parts, a colour, MODULATES); an orb
+  draws only its patches (under a fiftieth of the page); a timed RATE's part is its whole print;
+  a ring's end is found and gives its depth; the overlay draws only what changed; the editor:
+  the LFO key shows its page in the keyboard's place; the page's controls operate their
+  parameters; an assignment dragged from OUT lands on a knob at a quarter; depths are set by the
+  pop-up, the ring, Alt-drag and the menu; a strip knob takes an LFO from its menu; an LFO's
+  menu sets its colour and EDGES; the LFO key glows while an LFO moves a knob; the window with
+  the page put together in parts is put together whole.
+- No approved image changed: `tests/approved.png` and `approved-large.png` are the panel without
+  the rail.

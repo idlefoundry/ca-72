@@ -370,7 +370,8 @@ impl Editing {
     /// where the drag has it), its trace from its settings, its orb from its last reading, what
     /// MODULATES reads, its colour.
     pub(super) fn lfo_scene_now(&self) -> LfoScene {
-        let tempo = self.params.tempo();
+        // (The host's tempo as the audio thread last played at it, else the standalone's.)
+        let tempo = self.meters.tempo().unwrap_or_else(|| self.params.tempo());
         let mut s = LfoScene::default();
         for (n, col) in s.columns.iter_mut().enumerate() {
             let q = self.params.lfo(n);

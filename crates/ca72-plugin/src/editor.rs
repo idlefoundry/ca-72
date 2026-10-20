@@ -214,6 +214,9 @@ pub struct Meters {
     /// Each oscillator's CONTINUOUS shape where the newest sounding voice has it (MOD's orbs:
     /// decisions.md R-CONTINUOUS-WAVE), its switch's steps; NaN for none.
     shapes: [AtomicU32; 3],
+    /// The tempo the audio thread plays at (the host's, else the standalone's TEMPO), beats a
+    /// minute; NaN before a block: the LFO page's timed scopes (decisions.md R-LFO-PAGE).
+    tempo: AtomicU32,
 }
 
 impl Default for Meters {
@@ -227,6 +230,7 @@ impl Default for Meters {
             output: AtomicU32::new(0),
             watchers: AtomicU32::new(0),
             shapes: std::array::from_fn(|_| AtomicU32::new(f32::NAN.to_bits())),
+            tempo: AtomicU32::new(f32::NAN.to_bits()),
         }
     }
 }
@@ -244,6 +248,17 @@ impl Meters {
 
     /// Each oscillator's CONTINUOUS shape where the newest sounding voice has it (the audio
     /// thread's, a block's).
+    /// The tempo a block played at (decisions.md R-LFO-PAGE).
+    pub fn publish_tempo(&self, bpm: f64) {
+        self.tempo.store((bpm as f32).to_bits(), Ordering::Relaxed);
+    }
+
+    /// The tempo the audio thread last played at, if it has played.
+    fn tempo(&self) -> Option<f64> {
+        let t = f64::from(f32::from_bits(self.tempo.load(Ordering::Relaxed)));
+        (t.is_finite() && t > 0.0).then_some(t)
+    }
+
     pub fn publish_shapes(&self, shapes: [Option<f64>; 3]) {
         for (a, at) in self.shapes.iter().zip(shapes) {
             a.store(
@@ -4179,6 +4194,7 @@ impl Editing {
         });
         self.learning.variable = std::array::from_fn(|n| self.params.continuous(n));
         self.learning.timed = [self.params.timed_now(1), self.params.timed_now(2)];
+        self.learning.lfo_timed = std::array::from_fn(|n| self.params.lfo(n).timed.value());
         self.scene.overload = Meters::load(&self.meters.overload);
         self.move_opening(Instant::now(), self.params.quality.value());
         self.scene.midi = (
@@ -13885,7 +13901,9 @@ mod tests {
         let patch = Arc::clone(&params.lfo_patch);
         patch.assign(Source::Lfo(0), T::Cutoff, 0.4).unwrap();
         patch.assign(Source::Lfo(1), T::Cutoff, -0.25).unwrap();
-        patch.assign(Source::Lfo(0), T::Osc2Frequency, -0.1).unwrap();
+        patch
+            .assign(Source::Lfo(0), T::Osc2Frequency, -0.1)
+            .unwrap();
         patch.assign(Source::Lfo(2), T::Volume, -0.5).unwrap();
         let moving = |k: f32| Reading {
             value: (k * 2.3).sin(),
@@ -13932,6 +13950,34 @@ mod tests {
     }
 
     // ---- The LFO page and modulation (decisions.md R-LFO).
+
+    /// The LFO page's knobs take exact values typed at them (R-KNOB-ENTRY), in their dials'
+    /// units: RATE in Hz, PHASE in degrees, RISE in seconds.
+    #[test]
+    fn the_lfo_knobs_take_values_typed_in_their_units() {
+        let (mut e, host, params) = editing();
+        lfo_open(&mut e);
+        host.take();
+        let q = params.lfo(0);
+        for (k, text, p, want) in [
+            (3, "90", &q.phase, 90.0),
+            (4, "1", &q.rise, 1.0),
+            (1, "5 Hz", &q.rate, 5.0),
+        ] {
+            let id = format!("lfo1_{}", ca72_panel::controls::LFO_PARTS[k]);
+            entry_click(&mut e, &id);
+            assert!(e.knob_entry.is_some(), "{id} opens");
+            keyed(&mut e, Key::Character(text.into()));
+            keyed(&mut e, Key::Enter);
+            let calls = host.take();
+            let set = calls.iter().find_map(|c| match c {
+                Call::Set(ptr, v) if *ptr == p.as_ptr() => Some(*v),
+                _ => None,
+            });
+            let got = p.preview_plain(set.unwrap_or_else(|| panic!("{id}: {calls:?}")));
+            assert!((got - want).abs() < 0.01 * want.max(1.0), "{id}: {got}");
+        }
+    }
 
     /// The LFO page opened by the rail's LFO key (`lfo_page::Modulating::open`).
     fn lfo_open(e: &mut Editing) {

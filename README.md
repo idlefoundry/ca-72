@@ -179,9 +179,9 @@ own CLAP and VST3 effects, run after the synthesizer, left to right. **+ ADD EFF
 effects in your CLAP and VST3 folders (scanned the first time you open it, each plug-in loaded in
 a process of its own; **SCAN AGAIN** after installing more). Click an effect's name to open its
 window, its **ON** tab to bypass it, drag a name onto another slot to move it there, and
-right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while an effect plays. An
-effect that crashes is started again; after five crashes it is passed by and its slot says
-CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
+right-click a slot for **REPLACE…** and **REMOVE**. The key is lit while its drawer is open and
+glows faintly while an effect plays with it shut. An effect that crashes is started again;
+after five crashes it is passed by and its slot says CRASHED; one whose plug-in is not installed says MISSING and keeps its settings. The chain and
 each effect's settings are saved in `effects.json` beside `session.json`. The standalone never
 waits for an effect: it opens and plays while they load. One that crashes or stops responding as
 it loads, or is passed by, stays off (CRASHED, NOT RESPONDING) at the next start until you click it
@@ -288,9 +288,9 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   until it is changed in the window.
 - **LEVEL** (-30 to +12 dB, 0 by default): the output's gain, after MAIN OUTPUT's.
 - **ARP**, the arpeggiator (from 0.3.0; off by default, and off in every preset and project
-  saved before it): the **ARP** key on the rail, after the keyboard's, drops its drawer down
-  over the lower controls or the keyboard, and puts it away; the key stays lit while the
-  arpeggiator is on. It plays the keys you hold one at a time, in turn, and its notes go
+  saved before it): the **ARP** key on the rail drops its drawer down over the lower controls,
+  the keyboard or the LFO page, and puts it away; the key is lit while its drawer is open and
+  glows faintly while the arpeggiator runs with it shut. It plays the keys you hold one at a time, in turn, and its notes go
   through the instrument exactly as played ones do (MONO, POLY, UNISON, NOTE PRIORITY,
   RETRIGGER and GLIDE take them the same way). **ON** switches it on; **HOLD** keeps the chord
   playing after you let go, until you play a new one with no keys held or switch HOLD off.
@@ -335,7 +335,8 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   and is dark otherwise; **PRESSURE** and **TIMBRE** each have **MODULATION** (-100 to
   100 %, how far they move the voice's MODULATION wheel, added to the wheel's own) and
   **CUTOFF** (-4 to 4 octaves of the voice's filter cutoff). All four are 0 by default, so
-  nothing changes until you turn them; the key is lit while any is not 0. Double-click a
+  nothing changes until you turn them; the key is lit while its drawer is open and glows faintly
+  while any is not 0 with it shut. Double-click a
   readout (or ⌘/Ctrl-click a knob) to type a value. They are host parameters that can be
   automated or MIDI-learned, and are saved with presets and projects. SETTINGS > MPE >
   INPUT & TIMBRE… chooses, for this computer: **MPE INPUT**, AUTO (the default: the
@@ -348,6 +349,46 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   fresh touch is always at rest; ordinary CC 74, shared by every voice, counts from where it
   was when you began playing, the first key pressed with none held). A note or channel that
   never sends timbre is always at rest.
+- **LFOs** (from 0.3.0; none assigned in any preset or project saved before it, which sound as
+  they did): the rail's **LFO** key, right after the keyboard's, shows the LFO page in the
+  keyboard's place (the wheels stay at its left); pressed again, it puts it away. Four LFOs
+  side by side, each with:
+  - its **scope**, in its own phosphor colour (LFO 1 amber, LFO 2 green, LFO 3 blue, LFO 4 red
+    at first): two cycles of its output from a note's start, so PHASE, RISE and ENV show, and an
+    orb where the LFO is now. Right-click the scope for its **COLOR** (amber, green, blue, red,
+    violet or white; kept on this computer, not in the patch) and its **EDGES**: SOFT (the
+    default, a jump eased over about 2 ms) or SHARP;
+  - **MODE**: FREE runs on; RETRIG starts again at PHASE with a new note; ENV runs one cycle from
+    PHASE and holds (a new note follows the left hand's RETRIGGER switch, as the contours do);
+    and **MONO** (on: one LFO every voice shares; off: one a voice, except on the knobs every
+    voice shares, VOLUME and the strip's, which take the shared one);
+  - **WAVEFORM**, the oscillators' six shapes, STEPPED or CONTINUOUS (right-click it, as an
+    oscillator's); **RATE**, 0.01 to 50 Hz, or with its timed key (the note beside it shows the
+    value) a note value locked to the host's tempo, as the timed oscillators' dials; **PHASE**,
+    0 to 360°, where the cycle starts (a negative depth inverts the LFO exactly); **RISE**, 0 to
+    10 s, how long it fades in after a new note;
+  - its **OUT** jack and its **MODULATES** screen (the knob and its depth, the count, or NOT IN
+    USE; its tip lists them all, a click drops the list with DEPTH… and REMOVE for each).
+
+  **To modulate a knob, drag a cord from an LFO's OUT jack to it.** While you drag, every knob
+  that can take it has a dotted ring and the one under the plug a bright one; let go there and
+  the LFO moves it by 25 % of its travel either way. Each LFO modulates up to eight knobs, and
+  a knob takes several LFOs. The panel's continuous knobs can be modulated, and an oscillator's
+  WAVEFORM while CONTINUOUS (not switches, stepped selectors, VOICES, the timed dials, the
+  wheels, the drawers' or the LFOs' own knobs). The strip's knobs (ENTROPY, WIDTH, INNER, DETUNE,
+  DRIVE) are under the LFO page, so they take an LFO from their right-click menu instead. A
+  modulated knob carries a thin ring for each LFO in its colour (the first LFO outermost)
+  showing how far it swings either way, its positive end ticked, and while the LFO page shows a
+  point where the LFO has it now; the rings show only while the LFO page is open, while you
+  drag a cord, or on the knob under the pointer, so the panel looks as it always did otherwise.
+  The knob's pointer stays where you set it. To change a depth: drag its dial up or down in the
+  pop-up over the knob (double-click a dial to take it away); drag a ring's ticked end round
+  the knob (to the pointer takes it away); hold Alt/Option and drag the knob itself, for the
+  LFO whose column you touched last; or right-click the knob, where each LFO has DEPTH… (type
+  -100 to 100 %) and REMOVE. The knob's tip lists its LFOs' depths. Depths and EDGES are saved
+  with presets and projects but are not host parameters; every other LFO control is a host
+  parameter that can be automated or MIDI-learned. The LFO key is lit while its page shows and
+  glows faintly while an LFO is assigned and moving a knob with it put away.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
 - **Output:** stereo, the same on both channels unless SPREAD places the voices or DOUBLE's

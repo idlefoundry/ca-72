@@ -1035,7 +1035,11 @@ fn make_tube(
     let base = draw(&b.0, size, view);
     let mut over = glass_over(s, size, (gw, gh));
     // (Inside the glass's rounded corners only, as the face is.)
-    for (o, b) in over.data_mut().chunks_exact_mut(4).zip(base.data().chunks_exact(4)) {
+    for (o, b) in over
+        .data_mut()
+        .chunks_exact_mut(4)
+        .zip(base.data().chunks_exact(4))
+    {
         if b[3] < 255 {
             for c in o.iter_mut() {
                 *c = (u16::from(*c) * u16::from(b[3]) / 255) as u8;

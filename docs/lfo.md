@@ -104,3 +104,38 @@ deuteranopia and protanopia (R-LFO has the check).
   is off (option C for the shared targets).
 - No assignment (or every depth 0): nothing runs, the sound is the same to the bit, and an LFO
   never wakes the sleeping instrument (R68).
+
+## The editor's side: the page, the rings, the drag (R-LFO-PAGE)
+
+- **The page** is `ca72_panel::strip::lfo` (`LfoRenderer`, `LfoScene`), a lower page in the
+  keyboard's place shown by the rail's LFO key; its 28 controls are `CONTROLS`' `Place::Lfo`
+  (`controls::lfo_index(n, k)`, `LFO_PARTS`), found by `interact::hit_lfo` while it shows. The
+  editor's state and glue are `crates/ca72-plugin/src/editor/lfo_page.rs` (`Modulating`).
+- **The scene** each frame: the controls' values as the panel's scene has them; each scope's
+  trace from `lfo::settings(..).output_after(t, tempo)`, two cycles of `hz_at(tempo)`; the orb from
+  the last `Scope::read` (read at most 30 times a second, only while the page shows): along the
+  trace at `since × hz` in its first two cycles (ENV held at the end of its one), then by `phase`
+  in the second; at `value`, or on the trace while it does not move. MODULATES from
+  `Patch::assignments(Source::Lfo(n))`.
+- **The overlay** is `ca72_panel::modulation` (`ModRenderer`, `ModScene`): knobs' rings, a
+  dragged assignment's cord and targets, the hover pop-up. Nothing in it names an LFO: a ring, a
+  dial and a cord each take a colour and (the pop-up's) a label.
+
+## Adding the macros: what the panel and editor need
+
+The assignment UI is over **sources**, as the engine is. To give a macro (`Source::Macro(n)`)
+the same cord, rings, pop-up, menus and tips:
+
+1. In `editor/lfo_page.rs`, give `colour()` and `label()` the macro's colour (a setting of the
+   computer's, as `lfo_colors`) and name (`MACRO 1`, or its typed name). Every ring, pop-up dial,
+   menu head and tip takes them from there; `sources_on`, `knob_rows`, `mod_press` and
+   `mod_released` already iterate `Source::all()` and use `Patch` by source.
+2. Give each macro a handle that starts a drag: set `Modulating::patching` to `Some(Patching {
+   source: Source::Macro(n), at })` on its press (the LFOs' is the OUT jack); `mod_moved` and
+   `mod_released` then follow and drop it. `mod_scene_now` draws the cord from `lfo_ui::places(n)
+   .jack` for an LFO; give `Cord::from` the macro's handle there.
+3. Give the rings' points their values: `reading_of(source)` returns a source's present output
+   (-1..1) and whether it moves; a macro's is its knob's value (unipolar as the owner asked, so
+   its ring's swing is one-sided: draw `Ring::depth` from the knob's setting the one way).
+4. Strip knobs offer LFO 1 to 4 under an LFO head (`knob_rows`); add a MACRO head the same way.
+
