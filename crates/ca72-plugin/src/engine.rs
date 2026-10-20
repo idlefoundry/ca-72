@@ -1235,11 +1235,13 @@ pub struct Spares {
     places: [Mutex<Spare>; POLY_VOICES.2],
 }
 
-/// A place's spare voice and twin (DOUBLE's): clean, or the ones they replaced. (The twin
-/// boxed, as [`made_twin`]'s: the places are made together.)
+/// A place's spare voice and twin (DOUBLE's): clean, or the ones they replaced. (Each boxed,
+/// as [`made_twin`]'s twin is: ten voices inline made [`Spares`] some 440 KB, which `Arc::new`
+/// built on the stack of whatever thread made the engine, a host's making an instance:
+/// decisions.md R-HOST-STACK.)
 #[derive(Debug, Default)]
 struct Spare {
-    voice: Option<Voice>,
+    voice: Option<Box<Voice>>,
     twin: Option<Box<Voice>>,
     clean: bool,
 }
@@ -1263,10 +1265,10 @@ impl Spares {
                 .lock()
                 .ok()
                 .filter(|s| !s.clean)
-                .and_then(|s| s.voice.as_ref().map(Voice::rate));
+                .and_then(|s| s.voice.as_ref().map(|v| v.rate()));
             if let Some(rate) = used {
                 fill(place, rate, |s| {
-                    !s.clean && s.voice.as_ref().map(Voice::rate) == Some(rate)
+                    !s.clean && s.voice.as_ref().map(|v| v.rate()) == Some(rate)
                 });
             }
         }
@@ -1276,7 +1278,7 @@ impl Spares {
     fn make(&self, rate: f64) {
         for place in &self.places {
             fill(place, rate, |s| {
-                !(s.clean && s.voice.as_ref().map(Voice::rate) == Some(rate))
+                !(s.clean && s.voice.as_ref().map(|v| v.rate()) == Some(rate))
             });
         }
     }
@@ -1289,7 +1291,7 @@ fn fill(place: &Mutex<Spare>, rate: f64, wanted: impl Fn(&Spare) -> bool) {
         return;
     }
     let (mut voice, mut twin) = (
-        Some(Voice::prototype(rate)),
+        Some(Box::new(Voice::prototype(rate))),
         Some(Box::new(Voice::prototype(rate))),
     );
     if let Ok(mut s) = place.lock()
@@ -1627,7 +1629,11 @@ impl Engine {
         }
         let voices: Vec<Shared> = self.slots.iter().map(|s| s.play.clone()).collect();
         // (ULTRA's split crews made from a voice's parts, spare between runs.)
-        let template = self.slots[0].play.lock().ok().map(|p| p.voice.clone());
+        let template = self.slots[0]
+            .play
+            .lock()
+            .ok()
+            .map(|p| Box::new(p.voice.clone()));
         self.plan = self.crew.plan(&voices, workers, period, template);
         if let Some(need) = self.need() {
             self.pool = self.crew.start(self.plan, need);
@@ -1948,7 +1954,7 @@ impl Engine {
         let Some(clean) = spare.voice.as_mut().filter(|v| v.rate() == rate) else {
             return false;
         };
-        std::mem::swap(&mut p.voice, clean);
+        std::mem::swap(&mut p.voice, &mut **clean);
         if let Some(twin) = spare.twin.as_mut().filter(|v| v.rate() == rate) {
             std::mem::swap(&mut p.twin.voice, &mut **twin);
         }

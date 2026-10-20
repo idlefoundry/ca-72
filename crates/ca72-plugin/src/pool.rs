@@ -908,13 +908,15 @@ pub struct Crew<V: Play = Playing> {
 
 /// What a pool is started for: the voices, how many workers at most and the period they are
 /// made audio threads for, and a voice to make split crews from (ULTRA's); a new generation
-/// each time it is set.
+/// each time it is set. (The voice boxed: inline, the crew and each plan moved it about the
+/// stack of the host's thread that made, started or stopped the instance: decisions.md
+/// R-HOST-STACK.)
 struct Plan<V> {
     generation: u64,
     voices: Vec<Shared<V>>,
     workers: usize,
     period: Option<Duration>,
-    template: Option<Voice>,
+    template: Option<Box<Voice>>,
 }
 
 /// What passes between the audio thread and the helper thread.
@@ -997,7 +999,7 @@ impl<V: Play> Crew<V> {
         voices: &[Shared<V>],
         workers: usize,
         period: Option<Duration>,
-        template: Option<Voice>,
+        template: Option<Box<Voice>>,
     ) -> u64 {
         let _serving = lock(&self.serving);
         let (generation, old) = {
@@ -1067,7 +1069,7 @@ impl<V: Play> Crew<V> {
                 period: p.period,
                 need,
                 splits,
-                template: p.template.as_ref(),
+                template: p.template.as_deref(),
                 share: Some(share),
                 target,
             },
