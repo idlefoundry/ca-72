@@ -1122,7 +1122,7 @@ fn clap_note_expressions_and_mpe_midi_play_the_same_samples() {
 }
 
 /// TIMBRE REST through the real CLAP entry, as the computer's `settings.toml` chooses it
-/// (decisions.md R-TIMBRE-REST), each in a process of its own with a shared folder of its own:
+/// (decisions.md R-MPE), each in a process of its own with a shared folder of its own:
 /// at "centre" (and with none set) a host's brightness at 0.5 is at rest, the notes the same to
 /// the bit as with none, TIMBRE TO FILTER turned up; at "zero" it is half the reach, audibly not;
 /// at "start", a note's first brightness is where it begins, so 0.5 then 0.9 is heard and 0.5

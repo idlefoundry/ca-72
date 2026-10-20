@@ -3128,7 +3128,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
-        // (Timbres 0..1 from 0, as R-MPE first had them: R-TIMBRE-REST's ZERO.)
+        // (Timbres 0..1 from 0, as R-MPE first had them: R-MPE's ZERO.)
         p.params.set_timbre_rest(expression::TimbreRest::Zero);
         p.params.midi_map.assign(learnable("cutoff"), on(1, 74));
         let cutoff = p.params.cutoff.value();
@@ -3194,7 +3194,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
-        // (Timbres 0..1 from 0, as R-MPE first had them: R-TIMBRE-REST's ZERO.)
+        // (Timbres 0..1 from 0, as R-MPE first had them: R-MPE's ZERO.)
         p.params.set_timbre_rest(expression::TimbreRest::Zero);
         rpn(&mut p, &mut c, 15, 6, 5);
         assert_eq!(p.expressions.zones(), [0, 5]);
@@ -3229,7 +3229,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut p = initialised(true);
         let mut c = hostless(&p);
-        // (Timbres 0..1 from 0, as R-MPE first had them: R-TIMBRE-REST's ZERO.)
+        // (Timbres 0..1 from 0, as R-MPE first had them: R-MPE's ZERO.)
         p.params.set_timbre_rest(expression::TimbreRest::Zero);
         send(
             &mut p,
@@ -3406,7 +3406,7 @@ mod tests {
         }
     }
 
-    /// TIMBRE REST at its default, the centre (decisions.md R-TIMBRE-REST): ordinary CC 74 at 64
+    /// TIMBRE REST at its default, the centre (decisions.md R-MPE): ordinary CC 74 at 64
     /// and a host's brightness at 0.5 are at rest, the output with TIMBRE TO FILTER turned up
     /// the same to the bit as with no timbre at all, the one instrument and POLY; 0 and 127
     /// (brightness 0 and 1) reach -1 and 1, a member channel's CC 74 alike.
@@ -3478,7 +3478,7 @@ mod tests {
         }
     }
 
-    /// TIMBRE REST at START (decisions.md R-TIMBRE-REST): every note's timbre is measured from
+    /// TIMBRE REST at START (decisions.md R-MPE): every note's timbre is measured from
     /// where it began, a fresh touch at rest whatever its CC 74. An MPE member channel's begins
     /// at the channel's last value before the note, else its first after; a host's brightness
     /// at its first value; ordinary MIDI's shared CC 74 at its value as the phrase began (the
@@ -3556,7 +3556,7 @@ mod tests {
         assert_eq!(p.engine.shared_expression().1, step(80));
     }
 
-    /// TIMBRE REST changed while a note is held (decisions.md R-TIMBRE-REST): the note's and the
+    /// TIMBRE REST changed while a note is held (decisions.md R-MPE): the note's and the
     /// shared timbre measured afresh at once; at ZERO, CC 74 is 0..1 from 0 as R-MPE had it.
     #[test]
     fn the_timbre_rest_changed_while_playing_measures_afresh() {
@@ -3583,7 +3583,7 @@ mod tests {
         assert_eq!(p.engine.key_expression(60).timbre, 0.0);
     }
 
-    /// The INPUT screen's counts (decisions.md R-TIMBRE-REST): each note's own pressure, timbre
+    /// The INPUT screen's counts (decisions.md R-MPE): each note's own pressure, timbre
     /// and bend (a member channel's, polyphonic aftertouch, a host's note expressions) counted
     /// per note; ordinary channel pressure and CC 74 (the master channel's included) as the
     /// channel's; anything else neither.

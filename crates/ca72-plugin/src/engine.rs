@@ -163,9 +163,8 @@ pub struct Controls {
 }
 
 /// How far a voice's note's pressure (0..1) and timbre (-1..1, 0 at rest) move it (decisions.md
-/// R-MPE, R-TIMBRE-REST): its
-/// MODULATION wheel's MIDI share, as a keyboard's wheel moves it (-1..1, 1 adding a wheel
-/// pushed fully forward at full pressure), and its filter's cutoff, octaves at full.
+/// R-MPE): its MODULATION wheel's MIDI share, as a keyboard's wheel moves it (-1..1, 1 adding a
+/// wheel pushed fully forward at full pressure), and its filter's cutoff, octaves at full.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Reach {
     pub pressure_mod: f64,
@@ -183,7 +182,7 @@ impl Reach {
 
 /// A note's own expression, as MPE or a host's note expressions give it (decisions.md R-MPE):
 /// its pressure, 0..1; its timbre, -1..1 and 0 at rest, as the computer's TIMBRE REST measures
-/// it (`expression::TimbreRest`, R-TIMBRE-REST: 0..1 from 0 at ZERO); and its own pitch bend,
+/// it (`expression::TimbreRest`, R-MPE: 0..1 from 0 at ZERO); and its own pitch bend,
 /// semitones (on top of the PITCH wheel's, which every voice shares).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Expression {
@@ -254,7 +253,7 @@ pub enum Event {
         expression: Expression,
     },
     /// The pressure (0..1) and timbre (-1..1, 0 at rest) every voice shares, ordinary MIDI's
-    /// channel pressure and control change 74 (decisions.md R-MPE, R-TIMBRE-REST): a voice takes
+    /// channel pressure and control change 74 (decisions.md R-MPE): a voice takes
     /// the larger of its own pressure and this, and of its own timbre and this the one farther
     /// from rest ([`farther`]).
     ChannelPressure(f32),
@@ -714,7 +713,7 @@ impl Expressed {
 }
 
 /// Of a note's own timbre and the one every voice shares, the one farther from rest (0), the
-/// note's where they are as far (decisions.md R-TIMBRE-REST): a note with none of its own takes
+/// note's where they are as far (decisions.md R-MPE): a note with none of its own takes
 /// the shared, a shared one at rest leaves the note's alone. Timbres measured from 0 (TIMBRE
 /// REST at ZERO) are never below it, and this is then the larger, as it had been, to the bit.
 pub fn farther(own: f32, shared: f32) -> f32 {
@@ -6407,7 +6406,7 @@ mod expression_tests {
         assert_eq!(e.keys[55], x(0.0, 0.0, 0.0));
     }
 
-    /// A timbre about its rest (decisions.md R-TIMBRE-REST): a voice takes of its note's and the
+    /// A timbre about its rest (decisions.md R-MPE): a voice takes of its note's and the
     /// shared one the one farther from rest, its note's where as far; a note with none takes
     /// the shared, and a shared one at rest leaves each note's alone. Timbres from 0 (ZERO)
     /// take the larger, as before.
@@ -6540,7 +6539,7 @@ mod expression_tests {
         e.event(Event::Timbre(-2.0));
         assert!(e.asleep());
         assert_eq!(e.keys[60], x(0.0, 1.0, BEND_MOST));
-        // (A timbre runs -1..1 about its rest, R-TIMBRE-REST.)
+        // (A timbre runs -1..1 about its rest, R-MPE.)
         assert_eq!((e.pressure, e.timbre), (0.0, -1.0));
     }
 }

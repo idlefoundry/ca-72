@@ -3732,7 +3732,7 @@ impl Editing {
         // not 0; INPUT reading what the audio thread heard in the last few seconds.
         self.browser.bar.mpe = reaching(&self.params);
         let now = Instant::now();
-        let counts = (0u32, 0u32); // TODO-HEARD self.params.heard.counts()
+        let counts = self.params.heard.counts();
         let (was, per_note, channel) = self.heard;
         self.heard = (
             counts,
@@ -7145,11 +7145,10 @@ mod tests {
     #[test]
     fn knob_entry_opens_every_operable_knob_and_selector_without_a_gesture() {
         let (mut e, host, _) = editing_poly();
-        // (The arpeggiator's drawer's knobs take theirs in its readouts:
-        // `the_arp_drawer_takes_knob_entry_in_its_readouts`.)
+        // (The drawers' knobs take theirs in their readouts:
+        // `the_arp_drawer_takes_knob_entry_in_its_readouts`, `the_mpe_drawer_operates_its_parameters`.)
         for c in CONTROLS.iter().filter(|c| {
-            matches!(c.kind, Kind::Knob { .. } | Kind::Selector(_))
-                && c.place != ca72_panel::controls::Place::Arp
+            matches!(c.kind, Kind::Knob { .. } | Kind::Selector(_)) && !c.place.is_drawer()
         }) {
             let i = ca72_panel::controls::index(c.param).expect("a control");
             if !e.operable(i) {
@@ -7573,7 +7572,13 @@ mod tests {
         let m = e.learning.menu().expect("a menu");
         let (w, h) = m.extent(e.renderer.fonts());
         assert!(m.x >= 0.0 && m.x + w <= art::W && m.y + h <= art::H);
-        assert!(m.y > strip::centre(Rail::Plugin, StripTarget::Bar(BarTarget::Settings)).1);
+        // (Under the key where there is room; else, as with MPE's group at this size, its foot
+        // at the window's, over the rail: decisions.md R-MPE.)
+        if settings_menu_corner().1 + h <= art::H {
+            assert!(m.y > strip::centre(Rail::Plugin, StripTarget::Bar(BarTarget::Settings)).1);
+        } else {
+            assert!((m.y + h - art::H).abs() < 1e-6);
+        }
         menu_item(&mut e, "CLASSIC");
         assert_eq!(
             (e.settings.skin, e.renderer.skin()),
@@ -7739,7 +7744,8 @@ mod tests {
         e.draw();
         let m = e.learning.menu().expect("a menu");
         let (_, h) = m.extent(e.renderer.fonts());
-        assert!(m.y >= 0.0 && m.y + h <= DRAWER_TOP, "{} + {h}", m.y);
+        // (Shrunk to fit, its foot the drawer's top to a rounding.)
+        assert!(m.y >= 0.0 && m.y + h <= DRAWER_TOP + 1e-9, "{} + {h}", m.y);
         menu_item(&mut e, "STANDARD");
         assert_eq!(
             (
@@ -7775,7 +7781,7 @@ mod tests {
             e.learning
                 .menu()
                 .map(|m| (m.heads.clone(), m.marked.clone())),
-            Some((vec![0, 3, 6, 9, 12], vec![1, 4, 7]))
+            Some((vec![0, 3, 6, 9, 12, 14], vec![1, 4, 7]))
         );
         // Oscillator 2 at +5 semitones, oscillator 3's pot at its clockwise end (+8.22).
         let ps: Arc<dyn Params> = params.clone();
@@ -8633,6 +8639,36 @@ mod tests {
             e.update_scene();
             assert!(!e.browser.bar.mpe, "{}", q.name());
         }
+    }
+
+    /// INPUT (decisions.md R-MPE) reads MPE while each note's own expression came in the last
+    /// 3 s, else CHANNEL while ordinary channel pressure or CC 74 did, else is dark; and the
+    /// drawer's frame follows it.
+    #[test]
+    fn the_mpe_drawers_input_reads_what_came_in_lately() {
+        use mpe_ui::Input;
+        let (mut e, _, params) = editing();
+        mpe_open(&mut e);
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::None);
+        params.heard.channel();
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::Channel);
+        params.heard.note();
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::Mpe);
+        assert!(e.draw());
+        // Each note's own, quiet for longer than 3 s: the channel's, heard since, shows.
+        params.heard.channel();
+        e.update_scene();
+        let long_ago = Instant::now() - HEARD_FOR - Duration::from_millis(10);
+        e.heard.1 = Some(long_ago);
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::Channel);
+        e.heard.2 = Some(long_ago);
+        e.update_scene();
+        assert_eq!(e.mpe_scene.input, Input::None);
+        assert!(e.draw());
     }
 
     /// The drawer's knobs operate the expression's four amounts (decisions.md R-MPE): turned,

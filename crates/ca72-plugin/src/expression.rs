@@ -18,7 +18,7 @@
 //! that MIDI without them sends nothing new.
 //!
 //! The timbre goes to the engine measured from its rest point, the computer's TIMBRE REST
-//! ([`TimbreRest`], decisions.md R-TIMBRE-REST): -1..1 and 0 at rest, a note or channel that
+//! ([`TimbreRest`], decisions.md R-MPE): -1..1 and 0 at rest, a note or channel that
 //! never sent one at rest whatever the point. What arrives, per note and on ordinary channels,
 //! is counted for the editor's INPUT screen ([`Heard`]).
 
@@ -87,7 +87,7 @@ impl Mode {
 }
 
 /// Where a timbre rests, a setting of the computer's (`settings.rs`, `timbre_rest`; decisions.md
-/// R-TIMBRE-REST). The engine is given each timbre measured from it, -1..1 and 0 at rest
+/// R-MPE). The engine is given each timbre measured from it, -1..1 and 0 at rest
 /// ([`TimbreRest::measured`]):
 /// - `Centred` (the default, "centre"): control change 74 at 64 and a host's brightness at 0.5
 ///   rest; 0 is -1, 127 (1.0) is 1. Many MPE controllers rest near 64.
@@ -173,7 +173,7 @@ fn centred(x: f32) -> f32 {
 }
 
 /// What expression has arrived, counted for the editor's INPUT screen (decisions.md
-/// R-TIMBRE-REST): each count goes up (wrapping) on the audio thread as a message arrives, and
+/// R-MPE): each count goes up (wrapping) on the audio thread as a message arrives, and
 /// the editor times how recently each changed. `per_note`: a note's own pressure, timbre or
 /// bend (an MPE member channel's, polyphonic aftertouch, a host's note expressions);
 /// `channel`: ordinary channel pressure or control change 74 (outside a zone's members).
@@ -192,11 +192,11 @@ impl Heard {
         )
     }
 
-    fn note(&self) {
+    pub(crate) fn note(&self) {
         self.per_note.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn channel(&self) {
+    pub(crate) fn channel(&self) {
         self.channel.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -335,7 +335,7 @@ impl Expressions {
         };
         if let Some(zone) = self.zone_of(channel) {
             e.pressure = e.pressure.max(self.pressure[c]);
-            // (Its own and its channel's, the one farther from rest: R-TIMBRE-REST.)
+            // (Its own and its channel's, the one farther from rest: R-MPE.)
             let member = rest.measured(self.timbre[c], self.member_start[c][k]);
             e.timbre = farther(e.timbre, member);
             e.bend += self.bend[c] * self.range[zone];
@@ -728,7 +728,7 @@ mod tests {
         assert_eq!(Mode::of_code(9), Mode::Auto);
     }
 
-    /// TIMBRE REST's words and indexes go both ways, anything else the centre (R-TIMBRE-REST).
+    /// TIMBRE REST's words and indexes go both ways, anything else the centre (R-MPE).
     #[test]
     fn the_timbre_rests_words_and_indexes_go_both_ways() {
         for (i, r) in TimbreRest::ALL.into_iter().enumerate() {
@@ -741,7 +741,7 @@ mod tests {
         assert_eq!(TimbreRest::default(), TimbreRest::Centred);
     }
 
-    /// The centre's law (R-TIMBRE-REST): CC 74's 0, 64 and 127 (as a host gives them, v/127) are
+    /// The centre's law (R-MPE): CC 74's 0, 64 and 127 (as a host gives them, v/127) are
     /// -1, 0 exactly and 1, and a host's brightness 0, 0.5 and 1 the same; it never falls as
     /// either rises; none heard is at rest at every rest point, and ZERO is what was received.
     #[test]
@@ -769,7 +769,7 @@ mod tests {
 
     /// Of a member channel's CC 74 and its note's own brightness (both in one note, which MPE
     /// and a host would rarely both send), the one farther from rest; at ZERO the larger, as
-    /// R-MPE had it (R-TIMBRE-REST).
+    /// R-MPE had it (R-MPE).
     #[test]
     fn a_notes_own_timbre_and_its_channels_take_the_one_farther_from_rest() {
         let mut x = Expressions::default();

@@ -337,10 +337,10 @@ pub struct Ca72Params {
     /// decisions.md R-MPE). Not the session's.
     pub mpe: Arc<AtomicU8>,
     /// Where a timbre rests on this computer (`settings.rs`, `expression::TimbreRest`;
-    /// decisions.md R-TIMBRE-REST), read by the audio thread each block. Not the session's.
+    /// decisions.md R-MPE), read by the audio thread each block. Not the session's.
     pub timbre_rest: Arc<AtomicU8>,
     /// What expression has arrived, per note and on ordinary channels, counted by the audio
-    /// thread for the editor's INPUT screen (`expression::Heard`; R-TIMBRE-REST). Not the
+    /// thread for the editor's INPUT screen (`expression::Heard`; R-MPE). Not the
     /// session's.
     pub heard: Arc<crate::expression::Heard>,
 
@@ -939,7 +939,7 @@ impl Ca72Params {
         self.mpe.store(mode.code(), Ordering::Relaxed);
     }
 
-    /// Where a timbre rests on this computer (decisions.md R-TIMBRE-REST; `settings.rs`).
+    /// Where a timbre rests on this computer (decisions.md R-MPE; `settings.rs`).
     pub fn timbre_rest(&self) -> crate::expression::TimbreRest {
         crate::expression::TimbreRest::from_index(self.timbre_rest.load(Ordering::Relaxed))
     }

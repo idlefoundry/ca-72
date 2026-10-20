@@ -3,7 +3,7 @@
 //! the look (the skin) the editor is drawn in, its lettering's size, how the FREQUENCY
 //! knobs' dials read, the MOD wheel's MIDI source (R-MODWHEEL-SOURCE), the standalone's TEMPO
 //! (R-ARP), whether agents may operate the standalone application (R-MCP), where MPE's zones
-//! come from (R-MPE) and where a timbre rests (R-TIMBRE-REST). In the shared
+//! come from (R-MPE) and where a timbre rests (R-MPE). In the shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, and as one changes only that key written, the file read again under a lock
 //! every instance takes (`settings.toml.lock`), so that one editor's change never undoes
@@ -66,7 +66,7 @@ pub struct Settings {
     /// always, for hosts that do not pass the message on) or "off".
     pub mpe: crate::expression::Mode,
     /// Where a timbre (control change 74, a host's brightness) rests (decisions.md
-    /// R-TIMBRE-REST): its centre unless set. Kept as `timbre_rest`, "centre", "zero" (0..1 from
+    /// R-MPE): its centre unless set. Kept as `timbre_rest`, "centre", "zero" (0..1 from
     /// 0, as the CA-72 first had it) or "start" (each note's from where it began).
     pub timbre_rest: crate::expression::TimbreRest,
 }
@@ -664,7 +664,7 @@ mod tests {
     }
 
     /// A timbre rests at its centre unless `timbre_rest` says "zero" or "start"; anything else
-    /// reads as the default (R-TIMBRE-REST).
+    /// reads as the default (R-MPE).
     #[test]
     fn the_timbre_rest_reads_its_three_words_and_else_centre() {
         use crate::expression::TimbreRest;
@@ -685,7 +685,7 @@ mod tests {
         }
     }
 
-    /// The menu's MPE and TIMBRE REST, kept as each changes (R-MPE, R-TIMBRE-REST): each written
+    /// The menu's MPE and TIMBRE REST, kept as each changes (R-MPE): each written
     /// as its word, read back, applied in memory alike, and neither undoing the other or a
     /// setting kept before.
     #[test]

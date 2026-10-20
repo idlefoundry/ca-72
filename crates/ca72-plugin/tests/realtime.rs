@@ -887,7 +887,7 @@ fn the_arpeggiator_neither_allocates_nor_frees() {
 /// aftertouch and a host's note expressions (pressure, tuning, brightness), ordinary channel
 /// pressure and timbre, the MOD wheel on polyphonic aftertouch, the reaches automated, POLY
 /// switched and voices stolen, QUALITY at LO and HI, Reset All Controllers and All Notes Off,
-/// TIMBRE REST switched through its three (R-TIMBRE-REST) and the INPUT screen's counts read,
+/// TIMBRE REST switched through its three (R-MPE) and the INPUT screen's counts read,
 /// a block at a time.
 #[test]
 fn mpe_expression_neither_allocates_nor_frees() {

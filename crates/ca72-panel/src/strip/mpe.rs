@@ -52,7 +52,7 @@ pub const KNOB_PARAMS: [&str; 4] = [
 const LEGENDS: [&str; 4] = ["MODULATION", "CUTOFF", "MODULATION", "CUTOFF"];
 /// Each readout's cells: four, for MODULATION's "-100" (CUTOFF's "-2.5" needs three), the same
 /// in all four so that their digits are one size.
-pub const CELLS: [usize; 4] = [4; 4];
+pub const CELLS: usize = 4;
 /// The groups' titles, each before its first unit (right-aligned this far left of its middle),
 /// and their size.
 const GROUPS: [(usize, &str); 2] = [(0, "PRESSURE"), (2, "TIMBRE")];
@@ -404,7 +404,7 @@ impl MpeRenderer {
                     &self.options,
                     s,
                     (x, y - oy, w, h),
-                    CELLS[i],
+                    CELLS,
                     text,
                     *lit,
                     &Lamp::ORANGE,
@@ -568,11 +568,14 @@ mod tests {
         for w in UNITS.windows(2) {
             assert!(w[1] - w[0] >= 2.0 * half);
         }
-        assert!(INPUT.0 > LEFT && INPUT.0 + INPUT.2 < RULES[0]);
-        // Each group between its rules, its title before its first knob's dial.
-        assert!(UNITS[0] - TITLE_LEFT - 230.0 > RULES[0]);
-        assert!(UNITS[1] + half < RULES[1] && UNITS[2] - TITLE_LEFT - 230.0 > RULES[1]);
-        assert!(UNITS[3] + half < RIGHT);
+        const {
+            assert!(INPUT.0 > LEFT && INPUT.0 + INPUT.2 < RULES[0]);
+            // Each group between its rules, its title (some 230 units) before its first knob's
+            // dial.
+            assert!(UNITS[0] - TITLE_LEFT - 230.0 > RULES[0]);
+            assert!(UNITS[2] - TITLE_LEFT - 230.0 > RULES[1]);
+        }
+        assert!(UNITS[1] + half < RULES[1] && UNITS[3] + half < RIGHT);
         // CUTOFF's OCT (some 50 units wide) inside the trim.
         let (rx, _, rw, _) = readout(3);
         assert!(rx + rw + 36.0 + 30.0 < RIGHT);
