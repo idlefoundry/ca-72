@@ -423,7 +423,9 @@ you can type one at it (`8.` dotted, `8t` triplet, `4x` four bars). The note bes
 shows the value chosen. FREQUENCY keeps its own place for when the key is off. At any other
 RANGE the key is dimmed and does nothing, and the dial reads semitones. While timed, the
 oscillator ignores the keyboard, the PITCH wheel and GLIDE; in the standalone and with the host
-stopped it runs on at the tempo (the standalone's TEMPO). Oscillator 3 timed at LO makes a
+stopped it runs on at the tempo (the standalone's TEMPO). So while oscillator 3 is timed, OSC. 3
+CONTROL is dimmed and does nothing; it keeps its setting for when the key is off or RANGE leaves
+LO. Oscillator 3 timed at LO makes a
 tempo-synced modulation source through MODULATION MIX.
 
 **Lettering.** If the panel's print is hard to read at the size the editor opens, choose

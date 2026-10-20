@@ -123,6 +123,9 @@ pub struct Scene {
     pub detune_off: bool,
     /// VOICES where it does nothing (the plug-in's `voices_inert`): dimmed, as DETUNE.
     pub voices_off: bool,
+    /// OSC. 3 CONTROL while oscillator 3 is timed (its key on, its RANGE at LO; decisions.md
+    /// R-OSC-TIMED), where it does nothing: dimmed, as VOICES.
+    pub osc3_control_off: bool,
     /// A tip: its text, centred above (x, y) in the drawing.
     pub tip: Option<(String, f64, f64)>,
     /// MIDI Learn (decisions.md R34): the control being learned, by its index in [`CONTROLS`]
@@ -184,6 +187,7 @@ impl Default for Scene {
             opening: crate::ultra::Opening::default(),
             detune_off: false,
             voices_off: false,
+            osc3_control_off: false,
             tip: None,
             learning: None,
             note: None,
@@ -854,18 +858,31 @@ impl Renderer {
                     layer.body = String::new();
                 }
                 // FEEDBACK while EXTERNAL INPUT is closed: dimmed as the parts with no
-                // parameter are, still operable; DETUNE in SCATTER and VOICES where it does
-                // nothing: dimmed so, and not operable (the editor's `operable`).
+                // parameter are, still operable; DETUNE in SCATTER, VOICES where it does
+                // nothing and OSC. 3 CONTROL while oscillator 3 is timed: dimmed so, and not
+                // operable (the editor's `operable`).
                 if (silent && c.param == "feedback")
                     || (scene.detune_off && c.param == "double")
                     || (scene.voices_off && c.param == "voices")
+                    || (scene.osc3_control_off && c.param == "osc3_control")
                 {
                     if worn {
-                        // (A picture is not dimmed: the knob is shaded.)
-                        layer.over.push_str(&format!(
-                            "<circle r='{}' fill='#000' fill-opacity='0.5'/>",
-                            crate::svg::N(art::STD.skirt + 1.0)
-                        ));
+                        // (A picture is not dimmed: the knob is shaded, a rocker over the
+                        // whole of its picture.)
+                        let n = crate::svg::N;
+                        layer.over.push_str(&match c.kind {
+                            Kind::Rocker { w, h, .. } => format!(
+                                "<rect x='{}' y='{}' width='{}' height='{}' rx='4' fill='#000' fill-opacity='0.5'/>",
+                                n(-w / 2.0 - 2.0),
+                                n(-h / 2.0 - 2.0),
+                                n(w + 4.0),
+                                n(h + 4.0)
+                            ),
+                            _ => format!(
+                                "<circle r='{}' fill='#000' fill-opacity='0.5'/>",
+                                n(art::STD.skirt + 1.0)
+                            ),
+                        });
                     } else {
                         layer.body = format!("<g opacity='0.5'>{}</g>", layer.body);
                     }
@@ -2370,6 +2387,62 @@ mod tests {
             }
             r.render(&scene);
             assert!(r.frame() == &before, "{skin:?}: not the frame before");
+        }
+    }
+
+    /// OSC. 3 CONTROL while oscillator 3 is timed (decisions.md R-OSC-TIMED) in either skin, on
+    /// or off: dimmed in place (the frame put together in part the frame put together whole),
+    /// only about the rocker (shaded darker in the worn skin), and live again the frame before,
+    /// to the pixel.
+    #[test]
+    fn osc3_control_is_dimmed_and_undimmed_in_place() {
+        let s = 0.2;
+        let at = index("osc3_control").expect("a control");
+        for skin in [Skin::Drawn, Skin::Worn] {
+            for on in [0.0, 1.0] {
+                let mut scene = Scene {
+                    values: [0.5; CONTROLS.len()],
+                    ..Scene::default()
+                };
+                scene.values[at] = on;
+                let mut r = Renderer::with_skin(skin, s, 1.0);
+                r.render(&scene);
+                let before = r.frame().clone();
+                scene.osc3_control_off = true;
+                assert!(r.render(&scene), "{skin:?} {on}");
+                let mut whole = Renderer::with_skin(skin, s, 1.0);
+                whole.render(&scene);
+                assert!(
+                    r.frame() == whole.frame(),
+                    "{skin:?} {on}: not as put together whole"
+                );
+                let lum = |p: &resvg::tiny_skia::PremultipliedColorU8| {
+                    u32::from(p.red()) + u32::from(p.green()) + u32::from(p.blue())
+                };
+                let (mut changed, mut darker) = (0, 0);
+                for (a, b) in before.pixels().iter().zip(r.frame().pixels()) {
+                    if a != b {
+                        changed += 1;
+                        darker += usize::from(lum(b) < lum(a));
+                    }
+                }
+                let all = before.pixels().len();
+                assert!(changed > 0, "{skin:?} {on}: not dimmed");
+                assert!(
+                    changed * 100 < all,
+                    "{skin:?} {on}: {changed} of {all} changed"
+                );
+                // (The worn skin shades it; the drawn skin's half opacity lifts its darks too.)
+                if skin == Skin::Worn {
+                    assert!(
+                        darker == changed,
+                        "{skin:?} {on}: {darker} of {changed} darker"
+                    );
+                }
+                scene.osc3_control_off = false;
+                r.render(&scene);
+                assert!(r.frame() == &before, "{skin:?} {on}: not the frame before");
+            }
         }
     }
 

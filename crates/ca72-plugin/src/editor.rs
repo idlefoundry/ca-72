@@ -2728,8 +2728,9 @@ impl Editing {
     }
 
     /// Whether control `i` answers the pointer: all but DETUNE in SCATTER (the owner: "make that
-    /// knob unresponsive unless the user is in double mode") and VOICES where it does nothing
-    /// ([`voices_inert`]), each drawn dimmed then.
+    /// knob unresponsive unless the user is in double mode"), VOICES where it does nothing
+    /// ([`voices_inert`]), a TIMED key away from LO and OSC. 3 CONTROL while oscillator 3 is
+    /// timed ([`osc3_control_inert`]), each drawn dimmed then.
     fn operable(&self, i: usize) -> bool {
         CONTROLS.get(i).is_none_or(|c| match c.param {
             "double" => self.params.doubled.value(),
@@ -2737,6 +2738,8 @@ impl Editing {
             // A TIMED key away from its RANGE's LO (R-OSC-TIMED).
             "osc2_timed" => !timed_inert(&self.params, 1),
             "osc3_timed" => !timed_inert(&self.params, 2),
+            // OSC. 3 CONTROL while oscillator 3 is timed.
+            "osc3_control" => !osc3_control_inert(&self.params),
             _ => true,
         })
     }
@@ -3789,6 +3792,7 @@ impl Editing {
         self.scene.power = !self.params.bypass.value();
         self.scene.detune_off = !self.params.doubled.value();
         self.scene.voices_off = voices_inert(&self.params);
+        self.scene.osc3_control_off = osc3_control_inert(&self.params);
         // Oscillators 2's and 3's timed keys and dials (decisions.md R-OSC-TIMED).
         self.scene.timed = timed_scene(&self.params);
         self.learning.timed = [self.params.timed_now(1), self.params.timed_now(2)];
@@ -4464,12 +4468,6 @@ fn mpe_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], input: mpe_ui::Inpu
     }
 }
 
-/// Whether VOICES does nothing (the owner, 2026-10-11, of a MONO preset's VOICES 4: "I don't
-/// think those 4 voices do anything"; decisions.md R64): in MONO (neither POLY nor UNISON)
-/// with DOUBLE, whose one pair has no place among others, or scattering with WIDTH at 0, where
-/// every one of VOICES's places is the centre (R62). Then its knob is dimmed and not operable,
-/// and its readout not lit nor typed into, as DETUNE's in SCATTER; its value stays for when it
-/// counts again.
 /// Whether oscillator `n`'s (1, 2) TIMED key does nothing: its RANGE away from LO (decisions.md
 /// R-OSC-TIMED). It is drawn dimmed and unlit then, whatever it holds, and does not answer the
 /// pointer, as VOICES where it does nothing.
@@ -4506,6 +4504,21 @@ fn timed_label(p: &Ca72Params, param: &str) -> Option<&'static str> {
     })
 }
 
+/// Whether OSC. 3 CONTROL does nothing: oscillator 3 timed (its key on, its RANGE at LO;
+/// decisions.md R-OSC-TIMED), its cycle kept to the clock whatever the keys play. Then it is
+/// dimmed and does not answer the pointer, as VOICES where it does nothing, and keeps its value,
+/// never switched off (the owner, 2026-10-20: "Okay, that's fine. Do it that way."); the host's
+/// automation and an agent still set it, to count when oscillator 3 follows the keys again.
+fn osc3_control_inert(p: &Ca72Params) -> bool {
+    p.timed_now(2)
+}
+
+/// Whether VOICES does nothing (the owner, 2026-10-11, of a MONO preset's VOICES 4: "I don't
+/// think those 4 voices do anything"; decisions.md R64): in MONO (neither POLY nor UNISON)
+/// with DOUBLE, whose one pair has no place among others, or scattering with WIDTH at 0, where
+/// every one of VOICES's places is the centre (R62). Then its knob is dimmed and not operable,
+/// and its readout not lit nor typed into, as DETUNE's in SCATTER; its value stays for when it
+/// counts again.
 fn voices_inert(p: &Ca72Params) -> bool {
     let c = p.controls();
     !c.poly && !c.unison && (p.doubled.value() || c.spread <= 0.0)
@@ -11290,6 +11303,64 @@ mod tests {
         e.hover = Some(Target::Control(key2));
         let tip = e.tip().expect("a tip").0;
         assert_eq!(tip, "OSCILLATOR-2 TIMED (at RANGE LO): On");
+    }
+
+    /// OSC. 3 CONTROL while oscillator 3 is timed (its key on, its RANGE at LO; decisions.md
+    /// R-OSC-TIMED): dimmed, and a click or the wheel on it does nothing, its value kept as it
+    /// was, on or off; with the key off or RANGE away from LO, live with its own setting.
+    #[test]
+    fn osc3_control_is_inert_while_oscillator_3_is_timed() {
+        use crate::params::Footage;
+        let index = |p: &str| ca72_panel::controls::index(p).expect("a control");
+        let control = index("osc3_control");
+        for (timed, range, inert) in [
+            (true, Footage::Lo, true),
+            (true, Footage::R8, false),
+            (false, Footage::Lo, false),
+            (false, Footage::R16, false),
+        ] {
+            for held in [true, false] {
+                let case = format!("TIMED {timed}, RANGE {range:?}, OSC. 3 CONTROL {held}");
+                let (mut e, host, params) = editing_of(
+                    Ca72Params {
+                        osc3_range: EnumParam::new("Osc 3 Range", range),
+                        osc3_timed: BoolParam::new("Osc 3 Timed", timed),
+                        osc3_control: BoolParam::new("Osc 3 Control", held),
+                        ..Ca72Params::default()
+                    },
+                    Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+                );
+                e.draw();
+                assert_eq!(osc3_control_inert(&params), inert, "{case}");
+                assert_eq!(e.scene.osc3_control_off, inert, "{case}: dimmed");
+                assert_eq!(e.operable(control), !inert, "{case}: operable");
+                // (Oscillator 3's RANGE and FREQUENCY live whatever.)
+                assert!(e.operable(index("osc3_range")) && e.operable(index("osc3_frequency")));
+                assert_eq!(e.scene.values[control], f64::from(u8::from(held)), "{case}");
+                host.take();
+                let pt = at(&e, centre("osc3_control"));
+                click(&mut e, pt);
+                let p = params.osc3_control.as_ptr();
+                if inert {
+                    go(&mut e, pt);
+                    wheel(&mut e, 1.0);
+                    wheel(&mut e, -1.0);
+                    e.end_gestures();
+                    assert!(host.take().is_empty(), "{case}: took a press or the wheel");
+                    assert_eq!(params.osc3_control.value(), held, "{case}: its value kept");
+                } else {
+                    assert_eq!(
+                        host.take(),
+                        vec![
+                            Call::Begin(p),
+                            Call::Set(p, if held { 0.0 } else { 1.0 }),
+                            Call::End(p)
+                        ],
+                        "{case}: flipped"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
