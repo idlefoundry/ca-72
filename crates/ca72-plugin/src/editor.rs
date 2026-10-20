@@ -910,6 +910,9 @@ struct PanelWindow {
     logical: (u32, u32),
     /// When the frame was last shown on the window (none since it opened or resized).
     shown: Option<Instant>,
+    /// Until when the frame is shown again at every frame, after it was first shown at a size
+    /// ([`SETTLE`]).
+    settle: Option<Instant>,
     /// When the frame was last drawn while the window could not be seen ([`HIDDEN_DRAW`]).
     hidden_drawn: Option<Instant>,
     editing: Editing,
@@ -1228,6 +1231,7 @@ impl PanelWindow {
             physical,
             logical: (width, height),
             shown: None,
+            settle: None,
             hidden_drawn: None,
             editing: Editing::new(
                 context,
@@ -1305,7 +1309,9 @@ impl PanelWindow {
         self.follow(window);
         self.keyboard(window);
         self.present(false);
-        self.shown = Some(Instant::now());
+        let now = Instant::now();
+        self.shown = Some(now);
+        self.settle = SETTLE.map(|for_| now + for_);
     }
 
     /// The pointer's look: the resize arrows over the grip and while it is dragged (R-SIZE),
@@ -4366,8 +4372,10 @@ impl Drop for Editing {
 /// to a window not yet on screen (a host maps the editor's window after its first frame:
 /// Bitwig on Linux showed it black until the pointer changed something) and, without a
 /// compositor, what a covering window hid; baseview reports neither. So on Linux the last
-/// frame is shown again at this pace, unchanged (a copy, no rendering; decisions.md R19).
-/// macOS keeps a window's pixels; Windows asks for them again (`WindowEvent::Damaged`, R28).
+/// frame is shown again at this pace, unchanged (a copy, no rendering; decisions.md R19), and
+/// at every frame for a while after a size is first shown ([`SETTLE`]). macOS keeps a window's
+/// pixels; Windows asks for them again (`WindowEvent::Damaged`, R28), as X11 does as a window is
+/// mapped or resized (baseview's change 12).
 const REPAINT: Option<Duration> = if cfg!(target_os = "linux") {
     Some(Duration::from_millis(250))
 } else {
@@ -4386,9 +4394,25 @@ static DRAWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0
 #[cfg(test)]
 static SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// How long after a frame is first shown at a size (the window opened, PANEL, SIZE, the grip)
+/// it is shown again at every frame, on X11: what is shown before the host's window has taken
+/// that size, or before the host has put it on screen, is lost. Bitwig 5.2.7 on Linux grows its
+/// window after the editor's and puts it on screen late: the editor's first frame after it
+/// reopened was lost, and the window stayed black until the next showing (decisions.md
+/// R-LINUX-RESIZE). A copy a frame, no drawing; 250 ms is the [`REPAINT`] it would wait for.
+const SETTLE: Option<Duration> = if cfg!(target_os = "linux") {
+    Some(Duration::from_millis(250))
+} else {
+    None
+};
+
 /// Whether the frame must be shown again though nothing in it changed: not yet shown since
-/// the window opened or resized, or (Linux) shown longer ago than [`REPAINT`].
-fn repaint_due(shown: Option<Instant>, now: Instant) -> bool {
+/// the window opened or resized, (Linux) settling until `settle`, or (Linux) shown longer ago
+/// than [`REPAINT`].
+fn repaint_due(shown: Option<Instant>, settle: Option<Instant>, now: Instant) -> bool {
+    if settle.is_some_and(|until| now < until) {
+        return true;
+    }
     match (shown, REPAINT) {
         (None, _) => true,
         (Some(at), Some(every)) => now.saturating_duration_since(at) >= every,
@@ -4461,10 +4485,13 @@ impl WindowHandler for PanelWindow {
         // host now, not at the editor's next event; decisions.md R34.)
         self.keyboard(window);
         // (Shown again whole when due: X11 may have dropped any of it.)
-        let due = repaint_due(self.shown, now);
+        let due = repaint_due(self.shown, self.settle, now);
         if seen && (changed || due) {
             #[cfg(test)]
             SHOWN.fetch_add(1, Ordering::Relaxed);
+            if self.shown.is_none() {
+                self.settle = SETTLE.map(|for_| now + for_);
+            }
             self.present(changed && !due);
             self.shown = Some(now);
         }
@@ -4477,9 +4504,11 @@ impl WindowHandler for PanelWindow {
                 self.resized(&info);
                 EventStatus::Captured
             }
-            // Windows repainting the window (a host's window painted its background over it):
-            // the last frame shown, again at once, unless none has been since it opened or
-            // resized (the next frame shows one). Not drawn afresh (decisions.md R28).
+            // Windows repainting the window (a host's window painted its background over it),
+            // or the X server asking for it (the window mapped or at a new size: baseview's
+            // change 12, decisions.md R-LINUX-RESIZE): the last frame shown, again at once,
+            // unless none has been since it opened or resized (the next frame shows one). Not
+            // drawn afresh (decisions.md R28).
             Event::Window(WindowEvent::Damaged) => {
                 if self.shown.is_some() {
                     self.present(false);
@@ -11407,10 +11436,27 @@ mod tests {
     #[test]
     fn a_frame_is_shown_again_on_linux_only() {
         let now = Instant::now();
-        assert!(repaint_due(None, now), "the first frame is always shown");
-        assert!(!repaint_due(Some(now), now));
+        assert!(
+            repaint_due(None, None, now),
+            "the first frame is always shown"
+        );
+        assert!(!repaint_due(Some(now), None, now));
         let later = now + Duration::from_secs(1);
-        assert_eq!(repaint_due(Some(now), later), cfg!(target_os = "linux"));
+        assert_eq!(
+            repaint_due(Some(now), None, later),
+            cfg!(target_os = "linux")
+        );
+        // Settling after a size first shown (R-LINUX-RESIZE): again at every frame, until then.
+        let until = SETTLE.map(|for_| now + for_);
+        let next = now + Duration::from_millis(15);
+        assert_eq!(
+            repaint_due(Some(now), until, next),
+            cfg!(target_os = "linux")
+        );
+        assert!(
+            !repaint_due(Some(next), until, now + Duration::from_millis(260)),
+            "settled"
+        );
     }
 
     /// The window as it opens (the panel and the strip under it), written to
