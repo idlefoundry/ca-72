@@ -4,7 +4,8 @@
 //! panel's renderer, the strip's over its foot, the editor's composing of the two
 //! (`ca72-plugin`'s `draw` and `compose`) and the frame's conversion to the window's pixels (its
 //! `present`, softbuffer's 0RGB), timed together: the median and the slowest of 40. Then the
-//! arpeggiator's drawer (decisions.md R-ARP) and the standalone's effects' drawer (R-FX-DRAWER);
+//! arpeggiator's drawer (decisions.md R-ARP), the expression drawer (R-MPE) and the standalone's
+//! effects' drawer (R-FX-DRAWER);
 //! `CA72_RAIL=effects` the strip with the standalone's rail (its FX key).
 
 use std::time::{Duration, Instant};
@@ -130,6 +131,7 @@ fn measure(s: f64) {
     });
     times("nothing changed", 100, &mut |_, _, _| {});
     arp(s, &mut panel);
+    mpe(s, &mut panel);
     fx(s, &panel);
 }
 
@@ -342,6 +344,83 @@ fn arp(s: f64, panel: &mut Renderer) {
         sc.direction = i % 4
     });
     times("the drawer open, nothing changed", &mut |_, _| {});
+}
+
+/// The expression drawer (decisions.md R-MPE), as the arpeggiator's: its first drop (at once and
+/// later), a knob turned in it, INPUT lit and dark, and nothing changed.
+fn mpe(s: f64, panel: &mut Renderer) {
+    use ca72_panel::strip::mpe::{self, Input, MpeRenderer, MpeScene};
+    let r = |t: &str| (t.to_owned(), true);
+    let mut scene = MpeScene {
+        input: Input::Mpe,
+        readouts: [r("50"), r("1.0"), r("-30"), r("2.5")],
+        knobs: [0.75, 0.625, 0.35, 0.8125],
+    };
+    let mut composed = panel.frame().clone();
+    let put = |d: &MpeRenderer, c: &mut Pixmap| {
+        let top = mpe::top_px(s) as usize;
+        let f = d.frame();
+        let (x0, x1) = (
+            (mpe::LEFT * s).round() as usize,
+            (mpe::RIGHT * s).round() as usize,
+        );
+        let w = c.width() as usize;
+        for y in 0..f.height() as usize {
+            let (from, to) = ((y * f.width() as usize + x0) * 4, ((top + y) * w + x0) * 4);
+            let n = (x1 - x0) * 4;
+            c.data_mut()[to..to + n].copy_from_slice(&f.data()[from..from + n]);
+        }
+    };
+    let t = Instant::now();
+    let mut d = MpeRenderer::new(s, Skin::Worn, ca72_panel::Lettering::Standard);
+    let made = t.elapsed();
+    d.render(&scene, panel);
+    put(&d, &mut composed);
+    println!(
+        "  {:<36} {:5.1} ms (its plate made on its thread, waited for)",
+        "MPE: the drawer's first drop, at once",
+        ms(t.elapsed())
+    );
+    println!(
+        "  {:<36} {:5.2} ms (on the editor's thread as it opens)",
+        "MPE: the drawer's renderer made",
+        ms(made)
+    );
+    let mut d = MpeRenderer::new(s, Skin::Worn, ca72_panel::Lettering::Standard);
+    std::thread::sleep(Duration::from_millis(1500));
+    let t = Instant::now();
+    d.render(&scene, panel);
+    put(&d, &mut composed);
+    println!(
+        "  {:<36} {:5.1} ms (its plate made already)",
+        "MPE: the drawer's first drop, later",
+        ms(t.elapsed())
+    );
+    let mut times = |name: &str, step: &mut dyn FnMut(usize, &mut MpeScene)| {
+        let mut v = Vec::new();
+        for i in 0..40 {
+            step(i, &mut scene);
+            let t = Instant::now();
+            if d.render(&scene, panel) {
+                put(&d, &mut composed);
+            }
+            v.push(t.elapsed());
+        }
+        v.sort();
+        println!(
+            "  {name:<36} median {:5.1} ms, slowest {:5.1} ms",
+            ms(v[v.len() / 2]),
+            ms(v[v.len() - 1])
+        );
+    };
+    times("MPE: a knob turned (TIMBRE CUTOFF)", &mut |i, sc| {
+        sc.knobs[3] = 0.3 + 0.01 * i as f64;
+        sc.readouts[3].0 = format!("{:.1}", -1.6 + 0.08 * i as f64);
+    });
+    times("MPE: INPUT lit and dark", &mut |i, sc| {
+        sc.input = [Input::Mpe, Input::Channel, Input::None][i % 3];
+    });
+    times("MPE: the drawer open, nothing changed", &mut |_, _| {});
 }
 
 fn ms(d: Duration) -> f64 {

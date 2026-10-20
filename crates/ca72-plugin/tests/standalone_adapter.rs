@@ -795,3 +795,178 @@ fn preset_pads_work_in_the_production_adapter_without_callback_allocation() {
     }
     adapter.deactivate();
 }
+
+/// Raw MPE MIDI into the standalone (decisions.md R-MPE): the MPE Configuration Message, then a
+/// note on a member channel with its bend, timbre and pressure, its pressure changing, through
+/// the production adapter, plays the same samples to the bit as the plug-in given the same
+/// note's expression as a host's note expressions (pressure, brightness, tuning), with no
+/// allocation in the adapter's callbacks; and not the samples of the note without it.
+#[test]
+fn standalone_raw_mpe_matches_host_note_expressions_without_callback_allocation() {
+    let reach = |p: &ca72_plugin::params::Ca72Params| {
+        [
+            (p.pressure_filter.as_ptr(), 0.8),
+            (p.timbre_filter.as_ptr(), 0.3),
+            (p.pressure_mod.as_ptr(), 0.9),
+        ]
+    };
+    let bend = 10_240u16;
+    let semitones = ((f32::from(bend) / 16_383.0) * 2.0 - 1.0) * 48.0;
+    let seven = |v: u8| f32::from(v) / 127.0;
+    let config = BufferConfig {
+        sample_rate: 48_000.0,
+        min_buffer_size: None,
+        max_buffer_size: 256,
+        process_mode: ProcessMode::Realtime,
+    };
+    // The plug-in given host note expressions (or, `plain`, the notes alone).
+    let direct = |plain: bool| {
+        let mut p = Ca72::default();
+        p.parameters().noise_seed.store(42, Ordering::Relaxed);
+        let params: Arc<dyn Params> = p.parameters().clone();
+        let mut c = TestProcessContext::<Ca72>::new(params, 48_000.0, ProcessMode::Realtime);
+        for (param, v) in reach(p.parameters()) {
+            c.automate(param, v);
+        }
+        assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Initial));
+        p.reset();
+        let mut out = Vec::new();
+        for b in 0..12 {
+            let x = |e| if plain { None } else { Some(e) };
+            let events: Vec<Option<NoteEvent<()>>> = match b {
+                0 => vec![
+                    Some(NoteEvent::NoteOn {
+                        timing: 0,
+                        voice_id: None,
+                        channel: 0,
+                        note: 60,
+                        velocity: 100.0 / 127.0,
+                    }),
+                    x(NoteEvent::PolyTuning {
+                        timing: 0,
+                        voice_id: None,
+                        channel: 0,
+                        note: 60,
+                        tuning: semitones,
+                    }),
+                    x(NoteEvent::PolyBrightness {
+                        timing: 0,
+                        voice_id: None,
+                        channel: 0,
+                        note: 60,
+                        brightness: seven(100),
+                    }),
+                    x(NoteEvent::PolyPressure {
+                        timing: 0,
+                        voice_id: None,
+                        channel: 0,
+                        note: 60,
+                        pressure: seven(96),
+                    }),
+                ],
+                4 => vec![x(NoteEvent::PolyPressure {
+                    timing: 0,
+                    voice_id: None,
+                    channel: 0,
+                    note: 60,
+                    pressure: seven(20),
+                })],
+                8 => vec![Some(NoteEvent::NoteOff {
+                    timing: 0,
+                    voice_id: None,
+                    channel: 0,
+                    note: 60,
+                    velocity: 0.0,
+                })],
+                _ => vec![],
+            };
+            for e in events.into_iter().flatten() {
+                c.push_event(e);
+            }
+            let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+            let mut buffer = Buffer::default();
+            // SAFETY: both channels are 256 samples long and alive through process.
+            unsafe {
+                buffer.set_slices(256, |s| {
+                    s.push(&mut l);
+                    s.push(&mut r);
+                });
+            }
+            p.process(
+                &mut buffer,
+                &mut AuxiliaryBuffers {
+                    inputs: &mut [],
+                    outputs: &mut [],
+                },
+                &mut c,
+            );
+            out.push((l, r));
+        }
+        p.deactivate();
+        out
+    };
+    let wrapped = Ca72::default();
+    wrapped.parameters().noise_seed.store(42, Ordering::Relaxed);
+    let params = wrapped.parameters().clone();
+    let (mut adapter, session) =
+        Processor::new(wrapped, &["pitch_wheel", "mod_wheel"]).expect("adapter");
+    for (param, v) in reach(&params) {
+        session.set_parameter(param, v);
+    }
+    adapter
+        .prepare(ProcessConfig {
+            sample_rate: 48_000.0,
+            max_buffer_frames: 256,
+        })
+        .expect("prepared");
+    let midi = |data: [u8; 3]| MidiEvent {
+        source: 1,
+        data,
+        len: if data[0] & 0xf0 == 0xd0 { 2 } else { 3 },
+    };
+    let (lsb, msb) = ((bend & 127) as u8, (bend >> 7) as u8);
+    let mut app = Vec::new();
+    for b in 0..12 {
+        let messages: Vec<MidiEvent> = match b {
+            0 => [
+                [0xb0, 101, 0],
+                [0xb0, 100, 6],
+                [0xb0, 6, 15],
+                [0xe1, lsb, msb],
+                [0xb1, 74, 100],
+                [0xd1, 96, 0],
+                [0x91, 60, 100],
+            ]
+            .into_iter()
+            .map(midi)
+            .collect(),
+            4 => vec![midi([0xd1, 20, 0])],
+            8 => vec![midi([0x81, 60, 0])],
+            _ => vec![],
+        };
+        let (mut l, mut r) = ([0.0f32; 256], [0.0f32; 256]);
+        OPERATIONS.with(|n| n.set(0));
+        TRACK.with(|track| track.set(true));
+        adapter.process(AudioBlock {
+            left: &mut l,
+            right: &mut r,
+            input_left: &[],
+            input_right: &[],
+            midi: &messages,
+            panic: false,
+        });
+        TRACK.with(|track| track.set(false));
+        assert_eq!(
+            OPERATIONS.with(Cell::get),
+            0,
+            "block {b} allocated or freed"
+        );
+        app.push((l, r));
+    }
+    adapter.deactivate();
+    let host = direct(false);
+    let plain = direct(true);
+    assert_eq!(app, host, "raw MPE against host note expressions");
+    assert!(app.iter().flat_map(|(l, _)| l).any(|s| s.abs() > 0.0001));
+    assert_ne!(app, plain, "the expression is heard");
+}

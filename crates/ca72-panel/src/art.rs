@@ -468,6 +468,14 @@ fn marks(dial: Dial) -> DialMarks {
                 .collect::<Vec<_>>(),
             &["1", "2", "3", "4", "5"],
         ),
+        // The expression drawer's MODULATION (decisions.md R-MPE): every 25 %, every other
+        // numbered, 0 at the top.
+        Dial::Reach => numbered(
+            &(0..9)
+                .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
+                .collect::<Vec<_>>(),
+            &["–100", "–50", "0", "50", "100"],
+        ),
         Dial::Detune | Dial::Percent => numbered(
             &(0..9)
                 .map(|k| (-150.0 + 37.5 * f64::from(k), (k % 2 == 0).then_some(k / 2)))
@@ -2199,12 +2207,8 @@ pub fn worn_overlay(arrangement: &Arrangement) -> String {
     put!(s, "<g transform='translate(0 {})'>", N(PANEL_H + rail));
     strip_trims(&mut s);
     s.0.push_str("</g>");
-    // The moving parts' shadows (the arpeggiator's drawer's knobs cast theirs on the drawer).
-    for c in arrangement
-        .controls
-        .iter()
-        .filter(|c| c.place != Place::Arp)
-    {
+    // The moving parts' shadows (the drawers' knobs cast theirs on their drawers).
+    for c in arrangement.controls.iter().filter(|c| !c.place.is_drawer()) {
         let (x, y) = c.centre();
         match c.kind {
             // A tall knob casts a long soft shadow away from the lamp, and a dark one where it

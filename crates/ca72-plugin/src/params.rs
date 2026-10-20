@@ -14,7 +14,7 @@ use nih_plug::prelude::*;
 
 use crate::character::Placement;
 use crate::drive::Calibration;
-use crate::engine::{Controls, DOUBLE_CENTS, DRIVE_TOP, LEVEL_RANGE, POLY_VOICES};
+use crate::engine::{Controls, DOUBLE_CENTS, DRIVE_TOP, LEVEL_RANGE, POLY_VOICES, Reach};
 use crate::learn::MidiMap;
 
 /// RANGE's positions.
@@ -333,6 +333,17 @@ pub struct Ca72Params {
     /// R54): 0 a semitone a mark, 1 the hardware's. Not the session's: a learned
     /// controller turns the knob through it ([`Ca72Params::freq_law`]).
     pub freq_law: Arc<AtomicU8>,
+    /// Where MPE's zones come from on this computer (`settings.rs`, `expression::Mode`;
+    /// decisions.md R-MPE). Not the session's.
+    pub mpe: Arc<AtomicU8>,
+    /// Where a timbre rests on this computer (`settings.rs`, `expression::TimbreRest`;
+    /// decisions.md R-MPE), read by the audio thread each block. Not the session's.
+    pub timbre_rest: Arc<AtomicU8>,
+    /// What expression has arrived, per note and on ordinary channels, counted by the audio
+    /// thread for the editor's INPUT screen (`expression::Heard`; R-MPE). Not the
+    /// session's.
+    pub heard: Arc<crate::expression::Heard>,
+
     /// The knobs' values a preset or Init is setting, marked so the voices take them at once
     /// instead of gliding there (`crate::smooth`; decisions.md R-KNOB-GLIDE). Not the session's.
     pub lands: crate::smooth::Lands,
@@ -561,6 +572,56 @@ pub struct Ca72Params {
     /// SWING: every second step late, up to three quarters of the way through the pair.
     #[id = "arp_swing"]
     pub arp_swing: FloatParam,
+
+    // Each note's own pressure and timbre (MPE's, a host's note expressions, or every voice's
+    // alike from channel pressure and control change 74) moving its voice (decisions.md
+    // R-MPE), the plug-in's own, after everything else. A preset's, as any sound parameter: a
+    // preset or a session saved before reads them 0, not at all (`Ca72::filter_state`,
+    // `presets::targets`).
+    /// PRESSURE's reach on the voice's MODULATION wheel, -100 to 100 %: at 100 %, full pressure
+    /// moves it as a keyboard's wheel pushed fully forward does.
+    #[id = "pressure_mod"]
+    pub pressure_mod: FloatParam,
+    /// PRESSURE's reach on the voice's filter's cutoff, octaves at full pressure.
+    #[id = "pressure_filter"]
+    pub pressure_filter: FloatParam,
+    /// TIMBRE's (MPE's slide, control change 74) on the voice's MODULATION wheel.
+    #[id = "timbre_mod"]
+    pub timbre_mod: FloatParam,
+    /// TIMBRE's on the voice's filter's cutoff, octaves at its top.
+    #[id = "timbre_filter"]
+    pub timbre_filter: FloatParam,
+}
+
+/// How far PRESSURE and TIMBRE move a voice's cutoff at most, either way, octaves.
+pub const REACH_OCTAVES: f32 = 4.0;
+
+/// A reach on the MODULATION wheel, -100 to 100 %, 0 by default.
+fn reach_mod(name: &str) -> FloatParam {
+    FloatParam::new(
+        name,
+        0.0,
+        FloatRange::Linear {
+            min: -100.0,
+            max: 100.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_rounded(0))
+}
+
+/// A reach on the cutoff, octaves either way, 0 by default.
+fn reach_filter(name: &str) -> FloatParam {
+    FloatParam::new(
+        name,
+        0.0,
+        FloatRange::Linear {
+            min: -REACH_OCTAVES,
+            max: REACH_OCTAVES,
+        },
+    )
+    .with_unit(" octaves")
+    .with_value_to_string(formatters::v2s_f32_rounded(2))
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -691,6 +752,10 @@ impl Default for Ca72Params {
                 MidiMap::for_computer()
             }),
             freq_law: Arc::new(AtomicU8::new(0)),
+            mpe: Arc::new(AtomicU8::new(0)),
+            timbre_rest: Arc::new(AtomicU8::new(0)),
+            heard: Arc::default(),
+
             lands: crate::smooth::Lands::default(),
             drive_curve: Calibration::default(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
@@ -842,6 +907,10 @@ impl Default for Ca72Params {
             .with_unit(" %")
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
             arp_swing: percent("Arp Swing"),
+            pressure_mod: reach_mod("Pressure to Modulation"),
+            pressure_filter: reach_filter("Pressure to Filter"),
+            timbre_mod: reach_mod("Timbre to Modulation"),
+            timbre_filter: reach_filter("Timbre to Filter"),
         }
     }
 }
@@ -861,6 +930,24 @@ pub const DEFAULT_TEMPO: f64 = 120.0;
 pub const TEMPO_RANGE: (f64, f64) = (30.0, 300.0);
 
 impl Ca72Params {
+    /// Where MPE's zones come from on this computer (decisions.md R-MPE; `settings.rs`).
+    pub fn mpe_mode(&self) -> crate::expression::Mode {
+        crate::expression::Mode::of_code(self.mpe.load(Ordering::Relaxed))
+    }
+
+    pub fn set_mpe_mode(&self, mode: crate::expression::Mode) {
+        self.mpe.store(mode.code(), Ordering::Relaxed);
+    }
+
+    /// Where a timbre rests on this computer (decisions.md R-MPE; `settings.rs`).
+    pub fn timbre_rest(&self) -> crate::expression::TimbreRest {
+        crate::expression::TimbreRest::from_index(self.timbre_rest.load(Ordering::Relaxed))
+    }
+
+    pub fn set_timbre_rest(&self, rest: crate::expression::TimbreRest) {
+        self.timbre_rest.store(rest.index(), Ordering::Relaxed);
+    }
+
     /// The standalone's TEMPO, beats a minute.
     pub fn tempo(&self) -> f64 {
         let t = f64::from_bits(self.tempo.load(Ordering::Relaxed));
@@ -1012,6 +1099,12 @@ impl Ca72Params {
             lock: self.lock.value(),
             potato: self.quality.value() == QualityMode::Lo,
             ultra: self.quality.value() == QualityMode::Ultra,
+            reach: Reach {
+                pressure_mod: value(&self.pressure_mod) / 100.0,
+                pressure_filter: value(&self.pressure_filter),
+                timbre_mod: value(&self.timbre_mod) / 100.0,
+                timbre_filter: value(&self.timbre_filter),
+            },
         }
     }
 }
@@ -1120,6 +1213,39 @@ mod tests {
         assert_eq!(p.tempo(), DEFAULT_TEMPO);
         p.set_tempo(1000.0);
         assert_eq!(p.tempo(), TEMPO_RANGE.1);
+    }
+
+    /// The expression's reaches (R-MPE): their ids after every other, 0 by default (none, the
+    /// sound as before), the engine told them in its units.
+    #[test]
+    fn the_expression_reaches_are_last_and_none_by_default() {
+        let p = Ca72Params::default();
+        let ids: Vec<String> = p.param_map().into_iter().map(|(id, ..)| id).collect();
+        let at = |id: &str| ids.iter().position(|i| i == id).expect(id);
+        for id in [
+            "pressure_mod",
+            "pressure_filter",
+            "timbre_mod",
+            "timbre_filter",
+        ] {
+            assert!(at(id) > at("arp_swing"), "{id}");
+        }
+        assert_eq!(p.controls().reach, Reach::default());
+        let c = p.controls_with(&|k| {
+            if std::ptr::eq(k, &p.pressure_mod) {
+                -50.0
+            } else if std::ptr::eq(k, &p.timbre_filter) {
+                REACH_OCTAVES
+            } else {
+                k.value()
+            }
+        });
+        assert_eq!(c.reach.pressure_mod, -0.5);
+        assert_eq!(c.reach.timbre_filter, f64::from(REACH_OCTAVES));
+        let shown =
+            |q: &FloatParam, v: f32| q.normalized_value_to_string(q.preview_normalized(v), true);
+        assert_eq!(shown(&p.pressure_mod, 100.0), "100 %");
+        assert_eq!(shown(&p.pressure_filter, -1.5), "-1.50 octaves");
     }
 
     /// SCATTER's placement offers two choices, EVEN (the default) and CENTER, the strip's tabs

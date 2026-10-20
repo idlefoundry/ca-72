@@ -30,11 +30,11 @@ fn in_rect(x: f64, y: f64, r: [f64; 4]) -> bool {
     x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]
 }
 
-/// What is at (x, y) in the drawing, the panel laid out as `arrangement` has it (the
-/// arpeggiator's drawer's knobs apart: [`hit_arp`]).
+/// What is at (x, y) in the drawing, the panel laid out as `arrangement` has it (the drawers'
+/// knobs apart: [`hit_drawer`]).
 pub fn hit(layout: &Layout, arrangement: &Arrangement, x: f64, y: f64) -> Option<Target> {
     for (i, c) in arrangement.controls.iter().enumerate() {
-        if c.place == Place::Arp {
+        if c.place.is_drawer() {
             continue;
         }
         let (cx, cy) = c.centre();
@@ -79,9 +79,15 @@ pub fn hit(layout: &Layout, arrangement: &Arrangement, x: f64, y: f64) -> Option
 /// The arpeggiator's drawer's knob at (x, y) in the drawing, the drawer open (decisions.md
 /// R-ARP).
 pub fn hit_arp(x: f64, y: f64) -> Option<Target> {
+    hit_drawer(Place::Arp, x, y)
+}
+
+/// Drawer `place`'s knob at (x, y) in the drawing, the drawer open (the arpeggiator's,
+/// decisions.md R-ARP; the expression's, R-MPE).
+pub fn hit_drawer(place: Place, x: f64, y: f64) -> Option<Target> {
     CONTROLS.iter().enumerate().find_map(|(i, c)| {
         let (cx, cy) = c.centre();
-        (c.place == Place::Arp && (x - cx).hypot(y - cy) <= STD.skirt + 8.0)
+        (c.place == place && (x - cx).hypot(y - cy) <= STD.skirt + 8.0)
             .then_some(Target::Control(i))
     })
 }
@@ -220,8 +226,8 @@ mod tests {
         let l = layout();
         for (i, c) in CONTROLS.iter().enumerate() {
             let (x, y) = c.centre();
-            let found = if c.place == Place::Arp {
-                hit_arp(x, y)
+            let found = if c.place.is_drawer() {
+                hit_drawer(c.place, x, y)
             } else {
                 hit(&l, x, y)
             };

@@ -127,6 +127,11 @@ pub enum Item {
     /// The settings' AGENTS (the standalone's; decisions.md R-MCP): AI agents allowed to
     /// operate it through MCP, or not.
     Agents(bool),
+    /// The settings' MPE: INPUT & TIMBRE…, the MPE menu wanted (decisions.md R-MPE); its MPE
+    /// INPUT and TIMBRE REST.
+    MpeMenu,
+    MpeInput(crate::expression::Mode),
+    TimbreRest(crate::expression::TimbreRest),
 }
 
 /// A menu open: for which learnable parameter (none: a control that cannot be learned), what
@@ -171,6 +176,11 @@ pub enum Pressed {
     Fx(crate::fx_view::FxAction),
     /// The settings' menu: agents allowed (true) or not.
     Agents(bool),
+    /// The settings' MPE: INPUT & TIMBRE…, the MPE menu wanted where the settings' was; its
+    /// choices (decisions.md R-MPE).
+    MpeMenu,
+    MpeInput(crate::expression::Mode),
+    TimbreRest(crate::expression::TimbreRest),
 }
 
 /// What was last done, said over a control for a while: its lines, the learnable parameter
@@ -426,6 +436,10 @@ impl Learning {
             (Item::WhatsNew, "WHAT'S NEW…"),
             (Item::Head, "MOD WHEEL SOURCE"),
             (Item::WheelMenu(None), "CHOOSE SOURCE…"),
+            // (Its two settings in a menu of their own: this one is already taller than the
+            // window at its opening size, decisions.md R-MPE.)
+            (Item::Head, "MPE"),
+            (Item::MpeMenu, "INPUT & TIMBRE…"),
         ];
         items.extend(rest.into_iter().map(|(it, t)| (it, t.to_owned())));
         #[cfg(feature = "standalone-production")]
@@ -466,6 +480,7 @@ impl Learning {
                             | Item::StandaloneSettings
                             | Item::SizeMenu
                             | Item::WhatsNew
+                            | Item::MpeMenu
                     ) && !current(it)
                         && !unusable.contains(&i);
                     let choosable = choosable || matches!(it, Item::WheelMenu(_));
@@ -476,6 +491,65 @@ impl Learning {
                     };
                     (text, choosable)
                 })
+                .collect(),
+            heads: items
+                .iter()
+                .enumerate()
+                .filter(|(_, (it, _))| *it == Item::Head)
+                .map(|(i, _)| i)
+                .collect(),
+            marked: items
+                .iter()
+                .enumerate()
+                .filter(|(_, (it, _))| current(it))
+                .map(|(i, _)| i)
+                .collect(),
+            hover: None,
+        };
+        let (w, _) = menu.extent(fonts);
+        menu = menu.placed(fonts, x - w, y, PANEL);
+        self.open = Some(Open {
+            learnable: None,
+            items: items.into_iter().map(|(it, _)| it).collect(),
+            menu,
+        });
+        self.take_keys = true;
+    }
+
+    /// The MPE menu (decisions.md R-MPE; the settings' MPE: INPUT & TIMBRE…), opened with its top
+    /// right corner at (`x`, `y`) as the settings' is: under MPE INPUT, where the zones come from
+    /// (`mode`); under TIMBRE REST, where CC 74 and a host's brightness rest (`rest`); the ones
+    /// they are marked, the others to be chosen. This computer's, as the settings' are.
+    pub fn open_mpe_menu(
+        &mut self,
+        fonts: &Fonts,
+        (x, y): (f64, f64),
+        size: f64,
+        (mode, rest): (crate::expression::Mode, crate::expression::TimbreRest),
+    ) {
+        use crate::expression::{Mode, TimbreRest};
+        let items: Vec<(Item, &str)> = vec![
+            (Item::Head, "MPE INPUT"),
+            (Item::MpeInput(Mode::Auto), "AUTO"),
+            (Item::MpeInput(Mode::Lower), "LOWER ZONE"),
+            (Item::MpeInput(Mode::Off), "OFF"),
+            (Item::Head, "TIMBRE REST"),
+            (Item::TimbreRest(TimbreRest::Centred), "CENTERED ON 64"),
+            (Item::TimbreRest(TimbreRest::Zero), "FROM 0"),
+            (
+                Item::TimbreRest(TimbreRest::NoteStart),
+                "FROM THE NOTE'S START",
+            ),
+        ];
+        let current = |it: &Item| *it == Item::MpeInput(mode) || *it == Item::TimbreRest(rest);
+        let mut menu = Menu {
+            x,
+            y,
+            size,
+            title: "MPE".into(),
+            items: items
+                .iter()
+                .map(|(it, t)| ((*t).to_owned(), *it != Item::Head && !current(it)))
                 .collect(),
             heads: items
                 .iter()
@@ -706,6 +780,9 @@ impl Learning {
             (Some(Item::WheelSource(source)), _) => return Pressed::WheelSource(*source),
             (Some(Item::Fx(a)), _) => return Pressed::Fx(*a),
             (Some(Item::Agents(on)), _) => return Pressed::Agents(*on),
+            (Some(Item::MpeMenu), _) => return Pressed::MpeMenu,
+            (Some(Item::MpeInput(m)), _) => return Pressed::MpeInput(*m),
+            (Some(Item::TimbreRest(r)), _) => return Pressed::TimbreRest(*r),
             _ => {}
         }
         Pressed::Done

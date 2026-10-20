@@ -160,6 +160,9 @@ pub enum BarTarget {
     /// The effects' drawer, the standalone application's alone (decisions.md R-FX-DRAWER); lit
     /// while an effect plays.
     Fx,
+    /// The drawer of each note's own expression (decisions.md R-MPE), dropped down over the lower
+    /// panel or put away; lit while any of its amounts is not 0.
+    Mpe,
 }
 
 /// What a pointer finds in the drawer.
@@ -311,6 +314,8 @@ pub struct BarScene {
     pub arp: bool,
     /// An effect plays (the standalone's FX key lit).
     pub fx: bool,
+    /// An amount of each note's own expression is not 0 (the MPE key lit).
+    pub mpe: bool,
 }
 
 // ---- The selector's layout (panel units across, the strip's units down).
@@ -562,7 +567,8 @@ pub fn bar_centre(t: BarTarget) -> (f64, f64) {
         | BarTarget::Panel
         | BarTarget::Keyboard
         | BarTarget::Arp
-        | BarTarget::Fx => SAVE_X + SAVE_W / 2.0,
+        | BarTarget::Fx
+        | BarTarget::Mpe => SAVE_X + SAVE_W / 2.0,
     };
     (x, BAR_MID)
 }
@@ -784,6 +790,7 @@ mod png {
                         panel: true,
                         arp: false,
                         fx: false,
+                        mpe: false,
                     },
                     ..crate::strip::StripScene::default()
                 },
@@ -1075,6 +1082,7 @@ mod png {
                     panel: true,
                     arp: false,
                     fx: false,
+                    mpe: false,
                 },
                 ..crate::strip::StripScene::default()
             },

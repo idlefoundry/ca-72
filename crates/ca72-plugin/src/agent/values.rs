@@ -180,6 +180,8 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
     const SO: &str = "STRIP: OUTPUT";
     const A: &str = "ARPEGGIATOR";
     const H: &str = "NOT ON THE PANEL";
+    // (Each note's own pressure and timbre's reach, decisions.md R-MPE: the MPE drawer's.)
+    const X: &str = "EXPRESSION";
     vec![
         e("bypass", "POWER", OUT, &p.bypass, Plain),
         e("tune", "TUNE", C, &p.tune, Plain),
@@ -375,6 +377,34 @@ pub fn table(p: &Ca72Params) -> Vec<Entry<'_>> {
         e("arp_octaves", "ARP OCTAVES", A, &p.arp_octaves, Plain),
         e("arp_gate", "ARP GATE", A, &p.arp_gate, Plain),
         e("arp_swing", "ARP SWING", A, &p.arp_swing, Plain),
+        e(
+            "pressure_mod",
+            "PRESSURE TO MODULATION",
+            X,
+            &p.pressure_mod,
+            Plain,
+        ),
+        e(
+            "pressure_filter",
+            "PRESSURE TO FILTER",
+            X,
+            &p.pressure_filter,
+            Plain,
+        ),
+        e(
+            "timbre_mod",
+            "TIMBRE TO MODULATION",
+            X,
+            &p.timbre_mod,
+            Plain,
+        ),
+        e(
+            "timbre_filter",
+            "TIMBRE TO FILTER",
+            X,
+            &p.timbre_filter,
+            Plain,
+        ),
         e("lock", "LOCK (oscillators identical)", H, &p.lock, Plain),
         e(
             "midi_bend_range",

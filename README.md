@@ -325,6 +325,29 @@ are [standalone-spec.md](docs/standalone-spec.md) and
   The source follows any MIDI channel and stays on this computer, outside presets and
   projects. Changing it clears the old MIDI value. All sound off,
   reset all controllers and all notes off (CC 120, 121 and 123) are followed.
+- **Each note's own expression (MPE):** with an MPE controller, each note's pressure, timbre
+  (CC 74, the slide) and its own pitch bend move only that note's voice. CLAP and VST3 note
+  expressions (pressure, tuning, brightness) and polyphonic aftertouch are each note's own
+  too; ordinary channel pressure and CC 74 move every voice alike. In mono and UNISON the
+  voice takes the expression of the note it plays. The rail's **MPE** key (after ARP; after
+  FX in the standalone) drops a drawer with what they move: **INPUT** reads MPE while each
+  note's own expression comes in, CHANNEL while only ordinary channel pressure or CC 74 does,
+  and is dark otherwise; **PRESSURE** and **TIMBRE** each have **MODULATION** (-100 to
+  100 %, how far they move the voice's MODULATION wheel, added to the wheel's own) and
+  **CUTOFF** (-4 to 4 octaves of the voice's filter cutoff). All four are 0 by default, so
+  nothing changes until you turn them; the key is lit while any is not 0. Double-click a
+  readout (or ⌘/Ctrl-click a knob) to type a value. They are host parameters that can be
+  automated or MIDI-learned, and are saved with presets and projects. SETTINGS > MPE >
+  INPUT & TIMBRE… chooses, for this computer: **MPE INPUT**, AUTO (the default: the
+  controller's MPE Configuration Message sets the zone, and each member channel's bend follows
+  its bend range, 48 semitones unless the controller sends RPN 0), LOWER ZONE (a lower zone of
+  fifteen channels, for hosts that do not pass that message on) or OFF; and **TIMBRE REST**,
+  where timbre moves nothing: CENTERED ON 64 (the default: CC 74 at 64, or a host's brightness
+  at half, is the rest, and lower values move the other way), FROM 0 (0 is the rest, timbre
+  only adding), or FROM THE NOTE'S START (each note's timbre counts from where it began, so a
+  fresh touch is always at rest; ordinary CC 74, shared by every voice, counts from where it
+  was when you began playing, the first key pressed with none held). A note or channel that
+  never sends timbre is always at rest.
 - **External input:** the host's side chain is the panel's EXTERNAL INPUT, through its
   MIXER switch and VOLUME.
 - **Output:** stereo, the same on both channels unless SPREAD places the voices or DOUBLE's

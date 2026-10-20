@@ -880,3 +880,210 @@ fn the_arpeggiator_neither_allocates_nor_frees() {
         "the arpeggiator allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
     );
 }
+
+/// Each note's own expression (decisions.md R-MPE) neither allocates nor frees, in the plug-in's
+/// own process: the MPE Configuration Message and its zone gone and back, notes on member
+/// channels with their bends, pressures and timbres, a member's bend range (RPN 0), polyphonic
+/// aftertouch and a host's note expressions (pressure, tuning, brightness), ordinary channel
+/// pressure and timbre, the MOD wheel on polyphonic aftertouch, the reaches automated, POLY
+/// switched and voices stolen, QUALITY at LO and HI, Reset All Controllers and All Notes Off,
+/// TIMBRE REST switched through its three (R-MPE) and the INPUT screen's counts read,
+/// a block at a time.
+#[test]
+fn mpe_expression_neither_allocates_nor_frees() {
+    use ca72_plugin::Ca72;
+    use ca72_plugin::expression::TimbreRest;
+    use ca72_plugin::mod_wheel::Source;
+    use nih_plug::context::process::TestProcessContext;
+    use nih_plug::prelude::*;
+
+    struct Init;
+    impl InitContext<Ca72> for Init {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Clap
+        }
+        fn execute(&self, _: ()) {}
+        fn set_latency_samples(&self, _: u32) {}
+        fn set_current_voice_capacity(&self, _: u32) {}
+    }
+
+    let _serial = start();
+    let mut p = Ca72::default();
+    let config = BufferConfig {
+        sample_rate: RATE as f32,
+        min_buffer_size: None,
+        max_buffer_size: BLOCK as u32,
+        process_mode: ProcessMode::Realtime,
+    };
+    assert!(p.initialize(&Ca72::AUDIO_IO_LAYOUTS[0], &config, &mut Init));
+    p.parameters()
+        .midi_map
+        .set_wheel_source(Source::PolyPressure);
+    let params = p.params();
+    let q = p.parameters().clone();
+    let mut c = TestProcessContext::<Ca72>::new(params, RATE as f32, ProcessMode::Realtime);
+    c.reported.reserve(1 << 16);
+    let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
+    let mut buffer = Buffer::default();
+    // SAFETY: both slices are `BLOCK` long and live as long as the buffer.
+    unsafe {
+        buffer.set_slices(BLOCK, |s| {
+            s.clear();
+            s.push(&mut l);
+            s.push(&mut r);
+        });
+    }
+    let mut aux = AuxiliaryBuffers {
+        inputs: &mut [],
+        outputs: &mut [],
+    };
+    let cc = |timing: u32, channel: u8, cc: u8, value: f32| NoteEvent::MidiCC {
+        timing,
+        channel,
+        cc,
+        value,
+    };
+    let key = |timing: u32, channel: u8, note: u8, on: bool| {
+        if on {
+            NoteEvent::NoteOn {
+                timing,
+                voice_id: None,
+                channel,
+                note,
+                velocity: 1.0,
+            }
+        } else {
+            NoteEvent::NoteOff {
+                timing,
+                voice_id: None,
+                channel,
+                note,
+                velocity: 0.0,
+            }
+        }
+    };
+    HERE.with(|h| h.set(true));
+    let mut sink = 0.0f32;
+    let mut seen = 0u32;
+    for b in 0..600usize {
+        // (The host's queue filled off the count.)
+        ARMED.store(false, Ordering::SeqCst);
+        let v = |k: usize| ((b * 3 + k) as f32 * 0.11).sin() * 0.5 + 0.5;
+        if b % 150 == 0 {
+            // The zone: fifteen members, then (every other time) gone for a while.
+            let n = if b % 300 == 0 { 15.0 } else { 0.0 };
+            c.push_event(cc(0, 0, 101, 0.0));
+            c.push_event(cc(0, 0, 100, 6.0 / 127.0));
+            c.push_event(cc(0, 0, 6, n / 127.0));
+        }
+        if b % 50 == 7 {
+            c.push_event(cc(1, 3, 101, 0.0));
+            c.push_event(cc(1, 3, 100, 0.0));
+            c.push_event(cc(1, 3, 6, [48.0, 12.0, 2.0][b / 50 % 3] / 127.0));
+        }
+        // A note on each of six member channels in turn, its controllers first.
+        let ch = 1 + (b / 6 % 6) as u8;
+        let note = 40 + (b * 7 % 48) as u8;
+        if b % 6 == 0 {
+            c.push_event(NoteEvent::MidiPitchBend {
+                timing: 2,
+                channel: ch,
+                value: v(0),
+            });
+            c.push_event(cc(2, ch, 74, v(1)));
+            c.push_event(NoteEvent::MidiChannelPressure {
+                timing: 2,
+                channel: ch,
+                pressure: v(2),
+            });
+            c.push_event(key(3, ch, note, true));
+        }
+        for k in 0..3u32 {
+            let ch = 1 + ((b + k as usize) % 6) as u8;
+            c.push_event(NoteEvent::MidiPitchBend {
+                timing: 20 + k * 40,
+                channel: ch,
+                value: v(k as usize),
+            });
+            c.push_event(NoteEvent::MidiChannelPressure {
+                timing: 21 + k * 40,
+                channel: ch,
+                pressure: v(k as usize + 1),
+            });
+            c.push_event(cc(22 + k * 40, ch, 74, v(k as usize + 2)));
+        }
+        // A host's note expressions and polyphonic aftertouch on the note just played.
+        c.push_event(NoteEvent::PolyPressure {
+            timing: 150,
+            voice_id: None,
+            channel: ch,
+            note,
+            pressure: v(4),
+        });
+        c.push_event(NoteEvent::PolyTuning {
+            timing: 151,
+            voice_id: None,
+            channel: ch,
+            note,
+            tuning: v(5) * 4.0 - 2.0,
+        });
+        c.push_event(NoteEvent::PolyBrightness {
+            timing: 152,
+            voice_id: None,
+            channel: ch,
+            note,
+            brightness: v(6),
+        });
+        // Ordinary channel pressure and timbre on the master channel.
+        c.push_event(NoteEvent::MidiChannelPressure {
+            timing: 160,
+            channel: 0,
+            pressure: v(7),
+        });
+        c.push_event(cc(161, 0, 74, v(8)));
+        if b % 6 == 5 {
+            c.push_event(key(200, ch, note, false));
+        }
+        if b % 97 == 0 {
+            c.push_event(cc(210, 9, 121, 0.0));
+        }
+        if b % 131 == 0 {
+            c.push_event(cc(211, 0, 123, 0.0));
+        }
+        if b % 20 == 0 {
+            c.automate(q.pressure_mod.as_ptr(), v(9));
+            c.automate(q.pressure_filter.as_ptr(), v(10));
+            c.automate(q.timbre_mod.as_ptr(), v(11));
+            c.automate(q.timbre_filter.as_ptr(), v(12));
+        }
+        if b % 100 == 50 {
+            c.automate(q.poly.as_ptr(), if b % 200 == 50 { 1.0 } else { 0.0 });
+            c.automate(q.voices.as_ptr(), 0.0);
+        }
+        if b % 120 == 60 {
+            c.automate(q.quality.as_ptr(), if b % 240 == 60 { 0.5 } else { 0.0 });
+        }
+        if b % 40 == 13 {
+            q.set_timbre_rest(TimbreRest::ALL[b / 40 % 3]);
+        }
+        ARMED.store(true, Ordering::SeqCst);
+        p.process(&mut buffer, &mut aux, &mut c);
+        let (per_note, channel) = q.heard.counts();
+        seen = seen.max(per_note.min(channel));
+        sink += buffer.as_slice()[0].iter().map(|x| x.abs()).sum::<f32>();
+    }
+    assert!(seen > 0, "both counted");
+    ARMED.store(false, Ordering::SeqCst);
+    assert!(sink > 1.0, "it played ({sink})");
+    let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
+    let first = FIRST
+        .lock()
+        .ok()
+        .and_then(|f| f.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (allocs, frees),
+        (0, 0),
+        "MPE allocated {allocs} and freed {frees} times while playing; the first:\n{first}"
+    );
+}

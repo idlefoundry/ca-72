@@ -20,9 +20,11 @@ use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_DONT_RECORD, CLAP_EVENT_IS_LIVE, CLAP_EVENT_MIDI,
-    CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT,
-    CLAP_TRANSPORT_IS_PLAYING, clap_event_header, clap_event_midi, clap_event_note,
-    clap_event_param_value, clap_event_transport, clap_input_events, clap_output_events,
+    CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE,
+    CLAP_EVENT_TRANSPORT, CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_PRESSURE,
+    CLAP_NOTE_EXPRESSION_TUNING, CLAP_TRANSPORT_IS_PLAYING, clap_event_header, clap_event_midi,
+    clap_event_note, clap_event_note_expression, clap_event_param_value, clap_event_transport,
+    clap_input_events, clap_output_events,
 };
 use clap_sys::ext::params::{
     CLAP_EXT_PARAMS, clap_host_params, clap_param_clear_flags, clap_param_rescan_flags,
@@ -90,6 +92,8 @@ enum In {
     Midi(u32, [u8; 3]),
     Note(u32, u16, i32, i16, i16, f64),
     Transport(u32, bool),
+    /// A note expression (decisions.md R-MPE): time, expression, note id, channel, key, value.
+    Expression(u32, i32, i32, i16, i16, f64),
 }
 
 /// A parameter value the plug-in told the host: time, flags, parameter, value.
@@ -109,6 +113,7 @@ struct Events {
     _params: Vec<Box<clap_event_param_value>>,
     _notes: Vec<Box<clap_event_note>>,
     _transport: Vec<Box<clap_event_transport>>,
+    _expressions: Vec<Box<clap_event_note_expression>>,
 }
 
 unsafe extern "C" fn in_size(list: *const clap_input_events) -> u32 {
@@ -249,6 +254,7 @@ impl Instance {
             _params: Vec::new(),
             _notes: Vec::new(),
             _transport: Vec::new(),
+            _expressions: Vec::new(),
         };
         for &e in events {
             match e {
@@ -309,6 +315,25 @@ impl Instance {
                     });
                     ev.headers.push(&raw const note.header);
                     ev._notes.push(note);
+                }
+                In::Expression(time, expression_id, note_id, channel, key, value) => {
+                    let x = Box::new(clap_event_note_expression {
+                        header: clap_event_header {
+                            size: size_of::<clap_event_note_expression>() as u32,
+                            time,
+                            space_id: CLAP_CORE_EVENT_SPACE_ID,
+                            type_: CLAP_EVENT_NOTE_EXPRESSION,
+                            flags: 0,
+                        },
+                        expression_id,
+                        note_id,
+                        port_index: 0,
+                        channel,
+                        key,
+                        value,
+                    });
+                    ev.headers.push(&raw const x.header);
+                    ev._expressions.push(x);
                 }
                 In::Transport(time, playing) => {
                     // SAFETY: every field of the CLAP transport permits zero.
@@ -489,6 +514,7 @@ fn at(e: In, timing: u32) -> In {
         In::Midi(_, data) => In::Midi(timing, data),
         In::Note(_, kind, id, ch, key, velocity) => In::Note(timing, kind, id, ch, key, velocity),
         In::Transport(_, playing) => In::Transport(timing, playing),
+        In::Expression(_, x, id, ch, key, value) => In::Expression(timing, x, id, ch, key, value),
     }
 }
 
@@ -1006,6 +1032,181 @@ fn midi_preset_actions_work_through_clap_with_no_editor() {
     );
 }
 
+/// A note's expression through CLAP's note expressions (pressure, brightness, tuning: what
+/// Bitwig sends an MPE controller's as) and the same through MIDI in an MPE zone (the MPE
+/// Configuration Message, then each note on its member channel), both into the real CLAP
+/// entry: the same samples to the bit, the one instrument and POLY; and audibly not the
+/// notes without it (decisions.md R-MPE).
+#[test]
+fn clap_note_expressions_and_mpe_midi_play_the_same_samples() {
+    // MPE's bend for MIDI's 14-bit value, as the plug-in reads it (over 48 semitones).
+    let bend_of = |v: u16| ((f32::from(v) / 16_383.0) * 2.0 - 1.0) * 48.0;
+    let seven = |v: u8| f64::from(f32::from(v) / 127.0);
+    let bend = 10_240u16;
+    let (lsb, msb) = ((bend & 127) as u8, (bend >> 7) as u8);
+    for mode in [0u8, 1] {
+        let instance = || {
+            let p = envelope_instance(256, mode, 0, false);
+            p.audio(
+                1,
+                &[
+                    In::Param(0, "pressure_filter", 0.8),
+                    In::Param(0, "timbre_filter", 0.3),
+                    In::Param(0, "pressure_mod", 0.9),
+                ],
+            );
+            p
+        };
+        let x = |t: u32, id: i32, note: i32, key: i16, v: f64| {
+            (t, In::Expression(0, id, note, 0, key, v))
+        };
+        let on =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_ON, note, 0, key, 1.0));
+        let off =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_OFF, note, 0, key, 0.0));
+        let native = [
+            on(0, 1, 60),
+            x(0, CLAP_NOTE_EXPRESSION_PRESSURE, 1, 60, seven(96)),
+            x(0, CLAP_NOTE_EXPRESSION_BRIGHTNESS, 1, 60, seven(100)),
+            x(
+                0,
+                CLAP_NOTE_EXPRESSION_TUNING,
+                1,
+                60,
+                f64::from(bend_of(bend)),
+            ),
+            on(4_800, 2, 67),
+            x(9_600, CLAP_NOTE_EXPRESSION_PRESSURE, 1, 60, seven(20)),
+            x(12_000, CLAP_NOTE_EXPRESSION_PRESSURE, 2, 67, seven(127)),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let midi = [
+            (0, In::Cc(0, 0, 101, 0)),
+            (0, In::Cc(0, 0, 100, 6)),
+            (0, In::Cc(0, 0, 6, 15)),
+            (0, In::Midi(0, [0xe1, lsb, msb])),
+            (0, In::Cc(0, 1, 74, 100)),
+            (0, In::Midi(0, [0xd1, 96, 0])),
+            (0, In::Midi(0, [0x91, 60, 127])),
+            (4_800, In::Midi(0, [0x92, 67, 127])),
+            (9_600, In::Midi(0, [0xd1, 20, 0])),
+            (12_000, In::Midi(0, [0xd2, 127, 0])),
+            (16_800, In::Midi(0, [0x81, 60, 0])),
+            (19_200, In::Midi(0, [0x82, 67, 0])),
+        ];
+        let plain = [
+            on(0, 1, 60),
+            on(4_800, 2, 67),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let a = render(&instance(), &native, 24_000);
+        let b = render(&instance(), &midi, 24_000);
+        let c = render(&instance(), &plain, 24_000);
+        assert!(rms(&a) > 0.01, "mode {mode}: sounding");
+        assert!(
+            a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()),
+            "mode {mode}: CLAP's note expressions and MPE's MIDI differ"
+        );
+        let apart = a
+            .iter()
+            .zip(&c)
+            .map(|(x, y)| f64::from(x - y).powi(2))
+            .sum::<f64>();
+        assert!(
+            apart > 1.0,
+            "mode {mode}: the expression is heard ({apart})"
+        );
+    }
+}
+
+/// TIMBRE REST through the real CLAP entry, as the computer's `settings.toml` chooses it
+/// (decisions.md R-MPE), each in a process of its own with a shared folder of its own:
+/// at "centre" (and with none set) a host's brightness at 0.5 is at rest, the notes the same to
+/// the bit as with none, TIMBRE TO FILTER turned up; at "zero" it is half the reach, audibly not;
+/// at "start", a note's first brightness is where it begins, so 0.5 then 0.9 is heard and 0.5
+/// alone is not.
+#[test]
+fn clap_brightness_rests_where_the_computers_setting_says() {
+    if let Ok(word) = std::env::var("CA72_TIMBRE_REST_CHILD") {
+        let instance = || {
+            let p = envelope_instance(256, 1, 0, false);
+            p.audio(1, &[In::Param(0, "timbre_filter", 2.0)]);
+            p
+        };
+        let x = |t: u32, note: i32, key: i16, v: f64| {
+            (
+                t,
+                In::Expression(0, CLAP_NOTE_EXPRESSION_BRIGHTNESS, note, 0, key, v),
+            )
+        };
+        let on =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_ON, note, 0, key, 1.0));
+        let off =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_OFF, note, 0, key, 0.0));
+        let plain = [
+            on(0, 1, 60),
+            on(4_800, 2, 67),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let half = [
+            on(0, 1, 60),
+            x(0, 1, 60, 0.5),
+            on(4_800, 2, 67),
+            x(4_800, 2, 67, 0.5),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let moved = [
+            on(0, 1, 60),
+            x(0, 1, 60, 0.5),
+            x(2_400, 1, 60, 0.9),
+            on(4_800, 2, 67),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let a = render(&instance(), &plain, 24_000);
+        let same = |b: &[f32]| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits());
+        assert!(rms(&a) > 0.01, "{word}: sounding");
+        let b = render(&instance(), &half, 24_000);
+        assert_eq!(same(&b), word != "zero", "{word}: brightness 0.5");
+        let c = render(&instance(), &moved, 24_000);
+        assert!(!same(&c), "{word}: brightness moved from 0.5 to 0.9");
+        return;
+    }
+    for word in ["", "centre", "zero", "start"] {
+        let dir = tempfile::tempdir().expect("shared data folder");
+        if !word.is_empty() {
+            let folder = dir.path().join("CA-72");
+            std::fs::create_dir_all(&folder).expect("settings folder");
+            std::fs::write(
+                folder.join("settings.toml"),
+                format!("timbre_rest = \"{word}\"\n"),
+            )
+            .expect("settings");
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "clap_brightness_rests_where_the_computers_setting_says",
+                "--nocapture",
+            ])
+            .env("CA72_TIMBRE_REST_CHILD", word)
+            .env("IDLE_FOUNDRY_SHARED", dir.path())
+            .env("CA72_SEATS_DIR", dir.path().join("seats"))
+            .output()
+            .expect("child host");
+        let told = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && told.contains("1 passed"),
+            "{word}:\n{told}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 /// A host may make, start and play an instance on a thread of its own, with less stack than a
 /// main thread's (a macOS secondary thread has 512 KB; a host's own threads may have less): the
 /// instance's whole life, made, activated, played at each QUALITY in POLY with GLIDE moving,
@@ -1196,7 +1397,7 @@ fn glide_stress_here() {
                         // (Sorted by time, as a host gives them.)
                         let time = |e: &In| match *e {
                             In::Param(t, ..) | In::Note(t, ..) | In::Midi(t, ..) => t,
-                            In::Cc(t, ..) | In::Transport(t, ..) => t,
+                            In::Cc(t, ..) | In::Transport(t, ..) | In::Expression(t, ..) => t,
                         };
                         ev.sort_by_key(time);
                         if rand() < 0.01 && std::env::var_os("CA72_NO_LOAD").is_none() {

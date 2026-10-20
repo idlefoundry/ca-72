@@ -2,7 +2,8 @@
 //! R51, R54): QUALITY's indicator shown or not, whether ULTRA's note has been read,
 //! the look (the skin) the editor is drawn in, its lettering's size, how the FREQUENCY
 //! knobs' dials read, the MOD wheel's MIDI source (R-MODWHEEL-SOURCE), the standalone's TEMPO
-//! (R-ARP), and whether agents may operate the standalone application (R-MCP). In the shared
+//! (R-ARP), whether agents may operate the standalone application (R-MCP), where MPE's zones
+//! come from (R-MPE) and where a timbre rests (R-MPE). In the shared
 //! folder the preset library keeps (`library::shared_dir`), `CA-72/settings.toml`: read as the
 //! editor opens, and as one changes only that key written, the file read again under a lock
 //! every instance takes (`settings.toml.lock`), so that one editor's change never undoes
@@ -60,6 +61,14 @@ pub struct Settings {
     /// decisions.md R-MCP): off unless the player turns it on (SETTINGS: AGENTS). Kept as
     /// `agents`, true or false.
     pub agents: bool,
+    /// Where MPE's zones come from (decisions.md R-MPE): the controller's MPE Configuration
+    /// Message unless set. Kept as `mpe`, "auto", "lower" (a lower zone of fifteen channels
+    /// always, for hosts that do not pass the message on) or "off".
+    pub mpe: crate::expression::Mode,
+    /// Where a timbre (control change 74, a host's brightness) rests (decisions.md
+    /// R-MPE): its centre unless set. Kept as `timbre_rest`, "centre", "zero" (0..1 from
+    /// 0, as the CA-72 first had it) or "start" (each note's from where it began).
+    pub timbre_rest: crate::expression::TimbreRest,
 }
 
 /// A skin pack's id, as its manifest gives it (lower-case letters, digits, `-` and `.`, at
@@ -115,6 +124,8 @@ pub enum Change {
     ModWheelSource(Source),
     Tempo(u16),
     Agents(bool),
+    Mpe(crate::expression::Mode),
+    TimbreRest(crate::expression::TimbreRest),
 }
 
 impl Change {
@@ -156,6 +167,8 @@ impl Change {
             ),
             Change::Tempo(bpm) => ("standalone_tempo", i64::from(tempo_within(bpm)).into()),
             Change::Agents(on) => ("agents", on.into()),
+            Change::Mpe(mode) => ("mpe", mode.word().into()),
+            Change::TimbreRest(rest) => ("timbre_rest", rest.word().into()),
         };
         t.insert(key.into(), value);
     }
@@ -176,6 +189,8 @@ impl Default for Settings {
             mod_wheel_source: Source::DEFAULT,
             tempo: crate::params::DEFAULT_TEMPO as u16,
             agents: false,
+            mpe: crate::expression::Mode::Auto,
+            timbre_rest: crate::expression::TimbreRest::Centred,
         }
     }
 }
@@ -249,6 +264,17 @@ impl Settings {
                 Some("hardware") => Law::Hardware,
                 _ => d.frequency,
             },
+            mpe: t
+                .get("mpe")
+                .and_then(toml::Value::as_str)
+                .and_then(crate::expression::Mode::of_word)
+                .unwrap_or(d.mpe),
+            // (Anything but its three words, centred.)
+            timbre_rest: t
+                .get("timbre_rest")
+                .and_then(toml::Value::as_str)
+                .and_then(crate::expression::TimbreRest::of_word)
+                .unwrap_or(d.timbre_rest),
             mod_wheel_source: match t.get("mod_wheel_source").and_then(toml::Value::as_str) {
                 Some("channel_aftertouch") => Source::ChannelPressure,
                 Some("poly_aftertouch") => Source::PolyPressure,
@@ -283,6 +309,8 @@ impl Settings {
             Change::ModWheelSource(source) => self.mod_wheel_source = source,
             Change::Tempo(bpm) => self.tempo = tempo_within(bpm),
             Change::Agents(on) => self.agents = on,
+            Change::Mpe(mode) => self.mpe = mode,
+            Change::TimbreRest(rest) => self.timbre_rest = rest,
         }
     }
 
@@ -612,6 +640,79 @@ mod tests {
         assert_eq!(c.binding(previous), None, "does not return");
         assert_eq!(c.binding(next), Some(pad));
         assert_eq!(c.wheel_source(), Source::DEFAULT);
+    }
+
+    /// MPE's zones come from the controller unless `mpe` says "lower" or "off"; anything else
+    /// reads as the default (R-MPE).
+    #[test]
+    fn the_mpe_setting_reads_its_three_words_and_else_auto() {
+        use crate::expression::Mode;
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        assert_eq!(Settings::read(&path).mpe, Mode::Auto);
+        std::fs::create_dir_all(path.parent().expect("folder")).expect("folder made");
+        for (value, mode) in [
+            ("'auto'", Mode::Auto),
+            ("'lower'", Mode::Lower),
+            ("'off'", Mode::Off),
+            ("'upper'", Mode::Auto),
+            ("1", Mode::Auto),
+        ] {
+            std::fs::write(&path, format!("mpe = {value}\n")).expect("file");
+            assert_eq!(Settings::read(&path).mpe, mode, "{value}");
+        }
+    }
+
+    /// A timbre rests at its centre unless `timbre_rest` says "zero" or "start"; anything else
+    /// reads as the default (R-MPE).
+    #[test]
+    fn the_timbre_rest_reads_its_three_words_and_else_centre() {
+        use crate::expression::TimbreRest;
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        assert_eq!(Settings::read(&path).timbre_rest, TimbreRest::Centred);
+        std::fs::create_dir_all(path.parent().expect("folder")).expect("folder made");
+        for (value, rest) in [
+            ("'centre'", TimbreRest::Centred),
+            ("'zero'", TimbreRest::Zero),
+            ("'start'", TimbreRest::NoteStart),
+            ("'center'", TimbreRest::Centred),
+            ("'Zero'", TimbreRest::Centred),
+            ("1", TimbreRest::Centred),
+        ] {
+            std::fs::write(&path, format!("timbre_rest = {value}\n")).expect("file");
+            assert_eq!(Settings::read(&path).timbre_rest, rest, "{value}");
+        }
+    }
+
+    /// The menu's MPE and TIMBRE REST, kept as each changes (R-MPE): each written
+    /// as its word, read back, applied in memory alike, and neither undoing the other or a
+    /// setting kept before.
+    #[test]
+    fn mpe_and_the_timbre_rest_are_kept_and_read_back() {
+        use crate::expression::{Mode, TimbreRest};
+        let dir = tempfile::tempdir().expect("settings folder");
+        let path = dir.path().join("CA-72/settings.toml");
+        Settings::keep(&path, Change::Frequency(Law::Hardware)).expect("kept");
+        let mut mine = Settings::read(&path);
+        for mode in [Mode::Lower, Mode::Off, Mode::Auto] {
+            for rest in TimbreRest::ALL {
+                Settings::keep(&path, Change::Mpe(mode)).expect("kept");
+                Settings::keep(&path, Change::TimbreRest(rest)).expect("kept");
+                mine.apply(Change::Mpe(mode));
+                mine.apply(Change::TimbreRest(rest));
+                let read = Settings::read(&path);
+                assert_eq!((read.mpe, read.timbre_rest), (mode, rest));
+                assert_eq!(read, mine);
+                assert_eq!(read.frequency, Law::Hardware);
+                let text = std::fs::read_to_string(&path).expect("read");
+                assert!(
+                    text.contains(&format!("mpe = \"{}\"", mode.word()))
+                        && text.contains(&format!("timbre_rest = \"{}\"", rest.word())),
+                    "{text}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -954,6 +1055,8 @@ mod tests {
             mod_wheel_source: Source::DEFAULT,
             tempo: 120,
             agents: true,
+            mpe: crate::expression::Mode::Auto,
+            timbre_rest: crate::expression::TimbreRest::Centred,
         };
         assert_eq!(Settings::read(&path), s);
         assert!(
@@ -1047,6 +1150,8 @@ mod tests {
                 mod_wheel_source: Source::DEFAULT,
                 tempo: 120,
                 agents: false,
+                mpe: crate::expression::Mode::Auto,
+                timbre_rest: crate::expression::TimbreRest::Centred,
             }
         );
         let left: Vec<_> = std::fs::read_dir(path.parent().expect("its folder"))
