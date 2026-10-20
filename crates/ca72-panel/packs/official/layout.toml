@@ -360,7 +360,7 @@ baseline = 723
 
 # The legends: centred on `at` (the middle of their capitals). Without `size`, the panel's
 # legend size (19, and 22 in the large lettering); with it, that size in either. `large`: its
-# place in the large lettering, where it differs.
+# place in the large lettering, where it differs; `large_size`, an optional size there.
 
 # CONTROLLERS.
 [[text]]
@@ -621,16 +621,19 @@ at = [3023, 168]
 text = "ULTRA"
 at = [3023, 216]
 size = 15
+large_size = 17
 
 [[text]]
 text = "HI"
 at = [2983, 266]
 size = 15
+large_size = 17
 
 [[text]]
 text = "LO"
 at = [3023, 318]
 size = 15
+large_size = 17
 
 [[text]]
 text = "POWER"

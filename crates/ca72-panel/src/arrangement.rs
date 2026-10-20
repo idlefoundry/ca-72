@@ -33,16 +33,26 @@ const MOST_CHARS: usize = 48;
 
 /// A legend: `at` its centre (the middle of its capitals), in the face's units; `size` its
 /// lettering's (the panel's legend size, by the lettering, if `None`); `large` its place in
-/// the large lettering.
+/// the large lettering; `large_size` its size there, if different.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Text {
     pub at: (f64, f64),
     pub large: Option<(f64, f64)>,
     pub text: String,
     pub size: Option<f64>,
+    pub large_size: Option<f64>,
 }
 
 impl Text {
+    /// Its size in `lettering`, keeping a pack's fixed size unless it gives a larger one.
+    pub fn size_in(&self, lettering: art::Lettering) -> f64 {
+        match lettering {
+            art::Lettering::Large => self.large_size.or(self.size),
+            art::Lettering::Standard => self.size,
+        }
+        .unwrap_or(lettering.legend())
+    }
+
     /// Its place in `lettering`.
     pub fn at_in(&self, lettering: art::Lettering) -> (f64, f64) {
         match (lettering, self.large) {
@@ -191,6 +201,8 @@ struct TextEntry {
     at: [f64; 2],
     #[serde(default)]
     size: Option<f64>,
+    #[serde(default)]
+    large_size: Option<f64>,
     #[serde(default)]
     large: Option<[f64; 2]>,
     #[serde(flatten)]
@@ -609,7 +621,10 @@ impl Arrangement {
         };
         for t in &file.text {
             let at_ok = finite(t.at) && t.large.is_none_or(finite);
-            let size_ok = t.size.is_none_or(|s| (6.0..=80.0).contains(&s));
+            let size_ok = [t.size, t.large_size]
+                .into_iter()
+                .flatten()
+                .all(|s| (6.0..=80.0).contains(&s));
             if !plain(&t.text) || !at_ok || !size_ok {
                 reject(
                     "layout.text",
@@ -739,6 +754,7 @@ impl Arrangement {
                     large: t.large.map(pair),
                     text: t.text,
                     size: t.size,
+                    large_size: t.large_size,
                 })
                 .collect(),
             power: pair(fx.power),
@@ -919,6 +935,28 @@ mod tests {
         assert_eq!(a.texts.len(), 64);
         assert_eq!(a.titles.len(), 5);
         assert_eq!(a.lines.len(), 15);
+    }
+
+    /// QUALITY's small print follows LARGE, while older packs keep their fixed sizes.
+    #[test]
+    fn large_small_print_is_optional_and_checked() {
+        use art::Lettering::{Large, Standard};
+        let a = Arrangement::official();
+        assert_eq!(a.texts.iter().filter(|t| t.large_size.is_some()).count(), 3);
+        for text in a.texts.iter().filter(|t| t.size == Some(15.0)) {
+            assert_eq!(text.size_in(Standard), 15.0, "{}", text.text);
+            assert_eq!(text.size_in(Large), 17.0, "{}", text.text);
+        }
+        let old = include_str!("../tests/compat/v1/official-layout.toml");
+        let mut report = Report::default();
+        let old = Arrangement::read(old, &mut report).expect("the older layout");
+        for text in old.texts.iter().filter(|t| t.size == Some(15.0)) {
+            assert_eq!(text.size_in(Large), 15.0);
+        }
+        for size in ["5", "81", "nan", "inf"] {
+            let text = OFFICIAL.replacen("large_size = 17", &format!("large_size = {size}"), 1);
+            assert!(rejected(&text).has("layout.text"));
+        }
     }
 
     fn rejected(text: &str) -> Report {
