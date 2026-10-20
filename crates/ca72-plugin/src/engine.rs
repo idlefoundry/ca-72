@@ -162,7 +162,8 @@ pub struct Controls {
     pub reach: Reach,
 }
 
-/// How far a voice's note's pressure and timbre (each 0..1) move it (decisions.md R-MPE): its
+/// How far a voice's note's pressure (0..1) and timbre (-1..1, 0 at rest) move it (decisions.md
+/// R-MPE, R-TIMBRE-REST): its
 /// MODULATION wheel's MIDI share, as a keyboard's wheel moves it (-1..1, 1 adding a wheel
 /// pushed fully forward at full pressure), and its filter's cutoff, octaves at full.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -181,8 +182,9 @@ impl Reach {
 }
 
 /// A note's own expression, as MPE or a host's note expressions give it (decisions.md R-MPE):
-/// its pressure and timbre, 0..1, and its own pitch bend, semitones (on top of the PITCH
-/// wheel's, which every voice shares).
+/// its pressure, 0..1; its timbre, -1..1 and 0 at rest, as the computer's TIMBRE REST measures
+/// it (`expression::TimbreRest`, R-TIMBRE-REST: 0..1 from 0 at ZERO); and its own pitch bend,
+/// semitones (on top of the PITCH wheel's, which every voice shares).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Expression {
     pub pressure: f32,
@@ -251,8 +253,10 @@ pub enum Event {
         key: u8,
         expression: Expression,
     },
-    /// The pressure and timbre (0..1) every voice shares, ordinary MIDI's channel pressure and
-    /// control change 74 (decisions.md R-MPE): a voice takes the larger of its own and these.
+    /// The pressure (0..1) and timbre (-1..1, 0 at rest) every voice shares, ordinary MIDI's
+    /// channel pressure and control change 74 (decisions.md R-MPE, R-TIMBRE-REST): a voice takes
+    /// the larger of its own pressure and this, and of its own timbre and this the one farther
+    /// from rest ([`farther`]).
     ChannelPressure(f32),
     Timbre(f32),
 }
@@ -706,6 +710,18 @@ impl Expressed {
         let midi = self.midi + reach.pressure_mod * pressure + reach.timbre_mod * timbre;
         self.wheel
             .max(ca72::modulation::midi_wheel(midi.clamp(0.0, 1.0)))
+    }
+}
+
+/// Of a note's own timbre and the one every voice shares, the one farther from rest (0), the
+/// note's where they are as far (decisions.md R-TIMBRE-REST): a note with none of its own takes
+/// the shared, a shared one at rest leaves the note's alone. Timbres measured from 0 (TIMBRE
+/// REST at ZERO) are never below it, and this is then the larger, as it had been, to the bit.
+pub fn farther(own: f32, shared: f32) -> f32 {
+    if shared.abs() > own.abs() {
+        shared
+    } else {
+        own
     }
 }
 
@@ -2055,7 +2071,7 @@ impl Engine {
             }
             Event::Timbre(v) => {
                 self.timbre = if v.is_finite() {
-                    v.clamp(0.0, 1.0)
+                    v.clamp(-1.0, 1.0)
                 } else {
                     0.0
                 };
@@ -2126,7 +2142,7 @@ impl Engine {
         let finite = |x: f32| if x.is_finite() { x } else { 0.0 };
         *k = Expression {
             pressure: finite(e.pressure).clamp(0.0, 1.0),
-            timbre: finite(e.timbre).clamp(0.0, 1.0),
+            timbre: finite(e.timbre).clamp(-1.0, 1.0),
             bend: finite(e.bend).clamp(-BEND_MOST, BEND_MOST),
         };
         let e = *k;
@@ -2189,13 +2205,13 @@ impl Engine {
         (self.pressure, self.timbre)
     }
 
-    /// A voice's expression as slot `k` hands it on: its note's own, its pressure and timbre at
-    /// least the shared ones.
+    /// A voice's expression as slot `k` hands it on: its note's own, its pressure at least the
+    /// shared one, its timbre the shared one where that is farther from rest ([`farther`]).
     fn handed(&self, k: usize) -> [f64; 3] {
         let e = self.slots[k].expression;
         [
             f64::from(e.pressure.max(self.pressure)),
-            f64::from(e.timbre.max(self.timbre)),
+            f64::from(farther(e.timbre, self.timbre)),
             f64::from(e.bend),
         ]
     }
@@ -6391,6 +6407,31 @@ mod expression_tests {
         assert_eq!(e.keys[55], x(0.0, 0.0, 0.0));
     }
 
+    /// A timbre about its rest (decisions.md R-TIMBRE-REST): a voice takes of its note's and the
+    /// shared one the one farther from rest, its note's where as far; a note with none takes
+    /// the shared, and a shared one at rest leaves each note's alone. Timbres from 0 (ZERO)
+    /// take the larger, as before.
+    #[test]
+    fn a_voice_takes_the_timbre_farther_from_rest() {
+        let mut e = engine(&Controls {
+            reach: reach(),
+            ..poly(4)
+        });
+        on(&mut e, 48, Expression::NONE);
+        on(&mut e, 55, x(0.0, -0.5, 0.0));
+        let (a, b) = (slot_of(&e, 48).unwrap(), slot_of(&e, 55).unwrap());
+        assert_eq!((e.handed(a)[1], e.handed(b)[1]), (0.0, -0.5));
+        e.event(Event::Timbre(0.25));
+        assert_eq!((e.handed(a)[1], e.handed(b)[1]), (0.25, -0.5));
+        e.event(Event::Timbre(-0.75));
+        assert_eq!((e.handed(a)[1], e.handed(b)[1]), (-0.75, -0.75));
+        e.event(Event::Timbre(0.5));
+        assert_eq!(e.handed(b)[1], -0.5, "as far: the note's own");
+        for (own, shared) in [(0.0f32, 0.3f32), (0.6, 0.3), (0.3, 0.3), (1.0, 0.0)] {
+            assert_eq!(farther(own, shared), own.max(shared));
+        }
+    }
+
     /// The pressure's reach on the MODULATION wheel moves its own voice's wheel only, as far
     /// as a keyboard's wheel would at full; turned back to 0, the voice's wheel is the
     /// panel's again.
@@ -6499,6 +6540,7 @@ mod expression_tests {
         e.event(Event::Timbre(-2.0));
         assert!(e.asleep());
         assert_eq!(e.keys[60], x(0.0, 1.0, BEND_MOST));
-        assert_eq!((e.pressure, e.timbre), (0.0, 0.0));
+        // (A timbre runs -1..1 about its rest, R-TIMBRE-REST.)
+        assert_eq!((e.pressure, e.timbre), (0.0, -1.0));
     }
 }

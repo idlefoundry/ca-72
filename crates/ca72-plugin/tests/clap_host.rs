@@ -1121,6 +1121,91 @@ fn clap_note_expressions_and_mpe_midi_play_the_same_samples() {
     }
 }
 
+/// TIMBRE REST through the real CLAP entry, as the computer's `settings.toml` chooses it
+/// (decisions.md R-TIMBRE-REST), each in a process of its own with a shared folder of its own:
+/// at "centre" (and with none set) a host's brightness at 0.5 is at rest, the notes the same to
+/// the bit as with none, TIMBRE TO FILTER turned up; at "zero" it is half the reach, audibly not;
+/// at "start", a note's first brightness is where it begins, so 0.5 then 0.9 is heard and 0.5
+/// alone is not.
+#[test]
+fn clap_brightness_rests_where_the_computers_setting_says() {
+    if let Ok(word) = std::env::var("CA72_TIMBRE_REST_CHILD") {
+        let instance = || {
+            let p = envelope_instance(256, 1, 0, false);
+            p.audio(1, &[In::Param(0, "timbre_filter", 2.0)]);
+            p
+        };
+        let x = |t: u32, note: i32, key: i16, v: f64| {
+            (
+                t,
+                In::Expression(0, CLAP_NOTE_EXPRESSION_BRIGHTNESS, note, 0, key, v),
+            )
+        };
+        let on =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_ON, note, 0, key, 1.0));
+        let off =
+            |t: u32, note: i32, key: i16| (t, In::Note(0, CLAP_EVENT_NOTE_OFF, note, 0, key, 0.0));
+        let plain = [
+            on(0, 1, 60),
+            on(4_800, 2, 67),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let half = [
+            on(0, 1, 60),
+            x(0, 1, 60, 0.5),
+            on(4_800, 2, 67),
+            x(4_800, 2, 67, 0.5),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let moved = [
+            on(0, 1, 60),
+            x(0, 1, 60, 0.5),
+            x(2_400, 1, 60, 0.9),
+            on(4_800, 2, 67),
+            off(16_800, 1, 60),
+            off(19_200, 2, 67),
+        ];
+        let a = render(&instance(), &plain, 24_000);
+        let same = |b: &[f32]| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits());
+        assert!(rms(&a) > 0.01, "{word}: sounding");
+        let b = render(&instance(), &half, 24_000);
+        assert_eq!(same(&b), word != "zero", "{word}: brightness 0.5");
+        let c = render(&instance(), &moved, 24_000);
+        assert!(!same(&c), "{word}: brightness moved from 0.5 to 0.9");
+        return;
+    }
+    for word in ["", "centre", "zero", "start"] {
+        let dir = tempfile::tempdir().expect("shared data folder");
+        if !word.is_empty() {
+            let folder = dir.path().join("CA-72");
+            std::fs::create_dir_all(&folder).expect("settings folder");
+            std::fs::write(
+                folder.join("settings.toml"),
+                format!("timbre_rest = \"{word}\"\n"),
+            )
+            .expect("settings");
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "clap_brightness_rests_where_the_computers_setting_says",
+                "--nocapture",
+            ])
+            .env("CA72_TIMBRE_REST_CHILD", word)
+            .env("IDLE_FOUNDRY_SHARED", dir.path())
+            .env("CA72_SEATS_DIR", dir.path().join("seats"))
+            .output()
+            .expect("child host");
+        let told = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && told.contains("1 passed"),
+            "{word}:\n{told}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
 
 /// A host may make, start and play an instance on a thread of its own, with less stack than a
 /// main thread's (a macOS secondary thread has 512 KB; a host's own threads may have less): the

@@ -887,10 +887,12 @@ fn the_arpeggiator_neither_allocates_nor_frees() {
 /// aftertouch and a host's note expressions (pressure, tuning, brightness), ordinary channel
 /// pressure and timbre, the MOD wheel on polyphonic aftertouch, the reaches automated, POLY
 /// switched and voices stolen, QUALITY at LO and HI, Reset All Controllers and All Notes Off,
+/// TIMBRE REST switched through its three (R-TIMBRE-REST) and the INPUT screen's counts read,
 /// a block at a time.
 #[test]
 fn mpe_expression_neither_allocates_nor_frees() {
     use ca72_plugin::Ca72;
+    use ca72_plugin::expression::TimbreRest;
     use ca72_plugin::mod_wheel::Source;
     use nih_plug::context::process::TestProcessContext;
     use nih_plug::prelude::*;
@@ -962,6 +964,7 @@ fn mpe_expression_neither_allocates_nor_frees() {
     };
     HERE.with(|h| h.set(true));
     let mut sink = 0.0f32;
+    let mut seen = 0u32;
     for b in 0..600usize {
         // (The host's queue filled off the count.)
         ARMED.store(false, Ordering::SeqCst);
@@ -1060,10 +1063,16 @@ fn mpe_expression_neither_allocates_nor_frees() {
         if b % 120 == 60 {
             c.automate(q.quality.as_ptr(), if b % 240 == 60 { 0.5 } else { 0.0 });
         }
+        if b % 40 == 13 {
+            q.set_timbre_rest(TimbreRest::ALL[b / 40 % 3]);
+        }
         ARMED.store(true, Ordering::SeqCst);
         p.process(&mut buffer, &mut aux, &mut c);
+        let (per_note, channel) = q.heard.counts();
+        seen = seen.max(per_note.min(channel));
         sink += buffer.as_slice()[0].iter().map(|x| x.abs()).sum::<f32>();
     }
+    assert!(seen > 0, "both counted");
     ARMED.store(false, Ordering::SeqCst);
     assert!(sink > 1.0, "it played ({sink})");
     let (allocs, frees) = (ALLOCS.load(Ordering::SeqCst), FREES.load(Ordering::SeqCst));
