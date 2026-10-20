@@ -42,8 +42,9 @@ pub const LAND_WAIT: f64 = 0.5;
 
 /// The knobs that glide, by their parameters' IDs: every continuous control of the panel and
 /// the strip (the learnable knobs, `learn::knob_param`'s), and the panel's PITCH and
-/// MODULATION wheels. Not the arpeggiator's GATE and SWING ([`TIMING`]).
-pub const KNOBS: [&str; 29] = [
+/// MODULATION wheels, and the per-note expression's four reaches (decisions.md R-MPE). Not the
+/// arpeggiator's GATE and SWING ([`TIMING`]).
+pub const KNOBS: [&str; 33] = [
     "tune",
     "glide",
     "mod_mix",
@@ -73,6 +74,10 @@ pub const KNOBS: [&str; 29] = [
     "level",
     "pitch_wheel",
     "mod_wheel",
+    "pressure_mod",
+    "pressure_filter",
+    "timbre_mod",
+    "timbre_filter",
 ];
 
 /// The continuous knobs that do not glide: the arpeggiator's GATE and SWING, which set when its
@@ -112,6 +117,10 @@ pub fn param(p: &Ca72Params, k: usize) -> Option<&FloatParam> {
         26 => &p.level,
         27 => &p.pitch_wheel,
         28 => &p.mod_wheel,
+        29 => &p.pressure_mod,
+        30 => &p.pressure_filter,
+        31 => &p.timbre_mod,
+        32 => &p.timbre_filter,
         _ => return None,
     })
 }
@@ -125,10 +134,19 @@ pub fn index(id: &str) -> Option<usize> {
 /// choosing a preset does not glide). The editor marks each value just before it sets it; the
 /// audio thread lands a knob whose new value is marked, and takes the mark. A mark is the
 /// preset's generation (high 32 bits) and the plain value's bits; 0 is none.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Lands {
     generation: AtomicU32,
     marks: [AtomicU64; KNOBS.len()],
+}
+
+impl Default for Lands {
+    fn default() -> Self {
+        Lands {
+            generation: AtomicU32::new(0),
+            marks: std::array::from_fn(|_| AtomicU64::new(0)),
+        }
+    }
 }
 
 impl Lands {
