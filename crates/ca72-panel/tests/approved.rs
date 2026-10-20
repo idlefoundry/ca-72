@@ -14,8 +14,8 @@
 //! the owner approved them on 2026-10-15 (as the switch column has the renderer's).
 //!
 //! Oscillators 2's and 3's TIMED keys (decisions.md R-OSC-TIMED) came after the mock-up and were
-//! approved in their own: in both pictures, the renderer's pixels round each key (dimmed, as at
-//! 8'), as of 2026-10-20.
+//! approved in their own; away from LO, as at 8' here, they are off the panel, so both pictures
+//! are the mock-up's own there again (as before 2026-10-20's keys).
 
 use ca72_panel::art::{COL, PANEL_H, PH, PLATE_H, PLATE_X, PLATE_Y, TOP, W};
 use ca72_panel::render::Timed;
@@ -55,7 +55,7 @@ fn drawn_as_approved(lettering: Lettering, file: &str) {
     let approved = Pixmap::load_png(format!("{}/tests/{file}", env!("CARGO_MANIFEST_DIR")))
         .expect("the approved panel");
     let mut r = Renderer::with_look(Skin::Drawn, lettering, 1.0, 1.0);
-    // (Every RANGE at half its travel is at 8': the TIMED keys are inert there, dimmed.)
+    // (Every RANGE at half its travel is at 8': the TIMED keys are off the panel there.)
     r.render(&Scene {
         values: [0.5; CONTROLS.len()],
         timed: [Timed {

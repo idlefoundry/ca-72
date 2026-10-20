@@ -1995,7 +1995,22 @@ impl Editing {
                 return None;
             }
         }
+        // (A control off the panel is not there to find.)
         interact::hit(self.renderer.layout(), self.renderer.arrangement(), x, y)
+            .filter(|t| !matches!(t, Target::Control(i) if self.off_panel(*i)))
+    }
+
+    /// Whether control `i` is off the panel now: a TIMED key away from its RANGE's LO
+    /// (decisions.md R-OSC-TIMED; the owner: "they should disappear ... if it's not on low
+    /// mode"). It is neither drawn nor found by the pointer (no press, wheel, tip or menu), nor
+    /// ringed while MIDI Learn learns it from the list.
+    fn off_panel(&self, i: usize) -> bool {
+        CONTROLS.get(i).is_some_and(|c| {
+            ca72_panel::render::TIMED_KEYS
+                .iter()
+                .position(|k| *k == c.param)
+                .is_some_and(|k| timed_inert(&self.params, k + 1))
+        })
     }
 
     /// The drawer's top now (drawing units) and where it is cut off, while it shows: dropping
@@ -3686,6 +3701,8 @@ impl Editing {
             None => self.hover?,
         };
         match target {
+            // (None for a control gone from the panel under a pointer still: R-OSC-TIMED.)
+            Target::Control(i) | Target::Legend(i, _) if self.off_panel(i) => None,
             Target::Control(i) | Target::Legend(i, _) => {
                 let c = *self.renderer.arrangement().control(i);
                 let p = self.operated(i)?;
@@ -3812,6 +3829,7 @@ impl Editing {
         );
         let (note, ring, strip_ring, menu) = self.learning.scene(map, self.renderer.text_size());
         let note = note.or_else(|| self.ultra_note.then(|| self.ultra_note()));
+        let ring = ring.filter(|&i| !self.off_panel(i));
         (self.scene.note, self.scene.learning, self.scene.menu) = (note, ring, menu);
         self.strip_scene.learning = strip_ring.filter(|_| !self.playing.visible);
         if self.scene.note.is_some() || self.scene.menu.is_some() {
@@ -4189,15 +4207,15 @@ fn arp_scene(p: &Ca72Params, values: &[f64; CONTROLS.len()], was: ArpScene) -> A
 }
 
 /// Whether oscillator `n`'s (1, 2) TIMED key does nothing: its RANGE away from LO (decisions.md
-/// R-OSC-TIMED). It is drawn dimmed and unlit then, whatever it holds, and does not answer the
-/// pointer, as VOICES where it does nothing.
+/// R-OSC-TIMED). It is off the panel then, whatever it holds ([`Editing::off_panel`]), and does
+/// not answer the pointer.
 fn timed_inert(p: &Ca72Params, n: usize) -> bool {
     p.timed_params(n)
         .is_some_and(|(_, _, range)| range.value() != crate::params::Footage::Lo)
 }
 
 /// Oscillators 2's and 3's timed keys as the panel shows them: each one's division (its sign) and
-/// whether it is inert.
+/// whether it is inert (off the panel).
 fn timed_scene(p: &Ca72Params) -> [ca72_panel::render::Timed; 2] {
     std::array::from_fn(|k| {
         let n = k + 1;
@@ -4213,13 +4231,11 @@ fn timed_scene(p: &Ca72Params) -> [ca72_panel::render::Timed; 2] {
 }
 
 /// A tip's name for a control in timed mode (R-OSC-TIMED): a FREQUENCY knob turning its
-/// DIVISION, or a TIMED key that does nothing at its RANGE.
+/// DIVISION.
 fn timed_label(p: &Ca72Params, param: &str) -> Option<&'static str> {
     Some(match param {
         "osc2_frequency" if p.timed_now(1) => "OSCILLATOR-2 DIVISION",
         "osc3_frequency" if p.timed_now(2) => "OSCILLATOR-3 DIVISION",
-        "osc2_timed" if timed_inert(p, 1) => "OSCILLATOR-2 TIMED (at RANGE LO)",
-        "osc3_timed" if timed_inert(p, 2) => "OSCILLATOR-3 TIMED (at RANGE LO)",
         _ => return None,
     })
 }
@@ -10687,11 +10703,81 @@ mod tests {
         );
         let pt = at(&e, centre("osc2_timed"));
         click(&mut e, pt);
-        assert!(host.take().is_empty(), "the inert key took a press");
-        e.draw();
-        e.hover = Some(Target::Control(key2));
-        let tip = e.tip().expect("a tip").0;
-        assert_eq!(tip, "OSCILLATOR-2 TIMED (at RANGE LO): On");
+        assert!(host.take().is_empty(), "the hidden key took a press");
+    }
+
+    /// A TIMED key away from its RANGE's LO (decisions.md R-OSC-TIMED; the owner: "they should
+    /// disappear ... if it's not on low mode"): off the panel, not found by the pointer (no
+    /// press, wheel, tip or menu), not ringed while learned from the list; its TIMED and
+    /// DIVISION kept. At LO, the same key is there and flips TIMED.
+    #[test]
+    fn a_timed_key_away_from_lo_is_off_the_panel() {
+        use crate::params::{Division, Footage};
+        for range in [Footage::R32, Footage::R8, Footage::R2] {
+            let (mut e, host, params) = editing_of(
+                Ca72Params {
+                    osc2_range: EnumParam::new("Osc 2 Range", range),
+                    osc2_timed: BoolParam::new("Osc 2 Timed", true),
+                    osc2_division: EnumParam::new("Osc 2 Division", Division::Sixteenth),
+                    osc3_range: EnumParam::new("Osc 3 Range", Footage::Lo),
+                    ..Ca72Params::default()
+                },
+                Library::at(std::env::temp_dir().join("ca72-editor-tests-no-library")),
+            );
+            e.draw();
+            let index = |p: &str| ca72_panel::controls::index(p).expect("a control");
+            let (key2, key3) = (index("osc2_timed"), index("osc3_timed"));
+            assert!(e.off_panel(key2) && !e.off_panel(key3), "{range:?}");
+            assert!(e.scene.timed[0].inert && !e.scene.timed[1].inert);
+            let (x, y) = centre("osc2_timed");
+            assert_ne!(e.hit(x, y), Some(Target::Control(key2)), "{range:?}: found");
+            let (x, y) = centre("osc3_timed");
+            assert_eq!(e.hit(x, y), Some(Target::Control(key3)), "{range:?}");
+            // A press, the wheel, a tip and a menu on its place: nothing of the key's.
+            host.take();
+            let pt = at(&e, centre("osc2_timed"));
+            click(&mut e, pt);
+            go(&mut e, pt);
+            wheel(&mut e, 1.0);
+            e.end_gestures();
+            assert!(
+                host.take().is_empty(),
+                "{range:?}: the hidden key took a press"
+            );
+            e.draw();
+            assert!(e.scene.tip.is_none(), "{range:?}: {:?}", e.scene.tip);
+            // (A pointer resting there as RANGE leaves LO: no tip.)
+            e.hover = Some(Target::Control(key2));
+            assert!(e.tip().is_none(), "{range:?}");
+            e.hover = None;
+            right_click(&mut e, pt);
+            assert!(
+                !e.learning.menu().is_some_and(|m| m.title.contains("TIMED")),
+                "{range:?}: its menu"
+            );
+            e.learning.close_menu();
+            // Learned from the MIDI list: no ring round its empty place.
+            e.learning.learn(&params.midi_map, learnable("osc2_timed"));
+            e.draw();
+            assert_eq!(e.scene.learning, None, "{range:?}: ringed");
+            e.learning.learn(&params.midi_map, learnable("osc3_timed"));
+            e.draw();
+            assert_eq!(e.scene.learning, Some(key3), "{range:?}");
+            e.learning.cancel(&params.midi_map);
+            // Its values kept.
+            assert!(params.osc2_timed.value());
+            assert_eq!(params.osc2_division.value(), Division::Sixteenth);
+            // At LO, oscillator 3's key is on the panel and flips TIMED.
+            host.take();
+            let pt = at(&e, centre("osc3_timed"));
+            click(&mut e, pt);
+            let p = params.osc3_timed.as_ptr();
+            assert_eq!(
+                host.take(),
+                vec![Call::Begin(p), Call::Set(p, 1.0), Call::End(p)],
+                "{range:?}"
+            );
+        }
     }
 
     /// OSC. 3 CONTROL while oscillator 3 is timed (its key on, its RANGE at LO; decisions.md
