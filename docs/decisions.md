@@ -12951,6 +12951,9 @@ drag cannot do (a switch, a STEPPED WAVEFORM, a timed FREQUENCY, a ninth knob, a
   and red were within ΔE 23 for deuteranopia and the first choice within 16; these four are at
   least ΔE 27 apart for protanopia, deuteranopia and tritanopia (green and red 29.7 for
   deuteranopia).
+- **The presets' bar marks a preset changed** when what the LFOs modulate is not its own
+  (`Patch::same_as_values`, worked out again only when the patch's change count moves), as it
+  does for a parameter.
 - **The rail key's glow** reads `Scope::any_moving` (an LFO assigned, running, not an ENV that has
   finished).
 
@@ -12976,8 +12979,9 @@ drag cannot do (a switch, a STEPPED WAVEFORM, a timed FREQUENCY, a ninth knob, a
   inverse (`every_targets_law_is_the_parameters`); the base the glided value's
   (`the_base_is_the_knobs_glided_place`); the patch (at most eight, by source, saved and read
   back, preset values and back).
-- Saved: `a_preset_keeps_what_the_lfos_modulate` (saved to a preset's file, chosen back, none
-  from a preset without, none after Init, the parameters' defaults from an old preset);
+- Saved: `a_preset_keeps_what_the_lfos_modulate` (saved to a preset's file, chosen back, the
+  bar's mark following a depth changed and back, none from a preset without, none after Init,
+  the parameters' defaults from an old preset);
   `a_session_keeps_what_the_lfos_modulate_and_an_old_one_none`.
 - MIDI Learn's list and the knobs' glide test with the 40 (52 knobs, 28 selectors, 45 switches);
   the agents' `agents_assign_and_remove_as_the_page_does`.

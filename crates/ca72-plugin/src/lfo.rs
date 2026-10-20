@@ -756,6 +756,26 @@ impl Patch {
         self.load(&saved);
     }
 
+    /// Whether these are what a preset's values (`values`, its [`Patch::values`]) give: the
+    /// same assignments, in any order, their depths within a hundredth of a percent, and the same
+    /// EDGES (the presets' bar marks a preset changed where not).
+    pub fn same_as_values(&self, values: &[(String, f64)]) -> bool {
+        let theirs = Patch::default();
+        theirs.load_values(values);
+        let sorted = |p: &Patch, s: Source| {
+            let mut a: Vec<Assignment> = p.assignments(s).into_iter().flatten().collect();
+            a.sort_by_key(|a| a.target);
+            a
+        };
+        Source::all().all(|s| {
+            let (a, b) = (sorted(self, s), sorted(&theirs, s));
+            a.len() == b.len()
+                && a.iter()
+                    .zip(&b)
+                    .all(|(x, y)| x.target == y.target && (x.depth - y.depth).abs() < 1e-4)
+        }) && (0..LFOS).all(|l| self.edges(l) == theirs.edges(l))
+    }
+
     /// `other`'s assignments and EDGES in place of these, without allocating (a preset a MIDI
     /// pad chose, prepared off the audio thread and applied on it).
     pub fn copy_from(&self, other: &Patch) {
