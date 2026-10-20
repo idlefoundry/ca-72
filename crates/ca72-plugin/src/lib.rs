@@ -983,6 +983,8 @@ impl Plugin for Ca72 {
             }
             // The LFOs' scopes, orbs and rings (decisions.md R-LFO).
             self.params.lfo_scope.publish(&self.engine.lfo_readings());
+            // The tempo it played at, for the LFO page's timed scopes (decisions.md R-LFO-PAGE).
+            self.meters.publish_tempo(clock.tempo);
         }
         // The standalone's effects, after the synth and its meters: each effect's block is
         // waited for until a share of the period from the block's start, then the effect
