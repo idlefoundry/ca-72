@@ -11810,6 +11810,24 @@ that it stands as tall as their capitals), beside the key; the mock-ups show it 
 choose. Option B." Each key is on the panel at every RANGE; away from LO it is dimmed and does
 not answer the pointer, as VOICES where it does nothing (R64), and is unlit whatever it holds.
 
+**OSC. 3 CONTROL inert while oscillator 3 is timed (the owner, 2026-10-20).** Timed, oscillator 3
+follows its clock, never the keys, so OSC. 3 CONTROL does nothing then. The owner first asked
+whether it should be switched off automatically (his question, paraphrased: his words were not
+kept). The recommendation put to him was to dim it instead, for three reasons: switching it off
+would lose the player's setting; it would make hosts record automation the player didn't make,
+with a second undo step; and the panel already dims the controls that do nothing. He accepted:
+"Okay, that's fine. Do it that way." While oscillator 3's key is on and its RANGE at LO, OSC. 3
+CONTROL is dimmed (half opacity in the drawn skin; shaded over its whole picture in the worn,
+as the knobs are) and inert: clicks, a press while MIDI Learn listens, and the wheel do nothing.
+It keeps its stored value, on or off, and is never switched by the plug-in. The host's
+automation and an agent (MCP) still set it, to no effect until oscillator 3 follows the keys
+again; with its key off or its RANGE away from LO it is live with its own setting. Its tip is
+unchanged, as VOICES's is where it does nothing; its menu still learns it, as VOICES's does.
+Oscillator 2 has no such switch: nothing changes there. (`editor::osc3_control_inert`,
+`Scene::osc3_control_off`; tested by `osc3_control_is_inert_while_oscillator_3_is_timed` and
+`osc3_control_is_dimmed_and_undimmed_in_place`. The sound is untouched: the factory presets the
+same to the bit, below.)
+
 **The note follows the division (the owner, the same day):** "What if we made it so that
 instead of always having the eighth note beside the button, it dynamically shows whatever is
 selected on the oscillator? So if the user has a one bar LFO selected, it'll show a whole note,
