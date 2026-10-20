@@ -808,7 +808,7 @@ fn run_off(fonts: &Fonts, arrangement: &Arrangement) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for lettering in [Lettering::Standard, Lettering::Large] {
         for t in &arrangement.texts {
-            let size = t.size.unwrap_or(lettering.legend());
+            let size = t.size_in(lettering);
             let (x, y) = t.at_in(lettering);
             let half = fonts.advance(&t.text, size, Weight::Bold, 0.0) * art::STRETCH / 2.0;
             let c = arrangement.panel.canvas();

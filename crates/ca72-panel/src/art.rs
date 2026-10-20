@@ -1031,10 +1031,7 @@ fn print(s: &mut Svg, layout: &Layout, arrangement: &Arrangement) {
     }
     for t in &arrangement.texts {
         let (x, y) = t.at_in(s.1);
-        match t.size {
-            None => legend(s, x, y, &t.text),
-            Some(size) => lettered(s, x, y, &t.text, size),
-        }
+        lettered(s, x, y, &t.text, t.size_in(s.1));
     }
 }
 
