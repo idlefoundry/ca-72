@@ -13,7 +13,7 @@ use resvg::usvg;
 
 use crate::arrangement::Arrangement;
 use crate::art::{self, Blend, H, Layer, Layout, Lettering, W};
-use crate::controls::{CONTROLS, Kind, Mark, Place, feedback_silent};
+use crate::controls::{CONTROLS, Kind, Mark, feedback_silent};
 use crate::fonts::{FAMILY, Fonts};
 use crate::learn::{self, Menu, Note};
 use crate::look::Look;
@@ -613,8 +613,8 @@ impl Renderer {
             .iter()
             .zip(scene.values)
             .map(|(c, v)| {
-                // (The arpeggiator's drawer draws its own knobs: `Renderer::paint_control`.)
-                if c.place == Place::Arp {
+                // (The drawers draw their own knobs: `Renderer::paint_control`.)
+                if c.place.is_drawer() {
                     return Layer::default();
                 }
                 let midi = match c.kind {

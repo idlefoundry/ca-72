@@ -11768,3 +11768,188 @@ by `STATUS_STACK_OVERFLOW` (0xc00000fd: what Windows reports for a crash to the 
 kind), and passes with the fix. In a release build making an instance needed 640 to 768 KB of
 the thread's stack (a Windows thread has 1 MB unless its maker asks otherwise); with the fix the
 whole life fits 256 KB.
+
+## R-MPE. Each note's own pressure, timbre and bend: per-voice expression (issue 81), the engine and MIDI
+
+**Owner decision, 2026-10-19** (issue 81, "Owner decision, 2026-10-19: per voice"): a user asked
+to use aftertouch and an MPE controller's timbre as modulation sources, "even if only as one
+value for all voices". The owner: "implement it **per voice**. Each note's pressure and timbre
+move that note's voice only", each "assignable to that voice's modulation (the MODULATION
+wheel's amount, at least, and per-note filter amount)"; "with ordinary MIDI, the same sources
+come from channel pressure and the timbre controller and move every voice alike"; "a voice shared
+by several notes takes the playing note's expression"; and issue 109's wheel source and this
+"should share the same pressure handling, not duplicate it". That night's instruction: "Engine +
+mock-ups": the engine and MIDI half with tests, and two or three mock-ups of where the
+assignment goes. The panel's controls wait for the owner's choice of mock-up
+(`ca72-night/mpe-mockups/`); until then the amounts are parameters only (a host's, the MCP's).
+The owner chose A on 2026-10-20: below, "The drawer".
+
+**Built.**
+- **MIDI** (`expression.rs`, one record on the audio thread, fixed storage). The MPE
+  Configuration Message (RPN 6 on channel 1 or 16) makes a lower or upper zone of member
+  channels; a later zone takes channels from the other, as MPE says. A member channel's pitch
+  bend (over its zone's bend range, RPN 0 on any member, 48 semitones by default, at most 96),
+  channel pressure and control change 74 are its note's alone: not the PITCH wheel's, not
+  learned, not the wheel's channel aftertouch. The master channel and every channel outside a
+  zone are ordinary MIDI: their bend is the PITCH wheel's (MIDI BEND RANGE, as before), their
+  channel pressure and CC 74 every voice's alike. Polyphonic aftertouch and a host's note
+  expressions (CLAP's and VST3's pressure, tuning and brightness) are their note's own, zone
+  or not. A note's expression goes to the engine as its key's before the note, and whenever it
+  changes while the note is held; each value only as it changes.
+- **The wheel's aftertouch reads the same record** (R-MODWHEEL-SOURCE). The wheel keeps only
+  which held keys' pressure arrived since its source was chosen; the pressures are the
+  record's. Its channel aftertouch is channel pressure outside a zone's members (the master's
+  included); its polyphonic aftertouch is every held note's own pressure, an MPE member
+  channel's included.
+- **The engine.** Each key's expression as last told, and the shared pressure and timbre. A
+  POLY voice takes its note's at the attack, at once (not gliding from its last note's), and
+  its changes while the key is held; a voice let go keeps what it had; a stolen voice takes the
+  new note's. The one instrument and UNISON's voices take the expression of the key NOTE PRIORITY
+  sounds (LOW the lowest held, HIGH the highest, LAST the last pressed), at once for a key
+  pressed with none held, gliding as the keys change under a phrase; with none held the last
+  is kept for the release. A voice's pressure and timbre are the larger of its note's and the
+  shared ones. Each voice glides to its expression over a 4 ms time constant.
+- **What it moves** (four sound parameters, the last of all: `pressure_mod`, `pressure_filter`,
+  `timbre_mod`, `timbre_filter`, 0 by default). A note's own bend detunes its voice's
+  oscillators 1 and 2, and 3 with OSC. 3 CONTROL on (the PITCH wheel's bus reaches it only
+  then), by its semitones, as ENTROPY's offsets are applied. PRESSURE and TIMBRE TO FILTER
+  (-4 to 4 octaves at full) move the voice's cutoff, as ENTROPY's cutoff offset (volts at
+  R51). PRESSURE and TIMBRE TO MODULATION (-100 to 100 %) move the voice's MODULATION wheel's
+  MIDI share as a keyboard's wheel moves it: at 100 %, full pressure is the wheel pushed fully
+  forward; it adds to the keyboard's wheel (whatever moves it, R-MODWHEEL-SOURCE), the panel's
+  wheel the least as ever. The wheel is set once a run (at most 128 samples), the cutoff and
+  bend every sample.
+- **Off is the instrument as before, to the bit.** With no expression, or every reach at 0 and
+  no bend, the jacks and the wheel are not touched at all. The reaches are a preset's (saved
+  with the sound; a preset or a session saved before reads them 0), learnable knobs in MIDI
+  Learn's list (R34), and in the MCP's table.
+- **A per-computer setting, `mpe` in `settings.toml`**: `auto` (the default: the controller's
+  configuration message), `lower` (a lower zone of fifteen always, for hosts that do not pass
+  the message on) or `off`. In the settings menu since 2026-10-20 (below).
+- **nih-plug's change 16:** its VST3 wrapper turned the host's brightness into an expression
+  event and its expression into brightness; each now maps to its own (`PATCHES.md`).
+
+**Agent decisions, 2026-10-19** (not separately approved):
+- Pressure and timbre run 0 to 1 from rest (MPE's CC 74 often rests near 64: a positive reach
+  then moves a held note by about half). A centred timbre is an option for the owner. (The
+  owner, 2026-10-20: a setting, TIMBRE REST, CENTERED ON 64 by default; below.)
+- Reset All Controllers rests every pressure and bend, not the timbre (a sound controller,
+  MIDI's RP-015). All Notes Off, All Sound Off, panic and the host's reset let go of every note's
+  record; the voices letting go keep theirs.
+- The expression never wakes the sleeping one instrument (R68): asleep, no key is down.
+- A note's expression is by key in the engine, as its notes are: two notes on one key from two
+  channels share it, the later's. The arpeggiator's notes take their key's (a transposed one
+  usually none).
+- The wheel's channel aftertouch and PRESSURE TO MODULATION add for ordinary MIDI (the wheel
+  moves every voice, the reach each voice again); the owner may prefer one to replace the
+  other. (Kept by the owner, 2026-10-20.)
+- The master channel's RPN 0 is not followed: MIDI BEND RANGE stays the player's. (Kept by the
+  owner, 2026-10-20, with the ranges and Reset All Controllers.)
+
+**Hosts and formats.** CLAP: note expressions (pressure, tuning, brightness) and raw MPE through
+its MIDI dialect, the same samples (`tests/clap_host.rs`). VST3: polyphonic pressure, and tuning
+and brightness note expressions through nih-plug's controller (change 16 tested in the vendored
+crate); raw MPE only where a host passes channel messages through VST3's MIDI mapping. AU: the
+clap-wrapper's MIDI, so raw MPE. Standalone: raw MPE from the MIDI input
+(`tests/standalone_adapter.rs`). None was tried in a real host or with a controller.
+
+**Evidence (Linux x86-64, ngspice 47, 2026-10-20).** `preset_render`, every factory preset, ten
+voices, against renders of `17f1b5f` from a worktree of its own: the same to the bit at HI, LO
+and ULTRA. Tests: each voice's samples with another note's expression the same to the bit as
+without (LO, HI, ULTRA); no expression or no reach, the output to the bit (the engine, and the
+plug-in given channel pressure, CC 74 and polyphonic aftertouch); CLAP's note expressions and MPE
+MIDI through the real CLAP entry the same samples, the one instrument and POLY; raw MPE into the
+standalone's production adapter the same as a host's note expressions, nothing allocated in its
+callbacks; `mpe_expression_neither_allocates_nor_frees` (`tests/realtime.rs`); the fuzz with
+every reach and expression at its ends. `CA72_REQUIRE_NGSPICE=1 cargo test --workspace
+--no-fail-fast --features ca72-plugin/standalone-production`: 924 passed, 1 failed, 74 ignored;
+the one, `ca72-fx-helper`'s `effects_that_crash_or_hang_as_they_load_never_hold_the_start_and_stay_off`,
+fails the same at `17f1b5f`.
+
+**Owner decision, 2026-10-20** (the mock-ups, `ca72-night/mpe-mockups/`): "for MPE, i agree with
+your recommendation of A. Can we make the timbre's rest point something that is configurable
+computer-wide in settings? ... Give sensible defaults, and allow user configuration if the
+decision isn't obvious." Then: "Rebuild with those choices implemented". The defaults proposed
+with A and taken: the key MPE, the legends MODULATION and CUTOFF, the INPUT screen kept, the key
+lit while any amount is not 0, the settings in a menu of their own; and as built: PRESSURE TO
+MODULATION adds to the wheel's aftertouch, the ranges ±100 % and ±4 octaves, the master
+channel's RPN 0 ignored, Reset All Controllers by RP-015.
+
+**The drawer (A, as drawn; `strip/mpe.rs`).** The rail's MPE key, after ARP (the standalone's
+after FX: ARP | FX | MPE, beside the settings' key in both), drops a one-row drawer built as the
+arpeggiator's (C1, R-ARP: the same plate, edge, shadow and depth, `lower`), one drawer at a time
+with ARP's and FX's. The name's display is a key shorter for it (2100 to 2000 units in the
+plug-ins, 2000 to 1900 in the standalone); every key keeps its width and gaps. Left to right:
+- **INPUT**, a pixel screen of the rail's kind (240 by 50): MPE while each note's own expression
+  came in the last 3 s (an MPE member channel's pressure, timbre or bend, polyphonic aftertouch,
+  a host's note expressions), else CHANNEL while ordinary channel pressure or CC 74 did, else dark
+  (its dots unlit). The audio thread counts each kind (`expression::Heard`); the editor notes when
+  each count last changed. 3 s, so that a note held still between a controller's messages keeps it.
+- a rule; **PRESSURE**, its title, then MODULATION (a dial -100 to 100, `Dial::Reach`, its readout
+  in %) and CUTOFF (the panel's CUTOFF FREQUENCY dial, -4 to 4, its readout in OCT), each a knob
+  and readout unit as the strip's; a rule; **TIMBRE**, the same. The groups each centred on their
+  own half, at the mock-up's places.
+- **The readouts have four cells**, not the strip's three: MODULATION's "-100" needs them; CUTOFF's
+  the same so that the drawer's digits are one size (each cell is about three quarters of the
+  strip's width). Agent decision.
+- The key is lit while any of the four amounts is not 0, as ARP's while the arpeggiator runs.
+- The knobs are the panel's controls (`Place::Mpe`): turned, scrolled and double-clicked to their
+  default as the others; they glide (R-KNOB-GLIDE: the four are among `smooth::KNOBS`); right-click
+  for MIDI Learn (they were already learnable). A readout double-clicked, or a knob ⌘-clicked
+  (R-KNOB-ENTRY), takes a typed value in its units (R52): MODULATION a sign and three digits,
+  CUTOFF a sign, three digits and a point; past the travel, its end.
+- Drawn in the worn and the drawn skins; a skin pack's look draws its base's, as the other
+  drawers (R-SKIN-PACKS). Its still is made on a thread of its own as the editor opens.
+
+**The settings (per computer, `settings.toml`; the menu).** The settings' menu already reaches
+past the window's foot at the opening size, so MPE is one head and one item, INPUT & TIMBRE…,
+which opens a menu of its own (as mock-up B's sub-menu), titled MPE:
+- **MPE INPUT**: AUTO (the default; the controller's MPE Configuration Message), LOWER ZONE
+  (fifteen member channels, for hosts that do not pass the message on), OFF. The `mpe` setting
+  (`auto`, `lower`, `off`), now in the menu.
+- **TIMBRE REST**, `timbre_rest`: CENTERED ON 64 (the default, `centre`), FROM 0 (`zero`, the
+  behaviour built on 2026-10-19), FROM THE NOTE'S START (`start`).
+  - **CENTERED ON 64**: one law for CC 74 and a host's brightness, both 0..1 (`TimbreRest::
+    measured`): below 0.5, 2x - 1; from 0.5 to 64/127, exactly 0; above, (127x - 64)/63. So CC 0,
+    64 and 127 are -1, 0 and 1, brightness 0.5 is 0, and a brightness a host made of CC 74
+    (v/127) measures as the CC itself: the flat half-step keeps CLAP's note expressions and
+    MPE's MIDI the same to the bit.
+  - **FROM 0**: 0..1 from 0, as built on 2026-10-19, to the bit.
+  - **FROM THE NOTE'S START**: each note's timbre measured from where it began (-1..1). An MPE
+    member channel's: the channel's last value before the note (MPE sends it before the
+    note-on), else its first after. A host's brightness: its first value for the note (often
+    at the note's own time, just after it). Ordinary CC 74, every voice's: there is no note's
+    start, so the value as the phrase began (the first key pressed with none held), else its
+    first after; agent decision, over simply centring on 64, so that FROM THE NOTE'S START
+    means the same on every channel.
+  - In every one, a note or channel that never sent a timbre is at rest (not 0, which CENTERED
+    reads as -1). A voice takes, of its note's own timbre and the shared one, the one farther
+    from rest, its own on a tie (the larger under FROM 0, as before: "the larger" no longer
+    serves a timbre that can fall below rest); the same between a note's brightness and its
+    member channel's CC 74. Pressure is unchanged. The engine holds timbre -1..1. Agent
+    decision.
+  - Changing it while notes are held measures every held note and the shared timbre afresh.
+  - Only a timbre amount not 0 hears any of this, so the default's change leaves every factory
+    preset and every saved project without a timbre amount the same to the bit.
+- The settings take effect at once, in every instance whose editor opens after (each editor
+  reads the file as it opens, as the wheel's source); the audio thread reads them each block.
+- **MCP:** `ca72_settings` reads and `ca72_settings_set` sets `mpe_input` (AUTO, LOWER ZONE,
+  OFF) and `timbre_rest` (the menu's words), as the menu does.
+
+**Evidence (Linux x86-64, 2026-10-20).** `preset_render`, every factory preset, ten voices,
+TIMBRE REST at its new default (CENTERED ON 64), against renders of release-0.3.0's `47a987f`
+from a worktree of its own: the same to the bit at HI, LO and ULTRA (2 s). Tests: CC 64 and a
+brightness of 0.5 with both timbre reaches up are the same to the bit as no timbre (the one
+instrument and POLY), CC 0 and 127 -1 and 1; FROM THE NOTE'S START at rest on a fresh touch for
+member channels, host brightness and ordinary CC 74; the rest changed while playing; CLAP's
+brightness through the real entry under each `timbre_rest` (none, centre, zero, start), each in
+a process of its own; the INPUT counts; `mpe_expression_neither_allocates_nor_frees` through all
+three rests; the drawer drawn in parts the same as whole (both skins, two scales); the editor's
+key, one drawer at a time, the key's light, typed values, INPUT, the MPE menu and MCP's two
+settings. `cargo test -p ca72-plugin -p ca72-panel`: 617 passed, 0 failed, 67 ignored; clippy
+(`--workspace --all-targets --all-features -D warnings`) and fmt clean. Frame times (`frames`, the
+worn skin): the drawer's renderer made 0.03 ms on the editor's thread; its first drop 4.8 ms at
+0.44 and 14.0 ms at 0.87 with its plate made, a knob turned 1.1 and 3.3 ms (median), INPUT
+changing 0.4 and 0.6 ms: as the arpeggiator's drawer (5.3, 15.8; 1.1, 3.8). No golden image
+changed: `approved.png` is the panel's, without the rail. Not tried: a real host, an MPE
+controller, macOS, Windows, the VST3's and the AU's brightness.

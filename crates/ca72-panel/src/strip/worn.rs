@@ -773,6 +773,7 @@ impl StripRenderer {
                 BarTarget::Keyboard => scene.bar.keyboard,
                 BarTarget::Arp => scene.bar.arp,
                 BarTarget::Fx => scene.bar.fx,
+                BarTarget::Mpe => scene.bar.mpe,
                 _ => false,
             };
             if active && meets(self.key_part(target), r) {
@@ -1013,7 +1014,11 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                     N(y + 11.0)
                 );
             }
-            BarTarget::Save | BarTarget::Panel | BarTarget::Arp | BarTarget::Fx => put!(
+            BarTarget::Save
+            | BarTarget::Panel
+            | BarTarget::Arp
+            | BarTarget::Fx
+            | BarTarget::Mpe => put!(
                 o,
                 "<text x='{}' y='{}' font-size='20' font-weight='700' text-anchor='middle' dominant-baseline='central' fill='{print}'>{}</text>",
                 N(x),
@@ -1022,6 +1027,7 @@ fn key_marks(o: &mut Svg, rail: Rail, print: &str) {
                     BarTarget::Panel => "PANEL",
                     BarTarget::Arp => "ARP",
                     BarTarget::Fx => "FX",
+                    BarTarget::Mpe => "MPE",
                     _ => "SAVE",
                 }
             ),
@@ -1180,7 +1186,21 @@ fn reading(k: &mut StripRenderer, i: usize, r: Readout, text: &str, lit: bool) {
 pub(super) fn readout_patch(
     options: &usvg::Options<'_>,
     scale: f64,
+    window: (f64, f64, f64, f64),
+    text: &str,
+    lit: bool,
+    lamp: &Lamp,
+) -> Option<Reading> {
+    readout_cells(options, scale, window, 3, text, lit, lamp)
+}
+
+/// [`readout_patch`] of `cells` cells (the expression drawer's MODULATION, four for its "-100":
+/// decisions.md R-MPE).
+pub(super) fn readout_cells(
+    options: &usvg::Options<'_>,
+    scale: f64,
     (x, y, w, h): (f64, f64, f64, f64),
+    cells: usize,
     text: &str,
     lit: bool,
     lamp: &Lamp,
@@ -1199,7 +1219,7 @@ pub(super) fn readout_patch(
         N(-left / scale),
         N(-top / scale)
     );
-    seven(&mut o, (x, y, w, h), 3, text, lit, &lamp.seg());
+    seven(&mut o, (x, y, w, h), cells, text, lit, &lamp.seg());
     put!(o, "</g>");
     svg_over(options, &mut patch, scale, &o.0);
     Some(Reading {

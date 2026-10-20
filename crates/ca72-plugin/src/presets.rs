@@ -200,6 +200,12 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("arp_octaves", &p.arp_octaves),
         ("arp_gate", &p.arp_gate),
         ("arp_swing", &p.arp_swing),
+        // Each note's own pressure and timbre's reach (decisions.md R-MPE): a preset that does
+        // not name them plays as before, untouched by them.
+        ("pressure_mod", &p.pressure_mod),
+        ("pressure_filter", &p.pressure_filter),
+        ("timbre_mod", &p.timbre_mod),
+        ("timbre_filter", &p.timbre_filter),
     ]
 }
 
@@ -530,6 +536,7 @@ impl Browser {
             panel: self.bar.panel,
             arp: self.bar.arp,
             fx: self.bar.fx,
+            mpe: self.bar.mpe,
         };
     }
 
@@ -644,7 +651,8 @@ impl Browser {
             | BarTarget::Panel
             | BarTarget::Keyboard
             | BarTarget::Arp
-            | BarTarget::Fx => {}
+            | BarTarget::Fx
+            | BarTarget::Mpe => {}
             BarTarget::Next => self.step(1, p, s),
             BarTarget::Star => {
                 let current = Self::current(p);
@@ -1575,6 +1583,49 @@ mod tests {
     /// NOTE PRIORITY and RETRIGGER are a preset's (the owner, 2026-10-10: "This item should be
     /// saved per patch"; R50): saved with the sound, set by a preset naming them (the factory's
     /// the owner made since), and LOW and off, the instrument's own, by one saved before them.
+    /// Each note's own expression's reaches (decisions.md R-MPE) are a preset's: saved with the
+    /// sound and set by a preset naming them, and none (0, the sound as before) in one that
+    /// does not, every factory preset among them.
+    #[test]
+    fn the_expression_reaches_are_a_presets_and_none_where_it_does_not_name_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::at(dir.path());
+        let p = Ca72Params::default();
+        let target = |e: &Entry, id: &str| {
+            targets(&p, e)
+                .into_iter()
+                .find(|(k, _)| *k == id)
+                .map(|(_, v)| v)
+        };
+        let ids = [
+            "pressure_mod",
+            "pressure_filter",
+            "timbre_mod",
+            "timbre_filter",
+        ];
+        for id in ids {
+            assert!(values_now(&p).iter().any(|(k, _)| k == id), "{id}");
+        }
+        for e in lib.entries().0 {
+            for id in ids {
+                assert_eq!(target(&e, id), Some(0.5), "{} {id}", e.sound.name);
+            }
+        }
+        let saved = lib
+            .save(
+                "Pressed Open",
+                vec![
+                    ("pressure_filter".to_owned(), 2.0),
+                    ("timbre_mod".to_owned(), -50.0),
+                ],
+                None,
+            )
+            .unwrap();
+        assert_eq!(target(&saved, "pressure_filter"), Some(0.75));
+        assert_eq!(target(&saved, "timbre_mod"), Some(0.25));
+        assert_eq!(target(&saved, "pressure_mod"), Some(0.5));
+    }
+
     #[test]
     fn the_arpeggiator_is_part_of_a_preset_and_off_in_one_that_does_not_name_it() {
         let dir = tempfile::tempdir().unwrap();

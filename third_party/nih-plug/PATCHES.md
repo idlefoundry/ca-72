@@ -178,8 +178,17 @@ One more from the CA-72's own testing in Cubase 15 on Windows 11 (2026-10-10; it
     `visibility_tests` unit tests exercise the actual CLAP initialization and context;
     CI runs them explicitly because this vendored crate is outside the workspace.
 
+16. **A VST3 host's brightness arrives as brightness.** `NoteExpressionController::
+    translate_event` (`src/wrapper/vst3/note_expressions.rs`) turned `kBrightnessTypeID` into
+    `NoteEvent::PolyExpression` and `kExpressionTypeID` into `PolyBrightness`, the opposite of
+    its own `translate_event_reverse` and of the CLAP wrapper. The CA-72 takes brightness as a
+    note's timbre (its `docs/decisions.md` R-MPE, issue 81), so a VST3 host's MPE timbre went
+    nowhere. They now map each to its own (the module's own test, run as
+    `cargo test --manifest-path third_party/nih-plug/Cargo.toml --features vst3 --lib
+    note_expressions`; not yet in CI).
+
 To move to a newer upstream commit, copy its `Cargo.toml`, `LICENSE`, `README.md`, `src`
-and `nih_plug_derive` here and apply the fifteen changes again, unless upstream has fixed them.
+and `nih_plug_derive` here and apply the sixteen changes again, unless upstream has fixed them.
 Then update the commit above and `nih_plug_xtask`'s `rev` in the workspace's `Cargo.toml`.
 
 The standalone app adds a separate `standalone-production` feature. Its adapter

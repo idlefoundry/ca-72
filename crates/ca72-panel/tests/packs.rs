@@ -110,9 +110,9 @@ fn the_starter_pack_moves_the_controls_and_what_a_click_finds() {
     let mut moved = 0;
     for (i, c) in a.controls.iter().enumerate() {
         let (x, y) = c.centre();
-        // (The arpeggiator's drawer's knobs, the plug-in's own, are found while it is open.)
-        let found = if c.place == ca72_panel::controls::Place::Arp {
-            interact::hit_arp(x, y)
+        // (The drawers' knobs, the plug-in's own, are found while their drawer is open.)
+        let found = if c.place.is_drawer() {
+            interact::hit_drawer(c.place, x, y)
         } else {
             interact::hit(r.layout(), &a, x, y)
         };
