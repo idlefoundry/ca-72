@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 use ca72::freq_dial::{DIAL_END, Law, Pot};
 use ca72::modulation::PITCH_WHEEL_SEMITONES;
 use ca72::tuning::Range;
-use ca72::voice::{ContourKnobs, OscPanel, Panel, Priority, Quality, Waveform};
+use ca72::voice::{ContourKnobs, OscPanel, Panel, Priority, Quality, RectWidth, Waveform};
 use nih_plug::prelude::*;
 
 use crate::character::Placement;
@@ -151,6 +151,53 @@ pub enum NoiseColor {
     White,
     #[id = "pink"]
     Pink,
+}
+
+/// An oscillator's rectangle (decisions.md R-VARIABLE-RECT): STEPPED, the WAVEFORM switch's
+/// three as the instrument has them; VARIABLE, which the original does not have, one width
+/// turned anywhere from the square to the narrowest, with PWM.
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RectMode {
+    #[id = "stepped"]
+    #[name = "Stepped"]
+    Stepped,
+    #[id = "variable"]
+    #[name = "Variable"]
+    Variable,
+}
+
+/// VARIABLE's width: its travel, 0 (the square) to 1 (the narrowest), shown as the
+/// rectangle's duty cycle ("24 %").
+fn rect_width(name: &str) -> FloatParam {
+    FloatParam::new(name, 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+        .with_unit(" %")
+        .with_value_to_string(std::sync::Arc::new(|t| {
+            format!("{:.0}", 100.0 * rect_duty_at(f64::from(t)))
+        }))
+        .with_string_to_value(std::sync::Arc::new(|s| {
+            let pct: f64 = s.trim().trim_end_matches('%').trim().parse().ok()?;
+            Some(travel_at_duty(pct / 100.0) as f32)
+        }))
+}
+
+/// The rectangle's duty cycle at `t` of VARIABLE's travel.
+pub fn rect_duty_at(t: f64) -> f64 {
+    ca72::voice::rect_duty(ca72::voice::rect_travel_bias(t))
+}
+
+/// The travel at which the rectangle's duty cycle is `d` (held to the travel's ends).
+pub fn travel_at_duty(d: f64) -> f64 {
+    // (The duty falls as the travel goes on: a bisection.)
+    let (mut lo, mut hi) = (0.0, 1.0);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if rect_duty_at(mid) > d {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
 }
 
 /// FILTER MODE, which the original does not have (decisions.md R46): LO, the filter as
@@ -642,6 +689,28 @@ pub struct Ca72Params {
     pub osc3_timed: BoolParam,
     #[id = "osc3_division"]
     pub osc3_division: EnumParam<Division>,
+    // Each oscillator's rectangle (decisions.md R-VARIABLE-RECT), the plug-in's own, after
+    // everything else, so that no parameter before it moves: STEPPED or VARIABLE (WAVEFORM's
+    // menu), VARIABLE's width (the switch turned past SQUARE), and its PWM key. A preset's,
+    // as any sound parameter; a preset or a session saved before reads STEPPED.
+    #[id = "osc1_rect"]
+    pub osc1_rect: EnumParam<RectMode>,
+    #[id = "osc1_width"]
+    pub osc1_width: FloatParam,
+    #[id = "osc1_pwm"]
+    pub osc1_pwm: BoolParam,
+    #[id = "osc2_rect"]
+    pub osc2_rect: EnumParam<RectMode>,
+    #[id = "osc2_width"]
+    pub osc2_width: FloatParam,
+    #[id = "osc2_pwm"]
+    pub osc2_pwm: BoolParam,
+    #[id = "osc3_rect"]
+    pub osc3_rect: EnumParam<RectMode>,
+    #[id = "osc3_width"]
+    pub osc3_width: FloatParam,
+    #[id = "osc3_pwm"]
+    pub osc3_pwm: BoolParam,
 }
 
 /// DOUBLE on at DETUNE's 0, as the engine is told it: a share of DETUNE's travel so small that
@@ -927,6 +996,15 @@ impl Default for Ca72Params {
             osc2_division: EnumParam::new("Osc 2 Division", Division::Quarter),
             osc3_timed: BoolParam::new("Osc 3 Timed", false),
             osc3_division: EnumParam::new("Osc 3 Division", Division::Quarter),
+            osc1_rect: EnumParam::new("Osc 1 Rectangle", RectMode::Stepped),
+            osc1_width: rect_width("Osc 1 Width"),
+            osc1_pwm: BoolParam::new("Osc 1 PWM", false),
+            osc2_rect: EnumParam::new("Osc 2 Rectangle", RectMode::Stepped),
+            osc2_width: rect_width("Osc 2 Width"),
+            osc2_pwm: BoolParam::new("Osc 2 PWM", false),
+            osc3_rect: EnumParam::new("Osc 3 Rectangle", RectMode::Stepped),
+            osc3_width: rect_width("Osc 3 Width"),
+            osc3_pwm: BoolParam::new("Osc 3 PWM", false),
         }
     }
 }
@@ -1100,6 +1178,16 @@ impl Ca72Params {
             quality: Quality::default(),
             priority: self.note_priority.value().into(),
             retrigger: self.retrigger.value(),
+            rect: [
+                (&self.osc1_rect, &self.osc1_width, &self.osc1_pwm),
+                (&self.osc2_rect, &self.osc2_width, &self.osc2_pwm),
+                (&self.osc3_rect, &self.osc3_width, &self.osc3_pwm),
+            ]
+            .map(|(mode, width, pwm)| RectWidth {
+                variable: mode.value() == RectMode::Variable,
+                width: ca72::voice::rect_travel_bias(value(width)),
+                pwm: pwm.value(),
+            }),
         };
         Controls {
             panel,

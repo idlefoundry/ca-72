@@ -206,6 +206,17 @@ pub fn sound_params(p: &Ca72Params) -> Vec<(&'static str, &dyn SoundParam)> {
         ("osc2_division", &p.osc2_division),
         ("osc3_timed", &p.osc3_timed),
         ("osc3_division", &p.osc3_division),
+        // Each oscillator's rectangle (decisions.md R-VARIABLE-RECT): a preset that does not
+        // name it plays the instrument's switch.
+        ("osc1_rect", &p.osc1_rect),
+        ("osc1_width", &p.osc1_width),
+        ("osc1_pwm", &p.osc1_pwm),
+        ("osc2_rect", &p.osc2_rect),
+        ("osc2_width", &p.osc2_width),
+        ("osc2_pwm", &p.osc2_pwm),
+        ("osc3_rect", &p.osc3_rect),
+        ("osc3_width", &p.osc3_width),
+        ("osc3_pwm", &p.osc3_pwm),
     ]
 }
 

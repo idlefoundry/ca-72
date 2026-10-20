@@ -43,7 +43,7 @@ pub const LAND_WAIT: f64 = 0.5;
 /// The knobs that glide, by their parameters' IDs: every continuous control of the panel and
 /// the strip (the learnable knobs, `learn::knob_param`'s), and the panel's PITCH and
 /// MODULATION wheels. Not the arpeggiator's GATE and SWING ([`TIMING`]).
-pub const KNOBS: [&str; 29] = [
+pub const KNOBS: [&str; 32] = [
     "tune",
     "glide",
     "mod_mix",
@@ -73,6 +73,9 @@ pub const KNOBS: [&str; 29] = [
     "level",
     "pitch_wheel",
     "mod_wheel",
+    "osc1_width",
+    "osc2_width",
+    "osc3_width",
 ];
 
 /// The continuous knobs that do not glide: the arpeggiator's GATE and SWING, which set when its
@@ -112,6 +115,9 @@ pub fn param(p: &Ca72Params, k: usize) -> Option<&FloatParam> {
         26 => &p.level,
         27 => &p.pitch_wheel,
         28 => &p.mod_wheel,
+        29 => &p.osc1_width,
+        30 => &p.osc2_width,
+        31 => &p.osc3_width,
         _ => return None,
     })
 }
